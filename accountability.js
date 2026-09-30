@@ -414,6 +414,8 @@
     .mtg-log-row:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
     .mtg-log-title{font-size:13.5px;font-weight:700;color:#1f2937}
     .mtg-log-meta{font-size:12px;color:#6b7280;margin-top:2px}
+    .mtg-att-names{font-size:12px;color:#475569;margin-top:5px;line-height:1.5}
+    .mtg-att-names b{color:#1f2937;font-weight:600}
     .mtg-log-badge{flex:none;font-size:11px;font-weight:600;padding:4px 10px;border-radius:99px;white-space:nowrap}
     .mtg-log-badge.ready{background:#dcfce7;color:#16a34a}
     .mtg-log-badge.pending{background:#fef9c3;color:#a16207}
@@ -11103,7 +11105,7 @@
     if(window._mtgAutoOpenCreate){ window._mtgAutoOpenCreate=false; mtgOpenCreate(); }
   }
   function mtgGroupTabsHtml(){
-    const tabs=[['all','All'],['mode','Mode'],['recurring','Recurring'],['participants','Participants']];
+    const tabs=[['all','All'],['mode','Mode'],['recurring','Recurring'],['participants','Participants'],['attendance','Attendance']];
     return '<div class="mtg-grouptabs">'+tabs.map(function(t){ return '<button class="mtg-gtab'+(MTG_GROUP===t[0]?' active':'')+'" onclick="mtgSetGroup(\''+t[0]+'\')">'+t[1]+'</button>'; }).join('')+'</div>';
   }
   // Real duration once Google's Meet API has actually returned it (see google-meet-attendance-sync)
@@ -11130,10 +11132,19 @@
     if(l.attendance_status==='not_held') return '<span class="mtg-log-badge none"><i class="fa-solid fa-calendar-xmark"></i> Not held</span>';
     return '<span class="mtg-log-badge none">No attendance data</span>';
   }
+  // Real browser back — every navTo() call pushes a genuine history entry (nexus-core.js), so this
+  // reliably returns to whichever page actually linked here (Archive, a meeting's own day-wise
+  // list, the Meetings page's Completed-meetings section, or the Attendance tab), instead of a
+  // single hardcoded guess. history.length===1 means there's nothing in-app to go back to (a
+  // direct deep link, or this tab's very first page) — falls back to fallbackPath in that case.
+  window.mtgLogBack=function(fallbackPath){
+    if(window.history.length>1){ history.back(); } else { navTo(fallbackPath); }
+  };
   // A meeting occurrence's detail — real routed page (not a modal), reached via
-  // navTo('tasks/meetings/log/<id>') from either the global Archive tab (one-time meetings) or a
-  // recurring meeting's own Logs list page (mtgLogsPage). Self-contained: fetches the row itself
-  // rather than relying on any page-specific cached list, so it works from either place.
+  // navTo('tasks/meetings/log/<id>') from the global Archive tab, a recurring meeting's own
+  // day-wise list, the Meetings page's Completed-meetings section, or the Attendance tab.
+  // Self-contained: fetches the row itself rather than relying on any page-specific cached list,
+  // so it works from any of those places.
   async function mtgLogPage(v,id){
     injectCss(); setCrumb(['Accountability','Meeting Log']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -11204,15 +11215,17 @@
          // without pressing Record isn't stuck without a transcript for good.
          +'<div style="margin-top:10px"><button class="ac-btn primary" onclick="mtgAddRecording('+l.id+')"><i class="fa-solid fa-file-audio"></i> Add a recording to transcribe</button>'
          +'<div style="color:var(--slate);font-size:12px;margin-top:6px">Upload the audio or video from this meeting and JAIN-E will transcribe it automatically.</div></div>');
-    // One-time meetings' logs have meeting_id set to null once the meeting itself is deleted
-    // (see acc.log_completed_meetings) — those were only ever reachable from Archive, so Back
-    // goes there. A meeting that still exists keeps meeting_id, so Back returns to its own detail
-    // page (basic info + every day-wise occurrence) instead.
-    const backTarget = l.meeting_id!=null ? ('tasks/meetings/detail/'+l.meeting_id) : 'tasks/archive';
+    // Reachable from several places now (Archive, a recurring meeting's own day-wise list, the
+    // Meetings page's own "Completed meetings" section, and the Attendance tab) — a single
+    // hardcoded target used to send Back to Archive even when that's not where the click came
+    // from. navTo() always pushes a real history entry (see nexus-core.js), so real browser
+    // back — mtgLogBack() below — already lands wherever the click actually originated; this
+    // fallback target only covers a direct deep link with no in-app history to go back to.
+    const backFallback = l.meeting_id!=null ? ('tasks/meetings/detail/'+l.meeting_id) : 'tasks/archive';
     v.innerHTML='<div class="tp-head">'
       +'<div><div class="tp-title"><i class="fa-solid fa-box-archive" style="color:#7c3aed"></i> '+esc2(l.title)+'</div>'
       +'<div class="tp-sub">'+fmtDateY(l.occurrence_date)+'</div></div>'
-      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\''+backTarget+'\')"><i class="fa-solid fa-arrow-left"></i></button></div>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="mtgLogBack(\''+backFallback+'\')"><i class="fa-solid fa-arrow-left"></i></button></div>'
       +'</div>'
       +'<div class="tp-card">'
       +durationHtml
@@ -11709,6 +11722,55 @@
       }).join('')
       +'<div class="mtg-owed-more" style="cursor:pointer" onclick="navTo(\'tasks/archive\')">See all in Archive</div>';
   }
+  // Compact "who attended" line for one row of the Attendance tab — same present/joined vs
+  // invited-absent logic mtgLogPage's full detail view already uses, just condensed. Online
+  // participants (see google-meet-attendance-sync) only ever carry a display name, never an email,
+  // so an absentee list is only computable for offline meetings, where present_emails are real
+  // addresses matchable against attendee_emails.
+  function mtgAttendanceNamesHtml(l){
+    if(!l) return '';
+    const plist=MTG_PPL||[];
+    const nm=function(e){ return nameOf(plist,e)||e; };
+    if(l.mode==='offline'){
+      if(l.attendance_status!=='recorded') return '';
+      const present=(l.present_emails||[]);
+      const presentL=present.map(function(e){return String(e).toLowerCase();});
+      const absent=(l.attendee_emails||[]).filter(function(e){return presentL.indexOf(String(e).toLowerCase())===-1;});
+      return '<div class="mtg-att-names"><b>Present:</b> '+esc2(present.map(nm).join(', ')||'—')
+        +(absent.length?('<br><b>Absent:</b> '+esc2(absent.map(nm).join(', '))):'')+'</div>';
+    }
+    if(l.attendance_status!=='fetched') return '';
+    const names=(l.participants||[]).map(function(p){return p.name;});
+    return '<div class="mtg-att-names"><b>Joined:</b> '+esc2(names.join(', ')||'—')+'</div>';
+  }
+  // One meeting's row on the Attendance tab: its title plus whichever occurrence's register is the
+  // most recent one available (l), or "No occurrence yet" if the meeting hasn't run once yet.
+  function mtgAttendanceRowHtml(title,mode,dateStr,l,navTarget){
+    const badge=l?mtgAttendanceBadgeHtml(l):'<span class="mtg-log-badge none">No occurrence yet</span>';
+    return '<div class="mtg-log-row" style="align-items:flex-start;cursor:'+(navTarget?'pointer':'default')+'"'+(navTarget?(' onclick="navTo(\''+navTarget+'\')"'):'')+'>'
+      +'<div style="flex:1;min-width:0"><div class="mtg-log-title">'+esc2(title)+'</div>'
+      +'<div class="mtg-log-meta">'+(dateStr?(esc2(fmtDateY(dateStr))+' · '):'')+(mode==='offline'?'Offline':'Online')+'</div>'
+      +mtgAttendanceNamesHtml(l)
+      +'</div>'+badge+'</div>';
+  }
+  // The Attendance tab: one row per meeting showing its LAST attendance register. For a recurring
+  // meeting that register is whichever occurrence MTG_LAST most recently loaded — so as each new
+  // day's occurrence gets logged, this row moves on to that day's register on its own, with no
+  // separate update step. A one-time meeting only ever has the one register, from MTG_COMPLETED
+  // (its acc.meetings row — and so its card on this same page — is gone once it's held).
+  function mtgAttendanceTabHtml(){
+    const recurring=(MTG_LIST||[]).filter(function(m){return (m.recur_type||'none')!=='none';})
+      .slice().sort(function(a,b){return String(a.title||'').localeCompare(String(b.title||''));});
+    const recRows=recurring.length?recurring.map(function(m){
+      const l=MTG_LAST[m.id];
+      return mtgAttendanceRowHtml(m.title,m.mode,l?l.occurrence_date:null,l,'tasks/meetings/detail/'+m.id);
+    }).join(''):'<div class="ac-empty" style="cursor:default">No recurring meetings yet</div>';
+    const oneRows=(MTG_COMPLETED||[]).length?(MTG_COMPLETED||[]).map(function(l){
+      return mtgAttendanceRowHtml(l.title,l.mode,l.occurrence_date,l,'tasks/meetings/log/'+l.id);
+    }).join(''):'<div class="ac-empty" style="cursor:default">No completed one-time meetings yet</div>';
+    return '<div class="mtg-sec-label">Recurring — last register</div>'+recRows
+      +'<div class="mtg-sec-label">One-Time — completed</div>'+oneRows;
+  }
   function mtgRenderOnly(){
     try{ mtgStartBrowserTranscriber(); }catch(e){}
     const b=$('acBody'); if(!b)return;
@@ -11724,17 +11786,24 @@
         +'<button class="mcb-btn" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>'
         +'</div>';
     }
-    const groups=mtgGroupedSections(MTG_GROUP);
-    groups.forEach(function(g){ g.items=g.items.slice().sort(function(a,b){return mtgSortKey(a).localeCompare(mtgSortKey(b));}); });
-    let body=groups.map(function(g){ return '<div class="mtg-sec-label">'+esc2(g.label)+'</div>'+g.items.map(function(m){ return mtgCard(m); }).join(''); }).join('');
-    if(!groups.length) body='<div class="ac-empty" style="cursor:default;border:0">No meetings yet — click <b>Schedule Meeting</b> to add one.</div>';
+    let body, trailer;
+    if(MTG_GROUP==='attendance'){
+      body=mtgAttendanceTabHtml();
+      trailer='';
+    } else {
+      const groups=mtgGroupedSections(MTG_GROUP);
+      groups.forEach(function(g){ g.items=g.items.slice().sort(function(a,b){return mtgSortKey(a).localeCompare(mtgSortKey(b));}); });
+      body=groups.map(function(g){ return '<div class="mtg-sec-label">'+esc2(g.label)+'</div>'+g.items.map(function(m){ return mtgCard(m); }).join(''); }).join('');
+      if(!groups.length) body='<div class="ac-empty" style="cursor:default;border:0">No meetings yet — click <b>Schedule Meeting</b> to add one.</div>';
+      trailer=mtgCompletedHtml();
+    }
     b.innerHTML='<div class="mtg-page">'
       +'<div class="mtg-main">'
       +'<div class="mtg-toolbar"><div class="mtg-toolbar-title">Meetings</div>'+mtgGoogleStatusHtml()+'<button class="mtg-create" onclick="mtgOpenCreate()"><i class="fa-solid fa-plus"></i> Schedule Meeting</button></div>'
       +mtgBanner
       +mtgOwedHtml()
       +mtgGroupTabsHtml()
-      +'<div class="mtg-body">'+body+mtgCompletedHtml()+'</div>'
+      +'<div class="mtg-body">'+body+trailer+'</div>'
       +'</div></div>';
   }
 
