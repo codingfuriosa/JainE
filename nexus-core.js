@@ -387,11 +387,45 @@ async function boot(){
 // Statement tab's "View full ledger" jump) were renumbered to match.
 const CUST_TABS=['Home','Statement','Construction Progress','Ledger','Cost Sheet','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
 const CUST_TAB_ICONS=['fa-house','fa-file-invoice-dollar','fa-helmet-safety','fa-book-open','fa-calculator','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-gift','fa-screwdriver-wrench','fa-pen-to-square'];
+/* Which sections a customer sees is decided by staff in Customer Portal Admin > Customer Features,
+   per project and per block (cust.feature_access). Each section's key, in CUST_TABS order from
+   index 1 - Home (index 0) is the landing page and is always shown. */
+const CUST_FEATURES=[
+  {key:'statement',tab:1},{key:'progress',tab:2},{key:'ledger',tab:3},{key:'cost_sheet',tab:4},
+  {key:'inspection',tab:5},{key:'documents',tab:6},{key:'videos',tab:7},{key:'support',tab:8},
+  {key:'amenities',tab:9},{key:'submeter',tab:10},{key:'referrals',tab:11},{key:'maintenance',tab:12},
+  {key:'modifications',tab:13}];
+/* Used only where no rule exists at any level - including when the rules could not be read at all.
+   The money and progress sections are on; everything else stays hidden until staff turn it on, so a
+   failed read never exposes an unfinished section. */
+const CUST_FEATURE_FALLBACK={statement:true,progress:true,ledger:true,cost_sheet:true};
+// The most specific rule wins: this block, then the whole project, then the all-projects default.
+function custFeatureRule(rules,key,projectId,tower){
+  const find=(p,t)=>(rules||[]).find(r=>r.feature===key&&(r.project_id||null)===(p||null)&&(r.tower||null)===(t||null));
+  return (tower&&find(projectId,tower))||find(projectId,null)||find(null,null)||null;
+}
+function custFeatureOn(rules,key,projectId,tower){
+  const r=custFeatureRule(rules,key,projectId,tower);
+  return r?!!r.enabled:!!CUST_FEATURE_FALLBACK[key];
+}
+function custTabAllowed(ti,unit){
+  if(ti===0)return true;
+  const f=CUST_FEATURES.find(x=>x.tab===ti);if(!f)return false;
+  if(!unit)return false;
+  return custFeatureOn(CUST_DATA&&CUST_DATA.featureRules,f.key,unit.project_id,unit.tower);
+}
+function custCurrentUnit(){
+  const units=(CUST_DATA&&CUST_DATA.units)||[];
+  return units.find(u=>u.id===CUST_SELECTED_UNIT)||units[0]||null;
+}
 function custSidebarTabs(ti){
   const nav=$('sbNav');
   if(!nav)return;
   nav.innerHTML='';
   nav.appendChild(el('div','sb-group','Customer Portal'));
+  // Before the customer's flats have loaded nothing is known about which sections apply, so only
+  // Home is listed; the sidebar is rebuilt as soon as the data arrives.
+  const unit=custCurrentUnit();
   /* "Earn" badge on Referrals - only while this customer has never submitted one. Reads CUST_DATA
      directly rather than taking a parameter: the sidebar paints once at boot (renderCustomerShell,
      before any data exists - CUST_DATA is null, badge stays off rather than flash on) and again from
@@ -400,6 +434,7 @@ function custSidebarTabs(ti){
      a successful submit, so the badge is gone on the very next sidebar rebuild - no stale cache read. */
   const showReferralBadge=CUST_DATA&&CUST_DATA.hasReferred===false;
   CUST_TABS.forEach(function(t,i){
+    if(!custTabAllowed(i,unit))return;
     const badge=(t==='Referrals'&&showReferralBadge)?' <span class="sb-badge-gold">Earn</span>':'';
     const a=el('a','sb-item'+(i===ti?' active':''),'<i class="fa-solid '+(CUST_TAB_ICONS[i]||'fa-circle')+'"></i> <span class="sb-item-label">'+t+'</span>'+badge);
     a.href='javascript:void(0)';
@@ -18404,7 +18439,8 @@ VIEWS.custportal_admin=async function(v,seg){
     const h=$('cpaBody');if(h) await cpaRenderPhotos(h);
     return;
   }
-  const tabs=['Projects & Units','Customers','Farvision Import','Photos & Videos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals','Maintenance','Modification Requests'];
+  // Customer Features is last so every older tab keeps its number - the index is the route.
+  const tabs=['Projects & Units','Customers','Farvision Import','Photos & Videos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals','Maintenance','Modification Requests','Customer Features'];
   const ti=mTab(seg,tabs.length);
   v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',tabs,ti)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
   const host=$('cpaBody');if(!host)return;
@@ -18419,7 +18455,84 @@ VIEWS.custportal_admin=async function(v,seg){
   else if(ti===8) await cpaRenderSupport(host);
   else if(ti===9) await cpaRenderReferrals(host);
   else if(ti===10) await cpaRenderMaintenance(host,seg);
-  else await cpaRenderModificationRequests(host);
+  else if(ti===11) await cpaRenderModificationRequests(host);
+  else await cpaRenderFeatures(host);
+};
+
+/* ---------- Tab 13: Customer Features - which sections customers see, per project and block ----------
+   Rows live in cust.feature_access; the customer portal resolves them with custFeatureOn() (block,
+   then project, then the all-projects default). Home is always shown and is not listed. */
+let CPA_FEAT_PROJ='';
+// Shown beside a section so nobody switches on something that is not finished (audit, 30 Sep 2026).
+const CPA_FEATURE_NOTES={
+  inspection:'Not finished - staff cannot list or delete an uploaded checklist or update.',
+  documents:'Not finished - staff cannot list or delete an uploaded document.',
+  videos:'Ready - but no process videos have been uploaded yet.',
+  support:'Ready - needs the Zoho Desk connection; replies are made in Zoho Desk.',
+  amenities:'Not finished - a customer can see other flats\' bookings. After possession only.',
+  submeter:'Ready - payment is by UPI reference, confirmed by staff.',
+  referrals:'Not finished - "Refer & earn" has no reward or sales hand-off yet.',
+  maintenance:'Not finished - a confirmed payment does not reduce the balance until the next import. After possession only.',
+  modifications:'Ready - assign a Project Manager per project first. After possession only.'
+};
+async function cpaRenderFeatures(host){
+  const [projects,units,rulesRes]=await Promise.all([cpaProjects(true),cpaUnits(true),
+    sb.schema('cust').from('feature_access').select('*')]);
+  if(rulesRes.error){ host.innerHTML='<div class="card card-pad empty">Could not load the section settings: '+esc(rulesRes.error.message)+'</div>'; return; }
+  CPA.featureRules=rulesRes.data||[];
+  const proj=projects.find(p=>String(p.id)===CPA_FEAT_PROJ)||null;
+  if(!proj)CPA_FEAT_PROJ='';
+  const natural=(a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'});
+  const blocks=proj?[...new Set(units.filter(u=>u.project_id===proj.id&&u.tower&&u.status!=='cancelled').map(u=>u.tower))].sort(natural):[];
+  const rules=CPA.featureRules;
+  const exact=(key,pid,tower)=>rules.find(r=>r.feature===key&&(r.project_id||null)===(pid||null)&&(r.tower||null)===(tower||null));
+  const onOff=b=>b?'On':'Off';
+  // One dropdown per cell. "Follow ..." means no row at this level; the label shows what that gives.
+  const cell=(key,pid,tower)=>{
+    const own=exact(key,pid,tower);
+    const val=own?(own.enabled?'on':'off'):'';
+    const eff=custFeatureOn(rules,key,pid,tower);
+    const followLbl=pid==null?null:(tower?'Same as project':'Same as default')+' ('+onOff(tower?custFeatureOn(rules,key,pid,null):custFeatureOn(rules,key,null,null))+')';
+    const opts=(followLbl?`<option value=""${val===''?' selected':''}>${followLbl}</option>`:'')+
+      `<option value="on"${val==='on'?' selected':''}>On</option><option value="off"${val==='off'?' selected':''}>Off</option>`;
+    const style=eff?'color:#15803d;border-color:#bbf7d0;background:#f0fdf4':'color:#64748b;background:#f8fafc';
+    return `<select class="mu-sel" style="min-width:128px;font-weight:${val?'600':'400'};${style}" title="${eff?'Customers see this section':'Hidden from customers'}"
+      onchange="cpaFeatureSet('${key}',${pid==null?'null':pid},${esc(JSON.stringify(tower||null))},this.value)">${opts}</select>`;
+  };
+  const head=['Section'].concat(proj?['Whole project'].concat(blocks):['All projects']);
+  const rows=CUST_FEATURES.map(f=>{
+    const note=CPA_FEATURE_NOTES[f.key]||'Ready.';
+    const warn=/^Not finished/.test(note);
+    return [`<div style="min-width:250px;max-width:340px"><b>${esc(CUST_TABS[f.tab])}</b>`+
+      `<div style="font-size:12px;line-height:1.45;margin-top:2px;color:${warn?'#b45309':'var(--slate)'}">${warn?'<i class="fa-solid fa-triangle-exclamation"></i> ':''}${esc(note)}</div></div>`]
+      .concat(proj?[cell(f.key,proj.id,null)].concat(blocks.map(b=>cell(f.key,proj.id,b))):[cell(f.key,null,null)]);
+  });
+  const projOpts=projects.map(p=>`<option value="${p.id}"${String(p.id)===CPA_FEAT_PROJ?' selected':''}>${esc(p.name)}</option>`).join('');
+  host.innerHTML=`<div class="sec-title" style="margin:0 0 6px">Customer Features</div>
+    <div style="font-size:13px;color:var(--slate);margin-bottom:12px;line-height:1.55">Choose which sections customers see. <b>Home</b> is always shown.
+      A block's setting beats its project's, and a project's beats the default for all projects. Customers see a change the next time they open or refresh the portal.
+      To check, use the <i class="fa-solid fa-eye"></i> preview on the Customers tab.</div>
+    <div class="mu-filters"><select id="cpaFeatProj" class="mu-sel" style="max-width:360px" onchange="CPA_FEAT_PROJ=this.value;route()">
+      <option value=""${CPA_FEAT_PROJ?'':' selected'}>Default — all projects</option>${projOpts}</select>
+      ${proj&&!blocks.length?'<span class="mu-count">This project has no blocks with a live flat yet.</span>':''}</div>
+    <div style="overflow-x:auto">${cpaTable(head,rows)}</div>`;
+}
+window.cpaFeatureSet=async function(key,pid,tower,value){
+  const rules=CPA.featureRules||[];
+  const own=rules.find(r=>r.feature===key&&(r.project_id||null)===(pid||null)&&(r.tower||null)===(tower||null));
+  let error;
+  if(value===''){ if(own)({error}=await sb.schema('cust').from('feature_access').delete().eq('id',own.id)); }
+  else{
+    const row={enabled:value==='on',updated_at:new Date().toISOString(),updated_by:state.email};
+    if(own)({error}=await sb.schema('cust').from('feature_access').update(row).eq('id',own.id));
+    else ({error}=await sb.schema('cust').from('feature_access').insert({...row,feature:key,project_id:pid,tower}));
+  }
+  if(error){ toast('Could not save: '+error.message,'err'); }
+  else{
+    const where=tower?tower:pid!=null?'the whole project':'all projects';
+    toast(CUST_TABS[(CUST_FEATURES.find(f=>f.key===key)||{}).tab]+': '+(value===''?'following the level above':value==='on'?'switched on':'switched off')+' for '+where,'ok');
+  }
+  route();
 };
 
 /* ---------- Tab 1: Projects & Units ---------- */
@@ -20652,7 +20765,17 @@ async function custLoadData(customerId,force){
     const {data:ref}=await sb.schema('cust').from('referrals').select('id').in('unit_id',unitIds).limit(1);
     hasReferred=!!(ref&&ref.length);
   }else hasReferred=false;
-  CUST_DATA={customerId,units:list,contactByUnit,hasReferred};
+  // The section rules for these flats' projects plus the all-projects default. If they can't be read,
+  // featureRules stays empty and only the CUST_FEATURE_FALLBACK sections show.
+  let featureRules=[];
+  try{
+    const pids=[...new Set(list.map(u=>u.project_id))];
+    let q=sb.schema('cust').from('feature_access').select('feature,project_id,tower,enabled');
+    q=pids.length?q.or('project_id.is.null,project_id.in.('+pids.join(',')+')'):q.is('project_id',null);
+    const {data,error}=await q;
+    if(!error)featureRules=data||[];
+  }catch(e){}
+  CUST_DATA={customerId,units:list,contactByUnit,hasReferred,featureRules};
   return CUST_DATA;
 }
 window.custSwitchUnit=function(id){CUST_SELECTED_UNIT=Number(id);route();};
@@ -20970,7 +21093,7 @@ async function custTabOverview(data,unit){
      not a payment position. */
   const moneySections=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
-    '<a href="javascript:void(0)" onclick="navTo(\'customer/3\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
+    (custTabAllowed(3,unit)?'<a href="javascript:void(0)" onclick="navTo(\'customer/3\')" style="font-size:12.5px;font-weight:600">View full ledger →</a>':'')+'</div>'+
     (recentRows.length?mTable(['Date','Type','Details','Debit','Credit'],recentRows):
       '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>')+
     costSheetSection+
@@ -22703,7 +22826,7 @@ VIEWS.customer=async function(v,seg){
     '<div class="cbl-building"><div class="cbl-floor cbl-f1"></div><div class="cbl-floor cbl-f2"></div><div class="cbl-floor cbl-f3"></div><div class="cbl-floor cbl-f4"></div><div class="cbl-floor cbl-f5"></div></div>'+
     '<div class="cbl-ground"></div></div><div class="cbl-text">Building your experience...</div></div>';
   const tabs=CUST_TABS;
-  const ti=mTab(seg,tabs.length);
+  let ti=mTab(seg,tabs.length);
   // The sidebar is rebuilt on every render (not just once at boot) so its active item tracks
   // whichever section is actually showing, including a same-page link like the Statement tab's
   // "View full ledger" jumping straight to navTo('customer/3') (was already stale here at '1'
@@ -22711,9 +22834,19 @@ VIEWS.customer=async function(v,seg){
   custSidebarTabs(ti);
   setCrumb(['Customer Portal',tabs[ti]]);
   const data=await custLoadData(state.customer&&state.customer.id);
-  // Rebuilt again now that CUST_DATA.hasReferred is known, so the Referrals "Earn" badge can appear
-  // (it stays off on the call above rather than risk flashing on for a customer who's already
-  // referred someone). A no-op redraw for every tab except Referrals.
+  if(data.units.length&&(!CUST_SELECTED_UNIT||!data.units.some(u=>u.id===CUST_SELECTED_UNIT)))CUST_SELECTED_UNIT=data.units[0].id;
+  // A section switched off for this flat's project or block (Customer Portal Admin > Customer
+  // Features) is not listed, and reaching it anyway - an old link, a bookmark, switching to another
+  // flat while on it - lands on Home instead.
+  if(!custTabAllowed(ti,custCurrentUnit())){
+    ti=0;
+    // Keeps the path and a staff preview's ?as=<id>; only the section in the hash changes.
+    if(location.hash&&location.hash!=='#/'&&location.hash!=='#/0'){ try{ history.replaceState(history.state,'',location.pathname+location.search+'#/0'); }catch(e){} }
+  }
+  setCrumb(['Customer Portal',tabs[ti]]);
+  // Rebuilt again now that the flats, their section rules and CUST_DATA.hasReferred are known, so
+  // only this flat's sections are listed and the Referrals "Earn" badge can appear (it stays off on
+  // the call above rather than risk flashing on for a customer who's already referred someone).
   custSidebarTabs(ti);
   // The impersonation banner stays - it's the only thing on screen telling a staff member WHO
   // they're previewing, and it's how they get back out. The plain "signed in as you" banner for a
@@ -22726,7 +22859,6 @@ VIEWS.customer=async function(v,seg){
       '<div class="card card-pad empty"><i class="fa-solid fa-circle-info"></i><div style="margin-top:8px">No unit is linked to '+(state.impersonating?'this customer':'your account')+' yet'+(state.impersonating?'.':'. Please contact your relationship manager.')+'</div></div></div>';
     return;
   }
-  if(!CUST_SELECTED_UNIT||!data.units.some(u=>u.id===CUST_SELECTED_UNIT))CUST_SELECTED_UNIT=data.units[0].id;
   const unit=data.units.find(u=>u.id===CUST_SELECTED_UNIT);
   let body;
   if(ti===0)body='';
