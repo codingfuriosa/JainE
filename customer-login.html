@@ -51,6 +51,8 @@ body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--
 .links{display:flex;justify-content:center;align-items:center;gap:10px;margin-top:16px;font-size:13.5px;color:#cbd5e1;flex-wrap:wrap}
 .lnk{border:none;background:none;color:var(--brand);font:inherit;font-weight:600;cursor:pointer;padding:4px 2px}
 .lnk:hover{text-decoration:underline}.lnk:disabled{color:var(--slate);cursor:default;text-decoration:none;font-weight:500}
+.forgot{display:flex;gap:10px;align-items:flex-start;margin-top:18px;padding:12px 14px;border-radius:10px;background:#f1f5fb;border:1px solid #dbe4f3;color:#475569;font-size:13px;line-height:1.55}
+.forgot i{color:var(--brand);margin-top:3px}.forgot b{color:var(--ink)}
 .m-logo{display:none;align-items:center;gap:12px;margin-bottom:30px}
 .m-logo .logo-mark{width:42px;height:42px;font-size:19px}
 .m-logo .name{font-weight:700;font-size:16px;color:var(--ink)}.m-logo .name small{display:block;font-weight:500;font-size:12px;color:var(--slate)}
@@ -80,8 +82,8 @@ body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--
     <div class="card">
       <div class="m-logo"><div class="logo-mark">J</div><div class="name">Jain Group<small>Customer Portal</small></div></div>
       <div id="stepEmail">
-        <h2>Sign in</h2>
-        <p class="sub">Enter the email address you gave us at booking. We will email you a 6-digit code — no password needed.</p>
+        <h2 id="signInTitle">Sign in</h2>
+        <p class="sub" id="signInSub">Enter the email address you gave us at booking. We will email you a 6-digit code — no password needed.</p>
         <div id="msg" class="msg"></div>
         <form id="emailForm" autocomplete="on" novalidate>
           <div class="field">
@@ -90,6 +92,8 @@ body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--
           </div>
           <button type="submit" class="btn btn-primary" id="sendBtn" style="margin-top:6px"><i class="fa-solid fa-paper-plane"></i> Email me a code</button>
         </form>
+        <div class="forgot"><i class="fa-solid fa-circle-question"></i><span><b>Forgot your password?</b> You don't need one. Tap <b>Email me a code</b> and sign in with the new code we send you — every time you are signed out.</span></div>
+        <div class="links" id="notYou" style="display:none"><button type="button" class="lnk" onclick="forgetEmail()">Not you? Use a different email</button></div>
       </div>
       <div id="stepCode" style="display:none">
         <h2>Check your email</h2>
@@ -166,12 +170,32 @@ async function isLinkedCustomer(){
     return !!data;
   }catch(e){ return false; }
 }
+/* Signing back in after being signed out is the same as the first time - a new code - so the page
+   remembers the email this device last signed in with and only asks for one tap. Nothing but the
+   email is kept, and only once it has actually signed in here. */
+const LAST_EMAIL_KEY='jg_cust_last_email';
+function lastEmail(){ try{ return localStorage.getItem(LAST_EMAIL_KEY)||''; }catch(e){ return ''; } }
+function rememberEmail(v){ try{ localStorage.setItem(LAST_EMAIL_KEY,v); }catch(e){} }
+function showWelcomeBack(email){
+  $('email').value=email;
+  $('signInTitle').textContent='Welcome back';
+  $('signInSub').textContent='You were signed out. Tap below and we will email a new 6-digit code to '+email+'.';
+  $('notYou').style.display='';
+}
+window.forgetEmail=function(){
+  try{ localStorage.removeItem(LAST_EMAIL_KEY); }catch(e){}
+  $('email').value='';$('signInTitle').textContent='Sign in';
+  $('signInSub').textContent='Enter the email address you gave us at booking. We will email you a 6-digit code — no password needed.';
+  $('notYou').style.display='none';hideMsg();$('email').focus();
+};
 (async()=>{
   try{
     const {data}=await sb.auth.getSession();
     if(data.session && await isLinkedCustomer()){ location.replace('customer.html'); return; }
     if(data.session){ await sb.auth.signOut(); }
   }catch(e){}
+  const remembered=lastEmail();
+  if(remembered) showWelcomeBack(remembered);
   $('authCheck').style.display='none';
   $('wrap').style.visibility='visible';
 })();
@@ -204,6 +228,7 @@ $('codeForm').addEventListener('submit',async function(e){
     await sb.auth.signOut();
     msg('This email isn’t linked to a customer account. Contact your relationship manager.','err','msg2');reset();return;
   }
+  rememberEmail(SENT_EMAIL);
   location.replace('customer.html');
 });
 </script>
