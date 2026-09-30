@@ -10602,13 +10602,19 @@
   // Fires the real Calendar/Meet API call for a meeting (create/update/cancel). Silently
   // no-ops (connected:false) if the organizer hasn't connected Google yet — the meeting still
   // saves normally either way, this just skips getting a real meet_link/google_event_id.
-  async function mtgSyncGoogle(meetingId,action){
+  // attendeeEmails is optional and only needed when this runs BEFORE acc.meeting_attendees has
+  // been (re)written for this meeting — mtgFormSave now syncs Google first specifically so
+  // meet_link already exists once meeting_attendees is inserted and fires the invite-email
+  // trigger, so at that point the DB has nothing to read the attendee list from yet.
+  async function mtgSyncGoogle(meetingId,action,attendeeEmails){
     try{
       const {data:{session}}=await sb.auth.getSession();
+      const body={meeting_id:meetingId,action:action||'sync'};
+      if(Array.isArray(attendeeEmails)) body.attendee_emails=attendeeEmails;
       await fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/google-calendar-sync',{
         method:'POST',
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+((session&&session.access_token)||''),'apikey':SUPABASE_KEY},
-        body:JSON.stringify({meeting_id:meetingId,action:action||'sync'})
+        body:JSON.stringify(body)
       });
     }catch(e){}
   }
@@ -11028,6 +11034,10 @@
     // invite), so there's no reason to keep them in separate arrays past this point.
     const pickedAtt=(typeof msGet==='function'?msGet('mtgAttBox'):[]);
     const attendees=[...new Set(pickedAtt.concat(MTG_EXTRA||[]))].filter(function(e){return !eq(e,me());});
+    // A meeting with nobody invited is a draft, not a meeting — require at least one other person
+    // before it can be saved, whether that's the initial create or an edit that would otherwise
+    // strip the last attendee off an existing one.
+    if(!attendees.length){ toast('Add at least one person to this meeting before saving.','err'); return; }
     const b=$('mtgSaveBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
     const row={title:title,mode:mode,recur_type:recur,meeting_date:meeting_date,recur_day:recur_day,recur_date:recur_date,start_time:start,end_time:end};
     if(mode==='offline') row.meet_link=null; // real Meet links only ever exist for online meetings — clear any stale one if switched away from online
@@ -11039,6 +11049,12 @@
       const {data,error}=await ACC().from('meetings').insert(row).select().single(); err=error; if(data)mtgId=data.id;
     }
     if(err){ toast(err.message,'err'); if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> '+(editing?'Save changes':'Schedule');} return; }
+    // Sync Google — and so set meet_link — BEFORE meeting_attendees is (re)written below. Inserting
+    // into meeting_attendees fires trg_notify_meeting_attendee, which emails each attendee an invite
+    // (via meeting-mailer) immediately; if meet_link isn't on the meetings row yet by then, that
+    // email goes out with no "Join meeting" link. The attendee list is passed straight through here
+    // since meeting_attendees itself doesn't have these rows yet for google-calendar-sync to read.
+    if(mode==='online'){ await mtgSyncGoogle(mtgId,'sync',attendees); }
     try{ await ACC().from('meeting_attendees').delete().eq('meeting_id',mtgId); }catch(e){}
     if(attendees.length){ try{ await ACC().from('meeting_attendees').insert(attendees.map(function(e){return {meeting_id:mtgId,email:e};})); }catch(e){} }
     if(attendees.length){
@@ -11058,7 +11074,6 @@
       editing?'update':'create',
       {title:title, attendees:(attendees.length?attendees.length+(attendees.length===1?' person':' people'):undefined)}); }catch(_e){}
     closeModal(); toast(editing?'Meeting updated':'Meeting scheduled','ok');
-    if(mode==='online'){ await mtgSyncGoogle(mtgId,'sync'); }
     await mtgLoadData(); mtgRenderOnly();
   };
   window.mtgCancelAsk=function(id){
