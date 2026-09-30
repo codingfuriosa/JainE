@@ -18689,11 +18689,15 @@ function cpaCustBlockOpts(proj){
   return '<option value="">All blocks</option>'+body;
 }
 async function cpaRenderCustomers(host){
-  const [customers,,projects,rulesRes]=await Promise.all([cpaCustomers(true),cpaUnits(true),cpaProjects(true),
-    sb.schema('cust').from('feature_access').select('*')]);
+  const [customers,,projects,rulesRes,invRes]=await Promise.all([cpaCustomers(true),cpaUnits(true),cpaProjects(true),
+    sb.schema('cust').from('feature_access').select('*'),
+    sb.schema('cust').from('portal_invites').select('customer_id,status,error,sent_at,sent_by').order('sent_at',{ascending:false}).limit(5000)]);
   CPA.featureRules=(rulesRes&&rulesRes.data)||[];
+  CPA.invites=(invRes&&invRes.data)||[];
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>
+  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap"><div class="sec-title" style="margin:0">Customers</div>
+    <span style="display:inline-flex;gap:8px"><button class="btn" onclick="cpaInviteModal()" title="Email the customers shown below an invitation to sign in to the portal"><i class="fa-solid fa-paper-plane"></i> Send invitation</button>
+    <button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></span></div>
     <div class="mu-filters">
       <select id="cpaCustProj" class="mu-sel" onchange="cpaCustFilter(true)" style="max-width:320px"><option value="">All projects</option>${projOpts}<option value="none">— Cancelled / no unit (hidden by default) —</option></select>
       <select id="cpaCustBlock" class="mu-sel" onchange="cpaCustFilter()" style="max-width:200px" title="Customers holding a flat in this block">${cpaCustBlockOpts(CPA_CUST_FILTER.proj)}</select>
@@ -18735,7 +18739,8 @@ function cpaCustUnitsByCustomer(){
   const by={};(CPA.units||[]).forEach(u=>{if(u.customer_id)(by[u.customer_id]=by[u.customer_id]||[]).push(u);});
   return by;
 }
-function cpaCustList(){
+// The customers the current filters show - the list below, and exactly who "Send invitation" emails.
+function cpaCustFiltered(){
   const all=CPA.customers||[],byCustomer=cpaCustUnitsByCustomer(),{proj,block,q}=CPA_CUST_FILTER;
   /* A customer with no unit holds no flat with us - a cancelled booking (Sales Details imports only
      Active rows, so cancellation leaves the customer behind without one) or a duplicate record left
@@ -18751,14 +18756,26 @@ function cpaCustList(){
     if(q&&![c.full_name,c.email,c.phone].concat(mine.map(u=>u.unit_code)).join(' ').toLowerCase().includes(q))return false;
     return true;
   });
+  return {customers,list,byCustomer};
+}
+// Sign-in is the 'login' row of Customer Features, per project and block.
+function cpaCustCanSignIn(mine){
+  return mine.some(u=>u.status!=='cancelled'&&custFeatureOn(CPA.featureRules,'login',u.project_id,u.tower));
+}
+// Latest invitation per customer (cust.portal_invites), newest first.
+function cpaCustLastInvite(id){ return (CPA.invites||[]).find(r=>r.customer_id===id)||null; }
+function cpaCustList(){
+  const {customers,list,byCustomer}=cpaCustFiltered();
   const rows=list.map(c=>{
     const mine=byCustomer[c.id]||[];
     const projNames=[...new Set(mine.map(u=>(u.projects&&u.projects.name)||'').filter(Boolean))];
     // Customers sign in with an emailed code (customer-invite edge function), so there is nothing for staff to create:
-    // this only says whether they can, and whether they have.
-    // Sign-in is the 'login' row of Customer Features, per project and block.
-    const canSignIn=mine.some(u=>u.status!=='cancelled'&&custFeatureOn(CPA.featureRules,'login',u.project_id,u.tower));
+    // this only says whether they can, whether they have been invited, and whether they have signed in.
+    const canSignIn=cpaCustCanSignIn(mine);
+    const inv=cpaCustLastInvite(c.id);
     const loginTag=c.auth_user_id&&canSignIn?'<span class="tag t-green" title="Has signed in with an email code">Signed in</span>'
+      :canSignIn&&inv&&inv.status==='sent'?`<span class="tag t-amber" style="white-space:nowrap" title="Invitation emailed ${esc(fmtDate(inv.sent_at))} by ${esc(inv.sent_by||'')} - not signed in yet">Invited ${esc(fmtDateShort(inv.sent_at))}</span>`
+      :canSignIn&&inv&&inv.status==='failed'?`<span class="tag t-red" title="${esc(inv.error||'')}">Invite failed</span>`
       :canSignIn?'<span class="tag t-blue" title="Can sign in with an email code - nothing to set up">Ready</span>'
       :'<span class="tag t-gray" title="Customer sign-in is off for this flat\'s project or block (Customer Features tab)">Not live</span>';
     return [`<span style="white-space:nowrap">${esc(c.full_name)}</span>`,
@@ -18775,6 +18792,125 @@ function cpaCustList(){
   $('cpaCustList').innerHTML=cpaTable(['Name','Project','Unit','Email','Phone','Login','Actions'],
     rows.length?rows:[['No customers match this filter','','','','','','']]);
 }
+/* "Send invitation": emails the customers the filters currently show a "your portal is open - here is
+   how to sign in" email from customercare1@thejaingroup.com (customer-invite edge function, action
+   'invite'). Only customers who can actually sign in are sent it; anyone already invited or already
+   signed in is left out unless staff tick them back in. Sent in small batches so one slow reply from
+   Gmail cannot time the whole run out, and each email is recorded in cust.portal_invites. */
+const CPA_INVITE_HELP_KEY='cpa_invite_help';
+function cpaInvitePlan(resend,includeSignedIn){
+  const {list,byCustomer}=cpaCustFiltered();
+  const send=[],skip={off:[],invited:[],signed:[]};
+  list.forEach(c=>{
+    const mine=byCustomer[c.id]||[];
+    if(!cpaCustCanSignIn(mine)){skip.off.push(c);return;}
+    if(c.auth_user_id&&!includeSignedIn){skip.signed.push(c);return;}
+    const inv=cpaCustLastInvite(c.id);
+    if(inv&&inv.status==='sent'&&!resend){skip.invited.push(c);return;}
+    send.push(c);
+  });
+  return {list,send,skip};
+}
+function cpaInviteScope(){
+  const {proj,block,q}=CPA_CUST_FILTER;
+  const p=(CPA.projects||[]).find(x=>String(x.id)===proj);
+  const parts=[p?projShortName(p.name):'All projects'];
+  if(block)parts.push(block.split('|').slice(1).join('|'));
+  if(q)parts.push('matching "'+q+'"');
+  return parts.join(' · ');
+}
+window.cpaInviteModal=function(){
+  let help='';try{help=localStorage.getItem(CPA_INVITE_HELP_KEY)||'';}catch(e){}
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-paper-plane"></i> Send portal invitation</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm" id="cpaInvBody">
+      <div style="font-size:13px;color:var(--slate);margin:-4px 0 10px">Customers shown: <b style="color:var(--ink)">${esc(cpaInviteScope())}</b>. Change the filters on the Customers list to pick a different group.</div>
+      <div id="cpaInvSummary"></div>
+      <label style="display:flex;gap:8px;align-items:center;font-weight:500;margin-top:10px"><input type="checkbox" id="cpaInvResend" onchange="cpaInviteRefresh()" style="width:auto"> Also send to customers invited before</label>
+      <label style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="cpaInvSigned" onchange="cpaInviteRefresh()" style="width:auto"> Also send to customers who have already signed in</label>
+      <label style="margin-top:12px">"If you have any trouble signing in, …" (optional)</label>
+      <input id="cpaInvHelp" maxlength="200" value="${esc(help)}" placeholder="simply reply to this email">
+      <div style="font-size:12px;color:var(--slate);margin-top:-6px">Leave empty to say "simply reply to this email". Example: call us on 98xxxxxxxx (10am–6pm).</div>
+      <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#f8fafc;font-size:13px;line-height:1.55">
+        <div><b>From:</b> Jain Group Customer Care &lt;customercare1@thejaingroup.com&gt;</div>
+        <div><b>Subject:</b> Your Dream Gurukul home is now online – Jain Group Customer Portal</div>
+        <div style="color:var(--slate);margin-top:4px">Each customer gets their own email with their name and the email address they sign in with, the four sections they can see, the three sign-in steps and a button to the portal.</div>
+      </div>
+      <div id="cpaInvProgress" style="margin-top:12px"></div>
+    </div>
+    <div class="modal-foot" id="cpaInvFoot"><button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn" id="cpaInvTestBtn" onclick="cpaInviteTest()"><i class="fa-solid fa-flask"></i> Send a test to me</button>
+      <button class="btn btn-primary" id="cpaInvSendBtn" onclick="cpaInviteSend()"><i class="fa-solid fa-paper-plane"></i> Send</button></div>`);
+  cpaInviteRefresh();
+};
+window.cpaInviteRefresh=function(){
+  const plan=cpaInvitePlan($('cpaInvResend').checked,$('cpaInvSigned').checked);
+  const names=a=>a.slice(0,6).map(c=>esc(custFirstName(c.full_name)||c.full_name)).join(', ')+(a.length>6?' and '+(a.length-6)+' more':'');
+  const line=(n,txt,who)=>n?`<li style="margin:2px 0">${n} ${txt}${who?' <span style="color:var(--slate)">('+who+')</span>':''}</li>`:'';
+  $('cpaInvSummary').innerHTML=`<div style="font-size:15px"><b style="font-size:22px;color:#1d4ed8">${plan.send.length}</b> customer${plan.send.length===1?'':'s'} will be emailed</div>`+
+    `<ul style="margin:6px 0 0 18px;padding:0;font-size:13px;color:var(--ink)">`+
+    line(plan.skip.invited.length,'left out — already invited',names(plan.skip.invited))+
+    line(plan.skip.signed.length,'left out — already signed in',names(plan.skip.signed))+
+    line(plan.skip.off.length,'left out — sign-in is off for their flat (Customer Features)','')+
+    `</ul>`;
+  const b=$('cpaInvSendBtn');b.disabled=!plan.send.length;
+  b.dataset.armed='';b.classList.remove('btn-danger-solid');b.classList.add('btn-primary');
+  b.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send to '+plan.send.length;
+};
+async function cpaInviteCall(body){
+  const {data:{session}}=await sb.auth.getSession();
+  const res=await fetch(SUPABASE_URL+'/functions/v1/customer-invite',{method:'POST',
+    headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},
+    body:JSON.stringify(body)});
+  const out=await res.json().catch(()=>({}));
+  if(!res.ok||out.error)throw new Error(out.error||('HTTP '+res.status));
+  return out;
+}
+function cpaInviteHelp(){
+  const v=$('cpaInvHelp').value.trim();
+  try{localStorage.setItem(CPA_INVITE_HELP_KEY,v);}catch(e){}
+  return v;
+}
+window.cpaInviteTest=async function(){
+  const b=$('cpaInvTestBtn');b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending…';
+  try{ const out=await cpaInviteCall({action:'invite_test',helpLine:cpaInviteHelp()}); toast('Test sent to '+(out.to||'you')+' — check your inbox','ok'); }
+  catch(e){ toast('Test not sent: '+e.message,'err'); }
+  b.disabled=false;b.innerHTML='<i class="fa-solid fa-flask"></i> Send a test to me';
+};
+window.cpaInviteSend=async function(){
+  const plan=cpaInvitePlan($('cpaInvResend').checked,$('cpaInvSigned').checked);
+  if(!plan.send.length)return;
+  // Two clicks, inside this window: the first asks, the second sends. (confirmDialog would replace
+  // this window, and with it the progress bar.)
+  const sendBtn=$('cpaInvSendBtn');
+  if(!sendBtn.dataset.armed){
+    sendBtn.dataset.armed='1';sendBtn.classList.remove('btn-primary');sendBtn.classList.add('btn-danger-solid');
+    sendBtn.innerHTML='<i class="fa-solid fa-triangle-exclamation"></i> Yes, email '+plan.send.length+' customer'+(plan.send.length===1?'':'s')+' now';
+    return;
+  }
+  const helpLine=cpaInviteHelp();
+  ['cpaInvSendBtn','cpaInvTestBtn','cpaInvResend','cpaInvSigned','cpaInvHelp'].forEach(id=>{const b=$(id);if(b)b.disabled=true;});
+  const prog=$('cpaInvProgress');
+  const tally={sent:0,failed:0,skipped:0},fails=[];
+  const draw=done=>{ const pct=Math.round(done/plan.send.length*100);
+    prog.innerHTML=`<div style="height:8px;border-radius:6px;background:#e5e9f0;overflow:hidden"><div style="height:100%;width:${pct}%;background:#1d4ed8;transition:width .3s"></div></div>
+      <div style="font-size:13px;margin-top:6px">${done} of ${plan.send.length} — <b style="color:#15803d">${tally.sent} sent</b>${tally.failed?` · <b style="color:#b91c1c">${tally.failed} failed</b>`:''}${tally.skipped?` · ${tally.skipped} skipped`:''}</div>`; };
+  draw(0);
+  const ids=plan.send.map(c=>c.id);let stopped='';
+  for(let i=0;i<ids.length;i+=10){
+    const batch=ids.slice(i,i+10);
+    try{
+      const out=await cpaInviteCall({action:'invite',customerIds:batch,resend:$('cpaInvResend').checked,helpLine});
+      (out.results||[]).forEach(r=>{ tally[r.status]=(tally[r.status]||0)+1; if(r.status==='failed')fails.push(r.reason); });
+      // The function stops early when Gmail refuses (bad login, sending limit): stop here too.
+      if((out.results||[]).length<batch.length&&fails.length){stopped=fails[fails.length-1];}
+    }catch(e){ stopped=e.message; }
+    draw(Math.min(i+batch.length,ids.length));
+    if(stopped)break;
+  }
+  if(stopped) prog.insertAdjacentHTML('beforeend',`<div style="margin-top:8px;color:#b91c1c;font-size:13px"><i class="fa-solid fa-circle-exclamation"></i> Stopped: ${esc(stopped)}</div>`);
+  $('cpaInvFoot').innerHTML='<button class="btn btn-primary" onclick="closeModal();route()">Done</button>';
+  toast(tally.sent+' invitation'+(tally.sent===1?'':'s')+' sent'+(tally.failed?', '+tally.failed+' failed':''),tally.failed||stopped?'warn':'ok');
+};
 window.cpaCustomerModal=function(id){
   const c=id?(CPA.customers||[]).find(x=>x.id===id):null;
   openModal(`<div class="modal-head"><h3>${c?'Edit customer':'New customer'}</h3><span class="x" onclick="closeModal()">&times;</span></div>

@@ -3,6 +3,13 @@
 //   { action: "send",   email }        -> emails a 6-digit code (valid 10 minutes)
 //   { action: "verify", email, code }  -> checks it and returns a token_hash; the login page turns
 //                                         that into a session with sb.auth.verifyOtp()
+//   { action: "invite", customerIds, resend?, helpLine? }   STAFF ONLY (caller's JWT is checked)
+//                                      -> emails each customer the "your portal is open" invitation
+//   { action: "invite_test", helpLine? }  STAFF ONLY -> the same invitation, to the caller's own email
+//
+// Customer mail (invitations and sign-in codes) goes out from customercare1@thejaingroup.com:
+// CUSTOMER_MAIL_USER / CUSTOMER_MAIL_APP_PASSWORD. Invitations need them; codes fall back to the
+// GMAIL_USER account until they are set.
 //
 // Why it is called customer-invite: this slot used to hold the staff-set-password function of that
 // name. The project is at its plan's limit on edge functions, so the email-code sign-in replaced it
@@ -11,8 +18,8 @@
 // cust.login_customer_for_email() accepts: an active customer holding a live flat in a project with
 // sign-in on for that flat's project and block (Customer Features). Checked on send AND again on verify.
 //
-// Mail goes out through the same Gmail account as the staff password reset (GMAIL_USER /
-// GMAIL_APP_PASSWORD), not Supabase's built-in mailer, which allows only a handful of emails an hour.
+// Mail goes out through Gmail SMTP (see CUSTOMER_MAIL_* above), not Supabase's built-in mailer,
+// which allows only a handful of emails an hour.
 //
 // Deployed with --no-verify-jwt: whoever calls this is, by definition, not signed in yet.
 
@@ -78,19 +85,136 @@ function codeEmail(name: string, code: string) {
   return { text, html };
 }
 
+const PORTAL_URL = (Deno.env.get("PORTAL_URL") || "https://jaingroupe.netlify.app").replace(/\/$/, "");
+const LOGIN_URL = PORTAL_URL + "/customer-login.html";
+
+function inviteEmail(name: string, email: string, helpLine: string) {
+  const hello = name ? `Dear ${esc(name)},` : "Dear Homeowner,";
+  const help = helpLine ? esc(helpLine) : "simply reply to this email";
+  const text = `${name ? "Dear " + name + "," : "Dear Homeowner,"}\n\n` +
+    `We're happy to share that the Jain Group Customer Portal is now open for Dream Gurukul homeowners.\n\n` +
+    `In one place, on your phone or computer, you can now see:\n` +
+    `- Construction progress: latest photos of your block and your own flat\n` +
+    `- Your statement: total cost, amount paid and balance\n- Ledger: every demand and receipt\n` +
+    `- Cost sheet: the full price breakup of your flat\n\n` +
+    `How to sign in (no password needed):\n1. Open ${LOGIN_URL}\n2. Enter your email address: ${email}\n` +
+    `3. We'll email you a 6-digit code. Enter it and you're in.\n\n` +
+    `Please use the same email address you gave us at booking. If you ever sign out, just ask for a new code the same way.\n\n` +
+    `If you have any trouble signing in, ${helpLine || "simply reply to this email"}.\n\nWarm regards,\nTeam Jain Group\nCustomer Relations`;
+  const li = (b: string, t: string) => `<tr><td style="padding:5px 0;vertical-align:top;color:#b8902f;font-size:15px;width:22px">&#10003;</td><td style="padding:5px 0;color:#334155;font-size:14px;line-height:1.5"><b style="color:#0f1e3d">${b}</b> &ndash; ${t}</td></tr>`;
+  const step = (n: string, t: string) => `<tr><td style="padding:6px 0;vertical-align:top;width:34px"><div style="width:24px;height:24px;border-radius:50%;background:#0f1e3d;color:#fff;font-size:12px;font-weight:700;text-align:center;line-height:24px">${n}</div></td><td style="padding:6px 0;color:#334155;font-size:14px;line-height:1.55">${t}</td></tr>`;
+  const html = `<div style="margin:0;padding:24px 12px;background:#f4f6fb;font-family:'Segoe UI',Arial,sans-serif">
+  <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e5e9f0">
+    <div style="background:#0f1e3d;padding:22px 28px">
+      <div style="color:#ffffff;font-size:17px;font-weight:700;letter-spacing:.3px">Jain Group</div>
+      <div style="color:#dcb451;font-size:12.5px;margin-top:3px;letter-spacing:.4px">CUSTOMER PORTAL &middot; DREAM GURUKUL</div>
+    </div>
+    <div style="padding:28px">
+      <p style="margin:0 0 12px;color:#0b1220;font-size:15.5px">${hello}</p>
+      <p style="margin:0 0 18px;color:#334155;font-size:14.5px;line-height:1.6">We're happy to share that the <b>Jain Group Customer Portal</b> is now open for Dream Gurukul homeowners. In one place, on your phone or computer, you can now see:</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 22px">
+        ${li("Construction progress", "latest photos of your block and your own flat")}
+        ${li("Your statement", "total cost, amount paid and balance")}
+        ${li("Ledger", "every demand and receipt")}
+        ${li("Cost sheet", "the full price breakup of your flat")}
+      </table>
+      <div style="background:#f6f8fc;border:1px solid #dbe4f3;border-radius:12px;padding:18px 20px;margin:0 0 20px">
+        <div style="color:#0f1e3d;font-size:14.5px;font-weight:700;margin-bottom:8px">How to sign in &ndash; no password needed</div>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+          ${step("1", `Open the portal using the button below`)}
+          ${step("2", `Enter your email address: <b style="color:#0f1e3d;word-break:break-all">${esc(email)}</b>`)}
+          ${step("3", `We'll email you a 6-digit code. Enter it and you're in.`)}
+        </table>
+      </div>
+      <div style="text-align:center;margin:0 0 20px">
+        <a href="${LOGIN_URL}" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;padding:13px 30px;border-radius:9px;font-size:15px;font-weight:600">Open my Customer Portal</a>
+      </div>
+      <p style="margin:0 0 10px;color:#64748b;font-size:13px;line-height:1.6">Please use the same email address you gave us at booking. If you ever sign out, just ask for a new code the same way.</p>
+      <p style="margin:0 0 22px;color:#64748b;font-size:13px;line-height:1.6">If you have any trouble signing in, ${help}.</p>
+      <p style="margin:0;color:#0b1220;font-size:14px;line-height:1.6">Warm regards,<br><b>Team Jain Group</b><br><span style="color:#64748b">Customer Relations</span></p>
+    </div>
+    <div style="padding:14px 28px;background:#f8fafc;border-top:1px solid #e5e9f0">
+      <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.5">If the button does not work, copy this link into your browser: ${LOGIN_URL}</p>
+    </div>
+  </div>
+</div>`;
+  return { subject: "Your Dream Gurukul home is now online – Jain Group Customer Portal", text, html };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return j({ error: "POST only" }, 405);
 
   const SB = Deno.env.get("SUPABASE_URL")!;
   const SRV = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const GU = Deno.env.get("GMAIL_USER"), GP = Deno.env.get("GMAIL_APP_PASSWORD");
+  // Customer mail comes from customercare1@thejaingroup.com once its secrets are set; until then the
+  // sign-in codes keep using the account they always have.
+  const CU = Deno.env.get("CUSTOMER_MAIL_USER"), CP = Deno.env.get("CUSTOMER_MAIL_APP_PASSWORD");
+  const GU = CU && CP ? CU : Deno.env.get("GMAIL_USER");
+  const GP = CU && CP ? CP : Deno.env.get("GMAIL_APP_PASSWORD");
   const db = createClient(SB, SRV);
   const cust = db.schema("cust");
 
   let body: any = {};
   try { body = await req.json(); } catch { /* empty body */ }
   const action = String(body.action || "");
+
+  // ------------------------------------------------------ invite (staff)
+  if (action === "invite" || action === "invite_test") {
+    // The caller's own token decides whether this is staff - never the page's word for it.
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+    const ANON = Deno.env.get("SUPABASE_ANON_KEY") || SRV;
+    const asUser = createClient(SB, ANON, { global: { headers: { Authorization: "Bearer " + bearer } } });
+    const { data: who } = await asUser.auth.getUser();
+    if (!who?.user) return j({ error: "Please sign in again." }, 401);
+    const { data: isStaff } = await asUser.schema("app").rpc("is_custportal_staff");
+    if (!isStaff) return j({ error: "Only Customer Portal staff can send invitations." }, 403);
+    if (!CU || !CP) {
+      return j({ error: "The customercare1@thejaingroup.com mailbox is not connected yet (CUSTOMER_MAIL_USER / CUSTOMER_MAIL_APP_PASSWORD)." }, 500);
+    }
+    const helpLine = String(body.helpLine || "").trim().slice(0, 200);
+    const from = `Jain Group Customer Care <${CU}>`;
+    const staffEmail = who.user.email || "";
+
+    let client: any = null;
+    const open = () => client || (client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: CU, password: CP } } }));
+    try {
+      if (action === "invite_test") {
+        const m = inviteEmail("Homeowner", staffEmail, helpLine);
+        await open().send({ from, to: staffEmail, subject: "[TEST] " + m.subject, content: m.text, html: m.html });
+        return j({ ok: true, to: staffEmail });
+      }
+      const ids = [...new Set((Array.isArray(body.customerIds) ? body.customerIds : []).map(Number).filter(Boolean))].slice(0, 25);
+      if (!ids.length) return j({ error: "No customers to invite." }, 400);
+      const { data: people } = await cust.from("customers").select("id,email,full_name").in("id", ids).is("deleted_at", null);
+      const { data: before } = await cust.from("portal_invites").select("customer_id").in("customer_id", ids).eq("status", "sent");
+      const invited = new Set((before || []).map((r: any) => r.customer_id));
+      const results: any[] = [];
+      for (const p of (people || []) as any[]) {
+        const email = String(p.email || "").trim().toLowerCase();
+        // Only people who can actually sign in: live flat, sign-in on for its project and block.
+        const { data: ok } = await cust.rpc("login_customer_for_email", { p_email: email });
+        if (!ok || !ok.length) { results.push({ id: p.id, status: "skipped", reason: "sign-in is off for their flat" }); continue; }
+        if (invited.has(p.id) && !body.resend) { results.push({ id: p.id, status: "skipped", reason: "already invited" }); continue; }
+        const m = inviteEmail(niceName(p.full_name), email, helpLine);
+        try {
+          await open().send({ from, to: email, subject: m.subject, content: m.text, html: m.html });
+          await cust.from("portal_invites").insert({ customer_id: p.id, email, status: "sent", sent_by: staffEmail });
+          results.push({ id: p.id, status: "sent" });
+        } catch (e) {
+          const msg = String((e as Error).message || e).slice(0, 300);
+          await cust.from("portal_invites").insert({ customer_id: p.id, email, status: "failed", error: msg, sent_by: staffEmail });
+          results.push({ id: p.id, status: "failed", reason: msg });
+          // A refused login or a Gmail sending limit fails every email after it too - stop here.
+          if (/auth|535|534|limit|quota|550 5\.4\.5/i.test(msg)) { client = null; break; }
+        }
+      }
+      return j({ ok: true, results });
+    } catch (e) {
+      return j({ error: "Could not send: " + String((e as Error).message || e).slice(0, 300) }, 502);
+    } finally { try { if (client) await client.close(); } catch { /* ignore */ } }
+  }
+
   const email = String(body.email || "").trim().toLowerCase();
   if (!EMAIL_RE.test(email)) return j({ error: "Please enter a valid email address." }, 400);
 
