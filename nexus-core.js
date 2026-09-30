@@ -18956,10 +18956,11 @@ window.cpaQueueImport=async function(queueId){
     // Match to projects/units (only registered projects pass through)
     const projects=await cpaProjects();
     const units=await cpaUnits();
-    const matched=[],unmatched=[];
+    const matched=[],unmatched=[],fileProjectIds=new Set();
     for(const rec of parsed){
       const project=cpaResolveProject(projects,rec.businessUnit);
       if(!project){unmatched.push(rec);continue;}
+      fileProjectIds.add(project.id);
       if(type==='sales_details'){matched.push({project,rec});}
       else if(type==='ptc_transfer'){
         // See the note in cpaImportPreviewXlsx: neither side is required alone, only that at least
@@ -18978,7 +18979,7 @@ window.cpaQueueImport=async function(queueId){
     }
     if(!matched.length) throw new Error('No rows matched registered projects ('+unmatched.length+' unmatched)');
     // Import using existing confirm logic
-    const st={type,fileName:q.file_name,parsedCount:parsed.length,matched,unmatched};
+    const st={type,fileName:q.file_name,parsedCount:parsed.length,matched,unmatched,fileProjectIds:[...fileProjectIds]};
     CPA_IMPORT_STATE=st;
     window._cpaQueueId=queueId;
     if(CPA_XLSX_IMPORT_TYPES.has(type)) await cpaImportConfirmXlsx(st);
@@ -19065,10 +19066,11 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
   }catch(e){toast(e.message,'err');return;}
   if(!parsed.length){toast('No data rows found in that file','err');return;}
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
-  const matched=[],unmatched=[],outOfScope=[];
+  const matched=[],unmatched=[],outOfScope=[],fileProjectIds=new Set();
   parsed.forEach(rec=>{
     const project=cpaResolveProject(projects,rec.businessUnit);
     if(!project){ outOfScope.push(rec); return; } // a project we don't manage in the portal yet - not an error
+    fileProjectIds.add(project.id);
     if(type==='sales_details'){
       if(rec.status!=='Active'){ return; } // cancelled bookings don't get a portal unit
       matched.push({rec,project});
@@ -19093,7 +19095,7 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
     if(!unit){ unmatched.push(rec); return; }
     matched.push({rec,project,unit});
   });
-  CPA_IMPORT_STATE={type,fileName:file.name,parsedCount:parsed.length,matched,unmatched,outOfScope};
+  CPA_IMPORT_STATE={type,fileName:file.name,parsedCount:parsed.length,matched,unmatched,outOfScope,fileProjectIds:[...fileProjectIds]};
   // Shown before Confirm: flats whose customer the import will deliberately NOT change.
   let sdNote='';
   if(type==='sales_details'){
@@ -19302,6 +19304,20 @@ async function cpaImportConfirmXlsx(st){
       const {error}=await sb.schema('cust').from('outstanding_snapshot').insert({unit_id:m.unit.id,as_on_date:new Date().toISOString().slice(0,10),
         total_consideration:r.totalConsideration,bill_outstanding:r.billOutstanding,on_account:r.onAccount,
         net_outstanding:r.netOutstanding,late_fee_accrued:r.lateFee,no_of_bills:r.noOfBills,is_current:true,import_batch_id:batchId});
+      if(error)throw error;
+    }
+    /* Farvision leaves a flat out of the Outstanding Summary once nothing is outstanding. Without this
+       its last snapshot stayed current: Mohmmad Anwar (Gateway 1E) cleared 31,44,019 on 29 Sep and was
+       absent from the 30 Sep file, yet his home screen kept showing that amount as due. So every flat
+       of a project this file covers that is not in it loses its snapshot, and the portal falls back to
+       the Sales Details cost sheet, as it already does for fully-paid flats. Projects the file does not
+       cover at all are left alone, so a single-project export cannot wipe the others. */
+    const inFile=new Set(st.matched.map(m=>m.unit.id));
+    const projIds=new Set(st.fileProjectIds||st.matched.map(m=>m.project.id));
+    const gone=(await cpaUnits(true)).filter(u=>projIds.has(u.project_id)&&!inFile.has(u.id)).map(u=>u.id);
+    for(let i=0;i<gone.length;i+=200){
+      const {error}=await sb.schema('cust').from('outstanding_snapshot').update({is_current:false})
+        .in('unit_id',gone.slice(i,i+200)).eq('is_current',true);
       if(error)throw error;
     }
   }else if(st.type==='invoice_register'){
