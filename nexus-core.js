@@ -18464,7 +18464,12 @@ VIEWS.custportal_admin=async function(v,seg){
    then project, then the all-projects default). Home is always shown and is not listed. */
 let CPA_FEAT_PROJ='';
 // Shown beside a section so nobody switches on something that is not finished (audit, 30 Sep 2026).
+// Sign-in first - with it off for a block, that block's customers cannot get in to see anything else.
+function cpaFeatureRows(){
+  return [{key:'login',label:'Customer sign-in'}].concat(CUST_FEATURES.map(f=>({key:f.key,label:CUST_TABS[f.tab]})));
+}
 const CPA_FEATURE_NOTES={
+  login:'Who can sign in with a code sent to the email on their booking. Off = these customers cannot sign in at all.',
   inspection:'Not finished - staff cannot list or delete an uploaded checklist or update.',
   documents:'Not finished - staff cannot list or delete an uploaded document.',
   videos:'Ready - but no process videos have been uploaded yet.',
@@ -18500,16 +18505,16 @@ async function cpaRenderFeatures(host){
       onchange="cpaFeatureSet('${key}',${pid==null?'null':pid},${esc(JSON.stringify(tower||null))},this.value)">${opts}</select>`;
   };
   const head=['Section'].concat(proj?['Whole project'].concat(blocks):['All projects']);
-  const rows=CUST_FEATURES.map(f=>{
+  const rows=cpaFeatureRows().map(f=>{
     const note=CPA_FEATURE_NOTES[f.key]||'Ready.';
     const warn=/^Not finished/.test(note);
-    return [`<div style="min-width:250px;max-width:340px"><b>${esc(CUST_TABS[f.tab])}</b>`+
+    return [`<div style="min-width:250px;max-width:340px"><b>${f.key==='login'?'<i class="fa-solid fa-right-to-bracket" style="color:#1d4ed8"></i> ':''}${esc(f.label)}</b>`+
       `<div style="font-size:12px;line-height:1.45;margin-top:2px;color:${warn?'#b45309':'var(--slate)'}">${warn?'<i class="fa-solid fa-triangle-exclamation"></i> ':''}${esc(note)}</div></div>`]
       .concat(proj?[cell(f.key,proj.id,null)].concat(blocks.map(b=>cell(f.key,proj.id,b))):[cell(f.key,null,null)]);
   });
   const projOpts=projects.map(p=>`<option value="${p.id}"${String(p.id)===CPA_FEAT_PROJ?' selected':''}>${esc(p.name)}</option>`).join('');
   host.innerHTML=`<div class="sec-title" style="margin:0 0 6px">Customer Features</div>
-    <div style="font-size:13px;color:var(--slate);margin-bottom:12px;line-height:1.55">Choose which sections customers see. <b>Home</b> is always shown.
+    <div style="font-size:13px;color:var(--slate);margin-bottom:12px;line-height:1.55">Choose which customers can sign in, and which sections they see. <b>Home</b> is always shown.
       A block's setting beats its project's, and a project's beats the default for all projects. Customers see a change the next time they open or refresh the portal.
       To check, use the <i class="fa-solid fa-eye"></i> preview on the Customers tab.</div>
     <div class="mu-filters"><select id="cpaFeatProj" class="mu-sel" style="max-width:360px" onchange="CPA_FEAT_PROJ=this.value;route()">
@@ -18530,7 +18535,7 @@ window.cpaFeatureSet=async function(key,pid,tower,value){
   if(error){ toast('Could not save: '+error.message,'err'); }
   else{
     const where=tower?tower:pid!=null?'the whole project':'all projects';
-    toast(CUST_TABS[(CUST_FEATURES.find(f=>f.key===key)||{}).tab]+': '+(value===''?'following the level above':value==='on'?'switched on':'switched off')+' for '+where,'ok');
+    toast((cpaFeatureRows().find(f=>f.key===key)||{label:key}).label+': '+(value===''?'following the level above':value==='on'?'switched on':'switched off')+' for '+where,'ok');
   }
   route();
 };
@@ -18543,15 +18548,12 @@ async function cpaRenderProjectsUnits(host){
     const mine=units.filter(u=>u.project_id===p.id);
     return [esc(p.name),esc(p.farvision_project_code||'—'),String(mine.length),
       String(new Set(mine.map(u=>u.customer_id).filter(Boolean)).size),
-      p.customer_login
-        ?`<button class="btn btn-sm" style="color:#15803d;border-color:#bbf7d0;background:#f0fdf4;white-space:nowrap" title="This project's customers can sign in with an email code. Click to switch off." onclick="cpaProjectLogin(${p.id},false)"><i class="fa-solid fa-circle-check"></i> Live</button>`
-        :`<button class="btn btn-sm" style="white-space:nowrap" title="This project's customers cannot sign in yet. Click to switch on." onclick="cpaProjectLogin(${p.id},true)"><i class="fa-solid fa-power-off"></i> Off</button>`,
       `<button class="btn btn-sm" onclick="cpaUnitsFor(${p.id})"><i class="fa-solid fa-list"></i> Units</button>`+
       ` <button class="btn btn-sm" onclick="cpaProjectModal(${p.id})"><i class="fa-solid fa-pen"></i> Edit</button>`];
   });
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Projects</div><button class="btn btn-primary" onclick="cpaProjectModal()"><i class="fa-solid fa-plus"></i> New project</button></div>`+
-    cpaTable(['Project','Farvision code','Units','Customers','Customer login',''],projRows.length?projRows:[['No projects yet','','','','','']])+
+    cpaTable(['Project','Farvision code','Units','Customers',''],projRows.length?projRows:[['No projects yet','','','','']])+
     `<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><div class="sec-title" style="margin:0">Units</div><button class="btn btn-primary" onclick="cpaUnitModal()"><i class="fa-solid fa-plus"></i> New unit</button></div>
     <div class="mu-filters">
       <select id="cpaUnitProj" class="mu-sel" onchange="cpaUnitFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}</select>
@@ -18591,30 +18593,12 @@ function cpaUnitList(){
     return [esc(u.unit_code),(u.projects&&u.projects.name)?cpaProjectChip(u.projects.name):'—',esc(u.tower||'—'),esc(u.unit_category||'—'),esc(u.unit_type||'—'),
       `<span class="tag t-blue">${esc(u.status||'—')}</span>`,
       c?`<span style="white-space:nowrap">${esc(c.full_name)}</span>`:'<span class="tag t-gray">Unassigned</span>',
-      u.floor_casting_completed_at?`<span class="tag t-green" style="white-space:nowrap">Cast ${fmtDateShort(u.floor_casting_completed_at)}</span>`:'<span class="tag t-amber">Pending</span>',
-      `<span style="display:inline-flex;gap:6px;white-space:nowrap">`+
-      `<button class="btn btn-sm" title="Edit unit" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`+
-      (u.floor_casting_completed_at?'':`<button class="btn btn-sm btn-primary" onclick="cpaMarkCasting(${u.id})">Mark cast</button>`)+
-      `</span>`];
+      `<button class="btn btn-sm" title="Edit unit" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`];
   });
   const cnt=$('cpaUnitCount');if(cnt)cnt.textContent=list.length+' of '+units.length;
-  $('cpaUnitList').innerHTML=cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer','Floor casting',''],
-    rows.length?rows:[['No units match this filter','','','','','','','','']]);
+  $('cpaUnitList').innerHTML=cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer',''],
+    rows.length?rows:[['No units match this filter','','','','','','','']]);
 }
-/* Which projects' customers may sign in (email code, see the customer-invite edge function). Switching a project on is all
-   it takes for every customer holding a live flat there - there are no logins to create. Switching
-   off stops new sign-ins; anyone already signed in stays so until their session ends. */
-window.cpaProjectLogin=async function(id,on){
-  const p=(CPA.projects||[]).find(x=>x.id===id);if(!p)return;
-  const n=new Set((CPA.units||[]).filter(u=>u.project_id===id&&u.status!=='cancelled'&&u.customer_id).map(u=>u.customer_id)).size;
-  const name='<b>'+esc(projShortName(p.name))+'</b>';
-  const ask=on?`Switch customer login <b>on</b> for ${name}? Its ${n} customer${n===1?'':'s'} will be able to sign in with a code sent to the email on their booking.`
-    :`Switch customer login <b>off</b> for ${name}? Its customers will no longer be able to sign in.`;
-  if(!await confirmDialog(ask,{okLabel:on?'Switch on':'Switch off'}))return;
-  const {error}=await sb.schema('cust').from('projects').update({customer_login:on}).eq('id',id);
-  if(error){toast('Could not change it: '+error.message,'err');return;}
-  toast('Customer login '+(on?'switched on':'switched off')+' for '+projShortName(p.name),'ok');route();
-};
 window.cpaProjectModal=function(id){
   const p=id?(CPA.projects||[]).find(x=>x.id===id):null;
   openModal(`<div class="modal-head"><h3>${p?'Edit project':'New project'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -18679,13 +18663,6 @@ window.cpaUnitSave=async function(id){
   if(error){toast('Save failed: '+error.message,'err');return;}
   closeModal();toast('Unit saved','ok');route();
 };
-window.cpaMarkCasting=async function(id){
-  if(!await confirmDialog('Mark this unit\u2019s floor casting as complete? Its construction-photo gallery becomes visible to the customer immediately.',{danger:false,okLabel:'Mark complete'}))return;
-  const {error}=await sb.schema('cust').from('units').update({floor_casting_completed_at:new Date().toISOString()}).eq('id',id);
-  if(error){toast('Failed: '+error.message,'err');return;}
-  toast('Floor casting marked complete','ok');route();
-};
-
 /* ---------- Tab 2: Customers ---------- */
 // A customer's project is not a column on the customer - it comes from the unit(s) they hold, and a
 // customer can legitimately hold units in more than one project. So both are derived per row rather
@@ -18712,7 +18689,9 @@ function cpaCustBlockOpts(proj){
   return '<option value="">All blocks</option>'+body;
 }
 async function cpaRenderCustomers(host){
-  const [customers,,projects]=await Promise.all([cpaCustomers(true),cpaUnits(true),cpaProjects(true)]);
+  const [customers,,projects,rulesRes]=await Promise.all([cpaCustomers(true),cpaUnits(true),cpaProjects(true),
+    sb.schema('cust').from('feature_access').select('*')]);
+  CPA.featureRules=(rulesRes&&rulesRes.data)||[];
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>
     <div class="mu-filters">
@@ -18772,16 +18751,16 @@ function cpaCustList(){
     if(q&&![c.full_name,c.email,c.phone].concat(mine.map(u=>u.unit_code)).join(' ').toLowerCase().includes(q))return false;
     return true;
   });
-  const liveProj=new Set((CPA.projects||[]).filter(p=>p.customer_login).map(p=>p.id));
   const rows=list.map(c=>{
     const mine=byCustomer[c.id]||[];
     const projNames=[...new Set(mine.map(u=>(u.projects&&u.projects.name)||'').filter(Boolean))];
     // Customers sign in with an emailed code (customer-invite edge function), so there is nothing for staff to create:
     // this only says whether they can, and whether they have.
-    const canSignIn=mine.some(u=>u.status!=='cancelled'&&liveProj.has(u.project_id));
+    // Sign-in is the 'login' row of Customer Features, per project and block.
+    const canSignIn=mine.some(u=>u.status!=='cancelled'&&custFeatureOn(CPA.featureRules,'login',u.project_id,u.tower));
     const loginTag=c.auth_user_id&&canSignIn?'<span class="tag t-green" title="Has signed in with an email code">Signed in</span>'
       :canSignIn?'<span class="tag t-blue" title="Can sign in with an email code - nothing to set up">Ready</span>'
-      :'<span class="tag t-gray" title="Customer login is not switched on for this project">Not live</span>';
+      :'<span class="tag t-gray" title="Customer sign-in is off for this flat\'s project or block (Customer Features tab)">Not live</span>';
     return [`<span style="white-space:nowrap">${esc(c.full_name)}</span>`,
       projNames.length?projNames.map(cpaProjectChip).join(' '):'<span class="tag t-amber">No unit</span>',
       mine.length?`<span style="white-space:nowrap">${mine.map(u=>esc(u.unit_code)+(u.tower?' <span style="color:var(--slate)">('+esc(u.tower)+')</span>':'')).join(', ')}</span>`:'—',

@@ -9,7 +9,7 @@
 // in place rather than being added as a new one. Nobody has to create or hand over a login any more.
 // The auth account is created on the customer's first correct code - but only for an email that
 // cust.login_customer_for_email() accepts: an active customer holding a live flat in a project with
-// customer_login on. That rule is checked on send AND again on verify.
+// sign-in on for that flat's project and block (Customer Features). Checked on send AND again on verify.
 //
 // Mail goes out through the same Gmail account as the staff password reset (GMAIL_USER /
 // GMAIL_APP_PASSWORD), not Supabase's built-in mailer, which allows only a handful of emails an hour.
