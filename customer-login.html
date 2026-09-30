@@ -44,7 +44,18 @@ body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--
 .msg.show{display:flex}
 .msg.err{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
 .msg.ok{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}
-.foot{text-align:center;margin-top:26px;font-size:13px;color:var(--slate)}
+.foot{text-align:center;margin-top:26px;font-size:13px;color:var(--slate);line-height:1.5}
+.card .sub b{color:var(--ink);word-break:break-all}
+.input input.code-in{font-size:22px;letter-spacing:10px;font-weight:700;font-variant-numeric:tabular-nums}
+.input input.code-in::placeholder{letter-spacing:8px;color:#cbd5e1}
+.links{display:flex;justify-content:center;align-items:center;gap:10px;margin-top:16px;font-size:13.5px;color:#cbd5e1;flex-wrap:wrap}
+.lnk{border:none;background:none;color:var(--brand);font:inherit;font-weight:600;cursor:pointer;padding:4px 2px}
+.lnk:hover{text-decoration:underline}.lnk:disabled{color:var(--slate);cursor:default;text-decoration:none;font-weight:500}
+.m-logo{display:none;align-items:center;gap:12px;margin-bottom:30px}
+.m-logo .logo-mark{width:42px;height:42px;font-size:19px}
+.m-logo .name{font-weight:700;font-size:16px;color:var(--ink)}.m-logo .name small{display:block;font-weight:500;font-size:12px;color:var(--slate)}
+@media(max-width:900px){.m-logo{display:flex}}
+@media(max-width:900px){body{height:auto;min-height:100vh;overflow:auto}.wrap{height:auto;min-height:100vh}.form-side{padding:32px 16px}}
 @media(max-width:900px){.wrap{grid-template-columns:1fr}.brand-side{display:none}}
 #authCheck{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:50}
 </style>
@@ -67,21 +78,33 @@ body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--
   </div>
   <div class="form-side">
     <div class="card">
-      <h2>Sign in</h2>
-      <p class="sub">Enter the credentials sent to you by your relationship manager.</p>
-      <div id="msg" class="msg"></div>
-      <form id="form" autocomplete="off">
-        <div class="field">
-          <label for="email">Email address</label>
-          <div class="input"><i class="fa-solid fa-envelope lead"></i><input type="email" id="email" placeholder="you@example.com" autocomplete="off" required></div>
-        </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <div class="input"><i class="fa-solid fa-lock lead"></i><input type="password" id="password" placeholder="Enter your password" autocomplete="off" required><button type="button" class="eye" tabindex="-1" title="Show / hide password" onclick="togglePwd('password',this)"><i class="fa-solid fa-eye"></i></button></div>
-        </div>
-        <button type="submit" class="btn btn-primary" id="submitBtn" style="margin-top:6px"><i class="fa-solid fa-right-to-bracket"></i> Sign In</button>
-      </form>
-      <div class="foot">Forgot your password, or not linked to an account yet? Contact your relationship manager.</div>
+      <div class="m-logo"><div class="logo-mark">J</div><div class="name">Jain Group<small>Customer Portal</small></div></div>
+      <div id="stepEmail">
+        <h2>Sign in</h2>
+        <p class="sub">Enter the email address you gave us at booking. We will email you a 6-digit code — no password needed.</p>
+        <div id="msg" class="msg"></div>
+        <form id="emailForm" autocomplete="on" novalidate>
+          <div class="field">
+            <label for="email">Email address</label>
+            <div class="input"><i class="fa-solid fa-envelope lead"></i><input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email" inputmode="email" required></div>
+          </div>
+          <button type="submit" class="btn btn-primary" id="sendBtn" style="margin-top:6px"><i class="fa-solid fa-paper-plane"></i> Email me a code</button>
+        </form>
+      </div>
+      <div id="stepCode" style="display:none">
+        <h2>Check your email</h2>
+        <p class="sub">If <b id="sentTo"></b> is registered with us, a 6-digit code is on its way. It works for 10 minutes. Please also check your Spam or Promotions folder.</p>
+        <div id="msg2" class="msg"></div>
+        <form id="codeForm" autocomplete="off" novalidate>
+          <div class="field">
+            <label for="code">6-digit code</label>
+            <div class="input"><i class="fa-solid fa-key lead"></i><input type="text" id="code" class="code-in" placeholder="••••••" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" required></div>
+          </div>
+          <button type="submit" class="btn btn-primary" id="verifyBtn" style="margin-top:6px"><i class="fa-solid fa-right-to-bracket"></i> Sign in</button>
+        </form>
+        <div class="links"><button type="button" class="lnk" id="resendBtn" onclick="resend()">Send a new code</button><span>·</span><button type="button" class="lnk" onclick="backToEmail()">Use a different email</button></div>
+      </div>
+      <div class="foot">Not getting a code? Make sure it is the email on your booking, or contact your relationship manager.</div>
     </div>
   </div>
 </div>
@@ -90,10 +113,51 @@ const SUPABASE_URL='https://rkxsgtauigjrpcjkmccu.supabase.co';
 const SUPABASE_KEY='sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n';
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=id=>document.getElementById(id);
-function togglePwd(id,btn){var p=document.getElementById(id);if(!p)return;var show=(p.type==='password');p.type=show?'text':'password';btn.innerHTML='<i class="fa-solid fa-'+(show?'eye-slash':'eye')+'"></i>';}
-window.togglePwd=togglePwd;
-function msg(t,type){const m=$('msg');m.className='msg show '+type;m.innerHTML='<i class="fa-solid fa-'+(type==='ok'?'circle-check':'circle-exclamation')+'"></i>'+t;}
-function hideMsg(){$('msg').className='msg';}
+// Sign-in is a 6-digit code emailed by the customer-otp edge function - there are no customer
+// passwords. The function checks the email belongs to a customer with a live flat in a project whose
+// customer login is on, and on the right code hands back a one-time token that becomes the session.
+const OTP_URL=SUPABASE_URL+'/functions/v1/customer-otp';
+let SENT_EMAIL='',resendTimer=null;
+function msg(t,type,box){const m=$(box||(SENT_EMAIL?'msg2':'msg'));m.className='msg show '+type;m.innerHTML='<i class="fa-solid fa-'+(type==='ok'?'circle-check':'circle-exclamation')+'"></i><span></span>';m.lastChild.textContent=t;}
+function hideMsg(){$('msg').className='msg';$('msg2').className='msg';}
+async function otp(body){
+  try{
+    const res=await fetch(OTP_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},body:JSON.stringify(body)});
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error) return {error:out.error||'Something went wrong. Please try again.'};
+    return out;
+  }catch(e){ return {error:'Could not reach the server. Check your internet connection and try again.'}; }
+}
+function busy(btn,on,label){btn.disabled=on;if(on)btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> '+label;}
+function startResendCountdown(secs){
+  const b=$('resendBtn');clearInterval(resendTimer);let left=secs;
+  const tick=()=>{ if(left<=0){clearInterval(resendTimer);b.disabled=false;b.textContent='Send a new code';return;}
+    b.disabled=true;b.textContent='Send a new code in '+left+'s';left--; };
+  tick();resendTimer=setInterval(tick,1000);
+}
+function showCodeStep(){
+  $('sentTo').textContent=SENT_EMAIL;
+  $('stepEmail').style.display='none';$('stepCode').style.display='';
+  $('code').value='';setTimeout(()=>$('code').focus(),50);
+}
+window.backToEmail=function(){
+  SENT_EMAIL='';clearInterval(resendTimer);hideMsg();
+  $('stepCode').style.display='none';$('stepEmail').style.display='';$('email').focus();
+};
+async function sendCode(email){
+  const out=await otp({action:'send',email});
+  if(out.error) return out;
+  SENT_EMAIL=email;
+  startResendCountdown(out.wait||60);
+  return out;
+}
+window.resend=async function(){
+  hideMsg();const b=$('resendBtn');b.disabled=true;b.textContent='Sending…';
+  const out=await sendCode(SENT_EMAIL);
+  if(out.error){msg(out.error,'err','msg2');b.disabled=false;b.textContent='Send a new code';return;}
+  msg(out.wait?'Please wait a moment before asking for another code.':'A new code has been sent. Only the newest code works.','ok','msg2');
+  $('code').value='';$('code').focus();
+};
 // A customer login is only ever valid if cust.customers.auth_user_id points back at this session —
 // otherwise this is a staff account (or nobody at all) and must never reach customer.html.
 async function isLinkedCustomer(){
@@ -111,19 +175,34 @@ async function isLinkedCustomer(){
   $('authCheck').style.display='none';
   $('wrap').style.visibility='visible';
 })();
-$('form').addEventListener('submit',async function(e){
+$('emailForm').addEventListener('submit',async function(e){
   e.preventDefault();hideMsg();
-  const email=$('email').value.trim(),password=$('password').value;
-  const btn=$('submitBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Signing in…';
-  const {error}=await sb.auth.signInWithPassword({email,password});
-  if(error){
-    msg('That email or password is not right. Check it, or contact your relationship manager.','err');
-    btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-right-to-bracket"></i> Sign In';return;
-  }
+  const email=$('email').value.trim().toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){msg('Please enter a valid email address.','err','msg');return;}
+  const btn=$('sendBtn');busy(btn,true,'Sending code…');
+  const out=await sendCode(email);
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Email me a code';
+  if(out.error){msg(out.error,'err','msg');return;}
+  showCodeStep();
+});
+// Digits only; a pasted "123 456" or "Code: 123456" still works.
+$('code').addEventListener('input',function(){
+  const d=this.value.replace(/\D/g,'').slice(0,6);if(this.value!==d)this.value=d;
+  if(d.length===6&&!$('verifyBtn').disabled)$('codeForm').requestSubmit();
+});
+$('codeForm').addEventListener('submit',async function(e){
+  e.preventDefault();hideMsg();
+  const code=$('code').value.replace(/\D/g,'');
+  if(code.length!==6){msg('Enter the 6-digit code from the email.','err','msg2');return;}
+  const btn=$('verifyBtn');busy(btn,true,'Signing in…');
+  const reset=()=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-right-to-bracket"></i> Sign in';};
+  const out=await otp({action:'verify',email:SENT_EMAIL,code});
+  if(out.error){msg(out.error,'err','msg2');reset();$('code').select();return;}
+  const {error}=await sb.auth.verifyOtp({token_hash:out.token_hash,type:'magiclink'});
+  if(error){msg('Could not sign you in. Please request a new code and try again.','err','msg2');reset();return;}
   if(!(await isLinkedCustomer())){
     await sb.auth.signOut();
-    msg('This login isn’t linked to a customer account. Contact your relationship manager.','err');
-    btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-right-to-bracket"></i> Sign In';return;
+    msg('This email isn’t linked to a customer account. Contact your relationship manager.','err','msg2');reset();return;
   }
   location.replace('customer.html');
 });

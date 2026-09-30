@@ -18430,12 +18430,15 @@ async function cpaRenderProjectsUnits(host){
     const mine=units.filter(u=>u.project_id===p.id);
     return [esc(p.name),esc(p.farvision_project_code||'—'),String(mine.length),
       String(new Set(mine.map(u=>u.customer_id).filter(Boolean)).size),
+      p.customer_login
+        ?`<button class="btn btn-sm" style="color:#15803d;border-color:#bbf7d0;background:#f0fdf4;white-space:nowrap" title="This project's customers can sign in with an email code. Click to switch off." onclick="cpaProjectLogin(${p.id},false)"><i class="fa-solid fa-circle-check"></i> Live</button>`
+        :`<button class="btn btn-sm" style="white-space:nowrap" title="This project's customers cannot sign in yet. Click to switch on." onclick="cpaProjectLogin(${p.id},true)"><i class="fa-solid fa-power-off"></i> Off</button>`,
       `<button class="btn btn-sm" onclick="cpaUnitsFor(${p.id})"><i class="fa-solid fa-list"></i> Units</button>`+
       ` <button class="btn btn-sm" onclick="cpaProjectModal(${p.id})"><i class="fa-solid fa-pen"></i> Edit</button>`];
   });
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Projects</div><button class="btn btn-primary" onclick="cpaProjectModal()"><i class="fa-solid fa-plus"></i> New project</button></div>`+
-    cpaTable(['Project','Farvision code','Units','Customers',''],projRows.length?projRows:[['No projects yet','','','','']])+
+    cpaTable(['Project','Farvision code','Units','Customers','Customer login',''],projRows.length?projRows:[['No projects yet','','','','','']])+
     `<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><div class="sec-title" style="margin:0">Units</div><button class="btn btn-primary" onclick="cpaUnitModal()"><i class="fa-solid fa-plus"></i> New unit</button></div>
     <div class="mu-filters">
       <select id="cpaUnitProj" class="mu-sel" onchange="cpaUnitFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}</select>
@@ -18485,6 +18488,20 @@ function cpaUnitList(){
   $('cpaUnitList').innerHTML=cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer','Floor casting',''],
     rows.length?rows:[['No units match this filter','','','','','','','','']]);
 }
+/* Which projects' customers may sign in (email code, see customer-otp). Switching a project on is all
+   it takes for every customer holding a live flat there - there are no logins to create. Switching
+   off stops new sign-ins; anyone already signed in stays so until their session ends. */
+window.cpaProjectLogin=async function(id,on){
+  const p=(CPA.projects||[]).find(x=>x.id===id);if(!p)return;
+  const n=new Set((CPA.units||[]).filter(u=>u.project_id===id&&u.status!=='cancelled'&&u.customer_id).map(u=>u.customer_id)).size;
+  const name='<b>'+esc(projShortName(p.name))+'</b>';
+  const ask=on?`Switch customer login <b>on</b> for ${name}? Its ${n} customer${n===1?'':'s'} will be able to sign in with a code sent to the email on their booking.`
+    :`Switch customer login <b>off</b> for ${name}? Its customers will no longer be able to sign in.`;
+  if(!await confirmDialog(ask,{okLabel:on?'Switch on':'Switch off'}))return;
+  const {error}=await sb.schema('cust').from('projects').update({customer_login:on}).eq('id',id);
+  if(error){toast('Could not change it: '+error.message,'err');return;}
+  toast('Customer login '+(on?'switched on':'switched off')+' for '+projShortName(p.name),'ok');route();
+};
 window.cpaProjectModal=function(id){
   const p=id?(CPA.projects||[]).find(x=>x.id===id):null;
   openModal(`<div class="modal-head"><h3>${p?'Edit project':'New project'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -18608,18 +18625,24 @@ function cpaCustList(){
     if(q&&![c.full_name,c.email,c.phone].concat(mine.map(u=>u.unit_code)).join(' ').toLowerCase().includes(q))return false;
     return true;
   });
+  const liveProj=new Set((CPA.projects||[]).filter(p=>p.customer_login).map(p=>p.id));
   const rows=list.map(c=>{
     const mine=byCustomer[c.id]||[];
     const projNames=[...new Set(mine.map(u=>(u.projects&&u.projects.name)||'').filter(Boolean))];
+    // Customers sign in with an emailed code (customer-otp), so there is nothing for staff to create:
+    // this only says whether they can, and whether they have.
+    const canSignIn=mine.some(u=>u.status!=='cancelled'&&liveProj.has(u.project_id));
+    const loginTag=c.auth_user_id&&canSignIn?'<span class="tag t-green" title="Has signed in with an email code">Signed in</span>'
+      :canSignIn?'<span class="tag t-blue" title="Can sign in with an email code - nothing to set up">Ready</span>'
+      :'<span class="tag t-gray" title="Customer login is not switched on for this project">Not live</span>';
     return [`<span style="white-space:nowrap">${esc(c.full_name)}</span>`,
       projNames.length?projNames.map(cpaProjectChip).join(' '):'<span class="tag t-amber">No unit</span>',
       mine.length?`<span style="white-space:nowrap">${mine.map(u=>esc(u.unit_code)+(u.tower?' <span style="color:var(--slate)">('+esc(u.tower)+')</span>':'')).join(', ')}</span>`:'—',
       esc(c.email),`<span style="white-space:nowrap">${esc(c.phone||'—')}</span>`,
-      c.auth_user_id?'<span class="tag t-green">Active</span>':'<span class="tag t-gray">None</span>',
+      loginTag,
       `<span style="display:inline-flex;gap:6px;white-space:nowrap">`+
       `<button class="btn btn-sm" title="Edit customer" onclick="cpaCustomerModal(${c.id})"><i class="fa-solid fa-pen"></i></button>`+
       `<button class="btn btn-sm" onclick="window.open('customer.html?as=${c.id}','_blank')" title="See exactly what this customer sees, without needing a customer login"><i class="fa-solid fa-eye"></i></button>`+
-      (c.auth_user_id?`<button class="btn btn-sm" title="Reset this customer's password" onclick="cpaSetPasswordModal(${c.id},true)">Reset</button>`:`<button class="btn btn-sm btn-primary" title="Create a portal login" onclick="cpaSetPasswordModal(${c.id},false)">Login</button>`)+
       `</span>`];
   });
   const cnt=$('cpaCustCount');if(cnt)cnt.textContent=list.length+' of '+customers.length;
@@ -18631,7 +18654,7 @@ window.cpaCustomerModal=function(id){
   openModal(`<div class="modal-head"><h3>${c?'Edit customer':'New customer'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
     <div class="modal-body frm"><label>Full name</label><input id="cpaCName" value="${c?esc(c.full_name):''}">
     <label>Email</label><input id="cpaCEmail" value="${c?esc(c.email):''}" ${c&&c.auth_user_id?'disabled':''}>
-    ${c&&c.auth_user_id?'<div style="font-size:12px;color:var(--slate);margin-top:-8px">Email is locked once a login has been created.</div>':''}
+    ${c&&c.auth_user_id?'<div style="font-size:12px;color:var(--slate);margin-top:-8px">Email is locked once the customer has signed in.</div>':''}
     <label>Phone</label><input id="cpaCPhone" value="${c?esc(c.phone||''):''}"></div>
     <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="cpaCustomerSave(${c?c.id:'null'})">Save</button></div>`);
 };
@@ -18646,38 +18669,6 @@ window.cpaCustomerSave=async function(id){
   }
   if(error){toast('Save failed: '+error.message,'err');return;}
   closeModal();toast('Customer saved','ok');route();
-};
-// No customer self-signup and no emailed reset link, by design — staff set the password directly
-// (typed or generated here) and hand it to the customer themselves. See customer-invite/index.ts.
-function cpaGenPassword(){
-  const chars='ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-  let out='';for(let i=0;i<10;i++)out+=chars[Math.floor(Math.random()*chars.length)];
-  return out;
-}
-window.cpaSetPasswordModal=function(id,isReset){
-  const c=(CPA.customers||[]).find(x=>x.id===id);
-  const pw=cpaGenPassword();
-  openModal(`<div class="modal-head"><h3>${isReset?'Reset password':'Create login'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
-    <div class="modal-body frm">
-    <p style="font-size:13px;color:var(--slate);margin:0 0 6px">${isReset?'This replaces the current password for':'Sets the initial login password for'} <b>${esc((c&&c.email)||'')}</b>. Share it with them directly — there is no email link.</p>
-    <label>Password</label>
-    <div style="display:flex;gap:8px"><input id="cpaSetPw" value="${esc(pw)}" style="flex:1"><button type="button" class="btn" onclick="$('cpaSetPw').value=cpaGenPassword()">Generate</button></div>
-    </div>
-    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="cpaSetPwBtn" onclick="cpaSetPasswordSave(${id})">${isReset?'Reset password':'Create login'}</button></div>`);
-};
-window.cpaSetPasswordSave=async function(id){
-  const password=$('cpaSetPw').value;
-  if(!password||password.length<6){toast('Password must be at least 6 characters','err');return;}
-  const btn=$('cpaSetPwBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';
-  try{
-    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
-    const res=await fetch(SUPABASE_URL+'/functions/v1/customer-invite',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({customerId:id,password})});
-    const out=await res.json().catch(()=>({}));
-    if(!res.ok||out.error){toast('Could not save password: '+(out.error||res.status),'err');btn.disabled=false;btn.innerHTML='Save';return;}
-    closeModal();
-    toast('Password set for '+(out.email||'this customer')+' — share it with them directly','ok');
-    route();
-  }catch(e){toast('Could not save password: '+e.message,'err');btn.disabled=false;btn.innerHTML='Save';}
 };
 
 /* ---------- Tab 3: Farvision Import ---------- */
