@@ -18798,6 +18798,8 @@ function cpaCustList(){
    signed in is left out unless staff tick them back in. Sent in small batches so one slow reply from
    Gmail cannot time the whole run out, and each email is recorded in cust.portal_invites. */
 const CPA_INVITE_HELP_KEY='cpa_invite_help';
+// Completes "If you have any trouble signing in, …" in the invitation (staff can change it per send).
+const CPA_INVITE_HELP_DEFAULT='please contact your relationship manager at 84205 41541 or customercare1@thejaingroup.com';
 function cpaInvitePlan(resend,includeSignedIn){
   const {list,byCustomer}=cpaCustFiltered();
   const send=[],skip={off:[],invited:[],signed:[]};
@@ -18821,15 +18823,16 @@ function cpaInviteScope(){
 }
 window.cpaInviteModal=function(){
   let help='';try{help=localStorage.getItem(CPA_INVITE_HELP_KEY)||'';}catch(e){}
+  if(!help)help=CPA_INVITE_HELP_DEFAULT;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-paper-plane"></i> Send portal invitation</h3><span class="x" onclick="closeModal()">&times;</span></div>
     <div class="modal-body frm" id="cpaInvBody">
       <div style="font-size:13px;color:var(--slate);margin:-4px 0 10px">Customers shown: <b style="color:var(--ink)">${esc(cpaInviteScope())}</b>. Change the filters on the Customers list to pick a different group.</div>
       <div id="cpaInvSummary"></div>
       <label style="display:flex;gap:8px;align-items:center;font-weight:500;margin-top:10px"><input type="checkbox" id="cpaInvResend" onchange="cpaInviteRefresh()" style="width:auto"> Also send to customers invited before</label>
       <label style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="cpaInvSigned" onchange="cpaInviteRefresh()" style="width:auto"> Also send to customers who have already signed in</label>
-      <label style="margin-top:12px">"If you have any trouble signing in, …" (optional)</label>
-      <input id="cpaInvHelp" maxlength="200" value="${esc(help)}" placeholder="simply reply to this email">
-      <div style="font-size:12px;color:var(--slate);margin-top:-6px">Leave empty to say "simply reply to this email". Example: call us on 98xxxxxxxx (10am–6pm).</div>
+      <label style="margin-top:12px">"If you have any trouble signing in, …"</label>
+      <input id="cpaInvHelp" maxlength="200" value="${esc(help)}" placeholder="${esc(CPA_INVITE_HELP_DEFAULT)}">
+      <div style="font-size:12px;color:var(--slate);margin-top:-6px">Finishes that sentence in the email. Leave empty to use: ${esc(CPA_INVITE_HELP_DEFAULT)}.</div>
       <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#f8fafc;font-size:13px;line-height:1.55">
         <div><b>From:</b> Jain Group Customer Care &lt;customercare1@thejaingroup.com&gt;</div>
         <div><b>Subject:</b> Your Dream Gurukul home is now online – Jain Group Customer Portal</div>
@@ -18866,7 +18869,7 @@ async function cpaInviteCall(body){
   return out;
 }
 function cpaInviteHelp(){
-  const v=$('cpaInvHelp').value.trim();
+  const v=$('cpaInvHelp').value.trim().replace(/[.\s]+$/,'')||CPA_INVITE_HELP_DEFAULT;
   try{localStorage.setItem(CPA_INVITE_HELP_KEY,v);}catch(e){}
   return v;
 }
