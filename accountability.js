@@ -10312,6 +10312,12 @@
   let MTG_LAST={};
   // Completed occurrences still owing a transcript — see the note where it's loaded.
   let MTG_OWED=[];
+  // Completed one-time meetings (their acc.meetings row is deleted the moment they're logged, so
+  // this is the only place left that still knows they happened) — shown directly on the Meetings
+  // page now instead of being reachable only from the separate Archive tab. attendee_emails is
+  // stamped at log time from creator + acc.meeting_attendees (see acc.log_meeting_occurrence), so
+  // this already covers every invited person, not just whoever organized it.
+  let MTG_COMPLETED=[];
   // Attendees from outside the company directory (msWidget's picker only ever lists directory
   // people) — typed in by email rather than picked, reset each time the Schedule/Edit modal opens.
   let MTG_EXTRA=[];
@@ -10552,6 +10558,16 @@
         .order('occurrence_date',{ascending:false}).limit(50);
       MTG_OWED=ow||[];
     }catch(e){ MTG_OWED=[]; }
+    // Completed one-time meetings this person was invited to (organizer or attendee) — mirrors
+    // the query archiveTab() already uses, just surfaced here too. Recurring meetings don't need
+    // this: their history lives under their own still-existing card via mtgDetailPage.
+    try{
+      const {data:cl}=await ACC().from('meeting_logs').select('*')
+        .eq('recur_type','none')
+        .contains('attendee_emails',[my])
+        .order('occurrence_date',{ascending:false}).limit(20);
+      MTG_COMPLETED=cl||[];
+    }catch(e){ MTG_COMPLETED=[]; }
     MTG_PPL=await people();
     return {list,attMap};
   }
@@ -11678,6 +11694,21 @@
       +(n>6?('<div class="mtg-owed-more">and '+(n-6)+' more — see Archive</div>'):'')
       +'</div>';
   }
+  // Same "Completed meetings" list archiveTab() shows, repeated here so a one-time meeting's own
+  // invitees can find it without knowing Archive exists — its acc.meetings row (and so its card
+  // above) is gone the moment it's held, so this is the only trace of it left on this page.
+  function mtgCompletedHtml(){
+    const list=MTG_COMPLETED||[];
+    if(!list.length) return '';
+    return '<div class="mtg-sec-label">Completed meetings</div>'
+      +list.map(function(l){
+        return '<div class="mtg-log-row" onclick="navTo(\'tasks/meetings/log/'+l.id+'\')">'
+          +'<div><div class="mtg-log-title">'+esc2(l.title)+'</div><div class="mtg-log-meta">'+esc2(fmtDateY(l.occurrence_date))+' · '+esc2(mtgLogTimeLabel(l))+'</div></div>'
+          +mtgAttendanceBadgeHtml(l)
+          +'</div>';
+      }).join('')
+      +'<div class="mtg-owed-more" style="cursor:pointer" onclick="navTo(\'tasks/archive\')">See all in Archive</div>';
+  }
   function mtgRenderOnly(){
     try{ mtgStartBrowserTranscriber(); }catch(e){}
     const b=$('acBody'); if(!b)return;
@@ -11703,7 +11734,7 @@
       +mtgBanner
       +mtgOwedHtml()
       +mtgGroupTabsHtml()
-      +'<div class="mtg-body">'+body+'</div>'
+      +'<div class="mtg-body">'+body+mtgCompletedHtml()+'</div>'
       +'</div></div>';
   }
 
