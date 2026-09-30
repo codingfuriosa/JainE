@@ -18,82 +18,107 @@
 
 import { QA_RUBRIC } from "../_shared/qa-rubric.ts";
 
+export const QA_RULES_EFFECTIVE_FROM = "2026-09-23 00:00 IST";
+
 export const CATALOGUE = `APPROVED PROJECT INFORMATION (Jain Group). This is the reference for
 judging whether what the agent said was correct. Do not treat anything absent from this list as
 false - treat it as unverifiable. Synced against the sales team's own Reckoner spreadsheet
-(2026-09-17) - where this disagrees with an older figure you may recall, THIS is current.
+(2026-09-23) - where this disagrees with an older figure you may recall, THIS is current.
 Every price is the "onwards" figure and excludes GST, registration and parking unless stated.
 Carpet area runs roughly 25-30% below the super built-up areas given here.
 
 - Dream Ananta - the project customers hear pitched as "the new project near the Airport".
-  UNDER CONSTRUCTION. launching 2026, Doltala, Old Jessore Rd, Madhyamgram / near the Airport; landmark Fortune
-  City / Julien Day School. Base rate 5,950/sft.
+  UNDER CONSTRUCTION (soft launch, 2026), Doltala, Old Jessore Rd, Madhyamgram / near the Airport,
+  on a road-facing plot; landmark Fortune City / Julien Day School. 
   2BHK 62 lakh (940-1015 sqft) - 3BHK 68 lakh (1075-1405 sqft) - 4BHK 1.14 crore (1780-1805 sqft).
-  Parking: covered 5 lakh, open 4 lakh. About 5.5 acres, 296 flats, G+8.
-  Possession date and RERA number are not yet announced - "not yet announced" is the correct
-  answer regardless of any rough internal estimate a caller may have heard.
+  Each price is inclusive of GST and EDC, excluding car parking. Parking: covered/basement 5 lakh,
+  open 4 lakh. About 5.5 acres, 296 flats, G+8; room sizes run roughly 12x13 ft.
+  the sheet references a soft-launch discount - treat a specific discount
+  figure an agent quotes as unverifiable unless the CRM record for that date confirms it.
+  Possession: an estimated ~5 years from launch is the correct rough answer. No fixed possession
+  date or RERA number is announced yet - a specific date beyond that rough estimate is not correct
+  to quote, regardless of any internal estimate a caller may have heard.
 - Dream Gurukul - a SEPARATE project from Dream Ananta, on the same Doltala / Madhyamgram side near
   the Airport (Jessore Road, Doltala Crossing, near Julien Day School, about 10 minutes from the
   Airport). Do not treat the two as one - but see the PROJECT-SPECIFIC RULE on redirecting a lead
-  from one to the other. UNDER CONSTRUCTION, possession 2028 (October). 5 acres, 6 towers, G+7,
-  450+ flats. 2BHK 58 lakh onwards (860-875 sqft) - 3BHK 82-85 lakh (1225-1290 sqft).
-  Parking: covered 5 lakh, open 4 lakh.
+  from one to the other. UNDER CONSTRUCTION, possession 2028 (October). 5 acres,  G+7 total towers,
+  450+ flats. 
+  2BHK 58 lakh onwards (860-975 sqft), including  car parking.
+  3BHK 82-85 lakh onwards (1225-1290 sqft, price depends on optional features), including 
+  covered parking and GST,Excluding PLC, FRC, EDC . 
+  Parking: covered 5 lakh, open 4 lakh. A floor preference charge of 50/sft applies from the 2nd
+  floor onwards.
 - Dream Diamond - UNDER CONSTRUCTION, handover 2027 (first 36 of 100 bungalows). G+1, row house,
-  3 bed and 3 bath, GST applicable. Nepalgunge Rd, Daulatpur, Pailan; landmark near Joka Metro.
-  2006 sqft on 1.25 kattha 79 lakh - 2033 sqft on 1.30 kattha 82 lakh.
+  3 bed and 3 bath, GST applicable. Nepalgunge Rd, Daulatpur (Kailati), Pailan - PIN 700104, near
+  Pailan World School, about 5-10 minutes from Joka Metro; a resident shuttle from Joka Metro is
+  offered.
+  2006 sqft on 1.25 kattha 79 lakh onwards - 2033 sqft on 1.30 kattha 82 lakh onwards.
+  A ready-to-move option also exists - only 2 bungalows, handover within about 1 month; treat
+  "ready now" beyond those 2 units as incorrect.
   RERA WBRERA/P/SOU/2023/00729. Possession mid-2027.
-- Dream World City - READY TO MOVE (2018 launch, completion certificate in hand). Nepalgunge Rd,
-  Daulatpur, Pailan, about 5 minutes from Joka Metro. 1BHK 25 lakh (560-575 sqft) - 2BHK 29 lakh
-  (630-800 sqft) - 3BHK 36 lakh onwards (795-1390 sqft, price scales up with size within that
-  range - a larger 3BHK in this project costing well above 36 lakh is not itself an error).
-  Parking: open 2.75 lakh, covered 3.50 lakh. 20 acres, 450 flats, 6 towers, G+9, over 70% open
-  space.
-- Dream Valley - READY TO MOVE. Hill Cart Road, near Dagapur Tea Estate, Siliguri. PRIMARILY 3BHK -
-  there is no 1BHK or 2BHK here, and an agent offering either has given wrong product information.
-  A single 4BHK unit now also exists (1860 sqft, 2nd floor) - offering it is no longer an error,
-  though it should be described as the one remaining unit, not as a regular configuration.
-  3BHK 74-85 lakh (1540-1645 sqft) - 4BHK 86 lakh onwards (1860 sqft). Base rate 4,150/sft.
-  Parking: open 4.5 lakh, covered 6-6.5 lakh. 3.5 acres, 264 flats, 4 towers, G+10.
-- Dream Eco City - READY TO MOVE. Muchipara, Bamunara, Durgapur, beside NH-2; landmark Kalpana Inn.
-  2BHK 36-39 lakh (880 sqft) - 2.5BHK (a 2BHK with an added study room) 41-43 lakh (1045 sqft) -
-  3BHK 54 lakh onwards (1285 sqft). Base rate 3,495/sft. Parking: open 4.5 lakh.
-  22 bighas, 200 flats, 3 towers, G+11 (only 17 units remain).
-- Dream Exotica - READY TO MOVE. Madhyamgram (Badu Road, near Madhyamgram Chowrasta, beside the
-  West Bengal Electricity power house). Base rate 3,900/sft.
-  1BHK studio 16 lakh (one open kitchen and toilet, no car parking, 380 sqft) - 2BHK 45 lakh
-  (1015 sqft, only one such unit remains) - 3BHK 55-61 lakh (1235-1400 sqft).
-  2 acres, 154 flats, 7 towers, G+4.
+- Dream World City - READY TO MOVE (2018 launch, completion certificate in hand; families already
+  living there). Nepalgunge Rd, Daulatpur (Kaitala), Pailan - PIN 700104, about 5 minutes(3.5km) from Joka
+  Metro, near Pailan World School. 
+  1BHK 25 lakh onwards (560-575 sqft) - 2BHK 29 lakh onwards (630-800 sqft) - 3BHK 36 lakh onwards
+  (795-1390 sqft, price scales up with size within that range).
+  Parking: open 2.75 lakh, covered 3.50 lakh.  20 acres, 450 flats, 6 towers,
+  G+9, over 70% open space.
+  The sheet also references a free open-parking / spot-booking promotion (not for 1BHK) - this is a
+  time-limited offer, not a standing catalogue fact. Treat an agent's mention of it as unverifiable
+  unless the CRM record for that date confirms the offer was live; never score it as a confirmed
+  permanent benefit either way.
+- Dream Valley - READY TO MOVE. Hill Cart Road, Dagapur, beside Viramma Resort and Savin Kingdom,
+  about 1.5 km from Darjeeling More, Siliguri. PRIMARILY 3BHK  and
+  an agent offering either has given wrong product information. A single 4BHK unit now also exists
+  (1860 sqft, 2nd floor).
+  3BHK 74-85 lakh (1540-1645 sqft) - 4BHK 86 lakh onwards (1860 sqft) only on 2nd floor.
+  Parking: open 4.5 lakh, covered 6-6.5 lakh. FRC, floor-rising and PLC charges may also apply -
+  confirm the specific unit's charges before a final quotation.
+  Only about 20 units are currently reported available.
+- Dream Eco City - READY TO MOVE. Muchipara, Bamunara, Durgapur - PIN 713212, beside NH-2; landmark
+  Kalpana Inn. 2BHK 36-39 lakh (880 sqft) - 2.5BHK (a 2BHK with an added study room) 41-43 lakh
+  (1045 sqft) - 3BHK 54 lakh onwards (1285 sqft).  Parking: open 4.5 lakh. FRC, floor-rising and PLC
+  charges may also apply - confirm before a final quotation.
+   200 flats, 3 towers, G+11.
+- Dream Exotica - READY TO MOVE. Madhyamgram (Badu Road, near Madhyamgram Chowmatha, beside the
+  West Bengal Electricity power house).
+  1RK 16 lakh (one open kitchen and toilet, no car parking, 380 sqft) - 2BHK with terrace
+  45 lakh (1015 sqft, only one such unit remains) - 3BHK 55-61 lakh (1235-1400 sqft), Including of
+  car parking.
+  Booking amount 1 lakh token. 2 acres, 154 flats, 7 towers, G+4.
 - Dream One - READY TO MOVE. Kadampukur-Jhalgachhi Rd, Patharghata, New Town / Rajarhat, beside the
-  Westin and opposite Eco Park Gate 1. Base rate 11,000/sft.
+  Westin and opposite Eco Park Gate 1. 
   2BHK 1.16-1.25 crore (945-1010 sqft) - 3BHK (ready to move) 2.02-2.55 crore (1650-2045 sqft) -
-  3BHK Pent House 3770 sqft from 4.72 crore (a second, 2395 sqft pent-house variant also exists
-  with no separately confirmed price - treat that unit's own price as unverifiable, not as
-  whatever the 3770 sqft figure works out to per sqft).
+  3BHK Pent House 3770 sqft from 4.72 crore (unit price + EDC + open parking; 4  bhk about 2.89 crore + 50 lakh interior = 3.40 crore onwards "with interior  , 
+  including of all", may apply to a different configuration - confirm which unit before quoting it).
   Only 13 of 213 flats remain. Parking: open 7.25 lakh (no covered figure currently quoted -
   treat a covered-parking price for this project as unverifiable rather than assumed absent).
+  Booking: 2 lakh token, then 20% of the final cost-sheet price.
   3.2 acres, 4 towers (three G+14, one G+7 - note the G+7 tower carries 3BHK only, on its 1st and
   2nd floors).
 - Dream Residency Manor - a live project in its own right, separate from every project above.
   READY TO MOVE. Rajarhat, on Salwa Bazar Main Road (211 bus route). Base rate 4,900/sft.
-  Only one unit remains, a 2BHK, 1115 sqft, 63 lakh onwards inclusive of open parking, on the 6th
-  (top) floor. The project's 4BHK configuration is SOLD OUT - an agent offering one has given
-  wrong product information. 1 acre, 8 towers, G+6, 173 flats total.
+  Only one unit remains, a 2BHK, 1115 sqft, South-West facing, 63 lakh onwards inclusive of open
+  parking, on the 6th (top) floor - the sheet separately also lists open parking at 5.25 lakh, so
+  confirm the current cost sheet before quoting a final price. The project's 4BHK configuration is
+  SOLD OUT - an agent offering one has given wrong product information. Booking amount 1 lakh.
+  1 acre, 8 towers, G+6, 173 flats total.
 - Dream Palazzo - a live project in its own right, separate from every project above. On 100
-  katha of land in Rajarhat, Narayanpur, near Koikhali (opposite Sidha Town). READY TO MOVE. Base
-  rate 3,900/sft. Almost entirely SOLD OUT: only one unit remains, a 3BHK, 1385 sqft, 75 lakh all
-  inclusive, on the 1st floor. Its 2BHK configuration is SOLD OUT entirely - an agent offering one
-  has given wrong product information. 10 towers, G+6.
+  katha of land in Rajarhat, Narayanpur, near Koikhali (opposite Siddha Town), about 10 minutes
+  from the airport. READY TO MOVE, marked SOLD OUT overall in the sheet. Base rate 3,800/sft.
+  Almost entirely SOLD OUT: only one unit remains, a 3BHK, 1836 sqft, 76 lakh all inclusive, on the
+  1st floor - because the project is marked sold out overall, confirm live availability before
+  promising this unit. Its 2BHK configuration is SOLD OUT entirely - an agent offering one has
+  given wrong product information. Booking amount 1 lakh. 10 towers, G+6.
 - Ecocity Bungalows - a live project in its own right, and NOT another name for Dream Diamond or for
-  Dream Eco City. UNDER CONSTRUCTION, handover 2028. Row-house bungalows, G+1, 3BHK duplex, 3
-  toilets, 2 attached private gardens each. STANDARD tier: 1.5 kattha land, 2210 sqft usable
-  (1452 sqft built-up), 85.62 lakh all inclusive (no private swimming pool). A separate PREMIUM
-  tier also exists (3.5 cottah land) with no confirmed price - treat that tier's price as
-  unverifiable. 92 bungalows total across 13 blocks, on 1.33 acres (standard) plus premium plots.
-- Durbaar Banquets - a banquet venue, not a residential project. Run by Jain Group inside the
-  Holiday Inn Kolkata Airport, Bishwa Bangla Sarani, near City Center 2, New Town. A 12,000 sqft
-  pillar-less banquet hall and a 10,000 sqft lawn, 137 hotel rooms, 200+ car parks with valet,
-  outdoor catering permitted. Exact pricing is never quoted on a call - it is settled at the venue.`;
-
+  Dream Eco City. UNDER CONSTRUCTION, handover 2028. Row-house bungalows, G+1, 3BHK duplex, 2
+  private gardens each, extra ceiling height, roof interface. STANDARD tier: 1.5 kattha land, 2210
+  sqft usable (1452 sqft built-up, about 136 sqft of that is parking), 85.62 lakh all inclusive (no
+  personal swimming pool). A separate PREMIUM tier also exists (3.5 cottah land, 3BHK duplex) with
+  no confirmed price - treat that tier's price as unverifiable. The sheet also references 3 further
+  fully private bungalows with no separate specification given - treat any claim about that tier as
+  unverifiable too. 92 bungalows total across 13 blocks, on 1.33 acres (standard) plus premium
+  plots.`;
 /* The short forms the sales floor actually speaks. The unambiguous ones are already written out in
    the transcript before it reaches here; these four are not, because each is also an ordinary word
    and rewriting them would have corrupted the transcript. So they are resolved HERE, by a reader
@@ -167,7 +192,7 @@ words instead of forcing it into one that does not fit.`;
    contract in strict JSON Schema, and this contract is nullable unions and a `null` member inside an
    enum - expressible only by relaxing it, which trades a real guarantee for a nominal one. The same
    was true of Gemini's responseSchema, so the arrangement here is unchanged by the vendor move.
-   The guarantee therefore lives in qaPhase(), which refuses any reply missing one of the five
+   The guarantee therefore lives in qaPhase(), which refuses any reply missing one of the six
    assessments and retries it. Nothing half-formed is ever saved: that is the same rule the
    transcriber follows, and it is why a weaker guarantee here is not a weaker result. `json_object`
    still removes the failure this pipeline actually sees - prose or a code fence around the JSON.
@@ -219,6 +244,12 @@ Every key below must be present on every reply. Where you have nothing to say, u
     "evidence": "the line from the transcript that settles it, or null",
     "reason": "why this verdict"
   },
+  "retention_effort": {
+    "status": "Pass" | "Partial" | "Fail" | "Not Applicable",
+    "score": 0-100, or null when status is "Not Applicable",
+    "evidence": "the line(s) from the transcript that show what the agent did or did not try, or null",
+    "reason": "why this verdict"
+  },
   "remarks_accuracy": {
     "status": "Accurate" | "Partially Accurate" | "Inaccurate" | "Not Verifiable",
     "score": 0-100, or null when status is "Not Verifiable",
@@ -246,26 +277,39 @@ Every key below must be present on every reply. Where you have nothing to say, u
                                  what it means for this call, or null when there is no earlier one",
     "ai_assessed_status": "Lost" | "Qualified" | "In Follow Up" | "Unclear",
     "visit_pending": true | false - a question about THIS CALL'S OWN FACTS, answered independently of
-                     whatever you wrote for ai_assessed_status on this same call: does the lead
-                     qualify (the four gates are met, or the customer wants to buy or has shown
-                     interest in visiting) or was ALREADY qualified on an earlier call (see LEAD
-                     HISTORY), AND is the site visit itself the one thing still not done - not
-                     firmly fixed, postponed, rescheduled, or the customer just has not gotten to it
-                     yet? Answer true whenever that describes the lead, EVEN IF you wrote "In Follow
-                     Up" for ai_assessed_status on this call rather than "Qualified" - the two fields
-                     are not the same question, and this one is read by the pipeline against the
-                     EFFECTIVE status (yours, or the ratchet's, whichever ends up higher) precisely so
-                     it still applies when a previously-qualified lead's visit gets pushed again and
-                     you call this particular call "In Follow Up" yourself.
-                     Answer false whenever the lead has NOT actually qualified - genuinely undecided,
+                     whatever you wrote for ai_assessed_status on this same call. TWO THINGS must both
+                     be true for this to be true:
+                     (1) the lead qualifies - the four gates are met, or the customer wants to buy or
+                     has directly shown interest in visiting - or it was ALREADY qualified on an
+                     earlier call (see LEAD HISTORY); AND
+                     (2) a site visit is actually PART OF THE PICTURE and still not done: the customer
+                     (on this call, an earlier call, or in the CRM's own record) agreed to one, asked
+                     for one, or an already-arranged one got postponed, rescheduled or is still being
+                     waited on.
+                     Answer true whenever both hold, EVEN IF you wrote "In Follow Up" for
+                     ai_assessed_status on this call rather than "Qualified" - the two fields are not
+                     the same question, and this one is read by the pipeline against the EFFECTIVE
+                     status (yours, or the ratchet's, whichever ends up higher) precisely so it still
+                     applies when a previously-qualified lead's visit gets pushed again and you call
+                     this particular call "In Follow Up" yourself.
+                     Answer false when the four gates are met (or the lead already qualified) but a
+                     site visit is NOT part of the picture at all - never offered, never agreed to,
+                     never requested, nothing about one in the LEAD HISTORY either. That is a plain
+                     "Qualified", not "Qualified (Visit Pending)": a visit that was never raised is not
+                     something "pending". Do not set this true merely because the call happened to end
+                     without a date, or because a visit "hasn't come up yet" in the abstract - there
+                     has to be an actual visit-related signal in the record, not just its absence.
+                     Also answer false whenever the lead has NOT actually qualified - genuinely undecided,
                      budget or project still unfixed, no interest in visiting shown at all. A customer
                      who says "I don't know if I'll buy, budget isn't fixed, project isn't decided" is
                      In Follow Up on the merits and visit_pending is false; do not set it true just
                      because a visit has not come up, when nothing else qualifies the lead either.
                      This is read by the pipeline, not just for show: a CRM status of "In Follow Up"
                      against an effective "Qualified" verdict is not counted as a mismatch when this
-                     is true, because "In Follow Up" is a fair label for a lead that qualifies but has
-                     not yet visited - see the rule below.
+                     is true AND the lead was already qualified on an earlier call (see LEAD HISTORY) -
+                     "In Follow Up" is a fair label for a lead that qualifies but has not yet visited,
+                     provided it has qualified before. The first call that qualifies a lead is still a
+                     mismatch even with visit_pending true - see the rule below.
     "score": 0-100, or null when ai_assessed_status is "Unclear",
     "status_match": true | false | null,
     "mismatch_type": "lost_should_not_have_been_lost" | "qualified_should_not_have_been_qualified"
@@ -281,6 +325,12 @@ Every key below must be present on every reply. Where you have nothing to say, u
         should when the call is not clear-cut. Omit entirely (empty array) only for a call too short
         to establish anything.
     ]
+  },
+  "personal_mobile_requested": {
+    "status": "Yes" | "No",
+    "number_shared": "the number exactly as the customer stated it, or null - null whenever status is No, and also null when Yes but the customer was asked and did not actually give one",
+    "evidence": "the line where this happened, or null when status is No",
+    "reason": "why this verdict"
   },
   "summary_verdict": "several sentences"
 }`;
@@ -397,7 +447,29 @@ Also give "score", 0-100: 100 when the CRM's lost_reason is exactly the reason t
 scaling down for a reason that is only partly right. Null whenever status is "Not Verifiable" -
 including every follow-up that is not marked Lost, since the question does not apply there.
 
-### 4. REMARKS ACCURACY
+### 4. RETENTION EFFORT (LOST LEADS ONLY)
+Only meaningful when the CRM status for this follow-up is Lost. If it is not Lost, return
+"Not Applicable" with a one-line reason saying so, and leave "evidence" null.
+Where the status is Lost: did the agent make a genuine attempt to keep the lead before accepting the
+loss - probing the actual objection, offering an alternative (a different configuration, budget,
+location or project), addressing a concern the customer raised, or asking them to reconsider - rather
+than accepting the first "not interested" and moving straight on?
+- Pass     - the agent made a real attempt: asked why, engaged with the actual objection raised, or
+             offered something concrete before letting the lead go.
+- Partial  - a token gesture only ("are you sure?", one line with no follow-through) that never
+             engages with the actual objection.
+- Fail     - the agent accepted the loss with no attempt at all, or ended the call as soon as the
+             customer hesitated.
+- Not Applicable - the CRM status is not Lost; or the customer ended the call before the agent had any
+             opening to try (hung up mid-sentence, call cut); or the loss was already decided on an
+             earlier call with nothing left to attempt on this one.
+Do not penalise an agent for accepting a genuinely firm, final refusal ("do not call me again" or
+equivalent) - Pass still requires an actual objection to engage with, not manufacturing a debate the
+customer has already closed.
+Also give "score", 0-100, scaling with how substantive the retention attempt was. Null only when
+status is "Not Applicable".
+
+### 5. REMARKS ACCURACY
 Do the CRM's remarks represent what actually happened on the call?
 The remarks are shorthand typed by a salesperson - "no req", "received then cut the call". They do
 NOT need to be word-for-word anything. Judge whether the meaning is right, over: the customer's
@@ -414,11 +486,11 @@ happened, not a restatement of "status" in digits - Accurate is not automaticall
 Accurate is not automatically 50, score what the remarks actually get right and leave out. Null only
 when status is "Not Verifiable".
 
-### 5. THE SIX-POINT AGENT AUDIT - DO THIS BEFORE YOU DECIDE THE STATUS
-This audit comes first on purpose, and section 6 depends on it. What the agent asked decides what
+### 6. THE SIX-POINT AGENT AUDIT - DO THIS BEFORE YOU DECIDE THE STATUS
+This audit comes first on purpose, and section 7 depends on it. What the agent asked decides what
 the call is even capable of establishing: an agent who never asked the budget cannot have
 established that the budget matches, and a status resting on a question nobody asked is a guess
-dressed up as a verdict. Work through all six points, then carry what you found into section 6.
+dressed up as a verdict. Work through all six points, then carry what you found into section 7.
 
 Return "agent_qa" as an array of six objects, each {"point","status","score","evidence","reason"},
 with "status" exactly "Pass", "Fail", "Partial" or "Not Applicable", and "evidence" quoting the
@@ -436,8 +508,8 @@ ${QA_RUBRIC}
 
 Use "Not Applicable" only where the call ended before the point could arise, and say so in "reason".
 
-### 6. STATUS ASSESSMENT - BUILT ON SECTION 5, NEVER DECIDED BEFORE IT
-Decide, from the whole conversation and from what section 5 established, what the status of this
+### 7. STATUS ASSESSMENT - BUILT ON SECTION 6, NEVER DECIDED BEFORE IT
+Decide, from the whole conversation and from what section 6 established, what the status of this
 lead SHOULD be, and compare it with what the CRM recorded.
 
 THE QUALIFICATION TEST - FOUR REQUIREMENT GATES.
@@ -452,7 +524,7 @@ four of these:
                 launching in 2026, and one happy to wait matches either.
 Fill in "qualification_check" with "Match", "Mismatch" or "Not Established" for each of the four,
 plus a one-line "note" on what settled it. "Not Established" is for a gate the call never reached -
-usually because the agent never asked, which section 5 will already have marked down under Script.
+usually because the agent never asked, which section 6 will already have marked down under Script.
 All four Match is Qualified. Any Mismatch fails the test. Gates left Not Established do not qualify
 a lead, but they do not disqualify it either - that call is In Follow Up or Unclear, not Lost.
 
@@ -582,17 +654,28 @@ Then set "mismatch_type" to EXACTLY one of these, or null:
                                                     the history says was already qualified and that
                                                     the agent has now logged back as In Follow Up.
                                                     That downgrade is a CRM error and belongs here.
-                                                    BY REQUIREMENT (2026-09-18), THIS EXCLUDES THE
-                                                    VISIT-PENDING CASE: a customer who has cleared the
-                                                    four gates (or already wants to buy) but simply
-                                                    cannot make the site visit work yet - busy,
-                                                    travelling, asks to be called after a date, sends
-                                                    someone else instead. Set "visit_pending": true on
-                                                    that call, and that combination is NOT this
+                                                    BY REQUIREMENT (2026-09-18, NARROWED 2026-09-21),
+                                                    THIS EXCLUDES THE VISIT-PENDING CASE ONLY WHEN THE
+                                                    LEAD WAS ALREADY QUALIFIED ON AN EARLIER CALL: a
+                                                    customer who has cleared the four gates (or already
+                                                    wants to buy) but simply cannot make the site visit
+                                                    work yet - busy, travelling, asks to be called after
+                                                    a date, sends someone else instead. Set
+                                                    "visit_pending": true on that call, and IF the LEAD
+                                                    HISTORY block below shows this lead was already
+                                                    qualified before today, that combination is NOT this
                                                     mismatch_type - it is not counted as a disagreement
                                                     at all (see status_match below). "In Follow Up" is
                                                     a fair working label for a lead that qualifies but
-                                                    has not yet visited, not a CRM error.
+                                                    has not yet visited, not a CRM error - PROVIDED the
+                                                    lead has qualified before. A lead being qualified for
+                                                    the FIRST time on THIS call, with the site visit the
+                                                    only open item, is still this mismatch_type: the CRM
+                                                    genuinely needs to be told this lead just qualified,
+                                                    not excused because a visit date is unsettled. Set
+                                                    "visit_pending": true either way (it describes the
+                                                    call, not the verdict) - the pipeline is what applies
+                                                    the prior-qualification gate deterministically.
                                                     THIS INCLUDES A LEAD ALREADY QUALIFIED ON AN
                                                     EARLIER CALL who, on THIS call, only reports the
                                                     same visit still postponed - "not this week, call
@@ -619,16 +702,35 @@ Then set "mismatch_type" to EXACTLY one of these, or null:
                                                     visit_pending is false there: nothing qualified this
                                                     lead in the first place, so there is no visit to be
                                                     "pending" on.
-- null                                              the two agree, the CRM status is one this scheme
-                                                    does not cover (Site Visited, OV, and similar),
-                                                    or your assessment is Unclear.
-"status_match" is true when your assessment agrees with the CRM, false when it does not, and null
-when your assessment is Unclear - an unclear call is not a disagreement.
+- null                                              the two agree, or the CRM status is one this
+                                                    scheme does not cover (Site Visited, OV, and
+                                                    similar).
+Leave "mismatch_type" null when your own ai_assessed_status is "Unclear" too - the pipeline derives
+its own category for that case (see below), so nothing you write here for an unclear call is read.
+"status_match" is true when your assessment agrees with the CRM, false when it does not. An Unclear
+assessment is NOT scored as null any more (by requirement, 2026-09-23): the pipeline treats it as its
+own mismatch, flagged for review rather than silently dropped from the count, regardless of what you
+write in "status_match" or "mismatch_type" for that call - both are re-derived deterministically from
+ai_assessed_status alone. Only the CRM-status-not-covered case above still gets a real null.
 
-### 7. VERDICT
+### 8. VERDICT
 "summary_verdict": several sentences - what the customer wanted, how the agent handled it, what was
 agreed, where the CRM's record differs from the call, and what should happen to this lead now. If the
 call was a few words long, say that plainly instead of padding it out.
+
+### 9. PERSONAL MOBILE NUMBER REQUESTED
+Did the agent ask the customer for a mobile number to reach them on that is ADDITIONAL to whatever the
+CRM already has on file for this lead - or ask to call/WhatsApp them on a different, personal line -
+rather than simply confirming or reading back the number already on record?
+- "Yes" - the agent asked for a number to reach the customer on, and that request is present on this
+          call, whether or not the customer actually gave one.
+- "No"  - no such request was made on this call.
+Confirming the existing CRM number back to the customer ("is this still the best number to reach you
+on, the one ending XXXX") is NOT a request for a personal number - only count a genuinely NEW number
+being asked for.
+If "Yes", put the number the customer actually stated in "number_shared", exactly as said (digits only,
+no spaces needed) - null if they were asked but did not give one, or the call ended before they could.
+Quote the line where this happened in "evidence" - null when status is "No".
 
 ${CATALOGUE}
 
@@ -750,6 +852,11 @@ CRM status for this follow-up: ${or(c.crm_status, "(none)")}${
 CRM remarks: ${or(c.crm_remarks)}
 CRM next_follow_up_date: ${or(c.next_follow_up_label ?? c.crm_next_follow_up, "(none set)")}
 CRM lost_reason for this follow-up: ${or(c.crm_lost_reason, "(none - this follow-up is not marked Lost)")}
+
+QA RULES EFFECTIVE DATE: ${QA_RULES_EFFECTIVE_FROM}
+Apply the revised catalogue and QA rules only to processing that begins on or after this date.
+Existing QA results and transcripts are historical records and must not be rewritten or reassessed by
+this prompt.
 
 WHEN THE CALL HAPPENED (all times are Indian Standard Time)
 Call started: ${or(c.call_started, "(not recorded)")}

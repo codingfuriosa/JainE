@@ -432,7 +432,19 @@
     .mtg-card{display:flex;align-items:stretch;gap:14px;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;transition:box-shadow .12s,border-color .12s}
     .mtg-card:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
     .mtg-bar{width:4px;border-radius:3px;flex:none}
-    .mtg-time{width:132px;flex:none;font-size:12.5px;color:#6b7280;font-weight:600;padding-top:2px;line-height:1.35}
+    .mtg-time{width:146px;flex:none;font-size:12.5px;color:#6b7280;font-weight:600;padding-top:1px;line-height:1.35}
+    .mtg-when{font-size:13px;font-weight:800;color:#334155}
+    .mtg-when.now{color:#16a34a}
+    .mtg-when.late{color:#b45309}
+    .mtg-clock{font-size:12px;font-weight:600;color:#6b7280;margin-top:2px}
+    .mtg-dur{font-size:11px;font-weight:600;color:#9ca3af;margin-top:1px}
+    .mtg-chips{display:flex;flex-wrap:wrap;gap:6px;margin:1px 0 5px}
+    .mtg-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#475569;background:#f1f5f9;border-radius:99px;padding:3px 9px;white-space:nowrap}
+    .mtg-chip.ok{background:#dcfce7;color:#15803d}
+    .mtg-chip.warn{background:#fef3c7;color:#b45309}
+    .mtg-chip.pend{background:#e0f2fe;color:#0369a1}
+    .mtg-chip.click{cursor:pointer}
+    .mtg-chip.click:hover{filter:brightness(.95)}
     .mtg-info{flex:1;min-width:0}
     .mtg-title{font-size:14px;font-weight:700;color:#1f2937;margin-bottom:4px}
     .mtg-recur-tag{font-size:10.5px;font-weight:600;color:#7c3aed;background:#f5f3ff;padding:2px 7px;border-radius:10px;margin-left:6px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
@@ -445,6 +457,15 @@
     .mtg-join:hover{filter:brightness(.94)}
     .mtg-join.disabled{border-color:#e5e7eb;background:#f8fafc;color:#9ca3af;cursor:not-allowed}
     .mtg-join.ghost{border-color:#e5e7eb;background:#fff;color:#475569;cursor:default}
+    .mtg-owed{margin:14px 16px 0;border:1px solid #fde68a;background:#fffbeb;border-radius:11px;padding:13px 15px}
+    .mtg-owed-h{font-size:13.5px;font-weight:800;color:#92400e;display:flex;align-items:center;gap:8px}
+    .mtg-owed-sub{font-size:12.5px;color:#a16207;line-height:1.5;margin:5px 0 10px}
+    .mtg-owed-row{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid #fde68a;border-radius:9px;padding:8px 11px;margin-bottom:6px}
+    .mtg-owed-t b{font-size:13px;color:#1f2937;display:block}
+    .mtg-owed-when{font-size:11.5px;color:#a16207}
+    .mtg-owed-more{font-size:12px;color:#a16207;margin-top:2px}
+    .mtg-join.alt{border-color:#cbd5e1;background:#fff;color:#334155}
+    .mtg-join.alt:hover{border-color:#94a3b8;background:#f8fafc;filter:none}
     .mtg-del{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;padding:0 8px;height:32px;border-radius:6px;margin-left:6px}
     .mtg-del:hover{color:#dc2626;background:#fef2f2}
     .mtg-static-hint{height:38px;display:flex;align-items:center;color:#94a3b8;font-size:13px;font-style:italic}
@@ -460,6 +481,14 @@
       .mtg-info{order:2}
       .mtg-title{font-size:13px;margin-bottom:1px}
       .mtg-meta{font-size:11px}
+      .mtg-when{font-size:12px;display:inline}
+      .mtg-clock{display:inline;margin:0 0 0 6px}
+      .mtg-dur{display:inline;margin:0 0 0 6px}
+      .mtg-chips{gap:4px;margin:2px 0 3px}
+      .mtg-chip{font-size:10.5px;padding:2px 7px;gap:4px}
+      .mtg-owed{margin:12px 14px 0;padding:11px 12px}
+      .mtg-owed-row{flex-direction:column;align-items:stretch;gap:7px}
+      .mtg-owed-row .mtg-join.alt{width:100%}
       .mtg-actions{order:3;width:100%;justify-content:flex-end;gap:0;margin-top:2px}
       .mtg-join{height:26px;padding:0 10px;font-size:11.5px}
       .mtg-del{height:26px;width:26px}
@@ -487,6 +516,35 @@
     .tp-sub-item.drag{opacity:.4}
     .ac-in{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13.5px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
     .ac-in:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    /* THE CHECK LIST PREVIEW IS THE DOCUMENT. An A4 sheet on the viewer's grey, typed into
+       directly - so what is corrected here is what the Word file contains. Sized in points
+       against a 96dpi screen (1pt = 1.333px) so the preview and the .docx agree on where things
+       sit rather than only roughly resembling each other. */
+    .wfd-page{width:794px;min-height:1123px;margin:0 auto;background:#fff;color:#121214;
+      padding:77px;box-sizing:border-box;font-family:Calibri,Segoe UI,Arial,sans-serif;
+      font-size:14px;line-height:1.55;box-shadow:0 2px 14px rgba(0,0,0,.35);outline:none}
+    .wfd-page p{margin:0 0 6px}
+    .wfd-page .wfd-h{font-weight:700;margin:16px 0 10px}
+    .wfd-page .wfd-right{text-align:right}
+    .wfd-page .wfd-gap{margin-bottom:18px}
+    .wfd-page .wfd-soft{color:#6b7280}
+    .wfd-page .wfd-small{font-size:11.5px}
+    .wfd-page table{width:100%;border-collapse:collapse;margin:0 0 8px}
+    .wfd-page td{vertical-align:bottom;padding:3px 6px 3px 0;border:0}
+    .wfd-page td.wfd-rule{border-bottom:1px solid #8c9096}
+    .wfd-page .wfd-cl td{padding-top:9px}
+    .wfd-page .wfd-sign{margin-top:26px}
+    .wfd-page .wfd-logo{margin:0 0 14px}
+    .wfd-page .wfd-logo img{width:146px;height:175px;display:block}
+    /* A caret has to be visible on a page somebody is meant to correct. */
+    .wfd-page:focus-within{box-shadow:0 2px 14px rgba(0,0,0,.35),0 0 0 2px var(--brand)}
+    /* THE TASKS SEARCH BAR IS OUTLINED BEFORE IT IS CLICKED. Every other box on the page is a
+       field you fill in, and they all share the same grey outline until focused - so the one
+       control that is there to FIND something looked identical to the ones that are there to
+       record something, and people scrolled past it. Carrying the brand colour from the start
+       makes it the first thing the eye lands on. Focus still adds the glow, so it is still
+       obvious which box the keyboard is in. */
+    #acTaskSearch{border-color:var(--brand)}
     textarea.ac-in{min-height:150px;resize:vertical}
     .ac-lbl{display:block;font-size:12.5px;font-weight:600;color:#334155;margin:12px 0 6px}
     .ac-msrow{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--line);border-radius:9px;padding:8px;max-height:150px;overflow:auto}
@@ -915,6 +973,7 @@
   VIEWS.tasks = async function(v, seg){
     injectCss();
     if (seg[0]==='task' && seg[1]) { ROUTE={tab:'task',taskId:Number(seg[1])}; return taskPage(v, seg[1], seg[2]==='ro'); }
+    if (seg[0]==='meetings' && seg[1]==='detail' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgDetailPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='logs' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogsPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='log' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='record' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgRecordPage(v, Number(seg[2])); }
@@ -924,19 +983,20 @@
     if (seg[0]==='workflow' && seg[1]==='edit' && seg[2]) { ROUTE={tab:'workflow',taskId:null}; return wfFormPage(v, Number(seg[2])); }
     if (seg[0]==='workflow' && seg[1]==='case' && seg[2]) { ROUTE={tab:'workflow',taskId:null}; return wfCaseRoute(v, Number(seg[2])); }
     if (seg[0]==='workflow' && seg[1]) { ROUTE={tab:'workflow',taskId:null}; return wfDetailPage(v, Number(seg[1]), null); }
+    // The Scoreboard is its own module now (Overview > Scoreboard). Anything still pointing at the
+    // old tab — a bookmark, a pasted link, a stale open tab — goes there rather than to a blank tab.
+    if (seg[0]==='scoreboard') { navTo('scoreboard'); return; }
     let tab = seg[0] || 'work'; if(tab==='home')tab='work';
     ROUTE={tab:tab,taskId:null};
     setCrumb(['Accountability', tab==='work'?'Tasks':(tab.charAt(0).toUpperCase()+tab.slice(1))]);
-    v.innerHTML = `<div class="page-head"><div><h1><i class="fa-solid fa-list-check" style="color:#1d4ed8"></i> Accountability</h1><p>Tasks, delegation & scoreboard</p></div></div>
+    v.innerHTML = `<div class="page-head"><div><h1><i class="fa-solid fa-list-check" style="color:#1d4ed8"></i> Accountability</h1><p>Tasks &amp; delegation</p></div></div>
     <div class="ac-tabs">
       <div class="ac-tab ${tab==='work'?'active':''}" onclick="navTo('tasks/work')"><i class="fa-solid fa-list-check"></i> Tasks</div>
       <div class="ac-tab ${tab==='calendar'?'active':''}" onclick="navTo('tasks/calendar')"><i class="fa-solid fa-calendar-days"></i> Calendar</div>
       <div class="ac-tab ${tab==='meetings'?'active':''}" onclick="navTo('tasks/meetings')"><i class="fa-solid fa-video"></i> Meetings</div>
       <div class="ac-tab ${tab==='workflow'?'active':''}" onclick="navTo('tasks/workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow</div>
       <div class="ac-tab ${tab==='archive'?'active':''}" onclick="navTo('tasks/archive')"><i class="fa-solid fa-box-archive"></i> Archive</div>
-      <div class="ac-tab ${tab==='scoreboard'?'active':''}" onclick="navTo('tasks/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div><div id="acBody"><div class="loader"><div class="spin"></div></div></div>`;
-    if (tab==='scoreboard') return scoreboardTab();
     if (tab==='meetings') return meetingsTab();
     if (tab==='calendar') return calendarTab();
     if (tab==='archive') return archiveTab();
@@ -984,22 +1044,85 @@
     return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon}${titleHtml}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
   }
   function summaryCard(title,icon,color,count,inner){ return `<div class="ac-card sm"><div class="hd"><i class="fa-solid ${icon}" style="color:${color}"></i> ${title}<span class="cnt">${count}</span></div><div class="bd" style="height:180px;max-height:180px;min-height:0">${inner}</div></div>`; }
+  /* WHAT YOU SEARCHED FOR COMES TO THE TOP.
+     Filtering alone was not enough. The rows keep their priority order, so a task that matched
+     stayed exactly where it sat - often three groups down, below a run of headings whose own
+     tasks had all just been hidden - and you still had to scroll the page hunting for the thing
+     you had just typed the name of. Now the matches are lifted to the top of whatever list they
+     belong to, groups with a match come before groups without, and groups with nothing left in
+     them step out of the way. Nothing is renumbered: this is purely how the page is laid out
+     while a search is running, and clearing the box puts every row back exactly where it was.
+     That is what ACC_SEARCH_MOVED is for - each container it touches keeps a copy of its own
+     original child order, which is replayed on the way out. */
+  let ACC_SEARCH_MOVED=[];
+  function accSearchSnapshot(el){
+    if(el._accOrigOrder) return;
+    el._accOrigOrder=Array.prototype.slice.call(el.children);
+    ACC_SEARCH_MOVED.push(el);
+  }
+  function accSearchRestoreOrder(){
+    ACC_SEARCH_MOVED.forEach(function(el){
+      if(!el._accOrigOrder) return;
+      // Re-appending in the remembered order puts them back; anything since removed is skipped.
+      el._accOrigOrder.forEach(function(c){ if(c.parentElement===el) el.appendChild(c); });
+      el._accOrigOrder=null;
+    });
+    ACC_SEARCH_MOVED=[];
+  }
+  function accSearchHasMatch(sec){
+    return Array.prototype.some.call(sec.querySelectorAll('.ac-row'), function(r){ return r.style.display!=='none'; });
+  }
+  function accSearchHoist(body){
+    // Matching rows to the head of their own list, keeping the order they had between themselves.
+    const byParent=new Map();
+    body.querySelectorAll('.ac-row').forEach(function(r){
+      if(r.style.display==='none') return;
+      const p=r.parentElement; if(!p) return;
+      if(!byParent.has(p)) byParent.set(p,[]);
+      byParent.get(p).push(r);
+    });
+    byParent.forEach(function(rows,p){
+      accSearchSnapshot(p);
+      rows.slice().reverse().forEach(function(r){ p.insertBefore(r,p.firstChild); });
+    });
+    // Then the groups themselves: the ones holding a match first, the empty ones out of sight.
+    body.querySelectorAll('.ac-grpbox').forEach(function(box){
+      accSearchSnapshot(box);
+      const secs=Array.prototype.slice.call(box.children).filter(function(c){
+        return c.classList && c.classList.contains('ac-secwrap'); });
+      secs.forEach(function(sec){ sec.style.display=accSearchHasMatch(sec)?'':'none'; });
+      secs.filter(accSearchHasMatch).reverse().forEach(function(sec){ box.insertBefore(sec,box.firstChild); });
+    });
+  }
+
   // Client-side title filter for every task row currently on screen (Tasks tab) — no re-fetch.
   window.accTaskSearch=function(val){
     const q=(val||'').trim().toLowerCase();
     const body=document.getElementById('acBody'); if(!body)return;
+    // Always work from the real order, so the result of the fifth keystroke is the same as it
+    // would have been had it been the first.
+    accSearchRestoreOrder();
     body.querySelectorAll('.ac-row').forEach(function(row){
       const el=row.querySelector('.ti .t');
-      const txt=el?el.textContent.toLowerCase():'';
+      // A workflow-step row's visible text is built purely from that instance's own field values
+      // (vendor, bill no., amount, ...) - the workflow's own name (e.g. "Challan Processing") and
+      // case number never appear in it at all, so searching "challan" found nothing even though
+      // every Challan bill was sitting right there. data-wf carries that name/number for matching
+      // without changing what the row actually displays.
+      const txt=(el?el.textContent.toLowerCase():'')+' '+(row.dataset.wf||'').toLowerCase();
       row.style.display=(!q||txt.includes(q))?'':'none';
     });
-    // While searching, hide the "Add task" dotted rows unless their group still has a visible task.
+    /* The "Add task" dotted rows go away for the duration of a search. They used to stay on if
+       their group still had a visible task, which was fine while the rows sat in their real
+       order - but each one means "put a new task BETWEEN these two", and once the matches have
+       been lifted to the top the two rows either side of a gap are no longer neighbours. Adding
+       there would have filed the new task at the wrong priority. */
     body.querySelectorAll('.ac-addrow-ghost, .ac-ins, .ac-addrow').forEach(function(g){
-      if(!q){ g.style.display=''; return; }
-      const parent=g.parentElement;
-      const hasVisible=parent && Array.prototype.some.call(parent.querySelectorAll('.ac-row'), function(r){ return r.style.display!=='none'; });
-      g.style.display=hasVisible?'':'none';
+      g.style.display=q?'none':'';
     });
+    window._accSearching=!!q;
+    if(q){ accSearchHoist(body); }
+    else { body.querySelectorAll('.ac-secwrap').forEach(function(s){ s.style.display=''; }); }
     // Logged directly, debounced to the settled query, rather than through USAGE_MAP - this fires
     // on every keystroke for instant filtering, and logging every keystroke turned one real search
     // into a burst of single/two-character fragments milliseconds apart (typing "182" logged "1",
@@ -2442,7 +2565,19 @@
     pageSize = pageSize || 1000;
     const out=[];
     for(let from=0;;from+=pageSize){
-      const {data,error}=await build().range(from, from+pageSize-1);
+      // A page can fail on a transient blip - a dropped connection, a momentary auth hiccup - and
+      // giving up on the first error used to return whatever had already loaded as if it were
+      // everything, with no error shown anywhere: a fully-progressed bill's tracker row rendered
+      // as the blank "not yet" dot over every step, because ONE page out of several silently
+      // failed to load. Three attempts with a short, growing pause give a blip a real chance to
+      // clear before this falls back to the old behaviour of just stopping where it is.
+      let data=null, error=null;
+      for(let attempt=0; attempt<3; attempt++){
+        const r=await build().range(from, from+pageSize-1);
+        data=r.data; error=r.error;
+        if(!error) break;
+        if(attempt<2) await new Promise(function(res){ setTimeout(res, 500*(attempt+1)); });
+      }
       if(error||!data) break;
       out.push.apply(out,data);
       if(data.length<pageSize) break;   // a short page is the last page
@@ -3416,6 +3551,15 @@
        itself needs no change here: the generic "already started" block below (data-first-received)
        already covers every workflow, this one included. */
     const wfPastStep1Locked=function(c){ return id===39 && (c&&c.current_step>1) && !(c&&c.returned_at); };
+    /* Reimbursement only: the case number of an existing claim of mine that is already in process
+       (past its first step, not Done/Cancelled, not sent back for correction) — mirrors the block
+       acc.wf_create_instance now enforces server-side (one open claim at a time), so "New
+       Reimbursement" reads as unavailable up front instead of only failing once the form is filled
+       in and submitted. */
+    const wfMyOpenReimbursement=id===39 ? (function(){
+      const c=cases.find(function(x){ return eq(x&&x.created_by, mySelf) && x.current_step>1 && !x.returned_at && x.status!=='Done' && x.status!=='Cancelled'; });
+      return c ? wfCaseNoText(c) : null;
+    })() : null;
     const wfBookingStarted=function(c){
       if(id!==41 || !c) return false;
       const firstSeqHere = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
@@ -3547,7 +3691,10 @@
       +'</span>'):'')
       +(canManageEdit?'<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>':'')
       +(canManage?'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>':'')
-      +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
+      +(canEvent?(wfMyOpenReimbursement
+          ? '<button class="ac-btn primary" disabled title="Your '+esc2(N.lc)+' #'+esc2(wfMyOpenReimbursement)+' is still in process — raise a new one only after that is Done"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>'
+          : '<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>'
+        ):'')
       +'</div>';
 
     // Reimbursement only, and only these two named accounts (Accounts' own lookup tool — not a
@@ -3909,7 +4056,7 @@
        the Administrator, Post Sales dept, or the named viewing exemption above get to see the
        buttons at all, regardless of who created the instance. */
     const auditBtn=(c.flow_id===41&&wfBookingCanView)
-      ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Download the Booking Form Check List"><i class="fa-solid fa-list-check"></i></button>'
+      ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Open the Booking Form Check List \u2014 editable, downloads as Word"><i class="fa-solid fa-list-check"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfWelcomeLetter('+c.id+')" title="Download the customer\'s Welcome Letter"><i class="fa-solid fa-envelope-open-text"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfAllotmentLetter('+c.id+')" title="Download the Allotment Letter"><i class="fa-solid fa-file-signature"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfAgreement('+c.id+')" title="Download the Agreement for Sale — a draft to be checked and completed, not a final deed"><i class="fa-solid fa-file-contract"></i></button>'
@@ -4157,6 +4304,252 @@
      PDF carrying a customer's Aadhaar and KYC that somebody is about to hand over or file. Every
      one of them now opens a preview of the finished PDF first - the file only reaches disk once a
      person has looked at it and presses Download themselves. */
+  /* ══════════════════════════════════════════════════════════════════════════════════════════
+     WORD DOCUMENTS, WRITTEN FROM WHAT IS ON THE SCREEN.
+
+     The check list used to be a PDF: typeset, exact, and impossible to correct. In practice a
+     sheet often needs a word changed before it is filed - a name spelt as the customer spells it,
+     a note added beside a failed check - and with a PDF the only way to do that was to go back to
+     the documents, fix them, and re-read. So the sheet is now a Word file, and the preview it is
+     downloaded from is itself editable: what you see, including anything you type into it, is
+     what the file contains.
+
+     IT IS A REAL .docx, not HTML saved under a .doc name. That trick is easier, but Word opens
+     such a file with "the file format and extension don't match" and a Protected View bar, which
+     is not a thing to hand somebody every time they file a booking. A .docx is a zip of a few XML
+     parts; the ones Word actually needs are written below.
+
+     The writer walks the preview's own DOM rather than a fixed model, so an edit that adds a
+     line, or makes something bold, survives into the document the same as a changed word does. */
+
+  async function loadJsZip(){
+    if(window.JSZip) return window.JSZip;
+    await new Promise(function(res,rej){
+      const sc=document.createElement('script');
+      sc.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+      sc.onload=res;
+      sc.onerror=function(){ rej(new Error('the Word library could not be loaded')); };
+      document.head.appendChild(sc);
+    });
+    if(!window.JSZip) throw new Error('the Word library loaded but was empty');
+    return window.JSZip;
+  }
+
+  const wfXml=function(t){ return String(t==null?'':t)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+
+  /* One run of text, carrying whatever the element it came from was wearing. Half-point sizes and
+     hex colours are what Word wants; 10.5pt is sz 21. */
+  function wfRun(text,st){
+    if(text==='') return '';
+    /* ORDER IS PART OF THE SCHEMA. w:rPr's children are a sequence, not a set: rFonts, b, i,
+       colour, then size. Word is usually forgiving about it and then one day is not, which shows
+       up as "the file cannot be opened because there are problems with the contents" rather than
+       anything that names the cause - so it is written in the order the schema states. */
+    const pr=['<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>'];
+    if(st.b) pr.push('<w:b/>');
+    if(st.i) pr.push('<w:i/>');
+    if(st.color) pr.push('<w:color w:val="'+st.color+'"/>');
+    pr.push('<w:sz w:val="'+(st.sz||21)+'"/>');
+    return '<w:r><w:rPr>'+pr.join('')+'</w:rPr>'
+      +'<w:t xml:space="preserve">'+wfXml(text)+'</w:t></w:r>';
+  }
+
+  // Inline walk: text nodes become runs, <b>/<strong> and a bold font-weight turn bold on, <br>
+  // becomes a line break inside the same paragraph.
+  function wfRunsOf(node,st){
+    let out='';
+    [].slice.call(node.childNodes).forEach(function(n){
+      if(n.nodeType===3){ out+=wfRun(n.nodeValue.replace(/ /g,' '),st); return; }
+      if(n.nodeType!==1) return;
+      const tag=n.tagName.toLowerCase();
+      if(tag==='br'){ out+='<w:r><w:br/></w:r>'; return; }
+      const s={b:st.b,i:st.i,sz:st.sz,color:st.color};
+      if(tag==='b'||tag==='strong') s.b=true;
+      if(tag==='i'||tag==='em') s.i=true;
+      const inline=n.getAttribute&&n.getAttribute('style')||'';
+      if(/font-weight\s*:\s*(bold|[6-9]00)/i.test(inline)) s.b=true;
+      if(n.classList&&n.classList.contains('wfd-soft')) s.color='6B7280';
+      if(n.classList&&n.classList.contains('wfd-small')) s.sz=17;
+      out+=wfRunsOf(n,s);
+    });
+    return out;
+  }
+
+  function wfPara(el,st,opt){
+    opt=opt||{};
+    const runs=wfRunsOf(el,st||{});
+    // Same sequence rule as w:rPr above: pBdr, then spacing, then jc.
+    const pr=[];
+    if(opt.border) pr.push('<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="8C9096"/></w:pBdr>');
+    pr.push('<w:spacing w:after="'+(opt.after==null?80:opt.after)+'" w:line="240" w:lineRule="auto"/>');
+    if(opt.align) pr.push('<w:jc w:val="'+opt.align+'"/>');
+    return '<w:p><w:pPr>'+pr.join('')+'</w:pPr>'+(runs||'<w:r><w:t xml:space="preserve"></w:t></w:r>')+'</w:p>';
+  }
+
+  /* A table cell's bottom border is how the sheet draws the rule a value sits on, so it is read
+     off the cell's own class rather than guessed from where it sits. */
+  function wfCell(td,widthPct){
+    const ruled=td.classList&&td.classList.contains('wfd-rule');
+    const borders=ruled
+      ? '<w:tcBorders><w:bottom w:val="single" w:sz="6" w:space="0" w:color="8C9096"/></w:tcBorders>'
+      : '<w:tcBorders><w:bottom w:val="nil"/></w:tcBorders>';
+    return '<w:tc><w:tcPr><w:tcW w:w="'+widthPct+'" w:type="pct"/>'+borders
+      +'<w:vAlign w:val="bottom"/></w:tcPr>'
+      + wfPara(td,{},{after:20}) + '</w:tc>';
+  }
+
+  function wfTable(tbl){
+    const rows=[].slice.call(tbl.querySelectorAll('tr'));
+    if(!rows.length) return '';
+    let x='<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/>'
+      +'<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/>'
+      +'<w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>'
+      +'<w:tblCellMar><w:left w:w="0" w:type="dxa"/><w:right w:w="60" w:type="dxa"/></w:tblCellMar>'
+      +'</w:tblPr>';
+    rows.forEach(function(tr){
+      const tds=[].slice.call(tr.children).filter(function(c){ return c.tagName==='TD'||c.tagName==='TH'; });
+      if(!tds.length) return;
+      x+='<w:tr>';
+      tds.forEach(function(td){
+        // an explicit width wins; otherwise the row is shared out evenly
+        const w=td.getAttribute('data-w');
+        x+=wfCell(td, w?Number(w)*50:Math.round(5000/tds.length));
+      });
+      x+='</w:tr>';
+    });
+    return x+'</w:tbl>';
+  }
+
+  // 12700 EMU to the point - the logo keeps the size the printed blank gave it.
+  function wfImagePara(wPt,hPt){
+    const cx=Math.round(wPt*12700), cy=Math.round(hPt*12700);
+    return '<w:p><w:pPr><w:spacing w:after="140"/></w:pPr><w:r><w:drawing>'
+      +'<wp:inline distT="0" distB="0" distL="0" distR="0">'
+      +'<wp:extent cx="'+cx+'" cy="'+cy+'"/><wp:docPr id="1" name="Logo"/>'
+      +'<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+      +'<pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="Logo"/><pic:cNvPicPr/></pic:nvPicPr>'
+      +'<pic:blipFill><a:blip r:embed="rId5"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+      +'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="'+cx+'" cy="'+cy+'"/></a:xfrm>'
+      +'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>'
+      +'</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
+  }
+
+  /* Walks the edited page and returns the body XML. Anything that is not a table is a paragraph,
+     which is what keeps a line somebody typed themselves from being dropped. */
+  function wfBodyXml(root,hasLogo){
+    let body='';
+    [].slice.call(root.children).forEach(function(el){
+      const tag=el.tagName.toLowerCase();
+      if(tag==='table'){ body+=wfTable(el); return; }
+      if(el.classList&&el.classList.contains('wfd-logo')){
+        /* Only when the image part was actually written. A drawing pointing at a relationship
+           that is not in the package is exactly the kind of thing Word refuses to open, and it
+           would be introduced by nothing more than calling this without a logo. */
+        const img=el.querySelector('img');
+        if(img&&hasLogo) body+=wfImagePara(Number(img.dataset.wpt)||109.5,Number(img.dataset.hpt)||131.25);
+        return;
+      }
+      const opt={};
+      if(el.classList&&el.classList.contains('wfd-right')) opt.align='right';
+      if(el.classList&&el.classList.contains('wfd-gap')) opt.after=320;
+      const st={};
+      if(tag==='h1'||tag==='h2'||(el.classList&&el.classList.contains('wfd-h'))) st.b=true;
+      body+=wfPara(el,st,opt);
+    });
+    return body;
+  }
+
+  async function wfBuildDocx(root,logoBytes){
+    const JSZipC=await loadJsZip();
+    const zip=new JSZipC();
+
+    zip.file('[Content_Types].xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      +'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+      +'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+      +'<Default Extension="xml" ContentType="application/xml"/>'
+      +'<Default Extension="jpeg" ContentType="image/jpeg"/>'
+      +'<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+      +'</Types>');
+
+    zip.folder('_rels').file('.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      +'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      +'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
+      +'</Relationships>');
+
+    const wordRels=['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'];
+    if(logoBytes){
+      wordRels.push('<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.jpeg"/>');
+      zip.folder('word').folder('media').file('logo.jpeg',logoBytes);
+    }
+    wordRels.push('</Relationships>');
+    zip.folder('word').folder('_rels').file('document.xml.rels',wordRels.join(''));
+
+    /* A4 with the same margins the sheet was typeset at - 58pt all round, in twentieths of a
+       point, so the Word version lines up with the printed blank rather than drifting wider. */
+    const M=Math.round(58*20);
+    const doc='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      +'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+      +' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+      +' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"'
+      +' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+      +' xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+      +'<w:body>'+wfBodyXml(root,!!logoBytes)
+      +'<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
+      +'<w:pgMar w:top="'+M+'" w:right="'+M+'" w:bottom="'+M+'" w:left="'+M+'"'
+      +' w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>'
+      +'</w:body></w:document>';
+    zip.folder('word').file('document.xml',doc);
+
+    return await zip.generateAsync({type:'uint8array',
+      mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+  }
+
+  /* The preview, which is the document. Editable in place; Download writes whatever it now says.
+     The logo is marked contenteditable="false" so it cannot be typed over or deleted by accident,
+     while everything around it stays editable. */
+  function wfPreviewDoc(html,filename,toastMsg,logoBytes){
+    openModal('<div class="modal-head"><h3>'+esc2(filename)+'</h3><span class="x" data-wfx>&times;</span></div>'
+      +'<div class="modal-body" style="padding:0;background:#525659">'
+        +'<div style="max-height:70vh;overflow:auto;padding:22px 0">'
+        +'<div id="wfdRoot" class="wfd-page" contenteditable="true" spellcheck="false">'+html+'</div>'
+        +'</div>'
+      +'</div>'
+      +'<div class="modal-foot">'
+        +'<span style="margin-right:auto;font-size:12px;color:var(--slate)">'
+        +'<i class="fa-solid fa-pen"></i> Click anywhere on the sheet to correct it before downloading.</span>'
+        +'<button class="ac-btn" id="wfPvClose">Close Preview</button>'
+        +'<button class="ac-btn primary" id="wfPvGo"><i class="fa-solid fa-file-word"></i> Download Word</button>'
+      +'</div>','lg');
+    setTimeout(function(){
+      const go=$('wfPvGo');
+      if(go) go.onclick=async function(){
+        const root=$('wfdRoot'); if(!root) return;
+        go.disabled=true; const was=go.innerHTML;
+        go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Building…';
+        try{
+          const bytes=await wfBuildDocx(root,logoBytes);
+          const blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+          const url=URL.createObjectURL(blob);
+          const a=document.createElement('a');
+          a.href=url; a.download=filename;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },60000);
+          if(toastMsg) toast(toastMsg,'ok');
+        }catch(e){
+          toast('Could not build the Word file: '+((e&&e.message)||e),'err');
+        }
+        go.disabled=false; go.innerHTML=was;
+      };
+      const close=$('wfPvClose');
+      if(close) close.onclick=function(){ closeModal(); };
+      [].slice.call(document.querySelectorAll('[data-wfx]')).forEach(function(x){ x.onclick=function(){ closeModal(); }; });
+    },30);
+  }
+
   function wfPreviewPdf(bytes,filename,toastMsg){
     const blob=new Blob([bytes],{type:'application/pdf'});
     const url=URL.createObjectURL(blob);
@@ -4996,7 +5389,7 @@
     let res=null;
     try{ res=await wfBookingReading(caseId); }
     catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
-    try{ await wfChecklistPdf(res); }
+    try{ await wfChecklistDoc(res); }
     catch(e){ toast('Could not build the check list: '+((e&&e.message)||e),'err'); }
   };
 
@@ -5012,18 +5405,18 @@
 
      The wording, the items and their order are the form's own and are not to be improved on;
      assets/forms/booking-check-list-blank.pdf stays in the repo as the reference for them. */
-  async function wfChecklistPdf(res){
-    const L=await loadPdfLib();
-    if(!L) throw new Error('the PDF library could not be loaded');
+  /* The Booking Form check list, as an editable Word sheet.
 
-    const doc=await L.PDFDocument.create();
-    const page=doc.addPage([595.28,841.89]);
-    const W=595.28, H=841.89, M=58, R=W-M;
-    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
-    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
-    /* One ink, as on any form - a check list is not a dashboard, and it gets photocopied. Grey is
-       for a value nobody has filled in yet, never for a warning. */
-    const ink=L.rgb(0.07,0.07,0.08), soft=L.rgb(0.42,0.44,0.47), rule=L.rgb(0.55,0.57,0.60);
+     Every value still comes from the stored reading; nothing here is written by a model. What has
+     changed is the medium: this builds the sheet as HTML, shows it in a preview you can type into,
+     and writes a .docx from whatever it says when you press Download. It was a PDF, which was
+     exact and unfixable - a misspelt name meant going back to the documents and re-reading.
+
+     The wording, the items and their order are the form's own and are not to be improved on;
+     assets/forms/booking-check-list-blank.pdf stays in the repo as the reference for them. */
+  async function wfChecklistDoc(res){
+    const logoBytes=await jgLogo('classic');
+    let b64=''; { let s=''; for(let i=0;i<logoBytes.length;i++) s+=String.fromCharCode(logoBytes[i]); b64=btoa(s); }
 
     const f=res.fields||{}, cl=res.checklist||{};
     const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
@@ -5037,121 +5430,62 @@
     };
     const said=function(t){ const x=String(t==null?'':t).trim();
       return (x && x!=='NIL' && !/^--.*--$/.test(x)) ? x : ''; };
+    const E=esc2;
 
-    /* The mark the form itself carries, top left, at the size and place the printed blank put it:
-       109.5 x 131.25 points against the left margin. This one is an internal sheet, so it prints
-       its own letterhead rather than assuming company paper the way the letters do. */
-    const logo=await doc.embedJpg(await jgLogo('classic'));
-    const lw=109.5, lh=131.25, logoTop=H-52;
-    page.drawImage(logo,{x:M,y:logoTop-lh,width:lw,height:lh});
-    let y=logoTop-lh-26;
-
-    (function(){
-      const lab='Date  :  ', val=dots((res.header&&res.header.date)||'')||'\u2014';
-      const lw=reg.widthOfTextAtSize(lab,10.5), w=lw+bold.widthOfTextAtSize(val,10.5);
-      page.drawText(lab,{x:R-w,y:y,size:10.5,font:reg,color:ink});
-      page.drawText(val,{x:R-w+lw,y:y,size:10.5,font:bold,color:ink});
-    })();
-    y-=30;
-
-    page.drawText('Booking form check list :-',{x:M,y:y,size:11.5,font:bold,color:ink});
-    y-=26;
-
-    // The two header lines, colons in one column so each pair reads as a pair.
-    const mLab=['Name of Post sales in-charge Responsible','Name of the customer'];
-    const mVal=[(res.header&&res.header.post_sales_incharge)||'MS. PALLABITA GHOSH',
-                allotteeNames(res).join('  &  ')||'\u2014'];
-    const colonX=M+Math.max.apply(null,mLab.map(function(t){
-      return reg.widthOfTextAtSize(t,10.5); }))+12;
-    mLab.forEach(function(lab,i){
-      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:soft});
-      page.drawText(':',{x:colonX,y:y,size:10.5,font:reg,color:soft});
-      page.drawText(String(mVal[i]),{x:colonX+12,y:y,size:10.5,font:bold,color:ink});
-      y-=17;
-    });
-    y-=11;
-
-    /* Label : Value, comma separated, with real space around the colon. Drawn as a run of chunks
-       so the labels can stay light and the values bold on the one line. */
-    const runLine=function(pairs){
-      let x=M;
-      pairs.forEach(function(p,i){
-        /* An explicit NIL is an answer and prints as one - the form's own way of saying there is
-           no discount, no parking. Only a genuinely empty value becomes a dash. */
-        const lab=p[0]+' : ';
-        const val=(p[1]==null||String(p[1]).trim()==='') ? '\u2014' : String(p[1]).trim();
-        page.drawText(lab,{x:x,y:y,size:10.5,font:reg,color:soft});
-        x+=reg.widthOfTextAtSize(lab,10.5);
-        page.drawText(val,{x:x,y:y,size:10.5,font:bold,color:ink});
-        x+=bold.widthOfTextAtSize(val,10.5);
-        if(i<pairs.length-1){
-          page.drawText(',    ',{x:x,y:y,size:10.5,font:reg,color:ink});
-          x+=reg.widthOfTextAtSize(',    ',10.5);
-        }
+    /* Label : Value, comma separated - the labels light, the values bold, exactly as the sheet
+       reads. An explicit NIL is an answer and prints as one; only a genuinely empty value becomes
+       a dash. */
+    const runLine=function(pairs,cls){
+      const bits=pairs.map(function(p){
+        const val=(p[1]==null||String(p[1]).trim()==='') ? '—' : String(p[1]).trim();
+        return '<span class="wfd-soft">'+E(p[0])+' : </span><b>'+E(val)+'</b>';
       });
-      y-=17;
+      return '<p class="'+(cls||'')+'">'+bits.join(',&nbsp;&nbsp;&nbsp; ')+'</p>';
     };
-    // The floor is the number the booking form gives - not "3rd FLOOR" clipped to "3rd FL".
+
     const floorNo=(String(v('floor')).match(/\d+/)||[v('floor')])[0]||'';
-    runLine([['Project Name',v('project_name')],['Block Name',v('block')],['Flat',v('flat')],
-             ['Floor',floorNo],
-             ['Area',v('area_sqft')?(grp(v('area_sqft'))+' sq.ft.'):'']]);
-    /* WHICH parking belongs in the label, not the value. The reading gives "COVERED 5,00,000",
-       which printed as "Parking : COVERED 5,00,000" - reading as though COVERED were part of the
-       amount. What was ticked is the name of the thing being charged for, so it goes with the
-       word: "COVERED Parking : 5,00,000". Nothing ticked stays plain "Parking". */
+
+    /* WHICH parking belongs in the label, not the value: "COVERED Parking : 5,00,000", never
+       "Parking : COVERED 5,00,000", which reads as though COVERED were part of the amount. */
     const pv=String(res.parking_value||v('covered_parking')||'').trim();
     const pk=pv.match(/^(COVERED|OPEN)\s*(.*)$/i);
     const parkLabel=pk?(pk[1].toUpperCase()+' Parking'):'Parking';
     const parkValue=pk?((pk[2]||'').trim()||'NIL'):(pv||'NIL');
-    // Base Rate and Discount are read straight off the baserate check's own fields rather than
-    // parsed back out of a sentence - see booking-audit's baseRateCheck for the three cases:
-    //   document rate = approved     Base Rate is that rate, Discount is Nil.
-    //   document rate < approved     Base Rate is the APPROVED (cross-check) rate, not the
-    //                                 document's own lower one, and Discount is the shortfall x the
-    //                                 area, as a plain figure: 61,750/-.
-    //   document rate > approved     Base Rate is the document's own (higher) rate, Discount Nil.
+
+    // Base Rate and Discount come off the baserate check's own fields rather than being parsed
+    // back out of a sentence - see booking-audit's baseRateCheck for the three cases.
     const baseRateArith=(res.arithmetic||[]).filter(function(c){ return c.kind==='baserate'; })[0];
-    const baseRateVal=(baseRateArith&&baseRateArith.display_rate)
-      ? baseRateArith.display_rate+'/-' : (v('base_rate')?(grp(v('base_rate'))+'/-'):'');
-    // Just the resulting amount, not the "X - Y = Z X area = amount/-" working - the arithmetic
-    // that got there lives in the reading for anyone who wants it; the check list only needs the
-    // figure itself, the same way every other money field on this row is a bare figure.
+    /* A SHEET THAT PRINTS NO RATE STILL HAS ONE. Several cost sheets quote a lump sum and never
+       state the per-square-foot rate; the line then came out blank, which reads as "no rate"
+       rather than "not written on this sheet". The approved rate is known either way, and is
+       marked as approved so nobody mistakes it for something read off the document. */
+    const WF_APPROVED_RATE={'Dream Valley':3900,'Dream Exotica':3550,'Dream Eco City':3500,
+      'Dream Eco City Bungalow':5160,'Dream One':9000,'Dream World City':4370,
+      'Dream Gurukul':5399,'Dream Ananta':5600};
+    const approvedRateFor=function(){
+      const proj=String(v('project_name')||'').trim();
+      if(!proj) return null;
+      if(WF_APPROVED_RATE[proj]!=null) return WF_APPROVED_RATE[proj];
+      if(/ECO\s*CITY/i.test(proj) && /BUNGALOW/i.test(JSON.stringify(res.fields||{})))
+        return WF_APPROVED_RATE['Dream Eco City Bungalow'];
+      return null;
+    };
+    const baseRateVal=(function(){
+      if(baseRateArith&&baseRateArith.display_rate) return baseRateArith.display_rate+'/-';
+      if(v('base_rate')) return grp(v('base_rate'))+'/-';
+      const ap=approvedRateFor();
+      return (ap!=null) ? (grp(ap)+'/- (approved)') : '';
+    })();
     const discountVal=(baseRateArith&&baseRateArith.discount&&baseRateArith.discount.amount)
       ? baseRateArith.discount.amount+'/-' : 'Nil';
-    // Base Rate back on the same row as PLC/FLC/Parking - now that it and Discount are both short
-    // figures rather than a spelled-out sum, there is no more risk of running past the printable
-    // width, so this is the plain grouping every other cost-sheet figure on the sheet uses. Each
-    // field is still measured and placed by its own actual width (see runLine), so nothing overlaps
-    // even when Parking carries a kind ("OPEN Parking : 4,00,000") rather than a bare figure.
-    runLine([['Base Rate',baseRateVal],['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
-             [parkLabel,parkValue]]);
-    runLine([['Discount',discountVal]]);
-    y-=13;
 
-    page.drawText('Check List :',{x:M,y:y,size:11,font:bold,color:ink});
-    y-=23;
-
-    /* A dash between the label and the rule, and the value written ON the rule - which is what a
-       filled form looks like. Every value starts in the same column, so they read straight down
-       instead of being hunted for. */
-    const LBL=152, VX=M+LBL+18;
-
-    /* WHY IT FAILED, IN A FEW WORDS, ON THE SAME LINE.
-       A column of NOT OKs tells whoever picks the file up that something is wrong but not what,
-       and they then have to open the reading to find out. So each failed row carries its own
-       reason in brackets beside it.
-       These are WRITTEN SHORT rather than trimmed from the long reason the reader gives: a
-       sentence cut off mid-word reads worse than no sentence at all. Each is built from what was
-       actually decided, so it can never disagree with the verdict beside it. The full wording is
-       still in the reading for anyone who wants it. */
+    /* WHY IT FAILED, IN A FEW WORDS, BESIDE THE VERDICT.
+       A column of NOT OKs says something is wrong but not what, and whoever picks the file up then
+       has to open the reading to find out. Each reason is written short rather than trimmed from
+       the reader's long one - a sentence cut off mid-word reads worse than no sentence - and is
+       built from what was actually decided, so it can never disagree with the verdict beside it. */
     const clWhy=function(key){
       if(key==='Cost Sheet'){
-        // NOT a list of which parts failed - "car parking, base rate" says WHERE to look, not
-        // WHAT is wrong, and reads as though those were the reasons rather than just the labels.
-        // Each one is instead built from the same structured evidence the verdict itself came
-        // from, the same way KYC's reason below points at the actual card rather than just
-        // saying "KYC" failed.
         const parts=((res.cost_sheet_verdict||{}).parts)||[];
         const bad=parts.filter(function(p){ return !p.ok; }).map(function(p){ return p.what; });
         const bits=[];
@@ -5167,16 +5501,13 @@
         }
         if(bad.indexOf('the unit')>=0){
           const uc=Array.isArray(res.unit&&res.unit.comparison)?res.unit.comparison:[];
-          const diff=uc.filter(function(f){ return f.matches===false; })[0];
+          const diff=uc.filter(function(f2){ return f2.matches===false; })[0];
           bits.push(diff?(diff.field+' differs'):'unit details differ');
         }
-        // Kept for safety even though the base rate no longer fails the cost sheet on its own -
-        // see booking-audit's baseRateCheck, which is now informational only.
         if(bad.indexOf('the base rate')>=0) bits.push('base rate below approved');
         return bits.join('; ');
       }
       if(key==='KYC of Customer'){
-        // a card that is plainly the applicant's, spelt differently - the commonest failure
         const nf=res.name_faults||[];
         if(nf.length){
           const m=String(nf[0]).match(/^The ([A-Z]+) card/);
@@ -5217,96 +5548,89 @@
       return '';
     };
 
-    const row=function(label,value,dim,edge){
-      page.drawText(label,{x:M,y:y,size:10.5,font:reg,color:ink});
-      page.drawText('\u2013',{x:M+LBL,y:y,size:10.5,font:reg,color:soft});
-      page.drawText(String(value),{x:VX,y:y,size:10.5,font:dim?reg:bold,color:dim?soft:ink});
-      /* IT MUST NOT WRAP. The row is one line and a second one would push the whole sheet out of
-         shape, so the reason has to fit in whatever space is actually left on this line.
-         SHRINK THE FONT BEFORE SHORTENING THE WORDS - the full reason a size or two smaller reads
-         better, and is more useful, than a cut-down one at full size, and either way it stays on
-         this line rather than wrapping. Cutting the words is the last resort, only once the font
-         has already shrunk as far as it can still be read, and even then from the END - a
-         reason that starts making sense and trails off beats one sliced from the front. A
-         reason that still will not fit at the smallest size is left off; a missing note costs
-         nothing, a broken sheet costs a reprint. */
-      if(String(value)==='NOT OK'){
-        const why=clWhy(label);
-        if(why){
-          const vw=bold.widthOfTextAtSize(String(value),10.5);
-          const sx=VX+vw+7, room=(edge||R)-6-sx;
-          const full='('+why+')';
-          let size=8.5;
-          while(size>6.5 && reg.widthOfTextAtSize(full,size)>room) size-=0.25;
-          if(reg.widthOfTextAtSize(full,size)<=room){
-            page.drawText(full,{x:sx,y:y,size:size,font:reg,color:soft});
-          }else{
-            let s=why;
-            while(s.length>6 && reg.widthOfTextAtSize('('+s+'…)',size)>room) s=s.slice(0,-1);
-            const cut='('+s+'…)';
-            if(reg.widthOfTextAtSize(cut,size)<=room)
-              page.drawText(cut,{x:sx,y:y,size:size,font:reg,color:soft});
-          }
-        }
-      }
-      page.drawLine({start:{x:VX,y:y-4},end:{x:edge||R,y:y-4},thickness:0.6,color:rule});
-    };
     // Nothing prints as UNKNOWN: a check that could not be settled reads NOT OK. See the reader.
     const verdict=function(key){
       const t=String(cl[key]==null?'':cl[key]).trim();
       if(t==='Ok')     return ['OK',false];
       if(t==='Not Ok') return ['NOT OK',false];
-      if(!t||/^--.*--$/.test(t)) return ['\u2014',true];
+      if(!t||/^--.*--$/.test(t)) return ['—',true];
       return [t,false];
     };
+    /* In Word a line can wrap, so the reason no longer has to be shrunk or cut to fit - the whole
+       thing is printed. The PDF had to measure and trim it; this does not. */
+    const clRow=function(label,value,dim){
+      const why=(String(value)==='NOT OK') ? clWhy(label) : '';
+      return '<tr><td data-w="30">'+E(label)+'</td>'
+        +'<td data-w="70" class="wfd-rule">'
+        +(dim?'<span class="wfd-soft">'+E(value)+'</span>':'<b>'+E(value)+'</b>')
+        +(why?' <span class="wfd-small wfd-soft">('+E(why)+')</span>':'')
+        +'</td></tr>';
+    };
+
+    const names=allotteeNames(res).join('  &  ')||'—';
+    const incharge=(res.header&&res.header.post_sales_incharge)||'MS. PALLABITA GHOSH';
+    const dateVal=dots((res.header&&res.header.date)||'')||'—';
+
+    let h='';
+    h+='<div class="wfd-logo" contenteditable="false"><img alt="The Jain Group" '
+      +'data-wpt="109.5" data-hpt="131.25" src="data:image/jpeg;base64,'+b64+'"></div>';
+    h+='<p class="wfd-right"><span class="wfd-soft">Date&nbsp;:&nbsp;</span><b>'+E(dateVal)+'</b></p>';
+    h+='<p class="wfd-h">Booking form check list :-</p>';
+    h+='<table class="wfd-meta">'
+      +'<tr><td data-w="44">Name of Post sales in-charge Responsible</td><td data-w="3">:</td>'
+        +'<td data-w="53"><b>'+E(incharge)+'</b></td></tr>'
+      +'<tr><td data-w="44">Name of the customer</td><td data-w="3">:</td>'
+        +'<td data-w="53"><b>'+E(names)+'</b></td></tr>'
+      +'</table>';
+
+    h+=runLine([['Project Name',v('project_name')],['Block Name',v('block')],['Flat',v('flat')],
+                ['Floor',floorNo],
+                ['Area',v('area_sqft')?(grp(v('area_sqft'))+' sq.ft.'):'']]);
+    h+=runLine([['Base Rate',baseRateVal],['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
+                [parkLabel,parkValue]]);
+    h+=runLine([['Discount',discountVal]],'wfd-gap');
+
+    h+='<p class="wfd-h">Check List :</p>';
+    h+='<table class="wfd-cl">';
     ['Cost Sheet','Market valuation Sheet','KYC of Customer','Mobile Number','Email ID',
      'Pan Card No.','Document Quality'].forEach(function(k){
-      const d=verdict(k); row(k,d[0],d[1]); y-=22;
+      const d=verdict(k); h+=clRow(k,d[0],d[1]);
     });
-    (function(){ const src=said(cl['Source']); row('Source',src||'\u2014',!src); y-=22; })();
+    (function(){ const src=said(cl['Source']); h+=clRow('Source',src||'—',!src); })();
 
     // The one row the form itself puts two pairs on.
     (function(){
-      const lead=said(cl['Booked in CRM - Lead ID']), mid=VX+112;
-      row('Booked in CRM \u2013 Lead ID', lead||'awaiting the CRM', !lead, mid);
-      const bx=mid+26, blab='Booking Date';
-      page.drawText(blab,{x:bx,y:y,size:10.5,font:reg,color:ink});
-      const bvx=bx+reg.widthOfTextAtSize(blab,10.5)+12;
-      page.drawText('\u2013',{x:bvx,y:y,size:10.5,font:reg,color:soft});
+      const lead=said(cl['Booked in CRM - Lead ID']);
       const bd=said(cl['Booking Date']) ? dots(cl['Booking Date']) : '';
-      page.drawText(bd||'\u2014',{x:bvx+14,y:y,size:10.5,font:bd?bold:reg,color:bd?ink:soft});
-      page.drawLine({start:{x:bvx+14,y:y-4},end:{x:R,y:y-4},thickness:0.6,color:rule});
-      y-=22;
+      h+='<tr><td data-w="30">Booked in CRM – Lead ID</td>'
+        +'<td data-w="26" class="wfd-rule">'
+          +(lead?('<b>'+E(lead)+'</b>'):'<span class="wfd-soft">awaiting the CRM</span>')+'</td>'
+        +'<td data-w="18">Booking Date</td>'
+        +'<td data-w="26" class="wfd-rule">'
+          +(bd?('<b>'+E(bd)+'</b>'):'<span class="wfd-soft">—</span>')+'</td></tr>';
     })();
-    (function(){ const d=verdict('Signatures'); row('Signatures',d[0],d[1]); y-=32; })();
+    (function(){ const d=verdict('Signatures'); h+=clRow('Signatures',d[0],d[1]); })();
+    h+='</table>';
 
-    (function(){
-      /* The form prints a small arrow here that the standard PDF fonts cannot encode; a colon
-         says the same thing and matches every other label on the sheet. */
-      const lab='Payment Plan   :   ';
-      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:soft});
-      page.drawText(String(cl['Payment Plan']||'AS PER COST SHEET /'),
-        {x:M+reg.widthOfTextAtSize(lab,10.5),y:y,size:10.5,font:bold,color:ink});
-      y-=42;
-    })();
+    /* The form prints a small arrow here that the standard fonts cannot encode; a colon says the
+       same thing and matches every other label on the sheet. */
+    h+='<p class="wfd-gap"><span class="wfd-soft">Payment Plan&nbsp;&nbsp;:&nbsp;&nbsp;</span><b>'
+      +E(String(cl['Payment Plan']||'AS PER COST SHEET /'))+'</b></p>';
 
     /* Discount Approved is a line for VC / HD to sign, not a value to fill - so it stays a line,
        with whoever the documents named written on it when they named anybody. */
     (function(){
-      const lab='Discount Approved', vchd='(VC / HD)';
-      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:ink});
-      const x1=M+reg.widthOfTextAtSize(lab,10.5)+18;
-      const x2=R-reg.widthOfTextAtSize(vchd,10.5)-16;
       const who=said(cl['Discount Approved']);
-      if(who) page.drawText(who,{x:x1+8,y:y,size:10.5,font:bold,color:ink});
-      page.drawLine({start:{x:x1,y:y-4},end:{x:x2,y:y-4},thickness:0.6,color:rule});
-      page.drawText(vchd,{x:x2+16,y:y,size:10.5,font:reg,color:soft});
+      h+='<table class="wfd-sign"><tr>'
+        +'<td data-w="26">Discount Approved</td>'
+        +'<td data-w="56" class="wfd-rule">'+(who?('<b>'+E(who)+'</b>'):'&nbsp;')+'</td>'
+        +'<td data-w="18"><span class="wfd-soft">(VC / HD)</span></td>'
+        +'</tr></table>';
     })();
 
-    const bytes=await doc.save();
     const nm=(allotteeNames(res)[0]||v('customer_name')||'booking')
       .replace(/[^\w \-]/g,'').trim()||'booking';
-    wfPreviewPdf(bytes,'Booking Form Check List - '+nm+'.pdf','Check list downloaded');
+    wfPreviewDoc(h,'Booking Form Check List - '+nm+'.docx','Check list downloaded',logoBytes);
   }
   /* ----- Print an instance --------------------------------------------------------------------
      Reuses wfCaseSummaryHtml exactly as shown on screen (the day-wise table for an entry-wise
@@ -5720,8 +6044,20 @@
   window.wfUpiPick=function(el){
     const wrap=el&&el.closest('.wf-upi-wrap'); if(!wrap) return;
     const inp=wrap.querySelector('.wf-evt-upi');
-    if(inp){ inp.value=el.getAttribute('data-v')||''; wfUpiTyped(inp); }
+    const picked=el.getAttribute('data-v')||'';
+    if(inp){ inp.value=picked; wfUpiTyped(inp); }
     wrap.classList.remove('open');
+    /* Logged here rather than through USAGE_MAP, which fired it by function name and so could only
+       ever record that a click happened - every one of this feature's events carried a null meta
+       and the row was dashes end to end. Same reason every other workflow feature logs from here:
+       the map can see that a function ran, not what it did.
+
+       This is the half that matters most. Reusing a remembered id is the ONLY event that proves
+       the auto-remembering is doing its job; an upload says nothing either way, since the person
+       may simply have re-attached the same QR out of habit. The id itself is deliberately not
+       recorded - it is a payment destination, and this is a usage report. */
+    try{ usageQueue('tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id','create',
+                    {via:'Saved UPI id'}); }catch(_e){}
   };
   function wfUpiFillPanel(wrap){
     const panel=wrap.querySelector('.wf-upi-panel'); if(!panel) return;
@@ -6372,7 +6708,15 @@
        of a Km on a bus journey. */
     const showWhen=f.showWhen?(' data-showwhen="'+esc2(JSON.stringify(f.showWhen))+'" data-hidden="1" style="display:none"'):'';
     const requires=f.requires?(' data-requires="'+esc2(f.requires)+'"'):'';
-    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'"'+showWhen+requires+' data-orig="'+esc2(value||'')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
+    /* The payment-QR field carries a marker so the upload can be COUNTED as the thing it is.
+       Usability has a feature called "Upload and auto-remember a payment QR / UPI ID", and until
+       now the only thing wired to it was picking an id off the saved dropdown - so the four people
+       who actually uploaded a QR last week produced no events at all, and the feature read as
+       Inactive. The attachment handler is shared by every file field on every workflow, so it needs
+       to be told which one it is looking at; the template already knows (upiScannerMemory), and
+       this carries that answer into the DOM rather than making the handler re-derive it. */
+    const qrMark=f.upiScannerMemory?' data-upiqr="1"':'';
+    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'"'+showWhen+requires+qrMark+' data-orig="'+esc2(value||'')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
   }
   // One attached file on a multi-file field. The stored path is kept on the chip so the hidden
   // value can be rebuilt from whatever chips are left after a removal.
@@ -6447,6 +6791,29 @@
     try{ wfEvtSweepUploads([]); }catch(_e){}
     try{ closeModal(); }catch(_e){}
   };
+  /* Counting a payment-QR upload as one. Every file field on every workflow comes through
+     wfEvtAttPick, so the row says which field this is (data-upiqr, set from the template's
+     upiScannerMemory flag) and only that one is counted.
+
+     Logged on the UPLOAD ITSELF rather than on the save: the file reaches S3 the moment it is
+     chosen, and a claim abandoned before Create still had a QR uploaded. Counting it at save time
+     would miss exactly the people worth knowing about - the ones who started and gave up.
+
+     WHAT IT RECORDS, AND WHAT IT DELIBERATELY DOES NOT. The obvious thing to capture was the file
+     name, and it is worthless: of twenty distinct QR files filed since June, eighteen are
+     "WhatsApp_Image_2026-08-19_at_16.17.40.jpeg", "IMG-20260827-WA0014.jpg", a bare UUID, or
+     "qr_code.png" - which only says again what the field is called. The UPI id was the other
+     candidate and is a payment destination; a usage-analytics screen is not where those belong.
+
+     What is worth knowing is HOW the destination was given, because that is the one thing this
+     feature exists to settle: does the remembering actually save anybody the trouble, or does
+     everyone re-upload a QR every time? That reads straight off which path ran, so it is always
+     populated and never guessed. */
+  function wfQrUsage(rowEl){
+    if(!rowEl || rowEl.getAttribute('data-upiqr')!=='1') return;
+    try{ usageQueue('tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id','create',
+                    {via:'QR image'}); }catch(_e){}
+  }
   window.wfEvtAttPick=async function(input){
     const wrapM=input.closest('.wf-evt-att-multi');
     if(wrapM){
@@ -6475,6 +6842,7 @@
           const {data,error}=await uploadFileToS3(key,file);
           if(error) throw error;
           wfEvtTrackUpload(data.path);
+          wfQrUsage(wrapM.closest('.wf-evt-row'));
           // Swapped for the real chip, which carries data-path and so counts towards the value.
           if(slot) slot.outerHTML=wfAttChipHtml(data.path);
         }catch(e){
@@ -6503,6 +6871,7 @@
       const {data,error}=await uploadFileToS3(key,file);
       if(error) throw error;
       wfEvtTrackUpload(data.path);
+      wfQrUsage(wrap.closest('.wf-evt-row'));
       wrap.innerHTML='<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> <span class="wf-evt-att-fname" title="'+esc2(file.name)+'">'+esc2(file.name)+'</span> <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span><input type="hidden" class="wf-evt-value" value="'+esc2(data.path)+'">';
     }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); wfEvtAttReset(wrap); }
   };
@@ -7651,10 +8020,11 @@
     } else if(amAssignee && caseActive){
       /* Send back is on offer at any point the step is yours - on arrival, and also after you have
          received it, because a problem is as often spotted while working through something as at
-         first glance. It goes to whoever raised the instance rather than one step back: they are the
-         only person who can actually correct it. Not styled as a destructive action any more, since
-         nothing is destroyed - it is a return. */
-      const rejectBtn='<button class="ac-btn" title="Send the whole '+esc2(wfNounOf(flow).lc)+' back to whoever raised it" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-rotate-left"></i> Send back</button>';
+         first glance. It goes to the PERSON BEFORE YOU on this instance's route - or all the way to
+         reject_to_seq where a flow sets one, as Invoice Processing does. The confirmation names
+         whoever that turns out to be before anything happens. Not styled as a destructive action,
+         since nothing is destroyed - it is a return. */
+      const rejectBtn='<button class="ac-btn" title="Mark this '+esc2(wfNounOf(flow).lc)+' Sent Back and hold it yourself until it is corrected" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-rotate-left"></i> Send back</button>';
       if(!received){
         A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'+rejectBtn;
       } else {
@@ -7729,7 +8099,7 @@
       +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback'+tip('Everything posted here is visible to EVERYONE in this workflow — there are no private notes. Whatever you write stays with the '+wfNounOf(flow).lc+' as it moves to the next person, and rejection reasons appear here too.')+'</h3>'
         +wfOriginalAttachmentHtml(caseRow,flow)+wfQrCodeAttachmentHtml(caseRow,flow)
         +'<div class="wf-updlist" id="wfUpdList">'+(updates.length?updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
-        +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Rejecting this step — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm rejection</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
+        +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Marking this Sent Back — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
         +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+fcs.case_id+');}"><label class="ac-btn ic" title="Attach files" id="wfUpdFileLbl"><i class="fa-solid fa-paperclip"></i><input type="file" id="wfUpdFile" multiple style="display:none" onchange="wfUpdFilePicked(this)"></label><button class="ac-btn primary ic" onclick="wfPostUpdate('+fcs.case_id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
         +'<div id="wfUpdFileList" class="wf-updfile-list"></div>'
       +'</div></div>';
@@ -8004,30 +8374,48 @@
      instance (Reimbursement), that reason is the only thing the claimant gets to work from — the
      claim itself is deleted — so it is required there, and it is emailed to them along with what
      they submitted and a note that a corrected one has to be raised. */
+  /* Where "Send back" actually sends it, mirroring acc.wf_reject exactly: a flow with
+     reject_to_seq set jumps all the way to that step (Invoice Processing sends it to the front);
+     otherwise it is ONE POSITION BACK along this instance's own route, which is not the same as
+     "the step with the next lowest number" once a flow branches. null means there is nothing
+     before it, which ends the instance. */
+  /* Kept, uncalled, as the client-side mirror of acc.wf_prev_seq, which is likewise kept in the
+     database: both are correct and both are what would be needed if Send back is ever changed
+     back to passing the instance up the route. Neither is referenced while it holds instead. */
+  function wfRejectTargetSeq(mySeq, rejectTo, routeSeqs, steps){
+    if(mySeq==null) return null;
+    if(rejectTo!=null && mySeq>rejectTo) return rejectTo;
+    const route=(Array.isArray(routeSeqs)&&routeSeqs.length)?routeSeqs:null;
+    if(route){
+      const pos=route.indexOf(mySeq);
+      if(pos>0) return route[pos-1];
+      if(pos===0) return null;
+    }
+    let best=null;
+    (steps||[]).forEach(function(s){ if(s.seq<mySeq && (best==null||s.seq>best)) best=s.seq; });
+    return best;
+  }
   window.wfRejectStart=async function(fcsId, caseId){
-    let noun='instance', wantsReason=false, isFirst=false, raisedBy='';
+    let noun='instance', wantsReason=false;
     try{
-      const {data:mine}=await ACC().from('flow_case_steps').select('case_id,seq').eq('id',fcsId).maybeSingle();
+      const {data:mine}=await ACC().from('flow_case_steps').select('case_id').eq('id',fcsId).maybeSingle();
       const cid=(mine&&mine.case_id)||caseId;
       if(cid){
-        const {data:c}=await ACC().from('flow_cases').select('flow_id,created_by').eq('id',cid).maybeSingle();
-        raisedBy=(c&&c.created_by)||'';
+        const {data:c}=await ACC().from('flow_cases').select('flow_id').eq('id',cid).maybeSingle();
         if(c&&c.flow_id){
           const {data:f}=await ACC().from('flows').select('reject_deletes_instance,instance_noun').eq('id',c.flow_id).maybeSingle();
           wantsReason=!!(f&&f.reject_deletes_instance);
           noun=(f&&f.instance_noun)||'instance';
         }
-        // nothing sits behind the first step, so rejecting it ends the instance in ANY workflow
-        const {data:sib}=await ACC().from('flow_case_steps').select('seq').eq('case_id',cid);
-        if(mine&&Array.isArray(sib)) isFirst=!sib.some(function(x){ return x.seq<mine.seq; });
       }
     }catch(e){}
-    /* Every rejection now goes the same way: the whole thing returns to whoever raised it, every
-       task on it stops, and it only moves again once they have corrected it. Nothing is deleted, so
-       there is no longer anything to warn about - just a plain statement of what happens next. */
-    const who=raisedBy?wfNm(raisedBy):('whoever raised this '+noun);
+    /* IT STAYS WITH YOU, so there is no destination to work out and nobody to name. The person
+       who says a bill is wrong is the person who knows what is wrong with it; it is marked Sent
+       Back and held here until that is settled, then forwarded like any other step. */
     const warn='<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This '+esc2(noun)
-      +' goes back to <b>'+esc2(who)+'</b> to correct. It stops here until they have — nobody else can act on it in the meantime.</span></div>';
+      +' is marked <b>Sent Back</b> and stays with <b>you</b> as a received task. Nothing after it '
+      +'is touched, nothing moves on until you forward it, and the reason is recorded on the '
+      +esc2(noun)+'.</span></div>';
     openModal('<div class="modal-head"><h3><i class="fa-solid fa-rotate-left" style="color:var(--brand)"></i> Send this back</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body frm" style="width:min(94vw,520px)">'
         +warn
@@ -8035,20 +8423,20 @@
            rejection is just a rejection and an empty box would only be noise. */
         +(wantsReason
           ? '<label>Reason</label>'
-            +'<textarea id="wfRejReason" rows="4" placeholder="What needs correcting? Be specific — this is all they have to go on."></textarea>'
+            +'<textarea id="wfRejReason" rows="4" placeholder="What needs correcting? This is recorded on the record and is what anybody reviewing it later will read."></textarea>'
             +'<div id="wfRejErr" class="wf-rej-err" style="display:none"></div>'
           : '')
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button>'
         +'<button class="ac-btn primary" id="wfRejGo" onclick="wfRejectConfirm('+fcsId+','+(wantsReason?'true':'false')+',true)">'
-        +'<i class="fa-solid fa-rotate-left"></i> Send back for correction</button></div>','md');
+        +'<i class="fa-solid fa-rotate-left"></i> Mark Sent Back</button></div>','md');
     if(wantsReason) setTimeout(function(){ const t=$('wfRejReason'); if(t)try{t.focus();}catch(_){} },40);
   };
   window.wfRejectConfirm=async function(fcsId, needReason, ends){
     const box=$('wfRejReason'), err=$('wfRejErr');
     const reason=((box&&box.value)||'').trim();
     if(needReason && reason.length<3){
-      if(err){ err.textContent='Please say why — this is all they will have to go on.'; err.style.display='block'; }
+      if(err){ err.textContent='Please say why — this is what gets recorded against it.'; err.style.display='block'; }
       if(box)try{box.focus();}catch(_){}
       return;
     }
@@ -8057,12 +8445,13 @@
     // nothing is deleted any more, so there are no files to collect first
     try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
     catch(e){
-      if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-rotate-left"></i> Send back for correction'; }
+      if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-rotate-left"></i> Mark Sent Back'; }
       toast('Could not send it back: '+((e&&e.message)||e),'err'); return;
     }
     await wfLogReject(um, cid);
     closeModal();
-    toast('Sent back for correction — an email has gone out','ok');
+    // No email: the one person who needs to know is the one who pressed it.
+    toast('Marked Sent Back — it is with you as a received task','ok');
     navTo('tasks/work');
   };
   window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; };
@@ -8070,10 +8459,14 @@
   window.wfRowReject=function(fcsId, caseId, taskId){ wfRejectStart(fcsId, caseId); };
   window.wfDoReject=async function(fcsId, caseId){
     const um=await wfStepUsageMeta(fcsId);
-    try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
-    catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
+    const box=$('wfRejReason');
+    const reason=((box&&box.value)||'').trim();
+    try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
+    catch(e){ toast('Could not send it back: '+((e&&e.message)||e),'err'); return; }
     await wfLogReject(um, caseId!=null?caseId:await wfCaseIdOfStep(fcsId));
-    toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
+    // It never went "to the previous person" - it said so, but the instance went to the raiser.
+    // Now it stays here, and the message says the thing that actually happened.
+    toast('Marked Sent Back — it is with you as a received task','ok'); navTo('tasks/work');
   };
 
   // Revert: pull the flow back to me from whoever currently holds it
@@ -8790,16 +9183,56 @@
     document.head.appendChild(s);
   }
 
-  /* ---------- SCOREBOARD ---------- */
-  async function scoreboardTab(){ const b=$('acBody'); let rows=[]; try{const {data}=await ACC().rpc('scoreboard');rows=data||[];}catch(e){} const medal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
-    rows=rows.map(r=>Object.assign({},r,{score:(r.tasks_completed||0)*1+(r.tasks_on_time||0)*1-(r.tasks_late||0)*1})).sort((a,b)=>b.score-a.score);
-    b.innerHTML=`<div class="tp-card" style="padding:0"><div style="padding:14px 16px;border-bottom:1px solid var(--line)"><b>Scoreboard</b><div style="font-size:12px;color:var(--slate)">task completed +1 · on-time +1 · overdue −1 (declines automatically reverse the credit)</div></div><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>Sub</th><th>On-time</th><th>Overdue</th><th>Score</th></tr></thead><tbody>${rows.length?rows.map((r,i)=>`<tr><td>${medal(i)}</td><td><b>${esc2(r.full_name||r.email)}</b></td><td>${r.tasks_completed}</td><td>${r.checklist_items_done}</td><td style="color:#16a34a">${r.tasks_on_time}</td><td style="color:#dc2626">${r.tasks_late}</td><td style="font-weight:800">${r.score}</td></tr>`).join(''):'<tr><td colspan="7"><div class="ac-empty" style="cursor:default;border:0">No activity yet</div></td></tr>'}</tbody></table></div></div>`; }
-
   /* ---------- CALENDAR (Google-Calendar-inspired UI) ---------- */
   let GCAL_VIEW='month', GCAL_DATE=null, GCAL_MINI_MONTH=null, GCAL_Q='';
-  let GCAL_FILTERS=new Set(['toMe','byMe','meeting','case']);
+  let GCAL_FILTERS=new Set(['toMe','byMe','meeting','case','interview']);
   let GCAL_LAST=null; // {byDate,list,asg}
   let GCAL_CASES=[]; // Legal cases with an upcoming Action Date and/or Next Date — only ever populated for users with 'legal' module access
+  /* SCHEDULED INTERVIEWS, FOR THE PEOPLE WHOSE JOB THEY ARE.
+
+     Booking one created a task for each interviewer and a stage on the candidate, and left no
+     mark at all on the calendar - the one screen somebody looks at to answer "what is happening
+     on Thursday". Now it is a bar like everything else.
+
+     Same permission as the + that books them: HR, Abhay Mati and Administrators. Not
+     participation-based like tasks and meetings, because an interview is HR's business whoever is
+     holding it - the interviewer already has a task about theirs. */
+  let GCAL_INTERVIEWS=[];
+  function gcalCanSeeInterviews(){
+    return !!(typeof recCanWrite==='function' && recCanWrite());
+  }
+  async function gcalInterviewsLoadData(){
+    if(!gcalCanSeeInterviews()){ GCAL_INTERVIEWS=[]; return GCAL_INTERVIEWS; }
+    try{
+      const {data}=await sb.schema('hr').from('interviews')
+        .select('id,candidate_id,scheduled_at,holders,decision,candidates(name,position)')
+        .order('scheduled_at',{ascending:true});
+      /* ONCE IT HAS AN OUTCOME IT COMES OFF THE CALENDAR.
+
+         A calendar answers "what is happening, and what still needs me". An interview that has
+         been held and recorded is neither - it is history, and it lives on the candidate's row
+         and in Monthly Progress. Leaving the bars there meant the week filled up with interviews
+         that were already finished, and the one or two still needing a verdict were lost among
+         them.
+
+         A deleted candidate takes their interviews with them at the database - the foreign key
+         cascades - so that case needs nothing here: the row is simply not returned any more. */
+      GCAL_INTERVIEWS=(data||[]).filter(function(iv){return !!iv.scheduled_at&&!iv.decision;}).map(function(iv){
+        const c=iv.candidates||{};
+        const when=new Date(iv.scheduled_at);
+        // Bucketed by the Indian date, because that is the day the office means - a 9pm UTC
+        // booking is the next morning here, and would otherwise land on the wrong square.
+        const ist=new Date(when.getTime()+(330+when.getTimezoneOffset())*60000);
+        const pad=function(x){return String(x).padStart(2,'0');};
+        iv.date_iso=ist.getFullYear()+'-'+pad(ist.getMonth()+1)+'-'+pad(ist.getDate());
+        iv.time_label=((ist.getHours()%12)||12)+':'+pad(ist.getMinutes())+' '+(ist.getHours()<12?'AM':'PM');
+        iv.title='Interview \u00b7 '+(c.name||'Candidate')+(c.position?(' \u00b7 '+c.position):'');
+        iv.cand_name=c.name||''; iv.cand_position=c.position||'';
+        return iv;
+      });
+    }catch(e){ GCAL_INTERVIEWS=[]; }
+    return GCAL_INTERVIEWS;
+  }
   // Legal dates ride the same Calendar as tasks/meetings, but visibility is permission-based
   // (module access), not participation-based like tasks/meetings — not everyone who can see the
   // Calendar has Legal access, so this must be checked before ever querying mis_cases.
@@ -8827,7 +9260,7 @@
     return [iso(mon),iso(sun)];
   }
   async function gcalLoadData(){
-    const [list,{tasks,asg}]=await Promise.all([people(), loadAll(), mtgLoadData(), gcalCasesLoadData()]).then(r=>[r[0],r[1]]);
+    const [list,{tasks,asg}]=await Promise.all([people(), loadAll(), mtgLoadData(), gcalCasesLoadData(), gcalInterviewsLoadData()]).then(r=>[r[0],r[1]]);
     // Completed tasks never appear on the calendar (matches the old behaviour) — only active, dated tasks.
     const withDue=tasks.filter(t=>t.due_date && stOf(t)!=='approved');
     const byDate={};
@@ -8847,7 +9280,11 @@
     // A case's own separate Next Date lands as its own entry, same day or not — a case can appear
     // twice on the calendar (once per date) when both happen to be set.
     const nextDateItems=past?[]:(GCAL_CASES||[]).filter(function(c){return c.case_next_date_iso===dateStr;}).map(function(c){return {t:c,kind:'nextdate'};});
-    return items.concat(mtgItems).concat(caseItems).concat(nextDateItems).filter(x=>{
+    /* Past interviews stay on the calendar, unlike past legal dates: an interview that happened
+       is a record of the day, and a verdict may still be outstanding on it. */
+    const ivItems=(GCAL_INTERVIEWS||[]).filter(function(iv){return iv.date_iso===dateStr;})
+      .map(function(iv){return {t:iv,kind:'interview'};});
+    return items.concat(mtgItems).concat(caseItems).concat(nextDateItems).concat(ivItems).filter(x=>{
       // Next Date entries share the "Legal dates" toggle with Action Date entries — one shared
       // filter key, not two, since they are the same underlying legal case.
       if(!GCAL_FILTERS.has(x.kind==='nextdate'?'case':x.kind))return false;
@@ -8855,13 +9292,118 @@
       return true;
     });
   }
-  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':(kind==='case'?'#1e3a8a':(kind==='nextdate'?'#0e7490':'#16a34a'))); }
-  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : (x.kind==='case' ? ('c'+x.t.id) : (x.kind==='nextdate' ? ('n'+x.t.id) : String(x.t.id))); }
+  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':(kind==='case'?'#1e3a8a':(kind==='nextdate'?'#0e7490':(kind==='interview'?'#7c3aed':'#16a34a')))); }
+  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : (x.kind==='case' ? ('c'+x.t.id) : (x.kind==='nextdate' ? ('n'+x.t.id) : (x.kind==='interview' ? ('i'+x.t.id) : String(x.t.id)))); }
   window.gcalOpenItem=function(key){
     key=String(key);
     if(key.charAt(0)==='m'){ window.gcalOpenMeetingPanel(Number(key.slice(1))); }
     else if(key.charAt(0)==='c'||key.charAt(0)==='n'){ window.gcalOpenCase(Number(key.slice(1))); }
+    else if(key.charAt(0)==='i'){ window.gcalOpenInterview(Number(key.slice(1))); }
     else { window.gcalOpenTask(Number(key)); }
+  };
+
+  /* The calendar is often the screen you are standing on when a verdict is recorded - its day
+     panel lists the very task you press. Reloading it means the bar goes at once, rather than
+     lingering until the next visit and reading as though the verdict had not taken. Does nothing
+     when the calendar is not on screen. */
+  async function gcalReloadIfOpen(){
+    if(!$('gcalBody')) return;
+    try{ await gcalLoadData(); await gcalRefresh(); }catch(_e){}
+  }
+
+  /* A booking whose day went by more than 24 hours ago and that nobody has answered. The grace
+     period is deliberate: an interview held at 4pm is not late at 4:05, and a Reschedule button
+     sitting there on the morning of the interview is an invitation to move it. */
+  window.ivIsStale=function(ivId){
+    const v=(window._ivInfo||{})[ivId];
+    if(!v||!v.scheduled_at||v.decision) return false;
+    return (Date.now()-new Date(v.scheduled_at).getTime()) > 24*3600*1000;
+  };
+
+  /* MOVING ONE, rather than cancelling it and booking another. It is the same conversation on a
+     different day, so it keeps its own record and its own tasks; the Tracker's date and the
+     candidate's stage follow it, which is what puts the new date in front of HR and keeps
+     Monthly Progress counting them as Interview Scheduled. */
+  window.ivReschedule=async function(ivId){
+    if(!(typeof recCanWrite==='function'&&recCanWrite())){
+      toast('Only HR, Abhay Mati and Administrators can move an interview','err'); return;
+    }
+    const v=(window._ivInfo||{})[ivId]||{};
+    const pad=function(x){return String(x).padStart(2,'0');};
+    const t=new Date();
+    const nowIst=new Date(t.getTime()+(330+t.getTimezoneOffset())*60000);
+    const todayStr=nowIst.getFullYear()+'-'+pad(nowIst.getMonth()+1)+'-'+pad(nowIst.getDate());
+    // Opens on tomorrow: the old date has gone, so today is rarely what is meant.
+    const tm=new Date(nowIst.getTime()+24*3600*1000);
+    const dStr=tm.getFullYear()+'-'+pad(tm.getMonth()+1)+'-'+pad(tm.getDate());
+    const was=v.scheduled_at
+      ? new Date(new Date(v.scheduled_at).getTime()+(330+new Date(v.scheduled_at).getTimezoneOffset())*60000)
+      : null;
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-calendar-day"></i> Move this interview</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm">'
+      +'<div style="font-size:15px;font-weight:700">'+esc2(v.candidate_name||'Candidate')+'</div>'
+      +(v.position_title?'<div style="color:var(--slate);font-size:13px;margin-top:2px">'+esc2(v.position_title)+'</div>':'')
+      +(was?'<div style="margin-top:10px;font-size:12.5px;color:var(--slate)">Was '
+            +esc2(pad(was.getDate())+'/'+pad(was.getMonth()+1)+'/'+was.getFullYear())+' at '
+            +esc2(((was.getHours()%12)||12)+':'+pad(was.getMinutes())+' '+(was.getHours()<12?'AM':'PM'))
+            +' \u2014 nobody recorded an outcome.</div>':'')
+      +'<div class="two" style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;margin-top:12px">'
+      +'<div><label style="margin-top:0">New date</label><input type="date" id="ivRsDate" class="inp" value="'+dStr+'" min="'+todayStr+'" onchange="ivRsTimeRefresh()"></div>'
+      +'<div><label style="margin-top:0">Time <span style="font-size:11px;color:var(--slate)">IST</span></label>'
+      +'<select id="ivRsTime" class="sel">'+ivTimeOptions(dStr)+'</select></div></div>'
+      +'</div>'
+      +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+      +'<button class="btn btn-primary" id="ivRsGo" onclick="ivRescheduleGo('+ivId+')"><i class="fa-solid fa-check"></i> Move it</button></div>');
+  };
+  window.ivRsTimeRefresh=function(){
+    const d=$('ivRsDate'), t=$('ivRsTime');
+    if(d&&t) t.innerHTML=ivTimeOptions(d.value);
+  };
+  window.ivRescheduleGo=async function(ivId){
+    const date=($('ivRsDate')||{}).value, time=($('ivRsTime')||{}).value;
+    if(!date||!time){ toast('Choose a date and a time','err'); return; }
+    // +05:30 spelt out, so the moment stored is the one picked in Indian time whatever the
+    // machine's own clock is set to.
+    const when=new Date(date+'T'+time+':00+05:30');
+    if(isNaN(when.getTime())){ toast('That date and time could not be read','err'); return; }
+    if(when.getTime()<Date.now()){ toast('That time has already passed \u2014 choose a later one','err'); return; }
+    const btn=$('ivRsGo'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+    try{
+      const {data,error}=await sb.schema('hr').rpc('interview_reschedule',
+        {p_interview_id:ivId, p_when:when.toISOString()});
+      if(error) throw new Error(error.message);
+      closeModal();
+      toast('Moved to '+((data&&data.when)||'the new time')+' \u2014 the Tracker and Monthly Progress follow it','ok');
+      await gcalReloadIfOpen();
+      hrAfterApprovalAction();
+    }catch(e){
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Move it';}
+      toast('Could not move it: '+((e&&e.message)||e),'err');
+    }
+  };
+
+  /* Read-only: the verdict belongs to the task, where HR records it, and scheduling belongs to
+     the + button. This says who, when and what was decided. */
+  window.gcalOpenInterview=function(id){
+    const iv=(GCAL_INTERVIEWS||[]).find(function(x){return Number(x.id)===Number(id);});
+    if(!iv){ toast('That interview is no longer on the calendar','err'); return; }
+    const holders=(iv.holders||[]).join(', ')||'nobody recorded';
+    // Only interviews still waiting for an answer reach the calendar, so this is what it says.
+    const verdict=iv.decision
+      ? '<span class="tag '+(iv.decision==='Selected'?'t-green':'t-red')+'">'+esc2(iv.decision)+'</span>'
+      : '<span style="color:var(--slate)">Waiting on HR to record the outcome</span>';
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-user-tie"></i> Interview</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm">'
+      +'<div style="font-size:16px;font-weight:700">'+esc2(iv.cand_name||'Candidate')+'</div>'
+      +(iv.cand_position?'<div style="color:var(--slate);font-size:13px;margin-top:2px">'+esc2(iv.cand_position)+'</div>':'')
+      +'<div style="margin-top:14px;display:grid;gap:8px;font-size:13.5px">'
+      +'<div><b>When</b><br>'+esc2(iv.date_iso)+' at '+esc2(iv.time_label)+' IST</div>'
+      +'<div><b>Held by</b><br>'+esc2(holders)+'</div>'
+      +'<div><b>Outcome</b><br>'+verdict+'</div>'
+      +'</div></div>'
+      +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>');
   };
 
   /* ---- sidebar: mini month calendar ---- */
@@ -8899,14 +9441,20 @@
     const caseRow=gcalCanSeeCases()
       ? '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('case')?'checked':'')+' onchange="gcalToggleFilter(\'case\',this.checked)"><span class="gcal-filter-dot" style="background:#1e3a8a"></span>Legal dates</label>'
       : '';
+    // Only drawn for the people who can see interviews at all - a toggle for something you never
+    // see is a control that does nothing.
+    const ivRow=gcalCanSeeInterviews()
+      ? '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('interview')?'checked':'')+' onchange="gcalToggleFilter(\'interview\',this.checked)"><span class="gcal-filter-dot" style="background:#7c3aed"></span>Interviews</label>'
+      : '';
     return '<div class="gcal-filters"><div class="gcal-filters-title">Quick filters</div>'+rows
       +'<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('meeting')?'checked':'')+' onchange="gcalToggleFilter(\'meeting\',this.checked)"><span class="gcal-filter-dot" style="background:#ea580c"></span>Meetings</label>'
+      +ivRow
       +caseRow
       +'</div>';
   }
   window.gcalToggleFilter=function(k,on){ if(on)GCAL_FILTERS.add(k); else GCAL_FILTERS.delete(k);
     try{ usageQueue('tasks.calendar.filter_by_assigned_to_me_by_me_meetings_legal_dates','search',
-      {title:({toMe:'Assigned to me',byMe:'Assigned by me',meeting:'Meetings',case:'Legal dates'}[k]||k)+' — '+(on?'on':'off')}); }catch(_e){}
+      {title:({toMe:'Assigned to me',byMe:'Assigned by me',meeting:'Meetings',case:'Legal dates',interview:'Interviews'}[k]||k)+' — '+(on?'on':'off')}); }catch(_e){}
     gcalRenderOnly(); };
 
   /* Which way the calendar is being read, for the Usability report.
@@ -9236,7 +9784,215 @@
   /* ---- Create button + floating action button ----
      Task-creation from the calendar is disabled for now — once Meetings exist this
      will be redesigned around them rather than quietly creating a plain Task. */
-  window.gcalQuickAdd=function(){ window._mtgAutoOpenCreate=true; navTo('tasks/meetings'); };
+  /* THE + ON THE CALENDAR BOOKS AN INTERVIEW.
+
+     It used to be a shortcut to the meeting form. Meetings keep their own screen and their own
+     Schedule Meeting button, so nothing is lost by giving this the job it is actually wanted for -
+     and the + is now only drawn for HR and the Administrator, which is exactly who books
+     interviews. */
+  window.gcalQuickAdd=function(){ ivOpenSchedule(); };
+
+  /* ── SCHEDULING AN INTERVIEW ───────────────────────────────────────────────────────────
+     Three questions: who, when, and who is holding it. The candidate list is built by the
+     database (hr.interviewable_candidates) rather than filtered here, so the rule about who can
+     still be interviewed - on an open position, approved, not yet at an outcome - lives in one
+     place and cannot drift between this window and anything else that asks. */
+  window.ivOpenSchedule=async function(){
+    if(!(typeof recCanWrite==='function'&&recCanWrite())){
+      toast('Only HR, Abhay Mati and Administrators can schedule an interview','err'); return;
+    }
+    /* WHO HOLDS IT IS NOT ASKED ANY MORE. It is HR, every time, so the list of people is gone
+       and the database resolves the HR group itself - which also means adding somebody to the HR
+       department is the one place that changes. */
+    let cands=[];
+    try{
+      const cR=await sb.schema('hr').rpc('interviewable_candidates');
+      cands=cR.data||[];
+    }catch(e){ toast('Could not load candidates: '+((e&&e.message)||e),'err'); return; }
+
+    if(!cands.length){
+      openModal('<div class="modal-head"><h3><i class="fa-solid fa-calendar-plus"></i> Schedule an interview</h3>'
+        +'<span class="x" onclick="closeModal()">&times;</span></div>'
+        +'<div class="modal-body frm"><div style="padding:18px;text-align:center;color:var(--slate);font-size:13.5px">'
+        +'Nobody is ready to be interviewed.<br><br>A candidate appears here once their position is open, '
+        +'they have been approved, and they have not already been selected, rejected or put on hold.'
+        +'</div></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>');
+      return;
+    }
+
+    /* EVERYTHING HERE IS RECKONED IN IST, WHATEVER THE MACHINE IS SET TO.
+
+       The first version used the browser's own clock. On a laptop set to IST that is right by
+       accident; on one set to anything else it is wrong twice over - the date picker's idea of
+       "today" is a different day from the office's, and the moment saved is not the moment the
+       person chose. The Tracker then prints the time converted back to IST, so the booking and
+       the row disagree and neither is obviously at fault.
+
+       India has no daylight saving, so IST is always UTC+5:30 and a fixed offset is exact rather
+       than an approximation. istNow gives a Date whose ordinary fields - getHours, getDate - read
+       as Indian time, which is what the pickers need. */
+    const IST_OFFSET_MIN=330;
+    const pad=function(x){return String(x).padStart(2,'0');};
+    const istNow=function(){
+      const t=new Date();
+      return new Date(t.getTime()+(IST_OFFSET_MIN+t.getTimezoneOffset())*60000);
+    };
+    const istDateStr=function(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); };
+
+    const nowIst=istNow();
+    const todayStr=istDateStr(nowIst);
+    /* Opens on today while a slot is still left on it, and on tomorrow once the working day is
+       gone - the same 15-minute notice ivTimeOptions uses, so the date it opens on is always a
+       date that actually has times under it. */
+    const LAST_SLOT_MIN=20*60;
+    const dStr=((nowIst.getHours()*60+nowIst.getMinutes()+15)<=LAST_SLOT_MIN)
+      ? todayStr
+      : istDateStr(new Date(nowIst.getTime()+24*3600*1000));
+
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-calendar-plus"></i> Schedule an interview</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm">'
+      +'<label style="margin-top:0">Candidate</label>'
+      +'<select id="ivCand" class="sel">'
+      +cands.map(function(c){
+          return '<option value="'+c.id+'">'+esc2(c.name||'Unnamed')
+            +(c.position_title?(' \u00b7 '+esc2(c.position_title)):'')
+            +(c.stage?(' \u00b7 '+esc2(c.stage)):'')+'</option>';
+        }).join('')
+      +'</select>'
+      +'<div class="two" style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">'
+      +'<div><label>Date</label><input type="date" id="ivDate" class="inp" value="'+dStr+'" min="'+todayStr+'" onchange="ivTimeRefresh()"></div>'
+      +'<div><label>Time <span style="font-size:11px;color:var(--slate)">IST</span></label>'
+      +'<select id="ivTime" class="sel">'+ivTimeOptions(dStr)+'</select></div></div>'
+      +'<div style="margin-top:14px;background:var(--bg);border:1px solid var(--line);border-radius:8px;'
+       +'padding:10px 12px;font-size:12.5px;color:var(--slate)">'
+       +'<i class="fa-solid fa-users" style="margin-right:6px"></i>'
+       +'HR will be given the task to record the outcome. The first answer is the one that counts.'
+      +'</div>'
+      +'</div>'
+      +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+      +'<button class="btn btn-primary" id="ivGo" onclick="ivScheduleGo()"><i class="fa-solid fa-check"></i> Schedule</button></div>');
+  };
+
+  /* The slots for one day. On today it starts from the next half hour, so a time that has gone
+     is not offered at all - a disabled option somebody cannot pick is still a question they have
+     to read and dismiss. On any later day the full working range is there. */
+  window.ivTimeOptions=function(dayStr){
+    const IST_OFFSET_MIN=330;
+    const pad=function(x){return String(x).padStart(2,'0');};
+    const t=new Date();
+    const nowIst=new Date(t.getTime()+(IST_OFFSET_MIN+t.getTimezoneOffset())*60000);
+    const todayStr=nowIst.getFullYear()+'-'+pad(nowIst.getMonth()+1)+'-'+pad(nowIst.getDate());
+    const isToday=(String(dayStr||'')===todayStr);
+    /* The next slot that has not gone, and nothing further. A 15-minute cushion was added here
+       on the theory that nobody books an interview for two minutes' time - but at 2:56 it pushed
+       the first offer to 3:30 and hid 3:00, which is a perfectly good time and the obvious one to
+       want. A slot in the future is offered; the cushion was inventing a rule nobody asked for. */
+    const minMinutes=isToday?(nowIst.getHours()*60+nowIst.getMinutes()+1):0;
+    let o='', first=true;
+    for(let h=8;h<=20;h++){
+      for(const m of ['00','30']){
+        const mins=h*60+(m==='00'?0:30);
+        if(mins<minMinutes||mins>20*60) continue;   // 8 PM is the last slot, not 8:30
+        const lbl=((h%12)||12)+':'+m+' '+(h<12?'AM':'PM');
+        o+='<option value="'+pad(h)+':'+m+'"'+(first?' selected':'')+'>'+lbl+'</option>';
+        first=false;
+      }
+    }
+    if(!o) o='<option value="">No time left today \u2014 choose another date</option>';
+    return o;
+  };
+  window.ivTimeRefresh=function(){
+    const d=$('ivDate'), t=$('ivTime');
+    if(d&&t) t.innerHTML=ivTimeOptions(d.value);
+  };
+
+  window.ivScheduleGo=async function(){
+    const cid=parseInt(($('ivCand')||{}).value,10);
+    const date=($('ivDate')||{}).value;
+    const time=($('ivTime')||{}).value;
+    if(!cid){ toast('Choose a candidate','err'); return; }
+    if(!date){ toast('Choose a date','err'); return; }
+
+    /* THE OFFSET IS SPELT OUT, SO THE INSTANT STORED IS THE ONE THEY PICKED IN INDIAN TIME.
+
+       Without +05:30 the browser reads the value in its own zone. On a machine set to IST that
+       happens to be right; on any other it quietly stores a different moment, and the Tracker -
+       which prints times converted to IST - then shows an hour nobody chose. */
+    const when=new Date(date+'T'+time+':00+05:30');
+    if(isNaN(when.getTime())){ toast('That date and time could not be read','err'); return; }
+    /* The dropdown no longer offers a time that has gone, so this is now a backstop rather than
+       the only guard - it still matters for a window left open across the slot it was showing. */
+    if(when.getTime() < Date.now()){
+      toast('That time has already passed — choose a later one','err'); return;
+    }
+
+    const btn=$('ivGo'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+    try{
+      const {error}=await sb.schema('hr').rpc('interview_schedule',
+        {p_candidate_id:cid, p_when:when.toISOString()});
+      if(error) throw new Error(error.message);
+      closeModal();
+      toast('Interview scheduled \u2014 HR has the task to record the outcome','ok');
+      if(typeof calendarTab==='function') navTo('tasks/calendar');
+    }catch(e){
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Schedule';}
+      toast('Could not schedule: '+((e&&e.message)||e),'err');
+    }
+  };
+
+  /* ── THE VERDICT ───────────────────────────────────────────────────────────────────────
+     Only Selected and Rejected, because those are the only two things an interviewer decides.
+     Joined, Hold and Backed Out are HR's, and they are what is left on the Interviews dropdown. */
+  window.ivDecide=async function(interviewId,decision){
+    if(!await confirmDialog(
+        'Record this interview as '+decision+'?'
+        +(decision==='Rejected'?' The candidate will be emailed to say they were not successful.':'')
+        +' The first answer is the one that counts \u2014 once it is in, the other interviewers can '
+        +'no longer change it.',
+        {title:decision, okLabel:decision, icon:decision==='Selected'?'fa-check':'fa-xmark',
+         danger:decision==='Rejected'}))return;
+    try{
+      const {data,error}=await sb.schema('hr').rpc('interview_decide',
+        {p_interview_id:interviewId, p_decision:decision});
+      if(error) throw new Error(error.message);
+      if(data&&data.ok===false&&data.already){
+        toast('Already recorded as '+data.decision+' by '+(data.by||'someone else'),'warn');
+        await gcalReloadIfOpen();
+        hrAfterApprovalAction();
+        return;
+      }
+      toast('Recorded as '+decision,'ok');
+
+      /* A REJECTION HERE IS STILL A REJECTION, SO THE CANDIDATE IS STILL TOLD.
+
+         The letter was wired to the two HR routes and not to this one, so being turned down at
+         interview - the most likely way of all - happened in silence.
+
+         Sent after the verdict is recorded, so a mail failure cannot leave somebody told about a
+         decision the record does not show. The interview id travels with it because an interviewer
+         is usually NOT one of the four people allowed to email candidates, and holding this
+         interview is what entitles them to send this one letter. */
+      if(decision==='Rejected'&&data&&data.candidate_id){
+        try{
+          const {data:c}=await sb.schema('hr').from('candidates')
+            .select('name,email,position').eq('id',data.candidate_id).single();
+          if(c&&String(c.email||'').trim()){
+            const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
+              {body:{kind:'candidate_rejected',name:c.name||'',email:c.email,
+                     position:c.position||'',interview_id:interviewId}});
+            if(se||(sent&&sent.error)) toast('Recorded, but the email failed: '+((sent&&sent.error)||se.message),'err');
+            else toast(c.email+' has been told','ok');
+          }else{
+            toast('No email address on file, so the candidate was not told','warn');
+          }
+        }catch(e){ toast('Recorded, but the email failed: '+((e&&e.message)||e),'err'); }
+      }
+      await gcalReloadIfOpen();
+      hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
+
 
   /* ---- drag & drop: dragging a task or one-time-meeting row onto another day moves its date ----
      Uses pointer events (not native HTML5 DnD) to match the touch-friendly drag pattern already used
@@ -9535,7 +10291,15 @@
       +'</div>'
       +'<div class="gcal-backdrop" id="gcalBackdrop" onclick="gcalClosePanel()"></div>'
       +'<div class="gcal-panel" id="gcalPanel"><div class="gcal-panel-head"><b>Details</b><div class="x" onclick="gcalClosePanel()"><i class="fa-solid fa-xmark"></i></div></div><div class="gcal-panel-body"></div><div class="gcal-panel-foot"></div></div>'
-      +'<button class="gcal-fab" onclick="gcalQuickAdd()" title="Schedule a meeting"><i class="fa-solid fa-plus"></i></button>';
+      /* THE + IS FOR THE PEOPLE WHO BOOK THINGS, NOT EVERYONE WHO LOOKS AT THE CALENDAR.
+         Most of the company reads this screen to see what is happening; scheduling is HR's and the
+         Administrator's job. A button that everybody can press and nobody else should is an
+         invitation to a mistake, and hiding it is honest here because the actions behind it are
+         refused for everybody else anyway. recCanWrite comes from nexus-core.js, which this page
+         loads, and is the same question every other HR control asks. */
+      +((typeof recCanWrite==='function'&&recCanWrite())
+        ? '<button class="gcal-fab" onclick="gcalQuickAdd()" title="Schedule"><i class="fa-solid fa-plus"></i></button>'
+        : '');
     gcalWireDrag($('gcalBody'));
     gcalWireTimeDrag();
   }
@@ -9548,6 +10312,14 @@
 
   /* ---------- MEETINGS ---------- */
   let MTG_LIST=[], MTG_ATT={}, MTG_PPL=[], MTG_DONE=new Set(), MTG_SKIP=new Set(), MTG_RESCHED=null;
+  // Most recent completed occurrence of each meeting, keyed by meeting id. It's what lets the
+  // single line item report whether the last time it ran was transcribed.
+  let MTG_LAST={};
+  // Completed occurrences still owing a transcript — see the note where it's loaded.
+  let MTG_OWED=[];
+  // Attendees from outside the company directory (msWidget's picker only ever lists directory
+  // people) — typed in by email rather than picked, reset each time the Schedule/Edit modal opens.
+  let MTG_EXTRA=[];
   /* How many people a meeting action actually serves, for the Usability report.
      "Scheduled a meeting" is the same row whether two people spoke for ten minutes or fifteen sat
      through a review, and those are not the same fact about the feature. The attendee list is
@@ -9622,36 +10394,80 @@
     set.forEach(function(e){ const k=String(e||'').toLowerCase(); if(k&&!seen[k]){ seen[k]=true; out.push(k); } });
     return out;
   }
-  // Sort key used within every group: recurring meetings float to the top (they're
-  // always "live"), then one-time meetings in chronological order.
-  function mtgSortKey(m){
+  // THE NEXT DATE THIS MEETING ACTUALLY HAPPENS, on or after today: the first occurrence that
+  // isn't already logged as held and hasn't been moved out by a "this time only" reschedule.
+  // This is the single fact the whole list is now built from — it's what a recurring meeting is
+  // filed under, and it's what "when is it due next" means once today's one has been held.
+  // Returns null only for a one-time meeting whose day has gone by but which the archive cron
+  // hasn't closed out yet (that job runs every minute, so it's a seconds-wide window).
+  function mtgNextOccurrence(m){
+    const today=istTodayISO();
     const rt=m.recur_type||'none';
-    return rt!=='none' ? ('0'+String(m.start_time||'')) : ('1'+String(m.meeting_date||'9999-99-99')+String(m.start_time||''));
+    if(rt==='none'){
+      if(!m.meeting_date||m.meeting_date<today) return null;
+      return MTG_DONE.has(m.id+'|'+m.meeting_date) ? null : m.meeting_date;
+    }
+    // 400 days is more than a full year, so even "monthly on the 31st" — which skips every short
+    // month — always resolves rather than running off the end of the loop.
+    let d=today;
+    for(let i=0;i<400;i++){
+      if(mtgOccursOn(m,d)&&!MTG_DONE.has(m.id+'|'+d)) return d;
+      d=calShiftISO(d,1);
+    }
+    return null;
   }
-  // Splits a list of meetings into Today / Tomorrow / This Week (the remaining days of the
-  // week after tomorrow). A daily-recurring meeting occurs every one of those remaining days —
-  // rather than listing it once per day (spammy), it's shown ONCE in "This Week" with a
-  // _weekCount attached (how many more times it occurs this week) for the card to badge.
+  // The frequency spelled out in full for the line item ("Every Monday"), as opposed to the
+  // compact tag that sits next to the title ("Weekly · Mon").
+  function mtgFreqText(m){
+    const rt=m.recur_type||'none';
+    if(rt==='daily') return 'Every day';
+    if(rt==='weekly'){ const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']; return 'Every '+(days[m.recur_day]||'week'); }
+    if(rt==='monthly') return 'Every month on the '+m.recur_date+mtgOrdinalSuffix(m.recur_date);
+    return 'One-time';
+  }
+  // Today / Tomorrow / "Sat, 27 Sep" — a date read without doing arithmetic. The year is only
+  // added when it isn't this one, so the common case stays short.
+  function mtgWhenText(dateStr){
+    if(!dateStr) return '';
+    const today=istTodayISO();
+    if(dateStr===today) return 'Today';
+    if(dateStr===calShiftISO(today,1)) return 'Tomorrow';
+    const d=new Date(dateStr+'T00:00:00');
+    const opts={weekday:'short',day:'numeric',month:'short'};
+    if(d.getFullYear()!==new Date(today+'T00:00:00').getFullYear()) opts.year='numeric';
+    return d.toLocaleDateString('en-IN',opts);
+  }
+  // Within a bucket, order by the next occurrence's date and then time of day. (It used to float
+  // recurring meetings to the top, which only made sense while a recurring meeting could be
+  // listed in a bucket on a day it wasn't actually happening.)
+  function mtgSortKey(m){
+    return String(m._next||'9999-99-99')+'T'+String(m.start_time||'99:99');
+  }
+  // ONE MEETING, ONE LINE ITEM. A daily meeting used to be pushed into Today AND Tomorrow AND
+  // This Week, so the same meeting appeared three times over with three sets of buttons, and the
+  // only way to tell the copies apart was that two of them were lying about when they were.
+  // Now each meeting goes in exactly one bucket — the one its NEXT occurrence falls in — and the
+  // card states the frequency and that date itself. Holding today's occurrence moves the next one
+  // to tomorrow, so the meeting simply moves down the page: that is how it shows when it's due
+  // next, with no second row anywhere.
   function mtgDayBuckets(items){
-    const todayS=istTodayISO(), tomS=calShiftISO(todayS,1), weekEnd=gcalWeekBounds(todayS)[1]; // Kolkata-anchored, matches mtgEndedToday
-    const today=[], tomorrow=[], week=[];
+    const todayS=istTodayISO(), tomS=calShiftISO(todayS,1), weekEnd=gcalWeekBounds(todayS)[1]; // Kolkata-anchored
+    const today=[], tomorrow=[], week=[], later=[], awaiting=[];
     items.forEach(function(m){
-      if(mtgOccursOn(m,todayS)) today.push(m);
-      if(mtgOccursOn(m,tomS)) tomorrow.push(m);
-      if((m.recur_type||'none')==='daily'){
-        let d=calShiftISO(tomS,1), count=0;
-        while(d<=weekEnd){ count++; d=calShiftISO(d,1); }
-        if(count>0){ m._weekCount=count; week.push(m); }
-      } else {
-        let d=calShiftISO(tomS,1), inWeek=false;
-        while(d<=weekEnd){ if(mtgOccursOn(m,d)){ inWeek=true; break; } d=calShiftISO(d,1); }
-        if(inWeek) week.push(m);
-      }
+      const nx=mtgNextOccurrence(m);
+      m._next=nx;
+      if(!nx) awaiting.push(m);                 // one-time meeting past its day, archive cron pending
+      else if(nx===todayS) today.push(m);
+      else if(nx===tomS) tomorrow.push(m);
+      else if(nx<=weekEnd) week.push(m);
+      else later.push(m);
     });
     return [
       {label:'Today',items:today},
       {label:'Tomorrow',items:tomorrow},
-      {label:'This Week',items:week}
+      {label:'Later This Week',items:week},
+      {label:'Upcoming',items:later},
+      {label:'Awaiting Close',items:awaiting}
     ].filter(function(g){return g.items.length;});
   }
   // Applies the Today/Tomorrow/This-Week split within one already-filtered category, prefixing
@@ -9712,10 +10528,35 @@
     // Which occurrences are already done (a log exists). Recurring meetings keep meeting_id on their
     // logs; one-time meetings are deleted when done so they simply drop off the list. Used to turn the
     // Record button into "Done" and to hide a done occurrence from that day in the calendar.
-    try{ const {data:lg}=await ACC().from('meeting_logs').select('meeting_id,occurrence_date').not('meeting_id','is',null); const s=new Set(); (lg||[]).forEach(function(r){ s.add(r.meeting_id+'|'+r.occurrence_date); }); MTG_DONE=s; }catch(e){ MTG_DONE=new Set(); }
+    // Alongside MTG_DONE this now keeps the most recent completed occurrence per meeting
+    // (MTG_LAST), which is what the line item reads to report the transcript.
+    try{
+      const {data:lg}=await ACC().from('meeting_logs').select('id,meeting_id,occurrence_date,transcript_status,audio_url').not('meeting_id','is',null);
+      const s=new Set(), lastMap={};
+      (lg||[]).forEach(function(r){
+        s.add(r.meeting_id+'|'+r.occurrence_date);
+        const cur=lastMap[r.meeting_id];
+        if(!cur||String(r.occurrence_date)>String(cur.occurrence_date)) lastMap[r.meeting_id]=r;
+      });
+      MTG_DONE=s; MTG_LAST=lastMap;
+    }catch(e){ MTG_DONE=new Set(); MTG_LAST={}; }
     // Occurrences of a recurring meeting that were moved elsewhere ("this time only" reschedule) —
     // hidden from their original day.
     try{ const {data:sk}=await ACC().from('meeting_skips').select('meeting_id,occ_date'); const ss=new Set(); (sk||[]).forEach(function(r){ ss.add(r.meeting_id+'|'+r.occ_date); }); MTG_SKIP=ss; }catch(e){ MTG_SKIP=new Set(); }
+    // Occurrences of MY meetings that finished with no transcript. Loaded separately from MTG_LAST
+    // because a one-time meeting's row is deleted the moment it completes, so its log is no longer
+    // reachable from anything in the list — and those are exactly the ones that would otherwise be
+    // forgotten about entirely. 60 days back is far enough to matter and near enough to still act on.
+    try{
+      const {data:ow}=await ACC().from('meeting_logs')
+        .select('id,occurrence_date,title,mode,transcript_status,audio_url')
+        .contains('attendee_emails',[my])
+        .or('audio_url.is.null,transcript_status.eq.failed')
+        .neq('transcript_status','ready')
+        .gte('occurrence_date',calShiftISO(istTodayISO(),-60))
+        .order('occurrence_date',{ascending:false}).limit(50);
+      MTG_OWED=ow||[];
+    }catch(e){ MTG_OWED=[]; }
     MTG_PPL=await people();
     return {list,attMap};
   }
@@ -9728,13 +10569,11 @@
   }
   function mtgGoogleStatusHtml(){
     if(GOOGLE_CONNECTED===true) return '<span class="mtg-gstatus connected"><i class="fa-brands fa-google"></i> Connected to Google</span>';
-    if(GOOGLE_CONNECTED===false){
-      // A non-thejaingroup.com account can't connect Google Meet at all, so don't offer a
-      // Connect button that would only ever fail — the offline banner explains what they CAN do.
-      const offDomain=!/@thejaingroup\.com$/i.test(me()||'');
-      if(offDomain) return '';
-      return '<button class="mtg-gstatus connect" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>';
-    }
+    // Any JAIN-E account can offer to connect now, not just thejaingroup.com ones — the OAuth flow
+    // itself (google-oauth-start/callback) never checked domain, it only ever confirmed the Google
+    // account authorizing matches the JAIN-E email that started the flow, which works the same for
+    // a personal Gmail login as it does for a company one.
+    if(GOOGLE_CONNECTED===false) return '<button class="mtg-gstatus connect" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>';
     return '';
   }
   window.googleConnect=function(){
@@ -9792,40 +10631,118 @@
     try{ usageQueue('tasks.meetings.join_a_meeting','view',Object.assign({title:m.title}, mtgUsageAttendees(id)||{})); }catch(_e){}
     window.open(m.meet_link,'_blank','noopener');
   };
-  function mtgCard(m,weekCount){
+  // A meeting's ONE AND ONLY line item. Everything worth knowing is stated on the card itself —
+  // how often it repeats, the next date it actually happens, the time and how long it runs, where
+  // it is, who's in it, and what became of the last time it was held. That is what lets a
+  // recurring meeting be listed once rather than once per occurrence: none of this used to be
+  // visible without opening the edit form, so repetition was doing the explaining.
+  function mtgCard(m){
     const modeColor = m.mode==='offline' ? '#64748b' : '#2563eb';
     const people2=mtgAllAttendees(m);
-    const rt=m.recur_type||'none';
-    const dateLbl = rt==='none' ? (fmtDate(m.meeting_date)+', ') : '';
-    const timeLabel=dateLbl+mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
+    const today=istTodayISO();
+    // _next is stamped by mtgDayBuckets; recomputed here so the card also stands on its own.
+    const nx=(m._next!==undefined)?m._next:mtgNextOccurrence(m);
+    const doneToday=MTG_DONE.has(m.id+'|'+today);
+    const mins=mtgDurationMinutes(m.start_time,m.end_time);
+    const timeRange=mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
     const recurLbl=mtgRecurLabel(m);
-    const whereHtml = m.mode==='offline' ? '<i class="fa-solid fa-people-group"></i> Offline' : '<i class="fa-solid fa-video"></i> Online';
-    const doneToday = MTG_DONE.has(m.id+'|'+istTodayISO());
-    let join;
-    if(doneToday) join='<button class="mtg-join" disabled title="Already done today">Done</button>';
-    // Online meetings get Join AND Record — recording an online meeting captures the shared meeting
-    // tab's audio as well as the microphone, so it too can be transcribed by Gemini.
-    else if(m.mode==='online' && m.meet_link) join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryJoin('+m.id+')" title="Join meeting">Join</button>'
-      +'<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
-    // An online meeting with no link yet can still be recorded; Join is what's unavailable.
-    else if(m.mode==='online') join='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>'
-      +'<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
-    else join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
+
+    // LEFT — when it next happens, at what time, for how long.
+    const timeCol='<div class="mtg-time">'
+      +'<div class="mtg-when'+(nx===today?' now':(nx?'':' late'))+'">'+esc2(nx?mtgWhenText(nx):'Past due')+'</div>'
+      +'<div class="mtg-clock">'+esc2(timeRange)+'</div>'
+      +(mins?('<div class="mtg-dur">'+mins+' min</div>'):'')
+      +'</div>';
+
+    // MIDDLE — the details of the meeting, on the row instead of behind the edit form.
+    const chips=['<span class="mtg-chip"><i class="fa-solid fa-rotate"></i> '+esc2(mtgFreqText(m))+'</span>'];
+    if(nx) chips.push('<span class="mtg-chip"><i class="fa-regular fa-calendar"></i> '+(doneToday?'Next: ':'')+esc2(fmtDateY(nx))+'</span>');
+    chips.push('<span class="mtg-chip" style="color:'+modeColor+'"><i class="fa-solid fa-'+(m.mode==='offline'?'people-group':'video')+'"></i> '+esc2(mtgModeLabel(m))+'</span>');
+    if(m.mode==='online'&&!m.meet_link) chips.push('<span class="mtg-chip warn"><i class="fa-solid fa-link-slash"></i> No link yet</span>');
+    chips.push('<span class="mtg-chip"><i class="fa-solid fa-users"></i> '+people2.length+(people2.length===1?' person':' people')+'</span>');
+    if(doneToday) chips.push('<span class="mtg-chip ok"><i class="fa-solid fa-circle-check"></i> Held today</span>');
+
+    // TRANSCRIPTION — a completed occurrence is transcribed by JAIN-E automatically whenever a
+    // recording exists, so the card reports where that got to. When an occurrence closed without
+    // one (nobody pressed Record, or Google closed an online call by itself) it asks for the audio
+    // rather than leaving that meeting with no transcript for good.
+    const last=MTG_LAST[m.id];
+    let addRec='';
+    if(last){
+      const st=last.transcript_status;
+      const heldTxt=(last.occurrence_date===today)?'today':('on '+fmtDateY(last.occurrence_date));
+      if(st==='ready')
+        chips.push('<span class="mtg-chip ok click" onclick="event.stopPropagation();navTo(\'tasks/meetings/log/'+last.id+'\')" title="Open the transcript from '+esc2(fmtDateY(last.occurrence_date))+'"><i class="fa-solid fa-file-lines"></i> Transcript ready</span>');
+      else if(st==='processing'||st==='transcribing'||st==='pending')
+        chips.push('<span class="mtg-chip pend"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing '+esc2(heldTxt)+'&hellip;</span>');
+      else if(st==='failed')
+        chips.push('<span class="mtg-chip warn"><i class="fa-solid fa-triangle-exclamation"></i> Transcription failed</span>');
+      else if(!last.audio_url)
+        chips.push('<span class="mtg-chip"><i class="fa-solid fa-microphone-slash"></i> Not recorded '+esc2(heldTxt)+'</span>');
+      if(!last.audio_url||st==='failed')
+        addRec='<button class="mtg-join alt" onclick="event.stopPropagation();mtgAddRecording('+last.id+')" title="Upload the audio from that meeting — JAIN-E will transcribe it">Add recording</button>';
+    }
+
+    // ACTIONS — Record only appears on the day the meeting actually runs, because mtgTryRecord
+    // refuses every other day, so offering it then was only ever a way to be told no.
+    let join='';
+    if(m.mode==='online'&&m.meet_link) join+='<button class="mtg-join" onclick="event.stopPropagation();mtgTryJoin('+m.id+')" title="Join meeting">Join</button>';
+    else if(m.mode==='online') join+='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>';
+    if(nx===today&&!doneToday) join+='<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record it — JAIN-E transcribes it when you stop">Record</button>';
+    join+=addRec;
     const mine = eq(m.created_by,me());
-    const isRecurring = !!(m.recur_type&&m.recur_type!=='none');
     const editBtn = mine ? '<button class="mtg-del" onclick="event.stopPropagation();mtgOpenCreate('+m.id+')" title="Edit meeting"><i class="fa-solid fa-pen"></i></button>' : '';
     const delBtn = mine ? '<button class="mtg-del" onclick="event.stopPropagation();mtgCancelAsk('+m.id+')" title="Cancel meeting"><i class="fa-solid fa-trash"></i></button>' : '';
-    // Recurring meetings: clicking anywhere on the free space of the card opens its Logs
-    // (past occurrences) — no separate Logs button needed. One-time meetings aren't clickable
-    // here (they have no history yet; their completed record only exists after in Archive).
-    const cardClick = isRecurring ? ' onclick="navTo(\'tasks/meetings/logs/'+m.id+'\')" style="cursor:pointer" title="View past occurrences"' : '';
+    // Clicking anywhere on the free space of the card opens the meeting's own detail page — basic
+    // info first, then every day-wise occurrence below it. Once a one-time meeting is actually held
+    // its acc.meetings row is deleted and its card disappears from this list entirely (the
+    // completed record then only lives in Archive), so this only ever fires pre-completion for one
+    // -time meetings — which is fine, the day-wise section just reads "No completed occurrences yet".
+    const cardClick = ' onclick="navTo(\'tasks/meetings/detail/'+m.id+'\')" style="cursor:pointer" title="View meeting details"';
     return '<div class="mtg-card"'+cardClick+'>'
       +'<div class="mtg-bar" style="background:'+modeColor+'"></div>'
-      +'<div class="mtg-time">'+esc2(timeLabel)+'</div>'
-      +'<div class="mtg-info"><div class="mtg-title">'+esc2(m.title)+(recurLbl?(' <span class="mtg-recur-tag"><i class="fa-solid fa-rotate"></i> '+esc2(recurLbl)+'</span>'):'')+(weekCount?(' <span class="mtg-recur-tag" style="color:#0369a1;background:#eff6ff">×'+weekCount+' more this week</span>'):'')+'</div><div class="mtg-meta">'+whereHtml+' · <span style="color:'+modeColor+';font-weight:600">'+mtgModeLabel(m)+'</span>'+mtgAvatars(people2)+'</div></div>'
+      +timeCol
+      +'<div class="mtg-info">'
+        +'<div class="mtg-title">'+esc2(m.title)+(recurLbl?(' <span class="mtg-recur-tag"><i class="fa-solid fa-rotate"></i> '+esc2(recurLbl)+'</span>'):'')+'</div>'
+        +'<div class="mtg-chips">'+chips.join('')+'</div>'
+        +'<div class="mtg-meta">'+mtgAvatars(people2)+'</div>'
+      +'</div>'
       +'<div class="mtg-actions">'+join+editBtn+delBtn+'</div>'
       +'</div>';
   }
+  // Transcription for an occurrence that completed WITHOUT an in-app recording — nobody pressed
+  // Record, or Google closed an online call on its own. The audio goes to exactly the same place
+  // a live recording does and lands in the same queue, so JAIN-E's own transcriber picks it up in
+  // whichever desktop browser has the portal open — no second path to keep working.
+  window.mtgAddRecording=function(logId){
+    const inp=document.createElement('input');
+    inp.type='file'; inp.accept='audio/*,video/*'; inp.style.display='none';
+    inp.onchange=async function(){
+      const f=inp.files&&inp.files[0];
+      try{ inp.remove(); }catch(_e){}
+      if(!f) return;
+      let l=null;
+      try{ const {data}=await ACC().from('meeting_logs').select('id,meeting_id,occurrence_date,title').eq('id',logId).maybeSingle(); l=data; }catch(_e){}
+      if(!l){ toast('Could not find that meeting occurrence.','err'); return; }
+      toast('Uploading the recording…');
+      const ext=String(f.name||'').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,5)||'webm';
+      const key='accountability/meeting-audio/'+(l.meeting_id||('log'+l.id))+'-'+l.occurrence_date+'-'+Date.now()+'.'+ext;
+      const up=await mtgUploadAudio(key,f);
+      if(!up||!up.data){ toast('Upload failed: '+(((up||{}).error||{}).message||'unknown error'),'err'); return; }
+      // transcript_attempts resets so a previously-failed occurrence gets a fresh set of tries —
+      // claim_transcription_job stops handing a job out after three.
+      try{
+        const {error}=await ACC().from('meeting_logs')
+          .update({audio_url:up.data.path,transcript_status:'processing',transcript_attempts:0,transcript_claimed_at:null})
+          .eq('id',logId);
+        if(error) throw error;
+      }catch(e){ toast('Could not queue the transcription: '+((e&&e.message)||e),'err'); return; }
+      try{ usageQueue('tasks.meetings.add_a_recording_for_transcription','create',{title:l.title}); }catch(_e){}
+      toast('Recording added — JAIN-E is transcribing it now.','ok');
+      navTo(String(location.hash||'').indexOf('/meetings/log/')>=0 ? ('tasks/meetings/log/'+logId) : 'tasks/meetings');
+    };
+    document.body.appendChild(inp); inp.click();
+  };
   function mtgDateFieldHtml(recur,m){
     const val = (m&&m.meeting_date)?m.meeting_date:'';
     if(recur==='daily') return '<label>Date</label><div class="mtg-static-hint">Repeats every day</div>';
@@ -9973,6 +10890,15 @@
     const pickable = (GOOGLE_CONNECTED===true)
       ? list.filter(function(p){ const e=String(p.email||'').toLowerCase(); return !eq(p.email,my) && (connected.has(e) || selSet.has(e)); })
       : list.filter(function(p){ return !eq(p.email,my); });
+    // The picker above only ever lists people already in the company directory. Anyone outside it —
+    // a client, a vendor, anyone without a JainE account — has to be typed in by email instead; the
+    // Google Calendar invite goes out to them exactly the same way (google-calendar-sync sends the
+    // whole meeting_attendees list to Google, with no directory check on that side at all). An
+    // attendee already saved on this meeting who isn't in `pickable` (i.e. wasn't picked from the
+    // directory) is assumed to be one of these and is restored here, or editing would silently drop
+    // them the moment the picker re-renders without a matching row for their email.
+    const pickableSet = new Set(pickable.map(function(p){ return String(p.email||'').toLowerCase(); }));
+    MTG_EXTRA = editing ? selAtt.filter(function(e){ return !pickableSet.has(String(e||'').toLowerCase()); }) : [];
     const recurVal = m ? (m.recur_type||'none') : 'none';
     // New meetings default to Offline when Google isn't connected (Online needs a real Meet link).
     const modeVal = m ? (m.mode||'online') : (GOOGLE_CONNECTED===true ? 'online' : 'offline');
@@ -9987,12 +10913,38 @@
       +'<div id="mtgLinkWrap">'+mtgLinkFieldHtml(modeVal,m)+'</div>'
       +'<label>Attendees <span style="color:var(--slate);font-weight:400">('+(GOOGLE_CONNECTED===true?'optional — only people who\'ve connected Google can be added':'optional')+')</span></label>'+msWidget('mtgAttBox',pickable,selAtt)
       +((GOOGLE_CONNECTED===true&&!pickable.length)?'<p style="color:var(--slate);font-size:12.5px;margin:4px 0 0">Nobody else has connected their Google account yet.</p>':'')
+      +'<label style="margin-top:10px">Add someone outside the company <span style="color:var(--slate);font-weight:400">(optional — any email, e.g. a client or vendor)</span></label>'
+      +'<div style="display:flex;gap:8px"><input type="email" id="mtgExtraEmail" placeholder="name@example.com" style="flex:1" onkeydown="if(event.key===\'Enter\'){event.preventDefault();mtgAddExtraAttendee();}"><button type="button" class="ac-btn" onclick="mtgAddExtraAttendee()">Add</button></div>'
+      +'<div id="mtgExtraChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">'+mtgExtraChipsHtml()+'</div>'
       +'<div id="mtgConflictBox"></div>'
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" id="mtgSaveBtn" onclick="mtgFormSave('+(editing?id:'null')+')"><i class="fa-solid fa-check"></i> '+(editing?'Save changes':'Schedule')+'</button></div>');
     MTG_CONFLICT_EDIT_ID = editing ? id : null;
     mtgWireConflictCheckOnce();
     mtgRefreshConflicts();
+  };
+  function mtgExtraChipsHtml(){
+    return (MTG_EXTRA||[]).map(function(e){
+      return '<span class="chip active" style="cursor:default">'+esc2(e)
+        +'<i class="fa-solid fa-xmark" style="cursor:pointer;margin-left:2px" onclick="mtgRemoveExtraAttendee(\''+escJs(e)+'\')"></i></span>';
+    }).join('');
+  }
+  window.mtgAddExtraAttendee=function(){
+    const inp=$('mtgExtraEmail'); if(!inp) return;
+    const v=(inp.value||'').trim().toLowerCase();
+    if(!v) return;
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)){ toast('Enter a valid email address','err'); return; }
+    if(eq(v,me())){ toast('That\'s you — no need to add yourself','warn'); return; }
+    if(MTG_EXTRA.some(function(e){return eq(e,v);})){ toast('Already added','warn'); inp.value=''; return; }
+    MTG_EXTRA.push(v);
+    inp.value='';
+    const host=$('mtgExtraChips'); if(host) host.innerHTML=mtgExtraChipsHtml();
+    try{ if(typeof mtgRefreshConflicts==='function')mtgRefreshConflicts(); }catch(_e){}
+  };
+  window.mtgRemoveExtraAttendee=function(email){
+    MTG_EXTRA=MTG_EXTRA.filter(function(e){return !eq(e,email);});
+    const host=$('mtgExtraChips'); if(host) host.innerHTML=mtgExtraChipsHtml();
+    try{ if(typeof mtgRefreshConflicts==='function')mtgRefreshConflicts(); }catch(_e){}
   };
   window.mtgFormSave=async function(id){
     const editing = id!=null;
@@ -10058,7 +11010,11 @@
         }
       }
     }
-    const attendees=(typeof msGet==='function'?msGet('mtgAttBox'):[]).filter(function(e){return !eq(e,me());});
+    // Directory picks plus whatever was typed in under "Add someone outside the company" — the
+    // Google side treats them identically (google-calendar-sync just mails the whole list an
+    // invite), so there's no reason to keep them in separate arrays past this point.
+    const pickedAtt=(typeof msGet==='function'?msGet('mtgAttBox'):[]);
+    const attendees=[...new Set(pickedAtt.concat(MTG_EXTRA||[]))].filter(function(e){return !eq(e,me());});
     const b=$('mtgSaveBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
     const row={title:title,mode:mode,recur_type:recur,meeting_date:meeting_date,recur_day:recur_day,recur_date:recur_date,start_time:start,end_time:end};
     if(mode==='offline') row.meet_link=null; // real Meet links only ever exist for online meetings — clear any stale one if switched away from online
@@ -10205,9 +11161,12 @@
     } else if(l.attendance_status==='fetched'){
       const parts=(l.participants||[]);
       const joinedRows=parts.length?parts.map(function(p){
-        const durLbl=p.duration_min!=null?(' · '+p.duration_min+' min'):'';
+        // The actual clock times, not just the derived duration - "who joined and when" needs the
+        // "when" spelled out, same IST-formatted style already used for the recording's own start/end.
+        const timesLbl=(p.join?(' · joined '+esc2(mtgClockIST(p.join))):'')+(p.leave?(' – left '+esc2(mtgClockIST(p.leave))):'');
+        const durLbl=p.duration_min!=null?(' ('+p.duration_min+' min)'):'';
         const rejoinLbl=p.rejoined?' <span style="color:#a16207;font-weight:600">(rejoined)</span>':'';
-        return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(p.name)+durLbl+rejoinLbl+'</div>';
+        return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(p.name)+timesLbl+durLbl+rejoinLbl+'</div>';
       }).join(''):'<p style="color:var(--slate);font-size:13px;margin:2px 0 0">Nobody joined this call.</p>';
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
         +'<div style="margin-top:8px"><b style="font-size:12.5px;color:var(--slate)">Joined ('+parts.length+' of '+invitedNames.length+')</b>'+joinedRows+'</div>';
@@ -10228,12 +11187,17 @@
     const recordingHtml = audioSrc
       ? ('<audio controls preload="none" style="width:100%;margin-top:4px" src="'+esc2(audioSrc)+'"></audio>')
       : ('<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No recording was captured for this meeting.'
-         +(l.mode==='online'?' Use the <b>Record</b> button during an online meeting and share the meeting tab\'s audio to capture one.':'')+'</p>');
+         +(l.mode==='online'?' Use the <b>Record</b> button during an online meeting and share the meeting tab\'s audio to capture one.':'')+'</p>'
+         // A meeting can also be recorded on a phone, a dictaphone or Meet's own recording. Taking
+         // the file here runs it through the same transcriber, so an occurrence that was completed
+         // without pressing Record isn't stuck without a transcript for good.
+         +'<div style="margin-top:10px"><button class="ac-btn primary" onclick="mtgAddRecording('+l.id+')"><i class="fa-solid fa-file-audio"></i> Add a recording to transcribe</button>'
+         +'<div style="color:var(--slate);font-size:12px;margin-top:6px">Upload the audio or video from this meeting and JAIN-E will transcribe it automatically.</div></div>');
     // One-time meetings' logs have meeting_id set to null once the meeting itself is deleted
     // (see acc.log_completed_meetings) — those were only ever reachable from Archive, so Back
-    // goes there. Recurring meetings' logs keep meeting_id, so Back returns to that meeting's
-    // own Logs page instead.
-    const backTarget = l.meeting_id!=null ? ('tasks/meetings/logs/'+l.meeting_id) : 'tasks/archive';
+    // goes there. A meeting that still exists keeps meeting_id, so Back returns to its own detail
+    // page (basic info + every day-wise occurrence) instead.
+    const backTarget = l.meeting_id!=null ? ('tasks/meetings/detail/'+l.meeting_id) : 'tasks/archive';
     v.innerHTML='<div class="tp-head">'
       +'<div><div class="tp-title"><i class="fa-solid fa-box-archive" style="color:#7c3aed"></i> '+esc2(l.title)+'</div>'
       +'<div class="tp-sub">'+fmtDateY(l.occurrence_date)+'</div></div>'
@@ -10247,8 +11211,54 @@
       +'<div class="tp-card"><h3><i class="fa-solid fa-circle-play" style="color:#64748b"></i> Recording</h3>'+recordingHtml+'</div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-file-lines" style="color:#64748b"></i> Transcript</h3>'+transcriptHtml+'</div>';
   }
-  // Recurring meetings never go to Archive — clicking anywhere on their card (mtgCard) navigates
-  // here instead, listing every past completed occurrence; each row navigates to mtgLogPage above.
+  // A meeting's own detail page: basic info first (mode, recurrence, time, organizer, invited
+  // people, Meet link), then every day-wise occurrence below it — reached by clicking anywhere on
+  // its card (mtgCard), for one-time and recurring meetings alike. Previously only recurring
+  // meetings were clickable at all, and clicking skipped straight to the bare occurrence list
+  // (mtgLogsPage, still below, now only reached from here or old links) with no basic info first.
+  // Self-contained like mtgLogPage: fetches the meeting itself rather than assuming MTG_LIST/MTG_ATT
+  // are already warm, so it also works on a direct link/refresh.
+  async function mtgDetailPage(v,meetingId){
+    injectCss(); setCrumb(['Accountability','Meeting']);
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    let m=(MTG_LIST||[]).find(function(x){return x.id===meetingId;});
+    if(!m){ try{ const {data}=await ACC().from('meetings').select('*').eq('id',meetingId).maybeSingle(); m=data; }catch(e){} }
+    if(!m){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">Meeting not found — it may have been cancelled.</div></div>'; return; }
+    const plist=await people();
+    let attEmails=[];
+    try{ attEmails=mtgAllAttendees(m); }catch(e){ attEmails=[m.created_by].filter(Boolean); }
+    const names=attEmails.map(function(e){return nameOf(plist,e);}).filter(Boolean).join(', ');
+    const recurLbl=mtgRecurLabel(m);
+    const modeColor=m.mode==='offline'?'#64748b':'#2563eb';
+    const isOneOff=(!m.recur_type||m.recur_type==='none');
+    const basicHtml='<div class="gcal-panel-row"><i class="fa-solid '+(m.mode==='offline'?'fa-people-group':'fa-video')+'" style="color:'+modeColor+'"></i> '+esc2(mtgModeLabel(m))+(recurLbl?(' · '+esc2(recurLbl)):'')+'</div>'
+      +(isOneOff
+        ? '<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> '+esc2(fmtDateY(m.meeting_date))+' · '+esc2(mtgFmtTime(m.start_time))+(m.end_time?(' – '+esc2(mtgFmtTime(m.end_time))):'')+'</div>'
+        : '<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> '+esc2(mtgFmtTime(m.start_time))+(m.end_time?(' – '+esc2(mtgFmtTime(m.end_time))):'')+'</div>')
+      +'<div class="gcal-panel-row"><i class="fa-solid fa-user"></i> Organized by '+esc2(nameOf(plist,m.created_by)||m.created_by)+'</div>'
+      +(names?('<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(names)+'</div>'):'')
+      +((m.mode==='online'&&m.meet_link)?('<div class="gcal-panel-row"><i class="fa-solid fa-link"></i> <a href="'+esc2(m.meet_link)+'" target="_blank" rel="noopener">Meet link</a></div>'):'');
+    let logs=[];
+    try{ const {data}=await ACC().from('meeting_logs').select('*').eq('meeting_id',meetingId).order('occurrence_date',{ascending:false}).limit(100); logs=data||[]; }catch(e){}
+    const dayRows=logs.length?logs.map(function(l){
+      return '<div class="mtg-log-row" onclick="navTo(\'tasks/meetings/log/'+l.id+'\')">'
+        +'<div><div class="mtg-log-title">'+esc2(fmtDateY(l.occurrence_date))+'</div><div class="mtg-log-meta">'+esc2(mtgLogTimeLabel(l))+'</div></div>'
+        +mtgAttendanceBadgeHtml(l)
+        +'</div>';
+    }).join(''):'<div class="ac-empty" style="cursor:default">No completed occurrences yet</div>';
+    const mine=eq(m.created_by,me());
+    v.innerHTML='<div class="tp-head">'
+      +'<div><div class="tp-title"><i class="fa-solid fa-video" style="color:#1d4ed8"></i> '+esc2(m.title)+'</div>'
+      +'<div class="tp-sub">Meeting details</div></div>'
+      +'<div class="tp-acts">'
+        +(mine?('<button class="ac-btn ic" title="Edit meeting" onclick="mtgOpenCreate('+m.id+')"><i class="fa-solid fa-pen"></i></button>'):'')
+        +'<button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button>'
+      +'</div></div>'
+      +'<div class="tp-card">'+basicHtml+'</div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-calendar-days" style="color:#7c3aed"></i> Day-wise — who joined, and when</h3>'+dayRows+'</div>';
+  }
+  // Superseded as the card's own click target by mtgDetailPage above, which now embeds this same
+  // occurrence list under a meeting's basic info — kept for any old link still pointing here.
   async function mtgLogsPage(v,meetingId){
     injectCss(); setCrumb(['Accountability','Meeting Logs']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -10305,9 +11315,17 @@
       const factsHtml=facts.length?('<div class="mtg-tr-facts">'+facts.map(function(f){return '<div class="mtg-tr-fact"><div class="k">'+esc2(f[0])+'</div><div class="v">'+esc2(f[1])+'</div></div>';}).join('')+'</div>'):'';
       const hasBn=!!(l.transcript_bn&&String(l.transcript_bn).trim());
       const lang=(MTG_LOG_LANG==='bn'&&hasBn)?'bn':'en';
+      // The language switch is only offered when there really ARE two versions to switch between.
+      // A transcript JAIN-E made itself is a single faithful record in the languages spoken —
+      // translating it would need a language model, which is precisely what is no longer used —
+      // so showing an "English / Original" pair that served the same text twice would be a lie
+      // about what is stored. Older Gemini-era logs do have both and keep the switch.
       const toggle='<div class="mtg-tr-bar"><div class="mtg-tr-h"><i class="fa-solid fa-quote-left"></i> Transcript</div>'
-        +'<div class="mtg-tr-btns"><button class="ac-btn'+(lang==='en'?' primary':'')+'" id="mtgLang_en" onclick="mtgSetLang(\'en\')">English</button>'
-        +'<button class="ac-btn'+(lang==='bn'?' primary':'')+'" id="mtgLang_bn" onclick="mtgSetLang(\'bn\')">বাংলা / Original</button></div></div>';
+        +(hasBn
+          ? ('<div class="mtg-tr-btns"><button class="ac-btn'+(lang==='en'?' primary':'')+'" id="mtgLang_en" onclick="mtgSetLang(\'en\')">English</button>'
+             +'<button class="ac-btn'+(lang==='bn'?' primary':'')+'" id="mtgLang_bn" onclick="mtgSetLang(\'bn\')">বাংলা / Original</button></div>')
+          : '<span style="font-size:11.5px;color:var(--slate)">Transcribed by JAIN-E on this device</span>')
+        +'</div>';
       return factsHtml+sumHtml+toggle+'<div id="mtgTrBody">'+mtgTrBody(l,lang)+'</div>';
     }
     if(l.transcript_status==='processing') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing the recording&hellip; this appears here automatically once ready.</p>';
@@ -10380,9 +11398,9 @@
     // An OFFLINE meeting happens in the room, so the microphone hears everyone.
     // An ONLINE meeting does not: the other people arrive as sound coming OUT of this device, which
     // a microphone either misses entirely (headphones) or picks up faintly. So for online meetings
-    // we also ask the browser to share the Meet tab's audio and mix the two together, giving Gemini
-    // one track with both sides of the conversation. If that share is declined we fall back to the
-    // microphone alone rather than failing outright.
+    // we also ask the browser to share the Meet tab's audio and mix the two together, so the
+    // transcriber gets one track with both sides of the conversation. If that share is declined we
+    // fall back to the microphone alone rather than failing outright.
     const isOnline=(R.meeting.mode==='online');
     let stream, mic=null, tab=null, mixCtx=null;
     try{ mic=await navigator.mediaDevices.getUserMedia({audio:true}); }
@@ -10448,6 +11466,26 @@
     const resp=await mtgRecCall({action:'save-recording',meeting_id:R.meeting.id,occ:occ,actual_start:R.startedAt,actual_end:endedAt,audio_url:audioPath});
     if(!resp||!resp.log_id){ toast('Could not save the recording: '+((resp&&resp.error)||'unknown error'),'err'); if(sp){sp.disabled=false;sp.innerHTML='<i class="fa-solid fa-stop"></i> Stop &amp; finish';} return; }
     try{ usageQueue('tasks.meetings.start_stop_recording','create',{title:R.meeting&&R.meeting.title}); }catch(_e){}
+    // TRANSCRIBE IT HERE, NOW. The audio is still in memory on the machine that just recorded it,
+    // so there is nothing to download and nobody else's browser has to be open for this to happen.
+    // Deliberately NOT awaited: the wrap-up screen is what the organiser needs next, and its
+    // existing poller shows the transcript the moment this lands. If they close the tab first the
+    // recording is already in S3, so the catch-up worker finishes the job instead — the work is
+    // never lost, only moved.
+    if(blob.size && resp.log_id){
+      const logId=resp.log_id;
+      (async function(){
+        try{
+          wtChip(true,'JAIN-E is transcribing this meeting…');
+          await wtRunAndSave(await wtDecodeBuffer(await blob.arrayBuffer()), logId);
+          toast('Transcript ready.','ok');
+        }catch(_e){
+          // Hand it back to the queue rather than marking it failed — a closed tab, a browser
+          // without WebGPU or a machine that went to sleep is a reason to try again elsewhere.
+          try{ await mtgRecCall({action:'save-transcript',log_id:logId,status:'processing'}); }catch(_e2){}
+        }finally{ wtChip(false); }
+      })();
+    }
     MTG_REC=null;
     navTo('tasks/meetings/wrap/'+resp.log_id);
   };
@@ -10525,7 +11563,7 @@
     toast('Saved to Logs','ok');
     const l=MTG_WRAP.l, lid=MTG_WRAP.logId; MTG_WRAP=null;
     try{ usageQueue('tasks.meetings.save_meeting_wrap_up_summary','update',{title:l&&l.title}); }catch(_e){}
-    if(l && l.recur_type && l.recur_type!=='none' && l.meeting_id!=null) navTo('tasks/meetings/logs/'+l.meeting_id);
+    if(l && l.recur_type && l.recur_type!=='none' && l.meeting_id!=null) navTo('tasks/meetings/detail/'+l.meeting_id);
     else navTo('tasks/meetings/log/'+lid);
   };
 
@@ -10557,15 +11595,40 @@
     })();
     return WT_pipePromise;
   }
-  async function wtDecode(url){
-    const res=await fetch(url); if(!res.ok) throw new Error('audio fetch '+res.status);
-    const buf=await res.arrayBuffer();
+  function wtDecodeBuffer(buf){
     const AC=window.AudioContext||window.webkitAudioContext;
     const ctx=new AC({sampleRate:16000});
-    const audio=await ctx.decodeAudioData(buf);
-    const data=audio.getChannelData(0).slice();
-    try{ ctx.close(); }catch(_e){}
-    return data;
+    return ctx.decodeAudioData(buf).then(function(audio){
+      const data=audio.getChannelData(0).slice();
+      try{ ctx.close(); }catch(_e){}
+      return data;
+    });
+  }
+  async function wtDecode(url){
+    const res=await fetch(url); if(!res.ok) throw new Error('audio fetch '+res.status);
+    return wtDecodeBuffer(await res.arrayBuffer());
+  }
+  // Turn decoded audio into a transcript and store it. The model runs HERE, in this browser:
+  // the recording is never sent to Gemini, Claude, Google or any other service, and nothing is
+  // billed per use.
+  //
+  // WHAT A LOCAL TRANSCRIPT DOES NOT INCLUDE. summary, num_speakers, transcript_en and
+  // transcript_bn were all produced by asking a language model, which is exactly what is no longer
+  // being done. Whisper returns one thing - the words, in the languages they were spoken in - so
+  // that is what gets stored, and the LLM-only columns are explicitly cleared rather than left
+  // holding a stale value from an earlier engine.
+  async function wtRunAndSave(audio, logId){
+    const pipe=await wtLoadPipe();
+    const out=await pipe(audio,{chunk_length_s:30,stride_length_s:5,task:'transcribe'});
+    const text=(out&&out.text!=null?String(out.text):'').trim();
+    if(!text) throw new Error('empty transcript');
+    const {error}=await ACC().from('meeting_logs').update({
+      transcript:text, transcript_en:null, transcript_bn:null,
+      summary:null, num_speakers:null, languages:null,
+      transcript_status:'ready'
+    }).eq('id',logId);
+    if(error) throw error;
+    return text;
   }
   async function wtTick(){
     if(!WT_started) return;
@@ -10574,56 +11637,76 @@
     let job=null;
     try{ const r=await mtgRecCall({action:'claim-transcription'}); if(r&&r.log_id)job=r; }catch(_e){}
     if(!job){ return again(60000); }
-    WT_busy=true; wtChip(true,'Transcribing a meeting…');
+    WT_busy=true; wtChip(true,'JAIN-E is transcribing a meeting…');
     try{
-      const pipe=await wtLoadPipe();
       let src=job.audio_url;
       if(typeof src==='string' && src.indexOf('s3:')===0){ const {data}=await s3Sign('get',src.slice(3)); src=data&&data.url; }
       if(!src) throw new Error('no audio url');
-      const audio=await wtDecode(src);
-      const out=await pipe(audio,{chunk_length_s:30,stride_length_s:5,task:'transcribe'});
-      const text=(out&&out.text!=null?String(out.text):'').trim();
-      await mtgRecCall({action:'save-transcript',log_id:job.log_id,transcript:text,status:'ready'});
+      await wtRunAndSave(await wtDecode(src), job.log_id);
     }catch(e){
       // release the job so another browser/attempt can try (claim() gives up after 3 tries)
       try{ await mtgRecCall({action:'save-transcript',log_id:job.log_id,status:'processing'}); }catch(_e){}
     }finally{ WT_busy=false; wtChip(false); again(3000); }
   }
-  // TURNED OFF. Recordings are transcribed server-side by GEMINI (the transcribe-pending function,
-  // which runs on its own every couple of minutes) — the same engine the Transcription module uses.
-  // Gemini is markedly better on the Bengali/Hindi/English code-switching in these meetings than the
-  // small in-browser Whisper model was, and it doesn't need anyone to leave a desktop browser open.
-  // Both paths claim from the same queue, so leaving this running would race Gemini and sometimes
-  // win with the worse transcript. The worker code above is left in place as a fallback should the
-  // Gemini key ever be withdrawn.
+  // OFF. Transcription is Gemini's job again (transcribe-pending / meet-transcript-sync, both
+  // re-scheduled) — live, server-side, no browser needed. This in-browser Whisper worker stays
+  // switched off rather than deleted, same reason it was written in the first place: a fallback
+  // should the Gemini key ever be withdrawn. It must not run alongside Gemini: the cron jobs pick
+  // up transcript_status='processing' rows directly with no claim/lock step, while this worker
+  // claims jobs atomically through claim_transcription_job() — both live at once would race for
+  // the same rows, and one engine is already enough.
   function mtgStartBrowserTranscriber(){ return; }
 
+  // The standing list of meetings that finished without a transcript, at the top of the tab where
+  // it can't be scrolled past. Every meeting is supposed to end up transcribed; an online one now
+  // does so on its own, but an offline one can only ever be transcribed from a recording somebody
+  // made — so when that didn't happen, this is where it gets put right, rather than the occurrence
+  // quietly ageing into Archive with nothing in it.
+  function mtgOwedHtml(){
+    const list=MTG_OWED||[];
+    if(!list.length) return '';
+    const n=list.length;
+    return '<div class="mtg-owed">'
+      +'<div class="mtg-owed-h"><i class="fa-solid fa-file-circle-exclamation"></i> '
+        +n+(n===1?' meeting has':' meetings have')+' no transcript</div>'
+      +'<div class="mtg-owed-sub">JAIN-E transcribes every meeting it has a recording of. These finished without one — add the audio and the transcript appears on the meeting automatically.</div>'
+      +list.slice(0,6).map(function(l){
+        const failed=l.transcript_status==='failed';
+        return '<div class="mtg-owed-row">'
+          +'<div class="mtg-owed-t"><b>'+esc2(l.title)+'</b>'
+            +'<span class="mtg-owed-when">'+esc2(fmtDateY(l.occurrence_date))+' · '+(l.mode==='offline'?'Offline':'Online')
+            +(failed?' · transcription failed':'')+'</span></div>'
+          +'<button class="mtg-join alt" onclick="mtgAddRecording('+l.id+')" title="Upload the audio — JAIN-E will transcribe it">'
+            +(failed?'Try again':'Add recording')+'</button>'
+          +'</div>';
+      }).join('')
+      +(n>6?('<div class="mtg-owed-more">and '+(n-6)+' more — see Archive</div>'):'')
+      +'</div>';
+  }
   function mtgRenderOnly(){
     try{ mtgStartBrowserTranscriber(); }catch(e){}
     const b=$('acBody'); if(!b)return;
     // Meetings are open to everyone: anyone can create and run OFFLINE meetings without Google.
-    // Online (Google Meet) meetings still need a connected thejaingroup.com Google account — that's
-    // enforced in the Schedule form below, instead of locking the whole section for everyone.
+    // Online (Google Meet) meetings need a connected Google account — any JAIN-E user's, on any
+    // email domain, not just thejaingroup.com — that's enforced in the Schedule form below, instead
+    // of locking the whole section for everyone.
     let mtgBanner='';
     if(GOOGLE_CONNECTED!==true){
-      const myEmail=me();
-      const offDomain=!/@thejaingroup\.com$/i.test(myEmail||'');
       mtgBanner='<div class="mtg-connect-banner"><i class="fa-brands fa-google mcb-ico"></i><div class="mcb-txt">'
-        +(offDomain
-            ? 'You\'re signed in as <b>'+esc2(myEmail)+'</b>. Online (Google Meet) meetings need a thejaingroup.com Google account — but you can create and run <b>Offline meetings</b> right here.'
-            : 'You can create and run <b>Offline meetings</b> right away. Connect Google to also schedule <b>Online</b> meetings with an auto-created Meet link.')
+        +'You can create and run <b>Offline meetings</b> right away. Connect Google to also schedule <b>Online</b> meetings with an auto-created Meet link.'
         +'</div>'
-        +(offDomain?'':'<button class="mcb-btn" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>')
+        +'<button class="mcb-btn" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>'
         +'</div>';
     }
     const groups=mtgGroupedSections(MTG_GROUP);
     groups.forEach(function(g){ g.items=g.items.slice().sort(function(a,b){return mtgSortKey(a).localeCompare(mtgSortKey(b));}); });
-    let body=groups.map(function(g){ const isWeek=/This Week$/.test(g.label); return '<div class="mtg-sec-label">'+esc2(g.label)+'</div>'+g.items.map(function(m){ return mtgCard(m,isWeek?m._weekCount:null); }).join(''); }).join('');
+    let body=groups.map(function(g){ return '<div class="mtg-sec-label">'+esc2(g.label)+'</div>'+g.items.map(function(m){ return mtgCard(m); }).join(''); }).join('');
     if(!groups.length) body='<div class="ac-empty" style="cursor:default;border:0">No meetings yet — click <b>Schedule Meeting</b> to add one.</div>';
     b.innerHTML='<div class="mtg-page">'
       +'<div class="mtg-main">'
       +'<div class="mtg-toolbar"><div class="mtg-toolbar-title">Meetings</div>'+mtgGoogleStatusHtml()+'<button class="mtg-create" onclick="mtgOpenCreate()"><i class="fa-solid fa-plus"></i> Schedule Meeting</button></div>'
       +mtgBanner
+      +mtgOwedHtml()
       +mtgGroupTabsHtml()
       +'<div class="mtg-body">'+body+'</div>'
       +'</div></div>';
@@ -10664,6 +11747,18 @@
     const b=$('acBody');
     const [list,{tasks,asg,pm},myRanks]=await Promise.all([people(), loadAll(), loadMyRanks()]);
     const delegatedByMeIds=new Set(tasks.filter(t=>t.parent_task_id&&isOwner(t)).map(t=>t.parent_task_id));
+    /* When each interview is and whether it has been answered, so a card can decide whether to
+       offer Reschedule. Read once for the whole visible list rather than a query per card. */
+    window._ivInfo={};
+    try{
+      const ivIds=Array.from(new Set(tasks.filter(function(t){return t.interview_id!=null;})
+                                          .map(function(t){return t.interview_id;})));
+      if(ivIds.length){
+        const {data:ivs}=await sb.schema('hr').rpc('interviews_info',{p_ids:ivIds});
+        (ivs||[]).forEach(function(v){ window._ivInfo[v.id]=v; });
+      }
+    }catch(_e){ window._ivInfo={}; }
+
     // Workflow step state (per-task) so rows can show Forward vs Receive/Reject correctly
     window._wfStepInfo={};
     try{
@@ -10684,7 +11779,7 @@
         let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,jaine_id,flow_id,trigger_details,created_by,skipped_seqs,route,route_seqs').in('id',caseIds); casesD=(r&&r.data)||[]; }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
-        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields').in('id',flowIds); flowsD=(r&&r.data)||[]; }
+        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields,id_label').in('id',flowIds); flowsD=(r&&r.data)||[]; }
         const flowMap={}; flowsD.forEach(function(f){ flowMap[f.id]=f; });
         /* How far the workflow actually runs, taken from its DEFINITION. Working "is this the last
            step?" out purely from the instance's own steps meant it depended on being able to READ
@@ -10754,7 +11849,7 @@
           // wfWhoOfStep/wfStepWhoText need the next step's DEFINITION (owner_emails/owner_from_trigger/...)
           // merged in - nextStep itself only ever carries the instance-row fields (person/candidates).
           const nextDef=nextStep?(stepDefByFlowSeq[c.flow_id+':'+nextStep.seq]||null):null;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,idLabel:f.id_label||'',flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -11627,7 +12722,46 @@
   function taskRow(t,asg,list,opt){
     opt=opt||{};
     const emails=(opt.ownerAvatar&&!opt.owner)?[t.delegator].filter(Boolean):(asg[t.id]||[]);
-    const approve=opt.approve?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve (A)" onclick="accApprove(${t.id},true)"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Decline (D)" onclick="accDecline(${t.id})"><i class="fa-solid fa-xmark"></i></button></div>`:'';
+    // ManPower/Referral approval tasks (see hrApprovalTaskSync in nexus-core.js) reuse this same
+    // Pending Approval card - it's exactly what Recruitment's own tab used to be - but Approve/
+    // Decline here must run the actual domain action (approve a JD, connect a referral) rather than
+    // the generic subtree-completion bookkeeping accApprove/accDecline do for an ordinary task.
+    /* THE DOCUMENT YOU ARE BEING ASKED TO APPROVE, ON THE TASK.
+       Approving a job description meant leaving Accountability, finding Recruitment, finding the
+       request and opening it from there - four steps to read the one thing the decision is about,
+       which is how approvals get rubber-stamped. The paperclip builds the same PDF Recruitment
+       does, from the same bytes, in a new tab. accountability.html loads nexus-core.js, so
+       hrJdPdfDownload is already here. */
+    const approve=opt.approve?(t.manpower_request_id!=null
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ic" style="height:30px;width:30px" title="Open the job description" onclick="hrTaskOpenJd(${t.manpower_request_id})"><i class="fa-solid fa-paperclip"></i></button><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve" onclick="hrTaskApproveManpower(${t.id},${t.manpower_request_id})"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="hrTaskRejectManpower(${t.id},${t.manpower_request_id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      /* APPROVE, NOT CONNECT. The task asks whether to accept the referral; connecting it to a
+         position is what HR does afterwards, in the Referrals tab, once it has been accepted.
+         Putting Connect here made the approval queue ask one question and offer the answer to a
+         different one - and left the task titled "Approve Referral" with no Approve button on it. */
+      :t.referral_id!=null
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve this referral" onclick="hrTaskApproveReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject this referral" onclick="hrTaskRejectReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      /* A JOB DESCRIPTION AND A CANDIDATE NEEDED THEIR OWN BRANCHES.
+         Without them both fell through to the generic accApprove/accDecline at the end, which does
+         the subtree bookkeeping for an ordinary task: the row vanished from the card and nothing
+         happened to the description or the candidate. A button that ticks itself off and changes
+         nothing is worse than a missing one, because it reports success. */
+      :t.job_description_id!=null
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve and publish to the Document Library" onclick="hrTaskApproveJd(${t.id},'${t.job_description_id}')"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="hrTaskRejectJd(${t.id},'${t.job_description_id}')"><i class="fa-solid fa-xmark"></i></button></div>`
+      :t.candidate_id!=null
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve this candidate" onclick="hrTaskApproveCandidate(${t.id},${t.candidate_id})"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject this candidate" onclick="hrTaskRejectCandidate(${t.id},${t.candidate_id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      /* An interview verdict, which is a different question from approving somebody: this asks how
+         the interview went, and the answer moves the candidate straight to Selected or Rejected. */
+      :t.interview_id!=null
+      /* RESCHEDULE TURNS UP A DAY AFTER THE INTERVIEW SHOULD HAVE HAPPENED.
+
+         Not before: while the day is still ahead, the only honest answers are Selected and
+         Rejected, and offering a third invites the interview to be pushed rather than held. A
+         day after, though, a booking with no verdict is the commonest loose end there is - the
+         candidate did not turn up, or it slipped - and the only ways out were to record a
+         verdict that never happened or leave the task for ever. */
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${ivIsStale(t.interview_id)?`<button class="ac-btn" style="height:30px" title="Move this interview to another day" onclick="ivReschedule(${t.interview_id})"><i class="fa-solid fa-calendar-day"></i> Reschedule</button>`:''}<button class="ac-btn ok ic" style="height:30px;width:30px" title="Selected" onclick="ivDecide(${t.interview_id},'Selected')"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Rejected" onclick="ivDecide(${t.interview_id},'Rejected')"><i class="fa-solid fa-xmark"></i></button></div>`
+      :`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve (A)" onclick="accApprove(${t.id},true)"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Decline (D)" onclick="accDecline(${t.id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      ):'';
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
     const wfReceived=wfInfo&&!!wfInfo.received_at;
     const wfNeedsReceive=wfInfo&&!wfReceived;
@@ -11695,7 +12829,14 @@
       : (emails.length?avatars(list,emails):'');
     const wfCombined=wfRowTitle(wfInfo,list,t&&t.description);
     const wfTitle=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
-    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
+    // Searchable but not necessarily shown: the workflow's own name/noun and JAINE's OWN instance
+    // number under its own label (e.g. "Challan Id 12") - not the invoice/challan number typed on
+    // the form, which is a completely different value that happens to live in the same row's
+    // visible detail line. A task whose visible text is only ever that instance's own field values
+    // never mentions the workflow's name or its JainE id at all otherwise.
+    const wfSearch=wfInfo?esc2([wfInfo.flowName,wfInfo.triggerEvent,
+      wfInfo.caseNo?((wfInfo.idLabel||'Id')+' '+wfInfo.caseNo):''].filter(Boolean).join(' ')):'';
+    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" data-id="${t.id}"${wfSearch?` data-wf="${wfSearch}"`:''} onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
   }
 
   function wirePointerDrag(col,sel,persist,onSwipeLeft){ col.querySelectorAll(sel).forEach(row=>{ const grip=row.querySelector('.grip'); if(!grip)return; grip.style.touchAction='none'; grip.addEventListener('pointerdown',function(e){ e.preventDefault(); e.stopPropagation(); try{grip.setPointerCapture(e.pointerId);}catch(_){} const startX=e.clientX,startY=e.clientY,isTouch=e.pointerType==='touch'; let mode=null,lastDx=0; window._dragging=true; function move(ev){ const dx=ev.clientX-startX,dy=ev.clientY-startY; lastDx=dx; if(mode===null){ if(Math.abs(dx)>10||Math.abs(dy)>10){ if(onSwipeLeft&&isTouch&&dx<0&&Math.abs(dx)>Math.abs(dy)*1.2){ mode='swipe'; } else { mode='drag'; row.classList.add('drag'); } } } if(mode==='swipe'){ row.style.transition='none'; row.style.transform='translateX('+Math.max(dx,-88)+'px)'; } else if(mode==='drag'){ const el=document.elementFromPoint(ev.clientX,ev.clientY); const tgt=el&&el.closest(sel); if(tgt&&tgt!==row&&col.contains(tgt)){ const r=tgt.getBoundingClientRect(); if(ev.clientY<r.top+r.height/2)col.insertBefore(row,tgt); else col.insertBefore(row,tgt.nextSibling); } } } function up(){ try{grip.releasePointerCapture(e.pointerId);}catch(_){} window._dragging=false; row.classList.remove('drag'); row.style.transition='transform .15s'; row.style.transform=''; document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); if(mode==='swipe'&&lastDx<-44)onSwipeLeft(row); else if(mode==='drag')persist(col); } document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); }); }); }
@@ -11770,8 +12911,16 @@
             if(lastDx<-44){ const gap=row.nextElementSibling; if(gap&&(gap.classList.contains('ac-ins')||gap.classList.contains('ac-addrow-ghost')))gap.click(); }
           } else if(hoverTgt){
             hoverTgt.classList.remove('swap-tgt');
-            const orderIds=fullOrderIds||[...col.querySelectorAll('.ac-row')].map(r=>Number(r.dataset.id));
-            crystallizeAndSwap(Number(row.dataset.id),Number(hoverTgt.dataset.id),orderIds);
+            /* Not while a search is on. The rows on screen are in match order, not priority
+               order, and where there is no stored order to fall back on the swap reads the
+               order off the screen - which would write the search layout back as the real
+               priority for everybody. */
+            if(window._accSearching){
+              toast('Clear the search box first \u2014 tasks cannot be re-ordered while filtered','err');
+            } else {
+              const orderIds=fullOrderIds||[...col.querySelectorAll('.ac-row')].map(r=>Number(r.dataset.id));
+              crystallizeAndSwap(Number(row.dataset.id),Number(hoverTgt.dataset.id),orderIds);
+            }
           }
           document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
         }
@@ -11825,7 +12974,37 @@
     const amOwner=eq(t.delegator,me()), amMember=members.some(e=>eq(e,me())), st=stOf(t); const iHaveDelegated=(dR.data||[]).length>0;
     const selfTask=amOwner&&amMember;
     const locked=ro&&st==='approved';
-    const canEdit=amOwner&&!locked;
+    /* AN HR APPROVAL TASK BELONGS TO ALL FOUR APPROVERS, NOT TO ONE OF THEM.
+
+       Ordinary tasks are owned by whoever delegated them, and only that person may delete one -
+       which is right, because somebody else's task is somebody else's business. The HR approval
+       tasks are different: the system writes four copies of the same question, one per approver,
+       and none of the four "owns" it more than the others. Opening the copy addressed to Khushbu
+       and finding no Delete is correct for a normal task and wrong for this one - it is the same
+       question, and clearing it is the same act.
+
+       So any of the four approvers may delete any copy of an approval task. Everything else is
+       unchanged. */
+    const isHrApproval = t.manpower_request_id!=null || t.referral_id!=null
+                      || t.candidate_id!=null || t.job_description_id!=null
+                      || t.interview_id!=null;
+    const hrApprovers = ['mgr.hr@thejaingroup.com','hr@thejaingroup.com',
+                         'career@thejaingroup.com','ayushruia1@gmail.com'];
+    const amApprover = isHrApproval && hrApprovers.some(e=>eq(e,me()));
+    const canEdit=(amOwner||amApprover)&&!locked;
+
+    /* AN APPROVAL TASK IS THE DECISION, NOT A NOTE ABOUT IT - SO IT CANNOT BE DELETED.
+
+       Deleting one does not cancel the hiring request, the referral, the candidate or the job
+       description behind it. It only removes the question. The record stays Pending for ever,
+       with nothing left anywhere that can approve it and nothing on screen saying so: the request
+       simply stops existing as far as anybody is concerned, and the person who raised it is still
+       waiting. Approve and Reject are the two ways out, and both leave a record of who decided.
+
+       Renaming and re-describing go the same way: the wording is written by the system from the
+       request, and an edited title would describe something other than what is being approved. */
+    const isApprovalTask = isHrApproval;
+    const canEditThis = canEdit && !isApprovalTask;
     const dueHist=acts.filter(a=>a.action==='due date changed');
     window._tp={dueHist,list,amOwner,amMember,tid,canApprove:(amOwner&&st==='await'),selfTask,comments};
     let A='';
@@ -11844,7 +13023,7 @@
     const verb=t.parent_task_id?'Delegated':'Assigned', doneC=subL.filter(s=>s.done).length;
     v.innerHTML=`
     <div class="tp-head">
-      <div><div class="tp-title"><i class="fa-solid fa-clipboard-check" style="color:#7c3aed"></i> ${esc2(t.title)} ${canEdit?`<button class="ac-btn ic" style="height:26px;width:26px" title="Rename" onclick="accEditTitle(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div>
+      <div><div class="tp-title"><i class="fa-solid fa-clipboard-check" style="color:#7c3aed"></i> ${esc2(t.title)} ${canEditThis?`<button class="ac-btn ic" style="height:26px;width:26px" title="Rename" onclick="accEditTitle(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div>
         <div class="tp-sub">${selfTask?'Self task':(verb+' to '+(members.map(e=>esc2(nameOf(list,e))).join(', ')||'nobody yet')+' by '+esc2(nameOf(list,t.delegator)))}</div></div>
       <div class="tp-acts">
         <button class="ac-btn ic" title="Back" onclick="navTo('tasks/work')"><i class="fa-solid fa-arrow-left"></i></button>
@@ -11853,11 +13032,12 @@
         ${A}
       </div>
     </div>
-    ${t.description?`<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description${canEdit?`<span class="r"><button class="ac-btn ic" title="Edit" onclick="accEditDesc(${tid})"><i class="fa-solid fa-pen"></i></button></span>`:''}</h3><div class="tp-desc">${mdBold(t.description)}</div></div>`:''}
+    ${t.description?`<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description${canEditThis?`<span class="r"><button class="ac-btn ic" title="Edit" onclick="accEditDesc(${tid})"><i class="fa-solid fa-pen"></i></button></span>`:''}</h3><div class="tp-desc">${mdBold(t.description)}</div></div>`:''}
     <div class="tp-card">
       <h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details<span class="r">
-        ${canEdit?`<button class="ac-btn ic" title="${t.description?'Edit':'Add'} description" onclick="accEditDesc(${tid})"><i class="fa-solid fa-align-left"></i></button>`:''}
-        ${canEdit?`<button class="ac-btn ic danger" title="Delete" onclick="accTaskDelete(${tid})"><i class="fa-solid fa-trash"></i></button>`:''}</span></h3>
+        ${canEditThis?`<button class="ac-btn ic" title="${t.description?'Edit':'Add'} description" onclick="accEditDesc(${tid})"><i class="fa-solid fa-align-left"></i></button>`:''}
+        ${canEditThis?`<button class="ac-btn ic danger" title="Delete" onclick="accTaskDelete(${tid})"><i class="fa-solid fa-trash"></i></button>`
+          :(isApprovalTask&&!locked?`<span style="font-size:11.5px;color:var(--slate);font-weight:500"><i class="fa-solid fa-lock" style="margin-right:5px"></i>Approve or reject to clear this</span>`:'')}</span></h3>
       <div class="tp-grid">
         <div class="tp-f"><div class="k">Due date</div><div class="v">${t.due_date?fmtDateY(t.due_date):'—'}${t.recur?` <span class="dp-chip-rep"><i class="fa-solid fa-rotate"></i> ${esc2(dpDescribe(t.recur))}</span>`:''} ${dueHist.length?`<a onclick="accDueHistory(${tid})" title="History"><i class="fa-solid fa-clock-rotate-left"></i></a>`:''} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit due date" onclick="accEditDue(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
         <div class="tp-f"><div class="k">Tag</div><div class="v">${projName?esc2(projName):'—'} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit tag" onclick="accEditProject(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
@@ -12130,8 +13310,26 @@
     openModal(`<div class="modal-head"><h3>Members <span style="font-size:12px;color:#94a3b8;font-weight:400">(owner cannot be a member)</span></h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="width:100%;box-sizing:border-box;overflow-x:hidden">${msWidget('emMembers',others,cur)}</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditMembersSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md'); };
   // usageQueue logged only when parts is non-empty (a real add/remove happened), after the actual
   // change, rather than through USAGE_MAP - captures who was added/removed, not just a click.
-  window.accEditMembersSave=async function(tid){ const sel=msGet('emMembers'); if(!sel.length){toast('At least one member required','err');return;} try{ const [oR,list]=await Promise.all([ACC().from('ptask_assignees').select('email').eq('task_id',tid),people()]); const oldE=(oR.data||[]).map(r=>r.email); const added=sel.filter(e=>!oldE.some(o=>eq(o,e))); const removed=oldE.filter(e=>!sel.some(x=>eq(x,e))); if(removed.length)await ACC().from('ptask_assignees').delete().eq('task_id',tid).in('email',removed); if(added.length)await ACC().from('ptask_assignees').insert(added.map(e=>({task_id:tid,email:e}))); const parts=[]; if(added.length)parts.push('added '+added.map(e=>nameOf(list,e)).join(', ')); if(removed.length)parts.push('removed '+removed.map(e=>nameOf(list,e)).join(', ')); if(parts.length){await sysMsg(tid,parts.join('; ')+' as member'+((added.length+removed.length)>1?'s':'')); try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts.join('; ')}); }catch(_e){}} closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Could not update members: '+((e&&e.message)||e),'err');} };
-  window.accTaskDelete=function(tid){ accConfirm('Delete this task permanently?', async function(){ try{ const [{data:pf},{data:cm}]=await Promise.all([ ACC().from('ptask_files').select('storage_path').eq('task_id',tid), ACC().from('ptask_comments').select('attach_path').eq('task_id',tid).not('attach_path','is',null) ]); const paths=[...(pf||[]).map(x=>x.storage_path),...(cm||[]).map(x=>x.attach_path)].filter(Boolean); await ACC().from('ptasks').delete().eq('id',tid); if(paths.length)await Promise.all(paths.map(p=>s3Delete(p).catch(()=>{}))); toast('Deleted','ok');navTo('tasks/work');}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} }); };
+  window.accEditMembersSave=async function(tid){ const sel=msGet('emMembers'); if(!sel.length){toast('At least one member required','err');return;} try{ const [oR,list]=await Promise.all([ACC().from('ptask_assignees').select('email').eq('task_id',tid),people()]); const oldE=(oR.data||[]).map(r=>r.email); const added=sel.filter(e=>!oldE.some(o=>eq(o,e))); const removed=oldE.filter(e=>!sel.some(x=>eq(x,e))); if(removed.length)await ACC().from('ptask_assignees').delete().eq('task_id',tid).in('email',removed); if(added.length)await ACC().from('ptask_assignees').insert(added.map(e=>({task_id:tid,email:e}))); const parts=[]; if(added.length)parts.push('added '+added.map(e=>nameOf(list,e)).join(', ')); if(removed.length)parts.push('removed '+removed.map(e=>nameOf(list,e)).join(', ')); if(parts.length){await sysMsg(tid,parts.join('; ')+' as member'+((added.length+removed.length)>1?'s':'')); /* Both halves: what changed, and who the task actually ended up with. It recorded only the change
+   ("added Ravi; removed Uma"), which left the Assigned to column empty on the one feature whose
+   whole subject is assignment - so the column had to be taken off it. `sel` is already the final
+   member list, so the answer was in hand and simply never written down. */
+try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts.join('; '), assignee:sel.map(e=>nameOf(list,e)).join(', ')}); }catch(_e){}} closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Could not update members: '+((e&&e.message)||e),'err');} };
+  /* Guarded here as well as on the button. The button is drawn from data already on screen; this
+     re-reads the task, so a page left open before the rule existed still cannot delete one. */
+  window.accTaskDelete=async function(tid){
+    try{
+      const {data:chk}=await ACC().from('ptasks')
+        .select('manpower_request_id,referral_id,candidate_id,job_description_id,interview_id')
+        .eq('id',tid).single();
+      if(chk&&(chk.manpower_request_id!=null||chk.referral_id!=null||chk.candidate_id!=null
+               ||chk.job_description_id!=null||chk.interview_id!=null)){
+        toast('An approval task cannot be deleted — approve or reject it instead, so the '
+              +'request behind it is not left waiting for ever','err');
+        return;
+      }
+    }catch(_e){ /* cannot confirm what it is - fall through to the normal confirmation */ }
+    accConfirm('Delete this task permanently?', async function(){ try{ const [{data:pf},{data:cm}]=await Promise.all([ ACC().from('ptask_files').select('storage_path').eq('task_id',tid), ACC().from('ptask_comments').select('attach_path').eq('task_id',tid).not('attach_path','is',null) ]); const paths=[...(pf||[]).map(x=>x.storage_path),...(cm||[]).map(x=>x.attach_path)].filter(Boolean); await ACC().from('ptasks').delete().eq('id',tid); if(paths.length)await Promise.all(paths.map(p=>s3Delete(p).catch(()=>{}))); toast('Deleted','ok');navTo('tasks/work');}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} }); };
 
   window.accDelegate=async function(tid){ const list=await people(); const others=list.filter(p=>!eq(p.email,me()));
     openModal(`<div class="modal-head"><h3><i class="fa-solid fa-people-arrows"></i> Delegate task</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="width:100%;box-sizing:border-box;overflow-x:hidden"><p style="font-size:12.5px;color:var(--slate);margin:0 0 8px">Pick who to delegate to — they become members of a new task you own. People above you will not see it.</p>${msWidget('dgM',others,[])}</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accDelegateSave(${tid})"><i class="fa-solid fa-check"></i> Delegate</button></div>`,'lg'); };
@@ -12159,6 +13357,340 @@
   };
   window.accConfirm=function(msg,cb,onCancel){ openModal(`<div class="modal-head"><h3><i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> Please confirm</h3><span class="x" id="acConfX">&times;</span></div><div class="modal-body" style="min-width:min(90vw,420px)"><p style="font-size:13.5px;color:var(--body);line-height:1.5">${esc2(msg)}</p></div><div class="modal-foot"><button class="ac-btn" id="acConfNo">Cancel</button><button class="ac-btn danger" id="acConfYes"><i class="fa-solid fa-check"></i> Yes</button></div>`,'md'); const cancel=function(){ closeModal(); if(onCancel)onCancel(); }; const y=$('acConfYes'); if(y)y.onclick=function(){ closeModal(); cb(); }; const n=$('acConfNo'); if(n)n.onclick=cancel; const x=$('acConfX'); if(x)x.onclick=cancel; };
   window.accDecline=function(tid,notifId){ accConfirm('Decline this task? It will be sent back and restored to the assignee.', function(){ accApprove(tid,false,notifId); }); };
+
+  /* ── ManPower/Referral approval tasks: these ptasks rows are the ONLY approval surface now (no
+     Recruitment tab). Approve/Reject here perform the real domain action, then resolve every
+     sibling task (the other 3 approvers' own copies of this same decision) via
+     acc.hr_approval_task_resolve_all - so it disappears from everyone's Pending Approval at once,
+     not just the person who acted. ── */
+  function hrAfterApprovalAction(){ if(location.hash.includes('/task/'))renderPage(); else if(PAGE==='tasks')tasksScreen(); }
+  /* Reads the request straight from the database rather than from MP_RECORDS, which is
+     Recruitment's in-memory list and is empty on this page. */
+  window.hrTaskOpenJd=async function(mpId){
+    const tab=window.open('','_blank');   // opened on the click, before any await, or it is blocked
+    if(tab){ try{ tab.document.write('<!doctype html><meta charset="utf-8"><title>Opening\u2026</title>'
+      +'<body style="font:16px system-ui;padding:40px;color:#334155">Building the job description\u2026</body>'); }catch(_e){} }
+    try{
+      const {data,error}=await sb.schema('hr').from('manpower_requests')
+        .select('job_title,ai_job_description').eq('id',mpId).single();
+      if(error) throw new Error(error.message);
+      if(!data||!String(data.ai_job_description||'').trim()){
+        if(tab) tab.close();
+        toast('No job description has been written for this request yet','err');
+        return;
+      }
+      const bytes=await jdBuildPdfBytes('Job Description \u2014 '+(data.job_title||''),data.ai_job_description);
+      const blob=new Blob([bytes],{type:'application/pdf'});
+      const url=URL.createObjectURL(blob);
+      if(tab) tab.location.href=url; else window.open(url,'_blank');
+    }catch(e){
+      if(tab) try{ tab.close(); }catch(_e){}
+      toast('Could not open it: '+((e&&e.message)||e),'err');
+    }
+  };
+
+  window.hrTaskApproveManpower=async function(tid,mpId){
+    try{
+      await sb.schema('hr').from('manpower_requests').update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null}).eq('id',mpId);
+      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'manpower',p_ref_id:mpId,p_by:me()});
+      /* Approving the description is what publishes it. Leaving it in Recruitment would make the
+         approval decorative - the point of approving is that the rest of the company can find it,
+         so the same click copies it into the Document Library under Job Descriptions. */
+      let published=false;
+      try{
+        const {data:jd}=await sb.schema('recruit').from('job_descriptions')
+          .select('id').eq('manpower_request_id',mpId).limit(1);
+        if(jd&&jd[0]){
+          await sb.schema('recruit').from('job_descriptions')
+            .update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null}).eq('id',jd[0].id);
+          const {error:pubErr}=await sb.schema('recruit').rpc('job_description_publish',{p_id:jd[0].id});
+          published=!pubErr;
+        }
+      }catch(_e){ /* the approval itself still stands */ }
+      toast(published?'Approved \u2014 the description is now in the Document Library':'Job Description approved','ok');
+      hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
+  window.hrTaskRejectManpower=function(tid,mpId){
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-xmark"></i> Reject Job Description</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><label>Reason (folded into the AI rewrite)</label><textarea id="hrRejReason" class="inp" rows="3" placeholder="What needs to change?"></textarea></div>'
+      +'<div class="modal-foot"><button class="btn btn-primary" id="hrRejGoBtn" onclick="hrTaskRejectManpowerGo('+tid+','+mpId+')"><i class="fa-solid fa-rotate-left"></i> Reject &amp; Regenerate</button><button class="btn" onclick="closeModal()">Cancel</button></div>');
+    setTimeout(function(){ const el=$('hrRejReason'); if(el)el.focus(); },100);
+  };
+  window.hrTaskRejectManpowerGo=async function(tid,mpId){
+    const reason=(($('hrRejReason')||{}).value||'').trim();
+    const btn=$('hrRejGoBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+    try{
+      await sb.schema('hr').from('manpower_requests').update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO(),rejection_reason:reason||null}).eq('id',mpId);
+      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'manpower',p_ref_id:mpId,p_by:me()});
+      if(reason) sb.functions.invoke('manpower-ai-generate',{body:{request_id:mpId,requested_by:me(),rejection_reason:reason}});
+      closeModal();
+      toast(reason?'Rejected — regenerating the description with your reason':'Rejected','ok');
+      hrAfterApprovalAction();
+    }catch(e){
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-rotate-left"></i> Reject &amp; Regenerate';}
+      toast('Failed: '+((e&&e.message)||e),'err');
+    }
+  };
+  /* APPROVING A JOB DESCRIPTION PUBLISHES IT.
+     Marking it approved and leaving it in Recruitment would make the approval decorative - the
+     point of approving a description is that the rest of the company can then find it, so the
+     same click copies it into the Document Library under Job Descriptions. The copy is exactly
+     that: Recruitment keeps its own working record, and re-approving a corrected description
+     updates the published copy instead of leaving two. */
+  window.hrTaskApproveJd=async function(tid,jdId){
+    try{
+      await sb.schema('recruit').from('job_descriptions')
+        .update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null}).eq('id',jdId);
+      const {error:pubErr}=await sb.schema('recruit').rpc('job_description_publish',{p_id:jdId});
+      await ACC().rpc('hr_approval_task_resolve_jd',{p_ref_id:jdId,p_by:me()});
+      if(pubErr) toast('Approved, but it could not be copied to the Document Library: '+pubErr.message,'err');
+      else toast('Approved \u2014 it is now in the Document Library under Job Descriptions','ok');
+      hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
+  window.hrTaskRejectJd=function(tid,jdId){
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-xmark"></i> Reject Job Description</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><label>Reason</label><textarea id="hrJdRejReason" class="inp" rows="3" placeholder="What needs to change?"></textarea>'
+      +'<div style="font-size:11.5px;color:var(--slate);margin-top:6px">The description stays in Recruitment so it can be corrected. It is not published.</div></div>'
+      +'<div class="modal-foot"><button class="btn btn-primary" id="hrJdRejGo" onclick="hrTaskRejectJdGo(\''+jdId+'\')"><i class="fa-solid fa-xmark"></i> Reject</button><button class="btn" onclick="closeModal()">Cancel</button></div>');
+    setTimeout(function(){ const el=$('hrJdRejReason'); if(el)el.focus(); },100);
+  };
+  window.hrTaskRejectJdGo=async function(jdId){
+    const reason=(($('hrJdRejReason')||{}).value||'').trim();
+    const btn=$('hrJdRejGo'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+    try{
+      await sb.schema('recruit').from('job_descriptions')
+        .update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO(),rejection_reason:reason||null}).eq('id',jdId);
+      await ACC().rpc('hr_approval_task_resolve_jd',{p_ref_id:jdId,p_by:me()});
+      closeModal(); toast('Job description rejected','ok'); hrAfterApprovalAction();
+    }catch(e){
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-xmark"></i> Reject';}
+      toast('Failed: '+((e&&e.message)||e),'err');
+    }
+  };
+
+  /* A candidate added by hand. Approving leaves them where they are - they are already in the
+     Interviews list - and simply closes the review. Rejecting sets the stage, which is what the
+     rejection email keys off, so the two stay in step. */
+  /* APPROVING IS WHAT LETS ANYTHING HAPPEN TO THIS PERSON.
+     A candidate starts Pending and the database refuses to move their stage or let a test be sent
+     while they are. hr.candidate_decide is what lifts that, so resolving the task alone is not
+     enough - doing only that would close the task and leave the person frozen, which is the
+     decorative approval this replaced. */
+  window.hrTaskApproveCandidate=async function(tid,candId){
+    try{
+      const {error}=await sb.schema('hr').rpc('candidate_decide',{p_id:candId,p_approved:true});
+      if(error) throw new Error(error.message);
+      await ACC().rpc('hr_approval_task_resolve_candidate',{p_ref_id:candId,p_by:me()});
+      toast('Candidate approved — they can now be sent a test and moved on','ok');
+      hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
+  window.hrTaskRejectCandidate=async function(tid,candId){
+    try{
+      // candidate_decide sets the stage to Rejected itself, which is the one move a Pending
+      // candidate is allowed - otherwise turning somebody down would be impossible.
+      /* ASKED BEFORE ANYTHING HAPPENS, NOT AFTER.
+
+         This used to reject the candidate, close the task, announce "Candidate rejected", and only
+         THEN ask whether to email them - so the confirmation arrived after the decision it was
+         supposed to be confirming, and the toast contradicted the dialog still on screen. The
+         question now comes first, and its answer is about the email only: the rejection itself is
+         the button you already pressed. */
+      /* TURNING SOMEBODY DOWN AND WRITING TO THEM ARE TWO DECISIONS, SO THEY ARE TWO BUTTONS.
+
+         The dialog used to ask "Reject & email?" and treat No as "do nothing at all" - so there
+         was no way to reject somebody quietly, which is what you want when the referral came
+         from a colleague, or when HR will call them instead. Reject does exactly that; Reject
+         and email does both; Cancel still changes nothing. */
+      let sendMail=false, who=null;
+      try{
+        const {data:c}=await sb.schema('hr').from('candidates')
+          .select('name,email,position').eq('id',candId).single();
+        who=c||null;
+        if(who&&String(who.email||'').trim()){
+          const pick=await choiceDialog(
+            'Reject '+(who.name||'this candidate')+'? Rejecting is final either way. If you choose '
+            +'to email them, the letter goes from your own address, says nothing about scores or '
+            +'reasons, and cannot be taken back.',
+            {title:'Reject candidate', icon:'fa-user-xmark', danger:true, choices:[
+              {key:'reject', label:'Reject', style:'btn-danger', icon:'fa-user-xmark'},
+              {key:'reject_email', label:'Reject and email', style:'btn-danger', icon:'fa-envelope'}
+            ]});
+          if(!pick){ toast('Nothing was changed','warn'); return; }
+          sendMail=(pick==='reject_email');
+        }
+      }catch(_e){ /* no address on file: rejected without an email, which is said below */ }
+
+      const {error}=await sb.schema('hr').rpc('candidate_decide',{p_id:candId,p_approved:false});
+      if(error) throw new Error(error.message);
+      await ACC().rpc('hr_approval_task_resolve_candidate',{p_ref_id:candId,p_by:me()});
+      /* REJECTING FROM HERE TELLS THE CANDIDATE TOO.
+         The rejection email was wired to the Tracker's stage dropdown only, so turning somebody
+         down from the approvals queue - which is the more natural place to do it - rejected them
+         in silence. The same person, the same decision, and whether they heard about it depended
+         on which screen it was taken from. Asked first, because it cannot be recalled. */
+      /* The email is sent AFTER the rejection is recorded, so a mail failure cannot leave somebody
+         told they were rejected when the record still says otherwise. Errors are shown rather than
+         swallowed - a silent catch here is how the missing email went unexplained. */
+      if(sendMail&&who){
+        try{
+          const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
+            {body:{kind:'candidate_rejected',name:who.name||'',email:who.email,position:who.position||''}});
+          if(se||(sent&&sent.error)) toast('Rejected, but the email failed: '+((sent&&sent.error)||se.message),'err');
+          else if(sent&&sent.not_connected) toast('Rejected and emailed from the shared JAIN-E address — connect your Google account to send from your own','warn');
+          else toast('Rejected — '+who.email+' has been told','ok');
+        }catch(e){ toast('Rejected, but the email failed: '+((e&&e.message)||e),'err'); }
+      }else{
+        toast('Candidate rejected — no email address on file, so nobody was told','warn');
+      }
+      hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
+
+  window.hrTaskConnectReferral=async function(tid,refId){
+    const {data:rec}=await sb.schema('hr').from('referrals').select('*').eq('id',refId).single();
+    if(!rec){toast('Referral not found','err');return;}
+    const {data:openReqs}=await sb.schema('hr').from('manpower_requests').select('id,job_title,department').eq('approval_status','Approved').eq('status','Open');
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Connect Referral</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><label>'+esc2(rec.referred_name||'')+' — connect to which open position?</label>'
+      +'<select id="hrConnPos" class="sel"><option value="">— Select an open requisition —</option>'
+      +(openReqs||[]).map(function(r){return '<option value="'+r.id+'">'+esc2(r.job_title||'—')+(r.department?' · '+esc2(r.department):'')+'</option>';}).join('')
+      +'</select>'+(!(openReqs||[]).length?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No approved open requisitions yet.</div>':'')
+      +'</div><div class="modal-foot"><button class="btn btn-primary" id="hrConnGoBtn" onclick="hrTaskConnectReferralGo('+tid+','+refId+')"><i class="fa-solid fa-check"></i> Connect</button><button class="btn" onclick="closeModal()">Cancel</button></div>');
+  };
+  window.hrTaskConnectReferralGo=async function(tid,refId){
+    const reqId=parseInt((($('hrConnPos')||{}).value)||'');
+    if(!reqId){toast('Pick a position','err');return;}
+    const btn=$('hrConnGoBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+    try{
+      const {data:req}=await sb.schema('hr').from('manpower_requests').select('job_title').eq('id',reqId).single();
+      const {data:rec}=await sb.schema('hr').from('referrals').update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),
+        rejection_reason:null,manpower_request_id:reqId,position:(req&&req.job_title)||null}).eq('id',refId).select().single();
+      const {data:rowId}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
+      const {data:cand}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:reqId,
+        name:rec.referred_name,email:rec.referred_email,phone:rec.referred_phone,position:(req&&req.job_title)||null,
+        source:'Referral',stage:'Tests Sent',created_by:me(),applied_at:nowISO()}).select().single();
+      if(cand){
+        const {data:tr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:rec.referred_name,
+          position:(req&&req.job_title)||null,source:'Referral',number:rec.referred_phone,email:rec.referred_email,
+          notes:'Referred by '+(rec.referred_by||'someone')+(rec.notes?(' — '+rec.notes):''),candidate_id:cand.id}).select().single();
+        if(tr){
+          await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
+          await sb.schema('hr').from('referrals').update({candidate_id:cand.id,tracker_id:tr.id}).eq('id',refId);
+        }
+      }
+      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()});
+      closeModal();
+      toast('Connected to '+(req&&req.job_title||'position')+' and added to Interviews','ok');
+
+      /* The referrer is told their referral was accepted, from here as well as from the Referrals
+         tab. Both sides of the decision now behave the same wherever it is taken - an acceptance
+         that goes unmentioned is the reason people stop referring anybody. */
+      if(rec&&String(rec.referred_by||'').trim()){
+        try{
+          const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
+            {body:{kind:'referral_decided',approved:true,
+                   referrer_email:rec.referred_by,referrer_name:'',
+                   candidate_name:rec.referred_name||''}});
+          if(se||(sent&&sent.error)) toast('Connected, but the email failed: '+((sent&&sent.error)||se.message),'err');
+          else toast(rec.referred_by+' has been told their referral was accepted','ok');
+        }catch(e){ toast('Connected, but the email failed: '+((e&&e.message)||e),'err'); }
+      }
+      hrAfterApprovalAction();
+    }catch(e){
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Connect';}
+      toast('Failed: '+((e&&e.message)||e),'err');
+    }
+  };
+  /* REJECTING A REFERRAL TELLS THE PERSON WHO MADE IT, FROM WHEREVER IT IS REJECTED.
+
+     The email was wired to the Reject button on the Referrals tab and not to this one, so the same
+     decision taken from the approvals queue - which is the more natural place to take it - happened
+     in silence. Somebody put a name forward and never heard back, and nothing on either screen
+     showed that the two behaved differently.
+
+     Sent from ai@, not from whoever clicked: this is the company's answer, not one approver's
+     opinion, and a name on it invites the referrer to go and argue with a colleague. */
+  /* Accepting a referral. It does NOT create a candidate - that happens when HR connects them to a
+     position, which is a judgment about WHICH role they suit and cannot be made from a queue that
+     does not ask it. Approving says "yes, worth pursuing"; Connect says "for this job". */
+  window.hrTaskApproveReferral=async function(tid,refId){
+    let ref=null;
+    try{
+      const {data}=await sb.schema('hr').from('referrals')
+        .select('referred_name,referred_by').eq('id',refId).single();
+      ref=data||null;
+    }catch(_e){ /* the name only makes the question clearer */ }
+
+    const who=(ref&&ref.referred_name)||'this referral';
+    const tellThem=!!(ref&&String(ref.referred_by||'').trim());
+    if(!await confirmDialog(
+        'Approve '+who+'?'+(tellThem
+          ? ' '+ref.referred_by+' will be emailed to say the referral was accepted. HR can then connect them to a position.'
+          : ' HR can then connect them to a position.'),
+        {title:'Approve referral', okLabel:'Approve', icon:'fa-check', danger:false}))return;
+
+    try{
+      await sb.schema('hr').from('referrals')
+        .update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null})
+        .eq('id',refId);
+      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()});
+      toast('Referral approved — connect them to a position from Recruitment › Referrals','ok');
+
+      if(tellThem){
+        try{
+          const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
+            {body:{kind:'referral_decided',approved:true,
+                   referrer_email:ref.referred_by,referrer_name:'',
+                   candidate_name:ref.referred_name||''}});
+          if(se||(sent&&sent.error)) toast('Approved, but the email failed: '+((sent&&sent.error)||se.message),'err');
+          else toast(ref.referred_by+' has been told','ok');
+        }catch(e){ toast('Approved, but the email failed: '+((e&&e.message)||e),'err'); }
+      }
+      hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
+
+  window.hrTaskRejectReferral=async function(tid,refId){
+    let ref=null;
+    try{
+      const {data}=await sb.schema('hr').from('referrals')
+        .select('referred_name,referred_by').eq('id',refId).single();
+      ref=data||null;
+    }catch(_e){ /* the name just makes the question clearer */ }
+
+    const who=(ref&&ref.referred_name)||'this referral';
+    const tellThem=!!(ref&&String(ref.referred_by||'').trim());
+    if(!await confirmDialog(
+        'Reject '+who+'?'+(tellThem
+          ? ' '+ref.referred_by+' will be emailed to say the referral was not taken forward.'
+          : ' Nobody will be emailed — there is no address for whoever referred them.'),
+        {title:'Reject referral', okLabel:'Reject', icon:'fa-xmark', danger:true}))return;
+
+    try{
+      await sb.schema('hr').from('referrals').update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO()}).eq('id',refId);
+      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()});
+
+      /* After the rejection is recorded, so a mail failure cannot leave the referrer told about a
+         decision the record does not show. Errors are surfaced, not swallowed - a silent catch is
+         how the missing email went unexplained the first time. */
+      if(tellThem){
+        try{
+          const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
+            {body:{kind:'referral_decided',approved:false,
+                   referrer_email:ref.referred_by,referrer_name:'',
+                   candidate_name:ref.referred_name||''}});
+          if(se||(sent&&sent.error)) toast('Rejected, but the email failed: '+((sent&&sent.error)||se.message),'err');
+          else toast('Rejected — '+ref.referred_by+' has been told','ok');
+        }catch(e){ toast('Rejected, but the email failed: '+((e&&e.message)||e),'err'); }
+      }else{
+        toast('Referral rejected — no address for the referrer, so nobody was told','warn');
+      }
+      hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
   function accPoll(fn){ clearInterval(window._accPoll); window._accPoll=setInterval(function(){ const ov=$('overlay'); if(ov&&ov.classList.contains('show'))return; if(window._dragging)return; const a=document.activeElement; if(a&&/INPUT|TEXTAREA/.test(a.tagName))return; fn(); },13000); }
   /* ---------- keyboard shortcuts (Accountability only) ---------- */
   document.addEventListener('keydown', function(e){

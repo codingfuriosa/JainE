@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.machine_id
+*.log
+# The dedicated Chrome profile (Section 7) holds real cookies/session data once
+# you log into target apps in it — never committed. Same for test artifacts.
+.chrome-profile/
+.artifacts/
+*.egg-info/

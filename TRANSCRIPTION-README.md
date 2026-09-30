@@ -69,7 +69,7 @@ the work.
 | `acc.crm_leads` | lead | the CRM's current state, carried forward |
 | `acc.crm_followups` | follow-up | **the lead history.** Every follow-up ever seen |
 | `acc.call_transcripts` | **recording_url** | the transcript. This is the deduplication key |
-| `acc.followup_qa` | follow-up | the five assessments |
+| `acc.followup_qa` | follow-up | the seven assessments |
 | `acc.transcription_queue` | pre-sales follow-up with a recording | FIFO state |
 | `acc.followup_timeline_v` | follow-up | all of the above joined — what the UI reads |
 | `acc.daily_qa_summary_v` | day | the day's numbers, including the four mismatch counts |
@@ -255,7 +255,7 @@ the transcriber uses. OpenAI's Structured Outputs would mean restating this cont
 Schema, and the contract is nullable unions and a `null` member inside an enum — expressible only by
 relaxing it, which trades a real guarantee for a nominal one. (Gemini's `responseSchema` could not
 express it either, so this is unchanged by the move.) The guarantee therefore lives in `qaPhase`'s
-validation: a reply missing any of the five assessments is refused and retried, and nothing
+validation: a reply missing any of the seven assessments is refused and retried, and nothing
 half-formed is ever saved.
 
 `CHATGPT_QA_MODEL` moves the judge. An o-series or gpt-5 name is detected and sent
@@ -284,7 +284,7 @@ Do not remove them.
 
 ### What the QA step measures
 
-Five assessments per follow-up, each carrying its own status, its evidence quoted from the transcript,
+Seven assessments per follow-up, each carrying its own status, its evidence quoted from the transcript,
 and its reasoning. "Not Verifiable" is a real answer everywhere and is never penalised — guessing is
 the only wrong answer.
 
@@ -293,8 +293,10 @@ the only wrong answer.
 | **Pitch accuracy** | Accurate · Partially Accurate · Inaccurate · Not Verifiable | scoring a pitch that never happened. A call cut short is Not Verifiable and scores `null`, not 0 — a zero would drag the day's average down as though the agent had pitched badly. |
 | **Follow-up date accuracy** | Accurate · Inaccurate · Not Verifiable | marking a date wrong merely because the customer never named one. No discussion is **Not Verifiable**, never Inaccurate. Only a conversation that *contradicts* the CRM date is Inaccurate. |
 | **Lost reason accuracy** | Accurate · Inaccurate · Not Verifiable | inventing a specific reason. "Not interested, thank you" is not evidence of a budget problem. |
+| **Retention effort** (Lost leads only) | Pass · Partial · Fail · Not Applicable | counting a call as a real retention attempt when it was one perfunctory line ("are you sure?") with no engagement of the actual objection. Not Applicable outside Lost, or when the customer ended the call before the agent had any opening to try. |
 | **Remarks accuracy** | Accurate · Partially Accurate · Inaccurate · Not Verifiable | demanding the salesperson's shorthand match word for word. Meaning is judged, not wording. |
 | **Status assessment** | Lost · Qualified · In Follow Up · Unclear | deciding from one keyword. "I'm not interested right now" is usually In Follow Up; "send me the details" is usually not Qualified. |
+| **Personal mobile number requested** | Yes · No | counting a confirmation of the CRM's own number on file as a request — only a genuinely new number being asked for counts. Captures the number itself (`number_shared`) when the customer gave one. |
 
 Plus the **six-point agent audit** — Script, Etiquette, Query Handling, Call to Action, Leakage
 Avoidance, Hyper-personalization — scored Pass / Partial / Fail / Not Applicable against the explicit
@@ -348,7 +350,7 @@ the CRM record is all there is at that point. The queue runs oldest-first, so it
 did* — asked, answered, confirmed, disclosed — so there is no project fact in it for a transcript to
 absorb.
 
-### The four mismatch counts
+### The five mismatch counts
 
 `status_match` and `mismatch_type` are **re-derived by the pipeline** from the CRM status and the
 assessed status after the reply arrives. The model is asked for them, because making it commit in
@@ -360,11 +362,11 @@ contradicts itself cannot corrupt the dashboard.
 | Lost | Qualified or In Follow Up | `lost_should_not_have_been_lost` |
 | Qualified | anything else | `qualified_should_not_have_been_qualified` — but never when the lead was already soundly qualified and the call merely set a new callback date; that is lifted to Qualified first and agrees |
 | In Follow Up | Lost | `in_followup_should_have_been_lost` |
-| In Follow Up | Qualified | `in_followup_should_have_been_qualified` — including a lead already qualified that the agent has logged back as In Follow Up |
-| anything | Unclear | **not counted** — an unclear call is not a disagreement |
-| Site Visited, OV, … | anything | not counted — outside the four categories |
+| In Follow Up | Qualified | `in_followup_should_have_been_qualified` — including a lead already qualified that the agent has logged back as In Follow Up. Also covers "Qualified, visit pending": the visit-not-yet-fixed carve-out (2026-09-18) only excuses that combination when the lead **already qualified on an earlier call** (narrowed 2026-09-21) — a lead qualifying for the first time, with only the site visit unsettled, is still counted here, not excused |
+| anything | Unclear | `ai_status_unclear` (2026-09-23) — an unclear call is now flagged as a mismatch (for review) rather than silently dropped from every total |
+| Site Visited, OV, … | anything | not counted — outside the three CRM statuses this scheme covers |
 
-A `check` constraint on `acc.followup_qa` refuses any other value, so a typo cannot become a fifth
+A `check` constraint on `acc.followup_qa` refuses any other value, so a typo cannot become a sixth
 category that no card ever shows.
 
 ### FIFO, and what survives a restart
@@ -377,11 +379,23 @@ category that no card ever shows.
    in flight. **Reclaiming counts as an attempt**, or a recording whose model call always overruns the
    worker limit would be reclaimed and re-billed for ever.
 3. **Refuses to start** if anything is genuinely in flight.
-4. Claims the lowest `queue_seq` row with a status predicate — that predicate *is* the lock, so two
-   overlapping ticks cannot both win and a recording is never paid for twice.
+4. Claims a row via `next_claimable_follow_up` — restricted to leads in **today's decision-day CRM
+   response**, a lead already mid-way (a completed/failed recording of its own) over a fresh lead, then
+   lowest `queue_seq`. That predicate *is* the lock, so two overlapping ticks cannot both win and a
+   recording is never paid for twice.
 5. Advances it one phase, then stops.
 
 Nothing lives in memory between invocations: the queue *is* the table.
+
+**Automatic processing never scans the whole backlog — only today's decision-day leads** (2026-09-22,
+sharpened from the 2026-09-22 "newest day first" rule it replaces). `next_claimable_follow_up` restricts
+every automatic claim to `lead_id`s present among rows whose `snapshot_date` is the latest one in the
+queue - by construction, exactly the leads `crm_build_queue` queued today (their own call, and any of
+their own previously-unqueued history, both tagged with today's `snapshot_date`). A lead not in today's
+CRM response - Lead B, last touched days ago - is never picked up automatically no matter how idle the
+worker is, "waiting" or "failed" or not; only a human clicking **Retry** revives it, and Retry stamps
+the row's `snapshot_date` forward to today's so the hand-retried call is guaranteed to actually run
+rather than sit re-flagged and still out of scope.
 
 ---
 
@@ -399,12 +413,42 @@ a lead — showing the CRM's verdict and the call's verdict side by side.
 
 **Clicking a lead** opens its complete story: the lead as the CRM has it today, an accuracy roll-up
 across all its calls, and then **every conversation in chronological order, oldest first**. Each one
-carries what the CRM recorded, how it was processed, the four accuracy assessments with their
+carries what the CRM recorded, how it was processed, the five accuracy assessments with their
 evidence, the status check, the verdict, the **full transcript** turn by turn with MM:SS timestamps
 and speaker labels, and the six-point audit. A call that reused an existing transcript is marked as
 such and shows that transcript.
 
 The lead list is newest-first. Inside a lead it is oldest-first: a history only reads forwards.
+
+### Three things computed from CRM data alone, never the AI
+
+These are not model judgements — they are plain arithmetic over `acc.crm_followups`/`acc.crm_leads`,
+computed client-side in `nexus-core.js` and shown as cards on a lead's detail page (`trcCallbackOverdue`,
+`trcCadenceIssues`, `trcFirstCallbackTat`). None of the three add a database column; all three read
+data the pipeline already stores.
+
+- **Missed callback** — the lead's LATEST call promised a `next_follow_up_text` date that has passed
+  with nothing logged against the lead since. Not evaluated once a lead is Lost.
+- **Follow-up cadence** — the same idea, applied to every gap in a lead's history, not only the
+  current open one. A call that named a date is late if the NEXT call happens after it; a call that
+  named no date is late if more than 3 days pass before the next one. Also skipped for Lost leads.
+- **First callback turnaround (TAT)** — how long after the lead first appeared in the CRM
+  (`acc.crm_leads.first_seen_date`) the first logged call actually happened. That column carries no
+  time-of-day, so this is a calendar-day proxy for a 24-hour target: the same day counts as on time,
+  anything later is flagged. Only available where the row came through the full join
+  (`followup_timeline_v`/`TRC_LIGHT`) — on the fast `crm_followups`-only path used for some list
+  fetches, `acc.crm_leads` is not joined, so this reads as not-flagged there, the same way a
+  regression tag does on a light row (see the note above `TRC_LIGHT`).
+
+**The AI Status column carries a lead's last judgement across date ranges** (2026-09-22). When none of
+a lead's calls in the *selected* range were ever assessed — no recording, out of scope, no
+conversation — the column no longer just reads blank. It shows that lead's actual last AI judgement,
+wherever it happened, labelled **"Last judged \<date\>"** so it reads as carried-over, not a verdict on
+today's call. Backed by `acc.followup_qa.is_latest_assessed`, fetched only for the leads on the current
+page (`trcBackfillLastJudgement`, mirroring `trcEnrichVisiblePage`'s page-scoped lazy-load) and cached
+for the rest of the session — a lead genuinely never assessed is cached that way too, so it is never
+re-queried. A lead's own detail page has always shown its full history regardless of range; this only
+brings the same fact forward onto the list.
 
 **Copy Response** puts the lead's stored CRM record on the clipboard. There is no download button
 anywhere on this page, by requirement. **Retry** appears on failed calls and resumes at the phase that

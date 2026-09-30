@@ -166,6 +166,35 @@ window.__confirmAnswer=function(val){
   if(r)r(val);
 };
 
+/* SOME DECISIONS ARE NOT YES OR NO.
+
+   Rejecting a candidate is two different acts - turning them down, and telling them - and a
+   two-button dialog had to pick one. It asked "Reject & email?" and treated No as "do nothing",
+   so rejecting somebody without writing to them was simply not offered. This takes a list of
+   choices and returns the one pressed, or null for Cancel. */
+let __choiceResolve=null;
+function choiceDialog(message,opts){
+  opts=opts||{};
+  const btns=(opts.choices||[]).map(function(c){
+    return '<button class="btn '+(c.style||'')+'" onclick="__choiceAnswer('
+      +esc(JSON.stringify(String(c.key)))+')">'
+      +(c.icon?'<i class="fa-solid '+esc(c.icon)+'"></i> ':'')+esc(c.label)+'</button>';
+  }).join('');
+  return new Promise(function(resolve){
+    __choiceResolve=resolve;
+    openModal('<div class="modal-head"><h3><i class="fa-solid '+esc(opts.icon||'fa-circle-question')
+      +'" style="color:'+(opts.danger?'var(--err)':'var(--brand)')+'"></i> '+esc(opts.title||'Please choose')+'</h3></div>'
+      +'<div class="modal-body">'+esc(message)+'</div>'
+      +'<div class="modal-foot" style="flex-wrap:wrap;gap:8px">'
+      +'<button class="btn" onclick="__choiceAnswer(null)">Cancel</button>'+btns+'</div>');
+  });
+}
+window.__choiceAnswer=function(key){
+  const r=__choiceResolve;__choiceResolve=null;
+  closeModal();
+  if(r)r(key===undefined?null:key);
+};
+
 /* ============================ AUTH ============================ */
 function fatal(msg){
   var a=$('authLoad');
@@ -341,20 +370,38 @@ async function boot(){
   renderPage();
   startSessionGuard();
   promptSetPassword();
+  // Not tied to the page just rendered - only to whether this user can see Legal MIS at all
+  // (clrevCheckPending checks pageAllowed('legal') itself). Fire-and-forget: it puts its own
+  // modal up over whatever renderPage() just drew, it doesn't need to be awaited first.
+  try{ clrevCheckPending(); }catch(e){}
 }
 // The customer portal's sections used to be a horizontally-scrolling tab row above the page body -
 // with 13 of them the active one was often scrolled out of view. They live in the sidebar instead
 // now, one item per section; .sb-nav is already flex:1+overflow-y:auto (same as the staff nav with
 // its own long lists), so this scrolls for free with no CSS changes.
-const CUST_TABS=['Statement','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
-const CUST_TAB_ICONS=['fa-file-invoice-dollar','fa-book-open','fa-calculator','fa-helmet-safety','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-user-plus','fa-screwdriver-wrench','fa-pen-to-square'];
+// 'Home' is the landing page and must stay at index 0 - the tab index IS the route (customer/<i>),
+// so anything hard-coding a number moves with it.
+// Construction Progress sits right after Statement (was after Cost Sheet) - a homebuyer mid-build
+// wants to see the site before the accounting. CUST_TAB_ICONS stays a parallel array in the same
+// order; the render switch below and the one hardcoded navTo('customer/N') deep link (the
+// Statement tab's "View full ledger" jump) were renumbered to match.
+const CUST_TABS=['Home','Statement','Construction Progress','Ledger','Cost Sheet','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
+const CUST_TAB_ICONS=['fa-house','fa-file-invoice-dollar','fa-helmet-safety','fa-book-open','fa-calculator','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-gift','fa-screwdriver-wrench','fa-pen-to-square'];
 function custSidebarTabs(ti){
   const nav=$('sbNav');
   if(!nav)return;
   nav.innerHTML='';
   nav.appendChild(el('div','sb-group','Customer Portal'));
+  /* "Earn" badge on Referrals - only while this customer has never submitted one. Reads CUST_DATA
+     directly rather than taking a parameter: the sidebar paints once at boot (renderCustomerShell,
+     before any data exists - CUST_DATA is null, badge stays off rather than flash on) and again from
+     VIEWS.customer once custLoadData resolves, so it appears a beat after first paint rather than
+     ever having to be taken back. custNewReferralSave flips CUST_DATA.hasReferred straight to true on
+     a successful submit, so the badge is gone on the very next sidebar rebuild - no stale cache read. */
+  const showReferralBadge=CUST_DATA&&CUST_DATA.hasReferred===false;
   CUST_TABS.forEach(function(t,i){
-    const a=el('a','sb-item'+(i===ti?' active':''),'<i class="fa-solid '+(CUST_TAB_ICONS[i]||'fa-circle')+'"></i> '+t);
+    const badge=(t==='Referrals'&&showReferralBadge)?' <span class="sb-badge-gold">Earn</span>':'';
+    const a=el('a','sb-item'+(i===ti?' active':''),'<i class="fa-solid '+(CUST_TAB_ICONS[i]||'fa-circle')+'"></i> <span class="sb-item-label">'+t+'</span>'+badge);
     a.href='javascript:void(0)';
     a.onclick=function(){navTo('customer/'+i);};
     nav.appendChild(a);
@@ -472,9 +519,7 @@ const NAV=[
   {group:'Overview',items:[
     {id:'dashboard',label:'Home / Dashboards',icon:'fa-gauge-high'},
     {id:'tasks',label:'Accountability',icon:'fa-clipboard-check'},
-  ]},
-  {group:'IT & Support',items:[
-    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
+    {id:'scoreboard',label:'Scoreboard',icon:'fa-ranking-star'},
   ]},
   {group:'Sales',items:[
     {id:'gtd',label:'GTD',icon:'fa-brain'},
@@ -490,8 +535,8 @@ const NAV=[
     {id:'inspection',label:'Inspection',icon:'fa-clipboard-list'},
   ]},
   {group:'People',items:[
-    {id:'recruitment_new',label:'Recruitment (New)',icon:'fa-user-plus'},
-    {id:'hr_new',label:'Human Resources (New)',icon:'fa-users'},
+    {id:'recruitment_new',label:'Recruitment',icon:'fa-user-plus'},
+    {id:'hr_new',label:'Human Resources',icon:'fa-users'},
   ]},
   {group:'Governance',items:[
     {id:'finance',label:'Finance Vault',icon:'fa-indian-rupee-sign'},
@@ -526,14 +571,62 @@ const NAV=[
   {group:'System',items:[
     {id:'settings',label:'Settings',icon:'fa-gear'},
   ]},
+  // Last on purpose. Internet Speed is a thing you go and look at when something feels slow, not
+  // something you work in, so it sat oddly as the second group in the sidebar — above Sales,
+  // Operations and everything people actually open all day. It keeps its own group rather than
+  // being folded into System, so the sidebar still says what it is.
+  {group:'IT & Support',items:[
+    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
+  ]},
 ];
 const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i.label;ICONS[i.id]=i.icon;}));LABELS.security='Control Panel';ICONS.security='fa-sliders';LABELS.usability='Usability';ICONS.usability='fa-chart-simple';
 const MODLIST=[];NAV.forEach(g=>g.items.forEach(i=>MODLIST.push([i.id,i.label])));
 const MODSET=new Set(MODLIST.map(m=>m[0]));
 const LEVELS=['Manager','Employee','New','Intern'];
 const DEFAULT_MODULES=['dashboard','tasks','projects','settings','network'];
+/* Modules nobody needs to be granted — they are part of the furniture, and were previously spelled
+   out three separate times inside allowedSet() plus once more in pageAllowed(), which is how a new
+   one gets added to some of them and not others.
+
+   The Scoreboard is here because it is meant to be seen by everyone: it is a company-wide
+   leaderboard, and a leaderboard half the company cannot open is not a leaderboard. This replaces
+   the narrower "holding tasks grants scoreboard" rule it shipped with a few commits ago.
+
+   This decides only whether a menu entry is drawn and a page will open. It is not a grant of
+   anything else: the figures come from acc.scoreboard(), which is SECURITY DEFINER, reads only
+   already-approved task counts, and is unchanged. Customers never reach any of this — pageAllowed()
+   sends a customer session to the customer page before it gets here. */
+const ALWAYS_ON=['dashboard','settings','network','scoreboard'];
 function navIcon(id){return ICONS[id]||'fa-square';}
-function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return new Set(DEFAULT_MODULES);if(Array.isArray(m)&&m.length){const ss=new Set(m);ss.add('dashboard');ss.add('settings');ss.add('network');return ss;}const ss=new Set(['dashboard','settings','network']);return ss;}
+/* THE PAGES WERE RENAMED AND NOBODY'S PERMISSIONS FOLLOWED.
+
+   Recruitment and Human Resources became recruitment_new and hr_new. The menu is filtered by the
+   ids in a person's modules, nothing mapped the old names onto the new ones, and not one of the 84
+   accounts carries the new ids - so the two entries were invisible to everybody except the two
+   super admins, who bypass the filter. 71 people hold 'recruitment' and 10 hold 'hr', and all of
+   them had silently lost pages they used to be able to open.
+
+   Rather than rewrite 71 rows, the old id grants the page it was renamed to. That restores what
+   people had before the rename and nothing more.
+
+   THIS GRANTS NO EDITING RIGHTS. modules decides only whether a menu entry is drawn. What anybody
+   may change once inside is decided separately and is untouched - recCanWrite() by department,
+   app.can_write('hr') by role, recruit.can_manage_tests() by its own list, each re-checked in the
+   database on every write. Somebody who could only look before can still only look. */
+const MODULE_RENAMES={recruitment:'recruitment_new', hr:'hr_new'};
+function expandModules(ss){
+  Object.keys(MODULE_RENAMES).forEach(function(oldId){
+    if(ss.has(oldId)) ss.add(MODULE_RENAMES[oldId]);
+  });
+  if(ss.has('custportal_photos')) ss.add('custportal_admin');
+  ALWAYS_ON.forEach(function(id){ ss.add(id); });
+  return ss;
+}
+/* 'custportal_photos' = Customer Portal Admin limited to its Photos & Videos tab. The database
+   enforces the same boundary (app.is_custportal_media_editor): such an account can write the four
+   photo tables and read project names and a bare flat list, and nothing else in cust.*. */
+function cpaPhotosOnly(){ if(state.super)return false; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('custportal_photos')!==-1; }
+function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return expandModules(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length)return expandModules(new Set(m));return expandModules(new Set());}
 /* Usability sits under Control Panel in Administration, but unlike Control Panel it is NOT
    superadmin-only: the Systems department are the people who actually read it, and they are not
    superadmins. So it is granted the ordinary way — 'usability' in a person's modules — and the
@@ -547,7 +640,7 @@ function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='dashboard'||id==='settings'||id==='placeholder'||id==='network')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return m.includes(id);return id==='dashboard'||id==='settings';}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -600,7 +693,22 @@ function renderShell(){
   const _gsDrop=document.createElement('div');
   _gsDrop.id='gsDrop';_gsDrop.style.cssText='position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:9999;max-height:340px;overflow-y:auto;display:none';
   _gs.parentElement.style.position='relative';_gs.parentElement.appendChild(_gsDrop);
-  _gs.addEventListener('keydown',e=>{if(e.key==='Enter'){const q=e.target.value.trim();_gsDrop.style.display='none';if(q)navTo('documents/search/'+encodeURIComponent(q));}});
+  _gs.addEventListener('keydown',async e=>{
+    if(e.key!=='Enter')return;
+    const q=e.target.value.trim();_gsDrop.style.display='none';
+    if(!q)return;
+    // Same exact-id lookup gsLiveSearch does for the dropdown, so pressing Enter before the debounced
+    // dropdown appears (or with it dismissed) still lands on the lead instead of a text search for it.
+    if(/^\d+$/.test(q)){
+      try{
+        const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:[Number(q)]});
+        if(error)throw error;
+        const hit=(data||[])[0];
+        if(hit&&hit.lead){navTo('transcription/lead/'+hit.lead.lead_id);return;}
+      }catch(e){}
+    }
+    navTo('documents/search/'+encodeURIComponent(q));
+  });
   _gs.addEventListener('input',e=>{
     clearTimeout(_gsTimer);const q=e.target.value.trim();
     if(!q){_gsDrop.style.display='none';return;}
@@ -622,6 +730,32 @@ async function gsLiveSearch(q){
   drop.style.display='block';
   drop.innerHTML='<div style="padding:10px 14px;color:var(--slate);font-size:13px">Searching…</div>';
   const ql=q.toLowerCase();
+  // A bare number is treated as a lead id lookup rather than a text search: acc.crm_lead_detail takes
+  // a bigint id and does an EXACT match, so this is "find this one lead", not "find leads like this".
+  // It returns the lead row plus its whole follow-up history (recordings included) in one round trip,
+  // the same RPC the Transcription lead page itself uses (see trcLeadFetchByIds) - so a hit here always
+  // opens straight into that same detail page, never a partial or reconstructed view of it.
+  let leadRow='';
+  if(/^\d+$/.test(q)){
+    try{
+      const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:[Number(q)]});
+      if(error)throw error;
+      const hit=(data||[])[0];
+      if(hit&&hit.lead){
+        const lead=hit.lead;
+        const followups=Array.isArray(hit.followups)?hit.followups:[];
+        const calls=followups.filter(f=>f&&(f.has_recording||f.recording_url)).length;
+        const sub='Lead · '+followups.length+' follow-up'+(followups.length===1?'':'s')
+          +(calls?' · '+calls+' call recording'+(calls===1?'':'s'):'')
+          +(lead.status?' · '+lead.status:'');
+        leadRow='<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--line-2);background:#f0fdfa" '
+          +'onmousedown="event.preventDefault();navTo(\'transcription/lead/'+esc(String(lead.lead_id))+'\');document.getElementById(\'gsDrop\').style.display=\'none\'">'
+          +'<i class="fa-solid fa-user-clock" style="color:#0d9488;width:14px;font-size:13px"></i>'
+          +'<div><div style="font-size:13px;font-weight:500">'+esc(lead.lead_name||('Lead '+lead.lead_id))+'</div>'
+          +'<div style="font-size:11px;color:var(--slate)">'+esc(sub)+'</div></div></div>';
+      }
+    }catch(e){}
+  }
   // Search documents
   let docs=[];
   try{const {data}=await sb.schema('doc').from('documents').select('id,title,file_name,category,department,storage_path').or('file_name.ilike.%'+q+'%,title.ilike.%'+q+'%,doc_no.ilike.%'+q+'%').limit(6);docs=data||[];}catch(e){}
@@ -629,7 +763,7 @@ async function gsLiveSearch(q){
   let jds=[];
   try{const {data}=await sb.schema('recruit').from('job_descriptions').select('id,name,storage_path').limit(6);jds=(data||[]).filter(j=>j.name.toLowerCase().includes(ql));}catch(e){}
   const defJds=(typeof DEFAULT_JDS!=='undefined'?DEFAULT_JDS:[]).filter(j=>j.name.toLowerCase().includes(ql));
-  if(!docs.length&&!jds.length&&!defJds.length){drop.innerHTML='<div style="padding:12px 14px;color:var(--slate);font-size:13px;text-align:center">No documents found</div>';return;}
+  if(!leadRow&&!docs.length&&!jds.length&&!defJds.length){drop.innerHTML='<div style="padding:12px 14px;color:var(--slate);font-size:13px;text-align:center">No results found</div>';return;}
   const row=(icon,name,sub,url)=>`<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--line-2)" onmousedown="event.preventDefault();window.open('${url}','_blank');document.getElementById('gsDrop').style.display='none'">
     <i class="fa-solid ${icon}" style="color:#64748b;width:14px;font-size:13px"></i>
     <div><div style="font-size:13px;font-weight:500">${esc(name)}</div><div style="font-size:11px;color:var(--slate)">${esc(sub)}</div></div>
@@ -637,7 +771,7 @@ async function gsLiveSearch(q){
   const docRows=docs.map(r=>{const url=r.storage_path?SUPABASE_URL+'/storage/v1/object/public/documents/'+encodeURIComponent(r.storage_path).replace(/%2F/g,'/'):'#';const sub=[r.department,r.category].filter(Boolean).join(' · ')||'Document Library';return row('fa-file',r.title||r.file_name,sub,url);});
   const jdDbRows=jds.map(j=>{const url=j.storage_path?SUPABASE_URL+'/storage/v1/object/public/recruitment/'+encodeURIComponent(j.storage_path).replace(/%2F/g,'/'):'#';return row('fa-file-pdf',j.name,'Job Description · Recruitment',url);});
   const jdDefRows=defJds.map(j=>row('fa-file-pdf',j.name,'Job Description · Recruitment',j.url));
-  drop.innerHTML=docRows.join('')+jdDbRows.join('')+jdDefRows.join('')+
+  drop.innerHTML=leadRow+docRows.join('')+jdDbRows.join('')+jdDefRows.join('')+
     `<div style="padding:8px 14px;font-size:12px;color:var(--brand);font-weight:600;cursor:pointer;text-align:center" onmousedown="event.preventDefault();navTo('documents/search/'+encodeURIComponent('${q}'));document.getElementById('gsDrop').style.display='none'">See all results →</div>`;
 }
 
@@ -920,7 +1054,7 @@ const MODMETA={
   procurement:{icon:'fa-cart-shopping',c:'#b45309',bg:'#fffbeb',desc:'Indent → RFQ → PO → GRN with multi-level approvals & 3-way match.',kpis:[['Open POs','14','fa-file-invoice'],['Pending Approval','5','fa-clock'],['Vendors','86','fa-store'],['Spend (mo)','₹62L','fa-indian-rupee-sign']],cols:['PO No','Vendor','Amount','Status','Date'],rows:[['PO-0042','ACC Cement','₹4.2L','Pending','27 Jun'],['PO-0041','Tata Steel','₹9.1L','Approved','25 Jun'],['PO-0040','Pidilite','₹1.3L','Received','22 Jun']]},
   finance:{icon:'fa-indian-rupee-sign',c:'#15803d',bg:'#f0fdf4',desc:'Director vault — collections, dues, payables & project P&L.',kpis:[['Collections (mo)','₹1.2 Cr','fa-arrow-down'],['Outstanding','₹3.8 Cr','fa-hourglass'],['Payables','₹64L','fa-file-invoice-dollar'],['Net Position','₹5.6 Cr','fa-scale-balanced']],cols:['Account','Type','Amount','Status','Date'],rows:[['Skyline Collections','Inflow','₹42L','Cleared','26 Jun'],['Contractor Payment','Outflow','₹18L','Pending','27 Jun']]},
   hr:{icon:'fa-users',c:'#be123c',bg:'#fff1f2',desc:'Directory, attendance, payroll-grade data, performance & statutory.',kpis:[['Headcount','3','fa-users'],['Present Today','3','fa-user-check'],['On Leave','0','fa-plane'],['Open Requests','2','fa-inbox']],cols:['Employee','Department','Designation','Status','Joined'],rows:[['(salary columns are protected)','—','—','—','—']]},
-  recruitment:{icon:'fa-user-plus',c:'#0369a1',bg:'#f0f9ff',desc:'Hiring funnel — requisition → applications → interviews → offer → onboarding.',kpis:[['Open Roles','4','fa-briefcase'],['Applicants','37','fa-id-card'],['Interviews (wk)','6','fa-comments'],['Offers Out','2','fa-envelope-open-text']],cols:['Applicant','Role','Stage','Score','Status'],rows:[['Neha Verma','Site Engineer','Interview L2','82','Active'],['Karan Singh','Accountant','Shortlisted','—','Active']]},
+  recruitment:{icon:'fa-user-plus',c:'#0369a1',bg:'#f0f9ff',desc:'Hiring funnel — request → applications → interviews → offer → onboarding.',kpis:[['Open Roles','4','fa-briefcase'],['Applicants','37','fa-id-card'],['Interviews (wk)','6','fa-comments'],['Offers Out','2','fa-envelope-open-text']],cols:['Applicant','Role','Stage','Score','Status'],rows:[['Neha Verma','Site Engineer','Interview L2','82','Active'],['Karan Singh','Accountant','Shortlisted','—','Active']]},
   maintenance:{icon:'fa-screwdriver-wrench',c:'#7c3aed',bg:'#f5f3ff',desc:'Asset register, preventive-maintenance schedules & breakdown tracking.',kpis:[['Assets','64','fa-gears'],['PM Due (wk)','8','fa-calendar-check'],['Under Repair','2','fa-wrench'],['Downtime','3.2h','fa-clock']],cols:['Asset','Category','Location','Next PM','Status'],rows:[['DG Set 250kVA','Electrical','Skyline','02 Jul','Active'],['Passenger Lift 1','Mechanical','Greenfield','—','Under Repair']]},
   reports:{icon:'fa-chart-pie',c:'#1d4ed8',bg:'#eff4ff',desc:'Cross-module analytics, scoreboards & reconciliation tools.',kpis:[['Saved Reports','12','fa-floppy-disk'],['Reconciliations','4','fa-not-equal'],['Scheduled','3','fa-clock'],['Exports (mo)','28','fa-file-export']],cols:['Report','Module','Type','Last Run','Owner'],rows:[['Collections vs Demand','CRM','Reconciliation','Today','You'],['Stock Variance','Inventory','Reconciliation','Yesterday','You']]},
   helpdesk:{icon:'fa-headset',c:'#0f766e',bg:'#f0fdfa',desc:'AI-assisted answers from the company knowledge base, with ticket fallback.',kpis:[['Open Tickets','3','fa-ticket'],['Resolved (mo)','41','fa-circle-check'],['KB Articles','58','fa-book'],['Avg. Response','12m','fa-stopwatch']],cols:['Ticket','Subject','Department','Status','Raised'],rows:[['HD-0091','VPN access','IT','Open','Today'],['HD-0090','Salary slip','HR','Resolved','Yesterday']]},
@@ -1162,7 +1296,6 @@ function s3KeyForFlowEvent(flowId,filename){return `accountability/flow-events/$
 function s3KeyForProjectPhoto(projectId,filename){return `customer-portal/projects/${projectId}/photos/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForProjectDoc(projectId,docType,filename){return `customer-portal/projects/${projectId}/${s3SafeSeg(docType)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForUnitPhoto(unitId,filename){return `customer-portal/units/${unitId}/photos/${s3Stamp()}_${s3SafeName(filename)}`;}
-function s3KeyForFloorPhoto(projectId,floorNo,filename){return `customer-portal/projects/${projectId}/floors/${s3SafeSeg(floorNo)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForTowerPhoto(projectId,tower,filename){return `customer-portal/projects/${projectId}/towers/${s3SafeSeg(tower)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForCustomerDoc(unitId,docType,filename){return `customer-portal/units/${unitId}/${s3SafeSeg(docType)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForProcessVideo(category,filename){return `customer-portal/process-videos/${s3SafeSeg(category)}/${s3Stamp()}_${s3SafeName(filename)}`;}
@@ -1189,12 +1322,49 @@ async function uploadFileToS3(key,file,onProgress){
     xhr.send(file);
   });
 }
+/* THE TAB IS OPENED ON THE CLICK, BEFORE THE URL IS SIGNED.
+
+   This used to sign the URL first and call window.open afterwards. By then the click that caused it
+   has been forgotten, so the browser treats the new tab as one the page opened by itself and blocks
+   it as a pop-up - silently, with no error and no file. Every file in JAIN-E opens through here, so
+   the Document Library, a CV, a job description and a test attachment all failed the same way and
+   for the same reason.
+
+   Opening a blank tab while the click is still live, then pointing it at the signed URL when it
+   arrives, is what makes it work. Downloads are unaffected - an <a download> is not a pop-up - so
+   that path is left exactly as it was.
+
+   If the tab is blocked anyway (some browsers block even this when pop-ups are disabled outright),
+   the address is handed over rather than lost. */
 async function s3OpenSigned(storagePath,downloadName){
   const key=storagePath.slice(3);
+  const tab=downloadName?null:window.open('','_blank');
+  if(tab){
+    try{ tab.document.write('<!doctype html><meta charset="utf-8"><title>Opening…</title>'
+      +'<body style="font:16px system-ui;padding:40px;color:#334155">Opening the file…</body>'); }catch(_e){}
+  }
   const {data,error}=await s3Sign('get',key);
-  if(error){toast('Could not open file: '+error.message,'err');return;}
-  if(downloadName){const a=document.createElement('a');a.href=data.url;a.download=downloadName;document.body.appendChild(a);a.click();a.remove();}
-  else window.open(data.url,'_blank');
+  if(error){
+    if(tab) try{ tab.close(); }catch(_e){}
+    toast('Could not open file: '+error.message,'err');
+    return;
+  }
+  if(downloadName){
+    const a=document.createElement('a');a.href=data.url;a.download=downloadName;
+    document.body.appendChild(a);a.click();a.remove();
+    return;
+  }
+  if(tab&&!tab.closed){ try{ tab.location.href=data.url; return; }catch(_e){} }
+  const w=window.open(data.url,'_blank');
+  if(!w){
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-file"></i> Open file</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><p style="margin:0 0 10px;color:var(--slate);font-size:13px">'
+      +'Your browser blocked the new tab. Open it from here instead.</p>'
+      +'<input class="inp" readonly value="'+esc(data.url)+'" onclick="this.select()"></div>'
+      +'<div class="modal-foot"><a class="btn btn-primary" href="'+esc(data.url)+'" target="_blank" rel="noopener">Open</a>'
+      +'<button class="btn" onclick="closeModal()">Close</button></div>');
+  }
 }
 // Signed URL for inline display (an <img src>, not a click-to-open/download) — used by the
 // customer-portal photo galleries so a thumbnail actually shows the photo instead of a placeholder
@@ -2015,7 +2185,7 @@ async function legalOcrBarPaint(){
 }
 window.legalOcrBarPaint=legalOcrBarPaint;
 VIEWS.legal=async function(v,seg){
-  const known={mis:1,scoreboard:1,actions:1,advocates:1};
+  const known={mis:1,scoreboard:1,actions:1,advocates:1,causelist:1};
   const tab=known[seg[0]]?seg[0]:'docs';
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-scale-balanced" style="color:#1e3a8a"></i> Legal</h1><p>Document vault and litigation MIS for the Legal department</p></div>
     <div id="legalHeadActions" style="display:flex;gap:10px;flex-wrap:wrap"></div></div>
@@ -2023,6 +2193,7 @@ VIEWS.legal=async function(v,seg){
       <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('legal')"><i class="fa-solid fa-folder-open"></i> Documents</div>
       <div class="tab ${tab==='mis'?'active':''}" onclick="navTo('legal/mis')"><i class="fa-solid fa-gavel"></i> MIS</div>
       <div class="tab ${tab==='actions'?'active':''}" onclick="navTo('legal/actions')"><i class="fa-solid fa-list-check"></i> Actions</div>
+      <div class="tab ${tab==='causelist'?'active':''}" onclick="navTo('legal/causelist')"><i class="fa-solid fa-clipboard-check"></i> Causelist Reviews</div>
       <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
@@ -2032,6 +2203,7 @@ VIEWS.legal=async function(v,seg){
   if(tab==='mis') legalMIS();
   else if(tab==='scoreboard') legalScoreboard();
   else if(tab==='actions') legalActions();
+  else if(tab==='causelist') legalCauselistReviews();
   else if(tab==='advocates') legalAdvocates();
   else legalDocsView(seg);
 };
@@ -2685,6 +2857,17 @@ async function legalMIS(){
   try{const {data,error}=await sb.from('mis_cases').select('*').order('id',{ascending:true});if(error)throw error;rows=data||[];}catch(e){toast((e&&e.message)||'Could not load MIS cases','err');}
   window._misRows=rows;
   window._misSel=new Set();
+  // Anything this account exported and never finished answering nudges right here, not only
+  // silently again at the next login (clrevCheckPending covers that separately) — same claim,
+  // just checked on demand instead of only once at boot.
+  try{
+    const myPending=rows.filter(function(r){ return r.causelist_pending_by===state.email && !clrevAlreadyActioned(r); });
+    if(hAct && myPending.length){
+      hAct.innerHTML='<button class="btn" style="background:var(--warn-50);border-color:var(--warn);color:#b45309" '
+        +'onclick="clrevCheckPending()" title="Reopen the causelist action-review popup"><i class="fa-solid fa-triangle-exclamation"></i> '
+        +myPending.length+' matter'+(myPending.length===1?'':'s')+' awaiting your review</button>';
+    }
+  }catch(e){}
   /* How many papers are filed against each case, so the Documents button knows whether it has
      anything to open and the row can say so at a glance. One small query for the whole table. */
   window._misDocCounts={}; window._misDocFolders={};
@@ -3135,6 +3318,270 @@ window.legalActionsFilter=function(){
   usageQueueDebounced('legal.actions.view_search_filter_case_actions', q);
 };
 
+/* ---------- Causelist Reviews -----------------------------------------------------------------
+   Where the causelist action-review popup's decisions actually live once made - not just today's
+   snapshot on mis_cases (pending/answered/who), but the full history from
+   mis_causelist_review_log: every export claim, every answer, every time someone closed the popup
+   without answering. Also the on-demand way back into it: the toolbar nudge in legalMIS() covers
+   "I have some to answer"; this covers "let me see all of them, and who else does too". Sourced
+   from the log table itself (a case appears here iff it has at least one log row) rather than a
+   field-presence filter on mis_cases, so this and the log agree by construction. */
+function clrevDT(iso){ if(!iso) return '—'; const d=new Date(iso); if(isNaN(d)) return String(iso);
+  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()
+    +', '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+async function legalCauselistReviews(){
+  setCrumb(['Legal','Causelist Reviews']);
+  const hAct=$('legalHeadActions'); if(hAct)hAct.innerHTML='';
+  const body=$('legalBody'); if(!body)return;
+  loader(body);
+  try{ await getPeople(); }catch(e){}
+  try{ await clrevLoadLegal(); }catch(e){}   // populates window._clrevLegal for the inline person picker below
+  let logs=[], cases=[];
+  try{ const {data}=await sb.from('mis_causelist_review_log').select('*').order('created_at',{ascending:true}); logs=data||[]; }catch(e){}
+  const ids=Array.from(new Set(logs.map(function(l){return l.case_id;})));
+  if(ids.length){
+    try{
+      // The date fields are needed for misHearingIso() when an inline answer creates a task -
+      // the narrower column set used before was fine for display but left the task description's
+      // hearing date blank.
+      const {data}=await sb.from('mis_cases').select('id,case_no,case_type,cause_title,court,'
+        +'causelist_pending_by,causelist_reviewed_at,causelist_action_needed,causelist_reviewed_by,'
+        +'case_next_date_iso,case_next_date,next_date_iso,next_date').in('id',ids);
+      cases=data||[];
+    }catch(e){}
+  }
+  const byCase={};
+  logs.forEach(function(l){ (byCase[l.case_id]=byCase[l.case_id]||[]).push(l); });
+  const rows=cases.map(function(c){
+    const hist=byCase[c.id]||[];
+    // The most recent DECISION (first answer or any later edit of it) - this is what the Due /
+    // Responsible cells show, and where an edit reads the previous task id from.
+    const decisions=hist.filter(function(l){return l.event==='answered'||l.event==='edited';});
+    const closes=hist.filter(function(l){return l.event==='closed_without_answering';}).length;
+    return Object.assign({}, c, {_hist:hist, _lastAnswered:decisions[decisions.length-1]||null,
+      _closes:closes, _pending:!!c.causelist_pending_by && !c.causelist_reviewed_at});
+  }).sort(function(a,b){
+    // Pending first (soonest claimed first among those), then most recently answered.
+    if(a._pending!==b._pending) return a._pending?-1:1;
+    return String((b.causelist_reviewed_at||b._hist[0]&&b._hist[0].created_at)||'').localeCompare(String((a.causelist_reviewed_at||a._hist[0]&&a._hist[0].created_at)||''));
+  });
+  window._clrevReviewRows=rows;
+  const pendingCount=rows.filter(function(r){return r._pending;}).length;
+  body.innerHTML=`<style>
+    .crv-bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:13px}
+    .crv-search{position:relative;flex:1;min-width:180px;display:flex;align-items:center}
+    .crv-search i{position:absolute;left:11px;color:var(--slate);font-size:12.5px;pointer-events:none}
+    .crv-search input{width:100%;height:38px;padding:0 12px 0 32px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+    .crv-search input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    .crv-sel{height:38px;padding:0 34px 0 13px;border:1px solid var(--line);border-radius:9px;font-size:13px;
+      font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;
+      appearance:none;-webkit-appearance:none;
+      background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231e3a8a' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat:no-repeat;background-position:right 12px center;background-size:11px 8px}
+    @media(max-width:760px){.crv-search,.crv-sel{flex:1 1 100%}}
+    #crvTbl{width:100%;border-collapse:collapse;font-size:13px}
+    #crvTbl th{text-align:left;padding:10px 12px;background:var(--bg-subtle,#f8fafc);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);border-bottom:2px solid var(--line);white-space:nowrap}
+    #crvTbl td{padding:10px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
+    /* Pending rows answer inline, right on the line item - no click-through, no popup. */
+    .crv-seg{display:inline-flex;gap:4px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:2px;margin-left:6px;vertical-align:middle}
+    .crv-seg-btn{border:none;background:transparent;color:var(--slate);font-size:11.5px;font-weight:600;padding:4px 8px;border-radius:6px;cursor:pointer;white-space:nowrap}
+    .crv-seg-btn:hover{color:var(--ink)}
+    .crv-seg-btn.on{background:var(--card);color:var(--brand);box-shadow:var(--shadow)}
+    .crv-inline-fields{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+    .crv-inline-fields input,.crv-inline-fields select{padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;color:var(--ink);background:var(--card)}
+    @media(max-width:760px){#crvTbl{min-width:820px}}
+  </style>
+  <div class="crv-bar">
+    <div class="crv-search"><i class="fa-solid fa-magnifying-glass"></i><input id="crvQ" placeholder="Search case, exporter or reviewer…" oninput="legalCauselistFilter()"></div>
+    <select class="crv-sel" id="crvState" onchange="legalCauselistFilter()">
+      <option value="all">All (${rows.length})</option>
+      <option value="pending">Pending review (${pendingCount})</option>
+      <option value="needed">Action needed (${rows.filter(function(r){return r.causelist_action_needed===true;}).length})</option>
+      <option value="noaction">No action needed (${rows.filter(function(r){return r.causelist_action_needed===false;}).length})</option>
+    </select>
+  </div>
+  <div class="card" style="overflow:hidden"><div style="overflow-x:auto">
+    <table id="crvTbl"><thead><tr>
+      <th>Case</th><th>Status</th><th>Pending with</th><th>Answered by</th><th>Due</th><th>Responsible</th>
+    </tr></thead><tbody id="crvBody"></tbody></table>
+  </div></div>
+  <div class="empty" id="crvEmpty" style="padding:34px;display:none"><i class="fa-regular fa-square-check"></i><div>Nothing here yet.</div>
+    <div style="font-size:12.5px;color:var(--slate);margin-top:6px">This fills in as causelists get exported from the MIS tab.</div></div>`;
+  legalCauselistFilter();
+}
+// Answering a pending row - or EDITING an already-answered one - happens right on the line item: a
+// segmented control in the Status cell, and (once "Action needed" is picked) a date input +
+// Legal-person select in the Due cell, both live in window._crvEdit until Save. No popup, no
+// click-through: every control needed is always visible on its own row.
+//
+// A row is "editable" either because it's genuinely still pending, or because Edit was explicitly
+// clicked on an already-answered one (window._crvEditingIds). The two look the same but behave
+// slightly differently: a fresh pending row's "No action" saves in one click since there's nothing
+// to lose; an explicit edit always needs a deliberate Save, even for "No action", since that can
+// delete an existing task.
+window._crvEdit={};
+window._crvEditingIds=new Set();
+function crvGetEdit(id){ return window._crvEdit[id] || (window._crvEdit[id]={needed:null,due:'',person:''}); }
+function crvEditable(r){ return r._pending || window._crvEditingIds.has(r.id); }
+function crvIsExplicitEdit(r){ return !r._pending && window._crvEditingIds.has(r.id); }
+function legalCauselistStatusPill(r){
+  if(!crvEditable(r)){
+    if(r.causelist_action_needed===true) return '<span class="mis-ptag mis-ptag--green">Action needed</span> '
+      +'<a href="javascript:void(0)" onclick="legalCauselistOpenHistory('+r.id+')" style="font-size:12px;color:var(--slate)">History</a>'
+      +' · <a href="javascript:void(0)" onclick="legalCauselistEditStart('+r.id+')" style="font-size:12px">Edit</a>';
+    if(r.causelist_action_needed===false) return '<span class="mis-ptag">No action needed</span> '
+      +'<a href="javascript:void(0)" onclick="legalCauselistOpenHistory('+r.id+')" style="font-size:12px;color:var(--slate)">History</a>'
+      +' · <a href="javascript:void(0)" onclick="legalCauselistEditStart('+r.id+')" style="font-size:12px">Edit</a>';
+    return '—';
+  }
+  const e=crvGetEdit(r.id);
+  return '<span class="mis-ptag mis-ptag--amber">'+(r._pending?'Pending':'Editing')+'</span>'
+    +'<span class="crv-seg">'
+      +'<button type="button" class="crv-seg-btn'+(e.needed===true?' on':'')+'" onclick="crvSetNeeded('+r.id+',true)"><i class="fa-solid fa-flag"></i> Action needed</button>'
+      +'<button type="button" class="crv-seg-btn'+(e.needed===false?' on':'')+'" onclick="crvSetNeeded('+r.id+',false)"><i class="fa-solid fa-check"></i> No action</button>'
+    +'</span>'
+    +((r._hist||[]).length?' <a href="javascript:void(0)" onclick="legalCauselistOpenHistory('+r.id+')" style="font-size:12px;color:var(--slate)">History</a>':'')
+    +(crvIsExplicitEdit(r)?' <a href="javascript:void(0)" onclick="legalCauselistEditCancel('+r.id+')" style="font-size:12px;color:var(--slate)">Cancel</a>':'');
+}
+function crvDueCellHtml(r){
+  if(!crvEditable(r)){
+    // Assigned person lives in its own Responsible column now (crvResponsibleName) - just the date here.
+    const detail=(r._lastAnswered&&r._lastAnswered.detail)||{};
+    return (r.causelist_action_needed===true) ? esc(detail.due?clrevDmy(detail.due):'—') : '—';
+  }
+  const e=crvGetEdit(r.id);
+  if(e.needed===null) return '—';
+  if(e.needed!==true){
+    // Explicit edit landing on "No action" still needs a deliberate Save - a fresh pending row
+    // never reaches this branch, since crvSetNeeded already saved it and left edit mode.
+    return crvIsExplicitEdit(r)
+      ? '<div class="crv-inline-fields">—&nbsp;<button type="button" class="btn btn-primary" id="crvSaveBtn_'+r.id+'" style="padding:5px 10px;font-size:12px" onclick="crvSaveInline('+r.id+')">Save</button></div>'
+      : '—';
+  }
+  const legal=window._clrevLegal||[];
+  const opts='<option value="">— choose —</option>'+legal.map(function(p){
+    return '<option value="'+esc(p.email)+'"'+(e.person===p.email?' selected':'')+'>'+esc(p.name)+'</option>'; }).join('');
+  const hearing=misHearingIso(r);
+  return '<div class="crv-inline-fields">'
+    +'<input type="date" id="crvDue_'+r.id+'" value="'+esc(e.due||'')+'"'+(hearing?' max="'+esc(hearing)+'"':'')+' title="'+(hearing?'On or before the '+esc(clrevDmy(hearing))+' hearing':'')+'" onchange="crvFieldChange('+r.id+')">'
+    +'<select id="crvPerson_'+r.id+'" onchange="crvFieldChange('+r.id+')">'+opts+'</select>'
+    +'<button type="button" class="btn btn-primary" id="crvSaveBtn_'+r.id+'" style="padding:5px 10px;font-size:12px" onclick="crvSaveInline('+r.id+')" title="Save"><i class="fa-solid fa-check"></i></button>'
+  +'</div>';
+}
+// Who's actually doing it, once a matter has been marked action-needed and saved. Blank for
+// anything still pending (nobody's assigned yet) or answered as no-action (nobody needs to be).
+function crvResponsibleName(r){
+  const detail=(r._lastAnswered&&r._lastAnswered.detail)||{};
+  return (r.causelist_action_needed===true && detail.person) ? esc(nameOf(detail.person)) : '—';
+}
+function crvRepaintRow(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;}); if(!r) return;
+  const st=$('crvStat_'+id); if(st) st.innerHTML=legalCauselistStatusPill(r);
+  const da=$('crvDA_'+id); if(da) da.innerHTML=crvDueCellHtml(r);
+}
+window.legalCauselistEditStart=function(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;}); if(!r) return;
+  window._crvEditingIds.add(id);
+  const detail=(r._lastAnswered&&r._lastAnswered.detail)||{};
+  window._crvEdit[id]={needed:r.causelist_action_needed, due:detail.due||'', person:detail.person||''};
+  crvRepaintRow(id);
+};
+window.legalCauselistEditCancel=function(id){
+  window._crvEditingIds.delete(id);
+  delete window._crvEdit[id];
+  crvRepaintRow(id);
+};
+window.crvSetNeeded=function(id,val){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;}); if(!r) return;
+  const e=crvGetEdit(id);
+  e.needed=val;
+  // Fresh (not-yet-answered) "No action" still saves in one click - nothing at stake to lose.
+  if(val===false && r._pending && !crvIsExplicitEdit(r)){ crvSaveInline(id); return; }
+  crvRepaintRow(id);
+};
+window.crvFieldChange=function(id){
+  const e=crvGetEdit(id), d=$('crvDue_'+id), p=$('crvPerson_'+id);
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;});
+  const hearing=r?misHearingIso(r):null;
+  if(d && clrevDueTooLate(d.value,hearing)){
+    toast('Due date can\'t be after the '+clrevDmy(hearing)+' hearing — reset to that date','warn');
+    d.value=hearing;
+  }
+  if(d) e.due=d.value||''; if(p) e.person=p.value||'';
+};
+window.crvSaveInline=async function(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;});
+  if(!r) return;
+  const e=crvGetEdit(id);
+  if(e.needed===null) return;
+  if(e.needed===true){
+    crvFieldChange(id);
+    if(!e.due||!e.person){ toast('Pick a due date and a responsible person first','warn'); return; }
+    if(clrevDueTooLate(e.due,misHearingIso(r))){ toast('Due date can\'t be after the '+clrevDmy(misHearingIso(r))+' hearing','warn'); return; }
+  }
+  const isEdit=!r._pending;
+  const prevTaskId=(r._lastAnswered&&r._lastAnswered.detail&&r._lastAnswered.detail.task_id)||null;
+  const btn=$('crvSaveBtn_'+id);
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try{
+    await clrevSaveOneRow({id:r.id, case_no:r.case_no, cause_title:r.cause_title, court:r.court,
+      hearing:misHearingIso(r), needed:e.needed, due:e.due, person:e.person}, {prevTaskId:prevTaskId, isEdit:isEdit});
+  }catch(err){
+    toast('Could not save: '+((err&&err.message)||err),'err');
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i>'; }
+    return;
+  }
+  window._crvEditingIds.delete(id);
+  delete window._crvEdit[id];
+  toast(isEdit?'Updated':'Saved','ok');
+  legalCauselistReviews();
+};
+window.legalCauselistFilter=function(){
+  const rows=window._clrevReviewRows||[];
+  const q=(($('crvQ')||{}).value||'').trim().toLowerCase();
+  const st=(($('crvState')||{}).value)||'all';
+  const list=rows.filter(function(r){
+    if(st==='pending'&&!r._pending) return false;
+    if(st==='needed'&&r.causelist_action_needed!==true) return false;
+    if(st==='noaction'&&r.causelist_action_needed!==false) return false;
+    if(!q) return true;
+    return [r.case_no,r.cause_title,r.causelist_pending_by,r.causelist_reviewed_by].filter(Boolean).join(' ').toLowerCase().indexOf(q)!==-1;
+  });
+  const tb=$('crvBody'); if(!tb)return;
+  tb.innerHTML=list.map(function(r){
+    return '<tr>'
+      +'<td><b class="lg-clamp" title="'+esc(r.cause_title||'')+'">'+esc(r.case_no||('#'+r.id))+'</b>'
+        +'<div style="color:var(--slate);font-size:12px" class="lg-clamp">'+esc(r.cause_title||'')+'</div></td>'
+      +'<td id="crvStat_'+r.id+'">'+legalCauselistStatusPill(r)+'</td>'
+      +'<td style="white-space:nowrap">'+(r.causelist_pending_by?esc(nameOf(r.causelist_pending_by)):'—')+'</td>'
+      +'<td style="white-space:nowrap">'+(r.causelist_reviewed_by?(esc(nameOf(r.causelist_reviewed_by))+' · '+esc(clrevDmy(String(r.causelist_reviewed_at||'').slice(0,10)))):'—')+'</td>'
+      +'<td id="crvDA_'+r.id+'">'+crvDueCellHtml(r)+'</td>'
+      +'<td>'+crvResponsibleName(r)+'</td>'
+    +'</tr>';
+  }).join('');
+  const em=$('crvEmpty'); if(em)em.style.display=list.length?'none':'';
+};
+window.legalCauselistOpenHistory=function(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;});
+  if(!r) return;
+  const hist=r._hist||[];
+  const rowsHtml=hist.length ? hist.map(function(l){
+    let what='';
+    if(l.event==='exported') what='Exported / claimed by '+esc(nameOf(l.actor));
+    else if(l.event==='closed_without_answering') what='Closed the popup without answering — '+esc(nameOf(l.actor));
+    else if(l.event==='answered'||l.event==='edited'){
+      const d=l.detail||{}, verb=(l.event==='edited')?'Edited to':'Marked';
+      what=d.needed
+        ? verb+' <b>action needed</b> by '+esc(nameOf(l.actor))+' — due '+esc(d.due?clrevDmy(d.due):'—')+', assigned to '+esc(d.person?nameOf(d.person):'—')
+        : verb+' <b>no action needed</b> by '+esc(nameOf(l.actor));
+    }
+    return '<div style="padding:9px 0;border-bottom:1px solid var(--line-2)"><div style="font-size:12px;color:var(--slate)">'+esc(clrevDT(l.created_at))+'</div><div>'+what+'</div></div>';
+  }).join('') : '<div style="color:var(--slate);padding:14px 0">No history recorded.</div>';
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-clock-rotate-left"></i> '+esc(r.case_no||('Case '+r.id))+' — review history</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,560px);max-height:70vh;overflow:auto">'+rowsHtml+'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','md');
+};
+
 /* ---------- Advocates ----------------------------------------------------------------------- */
 async function legalAdvocates(){
   setCrumb(['Legal','Advocates']);
@@ -3426,7 +3873,7 @@ function usbCauselistMeta(built){
     return {range:misRangeLabel()||'All dates', cases:n+' case'+(n===1?'':'s')};
   }catch(e){ return null; }
 }
-window.misExportCauselist=function(){
+window.misExportCauselist=async function(){
   const built=misBuildCauselist();
   if(!built) return;   // misBuildCauselist already toasted why
   const rows=built.rows;
@@ -3443,6 +3890,284 @@ window.misExportCauselist=function(){
   // misBuildCauselist (no date range, or nothing in range) as a use just the same as a real
   // export, which is exactly the bug that made "1 use" unverifiable as a real success.
   try{ usageQueue('legal.mis.export_causelist','export', usbCauselistMeta(built)); }catch(_e){}
+  // Every matter an export just produced now has to be marked action-needed or not before the
+  // export counts as done - clrevMaybeOpen no-ops if every one of them was already answered by
+  // an earlier, overlapping export.
+  await clrevMaybeOpen(rows);
+};
+
+/* ---- Causelist export review: action-needed popup -----------------------------------------
+   Whoever exported a causelist, or is just starting a new session with matters still unanswered,
+   gets asked to say, for each one, whether it needs action and — if it does — by when and who in
+   Legal is doing it. That answer becomes a task delegated from businessanalyst@thejaingroup.com,
+   due the date picked here, assigned to the person picked here. A case already answered
+   (causelist_reviewed_at set), or already carrying an open or executed action from the ordinary
+   per-case action tracker, is never asked about again.
+
+   The popup itself can be closed with the X — but closing it decides nothing: nothing is written
+   to the database until Submit runs, so whatever was still unanswered stays unanswered, and
+   clrevCheckPending() (called once from boot(), i.e. once per page load — this app is multi-page,
+   so that is effectively "every new session") puts the same popup straight back up the next time
+   JainE is opened. Submit is still the only way to actually clear a matter off this list. */
+window._clrevRows=[]; window._clrevLegal=[];
+// Set by a caller that needs to know when a clrev popup actually finished (answered or closed) -
+// the Causelist Reviews tab uses this to repaint itself with the fresh status instead of going
+// stale the moment its own "Answer now" popup closes. Cleared right after it fires, once.
+window._clrevOnDone=null;
+// A case where action has already been taken - an open action already logged (action_needed) or
+// one already carried out (action_executed_date) - has nothing left for this popup to ask about,
+// on top of one this popup itself already reviewed (causelist_reviewed_at). None of this touches
+// what the export file itself lists - that stays every matter in the range, unfiltered.
+function clrevAlreadyActioned(r){
+  return !!r.causelist_reviewed_at || !!String(r.action_needed||'').trim() || !!String(r.action_executed_date||'').trim();
+}
+function clrevPrepRows(rows){
+  return (rows||[]).map(function(r){ return {id:r.id, case_no:r.case_no, case_type:r.case_type,
+    cause_title:r.cause_title, court:r.court, hearing:misHearingIso(r), needed:null, due:'', person:''}; });
+}
+async function clrevLoadLegal(){
+  const people=await getPeople();
+  window._clrevLegal=people.filter(function(p){ return Array.isArray(p.depts)&&p.depts.indexOf('Legal')!==-1; })
+    .sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+}
+async function clrevMaybeOpen(rows){
+  const pending=(rows||[]).filter(function(r){ return !clrevAlreadyActioned(r); });
+  if(!pending.length) return;
+  // Claim these cases as this exporter's to review, written immediately (not left until Submit) so
+  // it survives a closed tab or a later session — clrevCheckPending() only ever shows a case to
+  // whoever holds this claim. Re-exporting an overlapping range later just re-claims it for
+  // whoever ran that export, which is the point: it should nag the person who most recently
+  // downloaded it, not whoever exported it first.
+  const ids=pending.map(function(r){return r.id;});
+  try{
+    await sb.from('mis_cases').update({causelist_pending_by:state.email}).in('id',ids);
+    pending.forEach(function(r){ r.causelist_pending_by=state.email; });
+    await sb.from('mis_causelist_review_log').insert(ids.map(function(id){
+      return {case_id:id, event:'exported', actor:state.email};
+    }));
+  }catch(e){}
+  await clrevLoadLegal();
+  window._clrevRows=clrevPrepRows(pending);
+  clrevRender();
+}
+// Called once from boot(), after auth resolves - only for the person who actually exported a
+// causelist and left it unanswered (causelist_pending_by = them), never for anyone else with Legal
+// MIS access. Only cases with a real hearing date are in scope (the same universe a causelist ever
+// draws from), so this never turns into "review every case in the system".
+async function clrevCheckPending(){
+  if(!(typeof pageAllowed==='function') || !pageAllowed('legal')) return;
+  if(!state.email) return;
+  let rows=[];
+  try{
+    const {data,error}=await sb.from('mis_cases').select('*').eq('causelist_pending_by',state.email);
+    if(error) throw error;
+    rows=(data||[]).filter(function(r){ return misHearingIso(r) && !clrevAlreadyActioned(r); });
+  }catch(e){ return; }
+  if(!rows.length) return;
+  await clrevLoadLegal();
+  window._clrevRows=clrevPrepRows(rows);
+  clrevRender();
+}
+// Typed-in due-date/person values live only in the DOM between renders; a Yes/No toggle rebuilds
+// the whole modal (to show or hide that row's fields), so whatever is currently in every input
+// has to be pulled back into state first or it would be lost for every OTHER row on that rebuild.
+function clrevSync(){
+  (window._clrevRows||[]).forEach(function(r){
+    const d=$('clrevDue_'+r.id), p=$('clrevPerson_'+r.id);
+    if(d) r.due=d.value||'';
+    if(p) r.person=p.value||'';
+  });
+}
+window.clrevSetNeeded=function(id,val){
+  clrevSync();
+  const r=(window._clrevRows||[]).find(function(x){return x.id===id;});
+  if(r) r.needed=val;
+  clrevRender();
+};
+function clrevDmy(iso){ if(!iso)return '—'; const d=new Date(iso+'T00:00:00');
+  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); }
+// A task to prepare for a hearing due AFTER the hearing is pointless - the MIS "Action Date" for a
+// case has always mirrored its hearing date (the old per-case editor sets action_date=next_date
+// the moment an action is raised), so this is the same rule the old system already enforced,
+// applied here to the date this popup's task carries. Shared by both the popup and the Causelist
+// Reviews tab's inline editor.
+function clrevDueTooLate(due, hearing){ return !!(due && hearing && due > hearing); }
+window.clrevDueChange=function(id){
+  const r=(window._clrevRows||[]).find(function(x){return x.id===id;});
+  const d=$('clrevDue_'+id);
+  if(r && d && clrevDueTooLate(d.value, r.hearing)){
+    toast('Due date can\'t be after the '+clrevDmy(r.hearing)+' hearing — reset to that date','warn');
+    d.value=r.hearing;
+  }
+};
+function clrevRender(){
+  const rows=window._clrevRows||[], legal=window._clrevLegal||[];
+  const isDone=function(r){ return r.needed===false || (r.needed===true && r.due && r.person); };
+  const answered=rows.filter(isDone).length;
+  const pct=rows.length?Math.round(100*answered/rows.length):0;
+  const opts=legal.map(function(p){ return {v:esc(p.email), t:esc(p.name)}; });
+  const body=rows.map(function(r,i){
+    const yesOn=r.needed===true, noOn=r.needed===false;
+    const personOpts='<option value="">— choose —</option>'+opts.map(function(o){
+      return '<option value="'+o.v+'"'+(r.person===o.v?' selected':'')+'>'+o.t+'</option>'; }).join('');
+    return '<div class="clrev-card'+(isDone(r)?' clrev-done':'')+'">'
+      +'<div class="clrev-card-top">'
+        +'<div class="clrev-meta">'
+          +'<span class="clrev-badge">'+esc(r.case_no||('#'+(i+1)))+'</span>'
+          +'<span class="clrev-sub">'+esc(r.case_type||'—')+' · '+esc(r.court||'—')+' · Hearing '+esc(clrevDmy(r.hearing))+'</span>'
+          +'<div class="clrev-title">'+esc(r.cause_title||'—')+'</div>'
+        +'</div>'
+        +'<div class="clrev-toggle">'
+          +'<button type="button" class="clrev-seg'+(yesOn?' on':'')+'" onclick="clrevSetNeeded('+r.id+',true)"><i class="fa-solid fa-flag"></i> Action needed</button>'
+          +'<button type="button" class="clrev-seg'+(noOn?' on':'')+'" onclick="clrevSetNeeded('+r.id+',false)"><i class="fa-solid fa-check"></i> No action</button>'
+        +'</div>'
+      +'</div>'
+      +(yesOn
+        ? '<div class="clrev-fields">'
+            +'<label>Due date'+(r.hearing?' <span style="font-weight:400;color:var(--slate)">(on or before the '+esc(clrevDmy(r.hearing))+' hearing)</span>':'')
+              +'<input type="date" id="clrevDue_'+r.id+'" value="'+esc(r.due||'')+'"'+(r.hearing?' max="'+esc(r.hearing)+'"':'')+' onchange="clrevDueChange('+r.id+')"></label>'
+            +'<label>Responsible (Legal)<select id="clrevPerson_'+r.id+'">'+personOpts+'</select></label>'
+          +'</div>'
+        : '')
+      +'</div>';
+  }).join('');
+  openModal('<style>'
+    +'.clrev-body{width:min(94vw,760px);max-height:74vh;overflow:auto;padding:20px 22px}'
+    +'.clrev-progress-wrap{margin-bottom:16px}'
+    +'.clrev-progress-txt{display:flex;justify-content:space-between;font-size:13px;color:var(--slate);margin-bottom:6px}'
+    +'.clrev-progress-bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}'
+    +'.clrev-progress-fill{height:100%;background:var(--brand);border-radius:99px;transition:width .2s}'
+    +'.clrev-card{border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:10px;padding:14px 16px;margin-bottom:12px;background:var(--card);transition:border-color .15s}'
+    +'.clrev-card.clrev-done{border-left-color:var(--ok)}'
+    +'.clrev-card-top{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:flex-start}'
+    +'.clrev-meta{min-width:0}'
+    +'.clrev-badge{display:inline-block;background:var(--brand-50);color:var(--brand);font-weight:700;font-size:12px;padding:2px 9px;border-radius:6px;margin-bottom:5px}'
+    +'.clrev-sub{display:block;color:var(--slate);font-size:12.5px;margin-bottom:3px}'
+    +'.clrev-title{font-weight:600;font-size:14px;line-height:1.35}'
+    +'.clrev-toggle{display:flex;gap:6px;flex:none;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:3px}'
+    +'.clrev-seg{border:none;background:transparent;color:var(--slate);font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}'
+    +'.clrev-seg:hover{color:var(--ink)}'
+    +'.clrev-seg.on{background:var(--card);color:var(--brand);box-shadow:var(--shadow)}'
+    +'.clrev-fields{display:flex;gap:12px;margin-top:12px;padding:12px;background:var(--bg);border-radius:8px;flex-wrap:wrap}'
+    +'.clrev-fields label{flex:1;min-width:170px;font-size:12.5px;color:var(--slate);font-weight:600}'
+    +'.clrev-fields input,.clrev-fields select{display:block;width:100%;margin-top:5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13.5px;color:var(--ink);background:var(--card)}'
+    +'</style>'
+    +'<div class="modal-head"><h3><i class="fa-solid fa-scale-balanced" style="color:var(--brand)"></i> Causelist — action review</h3>'
+      +'<span class="x" onclick="clrevClose()">&times;</span></div>'
+    +'<div class="modal-body clrev-body">'
+      +'<div class="clrev-progress-wrap"><div class="clrev-progress-txt"><span>Mark whether each matter needs action</span><span>'+answered+' of '+rows.length+'</span></div>'
+        +'<div class="clrev-progress-bar"><div class="clrev-progress-fill" style="width:'+pct+'%"></div></div></div>'
+      +(body||'<div style="color:var(--slate)">Nothing left to answer.</div>')
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn btn-primary" onclick="clrevSubmit()">Submit</button></div>','lg');
+}
+// The X closes the popup without deciding anything (causelist_pending_by is untouched, so
+// clrevCheckPending() puts the same rows back up next session) - logged here so the review log
+// shows it was seen and skipped, not just silently missing between the export and whenever it's
+// finally answered.
+window.clrevClose=function(){
+  clrevSync();
+  const unanswered=(window._clrevRows||[]).filter(function(r){
+    return !(r.needed===false || (r.needed===true && r.due && r.person));
+  });
+  if(unanswered.length){
+    sb.from('mis_causelist_review_log').insert(unanswered.map(function(r){
+      return {case_id:r.id, event:'closed_without_answering', actor:state.email};
+    })).then(function(){},function(){});
+  }
+  closeModal();
+  if(typeof window._clrevOnDone==='function'){ const fn=window._clrevOnDone; window._clrevOnDone=null; try{ fn(); }catch(e){} }
+};
+// The actual save for one row - task (create/update/delete as needed), mis_cases update, log
+// entry, in-memory sync. Shared by clrevSubmit's loop (the modal - always a fresh answer, never an
+// edit), the Causelist Reviews table's inline answer (also fresh), and its inline EDIT of an
+// already-answered row.
+//
+// opts.prevTaskId is the task an earlier answer on this same case created, if any (read from that
+// answer's own log entry - nothing on mis_cases points at it directly). Editing needed=true with a
+// prevTaskId updates that task in place rather than creating a second one; editing needed=true
+// without one creates a fresh task, same as a first answer; editing down to needed=false with a
+// prevTaskId deletes that task outright, since a case marked no-action-needed shouldn't still carry
+// one. opts.isEdit only controls which event name gets logged (edited vs answered) - it does not
+// change what happens to the task, which is decided by whether prevTaskId is actually set.
+async function clrevSaveOneRow(r, opts){
+  opts=opts||{};
+  const prevTaskId=opts.prevTaskId||null;
+  let taskId=null;
+  if(r.needed===true){
+    if(prevTaskId){
+      const {error:ue2}=await sb.schema('acc').from('ptasks').update({due_date:r.due}).eq('id',prevTaskId);
+      if(ue2) throw ue2;
+      const {data:cur}=await sb.schema('acc').from('ptask_assignees').select('email').eq('task_id',prevTaskId);
+      const already=(cur||[]).some(function(x){return String(x.email||'').toLowerCase()===String(r.person||'').toLowerCase();});
+      if(!already){
+        const {error:de}=await sb.schema('acc').from('ptask_assignees').delete().eq('task_id',prevTaskId);
+        if(de) throw de;
+        const {error:ae2}=await sb.schema('acc').from('ptask_assignees').insert({task_id:prevTaskId, email:r.person});
+        if(ae2) throw ae2;
+      }
+      taskId=prevTaskId;
+    }else{
+      const {data:t,error}=await sb.schema('acc').from('ptasks').insert({
+        title:'Legal MIS — Case '+(r.case_no||r.id),
+        description:(r.cause_title||'')+(r.court?' · '+r.court:'')+' · Hearing '+clrevDmy(r.hearing),
+        delegator:'businessanalyst@thejaingroup.com', created_by:'businessanalyst@thejaingroup.com',
+        due_date:r.due, order_index:0, source:'causelist'
+      }).select().single();
+      if(error) throw error;
+      const {error:ae}=await sb.schema('acc').from('ptask_assignees').insert({task_id:t.id, email:r.person});
+      if(ae) throw ae;
+      taskId=t.id;
+    }
+  }else if(prevTaskId){
+    // Edited down to "no action needed" - the task an earlier "action needed" answer created no
+    // longer applies.
+    try{ await sb.schema('acc').from('ptask_assignees').delete().eq('task_id',prevTaskId); }catch(_de){}
+    const {error:de2}=await sb.schema('acc').from('ptasks').delete().eq('id',prevTaskId);
+    if(de2) throw de2;
+  }
+  const {error:ue}=await sb.from('mis_cases').update({
+    causelist_reviewed_at:new Date().toISOString(),
+    causelist_action_needed:r.needed,
+    causelist_reviewed_by:state.email,
+    causelist_pending_by:null
+  }).eq('id',r.id);
+  if(ue) throw ue;
+  try{ await sb.from('mis_causelist_review_log').insert({case_id:r.id, event:opts.isEdit?'edited':'answered', actor:state.email,
+    detail:{needed:r.needed, due:r.needed?(r.due||null):null, person:r.needed?(r.person||null):null, task_id:taskId}}); }catch(_le){}
+  // Keep the in-memory MIS table in sync too, so re-exporting an overlapping range later in this
+  // same session doesn't ask about this case again without a full reload.
+  const src=(window._misRows||[]).find(function(x){return x.id===r.id;});
+  if(src){ src.causelist_reviewed_at=new Date().toISOString(); src.causelist_action_needed=r.needed; src.causelist_reviewed_by=state.email; src.causelist_pending_by=null; }
+}
+window.clrevSubmit=async function(){
+  clrevSync();
+  const rows=window._clrevRows||[];
+  const bad=rows.find(function(r){ return r.needed===null || (r.needed===true && (!r.due||!r.person)); });
+  if(bad){
+    toast('Answer every matter first — case '+(bad.case_no||bad.id)+' is still incomplete','warn');
+    clrevRender();
+    return;
+  }
+  const late=rows.find(function(r){ return r.needed===true && clrevDueTooLate(r.due,r.hearing); });
+  if(late){
+    toast('Case '+(late.case_no||late.id)+'\'s due date is after its '+clrevDmy(late.hearing)+' hearing — fix it first','warn');
+    clrevRender();
+    return;
+  }
+  const btn=document.querySelector('.modal-foot .btn-primary');
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try{
+    for(const r of rows){ await clrevSaveOneRow(r); }
+  }catch(e){
+    toast('Could not save: '+((e&&e.message)||e),'err');
+    if(btn){ btn.disabled=false; btn.innerHTML='Submit'; }
+    return;
+  }
+  window._clrevRows=[]; window._clrevLegal=[];
+  closeModal();
+  toast('Causelist reviewed — tasks created for every matter marked action-needed','ok');
+  if(typeof window._clrevOnDone==='function'){ const fn=window._clrevOnDone; window._clrevOnDone=null; try{ fn(); }catch(e){} }
 };
 // View is the same sheet, opened for on-screen reading instead of forced onto disk - the
 // causelist-format equivalent of every other module's Preview/Download pair.
@@ -3948,7 +4673,8 @@ async function getPeople(){
 }
 function nameOf(email){if(!email)return '—';const p=(PEOPLE||[]).find(x=>x.email===email);return p?p.name:email.split('@')[0];}
 function taskTabs(active){
-  const t=[['','Home','fa-house'],['list','Projects','fa-diagram-project'],['scoreboard','Scoreboard','fa-trophy']];
+  // No Scoreboard tab here any more — it's its own module (Overview > Scoreboard).
+  const t=[['','Home','fa-house'],['list','Projects','fa-diagram-project']];
   return '<div class="tabs">'+t.map(x=>`<div class="tab ${active===x[0]?'active':''}" onclick="location.hash='#/tasks${x[0]?'/'+x[0]:''}'"><i class="fa-solid ${x[2]}"></i> ${x[1]}</div>`).join('')+'</div>';
 }
 
@@ -6026,19 +6752,51 @@ function recGuard(){
   toast('Read-only — only HR, Abhay Mati and Administrators can change Recruitment records','err');
   return false;
 }
-const REC_WRITE_FNS=['rtAdd','rtRename','rtDelete','rtSave','rtUpdate','rtShareAddN','rtShareSend',
+const REC_WRITE_FNS=['rtAdd','rtRename','rtDelete','rtSave','rtUpdate','rtShareSend',
   'mpFillForm','mpEditSel','mpDeleteSel','mpEdit','mpDeleteOne','mpUpdate','mpSave',
   'recUploadModal','recDeleteSel','recJdSave','recJdDelete',
   'tpMpApprove','tpMpReject','tpMpRejectConfirm','tpMpDeleteOne','tpMpGenerate',
-  'tpRefApprove','tpRefReject','tpTrAdd','tpTrSave','tpTrEmailSel','tpTrDeleteSel',
+  'tpRefConnect','tpRefConnectGo','tpRefReject','tpTrAdd','tpTrSave','tpTrEmailSel','tpTrEmailSelSend','tpTrDeleteSel',
   'tpMuOpenMonth','tpMuDeleteRow','tpMuCompleteRow','tpMuUncompleteRow',
   'rtManageQuestions','rtqAddForm','rtqSaveMcq','rtqSaveDescriptive','rtqDelete',
   'rtNativeSend','rtNativeSendGo','rtqRegrade','tpTrEmailSend'];
+/* CONTROLS ARE DISABLED AND EXPLAINED, NOT DELETED.
+
+   This used to call el.remove(), and that one decision cost more time today than any bug in the
+   features themselves. A button that is simply gone tells you nothing: Preview, Get Link and Send
+   each vanished in turn, and every time it looked like the feature was broken, or the account was
+   wrong, or the file was stale - when the real answer was "you do not have permission" or "your
+   roles are three minutes out of date". Hours went into questions one sentence on the screen would
+   have answered.
+
+   So the control stays, greyed, and says why when pressed. That is no less safe: removal only ever
+   hid the control, it never stopped anything - every one of these actions re-checks permission
+   itself, and the database checks again on the write. Hiding was never the protection; it only
+   made the failure silent.
+
+   Anything that cannot be disabled - a link, a div - has its onclick taken away instead, so it can
+   still be seen and still cannot act. */
 function recStripWriteControls(root){
   if(recCanWrite()) return;
   const re=new RegExp('^\\s*(?:'+REC_WRITE_FNS.join('|')+')\\s*\\(');
+  const why='Read-only — only HR, Abhay Mati and Administrators can change Recruitment records.';
   (root||document).querySelectorAll('[onclick]').forEach(function(el){
-    if(re.test(el.getAttribute('onclick')||'')) el.remove();
+    if(!re.test(el.getAttribute('onclick')||'')) return;
+    if(el.dataset && el.dataset.recLocked==='1') return;   // the observer re-runs; do this once
+    if(el.dataset) el.dataset.recLocked='1';
+    el.removeAttribute('onclick');
+    el.setAttribute('title',why);
+    /* NOT el.disabled. A disabled button swallows the click, so the very sentence this exists to
+       show would never appear - the control would look dead for no stated reason, which is the
+       failure being fixed. It is marked disabled to assistive tech, greyed to the eye, and its
+       action already removed above; the listener below is what answers the press. */
+    el.setAttribute('aria-disabled','true');
+    el.style.opacity='.55';
+    el.style.cursor='not-allowed';
+    el.addEventListener('click',function(ev){
+      ev.preventDefault(); ev.stopPropagation();
+      try{ toast(why,'err'); }catch(_e){}
+    },true);
   });
 }
 // Several Recruitment bars are re-rendered on the fly, so watch the view and re-strip.
@@ -6060,18 +6818,20 @@ function hrEmpOptions(sel){return (HR_EMP||[]).map(e=>`<option value="${esc(e.em
 // talent, so hrResumes/hrInterviewQs are reused as-is -- they, and tp*, disagree on which body
 // container id they render into (hrBody vs recBody), so the id switches per tab below.
 VIEWS.hr_new=async function(v,seg){
-  setCrumb(['People','Human Resources (New)']);
-  const tabs=['Interview Tracker','Monthly Update','Resumes','Interview Qs'];
+  setCrumb(['People','Human Resources']);
+  const tabs=['Interviews','Monthly Progress','Resumes'];
   const ti=mTab(seg,tabs.length);
   const bodyId=(ti<=1)?'recBody':'hrBody';
-  v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-users','#be123c','Human Resources (New)')
+  v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-users','#be123c','Human Resources')
     +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Approving, editing and deleting here is limited to HR, Abhay Mati and Administrators.</div>')
     +mTabs('hr_new',tabs,ti)+'<div id="'+bodyId+'" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
   recWatchPerms();
   if(ti===0){await tpTracker();return;}
   if(ti===1){await tpMonthlyUpdate();return;}
-  if(ti===2){await hrResumes();return;}
-  await hrInterviewQs();
+  /* Resumes is the last tab now. Interview Qs was removed: it was a library nobody was reaching
+     for, and it sat in the tab strip costing a decision on every visit. hrInterviewQs() is left in
+     the file rather than deleted, so nothing is lost if it is ever wanted back. */
+  await hrResumes();
 };
 
 /* ── Monthly Update ──
@@ -6082,7 +6842,10 @@ VIEWS.hr_new=async function(v,seg){
    The first four columns are cumulative ("how many got at least this far") and read the candidate's
    high-water mark, not their current stage — otherwise anybody who dropped out after their test
    would still be counted as having been interviewed. The last five are exact outcomes. That split
-   lives in hr.tracker_stages.counts_as, so adding a stage is a database change, not a code change. */
+   lives in hr.tracker_stages.counts_as, so adding a stage is a database change, not a code change.
+   A candidate begins BELOW all nine, at 'Applied' (seq 0), so filling in the careers-page form no
+   longer reports a test as having been sent to them. Nothing counts them until something really
+   happens; how many applied is candidate_total, which hr.monthly_view returns separately. */
 let MU_MONTHS_CACHE=null, MU_CUR=null, MU_ROWS=null, MU_SEL=new Set();
 const MU_MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
 /* The nine column names come from the database (hr.tracker_stages) so the screen cannot disagree
@@ -6129,7 +6892,7 @@ function muRenderList(b){
   if(!rows.length){
     html+='<div class="card card-pad empty"><i class="fa-regular fa-calendar"></i>'
       +'<div style="font-weight:600;color:var(--ink)">No months yet</div>'
-      +'<p style="max-width:400px;margin:6px auto 0">A month appears here as soon as a ManPower requisition lands in it. '
+      +'<p style="max-width:400px;margin:6px auto 0">A month appears here as soon as a hiring request lands in it. '
       +'Fill a ManPower Form in Recruitment to start one.</p></div>';
   } else {
     html+='<div class="mu-grid">'+rows.map(function(r){
@@ -6170,7 +6933,7 @@ async function muRenderDetail(b){
 
   const head='<tr>'
     +'<th style="width:36px"><input type="checkbox" class="mu-cb" id="muChkAll" onchange="muToggleAll(this)"></th>'
-    +'<th>Position</th><th>Vacancies</th><th>Approval</th><th>Hiring</th>'
+    +'<th>Position</th><th>Vacancies</th><th>Status</th><th>Hiring</th>'
     +stages.map(function(s,i){ return '<th class="mu-n'+(i===0?' mu-split':'')+'">'+esc(s)+'</th>'; }).join('')
     +'</tr>';
 
@@ -6236,7 +6999,7 @@ async function muRenderDetail(b){
         +'<div id="muNoMatch" class="empty" style="display:none;padding:26px">No matches</div></div>'
       : '<div class="card card-pad empty"><i class="fa-regular fa-folder-open"></i>'
         +'<div style="font-weight:600;color:var(--ink)">Nothing in '+esc(muMonthLabel(MU_CUR))+' yet</div>'
-        +'<p style="max-width:400px;margin:6px auto 0">Positions appear here from ManPower requisitions.</p></div>');
+        +'<p style="max-width:400px;margin:6px auto 0">Positions appear here from hiring requests.</p></div>');
 }
 
 /* Closing a position is what takes its page off the website. hr.public_position only answers for
@@ -6348,7 +7111,7 @@ window.muDeleteSel=async function(){
   const what=ids.length===1
     ? 'Remove “'+((picked[0]&&picked[0].position_title)||'this position')+'” from '+muMonthLabel(MU_CUR)+'?'
     : 'Remove '+ids.length+' positions from '+muMonthLabel(MU_CUR)+'?';
-  if(!await confirmDialog(what+' The requisition itself is not deleted.',
+  if(!await confirmDialog(what+' The hiring request itself is not deleted.',
       {title:'Remove from month', okLabel:'Remove'})) return;
   const {error}=await sb.schema('hr').from('tracker_rows').delete().in('id',ids);
   if(error){ toast(error.message,'err'); return; }
@@ -6360,16 +7123,16 @@ window.muDeleteSel=async function(){
 /* Approve / Reject a fresh row. The decision is recorded against the REQUISITION, which is what the
    emailed one-click links act on as well, so both routes land in exactly the same place. */
 window.muApprove=async function(manpowerId,ok){
-  if(!manpowerId){ toast('This row has no requisition behind it','err'); return; }
-  if(!hrCan()){ toast('Only HR can approve a requisition','err'); return; }
+  if(!manpowerId){ toast('This row has no hiring request behind it','err'); return; }
+  if(!hrCan()){ toast('Only HR can approve a hiring request','err'); return; }
   const row=(MU_ROWS||[]).find(function(r){return r.manpower_id===manpowerId;})||{};
-  const who=row.position_title||'this requisition';
+  const who=row.position_title||'this request';
   /* confirmDialog defaults to danger:true with the OK button labelled "Delete" - which turned the
      Approve prompt into a red delete warning. Both buttons are named for what they actually do. */
   const okd=await confirmDialog(
-    (ok?'Approve the requisition for “':'Reject the requisition for “')+who+'”?',
-    ok ? {title:'Approve requisition', okLabel:'Approve', icon:'fa-circle-check', danger:false}
-       : {title:'Reject requisition',  okLabel:'Reject',  icon:'fa-circle-xmark', danger:true});
+    (ok?'Approve the hiring request for “':'Reject the hiring request for “')+who+'”?',
+    ok ? {title:'Approve hiring request', okLabel:'Approve', icon:'fa-circle-check', danger:false}
+       : {title:'Reject hiring request',  okLabel:'Reject',  icon:'fa-circle-xmark', danger:true});
   if(!okd) return;
   const patch=ok
     ? {approval_status:'Approved', approved_by:state.email, approved_at:new Date().toISOString(), rejection_reason:null}
@@ -6502,7 +7265,7 @@ async function hrTracker(){
             <td style="font-size:12px;color:var(--slate)">${cel(r.source)}</td>
             <td style="font-size:12px">${cel(r.entity)}</td>
             <td class="tr-nowrap" style="font-family:monospace;font-size:12px">${cel(r.number)}</td>
-            <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" onclick="hrTrackerMailed(${JSON.stringify(r.candidate_name||'')})" style="color:var(--brand)">${esc(r.email)}</a>`:''}</td>
+            <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" onclick="hrTrackerMailed(${esc(JSON.stringify(r.candidate_name||''))})" style="color:var(--brand)">${esc(r.email)}</a>`:''}</td>
             <td class="tr-nowrap" style="font-size:12px;color:var(--slate)">${cel(r.scheduled_date)}</td>
             <td class="tr-nowrap">${fbTag(r.feedback)}</td>
             <td class="tr-nowrap">${trResumeCell(r)}</td>
@@ -6736,16 +7499,19 @@ window.rsBulkDownload=async function(){
 };
 window.rsBulkDelete=async function(){
   if(!RS_SEL.size)return;
-  if(!await confirmDialog('Delete '+RS_SEL.size+' resume(s) permanently?'))return;
-  for(const id of RS_SEL){
-    const r=(RS_ROWS||[]).find(x=>x.id===id);
-    if(r&&r.storage_path){ if(isS3Path(r.storage_path)) await s3Delete(r.storage_path); else await sb.storage.from('resumes').remove([r.storage_path]); }
-    await sb.schema('hr').from('resumes').delete().eq('id',id);
-  }
+  const ids=[...RS_SEL];
+  if(!await confirmDialog(
+      'Delete '+ids.length+' CV'+(ids.length===1?'':'s')+' permanently? Where somebody is still '
+      +'waiting to be approved on the strength of one, their approval task is cancelled too.',
+      {title:'Delete CV'+(ids.length===1?'':'s'), okLabel:'Delete', icon:'fa-trash', danger:true}))return;
+  // One call, so the whole set succeeds or fails together instead of half-deleting on an error.
+  const {data,error}=await sb.schema('hr').rpc('resume_delete',{p_ids:ids});
+  if(error){toast('Could not delete: '+error.message,'err');return;}
+  await hrRemoveFiles(data);
   RS_ROWS=(RS_ROWS||[]).filter(x=>!RS_SEL.has(x.id));
   if(RS_SEARCH)RS_SEARCH=(RS_SEARCH||[]).filter(x=>!RS_SEL.has(x.id));
   RS_SEL=new Set();
-  toast('Deleted','ok');rsRender();
+  toast(ids.length+' deleted','ok');rsRender();
 };
 function rsDetailRow(label,html){
   if(!html)return '';
@@ -6794,38 +7560,166 @@ window.rsFilter=function(q){
   const el=$('rsQ'); if(el){ el.focus(); el.setSelectionRange(el.value.length,el.value.length); }
 };
 window.rsClearFilter=function(){ rsFilter(''); };
-window.rsUploadModal=function(){
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-upload"></i> Upload Resume</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div class="dropzone" onclick="document.getElementById('rsFile').click()"><i class="fa-solid fa-cloud-arrow-up"></i><div id="rsFName">Click to choose a PDF, Word doc, or image</div></div>
-    <input type="file" id="rsFile" class="hidden" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onchange="document.getElementById('rsFName').textContent=this.files[0]?this.files[0].name:'Click to choose a PDF, Word doc, or image'">
-    <p style="font-size:12px;color:var(--slate);margin-top:10px">AI will automatically read the resume and fill in name, contact info, skills, experience and a summary — no need to type it in.</p>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="rsUpBtn" onclick="rsUploadSave()"><i class="fa-solid fa-upload"></i> Upload</button></div>`);
-};
-window.rsUploadSave=async function(){
-  const fEl=$('rsFile');const f=fEl&&fEl.files&&fEl.files[0];
-  if(!f){toast('Choose a file first','err');return;}
-  const btn=$('rsUpBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
-  const key=s3KeyForResume(f.name);
-  const {data:upData,error:upErr}=await uploadFileToS3(key,f);
-  if(upErr){
-    toast('Upload failed: '+upErr.message,'err');
-    btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+/* THE OPEN POSITIONS, WHICH IS WHAT A CV CAN BE UPLOADED AGAINST.
+   Approved and still Open: an unapproved request is not a vacancy yet, and a closed one is not a
+   vacancy any more, so neither should be able to collect CVs. */
+async function hrOpenPositions(){
+  const {data,error}=await sb.schema('hr').from('manpower_requests')
+    .select('id,job_title,department')
+    .eq('approval_status','Approved').eq('status','Open')
+    .order('job_title',{ascending:true});
+  if(error) throw error;
+  return data||[];
+}
+
+/* UPLOADING A CV NOW REQUIRES SAYING WHICH JOB IT IS FOR, and takes as many files as you like for
+   that one job.
+
+   ONE position, never several. Letting a CV be filed against two vacancies at once sounds generous
+   and makes every later count wrong: the same person appears twice in the funnel, Monthly Progress
+   over-reports, and nobody can say which role they were actually being considered for. If somebody
+   genuinely suits two roles, that is two decisions made by a person, not one upload pretending to
+   be both.
+
+   preselectId lets Monthly Progress open this window with its own position already chosen and
+   locked, so uploading from a position's row cannot land the files on a different one. */
+window.rsUploadModal=async function(preselectId){
+  let positions=[];
+  try{ positions=await hrOpenPositions(); }
+  catch(e){ toast('Could not read the open positions: '+((e&&e.message)||e),'err'); return; }
+
+  if(!positions.length){
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-upload"></i> Upload CVs</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><div style="padding:18px;text-align:center;color:var(--slate);font-size:13.5px">'
+      +'There are no open positions to upload against yet.<br><br>'
+      +'A position appears here once its hiring request has been approved and is still open.'
+      +'</div></div>'
+      +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>');
     return;
   }
-  /* Nothing is read out of the file and nothing is sent to a model. The AI columns stay null,
-     which is why no row can sit on "Analyzing" any more - there is nothing to wait for. */
-  const {data:row,error}=await sb.schema('hr').from('resumes').insert({
-    file_name:f.name, storage_path:upData.path, file_size:f.size,
-    file_type:(f.name.split('.').pop()||'').toLowerCase(), ai_status:null
-  }).select().single();
-  if(error){ toast('Saved the file but the record failed: '+error.message,'err'); closeModal(); hrResumes(); return; }
-  closeModal();
-  toast('Resume uploaded','ok');
-  RS_ROWS=[row,...(RS_ROWS||[])];
-  if(RS_Q) rsFilter(RS_Q); else rsRender();
+
+  const locked=preselectId!=null&&positions.some(function(x){return String(x.id)===String(preselectId);});
+  const opts=positions.map(function(x){
+    return '<option value="'+x.id+'"'+(String(x.id)===String(preselectId)?' selected':'')+'>'
+      +esc(x.job_title||'Untitled')+(x.department?(' \u00b7 '+esc(x.department)):'')+'</option>';
+  }).join('');
+
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-upload"></i> Upload CVs</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'
+    +'<label>Position <span style="color:var(--err)">*</span></label>'
+    +'<select id="rsPos" class="sel"'+(locked?' disabled style="background:#f1f5f9;color:var(--slate)"':'')+'>'
+    +(locked?'':'<option value="">\u2014 Choose the position these CVs are for \u2014</option>')
+    +opts+'</select>'
+    +(locked?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">Uploading for this position.</div>':'')
+    +'<label>Files</label>'
+    +'<div class="dropzone" onclick="document.getElementById(\'rsFile\').click()"><i class="fa-solid fa-cloud-arrow-up"></i><div id="rsFName">Click to choose one or more PDFs, Word docs, or images</div></div>'
+    +'<input type="file" id="rsFile" class="hidden" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onchange="rsFilesPicked(this)">'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+    +'<button class="btn btn-primary" id="rsUpBtn" onclick="rsUploadSave()"><i class="fa-solid fa-upload"></i> Upload</button></div>');
 };
+window.rsFilesPicked=function(el){
+  const lbl=document.getElementById('rsFName'); if(!lbl)return;
+  const k=el&&el.files?el.files.length:0;
+  lbl.textContent=k?(k===1?el.files[0].name:(k+' files chosen')):'Click to choose one or more PDFs, Word docs, or images';
+};
+window.rsUploadSave=async function(){
+  const sel=$('rsPos');
+  const posId=sel?String(sel.value||'').trim():'';
+  if(!posId){ toast('Choose which position these CVs are for','err'); if(sel)sel.focus(); return; }
+  const posText=(sel&&sel.selectedOptions&&sel.selectedOptions[0])
+    ? String(sel.selectedOptions[0].textContent||'').split(' \u00b7 ')[0].trim() : '';
+
+  const fEl=$('rsFile');
+  const files=(fEl&&fEl.files)?Array.prototype.slice.call(fEl.files):[];
+  if(!files.length){ toast('Choose at least one file','err'); return; }
+
+  const btn=$('rsUpBtn'); if(btn){btn.disabled=true;}
+  /* One at a time, and one failure does not lose the rest. Uploading ten CVs and being told only
+     that "the upload failed" - with no way to know which of the ten landed - is the outcome worth
+     avoiding here, so each file is reported by name. */
+  const added=[]; const failed=[];
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    if(btn) btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading '+(i+1)+' of '+files.length+'\u2026';
+    try{
+      const up=await uploadFileToS3(s3KeyForResume(f.name),f);
+      if(up.error) throw new Error(up.error.message);
+      const {data:row,error}=await sb.schema('hr').from('resumes').insert({
+        file_name:f.name, storage_path:up.data.path, file_size:f.size,
+        file_type:(f.name.split('.').pop()||'').toLowerCase(), ai_status:'analyzing',
+        manpower_request_id:Number(posId), position:posText||null,
+        uploaded_by:state.email||null
+      }).select().single();
+      if(error) throw new Error(error.message);
+      added.push(row);
+    }catch(e){ failed.push(f.name+' ('+((e&&e.message)||e)+')'); }
+  }
+  if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';}
+
+  if(added.length){
+    closeModal();
+    RS_ROWS=added.slice().reverse().concat(RS_ROWS||[]);
+    toast(added.length+' CV'+(added.length===1?'':'s')+' uploaded for '+(posText||'this position'),'ok');
+    if(RS_Q) rsFilter(RS_Q); else rsRender();
+    /* READING THE CVs HAPPENS AFTER THE UPLOAD IS SAFE, AND NEVER BLOCKS IT.
+
+       The files are stored and the rows exist before a single word is read, so a model being slow,
+       rate-limited or wrong cannot cost somebody their upload - the worst case is a row that says
+       it could not be read, with the file still there to open by hand.
+
+       One at a time rather than all at once: ten CVs fired in parallel is ten concurrent calls,
+       and being rate-limited halfway leaves half the batch unread for no reason. */
+    rsParseUploaded(added.map(function(r){return r.id;}));
+  }
+  if(failed.length) toast('Could not upload: '+failed.slice(0,3).join(', ')+(failed.length>3?(' and '+(failed.length-3)+' more'):''),'err');
+};
+
+/* ONLY CVs UPLOADED HERE ARE READ BY THE MODEL.
+
+   A referral's CV and a careers-page application arrive with the name, email and phone already
+   typed by the person who sent them, and that is better evidence than anything read off a
+   document - overwriting a name somebody entered by hand with a model's reading of a scan is a
+   downgrade, not an improvement. Those paths go through hr.referral_submit and career-apply and
+   never come near this. */
+async function rsParseUploaded(ids){
+  if(!ids||!ids.length)return;
+  let done=0, failed=0;
+  /* WHAT HAPPENED TO EACH CV, NOT JUST HOW MANY WERE READ.
+     Matching on email correctly refuses to create a second copy of somebody already here, so
+     nothing new appears in Interviews - and from the outside that is indistinguishable from the
+     upload having failed. Three uploads of the same CV looked like three failures. Counted apart
+     so each outcome can be said in its own words. */
+  const matched=[], notLinked=[];
+  for(const id of ids){
+    try{
+      const {data,error}=await sb.functions.invoke('resume-ai',{body:{action:'parse_resume',resume_id:id}});
+      if(error||(data&&data.error)) throw new Error((data&&data.error)||error.message);
+      /* The list is updated in place so the row fills in where somebody is already looking,
+         instead of only after a refresh. */
+      const row=(RS_ROWS||[]).find(r=>r.id===id);
+      if(row&&data&&data.profile) Object.assign(row,data.profile);
+      done++;
+      const L=data&&data.linked;
+      if(L&&L.ok===false&&L.reason){
+        notLinked.push(((row&&row.candidate_name)||(row&&row.file_name)||'A CV')+' — '+L.reason);
+      }else if(L&&L.matched){
+        matched.push((row&&row.candidate_name)||'That person');
+      }
+    }catch(e){
+      failed++;
+      const row=(RS_ROWS||[]).find(r=>r.id===id);
+      if(row){ row.ai_status='failed'; row.ai_error=String((e&&e.message)||e).slice(0,300); }
+    }
+    if(RS_Q) rsFilter(RS_Q); else rsRender();
+  }
+  const added=done-matched.length-notLinked.length;
+  if(added>0) toast(added+' CV'+(added===1?'':'s')+' read \u2014 added to Interviews','ok');
+  if(matched.length) toast(matched.slice(0,3).join(', ')+(matched.length>3?(' and '+(matched.length-3)+' more'):'')
+    +' '+(matched.length===1?'is':'are')+' already in Interviews \u2014 the CV was added to their record','warn');
+  if(notLinked.length) toast(notLinked.slice(0,2).join(' \u00b7 '),'warn');
+  if(failed) toast(failed+' CV'+(failed===1?' could':'s could')+' not be read \u2014 the file is still there, open it to check','err');
+}
 
 /* Download keeps the candidate's own name on the file rather than the stamped storage name, the
    same as the Tracker's Resumes column does. */
@@ -6851,12 +7745,31 @@ window.rsDownload=async function(id){
   if(error){toast('Download failed: '+error.message,'err');return;}
   const a=document.createElement('a');a.href=data.signedUrl;a.download=r.file_name||'';document.body.appendChild(a);a.click();a.remove();
 };
+/* A database call can delete a row but not a file in S3, so every delete that removes a CV hands
+   back its storage path and the caller finishes the job. Failures are swallowed on purpose: a
+   file left behind is waste, a row left behind is a ghost record, so the rows going is what
+   matters and a storage hiccup must not make the delete look like it failed. */
+async function hrRemoveFiles(rows){
+  const paths=(rows||[]).map(function(x){return x&&x.storage_path;}).filter(Boolean);
+  if(!paths.length) return 0;
+  await Promise.all(paths.map(function(pth){
+    try{ return isS3Path(pth) ? s3Delete(pth).catch(function(){})
+                              : sb.storage.from('resumes').remove([pth]).catch(function(){}); }
+    catch(_e){ return null; }
+  }));
+  return paths.length;
+}
+
 window.rsDelete=async function(id){
-  if(!await confirmDialog('Delete this resume permanently?'))return;
-  const r=await rsGet(id);
-  if(r&&r.storage_path){ if(isS3Path(r.storage_path)) await s3Delete(r.storage_path); else await sb.storage.from('resumes').remove([r.storage_path]); }
-  const {error}=await sb.schema('hr').from('resumes').delete().eq('id',id);
-  if(error){toast(error.message,'err');return;}
+  if(!await confirmDialog(
+      'Delete this CV permanently? If somebody is still waiting to be approved on the strength of '
+      +'it, their approval task is cancelled too \u2014 there would be nothing left to read.',
+      {title:'Delete CV', okLabel:'Delete', icon:'fa-trash', danger:true}))return;
+  /* Through hr.resume_delete rather than a plain delete, so the rule about pending approval
+     tasks holds however the CV is removed. */
+  const {data,error}=await sb.schema('hr').rpc('resume_delete',{p_ids:[id]});
+  if(error){toast('Could not delete: '+error.message,'err');return;}
+  await hrRemoveFiles(data);
   RS_ROWS=(RS_ROWS||[]).filter(x=>x.id!==id);
   if(RS_SEARCH)RS_SEARCH=RS_SEARCH.filter(x=>x.id!==id);
   toast('Deleted','ok');rsRender();
@@ -7523,7 +8436,8 @@ async function secUserDetail(v,email){
         ${u.super_admin?'<span style="font-size:12px;color:var(--slate)">Full access — Administrator</span>':'<div style="display:flex;gap:6px"><button type="button" class="btn btn-sm" onclick="secAllTabs(true)">Select all</button><button type="button" class="btn btn-sm" onclick="secAllTabs(false)">Clear all</button></div>'}
       </div>
       <div style="padding:14px 16px 16px">
-        <div class="tab-grid">${NAV.flatMap(g=>{const gi=g.items.filter(m=>MODSET.has(m.id));if(!gi.length)return[];return['<div class="tab-grid-head">'+esc(g.group)+'</div>',...gi.map(m=>'<label class="chk-tile"><input type="checkbox" class="secMod" value="'+m.id+'" '+((m.id==='network'||mods.includes(m.id))?'checked':'')+' '+((u.super_admin||m.id==='network')?'disabled':'')+'><i class="fa-solid '+m.icon+' tile-ic"></i>'+esc(m.label)+'</label>')];}).join('')}</div>
+        <div class="tab-grid">${NAV.flatMap(g=>{const gi=g.items.filter(m=>MODSET.has(m.id));if(!gi.length)return[];return['<div class="tab-grid-head">'+esc(g.group)+'</div>',...gi.flatMap(m=>['<label class="chk-tile"><input type="checkbox" class="secMod" value="'+m.id+'" '+((m.id==='network'||mods.includes(m.id))?'checked':'')+' '+((u.super_admin||m.id==='network')?'disabled':'')+'><i class="fa-solid '+m.icon+' tile-ic"></i>'+esc(m.label)+'</label>']
+            .concat(m.id==='custportal_admin'?['<label class="chk-tile" title="Opens Customer Portal Admin with only the Photos &amp; Videos tab"><input type="checkbox" class="secMod" value="custportal_photos" '+(mods.includes('custportal_photos')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-photo-film tile-ic"></i>Customer Portal: Photos &amp; Videos only</label>']:[]))];}).join('')}</div>
       </div>
     </div>
     ${u.super_admin?'<p style="color:var(--slate);font-size:13px;margin-top:12px">This person is an administrator and always has full access.</p>':`<div style="margin-top:18px;display:flex;justify-content:flex-end;gap:10px"><button class="btn" onclick="navTo('security')">Cancel</button><button class="btn btn-primary" id="secSaveBtn" onclick="secSave('${esc(email)}')"><i class="fa-solid fa-check"></i> Save access</button></div>`}
@@ -7570,30 +8484,65 @@ window.secSave=async function(email){
 };
 function noAccess(v){ setCrumb(['Access']); v.innerHTML=`<div class="card card-pad empty" style="max-width:520px;margin:24px auto;text-align:center"><i class="fa-solid fa-lock" style="font-size:30px;color:#94a3b8"></i><h2 style="margin-top:12px">No access to this module</h2><p style="color:var(--slate)">You do not have permission to view this page. Contact your administrator if you need access.</p><button class="btn btn-primary" style="margin-top:14px" onclick="navTo('dashboard')">Go to Dashboard</button></div>`; }
 
-async function taskScoreboard(v){
-  setCrumb(['Accountability','Scoreboard']);
-  v.innerHTML=taskTabs('scoreboard')+'<div class="card card-pad"><div class="loader"><div class="spin"></div></div></div>';
-  await getPeople();
-  let rowsRaw=[];try{const {data}=await sb.schema('acc').rpc('scoreboard');rowsRaw=data||[];}catch(e){}
-  let rows=rowsRaw.map(r=>{
-    const tasksTotal=(r.tasks_on_time||0)+(r.tasks_late||0);
-    const punctuality=tasksTotal?Math.round((r.tasks_on_time||0)/tasksTotal*100):null;
-    // Score: task closure + punctuality + checklist volume (normalised), lightly penalised for frequent due-date extensions
-    const closureScore=Math.min(100,(r.tasks_completed||0)*8);
-    const checklistScore=Math.min(100,(r.checklist_items_done||0)*4);
-    const parts=[punctuality,closureScore,checklistScore].filter(x=>x!=null);
-    let score=parts.length?Math.round(parts.reduce((a,b)=>a+b,0)/parts.length):0;
-    score=Math.max(0,score-Math.min(20,(r.due_date_extensions||0)*3));
-    return {name:r.full_name||nameOf(r.email),email:r.email,checklist:r.checklist_items_done||0,completed:r.tasks_completed||0,punctuality,extensions:r.due_date_extensions||0,score};
-  }).sort((a,b)=>b.score-a.score);
-  const bar=(val,col)=>val==null?'<span style="color:#94a3b8">—</span>':'<div style="display:flex;align-items:center;gap:8px"><div class="progress" style="flex:1;max-width:130px"><span style="width:'+val+'%;background:'+col+'"></span></div><span style="font-size:12px;color:var(--slate);min-width:34px">'+val+'%</span></div>';
-  const medal=i=>i===0?'<span style="font-size:18px">🥇</span>':i===1?'<span style="font-size:18px">🥈</span>':i===2?'<span style="font-size:18px">🥉</span>':'<span style="color:var(--slate);font-weight:600">'+(i+1)+'</span>';
-  v.innerHTML=taskTabs('scoreboard')+
-    '<p style="color:var(--slate);font-size:13px;margin:6px 2px 14px">Score = Time Sheet items completed + tasks finished + punctuality against due dates, with a penalty for frequent due-date extensions.</p>'+
-    '<div class="card"><table class="tbl"><thead><tr><th>Rank</th><th>Person</th><th>Time Sheet items done</th><th>Tasks completed</th><th>Punctuality</th><th>Due-date extensions</th><th>Score</th></tr></thead><tbody>'+
-    (rows.length?rows.map((r,i)=>'<tr><td>'+medal(i)+'</td><td>'+avatar(r.name)+' <b>'+esc(r.name)+'</b></td><td>'+r.checklist+'</td><td>'+r.completed+'</td><td>'+bar(r.punctuality,'#0f766e')+'</td><td style="color:var(--slate)">'+r.extensions+'</td><td style="font-weight:700;font-size:15px">'+r.score+'</td></tr>').join(''):'<tr><td colspan="7"><div class="empty" style="padding:22px">No completed work yet</div></td></tr>')+
-    '</tbody></table></div>';
+/* ===== SCOREBOARD — its own module, not a tab inside Accountability =====
+
+   It used to exist twice, in two places, computing two different numbers from the same RPC: the
+   real one in accountability.js, and a legacy copy here that averaged punctuality, a capped
+   "closure score" and a capped checklist score, then docked points for due-date extensions - a
+   figure that shared nothing with the one people actually saw, and which leaned on
+   due_date_extensions, a column acc.scoreboard() has always returned hardcoded to 0. Pulling the
+   Scoreboard out of Accountability is the moment to have one implementation instead of two, so
+   this is now the only one, and it is the arithmetic the tab really used.
+
+   Lives in nexus-core.js rather than its own page script because nexus-core is loaded by every
+   page already: no extra <script>, no load-order race, and the legacy /tasks/scoreboard route can
+   hand straight over to it. */
+let SB_VIEW='all';
+window.sbSetView=function(v){ if(SB_VIEW===v)return; SB_VIEW=v; if(typeof renderPage==='function')renderPage(); };
+const sbMedal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
+
+async function sbRenderAllTasks(host){
+  let rows=[]; try{const {data}=await sb.schema('acc').rpc('scoreboard');rows=data||[];}catch(e){}
+  /* The score is the sum of the counts the RPC returns, and the RPC decides which tasks reach
+     those counts: self-assigned ones are excluded, and a task with no due date is not counted as
+     having met one. So per task: due date met +2, due date missed 0, no due date +1. */
+  rows=rows.map(r=>Object.assign({},r,{score:(r.tasks_completed||0)+(r.tasks_on_time||0)-(r.tasks_late||0)}))
+           .sort((a,b)=>b.score-a.score||b.tasks_completed-a.tasks_completed);
+  if(!host)return;
+  host.innerHTML='<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">Counts tasks someone else assigned you. Completed <b>+1</b> · finished by its due date <b>+1 more</b> · missed the due date <b>&minus;1</b>. A task with no due date still earns the completion point but cannot earn the on-time point. Tasks you assigned to yourself are listed under <b>Self</b> and do not score. Declines automatically reverse the credit.</div>'
+    /* No "Sub" column. It showed acc.scoreboard()'s checklist_items_done, which counts done
+       subtasks by the names in ptask_subtasks.people — and every completed subtask in the system
+       has that array empty, so the column read 0 for all 85 people. It never fed the score either.
+       The RPC still returns the count; nothing displays it now. */
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>On-time</th><th>Overdue</th><th title="Tasks this person created for themselves — shown for completeness, not scored">Self</th><th>Score</th></tr></thead><tbody>'
+    +(rows.length?rows.map((r,i)=>'<tr><td>'+sbMedal(i)+'</td><td><b>'+esc(r.full_name||r.email)+'</b></td><td>'+r.tasks_completed+'</td><td style="color:#16a34a">'+r.tasks_on_time+'</td><td style="color:#dc2626">'+r.tasks_late+'</td><td style="color:var(--slate)">'+(r.tasks_self||0)+'</td><td style="font-weight:800">'+r.score+'</td></tr>').join('')
+       :'<tr><td colspan="7"><div class="empty" style="padding:22px">No activity yet</div></td></tr>')
+    +'</tbody></table></div>';
 }
+
+async function sbRenderCauselistBoard(host){
+  let rows=[]; try{const {data}=await sb.schema('acc').rpc('scoreboard_causelist');rows=data||[];}catch(e){}
+  if(!host)return;
+  host.innerHTML='<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">Legal MIS causelist tasks only — per task, by how far ahead of its due date it was finished: 7+ days early <b>+2</b> · 3–6 days early <b>+1</b> · 0–2 days early <b>0</b> · after the due date <b>&minus;1</b></div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Assigned</th><th>Completed</th><th>Pending</th><th>Score</th></tr></thead><tbody>'
+    +(rows.length?rows.map((r,i)=>'<tr><td>'+sbMedal(i)+'</td><td><b>'+esc(r.full_name||r.email)+'</b></td><td>'+r.tasks_assigned+'</td><td>'+r.tasks_completed+'</td><td>'+r.tasks_pending+'</td><td style="font-weight:800">'+r.score+'</td></tr>').join('')
+       :'<tr><td colspan="6"><div class="empty" style="padding:22px">No causelist tasks yet</div></td></tr>')
+    +'</tbody></table></div>';
+}
+
+VIEWS.scoreboard=async function(v){
+  setCrumb(['Scoreboard']);
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-ranking-star" style="color:#b8902f"></i> Scoreboard</h1><p>Who is delivering assigned work, and on time</p></div></div>'
+    +'<div class="card" style="padding:0">'
+      +'<div style="display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:center;flex-wrap:wrap">'
+        +'<button class="btn'+(SB_VIEW==='all'?' btn-primary':'')+'" onclick="sbSetView(\'all\')">All Tasks</button>'
+        +'<button class="btn'+(SB_VIEW==='causelist'?' btn-primary':'')+'" onclick="sbSetView(\'causelist\')">Causelist</button>'
+      +'</div><div id="sbBody"><div class="loader"><div class="spin"></div></div></div></div>';
+  if(SB_VIEW==='causelist') await sbRenderCauselistBoard($('sbBody'));
+  else await sbRenderAllTasks($('sbBody'));
+};
+// Kept so /tasks/scoreboard links and bookmarks from when it was a tab still land somewhere real.
+function taskScoreboard(){ navTo('scoreboard'); }
 
 /* ===== Global first-login onboarding (full screen, no sidebar) ===== */
 async function renderOnboarding(){
@@ -8944,9 +9893,28 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
      padded with dashes. */
   const col4=usbCol4(featureKey);
   const showCol4=!!col4.header, showDetails=!col4.hideDetails;
+  /* Times used is asked for per feature (col4.timesUsed) rather than shown on all of them. It can
+     never be blank, but "never blank" is not the same as "worth a column": on a feature somebody
+     opens forty times a week it is just a fast-climbing number beside the row it belongs to. It
+     earns its place where the question is whether the thing gets RE-used - which is the whole
+     point of a payment destination the portal offers to remember for you. */
+  const showTimes=!!col4.timesUsed;
+  /* "Times used" — how many times this person had used this feature, counting this one. So the row
+     reads as a running tally: 1 on the day they found it, 12 by the time it is part of their week.
+     Named for what the number IS rather than "Use #", which made the reader work out whether it
+     was a total, a position or an id before it told them anything.
+
+     Unlike every other column here it can never be blank - it is the row's own position in the
+     person's history, not something a feature had to remember to capture, so it works even on the
+     rows the historical backfill left with no meta at all. That is what makes it available to any
+     feature that wants it; whether a feature wants it is a separate question, answered above.
+
+     Counted over their whole history server-side, not over the rows on screen, so
+     narrowing the date range does not restart it at 1. */
   const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th>'
     +(showDetails?('<th>'+esc(col4.detailsHeader||'Details')+'</th>'):'')
     +(showCol4?('<th>'+esc(col4.header)+'</th>'):'')
+    +(showTimes?('<th title="How many times this person had used this feature, counting this one — across their whole history, not just the dates shown">Times used</th>'):'')
     +'</tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
@@ -8958,9 +9926,16 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
       // hid fields the column then had no room for - "Open a month" lost its month from Details to a
       // column that never showed it, which is how a working row ended up blank at both ends.
       const col=usbCol4Value(e.meta, col4.keys);
+      /* A first use is worth seeing at a glance - it is the row that says somebody found the
+         feature - so it is marked rather than left as a bare 1 among the 40s. */
+      const useN=(e.use_n==null)?'':String(e.use_n);
+      const firstUse=String(e.use_n)==='1';
+      const useLabel=firstUse?'1st time':useN;
       return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td>'
         +(showDetails?('<td>'+usbMetaHtml(e.meta,col.used)+'</td>'):'')
         +(showCol4?('<td style="color:var(--slate)">'+esc(col.text||'—')+'</td>'):'')
+        +(showTimes?('<td style="white-space:nowrap;font-variant-numeric:tabular-nums'+(firstUse?';color:#15803d;font-weight:600':';color:var(--slate)')+'">'
+          +esc(useLabel)+'</td>'):'')
       +'</tr>';
     }).join('')
     +'</tbody></table></div></div>';
@@ -9078,6 +10053,16 @@ const USB_COL4={
      that is the number worth reading: 410 measurable steps, 45.9 hours average, 204 of them over a
      day. A "Step" column was the other candidate and is wrong - Details already prints the step. */
   'tasks.workflow':                               {header:'Waited',  keys:['waited']},
+  /* The payment QR is not a step, so it can never have a "Waited" - it was a dash on both of the
+     feature's events and would be a dash on every future one. It gets no promoted column at all.
+     Details instead carries HOW the payment destination was given - a QR image, or an id reused
+     off the remembered list - which is the one question this feature exists to settle. Named
+     "Given as" because the cell holds one specific thing and the reader should not have to work
+     that out. The file name was the first attempt and was dropped: eighteen of the twenty QR files
+     on record are WhatsApp camera-roll names or a bare UUID. */
+  'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id':
+                                                  {header:null, keys:[], detailsHeader:'Given as',
+                                                   timesUsed:true},
   'tasks.workflow.forward_a_step':                {header:'Sent to', keys:['assignee']},
   'tasks.workflow.reject_send_a_step_back':       {header:'Sent to', keys:['assignee']},
   'tasks.workflow.revert_a_forwarded_step':       {header:'Sent to', keys:['assignee']},
@@ -9119,6 +10104,26 @@ const USB_COL4={
      been live since 1684217 - yet "view" has never once been recorded on any of them. That is a
      real fault and worth chasing on its own; until it is chased, a header promising something the
      rows have never held is the thing to remove. */
+  /* "Assigned to" is the Accountability default and it is right on the actions that hand a task to
+     somebody - Create, Approve, Comment, Delegate all fill it 100%. These six are the ones it was
+     inherited by and cannot fit, measured rather than guessed: zero assignee on every event any of
+     them has ever produced.
+
+     What each does carry is already in Details, which is why none of them loses anything by
+     dropping the column - Search tasks has the query, the sub-task features have the item, and a
+     narrower table of two honest columns beats a wide one padded with dashes.
+
+     Edit task members/assignees is deliberately NOT in this list. It was, briefly - it is the
+     feature that changes who a task is assigned to, and it recorded only the change ("added Ravi;
+     removed Uma"), so Assigned to was empty on the one feature whose whole subject is assignment.
+     The honest fix there was the capture, not the column: accEditMembersSave now writes the
+     resulting member list as well, so it keeps the module's Assigned to and fills it. The single
+     event from before that change will read as a dash, which is true - nothing recorded it. */
+  'tasks.tasks.search_tasks':                                  {header:null, keys:[]},
+  'tasks.tasks.add_checklist_sub_task_item':                   {header:null, keys:[]},
+  'tasks.tasks.mark_sub_task_complete':                        {header:null, keys:[]},
+  'tasks.tasks.delete_sub_task':                               {header:null, keys:[], hideDetails:true},
+  'tasks.tasks.mark_all_notifications_as_read':                {header:null, keys:[]},
   'tasks.tasks.view_tasks_grouped_by_workflow':                {header:null, keys:[], hideDetails:true},
   'tasks.tasks.view_tasks_grouped_by_person':                  {header:null, keys:[], hideDetails:true},
   'tasks.tasks.view_tasks_grouped_by_tag':                     {header:null, keys:[], hideDetails:true},
@@ -9136,9 +10141,9 @@ const USB_COL4={
   'dashboard':            {header:'Time spent', keys:['time_spent'], hideDetails:true},
   'projects':             {header:'Time spent', keys:['time_spent']},
   'video':                {header:'Time spent', keys:['time_spent']},
-  /* All 8 CRM & Sales features are named "View ..." and every one of them is exactly that - a tab
-     that opens a list. Nothing is ever chosen, filtered or changed, so the only things the events
-     ever carried were the row count and how long the tab stayed open, neither of which answers a
+  /* CRM & Sales is one read-only screen - Daily Updates, which shows one day's rollup and lets a
+     past day be reopened. Nothing is chosen, filtered or changed, so the only things an event
+     could carry are the row count and how long the screen stayed open, neither of which answers a
      question anybody asks. When and Action say the whole truth here. */
   'crm':                  {header:null, keys:[], hideDetails:true},
   'scaling':              {header:'Time spent', keys:['time_spent']},
@@ -9152,7 +10157,99 @@ const USB_COL4={
   'maintenance':          {header:null, keys:[], hideDetails:true},
   'inventory':            {header:'Time spent', keys:['time_spent']},
   'playbook':             {header:'Time spent', keys:['time_spent']},
-  'finance':              {header:'Time spent', keys:['time_spent']}
+  'finance':              {header:'Time spent', keys:['time_spent']},
+
+  /* ---- features that inherit a column they cannot fill -------------------------------------
+     Each of these resolves, by module or by tab, to a column that is a dash on every single event
+     it has ever produced - 66 features, 801 events, measured rather than assumed. They are the
+     same shape of mistake in every case: the default is right for the module and wrong for the
+     one feature, because what the module does and what the feature does are not the same thing.
+     Inspection's Unit fits an inspection of a flat but not the console you filter it from; Legal's
+     Case · Court fits editing a case but not searching for one; Workflow's Waited fits a step
+     somebody received but not printing, editing or deleting an instance.
+
+     The line is almost always the same: a feature that DOES something carries a subject, and a
+     feature you only LOOK AT does not. Create task has an assignee, Search tasks never will.
+
+     hideDetails is set only where Details is empty too, so what is left is never a row of two
+     dashes - on the rest Details already carries the query, the item, the case number or the
+     check, which is why none of them loses anything by giving up the column. */
+  'tasks.meetings.join_a_meeting':                                     {header:null, keys:[]},
+  'tasks.meetings.filter_meetings_by_group':                           {header:null, keys:[], hideDetails:true},
+  'tasks.meetings.schedule_a_meeting_one_time_or_recurring':           {header:null, keys:[]},
+  'tasks.meetings.start_stop_recording':                               {header:null, keys:[]},
+  'tasks.meetings.save_meeting_wrap_up_summary':                       {header:null, keys:[]},
+  // Uploading a recording for a meeting that wasn't recorded live: it carries the meeting title,
+  // never an attendee list, so it must not inherit the tab's permanently-blank Attendees column.
+  'tasks.meetings.add_a_recording_for_transcription':                  {header:null, keys:[]},
+  'legal.mis.search_cases_incl_ai_semantic_search':                    {header:null, keys:[]},
+  'legal.mis.filter_cases_by_hearing_date_range':                      {header:null, keys:[]},
+  'legal.actions.view_search_filter_case_actions':                     {header:null, keys:[], hideDetails:true},
+  'legal.advocates.search_advocates':                                  {header:null, keys:[], hideDetails:true},
+  'legal.documents.search_sort_filter_documents':                      {header:null, keys:[]},
+  'legal.documents.replace_document_version':                          {header:null, keys:[], hideDetails:true},
+  'legal.documents.delete_document_s':                                 {header:null, keys:[], hideDetails:true},
+  'competitors.overview.fetch_ads_from_meta_ad_library':               {header:null, keys:[], hideDetails:true},
+  'competitors.overview.view_competitor_watchlist_and_stored_ads':     {header:null, keys:[], hideDetails:true},
+  'competitors.overview.view_ad_detail':                               {header:null, keys:[]},
+  'competitors.overview.add_competitor':                               {header:null, keys:[], hideDetails:true},
+  'competitors.overview.rebuild_ad_media_previews':                    {header:null, keys:[], hideDetails:true},
+  'competitors.overview.toggle_auto_sync_for_a_competitor':            {header:null, keys:[], hideDetails:true},
+  'hr.monthly_update.close_reopen_hiring':                             {header:null, keys:[], hideDetails:true},
+  'hr.monthly_update.edit_tracking_values':                            {header:null, keys:[], hideDetails:true},
+  'hr.monthly_update.create_new_month_record':                         {header:null, keys:[], hideDetails:true},
+  'hr.monthly_update.open_a_month':                                    {header:null, keys:[]},
+  'hr.interview_tracker.search_filter_interviews':                     {header:null, keys:[], hideDetails:true},
+  'hr.interview_qs.generate_ai_interview_guide':                       {header:null, keys:[]},
+  'hr.h_s_candidates.search_filter_candidates':                        {header:null, keys:[], hideDetails:true},
+  'hr.resumes.preview_download_resume':                                {header:null, keys:[], hideDetails:true},
+  'hr.resumes.delete_resume_s':                                        {header:null, keys:[], hideDetails:true},
+  'recruitment.descriptions.preview_download_job_description':         {header:null, keys:[]},
+  'recruitment.descriptions.upload_job_description':                   {header:null, keys:[]},
+  'recruitment.manpower_form.generate_jd_post_text_creative':          {header:null, keys:[], hideDetails:true},
+  'recruitment.manpower_form.submit_requisition':                      {header:null, keys:[]},
+  'recruitment.tests.preview_test_responses_scores':                   {header:null, keys:[]},
+  'recruitment.tests.share_test_via_email':                            {header:null, keys:[]},
+  'transcription.call_detail.switch_transcript_language':              {header:null, keys:[], hideDetails:true},
+  'transcription.call_detail.add_delete_a_remark':                     {header:null, keys:[]},
+  'transcription.deleted.restore_a_deleted_call_single_or_all':        {header:null, keys:[], hideDetails:true},
+  'transcription.all_calls.download_call_report_or_copy_link':         {header:null, keys:[], hideDetails:true},
+  'network.overview.filter_chart_by_date_range':                       {header:null, keys:[], hideDetails:true},
+  'network.all_readings.filter_readings_by_date_range':                {header:null, keys:[]},
+  'organic.overview.view_engagement_overview_by_type_and_page':        {header:null, keys:[], hideDetails:true},
+  'campaigns.overview.drill_into_a_project_s_campaigns':               {header:null, keys:[], hideDetails:true},
+  'postsales.adhoc.upload_document_for_adhoc_replacement':             {header:null, keys:[]},
+  /* MIS carries its own date in Details and how complete the day's set was in the column, which
+     is the thing worth knowing about a run: a report built off eight files is not the same
+     report as one built off twenty-four. */
+  'postsales.mis.build_mis_report_from_farvision_files':               {header:'Business units', keys:['status']},
+  'postsales.mis.preview_an_mis_report':                               {header:null, keys:[], hideDetails:true},
+  'postsales.mis.download_mis_report_as_excel':                        {header:null, keys:[], hideDetails:true},
+  'postsales.mis.download_mis_report_as_pdf':                          {header:null, keys:[], hideDetails:true},
+  'postsales.adhoc.preview_a_document':                                {header:null, keys:[], hideDetails:true},
+  'postsales.adhoc.download_all_documents_as_zip':                     {header:null, keys:[], hideDetails:true},
+  'scaling.priorities_rocks.view_quarterly_rocks_progress':            {header:null, keys:[], hideDetails:true},
+  'scaling.learning_hub.view_learning_resources_list':                 {header:null, keys:[], hideDetails:true},
+  'scaling.meeting_rhythm.view_meeting_cadence_schedule':              {header:null, keys:[], hideDetails:true},
+  'scaling.kpi_scoreboard.view_kpi_targets_vs_actuals':                {header:null, keys:[], hideDetails:true},
+  'inspection.new_inspection.mark_item_ok_not_ok_n_a':                 {header:null, keys:[]},
+  'inspection.new_inspection.submit_inspection':                       {header:null, keys:[]},
+  'inspection.console.view_inspection_kpis_and_breakdowns':            {header:null, keys:[], hideDetails:true},
+  'inspection.console.start_new_inspection':                           {header:null, keys:[], hideDetails:true},
+  'inspection.console.filter_by_project_block_floor_flat_work_type':   {header:null, keys:[], hideDetails:true},
+  'inspection.responses.open_and_edit_a_submission':                   {header:null, keys:[], hideDetails:true},
+  'procurement.vendor_trends.view_spend_kpis_trend_charts':            {header:null, keys:[], hideDetails:true},
+  'tasks.calendar.search_calendar_items':                              {header:null, keys:[]},
+  'tasks.workflow.print_an_instance':                                  {header:null, keys:[]},
+  'tasks.workflow.search_filter_the_tracker':                          {header:null, keys:[]},
+  'tasks.workflow.post_an_update_comment_on_an_instance':              {header:null, keys:[]},
+  'tasks.workflow.delete_an_instance':                                 {header:null, keys:[]},
+  'tasks.workflow.edit_an_instance':                                   {header:null, keys:[]},
+  'tasks.workflow.attach_a_file_to_an_update':                         {header:null, keys:[]},
+  'tasks.workflow.create_a_new_workflow':                              {header:null, keys:[]},
+  'tasks.workflow.edit_workflow_steps_owners':                         {header:null, keys:[]},
+  'tasks.workflow.reopen_a_completed_instance':                        {header:null, keys:[], hideDetails:true},
+  'tasks.workflow.delete_a_workflow':                                  {header:null, keys:[], hideDetails:true},
 };
 const USB_COL4_DEFAULT={header:'Assigned to', keys:['assignee']};
 /* Most specific wins: the feature itself, then its tab, then its module.
@@ -9327,24 +10424,78 @@ VIEWS.gtd=function(v,seg){
   v.innerHTML=mHead('fa-brain','#7c3aed','GTD')+mKpis(kpis)+mTabs('gtd',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
 };
 
+/* CRM & SALES IS DAILY UPDATES, AND NOTHING ELSE.
+
+   There used to be nine tabs. Eight of them were a demonstration: Pipeline & funnel drew a
+   conversion chart out of invented numbers, Leads and Comm history listed two people who do not
+   exist, Bookings and Demands one each, Brokers a firm called Skyline Realty, and the remaining
+   two said they were being built. None of them read anything. Somebody looking at "428 leads,
+   61 bookings" had no way of telling it was a mock-up, which is worse than an empty screen -
+   an empty screen at least tells the truth.
+
+   Daily Updates is the one that is real: the Qualified / Site Visits / Agent Visits rollup the
+   daily-crm-updates task pulls out of RealtyBucket every morning. With it alone there is nothing
+   to tab between, so the tab strip is gone too and the page opens straight onto it. The Open
+   button still goes to RealtyBucket, which is where the actual CRM work happens. */
 VIEWS.crm=function(v,seg){
   setCrumb(['Sales','CRM & Sales']);
-  const tabs=['Pipeline & funnel','Leads','Bookings','Directory & hierarchy','Comm history','Demands & collections','Brokers','Post-sale'];const ti=mTab(seg,tabs.length);
-  let body;
-  if(ti===0){
-    const funnel=mCard('Conversion funnel (this quarter)',mFunnel([['Leads',428],['Contacted',286],['Site visit',171],['Negotiation',98],['Booking',61],['Agreement',47],['Registered',38]]));
-    const ageing=mCard('Stage ageing','<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Stage</th><th>Avg days in stage</th><th>Oldest</th></tr></thead><tbody>'+[['Contacted','3.1 d','11 d'],['Site visit','6.4 d','19 d'],['Negotiation','9.8 d','27 d'],['Booking','4.2 d','14 d']].map(r=>'<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td></tr>').join('')+'</tbody></table></div>');
-    body='<div class="m2grid">'+funnel+ageing+'</div>';
-  } else if(ti===1){ body=mTable(['Lead','Project','Stage','Owner','Value'],[['Rahul Mehta','Dream Valley','Site visit','You','₹85L'],['Priya Shah','Dream One','Negotiation','You','₹1.1Cr']]); }
-  else if(ti===2){ body=mTable(['Customer','Unit','Date','Value','Status'],[['Amit Patel','DV A-905','24 Jun','₹92L','Confirmed']]); }
-  else if(ti===4){ body=mTable(['Lead','Channel','Last contact','Note'],[['Rahul Mehta','Call','Today','Site visit booked']]); }
-  else if(ti===5){ body=mTable(['Customer','Demand','Due','Amount','Status'],[['Rahul Mehta','On RCC F10','30 Jun','₹4.2L','Pending']]); }
-  else if(ti===6){ body=mTable(['Broker','Deals','Commission','Status'],[['Skyline Realty','12','₹6.2L','Active']]); }
-  else { body=mSoon(tabs[ti]); }
   v.innerHTML=mHead('fa-handshake','#7c3aed','CRM & Sales')
     +'<div style="margin:-8px 0 12px"><button class="btn btn-primary" onclick="window.open(\'https://www.realtybucket.com/\',\'_blank\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open</button></div>'
-    +mTabs('crm',tabs,ti)+'<div style="margin-top:16px">'+body+'</div>';
+    +'<div style="margin-top:16px"><div id="crmDuWrap"><div class="loader"><div class="spin"></div></div></div></div>';
+  crmDuLoad();
 };
+/* ============================ CRM & SALES — DAILY UPDATES TAB ============================
+   Read-only viewer over acc.crm_daily_updates: the Qualified / Site Visits / Agent Visits rollup
+   that the daily-crm-updates scheduled task extracts from RealtyBucket and writes to Supabase
+   each morning (replacing the old "CRM Updates" Google Sheet). Nothing on this tab writes data —
+   it only ever selects from the table, one report_date at a time, most recent first by default,
+   with a date picker so any past day can be reopened. */
+let CRM_DU_DATE=null; // yyyy-mm-dd string picked by the user; null = "most recent available"
+async function crmDuLoad(){
+  const wrap=$('crmDuWrap'); if(!wrap)return;
+  loader(wrap);
+  try{
+    let dateStr=CRM_DU_DATE;
+    if(!dateStr){
+      const {data:latest,error:e1}=await sb.schema('acc').from('crm_daily_updates').select('report_date').order('report_date',{ascending:false}).limit(1).maybeSingle();
+      if(e1)throw e1;
+      dateStr=latest?latest.report_date:null;
+    }
+    if(!dateStr){
+      wrap.innerHTML=crmDuDatePicker(null)+'<div class="card card-pad empty" style="padding:36px;text-align:center"><i class="fa-regular fa-chart-bar"></i><div>No CRM Updates recorded yet</div><p style="max-width:380px;margin:6px auto 0;color:var(--slate)">The daily-crm-updates task writes here every morning once it runs.</p></div>';
+      return;
+    }
+    const {data,error}=await sb.schema('acc').from('crm_daily_updates').select('*').eq('report_date',dateStr).order('sort_order',{ascending:true});
+    if(error)throw error;
+    crmDuRender(dateStr,data||[]);
+  }catch(e){
+    wrap.innerHTML=crmDuDatePicker(CRM_DU_DATE)+'<div class="card card-pad empty" style="padding:32px"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load CRM Updates</div><p>'+esc((e&&e.message)||String(e))+'</p></div>';
+  }
+}
+function crmDuDatePicker(dateStr){
+  return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">'
+    +'<label style="font-size:13px;color:var(--slate)">Report date</label>'
+    +'<input type="date" class="sel" id="crmDuDate" value="'+esc(dateStr||'')+'" onchange="crmDuOnDateChange(this.value)" style="max-width:170px;height:38px">'
+    +'<span style="font-size:12px;color:var(--slate)">Month = 1st of the month through this date &middot; Yesterday = this date only</span>'
+    +'</div>';
+}
+function crmDuRender(dateStr,rows){
+  const wrap=$('crmDuWrap'); if(!wrap)return;
+  const props=rows.filter(function(r){return !r.is_total;});
+  const total=rows.find(function(r){return r.is_total;});
+  const rowsHtml=props.map(function(r){
+    return [r.property_label,r.month_qualified+' / '+r.yesterday_qualified,r.month_visits+' / '+r.yesterday_visits,r.agent_month_visits+' / '+r.agent_yesterday_visits];
+  });
+  if(total){
+    rowsHtml.push(['<b>Total</b>','<b>'+total.month_qualified+' / '+total.yesterday_qualified+'</b>','<b>'+total.month_visits+' / '+total.yesterday_visits+'</b>','<b>'+total.agent_month_visits+' / '+total.agent_yesterday_visits+'</b>']);
+  }
+  const tableHtml=rowsHtml.length
+    ? mTable(['Property','Qualified (Month / Yesterday)','Site Visits (Month / Yesterday)','Agent Visits (Month / Yesterday)'],rowsHtml)
+    : '<div class="card card-pad empty" style="padding:32px;text-align:center">No rows recorded for '+esc(fmtDate(dateStr))+'</div>';
+  const runAt=props.length&&props[0].run_at?('<div style="font-size:12px;color:var(--slate);margin-top:10px">Last extracted '+esc(fmtDate(props[0].run_at))+'</div>'):'';
+  wrap.innerHTML=crmDuDatePicker(dateStr)+tableHtml+runAt;
+}
+window.crmDuOnDateChange=function(v){ CRM_DU_DATE=v||null; crmDuLoad(); };
 
 /* ============================ POST SALES — ADHOC bulk replace ============================
    Converted output files upload to S3 (postsales/adhoc/...) and the conversion record (file
@@ -9370,13 +10521,845 @@ async function psaFetchAll(){
     });
   }catch(e){ return []; }
 }
+/* ============================== POST SALES — MIS REPORT ==============================
+   Outstanding against Collection, project by project, kept as a dated record.
+
+   HOW THE FIGURES GET HERE. FarVision is on the office network and JAIN-E is not, so nothing
+   here reaches into the ERP. What it does is take the files the morning extraction already
+   produces - one Receipt Register Summary and one Customer Outstanding Summary per business
+   unit - read them in the browser, and apply the same three rules that were being applied by
+   hand in Excel:
+
+     Current / Previous month collection : Money Receipt Date falls in that month,
+                                           AND Unit Status is Active, AND Is Reversed is No.
+     Outstanding                         : Customer Status is Active AND Net Outstanding > 0.
+
+   Nothing is typed in. Every figure on the report is a sum the browser did off the ERP's own
+   file, and every one of them keeps the file it came from and the number of receipts behind
+   it, so a line can be questioned later without re-running the extraction.
+
+   THE ORDER OF THE ROWS IS FIXED and lives in postsales.mis_bus, because the report is read
+   against last week's - a row that moved would make two dates uncomparable. A business unit
+   with no file that day is not dropped, it is shown blank, which is the honest answer.
+
+   The date comes out of the files themselves (the "To" of the receipt range, the "As On" of
+   the outstanding), not off the clock, so a set extracted yesterday and loaded today is filed
+   under the day it actually describes. */
+
+const MIS = { bus: [], reports: [], staged: null, busy: false };
+
+function misIN(n, dash) {
+  if (n === null || n === undefined || n === '') return dash ? '—' : '0';
+  n = Math.round(Number(n) || 0);
+  if (!n) return dash ? '—' : '0';
+  const neg = n < 0;
+  let s = String(Math.abs(n));
+  const last3 = s.slice(-3);
+  let rest = s.slice(0, -3);
+  const parts = [];
+  while (rest.length > 2) { parts.push(rest.slice(-2)); rest = rest.slice(0, -2); }
+  if (rest) parts.push(rest);
+  parts.reverse();
+  return (neg ? '-' : '') + (parts.length ? parts.join(',') + ',' + last3 : last3);
+}
+const MIS_MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function misMonthLabel(y, m /* 1-12 */) { return MIS_MON[m - 1] + "'" + String(y).slice(2); }
+// `instanceof Date` is not asked here. A Date that arrived from another realm - the sheet
+// reader's, a worker's - is still a Date in every way that matters, and it answers false.
+function misIsDate(v) { return Object.prototype.toString.call(v) === '[object Date]' && isFinite(v.getTime()); }
+function misDMY(d) {
+  const dt = misIsDate(d) ? d : new Date(d + 'T00:00:00');
+  return String(dt.getDate()).padStart(2, '0') + '.' + String(dt.getMonth() + 1).padStart(2, '0')
+       + '.' + dt.getFullYear();
+}
+function misISO(dt) {
+  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-'
+       + String(dt.getDate()).padStart(2, '0');
+}
+// The month before a given one, rolling the year back in January.
+function misPrevMonth(y, m) { return m > 1 ? { y: y, m: m - 1 } : { y: y - 1, m: 12 }; }
+
+/* Business unit names are compared with the punctuation taken out. The ERP writes
+   "DREAM DIAMOND." with a full stop and "DREAM ONE BLK 3 \ 4" with a backslash, and whether
+   those survive a download, a rename and a re-save is not something worth betting a match on. */
+function misNorm(s) {
+  return String(s || '').toUpperCase().replace(/[\\\/]/g, ' ')
+    .replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/* ── reading one FarVision file ────────────────────────────────────────────────────────── */
+
+function misSheetRows(wb) {
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+}
+// The header is not on a fixed row: Receipt Register puts it on 11, Customer Outstanding on 12,
+// and a future report banner would move both. It is found by the column that must be there.
+function misHeaderRow(rows, anchor) {
+  for (let r = 0; r < Math.min(rows.length, 30); r++) {
+    const row = rows[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      if (typeof row[c] === 'string' && row[c].trim() === anchor) return r;
+    }
+  }
+  return -1;
+}
+function misIndex(row) {
+  const idx = {};
+  (row || []).forEach(function (h, i) { if (h != null) idx[String(h).trim()] = i; });
+  return idx;
+}
+function misBannerLine(rows, prefix) {
+  for (let r = 0; r < Math.min(rows.length, 12); r++) {
+    const v = (rows[r] || [])[0];
+    if (typeof v === 'string' && v.trim().toLowerCase().indexOf(prefix.toLowerCase()) === 0) {
+      return v.trim().slice(prefix.length).trim();
+    }
+  }
+  return '';
+}
+// d/m/yy or dd/mm/yyyy, the two spellings the banners use. Day first, always - these are
+// Indian ERP dates and "3/4" is the third of April.
+function misParseDMY(s) {
+  const m = String(s || '').match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{2,4})/);
+  if (!m) return null;
+  let y = +m[3];
+  if (y < 100) y += 2000;
+  const d = new Date(y, +m[2] - 1, +m[1]);
+  return isFinite(d.getTime()) ? d : null;
+}
+/* THE SHEET IS READ WITHOUT cellDates, AND THIS IS WHY.
+
+   Asking the reader for Date objects looks like the obvious thing and quietly moves money
+   between months. Excel serial 46266 is the 1st of September; the reader hands back
+   2026-08-31T18:29:50Z, which in Indian time is the 31st of August at 23:59:50 - ten seconds
+   short of midnight, because the serial-to-Date conversion loses a fraction. Read the month
+   off that and every receipt dated the 1st is counted in the month before. On the 28.09.2026
+   set that was 12.4 lakh landing in the wrong month across three projects, with the totals
+   still adding up, which is the worst kind of wrong.
+
+   The serial is an integer day count with no clock and no timezone in it. The reader's own
+   SSF.parse_date_code turns it into the year, month and day the cell actually shows. Nothing
+   to drift.
+
+   A Date is still accepted, because a file saved elsewhere can arrive with real ones, and it
+   is nudged half a minute forward first so the same ten-second deficit cannot bite. These are
+   date-only columns; nothing in them is a genuine timestamp thirty seconds before midnight. */
+function misCellDate(v) {
+  if (v == null) return null;
+  if (typeof v === 'number' && window.XLSX && XLSX.SSF && XLSX.SSF.parse_date_code) {
+    const p = XLSX.SSF.parse_date_code(v);
+    if (p && p.y) return new Date(p.y, p.m - 1, p.d);
+  }
+  if (misIsDate(v)) { const t = new Date(v.getTime() + 30000); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); }
+  return misParseDMY(v);
+}
+function misNum(v) {
+  if (v == null || v === '') return 0;
+  const n = Number(String(v).replace(/[,₹\s]/g, ''));
+  return isFinite(n) ? n : 0;
+}
+function misIsA(v, want) { return String(v == null ? '' : v).trim().toLowerCase() === want; }
+
+/* One Receipt Register Summary. Totals are worked out for whichever two months are asked for,
+   in a single pass, and the rows that were left out are counted rather than discarded - that
+   count is the difference between "this project collected nothing" and "the file was wrong". */
+function misReadCollection(wb, curr, prev) {
+  const rows = misSheetRows(wb);
+  const hr = misHeaderRow(rows, 'Money Receipt Date');
+  if (hr < 0) throw new Error('This does not look like a Receipt Register Summary — no "Money Receipt Date" column.');
+  const ix = misIndex(rows[hr]);
+  const cDate = ix['Money Receipt Date'], cAmt = ix['Amount'],
+        cUnit = ix['Unit Status'], cRev = ix['Is Reversed'];
+  if (cAmt == null) throw new Error('No "Amount" column in this Receipt Register Summary.');
+  const out = { curr: 0, prev: 0, nCurr: 0, nPrev: 0, excluded: 0, nRows: 0 };
+  for (let r = hr + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const d = misCellDate(row[cDate]);
+    if (!d) continue;
+    const y = d.getFullYear(), m = d.getMonth() + 1;
+    const isCurr = (y === curr.y && m === curr.m), isPrev = (y === prev.y && m === prev.m);
+    if (!isCurr && !isPrev) continue;
+    out.nRows++;
+    const keep = (cUnit == null || misIsA(row[cUnit], 'active'))
+              && (cRev == null || misIsA(row[cRev], 'no'));
+    if (!keep) { out.excluded++; continue; }
+    const amt = misNum(row[cAmt]);
+    if (isCurr) { out.curr += amt; out.nCurr++; } else { out.prev += amt; out.nPrev++; }
+  }
+  out.buName = misBannerLine(rows, 'Business Unit:');
+  out.range = misBannerLine(rows, 'Custom Date:');
+  out.asOn = misParseDMY((out.range.split(/\bTo\b/i)[1] || ''));
+  return out;
+}
+
+/* One Customer Outstanding Summary. Net Outstanding is what the report has always used, and
+   credit balances are left out with the cancelled bookings rather than netted off against
+   somebody else's dues - a project does not owe less because one customer paid ahead. */
+function misReadOutstanding(wb) {
+  const rows = misSheetRows(wb);
+  const hr = misHeaderRow(rows, 'Net Outstanding');
+  if (hr < 0) throw new Error('This does not look like a Customer Outstanding Summary — no "Net Outstanding" column.');
+  const ix = misIndex(rows[hr]);
+  const cNet = ix['Net Outstanding'], cSt = ix['Customer Status'];
+  const out = { total: 0, n: 0, excluded: 0, nRows: 0 };
+  for (let r = hr + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    if (row[cNet] == null || row[cNet] === '') continue;
+    const v = misNum(row[cNet]);
+    out.nRows++;
+    if ((cSt == null || misIsA(row[cSt], 'active')) && v > 0) { out.total += v; out.n++; }
+    else out.excluded++;
+  }
+  out.buName = misBannerLine(rows, 'Business Unit:');
+  const asOn = misBannerLine(rows, 'As On Date:');
+  out.asOn = misParseDMY(asOn);
+  return out;
+}
+
+function misKindOf(rows) {
+  const head = String((rows[0] || [])[0] || '').toLowerCase();
+  if (head.indexOf('receipt register') >= 0) return 'collection';
+  if (head.indexOf('customer outstanding') >= 0) return 'outstanding';
+  if (misHeaderRow(rows, 'Money Receipt Date') >= 0) return 'collection';
+  if (misHeaderRow(rows, 'Net Outstanding') >= 0) return 'outstanding';
+  return null;
+}
+
+/* ── loading and drawing the tab ───────────────────────────────────────────────────────── */
+
+let MIS_CSS_DONE = false;
+function misCss() {
+  if (MIS_CSS_DONE) return;
+  MIS_CSS_DONE = true;
+  const st = document.createElement('style');
+  st.textContent = `
+  .mis-hint{flex:1;font-size:12.5px;color:var(--slate);display:flex;align-items:center;gap:8px;min-width:200px}
+  .mis-tbl td,.mis-tbl th{white-space:nowrap}
+  .mis-num{text-align:right;font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  .mis-tot td{font-weight:700;background:#f8fafc;border-top:2px solid var(--line)}
+  .mis-blank{color:#94a3b8}
+  .mis-prevwrap{max-height:62vh;overflow:auto}
+  .mis-doc{border:1px solid var(--line);border-radius:10px;padding:18px 20px;background:#fff}
+  .mis-doc h4{margin:0 0 2px;font-size:15px}
+  .mis-doc .sub{font-size:12.5px;color:var(--slate);margin-bottom:14px}
+  .mis-doc table{width:100%;border-collapse:collapse;font-size:13px}
+  .mis-doc th{background:#7e22ce;color:#fff;font-size:11px;letter-spacing:.4px;text-transform:uppercase;
+    padding:9px 10px;text-align:left;vertical-align:middle}
+  .mis-doc td{padding:8px 10px;border-bottom:1px solid var(--line)}
+  .mis-stage{max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:9px}
+  .mis-stage table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .mis-stage th{position:sticky;top:0;background:#f8fafc;padding:8px 10px;text-align:left;
+    font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--slate);
+    border-bottom:1px solid var(--line);z-index:1}
+  .mis-stage td{padding:7px 10px;border-bottom:1px solid var(--line)}
+  .mis-ok{color:#16a34a}.mis-miss{color:#94a3b8}
+  .mis-badfile{font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;
+    border-radius:8px;padding:9px 11px;margin-top:10px}
+  .mis-when{font-size:12px;color:var(--slate)}
+  `;
+  document.head.appendChild(st);
+}
+
+async function misLoadBus() {
+  const { data } = await sb.schema('postsales').from('mis_bus').select('*')
+    .eq('active', true).order('sort_order');
+  MIS.bus = data || [];
+}
+async function misLoadReports() {
+  const { data } = await sb.schema('postsales').from('mis_reports').select('*')
+    .order('report_date', { ascending: false }).limit(200);
+  MIS.reports = data || [];
+}
+
+function misRender() {
+  const host = $('misBody'); if (!host) return;
+  const latest = MIS.reports[0];
+  const kpis = mKpis([
+    ['Latest report', latest ? misDMY(latest.report_date) : '—',
+      latest ? (latest.bu_count + ' of ' + MIS.bus.length + ' business units') : 'nothing recorded yet'],
+    ['Outstanding', latest ? misIN(latest.total_outstanding) : '—',
+      latest ? ('as at ' + misDMY(latest.report_date)) : ''],
+    [latest ? ('Collection · ' + latest.curr_month_label) : 'Collection',
+      latest ? misIN(latest.total_curr) : '—',
+      latest ? (latest.prev_month_label + ': ' + misIN(latest.total_prev)) : ''],
+    ['Records', String(MIS.reports.length), MIS.reports.length === 1 ? 'report kept' : 'reports kept'],
+  ]);
+  const toolbar = '<div class="toolbar">'
+    + '<div class="mis-hint"><i class="fa-solid fa-file-invoice"></i> Drop the day’s Receipt Register and Customer Outstanding files and the report builds itself — Outstanding, this month’s collection and last month’s, per project.</div>'
+    + '<button class="btn btn-primary" onclick="misNewModal()"><i class="fa-solid fa-plus"></i> New MIS Report</button>'
+    + '</div>';
+  const body = MIS.reports.length ? MIS.reports.map(function (r) {
+    return '<tr>'
+      + '<td><b>' + esc(misDMY(r.report_date)) + '</b>'
+        + (r.bu_count < MIS.bus.length
+            ? '<div class="mis-when" style="color:#b45309">' + (MIS.bus.length - r.bu_count) + ' business unit' + ((MIS.bus.length - r.bu_count) === 1 ? '' : 's') + ' had no file</div>'
+            : '')
+        + '</td>'
+      + '<td class="mis-num">' + esc(misIN(r.total_outstanding)) + '</td>'
+      + '<td class="mis-num">' + esc(misIN(r.total_curr)) + '<div class="mis-when">' + esc(r.curr_month_label) + '</div></td>'
+      + '<td class="mis-num">' + esc(misIN(r.total_prev)) + '<div class="mis-when">' + esc(r.prev_month_label) + '</div></td>'
+      + '<td>' + esc((r.created_by || '').split('@')[0] || '—')
+        + '<div class="mis-when">' + esc(fmtDate(r.created_at)) + '</div></td>'
+      + '<td style="text-align:right;white-space:nowrap">'
+        + '<button class="btn btn-sm btn-ghost" title="Preview" onclick="misPreview(' + r.id + ')"><i class="fa-solid fa-eye"></i></button>'
+        + '<button class="btn btn-sm btn-ghost" title="Download as Excel" onclick="misExportXlsx(' + r.id + ',this)"><i class="fa-solid fa-file-excel"></i></button>'
+        + '<button class="btn btn-sm btn-ghost" title="Download as PDF" onclick="misExportPdf(' + r.id + ',this)"><i class="fa-solid fa-file-pdf"></i></button>'
+        + '<button class="btn btn-sm btn-ghost" title="Delete this record" onclick="misDelete(' + r.id + ')"><i class="fa-solid fa-trash"></i></button>'
+      + '</td></tr>';
+  }).join('')
+  : '<tr><td colspan="6"><div class="empty"><i class="fa-regular fa-file-lines"></i><div>No MIS report recorded yet</div>'
+    + '<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="misNewModal()"><i class="fa-solid fa-plus"></i> Build the first one</button></div></td></tr>';
+  host.innerHTML = kpis + toolbar
+    + '<div class="card"><div style="overflow-x:auto"><table class="tbl mis-tbl"><thead><tr>'
+    + '<th>Report date</th><th class="mis-num">Outstanding</th><th class="mis-num">Current month</th>'
+    + '<th class="mis-num">Previous month</th><th>Made by</th><th></th>'
+    + '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
+}
+
+/* ── building a new one ────────────────────────────────────────────────────────────────── */
+
+window.misNewModal = function () {
+  MIS.staged = null;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-file-invoice" style="color:#7e22ce"></i> New MIS Report</h3></div>'
+    + '<div class="modal-body">'
+      + '<div style="font-size:13px;color:var(--slate);margin-bottom:12px">Select every file the extraction produced for the day — the <b>Receipt Register Summary</b> and the <b>Customer Outstanding Summary</b> for each business unit. They are read here in your browser; nothing is uploaded. A business unit with no file is left blank rather than counted as nil.</div>'
+      + '<div class="dropzone" ondragover="event.preventDefault()" ondrop="misDrop(event)" onclick="document.getElementById(\'misFiles\').click()">'
+        + '<i class="fa-solid fa-file-arrow-up"></i><div id="misPickName">Drag &amp; drop the files, or click to choose them</div>'
+        + '<div style="font-size:12px;margin-top:4px">.xlsx or .xls · up to ' + (MIS.bus.length * 2) + ' files · exactly as they download from FarVision</div>'
+      + '</div>'
+      + '<input type="file" id="misFiles" multiple accept=".xlsx,.xls" style="display:none" onchange="misFilesPicked(this.files)">'
+      + '<div id="misStageHost" style="margin-top:14px"></div>'
+    + '</div>'
+    + '<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+      + '<button class="btn btn-primary" id="misSaveBtn" disabled onclick="misSave(this)"><i class="fa-solid fa-floppy-disk"></i> Save this report</button></div>', 'lg');
+};
+window.misDrop = function (e) {
+  e.preventDefault();
+  const f = e.dataTransfer && e.dataTransfer.files;
+  if (f && f.length) misFilesPicked(f);
+};
+
+window.misFilesPicked = async function (fileList) {
+  const files = Array.prototype.slice.call(fileList || []);
+  if (!files.length) return;
+  const host = $('misStageHost'); if (!host) return;
+  const pick = $('misPickName'); if (pick) pick.textContent = files.length + ' file' + (files.length === 1 ? '' : 's') + ' selected';
+  host.innerHTML = '<div class="loader"><div class="spin"></div></div>';
+  try {
+    if (!(await loadXLSX())) throw new Error('Could not load the spreadsheet reader. Check the connection and try again.');
+
+    /* WHICH DAY IS THIS. Every file carries its own as-at date, and they should agree because
+       they came out of one extraction run. The latest is taken as the report's date and any
+       disagreement is shown rather than hidden, because a stale file mixed into a fresh set is
+       exactly the mistake worth catching before it is filed. */
+    const read = [];
+    const bad = [];
+    for (const f of files) {
+      try {
+        const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });   // serials, not Dates - see misCellDate
+        const rows = misSheetRows(wb);
+        const kind = misKindOf(rows);
+        if (!kind) { bad.push([f.name, 'not a Receipt Register or Customer Outstanding summary']); continue; }
+        read.push({ file: f, wb: wb, kind: kind, buName: misBannerLine(rows, 'Business Unit:') });
+      } catch (e) { bad.push([f.name, (e && e.message) || String(e)]); }
+    }
+    if (!read.length) throw new Error('None of those files could be read as a FarVision summary.');
+
+    const dates = [];
+    read.forEach(function (r) {
+      try {
+        const rows = misSheetRows(r.wb);
+        const d = r.kind === 'collection'
+          ? misParseDMY((misBannerLine(rows, 'Custom Date:').split(/\bTo\b/i)[1] || ''))
+          : misParseDMY(misBannerLine(rows, 'As On Date:'));
+        if (d) { r.asOn = d; dates.push(d.getTime()); }
+      } catch (e) { /* a file with no readable banner still contributes its figures */ }
+    });
+    const reportDate = dates.length ? new Date(Math.max.apply(null, dates)) : new Date();
+    const spread = dates.length ? (Math.max.apply(null, dates) - Math.min.apply(null, dates)) : 0;
+    const curr = { y: reportDate.getFullYear(), m: reportDate.getMonth() + 1 };
+    const prev = misPrevMonth(curr.y, curr.m);
+
+    // Each file lands on its business unit by the name the ERP wrote inside it, not the filename.
+    const byBu = {};
+    MIS.bus.forEach(function (b) { byBu[b.bu_name] = { bu: b, coll: null, out: null, cf: '', of: '' }; });
+    read.forEach(function (r) {
+      const key = misNorm(r.buName);
+      const match = MIS.bus.find(function (b) { return misNorm(b.bu_name) === key; });
+      if (!match) { bad.push([r.file.name, 'business unit "' + (r.buName || 'unnamed') + '" is not on the report']); return; }
+      const slot = byBu[match.bu_name];
+      try {
+        if (r.kind === 'collection') { slot.coll = misReadCollection(r.wb, curr, prev); slot.cf = r.file.name; }
+        else { slot.out = misReadOutstanding(r.wb); slot.of = r.file.name; }
+      } catch (e) { bad.push([r.file.name, (e && e.message) || String(e)]); }
+    });
+
+    MIS.staged = {
+      date: reportDate, curr: curr, prev: prev,
+      currLabel: misMonthLabel(curr.y, curr.m), prevLabel: misMonthLabel(prev.y, prev.m),
+      byBu: byBu, bad: bad, spreadDays: Math.round(spread / 86400000)
+    };
+    misStageRender();
+  } catch (e) {
+    host.innerHTML = '<div class="mis-badfile"><i class="fa-solid fa-circle-exclamation"></i> '
+      + esc((e && e.message) || String(e)) + '</div>';
+    const b = $('misSaveBtn'); if (b) b.disabled = true;
+  }
+};
+
+function misStageRows() {
+  const s = MIS.staged; if (!s) return [];
+  return MIS.bus.map(function (b) {
+    const slot = s.byBu[b.bu_name];
+    return {
+      bu: b,
+      outstanding: slot.out ? slot.out.total : null,
+      curr: slot.coll ? slot.coll.curr : null,
+      prev: slot.coll ? slot.coll.prev : null,
+      nCurr: slot.coll ? slot.coll.nCurr : null,
+      nPrev: slot.coll ? slot.coll.nPrev : null,
+      nOut: slot.out ? slot.out.n : null,
+      nExcl: (slot.coll ? slot.coll.excluded : 0) + (slot.out ? slot.out.excluded : 0),
+      cf: slot.cf, of: slot.of,
+      has: !!(slot.coll || slot.out)
+    };
+  });
+}
+
+function misStageRender() {
+  const host = $('misStageHost'); const s = MIS.staged;
+  if (!host || !s) return;
+  const rows = misStageRows();
+  const have = rows.filter(function (r) { return r.has; }).length;
+  const tot = rows.reduce(function (a, r) {
+    a.o += r.outstanding || 0; a.c += r.curr || 0; a.p += r.prev || 0; return a;
+  }, { o: 0, c: 0, p: 0 });
+
+  const tick = function (yes, fname) {
+    return yes ? '<i class="fa-solid fa-circle-check mis-ok" title="' + esc(fname) + '"></i>'
+               : '<i class="fa-regular fa-circle mis-miss" title="no file"></i>';
+  };
+  const cell = function (v, n, unit) {
+    if (v === null) return '<td class="mis-num mis-blank">—</td>';
+    return '<td class="mis-num">' + esc(misIN(v, true))
+      + (n ? '<div class="mis-when">' + n + ' ' + unit + (n === 1 ? '' : 's') + '</div>' : '') + '</td>';
+  };
+
+  const warn = [];
+  if (s.spreadDays > 0) warn.push('The files are not all from the same day — they span ' + s.spreadDays + ' day' + (s.spreadDays === 1 ? '' : 's') + '. The latest, ' + misDMY(s.date) + ', is being used.');
+  if (have < MIS.bus.length) warn.push((MIS.bus.length - have) + ' business unit' + ((MIS.bus.length - have) === 1 ? ' has' : 's have') + ' no file and will be left blank.');
+  const clash = MIS.reports.find(function (r) { return r.report_date === misISO(s.date); });
+  if (clash) warn.push('A report for ' + misDMY(s.date) + ' already exists. Saving will replace it.');
+
+  host.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+      + '<div style="font-size:13px"><b>' + esc(misDMY(s.date)) + '</b> · current month <b>' + esc(s.currLabel)
+        + '</b> · previous <b>' + esc(s.prevLabel) + '</b></div>'
+      + '<div style="margin-left:auto;font-size:12.5px;color:var(--slate)">' + have + ' of ' + MIS.bus.length + ' business units matched</div>'
+    + '</div>'
+    + (warn.length ? '<div class="mis-badfile" style="margin-top:0;margin-bottom:10px"><i class="fa-solid fa-triangle-exclamation"></i> ' + warn.map(esc).join('<br>') + '</div>' : '')
+    + '<div class="mis-stage"><table><thead><tr>'
+      + '<th>Business unit</th><th style="text-align:center">Coll.</th><th style="text-align:center">Outst.</th>'
+      + '<th class="mis-num">Outstanding</th><th class="mis-num">' + esc(s.currLabel) + '</th><th class="mis-num">' + esc(s.prevLabel) + '</th>'
+      + '</tr></thead><tbody>'
+      + rows.map(function (r) {
+          return '<tr' + (r.has ? '' : ' style="opacity:.55"') + '>'
+            + '<td>' + esc(r.bu.bu_name) + '<div class="mis-when">' + esc(r.bu.project_name) + '</div></td>'
+            + '<td style="text-align:center">' + tick(!!r.cf, r.cf) + '</td>'
+            + '<td style="text-align:center">' + tick(!!r.of, r.of) + '</td>'
+            + cell(r.outstanding, r.nOut, 'customer')
+            + cell(r.curr, r.nCurr, 'receipt')
+            + cell(r.prev, r.nPrev, 'receipt')
+            + '</tr>';
+        }).join('')
+      + '<tr class="mis-tot"><td colspan="3">TOTAL</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.o)) + '</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.c)) + '</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.p)) + '</td></tr>'
+      + '</tbody></table></div>'
+    + (s.bad.length
+        ? '<div class="mis-badfile"><b>' + s.bad.length + ' file' + (s.bad.length === 1 ? '' : 's') + ' not used:</b><br>'
+          + s.bad.map(function (b) { return esc(b[0]) + ' — ' + esc(b[1]); }).join('<br>') + '</div>'
+        : '');
+  const btn = $('misSaveBtn'); if (btn) btn.disabled = !have;
+}
+
+window.misSave = async function (btn) {
+  const s = MIS.staged;
+  if (!s) return;
+  const rows = misStageRows().filter(function (r) { return r.has; });
+  if (!rows.length) { toast('Nothing matched — there is no report to save', 'warn'); return; }
+  const iso = misISO(s.date);
+  const clash = MIS.reports.find(function (r) { return r.report_date === iso; });
+  if (clash && !(await confirmDialog('A report for ' + misDMY(s.date) + ' is already on record. Replace it with this one?',
+      { title: 'Replace that day’s report?', okLabel: 'Replace', icon: 'fa-rotate' }))) return;
+
+  const restore = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
+  try {
+    // The old record goes first, so a replaced day can never end up with two sets of rows.
+    if (clash) await sb.schema('postsales').from('mis_reports').delete().eq('id', clash.id);
+    const tot = rows.reduce(function (a, r) {
+      a.o += r.outstanding || 0; a.c += r.curr || 0; a.p += r.prev || 0; return a;
+    }, { o: 0, c: 0, p: 0 });
+    const { data: rep, error } = await sb.schema('postsales').from('mis_reports').insert({
+      report_date: iso, curr_month_label: s.currLabel, prev_month_label: s.prevLabel,
+      total_outstanding: Math.round(tot.o), total_curr: Math.round(tot.c), total_prev: Math.round(tot.p),
+      bu_count: rows.length,
+      note: s.bad.length ? (s.bad.length + ' file(s) were not used') : null,
+      created_by: (typeof state !== 'undefined' && state.email) || null
+    }).select('*').single();
+    if (error) throw error;
+    const payload = rows.map(function (r) {
+      return {
+        report_id: rep.id, sort_order: r.bu.sort_order,
+        project_name: r.bu.project_name, bu_name: r.bu.bu_name,
+        outstanding: r.outstanding === null ? null : Math.round(r.outstanding),
+        curr_collection: r.curr === null ? null : Math.round(r.curr),
+        prev_collection: r.prev === null ? null : Math.round(r.prev),
+        src_collection: r.cf || null, src_outstanding: r.of || null,
+        n_curr: r.nCurr, n_prev: r.nPrev, n_out: r.nOut, n_excluded: r.nExcl
+      };
+    });
+    const { error: re } = await sb.schema('postsales').from('mis_rows').insert(payload);
+    if (re) throw re;
+    try { usageQueue('postsales.mis.build_mis_report_from_farvision_files', 'create',
+      { title: misDMY(s.date), status: rows.length + ' of ' + MIS.bus.length + ' business units' }); } catch (e) {}
+    closeModal();
+    await misLoadReports();
+    misRender();
+    toast('MIS report for ' + misDMY(s.date) + ' saved', 'ok');
+  } catch (e) {
+    toast('Could not save the report: ' + ((e && e.message) || e), 'err');
+    if (btn) { btn.disabled = false; btn.innerHTML = restore; }
+  }
+};
+
+window.misDelete = async function (id) {
+  const r = MIS.reports.find(function (x) { return x.id === id; });
+  if (!r) return;
+  if (!(await confirmDialog('Delete the MIS report for ' + misDMY(r.report_date) + '? It is removed for everyone.',
+    { title: 'Delete this record?' }))) return;
+  try {
+    const { error } = await sb.schema('postsales').from('mis_reports').delete().eq('id', id);
+    if (error) throw error;
+    await misLoadReports();
+    misRender();
+    toast('Report deleted', 'ok');
+  } catch (e) { toast('Could not delete: ' + ((e && e.message) || e), 'err'); }
+};
+
+/* ── one saved report, read back ───────────────────────────────────────────────────────── */
+
+/* Always read from the database, never from whatever happens to be in memory. A record is a
+   record: preview, Excel and PDF must all be showing the same thing, and the only way to be
+   sure of that is for all three to fetch it the same way. */
+async function misFetch(id) {
+  const rep = MIS.reports.find(function (x) { return x.id === id; });
+  const { data, error } = await sb.schema('postsales').from('mis_rows').select('*')
+    .eq('report_id', id).order('sort_order');
+  if (error) throw error;
+  // Every business unit gets a line whether or not it had a file that day, in the fixed order.
+  const byBu = {};
+  (data || []).forEach(function (r) { byBu[r.bu_name] = r; });
+  const rows = MIS.bus.map(function (b) {
+    const r = byBu[b.bu_name];
+    return {
+      project_name: b.project_name, bu_name: b.bu_name,
+      outstanding: r ? r.outstanding : null,
+      curr: r ? r.curr_collection : null,
+      prev: r ? r.prev_collection : null
+    };
+  });
+  // A business unit retired from the list but present in an old report still belongs to it.
+  (data || []).forEach(function (r) {
+    if (!MIS.bus.some(function (b) { return b.bu_name === r.bu_name; })) {
+      rows.push({ project_name: r.project_name, bu_name: r.bu_name,
+        outstanding: r.outstanding, curr: r.curr_collection, prev: r.prev_collection });
+    }
+  });
+  return { rep: rep, rows: rows };
+}
+function misTotals(rows) {
+  return rows.reduce(function (a, r) {
+    a.o += Number(r.outstanding || 0); a.c += Number(r.curr || 0); a.p += Number(r.prev || 0); return a;
+  }, { o: 0, c: 0, p: 0 });
+}
+function misTitleLines(rep) {
+  const d = misDMY(rep.report_date);
+  return {
+    heading: 'Project Wise Outstanding Status VS Collection Status As Per ERP',
+    sub: 'Weekly Basis MIS Report - Date: ' + d,
+    cOut: 'Current Outstanding Amount Till Date ' + d,
+    cCur: 'Current Month Collection Amount Upto - ' + rep.curr_month_label,
+    cPrv: 'Previous Month Collection Amount Upto - ' + rep.prev_month_label
+  };
+}
+
+window.misPreview = async function (id) {
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-eye" style="color:#7e22ce"></i> MIS Report</h3></div>'
+    + '<div class="modal-body"><div class="loader"><div class="spin"></div></div></div>', 'xl');
+  try {
+    const { rep, rows } = await misFetch(id);
+    const t = misTitleLines(rep), tot = misTotals(rows);
+    const host = document.querySelector('#modalHost .modal-body');
+    if (!host) return;
+    host.innerHTML = '<div class="mis-prevwrap"><div class="mis-doc">'
+      + '<h4>' + esc(t.heading) + '</h4>'
+      + '<div class="sub">' + esc(t.sub) + '</div>'
+      + '<table><thead><tr><th>Project Name</th><th>Business Unit Name</th>'
+        + '<th style="text-align:right">' + esc(t.cOut) + '</th>'
+        + '<th style="text-align:right">' + esc(t.cCur) + '</th>'
+        + '<th style="text-align:right">' + esc(t.cPrv) + '</th></tr></thead><tbody>'
+      + rows.map(function (r) {
+          return '<tr><td>' + esc(r.project_name) + '</td><td>' + esc(r.bu_name) + '</td>'
+            + '<td class="mis-num">' + esc(misIN(r.outstanding, true)) + '</td>'
+            + '<td class="mis-num">' + esc(misIN(r.curr, true)) + '</td>'
+            + '<td class="mis-num">' + esc(misIN(r.prev, true)) + '</td></tr>';
+        }).join('')
+      + '<tr class="mis-tot"><td>TOTAL</td><td></td>'
+        + '<td class="mis-num">' + esc(misIN(tot.o)) + '</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.c)) + '</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.p)) + '</td></tr>'
+      + '</tbody></table></div></div>';
+    const foot = document.querySelector('#modalHost .modal-foot');
+    if (!foot) {
+      document.querySelector('#modalHost .modal').insertAdjacentHTML('beforeend',
+        '<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>'
+        + '<button class="btn" onclick="misExportXlsx(' + id + ',this)"><i class="fa-solid fa-file-excel"></i> Excel</button>'
+        + '<button class="btn btn-primary" onclick="misExportPdf(' + id + ',this)"><i class="fa-solid fa-file-pdf"></i> PDF</button></div>');
+    }
+    try { usageQueue('postsales.mis.preview_an_mis_report', 'view', { title: misDMY(rep.report_date) }); } catch (e) {}
+  } catch (e) {
+    const host = document.querySelector('#modalHost .modal-body');
+    if (host) host.innerHTML = '<div class="mis-badfile">' + esc((e && e.message) || String(e)) + '</div>';
+  }
+};
+
+/* ── Excel ─────────────────────────────────────────────────────────────────────────────── */
+
+/* The figures go out as NUMBERS, not as the "2,13,84,025" strings the report is read in. The
+   template has always carried them as text, which is why the total at the bottom had to be
+   typed rather than summed - anybody who wanted to check a column had to retype it first.
+   The Indian grouping is a number format here, so it looks identical and still adds up. */
+const MIS_XL_FMT = '[>=10000000]##\\,##\\,##\\,##0;[>=100000]##\\,##\\,##0;##,##0';
+
+window.misExportXlsx = async function (id, btn) {
+  const restore = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try {
+    const { rep, rows } = await misFetch(id);
+    const t = misTitleLines(rep), tot = misTotals(rows);
+    if (!(await usbLoadXlsx())) throw new Error('Could not load the spreadsheet library.');
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'JAIN-E'; wb.created = new Date();
+    const ws = wb.addWorksheet('Sheet1');
+    ws.columns = [{ width: 26 }, { width: 38 }, { width: 22 }, { width: 22 }, { width: 22 }];
+
+    ws.mergeCells('A2:E2');
+    ws.getCell('A2').value = t.heading;
+    ws.getCell('A2').font = { size: 13, bold: true };
+    ws.getCell('A2').alignment = { horizontal: 'center' };
+    ws.getRow(2).height = 22;
+    ws.mergeCells('A3:E3');
+    ws.getCell('A3').value = t.sub;
+    ws.getCell('A3').font = { size: 11, bold: true, color: { argb: 'FF7E22CE' } };
+    ws.getCell('A3').alignment = { horizontal: 'center' };
+
+    const head = ws.getRow(4);
+    head.values = ['Project Name', 'Business Unit Name', t.cOut, t.cCur, t.cPrv];
+    head.height = 42;
+    head.eachCell(function (c) {
+      c.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10.5 };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7E22CE' } };
+      c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+    });
+
+    /* A dash, not a nought. Nothing collected and no file to say so both read as a dash on the
+       screen and in the PDF, and a spreadsheet that showed 0 for the same line would look like a
+       different report. SUM steps over text, so a dash costs the total nothing. */
+    const cellVal = function (v) { return (v == null || Number(v) === 0) ? null : Number(v); };
+    rows.forEach(function (r) {
+      const row = ws.addRow([r.project_name, r.bu_name,
+        cellVal(r.outstanding), cellVal(r.curr), cellVal(r.prev)]);
+      [3, 4, 5].forEach(function (i) {
+        const c = row.getCell(i);
+        c.numFmt = MIS_XL_FMT;
+        c.alignment = { horizontal: 'right' };
+        if (c.value == null) { c.value = '—'; c.alignment = { horizontal: 'center' }; c.font = { color: { argb: 'FF94A3B8' } }; }
+      });
+      row.eachCell(function (c) { c.border = { top: { style: 'hair' }, left: { style: 'hair' }, bottom: { style: 'hair' }, right: { style: 'hair' } }; });
+    });
+
+    /* The total is a live SUM over the rows above it, so the sheet checks itself - and it
+       carries the answer with it. A formula written without a cached result is blank until
+       something recalculates the file; Excel does, a phone viewer and Google Sheets' preview
+       do not, and this report is forwarded more often than it is opened in Excel. */
+    const first = 5, last = 4 + rows.length;
+    const tr = ws.addRow(['TOTAL', null,
+      { formula: 'SUM(C' + first + ':C' + last + ')', result: Math.round(tot.o) },
+      { formula: 'SUM(D' + first + ':D' + last + ')', result: Math.round(tot.c) },
+      { formula: 'SUM(E' + first + ':E' + last + ')', result: Math.round(tot.p) }]);
+    tr.height = 20;
+    tr.eachCell(function (c, i) {
+      c.font = { bold: true, size: 11 };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+      c.border = { top: { style: 'medium' }, left: { style: 'thin' }, bottom: { style: 'double' }, right: { style: 'thin' } };
+      if (i >= 3) { c.numFmt = MIS_XL_FMT; c.alignment = { horizontal: 'right' }; }
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    usbSaveBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      'MIS_Report_' + misDMY(rep.report_date) + '.xlsx');
+    try { usageQueue('postsales.mis.download_mis_report_as_excel', 'export', { title: misDMY(rep.report_date) }); } catch (e) {}
+    toast('Excel downloaded', 'ok');
+  } catch (e) {
+    toast('Could not build the spreadsheet: ' + ((e && e.message) || e), 'err');
+  } finally { if (btn) { btn.disabled = false; btn.innerHTML = restore; } }
+};
+
+/* ── PDF ───────────────────────────────────────────────────────────────────────────────── */
+
+/* Landscape, because five columns with rupee figures and two headings that each run to a line
+   of prose do not fit across a portrait page without being squeezed into something nobody
+   wants to read off a phone. The Jain Group letterhead goes on every page - this one leaves
+   the building. */
+window.misExportPdf = async function (id, btn) {
+  const restore = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try {
+    const { rep, rows } = await misFetch(id);
+    const t = misTitleLines(rep), tot = misTotals(rows);
+    const L = await loadPdfLib();
+    if (!L) throw new Error('Could not load the PDF library.');
+    const doc = await L.PDFDocument.create();
+    const reg = await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold = await doc.embedFont(L.StandardFonts.HelveticaBold);
+    let logo = null;
+    try { const b = await jgLogoPngBytes(); if (b) logo = await doc.embedPng(b); } catch (e) {}
+
+    const W = 841.89, H = 595.28, M = 40;
+    const ink = L.rgb(0.09, 0.11, 0.15), soft = L.rgb(0.42, 0.45, 0.50),
+          brand = L.rgb(0.494, 0.133, 0.808), line = L.rgb(0.85, 0.87, 0.90),
+          zebra = L.rgb(0.976, 0.980, 0.988);
+    // Project, Business unit, then three money columns of equal width.
+    const COL = [150, 215, 132, 132, 132];
+    const X = []; { let x = M; COL.forEach(function (w) { X.push(x); x += w; }); }
+    const RIGHT = M + COL.reduce(function (a, b) { return a + b; }, 0);
+
+    let page, y;
+    const headerHeight = function () { return logo ? (150 * logo.height / logo.width) + 16 : 0; };
+    const newPage = function () {
+      page = doc.addPage([W, H]);
+      y = H - M;
+      if (logo) {
+        const lw = 150, lh = lw * logo.height / logo.width;
+        page.drawImage(logo, { x: M, y: y - lh, width: lw, height: lh });
+        y -= lh + 10;
+        page.drawLine({ start: { x: M, y: y }, end: { x: RIGHT, y: y }, thickness: 1.4, color: L.rgb(0.78, 0.09, 0.14) });
+        y -= 18;
+      }
+    };
+    // The column headings repeat on every page; a continued table with no headings is a wall of
+    // numbers whose meaning is on a sheet somebody already turned over.
+    const drawHead = function () {
+      const hh = 34;
+      page.drawRectangle({ x: M, y: y - hh, width: RIGHT - M, height: hh, color: brand });
+      const labels = ['Project Name', 'Business Unit Name', t.cOut, t.cCur, t.cPrv];
+      labels.forEach(function (lab, i) {
+        const size = 7.6;
+        // Two short lines beat one clipped one for the three long money headings.
+        const words = lab.split(' ');
+        const lines = [];
+        let cur = '';
+        words.forEach(function (w) {
+          const test = cur ? cur + ' ' + w : w;
+          if (bold.widthOfTextAtSize(test, size) > COL[i] - 12 && cur) { lines.push(cur); cur = w; }
+          else cur = test;
+        });
+        if (cur) lines.push(cur);
+        const startY = y - hh / 2 + (lines.length * 9) / 2 - 7;
+        lines.forEach(function (ln, k) {
+          const w = bold.widthOfTextAtSize(ln, size);
+          const cx = i < 2 ? X[i] + 6 : X[i] + COL[i] - 6 - w;
+          page.drawText(ln, { x: cx, y: startY - k * 9, size: size, font: bold, color: L.rgb(1, 1, 1) });
+        });
+      });
+      y -= hh;
+    };
+
+    newPage();
+    page.drawText(t.heading, { x: M, y: y - 12, size: 12.5, font: bold, color: ink });
+    y -= 12 + 15;
+    page.drawText(t.sub, { x: M, y: y - 10, size: 10, font: bold, color: brand });
+    y -= 10 + 16;
+    drawHead();
+
+    const RH = 20;
+    const money = function (v, x, w, yy, f, col) {
+      const s = misIN(v, true);
+      const tw = f.widthOfTextAtSize(s, 9);
+      page.drawText(s, { x: x + w - 6 - tw, y: yy, size: 9, font: f, color: col });
+    };
+    rows.forEach(function (r, i) {
+      if (y - RH < M + 26) { newPage(); drawHead(); }
+      if (i % 2) page.drawRectangle({ x: M, y: y - RH, width: RIGHT - M, height: RH, color: zebra });
+      const ty = y - RH + 6.5;
+      page.drawText(String(r.project_name || ''), { x: X[0] + 6, y: ty, size: 9, font: reg, color: ink });
+      page.drawText(String(r.bu_name || ''), { x: X[1] + 6, y: ty, size: 9, font: reg, color: ink });
+      const blank = function (v) { return v == null || Number(v) === 0; };
+      money(r.outstanding, X[2], COL[2], ty, reg, blank(r.outstanding) ? soft : ink);
+      money(r.curr, X[3], COL[3], ty, reg, blank(r.curr) ? soft : ink);
+      money(r.prev, X[4], COL[4], ty, reg, blank(r.prev) ? soft : ink);
+      page.drawLine({ start: { x: M, y: y - RH }, end: { x: RIGHT, y: y - RH }, thickness: 0.5, color: line });
+      y -= RH;
+    });
+
+    if (y - 24 < M + 26) { newPage(); drawHead(); }
+    page.drawRectangle({ x: M, y: y - 24, width: RIGHT - M, height: 24, color: L.rgb(0.945, 0.957, 0.973) });
+    page.drawText('TOTAL', { x: X[0] + 6, y: y - 24 + 8, size: 10, font: bold, color: ink });
+    money(tot.o, X[2], COL[2], y - 24 + 8, bold, ink);
+    money(tot.c, X[3], COL[3], y - 24 + 8, bold, ink);
+    money(tot.p, X[4], COL[4], y - 24 + 8, bold, ink);
+    page.drawLine({ start: { x: M, y: y }, end: { x: RIGHT, y: y }, thickness: 1.2, color: ink });
+    y -= 24;
+
+    // Page numbers last, once the count is known.
+    const pages = doc.getPages();
+    pages.forEach(function (p, i) {
+      const s = 'Page ' + (i + 1) + ' of ' + pages.length + '  ·  Generated from FarVision extracts on ' + misDMY(rep.report_date);
+      p.drawText(s, { x: M, y: M - 16, size: 7.5, font: reg, color: soft });
+    });
+
+    const bytes = await doc.save();
+    usbSaveBlob(new Blob([bytes], { type: 'application/pdf' }),
+      'MIS_Report_' + misDMY(rep.report_date) + '.pdf');
+    try { usageQueue('postsales.mis.download_mis_report_as_pdf', 'export', { title: misDMY(rep.report_date) }); } catch (e) {}
+    toast('PDF downloaded', 'ok');
+  } catch (e) {
+    toast('Could not build the PDF: ' + ((e && e.message) || e), 'err');
+  } finally { if (btn) { btn.disabled = false; btn.innerHTML = restore; } }
+};
+
 VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
-  const tabs=[['adhoc','ADHOC']];
+  const tabs=[['adhoc','ADHOC'],['mis','MIS']];
   const tab=(seg&&seg[0])||'adhoc';
+  // One body div per tab rather than one shared one: the two are rendered by different code
+  // that each look up their own host by id, and a shared id would have them fighting over it.
   v.innerHTML=mHead('fa-headset','#7e22ce','Post Sales')
     +'<div class="tabs" style="margin-top:14px">'+tabs.map(function(t){return '<div class="tab '+(tab===t[0]?'active':'')+'" onclick="navTo(\'postsales/'+t[0]+'\')">'+t[1]+'</div>';}).join('')+'</div>'
-    +'<div id="psaBody" style="margin-top:16px"></div>';
+    +'<div id="'+(tab==='mis'?'misBody':'psaBody')+'" style="margin-top:16px"></div>';
+  if(tab==='mis'){
+    misCss();
+    const host=$('misBody'); if(host) loader(host);
+    await misLoadBus();
+    await misLoadReports();
+    misRender();
+    return;
+  }
   if(tab==='adhoc'){
     const host=$('psaBody'); if(host) loader(host);
     PSA.queue=await psaFetchAll();
@@ -10443,23 +12426,23 @@ let REC_SEL=new Set();
 // Recruitment (New) -- retired recruitment.html's four tabs, ManPower Form/Referrals rebuilt on
 // talent's approval-workflow versions (tpManpower/tpReferrals) instead of v1's recManpower/
 // recReferrals, which are deleted. Tests are unchanged (recTests) -- both v1 and talent already
-// shared it. Descriptions is restricted to the 3 named HR approvers + Administrator (rtCanManage()'s
-// own allowlist, not the wider recCanWrite() HR-department group) -- the tab simply doesn't exist
-// in the array for anyone else. No separate "Pending Approvals" tab: approving/rejecting a
-// requisition happens in ManPower Form's own row detail (tpMpShowDetail, unchanged), and the 3
-// approvers are notified via a real Task (see hrNotifyApproversTask) instead of a dedicated screen.
+// shared it. Descriptions stays restricted to the 3 named HR approvers + Administrator
+// (rtCanManage()'s own allowlist, not the wider recCanWrite() HR-department group).
+// Pending Approvals is NOT a tab here any more -- a ManPower JD ready for review or a Referral just
+// submitted creates a real task in Accountability's own Pending Approval card instead (see
+// acc.hr_approval_task_upsert, called from manpower-ai-generate and hr.referral_approval_task_trg).
 VIEWS.recruitment_new=async function(v,seg){
-  setCrumb(['People','Recruitment (New)']);
+  setCrumb(['People','Recruitment']);
   const canApprove=rtCanManage();
   const slots=[
     {label:'Tests',run:recTests},
-    canApprove?{label:'Descriptions',run:()=>recLoadJDs(v)}:null,
-    {label:'ManPower Form',run:tpManpower},
-    {label:'Referrals',run:tpReferrals},
+    canApprove?{label:'Job Descriptions',run:()=>recLoadJDs(v)}:null,
+    {label:'Hiring Request',run:tpManpower},
+    {label:recCanWrite()?'Referrals':'Refer to HR',run:tpReferrals},
   ].filter(Boolean);
   const tabs=slots.map(s=>s.label);
   const ti=mTab(seg,tabs.length);
-  v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-user-plus','#0369a1','Recruitment (New)')
+  v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-user-plus','#0369a1','Recruitment')
     +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Approving, editing and deleting here is limited to HR, Abhay Mati and Administrators — anyone can still submit a ManPower Form or Referral.</div>')
     +mTabs('recruitment_new',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
   recWatchPerms();
@@ -10485,41 +12468,63 @@ function rtRender(){
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
     <div class="sec-title" style="margin:0">Assessment Tests <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <!-- RENAME AND DELETE ARE GONE, BY REQUEST. A test is not a document to tidy: results,
+           attempts and answers hang off it, and renaming one silently relabels every result
+           already recorded against it. Email is what this screen is for. The functions are left
+           in the file, unreferenced, so nothing is lost if they are ever wanted back. -->
       ${rtCanManage()?`
-      <button class="btn btn-primary" onclick="rtAdd()"><i class="fa-solid fa-plus"></i> Add Test</button>
-      <button class="btn" id="rtRenBtn" disabled style="${dis}" onclick="rtRename()"><i class="fa-solid fa-pen"></i> Rename</button>
-      <button class="btn" id="rtDelBtn" disabled style="${dis};color:var(--err);border-color:var(--err)" onclick="rtDelete()"><i class="fa-solid fa-trash"></i> Delete</button>
-      <button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-share-nodes"></i> Share</button>
-      <button class="btn" disabled style="opacity:.4;cursor:not-allowed" title="Coming soon — Email only for now"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>`
+      <button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-envelope"></i> Email</button>`
       : `<span style="font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:6px"><i class="fa-solid fa-lock"></i> View only</span>`}
     </div>
   </div>
+  <!-- NO SIDEWAYS SCROLL. The Form Link column was the widest thing here and, now that every test
+       is built in JainE rather than being a Google Form, it held nothing but the words "Built in
+       JainE - no external link" on every row. Taking it out is what lets the remaining five
+       columns fit, so the table no longer runs past its own edge and needs no scrollbar to reach
+       the buttons at the end of a row. The Test Name takes the freed space. -->
   <div class="card" style="overflow:hidden">
   <table class="tbl" id="rtTbl" style="table-layout:fixed;width:100%">
     <thead><tr>
       <th style="width:36px;text-align:center"><input type="checkbox" id="rtChkAll" onchange="rtToggleAll(this)"></th>
-      <th style="width:56px;text-align:center">Sl.</th>
-      <th style="width:160px">Test Name</th>
-      <th>Link / Engine</th>
-      <th style="width:190px;text-align:center">Actions</th>
+      <th style="width:52px;text-align:center">Sl.</th>
+      <th style="width:60px;text-align:center">Type</th>
+      <th>Test Name</th>
+      <th style="width:200px;text-align:center">Actions</th>
     </tr></thead>
-    <tbody>${rows.length?rows.map(t=>`<tr>
+    <!-- Sl. is the row's position in this list, not the stored sl column. That column keeps the
+         number a test was given when it was created, so deleting three tests left the list reading
+         1, 2, 5, 6, 9 - which looks like rows are missing rather than like numbers were reused. -->
+    <tbody>${rows.length?rows.map((t,i)=>{
+      const native=t.engine==='native';
+      return `<tr>
       <td style="text-align:center"><input type="checkbox" class="rt-chk" value="${t.id}" onchange="rtSyncToolbar()"></td>
-      <td style="text-align:center;color:var(--slate);font-size:13px">${t.sl}</td>
-      <td style="font-weight:500;overflow-wrap:anywhere">${esc(t.name)}</td>
-      <td style="overflow-wrap:anywhere">${t.engine==='native'
-          ?`<span class="tag t-green"><i class="fa-solid fa-shield-halved"></i> JainE test${t.duration_seconds?' · '+Math.round(t.duration_seconds/60)+' min':''}</span>`
-          :(t.link?`<a href="${esc(t.link)}" target="_blank" rel="noopener" style="color:#0369a1;display:inline-flex;align-items:flex-start;gap:5px;font-size:13px;text-decoration:none;white-space:normal;overflow-wrap:anywhere;word-break:break-all"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:11px;margin-top:2px;flex:none"></i><span>${esc(t.link)}</span></a>`:'<span style="color:var(--slate)">—</span>')}</td>
-      <td style="text-align:center">${t.engine==='native'
-          ?`<button class="btn btn-sm" style="font-size:12px" onclick="rtManageQuestions(${t.id})"><i class="fa-solid fa-list-check"></i> Questions</button>
-            <button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtNativeSend(${t.id})"><i class="fa-solid fa-paper-plane"></i> Send</button>
-            <button class="btn btn-sm" style="font-size:12px" onclick="rtNativeResults(${t.id})"><i class="fa-solid fa-chart-simple"></i> Results</button>`
-          :`<button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtPreview(${t.id})"><i class="fa-solid fa-plus"></i> Preview</button>`}</td>
-    </tr>`).join(''):'<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--slate)">No tests yet — click <b>Add Test</b></td></tr>'}
+      <td style="text-align:center;color:var(--slate);font-size:13px">${i+1}</td>
+      <td style="text-align:center"><span class="tag ${native?'t-green':'t-gray'}" style="font-size:11px">${native?'Native':'Legacy'}</span></td>
+      <!-- THE NAME IS THE WAY INTO THE QUESTIONS. The row used to carry a fourth button for it,
+           which is what pushed the last button out of sight, and a button that only ever repeats
+           what the row already says is a button worth not having. Clicking the name of a test to
+           edit that test needs no label and costs no width. -->
+      <td style="font-weight:500;overflow-wrap:anywhere">${native
+        ?`<a href="javascript:void(0)" onclick="rtManageQuestions(${t.id})" style="color:var(--brand);text-decoration:none" title="Open this test's questions">${esc(t.name)}</a>`
+        :esc(t.name)}${native&&t.duration_seconds?`<div style="font-size:11px;color:var(--slate);font-weight:400">${Math.round(t.duration_seconds/60)} min</div>`:''}</td>
+      <!-- TWO BUTTONS. There were four, in a fixed-width column set to never wrap, so the last one
+           was cropped off the edge with no scrollbar to reach it - present in the page and
+           unusable, which reads as missing. Questions moved onto the test name; Get Link went
+           entirely, because Email already sends a test and a link copied by hand bypasses the very
+           thing that ties a result to a named candidate. -->
+      <!-- TRY IT REMOVED, BY REQUEST. Sitting the paper yourself minted a real attempt against
+           your own address, which then had to be filtered out of Results everywhere it appeared.
+           The questions are readable by clicking the test's name, which is what people actually
+           wanted it for. -->
+      <td style="text-align:center;white-space:nowrap;padding-right:14px">${native
+        ?`<button class="btn btn-sm" style="font-size:12px" onclick="rtResultsNative(${t.id})"><i class="fa-solid fa-chart-simple"></i> Results</button>`
+        :`<span style="font-size:12px;color:var(--slate)">—</span>`}</td>
+    </tr>`;}).join(''):'<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--slate)">No tests set up yet.</td></tr>'}
     </tbody>
   </table>
   </div>
-  <div id="rtPreviewPanel" style="display:none;margin-top:16px"></div>`;
+  <div id="rtPreviewPanel" style="display:none;margin-top:16px"></div>
+  <div id="rtQuestionsPanel" style="display:none;margin-top:16px"></div>`;
 }
 window.rtToggleAll=function(el){document.querySelectorAll('.rt-chk').forEach(c=>c.checked=el.checked);rtSyncToolbar();};
 window.rtSyncToolbar=function(){
@@ -10527,27 +12532,25 @@ window.rtSyncToolbar=function(){
   if(!rtCanManage()) return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')];
   const n=sel.length;
-  const ren=$('rtRenBtn'),del=$('rtDelBtn');
+  // Rename and Delete no longer exist on this screen; only Email is driven by the ticks.
   const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
-  if(ren){ren.disabled=n!==1;ren.style.cssText=n===1?'':dis;}
-  if(del){del.disabled=n===0;del.style.cssText=n>0?'color:var(--err);border-color:var(--err)':dis+';color:var(--err);border-color:var(--err)';}
   const shr=$('rtShareBtn');
   if(shr){shr.disabled=n!==1;shr.style.cssText=n===1?'':dis;}
 };
 window.rtAdd=function(){if(!recGuard()||!rtTestsGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
-    <label>Test Name *</label><input id="rtFName" class="inp" placeholder="e.g. Test for HR">
-    <label>Engine *</label>
-    <select id="rtFEngine" class="inp" onchange="rtEngineToggle()">
-      <option value="native">JainE Test (built-in, tracked, timed)</option>
-      <option value="legacy">Google Form (external link)</option>
+    <label>Test Name *</label><input id="rtFName" class="inp" placeholder="e.g. Sales Aptitude">
+    <label>Type *</label>
+    <select id="rtFEngine" class="inp" onchange="rtAddEngineToggle()">
+      <option value="native">Native — built in JainE (MCQ + descriptive, AI-graded)</option>
+      <option value="legacy">Legacy — external Google Form link</option>
     </select>
-    <div id="rtFNativeBox">
-      <label>Duration (minutes) <span style="font-size:11px;color:var(--slate)">(candidate is auto-submitted when time is up)</span></label>
-      <input id="rtFDuration" class="inp" type="number" min="1" max="600" value="30">
+    <div id="rtFNativeFields">
+      <label>Duration <span style="font-size:11px;color:var(--slate)">(minutes — shown to the candidate, informational only)</span></label>
+      <input id="rtFDuration" class="inp" type="number" min="1" placeholder="e.g. 20">
     </div>
-    <div id="rtFLegacyBox" style="display:none">
+    <div id="rtFLegacyFields" style="display:none">
       <label>Form Link</label><input id="rtFLink" class="inp" placeholder="http://form-timer.com/start/...">
       <label>Response Sheet URL <span style="font-size:11px;color:var(--slate)">(Google Sheets URL for Preview)</span></label>
       <input id="rtFSheet" class="inp" placeholder="https://docs.google.com/spreadsheets/d/...">
@@ -10556,10 +12559,10 @@ window.rtAdd=function(){if(!recGuard()||!rtTestsGuard())return;
   <div class="modal-foot"><button class="btn btn-primary" onclick="rtSave()">Add Test</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
   setTimeout(()=>{const el=$('rtFName');if(el)el.focus();},100);
 };
-window.rtEngineToggle=function(){
+window.rtAddEngineToggle=function(){
   const native=($('rtFEngine')||{}).value==='native';
-  if($('rtFNativeBox'))$('rtFNativeBox').style.display=native?'':'none';
-  if($('rtFLegacyBox'))$('rtFLegacyBox').style.display=native?'none':'';
+  if($('rtFNativeFields'))$('rtFNativeFields').style.display=native?'':'none';
+  if($('rtFLegacyFields'))$('rtFLegacyFields').style.display=native?'none':'';
 };
 window.rtSave=async function(){
   if(!rtTestsGuard())return;
@@ -10567,20 +12570,239 @@ window.rtSave=async function(){
   const engine=($('rtFEngine')||{}).value==='legacy'?'legacy':'native';
   if(!name){toast('Test name is required','err');return;}
   const maxSl=(RT_RECORDS||[]).reduce((m,r)=>Math.max(m,r.sl||0),0)+1;
-  let payload={sl:maxSl,name,engine};
-  if(engine==='legacy'){
-    payload.link=($('rtFLink')||{}).value?.trim()||'';
-    payload.response_sheet_url=($('rtFSheet')||{}).value?.trim()||null;
-  } else {
-    const mins=parseInt(($('rtFDuration')||{}).value)||30;
-    payload.duration_seconds=Math.max(60,mins*60);
-    payload.link=null;
+  const row={sl:maxSl,name,engine};
+  if(engine==='native'){
+    const mins=parseInt(($('rtFDuration')||{}).value||'',10);
+    row.link=''; row.duration_seconds=mins>0?mins*60:null;
+  }else{
+    row.link=($('rtFLink')||{}).value?.trim()||'';
+    row.response_sheet_url=($('rtFSheet')||{}).value?.trim()||null;
   }
-  const{data,error}=await sb.schema('recruit').from('tests').insert(payload).select().single();
+  const{data,error}=await sb.schema('recruit').from('tests').insert(row).select().single();
   if(error){toast(error.message,'err');return;}
   RT_RECORDS=[...(RT_RECORDS||[]),data];
   closeModal();toast('Test added');rtRender();
   if(engine==='native')rtManageQuestions(data.id);
+};
+
+/* ── Native test authoring ("the making part") — questions live in recruit.test_questions, one
+   row per question, MCQ or descriptive. Nothing here is exposed publicly: only the 4 people in
+   RT_TESTS_ALLOWED can reach this panel; the public candidate side is recruit-test-start/submit,
+   which strip correct_option/model_answer before anything leaves the server. ── */
+let RT_QUESTIONS=null, RT_QUESTIONS_TEST=null;
+window.rtManageQuestions=async function(testId){
+  const test=(RT_RECORDS||[]).find(t=>t.id===testId); if(!test)return;
+  RT_QUESTIONS_TEST=test;
+  const panel=$('rtQuestionsPanel'); if(!panel)return;
+  panel.style.display='';
+  panel.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  panel.scrollIntoView({behavior:'smooth',block:'start'});
+  const{data,error}=await sb.schema('recruit').from('test_questions').select('*').eq('test_id',testId).order('seq',{ascending:true});
+  if(error){panel.innerHTML='<div class="empty" style="padding:20px;color:var(--err)">'+esc(error.message)+'</div>';return;}
+  RT_QUESTIONS=data||[];
+  rtQuestionsRender();
+};
+function rtQuestionsRender(){
+  const panel=$('rtQuestionsPanel'); if(!panel||!RT_QUESTIONS_TEST)return;
+  const rows=RT_QUESTIONS||[];
+  const canEdit=rtCanManage();
+  panel.innerHTML=`<div class="card" style="padding:16px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <div class="sec-title" style="margin:0">Questions — ${esc(RT_QUESTIONS_TEST.name)} <span class="tag t-gray">${rows.length}</span></div>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        ${canEdit?`<button class="btn btn-sm btn-primary" onclick="rtQAdd()"><i class="fa-solid fa-plus"></i> Add Question</button>`:''}
+        <button class="btn btn-sm" onclick="rtQuestionsClose()"><i class="fa-solid fa-xmark"></i> Close</button>
+      </div>
+    </div>
+    ${rows.length?rows.map((q,i)=>`<div class="card" style="padding:12px;margin-bottom:8px;background:var(--bg2)">
+      <div style="display:flex;gap:8px;align-items:flex-start">
+        <span class="tag ${q.type==='mcq'?'t-blue':'t-amber'}" style="font-size:11px;flex:none">${q.type==='mcq'?'MCQ':'Descriptive'}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:500">${i+1}. ${esc(q.prompt)}</div>
+          ${q.type==='mcq'?`<div style="font-size:12px;color:var(--slate);margin-top:4px">${(q.options||[]).map(o=>`<div style="${o===q.correct_option?'color:var(--ok);font-weight:600':''}">${o===q.correct_option?'✓ ':'· '}${esc(o)}</div>`).join('')}</div>`
+            :`<div style="font-size:12px;color:var(--slate);margin-top:4px">Model answer: ${esc(q.model_answer||'—')}</div>`}
+          <div style="font-size:11px;color:var(--slate);margin-top:4px">${q.max_marks} mark${q.max_marks==1?'':'s'}</div>
+        </div>
+        ${canEdit?`<button class="btn btn-sm" style="color:var(--err);border-color:var(--err);flex:none" onclick="rtQDelete(${q.id})"><i class="fa-solid fa-trash"></i></button>`:''}
+      </div>
+    </div>`).join(''):'<div class="empty" style="padding:20px;color:var(--slate)">No questions yet — click Add Question</div>'}
+  </div>`;
+}
+window.rtQuestionsClose=function(){RT_QUESTIONS=null;RT_QUESTIONS_TEST=null;const p=$('rtQuestionsPanel');if(p){p.style.display='none';p.innerHTML='';}};
+/* The correct-answer picker sits RIGHT NEXT TO each option's own text box (a radio you click as you
+   type it), instead of a separate dropdown that only ever said "Option 1/2/3/4" — that dropdown
+   never showed what you'd actually typed, so picking the correct answer meant trusting a position
+   number rather than seeing the real text, and it was easy to mark the wrong one correct without
+   any way to notice. This can't have that failure mode: the radio is beside the text it marks. */
+function rtQOptRow(i,placeholder){
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <input type="radio" name="rtQFCorrectRadio" value="${i}" id="rtQFCorrectR${i}" style="flex:none" title="Mark this the correct answer">
+    <input id="rtQFOpt${i}" class="inp" placeholder="${esc(placeholder)}" style="flex:1">
+  </div>`;
+}
+window.rtQAdd=function(){if(!rtTestsGuard()||!RT_QUESTIONS_TEST)return;
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Question</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <label>Type *</label>
+    <select id="rtQFType" class="inp" onchange="rtQTypeToggle()">
+      <option value="mcq">Multiple Choice</option>
+      <option value="descriptive">Descriptive (AI-graded)</option>
+    </select>
+    <label>Question *</label><textarea id="rtQFPrompt" class="inp" rows="2" placeholder="Type the question..."></textarea>
+    <div id="rtQFMcq">
+      <label>Options — click the radio beside the correct one *</label>
+      ${rtQOptRow(0,'Option 1')}${rtQOptRow(1,'Option 2')}${rtQOptRow(2,'Option 3 (optional)')}${rtQOptRow(3,'Option 4 (optional)')}${rtQOptRow(4,'Option 5 (optional)')}${rtQOptRow(5,'Option 6 (optional)')}
+    </div>
+    <div id="rtQFDescriptive" style="display:none">
+      <label>Model Answer <span style="font-size:11px;color:var(--slate)">(what ChatGPT grades against — not shown to the candidate)</span></label>
+      <textarea id="rtQFModel" class="inp" rows="3" placeholder="An ideal answer..."></textarea>
+    </div>
+    <label>Marks *</label><input id="rtQFMarks" class="inp" type="number" min="1" value="1">
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" onclick="rtQSave()">Add Question</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+  setTimeout(()=>{const el=$('rtQFPrompt');if(el)el.focus();},100);
+};
+window.rtQTypeToggle=function(){
+  const mcq=($('rtQFType')||{}).value==='mcq';
+  if($('rtQFMcq'))$('rtQFMcq').style.display=mcq?'':'none';
+  if($('rtQFDescriptive'))$('rtQFDescriptive').style.display=mcq?'none':'';
+};
+window.rtQSave=async function(){
+  if(!rtTestsGuard()||!RT_QUESTIONS_TEST)return;
+  const type=($('rtQFType')||{}).value==='descriptive'?'descriptive':'mcq';
+  const prompt=($('rtQFPrompt')||{}).value?.trim();
+  const marks=parseFloat(($('rtQFMarks')||{}).value||'1')||1;
+  if(!prompt){toast('Question text is required','err');return;}
+  const seq=((RT_QUESTIONS||[]).reduce((m,q)=>Math.max(m,q.seq||0),0))+1;
+  const row={test_id:RT_QUESTIONS_TEST.id,seq,type,max_marks:marks};
+  if(type==='mcq'){
+    // Keyed by original slot (0..5), not compacted first — so a correct-answer radio always points
+    // at the text actually beside it, even when an earlier slot was left blank.
+    const slots=[0,1,2,3,4,5].map(i=>({i,v:(($('rtQFOpt'+i)||{}).value||'').trim()})).filter(s=>s.v);
+    if(slots.length<2){toast('Add at least 2 options','err');return;}
+    const checked=document.querySelector('input[name="rtQFCorrectRadio"]:checked');
+    if(!checked){toast('Click the radio beside the correct option','err');return;}
+    const correctSlot=slots.find(s=>s.i===parseInt(checked.value,10));
+    if(!correctSlot){toast('The option you marked correct is empty — fill it in or pick another','err');return;}
+    row.options=slots.map(s=>s.v); row.correct_option=correctSlot.v;
+  }else{
+    row.model_answer=($('rtQFModel')||{}).value?.trim()||'';
+  }
+  const{data,error}=await sb.schema('recruit').from('test_questions').insert(row).select().single();
+  if(error){toast(error.message,'err');return;}
+  RT_QUESTIONS=[...(RT_QUESTIONS||[]),data];
+  closeModal();toast('Question added');rtQuestionsRender();
+};
+window.rtQDelete=async function(qId){
+  if(!rtTestsGuard())return;
+  if(!await confirmDialog('Delete this question? This cannot be undone.'))return;
+  const{error}=await sb.schema('recruit').from('test_questions').delete().eq('id',qId);
+  if(error){toast(error.message,'err');return;}
+  RT_QUESTIONS=(RT_QUESTIONS||[]).filter(q=>q.id!==qId);
+  toast('Question deleted');rtQuestionsRender();
+};
+
+/* ── Get Link: mints one recruit.test_attempts row via the already-authenticated edge function,
+   for a specific candidate's email (and candidate_id if this test is being sent from a candidate's
+   own row elsewhere — from the Tests tab directly there is no candidate context, so it's left null
+   and Tests Sent/Test Passed stage automation simply does not fire for a link generated this way). ── */
+/* One click, no form: mints a real attempt under the previewer's own email and opens it
+   immediately in a new tab, so "does this test actually work" is answered by trying it, not by
+   reading a link out of a modal. Uses the exact same recruit-test-generate-link function a real
+   candidate's link comes from — this is not a fake/simulated preview, it is the real thing. */
+/* THE BUTTON IS DRAWN FOR EVERYONE, AND THE SERVER DECIDES.
+
+   It used to be hidden unless rtCanManage() said so, and when somebody who ought to have had it
+   could not see it there was nothing on the screen to explain why - a control that is simply
+   absent tells you nothing. Now it is always there, and a refusal comes back as a sentence naming
+   the reason. Nothing is loosened: recruit-test-generate-link still asks the database whether this
+   caller may do it, and a visible button does not make the request succeed.
+
+   THE TAB IS OPENED BEFORE THE AWAIT, NOT AFTER. A window.open that runs after an await has lost
+   the click that caused it, and browsers block it as a pop-up - so the old version could do
+   everything correctly, mint the attempt, and then appear to do nothing whatsoever. Opening the
+   tab while the click is still live and pointing it at the paper when the link arrives is what
+   makes Preview work from the page. If the tab is blocked anyway, the address is handed over
+   rather than the attempt being lost. */
+window.rtPreviewNative=async function(testId){
+  const test=(RT_RECORDS||[]).find(t=>t.id===testId);
+  const tab=window.open('', '_blank');          // on the click, before anything is awaited
+  if(tab){ try{ tab.document.write('<!doctype html><meta charset="utf-8"><title>Opening…</title>'
+    +'<body style="font:16px system-ui;padding:40px;color:#334155">Opening the test…</body>'); }catch(_e){} }
+  /* preview:true is what keeps a rehearsal out of Results. The attempt is still real - the paper
+     opens and grades exactly as a candidate's would - it simply is not counted as somebody having
+     sat the test, and carries no candidate, so it can never mark anybody 'Tests Sent'. */
+  const{data,error}=await sb.functions.invoke('recruit-test-generate-link',
+    {body:{test_id:testId,candidate_email:state.email||'preview@thejaingroup.com',
+           origin:location.origin,preview:true}});
+  if(error||data?.error){
+    if(tab) try{ tab.close(); }catch(_e){}
+    toast((data&&data.error)||(error&&error.message)||'Could not open the test','err');
+    return;
+  }
+  if(tab){ try{ tab.location.href=data.link; }catch(_e){ try{ tab.close(); }catch(_x){} } }
+  if(!tab||tab.closed){
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-eye"></i> '+esc((test&&test.name)||'Test')+'</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><p style="margin:0 0 10px;color:var(--slate);font-size:13px">'
+      +'Your browser blocked the new tab. Open this instead — it is your preview, ready to sit.</p>'
+      +'<input class="inp" readonly value="'+esc(data.link)+'" onclick="this.select()"></div>'
+      +'<div class="modal-foot"><a class="btn btn-primary" href="'+esc(data.link)+'" target="_blank" rel="noopener">Open the test</a>'
+      +'<button class="btn" onclick="closeModal()">Close</button></div>');
+    return;
+  }
+  toast('Preview opened in a new tab — it will not appear in Results');
+};
+window.rtGetLink=function(testId){if(!rtTestsGuard())return;
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Get Test Link</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <label>Candidate Email *</label><input id="rtLinkEmail" class="inp" placeholder="candidate@example.com">
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" onclick="rtGetLinkGo(${testId})">Generate Link</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+  setTimeout(()=>{const el=$('rtLinkEmail');if(el)el.focus();},100);
+};
+window.rtGetLinkGo=async function(testId){
+  const email=($('rtLinkEmail')||{}).value?.trim();
+  if(!email){toast('Candidate email is required','err');return;}
+  const test=(RT_RECORDS||[]).find(t=>t.id===testId);
+  const{data,error}=await sb.functions.invoke('recruit-test-generate-link',{body:{test_id:testId,candidate_email:email,origin:location.origin}});
+  if(error||data?.error){toast((data&&data.error)||error.message,'err');return;}
+  window._rtLinkCtx={link:data.link,email,testId,testName:(test&&test.name)||data.test_name||'Assessment'};
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-check"></i> Link Ready</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <label>Send this link to ${esc(email)}</label>
+    <input id="rtLinkOut" class="inp" readonly value="${esc(data.link)}" onclick="this.select()">
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" onclick="rtNativeSendPrompt()"><i class="fa-solid fa-envelope"></i> Send Email</button><button class="btn" onclick="navigator.clipboard.writeText('${esc(data.link)}');toast('Copied')"><i class="fa-solid fa-copy"></i> Copy</button><button class="btn" onclick="closeModal()">Close</button></div>`);
+};
+/* Same send-test-email function the legacy Google-Forms Share button already uses (recipients,
+   subject, body, link) — a native test's link works there exactly the same way, so this reuses it
+   rather than building a second mail-sending path. Requires the sender's own Gmail be connected
+   (or falls back to the shared address with Reply-To them), same as Share already does. */
+window.rtNativeSendPrompt=function(){
+  const ctx=window._rtLinkCtx; if(!ctx)return;
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-envelope"></i> Send Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <label>To</label><input class="inp" value="${esc(ctx.email)}" disabled>
+    <label>Subject</label><input id="rtSendSubject" class="inp" value="Check This ${esc(ctx.testName)} provided by JainGroup">
+    <label>Message</label><textarea id="rtSendBody" class="inp" rows="4">Hi,\n\nPlease complete the assessment below at your convenience.\n\nThanks</textarea>
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" id="rtSendGoBtn" onclick="rtNativeSendGo()"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+};
+window.rtNativeSendGo=async function(){
+  const ctx=window._rtLinkCtx; if(!ctx)return;
+  const subject=($('rtSendSubject')||{}).value?.trim()||('Check This '+ctx.testName);
+  const body=($('rtSendBody')||{}).value?.trim()||'';
+  const btn=$('rtSendGoBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  try{
+    const{data,error}=await sb.functions.invoke('send-test-email',{body:{test_name:ctx.testName,link:ctx.link,subject,body,recipients:[ctx.email]}});
+    if(error||data?.error)throw new Error((data&&data.error)||error.message);
+    closeModal();
+    toast('Test sent to '+ctx.email+(data.via==='gmail'?' from '+(data.sent_as||'your address'):' from the shared address'));
+  }catch(e){
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
+    toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
+  }
 };
 window.rtRename=function(){if(!recGuard()||!rtTestsGuard())return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')];
@@ -10634,7 +12856,8 @@ const RT_TESTS_ALLOWED=[
   'mgr.hr@thejaingroup.com',   // Shuchandra Das
   'hr@thejaingroup.com',       // Khusbu Singh
   'career@thejaingroup.com',   // Uzma Ahmed
-  'ayushruia1@gmail.com'       // Administrator
+  'ayushruia1@gmail.com',      // Administrator
+  'system1@thejaingroup.com'   // Abhay Mati
 ];
 function rtCanManage(){
   return RT_TESTS_ALLOWED.includes(String(state.email||'').trim().toLowerCase());
@@ -10642,6 +12865,17 @@ function rtCanManage(){
 function rtTestsGuard(){
   if(rtCanManage()) return true;
   toast('Assessment Tests can only be changed by Shuchandra Das, Khusbu Singh, Uzma Ahmed or the Administrator','err');
+  return false;
+}
+/* Connecting a referral to a position is HR's decision: HR, the Administrator, or Abhay Mati -
+   the same group that can act anywhere else in Recruitment, and deliberately NOT the tighter
+   four-person list that owns the test bank and may email candidates. Connecting is judging who
+   fits a role, which is the job of whoever is running the hiring, not of whoever owns the tests.
+   Somebody outside that group may still REFER a person; they simply cannot decide where that
+   person goes. */
+function rtRefConnectGuard(){
+  if(recCanWrite()) return true;
+  toast('Only HR, Abhay Mati and Administrators can approve or connect a referral','err');
   return false;
 }
 /* Whether this person has granted the app permission to send mail from their own Gmail. Read from
@@ -10665,74 +12899,381 @@ window.rtShareConnectGoogle=function(){
 // Sharing is one of the managed actions, not a separately-permissioned one; the name is kept so
 // the existing call sites read unchanged.
 function rtCanShare(){ return rtCanManage(); }
-function rtShareFieldRow(val){
-  return `<div class="rt-share-field" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
-    <input class="inp rt-email-inp" type="email" placeholder="candidate@email.com" value="${val?esc(val):''}" style="flex:1">
-    <button type="button" class="btn btn-sm" style="color:var(--err);border-color:var(--err);flex:none;padding:6px 10px" onclick="rtShareRemoveField(this)" title="Remove this email"><i class="fa-solid fa-xmark"></i></button>
-  </div>`;
+/* A TEST GOES TO SOMEBODY IN THE INTERVIEW TRACKER, AND NOWHERE ELSE.
+
+   This used to be five empty boxes to type addresses into, which meant a test could be sent to any
+   address at all - a typo, a personal account, somebody who was never a candidate here. Nothing
+   downstream could cope with that: the attempt, the answers, the time taken and the pass are all
+   recorded against the address the link was minted for, so an address that belongs to no candidate
+   produces a result that can never be tied back to a person, and a mistyped one silently sends the
+   paper to a stranger while the real candidate waits.
+
+   So the addresses are no longer typed - they are PICKED, from the Interview Tracker, which is the
+   list of people who are actually being considered. Anyone who should get a test is added there
+   first. That is also what lets 'Tests Sent' and 'Test Passed' land on the right row.
+
+   Read straight from hr.interview_tracker rather than from TP_TR_RECORDS, because that variable is
+   only filled while the Interview Tracker page is open and is empty when Tests is where you are. */
+let RT_TRACKER_PEOPLE=null, RT_TRACKER_HIDDEN=0, RT_TRACKER_WAITING=0, RT_TRACKER_EXCLUDED=[];
+/* ONLY SOMEBODY WHO HAS NOT BEEN ANYWHERE YET CAN BE SENT A TEST.
+
+   A stage in the Feedback column means something has already happened to this person, and in every
+   case it is a reason not to post them a paper:
+
+     Tests Sent          they already have one, sitting unanswered - a second link would replace
+                         nothing and leave two live attempts against one person
+     Test Passed         they have sat it and passed; sending it again invites a second, different
+                         score against the same name
+     Interview Scheduled / Interview Done / Selected / Joined
+                         they are past the testing stage entirely
+     Rejected / Backed Out
+                         they are not a candidate any more
+     Hold                a decision has been deliberately paused; a test would restart it
+
+   TP_STAGES is the funnel in order and begins at 'Tests Sent', so "everything from Tests Sent
+   onward, plus Hold, Rejected, Selected and Backed Out" is in fact every stage in that list.
+
+   WHICH IS WHY THIS HIDES THE NAMED STAGES RATHER THAN SHOWING ONLY BLANK ONES. Written the other
+   way round - "only somebody with no stage at all" - it looked equivalent and was not: live rows
+   carry 'Pending', which is not in TP_STAGES, and hiding it would have emptied this list of the
+   only people eligible to sit a test. Anything that is not one of the stages below is somebody
+   nothing has happened to yet, and they belong here.
+
+   Note a test cannot be re-sent to the same person from here once it has gone: they move to Tests
+   Sent the moment the link is generated and drop out of this list. If somebody never receives
+   theirs, set their Feedback back in the Interview Tracker and they reappear. */
+/* Built on first use, not at load. TP_STAGES is declared further down this same file, so reading
+   it from a top-level const up here throws a ReferenceError the instant the script is parsed and
+   takes every page of JAIN-E down with it. Inside the function it is only read on a click, long
+   after the whole file has run. */
+let RT_NOT_TESTABLE=null;
+function rtTestable(feedback){
+  if(!RT_NOT_TESTABLE) RT_NOT_TESTABLE=new Set(TP_STAGES.map(x=>x.toLowerCase()));
+  const f=String(feedback||'').trim().toLowerCase();
+  return !RT_NOT_TESTABLE.has(f);
 }
-window.rtShareRemoveField=function(btn){const row=btn.closest('.rt-share-field');if(row)row.remove();};
-window.rtShareAddN=function(){
-  const raw=parseInt(($('rtAddN')||{}).value);
-  const n=Math.max(1,Math.min(50,isNaN(raw)?1:raw));
-  const cont=$('rtEmailFields');if(!cont)return;
-  for(let i=0;i<n;i++)cont.insertAdjacentHTML('beforeend',rtShareFieldRow());
+/* ONE ENTRY PER TRACKER ROW, NOT PER PERSON.
+
+   The obvious thing is to list each address once, and it is wrong. One person can be a live
+   candidate for two positions at the same time, and the two are judged separately - somebody who
+   backed out of Operations Head can still be Pending for Sales Executive, which is exactly what
+   the live data looks like. Collapsing them to one line per address means judging that person by
+   whichever row happened to be newest, and hiding a candidate who is genuinely still in the
+   running.
+
+   A test is sent FOR A POSITION, and Monthly Update counts per position, so the row is the unit.
+   Each row carries its own candidate_id, which is what makes the count land on the right position.
+
+   candidate_id is the whole reason this is carried at all: without it recruit-test-generate-link
+   has nobody to move to 'Tests Sent', so hr.candidates.stage never changes and Monthly Update -
+   which counts those stages - stays at zero however many tests have actually gone out. */
+async function rtTrackerPeople(force){
+  if(RT_TRACKER_PEOPLE&&!force) return RT_TRACKER_PEOPLE;
+  const {data,error}=await sb.schema('hr').from('interview_tracker')
+    .select('id,candidate_id,candidate_name,email,position,feedback').order('id',{ascending:false});
+  if(error) throw error;
+
+  /* NOBODY UNAPPROVED IS OFFERED A TEST.
+     The database refuses the stage change anyway, so sending to one would deliver an email and
+     then fail to record it - the worst of both. Asking which candidates are approved here means
+     they are simply not in the list, with the reason said once above it rather than as a failure
+     per person. */
+  const ids=[...new Set((data||[]).map(r=>r.candidate_id).filter(x=>x!=null))];
+  let approved=new Set();
+  if(ids.length){
+    const {data:cands}=await sb.schema('hr').from('candidates')
+      .select('id,approval_status').in('id',ids);
+    (cands||[]).forEach(c=>{ if((c.approval_status||'Approved')==='Approved') approved.add(c.id); });
+  }
+
+  /* Counted apart, because they are different problems with different answers. "Waiting to be
+     approved" is something you can go and fix in a minute; "already tested or moved on" is not a
+     problem at all. Lumping them together produced the worst possible message for a brand new
+     candidate: that they had already been sent a test and moved on. */
+  /* WHY SOMEBODY IS NOT IN THE LIST IS KEPT PER ROW, NOT AS ONE TOTAL.
+
+     The counts used to be two numbers for the whole tracker, and the message about a single
+     position read from them. So on a position where everyone had already been tested, the window
+     still said "1 is still waiting to be approved in Accountability" - counting somebody waiting
+     on a completely different position. It sent people to Pending Approval to look for a task
+     that had nothing to do with the position they were on.
+
+     Each excluded row now carries its own position and reason, so the sentence can be counted
+     from exactly the rows the sentence is about. */
+  const out=[]; const excluded=[];
+  for(const r of (data||[])){
+    const em=String(r.email||'').trim().toLowerCase();
+    if(!em) continue;
+    const pos=r.position||'';
+    if(r.candidate_id!=null && !approved.has(r.candidate_id)){
+      excluded.push({position:pos,reason:'waiting'}); continue;
+    }
+    if(!rtTestable(r.feedback)){
+      excluded.push({position:pos,reason:'moved_on',feedback:r.feedback||''}); continue;
+    }
+    out.push({email:em,name:r.candidate_name||'',position:pos,
+              feedback:r.feedback||'',candidateId:r.candidate_id||null});
+  }
+  RT_TRACKER_PEOPLE=out;
+  RT_TRACKER_EXCLUDED=excluded;
+  RT_TRACKER_HIDDEN=excluded.length;
+  RT_TRACKER_WAITING=excluded.filter(function(x){return x.reason==='waiting';}).length;
+  return out;
+}
+/* The sentence for one position, counted from that position's own rows. Returns null when there
+   is genuinely nothing to say. */
+function rtWhyNobody(position){
+  const rows=(RT_TRACKER_EXCLUDED||[]).filter(function(x){
+    return position==null || String(x.position||'')===String(position); });
+  const waiting=rows.filter(function(x){return x.reason==='waiting';}).length;
+  const movedOn=rows.filter(function(x){return x.reason==='moved_on';}).length;
+  const who=position?('\u201c'+position+'\u201d'):'the Interview Tracker';
+  if(!rows.length) return 'There is nobody on '+who+' to send a test to.';
+  if(waiting&&movedOn){
+    return 'Nobody on '+who+' can be sent a test right now '+'—'+' '+movedOn+' '
+      +(movedOn===1?'has':'have')+' already been sent one or moved on, and '+waiting+' '
+      +(waiting===1?'is':'are')+' still waiting to be approved in Accountability \u203a Pending Approval.';
+  }
+  if(waiting){
+    return 'Nobody on '+who+' can be sent a test yet '+'—'+' '+waiting+' '
+      +(waiting===1?'is':'are')+' still waiting to be approved in Accountability \u203a Pending Approval.';
+  }
+  return 'Nobody on '+who+' can be sent a test right now '+'—'
+    +' they have all been sent one already, or moved on.';
+}
+/* Styled by .rt-cand-* in nexus.css, not inline, because this sits inside .frm - see the note
+   there. The row must stay a <label> so that a click anywhere on it ticks the box. */
+function rtSharePersonRow(p,preTick){
+  const sub=[p.position,p.feedback].filter(Boolean).join(' \u00b7 ');
+  return `<label class="rt-cand-row" data-hay="${esc((p.name+' '+p.email+' '+p.position).toLowerCase())}">
+    <input type="checkbox" class="rt-cand-chk"${preTick?' checked':''} value="${esc(p.email)}" data-cand="${p.candidateId==null?'':p.candidateId}">
+    <span style="min-width:0">
+      <span class="rt-cand-name">${esc(p.name||p.email)}</span>
+      <span class="rt-cand-mail">${esc(p.email)}</span>
+      ${sub?`<span class="rt-cand-sub">${esc(sub)}</span>`:''}
+    </span>
+  </label>`;
+}
+/* Keeps the subject in step with the chosen test, but never overwrites wording somebody has
+   typed - the default is recognisable, so anything else is theirs. */
+window.rtShareTestChanged=function(){
+  const selEl=$('rtShareTest'); if(!selEl)return;
+  const t=(RT_RECORDS||[]).find(x=>String(x.id)===String(selEl.value));
+  const subj=$('rtShareSubj');
+  if(t&&subj){
+    const looksDefault=/^Check This .* provided by JainGroup$/.test(subj.value||'');
+    if(looksDefault||!String(subj.value||'').trim()) subj.value='Check This '+t.name+' provided by JainGroup';
+  }
 };
-window.rtShare=async function(){
+window.rtShareFilter=function(q){
+  const t=String(q||'').trim().toLowerCase();
+  let shown=0;
+  document.querySelectorAll('#rtEmailFields .rt-cand-row').forEach(function(el){
+    const hit=!t||(el.dataset.hay||'').includes(t);
+    el.style.display=hit?'':'none';   // '' falls back to the stylesheet's flex
+    if(hit)shown++;
+  });
+  const none=$('rtCandNone'); if(none)none.style.display=shown?'none':'block';
+};
+window.rtShareCheckAll=function(el){
+  /* Ticks only what is visible, so a filter then Select-all means "everyone matching this",
+     not "everyone in the tracker" - which is what somebody filtering plainly intends. */
+  document.querySelectorAll('#rtEmailFields .rt-cand-row').forEach(function(row){
+    if(row.style.display==='none')return;
+    const cb=row.querySelector('.rt-cand-chk'); if(cb)cb.checked=el.checked;
+  });
+  rtShareCountSel();
+};
+window.rtShareCountSel=function(){
+  const n=document.querySelectorAll('#rtEmailFields .rt-cand-chk:checked').length;
+  const lbl=$('rtCandCount'); if(lbl)lbl.textContent=n?(n+' selected'):'none selected';
+};
+/* fromPosition is set when this was opened from a Monthly Progress row. It narrows the list to
+   that one position and ticks everybody, because on a position's own row the normal case is "send
+   it to all of them" - unticking one is less work than ticking nine. Opened the usual way from
+   Tests, nothing is narrowed and nothing is pre-ticked, which is the safer default when the whole
+   company's candidates are on screen. */
+window.rtShare=async function(fromPosition){
   if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
   await rtShareCheckGmail();
-  const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
-  if(sel.length!==1){toast('Select exactly one test to share','err');return;}
-  const rec=(RT_RECORDS||[]).find(r=>r.id===sel[0]);if(!rec)return;
+
+  /* WHICH TEST IS ASKED FOR, NOT ASSUMED.
+
+     This used to read the ticked row in the Tests table and refuse with "Select exactly one test
+     to share" if there was not exactly one. Opened from Tests that is fair. Opened from Monthly
+     Progress it was nonsense: the Tests table is on a different tab, nothing there is ticked and
+     nothing can be ticked without leaving the screen you are on - so the window refused, naming a
+     control that was not on it, for a reason nobody could act on.
+
+     From Monthly Progress the position is known and the test is not, so the test is a field in the
+     window. From Tests the test is known and stays as it was. */
+  const fromPos=fromPosition===true;
+  let rec=null;
+  if(!fromPos){
+    const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
+    if(sel.length!==1){toast('Tick exactly one test to email','err');return;}
+    rec=(RT_RECORDS||[]).find(r=>r.id===sel[0]);
+    if(!rec)return;
+  }else{
+    const usable=(RT_RECORDS||[]).filter(t=>t.engine==='native');
+    if(!usable.length){toast('There are no tests set up to send','err');return;}
+    rec=usable[0];            // the window opens on the first, and the dropdown changes it
+  }
   const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
   const subject=`Check This ${rec.name} provided by JainGroup`;
   const body=`Dear Candidate,\nFill This Test at the latest.\nTest Attachment`;
-  const fields=Array.from({length:5}).map(()=>rtShareFieldRow()).join('');
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-share-nodes"></i> Share Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  let people=[];
+  try{ people=await rtTrackerPeople(true); }
+  catch(e){ toast('Could not read the Interview Tracker: '+((e&&e.message)||e),'err'); return; }
+  const onlyPos=fromPosition===true?TP_MU_EMAIL_POS:null;
+  if(onlyPos){
+    people=people.filter(function(x){return String(x.position||'')===String(onlyPos);});
+    if(!people.length){
+      /* Says which of the two it is. A candidate added a minute ago being told they have "already
+         been sent one" is a message that sends somebody looking for a test that was never sent. */
+      toast(rtWhyNobody(onlyPos),'err');
+      return;
+    }
+  }
+  /* AN EMPTY WINDOW IS NOT AN ANSWER. Opening a Send window with nobody in it, and a sentence
+     explaining why, asks somebody to read a dialog in order to learn there was nothing to do -
+     and leaves a Send button on screen that cannot send. The reason is said as a message and the
+     window stays shut. */
+  if(!people.length){
+    toast(RT_TRACKER_WAITING
+      ? (RT_TRACKER_WAITING+' candidate'+(RT_TRACKER_WAITING===1?' is':'s are')
+         +' waiting to be approved \u2014 approve them in Accountability \u203a Pending Approval, then send the test')
+      : RT_TRACKER_HIDDEN
+      ? 'Everybody in the Interview Tracker has already been sent a test or moved on'
+      : 'Nobody in the Interview Tracker has an email address yet \u2014 add a candidate there first',
+      'err');
+    return;
+  }
+
+  const fields=people.length
+    ? people.map(function(x){return rtSharePersonRow(x,!!onlyPos);}).join('')
+    : '<div style="padding:18px;text-align:center;color:var(--slate);font-size:13px">'
+      /* Three situations, three answers. Telling somebody their brand new candidate has "already
+         been moved on" is worse than saying nothing: it describes a history that did not happen,
+         and hides the one action that would actually fix it. */
+      +(RT_TRACKER_WAITING
+        ? '<b>'+RT_TRACKER_WAITING+' candidate'+(RT_TRACKER_WAITING===1?' is':'s are')+' waiting to be approved.</b>'
+          +'<div style="margin-top:6px;font-size:12.5px">Approve them in <b>Accountability \u203a Pending '
+          +'Approval</b> and they can be sent a test.</div>'
+        : RT_TRACKER_HIDDEN
+        ? 'Every candidate in the Interview Tracker has already been moved on \u2014 sent a test, '
+          +'interviewed, selected, rejected, backed out or put on hold. Add a new candidate there to '
+          +'send a test.'
+        : 'Nobody in the Interview Tracker has an email address yet. Add the candidate there first, '
+          +'with their email, and they will appear here.')
+      +'</div>';
+  /* THE WINDOW SAYS WHAT IT NEEDS AND NOTHING ELSE.
+
+     It had grown four blocks of explanation - where the mail comes from, how per-person links work,
+     why some candidates are missing, what the search box searches. Every one was true and together
+     they buried the three things somebody actually came here to do: pick a test, write a line, tick
+     people. Explanations that are never read are not documentation, they are noise with a cost.
+
+     What stayed: the sender line, because a letter going out over the wrong address is worth one
+     sentence; and the count of who is not shown, cut to the fact itself. Everything else moved to
+     a tooltip or went. */
+  openModal(/* wider: this window holds a subject, a message and a scrolling list of
+     candidates, and at 560px the list was a narrow column with names wrapping onto two lines */
+  `<div class="modal-head"><h3><i class="fa-solid fa-envelope"></i> Email Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
-    ${RT_CAN_SEND_AS_SELF
-      ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#166534;margin-bottom:4px"><i class="fa-brands fa-google"></i> Sending from <b>${esc(state.email||'')}</b> — it will be in your own Sent folder, and replies come straight to you.</div>`
-      : `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#92400e;margin-bottom:4px">
-           <div style="margin-bottom:7px">This will be sent from the shared JAIN-E address, signed by you, with replies pointed at <b>${esc(state.email||'')}</b>. Connect your Google account to send it from your own address instead.</div>
-           <button type="button" class="btn btn-sm" onclick="rtShareConnectGoogle()"><i class="fa-brands fa-google"></i> Connect Google</button>
-         </div>`}
-    <label>Test</label><input class="inp" value="${esc(rec.name)}" disabled>
-    <label>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
-    <label>Message</label><textarea id="rtShareBody" class="inp" rows="3" style="resize:vertical">${esc(body)}</textarea>
-    ${rec.link?`<div style="font-size:11.5px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-paperclip"></i> Test link attached: <span style="word-break:break-all">${esc(rec.link)}</span></div>`:'<div style="font-size:11.5px;color:var(--err);margin-top:2px">&#9888; This test has no form link.</div>'}
-    <label style="margin-top:6px">Candidate Emails <span style="font-size:11px;color:var(--slate)">(fill in as many as you need &mdash; blank ones are ignored)</span></label>
-    <div id="rtEmailFields">${fields}</div>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-      <input id="rtAddN" type="number" min="1" max="50" value="1" class="inp" style="width:84px" title="How many fields to add">
-      <button type="button" class="btn btn-sm" onclick="rtShareAddN()"><i class="fa-solid fa-plus"></i> Add Field(s)</button>
+    <div style="font-size:12px;color:var(--slate);margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span><i class="fa-solid fa-paper-plane" style="opacity:.6"></i> From <b>${RT_CAN_SEND_AS_SELF?esc(state.email||''):'the shared JAIN-E address'}</b></span>
+      ${RT_CAN_SEND_AS_SELF?'':`<button type="button" class="btn btn-sm" style="padding:2px 10px" onclick="rtShareConnectGoogle()" title="Send from your own address instead"><i class="fa-brands fa-google"></i> Use mine</button>`}
     </div>
+
+    ${fromPos?`<label>Test</label>
+    <select id="rtShareTest" class="sel" onchange="rtShareTestChanged()">
+      ${(RT_RECORDS||[]).filter(t=>t.engine==='native').map(t=>`<option value="${t.id}"${t.id===rec.id?' selected':''}>${esc(t.name||'Untitled')}</option>`).join('')}
+    </select>`:''}
+
+    <label${fromPos?'':' style="margin-top:0"'}>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
+    <label>Message</label><textarea id="rtShareBody" class="inp" rows="3" style="resize:vertical">${esc(body)}</textarea>
+    ${rec.engine==='native'?'':(rec.link?'':'<div style="font-size:11.5px;color:var(--err);margin-top:2px">&#9888; This test has no form link.</div>')}
+
+    <div style="display:flex;align-items:baseline;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <label style="margin:0">Send to${onlyPos?` <span style="font-weight:400;color:var(--slate)">\u00b7 ${esc(onlyPos)}</span>`:''}</label>
+      ${RT_TRACKER_HIDDEN?`<span style="font-size:11.5px;color:var(--slate)" title="Candidates already sent a test, interviewed, selected, rejected, backed out, on hold, or still waiting to be approved">${RT_TRACKER_HIDDEN} not shown</span>`:''}
+      <span id="rtCandCount" style="margin-left:auto;font-size:12px;color:var(--slate)">${onlyPos?(people.length+' selected'):'none selected'}</span>
+    </div>
+    <input id="rtCandSearch" class="inp" placeholder="Search\u2026" oninput="rtShareFilter(this.value)" style="margin:6px 0">
+    <div class="rt-cand-tools" style="margin-bottom:6px">
+      <label><input type="checkbox" onchange="rtShareCheckAll(this)"> Select all shown</label>
+    </div>
+    <div id="rtEmailFields" class="rt-cand-list" onchange="rtShareCountSel()">${fields}</div>
+    <div id="rtCandNone" style="display:none;padding:12px;text-align:center;color:var(--slate);font-size:12.5px">Nobody matches that.</div>
   </div>
-  <div class="modal-foot"><button class="btn btn-primary" id="rtShareSendBtn" onclick="rtShareSend(${rec.id})"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+  <div class="modal-foot"><button class="btn btn-primary" id="rtShareSendBtn" onclick="${fromPos?'rtShareSendPicked()':'rtShareSend('+rec.id+')'}"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`,'lg');
+};
+/* The dropdown decides, not whatever the window opened on. Reading it at Send time is what makes
+   changing the test actually change what goes out. */
+window.rtShareSendPicked=function(){
+  const selEl=$('rtShareTest');
+  const id=selEl?parseInt(selEl.value,10):NaN;
+  if(!id||isNaN(id)){toast('Choose a test to send','err');return;}
+  return rtShareSend(id);
 };
 window.rtShareSend=async function(id){
   if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
   const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
-  const inps=[...document.querySelectorAll('#rtEmailFields .rt-email-inp')];
-  if(!inps.length){toast('Add at least one candidate email','err');return;}
-  const re=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const emails=[];
-  /* A blank box is simply not a candidate. The window opens with five and can be grown fifty at a
-     time, so treating every empty one as an error meant deleting boxes before a smaller send would
-     go - the box count is a convenience, not a declaration of how many people are being written to.
-     What was actually typed is still checked properly for shape and for duplicates. */
-  for(const el of inps){
-    const v=(el.value||'').trim();
-    el.style.borderColor='';
-    if(!v)continue;
-    if(!re.test(v)){el.style.borderColor='var(--err)';toast('Invalid email: '+v,'err');el.focus();return;}
-    if(emails.includes(v.toLowerCase())){el.style.borderColor='var(--err)';toast('Duplicate email: '+v,'err');el.focus();return;}
-    emails.push(v.toLowerCase());
-  }
-  if(!emails.length){toast('Type at least one candidate email','err');inps[0].focus();return;}
+  /* The recipients are the rows ticked in the Interview Tracker list - an address AND the
+     candidate it belongs to. Nothing typed can reach here, so there is no shape to validate. */
+  const picked=[...document.querySelectorAll('#rtEmailFields .rt-cand-chk:checked')].map(function(c){
+    const cid=parseInt(c.dataset.cand,10);
+    return {email:String(c.value||'').trim().toLowerCase(), candidateId:isNaN(cid)?null:cid};
+  }).filter(function(x){return x.email;});
+  if(!picked.length){toast('Tick at least one candidate to send this to','err');return;}
+  const emails=picked.map(function(x){return x.email;});
   const subject=($('rtShareSubj')||{}).value?.trim()||`Check This ${rec.name} provided by JainGroup`;
   const body=($('rtShareBody')||{}).value?.trim()||'';
   const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
   const btn=$('rtShareSendBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending…';}
+
+  /* A NATIVE TEST HAS NO ONE LINK TO SHARE, which is why Share used to refuse with "this test has
+     no form link". A Google Form is one address everybody opens; a paper built in JainE is minted
+     per person, and that is the whole point - it is what ties the answers, the time taken and the
+     pass to a named candidate instead of to an anonymous form response.
+
+     So each recipient gets their own, one at a time. Generating a link is also what records
+     'Tests Sent' against a candidate, which a shared form address could never do. One address
+     failing does not stop the rest: the others still go, and the failures are named afterwards. */
+  if(rec.engine==='native'){
+    let sent=0, staged=0; const failed=[];
+    for(const who of picked){
+      const to=who.email;
+      try{
+        /* candidate_id is what moves this person to 'Tests Sent', which is what Monthly Update
+           counts. Sending without it delivers the email and leaves every report reading zero. */
+        const {data:gen,error:genErr}=await sb.functions.invoke('recruit-test-generate-link',
+          {body:{test_id:id,candidate_email:to,candidate_id:who.candidateId,origin:location.origin}});
+        if(genErr||gen?.error) throw new Error((gen&&gen.error)||genErr.message);
+        const {data:sd,error:se}=await sb.functions.invoke('send-test-email',
+          {body:{test_id:id,test_name:rec.name,link:gen.link,subject,body,recipients:[to],
+                 sender_name:senderName,sender_email:state.email||''}});
+        if(se||sd?.error) throw new Error((sd&&sd.error)||se.message);
+        sent++; if(who.candidateId) staged++;
+      }catch(e){ failed.push(to+' ('+((e&&e.message)||e)+')'); }
+    }
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
+    if(sent){
+      try{usageQueue('recruitment.tests.share_test_via_email','update',{title:rec.name,recipients:sent});}catch(_e){}
+      closeModal();
+      toast('Sent to '+sent+' candidate'+(sent===1?'':'s')+' — each has their own link'
+            +(staged?', and '+(staged===sent?(sent===1?'is':'are'):(staged+' of them are'))+' now at Tests Sent':''),'ok');
+      /* A tracker row with no candidate_id behind it cannot be moved to a stage, so it will never
+         appear in Monthly Update however many tests it receives. Better said out loud than left to
+         be discovered as a report that quietly reads zero. */
+      if(staged<sent) toast((sent-staged)+' of those are not linked to a candidate record, so they will not show in Monthly Update','err');
+    }
+    if(failed.length) toast('Could not send to: '+failed.slice(0,3).join(', ')+(failed.length>3?(' and '+(failed.length-3)+' more'):''),'err');
+    if(!sent&&!failed.length) toast('Nothing was sent','err');
+    return;
+  }
+
   try{
     const {data:{session}}=await sb.auth.getSession();
     const token=session&&session.access_token;
@@ -10758,6 +13299,167 @@ window.rtShareSend=async function(id){
     if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
     toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
   }
+};
+/* Native tests' own results view — same shape as the Google-Forms one above (Score, Timestamps,
+   one row per person), except the row is real and clicking it opens that person's actual answers,
+   since native tests grade themselves instead of needing a response sheet imported by hand. */
+/* SHOWPREVIEWS decides which of the two lists this is. Hiding rehearsals from the candidate
+   results was right - HR checking a paper is not a result - but hiding them from EVERYWHERE was
+   not: you could sit a test from JainE to check the grading and then have nowhere to see how it
+   was marked, which is the one thing a preview is for. So they are a second list rather than no
+   list, reached by a button, and never mixed into the first. */
+window.rtResultsNative=async function(testId,showPreviews){
+  const test=(RT_RECORDS||[]).find(t=>t.id===testId);if(!test)return;
+  const panel=$('rtPreviewPanel');if(!panel)return;
+  panel.style.display='block';
+  panel.innerHTML=`<div class="card card-pad">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <i class="fa-solid fa-chart-simple" style="color:#0369a1;font-size:16px"></i>
+      <span style="font-weight:700;font-size:15px">${esc(test.name)} — ${showPreviews?'My Previews':'Results'}</span>
+      <button class="btn btn-sm" style="font-size:12px" onclick="rtResultsNative(${testId},${showPreviews?'false':'true'})">
+        <i class="fa-solid fa-${showPreviews?'users':'eye'}"></i> ${showPreviews?'Show candidates':'Show previews'}</button>
+      <button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--slate)" onclick="document.getElementById('rtPreviewPanel').style.display='none'">&times;</button>
+    </div>
+    <div id="rtResultsBody"><div class="loader"><div class="spin"></div></div></div>
+  </div>`;
+  panel.scrollIntoView({behavior:'smooth',block:'start'});
+  const rb=$('rtResultsBody');
+  try{
+    // Rehearsals are excluded: HR checking the paper is not a result, and before this they piled
+    // up in here beside the candidates - 18 of them under one address before a single real
+    // candidate had sat anything.
+    let{data,error}=await sb.schema('recruit').from('test_attempts')
+      .select('id,candidate_email,status,started_at,submitted_at,mcq_score,mcq_max,ai_score,ai_max,ai_status,final_pct,pass_fail')
+      .eq('test_id',testId).eq('is_preview',!!showPreviews).order('submitted_at',{ascending:false,nullsFirst:false});
+    if(error)throw new Error(error.message);
+
+    /* A RESULT IS SOMEBODY WHO PRESSED START. NOTHING ELSE.
+
+       Sending a test creates an attempt row straight away - that is what mints the link and what
+       moves the candidate to 'Tests Sent'. But an attempt that exists is not a person who sat
+       anything: it is an invitation, and until they open the page and press Start no question has
+       been seen and no answer exists. Listing those here filled Results with names scoring zero out
+       of zero, which reads exactly like somebody who sat the paper and failed it - worse than
+       showing nothing, because it is a wrong answer to "how did they do".
+
+       started_at is stamped by the server when Start is pressed, so it is the honest dividing line:
+       opened the email, opened the page, wandered off - no row here. Pressed Start - a row, even if
+       they never submitted, because by then they have seen the paper and the clock has run. Those
+       show as 'still open' rather than as a score.
+
+       The ones still waiting are counted on the line above the table rather than dropped silently,
+       so "sent to 5, two have sat it" is visible instead of looking like three sends went missing. */
+    const all=data||[];
+    const waiting=all.filter(function(r){return !r.started_at;}).length;
+    data=all.filter(function(r){return !!r.started_at;});
+
+    if(!data.length){
+      rb.innerHTML='<div class="empty" style="padding:36px;color:var(--slate)">'
+        +'<i class="fa-solid fa-inbox" style="font-size:28px;opacity:.3;display:block;margin-bottom:10px"></i>'
+        +(showPreviews
+          ? 'You have not previewed this test yet. Press Preview on its row to sit it \u2014 the marking will show up here.'
+          : (waiting
+             ? '<b>'+waiting+' candidate'+(waiting===1?' has':'s have')+' been sent this test, but nobody has started it yet.</b>'
+               +'<div style="margin-top:6px;font-size:12.5px">A result appears the moment somebody opens their link and presses Start.</div>'
+             : 'No candidate has taken this test yet.'))
+        +'</div>';
+      return;
+    }
+    window._rtResultsCache=data;
+    const fmt=ts=>{if(!ts)return '—';try{return new Date(ts).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch{return ts;}};
+    /* HOW LONG IT TOOK, from the two timestamps the server already stamps - started_at when Start
+       is pressed and submitted_at when it is handed in. Both are written by the server from its
+       own clock, so neither can be dressed up from the candidate's machine. An attempt that was
+       started and never submitted shows as still open rather than as a time, because it has not
+       finished and any figure would be a guess. */
+    const took=r=>{
+      if(!r.started_at) return '—';
+      if(!r.submitted_at) return '<span style="color:var(--slate)">still open</span>';
+      const ms=new Date(r.submitted_at)-new Date(r.started_at);
+      if(!isFinite(ms)||ms<0) return '—';
+      const m=Math.floor(ms/60000), sec=Math.round((ms%60000)/1000);
+      return m?(m+' min '+sec+' s'):(sec+' s');
+    };
+    const scoreTag=r=>{
+      if(r.status!=='submitted')return '<span style="color:var(--slate)">In progress</span>';
+      if(r.final_pct==null)return '<span style="color:#c08000">Grading '+(r.ai_status==='failed'?'failed — click to retry':'pending')+'</span>';
+      const col=r.pass_fail?'#16855a':'#c83232';
+      return `<b style="color:${col}">${r.final_pct}%</b> <span style="font-size:11px;color:var(--slate)">(${(Number(r.mcq_score||0)+Number(r.ai_score||0))} / ${(Number(r.mcq_max||0)+Number(r.ai_max||0))})</span> — <span style="color:${col};font-weight:600">${r.pass_fail?'Pass':'Fail'}</span>`;
+    };
+    rb.innerHTML=`
+      <div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} ${showPreviews?('preview'+(data.length!==1?'s':'')+' · not counted anywhere'):('response'+(data.length!==1?'s':''))}${(!showPreviews&&waiting)?` · ${waiting} sent but not started yet`:''} · click a row to see answers</div>
+      <div style="overflow-x:auto">
+      <table class="tbl" style="min-width:500px">
+        <thead><tr>
+          <th style="width:36px;text-align:center">#</th>
+          <th>Respondent</th>
+          <th style="white-space:nowrap">Score</th>
+          <th style="white-space:nowrap">Started</th>
+          <th style="white-space:nowrap">Submitted</th>
+          <th style="white-space:nowrap">Time taken</th>
+        </tr></thead>
+        <tbody>${data.map((r,i)=>`<tr style="cursor:pointer" onclick="rtResultsAttemptDetail('${r.id}')">
+          <td style="text-align:center;color:var(--slate);font-size:12px">${i+1}</td>
+          <td style="font-weight:500">${esc(r.candidate_email||'—')}</td>
+          <td style="white-space:nowrap">${scoreTag(r)}</td>
+          <td style="font-size:12px;color:var(--slate);white-space:nowrap">${fmt(r.started_at)}</td>
+          <td style="font-size:12px;color:var(--slate);white-space:nowrap">${fmt(r.submitted_at)}</td>
+          <td style="font-size:12px;white-space:nowrap">${took(r)}</td>
+        </tr>`).join('')}
+        </tbody>
+      </table></div>`;
+  }catch(e){
+    rb.innerHTML=`<div class="empty" style="padding:30px;color:var(--err)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;
+  }
+};
+window.rtResultsAttemptDetail=async function(attemptId){
+  const rb=$('rtResultsBody');if(!rb)return;
+  rb.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  try{
+    // The cached row from the results list doesn't carry test_id, so the full attempt is re-fetched here.
+    const{data:full}=await sb.schema('recruit').from('test_attempts').select('*').eq('id',attemptId).single();
+    const{data:qs}=await sb.schema('recruit').from('test_questions').select('*').eq('test_id',full.test_id).order('seq',{ascending:true});
+    const{data:answers}=await sb.schema('recruit').from('test_answers').select('*').eq('attempt_id',attemptId);
+    const byQ={}; (answers||[]).forEach(a=>byQ[a.question_id]=a);
+    rb.innerHTML=`<button class="btn btn-sm" onclick="rtResultsNative(${full.test_id},${!!full.is_preview})" style="margin-bottom:12px"><i class="fa-solid fa-arrow-left"></i> Back to ${full.is_preview?'Previews':'Results'}</button>
+      <div style="font-size:13px;color:var(--slate);margin-bottom:14px">${esc(full.candidate_email||'—')} · ${full.final_pct!=null?full.final_pct+'% — '+(full.pass_fail?'Pass':'Fail'):'Not yet graded'}
+        ${(full.mcq_max==null||Number(full.ai_max||0)>0)?`<button class="btn btn-sm" style="margin-left:8px"
+            title="${full.ai_status==='failed'?'Grading did not finish — run it again':'Mark the written answers again'}"
+            onclick="rtRegradeAttempt('${attemptId}')"><i class="fa-solid fa-rotate"></i> ${full.ai_status==='failed'?'Retry grading':'Re-grade'}</button>`:''}
+      </div>
+      ${(qs||[]).map((q,i)=>{
+        const a=byQ[q.id]||{};
+        const given=a.answer_text||'';
+        const isMcq=q.type==='mcq';
+        const marksTag=`<span class="tag ${a.marks_earned>=q.max_marks?'t-green':(a.marks_earned>0?'t-amber':'t-gray')}" style="font-size:12px;font-weight:700;flex:none">${a.marks_earned!=null?a.marks_earned:0} / ${q.max_marks} marks</span>`;
+        return `<div class="card" style="padding:12px;margin-bottom:8px;background:var(--bg2)">
+          <div style="display:flex;align-items:flex-start;gap:10px;justify-content:space-between">
+            <div style="font-weight:500;flex:1">${i+1}. ${esc(q.prompt)}</div>
+            ${marksTag}
+          </div>
+          ${isMcq
+            ?`<div style="margin-top:8px">${(q.options||[]).map(o=>{
+                const chosen=o===given, correct=o===q.correct_option;
+                const style=correct?'color:var(--ok);font-weight:600':(chosen?'color:var(--err);font-weight:600':'color:var(--ink)');
+                const tag=correct?' <span style="font-size:10.5px;color:var(--ok)">(correct answer)</span>':(chosen?' <span style="font-size:10.5px;color:var(--err)">(their answer)</span>':'');
+                return `<div style="font-size:12.5px;padding:3px 0;${style}">${chosen||correct?(chosen?'●':'○'):'○'} ${esc(o)}${tag}</div>`;
+              }).join('')}${!given?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">(no answer given)</div>':''}</div>`
+            :`<div style="font-size:12.5px;margin-top:8px;white-space:pre-wrap;color:var(--ink)">${esc(given||'(no answer given)')}</div>
+              ${a.ai_feedback?`<div style="font-size:11.5px;color:var(--slate);margin-top:6px;font-style:italic">AI feedback: ${esc(a.ai_feedback)}</div>`:''}`}
+        </div>`;
+      }).join('')}`;
+  }catch(e){
+    rb.innerHTML=`<div class="empty" style="padding:30px;color:var(--err)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;
+  }
+};
+window.rtRegradeAttempt=async function(attemptId){
+  toast('Regrading…');
+  try{
+    const{data,error}=await sb.functions.invoke('recruit-test-regrade',{body:{attempt_id:attemptId}});
+    if(error||data?.error)throw new Error((data&&data.error)||error.message);
+    toast('Regraded: '+data.final_pct+'% — '+(data.pass_fail?'Pass':'Fail'));
+    rtResultsAttemptDetail(attemptId);
+  }catch(e){toast('Regrade failed: '+((e&&e.message)||e),'err');}
 };
 window.rtPreview=async function(id){
   const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
@@ -11091,9 +13793,91 @@ function mpFmtDate(s){
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return day+' '+months[parseInt(mo)-1]+' '+y;
 }
+/* THE DATE OF REQUEST IS TODAY, AND IT STAYS TODAY.
+   It used to be an ordinary date box, which meant a requisition could be back-dated - and one
+   back-dated by a week is a requisition that looks overdue for approval the moment it arrives,
+   or one quietly aged to jump the queue. The date a request was raised is a fact about when it
+   was raised, not a preference, so the form fills it in and greys it out. An existing
+   requisition keeps the date it was actually raised on; it just can't be edited either. */
+function mpTodayInput(){
+  const d=new Date(), p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
+}
+
+/* THE JOB TITLE FILLS IN THE DEPARTMENT AND THE QUALIFICATION.
+   Plain keyword matching, deliberately - no AI. Nothing here should depend on a model being
+   reachable, costing money, or answering differently on a Tuesday; somebody typing "Site
+   Engineer" wants the Department box to say Operations before their finger leaves the key.
+   Both are only ever SUGGESTIONS: the moment anyone touches either box by hand it is theirs,
+   and the title can then change as much as it likes without overwriting the choice.
+
+   ORDER MATTERS in this list, because the first match wins and the titles overlap. "Pre Sales
+   Executive" contains the word "sales", so Pre Sales has to be asked before Sales. "Site
+   Engineer" contains "engineer", so Operations has to be asked before IT. Anything genuinely
+   unrecognised leaves the boxes alone rather than guessing - a wrong department that looks
+   deliberate is worse than an empty one. */
+const MP_TITLE_DEPT=[
+  ['Pre Sales',            ['pre sales','pre-sales','presales','telecaller','tele caller','tele-caller','inside sales','call centre','call center','lead qualification']],
+  ['Channel Partner',      ['channel partner','channel sales','broker','cp manager']],
+  ['HR',                   ['hr ','hr-','human resource','recruit','talent acquisition','payroll']],
+  ['Legal',                ['legal','lawyer','advocate','litigation','compliance','company secretary']],
+  ['Finance',              ['finance','financial','treasury','chartered accountant','taxation','gst','audit','cfo']],
+  ['Accounts',             ['account','bookkeep','book keeping','billing','tally','invoice']],
+  ['Procurement',          ['procure','purchase','vendor','supply chain','store keeper','storekeeper','inventory','material']],
+  ['Facility & Maintenance',['facility','maintenance','housekeep','electrician','plumber','carpenter','security guard','gardener','caretaker','lift operator']],
+  ['Operations',           ['site engineer','civil engineer','structural','project manager','project engineer','planning engineer','quantity surveyor','execution','site supervisor','architect','safety officer','qa/qc','quality control','operations']],
+  ['Marketing',            ['marketing','digital','seo','social media','brand','content writer','copywriter','graphic','designer','creative','advertis','campaign','video editor','photographer','media buyer']],
+  ['IT',                   ['software','developer','programmer','it executive','it manager','it support','system admin','network','database','devops','data analyst','tech support','hardware']],
+  ['Sales',                ['sales','business development','relationship manager','closing manager']],
+  ['Admin',                ['admin','receptionist','front desk','front office','office assistant','peon','driver','clerk','secretary','personal assistant']],
+];
+/* Qualification is a looser suggestion again - the usual entry requirement for that kind of
+   role here, not a rule. Left blank when nothing obvious fits. */
+const MP_TITLE_QUAL=[
+  [['site engineer','civil engineer','structural','planning engineer','project engineer','quantity surveyor','execution'], 'B.E. / B.Tech (Civil)'],
+  [['architect'],                                          'B.Arch'],
+  [['software','developer','programmer','devops','database','network','data analyst','it executive','it manager','it support','tech support'], 'B.Tech / BCA / MCA'],
+  [['chartered accountant',' ca ','taxation','gst','audit'],'CA / CA Inter'],
+  [['account','finance','bookkeep','billing','tally'],      'B.Com (Hons) / M.Com'],
+  [['hr ','human resource','recruit','talent acquisition','payroll'], 'MBA (HR) / MSW'],
+  [['legal','lawyer','advocate','litigation'],              'LL.B'],
+  [['company secretary'],                                   'CS'],
+  [['marketing','digital','seo','social media','brand','campaign','media buyer'], 'MBA (Marketing) / Graduate'],
+  [['graphic','designer','creative','video editor','photographer','content writer','copywriter'], 'Graduate / Diploma in Design'],
+  [['electrician','plumber','carpenter','technician','lift operator'], 'ITI / Diploma'],
+  [['driver'],                                              'Valid commercial driving licence'],
+  [['security guard','housekeep','peon','gardener','caretaker'], 'Class VIII pass or above'],
+  [['sales','business development','relationship manager','telecaller','tele caller','presales','pre sales','channel partner'], 'Graduate'],
+  [['receptionist','front desk','front office','office assistant','admin','clerk','secretary'], 'Graduate'],
+  [['purchase','procure','store keeper','storekeeper','inventory','project manager','safety officer'], 'Graduate / Diploma'],
+];
+function mpDeptFromTitle(title){
+  const t=' '+String(title||'').toLowerCase().trim()+' ';
+  if(t.trim().length<3) return '';
+  for(const [dept,words] of MP_TITLE_DEPT){ if(words.some(w=>t.includes(w))) return dept; }
+  return '';
+}
+function mpQualFromTitle(title){
+  const t=' '+String(title||'').toLowerCase().trim()+' ';
+  if(t.trim().length<3) return '';
+  for(const [words,qual] of MP_TITLE_QUAL){ if(words.some(w=>t.includes(w))) return qual; }
+  return '';
+}
+// Anything typed or chosen by hand is the person's own - never overwritten by a later title edit.
+window.mpMarkTouched=function(el){ if(el) el._mpTouched=true; };
+window.mpTitleSuggest=function(){
+  const title=($('mpFTitle')||{}).value||'';
+  const sel=$('mpFDeptSel');
+  if(sel&&!sel._mpTouched){
+    const dept=mpDeptFromTitle(title);
+    if(dept&&MP_DEPTS.includes(dept)){ sel.value=dept; mpSelChange('mpFDept'); }
+  }
+  const qual=$('mpFQual');
+  if(qual&&!qual._mpTouched){ qual.value=mpQualFromTitle(title); }
+};
 function mpSelOpt(id,opts,val){
   const known=opts.includes(val);
-  let h=`<select id="${id}Sel" class="sel" onchange="mpSelChange('${id}')">`;
+  let h=`<select id="${id}Sel" class="sel" onchange="mpMarkTouched(this);mpSelChange('${id}')">`;
   h+=opts.map(o=>`<option${o===val?' selected':''}>${esc(o)}</option>`).join('');
   h+=`<option value="__other"${!known&&val?' selected':''}>Other (type below)</option></select>`;
   h+=`<input id="${id}Custom" class="inp" style="margin-top:6px;display:${known||!val?'none':'block'}" value="${esc(!known?val:'')}">`;
@@ -11110,7 +13894,7 @@ async function recManpower(){
   const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
   const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">ManPower Requisitions <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
+    <div class="sec-title" style="margin:0">Hiring Requests <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap" id="mpToolbar">
       <button class="btn btn-primary" onclick="mpFillForm()"><i class="fa-solid fa-pen-to-square"></i> Fill Form</button>
       <button class="btn" id="mpEditBtn" disabled style="${dis}" onclick="mpEditSel()"><i class="fa-solid fa-pen"></i> Edit</button>
@@ -11135,7 +13919,7 @@ async function recManpower(){
       <td style="font-size:12px">${esc(r.salary_range||'—')}</td>
       <td>${esc(r.location||'—')}</td>
       <td>${priTag(r.priority)}</td>
-    </tr>`).join(''):'<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--slate)">No requisitions yet — click <b>Fill Form</b> to add one</td></tr>'}
+    </tr>`).join(''):'<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--slate)">No hiring requests yet — click <b>Fill Form</b> to add one</td></tr>'}
     </tbody>
   </table>
   </div>
@@ -11158,11 +13942,11 @@ window.mpEditSel=function(){if(!recGuard())return;
 window.mpDeleteSel=async function(){if(!recGuard())return;
   const sel=[...document.querySelectorAll('.mp-chk:checked')].map(c=>parseInt(c.value));
   if(!sel.length)return;
-  if(!await confirmDialog('Delete '+sel.length+' requisition(s)? This cannot be undone.'))return;
+  if(!await confirmDialog('Delete '+sel.length+' hiring request'+(sel.length===1?'':'s')+'? This cannot be undone.'))return;
   const {error}=await sb.schema('hr').from('manpower_requests').delete().in('id',sel);
   if(error){toast(error.message,'err');return;}
   if(MP_RECORDS)MP_RECORDS=MP_RECORDS.filter(r=>!sel.includes(r.id));
-  toast(sel.length+' deleted');recManpower();
+  toast(sel.length+' deleted');mpRefreshList();
 };
 window.mpShowDetail=function(id,e){
   if(e&&e.target&&e.target.type==='checkbox')return;
@@ -11217,42 +14001,124 @@ function mpGetField(id,opts){
 }
 function mpModal(title,vals,saveBtn){
   const locs=['HO','Site/Project Name','Durgapur','Siliguri'];
-  const selLocs=vals&&vals.location?vals.location.split(',').map(s=>s.trim()):[];
-  const locChk=locs.map(l=>`<label style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;margin-bottom:4px"><input type="checkbox" class="mp-loc" value="${l}"${selLocs.includes(l)?' checked':''}> ${l}</label>`).join('');
-  const dateVal=mpToDateInput(vals&&vals.date_of_request||'');
+  /* HO on a new form, because most requests are for head office and an empty set of locations is
+     never what anybody meant. An EXISTING request keeps exactly what it was saved with - including
+     none - so editing one cannot quietly add a location nobody chose. */
+  const selLocs=vals ? (vals.location?vals.location.split(',').map(s=>s.trim()):[]) : ['HO'];
+  const locChk=locs.map(l=>`<label class="mpf-chip"><input type="checkbox" class="mp-loc" value="${l}"${selLocs.includes(l)?' checked':''}> ${l}</label>`).join('');
+  // A new form opens on today; an existing one shows the day it was actually raised. Neither
+  // can be typed over - see mpTodayInput above.
+  const dateVal=mpToDateInput(vals&&vals.date_of_request||'')||mpTodayInput();
+  /* THE FORM, REBUILT AROUND WHAT IS BEING ASKED RATHER THAN WHAT THE TABLE HOLDS.
+
+     It used to be eleven fields in a flat stack, every one the same weight, with two of them
+     explaining themselves in grey text underneath. Three things went:
+
+       Date of Request  - it is always today and could never be edited. A disabled box that always
+                          says the same thing is furniture, not a field. It is still recorded.
+       Job Description  - a description is WRITTEN from this request, by AI, and then reviewed.
+       / KPI              Asking for one here meant typing something that would be replaced.
+       The suggestions  - Department and Qualification guessed from the job title. A guess that is
+                          right most of the time is worse than no guess, because the times it is
+                          wrong are the times nobody looks.
+
+     What is left is grouped: the role, then the person, then the terms. Defaults are set where
+     there is an obvious one - Location HO, Not Urgent - so the common request is mostly filled in
+     before anybody types. */
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-file-pen"></i> ${title}</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm" style="max-height:72vh;overflow-y:auto">
-    <div class="two">
+  <style>
+    /* THREE GROUPS, AND YOU CAN SEE THAT THERE ARE THREE.
+
+       The fields were already in sections, but the only thing separating them was a hairline and
+       18px - less than the gap between two fields inside a section. So everything sat at the same
+       distance from everything else and the form read as one long column of thirteen boxes.
+       Things that belong together are now closer to each other than to anything else, which is
+       what makes a group a group: each section is its own panel, with real space between panels
+       and a quieter heading, because the panel already says where the boundary is. */
+    .mpf-sec{background:#fff;border:1px solid var(--line);border-radius:12px;
+      padding:16px 18px 18px;margin:0 0 16px}
+    .mpf-sec:last-of-type{margin-bottom:4px}
+    .mpf-sec-t{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;
+      letter-spacing:.8px;text-transform:uppercase;color:var(--slate);margin:0 0 14px}
+    .mpf-sec-t::after{content:"";flex:1;height:1px;background:var(--line)}
+    .mpf-sec-t i{color:var(--brand);font-size:12px}
+    /* 22px between rows, 20px between the two columns - a field is nearer its own label than the
+       next field is, which is the whole point. */
+    .frm .mpf-row{display:grid;grid-template-columns:1fr 1fr;gap:18px 20px;margin-bottom:18px}
+    .frm .mpf-row:last-child{margin-bottom:0}
+    .frm .mpf-row.one{grid-template-columns:1fr}
+    .frm .mpf-row label{display:block;margin:0 0 6px;font-size:12px;font-weight:600;
+      color:var(--slate);letter-spacing:.2px}
+    .frm .mpf-row .inp,.frm .mpf-row .sel,.frm .mpf-row select{margin:0}
+    .mpf-hint{font-size:11.5px;color:var(--slate);margin-top:7px;line-height:1.45}
+    .mpf-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+    .mpf-chip{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border:1px solid var(--line);
+      border-radius:999px;cursor:pointer;font-size:13px;background:#fff;margin:0;transition:.12s}
+    .mpf-chip:hover{background:#f8fafc;border-color:#94a3b8}
+    .mpf-chip:has(input:checked){background:#eff6ff;border-color:var(--brand);color:#1e40af;font-weight:600}
+    .frm .mpf-chip input{width:auto;margin:0;padding:0;border:0;box-shadow:none;background:none}
+    @media(max-width:620px){
+      .frm .mpf-row{grid-template-columns:1fr;gap:16px}
+      .mpf-sec{padding:14px 14px 16px}
+    }
+  </style>
+  <div class="modal-body frm" style="max-height:74vh;overflow-y:auto;background:var(--bg);padding-top:16px">
+    <div class="mpf-sec">
+    <div class="mpf-sec-t"><i class="fa-solid fa-briefcase"></i>The role</div>
+    <div class="mpf-row">
       <div><label>Job Title *</label><input id="mpFTitle" class="inp" value="${esc(vals&&vals.job_title||'')}" placeholder="e.g. Sales Executive"></div>
-      <div><label>Date of Request *</label><input id="mpFDate" type="date" class="inp" value="${dateVal}"></div>
-    </div>
-    <div class="two">
       <div><label>Department *</label>${mpSelOpt('mpFDept',MP_DEPTS,vals&&vals.department||'')}</div>
-      <div><label>No. of Vacancy *</label><input id="mpFVac" class="inp" value="${esc(vals&&vals.no_of_vacancy||'')}" placeholder="e.g. 2"></div>
     </div>
-    <div class="two">
+    <div class="mpf-row">
+      <div><label>Number of People *</label><input id="mpFVac" class="inp" value="${esc(vals&&vals.no_of_vacancy||'')}" placeholder="e.g. 2"></div>
       <div><label>Reporting Person / HOD *</label><input id="mpFHOD" class="inp" value="${esc(vals&&vals.reporting_person||'')}" placeholder="Name"></div>
+    </div>
+    <div class="mpf-row one">
+      <div><label>Location</label><div class="mpf-chips">${locChk}</div></div>
+    </div>
+    </div>
+
+    <div class="mpf-sec">
+    <div class="mpf-sec-t"><i class="fa-solid fa-user-check"></i>The person</div>
+    <div class="mpf-row">
+      <div><label>Experience</label>${mpSelOpt('mpFExp',MP_EXP,vals&&vals.experience||'')}</div>
       <div><label>Required Qualification</label><input id="mpFQual" class="inp" value="${esc(vals&&vals.qualification||'')}" placeholder="e.g. Graduate, B.Tech"></div>
     </div>
-    <div class="two">
-      <div><label>Experience</label>${mpSelOpt('mpFExp',MP_EXP,vals&&vals.experience||'')}</div>
-      <div><label>Gender</label><select id="mpFGender" class="sel"><option value="">— Select —</option>${MP_GEND.map(g=>`<option${g===(vals&&vals.gender||'')?'  selected':''}>${g}</option>`).join('')}<option value="Other"${!MP_GEND.includes(vals&&vals.gender||'')?'  selected':''}>Other</option></select></div>
+    <div class="mpf-row one">
+      <div><label>Gender</label>
+        <div class="mpf-chips">
+          ${['Any','Male','Female'].map(g=>`<label class="mpf-chip"><input type="radio" name="mpGender" value="${g}"${(vals&&vals.gender||'Any')===g?' checked':''}> ${g}</label>`).join('')}
+        </div>
+      </div>
     </div>
-    <div><label>Salary Range</label>${mpSelOpt('mpFSalary',MP_SAL,vals&&vals.salary_range||'')}</div>
-    <div><label>Location</label><div style="display:flex;flex-wrap:wrap;margin-top:6px">${locChk}</div></div>
-    <div><label>Job Description / KPI</label><textarea id="mpFJD" class="inp" rows="4" placeholder="Key responsibilities and requirements...">${esc(vals&&vals.job_description||'')}</textarea></div>
-    <div><label>Priority</label><div style="display:flex;gap:20px;margin-top:6px">
-      <label style="display:inline-flex;align-items:center;gap:5px"><input type="radio" name="mpPri" value="Urgent"${vals&&vals.priority==='Urgent'?' checked':''}> <span style="color:#c83232;font-weight:600">Urgent</span></label>
-      <label style="display:inline-flex;align-items:center;gap:5px"><input type="radio" name="mpPri" value="Not Urgent"${vals&&vals.priority==='Not Urgent'?' checked':!vals?' checked':''}> Not Urgent</label>
-    </div><div style="font-size:11.5px;color:var(--slate);margin-top:4px">Kindly use Urgent only in rare cases (sudden absence/resignation). Non Urgent is default.</div></div>
-    <div><label>Notes / Reason</label><textarea id="mpFNotes" class="inp" rows="2" placeholder="Any additional context...">${esc(vals&&vals.notes||'')}</textarea></div>
+    </div>
+
+    <div class="mpf-sec">
+    <div class="mpf-sec-t"><i class="fa-solid fa-file-signature"></i>The terms</div>
+    <div class="mpf-row">
+      <div><label>Salary Range</label>${mpSelOpt('mpFSalary',MP_SAL,vals&&vals.salary_range||'')}</div>
+      <div><label>Priority</label>
+        <div class="mpf-chips">
+          <label class="mpf-chip"><input type="radio" name="mpPri" value="Not Urgent"${(vals&&vals.priority)==='Urgent'?'':' checked'}> Not Urgent</label>
+          <label class="mpf-chip"><input type="radio" name="mpPri" value="Urgent"${(vals&&vals.priority)==='Urgent'?' checked':''}> <span style="color:#c83232;font-weight:600">Urgent</span></label>
+        </div>
+        <div class="mpf-hint">Urgent is for a sudden absence or resignation.</div>
+      </div>
+    </div>
+    <div class="mpf-row one">
+      <div><label>Notes / Reason</label><textarea id="mpFNotes" class="inp" rows="3" placeholder="Anything the approver should know">${esc(vals&&vals.notes||'')}</textarea></div>
+    </div>
+    </div>
+    <input type="hidden" id="mpFDate" value="${dateVal}">
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>${saveBtn}</div>`);
 }
 function mpCollect(){
   const locs=[...document.querySelectorAll('.mp-loc:checked')].map(el=>el.value).join(', ');
   const pri=(document.querySelector('input[name="mpPri"]:checked')||{}).value||'Not Urgent';
-  const rawDate=$('mpFDate')&&$('mpFDate').value?$('mpFDate').value:'';
+  // Disabled inputs still hand their value to JavaScript, so this reads the locked box; the
+  // fallback only matters if the field ever goes missing, and today is the right answer then.
+  const rawDate=$('mpFDate')&&$('mpFDate').value?$('mpFDate').value:mpTodayInput();
   let fmtDate=rawDate;
   if(rawDate&&/^\d{4}-\d{2}-\d{2}$/.test(rawDate)){const[y,mo,d]=rawDate.split('-');fmtDate=d+'/'+mo+'/'+y;}
   return {
@@ -11263,27 +14129,36 @@ function mpCollect(){
     reporting_person:($('mpFHOD').value||'').trim(),
     qualification:($('mpFQual').value||'').trim(),
     experience:mpGetField('mpFExp',MP_EXP),
-    gender:$('mpFGender')&&$('mpFGender').value&&$('mpFGender').value!=='— Select —'?$('mpFGender').value:'',
+    gender:(document.querySelector('input[name="mpGender"]:checked')||{}).value||'Any',
     salary_range:mpGetField('mpFSalary',MP_SAL),
     location:locs,
-    job_description:($('mpFJD').value||'').trim(),
     priority:pri,
     notes:($('mpFNotes').value||'').trim(),
     submitted_at:new Date().toISOString()
   };
 }
-window.mpFillForm=function(){if(!recGuard())return;mpModal('ManPower Requisition Form',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="mpSave()"><i class="fa-solid fa-check"></i> Submit</button>');};
+window.mpFillForm=function(){if(!recGuard())return;mpModal('Hiring Request',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="mpSave()"><i class="fa-solid fa-check"></i> Submit</button>');};
 window.mpSave=async function(){
   const d=mpCollect();
   if(!d.job_title){toast('Job Title is required','err');return;}
   const btn=$('mpSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {data,error}=await sb.schema('hr').from('manpower_requests').insert(d).select().single();
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit';}return;}
-  MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();toast('Requisition submitted');recManpower();
+  MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();toast('Hiring request submitted');mpRefreshList();
 };
+/* REDRAW WHICHEVER LIST IS ACTUALLY ON SCREEN.
+
+   Both layouts render into #recBody: the Hiring Request tab through tpMpRender, and the retired
+   recruitment page through recManpower. Saving an edit called recManpower unconditionally, so the
+   new tab was redrawn with the OLD toolbar - same data, different screen, and only ever after an
+   edit, which is why it looked like the page had changed its mind. */
+function mpRefreshList(){
+  if(PAGE==='recruitment_new'&&typeof tpManpower==='function'){ tpManpower(); return; }
+  recManpower();
+}
 window.mpEdit=function(id){if(!recGuard())return;
   const rec=(MP_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
-  mpModal('Edit Requisition',rec,`<button class="btn btn-primary" id="mpSaveBtn" onclick="mpUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button>`);
+  mpModal('Edit Hiring Request',rec,`<button class="btn btn-primary" id="mpSaveBtn" onclick="mpUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button>`);
 };
 window.mpUpdate=async function(id){
   const d=mpCollect();delete d.submitted_at;
@@ -11294,14 +14169,14 @@ window.mpUpdate=async function(id){
   if(prevRec&&prevRec.priority!==d.priority){ try{usageQueue('recruitment.manpower_form.mark_requisition_priority','update',{title:d.job_title,priority:d.priority});}catch(_e){} }
   const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id);
   if(idx>-1&&MP_RECORDS)MP_RECORDS[idx]=data;
-  closeModal();toast('Updated');recManpower();
+  closeModal();toast('Updated');mpRefreshList();
 };
 window.mpDeleteOne=async function(id){if(!recGuard())return;
-  if(!await confirmDialog('Delete this requisition?'))return;
+  if(!await confirmDialog('Delete this hiring request?'))return;
   const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
   if(error){toast(error.message,'err');return;}
   if(MP_RECORDS)MP_RECORDS=MP_RECORDS.filter(r=>r.id!==id);
-  toast('Deleted');recManpower();
+  toast('Deleted');mpRefreshList();
 };
 window.mpDelete=window.mpDeleteOne;
 window.mpReload=function(){MP_RECORDS=null;if(PAGE==='recruitment')renderPage();};
@@ -11372,7 +14247,7 @@ function mpCopyFallback(txt,done){
 window.mpAiGenerate=async function(id,isRewrite){
   if(!recGuard()) return;
   if(isRewrite && !await confirmDialog(
-      'Rewrite the Job Description, post text and creative for this requisition? The current ones are replaced.',
+      'Rewrite the Job Description, post text and creative for this hiring request? The current ones are replaced.',
       {title:'Rewrite', okLabel:'Rewrite', icon:'fa-rotate', danger:false})) return;
   const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
   if(rec){ rec.ai_status='generating'; mpShowDetail(id); }
@@ -11701,10 +14576,16 @@ window.refDecide=async function(id,ok){
 window.refDelete=async function(id){
   if(!hrCan()){ toast('Only HR can delete a referral','err'); return; }
   const r=(REF_RECORDS||[]).find(function(x){return x.id===id;})||{};
-  if(!await confirmDialog('Delete the referral for “'+(r.referred_name||'this person')+'”? This cannot be undone.')) return;
-  const {error}=await sb.schema('hr').from('referrals').delete().eq('id',id);
+  if(!await confirmDialog(
+      'Delete the referral for “'+(r.referred_name||'this person')+'”? The candidate it '
+      +'created is deleted as well, along with their CV. This cannot be undone.',
+      {title:'Delete referral', okLabel:'Delete', icon:'fa-trash', danger:true})) return;
+  /* Through the same function the other screen uses. This one used to delete the row straight
+     out of the table, which left the candidate behind and skipped the rule entirely. */
+  const {data,error}=await sb.schema('hr').rpc('referral_withdraw',{p_id:id});
   if(error){ toast(error.message,'err'); return; }
-  toast('Referral deleted','ok');
+  await hrRemoveFiles(data);
+  toast('Referral deleted \u2014 the candidate was removed too','ok');
   REF_RECORDS=null; recReferrals();
 };
 
@@ -11713,30 +14594,568 @@ window.refReload=function(){ REF_RECORDS=null; REF_POSITIONS=null; if(PAGE==='re
 async function recLoadJDs(v){
   REC_SEL=new Set();
   let uploaded=[];
-  try{const {data,error}=await sb.schema('recruit').from('job_descriptions').select('*').order('created_at',{ascending:true});if(!error)uploaded=data||[];}catch(e){}
+  // Newest first. Ordered the other way, a description written a minute ago arrived at the BOTTOM
+  // of a grid of a dozen, which reads exactly like it was never created.
+  try{const {data,error}=await sb.schema('recruit').from('job_descriptions').select('*').order('created_at',{ascending:false});if(!error)uploaded=data||[];}catch(e){}
+
+  /* A DESCRIPTION IS JUDGED ON ITS OWN APPROVAL, NOT ITS REQUEST'S.
+
+     This used to show an AI-written description only when the hiring request behind it was
+     Approved, which broke in two ways at once:
+
+       - a request deleted later leaves its description with no request at all (the foreign key
+         clears the link deliberately, so the document survives) - and a description that can never
+         match an approved request id was hidden for good, with no way back;
+       - a request approved, then reopened, hid a description that had already been reviewed and
+         published.
+
+     Job descriptions carry their own approval_status now, set when the approval task is approved,
+     so that is what decides it. The request's status is still honoured as a fallback for rows
+     approved before that column existed. Manually uploaded reference JDs were never part of any
+     approval workflow and are shown unconditionally, same as always. */
+  const genReqIds=[...new Set(uploaded.filter(j=>j.source==='ai_generated'&&j.manpower_request_id!=null).map(j=>j.manpower_request_id))];
+  let approvedSet=new Set();
+  if(genReqIds.length){
+    try{
+      const {data:reqs}=await sb.schema('hr').from('manpower_requests').select('id,approval_status').in('id',genReqIds);
+      approvedSet=new Set((reqs||[]).filter(r=>r.approval_status==='Approved').map(r=>r.id));
+    }catch(e){}
+  }
+  uploaded=uploaded.filter(jd=>jd.source!=='ai_generated'
+    || jd.approval_status==='Approved'
+    || approvedSet.has(jd.manpower_request_id));
   const uploadedCards=uploaded.map(jd=>({...jd,isDefault:false}));
   const allJDs=[...DEFAULT_JDS,...uploadedCards];
   window._recAllJDs=allJDs;
   const n=REC_SEL.size;
   const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
   $('recBody').innerHTML=`
+    <!-- THREE BUTTONS DID TWO JOBS, AND ONE OF THEM DID NOTHING NEW.
+         Download sat here AND on every card, so downloading one description meant ticking it,
+         coming back up here, and clicking - three actions to do what the card already did in one.
+         The toolbar's Download is gone. Delete stays, because deleting several at once is the only
+         thing the tick-boxes are genuinely for, and it now only appears once something is ticked
+         rather than sitting greyed out asking to be understood. -->
     <div id="recBar" style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-      <button class="btn btn-primary" onclick="recUploadModal()"><i class="fa-solid fa-upload"></i> Upload JD</button>
-      <button class="btn" ${n===0?'disabled':''} style="${n===0?dis:''}" onclick="recDownloadSel()"><i class="fa-solid fa-download"></i> Download</button>
-      <button class="btn" ${n===0?'disabled':''} style="${n===0?dis:'color:var(--err)'}" onclick="recDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>
-      ${n>0?`<span style="font-size:12px;color:var(--slate)">${n} selected</span>`:''}
+      <button class="btn btn-primary" onclick="recUploadModal()"><i class="fa-solid fa-upload"></i> Upload</button>
+      ${n>0?`<button class="btn" style="color:var(--err)" onclick="recDeleteSel()"><i class="fa-solid fa-trash"></i> Delete ${n}</button>
+      <button class="btn btn-ghost" onclick="recClearSel()">Clear</button>`:''}
     </div>
     <div class="grid lib-grid" id="recGrid">
       ${allJDs.map(jd=>recJDCard(jd)).join('')}
     </div>`;
 }
+/* A JOB DESCRIPTION OPENS IN ITS OWN TAB, AS SOMETHING YOU CAN CHANGE.
+
+   It used to open as a finished PDF, which is the right thing to send to a candidate and the wrong
+   thing to be handed when the text is AI-written and nearly always needs a line fixing. Reading it
+   and correcting it were two different journeys: open the PDF, notice the mistake, go back, find
+   Regenerate, hope the next draft was better.
+
+   So Open gives you the text, in a full tab, editable, with Save and Download on it. Save writes
+   back to the same record the PDF is built from, so the next PDF carries the correction.
+
+   THE TAB IS OPENED ON THE CLICK, BEFORE ANY await. A window.open that happens after an await has
+   lost the click that caused it and browsers block it as a pop-up - the same trap that made Preview
+   look broken. The editor is written into the blank tab immediately and filled in afterwards.
+
+   The child page is same-origin (about:blank inherits this origin), so it can call back into this
+   page directly rather than needing its own database connection. */
+/* ONE EDITOR, TWO WAYS IN.
+
+   The same tab is opened from the Descriptions tab and from a hiring request's own panel, so the
+   two cannot drift into behaving differently. What changes between them is only WHERE Save writes:
+   a library description saves to recruit.job_descriptions, a request's description saves to the
+   request itself. The caller passes that in.
+
+   THE TAB IS OPENED ON THE CLICK, BEFORE ANY await. A window.open after an await has lost the
+   click that caused it and browsers block it as a pop-up - the trap that made Preview look broken.
+
+   The child page is same-origin (about:blank inherits this origin), so it calls back into this
+   page directly rather than needing its own database connection. */
+window.jdOpenEditorTab=function(title,text,onSave){
+  const tab=window.open('','_blank');
+  if(!tab){ toast('Your browser blocked the new tab','err'); return; }
+  const escH=t=>String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  /* THE SAME GEOMETRY THE PDF IS BUILT WITH, IN PIXELS.
+
+     jdBuildPdfBytes lays out A4 at 595.28 x 841.89 points with a 56pt margin, 10.5pt text on a
+     15pt line, and a 15pt bold title. At 96dpi a point is 4/3 of a pixel, so those numbers are
+     converted once here and used for both the sheets on screen and the measuring column that
+     decides where each page ends.
+
+     The header height is DERIVED, not eyeballed: the PDF draws the logo 150pt wide, the file is
+     600x189, so it lands 47.25pt tall, then 10pt of gap, the rule, and a 24pt drop before text. */
+  const PT=4/3;
+  const PW=Math.round(595.28*PT), PH=Math.round(841.89*PT);   // 794 x 1123
+  const MG=Math.round(56*PT);                                  // 75
+  const FS=(10.5*PT).toFixed(2), LH=(15*PT).toFixed(2);        // 14 / 20
+  const TITLE_FS=(15*PT).toFixed(2), TITLE_LH=(21*PT).toFixed(2);
+  const LOGO_W=150, LOGO_H=LOGO_W*189/600;
+  const HEAD_H=Math.round((LOGO_H+10+24)*PT);
+  const FOOT_H=Math.round(24*PT);
+
+
+  tab.document.write('<!doctype html><meta charset="utf-8"><title>'+escH(title)+'</title>'
+  +'<style>'
+  +'*{box-sizing:border-box}'
+  +'body{margin:0;font:14px/1.5 Segoe UI,Arial,sans-serif;background:#535659;color:#0f172a;overflow:hidden}'
+  +'header{position:fixed;inset:0 0 auto 0;z-index:5;background:#323639;color:#e8eaed}'
+  +'.bar{display:flex;align-items:center;gap:10px;padding:0 14px;height:52px}'
+  +'.bar2{display:flex;align-items:center;gap:6px;padding:0 14px 8px;flex-wrap:wrap}'
+  +'header h1{font-size:14px;margin:0;font-weight:600;flex:1;min-width:90px;overflow:hidden;'
+   +'text-overflow:ellipsis;white-space:nowrap}'
+  +'.grp{display:flex;align-items:center;gap:2px;background:#3c4043;border-radius:8px;padding:3px}'
+  +'.ic{min-width:32px;height:30px;border:0;border-radius:6px;background:transparent;color:#e8eaed;'
+   +'font-size:15px;cursor:pointer;line-height:1;padding:0 7px}'
+  +'.ic:hover{background:#4a4e51}.ic:disabled{opacity:.35;cursor:not-allowed}'
+  +'.ic.on{background:#5f6368}'
+  +'#zlabel{min-width:52px;text-align:center;font-size:12.5px;color:#e8eaed;cursor:pointer;'
+   +'user-select:none;padding:0 4px}'
+  +'#pglabel{font-size:12.5px;color:#bdc1c6;min-width:64px;text-align:center}'
+  +'select.tb,input.tb{height:30px;border-radius:6px;border:1px solid #5f6368;background:#3c4043;'
+   +'color:#e8eaed;font:13px Segoe UI,Arial,sans-serif;padding:0 6px}'
+  +'input.tb[type=color]{width:34px;padding:2px;cursor:pointer}'
+  +'button.txt{font:600 13px Segoe UI,Arial,sans-serif;padding:8px 14px;border-radius:7px;'
+   +'border:1px solid #5f6368;background:#3c4043;color:#e8eaed;cursor:pointer}'
+  +'button.txt:hover{background:#4a4e51}'
+  +'button.primary{background:#e0121c;border-color:#e0121c;color:#fff}'
+  +'button.txt:disabled{opacity:.5;cursor:not-allowed}'
+  +'#msg{font-size:12.5px;color:#bdc1c6;min-width:10px}'
+  +'#view{position:fixed;inset:96px 0 0 0;overflow:auto;padding:24px 0 40px}'
+  +'#doc{transform-origin:top center;margin:0 auto;width:'+PW+'px}'
+  +'.sheet{width:'+PW+'px;height:'+PH+'px;background:#fff;margin:0 auto 20px;position:relative;'
+   +'box-shadow:0 1px 3px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.25)}'
+  +'.sheet .hd{position:absolute;left:'+MG+'px;right:'+MG+'px;top:'+MG+'px;'
+   +'user-select:none;-webkit-user-select:none;pointer-events:none}'
+  +'.sheet .logo{display:block;width:'+Math.round(LOGO_W*PT)+'px;height:auto}'
+  +'.sheet .brand{font:700 15px Arial,Helvetica,sans-serif;letter-spacing:1.4px;color:#0f172a;'
+   +'height:'+Math.round(LOGO_H*PT)+'px;display:flex;align-items:flex-end}'
+  +'.sheet .rule{height:1.6px;background:#e0121c;margin-top:8px}'
+  /* The title is page furniture, not text: outside the editable box, so it cannot be selected
+     into, deleted, or dragged out of place. */
+  +'.sheet .ttl{position:absolute;left:'+MG+'px;right:'+MG+'px;top:'+(MG+HEAD_H)+'px;'
+   +'font:700 '+TITLE_FS+'px/'+TITLE_LH+'px Arial,Helvetica,sans-serif;'
+   +'user-select:none;-webkit-user-select:none;pointer-events:none}'
+  +'.sheet .bd{position:absolute;left:'+MG+'px;right:'+MG+'px;top:'+(MG+HEAD_H)+'px;'
+   +'bottom:'+(MG+FOOT_H)+'px;font:'+FS+'px/'+LH+'px Arial,Helvetica,sans-serif;outline:0;'
+   +'white-space:pre-wrap;word-wrap:break-word}'
+  +'.sheet .pn{position:absolute;left:0;right:0;bottom:'+Math.round(MG/2)+'px;text-align:center;'
+   +'font-size:11px;color:#94a3b8}'
+  +'.ln{min-height:'+LH+'px}'
+  +'#meas{position:absolute;visibility:hidden;left:-9999px;top:0;width:'+(PW-2*MG)+'px;'
+   +'font:'+FS+'px/'+LH+'px Arial,Helvetica,sans-serif;white-space:pre-wrap;word-wrap:break-word}'
+  +'#meas .ln{min-height:'+LH+'px}'
+  +'</style>'
+  +'<header>'
+   +'<div class="bar">'
+     +'<h1>'+escH(title)+'</h1>'
+     +'<span id="pglabel">1 / 1</span>'
+     +'<div class="grp">'
+       +'<button class="ic" id="zo" title="Zoom out">&#8722;</button>'
+       +'<span id="zlabel" title="Click to fit the width">100%</span>'
+       +'<button class="ic" id="zi" title="Zoom in">&#43;</button>'
+       +'<button class="ic" id="zf" title="Fit width">&#8596;</button>'
+     +'</div>'
+     +'<span id="msg"></span>'
+     +'<button class="txt primary" id="save">Save</button>'
+     +'<button class="txt" id="dl">Download PDF</button>'
+   +'</div>'
+   +'<div class="bar2">'
+     +'<div class="grp">'
+       +'<button class="ic" id="undo" title="Undo (Ctrl+Z)">&#8630;</button>'
+       +'<button class="ic" id="redo" title="Redo (Ctrl+Y)">&#8631;</button>'
+     +'</div>'
+     +'<div class="grp">'
+       +'<button class="ic" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>'
+       +'<button class="ic" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>'
+       +'<button class="ic" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>'
+     +'</div>'
+     /* Size, typeface and colour removed by request. Bold, italic and underline are the ones a
+        job description actually uses, and they are the ones that read the same in every document;
+        three people each picking their own font and colour is how a set of company documents
+        stops looking like a set. The PDF still renders all of it, so anything already saved with
+        a size or a colour keeps it. */
+     +'<button class="ic" id="clr" title="Remove formatting" style="min-width:auto;padding:0 10px;font-size:13px">Clear</button>'
+   +'</div>'
+  +'</header>'
+  +'<div id="view"><div id="doc"></div></div>'
+  +'<div id="meas"></div>');
+  tab.document.close();
+
+  try{
+    const d=tab.document, w=tab;
+    const view=d.getElementById('view'), doc=d.getElementById('doc'),
+          meas=d.getElementById('meas'), msg=d.getElementById('msg'),
+          zlabel=d.getElementById('zlabel'), pglabel=d.getElementById('pglabel');
+
+
+    /* THE SAME IMAGE THE PDF EMBEDS, not a typed approximation of it. Drawn outside the editable
+       area and made unselectable, so it is on every page and cannot be edited out. */
+    const LOGO_HTML=(typeof JG_LOGO_PNG_B64==='string'&&JG_LOGO_PNG_B64)
+      ? '<img class="logo" alt="The Jain Group" src="data:image/png;base64,'+JG_LOGO_PNG_B64+'">'
+      : '<div class="brand">THE JAIN GROUP</div>';
+
+    /* A PARAGRAPH IS A STRING OF HTML, not a string of text.
+
+       The document used to be plain lines, so there was nowhere to keep bold or a colour. Each
+       paragraph is now its own fragment of HTML and that is what gets saved, measured and handed
+       to the PDF builder.
+
+       Plain text still loads: everything written before today is plain, and so is everything the
+       AI writes. It is escaped line by line, and the old rule that a short line ending in a colon
+       is a heading is applied ONCE on the way in - turning it into real bold that can then be
+       edited, rather than a guess the PDF re-makes every time. */
+    function parseInput(src){
+      const raw=String(src||'');
+      if(!/<[a-z!/]/i.test(raw)){
+        return raw.split('\n').map(function(l){
+          const head=/:$/.test(l.trim())&&l.trim().length<40;
+          const e=escH(l);
+          return l===''?'<br>':(head?'<b>'+e+'</b>':e);
+        });
+      }
+      const dom=new DOMParser().parseFromString('<body>'+raw+'</body>','text/html');
+      const kids=Array.prototype.filter.call(dom.body.children,function(n){
+        return /^(DIV|P|LI|H[1-6])$/.test(n.tagName); });
+      if(!kids.length) return [dom.body.innerHTML||'<br>'];
+      return kids.map(function(n){ return n.innerHTML||'<br>'; });
+    }
+
+    let BLOCKS=parseInput(text);
+    let PAGES=[];          // {start,end} indexes into BLOCKS
+    let TITLE_H=0;
+    let zoom=1, fitMode=false;
+
+    /* WHERE THE PAGES BREAK, measured rather than guessed. Every paragraph is laid out once in a
+       hidden column of exactly the page's text width, so one that wraps to three rows - or that
+       carries a 24pt word - is counted at its real height. */
+    function paginate(){
+      meas.innerHTML=BLOCKS.map(function(h){return '<div class="ln">'+h+'</div>';}).join('');
+      const els=meas.children;
+      const th=d.createElement('div');
+      th.style.cssText='font:700 '+TITLE_FS+'px/'+TITLE_LH+'px Arial,Helvetica,sans-serif';
+      th.textContent=title||'Job Description';
+      meas.appendChild(th);
+      const titleH=th.getBoundingClientRect().height+8;
+      TITLE_H=titleH;
+
+      const hs=[];
+      for(let i=0;i<BLOCKS.length;i++) hs.push(els[i]?els[i].getBoundingClientRect().height:parseFloat(LH));
+      /* ONLY PAGE ONE CARRIES THE LETTERHEAD, so only page one pays for it. A later page starts
+         at the top margin and has the logo's worth of extra room, which is why the two limits
+         below are different rather than one number reused. */
+      const FIRST_LIMIT=PH-2*MG-HEAD_H-titleH-FOOT_H;
+      const REST_LIMIT =PH-2*MG-FOOT_H;
+      /* A few pixels held back. The measuring column and the page's own text box agree to within
+         about 3px - line boxes are not laid out identically in a bare div and in a contenteditable
+         one - and the error always went the same way. Breaking a hair early is the safe direction. */
+      const SAFE=6;
+      PAGES=[]; let start=0, used=0, limit=FIRST_LIMIT-SAFE;
+      for(let i=0;i<BLOCKS.length;i++){
+        if(used+hs[i]>limit && i>start){
+          PAGES.push({start:start,end:i});
+          start=i; used=0; limit=REST_LIMIT-SAFE;
+        }
+        used+=hs[i];
+      }
+      PAGES.push({start:start,end:BLOCKS.length});
+      meas.innerHTML='';
+    }
+
+    function render(){
+      paginate();
+      let html='';
+      for(let p=0;p<PAGES.length;p++){
+        const seg=BLOCKS.slice(PAGES[p].start,PAGES[p].end);
+        const bodyTop=(p===0?MG+HEAD_H+Math.round(TITLE_H):MG);
+        html+='<div class="sheet" data-p="'+p+'">'
+          +(p===0?'<div class="hd">'+LOGO_HTML+'<div class="rule"></div></div>'
+                 +'<div class="ttl">'+escH(title||'Job Description')+'</div>':'')
+          +'<div class="bd" contenteditable="true" spellcheck="true" data-p="'+p+'"'
+            +' style="top:'+bodyTop+'px">'
+          +seg.map(function(h){ return '<div class="ln">'+(h||'<br>')+'</div>'; }).join('')
+          +'</div>'
+          +'<div class="pn">'+(p+1)+' / '+PAGES.length+'</div>'
+          +'</div>';
+      }
+      doc.innerHTML=html;
+      Array.prototype.forEach.call(d.querySelectorAll('.bd'),function(b){
+        b.addEventListener('input',onInput);
+        b.addEventListener('keydown',onKey);
+        b.addEventListener('paste',onPaste);
+        b.addEventListener('keyup',syncButtons);
+        b.addEventListener('mouseup',syncButtons);
+      });
+      applyZoom();
+      updatePageLabel();
+    }
+
+    // The paragraphs a page currently holds, read back off the screen.
+    function blocksOf(bd){
+      const out=[];
+      Array.prototype.forEach.call(bd.children,function(c){ out.push(c.innerHTML); });
+      return out;
+    }
+    function collect(){
+      const all=[];
+      Array.prototype.forEach.call(d.querySelectorAll('.bd'),function(b){
+        Array.prototype.push.apply(all,blocksOf(b));
+      });
+      // What gets saved: one div per paragraph, which is what parseInput reads back.
+      return all.map(function(h){ return '<div>'+h+'</div>'; }).join('');
+    }
+
+    /* THE CARET SURVIVES RE-PAGINATION. A paragraph never changes its position in the sequence
+       when pages are recut - only which page it sits on - so the caret is remembered as
+       "paragraph N, character C" and put back by the same pair. */
+    function caretPos(){
+      const sel=w.getSelection();
+      if(!sel||!sel.rangeCount) return null;
+      let node=sel.anchorNode; if(!node) return null;
+      let el=node.nodeType===3?node.parentNode:node;
+      let ln=el; while(ln&&!(ln.classList&&ln.classList.contains('ln'))) ln=ln.parentNode;
+      if(!ln) return null;
+      const bd=ln.closest('.bd'); if(!bd) return null;
+      const p=parseInt(bd.getAttribute('data-p'),10)||0;
+      const idx=Array.prototype.indexOf.call(bd.children,ln);
+      if(idx<0) return null;
+      const r=d.createRange(); r.selectNodeContents(ln);
+      try{ r.setEnd(sel.anchorNode,sel.anchorOffset); }catch(_e){ return null; }
+      return {block:PAGES[p].start+idx, ch:r.toString().length};
+    }
+    function setCaret(pos){
+      if(!pos) return;
+      for(let p=0;p<PAGES.length;p++){
+        if(pos.block>=PAGES[p].start && pos.block<PAGES[p].end){
+          const bd=d.querySelector('.bd[data-p="'+p+'"]'); if(!bd) return;
+          const ln=bd.children[pos.block-PAGES[p].start]; if(!ln) return;
+          const walker=d.createTreeWalker(ln,w.NodeFilter.SHOW_TEXT,null);
+          let left=pos.ch, node=null;
+          while(walker.nextNode()){
+            node=walker.currentNode;
+            if(left<=node.length) break;
+            left-=node.length;
+          }
+          const r=d.createRange();
+          if(node) r.setStart(node,Math.max(0,Math.min(left,node.length)));
+          else { r.selectNodeContents(ln); }
+          r.collapse(true);
+          const sel=w.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+          bd.focus();
+          return;
+        }
+      }
+    }
+
+    /* ── UNDO AND REDO ────────────────────────────────────────────────────────────────────
+       The browser's own undo stack is useless here: re-cutting the pages replaces the whole
+       document, and every replacement throws that stack away - which is why Ctrl+Z did nothing.
+       So the editor keeps its own. A state is the list of paragraphs plus where the caret was,
+       and one is recorded whenever a change settles, not on every keystroke, so a single undo
+       takes back a word rather than a letter. */
+    let HIST=[{blocks:BLOCKS.slice(),caret:null}], HPOS=0;
+    const HMAX=200;
+    function commit(){
+      const st={blocks:BLOCKS.slice(),caret:caretPos()};
+      // Nothing actually changed - do not fill the history with duplicates.
+      if(HIST[HPOS] && HIST[HPOS].blocks.join('\u0001')===st.blocks.join('\u0001')) return;
+      HIST=HIST.slice(0,HPOS+1);
+      HIST.push(st);
+      if(HIST.length>HMAX){ HIST.shift(); } else { HPOS++; }
+      syncHistButtons();
+    }
+    function applyState(st){
+      BLOCKS=st.blocks.slice();
+      render();
+      setCaret(st.caret);
+      syncHistButtons();
+    }
+    function undo(){ if(HPOS>0){ HPOS--; applyState(HIST[HPOS]); } }
+    function redo(){ if(HPOS<HIST.length-1){ HPOS++; applyState(HIST[HPOS]); } }
+    function syncHistButtons(){
+      d.getElementById('undo').disabled=HPOS<=0;
+      d.getElementById('redo').disabled=HPOS>=HIST.length-1;
+    }
+    d.getElementById('undo').onclick=undo;
+    d.getElementById('redo').onclick=redo;
+
+    /* Re-cut on a pause, not on every keystroke: recutting mid-word would move the text under
+       the cursor while somebody is still typing the word. */
+    let t=null;
+    function onInput(){
+      clearTimeout(t);
+      t=setTimeout(function(){
+        const pos=caretPos();
+        BLOCKS=(function(){ const a=[]; Array.prototype.forEach.call(d.querySelectorAll('.bd'),
+          function(b){ Array.prototype.push.apply(a,blocksOf(b)); }); return a; })();
+        render();
+        setCaret(pos);
+        commit();
+      },400);
+    }
+    function onKey(e){
+      const mod=e.ctrlKey||e.metaKey;
+      if(mod&&e.key==='s'){ e.preventDefault(); d.getElementById('save').click(); return; }
+      if(mod&&!e.shiftKey&&String(e.key).toLowerCase()==='z'){ e.preventDefault(); clearTimeout(t); undo(); return; }
+      if(mod&&(String(e.key).toLowerCase()==='y'||(e.shiftKey&&String(e.key).toLowerCase()==='z'))){
+        e.preventDefault(); clearTimeout(t); redo(); return; }
+      // Ctrl+B/I/U are left to the browser, which applies them to the selection; the change is
+      // picked up by the input handler like any other edit.
+    }
+    /* Pasting from Word brings its own fonts, colours, tables and class names with it. Only the
+       words are taken, and anything you want emphasised you set here. */
+    function onPaste(e){
+      e.preventDefault();
+      const txt=(e.clipboardData||w.clipboardData).getData('text/plain');
+      d.execCommand('insertText',false,String(txt||''));
+    }
+
+    /* ── FORMATTING ───────────────────────────────────────────────────────────────────────
+       styleWithCSS makes the browser write inline styles rather than <font> tags, which is what
+       the PDF builder reads. Bold, italic and underline go through execCommand, which handles a
+       selection spanning several paragraphs properly. */
+    try{ d.execCommand('styleWithCSS',false,true); }catch(_e){}
+
+    function afterFormat(){
+      const pos=caretPos();
+      BLOCKS=(function(){ const a=[]; Array.prototype.forEach.call(d.querySelectorAll('.bd'),
+        function(b){ Array.prototype.push.apply(a,blocksOf(b)); }); return a; })();
+      render(); setCaret(pos); commit();
+    }
+    Array.prototype.forEach.call(d.querySelectorAll('[data-cmd]'),function(btn){
+      // mousedown is cancelled so the button never steals the selection it is about to act on.
+      btn.addEventListener('mousedown',function(e){ e.preventDefault(); });
+      btn.addEventListener('click',function(){
+        d.execCommand(btn.getAttribute('data-cmd'),false,null);
+        syncButtons(); afterFormat();
+      });
+    });
+    d.getElementById('clr').addEventListener('mousedown',function(e){ e.preventDefault(); });
+    d.getElementById('clr').onclick=function(){
+      d.execCommand('removeFormat',false,null);
+      syncButtons(); afterFormat();
+    };
+    // The B / I / U buttons light up when the caret is inside text that already has them.
+    function syncButtons(){
+      ['bold','italic','underline'].forEach(function(c){
+        const btn=d.querySelector('[data-cmd="'+c+'"]'); if(!btn) return;
+        let on=false; try{ on=d.queryCommandState(c); }catch(_e){}
+        btn.classList.toggle('on',!!on);
+      });
+    }
+
+    // ── zoom ────────────────────────────────────────────────────────────────────────────
+    const STEPS=[0.5,0.67,0.75,0.9,1,1.1,1.25,1.5,1.75,2,2.5,3];
+    function applyZoom(){
+      doc.style.transform='scale('+zoom+')';
+      const natural=PAGES.length*(PH+20);
+      doc.style.marginBottom=((zoom-1)*natural)+'px';
+      const wide=PW*zoom;
+      doc.style.marginLeft=wide>view.clientWidth?((wide-PW)/2)+'px':'auto';
+      doc.style.marginRight=doc.style.marginLeft==='auto'?'auto':'0';
+      zlabel.textContent=Math.round(zoom*100)+'%';
+    }
+    function setZoom(z,keepFit){
+      zoom=Math.max(0.25,Math.min(4,z));
+      if(!keepFit) fitMode=false;
+      applyZoom();
+    }
+    function fitWidth(){ fitMode=true; setZoom((view.clientWidth-48)/PW,true); }
+    d.getElementById('zi').onclick=function(){
+      const nx=STEPS.find(s=>s>zoom+0.001); setZoom(nx||Math.min(4,zoom*1.1));
+    };
+    d.getElementById('zo').onclick=function(){
+      const pv=STEPS.slice().reverse().find(s=>s<zoom-0.001); setZoom(pv||Math.max(0.25,zoom/1.1));
+    };
+    d.getElementById('zf').onclick=fitWidth;
+    zlabel.onclick=fitWidth;
+    view.addEventListener('wheel',function(e){
+      if(!(e.ctrlKey||e.metaKey)) return;
+      e.preventDefault();
+      setZoom(zoom*(e.deltaY<0?1.1:1/1.1));
+    },{passive:false});
+    d.addEventListener('keydown',function(e){
+      if(!(e.ctrlKey||e.metaKey)) return;
+      if(e.key==='='||e.key==='+'){ e.preventDefault(); d.getElementById('zi').click(); }
+      else if(e.key==='-'){ e.preventDefault(); d.getElementById('zo').click(); }
+      else if(e.key==='0'){ e.preventDefault(); setZoom(1); }
+    });
+    w.addEventListener('resize',function(){ if(fitMode) fitWidth(); });
+
+    function updatePageLabel(){
+      const sheets=d.querySelectorAll('.sheet');
+      if(!sheets.length) return;
+      const mid=view.scrollTop+view.clientHeight/2;
+      let cur=1;
+      for(let i=0;i<sheets.length;i++){ if(sheets[i].offsetTop*zoom<=mid) cur=i+1; }
+      pglabel.textContent=cur+' / '+sheets.length;
+    }
+    view.addEventListener('scroll',updatePageLabel);
+
+    // ── save / download ─────────────────────────────────────────────────────────────────
+    d.getElementById('save').onclick=async function(){
+      const btn=this; btn.disabled=true; msg.textContent='Saving…';
+      try{
+        await onSave(collect());
+        /* SAVED MEANS DONE, SO THE TAB CLOSES. The short pause is so "Saved" is actually seen. */
+        msg.textContent='Saved';
+        setTimeout(function(){ try{ tab.close(); }catch(_e){} }, 600);
+      }catch(e){
+        msg.textContent='Could not save: '+((e&&e.message)||e);
+        btn.disabled=false;
+      }
+    };
+    d.getElementById('dl').onclick=async function(){
+      const btn=this; btn.disabled=true; msg.textContent='Building the PDF…';
+      try{ await window.opener.jdEditorDownload(title, collect()); msg.textContent=''; }
+      catch(e){ msg.textContent='Could not build it: '+((e&&e.message)||e); }
+      btn.disabled=false;
+    };
+
+    render();
+    fitWidth();
+    syncHistButtons();
+  }catch(e){ /* the tab is still readable even if the controls could not be wired */ }
+};
+window.jdEditOpen=function(id){
+  const jd=(window._recAllJDs||[]).find(j=>j.id===id);
+  if(!jd){ toast('That description could not be found','err'); return; }
+  if(jd.source!=='ai_generated'){
+    // An uploaded PDF is a file, not text we hold - there is nothing here to edit, so it opens as
+    // the file it is.
+    return recJdOpen(id);
+  }
+  jdOpenEditorTab(String(jd.name||'Job Description'), String(jd.content_text||''),
+    async function(text){ await jdEditorSave(id, text); });
+};
+/* Called by the editor tab. Kept on this page because this is where the database connection and
+   the PDF builder already live. */
+window.jdEditorSave=async function(id,text){
+  const {error}=await sb.schema('recruit').from('job_descriptions')
+    .update({content_text:String(text||'')}).eq('id',id);
+  if(error) throw new Error(error.message);
+  const jd=(window._recAllJDs||[]).find(j=>j.id===id);
+  if(jd) jd.content_text=String(text||'');
+  toast('Job description saved');
+};
+window.jdEditorDownload=async function(title,text){
+  const bytes=await jdBuildPdfBytes(title||'Job Description',String(text||''));
+  jdPdfOpen(bytes,(String(title||'job-description').replace(/[^A-Za-z0-9 ()-]/g,'').trim()||'job-description')+'.pdf',true);
+};
 window.recJdOpen=async function(id){
   const jd=(window._recAllJDs||[]).find(j=>j.id===id);if(!jd)return;
   if(jd.source==='ai_generated'){
-    if(jd.jd_document_path){window.open(jd.jd_document_path,'_blank');return;}
-    // Older AI-generated rows made before the document file existed — fall back to a plain-text view.
-    const blob=new Blob([jd.content_text||''],{type:'text/plain'});
-    window.open(URL.createObjectURL(blob),'_blank');
+    /* Opened as a PDF on the Jain Group letterhead, in its own tab - not as the raw HTML document
+       and not as a wall of plain text. A job description is something that gets forwarded to a
+       candidate or printed for an interview panel, so what is on screen is the same thing that
+       comes out of Download, built from the same bytes. */
+    if(!String(jd.content_text||'').trim()){ toast('This description has no text to print yet','err'); return; }
+    try{
+      const bytes=await jdBuildPdfBytes(jd.name||'Job Description',jd.content_text||'');
+      jdPdfOpen(bytes,((jd.name||'job-description').replace(/[^A-Za-z0-9 ()-]/g,'').trim()||'job-description')+'.pdf',false);
+    }catch(e){ toast('Could not build the PDF: '+((e&&e.message)||e),'err'); }
     return;
   }
   if(jd.isDefault){window.open(jd.url,'_blank');return;}
@@ -11749,11 +15168,12 @@ window.recJdOpen=async function(id){
 window.recJdDownload=async function(id){
   const jd=(window._recAllJDs||[]).find(j=>j.id===id);if(!jd)return;
   if(jd.source==='ai_generated'){
-    if(jd.jd_document_path){await tpDownloadUrl(jd.jd_document_path,(jd.name||'job-description')+'.html');return;}
-    const blob=new Blob([jd.content_text||''],{type:'text/plain'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=(jd.name||'job-description')+'.txt';a.click();
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    // The same PDF the Preview shows - it used to come down as .html or .txt.
+    if(!String(jd.content_text||'').trim()){ toast('This description has no text to print yet','err'); return; }
+    try{
+      const bytes=await jdBuildPdfBytes(jd.name||'Job Description',jd.content_text||'');
+      jdPdfOpen(bytes,((jd.name||'job-description').replace(/[^A-Za-z0-9 ()-]/g,'').trim()||'job-description')+'.pdf',true);
+    }catch(e){ toast('Could not build the PDF: '+((e&&e.message)||e),'err'); }
     return;
   }
   if(jd.isDefault){const a=document.createElement('a');a.href=jd.url;a.download=jd.name+'.pdf';a.click();return;}
@@ -11778,8 +15198,11 @@ function recJDCard(jd){
         ${!jd.isDefault&&jd.file_name?`<div style="font-size:11.5px;color:var(--slate);margin-top:2px">${esc(jd.file_name)}</div>`:''}
       </div>
     </div>
+    <!-- Open reads it in a tab, Download saves the file. Both live on the card; what was removed
+         was the DUPLICATE Download up on the toolbar, which needed a tick and a trip upwards to do
+         what this button does in one click. -->
     <div style="margin-top:12px;display:flex;gap:8px">
-      <button class="btn btn-sm" style="flex:1" onclick="event.stopPropagation();recJdOpen('${jd.id}')"><i class="fa-solid fa-eye"></i> Preview</button>
+      <button class="btn btn-sm" style="flex:1" onclick="event.stopPropagation();jdEditOpen('${jd.id}')"><i class="fa-solid fa-eye"></i> Open</button>
       <button class="btn btn-sm" style="flex:1" onclick="event.stopPropagation();recJdDownload('${jd.id}')"><i class="fa-solid fa-download"></i> Download</button>
     </div>
   </div>`;
@@ -11790,13 +15213,27 @@ window.recToggleSel=function(id){
   if(jd){const el=document.getElementById('rjd_'+id);if(el){const tmp=document.createElement('div');tmp.innerHTML=recJDCard(jd);el.replaceWith(tmp.firstElementChild);}}
   recRefreshBar();
 };
+/* Untick everything at once. The toolbar only appears while something is selected, so without this
+   the only way out of a selection you did not mean to make is to find and untick each card again. */
+window.recClearSel=function(){
+  const ids=[...REC_SEL];
+  REC_SEL.clear();
+  ids.forEach(function(id){
+    const jd=(window._recAllJDs||[]).find(j=>j.id===id);
+    if(!jd)return;
+    const el=document.getElementById('rjd_'+id);
+    if(el){const tmp=document.createElement('div');tmp.innerHTML=recJDCard(jd);el.replaceWith(tmp.firstElementChild);}
+  });
+  recRefreshBar();
+};
 window.recRefreshBar=function(){
-  const n=REC_SEL.size;const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
+  /* Must match the bar built in recLoadJDs exactly - this redraws it on every tick, so any
+     difference between the two silently reinstates the old three-button version. */
+  const n=REC_SEL.size;
   const bar=$('recBar');if(!bar)return;
-  bar.innerHTML=`<button class="btn btn-primary" onclick="recUploadModal()"><i class="fa-solid fa-upload"></i> Upload JD</button>
-    <button class="btn" ${n===0?'disabled':''} style="${n===0?dis:''}" onclick="recDownloadSel()"><i class="fa-solid fa-download"></i> Download</button>
-    <button class="btn" ${n===0?'disabled':''} style="${n===0?dis:'color:var(--err)'}" onclick="recDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>
-    ${n>0?`<span style="font-size:12px;color:var(--slate)">${n} selected</span>`:''}`;
+  bar.innerHTML=`<button class="btn btn-primary" onclick="recUploadModal()"><i class="fa-solid fa-upload"></i> Upload</button>
+    ${n>0?`<button class="btn" style="color:var(--err)" onclick="recDeleteSel()"><i class="fa-solid fa-trash"></i> Delete ${n}</button>
+    <button class="btn btn-ghost" onclick="recClearSel()">Clear</button>`:''}`;
 };
 window.recUploadModal=function(){if(!recGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-file-pdf"></i> Upload Job Description</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -11819,7 +15256,13 @@ window.recJdSave=async function(){
   if(se){toast('Upload failed: '+se.message,'err');console.error('JD S3 upload error',se);if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';}return;}
   const {error:de}=await sb.schema('recruit').from('job_descriptions').insert({name,storage_path:upData.path,file_name:file.name,file_size:file.size,uploaded_by:state.email});
   if(de){toast(de.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';}return;}
-  closeModal();toast(name+' uploaded to S3','ok');recLoadJDs($('view'));
+  closeModal();toast(name+' uploaded','ok');recLoadJDs($('view'));
+  /* The three HRs are told, with the file attached. A description sitting in a library nobody has
+     been pointed at is the same as not having one, and this is the moment there is something to
+     point at. Sent from ai@ because nobody decided this - it happened, and they are being told. */
+  const r=await hrNotify({kind:'job_description_created',title:name,
+    created_by:state.email||'',storage_path:upData.path});
+  if(r&&r.ok) toast('The HR team has been emailed the description','ok');
 };
 window.recDownloadSel=async function(){
   let jds=[];try{const {data}=await sb.schema('recruit').from('job_descriptions').select('*');jds=data||[];}catch(e){}
@@ -11900,11 +15343,28 @@ function cmpPrevRange(){
 }
 function cmpPrevKey(){const p=cmpPrevRange();return p?('custom:'+p.since+':'+p.until):null;}
 function cmpPrevLabel(){const p=cmpPrevRange();return p?(p.since===p.until?p.since:(p.since+' → '+p.until)):'previous period';}
-// Meta's previous-period window is now filled by the MCP ingest pipeline (mcp-ads-ingest),
-// not fetched live — see camp.campaign_insights' own synced_at. google-ads-live still fills
-// both of its own buckets in one call (its prev_since/prev_until parameters), so there's
-// nothing left for this to do; kept as a no-op so its two call sites don't need to change.
+// Meta's previous-period window is no longer live-fetched here: Meta is fully MCP-sourced now
+// (the account owner's own call, over the Graph API). A manually triggered Claude Code task
+// ("Refresh JainE Campaign Analytics (Meta) from MCP") computes and writes these same
+// custom:since:until previous-period rows itself. google-ads-live still fills both of its own
+// buckets in one call (its prev_since/prev_until parameters), so there is nothing left for this
+// to do for either source; kept as a documented no-op rather than deleted, since cmpBothView
+// still calls it.
 async function cmpSyncPrev(which){}
+/* "Run via MCP" button (Campaign Analytics, Meta tab). A browser cannot call the Meta Ads MCP
+   tool itself - only a live Claude Code session can - so this just drops a pending row into
+   camp.mcp_refresh_requests (an RLS policy lets any authenticated user do that) and lets the
+   local watcher script on the always-on PC (meta-mcp-watcher.ps1) pick it up, run the full
+   refresh, and write the result back. Re-rendering the page right after just shows the button
+   as queued/running - see refreshReq in VIEWS.campaigns - it does not itself wait for the run. */
+window.cmpRunMcpRefresh=async function(){
+  try{
+    const {error}=await sb.schema('camp').from('mcp_refresh_requests').insert({requested_by:me()});
+    if(error){ toast('Could not queue the refresh: '+error.message,'err'); return; }
+    toast('Queued — the local watcher will pick this up within about 20 seconds','ok');
+    renderPage();
+  }catch(e){ toast('Could not queue the refresh: '+((e&&e.message)||e),'err'); }
+};
 // Trend pill. lowerIsBetter=true for cost metrics (a fall is good).
 function cmpTrend(cur,prev,lowerIsBetter){
   cur=Number(cur)||0;
@@ -12207,8 +15667,8 @@ async function cmpBothView(v,seg){
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
-  // Meta's half of this view is now MCP-fed (see camp.campaign_insights' synced_at), not
-  // fetched live — only google-ads-live still needs asking here.
+  // Meta's half of this refresh is gone - its data now comes solely from the manually-triggered
+  // Meta Ads MCP task (see cmpSyncPrev). Google's own live pipeline is untouched.
   if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
     try{
       const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
@@ -12607,133 +16067,492 @@ function tpApprovalTag(rec){
   return '<span class="tag t-amber"><i class="fa-solid fa-hourglass-half"></i> Pending Approval</span>';
 }
 
-/* ── Approval notification: a real Task, not a screen ──
-   Suchandra Das / Khushbu Singh / Uzma Ahmed get an actual acc.ptasks Task (the same Tasks system
-   as Accountability) whenever a Job Description is ready for their review -- no dedicated tab.
-   Approving or rejecting still happens where it already did, in ManPower Form's own row detail
-   (tpMpShowDetail, unchanged). manpower_requests.approval_task_id tracks the one open task per
-   requisition so it can be closed automatically the moment a decision is made. */
-const HR_APPROVERS=['mgr.hr@thejaingroup.com','hr@thejaingroup.com','career@thejaingroup.com']; // Suchandra Das, Khushbu Singh, Uzma Ahmed
-async function hrNotifyApproversTask(rec){
-  try{
-    const {data:t,error}=await sb.schema('acc').from('ptasks').insert({
-      title:'Approve Job Description: '+(rec.job_title||'Untitled Position'),
-      description:'A Job Description was generated for this ManPower requisition ('+(rec.department||'—')+', raised by '+(rec.raised_by||'—')+'). Open Recruitment (New) → ManPower Form, click the row, and Approve or Reject it there. Rejecting asks for a reason and regenerates the description automatically for another review.',
-      delegator:state.email||rec.raised_by||'system',order_index:0
-    }).select().single();
-    if(error||!t)return;
-    await sb.schema('acc').from('ptask_assignees').insert(HR_APPROVERS.map(e=>({task_id:t.id,email:e})));
-    for(const e of HR_APPROVERS){
-      try{
-        const {data:mx}=await sb.schema('acc').from('task_rank').select('rank').ilike('viewer_email',e).order('rank',{ascending:false}).limit(1);
-        const next=(mx&&mx.length?Number(mx[0].rank):0)+1;
-        await sb.schema('acc').from('task_rank').insert({task_id:t.id,viewer_email:e,rank:next});
-      }catch(_e){}
-    }
-    await sb.schema('hr').from('manpower_requests').update({approval_task_id:t.id}).eq('id',rec.id);
-    rec.approval_task_id=t.id;
-  }catch(_e){ /* the description still exists and can be approved even if the reminder failed */ }
-}
-async function hrCloseApprovalTask(rec){
-  if(!rec||!rec.approval_task_id)return;
-  try{ await sb.schema('acc').from('ptasks').update({status:'Done',completed_at:new Date().toISOString()}).eq('id',rec.approval_task_id); }catch(_e){}
-}
+/* Pending Approvals is no longer a Recruitment tab — a ManPower JD ready for review, or a Referral
+   just submitted, now creates a real task in Accountability's own Pending Approval card instead
+   (acc.hr_approval_task_upsert; the domain-specific Approve/Reject there live in accountability.js
+   as hrTaskApproveManpower/hrTaskRejectManpower/hrTaskConnectReferral/hrTaskRejectReferral). */
 /* Plain, professional one-column PDF of the AI-generated Job Description text (already the exact
    wording an approver is judging) -- reuses loadPdfLib(), the same lazy-loaded pdf-lib this app
    already uses for the Booking Form checklist / Welcome Letter / Allotment Letter, rather than
    adding new PDF infrastructure. Paginates plainly; this is an internal approval attachment, not a
    branded document, so no logo/letterhead. */
-window.hrJdPdfDownload=async function(manpowerId){
+/* THE JAIN GROUP LETTERHEAD, for anything printed out of Recruitment.
+
+   The logo ships as a .webp, which is right for a web page and no use to pdf-lib - it can embed
+   PNG and JPEG and nothing else. Rather than commit a second copy of the same picture in a second
+   format (two files to keep in step, and the one nobody remembers to replace is the one that goes
+   out to candidates), the browser converts it: it can already decode webp to draw it on screen, so
+   it is drawn onto a canvas and read back as PNG. Done once and kept, because the same logo goes on
+   every page of every description.
+
+   Returns null if anything goes wrong. A job description with no logo is a small disappointment; a
+   job description that would not open at all because of the logo is a real problem. */
+let JG_LOGO_PNG=null;
+/* THE LOGO IS CARRIED IN THE FILE, NOT FETCHED AND CONVERTED.
+
+   Three things went wrong with loading it from assets/ and converting it through a canvas, and
+   each one failed silently into "no logo, PDF otherwise perfect":
+
+     - crossOrigin='anonymous' turned a same-origin read into a CORS check, which a file:// page
+       can never satisfy;
+     - even without that, drawing a file:// image onto a canvas TAINTS the canvas, so toBlob
+       throws - there is no way around that from a page opened off disk;
+     - the source was webp, and pdf-lib embeds PNG and JPEG only, so the canvas step was not
+       optional as long as the source stayed webp.
+
+   So the logo is a PNG, base64 here, decoded straight to bytes. No network, no canvas, no format
+   conversion, and it behaves the same on the live site and from a local file. It is 15KB on a
+   1.8MB file. assets/jain-group-logo.png is the same image if it is ever needed elsewhere.
+
+   To replace it: convert the new artwork to PNG, base64 it, and swap the string. */
+const JG_LOGO_PNG_B64='iVBORw0KGgoAAAANSUhEUgAAAlgAAAC9CAYAAABvcAPEAAA6+0lEQVR42u2dd5wdZbnHv3M2yaaThBBC7zXU0JviVelWikDoold6VcELigLCFVFQRECkKIoUQZF26UVKKFIM0gKhBQgGSCFty5n7x/McMyx7zs47Z07Z3d/385lPdrNn5sy885bnfSoIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEI0lKgR33nJ5p9ebmxne+sitX/daQU++Ij3Dn3x4blqDSGEEKI2DKj3Fx61006Dxrwz6+bxbe0bdhL3+PkYiGsoBhbi9J+NI4ipnaQbBVy8GNQmBSCiEHcytCVidKH9AOD36v5CCCFEHxGwAEa1tXUssWARHWmEGppHhdcs9xJ+HwUiYqCToQUYGBeL6vpCCCFEHxOwYiI6o4hOtX/diOIIoohiFNEZS74SQggh+pyAZSJW8RMam3KmwCjWi6pWNxZHkZkhgRY1iBBCCFFTCmoCIYQQQggJWEIIIYQQErCEEEIIISRgCSGEEEIICVj9jxgLFogbnDdWCCGEEDRFFGHUfdLOrtGCETAoiogLUdWJQ8sl5gz5fF7XDqHcteOok0IMLXFEkQIdMZ5XLK6YYytCIZlCCCFEH03TkC7pZjGO2xbG8eNxIVqQWsAqk+KpWKj+83ldO0jAKlRIK/+f7ygC8aoDo8KqnXH5bPhRbEdBCciEEEKI/ilgFYgoRrz/wbARu39uyuQZelWVuXedjU8Z3148vaPzk/nxi1gOrGIBilFEe4syYQkhhBD91gcrjqLog6GDhuo19cwHgwYNbCsU/pPCNXnEQGe0OMWrEEIIIeTkLqhvzUUhhBBC0AtNhO4LpEU/T4oQxd06sUdAHCdK5cgHSwghhOifPlgie+oGpL8SQgghkIlQCCGEEEIClqBZzYSUs8kW1TxCCCGEBCwhhBBCCAlYQgghhBCCJi+VI3JucMnUQgghBNJgCSGEEEJIwBJCCCGEEBKwhBBCCCEkYAkhhBBCSMASND7De+Q5suIIOlvUIkIIIQSqRSh6olgoUIwKQAefjCEsej3CAnGsVhdCCCFUi1CklFmLxBEsLunc9e8xxUKRYqFIJ6r2LIQQQkjAEj0LWHFcKBDR0o3VN8KSjnUUigyIIlqkxhJCCCEkYImeWTBw4EcfdjB7wIBie9QlhWvsrzluKbIwLgxs62xdqBYTQgghJGCJHvho6KArXy+03DW0JerG/jfQ/22nvaXQQvvAV9ViQgghhAQs0QNH3n//u8C7agkhhBBCtQhVi1AIIYQQErCEEKJGDPQ5qetWKwYWqXn6JIOxfIytifDnor/vot67kIAlRE5c/ukDB4/itcHtAwfGfAiMtv9fNGBAvP/tt89RC/WpuWctYGVgWWBVYEVgpC+sLNZ30w684cd04DXgVWCmmrHXvfM1/L2vCKzgv7cCK/nfI2Chv+uFwIvAW/7OXwKmqhmFBKz+wQhgb2B7oLv86EXgQeAqYG4D73MPP+YCP/VJq6mYe8px67c8+dyRs5/7+6pRFLVGFOJCDJ0f8J+sXTPX2+CtJYYMu2zg44/cnfKyrcDJwAfATT5JNyNrAfsDq5f5+0fAX4E7+sCOfivgC8BEYDVfaAcFXuMdf5fPArcDdwLz6vwcE4BJLhjWi04XMF8C/glMacBzZ2FDYB9gI2+v1ei5ish6XX5fBLzigvX9wF8aJGxFwGeAvYBRZT7zJvBH4KkGtffKwKEV5pMFwJ+BW7tsZnp67s8DXwOG1ek5OoBp/p7/4X2+V1H3fEhH7bRT6xffeO+hpRcu3KSjgg9WCxHtEe++MnbM1ns99uC0JhVO/wLs3MNkEQP3Abv4jqzeLO8Dfaz//gfgYNcK0Bw5vOaMnbbL7jcuOfWtbZnfzqCoQEREsQCdkR1RDC1xDINbZxeHDd1q5FOTn09x6eOAn/nPrwP7Ag83WT/aHLjGJ8VKLAJ+BJzVjQmt2VnGx8mBwKbA0Byv3eaarD94Oz7TbTmDfBnnE/5yDWrPoi+Sc4F7/bn/DrzfZO/8U8ARwMbA8JyvPwf4P+Ay4DHfRNWDrwGXA0N6+Nxs4IvAA3Vu9w2AG1yI7Wk++Qnw/ZTX3Ru4GNMw15tOYL4LWzf4ZnNKHcY5qkXYODYBdkjRhhGwtUv/jeDIhHCFC3rbNFVLnnby54bOm7VVx/w2igNaaItgQRyzMI5pK9qxKI5pi4t0tC1aYvaIIV9MeeXtEj+v5Ivwdk22wdkxhXAFpo37KrB0Lxoj44Bjfaf8W19wh+b8HYMwE+O3XXj+rY+3WvJV/85GztvDgPGuGfoLcCOmUWtt8DsfDhwO3AL8ycfb8Bp8z0hgT+Bm18bszeJ8NLXksBTCFcASvpGtNzunEK5K88kuKTcJQ12wHNmgPtWCWYs2AE4DJgOXYpYjCVhlaxF2OXoZGwUM6Fbqa0ogYXras8v/jQa+ThOZh9vfmT5qVLHYEhUi4mInHRQpFuL/qGlavG5lsRDRXuikZfjgDQJ2PnRRnV8N7EbzOHVvGPD55ShvlqDJnNUnuXbl5z5W6sEg4AAXNs7rsrHIkxVovlKq2wFXYKbwTRt0D1/EzNi/wrRW9Vp8t/dnvxHYosbft0LAZ1dvwDtYM+Czq6Z8nlEN1NaWG+cHAtcD5wNLSsCiD5b/q+3n83i3+5cR7PbGfGCaoxNGUUxUoBjHqRopjovVFFNcDvOPmERzaLBa+ti4mOBC7FXAujROc3YMZp7ZowbCUGcT+9TugJnODs3g21aN0HEBpknaqkHP3grsCtyFmb1GUztzFQE+RDS5i1BvLpu2JHC09/fPScAS9WQF4KAKE/EJTVZMkTiO6xmccD7mk9XbBPVmZhLmH7F7k9zPOsCVwNmYyaa/MAa4EPhhHeb47TAT5RFNohUf7s99TQMFfEHd3XWuxrTXErBEXfgmldW6OwKf7sftsyTwG9/pt6i7UK3K/mzM/2m1Jru3ocB3XNBakf6VU+y7WFDEoBqZ5g7CTJITm/D5Pw/8Dfishme/YKzP58fQRFo5CVh9k5WBQ+jZCfMbWKK//spQ4CLMpKCUJWSOUr3IF/PWJr7PL2HatbX60buJMOf/b+e8iShg6U8uobl9AlfFos6+rmHabzZ657hyoR8LWKVSOV0OQZ7aq6VTOqU2fPfZQgtEEXEcEVEgJiKmAHFE5Id1mpiYIh3FYiHnnfhJwPfUbYIZ74vswbl5g3Q9yD0w5UrMdJivF0tt77vaOzwR2DbHa34HOIW8ovZq24YjsVQt+2m41tmzqzFjYiBwJk0SLS4NVt9jHcyJPUrpi3R0w+94zbVYNHwEcVwkLsZQjF3MwoWtiEIcUYgLtMWdxMMGza3Bzuc0LM/UUHUh0mr/fomFhZOzE/FHwAws11HejsJbYOk6lutH72oUFlW5RE7C2pnkq61cCPzb3/kMLK9ZG/mmdLiQ5ghsEdTF/eMXNDaVCiCzSF9kH2CVgM9/GdgSeLRxd7wfC96Zy6xnX2HEgBaiOKZITBzFFAsFIKZQhA5i4nFLMXabrZ7ghltrse86FTN5HUXvyJBNA/17zsQi9MjByX8KMZOxLN1vAbN8kR2FOWyPB9bGtK15aFw3dq3GN1yIo07BDHdhWb6jDOeOwcL+1yO79u4wzFeOKipCnJzTxnwK8BDwIjFvYtn5OxMRgeOx3HXrYPnTVs0hsOUsLFnlwxrCdWEmMXf7XBoF9PVlfR5et4q+thGWA/IU0merl4Al6CkFwbcID28+1gWzxkS0LbMaY44+nIVDWnnjoWcodMR0Fkpm4wKFuJNOioxefRVW2/1LtG666SJOOLVWd3OwTwbfQoVmy3GIC6HV8CFwLXAd8LwvsHEPAvDSWLLBg7CQ/GoSH+6JRb9dXYf2+hemKX7SBbosAtYQFzhXw1wA9spgotsPS1HyRoZnWNe1AmOqaIePXMj8NfAcVvaHFCb85bGKB0f7v4OqiKy+CHOAn6FhXFNuJOZkrKRVe6CANdwF4hUSfT1LeZ7DsfxoL0nAEnlwDLBUhvN2wKJt7mqYSmSFtVjp1FNZcW4ROmMoeH2cROqGqHUADB+BFc+pKQf5zulEzHQhFrM18OMqnKZnu1BzLmG15GLgXT/ucEHr+1g26iFk01huWQcBK3ZB8u4qrzPPj+lYfq9bMLPfOMJylO2MlTwJYbQLRePJXtrnNswE/xjhJuPX/bgO8xv9bhXZ+tfH6rH+N1Z+ReTPImJOI3vN2zl+TMcsKxdj1oVdA6+zhM8RBzRKiyUfrL7Dai7pZ2E0lpR0UEPuvNM34gNGEI1agmjsKKLRSxCNGUW05CiiJUcTjR4NQ0bU864OwJJlLq2uRVLbeW4VWownMM3R4TkU6n0W8zU8CHiZbDUMn6hDm83HClLnzdWYJnFehlIqoX6GR5C9vNZMTPO0RwbhqjtuciHr+1VomL/q1xC14Q2sMHdeTMb8567McO6uLlSjUjmimvd4COazkJW9qV95i4/RXmz/j05hQdsC5s+bx/z585k3bx7z5vm/8+cndCZ1S1u1A+YQvay6GGBmwS0znnslVqLozhxN0R2YdmhX4J6A8xZgmcf/mIt+qrvj4xqY2TV6H7ewuJh5WrYN3DSsj/myZBl0j/sY+hX5Frp/HzgdS70xnWwBGqcRpv0T6cfEwhrEDc72fngN4QEeX0YmQkF12qv9qT6S7ts5OS4HMXDgQGbOnMkVV1zBY489RltbG0QQJcZoHMesvsbqTNp3EmuvvXY9b++zLmQdjPkT9FfWdE1GFs7HnKMX1OjeXvZ+e36KcXA/5kt0Qx/ZyP4Gq8u2YkCE1fqYs3cavptRi3sPpgWeXsNn/z9MI3cVZjImsE7r0ZgTtCD3gKFa8JH3xwmEBXtsjflrzkEClsjA/oQVIaVCdvdtsOieunL2WWdz7s/O7fFzf3/w75xyyin1zjS0PVZn7RDgmX7axw7AEtiGchlWlqnW9fs+9B3uIOBr3fz9Hazw9OWY2aqvMB3LWH5EYBTlTaRLaZGl7NEDmEP9O3V4/n9i2vcbsEhTAn0tr8xoYhaN4XXfSP0m4JwNfO56FvlgCcIjYw4jvzpeR1LnjNxXXXUV9953b6rPTp48mfPPP3/zKKp7NseJvlPelP4ZnXp4hvOu9/5Ur+LIc/z7LnAhaoEv8n/AykKd08eEKzDn3YcIyxe2cUqN9gmEV3p4BdP2vlPHNnjeNz8zM/Trg+ndBY/7I38IFIrHNyrvnQSs3s8RWB2mvNjJd651Y/Lkycye3bObSkmoamtra1Th3vWA32UwR/R2DsQCIUIX2uNraBakglP1UZjmZR/gK5g2pS9rKV4iLO3A8ik3FNsT7ht1NJbPrN48glVjWJChhNIKiN7EQsz/MIRVkIAlCM/avif5Z33+Vj37RktLC4VCIdS1uJFt/jca6DhZZ4YQ7pfXgZVTebOB9/0AVntwcj94R28Slk4kjXP35whP+XIJlo6hUVxOeMTmOmRP+SBoVJgc9wWuA2ujWoQi8N3tR9cMxxF51IHaE0voVxc6gWLcq8JIV/TF5Kv9oJ9th2UQJzBi8BYN0brRARQDxn5POYHGEO579Srm4xY3uB2+R5gzc+TPmm0Fav5alH2VGZjTOwE5sSJpsAQBav5DqF3ww/Fq4ooshSXA262PP+f2WFZlAkx0v0JZ8Htz1NbKwIaB51xMcyTlfZHw9Bufz5igWdBQ38N2mtzqIQGr93I42TMrp510PqNmrshYzCfrm330+cYQnmDyJuApdY1eLZDtGCi0vQz8nuYxH10WKOwt4fOdoFeZCePeYGYSvY9VsLD5WjIK05ANVnPTUxb8X2JlivoaS2M5Z0J2lZeqSzREEB5OWNkdesj9RmC06LtN1B5TsHxnBOZKEvSqgvODmyA3lwSsPsg3CddePUL65IIkSkpsrOYmTUj7/2IpAvoSK2OJKdPytB+ivkwgrIrD6xX+NgxLKktAaowHm0ybsACrV9kRmHhU9B6WCSwA/U4j+qgELHpl5OA+gRL5PcB/YSHr8wJLSsgXi6A6fT+qdx4xapuWIoRbG5CWob/TgpWjCelzlepArh64cL1GPjUG8+ZOLPksAbmSVBKr97At4UEYqBah6Il9Ku5W426PS7DcIVOAGwO/bzdgq2Z48Lj2kYZ/wtILzCW7JutU4ExMhU0f0GAREAwq7VX92QzLZJ6mLmKJZ3oInhkc6FT+fhO2y2uEmS1HkqUkUPo2F/kxkrAo15gG5cFTqRx6XeRgaEbtx1hcFqMTcwD9AubYmYbBwLF+nc4+3LbzsMK5j/uicX7G0jBgGbALLqx10HsdoUNMRR8Ab1N9JYEJ3s/rvUy1YRnBX8/5ncU1HDcjsNQIIUlg26lcCmsVLPcZAVnUm5UXsbqLpPQ5HY/oDexLWHLY1xvlIygBq3dxDGE+Me3AeXzcbPN34GZgEuERhXf14bbtZHFelZuA97CSDKtmvN5xmIn1FHpveZbWwFqAH1JdbrHzaWwC1znA6ZipN87RGXecL/bkHITyU2DLwPOeoHIZm0GB7gdvNnH/fY70SXIHEWYaFY1hNeDEwHOe6cHvEPlgiTUzZNR+lE9mNm4Hrg7MITIaK5cyiP4Tvv4oZo59qYrr/TeWE2psP+if71OdqWj3JsiOPxLTEOfp8DwU833Mk/WxZK4HZTj3JmB2TvmCOutcc5AMJVXoJRUi+to8WqzBdZd0hcFqge/0fmA+0mCJCoLwQYSZrIrAn8toFW4FHsYK4Kblay4sPNqP2v0xzAftMsKdKkvs5YLpoTSnr0qlSTJEWzq/iklsSGBfpMZ+Z+sCL+R4zT2wkj2P+KIfZVj4h/q97e/XG5nhPqYBf8lRkCjSXOkZCIiWFLVjbczU/3iO69/WwE8I9wee4esd/UfAKpXH6frf2j+UY1XC815NpXxG4xhLK7BdgBZzIKaa3aOftf3LwMFYQtGszv5f9nY+CniD3pPIb06PmWTij/nqDSYsSpVEJNwQmifEf27V2XU+PpetgAVQTPFrZxGwxlC9Zu3PmQXHqMzCFze1dnaFFP1WUJPI1jOB/6lSyFoZ2AjY1dedURmucR35m+elwepjHAwsF3jOhVTOZnw/5lO1Q8A1dwA+hRXS7U9Mxeoz/oLs9Qe/iJkKD6W5HYPp4vhNgBl5NNm1dHET+eJ1NknaC3KOqjsv54SMLRnmpXoyIkNVQUFulUA2wAJfihmFtFFYCaOsvnEfYkEgSMAS5ViJ8FIsL2A+GvRg0rkGqzU3KGDCOgwznS3sZ+9hOvB110AcmPEaW2Naxb0Tu6oizV3vi4AIwOEark3JfEz7PD2lUB0HCBvjmvi5lwvcTCxUVyHvShBL0zgN/M8IT66NnNz7F4cR7iT9O2BWis/dCDwbeO2dsdw7/ZFZWHTg5VVcYyN/Pxu4ALNUE5sIQ8yZy2KRgDRJwWKxmMuwyOG0G4lFvUQr1xMhBavnYpHDom9wO3ARqkUoqFwCYy/CzVk3BqhQQzvhEsD36RuJNMmodv5v4MdVaJ82x8yzv2uWJK4ZMn7TjTZ89Yzf00HlyLZ68oEffYWrsHxsiwIErIWBJWZGNuFzL0uYButDqs/jJpqDfwFH0wTpcSRg0dSRg/tiif9CuJYwR9YbMf+MED5HmO9WX6PdhcwfV3GNpTBT4cAmzyMUwqfIlspjoQuczeCHNaeJhL1q+QPwLcLKF71CWDToasDEJnz27Qlzip5F/hosudLTkELfewZuDlUqh/6Ztf1QwkNSL8ywY/9Fhvs7Pi/hoIVeaR/qxOoOHt+HfTdeJhkVGNNTSZDPYUVYs3Az8Ftvy/YcDqrQUH7Qy0ulxD4PHJ4hqvN9uqvbVv45R5M9hQk1drJuTdlvS1qPtpzvYRj1T14aZSj001d4Fstd+K9muSE5uTcvRxHuQHo56RxZ6SZ8+2DSl5UAM219GQuDpR9rsn7uGo9fYrmK+hIzgH+SPlv4MMx8+r0M3/U2FszxQ99cFKsUfj/vfXrNwHPf6uUarBewFCxXVHGN+wOFpq9grgbNUrFgfRf2QwSNh2sgwAzG0o/Mo37r+cqEBe70Bb+zRcD1WEm3pqqaIQGrfurfKFDtvg/ZbM9ZeIuwul34xHEQcBuLS8zQj52II1/YlqRvZWf/Z2A5ln2B35Ateif2vvhWDvf+pE+2vyFca9db+RNWbLxa88j/YTmM0jIRq296eZO0w54upBMQZXkH+acuGe7zwcw6WqRW7GdmzCexBKQ30IR1X+WDRVU+NCGduD1AEPsG5qQZyn/5ABsTcCzpu9W1M3zfDliyUmHmrYPpW46yna7NaAusKfiNJrn/gRl2wr21UsGjmPZwak5OwqHJGU+kOWr5rYhFXofwUMC4fSXgumOxNDv1YonAdeN9uiYT7h3MwxKYHoJFtV/bjMIVSINFlVlmQzrEtIAyA/tmdEs6CPgSpvYtBAh0q1fRf04C7mzWDl5n/oY5FF9GWLX3ZuYeLAhizYD+dCBWkuUxGptk8muB57wDPEjttIEPUN78OABYB9g448Z3do6L5QdY8MtJAeesg6UwObOBWpEBwBkZ0tpcG3DPbwbWttyQ9Nqxavk0YQXa3yOkakFjeRszfz8F3OJjqbPZb1oCVnU7JQLC0OcGmFiqWZxLGbXrxTbATqTPs9PXuQuLDrzAF8vezjuYGXjNwBD5H2NmowUNuu/9sajGEG6tkb/MFOBITBtID4EtX8LMc8tkSGK7AeF57Sijcb8d84kbEyBYHwvcB/y9Qe98d8JLeb0K3Bvw+WcCr7+dzwX1GAe7Bgrnr5O/Yz9dNODTMM1wFGBVm+bjcIa/n2lYTr6pvc0/UrUIs7EKVh+QgDD011IKbYdnqHVGg+tOHe2CxcKso7CPBZE+7Av87/uIkPVrX2xD6gV+FnNY/14DtJtbA6f9Z/SkG0MdmKMsNciG/7sUwhWY79mvgKdd2BsZqLE7DyvJlIdP5EOY2XGXgHOWBM7BnN7fbUBS0bMz1LS8KdBf8CnCEzNvWAfT8zrAZwjLXP80tTVZn4CleikG+iov8nM6evvSIB+sbGwbqMGaSbrovqMDdozNxDa+exJ8LIfUJGpncqLO6RquyHDeEdTfH2sVLKItNEP+A8AT1KZMzd0ZhJsfZPiuz2BO7nlsnDuw9C2hC9yWmMZmFPVNKvprwtw2wFJyXBH4jNMCAyEG+Dup9Sb3IML8veYAj9Twnk7yjeZszHqT9pjjAlZ7X9h3F/p4Re8NMXX7NZjjY2sO1x2OmYBCrvV4is6yDqbi7o0MzaDh6A88j/kB3drLn6OIReO9laFfnI1p86hT7bPLCIuGBVOi/o7a+KMUyWYeughLn0KG9C5fyune78T8CslgqvsZ9cnwvoL3zSwVES4l3OQ3K8Omaccaj4HNsQCH0LmpVnX6XgX+oem/bwpYYzDfj9+5YHMGVm7mQqxkBDk4Eu5CeF2knt7DARl2YM3EDlgUo+ATPkz70/t91J7KqMUaCVyC+ecMrvEicwuWwZsM2qsbaY7kjyTcCr5PeJWFIZiZca2chMMzMvq9HIylbahlsMdELA/fLhnOfQPLYUcGzd7thPkutWAayY1qtKm4GIsgJLCEUlzDKL9mLmIvAYtsUUOHYH4U12PO4gO72d1VIwQsmUF1PwNT+dND5OBBfeAdnIgCJygTlXVIE+UJysoFGXb8uGD1E9cY1GITsR+WA2qTDOe2uSAzp0lrqp2ccdH9eU452Z7GzG9Z+KoLrrvWQGDdD9PwbUE2t88zffOThfuwwAUCcxteRHUF0buyDKa9C9XYvke42Tr0/ah4ex8SsLbAnOouxvwQBlXIXXVloDMgiei8C4HNAs+7LUW23BOB8X3gPWxFfuaJvsa/sbpwF9G7M7sfnzHSbiDmk3aPt8NYqs9xtblrMH5LeM1OEmaiv9PcyUMvyHDeTuSjsW/HEuhm9dfZBHPRuICw5J9UKC59jb/zrML69b4OVDOWr8+4Tl3v/bZaJrjw+oUM515Dd+WQhGoR0r0N/lJg3ZTak+Wx6K4Qn6H1sMKpexGuKv1TD0lGN8IyD/emWmflaMXqJ46g79ciJKO25GjgpzQufQE55MX6YRX1/lZxjci9mEZ5HcK1yF9OCEZ79FhguvwYesI1Gc3O2RkEnAj4doa0BZTxOzqO7BnJh2EBD49gJsetAzXdw7Co1PP8GntmLCoO5qB+MuZIXQ1XYGkOQtkMi1w8lbBI9BKjvC1vy6i9m+HCpar/ojxYaVguw254OcxPYS8XnK7Don2KCcGzgKle9/MJfdWMoc4PpYi0Gt6H+tT2mJ+a8mKV1wh8B0s8eXovHYO/xgJIJlVxjfWwKLWpmK/kZKzsxYu+oJMw/a+M+dts4xupjapYYElE9h5O78i8P92FgpsIcxyPsLQJL2Ilj6phsgvWP6+izy6PBR0d6vfzqAvJL/kzxol1aXksxcnmfqyfQ2TiR77BmZaTb+XZGc2nS2OF4vfGAmD+6n1/UTe+S5H39Q0wbdXnCStd1ZXfEZ5qQvRjAWt2xt30AN8VfcY1Ci9iDqWdWLjrKr5bzhoZt8AH4Ec9hDR/kfAkgFMwG/qL1EYLGWMmmG19l7RioL/NCVg9s3YNsbLte7a3zw+bpMRI6EJ1JBZQsnOV11rdj318gWnrssgUfKwOzlHROc83No/3oja/HzgL07gVAitO/NS1PnNy8MEb432WKh2zl8YKMrf5OOjoxgTciim4yUl7fDg9BxwR6Ci+E9ndItb14yhfx17k43mjWn3u3dg34YNzSHh7phzQJWARWD3+Jp8wyWgmHYP5D21FvrXp7k2Ru2Rc4HXP9wluVh3a9heYrf9ywnzPtsdCk6XFqsy5rkk5h/C8TY1mFhYpdhnZorgoY2JupfZm2h9g5VHohUEGm2HO4wRG+J5CPj5ZP/E564icnmkQ1Wsj02xovg/8sQYbje8Bm2JWkWr6/Tg/tqthqaZje1smdOSD1RTagB9geT2ahScwx1B6iBw8kHCH+e/WSbgikTDz4AxRM8fVYeLsC1yJOX3P7qVO7/t7v+wNLPQF8Re9tK98hAUZvJzh3GPJxx9rIaahvqCXaEIWYEkvf0Jtatf9C0umO7fJ89j9EPOfFBKwMknnXyc8ESI1ynt0dIp7+S5hKt9ZvgtrozFZyS8OnKC2wnzXRM/cgKUVeYXemYJiP8yPkV6Qj+xcerfp+nUXcBZkiLo8m7CakuVYhJm1jm9ywWI6ZiX4SY2dum/DgqZmNmEbdLpw9Us5tvcXAatUi7DLUSWP+ICf38D2/BDLqPtIitDlXTMswv9s4LNdRcTU/2Q4SR6UTXh4ECn8izo7OzUSzdl1Ui8Wsg7GzFDzmvD+nnXh6vo+0lf+RrYkmath/lh5+fyd7+/9lXqvHynmoX9gQUzX1jGdxtd9DaBR62qXI8YsKWcipMHKgesws9u/G/Dd77pA8bcUWQm+RVjNwQ+wsPRFNNLnJg6e1HfEIgoFqSO19iKbCajRzPOJ/Esu0DQDizD/wV2obWLFRnAWlrk+lC+Qn/8UWLLPHYCrqX9Rb8rUfjzfN7AP1/m7b8IiA6fQDOb7iEOxdBDawUrAyo3rMV+Deoai/sO/8ybSlXf4SgbtxiNN0LbXBk4eBcz/YWClD8VxHMVxz9rrKIpK/7YEpNjqbdmH/wHsRnMnv6zE3Vh07um+6aCBfpAHulZhOo0tfRPVyB/rpIzP9j9kS7ZMhdpz+2La+ycb+M7v8/s4toF97w4XYi9qoMB5KzG7UOQy8vGTiwJlhb5c41jFnrHaYl/Ccl2113jXfj7ma/QQ6QuhLhnoe3VOk7Trh8ScFzhoN8PyF5Vl2223nTdsmFktCoVCj0LWnDlznk8jkGEOqAT4KnzYJO38ki8Uj/TSnKwzMX/BHTFn6Pl1brsjfUxeUyO/k/czuA7UgilYMtFihvqQ+9egL13m8+6pNRBqKwU5vUTMEb7J/WsT9P/XMB+1r7qgH9fNVzbmUGL2ybnY8izCygq9rRQ9fV/SfNMn2p19VzE/5+ipG3wBOda/i4Bi1KHJEJ9tonb9LRE/CtidDaaHQqR77733vePHj39q9OjRFIvl14oBAwawxhprzB0xYsQ1Kb/7D6Q3F1/VZEkn38RyF/2ti9Nub4o2fNYXmg19s/MvaifQ3YM5Gm/m3zW9xq4IbwZkvq9lv7oaM/lNz5CLqrVGjuVnYMlBj8Vyjc2vUZqQB4g4hJitsDJm7zdR3+/wsbsdFgRyOz2XTCOjSfRR4DBvh9+Sf13Neb7edaSMWLySxrqz0L/zYJXK41A3k8V9mE1+Bz/WILsj/R3AnaTXWHW3yyv6PcRl1LELfHd6G5ZgkCYL+i1lh94GSzdRKPMsBR/8j/eglXrrhhtuOG7ZZZfd8/XXX99l4cKFA7pcLwLitra2OyZMmHDDbrvt9uoDDzyQ5k6fx8xEu2OJY+Nu7m+et/GfaM4oqP0xk/IEn6Tf7oXzzFTf7KyAmQ+3TmRlp4qAkkcwU+rDPh476vheDnABeO1u+lXkO/jHsJIqteYi15TsjZUeGlxBaxK5cHIelnKhVryNafcvw/LibY8lVt6yio39IuBBYh70d/4AcUOiqglMa/FHF4S3wZKrboMFOo0mezWIp3xde8iF+I+ovRN/G6YZHlOmz8/G3GSU/7CGvgEVOWqnnVq/+Pp7D41fuHCTjorOMxHtEe++MnbM1ns99uC0HG9hWV9st8TKD6zl/xd1o3p+HXM4fsQny7dy2iVFVC550VmHAZMXS/TwnKlzdrW2tnL//fcvP23atKiMpmt6FEVZfApa6L4cUWkhnKepgHprzsdhyRm3wMrmrI5lHR9SZkGZ5scLwDNY5Np7DR4nlcZxkcakMBiewvewrUG1MMdgCXU39w3DWlim8nEVBNnSHPwUphF9rw8kyxyJlXdbCyv7tKa3y8rdzKdzfd2ZgZm//4lpgj+gMWkhBlfQfLbT2Ch+CVhNIGAJIYQQQsgHSwghhBAC+WCJenPdBptuvPLCBRMLHXGxOzm60NkCdDKoEBcWtHDfplOfe0WtJoQQQkjAEhVoiaI9hrUM/F7c2f5J79Y4IioAUcTQQoFFHW0H0jszhgshhBASsOipVE7X/1alJLIHZhY62jsj4mLcTfhQDHEMxAyII6JogDL7CiGEEMgHS+SQja8Q2yGEEEIICVhCCCGEEBKwBMrHIYQQQkjAEkIIIYQQErBEwIuMqV+9USGEEEL0h1qE9CczYFkxKoopAjFFWjqLaiwhhBACabAE+VRpFkIIIQRKNCp6BUOwQqVbAyu54D4TS2b6SMaipMthlduHYcV9/y9w47A+VkS2WObvs/3+3k95L2v7ea8Ar1K+0O6Gfs/vAU9Tuej4On7NVwMSvw7BCiNvCazgY/g9rBDs08DbOb7XUjHeYgrl6Tx/T/NTtucWfv3xwLtYUd/7/Odiyne8HrB0hXc8E3gN+DCHthjkbT7If3/Z77kcSwITMaXyQuAJ/5cKBYC3Btb1NpmDFfidDLwILCKdEnuC9625PbyPZf2z9NCnl/d+Wq6N5wNTvY3byK9g9URv6+6U8m8B73gbpWVtHy95PMdYn19aUvheFLACze+mvM+BwG7AGn4vfwH+TVhB7U385w+xItmV8h6OAjb2Z2kDHkzxTCsD2/jYw/v1ZJ+DGlHgXJAo9nznOhOf+Ocq68ZPVTieXWVC/OSqE965dvPtVlGr9cyNG27xw2fX3Dh+upu2fHqVCfEzK68XP7XKuvFLq64XP7viupNy/OpdfWFsSzh7JY93gJN9UQ0RkM5IXOM5X+hDBL6by9xP8pgB/K8LLJX4VuKcH1X43AbANP/cPBcQy/GNxDV/nPK59vC2Lvc8b/vzrJnTu/1VijYsHS+6wFSJ1YFzXajt7hqzgUsTC38lBgM3pbiv94BzAvtPuT55ReK69/ji1B2twK2Jz16cEMy6W+C+C7xQ5v6L3pd3TikEXpvyfXw9ZZ8+IkUbzwf+7AJiHqzvQkWl73zB73udlNe8KOA5Nu/hWrv4Z9OOjf0Dnn1Cl2c/JjAI/HOJc+cAX+phDF2e+Pz7PVi1RgCnVhi///S5chmtyL3ERNgZKTUm6XOJ1ptvAH8EPu07r+4Y7wLE9b7zS8No4KDE7+v2IKxkbY9xwHd8UVo55fXilJ8bCpzvi0W112zxxeRKb+tyLOPPc65PhvXsU4UeFoLNvQ8c77vsclqcr/uufZec7m8p4ETgD4kdNxnt6z/wXTrAdsBhFYSXkkD0L+D7ZbQiy7nQdnYFYSjyTcy1wHEBbRLn9J7jlBuar7pwsn2d5rO1fLH/KzApp76SfI5tchwbIQLSfl3myUmu0cvCCOB0n0+7Y09gr4Bn+oHPQ2MSGrIZib+vB/waOFjLMb3ARBgXGTh/XoEogmJRPvFlh28Ut3Z0FgpxXE8vqwNdwzHQF58HgV9iquKS8HIosI/v0mdR2USS5KBuNF6HA791zVAIc1wb9mxCpV8APus7y7GYivyYlAtYCCv6hLMH6U0E3U3OR/piUuJv3vbPJYTYA4B9fVf6+5SmutT7HOCnwL3eht3d40eY6abcrvxPQEkbPc37yl9d8BgAfM0FkzVc03WlC1mPp7i/d12w/Le/29I7/i/gEO9/2wLf9AUnK68DJ7iwMwT4NnAnZv4rsSlwkv+8wPvUjDKL3wUJDcMs13T9zvvsAL/WCZg5dbi/g/nAJQ3YUHVgmsD7E30gdkHnm65JGg+c6VqUBTl9730+flsT73VHF2BX9/5ymfej63J6juV9U7hzinF0N3Cej5GozMbjqZTPOtbvgS79aaeUz0YZbeDpwFFd+syqwFm+EUx7nZIm7gPvl7f5NZf3+97dx+AtWpSbvBZhkZgCjFxx3oLTH111wqx4zQ3kkN+ts3qBePX121oWLtimGEfdzrox1t5e95nOllwEhx8mtFa/9gVufhc/icNdG/FFH+Qfpbj2qMQO6FXML2IHnwD39B1/CCW/gke7/P8twMPA1T4OdqmBgIXvhH/mwkOWRWdDzIRUWhzO94U97tLWT7gQs4ILAHlrR58gzA8uOcecmRCuHnXh/KUun/tfX0T+gPk6jfU+9jV69uuYB9zRjSBziwtz5/liukeVAlbpmpf6gjXa3+3Ofg8jfWFewdvsPOCuMtc5mMVa2bf99zu6fOY1X8TO9/5TAP7Hr/lKAzTkj3fTB25zIfNu1xBu7Yv3czl975t+7a7vYHnM7LcrZho92/votCqe4y7/rnEukA9LIWC9gZlw8+C/E9qmK4G9XbA8ArihB1+qShwA3J64z0EurIe4bayXMInf1GUefg8zDV7qG4FntEY3uQYrBiKiocNh30IMKLVAGY1zEYhoj6GjB/1VnJ8OcC/MmR2frE6uMBHd4RNw2h33V3xXCnAVpq7fzjUGB/r/deTUz2/2+x6JOSXnyb99gh7qE+XLmIo99EV/jcU+DXe6JqtcWz7chJ11fRabNRe4Nu6lMp99FTMh3oyZIT7jAurtKdqp3Du+2gW8kZhjd6HKcNoYOM21YxO8bx7pAuJhwOcT4+KcMt81EDOvlwbwz7sRrpLC44kuaG/qwttX/dr1ptzW7DlfVHdgsWP8czV2Y3nLtSbXA1u5UPcVF3izPscUF9LHpTB55+2asaxvICOfK0qmuC9g5vXPpxgHXTV1b/i7GOHXe9rbbRKLNafPe9u1ptioFhObvjX8PpM8obW5F5kIY2BRrCSZPY/puN6T7GcTv1+YQsMQB0TAHOI7rLd88nzOd6x7AJu5NuwGwk1c3bEdZlIr7cLy5DnXxpzri/t3XBv3+4BrDHNtDkC7CwsLuozf8d20bwEzM83O8XmWKrPjjbx936G8021y5/uPHr5nsgtYB/i7mZhyYSn3jrdNvONXcspV8oELU7f44nWMv4PjWeybckyF6MX1sKi2kgbk4h6+bxZmFpyYMJGd00R5XpZicaBITOXoyjx5G3Mb2Nznpa0xbfqCjM+xSsK/qCPlvLW8v4/OMvPelDImYroJFtrQz7nGNxuXYObBIS6Q3xMQqTnAtUwrYdrPjX1jcCGmBS14/zza56lxPVzvKX+OlfxaD/p4LmmJX895vpGAJXqZ3ivOpSjhcD7uNDklx1vcKiFQ3O27q6JrrXby756EqfMXBOyAl3XhoOSDNdw1I8cnortuIH9B9DrMbHKGL/Jn+SL/cEA0ZCn6bUY3wskymAm2OwHrcszPKa9n+TZmxip0I2D9298PZczJJR5JsWgV/Tn392svkXIeW9H/LflgDXMB+ruJd/znHN/vI96+3/P3cHbib2fzSZM0XYI2SlqUtKHtz3iqhiGJlCH1VuuPS4yjEhMxV4BVWewzNa2O9/Qm5ts5zO9tZIq5oetztPpzHJHYRNyeMg3EDizW3HXHJCwQqKc59ev+8zuJzz/k/exTmBZ4E/89LfMxM/v2wGqYA/1E/7lkwr4npRzwKqY9vwjTyi/tQt83fG56GvNruzLnVDESsES/oqXLBJvnJH+M98l5PpA7EpPd45jJqLTTezTlNUf5rm1hQrwc4BNESVi4ETPT5G3HLbimYU3XyCwH/MYX/rYMasvObjRcE8t8/p6cn2UVFvtRdWVhgMCYhrn/8RIgtXnlxi7tM8AX0paE9uxS8nf63s6PKPE9F9BzOoUocPwsTAinrTRmrTgDcweIuuT7KjlKT3XtyCLq63zfEVATrLvnaPHnaE3kODsj5XN0YtplypjV0lzjMyxODXGrbyxxDdMVvulc0jcdIQLWQBdAT8T8Mltd+1TawJ7jbZB2nP3e3/HRmIl8pG8cl8a0eDtiju7fTKGploAlBN37hMzuktsoj8G0eSLEux3zEfhy4vfkbvOoAAGrUEH9/ZJPYBfllIyyO2G0DfPRWdGfb13MJPSELwwDK5zfnmjr0a4leCHx9w+7OJuO98m6lXA/tZ60Sg9W0EzM7iGKk0TkUtTDIlgANkoIv/NSzmPLlvnb85gJ5Nc1eMezgGNd+C9gZuaTUzhGv+gLc4sLrYNSCNxrJTRxU1IIZiN8AUxjJkuzwEa+yHfnqzgTi2w9n/o7OC+dSGMwM0V/qfQc72Imr3MTQk5P3O8CdXdRhEXgyRRC0AmJc0djPoMlbfu4xMZhkgtFoRrCUtRxKafW2/6dCzLIAI/4sZQLflv6eN3W+9sm/l2fCdh4ScBCtQjp7V5bObX3Ikwd/NlESoVrc9JeDUxonU6islp+LV+o0mhDfpr47F6Yk3BJMDgnZ2Gk3D0chfkWreSC4+YpdtulbNwb+yKyo+9wSZgND+4S0n17DTQcRcx5+KYM5z7kE/kQzAn5dN9VUyHL++cTGoBnU3zHe1gAQUmA2hfz1QMzX55Zw3c71dun4ALXv1Kc84Lf61gXOnejsom6BQt2KM3Xj6WIgFnaBe5K7ZwUFNNoan7B4jQsG2Mm9tKY/WnKZ8+TVszsVdp8PZlCwOr6HJtj0cOldjsDi94kIHXHjVU8w7aJzOu4BogKeeKOcaGeQB/UszF/yPV8PDxL9UE8f/Oj1eemS13w2gLzTZuKEo0KEcwViYlsZxeGyslva2D+O5Wy+27hg78kVEzFfJWSx9SEbX+sCyyFlKaVWzDH0Wswf5HSrnIzn1Bb6tBmUzDV+kcJn6FBKSbGvyYEwEN7mICH1vBZhmQ8785EyaCxmLl2TIX7/wGLHcCfIJ2mcm7i/V6DmShKi/2nMD+UqA6RdVGAk/yfEhqMU10LUI6jsGiy0rlXUl7jOTVxX/uU2UQvnehH81IKRkUsD1qpjU/C8k+V3uvFVSTEzBIgM9i1MLskHN5vzvAcJ7DY52m8P8dQapNElG5Mxd/0duvAAnu6m/umJbRBX0hEcIcwA9OkX4Bp7LOwD2Ya7G7TfVMiijAi/6hsCVii3zClS+TTaZgP08aJPrWSa7f+DPwEc7oeV0aLurf/rd13WttiTp3JY1sf4NP9vJ1IVxIm6iIczPAd4MxEAtPd69RuN7mwGaIxuxuLHiwJIBdjfi7r8nE/s119dzuiycZ2OxYiXjKB7YZpPL+ciC4c6YL671ns7LvQhd93U77jod0sJiXNzHEJjVaz8LOEYLORL/bfSCyeBd8AnONjolSX7+eUN1/FWADI3MSCeDaLqwkM8HH064RA91yAub2rZvTkxGZlW58HBtZAsB/jQuGyru05wPtKUjN5TgpzXLnnOIHFpvcd/LnSjp+hfl9LlznGJ6JYuzIxkfH/SdcCbddl3vsU5lpwZSLSMWups/tdWC9m8MHcywXqm7Dgju0TG8RB/vetEpuAF7RMNshEGMVxoUXJF6i3ibAlhoFxbhmxTvOJpZQM7xgslcLbvpiOw6JVColQ7oFlQrz3YXHI+lUVwpr/7RqdwxN5b87KcO9/98m5VFLmLBca62Hi+A1Ws/Aw0psXT8Z83bbyneEZvhi/68LaSKzUz4jEjvLVJup+t2PRdqf7gvlZf5ZXMB+t4b5wjEwIZd92YSEr92JmqzO8XX7m7/iVJmmTaT5mLvFnX9N/ftmF/wGYmWWZLilRzuth6nwYM9UclxAe9nLtyEAX4JZKaK9OS2ki7I5SOoobfLwfjvlj/jHHdvpcIut65H1kfGJeWejC1YVVfMcMb6/rscCR413g+UuKc3ekfDLZEieVMa9PwqJki5ifYKX551qfa5fwDeEliU1iPRQx2yQExSN9zn7N238wpnUe5n//rYo+N1DAWjBgwIK5HR0Li5Kx6paYtAi0ENEWRQMWUejIya/oIMxH6Ju+SCzHJ3MlzXSh6AcJ7VOSE1lcI+7PLmRRQb1/tWs5ShmOr6D7HExDEiHQ3ZnNLsRMk3u7sHaFa1feK+OIGqWI4CokzCRDy5gPOl0DNd4FxDRRYdP93n7omp/lfaFcqRtn8yexbOJ5RBEOTswT1WomzvVd7Xcxx9ih3dRpXOTalHMx3460ZsvhZdq6pFXdPfGOv5LzwpRMcjos8Ny7MBPXj1xzsgRmUl+DT+ZUu9yfp5jCrHySb3ImeV9ZwY8kT7twdVsKM1ZpDAwo42N3BubXNMQX11dY7OOUdUEvjaMl6D5VxzsuMP8khYCT7MvlnuN2fw//633zcp+L/lFm3Rzaw/3RJS0E3RQ+PzLxLNelKBl0P6aJnegCzi97WNMHkT71DhVMvJ0+Tz/p97xhmUCB2b5BPrMBKUSaPiV4XfgBFFba/FPbjFzYNir+WHEcUQ9xOu6MBw6Bx77wzKPTc7zyBi6slDL8Fl1Qed4n4AcrnLsni4ub3pbCwbSkrh7jgtM1rtnqOsns4ALIQp883ymTJHDXxG74Zrp3wJ6AqerB/AzK1cdbEjNdjvTvu71CJM0qfo8Fn8TTLkibYAkVJ2B+XC2+EEz16zyYY/TOdphTbBEzVebhtDrcn3szX2RGurD+vN//naQrqdTi11nZtWB/KePgvLK/k9Jc95cKSVHJ6Gh9kL/H2Rm1Ny1Y1NVEFzqXdmFzmm9g7smYW2pTFkeuLpPQbD7nY+3tlCVStvM+UK5ET6uP4xGJ/vxIFW26JOZrNKRC+oMp/j3tKa/5KR8zlZ5jGBYAM9yfY3KZ7OQruuZqQICZ/6VuBKwdMCXDq6QrQ7URi81w08ok4F0+4a/3KD3XQSx4/231eeOKHjSkSybmhVV9o/ie389DmOa4E9EYAUv0+f40zAdoW8DkJ7Lt8od4my/opZPaYF+kOhTSTVJb2uqCwPwcLRWlay5QE4uc+9WiOkRiCyGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCiHD+H3vEsXLxBPhOAAAAAElFTkSuQmCC';
+async function jgLogoPngBytes(){
+  if(JG_LOGO_PNG!==null) return JG_LOGO_PNG||null;
+  try{
+    const bin=atob(JG_LOGO_PNG_B64);
+    const out=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
+    JG_LOGO_PNG=out;
+    return JG_LOGO_PNG;
+  }catch(_e){ JG_LOGO_PNG=false; return null; }
+}
+
+/* Builds a job description as a real PDF: letterhead, title, then the text laid out so it breaks
+   across pages properly. Returns the bytes; what the caller does with them - open a tab, save a
+   file - is the caller's business, so preview and download cannot drift into showing two different
+   documents. */
+/* ── THE DESCRIPTION IS RICH TEXT NOW, AND THE PDF HAS TO CARRY IT ─────────────────────────
+   The editor lets people set bold, italic, underline, size, colour and typeface, so a PDF that
+   threw all of that away and re-derived its own bold from a colon would be showing something
+   nobody wrote. This reads the editor's HTML and draws it.
+
+   It still accepts PLAIN TEXT, unchanged, because every description written before today is
+   plain and so is everything the AI generates. With no tags in it the old rule applies - a short
+   line ending in a colon is a heading - so old documents come out exactly as they did.
+
+   Only the three PDF base-14 families exist, in four styles each, so a font nobody can embed is
+   mapped to its nearest relative rather than silently dropped. */
+function jdRgbToPdf(L, css){
+  const s = String(css || '').trim();
+  let m = s.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i);
+  if (m) return L.rgb(+m[1] / 255, +m[2] / 255, +m[3] / 255);
+  m = s.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (m) {
+    let h = m[1];
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    return L.rgb(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255,
+                 parseInt(h.slice(4, 6), 16) / 255);
+  }
+  return null;
+}
+function jdFamilyKey(css){
+  const f = String(css || '').toLowerCase();
+  if (/times|georgia|serif/.test(f) && !/sans/.test(f)) return 'times';
+  if (/courier|mono|consolas/.test(f)) return 'courier';
+  return 'helvetica';
+}
+/* The style in force at one piece of text, worked out by walking up its ancestors. The editor
+   writes inline styles (styleWithCSS), and the browser's own execCommand still emits B/I/U in
+   places, so both are read. */
+function jdStyleAt(node, stopAt){
+  const st = { b: false, i: false, u: false, size: null, color: null, fam: null };
+  for (let n = node.parentNode; n && n !== stopAt.parentNode; n = n.parentNode) {
+    if (n.nodeType !== 1) continue;
+    const tag = n.tagName;
+    if (tag === 'B' || tag === 'STRONG') st.b = true;
+    if (tag === 'I' || tag === 'EM') st.i = true;
+    if (tag === 'U') st.u = true;
+    const s = n.style || {};
+    const fw = String(s.fontWeight || '');
+    if (fw === 'bold' || fw === 'bolder' || (parseInt(fw, 10) >= 600)) st.b = true;
+    if (String(s.fontStyle || '') === 'italic') st.i = true;
+    const dec = String(s.textDecoration || '') + ' ' + String(s.textDecorationLine || '');
+    if (dec.indexOf('underline') >= 0) st.u = true;
+    if (st.size === null && s.fontSize) { const v = parseFloat(s.fontSize); if (isFinite(v)) st.size = v; }
+    if (st.color === null && s.color) st.color = s.color;
+    if (st.fam === null && s.fontFamily) st.fam = s.fontFamily;
+  }
+  return st;
+}
+/* One entry per paragraph, each a list of runs. A run is a stretch of text that shares one
+   style, which is the unit the layout below can measure and draw. */
+function jdParseBlocks(input){
+  const raw = String(input || '');
+  if (!/<[a-z!/]/i.test(raw)) {
+    // Plain text, the way it has always been stored.
+    return raw.split('\n').map(function (line) {
+      const head = /:$/.test(line.trim()) && line.trim().length < 40;
+      return [{ text: line, b: head, i: false, u: false, size: null, color: null, fam: null }];
+    });
+  }
+  const dom = new DOMParser().parseFromString('<body>' + raw + '</body>', 'text/html');
+  const body = dom.body;
+  let tops = Array.prototype.filter.call(body.childNodes, function (n) {
+    return n.nodeType === 1 || (n.nodeType === 3 && n.textContent.trim() !== '');
+  });
+  if (!tops.length) return [[{ text: '', b: false, i: false, u: false, size: null, color: null, fam: null }]];
+  // Bare text with no wrapper is still one paragraph.
+  if (!tops.some(function (n) { return n.nodeType === 1 && /^(DIV|P|LI|H[1-6])$/.test(n.tagName); })) {
+    tops = [body];
+  }
+  const blocks = [];
+  tops.forEach(function (top) {
+    if (top.nodeType === 3) {
+      blocks.push([{ text: top.textContent, b: false, i: false, u: false, size: null, color: null, fam: null }]);
+      return;
+    }
+    // A <br> ends a line inside a block, so each one starts another paragraph. brSplit records
+    // that the block already contributed something, so <div><br></div> - an empty paragraph, the
+    // commonest thing in these documents - yields ONE blank paragraph and not two.
+    let runs = [], brSplit = false;
+    const walk = function (n) {
+      if (n.nodeType === 3) {
+        const t = n.textContent.replace(/ /g, ' ');
+        if (t !== '') { const s = jdStyleAt(n, top); runs.push({ text: t, b: s.b, i: s.i, u: s.u, size: s.size, color: s.color, fam: s.fam }); }
+        return;
+      }
+      if (n.nodeType !== 1) return;
+      if (n.tagName === 'BR') { blocks.push(runs); runs = []; brSplit = true; return; }
+      Array.prototype.forEach.call(n.childNodes, walk);
+    };
+    Array.prototype.forEach.call(top.childNodes, walk);
+    if (runs.length || !brSplit) blocks.push(runs);
+  });
+  return blocks.map(function (r) {
+    return r.length ? r : [{ text: '', b: false, i: false, u: false, size: null, color: null, fam: null }];
+  });
+}
+
+async function jdBuildPdfBytes(title,bodyText){
+  const L=await loadPdfLib(); if(!L)throw new Error('the PDF library could not be loaded');
+  const doc=await L.PDFDocument.create();
+  const S=L.StandardFonts;
+  const FAM={
+    helvetica:{r:await doc.embedFont(S.Helvetica), b:await doc.embedFont(S.HelveticaBold),
+               i:await doc.embedFont(S.HelveticaOblique), bi:await doc.embedFont(S.HelveticaBoldOblique)},
+    times:{r:await doc.embedFont(S.TimesRoman), b:await doc.embedFont(S.TimesRomanBold),
+           i:await doc.embedFont(S.TimesRomanItalic), bi:await doc.embedFont(S.TimesRomanBoldItalic)},
+    courier:{r:await doc.embedFont(S.Courier), b:await doc.embedFont(S.CourierBold),
+             i:await doc.embedFont(S.CourierOblique), bi:await doc.embedFont(S.CourierBoldOblique)}
+  };
+  const bold=FAM.helvetica.b;
+  const W=595.28,Hh=841.89,M=56,SIZE=10.5,LEAD_RATIO=15/10.5,MAXW=W-2*M;
+  const pick=(r)=>FAM[r.fam?jdFamilyKey(r.fam):'helvetica'][r.b&&r.i?'bi':r.b?'b':r.i?'i':'r'];
+  // The editor works in CSS pixels; a PDF works in points.
+  const sizeOf=(r)=>r.size?Math.max(4,Math.min(72,r.size*0.75)):SIZE;
+
+  let logo=null,logoDims=null;
+  const png=await jgLogoPngBytes();
+  if(png){ try{ logo=await doc.embedPng(png); logoDims=logo.scale(150/logo.width); }catch(_e){ logo=null; } }
+
+  function wrapLine(text,font,size){
+    const words=String(text||'').split(' ');const out=[];let cur='';
+    words.forEach(w=>{const t=cur?cur+' '+w:w; if(font.widthOfTextAtSize(t,size)<=MAXW){cur=t;}else{if(cur)out.push(cur);cur=w;}});
+    if(cur)out.push(cur); return out.length?out:[''];
+  }
+  /* THE LETTERHEAD IS ON THE FIRST PAGE ONLY, and so is the title - the editor shows it that way
+     and the two have to agree or the preview is lying about where the text will fall. A
+     continuation page starts at the top margin with the full column to itself. */
+  let pageNo=0;
+  function newPage(){
+    const pg=doc.addPage([W,Hh]);
+    let top=Hh-M;
+    if(pageNo===0){
+      if(logo&&logoDims){
+        pg.drawImage(logo,{x:M,y:top-logoDims.height,width:logoDims.width,height:logoDims.height});
+        top-=logoDims.height+10;
+      }
+      pg.drawLine({start:{x:M,y:top},end:{x:W-M,y:top},thickness:1.2,
+                   color:L.rgb(0.88,0.07,0.11)});
+      top-=24;
+    }
+    pageNo++;
+    return {pg,y:top};
+  }
+  let {pg:page,y}=newPage();
+  wrapLine(title||'Job Description',bold,15).forEach(function(l){
+    page.drawText(l,{x:M,y,size:15,font:bold}); y-=21;
+  });
+  y-=8;
+
+  /* EACH PARAGRAPH IS WRAPPED ACROSS LINES AS A SEQUENCE OF STYLED PIECES.
+
+     Words are measured with their own run's font and size, so a sentence that turns bold halfway
+     wraps in the right place instead of at the place it would have wrapped had it all been one
+     font. A line's leading follows its tallest piece, so a 24pt word does not sit on top of the
+     line above it. */
+  const blocks=jdParseBlocks(bodyText);
+  blocks.forEach(function(runs){
+    // Split the runs into words, each word remembering the style it came from.
+    const words=[];
+    runs.forEach(function(r){
+      const parts=String(r.text||'').split(/(\s+)/);
+      parts.forEach(function(p){ if(p!=='') words.push({t:p,r:r,space:/^\s+$/.test(p)}); });
+    });
+    /* An empty paragraph takes the same room it always did - one line plus the 4pt the old
+       builder added - so a description written before today prints at exactly the same length. */
+    if(!words.length){ y-=SIZE*LEAD_RATIO+4; return; }
+
+    let line=[], lineW=0;
+    const flush=function(){
+      if(!line.length) return;
+      const maxSize=line.reduce(function(m,x){return Math.max(m,sizeOf(x.r));},SIZE);
+      const lead=maxSize*LEAD_RATIO;
+      if(y<M+24){ const np=newPage(); page=np.pg; y=np.y; }
+      let x=M;
+      line.forEach(function(x2){
+        const f=pick(x2.r), sz=sizeOf(x2.r);
+        const col=x2.r.color?jdRgbToPdf(L,x2.r.color):null;
+        const wpx=f.widthOfTextAtSize(x2.t,sz);
+        if(x2.t.trim()!==''){
+          page.drawText(x2.t,Object.assign({x:x,y:y,size:sz,font:f},col?{color:col}:{}));
+          if(x2.r.u){
+            page.drawLine({start:{x:x,y:y-sz*0.12},end:{x:x+wpx,y:y-sz*0.12},
+                           thickness:Math.max(0.4,sz*0.05)},
+                          );
+          }
+        }
+        x+=wpx;
+      });
+      y-=lead;
+      line=[]; lineW=0;
+    };
+    words.forEach(function(wd){
+      const f=pick(wd.r), sz=sizeOf(wd.r);
+      const wpx=f.widthOfTextAtSize(wd.t,sz);
+      if(lineW+wpx>MAXW && line.length){
+        // never start a wrapped line with the space that caused the wrap
+        flush();
+        if(wd.space) return;
+      }
+      line.push(wd); lineW+=wpx;
+    });
+    flush();
+  });
+  return await doc.save();
+}
+
+// Opens bytes in a new tab, or saves them, from one place so both behave the same.
+function jdPdfOpen(bytes,filename,download){
+  const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
+  if(download){
+    const a=document.createElement('a');a.href=url;a.download=filename;
+    document.body.appendChild(a);a.click();a.remove();
+  } else {
+    // Some browsers block a tab opened after an await; fall back to saving rather than doing nothing.
+    const w=window.open(url,'_blank');
+    if(!w){ const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+            toast('Your browser blocked the preview tab, so it was downloaded instead',''); }
+  }
+  setTimeout(function(){URL.revokeObjectURL(url);},60000);
+}
+
+/* EDITING THE DESCRIPTION FROM THE REQUEST IT BELONGS TO.
+
+   Open used to build a PDF. A PDF is the right thing to send somebody and the wrong thing to be
+   handed when the text is AI-written and nearly always needs a line changed - correcting it meant
+   going to the Descriptions tab and finding it there, and while the request is still Pending its
+   description is not even shown there, so there was no way to edit it at all.
+
+   The text for a hiring request lives on hr.manpower_requests.ai_job_description, which is what
+   the PDF is built from, so saving here is what changes the document everybody else sees. Where a
+   recruit.job_descriptions row also exists for this request, it is kept in step - otherwise the
+   Descriptions tab would show the old wording after an edit. */
+window.mpJdEditOpen=async function(manpowerId){
+  await tpEnsurePositions();
+  const rec=(MP_RECORDS||[]).find(r=>r.id===manpowerId);
+  if(!rec||!String(rec.ai_job_description||'').trim()){toast('No description to edit yet','err');return;}
+  jdOpenEditorTab('Job Description \u2014 '+(rec.job_title||''), rec.ai_job_description||'',
+    async function(text){
+      const {error}=await sb.schema('hr').from('manpower_requests')
+        .update({ai_job_description:String(text||'')}).eq('id',manpowerId);
+      if(error) throw new Error(error.message);
+      rec.ai_job_description=String(text||'');
+      try{
+        await sb.schema('recruit').from('job_descriptions')
+          .update({content_text:String(text||'')}).eq('manpower_request_id',manpowerId);
+      }catch(_e){ /* the request's own copy is the one the PDF is built from */ }
+      toast('Job description saved');
+    });
+};
+
+window.hrJdPdfDownload=async function(manpowerId,download){
+  await tpEnsurePositions();
   const rec=(MP_RECORDS||[]).find(r=>r.id===manpowerId);
   if(!rec||!rec.ai_job_description){toast('No description to show yet','err');return;}
   try{
-    const L=await loadPdfLib(); if(!L)throw new Error('the PDF library could not be loaded');
-    const doc=await L.PDFDocument.create();
-    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
-    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
-    const W=595.28,Hh=841.89,M=56,SIZE=10.5,LEAD=15,MAXW=W-2*M;
-    function wrapLine(text,font,size){
-      const words=String(text||'').split(' ');const out=[];let cur='';
-      words.forEach(w=>{const t=cur?cur+' '+w:w; if(font.widthOfTextAtSize(t,size)<=MAXW){cur=t;}else{if(cur)out.push(cur);cur=w;}});
-      if(cur)out.push(cur); return out.length?out:[''];
-    }
-    let page=doc.addPage([W,Hh]),y=Hh-M;
-    page.drawText('Job Description — '+(rec.job_title||''),{x:M,y,size:14,font:bold});y-=26;
-    (rec.ai_job_description.split('\n')).forEach(line=>{
-      const isHead=/:$/.test(line.trim())&&line.trim().length<40;
-      wrapLine(line,isHead?bold:reg,SIZE).forEach(l=>{
-        if(y<M+20){page=doc.addPage([W,Hh]);y=Hh-M;}
-        page.drawText(l,{x:M,y,size:SIZE,font:isHead?bold:reg});y-=LEAD;
-      });
-      if(!line.trim())y-=4;
-    });
-    const bytes=await doc.save();
-    const blob=new Blob([bytes],{type:'application/pdf'});
-    const url=URL.createObjectURL(blob);
-    window.open(url,'_blank');
-    setTimeout(()=>URL.revokeObjectURL(url),60000);
+    const bytes=await jdBuildPdfBytes('Job Description \u2014 '+(rec.job_title||''),rec.ai_job_description);
+    jdPdfOpen(bytes,((rec.job_title||'job-description').replace(/[^A-Za-z0-9 ()-]/g,'').trim()||'job-description')+'.pdf',!!download);
   }catch(e){toast('Could not build the PDF: '+((e&&e.message)||e),'err');}
 };
 
 /* ── ManPower Form v2 (approval workflow + AI-content preview) ── */
+/* ALWAYS READ FRESH. This used to keep MP_RECORDS for the life of the page and only fetch when it
+   was empty - which is fine for a list nothing else changes, and wrong for this one. Approving a
+   hiring request happens in Accountability, on another screen; coming back here showed the copy
+   loaded before the approval, still saying Pending, with no way to tell it was stale. The database
+   was right the whole time and the page was reporting an old answer as a current one.
+
+   A list of open positions is small and read rarely. Caching it saved nothing worth this. */
 async function tpManpower(){
   const b=$('recBody');
-  if(!MP_RECORDS){
-    b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-    try{const {data,error}=await sb.schema('hr').from('manpower_requests').select('*').order('submitted_at',{ascending:false});
-      if(error)throw error; MP_RECORDS=data||[];}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
+  if(!MP_RECORDS) b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+  try{
+    const {data,error}=await sb.schema('hr').from('manpower_requests').select('*').order('submitted_at',{ascending:false});
+    if(error)throw error;
+    MP_RECORDS=data||[];
+  }catch(e){
+    // Keep whatever was on screen if the refresh fails - an empty list would read as "everything
+    // was deleted", which is a worse lie than a slightly old one.
+    if(!MP_RECORDS){ b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>'; return; }
+    toast('Could not refresh the list: '+((e&&e.message)||e),'err');
   }
+  await tpMpLoadApplied();
   tpMpRender();
+}
+
+/* HOW MANY PEOPLE HAVE ALREADY APPLIED FOR EACH POSITION.
+
+   Read here rather than per row, because the Edit button has to know before anybody clicks it -
+   a button that looks live and then refuses is worse than one that is plainly switched off.
+   Only fetched for people who can edit; everybody else never sees the button. A failure leaves
+   the map empty, which unlocks Edit rather than locking everything - the database refuses the
+   edit anyway, so the worst case is a clear error instead of a silent wrong state. */
+let TP_MP_APPLIED={};
+async function tpMpLoadApplied(){
+  TP_MP_APPLIED={};
+  if(!recCanWrite()) return;
+  try{
+    const {data,error}=await sb.schema('hr').from('candidates')
+      .select('manpower_request_id').not('manpower_request_id','is',null);
+    if(error) throw error;
+    (data||[]).forEach(function(c){
+      const k=c.manpower_request_id;
+      TP_MP_APPLIED[k]=(TP_MP_APPLIED[k]||0)+1;
+    });
+  }catch(_e){ /* leave it empty - see above */ }
 }
 function tpMpRender(){
   const b=$('recBody'); if(!b)return;
   const rows=MP_RECORDS||[];
+  const canOpen=recCanWrite();
+  /* Ticks that no longer match a visible row are dropped, so deleting a request cannot leave a
+     phantom in the count. */
+  TP_MP_SEL=new Set([...TP_MP_SEL].filter(id=>rows.some(r=>r.id===id)));
+  const nSel=TP_MP_SEL.size;
   const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
-  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">ManPower Requisitions <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
-    <div style="margin-left:auto;display:flex;gap:8px">
-      <button class="btn" onclick="tpMpPreviewCreative()"><i class="fa-solid fa-image"></i> Preview Creative Design</button>
-      <button class="btn btn-primary" onclick="tpMpFillForm()"><i class="fa-solid fa-pen-to-square"></i> Fill Form</button>
+  b.innerHTML=TP_NOTE_CSS+`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+    <div class="sec-title" style="margin:0">Hiring Requests <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
+    <!-- EDIT AND DELETE LIVE HERE, ON A SELECTION, NOT INSIDE EACH REQUEST.
+         They used to sit on the detail panel, which meant opening a request to delete it - reading
+         a thing in order to throw it away. Tick and act instead. Edit needs exactly one (there is
+         nothing sensible to show when two are ticked); Delete takes as many as are ticked. -->
+    <!-- ALWAYS DRAWN, SWITCHED OFF UNTIL SOMETHING IS TICKED.
+         They used to appear only once a box was ticked, which makes the toolbar jump and, worse,
+         hides the fact that ticking a row is what these are for - you cannot look for a button
+         that is not there. Greyed out they explain themselves: the control is visible, the reason
+         it cannot be pressed is in the tooltip, and the row does not move when it becomes live.
+         Edit takes exactly one, because there is nothing sensible to show for two at once. -->
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      ${canOpen?(function(){
+        /* A POSITION WITH APPLICANTS CANNOT BE EDITED, AND THE BUTTON SAYS SO BEFORE IT IS CLICKED.
+           People applied to the role as it was written; changing the title or the pay afterwards
+           would quietly turn them into candidates for something else. The database refuses it too
+           - this is the half that explains itself. */
+        const selId=nSel===1?[...TP_MP_SEL][0]:null;
+        const applied=selId!=null?(TP_MP_APPLIED[selId]||0):0;
+        const canEditSel=nSel===1&&applied===0;
+        const why=nSel!==1 ? 'Tick exactly one request to edit it'
+          : applied ? ('Locked — '+applied+' candidate'+(applied===1?' has':'s have')+' already applied for this position')
+          : 'Edit the ticked request';
+        return `<span style="font-size:12px;color:var(--slate)">${nSel?(nSel+' selected'):'Tick a row to edit or delete'}</span>
+        <button class="btn" ${canEditSel?'':'disabled style="opacity:.45;cursor:not-allowed"'}
+          title="${why}"
+          onclick="tpMpEditSel()">${applied&&nSel===1?'<i class="fa-solid fa-lock"></i>':'<i class="fa-solid fa-pen"></i>'} Edit</button>`;
+      })()+`
+        <button class="btn" ${nSel?'style="color:var(--err);border-color:var(--err)"':'disabled style="opacity:.45;cursor:not-allowed"'}
+          title="${nSel?('Delete the '+nSel+' ticked request'+(nSel===1?'':'s')):'Tick at least one request to delete it'}"
+          onclick="tpMpDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
+      <button class="btn btn-primary" onclick="tpMpFillForm()"><i class="fa-solid fa-plus"></i> New Request</button>
     </div>
   </div>
-  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Click a row for its status, the AI-generated Job Description / Description / Creative, and to Approve or Reject it.</div>
+  <!-- There used to be no Open button: the row itself was clickable, and the only hint was the
+       mouse cursor changing. Nobody discovers that, and nothing on screen said a panel would
+       appear, so the request looked like a dead list. The action is now a button that says Open. -->
+  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">${canOpen?'Open a request to read its job description, approve it or reject it.':'Anyone can raise a request here. Opening one is limited to HR, Abhay Mati and Administrators.'}</div>
   <div style="overflow-x:auto">
   <table class="tbl" id="tpMpTbl">
-    <thead><tr><th>Job Title</th><th>Department</th><th>Date</th><th style="text-align:center">Vacancy</th><th>Priority</th><th>Approval</th></tr></thead>
-    <tbody>${rows.length?rows.map(r=>`<tr class="tp-mp-row" data-id="${r.id}" style="cursor:pointer" onclick="tpMpShowDetail(${r.id})">
-      <td style="font-weight:600">${esc(r.job_title||'—')}</td>
+    <!-- COLUMNS CHOSEN FOR WHAT SOMEBODY SCANS THIS LIST TO FIND OUT: which job, for which
+         department, where, who asked, and has it been approved. Vacancy count and Priority were
+         columns of their own and neither answers a question anybody asks of a list - the count
+         matters once you open the request, and Priority only matters when it is Urgent. So Urgent
+         now rides next to the job title as a red chip, where it is more visible than a column of
+         mostly "Not Urgent", and both columns are gone. Location and Raised By took their place. -->
+    <thead><tr>${canOpen?'<th style="width:34px;text-align:center"><input type="checkbox" onchange="tpMpToggleAll(this)"></th>':''}<th>Job Title</th><th>Department</th><th>Location</th><th>Raised By</th><th>Date</th><th>Status</th>${canOpen?'<th style="width:90px"></th>':''}</tr></thead>
+    <!-- CLICKING A ROW SHOWS THE PEOPLE ON THAT POSITION, the same way a Monthly Progress row
+         does. A hiring request is a position, and the question you usually have of one is "who
+         have we got for it" - which meant going to Interviews and filtering by hand. The tick box
+         and the Details button keep their own jobs and stop the click reaching the row. -->
+    <tbody>${rows.length?rows.map(r=>`<tr class="tp-mp-row tp-mp-click" data-id="${r.id}"
+      onclick="tpMuOpenPeople(${esc(JSON.stringify(r.job_title||''))})"
+      title="See the candidates on ${esc(r.job_title||'this position')}">
+      ${canOpen?`<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="tp-mp-cb" value="${r.id}"${TP_MP_SEL.has(r.id)?' checked':''} onchange="tpMpPick(${r.id},this.checked)"></td>`:''}
+      <td style="font-weight:600">${esc(r.job_title||'—')}${r.priority==='Urgent'?' <span class="tag t-red" style="font-size:10px">Urgent</span>':''}</td>
       <td>${esc(r.department||'—')}</td>
+      <td style="font-size:12px">${esc(r.location||'—')}</td>
+      <td style="font-size:12px;color:var(--slate);overflow-wrap:anywhere">${esc(r.raised_by||'—')}</td>
       <td style="color:var(--slate);font-size:12px;white-space:nowrap">${esc(mpFmtDate(r.date_of_request))}</td>
-      <td style="text-align:center">${esc(String(r.no_of_vacancy||'—'))}</td>
-      <td>${priTag(r.priority)}</td>
       <td>${tpApprovalTag(r)}</td>
-    </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--slate)">No requisitions yet — click <b>Fill Form</b> to add one</td></tr>'}
+      ${canOpen?`<td style="text-align:right" onclick="event.stopPropagation()"><button class="btn btn-sm" style="font-size:12px" onclick="tpMpShowDetail(${r.id})"><i class="fa-solid fa-eye"></i> Details</button></td>`:''}
+    </tr>`).join(''):`<tr><td colspan="${canOpen?8:6}" style="text-align:center;padding:40px;color:var(--slate)">No hiring requests yet — click <b>New Request</b> to raise one</td></tr>`}
     </tbody>
   </table>
   </div>
   <div id="tpMpDetail" style="display:none"></div>`;
 }
-window.tpMpPreviewCreative=function(){
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-image"></i> Preview Creative Design</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div class="two"><div><label>Sample Job Title</label><input id="tpPvTitle" class="inp" value="Sales Manager"></div><div><label>Sample Department</label><input id="tpPvDept" class="inp" value="Sales"></div></div>
-    <div id="tpPvResult" style="margin-top:14px;text-align:center;color:var(--slate)"><i class="fa-solid fa-spinner fa-spin"></i> Generating preview…</div>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="tpMpPreviewCreativeRun()"><i class="fa-solid fa-rotate"></i> Regenerate Preview</button></div>`);
-  tpMpPreviewCreativeRun();
+let TP_MP_SEL=new Set();
+window.tpMpPick=function(id,on){ if(on)TP_MP_SEL.add(id); else TP_MP_SEL.delete(id); tpMpRender(); };
+window.tpMpToggleAll=function(el){
+  if(el.checked)(MP_RECORDS||[]).forEach(r=>TP_MP_SEL.add(r.id)); else TP_MP_SEL.clear();
+  tpMpRender();
 };
-window.tpMpPreviewCreativeRun=async function(){
-  const box=$('tpPvResult');if(!box)return;
-  box.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Generating preview…';
-  const job_title=($('tpPvTitle')||{}).value?.trim()||'Sample Position';
-  const department=($('tpPvDept')||{}).value?.trim()||'';
-  const {data,error}=await sb.functions.invoke('manpower-ai-generate',{body:{sample:true,job_title,department}});
-  if(error||!data||data.error){box.innerHTML='<span style="color:var(--err)">'+((error&&error.message)||(data&&data.error)||'Failed')+'</span>';return;}
-  box.innerHTML=data.creative_path?`<img src="${esc(data.creative_path)}" style="max-width:100%;border-radius:8px;border:1px solid var(--line)">`:'<span style="color:var(--err)">No creative returned</span>';
+window.tpMpEditSel=function(){
+  if(!recGuard())return;
+  const id=[...TP_MP_SEL][0]; if(id==null){toast('Tick a request first','err');return;}
+  // The button is already disabled for this; the check is here for a screen left open while
+  // somebody else's application landed.
+  const applied=TP_MP_APPLIED[id]||0;
+  if(applied){
+    toast('This position cannot be edited — '+applied+' candidate'+(applied===1?' has':'s have')
+          +' already applied for it','err');
+    return;
+  }
+  mpEdit(id);
+};
+window.tpMpDeleteSel=async function(){
+  if(!recGuard())return;
+  const ids=[...TP_MP_SEL]; if(!ids.length){toast('Tick a request first','err');return;}
+  /* Says what else goes, because it is not obvious: the approval tasks are about the request and
+     follow it down. The job description does NOT - it is a document in its own right and keeps
+     existing, unlinked. */
+  /* JainE's own dialog, not the browser's. A window.confirm looks like the page has been taken
+     over by something else, cannot say which records are going, and on some browsers carries a
+     "prevent this page from creating more dialogs" tick that silently disables every later one. */
+  if(!await confirmDialog(
+      'Delete '+ids.length+' hiring request'+(ids.length===1?'':'s')+'? Their approval tasks will be '
+      +'cancelled. Any job description written for them stays in the library.',
+      {title:'Delete hiring request'+(ids.length===1?'':'s'), okLabel:'Delete', icon:'fa-trash', danger:true}))return;
+  const {error}=await sb.schema('hr').from('manpower_requests').delete().in('id',ids);
+  if(error){toast('Could not delete: '+error.message,'err');return;}
+  MP_RECORDS=(MP_RECORDS||[]).filter(r=>!ids.includes(r.id));
+  TP_MP_SEL=new Set();
+  const det=$('tpMpDetail'); if(det)det.style.display='none';
+  toast(ids.length+' deleted','ok');
+  tpMpRender();
 };
 window.tpMpFillForm=function(){
   // Open to everyone — this is the "raise a need" side of the approval workflow, not a write-guarded action.
-  mpModal('ManPower Requisition Form',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="tpMpSave()"><i class="fa-solid fa-check"></i> Submit</button>');
+  mpModal('Hiring Request',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="tpMpSave()"><i class="fa-solid fa-check"></i> Submit</button>');
 };
 window.tpMpSave=async function(){
   const d=mpCollect();
@@ -12743,7 +16562,7 @@ window.tpMpSave=async function(){
   const {data,error}=await sb.schema('hr').from('manpower_requests').insert(d).select().single();
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit';}return;}
   MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();
-  toast(data.approval_status==='Approved'?'Requisition submitted and auto-approved':'Requisition submitted — pending HR approval');
+  toast(data.approval_status==='Approved'?'Hiring request submitted and approved':'Hiring request submitted — HR has been asked to approve it');
   tpMpRender();
   // Fire the AI JD/Description/Creative generation in the background — the submitter doesn't need
   // to wait or have write access for this; it's just drafting content, not an approval action.
@@ -12751,15 +16570,40 @@ window.tpMpSave=async function(){
     const rec=(MP_RECORDS||[]).find(r=>r.id===data.id);if(!rec)return;
     if(error||!gen||gen.error){rec.ai_status='failed';return;}
     rec.ai_status='ready';rec.ai_job_description=gen.job_description;rec.ai_job_description_json=gen.job_description_json;rec.ai_platform_post_text=gen.platform_post_text;rec.ai_creative_path=gen.creative_path;
-    // A self-approved submission (HR/Management/Abhay Mati themselves) has nothing for the 3
-    // approvers to review -- only notify when it's actually sitting in their queue.
-    if((rec.approval_status||'Pending')==='Pending') hrNotifyApproversTask(rec);
+    /* THE EMAIL WAS ONLY EVER WIRED TO A MANUAL UPLOAD.
+
+       Most job descriptions are not uploaded - they are written from a hiring request, by AI, the
+       moment the request is raised. That path told nobody, so raising a position produced a
+       description that existed and a notification that did not. This is the point at which there
+       is something to tell them about: the text exists and is on the record.
+
+       There is no file to attach here. A description written in JAIN-E is text, and the PDF is
+       built on demand, so the text travels in the body rather than promising an attachment that
+       was never created. */
+    hrNotify({kind:'job_description_created',title:rec.job_title||'Untitled',
+              created_by:state.email||'',content_text:gen.job_description||''});
   });
 };
+/* thejaingroup.com does NOT serve this repo (confirmed live: career-position.html there falls back
+   to the homepage) — but GitHub Pages does, confirmed live at this exact URL, serving the exact
+   file just pushed. Swap this one constant if/when a custom domain is actually wired up to it. */
+const CAREERS_BASE_URL='https://codingfuriosa.github.io/JainGroup';
+function tpCareersLink(slug){ return CAREERS_BASE_URL+'/career-position.html?slug='+encodeURIComponent(slug||''); }
 window.tpMpShowDetail=function(id){
  try{
+  /* OPENING A ROW IS NOT FOR EVERYONE. Anyone may raise a requisition, and anyone may see the
+     list of what has been raised - that is the point of a shared form. What sits behind the row
+     is a different matter: the AI-written job description, the approval and rejection reasons,
+     and the live Careers Page link, which is a public URL that puts the position on the
+     internet the moment it is shared. That belongs to HR, Abhay Mati and Administrators. The
+     rows are also drawn without a pointer for everyone else, so it does not merely fail on a
+     click - it never looks clickable. */
+  if(!recCanWrite()){
+    toast('Only HR, Abhay Mati and Administrators can open a hiring request','err');
+    return;
+  }
   const rec=(MP_RECORDS||[]).find(r=>r.id===id);
-  if(!rec){toast('Could not find requisition #'+id+' — try refreshing the page','err');console.error('tpMpShowDetail: no record with id',id,'in MP_RECORDS',MP_RECORDS);return;}
+  if(!rec){toast('Could not find hiring request #'+id+' — try refreshing the page','err');console.error('tpMpShowDetail: no record with id',id,'in MP_RECORDS',MP_RECORDS);return;}
   const panel=$('tpMpDetail');
   if(!panel){toast('Detail panel container missing from the page — try refreshing','err');console.error('tpMpShowDetail: #tpMpDetail not found in DOM');return;}
   document.querySelectorAll('.tp-mp-row').forEach(tr=>tr.style.background='');
@@ -12768,22 +16612,48 @@ window.tpMpShowDetail=function(id){
   panel.style.display='block';
   const canAct=recCanWrite(), pending=(rec.approval_status||'Pending')==='Pending';
   const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
-  panel.innerHTML=`<div class="card card-pad" style="margin-top:14px;position:relative">
-    <button style="position:absolute;top:12px;right:12px;background:none;border:none;cursor:pointer;font-size:18px;color:var(--slate);line-height:1" onclick="tpMpCloseDetail()">&times;</button>
-    <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;padding-right:32px">
+  /* THE PANEL WAS SIX BUTTONS AND A TITLE FIGHTING FOR ONE ROW, WITH THE WAY OUT AS A GREY ×.
+
+     Approve, Reject, Edit and Delete all sat together at the same size and weight, so the one
+     thing you came to do looked exactly like the one thing you must not do by accident. The close
+     control was an 18px × floated over the corner - the smallest thing on a panel that fills the
+     screen, and the only way back to the list.
+
+     Now: a bar across the top that says what you are looking at and carries a real Close button
+     with a word on it. Under it, one row of actions where Approve is the only filled button and
+     Delete is pushed to the far right, away from everything else. Then plain sections with
+     headings, so the panel reads in an order instead of all at once. */
+  panel.innerHTML=`<div class="card card-pad" style="margin-top:14px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:12px;border-bottom:2px solid var(--line)">
+      <button class="btn btn-sm" style="font-weight:600" onclick="tpMpCloseDetail()"><i class="fa-solid fa-arrow-left"></i> Close</button>
       <div style="flex:1;min-width:220px">
         <div style="font-size:18px;font-weight:700;color:var(--ink)">${esc(rec.job_title||'—')}</div>
         <div style="color:var(--slate);font-size:13px;margin-top:2px">${esc(rec.department||'—')} &nbsp;·&nbsp; ${mpFmtDate(rec.date_of_request)} &nbsp;·&nbsp; raised by ${esc(rec.raised_by||'—')}</div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        ${priTag(rec.priority)}${tpApprovalTag(rec)}
-        ${canAct&&pending?`<button class="btn btn-sm btn-primary" onclick="tpMpApprove(${rec.id})"><i class="fa-solid fa-check"></i> Approve</button><button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMpReject(${rec.id})"><i class="fa-solid fa-xmark"></i> Reject</button>`:''}
-        <button class="btn btn-sm" onclick="mpEdit(${rec.id})"><i class="fa-solid fa-pen"></i> Edit</button>
-        ${canAct?`<button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMpDeleteOne(${rec.id})"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
-      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${priTag(rec.priority)}${tpApprovalTag(rec)}</div>
     </div>
+    <!-- APPROVING DOES NOT HAPPEN HERE ANY MORE.
+
+         A hiring request already raises a Pending Approval task for each approver in Accountability,
+         which is where every other approval in JAIN-E is worked. Having Approve and Reject ALSO sit
+         on this panel meant two places to do one job, and the two could disagree: approve it here
+         and the task stayed open, waiting for somebody who had already decided. One queue, one
+         decision. This panel is now for reading the request.
+
+         What is left is Edit and Delete, and they are not peers - Edit is the ordinary thing and
+         Delete is the one you cannot undo. They are separated, weighted differently, and Delete is
+         a proper bordered button rather than red text, which read as a label rather than a control. -->
+    <!-- Edit and Delete moved to the toolbar, on a tick. Opening a request in order to delete it
+         meant reading a thing to throw it away, and put the most destructive control on the screen
+         you land on after a click. -->
+    ${pending?`<div style="margin-top:10px;font-size:12.5px;color:var(--slate);background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:9px 12px">
+      <i class="fa-solid fa-circle-info"></i> Waiting for approval — approve or reject it from <b>Accountability › Pending Approval</b>.
+    </div>`:''}
     ${rec.approval_status==='Rejected'&&rec.rejection_reason?`<div style="margin-top:10px;padding:10px 14px;background:#fef2f2;border-radius:8px;border:1px solid #fecaca"><span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#b91c1c">Rejection reason · </span><span style="font-size:13px;color:#7f1d1d">${esc(rec.rejection_reason)}</span></div>`:''}
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 20px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+      <div style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate);margin-bottom:10px">The request</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 20px">
       <div><div class="tp-lbl">Vacancies</div><div style="font-size:14px;margin-top:2px">${esc(String(rec.no_of_vacancy||'—'))}</div></div>
       <div><div class="tp-lbl">Reporting To / HOD</div><div style="font-size:14px;margin-top:2px">${esc(rec.reporting_person||'—')}</div></div>
       <div><div class="tp-lbl">Qualification</div><div style="font-size:14px;margin-top:2px">${esc(rec.qualification||'—')}</div></div>
@@ -12796,33 +16666,51 @@ window.tpMpShowDetail=function(id){
     ${rec.notes?`<div style="margin-top:12px;padding:10px 14px;background:#fefce8;border-radius:8px;border:1px solid #fde68a"><span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#a16207">Note · </span><span style="font-size:13px;color:#78350f">${esc(rec.notes)}</span></div>`:''}
     <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-        <i class="fa-solid fa-wand-magic-sparkles" style="color:#7c3aed"></i><span style="font-weight:700;font-size:13.5px">AI-generated for this posting</span>
+        <span style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)">Job description</span>
         ${rec.ai_status==='generating'?'<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Generating…</span>':''}
         ${rec.ai_status==='failed'?'<span class="tag t-red">Generation failed</span>':''}
-        ${canAct&&rec.ai_status!=='generating'?`<button class="btn btn-sm" style="margin-left:auto" onclick="tpMpGenerate(${rec.id})"><i class="fa-solid fa-wand-magic-sparkles"></i> ${rec.ai_status==='ready'?'Regenerate':'Generate with AI'}</button>`:''}
+        <!-- The generate button used to sit up here on its own, at the far end of a heading row,
+             while Open and Download sat in the card below it. Three buttons about one document,
+             in two places. It has moved down beside them. -->
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
-        <div class="card" style="padding:12px">
-          <div class="tp-lbl" style="margin-bottom:6px">Creative</div>
-          ${rec.ai_creative_path?`<img src="${esc(rec.ai_creative_path)}" style="width:100%;border-radius:8px;display:block;margin-bottom:8px;border:1px solid var(--line)">
-            <div style="display:flex;gap:6px"><button class="btn btn-sm" style="flex:1" onclick="window.open('${esc(rec.ai_creative_path)}','_blank')"><i class="fa-solid fa-eye"></i> Preview</button><button class="btn btn-sm" style="flex:1" onclick="tpDownloadUrl('${esc(rec.ai_creative_path)}','${esc(rec.job_title||'creative')}.svg')"><i class="fa-solid fa-download"></i> Download</button></div>`
-            :'<div style="font-size:12.5px;color:var(--slate)">Not generated yet</div>'}
+      <!-- THE SENTENCE AND THE BUTTONS SHARE A LINE. They were stacked, under an empty label, so
+           three rows of card were spent saying one thing. The sentence explains what the buttons
+           are for, so it belongs beside them, not above them. -->
+      <div class="card" style="padding:12px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px;font-size:12.5px;color:var(--slate)">${rec.ai_job_description
+            ? '<i class="fa-solid fa-file-lines"></i> A job description has been written for this position.'
+            : 'No job description has been written yet.'}</div>
+          <div style="display:flex;gap:6px;flex:none;flex-wrap:wrap">
+            ${rec.ai_job_description?`
+            <button class="btn btn-sm" onclick="mpJdEditOpen(${rec.id})"><i class="fa-solid fa-pen"></i> Open</button>
+            <button class="btn btn-sm" onclick="hrJdPdfDownload(${rec.id},true)"><i class="fa-solid fa-download"></i> Download</button>`:''}
+            ${canAct&&rec.ai_status!=='generating'?`<button class="btn btn-sm${rec.ai_job_description?'':' btn-primary'}" onclick="tpMpGenerate(${rec.id})"><i class="fa-solid fa-wand-magic-sparkles"></i> ${rec.ai_job_description?'Regenerate':'Generate with AI'}</button>`:''}
+          </div>
         </div>
-        <div class="card" style="padding:12px">
-          <div class="tp-lbl" style="margin-bottom:6px">Job Description Document</div>
-          ${rec.ai_job_description?`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><i class="fa-solid fa-file-pdf" style="font-size:28px;color:#D21F3C"></i><span style="font-size:12.5px;color:var(--slate)">Ready to view or share</span></div>
-            <button class="btn btn-sm" style="width:100%" onclick="hrJdPdfDownload(${rec.id})"><i class="fa-solid fa-file-pdf"></i> View as PDF</button>`
-            :'<div style="font-size:12.5px;color:var(--slate)">Not generated yet</div>'}
-        </div>
-        <div class="card" style="padding:12px"><div class="tp-lbl">Description (Post Text)</div><div style="margin-top:8px;font-size:12.5px;${rec.ai_platform_post_text?'color:var(--ink);white-space:pre-wrap':'color:var(--slate)'}">${rec.ai_platform_post_text?esc(rec.ai_platform_post_text):'Not generated yet'}</div></div>
+        <!-- The full text used to be printed below this, 260px of scrolling prose in the middle of
+             a panel about a hiring request. Nobody reads a job description in a scroll box, and it
+             buried everything under it. It is a document: the line above says whether one exists,
+             and Open puts it in a tab where it can actually be read. -->
       </div>
-      <div style="font-size:11.5px;color:var(--slate);margin-top:10px"><i class="fa-solid fa-circle-info"></i> The Careers Page Link is wired up next — this panel will get a Link field once that's live.</div>
+      ${(rec.approval_status==='Approved')?`<div class="card" style="padding:12px;margin-top:12px">
+        <div style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate);margin-bottom:8px">Careers page</div>
+        ${rec.status==='Open'?`
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input class="ac-in" readonly style="flex:1;min-width:220px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:#0369a1" value="${esc(tpCareersLink(rec.slug))}" onclick="this.select()">
+            <button class="btn btn-sm" onclick="navigator.clipboard.writeText('${esc(tpCareersLink(rec.slug))}');toast('Link copied')"><i class="fa-solid fa-copy"></i> Copy</button>
+            <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMpCloseHiring(${rec.id})"><i class="fa-solid fa-lock"></i> Close Hiring</button>
+          </div>
+          <div style="font-size:11px;color:var(--slate);margin-top:6px">Live now — anyone with this link can apply. Closing hiring takes the page down.</div>`
+        :`<div style="font-size:12.5px;color:var(--slate)">Hiring is closed for this position — its page is no longer live.</div>
+          <button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="tpMpReopenHiring(${rec.id})"><i class="fa-solid fa-unlock"></i> Reopen Hiring</button>`}
+      </div>`:`<div style="font-size:11.5px;color:var(--slate);margin-top:10px"><i class="fa-solid fa-circle-info"></i> The careers page link appears here once this request is approved.</div>`}
     </div>
   </div>`;
   panel.scrollIntoView({behavior:'smooth',block:'nearest'});
  }catch(e){
   console.error('tpMpShowDetail threw:',e);
-  toast('Could not open that requisition: '+(e&&e.message||e),'err');
+  toast('Could not open that hiring request: '+(e&&e.message||e),'err');
  }
 };
 window.tpMpGenerate=async function(id){
@@ -12845,8 +16733,26 @@ window.tpMpApprove=async function(id){if(!recGuard())return;
   hrCloseApprovalTask(data);
   toast('Approved');tpMpRender();tpMpShowDetail(id);
 };
+/* Opening/closing hiring reuses hr.set_hiring_open exactly as it always did — that RPC already
+   flips status Open/Filled and is what hr.public_position (and so career-apply / career-position.html)
+   gates on, so this is the real "take the page down" switch, not just a label change here. */
+window.tpMpCloseHiring=async function(id){
+  if(!await confirmDialog('Close hiring for this position? Its Careers Page will stop accepting applications immediately.'))return;
+  try{
+    await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:id,p_open:false});
+    const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx].status='Filled';
+    toast('Hiring closed');tpMpRender();tpMpShowDetail(id);
+  }catch(e){toast('Could not close hiring: '+((e&&e.message)||e),'err');}
+};
+window.tpMpReopenHiring=async function(id){
+  try{
+    await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:id,p_open:true});
+    const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx].status='Open';
+    toast('Hiring reopened');tpMpRender();tpMpShowDetail(id);
+  }catch(e){toast('Could not reopen hiring: '+((e&&e.message)||e),'err');}
+};
 window.tpMpReject=function(id){if(!recGuard())return;
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-xmark"></i> Reject Requisition</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-xmark"></i> Reject Hiring Request</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm"><label>Reason (optional, shown to the requester)</label><textarea id="tpRejReason" class="inp" rows="3" placeholder="Why is this being rejected?"></textarea></div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" style="background:var(--err);border-color:var(--err)" onclick="tpMpRejectConfirm(${id})"><i class="fa-solid fa-xmark"></i> Reject</button></div>`);
 };
@@ -12874,8 +16780,7 @@ window.tpMpRejectConfirm=async function(id){
   }
 };
 window.tpMpDeleteOne=async function(id){if(!recGuard())return;
-  if(!await confirmDialog('Delete this requisition?'))return;
-  const rec=(MP_RECORDS||[]).find(r=>r.id===id);
+  if(!await confirmDialog('Delete this hiring request?'))return;
   const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
   if(error){toast(error.message,'err');return;}
   if(rec)hrCloseApprovalTask(rec); // a deleted requisition has nothing left to approve
@@ -12891,72 +16796,333 @@ async function tpReferrals(){
     if(error)throw error; TP_REF_RECORDS=data||[];}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
   tpRefRender();
 }
+const TP_NOTE_CSS=`<style>
+  .tp-mp-click{cursor:pointer}
+  .tp-mp-click:hover{background:#f8fafc}
+  .tbl td.tp-note{font-size:12px;color:var(--slate);max-width:240px;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .tbl td.tp-note[title]:not([title=""]){cursor:help}
+</style>`;
 function tpRefRender(){
   const b=$('recBody'); if(!b)return;
   const rows=TP_REF_RECORDS||[];
   const canAct=recCanWrite();
-  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+  b.innerHTML=TP_NOTE_CSS+`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
     <div class="sec-title" style="margin:0">Employee Referrals <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto"><button class="btn btn-primary" onclick="tpRefAdd()"><i class="fa-solid fa-user-plus"></i> Refer Someone</button></div>
   </div>
   <div style="overflow-x:auto"><table class="tbl">
-    <thead><tr><th>Candidate</th><th>Position</th><th>Phone</th><th>Email</th><th>Referred By</th><th>Date</th><th>Approval</th></tr></thead>
-    <tbody>${rows.length?rows.map(r=>`<tr class="tp-ref-row">
+    <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Note</th><th>CV</th><th>Referred By</th><th>Date</th><th>Status</th></tr></thead>
+    <tbody>${rows.length?rows.map(r=>{
+      const connected=!!r.tracker_id;
+      /* Connect sits on every row that has not already gone through, whatever its status - a
+         referral turned down for one role can be the right person for another later, so a
+         Rejected row is not a dead end. Once it IS in the Tracker the button goes: pressing it
+         again would make a second candidate out of the same person. */
+      /* CONNECT ONLY, AND ONLY ONCE APPROVED.
+
+         Reject used to sit here too, which meant a referral could be turned down in two places -
+         this row and the approval task - and the two did different things: the task told the
+         referrer, this button did not. One decision with two buttons and two outcomes is worse
+         than one button in the wrong place. Rejecting now belongs to the task, where it is asked.
+
+         Connect appears only after the referral has been approved. It was offered on a Pending
+         referral and then refused, which is a button that exists to say no. A Pending row says
+         what it is waiting for instead. */
+      const approved=(r.approval_status||'Pending')==='Approved';
+      const acts=connected
+        ? '<span class="tag t-gray">In Interviews</span>'
+        : (canAct&&approved
+            ? `<button class="btn btn-sm btn-primary" style="padding:3px 10px" onclick="tpRefConnect(${r.id})" title="Connect to an open position"><i class="fa-solid fa-link"></i> Connect</button>`
+            : '');   // the Status pill beside this already says Pending - saying it twice, in
+                       // two different forms of words, only made the cell look busy
+      return `<tr class="tp-ref-row">
       <td style="font-weight:600">${esc(r.referred_name||'—')}</td>
-      <td>${esc(r.position||'—')}</td>
+      <td>${r.referred_email?`<a href="mailto:${esc(r.referred_email)}" style="color:var(--brand)">${esc(r.referred_email)}</a>`:'—'}</td>
       <td>${esc(r.referred_phone||'—')}</td>
-      <td>${esc(r.referred_email||'—')}</td>
-      <td>${esc(r.referred_by||'—')}</td>
+      <!-- A long note used to wrap and push the whole row two or three lines tall, so a list of
+           ten referrals scrolled like a list of thirty. One line, cut with an ellipsis, and the
+           full text on hover - the note is worth reading, it is just not worth the whole table
+           rearranging itself around it. -->
+      <td class="tp-note" title="${esc(r.notes||'')}">${esc(r.notes||'—')}</td>
+      <td>${r.resume_id?`<button class="btn btn-sm" style="padding:3px 8px" onclick="tpRefCv(${r.resume_id},${esc(JSON.stringify(r.referred_name||'CV'))})" title="Open the CV"><i class="fa-solid fa-file-arrow-down"></i> CV</button>`:'<span style="color:var(--slate)">—</span>'}</td>
+      <td style="font-size:12px">${esc(r.referred_by||'—')}</td>
       <td style="color:var(--slate);font-size:12px;white-space:nowrap">${new Date(r.created_at).toLocaleDateString()}</td>
-      <td>${tpApprovalTag(r)}${canAct&&(r.approval_status||'Pending')==='Pending'?` <button class="btn btn-sm btn-primary" style="margin-left:6px;padding:3px 8px" onclick="tpRefApprove(${r.id})"><i class="fa-solid fa-check"></i></button><button class="btn btn-sm" style="margin-left:4px;padding:3px 8px;color:var(--err);border-color:var(--err)" onclick="tpRefReject(${r.id})"><i class="fa-solid fa-xmark"></i></button>`:''}</td>
-    </tr>`).join(''):'<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--slate)">No referrals yet — click <b>Refer Someone</b></td></tr>'}
+      <!-- THE STATUS AND THE BUTTONS ARE NOT THE SAME KIND OF THING, SO THEY DO NOT SIT TOGETHER.
+           The pill reports what has happened; the buttons change it. Pressed up against each other
+           they read as one control, and the eye cannot tell which part is clickable. The pill stays
+           left, the actions are pushed to the right of the cell, and the gap between them says they
+           are separate. -->
+      <td style="white-space:nowrap">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="flex:none">${tpApprovalTag(r)}</span>
+          <span style="margin-left:auto;display:flex;gap:6px;flex:none">${acts}${tpRefWithdrawBtn(r)}</span>
+        </div>
+      </td>
+    </tr>`;}).join(''):'<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--slate)">No referrals yet — click <b>Refer Someone</b></td></tr>'}
     </tbody>
   </table></div>`;
 }
+/* WITHDRAW - shown to the person who made the referral, while it is still Pending, and to HR at
+   any time. Before this, a referral could be raised by anyone and removed by nobody: refer the
+   wrong person and it stayed for good. HR's existing control says Reject, which is a judgment on
+   the candidate, not a way to take back your own mistake - so the two are kept apart. The database
+   decides both questions again in hr.referral_withdraw; this only decides what is drawn. */
+function tpRefWithdrawBtn(r){
+  const me=String(state.email||'').toLowerCase();
+  const mine=String(r.referred_by||'').toLowerCase()===me&&me!=='';
+  const pending=(r.approval_status||'Pending')==='Pending';
+  if(!(recCanWrite()||(mine&&pending))) return '';
+  const label=recCanWrite()&&!mine?'Remove':'Withdraw';
+  return `<button class="btn btn-sm" style="padding:3px 10px;color:var(--err);border-color:var(--err)"
+    onclick="tpRefWithdraw(${r.id},${esc(JSON.stringify(r.referred_name||'this referral'))})"
+    title="${label} this referral"><i class="fa-solid fa-trash"></i> ${label}</button>`;
+}
+window.tpRefWithdraw=async function(id,who){
+  if(!await confirmDialog(
+      'Withdraw the referral for '+(who||'this person')+'? The candidate it created is deleted as '
+      +'well, along with their CV and any approval task \u2014 a referral and the candidate it put '
+      +'forward are one and the same.',
+      {title:'Withdraw referral', okLabel:'Withdraw', icon:'fa-trash', danger:true}))return;
+  const {data,error}=await sb.schema('hr').rpc('referral_withdraw',{p_id:id});
+  if(error){toast(error.message,'err');return;}
+  await hrRemoveFiles(data);
+  TP_REF_RECORDS=(TP_REF_RECORDS||[]).filter(r=>r.id!==id);
+  // The candidate went with it, so the Tracker on screen is now out of date.
+  TP_TR_RECORDS=null;
+  toast('Referral withdrawn \u2014 the candidate was removed too','ok');
+  tpRefRender();
+};
+/* Opens the CV behind a referral. The file keeps the candidate's own name rather than the stamped
+   storage name, the same as the Resumes tab does. */
+window.tpRefCv=async function(resumeId,who){
+  const {data,error}=await sb.schema('hr').from('resumes').select('storage_path,file_name').eq('id',resumeId).maybeSingle();
+  if(error||!data||!data.storage_path){toast('That CV is no longer on file','err');return;}
+  const base=String(who||'CV').replace(/[^A-Za-z0-9 .()-]/g,'').trim()||'CV';
+  const ext=String(data.file_name||'').split('.').pop().toLowerCase();
+  s3OpenSigned(data.storage_path, base+(ext&&ext.length<=5?'.'+ext:''));
+};
 window.tpRefAdd=function(){
   // Open to everyone — referring a candidate is the "raise" side of the approval workflow.
-  const openReqs=(MP_RECORDS||[]).filter(r=>(r.approval_status||'Pending')==='Approved'&&(r.status||'Open')==='Open');
+  // No Position field here on purpose: a referral names a PERSON, not a role they're pre-committed
+  // to — which position (if any, yet) fits them is a judgment call HR makes later, via Connect.
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-user-plus"></i> Refer Someone</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <!-- THE CV COMES FIRST. It was last, under a note field, at the bottom of a form - the single
+       most useful thing in a referral, in the place people stop reading. HR judges a referral on
+       the CV before anything typed about the person, so it is now the first thing asked for. -->
+  <!-- Name, then the two ways of reaching them, then the CV, then the note. The CV was at the very
+       bottom under the note, where people stop reading; putting it at the very top pushed the
+       person's own name below the fold. Between contact details and the note is where it belongs -
+       it is one more thing about who this person is, and it is the thing HR opens first. -->
   <div class="modal-body frm">
     <label>Candidate Name *</label><input id="tpRfName" class="inp">
-    <div class="two"><div><label>Phone</label><input id="tpRfPhone" class="inp"></div><div><label>Email</label><input id="tpRfEmail" class="inp"></div></div>
-    <label>Position *</label><select id="tpRfPosition" class="sel">
-      <option value="">— Select an open requisition —</option>
-      ${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}${r.department?' · '+esc(r.department):''}</option>`).join('')}
-    </select>
-    ${!openReqs.length?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No approved open requisitions yet — ask HR to approve a ManPower Form first, or refer against a future opening once one exists.</div>':''}
-    <label>Notes</label><textarea id="tpRfNotes" class="inp" rows="2"></textarea>
+    <div class="two"><div><label>Email</label><input id="tpRfEmail" class="inp"></div><div><label>Phone</label><input id="tpRfPhone" class="inp"></div></div>
+    <!-- A FILE YOU HAVE CHOSEN CAN BE TAKEN OFF AGAIN. Picking the wrong CV used to be permanent
+         for the life of the window: the box showed the filename and there was no way back to empty,
+         so the only way to correct it was to close the form and lose everything typed. -->
+    <label>CV <span style="color:var(--err)">*</span></label>
+    <div class="dropzone" onclick="document.getElementById('tpRfCv').click()"><i class="fa-solid fa-cloud-arrow-up"></i><div id="tpRfCvName">Click to choose a PDF, Word doc, or image</div></div>
+    <div id="tpRfCvPicked" style="display:none;align-items:center;gap:8px;margin-top:6px;font-size:12.5px">
+      <i class="fa-solid fa-paperclip" style="color:var(--slate)"></i>
+      <span id="tpRfCvPickedName" style="font-weight:600;overflow-wrap:anywhere"></span>
+      <button type="button" class="btn btn-sm" style="margin-left:auto;padding:2px 10px;color:var(--err);border-color:var(--err)" onclick="tpRefCvClear()">Remove</button>
+    </div>
+    <input type="file" id="tpRfCv" class="hidden" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onchange="tpRefCvPicked(this)">
+    <label>Note</label><textarea id="tpRfNotes" class="inp" rows="2" placeholder="How you know them, what they do now, why they'd be a good fit"></textarea>
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpRfSaveBtn" onclick="tpRefSave()"><i class="fa-solid fa-check"></i> Submit Referral</button></div>`);
   setTimeout(()=>{const el=$('tpRfName');if(el)el.focus();},100);
 };
+/* Choosing and un-choosing the CV. Clearing sets the input's value to '' rather than trying to
+   build an empty FileList, which browsers do not allow. */
+window.tpRefCvPicked=function(el){
+  const f=el&&el.files&&el.files[0];
+  const zone=document.getElementById('tpRfCvName');
+  const box=document.getElementById('tpRfCvPicked');
+  const nm=document.getElementById('tpRfCvPickedName');
+  if(f){
+    if(zone)zone.textContent='Choose a different file';
+    if(nm)nm.textContent=f.name;
+    if(box)box.style.display='flex';
+  }else{
+    if(zone)zone.textContent='Click to choose a PDF, Word doc, or image';
+    if(box)box.style.display='none';
+  }
+};
+window.tpRefCvClear=function(){
+  const el=document.getElementById('tpRfCv');
+  if(el)el.value='';
+  tpRefCvPicked(el);
+};
 window.tpRefSave=async function(){
   const name=($('tpRfName')||{}).value?.trim();
   if(!name){toast('Candidate name is required','err');return;}
-  const reqId=parseInt(($('tpRfPosition')||{}).value||'');
-  if(!reqId){toast('Please pick a position','err');return;}
-  const req=(MP_RECORDS||[]).find(r=>r.id===reqId);
-  const d={referred_name:name,referred_phone:($('tpRfPhone')||{}).value?.trim()||null,referred_email:($('tpRfEmail')||{}).value?.trim()||null,
-    manpower_request_id:reqId,position:req&&req.job_title||null,notes:($('tpRfNotes')||{}).value?.trim()||null,referred_by:state.email||''};
+  const phone=($('tpRfPhone')||{}).value?.trim()||null, email=($('tpRfEmail')||{}).value?.trim()||null;
+  if(!phone&&!email){toast('Give a phone number or an email — otherwise nobody can reach them','err');return;}
+  /* THE CV IS REQUIRED. A referral without one is a name and a phone number, and HR judges a
+     referral on the document before anything typed about the person - so a referral with no CV
+     sits in the list waiting for somebody to chase the referrer for it. Better to ask now, while
+     the person referring them still has the file to hand. */
+  const cvPick=$('tpRfCv');
+  if(!(cvPick&&cvPick.files&&cvPick.files[0])){toast('Attach their CV — a referral needs one','err');if(cvPick)cvPick.click();return;}
+  const d={notes:($('tpRfNotes')||{}).value?.trim()||null};
   const btn=$('tpRfSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {data,error}=await sb.schema('hr').from('referrals').insert(d).select().single();
+  /* The CV is uploaded first, then the referral and its Resumes record are written TOGETHER by
+     hr.referral_submit.
+
+     They have to go together because anybody signed in may refer somebody, but writing to Resumes
+     needs HR access - so an ordinary employee attaching a CV would have had the referral accepted
+     and the CV refused, leaving a referral claiming a file that was not there. The function does
+     both as one, and only ever creates a CV row as part of creating a referral.
+
+     It also takes "referred by" from the caller's own sign-in rather than from this page. A
+     referral scheme is exactly the thing somebody has a reason to credit to the wrong person.
+
+     The upload happens before either, so a failed upload leaves nothing behind at all. A referral
+     with no CV still goes through; the file is optional. */
+  const cvEl=$('tpRfCv'), cv=cvEl&&cvEl.files&&cvEl.files[0];
+  let up=null;
+  if(cv){
+    const r=await uploadFileToS3(s3KeyForResume(cv.name),cv);
+    if(r.error){
+      toast('The CV could not be uploaded: '+r.error.message+' — nothing was saved','err');
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit Referral';}
+      return;
+    }
+    up=r.data;
+  }
+  const {data:out,error}=await sb.schema('hr').rpc('referral_submit',{
+    p_name:name, p_email:email, p_phone:phone, p_notes:d.notes,
+    p_file_name:cv?cv.name:null, p_storage_path:up?up.path:null,
+    p_file_size:cv?cv.size:null, p_file_type:cv?(cv.name.split('.').pop()||'').toLowerCase():null
+  });
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit Referral';}return;}
+  // referral_submit returns one hr.referrals row, not a set, so it arrives as a plain object -
+  // but take the first element too, so this keeps working if it is ever made set-returning.
+  const data=Array.isArray(out)?out[0]:out;
+  if(!data){toast('The referral was not saved','err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit Referral';}return;}
   TP_REF_RECORDS=[data,...(TP_REF_RECORDS||[])];closeModal();
-  toast(data.approval_status==='Approved'?'Referral submitted and auto-approved':'Referral submitted — pending HR approval');
+  toast('Referral submitted — HR will connect it to a position');
   tpRefRender();
 };
-window.tpRefApprove=async function(id){if(!recGuard())return;
-  const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Approved',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:null}).eq('id',id).select().single();
-  if(error){toast(error.message,'err');return;}
-  const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
-  toast('Approved');tpRefRender();
+/* Connect: pick which open position this referral fits, right now, at connect time — not locked in
+   at submission. Only HR/Administrator (rtRefConnectGuard). Approving and connecting are the same
+   action: a referral isn't really "approved" in the abstract, it's approved FOR a specific role. */
+/* The signed-in person's name as the Tracker's Entity column wants it. hr.entities is a short
+   list of recruiters; matched case-insensitively so a stored "Khushbu Singh" still answers for a
+   profile reading "Khusbu Singh" - the same mismatch that once silently cost somebody their
+   Share button. Falls back to their own full name. */
+async function tpEntityForMe(){
+  const mine=((state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||'').trim();
+  try{
+    if(!window._tpEntities){
+      const {data}=await sb.schema('hr').from('entities').select('name').eq('active',true).order('sort');
+      window._tpEntities=data||[];
+    }
+    const hit=(window._tpEntities||[]).find(function(e){
+      return String(e.name||'').trim().toLowerCase()===mine.toLowerCase(); });
+    if(hit) return hit.name;
+  }catch(_e){ /* the profile name will do */ }
+  return mine||(state.email||'').split('@')[0]||null;
+}
+/* THE POSITIONS LIST IS LOADED WHERE IT IS USED, NOT WHERE IT HAPPENS TO HAVE BEEN LOADED.
+
+   MP_RECORDS is filled by tpManpower(), which only runs when the Hiring Request tab is opened.
+   Everything else that needs the list of open positions - Connect Referral, Add Candidate - read
+   the cache directly, so on a fresh page load the dropdown was empty and the form said there were
+   no approved positions. Going to Hiring Request and back filled it, which is exactly the detour
+   that should not be necessary. This fetches it if it is not there yet. */
+async function tpEnsurePositions(){
+  if(MP_RECORDS) return MP_RECORDS;
+  try{
+    const {data,error}=await sb.schema('hr').from('manpower_requests').select('*')
+      .order('submitted_at',{ascending:false});
+    if(error)throw error;
+    MP_RECORDS=data||[];
+  }catch(e){
+    // An empty list here reads as "no positions are open", which is a lie when the fetch failed.
+    toast('Could not load the list of positions: '+((e&&e.message)||e),'err');
+    MP_RECORDS=null;
+  }
+  return MP_RECORDS;
+}
+
+window.tpRefConnect=async function(id){if(!rtRefConnectGuard())return;
+  const rec=(TP_REF_RECORDS||[]).find(r=>r.id===id); if(!rec)return;
+  await tpEnsurePositions();
+  const openReqs=(MP_RECORDS||[]).filter(r=>(r.approval_status||'Pending')==='Approved'&&(r.status||'Open')==='Open');
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Connect Referral</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <label>${esc(rec.referred_name)} — connect to which open position?</label>
+    <select id="tpRfConnectPos" class="sel">
+      <option value="">— Select an open position —</option>
+      ${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}${r.department?' · '+esc(r.department):''}</option>`).join('')}
+    </select>
+    ${!openReqs.length?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No approved open positions yet — approve a Hiring Request first.</div>':''}
+  </div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpRfConnectBtn" onclick="tpRefConnectGo(${id})"><i class="fa-solid fa-check"></i> Connect</button></div>`);
 };
-window.tpRefReject=async function(id){if(!recGuard())return;
+window.tpRefConnectGo=async function(id){
+  const reqId=parseInt(($('tpRfConnectPos')||{}).value||'');
+  if(!reqId){toast('Pick a position','err');return;}
+  const req=(MP_RECORDS||[]).find(r=>r.id===reqId);
+  const btn=$('tpRfConnectBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Approved',approved_by:state.email,
+    approved_at:new Date().toISOString(),rejection_reason:null,manpower_request_id:reqId,position:req&&req.job_title||null}).eq('id',id).select().single();
+  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Connect';}return;}
+  if(String(data.referred_by||'').trim()){
+    const rn=await hrNotify({kind:'referral_decided',approved:true,
+      referrer_email:data.referred_by,referrer_name:'',candidate_name:data.referred_name||''});
+    if(rn&&rn.ok) toast('The person who referred them has been told','ok');
+  }
+  try{
+    const {data:rowId}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
+    /* ENTITY is whoever made the decision - here, whoever pressed Connect. hr.entities is the list
+       of recruiters the Tracker offers, so their name is matched against it and used when it is
+       there; when it is not, their own name is used rather than leaving the column empty, because
+       "who owns this candidate" is the question the column exists to answer. */
+    const entity=await tpEntityForMe();
+    const {data:cand}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:reqId,
+      name:data.referred_name,email:data.referred_email,phone:data.referred_phone,position:(req&&req.job_title)||null,
+      // No stage: hr.candidates starts everyone at 'Applied'. Connecting a referral to a
+      // position is not sending that person a test, and "Tests Sent" on the Monthly Update is
+      // supposed to mean a test was actually sent.
+      source:'Referral',entity:entity,resume_id:data.resume_id||null,
+      created_by:state.email,applied_at:new Date().toISOString()}).select().single();
+    if(cand){
+      /* Date is when the connection was made, not when the referral was submitted - the Tracker is
+         a record of people being worked on, and this person starts being worked on now.
+         Feedback is deliberately left empty: nothing has happened to them yet. */
+      const {data:tr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:data.referred_name,
+        position:(req&&req.job_title)||null,source:'Referral',entity:entity,
+        number:data.referred_phone,email:data.referred_email,created_at:new Date().toISOString(),
+        notes:'Referred by '+(data.referred_by||'someone')+(data.notes?(' — '+data.notes):''),candidate_id:cand.id}).select().single();
+      if(tr){
+        await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
+        await sb.schema('hr').from('referrals').update({candidate_id:cand.id,tracker_id:tr.id}).eq('id',id);
+        data.candidate_id=cand.id; data.tracker_id=tr.id;
+      }
+    }
+  }catch(e){ toast('Connected, but could not create the Interview Tracker row: '+((e&&e.message)||e),'err'); }
+  const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
+  closeModal();
+  toast('Connected to '+(req&&req.job_title||'position')+' and added to Interview Tracker');tpRefRender();
+};
+window.tpRefReject=async function(id){if(!rtRefConnectGuard())return;
   if(!await confirmDialog('Reject this referral?'))return;
   const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Rejected',approved_by:state.email,approved_at:new Date().toISOString()}).eq('id',id).select().single();
   if(error){toast(error.message,'err');return;}
   const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
   toast('Rejected');tpRefRender();
+  /* The referrer is told, and nobody else. HR and administrators act on these all day; copying
+     them on their own decision is noise they would learn to ignore. Sent from ai@ rather than from
+     whoever pressed the button, because this is the company's answer and not one approver's
+     opinion - putting a name on it invites the referrer to go and argue with a colleague. */
+  if(String(data.referred_by||'').trim()){
+    const r=await hrNotify({kind:'referral_decided',approved:false,
+      referrer_email:data.referred_by,referrer_name:'',candidate_name:data.referred_name||''});
+    if(r&&r.ok) toast('The person who referred them has been told','ok');
+  }
 };
 
 /* ── Interview Tracker v2 ──
@@ -12968,16 +17134,61 @@ const TP_STAGES=['Tests Sent','Test Passed','Interview Scheduled','Interview Don
 // being graded a pass) -- deliberately NOT removed from TP_STAGES itself (hr.candidate_set_stage
 // looks stages up by label there and would break for that automatic path, and max_stage_seq
 // sequencing assumes the full 9-value domain), just filtered out of what a person can pick by hand.
-const TP_STAGES_SELECTABLE=TP_STAGES.filter(s=>s!=='Tests Sent'&&s!=='Test Passed');
+/* WHAT A PERSON MAY CHOOSE HERE, AND WHAT THEY MAY NOT.
+
+   Tests Sent and Test Passed are stamped by the system - one when a link is generated, one when a
+   paper clears the pass mark - so choosing them by hand would forge a record of something that did
+   not happen.
+
+   REJECTED IS DIFFERENT AND IS NOW ALSO OFF THE LIST. Turning somebody down is the one stage that
+   sends a letter to the person it is about, and that letter cannot be recalled. Leaving it in a
+   dropdown meant a rejection was one mis-click away, next to Hold and Interview Scheduled, with no
+   pause and nobody else involved. It belongs where it is asked as a question: the approval task in
+   Accountability, which names the person, warns that they will be emailed, and waits for an answer.
+
+   The database still permits Rejected - that is how Accountability sets it - so this closes the
+   accidental route without closing the deliberate one. */
+/* WHAT HR MAY SET BY HAND, AND IN WHAT ORDER.
+
+   Most stages are not HR's to type in any more, because something else owns them:
+
+     Tests Sent, Test Passed   stamped when a link is generated and when a paper passes
+     Interview Scheduled       set by scheduling an interview, which also books the interviewer
+     Selected, Rejected        the interviewer's verdict, taken on their own task
+
+   What is left is the three outcomes only HR knows about, because they come from talking to the
+   person rather than from anything the system can see: they accepted, they are on hold, they
+   walked away. Listed in the order they are most often needed rather than alphabetically. */
+const TP_STAGES_SELECTABLE=['Joined','Hold','Backed Out'];
 let TP_TR_RECORDS=null, TP_TR_SEL=new Set(), TP_TR_COMPLETED_ROWS=new Set();
+/* Set by a click on a Monthly Progress row, read once by the Interviews list, and cleared the
+   moment it is used - so it filters the visit it was meant for and does not quietly persist into
+   the next one, which would look like rows going missing. */
+let TP_TR_POS_FILTER=null;
+window.tpMuOpenPeople=function(position){
+  TP_TR_POS_FILTER=String(position||'')||null;
+  navTo('hr_new/0');
+};
+window.tpTrClearPosFilter=function(){ TP_TR_POS_FILTER=null; tpTrRender(); };
 async function tpTracker(){
   const b=$('recBody'); if(!b)return;
   b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
   try{
-    // interview_tracker<->candidates has two FKs (candidate_id, and candidates.tracker_id back the
-    // other way), so the embed shorthand is ambiguous without naming the constraint explicitly.
+    // Two FKs exist between these tables now (candidates.tracker_id -> interview_tracker, and
+    // interview_tracker.candidate_id -> candidates), so PostgREST can no longer guess which one an
+    // unqualified embed means - named explicitly by the FK that actually points the way we want.
     const {data,error}=await sb.schema('hr').from('interview_tracker').select('*,candidates!interview_tracker_candidate_id_fkey(tracker_row_id)').order('id',{ascending:false});
     if(error)throw error; TP_TR_RECORDS=data||[];
+    /* Loaded here, with the list, rather than after the Add window is already open. Fetching them
+       afterwards meant the Source dropdown was empty the first time anybody used it and filled in
+       a moment later - which reads as "there are no sources" and is how somebody ends up leaving
+       it blank. Failure is not fatal: the column falls back to plain text. */
+    if(!window._tpSources){
+      try{
+        const {data:src}=await sb.schema('hr').from('sources').select('name').order('sort');
+        window._tpSources=src||[];
+      }catch(_e){ window._tpSources=[]; }
+    }
     const rowIds=[...new Set((TP_TR_RECORDS||[]).map(r=>r.candidates&&r.candidates.tracker_row_id).filter(Boolean))];
     TP_TR_COMPLETED_ROWS=new Set();
     if(rowIds.length){
@@ -12988,34 +17199,83 @@ async function tpTracker(){
   TP_TR_SEL=new Set();
   tpTrRender();
 }
+/* ONE LOOK FOR THE TWO EDITABLE CELLS. They were native selects with a couple of inline rules,
+   so Source and Stage were different widths and different heights in the same row and neither
+   lined up with the text beside them. */
+const TP_SEL_CSS=`<style>
+  .tp-sel{width:100%;max-width:170px;font-size:12px;line-height:1.3;padding:5px 26px 5px 9px;
+    border:1px solid var(--line);border-radius:7px;background-color:#fff;color:var(--ink);
+    height:30px;cursor:pointer;appearance:none;-webkit-appearance:none;
+    background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath fill='%2364748b' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 9px center}
+  .tp-sel:hover:not(:disabled){border-color:#94a3b8}
+  .tp-sel:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  .tp-sel:disabled{opacity:.6;cursor:not-allowed;background-color:#f8fafc}
+  .tp-sel optgroup{font-size:11px;color:var(--slate)}
+</style>`;
 function tpTrFbTag(s){
   const m={'Selected':'t-green','Joined':'t-green','Rejected':'t-red','Backed Out':'t-red','Hold':'t-amber','Tests Sent':'t-gray','Test Passed':'t-gray','Interview Scheduled':'t-gray','Interview Done':'t-gray'};
   return s?`<span class="tag ${m[s]||'t-gray'}">${esc(s)}</span>`:'<span class="tag t-gray">—</span>';
 }
 function tpTrRender(){
   const b=$('recBody'); if(!b)return;
-  const rows=TP_TR_RECORDS||[];
+  const all=TP_TR_RECORDS||[];
+  const posFilter=TP_TR_POS_FILTER;
+  const rows=posFilter
+    ? all.filter(function(r){return String(r.position||'')===posFilter;})
+    : all;
   const canAct=recCanWrite();
-  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">Interview Tracker <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
+  /* Writing to a candidate is NOT ordinary Recruitment write access. It is the same four people who
+     own the test bank - Shuchandra Das, Khusbu Singh, Uzma Ahmed, the Administrator - and the
+     database says so too (recruit.can_email_candidates, which send-test-email asks with the
+     caller's own token). Checked here as well so the rest of HR never gets a button that would
+     refuse them only after they had written the message. */
+  const canMail=rtCanManage();
+  b.innerHTML=TP_SEL_CSS+TP_NOTE_CSS+`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+    <div class="sec-title" style="margin:0">Interviews <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-primary" onclick="tpTrAdd()"><i class="fa-solid fa-plus"></i> Add Candidate</button>
-      ${canAct?`<button class="btn" id="tpTrEmailBtn" disabled style="opacity:.4" onclick="tpTrEmailSel()"><i class="fa-solid fa-envelope"></i> Email Selected</button>
-      <button class="btn" disabled style="opacity:.4;cursor:not-allowed" title="Coming soon — Email only for now"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>
-      <button class="btn" id="tpTrDelBtn" disabled style="opacity:.4;color:var(--err);border-color:var(--err)" onclick="tpTrDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
+      <button class="btn btn-primary" onclick="tpTrAdd()"><i class="fa-solid fa-plus"></i> Add</button>
+      ${canMail?`<button class="btn" id="tpTrEmailBtn" disabled style="opacity:.4" onclick="tpTrEmailSel()"><i class="fa-solid fa-envelope"></i> Email</button>`:''}
+      ${canAct?`<button class="btn" id="tpTrDelBtn" disabled style="opacity:.4;color:var(--err);border-color:var(--err)" onclick="tpTrDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
     </div>
   </div>
+  ${posFilter?`<div style="display:flex;align-items:center;gap:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12.5px;color:#1e40af">
+    <i class="fa-solid fa-filter"></i> Showing only <b>${esc(posFilter)}</b> — ${rows.length} of ${all.length}
+    <button class="btn btn-sm" style="margin-left:auto;padding:2px 10px" onclick="tpTrClearPosFilter()">Show all</button>
+  </div>`:''}
   <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Only Hold candidates from before today, plus fresh ones from Approved Referrals or added directly here.</div>
   <div style="overflow-x:auto"><table class="tbl" style="min-width:1200px">
     <thead><tr>
       ${canAct?'<th style="width:32px"><input type="checkbox" onchange="tpTrToggleAll(this)"></th>':''}
-      <th>Candidate</th><th>Position</th><th>Source</th><th>Entity</th><th>Phone</th><th>Email</th><th>Date &amp; Time</th><th style="width:170px">Feedback</th><th>Notes</th>
+      <th>Candidate</th><th>Position</th><th>Source</th><th>Handled By</th><th>Phone</th><th>Email</th><th>Date &amp; Time</th><th style="width:170px">Stage</th><th>Notes</th>
     </tr></thead>
     <tbody>${rows.length?rows.map(r=>`<tr>
       ${canAct?`<td><input type="checkbox" class="tp-tr-cb" data-id="${r.id}" data-email="${esc(r.email||'')}" onchange="tpTrRowCheck(this)"></td>`:''}
       <td style="font-weight:600">${esc(r.candidate_name||'—')}</td>
       <td>${esc(r.position||'—')}</td>
-      <td style="font-size:12px;color:var(--slate)">${esc(r.source||'—')}</td>
+      <!-- SOURCE IS EDITABLE, THE SAME WAY STAGE IS. It was printed as text, so a row that came in
+           with the wrong source - or none, which is what a hand-added candidate starts with - could
+           only be corrected in the database. It is the field Monthly Progress and every "where do
+           our candidates come from" question reads, so it has to be fixable where it is seen. -->
+      <!-- SOURCE IS A FACT FOR A REFERRAL, NOT A CHOICE. Somebody referred this person; that is how
+           they got here and no later edit changes it. Leaving the dropdown open invited a row to be
+           relabelled LinkedIn, at which point nothing connects the candidate back to the colleague
+           who put them forward - and referral credit is the whole reason people refer anybody. -->
+      <td style="font-size:12px;color:var(--slate)">${String(r.source||'')==='Referral'
+        ? '<span class="tag t-gray" title="Set when the referral was connected">Referral</span>'
+        : canAct&&(window._tpSources||[]).length
+        ? (function(){
+            /* The current value is listed ONCE. A source that is not in the list any more was
+               appended as an extra option, so anything still in the list appeared twice. */
+            const names=(window._tpSources||[]).map(function(x){return x.name;});
+            const cur=String(r.source||'');
+            if(cur&&names.indexOf(cur)<0) names.push(cur);
+            return `<select class="tp-sel" onchange="tpTrSource(${r.id},this.value)">
+             <option value=""${cur?'':' selected'}>— None —</option>
+             ${names.map(x=>`<option${cur===String(x)?' selected':''}>${esc(x)}</option>`).join('')}
+           </select>`;
+          })()
+        : esc(r.source||'—')}</td>
       <td style="font-size:12px">${esc(r.entity||'—')}</td>
       <td style="font-family:monospace;font-size:12px">${esc(r.number||'—')}</td>
       <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" style="color:var(--brand)">${esc(r.email)}</a>`:'—'}</td>
@@ -13025,16 +17285,61 @@ function tpTrRender(){
           const locked=rowId&&TP_TR_COMPLETED_ROWS.has(rowId);
           if(locked)return tpTrFbTag(r.feedback)+' <i class="fa-solid fa-lock" style="color:var(--slate);font-size:10px" title="This position is marked Complete in Monthly Update"></i>';
           if(!canAct)return tpTrFbTag(r.feedback);
-          // Tests Sent/Test Passed aren't offered here -- they're set automatically when a test
-          // link is sent / graded a pass. If a candidate is already at one of those two (set
-          // automatically), it shows as a read-only tag instead of a dropdown that can't represent it.
-          if(r.feedback==='Tests Sent'||r.feedback==='Test Passed')return tpTrFbTag(r.feedback);
-          return `<select class="sel" style="font-size:12px;padding:4px 6px" onchange="tpTrFeedback(${r.id},this.value)">
-            <option value="">— Select —</option>
-            ${TP_STAGES_SELECTABLE.map(s=>`<option${r.feedback===s?' selected':''}>${s}</option>`).join('')}
+          /* TESTS SENT AND TEST PASSED ARE NOT OFFERED, BUT THEY NO LONGER FREEZE THE ROW.
+
+             Those two stages are stamped by the system - one when a test link is generated, one
+             when a submission clears the pass mark - so they are deliberately absent from the list
+             of things a person can choose. That much was right. What was wrong was hiding the whole
+             dropdown once a candidate reached one of them: the moment you sent somebody a test they
+             became stuck, and there was no way to move them on to Interview Scheduled, or to Reject
+             them, without going into the database. A stage the system sets should stop you FORGING
+             it, not stop you continuing.
+
+             So the dropdown is always there. It shows the current stage as its heading when that
+             stage is one of the automatic two, and every manual stage stays selectable. */
+          /* The per-row "Send Test" button used to live here. Sending a test is now one of the
+             things the Email Selected window can do, so it is done the same way as any other mail
+             to a candidate - tick the rows, write the message, optionally attach a test - instead
+             of through a second button with its own separate window. Attaching a test there still
+             generates each candidate their own link and still moves them to Tests Sent. */
+          /* THE DROPDOWN STILL HAS TO SAY WHERE THEY ARE.
+
+             Most stages are no longer HR's to choose - the system sets Tests Sent and Test Passed,
+             booking sets Interview Scheduled, the interviewer sets Selected and Rejected. But a
+             stage you cannot choose is still a stage you need to SEE. With those removed from the
+             list, the box fell back to "- Select -" and the column stopped reporting anything: a
+             candidate sitting at Interview Scheduled looked identical to one who had just arrived.
+
+             So the closed part of the box shows the stage they are actually at, and the list below
+             offers only what this person may set. Reading and choosing are different jobs and the
+             control does both. */
+          const shown=String(r.feedback||'').trim();
+          const canPick=TP_STAGES_SELECTABLE.indexOf(shown)>=0;
+          /* REJECTED IS THE END OF THE ROAD, SO THE BOX STOPS OFFERING A WAY FORWARD.
+
+             Failing the test now rejects a candidate, and the dropdown still offered Joined,
+             Hold and Backed Out to somebody who had been rejected - picking one was refused by
+             the database, but only after it had been chosen. The stage is still shown, because
+             HR needs to see where the person stands; there is simply nothing left to pick. */
+          if(shown==='Rejected'){
+            return `<select class="tp-sel" disabled title="This candidate has been rejected — the decision is final"><option>Rejected</option></select>`;
+          }
+          /* THE CURRENT STAGE IS THE HEADING, NOT AN ITEM IN THE LIST.
+
+             It used to be an ordinary option, so a candidate sitting at Pending showed "Pending"
+             on the closed box and "Pending" again as the first line when you opened it - the
+             thing you already are, offered as somewhere to go. `hidden` keeps it as the closed
+             label and takes it out of the list, and `disabled` means it cannot be re-chosen even
+             where a browser ignores `hidden`. What is left under it is only what you may pick. */
+          const heading=shown?esc(shown):'Not started';
+          return `<select class="tp-sel" onchange="tpTrFeedback(${r.id},this.value)">
+            <option value="" selected disabled hidden>${heading}</option>
+            <optgroup label="Move to…">
+              ${TP_STAGES_SELECTABLE.filter(x=>x!==shown).map(x=>`<option>${x}</option>`).join('')}
+            </optgroup>
           </select>`;
         })()}</td>
-      <td style="font-size:12px;color:var(--slate)">${esc(r.notes||'—')}</td>
+      <td class="tp-note" title="${esc(r.notes||'')}">${esc(r.notes||'—')}</td>
     </tr>`).join(''):`<tr><td colspan="${canAct?9:8}" style="text-align:center;padding:40px;color:var(--slate)">No candidates yet — click <b>Add Candidate</b></td></tr>`}
     </tbody>
   </table></div>`;
@@ -13050,20 +17355,87 @@ function tpTrSyncToolbar(){
 // candidate_set_stage takes a candidates.id, but the Tracker row's own id (interview_tracker.id) is what
 // we render against — resolve via candidate_id when present, otherwise fall back to a direct tracker update
 // (rows with no candidate_id are the pre-reset Hold rows carried over, which never got a hr.candidates row).
+/* SENDING ONE OF THE THREE HR LETTERS.
+
+   Every caller goes through here so the wording, the sender rules and the reporting stay in one
+   place. It never throws: a letter failing must not undo the decision that prompted it - a
+   candidate who has been rejected stays rejected whether or not the email left the building - so
+   the outcome is reported and the caller carries on.
+
+   When the sender's own Google is not connected the letter still goes, from the shared account,
+   and the toast says so. Letting somebody believe a rejection went out over their name when it
+   did not is the failure worth avoiding here. */
+async function hrNotify(payload){
+  try{
+    const {data,error}=await sb.functions.invoke('hr-notify',{body:payload});
+    if(error||(data&&data.error)) throw new Error((data&&data.error)||error.message);
+    if(data&&data.not_connected){
+      toast('Sent from the shared JAIN-E address \u2014 connect your Google account to send from your own','warn');
+    }
+    return data;
+  }catch(e){
+    toast('The email could not be sent: '+((e&&e.message)||e),'err');
+    return null;
+  }
+}
+
 window.tpTrFeedback=async function(trackerId,stage){
   if(!recGuard()||!stage)return;
   const rec=(TP_TR_RECORDS||[]).find(r=>r.id===trackerId); if(!rec)return;
+  /* A REFUSED CHANGE PUTS THE DROPDOWN BACK.
+
+     The database refuses to move an unapproved candidate, and that part worked - but a <select>
+     keeps whatever was picked until something redraws it. So the toast said no and the box said
+     yes, which reads as "it complained but did it anyway". Re-rendering from the record we still
+     hold snaps it back to the truth, so the screen and the database never disagree. */
   if(rec.candidate_id){
     const {error}=await sb.schema('hr').rpc('candidate_set_stage',{p_id:rec.candidate_id,p_stage:stage});
-    if(error){toast(error.message,'err');return;}
+    if(error){toast(error.message,'err');tpTrRender();return;}
   }else{
     const {error}=await sb.schema('hr').from('interview_tracker').update({feedback:stage,status:stage}).eq('id',trackerId);
-    if(error){toast(error.message,'err');return;}
+    if(error){toast(error.message,'err');tpTrRender();return;}
   }
   rec.feedback=stage;toast('Updated');
+
+  /* Only Rejected writes to the candidate, and only if there is an address to write to. The other
+     stages are internal bookkeeping - nobody expects a letter saying they have moved to
+     "Interview Scheduled", and sending one would be worse than silence. Asked first, because a
+     rejection email cannot be recalled once it has gone. */
+  if(stage==='Rejected'&&String(rec.email||'').trim()){
+    const who=rec.candidate_name||'this candidate';
+    if(await confirmDialog(
+        'Send '+who+' a rejection email? It goes from your own address, says nothing about scores or '
+        +'reasons, and cannot be taken back.',
+        {title:'Send rejection email', okLabel:'Send', icon:'fa-envelope', danger:true})){
+      const r=await hrNotify({kind:'candidate_rejected',name:rec.candidate_name||'',
+                              email:rec.email,position:rec.position||''});
+      if(r&&r.ok) toast('Rejection email sent to '+rec.email,'ok');
+    }
+  }
 };
-window.tpTrAdd=function(){
+/* Written to the tracker row AND to the candidate record, because both carry a source and the two
+   are read by different screens - the Tracker prints its own, Monthly Progress and the reports read
+   the candidate's. Updating one would leave the other saying something else. */
+window.tpTrSource=async function(trackerId,value){
   if(!recGuard())return;
+  const rec=(TP_TR_RECORDS||[]).find(r=>r.id===trackerId); if(!rec)return;
+  if(String(rec.source||'')==='Referral'){
+    toast('A referred candidate stays a Referral — that is how they reached us','err');
+    tpTrRender();
+    return;
+  }
+  const v=String(value||'').trim()||null;
+  const {error}=await sb.schema('hr').from('interview_tracker').update({source:v}).eq('id',trackerId);
+  if(error){toast(error.message,'err');return;}
+  if(rec.candidate_id){
+    try{ await sb.schema('hr').from('candidates').update({source:v}).eq('id',rec.candidate_id); }catch(_e){}
+  }
+  rec.source=v;
+  toast('Source updated');
+};
+window.tpTrAdd=async function(){
+  if(!recGuard())return;
+  await tpEnsurePositions();
   const openReqs=(MP_RECORDS||[]).filter(r=>(r.approval_status||'Pending')==='Approved');
   const entities=(window._tpEntities||[]);
   const sources=(window._tpSources||[]);
@@ -13071,19 +17443,83 @@ window.tpTrAdd=function(){
   <div class="modal-body frm">
     <div class="two"><div><label>Candidate Name *</label><input id="tpTrName" class="inp"></div>
     <div><label>Position *</label><select id="tpTrPos" class="sel"><option value="">— Select —</option>${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}</option>`).join('')}</select></div></div>
-    <div class="two"><div><label>Source</label><select id="tpTrSrc" class="sel"><option value="">— Select —</option>${sources.map(s=>`<option>${esc(s.name)}</option>`).join('')}</select></div>
-    <div><label>Entity (recruiter)</label><select id="tpTrEntity" class="sel"><option value="">— Select —</option>${entities.map(e=>`<option>${esc(e.name)}</option>`).join('')}</select></div></div>
+    <!-- ENTITY IS NOT ASKED FOR. It is who handled this candidate, and that is whoever is filling
+         this form in - asking them to pick themselves from a list is a question with one right
+         answer. It is recorded from the signed-in user instead. -->
+    <div><label>Source</label>
+      <select id="tpTrSrc" class="sel" onchange="tpTrSrcPick(this)">
+        <option value="">— Select —</option>
+        ${sources.map(s=>`<option>${esc(s.name)}</option>`).join('')}
+        <option value="__new">+ Add a new source…</option>
+      </select>
+      <div id="tpTrSrcNew" style="display:none;gap:6px;margin-top:6px">
+        <input id="tpTrSrcNewName" class="inp" placeholder="Name of the new source" style="flex:1"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();tpTrSrcNewSave();}else if(event.key==='Escape'){event.preventDefault();tpTrSrcNewCancel();}">
+        <button class="btn btn-primary" id="tpTrSrcNewBtn" type="button" onclick="tpTrSrcNewSave()"><i class="fa-solid fa-check"></i> Add</button>
+        <button class="btn" type="button" onclick="tpTrSrcNewCancel()">Cancel</button>
+      </div>
+      <div style="font-size:11.5px;color:var(--slate);margin-top:4px">A source added here also appears on the careers page form.</div>
+    </div>
     <div class="two"><div><label>Phone</label><input id="tpTrPhone" class="inp"></div><div><label>Email</label><input id="tpTrEmail" class="inp"></div></div>
     <label>Notes</label><textarea id="tpTrNotes" class="inp" rows="2"></textarea>
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpTrSaveBtn" onclick="tpTrSave()"><i class="fa-solid fa-check"></i> Add</button></div>`);
-  if(!window._tpEntities){
-    sb.schema('hr').from('entities').select('name').eq('active',true).order('sort').then(({data})=>{window._tpEntities=data||[];const s=$('tpTrEntity');if(s&&data)s.innerHTML='<option value="">— Select —</option>'+data.map(e=>`<option>${esc(e.name)}</option>`).join('');});
-  }
   if(!window._tpSources){
-    sb.schema('hr').from('sources').select('name').order('sort').then(({data})=>{window._tpSources=data||[];const s=$('tpTrSrc');if(s&&data)s.innerHTML='<option value="">— Select —</option>'+data.map(x=>`<option>${esc(x.name)}</option>`).join('');});
+    sb.schema('hr').from('sources').select('name').order('sort').then(({data})=>{
+      window._tpSources=data||[]; tpTrSrcRefill();
+    });
   }
   setTimeout(()=>{const el=$('tpTrName');if(el)el.focus();},100);
+};
+/* Redraws the Source list from whatever is currently loaded, keeping what was chosen. Used after
+   the list arrives and after a new source is added. */
+function tpTrSrcRefill(keep){
+  const el=$('tpTrSrc'); if(!el) return;
+  const cur=keep!==undefined?keep:el.value;
+  el.innerHTML='<option value="">\u2014 Select \u2014</option>'
+    +(window._tpSources||[]).map(x=>`<option${String(cur)===String(x.name)?' selected':''}>${esc(x.name)}</option>`).join('')
+    +'<option value="__new">+ Add a new source\u2026</option>';
+}
+/* Adding a source from the place you needed it, rather than sending somebody to a settings
+   screen to come back later. It goes into hr.sources, which is the one list the Tracker, this
+   form and the careers page all read - so a source added here really does show up on the
+   website's "how did you hear about this opening?" the next time that page is opened. */
+window.tpTrSrcPick=function(el){
+  if(!el||el.value!=='__new') return;
+  el.value='';
+  // Inline, not a second modal on top of this one: the form stays where it is and the new name
+  // is typed in the place the answer belongs.
+  const box=$('tpTrSrcNew'); if(!box) return;
+  el.style.display='none'; box.style.display='flex';
+  const inp=$('tpTrSrcNewName'); if(inp){ inp.value=''; inp.focus(); }
+};
+window.tpTrSrcNewCancel=function(){
+  const el=$('tpTrSrc'), box=$('tpTrSrcNew');
+  if(box) box.style.display='none';
+  if(el){ el.style.display=''; el.value=''; }
+};
+/* Adding a source where you needed it, rather than sending somebody to a settings screen to come
+   back later. It goes into hr.sources, which is the one list the Tracker, this form and the
+   careers page all read - so a source added here really does appear in the website's "how did you
+   hear about this opening?" the next time that page loads. */
+window.tpTrSrcNewSave=async function(){
+  const inp=$('tpTrSrcNewName'); const v=String((inp&&inp.value)||'').trim();
+  if(!v){ toast('Type a name for the source','err'); if(inp)inp.focus(); return; }
+  if((window._tpSources||[]).some(x=>String(x.name).trim().toLowerCase()===v.toLowerCase())){
+    toast('That source is already in the list','warn'); tpTrSrcNewCancel(); tpTrSrcRefill(v); return;
+  }
+  const btn=$('tpTrSrcNewBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  try{
+    const maxSort=(window._tpSources||[]).reduce((m,x)=>Math.max(m,Number(x.sort)||0),0)+10;
+    const {error}=await sb.schema('hr').from('sources').insert({name:v,sort:maxSort});
+    if(error) throw new Error(error.message);
+    window._tpSources=[...(window._tpSources||[]),{name:v,sort:maxSort}];
+    tpTrSrcNewCancel(); tpTrSrcRefill(v);
+    toast('“'+v+'” added — it will show on the careers page too','ok');
+  }catch(e){
+    toast('Could not add that source: '+((e&&e.message)||e),'err');
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}
+  }
 };
 window.tpTrSave=async function(){
   const name=($('tpTrName')||{}).value?.trim();
@@ -13093,10 +17529,19 @@ window.tpTrSave=async function(){
   const btn=$('tpTrSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {data:rowId,error:rrErr}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
   if(rrErr){toast(rrErr.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}return;}
-  const source=($('tpTrSrc')||{}).value||null, entity=($('tpTrEntity')||{}).value||(req?req.approved_by:null)||null;
+  let source=($('tpTrSrc')||{}).value||null;
+  if(source==='__new') source=null;            // the placeholder is not a source
+  /* Handled By is whoever is adding them. tpEntityForMe resolves the signed-in person to an entity
+     name where one matches, and falls back to their own name - which is more use than the blank
+     the old optional dropdown usually left behind. */
+  let entity=null;
+  try{ entity=await tpEntityForMe(); }catch(_e){ entity=null; }
+  if(!entity) entity=(req?req.approved_by:null)||state.email||null;
   const phone=($('tpTrPhone')||{}).value?.trim()||null, email=($('tpTrEmail')||{}).value?.trim()||null;
   const {data:cand,error:cErr}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:reqId,name,email,phone,
-    position:req&&req.job_title,source,entity,stage:'Tests Sent',created_by:state.email,applied_at:new Date().toISOString()}).select().single();
+    // Same again - added to the Tracker, not yet tested. The Send Test button on the row is what
+    // moves them on, via candidate_set_stage.
+    position:req&&req.job_title,source,entity,created_by:state.email,applied_at:new Date().toISOString()}).select().single();
   if(cErr){toast(cErr.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}return;}
   const notes=($('tpTrNotes')||{}).value?.trim()||null;
   const {data:tr,error:tErr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:name,position:req&&req.job_title,source,entity,number:phone,email,notes,candidate_id:cand.id}).select().single();
@@ -13104,77 +17549,170 @@ window.tpTrSave=async function(){
   await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
   TP_TR_RECORDS=[tr,...(TP_TR_RECORDS||[])];closeModal();toast('Candidate added');tpTrRender();
 };
+/* EMAIL SELECTED - one window for writing to candidates, which can also carry a test.
+
+   It used to hand the addresses to the computer's own mail program through a mailto: link. That
+   is where the truncated and code-looking mail came from: a mailto: is a URL, everything in it is
+   percent-encoded, and browsers and mail programs cut it off at a length nobody agrees on - so a
+   message either arrived half-written or arrived full of %20 and %0A. It also meant the mail was
+   never really sent by JAIN-E at all, so nothing could be recorded and nobody could be sure it
+   went. Now it goes through send-test-email, the same path the Tests tab has always used: proper
+   HTML with a plain-text alternative, base64-encoded so a long line or an accented character
+   cannot corrupt it, one message per candidate so nobody sees anybody else's address, and sent
+   from the writer's own Gmail when they have connected it.
+
+   NOTHING IS PRE-FILLED. Subject and message start empty and are the writer's own words - the
+   old version put "Regarding your application" in for them, which is how every candidate got an
+   identical subject line nobody had chosen.
+
+   Attaching a test is optional, and is what replaced the per-row Send Test button. When one is
+   attached each candidate gets their OWN link, generated against their candidate record, which is
+   what moves them to Tests Sent on the Monthly Update - the same mechanism as before, just reached
+   from here. Anyone with no candidate record behind their row still gets the message; they simply
+   cannot be given a personal link, and the window says so plainly rather than silently leaving
+   them out. */
 window.tpTrEmailSel=async function(){
-  const cands=[...TP_TR_SEL].map(id=>(TP_TR_RECORDS||[]).find(x=>x.id===id)).filter(r=>r&&r.email);
-  if(!cands.length){toast('None of the selected candidates have an email on file','err');return;}
+  if(!rtCanManage()){toast('Only Shuchandra Das, Khusbu Singh, Uzma Ahmed or the Administrator can email candidates','err');return;}
+  const rows=[...TP_TR_SEL].map(id=>(TP_TR_RECORDS||[]).find(x=>x.id===id)).filter(Boolean);
+  const withEmail=rows.filter(r=>r.email);
+  if(!withEmail.length){toast('None of the selected candidates have an email on file','err');return;}
+  const noEmail=rows.length-withEmail.length;
   await rtShareCheckGmail();
-  if(!Array.isArray(RT_RECORDS)){
-    const{data}=await sb.schema('recruit').from('tests').select('*').order('sl');
-    RT_RECORDS=data||[];
+  // Native tests only: a personal, trackable link can only be made for one of ours.
+  let tests=(RT_RECORDS||[]).filter(t=>t.engine==='native');
+  if(!tests.length){
+    try{const {data}=await sb.schema('recruit').from('tests').select('*').eq('engine','native').order('sl');
+      tests=data||[];}catch(_e){ tests=[]; }
   }
-  const testOpts=(RT_RECORDS||[]).filter(t=>t.engine==='native'||t.link).map(t=>`<option value="${t.id}">${esc(t.name)}${t.engine==='native'?' (JainE test)':''}</option>`).join('');
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-envelope"></i> Email ${cands.length} Candidate${cands.length>1?'s':''}</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
+  const noCand=withEmail.filter(r=>!r.candidate_id).length;
+  const list=withEmail.map(r=>'<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px solid var(--line-2)">'
+      +'<span style="font-weight:600">'+esc(r.candidate_name||'\u2014')+'</span>'
+      +'<span style="color:var(--slate);font-size:12px">'+esc(r.email)+'</span></div>').join('');
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-envelope"></i> Email Selected</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm" style="max-height:72vh;overflow-y:auto">
     ${RT_CAN_SEND_AS_SELF
-      ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#166534;margin-bottom:4px"><i class="fa-brands fa-google"></i> Sending from <b>${esc(state.email||'')}</b>.</div>`
+      ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#166534;margin-bottom:4px"><i class="fa-brands fa-google"></i> Sending from <b>${esc(state.email||'')}</b> \u2014 it will be in your own Sent folder, and replies come straight to you.</div>`
       : `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#92400e;margin-bottom:4px">
-           <div style="margin-bottom:7px">This will be sent from the shared JAIN-E address, signed by you. Connect your Google account to send from your own address instead.</div>
+           <div style="margin-bottom:7px">This will be sent from the shared JAIN-E address, signed by you, with replies pointed at <b>${esc(state.email||'')}</b>. Connect your Google account to send it from your own address instead.</div>
            <button type="button" class="btn btn-sm" onclick="rtShareConnectGoogle()"><i class="fa-brands fa-google"></i> Connect Google</button>
          </div>`}
-    <label>Subject</label><input id="tpTrMailSubj" class="inp" value="Regarding your application">
-    <label>Message</label><textarea id="tpTrMailBody" class="inp" rows="4" style="resize:vertical">Dear Candidate,\n\nThank you for your interest. We will be in touch shortly.\n\nBest,\nThe Jain Group</textarea>
-    <label>Attach a Test <span style="font-size:11px;color:var(--slate)">(optional — a JainE test sends each candidate their own unique link)</span></label>
-    <select id="tpTrMailTest" class="sel"><option value="">— None —</option>${testOpts}</select>
-    <div style="font-size:12px;color:var(--slate);margin-top:8px">To: ${cands.map(c=>esc(c.email)).join(', ')}</div>
+    <label>To <span style="font-size:11px;color:var(--slate)">(${withEmail.length} candidate${withEmail.length>1?'s':''} \u2014 each gets their own copy)</span></label>
+    <div style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;max-height:132px;overflow-y:auto">${list}</div>
+    ${noEmail?`<div style="font-size:11.5px;color:#92400e;margin-top:4px"><i class="fa-solid fa-triangle-exclamation"></i> ${noEmail} selected row${noEmail>1?'s have':' has'} no email on file and will be skipped.</div>`:''}
+    <label style="margin-top:10px">Subject *</label><input id="tpTrMailSubj" class="inp" placeholder="Write the subject">
+    <label>Message *</label><textarea id="tpTrMailBody" class="inp" rows="6" style="resize:vertical" placeholder="Write your message"></textarea>
+    <label style="margin-top:10px">Attach a Test <span style="font-size:11px;color:var(--slate)">(optional)</span></label>
+    <select id="tpTrMailTest" class="sel">
+      <option value="">\u2014 No test \u2014</option>
+      ${tests.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}
+    </select>
+    ${tests.length?`<div style="font-size:11.5px;color:var(--slate);margin-top:4px">Each candidate gets their own link, and moves to <b>Tests Sent</b> on the Monthly Update.${noCand?` ${noCand} of them ${noCand>1?'have':'has'} no candidate record, so ${noCand>1?'they':'it'} cannot be given one \u2014 ${noCand>1?'they':'it'} will still receive the message.`:''}</div>`
+      :`<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No tests exist yet \u2014 create one in the Tests tab to be able to attach it here.</div>`}
   </div>
-  <div class="modal-foot"><button class="btn btn-primary" id="tpTrMailSendBtn" onclick="tpTrEmailSend()"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpTrMailBtn" onclick="tpTrEmailSelSend()"><i class="fa-solid fa-paper-plane"></i> Send</button></div>`);
+  setTimeout(()=>{const el=$('tpTrMailSubj');if(el)el.focus();},100);
 };
-window.tpTrEmailSend=async function(){
-  const cands=[...TP_TR_SEL].map(id=>(TP_TR_RECORDS||[]).find(x=>x.id===id)).filter(r=>r&&r.email);
-  const subject=($('tpTrMailSubj')||{}).value?.trim()||'Regarding your application';
-  const body=($('tpTrMailBody')||{}).value?.trim()||'';
-  const testId=parseInt(($('tpTrMailTest')||{}).value||'');
-  const test=testId?(RT_RECORDS||[]).find(t=>t.id===testId):null;
-  const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
-  const btn=$('tpTrMailSendBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending…';}
+
+window.tpTrEmailSelSend=async function(){
+  if(!rtCanManage()){toast('Only Shuchandra Das, Khusbu Singh, Uzma Ahmed or the Administrator can email candidates','err');return;}
+  const subject=(($('tpTrMailSubj')||{}).value||'').trim();
+  const body=(($('tpTrMailBody')||{}).value||'').trim();
+  // An empty subject or an empty message is a slip, not a choice - the window starts blank on
+  // purpose, so there is nothing to fall back on if they are left that way.
+  if(!subject){toast('Write a subject','err');const el=$('tpTrMailSubj');if(el)el.focus();return;}
+  if(!body){toast('Write a message','err');const el=$('tpTrMailBody');if(el)el.focus();return;}
+  const testId=parseInt((($('tpTrMailTest')||{}).value)||'')||null;
+  const rows=[...TP_TR_SEL].map(id=>(TP_TR_RECORDS||[]).find(x=>x.id===id)).filter(r=>r&&r.email);
+  if(!rows.length){toast('Nobody selected has an email on file','err');return;}
+  const testName=testId?((RT_RECORDS||[]).find(t=>t.id===testId)||{}).name||'Assessment':'';
+  const btn=$('tpTrMailBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending\u2026';}
+  const {data:{session}}=await sb.auth.getSession();
+  const token=session&&session.access_token;
+  const post=async (payload)=>{
+    const res=await fetch(SUPABASE_URL+'/functions/v1/send-test-email',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify(payload)
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error)throw new Error(out.error||('send-test-email HTTP '+res.status));
+    return out;
+  };
+  let sent=0, tested=0; const failed=[];
   try{
-    const{data:{session}}=await sb.auth.getSession();
-    const token=session&&session.access_token;
-    let sent=0,failed=[];
-    for(const c of cands){
-      let link=test&&test.link||'';
-      if(test&&test.engine==='native'){
-        const linkRes=await fetch(SUPABASE_URL+'/functions/v1/recruit-test-generate-link',{
-          method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-          body:JSON.stringify({test_id:test.id,candidate_email:c.email,candidate_id:c.candidate_id||null,origin:location.origin})
-        });
-        const linkOut=await linkRes.json().catch(()=>({}));
-        if(!linkRes.ok||linkOut.error||!linkOut.link){failed.push(c.email);continue;}
-        link=linkOut.link;
+    if(!testId){
+      /* No test: one call, and the function still writes one message per candidate so nobody sees
+         anybody else's address. */
+      const out=await post({test_name:'',link:'',subject,body,recipients:rows.map(r=>r.email.toLowerCase())});
+      sent=Number(out.sent||rows.length);
+      (out.failed||[]).forEach(f=>failed.push((f&&f.to)||'someone'));
+    } else {
+      /* A test: each candidate needs their OWN link, so this goes one at a time.
+         recruit-test-generate-link is what calls candidate_set_stage(...,'Tests Sent'), and it
+         only does so when a real candidate_id is passed - which is why somebody with no candidate
+         record gets the message but not a link, rather than being quietly dropped. */
+      for(const r of rows){
+        let link='';
+        if(r.candidate_id){
+          try{
+            const {data,error}=await sb.functions.invoke('recruit-test-generate-link',
+              {body:{test_id:testId,candidate_id:r.candidate_id,candidate_email:r.email,origin:location.origin}});
+            if(error||data?.error)throw new Error((data&&data.error)||error.message);
+            link=data.link||'';
+          }catch(e){ failed.push((r.candidate_name||r.email)+' (test link: '+((e&&e.message)||e)+')'); continue; }
+        }
+        try{
+          await post({test_id:testId,test_name:link?testName:'',link,subject,body,recipients:[r.email.toLowerCase()]});
+          sent++; if(link)tested++;
+        }catch(e){ failed.push((r.candidate_name||r.email)+' ('+((e&&e.message)||e)+')'); }
       }
-      const mailRes=await fetch(SUPABASE_URL+'/functions/v1/send-test-email',{
-        method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-        body:JSON.stringify({test_id:test?test.id:null,test_name:test?test.name:'',link,subject,body,recipients:[c.email],sender_name:senderName,sender_email:state.email||''})
-      });
-      const mailOut=await mailRes.json().catch(()=>({}));
-      if(!mailRes.ok||mailOut.error)failed.push(c.email);else sent++;
     }
-    closeModal();
-    if(sent)toast('Emailed '+sent+' candidate'+(sent>1?'s':''),'ok');
-    if(failed.length)toast(failed.length+' address'+(failed.length>1?'es':'')+' could not be sent: '+failed.join(', '),'err');
   }catch(e){
     if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
     toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
+    return;
   }
+  closeModal();
+  if(sent)toast('Emailed '+sent+' candidate'+(sent===1?'':'s')+(tested?(' \u2014 '+tested+' now at Tests Sent'):''),'ok');
+  // One address failing among several must not read as a clean success.
+  if(failed.length)toast('Could not reach: '+failed.slice(0,3).join(', ')+(failed.length>3?(' and '+(failed.length-3)+' more'):''),'err');
+  try{usageQueue('recruitment.interview_tracker.email_selected','update',{recipients:sent,test:testName||null});}catch(_e){}
+  if(tested)tpTracker();
 };
+/* DELETING A CANDIDATE REMOVES THE CANDIDATE, NOT JUST THE LINE ON SCREEN.
+
+   This used to delete from hr.interview_tracker and nothing else. That table is only the row you
+   are looking at - the person lives in hr.candidates and their CV in hr.resumes - so a "deleted"
+   candidate was still a candidate, and their CV stayed in the Resumes tab with nothing pointing
+   at it and no way to tell whose it had been.
+
+   hr.candidate_delete does all three and hands back the storage paths of the CV files, because a
+   database call can delete a row but not a file in S3. The files are removed afterwards: a file
+   left behind is waste, whereas a row left behind is a ghost candidate, so the rows go first and
+   a failure to delete the file does not hold up the delete. */
 window.tpTrDeleteSel=async function(){
   if(!recGuard())return;
   const ids=[...TP_TR_SEL]; if(!ids.length)return;
-  if(!await confirmDialog('Delete '+ids.length+' candidate(s) from the Tracker? This cannot be undone.'))return;
-  const {error}=await sb.schema('hr').from('interview_tracker').delete().in('id',ids);
-  if(error){toast(error.message,'err');return;}
+  const names=ids.map(id=>((TP_TR_RECORDS||[]).find(r=>r.id===id)||{}).candidate_name).filter(Boolean);
+  if(!await confirmDialog(
+      'Delete '+ids.length+' candidate'+(ids.length===1?'':'s')
+      +(names.length&&names.length<=3?(' — '+names.join(', ')):'')
+      +'? Their CV, any interviews booked for them, and the referral that put them forward are '
+      +'deleted as well. This cannot be undone.',
+      {title:'Delete candidate'+(ids.length===1?'':'s'), okLabel:'Delete', icon:'fa-trash', danger:true}))return;
+  let paths=[];
+  try{
+    const {data,error}=await sb.schema('hr').rpc('candidate_delete',{p_tracker_ids:ids});
+    if(error)throw new Error(error.message);
+    paths=(data||[]).map(r=>r&&r.storage_path).filter(Boolean);
+  }catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
+  // Best effort, and deliberately not fatal - see above.
+  let fileFails=0;
+  await Promise.all(paths.map(pth=>s3Delete(pth).catch(()=>{fileFails++;})));
   TP_TR_RECORDS=(TP_TR_RECORDS||[]).filter(r=>!ids.includes(r.id));TP_TR_SEL=new Set();
-  toast(ids.length+' deleted');tpTrRender();
+  toast(ids.length+' deleted'+(paths.length?(' — '+paths.length+' CV'+(paths.length===1?'':'s')+' removed'):''),'ok');
+  if(fileFails)toast(fileFails+' CV file'+(fileFails===1?'':'s')+' could not be removed from storage','warn');
+  tpTrRender();
 };
 
 /* ── Monthly Update v2 — one row per position per month, live stage counts, deletable ── */
@@ -13204,35 +17742,174 @@ async function tpMuLoad(){
     (cands||[]).forEach(c=>{counts[c.tracker_row_id]=counts[c.tracker_row_id]||{};counts[c.tracker_row_id][c.stage]=(counts[c.tracker_row_id][c.stage]||0)+1;});
   }
   TP_MU_ROWS=rows;
+  window._tpMuCounts=counts;   // kept so tpMuPick can redraw without refetching
   tpMuRender(counts);
 }
+/* MONTHLY PROGRESS SHOWS A SUBSET, AND THAT IS DELIBERATE.
+
+   The report's columns are not the same thing as the stages a candidate can be at. Interview Done
+   is a step somebody passes through on the way to Selected or Rejected, and as a column it was a
+   number nobody read between two that are. Dropping it from the report does not remove the stage -
+   candidates still reach it, the Interviews list still shows it, and hr.tracker_stages still
+   knows it. Only the column is gone.
+
+   Kept as its own list so the two can differ without one quietly changing the other. */
+const TP_MU_COLS=TP_STAGES.filter(s=>s!=='Interview Done');
+
 function tpMuRender(counts){
   const b=$('recBody'); if(!b)return;
   const rows=TP_MU_ROWS||[];
   const canAct=recCanWrite();
+  /* THE ACTIONS LIVE AT THE TOP, AND THE ROW IS CHOSEN FIRST.
+
+     Upload and Email were on every row, which put two buttons on each of ten lines and pushed the
+     numbers - the thing this screen exists to show - off to the side. One toolbar, and you say
+     which position it applies to by picking the row.
+
+     A RADIO, NOT A TICK BOX. Both actions need exactly one position: CVs are filed against one
+     vacancy, and the email window narrows to one position's candidates. Tick boxes would invite
+     choosing three and then being told you cannot, so the control only allows what the action
+     allows. */
+  const selPos=TP_MU_SEL;
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">Monthly Update</div>
+    <div class="sec-title" style="margin:0">Monthly Progress</div>
     <select class="sel" style="margin-left:8px" onchange="tpMuSwitchMonth(this.value)">${(TP_MU_MONTHS||[]).map(m=>`<option value="${m}"${m===TP_MU_CUR?' selected':''}>${tpMuMonthLabel(m)}</option>`).join('')}</select>
-    ${canAct?`<button class="btn" style="margin-left:auto" onclick="tpMuOpenMonth()"><i class="fa-solid fa-rotate"></i> Refresh open positions into this month</button>`:''}
+    ${canAct?`<div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      ${selPos?`<span style="font-size:12px;color:var(--slate)">Selected: <b>${esc(selPos)}</b></span>`:'<span style="font-size:12px;color:var(--slate)">Select a position to upload or email</span>'}
+      <button class="btn" ${selPos?'':'disabled style="opacity:.45;cursor:not-allowed"'} onclick="tpMuUpload()"><i class="fa-solid fa-upload"></i> Upload</button>
+      <button class="btn" ${selPos?'':'disabled style="opacity:.45;cursor:not-allowed"'} onclick="tpMuEmail()"><i class="fa-solid fa-envelope"></i> Email</button>
+    </div>`:''}
   </div>
-  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">One row per position; counts update live as candidates move through Tracker feedback. No manual data entry.</div>
+  <style>
+    .tp-mu-row:hover{background:#eff6ff}
+    .tp-mu-row:hover .tp-mu-go{opacity:1}
+  </style>
+  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">One row per position, counted automatically as people move through their stages — nothing here is typed in. <b>Click a row</b> to see the people behind its numbers.</div>
   <div style="overflow-x:auto"><table class="tbl" style="min-width:1100px">
-    <thead><tr><th>Position</th><th>Department</th>${TP_STAGES.map(s=>`<th style="text-align:center;font-size:11px">${esc(s)}</th>`).join('')}${canAct?'<th></th>':''}</tr></thead>
+    <thead><tr>${canAct?'<th style="width:34px"></th>':''}<th>Position</th><th>Department</th>${TP_MU_COLS.map(s=>`<th style="text-align:center;font-size:11px">${esc(s)}</th>`).join('')}${canAct?'<th></th>':''}</tr></thead>
     <tbody>${rows.length?rows.map(r=>{
       const c=counts[r.id]||{};
-      return `<tr>
-        <td style="font-weight:600">${esc(r.position||'—')}${r.carried_from_row_id?' <span class="tag t-amber" style="margin-left:4px">carried</span>':''}</td>
+      /* A GRID OF NUMBERS YOU CANNOT OPEN IS A DEAD END. You could read "3" against Tests Sent and
+         had no way to find out which three - you went to Interviews and read the whole list. The
+         row now carries you there with that position already filtered, and it LOOKS like it will:
+         a hover state, a pointer, and a chevron that appears on the row. An affordance nobody can
+         see is the same as not having one, which is the mistake the Hiring Request rows made. */
+      const isSel=selPos!=null&&String(r.position||'')===String(selPos);
+      return `<tr class="tp-mu-row"${isSel?' style="background:#eff6ff"':' style="cursor:pointer"'} onclick="tpMuOpenPeople(${esc(JSON.stringify(r.position||''))})" title="See the people for ${esc(r.position||'this position')}">
+        ${canAct?`<td onclick="event.stopPropagation()" style="text-align:center">
+          <input type="radio" name="tpMuPick" ${isSel?'checked':''} onchange="tpMuPick(${esc(JSON.stringify(r.position||''))})" title="Choose this position">
+        </td>`:''}
+        <td style="font-weight:600">${esc(r.position||'—')}${r.carried_from_row_id?' <span class="tag t-amber" style="margin-left:4px">carried</span>':''}
+          <i class="fa-solid fa-chevron-right tp-mu-go" style="margin-left:6px;font-size:10px;color:var(--brand);opacity:0;transition:opacity .12s"></i></td>
         <td style="font-size:12px;color:var(--slate)">${esc((r.manpower_requests&&r.manpower_requests.department)||'—')}</td>
-        ${TP_STAGES.map(s=>`<td style="text-align:center">${c[s]||0}</td>`).join('')}
-        ${canAct?`<td>${r.completed_at
+        ${TP_MU_COLS.map(s=>`<td style="text-align:center">${c[s]||0}</td>`).join('')}
+        ${canAct?`<td onclick="event.stopPropagation()">${r.completed_at
             ?`<button class="btn btn-sm" onclick="tpMuUncompleteRow(${r.id})" title="Completed ${esc(new Date(r.completed_at).toLocaleDateString())} — click to reopen"><i class="fa-solid fa-lock"></i> Un-complete</button>`
             :`<button class="btn btn-sm btn-primary" onclick="tpMuCompleteRow(${r.id})"><i class="fa-solid fa-check-double"></i> Complete</button>`}</td>`:''}
       </tr>`;
-    }).join(''):`<tr><td colspan="${2+TP_STAGES.length+(canAct?1:0)}" style="text-align:center;padding:40px;color:var(--slate)">No positions for this month yet</td></tr>`}
+    }).join(''):`<tr><td colspan="${2+TP_MU_COLS.length+(canAct?2:0)}" style="text-align:center;padding:40px;color:var(--slate)">No positions for this month yet</td></tr>`}
     </tbody>
   </table></div>`;
 }
-window.tpMuSwitchMonth=function(m){TP_MU_CUR=m;tpMuLoad();};
+let TP_MU_SEL=null;
+window.tpMuPick=function(position){
+  TP_MU_SEL=String(position||'')||null;
+  /* Redrawn rather than patched, so the toolbar's enabled state, its "Selected: ..." line and the
+     highlighted row can never disagree with the radio. */
+  tpMuRender(window._tpMuCounts||{});
+};
+window.tpMuSwitchMonth=function(m){TP_MU_CUR=m;TP_MU_SEL=null;tpMuLoad();};
+
+/* UPLOAD AND EMAIL, FROM THE ROW OF THE POSITION THEY ARE ABOUT.
+
+   Both of these were possible already, in two other places, and both needed the position chosen
+   again by hand once you got there - which is how CVs end up filed against the wrong vacancy and
+   how a test goes to somebody from a different role. Starting from the row means the position is
+   already decided and cannot be got wrong.
+
+   Monthly Progress rows are keyed by job title rather than by the hiring request id, so the title
+   is what gets matched. Where a title has no open request behind it - a closed or carried row -
+   Upload says so instead of opening a window that cannot file anything. */
+/* STRAIGHT TO THE FILE PICKER. The position is already chosen - it is the row you ticked - so a
+   window that exists only to ask for it again is a step that asks a question already answered.
+   The picker opens, the files upload against that position, and the only thing on screen is
+   progress.
+
+   The <input> is created, used and thrown away each time rather than kept in the page, so choosing
+   the same file twice in a row still fires a change event. */
+window.tpMuUpload=async function(){
+  const position=TP_MU_SEL;
+  if(!position){ toast('Choose a position first','err'); return; }
+  let positions=[];
+  try{ positions=await hrOpenPositions(); }
+  catch(e){ toast('Could not read the open positions: '+((e&&e.message)||e),'err'); return; }
+  const match=positions.find(function(x){return String(x.job_title||'')===String(position||'');});
+  if(!match){
+    toast('There is no open hiring request for \u201c'+(position||'this position')+'\u201d, so CVs cannot be filed against it','err');
+    return;
+  }
+  const inp=document.createElement('input');
+  inp.type='file'; inp.multiple=true; inp.accept='.pdf,.doc,.docx,.png,.jpg,.jpeg';
+  inp.style.display='none';
+  document.body.appendChild(inp);
+  inp.onchange=async function(){
+    const files=inp.files?Array.prototype.slice.call(inp.files):[];
+    document.body.removeChild(inp);
+    if(!files.length) return;
+    await rsUploadFiles(files, match.id, match.job_title||position);
+  };
+  inp.click();
+};
+
+/* The upload itself, with no window around it. rsUploadSave reads the form; this takes what it is
+   given, so both the window and the direct picker end at the same code and cannot drift into
+   filing CVs differently. */
+window.rsUploadFiles=async function(files,posId,posText){
+  const added=[]; const failed=[];
+  toast('Uploading '+files.length+' file'+(files.length===1?'':'s')+'\u2026');
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    try{
+      const up=await uploadFileToS3(s3KeyForResume(f.name),f);
+      if(up.error) throw new Error(up.error.message);
+      const {data:row,error}=await sb.schema('hr').from('resumes').insert({
+        file_name:f.name, storage_path:up.data.path, file_size:f.size,
+        file_type:(f.name.split('.').pop()||'').toLowerCase(), ai_status:'analyzing',
+        manpower_request_id:Number(posId), position:posText||null,
+        uploaded_by:state.email||null
+      }).select().single();
+      if(error) throw new Error(error.message);
+      added.push(row);
+    }catch(e){ failed.push(f.name+' ('+((e&&e.message)||e)+')'); }
+  }
+  if(added.length){
+    RS_ROWS=added.slice().reverse().concat(RS_ROWS||[]);
+    toast(added.length+' CV'+(added.length===1?'':'s')+' uploaded for '+(posText||'this position'),'ok');
+    rsParseUploaded(added.map(function(r){return r.id;}));
+  }
+  if(failed.length) toast('Could not upload: '+failed.slice(0,3).join(', ')+(failed.length>3?(' and '+(failed.length-3)+' more'):''),'err');
+};
+
+/* Everybody on this position, already ticked. The window is the same one Tests uses, so the rules
+   that matter still hold - the addresses come from the Interviews list, never typed, and anyone
+   already sent a test or past that stage is not in it. Pre-ticking is the only difference: on a
+   position's own row the normal case is "all of them", and unticking the odd one is less work than
+   ticking nine. */
+window.tpMuEmail=async function(){
+  const position=TP_MU_SEL;
+  if(!position){ toast('Choose a position first','err'); return; }
+  if(!rtCanManage()){ toast('Only the test owners can email candidates','err'); return; }
+  if(!RT_RECORDS){
+    try{
+      const {data,error}=await sb.schema('recruit').from('tests').select('*').order('sl',{ascending:true});
+      if(error) throw error;
+      RT_RECORDS=data||[];
+    }catch(e){ toast('Could not load the tests: '+((e&&e.message)||e),'err'); return; }
+  }
+  TP_MU_EMAIL_POS=String(position||'')||null;
+  await rtShare(true);
+};
+let TP_MU_EMAIL_POS=null;
 window.tpMuOpenMonth=async function(){
   if(!recGuard())return;
   const {error}=await sb.schema('hr').rpc('tracker_open_month',{p_month:null});
@@ -13261,17 +17938,26 @@ VIEWS.campaigns=async function(v,seg){
   setCrumb(['Growth & Strategy','Campaign Analytics']);
   if(CMP_SOURCE==='google'){ return cmpGoogleView(v,seg); }
   if(CMP_SOURCE==='both'){ return cmpBothView(v,seg); }
-  const tabs=['Overview','Campaigns','By Project','Ads','Trend','Ad Fatigue'];const ti=mTab(seg,tabs.length);
+  const tabs=['Overview','Campaigns','By Project','Ads','Trend','Ad Fatigue','AI Insights'];const ti=mTab(seg,tabs.length);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const needAd=(ti===3||ti===5);
+  // AI Insights: Opportunity Score, anomalies and performance trend from the Meta Ads MCP tool -
+  // not something a browser or a period/date query can fetch live, since only a Claude Code
+  // session with the Meta Ads MCP connector can call those tools. A local scheduled task refreshes
+  // camp.mcp_ad_insights hourly (see mcp-ads-ingest edge function); this tab just reads it.
+  const needMcp=(ti===6);
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
-  // Data comes from the MCP ingest pipeline now (camp.campaign_insights' own synced_at),
-  // not a live Graph API call on every open — see mcp-ads-ingest.
-  await cmpSyncPrev('meta');
+  // NO LIVE REFRESH HERE ANY MORE. Meta data is fully MCP-sourced now (the account owner's own
+  // choice, over the Graph API) - campaign_insights/ad_insights/campaigns/ads/ad_accounts are
+  // written by a manually-triggered Claude Code task ("Refresh JainE Campaign Analytics (Meta)
+  // from MCP") using the Meta Ads MCP tool, since that tool cannot be called from a browser or a
+  // cron-only edge function. This page just reads whatever that task last wrote - see the
+  // "Last synced" line below for how stale that might be, and trigger the task again for fresher
+  // numbers rather than expecting this page load to fetch anything itself.
   const CMP=()=>sb.schema('camp');
   const prevKey=cmpPrevKey();
-  let accounts=[],campaigns=[],cIns=[],ads=[],aIns=[],cPrev=[],aPrev=[];
+  let accounts=[],campaigns=[],cIns=[],ads=[],aIns=[],cPrev=[],aPrev=[],mcpRows=[],refreshReq=null;
   try{
     const calls=[
       CMP().from('ad_accounts').select('*').order('name'),
@@ -13279,13 +17965,19 @@ VIEWS.campaigns=async function(v,seg){
       CMP().from('campaign_insights').select('*').eq('period',periodKey)
     ];
     const iPrevC=calls.length; if(prevKey)calls.push(CMP().from('campaign_insights').select('*').eq('period',prevKey));
-    let iAds=-1,iAdIns=-1,iPrevA=-1;
+    let iAds=-1,iAdIns=-1,iPrevA=-1,iMcp=-1;
     if(needAd){ iAds=calls.length; calls.push(CMP().from('ads').select('*')); iAdIns=calls.length; calls.push(CMP().from('ad_insights').select('*').eq('period',periodKey)); if(prevKey){ iPrevA=calls.length; calls.push(CMP().from('ad_insights').select('*').eq('period',prevKey)); } }
+    if(needMcp){ iMcp=calls.length; calls.push(CMP().from('mcp_ad_insights').select('*')); }
+    // The "Run via MCP" button's own state — shown on every sub-tab, not just AI Insights, since
+    // it affects every number on the whole Meta side.
+    const iReq=calls.length; calls.push(CMP().from('mcp_refresh_requests').select('*').order('requested_at',{ascending:false}).limit(1));
     const results=await Promise.all(calls);
     const at=function(i){return (i>=0&&results[i]&&results[i].data)?results[i].data:[];};
     accounts=at(0);campaigns=at(1);cIns=at(2);
     if(prevKey)cPrev=at(iPrevC);
     if(needAd){ads=at(iAds);aIns=at(iAdIns);if(iPrevA>=0)aPrev=at(iPrevA);}
+    if(needMcp)mcpRows=at(iMcp);
+    refreshReq=at(iReq)[0]||null;
   }catch(e){}
   const cPrevMap={};cPrev.forEach(function(x){cPrevMap[x.campaign_id]=x;});
   const aPrevMap={};aPrev.forEach(function(x){aPrevMap[x.ad_id]=x;});
@@ -13425,6 +18117,50 @@ VIEWS.campaigns=async function(v,seg){
     }
     body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Meta · per-person frequency + CTR trend');
   }
+  else if(ti===6){
+    // ---- AI Insights: Opportunity Score, anomalies, performance trend (Meta Ads MCP) ----
+    const mcpByAcc={}; mcpRows.forEach(function(r){ mcpByAcc[r.ad_account_id]=r; });
+    const scoreColor=function(s){ return s==null?'var(--slate)':(s>=80?'#16a34a':(s>=50?'#c2410c':'#b91c1c')); };
+    const agoText=function(iso){
+      if(!iso) return null;
+      const mins=Math.round((Date.now()-new Date(iso).getTime())/60000);
+      if(mins<2) return 'just now';
+      if(mins<60) return mins+' min ago';
+      const hrs=Math.round(mins/60);
+      if(hrs<48) return hrs+' hr'+(hrs===1?'':'s')+' ago';
+      return Math.round(hrs/24)+' days ago';
+    };
+    const pre=function(text){ return '<pre style="white-space:pre-wrap;font-family:inherit;font-size:12.5px;color:var(--ink,#0f172a);background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:6px 0 0;max-height:260px;overflow:auto">'+esc(text)+'</pre>'; };
+    const cards=accounts.map(function(acc){
+      const m=mcpByAcc[acc.ad_account_id];
+      if(!m){
+        return '<div class="cmp-chcard"><h4>'+esc(acc.name)+'</h4><div class="sub">Not yet refreshed — the hourly Meta Ads MCP job hasn\'t run for this account yet.</div></div>';
+      }
+      const recs=(Array.isArray(m.recommendations)?m.recommendations:[])
+        .slice().sort(function(a,b){ return (Number(b&&b.recommendation_content&&b.recommendation_content.opportunity_score_lift)||0)-(Number(a&&a.recommendation_content&&a.recommendation_content.opportunity_score_lift)||0); })
+        .slice(0,3);
+      const recsHtml=recs.length?('<ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;line-height:1.6">'+recs.map(function(r){
+        const rc=r&&r.recommendation_content||{};
+        return '<li><b>'+esc(rc.lift_estimate||'Recommendation')+'</b> — '+esc(rc.body||'')+(r.url?' <a href="'+esc(r.url)+'" target="_blank" rel="noopener" style="color:var(--brand)">Open in Ads Manager</a>':'')+'</li>';
+      }).join('')+'</ul>'):'<div class="sub">No recommendations returned.</div>';
+      const anomText=(m.anomalies&&m.anomalies.result)?m.anomalies.result:null;
+      const trendAd=(m.performance_trends&&m.performance_trends.ad&&m.performance_trends.ad.result)?m.performance_trends.ad.result:null;
+      const trendAdset=(m.performance_trends&&m.performance_trends.adset&&m.performance_trends.adset.result)?m.performance_trends.adset.result:null;
+      return '<div class="cmp-chcard">'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px">'
+          +'<h4>'+esc(acc.name)+'</h4>'
+          +'<span style="font-weight:800;font-size:16px;color:'+scoreColor(m.opportunity_score)+'">'+(m.opportunity_score!=null?m.opportunity_score:'—')+(m.opportunity_score!=null?'<span style="font-size:11px;font-weight:600;color:var(--slate)">/100</span>':'')+'</span>'
+        +'</div>'
+        +'<div class="sub">Opportunity Score'+(agoText(m.fetched_at)?(' · updated '+agoText(m.fetched_at)):'')+'</div>'
+        +'<h5 style="margin:12px 0 0;font-size:12px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">Top recommendations</h5>'+recsHtml
+        +'<h5 style="margin:14px 0 0;font-size:12px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">Anomalies</h5>'+(anomText?pre(anomText):'<div class="sub">No anomalies flagged.</div>')
+        +'<h5 style="margin:14px 0 0;font-size:12px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">Performance trend — Ads</h5>'+(trendAd?pre(trendAd):'<div class="sub">Not available.</div>')
+        +'<h5 style="margin:14px 0 0;font-size:12px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">Performance trend — Ad sets</h5>'+(trendAdset?pre(trendAdset):'<div class="sub">Not available.</div>')
+      +'</div>';
+    });
+    body='<div class="cmp-cap"><i class="fa-solid fa-wand-magic-sparkles" style="color:#7c3aed"></i> From the Meta Ads MCP tool · refreshed hourly by a scheduled Claude Code job, independent of the period picker above</div>'
+      +'<div class="cmp-charts">'+cards.join('')+'</div>';
+  }
   else {
     const filteredAccIds=new Set((CMP_AD_PROJECT==='all'?accounts:accounts.filter(a=>a.ad_account_id===CMP_AD_PROJECT)).map(a=>a.ad_account_id));
     const allAdRows=ads.map(a=>{const i=aInsMap[a.id];const camp=campMap[a.campaign_id];const acc=accounts.find(x=>x.ad_account_id===a.ad_account_id);return {a,i,camp,acc,spend:i?Number(i.spend)||0:0};})
@@ -13499,9 +18235,40 @@ VIEWS.campaigns=async function(v,seg){
     +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed',cmpTrend(avgCpc,pAvgCpc,true))
     +cmpKpi('fa-fire','Ad Fatigue',metaFreq?(metaFreq.toFixed(1)+'x'):'—','seen per person','#e11d48','#fff1f2',cmpFatigue(metaFreq,avgCtr,pAvgCtr))
     +'</div>';
-  const syncCap='<div class="cmp-cap"><i class="fa-brands fa-facebook" style="color:#1877f2"></i> Live Meta Ads · '+esc(periodLabel)+(accounts.length?(' · '+accounts.length+' ad account'+(accounts.length===1?'':'s')):'')+'</div>';
+  // No longer "Live" - see the note above where the old refresh call used to be. last_synced_at
+  // is stamped by the MCP ingest task each time it writes ad_accounts, so this is genuinely when
+  // the numbers on screen were last fetched, not just when the page happened to load.
+  const lastSynced=accounts.map(function(a){return a.last_synced_at;}).filter(Boolean).sort().pop();
+  // Shared by the sync caption below and the last-run-result line further down.
+  const agoWords=function(iso){
+    if(!iso) return null;
+    const mins=Math.round((Date.now()-new Date(iso).getTime())/60000);
+    if(mins<2) return 'just now';
+    if(mins<60) return mins+' min ago';
+    const hrs=Math.round(mins/60);
+    if(hrs<48) return hrs+' hr'+(hrs===1?'':'s')+' ago';
+    return Math.round(hrs/24)+' days ago';
+  };
+  const syncAgo=lastSynced?('synced '+agoWords(lastSynced)):'never synced — run the MCP refresh task';
+  // The button itself. A pending/running request disables it and shows a spinner instead - the
+  // watcher polls every ~20s and a full refresh can take several minutes (6 accounts x 16
+  // period-buckets x 2 levels, plus the AI Insights calls), so repeated clicks would just queue
+  // more work behind the one already running for no benefit.
+  const reqBusy=refreshReq&&(refreshReq.status==='pending'||refreshReq.status==='running');
+  const runBtn=reqBusy
+    ? '<button class="ac-btn ic" disabled title="'+(refreshReq.status==='pending'?'Waiting for the local watcher to pick this up':'Running — this can take several minutes')+'"><i class="fa-solid fa-spinner fa-spin"></i> '+(refreshReq.status==='pending'?'Queued…':'Running…')+'</button>'
+    : '<button class="ac-btn ic" onclick="cmpRunMcpRefresh()" title="Queues a full Meta Ads MCP refresh — picked up by the local watcher on the always-on PC, not run in this browser"><i class="fa-solid fa-arrows-rotate"></i> Run via MCP</button>';
+  const lastResult=(refreshReq&&(refreshReq.status==='done'||refreshReq.status==='failed'))
+    ? '<div class="cmp-cap" style="color:'+(refreshReq.status==='failed'?'#b91c1c':'var(--slate)')+'"><i class="fa-solid '+(refreshReq.status==='failed'?'fa-triangle-exclamation':'fa-circle-check')+'"></i> Last run '+(refreshReq.status==='failed'?'failed':'finished')+(refreshReq.finished_at?(' '+esc(agoWords(refreshReq.finished_at)||'')):'')+(refreshReq.summary?(': '+esc(refreshReq.summary)):'')+'</div>'
+    : '';
+  const syncCap='<div class="cmp-cap" style="justify-content:space-between;display:flex;align-items:center;flex-wrap:wrap;gap:10px"><span><i class="fa-brands fa-facebook" style="color:#1877f2"></i> Meta Ads via MCP · '+esc(periodLabel)+(accounts.length?(' · '+accounts.length+' ad account'+(accounts.length===1?'':'s')):'')+' · <span title="Data comes from a manually-triggered Claude Code task, not a live page-load fetch">'+esc(syncAgo)+'</span></span>'+runBtn+'</div>'+lastResult
+    // Custom ranges are the one thing the MCP refresh task does not pre-compute (it only fetches
+    // the 10 fixed presets, each account x each preset x campaign+ad level being expensive enough
+    // already) - a picked custom range will show empty rather than fetch anything, so say so
+    // plainly instead of leaving a silent "no data" that looks like a bug.
+    +(CMP_PERIOD==='custom'?'<div class="cmp-cap" style="color:#c2410c"><i class="fa-solid fa-triangle-exclamation"></i> Custom ranges aren\'t fetched by the MCP refresh task — pick one of the preset periods above, or ask for this range to be pulled directly.</div>':'');
   const legend='<div class="cmp-legend"><span>Trend compares with '+esc(cmpPrevLabel())+'</span><span>Fatigue = times each person saw the ad + whether CTR is falling</span></div>';
-  const showKpis=(ti!==4&&ti!==5);
+  const showKpis=(ti!==4&&ti!==5&&ti!==6);
   v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+syncCap+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
@@ -13882,15 +18649,19 @@ function compPaint(){
   const wl=window._compWl||[];
   if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
   const cur=(COMP_F.wl!=='all')?wl.filter(function(w){return String(w.id)===String(COMP_F.wl);})[0]:null;
-  // Show whatever is already stored, for this selection, right away - switching the competitor or
-  // range dropdown must never hide real data that's sitting in the database. A "not fetched yet"
-  // gate here used to hide already-synced ads any time you navigated away and back (or picked "All
-  // competitors" after only ever fetching individual ones), which looked like the data had vanished
-  // even though nothing was lost. Fetching is still how you pull NEW data from Meta; viewing what's
-  // already stored no longer depends on having fetched that exact selection in this browser visit.
-  const everFetchedAnything=(window._compAdsAll||[]).length>0;
+  /* ADS THAT ARE ALREADY STORED ARE SHOWN, rather than hidden until somebody presses Fetch.
+     The original rule was that nothing appears until it has been fetched IN THIS VISIT, so that
+     what you see always matches the filters you just asked for. That was reasonable when the only
+     way ads arrived was pressing the button - but they now also arrive on their own, nightly,
+     from the Proxy sync. With the old rule a table holding 384 ads across 19 competitors showed
+     an empty page every morning, and the only way to see anything was to re-fetch it by hand.
+     So: if there are stored ads for this selection, show them. Pressing Fetch still does exactly
+     what it did, and the filters still apply to what is displayed. */
+  const storedFor=(window._compAdsAll||[]).some(function(a){
+    return COMP_F.wl==='all' || String(a.watchlist_id)===String(COMP_F.wl); });
+  const fetched=!!window._compFetched[String(COMP_F.wl)] || storedFor;
   host.innerHTML=(cur?compWlCardHtml(cur):compWlTableHtml(wl))
-    +(everFetchedAnything
+    +(fetched
       ?('<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
           +'<div id="compCount" style="font-size:12.5px;color:var(--slate);font-weight:600"></div>'
         +'</div>'
@@ -13905,7 +18676,7 @@ function compPaint(){
             +'Set the date range, status and media above, then press <b>Fetch from Meta</b> — or use the filter button beside a competitor to fetch just that one. '
             +'Nothing is shown until it has actually been fetched, so what you see always matches the filters you asked for.</div>'
         +'</div>'));
-  if(everFetchedAnything) compPaintGrid();
+  if(fetched) compPaintGrid();
 }
 async function compRender(){
   const host=$('compBody'); if(!host)return;
@@ -14366,6 +19137,11 @@ async function cpaProjects(force){
 }
 async function cpaUnits(force){
   if(CPA.units&&!force)return CPA.units;
+  if(cpaPhotosOnly()){
+    // cust.units itself is closed to a photos-only account (agreement values, customer links).
+    const {data}=await sb.schema('cust').rpc('media_unit_list');
+    CPA.units=(data||[]).map(u=>({...u,projects:{id:u.project_id,name:u.project_name}}));return CPA.units;
+  }
   const {data}=await sb.schema('cust').from('units').select('*, projects(id,name)').is('deleted_at',null).order('id',{ascending:false});
   CPA.units=data||[];return CPA.units;
 }
@@ -14400,6 +19176,11 @@ async function cpaStaffOptions(force){
 
 VIEWS.custportal_admin=async function(v,seg){
   setCrumb(['Stakeholder Portals','Customer Portal Admin']);
+  if(cpaPhotosOnly()){
+    v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',['Photos & Videos'],0)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
+    const h=$('cpaBody');if(h) await cpaRenderPhotos(h);
+    return;
+  }
   const tabs=['Projects & Units','Customers','Farvision Import','Photos & Videos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals','Maintenance','Modification Requests'];
   const ti=mTab(seg,tabs.length);
   v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',tabs,ti)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
@@ -14562,7 +19343,7 @@ async function cpaRenderCustomers(host){
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>
     <div class="mu-filters">
-      <select id="cpaCustProj" class="mu-sel" onchange="cpaCustFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}<option value="none">— Without a unit —</option></select>
+      <select id="cpaCustProj" class="mu-sel" onchange="cpaCustFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}<option value="none">— Cancelled / no unit (hidden by default) —</option></select>
       <span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="cpaCustQ" placeholder="Search name, email, phone or unit code" oninput="cpaCustFilter()"></span>
       <span class="mu-count" id="cpaCustCount"></span>
     </div>
@@ -14579,16 +19360,24 @@ window.cpaCustFilter=function(){
 // Farvision project names carry a location suffix - "DREAM GURUKUL(DOLTALA MADHYAMGRAM)" - which
 // wrapped to three lines in a table cell and made every row triple height. Show the name itself and
 // keep the full string on hover, since the suffix is what distinguishes two same-named projects.
+function projShortName(name){
+  const s=String(name||''),i=s.indexOf('(');
+  return i>0?s.slice(0,i).trim():s;
+}
 function cpaProjectChip(name){
-  const full=String(name||''),i=full.indexOf('(');
-  return '<span title="'+esc(full)+'" style="white-space:nowrap">'+esc(i>0?full.slice(0,i).trim():full)+'</span>';
+  return '<span title="'+esc(name||'')+'" style="white-space:nowrap">'+esc(projShortName(name))+'</span>';
 }
 function cpaCustUnitsByCustomer(){
   const by={};(CPA.units||[]).forEach(u=>{if(u.customer_id)(by[u.customer_id]=by[u.customer_id]||[]).push(u);});
   return by;
 }
 function cpaCustList(){
-  const customers=CPA.customers||[],byCustomer=cpaCustUnitsByCustomer(),{proj,q}=CPA_CUST_FILTER;
+  const all=CPA.customers||[],byCustomer=cpaCustUnitsByCustomer(),{proj,q}=CPA_CUST_FILTER;
+  /* A customer with no unit holds no flat with us - a cancelled booking (Sales Details imports only
+     Active rows, so cancellation leaves the customer behind without one) or a duplicate record left
+     by an email that differed between exports. Neither belongs in the working list, so the default
+     view is customers who actually hold a unit. "Without a unit" still reaches them. */
+  const customers=proj==='none'?all:all.filter(c=>(byCustomer[c.id]||[]).length>0);
   const list=customers.filter(c=>{
     const mine=byCustomer[c.id]||[];
     if(proj==='none'){if(mine.length)return false;}
@@ -14683,9 +19472,14 @@ function xlsxMergedLabel(ws,rows,r,c){
   for(const m of merges){ if(r>=m.s.r&&r<=m.e.r&&c>=m.s.c&&c<=m.e.c){ const a=rows[m.s.r]&&rows[m.s.r][m.s.c]; return a!=null?a:null; } }
   return direct;
 }
+// A Date cell is read off its LOCAL calendar day, nudged half a minute forward first - never via
+// toISOString(). The reader builds a cell's Date at local midnight minus a few seconds, so in India
+// the UTC string is the previous day: every invoice, receipt and transfer the Gmail queue imported
+// was landing one day early (Farvision 14 Jul, portal 13 Jul). Same trap as misCellDate above.
 function xlsxExcelDate(v){
   if(v==null||v==='') return null;
-  if(v instanceof Date) return v.toISOString().slice(0,10);
+  if(v instanceof Date){ if(isNaN(v)) return null; const t=new Date(v.getTime()+30000);
+    return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0'); }
   if(typeof v==='number'){ const d=window.XLSX&&XLSX.SSF&&XLSX.SSF.parse_date_code(v); if(d) return d.y+'-'+String(d.m).padStart(2,'0')+'-'+String(d.d).padStart(2,'0'); }
   if(typeof v==='string'){ const d=new Date(v); if(!isNaN(d)) return d.toISOString().slice(0,10); }
   return null;
@@ -14796,24 +19590,48 @@ function cpaParseReceiptReversal(wb){
     narration:get('Narration'),bankDescription:get('Bank Description'),reason:get('Reason'),
   }));
 }
+// Farvision's Booking Register Summary names these columns "Booking Status", "Unit" and "Document
+// Date". This used to read "Status", "Unit Code" and "Booking Date", which the report does not have,
+// so every row came back with no status and a booking cancelled or transferred in Farvision (Arup
+// Bhawal's D/8G -> D/8H, 26.09.2026) stayed live in the portal. "Booking Status" is now required, so
+// a renamed column stops the import instead of quietly reading nothing.
 function cpaParseBookingRegister(wb){
-  return cpaParseFlatSheet(wb,'Booking Id',['Booking Id','Business Unit']).map(get=>({
+  return cpaParseFlatSheet(wb,'Booking Id',['Booking Id','Business Unit','Booking Status']).map(get=>({
     businessUnit:get('Business Unit'),bookingId:get('Booking Id'),
     bookingNo:get('Booking No')!=null?String(get('Booking No')):null,
-    customerName:get('Customer Name'),status:get('Status'),
-    unitCode:get('Unit Code'),tower:get('Level3'),
-    bookingDate:xlsxExcelDate(get('Booking Date')),
+    customerName:get('Customer Name'),status:String(get('Booking Status')||'').trim()||null,
+    unitCode:get('Unit')!=null?String(get('Unit')):null,tower:get('Level3'),
+    bookingDate:xlsxExcelDate(get('Document Date')),
   }));
 }
-// Booking No is the real join key (unlike unit_code, which repeats across towers) - fall back to
-// (project, tower, unit code) only for the rare pre-Booking-No-convention record.
+// Farvision's PTC (Payment To Customer) register - booking transfers and refunds. Filed under the
+// SOURCE booking; a transfer additionally names "Booking No. of Transferee", the unit the money
+// actually lands on. A refund is just a row with no transferee - the money left the business rather
+// than another unit. No narration parsing needed: both cases resolve the same way at import time
+// (debit source if it resolves, credit transferee if it resolves).
+function cpaParsePTC(wb){
+  return cpaParseFlatSheet(wb,'PTC Created By',['Document No','Booking No','Business Unit']).map(get=>({
+    businessUnit:get('Business Unit'),documentNo:String(get('Document No')),
+    documentDate:xlsxExcelDate(get('Document Date')),
+    sourceBookingNo:get('Booking No')!=null?String(get('Booking No')):null,
+    transfereeBookingNo:get('Booking No. of Transferee')!=null?String(get('Booking No. of Transferee')):null,
+    amount:Number(get('Amount')||0),narration:get('Narration'),
+    isReversed:String(get('Is Reversed')||'').trim().toUpperCase()==='YES',
+  }));
+}
+// Booking No is the real join key (unlike unit_code, which repeats across towers). A record that
+// carries a Booking No resolves by it or not at all: falling back to (tower, unit code) whenever the
+// lookup missed attached every cancelled booking's invoices, receipts and Outstanding row to whoever
+// holds that flat now - another buyer's money in the current owner's ledger. The flat-level lookup
+// is only for the rare record with no Booking No.
 function cpaResolveUnit(units,projectId,bookingNo,tower,unitCode){
-  if(bookingNo){ const u=units.find(u=>u.booking_no===bookingNo); if(u) return u; }
-  if(projectId&&unitCode){
-    const norm=s=>String(s||'').trim().toLowerCase();
-    return units.find(u=>u.project_id===projectId&&norm(u.tower)===norm(tower)&&norm(u.unit_code)===norm(unitCode))||null;
-  }
-  return null;
+  if(bookingNo) return units.find(u=>u.booking_no===bookingNo)||null;
+  return cpaResolveFlat(units,projectId,tower,unitCode);
+}
+function cpaResolveFlat(units,projectId,tower,unitCode){
+  if(!projectId||!unitCode) return null;
+  const norm=s=>String(s||'').trim().toLowerCase();
+  return units.find(u=>u.project_id===projectId&&norm(u.tower)===norm(tower)&&norm(u.unit_code)===norm(unitCode))||null;
 }
 function cpaResolveProject(projects,businessUnit){
   if(!businessUnit) return null;
@@ -14825,12 +19643,12 @@ function cpaResolveProject(projects,businessUnit){
     ||projects.find(p=>norm(p.name)===bu)||null;
 }
 
-const CPA_XLSX_IMPORT_TYPES=new Set(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register']);
+const CPA_XLSX_IMPORT_TYPES=new Set(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register','ptc_transfer']);
 const CPA_IMPORT_COLUMNS={
   maintenance_bills:{required:['unit_code','bill_no','bill_date','amount'],optional:['bill_period','due_date','gst_amount','total_amount','status']},
   maintenance_receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_bill_no']}
 };
-const CPA_IMPORT_LABELS={sales_details:'Sales Details',outstanding:'Outstanding',invoice_register:'Invoice Register (Demand)',receipt_register:'Receipt Register (Receipts)',receipt_reversal:'Receipt Reversal (Cheque Return)',booking_register:'Booking Register',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts',demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates'};
+const CPA_IMPORT_LABELS={sales_details:'Sales Details',outstanding:'Outstanding',invoice_register:'Invoice Register (Demand)',receipt_register:'Receipt Register (Receipts)',receipt_reversal:'Receipt Reversal (Cheque Return)',booking_register:'Booking Register',ptc_transfer:'Payment To Customer (Transfers & Refunds)',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts',demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates'};
 let CPA_IMPORT_STATE=null;
 async function cpaRenderImport(host,seg){
   const projects=await cpaProjects();
@@ -14858,7 +19676,9 @@ async function cpaRenderImport(host,seg){
   }
 
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  const typeOpts=Object.keys(CPA_IMPORT_COLUMNS).concat(['sales_details','outstanding','invoice_register','receipt_register'])
+  // All six .xlsx reports, not four. Manual upload is the fallback whenever the Gmail fetcher is
+  // down - it was missing exactly the two types that could not then be imported by any route.
+  const typeOpts=Object.keys(CPA_IMPORT_COLUMNS).concat(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register'])
     .map(k=>`<option value="${k}">${esc(CPA_IMPORT_LABELS[k]||k)}</option>`).join('');
   host.innerHTML=`<div class="tabs" style="margin-bottom:14px"><div class="tab active">Import</div><div class="tab" onclick="navTo('custportal_admin/2/history')">Import History</div></div>
     ${queueHtml}
@@ -14882,7 +19702,8 @@ window.cpaQueueImport=async function(queueId){
     const {data:blob,error:dlErr}=await sb.storage.from('farvision-imports').download(q.storage_path);
     if(dlErr||!blob)throw new Error(dlErr?.message||'Download failed');
     const buf=await blob.arrayBuffer();
-    const wb=XL.read(new Uint8Array(buf),{cellDates:true});
+    // Serials, not Dates - the same as a manual upload, and read to the exact day by xlsxExcelDate.
+    const wb=XL.read(new Uint8Array(buf),{type:'array'});
     // Detect type
     const {rows}=xlsxSheetRows(wb);
     let type=null;
@@ -14895,6 +19716,7 @@ window.cpaQueueImport=async function(queueId){
       if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')){type='invoice_register';break;}
       if(vals.includes('Net Outstanding')&&vals.includes('Bill Outstanding')){type='outstanding';break;}
       if(vals.includes('Booking Id')&&!vals.includes('Total Basic')){type='booking_register';break;}
+      if(vals.includes('PTC Created By')){type='ptc_transfer';break;}
       if(vals.includes('Payment Plan')&&vals.includes('Total Basic')){type='sales_details';break;}
     }
     if(!type) throw new Error('Could not detect report type');
@@ -14906,23 +19728,35 @@ window.cpaQueueImport=async function(queueId){
     else if(type==='receipt_register') parsed=cpaParseReceiptRegister(wb);
     else if(type==='receipt_reversal') parsed=cpaParseReceiptReversal(wb);
     else if(type==='booking_register') parsed=cpaParseBookingRegister(wb);
+    else if(type==='ptc_transfer') parsed=cpaParsePTC(wb);
     else throw new Error('Type '+type+' not yet supported for auto-import');
     // Match to projects/units (only registered projects pass through)
     const projects=await cpaProjects();
     const units=await cpaUnits();
-    const matched=[],unmatched=[];
+    const matched=[],unmatched=[],fileProjectIds=new Set();
     for(const rec of parsed){
       const project=cpaResolveProject(projects,rec.businessUnit);
       if(!project){unmatched.push(rec);continue;}
+      fileProjectIds.add(project.id);
       if(type==='sales_details'){matched.push({project,rec});}
+      else if(type==='ptc_transfer'){
+        // See the note in cpaImportPreviewXlsx: neither side is required alone, only that at least
+        // one resolves to a unit we can attach the money to.
+        const sourceUnit=cpaResolveUnit(units,project.id,rec.sourceBookingNo,null,null);
+        const transfereeUnit=rec.transfereeBookingNo?cpaResolveUnit(units,project.id,rec.transfereeBookingNo,null,null):null;
+        if(sourceUnit||transfereeUnit) matched.push({project,sourceUnit,transfereeUnit,rec}); else unmatched.push(rec);
+      }
       else{
         const unit=cpaResolveUnit(units,project.id,rec.bookingNo,rec.tower,rec.unitCode);
+        // A cancelled booking keeps its unit row for audit but must not take financial rows - those
+        // would surface in that customer's portal. booking_register is exempt: cancelling is its job.
+        if(unit&&unit.status==='cancelled'&&type!=='booking_register') continue;
         if(unit) matched.push({project,unit,rec}); else unmatched.push(rec);
       }
     }
     if(!matched.length) throw new Error('No rows matched registered projects ('+unmatched.length+' unmatched)');
     // Import using existing confirm logic
-    const st={type,fileName:q.file_name,parsedCount:parsed.length,matched,unmatched};
+    const st={type,fileName:q.file_name,parsedCount:parsed.length,matched,unmatched,fileProjectIds:[...fileProjectIds]};
     CPA_IMPORT_STATE=st;
     window._cpaQueueId=queueId;
     if(CPA_XLSX_IMPORT_TYPES.has(type)) await cpaImportConfirmXlsx(st);
@@ -14976,6 +19810,9 @@ window.cpaImportTypeChange=function(){
       outstanding:'Real "Customer Outstanding Summary" export — an as-on-date balance snapshot, one row per booking.',
       invoice_register:'Real "Invoice Register Details" export — dated demand, one row per invoice line.',
       receipt_register:'Real "Receipt Register Details" export — dated receipts, one row per receipt-to-invoice allocation.',
+      receipt_reversal:'Real "Receipt Reversal Register Details" export — cheque returns, one row per reversal revenue-head line.',
+      booking_register:'Real "Booking Register Summary" export — booking status per unit; marks cancelled bookings cancelled.',
+      ptc_transfer:'Real "Payment To Customer Register" export — booking transfers and refunds, one row per PTC document.',
     }[type]||'';
   }else{
     const c=CPA_IMPORT_COLUMNS[type];
@@ -14999,38 +19836,67 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
     parsed=type==='sales_details'?cpaParseSalesDetails(wb)
       :type==='outstanding'?cpaParseOutstanding(wb)
       :type==='invoice_register'?cpaParseInvoiceRegister(wb)
+      :type==='receipt_reversal'?cpaParseReceiptReversal(wb)
+      :type==='booking_register'?cpaParseBookingRegister(wb)
+      :type==='ptc_transfer'?cpaParsePTC(wb)
       :cpaParseReceiptRegister(wb);
   }catch(e){toast(e.message,'err');return;}
   if(!parsed.length){toast('No data rows found in that file','err');return;}
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
-  const matched=[],unmatched=[],outOfScope=[];
+  const matched=[],unmatched=[],outOfScope=[],fileProjectIds=new Set();
   parsed.forEach(rec=>{
     const project=cpaResolveProject(projects,rec.businessUnit);
     if(!project){ outOfScope.push(rec); return; } // a project we don't manage in the portal yet - not an error
+    fileProjectIds.add(project.id);
     if(type==='sales_details'){
       if(rec.status!=='Active'){ return; } // cancelled bookings don't get a portal unit
       matched.push({rec,project});
       return;
     }
+    if(type==='ptc_transfer'){
+      // Both sides are looked up independently, and neither is required alone: the source booking is
+      // very often a cancelled booking that was never Active (so Sales Details never created a unit
+      // for it, per the same rule above) - that's expected, not a failure, since the whole point of
+      // the transferee side is to land the money on a unit that DOES exist. Only genuinely unmatched
+      // if NEITHER side resolves to anything we can attach money to.
+      const sourceUnit=cpaResolveUnit(units,project.id,rec.sourceBookingNo,null,null);
+      const transfereeUnit=rec.transfereeBookingNo?cpaResolveUnit(units,project.id,rec.transfereeBookingNo,null,null):null;
+      if(!sourceUnit&&!transfereeUnit){ unmatched.push(rec); return; }
+      matched.push({rec,project,sourceUnit,transfereeUnit});
+      return;
+    }
     const unit=cpaResolveUnit(units,project.id,rec.bookingNo,rec.tower,rec.unitCode);
+    // Cancelled bookings keep their unit row for audit but take no financial rows - see the note in
+    // the queue importer. booking_register is exempt, since cancelling is what it does.
+    if(unit&&unit.status==='cancelled'&&type!=='booking_register'){ outOfScope.push(rec); return; }
     if(!unit){ unmatched.push(rec); return; }
     matched.push({rec,project,unit});
   });
-  CPA_IMPORT_STATE={type,fileName:file.name,parsedCount:parsed.length,matched,unmatched,outOfScope};
+  CPA_IMPORT_STATE={type,fileName:file.name,parsedCount:parsed.length,matched,unmatched,outOfScope,fileProjectIds:[...fileProjectIds]};
+  // Shown before Confirm: flats whose customer the import will deliberately NOT change.
+  let sdNote='';
+  if(type==='sales_details'){
+    const sdCustomers=await cpaCustomers(true);
+    sdNote=cpaSdFlagNote(matched.map(m=>cpaSdCustomerGuard(m.rec,units,sdCustomers).flag).filter(Boolean));
+  }
   const sampleCols=type==='sales_details'?['Booking No','Customer','Unit','Tower','Project','Cost items']
     :type==='outstanding'?['Booking No','Customer','Unit','Net Outstanding','On Account']
     :type==='invoice_register'?['Doc No','Date','Booking No','Customer','Unit','Schedule','Amount']
+    :type==='ptc_transfer'?['Doc No','Date','Amount','Debit unit','Credit unit','Narration']
     :['Receipt No','Date','Booking No','Customer','Invoice No','Amount'];
   const sampleRows=matched.slice(0,10).map(m=>{
     const r=m.rec;
     if(type==='sales_details') return [esc(r.bookingNo),esc(r.customerName),esc(r.unitCode),esc(r.tower),esc(m.project.name),r.costItems.length];
     if(type==='outstanding') return [esc(r.bookingNo),esc(r.customerName),esc(r.unitCode),custInr(r.netOutstanding),custInr(r.onAccount)];
     if(type==='invoice_register') return [esc(r.docNo),fmtDate(r.docDate),esc(r.bookingNo),esc(r.customerName),esc(r.unitCode),esc(r.schedule),custInr(r.netAmount)];
+    if(type==='ptc_transfer') return [esc(r.documentNo),fmtDate(r.documentDate),custInr(r.amount),
+      m.sourceUnit?esc(m.sourceUnit.unit_code):'—',m.transfereeUnit?esc(m.transfereeUnit.unit_code):'—',esc(r.narration||'—')];
     return [esc(r.receiptNo),fmtDate(r.receiptDate),esc(r.bookingNo),esc(r.customerName),esc(r.invoiceNo||'—'),custInr(r.amount)];
   });
   $('cpaImpPreview').innerHTML=`<div class="card card-pad">
     <div class="sec-title" style="margin:0 0 10px">Preview — ${parsed.length} row(s), ${matched.length} ready to import${unmatched.length?`, <span style="color:#c83232">${unmatched.length} unmatched</span>`:''}${outOfScope.length?`, ${outOfScope.length} for a project not yet in the portal`:''}</div>
     ${unmatched.length?`<div style="font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #f0dfa8;border-radius:8px;padding:8px 10px;margin-bottom:10px">Could not resolve a unit for: ${esc(unmatched.slice(0,15).map(r=>r.bookingNo||r.unitCode).join(', '))}${unmatched.length>15?' …':''} — run a Sales Details import for these first.</div>`:''}
+    ${sdNote}
     ${matched.length?mTable(sampleCols,sampleRows):''}
     <div style="margin-top:12px;display:flex;gap:10px"><button class="btn" onclick="$('cpaImpPreview').innerHTML=''">Cancel</button>
     ${matched.length?`<button class="btn btn-primary" onclick="cpaImportConfirm(this)"><i class="fa-solid fa-check"></i> Confirm import (${matched.length} row${matched.length>1?'s':''})</button>`:''}
@@ -15083,6 +19949,69 @@ window.cpaImportConfirm=async function(btn){
     navTo('custportal_admin/2/history');
   }catch(e){toast('Import failed: '+e.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Confirm import';}}
 };
+/* raw_rows is an audit copy of what was parsed. It is INSPECTION ONLY - undo_import_batch does not
+   read it, it reverts via import_batch_id on the data tables - so capping it loses no ability to
+   undo and changes no imported figure.
+
+   Why it needs a cap: a Receipt Register carries ~14k matched rows, which is ~6MB of JSON in the
+   single INSERT that opens every import. That sat just under the 8s statement_timeout on the
+   `authenticated` role until Dream Ananta was added; the extra matched rows tipped it over and the
+   import began failing outright with "canceling statement due to statement timeout" - and it would
+   have failed for every project added after that too.
+
+   Above the cap the column is left empty rather than partially filled: a truncated array reads like
+   a complete one and would be worse than nothing for anyone auditing a figure. The .xlsx itself is
+   kept in the farvision-imports bucket and is a better record than a JSON copy of it. */
+const CPA_RAW_ROWS_MAX=2000;
+
+/* The current rows for this batch's units, keyed `unit_id|<keyCol>` -> id.
+   Stands in for ON CONFLICT, which cannot infer these tables' PARTIAL unique indexes.
+   Paged explicitly: PostgREST caps a response at 1000 rows, and a row missed here would be inserted
+   as a duplicate instead of updated, leaving two "current" rows for one document and a ledger that
+   double-counts it. Silent wrong money is the one outcome worth being long-winded about. */
+async function cpaCurrentByKey(table,keyCol,matched){
+  const unitIds=[...new Set(matched.map(m=>m.unit&&m.unit.id).filter(Boolean))];
+  const map={},PAGE=1000;
+  for(let i=0;i<unitIds.length;i+=100){
+    const chunk=unitIds.slice(i,i+100);
+    for(let from=0;;from+=PAGE){
+      const {data,error}=await sb.schema('cust').from(table).select('id,unit_id,'+keyCol)
+        .in('unit_id',chunk).is('deleted_at',null).eq('is_current',true)
+        .order('id').range(from,from+PAGE-1);
+      if(error)throw error;
+      (data||[]).forEach(r=>{map[r.unit_id+'|'+r[keyCol]]=r.id;});
+      if(!data||data.length<PAGE)break;
+    }
+  }
+  return map;
+}
+/* Who a Sales Details row's flat should belong to, without letting a routine re-import move an
+   existing flat away from the customer who already logs in to it.
+     * Same booking, email left blank in Farvision -> keep the flat's current customer. (It used to be
+       set to nobody, and the customer lost the flat from their portal.)
+     * Same booking, email different from the current customer's -> keep the current customer and
+       flag it. A new email on the SAME booking is an edit in Farvision, not a new buyer - moving the
+       flat would create a second customer and leave the real one's login empty. Staff decide.
+     * A different booking on the flat (a rebooking - the old buyer's row matched by tower/unit) or a
+       brand-new flat -> the file's email decides, as before: that is a genuinely different buyer.
+   Returns {keep: customerId|null, flag: null|{bookingNo, name, current, file}}; keep=null means
+   "resolve by the file's email". */
+function cpaSdCustomerGuard(r,units,customers){
+  const byBooking=r.bookingNo?units.find(u=>u.booking_no===r.bookingNo):null;
+  if(!byBooking||!byBooking.customer_id) return {keep:null,flag:null};
+  const norm=s=>String(s||'').trim().toLowerCase();
+  if(!norm(r.email)) return {keep:byBooking.customer_id,flag:null};
+  const cur=customers.find(c=>c.id===byBooking.customer_id);
+  if(!cur||norm(cur.email)===norm(r.email)) return {keep:null,flag:null};
+  return {keep:byBooking.customer_id,flag:{bookingNo:r.bookingNo,name:r.customerName,unit:byBooking.unit_code,current:cur.email,file:r.email}};
+}
+function cpaSdFlagNote(flags){
+  if(!flags.length) return '';
+  return '<div style="font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #f0dfa8;border-radius:8px;padding:8px 10px;margin-bottom:10px">'
+    +'<b>Email changed in Farvision - please check.</b> These flats were kept with their current customer so nobody loses access: '
+    +flags.map(f=>esc(f.name)+' ('+esc(f.unit||f.bookingNo)+'): portal '+esc(f.current)+' → Farvision '+esc(f.file)).join('; ')
+    +'. If the new email is right, update it on the customer in Customer Portal Admin.</div>';
+}
 async function cpaImportConfirmXlsx(st){
   // No project_id: an .xlsx report resolves a project per row from its own Business Unit column, so
   // one file can span several projects at once. project_names records the set it actually touched.
@@ -15090,18 +20019,22 @@ async function cpaImportConfirmXlsx(st){
     import_type:st.type,file_name:st.fileName,imported_by:state.email,
     project_names:[...new Set(st.matched.map(m=>m.project&&m.project.name).filter(Boolean))].sort(),
     row_count:st.parsedCount,matched_count:st.matched.length,unmatched_count:st.unmatched.length,
-    unmatched_codes:st.unmatched.map(r=>r.bookingNo||r.unitCode||'').filter(Boolean),
-    raw_rows:st.matched.map(m=>m.rec)}).select('id').single();
+    unmatched_codes:st.unmatched.map(r=>r.bookingNo||r.unitCode||r.documentNo||'').filter(Boolean),
+    raw_rows:st.matched.length<=CPA_RAW_ROWS_MAX?st.matched.map(m=>m.rec):[]}).select('id').single();
   if(beErr)throw beErr;
   const batchId=batch.id;
 
   if(st.type==='sales_details'){
+    const sdCustomers=await cpaCustomers(true), sdFlags=[];
     for(const m of st.matched){
       const r=m.rec;
       // Customers are matched by email — the only field guaranteed to identify one person across
       // bookings; a row with no email can't be created here (it also couldn't get a portal login).
-      let customerId=null;
-      if(r.email){
+      // cpaSdCustomerGuard first: an existing flat never loses its customer to a blank or edited email.
+      const guard=cpaSdCustomerGuard(r,await cpaUnits(),sdCustomers);
+      if(guard.flag) sdFlags.push(guard.flag);
+      let customerId=guard.keep;
+      if(customerId==null&&r.email){
         const {data:existing}=await sb.schema('cust').from('customers').select('id').ilike('email',r.email).is('deleted_at',null).maybeSingle();
         if(existing) customerId=existing.id;
         else{
@@ -15109,7 +20042,10 @@ async function cpaImportConfirmXlsx(st){
           if(error)throw error; customerId=created.id;
         }
       }
-      const existingUnit=cpaResolveUnit(await cpaUnits(),m.project.id,r.bookingNo,r.tower,r.unitCode);
+      // Sales Details lists Active bookings only, and a flat has one non-cancelled row
+      // (units_project_tower_code_active_uq), so a rebooked flat must still find its existing row.
+      const allUnits=await cpaUnits();
+      const existingUnit=cpaResolveUnit(allUnits,m.project.id,r.bookingNo,null,null)||cpaResolveFlat(allUnits,m.project.id,r.tower,r.unitCode);
       const unitRow={project_id:m.project.id,unit_code:r.unitCode,tower:r.tower,floor_no:r.floor||null,
         unit_type:r.typology||null,carpet_area_sqft:r.carpet||null,super_built_up_area_sqft:r.superBuiltUp||null,
         built_up_area_sqft:r.builtUp||null,agreement_value:r.totalBasic+r.totalTax,booking_no:r.bookingNo,
@@ -15131,6 +20067,13 @@ async function cpaImportConfirmXlsx(st){
         booking_date:r.bookingDate,agreement_date:r.agreementDate,is_current:true,import_batch_id:batchId});
       if(ceErr)throw ceErr;
     }
+    // The queue import has no preview screen, so the warning has to reach staff here as well.
+    st.sdFlags=sdFlags;
+    if(sdFlags.length){
+      console.warn('Sales Details: email changed in Farvision, flat kept with its current customer',sdFlags);
+      toast(sdFlags.length+' flat'+(sdFlags.length===1?'':'s')+' kept with the current customer - email changed in Farvision ('
+        +sdFlags.map(f=>f.name+' '+(f.unit||f.bookingNo)).join(', ')+'). Please check.','warn');
+    }
   }else if(st.type==='outstanding'){
     for(const m of st.matched){
       const r=m.rec;
@@ -15138,6 +20081,20 @@ async function cpaImportConfirmXlsx(st){
       const {error}=await sb.schema('cust').from('outstanding_snapshot').insert({unit_id:m.unit.id,as_on_date:new Date().toISOString().slice(0,10),
         total_consideration:r.totalConsideration,bill_outstanding:r.billOutstanding,on_account:r.onAccount,
         net_outstanding:r.netOutstanding,late_fee_accrued:r.lateFee,no_of_bills:r.noOfBills,is_current:true,import_batch_id:batchId});
+      if(error)throw error;
+    }
+    /* Farvision leaves a flat out of the Outstanding Summary once nothing is outstanding. Without this
+       its last snapshot stayed current: Mohmmad Anwar (Gateway 1E) cleared 31,44,019 on 29 Sep and was
+       absent from the 30 Sep file, yet his home screen kept showing that amount as due. So every flat
+       of a project this file covers that is not in it loses its snapshot, and the portal falls back to
+       the Sales Details cost sheet, as it already does for fully-paid flats. Projects the file does not
+       cover at all are left alone, so a single-project export cannot wipe the others. */
+    const inFile=new Set(st.matched.map(m=>m.unit.id));
+    const projIds=new Set(st.fileProjectIds||st.matched.map(m=>m.project.id));
+    const gone=(await cpaUnits(true)).filter(u=>projIds.has(u.project_id)&&!inFile.has(u.id)).map(u=>u.id);
+    for(let i=0;i<gone.length;i+=200){
+      const {error}=await sb.schema('cust').from('outstanding_snapshot').update({is_current:false})
+        .in('unit_id',gone.slice(i,i+200)).eq('is_current',true);
       if(error)throw error;
     }
   }else if(st.type==='invoice_register'){
@@ -15149,15 +20106,24 @@ async function cpaImportConfirmXlsx(st){
       if(!byDoc[key]) byDoc[key]={unit:m.unit,rec:r,items:[]};
       byDoc[key].items.push(r);
     }
+    /* invoices_uq is a PARTIAL unique index (WHERE deleted_at is null and is_current). Postgres
+       cannot infer a partial index from a bare column list, so .upsert({onConflict:'unit_id,
+       document_no'}) raised "no unique or exclusion constraint matching the ON CONFLICT
+       specification" on every run - which is why cust.invoices was last written on 11 Sep while
+       every import since reported success. Look the current rows up ourselves instead. */
+    const existingInv=await cpaCurrentByKey('invoices','document_no',st.matched);
     for(const key of Object.keys(byDoc)){
       const {unit,rec,items}=byDoc[key];
-      // Upsert invoice header
-      const {data:inv,error:ie}=await sb.schema('cust').from('invoices').upsert({
-        unit_id:unit.id,document_no:rec.docNo,document_date:rec.docDate,
+      const invRow={unit_id:unit.id,document_no:rec.docNo,document_date:rec.docDate,
         invoice_type:rec.invoiceType||'Payment Plan',due_date:rec.dueDate,gstin:rec.gstin,
-        status:rec.status,is_current:true,import_batch_id:batchId
-      },{onConflict:'unit_id,document_no'}).select('id').single();
-      if(ie)throw ie;
+        status:rec.status,is_current:true,import_batch_id:batchId};
+      let invId=existingInv[unit.id+'|'+rec.docNo];
+      if(invId){ const {error:ue}=await sb.schema('cust').from('invoices').update(invRow).eq('id',invId); if(ue)throw ue; }
+      else{
+        const {data:ins,error:ie}=await sb.schema('cust').from('invoices').insert(invRow).select('id').single();
+        if(ie)throw ie; invId=ins.id; existingInv[unit.id+'|'+rec.docNo]=invId;
+      }
+      const inv={id:invId};
       // Delete old items for this invoice, insert fresh
       await sb.schema('cust').from('invoice_items').delete().eq('invoice_id',inv.id);
       const itemRows=items.map((r,i)=>({
@@ -15165,13 +20131,6 @@ async function cpaImportConfirmXlsx(st){
         amount:r.amount,tax:r.tax,net_amount:r.netAmount,sort_order:i
       }));
       if(itemRows.length){const {error}=await sb.schema('cust').from('invoice_items').insert(itemRows);if(error)throw error;}
-    }
-    // Also write to old table for backwards compatibility
-    const oldRows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,booking_no:m.rec.bookingNo,demand_no:m.rec.docNo,
-      milestone:m.rec.schedule,revenue_head:m.rec.revenueHead,demand_date:m.rec.docDate,due_date:m.rec.dueDate,
-      amount:m.rec.amount,gst_amount:m.rec.tax,total_amount:m.rec.netAmount,status:m.rec.status,import_batch_id:batchId}));
-    for(let i=0;i<oldRows.length;i+=500){
-      await sb.schema('cust').from('farvision_demand').upsert(oldRows.slice(i,i+500),{onConflict:'unit_id,demand_no'});
     }
   }else if(st.type==='receipt_register'){
     // Write to NEW tables: cust.money_receipts (headers) + cust.receipt_items (lines)
@@ -15182,19 +20141,24 @@ async function cpaImportConfirmXlsx(st){
       if(!byReceipt[key]) byReceipt[key]={unit:m.unit,rec:r,items:[]};
       byReceipt[key].items.push(r);
     }
+    // money_receipts_uq is partial in the same way invoices_uq is - see the note above.
+    const existingRcpt=await cpaCurrentByKey('money_receipts','receipt_no',st.matched);
     for(const key of Object.keys(byReceipt)){
       const {unit,rec,items}=byReceipt[key];
       const totalAmt=items.reduce((s,r)=>s+Number(r.totalAmount||r.amount||0),0);
-      // Upsert receipt header
-      const {data:rcpt,error:re}=await sb.schema('cust').from('money_receipts').upsert({
-        unit_id:unit.id,receipt_no:rec.receiptNo,receipt_date:rec.receiptDate,
+      const rcptRow={unit_id:unit.id,receipt_no:rec.receiptNo,receipt_date:rec.receiptDate,
         payment_mode:rec.mode,instrument_no:rec.instrumentNo,instrument_date:rec.instrumentDate,
         drawn_on:rec.drawnOn,drawn_on_branch:rec.drawnOnBranch,deposit_bank:rec.depositBank,
         narration:rec.narration,total_amount:totalAmt,
         is_reversed:rec.isReversed==='Yes',unit_status_at_receipt:rec.unitStatus,
-        is_current:true,import_batch_id:batchId
-      },{onConflict:'unit_id,receipt_no'}).select('id').single();
-      if(re)throw re;
+        is_current:true,import_batch_id:batchId};
+      let rcptId=existingRcpt[unit.id+'|'+rec.receiptNo];
+      if(rcptId){ const {error:ue}=await sb.schema('cust').from('money_receipts').update(rcptRow).eq('id',rcptId); if(ue)throw ue; }
+      else{
+        const {data:ins,error:re}=await sb.schema('cust').from('money_receipts').insert(rcptRow).select('id').single();
+        if(re)throw re; rcptId=ins.id; existingRcpt[unit.id+'|'+rec.receiptNo]=rcptId;
+      }
+      const rcpt={id:rcptId};
       // Delete old items, insert fresh
       await sb.schema('cust').from('receipt_items').delete().eq('receipt_id',rcpt.id);
       const itemRows=items.map((r,i)=>({
@@ -15203,33 +20167,58 @@ async function cpaImportConfirmXlsx(st){
       }));
       if(itemRows.length){const {error}=await sb.schema('cust').from('receipt_items').insert(itemRows);if(error)throw error;}
     }
-    // Also write to old table
-    const oldRows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,booking_no:m.rec.bookingNo,receipt_no:m.rec.receiptNo,
-      receipt_date:m.rec.receiptDate,amount:m.rec.amount,mode:m.rec.mode,against_demand_no:m.rec.invoiceNo,
-      revenue_head:m.rec.revenueHead,import_batch_id:batchId}));
-    for(let i=0;i<oldRows.length;i+=500){
-      await sb.schema('cust').from('farvision_receipts').upsert(oldRows.slice(i,i+500),{onConflict:'unit_id,receipt_no,against_demand_no'});
-    }
   }else if(st.type==='receipt_reversal'){
-    for(const m of st.matched){
-      const r=m.rec;
-      // Skip if already exists
-      const {data:existing}=await sb.schema('cust').from('receipt_reversals').select('id').eq('unit_id',m.unit.id).eq('receipt_reversal_no',r.reversalNo).limit(1);
-      if(existing&&existing.length) continue;
-      const {error}=await sb.schema('cust').from('receipt_reversals').insert({
-        unit_id:m.unit.id,receipt_reversal_no:r.reversalNo,receipt_reversal_date:r.reversalDate,
+    // One report row per revenue-head line, and every consumer (Ledger, reconciliation) sums
+    // reversal_amount across a reversal's rows - so all lines must land. Skipping a reversal number
+    // once its first line existed kept Rs 3,201 of a Rs 10,00,000 bounced cheque.
+    const byRev={};
+    for(const m of st.matched){ const k=m.unit.id+'|'+m.rec.reversalNo; (byRev[k]=byRev[k]||{unit:m.unit,lines:[]}).lines.push(m.rec); }
+    for(const k of Object.keys(byRev)){
+      const {unit,lines}=byRev[k];
+      const {error:ue}=await sb.schema('cust').from('receipt_reversals').update({is_current:false})
+        .eq('unit_id',unit.id).eq('receipt_reversal_no',lines[0].reversalNo).eq('is_current',true);
+      if(ue)throw ue;
+      const {error}=await sb.schema('cust').from('receipt_reversals').insert(lines.map(r=>({
+        unit_id:unit.id,receipt_reversal_no:r.reversalNo,receipt_reversal_date:r.reversalDate,
         receipt_no:r.receiptNo,receipt_date:r.receiptDate,
         instrument_no:r.instrumentNo,instrument_date:r.instrumentDate,
         reversal_amount:r.reversalAmount,total_reversal_amount:r.totalReversalAmount,
         narration:r.narration,bank_description:r.bankDescription,reason:r.reason,
-        is_current:true,import_batch_id:batchId});
+        is_current:true,import_batch_id:batchId})));
       if(error)throw error;
     }
   }else if(st.type==='booking_register'){
+    // Only the two moves this report actually knows about: Cancel cancels, and Active brings back a
+    // unit wrongly left cancelled. 'registered' / 'possession' are set by staff and are not this
+    // report's to overwrite, and a row with no readable status changes nothing.
     for(const m of st.matched){
       const r=m.rec;
-      const newStatus=r.status==='Cancel'?'cancelled':'booked';
-      await sb.schema('cust').from('units').update({status:newStatus,updated_at:new Date().toISOString()}).eq('id',m.unit.id);
+      const newStatus=r.status==='Cancel'?'cancelled'
+        :(r.status==='Active'&&m.unit.status==='cancelled')?'booked':null;
+      if(!newStatus||newStatus===m.unit.status) continue;
+      const {error}=await sb.schema('cust').from('units').update({status:newStatus,updated_at:new Date().toISOString()}).eq('id',m.unit.id);
+      if(error)throw error;
+    }
+  }else if(st.type==='ptc_transfer'){
+    // ptc_transfers_doc_uq is a PARTIAL unique index (WHERE deleted_at is null) - same reason
+    // .upsert({onConflict:...}) silently broke cust.invoices/cust.money_receipts for eleven days.
+    // Look the row up ourselves instead of trusting Postgres to infer the index.
+    const docNos=st.matched.map(m=>m.rec.documentNo);
+    const existingByDoc={};
+    for(let i=0;i<docNos.length;i+=100){
+      const {data}=await sb.schema('cust').from('ptc_transfers').select('id,document_no')
+        .in('document_no',docNos.slice(i,i+100)).is('deleted_at',null);
+      (data||[]).forEach(r=>{existingByDoc[r.document_no]=r.id;});
+    }
+    for(const m of st.matched){
+      const r=m.rec;
+      const row={document_no:r.documentNo,document_date:r.documentDate,amount:r.amount,narration:r.narration,
+        source_booking_no:r.sourceBookingNo,source_unit_id:(m.sourceUnit&&m.sourceUnit.id)||null,
+        transferee_booking_no:r.transfereeBookingNo,transferee_unit_id:(m.transfereeUnit&&m.transfereeUnit.id)||null,
+        is_reversed:r.isReversed,is_current:true,import_batch_id:batchId};
+      const existingId=existingByDoc[r.documentNo];
+      if(existingId){ const {error}=await sb.schema('cust').from('ptc_transfers').update(row).eq('id',existingId); if(error)throw error; }
+      else{ const {error}=await sb.schema('cust').from('ptc_transfers').insert(row); if(error)throw error; }
     }
   }
   toast(st.matched.length+' row(s) imported','ok');
@@ -15282,210 +20271,631 @@ window.cpaUndoImport=async function(id){
    images and videos together, multiple files at once, and lists what's already there with a
    Delete button so staff can remove anything wrongly uploaded) ---------- */
 function cpaTowersForProject(units,projectId){return [...new Set(units.filter(u=>u.project_id===Number(projectId)&&u.tower).map(u=>u.tower))].sort();}
-function cpaFloorsForProject(units,projectId){return [...new Set(units.filter(u=>u.project_id===Number(projectId)).map(u=>custDeriveFloor(u.unit_code)).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));}
-// A cancelled booking's unit row stays in cust.units for audit history (see the
-// units_project_tower_code_active_uq migration) - fine for financial records, but it means the
-// same physical flat can appear 2-4 times in a flat unit list (one 'booked' row plus every
-// historical 'cancelled' one). For picking WHICH flat to upload photos against, only the
-// currently-occupied row is ever relevant, so this list drops cancelled rows entirely - which
-// also removes every duplicate, since no physical unit has more than one non-cancelled row.
-// Grouped by tower (Farvision's own Project >> Block >> Unit hierarchy) so the list reads like
-// a floor plan instead of 90+ flat, unsorted options.
-function cpaUnitOptionsGrouped(units){
-  const active=units.filter(u=>u.status!=='cancelled');
-  const byTower={};
-  active.forEach(u=>{(byTower[u.tower||'Ungrouped']=byTower[u.tower||'Ungrouped']||[]).push(u);});
-  return Object.keys(byTower).sort().map(tower=>{
-    const group=byTower[tower];
-    const projName=(group[0].projects&&group[0].projects.name)||'';
-    const opts=group.slice().sort((a,b)=>{
-      const fa=Number(custDeriveFloor(a.unit_code))||0,fb=Number(custDeriveFloor(b.unit_code))||0;
-      return fa-fb||String(a.unit_code).localeCompare(String(b.unit_code));
-    }).map(u=>`<option value="${u.id}">Unit ${esc(u.unit_code)}${u.floor_casting_completed_at?'':' · casting pending'}</option>`).join('');
-    return `<optgroup label="${esc(projName)} » ${esc(tower)}">${opts}</optgroup>`;
-  }).join('');
-}
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+   CONSTRUCTION PHOTOS & VIDEOS — one screen, three levels, one place to say where.
+
+   What was here before: four near-identical forms stacked two-by-two, every one of them on
+   screen at once, each with its own project picker, its own date, its own caption and its own
+   list of what had already been uploaded. To put photos against a flat you scrolled past three
+   forms you were not using, then hunted the flat in a single dropdown holding every unit in
+   every tower of every project. The most frequent job on the screen was the hardest one to do.
+
+   What it is now. WHERE is asked once, at the top, and it cascades: Project, then Block, then
+   Flat, with a search box because a block can hold ninety flats. WHAT LEVEL is a row of three
+   buttons, and only that level's form is on screen. Below, one panel to upload into and one
+   panel showing what is already there.
+
+   THE FLAT LEVEL TAKES THREE SETS OF FILES AT ONCE - common area, bathroom, kitchen - because
+   that is how somebody walks a flat and how a customer asks about it. Any one, any two, or all
+   three; whatever is filled in goes up together on one press.
+
+   FLOOR LEVEL IS GONE, by request. It held nothing (the table was empty), it sat between two
+   levels people actually use, and deriving a floor from a unit code was a guess.
+   ══════════════════════════════════════════════════════════════════════════════════════════ */
+
+const CPA_PH_AREAS=[['common','Common area','fa-couch'],
+                    ['bathroom','Bathroom','fa-bath'],
+                    ['kitchen','Kitchen','fa-kitchen-set']];
+// level -> which of the three pickers it needs. Flat needs all three; the project level needs
+// only the project, so the pickers it does not use are hidden rather than left there to be
+// filled in pointlessly.
+const CPA_PH_LEVELS=[['project','Whole project','fa-city'],
+                     ['tower','Block / Tower','fa-building'],
+                     ['unit','Flat','fa-door-open']];
+let CPA_PH={level:'project',project:'',tower:'',unit:'',files:{all:[],common:[],bathroom:[],kitchen:[]}};
+/* What the review panel is showing. It starts wherever the upload pickers are pointing, because
+   that is almost always what you want to check straight after uploading - but '' means "all", so
+   it can be widened to a whole block or a whole project without disturbing the upload target. */
+let CPA_PHF={project:'',tower:'',unit:'',area:''};
+
+function cpaPhCss(){return `<style>
+  /* Everything here is sized so the whole screen - pick, upload, review - fits a laptop
+     without scrolling. The first version let the chosen-files list grow under the drop zones,
+     so each batch pushed the Upload button further down and by the third area it was off the
+     bottom of the screen. Nothing on this screen grows now: the zones are a fixed height and
+     the file list scrolls inside the zone it belongs to. */
+  .cph-wrap{display:flex;flex-direction:column;gap:12px}
+  .cph-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .cph-h{font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--slate);
+    margin:0 0 14px;display:flex;align-items:center;gap:8px}
+  .cph-h::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  /* level buttons and the pickers share one row on a wide screen */
+  .cph-bar{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
+  .cph-levels{display:flex;gap:6px;background:#f1f5f9;padding:4px;border-radius:10px;flex:none}
+  .cph-lv{display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border:0;border-radius:7px;
+    background:transparent;cursor:pointer;font:600 13px Segoe UI,Arial,sans-serif;color:var(--slate);transition:.12s}
+  .cph-lv:hover{color:var(--ink)}
+  .cph-lv.on{background:#fff;color:var(--brand);box-shadow:0 1px 2px rgba(15,23,42,.12)}
+
+  .cph-pick{display:flex;gap:12px;flex-wrap:wrap;flex:1;min-width:0}
+  .cph-f{display:flex;flex-direction:column;gap:5px;min-width:150px;flex:1}
+  .cph-f>label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}
+  /* A real menu control rather than the browser's default: fixed height, its own caret, and a
+     focus ring that matches the rest of JainE. */
+  .cph-sel{position:relative;display:block}
+  .cph-sel select,.cph-in{width:100%;height:34px;border:1px solid var(--line);border-radius:8px;
+    padding:0 30px 0 11px;font:13.5px Segoe UI,Arial,sans-serif;background:#fff;color:var(--ink);
+    appearance:none;-webkit-appearance:none;cursor:pointer;text-overflow:ellipsis}
+  .cph-in{padding-right:11px;cursor:text}
+  .cph-sel::after{content:"";position:absolute;right:11px;top:50%;margin-top:-2px;pointer-events:none;
+    border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid #64748b}
+  .cph-sel select:hover{border-color:#94a3b8}
+  .cph-sel select:focus,.cph-in:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  /* The open list itself - a long block of flats should scroll, not run off the screen. */
+  .cph-sel select option{padding:6px 8px}
+
+  /* ── drop zones: FIXED height, whatever is in them ── */
+  .cph-zones{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+  .cph-zone{border:1.5px dashed var(--line);border-radius:10px;background:#fafcff;cursor:pointer;
+    transition:.12s;height:132px;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden}
+  .cph-zone:hover{border-color:var(--brand);background:#eff6ff}
+  .cph-zone.over{border-color:var(--brand);background:#dbeafe;border-style:solid}
+  .cph-zone.has{border-style:solid;border-color:#86efac;background:#fff}
+  .cph-zhead{display:flex;align-items:center;gap:7px;padding:0 11px;height:36px;flex:none;box-sizing:border-box}
+  .cph-zhead i{font-size:14px;color:var(--slate)}
+  .cph-zone.has .cph-zhead i{color:#16a34a}
+  .cph-zt{font-size:12.5px;font-weight:700;color:var(--ink)}
+  .cph-zn{margin-left:auto;font-size:11px;font-weight:700;color:#16a34a;background:#f0fdf4;
+    border:1px solid #bbf7d0;border-radius:999px;padding:1px 7px}
+  .cph-zbody{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:5px;color:var(--slate);font-size:11.5px;padding:0 10px 8px;text-align:center}
+  /* Camera / Video / Gallery - icon over label so three fit a 200px zone */
+  .cph-zbtns{display:flex;gap:6px;width:100%}
+  .cph-zb{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    height:48px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);cursor:pointer;
+    font:600 11.5px Segoe UI,Arial,sans-serif;padding:0 4px}
+  .cph-zb i{font-size:15px;color:var(--brand)}
+  .cph-zb:hover{border-color:var(--brand);background:#eff6ff}
+  .cph-zb:active{background:#dbeafe}
+  .cph-zhint{font-size:11px}
+  /* the only scrolling part of the screen */
+  /* ── what you have chosen but not yet sent: pictures, not filenames ──
+     A filename tells you nothing about whether you picked the right photo. These are the real
+     images, read straight off the disk before anything is uploaded. The strip sits under the
+     zones rather than inside them, and scrolls once it is three rows deep so the Upload button
+     never walks off the bottom of the screen. */
+  .cph-staged{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
+  .cph-sgroup{margin-bottom:10px}
+  .cph-sgroup:last-child{margin-bottom:0}
+  .cph-sh{font-size:11px;font-weight:700;color:var(--slate);margin:0 0 6px;display:flex;align-items:center;gap:6px}
+  .cph-sh i{color:#16a34a;font-size:11px}
+  .cph-sh .n{font-weight:500}
+  .cph-strip{display:flex;flex-wrap:wrap;gap:7px;max-height:186px;overflow-y:auto}
+  .cph-sthumb{position:relative;width:74px;height:74px;border-radius:8px;overflow:hidden;
+    border:1px solid var(--line);background:#f1f5f9;flex:none}
+  .cph-sthumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .cph-sthumb .vid{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#64748b}
+  .cph-sx{position:absolute;top:3px;right:3px;width:19px;height:19px;border-radius:5px;border:0;
+    background:rgba(15,23,42,.66);color:#fff;cursor:pointer;font-size:10px;line-height:1;padding:0}
+  .cph-sx:hover{background:var(--err)}
+
+  .cph-acts{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+
+  /* ── already uploaded: one row each, so a date, a flat and a caption can be read across ── */
+  .cph-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+  /* The headers sat hard against the top of their strip and hard against the title above it.
+     A fixed height with vertical-align:middle centres the text in the strip whatever the font
+     does, and the strip itself is pushed clear of the section title. */
+  .cph-tbl{margin-top:4px}
+  .cph-tbl thead th{text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+    color:var(--slate);padding:0 10px;height:36px;vertical-align:middle;background:#f8fafc;
+    border-top:1px solid var(--line);border-bottom:1px solid var(--line);white-space:nowrap}
+  .cph-tbl thead th:first-child{border-radius:8px 0 0 8px;border-left:1px solid var(--line)}
+  .cph-tbl thead th:last-child{border-radius:0 8px 8px 0;border-right:1px solid var(--line)}
+  .cph-tbl td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .cph-tbl tr:last-child td{border-bottom:0}
+  .cph-tbl tbody tr:hover{background:#f8fafc}
+  .cph-th{width:46px;height:46px;border-radius:7px;object-fit:cover;display:block;cursor:pointer;border:1px solid var(--line)}
+  .cph-th.vid{background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b}
+  .cph-when{white-space:nowrap;font-weight:600;color:var(--ink)}
+  .cph-area{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;
+    background:#eff6ff;color:#1e40af;white-space:nowrap}
+  .cph-rm{border:1px solid var(--line);background:#fff;color:var(--slate);border-radius:7px;
+    width:28px;height:28px;cursor:pointer;font-size:11px}
+  .cph-rm:hover{border-color:var(--err);color:var(--err)}
+
+  /* Filters for what is already there. Separate from the pickers at the top: those say where the
+     next upload goes, these say what you want to look at, and the two are not always the same
+     question - "show me every kitchen in Block E" is not an upload target. */
+  .cph-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;
+    padding-bottom:14px;border-bottom:1px solid var(--line)}
+  .cph-filters .cph-f{min-width:130px}
+  .cph-fcount{font-size:11.5px;color:var(--slate);margin-left:auto;padding-bottom:8px;white-space:nowrap}
+
+  /* A staged photo, full size, before it goes anywhere. */
+  .cph-box{position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,.82);display:flex;
+    align-items:center;justify-content:center;padding:32px}
+  .cph-box img,.cph-box video{max-width:92vw;max-height:84vh;border-radius:10px;display:block;
+    box-shadow:0 20px 60px rgba(0,0,0,.5);background:#000}
+  .cph-boxbar{position:absolute;top:0;left:0;right:0;padding:14px 18px;display:flex;align-items:center;
+    gap:12px;color:#e8eaed;font-size:13px;background:linear-gradient(rgba(0,0,0,.55),transparent)}
+  .cph-boxbar .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cph-boxx{margin-left:auto;border:0;background:rgba(255,255,255,.14);color:#fff;border-radius:8px;
+    width:32px;height:32px;cursor:pointer;font-size:16px;line-height:1;flex:none}
+  .cph-boxx:hover{background:rgba(255,255,255,.28)}
+  .cph-sthumb{cursor:zoom-in}
+  .cph-empty{padding:18px;text-align:center;color:var(--slate);font-size:12.5px;
+    border:1px dashed var(--line);border-radius:10px}
+  /* the review panel is the one thing allowed to be long, and it scrolls on its own */
+  .cph-review{max-height:330px;overflow-y:auto}
+  .cph-areahead{font-size:11.5px;font-weight:700;color:var(--ink);margin:12px 0 7px;display:flex;align-items:center;gap:7px}
+  .cph-areahead .n{font-weight:500;color:var(--slate)}
+  @media(max-width:820px){.cph-bar{align-items:stretch}.cph-pick{width:100%}}
+  /* Phone - mostly site staff standing in the flat. Full-width tap targets, 16px controls (smaller
+     makes iOS zoom on focus), zones stacked, and the uploaded list reflowed into rows of
+     thumbnail | details | delete instead of a table squeezed sideways. */
+  @media(max-width:760px){
+    .cph-card{padding:12px}
+    .cph-levels{width:100%;box-sizing:border-box}
+    .cph-lv{flex:1;justify-content:center;padding:10px 6px}
+    .cph-f{flex:1 1 100%;min-width:0;max-width:none!important}
+    .cph-sel select,.cph-in{height:46px;font-size:16px}
+    .cph-zones{grid-template-columns:1fr!important}
+    .cph-zone{height:auto;min-height:0}
+    .cph-zb{height:56px;font-size:13px}
+    .cph-zb i{font-size:18px}
+    .cph-zhint{display:none}
+    .cph-acts .btn{flex:1;justify-content:center;min-height:48px;font-size:15px}
+    .cph-acts span{flex-basis:100%}
+    .cph-filters .cph-f{flex:1 1 calc(50% - 5px)}
+    .cph-fcount{margin-left:0;padding-bottom:0;flex-basis:100%}
+    .cph-review{max-height:none}
+    .cph-tbl,.cph-tbl tbody{display:block;width:100%}
+    .cph-tbl thead{display:none}
+    .cph-tbl tr{display:grid;grid-template-columns:56px minmax(0,1fr) auto;column-gap:12px;row-gap:0;
+      align-items:center;padding:10px 2px;border-bottom:1px solid var(--line)}
+    .cph-tbl tr:last-child{border-bottom:0}
+    .cph-tbl td{display:block;padding:1px 0;border:0;grid-column:2;min-width:0;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .cph-tbl td:first-child{grid-column:1;grid-row:1/span 20;padding:0}
+    .cph-tbl td:last-child{grid-column:3;grid-row:1/span 20;padding:0}
+    .cph-th{width:56px;height:56px}
+    .cph-rm{width:40px;height:40px;font-size:13px}
+    .cph-box{padding:12px}
+  }
+</style>`;}
+
 async function cpaRenderPhotos(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
-  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  const unitOpts=cpaUnitOptionsGrouped(units);
+  if(!CPA_PH.project&&projects.length) CPA_PH.project=String(projects[0].id);
+  host.innerHTML=cpaPhCss()+'<div class="cph-wrap" id="cphWrap"></div>';
+  cpaPhPaint(projects,units);
+}
+
+// Everything on screen is redrawn from CPA_PH, so there is one description of the state and no
+// way for the pickers, the form and the list to disagree about which flat is being looked at.
+async function cpaPhPaint(projects,units){
+  projects=projects||await cpaProjects(); units=units||await cpaUnits();
+  const wrap=$('cphWrap'); if(!wrap) return;
+  const lvl=CPA_PH.level;
+  const needTower=(lvl==='tower'||lvl==='unit'), needUnit=(lvl==='unit');
+
+  const towers=cpaTowersForProject(units,CPA_PH.project);
+  if(needTower&&towers.length&&towers.indexOf(CPA_PH.tower)<0) CPA_PH.tower=towers[0];
+  const flats=cpaPhFlats(units);
+  if(needUnit&&flats.length&&!flats.some(u=>String(u.id)===String(CPA_PH.unit))) CPA_PH.unit=String(flats[0].id);
+
   const today=new Date().toISOString().slice(0,10);
-  const firstProjectId=projects[0]?projects[0].id:null;
-  const towerOpts=firstProjectId?cpaTowersForProject(units,firstProjectId).map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join(''):'';
-  const floorOpts=firstProjectId?cpaFloorsForProject(units,firstProjectId).map(f=>`<option value="${esc(f)}">Floor ${esc(f)}</option>`).join(''):'';
-  host.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
-    <div class="card card-pad frm"><div class="sec-title">Project-wide construction photos/videos</div>
-    <label>Project</label><select id="cpaPhProject" onchange="cpaRenderProjectPhotoList()">${projOpts}</select>
-    <label>Date shown to customers</label><input type="date" id="cpaPhDate" value="${today}">
-    <label>Caption (optional)</label><input id="cpaPhCaption">
-    <label>Photos / videos</label><input type="file" id="cpaPhFiles" accept="image/*,video/*" multiple>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaPhBtn" onclick="cpaUploadProjectPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaPhList" style="margin-top:14px"></div>
-    </div>
-    <div class="card card-pad frm"><div class="sec-title">Tower / Block-wise construction photos/videos</div>
-    <label>Project</label><select id="cpaTwProject" onchange="cpaOnTwProjectChange()">${projOpts}</select>
-    <label>Tower / Block</label><select id="cpaTwTower" onchange="cpaRenderTowerPhotoList()">${towerOpts}</select>
-    <label>Date shown to customers</label><input type="date" id="cpaTwDate" value="${today}">
-    <label>Caption (optional)</label><input id="cpaTwCaption">
-    <label>Photos / videos</label><input type="file" id="cpaTwFiles" accept="image/*,video/*" multiple>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaTwBtn" onclick="cpaUploadTowerPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaTwList" style="margin-top:14px"></div>
-    </div>
-    <div class="card card-pad frm"><div class="sec-title">Floor-wise construction photos/videos</div>
-    <label>Project</label><select id="cpaFlProject" onchange="cpaOnFlProjectChange()">${projOpts}</select>
-    <label>Floor</label><select id="cpaFlFloor" onchange="cpaRenderFloorPhotoList()">${floorOpts}</select>
-    <label>Date shown to customers</label><input type="date" id="cpaFlDate" value="${today}">
-    <label>Caption (optional)</label><input id="cpaFlCaption">
-    <label>Photos / videos</label><input type="file" id="cpaFlFiles" accept="image/*,video/*" multiple>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaFlBtn" onclick="cpaUploadFloorPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaFlList" style="margin-top:14px"></div>
-    </div>
-    <div class="card card-pad frm"><div class="sec-title">Per-flat construction photos/videos</div>
-    <label>Unit</label><select id="cpaUhUnit" onchange="cpaRenderUnitPhotoList()">${unitOpts}</select>
-    <label>Date shown to customers</label><input type="date" id="cpaUhDate" value="${today}">
-    <label>Caption (optional)</label><input id="cpaUhCaption">
-    <label>Photos / videos</label><input type="file" id="cpaUhFiles" accept="image/*,video/*" multiple>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaUhBtn" onclick="cpaUploadUnitPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaUhList" style="margin-top:14px"></div>
-    </div></div>`;
-  cpaRenderProjectPhotoList();cpaRenderTowerPhotoList();cpaRenderFloorPhotoList();cpaRenderUnitPhotoList();
+  wrap.innerHTML=
+    '<div class="cph-card">'
+      +'<div class="cph-bar">'
+        +'<div class="cph-levels">'
+          +CPA_PH_LEVELS.map(l=>'<button class="cph-lv'+(lvl===l[0]?' on':'')+'" onclick="cpaPhSetLevel(\''+l[0]+'\')">'
+             +'<i class="fa-solid '+l[2]+'"></i>'+esc(l[1])+'</button>').join('')
+        +'</div>'
+        +'<div class="cph-pick">'
+          +'<div class="cph-f"><label>Project</label><div class="cph-sel"><select onchange="cpaPhSet(\'project\',this.value)">'
+            +projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(CPA_PH.project)?' selected':'')+'>'+esc(p.name)+'</option>').join('')
+          +'</select></div></div>'
+          +(needTower?'<div class="cph-f"><label>Block</label><div class="cph-sel"><select id="cphTower" onchange="cpaPhSet(\'tower\',this.value)">'
+            +(towers.length?towers.map(t=>'<option'+(t===CPA_PH.tower?' selected':'')+'>'+esc(t)+'</option>').join('')
+                           :'<option value="">No blocks on record</option>')
+          +'</select></div></div>':'')
+          +(needUnit?'<div class="cph-f"><label>Flat</label><div class="cph-sel"><select id="cphUnit" onchange="cpaPhSet(\'unit\',this.value)">'
+            +(flats.length?flats.map(u=>'<option value="'+u.id+'"'+(String(u.id)===String(CPA_PH.unit)?' selected':'')+'>'+esc(u.unit_code)+'</option>').join('')
+                          :'<option value="">No flats in this block</option>')
+          +'</select></div></div>':'')
+        +'</div>'
+      +'</div>'
+    +'</div>'
+
+    +'<div class="cph-card">'
+      +'<div class="cph-bar" style="margin-bottom:12px">'
+        +'<div class="cph-f" style="max-width:190px"><label>Date shown to customers</label>'
+          +'<input type="date" class="cph-in" id="cphDate" value="'+today+'"></div>'
+      +'</div>'
+      +(lvl==='unit'
+        ? '<div class="cph-zones">'+CPA_PH_AREAS.map(a=>cpaPhZone(a[0],a[1],a[2])).join('')+'</div>'
+        : '<div class="cph-zones" style="grid-template-columns:1fr">'+cpaPhZone('all','Photos or videos','fa-images')+'</div>')
+      +'<div class="cph-staged" id="cphStaged" style="display:none"></div>'
+      +'<div class="cph-acts">'
+        +'<button class="btn btn-primary" id="cphGo" onclick="cpaPhUpload()">'
+          +'<i class="fa-solid fa-cloud-arrow-up"></i> Upload</button>'
+        +'<button class="btn" id="cphClear" onclick="cpaPhClear()">Clear all</button>'
+        +(lvl==='unit'?'<span style="font-size:11.5px;color:var(--slate)">Any one, two or all three \u2014 they go up together.</span>':'')
+      +'</div>'
+    +'</div>'
+
+    +'<div class="cph-card">'
+      +'<div class="cph-h"><i class="fa-solid fa-images"></i>Already uploaded</div>'
+      +'<div id="cphList" class="cph-review"><div class="cph-empty">Loading\u2026</div></div>'
+    +'</div>';
+
+  cpaPhWireZones();
+  cpaPhStaged();
+  cpaPhSyncActions();
+  cpaPhList();
 }
-window.cpaOnTwProjectChange=async function(){
-  const units=await cpaUnits();
-  const towers=cpaTowersForProject(units,$('cpaTwProject').value);
-  $('cpaTwTower').innerHTML=towers.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
-  cpaRenderTowerPhotoList();
+
+// The flats of the chosen project and block, cancelled rows dropped (a cancelled booking keeps
+// its row for audit, which is why the same physical flat could appear two to four times), and
+// filtered by whatever has been typed.
+function cpaPhFlats(units){
+  return (units||[]).filter(u=>
+      u.status!=='cancelled'
+      && String(u.project_id)===String(CPA_PH.project)
+      && (!CPA_PH.tower||String(u.tower||'')===String(CPA_PH.tower)))
+    .sort((a,b)=>String(a.unit_code).localeCompare(String(b.unit_code),undefined,{numeric:true}));
+}
+/* The zone says what it is for and how much is in it. What was actually chosen is shown as
+   pictures underneath, where there is room for them - a filename in a narrow box told you
+   nothing about whether you had picked the right photo. */
+function cpaPhZone(key,title,icon){
+  const n=(CPA_PH.files[key]||[]).length;
+  return '<div class="cph-zone'+(n?' has':'')+'" data-zone="'+key+'" tabindex="0">'
+    +'<div class="cph-zhead"><i class="fa-solid '+(n?'fa-circle-check':icon)+'"></i>'
+      +'<span class="cph-zt">'+esc(title)+'</span>'
+      +(n?'<span class="cph-zn">'+n+'</span>':'')
+    +'</div>'
+    +'<div class="cph-zbody"><div class="cph-zbtns">'
+      +'<button type="button" class="cph-zb" onclick="cpaPhPick(\''+key+'\',\'photo\',event)"><i class="fa-solid fa-camera"></i>Camera</button>'
+      +'<button type="button" class="cph-zb" onclick="cpaPhPick(\''+key+'\',\'video\',event)"><i class="fa-solid fa-video"></i>Video</button>'
+      +'<button type="button" class="cph-zb" onclick="cpaPhPick(\''+key+'\',\'gallery\',event)"><i class="fa-solid fa-images"></i>Gallery</button>'
+      +'</div><div class="cph-zhint">'+(n?'Add more, or drop files here':'or drop files here')+'</div></div>'
+    +'</div>';
+}
+
+/* A preview for something that has not left the computer yet. The object URL is kept on the
+   file and revoked when it is taken back out, so choosing forty photos and changing your mind
+   does not leave forty images pinned in memory. */
+function cpaPhPreview(f){
+  if(!f.__u){ try{ f.__u=URL.createObjectURL(f); }catch(_e){ f.__u=''; } }
+  return f.__u;
+}
+function cpaPhForget(f){
+  if(f&&f.__u){ try{ URL.revokeObjectURL(f.__u); }catch(_e){} f.__u=null; }
+}
+/* Full size, before it is uploaded. A 74px tile is enough to see that you picked a photo and
+   not enough to see whether it is the right one or whether it came out blurred - which is the
+   moment to find out, not after it is in front of a customer. Video plays in place with the
+   browser's own controls. */
+window.cpaPhZoom=function(key,idx){
+  const f=(CPA_PH.files[key]||[])[idx]; if(!f) return;
+  const isVid=/^video\//.test(f.type||'');
+  const url=cpaPhPreview(f);
+  const box=document.createElement('div');
+  box.className='cph-box';
+  box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
+    +'<span class="nm">'+esc(f.name)+'</span>'
+    +'<button class="cph-boxx" title="Close (Esc)">&times;</button></div>'
+    +(isVid?'<video src="'+url+'" controls autoplay playsinline></video>'
+           :'<img src="'+url+'" alt="">');
+  const shut=function(){
+    try{ document.removeEventListener('keydown',onKey); }catch(_e){}
+    if(box.parentNode) box.parentNode.removeChild(box);
+  };
+  const onKey=function(e){ if(e.key==='Escape') shut(); };
+  // Clicking the picture itself must not close it - only the backdrop or the button.
+  box.onclick=function(e){ if(e.target===box) shut(); };
+  box.querySelector('.cph-boxx').onclick=shut;
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(box);
 };
-window.cpaOnFlProjectChange=async function(){
-  const units=await cpaUnits();
-  const floors=cpaFloorsForProject(units,$('cpaFlProject').value);
-  $('cpaFlFloor').innerHTML=floors.map(f=>`<option value="${esc(f)}">Floor ${esc(f)}</option>`).join('');
-  cpaRenderFloorPhotoList();
+function cpaPhStaged(){
+  const host=$('cphStaged'); if(!host) return;
+  const keys=CPA_PH.level==='unit'?CPA_PH_AREAS.map(a=>a[0]):['all'];
+  let html='';
+  keys.forEach(function(k){
+    const fs=CPA_PH.files[k]||[]; if(!fs.length) return;
+    const meta=CPA_PH_AREAS.concat([['all','Chosen','fa-images']]).find(a=>a[0]===k);
+    html+='<div class="cph-sgroup">'
+      +(CPA_PH.level==='unit'
+        ? '<div class="cph-sh"><i class="fa-solid fa-circle-check"></i>'+esc(meta[1])
+          +' <span class="n">\u00b7 '+fs.length+'</span></div>' : '')
+      +'<div class="cph-strip">'
+      +fs.map(function(f,i){
+          const isVid=/^video\//.test(f.type||'');
+          const inner=isVid
+            ? '<div class="vid"><i class="fa-solid fa-circle-play fa-lg"></i></div>'
+            : '<img src="'+cpaPhPreview(f)+'" alt="">';
+          return '<div class="cph-sthumb" title="'+esc(f.name)+'" onclick="cpaPhZoom(\''+k+'\','+i+')">'+inner
+            +'<button class="cph-sx" title="Remove" onclick="event.stopPropagation();cpaPhDrop(\''+k+'\','+i+')">&times;</button></div>';
+        }).join('')
+      +'</div></div>';
+  });
+  host.innerHTML=html;
+  host.style.display=html?'':'none';
+}
+
+/* Click and drag-and-drop both, on every zone. The file input is made here rather than living in
+   the markup so that choosing a second batch ADDS to the first instead of replacing it - a plain
+   <input type=file> forgets everything it held the moment you pick again, which is why adding
+   "just one more photo" used to silently drop the rest. */
+/* Camera / Video open the phone's camera straight away (capture="environment" = the rear camera);
+   Gallery is the multi-select picker. On a computer, capture is ignored and all three open the file
+   picker. Every capture goes through cpaPhAdd, so shooting five photos one after another adds five,
+   the same as picking five. */
+window.cpaPhPick=function(key,mode,ev){
+  if(ev) ev.stopPropagation();
+  const inp=document.createElement('input');
+  inp.type='file';
+  if(mode==='gallery'){ inp.multiple=true; inp.accept='image/*,video/*'; }
+  else{ inp.accept=mode==='video'?'video/*':'image/*'; inp.setAttribute('capture','environment'); }
+  inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); };
+  inp.click();
 };
-// A real thumbnail (not just a generic file-type icon) so staff can see at a glance that the
-// right photo actually made it in, right after uploading - videos get a play-icon tile since
-// signing a video URL just to build a thumbnail isn't worth the round trip, only opened on click.
-async function cpaMediaThumb(p){
-  // Every branch below needs exactly one style="" attribute - a second style attribute on the
-  // same tag is silently dropped by the browser (first one wins), which is why the sizing here
-  // used to be ignored entirely and thumbnails rendered at their native full size.
-  const isVideo=(p.file_type||'').indexOf('video')===0;
-  const onclickAttr=`onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')"`;
-  if(isVideo)return `<div ${onclickAttr} title="Open video" style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b;cursor:pointer"><i class="fa-solid fa-circle-play"></i></div>`;
-  const url=await s3SignedUrl(p.storage_path);
-  return url
-    ?`<img src="${url}" alt="" ${onclickAttr} title="Open full size" style="width:52px;height:52px;object-fit:cover;border-radius:6px;display:block;cursor:pointer">`
-    :`<div ${onclickAttr} style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#94a3b8;cursor:pointer"><i class="fa-solid fa-image"></i></div>`;
+function cpaPhWireZones(){
+  Array.prototype.forEach.call(document.querySelectorAll('.cph-zone'),function(z){
+    const key=z.getAttribute('data-zone');
+    const open=function(){ cpaPhPick(key,'gallery'); };
+    z.onclick=open;
+    // Enter on one of the zone's own buttons is that button's click - not the zone's as well.
+    z.onkeydown=function(e){ if(e.target!==z) return; if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } };
+    z.ondragover=function(e){ e.preventDefault(); z.classList.add('over'); };
+    z.ondragleave=function(){ z.classList.remove('over'); };
+    z.ondrop=function(e){
+      e.preventDefault(); z.classList.remove('over');
+      cpaPhAdd(key,[...(e.dataTransfer&&e.dataTransfer.files||[])]);
+    };
+  });
 }
-async function cpaMediaRow(p){return [await cpaMediaThumb(p),fmtDate(p.taken_on),esc(p.caption||p.file_name||'—')];}
-// Caps each "Existing uploads" panel at roughly 5 rows tall (thumbnail rows run ~64px incl.
-// padding) and scrolls internally past that, so uploading a dozen photos to one scope doesn't
-// push the Upload button and every panel after it down the page - only this list scrolls.
-function cpaMediaListWrap(label,tableHtml){
-  return '<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">'+label+'</div>'+
-    '<div style="max-height:320px;overflow-y:auto">'+tableHtml+'</div>';
+function cpaPhAdd(key,files){
+  const keep=(files||[]).filter(f=>/^(image|video)\//.test(f.type||''));
+  const dropped=(files||[]).length-keep.length;
+  if(dropped) toast(dropped+' file'+(dropped===1?' was':'s were')+' not a photo or video and '+(dropped===1?'was':'were')+' skipped','warn');
+  if(!keep.length) return;
+  // Same file picked twice is the same file once.
+  const have=new Set((CPA_PH.files[key]||[]).map(f=>f.name+'|'+f.size));
+  CPA_PH.files[key]=(CPA_PH.files[key]||[]).concat(keep.filter(f=>!have.has(f.name+'|'+f.size)));
+  cpaPhRepaintZones();
 }
-async function cpaRenderProjectPhotoList(){
-  const host=$('cpaPhList');if(!host)return;
-  const projectId=Number($('cpaPhProject').value);
-  const {data}=await sb.schema('cust').from('project_photos').select('*').eq('project_id',projectId).is('deleted_at',null).order('taken_on',{ascending:false});
-  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('project_photos',${p.id},'cpaRenderProjectPhotoList')">Delete</button>`]));
-  host.innerHTML=cpaMediaListWrap('Existing uploads',cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+window.cpaPhDrop=function(key,idx){
+  cpaPhForget(CPA_PH.files[key][idx]);
+  CPA_PH.files[key].splice(idx,1);
+  cpaPhRepaintZones();
+};
+window.cpaPhClear=function(){
+  Object.keys(CPA_PH.files).forEach(k=>(CPA_PH.files[k]||[]).forEach(cpaPhForget));
+  CPA_PH.files={all:[],common:[],bathroom:[],kitchen:[]};
+  cpaPhRepaintZones();
+};
+/* Redrawing one zone in place keeps the caret and the scroll position of the others, which
+   matters when three of them are on screen. */
+function cpaPhRepaintZones(){
+  Array.prototype.forEach.call(document.querySelectorAll('.cph-zone'),function(z){
+    const key=z.getAttribute('data-zone');
+    const meta=CPA_PH_AREAS.concat([['all','Photos or videos','fa-images']]).find(a=>a[0]===key);
+    const holder=document.createElement('div');
+    holder.innerHTML=cpaPhZone(key,meta?meta[1]:'Files',meta?meta[2]:'fa-images');
+    const fresh=holder.firstChild;
+    z.className=fresh.className;
+    z.innerHTML=fresh.innerHTML;
+  });
+  cpaPhStaged();
+  cpaPhSyncActions();
 }
-async function cpaRenderTowerPhotoList(){
-  const host=$('cpaTwList');if(!host)return;
-  const projectId=Number($('cpaTwProject').value),tower=$('cpaTwTower').value;
-  if(!tower){host.innerHTML='<div style="font-size:12.5px;color:var(--slate)">This project has no towers on record.</div>';return;}
-  const {data}=await sb.schema('cust').from('tower_photos').select('*').eq('project_id',projectId).eq('tower',tower).is('deleted_at',null).order('taken_on',{ascending:false});
-  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('tower_photos',${p.id},'cpaRenderTowerPhotoList')">Delete</button>`]));
-  host.innerHTML=cpaMediaListWrap('Existing uploads for '+esc(tower),cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+// The two buttons that act on what has been chosen sit together and know how much there is.
+function cpaPhSyncActions(){
+  const keys=CPA_PH.level==='unit'?CPA_PH_AREAS.map(a=>a[0]):['all'];
+  const total=keys.reduce((t,k)=>t+((CPA_PH.files[k]||[]).length),0);
+  const go=$('cphGo'), clr=$('cphClear');
+  if(go){
+    go.disabled=!total; go.style.opacity=total?'':'.5';
+    go.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> '+(total?('Upload '+total+' file'+(total===1?'':'s')):'Upload');
+  }
+  if(clr){ clr.disabled=!total; clr.style.opacity=total?'':'.4'; }
 }
-async function cpaRenderFloorPhotoList(){
-  const host=$('cpaFlList');if(!host)return;
-  const projectId=Number($('cpaFlProject').value),floorNo=$('cpaFlFloor').value;
-  if(!floorNo){host.innerHTML='<div style="font-size:12.5px;color:var(--slate)">This project has no units to derive floors from.</div>';return;}
-  const {data}=await sb.schema('cust').from('floor_photos').select('*').eq('project_id',projectId).eq('floor_no',floorNo).is('deleted_at',null).order('taken_on',{ascending:false});
-  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('floor_photos',${p.id},'cpaRenderFloorPhotoList')">Delete</button>`]));
-  host.innerHTML=cpaMediaListWrap('Existing uploads for Floor '+esc(floorNo),cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+
+window.cpaPhSetLevel=function(l){ CPA_PH.level=l; cpaPhFollowPickers(); cpaPhPaint(); };
+// The filters snap back to the upload target whenever that target moves, so the panel always
+// opens on "what I am about to add to" rather than on a stale view of somewhere else.
+function cpaPhFollowPickers(){
+  CPA_PHF={project:CPA_PH.project,tower:CPA_PH.tower,unit:CPA_PH.unit,area:''};
 }
-async function cpaRenderUnitPhotoList(){
-  const host=$('cpaUhList');if(!host)return;
-  const unitId=Number($('cpaUhUnit').value);
-  const {data}=await sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unitId).is('deleted_at',null).order('taken_on',{ascending:false});
-  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('unit_photos',${p.id},'cpaRenderUnitPhotoList')">Delete</button>`]));
-  host.innerHTML=cpaMediaListWrap('Existing uploads for this flat',cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+window.cpaPhFilter=function(k,v){ CPA_PHF[k]=v; if(k==='project'){CPA_PHF.tower='';CPA_PHF.unit='';} if(k==='tower'){CPA_PHF.unit='';} cpaPhList(); };
+window.cpaPhSet=function(k,v){
+  CPA_PH[k]=v;
+  // Changing the project invalidates the block and the flat under it.
+  if(k==='project'){ CPA_PH.tower=''; CPA_PH.unit=''; }
+  if(k==='tower'){ CPA_PH.unit=''; }
+  cpaPhFollowPickers();
+  cpaPhPaint();
+};
+window.cpaPhUpload=async function(){
+  const takenOn=($('cphDate')||{}).value;
+  // Captions were asked for on every upload and almost never written; the date, the flat and
+  // the section already say what a photo is. The column is left on the tables so anything
+  // written before today is not lost - it is simply no longer asked for or shown.
+  const caption=null;
+  const lvl=CPA_PH.level;
+  const jobs=[];
+  if(lvl==='unit'){
+    const unitId=Number(CPA_PH.unit);
+    if(!unitId){ toast('Choose a flat first','err'); return; }
+    CPA_PH_AREAS.forEach(a=>(CPA_PH.files[a[0]]||[]).forEach(f=>jobs.push({f,area:a[0]})));
+  } else {
+    (CPA_PH.files.all||[]).forEach(f=>jobs.push({f,area:null}));
+  }
+  if(!jobs.length){ toast('Add at least one photo or video','err'); return; }
+  if(lvl==='tower'&&!CPA_PH.tower){ toast('Choose a block first','err'); return; }
+
+  const go=$('cphGo'); go.disabled=true;
+  let ok=0; const failed=[];
+  for(let i=0;i<jobs.length;i++){
+    const {f,area}=jobs[i];
+    go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading '+(i+1)+' of '+jobs.length+'…';
+    try{
+      let key,table,row;
+      if(lvl==='project'){
+        key=s3KeyForProjectPhoto(CPA_PH.project,f.name); table='project_photos';
+        row={project_id:Number(CPA_PH.project)};
+      }else if(lvl==='tower'){
+        key=s3KeyForTowerPhoto(CPA_PH.project,CPA_PH.tower,f.name); table='tower_photos';
+        row={project_id:Number(CPA_PH.project),tower:CPA_PH.tower};
+      }else{
+        key=s3KeyForUnitPhoto(CPA_PH.unit,f.name); table='unit_photos';
+        row={unit_id:Number(CPA_PH.unit),area:area};
+      }
+      const {data,error}=await uploadFileToS3(key,f);
+      if(error) throw new Error(error.message);
+      const {error:insErr}=await sb.schema('cust').from(table).insert(Object.assign(row,{
+        taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,
+        file_size:f.size,file_type:f.type,uploaded_by:state.email}));
+      if(insErr) throw new Error(insErr.message);
+      ok++;
+    }catch(e){ failed.push(f.name+' — '+((e&&e.message)||e)); }
+  }
+  go.disabled=false;
+  /* Only what actually went up is cleared. A failed file stays in the list so it can be tried
+     again, instead of being quietly dropped along with the ones that worked. */
+  if(!failed.length) cpaPhClear(); else cpaPhRepaintZones();
+  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded','ok');
+  if(failed.length) toast(failed.length+' could not be uploaded: '+failed[0],'err');
+  cpaPhList();
+};
+
+/* What is already there, as thumbnails rather than a table of 52px squares. At flat level it is
+   split by area, because that is the question being asked of it. */
+/* WHAT IS ALREADY THERE, AS ROWS, WITH ITS OWN FILTERS.
+
+   The columns follow the level - a project-wide photo has no block or flat to name, and only a
+   flat photo has a section - and so do the filters. They start on whatever the upload pickers
+   are pointing at and can then be widened: every block in the project, every flat in a block,
+   one section across all of them. That is a different question from "where does the next upload
+   go", which is why it is asked separately here rather than driven by the strip at the top. */
+async function cpaPhList(){
+  const host=$('cphList'); if(!host) return;
+  const lvl=CPA_PH.level;
+  host.innerHTML='<div class="cph-empty">Loading\u2026</div>';
+  try{
+    const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
+    const live=(units||[]).filter(u=>u.status!=='cancelled');
+    const nameOf=id=>{const x=(projects||[]).find(y=>String(y.id)===String(id));return (x&&x.name)||'\u2014';};
+
+    // ── the filter bar, showing only what this level can be filtered by ──
+    const towers=[...new Set(live.filter(u=>String(u.project_id)===String(CPA_PHF.project)&&u.tower)
+                                 .map(u=>u.tower))].sort();
+    const flats=live.filter(u=>String(u.project_id)===String(CPA_PHF.project)
+                             &&(!CPA_PHF.tower||String(u.tower||'')===String(CPA_PHF.tower)))
+                    .sort((x,y)=>String(x.unit_code).localeCompare(String(y.unit_code),undefined,{numeric:true}));
+    const sel=(id,label,opts,val,allLabel)=>
+      '<div class="cph-f"><label>'+esc(label)+'</label><div class="cph-sel">'
+      +'<select onchange="cpaPhFilter(\''+id+'\',this.value)">'
+      +(allLabel?'<option value=""'+(val?'':' selected')+'>'+esc(allLabel)+'</option>':'')
+      +opts.map(o=>'<option value="'+esc(o[0])+'"'+(String(o[0])===String(val)?' selected':'')+'>'+esc(o[1])+'</option>').join('')
+      +'</select></div></div>';
+
+    let bar='<div class="cph-filters">'
+      +sel('project','Project',(projects||[]).map(x=>[x.id,x.name]),CPA_PHF.project,'');
+    if(lvl!=='project') bar+=sel('tower','Block',towers.map(t=>[t,t]),CPA_PHF.tower,'All blocks');
+    if(lvl==='unit'){
+      bar+=sel('unit','Flat',flats.map(u=>[u.id,u.unit_code]),CPA_PHF.unit,'All flats');
+      bar+=sel('area','Section',CPA_PH_AREAS.map(x=>[x[0],x[1]]),CPA_PHF.area,'All sections');
+    }
+    bar+='<span class="cph-fcount" id="cphCount"></span></div>';
+
+    // ── the rows ──
+    let rowsHtml,count=0;
+    if(lvl==='project'){
+      const {data}=await sb.schema('cust').from('project_photos').select('*')
+        .eq('project_id',Number(CPA_PHF.project)).is('deleted_at',null).order('taken_on',{ascending:false});
+      const list=data||[]; count=list.length;
+      rowsHtml=await cpaPhRows(list,'project_photos',['Project'],
+        ()=>[esc(nameOf(CPA_PHF.project))],'Nothing uploaded for this project yet.');
+    }else if(lvl==='tower'){
+      let q=sb.schema('cust').from('tower_photos').select('*').eq('project_id',Number(CPA_PHF.project));
+      if(CPA_PHF.tower) q=q.eq('tower',CPA_PHF.tower);
+      const {data}=await q.is('deleted_at',null).order('taken_on',{ascending:false});
+      const list=data||[]; count=list.length;
+      rowsHtml=await cpaPhRows(list,'tower_photos',['Project','Block'],
+        p=>[esc(nameOf(CPA_PHF.project)),esc(p.tower||'\u2014')],
+        CPA_PHF.tower?'Nothing uploaded for this block yet.':'Nothing uploaded for any block on this project yet.');
+    }else{
+      // "All flats" means every flat in scope, so the ids are gathered and asked for together
+      // rather than one query per flat.
+      const ids=CPA_PHF.unit?[Number(CPA_PHF.unit)]:flats.map(u=>u.id);
+      if(!ids.length){
+        rowsHtml='<div class="cph-empty">There are no flats in this block.</div>';
+      }else{
+        let q=sb.schema('cust').from('unit_photos').select('*').in('unit_id',ids);
+        if(CPA_PHF.area) q=q.eq('area',CPA_PHF.area);
+        const {data}=await q.is('deleted_at',null).order('taken_on',{ascending:false});
+        const list=data||[]; count=list.length;
+        const byId={}; live.forEach(u=>{byId[u.id]=u;});
+        rowsHtml=await cpaPhRows(list,'unit_photos',['Project','Block','Flat','Section'],
+          function(p){
+            const u=byId[p.unit_id]||{};
+            const ar=CPA_PH_AREAS.find(x=>x[0]===(p.area||'common'));
+            return [esc(nameOf(u.project_id||CPA_PHF.project)),esc(u.tower||'\u2014'),esc(u.unit_code||'\u2014'),
+                    '<span class="cph-area">'+esc(ar?ar[1]:p.area)+'</span>'];
+          },'Nothing uploaded here yet.');
+      }
+    }
+    host.innerHTML=bar+rowsHtml;
+    const c=$('cphCount'); if(c) c.textContent=count?(count+(count===1?' item':' items')):'';
+  }catch(e){ host.innerHTML='<div class="cph-empty" style="color:var(--err)">'+esc((e&&e.message)||String(e))+'</div>'; }
 }
-window.cpaDeletePhoto=async function(table,id,refreshFn){
-  if(!await confirmDialog('Remove this photo/video from the customer portal?',{okLabel:'Delete'}))return;
+// `cols` names the middle columns and `vals` fills them for one row, so the three levels share
+// one table rather than three that could drift apart.
+async function cpaPhRows(list,table,cols,vals,emptyMsg){
+  if(!list.length) return '<div class="cph-empty">'+esc(emptyMsg)+'</div>';
+  const rows=await Promise.all(list.map(async function(p){
+    const isVideo=(p.file_type||'').indexOf('video')===0;
+    const open="s3OpenSigned('"+p.storage_path.replace(/'/g,"\\'")+"')";
+    let thumb;
+    if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
+    else{
+      const url=await s3SignedUrl(p.storage_path);
+      thumb=url?'<img class="cph-th" src="'+url+'" alt="" onclick="'+open+'" title="Open full size">'
+               :'<div class="cph-th vid" onclick="'+open+'"><i class="fa-solid fa-image"></i></div>';
+    }
+    return '<tr><td>'+thumb+'</td>'
+      +'<td class="cph-when">'+esc(fmtDate(p.taken_on))+'</td>'
+      +vals(p).map(v=>'<td>'+v+'</td>').join('')
+      +'<td style="text-align:right"><button class="cph-rm" title="Remove from the customer portal" '
+        +'onclick="cpaPhDelete(\''+table+'\','+p.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>';
+  }));
+  return '<table class="cph-tbl"><thead><tr><th style="width:56px"></th><th>Date</th>'
+    +cols.map(c=>'<th>'+esc(c)+'</th>').join('')
+    +'<th style="width:44px"></th></tr></thead><tbody>'+rows.join('')+'</tbody></table>';
+}
+window.cpaPhDelete=async function(table,id){
+  if(!await confirmDialog('Remove this from the customer portal? The customer will no longer see it.',
+     {title:'Remove', okLabel:'Remove', icon:'fa-trash', danger:true})) return;
   const {error}=await sb.schema('cust').from(table).update({deleted_at:new Date().toISOString(),deleted_by:state.email}).eq('id',id);
-  if(error){toast('Delete failed: '+error.message,'err');return;}
-  toast('Removed','ok');window[refreshFn]();
-};
-window.cpaUploadProjectPhotos=async function(){
-  const projectId=Number($('cpaPhProject').value),takenOn=$('cpaPhDate').value,caption=$('cpaPhCaption').value.trim()||null;
-  const files=[...$('cpaPhFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
-  const btn=$('cpaPhBtn');btn.disabled=true;let ok=0;
-  for(const f of files){
-    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
-    const {data,error}=await uploadFileToS3(s3KeyForProjectPhoto(projectId,f.name),f);
-    if(error){toast('Upload failed: '+error.message,'err');continue;}
-    const {error:insErr}=await sb.schema('cust').from('project_photos').insert({project_id:projectId,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
-  }
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaPhFiles').value='';
-  cpaRenderProjectPhotoList();
-};
-window.cpaUploadTowerPhotos=async function(){
-  const projectId=Number($('cpaTwProject').value),tower=$('cpaTwTower').value,takenOn=$('cpaTwDate').value,caption=$('cpaTwCaption').value.trim()||null;
-  if(!tower){toast('This project has no towers on record','err');return;}
-  const files=[...$('cpaTwFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
-  const btn=$('cpaTwBtn');btn.disabled=true;let ok=0;
-  for(const f of files){
-    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
-    const {data,error}=await uploadFileToS3(s3KeyForTowerPhoto(projectId,tower,f.name),f);
-    if(error){toast('Upload failed: '+error.message,'err');continue;}
-    const {error:insErr}=await sb.schema('cust').from('tower_photos').insert({project_id:projectId,tower,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
-  }
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaTwFiles').value='';
-  cpaRenderTowerPhotoList();
-};
-window.cpaUploadFloorPhotos=async function(){
-  const projectId=Number($('cpaFlProject').value),floorNo=$('cpaFlFloor').value,takenOn=$('cpaFlDate').value,caption=$('cpaFlCaption').value.trim()||null;
-  if(!floorNo){toast('This project has no units to derive floors from','err');return;}
-  const files=[...$('cpaFlFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
-  const btn=$('cpaFlBtn');btn.disabled=true;let ok=0;
-  for(const f of files){
-    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
-    const {data,error}=await uploadFileToS3(s3KeyForFloorPhoto(projectId,floorNo,f.name),f);
-    if(error){toast('Upload failed: '+error.message,'err');continue;}
-    const {error:insErr}=await sb.schema('cust').from('floor_photos').insert({project_id:projectId,floor_no:floorNo,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
-  }
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaFlFiles').value='';
-  cpaRenderFloorPhotoList();
-};
-window.cpaUploadUnitPhotos=async function(){
-  const unitId=Number($('cpaUhUnit').value),takenOn=$('cpaUhDate').value,caption=$('cpaUhCaption').value.trim()||null;
-  const files=[...$('cpaUhFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
-  const btn=$('cpaUhBtn');btn.disabled=true;let ok=0;
-  for(const f of files){
-    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
-    const {data,error}=await uploadFileToS3(s3KeyForUnitPhoto(unitId,f.name),f);
-    if(error){toast('Upload failed: '+error.message,'err');continue;}
-    const {error:insErr}=await sb.schema('cust').from('unit_photos').insert({unit_id:unitId,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
-  }
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaUhFiles').value='';
-  cpaRenderUnitPhotoList();
+  if(error){ toast('Could not remove it: '+error.message,'err'); return; }
+  toast('Removed','ok'); cpaPhList();
 };
 
 /* ---------- Tab 5: Inspection (checklist scan + dated photo/video update trail, per unit) ---------- */
@@ -15972,7 +21382,11 @@ async function custLoadData(customerId,force){
   // see boot() above) has full staff_all read access to every cust.* row, so without this filter a
   // preview would show every customer's units mixed together instead of just the one being previewed.
   if(CUST_DATA&&CUST_DATA.customerId===customerId&&!force)return CUST_DATA;
-  const {data:units}=await sb.schema('cust').from('units').select('*, projects(id,name)').eq('customer_id',customerId).order('id');
+  // Live flats only. A cancelled booking keeps its unit row (audit, and the money that moved off it),
+  // but it is not the customer's flat any more - Arup Bhawal's D/8G stayed in his "Viewing" list
+  // after he moved to D/8H, beside the flat he actually owns.
+  const {data:units}=await sb.schema('cust').from('units').select('*, projects(id,name)').eq('customer_id',customerId)
+    .neq('status','cancelled').is('deleted_at',null).order('id');
   const list=units||[];
   const unitIds=list.map(u=>u.id);
   let contacts=[];
@@ -15981,7 +21395,16 @@ async function custLoadData(customerId,force){
     contacts=data||[];
   }
   const contactByUnit={};contacts.forEach(c=>{contactByUnit[c.unit_id]=c;});
-  CUST_DATA={customerId,units:list,contactByUnit};
+  // Whether this customer has ever submitted a referral, across all their units (the sidebar is
+  // shared across units, not per-unit) - drives the "Earn" badge in custSidebarTabs. Left undefined
+  // rather than defaulted to false until this resolves, so the sidebar's very first paint (before
+  // any data has loaded) never flashes a badge it might have to immediately take back.
+  let hasReferred;
+  if(unitIds.length){
+    const {data:ref}=await sb.schema('cust').from('referrals').select('id').in('unit_id',unitIds).limit(1);
+    hasReferred=!!(ref&&ref.length);
+  }else hasReferred=false;
+  CUST_DATA={customerId,units:list,contactByUnit,hasReferred};
   return CUST_DATA;
 }
 window.custSwitchUnit=function(id){CUST_SELECTED_UNIT=Number(id);route();};
@@ -15995,18 +21418,94 @@ function custFormatUnitType(t){
   if(!m)return t;
   return (parseFloat(m[1]))+' BHK';
 }
-// Floor number derived from the leading digits of unit_code (e.g. "5" from "5A", "12" from
-// "12C") - the same Farvision <floor><unit-letter> convention the RLS policy on
-// cust.floor_photos matches against (substring(unit_code from '^[0-9]+')), so a customer's own
-// derived floor always lines up with what the admin picks when uploading floor-wise media.
-function custDeriveFloor(unitCode){
-  const m=String(unitCode||'').match(/^\d+/);
-  return m?m[0]:null;
+/* Farvision stores names as "Mr. AKSHAY DEBNATH" - shouted back at a customer that reads like a
+   demand letter, so the greeting uses just the given name, title-cased. */
+function custFirstName(fullName){
+  // Md./Mohd. are honorifics here, not given names - without them "Md. MONAZIR HUSSAIN ARSHI" is
+  // greeted as "Md". Stripped repeatedly, since "Mr. Md. ..." occurs.
+  let bare=String(fullName||'').trim(),prev;
+  do{prev=bare;bare=bare.replace(/^(mr|mrs|ms|m\/s|md|mohd|dr|prof|smt|shri|sri)\.?\s+/i,'').trim();}while(bare!==prev);
+  const first=(bare.split(/\s+/)[0]||'').replace(/[^A-Za-z'-]/g,'');
+  return first?first.charAt(0).toUpperCase()+first.slice(1).toLowerCase():'';
+}
+function custGreeting(fullName,unit){
+  const h=new Date().getHours();
+  const hi=h<12?'Good morning':h<17?'Good afternoon':'Good evening';
+  const name=custFirstName(fullName);
+  const proj=projShortName((unit&&unit.projects&&unit.projects.name)||'');
+  const where=[unit&&unit.unit_code,unit&&unit.tower].filter(Boolean).join(' · ');
+  return '<div class="cust-greet">'+
+    (proj?'<div class="cust-greet-kicker">The Jain Group · '+esc(proj)+'</div>':'')+
+    '<div class="cust-greet-hi">'+hi+(name?', '+esc(name):'')+'</div>'+
+    '<div class="cust-greet-sub">Welcome back'+
+      (proj?' — your home at <b>'+esc(proj)+'</b>'+(where?', '+esc(where):''):'')+'.</div>'+
+  '</div>';
+}
+/* Jain Group's own official renders, hotlinked from each project's own marketing microsite - not a
+   generic stock photo, the actual building the customer bought into. Same company, same asset,
+   reused on its own customer portal: no licensing question the way an arbitrary web image would
+   raise. Keyed on cust.projects.name exactly as Farvision sends it, same as everywhere else in this
+   file that reads a project by name. A project with no entry here (Dream Ananta has no dedicated
+   microsite yet) falls back to the plain navy card - never another project's building. */
+const CUST_PROJECT_HERO_IMG={
+  'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://thejaingroup.com/dreamgurukul/assets/images/elevation/Dream%20Gurukul%20elevation%20vertical%201.webp'
+};
+/* A looping site/elevation video, Home page only - not the rest of the portal, which stays plain
+   white so ledgers, statements and cost sheets keep the readability a moving video behind them
+   would cost. Hosted in its own public `project-hero` Storage bucket rather than hotlinked, since
+   it did not already live on a public URL the way the hero photos above do - it is a one-off file,
+   not an asset already published on Jain Group's own site. (Landed in its own bucket rather than a
+   folder inside `branding` as first set up - Storage's "Create folder" in the dashboard can create
+   a sibling bucket instead depending on which button is used; verified with a live curl against the
+   public URL before treating either the path or the bucket's public flag as correct.)
+   Used as the `poster` too: the still frame shown before the video can play, and what renders for
+   anyone with prefers-reduced-motion set (see custLanding below - reduced motion falls back to the
+   plain photo card entirely, not a paused video frame in a full-viewport layout it was never using). */
+const CUST_PROJECT_HERO_VIDEO={
+  'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/project-hero/dream-gurukul.mp4'
+};
+/* A faint (see .cust-tab-bg's opacity in nexus.css) version of the project's own render sits behind
+   every non-Home tab - Statement, Ledger, Cost Sheet etc. - so the portal doesn't go flat and blank
+   the moment a customer leaves the hero. Deliberately its own map, not a reuse of CUST_PROJECT_HERO_IMG:
+   the Home hero and this backdrop are different renders of the same project (dusk elevation vs. a
+   daytime shot with the playground/garden), so a project could in principle only have one of the two. */
+const CUST_PROJECT_TAB_BG={
+  'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/branding/dream%20gurukul%20statement.webp'
+};
+/* The landing page: a greeting standing on the project's own hero media, and nothing else. It is
+   the first thing a customer sees, before they choose Statement or anything else from the sidebar. */
+function custLanding(fullName,unit){
+  const projName=(unit&&unit.projects&&unit.projects.name)||'';
+  const heroImg=CUST_PROJECT_HERO_IMG[projName];
+  const heroVideo=CUST_PROJECT_HERO_VIDEO[projName];
+  const reducedMotion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(heroVideo&&!reducedMotion){
+    return '<div class="cust-landing cust-landing--video">'+
+      '<video class="cust-landing-video" autoplay muted loop playsinline preload="auto"'+
+        (heroImg?' poster="'+esc(heroImg)+'"':'')+'>'+
+        '<source src="'+esc(heroVideo)+'" type="video/mp4">'+
+      '</video>'+
+      '<div class="cust-landing-scrim"></div>'+
+      '<div class="cust-landing-inner">'+custGreeting(fullName,unit)+'</div>'+
+    '</div>';
+  }
+  // A dark scrim under the greeting text, fading to nearly nothing toward the top so the render
+  // itself stays the star of the panel rather than being blanketed. Gives white/gold text on the
+  // photo the same contrast a solid card would, without needing one.
+  const style=heroImg?' style="background-image:linear-gradient(180deg,rgba(9,15,30,.05) 0%,rgba(9,15,30,.35) 45%,rgba(7,12,25,.92) 100%),url(\''+heroImg+'\')"':'';
+  return '<div class="cust-landing'+(heroImg?' cust-landing--photo':'')+'"'+style+'>'+
+    '<div class="cust-landing-inner">'+custGreeting(fullName,unit)+'</div>'+
+  '</div>';
 }
 function custUnitPicker(units,selUnitId){
   if(units.length<2)return '';
-  return `<select id="custUnitPicker" onchange="custSwitchUnit(this.value)" style="margin-bottom:14px;max-width:320px">`+
-    units.map(u=>`<option value="${u.id}" ${u.id===selUnitId?'selected':''}>${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}</option>`).join('')+'</select>';
+  /* An <option> cannot carry a tooltip, so the project's location suffix is dropped here rather than
+     left to truncate mid-word against the dropdown arrow - the tower tells the units apart anyway. */
+  return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
+    '<span style="font-size:12.5px;font-weight:600;color:var(--slate)">Viewing</span>'+
+    `<select id="custUnitPicker" class="mu-sel" onchange="custSwitchUnit(this.value)" style="max-width:340px">`+
+    units.map(u=>`<option value="${u.id}" ${u.id===selUnitId?'selected':''}>${esc(u.unit_code)}${u.tower?' · '+esc(u.tower):''} · ${esc(projShortName((u.projects&&u.projects.name)||''))}</option>`).join('')+
+    '</select></div>';
 }
 // Farvision keeps cancelled demands in the Invoice Register with Status=Cancel (a quarter of the
 // rows), and the cost sheet carries an offsetting negative against them. Showing them to a
@@ -16019,11 +21518,37 @@ const CUST_INVOICE_CANCELLED='Cancel';
 // "next demand due in N days" banner, and the 5 most recent transactions - with the exhaustive
 // list left to the separate Ledger tab. Pulls entirely from data already imported by Sales
 // Details / Outstanding / Invoice & Receipt Register - no new data source.
+/* Does Farvision agree with what we are about to show this customer?
+   cust.reconciliation compares the two per unit. Anything other than a confirmed match - including
+   a unit Farvision sent no snapshot for, which is 40 of them - means nobody has verified the figure,
+   so the portal says it is being updated rather than showing a number on trust.
+
+   FAILS CLOSED on purpose. A query that errors, a row RLS hides, an unreadable view: all of them
+   hide the figures rather than show them. Someone seeing "being updated" when their account is
+   actually fine is an annoyance; someone paying against a wrong balance is not. */
+async function custReconGate(unitId){
+  try{
+    const {data,error}=await sb.schema('cust').from('reconciliation')
+      .select('status').eq('unit_id',unitId).maybeSingle();
+    if(error||!data) return {ok:false,status:'unverified'};
+    /* The six Farvision reports are the source of truth, so the question is not "do our sums agree
+       with Farvision" but "do we HAVE Farvision's figures for this unit". A mismatch means our
+       arithmetic disagreed with Farvision's bookkeeping - Farvision wins, and the customer is shown
+       its numbers. Only 'unchecked' - no Outstanding snapshot at all - leaves us with nothing
+       authoritative to show. ('no_activity' has no snapshot either, but also nothing to state.) */
+    return {ok:data.status!=='unchecked',status:data.status};
+  }catch(e){ return {ok:false,status:'unverified'}; }
+}
+const CUST_FIGURES_NOTICE='<div style="display:flex;gap:10px;align-items:flex-start;background:#fffbeb;'+
+  'border:1px solid #f0dfa8;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13.5px;color:#92400e">'+
+  '<i class="fa-solid fa-circle-info" style="margin-top:2px"></i><div><b>Your figures are being updated.</b> '+
+  'We are reconciling this account against our accounting system, so the amounts are not being shown right now. '+
+  'Please contact us before making any payment.</div></div>';
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
   const [{data:invRows},{data:rcptRows},{data:revRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
     sb.schema('cust').from('invoices').select('id,document_no,document_date,due_date,invoice_type').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
-    sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
+    sb.schema('cust').from('money_receipts').select('*,receipt_items(against_demand_no,amount)').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true),
     sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle(),
     sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
@@ -16052,9 +21577,25 @@ async function custTabOverview(data,unit){
   const csiReceived=costItems.reduce((s,i)=>s+Number(i.received_amount||0),0);
   const csiBalance=costItems.reduce((s,i)=>s+Number(i.balance_amount||0),0);
   const csiOnaccount=costItems.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
-  const useCostSheet=!invoices.length&&!receiptRows.length&&costItems.length>0;
-  const propertyValue=snap?Number(snap.total_consideration||0):totalCostWithTax;
-  const totalReceivedFinal=useCostSheet?csiReceived:netReceived;
+  /* Farvision omits a unit from the Outstanding Summary when it has nothing outstanding - Mr
+     Aniruddha Mukherjee's 5D is billed 62,47,674 and received 62,47,674, so no row exists for him.
+     Its Sales Details cost sheet still carries billed/received/balance per component and is equally
+     Farvision's, so it stands in whenever the snapshot is absent. This used to require the unit to
+     have NO invoices and NO receipts, which is exactly the case it never applies to - any real
+     customer has both - so those 39 units fell through to our own arithmetic instead. */
+  const useCostSheet=costItems.length>0;
+  /* Farvision's total_consideration is the basic amount EXCLUDING GST - for 6N it is 92,72,740
+     against a cost sheet grand total of 98,09,442, the difference being exactly its 5,36,702 of tax.
+     Using it here put an ex-tax value beside a tax-inclusive "Paid to date", so Remaining understated
+     what the customer still owes by the whole tax component, and it disagreed with the Cost Sheet
+     tab's Grand Total. The cost sheet's own tax-inclusive total is the figure that compares like with
+     like, and is equally Farvision's. */
+  const propertyValue=costItems.length?totalCostWithTax:Number((snap&&snap.total_consideration)||0);
+  /* Farvision's own received figure (Sales Details -> cost_sheet_items.received_amount) in
+     preference to summing our receipt rows. Every other KPI here already reads from the Outstanding
+     snapshot, and mixing one locally-computed number in among them is what let "Paid to date" and
+     "Remaining" drift away from "Demand due" on the same card row. */
+  const totalReceivedFinal=costItems.length?csiReceived:netReceived;
   const billOutstanding=snap?Number(snap.bill_outstanding||0):(useCostSheet?csiBalance:Math.max(0,totalBilled-netReceived));
   const lateFee=snap?Number(snap.late_fee_accrued||0):0;
   const onAccount=snap?Number(snap.on_account||0):(useCostSheet?csiOnaccount:0);
@@ -16070,17 +21611,26 @@ async function custTabOverview(data,unit){
     const osScheds=osItems.filter(o=>o.document_no===lastInv.document_no&&o.schedule).map(o=>o.schedule);
     const schedules=[...new Set(osScheds)];
     dueBanner=`<div class="card card-pad" style="background:${days!=null&&days<0?'#fef2f2':'#eff4ff'};border-color:${days!=null&&days<0?'#fecaca':'#cfe0ef'};margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <div><i class="fa-solid fa-file-invoice-dollar" style="color:${days!=null&&days<0?'#c83232':'#1d4ed8'}"></i> <b>Demand due — ${custInr(billOutstanding)}</b> <span style="color:var(--slate);font-size:13px">${esc(schedules.join(', ')||lastInv.document_no||'')}${lastInv.due_date?' · due '+fmtDate(lastInv.due_date):''}</span></div>
+      <div><i class="fa-solid fa-file-invoice-dollar" style="color:${days!=null&&days<0?'#c83232':'#1d4ed8'}"></i> <b>Amount due now — ${custInr(billOutstanding)}</b> <span style="color:var(--slate);font-size:13px">${esc(schedules.join(', ')||lastInv.document_no||'')}${lastInv.due_date?' · due '+fmtDate(lastInv.due_date):''}</span></div>
       ${dueText?`<span class="tag ${days!=null&&days<0?'t-red':'t-blue'}">${esc(dueText)}</span>`:''}
     </div>`;
   }
 
+  const gate=await custReconGate(unit.id);
+  /* Named for the customer, not the accounts team. "Property value", "Demand due" and "Remaining"
+     read as three versions of one number; these say what each one is, and the small line under
+     Balance to pay ties the row together: Total flat cost = Amount paid + Balance to pay, and the
+     balance already includes what is due now. */
   const kpis=[
-    ['Property value',custInr(propertyValue),snap?'as recorded with us':'agreement value'],
-    ['Paid to date',custInr(totalReceivedFinal),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
-    ['Demand due',custInr(billOutstanding),billOutstanding>0?(lastInv?esc(lastInv.document_no||''):'against raised invoices'):'nothing currently due',billOutstanding>0?'#e08600':'#16855a'],
-    ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':'against full agreement value')]
+    ['Total flat cost',custInr(propertyValue),'incl. GST and all charges'],
+    ['Amount paid',custInr(totalReceivedFinal),paidPct+'% of total cost'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
+    ['Amount due now',custInr(billOutstanding),billOutstanding>0?'billed to you, not yet paid':'nothing to pay right now',billOutstanding>0?'#e08600':'#16855a'],
+    ['Balance to pay',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':
+      (billOutstanding>0?'incl. '+custInr(billOutstanding)+' due now; rest billed as work progresses':'billed as construction progresses'))]
   ];
+  // Every figure here derives from the same imported rows, so if the unit does not reconcile there is
+  // no subset of them that is safe to keep showing.
+  if(!gate.ok) kpis.forEach(k=>{k[1]='—';k[2]='being updated';k[3]=undefined;});
 
   const entries=[];
   invoices.forEach(inv=>{
@@ -16088,13 +21638,32 @@ async function custTabOverview(data,unit){
     const osScheds2=osItems.filter(o=>o.document_no===inv.document_no&&o.schedule).map(o=>o.schedule);
     entries.push({date:inv.document_date,type:'Demand',desc:[...new Set(osScheds2)].join(', ')||inv.document_no,amount:total});
   });
-  receiptRows.forEach(r=>{entries.push({date:r.receipt_date,type:'Receipt',desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),amount:-Number(r.total_amount||0)});});
+  // Same rule as the Ledger: credit only what was applied to a demand this list shows, or money with
+  // no allocation at all. Otherwise this preview would show receipts the full ledger omits.
+  const ovLiveDocs=new Set(invoices.map(i=>i.document_no));
+  receiptRows.forEach(r=>{
+    const ri=r.receipt_items||[];
+    const amt=ri.length
+      ? ri.reduce((s,x)=>s+(x.against_demand_no==null||ovLiveDocs.has(x.against_demand_no)?Number(x.amount||0):0),0)
+      : Number(r.total_amount||0);
+    if(amt) entries.push({date:r.receipt_date,type:'Receipt',desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),amount:-amt});
+  });
+  // PTC (transfer/refund) - see the fuller note in custTabLedger. Included here too so this preview
+  // cannot omit an entry the full Ledger shows for the same unit.
+  const [{data:ovPtcOut},{data:ovPtcIn}]=await Promise.all([
+    sb.schema('cust').from('ptc_transfers').select('document_date,amount,narration').eq('source_unit_id',unit.id).eq('is_reversed',false).is('deleted_at',null),
+    sb.schema('cust').from('ptc_transfers').select('document_date,amount,narration').eq('transferee_unit_id',unit.id).eq('is_reversed',false).is('deleted_at',null)
+  ]);
+  (ovPtcOut||[]).forEach(p=>entries.push({date:p.document_date,type:'PTC',desc:p.narration||'Transfer / refund',amount:Number(p.amount||0)}));
+  (ovPtcIn||[]).forEach(p=>entries.push({date:p.document_date,type:'PTC',desc:p.narration||'Transfer in',amount:-Number(p.amount||0)}));
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-  let bal=0;
-  const withBalance=entries.map(e=>{bal+=e.amount;return Object.assign({},e,{balance:bal});});
-  const recent=withBalance.slice(-5).reverse();
-  const recentRows=recent.map(e=>[fmtDate(e.date),e.type==='Demand'?'<span class="tag t-amber">Demand</span>':'<span class="tag t-green">Receipt</span>',
-    esc(e.desc||'—'),e.type==='Demand'?custInr(e.amount):'—',e.type==='Receipt'?custInr(-e.amount):'—',custInr(e.balance)]);
+  // No running balance: the KPIs above are Farvision's position, and this list's own tally would be
+  // a second answer to the same question. It showed -51,62,707 on one unit whose Demand due, taken
+  // from Farvision, was nothing of the sort.
+  const recent=entries.slice(-5).reverse();
+  const typeTag={Demand:'<span class="tag t-amber">Demand</span>',Receipt:'<span class="tag t-green">Receipt</span>',PTC:'<span class="tag t-blue">Transfer</span>'};
+  const recentRows=recent.map(e=>[fmtDate(e.date),typeTag[e.type]||esc(e.type),
+    esc(e.desc||'—'),e.amount>0?custInr(e.amount):'—',e.amount<0?custInr(-e.amount):'—']);
 
   // Until a real Invoice/Receipt Register import exists for this project, the cost sheet from
   // Sales Details is the only per-charge breakdown available - shown as its own section rather
@@ -16102,11 +21671,15 @@ async function custTabOverview(data,unit){
   const costSheetRows=costItems.map(i=>[esc(i.component),custInr(Number(i.amount||0)+Number(i.tax_amount||0)),
     custInr(i.bill_amount||0),custInr(i.received_amount||0),
     Number(i.balance_amount||0)>0?'<b style="color:#e08600">'+custInr(i.balance_amount)+'</b>':custInr(i.balance_amount||0)]);
-  const costSheetSection=costItems.length?
-    '<div class="sec-title" style="margin:22px 0 8px">Charges &amp; payments</div>'+
-    mTable(['Charge','Amount (incl. tax)','Billed','Received','Balance'],costSheetRows):'';
+  // The per-charge breakdown is the Cost Sheet tab's whole job; repeating it here made the Statement
+  // scroll past its own summary into a second copy of another page.
+  const costSheetSection='';
 
-  window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived:totalReceivedFinal,billOutstanding,remaining,paidPct,c};
+  // Only arm the printer when the figures are safe to show. custPrintStatement already refuses
+  // without these, so an unreconciled unit cannot be printed even if the button is reached some
+  // other way - a PDF is the one copy that outlives the page and its notice.
+  if(gate.ok){ window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived:totalReceivedFinal,billOutstanding,remaining,paidPct,c}; }
+  else { window._custStatementUnit=null; window._custStatementSnap=null; }
   const unitCostItem=costItems.find(i=>/unit cost/i.test(i.component||''));
   const basicAmt=Number(unitCostItem?.amount||0);
   const sba=Number(unit.super_built_up_area_sqft||0);
@@ -16141,16 +21714,24 @@ async function custTabOverview(data,unit){
       '</div>'+
     '</div>'
     :'<div class="card card-pad empty">Profile not yet available — this updates after our next records sync.</div>';
-  return dueBanner+mKpis(kpis)+
-    myUnitSection+
+  // The due banner is a call to pay a specific amount - it must not survive a failed reconciliation.
+  /* Everything money-related goes together when the unit does not reconcile. Masking the KPIs alone
+     left the transaction table showing a running balance, the cost sheet showing billed/received per
+     component, and - worst - the Print button still building its PDF from the unmasked figures, which
+     carries them out of the portal entirely. The unit details and profile stay: they are contractual,
+     not a payment position. */
+  const moneySections=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
-    '<a href="javascript:void(0)" onclick="navTo(\'customer/1\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
-    (recentRows.length?mTable(['Date','Type','Details','Debit','Credit','Balance'],recentRows):
+    '<a href="javascript:void(0)" onclick="navTo(\'customer/3\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
+    (recentRows.length?mTable(['Date','Type','Details','Debit','Credit'],recentRows):
       '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>')+
     costSheetSection+
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
-    '</div>'+
+    '</div>';
+  return (gate.ok?dueBanner:CUST_FIGURES_NOTICE)+mKpis(kpis)+
+    myUnitSection+
+    (gate.ok?moneySections:'')+
     profileSection;
 }
 // Opens a print-friendly statement in a new tab, reusing the wfPrintCase pattern (open the tab
@@ -16174,10 +21755,10 @@ window.custPrintStatement=function(){
     '<h1>Statement of Account — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · '+esc((snap.c&&snap.c.contact_name)||'')+' · as on '+fmtDate(new Date())+'</h2>'+
     '<div class="kpis">'+
-      '<div class="kpi"><div class="lbl">Property value</div><div class="val">'+custInr(snap.propertyValue)+'</div></div>'+
-      '<div class="kpi"><div class="lbl">Paid to date</div><div class="val">'+custInr(snap.totalReceived)+'</div></div>'+
-      '<div class="kpi"><div class="lbl">Demand due</div><div class="val">'+custInr(snap.billOutstanding)+'</div></div>'+
-      '<div class="kpi"><div class="lbl">Remaining</div><div class="val">'+custInr(snap.remaining)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Total flat cost</div><div class="val">'+custInr(snap.propertyValue)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Amount paid</div><div class="val">'+custInr(snap.totalReceived)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Amount due now</div><div class="val">'+custInr(snap.billOutstanding)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Balance to pay</div><div class="val">'+custInr(snap.remaining)+'</div></div>'+
     '</div>'+
     (tableHtml||'<p>No transactions recorded yet.</p>')+
     '</body></html>';
@@ -16186,18 +21767,16 @@ window.custPrintStatement=function(){
   setTimeout(function(){ try{w.focus();w.print();}catch(_e){} },350);
 };
 async function custTabLedger(unit){
-  const [{data:rcptRows},{data:revRows},{data:csiRows},{data:invRows}]=await Promise.all([
-    sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
+  const [{data:rcptRows},{data:revRows},{data:csiRows},{data:invRows},{data:ptcOutRows},{data:ptcInRows}]=await Promise.all([
+    sb.schema('cust').from('money_receipts').select('*,receipt_items(against_demand_no,amount)').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('receipt_reversals').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_reversal_date'),
     sb.schema('cust').from('cost_sheet_items').select('component,bill_amount').eq('unit_id',unit.id).eq('is_current',true),
-    sb.schema('cust').from('invoices').select('id,document_no,document_date,invoice_type,due_date,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date')
+    sb.schema('cust').from('invoices').select('id,document_no,document_date,invoice_type,due_date,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
+    sb.schema('cust').from('ptc_transfers').select('*').eq('source_unit_id',unit.id).eq('is_reversed',false).is('deleted_at',null),
+    sb.schema('cust').from('ptc_transfers').select('*').eq('transferee_unit_id',unit.id).eq('is_reversed',false).is('deleted_at',null)
   ]);
   const receipts=rcptRows||[], reversals=revRows||[], costItems=csiRows||[], invoices=invRows||[];
-  const totalBilled=costItems.reduce((s,i)=>s+Number(i.bill_amount||0),0);
-  const grossReceipts=receipts.reduce((s,r)=>s+Number(r.total_amount||0),0);
-  const grossReversals=reversals.reduce((s,rv)=>s+Number(rv.reversal_amount||0),0);
-  const netReceived=grossReceipts-grossReversals;
-  const balance=totalBilled-netReceived;
+  const ptcOut=ptcOutRows||[], ptcIn=ptcInRows||[];
   const entries=[];
   invoices.forEach(inv=>{
     // Farvision's real Applicant Ledger shows one row per (Document No x Schedule) -
@@ -16217,8 +21796,20 @@ async function custTabLedger(unit){
       if(amt>0) entries.push({date:inv.document_date,type:'INV',ref:inv.document_no,iid:inv.id,desc:s,debit:amt,credit:0});
     });
   });
+  /* Credit only the part of a receipt that was applied to a demand this ledger actually shows.
+     Farvision's own Customer Ledger for 2D/BLOCK A2 totals 6,173,042 in credits; crediting whole
+     receipts gave 6,730,255, over by exactly the 557,213 paid against her cancelled demand
+     OHINV/0015524-25, which Farvision leaves out. Summing the receipt_items allocated to live
+     demands gives 5,963,042 - Farvision's figure once its 210,000 PTC transfer is set aside.
+     Money with no allocation at all is genuine on-account payment and is credited. */
+  const liveDocs=new Set(invoices.map(i=>i.document_no));
   receipts.forEach(r=>{
-    entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,rid:r.id,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:'')+(r.drawn_on?' · '+r.drawn_on:''),debit:0,credit:Number(r.total_amount||0)});
+    const items=r.receipt_items||[];
+    const credit=items.length
+      ? items.reduce((s,ri)=>s+(ri.against_demand_no==null||liveDocs.has(ri.against_demand_no)?Number(ri.amount||0):0),0)
+      : Number(r.total_amount||0);
+    if(!credit) return;
+    entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,rid:r.id,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:'')+(r.drawn_on?' · '+r.drawn_on:''),debit:0,credit:credit});
   });
   // Group reversals by reversal_no — one ledger row per cheque bounce, not per revenue-head line
   const revByNo={};
@@ -16230,14 +21821,19 @@ async function custTabLedger(unit){
   Object.values(revByNo).forEach(rv=>{
     entries.push({date:rv.date,type:'CQRV',ref:rv.ref,desc:'Cheque return'+(rv.instrument?' · '+rv.instrument:''),debit:rv.total,credit:0});
   });
+  /* PTC (Payment To Customer) - Farvision's transfer/refund document, the fourth type on its own
+     Customer Ledger and the one report of the seven that arrives filed under the SOURCE booking
+     rather than the unit the money actually affects. A transfer debits this unit when it is the
+     source (money leaving) and credits it when it is the transferee (money arriving) - a refund is
+     just the same debit with no transferee, so no separate handling is needed here. */
+  ptcOut.forEach(p=>{
+    entries.push({date:p.document_date,type:'PTC',ref:p.document_no,desc:p.narration||'Transfer / refund',debit:Number(p.amount||0),credit:0});
+  });
+  ptcIn.forEach(p=>{
+    entries.push({date:p.document_date,type:'PTC',ref:p.document_no,desc:p.narration||'Transfer in',debit:0,credit:Number(p.amount||0)});
+  });
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-  let runBal=0;
-  function balCell(b){
-    if(b>0)return '<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#e08600">'+custInr(b)+'</b><span class="tag t-amber" style="padding:1px 8px;font-size:10px">Due</span></span>';
-    if(b<0)return '<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#16855a">'+custInr(Math.abs(b))+'</b><span class="tag t-green" style="padding:1px 8px;font-size:10px">Adv</span></span>';
-    return '<span style="white-space:nowrap;color:#16855a;font-weight:600">0.00</span>';
-  }
-  const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
+  const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>',PTC:'<span class="tag t-blue">Transfer</span>'};
   const seenInvoice={};
   const pick=(kind,id)=>'<input type="checkbox" class="rcpt-pick" data-kind="'+kind+'" value="'+id+'" onchange="custDocPickChanged()">';
   const refCell=e=>{
@@ -16250,17 +21846,31 @@ async function custTabLedger(unit){
     }
     return esc(e.ref||'—');
   };
+  /* Running balance over the rows listed, exactly as Farvision's own Applicant Ledger prints it -
+     each demand adds, each receipt subtracts, and the closing figure is where the account stands on
+     this list. What is NOT rebuilt here is the old "Total billed / Net received / Balance" summary,
+     which mixed cost_sheet totals with our receipt sums and so answered a different question from
+     the Statement's Farvision-sourced Demand due. */
+  let runBal=0;
+  const balCell=b=>b>0
+    ?'<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#e08600">'+custInr(b)+'</b><span class="tag t-amber" style="padding:1px 8px;font-size:10px">Due</span></span>'
+    :b<0
+    ?'<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#16855a">'+custInr(Math.abs(b))+'</b><span class="tag t-green" style="padding:1px 8px;font-size:10px">Adv</span></span>'
+    :'<span style="white-space:nowrap;color:#16855a;font-weight:600">0.00</span>';
   const rows=entries.map(e=>{runBal+=e.debit-e.credit;
     return [fmtDate(e.date),tags[e.type]||esc(e.type),refCell(e),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',balCell(runBal)];});
   if(!receipts.length&&!costItems.length) return '<div class="card card-pad empty">No financial records yet for this unit.</div>';
   const totalDebit=entries.reduce((s,e)=>s+e.debit,0), totalCredit=entries.reduce((s,e)=>s+e.credit,0);
   const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>','<b>'+balCell(runBal)+'</b>']:null;
-  window._custLedgerUnit=unit; window._custLedgerEntries=entries; window._custLedgerTotalBilled=totalBilled; window._custLedgerNetReceived=netReceived;
-  const balLabel=balance>0?'<b style="color:#e08600">'+custInr(balance)+' due</b>':balance<0?'<b style="color:#16855a">'+custInr(Math.abs(balance))+' advance</b>':'<b style="color:#16855a">0.00</b>';
+  /* The whole ledger is withheld when the unit does not reconcile, not just its balance column: a
+     statement missing some of its receipts still reads as a complete account and under-credits the
+     customer. Checked before the print globals are set, so custPrintLedger - which refuses without
+     them - cannot produce a PDF of figures the page itself is withholding. */
+  const gate=await custReconGate(unit.id);
+  if(!gate.ok){ window._custLedgerUnit=null; window._custLedgerEntries=null; return CUST_FIGURES_NOTICE; }
+  window._custLedgerUnit=unit; window._custLedgerEntries=entries;
   const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:12px;font-size:13.5px">'+
-    '<span><b>Total billed:</b> '+custInr(totalBilled)+'</span>'+
-    '<span><b>Net received:</b> '+custInr(netReceived)+'</span>'+
-    '<span><b>Balance:</b> '+balLabel+'</span>'+
+    '<span style="color:var(--slate)">Every demand raised and payment received on this unit, in date order.</span>'+
     '<span style="color:var(--slate)">'+entries.length+' entries</span>'+
     '<span style="margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'+
     '<button class="btn" id="custBulkDlBtn" style="display:none" onclick="custDownloadSelectedDocs()"><i class="fa-solid fa-file-arrow-down"></i> <span id="custBulkDlLabel">Download</span></button>'+
@@ -16268,19 +21878,19 @@ async function custTabLedger(unit){
   return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows);
 }
 window.custPrintLedger=function(){
-  const unit=window._custLedgerUnit,entries=window._custLedgerEntries,totalBilled=window._custLedgerTotalBilled||0,netReceived=window._custLedgerNetReceived||0;
+  const unit=window._custLedgerUnit,entries=window._custLedgerEntries;
   if(!unit){toast('Nothing to print yet','err');return;}
   const w=window.open('','_blank');
   if(!w){toast('Please allow popups to print','err');return;}
+  // D / C suffixes rather than the screen's Due/Adv tags - this is the format Farvision's own
+  // Applicant Ledger printout uses, and a printed copy is the one people put side by side with it.
   let runBal=0;
-  const balance=totalBilled-netReceived;
-  function balText(b){return b>0?custInr(b)+' D':b<0?custInr(Math.abs(b))+' C':'0';}
+  const balText=b=>b>0?custInr(b)+' D':b<0?custInr(Math.abs(b))+' C':'0.00';
   const totalDebit=(entries||[]).reduce((s,e)=>s+(e.debit||0),0);
   const totalCredit=(entries||[]).reduce((s,e)=>s+(e.credit||0),0);
   const trs=(entries||[]).map(e=>{runBal+=e.debit-e.credit;
     return '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.type)+'</td><td>'+esc(e.ref||'—')+'</td><td>'+esc(e.desc||'—')+'</td><td style="text-align:right">'+(e.debit?custInr(e.debit):'')+'</td><td style="text-align:right">'+(e.credit?custInr(e.credit):'')+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr>';
   }).join('');
-  const balLabel=balance>0?custInr(balance)+' due':balance<0?custInr(Math.abs(balance))+' advance':'0.00';
   const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Applicant Ledger — '+esc(unit.unit_code)+'</title><style>'+
     'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
     'h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#64748b;font-weight:500;margin:0 0 16px}'+
@@ -16293,7 +21903,7 @@ window.custPrintLedger=function(){
     '</style></head><body>'+
     '<h1>Applicant Ledger — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · Generated on '+fmtDate(new Date())+'</h2>'+
-    '<div class="summary"><b>Total billed:</b> '+custInr(totalBilled)+' &nbsp;|&nbsp; <b>Net received:</b> '+custInr(netReceived)+' &nbsp;|&nbsp; <b>Balance:</b> '+balLabel+'</div>'+
+    '<div class="summary">Every demand raised and payment received on this unit, in date order.</div>'+
     '<table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>'+
     '<tbody>'+trs+'</tbody>'+
     '<tfoot><tr><td colspan="4">Periodic Ledger Total</td><td style="text-align:right">'+custInr(totalDebit)+'</td><td style="text-align:right">'+custInr(totalCredit)+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr></tfoot>'+
@@ -16391,7 +22001,7 @@ function custReceiptDocHtml(r,items,unit,contact,forPrint){
       '<tfoot><tr><td colspan="7">Total Receipt Amount</td><td class="amt">'+custInr(total)+'</td></tr>'+
       '<tr><td colspan="8" class="rcpt-words">Amount in Words : '+esc(custAmountInWords(total))+'</td></tr></tfoot>'+
       '</table></div>'+
-      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'<span>Authorized Signatory</span></div>'+
+      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'</div>'+
     '</div>';
 }
 // Styles are shared by the on-screen modal and the printable window.
@@ -16422,7 +22032,6 @@ const CUST_RECEIPT_CSS=
   '.rcpt-terms p{margin:0 0 6px;text-align:justify}'+
   '.rcpt-terms ul{margin:0 0 6px;padding-left:16px}.rcpt-terms li{margin-bottom:3px}'+
   '.rcpt-sign{margin-top:26px;text-align:right;font-weight:700;font-size:12px}'+
-  '.rcpt-sign span{display:block;margin-top:26px;font-weight:600;color:#475569}'+
   // On a phone the two header columns cannot sit side by side without clipping the right one.
   '@media(max-width:640px){.rcpt-grid{grid-template-columns:1fr;gap:12px}'+
   '.rcpt-f span{min-width:82px;flex:0 0 82px}.rcpt-title{font-size:13px}}';
@@ -16439,10 +22048,23 @@ window.custViewReceipt=async function(id){
   ]);
   if(re||!rcpt){openModal('<div class="modal-head"><h3>Money Receipt</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
     '<div class="modal-body"><div class="card card-pad empty">This receipt could not be loaded.</div></div>','lg');return;}
-  window._custReceiptCache={r:rcpt,items:its||[],unit:unit,contact:(cts&&cts[0])||null};
+  /* receipt_items.invoice_date exists but nothing fills it - the Receipt Register export gives the
+     invoice NUMBER a receipt was applied to, not its date, so the column printed "—" on every line.
+     The date is the document_date of that invoice, which we already hold: all 14,403 allocation
+     lines match an invoice we have, so this resolves for every line rather than most of them. */
+  const items=its||[];
+  const docNos=[...new Set(items.map(i=>i.against_demand_no).filter(Boolean))];
+  const dateByDoc={};
+  if(docNos.length){
+    const {data:invs}=await sb.schema('cust').from('invoices')
+      .select('document_no,document_date').eq('unit_id',unit.id).eq('is_current',true).in('document_no',docNos);
+    (invs||[]).forEach(v=>{dateByDoc[v.document_no]=v.document_date;});
+  }
+  const lines=items.map(i=>Object.assign({},i,{invoice_date:i.invoice_date||dateByDoc[i.against_demand_no]||null}));
+  window._custReceiptCache={r:rcpt,items:lines,unit:unit,contact:(cts&&cts[0])||null};
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-receipt"></i> Money Receipt</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
     '<div class="modal-body"><style>'+CUST_RECEIPT_CSS+'</style>'+
-      custReceiptDocHtml(rcpt,its||[],unit,(cts&&cts[0])||null,false)+'</div>'+
+      custReceiptDocHtml(rcpt,lines,unit,(cts&&cts[0])||null,false)+'</div>'+
     '<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>'+
     '<button class="btn btn-primary" onclick="custPrintReceipt()"><i class="fa-solid fa-download"></i> Download PDF</button></div>','lg');
 };
@@ -16508,8 +22130,20 @@ window.custDownloadSelectedDocs=async function(){
       sb.schema('cust').from('money_receipts').select('*').in('id',rcptIds).eq('unit_id',unit.id).eq('is_current',true),
       sb.schema('cust').from('receipt_items').select('*').in('receipt_id',rcptIds).order('sort_order')
     ]);
+    // Same invoice-date fill as the single-receipt view - a bulk download must not print "—" where
+    // opening the receipt on screen shows a date.
+    const bulkDocNos=[...new Set((rItems||[]).map(i=>i.against_demand_no).filter(Boolean))];
+    const bulkDateByDoc={};
+    if(bulkDocNos.length){
+      const {data:bInvs}=await sb.schema('cust').from('invoices')
+        .select('document_no,document_date').eq('unit_id',unit.id).eq('is_current',true).in('document_no',bulkDocNos);
+      (bInvs||[]).forEach(v=>{bulkDateByDoc[v.document_no]=v.document_date;});
+    }
     const byReceipt={};
-    (rItems||[]).forEach(it=>{(byReceipt[it.receipt_id]=byReceipt[it.receipt_id]||[]).push(it);});
+    (rItems||[]).forEach(it=>{
+      const line=Object.assign({},it,{invoice_date:it.invoice_date||bulkDateByDoc[it.against_demand_no]||null});
+      (byReceipt[it.receipt_id]=byReceipt[it.receipt_id]||[]).push(line);
+    });
     const rank={}; rcptIds.forEach((id,i)=>{rank[id]=i;});
     (rcpts||[]).slice().sort((a,b)=>rank[a.id]-rank[b.id]).forEach(r=>{
       pages.push(custReceiptDocHtml(r,byReceipt[r.id]||[],unit,contact,true));
@@ -16701,7 +22335,7 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
       '<tbody>'+(rowsHtml||'<tr><td colspan="6" style="text-align:center;color:#64748b">No charge lines recorded.</td></tr>')+'</tbody>'+
       '<tfoot>'+foot+'</tfoot></table></div>'+
       tail+
-      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'<span>Authorized Signatory</span></div>'+
+      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'</div>'+
       '<div class="rcpt-addr" style="margin-top:14px">PAN NO : '+esc(CUST_RECEIPT_ISSUER.pan)+' &nbsp;·&nbsp; GSTIN : '+esc(CUST_RECEIPT_ISSUER.gstin)+'</div>'+
       '<div class="rcpt-addr">This is a system generated document. No signature required.</div>'+
     '</div>';
@@ -16839,26 +22473,58 @@ window.custPrintInvoice=function(){
   setTimeout(function(){try{w.focus();w.print();}catch(_e){}},350);
 };
 
+/* Cost sheet rows with a Rate, as the CRM cost sheet prints them.
+   RATE is per sq ft of super built-up area - how the CRM's 5150 / 350 / 100 come out of
+   48,92,500 / 3,32,500 / 95,000 on 950 sq ft. Farvision's files carry no per-charge rate, so it is
+   worked out from the amount:
+     * Unit Cost, Floor Escalation (FLC) and PLC always have one - the CRM prices all three per
+       sq ft - even when a discount leaves paise (FLC 2,49,536 on 860 sq ft = 290.16);
+     * any other charge shows one only when it divides by the area into whole rupees - legal 25,
+       generator 35, club infrastructure 65... A lump sum (association formation 15,000, cheque
+       dishonoured 2,000) does not, and shows "-";
+     * parking never does: it is priced per slot, and 4,00,000 on a 1,000 sq ft flat would
+       otherwise read as a rate of 400.
+   A table shows the Rate column only if at least one of its rows has a rate.
+   DREAM ANANTA's CRM sheet prints Unit Cost, Floor Escalation (FLC), PLC and Vehicle Parking as ONE
+   line, "Unit Price (Add On Premium Specification Pack)" (D/8G: 58,20,000 on 950 sq ft = 6,126.32).
+   Every other project keeps Farvision's own line-by-line split. */
+const CUST_ANANTA_UNIT_PRICE=/^unit cost$|flc charges|plc charge|vehicle parking/i;
+function custCostRows(unit,list,isUnitGroup){
+  const sbu=Number(unit.super_built_up_area_sqft||0);
+  const sum=(l,k)=>l.reduce((s,i)=>s+Number(i[k]||0),0);
+  const itemRate=i=>{const amt=Number(i.amount||0);
+    if(!sbu||!amt||/parking/i.test(i.component||'')) return null;
+    const r=amt/sbu;
+    if(/^unit cost$|flc charge|plc charge/i.test(String(i.component||'').trim())) return r;
+    return Math.abs(r-Math.round(r))<1e-9?Math.round(r):null;};
+  let rows;
+  const isAnanta=/^dream ananta$/i.test(String((unit.projects&&unit.projects.name)||'').trim());
+  if(isUnitGroup&&isAnanta){
+    const price=list.filter(i=>CUST_ANANTA_UNIT_PRICE.test(i.component||''));
+    const rest=list.filter(i=>!CUST_ANANTA_UNIT_PRICE.test(i.component||''));
+    rows=(price.length?[{label:'Unit Price (Add On Premium Specification Pack)',amount:sum(price,'amount'),tax:sum(price,'tax_amount'),
+        rate:sbu?sum(price,'amount')/sbu:null}]:[])
+      .concat(rest.map(i=>({label:i.component,amount:Number(i.amount||0),tax:Number(i.tax_amount||0),rate:itemRate(i)})));
+  }else rows=list.map(i=>({label:i.component,amount:Number(i.amount||0),tax:Number(i.tax_amount||0),rate:itemRate(i)}));
+  return {showRate:rows.some(r=>r.rate!=null),rows,amount:sum(list,'amount'),tax:sum(list,'tax_amount')};
+}
+function custFmtRate(r){return r==null?'—':Number(r).toLocaleString('en-IN',{maximumFractionDigits:2});}
 async function custTabCostSheet(data,unit){
   const c=data.contactByUnit[unit.id];
-  const [{data:costItemRows},{data:invRows},{data:uploadedDocs},{data:rcptRows},{data:revRows}]=await Promise.all([
+  const [{data:costItemRows},{data:invRows},{data:uploadedDocs}]=await Promise.all([
     sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
     sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_type,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
-    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false}),
-    sb.schema('cust').from('money_receipts').select('total_amount').eq('unit_id',unit.id).eq('is_current',true),
-    sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true)
+    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').is('deleted_at',null).order('created_at',{ascending:false})
   ]);
   const items=costItemRows||[], invoices=invRows||[], uploaded=uploadedDocs||[];
-  const receipts=rcptRows||[], reversals=revRows||[];
   if(!items.length&&!uploaded.length)return '<div class="card card-pad empty">Your cost sheet hasn\'t been shared yet.</div>';
 
   let out='';
   if(items.length){
     // "Cost Summary" card - mirrors the Basic/Extra/Tax breakup and Due/Received/Balance/
-    // Future-dues figures a customer would see on Farvision's own Customer Ledger printout,
-    // built entirely from our own cost_sheet_items + money_receipts + receipt_reversals (no
-    // guessed basic/tax split on the actuals - only the static per-component agreement figures
-    // carry that split reliably).
+    // Future-dues figures a customer would see on Farvision's own Customer Ledger printout, taken
+    // from cost_sheet_items alone (no guessed basic/tax split on the actuals - only the static
+    // per-component agreement figures carry that split reliably).
     const unitCostItem=items.find(i=>/unit cost/i.test(i.component||''));
     const basicCost=Number(unitCostItem?.amount||0);
     // The standard, recurring per-unit charge types that make up every Dream project's cost
@@ -16871,12 +22537,14 @@ async function custTabCostSheet(data,unit){
     const totalTax=items.reduce((s,i)=>s+Number(i.tax_amount||0),0);
     const totalWithoutTax=basicCost+extraCharges+adhocCharges;
     const totalWithTax=totalWithoutTax+totalTax;
+    /* Every figure on this card is Farvision's own, per component, rather than our sums of
+       money_receipts and receipt_reversals. bill_amount - received_amount = balance_amount holds on
+       all 1,180 current rows, so this card now agrees with the Statement by construction instead of
+       offering a third answer to what the customer owes. */
     const totalBilled=items.reduce((s,i)=>s+Number(i.bill_amount||0),0);
     const onAccount=items.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
-    const grossReceipts=receipts.reduce((s,r)=>s+Number(r.total_amount||0),0);
-    const grossReversals=reversals.reduce((s,rv)=>s+Number(rv.reversal_amount||0),0);
-    const netReceived=grossReceipts-grossReversals;
-    const balance=totalBilled-netReceived;
+    const netReceived=items.reduce((s,i)=>s+Number(i.received_amount||0),0);
+    const balance=items.reduce((s,i)=>s+Number(i.balance_amount||0),0);
     const futureDue=Math.max(0,totalWithTax-netReceived);
     const duePct=totalWithTax?Math.round(totalBilled/totalWithTax*1000)/10:0;
     const recdPct=totalWithTax?Math.round(netReceived/totalWithTax*1000)/10:0;
@@ -16884,7 +22552,7 @@ async function custTabCostSheet(data,unit){
     const stat=(label,val,sub,color)=>'<div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">'+label+'</div>'+
       '<div style="font-size:19px;font-weight:700;margin-top:3px'+(color?';color:'+color:'')+'">'+val+'</div>'+
       (sub?'<div style="font-size:11.5px;color:var(--slate);margin-top:1px">'+sub+'</div>':'')+'</div>';
-    out+='<div class="card card-pad" style="margin-bottom:18px;background:#f8fafc">'+
+    const costSummary='<div class="card card-pad" style="margin-bottom:18px;background:#f8fafc">'+
       '<div class="sec-title" style="margin:0 0 14px">Cost Summary</div>'+
       '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:16px;margin-bottom:16px">'+
         stat('Due as on '+fmtDate(new Date()),custInr(totalBilled),duePct+'% of agreement value')+
@@ -16900,6 +22568,11 @@ async function custTabCostSheet(data,unit){
         '<span><b>Total (excl. tax):</b> '+custInr(totalWithoutTax)+'</span>'+
         '<span style="margin-left:auto"><b>Total (incl. tax):</b> '+custInr(totalWithTax)+'</span>'+
       '</div></div>';
+    /* Same gate as the Statement. Without this a withheld customer could read their Due/Received/
+       Balance here instead - the Cost Breakup below stays either way, being the agreement's own
+       cost estimate rather than a payment position. */
+    const gate=await custReconGate(unit.id);
+    out+=gate.ok?costSummary:CUST_FIGURES_NOTICE;
 
     // Cost Breakup below shows the agreement's cost estimate itself (Amount/GST/Gross per
     // charge, grouped like Farvision's own "Estimated Offer Price" sheet into Unit Charges vs
@@ -16909,20 +22582,21 @@ async function custTabCostSheet(data,unit){
     const unitGroupItems=items.filter(i=>UNIT_GROUP.test(i.component||''));
     const edcGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&STANDARD_COMPONENTS.test(i.component||''));
     const adhocGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&!STANDARD_COMPONENTS.test(i.component||''));
-    const breakupRow=i=>{const amt=Number(i.amount||0),tax=Number(i.tax_amount||0),gstPct=amt?Math.round(tax/amt*1000)/10:0;
-      return [esc(i.component),custInr(amt),gstPct+'%',custInr(tax),custInr(amt+tax)];};
-    const breakupTotal=(list,label)=>{const amt=list.reduce((s,i)=>s+Number(i.amount||0),0),tax=list.reduce((s,i)=>s+Number(i.tax_amount||0),0);
-      return ['<b>'+label+'</b>','<b>'+custInr(amt)+'</b>','','<b>'+custInr(tax)+'</b>','<b>'+custInr(amt+tax)+'</b>'];};
+    // One table per group; the Rate column appears only where some row has a rate (custCostRows).
+    const breakupTable=(list,isUnitGroup,totalLabel)=>{
+      const g=custCostRows(unit,list,isUnitGroup), rc=g.showRate;
+      const cells=(r)=>{const gstPct=r.amount?Math.round(r.tax/r.amount*1000)/10:0;
+        return [esc(r.label)].concat(rc?[custFmtRate(r.rate)]:[]).concat([custInr(r.amount),gstPct+'%',custInr(r.tax),custInr(r.amount+r.tax)]);};
+      return mTable(['Particulars'].concat(rc?['Rate']:[]).concat(['Amount','GST','GST Amount','Gross Amount']),
+        g.rows.map(cells).concat([['<b>'+totalLabel+'</b>'].concat(rc?['']:[]).concat(['<b>'+custInr(g.amount)+'</b>','','<b>'+custInr(g.tax)+'</b>','<b>'+custInr(g.amount+g.tax)+'</b>'])]));
+    };
     const groupTitle=t=>'<div style="font-size:12px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;margin:16px 0 6px">'+t+'</div>';
     window._custCostSheetUnit=unit; window._custCostSheetContact=c; window._custCostSheetItems=items;
     out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div class="sec-title" style="margin:0">Cost Breakup</div>'+
       '<button class="btn" onclick="custPrintCostSheet()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>';
-    if(unitGroupItems.length) out+=groupTitle('Unit Charges')+
-      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],unitGroupItems.map(breakupRow).concat([breakupTotal(unitGroupItems,'Total Flat Value')]));
-    if(edcGroupItems.length) out+=groupTitle('Extra Development Charges (EDC)')+
-      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],edcGroupItems.map(breakupRow).concat([breakupTotal(edcGroupItems,'Total EDC')]));
-    if(adhocGroupItems.length) out+=groupTitle('Other Charges (Adhoc)')+
-      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],adhocGroupItems.map(breakupRow).concat([breakupTotal(adhocGroupItems,'Total Adhoc')]));
+    if(unitGroupItems.length) out+=groupTitle('Unit Charges')+breakupTable(unitGroupItems,true,'Total Flat Value');
+    if(edcGroupItems.length) out+=groupTitle('Extra Development Charges (EDC)')+breakupTable(edcGroupItems,false,'Total EDC');
+    if(adhocGroupItems.length) out+=groupTitle('Other Charges (Adhoc)')+breakupTable(adhocGroupItems,false,'Total Adhoc');
     out+='<div style="margin-top:8px;padding-top:10px;border-top:2px solid #334155;text-align:right;font-size:14.5px"><b>Grand Total: '+custInr(totalWithTax)+'</b></div>';
   }
   if(invoices.length){
@@ -16954,12 +22628,15 @@ window.custPrintCostSheet=function(){
   const unitGroupItems=items.filter(i=>UNIT_GROUP.test(i.component||''));
   const edcGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&STANDARD_COMPONENTS.test(i.component||''));
   const adhocGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&!STANDARD_COMPONENTS.test(i.component||''));
-  const rowHtml=i=>{const amt=Number(i.amount||0),tax=Number(i.tax_amount||0),gstPct=amt?Math.round(tax/amt*1000)/10:0;
-    return '<tr><td>'+esc(i.component)+'</td><td>'+custInr(amt)+'</td><td>'+gstPct+'%</td><td>'+custInr(tax)+'</td><td>'+custInr(amt+tax)+'</td></tr>';};
-  const totalHtml=(list,label)=>{const amt=list.reduce((s,i)=>s+Number(i.amount||0),0),tax=list.reduce((s,i)=>s+Number(i.tax_amount||0),0);
-    return '<tr style="font-weight:700"><td>'+label+'</td><td>'+custInr(amt)+'</td><td></td><td>'+custInr(tax)+'</td><td>'+custInr(amt+tax)+'</td></tr>';};
-  const groupTable=(label,list,totalLabel)=>list.length?'<h3>'+label+'</h3><table><thead><tr><th>Particulars</th><th>Amount</th><th>GST</th><th>GST Amount</th><th>Gross Amount</th></tr></thead><tbody>'+
-    list.map(rowHtml).join('')+totalHtml(list,totalLabel)+'</tbody></table>':'';
+  // Same rows and Rate column as the screen (custCostRows).
+  const groupTable=(label,list,totalLabel,isUnitGroup)=>{
+    if(!list.length) return '';
+    const g=custCostRows(unit,list,isUnitGroup), rc=g.showRate;
+    return '<h3>'+label+'</h3><table><thead><tr><th>Particulars</th>'+(rc?'<th>Rate</th>':'')+'<th>Amount</th><th>GST</th><th>GST Amount</th><th>Gross Amount</th></tr></thead><tbody>'+
+      g.rows.map(r=>{const p=r.amount?Math.round(r.tax/r.amount*1000)/10:0;
+        return '<tr><td>'+esc(r.label)+'</td>'+(rc?'<td>'+custFmtRate(r.rate)+'</td>':'')+'<td>'+custInr(r.amount)+'</td><td>'+p+'%</td><td>'+custInr(r.tax)+'</td><td>'+custInr(r.amount+r.tax)+'</td></tr>';}).join('')+
+      '<tr style="font-weight:700"><td>'+totalLabel+'</td>'+(rc?'<td></td>':'')+'<td>'+custInr(g.amount)+'</td><td></td><td>'+custInr(g.tax)+'</td><td>'+custInr(g.amount+g.tax)+'</td></tr></tbody></table>';
+  };
   const grandTotal=items.reduce((s,i)=>s+Number(i.amount||0)+Number(i.tax_amount||0),0);
   const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cost Sheet — '+esc(unit.unit_code)+'</title><style>'+
     'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
@@ -16971,9 +22648,9 @@ window.custPrintCostSheet=function(){
     '</style></head><body>'+
     '<h1>Cost Sheet — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · '+esc((c&&c.contact_name)||'')+(unit.booking_no?' · Booking No '+esc(unit.booking_no):'')+' · as on '+fmtDate(new Date())+'</h2>'+
-    groupTable('Unit Charges',unitGroupItems,'Total Flat Value')+
-    groupTable('Extra Development Charges (EDC)',edcGroupItems,'Total EDC')+
-    groupTable('Other Charges (Adhoc)',adhocGroupItems,'Total Adhoc')+
+    groupTable('Unit Charges',unitGroupItems,'Total Flat Value',true)+
+    groupTable('Extra Development Charges (EDC)',edcGroupItems,'Total EDC',false)+
+    groupTable('Other Charges (Adhoc)',adhocGroupItems,'Total Adhoc',false)+
     '<div class="grand">Grand Total: '+custInr(grandTotal)+'</div>'+
     '</body></html>';
   try{ w.document.open(); w.document.write(html); w.document.close(); }
@@ -16994,32 +22671,219 @@ async function custMediaGrid(list){
       return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
     <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
 }
-async function custTabProgress(unit){
-  const floorNo=custDeriveFloor(unit.unit_code);
-  const [{data:pPhotos},{data:tPhotos},{data:fPhotos},{data:uPhotos}]=await Promise.all([
-    sb.schema('cust').from('project_photos').select('*').eq('project_id',unit.project_id).order('taken_on',{ascending:false}),
-    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
-    floorNo?sb.schema('cust').from('floor_photos').select('*').eq('project_id',unit.project_id).eq('floor_no',floorNo).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
-    unit.floor_casting_completed_at?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false}):Promise.resolve({data:[]})
-  ]);
-  let out='<div class="sec-title" style="margin:0 0 10px">Project progress</div>'+
-    ((pPhotos&&pPhotos.length)?await custMediaGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
-  out+='<div class="sec-title" style="margin:20px 0 10px">Your tower'+(unit.tower?' — '+esc(unit.tower):'')+'</div>';
-  out+=(tPhotos&&tPhotos.length)?await custMediaGrid(tPhotos):'<div class="card card-pad empty">No tower-wide updates yet — check back soon.</div>';
-  out+='<div class="sec-title" style="margin:20px 0 10px">Your floor'+(floorNo?' — Floor '+esc(floorNo):'')+'</div>';
-  out+=(fPhotos&&fPhotos.length)?await custMediaGrid(fPhotos):'<div class="card card-pad empty">No floor-wide updates yet — check back soon.</div>';
-  out+='<div class="sec-title" style="margin:20px 0 10px">Your flat</div>';
-  if(!unit.floor_casting_completed_at){
-    out+='<div class="card card-pad empty"><i class="fa-solid fa-clock"></i><div style="margin-top:6px">Photos of your flat’s construction will appear here once the floor slab for your unit has been cast.</div></div>';
-  }else{
-    out+=(uPhotos&&uPhotos.length)?await custMediaGrid(uPhotos):'<div class="card card-pad empty">No flat-specific photos yet — check back soon, these are added roughly every two weeks once casting is complete.</div>';
+/* CONSTRUCTION PROGRESS - what the customer sees: their BLOCK and their FLAT, nothing else.
+
+   Project-wide photos are not shown here any more, by request: a customer's question is "how is
+   my building doing, how is my flat doing", and a gallery of the whole site answered neither. The
+   floor level went with the Photos & Videos redesign (it was guessed from digits in a unit code
+   and never held a photo).
+
+   Layout: a summary card (where, how many, when it was last updated), then the block's updates
+   grouped by the date the photos were taken - so it reads as a progress diary, newest first - then
+   the flat, filterable by room (Common area / Bathroom / Kitchen) because "is my kitchen done yet"
+   is the question people actually ask. Any photo opens full screen with next / previous, arrow
+   keys and swipe; a video plays in place.
+
+   Every read filters deleted_at itself. RLS already hides removed rows from a real customer, but
+   staff (and Staff preview) pass the staff policy, which returns deleted rows too - so preview used
+   to show photos an admin had removed and the customer could not see. */
+const CUST_PG_AREAS=[['common','Common area','fa-couch'],['bathroom','Bathroom','fa-bath'],['kitchen','Kitchen','fa-kitchen-set']];
+let CUST_PG={items:[],flat:[],room:'all'};
+function custPgCss(){return `<style>
+  .cpg{display:flex;flex-direction:column;gap:18px;position:relative;z-index:1}
+  .cpg-hero{border-radius:16px;padding:20px 22px;color:#fff;position:relative;overflow:hidden;
+    background:linear-gradient(135deg,#0f1e3d 0%,#1d4ed8 60%,#3b82f6 100%);box-shadow:0 10px 30px rgba(29,78,216,.22)}
+  .cpg-hero::after{content:"";position:absolute;right:-60px;top:-60px;width:220px;height:220px;border-radius:50%;
+    background:radial-gradient(circle,rgba(255,255,255,.18),transparent 70%);pointer-events:none}
+  .cpg-hero h2{font-size:20px;font-weight:700;margin:0 0 4px;letter-spacing:-.2px}
+  .cpg-hero .sub{font-size:13.5px;opacity:.85}
+  .cpg-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+  .cpg-chip{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);
+    padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:600}
+  .cpg-sec{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow)}
+  .cpg-sh{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+  .cpg-ic{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+    background:var(--brand-50);color:var(--brand);font-size:17px;flex:none}
+  .cpg-st{font-size:16px;font-weight:700;color:var(--ink);line-height:1.2}
+  .cpg-ss{font-size:12.5px;color:var(--slate);margin-top:2px}
+  .cpg-count{margin-left:auto;font-size:12px;font-weight:700;color:var(--brand);background:var(--brand-50);
+    padding:4px 11px;border-radius:999px;white-space:nowrap}
+  .cpg-day{display:flex;align-items:center;gap:10px;margin:18px 0 10px;font-size:12.5px;font-weight:700;color:var(--ink)}
+  .cpg-body>.cpg-day:first-child{margin-top:2px}
+  .cpg-day .dot{width:9px;height:9px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 4px var(--brand-50);flex:none}
+  .cpg-day .n{font-weight:500;color:var(--slate)}
+  .cpg-day::after{content:"";flex:1;height:1px;background:var(--line-2)}
+  .cpg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+  .cpg-tile{position:relative;aspect-ratio:4/3;border-radius:12px;overflow:hidden;cursor:pointer;background:#e9eef6;
+    border:0;padding:0;display:block;width:100%;box-shadow:0 1px 3px rgba(16,24,40,.08);transition:transform .15s,box-shadow .15s}
+  .cpg-tile:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(16,24,40,.16)}
+  .cpg-tile:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+  .cpg-tile img,.cpg-tile video{width:100%;height:100%;object-fit:cover;display:block;transition:transform .35s}
+  .cpg-tile:hover img,.cpg-tile:hover video{transform:scale(1.05)}
+  .cpg-ph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:22px}
+  .cpg-play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .cpg-play span{width:46px;height:46px;border-radius:50%;background:rgba(15,23,42,.62);color:#fff;display:flex;
+    align-items:center;justify-content:center;font-size:16px;padding-left:3px}
+  .cpg-tag{position:absolute;left:8px;bottom:8px;font-size:11px;font-weight:600;color:#fff;background:rgba(15,23,42,.62);
+    padding:3px 9px;border-radius:999px}
+  .cpg-rooms{display:flex;gap:6px;flex-wrap:wrap;background:#f1f5f9;padding:4px;border-radius:12px;margin-bottom:6px;width:fit-content;max-width:100%}
+  .cpg-room{display:inline-flex;align-items:center;gap:7px;border:0;background:transparent;border-radius:9px;padding:8px 14px;
+    font:600 13px Inter,system-ui,sans-serif;color:var(--slate);cursor:pointer;transition:.12s}
+  .cpg-room .n{font-size:11px;background:#e2e8f0;color:var(--slate);border-radius:999px;padding:1px 7px}
+  .cpg-room:hover{color:var(--ink)}
+  .cpg-room.on{background:#fff;color:var(--brand);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+  .cpg-room.on .n{background:var(--brand-50);color:var(--brand)}
+  .cpg-empty{text-align:center;padding:28px 16px;border:1.5px dashed var(--line);border-radius:14px;background:#fafbfd}
+  .cpg-empty i{font-size:26px;color:#cbd5e1;margin-bottom:10px;display:block}
+  .cpg-empty b{display:block;font-size:14px;color:var(--ink);margin-bottom:4px}
+  .cpg-empty span{font-size:12.5px;color:var(--slate)}
+  /* full-screen viewer */
+  .cpg-lb{position:fixed;inset:0;z-index:9500;background:rgba(6,10,20,.98);display:flex;flex-direction:column}
+  .cpg-lbbar{display:flex;align-items:center;gap:12px;padding:14px 18px;color:#e5e7eb;font-size:13.5px}
+  .cpg-lbbar .t{font-weight:600;color:#fff}
+  .cpg-lbbar .c{margin-left:auto;opacity:.75;white-space:nowrap}
+  .cpg-lbx{border:0;background:rgba(255,255,255,.12);color:#fff;width:38px;height:38px;border-radius:10px;cursor:pointer;font-size:18px;flex:none}
+  .cpg-lbx:hover{background:rgba(255,255,255,.24)}
+  .cpg-lbstage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;min-height:0;padding:0 64px 24px}
+  .cpg-lbstage img,.cpg-lbstage video{max-width:100%;max-height:100%;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5);background:#000}
+  .cpg-lbnav{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:0;cursor:pointer;
+    background:rgba(255,255,255,.14);color:#fff;font-size:17px}
+  .cpg-lbnav:hover{background:rgba(255,255,255,.28)}
+  .cpg-lbnav.prev{left:10px}.cpg-lbnav.next{right:10px}
+  @media(max-width:760px){
+    .cpg-hero{padding:18px}.cpg-hero h2{font-size:18px}
+    .cpg-sec{padding:14px}
+    .cpg-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .cpg-tile{border-radius:10px}
+    .cpg-rooms{width:100%}.cpg-room{flex:1;justify-content:center;padding:9px 6px;font-size:12.5px}
+    .cpg-count{margin-left:0}
+    .cpg-lbstage{padding:0 0 84px}
+    .cpg-lbnav{top:auto;bottom:22px;transform:none}
+    .cpg-lbnav.prev{left:calc(50% - 58px)}.cpg-lbnav.next{right:calc(50% - 58px)}
   }
+</style>`;}
+
+// One tile. `i` indexes CUST_PG.items, which is what the viewer walks through.
+function custPgTile(it,i,showRoom){
+  const media=it.url
+    ?(it.isVideo?'<video src="'+it.url+'#t=0.5" muted playsinline preload="metadata"></video>':'<img src="'+it.url+'" alt="" loading="lazy">')
+    :'<div class="cpg-ph"><i class="fa-solid '+(it.isVideo?'fa-film':'fa-image')+'"></i></div>';
+  return '<button type="button" class="cpg-tile" onclick="custPgOpen('+i+')" aria-label="Open '+esc(it.label)+' '+(it.isVideo?'video':'photo')+' of '+esc(fmtDate(it.date))+'">'
+    +media+(it.isVideo?'<div class="cpg-play"><span><i class="fa-solid fa-play"></i></span></div>':'')
+    +(showRoom&&it.room?'<span class="cpg-tag">'+esc(it.room)+'</span>':'')+'</button>';
+}
+// Newest day first, one heading per day - reads as a progress diary.
+function custPgByDay(idxs,showRoom){
+  const days={},order=[];
+  idxs.forEach(i=>{const d=CUST_PG.items[i].date||'';if(!(d in days)){days[d]=[];order.push(d);}days[d].push(i);});
+  return '<div class="cpg-body">'+order.map(d=>{const l=days[d],v=l.filter(i=>CUST_PG.items[i].isVideo).length,ph=l.length-v;
+    const n=[ph?ph+' photo'+(ph===1?'':'s'):'',v?v+' video'+(v===1?'':'s'):''].filter(Boolean).join(' · ');
+    return '<div class="cpg-day"><span class="dot"></span>'+esc(d?fmtDate(d):'Undated')+' <span class="n">'+n+'</span></div>'
+      +'<div class="cpg-grid">'+l.map(i=>custPgTile(CUST_PG.items[i],i,showRoom)).join('')+'</div>';}).join('')+'</div>';
+}
+function custPgEmpty(icon,title,text){return '<div class="cpg-empty"><i class="fa-solid '+icon+'"></i><b>'+esc(title)+'</b><span>'+esc(text)+'</span></div>';}
+function custPgFlatIdx(){
+  return CUST_PG.room==='all'?CUST_PG.flat:CUST_PG.flat.filter(i=>CUST_PG.items[i].roomKey===CUST_PG.room);
+}
+function custPgFlatBody(){
+  const idxs=custPgFlatIdx();
+  return idxs.length?custPgByDay(idxs,CUST_PG.room==='all'):custPgEmpty('fa-camera','Nothing here yet','Photos of this room will appear as soon as they are taken.');
+}
+window.custPgRoom=function(k){
+  CUST_PG.room=k;
+  document.querySelectorAll('.cpg-room').forEach(b=>b.classList.toggle('on',b.getAttribute('data-k')===k));
+  const host=$('cpgFlatBody'); if(host) host.innerHTML=custPgFlatBody();
+};
+
+async function custTabProgress(unit){
+  const [{data:tPhotos},{data:uPhotos}]=await Promise.all([
+    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
+    sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false})
+  ]);
+  const block=tPhotos||[], flat=uPhotos||[];
+  const roomOf=k=>(CUST_PG_AREAS.find(a=>a[0]===k)||CUST_PG_AREAS[0]);
+  const raw=block.map(p=>({p,label:'Block',roomKey:null,room:null}))
+    .concat(flat.map(p=>{const r=roomOf(p.area||'common');return {p,label:r[1],roomKey:r[0],room:r[1]};}));
+  const urls=await Promise.all(raw.map(r=>s3SignedUrl(r.p.storage_path).catch(()=>null)));
+  CUST_PG.items=raw.map((r,i)=>({url:urls[i],isVideo:(r.p.file_type||'').indexOf('video')===0,
+    date:r.p.taken_on,label:r.label,roomKey:r.roomKey,room:r.room,where:r.roomKey?'Your flat':'Your block'}));
+  CUST_PG.flat=CUST_PG.items.map((it,i)=>it.roomKey?i:-1).filter(i=>i>=0);
+  CUST_PG.room='all';
+  const blockIdx=CUST_PG.items.map((it,i)=>it.roomKey?-1:i).filter(i=>i>=0);
+
+  const total=CUST_PG.items.length, vids=CUST_PG.items.filter(i=>i.isVideo).length, pics=total-vids;
+  const latest=CUST_PG.items.reduce((m,i)=>i.date&&(!m||i.date>m)?i.date:m,null);
+  const projName=(unit.projects&&unit.projects.name)||'';
+  const where=[unit.tower,unit.unit_code?'Flat '+unit.unit_code:''].filter(Boolean).join(' · ');
+  const upd=n=>n+' update'+(n===1?'':'s');
+
+  let out=custPgCss()+'<div class="cpg">';
+  out+='<div class="cpg-hero"><h2>Construction progress</h2><div class="sub">'+esc(projName)+(where?' — '+esc(where):'')+'</div>'
+    +'<div class="cpg-chips">'
+      +'<span class="cpg-chip"><i class="fa-solid fa-clock-rotate-left"></i>'+(latest?'Last update '+esc(fmtDate(latest)):'Updates coming soon')+'</span>'
+      +(total?'<span class="cpg-chip"><i class="fa-solid fa-images"></i>'+[pics?pics+' photo'+(pics===1?'':'s'):'',vids?vids+' video'+(vids===1?'':'s'):''].filter(Boolean).join(' · ')+'</span>':'')
+    +'</div></div>';
+
+  // A section with nothing in it is not shown at all - no "No photos yet" boxes. Only when there is
+  // nothing anywhere does the customer get one short line, so the tab is never blank.
+  if(blockIdx.length) out+='<div class="cpg-sec"><div class="cpg-sh"><div class="cpg-ic"><i class="fa-solid fa-building"></i></div>'
+    +'<div><div class="cpg-st">Your block'+(unit.tower?' — '+esc(unit.tower):'')+'</div><div class="cpg-ss">How your building is coming along</div></div>'
+    +'<span class="cpg-count">'+upd(blockIdx.length)+'</span></div>'
+    +custPgByDay(blockIdx,false)+'</div>';
+
+  if(CUST_PG.flat.length){
+    const counts={}; CUST_PG.flat.forEach(i=>{const k=CUST_PG.items[i].roomKey;counts[k]=(counts[k]||0)+1;});
+    const rooms=CUST_PG_AREAS.filter(a=>counts[a[0]]);
+    out+='<div class="cpg-sec"><div class="cpg-sh"><div class="cpg-ic"><i class="fa-solid fa-door-open"></i></div>'
+      +'<div><div class="cpg-st">Your flat'+(unit.unit_code?' — '+esc(unit.unit_code):'')+'</div><div class="cpg-ss">Room by room, as it is built</div></div>'
+      +'<span class="cpg-count">'+upd(CUST_PG.flat.length)+'</span></div>';
+    // Only rooms that have something get a button, and the row only appears when there is a choice.
+    if(rooms.length>1) out+='<div class="cpg-rooms"><button type="button" class="cpg-room on" data-k="all" onclick="custPgRoom(\'all\')">All <span class="n">'+CUST_PG.flat.length+'</span></button>'
+      +rooms.map(a=>'<button type="button" class="cpg-room" data-k="'+a[0]+'" onclick="custPgRoom(\''+a[0]+'\')"><i class="fa-solid '+a[2]+'"></i>'+esc(a[1])+' <span class="n">'+counts[a[0]]+'</span></button>').join('')+'</div>';
+    out+='<div id="cpgFlatBody">'+custPgFlatBody()+'</div></div>';
+  }
+
+  if(!total) out+='<div class="cpg-sec">'+custPgEmpty('fa-helmet-safety','Photos are on their way','Our site team will share photos of your block and your flat here as construction progresses.')+'</div>';
+  out+='</div>';
   return out;
 }
+
+/* Full-screen viewer: next / previous, arrow keys, swipe, Esc. It walks only the section the tile
+   came from (the block, or the flat under the current room filter), so "next" never jumps from the
+   kitchen to the building's facade. */
+window.custPgOpen=function(start){
+  const it0=CUST_PG.items[start]; if(!it0) return;
+  const list=it0.roomKey?custPgFlatIdx():CUST_PG.items.map((it,i)=>it.roomKey?-1:i).filter(i=>i>=0);
+  let pos=Math.max(0,list.indexOf(start));
+  const box=document.createElement('div'); box.className='cpg-lb';
+  const go=function(d){ if(list.length<2) return; pos=(pos+d+list.length)%list.length; draw(); };
+  const onKey=function(e){ if(e.key==='Escape') shut(); else if(e.key==='ArrowRight') go(1); else if(e.key==='ArrowLeft') go(-1); };
+  function shut(){ document.removeEventListener('keydown',onKey); if(box.parentNode) box.parentNode.removeChild(box); document.body.style.overflow=''; }
+  function draw(){
+    const it=CUST_PG.items[list[pos]];
+    box.innerHTML='<div class="cpg-lbbar"><span class="t">'+esc(it.where)+(it.room?' · '+esc(it.room):'')+'</span><span>'+esc(fmtDate(it.date))+'</span>'
+      +'<span class="c">'+(pos+1)+' / '+list.length+'</span><button class="cpg-lbx" title="Close">&times;</button></div>'
+      +'<div class="cpg-lbstage">'
+        +(it.url?(it.isVideo?'<video src="'+it.url+'" controls autoplay playsinline></video>':'<img src="'+it.url+'" alt="">'):'<div style="color:#94a3b8">This file could not be loaded.</div>')
+        +(list.length>1?'<button class="cpg-lbnav prev" title="Previous"><i class="fa-solid fa-chevron-left"></i></button><button class="cpg-lbnav next" title="Next"><i class="fa-solid fa-chevron-right"></i></button>':'')
+      +'</div>';
+    box.querySelector('.cpg-lbx').onclick=shut;
+    const pv=box.querySelector('.prev'), nx=box.querySelector('.next');
+    if(pv) pv.onclick=function(e){e.stopPropagation();go(-1);};
+    if(nx) nx.onclick=function(e){e.stopPropagation();go(1);};
+  }
+  box.onclick=function(e){ if(e.target===box||e.target.classList.contains('cpg-lbstage')) shut(); };
+  let sx=null;
+  box.addEventListener('touchstart',function(e){ sx=e.touches[0].clientX; },{passive:true});
+  box.addEventListener('touchend',function(e){ if(sx==null) return; const dx=e.changedTouches[0].clientX-sx; sx=null; if(Math.abs(dx)>50) go(dx<0?1:-1); });
+  document.addEventListener('keydown',onKey);
+  document.body.style.overflow='hidden';
+  draw(); document.body.appendChild(box);
+};
 async function custTabDocuments(unit){
   const [{data:pDocs},{data:cDocs}]=await Promise.all([
-    sb.schema('cust').from('project_documents').select('*').eq('project_id',unit.project_id),
-    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id)
+    sb.schema('cust').from('project_documents').select('*').eq('project_id',unit.project_id).is('deleted_at',null),
+    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).is('deleted_at',null)
   ]);
   const docRow=d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Document'),fmtDate(d.created_at),
     `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'download').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`];
@@ -17032,7 +22896,7 @@ async function custTabDocuments(unit){
 async function custTabInspection(unit){
   const [{data:checklist},{data:updates}]=await Promise.all([
     sb.schema('cust').from('inspection_checklists').select('*').eq('unit_id',unit.id).maybeSingle(),
-    sb.schema('cust').from('inspection_updates').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false})
+    sb.schema('cust').from('inspection_updates').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false})
   ]);
   const checklistSection='<div class="sec-title" style="margin:0 0 10px">Inspection checklist</div>'+
     (checklist?
@@ -17043,7 +22907,7 @@ async function custTabInspection(unit){
   return checklistSection+updatesSection;
 }
 async function custTabVideos(){
-  const {data}=await sb.schema('cust').from('process_videos').select('*').order('category').order('created_at',{ascending:false});
+  const {data}=await sb.schema('cust').from('process_videos').select('*').is('deleted_at',null).order('category').order('created_at',{ascending:false});
   const byCat={};(data||[]).forEach(v=>{(byCat[v.category]=byCat[v.category]||[]).push(v);});
   return Object.keys(CPA_VIDEO_CATEGORIES).map(cat=>{
     const vids=byCat[cat]||[];
@@ -17276,14 +23140,176 @@ window.custSetSubmeterPaymentRefSave=async function(requestId){
   if(error){toast('Could not save: '+error.message,'err');return;}
   closeModal();toast('Payment reference saved','ok');route();
 };
-const CUST_REFERRAL_STATUSES={submitted:'Submitted',contacted:'Contacted',interested:'Interested',visited_site:'Visited Site',booked:'Booked',not_interested:'Not Interested'};
+/* Each stage gets its own colour, and the same colour everywhere it appears - the pill, the
+   progress rail, the stat tile. A referral's whole story is "how far along is it", so the stages
+   run cool-to-warm-to-green and a reader can tell where one has reached without reading a word.
+   Not-interested is deliberately the only grey: it is the one outcome that has stopped moving. */
+const CUST_REFERRAL_STAGES=[
+  {k:'submitted',     label:'Submitted',      ink:'#3730a3', bg:'#eef2ff', dot:'#6366f1', icon:'fa-paper-plane'},
+  {k:'contacted',     label:'Contacted',      ink:'#075985', bg:'#e0f2fe', dot:'#0284c7', icon:'fa-phone-volume'},
+  {k:'interested',    label:'Interested',     ink:'#92400e', bg:'#fef3c7', dot:'#d97706', icon:'fa-star'},
+  {k:'visited_site',  label:'Visited Site',   ink:'#6b21a8', bg:'#f5f3ff', dot:'#9333ea', icon:'fa-location-dot'},
+  {k:'booked',        label:'Booked',         ink:'#166534', bg:'#dcfce7', dot:'#16a34a', icon:'fa-circle-check'},
+  {k:'not_interested',label:'Not Interested', ink:'#475569', bg:'#f1f5f9', dot:'#94a3b8', icon:'fa-circle-minus'}
+];
+const CUST_REFERRAL_STATUSES=CUST_REFERRAL_STAGES.reduce(function(a,s){a[s.k]=s.label;return a;},{});
+function custRefStage(k){ return CUST_REFERRAL_STAGES.filter(function(s){return s.k===k;})[0]||CUST_REFERRAL_STAGES[0]; }
+
+/* The styles live here rather than in nexus.css because they are this one tab's and nothing else
+   reads them. Injected once; the id is the guard. */
+function custReferralCss(){
+  if(document.getElementById('custRefCss')) return;
+  const s=document.createElement('style'); s.id='custRefCss';
+  s.textContent=`
+  .cref-hero{position:relative;overflow:hidden;border-radius:16px;padding:30px 32px;margin-bottom:18px;
+    background:linear-gradient(125deg,#0f1e3d 0%,#16294f 38%,#1d4ed8 100%);color:#fff;
+    box-shadow:0 14px 34px -14px rgba(15,30,61,.55)}
+  /* A slow sheen travelling across the banner. It is the only moving thing on the page, which is
+     what makes it read as "look here" rather than as decoration competing with the content. */
+  .cref-hero::after{content:'';position:absolute;top:-60%;left:-30%;width:40%;height:220%;
+    background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.16) 50%,rgba(255,255,255,0) 100%);
+    transform:rotate(18deg);animation:crefSheen 5.5s ease-in-out infinite}
+  @keyframes crefSheen{0%{left:-35%}55%{left:115%}100%{left:115%}}
+  .cref-hero-in{position:relative;z-index:1;display:flex;gap:26px;align-items:center;flex-wrap:wrap}
+  .cref-hero-txt{flex:1 1 320px;min-width:0}
+  .cref-eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;
+    letter-spacing:.14em;text-transform:uppercase;color:#f0c964;margin-bottom:11px}
+  .cref-hero h2{font-size:26px;line-height:1.2;font-weight:800;margin:0 0 9px;letter-spacing:-.02em;text-wrap:balance}
+  .cref-hero p{font-size:14.5px;line-height:1.6;color:#c9d6f0;margin:0;max-width:52ch}
+  .cref-cta{display:inline-flex;align-items:center;gap:10px;border:0;cursor:pointer;
+    font-family:inherit;font-size:15px;font-weight:800;letter-spacing:.01em;color:#25324a;
+    padding:15px 28px;border-radius:999px;white-space:nowrap;
+    background:linear-gradient(135deg,#ffd97a 0%,#f0c964 45%,#dCA93a 100%);
+    box-shadow:0 8px 22px -6px rgba(240,201,100,.65);transition:transform .16s,box-shadow .16s}
+  .cref-cta:hover{transform:translateY(-2px);box-shadow:0 12px 28px -6px rgba(240,201,100,.8)}
+  .cref-cta:active{transform:translateY(0)}
+  .cref-cta i{font-size:14px}
+  /* The pulse stops the moment there is anything in the list - it is there to get a first referral
+     out of somebody, not to keep nagging a customer who has already used the thing. */
+  .cref-cta.pulse{animation:crefPulse 2.4s ease-out infinite}
+  @keyframes crefPulse{
+    0%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 0 rgba(240,201,100,.55)}
+    70%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 16px rgba(240,201,100,0)}
+    100%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 0 rgba(240,201,100,0)}}
+
+  .cref-stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+  .cref-stat{flex:1 1 150px;background:var(--card);border:1px solid var(--line);border-radius:13px;
+    padding:15px 17px;position:relative;overflow:hidden}
+  .cref-stat::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--cref-c,#1d4ed8)}
+  .cref-stat b{display:block;font-size:27px;font-weight:800;line-height:1.1;color:var(--cref-c,#1d4ed8);
+    font-variant-numeric:tabular-nums}
+  .cref-stat span{display:block;font-size:12px;color:var(--slate);margin-top:3px;font-weight:600}
+
+  .cref-steps{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px}
+  .cref-step{flex:1 1 200px;display:flex;gap:12px;align-items:flex-start;background:var(--card);
+    border:1px solid var(--line);border-radius:13px;padding:15px 16px}
+  .cref-step-n{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;
+    background:var(--brand-50);color:var(--brand);font-weight:800;font-size:13px}
+  .cref-step b{display:block;font-size:13.5px;margin-bottom:2px}
+  .cref-step span{font-size:12.5px;color:var(--slate);line-height:1.5}
+
+  .cref-list{display:flex;flex-direction:column;gap:11px}
+  .cref-card{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--cref-c,#6366f1);
+    border-radius:13px;padding:15px 17px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;
+    transition:box-shadow .16s,transform .16s}
+  .cref-card:hover{box-shadow:var(--shadow-lg);transform:translateY(-1px)}
+  .cref-who{flex:1 1 220px;min-width:0}
+  .cref-name{font-size:15.5px;font-weight:700;letter-spacing:-.01em}
+  .cref-meta{font-size:12.5px;color:var(--slate);margin-top:3px;display:flex;gap:14px;flex-wrap:wrap}
+  .cref-meta i{width:12px;text-align:center;margin-right:4px;opacity:.75}
+  .cref-pill{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;
+    padding:7px 14px;border-radius:999px;white-space:nowrap}
+  .cref-pill i{font-size:11px}
+  /* The whole journey on every row, so a customer can see there are stages beyond the one they are
+     at - a referral sitting at "Contacted" reads as progress rather than as nothing happening. */
+  .cref-rail{display:flex;gap:5px;align-items:center;flex:1 1 150px;min-width:120px}
+  .cref-seg{height:5px;border-radius:99px;flex:1;background:var(--line)}
+  .cref-seg.on{background:var(--cref-c,#6366f1)}
+  .cref-when{font-size:12px;color:var(--slate);white-space:nowrap}
+
+  .cref-empty{text-align:center;padding:38px 24px;background:var(--card);border:1px dashed var(--line-2);
+    border-radius:14px}
+  .cref-empty i{font-size:30px;color:var(--brand);opacity:.35}
+  .cref-empty b{display:block;margin-top:12px;font-size:16px}
+  .cref-empty span{display:block;margin-top:5px;font-size:13px;color:var(--slate)}
+  @media(max-width:620px){
+    .cref-hero{padding:24px 20px}
+    .cref-hero h2{font-size:21px}
+    .cref-cta{width:100%;justify-content:center}
+  }
+  /* Somebody who has asked the operating system to stop animations gets a page that still works and
+     still looks like this - only the sheen and the pulse go. */
+  @media(prefers-reduced-motion:reduce){
+    .cref-hero::after{animation:none;display:none}
+    .cref-cta.pulse{animation:none}
+    .cref-card,.cref-cta{transition:none}
+  }`;
+  document.head.appendChild(s);
+}
+
 async function custTabReferrals(unit){
+  custReferralCss();
   const {data:referrals}=await sb.schema('cust').from('referrals').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
-  const rows=(referrals||[]).map(r=>[esc(r.prospect_name),esc(r.prospect_phone||'—'),esc(r.prospect_email||'—'),
-    `<select onchange="custReferralStatusChange(${r.id},this.value)">${Object.keys(CUST_REFERRAL_STATUSES).map(k=>`<option value="${k}" ${k===r.status?'selected':''}>${CUST_REFERRAL_STATUSES[k]}</option>`).join('')}</select>`,
-    fmtDate(r.created_at)]);
-  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Referrals</div><button class="btn btn-primary" onclick="custNewReferralModal()"><i class="fa-solid fa-plus"></i> Refer someone</button></div>`+
-    (rows.length?cpaTable(['Name','Phone','Email','Status','Referred on'],rows):'<div class="card card-pad empty">You haven’t referred anyone yet.</div>');
+  const list=referrals||[];
+  const stageIndex=function(k){ const i=CUST_REFERRAL_STAGES.findIndex(function(s){return s.k===k;}); return i<0?0:i; };
+  const booked=list.filter(function(r){return r.status==='booked';}).length;
+  const moving=list.filter(function(r){return ['contacted','interested','visited_site'].indexOf(r.status)!==-1;}).length;
+
+  const hero=`<div class="cref-hero"><div class="cref-hero-in">
+      <div class="cref-hero-txt">
+        <div class="cref-eyebrow"><i class="fa-solid fa-gift"></i> Refer &amp; earn</div>
+        <h2>Know someone looking for a home?</h2>
+        <p>Tell us who they are and our sales team takes it from there — you can watch every
+           referral move along right here, from first call to booking.</p>
+      </div>
+      <button class="cref-cta${list.length?'':' pulse'}" onclick="custNewReferralModal()">
+        <i class="fa-solid fa-user-plus"></i> Refer someone
+      </button>
+    </div></div>`;
+
+  /* The counts only appear once there is something to count. On an empty tab they would be three
+     zeroes, which says "this is not worth using" at exactly the moment it needs to say the
+     opposite. */
+  const stats=list.length?`<div class="cref-stats">
+      <div class="cref-stat" style="--cref-c:#1d4ed8"><b>${list.length}</b><span>Referred by you</span></div>
+      <div class="cref-stat" style="--cref-c:#d97706"><b>${moving}</b><span>Being followed up</span></div>
+      <div class="cref-stat" style="--cref-c:#16a34a"><b>${booked}</b><span>Booked</span></div>
+    </div>`:'';
+
+  const steps=`<div class="cref-steps">
+      <div class="cref-step"><div class="cref-step-n">1</div><div><b>You refer</b>
+        <span>Their name and a phone number is all we need.</span></div></div>
+      <div class="cref-step"><div class="cref-step-n">2</div><div><b>We reach out</b>
+        <span>Our sales team calls them and shows them around.</span></div></div>
+      <div class="cref-step"><div class="cref-step-n">3</div><div><b>You follow along</b>
+        <span>Every stage shows up on this page as it happens.</span></div></div>
+    </div>`;
+
+  const body=list.length
+    ? `<div class="cref-list">`+list.map(function(r){
+        const st=custRefStage(r.status), at=stageIndex(r.status);
+        // Not-interested fills nothing: the rail is about progress, and that outcome is not progress.
+        const done=(r.status==='not_interested')?0:at+1;
+        const rail=CUST_REFERRAL_STAGES.slice(0,5).map(function(_,i){
+          return '<div class="cref-seg'+(i<done?' on':'')+'"></div>'; }).join('');
+        const phone=r.prospect_phone?`<span><i class="fa-solid fa-phone"></i>${esc(r.prospect_phone)}</span>`:'';
+        const mail=r.prospect_email?`<span><i class="fa-solid fa-envelope"></i>${esc(r.prospect_email)}</span>`:'';
+        return `<div class="cref-card" style="--cref-c:${st.dot}">
+            <div class="cref-who">
+              <div class="cref-name">${esc(r.prospect_name)}</div>
+              <div class="cref-meta">${phone}${mail}${(phone||mail)?'':'<span>No contact details given</span>'}</div>
+            </div>
+            <div class="cref-rail">${rail}</div>
+            <span class="cref-pill" style="background:${st.bg};color:${st.ink}">
+              <i class="fa-solid ${st.icon}"></i>${esc(st.label)}</span>
+            <span class="cref-when">${esc(fmtDate(r.created_at))}</span>
+          </div>`;
+      }).join('')+`</div>`
+    : `<div class="cref-empty"><i class="fa-solid fa-user-group"></i>
+         <b>No referrals yet</b>
+         <span>Be the first — it takes about ten seconds.</span></div>`;
+
+  return hero+stats+steps+body;
 }
 window.custNewReferralModal=function(){
   openModal(`<div class="modal-head"><h3>Refer a prospect</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -17298,6 +23324,10 @@ window.custNewReferralSave=async function(){
   const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
   const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,created_by:state.email});
   if(error){toast('Could not submit: '+error.message,'err');return;}
+  // Set directly rather than re-fetched: custLoadData's cache would otherwise hand route() the same
+  // pre-submit CUST_DATA (same customerId, no force), and the sidebar's "Earn" badge would survive
+  // the very referral that should have removed it.
+  if(CUST_DATA)CUST_DATA.hasReferred=true;
   closeModal();toast('Referral submitted — thank you!','ok');route();
 };
 window.custReferralStatusChange=async function(id,status){
@@ -17428,10 +23458,15 @@ VIEWS.customer=async function(v,seg){
   const ti=mTab(seg,tabs.length);
   // The sidebar is rebuilt on every render (not just once at boot) so its active item tracks
   // whichever section is actually showing, including a same-page link like the Statement tab's
-  // "View full ledger" jumping straight to navTo('customer/1').
+  // "View full ledger" jumping straight to navTo('customer/3') (was already stale here at '1'
+  // before this comment was corrected - the literal itself is what actually runs, not this note).
   custSidebarTabs(ti);
   setCrumb(['Customer Portal',tabs[ti]]);
   const data=await custLoadData(state.customer&&state.customer.id);
+  // Rebuilt again now that CUST_DATA.hasReferred is known, so the Referrals "Earn" badge can appear
+  // (it stays off on the call above rather than risk flashing on for a customer who's already
+  // referred someone). A no-op redraw for every tab except Referrals.
+  custSidebarTabs(ti);
   // The impersonation banner stays - it's the only thing on screen telling a staff member WHO
   // they're previewing, and it's how they get back out. The plain "signed in as you" banner for a
   // customer's own real session said nothing they don't already know from the profile menu, so it's
@@ -17446,25 +23481,33 @@ VIEWS.customer=async function(v,seg){
   if(!CUST_SELECTED_UNIT||!data.units.some(u=>u.id===CUST_SELECTED_UNIT))CUST_SELECTED_UNIT=data.units[0].id;
   const unit=data.units.find(u=>u.id===CUST_SELECTED_UNIT);
   let body;
-  if(ti===0)body=await custTabOverview(data,unit);
-  else if(ti===1)body=await custTabLedger(unit);
-  else if(ti===2)body=await custTabCostSheet(data,unit);
-  else if(ti===3)body=await custTabProgress(unit);
-  else if(ti===4)body=await custTabInspection(unit);
-  else if(ti===5)body=await custTabDocuments(unit);
-  else if(ti===6)body=await custTabVideos();
-  else if(ti===7)body=await custTabSupport(unit);
-  else if(ti===8)body=await custTabAmenities(unit);
-  else if(ti===9)body=await custTabSubmeter(unit);
-  else if(ti===10)body=await custTabReferrals(unit);
-  else if(ti===11)body=await custTabMaintenance(unit);
+  if(ti===0)body='';
+  else if(ti===1)body=await custTabOverview(data,unit);
+  else if(ti===2)body=await custTabProgress(unit);
+  else if(ti===3)body=await custTabLedger(unit);
+  else if(ti===4)body=await custTabCostSheet(data,unit);
+  else if(ti===5)body=await custTabInspection(unit);
+  else if(ti===6)body=await custTabDocuments(unit);
+  else if(ti===7)body=await custTabVideos();
+  else if(ti===8)body=await custTabSupport(unit);
+  else if(ti===9)body=await custTabAmenities(unit);
+  else if(ti===10)body=await custTabSubmeter(unit);
+  else if(ti===11)body=await custTabReferrals(unit);
+  else if(ti===12)body=await custTabMaintenance(unit);
   else body=await custTabModificationRequests(unit);
-  v.innerHTML='<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
-    banner+
-    custUnitPicker(data.units,unit.id)+
-    '<div style="margin-top:14px">'+body+'</div></div>';
+  /* The landing page is the greeting over the project's hero photo and nothing else - no page head,
+     no unit picker, no body. Every other tab keeps the normal chrome, plus a faint backdrop of the
+     same project's render (CUST_PROJECT_TAB_BG) so it isn't flat once the hero is behind them. */
+  const tabBg=CUST_PROJECT_TAB_BG[(unit.projects&&unit.projects.name)||''];
+  v.innerHTML=ti===0
+    ? '<div class="cust-view-fade">'+banner+custLanding((state.customer&&state.customer.full_name)||'',unit)+'</div>'
+    : '<div class="cust-view-fade">'+(tabBg?'<div class="cust-tab-bg" style="background-image:url(\''+esc(tabBg)+'\')"></div>':'')+
+      mHead('fa-user-tie','#1d4ed8','Customer Portal')+
+      banner+
+      custUnitPicker(data.units,unit.id)+
+      '<div style="margin-top:14px">'+body+'</div></div>';
   // Animated count-up on KPI values (Statement tab only)
-  if(ti===0){requestAnimationFrame(function(){
+  if(ti===1){requestAnimationFrame(function(){
     v.querySelectorAll('.cust-view-fade .kpi .val').forEach(function(el){
       var raw=el.textContent.trim();
       var m=raw.match(/[\d,.]+/);
@@ -18876,7 +24919,14 @@ const TRC_MISMATCH = {
   in_followup_should_have_been_qualified: {
     label: 'In Follow Up that should have been Qualified', short: 'Should be Qualified',
     tag: 't-green', icon: 'fa-circle-up', colour: '#16a34a',
-    blurb: 'The CRM has this lead in follow-up, but the call already meets the qualification test. Move it on.' }
+    blurb: 'The CRM has this lead in follow-up, but the call already meets the qualification test. Move it on.' },
+  /* By requirement (2026-09-23): an Unclear call used to score status_match:null and vanish from every
+     total - neither a match nor a mismatch. It is now its own category, so a run full of unreviewable
+     calls shows up rather than quietly reading as a clean mismatch rate. See deriveStatusMatch. */
+  ai_status_unclear: {
+    label: 'AI could not assess the call', short: 'Unclear',
+    tag: 't-gray', icon: 'fa-circle-question', colour: '#64748b',
+    blurb: 'The conversation did not establish a clear outcome - flagged for review rather than silently excluded from the count.' }
 };
 const TRC_MISMATCH_KEYS = Object.keys(TRC_MISMATCH);
 
@@ -19148,6 +25198,13 @@ async function trcPrefetchHistories(leadIds){
          for itself on click. A failed chunk simply stays uncached. */
     }
   }
+  /* Added so trcLeads' cadence/callbackTat (see its own note) stop reading the range-limited rows the
+     moment each lead's real history lands - a soft repaint, same as trcEnrichVisiblePage/
+     trcBackfillLastJudgement already do on their own completion. Gated on the same generation check as
+     everything above: a newer prefetch (or a page/filter change) means this one's result is stale and
+     must not repaint over whatever now owns the screen. Only reached at all when todo was non-empty,
+     so this never fires on a page that was already fully cached. */
+  if(gen===TRC_PREFETCH_GEN)trcRender(false,true);
 }
 
 /* THE ONE PLACE A LEAD'S HISTORY IS FETCHED, for the click and for the prefetch alike.
@@ -19199,7 +25256,7 @@ function trcSortHistory(rows){
      that transition is visible - which resets TRC_F back to these same defaults and clears this same
      key, so a reload caught right after landing here restores THIS visit, not the one before it. */
 const TRC_F=(function(){
-  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
+  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',overdue:'all',cadence:'all',callbackTat:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
   try{
     const saved=JSON.parse(sessionStorage.getItem('trc_filters_state')||'null');
     if(saved&&typeof saved==='object')return Object.assign(fallback,saved);
@@ -19218,6 +25275,8 @@ function trcResetFilters(){
   const y=traYesterday();
   TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
   TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
+  TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
+  TRC_F.cadence='all';TRC_F.callbackTat='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_PAGE=0;
   TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -19280,6 +25339,25 @@ function trcDailyCell(date,kind,val,n,cls){
     +'<a href="javascript:void(0)" onclick="trcDailyDrill(\''+date+'\',\''+kind+'\',\''+esc(val)+'\')"'
     +(cls?' class="'+cls+'"':'')+' style="font-weight:600">'+shown+'</a></td>';
 }
+/* HISTORICAL, NOT DRILLABLE - unlike every other cell in this table, this number is not "of the
+   leads currently on screen, how many match this" (that's what trcCard's filters answer), it is
+   "how many calls were EVER judged a mismatch on this date, corrected or not" (2026-09-23). Nothing
+   in TRC_F/trcApply can reproduce that set - is_latest_assessed always narrows to a lead's current
+   state - so this renders as a plain number, never a link, rather than a click that would silently
+   show the wrong rows. */
+function trcDailyPlainCell(n){
+  const shown=n||0;
+  return '<td style="text-align:center'+(shown?'':';color:var(--slate)')+'">'+shown+'</td>';
+}
+/* Reconciliation, point 2: not just the raw Transcribed/Failed counts already in the row (both were
+   already columns in acc.daily_qa_summary, just never surfaced here as a rate) - the PROPORTION of the
+   day's calls each one accounts for, so a day of 4 failed out of 6 calls reads as the crisis it is
+   instead of looking the same as 4 failed out of 400. */
+function trcDailyRateCell(n,total){
+  if(!total)return '<td style="text-align:center;color:var(--slate)">—</td>';
+  const pct=Math.round((Number(n||0)/Number(total))*1000)/10;
+  return '<td style="text-align:center;font-variant-numeric:tabular-nums">'+pct+'%</td>';
+}
 function trcRenderDaily(){
   const el=$('trcDaily');if(!el)return;
   if(!TRC_DAILY_OPEN){el.innerHTML='';return;}
@@ -19290,12 +25368,19 @@ function trcRenderDaily(){
       +'<td style="white-space:nowrap;font-weight:600">'+esc(trcWall(r.date,true)||r.date)+'</td>'
       +trcDailyCell(r.date,'all','all',r.total_leads)
       +trcDailyCell(r.date,'all','all',r.total_followups)
+      +trcDailyCell(r.date,'proc','no_recording',Math.max(0,Number(r.total_followups||0)-Number(r.recordings_available||0)))
+      +trcDailyCell(r.date,'proc','non_transcribable',r.non_transcribable)
       +trcDailyCell(r.date,'proc','completed',r.transcribed)
+      +trcDailyRateCell(r.transcribed,r.total_followups)
+      +trcDailyPlainCell(r.already_transcribed)
+      +trcDailyCell(r.date,'proc','failed',r.transcription_failed)
+      +trcDailyRateCell(r.transcription_failed,r.total_followups)
       +trcDailyCell(r.date,'match','MATCH',r.status_match)
       +trcDailyCell(r.date,'match','MISMATCH',r.status_mismatch)
+      +trcDailyPlainCell(r.historical_status_mismatch)
       +TRC_MISMATCH_KEYS.map(function(k){return trcDailyCell(r.date,'mismatch',k,r[k]);}).join('')
     +'</tr>';
-  }).join(''):'<tr><td colspan="'+(6+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
+  }).join(''):'<tr><td colspan="'+(13+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
   el.innerHTML='<div class="card card-pad" style="margin-top:14px">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-table-list" style="color:#0d9488"></i> Daily breakdown</div>'
@@ -19308,11 +25393,23 @@ function trcRenderDaily(){
       +'</div>'
     +'</div>'
     +'<div style="overflow-x:auto;margin-top:12px"><table class="tbl" style="width:100%">'
-      +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th><th>Transcribed</th>'
-        +'<th>Matched</th><th>Mismatched</th>'+mmHead+'</tr></thead>'
+      +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th>'
+        +'<th title="Total calls ÷ recordings available - calls with no recording at all to transcribe">No recording</th>'
+        +'<th title="Had a recording, but nothing usable came out of it (silence, wrong number, too short, etc)">No conversation</th>'
+        +'<th>Transcribed</th>'
+        +'<th title="Transcribed ÷ Total calls">Success rate</th>'
+        +'<th title="Of the Transcribed count, how many reused a recording already transcribed earlier - no repeat model call, no second bill. Not a link: this counts a fact about already-completed rows, not a separate status to filter the table by.">Reused (old transcript)</th>'
+        +'<th>Failed</th><th title="Transcription failed ÷ Total calls">Failure rate</th>'
+        +'<th>Matched</th><th title="Of this day\'s leads, how many are STILL a mismatch based on '
+        +'each lead\'s latest assessed call - a lead corrected by a later call drops out of this the '
+        +'moment that later call is judged.">Mismatched</th>'
+        +'<th title="Every call actually judged a mismatch on this date, corrected or not since - '
+        +'this number never goes down. Not clickable: it is not a set of CURRENT leads, so nothing on '
+        +'this page can open it as one.">Mismatch events (historical)</th>'
+        +mmHead+'</tr></thead>'
       +'<tbody>'+body+'</tbody>'
     +'</table></div>'
-    +'<div style="font-size:11.5px;color:var(--slate);margin-top:8px">Click any number to open those leads for that day.</div>'
+    +'<div style="font-size:11.5px;color:var(--slate);margin-top:8px">Click any number to open those leads for that day. "Mismatched" is today\'s unresolved count; "Mismatch events (historical)" is how many were ever flagged on that date, including ones since resolved - see a lead\'s own history for exactly when.</div>'
   +'</div>';
 }
 
@@ -19435,10 +25532,10 @@ function trcRecallRow(sl){
    call - see trcLeadDetail below. */
 const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status,crm_status_raw,status_detail,crm_remarks,'
-  +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_current_status,'
+  +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_first_seen_date,lead_current_status,'
   +'lead_current_lost_reason,transcript_id,transcription_status,turn_count,languages,duration_seconds,'
   +'non_transcribable_reason,transcription_model,qa_id,pitch_score,pitch_status,followup_date_status,'
-  +'lost_reason_status,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+  +'lost_reason_status,retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
   +'qa_error,reused_transcription,queue_status,fail_phase,queue_error,attempt_count,qa_attempt_count,'
   +'personnel_id,personnel_name,personnel_email,personnel_role,personnel_team,is_latest_assessed';
 const TRC_LIGHT_FIELDS=TRC_LIGHT.split(',');
@@ -19648,7 +25745,7 @@ async function trcEnsureQaFieldsMerged(){
   try{
     let q=sb.schema('acc').from('followup_qa').select(
       'follow_up_id,qa_id:id,pitch_score,pitch_status,followup_date_status,lost_reason_status,'
-      +'remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+      +'retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
       +'qa_error,reused_transcription,is_latest_assessed');
     if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
     if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
@@ -19671,6 +25768,15 @@ async function trcEnsureQaFieldsMerged(){
    and drops its own answer if something else has already moved on - the same cancellation shape
    trcPrefetchCancel uses for the history prefetch below. */
 let TRC_ENRICH_GEN=0;
+
+/* A lead whose calls in the CURRENT date range never produced a verdict (no recording, out of scope,
+   no conversation) still has a last real judgement somewhere in its history - by requirement
+   (2026-09-22), the row should say what it was and on what date, not just read blank. Keyed by
+   lead_id (string): a followup_qa row (is_latest_assessed=true) once fetched, or null once confirmed
+   this lead has never been assessed at all - either way, never re-queried. Global and never reset by
+   a date-range change, because a lead's last judgement does not depend on which range is on screen. */
+let TRC_LAST_JUDGEMENT_CACHE={};
+let TRC_BACKFILL_GEN=0;
 /* THE LAZY HALF OF THE FAST PATH. Only the leads on the CURRENT PAGE get enriched - not the whole
    range, which is exactly the cost trcFetchLight exists to avoid paying up front. Merges straight
    into TRC_ROWS by follow_up_id (acc.crm_lead_detail returns full followup_timeline_v-shaped rows
@@ -19725,6 +25831,53 @@ async function trcEnrichVisiblePage(){
   }
 }
 
+/* THE OTHER LAZY HALF, same shape as trcEnrichVisiblePage but a different question: not "what is
+   this call's own status" but "what did we last judge THIS LEAD as, on any date" - for exactly the
+   rows that came back with nothing to show (no recording, out of scope, no conversation) so the page
+   can say "Last AI Judge Status: Lost (15 Sep)" instead of a blank dash. By requirement (2026-09-22):
+   a lead not qualified today, or with no usable recording today, should still read as the lead it is.
+
+   Only the CURRENT PAGE's leads, only the ones trcLeads() just found nothing for, and only once ever
+   per lead (TRC_LAST_JUDGEMENT_CACHE, never reset by a date change) - a lead genuinely never assessed
+   stays cached as null rather than being re-asked on every page view. followup_qa alone, no join to
+   crm_followups/call_transcripts/transcription_queue: is_latest_assessed already marks the one row
+   that matters, and the existing lead_id index (20260831090000) makes lead_id IN (this page's ids)
+   cheap - nothing like the 3-8s cost the full followup_timeline_v join carries. */
+async function trcBackfillLastJudgement(){
+  // Mismatch view's TRC_PAGE_ROWS are raw call rows, not lead groups - no g.lastAssessed to check and
+  // nothing here renders a lastAssessedOutside cell for them, so there is nothing to backfill.
+  if(TRC_F.match==='MISMATCH')return;
+  const gen=++TRC_BACKFILL_GEN;
+  const ids=[],seen={};
+  (TRC_PAGE_ROWS||[]).forEach(function(g){
+    if(!g||g.lead_id==null||g.lastAssessed)return;
+    const k=String(g.lead_id);
+    if(seen[k]||Object.prototype.hasOwnProperty.call(TRC_LAST_JUDGEMENT_CACHE,k))return;
+    seen[k]=1;ids.push(g.lead_id);
+  });
+  if(!ids.length)return;
+  try{
+    const {data,error}=await sb.schema('acc').from('followup_qa')
+      .select('lead_id,follow_up_id,ai_assessed_status,visit_pending,status_match,mismatch_type,'
+        +'call_date,call_start_text')
+      .in('lead_id',ids).eq('is_latest_assessed',true);
+    if(error)throw error;
+    if(gen!==TRC_BACKFILL_GEN)return;
+    const byLead={};
+    (data||[]).forEach(function(r){byLead[String(r.lead_id)]=r;});
+    // Every requested id gets a cache entry, found or not - a miss is a real answer (never assessed)
+    // and must stick, or a lead with no history gets re-queried on every single page visit.
+    ids.forEach(function(id){
+      const k=String(id);
+      TRC_LAST_JUDGEMENT_CACHE[k]=byLead[k]||null;
+    });
+    if(gen===TRC_BACKFILL_GEN)trcRender(false,true);
+  }catch(e){
+    /* Silent, same as trcEnrichVisiblePage - the row just keeps showing a dash until a later render
+       (a re-sort, a page revisit) tries again; nothing is cached on failure so it does retry. */
+  }
+}
+
 function trcRowDate(r){
   return r.call_date || (r.communication_time?String(r.communication_time).slice(0,10):null);
 }
@@ -19753,14 +25906,16 @@ async function trcKpiFastFetch(force){
       remarks_accurate:0,remarks_partially_accurate:0,remarks_inaccurate:0,remarks_not_verifiable:0,
       status_match:0,status_mismatch:0,lost_should_not_have_been_lost:0,
       qualified_should_not_have_been_qualified:0,in_followup_should_have_been_lost:0,
-      in_followup_should_have_been_qualified:0,agent_qa_score_sum:0,agent_qa_score_n:0,
+      in_followup_should_have_been_qualified:0,ai_status_unclear:0,
+      agent_qa_score_sum:0,agent_qa_score_n:0,
       reused_transcription:0,
       /* Safe to sum day-by-day and add across a range, unlike total_leads - is_latest_assessed
          (20260918100000) is unique per lead across the WHOLE table, so a lead's match/mismatch
          contribution lands on exactly one day, ever. See 20260918110000. */
       status_match_leads:0,status_mismatch_leads:0,
       lost_should_not_have_been_lost_leads:0,qualified_should_not_have_been_qualified_leads:0,
-      in_followup_should_have_been_lost_leads:0,in_followup_should_have_been_qualified_leads:0};
+      in_followup_should_have_been_lost_leads:0,in_followup_should_have_been_qualified_leads:0,
+      ai_status_unclear_leads:0};
     (days||[]).forEach(function(d){
       Object.keys(sum).forEach(function(k){sum[k]+=Number(d[k]||0);});
     });
@@ -19827,6 +25982,42 @@ function trcApply(rows,skipCards){
        casing the CRM happened to send. Matching those exactly is how a selected caller's own calls
        end up filtered out from under them. */
     if(TRC_F.personnel!=='all'&&String(r.personnel_email||'').toLowerCase()!==String(TRC_F.personnel).toLowerCase())return false;
+    // Same shape as crm/bu above - an independent lens on the follow-up's own two accuracy verdicts,
+    // combined by AND with every other filter rather than acting as a fourth KPI-card tab. 'NONE'
+    // means "not assessed at all" (no QA row yet, or transcribed with nothing to judge), not a status
+    // value the model ever returns.
+    if(TRC_F.fdate!=='all'){
+      if(TRC_F.fdate==='NONE'){ if(r.followup_date_status)return false; }
+      else if(String(r.followup_date_status||'')!==TRC_F.fdate)return false;
+    }
+    if(TRC_F.remarks!=='all'){
+      if(TRC_F.remarks==='NONE'){ if(r.remarks_status)return false; }
+      else if(String(r.remarks_status||'')!==TRC_F.remarks)return false;
+    }
+    if(TRC_F.pitch!=='all'){
+      if(TRC_F.pitch==='NONE'){ if(r.pitch_status)return false; }
+      else if(String(r.pitch_status||'')!==TRC_F.pitch)return false;
+    }
+    if(TRC_F.etiquette!=='all'){
+      if(TRC_F.etiquette==='NONE'){ if(r.etiquette_status)return false; }
+      else if(String(r.etiquette_status||'')!==TRC_F.etiquette)return false;
+    }
+    if(TRC_F.queryHandling!=='all'){
+      if(TRC_F.queryHandling==='NONE'){ if(r.query_handling_status)return false; }
+      else if(String(r.query_handling_status||'')!==TRC_F.queryHandling)return false;
+    }
+    if(TRC_F.retention!=='all'){
+      if(TRC_F.retention==='NONE'){ if(r.retention_status)return false; }
+      else if(String(r.retention_status||'')!==TRC_F.retention)return false;
+    }
+    if(TRC_F.lostReason!=='all'){
+      if(TRC_F.lostReason==='NONE'){ if(r.lost_reason_status)return false; }
+      else if(String(r.lost_reason_status||'')!==TRC_F.lostReason)return false;
+    }
+    if(TRC_F.personalMobile!=='all'){
+      if(TRC_F.personalMobile==='NONE'){ if(r.personal_mobile_status)return false; }
+      else if(String(r.personal_mobile_status||'')!==TRC_F.personalMobile)return false;
+    }
     if(!skipCards){
       if(TRC_F.proc==='failed'){ if(!trcProcFailed(r))return false; }
       else if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
@@ -19884,12 +26075,31 @@ function trcLeads(rows){
     for(let i=g.rows.length-1;i>=0&&!g.lastAssessed;i--){
       if(g.rows[i].ai_assessed_status)g.lastAssessed=g.rows[i];
     }
+    /* Nothing in the current range was assessed - fall back to this lead's actual last judgement,
+       wherever it happened, if trcBackfillLastJudgement has already fetched it (see that function).
+       Kept as a SEPARATE field from g.lastAssessed, never merged into it, so trcLeadRowHtml can tell
+       "this call, in this range" from "carried over from another date" and label it accordingly. */
+    g.lastAssessedOutside=g.lastAssessed?null:(TRC_LAST_JUDGEMENT_CACHE[k]||null);
     g.recordings=g.rows.filter(function(r){return r.has_recording;}).length;
     g.transcribed=g.rows.filter(function(r){return r.transcription_status==='completed';}).length;
     g.assessed=g.rows.filter(function(r){return r.qa_id;}).length;
     g.mismatches=g.rows.filter(trcCountsMismatch).length;
     g.regressions=g.rows.filter(trcIsRegression).length;
     g.ovHealth=trcOvHealth(g.status,g.rows);
+    g.callbackOverdue=trcCallbackOverdue(g.status,g.rows);
+    /* Cadence and callback TAT judge a lead's WHOLE follow-up history, not just whatever slice of it
+       falls inside the selected date range - g.rows is range-limited, so judging off it directly would
+       silently score a lead only on the one call that happened to land in the window (which is why
+       these two used to read exactly like g.callbackOverdue - both collapsing to "the latest call in
+       range" when the range is a single day). The full history is exactly what trcPrefetchHistories
+       already warms in the background for click-through (see trcAfterListRender) - reuse it once it
+       has arrived; a lead not yet warmed simply falls back to the range-limited rows for this one
+       render, same as every other lazily-enriched field here, until trcPrefetchHistories' own
+       completion re-render (see its own note) picks it up. */
+    const cachedHistory=trcLeadCacheRead(g.lead_id);
+    const historyRows=cachedHistory?cachedHistory.rows:g.rows;
+    g.cadence=trcCadenceIssues(g.status,historyRows);
+    g.callbackTat=trcFirstCallbackTat(historyRows);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -20069,6 +26279,13 @@ function trcKpiHtml(rows){
   ];
   const assessed=fast?fast.qa_assessed:rows.filter(function(r){return r.qa_id;}).length;
   const reused=fast?fast.reused_transcription:rows.filter(function(r){return r.reused_transcription;}).length;
+  /* Missed callback needs lead_current_status (to exclude Lost leads), which only the full join
+     carries (see TRC_LIGHT) - same enrichment tier the 'proc' cards already require. Computed by
+     actually rolling `rows` up into leads (trcLeads), not a flat count, because "overdue" is a
+     property of a LEAD's latest call, not of any one row. */
+  const overdueLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackOverdue;}).length:null;
+  const cadenceLeads=haveDetail?trcLeads(rows).filter(function(g){return g.cadence;}).length:null;
+  const callbackTatLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackTat;}).length:null;
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
       const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
       return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
@@ -20082,6 +26299,13 @@ function trcKpiHtml(rows){
         +'<i class="fa-solid '+s[3]+'"></i> '+esc(s[0])+' <b>'+s[2]+'</b></button>';
     }).join('')
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
+    +'<button class="btn btn-sm'+(TRC_F.overdue==='1'?' btn-primary':'')+'" onclick="trcToggleOverdue()" title="A promised next-follow-up date that has passed with nothing logged since - not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-slash"></i> Missed callback'+(overdueLeads===null?'':' <b>'+overdueLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.cadence==='1'?' btn-primary':'')+'" onclick="trcToggleCadence()" title="At least one follow-up gap where the recontact was late - a scheduled date missed, or no date and more than 3 days passed. Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-hourglass-half"></i> Cadence issues'+(cadenceLeads===null?'':' <b>'+cadenceLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.callbackTat==='1'?' btn-primary':'')+'" onclick="trcToggleCallbackTat()" title="The first call on this lead happened after the day it first appeared in the CRM - not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-volume"></i> Slow first callback'+(callbackTatLeads===null?'':' <b>'+callbackTatLeads+'</b>')+'</button>'
+    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<span style="font-size:12.5px;color:var(--slate)">QA assessed <b style="color:var(--ink)">'+assessed+'</b></span>'
     /* Deduplication is invisible unless it is counted. This is the number of follow-ups that reused a
        transcript already paid for, which is the whole point of keying on recording_url. */
@@ -20090,7 +26314,8 @@ function trcKpiHtml(rows){
     +(TRC_F.match==='MISMATCH'?trcMismatchPanel(rows,fast):'');
 }
 
-/* The four counts the specification asks for, by name. Only rendered when Mismatch is the active
+/* The mismatch counts the specification asks for, by name (five now - see ai_status_unclear,
+   2026-09-23). Only rendered when Mismatch is the active
    card, because that is the question they answer: of the calls where the CRM and the conversation
    disagree, WHICH WAY do they disagree. Each one filters the table under it. */
 function trcMismatchPanel(rows,fast){
@@ -20126,7 +26351,7 @@ function trcMismatchPanel(rows,fast){
     +'<div class="sec-title" style="margin:0 0 4px"><i class="fa-solid fa-scale-unbalanced" style="color:#dc2626"></i> Where the CRM and the call disagree'
     +'<span style="font-weight:400;color:var(--slate);font-size:13px;margin-left:8px">'+total+' total, in '+totalLeads+' lead'+(totalLeads===1?'':'s')+'</span></div>'
     +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:12px">Counted per follow-up, from the CRM status recorded against that call and what the conversation actually established.</div>'
-    +'<div class="grid" style="grid-template-columns:repeat(4,1fr);gap:12px">'
+    +'<div class="grid" style="grid-template-columns:repeat('+TRC_MISMATCH_KEYS.length+',1fr);gap:12px">'
     +TRC_MISMATCH_KEYS.map(function(k){
       const m=TRC_MISMATCH[k],on=TRC_F.mismatch===k;
       return '<div class="card card-pad" style="margin:0;cursor:pointer'+(on?';box-shadow:inset 0 0 0 2px '+m.colour:'')+'" onclick="trcSet(\'mismatch\',\''+(on?'all':k)+'\')">'
@@ -20163,6 +26388,32 @@ window.trcCard=async function(kind,val){
   trcRender(true);
 };
 
+/* An independent toggle, not a fourth tab in the group above - it narrows whichever set of leads is
+   already on screen (a card, a mismatch category, a search) down to the ones with a missed callback,
+   the same way the accuracy dropdowns in the filter bar narrow it, rather than replacing that set.
+   Needs lead_current_status (to exclude Lost leads) - only the full join carries that, same as the
+   'proc' cards. */
+window.trcToggleOverdue=async function(){
+  TRC_F.overdue=(TRC_F.overdue==='1'?'all':'1');
+  if(TRC_F.overdue==='1')await trcEnsureFullEnrichment();
+  trcRender(true);
+};
+/* Same idea as trcToggleOverdue, narrowing to leads with at least one late follow-up gap (see
+   trcCadenceIssues) instead of only the current open one. Needs the full join for the same reason -
+   the check is skipped for Lost leads, which only lead_current_status (TRC_LIGHT) can tell it. */
+window.trcToggleCadence=async function(){
+  TRC_F.cadence=(TRC_F.cadence==='1'?'all':'1');
+  if(TRC_F.cadence==='1')await trcEnsureFullEnrichment();
+  trcRender(true);
+};
+/* Same idea again, narrowing to leads whose first-ever call landed later than lead_first_seen_date
+   (see trcFirstCallbackTat). Needs the full join too - lead_first_seen_date only travels with it. */
+window.trcToggleCallbackTat=async function(){
+  TRC_F.callbackTat=(TRC_F.callbackTat==='1'?'all':'1');
+  if(TRC_F.callbackTat==='1')await trcEnsureFullEnrichment();
+  trcRender(true);
+};
+
 /* "All time" is gone - it asked Postgres to sort and hand back the whole table (11k+ rows and
    climbing) in one shot, the single most expensive shape of this query, and it only got slower as the
    table grew. Previous day plus a manual From/To range covers the same ground a click at a time
@@ -20176,12 +26427,28 @@ function trcDateBar(){
      either box does the same thing a click on the button would.
      No preset buttons any more - the boxes already open on Previous day (see TRC_F's own initial
      state), so a one-click shortcut back to it would only ever restate what's already showing. */
+  const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
+  const personnelValues=trcPersonnelOptionsList(TRC_ROWS);
+  /* Moved up from the filter bar below (by request), same row as All personnel - the two are the
+     "who/which team" pair someone reaches for first, so they sit beside each other rather than one at
+     the top and one a row down. Same buValues logic trcFilterBar used to run itself: Durbaar Banquets
+     dropped (see trcFilterBar's own note - it no longer queues at all), everything else sorted. */
+  const buValues=Array.from(new Set((TRC_ROWS||[]).map(function(r){return r.business_unit_name;})
+    .filter(function(k){return k&&!/^durbaar banquet/i.test(k);}))).sort();
   return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     +'<label style="font-size:12px;color:var(--slate)">From</label>'
     +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
     +'<label style="font-size:12px;color:var(--slate)">To</label>'
     +'<input type="date" id="trcTo" value="'+esc(TRC_F.to||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
-    +'<button class="btn btn-sm btn-primary" onclick="trcApplyRange()"><i class="fa-solid fa-magnifying-glass"></i> Apply range</button>'
+    +'<button class="btn btn-sm btn-primary" onclick="trcApplyRange()"><i class="fa-solid fa-magnifying-glass"></i> Search</button>'
+    +'<select onchange="trcSet(\'personnel\',this.value)" style="padding:6px 8px">'
+      +opt('all','All personnel',TRC_F.personnel)
+      +personnelValues.map(function(p){return opt(p.email,p.name,TRC_F.personnel);}).join('')
+    +'</select>'
+    +'<select onchange="trcSet(\'bu\',this.value)" style="padding:6px 8px">'
+      +opt('all','All business units',TRC_F.bu)
+      +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
+    +'</select>'
   +'</div>';
 }
 window.trcApplyRange=function(){
@@ -20201,19 +26468,14 @@ window.trcSetRange=async function(f,t){
   trcAfterListRender();
 };
 
-function trcFilterBar(all){
-  const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
-    .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
-  /* Durbaar Banquets runs a different funnel entirely and no longer queues at all (see
-     crm_build_queue, 20260917120000) - dropped from the picker too, rather than left sitting there
-     offering to filter down to a project this pipeline no longer transcribes. */
-  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;})
-    .filter(function(k){return k&&!/^durbaar banquet/i.test(k);}))).sort();
-  /* The whole team first, in the roster's own order (the manager, then the callers), so every
-     pre-sales caller is selectable whether or not they have a call in this date range. Anyone
-     pre-sales in the fetched rows who is NOT on the roster is appended after them rather than
-     dropped: that combination means the CRM sent a caller the roster has not caught up with, and
-     hiding their calls behind a filter that cannot name them is the worse of the two failures. */
+/* The whole team first, in the roster's own order (the manager, then the callers), so every
+   pre-sales caller is selectable whether or not they have a call in this date range. Anyone
+   pre-sales in the fetched rows who is NOT on the roster is appended after them rather than
+   dropped: that combination means the CRM sent a caller the roster has not caught up with, and
+   hiding their calls behind a filter that cannot name them is the worse of the two failures.
+   Shared by the date bar's quick filter and the full filter row below it, so picking a caller in
+   either one offers the exact same names in the exact same order. */
+function trcPersonnelOptionsList(all){
   const seenP={};
   const personnelValues=(TRC_PERSONNEL||[]).map(function(p){
     seenP[p.email]=1;return {email:p.email,name:p.name};
@@ -20224,6 +26486,11 @@ function trcFilterBar(all){
     seenP[email]=1;
     personnelValues.push({email:email,name:(r.personnel_name||email)+' (not on the roster)'});
   });
+  return personnelValues;
+}
+function trcFilterBar(all){
+  const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
+    .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
     +'<select onchange="trcSet(\'match\',this.value)" style="padding:6px 8px">'
@@ -20236,13 +26503,65 @@ function trcFilterBar(all){
       +opt('all','All CRM statuses',TRC_F.crm)
       +crmValues.map(function(k){return opt(k,k,TRC_F.crm);}).join('')
     +'</select>'
-    +'<select onchange="trcSet(\'bu\',this.value)" style="padding:6px 8px">'
-      +opt('all','All business units',TRC_F.bu)
-      +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
+    +'<select onchange="trcSet(\'pitch\',this.value)" style="padding:6px 8px">'
+      +opt('all','Pitch accuracy: all',TRC_F.pitch)
+      +opt('Accurate','Pitch: Accurate',TRC_F.pitch)
+      +opt('Partially Accurate','Pitch: Partially Accurate',TRC_F.pitch)
+      +opt('Inaccurate','Pitch: Inaccurate',TRC_F.pitch)
+      +opt('Not Verifiable','Pitch: Not Verifiable',TRC_F.pitch)
+      +opt('NONE','Pitch: Not yet assessed',TRC_F.pitch)
     +'</select>'
-    +'<select onchange="trcSet(\'personnel\',this.value)" style="padding:6px 8px">'
-      +opt('all','All personnel',TRC_F.personnel)
-      +personnelValues.map(function(p){return opt(p.email,p.name,TRC_F.personnel);}).join('')
+    +'<select onchange="trcSet(\'fdate\',this.value)" style="padding:6px 8px">'
+      +opt('all','Follow-up date accuracy: all',TRC_F.fdate)
+      +opt('Accurate','Follow-up date: Accurate',TRC_F.fdate)
+      +opt('Inaccurate','Follow-up date: Inaccurate',TRC_F.fdate)
+      +opt('Not Verifiable','Follow-up date: Not Verifiable',TRC_F.fdate)
+      +opt('NONE','Follow-up date: Not yet assessed',TRC_F.fdate)
+    +'</select>'
+    +'<select onchange="trcSet(\'remarks\',this.value)" style="padding:6px 8px">'
+      +opt('all','Remarks accuracy: all',TRC_F.remarks)
+      +opt('Accurate','Remarks: Accurate',TRC_F.remarks)
+      +opt('Partially Accurate','Remarks: Partially Accurate',TRC_F.remarks)
+      +opt('Inaccurate','Remarks: Inaccurate',TRC_F.remarks)
+      +opt('Not Verifiable','Remarks: Not Verifiable',TRC_F.remarks)
+      +opt('NONE','Remarks: Not yet assessed',TRC_F.remarks)
+    +'</select>'
+    +'<select onchange="trcSet(\'etiquette\',this.value)" style="padding:6px 8px">'
+      +opt('all','Etiquette: all',TRC_F.etiquette)
+      +opt('Pass','Etiquette: Pass',TRC_F.etiquette)
+      +opt('Partial','Etiquette: Partial',TRC_F.etiquette)
+      +opt('Fail','Etiquette: Fail',TRC_F.etiquette)
+      +opt('Not Applicable','Etiquette: Not Applicable',TRC_F.etiquette)
+      +opt('NONE','Etiquette: Not yet assessed',TRC_F.etiquette)
+    +'</select>'
+    +'<select onchange="trcSet(\'queryHandling\',this.value)" style="padding:6px 8px">'
+      +opt('all','Query handling: all',TRC_F.queryHandling)
+      +opt('Pass','Query handling: Pass',TRC_F.queryHandling)
+      +opt('Partial','Query handling: Partial',TRC_F.queryHandling)
+      +opt('Fail','Query handling: Fail',TRC_F.queryHandling)
+      +opt('Not Applicable','Query handling: Not Applicable',TRC_F.queryHandling)
+      +opt('NONE','Query handling: Not yet assessed',TRC_F.queryHandling)
+    +'</select>'
+    +'<select onchange="trcSet(\'retention\',this.value)" style="padding:6px 8px" title="Only meaningful on Lost calls - Not Applicable everywhere else">'
+      +opt('all','Retention effort: all',TRC_F.retention)
+      +opt('Pass','Retention: Pass',TRC_F.retention)
+      +opt('Partial','Retention: Partial',TRC_F.retention)
+      +opt('Fail','Retention: Fail',TRC_F.retention)
+      +opt('Not Applicable','Retention: Not Applicable',TRC_F.retention)
+      +opt('NONE','Retention: Not yet assessed',TRC_F.retention)
+    +'</select>'
+    +'<select onchange="trcSet(\'lostReason\',this.value)" style="padding:6px 8px" title="Only meaningful on Lost calls - Not Verifiable everywhere else">'
+      +opt('all','Lost reason accuracy: all',TRC_F.lostReason)
+      +opt('Accurate','Lost reason: Accurate',TRC_F.lostReason)
+      +opt('Inaccurate','Lost reason: Inaccurate',TRC_F.lostReason)
+      +opt('Not Verifiable','Lost reason: Not Verifiable',TRC_F.lostReason)
+      +opt('NONE','Lost reason: Not yet assessed',TRC_F.lostReason)
+    +'</select>'
+    +'<select onchange="trcSet(\'personalMobile\',this.value)" style="padding:6px 8px" title="Did the agent ask for a personal mobile number additional to the one already on file">'
+      +opt('all','Personal mobile asked: all',TRC_F.personalMobile)
+      +opt('Yes','Personal mobile asked: Yes',TRC_F.personalMobile)
+      +opt('No','Personal mobile asked: No',TRC_F.personalMobile)
+      +opt('NONE','Personal mobile asked: Not yet assessed',TRC_F.personalMobile)
     +'</select>'
     +'<input id="trcQ" placeholder="Search lead ID, name, personnel or follow-up ID…" value="'+esc(TRC_F.q||'')+'" oninput="trcSet(\'q\',this.value)" style="padding:6px 10px;min-width:250px">'
     +'<div class="grow"></div>'
@@ -20256,12 +26575,16 @@ window.trcSet=async function(k,v){
   // required at least the qa-fields merge to be showing at all - this is a no-op in that case, and a
   // safety net otherwise, not the normal way this gets triggered (see trcCard).
   if(k==='mismatch'&&v!=='all')await trcEnsureQaFieldsMerged();
+  // followup_date_status/remarks_status live on acc.followup_qa exactly like match/mismatch do - same
+  // light merge, no join to call_transcripts/transcription_queue needed.
+  if((k==='fdate'||k==='remarks'||k==='pitch'||k==='etiquette'||k==='queryHandling'||k==='retention'||k==='lostReason'||k==='personalMobile')&&v!=='all')await trcEnsureQaFieldsMerged();
   // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
   trcRender(k!=='q');
 };
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
-  TRC_F.personnel='all';
+  TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
+  TRC_F.cadence='all';TRC_F.callbackTat='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_F.q='';
   // Not null/null - that was "All time". Clearing the filters resets the date range to the same
   // Previous day default the page opens with, rather than reopening that door.
@@ -20300,7 +26623,7 @@ function trcClipCell(inner){
 /* ---- the two tables. A lead has many conversations, so which row means what depends on the
    question being asked: "show me the day's leads" is a lead per row, and "show me the mismatches" is
    a CALL per row, because that is the level a mismatch exists at. ---- */
-const TRC_LEAD_COLS=10, TRC_CALL_COLS=7;
+const TRC_LEAD_COLS=11, TRC_CALL_COLS=7;
 
 /* sl is display-only - the row's position in the currently rendered, currently filtered list, purely
    so someone can say "row 12" out loud when talking to a colleague. Not stored anywhere: it is
@@ -20338,13 +26661,35 @@ function trcLeadRowHtml(g,sl){
     +trcClipCell((g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
-          (g.regressions>1?g.regressions+' status regressions':'Status regressed')):''))
-    +trcClipCell(g.lastAssessed?trcTag(TRC_AI_TAG[g.lastAssessed.ai_assessed_status]||'t-gray','',trcAiStatusLabel(g.lastAssessed)):'<span style="color:var(--slate)">—</span>')
+          (g.regressions>1?g.regressions+' status regressions':'Status regressed')):'')
+      +(g.callbackOverdue?' '+trcTag('t-red','fa-phone-slash','',
+          'Missed callback - promised '+(trcWall(g.callbackOverdue.dueDate)||g.callbackOverdue.dueDate)
+          +', '+g.callbackOverdue.daysLate+' day'+(g.callbackOverdue.daysLate===1?'':'s')+' overdue'):''))
+    /* g.lastAssessedOutside only ever fires once g.lastAssessed itself is null (see trcLeads) - a
+       carried-over verdict from another date, not this range's own, so it is labelled with exactly
+       that date (trcBackfillLastJudgement) rather than left indistinguishable from a same-range one.
+       Built as its own <td>, not trcClipCell (that helper's flex/nowrap box is for a single inline
+       tag and would clip a second, stacked line rather than show it). */
+    +(g.lastAssessed
+      ?trcClipCell(trcTag(TRC_AI_TAG[g.lastAssessed.ai_assessed_status]||'t-gray','',trcAiStatusLabel(g.lastAssessed)))
+      :g.lastAssessedOutside
+        ?'<td style="text-align:center">'+trcTag(TRC_AI_TAG[g.lastAssessedOutside.ai_assessed_status]||'t-gray','',trcAiStatusLabel(g.lastAssessedOutside))
+          +'<div style="font-size:11px;color:var(--slate);margin-top:2px">Last judged '
+          +esc(trcWall(g.lastAssessedOutside.call_start_text)||trcWall(g.lastAssessedOutside.call_date)||'')+'</div></td>'
+        :trcClipCell('<span style="color:var(--slate)">—</span>'))
     +trcClipCell(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))
     +trcTextCell(g.bu,160)
-    +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px">'+esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
+    /* Whoever was on the phone for the LATEST call, not the lead as a whole - a lead's calls can move
+       between Pre-Sales and Sales (or between people on the same team), so the personnel column is
+       g.last's, matching what "latest call recording" means everywhere else on this row (g.lastDate,
+       g.lastAssessed). */
+    +trcTextCell(last.personnel_name,140)
+    +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px'
+      +(g.callbackOverdue?';color:#dc2626;font-weight:600':'')+'"'
+      +(g.callbackOverdue?' title="'+esc(g.callbackOverdue.daysLate+' day'+(g.callbackOverdue.daysLate===1?'':'s')+' overdue')+'"':'')+'>'
+      +esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
     +trcTextCell(last.crm_remarks,220)
     /* No Recording column. A per-lead download only ever offered the LATEST call's audio, which is
@@ -20387,7 +26732,7 @@ function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
     : '<tr><th style="text-align:center">SL No</th><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
-      +'<th>Business Unit</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th></tr>';
+      +'<th>Business Unit</th><th>Personnel</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th></tr>';
 }
 /* Fixed proportions per column, matched 1:1 to trcHeadHtml's columns - paired with table-layout:fixed
    on the table itself (see trcView), this is what actually stops one long value (a badge holding an
@@ -20398,9 +26743,9 @@ function trcColsHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<col style="width:9%"><col style="width:20%"><col style="width:15%"><col style="width:11%">'
       +'<col style="width:15%"><col style="width:16%"><col style="width:14%">'
-    : '<col style="width:4%"><col style="width:7%"><col style="width:16%"><col style="width:10%">'
-      +'<col style="width:10%"><col style="width:11%"><col style="width:11%"><col style="width:8%">'
-      +'<col style="width:10%"><col style="width:13%">';
+    : '<col style="width:4%"><col style="width:7%"><col style="width:15%"><col style="width:9%">'
+      +'<col style="width:9%"><col style="width:10%"><col style="width:10%"><col style="width:9%">'
+      +'<col style="width:7%"><col style="width:9%"><col style="width:11%">';
 }
 
 /* keepPage: true for a plain page-turn (Prev/Next), which must not reset back to page 1 or fight the
@@ -20427,7 +26772,12 @@ function trcRender(full,keepPage){
      &&!rows.some(function(r){return String(r.lead_id)===String(TRC_LAST_LEAD_ID);})){
     rows=rows.concat(TRC_PIN_ROWS);
   }
-  const items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
+  let items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
+  // Missed callback is a per-LEAD fact (see trcCallbackOverdue) - it only narrows the lead rollup, not
+  // the call-level Mismatch table, which trcLeads never runs over in the first place.
+  if(!callLevel&&TRC_F.overdue==='1')items=items.filter(function(g){return g.callbackOverdue;});
+  if(!callLevel&&TRC_F.cadence==='1')items=items.filter(function(g){return g.cadence;});
+  if(!callLevel&&TRC_F.callbackTat==='1')items=items.filter(function(g){return g.callbackTat;});
   const totalItems=items.length;
   const totalPages=Math.max(1,Math.ceil(totalItems/TRC_PAGE_SIZE));
   if(!keepPage){
@@ -20608,13 +26958,15 @@ function trcPrefetchListedHistories(){
   (TRC_PAGE_ROWS||[]).forEach(function(r){if(r&&r.lead_id!=null)ids.push(r.lead_id);});
   if(ids.length)trcPrefetchHistories(ids);
 }
-/* The two background jobs every render of the list kicks off, never awaited: fill in this page's
+/* The three background jobs every render of the list kicks off, never awaited: fill in this page's
    own transcription/AI-status columns (trcEnrichVisiblePage, only when the fast fetch left them
-   blank) and warm the full history behind each of these same leads for an instant click-through
-   (trcPrefetchListedHistories). Independent of each other - one fills what's on screen, the other
-   fills what a click would open next - so there is no ordering to get right between them. */
+   blank), carry over a lead's last real judgement when this range has none of its own
+   (trcBackfillLastJudgement), and warm the full history behind each of these same leads for an
+   instant click-through (trcPrefetchListedHistories). Independent of each other - so there is no
+   ordering to get right between them. */
 function trcAfterListRender(){
   trcEnrichVisiblePage();
+  trcBackfillLastJudgement();
   trcPrefetchListedHistories();
 }
 
@@ -20680,7 +27032,8 @@ function trcQaTableHtml(r,m){
             : 'No QA assessment - this call has no usable transcript to judge against.')+'</div>';
   }
   const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{}, lreason=r.lost_reason_accuracy||{},
-        rem=r.remarks_accuracy||{}, sa=r.status_assessment||{};
+        retention=r.retention_effort||{}, rem=r.remarks_accuracy||{}, sa=r.status_assessment||{},
+        mobileAsk=r.personal_mobile_requested||{};
   const join=function(parts){return parts.filter(function(x){return x;}).join(' — ');};
   const topics=[
     {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
@@ -20690,14 +27043,28 @@ function trcQaTableHtml(r,m){
                fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
     {topic:'Lost reason accuracy',status:r.lost_reason_status,score:lreason.score,
      why:join([lreason.reason,lreason.actual_reason?'The call actually supports: '+lreason.actual_reason:null])},
+    // Only meaningful when the CRM status for THIS follow-up is Lost (see qa-prompt.ts section 4) -
+    // every other call gets "Not Applicable" from the model, which is a correct answer but not one
+    // worth a row on every single call, so the row itself is left out rather than shown as N/A.
+    r.crm_status==='Lost'?{topic:'Retention effort (lost leads)',status:r.retention_status,score:retention.score,
+     why:join([retention.reason,retention.evidence?'"'+retention.evidence+'"':null])}:null,
     {topic:'Remarks accuracy',status:r.remarks_status,score:rem.score,
      why:join([rem.reason,rem.actual_conversation_summary])},
+    {topic:'Personal mobile number requested',status:r.personal_mobile_status,score:null,
+     why:join([mobileAsk.reason,(r.personal_mobile_number||mobileAsk.number_shared)?'Number given: '+(r.personal_mobile_number||mobileAsk.number_shared):null,
+               mobileAsk.evidence?'"'+mobileAsk.evidence+'"':null])},
     {topic:'Status check',status:r.ai_assessed_status,score:sa.score,
+     /* Visit-pending only excuses the CRM's In Follow Up when this lead had ALREADY qualified on an
+        earlier call (2026-09-21 gate) - on a first-time qualification it's still flagged, so this note
+        only claims "not a disagreement" when the row's own status_match backs that up. Otherwise the
+        row genuinely disagrees and m (the actual mismatch entry) already says so. */
      why:join(['CRM: '+(r.crm_status||'—')+' → the call reads as: '+(trcAiStatusLabel(r)||'—'),
-               (r.ai_assessed_status==='Qualified'&&r.visit_pending)
+               (r.ai_assessed_status==='Qualified'&&r.visit_pending&&r.status_match!==false)
                  ?'Qualified and wants to buy - the site visit itself is the one thing still open, which is why this is not counted as a disagreement with the CRM\'s In Follow Up.':null,
+               (r.ai_assessed_status==='Qualified'&&r.visit_pending&&r.status_match===false)
+                 ?'Qualified and wants to buy, but this is the FIRST call that qualifies this lead - the site visit being unsettled does not excuse it, so the CRM genuinely needs to be told.':null,
                m?m.label:null,sa.reason])}
-  ];
+  ].filter(Boolean);
   if(Array.isArray(r.agent_qa)){
     r.agent_qa.forEach(function(a){
       topics.push({topic:a&&a.point,status:a&&a.status,
@@ -20859,6 +27226,114 @@ function trcAddDays(dateStr,delta){
   const dt=new Date(Date.UTC(p[0],p[1]-1,p[2]));
   dt.setUTCDate(dt.getUTCDate()+delta);
   return dt.getUTCFullYear()+'-'+String(dt.getUTCMonth()+1).padStart(2,'0')+'-'+String(dt.getUTCDate()).padStart(2,'0');
+}
+/* Same UTC-noon arithmetic as trcAddDays, the subtraction direction instead of the addition - how many
+   whole days sit between two YYYY-MM-DD strings. */
+function trcDaysBetween(fromStr,toStr){
+  const p=function(s){const a=String(s).split('-').map(Number);return Date.UTC(a[0],a[1]-1,a[2]);};
+  return Math.round((p(toStr)-p(fromStr))/86400000);
+}
+/* A promised callback date that has passed with nothing logged since is a missed callback - the agent
+   said "I'll call back on X" and X came and went in silence. Computed the same way trcOvHealth checks
+   its own promised date: against traToday(), over whichever rows the caller hands in - the lead's full
+   history on the detail page (see trcLeadDetail), or only the selected range's rows on the list (see
+   trcLeads) - a call outside that set is invisible here exactly as everywhere else this page rolls up
+   a lead's calls. Not applicable to a lead that has closed the door (Lost) - there is nothing left to
+   call back about. "Lost, then Reopened" is deliberately NOT treated as Lost, same reasoning as
+   everywhere else on this page (see the status_assessment prompt): the "then Reopened" half means the
+   lead is live again. Only the LATEST call's own promise matters - rows arrives chronological
+   (oldest-first, the same order trcLeads and trcLeadDetail already sort it into), so an earlier call's
+   promise was superseded the moment a later call happened, on time or not. */
+function trcCallbackOverdue(status,rows){
+  if(String(status||'')==='Lost')return null;
+  const last=(rows||[])[(rows||[]).length-1];
+  if(!last||!last.next_follow_up_text)return null;
+  const dueDate=String(last.next_follow_up_text).slice(0,10);
+  const today=traToday();
+  if(!(dueDate<today))return null;
+  return {dueDate:dueDate,daysLate:trcDaysBetween(dueDate,today)};
+}
+function trcCallbackOverdueHtml(o){
+  if(!o)return '';
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #dc2626">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-slash" style="color:#dc2626"></i> Missed callback</div>'
+    +'<div style="font-size:12.5px;color:var(--slate)">A callback was promised for '
+    +esc(trcWall(o.dueDate)||o.dueDate)+' and nothing has been logged against this lead since - '
+    +o.daysLate+' day'+(o.daysLate===1?'':'s')+' overdue.</div>'
+  +'</div>';
+}
+/* Follow-up frequency/cadence - was the recontact after each call made on time?
+   Scheduled   - the call named a next_follow_up_text date; late if the FOLLOWING call (or, for the
+                 lead's own still-open gap, today) falls after that date.
+   Unscheduled - the call named no date at all; late if more than TRC_CADENCE_UNSCHEDULED_DAYS days
+                 pass before the next call (or today, for the still-open gap).
+   Not evaluated once a lead is Lost - same reasoning as trcCallbackOverdue, there is nothing left to
+   call back about. rows must already be chronological, oldest-first (trcLeads/trcLeadDetail's own
+   order), since each gap is judged against the call that comes right after it. */
+const TRC_CADENCE_UNSCHEDULED_DAYS=3;
+function trcCadenceIssues(status,rows){
+  if(String(status||'')==='Lost')return null;
+  const list=rows||[];
+  const today=traToday();
+  const gaps=[];
+  for(let i=0;i<list.length;i++){
+    const prev=list[i];
+    const nextRow=list[i+1]||null;
+    const actualDate=nextRow?trcRowDate(nextRow):today;
+    if(!actualDate)continue;
+    const scheduled=!!prev.next_follow_up_text;
+    const prevDate=trcRowDate(prev);
+    const limitDate=scheduled?String(prev.next_follow_up_text).slice(0,10)
+                             :(prevDate?trcAddDays(prevDate,TRC_CADENCE_UNSCHEDULED_DAYS):null);
+    if(!limitDate||!(actualDate>limitDate))continue;
+    gaps.push({follow_up_id:prev.follow_up_id,scheduled:scheduled,limitDate:limitDate,
+      actualDate:nextRow?actualDate:null,daysLate:trcDaysBetween(limitDate,actualDate),open:!nextRow});
+  }
+  if(!gaps.length)return null;
+  return {lateCount:gaps.length,totalGaps:list.length,gaps:gaps};
+}
+function trcCadenceIssuesHtml(o){
+  if(!o)return '';
+  /* trcCadenceIssues builds gaps walking the history oldest-first, since each one is judged against
+     whatever call came right after it - display order is the opposite: the most recent gap is the one
+     someone actually needs to act on today, so it reads top of the card, newest first. */
+  const rows=o.gaps.slice().reverse().map(function(g){
+    return '<div style="margin-top:6px;font-size:12.5px;color:var(--slate)">'
+      +(g.scheduled?'Promised for ':'No date promised - overdue past ')+esc(trcWall(g.limitDate)||g.limitDate)
+      +(g.open?', nothing logged since':', next call on '+esc(trcWall(g.actualDate)||g.actualDate))
+      +' - '+g.daysLate+' day'+(g.daysLate===1?'':'s')+' late.</div>';
+  }).join('');
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #d97706">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-hourglass-half" style="color:#d97706"></i> Follow-up cadence - '
+    +o.lateCount+' late of '+o.totalGaps+'</div>'
+    +rows
+  +'</div>';
+}
+/* Inbound lead -> first callback turnaround: how long after this lead first appeared in the CRM the
+   first logged call actually happened. lead_first_seen_date (acc.crm_leads, not the per-follow-up
+   f.first_seen_date - see the view's own note) carries no time-of-day, so this is a calendar-day
+   proxy for a 24-hour target, not an hour-level measurement - same day counts as on time, anything
+   later is flagged. rows must be chronological, oldest-first. Only available where the row came from
+   the full join (TRC_LIGHT/followup_timeline_v) - on the fast crm_followups-only path this field is
+   simply absent and the function returns null, the same way trcIsRegression treats a light row. */
+function trcFirstCallbackTat(rows){
+  const list=rows||[];
+  const first=list[0];
+  if(!first||!first.lead_first_seen_date)return null;
+  const firstCallDate=trcRowDate(first);
+  if(!firstCallDate)return null;
+  const daysLate=trcDaysBetween(first.lead_first_seen_date,firstCallDate);
+  if(!(daysLate>0))return null;
+  return {leadSeenDate:first.lead_first_seen_date,firstCallDate:firstCallDate,daysLate:daysLate};
+}
+function trcFirstCallbackTatHtml(o){
+  if(!o)return '';
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #d97706">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-volume" style="color:#d97706"></i> First callback turnaround</div>'
+    +'<div style="font-size:12.5px;color:var(--slate)">Lead first seen '+esc(trcWall(o.leadSeenDate)||o.leadSeenDate)
+    +', first call logged '+esc(trcWall(o.firstCallDate)||o.firstCallDate)+' - '
+    +o.daysLate+' day'+(o.daysLate===1?'':'s')+' after.</div>'
+  +'</div>';
 }
 /* The two-part OV rule: enforced here, not just checked by hand.
    (1) each of the two days immediately BEFORE the visit day needs its own follow-up call logged on
@@ -21096,10 +27571,16 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
     : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
   const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
+  const callbackOverdue=trcCallbackOverdueHtml(trcCallbackOverdue(lead&&lead.status,rows));
+  const cadenceIssues=trcCadenceIssuesHtml(trcCadenceIssues(lead&&lead.status,rows));
+  const callbackTat=trcFirstCallbackTatHtml(trcFirstCallbackTat(rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
     +ovHealth
+    +callbackOverdue
+    +cadenceIssues
+    +callbackTat
     +calls;
 
   if(!document.getElementById('trcTwoCss')){
@@ -22474,7 +28955,11 @@ const USAGE_MAP={
      a third reason - it both creates and edits an instance from one function, so mapped here every
      edit was counted as "Start a new instance". */
   wfUpdFilePicked:'tasks.workflow.attach_a_file_to_an_update',
-  wfUpiPick:'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id',
+  /* wfUpiPick used to be mapped here and is not any more - it logs from accountability.js like the
+     rest of Workflow, so it can name the id that was reused instead of recording a bare click.
+     Mapped by function name it also only ever caught HALF the feature: the QR upload goes through
+     the shared attachment handler, which this map cannot see, so four real uploads last week
+     produced no events while the feature sat reading Inactive. */
   // Transcription
   /* An upload is the one action on this screen with no lead behind it yet - the call does not
      exist until it has been uploaded, so there is nothing to look up. 517 uses, and the column
@@ -22786,14 +29271,9 @@ const USAGE_VIEWS={
   'gtd/3':               'gtd.waiting_for.view_items_waiting_on_others',
   'gtd/4':               'gtd.someday_maybe.view_someday_maybe_ideas_list',
   'gtd/5':               'gtd.weekly_review.view_weekly_review_checklist',
-  'crm/0':               'crm.pipeline_funnel.view_conversion_funnel_stage_ageing',
-  'crm/1':               'crm.leads.view_leads_pipeline_list',
-  'crm/2':               'crm.bookings.view_bookings_list',
-  'crm/3':               'crm.directory_hierarchy.view_directory_hierarchy_tab',
-  'crm/4':               'crm.comm_history.view_communication_history',
-  'crm/5':               'crm.demands_collections.view_demands_collections_list',
-  'crm/6':               'crm.brokers.view_brokers_list',
-  'crm/7':               'crm.post_sale.view_post_sale_tab'
+  // CRM & Sales is a single screen now - the eight demonstration tabs that used to be listed here
+  // are gone, and with them the eight keys that recorded somebody opening a mock-up.
+  'crm/0':               'crm.daily_updates.view_daily_crm_updates'
 };
 let USAGE_LAST_VIEW='', USAGE_LAST_VIEW_AT=0;
 function usageViewTick(){
