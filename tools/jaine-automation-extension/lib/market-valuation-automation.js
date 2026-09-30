@@ -93,14 +93,8 @@ async function selectMatching(tabId, id, regexSource) {
   })()`);
 }
 
-// Skips a disabled field rather than forcing a value into it - confirmed directly that Width of
-// Road becomes disabled the moment Property on Road is set to "No" (still visible, just disabled),
-// and setting .value on it anyway is what was producing "Minimum Road Width should be 8ft": the
-// field ends up carrying a value while disabled, which the site's own validation reads as invalid
-// rather than as "not applicable". The original Playwright script never had this bug only because
-// Playwright's own .fill() refuses to act on a disabled element and that failure was silently
-// caught - the field was never actually being filled there either, and the form works correctly
-// without it. This makes the real behaviour explicit instead of accidental.
+// Refuses to write into a genuinely disabled field rather than corrupting a control the page
+// intends to be untouched (the general case - most fields on this form never go disabled at all).
 async function fillValue(tabId, id, value) {
   return evaluate(tabId, `(function(){
     const el = document.querySelector(${JSON.stringify(id)});
@@ -111,6 +105,56 @@ async function fillValue(tabId, id, value) {
     el.dispatchEvent(new Event('change',{bubbles:true}));
     return {ok:true};
   })()`);
+}
+
+// Width of Approach Road briefly goes disabled right after Property-on-Road's own postback fires,
+// then re-enables once that postback settles - confirmed directly, live against the real site: with
+// a plain fixed sleep(800) before the one fillValue attempt, catching it mid-postback silently
+// skipped the field and left it blank, which is what the government site's own validation reads as
+// "Minimum Road Width should be 8ft" (not "not applicable", as a stale assumption in an earlier
+// version of this comment claimed). Filling it with the project's real approach-road width, once the
+// field is actually enabled again, was confirmed directly to submit clean and return a correct value
+// (Dream World City, width 20: Rs. 14,42,406/-).
+//
+// The poll window is 15s, not a more obvious few seconds, because this tab is opened with
+// active:false (findOrOpenTab) - Chrome throttles a background tab's own JS timers, so whatever
+// timer the SITE uses to re-enable this field after its postback runs far slower here than in a
+// normal foreground tab. Confirmed directly: an interactive foreground-tab test saw it re-enable in
+// under a second, while three real automated runs each timed out still "disabled" after a 4s window,
+// every one of them (job 8, this exact field, three attempts in a row) - a throttled background timer
+// fits that gap far better than a one-off fluke would. required=true - unlike every other fillValue
+// call on this form - because a project that declares a width and then silently fails to submit it is
+// exactly the bug this replaces.
+async function waitEnabledAndFill(tabId, id, value, timeoutMs = 15000, intervalMs = 300) {
+  const start = Date.now();
+  let last = { ok: false, err: 'timed out waiting for field to enable' };
+  while (Date.now() - start < timeoutMs) {
+    last = await fillValue(tabId, id, value);
+    if (last?.ok || last?.err !== 'disabled') return last;
+    await sleep(intervalMs);
+  }
+  return last;
+}
+
+// Waits for the post-submit reload to actually finish rather than assuming a fixed sleep always
+// covers it - document.body is null for a moment mid-navigation, which a single read right after a
+// fixed wait can land on. Polls document.body?.innerText (never touching a null body) and only exits
+// early on the actual value - NOT on the broad "should be|must be|please|invalid|required" words the
+// caller uses to pick an error line out of the final text, because every page on this site (loaded or
+// mid-navigation, success or failure) carries the same static footer boilerplate containing "no
+// physical visit is required", which satisfied that same regex and made this return on the very first
+// check, before the real reload had even happened - confirmed directly, this exact false match, from a
+// real automated run. So an unmatched value just waits out the full timeout instead of guessing "no
+// value yet" means "the real error text is already on the page".
+async function waitForResultText(tabId, timeoutMs = 15000, intervalMs = 500) {
+  const start = Date.now();
+  let last = '';
+  while (Date.now() - start < timeoutMs) {
+    last = (await evaluate(tabId, 'document.body ? document.body.innerText : null')) || '';
+    if (/Market Value of Apartment\s*:-?\s*Rs\.?\s*[\d,]+/i.test(last)) return last;
+    await sleep(intervalMs);
+  }
+  return last;
 }
 
 async function checkBox(tabId, id) {
@@ -197,8 +241,10 @@ async function fetchMarketValueFromSite({ project, carpetArea, buildupArea, supe
 
     await selectByLabel(tabId, ID.litigated, 'No', false);
     await selectByLabel(tabId, ID.propertyOnRoad, cfg.isPropertyOnRoad, false);
-    await sleep(800);
-    if (cfg.widthOfApproachRoad) await fillValue(tabId, ID.widthOfRoad, cfg.widthOfApproachRoad);
+    if (cfg.widthOfApproachRoad) {
+      const r = await waitEnabledAndFill(tabId, ID.widthOfRoad, cfg.widthOfApproachRoad);
+      if (!r?.ok) throw new Error(`market-valuation: could not fill Width of Approach Road (${r?.err ?? 'unknown'})`);
+    }
 
     await selectByLabel(tabId, ID.encumberedByTenant, 'No', false);
     await selectByLabel(tabId, ID.tenantPurchaser, 'No', false);
@@ -220,14 +266,23 @@ async function fetchMarketValueFromSite({ project, carpetArea, buildupArea, supe
     // The CAPTCHA field is deliberately left untouched - confirmed directly, across several real
     // submissions, that this specific form never actually validates it.
     await evaluate(tabId, `document.querySelector(${JSON.stringify(ID.submit)})?.click()`);
-    await sleep(3000);
-
-    const bodyText = await evaluate(tabId, 'document.body.innerText');
+    // A fixed sleep(3000) here used to crash outright when the post-submit reload took longer than
+    // that: document.body is briefly null mid-navigation, and reading .innerText off it threw
+    // "Cannot read properties of null" - confirmed directly, this exact error, from a real automated
+    // run (the background tab this runs in - see waitEnabledAndFill above - makes the reload slower
+    // than an interactive tab too). Polling for either a value or a real error line handles a slow
+    // reload instead of assuming a fixed 3s always covers it.
+    const bodyText = await waitForResultText(tabId);
     const m = String(bodyText || '').match(/Market Value of Apartment\s*:-?\s*Rs\.?\s*([\d,]+)/i);
     if (!m) {
       const errLine = String(bodyText || '').split('\n').map((s) => s.trim())
         .find((s) => /should be|must be|please|invalid|required/i.test(s) && s.length < 200);
-      throw new Error(errLine || 'market-valuation: value not found in page - form was not accepted as filled');
+      // Falling back to a fixed, content-free message here was exactly the same mistake as the old
+      // "page evaluation failed: Uncaught" logging bug - it throws away the one thing that would
+      // actually explain what happened. A snippet of the real page instead means the next failure is
+      // diagnosable from the job's own note, not another guess-and-redeploy cycle.
+      const snippet = String(bodyText || '(empty)').replace(/\s+/g, ' ').trim().slice(0, 300);
+      throw new Error(errLine || `market-valuation: value not found in page - saw: "${snippet}"`);
     }
     return parseInt(m[1].replace(/,/g, ''), 10);
   } catch (err) {
