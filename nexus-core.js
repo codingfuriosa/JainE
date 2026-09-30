@@ -18849,7 +18849,20 @@ window.cpaInviteRefresh=function(){
   const plan=cpaInvitePlan($('cpaInvResend').checked,$('cpaInvSigned').checked);
   const names=a=>a.slice(0,6).map(c=>esc(custFirstName(c.full_name)||c.full_name)).join(', ')+(a.length>6?' and '+(a.length-6)+' more':'');
   const line=(n,txt,who)=>n?`<li style="margin:2px 0">${n} ${txt}${who?' <span style="color:var(--slate)">('+who+')</span>':''}</li>`:'';
-  $('cpaInvSummary').innerHTML=`<div style="font-size:15px"><b style="font-size:22px;color:#1d4ed8">${plan.send.length}</b> customer${plan.send.length===1?'':'s'} will be emailed</div>`+
+  // Which blocks those emails land in, so a send meant for one block cannot quietly go to a whole
+  // project (30 Sep: the list was left on "All projects" and the window offered all 89 in Gurukul).
+  const byCust=cpaCustUnitsByCustomer(),perBlock={};
+  plan.send.forEach(c=>{
+    const blocks=new Set((byCust[c.id]||[]).filter(u=>u.status!=='cancelled'&&custFeatureOn(CPA.featureRules,'login',u.project_id,u.tower))
+      .map(u=>projShortName(((CPA.projects||[]).find(p=>p.id===u.project_id)||{}).name||'')+' '+(u.tower||'')));
+    blocks.forEach(b=>{perBlock[b]=(perBlock[b]||0)+1;});
+  });
+  const natural=(a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'});
+  const blockKeys=Object.keys(perBlock).sort(natural);
+  const breakdown=blockKeys.length?`<div style="font-size:12.5px;color:var(--slate);margin-top:4px">${blockKeys.map(k=>esc(k)+': <b style="color:var(--ink)">'+perBlock[k]+'</b>').join(' · ')}</div>`:'';
+  const wide=blockKeys.length>1&&!CPA_CUST_FILTER.block;
+  const warn=wide?`<div style="margin-top:8px;padding:9px 12px;border-radius:9px;background:#fffbeb;border:1px solid #f0dfa8;color:#92400e;font-size:13px"><i class="fa-solid fa-triangle-exclamation"></i> This goes to <b>${blockKeys.length} blocks</b>. To invite one block only, close this, pick the project and block in the Customers filters, and open Send invitation again.</div>`:'';
+  $('cpaInvSummary').innerHTML=`<div style="font-size:15px"><b style="font-size:22px;color:#1d4ed8">${plan.send.length}</b> customer${plan.send.length===1?'':'s'} will be emailed</div>`+breakdown+warn+
     `<ul style="margin:6px 0 0 18px;padding:0;font-size:13px;color:var(--ink)">`+
     line(plan.skip.invited.length,'left out — already invited',names(plan.skip.invited))+
     line(plan.skip.signed.length,'left out — already signed in',names(plan.skip.signed))+
