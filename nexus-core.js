@@ -387,11 +387,45 @@ async function boot(){
 // Statement tab's "View full ledger" jump) were renumbered to match.
 const CUST_TABS=['Home','Statement','Construction Progress','Ledger','Cost Sheet','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
 const CUST_TAB_ICONS=['fa-house','fa-file-invoice-dollar','fa-helmet-safety','fa-book-open','fa-calculator','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-gift','fa-screwdriver-wrench','fa-pen-to-square'];
+/* Which sections a customer sees is decided by staff in Customer Portal Admin > Customer Features,
+   per project and per block (cust.feature_access). Each section's key, in CUST_TABS order from
+   index 1 - Home (index 0) is the landing page and is always shown. */
+const CUST_FEATURES=[
+  {key:'statement',tab:1},{key:'progress',tab:2},{key:'ledger',tab:3},{key:'cost_sheet',tab:4},
+  {key:'inspection',tab:5},{key:'documents',tab:6},{key:'videos',tab:7},{key:'support',tab:8},
+  {key:'amenities',tab:9},{key:'submeter',tab:10},{key:'referrals',tab:11},{key:'maintenance',tab:12},
+  {key:'modifications',tab:13}];
+/* Used only where no rule exists at any level - including when the rules could not be read at all.
+   The money and progress sections are on; everything else stays hidden until staff turn it on, so a
+   failed read never exposes an unfinished section. */
+const CUST_FEATURE_FALLBACK={statement:true,progress:true,ledger:true,cost_sheet:true};
+// The most specific rule wins: this block, then the whole project, then the all-projects default.
+function custFeatureRule(rules,key,projectId,tower){
+  const find=(p,t)=>(rules||[]).find(r=>r.feature===key&&(r.project_id||null)===(p||null)&&(r.tower||null)===(t||null));
+  return (tower&&find(projectId,tower))||find(projectId,null)||find(null,null)||null;
+}
+function custFeatureOn(rules,key,projectId,tower){
+  const r=custFeatureRule(rules,key,projectId,tower);
+  return r?!!r.enabled:!!CUST_FEATURE_FALLBACK[key];
+}
+function custTabAllowed(ti,unit){
+  if(ti===0)return true;
+  const f=CUST_FEATURES.find(x=>x.tab===ti);if(!f)return false;
+  if(!unit)return false;
+  return custFeatureOn(CUST_DATA&&CUST_DATA.featureRules,f.key,unit.project_id,unit.tower);
+}
+function custCurrentUnit(){
+  const units=(CUST_DATA&&CUST_DATA.units)||[];
+  return units.find(u=>u.id===CUST_SELECTED_UNIT)||units[0]||null;
+}
 function custSidebarTabs(ti){
   const nav=$('sbNav');
   if(!nav)return;
   nav.innerHTML='';
   nav.appendChild(el('div','sb-group','Customer Portal'));
+  // Before the customer's flats have loaded nothing is known about which sections apply, so only
+  // Home is listed; the sidebar is rebuilt as soon as the data arrives.
+  const unit=custCurrentUnit();
   /* "Earn" badge on Referrals - only while this customer has never submitted one. Reads CUST_DATA
      directly rather than taking a parameter: the sidebar paints once at boot (renderCustomerShell,
      before any data exists - CUST_DATA is null, badge stays off rather than flash on) and again from
@@ -400,6 +434,7 @@ function custSidebarTabs(ti){
      a successful submit, so the badge is gone on the very next sidebar rebuild - no stale cache read. */
   const showReferralBadge=CUST_DATA&&CUST_DATA.hasReferred===false;
   CUST_TABS.forEach(function(t,i){
+    if(!custTabAllowed(i,unit))return;
     const badge=(t==='Referrals'&&showReferralBadge)?' <span class="sb-badge-gold">Earn</span>':'';
     const a=el('a','sb-item'+(i===ti?' active':''),'<i class="fa-solid '+(CUST_TAB_ICONS[i]||'fa-circle')+'"></i> <span class="sb-item-label">'+t+'</span>'+badge);
     a.href='javascript:void(0)';
@@ -618,9 +653,14 @@ function expandModules(ss){
   Object.keys(MODULE_RENAMES).forEach(function(oldId){
     if(ss.has(oldId)) ss.add(MODULE_RENAMES[oldId]);
   });
+  if(ss.has('custportal_photos')) ss.add('custportal_admin');
   ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
+/* 'custportal_photos' = Customer Portal Admin limited to its Photos & Videos tab. The database
+   enforces the same boundary (app.is_custportal_media_editor): such an account can write the four
+   photo tables and read project names and a bare flat list, and nothing else in cust.*. */
+function cpaPhotosOnly(){ if(state.super)return false; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('custportal_photos')!==-1; }
 function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return expandModules(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length)return expandModules(new Set(m));return expandModules(new Set());}
 /* Usability sits under Control Panel in Administration, but unlike Control Panel it is NOT
    superadmin-only: the Systems department are the people who actually read it, and they are not
@@ -8427,7 +8467,8 @@ async function secUserDetail(v,email){
         ${u.super_admin?'<span style="font-size:12px;color:var(--slate)">Full access — Administrator</span>':'<div style="display:flex;gap:6px"><button type="button" class="btn btn-sm" onclick="secAllTabs(true)">Select all</button><button type="button" class="btn btn-sm" onclick="secAllTabs(false)">Clear all</button></div>'}
       </div>
       <div style="padding:14px 16px 16px">
-        <div class="tab-grid">${NAV.flatMap(g=>{const gi=g.items.filter(m=>MODSET.has(m.id));if(!gi.length)return[];return['<div class="tab-grid-head">'+esc(g.group)+'</div>',...gi.map(m=>'<label class="chk-tile"><input type="checkbox" class="secMod" value="'+m.id+'" '+((m.id==='network'||mods.includes(m.id))?'checked':'')+' '+((u.super_admin||m.id==='network')?'disabled':'')+'><i class="fa-solid '+m.icon+' tile-ic"></i>'+esc(m.label)+'</label>')];}).join('')}</div>
+        <div class="tab-grid">${NAV.flatMap(g=>{const gi=g.items.filter(m=>MODSET.has(m.id));if(!gi.length)return[];return['<div class="tab-grid-head">'+esc(g.group)+'</div>',...gi.flatMap(m=>['<label class="chk-tile"><input type="checkbox" class="secMod" value="'+m.id+'" '+((m.id==='network'||mods.includes(m.id))?'checked':'')+' '+((u.super_admin||m.id==='network')?'disabled':'')+'><i class="fa-solid '+m.icon+' tile-ic"></i>'+esc(m.label)+'</label>']
+            .concat(m.id==='custportal_admin'?['<label class="chk-tile" title="Opens Customer Portal Admin with only the Photos &amp; Videos tab"><input type="checkbox" class="secMod" value="custportal_photos" '+(mods.includes('custportal_photos')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-photo-film tile-ic"></i>Customer Portal: Photos &amp; Videos only</label>']:[]))];}).join('')}</div>
       </div>
     </div>
     ${u.super_admin?'<p style="color:var(--slate);font-size:13px;margin-top:12px">This person is an administrator and always has full access.</p>':`<div style="margin-top:18px;display:flex;justify-content:flex-end;gap:10px"><button class="btn" onclick="navTo('security')">Cancel</button><button class="btn btn-primary" id="secSaveBtn" onclick="secSave('${esc(email)}')"><i class="fa-solid fa-check"></i> Save access</button></div>`}
@@ -10539,6 +10580,10 @@ async function psaFetchAll(){
    the outstanding), not off the clock, so a set extracted yesterday and loaded today is filed
    under the day it actually describes. */
 
+/* The save is misrSave, not misSave, and the button is misrSaveBtn. Legal has its own MIS -
+   the cause-list one, built on mis_cases - and it already owned window.misSave and a
+   #misSaveBtn. Both files load together, this module is further down, so for a few days this
+   module's save quietly replaced Legal's and saving a cause-list case did nothing at all. */
 const MIS = { bus: [], reports: [], staged: null, back: null, busy: false };
 
 function misIN(n, dash) {
@@ -10904,7 +10949,7 @@ window.misNewModal = function () {
       + '<div id="misStageHost" style="margin-top:14px"></div>'
     + '</div>'
     + '<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
-      + '<button class="btn btn-primary" id="misSaveBtn" disabled onclick="misSave(this)"><i class="fa-solid fa-floppy-disk"></i> Save this report</button></div>', 'lg');
+      + '<button class="btn btn-primary" id="misrSaveBtn" disabled onclick="misrSave(this)"><i class="fa-solid fa-floppy-disk"></i> Save this report</button></div>', 'lg');
 };
 window.misDrop = function (e) {
   e.preventDefault();
@@ -11005,7 +11050,7 @@ window.misFilesPicked = async function (fileList) {
     MIS.staged = null; MIS.back = null;
     host.innerHTML = '<div class="mis-badfile"><i class="fa-solid fa-circle-exclamation"></i> '
       + esc((e && e.message) || String(e)) + '</div>';
-    const b = $('misSaveBtn'); if (b) b.disabled = true;
+    const b = $('misrSaveBtn'); if (b) b.disabled = true;
   }
 };
 
@@ -11058,7 +11103,7 @@ function misBackRender() {
     + '<th class="mis-num">Previous</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 
-function misSaveBtnLabel(b) {
+function misrSaveBtnLabel(b) {
   const n = (MIS.back || []).length + (MIS.staged ? 1 : 0);
   b.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> '
     + (n > 1 ? ('Save ' + n + ' reports') : 'Save this report');
@@ -11072,8 +11117,8 @@ function misStageRender() {
     host.innerHTML = misBackRender()
       + (bad.length ? '<div class="mis-badfile"><b>' + bad.length + ' file' + (bad.length === 1 ? '' : 's')
           + ' not used:</b><br>' + bad.map(function (b) { return esc(b[0]) + ' ' + '—' + ' ' + esc(b[1]); }).join('<br>') + '</div>' : '');
-    const b2 = $('misSaveBtn');
-    if (b2) { b2.disabled = !(MIS.back || []).length; misSaveBtnLabel(b2); }
+    const b2 = $('misrSaveBtn');
+    if (b2) { b2.disabled = !(MIS.back || []).length; misrSaveBtnLabel(b2); }
     return;
   }
   const rows = misStageRows();
@@ -11129,8 +11174,8 @@ function misStageRender() {
         ? '<div class="mis-badfile"><b>' + s.bad.length + ' file' + (s.bad.length === 1 ? '' : 's') + ' not used:</b><br>'
           + s.bad.map(function (b) { return esc(b[0]) + ' — ' + esc(b[1]); }).join('<br>') + '</div>'
         : '');
-  const btn = $('misSaveBtn');
-  if (btn) { btn.disabled = !have && !(MIS.back || []).length; misSaveBtnLabel(btn); }
+  const btn = $('misrSaveBtn');
+  if (btn) { btn.disabled = !have && !(MIS.back || []).length; misrSaveBtnLabel(btn); }
 }
 
 /* One record per date, whether it was worked out from today's extracts or read back from a
@@ -11162,7 +11207,7 @@ async function misWriteOne(iso, currLabel, prevLabel, note, rows) {
   if (re) throw re;
 }
 
-window.misSave = async function (btn) {
+window.misrSave = async function (btn) {
   const s = MIS.staged;
   const back = MIS.back || [];
   if (!s && !back.length) return;
@@ -18973,6 +19018,11 @@ async function cpaProjects(force){
 }
 async function cpaUnits(force){
   if(CPA.units&&!force)return CPA.units;
+  if(cpaPhotosOnly()){
+    // cust.units itself is closed to a photos-only account (agreement values, customer links).
+    const {data}=await sb.schema('cust').rpc('media_unit_list');
+    CPA.units=(data||[]).map(u=>({...u,projects:{id:u.project_id,name:u.project_name}}));return CPA.units;
+  }
   const {data}=await sb.schema('cust').from('units').select('*, projects(id,name)').is('deleted_at',null).order('id',{ascending:false});
   CPA.units=data||[];return CPA.units;
 }
@@ -19007,7 +19057,13 @@ async function cpaStaffOptions(force){
 
 VIEWS.custportal_admin=async function(v,seg){
   setCrumb(['Stakeholder Portals','Customer Portal Admin']);
-  const tabs=['Projects & Units','Customers','Farvision Import','Photos & Videos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals','Maintenance','Modification Requests'];
+  if(cpaPhotosOnly()){
+    v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',['Photos & Videos'],0)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
+    const h=$('cpaBody');if(h) await cpaRenderPhotos(h);
+    return;
+  }
+  // Customer Features is last so every older tab keeps its number - the index is the route.
+  const tabs=['Projects & Units','Customers','Farvision Import','Photos & Videos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals','Maintenance','Modification Requests','Customer Features'];
   const ti=mTab(seg,tabs.length);
   v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',tabs,ti)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
   const host=$('cpaBody');if(!host)return;
@@ -19022,7 +19078,89 @@ VIEWS.custportal_admin=async function(v,seg){
   else if(ti===8) await cpaRenderSupport(host);
   else if(ti===9) await cpaRenderReferrals(host);
   else if(ti===10) await cpaRenderMaintenance(host,seg);
-  else await cpaRenderModificationRequests(host);
+  else if(ti===11) await cpaRenderModificationRequests(host);
+  else await cpaRenderFeatures(host);
+};
+
+/* ---------- Tab 13: Customer Features - which sections customers see, per project and block ----------
+   Rows live in cust.feature_access; the customer portal resolves them with custFeatureOn() (block,
+   then project, then the all-projects default). Home is always shown and is not listed. */
+let CPA_FEAT_PROJ='';
+// Shown beside a section so nobody switches on something that is not finished (audit, 30 Sep 2026).
+// Sign-in first - with it off for a block, that block's customers cannot get in to see anything else.
+function cpaFeatureRows(){
+  return [{key:'login',label:'Customer sign-in'}].concat(CUST_FEATURES.map(f=>({key:f.key,label:CUST_TABS[f.tab]})));
+}
+const CPA_FEATURE_NOTES={
+  login:'Who can sign in with a code sent to the email on their booking. Off = these customers cannot sign in at all.',
+  inspection:'Not finished - staff cannot list or delete an uploaded checklist or update.',
+  documents:'Not finished - staff cannot list or delete an uploaded document.',
+  videos:'Ready - but no process videos have been uploaded yet.',
+  support:'Ready - needs the Zoho Desk connection; replies are made in Zoho Desk.',
+  amenities:'Not finished - a customer can see other flats\' bookings. After possession only.',
+  submeter:'Ready - payment is by UPI reference, confirmed by staff.',
+  referrals:'Not finished - "Refer & earn" has no reward or sales hand-off yet.',
+  maintenance:'Not finished - a confirmed payment does not reduce the balance until the next import. After possession only.',
+  modifications:'Ready - assign a Project Manager per project first. After possession only.'
+};
+async function cpaRenderFeatures(host){
+  const [projects,units,rulesRes]=await Promise.all([cpaProjects(true),cpaUnits(true),
+    sb.schema('cust').from('feature_access').select('*')]);
+  if(rulesRes.error){ host.innerHTML='<div class="card card-pad empty">Could not load the section settings: '+esc(rulesRes.error.message)+'</div>'; return; }
+  CPA.featureRules=rulesRes.data||[];
+  const proj=projects.find(p=>String(p.id)===CPA_FEAT_PROJ)||null;
+  if(!proj)CPA_FEAT_PROJ='';
+  const natural=(a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'});
+  const blocks=proj?[...new Set(units.filter(u=>u.project_id===proj.id&&u.tower&&u.status!=='cancelled').map(u=>u.tower))].sort(natural):[];
+  const rules=CPA.featureRules;
+  const exact=(key,pid,tower)=>rules.find(r=>r.feature===key&&(r.project_id||null)===(pid||null)&&(r.tower||null)===(tower||null));
+  const onOff=b=>b?'On':'Off';
+  // One dropdown per cell. "Follow ..." means no row at this level; the label shows what that gives.
+  const cell=(key,pid,tower)=>{
+    const own=exact(key,pid,tower);
+    const val=own?(own.enabled?'on':'off'):'';
+    const eff=custFeatureOn(rules,key,pid,tower);
+    const followLbl=pid==null?null:(tower?'Same as project':'Same as default')+' ('+onOff(tower?custFeatureOn(rules,key,pid,null):custFeatureOn(rules,key,null,null))+')';
+    const opts=(followLbl?`<option value=""${val===''?' selected':''}>${followLbl}</option>`:'')+
+      `<option value="on"${val==='on'?' selected':''}>On</option><option value="off"${val==='off'?' selected':''}>Off</option>`;
+    const style=eff?'color:#15803d;border-color:#bbf7d0;background:#f0fdf4':'color:#64748b;background:#f8fafc';
+    return `<select class="mu-sel" style="min-width:128px;font-weight:${val?'600':'400'};${style}" title="${eff?'Customers see this section':'Hidden from customers'}"
+      onchange="cpaFeatureSet('${key}',${pid==null?'null':pid},${esc(JSON.stringify(tower||null))},this.value)">${opts}</select>`;
+  };
+  const head=['Section'].concat(proj?['Whole project'].concat(blocks):['All projects']);
+  const rows=cpaFeatureRows().map(f=>{
+    const note=CPA_FEATURE_NOTES[f.key]||'Ready.';
+    const warn=/^Not finished/.test(note);
+    return [`<div style="min-width:250px;max-width:340px"><b>${f.key==='login'?'<i class="fa-solid fa-right-to-bracket" style="color:#1d4ed8"></i> ':''}${esc(f.label)}</b>`+
+      `<div style="font-size:12px;line-height:1.45;margin-top:2px;color:${warn?'#b45309':'var(--slate)'}">${warn?'<i class="fa-solid fa-triangle-exclamation"></i> ':''}${esc(note)}</div></div>`]
+      .concat(proj?[cell(f.key,proj.id,null)].concat(blocks.map(b=>cell(f.key,proj.id,b))):[cell(f.key,null,null)]);
+  });
+  const projOpts=projects.map(p=>`<option value="${p.id}"${String(p.id)===CPA_FEAT_PROJ?' selected':''}>${esc(p.name)}</option>`).join('');
+  host.innerHTML=`<div class="sec-title" style="margin:0 0 6px">Customer Features</div>
+    <div style="font-size:13px;color:var(--slate);margin-bottom:12px;line-height:1.55">Choose which customers can sign in, and which sections they see. <b>Home</b> is always shown.
+      A block's setting beats its project's, and a project's beats the default for all projects. Customers see a change the next time they open or refresh the portal.
+      To check, use the <i class="fa-solid fa-eye"></i> preview on the Customers tab.</div>
+    <div class="mu-filters"><select id="cpaFeatProj" class="mu-sel" style="max-width:360px" onchange="CPA_FEAT_PROJ=this.value;route()">
+      <option value=""${CPA_FEAT_PROJ?'':' selected'}>Default — all projects</option>${projOpts}</select>
+      ${proj&&!blocks.length?'<span class="mu-count">This project has no blocks with a live flat yet.</span>':''}</div>
+    <div style="overflow-x:auto">${cpaTable(head,rows)}</div>`;
+}
+window.cpaFeatureSet=async function(key,pid,tower,value){
+  const rules=CPA.featureRules||[];
+  const own=rules.find(r=>r.feature===key&&(r.project_id||null)===(pid||null)&&(r.tower||null)===(tower||null));
+  let error;
+  if(value===''){ if(own)({error}=await sb.schema('cust').from('feature_access').delete().eq('id',own.id)); }
+  else{
+    const row={enabled:value==='on',updated_at:new Date().toISOString(),updated_by:state.email};
+    if(own)({error}=await sb.schema('cust').from('feature_access').update(row).eq('id',own.id));
+    else ({error}=await sb.schema('cust').from('feature_access').insert({...row,feature:key,project_id:pid,tower}));
+  }
+  if(error){ toast('Could not save: '+error.message,'err'); }
+  else{
+    const where=tower?tower:pid!=null?'the whole project':'all projects';
+    toast((cpaFeatureRows().find(f=>f.key===key)||{label:key}).label+': '+(value===''?'following the level above':value==='on'?'switched on':'switched off')+' for '+where,'ok');
+  }
+  route();
 };
 
 /* ---------- Tab 1: Projects & Units ---------- */
@@ -19078,15 +19216,11 @@ function cpaUnitList(){
     return [esc(u.unit_code),(u.projects&&u.projects.name)?cpaProjectChip(u.projects.name):'—',esc(u.tower||'—'),esc(u.unit_category||'—'),esc(u.unit_type||'—'),
       `<span class="tag t-blue">${esc(u.status||'—')}</span>`,
       c?`<span style="white-space:nowrap">${esc(c.full_name)}</span>`:'<span class="tag t-gray">Unassigned</span>',
-      u.floor_casting_completed_at?`<span class="tag t-green" style="white-space:nowrap">Cast ${fmtDateShort(u.floor_casting_completed_at)}</span>`:'<span class="tag t-amber">Pending</span>',
-      `<span style="display:inline-flex;gap:6px;white-space:nowrap">`+
-      `<button class="btn btn-sm" title="Edit unit" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`+
-      (u.floor_casting_completed_at?'':`<button class="btn btn-sm btn-primary" onclick="cpaMarkCasting(${u.id})">Mark cast</button>`)+
-      `</span>`];
+      `<button class="btn btn-sm" title="Edit unit" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`];
   });
   const cnt=$('cpaUnitCount');if(cnt)cnt.textContent=list.length+' of '+units.length;
-  $('cpaUnitList').innerHTML=cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer','Floor casting',''],
-    rows.length?rows:[['No units match this filter','','','','','','','','']]);
+  $('cpaUnitList').innerHTML=cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer',''],
+    rows.length?rows:[['No units match this filter','','','','','','','']]);
 }
 window.cpaProjectModal=function(id){
   const p=id?(CPA.projects||[]).find(x=>x.id===id):null;
@@ -19152,34 +19286,65 @@ window.cpaUnitSave=async function(id){
   if(error){toast('Save failed: '+error.message,'err');return;}
   closeModal();toast('Unit saved','ok');route();
 };
-window.cpaMarkCasting=async function(id){
-  if(!await confirmDialog('Mark this unit\u2019s floor casting as complete? Its construction-photo gallery becomes visible to the customer immediately.',{danger:false,okLabel:'Mark complete'}))return;
-  const {error}=await sb.schema('cust').from('units').update({floor_casting_completed_at:new Date().toISOString()}).eq('id',id);
-  if(error){toast('Failed: '+error.message,'err');return;}
-  toast('Floor casting marked complete','ok');route();
-};
-
 /* ---------- Tab 2: Customers ---------- */
 // A customer's project is not a column on the customer - it comes from the unit(s) they hold, and a
 // customer can legitimately hold units in more than one project. So both are derived per row rather
 // than stored, and the project filter asks "does this customer hold a unit HERE".
-let CPA_CUST_FILTER={proj:'',q:''};
+let CPA_CUST_FILTER={proj:'',block:'',q:''};
+/* Block = the unit's tower ("BLOCK B", "BLOCK-1"). Two projects can both have a "BLOCK A", so a block
+   is always kept together with its project: the option value is "<projectId>|<tower>", and with no
+   project picked the blocks are grouped under each project's name. */
+function cpaCustBlockKey(u){ return u.project_id+'|'+(u.tower||''); }
+function cpaCustBlockOpts(proj){
+  if(proj==='none') return '<option value="">All blocks</option>';
+  const natural=(a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'});
+  const byProj={};
+  (CPA.units||[]).forEach(u=>{
+    if(!u.tower||!u.customer_id||u.status==='cancelled')return;
+    if(proj&&String(u.project_id)!==proj)return;
+    (byProj[u.project_id]=byProj[u.project_id]||new Set()).add(u.tower);
+  });
+  const opt=(pid,t)=>`<option value="${esc(pid+'|'+t)}">${esc(t)}</option>`;
+  const projects=(CPA.projects||[]).filter(p=>byProj[p.id]);
+  const body=proj
+    ?[...(byProj[proj]||[])].sort(natural).map(t=>opt(proj,t)).join('')
+    :projects.map(p=>`<optgroup label="${esc(projShortName(p.name))}">${[...byProj[p.id]].sort(natural).map(t=>opt(p.id,t)).join('')}</optgroup>`).join('');
+  return '<option value="">All blocks</option>'+body;
+}
 async function cpaRenderCustomers(host){
-  const [customers,,projects]=await Promise.all([cpaCustomers(true),cpaUnits(true),cpaProjects(true)]);
+  const [customers,,projects,rulesRes,invRes]=await Promise.all([cpaCustomers(true),cpaUnits(true),cpaProjects(true),
+    sb.schema('cust').from('feature_access').select('*'),
+    sb.schema('cust').from('portal_invites').select('customer_id,status,error,sent_at,sent_by').order('sent_at',{ascending:false}).limit(5000)]);
+  CPA.featureRules=(rulesRes&&rulesRes.data)||[];
+  CPA.invites=(invRes&&invRes.data)||[];
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>
+  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap"><div class="sec-title" style="margin:0">Customers</div>
+    <span style="display:inline-flex;gap:8px"><button class="btn" onclick="cpaInviteModal()" title="Email the customers shown below an invitation to sign in to the portal"><i class="fa-solid fa-paper-plane"></i> Send invitation</button>
+    <button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></span></div>
     <div class="mu-filters">
-      <select id="cpaCustProj" class="mu-sel" onchange="cpaCustFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}<option value="none">— Cancelled / no unit (hidden by default) —</option></select>
+      <select id="cpaCustProj" class="mu-sel" onchange="cpaCustFilter(true)" style="max-width:320px"><option value="">All projects</option>${projOpts}<option value="none">— Cancelled / no unit (hidden by default) —</option></select>
+      <select id="cpaCustBlock" class="mu-sel" onchange="cpaCustFilter()" style="max-width:200px" title="Customers holding a flat in this block">${cpaCustBlockOpts(CPA_CUST_FILTER.proj)}</select>
       <span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="cpaCustQ" placeholder="Search name, email, phone or unit code" oninput="cpaCustFilter()"></span>
       <span class="mu-count" id="cpaCustCount"></span>
     </div>
     <div id="cpaCustList"></div>`;
-  cpaCustList();
   if(CPA_CUST_FILTER.proj)$('cpaCustProj').value=CPA_CUST_FILTER.proj;
+  if(CPA_CUST_FILTER.block){ $('cpaCustBlock').value=CPA_CUST_FILTER.block; if($('cpaCustBlock').value!==CPA_CUST_FILTER.block)CPA_CUST_FILTER.block=''; }
   if(CPA_CUST_FILTER.q)$('cpaCustQ').value=CPA_CUST_FILTER.q;
+  $('cpaCustBlock').disabled=CPA_CUST_FILTER.proj==='none';
+  cpaCustList();
 }
-window.cpaCustFilter=function(){
+window.cpaCustFilter=function(projChanged){
   CPA_CUST_FILTER.proj=$('cpaCustProj').value;
+  const sel=$('cpaCustBlock');
+  if(projChanged){
+    // A new project brings its own blocks; keep the chosen one only if it belongs to that project.
+    const keep=CPA_CUST_FILTER.block;
+    sel.innerHTML=cpaCustBlockOpts(CPA_CUST_FILTER.proj);
+    sel.value=keep; if(sel.value!==keep)sel.value='';
+    sel.disabled=CPA_CUST_FILTER.proj==='none';
+  }
+  CPA_CUST_FILTER.block=sel.value;
   CPA_CUST_FILTER.q=$('cpaCustQ').value.trim().toLowerCase();
   cpaCustList();
 };
@@ -19197,8 +19362,9 @@ function cpaCustUnitsByCustomer(){
   const by={};(CPA.units||[]).forEach(u=>{if(u.customer_id)(by[u.customer_id]=by[u.customer_id]||[]).push(u);});
   return by;
 }
-function cpaCustList(){
-  const all=CPA.customers||[],byCustomer=cpaCustUnitsByCustomer(),{proj,q}=CPA_CUST_FILTER;
+// The customers the current filters show - the list below, and exactly who "Send invitation" emails.
+function cpaCustFiltered(){
+  const all=CPA.customers||[],byCustomer=cpaCustUnitsByCustomer(),{proj,block,q}=CPA_CUST_FILTER;
   /* A customer with no unit holds no flat with us - a cancelled booking (Sales Details imports only
      Active rows, so cancellation leaves the customer behind without one) or a duplicate record left
      by an email that differed between exports. Neither belongs in the working list, so the default
@@ -19208,33 +19374,188 @@ function cpaCustList(){
     const mine=byCustomer[c.id]||[];
     if(proj==='none'){if(mine.length)return false;}
     else if(proj&&!mine.some(u=>String(u.project_id)===proj))return false;
+    // A flat they have cancelled does not put them in that block.
+    if(block&&proj!=='none'&&!mine.some(u=>u.status!=='cancelled'&&cpaCustBlockKey(u)===block))return false;
     if(q&&![c.full_name,c.email,c.phone].concat(mine.map(u=>u.unit_code)).join(' ').toLowerCase().includes(q))return false;
     return true;
   });
+  return {customers,list,byCustomer};
+}
+// Sign-in is the 'login' row of Customer Features, per project and block.
+function cpaCustCanSignIn(mine){
+  return mine.some(u=>u.status!=='cancelled'&&custFeatureOn(CPA.featureRules,'login',u.project_id,u.tower));
+}
+// Latest invitation per customer (cust.portal_invites), newest first.
+function cpaCustLastInvite(id){ return (CPA.invites||[]).find(r=>r.customer_id===id)||null; }
+function cpaCustList(){
+  const {customers,list,byCustomer}=cpaCustFiltered();
   const rows=list.map(c=>{
     const mine=byCustomer[c.id]||[];
     const projNames=[...new Set(mine.map(u=>(u.projects&&u.projects.name)||'').filter(Boolean))];
+    // Customers sign in with an emailed code (customer-invite edge function), so there is nothing for staff to create:
+    // this only says whether they can, whether they have been invited, and whether they have signed in.
+    const canSignIn=cpaCustCanSignIn(mine);
+    const inv=cpaCustLastInvite(c.id);
+    const loginTag=c.auth_user_id&&canSignIn?'<span class="tag t-green" title="Has signed in with an email code">Signed in</span>'
+      :canSignIn&&inv&&inv.status==='sent'?`<span class="tag t-amber" style="white-space:nowrap" title="Invitation emailed ${esc(fmtDate(inv.sent_at))} by ${esc(inv.sent_by||'')} - not signed in yet">Invited ${esc(fmtDateShort(inv.sent_at))}</span>`
+      :canSignIn&&inv&&inv.status==='failed'?`<span class="tag t-red" title="${esc(inv.error||'')}">Invite failed</span>`
+      :canSignIn?'<span class="tag t-blue" title="Can sign in with an email code - nothing to set up">Ready</span>'
+      :'<span class="tag t-gray" title="Customer sign-in is off for this flat\'s project or block (Customer Features tab)">Not live</span>';
     return [`<span style="white-space:nowrap">${esc(c.full_name)}</span>`,
       projNames.length?projNames.map(cpaProjectChip).join(' '):'<span class="tag t-amber">No unit</span>',
       mine.length?`<span style="white-space:nowrap">${mine.map(u=>esc(u.unit_code)+(u.tower?' <span style="color:var(--slate)">('+esc(u.tower)+')</span>':'')).join(', ')}</span>`:'—',
       esc(c.email),`<span style="white-space:nowrap">${esc(c.phone||'—')}</span>`,
-      c.auth_user_id?'<span class="tag t-green">Active</span>':'<span class="tag t-gray">None</span>',
+      loginTag,
       `<span style="display:inline-flex;gap:6px;white-space:nowrap">`+
       `<button class="btn btn-sm" title="Edit customer" onclick="cpaCustomerModal(${c.id})"><i class="fa-solid fa-pen"></i></button>`+
       `<button class="btn btn-sm" onclick="window.open('customer.html?as=${c.id}','_blank')" title="See exactly what this customer sees, without needing a customer login"><i class="fa-solid fa-eye"></i></button>`+
-      (c.auth_user_id?`<button class="btn btn-sm" title="Reset this customer's password" onclick="cpaSetPasswordModal(${c.id},true)">Reset</button>`:`<button class="btn btn-sm btn-primary" title="Create a portal login" onclick="cpaSetPasswordModal(${c.id},false)">Login</button>`)+
       `</span>`];
   });
   const cnt=$('cpaCustCount');if(cnt)cnt.textContent=list.length+' of '+customers.length;
   $('cpaCustList').innerHTML=cpaTable(['Name','Project','Unit','Email','Phone','Login','Actions'],
     rows.length?rows:[['No customers match this filter','','','','','','']]);
 }
+/* "Send invitation": emails the customers the filters currently show a "your portal is open - here is
+   how to sign in" email from customercare1@thejaingroup.com (customer-invite edge function, action
+   'invite'). Only customers who can actually sign in are sent it; anyone already invited or already
+   signed in is left out unless staff tick them back in. Sent in small batches so one slow reply from
+   Gmail cannot time the whole run out, and each email is recorded in cust.portal_invites. */
+const CPA_INVITE_HELP_KEY='cpa_invite_help';
+// Completes "If you have any trouble signing in, …" in the invitation (staff can change it per send).
+const CPA_INVITE_HELP_DEFAULT='please contact your relationship manager at 84205 41541 or customercare1@thejaingroup.com';
+function cpaInvitePlan(resend,includeSignedIn){
+  const {list,byCustomer}=cpaCustFiltered();
+  const send=[],skip={off:[],invited:[],signed:[]};
+  list.forEach(c=>{
+    const mine=byCustomer[c.id]||[];
+    if(!cpaCustCanSignIn(mine)){skip.off.push(c);return;}
+    if(c.auth_user_id&&!includeSignedIn){skip.signed.push(c);return;}
+    const inv=cpaCustLastInvite(c.id);
+    if(inv&&inv.status==='sent'&&!resend){skip.invited.push(c);return;}
+    send.push(c);
+  });
+  return {list,send,skip};
+}
+function cpaInviteScope(){
+  const {proj,block,q}=CPA_CUST_FILTER;
+  const p=(CPA.projects||[]).find(x=>String(x.id)===proj);
+  const parts=[p?projShortName(p.name):'All projects'];
+  if(block)parts.push(block.split('|').slice(1).join('|'));
+  if(q)parts.push('matching "'+q+'"');
+  return parts.join(' · ');
+}
+window.cpaInviteModal=function(){
+  let help='';try{help=localStorage.getItem(CPA_INVITE_HELP_KEY)||'';}catch(e){}
+  if(!help)help=CPA_INVITE_HELP_DEFAULT;
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-paper-plane"></i> Send portal invitation</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm" id="cpaInvBody">
+      <div style="font-size:13px;color:var(--slate);margin:-4px 0 10px">Customers shown: <b style="color:var(--ink)">${esc(cpaInviteScope())}</b>. Change the filters on the Customers list to pick a different group.</div>
+      <div id="cpaInvSummary"></div>
+      <label style="display:flex;gap:8px;align-items:center;font-weight:500;margin-top:10px"><input type="checkbox" id="cpaInvResend" onchange="cpaInviteRefresh()" style="width:auto"> Also send to customers invited before</label>
+      <label style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="cpaInvSigned" onchange="cpaInviteRefresh()" style="width:auto"> Also send to customers who have already signed in</label>
+      <label style="margin-top:12px">"If you have any trouble signing in, …"</label>
+      <input id="cpaInvHelp" maxlength="200" value="${esc(help)}" placeholder="${esc(CPA_INVITE_HELP_DEFAULT)}">
+      <div style="font-size:12px;color:var(--slate);margin-top:-6px">Finishes that sentence in the email. Leave empty to use: ${esc(CPA_INVITE_HELP_DEFAULT)}.</div>
+      <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#f8fafc;font-size:13px;line-height:1.55">
+        <div><b>From:</b> Jain Group Customer Care &lt;customercare1@thejaingroup.com&gt;</div>
+        <div><b>Subject:</b> Your Dream Gurukul home is now online – Jain Group Customer Portal</div>
+        <div style="color:var(--slate);margin-top:4px">Each customer gets their own email with their name and the email address they sign in with, the four sections they can see, the three sign-in steps and a button to the portal.</div>
+      </div>
+      <div id="cpaInvProgress" style="margin-top:12px"></div>
+    </div>
+    <div class="modal-foot" id="cpaInvFoot"><button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn" id="cpaInvTestBtn" onclick="cpaInviteTest()"><i class="fa-solid fa-flask"></i> Send a test to me</button>
+      <button class="btn btn-primary" id="cpaInvSendBtn" onclick="cpaInviteSend()"><i class="fa-solid fa-paper-plane"></i> Send</button></div>`);
+  cpaInviteRefresh();
+};
+window.cpaInviteRefresh=function(){
+  const plan=cpaInvitePlan($('cpaInvResend').checked,$('cpaInvSigned').checked);
+  const names=a=>a.slice(0,6).map(c=>esc(custFirstName(c.full_name)||c.full_name)).join(', ')+(a.length>6?' and '+(a.length-6)+' more':'');
+  const line=(n,txt,who)=>n?`<li style="margin:2px 0">${n} ${txt}${who?' <span style="color:var(--slate)">('+who+')</span>':''}</li>`:'';
+  // Which blocks those emails land in, so a send meant for one block cannot quietly go to a whole
+  // project (30 Sep: the list was left on "All projects" and the window offered all 89 in Gurukul).
+  const byCust=cpaCustUnitsByCustomer(),perBlock={};
+  plan.send.forEach(c=>{
+    const blocks=new Set((byCust[c.id]||[]).filter(u=>u.status!=='cancelled'&&custFeatureOn(CPA.featureRules,'login',u.project_id,u.tower))
+      .map(u=>projShortName(((CPA.projects||[]).find(p=>p.id===u.project_id)||{}).name||'')+' '+(u.tower||'')));
+    blocks.forEach(b=>{perBlock[b]=(perBlock[b]||0)+1;});
+  });
+  const natural=(a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'});
+  const blockKeys=Object.keys(perBlock).sort(natural);
+  const breakdown=blockKeys.length?`<div style="font-size:12.5px;color:var(--slate);margin-top:4px">${blockKeys.map(k=>esc(k)+': <b style="color:var(--ink)">'+perBlock[k]+'</b>').join(' · ')}</div>`:'';
+  const wide=blockKeys.length>1&&!CPA_CUST_FILTER.block;
+  const warn=wide?`<div style="margin-top:8px;padding:9px 12px;border-radius:9px;background:#fffbeb;border:1px solid #f0dfa8;color:#92400e;font-size:13px"><i class="fa-solid fa-triangle-exclamation"></i> This goes to <b>${blockKeys.length} blocks</b>. To invite one block only, close this, pick the project and block in the Customers filters, and open Send invitation again.</div>`:'';
+  $('cpaInvSummary').innerHTML=`<div style="font-size:15px"><b style="font-size:22px;color:#1d4ed8">${plan.send.length}</b> customer${plan.send.length===1?'':'s'} will be emailed</div>`+breakdown+warn+
+    `<ul style="margin:6px 0 0 18px;padding:0;font-size:13px;color:var(--ink)">`+
+    line(plan.skip.invited.length,'left out — already invited',names(plan.skip.invited))+
+    line(plan.skip.signed.length,'left out — already signed in',names(plan.skip.signed))+
+    line(plan.skip.off.length,'left out — sign-in is off for their flat (Customer Features)','')+
+    `</ul>`;
+  const b=$('cpaInvSendBtn');b.disabled=!plan.send.length;
+  b.dataset.armed='';b.classList.remove('btn-danger-solid');b.classList.add('btn-primary');
+  b.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send to '+plan.send.length;
+};
+async function cpaInviteCall(body){
+  const {data:{session}}=await sb.auth.getSession();
+  const res=await fetch(SUPABASE_URL+'/functions/v1/customer-invite',{method:'POST',
+    headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},
+    body:JSON.stringify(body)});
+  const out=await res.json().catch(()=>({}));
+  if(!res.ok||out.error)throw new Error(out.error||('HTTP '+res.status));
+  return out;
+}
+function cpaInviteHelp(){
+  const v=$('cpaInvHelp').value.trim().replace(/[.\s]+$/,'')||CPA_INVITE_HELP_DEFAULT;
+  try{localStorage.setItem(CPA_INVITE_HELP_KEY,v);}catch(e){}
+  return v;
+}
+window.cpaInviteTest=async function(){
+  const b=$('cpaInvTestBtn');b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending…';
+  try{ const out=await cpaInviteCall({action:'invite_test',helpLine:cpaInviteHelp()}); toast('Test sent to '+(out.to||'you')+' — check your inbox','ok'); }
+  catch(e){ toast('Test not sent: '+e.message,'err'); }
+  b.disabled=false;b.innerHTML='<i class="fa-solid fa-flask"></i> Send a test to me';
+};
+window.cpaInviteSend=async function(){
+  const plan=cpaInvitePlan($('cpaInvResend').checked,$('cpaInvSigned').checked);
+  if(!plan.send.length)return;
+  // Two clicks, inside this window: the first asks, the second sends. (confirmDialog would replace
+  // this window, and with it the progress bar.)
+  const sendBtn=$('cpaInvSendBtn');
+  if(!sendBtn.dataset.armed){
+    sendBtn.dataset.armed='1';sendBtn.classList.remove('btn-primary');sendBtn.classList.add('btn-danger-solid');
+    sendBtn.innerHTML='<i class="fa-solid fa-triangle-exclamation"></i> Yes, email '+plan.send.length+' customer'+(plan.send.length===1?'':'s')+' now';
+    return;
+  }
+  const helpLine=cpaInviteHelp();
+  ['cpaInvSendBtn','cpaInvTestBtn','cpaInvResend','cpaInvSigned','cpaInvHelp'].forEach(id=>{const b=$(id);if(b)b.disabled=true;});
+  const prog=$('cpaInvProgress');
+  const tally={sent:0,failed:0,skipped:0},fails=[];
+  const draw=done=>{ const pct=Math.round(done/plan.send.length*100);
+    prog.innerHTML=`<div style="height:8px;border-radius:6px;background:#e5e9f0;overflow:hidden"><div style="height:100%;width:${pct}%;background:#1d4ed8;transition:width .3s"></div></div>
+      <div style="font-size:13px;margin-top:6px">${done} of ${plan.send.length} — <b style="color:#15803d">${tally.sent} sent</b>${tally.failed?` · <b style="color:#b91c1c">${tally.failed} failed</b>`:''}${tally.skipped?` · ${tally.skipped} skipped`:''}</div>`; };
+  draw(0);
+  const ids=plan.send.map(c=>c.id);let stopped='';
+  for(let i=0;i<ids.length;i+=10){
+    const batch=ids.slice(i,i+10);
+    try{
+      const out=await cpaInviteCall({action:'invite',customerIds:batch,resend:$('cpaInvResend').checked,helpLine});
+      (out.results||[]).forEach(r=>{ tally[r.status]=(tally[r.status]||0)+1; if(r.status==='failed')fails.push(r.reason); });
+      // The function stops early when Gmail refuses (bad login, sending limit): stop here too.
+      if((out.results||[]).length<batch.length&&fails.length){stopped=fails[fails.length-1];}
+    }catch(e){ stopped=e.message; }
+    draw(Math.min(i+batch.length,ids.length));
+    if(stopped)break;
+  }
+  if(stopped) prog.insertAdjacentHTML('beforeend',`<div style="margin-top:8px;color:#b91c1c;font-size:13px"><i class="fa-solid fa-circle-exclamation"></i> Stopped: ${esc(stopped)}</div>`);
+  $('cpaInvFoot').innerHTML='<button class="btn btn-primary" onclick="closeModal();route()">Done</button>';
+  toast(tally.sent+' invitation'+(tally.sent===1?'':'s')+' sent'+(tally.failed?', '+tally.failed+' failed':''),tally.failed||stopped?'warn':'ok');
+};
 window.cpaCustomerModal=function(id){
   const c=id?(CPA.customers||[]).find(x=>x.id===id):null;
   openModal(`<div class="modal-head"><h3>${c?'Edit customer':'New customer'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
     <div class="modal-body frm"><label>Full name</label><input id="cpaCName" value="${c?esc(c.full_name):''}">
     <label>Email</label><input id="cpaCEmail" value="${c?esc(c.email):''}" ${c&&c.auth_user_id?'disabled':''}>
-    ${c&&c.auth_user_id?'<div style="font-size:12px;color:var(--slate);margin-top:-8px">Email is locked once a login has been created.</div>':''}
+    ${c&&c.auth_user_id?'<div style="font-size:12px;color:var(--slate);margin-top:-8px">Email is locked once the customer has signed in.</div>':''}
     <label>Phone</label><input id="cpaCPhone" value="${c?esc(c.phone||''):''}"></div>
     <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="cpaCustomerSave(${c?c.id:'null'})">Save</button></div>`);
 };
@@ -19249,38 +19570,6 @@ window.cpaCustomerSave=async function(id){
   }
   if(error){toast('Save failed: '+error.message,'err');return;}
   closeModal();toast('Customer saved','ok');route();
-};
-// No customer self-signup and no emailed reset link, by design — staff set the password directly
-// (typed or generated here) and hand it to the customer themselves. See customer-invite/index.ts.
-function cpaGenPassword(){
-  const chars='ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-  let out='';for(let i=0;i<10;i++)out+=chars[Math.floor(Math.random()*chars.length)];
-  return out;
-}
-window.cpaSetPasswordModal=function(id,isReset){
-  const c=(CPA.customers||[]).find(x=>x.id===id);
-  const pw=cpaGenPassword();
-  openModal(`<div class="modal-head"><h3>${isReset?'Reset password':'Create login'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
-    <div class="modal-body frm">
-    <p style="font-size:13px;color:var(--slate);margin:0 0 6px">${isReset?'This replaces the current password for':'Sets the initial login password for'} <b>${esc((c&&c.email)||'')}</b>. Share it with them directly — there is no email link.</p>
-    <label>Password</label>
-    <div style="display:flex;gap:8px"><input id="cpaSetPw" value="${esc(pw)}" style="flex:1"><button type="button" class="btn" onclick="$('cpaSetPw').value=cpaGenPassword()">Generate</button></div>
-    </div>
-    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="cpaSetPwBtn" onclick="cpaSetPasswordSave(${id})">${isReset?'Reset password':'Create login'}</button></div>`);
-};
-window.cpaSetPasswordSave=async function(id){
-  const password=$('cpaSetPw').value;
-  if(!password||password.length<6){toast('Password must be at least 6 characters','err');return;}
-  const btn=$('cpaSetPwBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';
-  try{
-    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
-    const res=await fetch(SUPABASE_URL+'/functions/v1/customer-invite',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({customerId:id,password})});
-    const out=await res.json().catch(()=>({}));
-    if(!res.ok||out.error){toast('Could not save password: '+(out.error||res.status),'err');btn.disabled=false;btn.innerHTML='Save';return;}
-    closeModal();
-    toast('Password set for '+(out.email||'this customer')+' — share it with them directly','ok');
-    route();
-  }catch(e){toast('Could not save password: '+e.message,'err');btn.disabled=false;btn.innerHTML='Save';}
 };
 
 /* ---------- Tab 3: Farvision Import ---------- */
@@ -19298,9 +19587,14 @@ function xlsxMergedLabel(ws,rows,r,c){
   for(const m of merges){ if(r>=m.s.r&&r<=m.e.r&&c>=m.s.c&&c<=m.e.c){ const a=rows[m.s.r]&&rows[m.s.r][m.s.c]; return a!=null?a:null; } }
   return direct;
 }
+// A Date cell is read off its LOCAL calendar day, nudged half a minute forward first - never via
+// toISOString(). The reader builds a cell's Date at local midnight minus a few seconds, so in India
+// the UTC string is the previous day: every invoice, receipt and transfer the Gmail queue imported
+// was landing one day early (Farvision 14 Jul, portal 13 Jul). Same trap as misCellDate above.
 function xlsxExcelDate(v){
   if(v==null||v==='') return null;
-  if(v instanceof Date) return v.toISOString().slice(0,10);
+  if(v instanceof Date){ if(isNaN(v)) return null; const t=new Date(v.getTime()+30000);
+    return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0'); }
   if(typeof v==='number'){ const d=window.XLSX&&XLSX.SSF&&XLSX.SSF.parse_date_code(v); if(d) return d.y+'-'+String(d.m).padStart(2,'0')+'-'+String(d.d).padStart(2,'0'); }
   if(typeof v==='string'){ const d=new Date(v); if(!isNaN(d)) return d.toISOString().slice(0,10); }
   return null;
@@ -19411,13 +19705,18 @@ function cpaParseReceiptReversal(wb){
     narration:get('Narration'),bankDescription:get('Bank Description'),reason:get('Reason'),
   }));
 }
+// Farvision's Booking Register Summary names these columns "Booking Status", "Unit" and "Document
+// Date". This used to read "Status", "Unit Code" and "Booking Date", which the report does not have,
+// so every row came back with no status and a booking cancelled or transferred in Farvision (Arup
+// Bhawal's D/8G -> D/8H, 26.09.2026) stayed live in the portal. "Booking Status" is now required, so
+// a renamed column stops the import instead of quietly reading nothing.
 function cpaParseBookingRegister(wb){
-  return cpaParseFlatSheet(wb,'Booking Id',['Booking Id','Business Unit']).map(get=>({
+  return cpaParseFlatSheet(wb,'Booking Id',['Booking Id','Business Unit','Booking Status']).map(get=>({
     businessUnit:get('Business Unit'),bookingId:get('Booking Id'),
     bookingNo:get('Booking No')!=null?String(get('Booking No')):null,
-    customerName:get('Customer Name'),status:get('Status'),
-    unitCode:get('Unit Code'),tower:get('Level3'),
-    bookingDate:xlsxExcelDate(get('Booking Date')),
+    customerName:get('Customer Name'),status:String(get('Booking Status')||'').trim()||null,
+    unitCode:get('Unit')!=null?String(get('Unit')):null,tower:get('Level3'),
+    bookingDate:xlsxExcelDate(get('Document Date')),
   }));
 }
 // Farvision's PTC (Payment To Customer) register - booking transfers and refunds. Filed under the
@@ -19518,7 +19817,8 @@ window.cpaQueueImport=async function(queueId){
     const {data:blob,error:dlErr}=await sb.storage.from('farvision-imports').download(q.storage_path);
     if(dlErr||!blob)throw new Error(dlErr?.message||'Download failed');
     const buf=await blob.arrayBuffer();
-    const wb=XL.read(new Uint8Array(buf),{cellDates:true});
+    // Serials, not Dates - the same as a manual upload, and read to the exact day by xlsxExcelDate.
+    const wb=XL.read(new Uint8Array(buf),{type:'array'});
     // Detect type
     const {rows}=xlsxSheetRows(wb);
     let type=null;
@@ -19548,10 +19848,11 @@ window.cpaQueueImport=async function(queueId){
     // Match to projects/units (only registered projects pass through)
     const projects=await cpaProjects();
     const units=await cpaUnits();
-    const matched=[],unmatched=[];
+    const matched=[],unmatched=[],fileProjectIds=new Set();
     for(const rec of parsed){
       const project=cpaResolveProject(projects,rec.businessUnit);
       if(!project){unmatched.push(rec);continue;}
+      fileProjectIds.add(project.id);
       if(type==='sales_details'){matched.push({project,rec});}
       else if(type==='ptc_transfer'){
         // See the note in cpaImportPreviewXlsx: neither side is required alone, only that at least
@@ -19570,7 +19871,7 @@ window.cpaQueueImport=async function(queueId){
     }
     if(!matched.length) throw new Error('No rows matched registered projects ('+unmatched.length+' unmatched)');
     // Import using existing confirm logic
-    const st={type,fileName:q.file_name,parsedCount:parsed.length,matched,unmatched};
+    const st={type,fileName:q.file_name,parsedCount:parsed.length,matched,unmatched,fileProjectIds:[...fileProjectIds]};
     CPA_IMPORT_STATE=st;
     window._cpaQueueId=queueId;
     if(CPA_XLSX_IMPORT_TYPES.has(type)) await cpaImportConfirmXlsx(st);
@@ -19657,10 +19958,11 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
   }catch(e){toast(e.message,'err');return;}
   if(!parsed.length){toast('No data rows found in that file','err');return;}
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
-  const matched=[],unmatched=[],outOfScope=[];
+  const matched=[],unmatched=[],outOfScope=[],fileProjectIds=new Set();
   parsed.forEach(rec=>{
     const project=cpaResolveProject(projects,rec.businessUnit);
     if(!project){ outOfScope.push(rec); return; } // a project we don't manage in the portal yet - not an error
+    fileProjectIds.add(project.id);
     if(type==='sales_details'){
       if(rec.status!=='Active'){ return; } // cancelled bookings don't get a portal unit
       matched.push({rec,project});
@@ -19685,7 +19987,13 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
     if(!unit){ unmatched.push(rec); return; }
     matched.push({rec,project,unit});
   });
-  CPA_IMPORT_STATE={type,fileName:file.name,parsedCount:parsed.length,matched,unmatched,outOfScope};
+  CPA_IMPORT_STATE={type,fileName:file.name,parsedCount:parsed.length,matched,unmatched,outOfScope,fileProjectIds:[...fileProjectIds]};
+  // Shown before Confirm: flats whose customer the import will deliberately NOT change.
+  let sdNote='';
+  if(type==='sales_details'){
+    const sdCustomers=await cpaCustomers(true);
+    sdNote=cpaSdFlagNote(matched.map(m=>cpaSdCustomerGuard(m.rec,units,sdCustomers).flag).filter(Boolean));
+  }
   const sampleCols=type==='sales_details'?['Booking No','Customer','Unit','Tower','Project','Cost items']
     :type==='outstanding'?['Booking No','Customer','Unit','Net Outstanding','On Account']
     :type==='invoice_register'?['Doc No','Date','Booking No','Customer','Unit','Schedule','Amount']
@@ -19703,6 +20011,7 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
   $('cpaImpPreview').innerHTML=`<div class="card card-pad">
     <div class="sec-title" style="margin:0 0 10px">Preview — ${parsed.length} row(s), ${matched.length} ready to import${unmatched.length?`, <span style="color:#c83232">${unmatched.length} unmatched</span>`:''}${outOfScope.length?`, ${outOfScope.length} for a project not yet in the portal`:''}</div>
     ${unmatched.length?`<div style="font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #f0dfa8;border-radius:8px;padding:8px 10px;margin-bottom:10px">Could not resolve a unit for: ${esc(unmatched.slice(0,15).map(r=>r.bookingNo||r.unitCode).join(', '))}${unmatched.length>15?' …':''} — run a Sales Details import for these first.</div>`:''}
+    ${sdNote}
     ${matched.length?mTable(sampleCols,sampleRows):''}
     <div style="margin-top:12px;display:flex;gap:10px"><button class="btn" onclick="$('cpaImpPreview').innerHTML=''">Cancel</button>
     ${matched.length?`<button class="btn btn-primary" onclick="cpaImportConfirm(this)"><i class="fa-solid fa-check"></i> Confirm import (${matched.length} row${matched.length>1?'s':''})</button>`:''}
@@ -19791,6 +20100,33 @@ async function cpaCurrentByKey(table,keyCol,matched){
   }
   return map;
 }
+/* Who a Sales Details row's flat should belong to, without letting a routine re-import move an
+   existing flat away from the customer who already logs in to it.
+     * Same booking, email left blank in Farvision -> keep the flat's current customer. (It used to be
+       set to nobody, and the customer lost the flat from their portal.)
+     * Same booking, email different from the current customer's -> keep the current customer and
+       flag it. A new email on the SAME booking is an edit in Farvision, not a new buyer - moving the
+       flat would create a second customer and leave the real one's login empty. Staff decide.
+     * A different booking on the flat (a rebooking - the old buyer's row matched by tower/unit) or a
+       brand-new flat -> the file's email decides, as before: that is a genuinely different buyer.
+   Returns {keep: customerId|null, flag: null|{bookingNo, name, current, file}}; keep=null means
+   "resolve by the file's email". */
+function cpaSdCustomerGuard(r,units,customers){
+  const byBooking=r.bookingNo?units.find(u=>u.booking_no===r.bookingNo):null;
+  if(!byBooking||!byBooking.customer_id) return {keep:null,flag:null};
+  const norm=s=>String(s||'').trim().toLowerCase();
+  if(!norm(r.email)) return {keep:byBooking.customer_id,flag:null};
+  const cur=customers.find(c=>c.id===byBooking.customer_id);
+  if(!cur||norm(cur.email)===norm(r.email)) return {keep:null,flag:null};
+  return {keep:byBooking.customer_id,flag:{bookingNo:r.bookingNo,name:r.customerName,unit:byBooking.unit_code,current:cur.email,file:r.email}};
+}
+function cpaSdFlagNote(flags){
+  if(!flags.length) return '';
+  return '<div style="font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #f0dfa8;border-radius:8px;padding:8px 10px;margin-bottom:10px">'
+    +'<b>Email changed in Farvision - please check.</b> These flats were kept with their current customer so nobody loses access: '
+    +flags.map(f=>esc(f.name)+' ('+esc(f.unit||f.bookingNo)+'): portal '+esc(f.current)+' → Farvision '+esc(f.file)).join('; ')
+    +'. If the new email is right, update it on the customer in Customer Portal Admin.</div>';
+}
 async function cpaImportConfirmXlsx(st){
   // No project_id: an .xlsx report resolves a project per row from its own Business Unit column, so
   // one file can span several projects at once. project_names records the set it actually touched.
@@ -19804,12 +20140,16 @@ async function cpaImportConfirmXlsx(st){
   const batchId=batch.id;
 
   if(st.type==='sales_details'){
+    const sdCustomers=await cpaCustomers(true), sdFlags=[];
     for(const m of st.matched){
       const r=m.rec;
       // Customers are matched by email — the only field guaranteed to identify one person across
       // bookings; a row with no email can't be created here (it also couldn't get a portal login).
-      let customerId=null;
-      if(r.email){
+      // cpaSdCustomerGuard first: an existing flat never loses its customer to a blank or edited email.
+      const guard=cpaSdCustomerGuard(r,await cpaUnits(),sdCustomers);
+      if(guard.flag) sdFlags.push(guard.flag);
+      let customerId=guard.keep;
+      if(customerId==null&&r.email){
         const {data:existing}=await sb.schema('cust').from('customers').select('id').ilike('email',r.email).is('deleted_at',null).maybeSingle();
         if(existing) customerId=existing.id;
         else{
@@ -19842,6 +20182,13 @@ async function cpaImportConfirmXlsx(st){
         booking_date:r.bookingDate,agreement_date:r.agreementDate,is_current:true,import_batch_id:batchId});
       if(ceErr)throw ceErr;
     }
+    // The queue import has no preview screen, so the warning has to reach staff here as well.
+    st.sdFlags=sdFlags;
+    if(sdFlags.length){
+      console.warn('Sales Details: email changed in Farvision, flat kept with its current customer',sdFlags);
+      toast(sdFlags.length+' flat'+(sdFlags.length===1?'':'s')+' kept with the current customer - email changed in Farvision ('
+        +sdFlags.map(f=>f.name+' '+(f.unit||f.bookingNo)).join(', ')+'). Please check.','warn');
+    }
   }else if(st.type==='outstanding'){
     for(const m of st.matched){
       const r=m.rec;
@@ -19849,6 +20196,20 @@ async function cpaImportConfirmXlsx(st){
       const {error}=await sb.schema('cust').from('outstanding_snapshot').insert({unit_id:m.unit.id,as_on_date:new Date().toISOString().slice(0,10),
         total_consideration:r.totalConsideration,bill_outstanding:r.billOutstanding,on_account:r.onAccount,
         net_outstanding:r.netOutstanding,late_fee_accrued:r.lateFee,no_of_bills:r.noOfBills,is_current:true,import_batch_id:batchId});
+      if(error)throw error;
+    }
+    /* Farvision leaves a flat out of the Outstanding Summary once nothing is outstanding. Without this
+       its last snapshot stayed current: Mohmmad Anwar (Gateway 1E) cleared 31,44,019 on 29 Sep and was
+       absent from the 30 Sep file, yet his home screen kept showing that amount as due. So every flat
+       of a project this file covers that is not in it loses its snapshot, and the portal falls back to
+       the Sales Details cost sheet, as it already does for fully-paid flats. Projects the file does not
+       cover at all are left alone, so a single-project export cannot wipe the others. */
+    const inFile=new Set(st.matched.map(m=>m.unit.id));
+    const projIds=new Set(st.fileProjectIds||st.matched.map(m=>m.project.id));
+    const gone=(await cpaUnits(true)).filter(u=>projIds.has(u.project_id)&&!inFile.has(u.id)).map(u=>u.id);
+    for(let i=0;i<gone.length;i+=200){
+      const {error}=await sb.schema('cust').from('outstanding_snapshot').update({is_current:false})
+        .in('unit_id',gone.slice(i,i+200)).eq('is_current',true);
       if(error)throw error;
     }
   }else if(st.type==='invoice_register'){
@@ -19942,10 +20303,16 @@ async function cpaImportConfirmXlsx(st){
       if(error)throw error;
     }
   }else if(st.type==='booking_register'){
+    // Only the two moves this report actually knows about: Cancel cancels, and Active brings back a
+    // unit wrongly left cancelled. 'registered' / 'possession' are set by staff and are not this
+    // report's to overwrite, and a row with no readable status changes nothing.
     for(const m of st.matched){
       const r=m.rec;
-      const newStatus=r.status==='Cancel'?'cancelled':'booked';
-      await sb.schema('cust').from('units').update({status:newStatus,updated_at:new Date().toISOString()}).eq('id',m.unit.id);
+      const newStatus=r.status==='Cancel'?'cancelled'
+        :(r.status==='Active'&&m.unit.status==='cancelled')?'booked':null;
+      if(!newStatus||newStatus===m.unit.status) continue;
+      const {error}=await sb.schema('cust').from('units').update({status:newStatus,updated_at:new Date().toISOString()}).eq('id',m.unit.id);
+      if(error)throw error;
     }
   }else if(st.type==='ptc_transfer'){
     // ptc_transfers_doc_uq is a PARTIAL unique index (WHERE deleted_at is null) - same reason
@@ -20107,7 +20474,16 @@ function cpaPhCss(){return `<style>
   .cph-zn{margin-left:auto;font-size:11px;font-weight:700;color:#16a34a;background:#f0fdf4;
     border:1px solid #bbf7d0;border-radius:999px;padding:1px 7px}
   .cph-zbody{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:4px;color:var(--slate);font-size:11.5px;padding:0 10px;text-align:center}
+    gap:5px;color:var(--slate);font-size:11.5px;padding:0 10px 8px;text-align:center}
+  /* Camera / Video / Gallery - icon over label so three fit a 200px zone */
+  .cph-zbtns{display:flex;gap:6px;width:100%}
+  .cph-zb{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    height:48px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);cursor:pointer;
+    font:600 11.5px Segoe UI,Arial,sans-serif;padding:0 4px}
+  .cph-zb i{font-size:15px;color:var(--brand)}
+  .cph-zb:hover{border-color:var(--brand);background:#eff6ff}
+  .cph-zb:active{background:#dbeafe}
+  .cph-zhint{font-size:11px}
   /* the only scrolling part of the screen */
   /* ── what you have chosen but not yet sent: pictures, not filenames ──
      A filename tells you nothing about whether you picked the right photo. These are the real
@@ -20181,6 +20557,38 @@ function cpaPhCss(){return `<style>
   .cph-areahead{font-size:11.5px;font-weight:700;color:var(--ink);margin:12px 0 7px;display:flex;align-items:center;gap:7px}
   .cph-areahead .n{font-weight:500;color:var(--slate)}
   @media(max-width:820px){.cph-bar{align-items:stretch}.cph-pick{width:100%}}
+  /* Phone - mostly site staff standing in the flat. Full-width tap targets, 16px controls (smaller
+     makes iOS zoom on focus), zones stacked, and the uploaded list reflowed into rows of
+     thumbnail | details | delete instead of a table squeezed sideways. */
+  @media(max-width:760px){
+    .cph-card{padding:12px}
+    .cph-levels{width:100%;box-sizing:border-box}
+    .cph-lv{flex:1;justify-content:center;padding:10px 6px}
+    .cph-f{flex:1 1 100%;min-width:0;max-width:none!important}
+    .cph-sel select,.cph-in{height:46px;font-size:16px}
+    .cph-zones{grid-template-columns:1fr!important}
+    .cph-zone{height:auto;min-height:0}
+    .cph-zb{height:56px;font-size:13px}
+    .cph-zb i{font-size:18px}
+    .cph-zhint{display:none}
+    .cph-acts .btn{flex:1;justify-content:center;min-height:48px;font-size:15px}
+    .cph-acts span{flex-basis:100%}
+    .cph-filters .cph-f{flex:1 1 calc(50% - 5px)}
+    .cph-fcount{margin-left:0;padding-bottom:0;flex-basis:100%}
+    .cph-review{max-height:none}
+    .cph-tbl,.cph-tbl tbody{display:block;width:100%}
+    .cph-tbl thead{display:none}
+    .cph-tbl tr{display:grid;grid-template-columns:56px minmax(0,1fr) auto;column-gap:12px;row-gap:0;
+      align-items:center;padding:10px 2px;border-bottom:1px solid var(--line)}
+    .cph-tbl tr:last-child{border-bottom:0}
+    .cph-tbl td{display:block;padding:1px 0;border:0;grid-column:2;min-width:0;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .cph-tbl td:first-child{grid-column:1;grid-row:1/span 20;padding:0}
+    .cph-tbl td:last-child{grid-column:3;grid-row:1/span 20;padding:0}
+    .cph-th{width:56px;height:56px}
+    .cph-rm{width:40px;height:40px;font-size:13px}
+    .cph-box{padding:12px}
+  }
 </style>`;}
 
 async function cpaRenderPhotos(host){
@@ -20275,8 +20683,11 @@ function cpaPhZone(key,title,icon){
       +'<span class="cph-zt">'+esc(title)+'</span>'
       +(n?'<span class="cph-zn">'+n+'</span>':'')
     +'</div>'
-    +'<div class="cph-zbody"><i class="fa-solid fa-arrow-down-to-line" style="font-size:15px"></i>'
-      +'<div>'+(n?'Drop more, or click':'Drop files here, or click')+'</div></div>'
+    +'<div class="cph-zbody"><div class="cph-zbtns">'
+      +'<button type="button" class="cph-zb" onclick="cpaPhPick(\''+key+'\',\'photo\',event)"><i class="fa-solid fa-camera"></i>Camera</button>'
+      +'<button type="button" class="cph-zb" onclick="cpaPhPick(\''+key+'\',\'video\',event)"><i class="fa-solid fa-video"></i>Video</button>'
+      +'<button type="button" class="cph-zb" onclick="cpaPhPick(\''+key+'\',\'gallery\',event)"><i class="fa-solid fa-images"></i>Gallery</button>'
+      +'</div><div class="cph-zhint">'+(n?'Add more, or drop files here':'or drop files here')+'</div></div>'
     +'</div>';
 }
 
@@ -20346,17 +20757,26 @@ function cpaPhStaged(){
    the markup so that choosing a second batch ADDS to the first instead of replacing it - a plain
    <input type=file> forgets everything it held the moment you pick again, which is why adding
    "just one more photo" used to silently drop the rest. */
+/* Camera / Video open the phone's camera straight away (capture="environment" = the rear camera);
+   Gallery is the multi-select picker. On a computer, capture is ignored and all three open the file
+   picker. Every capture goes through cpaPhAdd, so shooting five photos one after another adds five,
+   the same as picking five. */
+window.cpaPhPick=function(key,mode,ev){
+  if(ev) ev.stopPropagation();
+  const inp=document.createElement('input');
+  inp.type='file';
+  if(mode==='gallery'){ inp.multiple=true; inp.accept='image/*,video/*'; }
+  else{ inp.accept=mode==='video'?'video/*':'image/*'; inp.setAttribute('capture','environment'); }
+  inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); };
+  inp.click();
+};
 function cpaPhWireZones(){
   Array.prototype.forEach.call(document.querySelectorAll('.cph-zone'),function(z){
     const key=z.getAttribute('data-zone');
-    const open=function(){
-      const inp=document.createElement('input');
-      inp.type='file'; inp.multiple=true; inp.accept='image/*,video/*';
-      inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); };
-      inp.click();
-    };
+    const open=function(){ cpaPhPick(key,'gallery'); };
     z.onclick=open;
-    z.onkeydown=function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } };
+    // Enter on one of the zone's own buttons is that button's click - not the zone's as well.
+    z.onkeydown=function(e){ if(e.target!==z) return; if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } };
     z.ondragover=function(e){ e.preventDefault(); z.classList.add('over'); };
     z.ondragleave=function(){ z.classList.remove('over'); };
     z.ondrop=function(e){
@@ -21077,7 +21497,11 @@ async function custLoadData(customerId,force){
   // see boot() above) has full staff_all read access to every cust.* row, so without this filter a
   // preview would show every customer's units mixed together instead of just the one being previewed.
   if(CUST_DATA&&CUST_DATA.customerId===customerId&&!force)return CUST_DATA;
-  const {data:units}=await sb.schema('cust').from('units').select('*, projects(id,name)').eq('customer_id',customerId).order('id');
+  // Live flats only. A cancelled booking keeps its unit row (audit, and the money that moved off it),
+  // but it is not the customer's flat any more - Arup Bhawal's D/8G stayed in his "Viewing" list
+  // after he moved to D/8H, beside the flat he actually owns.
+  const {data:units}=await sb.schema('cust').from('units').select('*, projects(id,name)').eq('customer_id',customerId)
+    .neq('status','cancelled').is('deleted_at',null).order('id');
   const list=units||[];
   const unitIds=list.map(u=>u.id);
   let contacts=[];
@@ -21095,7 +21519,17 @@ async function custLoadData(customerId,force){
     const {data:ref}=await sb.schema('cust').from('referrals').select('id').in('unit_id',unitIds).limit(1);
     hasReferred=!!(ref&&ref.length);
   }else hasReferred=false;
-  CUST_DATA={customerId,units:list,contactByUnit,hasReferred};
+  // The section rules for these flats' projects plus the all-projects default. If they can't be read,
+  // featureRules stays empty and only the CUST_FEATURE_FALLBACK sections show.
+  let featureRules=[];
+  try{
+    const pids=[...new Set(list.map(u=>u.project_id))];
+    let q=sb.schema('cust').from('feature_access').select('feature,project_id,tower,enabled');
+    q=pids.length?q.or('project_id.is.null,project_id.in.('+pids.join(',')+')'):q.is('project_id',null);
+    const {data,error}=await q;
+    if(!error)featureRules=data||[];
+  }catch(e){}
+  CUST_DATA={customerId,units:list,contactByUnit,hasReferred,featureRules};
   return CUST_DATA;
 }
 window.custSwitchUnit=function(id){CUST_SELECTED_UNIT=Number(id);route();};
@@ -21302,17 +21736,22 @@ async function custTabOverview(data,unit){
     const osScheds=osItems.filter(o=>o.document_no===lastInv.document_no&&o.schedule).map(o=>o.schedule);
     const schedules=[...new Set(osScheds)];
     dueBanner=`<div class="card card-pad" style="background:${days!=null&&days<0?'#fef2f2':'#eff4ff'};border-color:${days!=null&&days<0?'#fecaca':'#cfe0ef'};margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <div><i class="fa-solid fa-file-invoice-dollar" style="color:${days!=null&&days<0?'#c83232':'#1d4ed8'}"></i> <b>Demand due — ${custInr(billOutstanding)}</b> <span style="color:var(--slate);font-size:13px">${esc(schedules.join(', ')||lastInv.document_no||'')}${lastInv.due_date?' · due '+fmtDate(lastInv.due_date):''}</span></div>
+      <div><i class="fa-solid fa-file-invoice-dollar" style="color:${days!=null&&days<0?'#c83232':'#1d4ed8'}"></i> <b>Amount due now — ${custInr(billOutstanding)}</b> <span style="color:var(--slate);font-size:13px">${esc(schedules.join(', ')||lastInv.document_no||'')}${lastInv.due_date?' · due '+fmtDate(lastInv.due_date):''}</span></div>
       ${dueText?`<span class="tag ${days!=null&&days<0?'t-red':'t-blue'}">${esc(dueText)}</span>`:''}
     </div>`;
   }
 
   const gate=await custReconGate(unit.id);
+  /* Named for the customer, not the accounts team. "Property value", "Demand due" and "Remaining"
+     read as three versions of one number; these say what each one is, and the small line under
+     Balance to pay ties the row together: Total flat cost = Amount paid + Balance to pay, and the
+     balance already includes what is due now. */
   const kpis=[
-    ['Property value',custInr(propertyValue),snap?'as recorded with us':'agreement value'],
-    ['Paid to date',custInr(totalReceivedFinal),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
-    ['Demand due',custInr(billOutstanding),billOutstanding>0?(lastInv?esc(lastInv.document_no||''):'against raised invoices'):'nothing currently due',billOutstanding>0?'#e08600':'#16855a'],
-    ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':'against full agreement value')]
+    ['Total flat cost',custInr(propertyValue),'incl. GST and all charges'],
+    ['Amount paid',custInr(totalReceivedFinal),paidPct+'% of total cost'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
+    ['Amount due now',custInr(billOutstanding),billOutstanding>0?'billed to you, not yet paid':'nothing to pay right now',billOutstanding>0?'#e08600':'#16855a'],
+    ['Balance to pay',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':
+      (billOutstanding>0?'incl. '+custInr(billOutstanding)+' due now; rest billed as work progresses':'billed as construction progresses'))]
   ];
   // Every figure here derives from the same imported rows, so if the unit does not reconcile there is
   // no subset of them that is safe to keep showing.
@@ -21408,7 +21847,7 @@ async function custTabOverview(data,unit){
      not a payment position. */
   const moneySections=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
-    '<a href="javascript:void(0)" onclick="navTo(\'customer/3\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
+    (custTabAllowed(3,unit)?'<a href="javascript:void(0)" onclick="navTo(\'customer/3\')" style="font-size:12.5px;font-weight:600">View full ledger →</a>':'')+'</div>'+
     (recentRows.length?mTable(['Date','Type','Details','Debit','Credit'],recentRows):
       '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>')+
     costSheetSection+
@@ -21441,10 +21880,10 @@ window.custPrintStatement=function(){
     '<h1>Statement of Account — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · '+esc((snap.c&&snap.c.contact_name)||'')+' · as on '+fmtDate(new Date())+'</h2>'+
     '<div class="kpis">'+
-      '<div class="kpi"><div class="lbl">Property value</div><div class="val">'+custInr(snap.propertyValue)+'</div></div>'+
-      '<div class="kpi"><div class="lbl">Paid to date</div><div class="val">'+custInr(snap.totalReceived)+'</div></div>'+
-      '<div class="kpi"><div class="lbl">Demand due</div><div class="val">'+custInr(snap.billOutstanding)+'</div></div>'+
-      '<div class="kpi"><div class="lbl">Remaining</div><div class="val">'+custInr(snap.remaining)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Total flat cost</div><div class="val">'+custInr(snap.propertyValue)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Amount paid</div><div class="val">'+custInr(snap.totalReceived)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Amount due now</div><div class="val">'+custInr(snap.billOutstanding)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Balance to pay</div><div class="val">'+custInr(snap.remaining)+'</div></div>'+
     '</div>'+
     (tableHtml||'<p>No transactions recorded yet.</p>')+
     '</body></html>';
@@ -22159,12 +22598,48 @@ window.custPrintInvoice=function(){
   setTimeout(function(){try{w.focus();w.print();}catch(_e){}},350);
 };
 
+/* Cost sheet rows with a Rate, as the CRM cost sheet prints them.
+   RATE is per sq ft of super built-up area - how the CRM's 5150 / 350 / 100 come out of
+   48,92,500 / 3,32,500 / 95,000 on 950 sq ft. Farvision's files carry no per-charge rate, so it is
+   worked out from the amount:
+     * Unit Cost, Floor Escalation (FLC) and PLC always have one - the CRM prices all three per
+       sq ft - even when a discount leaves paise (FLC 2,49,536 on 860 sq ft = 290.16);
+     * any other charge shows one only when it divides by the area into whole rupees - legal 25,
+       generator 35, club infrastructure 65... A lump sum (association formation 15,000, cheque
+       dishonoured 2,000) does not, and shows "-";
+     * parking never does: it is priced per slot, and 4,00,000 on a 1,000 sq ft flat would
+       otherwise read as a rate of 400.
+   A table shows the Rate column only if at least one of its rows has a rate.
+   DREAM ANANTA's CRM sheet prints Unit Cost, Floor Escalation (FLC), PLC and Vehicle Parking as ONE
+   line, "Unit Price (Add On Premium Specification Pack)" (D/8G: 58,20,000 on 950 sq ft = 6,126.32).
+   Every other project keeps Farvision's own line-by-line split. */
+const CUST_ANANTA_UNIT_PRICE=/^unit cost$|flc charges|plc charge|vehicle parking/i;
+function custCostRows(unit,list,isUnitGroup){
+  const sbu=Number(unit.super_built_up_area_sqft||0);
+  const sum=(l,k)=>l.reduce((s,i)=>s+Number(i[k]||0),0);
+  const itemRate=i=>{const amt=Number(i.amount||0);
+    if(!sbu||!amt||/parking/i.test(i.component||'')) return null;
+    const r=amt/sbu;
+    if(/^unit cost$|flc charge|plc charge/i.test(String(i.component||'').trim())) return r;
+    return Math.abs(r-Math.round(r))<1e-9?Math.round(r):null;};
+  let rows;
+  const isAnanta=/^dream ananta$/i.test(String((unit.projects&&unit.projects.name)||'').trim());
+  if(isUnitGroup&&isAnanta){
+    const price=list.filter(i=>CUST_ANANTA_UNIT_PRICE.test(i.component||''));
+    const rest=list.filter(i=>!CUST_ANANTA_UNIT_PRICE.test(i.component||''));
+    rows=(price.length?[{label:'Unit Price (Add On Premium Specification Pack)',amount:sum(price,'amount'),tax:sum(price,'tax_amount'),
+        rate:sbu?sum(price,'amount')/sbu:null}]:[])
+      .concat(rest.map(i=>({label:i.component,amount:Number(i.amount||0),tax:Number(i.tax_amount||0),rate:itemRate(i)})));
+  }else rows=list.map(i=>({label:i.component,amount:Number(i.amount||0),tax:Number(i.tax_amount||0),rate:itemRate(i)}));
+  return {showRate:rows.some(r=>r.rate!=null),rows,amount:sum(list,'amount'),tax:sum(list,'tax_amount')};
+}
+function custFmtRate(r){return r==null?'—':Number(r).toLocaleString('en-IN',{maximumFractionDigits:2});}
 async function custTabCostSheet(data,unit){
   const c=data.contactByUnit[unit.id];
   const [{data:costItemRows},{data:invRows},{data:uploadedDocs}]=await Promise.all([
     sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
     sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_type,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
-    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false})
+    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').is('deleted_at',null).order('created_at',{ascending:false})
   ]);
   const items=costItemRows||[], invoices=invRows||[], uploaded=uploadedDocs||[];
   if(!items.length&&!uploaded.length)return '<div class="card card-pad empty">Your cost sheet hasn\'t been shared yet.</div>';
@@ -22232,20 +22707,21 @@ async function custTabCostSheet(data,unit){
     const unitGroupItems=items.filter(i=>UNIT_GROUP.test(i.component||''));
     const edcGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&STANDARD_COMPONENTS.test(i.component||''));
     const adhocGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&!STANDARD_COMPONENTS.test(i.component||''));
-    const breakupRow=i=>{const amt=Number(i.amount||0),tax=Number(i.tax_amount||0),gstPct=amt?Math.round(tax/amt*1000)/10:0;
-      return [esc(i.component),custInr(amt),gstPct+'%',custInr(tax),custInr(amt+tax)];};
-    const breakupTotal=(list,label)=>{const amt=list.reduce((s,i)=>s+Number(i.amount||0),0),tax=list.reduce((s,i)=>s+Number(i.tax_amount||0),0);
-      return ['<b>'+label+'</b>','<b>'+custInr(amt)+'</b>','','<b>'+custInr(tax)+'</b>','<b>'+custInr(amt+tax)+'</b>'];};
+    // One table per group; the Rate column appears only where some row has a rate (custCostRows).
+    const breakupTable=(list,isUnitGroup,totalLabel)=>{
+      const g=custCostRows(unit,list,isUnitGroup), rc=g.showRate;
+      const cells=(r)=>{const gstPct=r.amount?Math.round(r.tax/r.amount*1000)/10:0;
+        return [esc(r.label)].concat(rc?[custFmtRate(r.rate)]:[]).concat([custInr(r.amount),gstPct+'%',custInr(r.tax),custInr(r.amount+r.tax)]);};
+      return mTable(['Particulars'].concat(rc?['Rate']:[]).concat(['Amount','GST','GST Amount','Gross Amount']),
+        g.rows.map(cells).concat([['<b>'+totalLabel+'</b>'].concat(rc?['']:[]).concat(['<b>'+custInr(g.amount)+'</b>','','<b>'+custInr(g.tax)+'</b>','<b>'+custInr(g.amount+g.tax)+'</b>'])]));
+    };
     const groupTitle=t=>'<div style="font-size:12px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;margin:16px 0 6px">'+t+'</div>';
     window._custCostSheetUnit=unit; window._custCostSheetContact=c; window._custCostSheetItems=items;
     out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div class="sec-title" style="margin:0">Cost Breakup</div>'+
       '<button class="btn" onclick="custPrintCostSheet()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>';
-    if(unitGroupItems.length) out+=groupTitle('Unit Charges')+
-      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],unitGroupItems.map(breakupRow).concat([breakupTotal(unitGroupItems,'Total Flat Value')]));
-    if(edcGroupItems.length) out+=groupTitle('Extra Development Charges (EDC)')+
-      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],edcGroupItems.map(breakupRow).concat([breakupTotal(edcGroupItems,'Total EDC')]));
-    if(adhocGroupItems.length) out+=groupTitle('Other Charges (Adhoc)')+
-      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],adhocGroupItems.map(breakupRow).concat([breakupTotal(adhocGroupItems,'Total Adhoc')]));
+    if(unitGroupItems.length) out+=groupTitle('Unit Charges')+breakupTable(unitGroupItems,true,'Total Flat Value');
+    if(edcGroupItems.length) out+=groupTitle('Extra Development Charges (EDC)')+breakupTable(edcGroupItems,false,'Total EDC');
+    if(adhocGroupItems.length) out+=groupTitle('Other Charges (Adhoc)')+breakupTable(adhocGroupItems,false,'Total Adhoc');
     out+='<div style="margin-top:8px;padding-top:10px;border-top:2px solid #334155;text-align:right;font-size:14.5px"><b>Grand Total: '+custInr(totalWithTax)+'</b></div>';
   }
   if(invoices.length){
@@ -22277,12 +22753,15 @@ window.custPrintCostSheet=function(){
   const unitGroupItems=items.filter(i=>UNIT_GROUP.test(i.component||''));
   const edcGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&STANDARD_COMPONENTS.test(i.component||''));
   const adhocGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&!STANDARD_COMPONENTS.test(i.component||''));
-  const rowHtml=i=>{const amt=Number(i.amount||0),tax=Number(i.tax_amount||0),gstPct=amt?Math.round(tax/amt*1000)/10:0;
-    return '<tr><td>'+esc(i.component)+'</td><td>'+custInr(amt)+'</td><td>'+gstPct+'%</td><td>'+custInr(tax)+'</td><td>'+custInr(amt+tax)+'</td></tr>';};
-  const totalHtml=(list,label)=>{const amt=list.reduce((s,i)=>s+Number(i.amount||0),0),tax=list.reduce((s,i)=>s+Number(i.tax_amount||0),0);
-    return '<tr style="font-weight:700"><td>'+label+'</td><td>'+custInr(amt)+'</td><td></td><td>'+custInr(tax)+'</td><td>'+custInr(amt+tax)+'</td></tr>';};
-  const groupTable=(label,list,totalLabel)=>list.length?'<h3>'+label+'</h3><table><thead><tr><th>Particulars</th><th>Amount</th><th>GST</th><th>GST Amount</th><th>Gross Amount</th></tr></thead><tbody>'+
-    list.map(rowHtml).join('')+totalHtml(list,totalLabel)+'</tbody></table>':'';
+  // Same rows and Rate column as the screen (custCostRows).
+  const groupTable=(label,list,totalLabel,isUnitGroup)=>{
+    if(!list.length) return '';
+    const g=custCostRows(unit,list,isUnitGroup), rc=g.showRate;
+    return '<h3>'+label+'</h3><table><thead><tr><th>Particulars</th>'+(rc?'<th>Rate</th>':'')+'<th>Amount</th><th>GST</th><th>GST Amount</th><th>Gross Amount</th></tr></thead><tbody>'+
+      g.rows.map(r=>{const p=r.amount?Math.round(r.tax/r.amount*1000)/10:0;
+        return '<tr><td>'+esc(r.label)+'</td>'+(rc?'<td>'+custFmtRate(r.rate)+'</td>':'')+'<td>'+custInr(r.amount)+'</td><td>'+p+'%</td><td>'+custInr(r.tax)+'</td><td>'+custInr(r.amount+r.tax)+'</td></tr>';}).join('')+
+      '<tr style="font-weight:700"><td>'+totalLabel+'</td>'+(rc?'<td></td>':'')+'<td>'+custInr(g.amount)+'</td><td></td><td>'+custInr(g.tax)+'</td><td>'+custInr(g.amount+g.tax)+'</td></tr></tbody></table>';
+  };
   const grandTotal=items.reduce((s,i)=>s+Number(i.amount||0)+Number(i.tax_amount||0),0);
   const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cost Sheet — '+esc(unit.unit_code)+'</title><style>'+
     'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
@@ -22294,9 +22773,9 @@ window.custPrintCostSheet=function(){
     '</style></head><body>'+
     '<h1>Cost Sheet — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · '+esc((c&&c.contact_name)||'')+(unit.booking_no?' · Booking No '+esc(unit.booking_no):'')+' · as on '+fmtDate(new Date())+'</h2>'+
-    groupTable('Unit Charges',unitGroupItems,'Total Flat Value')+
-    groupTable('Extra Development Charges (EDC)',edcGroupItems,'Total EDC')+
-    groupTable('Other Charges (Adhoc)',adhocGroupItems,'Total Adhoc')+
+    groupTable('Unit Charges',unitGroupItems,'Total Flat Value',true)+
+    groupTable('Extra Development Charges (EDC)',edcGroupItems,'Total EDC',false)+
+    groupTable('Other Charges (Adhoc)',adhocGroupItems,'Total Adhoc',false)+
     '<div class="grand">Grand Total: '+custInr(grandTotal)+'</div>'+
     '</body></html>';
   try{ w.document.open(); w.document.write(html); w.document.close(); }
@@ -22317,51 +22796,219 @@ async function custMediaGrid(list){
       return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
     <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
 }
-/* THREE LEVELS, NOT FOUR, AND THE FLAT IS SPLIT BY ROOM.
+/* CONSTRUCTION PROGRESS - what the customer sees: their BLOCK and their FLAT, nothing else.
 
-   The floor level is gone. It sat between the block and the flat, it was worked out by reading
-   digits off a unit code rather than from anything anybody recorded, and in the whole life of
-   the portal not one photo was ever put against it.
+   Project-wide photos are not shown here any more, by request: a customer's question is "how is
+   my building doing, how is my flat doing", and a gallery of the whole site answered neither. The
+   floor level went with the Photos & Videos redesign (it was guessed from digits in a unit code
+   and never held a photo).
 
-   The flat's photos no longer wait for the slab to be cast. That gate meant a customer whose
-   photos HAD been taken was shown a message saying there would be none until casting finished -
-   the photos existed and were being withheld by a date field nobody kept up. If there are
-   photos of your flat you see them; if there are none you are told that, which is the honest
-   version of the same sentence.
+   Layout: a summary card (where, how many, when it was last updated), then the block's updates
+   grouped by the date the photos were taken - so it reads as a progress diary, newest first - then
+   the flat, filterable by room (Common area / Bathroom / Kitchen) because "is my kitchen done yet"
+   is the question people actually ask. Any photo opens full screen with next / previous, arrow
+   keys and swipe; a video plays in place.
 
-   Within the flat they are grouped common area / bathroom / kitchen, because that is how people
-   ask: "is my kitchen done yet" is not answerable by one long reverse-chronological pile. */
-async function custTabProgress(unit){
-  const [{data:pPhotos},{data:tPhotos},{data:uPhotos}]=await Promise.all([
-    sb.schema('cust').from('project_photos').select('*').eq('project_id',unit.project_id).order('taken_on',{ascending:false}),
-    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
-    sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false})
-  ]);
-  let out='<div class="sec-title" style="margin:0 0 10px">Project progress</div>'+
-    ((pPhotos&&pPhotos.length)?await custMediaGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
-  out+='<div class="sec-title" style="margin:20px 0 10px">Your tower'+(unit.tower?' — '+esc(unit.tower):'')+'</div>';
-  out+=(tPhotos&&tPhotos.length)?await custMediaGrid(tPhotos):'<div class="card card-pad empty">No tower-wide updates yet — check back soon.</div>';
-  out+='<div class="sec-title" style="margin:20px 0 10px">Your flat'+(unit.unit_code?' — '+esc(unit.unit_code):'')+'</div>';
-  const mine=uPhotos||[];
-  if(!mine.length){
-    out+='<div class="card card-pad empty">No photos of your flat yet — check back soon, these are added roughly every two weeks.</div>';
-  }else{
-    // Only the rooms that actually have something are given a heading; three headings with two
-    // "nothing yet" messages under them reads as a fault rather than as a stage of the build.
-    const AREAS=[['common','Common area'],['bathroom','Bathroom'],['kitchen','Kitchen']];
-    for(const a of AREAS){
-      const list=mine.filter(function(x){return (x.area||'common')===a[0];});
-      if(!list.length) continue;
-      out+='<div style="font-size:13px;font-weight:700;color:var(--ink);margin:14px 0 8px">'+esc(a[1])+'</div>';
-      out+=await custMediaGrid(list);
-    }
+   Every read filters deleted_at itself. RLS already hides removed rows from a real customer, but
+   staff (and Staff preview) pass the staff policy, which returns deleted rows too - so preview used
+   to show photos an admin had removed and the customer could not see. */
+const CUST_PG_AREAS=[['common','Common area','fa-couch'],['bathroom','Bathroom','fa-bath'],['kitchen','Kitchen','fa-kitchen-set']];
+let CUST_PG={items:[],flat:[],room:'all'};
+function custPgCss(){return `<style>
+  .cpg{display:flex;flex-direction:column;gap:18px;position:relative;z-index:1}
+  .cpg-hero{border-radius:16px;padding:20px 22px;color:#fff;position:relative;overflow:hidden;
+    background:linear-gradient(135deg,#0f1e3d 0%,#1d4ed8 60%,#3b82f6 100%);box-shadow:0 10px 30px rgba(29,78,216,.22)}
+  .cpg-hero::after{content:"";position:absolute;right:-60px;top:-60px;width:220px;height:220px;border-radius:50%;
+    background:radial-gradient(circle,rgba(255,255,255,.18),transparent 70%);pointer-events:none}
+  .cpg-hero h2{font-size:20px;font-weight:700;margin:0 0 4px;letter-spacing:-.2px}
+  .cpg-hero .sub{font-size:13.5px;opacity:.85}
+  .cpg-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+  .cpg-chip{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);
+    padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:600}
+  .cpg-sec{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow)}
+  .cpg-sh{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+  .cpg-ic{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+    background:var(--brand-50);color:var(--brand);font-size:17px;flex:none}
+  .cpg-st{font-size:16px;font-weight:700;color:var(--ink);line-height:1.2}
+  .cpg-ss{font-size:12.5px;color:var(--slate);margin-top:2px}
+  .cpg-count{margin-left:auto;font-size:12px;font-weight:700;color:var(--brand);background:var(--brand-50);
+    padding:4px 11px;border-radius:999px;white-space:nowrap}
+  .cpg-day{display:flex;align-items:center;gap:10px;margin:18px 0 10px;font-size:12.5px;font-weight:700;color:var(--ink)}
+  .cpg-body>.cpg-day:first-child{margin-top:2px}
+  .cpg-day .dot{width:9px;height:9px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 4px var(--brand-50);flex:none}
+  .cpg-day .n{font-weight:500;color:var(--slate)}
+  .cpg-day::after{content:"";flex:1;height:1px;background:var(--line-2)}
+  .cpg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+  .cpg-tile{position:relative;aspect-ratio:4/3;border-radius:12px;overflow:hidden;cursor:pointer;background:#e9eef6;
+    border:0;padding:0;display:block;width:100%;box-shadow:0 1px 3px rgba(16,24,40,.08);transition:transform .15s,box-shadow .15s}
+  .cpg-tile:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(16,24,40,.16)}
+  .cpg-tile:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+  .cpg-tile img,.cpg-tile video{width:100%;height:100%;object-fit:cover;display:block;transition:transform .35s}
+  .cpg-tile:hover img,.cpg-tile:hover video{transform:scale(1.05)}
+  .cpg-ph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:22px}
+  .cpg-play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .cpg-play span{width:46px;height:46px;border-radius:50%;background:rgba(15,23,42,.62);color:#fff;display:flex;
+    align-items:center;justify-content:center;font-size:16px;padding-left:3px}
+  .cpg-tag{position:absolute;left:8px;bottom:8px;font-size:11px;font-weight:600;color:#fff;background:rgba(15,23,42,.62);
+    padding:3px 9px;border-radius:999px}
+  .cpg-rooms{display:flex;gap:6px;flex-wrap:wrap;background:#f1f5f9;padding:4px;border-radius:12px;margin-bottom:6px;width:fit-content;max-width:100%}
+  .cpg-room{display:inline-flex;align-items:center;gap:7px;border:0;background:transparent;border-radius:9px;padding:8px 14px;
+    font:600 13px Inter,system-ui,sans-serif;color:var(--slate);cursor:pointer;transition:.12s}
+  .cpg-room .n{font-size:11px;background:#e2e8f0;color:var(--slate);border-radius:999px;padding:1px 7px}
+  .cpg-room:hover{color:var(--ink)}
+  .cpg-room.on{background:#fff;color:var(--brand);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+  .cpg-room.on .n{background:var(--brand-50);color:var(--brand)}
+  .cpg-empty{text-align:center;padding:28px 16px;border:1.5px dashed var(--line);border-radius:14px;background:#fafbfd}
+  .cpg-empty i{font-size:26px;color:#cbd5e1;margin-bottom:10px;display:block}
+  .cpg-empty b{display:block;font-size:14px;color:var(--ink);margin-bottom:4px}
+  .cpg-empty span{font-size:12.5px;color:var(--slate)}
+  /* full-screen viewer */
+  .cpg-lb{position:fixed;inset:0;z-index:9500;background:rgba(6,10,20,.98);display:flex;flex-direction:column}
+  .cpg-lbbar{display:flex;align-items:center;gap:12px;padding:14px 18px;color:#e5e7eb;font-size:13.5px}
+  .cpg-lbbar .t{font-weight:600;color:#fff}
+  .cpg-lbbar .c{margin-left:auto;opacity:.75;white-space:nowrap}
+  .cpg-lbx{border:0;background:rgba(255,255,255,.12);color:#fff;width:38px;height:38px;border-radius:10px;cursor:pointer;font-size:18px;flex:none}
+  .cpg-lbx:hover{background:rgba(255,255,255,.24)}
+  .cpg-lbstage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;min-height:0;padding:0 64px 24px}
+  .cpg-lbstage img,.cpg-lbstage video{max-width:100%;max-height:100%;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5);background:#000}
+  .cpg-lbnav{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:0;cursor:pointer;
+    background:rgba(255,255,255,.14);color:#fff;font-size:17px}
+  .cpg-lbnav:hover{background:rgba(255,255,255,.28)}
+  .cpg-lbnav.prev{left:10px}.cpg-lbnav.next{right:10px}
+  @media(max-width:760px){
+    .cpg-hero{padding:18px}.cpg-hero h2{font-size:18px}
+    .cpg-sec{padding:14px}
+    .cpg-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .cpg-tile{border-radius:10px}
+    .cpg-rooms{width:100%}.cpg-room{flex:1;justify-content:center;padding:9px 6px;font-size:12.5px}
+    .cpg-count{margin-left:0}
+    .cpg-lbstage{padding:0 0 84px}
+    .cpg-lbnav{top:auto;bottom:22px;transform:none}
+    .cpg-lbnav.prev{left:calc(50% - 58px)}.cpg-lbnav.next{right:calc(50% - 58px)}
   }
+</style>`;}
+
+// One tile. `i` indexes CUST_PG.items, which is what the viewer walks through.
+function custPgTile(it,i,showRoom){
+  const media=it.url
+    ?(it.isVideo?'<video src="'+it.url+'#t=0.5" muted playsinline preload="metadata"></video>':'<img src="'+it.url+'" alt="" loading="lazy">')
+    :'<div class="cpg-ph"><i class="fa-solid '+(it.isVideo?'fa-film':'fa-image')+'"></i></div>';
+  return '<button type="button" class="cpg-tile" onclick="custPgOpen('+i+')" aria-label="Open '+esc(it.label)+' '+(it.isVideo?'video':'photo')+' of '+esc(fmtDate(it.date))+'">'
+    +media+(it.isVideo?'<div class="cpg-play"><span><i class="fa-solid fa-play"></i></span></div>':'')
+    +(showRoom&&it.room?'<span class="cpg-tag">'+esc(it.room)+'</span>':'')+'</button>';
+}
+// Newest day first, one heading per day - reads as a progress diary.
+function custPgByDay(idxs,showRoom){
+  const days={},order=[];
+  idxs.forEach(i=>{const d=CUST_PG.items[i].date||'';if(!(d in days)){days[d]=[];order.push(d);}days[d].push(i);});
+  return '<div class="cpg-body">'+order.map(d=>{const l=days[d],v=l.filter(i=>CUST_PG.items[i].isVideo).length,ph=l.length-v;
+    const n=[ph?ph+' photo'+(ph===1?'':'s'):'',v?v+' video'+(v===1?'':'s'):''].filter(Boolean).join(' · ');
+    return '<div class="cpg-day"><span class="dot"></span>'+esc(d?fmtDate(d):'Undated')+' <span class="n">'+n+'</span></div>'
+      +'<div class="cpg-grid">'+l.map(i=>custPgTile(CUST_PG.items[i],i,showRoom)).join('')+'</div>';}).join('')+'</div>';
+}
+function custPgEmpty(icon,title,text){return '<div class="cpg-empty"><i class="fa-solid '+icon+'"></i><b>'+esc(title)+'</b><span>'+esc(text)+'</span></div>';}
+function custPgFlatIdx(){
+  return CUST_PG.room==='all'?CUST_PG.flat:CUST_PG.flat.filter(i=>CUST_PG.items[i].roomKey===CUST_PG.room);
+}
+function custPgFlatBody(){
+  const idxs=custPgFlatIdx();
+  return idxs.length?custPgByDay(idxs,CUST_PG.room==='all'):custPgEmpty('fa-camera','Nothing here yet','Photos of this room will appear as soon as they are taken.');
+}
+window.custPgRoom=function(k){
+  CUST_PG.room=k;
+  document.querySelectorAll('.cpg-room').forEach(b=>b.classList.toggle('on',b.getAttribute('data-k')===k));
+  const host=$('cpgFlatBody'); if(host) host.innerHTML=custPgFlatBody();
+};
+
+async function custTabProgress(unit){
+  const [{data:tPhotos},{data:uPhotos}]=await Promise.all([
+    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
+    sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false})
+  ]);
+  const block=tPhotos||[], flat=uPhotos||[];
+  const roomOf=k=>(CUST_PG_AREAS.find(a=>a[0]===k)||CUST_PG_AREAS[0]);
+  const raw=block.map(p=>({p,label:'Block',roomKey:null,room:null}))
+    .concat(flat.map(p=>{const r=roomOf(p.area||'common');return {p,label:r[1],roomKey:r[0],room:r[1]};}));
+  const urls=await Promise.all(raw.map(r=>s3SignedUrl(r.p.storage_path).catch(()=>null)));
+  CUST_PG.items=raw.map((r,i)=>({url:urls[i],isVideo:(r.p.file_type||'').indexOf('video')===0,
+    date:r.p.taken_on,label:r.label,roomKey:r.roomKey,room:r.room,where:r.roomKey?'Your flat':'Your block'}));
+  CUST_PG.flat=CUST_PG.items.map((it,i)=>it.roomKey?i:-1).filter(i=>i>=0);
+  CUST_PG.room='all';
+  const blockIdx=CUST_PG.items.map((it,i)=>it.roomKey?-1:i).filter(i=>i>=0);
+
+  const total=CUST_PG.items.length, vids=CUST_PG.items.filter(i=>i.isVideo).length, pics=total-vids;
+  const latest=CUST_PG.items.reduce((m,i)=>i.date&&(!m||i.date>m)?i.date:m,null);
+  const projName=(unit.projects&&unit.projects.name)||'';
+  const where=[unit.tower,unit.unit_code?'Flat '+unit.unit_code:''].filter(Boolean).join(' · ');
+  const upd=n=>n+' update'+(n===1?'':'s');
+
+  let out=custPgCss()+'<div class="cpg">';
+  out+='<div class="cpg-hero"><h2>Construction progress</h2><div class="sub">'+esc(projName)+(where?' — '+esc(where):'')+'</div>'
+    +'<div class="cpg-chips">'
+      +'<span class="cpg-chip"><i class="fa-solid fa-clock-rotate-left"></i>'+(latest?'Last update '+esc(fmtDate(latest)):'Updates coming soon')+'</span>'
+      +(total?'<span class="cpg-chip"><i class="fa-solid fa-images"></i>'+[pics?pics+' photo'+(pics===1?'':'s'):'',vids?vids+' video'+(vids===1?'':'s'):''].filter(Boolean).join(' · ')+'</span>':'')
+    +'</div></div>';
+
+  // A section with nothing in it is not shown at all - no "No photos yet" boxes. Only when there is
+  // nothing anywhere does the customer get one short line, so the tab is never blank.
+  if(blockIdx.length) out+='<div class="cpg-sec"><div class="cpg-sh"><div class="cpg-ic"><i class="fa-solid fa-building"></i></div>'
+    +'<div><div class="cpg-st">Your block'+(unit.tower?' — '+esc(unit.tower):'')+'</div><div class="cpg-ss">How your building is coming along</div></div>'
+    +'<span class="cpg-count">'+upd(blockIdx.length)+'</span></div>'
+    +custPgByDay(blockIdx,false)+'</div>';
+
+  if(CUST_PG.flat.length){
+    const counts={}; CUST_PG.flat.forEach(i=>{const k=CUST_PG.items[i].roomKey;counts[k]=(counts[k]||0)+1;});
+    const rooms=CUST_PG_AREAS.filter(a=>counts[a[0]]);
+    out+='<div class="cpg-sec"><div class="cpg-sh"><div class="cpg-ic"><i class="fa-solid fa-door-open"></i></div>'
+      +'<div><div class="cpg-st">Your flat'+(unit.unit_code?' — '+esc(unit.unit_code):'')+'</div><div class="cpg-ss">Room by room, as it is built</div></div>'
+      +'<span class="cpg-count">'+upd(CUST_PG.flat.length)+'</span></div>';
+    // Only rooms that have something get a button, and the row only appears when there is a choice.
+    if(rooms.length>1) out+='<div class="cpg-rooms"><button type="button" class="cpg-room on" data-k="all" onclick="custPgRoom(\'all\')">All <span class="n">'+CUST_PG.flat.length+'</span></button>'
+      +rooms.map(a=>'<button type="button" class="cpg-room" data-k="'+a[0]+'" onclick="custPgRoom(\''+a[0]+'\')"><i class="fa-solid '+a[2]+'"></i>'+esc(a[1])+' <span class="n">'+counts[a[0]]+'</span></button>').join('')+'</div>';
+    out+='<div id="cpgFlatBody">'+custPgFlatBody()+'</div></div>';
+  }
+
+  if(!total) out+='<div class="cpg-sec">'+custPgEmpty('fa-helmet-safety','Photos are on their way','Our site team will share photos of your block and your flat here as construction progresses.')+'</div>';
+  out+='</div>';
   return out;
 }
+
+/* Full-screen viewer: next / previous, arrow keys, swipe, Esc. It walks only the section the tile
+   came from (the block, or the flat under the current room filter), so "next" never jumps from the
+   kitchen to the building's facade. */
+window.custPgOpen=function(start){
+  const it0=CUST_PG.items[start]; if(!it0) return;
+  const list=it0.roomKey?custPgFlatIdx():CUST_PG.items.map((it,i)=>it.roomKey?-1:i).filter(i=>i>=0);
+  let pos=Math.max(0,list.indexOf(start));
+  const box=document.createElement('div'); box.className='cpg-lb';
+  const go=function(d){ if(list.length<2) return; pos=(pos+d+list.length)%list.length; draw(); };
+  const onKey=function(e){ if(e.key==='Escape') shut(); else if(e.key==='ArrowRight') go(1); else if(e.key==='ArrowLeft') go(-1); };
+  function shut(){ document.removeEventListener('keydown',onKey); if(box.parentNode) box.parentNode.removeChild(box); document.body.style.overflow=''; }
+  function draw(){
+    const it=CUST_PG.items[list[pos]];
+    box.innerHTML='<div class="cpg-lbbar"><span class="t">'+esc(it.where)+(it.room?' · '+esc(it.room):'')+'</span><span>'+esc(fmtDate(it.date))+'</span>'
+      +'<span class="c">'+(pos+1)+' / '+list.length+'</span><button class="cpg-lbx" title="Close">&times;</button></div>'
+      +'<div class="cpg-lbstage">'
+        +(it.url?(it.isVideo?'<video src="'+it.url+'" controls autoplay playsinline></video>':'<img src="'+it.url+'" alt="">'):'<div style="color:#94a3b8">This file could not be loaded.</div>')
+        +(list.length>1?'<button class="cpg-lbnav prev" title="Previous"><i class="fa-solid fa-chevron-left"></i></button><button class="cpg-lbnav next" title="Next"><i class="fa-solid fa-chevron-right"></i></button>':'')
+      +'</div>';
+    box.querySelector('.cpg-lbx').onclick=shut;
+    const pv=box.querySelector('.prev'), nx=box.querySelector('.next');
+    if(pv) pv.onclick=function(e){e.stopPropagation();go(-1);};
+    if(nx) nx.onclick=function(e){e.stopPropagation();go(1);};
+  }
+  box.onclick=function(e){ if(e.target===box||e.target.classList.contains('cpg-lbstage')) shut(); };
+  let sx=null;
+  box.addEventListener('touchstart',function(e){ sx=e.touches[0].clientX; },{passive:true});
+  box.addEventListener('touchend',function(e){ if(sx==null) return; const dx=e.changedTouches[0].clientX-sx; sx=null; if(Math.abs(dx)>50) go(dx<0?1:-1); });
+  document.addEventListener('keydown',onKey);
+  document.body.style.overflow='hidden';
+  draw(); document.body.appendChild(box);
+};
 async function custTabDocuments(unit){
   const [{data:pDocs},{data:cDocs}]=await Promise.all([
-    sb.schema('cust').from('project_documents').select('*').eq('project_id',unit.project_id),
-    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id)
+    sb.schema('cust').from('project_documents').select('*').eq('project_id',unit.project_id).is('deleted_at',null),
+    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).is('deleted_at',null)
   ]);
   const docRow=d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Document'),fmtDate(d.created_at),
     `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'download').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`];
@@ -22374,7 +23021,7 @@ async function custTabDocuments(unit){
 async function custTabInspection(unit){
   const [{data:checklist},{data:updates}]=await Promise.all([
     sb.schema('cust').from('inspection_checklists').select('*').eq('unit_id',unit.id).maybeSingle(),
-    sb.schema('cust').from('inspection_updates').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false})
+    sb.schema('cust').from('inspection_updates').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false})
   ]);
   const checklistSection='<div class="sec-title" style="margin:0 0 10px">Inspection checklist</div>'+
     (checklist?
@@ -22385,7 +23032,7 @@ async function custTabInspection(unit){
   return checklistSection+updatesSection;
 }
 async function custTabVideos(){
-  const {data}=await sb.schema('cust').from('process_videos').select('*').order('category').order('created_at',{ascending:false});
+  const {data}=await sb.schema('cust').from('process_videos').select('*').is('deleted_at',null).order('category').order('created_at',{ascending:false});
   const byCat={};(data||[]).forEach(v=>{(byCat[v.category]=byCat[v.category]||[]).push(v);});
   return Object.keys(CPA_VIDEO_CATEGORIES).map(cat=>{
     const vids=byCat[cat]||[];
@@ -22933,7 +23580,7 @@ VIEWS.customer=async function(v,seg){
     '<div class="cbl-building"><div class="cbl-floor cbl-f1"></div><div class="cbl-floor cbl-f2"></div><div class="cbl-floor cbl-f3"></div><div class="cbl-floor cbl-f4"></div><div class="cbl-floor cbl-f5"></div></div>'+
     '<div class="cbl-ground"></div></div><div class="cbl-text">Building your experience...</div></div>';
   const tabs=CUST_TABS;
-  const ti=mTab(seg,tabs.length);
+  let ti=mTab(seg,tabs.length);
   // The sidebar is rebuilt on every render (not just once at boot) so its active item tracks
   // whichever section is actually showing, including a same-page link like the Statement tab's
   // "View full ledger" jumping straight to navTo('customer/3') (was already stale here at '1'
@@ -22941,9 +23588,19 @@ VIEWS.customer=async function(v,seg){
   custSidebarTabs(ti);
   setCrumb(['Customer Portal',tabs[ti]]);
   const data=await custLoadData(state.customer&&state.customer.id);
-  // Rebuilt again now that CUST_DATA.hasReferred is known, so the Referrals "Earn" badge can appear
-  // (it stays off on the call above rather than risk flashing on for a customer who's already
-  // referred someone). A no-op redraw for every tab except Referrals.
+  if(data.units.length&&(!CUST_SELECTED_UNIT||!data.units.some(u=>u.id===CUST_SELECTED_UNIT)))CUST_SELECTED_UNIT=data.units[0].id;
+  // A section switched off for this flat's project or block (Customer Portal Admin > Customer
+  // Features) is not listed, and reaching it anyway - an old link, a bookmark, switching to another
+  // flat while on it - lands on Home instead.
+  if(!custTabAllowed(ti,custCurrentUnit())){
+    ti=0;
+    // Keeps the path and a staff preview's ?as=<id>; only the section in the hash changes.
+    if(location.hash&&location.hash!=='#/'&&location.hash!=='#/0'){ try{ history.replaceState(history.state,'',location.pathname+location.search+'#/0'); }catch(e){} }
+  }
+  setCrumb(['Customer Portal',tabs[ti]]);
+  // Rebuilt again now that the flats, their section rules and CUST_DATA.hasReferred are known, so
+  // only this flat's sections are listed and the Referrals "Earn" badge can appear (it stays off on
+  // the call above rather than risk flashing on for a customer who's already referred someone).
   custSidebarTabs(ti);
   // The impersonation banner stays - it's the only thing on screen telling a staff member WHO
   // they're previewing, and it's how they get back out. The plain "signed in as you" banner for a
@@ -22956,7 +23613,6 @@ VIEWS.customer=async function(v,seg){
       '<div class="card card-pad empty"><i class="fa-solid fa-circle-info"></i><div style="margin-top:8px">No unit is linked to '+(state.impersonating?'this customer':'your account')+' yet'+(state.impersonating?'.':'. Please contact your relationship manager.')+'</div></div></div>';
     return;
   }
-  if(!CUST_SELECTED_UNIT||!data.units.some(u=>u.id===CUST_SELECTED_UNIT))CUST_SELECTED_UNIT=data.units[0].id;
   const unit=data.units.find(u=>u.id===CUST_SELECTED_UNIT);
   let body;
   if(ti===0)body='';

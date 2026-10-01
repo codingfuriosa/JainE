@@ -1313,3 +1313,4 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
   opacity:.11;pointer-events:none;transition:left .22s ease;
 }
 @media(max-width:1024px){.cust-tab-bg{left:0}}
+

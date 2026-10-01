@@ -82,9 +82,10 @@ async function labelMsg(id: string, labelId: string) {
 
 async function findEmails(): Promise<string[]> {
   const q = `from:${GMAIL_SENDER} has:attachment filename:xlsx -label:${IMPORT_LABEL}`;
-  // 25, not 5: six reports arrive each morning and a backlog day can carry more. Anything beyond
-  // this page is simply left unlabelled and picked up next run.
-  const res = await gmail(`messages?q=${encodeURIComponent(q)}&maxResults=25`);
+  // 50: about seventeen emails arrive each morning now (the daily reports plus one Sales Details per
+  // project) and a backlog day can carry more. Anything beyond this page is simply left unlabelled
+  // and picked up next run.
+  const res = await gmail(`messages?q=${encodeURIComponent(q)}&maxResults=50`);
   return (res.messages || []).map((m: any) => m.id);
 }
 
@@ -152,9 +153,28 @@ async function processEmails(db: any) {
           if (ue) { log.push(`Upload fail ${p.name}: ${ue.message}`); allOk = false; continue; }
           // Auto-dismiss older pending files of the same report type
           // Report type is the filename prefix before the date stamp (e.g. "Invoice Register Details")
+          //
+          // EXCEPT Sales Details, which Farvision sends as one file PER PROJECT - eleven files in one
+          // thread every morning, all named "Sales Details_<stamp>.xlsx". Dismissing by report type
+          // made each one cancel the one before, so only the last project ever got imported (seen
+          // 30.09.2026: 10 of 11 marked completed without an import). For Sales Details only an exact
+          // re-delivery of the same file, or a file from an earlier day (older than 12 hours), is
+          // dismissed; every project file from today's batch stays pending.
           const baseType = p.name.replace(/_\d{14,}\.xlsx$/i, '').replace(/\.xlsx$/i, '').trim();
           if (baseType) {
-            const { data: older } = await db.schema("cust").from("import_queue").select("id").eq("status", "pending").ilike("file_name", baseType + "%");
+            const pendingQ = () => db.schema("cust").from("import_queue").select("id").eq("status", "pending");
+            let older: any[] | null;
+            if (/^sales details$/i.test(baseType)) {
+              const dayAgo = new Date(Date.now() - 12 * 3600 * 1000).toISOString();
+              const [{ data: same }, { data: stale }] = await Promise.all([
+                pendingQ().eq("file_name", p.name),
+                pendingQ().ilike("file_name", baseType + "%").lt("created_at", dayAgo),
+              ]);
+              const dupIds = new Set([...(same || []), ...(stale || [])].map((r: any) => r.id));
+              older = [...dupIds].map((id) => ({ id }));
+            } else {
+              ({ data: older } = await pendingQ().ilike("file_name", baseType + "%"));
+            }
             if (older && older.length) {
               await db.schema("cust").from("import_queue").update({ status: "completed", processed_at: new Date().toISOString() }).in("id", older.map((r: any) => r.id));
               log.push(`Auto-dismissed ${older.length} older ${baseType} file(s)`);
