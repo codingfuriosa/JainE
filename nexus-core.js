@@ -9527,12 +9527,18 @@ async function usbLoad(){
     if(error)throw error;
     USB.rows=data||[];
   }catch(e){ USB.rows=null; USB.err=(e&&e.message)||String(e); }
-  /* Workflow health is a second, independent query: it answers "where is the work stuck", which
-     the feature report cannot, and it deliberately ignores the date filters above (see the
-     function's own comment). Fetched here so the render stays synchronous like everything else;
-     a failure leaves it null and the block simply doesn't draw. */
-  try{ const {data:wf}=await sb.rpc('erp_usability_workflow_health'); USB.wfHealth=wf||[]; }
-  catch(e){ USB.wfHealth=null; }
+  /* Two further queries, both for Daily Checks and neither derivable from the feature report.
+     Workflow health answers "where is the work stuck"; transcription health answers "how did
+     yesterday's calls go, and is the CRM telling the truth about them". Both ignore the date
+     filters above on purpose (see each function's own comment). Fetched here so the render stays
+     synchronous like everything else; either failing leaves its block simply not drawn.
+     Sent together rather than one after the other: they are independent, and the Usability page
+     waits on this call too even though it draws neither. */
+  const health=await Promise.all([
+    sb.rpc('erp_usability_workflow_health').then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; }),
+    sb.rpc('erp_usability_transcription_health').then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; })
+  ]);
+  USB.wfHealth=health[0]; USB.trHealth=health[1];
   if(!USB.people){ try{ USB.people=await getPeople(); }catch(e){ USB.people=[]; } }
   // A per-feature drill-down cached under the old range/person would show stale names against the
   // new filters, so any change here throws it out rather than risk a misleading answer.
@@ -9930,16 +9936,17 @@ VIEWS.daily_checks=async function(v){
   const feature=mods.map(function(m){
     return usbDailyChecksHtml(picks.filter(function(r){ return r.module_label===m; }), m);
   }).join('');
-  const none=(!picks.length && !(USB.wfHealth||[]).length)
+  const none=(!picks.length && !(USB.wfHealth||[]).length && !(USB.trHealth||[]).length)
     ? '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-list-check"></i>'
       +'<div>Nothing is flagged as a daily check yet</div></div>' : '';
   /* The body is kept behind its own id so expanding a workflow breakdown repaints just this,
      rather than going through renderPage() — which would re-run usbLoad() and fire both RPCs
      again on every click. */
-  DC_BODY=function(){ return usbWorkflowHealthHtml()+feature+none; };
+  DC_BODY=function(){ return usbWorkflowHealthHtml()+usbTranscriptionHealthHtml()+feature+none; };
   v.innerHTML=head
     +'<p style="color:var(--slate);font-size:13px;margin:6px 2px 2px">What needs attention today. '
-      +'Feature counts cover the last 30 days; workflow figures are live, with movement from yesterday.</p>'
+      +'Feature counts cover the last 30 days; workflow figures are live and call figures come from '
+      +'the overnight pass, both with movement from yesterday.</p>'
     +'<div id="dcBody">'+DC_BODY()+'</div>';
 };
 let DC_BODY=null;
@@ -9968,7 +9975,6 @@ function usbWorkflowHealthHtml(){
       +'<th style="width:116px" title="Received, and not moved on">Received, not forwarded</th>'
       +'<th style="width:84px">Raised</th><th style="width:84px">Closed</th>'
       +'<th style="width:104px" title="Reverts and send-backs — the work going backwards">Reverted</th>'
-      +'<th style="width:112px" title="Instances that have reached the end of the workflow, all time">Completed</th>'
     +'</tr></thead><tbody>'
     +rows.map(function(r){
         /* The three backlog figures open a step-level breakdown. A count on its own says there is
@@ -9983,14 +9989,6 @@ function usbWorkflowHealthHtml(){
             +'title="Show which step these are sitting on">'+v
             +'<i class="fa-solid fa-chevron-'+(open?'down':'right')+'" style="font-size:9px;margin-left:5px;opacity:.6"></i></td>';
         };
-        const cd=Number(r.completed_total||0), tv=Number(r.total_ever||0);
-        const pct=tv?Math.round(cd/tv*100):0;
-        /* Under a fifth finished is worth the eye landing on it; the figure is still the count,
-           the share just decides whether it is called out. */
-        const done=tv
-          ? '<b style="'+(pct<20?'color:#9a3412':'color:#15803d')+'">'+cd+'</b>'
-            +'<span style="color:var(--slate);font-size:11.5px"> of '+tv+' &middot; '+pct+'%</span>'
-          : '<span style="color:var(--slate)">—</span>';
         const row='<tr><td><b>'+esc(r.workflow)+'</b></td>'
           +'<td>'+Number(r.live_instances||0)+'</td>'
           +cell(r.awaiting_receipt,'awaiting')
@@ -9998,10 +9996,7 @@ function usbWorkflowHealthHtml(){
           +cell(r.in_hand_not_forwarded,'inhand')
           +'<td>'+Number(r.raised_yesterday||0)+'</td>'
           +'<td>'+Number(r.closed_yesterday||0)+'</td>'
-          +'<td style="'+warn(r.reverted_yesterday)+'">'+Number(r.reverted_yesterday||0)+'</td>'
-          /* Shown against the total ever raised. A bare completion count reads as "some are still
-             in flight"; "8 of 264" says how much of what was started has actually finished. */
-          +'<td>'+done+'</td></tr>';
+          +'<td style="'+warn(r.reverted_yesterday)+'">'+Number(r.reverted_yesterday||0)+'</td></tr>';
         return row+usbWfStuckRowsHtml(r);
       }).join('')
     +'</tbody></table></div></div>';
@@ -10035,7 +10030,7 @@ function usbWfStuckRowsHtml(r){
           }).join('')
         +'</tbody></table>';
     }
-    return '<tr class="usb-users-row"><td colspan="9"><div class="usb-users-wrap" style="padding:10px 12px">'
+    return '<tr class="usb-users-row"><td colspan="8"><div class="usb-users-wrap" style="padding:10px 12px">'
       +'<div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);margin-bottom:7px">'
         +esc(r.workflow)+' &middot; '+s[1]+'</div>'
       +inner+'</div></td></tr>';
@@ -10053,6 +10048,76 @@ window.usbToggleWfStuck=async function(flowId,state){
   }catch(e){ USB_WF_CACHE[key]=[]; }
   dcRepaint();
 };
+/* TRANSCRIPTION HEALTH — the five call figures, on the Daily Checks page.
+   Like workflow health these are measurements, not usage: how many of yesterday's calls the
+   nightly pass transcribed, and how well what the rep typed into the CRM matched what was
+   actually said. The RPC's comment carries the definitions. */
+function usbTranscriptionHealthHtml(){
+  const rows=USB.trHealth;
+  if(!rows||!rows.length) return '';
+  const num=function(n){ return Number(n).toLocaleString('en-IN'); };
+  /* Rates keep the decimal even when it is .0, so a column reading 95.5 / 80.0 / 100.0 lines up
+     instead of 95.5 / 80 / 100. */
+  const show=function(v,pct){
+    if(v===null||v===undefined) return '—';
+    return pct ? Number(v).toFixed(1)+'%' : num(v);
+  };
+  /* Movement against yesterday rather than a pass mark. There is no agreed figure at which pitch
+     accuracy becomes "bad", and inventing one here would put a number in people's mouths that
+     nobody set; which way it moved overnight is a fact. So the arrow carries the colour and the
+     percentage is left to speak for itself. */
+  const move=function(r){
+    const a=r.today, b=r.yesterday;
+    if(a===null||a===undefined||b===null||b===undefined) return '';
+    const d=Math.round((Number(a)-Number(b))*10)/10;
+    if(!d) return '<span style="color:var(--slate);font-size:11.5px">level</span>';
+    /* Only the quality rates get a verdict colour. Call volume moving is a fact about the selling
+       day — 19 fewer calls is not a fault anybody introduced overnight, and painting it amber
+       would teach people to ignore the colour on the rows where it means something. */
+    const better=(d>0)===(r.higher_is_better!==false);
+    const ink=r.is_pct===false?'var(--slate)':(better?'#15803d':'#b45309');
+    const arrow=d>0?'▲':'▼';
+    return '<span style="color:'+ink+';font-weight:700;font-size:11.5px">'
+      +arrow+' '+Math.abs(d)+(r.is_pct?' pts':'')+'</span>';
+  };
+  return '<div class="card" style="margin-bottom:14px">'
+    +'<div class="card-pad" style="padding-bottom:10px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+        +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-microphone-lines" style="color:#b8902f"></i> Transcription health</div>'
+        +'<div style="font-size:12px;color:var(--slate)">This morning\'s run &middot; against the one before</div>'
+      +'</div>'
+      /* Stated plainly because it is the one thing about this table that surprises people: the
+         pass runs overnight, so today's column is yesterday's selling. */
+      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">The overnight pass grades the previous day\'s calls, so &ldquo;today&rdquo; is the run that finished this morning. An empty column means it did not run.</div>'
+    +'</div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
+      +'<th>Check</th><th style="width:92px">Today</th><th style="width:92px">Yesterday</th>'
+      +'<th style="width:96px">Movement</th>'
+      +'<th style="width:112px" title="The calls this could actually be judged on — the rest gave the grader nothing to go on">Judged on</th>'
+    +'</tr></thead><tbody>'
+    +rows.map(function(r){
+        const pct=r.is_pct!==false;
+        /* A count of zero here means the overnight pass produced nothing, which is the check
+           failing rather than a quiet day; percentages are left to the movement column. */
+        const zero=!pct&&!Number(r.today||0);
+        /* The base is printed beside every rate because they differ so much between rows — pitch
+           was judged on 70 calls this morning and the follow-up date on 37. A reader who sees
+           100% needs to be able to see 37 without asking anyone. */
+        const base=r.today_of===null||r.today_of===undefined
+          ? '<span style="color:var(--slate)">—</span>'
+          : '<b>'+num(r.today_of)+'</b><span style="color:var(--slate);font-size:11.5px"> calls</span>'
+            +(r.yesterday_of!==null&&r.yesterday_of!==undefined
+               ? '<span style="color:var(--slate);font-size:11.5px"> (was '+num(r.yesterday_of)+')</span>' : '');
+        return '<tr><td><b>'+esc(r.label)+'</b>'
+            +(r.detail?'<div style="color:var(--slate);font-size:11.5px;margin-top:2px">'+esc(r.detail)+'</div>':'')
+          +'</td>'
+          +'<td style="'+(zero?'color:#b45309;font-weight:700':'font-weight:700')+'">'+show(r.today,pct)+'</td>'
+          +'<td style="color:var(--slate)">'+show(r.yesterday,pct)+'</td>'
+          +'<td>'+move(r)+'</td>'
+          +'<td>'+base+'</td></tr>';
+      }).join('')
+    +'</tbody></table></div></div>';
+}
 /* THE DAILY CHECKS, ABOVE EVERYTHING ELSE.
    A handful of features are looked at every morning; the rest are read when somebody asks a
    question. Those few are flagged in erp_feature_catalog.daily_check and lifted out here into
