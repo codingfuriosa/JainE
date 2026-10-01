@@ -989,9 +989,43 @@ function setCrumb(parts){
   }).join(' ');
 }
 function setActive(id){document.querySelectorAll('.sb-item').forEach(a=>a.classList.toggle('active',a.dataset.id===id));}
+/* WHERE "BACK" ACTUALLY GOES.
+
+   Back buttons used to carry a hard-coded destination - a meeting log sent you to that meeting's
+   occurrence list however you had arrived, so reaching it from Archive and pressing Back put you
+   somewhere you had never been. Each one was a guess about the single route somebody might have
+   come from.
+
+   This keeps the real trail instead. Every route the app renders is recorded, and goBack() walks
+   it, so Back means the page you were actually on.
+
+   WHY NOT history.back(). The browser's history is the whole TAB's, not the app's: it holds the
+   inbox the customer clicked a deep link from, and the search results before that. history.back()
+   from the first JAIN-E page a person lands on takes them out of JAIN-E entirely, and
+   history.length > 1 cannot tell the two cases apart - it is already 2 on arrival from anywhere.
+   Walking our own trail can only ever land on a page inside the app, and falls back to a stated
+   route when there is nothing behind.
+
+   Repeated renders of the same route (an async view repainting itself) are not pushed twice, or
+   Back would appear to do nothing. */
+const NAV_TRAIL=[];
+function navRecord(route){
+  if(!route) return;
+  if(NAV_TRAIL[NAV_TRAIL.length-1]===route) return;
+  NAV_TRAIL.push(route);
+  if(NAV_TRAIL.length>60) NAV_TRAIL.shift();
+}
+/* fallback is where to go when this is the first page of the visit - a deep link opened from an
+   email, or a fresh tab. Every caller passes the route that page sits under. */
+window.goBack=function(fallback){
+  NAV_TRAIL.pop();                     // the page we are on
+  const prev=NAV_TRAIL.pop();          // the one before it; navTo re-records it
+  navTo(prev||fallback||'dashboard');
+};
 function renderPage(){
   let seg=location.hash.replace(/^#\/?/,'').split('/').filter(Boolean);
   if(seg[0]===PAGE)seg=seg.slice(1);
+  navRecord(PAGE+(seg.length?'/'+seg.join('/'):''));
   setActive(PAGE);
   const v=$('view');
   if(!pageAllowed(PAGE)){ return noAccess(v); }
@@ -1560,7 +1594,7 @@ async function docLibrary(v){
   const dept=DOC.dept;const m=DEPT_META[dept]||['fa-folder','#64748b','#f1f5f9'];
   setCrumb(['Documents',dept]);
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid ${m[0]}" style="color:${m[1]}"></i> ${esc(dept)} Library</h1><p>Folder navigation, categories & version-controlled storage</p></div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="location.hash='#/documents'"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
+    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="goBack('documents')"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
     <button class="btn" onclick="docNewFolder('${esc(dept)}')"><i class="fa-solid fa-folder-plus"></i> New Folder</button>
     <button class="btn btn-primary" onclick="docUploadModal('${esc(dept)}')"><i class="fa-solid fa-upload"></i> Upload</button></div></div>
     <div class="split"><div><div class="subnav" id="catNav"></div></div><div><div id="docTableHost"></div></div></div>`;
@@ -1597,7 +1631,7 @@ window.docPickCat=function(c){DOC.cat=c;DOC.page=1;document.querySelectorAll('#c
 async function docAll(v,title){
   setCrumb(['Documents',title]);
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-table-list" style="color:#1d4ed8"></i> ${esc(title)}</h1><p>Search and manage documents across every department</p></div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="location.hash='#/documents'"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
+    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="goBack('documents')"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
     <button class="btn btn-primary" onclick="docUploadModal()"><i class="fa-solid fa-upload"></i> Upload</button></div></div>
     <div id="docTableHost"></div>`;
   docRenderTable($('docTableHost'),null);
@@ -5316,7 +5350,7 @@ async function taskDetail(v,id,dgCtx){
   // shown in Details → Members just below it.
   const dgWord=!dgEdges.length?'':(!myDirectDelegator?'Assigned':dgCtx==='delegated'?(t.created_by===state.email?'Assigned':'Delegated'):(myDirectDelegator===t.created_by?'Assigned':'Delegated'));
   const subLabel=t.kind==='delegation'?'Delegated to <b>'+esc(nameOf(t.assigned_to))+'</b> by '+esc(nameOf(t.created_by)):t.project_id?(dgEdges.length?dgRowLabelHtml(dgWord,originalTeam,ownerEmail):'Delegated to <b>'+esc(nameOf(t.owner))+'</b> by '+esc(nameOf(t.created_by))):'Owned by <b>'+esc(nameOf(t.owner))+'</b>';
-  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="history.back()"><i class="fa-solid fa-arrow-left"></i> Back</button>
+  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="goBack('documents')"><i class="fa-solid fa-arrow-left"></i> Back</button>
     ${proj?`<div style="margin-top:10px"><span class="tag t-blue" style="cursor:pointer" onclick="location.hash='#/tasks/project/${proj.id}'"><i class="fa-solid fa-diagram-project"></i> ${esc(proj.name)}</span></div>`:goalP?`<div style="margin-top:10px"><span class="tag t-amber" style="cursor:pointer" onclick="location.hash='#/tasks/goal/${goalP.id}'"><i class="fa-solid fa-bullseye"></i> ${esc(goalP.name)}</span></div>`:''}
     <h1 style="margin-top:10px">${t.kind==='delegation'?'<i class="fa-solid fa-share-nodes" style="color:#0f766e"></i> ':''}${esc(t.title)}</h1>
     <p>${subLabel} · ${statusTagHtml}${apprText}</p></div>
@@ -5888,7 +5922,7 @@ async function noProjectDetail(v){
   const myTasks=list.filter(t=>t.kind!=='delegation'&&t.owner===me);
   const toMe=list.filter(t=>t.kind==='delegation'&&t.assigned_to===me&&t.created_by!==me);
   const byMe=list.filter(t=>t.kind==='delegation'&&t.created_by===me&&t.assigned_to!==me);
-  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="location.hash='#/tasks/list'"><i class="fa-solid fa-arrow-left"></i> Back</button>
+  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="goBack('tasks/list')"><i class="fa-solid fa-arrow-left"></i> Back</button>
     <h1 style="margin-top:10px"><i class="fa-solid fa-folder-open" style="color:#64748b"></i> No Project</h1>
     <p>Solo tasks and one-off delegations not tied to any project</p></div>
     <div>${fsHtml('nopStatus','Status',['Pending','Awaiting Approval','Completed'],NOPFILTER.status,'nopStatusChange')}</div>
@@ -6045,7 +6079,7 @@ async function projectDetail(v,id){
   const peopleList=[...owners,...mem.map(m=>m.email)].filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i);
   const dueHist=p.due_date_history||[];
   const statusOpts=['Pending','Awaiting Approval','Completed'];
-  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="location.hash='#/tasks/list'"><i class="fa-solid fa-arrow-left"></i> Back</button>
+  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="goBack('tasks/list')"><i class="fa-solid fa-arrow-left"></i> Back</button>
     <h1 style="margin-top:10px"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> ${esc(p.name)}</h1>
     <p>Owned by <b>${owners.length?owners.map(e=>esc(nameOf(e))).join(', '):esc(nameOf(p.created_by))}</b> · ${prioTag(p.priority)} ${statusTag(p.status)} · ${mem.length} member${mem.length===1?'':'s'} · ${list.length} task${list.length===1?'':'s'}</p></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -6478,7 +6512,7 @@ async function goalDetail(v,id){
   if(GLTFILTER.status!=='All')flist=flist.filter(t=>t.status===GLTFILTER.status);
   const statusOpts=['Pending','Awaiting Approval','Completed'];
   const prog=g.progress||0;
-  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="history.back()"><i class="fa-solid fa-arrow-left"></i> Back</button><h1 style="margin-top:10px"><i class="fa-solid fa-bullseye" style="color:#d97706"></i> ${esc(g.name)}</h1><p><span class="tag ${g.scope==='company'?'t-purple':g.scope==='team'?'t-blue':'t-gray'}" style="text-transform:capitalize">${esc(g.scope)}</span> ${prioTag(g.priority)} ${statusTag(g.status||'Pending')} · Owner ${esc(nameOf(g.owner))} · ${list.length} task${list.length===1?'':'s'}</p></div>
+  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="goBack('tasks/list')"><i class="fa-solid fa-arrow-left"></i> Back</button><h1 style="margin-top:10px"><i class="fa-solid fa-bullseye" style="color:#d97706"></i> ${esc(g.name)}</h1><p><span class="tag ${g.scope==='company'?'t-purple':g.scope==='team'?'t-blue':'t-gray'}" style="text-transform:capitalize">${esc(g.scope)}</span> ${prioTag(g.priority)} ${statusTag(g.status||'Pending')} · Owner ${esc(nameOf(g.owner))} · ${list.length} task${list.length===1?'':'s'}</p></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn ${g.status==='Completed'?'btn-primary':''}" onclick="goalMarkComplete(${id},${g.status!=='Completed'})"><i class="fa-solid fa-circle-check"></i> ${g.status==='Completed'?'Completed':'Mark Complete'}</button>
       <button class="btn btn-primary" onclick="taskCreateModal('task',null,null,${id},'${esc(g.name).replace(/'/g,"\\'")}')"><i class="fa-solid fa-plus"></i> New Task</button>
@@ -9251,7 +9285,7 @@ async function fhPreviewPage(v){
   setCrumb(['Feedback','Feedback Hub','Preview']);
   const ed=FH_EDIT;
   if(!ed){
-    v.innerHTML=FH_CSS+`<div class="fh-page-head"><button class="fh-page-back" title="Back" onclick="navTo('feedback_hub')"><i class="fa-solid fa-arrow-left"></i></button>
+    v.innerHTML=FH_CSS+`<div class="fh-page-head"><button class="fh-page-back" title="Back" onclick="goBack('feedback_hub')"><i class="fa-solid fa-arrow-left"></i></button>
       <div class="fh-page-titles"><div class="fh-page-title">Preview</div></div></div>
       <div class="empty"><i class="fa-solid fa-eye"></i><div>Nothing to preview</div><div style="font-size:12.5px;margin-top:4px">Open a form to build or edit first.</div></div>`;
     return;
@@ -9317,7 +9351,7 @@ async function fhRecordsPage(v,formId){
   const{data:questions}=await sb.schema('feedback').from('form_questions').select('*').eq('form_id',formId).order('seq');
   const{data:responses,error}=await sb.schema('feedback').from('responses').select('*').eq('form_id',formId).order('submitted_at',{ascending:false});
   const head=`<div class="fh-page-head">
-    <button class="fh-page-back" title="Back" onclick="navTo('feedback_hub/1')"><i class="fa-solid fa-arrow-left"></i></button>
+    <button class="fh-page-back" title="Back" onclick="goBack('feedback_hub/1')"><i class="fa-solid fa-arrow-left"></i></button>
     <div class="fh-page-titles"><div class="fh-page-title">${esc(f.title)}</div><div class="fh-page-sub">Records</div></div>
   </div>`;
   if(error){ v.innerHTML=FH_CSS+head+`<div class="err">${esc(error.message)}</div>`; return; }
@@ -9837,7 +9871,7 @@ function usbModuleDetailHtml(moduleId){
   const tabs=[]; rows.forEach(function(r){ if(tabs.indexOf(r.tab)===-1)tabs.push(r.tab); });
   const head='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-chart-simple" style="color:#7c3aed"></i> '+esc(label)+'</h1>'
     +'<p>'+rows.length+' features across '+tabs.length+' tab'+(tabs.length===1?'':'s')+'</p></div>'
-    +'<button class="btn btn-sm" onclick="navTo(\'usability\')"><i class="fa-solid fa-arrow-left"></i> All modules</button></div>';
+    +'<button class="btn btn-sm" onclick="goBack(\'usability\')"><i class="fa-solid fa-arrow-left"></i> All modules</button></div>';
   const body=tabs.map(function(tb){
     const list=rows.filter(function(r){return r.tab===tb;});
     return '<div class="card" style="margin-bottom:14px">'
@@ -25276,7 +25310,7 @@ async function traDetail(v,id){
     remarks=cd||[];
   }catch(e){ remarks=[]; }
   const crm=r.original_crm_response||{};
-  const back='<button class="btn btn-sm" onclick="navTo(\'transcription/0\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
+  const back='<button class="btn btn-sm" onclick="goBack(\'transcription/0\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
   const retry=(st==='failed')
     ?'<button class="btn btn-primary" onclick="traRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button>':'';
   /* Was "Copy Response" - the same JSON-to-clipboard button the lead page carried as "Copy CRM
@@ -27986,7 +28020,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
       +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')
         +(rowHint?' · Row #'+esc(String(rowHint))+' in the list':'')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
-        +'<button class="btn btn-sm" onclick="navTo(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>'
+        +'<button class="btn btn-sm" onclick="goBack(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>'
         +'<button class="btn" id="trcLeadRefreshBtn" onclick="trcLeadRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
       +'</div></div>';
 
@@ -28566,7 +28600,7 @@ function trCompDetailHtml(leads,leadId){
   const combined=trCombinedQualify(g.rows);
   const latest=trLatestVerdict(g.rows);
   const o=trOutcome(latest.qualification);
-  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription/5\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
+  const backBtn='<button class="btn btn-sm" onclick="goBack(\'transcription/5\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
   const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
   // Says which call the verdict came from, so nobody reads it as a merge of all of them.
   const verdictFrom=latest.row
@@ -28981,7 +29015,7 @@ async function trDetail(v,id){
   const banner=(r.status==='done'&&r.qualification)?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+o.colour+'"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span class="tag '+o.tag+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+o.icon+'"></i> '+esc(r.qualification)+'</span>'+(r.project&&r.project!=='Unclear'?'<span style="font-weight:700;color:#0d9488;font-size:15px">'+esc(r.project)+'</span>':'')+'</div>'+(r.reason?'<div style="margin-top:10px;font-size:14px;line-height:1.55">'+esc(r.reason)+'</div>':'')+'</div>'):'';
   let comments=[];
   try{const {data:cd}=await sb.schema('acc').from('transcription_comments').select('*').eq('transcription_id',id).order('created_at');comments=cd||[];}catch(e){}
-  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
+  const backBtn='<button class="btn btn-sm" onclick="goBack(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
   v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
     +'<div id="trAudio" style="margin:6px 0 16px"></div>'
     +banner

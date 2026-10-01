@@ -8080,7 +8080,7 @@
       : ([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title);
     v.innerHTML='<div class="wf-tp"><div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2(wfHeadTitle)+'</div>'
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
-      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View '+esc2(wfNounOf(flow).lc)+' timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
       +(caseRow&&!(flow&&flow.id===41)?'<button class="ac-btn" title="Print this '+esc2(wfNounOf(flow).lc)+' — same as printing from the '+esc2(wfNounOf(flow).lc)+' itself" onclick="wfPrintCase('+caseRow.id+')"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print</span></button>':'')
       +A+'</div></div>'
@@ -11158,9 +11158,9 @@
   // list, the Meetings page's Completed-meetings section, or the Attendance tab), instead of a
   // single hardcoded guess. history.length===1 means there's nothing in-app to go back to (a
   // direct deep link, or this tab's very first page) — falls back to fallbackPath in that case.
-  window.mtgLogBack=function(fallbackPath){
-    if(window.history.length>1){ history.back(); } else { navTo(fallbackPath); }
-  };
+  /* Was history.length>1, which is already 2 when somebody arrives from an email or a search, so
+     Back took them out of JAIN-E. goBack walks the app's own trail and can only land inside it. */
+  window.mtgLogBack=function(fallbackPath){ goBack(fallbackPath); };
   // A meeting occurrence's detail — real routed page (not a modal), reached via
   // navTo('tasks/meetings/log/<id>') from the global Archive tab, a recurring meeting's own
   // day-wise list, the Meetings page's Completed-meetings section, or the Attendance tab.
@@ -11297,7 +11297,7 @@
       +'<div class="tp-sub">Meeting details</div></div>'
       +'<div class="tp-acts">'
         +(mine?('<button class="ac-btn ic" title="Edit meeting" onclick="mtgOpenCreate('+m.id+')"><i class="fa-solid fa-pen"></i></button>'):'')
-        +'<button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button>'
+        +'<button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +'</div></div>'
       +'<div class="tp-card">'+basicHtml+'</div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-calendar-days" style="color:#7c3aed"></i> Day-wise — who joined, and when</h3>'+dayRows+'</div>';
@@ -11320,7 +11320,7 @@
     v.innerHTML='<div class="tp-head">'
       +'<div><div class="tp-title"><i class="fa-solid fa-clock-rotate-left" style="color:#7c3aed"></i> Logs — '+esc2(m?m.title:'Meeting')+'</div>'
       +'<div class="tp-sub">Past completed occurrences</div></div>'
-      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button></div>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button></div>'
       +'</div>'
       +'<div class="tp-card">'+rows+'</div>';
   }
@@ -13142,7 +13142,7 @@
       <div><div class="tp-title"><i class="fa-solid fa-clipboard-check" style="color:#7c3aed"></i> ${esc2(t.title)} ${canEditThis?`<button class="ac-btn ic" style="height:26px;width:26px" title="Rename" onclick="accEditTitle(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div>
         <div class="tp-sub">${selfTask?'Self task':(verb+' to '+(members.map(e=>esc2(nameOf(list,e))).join(', ')||'nobody yet')+' by '+esc2(nameOf(list,t.delegator)))}</div></div>
       <div class="tp-acts">
-        <button class="ac-btn ic" title="Back" onclick="navTo('tasks/work')"><i class="fa-solid fa-arrow-left"></i></button>
+        <button class="ac-btn ic" title="Back" onclick="goBack('tasks/work')"><i class="fa-solid fa-arrow-left"></i></button>
         <button class="ac-btn ic" title="Sub-tasks" onclick="accSubtasksToggle()"><i class="fa-solid fa-list-check"></i></button>
         ${(amMember && !iHaveDelegated && !selfTask && !locked)?`<button class="ac-btn ic" title="Delegate" onclick="accDelegate(${tid})"><i class="fa-solid fa-people-arrows"></i></button>`:''}
         ${A}
