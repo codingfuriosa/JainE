@@ -19089,10 +19089,15 @@ let CPA_FEAT_PROJ='';
 // Shown beside a section so nobody switches on something that is not finished (audit, 30 Sep 2026).
 // Sign-in first - with it off for a block, that block's customers cannot get in to see anything else.
 function cpaFeatureRows(){
-  return [{key:'login',label:'Customer sign-in'}].concat(CUST_FEATURES.map(f=>({key:f.key,label:CUST_TABS[f.tab]})));
+  // Flat photos sit right under Construction Progress, the section they appear in.
+  const rows=CUST_FEATURES.map(f=>({key:f.key,label:CUST_TABS[f.tab]}));
+  const at=rows.findIndex(r=>r.key==='progress')+1;
+  rows.splice(at,0,{key:'flat_photos',label:'↳ Flat photos'});
+  return [{key:'login',label:'Customer sign-in'}].concat(rows);
 }
 const CPA_FEATURE_NOTES={
   login:'Who can sign in with a code sent to the email on their booking. Off = these customers cannot sign in at all.',
+  flat_photos:'Photos of the customer\'s own flat inside Construction Progress. Off = only block photos are shown. Hidden on 1 Oct 2026 while the flat photos are checked.',
   inspection:'Not finished - staff cannot list or delete an uploaded checklist or update.',
   documents:'Not finished - staff cannot list or delete an uploaded document.',
   videos:'Ready - but no process videos have been uploaded yet.',
@@ -22921,9 +22926,13 @@ window.custPgRoom=function(k){
 };
 
 async function custTabProgress(unit){
+  /* Flat photos have their own Customer Features switch ('flat_photos'). The customer read policy
+     already returns none when it is off; checking here as well keeps a staff preview - which reads
+     through the staff policy - showing exactly what the customer sees. */
+  const flatOn=custFeatureOn(CUST_DATA&&CUST_DATA.featureRules,'flat_photos',unit.project_id,unit.tower);
   const [{data:tPhotos},{data:uPhotos}]=await Promise.all([
     unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
-    sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false})
+    flatOn?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]})
   ]);
   const block=tPhotos||[], flat=uPhotos||[];
   const roomOf=k=>(CUST_PG_AREAS.find(a=>a[0]===k)||CUST_PG_AREAS[0]);
