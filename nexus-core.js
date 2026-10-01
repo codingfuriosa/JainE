@@ -21989,7 +21989,7 @@ function custReceiptDocHtml(r,items,unit,contact,forPrint){
     field('Instn. No.',r.instrument_no),
     field('Instn. Date',r.instrument_date?fmtDate(r.instrument_date):'')
   ].join('');
-  const rowsHtml=(items||[]).map((it,i)=>'<tr>'+
+  const rowsHtml=custAnantaReceiptItems(unit,items).map((it,i)=>'<tr>'+
     '<td>'+(i+1)+'</td>'+
     '<td>'+(it.line_type==='on_account'?'On Account':'Bill')+'</td>'+
     '<td>'+esc(it.schedule||'—')+'</td>'+
@@ -22532,6 +22532,21 @@ function custAnantaPlan(unit,plan){
     const k=String(r.doc||'')+'|'+String(r.dueDate||'')+'|'+String(r.schedule||'');
     if(at[k]==null){ at[k]=out.length; out.push(Object.assign({},r,{head:CUST_ANANTA_UNIT_PRICE_LABEL,due:0,paid:0})); }
     const m=out[at[k]]; m.due+=Number(r.due||0); m.paid+=Number(r.paid||0);
+  });
+  return out;
+}
+/* Money Receipt lines for DREAM ANANTA: what was paid against Unit Cost, FLC, PLC and Vehicle Parking
+   of the same invoice and schedule is one "Unit Price" line, as on its invoice. Lines are only merged
+   when they agree on Bill/On Account and on their particulars, so nothing a receipt line says
+   separately is lost; the receipt's total is its own figure and is unaffected. */
+function custAnantaReceiptItems(unit,items){
+  if(!custIsAnanta(unit)) return items||[];
+  const out=[],at={};
+  (items||[]).forEach(it=>{
+    if(!CUST_ANANTA_UNIT_PRICE.test(String(it.revenue_head||'').trim())){ out.push(it); return; }
+    const k=[it.line_type,it.against_demand_no,it.schedule,it.particulars].map(v=>String(v||'')).join('|');
+    if(at[k]==null){ at[k]=out.length; out.push(Object.assign({},it,{revenue_head:CUST_ANANTA_UNIT_PRICE_LABEL,amount:0})); }
+    out[at[k]].amount=Number(out[at[k]].amount)+Number(it.amount||0);
   });
   return out;
 }
