@@ -203,12 +203,12 @@ words instead of forcing it into one that does not fit.`;
 export const QA_OUTPUT_SHAPE = `### OUTPUT FORMAT - STRICT
 Return ONLY valid JSON. No markdown, no code fences, no commentary before or after it.
 Every key below must be present on every reply. Where you have nothing to say, use the explicit
-"Not Verifiable" status and null - never omit a key and never return an empty object.
+"Not Applicable" status and null - never omit a key and never return an empty object.
 
 {
   "pitch_accuracy": {
-    "score": 0-100, or null when status is "Not Verifiable",
-    "status": "Accurate" | "Partially Accurate" | "Inaccurate" | "Not Verifiable",
+    "score": 0-100, or null when status is "Not Applicable",
+    "status": "Accurate" | "Partially Accurate" | "Inaccurate" | "Not Applicable",
     "issues": ["one short line per specific problem, quoting the claim"],
     "reason": "why this verdict",
     "fact_checks": [
@@ -229,16 +229,16 @@ Every key below must be present on every reply. Where you have nothing to say, u
     ]
   },
   "followup_date_accuracy": {
-    "status": "Accurate" | "Inaccurate" | "Not Verifiable",
-    "score": 0-100, or null when status is "Not Verifiable",
+    "status": "Accurate" | "Inaccurate" | "Not Applicable",
+    "score": 0-100, or null when status is "Not Applicable",
     "crm_date": "the CRM value exactly as given, or null",
     "customer_agreed_date": "what the customer actually agreed to, in their own terms, or null",
     "evidence": "the line from the transcript that settles it, or null",
     "reason": "why this verdict"
   },
   "lost_reason_accuracy": {
-    "status": "Accurate" | "Inaccurate" | "Not Verifiable",
-    "score": 0-100, or null when status is "Not Verifiable",
+    "status": "Accurate" | "Inaccurate" | "Not Applicable",
+    "score": 0-100, or null when status is "Not Applicable",
     "crm_reason": "the CRM value exactly as given, or null",
     "actual_reason": "the reason the conversation actually supports, or null",
     "evidence": "the line from the transcript that settles it, or null",
@@ -251,8 +251,8 @@ Every key below must be present on every reply. Where you have nothing to say, u
     "reason": "why this verdict"
   },
   "remarks_accuracy": {
-    "status": "Accurate" | "Partially Accurate" | "Inaccurate" | "Not Verifiable",
-    "score": 0-100, or null when status is "Not Verifiable",
+    "status": "Accurate" | "Partially Accurate" | "Inaccurate" | "Not Applicable",
+    "score": 0-100, or null when status is "Not Applicable",
     "crm_remarks": "the CRM value exactly as given, or null",
     "actual_conversation_summary": "two or three factual sentences on what the call contained",
     "reason": "why this verdict"
@@ -346,7 +346,7 @@ You are auditing the CRM. You never correct it, never rewrite it and never assum
 - CONVERSATION FACT is the transcript, and only the transcript.
 - Your assessment is a THIRD thing, kept separate from both.
 Every verdict must rest on something a reader can find in the transcript. Quote it in "evidence".
-Where the transcript does not settle a question, the honest answer is "Not Verifiable" - that is a
+Where the transcript does not settle a question, the honest answer is "Not Applicable" - that is a
 real answer here and is never penalised. Guessing is the only wrong answer.
 
 The transcript is a machine transcription of a call in Bengali, Hindi and English, and it is
@@ -365,7 +365,7 @@ the company funnel; were required points missed; was any wrong product informati
 - "score" is 0-100 for the accuracy of what was said, not for how good the agent was.
 - "status": Accurate (nothing incorrect, nothing important missing) · Partially Accurate (correct but
   incomplete, or one minor error) · Inaccurate (a materially wrong claim about the project) ·
-  Not Verifiable (the customer ended the call before any pitch happened, or nothing about the project
+  Not Applicable (the customer ended the call before any pitch happened, or nothing about the project
   was said at all - use this rather than scoring a pitch that did not occur).
 - "issues": one short line per specific problem, quoting the claim. Empty array if there are none.
 NEVER invent a project fact. If the agent stated something the approved information does not cover,
@@ -420,8 +420,8 @@ Distinguish carefully between these five situations:
   a. An explicit date and time was agreed          -> compare it with the CRM's date.
   b. An approximate time was agreed ("call me tomorrow morning", "after 5") -> a CRM date inside
      that window is Accurate; one outside it is Inaccurate.
-  c. No follow-up was discussed at all             -> "Not Verifiable". NOT Inaccurate.
-  d. The CRM date has no support in the conversation but nothing contradicts it -> "Not Verifiable".
+  c. No follow-up was discussed at all             -> "Not Applicable". NOT Inaccurate.
+  d. The CRM date has no support in the conversation but nothing contradicts it -> "Not Applicable".
   e. The conversation contradicts the CRM date ("call me next week" vs a same-day time, or the
      customer refused any further contact) -> "Inaccurate".
 DO NOT mark a date inaccurate merely because the customer did not state one. Absence of discussion is
@@ -430,21 +430,21 @@ Put the CRM's value in "crm_date" exactly as given, and what the customer actual
 their own terms, e.g. "tomorrow around 11 AM" - in "customer_agreed_date" (null if none).
 Also give "score", 0-100: 100 when the CRM date matches exactly, scaling down the further the actual
 agreement drifts from it (a few hours off scores high, a different day lower, a flatly contradicted
-date lower still). Null only when status is "Not Verifiable" - never invent a number for a date that
+date lower still). Null only when status is "Not Applicable" - never invent a number for a date that
 was never discussed.
 
 ### 3. LOST REASON ACCURACY
 Only meaningful when the CRM status for this follow-up is Lost. If it is not Lost, return
-"Not Verifiable" with a one-line reason saying so, and leave "actual_reason" null.
+"Not Applicable" with a one-line reason saying so, and leave "actual_reason" null.
 Where the status is Lost: compare the CRM's lost_reason with the reason the customer actually gave.
 - Accurate       - the CRM reason is the reason the customer gave, in substance.
 - Inaccurate     - the customer clearly gave a DIFFERENT reason. Name it in "actual_reason".
-- Not Verifiable - the customer refused without giving a reason, or the call gives no evidence either
+- Not Applicable - the customer refused without giving a reason, or the call gives no evidence either
                    way. Leave "actual_reason" null.
 Do not infer a specific lost reason the conversation does not support. "Not interested, thank you" is
 not evidence of a budget problem or a location problem.
 Also give "score", 0-100: 100 when the CRM's lost_reason is exactly the reason the customer gave,
-scaling down for a reason that is only partly right. Null whenever status is "Not Verifiable" -
+scaling down for a reason that is only partly right. Null whenever status is "Not Applicable" -
 including every follow-up that is not marked Lost, since the question does not apply there.
 
 ### 4. RETENTION EFFORT (LOST LEADS ONLY)
@@ -478,13 +478,13 @@ commitment, any site-visit commitment, the outcome of the call, and the reason f
 - Accurate           - the remarks are a fair record of the call.
 - Partially Accurate - true as far as it goes but leaves out something material that happened.
 - Inaccurate         - the remarks say something the call does not support, or contradict it.
-- Not Verifiable     - the CRM left the remarks empty, or the transcript is too thin to judge.
+- Not Applicable     - the CRM left the remarks empty, or the transcript is too thin to judge.
 Put a two or three sentence factual summary of what the call actually contained in
 "actual_conversation_summary" - that is the CONVERSATION FACT the reader compares against.
 Also give "score", 0-100, on the same scale as pitch accuracy: how fully the remarks represent what
 happened, not a restatement of "status" in digits - Accurate is not automatically 100 and Partially
 Accurate is not automatically 50, score what the remarks actually get right and leave out. Null only
-when status is "Not Verifiable".
+when status is "Not Applicable".
 
 ### 6. THE SIX-POINT AGENT AUDIT - DO THIS BEFORE YOU DECIDE THE STATUS
 This audit comes first on purpose, and section 7 depends on it. What the agent asked decides what

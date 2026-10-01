@@ -25068,7 +25068,7 @@ const TRC_MISMATCH_KEYS = Object.keys(TRC_MISMATCH);
    of them and a new value shows up as itself rather than silently grey. */
 const TRC_ACC_TAG = {
   'Accurate': 't-green', 'Partially Accurate': 't-amber',
-  'Inaccurate': 't-red', 'Not Verifiable': 't-gray'
+  'Inaccurate': 't-red', 'Not Applicable': 't-gray'
 };
 const TRC_TR_META = {
   completed:         {label:'Transcribed',      tag:'t-green', icon:'fa-circle-check'},
@@ -26642,14 +26642,14 @@ function trcFilterBar(all){
       +opt('Accurate','Pitch: Accurate',TRC_F.pitch)
       +opt('Partially Accurate','Pitch: Partially Accurate',TRC_F.pitch)
       +opt('Inaccurate','Pitch: Inaccurate',TRC_F.pitch)
-      +opt('Not Verifiable','Pitch: Not Verifiable',TRC_F.pitch)
+      +opt('Not Applicable','Pitch: Not Applicable',TRC_F.pitch)
       +opt('NONE','Pitch: Not yet assessed',TRC_F.pitch)
     +'</select>'
     +'<select onchange="trcSet(\'fdate\',this.value)" style="padding:6px 8px">'
       +opt('all','Follow-up date accuracy: all',TRC_F.fdate)
       +opt('Accurate','Follow-up date: Accurate',TRC_F.fdate)
       +opt('Inaccurate','Follow-up date: Inaccurate',TRC_F.fdate)
-      +opt('Not Verifiable','Follow-up date: Not Verifiable',TRC_F.fdate)
+      +opt('Not Applicable','Follow-up date: Not Applicable',TRC_F.fdate)
       +opt('NONE','Follow-up date: Not yet assessed',TRC_F.fdate)
     +'</select>'
     +'<select onchange="trcSet(\'remarks\',this.value)" style="padding:6px 8px">'
@@ -26657,7 +26657,7 @@ function trcFilterBar(all){
       +opt('Accurate','Remarks: Accurate',TRC_F.remarks)
       +opt('Partially Accurate','Remarks: Partially Accurate',TRC_F.remarks)
       +opt('Inaccurate','Remarks: Inaccurate',TRC_F.remarks)
-      +opt('Not Verifiable','Remarks: Not Verifiable',TRC_F.remarks)
+      +opt('Not Applicable','Remarks: Not Applicable',TRC_F.remarks)
       +opt('NONE','Remarks: Not yet assessed',TRC_F.remarks)
     +'</select>'
     +'<select onchange="trcSet(\'etiquette\',this.value)" style="padding:6px 8px">'
@@ -26684,11 +26684,11 @@ function trcFilterBar(all){
       +opt('Not Applicable','Retention: Not Applicable',TRC_F.retention)
       +opt('NONE','Retention: Not yet assessed',TRC_F.retention)
     +'</select>'
-    +'<select onchange="trcSet(\'lostReason\',this.value)" style="padding:6px 8px" title="Only meaningful on Lost calls - Not Verifiable everywhere else">'
+    +'<select onchange="trcSet(\'lostReason\',this.value)" style="padding:6px 8px" title="Only meaningful on Lost calls - Not Applicable everywhere else">'
       +opt('all','Lost reason accuracy: all',TRC_F.lostReason)
       +opt('Accurate','Lost reason: Accurate',TRC_F.lostReason)
       +opt('Inaccurate','Lost reason: Inaccurate',TRC_F.lostReason)
-      +opt('Not Verifiable','Lost reason: Not Verifiable',TRC_F.lostReason)
+      +opt('Not Applicable','Lost reason: Not Applicable',TRC_F.lostReason)
       +opt('NONE','Lost reason: Not yet assessed',TRC_F.lostReason)
     +'</select>'
     +'<select onchange="trcSet(\'personalMobile\',this.value)" style="padding:6px 8px" title="Did the agent ask for a personal mobile number additional to the one already on file">'
@@ -27231,8 +27231,8 @@ function trcQaTableHtml(r,m){
 
    Same chip as the pitch fact check, tick for match, cross for mismatch, nothing added on top. */
 function trcMarkChip(cls,icon,label,tip){
-  return '<span class="tag '+cls+'"'+(tip?' title="'+esc(tip)+'"':'')
-    +'><i class="fa-solid '+icon+'"></i> '+esc(label)+'</span>';
+  return '<div class="mark-item '+cls+'"'+(tip?' title="'+esc(tip)+'"':'')
+    +'><i class="fa-solid '+icon+'"></i><span>'+esc(label)+'</span></div>';
 }
 function trcMarkRowHtml(title,chips){
   return '<div style="margin-top:10px"><div style="font-size:12.5px;font-weight:700;margin-bottom:6px">'
@@ -27275,11 +27275,7 @@ function trcStatusSignalsHtml(r){
   if(!signals.length)return '';
   return trcMarkRowHtml('What the call says about the status',
     signals.map(function(s){
-      const dir=String(s.direction||'');
-      const isMatch=/^match$/i.test(dir), isMismatch=/^mismatch$/i.test(dir);
-      const cls=isMatch?'t-green':isMismatch?'t-red':'t-gray';
-      const icon=isMatch?'fa-check':isMismatch?'fa-xmark':'fa-circle-question';
-      return trcMarkChip(cls,icon,s.point,null);
+      return trcMarkChip('t-purple','fa-circle',s.point,null);
     }).join(''));
 }
 
