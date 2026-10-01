@@ -614,7 +614,7 @@ const NAV=[
     {id:'network',label:'Internet Speed',icon:'fa-wifi'},
   ]},
 ];
-const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i.label;ICONS[i.id]=i.icon;}));LABELS.security='Control Panel';ICONS.security='fa-sliders';LABELS.usability='Usability';ICONS.usability='fa-chart-simple';
+const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i.label;ICONS[i.id]=i.icon;}));LABELS.security='Control Panel';ICONS.security='fa-sliders';LABELS.daily_checks='Daily Checks';ICONS.daily_checks='fa-list-check';LABELS.usability='Usability';ICONS.usability='fa-chart-simple';
 const MODLIST=[];NAV.forEach(g=>g.items.forEach(i=>MODLIST.push([i.id,i.label])));
 const MODSET=new Set(MODLIST.map(m=>m[0]));
 const LEVELS=['Manager','Employee','New','Intern'];
@@ -688,9 +688,10 @@ function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
+  if(hasUsability()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -9492,6 +9493,12 @@ async function usbLoad(){
     if(error)throw error;
     USB.rows=data||[];
   }catch(e){ USB.rows=null; USB.err=(e&&e.message)||String(e); }
+  /* Workflow health is a second, independent query: it answers "where is the work stuck", which
+     the feature report cannot, and it deliberately ignores the date filters above (see the
+     function's own comment). Fetched here so the render stays synchronous like everything else;
+     a failure leaves it null and the block simply doesn't draw. */
+  try{ const {data:wf}=await sb.rpc('erp_usability_workflow_health'); USB.wfHealth=wf||[]; }
+  catch(e){ USB.wfHealth=null; }
   if(!USB.people){ try{ USB.people=await getPeople(); }catch(e){ USB.people=[]; } }
   // A per-feature drill-down cached under the old range/person would show stale names against the
   // new filters, so any change here throws it out rather than risk a misleading answer.
@@ -9520,6 +9527,9 @@ const USB_CSS='<style id="usbCss">'
   +'.usb-feat-row:hover td{background:#faf5ff}'
   +'.usb-feat-chev{color:var(--slate);font-size:10px;margin-right:8px;display:inline-block;width:10px;transition:transform .15s}'
   +'.usb-feat-chev.open{transform:rotate(90deg)}'
+  +'.usb-wf-cell{cursor:pointer;user-select:none}'
+  +'.usb-wf-cell:hover{background:#fffbeb}'
+  +'.usb-wf-cell.open{background:#fffbeb}'
   +'.usb-users-row td{background:#fbfaff;border-top:none;padding:0}'
   +'.usb-users-wrap{padding:4px 14px 12px 34px}'
   +'.usb-user-line{display:flex;justify-content:space-between;gap:14px;padding:6px 0;font-size:12.5px;border-bottom:1px solid #f1eefc}'
@@ -9854,6 +9864,197 @@ function usbModuleDetailHtml(moduleId){
       +'</tbody></table></div></div>';
   }).join('');
   return head+usbControlsHtml()+body;
+}
+/* ===== DAILY CHECKS — its own module =====
+
+   The handful of things somebody looks at every morning, lifted out of Usability so that routine
+   is one page rather than a hunt through twenty-five modules. It reads the same two sources the
+   Usability report does, so there is no second definition of any number to drift: the flagged
+   features come from erp_feature_catalog.daily_check, and the workflow backlog from
+   erp_usability_workflow_health.
+
+   Gated exactly like Usability (hasUsability), because the RPCs behind it are — a page that drew
+   an error for everyone else would be worse than no page.
+
+   Deliberately NOT given the Usability report's date pickers. This answers "what needs attention
+   today"; a range picker invites it to be read as a trend report, which is the other page's job. */
+VIEWS.daily_checks=async function(v){
+  setCrumb(['Administration','Daily Checks']);
+  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  await usbLoad();
+  const head=mHead('fa-list-check','#b8902f','Daily Checks');
+  if(USB.rows===null){
+    v.innerHTML=head+'<div class="card card-pad empty" style="margin-top:16px;padding:40px">'
+      +'<i class="fa-solid fa-lock"></i><div>'+esc(USB.err||'Could not load')+'</div></div>';
+    return;
+  }
+  const rows=USB.rows||[];
+  const picks=rows.filter(function(r){ return r.daily_check; });
+  /* Grouped by module in the catalogue's own order, so the page reads the way the list was
+     written rather than alphabetically. */
+  const mods=[]; picks.forEach(function(r){ if(mods.indexOf(r.module_label)===-1) mods.push(r.module_label); });
+  const feature=mods.map(function(m){
+    return usbDailyChecksHtml(picks.filter(function(r){ return r.module_label===m; }), m);
+  }).join('');
+  const none=(!picks.length && !(USB.wfHealth||[]).length)
+    ? '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-list-check"></i>'
+      +'<div>Nothing is flagged as a daily check yet</div></div>' : '';
+  /* The body is kept behind its own id so expanding a workflow breakdown repaints just this,
+     rather than going through renderPage() — which would re-run usbLoad() and fire both RPCs
+     again on every click. */
+  DC_BODY=function(){ return usbWorkflowHealthHtml()+feature+none; };
+  v.innerHTML=head
+    +'<p style="color:var(--slate);font-size:13px;margin:6px 2px 2px">What needs attention today. '
+      +'Feature counts cover the last 30 days; workflow figures are live, with movement from yesterday.</p>'
+    +'<div id="dcBody">'+DC_BODY()+'</div>';
+};
+let DC_BODY=null;
+function dcRepaint(){ const b=$('dcBody'); if(b&&DC_BODY) b.innerHTML=DC_BODY(); }
+/* WORKFLOW HEALTH — one row per workflow, on the Daily Checks page.
+   Five of these six are not usage at all: they count where instances are actually sitting, which
+   is the question "is anything stuck" really asks. They are a live snapshot plus yesterday, and
+   they ignore the report's date pickers on purpose — the function's comment explains why. */
+function usbWorkflowHealthHtml(){
+  const rows=USB.wfHealth;
+  if(!rows||!rows.length) return '';
+  const warn=function(n){ return Number(n)>0?'color:#b45309;font-weight:700':'color:var(--slate)'; };
+  return '<div class="card" style="margin-bottom:14px">'
+    +'<div class="card-pad" style="padding-bottom:10px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+        +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-heart-pulse" style="color:#b8902f"></i> Workflow health</div>'
+        +'<div style="font-size:12px;color:var(--slate)">Live right now · movement counts are yesterday</div>'
+      +'</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">Where each workflow\'s instances are actually sitting. Click any amber figure to see which step.</div>'
+    +'</div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
+      +'<th>Workflow</th>'
+      +'<th style="width:78px" title="Live instances not yet finished">Live</th>'
+      +'<th style="width:104px" title="Appeared for someone and not picked up yet">Awaiting receipt</th>'
+      +'<th style="width:116px" title="A previous person forwarded it and the next person has not accepted it">Forwarded, not received</th>'
+      +'<th style="width:116px" title="Received, and not moved on">Received, not forwarded</th>'
+      +'<th style="width:84px">Raised</th><th style="width:84px">Closed</th>'
+      +'<th style="width:104px" title="Reverts and send-backs — the work going backwards">Reverted</th>'
+      +'<th style="width:112px" title="Instances that have reached the end of the workflow, all time">Completed</th>'
+    +'</tr></thead><tbody>'
+    +rows.map(function(r){
+        /* The three backlog figures open a step-level breakdown. A count on its own says there is
+           a problem; the breakdown says which step and whose desk, which is the only form of this
+           anybody can act on. A zero isn't clickable — there'd be nothing behind it. */
+        const cell=function(n,state){
+          const v=Number(n||0);
+          if(!v) return '<td style="color:var(--slate)">0</td>';
+          const open=USB_WF_OPEN.has(r.flow_id+'|'+state);
+          return '<td class="usb-wf-cell'+(open?' open':'')+'" style="'+warn(v)+'" '
+            +'onclick="usbToggleWfStuck('+r.flow_id+',\''+state+'\')" '
+            +'title="Show which step these are sitting on">'+v
+            +'<i class="fa-solid fa-chevron-'+(open?'down':'right')+'" style="font-size:9px;margin-left:5px;opacity:.6"></i></td>';
+        };
+        const cd=Number(r.completed_total||0), tv=Number(r.total_ever||0);
+        const pct=tv?Math.round(cd/tv*100):0;
+        /* Under a fifth finished is worth the eye landing on it; the figure is still the count,
+           the share just decides whether it is called out. */
+        const done=tv
+          ? '<b style="'+(pct<20?'color:#9a3412':'color:#15803d')+'">'+cd+'</b>'
+            +'<span style="color:var(--slate);font-size:11.5px"> of '+tv+' &middot; '+pct+'%</span>'
+          : '<span style="color:var(--slate)">—</span>';
+        const row='<tr><td><b>'+esc(r.workflow)+'</b></td>'
+          +'<td>'+Number(r.live_instances||0)+'</td>'
+          +cell(r.awaiting_receipt,'awaiting')
+          +cell(r.fwd_not_received,'fwd')
+          +cell(r.in_hand_not_forwarded,'inhand')
+          +'<td>'+Number(r.raised_yesterday||0)+'</td>'
+          +'<td>'+Number(r.closed_yesterday||0)+'</td>'
+          +'<td style="'+warn(r.reverted_yesterday)+'">'+Number(r.reverted_yesterday||0)+'</td>'
+          /* Shown against the total ever raised. A bare completion count reads as "some are still
+             in flight"; "8 of 264" says how much of what was started has actually finished. */
+          +'<td>'+done+'</td></tr>';
+        return row+usbWfStuckRowsHtml(r);
+      }).join('')
+    +'</tbody></table></div></div>';
+}
+const USB_WF_OPEN=new Set();
+let USB_WF_CACHE={};
+/* The expanded breakdown under a workflow row. Mirrors the feature drill-down: load once per
+   workflow+state, cache it, and re-render from cache after that. */
+function usbWfStuckRowsHtml(r){
+  const states=[['awaiting','Awaiting receipt'],['fwd','Forwarded, not received'],['inhand','Received, not forwarded']];
+  return states.filter(function(s){ return USB_WF_OPEN.has(r.flow_id+'|'+s[0]); }).map(function(s){
+    const rows=USB_WF_CACHE[r.flow_id+'|'+s[0]];
+    let inner;
+    if(rows===undefined){
+      inner='<span style="color:var(--slate);font-size:12.5px"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</span>';
+    }else if(!rows.length){
+      inner='<span style="color:var(--slate);font-size:12.5px">Nothing sitting in this state.</span>';
+    }else{
+      inner='<table class="tbl" style="width:100%;margin:0"><thead><tr>'
+        +'<th style="width:54px">Step</th><th>Name</th><th style="width:88px">Instances</th>'
+        +'<th>With</th><th style="width:110px">Oldest</th></tr></thead><tbody>'
+        +rows.map(function(x){
+            const who=(x.who||[]).join(', ')+(Number(x.owners||0)>(x.who||[]).length
+              ? ' and '+(Number(x.owners)-(x.who||[]).length)+' more' : '');
+            const d=Number(x.oldest_days||0);
+            return '<tr><td style="color:var(--slate)">'+Number(x.seq)+'</td>'
+              +'<td><b>'+esc(x.step)+'</b></td>'
+              +'<td><b>'+Number(x.instances||0)+'</b></td>'
+              +'<td style="font-size:12px">'+esc(who||'—')+'</td>'
+              +'<td style="'+(d>=2?'color:#b45309;font-weight:700':'color:var(--slate)')+'">'+d+' day'+(d===1?'':'s')+'</td></tr>';
+          }).join('')
+        +'</tbody></table>';
+    }
+    return '<tr class="usb-users-row"><td colspan="9"><div class="usb-users-wrap" style="padding:10px 12px">'
+      +'<div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);margin-bottom:7px">'
+        +esc(r.workflow)+' &middot; '+s[1]+'</div>'
+      +inner+'</div></td></tr>';
+  }).join('');
+}
+window.usbToggleWfStuck=async function(flowId,state){
+  const key=flowId+'|'+state;
+  if(USB_WF_OPEN.has(key)){ USB_WF_OPEN.delete(key); dcRepaint(); return; }
+  USB_WF_OPEN.add(key); dcRepaint();
+  if(USB_WF_CACHE[key]!==undefined) return;
+  try{
+    const {data,error}=await sb.rpc('erp_usability_workflow_stuck_steps',{p_flow_id:flowId,p_state:state});
+    if(error)throw error;
+    USB_WF_CACHE[key]=data||[];
+  }catch(e){ USB_WF_CACHE[key]=[]; }
+  dcRepaint();
+};
+/* THE DAILY CHECKS, ABOVE EVERYTHING ELSE.
+   A handful of features are looked at every morning; the rest are read when somebody asks a
+   question. Those few are flagged in erp_feature_catalog.daily_check and lifted out here into
+   their own block at the top of the module, because the page below is grouped by TAB — pinning
+   them in place would scatter the Tasks ones away from the Workflow ones and defeat the point.
+   They still appear in their own tab further down, so nothing is hidden or duplicated away.
+   A module with nothing flagged renders nothing at all, rather than an empty card. */
+function usbDailyChecksHtml(rows,heading){
+  const picks=(rows||[]).filter(function(r){ return r.daily_check; });
+  if(!picks.length) return '';
+  return '<div class="card usb-daily" style="margin:16px 0 18px">'
+    +'<div class="card-pad" style="padding-bottom:10px">'
+      +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-folder-open" style="color:#b8902f"></i> '+esc(heading||'Daily checks')+'</div>'
+    +'</div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
+      +'<th>Feature</th><th style="width:90px">Uses</th><th style="width:90px">People</th>'
+      +'<th style="width:130px">Last used</th><th style="width:120px">Activity</th>'
+    +'</tr></thead><tbody>'
+    +picks.map(function(r){
+        const s=usbBandStyle(r.band);
+        const open=USB_FEAT_OPEN.has(r.feature_key);
+        const clickable=Number(r.uses||0)>0;
+        const chev=clickable
+          ? '<span class="usb-feat-chev'+(open?' open':'')+'"><i class="fa-solid fa-chevron-right"></i></span>'
+          : '<span class="usb-feat-chev" style="visibility:hidden"><i class="fa-solid fa-chevron-right"></i></span>';
+        const row='<tr class="'+(clickable?'usb-feat-row':'')+'"'
+          +(clickable?' onclick="usbToggleFeature(\''+escJs(r.feature_key)+'\')"':'')+'>'
+          +'<td>'+chev+esc(r.feature)
+            +'<span style="font-size:11px;color:var(--slate);margin-left:8px">'+esc(r.tab)+'</span></td>'
+          +'<td><b>'+Number(r.uses||0).toLocaleString('en-IN')+'</b></td>'
+          +'<td>'+Number(r.users||0)+'</td>'
+          +'<td style="color:var(--slate);font-size:12px">'+(r.last_used?esc(fmtDate(r.last_used)):'—')+'</td>'
+          +'<td><span class="badge" style="background:'+s.bg+';color:'+s.ink+';white-space:nowrap">'+esc(r.band)+'</span></td></tr>';
+        return row+(open?usbFeatureUsersRowHtml(r):'');
+      }).join('')
+    +'</tbody></table></div></div>';
 }
 /* The sub-row a clicked feature expands into: who actually used it, most recent first. Loads once
    per feature per filter set (usbLoad clears the cache on any range/person change) and is cached
