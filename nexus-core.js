@@ -22181,9 +22181,7 @@ window.custDownloadSelectedDocs=async function(){
       ? await sb.schema('cust').from('receipt_items').select('against_demand_no,schedule,revenue_head,amount,line_type,particulars,receipt_id').in('receipt_id',rids2)
       : {data:[]};
     const receiptDates={};(rcpts2||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
-    const sba=Number(unit.super_built_up_area_sqft||0);
-    const unitCost=(csi||[]).find(i=>/unit cost/i.test(i.component||''));
-    const rate=sba&&unitCost?Math.round(Number(unitCost.amount||0)/sba):null;
+    const rate=custDocRate(unit,csi);
     const lateFee=Number((snap&&snap.late_fee_accrued)||0);
     (invs||[]).forEach(inv=>{
       const {data:its}={data:(allInv||[]).find(a=>a.document_no===inv.document_no)};
@@ -22288,7 +22286,7 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
     head='<th>Due Date</th><th>Description</th><th>Charge Type</th>'+
       '<th class="amt">Amount Due</th><th class="amt">Amount Paid</th><th class="amt">Amount Payable</th>';
     let due=0,paid=0;
-    rowsHtml=(ctx.plan||[]).map(r=>{
+    rowsHtml=custAnantaPlan(unit,ctx.plan).map(r=>{
       due+=r.due; paid+=r.paid;
       return '<tr><td>'+(r.dueDate?fmtDate(r.dueDate):'—')+'</td>'+
         '<td>'+esc(r.schedule||'—')+'</td><td>'+esc(r.head||'—')+'</td>'+
@@ -22310,7 +22308,7 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
     head='<th>Sl. #</th><th>Schedule Name</th><th>Revenue Name</th>'+
       '<th class="amt">Amount</th><th class="amt">GST</th><th class="amt">Total Amt</th>';
     let amt=0,tax=0,net=0;
-    rowsHtml=(ctx.items||[]).map((it,i)=>{
+    rowsHtml=custAnantaInvoiceItems(unit,ctx.items).map((it,i)=>{
       amt+=Number(it.amount||0); tax+=Number(it.tax||0); net+=Number(it.net_amount||0);
       return '<tr><td>'+(i+1)+'</td><td>'+esc(it.schedule||'—')+'</td><td>'+esc(it.revenue_head||'—')+'</td>'+
         '<td class="amt">'+custInr(it.amount||0)+'</td><td class="amt">'+custInr(it.tax||0)+'</td>'+
@@ -22389,7 +22387,7 @@ function custBuildPlan(allInv,alloc,beforeDate,receiptDates){
     (iv.invoice_items||[]).slice().sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).forEach(it=>{
       const due=Number(it.net_amount||0);
       const paid=Math.min(due,Number(paidByKey[key(iv.document_no,it.schedule,it.revenue_head)]||0));
-      plan.push({dueDate:iv.due_date||iv.document_date,schedule:it.schedule,head:it.revenue_head,due:due,paid:paid});
+      plan.push({doc:iv.document_no,dueDate:iv.due_date||iv.document_date,schedule:it.schedule,head:it.revenue_head,due:due,paid:paid});
       if(beforeDate&&iv.document_date&&iv.document_date<beforeDate) prevDues+=Math.max(0,due-paid);
     });
   });
@@ -22431,12 +22429,10 @@ window.custViewInvoice=async function(id){
   (rcpts||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
   const {plan,prevDues,onAccount}=custBuildPlan(allInv,alloc,inv.document_date,receiptDates);
 
-  const sba=Number(unit.super_built_up_area_sqft||0);
-  const unitCost=(csi||[]).find(i=>/unit cost/i.test(i.component||''));
   window._custInvoiceCache={
     inv:inv, items:its||[], plan:plan, prevDues:prevDues, onAccount:onAccount,
     lateFee:Number((snap&&snap.late_fee_accrued)||0),
-    rate:sba&&unitCost?Math.round(Number(unitCost.amount||0)/sba):null,
+    rate:custDocRate(unit,csi),
     unit:unit, contact:(cts&&cts[0])||null, fmt:'invoice'
   };
   custRenderInvoiceModal();
@@ -22508,6 +22504,49 @@ window.custPrintInvoice=function(){
    line, "Unit Price (Add On Premium Specification Pack)" (D/8G: 58,20,000 on 950 sq ft = 6,126.32).
    Every other project keeps Farvision's own line-by-line split. */
 const CUST_ANANTA_UNIT_PRICE=/^unit cost$|flc charges|plc charge|vehicle parking/i;
+const CUST_ANANTA_UNIT_PRICE_LABEL='Unit Price (Add On Premium Specification Pack)';
+function custIsAnanta(unit){ return /^dream ananta$/i.test(String((unit&&unit.projects&&unit.projects.name)||'').trim()); }
+/* The same one line on DREAM ANANTA's Tax Invoice and Demand Letter as on its cost sheet: Farvision
+   bills Unit Cost, FLC, PLC and Vehicle Parking as separate revenue heads of one schedule, and the
+   CRM shows them as "Unit Price (Add On Premium Specification Pack)". Lines are merged within the
+   same schedule (and, on the demand letter, the same invoice), so each instalment's total and what
+   has been paid against it are unchanged - only how many rows it takes to say it. The merged line
+   sits where the first of its parts was. Every other project is returned untouched. */
+function custAnantaInvoiceItems(unit,items){
+  if(!custIsAnanta(unit)) return items||[];
+  const out=[],at={};
+  (items||[]).forEach(it=>{
+    if(!CUST_ANANTA_UNIT_PRICE.test(String(it.revenue_head||'').trim())){ out.push(it); return; }
+    const k=String(it.schedule||'');
+    if(at[k]==null){ at[k]=out.length; out.push(Object.assign({},it,{revenue_head:CUST_ANANTA_UNIT_PRICE_LABEL,amount:0,tax:0,net_amount:0})); }
+    const m=out[at[k]];
+    m.amount=Number(m.amount)+Number(it.amount||0); m.tax=Number(m.tax)+Number(it.tax||0); m.net_amount=Number(m.net_amount)+Number(it.net_amount||0);
+  });
+  return out;
+}
+function custAnantaPlan(unit,plan){
+  if(!custIsAnanta(unit)) return plan||[];
+  const out=[],at={};
+  (plan||[]).forEach(r=>{
+    if(!CUST_ANANTA_UNIT_PRICE.test(String(r.head||'').trim())){ out.push(r); return; }
+    const k=String(r.doc||'')+'|'+String(r.dueDate||'')+'|'+String(r.schedule||'');
+    if(at[k]==null){ at[k]=out.length; out.push(Object.assign({},r,{head:CUST_ANANTA_UNIT_PRICE_LABEL,due:0,paid:0})); }
+    const m=out[at[k]]; m.due+=Number(r.due||0); m.paid+=Number(r.paid||0);
+  });
+  return out;
+}
+// The Rate printed on a demand letter: Unit Cost per sq ft, or for DREAM ANANTA the whole Unit Price
+// (Unit Cost + FLC + PLC + parking) per sq ft - the same 6,126.32 its cost sheet shows for D/8G.
+function custDocRate(unit,csi){
+  const sba=Number(unit&&unit.super_built_up_area_sqft||0);
+  if(!sba) return null;
+  if(custIsAnanta(unit)){
+    const amt=(csi||[]).filter(i=>CUST_ANANTA_UNIT_PRICE.test(String(i.component||'').trim())).reduce((s,i)=>s+Number(i.amount||0),0);
+    return amt?custFmtRate(amt/sba):null;
+  }
+  const unitCost=(csi||[]).find(i=>/unit cost/i.test(i.component||''));
+  return unitCost?Math.round(Number(unitCost.amount||0)/sba):null;
+}
 function custCostRows(unit,list,isUnitGroup){
   const sbu=Number(unit.super_built_up_area_sqft||0);
   const sum=(l,k)=>l.reduce((s,i)=>s+Number(i[k]||0),0);
