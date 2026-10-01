@@ -21715,7 +21715,28 @@ async function custLoadData(customerId,force){
     const {data}=await sb.schema('cust').from('farvision_contacts').select('*').in('unit_id',unitIds).eq('is_current',true);
     contacts=data||[];
   }
-  const contactByUnit={};contacts.forEach(c=>{contactByUnit[c.unit_id]=c;});
+  /* Anything the customer corrected themselves wins over the imported row. It is kept in its own
+     table because farvision_contacts is rewritten by the nightly import - an edit written there
+     would quietly disappear overnight. Blank fields in the override mean "no correction", so the
+     imported value still shows through. */
+  let overrides=[];
+  if(unitIds.length){
+    const {data}=await sb.schema('cust').from('contact_overrides').select('*').in('unit_id',unitIds);
+    overrides=data||[];
+  }
+  const ovByUnit={};overrides.forEach(o=>{ovByUnit[o.unit_id]=o;});
+  const contactByUnit={};
+  contacts.forEach(c=>{
+    const o=ovByUnit[c.unit_id];
+    contactByUnit[c.unit_id]=o
+      ? Object.assign({},c,{
+          contact_phone:   o.contact_phone   || c.contact_phone,
+          contact_email:   o.contact_email   || c.contact_email,
+          contact_address: o.contact_address || c.contact_address,
+          _edited:{phone:!!o.contact_phone,email:!!o.contact_email,address:!!o.contact_address}
+        })
+      : c;
+  });
   // Whether this customer has ever submitted a referral, across all their units (the sidebar is
   // shared across units, not per-unit) - drives the "Earn" badge in custSidebarTabs. Left undefined
   // rather than defaulted to false until this resolves, so the sidebar's very first paint (before
@@ -21875,10 +21896,63 @@ const CUST_FIGURES_NOTICE='<div style="display:flex;gap:10px;align-items:flex-st
   '<i class="fa-solid fa-circle-info" style="margin-top:2px"></i><div><b>Your figures are being updated.</b> '+
   'We are reconciling this account against our accounting system, so the amounts are not being shown right now. '+
   'Please contact us before making any payment.</div></div>';
+/* One profile row, able to turn into an input. Rendered as text; custProfileEditStart swaps in the
+   field beside it rather than re-rendering the page, so a half-typed address survives a stray
+   click. "Updated by you" marks a value the customer corrected, so it is obvious which figures are
+   ours and which are theirs. */
+function custProfileField(key,icon,label,value,delay,c){
+  const edited=c&&c._edited&&c._edited[key];
+  const isAddr=key==='address';
+  return '<div class="cust-profile-item'+(isAddr?' cust-profile-addr':'')+'" style="animation-delay:'+delay+'">'
+    +'<div class="cust-profile-icon"><i class="fa-solid '+icon+'"></i></div>'
+    +'<div style="min-width:0;flex:1">'
+      +'<div class="cust-profile-label">'+esc(label)
+        +(edited?' <span style="color:#16855a;font-weight:600">· updated by you</span>':'')+'</div>'
+      +'<div class="cust-profile-value" id="custPV_'+key+'">'+esc(value||'—')+'</div>'
+      +(isAddr
+        ? '<textarea id="custPI_'+key+'" rows="3" style="display:none;width:100%;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13.5px;resize:vertical"></textarea>'
+        : '<input id="custPI_'+key+'" type="'+(key==='email'?'email':'tel')+'" style="display:none;width:100%;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13.5px">')
+    +'</div></div>';
+}
+const CUST_PROFILE_KEYS=['phone','email','address'];
+function custProfileToggle(editing){
+  CUST_PROFILE_KEYS.forEach(function(k){
+    const v=$('custPV_'+k), i=$('custPI_'+k);
+    if(!v||!i)return;
+    if(editing){ i.value=(v.textContent==='—'?'':v.textContent); }
+    v.style.display=editing?'none':'';
+    i.style.display=editing?'':'none';
+  });
+  ['custProfileCancel','custProfileSave','custProfileHint'].forEach(function(id){
+    const el=$(id); if(el) el.style.display=editing?'':'none';
+  });
+  const e=$('custProfileEdit'); if(e) e.style.display=editing?'none':'';
+}
+window.custProfileEditStart=function(){ custProfileToggle(true); const p=$('custPI_phone'); if(p)try{p.focus();}catch(_e){} };
+window.custProfileEditCancel=function(){ custProfileToggle(false); };
+window.custProfileSave=async function(unitId){
+  const btn=$('custProfileSave');
+  const vals={}; CUST_PROFILE_KEYS.forEach(function(k){ const i=$('custPI_'+k); vals[k]=i?i.value.trim():''; });
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
+  try{
+    const {error}=await sb.schema('cust').rpc('save_my_contact',
+      {p_unit_id:unitId,p_phone:vals.phone,p_email:vals.email,p_address:vals.address});
+    if(error)throw error;
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Save'; }
+    // The database writes these messages for the customer to read, so show it rather than a generic one.
+    toast((e&&e.message)||'Could not save your details','err');
+    return;
+  }
+  toast('Your details have been updated','ok');
+  // Re-read so the page shows what was actually stored, not what was typed.
+  CUST_DATA=null;
+  renderPage();
+};
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
   const [{data:invRows},{data:rcptRows},{data:revRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
-    sb.schema('cust').from('invoices').select('id,document_no,document_date,due_date,invoice_type').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
+    sb.schema('cust').from('invoices').select('id,document_no,document_date,due_date,invoice_type,invoice_items(net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
     sb.schema('cust').from('money_receipts').select('*,receipt_items(against_demand_no,amount)').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true),
     sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle(),
@@ -21887,11 +21961,20 @@ async function custTabOverview(data,unit){
   ]);
   const snap=snapRows||null;
   const invoices=invRows||[], receiptRows=rcptRows||[], reversalRows=revRows||[], costItems=costItemRows||[], osItems=osRows||[];
-  // Per-invoice amount for the "Recent transactions" list below (still sourced from
-  // outstanding_items, which only carries currently-unpaid documents - a fully-paid invoice
-  // shows as 0 there, which is a display-only limitation for that one list, not the KPIs below).
+  /* Per-invoice amount for the "Recent transactions" list below. It used to come from
+     outstanding_items, which carries only currently-UNPAID documents - so every demand a customer
+     had already settled showed as a blank. That was not a rare edge: 1,615 of 1,678 invoices, on
+     295 of 296 units, have no outstanding row at all, so almost every demand in this list was
+     empty. The demand's own line items are what it was raised for, paid or not, and they are what
+     the Ledger has always used; outstanding_items stays only as a fallback for the handful of
+     imported invoices that arrived without item rows. */
   const osTotals={};
   osItems.forEach(o=>{const d=o.document_no||'';osTotals[d]=(osTotals[d]||0)+Number(o.bill_amount||0);});
+  const invTotal=inv=>{
+    const items=inv.invoice_items||[];
+    const fromItems=items.reduce((s,it)=>s+Number(it.net_amount||0),0);
+    return fromItems||Number(osTotals[inv.document_no]||0);
+  };
   // "Demand due" must compare like with like: total ever billed (cost_sheet_items.bill_amount,
   // which already accounts for every invoice raised to date) against total ever actually
   // received (money_receipts minus receipt_reversals). Comparing outstanding_items (which only
@@ -21949,15 +22032,21 @@ async function custTabOverview(data,unit){
 
   const gate=await custReconGate(unit.id);
   /* Named for the customer, not the accounts team. "Property value", "Demand due" and "Remaining"
-     read as three versions of one number; these say what each one is, and the small line under
-     Balance to pay ties the row together: Total flat cost = Amount paid + Balance to pay, and the
-     balance already includes what is due now. */
+     read as three versions of one number; these say what each one is, and the four now add up
+     cleanly: Total flat cost = Amount paid + Amount due now + Future demands.
+
+     The last tile used to be "Balance to pay" and INCLUDED the amount already due now, so a
+     customer with money payable today saw it counted twice - once under Amount due now and again
+     inside the balance. It is now what it says: only the part not payable yet. 46 units have
+     something due today, and for them this figure is lower than the old one by exactly that
+     amount; for everyone else nothing changed. */
+  const futureDemands=Math.max(0,remaining-billOutstanding);
   const kpis=[
     ['Total flat cost',custInr(propertyValue),'incl. GST and all charges'],
     ['Amount paid',custInr(totalReceivedFinal),paidPct+'% of total cost'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
     ['Amount due now',custInr(billOutstanding),billOutstanding>0?'billed to you, not yet paid':'nothing to pay right now',billOutstanding>0?'#e08600':'#16855a'],
-    ['Balance to pay',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':
-      (billOutstanding>0?'incl. '+custInr(billOutstanding)+' due now; rest billed as work progresses':'billed as construction progresses'))]
+    ['Future demands not payable now',custInr(futureDemands),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':
+      (futureDemands>0?'billed as construction progresses — no action needed yet':'nothing further to be billed'))]
   ];
   // Every figure here derives from the same imported rows, so if the unit does not reconcile there is
   // no subset of them that is safe to keep showing.
@@ -21965,7 +22054,7 @@ async function custTabOverview(data,unit){
 
   const entries=[];
   invoices.forEach(inv=>{
-    const total=osTotals[inv.document_no]||0;
+    const total=invTotal(inv);
     const osScheds2=osItems.filter(o=>o.document_no===inv.document_no&&o.schedule).map(o=>o.schedule);
     entries.push({date:inv.document_date,type:'Demand',desc:[...new Set(osScheds2)].join(', ')||inv.document_no,amount:total});
   });
@@ -22039,9 +22128,19 @@ async function custTabOverview(data,unit){
         '</div>'+
       '</div>'+
       '<div class="cust-profile-details">'+
-        '<div class="cust-profile-item" style="animation-delay:.1s"><div class="cust-profile-icon"><i class="fa-solid fa-phone"></i></div><div><div class="cust-profile-label">Phone</div><div class="cust-profile-value">'+esc(c.contact_phone||'—')+'</div></div></div>'+
-        '<div class="cust-profile-item" style="animation-delay:.15s"><div class="cust-profile-icon"><i class="fa-solid fa-envelope"></i></div><div><div class="cust-profile-label">Email</div><div class="cust-profile-value">'+esc(c.contact_email||'—')+'</div></div></div>'+
-        '<div class="cust-profile-item cust-profile-addr" style="animation-delay:.2s"><div class="cust-profile-icon"><i class="fa-solid fa-location-dot"></i></div><div><div class="cust-profile-label">Correspondence address</div><div class="cust-profile-value">'+esc(c.contact_address||'—')+'</div></div></div>'+
+        custProfileField('phone','fa-phone','Phone',c.contact_phone,'.1s',c)+
+        custProfileField('email','fa-envelope','Email',c.contact_email,'.15s',c)+
+        custProfileField('address','fa-location-dot','Correspondence address',c.contact_address,'.2s',c)+
+      '</div>'+
+      /* The customer can correct how we reach them. The registered name is NOT here: it is the
+         name on the booking and appears on receipts and demand letters, so it has to match the
+         agreement rather than follow a text box. */
+      '<div class="cust-profile-edit-bar" style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
+        '<span id="custProfileHint" style="margin-right:auto;font-size:12px;color:var(--slate);display:none">'+
+          'Changing these updates how we contact you. Your name and flat details cannot be changed here — please call us for those.</span>'+
+        '<button class="btn" id="custProfileEdit" onclick="custProfileEditStart('+unit.id+')"><i class="fa-solid fa-pen"></i> Update my details</button>'+
+        '<button class="btn" id="custProfileCancel" style="display:none" onclick="custProfileEditCancel()">Cancel</button>'+
+        '<button class="btn btn-primary" id="custProfileSave" style="display:none" onclick="custProfileSave('+unit.id+')"><i class="fa-solid fa-check"></i> Save</button>'+
       '</div>'+
     '</div>'
     :'<div class="card card-pad empty">Profile not yet available — this updates after our next records sync.</div>';
@@ -22089,7 +22188,7 @@ window.custPrintStatement=function(){
       '<div class="kpi"><div class="lbl">Total flat cost</div><div class="val">'+custInr(snap.propertyValue)+'</div></div>'+
       '<div class="kpi"><div class="lbl">Amount paid</div><div class="val">'+custInr(snap.totalReceived)+'</div></div>'+
       '<div class="kpi"><div class="lbl">Amount due now</div><div class="val">'+custInr(snap.billOutstanding)+'</div></div>'+
-      '<div class="kpi"><div class="lbl">Balance to pay</div><div class="val">'+custInr(snap.remaining)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Future demands not payable now</div><div class="val">'+custInr(Math.max(0,Number(snap.remaining||0)-Number(snap.billOutstanding||0)))+'</div></div>'+
     '</div>'+
     (tableHtml||'<p>No transactions recorded yet.</p>')+
     '</body></html>';
@@ -22205,9 +22304,38 @@ async function custTabLedger(unit){
     '<span style="color:var(--slate)">'+entries.length+' entries</span>'+
     '<span style="margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'+
     '<button class="btn" id="custBulkDlBtn" style="display:none" onclick="custDownloadSelectedDocs()"><i class="fa-solid fa-file-arrow-down"></i> <span id="custBulkDlLabel">Download</span></button>'+
-    '<button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></span></div>';
+    '<button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
+    /* People were not finding the per-row download at all, because nothing on the page said a
+       single receipt or demand could be opened on its own - the only visible control printed the
+       whole ledger. The note says where to click, and the footnote covers the tick-boxes, which
+       are the part nobody discovers by accident. */
+    '<button class="btn" type="button" aria-label="How to download your documents" '+
+      'title="How to download your documents" onclick="custLedgerHelp()" '+
+      'style="padding-left:11px;padding-right:11px;color:var(--brand)">'+
+      '<i class="fa-solid fa-circle-info"></i></button>'+
+    '</span></div>';
   return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows);
 }
+window.custLedgerHelp=function(){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-circle-info" style="color:var(--brand)"></i> Downloading your documents</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,560px);font-size:13.5px;line-height:1.65;color:#334155">'
+      +'<p style="margin:0 0 14px">Every line in this ledger is a document you can open and keep.</p>'
+      +'<div style="display:grid;gap:12px">'
+        +'<div style="display:flex;gap:11px"><i class="fa-solid fa-receipt" style="color:#16855a;margin-top:3px;width:16px;text-align:center"></i>'
+          +'<div><b>Receipts</b><br>Click any <b>Receipt</b> row to open it, then use <b>Print / Download PDF</b> inside. This is your proof of payment.</div></div>'
+        +'<div style="display:flex;gap:11px"><i class="fa-solid fa-file-invoice" style="color:#e08600;margin-top:3px;width:16px;text-align:center"></i>'
+          +'<div><b>Demands and invoices</b><br>Click any <b>Demand</b> row to open the demand letter with its full breakdown of charges.</div></div>'
+        +'<div style="display:flex;gap:11px"><i class="fa-solid fa-print" style="color:#1d4ed8;margin-top:3px;width:16px;text-align:center"></i>'
+          +'<div><b>The whole ledger</b><br><b>Print / Download PDF</b> at the top gives you every demand and payment on this flat in one statement.</div></div>'
+      +'</div>'
+      +'<div style="margin-top:16px;padding:11px 13px;background:#f1f5f9;border-left:3px solid var(--brand);border-radius:7px;font-size:13px">'
+        +'<b>Need several at once?</b> Tick the box on each row you want, then press the <b>Download</b> button that appears at the top. '
+        +'They come down together as a single ZIP file.</div>'
+      +'<p style="margin:14px 0 0;font-size:12.5px;color:var(--slate)">If a document will not open, your browser may be blocking pop-ups for this site — allow them and try again.</p>'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn btn-primary" onclick="closeModal()">Got it</button></div>','md');
+};
 window.custPrintLedger=function(){
   const unit=window._custLedgerUnit,entries=window._custLedgerEntries;
   if(!unit){toast('Nothing to print yet','err');return;}
