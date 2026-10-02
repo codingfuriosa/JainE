@@ -25162,7 +25162,7 @@ window.trRecClick=async function(ev,feat,url,file){
    FIFO queue and increments the attempt count; nothing here duplicates a row or clears a result. */
 window.traRetry=async function(id){
   const btns=document.querySelectorAll('[onclick="traRetry('+id+')"]');
-  btns.forEach(function(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Queued';});
+  btns.forEach(function(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Starting';});
   try{
     const {data:{session}}=await sb.auth.getSession();
     const token=session&&session.access_token;
@@ -25171,7 +25171,7 @@ window.traRetry=async function(id){
       body:JSON.stringify({action:'retry',id:id,gemini_model:TRA_RETRY_MODEL})});
     const out=await res.json().catch(function(){return {};});
     if(!res.ok||out.error)throw new Error(out.error||('HTTP '+res.status));
-    toast('Back in the queue','ok');
+    toast(out.work&&out.work.processed?'Transcription and QA started':'Queued - it runs as soon as the current recording finishes','ok');
   }catch(e){
     toast('Could not retry: '+((e&&e.message)||e),'err');
   }
@@ -25490,14 +25490,7 @@ const TRC_MISMATCH = {
   in_followup_should_have_been_qualified: {
     label: 'In Follow Up that should have been Qualified', short: 'Should be Qualified',
     tag: 't-green', icon: 'fa-circle-up', colour: '#16a34a',
-    blurb: 'The CRM has this lead in follow-up, but the call already meets the qualification test. Move it on.' },
-  /* By requirement (2026-09-23): an Unclear call used to score status_match:null and vanish from every
-     total - neither a match nor a mismatch. It is now its own category, so a run full of unreviewable
-     calls shows up rather than quietly reading as a clean mismatch rate. See deriveStatusMatch. */
-  ai_status_unclear: {
-    label: 'AI could not assess the call', short: 'Unclear',
-    tag: 't-gray', icon: 'fa-circle-question', colour: '#64748b',
-    blurb: 'The conversation did not establish a clear outcome - flagged for review rather than silently excluded from the count.' }
+    blurb: 'The CRM has this lead in follow-up, but the call already meets the qualification test. Move it on.' }
 };
 const TRC_MISMATCH_KEYS = Object.keys(TRC_MISMATCH);
 
@@ -25543,6 +25536,15 @@ function trcTrStatus(r){
 function trcProcFailed(r){
   return !!(r && (trcTrStatus(r)==='failed' || r.queue_status==='failed'));
 }
+/* Retry is offered for a recording that failed OR is queued/unfinished (Waiting, or transcribed but
+   its QA never ran). queue_status is what proves the call is really in the pipeline: a call that was
+   never queued has none and has nothing to retry. */
+function trcCanRetry(r){
+  if(!r||!r.recording_url&&!r.has_recording&&!r.queue_status)return false;
+  if(trcProcFailed(r))return true;
+  return ['pending','transcribing','qa_pending','qa_running'].indexOf(String(r.queue_status||''))>=0;
+}
+function trcRetryLabel(r){return trcProcFailed(r)?'Retry':'Start now';}
 /* A Sales call still queues and is still attempted (a lead qualifies a whole day, Sales calls
    included - see TRANSCRIPTION-README.md), but one that never actually finished transcribing has
    nothing of its own worth putting in front of a reader: no CRM-vs-call comparison ran, so there is
@@ -26477,7 +26479,7 @@ async function trcKpiFastFetch(force){
       remarks_accurate:0,remarks_partially_accurate:0,remarks_inaccurate:0,remarks_not_verifiable:0,
       status_match:0,status_mismatch:0,lost_should_not_have_been_lost:0,
       qualified_should_not_have_been_qualified:0,in_followup_should_have_been_lost:0,
-      in_followup_should_have_been_qualified:0,ai_status_unclear:0,
+      in_followup_should_have_been_qualified:0,
       agent_qa_score_sum:0,agent_qa_score_n:0,
       reused_transcription:0,
       /* Safe to sum day-by-day and add across a range, unlike total_leads - is_latest_assessed
@@ -26485,8 +26487,7 @@ async function trcKpiFastFetch(force){
          contribution lands on exactly one day, ever. See 20260918110000. */
       status_match_leads:0,status_mismatch_leads:0,
       lost_should_not_have_been_lost_leads:0,qualified_should_not_have_been_qualified_leads:0,
-      in_followup_should_have_been_lost_leads:0,in_followup_should_have_been_qualified_leads:0,
-      ai_status_unclear_leads:0};
+      in_followup_should_have_been_lost_leads:0,in_followup_should_have_been_qualified_leads:0};
     (days||[]).forEach(function(d){
       Object.keys(sum).forEach(function(k){sum[k]+=Number(d[k]||0);});
     });
@@ -26885,8 +26886,7 @@ function trcKpiHtml(rows){
     +(TRC_F.match==='MISMATCH'?trcMismatchPanel(rows,fast):'');
 }
 
-/* The mismatch counts the specification asks for, by name (five now - see ai_status_unclear,
-   2026-09-23). Only rendered when Mismatch is the active
+/* The mismatch counts the specification asks for, by name (four). Only rendered when Mismatch is the active
    card, because that is the question they answer: of the calls where the CRM and the conversation
    disagree, WHICH WAY do they disagree. Each one filters the table under it. */
 function trcMismatchPanel(rows,fast){
@@ -27219,10 +27219,10 @@ function trcLeadRowHtml(g,sl){
          this lead's failed recordings there (see trcProcFailed), so every button below retries ONE
          specific recording, never the lead as a whole. stopPropagation keeps the click off the row's
          own onclick (which would otherwise navigate into the lead instead of retrying). */
-      +(TRC_F.proc==='failed'?'<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px" onclick="event.stopPropagation()">'
-        +g.rows.map(function(r){
+      +((TRC_F.proc==='failed'||TRC_F.proc==='not_transcribed')?'<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px" onclick="event.stopPropagation()">'
+        +g.rows.filter(trcCanRetry).map(function(r){
           return '<button class="btn btn-sm btn-primary" onclick="trcRetry('+r.follow_up_id+')">'
-            +'<i class="fa-solid fa-rotate-right"></i> Retry '+esc(trcWall(r.call_start_text,true)||trcWall(trcRowDate(r))||('#'+r.follow_up_id))+'</button>';
+            +'<i class="fa-solid fa-rotate-right"></i> '+trcRetryLabel(r)+' '+esc(trcWall(r.call_start_text,true)||trcWall(trcRowDate(r))||('#'+r.follow_up_id))+'</button>';
         }).join('')+'</div>':'')
     +'</td>'
     /* Danger and Status-regressed used to carry their full label alongside the CRM status tag - three
@@ -27692,7 +27692,10 @@ function trcQualGatesHtml(r){
     const isMatch=/^match$/i.test(v), isMismatch=/^mismatch$/i.test(v);
     const cls=isMatch?'t-green':isMismatch?'t-red':'t-gray';
     const icon=isMatch?'fa-check':isMismatch?'fa-xmark':'fa-circle-question';
-    return trcMarkChip(cls,icon,pair[1]+(v?' - '+v:' - not established'),g.note||null);
+    /* A budget gate that matched reads "Budget Match" (and "Budget Mismatch"): a customer's range that
+       contains the project's starting price is a match, and that is the wording asked for. */
+    const label=pair[0]==='budget'&&(isMatch||isMismatch)?'Budget '+(isMatch?'Match':'Mismatch'):pair[1]+(v?' - '+v:' - not established');
+    return trcMarkChip(cls,icon,label,g.note||null);
   }).join('');
   const ratchet=sa.qualification_ratcheted
     ?'<div style="font-size:12px;color:var(--slate);margin-top:6px">'
@@ -27736,7 +27739,7 @@ function trcCallHtml(r,i,total){
     +'<div class="grow"></div>'
     +trRecLink(r.recording_url,{label:'Download recording',file:trRecFile(r),
         feat:'transcription.call_detail.play_download_recording'})
-    +((r.queue_status==='failed')?'<button class="btn btn-sm btn-primary" onclick="trcRetry('+r.follow_up_id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button>':'')
+    +(trcCanRetry(r)?'<button class="btn btn-sm btn-primary" onclick="trcRetry('+r.follow_up_id+')" title="Run transcription and QA for this call now"><i class="fa-solid fa-rotate-right"></i> '+trcRetryLabel(r)+'</button>':'')
   +'</div>';
 
   const crm='<div class="card card-pad" style="margin:0">'
