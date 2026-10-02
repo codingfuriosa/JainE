@@ -614,7 +614,7 @@ const NAV=[
     {id:'network',label:'Internet Speed',icon:'fa-wifi'},
   ]},
 ];
-const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i.label;ICONS[i.id]=i.icon;}));LABELS.security='Control Panel';ICONS.security='fa-sliders';LABELS.usability='Usability';ICONS.usability='fa-chart-simple';
+const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i.label;ICONS[i.id]=i.icon;}));LABELS.security='Control Panel';ICONS.security='fa-sliders';LABELS.daily_checks='Daily Checks';ICONS.daily_checks='fa-list-check';LABELS.usability='Usability';ICONS.usability='fa-chart-simple';
 const MODLIST=[];NAV.forEach(g=>g.items.forEach(i=>MODLIST.push([i.id,i.label])));
 const MODSET=new Set(MODLIST.map(m=>m[0]));
 const LEVELS=['Manager','Employee','New','Intern'];
@@ -688,9 +688,10 @@ function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
+  if(hasUsability()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -988,9 +989,43 @@ function setCrumb(parts){
   }).join(' ');
 }
 function setActive(id){document.querySelectorAll('.sb-item').forEach(a=>a.classList.toggle('active',a.dataset.id===id));}
+/* WHERE "BACK" ACTUALLY GOES.
+
+   Back buttons used to carry a hard-coded destination - a meeting log sent you to that meeting's
+   occurrence list however you had arrived, so reaching it from Archive and pressing Back put you
+   somewhere you had never been. Each one was a guess about the single route somebody might have
+   come from.
+
+   This keeps the real trail instead. Every route the app renders is recorded, and goBack() walks
+   it, so Back means the page you were actually on.
+
+   WHY NOT history.back(). The browser's history is the whole TAB's, not the app's: it holds the
+   inbox the customer clicked a deep link from, and the search results before that. history.back()
+   from the first JAIN-E page a person lands on takes them out of JAIN-E entirely, and
+   history.length > 1 cannot tell the two cases apart - it is already 2 on arrival from anywhere.
+   Walking our own trail can only ever land on a page inside the app, and falls back to a stated
+   route when there is nothing behind.
+
+   Repeated renders of the same route (an async view repainting itself) are not pushed twice, or
+   Back would appear to do nothing. */
+const NAV_TRAIL=[];
+function navRecord(route){
+  if(!route) return;
+  if(NAV_TRAIL[NAV_TRAIL.length-1]===route) return;
+  NAV_TRAIL.push(route);
+  if(NAV_TRAIL.length>60) NAV_TRAIL.shift();
+}
+/* fallback is where to go when this is the first page of the visit - a deep link opened from an
+   email, or a fresh tab. Every caller passes the route that page sits under. */
+window.goBack=function(fallback){
+  NAV_TRAIL.pop();                     // the page we are on
+  const prev=NAV_TRAIL.pop();          // the one before it; navTo re-records it
+  navTo(prev||fallback||'dashboard');
+};
 function renderPage(){
   let seg=location.hash.replace(/^#\/?/,'').split('/').filter(Boolean);
   if(seg[0]===PAGE)seg=seg.slice(1);
+  navRecord(PAGE+(seg.length?'/'+seg.join('/'):''));
   setActive(PAGE);
   const v=$('view');
   if(!pageAllowed(PAGE)){ return noAccess(v); }
@@ -1559,7 +1594,7 @@ async function docLibrary(v){
   const dept=DOC.dept;const m=DEPT_META[dept]||['fa-folder','#64748b','#f1f5f9'];
   setCrumb(['Documents',dept]);
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid ${m[0]}" style="color:${m[1]}"></i> ${esc(dept)} Library</h1><p>Folder navigation, categories & version-controlled storage</p></div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="location.hash='#/documents'"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
+    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="goBack('documents')"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
     <button class="btn" onclick="docNewFolder('${esc(dept)}')"><i class="fa-solid fa-folder-plus"></i> New Folder</button>
     <button class="btn btn-primary" onclick="docUploadModal('${esc(dept)}')"><i class="fa-solid fa-upload"></i> Upload</button></div></div>
     <div class="split"><div><div class="subnav" id="catNav"></div></div><div><div id="docTableHost"></div></div></div>`;
@@ -1596,7 +1631,7 @@ window.docPickCat=function(c){DOC.cat=c;DOC.page=1;document.querySelectorAll('#c
 async function docAll(v,title){
   setCrumb(['Documents',title]);
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-table-list" style="color:#1d4ed8"></i> ${esc(title)}</h1><p>Search and manage documents across every department</p></div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="location.hash='#/documents'"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
+    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="goBack('documents')"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
     <button class="btn btn-primary" onclick="docUploadModal()"><i class="fa-solid fa-upload"></i> Upload</button></div></div>
     <div id="docTableHost"></div>`;
   docRenderTable($('docTableHost'),null);
@@ -5315,7 +5350,7 @@ async function taskDetail(v,id,dgCtx){
   // shown in Details → Members just below it.
   const dgWord=!dgEdges.length?'':(!myDirectDelegator?'Assigned':dgCtx==='delegated'?(t.created_by===state.email?'Assigned':'Delegated'):(myDirectDelegator===t.created_by?'Assigned':'Delegated'));
   const subLabel=t.kind==='delegation'?'Delegated to <b>'+esc(nameOf(t.assigned_to))+'</b> by '+esc(nameOf(t.created_by)):t.project_id?(dgEdges.length?dgRowLabelHtml(dgWord,originalTeam,ownerEmail):'Delegated to <b>'+esc(nameOf(t.owner))+'</b> by '+esc(nameOf(t.created_by))):'Owned by <b>'+esc(nameOf(t.owner))+'</b>';
-  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="history.back()"><i class="fa-solid fa-arrow-left"></i> Back</button>
+  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="goBack('documents')"><i class="fa-solid fa-arrow-left"></i> Back</button>
     ${proj?`<div style="margin-top:10px"><span class="tag t-blue" style="cursor:pointer" onclick="location.hash='#/tasks/project/${proj.id}'"><i class="fa-solid fa-diagram-project"></i> ${esc(proj.name)}</span></div>`:goalP?`<div style="margin-top:10px"><span class="tag t-amber" style="cursor:pointer" onclick="location.hash='#/tasks/goal/${goalP.id}'"><i class="fa-solid fa-bullseye"></i> ${esc(goalP.name)}</span></div>`:''}
     <h1 style="margin-top:10px">${t.kind==='delegation'?'<i class="fa-solid fa-share-nodes" style="color:#0f766e"></i> ':''}${esc(t.title)}</h1>
     <p>${subLabel} · ${statusTagHtml}${apprText}</p></div>
@@ -5887,7 +5922,7 @@ async function noProjectDetail(v){
   const myTasks=list.filter(t=>t.kind!=='delegation'&&t.owner===me);
   const toMe=list.filter(t=>t.kind==='delegation'&&t.assigned_to===me&&t.created_by!==me);
   const byMe=list.filter(t=>t.kind==='delegation'&&t.created_by===me&&t.assigned_to!==me);
-  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="location.hash='#/tasks/list'"><i class="fa-solid fa-arrow-left"></i> Back</button>
+  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="goBack('tasks/list')"><i class="fa-solid fa-arrow-left"></i> Back</button>
     <h1 style="margin-top:10px"><i class="fa-solid fa-folder-open" style="color:#64748b"></i> No Project</h1>
     <p>Solo tasks and one-off delegations not tied to any project</p></div>
     <div>${fsHtml('nopStatus','Status',['Pending','Awaiting Approval','Completed'],NOPFILTER.status,'nopStatusChange')}</div>
@@ -6044,7 +6079,7 @@ async function projectDetail(v,id){
   const peopleList=[...owners,...mem.map(m=>m.email)].filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i);
   const dueHist=p.due_date_history||[];
   const statusOpts=['Pending','Awaiting Approval','Completed'];
-  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="location.hash='#/tasks/list'"><i class="fa-solid fa-arrow-left"></i> Back</button>
+  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="goBack('tasks/list')"><i class="fa-solid fa-arrow-left"></i> Back</button>
     <h1 style="margin-top:10px"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> ${esc(p.name)}</h1>
     <p>Owned by <b>${owners.length?owners.map(e=>esc(nameOf(e))).join(', '):esc(nameOf(p.created_by))}</b> · ${prioTag(p.priority)} ${statusTag(p.status)} · ${mem.length} member${mem.length===1?'':'s'} · ${list.length} task${list.length===1?'':'s'}</p></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -6477,7 +6512,7 @@ async function goalDetail(v,id){
   if(GLTFILTER.status!=='All')flist=flist.filter(t=>t.status===GLTFILTER.status);
   const statusOpts=['Pending','Awaiting Approval','Completed'];
   const prog=g.progress||0;
-  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="history.back()"><i class="fa-solid fa-arrow-left"></i> Back</button><h1 style="margin-top:10px"><i class="fa-solid fa-bullseye" style="color:#d97706"></i> ${esc(g.name)}</h1><p><span class="tag ${g.scope==='company'?'t-purple':g.scope==='team'?'t-blue':'t-gray'}" style="text-transform:capitalize">${esc(g.scope)}</span> ${prioTag(g.priority)} ${statusTag(g.status||'Pending')} · Owner ${esc(nameOf(g.owner))} · ${list.length} task${list.length===1?'':'s'}</p></div>
+  v.innerHTML=`<div class="page-head"><div><button class="btn btn-sm" onclick="goBack('tasks/list')"><i class="fa-solid fa-arrow-left"></i> Back</button><h1 style="margin-top:10px"><i class="fa-solid fa-bullseye" style="color:#d97706"></i> ${esc(g.name)}</h1><p><span class="tag ${g.scope==='company'?'t-purple':g.scope==='team'?'t-blue':'t-gray'}" style="text-transform:capitalize">${esc(g.scope)}</span> ${prioTag(g.priority)} ${statusTag(g.status||'Pending')} · Owner ${esc(nameOf(g.owner))} · ${list.length} task${list.length===1?'':'s'}</p></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn ${g.status==='Completed'?'btn-primary':''}" onclick="goalMarkComplete(${id},${g.status!=='Completed'})"><i class="fa-solid fa-circle-check"></i> ${g.status==='Completed'?'Completed':'Mark Complete'}</button>
       <button class="btn btn-primary" onclick="taskCreateModal('task',null,null,${id},'${esc(g.name).replace(/'/g,"\\'")}')"><i class="fa-solid fa-plus"></i> New Task</button>
@@ -9250,7 +9285,7 @@ async function fhPreviewPage(v){
   setCrumb(['Feedback','Feedback Hub','Preview']);
   const ed=FH_EDIT;
   if(!ed){
-    v.innerHTML=FH_CSS+`<div class="fh-page-head"><button class="fh-page-back" title="Back" onclick="navTo('feedback_hub')"><i class="fa-solid fa-arrow-left"></i></button>
+    v.innerHTML=FH_CSS+`<div class="fh-page-head"><button class="fh-page-back" title="Back" onclick="goBack('feedback_hub')"><i class="fa-solid fa-arrow-left"></i></button>
       <div class="fh-page-titles"><div class="fh-page-title">Preview</div></div></div>
       <div class="empty"><i class="fa-solid fa-eye"></i><div>Nothing to preview</div><div style="font-size:12.5px;margin-top:4px">Open a form to build or edit first.</div></div>`;
     return;
@@ -9316,7 +9351,7 @@ async function fhRecordsPage(v,formId){
   const{data:questions}=await sb.schema('feedback').from('form_questions').select('*').eq('form_id',formId).order('seq');
   const{data:responses,error}=await sb.schema('feedback').from('responses').select('*').eq('form_id',formId).order('submitted_at',{ascending:false});
   const head=`<div class="fh-page-head">
-    <button class="fh-page-back" title="Back" onclick="navTo('feedback_hub/1')"><i class="fa-solid fa-arrow-left"></i></button>
+    <button class="fh-page-back" title="Back" onclick="goBack('feedback_hub/1')"><i class="fa-solid fa-arrow-left"></i></button>
     <div class="fh-page-titles"><div class="fh-page-title">${esc(f.title)}</div><div class="fh-page-sub">Records</div></div>
   </div>`;
   if(error){ v.innerHTML=FH_CSS+head+`<div class="err">${esc(error.message)}</div>`; return; }
@@ -9492,6 +9527,18 @@ async function usbLoad(){
     if(error)throw error;
     USB.rows=data||[];
   }catch(e){ USB.rows=null; USB.err=(e&&e.message)||String(e); }
+  /* Two further queries, both for Daily Checks and neither derivable from the feature report.
+     Workflow health answers "where is the work stuck"; transcription health answers "how did
+     yesterday's calls go, and is the CRM telling the truth about them". Both ignore the date
+     filters above on purpose (see each function's own comment). Fetched here so the render stays
+     synchronous like everything else; either failing leaves its block simply not drawn.
+     Sent together rather than one after the other: they are independent, and the Usability page
+     waits on this call too even though it draws neither. */
+  const health=await Promise.all([
+    sb.rpc('erp_usability_workflow_health').then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; }),
+    sb.rpc('erp_usability_transcription_health').then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; })
+  ]);
+  USB.wfHealth=health[0]; USB.trHealth=health[1];
   if(!USB.people){ try{ USB.people=await getPeople(); }catch(e){ USB.people=[]; } }
   // A per-feature drill-down cached under the old range/person would show stale names against the
   // new filters, so any change here throws it out rather than risk a misleading answer.
@@ -9520,6 +9567,9 @@ const USB_CSS='<style id="usbCss">'
   +'.usb-feat-row:hover td{background:#faf5ff}'
   +'.usb-feat-chev{color:var(--slate);font-size:10px;margin-right:8px;display:inline-block;width:10px;transition:transform .15s}'
   +'.usb-feat-chev.open{transform:rotate(90deg)}'
+  +'.usb-wf-cell{cursor:pointer;user-select:none}'
+  +'.usb-wf-cell:hover{background:#fffbeb}'
+  +'.usb-wf-cell.open{background:#fffbeb}'
   +'.usb-users-row td{background:#fbfaff;border-top:none;padding:0}'
   +'.usb-users-wrap{padding:4px 14px 12px 34px}'
   +'.usb-user-line{display:flex;justify-content:space-between;gap:14px;padding:6px 0;font-size:12.5px;border-bottom:1px solid #f1eefc}'
@@ -9827,7 +9877,7 @@ function usbModuleDetailHtml(moduleId){
   const tabs=[]; rows.forEach(function(r){ if(tabs.indexOf(r.tab)===-1)tabs.push(r.tab); });
   const head='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-chart-simple" style="color:#7c3aed"></i> '+esc(label)+'</h1>'
     +'<p>'+rows.length+' features across '+tabs.length+' tab'+(tabs.length===1?'':'s')+'</p></div>'
-    +'<button class="btn btn-sm" onclick="navTo(\'usability\')"><i class="fa-solid fa-arrow-left"></i> All modules</button></div>';
+    +'<button class="btn btn-sm" onclick="goBack(\'usability\')"><i class="fa-solid fa-arrow-left"></i> All modules</button></div>';
   const body=tabs.map(function(tb){
     const list=rows.filter(function(r){return r.tab===tb;});
     return '<div class="card" style="margin-bottom:14px">'
@@ -9854,6 +9904,256 @@ function usbModuleDetailHtml(moduleId){
       +'</tbody></table></div></div>';
   }).join('');
   return head+usbControlsHtml()+body;
+}
+/* ===== DAILY CHECKS — its own module =====
+
+   The handful of things somebody looks at every morning, lifted out of Usability so that routine
+   is one page rather than a hunt through twenty-five modules. It reads the same two sources the
+   Usability report does, so there is no second definition of any number to drift: the flagged
+   features come from erp_feature_catalog.daily_check, and the workflow backlog from
+   erp_usability_workflow_health.
+
+   Gated exactly like Usability (hasUsability), because the RPCs behind it are — a page that drew
+   an error for everyone else would be worse than no page.
+
+   Deliberately NOT given the Usability report's date pickers. This answers "what needs attention
+   today"; a range picker invites it to be read as a trend report, which is the other page's job. */
+VIEWS.daily_checks=async function(v){
+  setCrumb(['Administration','Daily Checks']);
+  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  await usbLoad();
+  const head=mHead('fa-list-check','#b8902f','Daily Checks');
+  if(USB.rows===null){
+    v.innerHTML=head+'<div class="card card-pad empty" style="margin-top:16px;padding:40px">'
+      +'<i class="fa-solid fa-lock"></i><div>'+esc(USB.err||'Could not load')+'</div></div>';
+    return;
+  }
+  const rows=USB.rows||[];
+  const picks=rows.filter(function(r){ return r.daily_check; });
+  /* Grouped by module in the catalogue's own order, so the page reads the way the list was
+     written rather than alphabetically. */
+  const mods=[]; picks.forEach(function(r){ if(mods.indexOf(r.module_label)===-1) mods.push(r.module_label); });
+  const feature=mods.map(function(m){
+    return usbDailyChecksHtml(picks.filter(function(r){ return r.module_label===m; }), m);
+  }).join('');
+  const none=(!picks.length && !(USB.wfHealth||[]).length && !(USB.trHealth||[]).length)
+    ? '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-list-check"></i>'
+      +'<div>Nothing is flagged as a daily check yet</div></div>' : '';
+  /* The body is kept behind its own id so expanding a workflow breakdown repaints just this,
+     rather than going through renderPage() — which would re-run usbLoad() and fire both RPCs
+     again on every click. */
+  DC_BODY=function(){ return usbWorkflowHealthHtml()+usbTranscriptionHealthHtml()+feature+none; };
+  v.innerHTML=head
+    +'<p style="color:var(--slate);font-size:13px;margin:6px 2px 2px">What needs attention today. '
+      +'Feature counts cover the last 30 days; workflow figures are live and call figures come from '
+      +'the overnight pass, both with movement from yesterday.</p>'
+    +'<div id="dcBody">'+DC_BODY()+'</div>';
+};
+let DC_BODY=null;
+function dcRepaint(){ const b=$('dcBody'); if(b&&DC_BODY) b.innerHTML=DC_BODY(); }
+/* WORKFLOW HEALTH — one row per workflow, on the Daily Checks page.
+   Five of these six are not usage at all: they count where instances are actually sitting, which
+   is the question "is anything stuck" really asks. They are a live snapshot plus yesterday, and
+   they ignore the report's date pickers on purpose — the function's comment explains why. */
+function usbWorkflowHealthHtml(){
+  const rows=USB.wfHealth;
+  if(!rows||!rows.length) return '';
+  const warn=function(n){ return Number(n)>0?'color:#b45309;font-weight:700':'color:var(--slate)'; };
+  return '<div class="card" style="margin-bottom:14px">'
+    +'<div class="card-pad" style="padding-bottom:10px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+        +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-heart-pulse" style="color:#b8902f"></i> Workflow health</div>'
+        +'<div style="font-size:12px;color:var(--slate)">Live right now · movement counts are yesterday</div>'
+      +'</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">Where each workflow\'s instances are actually sitting. Click any amber figure to see which step.</div>'
+    +'</div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
+      +'<th>Workflow</th>'
+      +'<th style="width:78px" title="Live instances not yet finished">Live</th>'
+      +'<th style="width:104px" title="Appeared for someone and not picked up yet">Awaiting receipt</th>'
+      +'<th style="width:116px" title="A previous person forwarded it and the next person has not accepted it">Forwarded, not received</th>'
+      +'<th style="width:116px" title="Received, and not moved on">Received, not forwarded</th>'
+      +'<th style="width:84px">Raised</th><th style="width:84px">Closed</th>'
+      +'<th style="width:104px" title="Reverts and send-backs — the work going backwards">Reverted</th>'
+    +'</tr></thead><tbody>'
+    +rows.map(function(r){
+        /* The three backlog figures open a step-level breakdown. A count on its own says there is
+           a problem; the breakdown says which step and whose desk, which is the only form of this
+           anybody can act on. A zero isn't clickable — there'd be nothing behind it. */
+        const cell=function(n,state){
+          const v=Number(n||0);
+          if(!v) return '<td style="color:var(--slate)">0</td>';
+          const open=USB_WF_OPEN.has(r.flow_id+'|'+state);
+          return '<td class="usb-wf-cell'+(open?' open':'')+'" style="'+warn(v)+'" '
+            +'onclick="usbToggleWfStuck('+r.flow_id+',\''+state+'\')" '
+            +'title="Show which step these are sitting on">'+v
+            +'<i class="fa-solid fa-chevron-'+(open?'down':'right')+'" style="font-size:9px;margin-left:5px;opacity:.6"></i></td>';
+        };
+        const row='<tr><td><b>'+esc(r.workflow)+'</b></td>'
+          +'<td>'+Number(r.live_instances||0)+'</td>'
+          +cell(r.awaiting_receipt,'awaiting')
+          +cell(r.fwd_not_received,'fwd')
+          +cell(r.in_hand_not_forwarded,'inhand')
+          +'<td>'+Number(r.raised_yesterday||0)+'</td>'
+          +'<td>'+Number(r.closed_yesterday||0)+'</td>'
+          +'<td style="'+warn(r.reverted_yesterday)+'">'+Number(r.reverted_yesterday||0)+'</td></tr>';
+        return row+usbWfStuckRowsHtml(r);
+      }).join('')
+    +'</tbody></table></div></div>';
+}
+const USB_WF_OPEN=new Set();
+let USB_WF_CACHE={};
+/* The expanded breakdown under a workflow row. Mirrors the feature drill-down: load once per
+   workflow+state, cache it, and re-render from cache after that. */
+function usbWfStuckRowsHtml(r){
+  const states=[['awaiting','Awaiting receipt'],['fwd','Forwarded, not received'],['inhand','Received, not forwarded']];
+  return states.filter(function(s){ return USB_WF_OPEN.has(r.flow_id+'|'+s[0]); }).map(function(s){
+    const rows=USB_WF_CACHE[r.flow_id+'|'+s[0]];
+    let inner;
+    if(rows===undefined){
+      inner='<span style="color:var(--slate);font-size:12.5px"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</span>';
+    }else if(!rows.length){
+      inner='<span style="color:var(--slate);font-size:12.5px">Nothing sitting in this state.</span>';
+    }else{
+      inner='<table class="tbl" style="width:100%;margin:0"><thead><tr>'
+        +'<th style="width:54px">Step</th><th>Name</th><th style="width:88px">Instances</th>'
+        +'<th>With</th><th style="width:110px">Oldest</th></tr></thead><tbody>'
+        +rows.map(function(x){
+            const who=(x.who||[]).join(', ')+(Number(x.owners||0)>(x.who||[]).length
+              ? ' and '+(Number(x.owners)-(x.who||[]).length)+' more' : '');
+            const d=Number(x.oldest_days||0);
+            return '<tr><td style="color:var(--slate)">'+Number(x.seq)+'</td>'
+              +'<td><b>'+esc(x.step)+'</b></td>'
+              +'<td><b>'+Number(x.instances||0)+'</b></td>'
+              +'<td style="font-size:12px">'+esc(who||'—')+'</td>'
+              +'<td style="'+(d>=2?'color:#b45309;font-weight:700':'color:var(--slate)')+'">'+d+' day'+(d===1?'':'s')+'</td></tr>';
+          }).join('')
+        +'</tbody></table>';
+    }
+    return '<tr class="usb-users-row"><td colspan="8"><div class="usb-users-wrap" style="padding:10px 12px">'
+      +'<div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);margin-bottom:7px">'
+        +esc(r.workflow)+' &middot; '+s[1]+'</div>'
+      +inner+'</div></td></tr>';
+  }).join('');
+}
+window.usbToggleWfStuck=async function(flowId,state){
+  const key=flowId+'|'+state;
+  if(USB_WF_OPEN.has(key)){ USB_WF_OPEN.delete(key); dcRepaint(); return; }
+  USB_WF_OPEN.add(key); dcRepaint();
+  if(USB_WF_CACHE[key]!==undefined) return;
+  try{
+    const {data,error}=await sb.rpc('erp_usability_workflow_stuck_steps',{p_flow_id:flowId,p_state:state});
+    if(error)throw error;
+    USB_WF_CACHE[key]=data||[];
+  }catch(e){ USB_WF_CACHE[key]=[]; }
+  dcRepaint();
+};
+/* TRANSCRIPTION HEALTH — the five call figures, on the Daily Checks page.
+   Like workflow health these are measurements, not usage: how many of yesterday's calls the
+   nightly pass transcribed, and how well what the rep typed into the CRM matched what was
+   actually said. The RPC's comment carries the definitions. */
+function usbTranscriptionHealthHtml(){
+  const rows=USB.trHealth;
+  if(!rows||!rows.length) return '';
+  const num=function(n){ return Number(n).toLocaleString('en-IN'); };
+  /* Rates keep the decimal even when it is .0, so a column reading 95.5 / 80.0 / 100.0 lines up
+     instead of 95.5 / 80 / 100. */
+  const show=function(v,pct){
+    if(v===null||v===undefined) return '—';
+    return pct ? Number(v).toFixed(1)+'%' : num(v);
+  };
+  /* Movement against yesterday rather than a pass mark. There is no agreed figure at which pitch
+     accuracy becomes "bad", and inventing one here would put a number in people's mouths that
+     nobody set; which way it moved overnight is a fact. So the arrow carries the colour and the
+     percentage is left to speak for itself. */
+  const move=function(r){
+    const a=r.today, b=r.yesterday;
+    if(a===null||a===undefined||b===null||b===undefined) return '';
+    const d=Math.round((Number(a)-Number(b))*10)/10;
+    if(!d) return '<span style="color:var(--slate);font-size:11.5px">level</span>';
+    /* Only the quality rates get a verdict colour. Call volume moving is a fact about the selling
+       day — 19 fewer calls is not a fault anybody introduced overnight, and painting it amber
+       would teach people to ignore the colour on the rows where it means something. */
+    const better=(d>0)===(r.higher_is_better!==false);
+    const ink=r.is_pct===false?'var(--slate)':(better?'#15803d':'#b45309');
+    const arrow=d>0?'▲':'▼';
+    return '<span style="color:'+ink+';font-weight:700;font-size:11.5px">'
+      +arrow+' '+Math.abs(d)+(r.is_pct?' pts':'')+'</span>';
+  };
+  return '<div class="card" style="margin-bottom:14px">'
+    +'<div class="card-pad" style="padding-bottom:10px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+        +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-microphone-lines" style="color:#b8902f"></i> Transcription health</div>'
+        +'<div style="font-size:12px;color:var(--slate)">This morning\'s run &middot; against the one before</div>'
+      +'</div>'
+      /* Stated plainly because it is the one thing about this table that surprises people: the
+         pass runs overnight, so today's column is yesterday's selling. */
+      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">The overnight pass grades the previous day\'s calls, so &ldquo;today&rdquo; is the run that finished this morning. An empty column means it did not run.</div>'
+    +'</div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
+      +'<th>Check</th><th style="width:92px">Today</th><th style="width:92px">Yesterday</th>'
+      +'<th style="width:96px">Movement</th>'
+      +'<th style="width:112px" title="The calls this could actually be judged on — the rest gave the grader nothing to go on">Judged on</th>'
+    +'</tr></thead><tbody>'
+    +rows.map(function(r){
+        const pct=r.is_pct!==false;
+        /* A count of zero here means the overnight pass produced nothing, which is the check
+           failing rather than a quiet day; percentages are left to the movement column. */
+        const zero=!pct&&!Number(r.today||0);
+        /* The base is printed beside every rate because they differ so much between rows — pitch
+           was judged on 70 calls this morning and the follow-up date on 37. A reader who sees
+           100% needs to be able to see 37 without asking anyone. */
+        const base=r.today_of===null||r.today_of===undefined
+          ? '<span style="color:var(--slate)">—</span>'
+          : '<b>'+num(r.today_of)+'</b><span style="color:var(--slate);font-size:11.5px"> calls</span>'
+            +(r.yesterday_of!==null&&r.yesterday_of!==undefined
+               ? '<span style="color:var(--slate);font-size:11.5px"> (was '+num(r.yesterday_of)+')</span>' : '');
+        return '<tr><td><b>'+esc(r.label)+'</b>'
+            +(r.detail?'<div style="color:var(--slate);font-size:11.5px;margin-top:2px">'+esc(r.detail)+'</div>':'')
+          +'</td>'
+          +'<td style="'+(zero?'color:#b45309;font-weight:700':'font-weight:700')+'">'+show(r.today,pct)+'</td>'
+          +'<td style="color:var(--slate)">'+show(r.yesterday,pct)+'</td>'
+          +'<td>'+move(r)+'</td>'
+          +'<td>'+base+'</td></tr>';
+      }).join('')
+    +'</tbody></table></div></div>';
+}
+/* THE DAILY CHECKS, ABOVE EVERYTHING ELSE.
+   A handful of features are looked at every morning; the rest are read when somebody asks a
+   question. Those few are flagged in erp_feature_catalog.daily_check and lifted out here into
+   their own block at the top of the module, because the page below is grouped by TAB — pinning
+   them in place would scatter the Tasks ones away from the Workflow ones and defeat the point.
+   They still appear in their own tab further down, so nothing is hidden or duplicated away.
+   A module with nothing flagged renders nothing at all, rather than an empty card. */
+function usbDailyChecksHtml(rows,heading){
+  const picks=(rows||[]).filter(function(r){ return r.daily_check; });
+  if(!picks.length) return '';
+  return '<div class="card usb-daily" style="margin:16px 0 18px">'
+    +'<div class="card-pad" style="padding-bottom:10px">'
+      +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-folder-open" style="color:#b8902f"></i> '+esc(heading||'Daily checks')+'</div>'
+    +'</div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
+      +'<th>Feature</th><th style="width:90px">Uses</th><th style="width:90px">People</th>'
+      +'<th style="width:130px">Last used</th><th style="width:120px">Activity</th>'
+    +'</tr></thead><tbody>'
+    +picks.map(function(r){
+        const s=usbBandStyle(r.band);
+        const open=USB_FEAT_OPEN.has(r.feature_key);
+        const clickable=Number(r.uses||0)>0;
+        const chev=clickable
+          ? '<span class="usb-feat-chev'+(open?' open':'')+'"><i class="fa-solid fa-chevron-right"></i></span>'
+          : '<span class="usb-feat-chev" style="visibility:hidden"><i class="fa-solid fa-chevron-right"></i></span>';
+        const row='<tr class="'+(clickable?'usb-feat-row':'')+'"'
+          +(clickable?' onclick="usbToggleFeature(\''+escJs(r.feature_key)+'\')"':'')+'>'
+          +'<td>'+chev+esc(r.feature)
+            +'<span style="font-size:11px;color:var(--slate);margin-left:8px">'+esc(r.tab)+'</span></td>'
+          +'<td><b>'+Number(r.uses||0).toLocaleString('en-IN')+'</b></td>'
+          +'<td>'+Number(r.users||0)+'</td>'
+          +'<td style="color:var(--slate);font-size:12px">'+(r.last_used?esc(fmtDate(r.last_used)):'—')+'</td>'
+          +'<td><span class="badge" style="background:'+s.bg+';color:'+s.ink+';white-space:nowrap">'+esc(r.band)+'</span></td></tr>';
+        return row+(open?usbFeatureUsersRowHtml(r):'');
+      }).join('')
+    +'</tbody></table></div></div>';
 }
 /* The sub-row a clicked feature expands into: who actually used it, most recent first. Loads once
    per feature per filter set (usbLoad clears the cache on any range/person change) and is cached
@@ -18031,10 +18331,15 @@ let CPA_FEAT_PROJ='';
 // Shown beside a section so nobody switches on something that is not finished (audit, 30 Sep 2026).
 // Sign-in first - with it off for a block, that block's customers cannot get in to see anything else.
 function cpaFeatureRows(){
-  return [{key:'login',label:'Customer sign-in'}].concat(CUST_FEATURES.map(f=>({key:f.key,label:CUST_TABS[f.tab]})));
+  // Flat photos sit right under Construction Progress, the section they appear in.
+  const rows=CUST_FEATURES.map(f=>({key:f.key,label:CUST_TABS[f.tab]}));
+  const at=rows.findIndex(r=>r.key==='progress')+1;
+  rows.splice(at,0,{key:'flat_photos',label:'↳ Flat photos'});
+  return [{key:'login',label:'Customer sign-in'}].concat(rows);
 }
 const CPA_FEATURE_NOTES={
   login:'Who can sign in with a code sent to the email on their booking. Off = these customers cannot sign in at all.',
+  flat_photos:'Photos of the customer\'s own flat inside Construction Progress. Off = only block photos are shown. Hidden on 1 Oct 2026 while the flat photos are checked.',
   inspection:'Not finished - staff cannot list or delete an uploaded checklist or update.',
   documents:'Not finished - staff cannot list or delete an uploaded document.',
   videos:'Ready - but no process videos have been uploaded yet.',
@@ -20451,7 +20756,28 @@ async function custLoadData(customerId,force){
     const {data}=await sb.schema('cust').from('farvision_contacts').select('*').in('unit_id',unitIds).eq('is_current',true);
     contacts=data||[];
   }
-  const contactByUnit={};contacts.forEach(c=>{contactByUnit[c.unit_id]=c;});
+  /* Anything the customer corrected themselves wins over the imported row. It is kept in its own
+     table because farvision_contacts is rewritten by the nightly import - an edit written there
+     would quietly disappear overnight. Blank fields in the override mean "no correction", so the
+     imported value still shows through. */
+  let overrides=[];
+  if(unitIds.length){
+    const {data}=await sb.schema('cust').from('contact_overrides').select('*').in('unit_id',unitIds);
+    overrides=data||[];
+  }
+  const ovByUnit={};overrides.forEach(o=>{ovByUnit[o.unit_id]=o;});
+  const contactByUnit={};
+  contacts.forEach(c=>{
+    const o=ovByUnit[c.unit_id];
+    contactByUnit[c.unit_id]=o
+      ? Object.assign({},c,{
+          contact_phone:   o.contact_phone   || c.contact_phone,
+          contact_email:   o.contact_email   || c.contact_email,
+          contact_address: o.contact_address || c.contact_address,
+          _edited:{phone:!!o.contact_phone,email:!!o.contact_email,address:!!o.contact_address}
+        })
+      : c;
+  });
   // Whether this customer has ever submitted a referral, across all their units (the sidebar is
   // shared across units, not per-unit) - drives the "Earn" badge in custSidebarTabs. Left undefined
   // rather than defaulted to false until this resolves, so the sidebar's very first paint (before
@@ -20611,10 +20937,63 @@ const CUST_FIGURES_NOTICE='<div style="display:flex;gap:10px;align-items:flex-st
   '<i class="fa-solid fa-circle-info" style="margin-top:2px"></i><div><b>Your figures are being updated.</b> '+
   'We are reconciling this account against our accounting system, so the amounts are not being shown right now. '+
   'Please contact us before making any payment.</div></div>';
+/* One profile row, able to turn into an input. Rendered as text; custProfileEditStart swaps in the
+   field beside it rather than re-rendering the page, so a half-typed address survives a stray
+   click. "Updated by you" marks a value the customer corrected, so it is obvious which figures are
+   ours and which are theirs. */
+function custProfileField(key,icon,label,value,delay,c){
+  const edited=c&&c._edited&&c._edited[key];
+  const isAddr=key==='address';
+  return '<div class="cust-profile-item'+(isAddr?' cust-profile-addr':'')+'" style="animation-delay:'+delay+'">'
+    +'<div class="cust-profile-icon"><i class="fa-solid '+icon+'"></i></div>'
+    +'<div style="min-width:0;flex:1">'
+      +'<div class="cust-profile-label">'+esc(label)
+        +(edited?' <span style="color:#16855a;font-weight:600">· updated by you</span>':'')+'</div>'
+      +'<div class="cust-profile-value" id="custPV_'+key+'">'+esc(value||'—')+'</div>'
+      +(isAddr
+        ? '<textarea id="custPI_'+key+'" rows="3" style="display:none;width:100%;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13.5px;resize:vertical"></textarea>'
+        : '<input id="custPI_'+key+'" type="'+(key==='email'?'email':'tel')+'" style="display:none;width:100%;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13.5px">')
+    +'</div></div>';
+}
+const CUST_PROFILE_KEYS=['phone','email','address'];
+function custProfileToggle(editing){
+  CUST_PROFILE_KEYS.forEach(function(k){
+    const v=$('custPV_'+k), i=$('custPI_'+k);
+    if(!v||!i)return;
+    if(editing){ i.value=(v.textContent==='—'?'':v.textContent); }
+    v.style.display=editing?'none':'';
+    i.style.display=editing?'':'none';
+  });
+  ['custProfileCancel','custProfileSave','custProfileHint'].forEach(function(id){
+    const el=$(id); if(el) el.style.display=editing?'':'none';
+  });
+  const e=$('custProfileEdit'); if(e) e.style.display=editing?'none':'';
+}
+window.custProfileEditStart=function(){ custProfileToggle(true); const p=$('custPI_phone'); if(p)try{p.focus();}catch(_e){} };
+window.custProfileEditCancel=function(){ custProfileToggle(false); };
+window.custProfileSave=async function(unitId){
+  const btn=$('custProfileSave');
+  const vals={}; CUST_PROFILE_KEYS.forEach(function(k){ const i=$('custPI_'+k); vals[k]=i?i.value.trim():''; });
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
+  try{
+    const {error}=await sb.schema('cust').rpc('save_my_contact',
+      {p_unit_id:unitId,p_phone:vals.phone,p_email:vals.email,p_address:vals.address});
+    if(error)throw error;
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Save'; }
+    // The database writes these messages for the customer to read, so show it rather than a generic one.
+    toast((e&&e.message)||'Could not save your details','err');
+    return;
+  }
+  toast('Your details have been updated','ok');
+  // Re-read so the page shows what was actually stored, not what was typed.
+  CUST_DATA=null;
+  renderPage();
+};
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
   const [{data:invRows},{data:rcptRows},{data:revRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
-    sb.schema('cust').from('invoices').select('id,document_no,document_date,due_date,invoice_type').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
+    sb.schema('cust').from('invoices').select('id,document_no,document_date,due_date,invoice_type,invoice_items(net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
     sb.schema('cust').from('money_receipts').select('*,receipt_items(against_demand_no,amount)').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true),
     sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle(),
@@ -20623,11 +21002,20 @@ async function custTabOverview(data,unit){
   ]);
   const snap=snapRows||null;
   const invoices=invRows||[], receiptRows=rcptRows||[], reversalRows=revRows||[], costItems=costItemRows||[], osItems=osRows||[];
-  // Per-invoice amount for the "Recent transactions" list below (still sourced from
-  // outstanding_items, which only carries currently-unpaid documents - a fully-paid invoice
-  // shows as 0 there, which is a display-only limitation for that one list, not the KPIs below).
+  /* Per-invoice amount for the "Recent transactions" list below. It used to come from
+     outstanding_items, which carries only currently-UNPAID documents - so every demand a customer
+     had already settled showed as a blank. That was not a rare edge: 1,615 of 1,678 invoices, on
+     295 of 296 units, have no outstanding row at all, so almost every demand in this list was
+     empty. The demand's own line items are what it was raised for, paid or not, and they are what
+     the Ledger has always used; outstanding_items stays only as a fallback for the handful of
+     imported invoices that arrived without item rows. */
   const osTotals={};
   osItems.forEach(o=>{const d=o.document_no||'';osTotals[d]=(osTotals[d]||0)+Number(o.bill_amount||0);});
+  const invTotal=inv=>{
+    const items=inv.invoice_items||[];
+    const fromItems=items.reduce((s,it)=>s+Number(it.net_amount||0),0);
+    return fromItems||Number(osTotals[inv.document_no]||0);
+  };
   // "Demand due" must compare like with like: total ever billed (cost_sheet_items.bill_amount,
   // which already accounts for every invoice raised to date) against total ever actually
   // received (money_receipts minus receipt_reversals). Comparing outstanding_items (which only
@@ -20685,15 +21073,21 @@ async function custTabOverview(data,unit){
 
   const gate=await custReconGate(unit.id);
   /* Named for the customer, not the accounts team. "Property value", "Demand due" and "Remaining"
-     read as three versions of one number; these say what each one is, and the small line under
-     Balance to pay ties the row together: Total flat cost = Amount paid + Balance to pay, and the
-     balance already includes what is due now. */
+     read as three versions of one number; these say what each one is, and the four now add up
+     cleanly: Total flat cost = Amount paid + Amount due now + Future demands.
+
+     The last tile used to be "Balance to pay" and INCLUDED the amount already due now, so a
+     customer with money payable today saw it counted twice - once under Amount due now and again
+     inside the balance. It is now what it says: only the part not payable yet. 46 units have
+     something due today, and for them this figure is lower than the old one by exactly that
+     amount; for everyone else nothing changed. */
+  const futureDemands=Math.max(0,remaining-billOutstanding);
   const kpis=[
     ['Total flat cost',custInr(propertyValue),'incl. GST and all charges'],
     ['Amount paid',custInr(totalReceivedFinal),paidPct+'% of total cost'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
     ['Amount due now',custInr(billOutstanding),billOutstanding>0?'billed to you, not yet paid':'nothing to pay right now',billOutstanding>0?'#e08600':'#16855a'],
-    ['Balance to pay',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':
-      (billOutstanding>0?'incl. '+custInr(billOutstanding)+' due now; rest billed as work progresses':'billed as construction progresses'))]
+    ['Future demands not payable now',custInr(futureDemands),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':
+      (futureDemands>0?'billed as construction progresses — no action needed yet':'nothing further to be billed'))]
   ];
   // Every figure here derives from the same imported rows, so if the unit does not reconcile there is
   // no subset of them that is safe to keep showing.
@@ -20701,7 +21095,7 @@ async function custTabOverview(data,unit){
 
   const entries=[];
   invoices.forEach(inv=>{
-    const total=osTotals[inv.document_no]||0;
+    const total=invTotal(inv);
     const osScheds2=osItems.filter(o=>o.document_no===inv.document_no&&o.schedule).map(o=>o.schedule);
     entries.push({date:inv.document_date,type:'Demand',desc:[...new Set(osScheds2)].join(', ')||inv.document_no,amount:total});
   });
@@ -20775,9 +21169,19 @@ async function custTabOverview(data,unit){
         '</div>'+
       '</div>'+
       '<div class="cust-profile-details">'+
-        '<div class="cust-profile-item" style="animation-delay:.1s"><div class="cust-profile-icon"><i class="fa-solid fa-phone"></i></div><div><div class="cust-profile-label">Phone</div><div class="cust-profile-value">'+esc(c.contact_phone||'—')+'</div></div></div>'+
-        '<div class="cust-profile-item" style="animation-delay:.15s"><div class="cust-profile-icon"><i class="fa-solid fa-envelope"></i></div><div><div class="cust-profile-label">Email</div><div class="cust-profile-value">'+esc(c.contact_email||'—')+'</div></div></div>'+
-        '<div class="cust-profile-item cust-profile-addr" style="animation-delay:.2s"><div class="cust-profile-icon"><i class="fa-solid fa-location-dot"></i></div><div><div class="cust-profile-label">Correspondence address</div><div class="cust-profile-value">'+esc(c.contact_address||'—')+'</div></div></div>'+
+        custProfileField('phone','fa-phone','Phone',c.contact_phone,'.1s',c)+
+        custProfileField('email','fa-envelope','Email',c.contact_email,'.15s',c)+
+        custProfileField('address','fa-location-dot','Correspondence address',c.contact_address,'.2s',c)+
+      '</div>'+
+      /* The customer can correct how we reach them. The registered name is NOT here: it is the
+         name on the booking and appears on receipts and demand letters, so it has to match the
+         agreement rather than follow a text box. */
+      '<div class="cust-profile-edit-bar" style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
+        '<span id="custProfileHint" style="margin-right:auto;font-size:12px;color:var(--slate);display:none">'+
+          'Changing these updates how we contact you. Your name and flat details cannot be changed here — please call us for those.</span>'+
+        '<button class="btn" id="custProfileEdit" onclick="custProfileEditStart('+unit.id+')"><i class="fa-solid fa-pen"></i> Update my details</button>'+
+        '<button class="btn" id="custProfileCancel" style="display:none" onclick="custProfileEditCancel()">Cancel</button>'+
+        '<button class="btn btn-primary" id="custProfileSave" style="display:none" onclick="custProfileSave('+unit.id+')"><i class="fa-solid fa-check"></i> Save</button>'+
       '</div>'+
     '</div>'
     :'<div class="card card-pad empty">Profile not yet available — this updates after our next records sync.</div>';
@@ -20825,7 +21229,7 @@ window.custPrintStatement=function(){
       '<div class="kpi"><div class="lbl">Total flat cost</div><div class="val">'+custInr(snap.propertyValue)+'</div></div>'+
       '<div class="kpi"><div class="lbl">Amount paid</div><div class="val">'+custInr(snap.totalReceived)+'</div></div>'+
       '<div class="kpi"><div class="lbl">Amount due now</div><div class="val">'+custInr(snap.billOutstanding)+'</div></div>'+
-      '<div class="kpi"><div class="lbl">Balance to pay</div><div class="val">'+custInr(snap.remaining)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Future demands not payable now</div><div class="val">'+custInr(Math.max(0,Number(snap.remaining||0)-Number(snap.billOutstanding||0)))+'</div></div>'+
     '</div>'+
     (tableHtml||'<p>No transactions recorded yet.</p>')+
     '</body></html>';
@@ -20941,9 +21345,38 @@ async function custTabLedger(unit){
     '<span style="color:var(--slate)">'+entries.length+' entries</span>'+
     '<span style="margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'+
     '<button class="btn" id="custBulkDlBtn" style="display:none" onclick="custDownloadSelectedDocs()"><i class="fa-solid fa-file-arrow-down"></i> <span id="custBulkDlLabel">Download</span></button>'+
-    '<button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></span></div>';
+    '<button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
+    /* People were not finding the per-row download at all, because nothing on the page said a
+       single receipt or demand could be opened on its own - the only visible control printed the
+       whole ledger. The note says where to click, and the footnote covers the tick-boxes, which
+       are the part nobody discovers by accident. */
+    '<button class="btn" type="button" aria-label="How to download your documents" '+
+      'title="How to download your documents" onclick="custLedgerHelp()" '+
+      'style="padding-left:11px;padding-right:11px;color:var(--brand)">'+
+      '<i class="fa-solid fa-circle-info"></i></button>'+
+    '</span></div>';
   return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows);
 }
+window.custLedgerHelp=function(){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-circle-info" style="color:var(--brand)"></i> Downloading your documents</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,560px);font-size:13.5px;line-height:1.65;color:#334155">'
+      +'<p style="margin:0 0 14px">Every line in this ledger is a document you can open and keep.</p>'
+      +'<div style="display:grid;gap:12px">'
+        +'<div style="display:flex;gap:11px"><i class="fa-solid fa-receipt" style="color:#16855a;margin-top:3px;width:16px;text-align:center"></i>'
+          +'<div><b>Receipts</b><br>Click any <b>Receipt</b> row to open it, then use <b>Print / Download PDF</b> inside. This is your proof of payment.</div></div>'
+        +'<div style="display:flex;gap:11px"><i class="fa-solid fa-file-invoice" style="color:#e08600;margin-top:3px;width:16px;text-align:center"></i>'
+          +'<div><b>Demands and invoices</b><br>Click any <b>Demand</b> row to open the demand letter with its full breakdown of charges.</div></div>'
+        +'<div style="display:flex;gap:11px"><i class="fa-solid fa-print" style="color:#1d4ed8;margin-top:3px;width:16px;text-align:center"></i>'
+          +'<div><b>The whole ledger</b><br><b>Print / Download PDF</b> at the top gives you every demand and payment on this flat in one statement.</div></div>'
+      +'</div>'
+      +'<div style="margin-top:16px;padding:11px 13px;background:#f1f5f9;border-left:3px solid var(--brand);border-radius:7px;font-size:13px">'
+        +'<b>Need several at once?</b> Tick the box on each row you want, then press the <b>Download</b> button that appears at the top. '
+        +'They come down together as a single ZIP file.</div>'
+      +'<p style="margin:14px 0 0;font-size:12.5px;color:var(--slate)">If a document will not open, your browser may be blocking pop-ups for this site — allow them and try again.</p>'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn btn-primary" onclick="closeModal()">Got it</button></div>','md');
+};
 window.custPrintLedger=function(){
   const unit=window._custLedgerUnit,entries=window._custLedgerEntries;
   if(!unit){toast('Nothing to print yet','err');return;}
@@ -21863,9 +22296,13 @@ window.custPgRoom=function(k){
 };
 
 async function custTabProgress(unit){
+  /* Flat photos have their own Customer Features switch ('flat_photos'). The customer read policy
+     already returns none when it is off; checking here as well keeps a staff preview - which reads
+     through the staff policy - showing exactly what the customer sees. */
+  const flatOn=custFeatureOn(CUST_DATA&&CUST_DATA.featureRules,'flat_photos',unit.project_id,unit.tower);
   const [{data:tPhotos},{data:uPhotos}]=await Promise.all([
     unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
-    sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false})
+    flatOn?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]})
   ]);
   const block=tPhotos||[], flat=uPhotos||[];
   const roomOf=k=>(CUST_PG_AREAS.find(a=>a[0]===k)||CUST_PG_AREAS[0]);
@@ -23880,7 +24317,7 @@ async function traDetail(v,id){
     remarks=cd||[];
   }catch(e){ remarks=[]; }
   const crm=r.original_crm_response||{};
-  const back='<button class="btn btn-sm" onclick="navTo(\'transcription/0\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
+  const back='<button class="btn btn-sm" onclick="goBack(\'transcription/0\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
   const retry=(st==='failed')
     ?'<button class="btn btn-primary" onclick="traRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button>':'';
   /* Was "Copy Response" - the same JSON-to-clipboard button the lead page carried as "Copy CRM
@@ -24010,7 +24447,7 @@ const TRC_MISMATCH_KEYS = Object.keys(TRC_MISMATCH);
    of them and a new value shows up as itself rather than silently grey. */
 const TRC_ACC_TAG = {
   'Accurate': 't-green', 'Partially Accurate': 't-amber',
-  'Inaccurate': 't-red', 'Not Verifiable': 't-gray'
+  'Inaccurate': 't-red', 'Not Applicable': 't-gray'
 };
 const TRC_TR_META = {
   completed:         {label:'Transcribed',      tag:'t-green', icon:'fa-circle-check'},
@@ -25584,14 +26021,14 @@ function trcFilterBar(all){
       +opt('Accurate','Pitch: Accurate',TRC_F.pitch)
       +opt('Partially Accurate','Pitch: Partially Accurate',TRC_F.pitch)
       +opt('Inaccurate','Pitch: Inaccurate',TRC_F.pitch)
-      +opt('Not Verifiable','Pitch: Not Verifiable',TRC_F.pitch)
+      +opt('Not Applicable','Pitch: Not Applicable',TRC_F.pitch)
       +opt('NONE','Pitch: Not yet assessed',TRC_F.pitch)
     +'</select>'
     +'<select onchange="trcSet(\'fdate\',this.value)" style="padding:6px 8px">'
       +opt('all','Follow-up date accuracy: all',TRC_F.fdate)
       +opt('Accurate','Follow-up date: Accurate',TRC_F.fdate)
       +opt('Inaccurate','Follow-up date: Inaccurate',TRC_F.fdate)
-      +opt('Not Verifiable','Follow-up date: Not Verifiable',TRC_F.fdate)
+      +opt('Not Applicable','Follow-up date: Not Applicable',TRC_F.fdate)
       +opt('NONE','Follow-up date: Not yet assessed',TRC_F.fdate)
     +'</select>'
     +'<select onchange="trcSet(\'remarks\',this.value)" style="padding:6px 8px">'
@@ -25599,7 +26036,7 @@ function trcFilterBar(all){
       +opt('Accurate','Remarks: Accurate',TRC_F.remarks)
       +opt('Partially Accurate','Remarks: Partially Accurate',TRC_F.remarks)
       +opt('Inaccurate','Remarks: Inaccurate',TRC_F.remarks)
-      +opt('Not Verifiable','Remarks: Not Verifiable',TRC_F.remarks)
+      +opt('Not Applicable','Remarks: Not Applicable',TRC_F.remarks)
       +opt('NONE','Remarks: Not yet assessed',TRC_F.remarks)
     +'</select>'
     +'<select onchange="trcSet(\'etiquette\',this.value)" style="padding:6px 8px">'
@@ -25626,11 +26063,11 @@ function trcFilterBar(all){
       +opt('Not Applicable','Retention: Not Applicable',TRC_F.retention)
       +opt('NONE','Retention: Not yet assessed',TRC_F.retention)
     +'</select>'
-    +'<select onchange="trcSet(\'lostReason\',this.value)" style="padding:6px 8px" title="Only meaningful on Lost calls - Not Verifiable everywhere else">'
+    +'<select onchange="trcSet(\'lostReason\',this.value)" style="padding:6px 8px" title="Only meaningful on Lost calls - Not Applicable everywhere else">'
       +opt('all','Lost reason accuracy: all',TRC_F.lostReason)
       +opt('Accurate','Lost reason: Accurate',TRC_F.lostReason)
       +opt('Inaccurate','Lost reason: Inaccurate',TRC_F.lostReason)
-      +opt('Not Verifiable','Lost reason: Not Verifiable',TRC_F.lostReason)
+      +opt('Not Applicable','Lost reason: Not Applicable',TRC_F.lostReason)
       +opt('NONE','Lost reason: Not yet assessed',TRC_F.lostReason)
     +'</select>'
     +'<select onchange="trcSet(\'personalMobile\',this.value)" style="padding:6px 8px" title="Did the agent ask for a personal mobile number additional to the one already on file">'
@@ -26173,8 +26610,8 @@ function trcQaTableHtml(r,m){
 
    Same chip as the pitch fact check, tick for match, cross for mismatch, nothing added on top. */
 function trcMarkChip(cls,icon,label,tip){
-  return '<span class="tag '+cls+'"'+(tip?' title="'+esc(tip)+'"':'')
-    +'><i class="fa-solid '+icon+'"></i> '+esc(label)+'</span>';
+  return '<div class="mark-item '+cls+'"'+(tip?' title="'+esc(tip)+'"':'')
+    +'><i class="fa-solid '+icon+'"></i><span>'+esc(label)+'</span></div>';
 }
 function trcMarkRowHtml(title,chips){
   return '<div style="margin-top:10px"><div style="font-size:12.5px;font-weight:700;margin-bottom:6px">'
@@ -26217,11 +26654,7 @@ function trcStatusSignalsHtml(r){
   if(!signals.length)return '';
   return trcMarkRowHtml('What the call says about the status',
     signals.map(function(s){
-      const dir=String(s.direction||'');
-      const isMatch=/^match$/i.test(dir), isMismatch=/^mismatch$/i.test(dir);
-      const cls=isMatch?'t-green':isMismatch?'t-red':'t-gray';
-      const icon=isMatch?'fa-check':isMismatch?'fa-xmark':'fa-circle-question';
-      return trcMarkChip(cls,icon,s.point,null);
+      return trcMarkChip('t-purple','fa-circle',s.point,null);
     }).join(''));
 }
 
@@ -26594,7 +27027,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
       +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')
         +(rowHint?' · Row #'+esc(String(rowHint))+' in the list':'')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
-        +'<button class="btn btn-sm" onclick="navTo(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>'
+        +'<button class="btn btn-sm" onclick="goBack(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>'
         +'<button class="btn" id="trcLeadRefreshBtn" onclick="trcLeadRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
       +'</div></div>';
 
@@ -27174,7 +27607,7 @@ function trCompDetailHtml(leads,leadId){
   const combined=trCombinedQualify(g.rows);
   const latest=trLatestVerdict(g.rows);
   const o=trOutcome(latest.qualification);
-  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription/5\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
+  const backBtn='<button class="btn btn-sm" onclick="goBack(\'transcription/5\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
   const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
   // Says which call the verdict came from, so nobody reads it as a merge of all of them.
   const verdictFrom=latest.row
@@ -27589,7 +28022,7 @@ async function trDetail(v,id){
   const banner=(r.status==='done'&&r.qualification)?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+o.colour+'"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span class="tag '+o.tag+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+o.icon+'"></i> '+esc(r.qualification)+'</span>'+(r.project&&r.project!=='Unclear'?'<span style="font-weight:700;color:#0d9488;font-size:15px">'+esc(r.project)+'</span>':'')+'</div>'+(r.reason?'<div style="margin-top:10px;font-size:14px;line-height:1.55">'+esc(r.reason)+'</div>':'')+'</div>'):'';
   let comments=[];
   try{const {data:cd}=await sb.schema('acc').from('transcription_comments').select('*').eq('transcription_id',id).order('created_at');comments=cd||[];}catch(e){}
-  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
+  const backBtn='<button class="btn btn-sm" onclick="goBack(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
   v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
     +'<div id="trAudio" style="margin:6px 0 16px"></div>'
     +banner

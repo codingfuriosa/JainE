@@ -980,7 +980,7 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
   const modelStatus = String(sa.ai_assessed_status || "").trim() || null;
   const aiStatus = derived.effective_status ?? modelStatus;
   const pitchStatus = String(pitch.status || "").trim() || null;
-  const pitchScore = pitchStatus === "Not Verifiable" || pitch.score === null || pitch.score === undefined
+  const pitchScore = pitchStatus === "Not Applicable" || pitch.score === null || pitch.score === undefined
     ? null : Math.max(0, Math.min(100, Math.round(Number(pitch.score))));
 
   const { data: saved, error: saveErr } = await db.schema("acc").from("followup_qa").upsert({
