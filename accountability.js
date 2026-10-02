@@ -3554,10 +3554,11 @@
        already covers every workflow, this one included. */
     const wfPastStep1Locked=function(c){ return id===39 && (c&&c.current_step>1) && !(c&&c.returned_at); };
     /* Reimbursement only: the case number of an existing claim of mine that is already in process
-       (past its first step, not Done/Cancelled, not sent back for correction) — mirrors the block
-       acc.wf_create_instance now enforces server-side (one open claim at a time), so "New
-       Reimbursement" reads as unavailable up front instead of only failing once the form is filled
-       in and submitted. */
+       (past its first step, not Done/Cancelled, not sent back for correction) — the same rule
+       acc.wf_new_instance_block_reason applies server-side, where the refusal actually happens.
+       Used ONLY to word the button's tooltip. It is deliberately not a gate: the database decides,
+       and a copy of the rule here that got the answer wrong would either refuse somebody the server
+       would have allowed, or promise a save that is about to be rejected. */
     const wfMyOpenReimbursement=id===39 ? (function(){
       const c=cases.find(function(x){ return eq(x&&x.created_by, mySelf) && x.current_step>1 && !x.returned_at && x.status!=='Done' && x.status!=='Cancelled'; });
       return c ? wfCaseNoText(c) : null;
@@ -3693,10 +3694,17 @@
       +'</span>'):'')
       +(canManageEdit?'<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>':'')
       +(canManage?'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>':'')
-      +(canEvent?(wfMyOpenReimbursement
-          ? '<button class="ac-btn primary" disabled title="Your '+esc2(N.lc)+' #'+esc2(wfMyOpenReimbursement)+' is still in process — raise a new one only after that is Done"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>'
-          : '<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>'
-        ):'')
+      /* THE BUTTON IS NEVER DISABLED, even for somebody who cannot submit yet. Disabling it opened
+         no form, and the form is the only way to reach Save draft - so the one person told to
+         "write the next one down and send it later" was the one person who could not. It opens,
+         they fill it in, they keep it. The refusal belongs on Submit, where acc.wf_create_instance
+         raises it with the claim number and what to do about it. The tooltip is a courtesy, not
+         the gate: it says the submit will be refused before the form is filled in rather than
+         after. */
+      +(canEvent?'<button class="ac-btn primary" title="'+esc2(wfMyOpenReimbursement
+            ? 'Your '+N.lc+' #'+wfMyOpenReimbursement+' has not finished yet — you can still fill this in and save it as a draft'
+            : 'Start a new '+N.lc)
+          +'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
     // Reimbursement only, and only these two named accounts (Accounts' own lookup tool — not a
@@ -7820,7 +7828,15 @@
           : (N.one+' created — first step assigned'),'ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       }
-    }catch(e){ toast('Could not save '+N.lc+': '+((e&&e.message)||e),'err'); }
+    }catch(e){
+      /* JE001 is the one-open-instance refusal, and it is not a failure to report as one: the
+         sentence already says which claim is in the way, what to do about it, and that this one
+         can be kept as a draft meanwhile. Prefixing it with "Could not save reimbursement:" would
+         contradict its own advice, so it is printed as it was written. Everything else keeps the
+         prefix, because an unexplained message needs saying what it was we could not do. */
+      if(e&&e.code==='JE001'){ toast((e&&e.message)||'','warn'); return; }
+      toast('Could not save '+N.lc+': '+((e&&e.message)||e),'err');
+    }
   };
 
 
