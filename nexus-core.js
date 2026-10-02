@@ -45,7 +45,7 @@ function pageIdFromPath(pathname){
 // the legacy-view race it guards against in VIEWS.tasks below). An in-place SPA navigation to one of
 // these needs the same script loaded on demand, once, before rendering — never re-fetched on a
 // second visit in the same tab.
-const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js'};
+const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const src=PAGE_EXTRA_SCRIPT[id];
@@ -11619,13 +11619,23 @@ window.misExportPdf = async function (id, btn) {
 
 VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
-  const tabs=[['adhoc','ADHOC'],['mis','MIS']];
+  const tabs=[['bookings','Bookings'],['invoices','Invoices'],['receipts','Receipts'],['reports','Reports'],['adhoc','ADHOC'],['mis','MIS'],['setup','Setup']];
   const tab=(seg&&seg[0])||'adhoc';
   // One body div per tab rather than one shared one: the two are rendered by different code
   // that each look up their own host by id, and a shared id would have them fighting over it.
+  const bodyId={mis:'misBody',setup:'pssBody',bookings:'psbBody',receipts:'psrBody',invoices:'psiBody',reports:'psrpBodyHost'}[tab]||'psaBody';
   v.innerHTML=mHead('fa-headset','#7e22ce','Post Sales')
     +'<div class="tabs" style="margin-top:14px">'+tabs.map(function(t){return '<div class="tab '+(tab===t[0]?'active':'')+'" onclick="navTo(\'postsales/'+t[0]+'\')">'+t[1]+'</div>';}).join('')+'</div>'
-    +'<div id="'+(tab==='mis'?'misBody':'psaBody')+'" style="margin-top:16px"></div>';
+    +'<div id="'+bodyId+'" style="margin-top:16px"></div>';
+  // Bookings and Setup (projects → towers → floors → flats, PLC, FRC, charges, parking, payment
+  // plans) live in postsales.js - see PAGE_EXTRA_SCRIPT and docs/post-sales-spec.md.
+  if(tab==='setup'||tab==='bookings'||tab==='receipts'||tab==='invoices'||tab==='reports'){
+    const host=$(bodyId); if(!host) return;
+    const fn={setup:window.pssRender,bookings:window.psbRender,receipts:window.psrRender,invoices:window.psiRender,reports:window.psrpRender}[tab];
+    if(typeof fn!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Post Sales could not finish loading - refresh the page.</div></div>'; return; }
+    await fn(host, seg.slice(1));
+    return;
+  }
   if(tab==='mis'){
     misCss();
     const host=$('misBody'); if(host) loader(host);
