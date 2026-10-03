@@ -14,6 +14,35 @@ import { fetchMarketValuationPending, writeMarketValuation } from './supabase-rp
 
 const FORM_URL = 'https://wbregistration.gov.in/MV/mv_aprt.aspx';
 
+// The site's own Floor field is numeric only ("0-Gr Floor,1-Ist Floor.." per its own placeholder
+// text) and rejects anything else outright ("Flat located in which floor must be number" -
+// confirmed directly, a real job that failed 3 attempts in a row with exactly that site error).
+// The Booking Form itself prints the floor as a word ("FIRST", "GROUND", ...), not a digit, and
+// that's what ends up in the top-level `floor` field read off it - cost_sheet.floor happening to
+// already be a clean number for some cases was masking this, not fixing it, since the ordinal-word
+// value was still what got used whenever it was present (which is most of the time, since the
+// Booking Form is read before the Cost Sheet). This converts it at the source instead of hoping a
+// different field is numeric.
+const ORDINAL_WORDS = {
+  GROUND: 0, GR: 0, G: 0, BASEMENT: 0,
+  FIRST: 1, SECOND: 2, THIRD: 3, FOURTH: 4, FIFTH: 5, SIXTH: 6, SEVENTH: 7, EIGHTH: 8, NINTH: 9,
+  TENTH: 10, ELEVENTH: 11, TWELFTH: 12, THIRTEENTH: 13, FOURTEENTH: 14, FIFTEENTH: 15,
+  SIXTEENTH: 16, SEVENTEENTH: 17, EIGHTEENTH: 18, NINETEENTH: 19, TWENTIETH: 20,
+  TWENTYFIRST: 21, TWENTYSECOND: 22, TWENTYTHIRD: 23, TWENTYFOURTH: 24, TWENTYFIFTH: 25,
+  TWENTYSIXTH: 26, TWENTYSEVENTH: 27, TWENTYEIGHTH: 28, TWENTYNINTH: 29, THIRTIETH: 30,
+};
+function floorToNumber(v) {
+  if (v == null) return null;
+  // "FLOOR"/"FLR" is noise some documents append ("Ground Floor", "1st Flr") - stripped before
+  // matching rather than required absent, so both spellings land on the same word.
+  const s = String(v).trim().toUpperCase().replace(/\bFLOOR\b|\bFLR\b/g, '').replace(/[^A-Z0-9]/g, '');
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  const m = s.match(/^(\d+)(ST|ND|RD|TH)$/);
+  if (m) return parseInt(m[1], 10);
+  return Object.prototype.hasOwnProperty.call(ORDINAL_WORDS, s) ? ORDINAL_WORDS[s] : null;
+}
+
 const ID = {
   district: '#ctl00_CPH_DDL_District',
   thana: '#ctl00_CPH_DDL_Thana',
@@ -327,7 +356,7 @@ export async function runMarketValuationJob(config) {
   const buildupArea = row.builtup_ua ?? row.cost_sheet?.builtup_sqft ?? null;
   const superBuildupArea = row.sba ?? null;
   const flat = deriveFlat(row.cost_sheet?.flat, row.booking_form?.flat);
-  const floor = row.floor ?? row.cost_sheet?.floor ?? row.booking_form?.floor ?? null;
+  const floor = floorToNumber(row.floor) ?? floorToNumber(row.cost_sheet?.floor) ?? floorToNumber(row.booking_form?.floor) ?? null;
 
   if (carpetArea == null || buildupArea == null || !flat || floor == null) {
     // Not a failure - there is genuinely nothing more to check. Marking it failed would just
