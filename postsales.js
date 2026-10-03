@@ -881,6 +881,23 @@ function isNonStandard(f){
 
 /* ---------------- shell ---------------- */
 let BK_SEQ=0;
+async function psSyncInfo(){
+  const el=document.getElementById('psSyncInfo'); if(!el) return;
+  const {data}=await PS().from('sync_runs').select('started_at,finished_at,error').order('id',{ascending:false}).limit(1);
+  const r=(data||[])[0]; if(!r){ el.textContent=''; return; }
+  el.textContent=(r.error?'Last sync failed ':'Synced ')+new Date(r.finished_at||r.started_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+  el.title=r.error||'Auto-syncs within 10 minutes of each Customer Portal import';
+}
+window.psSyncNow=async function(btn){
+  btn.disabled=true; const h=btn.innerHTML; btn.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Syncing';
+  const {data,error}=await PS().rpc('sync_farvision',{p_trigger:'manual'});
+  btn.disabled=false; btn.innerHTML=h;
+  if(error||data?.error){ toast('Sync failed: '+(error?error.message:data.error),'err'); psSyncInfo(); return; }
+  const d=data||{}, n=k=>Number(d[k]||0);
+  const parts=[['new_bookings','new bookings'],['new_invoices','new invoices'],['new_receipts','new receipts'],['receipts_reversed','receipts reversed'],['invoices_cancelled','invoices cancelled'],['bookings_cancelled','bookings cancelled']].filter(([k])=>n(k)).map(([k,l])=>n(k)+' '+l);
+  toast(parts.length?'Synced: '+parts.join(', '):'Synced - already up to date','ok');
+  if(parts.length) route(); else psSyncInfo();
+};
 window.psbRender=async function(host,seg){
   host.classList.add('ps-root');
   css(); bcss();
@@ -947,10 +964,11 @@ async function bookingList(host,stale){
   B.list=data||[];
   const pname=id=>{const p=S.projects.find(x=>x.id===id);return p?p.name:'';};
   const opts='<option value="">All projects</option>'+S.projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(B.pid||'')?' selected':'')+'>'+esc(p.name)+'</option>').join('');
-  host.innerHTML='<div class="ps-head"><div class="t"><div class="sec-title">Bookings</div><div class="pss-hint" style="margin:2px 0 0">Tap a booking to see its cost sheet, payments, invoices and interest.</div></div><div class="acts"><button class="btn btn-primary" onclick="navTo(\'postsales/bookings/new\')"><i class="fa-solid fa-plus"></i> New booking</button></div></div>'
+  host.innerHTML='<div class="ps-head"><div class="t"><div class="sec-title">Bookings</div><div class="pss-hint" style="margin:2px 0 0">Tap a booking to see its cost sheet, payments, invoices and interest.</div></div><div class="acts"><span id="psSyncInfo" class="pss-hint" style="margin:0;align-self:center"></span><button class="btn" onclick="psSyncNow(this)" title="Pull the latest Farvision imports from Customer Portal"><i class="fa-solid fa-rotate"></i> Sync now</button><button class="btn btn-primary" onclick="navTo(\'postsales/bookings/new\')"><i class="fa-solid fa-plus"></i> New booking</button></div></div>'
     +'<div class="ps-filters"><select id="psbProj" onchange="psbFilter()">'+opts+'</select>'
     +'<span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="psbQ" placeholder="Search booking no., flat or applicant" oninput="psbFilter()"></span></div>'
     +'<div id="psbList"></div>';
+  psSyncInfo();
   window.psbFilter=function(){
     B.pid=val('psbProj')||null; const q=val('psbQ').toLowerCase();
     const rows=B.list.filter(b=>(!B.pid||String(b.project_id)===B.pid)&&(!q||[b.booking_no,b.flats&&b.flats.flat_code,b.towers&&b.towers.name,(b.booking_applicants||[]).map(a=>a.full_name).join(' ')].join(' ').toLowerCase().includes(q)));
@@ -1878,7 +1896,7 @@ function interestPanel(b,rows){
     +(b.status==='active'&&unsettled>0.5?'<span style="display:flex;gap:6px"><button class="btn btn-sm btn-primary" onclick="psxInterestModal('+b.id+',\'bill\')"><i class="fa-solid fa-check"></i> Approve &amp; bill</button><button class="btn btn-sm" onclick="psxInterestModal('+b.id+',\'waive\')">Waive</button></span>':'')+'</h3>'
     +'<div class="pss-hint">Paid late = interest on amounts already paid after their due date - this is what is suggested for billing. Running = interest still building up on what is unpaid today. Nothing is charged until it is approved.</div>'
     +'<div style="overflow-x:auto"><table class="psb-tbl"><thead><tr><th>Invoice</th><th>Due</th><th class="r">Days late</th><th class="r">Unpaid</th><th class="r">Paid late</th><th class="r">Running</th><th class="r">Billed</th><th class="r">Waived</th><th class="r">Suggested</th></tr></thead><tbody>'
-    +rows.filter(r=>num(r.paid_late)+num(r.running)>0).map(r=>'<tr><td>'+esc(r.invoice_no)+'<div class="pss-hint" style="margin:0">'+esc(r.title)+'</div></td><td>'+dmy(r.due_date)+'</td><td class="r">'+r.days_overdue+'</td><td class="r">'+inr(r.balance)+'</td><td class="r">'+inr(r.paid_late)+'</td><td class="r">'+inr(r.running)+'</td><td class="r">'+inr(r.billed)+'</td><td class="r">'+inr(r.waived)+'</td><td class="r"><b>'+inr(r.suggested)+'</b></td></tr>').join('')
+    +rows.filter(r=>num(r.paid_late)+num(r.running)>0).map(r=>'<tr><td>'+esc(r.invoice_no)+'<div class="pss-hint" style="margin:0">'+esc(r.title)+'</div></td><td>'+dmy(r.due_date)+'</td><td class="r">'+(r.days_overdue??'')+'</td><td class="r">'+inr(r.balance)+'</td><td class="r">'+inr(r.paid_late)+'</td><td class="r">'+inr(r.running)+'</td><td class="r">'+inr(r.billed)+'</td><td class="r">'+inr(r.waived)+'</td><td class="r"><b>'+inr(r.suggested)+'</b></td></tr>').join('')
     +'<tr class="t"><td colspan="3">Total</td><td class="r">'+inr(t('balance'))+'</td><td class="r">'+inr(t('paid_late'))+'</td><td class="r">'+inr(t('running'))+'</td><td class="r">'+inr(t('billed'))+'</td><td class="r">'+inr(t('waived'))+'</td><td class="r">'+inr(t('suggested'))+'</td></tr></tbody></table></div></div>';
 }
 window.psxInterestModal=async function(bookingId,mode){
@@ -1890,7 +1908,7 @@ window.psxInterestModal=async function(bookingId,mode){
     +'<div class="pss-hint">'+(bill?'Raises one interest invoice (+18% GST, due in 30 days). Amounts can be edited before approving.':'Records a waiver - the amount is no longer suggested and nothing is billed.')+'</div>'
     +'<label style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="psxRun" style="width:auto" onchange="psxRunToggle()"> Include running interest (on amounts still unpaid, up to today)</label>'
     +'<table class="psb-tbl" style="margin-top:8px"><thead><tr><th>Invoice</th><th class="r">Paid late</th><th class="r">Running</th><th class="r">Already settled</th><th class="r">Amount</th></tr></thead><tbody>'
-    +rows.map((r,i)=>'<tr><td>'+esc(r.invoice_no)+'<div class="pss-hint" style="margin:0">'+esc(r.title)+'</div></td><td class="r">'+inr(r.paid_late)+'</td><td class="r">'+inr(r.running)+'</td><td class="r">'+inr(num(r.billed)+num(r.waived))+'</td><td class="r"><input class="n psxAmt" type="number" step="0.01" data-sid="'+r.invoice_id+'" data-a="'+def(r,false)+'" data-b="'+def(r,true)+'" value="'+def(r,false)+'" style="width:110px" oninput="psxTot()"></td></tr>').join('')
+    +rows.map((r,i)=>'<tr><td>'+esc(r.invoice_no)+'<div class="pss-hint" style="margin:0">'+esc(r.title)+'</div></td><td class="r">'+inr(r.paid_late)+'</td><td class="r">'+inr(r.running)+'</td><td class="r">'+inr(num(r.billed)+num(r.waived))+'</td><td class="r"><input class="n psxAmt" type="number" step="0.01" data-sid="'+(r.invoice_id||'')+'" data-a="'+def(r,false)+'" data-b="'+def(r,true)+'" value="'+def(r,false)+'" style="width:110px" oninput="psxTot()"></td></tr>').join('')
     +'</tbody></table><div style="text-align:right;margin-top:8px;font-weight:700" id="psxTot"></div>'
     +(bill?'<label>Invoice date</label><input type="date" id="psxDate" value="'+today()+'">':'<label>Reason for waiving *</label><input id="psxReason" placeholder="e.g. Delay due to bank loan disbursement - approved by MD">')
     +'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="psxInterestGo('+bookingId+',\''+mode+'\')">'+(bill?'Approve &amp; raise invoice':'Record waiver')+'</button></div>','lg');
@@ -1899,7 +1917,7 @@ window.psxInterestModal=async function(bookingId,mode){
 window.psxRunToggle=function(){ const on=$('psxRun').checked; document.querySelectorAll('.psxAmt').forEach(i=>i.value=on?i.dataset.b:i.dataset.a); psxTot(); };
 window.psxTot=function(){ const t=[...document.querySelectorAll('.psxAmt')].reduce((s,i)=>s+num(i.value),0); const e=$('psxTot'); if(e) e.textContent='Total '+inr(t)+($('psxDate')?' + GST '+inr(Math.round(t*0.18))+' = '+inr(t+Math.round(t*0.18)):''); };
 window.psxInterestGo=async function(bookingId,mode){
-  const items=[...document.querySelectorAll('.psxAmt')].map(i=>({source_invoice_id:Number(i.dataset.sid),amount:num(i.value)})).filter(x=>x.amount>0);
+  const items=[...document.querySelectorAll('.psxAmt')].map(i=>({source_invoice_id:i.dataset.sid?Number(i.dataset.sid):null,amount:num(i.value)})).filter(x=>x.amount>0);
   if(!items.length){ toast('Enter at least one amount','err'); return; }
   let error;
   if(mode==='bill') ({error}=await PS().rpc('bill_interest',{p:{booking_id:bookingId,invoice_date:val('psxDate')||today(),items}}));

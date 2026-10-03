@@ -193,7 +193,8 @@ begin
   end loop;
 
   for pt in select p.* from cust.ptc_transfers p where p.deleted_at is null and p.is_current and not p.is_reversed and coalesce(p.amount,0) > 0
-             and not exists(select 1 from postsales.payouts x where x.farvision_ptc_id = p.id) order by p.document_date, p.id loop
+             and not exists(select 1 from postsales.payouts x where x.farvision_ptc_id = p.id)
+             and not exists(select 1 from postsales.receipts x where x.mode = 'transfer' and x.instrument_no = p.document_no and x.receipt_no like p.document_no || '/IN%') order by p.document_date, p.id loop
     v_src := null; v_dst := null;
     select id into v_src from postsales.bookings where farvision_unit_id = pt.source_unit_id;
     select id into v_dst from postsales.bookings where farvision_unit_id = pt.transferee_unit_id;
