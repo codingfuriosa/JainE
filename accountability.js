@@ -414,6 +414,8 @@
     .mtg-log-row:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
     .mtg-log-title{font-size:13.5px;font-weight:700;color:#1f2937}
     .mtg-log-meta{font-size:12px;color:#6b7280;margin-top:2px}
+    .mtg-att-names{font-size:12px;color:#475569;margin-top:5px;line-height:1.5}
+    .mtg-att-names b{color:#1f2937;font-weight:600}
     .mtg-log-badge{flex:none;font-size:11px;font-weight:600;padding:4px 10px;border-radius:99px;white-space:nowrap}
     .mtg-log-badge.ready{background:#dcfce7;color:#16a34a}
     .mtg-log-badge.pending{background:#fef9c3;color:#a16207}
@@ -3552,10 +3554,11 @@
        already covers every workflow, this one included. */
     const wfPastStep1Locked=function(c){ return id===39 && (c&&c.current_step>1) && !(c&&c.returned_at); };
     /* Reimbursement only: the case number of an existing claim of mine that is already in process
-       (past its first step, not Done/Cancelled, not sent back for correction) — mirrors the block
-       acc.wf_create_instance now enforces server-side (one open claim at a time), so "New
-       Reimbursement" reads as unavailable up front instead of only failing once the form is filled
-       in and submitted. */
+       (past its first step, not Done/Cancelled, not sent back for correction) — the same rule
+       acc.wf_new_instance_block_reason applies server-side, where the refusal actually happens.
+       Used ONLY to word the button's tooltip. It is deliberately not a gate: the database decides,
+       and a copy of the rule here that got the answer wrong would either refuse somebody the server
+       would have allowed, or promise a save that is about to be rejected. */
     const wfMyOpenReimbursement=id===39 ? (function(){
       const c=cases.find(function(x){ return eq(x&&x.created_by, mySelf) && x.current_step>1 && !x.returned_at && x.status!=='Done' && x.status!=='Cancelled'; });
       return c ? wfCaseNoText(c) : null;
@@ -3691,10 +3694,17 @@
       +'</span>'):'')
       +(canManageEdit?'<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>':'')
       +(canManage?'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>':'')
-      +(canEvent?(wfMyOpenReimbursement
-          ? '<button class="ac-btn primary" disabled title="Your '+esc2(N.lc)+' #'+esc2(wfMyOpenReimbursement)+' is still in process — raise a new one only after that is Done"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>'
-          : '<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>'
-        ):'')
+      /* THE BUTTON IS NEVER DISABLED, even for somebody who cannot submit yet. Disabling it opened
+         no form, and the form is the only way to reach Save draft - so the one person told to
+         "write the next one down and send it later" was the one person who could not. It opens,
+         they fill it in, they keep it. The refusal belongs on Submit, where acc.wf_create_instance
+         raises it with the claim number and what to do about it. The tooltip is a courtesy, not
+         the gate: it says the submit will be refused before the form is filled in rather than
+         after. */
+      +(canEvent?'<button class="ac-btn primary" title="'+esc2(wfMyOpenReimbursement
+            ? 'Your '+N.lc+' #'+wfMyOpenReimbursement+' has not finished yet — you can still fill this in and save it as a draft'
+            : 'Start a new '+N.lc)
+          +'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
     // Reimbursement only, and only these two named accounts (Accounts' own lookup tool — not a
@@ -7823,7 +7833,15 @@
           : (N.one+' created — first step assigned'),'ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       }
-    }catch(e){ toast('Could not save '+N.lc+': '+((e&&e.message)||e),'err'); }
+    }catch(e){
+      /* JE001 is the one-open-instance refusal, and it is not a failure to report as one: the
+         sentence already says which claim is in the way, what to do about it, and that this one
+         can be kept as a draft meanwhile. Prefixing it with "Could not save reimbursement:" would
+         contradict its own advice, so it is printed as it was written. Everything else keeps the
+         prefix, because an unexplained message needs saying what it was we could not do. */
+      if(e&&e.code==='JE001'){ toast((e&&e.message)||'','warn'); return; }
+      toast('Could not save '+N.lc+': '+((e&&e.message)||e),'err');
+    }
   };
 
 
@@ -8083,7 +8101,7 @@
       : ([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title);
     v.innerHTML='<div class="wf-tp"><div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2(wfHeadTitle)+'</div>'
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
-      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View '+esc2(wfNounOf(flow).lc)+' timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
       +(caseRow&&!(flow&&flow.id===41)?'<button class="ac-btn" title="Print this '+esc2(wfNounOf(flow).lc)+' — same as printing from the '+esc2(wfNounOf(flow).lc)+' itself" onclick="wfPrintCase('+caseRow.id+')"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print</span></button>':'')
       +A+'</div></div>'
@@ -8670,7 +8688,13 @@
     .wf-remark-entry:first-child{padding-top:0}
     .wf-remark-day{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--brand);margin-bottom:3px}
     .wf-remark-txt{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
-    .wf-card-hd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--ink);margin-bottom:12px;text-transform:uppercase;letter-spacing:.03em}
+    /* WRAPS. On Reimbursement this row carries a print-all button with a four-word label plus
+       edit and delete, and with nowrap the cluster ran 146px past the right edge of a 390px
+       screen - taking the whole page into sideways scroll, which is the one thing a layout must
+       never do. It wraps to a second line instead, and the title is allowed to shrink so the
+       wrap happens at the sensible place. */
+    .wf-card-hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:700;font-size:13px;color:var(--ink);margin-bottom:12px;text-transform:uppercase;letter-spacing:.03em}
+    .wf-card-hd>span:not(.cnt):not(.wf-tip):not(.wf-inst-tools){min-width:0;overflow:hidden;text-overflow:ellipsis}
     .wf-card-hd i{color:var(--slate);font-size:13px}
     .wf-card-hd .cnt{background:var(--brand-a10,#eef2ff);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px}
     .wf-inst-filterbar{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px}
@@ -9075,7 +9099,7 @@
     .wf-pill.wt{background:#fef3c7;color:#92400e}
     .wf-upd-sys{text-align:center;font-size:12px;color:var(--slate);margin:2px 0;padding:4px 8px}
     .wf-upd-sys i{opacity:.6;margin-right:4px}
-    .wf-inst-tools{margin-left:auto;display:flex;gap:6px}
+    .wf-inst-tools{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
     .wf-chk-col{width:36px;text-align:center;white-space:nowrap}
     .wf-inst-chk{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
     .wf-owner-pick{display:flex;gap:8px;align-items:center}
@@ -10317,6 +10341,12 @@
   let MTG_LAST={};
   // Completed occurrences still owing a transcript — see the note where it's loaded.
   let MTG_OWED=[];
+  // Completed one-time meetings (their acc.meetings row is deleted the moment they're logged, so
+  // this is the only place left that still knows they happened) — shown directly on the Meetings
+  // page now instead of being reachable only from the separate Archive tab. attendee_emails is
+  // stamped at log time from creator + acc.meeting_attendees (see acc.log_meeting_occurrence), so
+  // this already covers every invited person, not just whoever organized it.
+  let MTG_COMPLETED=[];
   // Attendees from outside the company directory (msWidget's picker only ever lists directory
   // people) — typed in by email rather than picked, reset each time the Schedule/Edit modal opens.
   let MTG_EXTRA=[];
@@ -10557,6 +10587,16 @@
         .order('occurrence_date',{ascending:false}).limit(50);
       MTG_OWED=ow||[];
     }catch(e){ MTG_OWED=[]; }
+    // Completed one-time meetings this person was invited to (organizer or attendee) — mirrors
+    // the query archiveTab() already uses, just surfaced here too. Recurring meetings don't need
+    // this: their history lives under their own still-existing card via mtgDetailPage.
+    try{
+      const {data:cl}=await ACC().from('meeting_logs').select('*')
+        .eq('recur_type','none')
+        .contains('attendee_emails',[my])
+        .order('occurrence_date',{ascending:false}).limit(20);
+      MTG_COMPLETED=cl||[];
+    }catch(e){ MTG_COMPLETED=[]; }
     MTG_PPL=await people();
     return {list,attMap};
   }
@@ -10589,13 +10629,19 @@
   // Fires the real Calendar/Meet API call for a meeting (create/update/cancel). Silently
   // no-ops (connected:false) if the organizer hasn't connected Google yet — the meeting still
   // saves normally either way, this just skips getting a real meet_link/google_event_id.
-  async function mtgSyncGoogle(meetingId,action){
+  // attendeeEmails is optional and only needed when this runs BEFORE acc.meeting_attendees has
+  // been (re)written for this meeting — mtgFormSave now syncs Google first specifically so
+  // meet_link already exists once meeting_attendees is inserted and fires the invite-email
+  // trigger, so at that point the DB has nothing to read the attendee list from yet.
+  async function mtgSyncGoogle(meetingId,action,attendeeEmails){
     try{
       const {data:{session}}=await sb.auth.getSession();
+      const body={meeting_id:meetingId,action:action||'sync'};
+      if(Array.isArray(attendeeEmails)) body.attendee_emails=attendeeEmails;
       await fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/google-calendar-sync',{
         method:'POST',
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+((session&&session.access_token)||''),'apikey':SUPABASE_KEY},
-        body:JSON.stringify({meeting_id:meetingId,action:action||'sync'})
+        body:JSON.stringify(body)
       });
     }catch(e){}
   }
@@ -11015,6 +11061,10 @@
     // invite), so there's no reason to keep them in separate arrays past this point.
     const pickedAtt=(typeof msGet==='function'?msGet('mtgAttBox'):[]);
     const attendees=[...new Set(pickedAtt.concat(MTG_EXTRA||[]))].filter(function(e){return !eq(e,me());});
+    // A meeting with nobody invited is a draft, not a meeting — require at least one other person
+    // before it can be saved, whether that's the initial create or an edit that would otherwise
+    // strip the last attendee off an existing one.
+    if(!attendees.length){ toast('Add at least one person to this meeting before saving.','err'); return; }
     const b=$('mtgSaveBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
     const row={title:title,mode:mode,recur_type:recur,meeting_date:meeting_date,recur_day:recur_day,recur_date:recur_date,start_time:start,end_time:end};
     if(mode==='offline') row.meet_link=null; // real Meet links only ever exist for online meetings — clear any stale one if switched away from online
@@ -11026,6 +11076,12 @@
       const {data,error}=await ACC().from('meetings').insert(row).select().single(); err=error; if(data)mtgId=data.id;
     }
     if(err){ toast(err.message,'err'); if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> '+(editing?'Save changes':'Schedule');} return; }
+    // Sync Google — and so set meet_link — BEFORE meeting_attendees is (re)written below. Inserting
+    // into meeting_attendees fires trg_notify_meeting_attendee, which emails each attendee an invite
+    // (via meeting-mailer) immediately; if meet_link isn't on the meetings row yet by then, that
+    // email goes out with no "Join meeting" link. The attendee list is passed straight through here
+    // since meeting_attendees itself doesn't have these rows yet for google-calendar-sync to read.
+    if(mode==='online'){ await mtgSyncGoogle(mtgId,'sync',attendees); }
     try{ await ACC().from('meeting_attendees').delete().eq('meeting_id',mtgId); }catch(e){}
     if(attendees.length){ try{ await ACC().from('meeting_attendees').insert(attendees.map(function(e){return {meeting_id:mtgId,email:e};})); }catch(e){} }
     if(attendees.length){
@@ -11045,7 +11101,6 @@
       editing?'update':'create',
       {title:title, attendees:(attendees.length?attendees.length+(attendees.length===1?' person':' people'):undefined)}); }catch(_e){}
     closeModal(); toast(editing?'Meeting updated':'Meeting scheduled','ok');
-    if(mode==='online'){ await mtgSyncGoogle(mtgId,'sync'); }
     await mtgLoadData(); mtgRenderOnly();
   };
   window.mtgCancelAsk=function(id){
@@ -11092,7 +11147,7 @@
     if(window._mtgAutoOpenCreate){ window._mtgAutoOpenCreate=false; mtgOpenCreate(); }
   }
   function mtgGroupTabsHtml(){
-    const tabs=[['all','All'],['mode','Mode'],['recurring','Recurring'],['participants','Participants']];
+    const tabs=[['all','All'],['mode','Mode'],['recurring','Recurring'],['participants','Participants'],['attendance','Attendance']];
     return '<div class="mtg-grouptabs">'+tabs.map(function(t){ return '<button class="mtg-gtab'+(MTG_GROUP===t[0]?' active':'')+'" onclick="mtgSetGroup(\''+t[0]+'\')">'+t[1]+'</button>'; }).join('')+'</div>';
   }
   // Real duration once Google's Meet API has actually returned it (see google-meet-attendance-sync)
@@ -11119,10 +11174,19 @@
     if(l.attendance_status==='not_held') return '<span class="mtg-log-badge none"><i class="fa-solid fa-calendar-xmark"></i> Not held</span>';
     return '<span class="mtg-log-badge none">No attendance data</span>';
   }
+  // Real browser back — every navTo() call pushes a genuine history entry (nexus-core.js), so this
+  // reliably returns to whichever page actually linked here (Archive, a meeting's own day-wise
+  // list, the Meetings page's Completed-meetings section, or the Attendance tab), instead of a
+  // single hardcoded guess. history.length===1 means there's nothing in-app to go back to (a
+  // direct deep link, or this tab's very first page) — falls back to fallbackPath in that case.
+  /* Was history.length>1, which is already 2 when somebody arrives from an email or a search, so
+     Back took them out of JAIN-E. goBack walks the app's own trail and can only land inside it. */
+  window.mtgLogBack=function(fallbackPath){ goBack(fallbackPath); };
   // A meeting occurrence's detail — real routed page (not a modal), reached via
-  // navTo('tasks/meetings/log/<id>') from either the global Archive tab (one-time meetings) or a
-  // recurring meeting's own Logs list page (mtgLogsPage). Self-contained: fetches the row itself
-  // rather than relying on any page-specific cached list, so it works from either place.
+  // navTo('tasks/meetings/log/<id>') from the global Archive tab, a recurring meeting's own
+  // day-wise list, the Meetings page's Completed-meetings section, or the Attendance tab.
+  // Self-contained: fetches the row itself rather than relying on any page-specific cached list,
+  // so it works from any of those places.
   async function mtgLogPage(v,id){
     injectCss(); setCrumb(['Accountability','Meeting Log']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -11193,15 +11257,17 @@
          // without pressing Record isn't stuck without a transcript for good.
          +'<div style="margin-top:10px"><button class="ac-btn primary" onclick="mtgAddRecording('+l.id+')"><i class="fa-solid fa-file-audio"></i> Add a recording to transcribe</button>'
          +'<div style="color:var(--slate);font-size:12px;margin-top:6px">Upload the audio or video from this meeting and JAIN-E will transcribe it automatically.</div></div>');
-    // One-time meetings' logs have meeting_id set to null once the meeting itself is deleted
-    // (see acc.log_completed_meetings) — those were only ever reachable from Archive, so Back
-    // goes there. A meeting that still exists keeps meeting_id, so Back returns to its own detail
-    // page (basic info + every day-wise occurrence) instead.
-    const backTarget = l.meeting_id!=null ? ('tasks/meetings/detail/'+l.meeting_id) : 'tasks/archive';
+    // Reachable from several places now (Archive, a recurring meeting's own day-wise list, the
+    // Meetings page's own "Completed meetings" section, and the Attendance tab) — a single
+    // hardcoded target used to send Back to Archive even when that's not where the click came
+    // from. navTo() always pushes a real history entry (see nexus-core.js), so real browser
+    // back — mtgLogBack() below — already lands wherever the click actually originated; this
+    // fallback target only covers a direct deep link with no in-app history to go back to.
+    const backFallback = l.meeting_id!=null ? ('tasks/meetings/detail/'+l.meeting_id) : 'tasks/archive';
     v.innerHTML='<div class="tp-head">'
       +'<div><div class="tp-title"><i class="fa-solid fa-box-archive" style="color:#7c3aed"></i> '+esc2(l.title)+'</div>'
       +'<div class="tp-sub">'+fmtDateY(l.occurrence_date)+'</div></div>'
-      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\''+backTarget+'\')"><i class="fa-solid fa-arrow-left"></i></button></div>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="mtgLogBack(\''+backFallback+'\')"><i class="fa-solid fa-arrow-left"></i></button></div>'
       +'</div>'
       +'<div class="tp-card">'
       +durationHtml
@@ -11252,7 +11318,7 @@
       +'<div class="tp-sub">Meeting details</div></div>'
       +'<div class="tp-acts">'
         +(mine?('<button class="ac-btn ic" title="Edit meeting" onclick="mtgOpenCreate('+m.id+')"><i class="fa-solid fa-pen"></i></button>'):'')
-        +'<button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button>'
+        +'<button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +'</div></div>'
       +'<div class="tp-card">'+basicHtml+'</div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-calendar-days" style="color:#7c3aed"></i> Day-wise — who joined, and when</h3>'+dayRows+'</div>';
@@ -11275,7 +11341,7 @@
     v.innerHTML='<div class="tp-head">'
       +'<div><div class="tp-title"><i class="fa-solid fa-clock-rotate-left" style="color:#7c3aed"></i> Logs — '+esc2(m?m.title:'Meeting')+'</div>'
       +'<div class="tp-sub">Past completed occurrences</div></div>'
-      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button></div>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button></div>'
       +'</div>'
       +'<div class="tp-card">'+rows+'</div>';
   }
@@ -11683,6 +11749,70 @@
       +(n>6?('<div class="mtg-owed-more">and '+(n-6)+' more — see Archive</div>'):'')
       +'</div>';
   }
+  // Same "Completed meetings" list archiveTab() shows, repeated here so a one-time meeting's own
+  // invitees can find it without knowing Archive exists — its acc.meetings row (and so its card
+  // above) is gone the moment it's held, so this is the only trace of it left on this page.
+  function mtgCompletedHtml(){
+    const list=MTG_COMPLETED||[];
+    if(!list.length) return '';
+    return '<div class="mtg-sec-label">Completed meetings</div>'
+      +list.map(function(l){
+        return '<div class="mtg-log-row" onclick="navTo(\'tasks/meetings/log/'+l.id+'\')">'
+          +'<div><div class="mtg-log-title">'+esc2(l.title)+'</div><div class="mtg-log-meta">'+esc2(fmtDateY(l.occurrence_date))+' · '+esc2(mtgLogTimeLabel(l))+'</div></div>'
+          +mtgAttendanceBadgeHtml(l)
+          +'</div>';
+      }).join('')
+      +'<div class="mtg-owed-more" style="cursor:pointer" onclick="navTo(\'tasks/archive\')">See all in Archive</div>';
+  }
+  // Compact "who attended" line for one row of the Attendance tab — same present/joined vs
+  // invited-absent logic mtgLogPage's full detail view already uses, just condensed. Online
+  // participants (see google-meet-attendance-sync) only ever carry a display name, never an email,
+  // so an absentee list is only computable for offline meetings, where present_emails are real
+  // addresses matchable against attendee_emails.
+  function mtgAttendanceNamesHtml(l){
+    if(!l) return '';
+    const plist=MTG_PPL||[];
+    const nm=function(e){ return nameOf(plist,e)||e; };
+    if(l.mode==='offline'){
+      if(l.attendance_status!=='recorded') return '';
+      const present=(l.present_emails||[]);
+      const presentL=present.map(function(e){return String(e).toLowerCase();});
+      const absent=(l.attendee_emails||[]).filter(function(e){return presentL.indexOf(String(e).toLowerCase())===-1;});
+      return '<div class="mtg-att-names"><b>Present:</b> '+esc2(present.map(nm).join(', ')||'—')
+        +(absent.length?('<br><b>Absent:</b> '+esc2(absent.map(nm).join(', '))):'')+'</div>';
+    }
+    if(l.attendance_status!=='fetched') return '';
+    const names=(l.participants||[]).map(function(p){return p.name;});
+    return '<div class="mtg-att-names"><b>Joined:</b> '+esc2(names.join(', ')||'—')+'</div>';
+  }
+  // One meeting's row on the Attendance tab: its title plus whichever occurrence's register is the
+  // most recent one available (l), or "No occurrence yet" if the meeting hasn't run once yet.
+  function mtgAttendanceRowHtml(title,mode,dateStr,l,navTarget){
+    const badge=l?mtgAttendanceBadgeHtml(l):'<span class="mtg-log-badge none">No occurrence yet</span>';
+    return '<div class="mtg-log-row" style="align-items:flex-start;cursor:'+(navTarget?'pointer':'default')+'"'+(navTarget?(' onclick="navTo(\''+navTarget+'\')"'):'')+'>'
+      +'<div style="flex:1;min-width:0"><div class="mtg-log-title">'+esc2(title)+'</div>'
+      +'<div class="mtg-log-meta">'+(dateStr?(esc2(fmtDateY(dateStr))+' · '):'')+(mode==='offline'?'Offline':'Online')+'</div>'
+      +mtgAttendanceNamesHtml(l)
+      +'</div>'+badge+'</div>';
+  }
+  // The Attendance tab: one row per meeting showing its LAST attendance register. For a recurring
+  // meeting that register is whichever occurrence MTG_LAST most recently loaded — so as each new
+  // day's occurrence gets logged, this row moves on to that day's register on its own, with no
+  // separate update step. A one-time meeting only ever has the one register, from MTG_COMPLETED
+  // (its acc.meetings row — and so its card on this same page — is gone once it's held).
+  function mtgAttendanceTabHtml(){
+    const recurring=(MTG_LIST||[]).filter(function(m){return (m.recur_type||'none')!=='none';})
+      .slice().sort(function(a,b){return String(a.title||'').localeCompare(String(b.title||''));});
+    const recRows=recurring.length?recurring.map(function(m){
+      const l=MTG_LAST[m.id];
+      return mtgAttendanceRowHtml(m.title,m.mode,l?l.occurrence_date:null,l,'tasks/meetings/detail/'+m.id);
+    }).join(''):'<div class="ac-empty" style="cursor:default">No recurring meetings yet</div>';
+    const oneRows=(MTG_COMPLETED||[]).length?(MTG_COMPLETED||[]).map(function(l){
+      return mtgAttendanceRowHtml(l.title,l.mode,l.occurrence_date,l,'tasks/meetings/log/'+l.id);
+    }).join(''):'<div class="ac-empty" style="cursor:default">No completed one-time meetings yet</div>';
+    return '<div class="mtg-sec-label">Recurring — last register</div>'+recRows
+      +'<div class="mtg-sec-label">One-Time — completed</div>'+oneRows;
+  }
   function mtgRenderOnly(){
     try{ mtgStartBrowserTranscriber(); }catch(e){}
     const b=$('acBody'); if(!b)return;
@@ -11698,17 +11828,24 @@
         +'<button class="mcb-btn" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>'
         +'</div>';
     }
-    const groups=mtgGroupedSections(MTG_GROUP);
-    groups.forEach(function(g){ g.items=g.items.slice().sort(function(a,b){return mtgSortKey(a).localeCompare(mtgSortKey(b));}); });
-    let body=groups.map(function(g){ return '<div class="mtg-sec-label">'+esc2(g.label)+'</div>'+g.items.map(function(m){ return mtgCard(m); }).join(''); }).join('');
-    if(!groups.length) body='<div class="ac-empty" style="cursor:default;border:0">No meetings yet — click <b>Schedule Meeting</b> to add one.</div>';
+    let body, trailer;
+    if(MTG_GROUP==='attendance'){
+      body=mtgAttendanceTabHtml();
+      trailer='';
+    } else {
+      const groups=mtgGroupedSections(MTG_GROUP);
+      groups.forEach(function(g){ g.items=g.items.slice().sort(function(a,b){return mtgSortKey(a).localeCompare(mtgSortKey(b));}); });
+      body=groups.map(function(g){ return '<div class="mtg-sec-label">'+esc2(g.label)+'</div>'+g.items.map(function(m){ return mtgCard(m); }).join(''); }).join('');
+      if(!groups.length) body='<div class="ac-empty" style="cursor:default;border:0">No meetings yet — click <b>Schedule Meeting</b> to add one.</div>';
+      trailer=mtgCompletedHtml();
+    }
     b.innerHTML='<div class="mtg-page">'
       +'<div class="mtg-main">'
       +'<div class="mtg-toolbar"><div class="mtg-toolbar-title">Meetings</div>'+mtgGoogleStatusHtml()+'<button class="mtg-create" onclick="mtgOpenCreate()"><i class="fa-solid fa-plus"></i> Schedule Meeting</button></div>'
       +mtgBanner
       +mtgOwedHtml()
       +mtgGroupTabsHtml()
-      +'<div class="mtg-body">'+body+'</div>'
+      +'<div class="mtg-body">'+body+trailer+'</div>'
       +'</div></div>';
   }
 
@@ -13026,7 +13163,7 @@
       <div><div class="tp-title"><i class="fa-solid fa-clipboard-check" style="color:#7c3aed"></i> ${esc2(t.title)} ${canEditThis?`<button class="ac-btn ic" style="height:26px;width:26px" title="Rename" onclick="accEditTitle(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div>
         <div class="tp-sub">${selfTask?'Self task':(verb+' to '+(members.map(e=>esc2(nameOf(list,e))).join(', ')||'nobody yet')+' by '+esc2(nameOf(list,t.delegator)))}</div></div>
       <div class="tp-acts">
-        <button class="ac-btn ic" title="Back" onclick="navTo('tasks/work')"><i class="fa-solid fa-arrow-left"></i></button>
+        <button class="ac-btn ic" title="Back" onclick="goBack('tasks/work')"><i class="fa-solid fa-arrow-left"></i></button>
         <button class="ac-btn ic" title="Sub-tasks" onclick="accSubtasksToggle()"><i class="fa-solid fa-list-check"></i></button>
         ${(amMember && !iHaveDelegated && !selfTask && !locked)?`<button class="ac-btn ic" title="Delegate" onclick="accDelegate(${tid})"><i class="fa-solid fa-people-arrows"></i></button>`:''}
         ${A}
