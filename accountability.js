@@ -8409,26 +8409,46 @@
     return best;
   }
   window.wfRejectStart=async function(fcsId, caseId){
-    let noun='instance', wantsReason=false;
+    let noun='instance', wantsReason=false, toRaiser=false, raiserName='';
     try{
-      const {data:mine}=await ACC().from('flow_case_steps').select('case_id').eq('id',fcsId).maybeSingle();
+      const {data:mine}=await ACC().from('flow_case_steps').select('case_id,seq').eq('id',fcsId).maybeSingle();
       const cid=(mine&&mine.case_id)||caseId;
       if(cid){
-        const {data:c}=await ACC().from('flow_cases').select('flow_id').eq('id',cid).maybeSingle();
+        const {data:c}=await ACC().from('flow_cases').select('flow_id,created_by').eq('id',cid).maybeSingle();
         if(c&&c.flow_id){
           const {data:f}=await ACC().from('flows').select('reject_deletes_instance,instance_noun').eq('id',c.flow_id).maybeSingle();
           wantsReason=!!(f&&f.reject_deletes_instance);
           noun=(f&&f.instance_noun)||'instance';
         }
+        /* From the FIRST step it now goes to whoever raised it — see acc.wf_reject. Which step is
+           first is read from this instance's own materialised steps rather than the flow, for the
+           same reason the database does: a flow can be edited after an instance is created. */
+        if(mine&&mine.seq!=null){
+          const {data:all}=await ACC().from('flow_case_steps').select('seq').eq('case_id',cid);
+          const firstSeq=(all||[]).reduce(function(m,s){ return (m==null||s.seq<m)?s.seq:m; }, null);
+          const raiser=(c&&c.created_by)||'';
+          toRaiser = firstSeq!=null && mine.seq===firstSeq && !!raiser && !eq(raiser,state.email);
+          if(toRaiser){
+            if(!WF_PEOPLE){ try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=[]; } }
+            raiserName=nameOf(WF_PEOPLE,raiser);
+          }
+        }
       }
     }catch(e){}
-    /* IT STAYS WITH YOU, so there is no destination to work out and nobody to name. The person
-       who says a bill is wrong is the person who knows what is wrong with it; it is marked Sent
-       Back and held here until that is settled, then forwarded like any other step. */
-    const warn='<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This '+esc2(noun)
-      +' is marked <b>Sent Back</b> and stays with <b>you</b> as a received task. Nothing after it '
-      +'is touched, nothing moves on until you forward it, and the reason is recorded on the '
-      +esc2(noun)+'.</span></div>';
+    /* THE DIALOG HAS TO SAY WHICH OF THE TWO THINGS WILL HAPPEN, because they are opposites and
+       the person is about to choose based on it.
+       From a later step it STAYS WITH YOU: whoever says a bill is wrong is the person who knows
+       what is wrong with it, so it is marked Sent Back and held until that is settled.
+       From the first step there is nobody before you, so holding it was a dead end — it now goes
+       back to whoever raised it, and leaves your list. */
+    const warn=toRaiser
+      ? '<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This is the first step, '
+        +'so this '+esc2(noun)+' goes back to <b>'+esc2(raiserName)+'</b>, who raised it, to correct and '
+        +'send again. It leaves your list.</span></div>'
+      : '<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This '+esc2(noun)
+        +' is marked <b>Sent Back</b> and stays with <b>you</b> as a received task. Nothing after it '
+        +'is touched, nothing moves on until you forward it, and the reason is recorded on the '
+        +esc2(noun)+'.</span></div>';
     openModal('<div class="modal-head"><h3><i class="fa-solid fa-rotate-left" style="color:var(--brand)"></i> Send this back</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body frm" style="width:min(94vw,520px)">'
         +warn
@@ -8456,15 +8476,18 @@
     const go=$('wfRejGo'); if(go){ go.disabled=true; go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
     const um=await wfStepUsageMeta(fcsId), cid=await wfCaseIdOfStep(fcsId);
     // nothing is deleted any more, so there are no files to collect first
-    try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
+    let went=null;
+    try{ const {data,error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; went=data; }
     catch(e){
       if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-rotate-left"></i> Mark Sent Back'; }
       toast('Could not send it back: '+((e&&e.message)||e),'err'); return;
     }
     await wfLogReject(um, cid);
     closeModal();
-    // No email: the one person who needs to know is the one who pressed it.
-    toast('Marked Sent Back — it is with you as a received task','ok');
+    /* The message is whatever acc.wf_reject says actually happened — it returns the name it went
+       back to, or nothing when it stayed here. Working it out a second time on this side is how
+       the old "it went to the previous person" line came to be wrong. */
+    toast(went?('Sent back to '+went+' to correct'):'Marked Sent Back — it is with you as a received task','ok');
     navTo('tasks/work');
   };
   window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; };
@@ -8474,12 +8497,13 @@
     const um=await wfStepUsageMeta(fcsId);
     const box=$('wfRejReason');
     const reason=((box&&box.value)||'').trim();
-    try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
+    let went=null;
+    try{ const {data,error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; went=data; }
     catch(e){ toast('Could not send it back: '+((e&&e.message)||e),'err'); return; }
     await wfLogReject(um, caseId!=null?caseId:await wfCaseIdOfStep(fcsId));
-    // It never went "to the previous person" - it said so, but the instance went to the raiser.
-    // Now it stays here, and the message says the thing that actually happened.
-    toast('Marked Sent Back — it is with you as a received task','ok'); navTo('tasks/work');
+    // Same as the dialog path: the server says where it went, this only prints it.
+    toast(went?('Sent back to '+went+' to correct'):'Marked Sent Back — it is with you as a received task','ok');
+    navTo('tasks/work');
   };
 
   // Revert: pull the flow back to me from whoever currently holds it
