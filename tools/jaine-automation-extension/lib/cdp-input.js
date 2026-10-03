@@ -54,7 +54,15 @@ export async function click(tabId, x, y) {
 
 export async function evaluate(tabId, expression) {
   const { result, exceptionDetails } = await sendCommand(tabId, 'Runtime.evaluate', { expression, returnByValue: true });
-  if (exceptionDetails) throw new Error(`page evaluation failed: ${exceptionDetails.text}`);
+  if (exceptionDetails) {
+    // exceptionDetails.text is always the literal string "Uncaught" -- CDP puts the actual
+    // error message/stack on exceptionDetails.exception instead. Reading only .text produced
+    // a useless, content-free "page evaluation failed: Uncaught" for every single crash.
+    const detail = exceptionDetails.exception?.description
+      || exceptionDetails.exception?.value
+      || exceptionDetails.text;
+    throw new Error(`page evaluation failed: ${detail}`);
+  }
   return result?.value;
 }
 

@@ -11180,6 +11180,16 @@
   }
   // Small "N of M joined" badge for list rows — shown instead of a generic Online/Offline tag once
   // real attendance data exists, falls back gracefully while it's still pending or unavailable.
+  // Google Meet counts anyone who so much as glanced into a call as "joined" — someone whose link
+  // failed and reconnected for 20 seconds shouldn't read as having attended. Auto-present for
+  // online meetings only counts a participant once their real connected time (already computed
+  // server-side from participantSessions, see google-meet-attendance-sync) passes this bar.
+  // Offline still has no equivalent signal (one shared room microphone, no per-person duration),
+  // so it stays manually ticked in the Wrap-up screen.
+  const MTG_PRESENT_MIN=1.5;
+  function mtgOnlinePresent(l){
+    return (l.participants||[]).filter(function(p){ return p.duration_min!=null && p.duration_min>MTG_PRESENT_MIN; });
+  }
   function mtgAttendanceBadgeHtml(l){
     if(l.mode==='offline'){
       if(l.attendance_status==='not_marked_done') return '<span class="mtg-log-badge none"><i class="fa-solid fa-calendar-xmark"></i> Not marked done</span>';
@@ -11188,7 +11198,7 @@
       return '<span class="mtg-log-badge none">Offline</span>';
     }
     const invited=(l.attendee_emails||[]).length;
-    if(l.attendance_status==='fetched') return '<span class="mtg-log-badge ready"><i class="fa-solid fa-user-check"></i> '+(l.participants||[]).length+' of '+invited+' joined</span>';
+    if(l.attendance_status==='fetched') return '<span class="mtg-log-badge ready"><i class="fa-solid fa-user-check"></i> '+mtgOnlinePresent(l).length+' of '+invited+' present</span>';
     if(l.attendance_status==='pending') return '<span class="mtg-log-badge pending">Fetching attendance…</span>';
     if(l.attendance_status==='not_held') return '<span class="mtg-log-badge none"><i class="fa-solid fa-calendar-xmark"></i> Not held</span>';
     return '<span class="mtg-log-badge none">No attendance data</span>';
@@ -11243,16 +11253,23 @@
       }
     } else if(l.attendance_status==='fetched'){
       const parts=(l.participants||[]);
-      const joinedRows=parts.length?parts.map(function(p){
+      const rowHtml=function(p,isPresent){
         // The actual clock times, not just the derived duration - "who joined and when" needs the
         // "when" spelled out, same IST-formatted style already used for the recording's own start/end.
         const timesLbl=(p.join?(' · joined '+esc2(mtgClockIST(p.join))):'')+(p.leave?(' – left '+esc2(mtgClockIST(p.leave))):'');
         const durLbl=p.duration_min!=null?(' ('+p.duration_min+' min)'):'';
         const rejoinLbl=p.rejoined?' <span style="color:#a16207;font-weight:600">(rejoined)</span>':'';
-        return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(p.name)+timesLbl+durLbl+rejoinLbl+'</div>';
-      }).join(''):'<p style="color:var(--slate);font-size:13px;margin:2px 0 0">Nobody joined this call.</p>';
+        const icon=isPresent?'<i class="fa-solid fa-circle-check" style="color:#16a34a"></i>':'<i class="fa-solid fa-clock" style="color:#94a3b8"></i>';
+        return '<div class="mtg-log-attendee"'+(isPresent?'':' style="color:var(--slate)"')+'>'+icon+' '+esc2(p.name)+timesLbl+durLbl+rejoinLbl+'</div>';
+      };
+      const present=mtgOnlinePresent(l);
+      const brief=parts.filter(function(p){return present.indexOf(p)===-1;});
+      const joinedRows=(parts.length
+        ? present.map(function(p){return rowHtml(p,true);}).join('')
+          +(brief.length?('<div style="margin-top:8px;color:var(--slate);font-size:12px">Joined '+MTG_PRESENT_MIN+' min or less — not counted as present</div>'+brief.map(function(p){return rowHtml(p,false);}).join('')):'')
+        : '<p style="color:var(--slate);font-size:13px;margin:2px 0 0">Nobody joined this call.</p>');
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
-        +'<div style="margin-top:8px"><b style="font-size:12.5px;color:var(--slate)">Joined ('+parts.length+' of '+invitedNames.length+')</b>'+joinedRows+'</div>';
+        +'<div style="margin-top:8px"><b style="font-size:12.5px;color:var(--slate)">Present ('+present.length+' of '+invitedNames.length+')</b>'+joinedRows+'</div>';
     } else if(l.attendance_status==='pending'){
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
         +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Fetching who actually joined from Google Meet — check back shortly.</p>';
@@ -11801,8 +11818,8 @@
         +(absent.length?('<br><b>Absent:</b> '+esc2(absent.map(nm).join(', '))):'')+'</div>';
     }
     if(l.attendance_status!=='fetched') return '';
-    const names=(l.participants||[]).map(function(p){return p.name;});
-    return '<div class="mtg-att-names"><b>Joined:</b> '+esc2(names.join(', ')||'—')+'</div>';
+    const names=mtgOnlinePresent(l).map(function(p){return p.name;});
+    return '<div class="mtg-att-names"><b>Present:</b> '+esc2(names.join(', ')||'—')+'</div>';
   }
   // One meeting's row on the Attendance tab: its title plus whichever occurrence's register is the
   // most recent one available (l), or "No occurrence yet" if the meeting hasn't run once yet.

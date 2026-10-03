@@ -380,7 +380,9 @@ others - a call can be correct on Budget and wrong on Area in the same breath, a
 - Configuration - the BHK/type discussed, checked against what the project actually offers (Dream
   Valley is 3BHK only; Durbaar Banquets has no configuration - use Not Discussed there, never Mismatch
   for a question that does not apply to a venue).
-- Budget - any price quoted, checked against the catalogue's figure for that configuration. A total
+- Budget - any price quoted, checked against the catalogue's figure for that configuration. An agent
+  saying a customer's 25-30 lakh range "works" for a 2BHK from 29 lakh is correct - a range that contains
+  the starting price is a Match, not a Mismatch. A total
   price divided into a per-sqft rate is Dream One's own exception (PROJECT_EXCEPTIONS) - apply it only
   there.
 - Area (sqft) - any square footage quoted, checked against the catalogue's range for that
@@ -517,6 +519,10 @@ A follow-up lead is Qualified when what the CUSTOMER WANTS matches what the proj
 four of these:
 - Location    - the locality, landmark or area they want is the one this project is in.
 - Budget      - the money they are willing to spend reaches the project's range for what they want.
+                A customer budget given as a RANGE matches whenever the catalogue's "onwards" figure falls
+                anywhere inside it or below its top: a 25-30 lakh budget MATCHES a 2BHK from 29 lakh. Only a
+                budget whose whole range sits below the starting price is a Mismatch. When the customer gives a range
+                and the project's price falls within it, set budget to "Match" (shown as "Budget Match").
 - Area (sqft) - the size they want exists in this project. A configuration this project does not
                 offer at all (a 4BHK where only 3BHK is built) fails this gate.
 - Position    - ready-to-move versus under-construction: what they said they need is what this

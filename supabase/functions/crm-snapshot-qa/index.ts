@@ -711,14 +711,12 @@ carried forward as Qualified.`.replace(/\s+/g, " ")
     return done({ status_match: null, mismatch_type: null,
       note: "The conversation did not establish an outcome, so it neither agrees nor disagrees with the CRM." });
   }
-  /* By requirement (2026-09-23): an Unclear call is not a free pass. It used to count as neither a
-     match nor a mismatch - silently dropped from both totals - which let a run full of unreviewable
-     calls report a clean mismatch rate. It is now its own mismatch category: not a claim that the CRM
-     is wrong, but a flag that this call could not be judged and needs a human or a re-listen, and a
-     count that must show up rather than vanish. */
+  /* By requirement (2026-10-02): an Unclear call is NOT a mismatch. When the AI cannot judge the real
+     status from the call there is nothing to compare the CRM with, so it neither agrees nor disagrees
+     (this reverses the 2026-09-23 rule that counted it as ai_status_unclear). */
   if (a === "Unclear") {
-    return done({ status_match: false, mismatch_type: "ai_status_unclear",
-      note: "The call did not establish a clear outcome - counted as a mismatch so an unreviewable call is flagged rather than silently dropped from the count." });
+    return done({ status_match: null, mismatch_type: null,
+      note: "The call did not establish a clear outcome, so it neither agrees nor disagrees with the CRM - not counted as a mismatch." });
   }
   if (!["Lost", "Qualified", "In Follow Up"].includes(crm)) {
     return done({ status_match: null, mismatch_type: null,
@@ -1101,7 +1099,8 @@ async function promoteRetries(db: DB) {
   return { requeued_transcribe: (reTranscribe || []).length, requeued_qa: (reQa || []).length, reclaimed };
 }
 
-async function oneStep(db: DB, geminiKey: string, openaiKey: string, geminiModel: string, qaModel: string) {
+async function oneStep(db: DB, geminiKey: string, openaiKey: string, geminiModel: string, qaModel: string,
+                       onlyFollowUpId?: number) {
   /* STRICTLY ONE AT A TIME. */
   const { count: inFlight } = await db.schema("acc").from("transcription_queue")
     .select("id", { count: "exact", head: true }).in("status", IN_FLIGHT);
@@ -1120,7 +1119,12 @@ async function oneStep(db: DB, geminiKey: string, openaiKey: string, geminiModel
      worker onto a different lead while the current one still has claimable recordings. See that
      function's own comment (20260919130000_transcription_queue_one_lead_at_a_time.sql) for why this
      could not just rely on crm_build_queue's own insertion order. */
-  const { data: queue, error } = await db.rpc("next_claimable_follow_up", { p_claimable: claimable });
+  /* A hand retry names its recording, so that exact row is claimed rather than whatever the lead
+     preference would pick - the person who clicked Retry is waiting on THIS call. */
+  const { data: queue, error } = onlyFollowUpId
+    ? await db.schema("acc").from("transcription_queue").select("id, status")
+        .eq("follow_up_id", onlyFollowUpId).in("status", claimable).limit(1)
+    : await db.rpc("next_claimable_follow_up", { p_claimable: claimable });
   if (error) throw new Error(error.message);
   if (!queue || !queue.length) {
     if (!openaiKey) {
@@ -1169,7 +1173,8 @@ async function oneStep(db: DB, geminiKey: string, openaiKey: string, geminiModel
   }
 }
 
-async function doWork(db: DB, geminiKey: string, openaiKey: string, geminiModel: string, qaModel: string) {
+async function doWork(db: DB, geminiKey: string, openaiKey: string, geminiModel: string, qaModel: string,
+                      firstFollowUpId?: number) {
   const t0 = Date.now();
   const promoted = await promoteRetries(db);
   const steps: unknown[] = [];
@@ -1177,7 +1182,7 @@ async function doWork(db: DB, geminiKey: string, openaiKey: string, geminiModel:
 
   for (let i = 0; i < Math.max(1, MAX_STEPS_PER_TICK); i++) {
     if (i > 0 && Date.now() - t0 > SOFT_BUDGET_MS) { note = "stopped early to stay inside the worker limit"; break; }
-    const step = await oneStep(db, geminiKey, openaiKey, geminiModel, qaModel);
+    const step = await oneStep(db, geminiKey, openaiKey, geminiModel, qaModel, i === 0 ? firstFollowUpId : undefined);
     if (!step.done) { if (i === 0) note = step.skipped || (step.empty ? "the queue is empty" : undefined); break; }
     steps.push(step.result);
   }
@@ -1310,13 +1315,20 @@ Deno.serve(async (req: Request) => {
         .eq("follow_up_id", followUpId).maybeSingle();
       if (readErr) return j({ error: readErr.message }, 500);
       if (!row) return j({ error: "no queued recording for that follow-up" }, 404);
+      /* WAITING OR STUCK, NOT ONLY FAILED. A recording that is still queued is started right now
+         instead of waiting its turn; one "in flight" for longer than the stale window was killed by
+         the worker limit and is reset. One genuinely running a moment ago is left alone. */
+      const waiting = CLAIMABLE.includes(String(row.status));
       if (IN_FLIGHT.includes(String(row.status))) {
-        return j({ error: `that recording is already ${row.status} - wait for it to finish`, queue_status: row.status }, 409);
+        const { data: fresh } = await db.schema("acc").from("transcription_queue").select("started_at, updated_at")
+          .eq("id", row.id).maybeSingle();
+        const since = new Date(String(fresh?.started_at || fresh?.updated_at || 0)).getTime();
+        if (Date.now() - since < STALE_MINUTES * 60e3) {
+          return j({ error: `that recording is already ${row.status} - wait for it to finish`, queue_status: row.status }, 409);
+        }
       }
-      if (CLAIMABLE.includes(String(row.status))) {
-        return j({ error: `that recording is already queued (${row.status})`, queue_status: row.status }, 409);
-      }
-      const resumeQa = !body.force_transcribe && (row.fail_phase === "qa" || !!row.transcript_id);
+      const resumeQa = !body.force_transcribe && (row.fail_phase === "qa" || !!row.transcript_id
+        || row.status === "qa_pending" || row.status === "qa_running");
       if (row.call_date && String(row.call_date) < FORWARD_ONLY_EFFECTIVE_DATE) {
         const { data: existingQa, error: qaReadErr } = await db.schema("acc").from("followup_qa")
           .select("id").eq("follow_up_id", followUpId).maybeSingle();
@@ -1326,7 +1338,8 @@ Deno.serve(async (req: Request) => {
                      follow_up_id: followUpId, call_date: row.call_date }, 409);
         }
       }
-      /* To the BACK of the queue, so a call retried by hand cannot starve the day's own work. */
+      /* To the BACK of the queue, so a call retried by hand cannot starve the day's own work - it is
+         then claimed by id below, so it still runs first. */
       const { data: seq } = await db.rpc("next_crm_queue_block", { n: 1 });
       /* next_claimable_follow_up (20260922110000) only claims leads in TODAY's decision-day response -
          a lead not in today's CRM feed is never picked up automatically. A hand-retried row must work
@@ -1342,11 +1355,13 @@ Deno.serve(async (req: Request) => {
         .eq("id", row.id).eq("status", row.status).select("id, status").maybeSingle();
       if (error) return j({ error: error.message }, 500);
       if (!updated) return j({ error: "that recording changed state just now - try again" }, 409);
-      if (resumeQa && body.replace_qa !== false) {
+      /* A recording that never finished has no QA to replace; deleting only applies to a re-judge of
+         one that failed or was reset, and never for a plain waiting row. */
+      if (resumeQa && !waiting && body.replace_qa !== false) {
         await db.schema("acc").from("followup_qa").delete().eq("follow_up_id", followUpId);
       }
       return j({ ok: true, follow_up_id: followUpId, resumed_at: updated.status,
-                 work: await doWork(db, GEMINI_KEY, OPENAI_KEY, geminiModel, qaModel) });
+                 work: await doWork(db, GEMINI_KEY, OPENAI_KEY, geminiModel, qaModel, followUpId) });
     }
 
     if (action === "snapshot") {

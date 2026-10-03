@@ -18,6 +18,7 @@ import { buildRow, getAadhaarCandidates, SHEET_COLUMNS } from './mapping.js';
 import { pickPrimaryApplicantAadhaar } from './claude-decision.js';
 import { appendBookingRow } from './sheet-automation.js';
 import { runAgenticJob } from './agentic-runner.js';
+import { runMarketValuationJob } from './market-valuation-automation.js';
 
 async function runSheetAppendBooking(config, job) {
   const { job_id: jobId, case_id: caseId, audit_result: result } = job;
@@ -39,9 +40,16 @@ async function runSheetAppendBooking(config, job) {
 
 export const SHEET_JOB_HANDLER = runSheetAppendBooking;
 
-// Purpose-built handlers for specific acc.automation_jobs `kind`s. Empty today --
-// every universal job currently runs through the agentic fallback below.
-export const AUTOMATION_HANDLERS = {};
+// Purpose-built handlers for specific acc.automation_jobs `kind`s.
+//
+// market_valuation: Dream Gurukul / Dream World City bookings, looked up the exact West Bengal
+// government Market Value of Apartment figure and written back once a booking is marked done.
+// See lib/market-valuation-automation.js -- deliberately ignores which case_id the triggering job
+// named and re-derives the whole backlog fresh every run, so a job lost to a closed browser or a
+// prior failure gets swept up automatically rather than needing a person to notice and re-run it.
+export const AUTOMATION_HANDLERS = {
+  market_valuation: (config, _job) => runMarketValuationJob(config),
+};
 
 export async function runAutomationJob(config, job) {
   const handler = AUTOMATION_HANDLERS[job.kind];
