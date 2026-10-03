@@ -58,3 +58,19 @@ export async function finishAutomationJob(config, jobId, ok, note) {
     p_note: note,
   });
 }
+
+/** Every Dream Gurukul / Dream World City booking still missing a market valuation, regardless of
+ *  which (if any) automation_jobs row is nominally tied to it - see market-valuation-automation.js
+ *  for why this is queried fresh every run instead of trusting the job payload alone. */
+export async function fetchMarketValuationPending(config) {
+  const rows = await callRpc(config, 'market_valuation_job_pending', { p_secret: config.automationBotSecret });
+  return rows ?? [];
+}
+
+export async function writeMarketValuation(config, caseId, value) {
+  await callRpc(config, 'market_valuation_job_write', {
+    p_secret: config.automationBotSecret,
+    p_case_id: caseId,
+    p_value: value,
+  });
+}
