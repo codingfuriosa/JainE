@@ -52,7 +52,10 @@ function ensurePageScript(id){
   if(!src||_loadedPageScripts.has(src))return Promise.resolve();
   return new Promise((resolve)=>{
     const s=document.createElement('script');
-    s.src=src+'?v=20260913c';
+    /* Bump this whenever accountability.js or insp-items.js changes, the same way the pages bump
+       nexus-core.js. It had sat at 20260913c while thirty-five commits landed in
+       accountability.js — every one of them invisible to a browser holding that URL. */
+    s.src=src+'?v=20261003a';
     s.onload=()=>{_loadedPageScripts.add(src);resolve();};
     // A failed load shouldn't hang navigation forever — render with whatever's already there
     // (the legacy VIEWS.tasks placeholder already has its own "could not finish loading" message

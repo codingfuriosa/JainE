@@ -7412,7 +7412,14 @@
        the task and the first to Receive it takes it. */
     let openSteps=[];
     let wfRegulars=[];
-    if(!editing){
+    /* ON EDIT TOO, which it did not used to be. The question "who does this step" was asked once,
+       on the New form, and never again — so a bill pointed at the wrong department could not be
+       re-routed by anybody, including the person who raised it and made the mistake. It is asked
+       again here, prefilled with whoever has it now, and only for steps that have not already
+       been forwarded: correcting where a bill is going is the point, rewriting who already
+       handled it is not. acc.wf_update_instance enforces the same bound. */
+    let memberPrefill=[];
+    {
       try{ const {data}=await ACC().from('flow_steps').select('seq,title,owner_from_trigger,owner_email,owner_emails')
         .eq('flow_id',flowId).order('seq',{ascending:true});
         const all=data||[];
@@ -7438,6 +7445,21 @@
         wfRegulars=seen;
       }catch(_e){}
     }
+    if(editing && openSteps.length){
+      /* Which of those steps this particular instance can still be re-pointed at, and who has
+         them at the moment. A step already forwarded drops out of the list entirely rather than
+         being offered and then refused on save. */
+      try{
+        const {data:cs}=await ACC().from('flow_case_steps')
+          .select('seq,person,candidates,forwarded_at').eq('case_id',caseId);
+        const bySeq={}; (cs||[]).forEach(function(x){ bySeq[x.seq]=x; });
+        openSteps=openSteps.filter(function(s){ const x=bySeq[s.seq]; return x && !x.forwarded_at; });
+        const now=openSteps.length?bySeq[openSteps[0].seq]:null;
+        memberPrefill=(now&&Array.isArray(now.candidates)&&now.candidates.length)
+          ? now.candidates.filter(Boolean)
+          : (now&&now.person?[now.person]:[]);
+      }catch(_e){ openSteps=[]; }
+    }
     /* ONE picker for every step left open to the triggering event owner, not one each. Whoever is
        named here does all of them and it's required — can't leave a step silently unassigned.
        Asking the same question once per step made the form long and invited answering it
@@ -7460,7 +7482,9 @@
             ? flow.trigger_step_assignable_overrides[(me()||'').toLowerCase()] : []);
     const membersHtml=openSteps.length
       ? '<label class="wf-lbl">Who does '+(openSteps.length===1?'this step':'these steps')+'? '
-          +tip('These steps have no fixed owner — whoever you name here does '+(openSteps.length===1?'it':'all of them')+'. Name more than one and they all receive it, with the first to accept it keeping it.')+'</label>'
+          +tip(editing
+               ? 'Change this to send it to somebody else. The task moves to them and leaves the current holder’s list. Steps that have already been forwarded are not listed — those are finished.'
+               : 'These steps have no fixed owner — whoever you name here does '+(openSteps.length===1?'it':'all of them')+'. Name more than one and they all receive it, with the first to accept it keeping it.')+'</label>'
         +'<div id="wfEvtMembers">'
           +'<div class="wf-evt-row wf-mem-row" data-seq="'+openSteps.map(function(s){return s.seq;}).join(',')+'">'
             +'<div class="ac-in wf-evt-labelro wf-mem-lbl" style="background:#f8fafc;color:var(--ink);display:flex;align-items:center;gap:7px;overflow:hidden" title="'+esc2(openSteps.map(function(s){return 'Step '+s.seq+' · '+(s.title||'');}).join('\n'))+'">'
@@ -7470,7 +7494,7 @@
                     ? ('Step '+openSteps[0].seq+' · '+esc2(openSteps[0].title||''))
                     : (openSteps.length+' steps · '+esc2(openSteps.map(function(s){return s.title||('Step '+s.seq);}).join(', '))))
               +'</span></div>'
-            +wfPersonPickerHtml([], true, false, '', wfRegulars, undefined, stepAssignRestrict.length?stepAssignRestrict:undefined)
+            +wfPersonPickerHtml(memberPrefill, true, false, '', wfRegulars, undefined, stepAssignRestrict.length?stepAssignRestrict:undefined)
           +'</div>'
         +'</div>'
       : '';
@@ -7768,7 +7792,20 @@
             if(o.indexOf('s3:')===0 && after.indexOf(o)===-1) replacedAtts.push(o);
           });
         }); }
-        const {error}=await ACC().rpc('wf_update_instance',{p_case_id:caseId, p_details:details}); if(error)throw error;
+        /* The same {seq:[emails]} the New form sends. Gathered the same way and from the same
+           row, because it IS the same picker — it is only that Edit never used to draw it. An
+           empty picker is a mistake, not "leave it alone": the step would be unassigned. */
+        const editMembers={};
+        const editMemRow=document.querySelector('#wfEvtMembers .wf-evt-row');
+        if(editMemRow){
+          const seqs=String(editMemRow.getAttribute('data-seq')||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+          const v=((editMemRow.querySelector('.wf-s-person')||{}).value||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+          if(!v.length){ toast('Please choose who does '+(seqs.length>1?'these steps':'this step'),'warn'); return; }
+          seqs.forEach(function(sq){ editMembers[sq]=v.slice(); });
+        }
+        const {error}=await ACC().rpc('wf_update_instance',
+          {p_case_id:caseId, p_details:details,
+           p_step_members:Object.keys(editMembers).length?editMembers:null}); if(error)throw error;
         // Independent of one another, so they go together rather than one signing round trip and
         // one delete at a time while the person waits on Save changes.
         await wfRunPool(replacedAtts, 3, async function(oldPath){ try{ await s3Delete(oldPath); }catch(_e){} });
