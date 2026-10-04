@@ -45,7 +45,7 @@ function pageIdFromPath(pathname){
 // the legacy-view race it guards against in VIEWS.tasks below). An in-place SPA navigation to one of
 // these needs the same script loaded on demand, once, before rendering — never re-fetched on a
 // second visit in the same tab.
-const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js'};
+const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:'purchase.js'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const src=PAGE_EXTRA_SCRIPT[id];
@@ -55,7 +55,7 @@ function ensurePageScript(id){
     /* Bump this whenever accountability.js or insp-items.js changes, the same way the pages bump
        nexus-core.js. It had sat at 20260913c while thirty-five commits landed in
        accountability.js — every one of them invisible to a browser holding that URL. */
-    s.src=src+'?v=20261003a';
+    s.src=src+(src==='purchase.js'?'?v=20261004b':'?v=20261003a');
     s.onload=()=>{_loadedPageScripts.add(src);resolve();};
     // A failed load shouldn't hang navigation forever — render with whatever's already there
     // (the legacy VIEWS.tasks placeholder already has its own "could not finish loading" message
@@ -11689,9 +11689,18 @@ async function psaProcessPdf(file){
   return {blob:blob,count:total};
 }
 
-VIEWS.inventory=function(v,seg){
+VIEWS.inventory=async function(v,seg){
   setCrumb(['Operations','Inventory']);
-  const tabs=['Indents & RFQ','Quote comparison','Purchase orders','GRN & QC','Stock ledger','Accounts payable'];const ti=mTab(seg,tabs.length);
+  const tabs=['Indents & RFQ','Quote comparison','Purchase orders','GRN & QC','Stock ledger','Accounts payable','Setup'];const ti=mTab(seg,tabs.length);
+  if(ti===6){
+    // Purchase & Stores setup (items, groups, UOM, warehouses, legal entities) lives in purchase.js -
+    // see PAGE_EXTRA_SCRIPT and docs/purchase-stores-spec.md.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Purchase setup could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusRender(host,seg.slice(1));
+    return;
+  }
   let body;
   if(ti===0){
     body=mStep(['Indent','RFQ','Quote compare','PO + approval','Gate entry','GRN + QC','Stock'],'Quote compare')+
@@ -29204,6 +29213,7 @@ const USAGE_VIEWS={
   'inventory/3':         'inventory.grn_qc.view_grn_qc_status',
   'inventory/4':         'inventory.stock_ledger.view_stock_ledger',
   'inventory/5':         'inventory.accounts_payable.view_accounts_payable',
+  'inventory/6':         'inventory.setup.view_setup',
   'maintenance/0':       'maintenance.asset_register.view_asset_register',
   'maintenance/1':       'maintenance.preventive_maintenance.view_pm_schedule',
   'maintenance/2':       'maintenance.breakdowns_repairs.view_breakdown_repair_tickets',
