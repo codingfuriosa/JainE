@@ -667,14 +667,20 @@ function expandModules(ss){
   Object.keys(MODULE_RENAMES).forEach(function(oldId){
     if(ss.has(oldId)) ss.add(MODULE_RENAMES[oldId]);
   });
-  if(ss.has('custportal_photos')) ss.add('custportal_admin');
+  if(ss.has('custportal_photos')||ss.has('custportal_photo_approver')) ss.add('custportal_admin');
   ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
 /* 'custportal_photos' = Customer Portal Admin limited to its Photos & Videos tab. The database
    enforces the same boundary (app.is_custportal_media_editor): such an account can write the four
    photo tables and read project names and a bare flat list, and nothing else in cust.*. */
-function cpaPhotosOnly(){ if(state.super)return false; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('custportal_photos')!==-1; }
+function cpaPhotosOnly(){ if(state.super)return false; const m=state.roles&&state.roles.modules;
+  // A photo approver without Customer Portal Admin of their own gets the same single Photos tab.
+  return Array.isArray(m)&&(m.indexOf('custportal_photos')!==-1||(m.indexOf('custportal_photo_approver')!==-1&&m.indexOf('custportal_admin')===-1)); }
+/* 'custportal_photo_approver' = may publish or reject construction photos and videos (Photos & Videos
+   > Review). The database holds the same rule - app.is_photo_approver() in cust.review_media() - and
+   also refuses an approver's own uploads; this only decides whether to show the Review screen. */
+function cpaIsPhotoApprover(){ if(state.super)return true; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('custportal_photo_approver')!==-1; }
 function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return expandModules(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length)return expandModules(new Set(m));return expandModules(new Set());}
 /* Usability sits under Control Panel in Administration, but unlike Control Panel it is NOT
    superadmin-only: the Systems department are the people who actually read it, and they are not
@@ -943,8 +949,20 @@ function notifGeneralMeta(n){
   if(n.kind==='project_owner_added')return {icon:'fa-user-shield',cls:'t-blue',text:'Added you as an owner',taskId:null};
   if(n.kind==='task_delegated')return {icon:'fa-share-nodes',cls:'t-amber',text:'Delegated a task to you',taskId:n.task_id||null};
   if(n.kind==='comment')return {icon:'fa-comment-dots',cls:'t-blue',text:'Commented on a task',taskId:n.task_id||null};
+  // Construction photo approval (cust.review_media / cust.notify_media_uploaded).
+  if(n.kind==='media_pending')return {icon:'fa-stamp',cls:'t-amber',text:'Photos to approve',taskId:null,go:"notifOpenMedia('review')"};
+  if(n.kind==='media_rejected')return {icon:'fa-circle-xmark',cls:'t-red',text:n.body||'Photos rejected',taskId:null,go:"notifOpenMedia('upload')"};
+  if(n.kind==='media_published')return {icon:'fa-circle-check',cls:'t-green',text:'Photos published',taskId:null,go:"notifOpenMedia('upload')"};
   return {icon:'fa-bell',cls:'t-gray',text:n.body||'Notification',taskId:n.task_id||null};
 }
+// Opens Customer Portal Admin > Photos & Videos: Review for an approver's "to approve", the upload
+// list (with each item's status and any rejection reason) for the uploader.
+window.notifOpenMedia=function(mode){
+  const dd=$('notifDd'); if(dd) dd.classList.remove('show');
+  CPA_PH.mode=(mode==='review'&&cpaIsPhotoApprover())?'review':'upload';
+  if(CPA_PH.mode==='review'){ CPA_RV.status='pending'; CPA_RV.sel.clear(); }
+  navTo('custportal_admin/'+(cpaPhotosOnly()?0:3));
+};
 async function toggleNotif(){
   const dd=$('notifDd');dd.className='dropdown notif';
   dd.classList.toggle('show');if(!dd.classList.contains('show'))return;
@@ -970,7 +988,7 @@ async function renderNotifDropdown(){
   if(general.length){
     html+=subhead('Updates','notifMarkAllGeneralRead()')+general.map(n=>{
       const meta=notifGeneralMeta(n);
-      return `<div class="n-it" onclick="notifMarkRead(${n.id});${meta.taskId?`goToTask(${meta.taskId})`:`$('notifDd').classList.remove('show')`}"><div class="n-ic ${meta.cls}"><i class="fa-solid ${meta.icon}"></i></div><div><div style="font-weight:600;font-size:13px">${esc(n.title||meta.text)}</div><div style="color:var(--slate);font-size:12px">${meta.text} · ${relTime(n.created_at)}</div></div></div>`;
+      return `<div class="n-it" onclick="notifMarkRead(${n.id});${meta.go?meta.go:meta.taskId?`goToTask(${meta.taskId})`:`$('notifDd').classList.remove('show')`}"><div class="n-ic ${meta.cls}"><i class="fa-solid ${meta.icon}"></i></div><div><div style="font-weight:600;font-size:13px">${esc(n.title||meta.text)}</div><div style="color:var(--slate);font-size:12px">${meta.text} · ${relTime(n.created_at)}</div></div></div>`;
     }).join('');
   }
   if(items.length){
@@ -8536,7 +8554,8 @@ async function secUserDetail(v,email){
       </div>
       <div style="padding:14px 16px 16px">
         <div class="tab-grid">${NAV.flatMap(g=>{const gi=g.items.filter(m=>MODSET.has(m.id));if(!gi.length)return[];return['<div class="tab-grid-head">'+esc(g.group)+'</div>',...gi.flatMap(m=>['<label class="chk-tile"><input type="checkbox" class="secMod" value="'+m.id+'" '+((m.id==='network'||mods.includes(m.id))?'checked':'')+' '+((u.super_admin||m.id==='network')?'disabled':'')+'><i class="fa-solid '+m.icon+' tile-ic"></i>'+esc(m.label)+'</label>']
-            .concat(m.id==='custportal_admin'?['<label class="chk-tile" title="Opens Customer Portal Admin with only the Photos &amp; Videos tab"><input type="checkbox" class="secMod" value="custportal_photos" '+(mods.includes('custportal_photos')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-photo-film tile-ic"></i>Customer Portal: Photos &amp; Videos only</label>']:[]))];}).join('')}</div>
+            .concat(m.id==='custportal_admin'?['<label class="chk-tile" title="Opens Customer Portal Admin with only the Photos &amp; Videos tab"><input type="checkbox" class="secMod" value="custportal_photos" '+(mods.includes('custportal_photos')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-photo-film tile-ic"></i>Customer Portal: Photos &amp; Videos only</label>',
+              '<label class="chk-tile" title="May publish or reject construction photos and videos before customers see them (Photos &amp; Videos &gt; Review)"><input type="checkbox" class="secMod" value="custportal_photo_approver" '+(mods.includes('custportal_photo_approver')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-stamp tile-ic"></i>Customer Portal: approve photos</label>']:[]))];}).join('')}</div>
       </div>
     </div>
     ${u.super_admin?'<p style="color:var(--slate);font-size:13px;margin-top:12px">This person is an administrator and always has full access.</p>':`<div style="margin-top:18px;display:flex;justify-content:flex-end;gap:10px"><button class="btn" onclick="navTo('security')">Cancel</button><button class="btn btn-primary" id="secSaveBtn" onclick="secSave('${esc(email)}')"><i class="fa-solid fa-check"></i> Save access</button></div>`}
@@ -20183,7 +20202,14 @@ const CPA_PH_AREAS=[['common','Common area','fa-couch'],
 const CPA_PH_LEVELS=[['project','Whole project','fa-city'],
                      ['tower','Block / Tower','fa-building'],
                      ['unit','Flat','fa-door-open']];
-let CPA_PH={level:'project',project:'',tower:'',unit:'',files:{all:[],common:[],bathroom:[],kitchen:[]}};
+let CPA_PH={mode:'upload',level:'project',project:'',tower:'',unit:'',files:{all:[],common:[],bathroom:[],kitchen:[]}};
+/* Review (photo approvers only): which section, project, block and status is being looked at, and
+   what is ticked. Nothing a site supervisor uploads reaches a customer until it is published here -
+   see supabase/migrations/20261005110000_construction_media_approval.sql. */
+const CPA_RV={sec:'unit_photos',project:'',tower:'',status:'pending',sel:new Set(),shown:[]};
+const CPA_RV_SECS=[['project_photos','Projects','fa-city'],['tower_photos','Blocks','fa-building'],['unit_photos','Flats','fa-door-open']];
+const CPA_MEDIA_STATUS={pending:['Waiting for approval','t-amber','fa-hourglass-half'],published:['Published','t-green','fa-circle-check'],
+  rejected:['Rejected','t-red','fa-circle-xmark'],unpublished:['Unpublished','t-gray','fa-eye-slash']};
 /* What the review panel is showing. It starts wherever the upload pickers are pointing, because
    that is almost always what you want to check straight after uploading - but '' means "all", so
    it can be widened to a whole block or a whole project without disturbing the upload target. */
@@ -20200,6 +20226,39 @@ function cpaPhCss(){return `<style>
   .cph-h{font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--slate);
     margin:0 0 14px;display:flex;align-items:center;gap:8px}
   .cph-h::after{content:"";flex:1;height:1px;background:var(--line)}
+  /* Upload | Review, and the approval screen */
+  .cph-modes{display:inline-flex;gap:4px;padding:4px;background:#eef2f7;border-radius:11px;align-self:flex-start}
+  .cph-md{border:0;background:transparent;padding:8px 16px;border-radius:8px;font:inherit;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+  .cph-md.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+  .cph-badge{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#e08600;color:#fff;font-size:11px;font-weight:700;margin-left:4px}
+  .cph-note{display:flex;gap:9px;align-items:flex-start;padding:10px 14px;border-radius:10px;background:#fffbeb;border:1px solid #f0dfa8;color:#92400e;font-size:13px}
+  .cph-note i{margin-top:2px}
+  .cph-why{font-size:11.5px;color:#b91c1c;margin-top:3px;line-height:1.35;max-width:240px}
+  .cph-rvbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;min-height:30px}
+  .cph-rvg{margin-bottom:18px}
+  .cph-rvgh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:9px;font-size:13.5px}
+  .cph-rvgh span{color:var(--slate);font-size:12.5px;margin-right:auto}
+  .cph-rvgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+  .cph-rvc{position:relative;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#fff;display:flex;flex-direction:column;transition:box-shadow .15s,border-color .15s}
+  .cph-rvc.sel{border-color:#1d4ed8;box-shadow:0 0 0 2px rgba(29,78,216,.25)}
+  .cph-rvck{position:absolute;top:7px;left:7px;z-index:2;background:rgba(255,255,255,.92);border-radius:6px;padding:3px 4px;line-height:0}
+  .cph-rvck input{width:17px;height:17px;margin:0;cursor:pointer}
+  .cph-rvm{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;cursor:zoom-in;background:#0f172a}
+  .cph-rvm.vid{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:#cbd5e1;font-size:26px;cursor:pointer}
+  .cph-rvm.vid span{font-size:11.5px}
+  .cph-rvi{padding:8px 10px 4px;font-size:12px}
+  .cph-rvd{font-weight:600;color:var(--ink)}
+  .cph-rvu{color:var(--slate);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cph-rva{display:flex;gap:6px;padding:4px 10px 10px;margin-top:auto}
+  .cph-rva button{flex:1;height:34px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;font-size:14px}
+  .cph-ok{color:#15803d}.cph-ok:hover{background:#f0fdf4;border-color:#86efac}
+  .cph-no{color:#b91c1c}.cph-no:hover{background:#fef2f2;border-color:#fca5a5}
+  .cph-un{color:#475569}.cph-un:hover{background:#f1f5f9}
+  .cph-mine{font-size:11.5px;color:var(--slate);padding:8px 0}
+  .cph-reasons{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
+  .cph-reason{border:1px solid var(--line);background:#f8fafc;border-radius:16px;padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer}
+  .cph-reason:hover{border-color:#1d4ed8;color:#1d4ed8}
+  @media(max-width:760px){.cph-rvgrid{grid-template-columns:repeat(2,1fr)}.cph-md{padding:8px 12px}}
 
   /* level buttons and the pickers share one row on a wide screen */
   .cph-bar{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
@@ -20361,8 +20420,25 @@ async function cpaRenderPhotos(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
   if(!CPA_PH.project&&projects.length) CPA_PH.project=String(projects[0].id);
   host.innerHTML=cpaPhCss()+'<div class="cph-wrap" id="cphWrap"></div>';
-  cpaPhPaint(projects,units);
+  if(CPA_PH.mode==='review'&&cpaIsPhotoApprover()) cpaRvPaint(projects,units);
+  else{ CPA_PH.mode='upload'; cpaPhPaint(projects,units); }
 }
+// Upload | Review, for photo approvers. The Review count is everything still waiting, anywhere.
+function cpaPhModeBar(){
+  if(!cpaIsPhotoApprover()) return '';
+  const b=(m,ic,label,extra)=>'<button class="cph-md'+(CPA_PH.mode===m?' on':'')+'" onclick="cpaPhSetMode(\''+m+'\')"><i class="fa-solid '+ic+'"></i>'+label+(extra||'')+'</button>';
+  return '<div class="cph-modes">'+b('upload','fa-cloud-arrow-up','Upload')
+    +b('review','fa-stamp','Review','<span class="cph-badge" id="cphPendBadge" style="display:none"></span>')+'</div>';
+}
+async function cpaPhFillBadge(){
+  const el=$('cphPendBadge'); if(!el) return;
+  try{
+    const res=await Promise.all(CPA_RV_SECS.map(s=>sb.schema('cust').from(s[0]).select('id',{count:'exact',head:true}).eq('status','pending').is('deleted_at',null)));
+    const n=res.reduce((t,r)=>t+(r.count||0),0);
+    el.textContent=n>999?'999+':String(n); el.style.display=n?'inline-flex':'none';
+  }catch(_e){}
+}
+window.cpaPhSetMode=function(m){ CPA_PH.mode=m; CPA_RV.sel.clear(); route(); };
 
 // Everything on screen is redrawn from CPA_PH, so there is one description of the state and no
 // way for the pickers, the form and the list to disagree about which flat is being looked at.
@@ -20378,8 +20454,9 @@ async function cpaPhPaint(projects,units){
   if(needUnit&&flats.length&&!flats.some(u=>String(u.id)===String(CPA_PH.unit))) CPA_PH.unit=String(flats[0].id);
 
   const today=new Date().toISOString().slice(0,10);
-  wrap.innerHTML=
-    '<div class="cph-card">'
+  wrap.innerHTML=cpaPhModeBar()
+    +(cpaIsPhotoApprover()&&!state.super?'':'<div class="cph-note"><i class="fa-solid fa-circle-info"></i>Everything uploaded here waits for approval by the post-sales team before customers can see it.</div>')
+    +'<div class="cph-card">'
       +'<div class="cph-bar">'
         +'<div class="cph-levels">'
           +CPA_PH_LEVELS.map(l=>'<button class="cph-lv'+(lvl===l[0]?' on':'')+'" onclick="cpaPhSetLevel(\''+l[0]+'\')">'
@@ -20427,6 +20504,7 @@ async function cpaPhPaint(projects,units){
   cpaPhStaged();
   cpaPhSyncActions();
   cpaPhList();
+  cpaPhFillBadge();
 }
 
 // The flats of the chosen project and block, cancelled rows dropped (a cancelled booking keeps
@@ -20632,7 +20710,7 @@ window.cpaPhUpload=async function(){
   if(lvl==='tower'&&!CPA_PH.tower){ toast('Choose a block first','err'); return; }
 
   const go=$('cphGo'); go.disabled=true;
-  let ok=0; const failed=[];
+  let ok=0; const failed=[], newIds={};
   for(let i=0;i<jobs.length;i++){
     const {f,area}=jobs[i];
     go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading '+(i+1)+' of '+jobs.length+'…';
@@ -20650,10 +20728,12 @@ window.cpaPhUpload=async function(){
       }
       const {data,error}=await uploadFileToS3(key,f);
       if(error) throw new Error(error.message);
-      const {error:insErr}=await sb.schema('cust').from(table).insert(Object.assign(row,{
+      // Stored as 'pending' whatever is sent - the database sets that (media_status_guard).
+      const {data:ins,error:insErr}=await sb.schema('cust').from(table).insert(Object.assign(row,{
         taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,
-        file_size:f.size,file_type:f.type,uploaded_by:state.email}));
+        file_size:f.size,file_type:f.type,uploaded_by:state.email})).select('id').single();
       if(insErr) throw new Error(insErr.message);
+      (newIds[table]=newIds[table]||[]).push(ins.id);
       ok++;
     }catch(e){ failed.push(f.name+' — '+((e&&e.message)||e)); }
   }
@@ -20661,7 +20741,12 @@ window.cpaPhUpload=async function(){
   /* Only what actually went up is cleared. A failed file stays in the list so it can be tried
      again, instead of being quietly dropped along with the ones that worked. */
   if(!failed.length) cpaPhClear(); else cpaPhRepaintZones();
-  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded','ok');
+  // One notification per batch to the approvers, not one per file.
+  let told=0;
+  for(const t of Object.keys(newIds)){
+    try{ const {data:n}=await sb.schema('cust').rpc('notify_media_uploaded',{p_table:t,p_ids:newIds[t]}); told=Math.max(told,Number(n||0)); }catch(_e){}
+  }
+  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded — waiting for approval'+(told?'':'. No photo approver is set up yet (Control Panel).'),told?'ok':'warn');
   if(failed.length) toast(failed.length+' could not be uploaded: '+failed[0],'err');
   cpaPhList();
 };
@@ -20755,7 +20840,9 @@ async function cpaPhRows(list,table,cols,vals,emptyMsg){
     const isVideo=(p.file_type||'').indexOf('video')===0;
     const open="s3OpenSigned('"+p.storage_path.replace(/'/g,"\\'")+"')";
     let thumb;
-    if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
+    // A rejected file has been removed from S3 - there is nothing to show or open.
+    if(p.status==='rejected'){ thumb='<div class="cph-th vid" title="File removed when it was rejected"><i class="fa-solid fa-ban"></i></div>'; }
+    else if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
     else{
       const url=await s3SignedUrl(p.storage_path);
       thumb=url?'<img class="cph-th" src="'+url+'" alt="" onclick="'+open+'" title="Open full size">'
@@ -20763,13 +20850,22 @@ async function cpaPhRows(list,table,cols,vals,emptyMsg){
     }
     return '<tr><td>'+thumb+'</td>'
       +'<td class="cph-when">'+esc(fmtDate(p.taken_on))+'</td>'
+      +'<td>'+cpaMediaStatusTag(p)+'</td>'
       +vals(p).map(v=>'<td>'+v+'</td>').join('')
       +'<td style="text-align:right"><button class="cph-rm" title="Remove from the customer portal" '
         +'onclick="cpaPhDelete(\''+table+'\','+p.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>';
   }));
-  return '<table class="cph-tbl"><thead><tr><th style="width:56px"></th><th>Date</th>'
+  return '<table class="cph-tbl"><thead><tr><th style="width:56px"></th><th>Date</th><th>Status</th>'
     +cols.map(c=>'<th>'+esc(c)+'</th>').join('')
     +'<th style="width:44px"></th></tr></thead><tbody>'+rows.join('')+'</tbody></table>';
+}
+// Waiting / Published / Rejected (with the reason) / Unpublished, and who decided it.
+function cpaMediaStatusTag(p){
+  const s=CPA_MEDIA_STATUS[p.status]||CPA_MEDIA_STATUS.pending;
+  const who=p.reviewed_by&&p.status!=='pending'&&!/^already live/.test(p.reviewed_by)?' by '+String(p.reviewed_by).split('@')[0]:'';
+  return '<span class="tag '+s[1]+'" style="white-space:nowrap" title="'+esc(s[0]+who+(p.reviewed_at?' · '+fmtDate(p.reviewed_at):''))+'">'
+    +'<i class="fa-solid '+s[2]+'"></i> '+esc(s[0])+'</span>'
+    +(p.status==='rejected'&&p.review_note?'<div class="cph-why">'+esc(p.review_note)+'</div>':'');
 }
 window.cpaPhDelete=async function(table,id){
   if(!await confirmDialog('Remove this from the customer portal? The customer will no longer see it.',
@@ -20778,6 +20874,186 @@ window.cpaPhDelete=async function(table,id){
   if(error){ toast('Could not remove it: '+error.message,'err'); return; }
   toast('Removed','ok'); cpaPhList();
 };
+
+/* ---------- Photos & Videos > Review: publish or reject before customers see anything ----------
+   Split the way things are uploaded - Projects (whole-project photos), Blocks, Flats - and within
+   that grouped by where they are, so a whole flat or block can be published in one go. Approve,
+   reject (a reason is required; the uploader is told it, and the file is removed from S3) and
+   unpublish all go through cust.review_media(), which also refuses an approver's own uploads. */
+async function cpaRvPaint(projects,units){
+  projects=projects||await cpaProjects(); units=units||await cpaUnits();
+  const wrap=$('cphWrap'); if(!wrap) return;
+  if(!CPA_RV.project&&projects.length) CPA_RV.project=CPA_PH.project||String(projects[0].id);
+  const live=(units||[]).filter(u=>u.status!=='cancelled');
+  const towers=cpaTowersForProject(live,CPA_RV.project);
+  if(CPA_RV.tower&&towers.indexOf(CPA_RV.tower)<0) CPA_RV.tower='';
+  const projUnits=live.filter(u=>String(u.project_id)===String(CPA_RV.project));
+  // Waiting counts per section for the chosen project - what the section buttons show.
+  const pid=Number(CPA_RV.project);
+  const unitIds=projUnits.map(u=>u.id);
+  const cq=(t)=>{let q=sb.schema('cust').from(t).select('id',{count:'exact',head:true}).eq('status','pending').is('deleted_at',null);
+    return t==='unit_photos'?(unitIds.length?q.in('unit_id',unitIds):Promise.resolve({count:0})):q.eq('project_id',pid);};
+  const counts=await Promise.all(CPA_RV_SECS.map(s=>cq(s[0]).then(r=>r.count||0,()=>0)));
+  const sel=(id,label,opts,val,allLabel)=>'<div class="cph-f"><label>'+esc(label)+'</label><div class="cph-sel"><select onchange="cpaRvSet(\''+id+'\',this.value)">'
+    +(allLabel?'<option value=""'+(val?'':' selected')+'>'+esc(allLabel)+'</option>':'')
+    +opts.map(o=>'<option value="'+esc(o[0])+'"'+(String(o[0])===String(val)?' selected':'')+'>'+esc(o[1])+'</option>').join('')+'</select></div></div>';
+  wrap.innerHTML=cpaPhModeBar()
+    +'<div class="cph-card">'
+      +'<div class="cph-levels" style="margin-bottom:12px">'
+        +CPA_RV_SECS.map((s,i)=>'<button class="cph-lv'+(CPA_RV.sec===s[0]?' on':'')+'" onclick="cpaRvSet(\'sec\',\''+s[0]+'\')"><i class="fa-solid '+s[2]+'"></i>'+esc(s[1])
+          +(counts[i]?'<span class="cph-badge">'+counts[i]+'</span>':'')+'</button>').join('')
+      +'</div>'
+      +'<div class="cph-filters" style="margin:0">'
+        +sel('project','Project',projects.map(p=>[p.id,p.name]),CPA_RV.project,'')
+        +(CPA_RV.sec!=='project_photos'?sel('tower','Block',towers.map(t=>[t,t]),CPA_RV.tower,'All blocks'):'')
+        +sel('status','Showing',Object.keys(CPA_MEDIA_STATUS).map(k=>[k,CPA_MEDIA_STATUS[k][0]]),CPA_RV.status,'')
+      +'</div>'
+    +'</div>'
+    +'<div class="cph-card"><div class="cph-rvbar" id="cphRvBar"></div><div id="cphRvList"><div class="cph-empty">Loading…</div></div></div>';
+  cpaPhFillBadge();
+  await cpaRvList(projUnits);
+}
+window.cpaRvSet=function(k,v){
+  CPA_RV[k]=v; CPA_RV.sel.clear();
+  if(k==='project') CPA_RV.tower='';
+  cpaRvPaint();
+};
+async function cpaRvList(projUnits){
+  const host=$('cphRvList'); if(!host) return;
+  try{
+    if(!projUnits){ const units=await cpaUnits(); projUnits=(units||[]).filter(u=>u.status!=='cancelled'&&String(u.project_id)===String(CPA_RV.project)); }
+    const t=CPA_RV.sec, pid=Number(CPA_RV.project);
+    let q=sb.schema('cust').from(t).select('*').eq('status',CPA_RV.status).is('deleted_at',null);
+    let byUnit={};
+    if(t==='unit_photos'){
+      const scope=projUnits.filter(u=>!CPA_RV.tower||u.tower===CPA_RV.tower);
+      scope.forEach(u=>{byUnit[u.id]=u;});
+      const ids=scope.map(u=>u.id);
+      if(!ids.length){ host.innerHTML='<div class="cph-empty">No flats here.</div>'; cpaRvBar(); return; }
+      q=q.in('unit_id',ids);
+    }else{
+      q=q.eq('project_id',pid);
+      if(t==='tower_photos'&&CPA_RV.tower) q=q.eq('tower',CPA_RV.tower);
+    }
+    const {data,error}=await q.order('created_at',{ascending:false}).limit(240);
+    if(error) throw error;
+    const list=data||[];
+    CPA_RV.shown=list;
+    if(!list.length){
+      host.innerHTML='<div class="cph-empty">'+(CPA_RV.status==='pending'?'Nothing waiting for approval here. ✓':'Nothing '+esc(CPA_MEDIA_STATUS[CPA_RV.status][0].toLowerCase())+' here.')+'</div>';
+      cpaRvBar(); return;
+    }
+    // Group by place: one group for the project, one per block, one per flat.
+    const natural=(a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true});
+    const groups={};
+    list.forEach(p=>{
+      let k,label;
+      if(t==='unit_photos'){ const u=byUnit[p.unit_id]||{}; k='u'+p.unit_id; label=(u.tower||'')+' · Flat '+(u.unit_code||'?'); }
+      else if(t==='tower_photos'){ k='t'+p.tower; label=p.tower||'Block'; }
+      else { k='p'; label='Whole project'; }
+      (groups[k]=groups[k]||{label,items:[]}).items.push(p);
+    });
+    const keys=Object.keys(groups).sort((a,b)=>natural(groups[a].label,groups[b].label));
+    const cards=await Promise.all(list.map(p=>cpaRvCard(p,t)));
+    const cardOf={}; list.forEach((p,i)=>{cardOf[p.id]=cards[i];});
+    const canPublish=CPA_RV.status==='pending'||CPA_RV.status==='unpublished';
+    const me=String(state.email||'').toLowerCase();
+    host.innerHTML=keys.map(k=>{
+      const g=groups[k];
+      // An approver's own uploads are left out: the database would refuse them anyway.
+      const ids=g.items.filter(p=>state.super||String(p.uploaded_by||'').toLowerCase()!==me).map(p=>p.id);
+      return '<div class="cph-rvg"><div class="cph-rvgh"><b>'+esc(g.label)+'</b><span>'+g.items.length+' item'+(g.items.length===1?'':'s')+'</span>'
+        +(canPublish&&ids.length?'<button class="btn btn-sm" onclick="cpaRvDecide(\'publish\','+JSON.stringify(ids)+')"><i class="fa-solid fa-check"></i> Publish all '+ids.length+'</button>':'')
+        +(ids.length&&CPA_RV.status!=='rejected'?'<button class="btn btn-sm" onclick="cpaRvTick('+JSON.stringify(ids)+')"><i class="fa-regular fa-square-check"></i> Tick all</button>':'')+'</div>'
+        +'<div class="cph-rvgrid">'+g.items.map(p=>cardOf[p.id]).join('')+'</div></div>';
+    }).join('')
+      +(list.length>=240?'<div class="cph-empty">Showing the newest 240. Publish or reject these to see the rest.</div>':'');
+    cpaRvBar();
+  }catch(e){ host.innerHTML='<div class="cph-empty" style="color:var(--err)">'+esc((e&&e.message)||String(e))+'</div>'; }
+}
+async function cpaRvCard(p,t){
+  const isVideo=(p.file_type||'').indexOf('video')===0;
+  const open="s3OpenSigned('"+String(p.storage_path||'').replace(/'/g,"\\'")+"')";
+  let media;
+  if(p.status==='rejected') media='<div class="cph-rvm vid"><i class="fa-solid fa-ban"></i><span>File removed</span></div>';
+  else if(isVideo) media='<div class="cph-rvm vid" onclick="'+open+'" title="Play video"><i class="fa-solid fa-circle-play"></i><span>Video</span></div>';
+  else{ const url=await s3SignedUrl(p.storage_path);
+    media=url?'<img class="cph-rvm" src="'+url+'" alt="" onclick="'+open+'" title="Open full size">':'<div class="cph-rvm vid" onclick="'+open+'"><i class="fa-solid fa-image"></i></div>'; }
+  const area=t==='unit_photos'?((CPA_PH_AREAS.find(a=>a[0]===(p.area||'common'))||[0,p.area])[1]):'';
+  const mine=String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super;
+  const on=CPA_RV.sel.has(p.id);
+  const id=JSON.stringify([p.id]);
+  let acts='';
+  if(mine) acts='<span class="cph-mine" title="Another approver has to review your own uploads">Your upload</span>';
+  else if(p.status==='pending'||p.status==='unpublished')
+    acts='<button class="cph-ok" onclick="cpaRvDecide(\'publish\','+id+')" title="Publish - customers will see it"><i class="fa-solid fa-check"></i></button>'
+        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject - tell the uploader why"><i class="fa-solid fa-xmark"></i></button>';
+  else if(p.status==='published')
+    acts='<button class="cph-un" onclick="cpaRvDecide(\'unpublish\','+id+')" title="Unpublish - hide it from customers again"><i class="fa-solid fa-eye-slash"></i></button>'
+        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject and remove the file"><i class="fa-solid fa-xmark"></i></button>';
+  return '<div class="cph-rvc'+(on?' sel':'')+'" data-id="'+p.id+'">'
+    +(p.status!=='rejected'&&!mine?'<label class="cph-rvck"><input type="checkbox" '+(on?'checked':'')+' onchange="cpaRvToggle('+p.id+',this.checked)"></label>':'')
+    +media
+    +'<div class="cph-rvi"><div class="cph-rvd">'+esc(fmtDate(p.taken_on))+(area?' · '+esc(area):'')+'</div>'
+      +'<div class="cph-rvu" title="'+esc(p.uploaded_by||'')+'">'+esc(String(p.uploaded_by||'').split('@')[0])+'</div>'
+      +(p.status==='rejected'&&p.review_note?'<div class="cph-why">'+esc(p.review_note)+'</div>':'')
+    +'</div>'
+    +'<div class="cph-rva">'+acts+'</div></div>';
+}
+function cpaRvBar(){
+  const bar=$('cphRvBar'); if(!bar) return;
+  const n=CPA_RV.sel.size, st=CPA_RV.status;
+  const ids=JSON.stringify([...CPA_RV.sel]);
+  bar.innerHTML='<span class="cph-fcount">'+(n?n+' ticked':'Tick photos to act on several at once')+'</span>'
+    +(n?((st==='pending'||st==='unpublished')?'<button class="btn btn-sm btn-primary" onclick="cpaRvDecide(\'publish\','+ids+')"><i class="fa-solid fa-check"></i> Publish '+n+'</button>':'')
+      +(st==='published'?'<button class="btn btn-sm" onclick="cpaRvDecide(\'unpublish\','+ids+')"><i class="fa-solid fa-eye-slash"></i> Unpublish '+n+'</button>':'')
+      +(st!=='rejected'?'<button class="btn btn-sm btn-danger" onclick="cpaRvDecide(\'reject\','+ids+')"><i class="fa-solid fa-xmark"></i> Reject '+n+'</button>':'')
+      +'<button class="btn btn-sm" onclick="cpaRvClearSel()">Clear</button>':'');
+}
+window.cpaRvToggle=function(id,on){
+  if(on) CPA_RV.sel.add(id); else CPA_RV.sel.delete(id);
+  const c=document.querySelector('.cph-rvc[data-id="'+id+'"]'); if(c) c.classList.toggle('sel',on);
+  cpaRvBar();
+};
+window.cpaRvTick=function(ids){
+  const mine=new Set((CPA_RV.shown||[]).filter(p=>String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super).map(p=>p.id));
+  ids.forEach(id=>{ if(!mine.has(id)){ CPA_RV.sel.add(id); const c=document.querySelector('.cph-rvc[data-id="'+id+'"]'); if(c){c.classList.add('sel'); const cb=c.querySelector('input'); if(cb) cb.checked=true;} } });
+  cpaRvBar();
+};
+window.cpaRvClearSel=function(){ CPA_RV.sel.clear(); document.querySelectorAll('.cph-rvc.sel').forEach(c=>{c.classList.remove('sel'); const cb=c.querySelector('input'); if(cb) cb.checked=false;}); cpaRvBar(); };
+const CPA_RV_REASONS=['Blurred or out of focus','Wrong flat or block','Too dark','Not a construction photo','Duplicate','Shows people or private information'];
+window.cpaRvDecide=function(decision,ids){
+  ids=(ids||[]).filter(Boolean);
+  if(!ids.length) return;
+  if(decision!=='reject'){ cpaRvDo(decision,ids,null); return; }
+  const n=ids.length;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-circle-xmark" style="color:var(--err)"></i> Reject '+n+' item'+(n===1?'':'s')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm"><p style="margin:0 0 8px;font-size:13px;color:var(--slate)">The uploader is told this reason in their notifications, and the file'+(n===1?' is':'s are')+' removed. Customers never see '+(n===1?'it':'them')+'.</p>'
+    +'<div class="cph-reasons">'+CPA_RV_REASONS.map(r=>'<button type="button" class="cph-reason" onclick="$(\'cphRvWhy\').value=this.textContent;$(\'cphRvWhy\').focus()">'+esc(r)+'</button>').join('')+'</div>'
+    +'<label>Reason</label><textarea id="cphRvWhy" rows="3" maxlength="300" placeholder="What should be fixed?"></textarea></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+    +'<button class="btn btn-danger-solid" id="cphRvGo" onclick="cpaRvRejectGo('+JSON.stringify(ids)+')"><i class="fa-solid fa-xmark"></i> Reject</button></div>');
+  setTimeout(()=>{const t=$('cphRvWhy'); if(t) t.focus();},60);
+};
+window.cpaRvRejectGo=async function(ids){
+  const why=($('cphRvWhy')||{}).value||'';
+  if(!why.trim()){ toast('Please give a reason','err'); return; }
+  const b=$('cphRvGo'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Rejecting…'; }
+  closeModal();
+  await cpaRvDo('reject',ids,why.trim());
+};
+async function cpaRvDo(decision,ids,note){
+  const {data,error}=await sb.schema('cust').rpc('review_media',{p_table:CPA_RV.sec,p_ids:ids,p_decision:decision,p_note:note});
+  if(error){ toast(error.message,'err'); return; }
+  const done=data||[];
+  // A rejected file is not kept: remove it from S3 (the row stays, so the uploader can see why).
+  if(decision==='reject') await Promise.all(done.map(r=>r.storage_path?s3Delete(r.storage_path).catch(()=>null):null));
+  const skipped=ids.length-done.length;
+  const verb={publish:'published',reject:'rejected',unpublish:'unpublished'}[decision];
+  toast(done.length+' '+verb+(skipped?' · '+skipped+' skipped (your own uploads, or already changed)':''),skipped&&!done.length?'warn':'ok');
+  CPA_RV.sel.clear();
+  cpaRvPaint();
+}
 
 /* ---------- Tab 5: Inspection (checklist scan + dated photo/video update trail, per unit) ---------- */
 async function cpaRenderInspection(host){
@@ -22874,8 +23150,9 @@ async function custTabProgress(unit){
      through the staff policy - showing exactly what the customer sees. */
   const flatOn=custFeatureOn(CUST_DATA&&CUST_DATA.featureRules,'flat_photos',unit.project_id,unit.tower);
   const [{data:tPhotos},{data:uPhotos}]=await Promise.all([
-    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
-    flatOn?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]})
+    // Published only: customers' RLS already says so; the filter keeps a staff preview the same.
+    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).eq('status','published').is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
+    flatOn?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).eq('status','published').is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]})
   ]);
   const block=tPhotos||[], flat=uPhotos||[];
   const roomOf=k=>(CUST_PG_AREAS.find(a=>a[0]===k)||CUST_PG_AREAS[0]);
