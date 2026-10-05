@@ -87,7 +87,11 @@ function css(){
   @media (max-width:640px){ .pss-top select{min-width:0;width:100%} .frm .two{grid-template-columns:1fr} }
 
   /* ---- shared look for every Post Sales tab (.ps-root is set on each tab's host) ---- */
-  .ps-root{--ps-brand:#6d28d9;--ps-brand-50:#f5f3ff}
+  /* A DEEP BLUE, NOT A BRIGHT PURPLE.
+     #6d28d9 as TEXT - which is what a booking number in the first column is - is a saturated
+     violet on white, and reading a column of it is tiring. This is the same weight of colour
+     without the glare, and it is the colour a ledger is usually printed in. */
+  .ps-root{--ps-brand:#1e40af;--ps-brand-50:#eff6ff;--ps-chev:#94a3b8}
   .ps-root a{color:var(--ps-brand);font-weight:600;text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
   .ps-root a:hover{text-decoration-thickness:2px}
   .ps-root .btn{border:1px solid #cbd5e1;box-shadow:0 1px 1.5px rgba(15,23,42,.06);font-weight:600;min-height:34px;display:inline-flex;align-items:center;gap:7px}
@@ -103,7 +107,20 @@ function css(){
   .ps-root table.tbl tr[onclick],.ps-root .psb-tbl tr[onclick]{cursor:pointer}
   .ps-root table.tbl tr[onclick]:hover td,.ps-root .psb-tbl tr[onclick]:hover td{background:var(--ps-brand-50)}
   .ps-root table.tbl tr[onclick] td:first-child b,.ps-root .psb-tbl tr[onclick] td:first-child b{color:var(--ps-brand)}
-  .ps-root table.tbl tr[onclick] td:last-child::after,.ps-root .psb-tbl tr[onclick] td:last-child::after{content:'\\203A';color:#a78bfa;font-weight:700;font-size:18px;margin-left:10px;line-height:1}
+  /* THE CHEVRON SITS BESIDE THE STATUS PILL, NEVER UNDER IT.
+     It was a ::after on a cell that is allowed to wrap, so on a narrow-ish column the pill took
+     the first line and the chevron dropped to a second, which read as a mistake. The cell no
+     longer wraps and the two are laid out side by side with the chevron pushed to the right. */
+  .ps-root table.tbl tr[onclick] td:last-child,.ps-root .psb-tbl tr[onclick] td:last-child{white-space:nowrap}
+  .ps-root table.tbl tr[onclick] td:last-child::after,.ps-root .psb-tbl tr[onclick] td:last-child::after{content:'\\203A';color:var(--ps-chev);font-weight:700;font-size:18px;margin-left:10px;line-height:1;vertical-align:middle}
+  /* Dates and flat numbers are short, fixed things. Letting them wrap turns "05/10/2026" into two
+     lines and makes every row in the table taller than it needs to be. */
+  .ps-root table.tbl td.ps-nw,.ps-root table.tbl th.ps-nw{white-space:nowrap}
+  .ps-root table.tbl th.ps-wdate,.ps-root table.tbl td.ps-wdate{white-space:nowrap;width:1%}
+  /* The booking number column was taking a share of the free space it had no use for, which is
+     where the gap between Booking and Date came from. width:1% with nowrap is the usual trick:
+     the browser gives the column exactly what its content needs and no more. */
+  .ps-root table.tbl th.ps-wid,.ps-root table.tbl td.ps-wid{width:1%;white-space:nowrap}
   .ps-root .kpis{gap:12px}
   .ps-nav{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px;padding:4px;border:1px solid var(--line);border-radius:10px;background:var(--bg-card,#fff);width:max-content;max-width:100%}
   .ps-nav span{padding:7px 14px;border-radius:7px;font-size:13px;font-weight:600;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
@@ -132,7 +149,7 @@ function css(){
   .ps-card .r1 .amt{font-weight:700;font-size:14px;white-space:nowrap;font-variant-numeric:tabular-nums}
   .ps-card .r2{font-size:13px;margin-top:4px;color:var(--ink)}
   .ps-card .r3{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:12px;color:var(--slate);margin-top:8px;padding-right:16px}
-  .ps-card::after{content:'\\203A';position:absolute;right:12px;bottom:10px;color:#a78bfa;font-size:20px;font-weight:700}
+  .ps-card::after{content:'\\203A';position:absolute;right:12px;bottom:10px;color:var(--ps-chev);font-size:20px;font-weight:700}
   .ps-more{display:flex;justify-content:center;gap:10px;align-items:center;margin:12px 0;font-size:12.5px;color:var(--slate)}
   @media (max-width:640px){ .ps-tablewrap{display:none} .ps-cards{display:block} }
   .ps-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
@@ -142,8 +159,22 @@ function css(){
   @media (max-width:720px){
     .ps-root .toolbar>select,.ps-root .toolbar>input,.ps-root .toolbar>.mu-sw,.ps-root .toolbar>label{flex:1 1 100%;max-width:none!important;width:100%}
     .ps-root .toolbar>.sec-title,.ps-root .toolbar>div[style*="flex:1"]{flex:1 1 100%}
-    .ps-root .toolbar>.btn{flex:1 1 auto;justify-content:center}
+    /* FOUR FULL-WIDTH BUTTONS WAS FOUR ROWS OF CHROME BEFORE ANY CONTENT.
+       Opening a booking on a phone meant scrolling past Back, Cost Sheet, Transfer flat, Cancel
+       booking and Edit - each on its own line, each shouting - before reaching anything about the
+       booking. Two to a row, and Back pinned small beside the title where a back control belongs,
+       gets the same five actions into two rows. */
+    .ps-root .toolbar>.btn{flex:1 1 calc(50% - 5px);justify-content:center;min-width:0}
+    .ps-root .toolbar>.btn:first-child{flex:0 0 auto;order:-1}
     .ps-root .toolbar>.btn-ghost.btn-sm{flex:0 0 auto}
+    /* The sub-line under the booking number carries project, block, flat and booked date. On a
+       narrow screen that is three wrapped lines of grey before the figures, so it is set smaller
+       and given room rather than left to sprawl. */
+    .ps-root .toolbar .pss-hint{font-size:12px;line-height:1.45}
+    .ps-root .psb-sum{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .ps-root .psb-sum div{padding:10px 11px}
+    .ps-root .psb-sum b{font-size:15px}
+    .ps-root .psb-sec{margin-bottom:16px}
     .ps-root .kpis{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px}
     .ps-root .kpi{padding:12px}
     .ps-root .kpi .val{font-size:18px;word-break:break-word}
@@ -916,18 +947,36 @@ function bcss(){
   if($('psbCss')) return;
   const st=document.createElement('style'); st.id='psbCss';
   st.textContent=`
-  .psb-sec{background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px}
-  .psb-sec h3{margin:0 0 4px;font-size:15px;display:flex;align-items:center;gap:8px}
-  .psb-sec h3 .n{display:inline-flex;width:22px;height:22px;border-radius:50%;background:#7e22ce;color:#fff;font-size:12px;align-items:center;justify-content:center}
+  /* ROOM TO BREATHE, BETWEEN SECTIONS AND INSIDE THEM.
+     The cards were 14px apart with the heading 4px off its own contents, so a page of six
+     sections read as one unbroken wall. The gap between cards is now clearly bigger than any gap
+     within a card, which is what tells the eye where one section ends. */
+  .psb-sec{background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin-bottom:22px}
+  .psb-sec h3{margin:0 0 14px;font-size:15px;display:flex;align-items:center;gap:8px}
+  .psb-sec h3 .n{display:inline-flex;width:22px;height:22px;border-radius:50%;background:var(--ps-brand,#1e40af);color:#fff;font-size:12px;align-items:center;justify-content:center}
+  /* A hint written directly under a heading belongs to it, so it keeps the heading's spacing
+     instead of inheriting the 14px meant to separate the heading from a table. */
+  .psb-sec h3+.pss-hint{margin-top:-8px;margin-bottom:12px}
+  .psb-sec>table,.psb-sec>div[style*="overflow-x"]{margin-top:2px}
+  .psb-sec .psb-appl+.psb-appl{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
   .psb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 14px}
   .psb-grid.wide{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
   .psb-span2{grid-column:span 2}
   .psb-facts{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;margin-top:10px;color:var(--slate)}
   .psb-facts b{color:var(--ink)}
+  /* 6px of side padding put a right-aligned Amount hard against the left edge of Invoice beside
+     it, with no visible gap at all - the two columns read as one. 12px, and a touch more height
+     per row, is what separates them. */
   .psb-tbl{width:100%;border-collapse:collapse;font-size:13px}
-  .psb-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--slate);text-align:left;padding:7px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
-  .psb-tbl td{padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .psb-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--slate);text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+  .psb-tbl td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .psb-tbl th:first-child,.psb-tbl td:first-child{padding-left:2px}
+  .psb-tbl th:last-child,.psb-tbl td:last-child{padding-right:2px}
   .psb-tbl .r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  /* The action column: wide enough for the button to be a button, and hard right so it lines up
+     under the figures rather than floating in the middle of whatever space is left. */
+  .psb-tbl th.act,.psb-tbl td.act{text-align:right;white-space:nowrap;width:1%}
+  .psb-tbl td.act .btn{min-width:84px;justify-content:center}
   .psb-tbl tr.t td{font-weight:700;border-top:2px solid var(--line);background:#fafafa}
   .psb-tbl tr.neg td{color:#b91c1c}
   .psb-tbl input,.psb-tbl select{width:100%;border:1px solid var(--line);border-radius:6px;padding:6px 7px;font-size:12.5px;font-family:inherit;background:var(--bg-card,#fff);color:var(--ink)}
@@ -938,9 +987,12 @@ function bcss(){
   .psb-appl-h b{flex:1}
   .psb-kyc{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
   .psb-bar{position:sticky;bottom:0;background:var(--bg,#f5f7fb);padding:12px 0;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid var(--line);z-index:5}
-  .psb-sum{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-top:10px}
-  .psb-sum div{border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12px;color:var(--slate)}
-  .psb-sum b{display:block;font-size:15px;color:var(--ink);margin-top:2px}
+  /* auto-FIT, not auto-fill. auto-fill keeps empty invisible columns at the end of the row, so
+     five cards in a six-column grid left a card-shaped hole on the right and the row stopped
+     short of the edge. auto-fit collapses the empties and the cards share the full width. */
+  .psb-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:4px}
+  .psb-sum div{border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:12px;color:var(--slate)}
+  .psb-sum b{display:block;font-size:16px;color:var(--ink);margin-top:4px;font-variant-numeric:tabular-nums}
   @media (max-width:640px){ .psb-span2{grid-column:auto} }
   `;
   document.head.appendChild(st);
@@ -975,8 +1027,11 @@ async function bookingList(host,stale){
     const st={active:'<span class="tag t-green">Active</span>',cancelled:'<span class="tag t-red">Cancelled</span>',transferred:'<span class="tag t-gray">Transferred</span>'};
     const aps=b=>(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq).map(a=>a.full_name);
     $('psbList').innerHTML=listHtml('bk','psbFilter',rows,
-      '<th>Booking</th><th>Date</th><th>Flat</th><th>Applicants</th><th>Plan</th><th class="pss-num">Consideration</th><th class="pss-num">Incl. GST</th><th>Status</th>',
-      b=>{const ap=aps(b);return '<tr onclick="navTo(\'postsales/bookings/'+b.id+'\')"><td><b>'+esc(b.booking_no)+'</b><div class="pss-hint" style="margin:0">'+esc(pname(b.project_id))+'</div></td><td>'+dmy(b.booking_date)+'</td><td>'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+'</td><td>'+esc(ap[0]||'')+(ap.length>1?' <span class="tag t-gray">+'+(ap.length-1)+'</span>':'')+'</td>'
+      // Booking, Date and Flat are all short and fixed, so they take only the width they need
+      // (ps-wid / ps-wdate / ps-nw) and the slack goes to Applicants and Plan, which are the
+      // columns that actually have something long to say.
+      '<th class="ps-wid">Booking</th><th class="ps-wdate">Date</th><th class="ps-nw">Flat</th><th>Applicants</th><th>Plan</th><th class="pss-num">Consideration</th><th class="pss-num">Incl. GST</th><th>Status</th>',
+      b=>{const ap=aps(b);return '<tr onclick="navTo(\'postsales/bookings/'+b.id+'\')"><td class="ps-wid"><b>'+esc(b.booking_no)+'</b><div class="pss-hint" style="margin:0">'+esc(pname(b.project_id))+'</div></td><td class="ps-wdate">'+dmy(b.booking_date)+'</td><td class="ps-nw">'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+'</td><td>'+esc(ap[0]||'')+(ap.length>1?' <span class="tag t-gray">+'+(ap.length-1)+'</span>':'')+'</td>'
           +'<td>'+esc(b.plan_name||'—')+(b.is_non_standard?' <span class="tag t-amber">Non-standard</span>':'')+'</td><td class="pss-num">'+inr(b.total_consideration)+'</td><td class="pss-num">'+inr(b.grand_total)+'</td><td>'+(st[b.status]||esc(b.status))+'</td></tr>';},
       b=>{const ap=aps(b);return '<div class="ps-card" onclick="navTo(\'postsales/bookings/'+b.id+'\')"><div class="r1"><b>'+esc(b.booking_no)+'</b><span class="amt">'+inr(b.grand_total)+'</span></div><div class="r2">'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+' · '+esc(ap[0]||'')+(ap.length>1?' +'+(ap.length-1):'')+'</div><div class="r3"><span>'+dmy(b.booking_date)+'</span><span>'+esc(pname(b.project_id))+'</span>'+(st[b.status]||'')+(b.is_non_standard?'<span class="tag t-amber">Non-standard</span>':'')+'</div></div>';},
       '<div class="empty"><i class="fa-solid fa-file-signature"></i><div>No bookings match</div></div>');
@@ -1319,23 +1374,37 @@ async function bookingView(host,id,stale){
   const sub=(lbl,n,g)=>'<tr class="t"><td colspan="2">'+lbl+'</td><td class="r">'+inr(n)+'</td><td></td><td class="r">'+inr(g)+'</td><td class="r">'+inr(num(n)+num(g))+'</td></tr>';
   const L=k=>ch.filter(l=>l.col===k);
   const sum=k=>ms.reduce((s,m)=>s+num(m[k]),0);
-  host.innerHTML='<div class="toolbar"><button class="btn btn-sm btn-ghost" onclick="navTo(\'postsales/bookings\')"><i class="fa-solid fa-arrow-left"></i> Bookings</button><div style="flex:1"><div class="sec-title" style="margin:0">'+esc(b.booking_no)+' '+st+(b.is_non_standard?' <span class="tag t-amber">Non-standard plan</span>':'')+'</div><div class="pss-hint" style="margin:0">'+esc(proj?proj.name:'')+' · '+esc(b.towers&&b.towers.name||'')+' - '+esc(b.flats&&b.flats.flat_code||'')+' · booked '+dmy(b.booking_date)+'</div></div>'
-    +'<button class="btn" onclick="psbPrint('+b.id+')"><i class="fa-solid fa-print"></i> Estimated Offer Price</button>'
+  // btn-ghost had no border and no shadow, so Back read as a line of text that happened to be
+  // clickable. It is a button now, like everything else on this bar.
+  host.innerHTML='<div class="toolbar"><button class="btn btn-sm" onclick="navTo(\'postsales/bookings\')"><i class="fa-solid fa-arrow-left"></i> Bookings</button><div style="flex:1"><div class="sec-title" style="margin:0">'+esc(b.booking_no)+' '+st+(b.is_non_standard?' <span class="tag t-amber">Non-standard plan</span>':'')+'</div><div class="pss-hint" style="margin:0">'+esc(proj?proj.name:'')+' · '+esc(b.towers&&b.towers.name||'')+' - '+esc(b.flats&&b.flats.flat_code||'')+' · booked '+dmy(b.booking_date)+'</div></div>'
+    // "Cost Sheet" is what everyone here calls it. The sheet still prints its own formal heading.
+    +'<button class="btn" onclick="psbPrint('+b.id+')"><i class="fa-solid fa-print"></i> Cost Sheet</button>'
     +(b.status==='active'?'<button class="btn" onclick="psxTransferStart('+b.id+')"><i class="fa-solid fa-right-left"></i> Transfer flat</button><button class="btn btn-danger" onclick="psxCancelModal('+b.id+')"><i class="fa-solid fa-ban"></i> Cancel booking</button><button class="btn btn-primary" onclick="navTo(\'postsales/bookings/'+b.id+'/edit\')"><i class="fa-solid fa-pen"></i> Edit</button>':'')+'</div>'
     +(b.status==='cancelled'?'<div class="pss-banner" style="border-color:#fecaca;background:#fef2f2"><i class="fa-solid fa-ban" style="color:#b91c1c"></i><div class="grow"><b>Cancelled on '+dmy(b.cancelled_on)+'</b> by '+esc((b.closed_by||'').split('@')[0])+' - '+esc(b.cancel_reason||'')+'. Charge '+inr(b.cancel_charge)+' + GST'+(num(b.cancel_charge)<num(b.cancel_charge_calc)?' (reduced from '+inr(b.cancel_charge_calc)+': '+esc(b.cancel_waiver_reason||'')+')':'')+'.</div></div>':'')
     +(b.status==='transferred'?'<div class="pss-banner"><i class="fa-solid fa-right-left" style="color:#7c3aed"></i><div class="grow"><b>Transferred on '+dmy(b.cancelled_on)+'</b> to <a href="javascript:void 0" onclick="navTo(\'postsales/bookings/'+b.transferred_to+'\')">the new booking</a>; everything paid here moved with it.</div></div>':'')
     +(b.transferred_from?'<div class="pss-banner"><i class="fa-solid fa-right-left" style="color:#7c3aed"></i><div class="grow">Transferred in from <a href="javascript:void 0" onclick="navTo(\'postsales/bookings/'+b.transferred_from+'\')">an earlier booking</a> - the original booking date is kept.</div></div>':'')
     +mKpis([['Total consideration',inr(b.total_consideration),'excl. GST'],['GST',inr(num(b.unit_gst)+num(b.parking_gst)+num(b.edc_gst)),''],['Grand total',inr(b.grand_total),'incl. GST'],['Rate',rate(b.rate)+'/sq ft',num(b.sba_sqft)+' sq ft super built-up']])
-    +'<div class="psb-sec" style="margin-top:14px" id="psbMoney"><h3>Payments</h3><div class="loader"><div class="spin"></div></div></div>'
+    // A clear break after the four figures at the top, so the sections below start somewhere
+    // rather than running straight on from them.
+    +'<div class="psb-sec" style="margin-top:22px" id="psbMoney"><h3>Payments</h3><div class="loader"><div class="spin"></div></div></div>'
     +'<div class="psb-sec"><h3>Applicants</h3>'+applHtml+'</div>'
     +'<div class="psb-sec"><h3>Cost sheet</h3><div style="overflow-x:auto"><table class="psb-tbl"><thead><tr><th>Particulars</th><th class="r">Rate</th><th class="r">Amount</th><th class="r">GST</th><th class="r">GST amount</th><th class="r">Gross</th></tr></thead><tbody>'
       +L('unit').map(row).join('')+sub('Total flat value',b.unit_net,b.unit_gst)+(L('parking').length?L('parking').map(row).join('')+sub('Total parking',b.parking_net,b.parking_gst):'')+(L('edc').length?L('edc').map(row).join('')+sub('Total extra development charges',b.edc_net,b.edc_gst):'')+'</tbody></table></div></div>'
     +'<div class="psb-sec"><h3>Payment schedule - '+esc(b.plan_name||'')+'</h3><div style="overflow-x:auto"><table class="psb-tbl"><thead><tr><th>#</th><th>Milestone</th><th>Raised</th><th class="r">Unit</th><th class="r">Parking</th><th class="r">EDC</th><th class="r">Gross</th></tr></thead><tbody>'
       +ms.map(m=>'<tr><td>'+m.seq+'</td><td>'+esc(m.name)+'<div class="pss-hint" style="margin:0">'+esc(msDescribe(m))+'</div></td><td style="font-size:12px">'+(m.trigger_type==='individual'?(m.due_days!=null?m.due_days+' days after booking':'By hand'):esc(TRIGGER_LBL[m.trigger_type])+': '+esc(stName(m.stage_id)))+'</td><td class="r">'+inr(num(m.unit_net)+num(m.unit_gst))+'</td><td class="r">'+inr(num(m.parking_net)+num(m.parking_gst))+'</td><td class="r">'+inr(num(m.edc_net)+num(m.edc_gst))+'</td><td class="r"><b>'+inr(m.gross_total)+'</b></td></tr>').join('')
       +'<tr class="t"><td></td><td>Total</td><td></td><td class="r">'+inr(sum('unit_net')+sum('unit_gst'))+'</td><td class="r">'+inr(sum('parking_net')+sum('parking_gst'))+'</td><td class="r">'+inr(sum('edc_net')+sum('edc_gst'))+'</td><td class="r">'+inr(sum('gross_total'))+'</td></tr></tbody></table></div></div>'
-    +'<div class="psb-sec"><h3>Booking details</h3><div class="psb-facts">'+fact('Purpose',esc(b.purpose==='investment'?'Investment':b.purpose==='residential'?'Residential':'—'))+fact('Loan',b.loan_required==null?'—':b.loan_required?'Yes'+(b.loan_bank?' ('+esc(b.loan_bank)+')':''):'No')+fact('Source',esc(b.source||'—'))+fact('Reason',esc(b.reason_chosen||'—'))+fact('Sales person',esc(b.sales_person||'—'))+fact('CRM Lead ID',esc(b.crm_lead_id||'—'))+fact('Created by',esc((b.created_by||'').split('@')[0]))+'</div>'
-      +(b.remarks?'<div class="pss-hint" style="margin-top:8px">'+esc(b.remarks)+'</div>':'')
-      +((b.attachments||[]).length?'<div class="psb-kyc">'+b.attachments.map(a=>'<span class="tag t-blue" style="cursor:pointer" onclick="s3OpenSigned(\''+esc(a.path)+'\')"><i class="fa-solid fa-paperclip"></i> '+esc(a.name)+'</span>').join('')+'</div>':'')+'</div>';
+    /* BOOKING DETAILS IS GONE, by request. Purpose, loan, source, reason, sales person, CRM lead
+       and created-by are all still recorded and all still on the Edit form - this page simply
+       stopped repeating them underneath the money, which is what people come here for.
+
+       The attachments did NOT go with it. Those are files somebody uploaded against this booking
+       and dropping the only place they can be opened from would have lost them in practice, so
+       they keep a short strip of their own. */
+    +((b.attachments||[]).length
+      ? '<div class="psb-sec"><h3>Attachments</h3><div class="psb-kyc">'
+        +b.attachments.map(a=>'<span class="tag t-blue" style="cursor:pointer" onclick="s3OpenSigned(\''+esc(a.path)+'\')"><i class="fa-solid fa-paperclip"></i> '+esc(a.name)+'</span>').join('')
+        +'</div>'+(b.remarks?'<div class="pss-hint" style="margin-top:8px">'+esc(b.remarks)+'</div>':'')+'</div>'
+      : (b.remarks?'<div class="psb-sec"><h3>Remarks</h3><div class="pss-hint" style="margin:0">'+esc(b.remarks)+'</div></div>':''));
   const [mo,irows,po]=await Promise.all([bookingMoney(b.id),interestRows(b.id),PS().from('payouts').select('*').eq('booking_id',b.id).order('payout_date')]);
   const box=$('psbMoney');
   if(stale()||!box) return;
@@ -1364,25 +1433,54 @@ window.psbPrint=async function(id){
   const tot=(lbl,a,g)=>'<tr class="t"><td colspan="2">'+lbl+'</td><td class="r">'+rs(a)+'</td><td></td><td class="r">'+rs(g)+'</td><td class="r">'+rs(num(a)+num(g))+'</td></tr>';
   const sum=k=>ms.reduce((s,m)=>s+num(m[k]),0);
   const html='<!doctype html><html><head><meta charset="utf-8"><title>Estimated Offer Price - '+esc(b.booking_no)+'</title><style>'
-    +'body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#111;margin:24px}h1{font-size:15px;letter-spacing:6px;text-align:center;background:#555;color:#fff;padding:7px;margin:0 0 0}'
-    +'table{width:100%;border-collapse:collapse;margin-bottom:0}td,th{border:1px solid #444;padding:6px 7px;vertical-align:top}th{background:#eee;text-align:left}'
-    +'.sec td{background:#777;color:#fff;font-weight:bold;text-align:center;letter-spacing:1px}.r{text-align:right;white-space:nowrap}.t td{font-weight:bold}.k{font-weight:bold;width:14%}'
-    +'.notes{background:#666;color:#fff;text-align:center;padding:8px;font-size:11px;line-height:1.6}.meta{font-size:11px;margin:10px 0 0;color:#444}@media print{body{margin:10mm}}</style></head><body>'
-    +'<h1>ESTIMATED OFFER PRICE</h1>'
-    +'<table><tr><td class="k">Project:</td><td>'+esc(proj?proj.name:'')+'</td><td class="k">Block:</td><td>'+esc(b.towers&&b.towers.name||'')+'</td><td class="k">Booking no.:</td><td>'+esc(b.booking_no)+'</td></tr>'
-    +'<tr><td class="k">SBA:</td><td>'+num(b.sba_sqft)+'</td><td class="k">Built-Up:</td><td>'+(b.flats&&b.flats.built_up_sqft!=null?num(b.flats.built_up_sqft):'')+'</td><td class="k">Carpet-Area:</td><td>'+(b.flats&&b.flats.carpet_sqft!=null?num(b.flats.carpet_sqft):'')+'</td></tr>'
-    +'<tr><td class="k">Floor:</td><td>'+esc(ordinal(b.floor_no))+'</td><td class="k">Flat:</td><td>'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+'</td><td class="k">BHK:</td><td>'+esc(b.flats&&b.flats.bhk||'')+'</td></tr>'
-    +'<tr><td class="k">Applicant:</td><td colspan="3">'+esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & '))+'</td><td class="k">Date:</td><td>'+dmy(b.booking_date)+'</td></tr></table>'
+    /* THE SHEET NOW LOOKS LIKE THE SCREEN IT WAS PRINTED FROM.
+
+       It was grey slabs - a #555 title bar, #777 bands across every section, a #666 block of
+       notes - with a hard #444 box around every single cell. On paper that is a wall of muddy
+       grey with the figures fighting their way out, and it is what a fax looked like in 1998.
+       The numbers were right and nothing else was.
+
+       The structure is unchanged, because the structure is what Accounts reads. What changed is
+       everything around it: no fills except a pale grey on the header row, horizontal rules only,
+       and the money set in a tabular-figure font so the columns line up digit under digit. */
+    +'@page{size:A4;margin:14mm}'
+    +'*{box-sizing:border-box}'
+    +"body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11.5px;color:#15171a;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}"
+    +'.doc-hd{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:2px solid #15171a;padding-bottom:9px;margin-bottom:4px}'
+    +'.doc-hd .co{font-size:16px;font-weight:700;letter-spacing:.2px}'
+    +'.doc-hd .ti{font-size:11px;font-weight:600;letter-spacing:2.4px;text-transform:uppercase;color:#5a6069;text-align:right}'
+    +'table{width:100%;border-collapse:collapse;margin:16px 0 0}'
+    +'td,th{padding:6px 9px;vertical-align:top;border-bottom:1px solid #e4e6ea}'
+    +'th{background:#f4f5f7;text-align:left;font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;color:#5a6069;font-weight:700;border-bottom:1px solid #c9ccd1}'
+    +'.meta-tbl td{border:0;padding:3px 0;font-size:11px}'
+    +'.meta-tbl .k{color:#5a6069;width:12%;white-space:nowrap;padding-right:6px}'
+    +'.meta-tbl .v{font-weight:600;width:21%}'
+    /* A section is a line of small capitals with a rule under it, not a grey bar. */
+    +'.sec td{background:none;color:#15171a;font-weight:700;font-size:9.5px;letter-spacing:1.4px;'
+      +'text-transform:uppercase;padding:14px 0 5px;border-bottom:1px solid #15171a}'
+    +".r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;font-feature-settings:'tnum' 1}"
+    +'.t td{font-weight:700;border-top:1px solid #c9ccd1;border-bottom:1px solid #c9ccd1;background:#fafbfc}'
+    +'.gt td{font-weight:700;font-size:12.5px;border-top:2px solid #15171a;border-bottom:2px solid #15171a;background:#f4f5f7}'
+    +'.notes{margin:18px 0 0;padding:10px 12px;border:1px solid #e4e6ea;border-left:3px solid #15171a;'
+      +'background:#fafbfc;font-size:10px;line-height:1.75;color:#3d434a}'
+    +'.meta{font-size:10px;margin:10px 0 0;color:#8a9099;display:flex;justify-content:space-between}'
+    +'tr{page-break-inside:avoid}thead{display:table-header-group}'
+    +'</style></head><body>'
+    +'<div class="doc-hd"><div class="co">The Jain Group</div><div class="ti">Estimated Offer Price</div></div>'
+    +'<table class="meta-tbl"><tr><td class="k">Project</td><td class="v">'+esc(proj?proj.name:'')+'</td><td class="k">Block</td><td class="v">'+esc(b.towers&&b.towers.name||'')+'</td><td class="k">Booking no.</td><td class="v">'+esc(b.booking_no)+'</td></tr>'
+    +'<tr><td class="k">SBA</td><td class="v">'+num(b.sba_sqft)+' sq ft</td><td class="k">Built-up</td><td class="v">'+(b.flats&&b.flats.built_up_sqft!=null?num(b.flats.built_up_sqft)+' sq ft':'—')+'</td><td class="k">Carpet</td><td class="v">'+(b.flats&&b.flats.carpet_sqft!=null?num(b.flats.carpet_sqft)+' sq ft':'—')+'</td></tr>'
+    +'<tr><td class="k">Floor</td><td class="v">'+esc(ordinal(b.floor_no))+'</td><td class="k">Flat</td><td class="v">'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+'</td><td class="k">BHK</td><td class="v">'+esc(b.flats&&b.flats.bhk||'')+'</td></tr>'
+    +'<tr><td class="k">Applicant</td><td class="v" colspan="3">'+esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & '))+'</td><td class="k">Date</td><td class="v">'+dmy(b.booking_date)+'</td></tr></table>'
     +'<table><tr class="sec"><td colspan="6">Unit Charges Details</td></tr><tr><th>Particulars</th><th class="r">Rate</th><th class="r">Total (Rs.)</th><th class="r">GST</th><th class="r">GST Amount</th><th class="r">Gross Amount</th></tr>'
     +L('unit').map(ln).join('')+tot('TOTAL FLAT VALUE',b.unit_net,b.unit_gst)
     +(L('parking').length?'<tr class="sec"><td colspan="6">Car Parking</td></tr>'+L('parking').map(ln).join('')+tot('TOTAL',b.parking_net,b.parking_gst):'')
     +(L('edc').length?'<tr class="sec"><td colspan="6">Extra Development Charges (EDC)</td></tr>'+L('edc').map(ln).join('')+tot('TOTAL',b.edc_net,b.edc_gst):'')
-    +'<tr class="t"><td colspan="2">GRAND TOTAL</td><td class="r">'+rs(b.total_consideration)+'</td><td></td><td class="r">'+rs(num(b.unit_gst)+num(b.parking_gst)+num(b.edc_gst))+'</td><td class="r">'+rs(b.grand_total)+'</td></tr></table>'
+    +'<tr class="gt"><td colspan="2">Grand total</td><td class="r">'+rs(b.total_consideration)+'</td><td></td><td class="r">'+rs(num(b.unit_gst)+num(b.parking_gst)+num(b.edc_gst))+'</td><td class="r">'+rs(b.grand_total)+'</td></tr></table>'
     +'<table><tr class="sec"><td colspan="5">Payment Schedule</td></tr><tr><th>Event Particulars</th><th class="r">Unit</th><th class="r">Parking</th><th class="r">EDC</th><th class="r">Gross Amount</th></tr>'
     +ms.map(m=>'<tr><td>'+esc(m.name)+(msDescribe(m)?' '+esc(msDescribe(m)):'')+'</td><td class="r">'+n(num(m.unit_net)+num(m.unit_gst))+'</td><td class="r">'+n(num(m.parking_net)+num(m.parking_gst))+'</td><td class="r">'+n(num(m.edc_net)+num(m.edc_gst))+'</td><td class="r">'+rs(m.gross_total)+'</td></tr>').join('')
-    +'<tr class="t"><td>TOTAL</td><td class="r">'+n(sum('unit_net')+sum('unit_gst'))+'</td><td class="r">'+n(sum('parking_net')+sum('parking_gst'))+'</td><td class="r">'+n(sum('edc_net')+sum('edc_gst'))+'</td><td class="r">'+rs(sum('gross_total'))+'</td></tr></table>'
-    +'<div class="notes">1) Above calculations are an indicative offer price only.<br>2) Taxes applicable as per govt norms.<br>3) Customers are advised to check all calculations and revert.<br>4) Please note that there may be changes in calculation due to decimal rounding off.</div>'
-    +'<div class="meta">Payment plan: '+esc(b.plan_name||'')+(b.is_non_standard?' (non-standard)':'')+'</div>'
+    +'<tr class="gt"><td>Total</td><td class="r">'+n(sum('unit_net')+sum('unit_gst'))+'</td><td class="r">'+n(sum('parking_net')+sum('parking_gst'))+'</td><td class="r">'+n(sum('edc_net')+sum('edc_gst'))+'</td><td class="r">'+rs(sum('gross_total'))+'</td></tr></table>'
+    +'<div class="notes"><b>Please note</b><br>1. The above is an indicative offer price only.<br>2. Taxes apply as per government norms prevailing at the time of payment.<br>3. Please check all calculations and revert with any discrepancy.<br>4. Figures may move slightly through rounding to the rupee.</div>'
+    +'<div class="meta"><span>Payment plan: '+esc(b.plan_name||'—')+(b.is_non_standard?' (non-standard)':'')+'</span><span>'+esc(b.booking_no)+' &middot; '+dmy(today())+'</span></div>'
     +'<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>';
   w.document.open(); w.document.write(html); w.document.close();
 };
@@ -1871,11 +1969,13 @@ window.psiPrint=async function(id){
 function milestoneStatus(b,ms,inv,al){
   const paid=id=>al.filter(a=>a.invoice_id===id).reduce((s,a)=>s+num(a.amount),0);
   const stName=sid=>{const s=S.stages.find(x=>x.id===sid);return s?s.name:'';};
-  return '<div style="overflow-x:auto;margin-top:12px"><table class="psb-tbl"><thead><tr><th>#</th><th>Milestone</th><th>When</th><th class="r">Amount</th><th>Invoice</th><th class="r">Balance</th><th></th></tr></thead><tbody>'
+  /* The invoice date had been tucked in beside the invoice number as grey text, so the cell read
+     "INV-0012 05/10/2026" - two different facts crushed into one column. It has a column now. */
+  return '<div style="overflow-x:auto;margin-top:12px"><table class="psb-tbl"><thead><tr><th>#</th><th>Milestone</th><th>When</th><th class="r">Amount</th><th>Invoice</th><th class="ps-wdate">Invoice date</th><th class="r">Balance</th><th class="act"></th></tr></thead><tbody>'
     +ms.map(m=>{const iv=inv.find(x=>x.booking_milestone_id===m.id&&x.status==='open');
       const when=m.trigger_type==='individual'?(m.due_days!=null?(()=>{const d=new Date(b.booking_date);d.setDate(d.getDate()+m.due_days);return 'Due '+dmy(d.toISOString().slice(0,10));})():'Raised by hand'):esc(stName(m.stage_id));
       const bal=iv?num(iv.total)-paid(iv.id):null;
-      return '<tr><td>'+m.seq+'</td><td>'+esc(m.name)+'</td><td style="font-size:12px">'+when+'</td><td class="r">'+inr(m.gross_total)+'</td><td>'+(iv?'<a href="javascript:void 0" onclick="navTo(\'postsales/invoices/'+iv.id+'\')">'+esc(iv.invoice_no)+'</a> <span class="pss-hint">'+dmy(iv.invoice_date)+'</span>':'<span class="tag t-gray">Not invoiced</span>')+'</td><td class="r">'+(iv?(bal<=0.5?'<span class="tag t-green">Paid</span>':inr(bal)):'')+'</td><td>'+(!iv&&b.status==='active'&&num(m.gross_total)>0?'<button class="btn btn-sm" onclick="psiRaiseOne('+m.id+',\''+esc(m.name).replace(/'/g,'')+'\')">Raise</button>':'')+'</td></tr>';}).join('')
+      return '<tr><td>'+m.seq+'</td><td>'+esc(m.name)+'</td><td style="font-size:12px">'+when+'</td><td class="r">'+inr(m.gross_total)+'</td><td>'+(iv?'<a href="javascript:void 0" onclick="navTo(\'postsales/invoices/'+iv.id+'\')">'+esc(iv.invoice_no)+'</a>':'<span class="tag t-gray">Not invoiced</span>')+'</td><td class="ps-wdate">'+(iv?dmy(iv.invoice_date):'')+'</td><td class="r">'+(iv?(bal<=0.5?'<span class="tag t-green">Paid</span>':inr(bal)):'')+'</td><td class="act">'+(!iv&&b.status==='active'&&num(m.gross_total)>0?'<button class="btn btn-sm btn-primary" onclick="psiRaiseOne('+m.id+',\''+esc(m.name).replace(/'/g,'')+'\')">Raise</button>':'')+'</td></tr>';}).join('')
     +'</tbody></table></div>';
 }
 /* ============================ POST SALES — INTEREST, CANCELLATION, TRANSFER (Stage 5) ============================
