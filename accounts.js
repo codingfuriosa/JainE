@@ -240,12 +240,19 @@ X.shell=async function(host,seg,tab,secs,dflt,renderers){
   catch(e){ if(!stale()) host.innerHTML=errHtml(e); return; }
   if(stale()) return;
   S.sec=secs.some(s=>s[0]===seg[0])?seg[0]:dflt;
-  if(!S.co.length&&tab===0) S.sec='structure';
-  if(!S.co.length&&tab===1){
-    host.innerHTML='<div class="empty"><i class="fa-solid fa-sitemap"></i><div>Set up an enterprise and a company first.</div><div style="margin-top:10px"><button class="btn btn-primary" onclick="navTo(\'accounts/0/structure\')">Go to Structure</button></div></div>'; return;
+  let locked='';
+  if(!S.co.length){
+    if(tab===0&&!secs.some(s=>s[0]===seg[0])) S.sec='structure';      // no section chosen yet: land where the next step is
+    // Nothing can be booked or posted until a company exists. Say so on the screen that was clicked,
+    // instead of quietly showing Structure (which made every pill look dead).
+    const what=S.ent.length?'Add a company to '+esc(S.ent[0].name)+' first.':'Set up an enterprise and a company first.';
+    const how=S.ent.length?'Open Structure and use the "+ Company" button on the enterprise.':'Open Structure, add an enterprise, then a company under it.';
+    locked='<div class="empty"><i class="fa-solid fa-lock"></i><div style="font-weight:600">'+what+'</div><div class="acx-hint" style="margin-top:4px">Books are kept per company, so this section stays locked until one exists. '+how+'</div><div style="margin-top:10px"><button class="btn btn-primary" onclick="navTo(\x27accounts/0/structure\x27)">Go to Structure</button></div></div>';
+    if(tab===1){ host.innerHTML=locked; return; }
+    if(S.sec==='structure') locked='';      // Structure is where the company gets added - it always works
   }
   host.innerHTML=(S.co.length?scopeBar():'')+'<div class="acx-subs">'+secs.map(s=>'<span class="chip'+(s[0]===S.sec?' active':'')+'" onclick="navTo(\'accounts/'+tab+'/'+s[0]+'\')">'+esc(s[1])+'</span>').join('')+'</div><div id="acxSec"></div>';
-  const sec=$('acxSec'); loader(sec);
+  const sec=$('acxSec'); if(locked){ sec.innerHTML=locked; return; } loader(sec);
   try{ await renderers[S.sec](sec,mine,stale); }
   catch(e){ console.error(e); if(!stale()) sec.innerHTML=errHtml(e); }
 };
@@ -264,6 +271,7 @@ function renderStructure(host){
     +(adm?'<button class="btn btn-primary" onclick="acxEntForm()"><i class="fa-solid fa-plus"></i> Enterprise</button>':'')+'</div>';
   if(!adm) h+='<div class="acx-hint" style="margin-bottom:10px">Only an Accounts administrator can change the structure.</div>';
   if(!S.ent.length) h+='<div class="card"><div class="empty" style="padding:28px"><i class="fa-solid fa-sitemap"></i><div>No enterprise has been set up yet.</div></div></div>';
+  else if(!S.co.length) h+='<div class="acx-warn"><b>Next step - add a company.</b> Use the "+ Company" button on the enterprise below. Receipts, payments, bills, journals and the Ledgers tab all stay locked until a company exists.</div>';
   S.ent.forEach(e=>{
     const cos=S.co.filter(c=>c.enterprise_id===e.id);
     h+='<div class="card acx-ent"><div class="acx-ent-h"><i class="fa-solid fa-sitemap" style="color:#0e7490"></i><b>'+esc(e.name)+'</b><span class="acx-hint">Enterprise</span><span class="grow"></span>'

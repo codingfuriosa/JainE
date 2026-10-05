@@ -59,7 +59,7 @@ function preview(src,r){
 }
 const MODE=m=>({cash:'Cash',cheque:'Bank (cheque)',dd:'Bank (DD)',net_banking:'Bank',transfer:'Bank',rtgs_neft_imps:'Bank',jv:'Adjustment'}[m]||'Bank');
 function pbDraw(host){
-  const cfg=PB.cfg, d=PB.data, src=PB.source;
+  const cfg=PB.cfg, d=PB.data||{}, src=PB.source;
   const need=(NEEDS[src]||[]); const miss=PB.missing.filter(m=>need.includes(m.key));
   const rows=(d.rows||[]).map(r=>{
     const ok=!r.blocker, x=r.extra||{};
