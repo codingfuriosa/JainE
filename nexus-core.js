@@ -23388,7 +23388,8 @@ async function custTabProgress(unit){
     +'<i class="fa-solid fa-circle-info" style="color:#d97706;font-size:17px;margin-top:2px"></i>'
     +'<div><b style="color:#92400e">About these photos</b><br>'
     +'These photos and videos are taken on site by our construction team while work is going on. Because of dust, '
-    +'lighting and site conditions, some may look unclear or slightly blurred. They show work in progress, not the '
+    +'lighting and site conditions, some may look unclear or slightly blurred, and you may see construction materials, '
+    +'tools or debris lying around. They show work in progress, not the '
     +'finished home — colours, finishes and fittings may look different at handover. If you have any question about '
     +'your flat, please contact your relationship manager.</div></div>';
 
