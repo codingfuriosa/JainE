@@ -45,17 +45,24 @@ function pageIdFromPath(pathname){
 // the legacy-view race it guards against in VIEWS.tasks below). An in-place SPA navigation to one of
 // these needs the same script loaded on demand, once, before rendering — never re-fetched on a
 // second visit in the same tab.
-const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:'purchase.js'};
+// A page may list several scripts; they load one after another, in order (purchase-indent.js uses what
+// purchase.js defines).
+const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js']};
+const PAGE_SCRIPT_VERSION={'purchase.js':'20261004v','purchase-indent.js':'20261004j','purchase-rfq.js':'20261004e','purchase-po.js':'20261004c','purchase-stores.js':'20261004b','purchase-reports.js':'20261004a'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
-  const src=PAGE_EXTRA_SCRIPT[id];
-  if(!src||_loadedPageScripts.has(src))return Promise.resolve();
+  const entry=PAGE_EXTRA_SCRIPT[id];
+  if(!entry)return Promise.resolve();
+  return [].concat(entry).reduce((p,src)=>p.then(()=>loadPageScript(src)),Promise.resolve());
+}
+function loadPageScript(src){
+  if(_loadedPageScripts.has(src))return Promise.resolve();
   return new Promise((resolve)=>{
     const s=document.createElement('script');
     /* Bump this whenever accountability.js or insp-items.js changes, the same way the pages bump
        nexus-core.js. It had sat at 20260913c while thirty-five commits landed in
        accountability.js — every one of them invisible to a browser holding that URL. */
-    s.src=src+(src==='purchase.js'?'?v=20261004b':'?v=20261003a');
+    s.src=src+'?v='+(PAGE_SCRIPT_VERSION[src]||'20261003a');
     s.onload=()=>{_loadedPageScripts.add(src);resolve();};
     // A failed load shouldn't hang navigation forever — render with whatever's already there
     // (the legacy VIEWS.tasks placeholder already has its own "could not finish loading" message
@@ -690,14 +697,33 @@ function canFeedbackHub(){
   const me=String(state.email||'').trim().toLowerCase();
   return FEEDBACK_HUB_PEOPLE.indexOf(me)!==-1;
 }
-function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
+/* INVENTORY (PURCHASE & STORES) IS FOR THREE PEOPLE, BY NAME, WHILE IT IS BEING BUILT AND REVIEWED.
+
+   Same arrangement as the Feedback Hub above: not granted through modules, and not open to every
+   superadmin either, so the test runs BEFORE the state.super shortcut in pageAllowed. The three are
+   the module's own administrators (Administrator, Prerna, Vivky) - the same people listed in
+   purchase.module_admins.
+
+   This decides only whether the menu entry is drawn and the page opens. It is not a database rule:
+   the purchase tables stay readable by signed-in staff through the API, and what anybody may change is
+   enforced by the database separately (roles, approvers and module administrators in the purchase schema).
+
+   To open it up later, delete this block, the two checks for 'inventory' below, and let it be granted
+   through modules like any other page. To add someone for now, add an address here. */
+const INVENTORY_PEOPLE=['ayushruia1@gmail.com','businessanalyst@thejaingroup.com','system3.thejaingroup@gmail.com'];
+function canInventory(){
+  if(state.isCustomer||state.impersonating) return false;
+  const me=String(state.email||'').trim().toLowerCase();
+  return INVENTORY_PEOPLE.indexOf(me)!==-1;
+}
+function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(hasUsability()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -5098,7 +5124,7 @@ window.msOpen=function(key){
 };
 window.msFieldClick=function(key,e){if(e)e.stopPropagation();msOpen(key);const inp=document.getElementById('ms_'+key+'_in');if(inp)inp.focus();};
 window.msToggle=function(key,e){if(e)e.stopPropagation();const p=document.getElementById('ms_'+key+'_panel');if(p&&p.classList.contains('show')){p.classList.remove('show');}else{msOpen(key);}};
-window.msPick=function(key,email){const m=MS[key];if(m.locked&&m.locked.has(email))return;const s=m.sel;s.has(email)?s.delete(email):s.add(email);msRenderChips(key);const inp=document.getElementById('ms_'+key+'_in');if(inp){inp.value='';inp.focus();}msRenderList(key);msPositionPanel(key);};
+window.msPick=function(key,email){const m=MS[key];if(m.locked&&m.locked.has(email))return;const s=m.sel;s.has(email)?s.delete(email):s.add(email);msRenderChips(key);const inp=document.getElementById('ms_'+key+'_in');if(inp){inp.value='';inp.focus();}msRenderList(key);msPositionPanel(key);if(typeof m.onChange==='function')m.onChange(email,s.has(email));};
 function getMS(key){return MS[key]?[...MS[key].sel]:[];}
 document.addEventListener('click',function(e){if(!e.target.closest('.ms'))document.querySelectorAll('.ms-panel.show').forEach(x=>x.classList.remove('show'));});
 window.addEventListener('scroll',function(){document.querySelectorAll('.ms-panel.show').forEach(p=>{const key=p.id.replace(/^ms_/,'').replace(/_panel$/,'');msPositionPanel(key);});},true);
@@ -11691,8 +11717,9 @@ async function psaProcessPdf(file){
 
 VIEWS.inventory=async function(v,seg){
   setCrumb(['Operations','Inventory']);
-  const tabs=['Indents & RFQ','Quote comparison','Purchase orders','GRN & QC','Stock ledger','Accounts payable','Setup'];const ti=mTab(seg,tabs.length);
-  if(ti===6){
+  const isAdmin=typeof window.pusIsAdmin==='function'&&await window.pusIsAdmin();
+  const tabs=['Setup','Vendors','Indents','RFQ & Quotes','Purchase orders','Stores','Stock & reports'].concat(isAdmin?['Admin']:[]);const ti=mTab(seg,tabs.length);
+  if(ti===0){
     // Purchase & Stores setup (items, groups, UOM, warehouses, legal entities) lives in purchase.js -
     // see PAGE_EXTRA_SCRIPT and docs/purchase-stores-spec.md.
     v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
@@ -11701,16 +11728,61 @@ VIEWS.inventory=async function(v,seg){
     await window.pusRender(host,seg.slice(1));
     return;
   }
-  let body;
-  if(ti===0){
-    body=mStep(['Indent','RFQ','Quote compare','PO + approval','Gate entry','GRN + QC','Stock'],'Quote compare')+
-      mTable(['Indent','Material','Qty','Project','Source','RFQ status'],[['IND-0512','OPC 53 cement','400 bags','Dream Valley','Auto (reorder)','<span class="tag t-blue">RFQ sent</span>'],['IND-0513','TMT steel Fe550','12 MT','Dream Valley','BOQ-002','<span class="tag t-amber">Quotes in</span>'],['IND-0514','Vitrified tiles','2,200 sqft','Trade Centre','Manual','<span class="tag t-gray">Draft</span>'],['IND-0515','Waterproof compound','60 drums','Green Acres','Maintenance','<span class="tag t-blue">RFQ sent</span>']]);
-  } else if(ti===1){ body=mTable(['RFQ','Item','Vendors','Best quote','Status'],[['RFQ-58','Tiles','4','₹3.1L','Open']]); }
-  else if(ti===2){ body=mTable(['PO No','Vendor','Amount','Status','Date'],[['PO-0042','ACC Cement','₹4.2L','Pending','27 Jun']]); }
-  else if(ti===3){ body=mTable(['GRN','PO','Supplier','QC','Status'],[['GRN-091','PO-0042','ACC Cement','Pass','Received']]); }
-  else if(ti===4){ body=mTable(['Item','Category','In stock','UoM','Value'],[['OPC 53 cement','Cement','420','Bags','₹1.6L']]); }
-  else { body=mTable(['Supplier','Invoice','Amount','Due','Status'],[['Tata Steel','INV-2291','₹9.1L','10 Jul','Submitted']]); }
-  v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div style="margin-top:16px">'+body+'</div>';
+  if(ti===1){
+    // Vendor enlistment (Stage 2) - also in purchase.js.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusVendorRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Vendors could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusVendorRender(host);
+    return;
+  }
+  if(ti===2){
+    // Indents and their approval (Stage 3) - purchase-indent.js.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusIndentRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Indents could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusIndentRender(host,seg.slice(1));
+    return;
+  }
+  if(ti===7){
+    // Purchase administrators only (approvers, warehouses, legal entities, who the administrators are) -
+    // the tab is only listed for them, and the database refuses these writes to anyone else.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    await window.pusRender($('pusBody'),seg.slice(1),'admin');
+    return;
+  }
+  if(ti===3){
+    // RFQs and quotations (Stage 4) - purchase-rfq.js.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusRfqRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>RFQs could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusRfqRender(host,seg.slice(1));
+    return;
+  }
+  if(ti===4){
+    // Purchase orders (Stage 5) - purchase-po.js.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusPoRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Purchase orders could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusPoRender(host,seg.slice(1));
+    return;
+  }
+  if(ti===5){
+    // Stores (Stage 6): GRN, returns, issues, adjustments, transfers - purchase-stores.js.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusStoresRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Stores could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusStoresRender(host,seg.slice(1));
+    return;
+  }
+  if(ti===6){
+    // Stock ledger and current stock (Stage 6) - purchase-stores.js.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusLedgerRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>The stock ledger could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusLedgerRender(host,seg.slice(1));
+    return;
+  }
 };
 
 /* ===== PROCUREMENT MODULE ===== */
@@ -29207,13 +29279,14 @@ const USAGE_VIEWS={
   // Assistant is Help Desk's default landing tab, reached with NO segment in the hash at all
   // is the string '0', not the tab's name, so '0' has to be listed too for that landing to ever
   // match; clicking the Assistant tab explicitly (from Tickets) sets the hash to 'assistant' instead.
-  'inventory/0':         'inventory.indents_rfq.view_indent_rfq_pipeline',
-  'inventory/1':         'inventory.quote_comparison.view_quote_comparison',
-  'inventory/2':         'inventory.purchase_orders.view_purchase_orders',
-  'inventory/3':         'inventory.grn_qc.view_grn_qc_status',
-  'inventory/4':         'inventory.stock_ledger.view_stock_ledger',
-  'inventory/5':         'inventory.accounts_payable.view_accounts_payable',
-  'inventory/6':         'inventory.setup.view_setup',
+  'inventory/2':         'inventory.indents_rfq.view_indent_rfq_pipeline',
+  'inventory/3':         'inventory.quote_comparison.view_quote_comparison',
+  'inventory/4':         'inventory.purchase_orders.view_purchase_orders',
+  'inventory/5':         'inventory.grn_qc.view_grn_qc_status',
+  'inventory/6':         'inventory.stock_ledger.view_stock_ledger',
+  'inventory/7':         'inventory.admin.view_admin',
+  'inventory/0':         'inventory.setup.view_setup',
+  'inventory/1':         'inventory.vendors.view_vendors',
   'maintenance/0':       'maintenance.asset_register.view_asset_register',
   'maintenance/1':       'maintenance.preventive_maintenance.view_pm_schedule',
   'maintenance/2':       'maintenance.breakdowns_repairs.view_breakdown_repair_tickets',
