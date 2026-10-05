@@ -297,7 +297,29 @@
       /* Label and value are NOT the same here: the value goes straight to the database as
          v_boq.location_level, which stores 'Project'. Renaming the option text to match the rest
          of the module has to leave the value alone or the filter silently matches nothing. */
-      '<select class="sel" onchange="ENG.f.pkFilter(\'level\',this.value)">'+opts([['Project','Business unit'],['Block','Block'],['Floor','Floor'],['Flat','Flat'],['Portion','Portion']],x=>x[0],x=>x[1],'','All levels')+'</select></div>'+
+      '<select class="sel" onchange="ENG.f.pkFilter(\'level\',this.value)">'+opts([['Project','Business unit'],['Block','Block'],['Floor','Floor'],['Flat','Flat'],['Portion','Portion']],x=>x[0],x=>x[1],'','All levels')+'</select>'+
+      '<button class="btn btn-sm" onclick="ENG.f.pkNewToggle()"><i class="fa-solid fa-plus"></i> New activity</button></div>'+
+      /* A work order can only tag BOQ lines, so an activity that was never in the BOQ cannot be
+         ordered — and on a live site that is exactly when one turns up. This panel writes BOTH:
+         the activity into the master (the same five fields the BOQ and Masters forms use) and one
+         BOQ line for it, which then appears in the list below ready to tag.
+         Location is kept to business-unit level or a whole block on purpose. Floor, flat and
+         portion lines are a BOQ job — a work order is not the place to lay out a building — and
+         the note says so rather than leaving someone hunting for the finer levels. */
+      '<div id="pkNew" style="display:none;border:1px solid var(--line);border-radius:9px;padding:12px;margin:0 0 10px;background:#fbfdff">'+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:8px">New activity — added to the master, with one BOQ line</div>'+
+        '<label>Activity name</label><input id="pkNName" placeholder="e.g. Internal plaster">'+
+        '<div class="two"><div><label>Parent activity group</label><select id="pkNGroup">'+opts(C.groups.filter(g=>g.active),g=>g.id,g=>g.name,'','Select a group…')+'</select></div>'+
+        '<div><label>Unit</label><select id="pkNUom">'+opts((C.uoms.length?C.uoms.map(u=>u.code):['Cum','Sqm','Rmt','Kg','Nos','Mtr','Sqft','MT','Ltr','Set']),u=>u,u=>u,'','Select…')+'</select></div></div>'+
+        '<label>Description <span style="color:var(--slate);font-weight:400">one line</span></label><input id="pkNDesc">'+
+        '<label>Long description <span style="color:var(--slate);font-weight:400">optional</span></label><textarea id="pkNLong" rows="3"></textarea>'+
+        '<div class="two"><div><label>Location</label><select id="pkNLoc"><option value="">Business unit — external / common work</option>'+opts(PK.towers,x=>x.id,x=>x.name,'')+'</select></div>'+
+        '<div><label>Quantity</label><input id="pkNQty" type="number" min="0" step="0.001"></div></div>'+
+        '<label>Estimated rate (₹) <span style="color:var(--slate);font-weight:400">optional — the contractor’s rate is set when you tag it</span></label><input id="pkNRate" type="number" min="0" step="0.01">'+
+        '<div class="eng-note" style="margin-top:10px">For a line against a floor, flat or portion, add it on the BOQ tab instead.</div>'+
+        '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" onclick="ENG.f.pkNewCreate(this)"><i class="fa-solid fa-check"></i> Create and show it below</button> '+
+        '<button class="btn btn-sm" onclick="ENG.f.pkNewToggle()">Cancel</button></div>'+
+      '</div>'+
       '<div id="pkSum" class="eng-sum" style="margin-bottom:8px"></div><div class="eng-tbl" style="border:1px solid var(--line);border-radius:9px;max-height:46vh;overflow:auto" id="pkList"></div>';
     $('modalHost').querySelector('.modal').insertAdjacentHTML('beforeend','<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="pkGo" onclick="ENG.f.pkSave(this)"><i class="fa-solid fa-link"></i> '+esc(cfg.okLabel||'Select')+'</button></div>');
     ENG.f.pkLoad();
@@ -358,6 +380,44 @@
       rows.forEach(r=>{if(!PK.sel.has(r.id))PK.sel.set(r.id,{qty:num(r.remaining_qty),rate:num(r.rate),max:num(r.remaining_qty)});});
       ENG.f.pkRender();
     }catch(e){fail(e);}
+  };
+  ENG.f.pkNewToggle=function(){
+    const p=$('pkNew');if(!p)return;
+    p.style.display=p.style.display==='none'?'':'none';
+    if(p.style.display===''){const n=$('pkNName');if(n)try{n.focus();}catch(e){}}
+  };
+  /* Writes the master row and its BOQ line, then reloads the list so the new line is there to be
+     tagged like any other. Deliberately NOT auto-selected: the quantity and the contractor's rate
+     are a separate decision from "this activity exists", and silently ticking it would put a line
+     on the work order that nobody set a rate for. */
+  ENG.f.pkNewCreate=function(btn){
+    return run(btn,async()=>{
+      const name=val('pkNName').trim(), gid=Number(val('pkNGroup'))||0, uom=val('pkNUom');
+      const qty=Number(val('pkNQty')), rate=Number(val('pkNRate'));
+      if(!name)return toast('Enter the new activity’s name','warn');
+      if(!gid) return toast('Choose the parent activity group','warn');
+      if(!uom) return toast('Choose the unit','warn');
+      if(!(qty>0))return toast('Enter the quantity for its BOQ line','warn');
+      const {data:a,error:ae}=await E().from('activities').insert({
+        group_id:gid,name:name,uom:uom,active:true,est_rate:(rate&&!isNaN(rate))?rate:null,
+        description:val('pkNDesc').trim()||null,long_description:val('pkNLong').trim()||null
+      }).select('id').maybeSingle();
+      if(ae)throw ae;
+      if(!a||!a.id)return toast('The activity could not be created','err');
+      const tower=Number(val('pkNLoc'))||null;
+      const {error:be}=await E().from('boq_items').insert({
+        project_id:PK.project_id,activity_id:a.id,tower_id:tower,
+        qty:qty,rate:(rate&&!isNaN(rate))?rate:0
+      });
+      if(be)throw be;
+      await ENG.reloadMasters();
+      ENG.f.pkNewToggle();
+      ['pkNName','pkNDesc','pkNLong','pkNQty','pkNRate'].forEach(k=>{const x=$(k);if(x)x.value='';});
+      /* Cleared so the new line is not hidden behind whatever was being searched for. */
+      PK.f={tower:'',group:'',level:'',q:''};PK.page=0;
+      toast('“'+name+'” added to the master, with a BOQ line','ok');
+      await ENG.f.pkLoad();
+    });
   };
   ENG.f.pkClear=function(){PK.sel=new Map();ENG.f.pkRender();};
   ENG.f.pkSave=function(btn){
@@ -443,11 +503,18 @@
     v.innerHTML=head('wd','Work recorded on site against work order items — verified by someone other than the person who entered it')+projBar(true)+
       '<div class="eng-filter"><div class="eng-chips" id="wdChips"></div><div class="toolbar grow" style="margin:0;flex:1;min-width:200px"><div class="grow"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Search work order, activity or location…" oninput="ENG.f.wdSearch(this.value)"></div></div></div>'+
       '<div class="card eng-tbl"><div id="wdHead" class="card-pad" style="border-bottom:1px solid var(--line)"></div><div id="wdTable">'+LOAD+'</div></div>';
-    L().wdF=L().wdF||{status:'Entered',q:'',page:0};L().wdF.page=0;L().wdSel=new Set();
+    /* Opens on "Awaiting verification", which is the right first screen for the person who
+       verifies — and a blank page for everybody else once the backlog is clear. `auto` marks this
+       as OUR choice rather than the reader's, so wdLoad may fall back to All when it finds
+       nothing; the moment somebody picks a chip themselves the flag goes and their choice stands,
+       empty or not. */
+    L().wdF=L().wdF||{status:'Entered',q:'',page:0,auto:true};L().wdF.page=0;L().wdSel=new Set();
     ENG.f.wdLoad();
   };
   ENG.f.wdSearch=(function(){let tm=null;return function(s){L().wdF.q=s;L().wdF.page=0;clearTimeout(tm);tm=setTimeout(ENG.f.wdLoad,250);};})();
-  ENG.f.wdStatus=function(s){L().wdF.status=s;L().wdF.page=0;L().wdSel=new Set();ENG.f.wdLoad();};
+  /* A chip the reader clicked is theirs: an empty Rejected list is an answer, not a fault, so the
+     fallback below must never second-guess it. */
+  ENG.f.wdStatus=function(s){L().wdF.status=s;L().wdF.auto=false;L().wdF.page=0;L().wdSel=new Set();ENG.f.wdLoad();};
   ENG.f.wdPage=function(p){L().wdF.page=p;ENG.f.wdLoad();};
   ENG.f.wdLoad=async function(){
     const f=L().wdF,pid=curProject();
@@ -462,6 +529,16 @@
       if(qq)x=x.or('wo_no.ilike.%'+qq+'%,activity_name.ilike.%'+qq+'%,location_label.ilike.%'+qq+'%');
       const {data,error,count}=await x.order('entry_date',{ascending:false}).order('id',{ascending:false}).range(f.page*PAGE_SIZE,(f.page+1)*PAGE_SIZE-1);
       if(error)throw error;
+      /* Nothing awaiting verification, and we are the ones who chose that filter: show everything
+         instead. The tab opening on an empty table while twelve verified entries sat behind the
+         next chip read as "Work Done is broken", which is how this got reported.
+         Once only — `auto` is cleared before the retry, so a genuinely empty module still lands on
+         All's own "nothing recorded yet" rather than looping. */
+      if(f.auto && f.status==='Entered' && !(count||0)){
+        f.auto=false; f.status=''; f.page=0;
+        return ENG.f.wdLoad();
+      }
+      f.auto=false;
       L().wdRows=data||[];indexRows(L().wdRows);
       const amt=(data||[]).reduce((s,r)=>s+num(r.value),0);
       const verifiable=L().wdRows.filter(canVerify).length;
