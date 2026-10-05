@@ -43,5 +43,17 @@
 <script src="engineering-amend.js?v=3"></script>
 <script src="engineering-ra.js?v=4"></script>
 <script src="engineering-ret.js?v=1"></script>
+<script>
+/* nexus-core.js draws the page as soon as sign-in finishes, which on a slow connection can happen before the Engineering
+   scripts above have downloaded — the router then finds no view and shows "Module not found". Once everything has loaded,
+   draw the page again if it is still showing that (or nothing). */
+window.addEventListener('load',function(){
+  try{
+    if(typeof state==='undefined'||!state.user||typeof renderPage!=='function')return;   // not signed in yet: the normal first draw will find everything loaded
+    var v=document.getElementById('view');
+    if(!v||v.textContent.trim()===''||/Module not found|Unknown page/.test(v.textContent))renderPage();
+  }catch(e){}
+});
+</script>
 </body>
 </html>
