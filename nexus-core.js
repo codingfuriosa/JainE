@@ -11346,7 +11346,7 @@ VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
   // The old MIS tab (built by hand from Farvision files) was retired 02-Oct-2026 - the MIS Report now
   // lives under Reports and is built from Post Sales data. An old #/mis link lands on Bookings.
-  const tabs=[['bookings','Bookings'],['invoices','Invoices'],['receipts','Receipts'],['reports','Reports'],['adhoc','ADHOC'],['setup','Setup']];
+  const tabs=[['bookings','Bookings'],['invoices','Invoices'],['receipts','Receipts'],['reports','Reports'],['adhoc','Contracted Extra Charges'],['setup','Setup']];
   const tab=tabs.some(function(t){return t[0]===(seg&&seg[0]);})?seg[0]:'bookings';
   // One body div per tab rather than one shared one: they are rendered by different code
   // that each look up their own host by id, and a shared id would have them fighting over it.
@@ -11507,7 +11507,7 @@ window.psaPreview=async function(id){
   }catch(e){ el.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not render preview</div></div>'; }
 };
 window.psaUploadModal=function(){
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-upload"></i> Upload documents — ADHOC replace</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-upload"></i> Upload documents — Contracted Extra Charges</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body frm">'
     +'<div class="dropzone" ondragover="event.preventDefault()" ondrop="psaDrop(event)" onclick="document.getElementById(\'psaFile\').click()"><i class="fa-solid fa-cloud-arrow-up"></i><div id="psaUpName">Drag & drop or click to select Word or PDF documents</div><div style="font-size:12px;margin-top:4px">.docx and .pdf · up to 500 at once · every "ADHOC" (any case) becomes "Contracted Extra Charges" · converted file is saved to your Post Sales S3 folder</div></div>'
     +'<input type="file" id="psaFile" class="hidden" multiple accept=".docx,.pdf" onchange="psaUpPick()">'
@@ -23210,7 +23210,7 @@ async function custTabCostSheet(data,unit){
       '<div style="border-top:1px solid #e2e8f0;padding-top:12px;font-size:13px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">'+
         '<span><b>Basic Cost:</b> '+custInr(basicCost)+'</span><span style="color:var(--slate)">+</span>'+
         '<span><b>Extra Charges:</b> '+custInr(extraCharges)+'</span><span style="color:var(--slate)">+</span>'+
-        (adhocCharges?'<span><b>Other Charges (Adhoc):</b> '+custInr(adhocCharges)+'</span><span style="color:var(--slate)">+</span>':'')+
+        (adhocCharges?'<span><b>Contracted Extra Charges:</b> '+custInr(adhocCharges)+'</span><span style="color:var(--slate)">+</span>':'')+
         '<span><b>Taxes:</b> '+custInr(totalTax)+'</span><span style="color:var(--slate)">=</span>'+
         '<span><b>Total (excl. tax):</b> '+custInr(totalWithoutTax)+'</span>'+
         '<span style="margin-left:auto"><b>Total (incl. tax):</b> '+custInr(totalWithTax)+'</span>'+
@@ -23243,7 +23243,7 @@ async function custTabCostSheet(data,unit){
       '<button class="btn" onclick="custPrintCostSheet()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>';
     if(unitGroupItems.length) out+=groupTitle('Unit Charges')+breakupTable(unitGroupItems,true,'Total Flat Value');
     if(edcGroupItems.length) out+=groupTitle('Extra Development Charges (EDC)')+breakupTable(edcGroupItems,false,'Total EDC');
-    if(adhocGroupItems.length) out+=groupTitle('Other Charges (Adhoc)')+breakupTable(adhocGroupItems,false,'Total Adhoc');
+    if(adhocGroupItems.length) out+=groupTitle('Contracted Extra Charges')+breakupTable(adhocGroupItems,false,'Total Contracted Extra Charges');
     out+='<div style="margin-top:8px;padding-top:10px;border-top:2px solid #334155;text-align:right;font-size:14.5px"><b>Grand Total: '+custInr(totalWithTax)+'</b></div>';
   }
   if(invoices.length){
@@ -23297,7 +23297,7 @@ window.custPrintCostSheet=function(){
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · '+esc((c&&c.contact_name)||'')+(unit.booking_no?' · Booking No '+esc(unit.booking_no):'')+' · as on '+fmtDate(new Date())+'</h2>'+
     groupTable('Unit Charges',unitGroupItems,'Total Flat Value',true)+
     groupTable('Extra Development Charges (EDC)',edcGroupItems,'Total EDC',false)+
-    groupTable('Other Charges (Adhoc)',adhocGroupItems,'Total Adhoc',false)+
+    groupTable('Contracted Extra Charges',adhocGroupItems,'Total Contracted Extra Charges',false)+
     '<div class="grand">Grand Total: '+custInr(grandTotal)+'</div>'+
     '</body></html>';
   try{ w.document.open(); w.document.write(html); w.document.close(); }
