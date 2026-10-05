@@ -43,11 +43,11 @@ function css(){
   st.textContent=`
   .pss-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
   .pss-top select{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font-size:13.5px;font-family:inherit;background:var(--bg-card,#fff);color:var(--ink);min-width:260px;max-width:100%}
-  .pss-code{font-size:12px;font-weight:700;padding:3px 9px;border-radius:6px;background:#f5f3ff;color:#6d28d9}
+  .pss-code{font-size:12px;font-weight:700;padding:3px 9px;border-radius:6px;background:#eff6ff;color:#1e40af}
   .pss-subs{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 16px}
   .pss-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   .pss-hint{font-size:12.5px;color:var(--slate);margin:2px 0 12px}
-  .pss-banner{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 14px;border:1px solid #ddd6fe;background:#faf5ff;border-radius:10px;margin-bottom:14px;font-size:13px}
+  .pss-banner{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 14px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px;margin-bottom:14px;font-size:13px;line-height:1.55}
   .pss-banner .grow{flex:1;min-width:220px}
   .pss-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
   .pss-card{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--bg-card,#fff);cursor:pointer}
@@ -64,7 +64,7 @@ function css(){
   .pss-flat span{font-size:10.5px;opacity:.8}
   .pss-flat.available{background:#ecfdf5;color:#065f46;border-color:#a7f3d0}
   .pss-flat.booked{background:#eff6ff;color:#1e40af;border-color:#bfdbfe}
-  .pss-flat.registered{background:#f5f3ff;color:#5b21b6;border-color:#ddd6fe}
+  .pss-flat.registered{background:#eef2ff;color:#3730a3;border-color:#c7d2fe}
   .pss-flat.possession{background:#f1f5f9;color:#334155;border-color:#cbd5e1}
   .pss-flat.blocked{background:#fef2f2;color:#991b1b;border-color:#fecaca}
   .pss-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin:10px 0}
@@ -101,7 +101,12 @@ function css(){
   .ps-root .btn-sm{min-height:30px}
   .ps-root .tag{cursor:default;border-radius:6px;font-weight:600}
   .ps-root .tag[onclick]{cursor:pointer;text-decoration:underline;text-underline-offset:2px}
-  .ps-root .toolbar{gap:10px;margin-bottom:14px}
+  /* CENTRED, not stretched. The toolbar never said how to align its children, so they defaulted
+     to stretch: the title block is two lines, the buttons are one, and a stretched button grows
+     to the title's height with its label floating in the middle of it. That is the "white strip
+     where nothing lines up" - on the receipt, the invoice and the booking alike. */
+  .ps-root .toolbar{gap:10px;margin-bottom:16px;align-items:center}
+  .ps-root .toolbar>.btn{align-self:center;flex:none}
   .ps-root .sec-title{font-size:15.5px}
   .ps-root .pss-hint{line-height:1.5}
   .ps-root table.tbl tr[onclick],.ps-root .psb-tbl tr[onclick]{cursor:pointer}
@@ -1033,9 +1038,21 @@ function bcss(){
   .psb-tbl input,.psb-tbl select{width:100%;border:1px solid var(--line);border-radius:6px;padding:6px 7px;font-size:12.5px;font-family:inherit;background:var(--bg-card,#fff);color:var(--ink)}
   .psb-tbl input.n{width:72px}
   .psb-tbl input[type=checkbox]{width:auto}
-  .psb-appl{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px}
-  .psb-appl-h{display:flex;align-items:center;gap:10px;margin-bottom:4px}
-  .psb-appl-h b{flex:1}
+  /* A sub-heading within a section: small capitals over a hairline, so a long card reads as the
+     three or four separate things it is rather than one wall of tables. */
+  .psb-sub{display:flex;align-items:baseline;gap:10px;margin:26px 0 2px;padding-top:12px;
+    border-top:1px solid var(--line)}
+  .psb-sub>span{font-size:10.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--ink)}
+  .psb-sub>em{font-style:normal;font-size:11.5px;color:var(--slate)}
+  .psb-sum+.psb-sub{margin-top:22px}
+  /* AN APPLICANT CARD IS A CARD, not a box with its details spilling out of the bottom. The
+     name row sat 4px off the facts under it and the facts ran edge to edge, so two applicants
+     read as one long list of fields with a border somewhere in the middle. */
+  .psb-appl{border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px;background:var(--bg-card,#fff)}
+  .psb-appl-h{display:flex;align-items:center;gap:10px;margin-bottom:10px;padding-bottom:10px;
+    border-bottom:1px solid var(--line)}
+  .psb-appl-h b{flex:1;font-size:13.5px}
+  .psb-appl .psb-facts{margin-top:0}
   .psb-kyc{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
   .psb-bar{position:sticky;bottom:0;background:var(--bg,#f5f7fb);padding:12px 0;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid var(--line);z-index:5}
   /* auto-FIT, not auto-fill. auto-fill keeps empty invisible columns at the end of the row, so
@@ -1464,8 +1481,17 @@ async function bookingView(host,id,stale){
     +((payouts.length||(b.status==='cancelled'&&num(mo.bal.advance)>0.5))?'<div class="psb-sec"><h3 style="justify-content:space-between">Refunds &amp; transfers out'+(b.status==='cancelled'&&num(mo.bal.advance)>0.5?' <button class="btn btn-sm btn-primary" onclick="psxRefundModal('+b.id+')"><i class="fa-solid fa-money-bill-transfer"></i> Record refund ('+inr(mo.bal.advance)+' due)</button>':'')+'</h3>'
       +(payouts.length?'<table class="psb-tbl"><thead><tr><th>No.</th><th>Date</th><th>Type</th><th>Ref.</th><th class="r">Amount</th></tr></thead><tbody>'+payouts.map(x=>'<tr><td><b>'+esc(x.payout_no)+'</b></td><td>'+dmy(x.payout_date)+'</td><td>'+(x.kind==='refund'?'Refund':'Transfer to '+(x.to_booking_id?'<a href="javascript:void 0" onclick="navTo(\'postsales/bookings/'+x.to_booking_id+'\')">new booking</a>':''))+'</td><td>'+esc(x.instrument_no||x.remarks||'')+'</td><td class="r">'+inr(x.amount)+'</td></tr>').join('')+'</tbody></table>':'<div class="pss-hint">Nothing paid back yet.</div>')+'</div>':''));
   box.innerHTML='<h3 style="justify-content:space-between">Payments'+(b.status!=='transferred'?' <button class="btn btn-sm btn-primary" onclick="navTo(\'postsales/receipts/new/'+b.id+'\')"><i class="fa-solid fa-plus"></i> Record payment</button>':'')+'</h3>'
-    +balanceCards(mo.bal)+milestoneStatus(b,ms,mo.inv,mo.al)
-    +(mo.inv.some(x=>x.kind!=='milestone')?'<div class="pss-hint" style="margin:12px 0 0">Other invoices on this booking:</div>'+invoiceTable(mo.inv.filter(x=>x.kind!=='milestone'),mo.al):'')
+    /* FOUR DIFFERENT THINGS UNDER ONE HEADING.
+       Balance figures, the payment schedule, other invoices and the receipts all ran together
+       under "Payments" with nothing between them, so the eye had to work out where one table
+       stopped and the next began. Each gets its own small heading and a rule above it. */
+    +balanceCards(mo.bal)
+    +psbSub('Payment schedule', ms.length+' milestone'+(ms.length===1?'':'s'))
+    +milestoneStatus(b,ms,mo.inv,mo.al)
+    +(mo.inv.some(x=>x.kind!=='milestone')
+        ? psbSub('Other invoices','not part of the schedule')+invoiceTable(mo.inv.filter(x=>x.kind!=='milestone'),mo.al)
+        : '')
+    +psbSub('Receipts', mo.rc.length?(mo.rc.length+' recorded'):'')
     +(mo.rc.length?'<div style="overflow-x:auto;margin-top:12px"><table class="psb-tbl"><thead><tr><th>Receipt</th><th>Date</th><th>Mode</th><th>Ref.</th><th class="r">Amount</th><th>Status</th></tr></thead><tbody>'
       +mo.rc.map(r=>'<tr style="cursor:pointer" onclick="navTo(\'postsales/receipts/'+r.id+'\')"><td><b>'+esc(r.receipt_no)+'</b>'+(r.against_interest?' <span class="tag t-purple">Interest</span>':'')+'</td><td>'+dmy(r.receipt_date)+'</td><td>'+esc(MODE_LBL[r.mode]||r.mode)+'</td><td>'+esc(r.instrument_no||'')+'</td><td class="r">'+inr(r.amount)+'</td><td>'+(r.status==='active'?'<span class="tag t-green">Received</span>':'<span class="tag t-red">Reversed</span>')+'</td></tr>').join('')
       +'</tbody></table></div>':'<div class="pss-hint" style="margin-top:10px">No payments recorded yet.</div>');
@@ -1628,6 +1654,12 @@ async function bookingMoney(bookingId){
   ]);
   return {bal:bal.data||{},inv:inv.data||[],rc:rc.data||[],al:al.data||[]};
 }
+/* A heading INSIDE a section, for the stretches that are each their own thing. Smaller than the
+   section's own h3 so the hierarchy still reads, with a rule above to say "new subject here". */
+function psbSub(title,note){
+  return '<div class="psb-sub"><span>'+esc(title)+'</span>'
+    +(note?'<em>'+esc(note)+'</em>':'')+'</div>';
+}
 function balanceCards(bal){
   return '<div class="psb-sum">'
     +'<div>Invoiced so far<b>'+inr(bal.principal_invoiced)+'</b></div>'
@@ -1741,7 +1773,7 @@ async function receiptView(host,id,stale){
       +(r.narration?'<div class="pss-hint" style="margin-top:8px">'+esc(r.narration)+'</div>':'')
       +((r.attachments||[]).length?'<div class="psb-kyc">'+r.attachments.map(a=>'<span class="tag t-blue" style="cursor:pointer" onclick="s3OpenSigned(\''+esc(a.path)+'\')"><i class="fa-solid fa-paperclip"></i> '+esc(a.name)+'</span>').join('')+'</div>':'')
       +(r.status==='reversed'?'<div class="pss-banner" style="margin-top:12px;border-color:#fecaca;background:#fef2f2"><i class="fa-solid fa-rotate-left" style="color:#b91c1c"></i><div class="grow">Reversed on '+dmy(r.reversal_date)+' ('+esc(r.reversal_no||'')+') by '+esc((r.reversed_by||'').split('@')[0])+' - '+esc(r.reversal_reason||'')+'</div></div>':'')+'</div>'
-    +'<div class="psb-sec"><h3>Applied to</h3>'+(r.status!=='active'?'<div class="pss-hint">A reversed receipt isn\'t applied to anything.</div>':al.length?'<table class="psb-tbl"><thead><tr><th>Invoice</th><th>Date</th><th>For</th><th class="r">Applied</th></tr></thead><tbody>'+al.map(a=>'<tr><td>'+esc(a.invoices&&a.invoices.invoice_no||'')+'</td><td>'+dmy(a.invoices&&a.invoices.invoice_date)+'</td><td>'+esc(a.invoices&&a.invoices.title||'')+'</td><td class="r">'+inr(a.amount)+'</td></tr>').join('')+'</tbody></table>':'<div class="pss-hint">Nothing yet - no invoice is open on this booking, so the whole amount is held as advance.</div>')+'</div>';
+    +'<div class="psb-sec"><h3>Applied to</h3>'+(r.status!=='active'?'<div class="pss-hint">A reversed receipt isn\'t applied to anything.</div>':al.length?'<div style="overflow-x:auto"><table class="psb-tbl"><thead><tr><th>Invoice</th><th>Date</th><th>For</th><th class="r">Applied</th></tr></thead><tbody>'+al.map(a=>'<tr><td>'+esc(a.invoices&&a.invoices.invoice_no||'')+'</td><td>'+dmy(a.invoices&&a.invoices.invoice_date)+'</td><td>'+esc(a.invoices&&a.invoices.title||'')+'</td><td class="r">'+inr(a.amount)+'</td></tr>').join('')+'</tbody></table></div>':'<div class="pss-hint">Nothing yet - no invoice is open on this booking, so the whole amount is held as advance.</div>')+'</div>';
 }
 window.psrReverseModal=function(id){
   openModal('<div class="modal-head"><h3>Reverse receipt</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm">'
@@ -1821,11 +1853,20 @@ async function invoiceList(host,stale){
   for(let k=0;k<ids.length;k+=300){ const {data:al}=await PS().from('receipt_allocations').select('invoice_id,amount').in('invoice_id',ids.slice(k,k+300)); (al||[]).forEach(a=>paid[a.invoice_id]=(paid[a.invoice_id]||0)+num(a.amount)); }
   if(stale()) return;
   I.paid=paid;
+  /* THE TWO EXPLAINER CARDS ARE GONE, by request.
+     They were a third of the page before a single invoice, every time anybody opened the tab, to
+     explain two buttons that are used occasionally. The actions remain - as buttons, on the same
+     row as the heading, where the rest of Post Sales keeps its actions. The explanations move to
+     their titles, which is where somebody looks when they are unsure. */
   host.innerHTML=invNav('list')
-    +'<div class="ps-actions">'
-      +'<div class="ps-action"><i class="ic fa-solid fa-helmet-safety"></i><div class="tx"><b>A construction stage is complete</b><div>Foundation, a floor casting, brickwork… Mark it done for a tower (or a floor) and every booked flat there gets its demand in one go. You see every invoice before anything is raised.</div><button class="btn btn-primary btn-sm" onclick="navTo(\'postsales/invoices/stage\')"><i class="fa-solid fa-check"></i> Mark stage complete</button></div></div>'
-      +'<div class="ps-action"><i class="ic fa-solid fa-calendar-check"></i><div class="tx"><b>Time-based demands</b><div>Balance booking, agreement and similar milestones fall due a set number of days after booking. This raises every one that has come due, dated today.</div><button class="btn btn-sm" onclick="psiRaiseDue()"><i class="fa-solid fa-file-invoice"></i> Raise due invoices</button></div></div>'
-    +'</div>'
+    +'<div class="ps-head"><div class="t"><div class="sec-title">Invoices</div>'
+      +'<div class="pss-hint" style="margin:2px 0 0">Every demand raised, and what has been paid against it.</div></div>'
+      +'<div class="acts">'
+      +'<button class="btn" onclick="psiRaiseDue()" title="Raises every time-based milestone that has come due - balance booking, agreement and the like, which fall a set number of days after booking. Dated today.">'
+        +'<i class="fa-solid fa-calendar-check"></i> Raise due invoices</button>'
+      +'<button class="btn btn-primary" onclick="navTo(\'postsales/invoices/stage\')" title="Mark a construction stage complete - foundation, a floor casting, brickwork - and every booked flat in that tower or on that floor gets its demand in one go. You see them all before anything is raised.">'
+        +'<i class="fa-solid fa-helmet-safety"></i> Mark stage complete</button>'
+      +'</div></div>'
     +'<div class="ps-filters">'+projSelect('psiProj',I.pid,'psiFilter()','All projects')
     +'<select id="psiSt" onchange="psiFilter()"><option value="open"'+(I.status==='open'?' selected':'')+'>Open invoices</option><option value="overdue"'+(I.status==='overdue'?' selected':'')+'>Overdue</option><option value="unpaid"'+(I.status==='unpaid'?' selected':'')+'>Not fully paid</option><option value="cancelled"'+(I.status==='cancelled'?' selected':'')+'>Cancelled</option><option value=""'+(I.status===''?' selected':'')+'>All invoices</option></select>'
     +'<span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="psiQ" placeholder="Search invoice, booking, flat, customer or milestone" oninput="psiFilter()"></span></div>'
@@ -1941,7 +1982,14 @@ async function interestDue(host,stale){
   const rows=(data||[]).sort((a,b)=>num(b.suggested)-num(a.suggested)||num(b.running)-num(a.running));
   const T=k=>rows.reduce((s,r)=>s+num(r[k]),0);
   host.innerHTML=invNav('interest')
-    +'<div class="ps-head"><div class="t"><div class="sec-title">Interest on late payment (18% p.a.) - as of today</div><div class="pss-hint" style="margin:2px 0 0"><b>Suggested</b> = interest on payments that came in after their due date, not yet billed or waived. Open a booking to approve (bill) or waive it. <b>Running</b> = still building on demands not yet paid.</div></div></div>'
+    /* The explanation sat 2px under a 15px heading and ran the full width of the page as one
+       unbroken paragraph, so the two ran together. It gets room to be a separate thing, a line
+       height that can be read, and a width that stops before the page edge. */
+    +'<div class="ps-head"><div class="t"><div class="sec-title">Interest on late payment (18% p.a.) &mdash; as of today</div>'
+      +'<div class="pss-hint" style="margin:8px 0 0;max-width:62ch;line-height:1.6">'
+      +'<b>Suggested</b> &mdash; interest on payments that came in after their due date, not yet billed or waived. '
+      +'Open a booking to approve (bill) or waive it.<br>'
+      +'<b>Running</b> &mdash; still building up on demands that are not paid yet.</div></div></div>'
     +'<div class="ps-filters">'+projSelect('psiIP',pid,'psiProjPick(this.value,"interest")','All projects')+'</div>'
     +mKpis([['Suggested for billing',inr(T('suggested')),rows.filter(r=>num(r.suggested)>0.5).length+' bookings'],['Running',inr(T('running')),'on unpaid demands'],['Billed',inr(T('billed')),''],['Waived',inr(T('waived')),'']])
     +'<div class="card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Booking</th><th>Flat</th><th>Applicant</th><th class="pss-num">Paid late</th><th class="pss-num">Running</th><th class="pss-num">Billed</th><th class="pss-num">Waived</th><th class="pss-num">Suggested</th></tr></thead><tbody>'
@@ -2003,7 +2051,7 @@ async function invoiceView(host,id,stale){
       +'<table class="psb-tbl" style="margin-top:10px"><thead><tr><th>Particulars</th><th class="r">Amount</th><th class="r">GST</th><th class="r">Total</th></tr></thead><tbody>'+ln.map(l=>'<tr><td>'+esc(l.head)+'</td><td class="r">'+inr(l.net)+'</td><td class="r">'+inr(l.gst)+'</td><td class="r">'+inr(l.total)+'</td></tr>').join('')+'<tr class="t"><td>Total</td><td class="r">'+inr(i.net)+'</td><td class="r">'+inr(i.gst)+'</td><td class="r">'+inr(i.total)+'</td></tr></tbody></table>'
       +(i.remarks?'<div class="pss-hint" style="margin-top:8px">'+esc(i.remarks)+'</div>':'')
       +(i.status==='cancelled'?'<div class="pss-banner" style="margin-top:12px"><i class="fa-solid fa-ban"></i><div class="grow">Cancelled by '+esc((i.cancelled_by||'').split('@')[0])+' - '+esc(i.cancel_reason||'')+'</div></div>':'')+'</div>'
-    +'<div class="psb-sec"><h3>Payments applied</h3>'+(al.length?'<table class="psb-tbl"><thead><tr><th>Receipt</th><th>Date</th><th>Mode</th><th class="r">Applied</th></tr></thead><tbody>'+al.map(a=>'<tr style="cursor:pointer" onclick="navTo(\'postsales/receipts/'+(a.receipts&&a.receipts.id)+'\')"><td>'+esc(a.receipts&&a.receipts.receipt_no||'')+'</td><td>'+dmy(a.receipts&&a.receipts.receipt_date)+'</td><td>'+esc(MODE_LBL[a.receipts&&a.receipts.mode]||'')+'</td><td class="r">'+inr(a.amount)+'</td></tr>').join('')+'</tbody></table>':'<div class="pss-hint">Nothing received against this invoice yet.</div>')+'</div>';
+    +'<div class="psb-sec"><h3>Payments applied</h3>'+(al.length?'<div style="overflow-x:auto"><table class="psb-tbl"><thead><tr><th>Receipt</th><th>Date</th><th>Mode</th><th class="r">Applied</th></tr></thead><tbody>'+al.map(a=>'<tr style="cursor:pointer" onclick="navTo(\'postsales/receipts/'+(a.receipts&&a.receipts.id)+'\')"><td>'+esc(a.receipts&&a.receipts.receipt_no||'')+'</td><td>'+dmy(a.receipts&&a.receipts.receipt_date)+'</td><td>'+esc(MODE_LBL[a.receipts&&a.receipts.mode]||'')+'</td><td class="r">'+inr(a.amount)+'</td></tr>').join('')+'</tbody></table></div>':'<div class="pss-hint">Nothing received against this invoice yet.</div>')+'</div>';
 }
 window.psiCancelModal=function(id){
   openModal('<div class="modal-head"><h3>Cancel invoice</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm"><div class="pss-hint">The invoice stays on record as cancelled; any payment applied to it moves to the booking\'s next due invoice (or back to advance). Its milestone can be invoiced again afterwards.</div><label>Reason</label><input id="psiCR" placeholder="e.g. Raised on the wrong date"></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Keep it</button><button class="btn btn-danger" onclick="psiCancel('+id+')">Cancel invoice</button></div>');
@@ -2348,7 +2396,7 @@ window.psrpRender=async function(host,seg){
   if(stale()) return;
   const key=seg[0];
   if(!REPORTS.some(r=>r[0]===key)){
-    host.innerHTML='<div class="pss-cards">'+REPORTS.map(r=>'<div class="pss-card" onclick="navTo(\'postsales/reports/'+r[0]+'\')"><h4><i class="fa-solid '+r[2]+'" style="color:#7e22ce;margin-right:6px"></i>'+esc(r[1])+'</h4><div class="m">'+esc(r[3])+'</div></div>').join('')+'</div>';
+    host.innerHTML='<div class="pss-cards">'+REPORTS.map(r=>'<div class="pss-card" onclick="navTo(\'postsales/reports/'+r[0]+'\')"><h4><i class="fa-solid '+r[2]+'" style="color:var(--ps-brand,#1e40af);margin-right:6px"></i>'+esc(r[1])+'</h4><div class="m">'+esc(r[3])+'</div></div>').join('')+'</div>';
     return;
   }
   RP.from=RP.from||fyStart(); RP.to=RP.to||today(); RP.asOf=RP.asOf||today();
