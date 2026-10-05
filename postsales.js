@@ -2266,10 +2266,17 @@ window.psiPrint=async function(id){
 const DOC_CSS =
    '@page{size:A4;margin:12mm}'
   +':root{color-scheme:light}'
-  +'html,body{background:#fff}'
+  +'html{background:#f1f1f1}'
   +'*{box-sizing:border-box}'
-  +'body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;margin:0;'
-    +'-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+  +'body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#fff;'
+    +'-webkit-print-color-adjust:exact;print-color-adjust:exact;'
+    /* On screen the page needs its own margin: @page only applies on paper, so without
+       this the text runs into the edge of the window. Sized and centred like an A4 sheet
+       so what is on screen is what comes out of the printer. */
+    +'width:210mm;max-width:100%;margin:12px auto;padding:12mm;'
+    +'box-shadow:0 1px 6px rgba(0,0,0,.25)}'
+  +'@media print{html{background:#fff}'
+    +'body{width:auto;margin:0;padding:0;box-shadow:none}}'
   +'.co{text-align:center;margin-bottom:14px}'
   +'.co .nm{font-size:14px;font-weight:bold;letter-spacing:.3px}'
   +'.co .ad{font-size:10px;margin-top:5px;line-height:1.55}'
