@@ -10,6 +10,8 @@ if(window.__PST_LOADED) return;
 window.__PST_LOADED=true;
 
 const U=()=>window.PUS;
+// The person who raised an adjustment can decide it only when the matching rule is on (Admin -> Rules); the database enforces the same.
+const selfApproval=()=>U().rule('adjustment.allow_self_approval')==='true';
 const qty=n=>Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:3});
 const money=n=>(n==null||n==='')?'—':'₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const me=()=>String(state.email||'').toLowerCase();
@@ -128,7 +130,7 @@ window.pusGrnForm=async function(poId,gid){
     +'<td><input class="pg-acc" type="number" step="0.001" min="0" style="width:96px" value="'+(x.ex?esc(x.ex.accepted_qty):'')+'" oninput="pusGrnCalc(this)"></td>'
     +'<td class="pus-num pg-rej">'+(x.ex?qty(x.ex.rejected_qty):'')+'</td><td><input class="pg-why" style="width:150px" placeholder="reason if rejected" value="'+esc(x.ex&&x.ex.rejection_reason||'')+'"></td></tr>').join('');
   const t=k=>esc(g&&g[k]||'');
-  openModal('<div class="modal-head"><h3>'+(g?'Edit goods receipt':'New goods receipt')+' — '+esc(P.doc_no||'PO')+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:74vh;overflow:auto">'
+  openModal('<div class="modal-head"><h3>'+(g?'Edit goods receipt':'New goods receipt')+' — '+esc(P.doc_no||'PO')+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'
     +'<div class="pus-hint" style="margin-top:0">Vendor: <b>'+esc(vName(P.vendor_id))+'</b>. Enter what physically arrived. <b>Accepted</b> goes into stock; the rest is <b>rejected</b> (give a reason) and does not.'+(tol>0?' Over-receipt up to '+tol+'% of the ordered quantity is allowed.':'')+'</div>'
     +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>#</th><th>Item</th><th class="pus-num">Ordered</th><th class="pus-num">Received so far</th><th class="pus-num">Balance</th><th>Received now</th><th>Accepted</th><th class="pus-num">Rejected</th><th>Reason</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
     +'<div class="pi-form" style="margin-top:14px"><div>'
@@ -181,7 +183,7 @@ window.pusGrnOpen=async function(id,tab){
   if(g.status==='posted'&&can&&GC.lines.some(l=>+l.accepted_qty-+l.returned_qty>0)) btn.push('<button class="btn" onclick="pusRtvNew('+id+')"><i class="fa-solid fa-rotate-left"></i> Return to vendor…</button>');
   const del=g.status==='draft'&&can&&mine?'<button class="btn btn-ghost" style="margin-right:auto" onclick="pusGrnDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete draft</button>':'';
   openModal('<div class="modal-head"><h3>Goods receipt '+esc(g.doc_no||('Draft #'+g.id))+' '+(g.status==='posted'?'<span class="tag t-green">Posted</span>':'<span class="tag t-gray">Draft</span>')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="max-height:74vh;overflow:auto">'+tabsBar('pstG',[['main','Main Info'],['items','Items'],['history','Change History']])+'<div id="pstGBody"></div></div>'
+    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto">'+tabsBar('pstG',[['main','Main Info'],['items','Items'],['history','Change History']])+'<div id="pstGBody"></div></div>'
     +'<div class="modal-foot">'+del+'<button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
   window.pstGGo(tab||'main');
 };
@@ -196,7 +198,7 @@ window.pstGGo=function(t){
   else b.innerHTML=logRows(log);
 };
 window.pusGrnPost=async function(id){
-  if(!await confirmDialog('Post this goods receipt? The accepted quantity goes into stock and the PO balance reduces. A posted receipt cannot be edited (use a return to the vendor to correct it).')) return;
+  if(!await confirmDialog('Post this goods receipt? The accepted quantity goes into stock and the PO balance reduces. A posted receipt cannot be edited (use a return to the vendor to correct it).',{title:'Post goods receipt',okLabel:'Post receipt',danger:false})) return;
   const {data,error}=await U().PU().rpc('grn_post',{p_id:id});
   if(U().fail(error,'Could not post')) return;
   closeModal(); toast('Posted as '+data+' — stock updated','ok'); route();
@@ -267,7 +269,7 @@ async function refreshStockSelects(cls,onlyStock){ document.querySelectorAll('.'
 
 window.pusIssueNew=async function(){
   const wh=U().S.warehouses.find(w=>w.active); await loadBalances(wh&&wh.id);
-  openModal('<div class="modal-head"><h3>New issue</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:74vh;overflow:auto">'
+  openModal('<div class="modal-head"><h3>New issue</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'
     +'<div class="pi-form"><div>'+field('Issue from','<select id="piWh" onchange="pusIssueWh()">'+whOptions(wh&&wh.id)+'</select>')+field('Date','<input id="piDate" type="date" max="'+today()+'" value="'+today()+'">')+field('Requested by','<input id="piBy" placeholder="who asked for it">')+'</div>'
     +'<div>'+field('Charged to project','<select id="piProj"><option value="">— same as warehouse —</option>'+U().S.projects.map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join('')+'</select>')+field('Block / tower','<input id="piBlock">')+field('Activity','<input id="piAct" placeholder="e.g. 3rd floor slab">')+'</div></div>'
     +'<div class="pus-sub">Items</div><div id="piLines">'+itemLine(null,'sl-issue',false)+'</div><button class="btn btn-sm" onclick="pusIssueAddLine()"><i class="fa-solid fa-plus"></i> Add item</button>'
@@ -297,7 +299,7 @@ window.pusIssueOpen=async function(id){
   if(h.error||!h.data){ toast('Could not open the issue','err'); return; }
   IC={i:h.data,lines:ls.data||[],returns:rt.data||[],log:lg};
   const canRet=U().can('stock.issue')&&IC.lines.some(l=>+l.qty-+l.returned_qty>0);
-  openModal('<div class="modal-head"><h3>Issue '+esc(IC.i.doc_no)+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="max-height:74vh;overflow:auto">'
+  openModal('<div class="modal-head"><h3>Issue '+esc(IC.i.doc_no)+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto">'
     +'<div class="pi-form"><div>'+ro('Warehouse',whName(IC.i.warehouse_id))+ro('Date',U().dmy(IC.i.issue_date))+ro('Requested by',IC.i.requested_by||'')+'</div><div>'+ro('Charged to',IC.i.cost_project_id?projName(IC.i.cost_project_id):'Warehouse project')+ro('Block / activity',[IC.i.block,IC.i.activity].filter(Boolean).join(' · '))+ro('Issued by',uname(IC.i.created_by))+'</div></div>'
     +'<div class="card" style="padding:0"><table class="tbl"><thead><tr><th>Item</th><th>Unit</th><th class="pus-num">Quantity</th><th class="pus-num">Rate</th><th class="pus-num">Value</th><th class="pus-num">Returned</th></tr></thead><tbody>'
     +IC.lines.map(l=>'<tr><td><b>'+esc(itemName(l.item_id))+'</b></td><td>'+esc(stockUnit(l.item_id))+'</td><td class="pus-num">'+qty(l.qty)+'</td><td class="pus-num">'+money(l.rate)+'</td><td class="pus-num">'+money(l.value)+'</td><td class="pus-num">'+(+l.returned_qty?qty(l.returned_qty):'—')+'</td></tr>').join('')+'</tbody></table></div>'
@@ -340,7 +342,7 @@ async function adjList(host){
   adjRender(host);
 }
 const adjStatus=a=>({draft:['Draft','t-gray'],pending_approval:['Awaiting level '+a.current_level,'t-amber'],approved:['Posted','t-green'],rejected:['Rejected','t-red'],cancelled:['Cancelled','t-red']}[a.status]||[a.status,'t-gray']);
-const adjMine=a=>a.status==='pending_approval'&&a.raised_by.toLowerCase()!==me()&&A.pending.some(p=>p.adjustment_id===a.id&&p.approvers.some(e=>e.toLowerCase()===me()));
+const adjMine=a=>a.status==='pending_approval'&&(selfApproval()||a.raised_by.toLowerCase()!==me())&&A.pending.some(p=>p.adjustment_id===a.id&&p.approvers.some(e=>e.toLowerCase()===me()));
 function adjRender(host){
   host=host||$('pstBody'); if(!host) return; const q=A.q.toLowerCase();
   const inF=(a,k)=>k==='all'||(k==='draft'&&a.status==='draft')||(k==='pending'&&a.status==='pending_approval')||(k==='mine'&&adjMine(a))||(k==='approved'&&a.status==='approved')||(k==='rejected'&&a.status==='rejected');
@@ -362,13 +364,14 @@ let AE=null;
 window.pusAdjEdit=async function(id){
   let a=null, ls=[];
   if(id){ const [h,l]=await Promise.all([U().PU().from('stock_adjustments').select('*').eq('id',id).single(),U().PU().from('adjustment_lines').select('*').eq('adjustment_id',id).order('line_no')]); if(h.error){ toast('Could not open','err'); return; } a=h.data; ls=l.data||[]; }
-  AE={id:id||null}; const wh=a?a.warehouse_id:(U().S.warehouses.find(w=>w.active)||{}).id; await loadBalances(wh);
-  openModal('<div class="modal-head"><h3>'+(a?'Edit adjustment':'New stock adjustment')+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:74vh;overflow:auto">'
+  AE={id:id||null,pending:!!(a&&a.status==='pending_approval')}; const wh=a?a.warehouse_id:(U().S.warehouses.find(w=>w.active)||{}).id; await loadBalances(wh);
+  const pendingNote='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:11px 14px;margin-bottom:12px;font-size:13.5px"><b style="color:#b45309"><i class="fa-solid fa-hourglass-half"></i> Awaiting approval</b><div style="margin-top:4px">Saving your changes pulls this adjustment back and sends it to the first approver again. Approvals given so far no longer count. Press Cancel to leave it as it is.</div></div>';
+  openModal('<div class="modal-head"><h3>'+(a?'Edit adjustment':'New stock adjustment')+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'+(AE.pending?pendingNote:'')
     +'<div class="pi-form"><div>'+field('Warehouse','<select id="paWh" onchange="pusAdjWh()"'+(a?' disabled':'')+'>'+whOptions(wh)+'</select>')+field('Date','<input id="paDate" type="date" max="'+today()+'" value="'+esc(a?a.adj_date:today())+'">')+'</div>'
     +'<div>'+field('Kind','<select id="paKind">'+Object.keys(ADJKIND).filter(k=>k!=='transfer').map(k=>'<option value="'+k+'"'+(a&&a.kind===k?' selected':'')+'>'+ADJKIND[k]+'</option>').join('')+'</select>')+field('Reason','<input id="paReason" placeholder="e.g. found short in stock-take" value="'+esc(a?a.reason:'')+'">')+'</div></div>'
     +'<div class="pus-sub">Items</div><div class="pus-hint" style="margin-top:0">A <b>decrease</b> takes stock out at the average cost; an <b>increase</b> brings it in at the rate you give (or the current average if you leave it empty).</div>'
     +'<div id="paLines">'+(ls.length?ls.map(adjLine).join(''):adjLine(null))+'</div><button class="btn btn-sm" onclick="pusAdjAddLine()"><i class="fa-solid fa-plus"></i> Add item</button></div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn" onclick="pusAdjSave(false)">Save draft</button><button class="btn btn-primary" onclick="pusAdjSave(true)">'+(a&&a.status==='rejected'?'Save & resubmit':'Save & submit for approval')+'</button></div>','xl');
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'+(AE.pending?'':'<button class="btn" onclick="pusAdjSave(false)">Save draft</button>')+'<button class="btn btn-primary" onclick="pusAdjSave(true)">'+(AE.pending?'Save & send for approval again':a&&a.status==='rejected'?'Save & resubmit':'Save & submit for approval')+'</button></div>','xl');
 };
 window.pusAdjWh=async function(){ await loadBalances(parseInt(U().val('paWh'),10)||null); refreshStockSelects('sl-adj',false); };
 window.pusAdjAddLine=function(){ $('paLines').insertAdjacentHTML('beforeend',adjLine(null)); };
@@ -383,9 +386,14 @@ window.pusAdjSave=async function(submit){
     lines.push({item_id:it,direction:dir,qty:q,rate:dir==='increase'?(d.querySelector('.sl-rate').value||null):null,note:d.querySelector('.sl-note').value.trim()||null}); }
   if(!lines.length){ toast('Add at least one item','err'); return; }
   const head={warehouse_id:wh,adj_date:U().val('paDate')||today(),kind:U().val('paKind'),reason:U().val('paReason')};
+  let pulledBack=false;
+  if(AE.pending){                      // awaiting approval: pull it back first (database function), then it is an ordinary draft
+    const w=await U().PU().rpc('adjustment_withdraw',{p_id:AE.id}); if(U().fail(w.error,'Could not pull the adjustment back from approval')) return;
+    pulledBack=true; submit=true;
+  }
   const {data:id,error}=await U().PU().rpc('adjustment_save',{p_id:AE.id,p_head:head,p_lines:lines});
-  if(U().fail(error,'Could not save')) return;
-  if(submit){ const r=await U().PU().rpc('adjustment_submit',{p_id:id}); if(r.error){ toast('Saved as a draft, but it could not be submitted: '+r.error.message.replace(/Setup > Approvals/g,'Admin > Approvers'),'warn'); closeModal(); route(); return; } closeModal(); toast('Submitted as '+r.data,'ok'); route(); return; }
+  if(U().fail(error,'Could not save')){ if(pulledBack) toast('The adjustment was pulled back from approval and is now a draft. Fix the problem, then send it again.','warn'); return; }
+  if(submit){ const r=await U().PU().rpc('adjustment_submit',{p_id:id}); if(r.error){ toast('Saved as a draft, but it could not be submitted: '+r.error.message.replace(/Setup > Approvals/g,'Admin > Approvers'),'warn'); closeModal(); route(); return; } closeModal(); toast(pulledBack?'Saved and sent for approval again as '+r.data:'Submitted as '+r.data,'ok'); route(); return; }
   closeModal(); toast('Draft saved','ok'); route();
 };
 let AC=null;
@@ -394,14 +402,17 @@ window.pusAdjOpen=async function(id,tab){
   const [h,ls,ap,lg]=await Promise.all([PU().from('stock_adjustments').select('*').eq('id',id).maybeSingle(),PU().from('adjustment_lines').select('*').eq('adjustment_id',id).order('line_no'),PU().from('adjustment_approvals').select('*').eq('adjustment_id',id).order('round').order('level'),loadLog('adjustment',id)]);
   if(h.error||!h.data||h.data.deleted_at){ toast('Could not open the adjustment','err'); return; }
   const a=h.data; AC={a,lines:ls.data||[],steps:ap.data||[],log:lg};
-  const mineTurn=a.status==='pending_approval'&&a.raised_by.toLowerCase()!==me()&&AC.steps.some(s=>s.round===a.round&&s.level===a.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
+  const mineTurn=a.status==='pending_approval'&&(selfApproval()||a.raised_by.toLowerCase()!==me())&&AC.steps.some(s=>s.round===a.round&&s.level===a.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
   const canEdit=['draft','rejected'].includes(a.status)&&(a.raised_by.toLowerCase()===me()||state.super)&&U().can('stock.adjust'), btn=[];
+  // While it is awaiting approval its maker can still change or delete it. Once approved (posted to stock): never.
+  const canEditPending=a.status==='pending_approval'&&(a.raised_by.toLowerCase()===me()||state.super)&&U().can('stock.adjust');
   if(canEdit) btn.push('<button class="btn" onclick="pusAdjEdit('+id+')"><i class="fa-solid fa-pen"></i> Edit</button>','<button class="btn btn-primary" onclick="pusAdjSubmit('+id+')"><i class="fa-solid fa-paper-plane"></i> '+(a.status==='rejected'?'Resubmit':'Submit for approval')+'</button>');
+  if(canEditPending) btn.push('<button class="btn" onclick="pusAdjEdit('+id+')" title="Pulls it back from approval; saving sends it to the first approver again"><i class="fa-solid fa-pen"></i> Edit</button>');
   if(mineTurn) btn.push('<button class="btn" onclick="pusAdjDecide('+id+',false)"><i class="fa-solid fa-circle-xmark"></i> Reject</button>','<button class="btn btn-primary" onclick="pusAdjDecide('+id+',true)"><i class="fa-solid fa-circle-check"></i> Approve & post</button>');
-  const del=a.status==='draft'&&canEdit?'<button class="btn btn-ghost" style="margin-right:auto" onclick="pusAdjDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete draft</button>':'';
+  const del=(a.status==='draft'&&canEdit)||canEditPending?'<button class="btn btn-ghost" style="margin-right:auto" onclick="pusAdjDelete('+id+')"><i class="fa-solid fa-trash"></i> '+(a.status==='draft'?'Delete draft':'Delete')+'</button>':'';
   const s=adjStatus(a);
   openModal('<div class="modal-head"><h3>Adjustment '+esc(a.doc_no||('Draft #'+a.id))+' <span class="tag '+s[1]+'">'+esc(s[0])+'</span></h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="max-height:74vh;overflow:auto">'+tabsBar('pstA',[['main','Main Info'],['history','Change History'],['approval','Approval History']])+'<div id="pstABody"></div></div><div class="modal-foot">'+del+'<button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
+    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto">'+tabsBar('pstA',[['main','Main Info'],['history','Change History'],['approval','Approval History']])+'<div id="pstABody"></div></div><div class="modal-foot">'+del+'<button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
   window.pstAGo(tab||'main');
 };
 window.pstAGo=function(t){
@@ -419,7 +430,11 @@ window.pstAGo=function(t){
       +(pend.map(s=>s.approvers.map(e=>'<tr><td>'+esc(uname(e))+'</td><td>'+esc(profile(e))+'</td><td>Level '+s.level+' (Approval pending)</td></tr>').join('')).join('')||'<tr><td colspan="3"><div class="empty" style="padding:14px"><div>Nothing pending</div></div></td></tr>')+'</tbody></table></div>'; }
 };
 window.pusAdjSubmit=async function(id){ const {data,error}=await U().PU().rpc('adjustment_submit',{p_id:id}); if(U().fail(error,'Could not submit')) return; closeModal(); toast('Submitted as '+data,'ok'); route(); };
-window.pusAdjDelete=async function(id){ if(!await confirmDialog('Delete this draft adjustment?')) return; const {error}=await U().PU().rpc('adjustment_delete',{p_id:id}); if(U().fail(error,'Delete failed')) return; closeModal(); toast('Draft deleted','ok'); route(); };
+window.pusAdjDelete=async function(id){
+  const pending=!!(AC&&AC.a.id===id&&AC.a.status==='pending_approval');
+  if(!await confirmDialog(pending?'Delete this adjustment? It is awaiting approval — the approvers will no longer see it. This cannot be undone.':'Delete this draft adjustment?')) return;
+  const {error}=await U().PU().rpc('adjustment_delete',{p_id:id}); if(U().fail(error,'Delete failed')) return; closeModal(); toast(pending?'Adjustment deleted':'Draft deleted','ok'); route();
+};
 window.pusAdjDecide=function(id,approve){
   openModal('<div class="modal-head"><h3>'+(approve?'Approve and post':'Reject')+' adjustment</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm">'+(approve?'<div class="pus-hint" style="margin-top:0">On the final approval the adjustment changes stock immediately, valued at today\'s average cost.</div>':'')
     +'<label>'+(approve?'Remark (optional)':'Reason for rejecting')+'</label><textarea id="paNote" rows="3"></textarea></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="pusAdjDecideSave('+id+','+approve+')">'+(approve?'Approve':'Reject')+'</button></div>');
@@ -452,7 +467,7 @@ window.pusTrfSearch=function(){ T.q=U().val('pstQ'); trfRender(); const e=$('pst
 const entityOf=wh=>{ const w=whById(wh); if(!w) return null; const pe=U().S.projEntity.find(p=>p.project_id===w.project_id); return pe?pe.legal_entity_id:null; };
 window.pusTrfNew=async function(){
   const w=U().S.warehouses.find(x=>x.active); await loadBalances(w&&w.id);
-  openModal('<div class="modal-head"><h3>New transfer</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:74vh;overflow:auto">'
+  openModal('<div class="modal-head"><h3>New transfer</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'
     +'<div class="pi-form"><div>'+field('From warehouse','<select id="ptFrom" onchange="pusTrfWh()">'+whOptions(w&&w.id)+'</select>')+field('To warehouse','<select id="ptTo" onchange="pusTrfWh()">'+whOptions(null)+'</select>')+'</div>'
     +'<div>'+field('Date','<input id="ptDate" type="date" max="'+today()+'" value="'+today()+'">')+field('Vehicle no','<input id="ptVeh">')+'</div></div>'
     +'<div id="ptKind" class="pus-hint"></div>'
@@ -490,7 +505,7 @@ window.pusTrfOpen=async function(id){
   const [h,ls,lg]=await Promise.all([PU().from('transfers').select('*').eq('id',id).maybeSingle(),PU().from('transfer_lines').select('*').eq('transfer_id',id).order('line_no'),loadLog('transfer',id)]);
   if(h.error||!h.data){ toast('Could not open the transfer','err'); return; }
   TC={t:h.data,lines:ls.data||[],log:lg}; const t=TC.t, s=trfStatus(t);
-  openModal('<div class="modal-head"><h3>Transfer '+esc(t.doc_no)+' <span class="tag '+s[1]+'">'+esc(s[0])+'</span></h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="max-height:74vh;overflow:auto">'
+  openModal('<div class="modal-head"><h3>Transfer '+esc(t.doc_no)+' <span class="tag '+s[1]+'">'+esc(s[0])+'</span></h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto">'
     +'<div class="pi-form"><div>'+ro('From',whName(t.from_wh)+'  ('+projName(t.from_project_id)+')')+ro('To',whName(t.to_wh)+'  ('+projName(t.to_project_id)+')')+ro('Date',U().dmy(t.transfer_date))+'</div><div>'+ro('Legal entity',t.kind==='same_entity'?'Same — a pure transfer':'Different — recorded as linked stock adjustments (for Accounts)')+ro('Vehicle no',t.vehicle_no||'')+ro('Dispatched by',uname(t.dispatched_by))+(t.received_by?ro('Received by',uname(t.received_by)+'  ·  '+U().dmyTime(t.received_at)):'')+'</div></div>'
     +'<div class="card" style="padding:0"><table class="tbl"><thead><tr><th>Item</th><th>Unit</th><th class="pus-num">Sent</th><th class="pus-num">Received</th><th class="pus-num">Sent back</th><th class="pus-num">Rate</th><th class="pus-num">Value</th></tr></thead><tbody>'
     +TC.lines.map(l=>'<tr><td><b>'+esc(itemName(l.item_id))+'</b></td><td>'+esc(stockUnit(l.item_id))+'</td><td class="pus-num">'+qty(l.qty)+'</td><td class="pus-num">'+(t.status==='in_transit'?'—':qty(l.received_qty))+'</td><td class="pus-num">'+(+l.returned_qty?qty(l.returned_qty):'—')+'</td><td class="pus-num">'+money(l.rate)+'</td><td class="pus-num">'+money(l.value)+'</td></tr>').join('')+'</tbody></table></div>'

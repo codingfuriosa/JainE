@@ -82,7 +82,7 @@
    '@media print{.sidebar,.topbar,.eng-tabs,.page-head .eng-actions,.eng-noprint,#toasts,.sb-backdrop{display:none!important}.main{margin:0!important}.view{padding:0!important}.card{box-shadow:none!important;border:0!important}}';
   document.head.appendChild(st);
 
-  const TABS=[['','Overview'],['budget','Budget'],['boq','BOQ'],['wo','Work Orders'],['amend','Amendments'],['wd','Work Done'],['ra','RA Bills'],['masters','Masters']];
+  const TABS=[['','Overview'],['budget','Budget'],['boq','BOQ'],['wo','Work Orders'],['amend','Amendments'],['wd','Work Done'],['ra','RA Bills'],['ret','Retention'],['masters','Masters']];
   const TABNAME={};TABS.forEach(t=>TABNAME[t[0]]=t[1]);
   function head(tab,sub,actions){
     return '<div class="page-head"><div><h1><i class="fa-solid fa-compass-drafting" style="color:#0e7490"></i> Engineering</h1><p>'+sub+'</p></div><div class="eng-actions">'+(actions||'')+'</div></div>'+
@@ -173,6 +173,24 @@
   /* ======================================================================= OVERVIEW */
   const dirTag=d=>'<span class="tag '+(d==='Inflow'?'t-green':'t-amber')+'"><i class="fa-solid fa-arrow-'+(d==='Inflow'?'down':'up')+'"></i> '+esc(d)+'</span>';
   ENG.dirTag=dirTag;
+  /* ---- actual payments, from Accounts. accounts.eng_budget_actuals() returns, per project / block / activity group, how much
+     of the work billed on RA bills Accounts has posted has been paid (GST, TDS and retention left out, so it compares directly
+     with the budget and with "billed"), and how much retention is still held. If Accounts is not available the column shows "—". ---- */
+  async function accActuals(pid){
+    try{const {data,error}=await sb.schema('accounts').rpc('eng_budget_actuals',{p_project:pid||null});if(error)return null;return data||[];}catch(e){return null;}
+  }
+  function actFor(b){
+    const rows=ENG.L.act;if(!rows)return null;
+    let paid=0,gross=0,ret=0;
+    rows.forEach(r=>{if(r.project_id===b.project_id&&(!b.tower_id||r.tower_id===b.tower_id)&&(!b.group_id||r.group_id===b.group_id)){paid+=num(r.paid_value);gross+=num(r.gross);ret+=num(r.retention_held);}});
+    return {paid:paid,gross:gross,ret:ret};
+  }
+  const actProject=pid=>{const rows=ENG.L.act;if(!rows)return null;return rows.filter(r=>r.project_id===pid).reduce((s,r)=>s+num(r.paid_value),0);};
+  const paidCell=b=>{
+    const a=actFor(b);if(!a)return '<td class="r sub">—</td>';
+    const bl=num(b.billed);
+    return '<td class="r">'+inr(a.paid)+'<div class="sub" style="font-size:11px;color:var(--slate)">'+(bl>0?pct(a.paid,bl)+'% of billed':'nothing billed')+(a.ret>0?' · '+inr(a.ret)+' retention held':'')+'</div></td>';
+  };
   ENG.routes['']=async function(v,a,t){
     v.innerHTML=head('','Budget → BOQ → work order → work done → RA bill, in one place')+projBar(true)+'<div id="engBody">'+LOAD+'</div>';
     const pid=curProject();
@@ -183,8 +201,11 @@
     const [sm,bd,cs]=await Promise.all([s,b,c]);
     if(sm.error)throw sm.error;if(bd.error)throw bd.error;if(cs.error)throw cs.error;
     if(t!==ENG.rt)return;
+    ENG.L.act=await accActuals(pid);
+    if(t!==ENG.rt)return;
     const rows=sm.data||[];const sum=k=>rows.reduce((x,r)=>x+num(r[k]),0);
-    const kp=[['Outflow budget',sum('outflow_budget')?cr(sum('outflow_budget')):'—','fa-wallet','#b45309','#fffbeb'],['Committed (work orders)',cr(sum('committed')),'fa-file-contract','#1d4ed8','#eff4ff'],['Work verified',cr(sum('verified')),'fa-circle-check','#0f766e','#f0fdfa'],['Billed (RA bills)',cr(sum('billed')),'fa-file-invoice-dollar','#7c3aed','#f5f3ff'],
+    const paidAll=ENG.L.act?ENG.L.act.reduce((s,r)=>s+num(r.paid_value),0):null;
+    const kp=[['Outflow budget',sum('outflow_budget')?cr(sum('outflow_budget')):'—','fa-wallet','#b45309','#fffbeb'],['Committed (work orders)',cr(sum('committed')),'fa-file-contract','#1d4ed8','#eff4ff'],['Work verified',cr(sum('verified')),'fa-circle-check','#0f766e','#f0fdfa'],['Billed (RA bills)',cr(sum('billed')),'fa-file-invoice-dollar','#7c3aed','#f5f3ff'],['Paid (via Accounts)',paidAll==null?'—':cr(paidAll),'fa-money-check-dollar','#0e7490','#ecfeff'],
       ['Inflow budget',sum('inflow_budget')?cr(sum('inflow_budget')):'—','fa-piggy-bank','#15803d','#f0fdf4'],['Received (collections)',cr(sum('received')),'fa-hand-holding-dollar','#15803d','#f0fdf4']];
     const att=[
       ['wd','Awaiting verification',sum('awaiting_verification'),'fa-hourglass-half','#b45309','#fffbeb'],
@@ -199,10 +220,10 @@
       '<div class="eng-att">'+att.map(x=>'<a onclick="navTo(\'engineering/'+x[0]+'\')"><span class="ic" style="background:'+x[5]+';color:'+x[4]+'"><i class="fa-solid '+x[3]+'"></i></span><span><div class="n">'+x[2]+'</div><div class="l">'+x[1]+'</div></span></a>').join('')+'</div>'+
       (pid?'':
         '<div class="card eng-tbl" style="margin-bottom:16px"><div class="card-pad" style="border-bottom:1px solid var(--line)"><div class="sec-title" style="margin:0">Projects</div><div class="sec-sub" style="margin:2px 0 0">Click a project to focus on it</div></div>'+
-        '<table class="tbl"><thead><tr><th>Project</th><th class="r">BOQ value</th><th class="r">Outflow budget</th><th class="r">Committed</th><th class="r">Billed</th><th class="r">Inflow budget</th><th class="r">Received</th><th class="r">Open WOs</th></tr></thead><tbody>'+
-        (rows.length?rows.map(r=>'<tr class="clk" onclick="ENG.f.setProject(\''+r.project_id+'\')"><td><b>'+esc(r.project_name)+'</b></td><td class="r">'+inr(r.boq_value)+'</td><td class="r">'+(num(r.outflow_budget)?inr(r.outflow_budget):'—')+'</td><td class="r">'+inr(r.committed)+'</td><td class="r">'+inr(r.billed)+'</td><td class="r">'+(num(r.inflow_budget)?inr(r.inflow_budget):'—')+'</td><td class="r">'+inr(r.received)+'</td><td class="r">'+(num(r.wo_draft)+num(r.wo_issued))+'</td></tr>').join(''):'<tr><td colspan="8"><div class="empty" style="padding:24px">No projects available</div></td></tr>')+
+        '<table class="tbl"><thead><tr><th>Project</th><th class="r">BOQ value</th><th class="r">Outflow budget</th><th class="r">Committed</th><th class="r">Billed</th><th class="r">Paid</th><th class="r">Inflow budget</th><th class="r">Received</th><th class="r">Open WOs</th></tr></thead><tbody>'+
+        (rows.length?rows.map(r=>'<tr class="clk" onclick="ENG.f.setProject(\''+r.project_id+'\')"><td><b>'+esc(r.project_name)+'</b></td><td class="r">'+inr(r.boq_value)+'</td><td class="r">'+(num(r.outflow_budget)?inr(r.outflow_budget):'—')+'</td><td class="r">'+inr(r.committed)+'</td><td class="r">'+inr(r.billed)+'</td><td class="r">'+(actProject(r.project_id)==null?'—':inr(actProject(r.project_id)))+'</td><td class="r">'+(num(r.inflow_budget)?inr(r.inflow_budget):'—')+'</td><td class="r">'+inr(r.received)+'</td><td class="r">'+(num(r.wo_draft)+num(r.wo_issued))+'</td></tr>').join(''):'<tr><td colspan="9"><div class="empty" style="padding:24px">No projects available</div></td></tr>')+
         '</tbody></table></div>')+
-      '<div class="card eng-tbl" style="margin-bottom:16px"><div class="card-pad" style="border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><div class="sec-title" style="margin:0">'+dirTag('Outflow')+' Budget vs actual</div><div class="sec-sub" style="margin:4px 0 0">Committed = value of work orders issued against the budgeted scope</div></div><button class="btn btn-sm" onclick="navTo(\'engineering/budget\')">Manage budgets</button></div>'+
+      '<div class="card eng-tbl" style="margin-bottom:16px"><div class="card-pad" style="border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><div class="sec-title" style="margin:0">'+dirTag('Outflow')+' Budget vs actual</div><div class="sec-sub" style="margin:4px 0 0">Committed = value of work orders issued against the budgeted scope · Paid = the part of the billed work already paid through Accounts (GST, TDS and retention left out)</div></div><button class="btn btn-sm" onclick="navTo(\'engineering/budget\')">Manage budgets</button></div>'+
         outflowTable(outRows,false)+'</div>'+
       '<div class="card eng-tbl" style="margin-bottom:16px"><div class="card-pad" style="border-bottom:1px solid var(--line)"><div class="sec-title" style="margin:0">'+dirTag('Inflow')+' Collections vs budget</div><div class="sec-sub" style="margin:4px 0 0">Received = active receipts recorded in Post Sales, less refunds</div></div>'+
         inflowTable(inRows,false)+'</div>'+
@@ -229,12 +250,12 @@
   const scopeCell=b=>'<td><b>'+esc(scopeLabel(b))+'</b>'+(b.remarks?'<div class="sub" style="font-size:12px;color:var(--slate)">'+esc(b.remarks)+'</div>':'')+'</td>';
   function outflowTable(rows,manage){
     if(!rows.length)return '<div class="empty" style="padding:34px"><i class="fa-solid fa-wallet"></i><div style="font-weight:600;color:var(--ink)">No outflow budgets set yet</div><p>Set a cost budget against a project, block, activity group or material.</p></div>';
-    return '<table class="tbl"><thead><tr><th>Project</th><th>Level</th><th>Scope</th><th class="r">Budget</th><th class="r">BOQ value</th><th class="r">Committed</th><th class="r">Billed</th><th style="min-width:120px">Committed vs budget</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+
+    return '<table class="tbl"><thead><tr><th>Project</th><th>Level</th><th>Scope</th><th class="r">Budget</th><th class="r">BOQ value</th><th class="r">Committed</th><th class="r">Billed</th><th class="r">Paid</th><th style="min-width:120px">Committed vs budget</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+
       rows.map(b=>{
         const mat=b.level==='Material';
         return '<tr><td>'+esc(b.project_name)+'</td><td>'+lvTag(b.level)+'</td>'+scopeCell(b)+'<td class="r">'+inr(b.amount)+'</td>'+
-        (mat?'<td class="r sub" colspan="4" style="text-align:center">Material budgets aren’t tracked against work orders</td>':
-          '<td class="r">'+inr(b.boq_value)+'</td><td class="r">'+inr(b.committed)+'</td><td class="r">'+inr(b.billed)+'</td><td>'+bar(num(b.committed),num(b.amount))+'<div style="font-size:11px;color:var(--slate);margin-top:3px">'+pct(num(b.committed),num(b.amount))+'% · '+(num(b.committed)>num(b.amount)?'<span style="color:var(--err);font-weight:600">over by '+inr(num(b.committed)-num(b.amount))+'</span>':inr(num(b.amount)-num(b.committed))+' left')+'</div></td>')+
+        (mat?'<td class="r sub" colspan="5" style="text-align:center">Material budgets aren’t tracked against work orders</td>':
+          '<td class="r">'+inr(b.boq_value)+'</td><td class="r">'+inr(b.committed)+'</td><td class="r">'+inr(b.billed)+'</td>'+paidCell(b)+'<td>'+bar(num(b.committed),num(b.amount))+'<div style="font-size:11px;color:var(--slate);margin-top:3px">'+pct(num(b.committed),num(b.amount))+'% · '+(num(b.committed)>num(b.amount)?'<span style="color:var(--err);font-weight:600">over by '+inr(num(b.committed)-num(b.amount))+'</span>':inr(num(b.amount)-num(b.committed))+' left')+'</div></td>')+
         (manage?rowActions(b):'')+'</tr>';
       }).join('')+'</tbody></table>';
   }
@@ -253,6 +274,8 @@
     if(pid)b=b.eq('project_id',pid);
     const r=await b;if(r.error)throw r.error;
     if(t!==ENG.rt)return;
+    ENG.L.act=await accActuals(pid);
+    if(t!==ENG.rt)return;
     ENG.L.budgets=r.data||[];
     const sorted=x=>x.slice().sort((p,q2)=>String(p.project_name).localeCompare(String(q2.project_name))||LVL_ORD[p.level]-LVL_ORD[q2.level]||String(scopeLabel(p)).localeCompare(String(scopeLabel(q2))));
     const outRows=sorted(ENG.L.budgets.filter(x=>x.direction!=='Inflow')),inRows=sorted(ENG.L.budgets.filter(x=>x.direction==='Inflow'));
@@ -262,7 +285,7 @@
       '<div class="eng-sum" style="margin-bottom:14px"><span>Planned inflow <b>'+inr(projIn)+'</b></span><span>Planned outflow <b>'+inr(projOut)+'</b></span><span>Planned net <b style="color:'+(projIn-projOut>=0?'var(--ok)':'var(--err)')+'">'+inr(projIn-projOut)+'</b></span><span style="color:var(--slate)">whole-project lines only</span></div>'+
       '<div class="card eng-tbl" style="margin-bottom:16px"><div class="card-pad" style="border-bottom:1px solid var(--line)"><div class="sec-title" style="margin:0">'+dirTag('Outflow')+' Cost budgets</div></div>'+outflowTable(outRows,true)+'</div>'+
       '<div class="card eng-tbl"><div class="card-pad" style="border-bottom:1px solid var(--line)"><div class="sec-title" style="margin:0">'+dirTag('Inflow')+' Collection budgets</div><div class="sec-sub" style="margin:4px 0 0">Compared with active receipts in Post Sales, less refunds. Set against a project or a block.</div></div>'+inflowTable(inRows,true)+'</div>'+
-      '<div class="eng-note" style="margin-top:12px">Budgets at different levels are independent controls — they are not required to add up to each other. Material budgets come from the Purchase item master and are shown for reference only.</div>';
+      '<div class="eng-note" style="margin-top:12px">Budgets at different levels are independent controls — they are not required to add up to each other. Material budgets come from the Purchase item master and are shown for reference only. <b>Paid</b> is what Accounts has actually paid against posted RA bills, shown as the part of the billed work it settles (GST, TDS and retention left out); retention still held is noted under it and is released from the Retention tab.</div>';
   };
   const LEVELS_ALL=[['project','Whole project'],['block','A block / tower'],['group','An activity group'],['block_group','Activity group within a block'],['material','A material'],['block_material','Material within a block']];
   const levelsFor=d=>d==='Inflow'?LEVELS_ALL.slice(0,2):LEVELS_ALL;

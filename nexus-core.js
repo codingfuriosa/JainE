@@ -47,8 +47,8 @@ function pageIdFromPath(pathname){
 // second visit in the same tab.
 // A page may list several scripts; they load one after another, in order (purchase-indent.js uses what
 // purchase.js defines).
-const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js']};
-const PAGE_SCRIPT_VERSION={'purchase.js':'20261004v','purchase-indent.js':'20261004j','purchase-rfq.js':'20261004e','purchase-po.js':'20261004c','purchase-stores.js':'20261004b','purchase-reports.js':'20261004a'};
+const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js'],accounts:['accounts.js','accounts-bank.js','accounts-books.js']};
+const PAGE_SCRIPT_VERSION={'accounts.js':'20261005c','accounts-bank.js':'20261005a','accounts-books.js':'20261005b','purchase.js':'20261005b','purchase-indent.js':'20261005a','purchase-rfq.js':'20261005a','purchase-po.js':'20261005a','purchase-stores.js':'20261005a','purchase-reports.js':'20261004a'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];
@@ -592,6 +592,7 @@ const NAV=[
   ]},
   {group:'Governance',items:[
     {id:'finance',label:'Finance Vault',icon:'fa-indian-rupee-sign'},
+    {id:'accounts',label:'Accounts',icon:'fa-calculator'},
     {id:'legal',label:'Legal',icon:'fa-scale-balanced'},
     {id:'compliance',label:'Renewals & Compliance',icon:'fa-calendar-check'},
   ]},
@@ -723,14 +724,45 @@ function canInventory(){
   const me=String(state.email||'').trim().toLowerCase();
   return INVENTORY_PEOPLE.indexOf(me)!==-1;
 }
-function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
+/* ACCOUNTS IS FOR THREE PEOPLE, BY NAME.
+   Administrator, Prerna and Vicky - the same people who hold the module's own administrator role in
+   accounts.access. Same arrangement as Inventory above: the test runs BEFORE the state.super shortcut
+   in pageAllowed, so the other super admins do not get the menu entry and cannot open the page.
+
+   This decides only whether the menu entry is drawn and the page opens. It is not a database rule:
+   accounts.can_read() still lets any super admin (or anyone granted 'accounts') read the accounts
+   tables through the API, and what anybody may post or change is enforced by the database separately
+   (accounts.access roles, posted vouchers are immutable).
+
+   To add someone for now, add an address here AND a row in accounts.access.
+   To open it up later, delete this block and the two checks for 'accounts' below. */
+const ACCOUNTS_PEOPLE=['ayushruia1@gmail.com','businessanalyst@thejaingroup.com','system3.thejaingroup@gmail.com'];
+function canAccounts(){
+  if(state.isCustomer||state.impersonating) return false;
+  const me=String(state.email||'').trim().toLowerCase();
+  return ACCOUNTS_PEOPLE.indexOf(me)!==-1;
+}
+/* WEEKLY STATUS IS FOR PRERNA ALONE, BY NAME.
+   Same arrangement as the Feedback Hub and Inventory above: not granted through modules and not
+   open to every superadmin, so the test runs BEFORE the state.super shortcut in pageAllowed.
+   The database half of this is app.has_module('weekly_status'), which for this one module ignores
+   the superadmin bypass and needs the id in the person's own adm.users.modules - so the ops.*
+   tables and RPCs refuse anyone else even if they reach the page some other way.
+   To add someone: add the address here AND put 'weekly_status' in their adm.users.modules. */
+const WEEKLY_STATUS_PEOPLE=['businessanalyst@thejaingroup.com'];
+function canWeeklyStatus(){
+  if(state.isCustomer||state.impersonating) return false;
+  const me=String(state.email||'').trim().toLowerCase();
+  return WEEKLY_STATUS_PEOPLE.indexOf(me)!==-1;
+}
+function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(it.id==='accounts')?canAccounts():(it.id==='weekly_status')?canWeeklyStatus():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(hasUsability()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -960,7 +992,7 @@ function notifGeneralMeta(n){
 window.notifOpenMedia=function(mode){
   const dd=$('notifDd'); if(dd) dd.classList.remove('show');
   CPA_PH.mode=(mode==='review'&&cpaIsPhotoApprover())?'review':'upload';
-  if(CPA_PH.mode==='review'){ CPA_RV.status='pending'; CPA_RV.sel.clear(); }
+  if(CPA_PH.mode==='review'){ CPA_RV.status='pending'; CPA_RV.sel.clear(); CPA_RV.picked=false; }
   navTo('custportal_admin/'+(cpaPhotosOnly()?0:3));
 };
 async function toggleNotif(){
@@ -10988,6 +11020,7 @@ const USB_COL4={
      The line is almost always the same: a feature that DOES something carries a subject, and a
      feature you only LOOK AT does not. Create task has an assignee, Search tasks never will.
 
+  'accounts':             {header:'Time spent', keys:['time_spent']},
      hideDetails is set only where Details is empty too, so what is left is never a row of two
      dashes - on the rest Details already carries the query, the item, the case number or the
      check, which is why none of them loses anything by giving up the column. */
@@ -11818,6 +11851,22 @@ async function procFetch(cat){
 
 function procRefresh(cat){
   const host=$('procHost');if(!host)return;
+/* ===== ACCOUNTS MODULE =====
+   Two tabs. Transactions (vouchers, bills & on-account payments, bank reconciliation, cheque printing,
+   enterprise / company / business-unit structure) lives in accounts.js + accounts-bank.js; Ledgers &
+   postings (automatic GST / TDS / retention / Post Sales postings, chart of accounts, ledger opening,
+   ledgers and trial balance) lives in accounts-books.js. Loaded on demand - see PAGE_EXTRA_SCRIPT.
+   Spec: docs/accounts-spec.md. Tables and functions: supabase/migrations/2026100510*..2026100512*. */
+VIEWS.accounts=async function(v,seg){
+  setCrumb(['Governance','Accounts']);
+  const tabs=['Transactions','Ledgers & postings'];const ti=mTab(seg,tabs.length);
+  v.innerHTML=mHead('fa-calculator','#0e7490','Accounts')+mTabs('accounts',tabs,ti)+'<div id="acxBody" style="margin-top:16px"></div>';
+  const host=$('acxBody');
+  const fn=ti===0?window.acxRender:window.acxBooksRender;
+  if(typeof fn!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Accounts could not finish loading - refresh the page.</div></div>'; return; }
+  await fn(host,seg.slice(1));
+};
+
   procFetch(cat).then(docs=>{ host.innerHTML=procCardsHtml(docs,cat); procActionBar(cat); });
 }
 
@@ -18837,6 +18886,13 @@ async function cpaStaffOptions(force){
 
 VIEWS.custportal_admin=async function(v,seg){
   setCrumb(['Stakeholder Portals','Customer Portal Admin']);
+  /* ".../custportal-admin.html#/3/review" - the "Review now" link in an approver's email - opens
+     Photos & Videos on Review. Taken once and dropped from the address, so switching back to Upload
+     afterwards is not overruled by it. */
+  if(Array.isArray(seg)&&seg.indexOf('review')!==-1){
+    if(cpaIsPhotoApprover()){ CPA_PH.mode='review'; CPA_RV.status='pending'; CPA_RV.sel.clear(); CPA_RV.picked=false; }
+    try{ history.replaceState(history.state,'',location.pathname+location.search+'#/'+seg.filter(s=>s!=='review').join('/')); }catch(_e){}
+  }
   if(cpaPhotosOnly()){
     v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',['Photos & Videos'],0)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
     const h=$('cpaBody');if(h) await cpaRenderPhotos(h);
@@ -20196,6 +20252,11 @@ function cpaTowersForProject(units,projectId){return [...new Set(units.filter(u=
 const CPA_PH_AREAS=[['common','Common area','fa-couch'],
                     ['bathroom','Bathroom','fa-bath'],
                     ['kitchen','Kitchen','fa-kitchen-set']];
+/* The sections offered when UPLOADING for a flat. The site supervisor (the 'Photos & Videos only'
+   tile) uploads Common area and Kitchen only - Bathroom was taken off his screen on 5 Oct 2026.
+   Everyone else still has all three, and bathroom photos already uploaded are untouched: the
+   lists, Review and the customer's view still know the section. */
+function cpaPhUploadAreas(){ return cpaPhotosOnly()?CPA_PH_AREAS.filter(a=>a[0]!=='bathroom'):CPA_PH_AREAS; }
 // level -> which of the three pickers it needs. Flat needs all three; the project level needs
 // only the project, so the pickers it does not use are hidden rather than left there to be
 // filled in pointlessly.
@@ -20240,7 +20301,11 @@ function cpaPhCss(){return `<style>
   .cph-rvgh span{color:var(--slate);font-size:12.5px;margin-right:auto}
   .cph-rvgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
   .cph-rvc{position:relative;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#fff;display:flex;flex-direction:column;transition:box-shadow .15s,border-color .15s}
-  .cph-rvc.sel{border-color:#1d4ed8;box-shadow:0 0 0 2px rgba(29,78,216,.25)}
+  /* Ticked. Its own class name: the site-wide .sel (dropdowns) is 36px tall and squashed the card. */
+  .cph-rvc.cph-picked{border-color:#1d4ed8;background:#eff6ff;box-shadow:0 0 0 2px rgba(29,78,216,.28)}
+  .cph-rvc.cph-picked .cph-rvm{opacity:.82}
+  .cph-rvc.cph-picked .cph-rvd{color:#1d4ed8}
+  .btn.cph-tickon{border-color:#1d4ed8;color:#1d4ed8;background:#eff6ff}
   .cph-rvck{position:absolute;top:7px;left:7px;z-index:2;background:rgba(255,255,255,.92);border-radius:6px;padding:3px 4px;line-height:0}
   .cph-rvck input{width:17px;height:17px;margin:0;cursor:pointer}
   .cph-rvm{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;cursor:zoom-in;background:#0f172a}
@@ -20258,7 +20323,29 @@ function cpaPhCss(){return `<style>
   .cph-reasons{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
   .cph-reason{border:1px solid var(--line);background:#f8fafc;border-radius:16px;padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer}
   .cph-reason:hover{border-color:#1d4ed8;color:#1d4ed8}
-  @media(max-width:760px){.cph-rvgrid{grid-template-columns:repeat(2,1fr)}.cph-md{padding:8px 12px}}
+  /* Review preview */
+  .cph-box.cph-pv{padding:0;background:#000}
+  .cph-pv .cph-boxbar{z-index:3;padding:14px 18px 30px;background:linear-gradient(rgba(0,0,0,.7),transparent)}
+  .cph-pvstage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .cph-pv .cph-pvstage img,.cph-pv .cph-pvstage video{position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;
+    object-fit:contain;background:transparent;box-shadow:none;border-radius:0}
+  .cph-pvload{color:#cbd5e1;font-size:26px}
+  .cph-pvn{color:#cbd5e1;font-size:12.5px;margin-left:10px;white-space:nowrap}
+  .cph-pvnav{position:absolute;z-index:2;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:0;
+    background:rgba(255,255,255,.16);color:#fff;font-size:18px;cursor:pointer}
+  .cph-pvnav:hover{background:rgba(255,255,255,.3)}
+  .cph-pvnav.l{left:18px}.cph-pvnav.r{right:18px}
+  .cph-pvacts{position:absolute;z-index:3;top:62px;left:0;right:0;display:flex;justify-content:center;gap:12px;flex-wrap:wrap;
+    padding:0 16px;pointer-events:none}
+  .cph-pvacts>*{pointer-events:auto}
+  .cph-pvbtn{height:46px;padding:0 26px;border-radius:10px;border:0;font:inherit;font-size:15px;font-weight:700;cursor:pointer;
+    display:inline-flex;align-items:center;gap:9px;box-shadow:0 6px 20px rgba(0,0,0,.55)}
+  .cph-pvbtn.ok{background:#16a34a;color:#fff}.cph-pvbtn.ok:hover{background:#15803d}
+  .cph-pvbtn.no{background:#dc2626;color:#fff}.cph-pvbtn.no:hover{background:#b91c1c}
+  .cph-pvbtn.un{background:#fff;color:#334155}
+  .cph-pvnote{color:#e2e8f0;background:rgba(255,255,255,.12);padding:11px 16px;border-radius:10px;font-size:14px}
+  @media(max-width:760px){.cph-rvgrid{grid-template-columns:repeat(2,1fr)}.cph-md{padding:8px 12px}
+    .cph-pvnav{top:auto;bottom:18px;transform:none}.cph-pvbtn{height:44px;padding:0 20px}}
 
   /* level buttons and the pickers share one row on a wide screen */
   .cph-bar{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
@@ -20348,6 +20435,9 @@ function cpaPhCss(){return `<style>
   .cph-tbl tbody tr:hover{background:#f8fafc}
   .cph-th{width:46px;height:46px;border-radius:7px;object-fit:cover;display:block;cursor:pointer;border:1px solid var(--line)}
   .cph-th.vid{background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b}
+  img.cph-th:not([src]),img.cph-rvm:not([src]){background:linear-gradient(90deg,#eef2f7,#f8fafc,#eef2f7);background-size:200% 100%;animation:cphShim 1.2s linear infinite}
+  img.cph-noimg{animation:none;background:#eef2f7}
+  @keyframes cphShim{to{background-position:-200% 0}}
   .cph-when{white-space:nowrap;font-weight:600;color:var(--ink)}
   .cph-area{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;
     background:#eff6ff;color:#1e40af;white-space:nowrap}
@@ -20438,7 +20528,7 @@ async function cpaPhFillBadge(){
     el.textContent=n>999?'999+':String(n); el.style.display=n?'inline-flex':'none';
   }catch(_e){}
 }
-window.cpaPhSetMode=function(m){ CPA_PH.mode=m; CPA_RV.sel.clear(); route(); };
+window.cpaPhSetMode=function(m){ CPA_PH.mode=m; CPA_RV.sel.clear(); if(m==='review'){ CPA_RV.status='pending'; CPA_RV.picked=false; } route(); };
 
 // Everything on screen is redrawn from CPA_PH, so there is one description of the state and no
 // way for the pickers, the form and the list to disagree about which flat is being looked at.
@@ -20454,6 +20544,9 @@ async function cpaPhPaint(projects,units){
   if(needUnit&&flats.length&&!flats.some(u=>String(u.id)===String(CPA_PH.unit))) CPA_PH.unit=String(flats[0].id);
 
   const today=new Date().toISOString().slice(0,10);
+  // When each flat last had something uploaded, shown beside it in the Flat picker (dd/mm/yy).
+  const lastUp=needUnit?await cpaPhLastUploads(flats.map(u=>u.id)):{};
+  if(!$('cphWrap')) return;
   wrap.innerHTML=cpaPhModeBar()
     +(cpaIsPhotoApprover()&&!state.super?'':'<div class="cph-note"><i class="fa-solid fa-circle-info"></i>Everything uploaded here waits for approval by the post-sales team before customers can see it.</div>')
     +'<div class="cph-card">'
@@ -20471,7 +20564,8 @@ async function cpaPhPaint(projects,units){
                            :'<option value="">No blocks on record</option>')
           +'</select></div></div>':'')
           +(needUnit?'<div class="cph-f"><label>Flat</label><div class="cph-sel"><select id="cphUnit" onchange="cpaPhSet(\'unit\',this.value)">'
-            +(flats.length?flats.map(u=>'<option value="'+u.id+'"'+(String(u.id)===String(CPA_PH.unit)?' selected':'')+'>'+esc(u.unit_code)+'</option>').join('')
+            +(flats.length?flats.map(u=>'<option value="'+u.id+'"'+(String(u.id)===String(CPA_PH.unit)?' selected':'')+'>'+esc(u.unit_code)
+                +(lastUp[u.id]?'\u00a0\u00a0\u00a0\u00a0\u00b7\u00a0\u00a0\u00a0\u00a0'+cpaDdMmYy(lastUp[u.id]):'')+'</option>').join('')
                           :'<option value="">No flats in this block</option>')
           +'</select></div></div>':'')
         +'</div>'
@@ -20484,14 +20578,14 @@ async function cpaPhPaint(projects,units){
           +'<input type="date" class="cph-in" id="cphDate" value="'+today+'"></div>'
       +'</div>'
       +(lvl==='unit'
-        ? '<div class="cph-zones">'+CPA_PH_AREAS.map(a=>cpaPhZone(a[0],a[1],a[2])).join('')+'</div>'
+        ? '<div class="cph-zones">'+cpaPhUploadAreas().map(a=>cpaPhZone(a[0],a[1],a[2])).join('')+'</div>'
         : '<div class="cph-zones" style="grid-template-columns:1fr">'+cpaPhZone('all','Photos or videos','fa-images')+'</div>')
       +'<div class="cph-staged" id="cphStaged" style="display:none"></div>'
       +'<div class="cph-acts">'
         +'<button class="btn btn-primary" id="cphGo" onclick="cpaPhUpload()">'
           +'<i class="fa-solid fa-cloud-arrow-up"></i> Upload</button>'
         +'<button class="btn" id="cphClear" onclick="cpaPhClear()">Clear all</button>'
-        +(lvl==='unit'?'<span style="font-size:11.5px;color:var(--slate)">Any one, two or all three \u2014 they go up together.</span>':'')
+        +(lvl==='unit'?'<span style="font-size:11.5px;color:var(--slate)">'+(cpaPhUploadAreas().length===2?'Either or both':'Any one, two or all three')+' \u2014 they go up together.</span>':'')
       +'</div>'
     +'</div>'
 
@@ -20507,6 +20601,18 @@ async function cpaPhPaint(projects,units){
   cpaPhFillBadge();
 }
 
+// Latest upload per flat (any status, not deleted) - newest first, so the first row per flat wins.
+async function cpaPhLastUploads(ids){
+  if(!ids||!ids.length) return {};
+  try{
+    const {data}=await sb.schema('cust').from('unit_photos').select('unit_id,created_at').in('unit_id',ids)
+      .is('deleted_at',null).order('created_at',{ascending:false}).limit(1000);
+    const out={}; (data||[]).forEach(r=>{ if(!out[r.unit_id]) out[r.unit_id]=r.created_at; });
+    return out;
+  }catch(_e){ return {}; }
+}
+function cpaDdMmYy(d){ const x=new Date(d); if(isNaN(x)) return '';
+  return String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+'/'+String(x.getFullYear()).slice(2); }
 // The flats of the chosen project and block, cancelled rows dropped (a cancelled booking keeps
 // its row for audit, which is why the same physical flat could appear two to four times), and
 // filtered by whatever has been typed.
@@ -20666,7 +20772,7 @@ function cpaPhRepaintZones(){
 }
 // The two buttons that act on what has been chosen sit together and know how much there is.
 function cpaPhSyncActions(){
-  const keys=CPA_PH.level==='unit'?CPA_PH_AREAS.map(a=>a[0]):['all'];
+  const keys=CPA_PH.level==='unit'?cpaPhUploadAreas().map(a=>a[0]):['all'];
   const total=keys.reduce((t,k)=>t+((CPA_PH.files[k]||[]).length),0);
   const go=$('cphGo'), clr=$('cphClear');
   if(go){
@@ -20702,7 +20808,7 @@ window.cpaPhUpload=async function(){
   if(lvl==='unit'){
     const unitId=Number(CPA_PH.unit);
     if(!unitId){ toast('Choose a flat first','err'); return; }
-    CPA_PH_AREAS.forEach(a=>(CPA_PH.files[a[0]]||[]).forEach(f=>jobs.push({f,area:a[0]})));
+    cpaPhUploadAreas().forEach(a=>(CPA_PH.files[a[0]]||[]).forEach(f=>jobs.push({f,area:a[0]})));
   } else {
     (CPA_PH.files.all||[]).forEach(f=>jobs.push({f,area:null}));
   }
@@ -20829,8 +20935,36 @@ async function cpaPhList(){
       }
     }
     host.innerHTML=bar+rowsHtml;
+    cphLazy(host);
     const c=$('cphCount'); if(c) c.textContent=count?(count+(count===1?' item':' items')):'';
   }catch(e){ host.innerHTML='<div class="cph-empty" style="color:var(--err)">'+esc((e&&e.message)||String(e))+'</div>'; }
+}
+/* Thumbnails load only as they scroll into view, a few at a time, and a signed link is reused for a
+   few minutes. Signing every row's file up front - one s3-sign call each, now with an access check
+   behind it - and then decoding a full-size original per row is what made a long list hang while
+   scrolling (5 Oct 2026: a block with 100+ flat photos). */
+const CPH_URLS={};
+async function cphSignedUrl(path){
+  const c=CPH_URLS[path];
+  if(c&&Date.now()-c.t<240000) return c.url;   // signed links last 5 minutes
+  const url=await s3SignedUrl(path);
+  if(url) CPH_URLS[path]={url,t:Date.now()};
+  return url;
+}
+let cphIO=null; const cphQ=[]; let cphBusy=0;
+function cphPump(){
+  while(cphBusy<6&&cphQ.length){
+    const img=cphQ.shift(); if(!img.isConnected) continue;
+    cphBusy++;
+    cphSignedUrl(img.getAttribute('data-ph')).then(u=>{ if(u){ img.src=u; } else img.classList.add('cph-noimg'); })
+      .catch(()=>img.classList.add('cph-noimg')).finally(()=>{ cphBusy--; cphPump(); });
+  }
+}
+function cphLazy(root){
+  const imgs=(root||document).querySelectorAll('img[data-ph]:not([src])');
+  if(!('IntersectionObserver' in window)){ imgs.forEach(i=>cphQ.push(i)); cphPump(); return; }
+  if(!cphIO) cphIO=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting){ cphIO.unobserve(e.target); cphQ.push(e.target); cphPump(); } }),{rootMargin:'300px 0px'});
+  imgs.forEach(i=>cphIO.observe(i));
 }
 // `cols` names the middle columns and `vals` fills them for one row, so the three levels share
 // one table rather than three that could drift apart.
@@ -20843,11 +20977,7 @@ async function cpaPhRows(list,table,cols,vals,emptyMsg){
     // A rejected file has been removed from S3 - there is nothing to show or open.
     if(p.status==='rejected'){ thumb='<div class="cph-th vid" title="File removed when it was rejected"><i class="fa-solid fa-ban"></i></div>'; }
     else if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
-    else{
-      const url=await s3SignedUrl(p.storage_path);
-      thumb=url?'<img class="cph-th" src="'+url+'" alt="" onclick="'+open+'" title="Open full size">'
-               :'<div class="cph-th vid" onclick="'+open+'"><i class="fa-solid fa-image"></i></div>';
-    }
+    else thumb='<img class="cph-th" data-ph="'+esc(p.storage_path)+'" alt="" decoding="async" onclick="'+open+'" title="Open full size">';
     return '<tr><td>'+thumb+'</td>'
       +'<td class="cph-when">'+esc(fmtDate(p.taken_on))+'</td>'
       +'<td>'+cpaMediaStatusTag(p)+'</td>'
@@ -20880,20 +21010,50 @@ window.cpaPhDelete=async function(table,id){
    that grouped by where they are, so a whole flat or block can be published in one go. Approve,
    reject (a reason is required; the uploader is told it, and the file is removed from S3) and
    unpublish all go through cust.review_media(), which also refuses an approver's own uploads. */
+/* Everything waiting, counted per project, per section and per block, so the pickers can say where
+   the work is. (5 Oct 2026: Review opened on the first project alphabetically, Dream Ananta, while
+   all 262 waiting photos were Dream Gurukul flats - the screen read "nothing waiting".) */
+async function cpaRvPending(units){
+  const unitOf={}; (units||[]).forEach(u=>{unitOf[u.id]=u;});
+  const q=(t,cols)=>sb.schema('cust').from(t).select(cols).eq('status','pending').is('deleted_at',null).limit(5000).then(r=>r.data||[],()=>[]);
+  const [pp,tp,up]=await Promise.all([q('project_photos','project_id'),q('tower_photos','project_id,tower'),q('unit_photos','unit_id')]);
+  const out={};
+  const add=(pid,sec,tower)=>{ if(pid==null) return;
+    const o=out[pid]=out[pid]||{total:0,project_photos:0,tower_photos:0,unit_photos:0,towers:{}};
+    o.total++; o[sec]++;
+    if(tower){ const t=o.towers[tower]=o.towers[tower]||{tower_photos:0,unit_photos:0}; t[sec]++; } };
+  pp.forEach(r=>add(r.project_id,'project_photos'));
+  tp.forEach(r=>add(r.project_id,'tower_photos',r.tower));
+  up.forEach(r=>{ const u=unitOf[r.unit_id]; if(u) add(u.project_id,'unit_photos',u.tower); });
+  return out;
+}
+// The section of a project that has the most waiting, or the current one if nothing is waiting.
+function cpaRvBusiestSec(p){
+  if(!p||!p.total) return CPA_RV.sec;
+  return CPA_RV_SECS.map(s=>s[0]).sort((a,b)=>(p[b]||0)-(p[a]||0))[0];
+}
 async function cpaRvPaint(projects,units){
   projects=projects||await cpaProjects(); units=units||await cpaUnits();
   const wrap=$('cphWrap'); if(!wrap) return;
+  const pend=await cpaRvPending(units);
+  CPA_RV.pend=pend;
+  // First time in (or arriving from a notification): go where the waiting items are.
+  if(!CPA_RV.picked){
+    const best=Object.keys(pend).sort((a,b)=>pend[b].total-pend[a].total)[0];
+    if(best&&CPA_RV.status==='pending'){ CPA_RV.project=String(best); CPA_RV.tower=''; CPA_RV.sec=cpaRvBusiestSec(pend[best]); }
+    CPA_RV.picked=true;
+  }
   if(!CPA_RV.project&&projects.length) CPA_RV.project=CPA_PH.project||String(projects[0].id);
   const live=(units||[]).filter(u=>u.status!=='cancelled');
   const towers=cpaTowersForProject(live,CPA_RV.project);
   if(CPA_RV.tower&&towers.indexOf(CPA_RV.tower)<0) CPA_RV.tower='';
   const projUnits=live.filter(u=>String(u.project_id)===String(CPA_RV.project));
   // Waiting counts per section for the chosen project - what the section buttons show.
-  const pid=Number(CPA_RV.project);
-  const unitIds=projUnits.map(u=>u.id);
-  const cq=(t)=>{let q=sb.schema('cust').from(t).select('id',{count:'exact',head:true}).eq('status','pending').is('deleted_at',null);
-    return t==='unit_photos'?(unitIds.length?q.in('unit_id',unitIds):Promise.resolve({count:0})):q.eq('project_id',pid);};
-  const counts=await Promise.all(CPA_RV_SECS.map(s=>cq(s[0]).then(r=>r.count||0,()=>0)));
+  const pp=pend[CPA_RV.project]||{};
+  const counts=CPA_RV_SECS.map(s=>pp[s[0]]||0);
+  const waitTxt=n=>n?' ('+n+' waiting)':'';
+  const projOpts=projects.map(p=>[p.id,p.name+waitTxt((pend[p.id]||{}).total)]);
+  const towerOpts=towers.map(t=>{ const c=(pp.towers&&pp.towers[t])||{}; return [t,t+waitTxt(c[CPA_RV.sec]||0)]; });
   const sel=(id,label,opts,val,allLabel)=>'<div class="cph-f"><label>'+esc(label)+'</label><div class="cph-sel"><select onchange="cpaRvSet(\''+id+'\',this.value)">'
     +(allLabel?'<option value=""'+(val?'':' selected')+'>'+esc(allLabel)+'</option>':'')
     +opts.map(o=>'<option value="'+esc(o[0])+'"'+(String(o[0])===String(val)?' selected':'')+'>'+esc(o[1])+'</option>').join('')+'</select></div></div>';
@@ -20904,8 +21064,8 @@ async function cpaRvPaint(projects,units){
           +(counts[i]?'<span class="cph-badge">'+counts[i]+'</span>':'')+'</button>').join('')
       +'</div>'
       +'<div class="cph-filters" style="margin:0">'
-        +sel('project','Project',projects.map(p=>[p.id,p.name]),CPA_RV.project,'')
-        +(CPA_RV.sec!=='project_photos'?sel('tower','Block',towers.map(t=>[t,t]),CPA_RV.tower,'All blocks'):'')
+        +sel('project','Project',projOpts,CPA_RV.project,'')
+        +(CPA_RV.sec!=='project_photos'?sel('tower','Block',towerOpts,CPA_RV.tower,'All blocks'):'')
         +sel('status','Showing',Object.keys(CPA_MEDIA_STATUS).map(k=>[k,CPA_MEDIA_STATUS[k][0]]),CPA_RV.status,'')
       +'</div>'
     +'</div>'
@@ -20915,7 +21075,12 @@ async function cpaRvPaint(projects,units){
 }
 window.cpaRvSet=function(k,v){
   CPA_RV[k]=v; CPA_RV.sel.clear();
-  if(k==='project') CPA_RV.tower='';
+  if(k==='project'){
+    CPA_RV.tower='';
+    // A project chosen while looking at what is waiting opens on a section that has some.
+    const p=(CPA_RV.pend||{})[v];
+    if(CPA_RV.status==='pending'&&p&&p.total&&!p[CPA_RV.sec]) CPA_RV.sec=cpaRvBusiestSec(p);
+  }
   cpaRvPaint();
 };
 async function cpaRvList(projUnits){
@@ -20928,6 +21093,7 @@ async function cpaRvList(projUnits){
     if(t==='unit_photos'){
       const scope=projUnits.filter(u=>!CPA_RV.tower||u.tower===CPA_RV.tower);
       scope.forEach(u=>{byUnit[u.id]=u;});
+      CPA_RV.byUnit=byUnit;
       const ids=scope.map(u=>u.id);
       if(!ids.length){ host.innerHTML='<div class="cph-empty">No flats here.</div>'; cpaRvBar(); return; }
       q=q.in('unit_id',ids);
@@ -20954,6 +21120,7 @@ async function cpaRvList(projUnits){
       (groups[k]=groups[k]||{label,items:[]}).items.push(p);
     });
     const keys=Object.keys(groups).sort((a,b)=>natural(groups[a].label,groups[b].label));
+    CPA_RV.order=keys.flatMap(k=>groups[k].items.map(p=>p.id));   // the preview's arrows follow this
     const cards=await Promise.all(list.map(p=>cpaRvCard(p,t)));
     const cardOf={}; list.forEach((p,i)=>{cardOf[p.id]=cards[i];});
     const canPublish=CPA_RV.status==='pending'||CPA_RV.status==='unpublished';
@@ -20964,10 +21131,12 @@ async function cpaRvList(projUnits){
       const ids=g.items.filter(p=>state.super||String(p.uploaded_by||'').toLowerCase()!==me).map(p=>p.id);
       return '<div class="cph-rvg"><div class="cph-rvgh"><b>'+esc(g.label)+'</b><span>'+g.items.length+' item'+(g.items.length===1?'':'s')+'</span>'
         +(canPublish&&ids.length?'<button class="btn btn-sm" onclick="cpaRvDecide(\'publish\','+JSON.stringify(ids)+')"><i class="fa-solid fa-check"></i> Publish all '+ids.length+'</button>':'')
-        +(ids.length&&CPA_RV.status!=='rejected'?'<button class="btn btn-sm" onclick="cpaRvTick('+JSON.stringify(ids)+')"><i class="fa-regular fa-square-check"></i> Tick all</button>':'')+'</div>'
+        +(ids.length&&CPA_RV.status!=='rejected'?'<button class="btn btn-sm" data-tick-ids="'+JSON.stringify(ids)+'" onclick="cpaRvTick('+JSON.stringify(ids)+')"><i class="fa-regular fa-square-check"></i> Tick all</button>':'')+'</div>'
         +'<div class="cph-rvgrid">'+g.items.map(p=>cardOf[p.id]).join('')+'</div></div>';
     }).join('')
       +(list.length>=240?'<div class="cph-empty">Showing the newest 240. Publish or reject these to see the rest.</div>':'');
+    cphLazy(host);
+    cpaRvSyncTickAll();
     cpaRvBar();
   }catch(e){ host.innerHTML='<div class="cph-empty" style="color:var(--err)">'+esc((e&&e.message)||String(e))+'</div>'; }
 }
@@ -20975,10 +21144,10 @@ async function cpaRvCard(p,t){
   const isVideo=(p.file_type||'').indexOf('video')===0;
   const open="s3OpenSigned('"+String(p.storage_path||'').replace(/'/g,"\\'")+"')";
   let media;
+  const prev='cpaRvPreview('+p.id+')';
   if(p.status==='rejected') media='<div class="cph-rvm vid"><i class="fa-solid fa-ban"></i><span>File removed</span></div>';
-  else if(isVideo) media='<div class="cph-rvm vid" onclick="'+open+'" title="Play video"><i class="fa-solid fa-circle-play"></i><span>Video</span></div>';
-  else{ const url=await s3SignedUrl(p.storage_path);
-    media=url?'<img class="cph-rvm" src="'+url+'" alt="" onclick="'+open+'" title="Open full size">':'<div class="cph-rvm vid" onclick="'+open+'"><i class="fa-solid fa-image"></i></div>'; }
+  else if(isVideo) media='<div class="cph-rvm vid" onclick="'+prev+'" title="Play video"><i class="fa-solid fa-circle-play"></i><span>Video</span></div>';
+  else media='<img class="cph-rvm" data-ph="'+esc(p.storage_path)+'" alt="" decoding="async" onclick="'+prev+'" title="Open larger, with Publish / Reject">';
   const area=t==='unit_photos'?((CPA_PH_AREAS.find(a=>a[0]===(p.area||'common'))||[0,p.area])[1]):'';
   const mine=String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super;
   const on=CPA_RV.sel.has(p.id);
@@ -20991,7 +21160,7 @@ async function cpaRvCard(p,t){
   else if(p.status==='published')
     acts='<button class="cph-un" onclick="cpaRvDecide(\'unpublish\','+id+')" title="Unpublish - hide it from customers again"><i class="fa-solid fa-eye-slash"></i></button>'
         +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject and remove the file"><i class="fa-solid fa-xmark"></i></button>';
-  return '<div class="cph-rvc'+(on?' sel':'')+'" data-id="'+p.id+'">'
+  return '<div class="cph-rvc'+(on?' cph-picked':'')+'" data-id="'+p.id+'">'
     +(p.status!=='rejected'&&!mine?'<label class="cph-rvck"><input type="checkbox" '+(on?'checked':'')+' onchange="cpaRvToggle('+p.id+',this.checked)"></label>':'')
     +media
     +'<div class="cph-rvi"><div class="cph-rvd">'+esc(fmtDate(p.taken_on))+(area?' · '+esc(area):'')+'</div>'
@@ -21012,17 +21181,100 @@ function cpaRvBar(){
 }
 window.cpaRvToggle=function(id,on){
   if(on) CPA_RV.sel.add(id); else CPA_RV.sel.delete(id);
-  const c=document.querySelector('.cph-rvc[data-id="'+id+'"]'); if(c) c.classList.toggle('sel',on);
+  const c=document.querySelector('.cph-rvc[data-id="'+id+'"]'); if(c) c.classList.toggle('cph-picked',on);
+  cpaRvSyncTickAll();
   cpaRvBar();
 };
+// Tick all / Untick all for one group: ticks every photo in it, or - when they are all ticked
+// already - unticks them again.
 window.cpaRvTick=function(ids){
-  const mine=new Set((CPA_RV.shown||[]).filter(p=>String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super).map(p=>p.id));
-  ids.forEach(id=>{ if(!mine.has(id)){ CPA_RV.sel.add(id); const c=document.querySelector('.cph-rvc[data-id="'+id+'"]'); if(c){c.classList.add('sel'); const cb=c.querySelector('input'); if(cb) cb.checked=true;} } });
+  const all=ids.length&&ids.every(id=>CPA_RV.sel.has(id));
+  ids.forEach(id=>{
+    if(all) CPA_RV.sel.delete(id); else CPA_RV.sel.add(id);
+    const c=document.querySelector('.cph-rvc[data-id="'+id+'"]');
+    if(c){ c.classList.toggle('cph-picked',!all); const cb=c.querySelector('input'); if(cb) cb.checked=!all; }
+  });
+  cpaRvSyncTickAll();
   cpaRvBar();
 };
-window.cpaRvClearSel=function(){ CPA_RV.sel.clear(); document.querySelectorAll('.cph-rvc.sel').forEach(c=>{c.classList.remove('sel'); const cb=c.querySelector('input'); if(cb) cb.checked=false;}); cpaRvBar(); };
+// Each group's button says what it will do next.
+function cpaRvSyncTickAll(){
+  document.querySelectorAll('[data-tick-ids]').forEach(b=>{
+    let ids=[]; try{ ids=JSON.parse(b.getAttribute('data-tick-ids')); }catch(_e){}
+    const all=ids.length&&ids.every(id=>CPA_RV.sel.has(id));
+    b.innerHTML=all?'<i class="fa-solid fa-square-minus"></i> Untick all':'<i class="fa-regular fa-square-check"></i> Tick all';
+    b.classList.toggle('cph-tickon',!!all);
+  });
+}
+window.cpaRvClearSel=function(){ CPA_RV.sel.clear(); document.querySelectorAll('.cph-rvc.cph-picked').forEach(c=>{c.classList.remove('cph-picked'); const cb=c.querySelector('input'); if(cb) cb.checked=false;}); cpaRvSyncTickAll(); cpaRvBar(); };
+/* Larger preview with the decision buttons, so a photo can be checked properly before it is
+   published. Arrows (and the keyboard arrows) move through the list in the order it is shown;
+   after Publish / Reject / Unpublish it moves on to the next one by itself. */
+function cpaRvPlace(p){
+  const t=CPA_RV.sec;
+  if(t==='unit_photos'){ const u=(CPA_RV.byUnit||{})[p.unit_id]||{};
+    const area=(CPA_PH_AREAS.find(a=>a[0]===(p.area||'common'))||[0,p.area||''])[1];
+    return (u.tower||'')+' · Flat '+(u.unit_code||'?')+(area?' · '+area:''); }
+  if(t==='tower_photos') return p.tower||'Block';
+  return 'Whole project';
+}
+window.cpaRvPreview=async function(id){
+  const order=CPA_RV.order||[], i=order.indexOf(id);
+  const p=(CPA_RV.shown||[]).find(x=>x.id===id); if(!p) return;
+  cpaRvPreviewClose();
+  const isVid=(p.file_type||'').indexOf('video')===0;
+  const mine=String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super;
+  const one=JSON.stringify([p.id]);
+  let acts;
+  if(mine) acts='<span class="cph-pvnote">Your upload — another approver has to review it.</span>';
+  else if(p.status==='pending'||p.status==='unpublished')
+    acts='<button class="cph-pvbtn ok" onclick="cpaRvPvDecide(\'publish\','+p.id+')"><i class="fa-solid fa-check"></i> Publish</button>'
+        +'<button class="cph-pvbtn no" onclick="cpaRvPvDecide(\'reject\','+p.id+')"><i class="fa-solid fa-xmark"></i> Reject</button>';
+  else if(p.status==='published')
+    acts='<button class="cph-pvbtn un" onclick="cpaRvPvDecide(\'unpublish\','+p.id+')"><i class="fa-solid fa-eye-slash"></i> Unpublish</button>'
+        +'<button class="cph-pvbtn no" onclick="cpaRvPvDecide(\'reject\','+p.id+')"><i class="fa-solid fa-xmark"></i> Reject</button>';
+  else acts='<span class="cph-pvnote">Rejected'+(p.review_note?': '+esc(p.review_note):'')+'</span>';
+  const box=document.createElement('div');
+  box.className='cph-box cph-pv'; box.id='cphPv';
+  box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
+      +'<span class="nm"><b>'+esc(cpaRvPlace(p))+'</b> · '+esc(fmtDate(p.taken_on))+' · '+esc(String(p.uploaded_by||'').split('@')[0])+'</span>'
+      +'<span class="cph-pvn">'+(i+1)+' of '+order.length+'</span>'
+      +'<button class="cph-boxx" title="Close (Esc)" onclick="cpaRvPreviewClose()">&times;</button></div>'
+    +(i>0?'<button class="cph-pvnav l" title="Previous (←)" onclick="cpaRvPreviewStep(-1)"><i class="fa-solid fa-chevron-left"></i></button>':'')
+    +(i<order.length-1?'<button class="cph-pvnav r" title="Next (→)" onclick="cpaRvPreviewStep(1)"><i class="fa-solid fa-chevron-right"></i></button>':'')
+    +'<div class="cph-pvacts">'+acts+'</div>'
+    +'<div class="cph-pvstage"><div class="cph-pvload"><i class="fa-solid fa-spinner fa-spin"></i></div></div>';
+  box.onclick=function(e){ if(e.target===box) cpaRvPreviewClose(); };
+  document.body.appendChild(box);
+  CPA_RV.pvId=p.id;
+  if(!window.__cphPvKeys){ window.__cphPvKeys=true;
+    document.addEventListener('keydown',function(e){
+      if(!$('cphPv')) return;
+      if(e.key==='Escape') cpaRvPreviewClose();
+      else if(e.key==='ArrowRight') cpaRvPreviewStep(1);
+      else if(e.key==='ArrowLeft') cpaRvPreviewStep(-1);
+    }); }
+  const url=p.status==='rejected'?null:await cphSignedUrl(p.storage_path);
+  const stage=box.querySelector('.cph-pvstage'); if(!stage||!box.isConnected) return;
+  stage.innerHTML=!url?'<div class="cph-pvload">File not available</div>'
+    :isVid?'<video src="'+url+'" controls autoplay playsinline></video>':'<img src="'+url+'" alt="">';
+};
+window.cpaRvPreviewClose=function(){ const b=$('cphPv'); if(b) b.remove(); };
+window.cpaRvPreviewStep=function(d){
+  const order=CPA_RV.order||[], i=order.indexOf(CPA_RV.pvId), j=i+d;
+  if(i<0||j<0||j>=order.length) return;
+  cpaRvPreview(order[j]);
+};
+// A decision from the preview: remember what comes next, so the preview reopens on it afterwards.
+window.cpaRvPvDecide=function(decision,id){
+  const order=CPA_RV.order||[], i=order.indexOf(id);
+  CPA_RV.pvNext=order[i+1]!=null?order[i+1]:(order[i-1]!=null?order[i-1]:null);
+  cpaRvPreviewClose();
+  cpaRvDecide(decision,[id],true);
+};
 const CPA_RV_REASONS=['Blurred or out of focus','Wrong flat or block','Too dark','Not a construction photo','Duplicate','Shows people or private information'];
-window.cpaRvDecide=function(decision,ids){
+window.cpaRvDecide=function(decision,ids,fromPreview){
+  if(!fromPreview) CPA_RV.pvNext=null;
   ids=(ids||[]).filter(Boolean);
   if(!ids.length) return;
   if(decision!=='reject'){ cpaRvDo(decision,ids,null); return; }
@@ -21052,7 +21304,10 @@ async function cpaRvDo(decision,ids,note){
   const verb={publish:'published',reject:'rejected',unpublish:'unpublished'}[decision];
   toast(done.length+' '+verb+(skipped?' · '+skipped+' skipped (your own uploads, or already changed)':''),skipped&&!done.length?'warn':'ok');
   CPA_RV.sel.clear();
-  cpaRvPaint();
+  const next=CPA_RV.pvNext; CPA_RV.pvNext=null;
+  await cpaRvPaint();
+  // Decided from the preview: carry on with the next photo, if it is still in the list.
+  if(next!=null&&(CPA_RV.order||[]).indexOf(next)!==-1) cpaRvPreview(next);
 }
 
 /* ---------- Tab 5: Inspection (checklist scan + dated photo/video update trail, per unit) ---------- */
@@ -23177,6 +23432,19 @@ async function custTabProgress(unit){
       +'<span class="cpg-chip"><i class="fa-solid fa-clock-rotate-left"></i>'+(latest?'Last update '+esc(fmtDate(latest)):'Updates coming soon')+'</span>'
       +(total?'<span class="cpg-chip"><i class="fa-solid fa-images"></i>'+[pics?pics+' photo'+(pics===1?'':'s'):'',vids?vids+' video'+(vids===1?'':'s'):''].filter(Boolean).join(' · ')+'</span>':'')
     +'</div></div>';
+
+  /* Set expectations before anyone opens a photo: these are working site pictures, taken by the site
+     team on a phone amid dust, poor light and scaffolding - some are not sharp - and they show work in
+     progress, not the finished flat. Asked for on 5 Oct 2026, once flat photos began to be published. */
+  if(total) out+='<div style="display:flex;gap:12px;align-items:flex-start;margin:0 0 18px;padding:14px 16px;border-radius:12px;'
+    +'background:#fffbeb;border:1px solid #f0dfa8;color:#78350f;font-size:13.5px;line-height:1.6">'
+    +'<i class="fa-solid fa-circle-info" style="color:#d97706;font-size:17px;margin-top:2px"></i>'
+    +'<div><b style="color:#92400e">About these photos</b><br>'
+    +'These photos and videos are taken on site by our construction team while work is going on. Because of dust, '
+    +'lighting and site conditions, some may look unclear or slightly blurred, and you may see construction materials, '
+    +'tools or debris lying around. They show work in progress, not the '
+    +'finished home — colours, finishes and fittings may look different at handover. If you have any question about '
+    +'your flat, please contact your relationship manager.</div></div>';
 
   // A section with nothing in it is not shown at all - no "No photos yet" boxes. Only when there is
   // nothing anywhere does the customer get one short line, so the tab is never blank.
@@ -29632,6 +29900,8 @@ const USAGE_VIEWS={
   'transcription/5':     'transcription.compilation.view_a_lead_s_combined_call_history',
   'transcription/view':  'transcription.call_detail.view_qualification_checklist_and_entities',
   'dashboard/0':         'dashboard.overview.view_home_dashboard_summary',
+  'accounts/0':          'accounts.transactions.view_transactions',
+  'accounts/1':          'accounts.ledgers_postings.view_ledgers_postings',
   'gtd/0':               'gtd.inbox.view_capture_inbox_clarify_queue',
   'gtd/1':               'gtd.next_actions.view_next_actions_by_context',
   'gtd/2':               'gtd.projects.view_active_projects_next_steps',

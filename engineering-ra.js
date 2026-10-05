@@ -20,6 +20,37 @@
     (t.oth?'<div><span>− Other deductions'+(b.other_deduction_note?' <span style="color:var(--slate)">('+esc(b.other_deduction_note)+')</span>':'')+'</span><span>'+inr(t.oth)+'</span></div>':'')+
     '<div class="net"><span>Net payable</span><span>'+inr(t.net)+'</span></div></div>';
 
+  /* ---- Accounts link: has this booked bill been posted to the ledgers, and how much of it is paid?
+     Read through accounts.ra_bill_accounts(), which shows Engineering only these figures. If Accounts is not set
+     up (or the call fails) the screens simply show "not posted" and carry on. ---- */
+  const chunk=(a,n)=>{const r=[];for(let i=0;i<a.length;i+=n)r.push(a.slice(i,i+n));return r;};
+  async function accStatus(ids){
+    const out={};
+    try{
+      for(const part of chunk(ids,500)){
+        const {data,error}=await sb.schema('accounts').rpc('ra_bill_accounts',{p_ids:part});
+        if(error)return out;
+        (data||[]).forEach(x=>{out[x.ra_bill_id]=x;});
+      }
+    }catch(e){}
+    return out;
+  }
+  const accCell=r=>{
+    if(r.status!=='Booked')return '<span style="color:var(--slate)">—</span>';
+    const a=(L().raAcc||{})[r.id];
+    if(!a)return '<span class="tag t-amber">Not yet posted</span>';
+    const out=num(a.outstanding);
+    return '<span class="tag '+(out<=0.004&&a.net!=null?'t-green':'t-blue')+'">'+(out<=0.004&&a.net!=null?'Paid':'Posted')+'</span><div class="sub" style="font-size:12px;color:var(--slate)">Paid '+inr(a.paid)+' of '+inr(a.net)+'</div>';
+  };
+  const accBox=B=>{
+    if(B.status!=='Booked')return '';
+    const a=(L().raAcc||{})[B.id];
+    if(!a)return '<div class="eng-note eng-noprint" style="margin-top:14px"><b>Accounts:</b> not posted yet. Accounts posts booked bills to the ledgers — GST, TDS and retention are entered there, and payment is made from there.</div>';
+    return '<div class="eng-noprint" style="margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#f8fafc"><div style="font-weight:700;margin-bottom:6px"><i class="fa-solid fa-calculator" style="color:#0e7490"></i> Accounts</div>'+
+      '<div class="eng-sum" style="gap:6px 22px;flex-wrap:wrap"><span>Posted as <b>'+esc(a.voucher_no)+'</b> <span style="color:var(--slate)">('+esc(a.company)+', '+dt(a.posted_on)+')</span></span><span>Net payable <b>'+inr(a.net)+'</b></span><span>Paid <b>'+inr(a.paid)+'</b></span><span>Outstanding <b>'+inr(a.outstanding)+'</b></span>'+
+      (num(a.retention)>0?'<span>Retention held <b>'+inr(a.retention)+'</b> <span style="color:var(--slate)">(released '+inr(a.retention_released)+', still held '+inr(a.retention_outstanding)+')</span></span>':'')+'</div></div>';
+  };
+
   /* ======================================================================= LIST / DETAIL */
   ENG.routes.ra=async function(v,a,t){
     if(a[0])return raDetail(v,Number(a[0]),t);
@@ -29,6 +60,8 @@
     const rows=await fetchAll(()=>{let x=E().from('v_ra_bills').select('*').order('id',{ascending:false});if(pid)x=x.eq('project_id',pid);return x;});
     if(ENG.stale(t))return;
     L().raRows=rows;L().raF={status:'',q:'',page:0};
+    L().raAcc=await accStatus(rows.filter(r=>r.status==='Booked').map(r=>r.id));
+    if(ENG.stale(t))return;
     $('engBody').innerHTML=
       '<div class="eng-filter"><div class="toolbar grow" style="margin:0;flex:1;min-width:200px"><div class="grow"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Search bill, work order or contractor…" oninput="ENG.f.raFilter(\'q\',this.value)"></div></div>'+
       '<select class="sel" onchange="ENG.f.raFilter(\'status\',this.value)">'+opts(['Draft','Booked','Cancelled'],x=>x,x=>x,'','All statuses')+'</select></div><div class="card eng-tbl" id="raCard"></div>';
@@ -43,8 +76,8 @@
     const booked=rows.filter(r=>r.status==='Booked');
     $('raCard').innerHTML=rows.length?
       '<div class="card-pad" style="border-bottom:1px solid var(--line)"><div class="eng-sum"><span><b>'+rows.length+'</b> bill'+(rows.length===1?'':'s')+'</span><span>Booked gross <b>'+inr(booked.reduce((s,r)=>s+num(r.gross),0))+'</b></span><span>Booked net payable <b>'+inr(booked.reduce((s,r)=>s+num(r.net_payable),0))+'</b></span></div></div>'+
-      '<table class="tbl"><thead><tr><th>Bill</th><th>Parent contractor</th><th>Project</th><th>Date</th><th class="r">Gross</th><th class="r">Net payable</th><th>Status</th></tr></thead><tbody>'+
-      pg.map(r=>'<tr class="clk" onclick="navTo(\'engineering/ra/'+r.id+'\')"><td><b>'+esc(r.bill_no)+'</b>'+(r.contractor_ref?'<div class="sub" style="font-size:12px;color:var(--slate)">Contractor ref '+esc(r.contractor_ref)+'</div>':'')+'</td><td>'+esc(r.vendor_name)+(r.sub_names?'<div class="sub" style="font-size:12px;color:var(--slate)">Sub: '+esc(r.sub_names)+'</div>':'')+'</td><td>'+esc(r.project_name)+'</td><td>'+dt(r.bill_date)+'</td><td class="r">'+inr(r.gross)+'</td><td class="r"><b>'+inr(r.net_payable)+'</b></td><td>'+stTag(r.status)+'</td></tr>').join('')+
+      '<table class="tbl"><thead><tr><th>Bill</th><th>Parent contractor</th><th>Project</th><th>Date</th><th class="r">Gross</th><th class="r">Net payable</th><th>Status</th><th>Accounts</th></tr></thead><tbody>'+
+      pg.map(r=>'<tr class="clk" onclick="navTo(\'engineering/ra/'+r.id+'\')"><td><b>'+esc(r.bill_no)+'</b>'+(r.contractor_ref?'<div class="sub" style="font-size:12px;color:var(--slate)">Contractor ref '+esc(r.contractor_ref)+'</div>':'')+'</td><td>'+esc(r.vendor_name)+(r.sub_names?'<div class="sub" style="font-size:12px;color:var(--slate)">Sub: '+esc(r.sub_names)+'</div>':'')+'</td><td>'+esc(r.project_name)+'</td><td>'+dt(r.bill_date)+'</td><td class="r">'+inr(r.gross)+'</td><td class="r"><b>'+inr(r.net_payable)+'</b></td><td>'+stTag(r.status)+'</td><td>'+accCell(r)+'</td></tr>').join('')+
       '</tbody></table>'+pager(rows.length,f.page,PAGE_SIZE,'ENG.f.raPage'):
       '<div class="empty" style="padding:44px"><i class="fa-solid fa-file-invoice-dollar"></i><div style="font-weight:600;color:var(--ink)">'+((L().raRows||[]).length?'No bills match':'No RA bills yet')+'</div>'+((L().raRows||[]).length?'':'<p>Once work done has been verified, raise an RA bill against it.</p>')+'</div>';
   };
@@ -59,14 +92,16 @@
     if(b.error)throw b.error;
     if(!b.data){v.innerHTML=head('ra','','')+'<div class="card card-pad empty"><i class="fa-solid fa-file-invoice-dollar"></i><div style="font-weight:600;color:var(--ink)">RA bill not found</div><p><a style="color:var(--brand);cursor:pointer" onclick="navTo(\'engineering/ra\')">Back to RA bills</a></p></div>';return;}
     const B=b.data;L().raCur=B;
+    if(B.status==='Booked'){const m=await accStatus([id]);L().raAcc=Object.assign(L().raAcc||{},m);if(ENG.stale(t))return;}
     const t0=totals(num(B.gross),B);
-    const draft=B.status==='Draft',booked=B.status==='Booked';
+    const draft=B.status==='Draft',booked=B.status==='Booked',posted=booked&&!!(L().raAcc||{})[id];
     v.innerHTML=head('ra','','')+
       '<div class="eng-noprint" style="margin-bottom:14px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><button class="btn btn-sm" onclick="navTo(\'engineering/ra\')"><i class="fa-solid fa-arrow-left"></i> All RA bills</button>'+
         '<div class="eng-actions">'+
         (draft?'<button class="btn" onclick="ENG.f.raEdit('+id+')"><i class="fa-solid fa-pen"></i> Edit details</button><button class="btn btn-ok" onclick="ENG.f.raBook('+id+')"><i class="fa-solid fa-stamp"></i> Book bill</button>':'')+
         (booked?'<button class="btn" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>':'')+
-        (draft||booked?'<button class="btn btn-danger" onclick="ENG.f.raCancel('+id+')">Cancel bill</button>':'')+'</div></div>'+
+        (draft||(booked&&!posted)?'<button class="btn btn-danger" onclick="ENG.f.raCancel('+id+')">Cancel bill</button>':'')+
+        (posted?'<button class="btn btn-danger" disabled title="Accounts has posted this bill. Ask Accounts to reverse the posting first, then cancel it here.">Cancel bill</button>':'')+'</div></div>'+
       '<div class="card eng-sheet">'+
         '<div style="display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap"><div><div style="font-size:12px;letter-spacing:.06em;color:var(--slate);font-weight:700">RUNNING ACCOUNT BILL</div><div style="font-size:22px;font-weight:700;margin-top:2px">'+esc(B.bill_no)+' '+stTag(B.status)+'</div>'+
         (draft?'<div class="eng-note eng-noprint" style="margin-top:8px">Draft — this bill reserves the work below. Book it to lock it, or cancel it to release the work.</div>':'')+
@@ -77,6 +112,7 @@
         (lines.length?lines.map((l,i)=>{const cum=num(l.prev_qty)+num(l.qty);return '<tr><td>'+(i+1)+'</td><td><b>'+esc(l.activity_name)+'</b>'+(l.sub_vendor_name?' <span class="tag t-purple">'+esc(l.sub_vendor_name)+'</span>':'')+'<div class="sub" style="font-size:12px;color:var(--slate)">'+esc(l.location_label)+'</div></td><td class="r">'+inr(l.rate)+'</td><td class="r">'+q(l.wo_qty)+' '+esc(l.uom)+'</td><td class="r">'+q(l.prev_qty)+'</td><td class="r"><b>'+q(l.qty)+'</b></td><td class="r">'+q(cum)+' <span style="color:var(--slate)">('+ENG.pct(cum,num(l.wo_qty))+'%)</span></td><td class="r">'+inr(l.amount)+'</td></tr>';}).join(''):'<tr><td colspan="8"><div class="empty" style="padding:24px">No work on this bill</div></td></tr>')+
         '</tbody></table></div>'+
         '<div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:18px"><div class="eng-sum" style="flex-direction:column;gap:5px;align-self:flex-start"><span>Billed on earlier RA bills <b>'+inr(B.prev_gross)+'</b></span><span>Cumulative gross to this bill <b>'+inr(num(B.prev_gross)+num(B.gross))+'</b></span>'+(B.remarks?'<span style="max-width:360px;white-space:pre-wrap">Remarks: <b>'+esc(B.remarks)+'</b></span>':'')+'</div>'+totBox(t0,B)+'</div>'+
+        accBox(B)+
         (B.booked_by?'<div style="margin-top:18px;font-size:12px;color:var(--slate)">Booked by '+esc(String(B.booked_by).split('@')[0])+' on '+dt(B.booked_at)+'</div>':'')+
       '</div>';
   }

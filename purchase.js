@@ -54,6 +54,17 @@ function css(){
   .pus-prow .pp-d{font-size:12.5px;color:var(--slate);white-space:nowrap}
   .pus-lv{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0}
   .pus-lvl{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#fff}
+  /* Active / Inactive switch (a real checkbox underneath, so it reads as checked/unchecked everywhere) */
+  .frm label.pus-switch,label.pus-switch{display:inline-flex;align-items:center;gap:10px;margin:14px 0 0;cursor:pointer;font-size:13.5px;font-weight:600;color:var(--slate);user-select:none;position:relative}
+  label.pus-switch input[type=checkbox]{position:absolute;opacity:0;width:0;height:0;margin:0;padding:0;border:0}
+  .pus-switch .trk{position:relative;flex:none;width:40px;height:22px;border-radius:999px;background:#cbd5e1;transition:background .15s}
+  .pus-switch .trk::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.35);transition:transform .15s}
+  .pus-switch input:checked + .trk{background:#0f766e}
+  .pus-switch input:checked + .trk::after{transform:translateX(18px)}
+  .pus-switch input:focus-visible + .trk{outline:2px solid #0f766e;outline-offset:2px}
+  .pus-switch .on{display:none;color:#0f766e}
+  .pus-switch input:checked ~ .on{display:inline}
+  .pus-switch input:checked ~ .off{display:none}
   `;
   document.head.appendChild(st);
 }
@@ -119,6 +130,7 @@ function listCard(title,hint,addLabel,addFn,heads,rows,top){
     +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+heads.map(h=>'<th'+(h[1]?' class="pus-num"':'')+'>'+esc(h[0])+'</th>').join('')+'<th></th></tr></thead><tbody>'
     +(rows||'<tr><td colspan="'+(heads.length+1)+'"><div class="empty" style="padding:24px"><div>Nothing added yet</div></div></td></tr>')+'</tbody></table></div></div>';
 }
+const activeSwitch=(id,on)=>'<label class="pus-switch"><input type="checkbox" id="'+id+'"'+(on?' checked':'')+'><span class="trk"></span><span class="on">Active</span><span class="off">Inactive</span></label>';
 function modal(title,body,saveFn){
   openModal('<div class="modal-head"><h3>'+esc(title)+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm">'+body+'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="'+saveFn+'">Save</button></div>');
 }
@@ -198,7 +210,7 @@ window.pusItemModal=function(id){
     +'<div><label>Make / brand</label><input id="pusIMake" value="'+esc(i&&i.make||'')+'"></div></div>'
     +'<div class="two"><div><label>Issue UOM <span style="color:var(--slate);font-weight:400">(only if different)</span></label><select id="pusIIss">'+uomOpts(i?i.issue_uom_id:null,'Same as receipt')+'</select></div>'
     +'<div><label>1 receipt unit = ? issue units</label><input id="pusIConv" type="number" step="0.0001" value="'+(i&&i.conversion!=null?i.conversion:'')+'" placeholder="e.g. 1000"></div></div>'
-    +'<label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="pusIActive"'+(!i||i.active?' checked':'')+'> Active</label>',
+    +activeSwitch('pusIActive',!i||i.active),
     'pusItemSave('+(i?i.id:'null')+')');
 };
 window.pusItemGroupPick=function(){ const b=$('pusINewGroup'); if(b) b.style.display=val('pusIGroup')==='new'?'grid':'none'; };
@@ -282,9 +294,9 @@ window.pusUomDelete=function(id){
 const projName=id=>{const p=S.projects.find(x=>x.id===id);return p?p.name:'—';};
 function renderWarehouses(host){
   const list=S.warehouses.filter(w=>!S.whProject||String(w.project_id)===S.whProject);
-  const rows=list.map(w=>'<tr><td><span class="pus-code">'+esc(w.code)+'</span></td><td><b>'+esc(w.name)+'</b>'+(w.active?'':' <span class="tag t-gray">Inactive</span>')+'</td><td>'+esc(projName(w.project_id))+'</td><td>'+esc(w.in_charge||'')+'</td>'+actBtns('pusWhModal('+w.id+')','pusWhDelete('+w.id+')','admin')+'</tr>').join('');
+  const rows=list.map(w=>'<tr><td><span class="pus-code">'+esc(w.code)+'</span></td><td><b>'+esc(w.name)+'</b>'+(w.active?'':' <span class="tag t-gray">Inactive</span>')+'</td><td>'+esc(projName(w.project_id))+'</td>'+actBtns('pusWhModal('+w.id+')','pusWhDelete('+w.id+')','admin')+'</tr>').join('');
   const top='<div class="pus-top"><select id="pusWP" onchange="pusWhFilter()"><option value="">All projects</option>'+S.projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===S.whProject?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select></div>';
-  host.innerHTML=listCard('Warehouses','Any number of warehouses (stores) under a project.','Add warehouse',S.isAdmin?'pusWhModal()':'',[['Code'],['Warehouse'],['Project'],['In-charge']],rows,top);
+  host.innerHTML=listCard('Warehouses','Any number of warehouses (stores) under a project.','Add warehouse',S.isAdmin?'pusWhModal()':'',[['Code'],['Warehouse'],['Project']],rows,top);
 }
 window.pusWhFilter=function(){ S.whProject=val('pusWP'); renderWarehouses($('pusSec')); };
 window.pusWhModal=function(id){
@@ -293,15 +305,14 @@ window.pusWhModal=function(id){
   modal(w?'Edit warehouse':'Add warehouse',
     '<label>Project</label><select id="pusWProj"'+(w?' disabled':'')+'><option value="">Choose…</option>'+S.projects.map(p=>'<option value="'+p.id+'"'+(p.id===pid?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select>'
     +'<div class="two"><div><label>Code</label><input id="pusWCode" maxlength="10" value="'+esc(w?w.code:'')+'" placeholder="MAIN"></div><div><label>Name</label><input id="pusWName" value="'+esc(w?w.name:'')+'" placeholder="Main store"></div></div>'
-    +'<label>In-charge (optional)</label><input id="pusWInch" value="'+esc(w&&w.in_charge||'')+'">'
-    +'<label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="pusWActive"'+(!w||w.active?' checked':'')+'> Active</label>',
+    +activeSwitch('pusWActive',!w||w.active),
     'pusWhSave('+(w?w.id:'null')+')');
 };
 window.pusWhSave=async function(id){
   const project_id=parseInt(val('pusWProj'),10), code=val('pusWCode').toUpperCase(), name=val('pusWName');
   if(!id&&!project_id){ toast('Choose a project','err'); return; }
   if(!code||!name){ toast('Enter a code and a name','err'); return; }
-  const row={code,name,in_charge:val('pusWInch')||null,active:$('pusWActive').checked};
+  const row={code,name,active:$('pusWActive').checked};
   if(!id) row.project_id=project_id;
   await save('warehouses',id,row,'Warehouse saved');
 };
@@ -591,7 +602,7 @@ window.pusAdminSave=async function(){
 window.pusAdminRemove=async function(email){
   const me=String(state.email||'').toLowerCase();
   if(S.admins.length<2){ toast('There must always be at least one administrator','err'); return; }
-  if(!await confirmDialog('Remove '+userName(email)+' as an administrator?'+(String(email).toLowerCase()===me?' You will lose access to this page.':''))) return;
+  if(!await confirmDialog('Remove '+userName(email)+' as an administrator?'+(String(email).toLowerCase()===me?' You will lose access to this page.':''),{title:'Remove administrator',okLabel:'Remove'})) return;
   const {error}=await PU().from('module_admins').delete().eq('email',email);
   if(fail(error,'Could not remove')) return;
   ADMIN_CACHE=null; toast('Removed','ok'); route();
@@ -813,7 +824,7 @@ window.pusVStatus=async function(id,status){
     if(r.pan&&!have.has('pan')) miss.push(DOC_LBL.pan);
     if(r.gstin&&!have.has('gst_certificate')) miss.push(DOC_LBL.gst_certificate);
     if(miss.length&&docRule==='block'){ toast('This vendor cannot be approved yet - missing: '+miss.join(', ')+'. Upload them first (Docs button).','err'); return; }
-    if(miss.length&&!await confirmDialog('No '+miss.join(', ')+' on file for this vendor. Approve anyway?')) return;
+    if(miss.length&&!await confirmDialog('No '+miss.join(', ')+' on file for this vendor. Approve anyway?',{title:'Approve vendor',okLabel:'Approve anyway',danger:false})) return;
   }
   if(!needNote){ pusVStatusSave(id,status,false); return; }
   openModal('<div class="modal-head"><h3>'+verb+' '+esc(r.trade_name||r.legal_name)+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm"><label>Reason</label><textarea id="pvNote" rows="3" placeholder="Why?"></textarea></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="pusVStatusSave('+id+',\''+status+'\',true)">'+verb+'</button></div>');
@@ -860,7 +871,7 @@ window.pusDocUpload=async function(vid){
 window.pusDocOpen=function(id){ const d=V.docs.find(x=>x.id===id); if(d) s3OpenSigned(d.storage_path); };
 window.pusDocDelete=async function(id,vid){
   const d=V.docs.find(x=>x.id===id);
-  if(!await confirmDialog('Remove '+(DOC_LBL[d.doc_type]||'document')+' '+d.file_name+'?')) return;
+  if(!await confirmDialog('Remove '+(DOC_LBL[d.doc_type]||'document')+' '+d.file_name+'?',{title:'Remove document',okLabel:'Remove'})) return;
   const {error}=await PU().from('vendor_documents').update(soft()).eq('id',id);
   if(fail(error,'Delete failed')) return;
   V.docs=V.docs.filter(x=>x.id!==id); $('pvdBody').innerHTML=docsBody(vid); vRender(); toast('Removed','ok');
@@ -914,7 +925,7 @@ window.pusInviteSend=async function(id){
 };
 window.pusInviteCancel=async function(id){
   const i=V.invites.find(x=>x.id===id);
-  if(!await confirmDialog('Cancel the invitation to '+i.email+'? The link will stop working.')) return;
+  if(!await confirmDialog('Cancel the invitation to '+i.email+'? The link will stop working.',{title:'Cancel invitation',okLabel:'Yes, cancel it'})) return;
   const {error}=await PU().from('vendor_invites').update({revoked_at:new Date().toISOString(),revoked_by:state.email}).eq('id',id);
   if(fail(error,'Could not cancel')) return;
   i.revoked_at=new Date().toISOString(); vRender(); toast('Invitation cancelled','ok');

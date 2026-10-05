@@ -20,6 +20,8 @@ const SC=[['all','All'],['draft','Drafts'],['pending','Awaiting approval'],['min
 const qty=n=>Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:3});
 const me=()=>String(state.email||'').toLowerCase();
 const U=()=>window.PUS;
+// The person who raised an indent can decide it only when the rule "let a person approve an indent they raised" is on (Admin -> Rules); the database enforces the same.
+const selfApproval=()=>U().rule('indent.allow_self_approval')==='true';
 const dmy=d=>{ if(!d) return '—'; const x=new Date(d); return isNaN(x)?'—':String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+'/'+x.getFullYear(); };
 const dmyTime=d=>{ const x=new Date(d); return isNaN(x)?'—':x.toLocaleString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})+', '+x.getDate()+' '+x.toLocaleString('en-IN',{month:'short'})+" '"+String(x.getFullYear()).slice(2); };
 // Financial year of a date: 1 April - 31 March.
@@ -49,8 +51,10 @@ function status(r){
   return [r.status,'t-gray'];
 }
 const statusTag=r=>{const s=status(r);return '<span class="tag '+s[1]+'">'+esc(s[0])+'</span>';};
-const isMine=r=>r.status==='pending_approval'&&r.raised_by.toLowerCase()!==me()&&I.pending.some(a=>a.indent_id===r.id&&a.approvers.some(e=>e.toLowerCase()===me()));
+const isMine=r=>r.status==='pending_approval'&&(selfApproval()||r.raised_by.toLowerCase()!==me())&&I.pending.some(a=>a.indent_id===r.id&&a.approvers.some(e=>e.toLowerCase()===me()));
 const canEdit=r=>(r.status==='draft'||r.status==='rejected')&&(r.raised_by.toLowerCase()===me()||state.super)&&U().can('indent.raise');
+// While an indent is awaiting approval its maker can still change or delete it. Once it is approved, never.
+const canEditPending=r=>r.status==='pending_approval'&&(r.raised_by.toLowerCase()===me()||state.super)&&U().can('indent.raise');
 const docNo=r=>r.doc_no||('Draft #'+r.id);
 const projName=id=>{const p=U().S.projects.find(x=>x.id===id);return p?p.name:'—';};
 const whName=id=>{const w=U().S.warehouses.find(x=>x.id===id);return w?w.name:'—';};
@@ -104,15 +108,23 @@ function piCss(){
   /* The shared dialog container sizes itself to its widest content (a wide table), which pushes the dialog off the
      left edge of a narrow window. Let it shrink to the window instead; tables scroll sideways inside the dialog. */
   #modalHost{min-width:0;max-width:100%}
+  /* A wide dialog keeps the SAME width on every tab. Left to the shared stylesheet it is as wide as the tab's content,
+     so a narrow tab (Change History) shrank the dialog, the tab strip wrapped and Approval History dropped out of reach. */
+  #modalHost .modal.xl{width:min(1120px,calc(100vw - 40px))}
+  #modalHost .modal.lg{width:min(1000px,calc(100vw - 40px))}
+  /* ...and roughly the same height, so it does not jump about when you change tab. */
+  .modal-body:has(>.pi-tabs){min-height:min(440px,calc(90vh - 150px))}
   .pi-form{display:grid;grid-template-columns:1fr 1fr;gap:12px 36px;margin-bottom:6px}
   .pi-row{display:grid;grid-template-columns:150px 1fr;gap:10px;align-items:start;margin-bottom:10px}
   .pi-row .l{font-size:13px;font-weight:600;color:var(--slate);padding-top:8px;text-align:right}
   .pi-row .v{padding-top:8px;font-size:14px;min-height:34px}
   .pi-row input,.pi-row select,.pi-row textarea{width:100%}
   .pi-ro{background:#f1f5f9;border:1px solid var(--line);border-radius:8px;padding:8px 11px!important;color:#334155}
-  .pi-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:16px;flex-wrap:wrap}
-  .pi-tabs a{padding:10px 16px;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;text-decoration:none}
-  .pi-tabs a.on{color:#0f766e;border-bottom-color:#0f766e}
+  /* One row, always: if the tabs do not fit they scroll sideways instead of wrapping onto a second line. */
+  .pi-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:16px;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
+  .pi-tabs a{flex:0 0 auto;white-space:nowrap;padding:10px 16px;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;text-decoration:none;user-select:none}
+  .pi-tabs a:hover{color:var(--ink,#0f172a);background:#f8fafc}
+  .pi-tabs a.on{color:#0f766e;border-bottom-color:#0f766e;background:none}
   .pui-head,.pui-line{display:grid;grid-template-columns:150px minmax(0,1.5fr) 56px 100px minmax(0,2fr) 36px;gap:8px;align-items:center}
   .pui-head{font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);margin-bottom:4px}
   .pui-line{margin-bottom:8px}
@@ -209,12 +221,13 @@ window.pusIndOpen=async function(id,tab){
   const r=h.data; if(!r||r.deleted_at){ toast('That indent no longer exists','err'); return; }
   CUR={r,lines:ls.data||[],steps:ap.data||[],log:lg.data||[]};
   const open=CUR.lines.some(l=>+l.qty-+l.ordered_qty-+l.short_closed_qty>0);
-  const my=r.status==='pending_approval'&&r.raised_by.toLowerCase()!==me()&&CUR.steps.some(s=>s.round===r.round&&s.level===r.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
+  const my=r.status==='pending_approval'&&(selfApproval()||r.raised_by.toLowerCase()!==me())&&CUR.steps.some(s=>s.round===r.round&&s.level===r.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
   const btn=[];
   if(canEdit(r)) btn.push('<button class="btn'+(r.status==='rejected'?' btn-primary':'')+'" onclick="pusIndEdit('+id+')"><i class="fa-solid fa-pen"></i> '+(r.status==='rejected'?'Revise…':'Edit')+'</button>',r.status==='rejected'?'<button class="btn" onclick="pusIndSubmit('+id+')" title="Send it for approval again without changes"><i class="fa-solid fa-paper-plane"></i> Resubmit unchanged</button>':'<button class="btn btn-primary" onclick="pusIndSubmit('+id+')"><i class="fa-solid fa-paper-plane"></i> Submit for approval</button>');
+  if(canEditPending(r)) btn.push('<button class="btn" onclick="pusIndEdit('+id+')" title="Pulls it back from approval; saving sends it to the first approver again"><i class="fa-solid fa-pen"></i> Edit</button>');
   if(my) btn.push('<button class="btn" onclick="pusIndDecide('+id+',false)"><i class="fa-solid fa-circle-xmark"></i> Reject</button>','<button class="btn btn-primary" onclick="pusIndDecide('+id+',true)"><i class="fa-solid fa-circle-check"></i> Approve</button>');
   if(r.status==='approved'&&open&&U().can('indent.short_close')) btn.push('<button class="btn" onclick="pusIndShortClose('+id+')"><i class="fa-solid fa-scissors"></i> Short close…</button>');
-  const del=r.status==='draft'&&canEdit(r)?'<button class="btn btn-ghost" style="margin-right:auto" onclick="pusIndDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete draft</button>':'';
+  const del=(r.status==='draft'&&canEdit(r))||canEditPending(r)?'<button class="btn btn-ghost" style="margin-right:auto" onclick="pusIndDelete('+id+')"><i class="fa-solid fa-trash"></i> '+(r.status==='draft'?'Delete draft':'Delete')+'</button>':'';
   openModal('<div class="modal-head"><h3>Indent '+esc(docNo(r))+' '+statusTag(r)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto"><div class="pi-tabs" id="piTabs">'+TABS.map(t=>'<a data-t="'+t[0]+'" onclick="pusIndTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="piTabBody"></div></div>'
     +'<div class="modal-foot">'+del+'<button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
@@ -348,12 +361,13 @@ window.pusIndEdit=async function(id){
     if(h.error||ls.error){ toast('Could not open the indent','err'); return; }
     r=h.data; lines=ls.data||[];
   }
-  ED={id:id||null,locked:!!(r&&r.doc_no),revising:!!(r&&r.status==='rejected')};
+  ED={id:id||null,locked:!!(r&&r.doc_no),revising:!!(r&&r.status==='rejected'),pending:!!(r&&r.status==='pending_approval')};
   const pid=r?r.project_id:(parseInt(I.project,10)||null), date=r?r.indent_date:new Date().toISOString().slice(0,10);
   const typeOpts='<option value="">Choose…</option>'+I.types.filter(t=>t.active||(r&&r.indent_type_id===t.id)).map(t=>'<option value="'+t.id+'"'+(r&&r.indent_type_id===t.id?' selected':'')+'>'+esc(t.name)+'</option>').join('');
-  const revising=!!(r&&r.status==='rejected');
+  const revising=!!(r&&r.status==='rejected'), pending=ED.pending;
+  const pendingNote='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:11px 14px;margin-bottom:12px;font-size:13.5px"><b style="color:#b45309"><i class="fa-solid fa-hourglass-half"></i> Awaiting approval</b><div style="margin-top:4px">Saving your changes pulls this indent back and sends it to the first approver again. Approvals given so far no longer count. Press Cancel to leave it as it is.</div></div>';
   openModal('<div class="modal-head"><h3>'+(revising?'Revise indent '+esc(docNo(r)):r?'Edit indent '+esc(docNo(r)):'New indent')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'+(revising?rejectedBanner(r):'')+'<div class="pi-tabs" id="piETabs"><a data-t="main" class="on" onclick="pusIndETab(\'main\')">Main Info</a><a data-t="delivery" onclick="pusIndETab(\'delivery\')">Delivery Info</a></div>'
+    +'<div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'+(revising?rejectedBanner(r):pending?pendingNote:'')+'<div class="pi-tabs" id="piETabs"><a data-t="main" class="on" onclick="pusIndETab(\'main\')">Main Info</a><a data-t="delivery" onclick="pusIndETab(\'delivery\')">Delivery Info</a></div>'
     +'<div id="pie_main"><div class="pi-form"><div>'
       +field('Project','<select id="pieProj" onchange="pusIndProj()"><option value="">Choose…</option>'+U().S.projects.map(p=>'<option value="'+p.id+'"'+(p.id===pid?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select>')
       +field('Document Type','<select id="pieType">'+typeOpts+'</select>')
@@ -374,11 +388,14 @@ window.pusIndEdit=async function(id){
       +field('Contact person','<input id="pieContact" value="'+esc(r&&r.contact_person||'')+'">')
       +field('Contact phone','<input id="piePhone" value="'+esc(r&&r.contact_phone||'')+'">')
     +'</div></div></div></div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'+'<button class="btn" onclick="pusIndSave(false)">'+(revising?'Save changes':'Save draft')+'</button><button class="btn btn-primary" onclick="pusIndSave(true)">'+(revising?'Save & send for approval':'Save & submit')+'</button></div>','xl');
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'+(pending?'':'<button class="btn" onclick="pusIndSave(false)">'+(revising?'Save changes':'Save draft')+'</button>')+'<button class="btn btn-primary" onclick="pusIndSave(true)">'+(pending?'Save & send for approval again':revising?'Save & send for approval':'Save & submit')+'</button></div>','xl');
 };
 
 window.pusIndSave=async function(submit){
-  const {PU,fail,val}=U();
+  const {PU,val}=U();
+  // After the indent has been pulled back from approval, any later problem leaves it as a draft - say so.
+  let pulledBack=false;
+  const fail=(e,w)=>{ if(!U().fail(e,w)) return false; if(pulledBack) toast('The indent was pulled back from approval and is now a draft. Fix the problem, then send it again.','warn'); return true; };
   const project_id=parseInt(val('pieProj'),10), warehouse_id=parseInt(val('pieWh'),10), indent_type_id=parseInt(val('pieType'),10)||null;
   if(!project_id){ toast('Choose the project','err'); return; }
   if(I.types.length&&!indent_type_id){ toast('Choose the document type','err'); return; }
@@ -399,6 +416,10 @@ window.pusIndSave=async function(submit){
     delivery_address:val('pieAddr')||null,contact_person:val('pieContact')||null,contact_phone:val('piePhone')||null};
   if(!ED.locked&&val('pieDate')) head.indent_date=val('pieDate');
   let iid=ED.id;
+  if(ED.pending){                       // awaiting approval: pull it back first (database function), then it is an ordinary draft
+    const w=await PU().rpc('indent_withdraw',{p_id:iid}); if(fail(w.error,'Could not pull the indent back from approval')) return;
+    pulledBack=true; submit=true;
+  }
   if(iid){ const {error}=await PU().from('indents').update(head).eq('id',iid); if(fail(error)) return; }
   else { const {data,error}=await PU().from('indents').insert(head).select('id').single(); if(fail(error)) return; iid=data.id; }
   const del=await PU().from('indent_lines').delete().eq('indent_id',iid); if(fail(del.error,'Could not update the items')) return;
@@ -406,7 +427,7 @@ window.pusIndSave=async function(submit){
   if(submit){
     const {data,error}=await PU().rpc('indent_submit',{p_id:iid});
     if(error){ toast('Saved as a draft, but it could not be submitted: '+error.message.replace(/Setup > Approvals/g,'Admin > Approvers'),'warn'); closeModal(); route(); return; }
-    closeModal(); toast('Submitted as '+data,'ok'); route(); return;
+    closeModal(); toast(pulledBack?'Saved and sent for approval again as '+data:'Submitted as '+data,'ok'); route(); return;
   }
   closeModal(); toast(ED.revising?'Changes saved — send it for approval when it is ready':'Draft saved','ok'); route();
 };
@@ -418,10 +439,11 @@ window.pusIndSubmit=async function(id){
 };
 
 window.pusIndDelete=async function(id){
-  if(!await confirmDialog('Delete this draft indent?')) return;
-  const {error}=await U().PU().from('indents').update(U().soft()).eq('id',id);
+  const r=(CUR&&CUR.r.id===id)?CUR.r:I.rows.find(x=>x.id===id), pending=!!(r&&r.status==='pending_approval');
+  if(!await confirmDialog(pending?'Delete this indent? It is awaiting approval — the approvers will no longer see it. This cannot be undone.':'Delete this draft indent?')) return;
+  const {error}=await U().PU().rpc('indent_delete',{p_id:id});
   if(U().fail(error,'Delete failed')) return;
-  closeModal(); toast('Draft deleted','ok'); navTo('inventory/2');
+  closeModal(); toast(pending?'Indent deleted':'Draft deleted','ok'); navTo('inventory/2');
 };
 
 /* ---------------- approve / reject / short close ---------------- */

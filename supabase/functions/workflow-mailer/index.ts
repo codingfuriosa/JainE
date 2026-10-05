@@ -121,6 +121,57 @@ Deno.serve(async (req)=>{
     return j({ok:true,sent,failed});
   }
 
+  /* Construction photo approval (Customer Portal Admin > Photos & Videos > Review). Called by the
+     acc.notifications trigger in 20261005130000_media_approval_emails.sql with ONLY the notification
+     id: the recipient and every word of the mail come from that row, never from the caller - this
+     function has no caller check, so it must not become a way to send arbitrary mail. Only recent
+     media_* notifications qualify, and cust.media_email_log lets each one be mailed once. */
+  if(type==='media_notice'){
+    const id = Number(body.id);
+    if(!id) return j({error:'id required'},400);
+    let n:any=null;
+    try{ const r=await fetch(SB+'/rest/v1/notifications?id=eq.'+id+'&select=id,recipient,kind,title,body,created_at',{headers:AP}); const rows=await r.json(); n=Array.isArray(rows)?rows[0]:null; }catch(_){}
+    if(!n) return j({error:'not found'},404);
+    const KINDS = ['media_pending','media_rejected','media_published'];
+    if(KINDS.indexOf(n.kind)===-1) return j({error:'not a photo approval notice'},400);
+    if(Date.now()-new Date(n.created_at).getTime() > 15*60*1000) return j({ok:true,skipped:'too old'});
+    // Claim it: the primary key makes a second call for the same id a no-op.
+    const CP={...H,'Content-Profile':'cust','Accept-Profile':'cust','Content-Type':'application/json','Prefer':'return=minimal'} as any;
+    const claim = await fetch(SB+'/rest/v1/media_email_log',{method:'POST',headers:CP,body:JSON.stringify({notification_id:id})});
+    if(!claim.ok) return j({ok:true,skipped:'already sent'});
+
+    const mTo = String(n.recipient||'');
+    if(!mTo) return j({error:'no recipient'},400);
+    const review = n.kind==='media_pending';
+    const link = PORTAL+'/custportal-admin.html#/3'+(review?'/review':'');
+    const tone = n.kind==='media_rejected' ? {c:'#b91c1c',bg:'#fef2f2',bar:'#e0121c',label:'Rejected'}
+               : n.kind==='media_published' ? {c:'#15803d',bg:'#f0fdf4',bar:'#16a34a',label:'Published'}
+               : {c:'#92400e',bg:'#fffbeb',bar:'#f59e0b',label:'Waiting for your approval'};
+    const btn = review ? 'Review now' : 'Open Photos & Videos';
+    const mSubject = String(n.title||'Construction photos');
+    const mText = 'Hello,\n\n'+mSubject+'\n\n'+String(n.body||'')+'\n\n'+btn+': '+link+'\n\nJAIN-E Customer Portal (automated message, please do not reply).';
+    const head = HEADER.replace('>Workflow<','>Construction Photos<');
+    const foot = "<div style='padding:14px 24px;background:#f8fafc;border-top:1px solid #e2e8f0'><p style='margin:0;color:#94a3b8;font-size:12px;line-height:1.5'>Automated message from JAIN-E &middot; Customer Portal Admin. Please do not reply to this email.</p></div>";
+    const mHtml = "<div style='margin:0;padding:24px;background:#f1f5f9;font-family:Segoe UI,Arial,sans-serif'><div style='max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0'>"+head
+      +"<div style='padding:24px'><p style='margin:0 0 14px;color:#0f172a;font-size:15px'>Hello,</p>"
+      +"<div style='margin:0 0 18px;padding:14px 16px;background:"+tone.bg+";border-left:3px solid "+tone.bar+";border-radius:6px'>"
+      +"<div style='font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:"+tone.c+";margin-bottom:5px'>"+esc(tone.label)+"</div>"
+      +"<div style='color:#0f172a;font-size:15px;font-weight:600;line-height:1.45'>"+esc(mSubject)+"</div>"
+      +(n.body?"<div style='color:#334155;font-size:14px;line-height:1.55;margin-top:6px'>"+esc(n.body)+"</div>":"")
+      +"</div><div style='margin:4px 0'><a href='"+link+"' style='display:inline-block;background:#e0121c;color:#ffffff;text-decoration:none;padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600'>"+esc(btn)+"</a></div></div>"
+      +foot+"</div></div>";
+    let client:any=null;
+    try{
+      client = new SMTPClient({connection:{hostname:'smtp.gmail.com',port:465,tls:true,auth:{username:GU,password:GP}}});
+      await client.send({from:GU,to:mTo,subject:mSubject,content:mText,html:mHtml});
+      await fetch(SB+'/rest/v1/media_email_log?notification_id=eq.'+id,{method:'PATCH',headers:CP,body:JSON.stringify({status:'sent'})});
+    }catch(e){
+      await fetch(SB+'/rest/v1/media_email_log?notification_id=eq.'+id,{method:'PATCH',headers:CP,body:JSON.stringify({status:'failed',error:String(e).slice(0,300)})}).catch(()=>{});
+      return j({error:'send failed',detail:String(e)},500);
+    } finally { try{ if(client) await client.close(); }catch(_){} }
+    return j({ok:true});
+  }
+
   let to='', subject='', html='', text='', wide=false;
 
   /* Two shapes of the same news, sharing the entry table.

@@ -18,6 +18,8 @@ window.__PUP_LOADED=true;
 const P={rows:[],lines:[],pending:[],vendors:[],types:[],rej:[],amends:[],sec:'orders',filter:'all',rv:'all',project:'',q:''};
 const SC=[['all','All'],['draft','Drafts'],['pending','Awaiting approval'],['mine','Awaiting my approval'],['approved','Approved'],['closed','Closed'],['cancelled','Cancelled']];
 const U=()=>window.PUS;
+// The person who raised an order can decide it only when the rule "let a person approve a purchase order they raised" is on (Admin -> Rules); the database enforces the same.
+const selfApproval=()=>U().rule('po.allow_self_approval')==='true';
 const qty=n=>Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:3});
 const money=n=>(n==null||n==='')?'—':'₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const me=()=>String(state.email||'').toLowerCase();
@@ -44,8 +46,10 @@ function status(p){
   return [p.status,'t-gray'];
 }
 const statusTag=p=>{const s=status(p);return '<span class="tag '+s[1]+'">'+esc(s[0])+'</span>';};
-const isMine=p=>p.status==='pending_approval'&&p.raised_by.toLowerCase()!==me()&&P.pending.some(a=>a.po_id===p.id&&a.approvers.some(e=>e.toLowerCase()===me()));
+const isMine=p=>p.status==='pending_approval'&&(selfApproval()||p.raised_by.toLowerCase()!==me())&&P.pending.some(a=>a.po_id===p.id&&a.approvers.some(e=>e.toLowerCase()===me()));
 const canEdit=p=>(p.status==='draft'||p.status==='rejected')&&(p.raised_by.toLowerCase()===me()||state.super)&&U().can('po.create');
+// While an order is awaiting approval its maker can still change it (and delete it, if it was never approved before). Once approved: amend / cancel only.
+const canEditPending=p=>p.status==='pending_approval'&&(p.raised_by.toLowerCase()===me()||state.super)&&U().can('po.create');
 
 async function pLoad(){
   await U().load();
@@ -176,19 +180,21 @@ window.pusPoOpen=async function(id,tab){
   if(!await loadCur(id)) return;
   const {p}=CUR;
   const open=CUR.lines.some(l=>+l.qty-+l.received_qty-+l.short_closed_qty>0), untouched=CUR.lines.every(l=>+l.received_qty===0&&+l.short_closed_qty===0);
-  const my=p.status==='pending_approval'&&p.raised_by.toLowerCase()!==me()&&CUR.steps.some(s=>s.round===p.round&&s.level===p.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
+  const my=p.status==='pending_approval'&&(selfApproval()||p.raised_by.toLowerCase()!==me())&&CUR.steps.some(s=>s.round===p.round&&s.level===p.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
   const canCreate=U().can('po.create'), btn=[];
   if(canEdit(p)) btn.push('<button class="btn'+(needsRevision(p)?' btn-primary':'')+'" onclick="pusPoEdit('+id+')"><i class="fa-solid fa-pen"></i> '+(needsRevision(p)?'Revise…':'Edit')+'</button>','<button class="btn'+(needsRevision(p)?'':' btn-primary')+'" onclick="pusPoSubmit('+id+')"'+(needsRevision(p)?' title="Send it for approval again without changing anything"':'')+'><i class="fa-solid fa-paper-plane"></i> '+(needsRevision(p)?'Resubmit unchanged':'Submit for approval')+'</button>');
+  if(canEditPending(p)) btn.push('<button class="btn" onclick="pusPoEdit('+id+')" title="Pulls it back from approval; saving sends it to the first approver again"><i class="fa-solid fa-pen"></i> Edit</button>');
   if(my) btn.push('<button class="btn" onclick="pusPoDecide('+id+',false)"><i class="fa-solid fa-circle-xmark"></i> Reject</button>','<button class="btn btn-primary" onclick="pusPoDecide('+id+',true)"><i class="fa-solid fa-circle-check"></i> Approve</button>');
   if(p.status==='approved'&&canCreate&&untouched) btn.push('<button class="btn" onclick="pusPoAmend('+id+')"><i class="fa-solid fa-file-pen"></i> Amend…</button>');
   if(p.status==='approved'&&open&&U().can('po.short_close')) btn.push('<button class="btn" onclick="pusPoShortClose('+id+')"><i class="fa-solid fa-scissors"></i> Short close…</button>');
   const left=[];
   if(canCreate&&['draft','rejected'].includes(p.status)&&canEdit(p)) left.push('<button class="btn btn-ghost" onclick="pusPoCancel('+id+')"><i class="fa-solid fa-ban"></i> Cancel order</button>');
   if(canCreate&&p.status==='approved'&&untouched) left.push('<button class="btn btn-ghost" onclick="pusPoCancel('+id+')"><i class="fa-solid fa-ban"></i> Cancel order</button>');
-  if(p.status==='draft'&&canEdit(p)) left.push('<button class="btn btn-ghost" onclick="pusPoDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete draft</button>');
+  if(p.status==='draft'&&canEdit(p)&&p.revision===0) left.push('<button class="btn btn-ghost" onclick="pusPoDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete draft</button>');
+  if(canEditPending(p)&&p.revision===0) left.push('<button class="btn btn-ghost" onclick="pusPoDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete</button>');
   const tabs=[['main','Main Info'],['items','Items'],['terms','Terms & Delivery'],['history','Change History'],['approval','Approval History']].concat(CUR.revs.length?[['revs','Revisions ('+CUR.revs.length+')']]:[]);
   openModal('<div class="modal-head"><h3>Purchase order '+esc(docNo(p))+' '+statusTag(p)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="max-height:74vh;overflow:auto"><div class="pi-tabs" id="ppTabs">'+tabs.map(t=>'<a data-t="'+t[0]+'" onclick="pusPoTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="ppBody"></div></div>'
+    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto"><div class="pi-tabs" id="ppTabs">'+tabs.map(t=>'<a data-t="'+t[0]+'" onclick="pusPoTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="ppBody"></div></div>'
     +'<div class="modal-foot"><div style="margin-right:auto;display:flex;gap:6px">'+left.join('')+'</div><button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
   window.pusPoTab(tab||'main');
 };
@@ -265,13 +271,14 @@ window.pusPoEdit=function(id){
     +'<td><input class="pe-qty" type="number" step="0.001" min="0" style="width:96px" value="'+esc(l.qty)+'" oninput="pusPoCalc()"></td><td><input class="pe-rate" type="number" step="0.01" min="0" style="width:100px" value="'+esc(l.rate)+'" oninput="pusPoCalc()"></td>'
     +'<td><input class="pe-gst" type="number" step="0.01" min="0" max="100" style="width:68px" value="'+esc(l.gst_rate)+'" oninput="pusPoCalc()"></td><td><input class="pe-make" style="width:110px" value="'+esc(l.make||'')+'"></td><td><input class="pe-rem" style="width:130px" value="'+esc(l.remark||'')+'"></td><td class="pus-num pe-tot"></td></tr>').join('');
   const t=k=>esc(p[k]||'');
-  const revising=needsRevision(p), v=vendorById(p.vendor_id), fy=U().fy(p.po_date);
-  ED.revising=revising;
+  const revising=needsRevision(p), pending=p.status==='pending_approval', v=vendorById(p.vendor_id), fy=U().fy(p.po_date);
+  ED.revising=revising; ED.pending=pending;
+  const pendingNote='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:11px 14px;margin-bottom:12px;font-size:13.5px"><b style="color:#b45309"><i class="fa-solid fa-hourglass-half"></i> Awaiting approval</b><div style="margin-top:4px">Saving your changes pulls this order back and sends it to the first approver again. Approvals given so far no longer count, and the indent quantity it holds is released and taken again. Press Cancel to leave it as it is.</div></div>';
   const typeOpts='<select id="peType">'+P.types.filter(x=>x.active||x.id===p.po_type_id).map(x=>'<option value="'+x.id+'"'+(x.id===p.po_type_id?' selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select>';
   const head='<div class="pi-form"><div>'+ro('Business Unit',projName(p.project_id))+f('Document Type',typeOpts)+ro('Document No',p.doc_no||'Assigned on submission')+ro('Document Date',U().dmy(p.po_date))+'</div><div>'
     +ro('Financial Year',fy.text)+ro('Supplier',vName(v)+(v&&v.gstin?'  ·  GSTIN '+v.gstin:''))+ro('Parent Account Head',parentHead(p.vendor_id))+'</div></div>';
-  openModal('<div class="modal-head"><h3>'+(revising?'Revise':'Edit')+' purchase order '+esc(docNo(p))+(p.revision>0?' · Rev '+p.revision:'')+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:74vh;overflow:auto">'
-    +rejectedBanner(p)+head
+  openModal('<div class="modal-head"><h3>'+(revising?'Revise':'Edit')+' purchase order '+esc(docNo(p))+(p.revision>0?' · Rev '+p.revision:'')+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'
+    +rejectedBanner(p)+(pending?pendingNote:'')+head
     +'<div class="pus-hint" style="margin-top:0">Rates, GST and make came from the vendor\'s quotation. You can adjust quantities (never above what the RFQ asked for) and any number here; the vendor and items cannot be changed — cancel and make a new order for that.</div>'
     +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>#</th><th>Item</th><th>Qty</th><th>Rate (₹)</th><th>GST %</th><th>Make</th><th>Remark</th><th class="pus-num">Line total</th></tr></thead><tbody>'+rows+'</tbody><tfoot><tr><td colspan="7" style="text-align:right"><b>Order total</b></td><td class="pus-num"><b id="peTotal"></b></td></tr></tfoot></table></div></div>'
     +'<div class="pi-form" style="margin-top:14px"><div>'
@@ -281,7 +288,7 @@ window.pusPoEdit=function(id){
       +f('Payment terms','<input id="pePay" value="'+t('payment_terms')+'">')+f('Delivery','<input id="peDel" value="'+t('delivery_terms')+'">')+f('Warranty / guarantee','<input id="peWar" value="'+t('warranty_terms')+'">')
       +f('Freight','<input id="peFre" value="'+t('freight_terms')+'">')+f('Price validity','<input id="peVal" value="'+t('price_validity')+'">')+f('Other terms','<input id="peOth" value="'+t('other_terms')+'">')
     +'</div></div></div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn" onclick="pusPoSave(false)">'+(revising?'Save changes':'Save')+'</button><button class="btn btn-primary" onclick="pusPoSave(true)">'+(revising?'Save & send for approval':'Save & submit')+'</button></div>','xl');
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'+(pending?'':'<button class="btn" onclick="pusPoSave(false)">'+(revising?'Save changes':'Save')+'</button>')+'<button class="btn btn-primary" onclick="pusPoSave(true)">'+(pending?'Save & send for approval again':revising?'Save & send for approval':'Save & submit')+'</button></div>','xl');
   window.pusPoCalc();
 };
 window.pusPoCalc=function(){
@@ -301,12 +308,17 @@ window.pusPoSave=async function(submit){
   }
   const head={po_type_id:parseInt(v('peType'),10)||null,warehouse_id:parseInt(v('peWh'),10)||null,delivery_address:v('peAddr'),contact_person:v('peContact'),contact_phone:v('pePhone'),remarks:v('peRem'),
     payment_terms:v('pePay'),delivery_terms:v('peDel'),warranty_terms:v('peWar'),freight_terms:v('peFre'),price_validity:v('peVal'),other_terms:v('peOth')};
+  let pulledBack=false;
+  if(ED.pending){                      // awaiting approval: pull it back first (database function), then it is an ordinary draft
+    const w=await U().PU().rpc('po_withdraw',{p_id:ED.id}); if(U().fail(w.error,'Could not pull the order back from approval')) return;
+    pulledBack=true; submit=true;
+  }
   const {error}=await U().PU().rpc('po_update',{p_id:ED.id,p_head:head,p_lines:lines});
-  if(U().fail(error,'Could not save')) return;
+  if(U().fail(error,'Could not save')){ if(pulledBack) toast('The order was pulled back from approval and is now a draft. Fix the problem, then send it again.','warn'); return; }
   if(submit){
     const r=await U().PU().rpc('po_submit',{p_id:ED.id});
     if(r.error){ toast('Saved, but it could not be submitted: '+r.error.message.replace(/Setup > Approvals/g,'Admin > Approvers'),'warn'); closeModal(); route(); return; }
-    closeModal(); toast('Submitted as '+r.data,'ok'); route(); return;
+    closeModal(); toast(pulledBack?'Saved and sent for approval again as '+r.data:'Submitted as '+r.data,'ok'); route(); return;
   }
   closeModal(); toast(ED.revising?'Changes saved — send it for approval when it is ready':'Saved','ok'); route();
 };
@@ -323,10 +335,11 @@ window.pusPoSubmit=async function(id){
   closeModal(); toast('Submitted as '+data+' — the indent quantity is now reserved','ok'); route();
 };
 window.pusPoDelete=async function(id){
-  if(!await confirmDialog('Delete this draft purchase order?')) return;
+  const p=(CUR&&CUR.p.id===id)?CUR.p:P.rows.find(x=>x.id===id), pending=!!(p&&p.status==='pending_approval');
+  if(!await confirmDialog(pending?'Delete this purchase order? It is awaiting approval — the approvers will no longer see it, and the indent quantity it holds is released. This cannot be undone.':'Delete this draft purchase order?')) return;
   const {error}=await U().PU().rpc('po_delete',{p_id:id});
   if(U().fail(error,'Delete failed')) return;
-  closeModal(); toast('Draft deleted','ok'); navTo('inventory/4');
+  closeModal(); toast(pending?'Purchase order deleted':'Draft deleted','ok'); navTo('inventory/4');
 };
 window.pusPoDecide=function(id,approve){
   openModal('<div class="modal-head"><h3>'+(approve?'Approve':'Reject')+' purchase order '+esc(docNo(CUR.p))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
