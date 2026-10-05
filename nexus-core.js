@@ -20507,7 +20507,7 @@ async function cpaPhPaint(projects,units){
           +'</select></div></div>':'')
           +(needUnit?'<div class="cph-f"><label>Flat</label><div class="cph-sel"><select id="cphUnit" onchange="cpaPhSet(\'unit\',this.value)">'
             +(flats.length?flats.map(u=>'<option value="'+u.id+'"'+(String(u.id)===String(CPA_PH.unit)?' selected':'')+'>'+esc(u.unit_code)
-                +(lastUp[u.id]?' · '+cpaDdMmYy(lastUp[u.id]):'')+'</option>').join('')
+                +(lastUp[u.id]?'\u00a0\u00a0\u00a0\u00a0\u00b7\u00a0\u00a0\u00a0\u00a0'+cpaDdMmYy(lastUp[u.id]):'')+'</option>').join('')
                           :'<option value="">No flats in this block</option>')
           +'</select></div></div>':'')
         +'</div>'
