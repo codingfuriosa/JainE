@@ -1285,7 +1285,7 @@ function recalc(full){
   if(cs){
     if(!pr||!num(f.rate)){ cs.innerHTML='<div class="pss-hint">Choose a flat and enter the booking rate to build the cost sheet.</div>'; }
     else{
-      const row=l=>'<tr'+(l.amount<0?' class="neg"':'')+'><td>'+esc(l.name)+'</td><td class="r">'+(l.basis==='per_sqft'?rate(l.rate)+' × '+num(l.qty):l.kind==='parking'?inr(l.rate)+' × '+num(l.qty):l.basis==='pct_unit'?pct(l.rate)+' of unit':'Fixed')+'</td><td class="r">'+inr(l.amount)+'</td><td class="r">'+pct(l.gst_rate)+'</td><td class="r">'+inr(l.gst_amount)+'</td><td class="r">'+inr(l.amount+l.gst_amount)+'</td></tr>';
+      const row=l=>'<tr'+(l.amount<0?' class="neg"':'')+'><td>'+esc(psLabel(l.name))+'</td><td class="r">'+(l.basis==='per_sqft'?rate(l.rate)+' × '+num(l.qty):l.kind==='parking'?inr(l.rate)+' × '+num(l.qty):l.basis==='pct_unit'?pct(l.rate)+' of unit':'Fixed')+'</td><td class="r">'+inr(l.amount)+'</td><td class="r">'+pct(l.gst_rate)+'</td><td class="r">'+inr(l.gst_amount)+'</td><td class="r">'+inr(l.amount+l.gst_amount)+'</td></tr>';
       const sub=(lbl,c)=>'<tr class="t"><td colspan="2">'+lbl+'</td><td class="r">'+inr(c.net)+'</td><td></td><td class="r">'+inr(c.gst)+'</td><td class="r">'+inr(c.net+c.gst)+'</td></tr>';
       const L=k=>pr.lines.filter(l=>l.col===k);
       cs.innerHTML='<div style="overflow-x:auto"><table class="psb-tbl"><thead><tr><th>Particulars</th><th class="r">Rate</th><th class="r">Amount</th><th class="r">GST</th><th class="r">GST amount</th><th class="r">Gross</th></tr></thead><tbody>'
@@ -1542,73 +1542,89 @@ window.psbPrint=async function(id){
   const v=(B.view&&B.view.b.id===id)?B.view:await loadBooking(id);
   if(!v){ w.close(); toast('Booking not found','err'); return; }
   const {b,ap,ch,ms}=v, proj=S.projects.find(p=>p.id===b.project_id);
-  const n=x=>{const v=Math.round(num(x));return (v<0?'−':'')+Math.abs(v).toLocaleString('en-IN');}, rs=x=>{const s=n(x);return s[0]==='−'?'−₹ '+s.slice(1):'₹ '+s;};
+  /* THE COST SHEET IS ONE OF THE FOUR DOCUMENTS, AND WAS THE ONLY ONE WITHOUT A LETTERHEAD.
+
+     It never loaded project_setup at all - it opened straight onto a centred title over a table,
+     while the demand letter, money receipt and customer ledger all carry the company block. Next
+     to them it read as a loose spreadsheet rather than something the company had issued, which is
+     what "it still looks bad" was about once the layout itself was fixed.
+
+     It uses DOC_CSS and docHead like the other three now, so all four are recognisably the same
+     family of document, and ends with the same registrations block. */
+  const {data:setup}=await PS().from('project_setup')
+    .select('company_name,company_address,company_pan,company_gstin,company_cin')
+    .eq('project_id',b.project_id).maybeSingle();
+  const n=x=>{const v=Math.round(num(x));return (v<0?'-':'')+Math.abs(v).toLocaleString('en-IN');};
+  const rs=x=>n(x);
   const L=k=>ch.filter(l=>l.col===k);
-  const ln=l=>'<tr><td>'+esc(l.name)+'</td><td class="r">'+(l.basis==='per_sqft'?num(l.rate).toLocaleString('en-IN'):l.kind==='parking'?n(l.rate)+' × '+num(l.qty):'')+'</td><td class="r">'+rs(l.amount)+'</td><td class="r">'+num(l.gst_rate)+'%</td><td class="r">'+rs(l.gst_amount)+'</td><td class="r">'+rs(num(l.amount)+num(l.gst_amount))+'</td></tr>';
-  const tot=(lbl,a,g)=>'<tr class="t"><td colspan="2">'+lbl+'</td><td class="r">'+rs(a)+'</td><td></td><td class="r">'+rs(g)+'</td><td class="r">'+rs(num(a)+num(g))+'</td></tr>';
   const sum=k=>ms.reduce((s,m)=>s+num(m[k]),0);
-  const html='<!doctype html><html><head><meta charset="utf-8"><title>Estimated Offer Price - '+esc(b.booking_no)+'</title><style>'
-    /* THE SHEET NOW LOOKS LIKE THE SCREEN IT WAS PRINTED FROM.
+  const ln=l=>'<tr><td>'+esc(psLabel(l.name))+'</td>'
+    +'<td class="r">'+(l.basis==='per_sqft'?num(l.rate).toLocaleString('en-IN')
+        :l.kind==='parking'?n(l.rate)+' × '+num(l.qty):'')+'</td>'
+    +'<td class="r">'+rs(l.amount)+'</td><td class="r">'+num(l.gst_rate)+'%</td>'
+    +'<td class="r">'+rs(l.gst_amount)+'</td><td class="r">'+rs(num(l.amount)+num(l.gst_amount))+'</td></tr>';
+  const tot=(lbl,a,g)=>'<tr class="tot"><td colspan="2">'+esc(lbl)+'</td><td class="r">'+rs(a)+'</td>'
+    +'<td></td><td class="r">'+rs(g)+'</td><td class="r">'+rs(num(a)+num(g))+'</td></tr>';
+  const sec=(lbl,span)=>'<tr class="secrow"><td colspan="'+span+'">'+esc(lbl)+'</td></tr>';
 
-       It was grey slabs - a #555 title bar, #777 bands across every section, a #666 block of
-       notes - with a hard #444 box around every single cell. On paper that is a wall of muddy
-       grey with the figures fighting their way out, and it is what a fax looked like in 1998.
-       The numbers were right and nothing else was.
-
-       The structure is unchanged, because the structure is what Accounts reads. What changed is
-       everything around it: no fills except a pale grey on the header row, horizontal rules only,
-       and the money set in a tabular-figure font so the columns line up digit under digit. */
-    /* A PRINTED SHEET IS WHITE PAPER, WHATEVER THE SCREEN IS SET TO.
-       Nothing here declared a colour scheme or a page background, so on a machine running dark
-       mode the print preview came up as white text on near-black - the figures almost unreadable
-       and the heading invisible. Paper has no dark mode; this says so. */
-    +'@page{size:A4;margin:14mm}'
-    +':root{color-scheme:light}'
-    +'*{box-sizing:border-box}'
-    +"html,body{background:#fff}"
-    +"body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11.5px;color:#15171a;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}"
-    /* ONE TITLE, CENTRED. The company name has been taken off by request, and with it the reason
-       the heading was pushed into the right margin: it was one half of a two-up header, letter-
-       spaced and jammed against the page edge. On its own and centred it reads as the title of a
-       document, which is what it is. */
-    +'.doc-hd{text-align:center;border-bottom:1.5px solid #15171a;padding-bottom:10px;margin-bottom:2px}'
-    +'.doc-hd .ti{font-size:13.5px;font-weight:700;letter-spacing:3.2px;text-transform:uppercase;color:#15171a}'
-    +'table{width:100%;border-collapse:collapse;margin:16px 0 0}'
-    +'td,th{padding:6px 9px;vertical-align:top;border-bottom:1px solid #e4e6ea}'
-    +'th{background:#f4f5f7;text-align:left;font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;color:#5a6069;font-weight:700;border-bottom:1px solid #c9ccd1}'
-    /* Three label/value pairs across, in columns of a FIXED width. Left to size themselves the
-       pairs drifted - a short value left a wide gap before the next label, so the three pairs
-       never lined up with each other down the block. */
-    +'.meta-tbl{table-layout:fixed;margin-top:12px}'
-    +'.meta-tbl td{border:0;padding:3.5px 0;font-size:11px}'
-    +'.meta-tbl .k{color:#5a6069;width:11%;white-space:nowrap;padding-right:8px}'
-    +'.meta-tbl .v{font-weight:600;width:22.3%;padding-right:14px;overflow-wrap:anywhere}'
-    /* A section is a line of small capitals with a rule under it, not a grey bar. */
-    +'.sec td{background:none;color:#15171a;font-weight:700;font-size:9.5px;letter-spacing:1.4px;'
-      +'text-transform:uppercase;padding:14px 0 5px;border-bottom:1px solid #15171a}'
-    +".r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;font-feature-settings:'tnum' 1}"
-    +'.t td{font-weight:700;border-top:1px solid #c9ccd1;border-bottom:1px solid #c9ccd1;background:#fafbfc}'
-    +'.gt td{font-weight:700;font-size:12.5px;border-top:2px solid #15171a;border-bottom:2px solid #15171a;background:#f4f5f7}'
-    +'.notes{margin:18px 0 0;padding:10px 12px;border:1px solid #e4e6ea;border-left:3px solid #15171a;'
-      +'background:#fafbfc;font-size:10px;line-height:1.75;color:#3d434a}'
-    +'.meta{font-size:10px;margin:10px 0 0;color:#8a9099;display:flex;justify-content:space-between}'
-    +'tr{page-break-inside:avoid}thead{display:table-header-group}'
+  const html='<!doctype html><html><head><meta charset="utf-8"><title>Estimated Offer Price - '+esc(b.booking_no)+'</title>'
+    +'<style>'+DOC_CSS
+      +'.secrow td{background:#d8d8d8;font-weight:bold;text-align:center;letter-spacing:.4px}'
+      +'.grid tr.gt td{background:#bfbfbf;font-weight:bold;font-size:11px}'
     +'</style></head><body>'
-    +'<div class="doc-hd"><div class="ti">Estimated Offer Price</div></div>'
-    +'<table class="meta-tbl"><tr><td class="k">Project</td><td class="v">'+esc(proj?proj.name:'')+'</td><td class="k">Block</td><td class="v">'+esc(b.towers&&b.towers.name||'')+'</td><td class="k">Booking no.</td><td class="v">'+esc(b.booking_no)+'</td></tr>'
-    +'<tr><td class="k">SBA</td><td class="v">'+num(b.sba_sqft)+' sq ft</td><td class="k">Built-up</td><td class="v">'+(b.flats&&b.flats.built_up_sqft!=null?num(b.flats.built_up_sqft)+' sq ft':'—')+'</td><td class="k">Carpet</td><td class="v">'+(b.flats&&b.flats.carpet_sqft!=null?num(b.flats.carpet_sqft)+' sq ft':'—')+'</td></tr>'
-    +'<tr><td class="k">Floor</td><td class="v">'+esc(ordinal(b.floor_no))+'</td><td class="k">Flat</td><td class="v">'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+'</td><td class="k">BHK</td><td class="v">'+esc(b.flats&&b.flats.bhk||'—')+'</td></tr>'
-    +'<tr><td class="k">Applicant</td><td class="v" colspan="3">'+esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & '))+'</td><td class="k">Date</td><td class="v">'+dmy(b.booking_date)+'</td></tr></table>'
-    +'<table><tr class="sec"><td colspan="6">Unit Charges Details</td></tr><tr><th>Particulars</th><th class="r">Rate</th><th class="r">Total (Rs.)</th><th class="r">GST</th><th class="r">GST Amount</th><th class="r">Gross Amount</th></tr>'
-    +L('unit').map(ln).join('')+tot('TOTAL FLAT VALUE',b.unit_net,b.unit_gst)
-    +(L('parking').length?'<tr class="sec"><td colspan="6">Car Parking</td></tr>'+L('parking').map(ln).join('')+tot('TOTAL',b.parking_net,b.parking_gst):'')
-    +(L('edc').length?'<tr class="sec"><td colspan="6">Extra Development Charges (EDC)</td></tr>'+L('edc').map(ln).join('')+tot('TOTAL',b.edc_net,b.edc_gst):'')
-    +'<tr class="gt"><td colspan="2">Grand total</td><td class="r">'+rs(b.total_consideration)+'</td><td></td><td class="r">'+rs(num(b.unit_gst)+num(b.parking_gst)+num(b.edc_gst))+'</td><td class="r">'+rs(b.grand_total)+'</td></tr></table>'
-    +'<table><tr class="sec"><td colspan="5">Payment Schedule</td></tr><tr><th>Event Particulars</th><th class="r">Unit</th><th class="r">Parking</th><th class="r">EDC</th><th class="r">Gross Amount</th></tr>'
-    +ms.map(m=>'<tr><td>'+esc(m.name)+(msDescribe(m)?' '+esc(msDescribe(m)):'')+'</td><td class="r">'+n(num(m.unit_net)+num(m.unit_gst))+'</td><td class="r">'+n(num(m.parking_net)+num(m.parking_gst))+'</td><td class="r">'+n(num(m.edc_net)+num(m.edc_gst))+'</td><td class="r">'+rs(m.gross_total)+'</td></tr>').join('')
-    +'<tr class="gt"><td>Total</td><td class="r">'+n(sum('unit_net')+sum('unit_gst'))+'</td><td class="r">'+n(sum('parking_net')+sum('parking_gst'))+'</td><td class="r">'+n(sum('edc_net')+sum('edc_gst'))+'</td><td class="r">'+rs(sum('gross_total'))+'</td></tr></table>'
-    +'<div class="notes"><b>Please note</b><br>1. The above is an indicative offer price only.<br>2. Taxes apply as per government norms prevailing at the time of payment.<br>3. Please check all calculations and revert with any discrepancy.<br>4. Figures may move slightly through rounding to the rupee.</div>'
-    +'<div class="meta"><span>Payment plan: '+esc(b.plan_name||'—')+(b.is_non_standard?' (non-standard)':'')+'</span><span>'+esc(b.booking_no)+' &middot; '+dmy(today())+'</span></div>'
+    +docHead(setup,'ESTIMATED OFFER PRICE')
+    /* The unit's particulars, in the same label : value column the demand letter uses, so the two
+       documents for the same flat read the same way. */
+    +'<table><tr>'
+      +'<td style="width:50%;vertical-align:top"><table class="ref">'
+        +docRef('Project', proj?proj.name:'')
+        +docRef('Block', b.towers&&b.towers.name)
+        +docRef('Unit No', b.flats&&b.flats.flat_code)
+        +docRef('Floor', ordinal(b.floor_no))
+        +docRef('BHK', b.flats&&b.flats.bhk)
+        +'</table></td>'
+      +'<td style="vertical-align:top"><table class="ref">'
+        +docRef('Booking No', b.booking_no)
+        +docRef('Date', dmy(b.booking_date))
+        +docRef('Super Built-up', num(b.sba_sqft)?num(b.sba_sqft).toLocaleString('en-IN')+' sq ft':'')
+        +docRef('Built-up', b.flats&&b.flats.built_up_sqft!=null?num(b.flats.built_up_sqft).toLocaleString('en-IN')+' sq ft':'')
+        +docRef('Carpet', b.flats&&b.flats.carpet_sqft!=null?num(b.flats.carpet_sqft).toLocaleString('en-IN')+' sq ft':'')
+        +'</table></td></tr></table>'
+    +'<div class="addr" style="margin:10px 0 2px"><b>Applicant:</b> '
+      +esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & ')||'')+'</div>'
+    +'<table class="grid" style="margin-top:10px">'
+      +sec('Unit Charges Details',6)
+      +'<tr><th>Particulars</th><th class="r">Rate</th><th class="r">Total (Rs.)</th>'
+        +'<th class="r">GST</th><th class="r">GST Amount</th><th class="r">Gross Amount</th></tr>'
+      +L('unit').map(ln).join('')+tot('Total flat value',b.unit_net,b.unit_gst)
+      +(L('parking').length?sec('Car Parking',6)+L('parking').map(ln).join('')+tot('Total',b.parking_net,b.parking_gst):'')
+      +(L('edc').length?sec('Extra Development Charges (EDC)',6)+L('edc').map(ln).join('')+tot('Total',b.edc_net,b.edc_gst):'')
+      +'<tr class="gt"><td colspan="2">GRAND TOTAL</td><td class="r">'+rs(b.total_consideration)+'</td><td></td>'
+        +'<td class="r">'+rs(num(b.unit_gst)+num(b.parking_gst)+num(b.edc_gst))+'</td>'
+        +'<td class="r">'+rs(b.grand_total)+'</td></tr>'
+    +'</table>'
+    +'<table class="grid" style="margin-top:12px">'
+      +sec('Payment Schedule'+(b.plan_name?' — '+b.plan_name:''),5)
+      +'<tr><th>Event Particulars</th><th class="r">Unit</th><th class="r">Parking</th>'
+        +'<th class="r">EDC</th><th class="r">Gross Amount</th></tr>'
+      +ms.map(m=>'<tr><td>'+esc(psLabel(m.name))+(msDescribe(m)?' <span class="sm">'+esc(msDescribe(m))+'</span>':'')+'</td>'
+        +'<td class="r">'+n(num(m.unit_net)+num(m.unit_gst))+'</td>'
+        +'<td class="r">'+n(num(m.parking_net)+num(m.parking_gst))+'</td>'
+        +'<td class="r">'+n(num(m.edc_net)+num(m.edc_gst))+'</td>'
+        +'<td class="r">'+rs(m.gross_total)+'</td></tr>').join('')
+      +'<tr class="gt"><td>TOTAL</td><td class="r">'+n(sum('unit_net')+sum('unit_gst'))+'</td>'
+        +'<td class="r">'+n(sum('parking_net')+sum('parking_gst'))+'</td>'
+        +'<td class="r">'+n(sum('edc_net')+sum('edc_gst'))+'</td>'
+        +'<td class="r">'+rs(sum('gross_total'))+'</td></tr>'
+    +'</table>'
+    +'<div class="sm" style="margin-top:12px;padding:9px 11px;border:1px solid #000"><b>Please note</b><br>'
+      +'1. The above is an indicative offer price only.<br>'
+      +'2. Taxes apply as per government norms prevailing at the time of payment.<br>'
+      +'3. Please check all calculations and revert with any discrepancy.<br>'
+      +'4. Figures may move slightly through rounding to the rupee.</div>'
+    +docRegs(setup)
+    +'<div class="sm" style="margin-top:12px">'+esc(b.booking_no)+' &middot; generated '+dmy(today())
+      +'. This is a system generated statement. No signature required.</div>'
     +'<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>';
   w.document.open(); w.document.write(html); w.document.close();
 };
@@ -1879,7 +1895,7 @@ window.psrPrint=async function(id){
          +'<th class="r" style="width:14%">Total Amt</th></tr></thead><tbody>'
          +al.map(function(a,ix){
              const iv=a.invoices||{};
-             return '<tr><td style="text-align:center">'+(ix+1)+'</td><td>Bill</td><td>'+esc(iv.title||'')+'</td>'
+             return '<tr><td style="text-align:center">'+(ix+1)+'</td><td>Bill</td><td>'+esc(psLabel(iv.title||''))+'</td>'
                +'<td>'+esc(iv.invoice_no||'')+'</td><td>'+(iv.invoice_date?dmy(iv.invoice_date):'')+'</td>'
                +'<td class="r">'+Math.round(num(a.amount)).toLocaleString('en-IN')+'.00</td></tr>';
            }).join('')
@@ -2336,7 +2352,7 @@ window.psrpLedgerPrint=async function(bookingId){
   const html='<!doctype html><html><head><meta charset="utf-8"><title>Customer Ledger - '+esc(b.booking_no)+'</title>'
     +'<style>'+DOC_CSS
       +'.led td,.led th{border:1px solid #000;padding:4px 6px;font-size:10px;vertical-align:top}'
-      +'.led td.lk{width:16%;font-weight:bold;background:#f2f2f2}'
+      +'.led td.lk{width:21%;font-weight:bold;background:#f2f2f2;white-space:nowrap}'
       +'.led th{background:#d8d8d8;text-align:center;font-weight:bold}'
       +'.led td.r,.led th.r{text-align:right}'
       +'.secrow td{background:#d8d8d8;font-weight:bold;text-align:center}'
