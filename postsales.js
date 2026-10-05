@@ -2531,15 +2531,26 @@ async function repMis(host,stale){
   const curFrom=iso(new Date(y,m,1)), prevFrom=iso(new Date(y,m-1,1)), prevTo=iso(new Date(y,m,0));
   const lbl=(yy,mm)=>MON[mm]+"'"+String(yy).slice(2), curL=lbl(y,m), pd=new Date(y,m-1,1), prevL=lbl(pd.getFullYear(),pd.getMonth());
   const dd=String(d.getDate()).padStart(2,'0')+'.'+String(m+1).padStart(2,'0')+'.'+y;
-  const [{data:out,error},bks,rcs]=await Promise.all([
-    PS().rpc('report_outstanding',{p_project_id:null,p_as_of:RP.asOf}),
-    allRows(()=>PS().from('bookings').select('id,project_id,status')),
+  /* OUTSTANDING COMES FROM FARVISION, NOT FROM OUR OWN LEDGER.
+
+     This used to call report_outstanding, which computes open invoices minus receipts from Post
+     Sales. That is a perfectly good definition and it is not the one the weekly MIS has ever
+     used: the sheet reads FarVision's Customer Outstanding Summary and sums Net Outstanding where
+     the customer is active and the figure is above zero. Publishing a different number under the
+     same heading is how a report loses its authority.
+
+     cust.outstanding_snapshot IS that export, already imported through Customer Portal, and
+     checked against the hand-made sheet for 28.09.2026 it matches to the rupee wherever every
+     unit has been imported - Dream Gurukul 2,13,84,025, Dream Ecocity Bungalow 18,15,709.
+     postsales.mis_outstanding reads it the way the sheet does and returns coverage with it. */
+  const [{data:out,error},rcs]=await Promise.all([
+    PS().rpc('mis_outstanding',{p_as_of:RP.asOf}),
     allRows(()=>PS().from('receipts').select('project_id,receipt_date,amount,mode,bookings!inner(status)').eq('status','active').neq('mode','transfer').eq('bookings.status','active').gte('receipt_date',prevFrom).lte('receipt_date',RP.asOf))]);
   if(stale()) return;
   if(error){ host.innerHTML='<div class="empty"><div>'+esc(error.message)+'</div></div>'; return; }
-  const bk={}; bks.forEach(b=>bk[b.id]=b);
-  const acc={}; S.projects.forEach(p=>acc[p.id]={o:0,c:0,p:0,n:0});
-  (out||[]).forEach(r=>{const b=bk[r.booking_id]; if(!b||b.status!=='active'||!acc[b.project_id]) return; const net=num(r.invoiced)-num(r.received); if(net>0.5){acc[b.project_id].o+=net;acc[b.project_id].n++;}});
+  const acc={}; S.projects.forEach(p=>acc[p.id]={o:0,c:0,p:0,n:0,cov:0,snap:null});
+  (out||[]).forEach(r=>{const a=acc[r.project_id]; if(!a) return;
+    a.o=num(r.outstanding); a.n=Number(r.units)||0; a.cov=Number(r.units_with_bookings)||0; a.snap=r.snapshot_date;});
   rcs.forEach(r=>{const a=acc[r.project_id]; if(!a) return; if(r.receipt_date>=curFrom) a.c+=num(r.amount); else if(r.receipt_date<=prevTo) a.p+=num(r.amount);});
   const byKey={}; S.projects.forEach(p=>byKey[misKey(p.name)]=p);
   const seen=new Set();
@@ -2549,7 +2560,30 @@ async function repMis(host,stale){
   repSet('Project Wise Outstanding Status VS Collection Status As Per ERP','Weekly Basis MIS Report - Date: '+dd,cols,rows);
   const T=k=>rows.reduce((s,r)=>s+num(r[k]),0);
   const dash=v=>num(v)?indN(v):'<span style="color:#94a3b8">—</span>';
-  host.innerHTML=mKpis([['Outstanding till '+dd,'₹'+indN(T('o')),rows.reduce((s,r)=>s+r.n,0)+' customers with dues'],['Collection '+curL,'₹'+indN(T('c')),'1st to '+dd],['Collection '+prevL,'₹'+indN(T('p')),'whole month']])
+  /* WHETHER THE IMPORT IS COMPLETE IS PART OF THE REPORT.
+
+     The outstanding figure is only ever as complete as the FarVision import behind it, and a
+     partial import produces a number that looks finished and is simply too small. On 28.09.2026
+     three business units matched the hand-made sheet to the rupee and the rest were short by
+     between five lakh and one crore seventy - every one of them short, never over, because units
+     that were never imported contribute nothing.
+
+     So the report says so, in front of the figure, naming the projects. A number nobody can check
+     is worse than no number. */
+  const short=S.projects.map(p=>({p,a:acc[p.id]})).filter(x=>x.a&&x.a.cov>0&&x.a.n<x.a.cov);
+  const noSnap=S.projects.map(p=>({p,a:acc[p.id]})).filter(x=>x.a&&x.a.cov>0&&!x.a.snap);
+  const snapDate=(out||[]).map(r=>r.snapshot_date).filter(Boolean).sort().pop();
+  const warn=(short.length||noSnap.length)
+    ? '<div class="pss-banner" style="border-color:#fde68a;background:#fffbeb;margin-bottom:14px">'
+      +'<i class="fa-solid fa-triangle-exclamation" style="color:#b45309"></i><div class="grow">'
+      +'<b>Outstanding is incomplete — do not circulate this yet.</b><br>'
+      +'It is summed from the FarVision outstanding import'+(snapDate?' as on '+dmy(snapDate):'')
+      +', and not every unit has come across. '
+      +(noSnap.length?'<br><b>Nothing imported at all:</b> '+noSnap.map(x=>esc(x.p.name)).join(', ')+'. ':'')
+      +(short.length?'<br><b>Partly imported:</b> '+short.map(x=>esc(x.p.name)+' ('+x.a.n+' of '+x.a.cov+' units)').join(', ')+'.':'')
+      +'<br>Re-run the FarVision outstanding import for these, then reopen this report.</div></div>'
+    : '';
+  host.innerHTML=warn+mKpis([['Outstanding till '+dd,'₹'+indN(T('o')),rows.reduce((s,r)=>s+r.n,0)+' customers with dues'],['Collection '+curL,'₹'+indN(T('c')),'1st to '+dd],['Collection '+prevL,'₹'+indN(T('p')),'whole month']])
     +'<div class="card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr style="background:#fef9c3">'+cols.map((c,i)=>'<th style="background:#fef08a;color:#111;white-space:normal;min-width:'+(i<2?140:150)+'px'+(i>1?';text-align:right':'')+'">'+esc(c.h)+'</th>').join('')+'</tr></thead><tbody>'
     +rows.map(r=>'<tr><td><b>'+esc(r.project)+'</b></td><td>'+esc(r.bu)+'</td><td class="pss-num">'+dash(r.o)+'</td><td class="pss-num">'+dash(r.c)+'</td><td class="pss-num">'+dash(r.p)+'</td></tr>').join('')
     +'</tbody><tfoot><tr><td style="font-weight:700">TOTAL</td><td></td><td class="pss-num" style="font-weight:700">'+indN(T('o'))+'</td><td class="pss-num" style="font-weight:700">'+indN(T('c'))+'</td><td class="pss-num" style="font-weight:700">'+indN(T('p'))+'</td></tr></tfoot></table></div></div>'
