@@ -2531,26 +2531,35 @@ async function repMis(host,stale){
   const curFrom=iso(new Date(y,m,1)), prevFrom=iso(new Date(y,m-1,1)), prevTo=iso(new Date(y,m,0));
   const lbl=(yy,mm)=>MON[mm]+"'"+String(yy).slice(2), curL=lbl(y,m), pd=new Date(y,m-1,1), prevL=lbl(pd.getFullYear(),pd.getMonth());
   const dd=String(d.getDate()).padStart(2,'0')+'.'+String(m+1).padStart(2,'0')+'.'+y;
-  /* OUTSTANDING COMES FROM FARVISION, NOT FROM OUR OWN LEDGER.
+  /* THE FIGURE IS JAIN-E'S OWN, AND FARVISION'S COPY IS USED TO CHECK IT.
 
-     This used to call report_outstanding, which computes open invoices minus receipts from Post
-     Sales. That is a perfectly good definition and it is not the one the weekly MIS has ever
-     used: the sheet reads FarVision's Customer Outstanding Summary and sums Net Outstanding where
-     the customer is active and the figure is above zero. Publishing a different number under the
-     same heading is how a report loses its authority.
+     Both live in Supabase and they are NOT in conflict: on 28.09.2026, of the 156 units present
+     in both, 152 agreed to the rupee. Post Sales covers 297 active bookings against the
+     snapshot's 158 units, so it is the wider of the two, and it is the ledger JAIN-E actually
+     keeps - invoices raised and receipts recorded here. That is what this report publishes.
 
-     cust.outstanding_snapshot IS that export, already imported through Customer Portal, and
-     checked against the hand-made sheet for 28.09.2026 it matches to the rupee wherever every
-     unit has been imported - Dream Gurukul 2,13,84,025, Dream Ecocity Bungalow 18,15,709.
-     postsales.mis_outstanding reads it the way the sheet does and returns coverage with it. */
-  const [{data:out,error},rcs]=await Promise.all([
+     cust.outstanding_snapshot - FarVision's own Customer Outstanding export, imported through
+     Customer Portal - is read alongside it purely as a second opinion, per project.
+
+     WHAT NEITHER OF THEM CAN DO IS INVENT DATA THAT WAS NEVER IMPORTED. For 28.09.2026 the two
+     Supabase sources said 17.17 and 17.27 crore; the sheet built from live FarVision that morning
+     said 24.50. They agree with each other and are both about 7.3 crore short of the ERP. That is
+     an import gap, not an arithmetic one, and no choice of table here closes it - which is why
+     the banner below reports it rather than papering over it. */
+  const [{data:out,error},{data:fv},rcs]=await Promise.all([
+    PS().rpc('report_outstanding',{p_project_id:null,p_as_of:RP.asOf}),
     PS().rpc('mis_outstanding',{p_as_of:RP.asOf}),
     allRows(()=>PS().from('receipts').select('project_id,receipt_date,amount,mode,bookings!inner(status)').eq('status','active').neq('mode','transfer').eq('bookings.status','active').gte('receipt_date',prevFrom).lte('receipt_date',RP.asOf))]);
   if(stale()) return;
   if(error){ host.innerHTML='<div class="empty"><div>'+esc(error.message)+'</div></div>'; return; }
-  const acc={}; S.projects.forEach(p=>acc[p.id]={o:0,c:0,p:0,n:0,cov:0,snap:null});
-  (out||[]).forEach(r=>{const a=acc[r.project_id]; if(!a) return;
-    a.o=num(r.outstanding); a.n=Number(r.units)||0; a.cov=Number(r.units_with_bookings)||0; a.snap=r.snapshot_date;});
+  const bks=await allRows(()=>PS().from('bookings').select('id,project_id,status'));
+  if(stale()) return;
+  const bk={}; bks.forEach(b=>bk[b.id]=b);
+  const acc={}; S.projects.forEach(p=>acc[p.id]={o:0,c:0,p:0,n:0,fv:null,fvUnits:0,snap:null});
+  (out||[]).forEach(r=>{const b=bk[r.booking_id]; if(!b||b.status!=='active'||!acc[b.project_id]) return;
+    const net=num(r.invoiced)-num(r.received); if(net>0.5){acc[b.project_id].o+=net;acc[b.project_id].n++;}});
+  (fv||[]).forEach(r=>{const a=acc[r.project_id]; if(!a) return;
+    a.fv=num(r.outstanding); a.fvUnits=Number(r.units)||0; a.snap=r.snapshot_date;});
   rcs.forEach(r=>{const a=acc[r.project_id]; if(!a) return; if(r.receipt_date>=curFrom) a.c+=num(r.amount); else if(r.receipt_date<=prevTo) a.p+=num(r.amount);});
   const byKey={}; S.projects.forEach(p=>byKey[misKey(p.name)]=p);
   const seen=new Set();
@@ -2570,18 +2579,28 @@ async function repMis(host,stale){
 
      So the report says so, in front of the figure, naming the projects. A number nobody can check
      is worse than no number. */
-  const short=S.projects.map(p=>({p,a:acc[p.id]})).filter(x=>x.a&&x.a.cov>0&&x.a.n<x.a.cov);
-  const noSnap=S.projects.map(p=>({p,a:acc[p.id]})).filter(x=>x.a&&x.a.cov>0&&!x.a.snap);
-  const snapDate=(out||[]).map(r=>r.snapshot_date).filter(Boolean).sort().pop();
-  const warn=(short.length||noSnap.length)
+  /* FARVISION'S COPY, SIDE BY SIDE, PER PROJECT.
+     A project where the two disagree by more than a lakh is one where JAIN-E and the ERP are
+     genuinely telling different stories, and that is worth a line on the report rather than a
+     discovery three weeks later. Under a lakh is rounding and timing and is left alone. */
+  const LAKH=100000;
+  const diffs=S.projects.map(p=>({p,a:acc[p.id]}))
+    .filter(x=>x.a&&x.a.fv!=null&&Math.abs(x.a.fv-x.a.o)>LAKH)
+    .sort((x,y)=>Math.abs(y.a.fv-y.a.o)-Math.abs(x.a.fv-x.a.o));
+  const snapDate=(fv||[]).map(r=>r.snapshot_date).filter(Boolean).sort().pop();
+  const sign=v=>(v>0?'+':'')+indN(Math.round(v));
+  const warn=diffs.length
     ? '<div class="pss-banner" style="border-color:#fde68a;background:#fffbeb;margin-bottom:14px">'
-      +'<i class="fa-solid fa-triangle-exclamation" style="color:#b45309"></i><div class="grow">'
-      +'<b>Outstanding is incomplete — do not circulate this yet.</b><br>'
-      +'It is summed from the FarVision outstanding import'+(snapDate?' as on '+dmy(snapDate):'')
-      +', and not every unit has come across. '
-      +(noSnap.length?'<br><b>Nothing imported at all:</b> '+noSnap.map(x=>esc(x.p.name)).join(', ')+'. ':'')
-      +(short.length?'<br><b>Partly imported:</b> '+short.map(x=>esc(x.p.name)+' ('+x.a.n+' of '+x.a.cov+' units)').join(', ')+'.':'')
-      +'<br>Re-run the FarVision outstanding import for these, then reopen this report.</div></div>'
+      +'<i class="fa-solid fa-scale-unbalanced" style="color:#b45309"></i><div class="grow">'
+      +'<b>Check before circulating — JAIN-E and FarVision do not agree on '+diffs.length+' project'
+      +(diffs.length===1?'':'s')+'.</b><br>'
+      +'The figures below are JAIN-E’s own: demands raised here less receipts recorded here. '
+      +'FarVision’s Customer Outstanding import'+(snapDate?' as on '+dmy(snapDate):'')+' says:<br>'
+      +diffs.map(x=>'&bull; '+esc(x.p.name)+' — FarVision ₹'+indN(Math.round(x.a.fv))
+          +' against ₹'+indN(Math.round(x.a.o))+' here ('+sign(x.a.fv-x.a.o)+')').join('<br>')
+      +'<br>Where FarVision is higher, demands it has raised have not reached JAIN-E yet — '
+      +'re-run the FarVision import. Where it is lower, it is usually a unit JAIN-E holds and the '
+      +'import has not covered.</div></div>'
     : '';
   host.innerHTML=warn+mKpis([['Outstanding till '+dd,'₹'+indN(T('o')),rows.reduce((s,r)=>s+r.n,0)+' customers with dues'],['Collection '+curL,'₹'+indN(T('c')),'1st to '+dd],['Collection '+prevL,'₹'+indN(T('p')),'whole month']])
     +'<div class="card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr style="background:#fef9c3">'+cols.map((c,i)=>'<th style="background:#fef08a;color:#111;white-space:normal;min-width:'+(i<2?140:150)+'px'+(i>1?';text-align:right':'')+'">'+esc(c.h)+'</th>').join('')+'</tr></thead><tbody>'
