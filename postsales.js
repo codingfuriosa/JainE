@@ -929,6 +929,38 @@ async function psSyncInfo(){
   const r=(data||[])[0]; if(!r){ el.textContent=''; return; }
   el.textContent=(r.error?'Last sync failed ':'Synced ')+new Date(r.finished_at||r.started_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
   el.title=r.error||'Auto-syncs within 10 minutes of each Customer Portal import';
+  psUnlinkedWarn();
+}
+
+/* FLATS FARVISION IS BILLING THAT POST SALES HAS NEVER HEARD OF.
+
+   sync_farvision joins TO bookings and cannot create one, so a flat sold and billed in FarVision
+   with no booking raised here never arrives - no demands, no receipts, no outstanding, and no
+   error, because an inner join matching nothing is not an error. Gateway Pailan 6B and 7H sat
+   like that for two days and took 76,70,151 out of the MIS with them.
+
+   The sync cannot fix itself: a booking needs applicants, a cost sheet and a payment plan, and
+   inventing those from an outstanding row would be worse than the gap. So somebody is told
+   instead, here, where the Sync button is - not at the next weekly MIS. */
+async function psUnlinkedWarn(){
+  const host=document.getElementById('psbList'); if(!host) return;
+  let rows=[];
+  try{ const {data}=await PS().rpc('unlinked_farvision_units'); rows=data||[]; }
+  catch(_e){ return; }                       // a failed check says nothing rather than crying wolf
+  const old=document.getElementById('psUnlinked'); if(old) old.remove();
+  if(!rows.length) return;
+  const tot=rows.reduce((s,r)=>s+num(r.outstanding),0);
+  host.insertAdjacentHTML('beforebegin',
+    '<div id="psUnlinked" class="pss-banner" style="border-color:#fecaca;background:#fef2f2;margin-bottom:12px">'
+    +'<i class="fa-solid fa-link-slash" style="color:#b91c1c"></i><div class="grow">'
+    +'<b>'+rows.length+' flat'+(rows.length===1?' is':'s are')+' being billed in FarVision with no booking here'
+    +' — '+inr(tot)+' is missing from every Post Sales figure, including the MIS.</b><br>'
+    +rows.slice(0,8).map(r=>'&bull; '+esc(r.project)+' — '+esc(r.tower||'')+' '+esc(r.unit_code)
+        +' — '+inr(r.outstanding)+' across '+(r.bills||0)+' demand'+((r.bills||0)===1?'':'s')
+        +' (first seen '+dmy(r.first_seen)+')').join('<br>')
+    +(rows.length>8?'<br>&hellip; and '+(rows.length-8)+' more':'')
+    +'<br>Raise the booking here and the next sync brings its demands and receipts across. '
+    +'The sync cannot do it for you — it has no applicants or payment plan to work from.</div></div>');
 }
 window.psSyncNow=async function(btn){
   btn.disabled=true; const h=btn.innerHTML; btn.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Syncing';
