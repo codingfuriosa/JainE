@@ -294,25 +294,29 @@ window.pusUomDelete=function(id){
 const projName=id=>{const p=S.projects.find(x=>x.id===id);return p?p.name:'—';};
 function renderWarehouses(host){
   const list=S.warehouses.filter(w=>!S.whProject||String(w.project_id)===S.whProject);
-  const rows=list.map(w=>'<tr><td><span class="pus-code">'+esc(w.code)+'</span></td><td><b>'+esc(w.name)+'</b>'+(w.active?'':' <span class="tag t-gray">Inactive</span>')+'</td><td>'+esc(projName(w.project_id))+'</td>'+actBtns('pusWhModal('+w.id+')','pusWhDelete('+w.id+')','admin')+'</tr>').join('');
+  const rows=list.map(w=>'<tr><td><span class="pus-code">'+esc(w.code)+'</span></td><td><b>'+esc(w.name)+'</b>'+(w.active?'':' <span class="tag t-gray">Inactive</span>')+'</td><td>'+esc(w.wh_type||'')+'</td><td>'+esc(projName(w.project_id))+'</td>'+actBtns('pusWhModal('+w.id+')','pusWhDelete('+w.id+')','admin')+'</tr>').join('');
   const top='<div class="pus-top"><select id="pusWP" onchange="pusWhFilter()"><option value="">All projects</option>'+S.projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===S.whProject?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select></div>';
-  host.innerHTML=listCard('Warehouses','Any number of warehouses (stores) under a project.','Add warehouse',S.isAdmin?'pusWhModal()':'',[['Code'],['Warehouse'],['Project']],rows,top);
+  host.innerHTML=listCard('Warehouses','Any number of warehouses (stores) under a project.','Add warehouse',S.isAdmin?'pusWhModal()':'',[['Code'],['Description'],['Type'],['Project']],rows,top);
 }
+// Types already used, plus the usual ones - offered as suggestions; any text is accepted.
+const WH_TYPES=['Main store','Site store','Sub store','Godown','Yard'];
+const whTypeOptions=()=>[...new Set(WH_TYPES.concat(S.warehouses.map(w=>w.wh_type).filter(Boolean)))].map(t=>'<option value="'+esc(t)+'"></option>').join('');
 window.pusWhFilter=function(){ S.whProject=val('pusWP'); renderWarehouses($('pusSec')); };
 window.pusWhModal=function(id){
   const w=id?S.warehouses.find(x=>x.id===id):null;
   const pid=w?w.project_id:(parseInt(S.whProject,10)||null);
   modal(w?'Edit warehouse':'Add warehouse',
     '<label>Project</label><select id="pusWProj"'+(w?' disabled':'')+'><option value="">Choose…</option>'+S.projects.map(p=>'<option value="'+p.id+'"'+(p.id===pid?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select>'
-    +'<div class="two"><div><label>Code</label><input id="pusWCode" maxlength="10" value="'+esc(w?w.code:'')+'" placeholder="MAIN"></div><div><label>Name</label><input id="pusWName" value="'+esc(w?w.name:'')+'" placeholder="Main store"></div></div>'
+    +'<div class="two"><div><label>Code</label><input id="pusWCode" maxlength="10" value="'+esc(w?w.code:'')+'" placeholder="MAIN"></div><div><label>Description</label><input id="pusWName" value="'+esc(w?w.name:'')+'" placeholder="Main store"></div></div>'
+    +'<label>Type <span style="color:var(--slate);font-weight:400">(optional)</span></label><input id="pusWType" list="pusWTypes" autocomplete="off" maxlength="40" value="'+esc(w&&w.wh_type||'')+'" placeholder="Choose or type, e.g. Site store"><datalist id="pusWTypes">'+whTypeOptions()+'</datalist>'
     +activeSwitch('pusWActive',!w||w.active),
     'pusWhSave('+(w?w.id:'null')+')');
 };
 window.pusWhSave=async function(id){
   const project_id=parseInt(val('pusWProj'),10), code=val('pusWCode').toUpperCase(), name=val('pusWName');
   if(!id&&!project_id){ toast('Choose a project','err'); return; }
-  if(!code||!name){ toast('Enter a code and a name','err'); return; }
-  const row={code,name,active:$('pusWActive').checked};
+  if(!code||!name){ toast('Enter a code and a description','err'); return; }
+  const row={code,name,wh_type:val('pusWType')||null,active:$('pusWActive').checked};
   if(!id) row.project_id=project_id;
   await save('warehouses',id,row,'Warehouse saved');
 };
@@ -666,16 +670,19 @@ window.pusChainSave=async function(){
 
 /* ============================ VENDORS (Stage 2) ============================
    Vendor enlistment: master details, ONE vendor email (RFQ mails are sent there), the ledger name / parent / group,
-   the item groups a vendor supplies, and the approval step. No contacts list and no bank accounts on the form.
+   the vendor's bank account details (one account, kept in purchase.vendor_banks), the item groups a vendor supplies,
+   and the approval step. No contacts list, no trade name and no MSME / Udyam number on the form.
    Spec: docs/purchase-stores-spec.md §2.
    Tables: supabase/migrations/20261004150000_purchase_vendors.sql (+ 20261004410000 / 20261004430000).
    Route: inventory/1. */
-const V={rows:[],vgroups:[],docs:[],invites:[],status:'all',q:''};
+const V={rows:[],vgroups:[],docs:[],invites:[],banks:[],status:'all',q:''};
 const DOC_LBL={pan:'PAN card',gst_certificate:'GST certificate',cancelled_cheque:'Cancelled cheque',msme_certificate:'MSME certificate',other:'Other'};
 const VSTATUS={pending:['Pending approval','t-amber'],approved:['Approved','t-green'],rejected:['Rejected','t-red'],blocked:['Blocked','t-gray']};
 const VTYPE={supplier:'Supplier',service:'Service provider',both:'Supplier & service provider'};
 const vTag=s=>'<span class="tag '+VSTATUS[s][1]+'">'+VSTATUS[s][0]+'</span>';
-const PAN_RE=/^[A-Z]{5}[0-9]{4}[A-Z]$/, GST_RE=/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const PAN_RE=/^[A-Z]{5}[0-9]{4}[A-Z]$/, GST_RE=/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/, IFSC_RE=/^[A-Z]{4}0[A-Z0-9]{6}$/;
+// The account shown on the form: the default one, else the oldest (a self-registered vendor may have sent several).
+const bankOf=vid=>V.banks.filter(b=>b.vendor_id===vid).sort((a,b)=>(+!!b.is_default-+!!a.is_default)||(a.id-b.id))[0]||null;
 
 function vcss(){
   if($('pusVCss')) return;
@@ -695,19 +702,20 @@ function vcss(){
 }
 
 async function vLoad(){
-  const [v,g,ig,d,inv,st,mp]=await Promise.all([
+  const [v,g,ig,d,inv,st,mp,bk]=await Promise.all([
     PU().from('vendors').select('*').is('deleted_at',null).order('code'),
     PU().from('vendor_groups').select('*'),
     PU().from('item_groups').select('*').is('deleted_at',null).order('sort_order').order('name'),
     PU().from('vendor_documents').select('*').is('deleted_at',null).order('uploaded_at',{ascending:false}),
     PU().from('vendor_invites').select('id,email,contact_name,vendor_name,token,created_at,created_by,expires_at,emailed_at,used_at,vendor_id,revoked_at').order('created_at',{ascending:false}),
     PU().from('settings').select('*'),
-    PU().rpc('my_permissions')
+    PU().rpc('my_permissions'),
+    PU().from('vendor_banks').select('*')
   ]);
-  const bad=[v,g,ig,d,inv,st,mp].find(r=>r.error); if(bad) throw bad.error;
+  const bad=[v,g,ig,d,inv,st,mp,bk].find(r=>r.error); if(bad) throw bad.error;
   S.perms=mp.data||[];
   S.settings={}; (st.data||[]).forEach(x=>S.settings[x.key]=x.value);
-  V.rows=v.data||[]; V.vgroups=g.data||[]; S.groups=ig.data||[]; V.docs=d.data||[]; V.invites=inv.data||[];
+  V.rows=v.data||[]; V.vgroups=g.data||[]; S.groups=ig.data||[]; V.docs=d.data||[]; V.invites=inv.data||[]; V.banks=bk.data||[];
 }
 
 let VSEQ=0;
@@ -760,22 +768,27 @@ window.pusVSearch=function(){ V.q=val('pusVQ'); vRender(); const e=$('pusVQ'); i
 /* ---- add / edit ---- */
 // Suggestions for the ledger fields: whatever has already been typed on other vendors, so the same wording is reused.
 const ledgerLists=()=>[['pvDlGroup','ledger_group']].map(([id,k])=>'<datalist id="'+id+'">'+[...new Set(V.rows.map(x=>x[k]).filter(Boolean))].sort().map(v=>'<option value="'+esc(v)+'"></option>').join('')+'</datalist>').join('');
+// Bank account details: all optional, but a bank needs its name, account number and IFSC together.
+const bankSection=b=>'<div class="pus-sub">Bank account details <span style="font-weight:400;text-transform:none;letter-spacing:0">— where payments to this vendor are made</span></div>'
+  +'<div class="two"><div><label>Bank name</label><input id="pvBank" value="'+esc(b&&b.bank_name||'')+'"></div><div><label>Branch</label><input id="pvBranch" value="'+esc(b&&b.branch||'')+'"></div></div>'
+  +'<div class="two"><div><label>Account holder name</label><input id="pvAcName" value="'+esc(b&&b.account_name||'')+'" placeholder="As in the bank records"></div><div><label>Account number</label><input id="pvAcNo" inputmode="numeric" maxlength="20" autocomplete="off" value="'+esc(b&&b.account_no||'')+'"></div></div>'
+  +'<div class="two"><div><label>IFSC</label><input id="pvIfsc" maxlength="11" autocomplete="off" style="text-transform:uppercase" value="'+esc(b&&b.ifsc||'')+'" placeholder="e.g. HDFC0001234"></div><div></div></div>';
 window.pusVendorModal=function(id){
   const r=id?V.rows.find(x=>x.id===id):null;
   const gsel=new Set(r?V.vgroups.filter(x=>x.vendor_id===id).map(x=>x.group_id):[]);
   const opt=(o,v)=>Object.keys(o).map(k=>'<option value="'+k+'"'+(v===k?' selected':'')+'>'+esc(o[k])+'</option>').join('');
   openModal('<div class="modal-head"><h3>'+(r?'Edit vendor '+esc(r.code):'Enlist vendor')+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:72vh;overflow:auto">'
-    +'<div class="two"><div><label>Legal name</label><input id="pvLegal" value="'+esc(r&&r.legal_name||'')+'" placeholder="As on GST / PAN"></div><div><label>Trade name <span style="color:var(--slate);font-weight:400">(optional)</span></label><input id="pvTrade" value="'+esc(r&&r.trade_name||'')+'"></div></div>'
-    +'<div class="two"><div><label>Vendor type</label><select id="pvType">'+opt(VTYPE,r?r.vendor_type:'supplier')+'</select></div><div><label>Default payment terms</label><input id="pvTerms" value="'+esc(r&&r.payment_terms||'')+'" placeholder="e.g. 30 days from invoice"></div></div>'
+    +'<div class="two"><div><label>Legal name</label><input id="pvLegal" value="'+esc(r&&r.legal_name||'')+'" placeholder="As on GST / PAN"></div><div><label>Vendor type</label><select id="pvType">'+opt(VTYPE,r?r.vendor_type:'supplier')+'</select></div></div>'
+    +'<label>Default payment terms</label><input id="pvTerms" value="'+esc(r&&r.payment_terms||'')+'" placeholder="e.g. 30 days from invoice">'
     +'<div class="pus-sub">Tax</div>'
     +'<div class="two"><div><label>GSTIN</label><input id="pvGst" maxlength="15" style="text-transform:uppercase" value="'+esc(r&&r.gstin||'')+'"></div><div><label>PAN</label><input id="pvPan" maxlength="10" style="text-transform:uppercase" value="'+esc(r&&r.pan||'')+'"></div></div>'
-    +'<label>MSME / Udyam number <span style="color:var(--slate);font-weight:400">(if registered)</span></label><input id="pvMsme" value="'+esc(r&&r.msme_no||'')+'">'
     +'<div class="pus-sub">Address</div>'
     +'<label>Address</label><input id="pvAddr" value="'+esc(r&&r.address||'')+'">'
     +'<div class="two"><div><label>City</label><input id="pvCity" value="'+esc(r&&r.city||'')+'"></div><div><label>State</label><input id="pvState" value="'+esc(r&&r.state||'')+'"></div></div>'
     +'<div class="two"><div><label>PIN code</label><input id="pvPin" maxlength="6" inputmode="numeric" value="'+esc(r&&r.pincode||'')+'"></div><div></div></div>'
     +'<div class="pus-sub">Vendor email</div>'
     +'<label>Email <span style="color:var(--slate);font-weight:400">— RFQ mails are sent to this address</span></label><input id="pvEmail" type="email" autocomplete="off" value="'+esc(r&&r.email||'')+'" placeholder="orders@vendor.com">'
+    +bankSection(r?bankOf(r.id):null)
     +'<div class="pus-sub">Ledger <span style="font-weight:400;text-transform:none;letter-spacing:0">— this vendor\'s account in the Accounts ledger</span></div>'
     +'<div class="two"><div><label>Ledger Name</label><input id="pvLName" value="'+esc(r&&r.ledger_name||'')+'" placeholder="Name of the ledger account"></div><div><label>Parent Description</label><input id="pvLParent" value="'+esc(r&&r.ledger_parent_description||'')+'"></div></div>'
     +'<div class="two"><div><label>Last Modified On</label><input id="pvLMod" disabled value="'+esc(r&&r.ledger_modified_at?new Date(r.ledger_modified_at).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}):'—')+'" title="Set automatically when a ledger detail is added or changed"></div><div><label>Group</label><input id="pvLGroup" list="pvDlGroup" value="'+esc(r&&r.ledger_group||'')+'"></div></div>'
@@ -795,8 +808,17 @@ window.pusVendorSave=async function(id){
   if(pin&&!/^\d{6}$/.test(pin)){ toast('PIN code is 6 digits','err'); return; }
   if(!email){ toast('Enter the vendor\'s email — RFQ mails are sent there','err'); return; }
   if(!EMAIL_RE.test(email)){ toast('That email address is not valid','err'); return; }
+  const bank={bank_name:val('pvBank'),branch:val('pvBranch'),account_name:val('pvAcName'),account_no:val('pvAcNo').replace(/\s+/g,''),ifsc:val('pvIfsc').toUpperCase()};
+  const hasBank=Object.values(bank).some(Boolean);
+  if(hasBank){
+    if(!bank.bank_name){ toast('Enter the bank name','err'); return; }
+    if(!bank.account_no){ toast('Enter the account number','err'); return; }
+    if(!/^\d{6,20}$/.test(bank.account_no)){ toast('The account number should be 6 to 20 digits','err'); return; }
+    if(!bank.ifsc){ toast('Enter the IFSC code','err'); return; }
+    if(!IFSC_RE.test(bank.ifsc)){ toast('That IFSC is not valid (4 letters, a 0, then 6 letters or digits - e.g. HDFC0001234)','err'); return; }
+  }
   const groupIds=[...document.querySelectorAll('.pv-group:checked')].map(c=>parseInt(c.value,10));
-  const row={legal_name:legal,trade_name:val('pvTrade')||null,vendor_type:val('pvType'),pan:pan||null,gstin:gst||null,msme_no:val('pvMsme')||null,address:val('pvAddr')||null,
+  const row={legal_name:legal,vendor_type:val('pvType'),pan:pan||null,gstin:gst||null,address:val('pvAddr')||null,
     city:val('pvCity')||null,state:val('pvState')||null,pincode:pin||null,payment_terms:val('pvTerms')||null,email,
     ledger_name:val('pvLName')||null,ledger_parent_description:val('pvLParent')||null,ledger_group:val('pvLGroup')||null};
   let reverify=false;
@@ -809,6 +831,15 @@ window.pusVendorSave=async function(id){
   const res=id?await PU().from('vendors').update(row).eq('id',id).select('id').single():await PU().from('vendors').insert(row).select('id').single();
   if(res.error){ if(/vendors_gstin_uq/.test(res.error.message||'')) toast('Another vendor already has that GSTIN','err'); else fail(res.error); return; }
   const vid=res.data.id;
+  // Bank account: update the one shown on the form, add it if there was none, remove it if every box was emptied.
+  const oldBank=id?bankOf(id):null;
+  if(hasBank){
+    const brow={bank_name:bank.bank_name,branch:bank.branch||null,account_name:bank.account_name||null,account_no:bank.account_no,ifsc:bank.ifsc};
+    const bs=oldBank?await PU().from('vendor_banks').update(brow).eq('id',oldBank.id):await PU().from('vendor_banks').insert({...brow,vendor_id:vid,is_default:true});
+    if(bs.error) fail(bs.error,'Vendor saved, but the bank details did not');
+  }else if(oldBank){
+    const bd=await PU().from('vendor_banks').delete().eq('id',oldBank.id); if(bd.error) fail(bd.error,'Vendor saved, but the old bank details could not be removed');
+  }
   if(id){ const del=await PU().from('vendor_groups').delete().eq('vendor_id',vid); if(del.error) fail(del.error,'Vendor saved, but its item groups could not be updated'); }
   if(groupIds.length){ const ins=await PU().from('vendor_groups').insert(groupIds.map(g=>({vendor_id:vid,group_id:g}))); if(ins.error) fail(ins.error,'Vendor saved, but its item groups did not'); }
   closeModal(); toast(id?(reverify?'Vendor saved — sent back for re-approval':'Vendor saved'):'Vendor enlisted — awaiting approval','ok'); route();
