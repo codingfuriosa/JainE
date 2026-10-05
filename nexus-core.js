@@ -21872,9 +21872,10 @@ const CPA_REFERRAL_STATUSES={submitted:'Submitted',contacted:'Contacted',interes
 async function cpaRenderReferrals(host){
   const {data}=await sb.schema('cust').from('referrals').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
   const rows=(data||[]).map(r=>[esc((r.units&&r.units.unit_code)||'—'),esc(r.prospect_name),esc(r.prospect_phone||'—'),esc(r.prospect_email||'—'),
+    '<span style="font-size:12.5px;color:var(--slate)">'+esc(r.notes||'—')+'</span>',
     `<select onchange="cpaReferralStatusChange(${r.id},this.value)">${Object.keys(CPA_REFERRAL_STATUSES).map(k=>`<option value="${k}" ${k===r.status?'selected':''}>${CPA_REFERRAL_STATUSES[k]}</option>`).join('')}</select>`,
     fmtDate(r.created_at)]);
-  host.innerHTML=rows.length?cpaTable(['Unit','Prospect','Phone','Email','Status','Submitted'],rows):'<div class="card card-pad empty">No referrals submitted yet.</div>';
+  host.innerHTML=rows.length?cpaTable(['Unit','Prospect','Phone','Email','Looking for','Status','Submitted'],rows):'<div class="card card-pad empty">No referrals submitted yet.</div>';
 }
 window.cpaReferralStatusChange=async function(id,status){
   const {error}=await sb.schema('cust').from('referrals').update({status,updated_at:new Date().toISOString(),updated_by:state.email}).eq('id',id);
@@ -24015,9 +24016,11 @@ function custReferralCss(){
   if(document.getElementById('custRefCss')) return;
   const s=document.createElement('style'); s.id='custRefCss';
   s.textContent=`
-  .cref-hero{position:relative;overflow:hidden;border-radius:16px;padding:30px 32px;margin-bottom:18px;
-    background:linear-gradient(125deg,#0f1e3d 0%,#16294f 38%,#1d4ed8 100%);color:#fff;
-    box-shadow:0 14px 34px -14px rgba(15,30,61,.55)}
+  /* Refer & Earn follows the marketing creative (assets/referral/refer-and-earn.jpg): Jain red,
+     white, and the pale pink of its slab cards. */
+  .cref-hero{position:relative;overflow:hidden;border-radius:16px;padding:28px 30px;margin-bottom:22px;
+    background:linear-gradient(125deg,#8f1119 0%,#c8202f 55%,#de3a45 100%);color:#fff;
+    box-shadow:0 14px 34px -14px rgba(143,17,25,.55)}
   /* A slow sheen travelling across the banner. It is the only moving thing on the page, which is
      what makes it read as "look here" rather than as decoration competing with the content. */
   .cref-hero::after{content:'';position:absolute;top:-60%;left:-30%;width:40%;height:220%;
@@ -24027,24 +24030,72 @@ function custReferralCss(){
   .cref-hero-in{position:relative;z-index:1;display:flex;gap:26px;align-items:center;flex-wrap:wrap}
   .cref-hero-txt{flex:1 1 320px;min-width:0}
   .cref-eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;
-    letter-spacing:.14em;text-transform:uppercase;color:#f0c964;margin-bottom:11px}
+    letter-spacing:.14em;text-transform:uppercase;color:#ffe1e3;margin-bottom:11px}
   .cref-hero h2{font-size:26px;line-height:1.2;font-weight:800;margin:0 0 9px;letter-spacing:-.02em;text-wrap:balance}
-  .cref-hero p{font-size:14.5px;line-height:1.6;color:#c9d6f0;margin:0;max-width:52ch}
+  .cref-hero p{font-size:14.5px;line-height:1.6;color:#ffe9ea;margin:0;max-width:54ch}
+  .cref-hero p b{color:#fff}
+  .cref-btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
   .cref-cta{display:inline-flex;align-items:center;gap:10px;border:0;cursor:pointer;
-    font-family:inherit;font-size:15px;font-weight:800;letter-spacing:.01em;color:#25324a;
-    padding:15px 28px;border-radius:999px;white-space:nowrap;
-    background:linear-gradient(135deg,#ffd97a 0%,#f0c964 45%,#dCA93a 100%);
-    box-shadow:0 8px 22px -6px rgba(240,201,100,.65);transition:transform .16s,box-shadow .16s}
-  .cref-cta:hover{transform:translateY(-2px);box-shadow:0 12px 28px -6px rgba(240,201,100,.8)}
+    font-family:inherit;font-size:15px;font-weight:800;letter-spacing:.01em;color:#b3141f;
+    padding:14px 26px;border-radius:999px;white-space:nowrap;background:#fff;
+    box-shadow:0 8px 22px -6px rgba(0,0,0,.35);transition:transform .16s,box-shadow .16s}
+  .cref-cta:hover{transform:translateY(-2px);box-shadow:0 12px 28px -6px rgba(0,0,0,.4)}
+  .cref-cta2{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-family:inherit;font-size:14.5px;
+    font-weight:700;color:#fff;padding:13px 22px;border-radius:999px;white-space:nowrap;
+    background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.7);transition:background .16s}
+  .cref-cta2:hover{background:rgba(255,255,255,.22)}
+  .cref-cta2 .fa-whatsapp{font-size:17px}
+  .cref-poster{flex:none;width:150px;padding:0;border:0;background:none;cursor:zoom-in;position:relative;
+    transform:rotate(2.5deg);transition:transform .2s}
+  .cref-poster:hover{transform:rotate(0) scale(1.03)}
+  .cref-poster img{width:100%;display:block;border-radius:10px;border:3px solid #fff;box-shadow:0 14px 30px -8px rgba(0,0,0,.5)}
+  .cref-poster span{position:absolute;left:50%;bottom:-11px;transform:translateX(-50%);background:#fff;color:#b3141f;
+    font-size:11.5px;font-weight:700;padding:5px 11px;border-radius:999px;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.2)}
+
+  .cref-sh{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;letter-spacing:.02em;
+    text-transform:uppercase;color:#c8202f;margin:4px 0 12px}
+  .cref-sh::after{content:'';flex:1;height:2px;background:linear-gradient(90deg,#f3c4c8,transparent)}
+  .cref-slabs{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+  .cref-slab{position:relative;background:#fde4e6;border:1px solid #f6c9cd;border-radius:14px;padding:24px 14px 16px;
+    text-align:center;transition:transform .18s,box-shadow .18s,border-color .18s}
+  .cref-slab .n{position:absolute;top:-13px;left:50%;transform:translateX(-50%);width:28px;height:28px;border-radius:50%;
+    background:#5f6368;color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center;border:3px solid #fff}
+  .cref-slab small{display:block;font-size:12.5px;font-weight:700;color:#b3141f;min-height:2.6em}
+  .cref-slab b{display:block;font-size:38px;line-height:1.05;font-weight:800;color:#c8202f;margin:4px 0;letter-spacing:-.02em}
+  .cref-slab em{font-style:normal;font-size:12px;font-weight:600;color:#b3141f}
+  .cref-slab.on{border-color:#c8202f;box-shadow:0 10px 24px -10px rgba(200,32,47,.55);transform:translateY(-3px)}
+  .cref-slab.on .n{background:#c8202f}
+
+  .cref-calc{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:22px;
+    display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+  .cref-calc-in{flex:1 1 300px;min-width:0}
+  .cref-calc-h{font-size:13.5px;font-weight:700;margin-bottom:2px}
+  .cref-calc-h i{color:#c8202f;margin-right:6px}
+  .cref-calc-l{font-size:12.5px;color:var(--slate);display:flex;justify-content:space-between;gap:10px;margin-bottom:6px}
+  .cref-calc-l b{color:var(--ink);font-size:14px}
+  .cref-calc input[type=range]{width:100%;accent-color:#c8202f}
+  .cref-calc-out{flex:0 0 auto;min-width:190px;text-align:center;background:#fff5f5;border:1px dashed #f3b4ba;border-radius:12px;padding:10px 16px}
+  .cref-calc-out span{display:block;font-size:12px;color:var(--slate);font-weight:600}
+  .cref-calc-out b{display:block;font-size:24px;font-weight:800;color:#16a34a;font-variant-numeric:tabular-nums}
+  .cref-calc-out em{display:block;font-style:normal;font-size:11.5px;color:var(--slate)}
+  .cref-fine{font-size:11.5px;color:var(--slate);line-height:1.6;margin:14px 2px 0}
+
+  .cref-pbox{position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,.88);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:14px;padding:16px}
+  .cref-pbox img{max-width:min(94vw,560px);max-height:calc(100vh - 110px);border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .cref-pbox-acts{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  .cref-pbox-acts a,.cref-pbox-acts button{display:inline-flex;align-items:center;gap:8px;border:0;cursor:pointer;font:inherit;
+    font-size:14px;font-weight:700;padding:11px 20px;border-radius:999px;background:#fff;color:#b3141f;text-decoration:none}
+  .cref-pbox-acts .x{background:rgba(255,255,255,.15);color:#fff}
   .cref-cta:active{transform:translateY(0)}
   .cref-cta i{font-size:14px}
   /* The pulse stops the moment there is anything in the list - it is there to get a first referral
      out of somebody, not to keep nagging a customer who has already used the thing. */
   .cref-cta.pulse{animation:crefPulse 2.4s ease-out infinite}
   @keyframes crefPulse{
-    0%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 0 rgba(240,201,100,.55)}
-    70%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 16px rgba(240,201,100,0)}
-    100%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 0 rgba(240,201,100,0)}}
+    0%{box-shadow:0 8px 22px -6px rgba(0,0,0,.35),0 0 0 0 rgba(255,255,255,.6)}
+    70%{box-shadow:0 8px 22px -6px rgba(0,0,0,.35),0 0 0 16px rgba(255,255,255,0)}
+    100%{box-shadow:0 8px 22px -6px rgba(0,0,0,.35),0 0 0 0 rgba(255,255,255,0)}}
 
   .cref-stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
   .cref-stat{flex:1 1 150px;background:var(--card);border:1px solid var(--line);border-radius:13px;
@@ -24058,7 +24109,7 @@ function custReferralCss(){
   .cref-step{flex:1 1 200px;display:flex;gap:12px;align-items:flex-start;background:var(--card);
     border:1px solid var(--line);border-radius:13px;padding:15px 16px}
   .cref-step-n{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;
-    background:var(--brand-50);color:var(--brand);font-weight:800;font-size:13px}
+    background:#fde4e6;color:#c8202f;font-weight:800;font-size:13px}
   .cref-step b{display:block;font-size:13.5px;margin-bottom:2px}
   .cref-step span{font-size:12.5px;color:var(--slate);line-height:1.5}
 
@@ -24089,7 +24140,13 @@ function custReferralCss(){
   @media(max-width:620px){
     .cref-hero{padding:24px 20px}
     .cref-hero h2{font-size:21px}
-    .cref-cta{width:100%;justify-content:center}
+    .cref-cta,.cref-cta2{width:100%;justify-content:center}
+    .cref-poster{width:118px;margin:4px auto 10px}
+    .cref-slabs{grid-template-columns:1fr;gap:18px}
+    .cref-slab{display:grid;grid-template-columns:1fr auto;align-items:center;text-align:left;padding:16px 16px 14px;column-gap:12px}
+    .cref-slab b{grid-row:1/3;grid-column:2;font-size:32px}
+    .cref-slab small{min-height:0}
+    .cref-calc-out{width:100%}
   }
   /* Somebody who has asked the operating system to stop animations gets a page that still works and
      still looks like this - only the sheen and the pulse go. */
@@ -24109,17 +24166,38 @@ async function custTabReferrals(unit){
   const booked=list.filter(function(r){return r.status==='booked';}).length;
   const moving=list.filter(function(r){return ['contacted','interested','visited_site'].indexOf(r.status)!==-1;}).length;
 
+  custRefPrefetch();
   const hero=`<div class="cref-hero"><div class="cref-hero-in">
       <div class="cref-hero-txt">
-        <div class="cref-eyebrow"><i class="fa-solid fa-gift"></i> Refer &amp; earn</div>
-        <h2>Know someone looking for a home?</h2>
-        <p>Tell us who they are and our sales team takes it from there — you can watch every
-           referral move along right here, from first call to booking.</p>
+        <div class="cref-eyebrow"><i class="fa-solid fa-bullhorn"></i> Refer &amp; Earn</div>
+        <h2>Earn up to 2% on every successful referral</h2>
+        <p>Help your friends and family find their safe haven with Jain Group. While they get the
+           home of their dreams, you <b>earn up to 2% of the agreement value</b> when they book.</p>
+        <div class="cref-btns">
+          <button class="cref-cta${list.length?'':' pulse'}" onclick="custNewReferralModal()">
+            <i class="fa-solid fa-user-plus"></i> Refer someone</button>
+          <button class="cref-cta2" onclick="custRefShare()"><i class="fa-brands fa-whatsapp"></i> Share with friends</button>
+        </div>
       </div>
-      <button class="cref-cta${list.length?'':' pulse'}" onclick="custNewReferralModal()">
-        <i class="fa-solid fa-user-plus"></i> Refer someone
-      </button>
+      <button class="cref-poster" onclick="custRefPoster()" aria-label="View the Refer and Earn poster">
+        <img src="${CUST_REF_POSTER}" alt="" loading="lazy"><span><i class="fa-solid fa-expand"></i> View poster</span></button>
     </div></div>`;
+
+  // The slabs, then what that means in rupees for a price the customer picks.
+  const start=12000000;
+  const slabs=`<div class="cref-sh">Know your rewarding journey</div>
+    <div class="cref-slabs">${CUST_REF_SLABS.map(function(sl,i){
+      return '<div class="cref-slab'+(i===custRefSlab(start)?' on':'')+'" data-slab="'+i+'"><span class="n">'+(i+1)+'</span>'
+        +'<small>'+esc(sl.label)+'</small><b>'+sl.pct+'%</b><em>of total consideration</em></div>'; }).join('')}</div>
+    <div class="cref-calc">
+      <div class="cref-calc-in">
+        <div class="cref-calc-h"><i class="fa-solid fa-calculator"></i>What could you earn?</div>
+        <div class="cref-calc-l"><span>Price of the flat your friend books</span><b id="crefPrice">${custRefShort(start)}</b></div>
+        <input type="range" min="2000000" max="50000000" step="500000" value="${start}" oninput="custRefCalc(this.value)" aria-label="Flat price">
+      </div>
+      <div class="cref-calc-out"><span>You earn</span><b id="crefEarn">${custRefMoney(start*CUST_REF_SLABS[custRefSlab(start)].pct/100)}</b>
+        <em id="crefPct">${CUST_REF_SLABS[custRefSlab(start)].pct}% of total consideration</em></div>
+    </div>`;
 
   /* The counts only appear once there is something to count. On an empty tab they would be three
      zeroes, which says "this is not worth using" at exactly the moment it needs to say the
@@ -24130,13 +24208,13 @@ async function custTabReferrals(unit){
       <div class="cref-stat" style="--cref-c:#16a34a"><b>${booked}</b><span>Booked</span></div>
     </div>`:'';
 
-  const steps=`<div class="cref-steps">
+  const steps=`<div class="cref-sh">How it works</div><div class="cref-steps">
       <div class="cref-step"><div class="cref-step-n">1</div><div><b>You refer</b>
-        <span>Their name and a phone number is all we need.</span></div></div>
-      <div class="cref-step"><div class="cref-step-n">2</div><div><b>We reach out</b>
-        <span>Our sales team calls them and shows them around.</span></div></div>
-      <div class="cref-step"><div class="cref-step-n">3</div><div><b>You follow along</b>
-        <span>Every stage shows up on this page as it happens.</span></div></div>
+        <span>Add their name and mobile number here — it takes a few seconds.</span></div></div>
+      <div class="cref-step"><div class="cref-step-n">2</div><div><b>We take it from there</b>
+        <span>Our sales team calls them and shows them around. Follow each step on this page.</span></div></div>
+      <div class="cref-step"><div class="cref-step-n">3</div><div><b>They book, you earn</b>
+        <span>Up to 2% of the total consideration of the flat they book.</span></div></div>
     </div>`;
 
   const body=list.length
@@ -24161,22 +24239,103 @@ async function custTabReferrals(unit){
       }).join('')+`</div>`
     : `<div class="cref-empty"><i class="fa-solid fa-user-group"></i>
          <b>No referrals yet</b>
-         <span>Be the first — it takes about ten seconds.</span></div>`;
+         <span>Refer someone, or share the poster with friends and family.</span></div>`;
 
-  return hero+stats+steps+body;
+  const fine=`<p class="cref-fine">The reward is a percentage of the total consideration of the flat booked by the
+    person you refer, at the slab it falls in, on a successful booking. Add them here so the referral is
+    counted in your name. Terms and conditions apply.</p>`;
+
+  return hero+slabs+steps+(list.length?'<div class="cref-sh">Your referrals</div>':'')+stats+body+fine;
 }
+
+/* REFER & EARN, from the marketing creative (5 Oct 2026). The reward is a share of the total
+   consideration of the flat the referred person books: 1% up to Rs 1.50 Cr, 1.5% above that up to
+   Rs 2.50 Cr, 2% above Rs 2.50 Cr. One list, so the cards and the calculator cannot disagree. */
+const CUST_REF_SLABS=[
+  {upto:15000000, pct:1,   label:'Up to ₹1.50 Cr'},
+  {upto:25000000, pct:1.5, label:'Above ₹1.50 Cr, up to ₹2.50 Cr'},
+  {upto:Infinity, pct:2,   label:'Above ₹2.50 Cr'}];
+const CUST_REF_POSTER='assets/referral/refer-and-earn.jpg';
+const CUST_REF_SHARE_TEXT='Hi! I have a home with Jain Group and I think you would like their projects. '
+  +'If you or someone in your family is looking for a home, tell me and I will refer you - their team will call you.';
+function custRefSlab(v){ v=Number(v)||0; for(let i=0;i<CUST_REF_SLABS.length;i++) if(v<=CUST_REF_SLABS[i].upto) return i; return CUST_REF_SLABS.length-1; }
+function custRefMoney(v){ return '₹'+Math.round(v).toLocaleString('en-IN'); }
+function custRefShort(v){ v=Number(v)||0; return v>=1e7?'₹'+(v/1e7).toFixed(2)+' Cr':'₹'+Math.round(v/1e5)+' L'; }
+window.custRefCalc=function(v){
+  v=Number(v)||0; const i=custRefSlab(v), sl=CUST_REF_SLABS[i];
+  const pr=$('crefPrice'), er=$('crefEarn'), pc=$('crefPct');
+  if(pr) pr.textContent=custRefShort(v);
+  if(er) er.textContent=custRefMoney(v*sl.pct/100);
+  if(pc) pc.textContent=sl.pct+'% of total consideration';
+  document.querySelectorAll('.cref-slab').forEach(function(c){ c.classList.toggle('on',Number(c.getAttribute('data-slab'))===i); });
+};
+/* Sharing hands the poster itself to WhatsApp (or any app) where the phone allows sharing a file.
+   The file is fetched when the tab opens, because a phone only allows a share straight from the
+   tap - waiting for a download first would be refused. Elsewhere WhatsApp opens with the text. */
+let CUST_REF_FILE=null;
+function custRefPrefetch(){
+  if(CUST_REF_FILE||!navigator.canShare) return;
+  fetch(CUST_REF_POSTER).then(function(r){ return r.ok?r.blob():null; }).then(function(b){
+    if(!b) return;
+    const f=new File([b],'Jain-Group-Refer-and-Earn.jpg',{type:'image/jpeg'});
+    try{ if(navigator.canShare({files:[f]})) CUST_REF_FILE=f; }catch(_e){}
+  }).catch(function(){});
+}
+window.custRefShare=function(){
+  if(CUST_REF_FILE&&navigator.share){
+    navigator.share({files:[CUST_REF_FILE],text:CUST_REF_SHARE_TEXT})
+      .then(custRefShared).catch(function(e){ if(!e||e.name!=='AbortError') custRefWhatsApp(); });
+    return;
+  }
+  custRefWhatsApp();
+};
+function custRefWhatsApp(){ window.open('https://wa.me/?text='+encodeURIComponent(CUST_REF_SHARE_TEXT),'_blank'); custRefShared(); }
+function custRefShared(){ toast('When a friend is interested, add them with "Refer someone" so the referral counts for you','ok'); }
+window.custRefPoster=function(){
+  const box=document.createElement('div'); box.className='cref-pbox';
+  box.innerHTML='<img src="'+CUST_REF_POSTER+'" alt="Refer and Earn - Jain Group">'
+    +'<div class="cref-pbox-acts">'
+      +'<button onclick="custRefShare()"><i class="fa-brands fa-whatsapp"></i> Share</button>'
+      +'<a href="'+CUST_REF_POSTER+'" download="Jain-Group-Refer-and-Earn.jpg"><i class="fa-solid fa-download"></i> Download</a>'
+      +'<button class="x"><i class="fa-solid fa-xmark"></i> Close</button></div>';
+  const shut=function(){ document.removeEventListener('keydown',onKey); box.remove(); };
+  const onKey=function(e){ if(e.key==='Escape') shut(); };
+  box.onclick=function(e){ if(e.target===box) shut(); };
+  box.querySelector('.x').onclick=shut;
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(box);
+};
+/* The mobile number is required: it is how the sales team reaches the person, and a referral without
+   one cannot be followed up. "What are they looking for" goes to notes, which the team sees. */
 window.custNewReferralModal=function(){
-  openModal(`<div class="modal-head"><h3>Refer a prospect</h3><span class="x" onclick="closeModal()">&times;</span></div>
-    <div class="modal-body frm"><label>Name</label><input id="custRefName">
-    <label>Phone</label><input id="custRefPhone">
-    <label>Email (optional)</label><input id="custRefEmail"></div>
-    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custRefBtn" onclick="custNewReferralSave()">Submit</button></div>`);
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-user-plus" style="color:#c8202f"></i> Refer a friend or family member</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm">
+    <label>Name</label><input id="custRefName" autocomplete="off" placeholder="Their full name">
+    <label>Mobile number</label><input id="custRefPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="10-digit mobile number">
+    <label>Email (optional)</label><input id="custRefEmail" type="email" autocomplete="off">
+    <label>What are they looking for? (optional)</label><textarea id="custRefNotes" rows="2" maxlength="300" placeholder="e.g. 2BHK, Newtown, budget around 80 lakh"></textarea>
+    <p style="margin:10px 0 0;font-size:12px;color:var(--slate)">Our sales team will call them. You can follow every step on the Referrals page.</p></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custRefBtn" onclick="custNewReferralSave()"><i class="fa-solid fa-paper-plane"></i> Submit referral</button></div>`);
+  setTimeout(function(){ const n=$('custRefName'); if(n) n.focus(); },60);
 };
 window.custNewReferralSave=async function(){
   const prospect_name=$('custRefName').value.trim(),prospect_phone=$('custRefPhone').value.trim()||null,prospect_email=$('custRefEmail').value.trim()||null;
-  if(!prospect_name){toast('Enter a name','err');return;}
+  const notes=(($('custRefNotes')||{}).value||'').trim()||null;
+  if(!prospect_name){toast('Enter their name','err');return;}
+  const digits=String(prospect_phone||'').replace(/\D/g,'');
+  if(digits.length<10||digits.length>13){toast('Enter their mobile number (10 digits)','err');return;}
+  if(prospect_email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(prospect_email)){toast('That email address does not look right','err');return;}
   const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
-  const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,created_by:state.email});
+  // The same person twice from the same flat is one referral - the team would call them twice.
+  try{
+    const {data:mine}=await sb.schema('cust').from('referrals').select('prospect_phone').eq('unit_id',unit.id);
+    const last10=digits.slice(-10);
+    if((mine||[]).some(function(r){ return String(r.prospect_phone||'').replace(/\D/g,'').slice(-10)===last10; })){
+      toast('You have already referred this number','warn'); return; }
+  }catch(_e){}
+  const b=$('custRefBtn'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…'; }
+  const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,notes,created_by:state.email});
+  if(error&&b){ b.disabled=false; b.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit referral'; }
   if(error){toast('Could not submit: '+error.message,'err');return;}
   // Set directly rather than re-fetched: custLoadData's cache would otherwise hand route() the same
   // pre-submit CUST_DATA (same customerId, no force), and the sidebar's "Earn" badge would survive
