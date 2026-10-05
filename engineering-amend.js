@@ -64,7 +64,7 @@
     const rows=(L().amRows||[]).filter(r=>(!f.status||r.status===f.status)&&(!qq||lc(r.amend_ref+' '+r.title+' '+r.vendor_name+' '+r.project_name).indexOf(qq)>=0));
     const pg=rows.slice(f.page*PAGE_SIZE,(f.page+1)*PAGE_SIZE);
     $('amCard').innerHTML=rows.length?
-      '<table class="tbl"><thead><tr><th>Amendment</th><th>Parent contractor</th><th>Project</th><th>Effective</th><th class="r">Lines</th><th class="r">Value change</th><th>Status</th></tr></thead><tbody>'+
+      '<table class="tbl"><thead><tr><th>Amendment</th><th>Parent contractor</th><th>Business unit</th><th>Effective</th><th class="r">Lines</th><th class="r">Value change</th><th>Status</th></tr></thead><tbody>'+
       pg.map(r=>'<tr class="clk" onclick="navTo(\'engineering/amend/'+r.id+'\')"><td><b>'+esc(r.amend_ref)+'</b><div class="sub" style="font-size:12px;color:var(--slate)">'+esc(r.title)+'</div></td><td>'+esc(r.vendor_name)+'</td><td>'+esc(r.project_name)+'</td><td>'+dt(r.effective_date)+'</td><td class="r">'+r.line_count+'</td><td class="r">'+(r.status==='Issued'?'<b>'+sgn(num(r.value_change))+'</b>':'<span style="color:var(--slate)">—</span>')+'</td><td>'+stTag(r.status)+'</td></tr>').join('')+
       '</tbody></table>'+pager(rows.length,f.page,PAGE_SIZE,'ENG.f.amPage'):
       '<div class="empty" style="padding:44px"><i class="fa-solid fa-pen-ruler"></i><div style="font-weight:600;color:var(--ink)">'+((L().amRows||[]).length?'No amendments match':'No amendments yet')+'</div>'+((L().amRows||[]).length?'':'<p>Start one from an issued work order, or use <b>New amendment</b>.</p>')+'</div>';

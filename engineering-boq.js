@@ -28,7 +28,7 @@
     $('engBody').innerHTML=
       '<div class="eng-filter">'+
         '<div class="toolbar grow" style="margin:0;flex:1;min-width:200px"><div class="grow"><i class="fa-solid fa-magnifying-glass"></i><input id="boqQ" placeholder="Search activity or location…" oninput="ENG.f.boqFilter(\'q\',this.value)"></div></div>'+
-        '<select class="sel" onchange="ENG.f.boqFilter(\'tower\',this.value)"><option value="">All locations</option><option value="P">Project level (external work)</option>'+opts(towers,x=>x.id,x=>x.name,'')+'</select>'+
+        '<select class="sel" onchange="ENG.f.boqFilter(\'tower\',this.value)"><option value="">All locations</option><option value="P">Business unit level (external work)</option>'+opts(towers,x=>x.id,x=>x.name,'')+'</select>'+
         '<select class="sel" onchange="ENG.f.boqFilter(\'group\',this.value)">'+opts(C.groups,g=>g.id,g=>g.name,'','All activity groups')+'</select>'+
         '<select class="sel" onchange="ENG.f.boqFilter(\'level\',this.value)">'+opts(['Project','Block','Floor','Flat','Portion'],x=>x,x=>x,'','All levels')+'</select>'+
       '</div><div class="card eng-tbl"><div id="boqHead" class="card-pad" style="border-bottom:1px solid var(--line)"></div><div id="boqTable"></div></div>';
@@ -112,12 +112,25 @@
   /* ---------------------------------------------------------------- generator */
   const G={geo:null,pid:null};
   ENG.f.boqForm=async function(){
-    const pid=curProject();if(!pid)return toast('Pick a project first','warn');
+    const pid=curProject();if(!pid)return toast('Pick a business unit first','warn');
     G.pid=pid;G.geo=null;
     modal('Add BOQ — '+esc(ENG.projName(pid)),
       '<div class="two"><div><label>Activity group</label><select id="bgGroup" onchange="ENG.f.bgGroup()">'+opts(C.groups.filter(g=>g.active),g=>g.id,g=>g.name,'','Select a group…')+'</select></div>'+
+      /* Pick from the master, or write a new one — INLINE, not in a second dialog. openModal
+         replaces the whole modal host rather than stacking, so opening the Masters activity form
+         from here would wipe this half-filled BOQ form. The fields are the master's own, and what
+         they create is a real master row, not a BOQ-only activity. */
       '<div><label>Activity</label><select id="bgAct" onchange="ENG.f.bgAct()"><option value="">Select a group first</option></select></div></div>'+
-      '<label>Location level — where the work is measured</label><select id="bgLevel" onchange="ENG.f.bgLoc()">'+opts([['project','Project — external / common work'],['block','Block / tower'],['floor','Floor'],['flat','Flat'],['portion','Portion of a flat (bedroom, kitchen, bathroom…)']],x=>x[0],x=>x[1],'flat')+'</select>'+
+      '<div id="bgActDesc" class="eng-note" style="margin:-4px 0 10px;display:none"></div>'+
+      '<div id="bgNew" style="display:none;border:1px solid var(--line);border-radius:9px;padding:12px;margin:-2px 0 12px;background:#fbfdff">'+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:8px">New activity — added to the master</div>'+
+        '<label>Activity name</label><input id="bgNName" placeholder="e.g. Internal plaster">'+
+        '<div class="two"><div><label>Parent activity group</label><select id="bgNGroup">'+opts(C.groups.filter(g=>g.active),g=>g.id,g=>g.name,'','Select a group…')+'</select></div>'+
+        '<div><label>Unit</label><select id="bgNUom">'+opts((C.uoms.length?C.uoms.map(u=>u.code):['Cum','Sqm','Rmt','Kg','Nos','Mtr','Sqft','MT','Ltr','Set']),u=>u,u=>u,'','Select…')+'</select></div></div>'+
+        '<label>Description <span style="color:var(--slate);font-weight:400">one line</span></label><input id="bgNDesc">'+
+        '<label>Long description <span style="color:var(--slate);font-weight:400">optional</span></label><textarea id="bgNLong" rows="3"></textarea>'+
+      '</div>'+
+      '<label>Location level — where the work is measured</label><select id="bgLevel" onchange="ENG.f.bgLoc()">'+opts([['project','Business unit — external / common work'],['block','Block / tower'],['floor','Floor'],['flat','Flat'],['portion','Portion of a flat (bedroom, kitchen, bathroom…)']],x=>x[0],x=>x[1],'flat')+'</select>'+
       '<div id="bgLoc">'+LOAD+'</div>'+
       '<div class="two"><div><label>Quantity at each location <span id="bgUom" style="color:var(--slate);font-weight:400"></span></label><input id="bgQty" type="number" min="0" step="0.001" oninput="ENG.f.bgSum()"></div>'+
       '<div><label>Estimated rate (₹) <span style="color:var(--slate);font-weight:400">optional</span></label><input id="bgRate" type="number" min="0" step="0.01"></div></div>'+
@@ -127,17 +140,54 @@
     try{G.geo=await loadGeo(pid);}catch(e){fail(e);}
     ENG.f.bgLoc();
   };
+  /* A sentinel rather than an id: "create one" is a different kind of answer from "this one", and
+     giving it a number would make it indistinguishable from an activity in every later check. */
+  const NEW_ACT='__new';
   ENG.f.bgGroup=function(){
     const gid=Number(val('bgGroup'));const acts=C.acts.filter(a=>a.active&&a.group_id===gid);
-    $('bgAct').innerHTML=opts(acts,a=>a.id,a=>a.name+' ('+a.uom+')','',acts.length?'Select an activity…':'No active activities in this group');
+    $('bgAct').innerHTML=opts(acts,a=>a.id,a=>a.name+' ('+a.uom+')','',acts.length?'Select an activity…':'No active activities in this group')
+      +'<option value="'+NEW_ACT+'">＋ Add a new activity to the master…</option>';
     ENG.f.bgAct();
   };
   ENG.f.bgAct=function(){
+    const isNew=val('bgAct')===NEW_ACT;
+    const box=$('bgNew'); if(box)box.style.display=isNew?'':'none';
+    if(isNew){
+      /* Carry the group already chosen above, so the new activity lands where the person was
+         already looking rather than making them answer the same question twice. */
+      const g=val('bgGroup'); if(g&&$('bgNGroup')&&!val('bgNGroup'))$('bgNGroup').value=g;
+      $('bgUom').textContent='';
+      const d=$('bgActDesc'); if(d)d.style.display='none';
+      return ENG.f.bgSum();
+    }
     const a=actById(val('bgAct'));
     $('bgUom').textContent=a?'('+a.uom+')':'';
     if(a&&a.est_rate!=null&&!val('bgRate'))$('bgRate').value=a.est_rate;
+    /* The master's description, shown where the choice is made rather than filed away in Masters —
+       it is the difference between two activities whose names read almost the same. */
+    const d=$('bgActDesc');
+    if(d){
+      const txt=a?[a.description,a.long_description].filter(Boolean).join(' — '):'';
+      d.style.display=txt?'':'none';
+      d.textContent=txt;
+    }
     ENG.f.bgSum();
   };
+  /* Creates the master row the inline fields describe and returns its id, or null when the fields
+     are not filled in properly — the caller stops rather than creating BOQ lines against nothing. */
+  async function createInlineActivity(){
+    const name=val('bgNName').trim(), gid=Number(val('bgNGroup'))||0, uom=val('bgNUom');
+    if(!name){toast('Enter the new activity’s name','warn');return null;}
+    if(!gid){toast('Choose the parent activity group','warn');return null;}
+    if(!uom){toast('Choose the unit','warn');return null;}
+    const {data,error}=await E().from('activities').insert({
+      group_id:gid,name:name,uom:uom,active:true,
+      description:val('bgNDesc').trim()||null,long_description:val('bgNLong').trim()||null
+    }).select('id').maybeSingle();
+    if(error)throw error;
+    await ENG.reloadMasters();
+    return data?data.id:null;
+  }
   const checks=id=>Array.prototype.slice.call(document.querySelectorAll('#'+id+' input[type=checkbox]:checked')).map(x=>x.value);
   const grid=(id,items,onchg)=>'<div class="eng-grid" id="'+id+'">'+items.map(i=>'<label><input type="checkbox" value="'+esc(i[0])+'"'+(i[2]?' checked':'')+' onchange="'+onchg+'"> '+esc(i[1])+'</label>').join('')+'</div>'+
     '<div style="font-size:12px;margin-top:5px"><a style="cursor:pointer;color:var(--brand)" onclick="ENG.f.bgAll(\''+id+'\',true)">Select all</a> · <a style="cursor:pointer;color:var(--brand)" onclick="ENG.f.bgAll(\''+id+'\',false)">None</a></div>';
@@ -212,12 +262,25 @@
   };
   ENG.f.bgCreate=function(btn){
     return run(btn,async()=>{
-      const a=actById(val('bgAct')),qty=numOrNull(val('bgQty')),rate=numOrNull(val('bgRate'));
-      if(!a)return toast('Choose an activity','warn');
+      const qty=numOrNull(val('bgQty')),rate=numOrNull(val('bgRate'));
+      /* Everything that can be judged without writing anything is judged first: the master row is
+         created only once the quantities and locations are known to be good, so a rejected form
+         does not leave a stray activity behind in the master. */
+      if(val('bgAct')!==NEW_ACT&&!actById(val('bgAct')))return toast('Choose an activity','warn');
       if(qty==null||isNaN(qty)||qty<=0)return toast('Enter the quantity at each location','warn');
       if(rate!=null&&(isNaN(rate)||rate<0))return toast('Enter a valid rate','warn');
       const rows=genRows();
       if(!rows.length)return toast('Nothing selected','warn');
+      let a;
+      if(val('bgAct')===NEW_ACT){
+        const newId=await createInlineActivity();
+        if(!newId)return;                 // createInlineActivity has already said what is missing
+        a=actById(newId);
+        rows.forEach(r=>{r.activity_id=newId;});
+        toast('“'+a.name+'” added to the activity master','ok');
+      }else{
+        a=actById(val('bgAct'));
+      }
       let ins=0,skp=0,done=0;
       for(const c of chunk(rows,400)){
         btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> '+done+' / '+rows.length;

@@ -39,7 +39,7 @@
     const rows=(L().woRows||[]).filter(r=>(!f.status||r.status===f.status)&&(!qq||lc(r.wo_no+' '+r.title+' '+r.vendor_name+' '+(r.sub_names||'')+' '+r.project_name).indexOf(qq)>=0));
     const pg=rows.slice(f.page*PAGE_SIZE,(f.page+1)*PAGE_SIZE);
     $('woCard').innerHTML=rows.length?
-      '<table class="tbl"><thead><tr><th>Work order</th><th>Parent contractor</th><th>Project</th><th class="r">Items</th><th class="r">Value</th><th class="r">Verified</th><th class="r">Billed</th><th>Status</th></tr></thead><tbody>'+
+      '<table class="tbl"><thead><tr><th>Work order</th><th>Parent contractor</th><th>Business unit</th><th class="r">Items</th><th class="r">Value</th><th class="r">Verified</th><th class="r">Billed</th><th>Status</th></tr></thead><tbody>'+
       pg.map(r=>'<tr class="clk" onclick="navTo(\'engineering/wo/'+r.id+'\')"><td><b>'+esc(r.wo_no)+'</b><div class="sub" style="font-size:12px;color:var(--slate)">'+esc(r.title)+' · '+dt(r.wo_date)+'</div></td><td>'+esc(r.vendor_name)+(r.sub_names?'<div class="sub" style="font-size:12px;color:var(--slate)">Sub: '+esc(r.sub_names)+'</div>':'')+'</td><td>'+esc(r.project_name)+'</td><td class="r">'+r.item_count+'</td><td class="r">'+inr(r.value)+'</td><td class="r">'+inr(r.verified_value)+'</td><td class="r">'+inr(r.billed_value)+'</td><td>'+stTag(r.status)+(num(r.pending_items)>0?' <span class="tag t-amber" title="Entries awaiting verification">'+r.pending_items+' to verify</span>':'')+'</td></tr>').join('')+
       '</tbody></table>'+pager(rows.length,f.page,PAGE_SIZE,'ENG.f.woPage'):
       '<div class="empty" style="padding:44px"><i class="fa-solid fa-file-contract"></i><div style="font-weight:600;color:var(--ink)">'+((L().woRows||[]).length?'No work orders match':'No work orders yet')+'</div>'+((L().woRows||[]).length?'':'<p>Create one, then tag BOQ lines onto it.</p>')+'</div>';
@@ -48,7 +48,7 @@
   /* ---------------------------------------------------------------- create / edit */
   function woFormHtml(w,isNew){
     const vendors=C.vendors;
-    return (isNew?'<label>Project</label><select id="woProj">'+opts(C.projects,p=>p.id,p=>p.name,curProject()||'','Select a project…')+'</select>':'')+
+    return (isNew?'<label>Business unit</label><select id="woProj">'+opts(C.projects,p=>p.id,p=>p.name,curProject()||'','Select a business unit…')+'</select>':'')+
       '<label>Parent (main) contractor</label><select id="woVendor"'+(isNew?' onchange="ENG.f.woSubsRender()"':'')+'>'+opts(vendors,x=>x.id,x=>vendorName(x)+(x.code?' ('+x.code+')':'')+(x.status&&x.status!=='approved'?' — '+x.status:''),w.vendor_id||'',vendors.length?'Select a contractor…':'No contractors in the Purchase vendor master yet')+'</select>'+
       (vendors.length?'':'<div class="eng-note" style="margin-top:8px">Contractors come from the Purchase module’s vendor master. Add the contractor there first, then reopen this form.</div>')+
       (isNew?'<label>Sub-contractors <span style="color:var(--slate);font-weight:400">optional — you can add or change them later</span></label><div id="woSubsHost"></div>':'')+
@@ -292,7 +292,7 @@
     $('modalHost').querySelector('.modal-body').innerHTML=
       '<div class="eng-note" style="margin-bottom:12px">Only BOQ lines of <b>'+esc(cfg.project_name)+'</b> with quantity still untagged are shown. '+esc(cfg.intro||'')+'</div>'+
       '<div class="eng-filter"><div class="toolbar grow" style="margin:0;flex:1;min-width:180px"><div class="grow"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Search activity or location…" oninput="ENG.f.pkFilter(\'q\',this.value)"></div></div>'+
-      '<select class="sel" onchange="ENG.f.pkFilter(\'tower\',this.value)"><option value="">All locations</option><option value="P">Project level</option>'+opts(PK.towers,x=>x.id,x=>x.name,'')+'</select>'+
+      '<select class="sel" onchange="ENG.f.pkFilter(\'tower\',this.value)"><option value="">All locations</option><option value="P">Business unit level</option>'+opts(PK.towers,x=>x.id,x=>x.name,'')+'</select>'+
       '<select class="sel" onchange="ENG.f.pkFilter(\'group\',this.value)">'+opts(C.groups,g=>g.id,g=>g.name,'','All groups')+'</select>'+
       '<select class="sel" onchange="ENG.f.pkFilter(\'level\',this.value)">'+opts(['Project','Block','Floor','Flat','Portion'],x=>x,x=>x,'','All levels')+'</select></div>'+
       '<div id="pkSum" class="eng-sum" style="margin-bottom:8px"></div><div class="eng-tbl" style="border:1px solid var(--line);border-radius:9px;max-height:46vh;overflow:auto" id="pkList"></div>';

@@ -108,29 +108,40 @@
   function projBar(allowAll,extra){
     const C=ENG.C;
     return '<div class="eng-filter"><select class="sel" onchange="ENG.f.setProject(this.value)" style="min-width:230px">'+
-      (allowAll?'<option value="">All projects</option>':'<option value="">Select a project…</option>')+
+      (allowAll?'<option value="">All business units</option>':'<option value="">Select a business unit…</option>')+
       C.projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(S.project)?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select>'+(extra||'')+'</div>';
   }
   const projName=id=>{const p=ENG.C.projects.find(x=>x.id===Number(id));return p?p.name:'—';};
 
   /* ---------- reference data ---------- */
-  const C=ENG.C={geo:{},projects:[],groups:[],acts:[],uoms:[],vendors:[],items:[]};
+  const C=ENG.C={geo:{},projects:[],groups:[],acts:[],uoms:[],vendors:[],items:[],heads:[],ledgers:[]};
   async function loadMasters(force){
     if(C.ready&&!force)return;
-    const [pr,gr,ac,um,ve,it]=await Promise.all([
+    const [pr,gr,ac,um,ve,it,bh,lg]=await Promise.all([
       E().rpc('projects'),
       E().from('activity_groups').select('*').order('sort_order').order('name'),
       E().from('activities').select('*').order('name'),
       PU().from('uoms').select('code,name').is('deleted_at',null).order('code'),
       PU().from('vendors').select('id,code,legal_name,trade_name,vendor_type,status').is('deleted_at',null).order('legal_name'),
-      PU().from('items').select('id,code,name,active').is('deleted_at',null).order('name')
+      PU().from('items').select('id,code,name,active').is('deleted_at',null).order('name'),
+      E().from('budget_heads').select('*').order('sort_order').order('name'),
+      /* The Accounts ledgers a budget head can point at. Read straight from Accounts: a head is
+         only as good as the ledger behind it, and offering a free-text name would let somebody
+         create a head whose actual can never be found. Accounts may be unreadable to this person
+         (it is name-limited) — then the picker simply has nothing to offer and says so. */
+      sb.schema('accounts').from('ledgers').select('id,name,code,active').order('name')
     ]);
     if(pr.error)throw pr.error;if(gr.error)throw gr.error;if(ac.error)throw ac.error;
     C.projects=(pr.data||[]).slice().sort((a,b)=>String(a.name).localeCompare(String(b.name)));
     C.groups=gr.data||[];C.acts=ac.data||[];
     C.uoms=um.error?[]:(um.data||[]);C.vendors=ve.error?[]:(ve.data||[]);C.items=it.error?[]:(it.data||[]);
+    C.heads=bh.error?[]:(bh.data||[]);C.ledgers=lg.error?[]:(lg.data||[]);
     C.ready=true;
   }
+  /* Exposed so the other engineering files can refresh the masters after writing one — BOQ adds an
+     activity inline and needs the new row in C.acts before it can select it. Defined here rather
+     than inside loadMasters, so it exists whether or not a load has run yet. */
+  ENG.reloadMasters=()=>loadMasters(true);
   const vendorName=v=>v?(v.trade_name||v.legal_name||v.code||('#'+v.id)):'—';
   async function loadTowers(pid){
     const g=C.geo[pid]=C.geo[pid]||{};
@@ -219,9 +230,9 @@
       '<div class="eng-kpis">'+kp.map(k=>'<div class="kpi"><div class="top"><div class="ic" style="background:'+k[4]+';color:'+k[3]+'"><i class="fa-solid '+k[2]+'"></i></div></div><div class="val">'+k[1]+'</div><div class="lbl">'+k[0]+'</div></div>').join('')+'</div>'+
       '<div class="eng-att">'+att.map(x=>'<a onclick="navTo(\'engineering/'+x[0]+'\')"><span class="ic" style="background:'+x[5]+';color:'+x[4]+'"><i class="fa-solid '+x[3]+'"></i></span><span><div class="n">'+x[2]+'</div><div class="l">'+x[1]+'</div></span></a>').join('')+'</div>'+
       (pid?'':
-        '<div class="card eng-tbl" style="margin-bottom:16px"><div class="card-pad" style="border-bottom:1px solid var(--line)"><div class="sec-title" style="margin:0">Projects</div><div class="sec-sub" style="margin:2px 0 0">Click a project to focus on it</div></div>'+
-        '<table class="tbl"><thead><tr><th>Project</th><th class="r">BOQ value</th><th class="r">Outflow budget</th><th class="r">Committed</th><th class="r">Billed</th><th class="r">Paid</th><th class="r">Inflow budget</th><th class="r">Received</th><th class="r">Open WOs</th></tr></thead><tbody>'+
-        (rows.length?rows.map(r=>'<tr class="clk" onclick="ENG.f.setProject(\''+r.project_id+'\')"><td><b>'+esc(r.project_name)+'</b></td><td class="r">'+inr(r.boq_value)+'</td><td class="r">'+(num(r.outflow_budget)?inr(r.outflow_budget):'—')+'</td><td class="r">'+inr(r.committed)+'</td><td class="r">'+inr(r.billed)+'</td><td class="r">'+(actProject(r.project_id)==null?'—':inr(actProject(r.project_id)))+'</td><td class="r">'+(num(r.inflow_budget)?inr(r.inflow_budget):'—')+'</td><td class="r">'+inr(r.received)+'</td><td class="r">'+(num(r.wo_draft)+num(r.wo_issued))+'</td></tr>').join(''):'<tr><td colspan="9"><div class="empty" style="padding:24px">No projects available</div></td></tr>')+
+        '<div class="card eng-tbl" style="margin-bottom:16px"><div class="card-pad" style="border-bottom:1px solid var(--line)"><div class="sec-title" style="margin:0">Business units</div><div class="sec-sub" style="margin:2px 0 0">Click a project to focus on it</div></div>'+
+        '<table class="tbl"><thead><tr><th>Business unit</th><th class="r">BOQ value</th><th class="r">Outflow budget</th><th class="r">Committed</th><th class="r">Billed</th><th class="r">Paid</th><th class="r">Inflow budget</th><th class="r">Received</th><th class="r">Open WOs</th></tr></thead><tbody>'+
+        (rows.length?rows.map(r=>'<tr class="clk" onclick="ENG.f.setProject(\''+r.project_id+'\')"><td><b>'+esc(r.project_name)+'</b></td><td class="r">'+inr(r.boq_value)+'</td><td class="r">'+(num(r.outflow_budget)?inr(r.outflow_budget):'—')+'</td><td class="r">'+inr(r.committed)+'</td><td class="r">'+inr(r.billed)+'</td><td class="r">'+(actProject(r.project_id)==null?'—':inr(actProject(r.project_id)))+'</td><td class="r">'+(num(r.inflow_budget)?inr(r.inflow_budget):'—')+'</td><td class="r">'+inr(r.received)+'</td><td class="r">'+(num(r.wo_draft)+num(r.wo_issued))+'</td></tr>').join(''):'<tr><td colspan="9"><div class="empty" style="padding:24px">No business units available</div></td></tr>')+
         '</tbody></table></div>')+
       '<div class="card eng-tbl" style="margin-bottom:16px"><div class="card-pad" style="border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><div class="sec-title" style="margin:0">'+dirTag('Outflow')+' Budget vs actual</div><div class="sec-sub" style="margin:4px 0 0">Committed = value of work orders issued against the budgeted scope · Paid = the part of the billed work already paid through Accounts (GST, TDS and retention left out)</div></div><button class="btn btn-sm" onclick="navTo(\'engineering/budget\')">Manage budgets</button></div>'+
         outflowTable(outRows,false)+'</div>'+
@@ -240,7 +251,7 @@
   function contractorTable(rows,showProject){
     if(!rows.length)return '<div class="empty" style="padding:30px"><i class="fa-solid fa-helmet-safety"></i><div style="font-weight:600;color:var(--ink)">No issued work orders yet</div></div>';
     let prev='';
-    return '<table class="tbl"><thead><tr>'+(showProject?'<th>Project</th>':'')+'<th>Parent contractor</th><th>Sub-contractor</th><th class="r">Work orders</th><th class="r">Committed</th><th class="r">Verified</th><th class="r">Billed</th></tr></thead><tbody>'+
+    return '<table class="tbl"><thead><tr>'+(showProject?'<th>Business unit</th>':'')+'<th>Parent contractor</th><th>Sub-contractor</th><th class="r">Work orders</th><th class="r">Committed</th><th class="r">Verified</th><th class="r">Billed</th></tr></thead><tbody>'+
       rows.map(r=>{
         const key=r.project_id+'|'+r.parent_id,first=key!==prev;prev=key;
         return '<tr>'+(showProject?'<td>'+(first?esc(r.project_name):'')+'</td>':'')+'<td>'+(first?'<b>'+esc(r.parent_name)+'</b>':'')+'</td><td>'+(r.sub_id?'<i class="fa-solid fa-turn-up fa-rotate-90" style="color:var(--slate);margin-right:6px"></i>'+esc(r.sub_name):'<span style="color:var(--slate)">Parent itself</span>')+'</td><td class="r">'+r.wo_count+'</td><td class="r">'+inr(r.committed)+'</td><td class="r">'+inr(r.verified)+'</td><td class="r">'+inr(r.billed)+'</td></tr>';
@@ -250,7 +261,7 @@
   const scopeCell=b=>'<td><b>'+esc(scopeLabel(b))+'</b>'+(b.remarks?'<div class="sub" style="font-size:12px;color:var(--slate)">'+esc(b.remarks)+'</div>':'')+'</td>';
   function outflowTable(rows,manage){
     if(!rows.length)return '<div class="empty" style="padding:34px"><i class="fa-solid fa-wallet"></i><div style="font-weight:600;color:var(--ink)">No outflow budgets set yet</div><p>Set a cost budget against a project, block, activity group or material.</p></div>';
-    return '<table class="tbl"><thead><tr><th>Project</th><th>Level</th><th>Scope</th><th class="r">Budget</th><th class="r">BOQ value</th><th class="r">Committed</th><th class="r">Billed</th><th class="r">Paid</th><th style="min-width:120px">Committed vs budget</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+
+    return '<table class="tbl"><thead><tr><th>Business unit</th><th>Level</th><th>Scope</th><th class="r">Budget</th><th class="r">BOQ value</th><th class="r">Committed</th><th class="r">Billed</th><th class="r">Paid</th><th style="min-width:120px">Committed vs budget</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+
       rows.map(b=>{
         const mat=b.level==='Material';
         return '<tr><td>'+esc(b.project_name)+'</td><td>'+lvTag(b.level)+'</td>'+scopeCell(b)+'<td class="r">'+inr(b.amount)+'</td>'+
@@ -261,7 +272,7 @@
   }
   function inflowTable(rows,manage){
     if(!rows.length)return '<div class="empty" style="padding:34px"><i class="fa-solid fa-piggy-bank"></i><div style="font-weight:600;color:var(--ink)">No inflow budgets set yet</div><p>Set an expected-collections budget against a project or a block.</p></div>';
-    return '<table class="tbl"><thead><tr><th>Project</th><th>Level</th><th>Scope</th><th class="r">Budget</th><th class="r">Received</th><th style="min-width:140px">Collected vs budget</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+
+    return '<table class="tbl"><thead><tr><th>Business unit</th><th>Level</th><th>Scope</th><th class="r">Budget</th><th class="r">Received</th><th style="min-width:140px">Collected vs budget</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+
       rows.map(b=>'<tr><td>'+esc(b.project_name)+'</td><td>'+lvTag(b.level)+'</td>'+scopeCell(b)+'<td class="r">'+inr(b.amount)+'</td><td class="r">'+inr(b.received)+'</td><td>'+bar(num(b.received),num(b.amount))+'<div style="font-size:11px;color:var(--slate);margin-top:3px">'+pct(num(b.received),num(b.amount))+'% · '+(num(b.received)>=num(b.amount)?'<span style="color:var(--ok);font-weight:600">target met</span>':inr(num(b.amount)-num(b.received))+' to collect')+'</div></td>'+(manage?rowActions(b):'')+'</tr>').join('')+'</tbody></table>';
   }
 
@@ -287,16 +298,18 @@
       '<div class="card eng-tbl"><div class="card-pad" style="border-bottom:1px solid var(--line)"><div class="sec-title" style="margin:0">'+dirTag('Inflow')+' Collection budgets</div><div class="sec-sub" style="margin:4px 0 0">Compared with active receipts in Post Sales, less refunds. Set against a project or a block.</div></div>'+inflowTable(inRows,true)+'</div>'+
       '<div class="eng-note" style="margin-top:12px">Budgets at different levels are independent controls — they are not required to add up to each other. Material budgets come from the Purchase item master and are shown for reference only. <b>Paid</b> is what Accounts has actually paid against posted RA bills, shown as the part of the billed work it settles (GST, TDS and retention left out); retention still held is noted under it and is released from the Retention tab.</div>';
   };
-  const LEVELS_ALL=[['project','Whole project'],['block','A block / tower'],['group','An activity group'],['block_group','Activity group within a block'],['material','A material'],['block_material','Material within a block']];
+  /* 'head' first among the trade-level choices: a spend head is the one of these that finance
+     recognises, and its actual comes straight from Accounts rather than from the BOQ. */
+  const LEVELS_ALL=[['project','Whole business unit'],['block','A block / tower'],['head','A budget head (Accounts)'],['group','An activity group'],['block_group','Activity group within a block'],['material','A material'],['block_material','Material within a block']];
   const levelsFor=d=>d==='Inflow'?LEVELS_ALL.slice(0,2):LEVELS_ALL;
   ENG.f.budgetForm=async function(id,dirPreset){
     const cur=id?(ENG.L.budgets||[]).find(x=>x.id===id):null;
     const pid=cur?cur.project_id:(curProject()||'');
     const dir=cur?(cur.direction||'Outflow'):(dirPreset||'Outflow');
-    const lvl=cur?(cur.item_id?(cur.tower_id?'block_material':'material'):cur.group_id?(cur.tower_id?'block_group':'group'):cur.tower_id?'block':'project'):'project';
+    const lvl=cur?(cur.head_id?'head':cur.item_id?(cur.tower_id?'block_material':'material'):cur.group_id?(cur.tower_id?'block_group':'group'):cur.tower_id?'block':'project'):'project';
     modal((cur?'Edit ':'Set ')+dir.toLowerCase()+' budget',
       '<label>Direction</label><select id="bfDir" '+(cur?'disabled':'onchange="ENG.f.bfDir()"')+'>'+opts([['Outflow','Outflow — a cost budget (work orders and bills)'],['Inflow','Inflow — expected collections (compared with receipts)']],x=>x[0],x=>x[1],dir)+'</select>'+
-      '<label>Project</label><select id="bfProj" '+(cur?'disabled':'onchange="ENG.f.bfRefresh()"')+'>'+opts(C.projects,p=>p.id,p=>p.name,pid,'Select a project…')+'</select>'+
+      '<label>Business unit</label><select id="bfProj" '+(cur?'disabled':'onchange="ENG.f.bfRefresh()"')+'>'+opts(C.projects,p=>p.id,p=>p.name,pid,'Select a business unit…')+'</select>'+
       '<label>Set against</label><select id="bfLevel" '+(cur?'disabled':'onchange="ENG.f.bfRefresh()"')+'>'+opts(levelsFor(dir),x=>x[0],x=>x[1],lvl)+'</select>'+
       '<div id="bfScope"></div>'+
       '<div class="two"><div><label>Budget amount (₹)</label><input id="bfAmt" type="number" min="0" step="0.01" value="'+(cur?num(cur.amount):'')+'"></div><div></div></div>'+
@@ -313,13 +326,16 @@
   ENG.f.bfRefresh=async function(cur){
     const host=$('bfScope');if(!host)return;
     const pid=Number(val('bfProj'))||(cur&&cur.project_id)||null;const lvl=val('bfLevel');
-    const needT=/block/.test(lvl),needG=/group/.test(lvl),needM=/material/.test(lvl);
+    const needT=/block/.test(lvl),needG=/group/.test(lvl),needM=/material/.test(lvl),needH=lvl==='head';
     if(!pid){host.innerHTML='';return;}
     let towers=[];if(needT){try{towers=await loadTowers(pid);}catch(e){fail(e);}}
     const keep=k=>{const x=document.getElementById(k);return x?x.value:'';};
-    const tSel=cur?String(cur.tower_id||''):keep('bfTower'),gSel=cur?String(cur.group_id||''):keep('bfGroup'),mSel=cur?String(cur.item_id||''):keep('bfItem');
+    const tSel=cur?String(cur.tower_id||''):keep('bfTower'),gSel=cur?String(cur.group_id||''):keep('bfGroup'),mSel=cur?String(cur.item_id||''):keep('bfItem'),hSel=cur?String(cur.head_id||''):keep('bfHead');
+    const heads=(C.heads||[]).filter(h=>h.active);
     host.innerHTML=
       (needT?'<label>Block</label><select id="bfTower" '+(cur?'disabled':'')+'>'+opts(towers,x=>x.id,x=>x.name,tSel,'Select a block…')+'</select>':'')+
+      (needH?'<label>Budget head</label><select id="bfHead" '+(cur?'disabled':'')+'>'+opts(heads,x=>x.id,x=>x.name,hSel,heads.length?'Select a head…':'No budget heads yet — add one under Masters')+'</select>'+
+        '<div class="eng-note" style="margin-top:8px">Spend on a head comes from its Accounts ledger, not from the BOQ — so BOQ value, committed and billed are left blank for it.</div>':'')+
       (needG?'<label>Activity group</label><select id="bfGroup" '+(cur?'disabled':'')+'>'+opts(C.groups,x=>x.id,x=>x.name,gSel,'Select a group…')+'</select>':'')+
       (needM?'<label>Material</label><select id="bfItem" '+(cur?'disabled':'')+'>'+opts(C.items,x=>x.id,x=>x.name+(x.code?' ('+x.code+')':''),mSel,C.items.length?'Select a material…':'No materials in the Purchase item master yet')+'</select>':'');
   };
@@ -331,9 +347,10 @@
       if(id){const {error}=await E().from('budgets').update({amount:amt,remarks:rem}).eq('id',id);if(error)throw error;}
       else{
         const lvl=val('bfLevel'),pid=Number(val('bfProj')),dir=val('bfDir')||'Outflow';
-        if(!pid)return toast('Select a project','warn');
+        if(!pid)return toast('Select a business unit','warn');
         const row={project_id:pid,direction:dir,amount:amt,remarks:rem};
         if(/block/.test(lvl)){row.tower_id=Number(val('bfTower'))||null;if(!row.tower_id)return toast('Select a block','warn');}
+        if(lvl==='head'){row.head_id=Number(val('bfHead'))||null;if(!row.head_id)return toast('Select a budget head','warn');}
         if(/group/.test(lvl)){row.group_id=Number(val('bfGroup'))||null;if(!row.group_id)return toast('Select an activity group','warn');}
         if(/material/.test(lvl)){row.item_id=Number(val('bfItem'))||null;if(!row.item_id)return toast('Select a material','warn');}
         const {error}=await E().from('budgets').insert(row);if(error)throw error;
@@ -347,16 +364,98 @@
   };
 
   /* ======================================================================= MASTERS */
+  /* Masters has three things in it now and they are not read together: the trade structure, the
+     activity list, and the spend heads that Accounts budgets against. Sub-tabs rather than one
+     long page, so "add an activity" is somewhere you go rather than something you hunt for under
+     the right group heading. */
+  const MSUB=[['','Activity groups'],['acts','Activities'],['heads','Budget heads']];
+  function msubBar(cur){
+    return '<div class="tabs eng-tabs" style="margin-top:-4px">'+MSUB.map(s=>
+      '<div class="tab'+(s[0]===cur?' active':'')+'" onclick="navTo(\'engineering/masters'+(s[0]?'/'+s[0]:'')+'\')">'+s[1]+'</div>').join('')+'</div>';
+  }
   ENG.routes.masters=async function(v,a,t){
+    const sub=(a&&a[0])||'';
+    if(sub==='acts')  return ENG.f.mastersActs(v);
+    if(sub==='heads') return ENG.f.mastersHeads(v);
     const used={};
     v.innerHTML=head('masters','Activity groups and the activities in them — the building blocks of every BOQ',
       '<button class="btn btn-primary" onclick="ENG.f.groupForm()"><i class="fa-solid fa-plus"></i> New group</button>')+
+      msubBar('')+
       '<div id="engBody">'+(C.groups.length?C.groups.map(g=>{
         const acts=C.acts.filter(x=>x.group_id===g.id);
         return '<div class="card eng-tbl" style="margin-bottom:14px"><div class="card-pad" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--line)"><div><span class="sec-title" style="margin:0">'+esc(g.name)+'</span> '+(g.active?'':stTag('Inactive'))+' <span style="color:var(--slate);font-size:12.5px">· '+acts.length+' activit'+(acts.length===1?'y':'ies')+'</span></div><div style="display:flex;gap:8px"><button class="btn btn-sm" onclick="ENG.f.activityForm(0,'+g.id+')"><i class="fa-solid fa-plus"></i> Activity</button><button class="btn btn-sm" onclick="ENG.f.groupForm('+g.id+')"><i class="fa-solid fa-pen"></i></button><button class="btn btn-sm btn-danger" onclick="ENG.f.groupDel('+g.id+')"><i class="fa-solid fa-trash"></i></button></div></div>'+
           (acts.length?'<table class="tbl"><thead><tr><th>Activity</th><th>UoM</th><th class="r">Estimated rate</th><th>Status</th><th></th></tr></thead><tbody>'+acts.map(x=>'<tr><td><b>'+esc(x.name)+'</b></td><td>'+esc(x.uom)+'</td><td class="r">'+(x.est_rate!=null?inr(x.est_rate):'—')+'</td><td>'+stTag(x.active?'Active':'Inactive')+'</td><td style="white-space:nowrap;text-align:right"><button class="btn btn-sm" onclick="ENG.f.activityForm('+x.id+')"><i class="fa-solid fa-pen"></i></button> <button class="btn btn-sm btn-danger" onclick="ENG.f.activityDel('+x.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>').join('')+'</tbody></table>':'<div class="empty" style="padding:22px">No activities in this group yet</div>')+'</div>';
       }).join(''):'<div class="card card-pad empty"><i class="fa-solid fa-sliders"></i><div style="font-weight:600;color:var(--ink)">No activity groups yet</div><p>Create a group, then add activities to it.</p></div>')+'</div>';
   };
+  /* ---- Masters -> Activities: the flat list, and the one place built for adding one ---- */
+  const groupName=id=>{const g=groupById(id);return g?g.name:'—';};
+  ENG.f.mastersActs=function(v){
+    const rows=C.acts.slice().sort((x,y)=>String(groupName(x.group_id)+x.name).localeCompare(String(groupName(y.group_id)+y.name)));
+    v.innerHTML=head('masters','Every activity in the master, with the group it belongs to',
+      '<button class="btn btn-primary" onclick="ENG.f.activityForm(0)"><i class="fa-solid fa-plus"></i> New activity</button>')+
+      msubBar('acts')+
+      '<div class="card eng-tbl">'+(rows.length
+        ? '<table class="tbl"><thead><tr><th>Activity</th><th>Parent group</th><th>Unit</th><th class="r">Estimated rate</th><th>Status</th><th></th></tr></thead><tbody>'+
+          rows.map(x=>'<tr><td><b>'+esc(x.name)+'</b>'+
+              (x.description?'<div class="sub" style="font-size:12px;color:var(--slate)">'+esc(x.description)+'</div>':'')+
+              (x.long_description?'<div class="sub" style="font-size:11.5px;color:var(--slate);opacity:.8;margin-top:2px">'+esc(x.long_description.length>120?x.long_description.slice(0,120)+'…':x.long_description)+'</div>':'')+
+            '</td><td>'+esc(groupName(x.group_id))+'</td><td>'+esc(x.uom)+'</td>'+
+            '<td class="r">'+(x.est_rate!=null?inr(x.est_rate):'—')+'</td><td>'+stTag(x.active?'Active':'Inactive')+'</td>'+
+            '<td style="white-space:nowrap;text-align:right"><button class="btn btn-sm" onclick="ENG.f.activityForm('+x.id+')"><i class="fa-solid fa-pen"></i></button> <button class="btn btn-sm btn-danger" onclick="ENG.f.activityDel('+x.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>').join('')+
+          '</tbody></table>'
+        : '<div class="empty" style="padding:34px"><i class="fa-solid fa-list-check"></i><div style="font-weight:600;color:var(--ink)">No activities yet</div><p>Add one here, or from the BOQ screen while you are building a bill of quantities.</p></div>')+
+      '</div>';
+  };
+
+  /* ---- Masters -> Budget heads: the spend heads Accounts budgets against ---- */
+  ENG.f.mastersHeads=function(v){
+    const led=id=>{const l=(C.ledgers||[]).find(x=>x.id===id);return l?l.name:null;};
+    v.innerHTML=head('masters','Spend heads a budget can be set against, each pointing at one Accounts ledger',
+      '<button class="btn btn-primary" onclick="ENG.f.headForm()"><i class="fa-solid fa-plus"></i> New budget head</button>')+
+      msubBar('heads')+
+      '<div class="card eng-tbl">'+((C.heads||[]).length
+        ? '<table class="tbl"><thead><tr><th>Budget head</th><th>Accounts ledger</th><th class="r">Sort</th><th>Status</th><th></th></tr></thead><tbody>'+
+          C.heads.map(h=>'<tr><td><b>'+esc(h.name)+'</b>'+
+              (h.description?'<div class="sub" style="font-size:12px;color:var(--slate)">'+esc(h.description)+'</div>':'')+'</td>'+
+            '<td>'+(h.ledger_id?esc(led(h.ledger_id)||('Ledger #'+h.ledger_id)):'<span style="color:#b45309">Not linked — no actual can be shown</span>')+'</td>'+
+            '<td class="r">'+num(h.sort_order)+'</td><td>'+stTag(h.active?'Active':'Inactive')+'</td>'+
+            '<td style="white-space:nowrap;text-align:right"><button class="btn btn-sm" onclick="ENG.f.headForm('+h.id+')"><i class="fa-solid fa-pen"></i></button> <button class="btn btn-sm btn-danger" onclick="ENG.f.headDel('+h.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>').join('')+
+          '</tbody></table>'
+        : '<div class="empty" style="padding:34px"><i class="fa-solid fa-wallet"></i><div style="font-weight:600;color:var(--ink)">No budget heads yet</div><p>A head is a spend head to budget against — Civil, MEP, Site establishment — pointing at the Accounts ledger its money is booked to.</p></div>')+
+      '</div>'+
+      ((C.ledgers||[]).length?'':'<div class="eng-note" style="margin-top:12px">No Accounts ledgers are readable from here, so a head cannot be linked yet. Accounts is limited by name; ask whoever holds it to add the ledgers, or to grant you access.</div>');
+  };
+  ENG.f.headForm=function(id){
+    const h=id?(C.heads||[]).find(x=>x.id===id):{name:'',ledger_id:'',description:'',sort_order:(C.heads||[]).length+1,active:true};
+    if(!h)return;
+    const leds=(C.ledgers||[]).filter(l=>l.active!==false);
+    modal(id?'Edit budget head':'New budget head',
+      '<label>Budget head name</label><input id="bhName" value="'+esc(h.name)+'" placeholder="e.g. Civil works">'+
+      '<label>Accounts ledger <span style="color:var(--slate);font-weight:400">the actual spend on this head is read from here</span></label>'+
+      '<select id="bhLedger">'+opts(leds,l=>l.id,l=>l.name+(l.code?' ('+l.code+')':''),h.ledger_id||'',leds.length?'Select a ledger…':'No Accounts ledgers readable')+'</select>'+
+      '<label>Description <span style="color:var(--slate);font-weight:400">optional</span></label><input id="bhDesc" value="'+esc(h.description||'')+'">'+
+      '<div class="two"><div><label>Sort order</label><input id="bhSort" type="number" value="'+num(h.sort_order)+'"></div>'+
+      '<div><label>Status</label><select id="bhAct"><option value="1"'+(h.active?' selected':'')+'>Active</option><option value="0"'+(h.active?'':' selected')+'>Inactive</option></select></div></div>'+
+      '<div class="eng-note" style="margin-top:12px">One ledger per head. Two heads sharing a ledger would each report the whole of that ledger as their own spend.</div>',
+      cancelBtn+'<button class="btn btn-primary" onclick="ENG.f.headSave(this,'+(id||0)+')"><i class="fa-solid fa-check"></i> Save</button>');
+  };
+  ENG.f.headSave=function(btn,id){
+    return run(btn,async()=>{
+      const row={name:val('bhName').trim(),ledger_id:Number(val('bhLedger'))||null,
+        description:val('bhDesc').trim()||null,sort_order:Number(val('bhSort'))||0,active:val('bhAct')==='1'};
+      if(!row.name)return toast('Enter the budget head name','warn');
+      const r=id?await E().from('budget_heads').update(row).eq('id',id):await E().from('budget_heads').insert(row);
+      if(r.error)throw r.error;
+      await loadMasters(true);closeModal();toast('Budget head saved','ok');renderPage();
+    });
+  };
+  ENG.f.headDel=async function(id){
+    const h=(C.heads||[]).find(x=>x.id===id);if(!h)return;
+    if(!await confirmDialog('Delete the budget head “'+h.name+'”? This only works if no budget uses it.',{okLabel:'Delete'}))return;
+    try{const r=await E().from('budget_heads').delete().eq('id',id);if(r.error)throw r.error;
+      await loadMasters(true);toast('Budget head deleted','ok');renderPage();}catch(e){fail(e);}
+  };
+
   ENG.f.groupForm=function(id){
     const g=id?groupById(id):{name:'',sort_order:C.groups.length+1,active:true};
     modal(id?'Edit activity group':'New activity group',
@@ -385,21 +484,32 @@
     const uoms=(C.uoms.length?C.uoms.map(u=>u.code):UOM_FALLBACK).slice();
     if(a.uom&&uoms.indexOf(a.uom)<0)uoms.push(a.uom);
     modal(id?'Edit activity':'New activity',
-      '<label>Activity group</label><select id="maGroup">'+opts(C.groups,g=>g.id,g=>g.name,a.group_id,'Select a group…')+'</select>'+
       '<label>Activity name</label><input id="maName" value="'+esc(a.name)+'" placeholder="e.g. Internal plaster">'+
-      '<div class="two"><div><label>Unit of measure</label><select id="maUom">'+opts(uoms,u=>u,u=>u,a.uom,'Select…')+'</select></div><div><label>Estimated rate (₹) <span style="color:var(--slate);font-weight:400">optional</span></label><input id="maRate" type="number" min="0" step="0.01" value="'+(a.est_rate!=null?a.est_rate:'')+'"></div></div>'+
+      '<label>Parent activity group</label><select id="maGroup">'+opts(C.groups,g=>g.id,g=>g.name,a.group_id,'Select a group…')+'</select>'+
+      '<div class="two"><div><label>Unit</label><select id="maUom">'+opts(uoms,u=>u,u=>u,a.uom,'Select…')+'</select></div><div><label>Estimated rate (₹) <span style="color:var(--slate);font-weight:400">optional</span></label><input id="maRate" type="number" min="0" step="0.01" value="'+(a.est_rate!=null?a.est_rate:'')+'"></div></div>'+
+      /* Two descriptions, because they answer different questions. The short one rides along
+         wherever the activity is picked — BOQ, work orders — so it has to fit on one line. The long
+         one is the specification nobody wants in a dropdown but somebody needs before ordering the
+         work, so it lives on the master and is read here. */
+      '<label>Description <span style="color:var(--slate);font-weight:400">one line, shown wherever this activity is picked</span></label>'+
+      '<input id="maDesc" value="'+esc(a.description||'')+'" placeholder="e.g. 12mm cement plaster on internal walls">'+
+      '<label>Long description <span style="color:var(--slate);font-weight:400">the full specification — optional</span></label>'+
+      '<textarea id="maLong" rows="4" placeholder="Method, materials, finish, acceptance — whatever the contractor needs to price and execute it.">'+esc(a.long_description||'')+'</textarea>'+
       '<label>Status</label><select id="maAct"><option value="1"'+(a.active?' selected':'')+'>Active</option><option value="0"'+(a.active?'':' selected')+'>Inactive</option></select>',
       cancelBtn+'<button class="btn btn-primary" onclick="ENG.f.activitySave(this,'+(id||0)+')"><i class="fa-solid fa-check"></i> Save</button>');
   };
   ENG.f.activitySave=function(btn,id){
     return run(btn,async()=>{
       const rate=numOrNull(val('maRate'));
-      const row={group_id:Number(val('maGroup')),name:val('maName').trim(),uom:val('maUom'),est_rate:rate,active:val('maAct')==='1'};
-      if(!row.group_id)return toast('Select a group','warn');
+      const row={group_id:Number(val('maGroup')),name:val('maName').trim(),uom:val('maUom'),est_rate:rate,
+        description:val('maDesc').trim()||null,long_description:val('maLong').trim()||null,
+        active:val('maAct')==='1'};
+      if(!row.group_id)return toast('Select a parent activity group','warn');
       if(!row.name)return toast('Enter the activity name','warn');
-      if(!row.uom)return toast('Select the unit of measure','warn');
+      if(!row.uom)return toast('Select the unit','warn');
       if(rate!=null&&(isNaN(rate)||rate<0))return toast('Enter a valid rate','warn');
-      const r=id?await E().from('activities').update(row).eq('id',id):await E().from('activities').insert(row);
+      const r=id?await E().from('activities').update(row).eq('id',id).select('id').maybeSingle()
+                :await E().from('activities').insert(row).select('id').maybeSingle();
       if(r.error)throw r.error;
       await loadMasters(true);closeModal();toast('Activity saved','ok');renderPage();
     });
