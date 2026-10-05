@@ -20269,7 +20269,25 @@ function cpaPhCss(){return `<style>
   .cph-reasons{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
   .cph-reason{border:1px solid var(--line);background:#f8fafc;border-radius:16px;padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer}
   .cph-reason:hover{border-color:#1d4ed8;color:#1d4ed8}
-  @media(max-width:760px){.cph-rvgrid{grid-template-columns:repeat(2,1fr)}.cph-md{padding:8px 12px}}
+  /* Review preview */
+  .cph-pv{flex-direction:column}
+  .cph-pvstage{display:flex;align-items:center;justify-content:center;max-width:92vw;min-height:30vh;margin-top:40px}
+  .cph-pv .cph-pvstage img,.cph-pv .cph-pvstage video{max-width:88vw;max-height:calc(100vh - 170px);border-radius:10px;display:block;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  .cph-pvload{color:#cbd5e1;font-size:26px}
+  .cph-pvn{color:#cbd5e1;font-size:12.5px;margin-left:10px;white-space:nowrap}
+  .cph-pvnav{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:0;
+    background:rgba(255,255,255,.16);color:#fff;font-size:18px;cursor:pointer}
+  .cph-pvnav:hover{background:rgba(255,255,255,.3)}
+  .cph-pvnav.l{left:18px}.cph-pvnav.r{right:18px}
+  .cph-pvacts{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;padding:0 16px;margin-top:16px}
+  .cph-pvbtn{height:46px;padding:0 26px;border-radius:10px;border:0;font:inherit;font-size:15px;font-weight:700;cursor:pointer;
+    display:inline-flex;align-items:center;gap:9px;box-shadow:0 6px 18px rgba(0,0,0,.3)}
+  .cph-pvbtn.ok{background:#16a34a;color:#fff}.cph-pvbtn.ok:hover{background:#15803d}
+  .cph-pvbtn.no{background:#dc2626;color:#fff}.cph-pvbtn.no:hover{background:#b91c1c}
+  .cph-pvbtn.un{background:#fff;color:#334155}
+  .cph-pvnote{color:#e2e8f0;background:rgba(255,255,255,.12);padding:11px 16px;border-radius:10px;font-size:14px}
+  @media(max-width:760px){.cph-rvgrid{grid-template-columns:repeat(2,1fr)}.cph-md{padding:8px 12px}
+    .cph-pvnav{top:auto;bottom:18px;transform:none}.cph-pvbtn{height:44px;padding:0 20px}}
 
   /* level buttons and the pickers share one row on a wide screen */
   .cph-bar{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
@@ -20359,6 +20377,9 @@ function cpaPhCss(){return `<style>
   .cph-tbl tbody tr:hover{background:#f8fafc}
   .cph-th{width:46px;height:46px;border-radius:7px;object-fit:cover;display:block;cursor:pointer;border:1px solid var(--line)}
   .cph-th.vid{background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b}
+  img.cph-th:not([src]),img.cph-rvm:not([src]){background:linear-gradient(90deg,#eef2f7,#f8fafc,#eef2f7);background-size:200% 100%;animation:cphShim 1.2s linear infinite}
+  img.cph-noimg{animation:none;background:#eef2f7}
+  @keyframes cphShim{to{background-position:-200% 0}}
   .cph-when{white-space:nowrap;font-weight:600;color:var(--ink)}
   .cph-area{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;
     background:#eff6ff;color:#1e40af;white-space:nowrap}
@@ -20465,6 +20486,9 @@ async function cpaPhPaint(projects,units){
   if(needUnit&&flats.length&&!flats.some(u=>String(u.id)===String(CPA_PH.unit))) CPA_PH.unit=String(flats[0].id);
 
   const today=new Date().toISOString().slice(0,10);
+  // When each flat last had something uploaded, shown beside it in the Flat picker (dd/mm/yy).
+  const lastUp=needUnit?await cpaPhLastUploads(flats.map(u=>u.id)):{};
+  if(!$('cphWrap')) return;
   wrap.innerHTML=cpaPhModeBar()
     +(cpaIsPhotoApprover()&&!state.super?'':'<div class="cph-note"><i class="fa-solid fa-circle-info"></i>Everything uploaded here waits for approval by the post-sales team before customers can see it.</div>')
     +'<div class="cph-card">'
@@ -20482,7 +20506,8 @@ async function cpaPhPaint(projects,units){
                            :'<option value="">No blocks on record</option>')
           +'</select></div></div>':'')
           +(needUnit?'<div class="cph-f"><label>Flat</label><div class="cph-sel"><select id="cphUnit" onchange="cpaPhSet(\'unit\',this.value)">'
-            +(flats.length?flats.map(u=>'<option value="'+u.id+'"'+(String(u.id)===String(CPA_PH.unit)?' selected':'')+'>'+esc(u.unit_code)+'</option>').join('')
+            +(flats.length?flats.map(u=>'<option value="'+u.id+'"'+(String(u.id)===String(CPA_PH.unit)?' selected':'')+'>'+esc(u.unit_code)
+                +(lastUp[u.id]?' · '+cpaDdMmYy(lastUp[u.id]):'')+'</option>').join('')
                           :'<option value="">No flats in this block</option>')
           +'</select></div></div>':'')
         +'</div>'
@@ -20518,6 +20543,18 @@ async function cpaPhPaint(projects,units){
   cpaPhFillBadge();
 }
 
+// Latest upload per flat (any status, not deleted) - newest first, so the first row per flat wins.
+async function cpaPhLastUploads(ids){
+  if(!ids||!ids.length) return {};
+  try{
+    const {data}=await sb.schema('cust').from('unit_photos').select('unit_id,created_at').in('unit_id',ids)
+      .is('deleted_at',null).order('created_at',{ascending:false}).limit(1000);
+    const out={}; (data||[]).forEach(r=>{ if(!out[r.unit_id]) out[r.unit_id]=r.created_at; });
+    return out;
+  }catch(_e){ return {}; }
+}
+function cpaDdMmYy(d){ const x=new Date(d); if(isNaN(x)) return '';
+  return String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+'/'+String(x.getFullYear()).slice(2); }
 // The flats of the chosen project and block, cancelled rows dropped (a cancelled booking keeps
 // its row for audit, which is why the same physical flat could appear two to four times), and
 // filtered by whatever has been typed.
@@ -20840,8 +20877,36 @@ async function cpaPhList(){
       }
     }
     host.innerHTML=bar+rowsHtml;
+    cphLazy(host);
     const c=$('cphCount'); if(c) c.textContent=count?(count+(count===1?' item':' items')):'';
   }catch(e){ host.innerHTML='<div class="cph-empty" style="color:var(--err)">'+esc((e&&e.message)||String(e))+'</div>'; }
+}
+/* Thumbnails load only as they scroll into view, a few at a time, and a signed link is reused for a
+   few minutes. Signing every row's file up front - one s3-sign call each, now with an access check
+   behind it - and then decoding a full-size original per row is what made a long list hang while
+   scrolling (5 Oct 2026: a block with 100+ flat photos). */
+const CPH_URLS={};
+async function cphSignedUrl(path){
+  const c=CPH_URLS[path];
+  if(c&&Date.now()-c.t<240000) return c.url;   // signed links last 5 minutes
+  const url=await s3SignedUrl(path);
+  if(url) CPH_URLS[path]={url,t:Date.now()};
+  return url;
+}
+let cphIO=null; const cphQ=[]; let cphBusy=0;
+function cphPump(){
+  while(cphBusy<6&&cphQ.length){
+    const img=cphQ.shift(); if(!img.isConnected) continue;
+    cphBusy++;
+    cphSignedUrl(img.getAttribute('data-ph')).then(u=>{ if(u){ img.src=u; } else img.classList.add('cph-noimg'); })
+      .catch(()=>img.classList.add('cph-noimg')).finally(()=>{ cphBusy--; cphPump(); });
+  }
+}
+function cphLazy(root){
+  const imgs=(root||document).querySelectorAll('img[data-ph]:not([src])');
+  if(!('IntersectionObserver' in window)){ imgs.forEach(i=>cphQ.push(i)); cphPump(); return; }
+  if(!cphIO) cphIO=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting){ cphIO.unobserve(e.target); cphQ.push(e.target); cphPump(); } }),{rootMargin:'300px 0px'});
+  imgs.forEach(i=>cphIO.observe(i));
 }
 // `cols` names the middle columns and `vals` fills them for one row, so the three levels share
 // one table rather than three that could drift apart.
@@ -20854,11 +20919,7 @@ async function cpaPhRows(list,table,cols,vals,emptyMsg){
     // A rejected file has been removed from S3 - there is nothing to show or open.
     if(p.status==='rejected'){ thumb='<div class="cph-th vid" title="File removed when it was rejected"><i class="fa-solid fa-ban"></i></div>'; }
     else if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
-    else{
-      const url=await s3SignedUrl(p.storage_path);
-      thumb=url?'<img class="cph-th" src="'+url+'" alt="" onclick="'+open+'" title="Open full size">'
-               :'<div class="cph-th vid" onclick="'+open+'"><i class="fa-solid fa-image"></i></div>';
-    }
+    else thumb='<img class="cph-th" data-ph="'+esc(p.storage_path)+'" alt="" decoding="async" onclick="'+open+'" title="Open full size">';
     return '<tr><td>'+thumb+'</td>'
       +'<td class="cph-when">'+esc(fmtDate(p.taken_on))+'</td>'
       +'<td>'+cpaMediaStatusTag(p)+'</td>'
@@ -20974,6 +21035,7 @@ async function cpaRvList(projUnits){
     if(t==='unit_photos'){
       const scope=projUnits.filter(u=>!CPA_RV.tower||u.tower===CPA_RV.tower);
       scope.forEach(u=>{byUnit[u.id]=u;});
+      CPA_RV.byUnit=byUnit;
       const ids=scope.map(u=>u.id);
       if(!ids.length){ host.innerHTML='<div class="cph-empty">No flats here.</div>'; cpaRvBar(); return; }
       q=q.in('unit_id',ids);
@@ -21000,6 +21062,7 @@ async function cpaRvList(projUnits){
       (groups[k]=groups[k]||{label,items:[]}).items.push(p);
     });
     const keys=Object.keys(groups).sort((a,b)=>natural(groups[a].label,groups[b].label));
+    CPA_RV.order=keys.flatMap(k=>groups[k].items.map(p=>p.id));   // the preview's arrows follow this
     const cards=await Promise.all(list.map(p=>cpaRvCard(p,t)));
     const cardOf={}; list.forEach((p,i)=>{cardOf[p.id]=cards[i];});
     const canPublish=CPA_RV.status==='pending'||CPA_RV.status==='unpublished';
@@ -21014,6 +21077,7 @@ async function cpaRvList(projUnits){
         +'<div class="cph-rvgrid">'+g.items.map(p=>cardOf[p.id]).join('')+'</div></div>';
     }).join('')
       +(list.length>=240?'<div class="cph-empty">Showing the newest 240. Publish or reject these to see the rest.</div>':'');
+    cphLazy(host);
     cpaRvSyncTickAll();
     cpaRvBar();
   }catch(e){ host.innerHTML='<div class="cph-empty" style="color:var(--err)">'+esc((e&&e.message)||String(e))+'</div>'; }
@@ -21022,10 +21086,10 @@ async function cpaRvCard(p,t){
   const isVideo=(p.file_type||'').indexOf('video')===0;
   const open="s3OpenSigned('"+String(p.storage_path||'').replace(/'/g,"\\'")+"')";
   let media;
+  const prev='cpaRvPreview('+p.id+')';
   if(p.status==='rejected') media='<div class="cph-rvm vid"><i class="fa-solid fa-ban"></i><span>File removed</span></div>';
-  else if(isVideo) media='<div class="cph-rvm vid" onclick="'+open+'" title="Play video"><i class="fa-solid fa-circle-play"></i><span>Video</span></div>';
-  else{ const url=await s3SignedUrl(p.storage_path);
-    media=url?'<img class="cph-rvm" src="'+url+'" alt="" onclick="'+open+'" title="Open full size">':'<div class="cph-rvm vid" onclick="'+open+'"><i class="fa-solid fa-image"></i></div>'; }
+  else if(isVideo) media='<div class="cph-rvm vid" onclick="'+prev+'" title="Play video"><i class="fa-solid fa-circle-play"></i><span>Video</span></div>';
+  else media='<img class="cph-rvm" data-ph="'+esc(p.storage_path)+'" alt="" decoding="async" onclick="'+prev+'" title="Open larger, with Publish / Reject">';
   const area=t==='unit_photos'?((CPA_PH_AREAS.find(a=>a[0]===(p.area||'common'))||[0,p.area])[1]):'';
   const mine=String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super;
   const on=CPA_RV.sel.has(p.id);
@@ -21085,8 +21149,74 @@ function cpaRvSyncTickAll(){
   });
 }
 window.cpaRvClearSel=function(){ CPA_RV.sel.clear(); document.querySelectorAll('.cph-rvc.cph-picked').forEach(c=>{c.classList.remove('cph-picked'); const cb=c.querySelector('input'); if(cb) cb.checked=false;}); cpaRvSyncTickAll(); cpaRvBar(); };
+/* Larger preview with the decision buttons, so a photo can be checked properly before it is
+   published. Arrows (and the keyboard arrows) move through the list in the order it is shown;
+   after Publish / Reject / Unpublish it moves on to the next one by itself. */
+function cpaRvPlace(p){
+  const t=CPA_RV.sec;
+  if(t==='unit_photos'){ const u=(CPA_RV.byUnit||{})[p.unit_id]||{};
+    const area=(CPA_PH_AREAS.find(a=>a[0]===(p.area||'common'))||[0,p.area||''])[1];
+    return (u.tower||'')+' · Flat '+(u.unit_code||'?')+(area?' · '+area:''); }
+  if(t==='tower_photos') return p.tower||'Block';
+  return 'Whole project';
+}
+window.cpaRvPreview=async function(id){
+  const order=CPA_RV.order||[], i=order.indexOf(id);
+  const p=(CPA_RV.shown||[]).find(x=>x.id===id); if(!p) return;
+  cpaRvPreviewClose();
+  const isVid=(p.file_type||'').indexOf('video')===0;
+  const mine=String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super;
+  const one=JSON.stringify([p.id]);
+  let acts;
+  if(mine) acts='<span class="cph-pvnote">Your upload — another approver has to review it.</span>';
+  else if(p.status==='pending'||p.status==='unpublished')
+    acts='<button class="cph-pvbtn ok" onclick="cpaRvPvDecide(\'publish\','+p.id+')"><i class="fa-solid fa-check"></i> Publish</button>'
+        +'<button class="cph-pvbtn no" onclick="cpaRvPvDecide(\'reject\','+p.id+')"><i class="fa-solid fa-xmark"></i> Reject</button>';
+  else if(p.status==='published')
+    acts='<button class="cph-pvbtn un" onclick="cpaRvPvDecide(\'unpublish\','+p.id+')"><i class="fa-solid fa-eye-slash"></i> Unpublish</button>'
+        +'<button class="cph-pvbtn no" onclick="cpaRvPvDecide(\'reject\','+p.id+')"><i class="fa-solid fa-xmark"></i> Reject</button>';
+  else acts='<span class="cph-pvnote">Rejected'+(p.review_note?': '+esc(p.review_note):'')+'</span>';
+  const box=document.createElement('div');
+  box.className='cph-box cph-pv'; box.id='cphPv';
+  box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
+      +'<span class="nm"><b>'+esc(cpaRvPlace(p))+'</b> · '+esc(fmtDate(p.taken_on))+' · '+esc(String(p.uploaded_by||'').split('@')[0])+'</span>'
+      +'<span class="cph-pvn">'+(i+1)+' of '+order.length+'</span>'
+      +'<button class="cph-boxx" title="Close (Esc)" onclick="cpaRvPreviewClose()">&times;</button></div>'
+    +(i>0?'<button class="cph-pvnav l" title="Previous (←)" onclick="cpaRvPreviewStep(-1)"><i class="fa-solid fa-chevron-left"></i></button>':'')
+    +(i<order.length-1?'<button class="cph-pvnav r" title="Next (→)" onclick="cpaRvPreviewStep(1)"><i class="fa-solid fa-chevron-right"></i></button>':'')
+    +'<div class="cph-pvstage"><div class="cph-pvload"><i class="fa-solid fa-spinner fa-spin"></i></div></div>'
+    +'<div class="cph-pvacts">'+acts+'</div>';
+  box.onclick=function(e){ if(e.target===box) cpaRvPreviewClose(); };
+  document.body.appendChild(box);
+  CPA_RV.pvId=p.id;
+  if(!window.__cphPvKeys){ window.__cphPvKeys=true;
+    document.addEventListener('keydown',function(e){
+      if(!$('cphPv')) return;
+      if(e.key==='Escape') cpaRvPreviewClose();
+      else if(e.key==='ArrowRight') cpaRvPreviewStep(1);
+      else if(e.key==='ArrowLeft') cpaRvPreviewStep(-1);
+    }); }
+  const url=p.status==='rejected'?null:await cphSignedUrl(p.storage_path);
+  const stage=box.querySelector('.cph-pvstage'); if(!stage||!box.isConnected) return;
+  stage.innerHTML=!url?'<div class="cph-pvload">File not available</div>'
+    :isVid?'<video src="'+url+'" controls autoplay playsinline></video>':'<img src="'+url+'" alt="">';
+};
+window.cpaRvPreviewClose=function(){ const b=$('cphPv'); if(b) b.remove(); };
+window.cpaRvPreviewStep=function(d){
+  const order=CPA_RV.order||[], i=order.indexOf(CPA_RV.pvId), j=i+d;
+  if(i<0||j<0||j>=order.length) return;
+  cpaRvPreview(order[j]);
+};
+// A decision from the preview: remember what comes next, so the preview reopens on it afterwards.
+window.cpaRvPvDecide=function(decision,id){
+  const order=CPA_RV.order||[], i=order.indexOf(id);
+  CPA_RV.pvNext=order[i+1]!=null?order[i+1]:(order[i-1]!=null?order[i-1]:null);
+  cpaRvPreviewClose();
+  cpaRvDecide(decision,[id],true);
+};
 const CPA_RV_REASONS=['Blurred or out of focus','Wrong flat or block','Too dark','Not a construction photo','Duplicate','Shows people or private information'];
-window.cpaRvDecide=function(decision,ids){
+window.cpaRvDecide=function(decision,ids,fromPreview){
+  if(!fromPreview) CPA_RV.pvNext=null;
   ids=(ids||[]).filter(Boolean);
   if(!ids.length) return;
   if(decision!=='reject'){ cpaRvDo(decision,ids,null); return; }
@@ -21116,7 +21246,10 @@ async function cpaRvDo(decision,ids,note){
   const verb={publish:'published',reject:'rejected',unpublish:'unpublished'}[decision];
   toast(done.length+' '+verb+(skipped?' · '+skipped+' skipped (your own uploads, or already changed)':''),skipped&&!done.length?'warn':'ok');
   CPA_RV.sel.clear();
-  cpaRvPaint();
+  const next=CPA_RV.pvNext; CPA_RV.pvNext=null;
+  await cpaRvPaint();
+  // Decided from the preview: carry on with the next photo, if it is still in the list.
+  if(next!=null&&(CPA_RV.order||[]).indexOf(next)!==-1) cpaRvPreview(next);
 }
 
 /* ---------- Tab 5: Inspection (checklist scan + dated photo/video update trail, per unit) ---------- */
