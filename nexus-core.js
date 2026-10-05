@@ -20275,8 +20275,9 @@ function cpaPhCss(){return `<style>
   .cph-reason{border:1px solid var(--line);background:#f8fafc;border-radius:16px;padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer}
   .cph-reason:hover{border-color:#1d4ed8;color:#1d4ed8}
   /* Review preview */
-  .cph-box.cph-pv{flex-direction:column;justify-content:flex-start;padding:62px 16px 14px}
-  .cph-pvstage{position:relative;flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center}
+  .cph-box.cph-pv{padding:0;background:#000}
+  .cph-pv .cph-boxbar{z-index:3;padding:14px 18px 30px;background:linear-gradient(rgba(0,0,0,.7),transparent)}
+  .cph-pvstage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
   .cph-pv .cph-pvstage img,.cph-pv .cph-pvstage video{position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;
     object-fit:contain;background:transparent;box-shadow:none;border-radius:0}
   .cph-pvload{color:#cbd5e1;font-size:26px}
@@ -20285,9 +20286,11 @@ function cpaPhCss(){return `<style>
     background:rgba(255,255,255,.16);color:#fff;font-size:18px;cursor:pointer}
   .cph-pvnav:hover{background:rgba(255,255,255,.3)}
   .cph-pvnav.l{left:18px}.cph-pvnav.r{right:18px}
-  .cph-pvacts{flex:none;display:flex;justify-content:center;gap:12px;flex-wrap:wrap;padding:0 16px;margin-bottom:12px}
+  .cph-pvacts{position:absolute;z-index:3;top:62px;left:0;right:0;display:flex;justify-content:center;gap:12px;flex-wrap:wrap;
+    padding:0 16px;pointer-events:none}
+  .cph-pvacts>*{pointer-events:auto}
   .cph-pvbtn{height:46px;padding:0 26px;border-radius:10px;border:0;font:inherit;font-size:15px;font-weight:700;cursor:pointer;
-    display:inline-flex;align-items:center;gap:9px;box-shadow:0 6px 18px rgba(0,0,0,.3)}
+    display:inline-flex;align-items:center;gap:9px;box-shadow:0 6px 20px rgba(0,0,0,.55)}
   .cph-pvbtn.ok{background:#16a34a;color:#fff}.cph-pvbtn.ok:hover{background:#15803d}
   .cph-pvbtn.no{background:#dc2626;color:#fff}.cph-pvbtn.no:hover{background:#b91c1c}
   .cph-pvbtn.un{background:#fff;color:#334155}
