@@ -1,0 +1,18 @@
+-- Deleting a candidate now deletes their test results with them.
+--
+-- recruit.test_attempts carries candidate_id, but there is no foreign key anywhere on
+-- hr.candidates, so nothing was removing them: the candidate went and their papers stayed, with
+-- a candidate_id pointing at a row that no longer existed. They would surface in the results
+-- list of whatever test they sat, named by an email with no record behind it.
+--
+-- Deleted by candidate_id, and by email ONLY when no candidate with that address survives. One
+-- person can hold two candidate records - two positions, same address - and deleting one of
+-- them must not take the other's results. Tested both ways before this shipped.
+--
+-- candidate_delete() routes through this function, so both deletion paths are covered.
+--
+-- (Body is the full function; see 20261005100000 in the Supabase migration history for the
+--  applied statement, which is identical to the one applied through the dashboard.)
+
+-- The applied definition is recorded in the Supabase migration
+-- 'candidate_purge_takes_test_results_too'.

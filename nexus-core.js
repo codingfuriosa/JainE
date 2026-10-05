@@ -12417,11 +12417,42 @@ window.rtShareSend=async function(id){
   const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
   /* The recipients are the rows ticked in the Interview Tracker list - an address AND the
      candidate it belongs to. Nothing typed can reach here, so there is no shape to validate. */
-  const picked=[...document.querySelectorAll('#rtEmailFields .rt-cand-chk:checked')].map(function(c){
+  let picked=[...document.querySelectorAll('#rtEmailFields .rt-cand-chk:checked')].map(function(c){
     const cid=parseInt(c.dataset.cand,10);
     return {email:String(c.value||'').trim().toLowerCase(), candidateId:isNaN(cid)?null:cid};
   }).filter(function(x){return x.email;});
   if(!picked.length){toast('Tick at least one candidate to send this to','err');return;}
+
+  /* NOBODY GETS THE SAME PAPER TWICE.
+
+     There was a rule already, and it answered a different question. It asks the Interview
+     Tracker "has this person been sent A test" - a single stage per row - so it cannot tell
+     "Pre Sales" from "Project Manager", and one candidate collected both on the same morning.
+     It also reads a list built when this window opened, so sending, then sending again a minute
+     later, offered the same people.
+
+     This asks the attempts table, about THIS test, at the moment of sending. It cannot go stale
+     and it cannot be confused by a second paper. A form-engine test has no attempts, so nothing
+     is skipped there and the behaviour is unchanged. */
+  let blocked=[];
+  try{
+    const {data:prev}=await sb.schema('recruit').from('test_attempts')
+      .select('candidate_email').eq('test_id',id).eq('is_preview',false)
+      .in('candidate_email',picked.map(function(x){return x.email;}));
+    const had=new Set((prev||[]).map(function(r){return String(r.candidate_email||'').trim().toLowerCase();}));
+    blocked=picked.filter(function(x){return had.has(x.email);});
+    picked=picked.filter(function(x){return !had.has(x.email);});
+  }catch(_e){ /* if the check cannot run, send rather than block - the old behaviour */ }
+  if(!picked.length){
+    toast(blocked.length===1
+      ? (blocked[0].email+' has already been sent this test')
+      : ('All '+blocked.length+' of those have already been sent this test'),'warn');
+    return;
+  }
+  if(blocked.length) toast('Skipping '+blocked.length+' who already had this test: '
+    +blocked.slice(0,3).map(function(x){return x.email;}).join(', ')
+    +(blocked.length>3?(' and '+(blocked.length-3)+' more'):''),'warn');
+
   const emails=picked.map(function(x){return x.email;});
   const subject=($('rtShareSubj')||{}).value?.trim()||`Check This ${rec.name} provided by JainGroup`;
   const body=($('rtShareBody')||{}).value?.trim()||'';
@@ -12511,8 +12542,6 @@ window.rtResultsNative=async function(testId,showPreviews){
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <i class="fa-solid fa-chart-simple" style="color:#0369a1;font-size:16px"></i>
       <span style="font-weight:700;font-size:15px">${esc(test.name)} — ${showPreviews?'My Previews':'Results'}</span>
-      <button class="btn btn-sm" style="font-size:12px" onclick="rtResultsNative(${testId},${showPreviews?'false':'true'})">
-        <i class="fa-solid fa-${showPreviews?'users':'eye'}"></i> ${showPreviews?'Show candidates':'Show previews'}</button>
       <button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--slate)" onclick="document.getElementById('rtPreviewPanel').style.display='none'">&times;</button>
     </div>
     <div id="rtResultsBody"><div class="loader"><div class="spin"></div></div></div>
