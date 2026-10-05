@@ -259,7 +259,7 @@ X.shell=async function(host,seg,tab,secs,dflt,renderers){
   catch(e){ console.error(e); if(!stale()) sec.innerHTML=errHtml(e); }
 };
 window.acxRender=function(host,seg){ return X.shell(host,seg||[],0,SECS,'vouchers',{structure:renderStructure,vouchers:renderVouchers.bind(null,{types:['receipt','payment'],title:'Receipts & payments',
-    hint:'Money received into, and paid out of, the bank and cash accounts. Payments to vendors are set against their bills, or kept on account.',news:['receipt','payment','vendor']}),
+    hint:'Money received into, and paid out of, the bank and cash accounts. Payments to vendors against their bills are made under Bills & on-account.',news:['receipt','payment']}),
   deposits:renderVouchers.bind(null,{types:['deposit','withdrawal'],title:'Deposits & withdrawals',hint:'Cash banked, and cash drawn from the bank.',news:['deposit','withdrawal']}),
   contra:renderVouchers.bind(null,{types:['contra'],title:'Contra entries',hint:'Money moved between bank and cash accounts (bank to bank, cash to bank ...).',news:['contra']}),
   journal:renderVouchers.bind(null,{types:['journal'],title:'Journal entries',hint:'Adjusting entries between ledgers that do not touch bank or cash — provisions, reclassifications, transfers between ledgers, corrections. Every journal must balance.',news:['journal']}),
@@ -599,7 +599,7 @@ async function vfLoadDocNo(){
   if(!VF||VF.dseq!==my) return; const e=$('vfDocNo'); if(e) e.value=(error||!data)?'Assigned when posted':data;
 }
 function vfRedrawLines(){ const e=$('vfLines'); if(e) e.innerHTML=vfLinesHtml(); vfPaintBal(); }
-const vfRpHint=()=>VF.type==='payment'?'Credit goes to the Cash / Bank account; the account heads are debited. To pay a vendor against its bills use “Pay a vendor”.':'Debit goes to the Cash / Bank account; the account heads are credited.';
+const vfRpHint=()=>VF.type==='payment'?'Credit goes to the Cash / Bank account; the account heads are debited. To pay a vendor against its bills use Bills & on-account.':'Debit goes to the Cash / Bank account; the account heads are credited.';
 function vfHeadRP(){
   const bus='<select id="vfBu">'+opt('','Company level (no business unit)',VF.bu)+coBus().filter(b=>b.active).map(b=>opt(b.id,b.name,VF.bu)).join('')+'</select>';
   const left=field('Business unit',bus)
@@ -616,7 +616,6 @@ function vfRpLower(){
   return '<div class="card" style="padding:14px 16px;margin-bottom:12px">'+strip+(VF.tab==='other'?vfRpOther():VF.tab==='dim'?vfRpDim():vfRpMain())+'</div>';
 }
 function vfRpMain(){
-  const isDr=VF.type==='payment';
   const rows=VF.lines.map((l,i)=>{
     const led=l.ledger?ledgerById(parseInt(l.ledger,10)):null;
     const subs=led&&led.sub_ledger_type?(S.subCache[led.id]||[]):[];
@@ -625,8 +624,7 @@ function vfRpMain(){
          +(l.sub==='__new'?'<input style="margin-top:4px" placeholder="New sub-ledger name" value="'+esc(l.subNew)+'" oninput="acxVfF('+i+',\'subNew\',this.value)">':''):'<span class="acx-dim">—</span>')+'</td>'
       +'<td style="min-width:140px"><input class="n" inputmode="decimal" value="'+esc(l.amt)+'" oninput="acxVfAmt('+i+',this.value)"><div class="acx-bal" id="vfLA_'+i+'"></div></td>'
       +'<td style="width:34px"><button class="btn btn-sm btn-ghost" title="Remove line" onclick="acxVfDel('+i+')"><i class="fa-solid fa-xmark"></i></button></td></tr>';}).join('');
-  return '<div class="acx-grid2" style="margin-bottom:10px">'+field('Dr / Cr','<select id="vfDrCr" onchange="acxVfDir()">'+opt('dr','Dr / Payment',isDr?'dr':'cr')+opt('cr','Cr / Receipt',isDr?'dr':'cr')+'</select>')+'<div></div></div>'
-    +'<div class="acx-lines-wrap"><table class="acx-lines" style="min-width:560px"><thead><tr><th>Account head</th><th>Sub-ledger</th><th>Amount</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+  return '<div class="acx-lines-wrap"><table class="acx-lines" style="min-width:560px"><thead><tr><th>Account head</th><th>Sub-ledger</th><th>Amount</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'
     +'<div class="acx-sticky-foot"><button class="btn btn-sm" onclick="acxVfAdd()"><i class="fa-solid fa-plus"></i> Add line</button><span class="acx-right"></span><div class="acx-tot"><span>Total</span><b id="vfTotal">'+money(VF.lines.reduce((s,l)=>s+num(l.amt),0))+'</b></div></div>';
 }
 function vfRpOther(){
@@ -651,13 +649,6 @@ window.acxVfTab=function(t){ vfSyncHead(); VF.tab=t; vfRedrawLines(); };
 window.acxVfBank=function(){ vfSyncHead(); vfPaintBal(); };
 window.acxVfDate=function(){
   vfSyncHead(); VF.bal={}; const fy=$('vfFy'); if(fy) fy.value=fyLabel(VF.date); vfLoadDocNo(); vfPaintBal();
-};
-window.acxVfDir=function(){
-  vfSyncHead(); const old=VF.type, nu=val('vfDrCr')==='dr'?'payment':'receipt'; if(nu===old) return;
-  if(VF.mode===VT[old].mode) VF.mode=VT[nu].mode;
-  VF.type=nu; const T=VT[nu];
-  const t=$('vfTitle'); if(t) t.textContent='New '+T.label.toLowerCase(); const b=$('vfPost'); if(b) b.textContent='Post '+T.label.toLowerCase(); const h=$('vfHint'); if(h) h.textContent=vfRpHint();
-  vfRedrawLines(); vfLoadDocNo();
 };
 function vfDrawRP(){
   const T=VT[VF.type];
