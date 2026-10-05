@@ -20320,9 +20320,6 @@ function cpaPhCss(){return `<style>
   .cph-no{color:#b91c1c}.cph-no:hover{background:#fef2f2;border-color:#fca5a5}
   .cph-un{color:#475569}.cph-un:hover{background:#f1f5f9}
   .cph-mine{font-size:11.5px;color:var(--slate);padding:8px 0}
-  .cph-reasons{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
-  .cph-reason{border:1px solid var(--line);background:#f8fafc;border-radius:16px;padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer}
-  .cph-reason:hover{border-color:#1d4ed8;color:#1d4ed8}
   /* Review preview */
   .cph-box.cph-pv{padding:0;background:#000}
   .cph-pv .cph-boxbar{z-index:3;padding:14px 18px 30px;background:linear-gradient(rgba(0,0,0,.7),transparent)}
@@ -20848,11 +20845,18 @@ window.cpaPhUpload=async function(){
      again, instead of being quietly dropped along with the ones that worked. */
   if(!failed.length) cpaPhClear(); else cpaPhRepaintZones();
   // One notification per batch to the approvers, not one per file.
-  let told=0;
+  let told=0, replaced=0;
   for(const t of Object.keys(newIds)){
     try{ const {data:n}=await sb.schema('cust').rpc('notify_media_uploaded',{p_table:t,p_ids:newIds[t]}); told=Math.max(told,Number(n||0)); }catch(_e){}
+    // What was rejected at the same place (flat and section, block, or project) is replaced by
+    // these: the rows are retired and their files removed from S3.
+    try{
+      const {data:old}=await sb.schema('cust').rpc('replace_rejected_media',{p_table:t,p_ids:newIds[t]});
+      replaced+=(old||[]).length;
+      await Promise.all((old||[]).map(r=>r.storage_path?s3Delete(r.storage_path).catch(()=>null):null));
+    }catch(_e){}
   }
-  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded — waiting for approval'+(told?'':'. No photo approver is set up yet (Control Panel).'),told?'ok':'warn');
+  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded — waiting for approval'+(replaced?' · replaces '+replaced+' rejected':'')+(told?'':'. No photo approver is set up yet (Control Panel).'),told?'ok':'warn');
   if(failed.length) toast(failed.length+' could not be uploaded: '+failed[0],'err');
   cpaPhList();
 };
@@ -20956,7 +20960,9 @@ function cphPump(){
   while(cphBusy<6&&cphQ.length){
     const img=cphQ.shift(); if(!img.isConnected) continue;
     cphBusy++;
-    cphSignedUrl(img.getAttribute('data-ph')).then(u=>{ if(u){ img.src=u; } else img.classList.add('cph-noimg'); })
+    // onerror: a file that is no longer in S3 (rejected before 5 Oct 2026 files were kept) shows
+    // as missing rather than as a broken image.
+    cphSignedUrl(img.getAttribute('data-ph')).then(u=>{ if(u){ img.onerror=()=>img.classList.add('cph-noimg'); img.src=u; } else img.classList.add('cph-noimg'); })
       .catch(()=>img.classList.add('cph-noimg')).finally(()=>{ cphBusy--; cphPump(); });
   }
 }
@@ -20974,9 +20980,7 @@ async function cpaPhRows(list,table,cols,vals,emptyMsg){
     const isVideo=(p.file_type||'').indexOf('video')===0;
     const open="s3OpenSigned('"+p.storage_path.replace(/'/g,"\\'")+"')";
     let thumb;
-    // A rejected file has been removed from S3 - there is nothing to show or open.
-    if(p.status==='rejected'){ thumb='<div class="cph-th vid" title="File removed when it was rejected"><i class="fa-solid fa-ban"></i></div>'; }
-    else if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
+    if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
     else thumb='<img class="cph-th" data-ph="'+esc(p.storage_path)+'" alt="" decoding="async" onclick="'+open+'" title="Open full size">';
     return '<tr><td>'+thumb+'</td>'
       +'<td class="cph-when">'+esc(fmtDate(p.taken_on))+'</td>'
@@ -20995,7 +20999,7 @@ function cpaMediaStatusTag(p){
   const who=p.reviewed_by&&p.status!=='pending'&&!/^already live/.test(p.reviewed_by)?' by '+String(p.reviewed_by).split('@')[0]:'';
   return '<span class="tag '+s[1]+'" style="white-space:nowrap" title="'+esc(s[0]+who+(p.reviewed_at?' · '+fmtDate(p.reviewed_at):''))+'">'
     +'<i class="fa-solid '+s[2]+'"></i> '+esc(s[0])+'</span>'
-    +(p.status==='rejected'&&p.review_note?'<div class="cph-why">'+esc(p.review_note)+'</div>':'');
+    +(p.status==='rejected'?'<div class="cph-why">'+(p.review_note?esc(p.review_note)+' · ':'')+'Upload a new one to replace it</div>':'');
 }
 window.cpaPhDelete=async function(table,id){
   if(!await confirmDialog('Remove this from the customer portal? The customer will no longer see it.',
@@ -21008,8 +21012,8 @@ window.cpaPhDelete=async function(table,id){
 /* ---------- Photos & Videos > Review: publish or reject before customers see anything ----------
    Split the way things are uploaded - Projects (whole-project photos), Blocks, Flats - and within
    that grouped by where they are, so a whole flat or block can be published in one go. Approve,
-   reject (a reason is required; the uploader is told it, and the file is removed from S3) and
-   unpublish all go through cust.review_media(), which also refuses an approver's own uploads. */
+   reject (one click; the file is kept, a rejected photo can still be published, and the
+   uploader's next photo for the same place replaces it) and unpublish all go through cust.review_media(), which also refuses an approver's own uploads. */
 /* Everything waiting, counted per project, per section and per block, so the pickers can say where
    the work is. (5 Oct 2026: Review opened on the first project alphabetically, Dream Ananta, while
    all 262 waiting photos were Dream Gurukul flats - the screen read "nothing waiting".) */
@@ -21123,7 +21127,7 @@ async function cpaRvList(projUnits){
     CPA_RV.order=keys.flatMap(k=>groups[k].items.map(p=>p.id));   // the preview's arrows follow this
     const cards=await Promise.all(list.map(p=>cpaRvCard(p,t)));
     const cardOf={}; list.forEach((p,i)=>{cardOf[p.id]=cards[i];});
-    const canPublish=CPA_RV.status==='pending'||CPA_RV.status==='unpublished';
+    const canPublish=CPA_RV.status!=='published';
     const me=String(state.email||'').toLowerCase();
     host.innerHTML=keys.map(k=>{
       const g=groups[k];
@@ -21131,7 +21135,7 @@ async function cpaRvList(projUnits){
       const ids=g.items.filter(p=>state.super||String(p.uploaded_by||'').toLowerCase()!==me).map(p=>p.id);
       return '<div class="cph-rvg"><div class="cph-rvgh"><b>'+esc(g.label)+'</b><span>'+g.items.length+' item'+(g.items.length===1?'':'s')+'</span>'
         +(canPublish&&ids.length?'<button class="btn btn-sm" onclick="cpaRvDecide(\'publish\','+JSON.stringify(ids)+')"><i class="fa-solid fa-check"></i> Publish all '+ids.length+'</button>':'')
-        +(ids.length&&CPA_RV.status!=='rejected'?'<button class="btn btn-sm" data-tick-ids="'+JSON.stringify(ids)+'" onclick="cpaRvTick('+JSON.stringify(ids)+')"><i class="fa-regular fa-square-check"></i> Tick all</button>':'')+'</div>'
+        +(ids.length?'<button class="btn btn-sm" data-tick-ids="'+JSON.stringify(ids)+'" onclick="cpaRvTick('+JSON.stringify(ids)+')"><i class="fa-regular fa-square-check"></i> Tick all</button>':'')+'</div>'
         +'<div class="cph-rvgrid">'+g.items.map(p=>cardOf[p.id]).join('')+'</div></div>';
     }).join('')
       +(list.length>=240?'<div class="cph-empty">Showing the newest 240. Publish or reject these to see the rest.</div>':'');
@@ -21145,8 +21149,7 @@ async function cpaRvCard(p,t){
   const open="s3OpenSigned('"+String(p.storage_path||'').replace(/'/g,"\\'")+"')";
   let media;
   const prev='cpaRvPreview('+p.id+')';
-  if(p.status==='rejected') media='<div class="cph-rvm vid"><i class="fa-solid fa-ban"></i><span>File removed</span></div>';
-  else if(isVideo) media='<div class="cph-rvm vid" onclick="'+prev+'" title="Play video"><i class="fa-solid fa-circle-play"></i><span>Video</span></div>';
+  if(isVideo) media='<div class="cph-rvm vid" onclick="'+prev+'" title="Play video"><i class="fa-solid fa-circle-play"></i><span>Video</span></div>';
   else media='<img class="cph-rvm" data-ph="'+esc(p.storage_path)+'" alt="" decoding="async" onclick="'+prev+'" title="Open larger, with Publish / Reject">';
   const area=t==='unit_photos'?((CPA_PH_AREAS.find(a=>a[0]===(p.area||'common'))||[0,p.area])[1]):'';
   const mine=String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super;
@@ -21156,12 +21159,14 @@ async function cpaRvCard(p,t){
   if(mine) acts='<span class="cph-mine" title="Another approver has to review your own uploads">Your upload</span>';
   else if(p.status==='pending'||p.status==='unpublished')
     acts='<button class="cph-ok" onclick="cpaRvDecide(\'publish\','+id+')" title="Publish - customers will see it"><i class="fa-solid fa-check"></i></button>'
-        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject - tell the uploader why"><i class="fa-solid fa-xmark"></i></button>';
+        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject - the uploader is asked for a better one"><i class="fa-solid fa-xmark"></i></button>';
   else if(p.status==='published')
     acts='<button class="cph-un" onclick="cpaRvDecide(\'unpublish\','+id+')" title="Unpublish - hide it from customers again"><i class="fa-solid fa-eye-slash"></i></button>'
-        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject and remove the file"><i class="fa-solid fa-xmark"></i></button>';
+        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject - hide it and ask the uploader for a better one"><i class="fa-solid fa-xmark"></i></button>';
+  else if(p.status==='rejected')
+    acts='<button class="cph-ok" onclick="cpaRvDecide(\'publish\','+id+')" title="Publish after all - customers will see it"><i class="fa-solid fa-check"></i></button>';
   return '<div class="cph-rvc'+(on?' cph-picked':'')+'" data-id="'+p.id+'">'
-    +(p.status!=='rejected'&&!mine?'<label class="cph-rvck"><input type="checkbox" '+(on?'checked':'')+' onchange="cpaRvToggle('+p.id+',this.checked)"></label>':'')
+    +(!mine?'<label class="cph-rvck"><input type="checkbox" '+(on?'checked':'')+' onchange="cpaRvToggle('+p.id+',this.checked)"></label>':'')
     +media
     +'<div class="cph-rvi"><div class="cph-rvd">'+esc(fmtDate(p.taken_on))+(area?' · '+esc(area):'')+'</div>'
       +'<div class="cph-rvu" title="'+esc(p.uploaded_by||'')+'">'+esc(String(p.uploaded_by||'').split('@')[0])+'</div>'
@@ -21174,7 +21179,7 @@ function cpaRvBar(){
   const n=CPA_RV.sel.size, st=CPA_RV.status;
   const ids=JSON.stringify([...CPA_RV.sel]);
   bar.innerHTML='<span class="cph-fcount">'+(n?n+' ticked':'Tick photos to act on several at once')+'</span>'
-    +(n?((st==='pending'||st==='unpublished')?'<button class="btn btn-sm btn-primary" onclick="cpaRvDecide(\'publish\','+ids+')"><i class="fa-solid fa-check"></i> Publish '+n+'</button>':'')
+    +(n?(st!=='published'?'<button class="btn btn-sm btn-primary" onclick="cpaRvDecide(\'publish\','+ids+')"><i class="fa-solid fa-check"></i> Publish '+n+'</button>':'')
       +(st==='published'?'<button class="btn btn-sm" onclick="cpaRvDecide(\'unpublish\','+ids+')"><i class="fa-solid fa-eye-slash"></i> Unpublish '+n+'</button>':'')
       +(st!=='rejected'?'<button class="btn btn-sm btn-danger" onclick="cpaRvDecide(\'reject\','+ids+')"><i class="fa-solid fa-xmark"></i> Reject '+n+'</button>':'')
       +'<button class="btn btn-sm" onclick="cpaRvClearSel()">Clear</button>':'');
@@ -21233,7 +21238,7 @@ window.cpaRvPreview=async function(id){
   else if(p.status==='published')
     acts='<button class="cph-pvbtn un" onclick="cpaRvPvDecide(\'unpublish\','+p.id+')"><i class="fa-solid fa-eye-slash"></i> Unpublish</button>'
         +'<button class="cph-pvbtn no" onclick="cpaRvPvDecide(\'reject\','+p.id+')"><i class="fa-solid fa-xmark"></i> Reject</button>';
-  else acts='<span class="cph-pvnote">Rejected'+(p.review_note?': '+esc(p.review_note):'')+'</span>';
+  else acts='<button class="cph-pvbtn ok" onclick="cpaRvPvDecide(\'publish\','+p.id+')"><i class="fa-solid fa-check"></i> Publish after all</button>';
   const box=document.createElement('div');
   box.className='cph-box cph-pv'; box.id='cphPv';
   box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
@@ -21254,7 +21259,7 @@ window.cpaRvPreview=async function(id){
       else if(e.key==='ArrowRight') cpaRvPreviewStep(1);
       else if(e.key==='ArrowLeft') cpaRvPreviewStep(-1);
     }); }
-  const url=p.status==='rejected'?null:await cphSignedUrl(p.storage_path);
+  const url=await cphSignedUrl(p.storage_path);
   const stage=box.querySelector('.cph-pvstage'); if(!stage||!box.isConnected) return;
   stage.innerHTML=!url?'<div class="cph-pvload">File not available</div>'
     :isVid?'<video src="'+url+'" controls autoplay playsinline></video>':'<img src="'+url+'" alt="">';
@@ -21272,34 +21277,18 @@ window.cpaRvPvDecide=function(decision,id){
   cpaRvPreviewClose();
   cpaRvDecide(decision,[id],true);
 };
-const CPA_RV_REASONS=['Blurred or out of focus','Wrong flat or block','Too dark','Not a construction photo','Duplicate','Shows people or private information'];
+// Reject is one click. Nothing is lost by it: the file stays, the photo can still be published
+// from 'Rejected', and the uploader's next photo for the same place replaces it.
 window.cpaRvDecide=function(decision,ids,fromPreview){
   if(!fromPreview) CPA_RV.pvNext=null;
   ids=(ids||[]).filter(Boolean);
   if(!ids.length) return;
-  if(decision!=='reject'){ cpaRvDo(decision,ids,null); return; }
-  const n=ids.length;
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-circle-xmark" style="color:var(--err)"></i> Reject '+n+' item'+(n===1?'':'s')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm"><p style="margin:0 0 8px;font-size:13px;color:var(--slate)">The uploader is told this reason in their notifications, and the file'+(n===1?' is':'s are')+' removed. Customers never see '+(n===1?'it':'them')+'.</p>'
-    +'<div class="cph-reasons">'+CPA_RV_REASONS.map(r=>'<button type="button" class="cph-reason" onclick="$(\'cphRvWhy\').value=this.textContent;$(\'cphRvWhy\').focus()">'+esc(r)+'</button>').join('')+'</div>'
-    +'<label>Reason</label><textarea id="cphRvWhy" rows="3" maxlength="300" placeholder="What should be fixed?"></textarea></div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
-    +'<button class="btn btn-danger-solid" id="cphRvGo" onclick="cpaRvRejectGo('+JSON.stringify(ids)+')"><i class="fa-solid fa-xmark"></i> Reject</button></div>');
-  setTimeout(()=>{const t=$('cphRvWhy'); if(t) t.focus();},60);
-};
-window.cpaRvRejectGo=async function(ids){
-  const why=($('cphRvWhy')||{}).value||'';
-  if(!why.trim()){ toast('Please give a reason','err'); return; }
-  const b=$('cphRvGo'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Rejecting…'; }
-  closeModal();
-  await cpaRvDo('reject',ids,why.trim());
+  cpaRvDo(decision,ids,null);
 };
 async function cpaRvDo(decision,ids,note){
   const {data,error}=await sb.schema('cust').rpc('review_media',{p_table:CPA_RV.sec,p_ids:ids,p_decision:decision,p_note:note});
   if(error){ toast(error.message,'err'); return; }
   const done=data||[];
-  // A rejected file is not kept: remove it from S3 (the row stays, so the uploader can see why).
-  if(decision==='reject') await Promise.all(done.map(r=>r.storage_path?s3Delete(r.storage_path).catch(()=>null):null));
   const skipped=ids.length-done.length;
   const verb={publish:'published',reject:'rejected',unpublish:'unpublished'}[decision];
   toast(done.length+' '+verb+(skipped?' · '+skipped+' skipped (your own uploads, or already changed)':''),skipped&&!done.length?'warn':'ok');
