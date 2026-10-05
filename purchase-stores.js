@@ -74,13 +74,15 @@ async function grnList(host){
     PU().from('grns').select('*').is('deleted_at',null).order('created_at',{ascending:false}),
     PU().from('grn_lines').select('grn_id,received_qty,accepted_qty,rejected_qty,returned_qty'),
     PU().from('pos').select('id,doc_no,vendor_id,project_id').is('deleted_at',null),
-    PU().from('vendors').select('id,code,legal_name,trade_name')
+    PU().from('vendors').select('id,code,legal_name,trade_name,ledger_parent_description')
   ]);
   const bad=[g,l,p,v].find(x=>x.error); if(bad) throw bad.error;
   G.rows=g.data||[]; G.lines=l.data||[]; G.pos=p.data||[]; G.vendors=v.data||[];
   grnRender(host);
 }
 const vName=id=>{const v=G.vendors.find(x=>x.id===id);return v?(v.trade_name||v.legal_name):'—';};
+// Parent Account Head: the supplier's ledger parent description (Vendors tab -> Ledger), as on the purchase order.
+const parentHead=id=>{const v=G.vendors.find(x=>x.id===id);return v&&v.ledger_parent_description?v.ledger_parent_description:'—';};
 const poNo=id=>{const p=G.pos.find(x=>x.id===id);return p?(p.doc_no||'PO'):'—';};
 function grnRender(host){
   host=host||$('pstBody'); if(!host) return;
@@ -89,11 +91,11 @@ function grnRender(host){
   const chips=[['all','All'],['draft','Draft'],['posted','Posted']].map(([k,l])=>'<span class="chip'+(G.filter===k?' active':'')+'" onclick="pusGrnFilter(\''+k+'\')">'+l+' ('+G.rows.filter(r=>k==='all'||r.status===k).length+')</span>').join('');
   const rows=list.map(r=>{ const ls=G.lines.filter(x=>x.grn_id===r.id); const rej=ls.reduce((s,x)=>s+ +x.rejected_qty,0);
     return '<tr style="cursor:pointer" onclick="pusGrnOpen('+r.id+')"><td><span class="pus-code">'+esc(r.doc_no||('Draft #'+r.id))+'</span></td><td>'+esc(poNo(r.po_id))+'</td><td><b>'+esc(vName(r.vendor_id))+'</b></td><td>'+esc(whName(r.warehouse_id))+'</td>'
-      +'<td style="white-space:nowrap">'+U().dmy(r.grn_date)+'</td><td>'+esc([r.challan_no&&'Challan '+r.challan_no,r.invoice_no&&'Inv '+r.invoice_no].filter(Boolean).join(' · '))+'</td><td class="pus-num">'+ls.length+(rej>0?' <span class="tag t-amber" title="Some quantity was rejected">rejected '+qty(rej)+'</span>':'')+'</td>'
+      +'<td style="white-space:nowrap">'+U().dmy(r.grn_date)+'</td><td>'+esc(r.invoice_no||(r.challan_no?'Challan '+r.challan_no:''))+'</td><td class="pus-num">'+ls.length+(rej>0?' <span class="tag t-amber" title="Some quantity was rejected">rejected '+qty(rej)+'</span>':'')+'</td>'
       +'<td>'+(r.status==='posted'?'<span class="tag t-green">Posted</span>':'<span class="tag t-gray">Draft</span>')+'</td></tr>'; }).join('');
   host.innerHTML=listShell('Goods receipts (GRN)','Record what arrived against an approved purchase order — accepted quantity goes into stock, rejected quantity does not. A delivery can be partial.',
-    'New GRN',U().can('grn.post')?'pusGrnNew()':'',[['GRN no'],['PO'],['Vendor'],['Warehouse'],['Date'],['Challan / invoice'],['Items',1],['Status']],rows,
-    '<div class="pus-top"><div class="pus-subs" style="margin:0">'+chips+'</div><input class="grow" id="pstQ" placeholder="Search by GRN, PO, vendor, challan or invoice" value="'+esc(G.q)+'" oninput="pusGrnSearch()"></div>');
+    'New GRN',U().can('grn.post')?'pusGrnNew()':'',[['GRN no'],['PO'],['Vendor'],['Warehouse'],['Date'],['Vendor doc no'],['Items',1],['Status']],rows,
+    '<div class="pus-top"><div class="pus-subs" style="margin:0">'+chips+'</div><input class="grow" id="pstQ" placeholder="Search by GRN, PO, vendor or vendor doc no" value="'+esc(G.q)+'" oninput="pusGrnSearch()"></div>');
 }
 window.pusGrnFilter=function(k){ G.filter=k; grnRender(); };
 window.pusGrnSearch=function(){ G.q=U().val('pstQ'); grnRender(); const e=$('pstQ'); if(e){ e.focus(); e.setSelectionRange(e.value.length,e.value.length); } };
@@ -118,12 +120,15 @@ window.pusGrnForm=async function(poId,gid){
   if(gid){ const [h,ls]=await Promise.all([PU().from('grns').select('*').eq('id',gid).single(),PU().from('grn_lines').select('*').eq('grn_id',gid)]); if(h.error){ toast('Could not open the receipt','err'); return; } g=h.data; poId=g.po_id; (ls.data||[]).forEach(x=>existing[x.po_line_id]=x); }
   const [po,pl]=await Promise.all([PU().from('pos').select('*').eq('id',poId).single(),PU().from('po_lines').select('*, items(code,name)').eq('po_id',poId).order('line_no')]);
   if(po.error||pl.error){ toast('Could not load the purchase order','err'); return; }
-  if(!G.vendors.length){ const v=await PU().from('vendors').select('id,code,legal_name,trade_name'); G.vendors=v.data||[]; }
+  if(!G.vendors.length){ const v=await PU().from('vendors').select('id,code,legal_name,trade_name,ledger_parent_description'); G.vendors=v.data||[]; }
   const tol=num(U().rule('grn.over_receipt_pct')), P=po.data;
   const lines=(pl.data||[]).map(l=>({pl:l,ex:existing[l.id]||null,bal:Math.max(0,+l.qty-+l.received_qty-+l.short_closed_qty),max:Math.max(0,+l.qty-+l.received_qty-+l.short_closed_qty)+ +l.qty*tol/100}))
     .filter(x=>x.ex||x.max>0);
   GF={id:gid||null,po:P,lines,tol};
-  const wh=U().S.warehouses.filter(w=>w.project_id===P.project_id&&w.active);
+  // The goods go into the order's delivery warehouse (a draft keeps the one it was saved with); there is no warehouse box on the form.
+  const whRow=U().S.warehouses.find(w=>w.id===(g?g.warehouse_id:P.warehouse_id)&&w.project_id===P.project_id&&w.active)||null;
+  GF.wh=whRow?whRow.id:null;
+  const docDate=g?g.grn_date:today();
   const rows=lines.map((x,i)=>'<tr class="pg-line" data-pl="'+x.pl.id+'"><td>'+(i+1)+'</td><td><b>'+esc(x.pl.items.name)+'</b><div style="font-size:12px;color:var(--slate)">'+esc(x.pl.items.code)+' · '+esc(U().uomCode(x.pl.uom_id))+'</div></td>'
     +'<td class="pus-num">'+qty(x.pl.qty)+'</td><td class="pus-num">'+qty(x.pl.received_qty-(x.ex&&g&&g.status==='posted'?x.ex.accepted_qty:0))+'</td><td class="pus-num"><b>'+qty(x.bal)+'</b>'+(tol>0?'<div style="font-size:11px;color:var(--slate)">up to '+qty(x.max)+'</div>':'')+'</td>'
     +'<td><input class="pg-rec" type="number" step="0.001" min="0" style="width:96px" value="'+(x.ex?esc(x.ex.received_qty):'')+'" oninput="pusGrnCalc(this)"></td>'
@@ -131,18 +136,24 @@ window.pusGrnForm=async function(poId,gid){
     +'<td class="pus-num pg-rej">'+(x.ex?qty(x.ex.rejected_qty):'')+'</td><td><input class="pg-why" style="width:150px" placeholder="reason if rejected" value="'+esc(x.ex&&x.ex.rejection_reason||'')+'"></td></tr>').join('');
   const t=k=>esc(g&&g[k]||'');
   openModal('<div class="modal-head"><h3>'+(g?'Edit goods receipt':'New goods receipt')+' — '+esc(P.doc_no||'PO')+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'
-    +'<div class="pus-hint" style="margin-top:0">Vendor: <b>'+esc(vName(P.vendor_id))+'</b>. Enter what physically arrived. <b>Accepted</b> goes into stock; the rest is <b>rejected</b> (give a reason) and does not.'+(tol>0?' Over-receipt up to '+tol+'% of the ordered quantity is allowed.':'')+'</div>'
+    +'<div class="pus-hint" style="margin-top:0">Vendor: <b>'+esc(vName(P.vendor_id))+'</b>. Enter what physically arrived. <b>Accepted</b> goes into stock; the rest is <b>rejected</b> (give a reason) and does not.'+(tol>0?' Over-receipt up to '+tol+'% of the ordered quantity is allowed.':'')
+      +(whRow?' Received into <b>'+esc(whRow.name)+'</b> (the order\'s delivery warehouse).':' <b style="color:#b91c1c">The order\'s delivery warehouse is not available - ask a Purchase administrator.</b>')+'</div>'
     +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>#</th><th>Item</th><th class="pus-num">Ordered</th><th class="pus-num">Received so far</th><th class="pus-num">Balance</th><th>Received now</th><th>Accepted</th><th class="pus-num">Rejected</th><th>Reason</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
     +'<div class="pi-form" style="margin-top:14px"><div>'
-      +field('Warehouse','<select id="pgWh">'+wh.map(w=>'<option value="'+w.id+'"'+((g?g.warehouse_id:P.warehouse_id)===w.id?' selected':'')+'>'+esc(w.name)+' ('+esc(w.code)+')</option>').join('')+'</select>')
-      +field('Receipt date','<input id="pgDate" type="date" max="'+today()+'" value="'+esc(g?g.grn_date:today())+'">')
-      +field('Challan no','<input id="pgCh" value="'+t('challan_no')+'">')+field('Challan date','<input id="pgChD" type="date" value="'+t('challan_date')+'">')
+      +ro('Business Unit',projName(P.project_id))
+      +field('Document Date','<input id="pgDate" type="date" max="'+today()+'" value="'+esc(docDate)+'" oninput="pusGrnFy()">')
+      +ro('Supplier',vName(P.vendor_id))
+      +field('Vendor Doc No','<input id="pgVdNo" maxlength="60" value="'+t('invoice_no')+'" placeholder="Vendor\'s challan / invoice no">')
     +'</div><div>'
-      +field('Invoice no','<input id="pgInv" value="'+t('invoice_no')+'">')+field('Invoice date','<input id="pgInvD" type="date" value="'+t('invoice_date')+'">')
-      +field('Vehicle no','<input id="pgVeh" value="'+t('vehicle_no')+'">')+field('Received by','<input id="pgBy" value="'+esc(g?g.received_by||'':uname(state.email))+'">')
-    +'</div></div>'+field('Remarks','<input id="pgRem" value="'+t('remarks')+'">')+'</div>'
+      +'<div class="pi-row"><div class="l">Financial Year</div><div class="v pi-ro" id="pgFy">'+esc(U().fy(docDate).text)+'</div></div>'
+      +ro('Document No',(g&&g.doc_no)||'Assigned on posting')
+      +ro('Parent Account Head',parentHead(P.vendor_id))
+      +field('Vendor Doc Date','<input id="pgVdDate" type="date" value="'+t('invoice_date')+'">')
+    +'</div></div></div>'
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn" onclick="pusGrnSave(false)">Save draft</button><button class="btn btn-primary" onclick="pusGrnSave(true)">Save & post to stock</button></div>','xl');
 };
+// The financial year follows the document date (1 April - 31 March).
+window.pusGrnFy=function(){ const e=$('pgFy'); if(e) e.textContent=U().fy(U().val('pgDate')||today()).text; };
 window.pusGrnCalc=function(inp){
   const tr=inp.closest('tr'), rec=num(tr.querySelector('.pg-rec').value);
   const accEl=tr.querySelector('.pg-acc');
@@ -160,7 +171,10 @@ window.pusGrnSave=async function(post){
     lines.push({po_line_id:parseInt(tr.dataset.pl,10),received_qty:rec,accepted_qty:acc,rejection_reason:why||null});
   }
   if(!lines.length){ toast('Enter the quantity received for at least one item','err'); return; }
-  const head={warehouse_id:parseInt(v('pgWh'),10),grn_date:v('pgDate')||today(),challan_no:v('pgCh'),challan_date:v('pgChD')||null,invoice_no:v('pgInv'),invoice_date:v('pgInvD')||null,vehicle_no:v('pgVeh'),received_by:v('pgBy'),remarks:v('pgRem')};
+  if(!GF.wh){ toast('The order\'s delivery warehouse is not available - ask a Purchase administrator','err'); return; }
+  const docDate=v('pgDate')||today(); if(docDate>today()){ toast('The document date cannot be in the future','err'); return; }
+  // Vendor Doc No / Date are kept in the receipt's invoice no / date (bill booking reads them from there).
+  const head={warehouse_id:GF.wh,grn_date:docDate,invoice_no:v('pgVdNo'),invoice_date:v('pgVdDate')||null};
   const {data:id,error}=await U().PU().rpc('grn_save',{p_id:GF.id,p_po_id:GF.po.id,p_head:head,p_lines:lines});
   if(U().fail(error,'Could not save')) return;
   if(post){
@@ -176,7 +190,7 @@ window.pusGrnOpen=async function(id,tab){
   const PU=U().PU;
   const [h,ls,lg]=await Promise.all([PU().from('grns').select('*').eq('id',id).maybeSingle(),PU().from('grn_lines').select('*, items(code,name)').eq('grn_id',id).order('line_no'),loadLog('grn',id)]);
   if(h.error||ls.error||!h.data||h.data.deleted_at){ toast('Could not open the goods receipt','err'); return; }
-  if(!G.vendors.length||!G.pos.length){ const [v,p]=await Promise.all([PU().from('vendors').select('id,code,legal_name,trade_name'),PU().from('pos').select('id,doc_no,vendor_id,project_id')]); G.vendors=v.data||[]; G.pos=p.data||[]; }
+  if(!G.vendors.length||!G.pos.length){ const [v,p]=await Promise.all([PU().from('vendors').select('id,code,legal_name,trade_name,ledger_parent_description'),PU().from('pos').select('id,doc_no,vendor_id,project_id')]); G.vendors=v.data||[]; G.pos=p.data||[]; }
   const g=h.data; GC={g,lines:ls.data||[],log:lg};
   const can=U().can('grn.post'), mine=g.raised_by.toLowerCase()===me()||state.super, btn=[];
   if(g.status==='draft'&&can&&mine) btn.push('<button class="btn" onclick="pusGrnForm(null,'+id+')"><i class="fa-solid fa-pen"></i> Edit</button>','<button class="btn btn-primary" onclick="pusGrnPost('+id+')"><i class="fa-solid fa-boxes-packing"></i> Post to stock</button>');
@@ -190,9 +204,8 @@ window.pusGrnOpen=async function(id,tab){
 window.pstGGo=function(t){
   document.querySelectorAll('#pstG a').forEach(a=>a.classList.toggle('on',a.dataset.t===t));
   const {g,lines,log}=GC, b=$('pstGBody'); if(!b) return;
-  if(t==='main') b.innerHTML='<div class="pi-form"><div>'+ro('Purchase order',poNo(g.po_id))+ro('Vendor',vName(g.vendor_id))+ro('Warehouse',whName(g.warehouse_id))+ro('Receipt date',U().dmy(g.grn_date))+ro('Received by',g.received_by||'')+'</div><div>'
-      +ro('Challan no',(g.challan_no||'')+(g.challan_date?'  ·  '+U().dmy(g.challan_date):''))+ro('Invoice no',(g.invoice_no||'')+(g.invoice_date?'  ·  '+U().dmy(g.invoice_date):''))+ro('Vehicle no',g.vehicle_no||'')+ro('Entered by',uname(g.raised_by))+'</div></div>'
-      +'<div class="pi-row"><div class="l">Remarks</div><div class="v pi-ro" style="min-height:44px;white-space:pre-wrap">'+(g.remarks?esc(g.remarks):'&nbsp;')+'</div></div>';
+  if(t==='main') b.innerHTML='<div class="pi-form"><div>'+ro('Business Unit',projName(g.project_id))+ro('Document Date',U().dmy(g.grn_date))+ro('Supplier',vName(g.vendor_id))+ro('Vendor Doc No',g.invoice_no||g.challan_no||'')+ro('Purchase order',poNo(g.po_id))+'</div><div>'
+      +ro('Financial Year',U().fy(g.grn_date).text)+ro('Document No',g.doc_no||'Assigned on posting')+ro('Parent Account Head',parentHead(g.vendor_id))+ro('Vendor Doc Date',g.invoice_date?U().dmy(g.invoice_date):'')+ro('Warehouse',whName(g.warehouse_id))+ro('Entered by',uname(g.raised_by))+'</div></div>';
   else if(t==='items') b.innerHTML='<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>#</th><th>Item</th><th>Unit</th><th class="pus-num">Received</th><th class="pus-num">Accepted</th><th class="pus-num">Rejected</th><th>Reason</th><th class="pus-num">Rate</th><th class="pus-num">Into stock</th><th class="pus-num">Returned</th></tr></thead><tbody>'
       +lines.map((l,i)=>'<tr><td>'+(i+1)+'</td><td><span class="pus-code">'+esc(l.items.code)+'</span> <b>'+esc(l.items.name)+'</b></td><td>'+esc(U().uomCode(l.uom_id))+'</td><td class="pus-num">'+qty(l.received_qty)+'</td><td class="pus-num"><b>'+qty(l.accepted_qty)+'</b></td><td class="pus-num">'+(+l.rejected_qty?qty(l.rejected_qty):'—')+'</td><td>'+esc(l.rejection_reason||'')+'</td><td class="pus-num">'+money(l.rate)+'</td><td class="pus-num">'+(l.stock_qty!=null?qty(l.stock_qty)+' '+esc(stockUnit(l.item_id)):'—')+'</td><td class="pus-num">'+(+l.returned_qty?qty(l.returned_qty):'—')+'</td></tr>').join('')+'</tbody></table></div></div>';
   else b.innerHTML=logRows(log);
