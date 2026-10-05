@@ -23375,6 +23375,18 @@ async function custTabProgress(unit){
       +(total?'<span class="cpg-chip"><i class="fa-solid fa-images"></i>'+[pics?pics+' photo'+(pics===1?'':'s'):'',vids?vids+' video'+(vids===1?'':'s'):''].filter(Boolean).join(' · ')+'</span>':'')
     +'</div></div>';
 
+  /* Set expectations before anyone opens a photo: these are working site pictures, taken by the site
+     team on a phone amid dust, poor light and scaffolding - some are not sharp - and they show work in
+     progress, not the finished flat. Asked for on 5 Oct 2026, once flat photos began to be published. */
+  if(total) out+='<div style="display:flex;gap:12px;align-items:flex-start;margin:0 0 18px;padding:14px 16px;border-radius:12px;'
+    +'background:#fffbeb;border:1px solid #f0dfa8;color:#78350f;font-size:13.5px;line-height:1.6">'
+    +'<i class="fa-solid fa-circle-info" style="color:#d97706;font-size:17px;margin-top:2px"></i>'
+    +'<div><b style="color:#92400e">About these photos</b><br>'
+    +'These photos and videos are taken on site by our construction team while work is going on. Because of dust, '
+    +'lighting and site conditions, some may look unclear or slightly blurred. They show work in progress, not the '
+    +'finished home — colours, finishes and fittings may look different at handover. If you have any question about '
+    +'your flat, please contact your relationship manager.</div></div>';
+
   // A section with nothing in it is not shown at all - no "No photos yet" boxes. Only when there is
   // nothing anywhere does the customer get one short line, so the tab is never blank.
   if(blockIdx.length) out+='<div class="cpg-sec"><div class="cpg-sh"><div class="cpg-ic"><i class="fa-solid fa-building"></i></div>'
