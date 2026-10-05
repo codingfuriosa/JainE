@@ -591,7 +591,7 @@ window.pusAdminSave=async function(){
 window.pusAdminRemove=async function(email){
   const me=String(state.email||'').toLowerCase();
   if(S.admins.length<2){ toast('There must always be at least one administrator','err'); return; }
-  if(!await confirmDialog('Remove '+userName(email)+' as an administrator?'+(String(email).toLowerCase()===me?' You will lose access to this page.':''))) return;
+  if(!await confirmDialog('Remove '+userName(email)+' as an administrator?'+(String(email).toLowerCase()===me?' You will lose access to this page.':''),{title:'Remove administrator',okLabel:'Remove'})) return;
   const {error}=await PU().from('module_admins').delete().eq('email',email);
   if(fail(error,'Could not remove')) return;
   ADMIN_CACHE=null; toast('Removed','ok'); route();
@@ -813,7 +813,7 @@ window.pusVStatus=async function(id,status){
     if(r.pan&&!have.has('pan')) miss.push(DOC_LBL.pan);
     if(r.gstin&&!have.has('gst_certificate')) miss.push(DOC_LBL.gst_certificate);
     if(miss.length&&docRule==='block'){ toast('This vendor cannot be approved yet - missing: '+miss.join(', ')+'. Upload them first (Docs button).','err'); return; }
-    if(miss.length&&!await confirmDialog('No '+miss.join(', ')+' on file for this vendor. Approve anyway?')) return;
+    if(miss.length&&!await confirmDialog('No '+miss.join(', ')+' on file for this vendor. Approve anyway?',{title:'Approve vendor',okLabel:'Approve anyway',danger:false})) return;
   }
   if(!needNote){ pusVStatusSave(id,status,false); return; }
   openModal('<div class="modal-head"><h3>'+verb+' '+esc(r.trade_name||r.legal_name)+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm"><label>Reason</label><textarea id="pvNote" rows="3" placeholder="Why?"></textarea></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="pusVStatusSave('+id+',\''+status+'\',true)">'+verb+'</button></div>');
@@ -860,7 +860,7 @@ window.pusDocUpload=async function(vid){
 window.pusDocOpen=function(id){ const d=V.docs.find(x=>x.id===id); if(d) s3OpenSigned(d.storage_path); };
 window.pusDocDelete=async function(id,vid){
   const d=V.docs.find(x=>x.id===id);
-  if(!await confirmDialog('Remove '+(DOC_LBL[d.doc_type]||'document')+' '+d.file_name+'?')) return;
+  if(!await confirmDialog('Remove '+(DOC_LBL[d.doc_type]||'document')+' '+d.file_name+'?',{title:'Remove document',okLabel:'Remove'})) return;
   const {error}=await PU().from('vendor_documents').update(soft()).eq('id',id);
   if(fail(error,'Delete failed')) return;
   V.docs=V.docs.filter(x=>x.id!==id); $('pvdBody').innerHTML=docsBody(vid); vRender(); toast('Removed','ok');
@@ -914,7 +914,7 @@ window.pusInviteSend=async function(id){
 };
 window.pusInviteCancel=async function(id){
   const i=V.invites.find(x=>x.id===id);
-  if(!await confirmDialog('Cancel the invitation to '+i.email+'? The link will stop working.')) return;
+  if(!await confirmDialog('Cancel the invitation to '+i.email+'? The link will stop working.',{title:'Cancel invitation',okLabel:'Yes, cancel it'})) return;
   const {error}=await PU().from('vendor_invites').update({revoked_at:new Date().toISOString(),revoked_by:state.email}).eq('id',id);
   if(fail(error,'Could not cancel')) return;
   i.revoked_at=new Date().toISOString(); vRender(); toast('Invitation cancelled','ok');

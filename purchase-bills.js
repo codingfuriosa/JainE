@@ -246,7 +246,7 @@ function bfRender(){
     +field('GST','<select id="bfGstType" onchange="pusBfCalc()"><option value="intra"'+(h.gst_type!=='inter'?' selected':'')+'>Within the state — CGST + SGST</option><option value="inter"'+(h.gst_type==='inter'?' selected':'')+'>Inter-state — IGST</option></select>');
   const head=BF.mode==='direct'?'<th>#</th><th>Description</th><th>HSN / SAC *</th><th>Unit</th><th>Qty</th><th>Rate (₹)</th><th>GST %</th><th class="pus-num">Line total</th><th></th>'
     :'<th></th><th>Item</th><th>'+(BF.type==='goods'?'HSN':'HSN / SAC')+'</th><th>Unit</th><th class="pus-num">Can bill</th><th>Qty billed</th><th>Rate (₹)</th><th>GST %</th><th class="pus-num">Line total</th>';
-  openModal('<div class="modal-head"><h3>'+(BF.id?'Edit':'New')+' '+(BF.type==='goods'?'goods':BF.type==='non_store'?'non-store purchase':'service')+' bill</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:74vh;overflow:auto">'
+  openModal('<div class="modal-head"><h3>'+(BF.id?'Edit':'New')+' '+(BF.type==='goods'?'goods':BF.type==='non_store'?'non-store purchase':'service')+' bill</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'
     +(BF.mode==='goods'?'<div class="pus-hint" style="margin-top:0">Tick the lines this invoice covers. The most you can bill on a line is what was accepted, less returns and anything already billed. The agreed rate is the rate on the purchase order.</div>':BF.mode==='order'?'<div class="pus-hint" style="margin-top:0">Tick the lines this invoice covers. The most you can bill on a line is what is left of the order.</div>':'<div class="pus-hint" style="margin-top:0">A direct service bill has no work order. Describe each service and give its HSN / SAC code.</div>')
     +'<div class="pi-form"><div>'+left+'</div><div>'+right+'</div></div>'
     +'<div class="card" style="padding:0;margin-top:8px"><div style="overflow-x:auto"><table class="tbl" id="bfTbl"><thead><tr>'+head+'</tr></thead><tbody id="bfBody">'+bfRowsHtml()+'</tbody></table></div></div>'
@@ -347,7 +347,7 @@ window.pusBillOpen=async function(id,tab){
   if(b.status==='booked'&&U().can(perm)){ btn.push('<button class="btn" onclick="pusDnNew('+id+')"><i class="fa-solid fa-file-circle-minus"></i> Raise debit note…</button>'); if(b.accounts_status!=='posted') left.push('<button class="btn btn-ghost" onclick="pusBillCancel('+id+')"><i class="fa-solid fa-ban"></i> Cancel bill</button>'); }
   const issued=CB.dns.filter(x=>x.status==='issued').length;
   openModal('<div class="modal-head"><h3>Bill '+esc(billNo(b))+' '+billTag(b)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="max-height:74vh;overflow:auto"><div class="pi-tabs" id="pabTabs">'+[['main','Main Info'],['items','Items'],['dn','Debit notes'+(issued?' ('+issued+')':'')],['history','Change History']].map(t=>'<a data-t="'+t[0]+'" onclick="pusBillTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="pabBody"></div></div>'
+    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto"><div class="pi-tabs" id="pabTabs">'+[['main','Main Info'],['items','Items'],['dn','Debit notes'+(issued?' ('+issued+')':'')],['history','Change History']].map(t=>'<a data-t="'+t[0]+'" onclick="pusBillTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="pabBody"></div></div>'
     +'<div class="modal-foot"><div style="margin-right:auto;display:flex;gap:6px">'+left.join('')+'</div><button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
   window.pusBillTab(tab||'main');
 };
@@ -533,9 +533,10 @@ window.pusEoForm=async function(id){
     o=h.data; rows=(l.data||[]).map(x=>({description:x.description,hsn_sac:x.hsn_sac,qty:+x.qty,unit:x.unit,rate:+x.rate,gst:+x.gst_rate}));
   }
   closeModal();
-  EF={id:id||null,kind:o?o.kind:'non_store',rows,o};
+  EF={id:id||null,kind:o?o.kind:'non_store',rows,o,pending:!!(o&&o.status==='pending_approval')};
   const f=EF.o||{}, ven=efVendors(EF.kind), heads=B.heads.filter(x=>x.active||x.id===f.expense_head_id);
-  openModal('<div class="modal-head"><h3>'+(id?'Edit '+esc(eoNo(o)):'New non-store purchase / service order')+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:74vh;overflow:auto">'
+  const pendingNote='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:11px 14px;margin-bottom:12px;font-size:13.5px"><b style="color:#b45309"><i class="fa-solid fa-hourglass-half"></i> Awaiting approval</b><div style="margin-top:4px">Saving your changes pulls this order back and sends it to the first approver again. Approvals given so far no longer count. Press Cancel to leave it as it is.</div></div>';
+  openModal('<div class="modal-head"><h3>'+(id?'Edit '+esc(eoNo(o)):'New non-store purchase / service order')+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'
     +'<div class="pus-hint" style="margin-top:0">Non-store purchases are expenses that do not go into stores. A service work order is for a service bought from a vendor (not a contractor — that is the Engineering module). HSN / SAC is mandatory on every line.</div>'
     +'<div class="pi-form"><div>'
       +(id?ro('Kind',KIND[o.kind])+ro('Project',projName(o.project_id)):field('Kind','<select id="efKind" onchange="pusEfKind()"><option value="non_store">Non-store purchase</option><option value="service">Service work order</option></select>')+field('Project','<select id="efProj"><option value="">Choose…</option>'+U().S.projects.map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join('')+'</select>'))
@@ -607,7 +608,7 @@ window.pusEoOpen=async function(id,tab){
     if(o.status==='draft'&&mineRaised) left.push('<button class="btn btn-ghost" onclick="pusEoDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete draft</button>');
   }
   openModal('<div class="modal-head"><h3>'+esc(KIND[o.kind])+' '+esc(eoNo(o))+' '+oTag(o)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="max-height:74vh;overflow:auto"><div class="pi-tabs" id="paoTabs">'+[['main','Main Info'],['items','Items'],['bills','Bills ('+CE.bills.length+')'],['approval','Approval History'],['history','Change History']].map(t=>'<a data-t="'+t[0]+'" onclick="pusEoTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="paoBody"></div></div>'
+    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto"><div class="pi-tabs" id="paoTabs">'+[['main','Main Info'],['items','Items'],['bills','Bills ('+CE.bills.length+')'],['approval','Approval History'],['history','Change History']].map(t=>'<a data-t="'+t[0]+'" onclick="pusEoTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="paoBody"></div></div>'
     +'<div class="modal-foot"><div style="margin-right:auto;display:flex;gap:6px">'+left.join('')+'</div><button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
   window.pusEoTab(tab||'main');
 };
