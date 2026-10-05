@@ -20203,6 +20203,11 @@ function cpaTowersForProject(units,projectId){return [...new Set(units.filter(u=
 const CPA_PH_AREAS=[['common','Common area','fa-couch'],
                     ['bathroom','Bathroom','fa-bath'],
                     ['kitchen','Kitchen','fa-kitchen-set']];
+/* The sections offered when UPLOADING for a flat. The site supervisor (the 'Photos & Videos only'
+   tile) uploads Common area and Kitchen only - Bathroom was taken off his screen on 5 Oct 2026.
+   Everyone else still has all three, and bathroom photos already uploaded are untouched: the
+   lists, Review and the customer's view still know the section. */
+function cpaPhUploadAreas(){ return cpaPhotosOnly()?CPA_PH_AREAS.filter(a=>a[0]!=='bathroom'):CPA_PH_AREAS; }
 // level -> which of the three pickers it needs. Flat needs all three; the project level needs
 // only the project, so the pickers it does not use are hidden rather than left there to be
 // filled in pointlessly.
@@ -20520,14 +20525,14 @@ async function cpaPhPaint(projects,units){
           +'<input type="date" class="cph-in" id="cphDate" value="'+today+'"></div>'
       +'</div>'
       +(lvl==='unit'
-        ? '<div class="cph-zones">'+CPA_PH_AREAS.map(a=>cpaPhZone(a[0],a[1],a[2])).join('')+'</div>'
+        ? '<div class="cph-zones">'+cpaPhUploadAreas().map(a=>cpaPhZone(a[0],a[1],a[2])).join('')+'</div>'
         : '<div class="cph-zones" style="grid-template-columns:1fr">'+cpaPhZone('all','Photos or videos','fa-images')+'</div>')
       +'<div class="cph-staged" id="cphStaged" style="display:none"></div>'
       +'<div class="cph-acts">'
         +'<button class="btn btn-primary" id="cphGo" onclick="cpaPhUpload()">'
           +'<i class="fa-solid fa-cloud-arrow-up"></i> Upload</button>'
         +'<button class="btn" id="cphClear" onclick="cpaPhClear()">Clear all</button>'
-        +(lvl==='unit'?'<span style="font-size:11.5px;color:var(--slate)">Any one, two or all three \u2014 they go up together.</span>':'')
+        +(lvl==='unit'?'<span style="font-size:11.5px;color:var(--slate)">'+(cpaPhUploadAreas().length===2?'Either or both':'Any one, two or all three')+' \u2014 they go up together.</span>':'')
       +'</div>'
     +'</div>'
 
@@ -20714,7 +20719,7 @@ function cpaPhRepaintZones(){
 }
 // The two buttons that act on what has been chosen sit together and know how much there is.
 function cpaPhSyncActions(){
-  const keys=CPA_PH.level==='unit'?CPA_PH_AREAS.map(a=>a[0]):['all'];
+  const keys=CPA_PH.level==='unit'?cpaPhUploadAreas().map(a=>a[0]):['all'];
   const total=keys.reduce((t,k)=>t+((CPA_PH.files[k]||[]).length),0);
   const go=$('cphGo'), clr=$('cphClear');
   if(go){
@@ -20750,7 +20755,7 @@ window.cpaPhUpload=async function(){
   if(lvl==='unit'){
     const unitId=Number(CPA_PH.unit);
     if(!unitId){ toast('Choose a flat first','err'); return; }
-    CPA_PH_AREAS.forEach(a=>(CPA_PH.files[a[0]]||[]).forEach(f=>jobs.push({f,area:a[0]})));
+    cpaPhUploadAreas().forEach(a=>(CPA_PH.files[a[0]]||[]).forEach(f=>jobs.push({f,area:a[0]})));
   } else {
     (CPA_PH.files.all||[]).forEach(f=>jobs.push({f,area:null}));
   }
