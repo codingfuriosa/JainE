@@ -823,17 +823,53 @@ function renderShell(){
     // dropdown appears (or with it dismissed) still lands on the lead instead of a text search for it.
     if(/^\d+$/.test(q)){
       try{
-        const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:[Number(q)]});
-        if(error)throw error;
-        const hit=(data||[])[0];
-        if(hit&&hit.lead){navTo('transcription/lead/'+hit.lead.lead_id);return;}
+        const route=await trcResolveLeadRoute(q);
+        if(route){navTo(route);return;}
+        if(PAGE==='transcription'){_gsDrop.innerHTML='<div style="padding:12px 14px;color:var(--slate);font-size:13px;text-align:center">No lead found with ID '+esc(q)+'</div>';_gsDrop.style.display='block';return;}
       }catch(e){}
     }
     navTo('documents/search/'+encodeURIComponent(q));
   });
+  /* On the Transcription page the search box doubles as a lead-id jump: a bare number opens that
+     lead's detail page as soon as the lookup finds it (no Enter needed), changing the number opens
+     the new lead, and clearing the box returns to the default Transcription list. Only a lead
+     detail route is left on clear - a tab the user chose themselves is not theirs to be pulled off.
+     _gsSeq discards a lookup that finished after the box had already changed again. */
+  let _gsSeq=0;
+  const _trLeadRoute=()=>/^#\/(lead|auto|r\d+)\/./i.test(location.hash);
+  /* Leaving a lead page by any other route (its Back button, the browser's back, a tab) empties the
+     box: the id in it described the page that is now gone. */
+  window.addEventListener('hashchange',()=>{
+    if(PAGE!=='transcription'||_trLeadRoute()||!_gs.value)return;
+    clearTimeout(_gsTimer);_gsSeq++;_gs.value='';_gsDrop.style.display='none';
+  });
   _gs.addEventListener('input',e=>{
-    clearTimeout(_gsTimer);const q=e.target.value.trim();
-    if(!q){_gsDrop.style.display='none';return;}
+    clearTimeout(_gsTimer);const q=e.target.value.trim();const seq=++_gsSeq;
+    if(!q){
+      _gsDrop.style.display='none';
+      if(PAGE==='transcription'&&_trLeadRoute())navTo('transcription');
+      return;
+    }
+    if(PAGE==='transcription'&&/^\d+$/.test(q)){
+      _gsTimer=setTimeout(async()=>{
+        try{
+          const route=await trcResolveLeadRoute(q);
+          if(seq!==_gsSeq)return;
+          if(route){
+            _gsDrop.style.display='none';
+            if(location.hash!=='#/'+route.split('/').slice(1).join('/'))navTo(route);
+            return;
+          }
+          _gsDrop.innerHTML='<div style="padding:12px 14px;color:var(--slate);font-size:13px;text-align:center">No lead found with ID '+esc(q)+'</div>';
+          _gsDrop.style.display='block';
+          return;
+        }catch(err){
+          if(seq===_gsSeq){_gsDrop.innerHTML='<div style="padding:12px 14px;color:var(--err);font-size:13px;text-align:center">Could not search leads: '+esc((err&&err.message)||String(err))+'</div>';_gsDrop.style.display='block';}
+          return;
+        }
+      },350);
+      return;
+    }
     _gsTimer=setTimeout(()=>gsLiveSearch(q),250);
   });
   document.addEventListener('click',e=>{if(!_gs.parentElement.contains(e.target))_gsDrop.style.display='none';});
@@ -846,6 +882,21 @@ function renderShell(){
 async function doSignOut(){ try{ await sb.auth.signOut(); }catch(e){} try{ Object.keys(localStorage).forEach(function(k){ if(/sb-.*-auth-token/.test(k)||k.indexOf('supabase')>=0) localStorage.removeItem(k); }); }catch(e){} try{ sessionStorage.removeItem(BOOT_CACHE_KEY); }catch(e){} location.replace(LOGIN_PAGE); }
 window.doSignOut=doSignOut;
 
+/* Where a typed lead id lives. crm_lead_detail answers every id asked for, so an unknown id still
+   comes back as a row with a null lead and no follow-ups - only a lead row or a history counts as
+   found. A lead can also exist ONLY as a transcribed call (acc.transcriptions, e.g. the lost-call sync
+   saw it before the CRM export did); that call's own page is the best thing to open for it. Returns
+   a navTo path, or null when the id is nowhere in Supabase. Throws on a failed query. */
+async function trcResolveLeadRoute(q){
+  const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:[Number(q)]});
+  if(error)throw error;
+  const hit=(data||[])[0];
+  if(hit&&(hit.lead||(Array.isArray(hit.followups)&&hit.followups.length)))return 'transcription/lead/'+Number(q);
+  const {data:tr,error:e2}=await sb.schema('acc').from('transcriptions').select('id').eq('lead_id',Number(q)).is('deleted_at',null).order('created_at',{ascending:false}).limit(1);
+  if(e2)throw e2;
+  if(tr&&tr.length)return 'transcription/auto/'+tr[0].id;
+  return null;
+}
 // Universal live document search (top nav)
 async function gsLiveSearch(q){
   const drop=document.getElementById('gsDrop');if(!drop)return;
