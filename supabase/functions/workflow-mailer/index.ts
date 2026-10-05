@@ -132,7 +132,7 @@ Deno.serve(async (req)=>{
     let n:any=null;
     try{ const r=await fetch(SB+'/rest/v1/notifications?id=eq.'+id+'&select=id,recipient,kind,title,body,created_at',{headers:AP}); const rows=await r.json(); n=Array.isArray(rows)?rows[0]:null; }catch(_){}
     if(!n) return j({error:'not found'},404);
-    const KINDS = ['media_pending','media_rejected','media_published','media_digest'];
+    const KINDS = ['media_pending','media_rejected','media_published'];
     if(KINDS.indexOf(n.kind)===-1) return j({error:'not a photo approval notice'},400);
     if(Date.now()-new Date(n.created_at).getTime() > 15*60*1000) return j({ok:true,skipped:'too old'});
     // Claim it: the primary key makes a second call for the same id a no-op.
@@ -142,10 +142,9 @@ Deno.serve(async (req)=>{
 
     const mTo = String(n.recipient||'');
     if(!mTo) return j({error:'no recipient'},400);
-    const review = n.kind==='media_pending' || n.kind==='media_digest';
+    const review = n.kind==='media_pending';
     const link = PORTAL+'/custportal-admin.html#/3'+(review?'/review':'');
     const tone = n.kind==='media_rejected' ? {c:'#b91c1c',bg:'#fef2f2',bar:'#e0121c',label:'Rejected'}
-               : n.kind==='media_digest' ? {c:'#92400e',bg:'#fffbeb',bar:'#f59e0b',label:'Daily summary'}
                : n.kind==='media_published' ? {c:'#15803d',bg:'#f0fdf4',bar:'#16a34a',label:'Published'}
                : {c:'#92400e',bg:'#fffbeb',bar:'#f59e0b',label:'Waiting for your approval'};
     const btn = review ? 'Review now' : 'Open Photos & Videos';
