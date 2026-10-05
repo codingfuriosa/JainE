@@ -11979,14 +11979,14 @@ window.rtNativeSendPrompt=function(){
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-envelope"></i> Send Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>To</label><input class="inp" value="${esc(ctx.email)}" disabled>
-    <label>Subject</label><input id="rtSendSubject" class="inp" value="Check This ${esc(ctx.testName)} provided by JainGroup">
-    <label>Message</label><textarea id="rtSendBody" class="inp" rows="4">Hi,\n\nPlease complete the assessment below at your convenience.\n\nThanks</textarea>
+    <label>Subject</label><input id="rtSendSubject" class="inp" value="${esc(RT_MAIL_SUBJECT)}">
+    <label>Message</label><textarea id="rtSendBody" class="inp" rows="4">${esc(rtMailBody(ctx.testName))}</textarea>
   </div>
   <div class="modal-foot"><button class="btn btn-primary" id="rtSendGoBtn" onclick="rtNativeSendGo()"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
 };
 window.rtNativeSendGo=async function(){
   const ctx=window._rtLinkCtx; if(!ctx)return;
-  const subject=($('rtSendSubject')||{}).value?.trim()||('Check This '+ctx.testName);
+  const subject=($('rtSendSubject')||{}).value?.trim()||RT_MAIL_SUBJECT;
   const body=($('rtSendBody')||{}).value?.trim()||'';
   const btn=$('rtSendGoBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   try{
@@ -12142,6 +12142,20 @@ let RT_TRACKER_PEOPLE=null, RT_TRACKER_HIDDEN=0, RT_TRACKER_WAITING=0, RT_TRACKE
    takes every page of JAIN-E down with it. Inside the function it is only read on a click, long
    after the whole file has run. */
 let RT_NOT_TESTABLE=null;
+/* ONE SUBJECT FOR EVERY TEST EMAIL, AND THE TEST NAMED IN THE BODY.
+
+   The subject used to carry the test name - "Check This Pre Sales provided by JainGroup" - so
+   every paper arrived under a different heading and the line itself read like a mistake. It is
+   fixed now, and the name moved into the message, which is where a candidate reads it anyway.
+
+   Both live here rather than at the five call sites that used to build them by hand; that is
+   how the send modal, the Share window and the per-position send came to word the same email
+   three slightly different ways. */
+const RT_MAIL_SUBJECT = 'Check This Assessment Provided by JainGroup';
+function rtMailBody(testName){
+  return 'Hi,\n\nPlease complete the ' + String(testName || 'assessment').trim()
+       + ' below at your convenience.\n\nThanks';
+}
 function rtTestable(feedback){
   if(!RT_NOT_TESTABLE) RT_NOT_TESTABLE=new Set(TP_STAGES.map(x=>x.toLowerCase()));
   const f=String(feedback||'').trim().toLowerCase();
@@ -12254,10 +12268,16 @@ function rtSharePersonRow(p,preTick){
 window.rtShareTestChanged=function(){
   const selEl=$('rtShareTest'); if(!selEl)return;
   const t=(RT_RECORDS||[]).find(x=>String(x.id)===String(selEl.value));
-  const subj=$('rtShareSubj');
-  if(t&&subj){
-    const looksDefault=/^Check This .* provided by JainGroup$/.test(subj.value||'');
-    if(looksDefault||!String(subj.value||'').trim()) subj.value='Check This '+t.name+' provided by JainGroup';
+  if(!t)return;
+  /* The subject no longer moves - it is the same line for every test. It is the BODY that now
+     carries the name, so it is the body that has to keep up when the dropdown changes. Wording
+     somebody has typed is still left alone: only a message still matching one of the generated
+     defaults is replaced, so an edit is never thrown away by touching the dropdown. */
+  const bodyEl=$('rtShareBody');
+  if(bodyEl){
+    const cur=String(bodyEl.value||'').trim();
+    const isGenerated=!cur||(RT_RECORDS||[]).some(function(x){ return rtMailBody(x.name).trim()===cur; });
+    if(isGenerated) bodyEl.value=rtMailBody(t.name);
   }
 };
 window.rtShareFilter=function(q){
@@ -12315,8 +12335,8 @@ window.rtShare=async function(fromPosition){
     rec=usable[0];            // the window opens on the first, and the dropdown changes it
   }
   const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
-  const subject=`Check This ${rec.name} provided by JainGroup`;
-  const body=`Dear Candidate,\nFill This Test at the latest.\nTest Attachment`;
+  const subject=RT_MAIL_SUBJECT;
+  const body=rtMailBody(rec.name);
   let people=[];
   try{ people=await rtTrackerPeople(true); }
   catch(e){ toast('Could not read the Interview Tracker: '+((e&&e.message)||e),'err'); return; }
@@ -12454,7 +12474,7 @@ window.rtShareSend=async function(id){
     +(blocked.length>3?(' and '+(blocked.length-3)+' more'):''),'warn');
 
   const emails=picked.map(function(x){return x.email;});
-  const subject=($('rtShareSubj')||{}).value?.trim()||`Check This ${rec.name} provided by JainGroup`;
+  const subject=($('rtShareSubj')||{}).value?.trim()||RT_MAIL_SUBJECT;
   const body=($('rtShareBody')||{}).value?.trim()||'';
   const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
   const btn=$('rtShareSendBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending…';}

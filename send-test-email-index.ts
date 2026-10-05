@@ -139,7 +139,9 @@ Deno.serve(async (req: Request) => {
     return json({ error: (e as Error).message }, 502);
   }
 
-  const finalSubject = (subject && String(subject).trim()) || `Check This ${test_name || ''} provided by JainGroup`;
+  // Same fixed line the app sends, so a call that omits the subject cannot produce a different
+  // one. The app always sends it, so this only covers a caller that does not.
+  const finalSubject = (subject && String(subject).trim()) || 'Check This Assessment Provided by JainGroup';
   const finalBody = ((body && String(body)) || 'Dear Candidate,\nFill This Test at the latest.\nTest Attachment')
     + (link ? `\r\n\r\n${link}` : '');
   const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
