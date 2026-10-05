@@ -834,7 +834,7 @@ window.pssPlanDelete=function(id){ const p=S.plans.find(x=>x.id===id); softDelet
 
    A booking keeps its own copy of the rates it was priced from (booking_charges), so editing a saved
    booking re-prices from THAT copy, not from today's setup - unless its flat is changed. */
-const B={pid:null,list:[],f:null,view:null};
+const B={pid:null,tower:null,list:[],f:null,view:null};
 const APPL_FIELDS=['title','full_name','relation_type','relation_name','dob','nationality','resident_status','pan','aadhaar','passport_no','spouse_name','anniversary','occupation','company','designation','gross_income','mobile','phone_res','phone_off','email','res_address','off_address','mailing_address','permanent_address','nri_bank_details'];
 const newApplicant=()=>({title:'Mr.',full_name:'',relation_type:'S/o',relation_name:'',dob:'',nationality:'Indian',resident_status:'resident',pan:'',aadhaar:'',passport_no:'',spouse_name:'',anniversary:'',occupation:'',company:'',designation:'',gross_income:'',mobile:'',phone_res:'',phone_off:'',email:'',res_address:'',off_address:'',mailing_address:'residential',permanent_address:'residential',nri_bank_details:'',kyc:[]});
 const r2=n=>Math.round(num(n)*100)/100;
@@ -1091,19 +1091,22 @@ function listHtml(key,fn,rows,head,row,card,empty,foot){
 
 /* ---------------- list ---------------- */
 async function bookingList(host,stale){
-  const data=await allRows(()=>PS().from('bookings').select('id,project_id,booking_no,booking_date,status,total_consideration,grand_total,is_non_standard,plan_name,flats(flat_code),towers(name),booking_applicants(full_name,seq)').order('booking_date',{ascending:false}).order('id',{ascending:false}));
+  const data=await allRows(()=>PS().from('bookings').select('id,project_id,tower_id,booking_no,booking_date,status,total_consideration,grand_total,is_non_standard,plan_name,flats(flat_code),towers(name),booking_applicants(full_name,seq)').order('booking_date',{ascending:false}).order('id',{ascending:false}));
   if(stale()) return;
   B.list=data||[];
   const pname=id=>{const p=S.projects.find(x=>x.id===id);return p?p.name:'';};
   const opts='<option value="">All projects</option>'+S.projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(B.pid||'')?' selected':'')+'>'+esc(p.name)+'</option>').join('');
-  host.innerHTML='<div class="ps-head"><div class="t"><div class="sec-title">Bookings</div><div class="pss-hint" style="margin:2px 0 0">Tap a booking to see its cost sheet, payments, invoices and interest.</div></div><div class="acts"><span id="psSyncInfo" class="pss-hint" style="margin:0;align-self:center"></span><button class="btn" onclick="psSyncNow(this)" title="Pull the latest Farvision imports from Customer Portal"><i class="fa-solid fa-rotate"></i> Sync now</button><button class="btn btn-primary" onclick="navTo(\'postsales/bookings/new\')"><i class="fa-solid fa-plus"></i> New booking</button></div></div>'
-    +'<div class="ps-filters"><select id="psbProj" onchange="psbFilter()">'+opts+'</select>'
+  host.innerHTML='<div class="ps-head"><div class="t"><div class="sec-title">Bookings</div><div class="pss-hint" style="margin:2px 0 0">Tap a booking to see its cost sheet, payments, invoices and interest.</div></div><div class="acts"><span id="psSyncInfo" class="pss-hint" style="margin:0;align-self:center"></span><button class="btn" onclick="psSyncNow(this)" title="Pull the latest Farvision imports from Customer Portal"><i class="fa-solid fa-rotate"></i> Sync now</button><button class="btn btn-primary" onclick="navTo(\'postsales/bookings/new\')"><i class="fa-solid fa-plus"></i> New booking</button>'+psDlBtns('psbDownload')+'</div></div>'
+    +'<div class="ps-filters"><select id="psbProj" onchange="B.tower=\'\';psbFilter()">'+opts+'</select>'
+    +psTowerOptions(B.pid,B.tower,'psbTower','B.tower=this.value;psbFilter()')
     +'<span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="psbQ" placeholder="Search booking no., flat or applicant" oninput="psbFilter()"></span></div>'
     +'<div id="psbList"></div>';
   psSyncInfo();
   window.psbFilter=function(){
     B.pid=val('psbProj')||null; const q=val('psbQ').toLowerCase();
-    const rows=B.list.filter(b=>(!B.pid||String(b.project_id)===B.pid)&&(!q||[b.booking_no,b.flats&&b.flats.flat_code,b.towers&&b.towers.name,(b.booking_applicants||[]).map(a=>a.full_name).join(' ')].join(' ').toLowerCase().includes(q)));
+    const tw=B.tower?Number(B.tower):null;
+    const rows=B.list.filter(b=>(!B.pid||String(b.project_id)===B.pid)&&(!tw||b.tower_id===tw)&&(!q||[b.booking_no,b.flats&&b.flats.flat_code,b.towers&&b.towers.name,(b.booking_applicants||[]).map(a=>a.full_name).join(' ')].join(' ').toLowerCase().includes(q)));
+    window._psbRows=rows;   // what the download sends: exactly what is on screen
     const st={active:'<span class="tag t-green">Active</span>',cancelled:'<span class="tag t-red">Cancelled</span>',transferred:'<span class="tag t-gray">Transferred</span>'};
     const aps=b=>(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq).map(a=>a.full_name);
     $('psbList').innerHTML=listHtml('bk','psbFilter',rows,
@@ -1633,7 +1636,7 @@ async function receiptList(host,stale){
   if(stale()) return;
   R.list=data||[];
   const opts='<option value="">All projects</option>'+S.projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(R.pid||'')?' selected':'')+'>'+esc(p.name)+'</option>').join('');
-  host.innerHTML='<div class="ps-head"><div class="t"><div class="sec-title">Receipts</div><div class="pss-hint" style="margin:2px 0 0">Every payment received, newest first. Tap one to see what it was applied to, print it or reverse it.</div></div><div class="acts"><button class="btn btn-primary" onclick="navTo(\'postsales/receipts/new\')"><i class="fa-solid fa-plus"></i> Record payment</button></div></div>'
+  host.innerHTML='<div class="ps-head"><div class="t"><div class="sec-title">Receipts</div><div class="pss-hint" style="margin:2px 0 0">Every payment received, newest first. Tap one to see what it was applied to, print it or reverse it.</div></div><div class="acts"><button class="btn btn-primary" onclick="navTo(\'postsales/receipts/new\')"><i class="fa-solid fa-plus"></i> Record payment</button>'+psDlBtns('psrDownload')+'</div></div>'
     +'<div class="ps-filters"><select id="psrProj" onchange="psrFilter()">'+opts+'</select>'
     +'<label class="fl">From<input type="date" id="psrFrom" onchange="psrFilter()"></label><label class="fl">To<input type="date" id="psrTo" onchange="psrFilter()"></label>'
     +'<span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="psrQ" placeholder="Search receipt, booking, flat, applicant or reference" oninput="psrFilter()"></span></div>'
@@ -1643,6 +1646,7 @@ async function receiptList(host,stale){
     const rows=R.list.filter(r=>{const b=r.bookings||{};
       if(R.pid&&String(r.project_id)!==R.pid) return false; if(from&&r.receipt_date<from) return false; if(to&&r.receipt_date>to) return false;
       return !q||[r.receipt_no,r.instrument_no,b.booking_no,b.flats&&b.flats.flat_code,b.towers&&b.towers.name,(b.booking_applicants||[]).map(a=>a.full_name).join(' ')].join(' ').toLowerCase().includes(q);});
+    window._psrRows=rows;   // the download sends exactly what is filtered here
     const act=rows.filter(r=>r.status==='active'), tot=act.reduce((s,r)=>s+num(r.amount),0);
     const stTag=r=>r.status==='active'?'<span class="tag t-green">Received</span>':'<span class="tag t-red">Reversed</span>';
     $('psrList').innerHTML=(rows.length?'<div class="psb-sum" style="margin:0 0 12px"><div>Total received<b>'+inr(tot)+'</b></div><div>Receipts<b>'+act.length+'</b></div>'+(rows.length>act.length?'<div>Reversed<b>'+(rows.length-act.length)+'</b></div>':'')+'</div>':'')
@@ -1879,7 +1883,7 @@ window.psrPrint=async function(id){
    booking for stages already complete. Due date = invoice date + 30 days. */
 const VIA_LBL={individual:'Individual',bulk:'Stage (bulk)',late_booking:'At booking',import:'Imported',system:'System'};
 const KIND_LBL={milestone:'Milestone',interest:'Interest',cancellation:'Cancellation',charge:'Charge'};
-const I={list:[],pid:null,status:'open',w:null};
+const I={list:[],tower:null,pid:null,status:'open',w:null};
 
 let IN_SEQ=0;
 window.psiRender=async function(host,seg){
@@ -1903,7 +1907,7 @@ const invNav=on=>'<div class="ps-nav">'+[['list','Invoices','fa-file-invoice','p
 const projSelect=(id,sel,onch,allLbl)=>'<select id="'+id+'" onchange="'+onch+'" style="height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px">'+(allLbl?'<option value="">'+allLbl+'</option>':'')+S.projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(sel||'')?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select>';
 
 async function invoiceList(host,stale){
-  const data=await allRows(()=>PS().from('invoices').select('id,project_id,booking_id,invoice_no,invoice_date,due_date,kind,title,total,status,raised_via,bookings!invoices_booking_id_fkey(booking_no,flats(flat_code),towers(name),booking_applicants(full_name,seq))').order('invoice_date',{ascending:false}).order('id',{ascending:false}));
+  const data=await allRows(()=>PS().from('invoices').select('id,project_id,booking_id,invoice_no,invoice_date,due_date,kind,title,total,status,raised_via,bookings!invoices_booking_id_fkey(booking_no,tower_id,flats(flat_code),towers(name),booking_applicants(full_name,seq))').order('invoice_date',{ascending:false}).order('id',{ascending:false}));
   if(stale()) return;
   I.list=data||[];
   const ids=I.list.map(i=>i.id), paid={};
@@ -1923,20 +1927,26 @@ async function invoiceList(host,stale){
         +'<i class="fa-solid fa-calendar-check"></i> Raise due invoices</button>'
       +'<button class="btn btn-primary" onclick="navTo(\'postsales/invoices/stage\')" title="Mark a construction stage complete - foundation, a floor casting, brickwork - and every booked flat in that tower or on that floor gets its demand in one go. You see them all before anything is raised.">'
         +'<i class="fa-solid fa-helmet-safety"></i> Mark stage complete</button>'
+      +psDlBtns('psiDownload')
       +'</div></div>'
-    +'<div class="ps-filters">'+projSelect('psiProj',I.pid,'psiFilter()','All projects')
+    // null rather than an empty string: this lands inside a double-quoted HTML attribute, and a
+    // quote character here would close it early.
+    +'<div class="ps-filters">'+projSelect('psiProj',I.pid,'I.tower=null;psiFilter()','All projects')+psTowerOptions(I.pid,I.tower,'psiTower','I.tower=this.value;psiFilter()')
     +'<select id="psiSt" onchange="psiFilter()"><option value="open"'+(I.status==='open'?' selected':'')+'>Open invoices</option><option value="overdue"'+(I.status==='overdue'?' selected':'')+'>Overdue</option><option value="unpaid"'+(I.status==='unpaid'?' selected':'')+'>Not fully paid</option><option value="cancelled"'+(I.status==='cancelled'?' selected':'')+'>Cancelled</option><option value=""'+(I.status===''?' selected':'')+'>All invoices</option></select>'
     +'<span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="psiQ" placeholder="Search invoice, booking, flat, customer or milestone" oninput="psiFilter()"></span></div>'
     +'<div id="psiList"></div>';
   window.psiFilter=function(){
     I.pid=val('psiProj')||null; I.status=val('psiSt'); const q=val('psiQ').toLowerCase(), td=today();
+    const itw=I.tower?Number(I.tower):null;
     const rows=I.list.filter(i=>{const b=i.bookings||{}, bal=num(i.total)-(I.paid[i.id]||0);
       if(I.pid&&String(i.project_id)!==I.pid) return false;
+      if(itw&&(i.bookings||{}).tower_id!==itw) return false;
       if(I.status==='open'&&i.status!=='open') return false;
       if(I.status==='cancelled'&&i.status!=='cancelled') return false;
       if(I.status==='unpaid'&&(i.status!=='open'||bal<=0.5)) return false;
       if(I.status==='overdue'&&(i.status!=='open'||bal<=0.5||i.due_date>=td)) return false;
       return !q||[i.invoice_no,i.title,b.booking_no,b.flats&&b.flats.flat_code,b.towers&&b.towers.name,(b.booking_applicants||[]).map(a=>a.full_name).join(' ')].join(' ').toLowerCase().includes(q);});
+    window._psiRows=rows;
     let T=0,P=0; rows.forEach(i=>{ if(i.status==='open'){T+=num(i.total);P+=(I.paid[i.id]||0);} });
     const info=i=>{const p=I.paid[i.id]||0,bal=num(i.total)-p,od=i.status==='open'&&bal>0.5&&i.due_date<td;
       return {p,bal,od,tag:i.status==='cancelled'?'<span class="tag t-gray">Cancelled</span>':bal<=0.5?'<span class="tag t-green">Paid</span>':od?'<span class="tag t-red">Overdue</span>':p>0?'<span class="tag t-amber">Part paid</span>':'<span class="tag t-blue">Due</span>'};};
@@ -2261,6 +2271,101 @@ function docRegs(setup){
   return body?'<table class="ref" style="width:auto;margin-top:18px">'+body+'</table>':'';
 }
 
+/* THE CUSTOMER LEDGER, laid out like the one FarVision prints.
+
+   The running debit/credit/balance table on screen is the useful thing for Accounts and it stays.
+   What a customer is sent is a different document: a boxed statement of what the flat costs, how
+   that cost breaks down, what has fallen due, what has been received and what is left. That is
+   what this prints.
+
+   Everything comes from the booking: booking_charges carries every revenue head with its rate,
+   quantity, amount and GST, and the invoices and receipts give due against received as on a date.
+   Nothing is recalculated here that the booking does not already hold. */
+window.psrpLedgerPrint=async function(bookingId){
+  const w=window.open('','_blank');
+  if(!w){ toast('Allow pop-ups to print the ledger','err'); return; }
+  w.document.write('<!doctype html><meta charset="utf-8"><title>Preparing</title>'
+    +'<body style="font:14px system-ui;padding:30px">Preparing the ledger&hellip;</body>');
+  const v=await loadBooking(bookingId);
+  if(!v){ w.close(); toast('Booking not found','err'); return; }
+  const {b,ap,ch,ms}=v, proj=S.projects.find(p=>p.id===b.project_id);
+  const [{data:setup},mo]=await Promise.all([
+    PS().from('project_setup').select('company_name,company_address,project_address')
+        .eq('project_id',b.project_id).maybeSingle(),
+    bookingMoney(b.id)]);
+
+  const asOf=today(), n=x=>Math.round(num(x)).toLocaleString('en-IN');
+  const L=k=>ch.filter(l=>l.col===k);
+  const sum=(a,f)=>a.reduce((s,x)=>s+num(f(x)),0);
+
+  /* Due is what has actually been demanded by today, not the whole schedule - the schedule is
+     shown separately as "with future bills". Received is every rupee against those demands. */
+  const dueInv=(mo.inv||[]).filter(i=>i.status==='open'&&i.invoice_date<=asOf);
+  const dueTot=sum(dueInv,i=>i.total);
+  const gotTot=num(mo.bal&&mo.bal.principal_received);
+  const grand=num(b.grand_total), netCost=num(b.total_consideration);
+  const pct=x=>grand?((num(x)/grand*100).toFixed(2)+'%'):'';
+  const taxOf=a=>sum(a,x=>x.gst_amount);
+
+  const row=(k,v)=>'<tr><td class="lk">'+esc(k)+'</td><td>'+v+'</td></tr>';
+  const headRow=(cols)=>'<tr>'+cols.map(c=>'<th'+(c[1]?' class="r"':'')+'>'+esc(c[0])+'</th>').join('')+'</tr>';
+
+  const html='<!doctype html><html><head><meta charset="utf-8"><title>Customer Ledger - '+esc(b.booking_no)+'</title>'
+    +'<style>'+DOC_CSS
+      +'.led td,.led th{border:1px solid #000;padding:4px 6px;font-size:10px;vertical-align:top}'
+      +'.led td.lk{width:16%;font-weight:bold;background:#f2f2f2}'
+      +'.led th{background:#d8d8d8;text-align:center;font-weight:bold}'
+      +'.led td.r,.led th.r{text-align:right}'
+      +'.secrow td{background:#d8d8d8;font-weight:bold;text-align:center}'
+    +'</style></head><body>'
+    +'<div class="co"><div class="nm">'+esc(setup&&setup.company_name||'The Jain Group')+'</div>'
+      +(setup&&setup.company_address?'<div class="ad">'+esc(setup.company_address)+'</div>':'')+'</div>'
+    +'<table style="margin-bottom:8px"><tr>'
+      +'<td style="text-align:center"><b style="font-size:12px">Customer Ledger</b><div class="sm">'+dmy(b.booking_date)+'</div></td>'
+      +'<td style="width:28%" class="sm"><table class="ref">'
+        +docRef('Run Date', dmy(asOf))
+        +docRef('Page', '1')
+        +'</table></td></tr></table>'
+    +'<table class="led">'
+      +row('Name of project', esc(proj?proj.name:'')
+            +(setup&&setup.project_address?'<br>'+esc(setup.project_address):''))
+      +row('Name of party', '<b>'+esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & ')||'')+'</b>'
+            +'<br>Booking No : '+esc(b.booking_no)
+            +(ap.length>1?'<br>Co-Allottees : '+esc(ap.slice(1).map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(', ')):'<br>Co-Allottees :'))
+      +row('Basic cost', n(sum(L('unit'),x=>x.amount))
+            +' &nbsp;&nbsp; Net Basic Cost : '+n(sum(L('unit'),x=>x.amount)))
+      +row('Cost breakup', 'Basic Cost + Extra Charges + Contracted Extra Charges + Taxes + Parking'
+            +'<br>'+n(sum(L('unit'),x=>x.amount))+' + '+n(sum(L('edc'),x=>x.amount))
+            +' + '+n(sum(L('parking'),x=>x.amount))+' + '+n(taxOf(ch))
+            +'<br>Total cost without tax : '+n(netCost)+' &nbsp;&nbsp; Total cost with tax : '+n(grand))
+      +row('Payment plan', esc(b.plan_name||''))
+      +row('Due as on '+dmy(asOf), n(dueTot)+' &nbsp;('+pct(dueTot)+')')
+      +row('Received till '+dmy(asOf), n(gotTot)+' &nbsp;('+pct(gotTot)+')')
+      +row('Balance as on '+dmy(asOf), (dueTot-gotTot>=0?n(dueTot-gotTot):n(gotTot-dueTot)+' Advance'))
+      +row('Total Due (with Future Bills)', '<b>'+n(grand-gotTot)+'</b>')
+    +'</table>'
+    +'<table class="led" style="margin-top:10px"><tr class="secrow"><td colspan="7">Property details</td></tr>'
+      +headRow([['Unit No'],['Revenue Head'],['Block/Tower'],['Floor'],['Saleable Area',1],['Rate',1],['Amount',1]])
+      +'<tr><td>'+esc(b.flats&&b.flats.flat_code||'')+'</td><td>Unit Cost</td>'
+        +'<td>'+esc(b.towers&&b.towers.name||'')+'</td><td>'+esc(ordinal(b.floor_no))+'</td>'
+        +'<td class="r">'+n(b.sba_sqft)+'</td><td class="r">'+n(b.rate)+'</td>'
+        +'<td class="r">'+n(sum(L('unit'),x=>x.amount))+'</td></tr>'
+    +'</table>'
+    +'<table class="led" style="margin-top:10px"><tr class="secrow"><td colspan="5">Cost Breakup Without Tax</td></tr>'
+      +headRow([['Revenue Head'],['Rate',1],['Quantity',1],['Discount',1],['Gross',1]])
+      +ch.map(function(l){
+          return '<tr><td>'+esc(l.name)+'</td><td class="r">'+n(l.rate)+'</td>'
+            +'<td class="r">'+n(l.qty)+'</td><td class="r">0</td>'
+            +'<td class="r">'+n(l.amount)+'</td></tr>';
+        }).join('')
+      +'<tr class="tot"><td><b>Total</b></td><td></td><td></td><td></td>'
+        +'<td class="r"><b>'+n(netCost)+'</b></td></tr>'
+    +'</table>'
+    +'<div class="sm" style="margin-top:12px">This is a system generated statement. No signature required.</div>'
+    +'<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>';
+  w.document.open(); w.document.write(html); w.document.close();
+};
+
 /* ---- booking page: milestone status + raise ---- */
 function milestoneStatus(b,ms,inv,al){
   const paid=id=>al.filter(a=>a.invoice_id===id).reduce((s,a)=>s+num(a.amount),0);
@@ -2428,6 +2533,75 @@ function repTable(cols,rows,opts){
     +'</tbody>'+(rows.length&&tot.some(x=>x!=null)?'<tfoot><tr>'+cols.map((c,i)=>'<td'+(tot[i]!=null?' class="pss-num"':'')+' style="font-weight:700">'+(i===0?'Total ('+rows.length+')':tot[i]!=null?fmtCell(c,tot[i]):'')+'</td>').join('')+'</tr></tfoot>':'')+'</table></div></div>';
 }
 function repSet(title,sub,cols,rows){ RP.title=title; RP.sub=sub; RP.cols=cols; RP.rows=rows; }
+/* ══ DOWNLOADS FOR THE LISTS, not just the Reports tab ══════════════════════════════════════
+   Bookings, Invoices and Receipts all show a filtered list and had no way to get it out. The
+   Reports tab already has a styled Excel writer and a PDF writer that work off RP - title,
+   subtitle, columns, rows - so these hand it the list that is on screen and reuse both. Whatever
+   is filtered is what downloads; there is no second definition of "the data" to drift.
+
+   Towers are offered on Bookings and Invoices because a flat belongs to one and people work block
+   by block. Receipts are project-only, by request: a receipt is money against a booking, and
+   which block that booking is in is not how anybody looks for a payment. */
+function psTowerOptions(pid, sel, id, onch){
+  const list=S.towers.filter(t=>!pid||String(t.project_id)===String(pid));
+  if(!pid) return '<select id="'+id+'" disabled title="Choose a project first"><option>All blocks</option></select>';
+  return '<select id="'+id+'" onchange="'+onch+'"><option value="">All blocks</option>'
+    +list.map(t=>'<option value="'+t.id+'"'+(String(t.id)===String(sel||'')?' selected':'')+'>'+esc(t.name)+'</option>').join('')
+    +'</select>';
+}
+/* Hands the current list to the Reports exporter and puts RP back as it was, so downloading from
+   Bookings does not leave the Reports tab believing it is showing bookings. */
+async function psExport(how, btn, title, sub, cols, rows){
+  if(!rows.length){ toast('Nothing to download with these filters','warn'); return; }
+  const keep={title:RP.title,sub:RP.sub,cols:RP.cols,rows:RP.rows,theme:RP.theme};
+  RP.title=title; RP.sub=sub; RP.cols=cols; RP.rows=rows; RP.theme='';
+  try{ await (how==='pdf'?psrpPdf(btn):psrpExcel(btn)); }
+  finally{ RP.title=keep.title; RP.sub=keep.sub; RP.cols=keep.cols; RP.rows=keep.rows; RP.theme=keep.theme; }
+}
+const psScope=(pid,towerId)=>{
+  const p=S.projects.find(x=>String(x.id)===String(pid)), t=S.towers.find(x=>String(x.id)===String(towerId));
+  return (p?p.name:'All projects')+(t?' · '+t.name:'')+' · as on '+dmy(today());
+};
+
+window.psbDownload=function(how,btn){
+  const rows=(window._psbRows||[]).map(b=>({
+    booking_no:b.booking_no, bdate:b.booking_date,
+    flat:(b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''),
+    app:((b.booking_applicants||[]).slice().sort((x,y)=>x.seq-y.seq)[0]||{}).full_name||'',
+    plan:b.plan_name||'', status:b.status,
+    cons:num(b.total_consideration), gross:num(b.grand_total)}));
+  psExport(how,btn,'Bookings',psScope(B.pid,B.tower),[
+    {h:'Booking',k:'booking_no'},{h:'Booked',k:'bdate',t:'d'},{h:'Flat',k:'flat'},
+    {h:'Applicant',k:'app'},{h:'Plan',k:'plan'},{h:'Status',k:'status'},
+    {h:'Consideration',k:'cons',t:'inr',sum:1},{h:'Incl. GST',k:'gross',t:'inr',sum:1}],rows);
+};
+window.psiDownload=function(how,btn){
+  const rows=(window._psiRows||[]).map(i=>{const b=i.bookings||{},p=I.paid[i.id]||0;
+    return {invoice_no:i.invoice_no, idate:i.invoice_date, due:i.due_date,
+      booking:b.booking_no||'', flat:(b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''),
+      title:i.title, amt:num(i.total), got:p, bal:i.status==='open'?num(i.total)-p:0, status:i.status};});
+  psExport(how,btn,'Invoices',psScope(I.pid,I.tower),[
+    {h:'Invoice',k:'invoice_no'},{h:'Date',k:'idate',t:'d'},{h:'Due',k:'due',t:'d'},
+    {h:'Booking',k:'booking'},{h:'Flat',k:'flat'},{h:'For',k:'title'},
+    {h:'Amount',k:'amt',t:'inr',sum:1},{h:'Received',k:'got',t:'inr',sum:1},
+    {h:'Balance',k:'bal',t:'inr',sum:1},{h:'Status',k:'status'}],rows);
+};
+window.psrDownload=function(how,btn){
+  const rows=(window._psrRows||[]).map(r=>{const b=r.bookings||{};
+    return {receipt_no:r.receipt_no, rdate:r.receipt_date, mode:MODE_LBL[r.mode]||r.mode,
+      ref:r.instrument_no||'', booking:b.booking_no||'',
+      flat:(b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''),
+      amt:num(r.amount), status:r.status};});
+  psExport(how,btn,'Receipts',psScope(R.pid,null),[
+    {h:'Receipt',k:'receipt_no'},{h:'Date',k:'rdate',t:'d'},{h:'Mode',k:'mode'},
+    {h:'Reference',k:'ref'},{h:'Booking',k:'booking'},{h:'Flat',k:'flat'},
+    {h:'Amount',k:'amt',t:'inr',sum:1},{h:'Status',k:'status'}],rows);
+};
+const psDlBtns=(fn)=>'<button class="btn" onclick="'+fn+'(\'xlsx\',this)" title="Download what is filtered below">'
+  +'<i class="fa-solid fa-file-excel" style="color:#15803d"></i> Excel</button>'
+  +'<button class="btn" onclick="'+fn+'(\'pdf\',this)" title="Download what is filtered below">'
+  +'<i class="fa-solid fa-file-pdf" style="color:#b91c1c"></i> PDF</button>';
+
 /* ---- exports: a styled Excel workbook (ExcelJS, already used by the MIS and Usability exports)
    and a real PDF (jsPDF + autoTable). Both carry the company, the report title, the filters it was
    run with, when and by whom, a coloured header row, totals and page numbers. RP.theme 'mis' gives
@@ -2446,7 +2620,7 @@ window.psrpExcel=async function(btn){
   const restore=btn?btn.innerHTML:''; if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Excel';}
   try{
     if(!(await usbLoadXlsx())) throw new Error('Could not load the spreadsheet library');
-    const mis=RP.theme==='mis', brand=mis?'FF000000':'FF6D28D9', headFill=mis?'FFFFFF00':'FF6D28D9', headInk=mis?'FF000000':'FFFFFFFF';
+    const mis=RP.theme==='mis', brand=mis?'FF000000':'FF1E40AF', headFill=mis?'FFFFFF00':'FF1E40AF', headInk=mis?'FF000000':'FFFFFFFF';
     const cols=RP.cols.filter(c=>!c.noExport), n=cols.length;
     const wb=new ExcelJS.Workbook(); wb.creator='JAIN-E'; wb.created=new Date();
     const ws=wb.addWorksheet(RP.title.replace(/[^\w &-]/g,'').slice(0,31)||'Report',{views:[{state:'frozen',ySplit:6}]});
@@ -2637,7 +2811,7 @@ async function repLedger(host,stale){
       const closing=e.length?e[e.length-1].bal:0;
       const cols=[{h:'Date',k:'d',t:'d'},{h:'Document',k:'doc'},{h:'Particulars',k:'part'},{h:'Debit',k:'dr',t:'inr',sum:1},{h:'Credit',k:'cr',t:'inr',sum:1},{h:'Balance',k:'bal',t:'inr',text:r=>Math.round(num(r.bal)).toLocaleString('en-IN')+(num(r.bal)<0?' Cr':' Dr'),html:r=>inr(Math.abs(r.bal))+(num(r.bal)<0?' <span class="tag t-green">Cr</span>':'')}];
       repSet('Applicant Ledger - '+b.booking_no,pName(b.project_id)+' · '+flatLbl(b)+' · '+apName(b)+' · booked '+dmy(b.booking_date),cols,e.map(x=>({...x,_link:x.link})));
-      host.innerHTML='<div class="toolbar"><button class="btn btn-sm" onclick="navTo(\'postsales/reports/ledger\')"><i class="fa-solid fa-arrow-left"></i> All customers</button><div style="flex:1"><b>'+esc(b.booking_no)+'</b> · '+esc(flatLbl(b))+' · '+esc(apName(b))+' <span class="pss-hint">booked '+dmy(b.booking_date)+' · '+esc(b.status)+'</span></div><button class="btn btn-sm" onclick="navTo(\'postsales/bookings/'+b.id+'\')">Open booking</button></div>'
+      host.innerHTML='<div class="toolbar"><button class="btn btn-sm" onclick="navTo(\'postsales/reports/ledger\')"><i class="fa-solid fa-arrow-left"></i> All customers</button><div style="flex:1"><b>'+esc(b.booking_no)+'</b> · '+esc(flatLbl(b))+' · '+esc(apName(b))+' <span class="pss-hint">booked '+dmy(b.booking_date)+' · '+esc(b.status)+'</span></div><button class="btn btn-sm" onclick="psrpLedgerPrint('+b.id+')"><i class="fa-solid fa-print"></i> Customer ledger</button><button class="btn btn-sm" onclick="navTo(\'postsales/bookings/'+b.id+'\')">Open booking</button></div>'
         +mKpis([['Consideration (incl. GST)',inr(b.grand_total),''],['Closing balance',inr(Math.abs(closing)),closing<0?'in credit (advance / refund due)':'receivable'],['Not yet due',inr(nd),'on raised invoices'],['Overdue',inr(od),'',od>0?'#b91c1c':undefined]])
         +'<div style="margin-top:14px">'+repTable(cols,RP.rows,{empty:'No entries yet'})+'</div>';
       return;
