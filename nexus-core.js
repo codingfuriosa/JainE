@@ -48,7 +48,7 @@ function pageIdFromPath(pathname){
 // A page may list several scripts; they load one after another, in order (purchase-indent.js uses what
 // purchase.js defines).
 const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js']};
-const PAGE_SCRIPT_VERSION={'purchase.js':'20261004v','purchase-indent.js':'20261004j','purchase-rfq.js':'20261004e','purchase-po.js':'20261004c','purchase-stores.js':'20261004b','purchase-reports.js':'20261004a'};
+const PAGE_SCRIPT_VERSION={'purchase.js':'20261004v','purchase-indent.js':'20261004k','purchase-rfq.js':'20261004e','purchase-po.js':'20261004d','purchase-stores.js':'20261004c','purchase-reports.js':'20261004a'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];

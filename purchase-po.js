@@ -18,6 +18,8 @@ window.__PUP_LOADED=true;
 const P={rows:[],lines:[],pending:[],vendors:[],types:[],rej:[],amends:[],sec:'orders',filter:'all',rv:'all',project:'',q:''};
 const SC=[['all','All'],['draft','Drafts'],['pending','Awaiting approval'],['mine','Awaiting my approval'],['approved','Approved'],['closed','Closed'],['cancelled','Cancelled']];
 const U=()=>window.PUS;
+// The person who raised an order can decide it only when the rule "let a person approve a purchase order they raised" is on (Admin -> Rules); the database enforces the same.
+const selfApproval=()=>U().rule('po.allow_self_approval')==='true';
 const qty=n=>Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:3});
 const money=n=>(n==null||n==='')?'—':'₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const me=()=>String(state.email||'').toLowerCase();
@@ -44,7 +46,7 @@ function status(p){
   return [p.status,'t-gray'];
 }
 const statusTag=p=>{const s=status(p);return '<span class="tag '+s[1]+'">'+esc(s[0])+'</span>';};
-const isMine=p=>p.status==='pending_approval'&&p.raised_by.toLowerCase()!==me()&&P.pending.some(a=>a.po_id===p.id&&a.approvers.some(e=>e.toLowerCase()===me()));
+const isMine=p=>p.status==='pending_approval'&&(selfApproval()||p.raised_by.toLowerCase()!==me())&&P.pending.some(a=>a.po_id===p.id&&a.approvers.some(e=>e.toLowerCase()===me()));
 const canEdit=p=>(p.status==='draft'||p.status==='rejected')&&(p.raised_by.toLowerCase()===me()||state.super)&&U().can('po.create');
 
 async function pLoad(){
@@ -176,7 +178,7 @@ window.pusPoOpen=async function(id,tab){
   if(!await loadCur(id)) return;
   const {p}=CUR;
   const open=CUR.lines.some(l=>+l.qty-+l.received_qty-+l.short_closed_qty>0), untouched=CUR.lines.every(l=>+l.received_qty===0&&+l.short_closed_qty===0);
-  const my=p.status==='pending_approval'&&p.raised_by.toLowerCase()!==me()&&CUR.steps.some(s=>s.round===p.round&&s.level===p.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
+  const my=p.status==='pending_approval'&&(selfApproval()||p.raised_by.toLowerCase()!==me())&&CUR.steps.some(s=>s.round===p.round&&s.level===p.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
   const canCreate=U().can('po.create'), btn=[];
   if(canEdit(p)) btn.push('<button class="btn'+(needsRevision(p)?' btn-primary':'')+'" onclick="pusPoEdit('+id+')"><i class="fa-solid fa-pen"></i> '+(needsRevision(p)?'Revise…':'Edit')+'</button>','<button class="btn'+(needsRevision(p)?'':' btn-primary')+'" onclick="pusPoSubmit('+id+')"'+(needsRevision(p)?' title="Send it for approval again without changing anything"':'')+'><i class="fa-solid fa-paper-plane"></i> '+(needsRevision(p)?'Resubmit unchanged':'Submit for approval')+'</button>');
   if(my) btn.push('<button class="btn" onclick="pusPoDecide('+id+',false)"><i class="fa-solid fa-circle-xmark"></i> Reject</button>','<button class="btn btn-primary" onclick="pusPoDecide('+id+',true)"><i class="fa-solid fa-circle-check"></i> Approve</button>');

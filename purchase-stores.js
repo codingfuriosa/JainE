@@ -10,6 +10,8 @@ if(window.__PST_LOADED) return;
 window.__PST_LOADED=true;
 
 const U=()=>window.PUS;
+// The person who raised an adjustment can decide it only when the matching rule is on (Admin -> Rules); the database enforces the same.
+const selfApproval=()=>U().rule('adjustment.allow_self_approval')==='true';
 const qty=n=>Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:3});
 const money=n=>(n==null||n==='')?'—':'₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const me=()=>String(state.email||'').toLowerCase();
@@ -340,7 +342,7 @@ async function adjList(host){
   adjRender(host);
 }
 const adjStatus=a=>({draft:['Draft','t-gray'],pending_approval:['Awaiting level '+a.current_level,'t-amber'],approved:['Posted','t-green'],rejected:['Rejected','t-red'],cancelled:['Cancelled','t-red']}[a.status]||[a.status,'t-gray']);
-const adjMine=a=>a.status==='pending_approval'&&a.raised_by.toLowerCase()!==me()&&A.pending.some(p=>p.adjustment_id===a.id&&p.approvers.some(e=>e.toLowerCase()===me()));
+const adjMine=a=>a.status==='pending_approval'&&(selfApproval()||a.raised_by.toLowerCase()!==me())&&A.pending.some(p=>p.adjustment_id===a.id&&p.approvers.some(e=>e.toLowerCase()===me()));
 function adjRender(host){
   host=host||$('pstBody'); if(!host) return; const q=A.q.toLowerCase();
   const inF=(a,k)=>k==='all'||(k==='draft'&&a.status==='draft')||(k==='pending'&&a.status==='pending_approval')||(k==='mine'&&adjMine(a))||(k==='approved'&&a.status==='approved')||(k==='rejected'&&a.status==='rejected');
@@ -394,7 +396,7 @@ window.pusAdjOpen=async function(id,tab){
   const [h,ls,ap,lg]=await Promise.all([PU().from('stock_adjustments').select('*').eq('id',id).maybeSingle(),PU().from('adjustment_lines').select('*').eq('adjustment_id',id).order('line_no'),PU().from('adjustment_approvals').select('*').eq('adjustment_id',id).order('round').order('level'),loadLog('adjustment',id)]);
   if(h.error||!h.data||h.data.deleted_at){ toast('Could not open the adjustment','err'); return; }
   const a=h.data; AC={a,lines:ls.data||[],steps:ap.data||[],log:lg};
-  const mineTurn=a.status==='pending_approval'&&a.raised_by.toLowerCase()!==me()&&AC.steps.some(s=>s.round===a.round&&s.level===a.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
+  const mineTurn=a.status==='pending_approval'&&(selfApproval()||a.raised_by.toLowerCase()!==me())&&AC.steps.some(s=>s.round===a.round&&s.level===a.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
   const canEdit=['draft','rejected'].includes(a.status)&&(a.raised_by.toLowerCase()===me()||state.super)&&U().can('stock.adjust'), btn=[];
   if(canEdit) btn.push('<button class="btn" onclick="pusAdjEdit('+id+')"><i class="fa-solid fa-pen"></i> Edit</button>','<button class="btn btn-primary" onclick="pusAdjSubmit('+id+')"><i class="fa-solid fa-paper-plane"></i> '+(a.status==='rejected'?'Resubmit':'Submit for approval')+'</button>');
   if(mineTurn) btn.push('<button class="btn" onclick="pusAdjDecide('+id+',false)"><i class="fa-solid fa-circle-xmark"></i> Reject</button>','<button class="btn btn-primary" onclick="pusAdjDecide('+id+',true)"><i class="fa-solid fa-circle-check"></i> Approve & post</button>');

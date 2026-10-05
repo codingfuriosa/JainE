@@ -12,6 +12,8 @@ if(window.__PAP_LOADED) return;
 window.__PAP_LOADED=true;
 
 const U=()=>window.PUS;
+// Same rule as purchase orders (po.allow_self_approval); the database enforces it.
+const selfApproval=()=>U().rule('po.allow_self_approval')==='true';
 const qty=n=>Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:3});
 const money=n=>(n==null||n==='')?'—':'₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const me=()=>String(state.email||'').toLowerCase();
@@ -492,7 +494,7 @@ function oStatus(o){
   return [o.status,'t-gray'];
 }
 const oTag=o=>{const s=oStatus(o);return '<span class="tag '+s[1]+'">'+esc(s[0])+'</span>';};
-const oMine=o=>o.status==='pending_approval'&&String(o.raised_by).toLowerCase()!==me()&&B.oapp.some(a=>a.order_id===o.id&&a.approvers.some(e=>e.toLowerCase()===me()));
+const oMine=o=>o.status==='pending_approval'&&(selfApproval()||String(o.raised_by).toLowerCase()!==me())&&B.oapp.some(a=>a.order_id===o.id&&a.approvers.some(e=>e.toLowerCase()===me()));
 async function orderList(host){
   const PU=U().PU;
   const [o,l,a]=await Promise.all([PU().from('expense_orders').select('*').is('deleted_at',null).order('created_at',{ascending:false}),PU().from('expense_order_lines').select('id,order_id,qty,billed_qty'),PU().from('expense_order_approvals').select('order_id,level,approvers,round,status').eq('status','pending')]);
@@ -594,7 +596,7 @@ window.pusEoOpen=async function(id,tab){
   const o=h.data; if(!o||o.deleted_at){ toast('That order no longer exists','err'); return; }
   CE={o,lines:l.data||[],steps:a.data||[],bills:b.data||[],log:lg};
   const perm='nonstore.purchase', mineRaised=canAct(o,perm), btn=[], left=[];
-  const my=o.status==='pending_approval'&&String(o.raised_by).toLowerCase()!==me()&&CE.steps.some(s=>s.round===o.round&&s.level===o.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
+  const my=o.status==='pending_approval'&&(selfApproval()||String(o.raised_by).toLowerCase()!==me())&&CE.steps.some(s=>s.round===o.round&&s.level===o.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
   const open=CE.lines.some(x=>+x.qty-+x.billed_qty>0.0005), billed=CE.lines.some(x=>+x.billed_qty>0);
   if(mineRaised&&['draft','rejected'].includes(o.status)) btn.push('<button class="btn" onclick="pusEoForm('+id+')"><i class="fa-solid fa-pen"></i> Edit</button>','<button class="btn btn-primary" onclick="pusEoSubmit('+id+')"><i class="fa-solid fa-paper-plane"></i> '+(o.status==='rejected'?'Resubmit for approval':'Submit for approval')+'</button>');
   if(my) btn.push('<button class="btn" onclick="pusEoDecide('+id+',false)"><i class="fa-solid fa-circle-xmark"></i> Reject</button>','<button class="btn btn-primary" onclick="pusEoDecide('+id+',true)"><i class="fa-solid fa-circle-check"></i> Approve</button>');

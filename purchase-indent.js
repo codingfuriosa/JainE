@@ -20,6 +20,8 @@ const SC=[['all','All'],['draft','Drafts'],['pending','Awaiting approval'],['min
 const qty=n=>Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:3});
 const me=()=>String(state.email||'').toLowerCase();
 const U=()=>window.PUS;
+// The person who raised an indent can decide it only when the rule "let a person approve an indent they raised" is on (Admin -> Rules); the database enforces the same.
+const selfApproval=()=>U().rule('indent.allow_self_approval')==='true';
 const dmy=d=>{ if(!d) return '—'; const x=new Date(d); return isNaN(x)?'—':String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+'/'+x.getFullYear(); };
 const dmyTime=d=>{ const x=new Date(d); return isNaN(x)?'—':x.toLocaleString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})+', '+x.getDate()+' '+x.toLocaleString('en-IN',{month:'short'})+" '"+String(x.getFullYear()).slice(2); };
 // Financial year of a date: 1 April - 31 March.
@@ -49,7 +51,7 @@ function status(r){
   return [r.status,'t-gray'];
 }
 const statusTag=r=>{const s=status(r);return '<span class="tag '+s[1]+'">'+esc(s[0])+'</span>';};
-const isMine=r=>r.status==='pending_approval'&&r.raised_by.toLowerCase()!==me()&&I.pending.some(a=>a.indent_id===r.id&&a.approvers.some(e=>e.toLowerCase()===me()));
+const isMine=r=>r.status==='pending_approval'&&(selfApproval()||r.raised_by.toLowerCase()!==me())&&I.pending.some(a=>a.indent_id===r.id&&a.approvers.some(e=>e.toLowerCase()===me()));
 const canEdit=r=>(r.status==='draft'||r.status==='rejected')&&(r.raised_by.toLowerCase()===me()||state.super)&&U().can('indent.raise');
 const docNo=r=>r.doc_no||('Draft #'+r.id);
 const projName=id=>{const p=U().S.projects.find(x=>x.id===id);return p?p.name:'—';};
@@ -209,7 +211,7 @@ window.pusIndOpen=async function(id,tab){
   const r=h.data; if(!r||r.deleted_at){ toast('That indent no longer exists','err'); return; }
   CUR={r,lines:ls.data||[],steps:ap.data||[],log:lg.data||[]};
   const open=CUR.lines.some(l=>+l.qty-+l.ordered_qty-+l.short_closed_qty>0);
-  const my=r.status==='pending_approval'&&r.raised_by.toLowerCase()!==me()&&CUR.steps.some(s=>s.round===r.round&&s.level===r.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
+  const my=r.status==='pending_approval'&&(selfApproval()||r.raised_by.toLowerCase()!==me())&&CUR.steps.some(s=>s.round===r.round&&s.level===r.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
   const btn=[];
   if(canEdit(r)) btn.push('<button class="btn'+(r.status==='rejected'?' btn-primary':'')+'" onclick="pusIndEdit('+id+')"><i class="fa-solid fa-pen"></i> '+(r.status==='rejected'?'Revise…':'Edit')+'</button>',r.status==='rejected'?'<button class="btn" onclick="pusIndSubmit('+id+')" title="Send it for approval again without changes"><i class="fa-solid fa-paper-plane"></i> Resubmit unchanged</button>':'<button class="btn btn-primary" onclick="pusIndSubmit('+id+')"><i class="fa-solid fa-paper-plane"></i> Submit for approval</button>');
   if(my) btn.push('<button class="btn" onclick="pusIndDecide('+id+',false)"><i class="fa-solid fa-circle-xmark"></i> Reject</button>','<button class="btn btn-primary" onclick="pusIndDecide('+id+',true)"><i class="fa-solid fa-circle-check"></i> Approve</button>');
