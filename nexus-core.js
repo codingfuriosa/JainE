@@ -668,7 +668,7 @@ function expandModules(ss){
   Object.keys(MODULE_RENAMES).forEach(function(oldId){
     if(ss.has(oldId)) ss.add(MODULE_RENAMES[oldId]);
   });
-  if(ss.has('custportal_photos')||ss.has('custportal_photo_approver')) ss.add('custportal_admin');
+  if(ss.has('custportal_photos')||ss.has('custportal_photo_approver')||ss.has('custportal_photo_backup')) ss.add('custportal_admin');
   ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
@@ -677,11 +677,14 @@ function expandModules(ss){
    photo tables and read project names and a bare flat list, and nothing else in cust.*. */
 function cpaPhotosOnly(){ if(state.super)return false; const m=state.roles&&state.roles.modules;
   // A photo approver without Customer Portal Admin of their own gets the same single Photos tab.
-  return Array.isArray(m)&&(m.indexOf('custportal_photos')!==-1||(m.indexOf('custportal_photo_approver')!==-1&&m.indexOf('custportal_admin')===-1)); }
+  return Array.isArray(m)&&(m.indexOf('custportal_photos')!==-1||((m.indexOf('custportal_photo_approver')!==-1||m.indexOf('custportal_photo_backup')!==-1)&&m.indexOf('custportal_admin')===-1)); }
 /* 'custportal_photo_approver' = may publish or reject construction photos and videos (Photos & Videos
    > Review). The database holds the same rule - app.is_photo_approver() in cust.review_media() - and
    also refuses an approver's own uploads; this only decides whether to show the Review screen. */
-function cpaIsPhotoApprover(){ if(state.super)return true; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('custportal_photo_approver')!==-1; }
+/* 'custportal_photo_backup' = a backup approver: may do everything an approver does, but the
+   database only tells them about photos that have waited more than 2 days (cust.media_daily_digest),
+   so they are not woken for what the approver is about to deal with anyway. */
+function cpaIsPhotoApprover(){ if(state.super)return true; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&(m.indexOf('custportal_photo_approver')!==-1||m.indexOf('custportal_photo_backup')!==-1); }
 function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return expandModules(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length)return expandModules(new Set(m));return expandModules(new Set());}
 /* Usability sits under Control Panel in Administration, but unlike Control Panel it is NOT
    superadmin-only: the Systems department are the people who actually read it, and they are not
@@ -1034,6 +1037,7 @@ function notifGeneralMeta(n){
   if(n.kind==='comment')return {icon:'fa-comment-dots',cls:'t-blue',text:'Commented on a task',taskId:n.task_id||null};
   // Construction photo approval (cust.review_media / cust.notify_media_uploaded).
   if(n.kind==='media_pending')return {icon:'fa-stamp',cls:'t-amber',text:'Photos to approve',taskId:null,go:"notifOpenMedia('review')"};
+  if(n.kind==='media_digest')return {icon:'fa-stamp',cls:'t-amber',text:n.body||'Photos waiting for approval',taskId:null,go:"notifOpenMedia('review')"};
   if(n.kind==='media_rejected')return {icon:'fa-circle-xmark',cls:'t-red',text:n.body||'Photos rejected',taskId:null,go:"notifOpenMedia('upload')"};
   if(n.kind==='media_published')return {icon:'fa-circle-check',cls:'t-green',text:'Photos published',taskId:null,go:"notifOpenMedia('upload')"};
   return {icon:'fa-bell',cls:'t-gray',text:n.body||'Notification',taskId:n.task_id||null};
@@ -8638,7 +8642,8 @@ async function secUserDetail(v,email){
       <div style="padding:14px 16px 16px">
         <div class="tab-grid">${NAV.flatMap(g=>{const gi=g.items.filter(m=>MODSET.has(m.id));if(!gi.length)return[];return['<div class="tab-grid-head">'+esc(g.group)+'</div>',...gi.flatMap(m=>['<label class="chk-tile"><input type="checkbox" class="secMod" value="'+m.id+'" '+((m.id==='network'||mods.includes(m.id))?'checked':'')+' '+((u.super_admin||m.id==='network')?'disabled':'')+'><i class="fa-solid '+m.icon+' tile-ic"></i>'+esc(m.label)+'</label>']
             .concat(m.id==='custportal_admin'?['<label class="chk-tile" title="Opens Customer Portal Admin with only the Photos &amp; Videos tab"><input type="checkbox" class="secMod" value="custportal_photos" '+(mods.includes('custportal_photos')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-photo-film tile-ic"></i>Customer Portal: Photos &amp; Videos only</label>',
-              '<label class="chk-tile" title="May publish or reject construction photos and videos before customers see them (Photos &amp; Videos &gt; Review)"><input type="checkbox" class="secMod" value="custportal_photo_approver" '+(mods.includes('custportal_photo_approver')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-stamp tile-ic"></i>Customer Portal: approve photos</label>']:[]))];}).join('')}</div>
+              '<label class="chk-tile" title="May publish or reject construction photos and videos before customers see them (Photos &amp; Videos &gt; Review)"><input type="checkbox" class="secMod" value="custportal_photo_approver" '+(mods.includes('custportal_photo_approver')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-stamp tile-ic"></i>Customer Portal: approve photos</label>',
+              '<label class="chk-tile" title="May approve like an approver, but is only told when photos have waited more than 2 days"><input type="checkbox" class="secMod" value="custportal_photo_backup" '+(mods.includes('custportal_photo_backup')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-user-shield tile-ic"></i>Customer Portal: backup photo approver</label>']:[]))];}).join('')}</div>
       </div>
     </div>
     ${u.super_admin?'<p style="color:var(--slate);font-size:13px;margin-top:12px">This person is an administrator and always has full access.</p>':`<div style="margin-top:18px;display:flex;justify-content:flex-end;gap:10px"><button class="btn" onclick="navTo('security')">Cancel</button><button class="btn btn-primary" id="secSaveBtn" onclick="secSave('${esc(email)}')"><i class="fa-solid fa-check"></i> Save access</button></div>`}
@@ -20371,9 +20376,6 @@ function cpaPhCss(){return `<style>
   .cph-no{color:#b91c1c}.cph-no:hover{background:#fef2f2;border-color:#fca5a5}
   .cph-un{color:#475569}.cph-un:hover{background:#f1f5f9}
   .cph-mine{font-size:11.5px;color:var(--slate);padding:8px 0}
-  .cph-reasons{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
-  .cph-reason{border:1px solid var(--line);background:#f8fafc;border-radius:16px;padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer}
-  .cph-reason:hover{border-color:#1d4ed8;color:#1d4ed8}
   /* Review preview */
   .cph-box.cph-pv{padding:0;background:#000}
   .cph-pv .cph-boxbar{z-index:3;padding:14px 18px 30px;background:linear-gradient(rgba(0,0,0,.7),transparent)}
@@ -20488,6 +20490,19 @@ function cpaPhCss(){return `<style>
   .cph-th.vid{background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b}
   img.cph-th:not([src]),img.cph-rvm:not([src]){background:linear-gradient(90deg,#eef2f7,#f8fafc,#eef2f7);background-size:200% 100%;animation:cphShim 1.2s linear infinite}
   img.cph-noimg{animation:none;background:#eef2f7}
+  .cph-vth{position:relative;display:block}
+  .cph-vth>i{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;font-size:15px;
+    text-shadow:0 1px 6px rgba(0,0,0,.6);pointer-events:none}
+  .cph-rvc .cph-vth>i{font-size:30px}
+  /* To retake: the uploader's rejected photos, each one tap from the camera for the same place */
+  .cph-fix{border-color:#fecaca;background:#fffafa}
+  .cph-fix .cph-h{color:#b91c1c}
+  .cph-fixsub{font-weight:400;color:var(--slate);font-size:12px;margin-left:8px;text-transform:none;letter-spacing:0}
+  .cph-fixl{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow:auto}
+  .cph-fixi{display:flex;align-items:center;gap:12px;padding:8px 10px;border:1px solid #fee2e2;border-radius:10px;background:#fff}
+  .cph-fixi .cph-th{width:54px;height:54px;flex:none}
+  .cph-fixw{flex:1;min-width:0;font-size:12.5px;color:var(--slate);line-height:1.45}
+  .cph-fixw b{display:block;color:var(--ink);font-size:13.5px}
   @keyframes cphShim{to{background-position:-200% 0}}
   .cph-when{white-space:nowrap;font-weight:600;color:var(--ink)}
   .cph-area{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;
@@ -20599,6 +20614,7 @@ async function cpaPhPaint(projects,units){
   const lastUp=needUnit?await cpaPhLastUploads(flats.map(u=>u.id)):{};
   if(!$('cphWrap')) return;
   wrap.innerHTML=cpaPhModeBar()
+    +'<div id="cphFix"></div>'
     +(cpaIsPhotoApprover()&&!state.super?'':'<div class="cph-note"><i class="fa-solid fa-circle-info"></i>Everything uploaded here waits for approval by the post-sales team before customers can see it.</div>')
     +'<div class="cph-card">'
       +'<div class="cph-bar">'
@@ -20650,7 +20666,68 @@ async function cpaPhPaint(projects,units){
   cpaPhSyncActions();
   cpaPhList();
   cpaPhFillBadge();
+  cpaPhFixList(projects,units);
 }
+
+/* TO RETAKE: what the reviewer rejected from this person's uploads, newest first. Retake opens the
+   camera at once for the same place (flat and section, block, or project) and points the form
+   there; the new photo, once uploaded, replaces the rejected one (cust.replace_rejected_media). */
+async function cpaPhFixList(projects,units){
+  const host=$('cphFix'); if(!host) return;
+  const me=String(state.email||'').toLowerCase(); if(!me) return;
+  const res=await Promise.all(CPA_RV_SECS.map(s=>sb.schema('cust').from(s[0]).select('*').eq('status','rejected')
+    .is('deleted_at',null).ilike('uploaded_by',me).order('reviewed_at',{ascending:false}).limit(60)));
+  if(!$('cphFix')) return;
+  const unitOf={}; (units||[]).forEach(u=>{unitOf[u.id]=u;});
+  const projOf={}; (projects||[]).forEach(p=>{projOf[p.id]=p;});
+  const areas=cpaPhUploadAreas().map(a=>a[0]);
+  const items=[];
+  CPA_RV_SECS.forEach((s,k)=>((res[k]&&res[k].data)||[]).forEach(p=>{
+    const t=s[0]; let place, pid, can=true;
+    if(t==='unit_photos'){
+      const u=unitOf[p.unit_id]; pid=u&&u.project_id;
+      const a=(CPA_PH_AREAS.find(x=>x[0]===(p.area||'common'))||[0,p.area||''])[1];
+      place=(u?(u.tower?u.tower+' · ':'')+'Flat '+u.unit_code:'Flat')+' · '+a;
+      can=!!u&&areas.indexOf(p.area||'common')!==-1;
+    }else if(t==='tower_photos'){ pid=p.project_id; place=p.tower||'Block'; }
+    else { pid=p.project_id; place='Whole project'; }
+    const pn=projOf[pid]?String(projOf[pid].name).split('(')[0].trim():'';
+    items.push({t,p,place,pn,can,when:p.reviewed_at||p.created_at});
+  }));
+  items.sort((a,b)=>String(b.when).localeCompare(String(a.when)));
+  CPA_PH.fix=items;
+  if(!items.length){ host.innerHTML=''; return; }
+  host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>To retake · '+items.length
+    +'<span class="cph-fixsub">The reviewer rejected these. A new photo for the same place replaces the rejected one.</span></div>'
+    +'<div class="cph-fixl">'+items.map((it,i)=>{
+      const p=it.p, isVid=(p.file_type||'').indexOf('video')===0;
+      const th=isVid&&!p.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
+        :'<img class="cph-th" '+cphThumbAttrs(p,it.t)+' alt="" decoding="async">';
+      return '<div class="cph-fixi">'+th
+        +'<div class="cph-fixw"><b>'+esc(it.place)+'</b>'+esc([it.pn,p.review_note,'rejected '+fmtDate(it.when)].filter(Boolean).join(' · '))+'</div>'
+        +(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+i+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'')
+        +'</div>';
+    }).join('')+'</div></div>';
+  cphLazy(host);
+}
+window.cpaPhRetake=function(i,isVid){
+  const it=(CPA_PH.fix||[])[i]; if(!it) return;
+  const p=it.p, units=CPA.units||[];
+  let key='all';
+  if(it.t==='unit_photos'){
+    const u=units.find(x=>String(x.id)===String(p.unit_id));
+    CPA_PH.level='unit'; CPA_PH.project=String(u?u.project_id:CPA_PH.project); CPA_PH.tower=u?String(u.tower||''):''; CPA_PH.unit=String(p.unit_id);
+    key=p.area||'common';
+  }else if(it.t==='tower_photos'){ CPA_PH.level='tower'; CPA_PH.project=String(p.project_id); CPA_PH.tower=String(p.tower||''); CPA_PH.unit=''; }
+  else { CPA_PH.level='project'; CPA_PH.project=String(p.project_id); CPA_PH.tower=''; CPA_PH.unit=''; }
+  // The camera has to open inside this tap - a phone refuses it once the click has been handled.
+  cpaPhPick(key,isVid?'video':'photo',null,function(){
+    const go=$('cphGo'); if(go){ go.scrollIntoView({behavior:'smooth',block:'center'}); }
+    toast('Added for '+it.place+' — press Upload','ok');
+  });
+  cpaPhFollowPickers();
+  cpaPhPaint().then(()=>{ const z=document.querySelector('.cph-zone[data-zone="'+key+'"]'); if(z) z.scrollIntoView({behavior:'smooth',block:'center'}); });
+};
 
 // Latest upload per flat (any status, not deleted) - newest first, so the first row per flat wins.
 async function cpaPhLastUploads(ids){
@@ -20762,13 +20839,13 @@ function cpaPhStaged(){
    Gallery is the multi-select picker. On a computer, capture is ignored and all three open the file
    picker. Every capture goes through cpaPhAdd, so shooting five photos one after another adds five,
    the same as picking five. */
-window.cpaPhPick=function(key,mode,ev){
+window.cpaPhPick=function(key,mode,ev,after){
   if(ev) ev.stopPropagation();
   const inp=document.createElement('input');
   inp.type='file';
   if(mode==='gallery'){ inp.multiple=true; inp.accept='image/*,video/*'; }
   else{ inp.accept=mode==='video'?'video/*':'image/*'; inp.setAttribute('capture','environment'); }
-  inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); };
+  inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); if(after&&inp.files.length) after(); };
   inp.click();
 };
 function cpaPhWireZones(){
@@ -20872,23 +20949,29 @@ window.cpaPhUpload=async function(){
     const {f,area}=jobs[i];
     go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading '+(i+1)+' of '+jobs.length+'…';
     try{
+      // Made smaller here first (cphPrepare), so a site upload over mobile data takes seconds.
+      const prep=await cphPrepare(f);
+      const name=prep.full!==f?f.name.replace(/\.[^.]*$/,'')+'.jpg':f.name;
       let key,table,row;
       if(lvl==='project'){
-        key=s3KeyForProjectPhoto(CPA_PH.project,f.name); table='project_photos';
+        key=s3KeyForProjectPhoto(CPA_PH.project,name); table='project_photos';
         row={project_id:Number(CPA_PH.project)};
       }else if(lvl==='tower'){
-        key=s3KeyForTowerPhoto(CPA_PH.project,CPA_PH.tower,f.name); table='tower_photos';
+        key=s3KeyForTowerPhoto(CPA_PH.project,CPA_PH.tower,name); table='tower_photos';
         row={project_id:Number(CPA_PH.project),tower:CPA_PH.tower};
       }else{
-        key=s3KeyForUnitPhoto(CPA_PH.unit,f.name); table='unit_photos';
+        key=s3KeyForUnitPhoto(CPA_PH.unit,name); table='unit_photos';
         row={unit_id:Number(CPA_PH.unit),area:area};
       }
-      const {data,error}=await uploadFileToS3(key,f);
+      const {data,error}=await uploadFileToS3(key,prep.full);
       if(error) throw new Error(error.message);
+      // A thumbnail that fails to go up is not worth failing the photo for - one is made later.
+      let thumbPath=null;
+      if(prep.thumb){ try{ const tu=await uploadFileToS3(cphThumbKey(key),prep.thumb); if(!tu.error) thumbPath=tu.data.path; }catch(_e){} }
       // Stored as 'pending' whatever is sent - the database sets that (media_status_guard).
       const {data:ins,error:insErr}=await sb.schema('cust').from(table).insert(Object.assign(row,{
-        taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,
-        file_size:f.size,file_type:f.type,uploaded_by:state.email})).select('id').single();
+        taken_on:takenOn,caption,storage_path:data.path,thumb_path:thumbPath,file_name:name,
+        file_size:prep.full.size,file_type:prep.full.type||f.type,uploaded_by:state.email})).select('id').single();
       if(insErr) throw new Error(insErr.message);
       (newIds[table]=newIds[table]||[]).push(ins.id);
       ok++;
@@ -20899,11 +20982,17 @@ window.cpaPhUpload=async function(){
      again, instead of being quietly dropped along with the ones that worked. */
   if(!failed.length) cpaPhClear(); else cpaPhRepaintZones();
   // One notification per batch to the approvers, not one per file.
-  let told=0;
+  let told=0, replaced=0;
   for(const t of Object.keys(newIds)){
     try{ const {data:n}=await sb.schema('cust').rpc('notify_media_uploaded',{p_table:t,p_ids:newIds[t]}); told=Math.max(told,Number(n||0)); }catch(_e){}
+    // What was rejected at the same place (flat and section, block, or project) is replaced by
+    // these. Only the rows leave the screens - photo files are never deleted from S3.
+    try{
+      const {data:old}=await sb.schema('cust').rpc('replace_rejected_media',{p_table:t,p_ids:newIds[t]});
+      replaced+=(old||[]).length;
+    }catch(_e){}
   }
-  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded — waiting for approval'+(told?'':'. No photo approver is set up yet (Control Panel).'),told?'ok':'warn');
+  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded — waiting for approval'+(replaced?' · replaces '+replaced+' rejected':'')+(told?'':'. No photo approver is set up yet (Control Panel).'),told?'ok':'warn');
   if(failed.length) toast(failed.length+' could not be uploaded: '+failed[0],'err');
   cpaPhList();
 };
@@ -21007,7 +21096,10 @@ function cphPump(){
   while(cphBusy<6&&cphQ.length){
     const img=cphQ.shift(); if(!img.isConnected) continue;
     cphBusy++;
-    cphSignedUrl(img.getAttribute('data-ph')).then(u=>{ if(u){ img.src=u; } else img.classList.add('cph-noimg'); })
+    // onerror: a file that is no longer in S3 (rejected before 5 Oct 2026 files were kept) shows
+    // as missing rather than as a broken image.
+    cphSignedUrl(img.getAttribute('data-ph')).then(u=>{ if(u){ img.onerror=()=>img.classList.add('cph-noimg');
+        img.onload=()=>{ const bf=img.getAttribute('data-bf'); if(bf) cphBackfill(bf); }; img.src=u; } else img.classList.add('cph-noimg'); })
       .catch(()=>img.classList.add('cph-noimg')).finally(()=>{ cphBusy--; cphPump(); });
   }
 }
@@ -21017,6 +21109,90 @@ function cphLazy(root){
   if(!cphIO) cphIO=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting){ cphIO.unobserve(e.target); cphQ.push(e.target); cphPump(); } }),{rootMargin:'300px 0px'});
   imgs.forEach(i=>cphIO.observe(i));
 }
+/* PHOTOS ARE MADE SMALLER ON THE PHONE, AND EACH GETS A THUMBNAIL (5 Oct 2026).
+
+   A phone photo is 4-8 MB and 4000px wide; nobody - customer or approver - looks at it larger than
+   a screen. Before upload it is redrawn at most 2560px on its long side (JPEG, quality 0.85: about
+   0.4-0.8 MB, no visible loss at screen size) plus a 480px thumbnail, and lists show the thumbnail.
+   The original is kept as taken when it is already smaller, or when the browser cannot read it
+   (some HEIC). Videos go up as they are, with a thumbnail from a frame at about one second. */
+const CPH_FULL=2560, CPH_THUMB=480;
+async function cphDecode(blob){
+  if(window.createImageBitmap){ try{ return await createImageBitmap(blob,{imageOrientation:'from-image'}); }catch(_e){} }
+  return await new Promise((res,rej)=>{ const u=URL.createObjectURL(blob); const im=new Image();
+    im.onload=()=>{ URL.revokeObjectURL(u); res(im); }; im.onerror=()=>{ URL.revokeObjectURL(u); rej(new Error('Could not read the image')); }; im.src=u; });
+}
+function cphJpeg(src,w,h,max,q){
+  if(!w||!h) return Promise.resolve(null);
+  const k=Math.min(1,max/Math.max(w,h)), cw=Math.max(1,Math.round(w*k)), ch=Math.max(1,Math.round(h*k));
+  const c=document.createElement('canvas'); c.width=cw; c.height=ch;
+  const g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,cw,ch); g.drawImage(src,0,0,cw,ch);
+  return new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',q));
+}
+// A frame from a video (a local file, or a signed S3 address for one already uploaded).
+function cphVideoFrame(src,local){
+  return new Promise(res=>{
+    const v=document.createElement('video'); v.muted=true; v.playsInline=true; v.preload='auto';
+    if(!local) v.crossOrigin='anonymous';
+    let done=false;
+    const fin=b=>{ if(done) return; done=true; clearTimeout(tm); if(local) URL.revokeObjectURL(src); try{ v.removeAttribute('src'); v.load(); }catch(_e){} res(b||null); };
+    const tm=setTimeout(()=>fin(null),12000);
+    v.onloadedmetadata=()=>{ try{ v.currentTime=Math.min(1,(v.duration||2)/2); }catch(_e){ fin(null); } };
+    v.onseeked=()=>{ cphJpeg(v,v.videoWidth,v.videoHeight,CPH_THUMB,0.72).then(fin,()=>fin(null)); };
+    v.onerror=()=>fin(null);
+    v.src=src;
+  });
+}
+// -> {full, thumb}: what to upload, and its thumbnail (null when none could be made).
+async function cphPrepare(file){
+  const t=file.type||'';
+  if(/^video\//.test(t)) return {full:file,thumb:await cphVideoFrame(URL.createObjectURL(file),true)};
+  if(!/^image\//.test(t)||/gif|svg/.test(t)) return {full:file,thumb:null};
+  try{
+    const im=await cphDecode(file); const w=im.width||im.naturalWidth, h=im.height||im.naturalHeight;
+    const big=await cphJpeg(im,w,h,CPH_FULL,0.85), thumb=await cphJpeg(im,w,h,CPH_THUMB,0.72);
+    if(im.close) im.close();
+    return {full:(big&&big.size<file.size)?big:file,thumb};
+  }catch(_e){ return {full:file,thumb:null}; }
+}
+// customer-portal/units/9/photos/123_a.png -> customer-portal/units/9/photos/thumbs/123_a.jpg
+function cphThumbKey(key){ return key.replace(/\/([^\/]+)$/,(m,n)=>'/thumbs/'+n.replace(/\.[^.]*$/,'')+'.jpg'); }
+
+/* Photos uploaded before thumbnails existed get one the first time a staff screen shows them: the
+   full file is read once more, shrunk here, and the thumbnail saved (cust.set_media_thumb). One at a
+   time, after the list itself has loaded, and at most once per photo per visit. Photos only - a
+   video frame from S3 is left to the next upload. */
+const cphBfQ=[], cphBfSeen=new Set(); let cphBfBusy=false;
+function cphBackfill(spec){ if(!spec||cphBfSeen.has(spec)) return; cphBfSeen.add(spec); cphBfQ.push(spec); cphBfPump(); }
+async function cphBfPump(){
+  if(cphBfBusy) return; const spec=cphBfQ.shift(); if(!spec) return; cphBfBusy=true;
+  try{
+    const i=spec.indexOf(':'), j=spec.indexOf(':',i+1);
+    const table=spec.slice(0,i), id=Number(spec.slice(i+1,j)), path=spec.slice(j+1);
+    const key=path.slice(3);
+    const {data,error}=await s3Sign('get',key);
+    if(!error&&data){
+      const r=await fetch(data.url);
+      if(r.ok){
+        const im=await cphDecode(await r.blob());
+        const thumb=await cphJpeg(im,im.width||im.naturalWidth,im.height||im.naturalHeight,CPH_THUMB,0.72);
+        if(im.close) im.close();
+        if(thumb){
+          const up=await uploadFileToS3(cphThumbKey(key),thumb);
+          if(!up.error) await sb.schema('cust').rpc('set_media_thumb',{p_table:table,p_id:id,p_thumb:up.data.path});
+        }
+      }
+    }
+  }catch(_e){}
+  cphBfBusy=false; setTimeout(cphBfPump,150);
+}
+// The image a list shows for a photo: its thumbnail, or the full file for one that has none yet
+// (data-bf asks for a thumbnail to be made once it has loaded).
+function cphThumbAttrs(p,table){
+  const isVideo=(p.file_type||'').indexOf('video')===0;
+  return 'data-ph="'+esc(p.thumb_path||p.storage_path)+'"'
+    +(!p.thumb_path&&!isVideo&&table?' data-bf="'+esc(table+':'+p.id+':'+p.storage_path)+'"':'');
+}
 // `cols` names the middle columns and `vals` fills them for one row, so the three levels share
 // one table rather than three that could drift apart.
 async function cpaPhRows(list,table,cols,vals,emptyMsg){
@@ -21025,10 +21201,9 @@ async function cpaPhRows(list,table,cols,vals,emptyMsg){
     const isVideo=(p.file_type||'').indexOf('video')===0;
     const open="s3OpenSigned('"+p.storage_path.replace(/'/g,"\\'")+"')";
     let thumb;
-    // A rejected file has been removed from S3 - there is nothing to show or open.
-    if(p.status==='rejected'){ thumb='<div class="cph-th vid" title="File removed when it was rejected"><i class="fa-solid fa-ban"></i></div>'; }
+    if(isVideo&&p.thumb_path){ thumb='<span class="cph-vth" onclick="'+open+'" title="Open video"><img class="cph-th" '+cphThumbAttrs(p,table)+' alt="" decoding="async"><i class="fa-solid fa-circle-play"></i></span>'; }
     else if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
-    else thumb='<img class="cph-th" data-ph="'+esc(p.storage_path)+'" alt="" decoding="async" onclick="'+open+'" title="Open full size">';
+    else thumb='<img class="cph-th" '+cphThumbAttrs(p,table)+' alt="" decoding="async" onclick="'+open+'" title="Open full size">';
     return '<tr><td>'+thumb+'</td>'
       +'<td class="cph-when">'+esc(fmtDate(p.taken_on))+'</td>'
       +'<td>'+cpaMediaStatusTag(p)+'</td>'
@@ -21046,7 +21221,7 @@ function cpaMediaStatusTag(p){
   const who=p.reviewed_by&&p.status!=='pending'&&!/^already live/.test(p.reviewed_by)?' by '+String(p.reviewed_by).split('@')[0]:'';
   return '<span class="tag '+s[1]+'" style="white-space:nowrap" title="'+esc(s[0]+who+(p.reviewed_at?' · '+fmtDate(p.reviewed_at):''))+'">'
     +'<i class="fa-solid '+s[2]+'"></i> '+esc(s[0])+'</span>'
-    +(p.status==='rejected'&&p.review_note?'<div class="cph-why">'+esc(p.review_note)+'</div>':'');
+    +(p.status==='rejected'?'<div class="cph-why">'+(p.review_note?esc(p.review_note)+' · ':'')+'Upload a new one to replace it</div>':'');
 }
 window.cpaPhDelete=async function(table,id){
   if(!await confirmDialog('Remove this from the customer portal? The customer will no longer see it.',
@@ -21059,8 +21234,8 @@ window.cpaPhDelete=async function(table,id){
 /* ---------- Photos & Videos > Review: publish or reject before customers see anything ----------
    Split the way things are uploaded - Projects (whole-project photos), Blocks, Flats - and within
    that grouped by where they are, so a whole flat or block can be published in one go. Approve,
-   reject (a reason is required; the uploader is told it, and the file is removed from S3) and
-   unpublish all go through cust.review_media(), which also refuses an approver's own uploads. */
+   reject (one click; the file is kept, a rejected photo can still be published, and the
+   uploader's next photo for the same place replaces it) and unpublish all go through cust.review_media(), which also refuses an approver's own uploads. */
 /* Everything waiting, counted per project, per section and per block, so the pickers can say where
    the work is. (5 Oct 2026: Review opened on the first project alphabetically, Dream Ananta, while
    all 262 waiting photos were Dream Gurukul flats - the screen read "nothing waiting".) */
@@ -21174,7 +21349,7 @@ async function cpaRvList(projUnits){
     CPA_RV.order=keys.flatMap(k=>groups[k].items.map(p=>p.id));   // the preview's arrows follow this
     const cards=await Promise.all(list.map(p=>cpaRvCard(p,t)));
     const cardOf={}; list.forEach((p,i)=>{cardOf[p.id]=cards[i];});
-    const canPublish=CPA_RV.status==='pending'||CPA_RV.status==='unpublished';
+    const canPublish=CPA_RV.status!=='published';
     const me=String(state.email||'').toLowerCase();
     host.innerHTML=keys.map(k=>{
       const g=groups[k];
@@ -21182,7 +21357,7 @@ async function cpaRvList(projUnits){
       const ids=g.items.filter(p=>state.super||String(p.uploaded_by||'').toLowerCase()!==me).map(p=>p.id);
       return '<div class="cph-rvg"><div class="cph-rvgh"><b>'+esc(g.label)+'</b><span>'+g.items.length+' item'+(g.items.length===1?'':'s')+'</span>'
         +(canPublish&&ids.length?'<button class="btn btn-sm" onclick="cpaRvDecide(\'publish\','+JSON.stringify(ids)+')"><i class="fa-solid fa-check"></i> Publish all '+ids.length+'</button>':'')
-        +(ids.length&&CPA_RV.status!=='rejected'?'<button class="btn btn-sm" data-tick-ids="'+JSON.stringify(ids)+'" onclick="cpaRvTick('+JSON.stringify(ids)+')"><i class="fa-regular fa-square-check"></i> Tick all</button>':'')+'</div>'
+        +(ids.length?'<button class="btn btn-sm" data-tick-ids="'+JSON.stringify(ids)+'" onclick="cpaRvTick('+JSON.stringify(ids)+')"><i class="fa-regular fa-square-check"></i> Tick all</button>':'')+'</div>'
         +'<div class="cph-rvgrid">'+g.items.map(p=>cardOf[p.id]).join('')+'</div></div>';
     }).join('')
       +(list.length>=240?'<div class="cph-empty">Showing the newest 240. Publish or reject these to see the rest.</div>':'');
@@ -21196,9 +21371,9 @@ async function cpaRvCard(p,t){
   const open="s3OpenSigned('"+String(p.storage_path||'').replace(/'/g,"\\'")+"')";
   let media;
   const prev='cpaRvPreview('+p.id+')';
-  if(p.status==='rejected') media='<div class="cph-rvm vid"><i class="fa-solid fa-ban"></i><span>File removed</span></div>';
+  if(isVideo&&p.thumb_path) media='<span class="cph-vth" onclick="'+prev+'" title="Play video"><img class="cph-rvm" '+cphThumbAttrs(p,t)+' alt="" decoding="async"><i class="fa-solid fa-circle-play"></i></span>';
   else if(isVideo) media='<div class="cph-rvm vid" onclick="'+prev+'" title="Play video"><i class="fa-solid fa-circle-play"></i><span>Video</span></div>';
-  else media='<img class="cph-rvm" data-ph="'+esc(p.storage_path)+'" alt="" decoding="async" onclick="'+prev+'" title="Open larger, with Publish / Reject">';
+  else media='<img class="cph-rvm" '+cphThumbAttrs(p,t)+' alt="" decoding="async" onclick="'+prev+'" title="Open larger, with Publish / Reject">';
   const area=t==='unit_photos'?((CPA_PH_AREAS.find(a=>a[0]===(p.area||'common'))||[0,p.area])[1]):'';
   const mine=String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super;
   const on=CPA_RV.sel.has(p.id);
@@ -21207,12 +21382,14 @@ async function cpaRvCard(p,t){
   if(mine) acts='<span class="cph-mine" title="Another approver has to review your own uploads">Your upload</span>';
   else if(p.status==='pending'||p.status==='unpublished')
     acts='<button class="cph-ok" onclick="cpaRvDecide(\'publish\','+id+')" title="Publish - customers will see it"><i class="fa-solid fa-check"></i></button>'
-        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject - tell the uploader why"><i class="fa-solid fa-xmark"></i></button>';
+        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject - the uploader is asked for a better one"><i class="fa-solid fa-xmark"></i></button>';
   else if(p.status==='published')
     acts='<button class="cph-un" onclick="cpaRvDecide(\'unpublish\','+id+')" title="Unpublish - hide it from customers again"><i class="fa-solid fa-eye-slash"></i></button>'
-        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject and remove the file"><i class="fa-solid fa-xmark"></i></button>';
+        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject - hide it and ask the uploader for a better one"><i class="fa-solid fa-xmark"></i></button>';
+  else if(p.status==='rejected')
+    acts='<button class="cph-ok" onclick="cpaRvDecide(\'publish\','+id+')" title="Publish after all - customers will see it"><i class="fa-solid fa-check"></i></button>';
   return '<div class="cph-rvc'+(on?' cph-picked':'')+'" data-id="'+p.id+'">'
-    +(p.status!=='rejected'&&!mine?'<label class="cph-rvck"><input type="checkbox" '+(on?'checked':'')+' onchange="cpaRvToggle('+p.id+',this.checked)"></label>':'')
+    +(!mine?'<label class="cph-rvck"><input type="checkbox" '+(on?'checked':'')+' onchange="cpaRvToggle('+p.id+',this.checked)"></label>':'')
     +media
     +'<div class="cph-rvi"><div class="cph-rvd">'+esc(fmtDate(p.taken_on))+(area?' · '+esc(area):'')+'</div>'
       +'<div class="cph-rvu" title="'+esc(p.uploaded_by||'')+'">'+esc(String(p.uploaded_by||'').split('@')[0])+'</div>'
@@ -21225,7 +21402,7 @@ function cpaRvBar(){
   const n=CPA_RV.sel.size, st=CPA_RV.status;
   const ids=JSON.stringify([...CPA_RV.sel]);
   bar.innerHTML='<span class="cph-fcount">'+(n?n+' ticked':'Tick photos to act on several at once')+'</span>'
-    +(n?((st==='pending'||st==='unpublished')?'<button class="btn btn-sm btn-primary" onclick="cpaRvDecide(\'publish\','+ids+')"><i class="fa-solid fa-check"></i> Publish '+n+'</button>':'')
+    +(n?(st!=='published'?'<button class="btn btn-sm btn-primary" onclick="cpaRvDecide(\'publish\','+ids+')"><i class="fa-solid fa-check"></i> Publish '+n+'</button>':'')
       +(st==='published'?'<button class="btn btn-sm" onclick="cpaRvDecide(\'unpublish\','+ids+')"><i class="fa-solid fa-eye-slash"></i> Unpublish '+n+'</button>':'')
       +(st!=='rejected'?'<button class="btn btn-sm btn-danger" onclick="cpaRvDecide(\'reject\','+ids+')"><i class="fa-solid fa-xmark"></i> Reject '+n+'</button>':'')
       +'<button class="btn btn-sm" onclick="cpaRvClearSel()">Clear</button>':'');
@@ -21284,7 +21461,7 @@ window.cpaRvPreview=async function(id){
   else if(p.status==='published')
     acts='<button class="cph-pvbtn un" onclick="cpaRvPvDecide(\'unpublish\','+p.id+')"><i class="fa-solid fa-eye-slash"></i> Unpublish</button>'
         +'<button class="cph-pvbtn no" onclick="cpaRvPvDecide(\'reject\','+p.id+')"><i class="fa-solid fa-xmark"></i> Reject</button>';
-  else acts='<span class="cph-pvnote">Rejected'+(p.review_note?': '+esc(p.review_note):'')+'</span>';
+  else acts='<button class="cph-pvbtn ok" onclick="cpaRvPvDecide(\'publish\','+p.id+')"><i class="fa-solid fa-check"></i> Publish after all</button>';
   const box=document.createElement('div');
   box.className='cph-box cph-pv'; box.id='cphPv';
   box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
@@ -21305,10 +21482,19 @@ window.cpaRvPreview=async function(id){
       else if(e.key==='ArrowRight') cpaRvPreviewStep(1);
       else if(e.key==='ArrowLeft') cpaRvPreviewStep(-1);
     }); }
-  const url=p.status==='rejected'?null:await cphSignedUrl(p.storage_path);
+  // The thumbnail is usually signed already, so it shows at once; the full photo replaces it.
+  if(!isVid&&p.thumb_path){
+    cphSignedUrl(p.thumb_path).then(tu=>{ const st=box.querySelector('.cph-pvstage');
+      if(tu&&st&&box.isConnected&&!st.querySelector('img')) st.innerHTML='<img src="'+tu+'" alt="">'; });
+  }
+  const url=await cphSignedUrl(p.storage_path);
   const stage=box.querySelector('.cph-pvstage'); if(!stage||!box.isConnected) return;
-  stage.innerHTML=!url?'<div class="cph-pvload">File not available</div>'
-    :isVid?'<video src="'+url+'" controls autoplay playsinline></video>':'<img src="'+url+'" alt="">';
+  if(!url){ stage.innerHTML='<div class="cph-pvload">File not available</div>'; return; }
+  if(isVid){ stage.innerHTML='<video src="'+url+'" controls autoplay playsinline></video>'; return; }
+  const full=new Image();
+  full.onload=()=>{ if(box.isConnected){ stage.innerHTML=''; stage.appendChild(full); } };
+  full.onerror=()=>{ if(box.isConnected&&!stage.querySelector('img')) stage.innerHTML='<div class="cph-pvload">File not available</div>'; };
+  full.alt=''; full.src=url;
 };
 window.cpaRvPreviewClose=function(){ const b=$('cphPv'); if(b) b.remove(); };
 window.cpaRvPreviewStep=function(d){
@@ -21323,34 +21509,18 @@ window.cpaRvPvDecide=function(decision,id){
   cpaRvPreviewClose();
   cpaRvDecide(decision,[id],true);
 };
-const CPA_RV_REASONS=['Blurred or out of focus','Wrong flat or block','Too dark','Not a construction photo','Duplicate','Shows people or private information'];
+// Reject is one click. Nothing is lost by it: the file stays, the photo can still be published
+// from 'Rejected', and the uploader's next photo for the same place replaces it.
 window.cpaRvDecide=function(decision,ids,fromPreview){
   if(!fromPreview) CPA_RV.pvNext=null;
   ids=(ids||[]).filter(Boolean);
   if(!ids.length) return;
-  if(decision!=='reject'){ cpaRvDo(decision,ids,null); return; }
-  const n=ids.length;
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-circle-xmark" style="color:var(--err)"></i> Reject '+n+' item'+(n===1?'':'s')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm"><p style="margin:0 0 8px;font-size:13px;color:var(--slate)">The uploader is told this reason in their notifications, and the file'+(n===1?' is':'s are')+' removed. Customers never see '+(n===1?'it':'them')+'.</p>'
-    +'<div class="cph-reasons">'+CPA_RV_REASONS.map(r=>'<button type="button" class="cph-reason" onclick="$(\'cphRvWhy\').value=this.textContent;$(\'cphRvWhy\').focus()">'+esc(r)+'</button>').join('')+'</div>'
-    +'<label>Reason</label><textarea id="cphRvWhy" rows="3" maxlength="300" placeholder="What should be fixed?"></textarea></div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
-    +'<button class="btn btn-danger-solid" id="cphRvGo" onclick="cpaRvRejectGo('+JSON.stringify(ids)+')"><i class="fa-solid fa-xmark"></i> Reject</button></div>');
-  setTimeout(()=>{const t=$('cphRvWhy'); if(t) t.focus();},60);
-};
-window.cpaRvRejectGo=async function(ids){
-  const why=($('cphRvWhy')||{}).value||'';
-  if(!why.trim()){ toast('Please give a reason','err'); return; }
-  const b=$('cphRvGo'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Rejecting…'; }
-  closeModal();
-  await cpaRvDo('reject',ids,why.trim());
+  cpaRvDo(decision,ids,null);
 };
 async function cpaRvDo(decision,ids,note){
   const {data,error}=await sb.schema('cust').rpc('review_media',{p_table:CPA_RV.sec,p_ids:ids,p_decision:decision,p_note:note});
   if(error){ toast(error.message,'err'); return; }
   const done=data||[];
-  // A rejected file is not kept: remove it from S3 (the row stays, so the uploader can see why).
-  if(decision==='reject') await Promise.all(done.map(r=>r.storage_path?s3Delete(r.storage_path).catch(()=>null):null));
   const skipped=ids.length-done.length;
   const verb={publish:'published',reject:'rejected',unpublish:'unpublished'}[decision];
   toast(done.length+' '+verb+(skipped?' · '+skipped+' skipped (your own uploads, or already changed)':''),skipped&&!done.length?'warn':'ok');
@@ -23420,8 +23590,8 @@ function custPgCss(){return `<style>
 
 // One tile. `i` indexes CUST_PG.items, which is what the viewer walks through.
 function custPgTile(it,i,showRoom){
-  const media=it.url
-    ?(it.isVideo?'<video src="'+it.url+'#t=0.5" muted playsinline preload="metadata"></video>':'<img src="'+it.url+'" alt="" loading="lazy">')
+  const media=it.tile
+    ?(it.isVideo&&!it.thumb?'<video src="'+it.tile+'#t=0.5" muted playsinline preload="metadata"></video>':'<img src="'+it.tile+'" alt="" loading="lazy">')
     :'<div class="cpg-ph"><i class="fa-solid '+(it.isVideo?'fa-film':'fa-image')+'"></i></div>';
   return '<button type="button" class="cpg-tile" onclick="custPgOpen('+i+')" aria-label="Open '+esc(it.label)+' '+(it.isVideo?'video':'photo')+' of '+esc(fmtDate(it.date))+'">'
     +media+(it.isVideo?'<div class="cpg-play"><span><i class="fa-solid fa-play"></i></span></div>':'')
@@ -23464,8 +23634,11 @@ async function custTabProgress(unit){
   const roomOf=k=>(CUST_PG_AREAS.find(a=>a[0]===k)||CUST_PG_AREAS[0]);
   const raw=block.map(p=>({p,label:'Block',roomKey:null,room:null}))
     .concat(flat.map(p=>{const r=roomOf(p.area||'common');return {p,label:r[1],roomKey:r[0],room:r[1]};}));
-  const urls=await Promise.all(raw.map(r=>s3SignedUrl(r.p.storage_path).catch(()=>null)));
-  CUST_PG.items=raw.map((r,i)=>({url:urls[i],isVideo:(r.p.file_type||'').indexOf('video')===0,
+  /* The grid loads thumbnails; the full photo or video is fetched only when it is opened. Before
+     5 Oct 2026 every full-size file was signed and downloaded just to draw the grid. */
+  const tiles=await Promise.all(raw.map(r=>s3SignedUrl(r.p.thumb_path||r.p.storage_path).catch(()=>null)));
+  CUST_PG.items=raw.map((r,i)=>({tile:tiles[i],thumb:!!r.p.thumb_path,url:r.p.thumb_path?null:tiles[i],path:r.p.storage_path,
+    isVideo:(r.p.file_type||'').indexOf('video')===0,
     date:r.p.taken_on,label:r.label,roomKey:r.roomKey,room:r.room,where:r.roomKey?'Your flat':'Your block'}));
   CUST_PG.flat=CUST_PG.items.map((it,i)=>it.roomKey?i:-1).filter(i=>i>=0);
   CUST_PG.room='all';
@@ -23534,10 +23707,18 @@ window.custPgOpen=function(start){
   function shut(){ document.removeEventListener('keydown',onKey); if(box.parentNode) box.parentNode.removeChild(box); document.body.style.overflow=''; }
   function draw(){
     const it=CUST_PG.items[list[pos]];
+    // Opened for the first time: show the thumbnail, fetch the full file, then draw again.
+    if(!it.url&&it.path&&!it.loading){
+      it.loading=true;
+      s3SignedUrl(it.path).then(u=>{ it.url=u||null; it.failed=!u; }).catch(()=>{ it.failed=true; })
+        .finally(()=>{ it.loading=false; if(box.isConnected&&CUST_PG.items[list[pos]]===it) draw(); });
+    }
+    const src=it.url||(it.isVideo?null:it.tile);
     box.innerHTML='<div class="cpg-lbbar"><span class="t">'+esc(it.where)+(it.room?' · '+esc(it.room):'')+'</span><span>'+esc(fmtDate(it.date))+'</span>'
       +'<span class="c">'+(pos+1)+' / '+list.length+'</span><button class="cpg-lbx" title="Close">&times;</button></div>'
       +'<div class="cpg-lbstage">'
-        +(it.url?(it.isVideo?'<video src="'+it.url+'" controls autoplay playsinline></video>':'<img src="'+it.url+'" alt="">'):'<div style="color:#94a3b8">This file could not be loaded.</div>')
+        +(src?(it.isVideo?'<video src="'+src+'" controls autoplay playsinline></video>':'<img src="'+src+'" alt="">')
+             :'<div style="color:#94a3b8">'+(it.loading?'<i class="fa-solid fa-spinner fa-spin"></i>':'This file could not be loaded.')+'</div>')
         +(list.length>1?'<button class="cpg-lbnav prev" title="Previous"><i class="fa-solid fa-chevron-left"></i></button><button class="cpg-lbnav next" title="Next"><i class="fa-solid fa-chevron-right"></i></button>':'')
       +'</div>';
     box.querySelector('.cpg-lbx').onclick=shut;
