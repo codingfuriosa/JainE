@@ -18837,6 +18837,13 @@ async function cpaStaffOptions(force){
 
 VIEWS.custportal_admin=async function(v,seg){
   setCrumb(['Stakeholder Portals','Customer Portal Admin']);
+  /* ".../custportal-admin.html#/3/review" - the "Review now" link in an approver's email - opens
+     Photos & Videos on Review. Taken once and dropped from the address, so switching back to Upload
+     afterwards is not overruled by it. */
+  if(Array.isArray(seg)&&seg.indexOf('review')!==-1){
+    if(cpaIsPhotoApprover()){ CPA_PH.mode='review'; CPA_RV.status='pending'; CPA_RV.sel.clear(); }
+    try{ history.replaceState(history.state,'',location.pathname+location.search+'#/'+seg.filter(s=>s!=='review').join('/')); }catch(_e){}
+  }
   if(cpaPhotosOnly()){
     v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',['Photos & Videos'],0)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
     const h=$('cpaBody');if(h) await cpaRenderPhotos(h);
