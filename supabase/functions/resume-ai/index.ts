@@ -20,11 +20,14 @@ const MODEL = 'claude-haiku-4-5-20251001';
    model's 404 and HR was told the CV could not be read, with no sign of what the models that
    matter had said. The first two failures were thrown away.
 
-   gemini-flash-latest leads because it is the model the nightly transcription job runs on in this
-   same project, with this same GEMINI_API_KEY, every night - so it is known reachable rather than
-   assumed. The aliases are deliberate: a pinned version silently stopped existing once already
-   and cost 65 calls before anybody noticed. */
-const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-2.0-flash'];
+   These two, and only these two, because this project has already been through the exercise of
+   asking the key what it may use: gemini-2.5-flash answers 404 "no longer available to new users"
+   and took 65 lost-call transcriptions down with it before anyone noticed, and gemini-2.0-flash is
+   retired as well. Both of the aliases below are what the nightly transcription job runs on, with
+   this same GEMINI_API_KEY, every night - known reachable rather than assumed. Aliases rather than
+   pinned versions for exactly the reason above. Adding a third name to this list without checking
+   it against the key first just buys another silent 404. */
+const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
 const OWN_ROOT_PREFIXES = ['portal/', 'legal/'];
 
 function parseJson(text: string): any {
@@ -102,6 +105,26 @@ RULES:
 - Use "" for missing text and [] for missing lists.
 - Valid JSON only.`;
 
+/* HR reads these messages, not a developer, and "finishReason: RECITATION" tells them nothing -
+   least of all that the fault is the file rather than the portal. RECITATION in particular is not
+   a malfunction: the model has recognised the document as something published on the web and will
+   not copy it back out, which is what happens if somebody uploads a sample CV off a template site
+   instead of a real one. That is worth saying plainly, because the fix is to upload the real CV. */
+function finishReasonInEnglish(reason: string): string {
+  switch (reason) {
+    case 'RECITATION':
+      return 'the reader recognised this as a document published on the web - a sample or template CV rather than a real one - and would not copy it out';
+    case 'MAX_TOKENS':
+      return 'the CV was too long for the reader to finish';
+    case 'SAFETY':
+      return 'the reader refused the contents of this file';
+    case 'PROHIBITED_CONTENT':
+      return 'the reader refused the contents of this file';
+    default:
+      return 'the reader returned nothing usable';
+  }
+}
+
 async function geminiParseDocument(apiKey: string, bytes: Uint8Array, mimeType: string) {
   let b = '';
   for (let i = 0; i < bytes.length; i += 0x8000) b += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -128,7 +151,19 @@ async function geminiParseDocument(apiKey: string, bytes: Uint8Array, mimeType: 
               { inline_data: { mime_type: mimeType, data: b64 } },
               { text: 'Read this CV and return the JSON described.' }
             ] }],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 4096, responseMimeType: 'application/json' }
+            /* 16384 rather than 4096. The prompt asks for up to 6000 characters of content_text on
+               top of every other field, which is most of a 4096 budget before the model has written
+               a word of the rest - a long CV had nowhere to go.
+
+               No thinkingConfig here, though it is the obvious thing to reach for. Setting
+               thinkingBudget 0 makes gemini-flash-lite-latest reject the whole request with a flat
+               400 INVALID_ARGUMENT, which is worse than the problem: it takes out a model that
+               otherwise works. */
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 16384,
+              responseMimeType: 'application/json'
+            }
           })
         }
       );
@@ -137,7 +172,16 @@ async function geminiParseDocument(apiKey: string, bytes: Uint8Array, mimeType: 
       const data = JSON.parse(raw);
       const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text || '').join('') || '';
       const parsed = parseJson(text);
-      if (!parsed) { failures.push(model + ': returned an unreadable response'); continue; }
+      if (!parsed) {
+        /* Say WHY it was unreadable, in words HR can act on. "Unreadable response" alone sent a
+           whole round of debugging after a retired model while the real answer - the finishReason
+           - was sitting in the response that nobody printed. */
+        const fin = String(data?.candidates?.[0]?.finishReason || 'no finishReason');
+        failures.push(model + ': ' + finishReasonInEnglish(fin)
+          + ' [' + fin + ', ' + text.length + ' chars'
+          + (text ? ': ' + text.slice(0, 80) : '') + ']');
+        continue;
+      }
       return { profile: parsed, model };
     } catch (e) {
       failures.push(model + ': ' + String((e as Error)?.message || e).slice(0, 160));
