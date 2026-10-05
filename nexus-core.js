@@ -723,14 +723,27 @@ function canInventory(){
   const me=String(state.email||'').trim().toLowerCase();
   return INVENTORY_PEOPLE.indexOf(me)!==-1;
 }
-function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
+/* WEEKLY STATUS IS FOR PRERNA ALONE, BY NAME.
+   Same arrangement as the Feedback Hub and Inventory above: not granted through modules and not
+   open to every superadmin, so the test runs BEFORE the state.super shortcut in pageAllowed.
+   The database half of this is app.has_module('weekly_status'), which for this one module ignores
+   the superadmin bypass and needs the id in the person's own adm.users.modules - so the ops.*
+   tables and RPCs refuse anyone else even if they reach the page some other way.
+   To add someone: add the address here AND put 'weekly_status' in their adm.users.modules. */
+const WEEKLY_STATUS_PEOPLE=['businessanalyst@thejaingroup.com'];
+function canWeeklyStatus(){
+  if(state.isCustomer||state.impersonating) return false;
+  const me=String(state.email||'').trim().toLowerCase();
+  return WEEKLY_STATUS_PEOPLE.indexOf(me)!==-1;
+}
+function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(it.id==='weekly_status')?canWeeklyStatus():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(hasUsability()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
