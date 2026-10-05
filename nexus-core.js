@@ -7357,7 +7357,7 @@ window.trackerCreate=function(){
     <div class="two"><div><label>Candidate Name *</label><input id="trFName" class="sel" placeholder="Full name"></div>
     <div><label>Position *</label><input id="trFPos" class="sel" placeholder="e.g. Sales Executive"></div></div>
     <div class="two"><div><label>Entity</label><input id="trFEntity" class="sel" placeholder="e.g. Rajanya, Zainab"></div>
-    <div><label>Source</label><input id="trFSrc" class="sel" placeholder="e.g. Naukri, Apna, Reference"></div></div>
+    <div><label>Source</label><input id="trFSrc" class="sel" placeholder="e.g. Naukri, Apna, Referral"></div></div>
     <div class="two"><div><label>Interview Date</label><input id="trFDate" class="sel" type="date"></div>
     <div><label>Interview Time</label><input id="trFTime" class="sel" type="time"></div></div>
     <div class="two"><div><label>Phone</label><input id="trFNum" class="sel" placeholder="10-digit number"></div>
