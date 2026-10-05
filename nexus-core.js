@@ -16334,21 +16334,10 @@ window.tpTrFeedback=async function(trackerId,stage){
   }
   rec.feedback=stage;toast('Updated');
 
-  /* Only Rejected writes to the candidate, and only if there is an address to write to. The other
-     stages are internal bookkeeping - nobody expects a letter saying they have moved to
-     "Interview Scheduled", and sending one would be worse than silence. Asked first, because a
-     rejection email cannot be recalled once it has gone. */
-  if(stage==='Rejected'&&String(rec.email||'').trim()){
-    const who=rec.candidate_name||'this candidate';
-    if(await confirmDialog(
-        'Send '+who+' a rejection email? It goes from your own address, says nothing about scores or '
-        +'reasons, and cannot be taken back.',
-        {title:'Send rejection email', okLabel:'Send', icon:'fa-envelope', danger:true})){
-      const r=await hrNotify({kind:'candidate_rejected',name:rec.candidate_name||'',
-                              email:rec.email,position:rec.position||''});
-      if(r&&r.ok) toast('Rejection email sent to '+rec.email,'ok');
-    }
-  }
+  /* Moving the stage to Rejected used to offer to email the candidate. It no longer does:
+     rejection is recorded and nothing is sent, from this screen or any other. The other stages
+     never wrote to anybody - nobody expects a letter saying they have reached "Interview
+     Scheduled". */
 };
 /* Written to the tracker row AND to the candidate record, because both carry a source and the two
    are read by different screens - the Tracker prints its own, Monthly Progress and the reports read

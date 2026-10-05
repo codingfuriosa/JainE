@@ -9967,30 +9967,9 @@
       }
       toast('Recorded as '+decision,'ok');
 
-      /* A REJECTION HERE IS STILL A REJECTION, SO THE CANDIDATE IS STILL TOLD.
-
-         The letter was wired to the two HR routes and not to this one, so being turned down at
-         interview - the most likely way of all - happened in silence.
-
-         Sent after the verdict is recorded, so a mail failure cannot leave somebody told about a
-         decision the record does not show. The interview id travels with it because an interviewer
-         is usually NOT one of the four people allowed to email candidates, and holding this
-         interview is what entitles them to send this one letter. */
-      if(decision==='Rejected'&&data&&data.candidate_id){
-        try{
-          const {data:c}=await sb.schema('hr').from('candidates')
-            .select('name,email,position').eq('id',data.candidate_id).single();
-          if(c&&String(c.email||'').trim()){
-            const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
-              {body:{kind:'candidate_rejected',name:c.name||'',email:c.email,
-                     position:c.position||'',interview_id:interviewId}});
-            if(se||(sent&&sent.error)) toast('Recorded, but the email failed: '+((sent&&sent.error)||se.message),'err');
-            else toast(c.email+' has been told','ok');
-          }else{
-            toast('No email address on file, so the candidate was not told','warn');
-          }
-        }catch(e){ toast('Recorded, but the email failed: '+((e&&e.message)||e),'err'); }
-      }
+      /* Recording "Rejected" here used to email the candidate on the spot, with no question
+         asked - the only one of the three rejection routes that did. Rejection no longer writes
+         to the candidate from anywhere; see hrTaskRejectCandidate. */
       await gcalReloadIfOpen();
       hrAfterApprovalAction();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
@@ -13607,60 +13586,24 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
     try{
       // candidate_decide sets the stage to Rejected itself, which is the one move a Pending
       // candidate is allowed - otherwise turning somebody down would be impossible.
-      /* ASKED BEFORE ANYTHING HAPPENS, NOT AFTER.
-
-         This used to reject the candidate, close the task, announce "Candidate rejected", and only
-         THEN ask whether to email them - so the confirmation arrived after the decision it was
-         supposed to be confirming, and the toast contradicted the dialog still on screen. The
-         question now comes first, and its answer is about the email only: the rejection itself is
-         the button you already pressed. */
-      /* TURNING SOMEBODY DOWN AND WRITING TO THEM ARE TWO DECISIONS, SO THEY ARE TWO BUTTONS.
-
-         The dialog used to ask "Reject & email?" and treat No as "do nothing at all" - so there
-         was no way to reject somebody quietly, which is what you want when the referral came
-         from a colleague, or when HR will call them instead. Reject does exactly that; Reject
-         and email does both; Cancel still changes nothing. */
-      let sendMail=false, who=null;
+      /* REJECTING DOES NOT WRITE TO THE CANDIDATE, FROM ANY SCREEN.
+         This offered "Reject" and "Reject and email", and before that it emailed without asking.
+         HR would rather make that call themselves: a word from the recruiter who actually met
+         them is worth more than a form letter, and a letter that cannot be recalled is a poor
+         thing to leave one click away. So this rejects, and only rejects. */
+      let who=null;
       try{
-        const {data:c}=await sb.schema('hr').from('candidates')
-          .select('name,email,position').eq('id',candId).single();
+        const {data:c}=await sb.schema('hr').from('candidates').select('name').eq('id',candId).single();
         who=c||null;
-        if(who&&String(who.email||'').trim()){
-          const pick=await choiceDialog(
-            'Reject '+(who.name||'this candidate')+'? Rejecting is final either way. If you choose '
-            +'to email them, the letter goes from your own address, says nothing about scores or '
-            +'reasons, and cannot be taken back.',
-            {title:'Reject candidate', icon:'fa-user-xmark', danger:true, choices:[
-              {key:'reject', label:'Reject', style:'btn-danger', icon:'fa-user-xmark'},
-              {key:'reject_email', label:'Reject and email', style:'btn-danger', icon:'fa-envelope'}
-            ]});
-          if(!pick){ toast('Nothing was changed','warn'); return; }
-          sendMail=(pick==='reject_email');
-        }
-      }catch(_e){ /* no address on file: rejected without an email, which is said below */ }
+      }catch(_e){ /* the name only decorates the question */ }
+      if(!(await confirmDialog('Reject '+((who&&who.name)||'this candidate')
+          +'? This is final. They are not told - if they should hear, tell them yourself.',
+          {title:'Reject candidate', icon:'fa-user-xmark', okLabel:'Reject'}))) return;
 
       const {error}=await sb.schema('hr').rpc('candidate_decide',{p_id:candId,p_approved:false});
       if(error) throw new Error(error.message);
       await ACC().rpc('hr_approval_task_resolve_candidate',{p_ref_id:candId,p_by:me()});
-      /* REJECTING FROM HERE TELLS THE CANDIDATE TOO.
-         The rejection email was wired to the Tracker's stage dropdown only, so turning somebody
-         down from the approvals queue - which is the more natural place to do it - rejected them
-         in silence. The same person, the same decision, and whether they heard about it depended
-         on which screen it was taken from. Asked first, because it cannot be recalled. */
-      /* The email is sent AFTER the rejection is recorded, so a mail failure cannot leave somebody
-         told they were rejected when the record still says otherwise. Errors are shown rather than
-         swallowed - a silent catch here is how the missing email went unexplained. */
-      if(sendMail&&who){
-        try{
-          const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
-            {body:{kind:'candidate_rejected',name:who.name||'',email:who.email,position:who.position||''}});
-          if(se||(sent&&sent.error)) toast('Rejected, but the email failed: '+((sent&&sent.error)||se.message),'err');
-          else if(sent&&sent.not_connected) toast('Rejected and emailed from the shared JAIN-E address — connect your Google account to send from your own','warn');
-          else toast('Rejected — '+who.email+' has been told','ok');
-        }catch(e){ toast('Rejected, but the email failed: '+((e&&e.message)||e),'err'); }
-      }else{
-        toast('Candidate rejected — no email address on file, so nobody was told','warn');
-      }
+      toast('Candidate rejected','ok');
       hrAfterApprovalAction();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
   };
