@@ -205,6 +205,7 @@ const NAV=[
   {group:'Operations',items:[
     {id:'projects',label:'Projects',icon:'fa-building'},
     {id:'construction',label:'Construction',icon:'fa-helmet-safety'},
+    {id:'engineering',label:'Engineering',icon:'fa-compass-drafting'},
     {id:'inventory',label:'Inventory',icon:'fa-boxes-stacked'},
     {id:'procurement',label:'Procurement',icon:'fa-cart-shopping'},
     {id:'maintenance',label:'Assets & Maintenance',icon:'fa-screwdriver-wrench'},
@@ -3856,6 +3857,8 @@ const HD_KB=[
  {k:['navigate','menu','sidebar','module','how to use','get around'],a:`Use the left sidebar to navigate: <b>Dashboard</b> (overview KPIs), <b>Accountability</b> (tasks, goals, delegation), <b>Document Library</b> & <b>Legal</b> (files), <b>Procurement</b>, <b>Recruitment</b>, <b>Help Desk</b>, and <b>Control Panel</b> (admins only). The <b>JAIN-E</b> logo always brings you Home.`},
  // ── Construction module ───────────────────────────────────────────────────
  {k:['construction','construction module','site','rcc','work order','contractor','tower','plinth','finishing','stage','construction stage'],a:`The <b>Construction</b> module shows live site data across all active projects. It has three tabs: <b>Towers & Units</b> (project tower breakdown, units sold, current stage), <b>Construction Stages</b> (% complete, target date, on-track/delayed status per project), and <b>Work Orders</b> (WO number, contractor, scope, amount, status).`},
+ // ── Engineering module ────────────────────────────────────────────────────────
+ {k:['engineering','boq','bill of quantities','work done','ra bill','running account','retention','amendment','sub contractor','sub-contractor'],a:`The <b>Engineering</b> module (Operations) runs the money side of construction: set <b>Budget</b> against a project, block, activity group or material → build the <b>BOQ</b> (activities by project, block, floor, flat or part of a flat) → raise a <b>Work Order</b> by tagging BOQ lines and issue it → record <b>Work Done</b> against its items; a different person <b>verifies</b> it → book an <b>RA Bill</b> against the verified work (gross + GST − retention − TDS − other deductions = net payable). Issued work orders change only through an <b>Amendment</b> (its own tab), and a work order can have a <b>parent contractor</b> and <b>sub-contractors</b>. Budgets are either <b>outflow</b> (cost) or <b>inflow</b> (collections). Ask an admin to enable the module for you in the Control Panel.`},
  // ── Sign out ───────────────────────────────────────────────────────────────
  {k:['sign out','signout','log out','logout','exit','how to sign out','how to log out'],a:`To sign out: click your <b>avatar / name</b> in the top-right corner of the screen, then click <b>Sign out</b> from the dropdown menu.`},
  // ── Recruitment PDFs ───────────────────────────────────────────────────────
