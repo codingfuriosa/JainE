@@ -11063,6 +11063,7 @@ const USB_COL4={
   'inventory':            {header:'Time spent', keys:['time_spent']},
   'playbook':             {header:'Time spent', keys:['time_spent']},
   'finance':              {header:'Time spent', keys:['time_spent']},
+  'accounts':             {header:'Time spent', keys:['time_spent']},
 
   /* ---- features that inherit a column they cannot fill -------------------------------------
      Each of these resolves, by module or by tab, to a column that is a dash on every single event
@@ -11076,7 +11077,6 @@ const USB_COL4={
      The line is almost always the same: a feature that DOES something carries a subject, and a
      feature you only LOOK AT does not. Create task has an assignee, Search tasks never will.
 
-  'accounts':             {header:'Time spent', keys:['time_spent']},
      hideDetails is set only where Details is empty too, so what is left is never a row of two
      dashes - on the rest Details already carries the query, the item, the case number or the
      check, which is why none of them loses anything by giving up the column. */
@@ -11894,19 +11894,6 @@ VIEWS.inventory=async function(v,seg){
   }
 };
 
-/* ===== PROCUREMENT MODULE ===== */
-const PROC={sel:new Set(),tab:'Quote Comp'};
-
-async function procFetch(cat){
-  const {data,error}=await sb.schema('doc').from('documents')
-    .select('*').eq('department','Procurement').eq('category',cat)
-    .order('created_at',{ascending:false});
-  if(error){toast('Load failed: '+error.message,'err');return[];}
-  return data||[];
-}
-
-function procRefresh(cat){
-  const host=$('procHost');if(!host)return;
 /* ===== ACCOUNTS MODULE =====
    Two tabs. Transactions (vouchers, bills & on-account payments, bank reconciliation, cheque printing,
    enterprise / company / business-unit structure) lives in accounts.js + accounts-bank.js; Ledgers &
@@ -11923,6 +11910,19 @@ VIEWS.accounts=async function(v,seg){
   await fn(host,seg.slice(1));
 };
 
+/* ===== PROCUREMENT MODULE ===== */
+const PROC={sel:new Set(),tab:'Quote Comp'};
+
+async function procFetch(cat){
+  const {data,error}=await sb.schema('doc').from('documents')
+    .select('*').eq('department','Procurement').eq('category',cat)
+    .order('created_at',{ascending:false});
+  if(error){toast('Load failed: '+error.message,'err');return[];}
+  return data||[];
+}
+
+function procRefresh(cat){
+  const host=$('procHost');if(!host)return;
   procFetch(cat).then(docs=>{ host.innerHTML=procCardsHtml(docs,cat); procActionBar(cat); });
 }
 
