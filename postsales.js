@@ -122,10 +122,19 @@ function css(){
      the browser gives the column exactly what its content needs and no more. */
   .ps-root table.tbl th.ps-wid,.ps-root table.tbl td.ps-wid{width:1%;white-space:nowrap}
   .ps-root .kpis{gap:12px}
-  .ps-nav{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px;padding:4px;border:1px solid var(--line);border-radius:10px;background:var(--bg-card,#fff);width:max-content;max-width:100%}
-  .ps-nav span{padding:7px 14px;border-radius:7px;font-size:13px;font-weight:600;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
-  .ps-nav span.on{background:var(--ps-brand);color:#fff}
-  .ps-nav span:not(.on):hover{background:var(--ps-brand-50);color:var(--ps-brand)}
+  /* A SEGMENTED CONTROL, NOT THREE LOOSE CHIPS.
+     These were pills of three different widths in a box sized to its contents, floating above a
+     full-width page - so they read as leftovers rather than as the switch between three views.
+     Equal segments in a bar that sits on the grid, with a hairline between them and a real
+     selected state, is what a three-way switch is supposed to look like. */
+  .ps-nav{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px;margin:0 0 16px;padding:4px;
+    border:1px solid var(--line);border-radius:10px;background:#f4f5f7;max-width:560px}
+  .ps-nav span{padding:8px 12px;border-radius:7px;font-size:13px;font-weight:600;color:#55606d;cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;
+    text-align:center;transition:background .12s,color .12s}
+  .ps-nav span.on{background:var(--bg-card,#fff);color:var(--ps-brand);box-shadow:0 1px 2px rgba(15,23,42,.1)}
+  .ps-nav span:not(.on):hover{background:rgba(255,255,255,.65);color:#15171a}
+  .ps-nav span i{font-size:12px;opacity:.85}
   .ps-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:14px}
   .ps-action{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--bg-card,#fff);display:flex;gap:12px;align-items:flex-start}
   .ps-action i.ic{width:34px;height:34px;border-radius:9px;background:var(--ps-brand-50);color:var(--ps-brand);display:inline-flex;align-items:center;justify-content:center;flex:none;font-size:15px}
@@ -190,8 +199,10 @@ function css(){
     .ps-root .psb-sum{grid-template-columns:repeat(2,minmax(0,1fr))}
     .ps-head .acts{width:100%}
     .ps-head .acts .btn{flex:1 1 auto;justify-content:center}
-    .ps-nav{width:100%}
-    .ps-nav span{flex:1 1 auto;justify-content:center}
+    /* Three segments side by side do not fit a phone once each carries a word like "Construction
+       progress", so they stack rather than squeeze the labels to nothing. */
+    .ps-nav{grid-auto-flow:row;grid-auto-columns:auto;max-width:none}
+    .ps-nav span{justify-content:flex-start}
     .ps-filters{padding:10px}
     .ps-filters>*{flex:1 1 100%}
     .pss-cards{grid-template-columns:1fr}
@@ -962,8 +973,16 @@ function bcss(){
   .psb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 14px}
   .psb-grid.wide{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
   .psb-span2{grid-column:span 2}
-  .psb-facts{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;margin-top:10px;color:var(--slate)}
-  .psb-facts b{color:var(--ink)}
+  /* A ROW OF FACTS, SPREAD ACROSS THE WIDTH IT HAS.
+     As a flex row these bunched up at the left and left two thirds of the card empty - "Invoice
+     date 05/10/2026  Due 04/11/2026  Type Milestone  Raised automatically by system" all crammed
+     into the first third with white space after it. A grid gives each fact a share of the line,
+     and stacks the label over the value so neither is squeezed. */
+  .psb-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 24px;font-size:13px;margin-top:10px;color:var(--slate)}
+  /* block, not a column flex: some of these read "Raised <b>automatically</b> by <b>system</b>",
+     and as flex items every fragment of that became its own line. */
+  .psb-facts>span{display:block;min-width:0;line-height:1.5}
+  .psb-facts b{color:var(--ink);font-weight:650;overflow-wrap:anywhere}
   /* 6px of side padding put a right-aligned Amount hard against the left edge of Invoice beside
      it, with no visible gap at all - the two columns read as one. 12px, and a touch more height
      per row, is what separates them. */
@@ -1443,18 +1462,31 @@ window.psbPrint=async function(id){
        The structure is unchanged, because the structure is what Accounts reads. What changed is
        everything around it: no fills except a pale grey on the header row, horizontal rules only,
        and the money set in a tabular-figure font so the columns line up digit under digit. */
+    /* A PRINTED SHEET IS WHITE PAPER, WHATEVER THE SCREEN IS SET TO.
+       Nothing here declared a colour scheme or a page background, so on a machine running dark
+       mode the print preview came up as white text on near-black - the figures almost unreadable
+       and the heading invisible. Paper has no dark mode; this says so. */
     +'@page{size:A4;margin:14mm}'
+    +':root{color-scheme:light}'
     +'*{box-sizing:border-box}'
+    +"html,body{background:#fff}"
     +"body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11.5px;color:#15171a;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}"
-    +'.doc-hd{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:2px solid #15171a;padding-bottom:9px;margin-bottom:4px}'
-    +'.doc-hd .co{font-size:16px;font-weight:700;letter-spacing:.2px}'
-    +'.doc-hd .ti{font-size:11px;font-weight:600;letter-spacing:2.4px;text-transform:uppercase;color:#5a6069;text-align:right}'
+    /* ONE TITLE, CENTRED. The company name has been taken off by request, and with it the reason
+       the heading was pushed into the right margin: it was one half of a two-up header, letter-
+       spaced and jammed against the page edge. On its own and centred it reads as the title of a
+       document, which is what it is. */
+    +'.doc-hd{text-align:center;border-bottom:1.5px solid #15171a;padding-bottom:10px;margin-bottom:2px}'
+    +'.doc-hd .ti{font-size:13.5px;font-weight:700;letter-spacing:3.2px;text-transform:uppercase;color:#15171a}'
     +'table{width:100%;border-collapse:collapse;margin:16px 0 0}'
     +'td,th{padding:6px 9px;vertical-align:top;border-bottom:1px solid #e4e6ea}'
     +'th{background:#f4f5f7;text-align:left;font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;color:#5a6069;font-weight:700;border-bottom:1px solid #c9ccd1}'
-    +'.meta-tbl td{border:0;padding:3px 0;font-size:11px}'
-    +'.meta-tbl .k{color:#5a6069;width:12%;white-space:nowrap;padding-right:6px}'
-    +'.meta-tbl .v{font-weight:600;width:21%}'
+    /* Three label/value pairs across, in columns of a FIXED width. Left to size themselves the
+       pairs drifted - a short value left a wide gap before the next label, so the three pairs
+       never lined up with each other down the block. */
+    +'.meta-tbl{table-layout:fixed;margin-top:12px}'
+    +'.meta-tbl td{border:0;padding:3.5px 0;font-size:11px}'
+    +'.meta-tbl .k{color:#5a6069;width:11%;white-space:nowrap;padding-right:8px}'
+    +'.meta-tbl .v{font-weight:600;width:22.3%;padding-right:14px;overflow-wrap:anywhere}'
     /* A section is a line of small capitals with a rule under it, not a grey bar. */
     +'.sec td{background:none;color:#15171a;font-weight:700;font-size:9.5px;letter-spacing:1.4px;'
       +'text-transform:uppercase;padding:14px 0 5px;border-bottom:1px solid #15171a}'
@@ -1466,10 +1498,10 @@ window.psbPrint=async function(id){
     +'.meta{font-size:10px;margin:10px 0 0;color:#8a9099;display:flex;justify-content:space-between}'
     +'tr{page-break-inside:avoid}thead{display:table-header-group}'
     +'</style></head><body>'
-    +'<div class="doc-hd"><div class="co">The Jain Group</div><div class="ti">Estimated Offer Price</div></div>'
+    +'<div class="doc-hd"><div class="ti">Estimated Offer Price</div></div>'
     +'<table class="meta-tbl"><tr><td class="k">Project</td><td class="v">'+esc(proj?proj.name:'')+'</td><td class="k">Block</td><td class="v">'+esc(b.towers&&b.towers.name||'')+'</td><td class="k">Booking no.</td><td class="v">'+esc(b.booking_no)+'</td></tr>'
     +'<tr><td class="k">SBA</td><td class="v">'+num(b.sba_sqft)+' sq ft</td><td class="k">Built-up</td><td class="v">'+(b.flats&&b.flats.built_up_sqft!=null?num(b.flats.built_up_sqft)+' sq ft':'—')+'</td><td class="k">Carpet</td><td class="v">'+(b.flats&&b.flats.carpet_sqft!=null?num(b.flats.carpet_sqft)+' sq ft':'—')+'</td></tr>'
-    +'<tr><td class="k">Floor</td><td class="v">'+esc(ordinal(b.floor_no))+'</td><td class="k">Flat</td><td class="v">'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+'</td><td class="k">BHK</td><td class="v">'+esc(b.flats&&b.flats.bhk||'')+'</td></tr>'
+    +'<tr><td class="k">Floor</td><td class="v">'+esc(ordinal(b.floor_no))+'</td><td class="k">Flat</td><td class="v">'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+'</td><td class="k">BHK</td><td class="v">'+esc(b.flats&&b.flats.bhk||'—')+'</td></tr>'
     +'<tr><td class="k">Applicant</td><td class="v" colspan="3">'+esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & '))+'</td><td class="k">Date</td><td class="v">'+dmy(b.booking_date)+'</td></tr></table>'
     +'<table><tr class="sec"><td colspan="6">Unit Charges Details</td></tr><tr><th>Particulars</th><th class="r">Rate</th><th class="r">Total (Rs.)</th><th class="r">GST</th><th class="r">GST Amount</th><th class="r">Gross Amount</th></tr>'
     +L('unit').map(ln).join('')+tot('TOTAL FLAT VALUE',b.unit_net,b.unit_gst)
