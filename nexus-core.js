@@ -24045,17 +24045,27 @@ function custReferralCss(){
     background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.7);transition:background .16s}
   .cref-cta2:hover{background:rgba(255,255,255,.22)}
   .cref-cta2 .fa-whatsapp{font-size:17px}
-  .cref-poster{flex:none;width:150px;padding:0;border:0;background:none;cursor:zoom-in;position:relative;
-    transform:rotate(2.5deg);transition:transform .2s}
-  .cref-poster:hover{transform:rotate(0) scale(1.03)}
-  .cref-poster img{width:100%;display:block;border-radius:10px;border:3px solid #fff;box-shadow:0 14px 30px -8px rgba(0,0,0,.5)}
-  .cref-poster span{position:absolute;left:50%;bottom:-11px;transform:translateX(-50%);background:#fff;color:#b3141f;
-    font-size:11.5px;font-weight:700;padding:5px 11px;border-radius:999px;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.2)}
+  /* The poster is shown large enough to read on the page itself - beside the slabs and the
+     calculator on a computer, full width on a phone - and opens full size on a tap. */
+  .cref-main{display:grid;grid-template-columns:minmax(0,400px) minmax(0,1fr);gap:22px;align-items:start;margin-bottom:22px}
+  .cref-pcard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px;
+    box-shadow:0 10px 28px -16px rgba(143,17,25,.45)}
+  .cref-pimg{display:block;width:100%;padding:0;border:0;background:none;cursor:zoom-in}
+  .cref-pimg img{display:block;width:100%;height:auto;border-radius:10px}
+  .cref-pacts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .cref-pacts a,.cref-pacts button{flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+    font:inherit;font-size:13px;font-weight:700;padding:10px 8px;border-radius:10px;cursor:pointer;text-decoration:none;
+    border:1px solid #f3c4c8;background:#fff5f5;color:#b3141f;white-space:nowrap}
+  .cref-pacts a:hover,.cref-pacts button:hover{background:#fde4e6}
+  .cref-pacts .fa-whatsapp{font-size:15px}
+  .cref-side .cref-calc{margin-bottom:22px}
+  .cref-side .cref-steps{flex-direction:column;gap:10px;margin-bottom:0}
+  .cref-side .cref-step{flex:none}
 
   .cref-sh{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;letter-spacing:.02em;
     text-transform:uppercase;color:#c8202f;margin:4px 0 12px}
   .cref-sh::after{content:'';flex:1;height:2px;background:linear-gradient(90deg,#f3c4c8,transparent)}
-  .cref-slabs{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+  .cref-slabs{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0 14px}
   .cref-slab{position:relative;background:#fde4e6;border:1px solid #f6c9cd;border-radius:14px;padding:24px 14px 16px;
     text-align:center;transition:transform .18s,box-shadow .18s,border-color .18s}
   .cref-slab .n{position:absolute;top:-13px;left:50%;transform:translateX(-50%);width:28px;height:28px;border-radius:50%;
@@ -24137,11 +24147,12 @@ function custReferralCss(){
   .cref-empty i{font-size:30px;color:var(--brand);opacity:.35}
   .cref-empty b{display:block;margin-top:12px;font-size:16px}
   .cref-empty span{display:block;margin-top:5px;font-size:13px;color:var(--slate)}
+  @media(max-width:900px){ .cref-main{grid-template-columns:minmax(0,1fr)} .cref-pcard{max-width:460px;width:100%;margin:0 auto} }
   @media(max-width:620px){
     .cref-hero{padding:24px 20px}
     .cref-hero h2{font-size:21px}
     .cref-cta,.cref-cta2{width:100%;justify-content:center}
-    .cref-poster{width:118px;margin:4px auto 10px}
+    .cref-main{grid-template-columns:1fr;gap:18px}
     .cref-slabs{grid-template-columns:1fr;gap:18px}
     .cref-slab{display:grid;grid-template-columns:1fr auto;align-items:center;text-align:left;padding:16px 16px 14px;column-gap:12px}
     .cref-slab b{grid-row:1/3;grid-column:2;font-size:32px}
@@ -24179,12 +24190,18 @@ async function custTabReferrals(unit){
           <button class="cref-cta2" onclick="custRefShare()"><i class="fa-brands fa-whatsapp"></i> Share with friends</button>
         </div>
       </div>
-      <button class="cref-poster" onclick="custRefPoster()" aria-label="View the Refer and Earn poster">
-        <img src="${CUST_REF_POSTER}" alt="" loading="lazy"><span><i class="fa-solid fa-expand"></i> View poster</span></button>
     </div></div>`;
 
   // The slabs, then what that means in rupees for a price the customer picks.
   const start=12000000;
+  const poster=`<div class="cref-pcard">
+      <button class="cref-pimg" onclick="custRefPoster()" aria-label="Open the Refer and Earn poster full size">
+        <img src="${CUST_REF_POSTER}" alt="Refer and Earn - earn up to 2% of the agreement value on every successful referral" width="1066" height="1600"></button>
+      <div class="cref-pacts">
+        <button onclick="custRefPoster()"><i class="fa-solid fa-expand"></i> Full size</button>
+        <a href="${CUST_REF_POSTER}" download="Jain-Group-Refer-and-Earn.jpg"><i class="fa-solid fa-download"></i> Download</a>
+        <button onclick="custRefShare()"><i class="fa-brands fa-whatsapp"></i> Share</button>
+      </div></div>`;
   const slabs=`<div class="cref-sh">Know your rewarding journey</div>
     <div class="cref-slabs">${CUST_REF_SLABS.map(function(sl,i){
       return '<div class="cref-slab'+(i===custRefSlab(start)?' on':'')+'" data-slab="'+i+'"><span class="n">'+(i+1)+'</span>'
@@ -24245,7 +24262,7 @@ async function custTabReferrals(unit){
     person you refer, at the slab it falls in, on a successful booking. Add them here so the referral is
     counted in your name. Terms and conditions apply.</p>`;
 
-  return hero+slabs+steps+(list.length?'<div class="cref-sh">Your referrals</div>':'')+stats+body+fine;
+  return hero+'<div class="cref-main">'+poster+'<div class="cref-side">'+slabs+steps+'</div></div>'+(list.length?'<div class="cref-sh">Your referrals</div>':'')+stats+body+fine;
 }
 
 /* REFER & EARN, from the marketing creative (5 Oct 2026). The reward is a share of the total
