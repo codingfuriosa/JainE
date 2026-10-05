@@ -1,5 +1,4 @@
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
-import { AwsClient } from "https://esm.sh/aws4fetch@1.0.20";
 const cors = { 'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization, x-client-info, apikey, content-type','Access-Control-Allow-Methods':'POST, GET, OPTIONS' };
 const j = (o:any,s=200)=> new Response(JSON.stringify(o),{status:s,headers:{...cors,'Content-Type':'application/json'}});
 const esc = (s:any)=> String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -127,42 +126,6 @@ Deno.serve(async (req)=>{
      id: the recipient and every word of the mail come from that row, never from the caller - this
      function has no caller check, so it must not become a way to send arbitrary mail. Only recent
      media_* notifications qualify, and cust.media_email_log lets each one be mailed once. */
-  /* Construction photo clean-up, run daily by pg_cron (job 'media-purge-daily'). A photo removed or
-     replaced keeps its file for 30 days; cust.media_purge_due() lists what is past that (never a file
-     a live photo still uses), this deletes those files from S3, and cust.media_mark_purged() stamps
-     the rows. The caller decides nothing - which rows, and which files, come from the database - so
-     calling it again, or early, only does what was due anyway. */
-  if(type==='media_purge'){
-    const bucket=Deno.env.get('S3_BUCKET'), region=Deno.env.get('S3_REGION');
-    const ak=Deno.env.get('AWS_ACCESS_KEY_ID'), sk=Deno.env.get('AWS_SECRET_ACCESS_KEY');
-    if(!bucket||!region||!ak||!sk) return j({error:'S3 secrets not configured'},500);
-    const RP={...H,'Content-Profile':'cust','Accept-Profile':'cust','Content-Type':'application/json'} as any;
-    const due=await fetch(SB+'/rest/v1/rpc/media_purge_due',{method:'POST',headers:RP,body:JSON.stringify({p_limit:200})});
-    if(!due.ok) return j({error:'could not list what is due',detail:await due.text()},500);
-    const rows:any[]=await due.json();
-    const aws=new AwsClient({accessKeyId:ak,secretAccessKey:sk,region,service:'s3'});
-    const done:any={}; let files=0, failed=0;
-    for(const r of rows){
-      let ok=true;
-      for(const path of (r.paths||[])){
-        const key=String(path).replace(/^s3:/,'');
-        const url='https://'+bucket+'.s3.'+region+'.amazonaws.com/'+key.split('/').map(encodeURIComponent).join('/');
-        try{
-          const res=await aws.fetch(url,{method:'DELETE'});
-          // 204 deleted; 404 already gone - both mean the file is no longer there.
-          if(res.ok||res.status===404) files++; else { ok=false; failed++; }
-        }catch(_){ ok=false; failed++; }
-      }
-      if(ok) (done[r.tbl]=done[r.tbl]||[]).push(r.id);
-    }
-    let marked=0;
-    for(const t of Object.keys(done)){
-      const m=await fetch(SB+'/rest/v1/rpc/media_mark_purged',{method:'POST',headers:RP,body:JSON.stringify({p_table:t,p_ids:done[t]})});
-      if(m.ok) marked+=Number(await m.json())||0;
-    }
-    return j({ok:true,due:rows.length,files_deleted:files,failed,rows_marked:marked});
-  }
-
   if(type==='media_notice'){
     const id = Number(body.id);
     if(!id) return j({error:'id required'},400);

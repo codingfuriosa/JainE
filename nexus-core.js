@@ -20935,7 +20935,7 @@ window.cpaPhUpload=async function(){
   for(const t of Object.keys(newIds)){
     try{ const {data:n}=await sb.schema('cust').rpc('notify_media_uploaded',{p_table:t,p_ids:newIds[t]}); told=Math.max(told,Number(n||0)); }catch(_e){}
     // What was rejected at the same place (flat and section, block, or project) is replaced by
-    // these. Its files are deleted from S3 by the daily clean-up 30 days later (media-purge-daily).
+    // these. Only the rows leave the screens - photo files are never deleted from S3.
     try{
       const {data:old}=await sb.schema('cust').rpc('replace_rejected_media',{p_table:t,p_ids:newIds[t]});
       replaced+=(old||[]).length;
