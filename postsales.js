@@ -325,14 +325,37 @@ function renderProjectSec(host){
     +'<div class="two"><div><label>Unit price</label><input id="pssGstUnit" type="number" step="0.01" value="'+esc(s.unit_gst_rate)+'"></div>'
     +'<div><label>PLC</label><input id="pssGstPlc" type="number" step="0.01" value="'+esc(s.plc_gst_rate)+'"></div></div>'
     +'<div class="two"><div><label>Floor rise (FRC)</label><input id="pssGstFrc" type="number" step="0.01" value="'+esc(s.frc_gst_rate)+'"></div><div></div></div>'
-    +'<label>Company name on receipts and invoices</label><input id="pssCompany" value="'+esc(s.company_name||'')+'" placeholder="e.g. Dream Gateway Hotels Ltd.">'
+    /* THE LETTERHEAD. Every printed document - demand letter, money receipt, customer ledger -
+       takes its company block from here. Left empty they print a bare name and nothing else,
+       which is exactly how they looked before this section existed.
+
+       It is per project because these projects belong to different legal entities: the Gateway
+       demand letter is DREAM GATEWAY HOTELS LIMITED with its own PAN and GSTIN. One global
+       letterhead would print the wrong registration number on a demand for money. */
+    +'<div class="sec-title" style="margin-top:18px">Letterhead</div>'
+    +'<div class="pss-hint" style="margin:0 0 8px">Printed on the demand letter, money receipt and customer ledger. Anything left blank is simply left off the document.</div>'
+    +'<label>Company name</label><input id="pssCompany" value="'+esc(s.company_name||'')+'" placeholder="e.g. DREAM GATEWAY HOTELS LIMITED">'
+    +'<label>Registered address</label><textarea id="pssCoAddr" rows="2" placeholder="JAIN GROUP 44/2A, HAZRA ROAD, KOLKATA-19&#10;KOLKATA, WEST BENGAL, INDIA, PIN: 700019">'+esc(s.company_address||'')+'</textarea>'
+    +'<div class="two"><div><label>PAN</label><input id="pssPan" value="'+esc(s.company_pan||'')+'" placeholder="AADCD0692H"></div>'
+    +'<div><label>GSTIN</label><input id="pssGstin" value="'+esc(s.company_gstin||'')+'" placeholder="19AADCD0692H1ZL"></div></div>'
+    +'<div class="two"><div><label>CIN</label><input id="pssCin" value="'+esc(s.company_cin||'')+'"></div>'
+    +'<div><label>Phone on the demand letter</label><input id="pssPhone" value="'+esc(s.contact_phone||'')+'" placeholder="033-40319999"></div></div>'
+    +'<label>Email on the demand letter</label><input id="pssEmail" value="'+esc(s.contact_email||'')+'" placeholder="assistant.md@thejaingroup.com">'
+    +'<label>Site address <span class="pss-hint" style="display:inline">&mdash; printed on the customer ledger, where the flat actually is</span></label>'
+    +'<textarea id="pssSiteAddr" rows="2">'+esc(s.project_address||'')+'</textarea>'
+    +'<label>Demand letter terms <span class="pss-hint" style="display:inline">&mdash; leave blank for the standard 18% wording</span></label>'
+    +'<textarea id="pssTerms" rows="3">'+esc(s.demand_terms||'')+'</textarea>'
     +'<div class="pss-hint" style="margin-top:10px">Parking and each charge carry their own GST rate, set in those sections.</div>'
     +'<button class="btn btn-primary" style="margin-top:6px" onclick="pssSaveProject()"><i class="fa-solid fa-floppy-disk"></i> Save</button></div></div>';
 }
 window.pssSaveProject=async function(){
   const code=val('pssCode').toUpperCase();
   if(!/^[A-Z0-9]{1,8}$/.test(code)){ toast('Use 1-8 letters or digits for the code, e.g. DG','err'); return; }
-  const row={project_id:S.pid,code,unit_gst_rate:num(val('pssGstUnit')),plc_gst_rate:num(val('pssGstPlc')),frc_gst_rate:num(val('pssGstFrc')),company_name:val('pssCompany')||null,updated_at:new Date().toISOString(),updated_by:state.email};
+  // Blank stays null, so a document leaves the line off rather than printing an empty label.
+  const txt=id=>{const v=val(id); return v&&v.trim()?v.trim():null;};
+  const row={project_id:S.pid,code,unit_gst_rate:num(val('pssGstUnit')),plc_gst_rate:num(val('pssGstPlc')),frc_gst_rate:num(val('pssGstFrc')),company_name:val('pssCompany')||null,
+    company_address:txt('pssCoAddr'),company_pan:txt('pssPan'),company_gstin:txt('pssGstin'),company_cin:txt('pssCin'),
+    contact_phone:txt('pssPhone'),contact_email:txt('pssEmail'),project_address:txt('pssSiteAddr'),demand_terms:txt('pssTerms'),updated_at:new Date().toISOString(),updated_by:state.email};
   const {error}=await PS().from('project_setup').upsert(row,{onConflict:'project_id'});
   if(error&&/project_setup_code_uq/.test(error.message)){ toast('Another project already uses the code '+code,'err'); return; }
   if(fail(error)) return;
@@ -1453,7 +1476,7 @@ async function bookingView(host,id,stale){
     +(a.res_address?'<div class="pss-hint" style="margin:6px 0 0">Residential: '+esc(a.res_address)+(a.mailing_address==='residential'?' <span class="tag t-gray">Mailing</span>':'')+'</div>':'')
     +(a.off_address?'<div class="pss-hint" style="margin:2px 0 0">Office: '+esc(a.off_address)+(a.mailing_address==='office'?' <span class="tag t-gray">Mailing</span>':'')+'</div>':'')
     +((a.kyc||[]).length?'<div class="psb-kyc">'+a.kyc.map(k=>'<span class="tag t-blue" style="cursor:pointer" onclick="s3OpenSigned(\''+esc(k.path)+'\')"><i class="fa-solid fa-paperclip"></i> '+esc(k.type)+'</span>').join('')+'</div>':'')+'</div>').join('');
-  const row=l=>'<tr'+(num(l.amount)<0?' class="neg"':'')+'><td>'+esc(l.name)+'</td><td class="r">'+(l.basis==='per_sqft'?rate(l.rate)+' × '+num(l.qty):l.kind==='parking'?inr(l.rate)+' × '+num(l.qty):'Fixed')+'</td><td class="r">'+inr(l.amount)+'</td><td class="r">'+pct(l.gst_rate)+'</td><td class="r">'+inr(l.gst_amount)+'</td><td class="r">'+inr(num(l.amount)+num(l.gst_amount))+'</td></tr>';
+  const row=l=>'<tr'+(num(l.amount)<0?' class="neg"':'')+'><td>'+esc(psLabel(l.name))+'</td><td class="r">'+(l.basis==='per_sqft'?rate(l.rate)+' × '+num(l.qty):l.kind==='parking'?inr(l.rate)+' × '+num(l.qty):'Fixed')+'</td><td class="r">'+inr(l.amount)+'</td><td class="r">'+pct(l.gst_rate)+'</td><td class="r">'+inr(l.gst_amount)+'</td><td class="r">'+inr(num(l.amount)+num(l.gst_amount))+'</td></tr>';
   const sub=(lbl,n,g)=>'<tr class="t"><td colspan="2">'+lbl+'</td><td class="r">'+inr(n)+'</td><td></td><td class="r">'+inr(g)+'</td><td class="r">'+inr(num(n)+num(g))+'</td></tr>';
   const L=k=>ch.filter(l=>l.col===k);
   const sum=k=>ms.reduce((s,m)=>s+num(m[k]),0);
@@ -1954,7 +1977,7 @@ async function invoiceList(host,stale){
       +listHtml('in','psiFilter',rows,
       '<th>Invoice</th><th>Date</th><th>Due</th><th>Booking / flat</th><th>For</th><th class="pss-num">Amount</th><th class="pss-num">Received</th><th class="pss-num">Balance</th><th>Status</th>',
       i=>{const b=i.bookings||{},ap=(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq),x=info(i);
-        return '<tr onclick="navTo(\'postsales/invoices/'+i.id+'\')"><td><b>'+esc(i.invoice_no)+'</b>'+(i.kind!=='milestone'?' <span class="tag t-purple">'+esc(KIND_LBL[i.kind])+'</span>':'')+'</td><td style="white-space:nowrap">'+dmy(i.invoice_date)+'</td><td style="white-space:nowrap'+(x.od?';color:#b91c1c;font-weight:600':'')+'">'+dmy(i.due_date)+'</td><td>'+esc(b.booking_no||'')+'<div class="pss-hint" style="margin:0">'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||'')+(ap[0]?' · '+ap[0].full_name:''))+'</div></td><td>'+esc(i.title)+'<div class="pss-hint" style="margin:0">'+esc(VIA_LBL[i.raised_via]||'')+'</div></td><td class="pss-num">'+inr(i.total)+'</td><td class="pss-num">'+inr(x.p)+'</td><td class="pss-num"><b>'+inr(i.status==='open'?x.bal:0)+'</b></td><td>'+x.tag+'</td></tr>';},
+        return '<tr onclick="navTo(\'postsales/invoices/'+i.id+'\')"><td><b>'+esc(i.invoice_no)+'</b>'+(i.kind!=='milestone'?' <span class="tag t-purple">'+esc(KIND_LBL[i.kind])+'</span>':'')+'</td><td style="white-space:nowrap">'+dmy(i.invoice_date)+'</td><td style="white-space:nowrap'+(x.od?';color:#b91c1c;font-weight:600':'')+'">'+dmy(i.due_date)+'</td><td>'+esc(b.booking_no||'')+'<div class="pss-hint" style="margin:0">'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||'')+(ap[0]?' · '+ap[0].full_name:''))+'</div></td><td>'+esc(psLabel(i.title))+'<div class="pss-hint" style="margin:0">'+esc(VIA_LBL[i.raised_via]||'')+'</div></td><td class="pss-num">'+inr(i.total)+'</td><td class="pss-num">'+inr(x.p)+'</td><td class="pss-num"><b>'+inr(i.status==='open'?x.bal:0)+'</b></td><td>'+x.tag+'</td></tr>';},
       i=>{const b=i.bookings||{},ap=(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq),x=info(i);
         return '<div class="ps-card" onclick="navTo(\'postsales/invoices/'+i.id+'\')"><div class="r1"><b>'+esc(i.invoice_no)+'</b><span class="amt">'+inr(i.status==='open'&&x.bal>0.5?x.bal:i.total)+'</span></div><div class="r2">'+esc(i.title)+'</div><div class="r3"><span>'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||'')+(ap[0]?' · '+ap[0].full_name:''))+'</span><span'+(x.od?' style="color:#b91c1c;font-weight:600"':'')+'>Due '+dmy(i.due_date)+'</span>'+x.tag+'</div></div>';},
       '<div class="empty"><i class="fa-solid fa-file-invoice"></i><div>No invoices match</div></div>');
@@ -2177,7 +2200,7 @@ window.psiPrint=async function(id){
       +'<th class="r" style="width:12%">Amount Paid</th><th class="r" style="width:13%">Amount Payable</th></tr></thead><tbody>'
     +ln.map(function(l){
         const due=num(l.total);
-        return '<tr><td>'+dmy(i.due_date)+'</td><td>'+esc(i.title)+'</td><td>'+esc(l.head)+'</td>'
+        return '<tr><td>'+dmy(i.due_date)+'</td><td>'+esc(psLabel(i.title))+'</td><td>'+esc(psLabel(l.head))+'</td>'
           +'<td class="r">'+n(due)+'.00</td><td class="r">0.00</td><td class="r">'+n(due)+'.00</td></tr>';
       }).join('')
     +'<tr class="tot"><td colspan="3">Total Amount Due</td><td class="r">'+n(i.total)+'.00</td>'
@@ -2354,7 +2377,7 @@ window.psrpLedgerPrint=async function(bookingId){
     +'<table class="led" style="margin-top:10px"><tr class="secrow"><td colspan="5">Cost Breakup Without Tax</td></tr>'
       +headRow([['Revenue Head'],['Rate',1],['Quantity',1],['Discount',1],['Gross',1]])
       +ch.map(function(l){
-          return '<tr><td>'+esc(l.name)+'</td><td class="r">'+n(l.rate)+'</td>'
+          return '<tr><td>'+esc(psLabel(l.name))+'</td><td class="r">'+n(l.rate)+'</td>'
             +'<td class="r">'+n(l.qty)+'</td><td class="r">0</td>'
             +'<td class="r">'+n(l.amount)+'</td></tr>';
         }).join('')
@@ -2532,6 +2555,13 @@ function repTable(cols,rows,opts){
       ||'<tr><td colspan="'+cols.length+'"><div class="empty" style="padding:28px"><div>'+esc(opts.empty||'Nothing to show for these filters')+'</div></div></td></tr>')
     +'</tbody>'+(rows.length&&tot.some(x=>x!=null)?'<tfoot><tr>'+cols.map((c,i)=>'<td'+(tot[i]!=null?' class="pss-num"':'')+' style="font-weight:700">'+(i===0?'Total ('+rows.length+')':tot[i]!=null?fmtCell(c,tot[i]):'')+'</td>').join('')+'</tr></tfoot>':'')+'</table></div></div>';
 }
+/* "Adhoc" IS THE WORD FARVISION STORES, and it reaches us in the data itself - invoice titles,
+   charge names, schedule names. Renaming the labels in the app did nothing for it: a demand
+   letter still printed "Adhoc" in the Description column because that is what the row says.
+   The agreement calls it Contracted Extra Charges and so does every document we send, so the
+   word is translated wherever one of those values is shown. The stored value is left alone -
+   it is FarVision's, and changing it would break the matching the sync relies on. */
+const psLabel=v=>String(v==null?'':v).replace(/\bad[\s-]?hoc\b/gi,'Contracted Extra Charges');
 function repSet(title,sub,cols,rows){ RP.title=title; RP.sub=sub; RP.cols=cols; RP.rows=rows; }
 /* ══ DOWNLOADS FOR THE LISTS, not just the Reports tab ══════════════════════════════════════
    Bookings, Invoices and Receipts all show a filtered list and had no way to get it out. The
