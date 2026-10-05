@@ -960,7 +960,7 @@ function notifGeneralMeta(n){
 window.notifOpenMedia=function(mode){
   const dd=$('notifDd'); if(dd) dd.classList.remove('show');
   CPA_PH.mode=(mode==='review'&&cpaIsPhotoApprover())?'review':'upload';
-  if(CPA_PH.mode==='review'){ CPA_RV.status='pending'; CPA_RV.sel.clear(); }
+  if(CPA_PH.mode==='review'){ CPA_RV.status='pending'; CPA_RV.sel.clear(); CPA_RV.picked=false; }
   navTo('custportal_admin/'+(cpaPhotosOnly()?0:3));
 };
 async function toggleNotif(){
@@ -18841,7 +18841,7 @@ VIEWS.custportal_admin=async function(v,seg){
      Photos & Videos on Review. Taken once and dropped from the address, so switching back to Upload
      afterwards is not overruled by it. */
   if(Array.isArray(seg)&&seg.indexOf('review')!==-1){
-    if(cpaIsPhotoApprover()){ CPA_PH.mode='review'; CPA_RV.status='pending'; CPA_RV.sel.clear(); }
+    if(cpaIsPhotoApprover()){ CPA_PH.mode='review'; CPA_RV.status='pending'; CPA_RV.sel.clear(); CPA_RV.picked=false; }
     try{ history.replaceState(history.state,'',location.pathname+location.search+'#/'+seg.filter(s=>s!=='review').join('/')); }catch(_e){}
   }
   if(cpaPhotosOnly()){
@@ -20445,7 +20445,7 @@ async function cpaPhFillBadge(){
     el.textContent=n>999?'999+':String(n); el.style.display=n?'inline-flex':'none';
   }catch(_e){}
 }
-window.cpaPhSetMode=function(m){ CPA_PH.mode=m; CPA_RV.sel.clear(); route(); };
+window.cpaPhSetMode=function(m){ CPA_PH.mode=m; CPA_RV.sel.clear(); if(m==='review'){ CPA_RV.status='pending'; CPA_RV.picked=false; } route(); };
 
 // Everything on screen is redrawn from CPA_PH, so there is one description of the state and no
 // way for the pickers, the form and the list to disagree about which flat is being looked at.
@@ -20887,20 +20887,50 @@ window.cpaPhDelete=async function(table,id){
    that grouped by where they are, so a whole flat or block can be published in one go. Approve,
    reject (a reason is required; the uploader is told it, and the file is removed from S3) and
    unpublish all go through cust.review_media(), which also refuses an approver's own uploads. */
+/* Everything waiting, counted per project, per section and per block, so the pickers can say where
+   the work is. (5 Oct 2026: Review opened on the first project alphabetically, Dream Ananta, while
+   all 262 waiting photos were Dream Gurukul flats - the screen read "nothing waiting".) */
+async function cpaRvPending(units){
+  const unitOf={}; (units||[]).forEach(u=>{unitOf[u.id]=u;});
+  const q=(t,cols)=>sb.schema('cust').from(t).select(cols).eq('status','pending').is('deleted_at',null).limit(5000).then(r=>r.data||[],()=>[]);
+  const [pp,tp,up]=await Promise.all([q('project_photos','project_id'),q('tower_photos','project_id,tower'),q('unit_photos','unit_id')]);
+  const out={};
+  const add=(pid,sec,tower)=>{ if(pid==null) return;
+    const o=out[pid]=out[pid]||{total:0,project_photos:0,tower_photos:0,unit_photos:0,towers:{}};
+    o.total++; o[sec]++;
+    if(tower){ const t=o.towers[tower]=o.towers[tower]||{tower_photos:0,unit_photos:0}; t[sec]++; } };
+  pp.forEach(r=>add(r.project_id,'project_photos'));
+  tp.forEach(r=>add(r.project_id,'tower_photos',r.tower));
+  up.forEach(r=>{ const u=unitOf[r.unit_id]; if(u) add(u.project_id,'unit_photos',u.tower); });
+  return out;
+}
+// The section of a project that has the most waiting, or the current one if nothing is waiting.
+function cpaRvBusiestSec(p){
+  if(!p||!p.total) return CPA_RV.sec;
+  return CPA_RV_SECS.map(s=>s[0]).sort((a,b)=>(p[b]||0)-(p[a]||0))[0];
+}
 async function cpaRvPaint(projects,units){
   projects=projects||await cpaProjects(); units=units||await cpaUnits();
   const wrap=$('cphWrap'); if(!wrap) return;
+  const pend=await cpaRvPending(units);
+  CPA_RV.pend=pend;
+  // First time in (or arriving from a notification): go where the waiting items are.
+  if(!CPA_RV.picked){
+    const best=Object.keys(pend).sort((a,b)=>pend[b].total-pend[a].total)[0];
+    if(best&&CPA_RV.status==='pending'){ CPA_RV.project=String(best); CPA_RV.tower=''; CPA_RV.sec=cpaRvBusiestSec(pend[best]); }
+    CPA_RV.picked=true;
+  }
   if(!CPA_RV.project&&projects.length) CPA_RV.project=CPA_PH.project||String(projects[0].id);
   const live=(units||[]).filter(u=>u.status!=='cancelled');
   const towers=cpaTowersForProject(live,CPA_RV.project);
   if(CPA_RV.tower&&towers.indexOf(CPA_RV.tower)<0) CPA_RV.tower='';
   const projUnits=live.filter(u=>String(u.project_id)===String(CPA_RV.project));
   // Waiting counts per section for the chosen project - what the section buttons show.
-  const pid=Number(CPA_RV.project);
-  const unitIds=projUnits.map(u=>u.id);
-  const cq=(t)=>{let q=sb.schema('cust').from(t).select('id',{count:'exact',head:true}).eq('status','pending').is('deleted_at',null);
-    return t==='unit_photos'?(unitIds.length?q.in('unit_id',unitIds):Promise.resolve({count:0})):q.eq('project_id',pid);};
-  const counts=await Promise.all(CPA_RV_SECS.map(s=>cq(s[0]).then(r=>r.count||0,()=>0)));
+  const pp=pend[CPA_RV.project]||{};
+  const counts=CPA_RV_SECS.map(s=>pp[s[0]]||0);
+  const waitTxt=n=>n?' ('+n+' waiting)':'';
+  const projOpts=projects.map(p=>[p.id,p.name+waitTxt((pend[p.id]||{}).total)]);
+  const towerOpts=towers.map(t=>{ const c=(pp.towers&&pp.towers[t])||{}; return [t,t+waitTxt(c[CPA_RV.sec]||0)]; });
   const sel=(id,label,opts,val,allLabel)=>'<div class="cph-f"><label>'+esc(label)+'</label><div class="cph-sel"><select onchange="cpaRvSet(\''+id+'\',this.value)">'
     +(allLabel?'<option value=""'+(val?'':' selected')+'>'+esc(allLabel)+'</option>':'')
     +opts.map(o=>'<option value="'+esc(o[0])+'"'+(String(o[0])===String(val)?' selected':'')+'>'+esc(o[1])+'</option>').join('')+'</select></div></div>';
@@ -20911,8 +20941,8 @@ async function cpaRvPaint(projects,units){
           +(counts[i]?'<span class="cph-badge">'+counts[i]+'</span>':'')+'</button>').join('')
       +'</div>'
       +'<div class="cph-filters" style="margin:0">'
-        +sel('project','Project',projects.map(p=>[p.id,p.name]),CPA_RV.project,'')
-        +(CPA_RV.sec!=='project_photos'?sel('tower','Block',towers.map(t=>[t,t]),CPA_RV.tower,'All blocks'):'')
+        +sel('project','Project',projOpts,CPA_RV.project,'')
+        +(CPA_RV.sec!=='project_photos'?sel('tower','Block',towerOpts,CPA_RV.tower,'All blocks'):'')
         +sel('status','Showing',Object.keys(CPA_MEDIA_STATUS).map(k=>[k,CPA_MEDIA_STATUS[k][0]]),CPA_RV.status,'')
       +'</div>'
     +'</div>'
@@ -20922,7 +20952,12 @@ async function cpaRvPaint(projects,units){
 }
 window.cpaRvSet=function(k,v){
   CPA_RV[k]=v; CPA_RV.sel.clear();
-  if(k==='project') CPA_RV.tower='';
+  if(k==='project'){
+    CPA_RV.tower='';
+    // A project chosen while looking at what is waiting opens on a section that has some.
+    const p=(CPA_RV.pend||{})[v];
+    if(CPA_RV.status==='pending'&&p&&p.total&&!p[CPA_RV.sec]) CPA_RV.sec=cpaRvBusiestSec(p);
+  }
   cpaRvPaint();
 };
 async function cpaRvList(projUnits){
