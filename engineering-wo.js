@@ -84,7 +84,7 @@
   ENG.f.woSave=function(btn,id){
     return run(btn,async()=>{
       const row=woRow(!id);
-      if(!id&&!row.project_id)return toast('Select a project','warn');
+      if(!id&&!row.project_id)return toast('Select a business unit','warn');
       if(!row.vendor_id)return toast('Select the parent contractor','warn');
       if(!row.title)return toast('Enter a title','warn');
       if(!row.wo_date)return toast('Enter the work order date','warn');
@@ -294,7 +294,10 @@
       '<div class="eng-filter"><div class="toolbar grow" style="margin:0;flex:1;min-width:180px"><div class="grow"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Search activity or location…" oninput="ENG.f.pkFilter(\'q\',this.value)"></div></div>'+
       '<select class="sel" onchange="ENG.f.pkFilter(\'tower\',this.value)"><option value="">All locations</option><option value="P">Business unit level</option>'+opts(PK.towers,x=>x.id,x=>x.name,'')+'</select>'+
       '<select class="sel" onchange="ENG.f.pkFilter(\'group\',this.value)">'+opts(C.groups,g=>g.id,g=>g.name,'','All groups')+'</select>'+
-      '<select class="sel" onchange="ENG.f.pkFilter(\'level\',this.value)">'+opts(['Project','Block','Floor','Flat','Portion'],x=>x,x=>x,'','All levels')+'</select></div>'+
+      /* Label and value are NOT the same here: the value goes straight to the database as
+         v_boq.location_level, which stores 'Project'. Renaming the option text to match the rest
+         of the module has to leave the value alone or the filter silently matches nothing. */
+      '<select class="sel" onchange="ENG.f.pkFilter(\'level\',this.value)">'+opts([['Project','Business unit'],['Block','Block'],['Floor','Floor'],['Flat','Flat'],['Portion','Portion']],x=>x[0],x=>x[1],'','All levels')+'</select></div>'+
       '<div id="pkSum" class="eng-sum" style="margin-bottom:8px"></div><div class="eng-tbl" style="border:1px solid var(--line);border-radius:9px;max-height:46vh;overflow:auto" id="pkList"></div>';
     $('modalHost').querySelector('.modal').insertAdjacentHTML('beforeend','<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="pkGo" onclick="ENG.f.pkSave(this)"><i class="fa-solid fa-link"></i> '+esc(cfg.okLabel||'Select')+'</button></div>');
     ENG.f.pkLoad();
