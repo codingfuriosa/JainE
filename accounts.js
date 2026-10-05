@@ -75,6 +75,8 @@ function css(){
   .acx-grid3{grid-template-columns:repeat(3,minmax(0,1fr))}
   .acx-grid4{grid-template-columns:repeat(4,minmax(0,1fr))}
   @media(max-width:760px){.acx-grid2,.acx-grid3,.acx-grid4{grid-template-columns:minmax(0,1fr)}}
+  .acx-bal{font-size:12px;color:var(--slate);margin-top:4px;min-height:16px}.acx-bal b{color:var(--ink)}
+  .acx-field input.acx-ro{background:#f1f5f9;color:#334155}
   .acx-field label{display:block;font-size:12px;font-weight:600;color:var(--slate);margin-bottom:4px}
   .acx-field input,.acx-field select,.acx-field textarea{width:100%;height:38px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font-size:13.5px;font-family:inherit;background:#fff;color:var(--ink);box-sizing:border-box}
   .acx-field textarea{height:auto;padding:8px 10px;resize:vertical}
@@ -491,7 +493,7 @@ window.acxVoucherNew=function(type){
   if(type!=='journal'&&!cb.length){ toast('Add a bank or cash ledger first (Ledgers & postings › Chart of accounts)','err'); return; }
   const T=VT[type];
   const pick=f=>(cb.filter(f)[0]||{}).id||'';
-  VF={type,date:today(),bu:S.buId||'',mode:T.mode,inst:'',instDate:'',party:'',narr:'',amount:'',
+  VF={type,tab:'main',bal:{},date:today(),bu:S.buId||'',mode:T.mode,inst:'',instDate:'',party:'',narr:'',amount:'',
       bank:T.kind==='lines'?((cb.find(l=>l.is_bank)||cb[0]).id):'',from:T.kind==='pair'?pick(T.fromF):'',to:T.kind==='pair'?pick(T.toF):'',
       lines:type==='journal'?[blankLine(),blankLine()]:[blankLine()]};
   if(type==='contra'&&VF.from===VF.to){ const other=cb.find(l=>l.id!==VF.from); if(other) VF.to=other.id; }
@@ -551,53 +553,147 @@ window.acxJnFill=function(i){
   const diff=r2(others.reduce((s,x)=>s+num(x.dr),0)-others.reduce((s,x)=>s+num(x.cr),0));
   if(Math.abs(diff)<0.005){ toast('Nothing to balance yet — enter the other lines first','warn'); return; }
   if(diff>0){ l.cr=String(diff); l.dr=''; } else { l.dr=String(-diff); l.cr=''; }
-  $('vfLines').innerHTML=vfLinesHtml();
+  vfRedrawLines();
 };
 function vfLinesHtml(){
-  const T=VT[VF.type]; if(T.kind==='journal') return vfJournalHtml(); if(T.kind!=='lines') return '';
+  const T=VT[VF.type]; if(T.kind==='journal') return vfJournalHtml(); if(T.kind==='lines') return vfRpLower(); return '';
+}
+
+/* ---- receipt / payment: laid out like the Farvision Receipt/Payment screen ----
+   Header: Business unit, Financial year, Document no (the next number, filled in for you), Document date,
+   Cash / Bank with its current balance, Narration. Below: Main Info (Dr / Cr, account head, amount with the
+   balance before and after), Other Info (mode, cheque / reference no, payee) and Dimension (cost / custom ledger).
+   Not carried over: Document type (the voucher type follows Dr / Cr), Copy template, the two empty search boxes. */
+const fmtDmy=d=>String(d.getDate()).padStart(2,'0')+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+d.getFullYear();
+function fyLabel(date){
+  const co=curCo(); const m=co?co.fy_start_month:4; const d=date?new Date(date+'T00:00:00'):new Date();
+  const y=(d.getMonth()+1)<m?d.getFullYear()-1:d.getFullYear();
+  return fmtDmy(new Date(y,m-1,1))+' to '+fmtDmy(new Date(y+1,m-1,0));
+}
+const balTxt=b=>money(Math.abs(b))+(b>=0.005?' Dr':b<=-0.005?' Cr':'');
+async function vfBal(ledger,sub){
+  const key=ledger+'|'+(sub||'')+'|'+VF.date; VF.bal=VF.bal||{};
+  if(VF.bal[key]!==undefined) return VF.bal[key];
+  const {data,error}=await rpc('ledger_balance',{p_company:S.coId,p_ledger:parseInt(ledger,10),p_sub:sub&&sub!=='__new'?parseInt(sub,10):null,p_as_on:VF.date});
+  VF.bal[key]=error?null:Number(data||0); return VF.bal[key];
+}
+function vfPaintAfter(i,b){
+  const a=$('vfLA_'+i); if(!a||!VF) return; const amt=r2(num(VF.lines[i].amt));
+  if(b==null||!amt){ a.textContent=''; return; }
+  a.innerHTML='Balance: <b>'+balTxt(b+(VF.type==='payment'?amt:-amt))+'</b>';   // a payment debits the account head, a receipt credits it
+}
+async function vfPaintBal(){
+  if(!VF||VT[VF.type].kind!=='lines') return;
+  const my=VF.bseq=(VF.bseq||0)+1, still=()=>VF&&VF.bseq===my;
+  if(VF.bank&&$('vfBankBal')){ const b=await vfBal(VF.bank,''); if(!still()) return; const e=$('vfBankBal'); if(e) e.innerHTML='Current balance: <b>'+(b==null?'—':balTxt(b))+'</b>'; }
+  for(let i=0;i<VF.lines.length;i++){
+    const l=VF.lines[i], c=$('vfLB_'+i); if(!c) continue;
+    if(!l.ledger){ c.textContent=''; l.cur=null; vfPaintAfter(i,null); continue; }
+    const b=l.sub==='__new'?0:await vfBal(l.ledger,l.sub||''); if(!still()) return;
+    l.cur=b; const c2=$('vfLB_'+i); if(c2) c2.innerHTML='Current balance: <b>'+(b==null?'—':balTxt(b))+'</b>'; vfPaintAfter(i,b);
+  }
+}
+async function vfLoadDocNo(){
+  const my=VF.dseq=(VF.dseq||0)+1; if(!$('vfDocNo')) return;
+  const {data,error}=await rpc('peek_doc_no',{p_company:S.coId,p_type:VF.type,p_date:VF.date});
+  if(!VF||VF.dseq!==my) return; const e=$('vfDocNo'); if(e) e.value=(error||!data)?'Assigned when posted':data;
+}
+function vfRedrawLines(){ const e=$('vfLines'); if(e) e.innerHTML=vfLinesHtml(); vfPaintBal(); }
+const vfRpHint=()=>VF.type==='payment'?'Credit goes to the Cash / Bank account; the account heads are debited. To pay a vendor against its bills use “Pay a vendor”.':'Debit goes to the Cash / Bank account; the account heads are credited.';
+function vfHeadRP(){
+  const bus='<select id="vfBu">'+opt('','Company level (no business unit)',VF.bu)+coBus().filter(b=>b.active).map(b=>opt(b.id,b.name,VF.bu)).join('')+'</select>';
+  const left=field('Business unit',bus)
+    +field('Document no','<input id="vfDocNo" class="acx-ro" readonly value="…"><div class="h">The next number; it is final when you post</div>')
+    +field('Cash / Bank','<select id="vfBank" onchange="acxVfBank()">'+cashBank().map(l=>opt(l.id,l.name+(l.is_cash?' (cash)':''),VF.bank)).join('')+'</select><div class="acx-bal" id="vfBankBal"></div>')
+    +field('Narration','<textarea id="vfNarr" rows="3">'+esc(VF.narr)+'</textarea>');
+  const right=field('Financial year','<input id="vfFy" class="acx-ro" readonly value="'+esc(fyLabel(VF.date))+'">')
+    +field('Document date','<input type="date" id="vfDate" value="'+esc(VF.date)+'" max="'+today()+'" onchange="acxVfDate()">');
+  return '<div class="acx-grid2"><div>'+left+'</div><div>'+right+'</div></div>';
+}
+function vfRpLower(){
+  const tabs=[['main','Main Info'],['other','Other Info'],['dim','Dimension']];
+  const strip='<div class="acx-subs" style="margin-bottom:12px">'+tabs.map(t=>'<span class="chip'+(VF.tab===t[0]?' active':'')+'" onclick="acxVfTab(\''+t[0]+'\')">'+t[1]+'</span>').join('')+'</div>';
+  return '<div class="card" style="padding:14px 16px;margin-bottom:12px">'+strip+(VF.tab==='other'?vfRpOther():VF.tab==='dim'?vfRpDim():vfRpMain())+'</div>';
+}
+function vfRpMain(){
+  const isDr=VF.type==='payment';
   const rows=VF.lines.map((l,i)=>{
     const led=l.ledger?ledgerById(parseInt(l.ledger,10)):null;
     const subs=led&&led.sub_ledger_type?(S.subCache[led.id]||[]):[];
+    return '<tr><td style="min-width:230px"><select onchange="acxVfLed('+i+',this.value)">'+ledgerOpts(x=>!x.is_bank&&!x.is_cash,l.ledger,'Choose account head…')+'</select><div class="acx-bal" id="vfLB_'+i+'"></div></td>'
+      +'<td style="min-width:190px">'+(led&&led.sub_ledger_type?'<select onchange="acxVfSub('+i+',this.value)">'+opt('','Choose '+led.sub_ledger_type+'…',l.sub)+subs.map(s=>opt(s.id,s.name,l.sub)).join('')+opt('__new','＋ New sub-ledger…',l.sub)+'</select>'
+         +(l.sub==='__new'?'<input style="margin-top:4px" placeholder="New sub-ledger name" value="'+esc(l.subNew)+'" oninput="acxVfF('+i+',\'subNew\',this.value)">':''):'<span class="acx-dim">—</span>')+'</td>'
+      +'<td style="min-width:140px"><input class="n" inputmode="decimal" value="'+esc(l.amt)+'" oninput="acxVfAmt('+i+',this.value)"><div class="acx-bal" id="vfLA_'+i+'"></div></td>'
+      +'<td style="width:34px"><button class="btn btn-sm btn-ghost" title="Remove line" onclick="acxVfDel('+i+')"><i class="fa-solid fa-xmark"></i></button></td></tr>';}).join('');
+  return '<div class="acx-grid2" style="margin-bottom:10px">'+field('Dr / Cr','<select id="vfDrCr" onchange="acxVfDir()">'+opt('dr','Dr / Payment',isDr?'dr':'cr')+opt('cr','Cr / Receipt',isDr?'dr':'cr')+'</select>')+'<div></div></div>'
+    +'<div class="acx-lines-wrap"><table class="acx-lines" style="min-width:560px"><thead><tr><th>Account head</th><th>Sub-ledger</th><th>Amount</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +'<div class="acx-sticky-foot"><button class="btn btn-sm" onclick="acxVfAdd()"><i class="fa-solid fa-plus"></i> Add line</button><span class="acx-right"></span><div class="acx-tot"><span>Total</span><b id="vfTotal">'+money(VF.lines.reduce((s,l)=>s+num(l.amt),0))+'</b></div></div>';
+}
+function vfRpOther(){
+  const T=VT[VF.type];
+  return '<div class="acx-grid2">'+field('Mode','<select id="vfMode" onchange="acxVfMode()">'+opts(MODES,VF.mode)+'</select>')
+    +field((VF.type==='payment'?'Cheque no':'Cheque / DD / reference no')+(VF.type==='payment'?' <span class="acx-dim" style="text-transform:none">(leave blank to take the next from the cheque book)</span>':''),'<input id="vfInst" value="'+esc(VF.inst)+'">')
+    +field('Instrument date','<input type="date" id="vfInstDate" value="'+esc(VF.instDate)+'">')
+    +field(T.party,'<input id="vfParty" value="'+esc(VF.party)+'">')+'</div>';
+}
+function vfRpDim(){
+  const rows=VF.lines.map((l,i)=>{
+    const led=l.ledger?ledgerById(parseInt(l.ledger,10)):null;
     const cled=l.cost?ledgerById(parseInt(l.cost,10)):null;
     const csubs=cled&&cled.sub_ledger_type?(S.subCache[cled.id]||[]):[];
-    return '<tr><td style="min-width:200px"><select onchange="acxVfLed('+i+',this.value)">'+ledgerOpts(x=>!x.is_bank&&!x.is_cash,l.ledger,'Choose ledger…')+'</select></td>'
-      +'<td style="min-width:170px">'+(led&&led.sub_ledger_type?'<select onchange="acxVfSub('+i+',this.value)">'+opt('','Choose '+led.sub_ledger_type+'…',l.sub)+subs.map(s=>opt(s.id,s.name,l.sub)).join('')+opt('__new','＋ New sub-ledger…',l.sub)+'</select>'
-         +(l.sub==='__new'?'<input style="margin-top:4px" placeholder="New sub-ledger name" value="'+esc(l.subNew)+'" oninput="acxVfF('+i+',\'subNew\',this.value)">':''):'<span class="acx-dim">—</span>')+'</td>'
-      +'<td style="min-width:170px"><select onchange="acxVfCost('+i+',this.value)">'+costOpts(l.cost,'—')+'</select>'
-         +(cled&&cled.sub_ledger_type?'<select style="margin-top:4px" onchange="acxVfF('+i+',\'csub\',this.value)">'+opt('','Choose sub-ledger…',l.csub)+csubs.map(s=>opt(s.id,s.name,l.csub)).join('')+'</select>':'')+'</td>'
-      +'<td style="min-width:120px"><input class="n" inputmode="decimal" value="'+esc(l.amt)+'" oninput="acxVfAmt('+i+',this.value)"></td>'
-      +'<td style="min-width:140px"><input value="'+esc(l.nar)+'" oninput="acxVfF('+i+',\'nar\',this.value)" placeholder="Narration"></td>'
-      +'<td style="width:34px"><button class="btn btn-sm btn-ghost" title="Remove line" onclick="acxVfDel('+i+')"><i class="fa-solid fa-xmark"></i></button></td></tr>';}).join('');
-  return '<div class="acx-sec-title" style="margin-top:0">'+T.lines+'</div><div class="acx-lines-wrap"><table class="acx-lines"><thead><tr><th>Ledger</th><th>Sub-ledger</th><th>Cost / custom ledger <span class="acx-dim" style="text-transform:none;letter-spacing:0">(optional)</span></th><th>Amount</th><th>Narration</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'
-    +'<div class="acx-sticky-foot"><button class="btn btn-sm" onclick="acxVfAdd()"><i class="fa-solid fa-plus"></i> Add line</button><span class="acx-right"></span><div class="acx-tot"><span>Total</span><b id="vfTotal">'+money(VF.lines.reduce((s,l)=>s+num(l.amt),0))+'</b></div></div>'
-    +'<div class="acx-field"><label>Narration</label><textarea id="vfNarr" rows="2">'+esc(VF.narr)+'</textarea></div>';
+    return '<tr><td style="min-width:200px">'+(led?esc(led.name):'<span class="acx-dim">Choose the account head first</span>')+'</td>'
+      +'<td style="min-width:220px"><select onchange="acxVfCost('+i+',this.value)">'+costOpts(l.cost,'—')+'</select></td>'
+      +'<td style="min-width:200px">'+(cled&&cled.sub_ledger_type?'<select onchange="acxVfF('+i+',\'csub\',this.value)">'+opt('','Choose sub-ledger…',l.csub)+csubs.map(s=>opt(s.id,s.name,l.csub)).join('')+'</select>':'<span class="acx-dim">—</span>')+'</td></tr>';}).join('');
+  return '<div class="acx-hint" style="margin-bottom:8px">Optional. Tag a line to a cost or custom ledger (and its sub-ledger) to follow the spend by block, activity or campaign. It does not change the trial balance.</div>'
+    +'<div class="acx-lines-wrap"><table class="acx-lines" style="min-width:0"><thead><tr><th>Account head</th><th>Cost / custom ledger</th><th>Sub-ledger</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
-function vfDraw(){
+window.acxVfTab=function(t){ vfSyncHead(); VF.tab=t; vfRedrawLines(); };
+window.acxVfBank=function(){ vfSyncHead(); vfPaintBal(); };
+window.acxVfDate=function(){
+  vfSyncHead(); VF.bal={}; const fy=$('vfFy'); if(fy) fy.value=fyLabel(VF.date); vfLoadDocNo(); vfPaintBal();
+};
+window.acxVfDir=function(){
+  vfSyncHead(); const old=VF.type, nu=val('vfDrCr')==='dr'?'payment':'receipt'; if(nu===old) return;
+  if(VF.mode===VT[old].mode) VF.mode=VT[nu].mode;
+  VF.type=nu; const T=VT[nu];
+  const t=$('vfTitle'); if(t) t.textContent='New '+T.label.toLowerCase(); const b=$('vfPost'); if(b) b.textContent='Post '+T.label.toLowerCase(); const h=$('vfHint'); if(h) h.textContent=vfRpHint();
+  vfRedrawLines(); vfLoadDocNo();
+};
+function vfDrawRP(){
+  const T=VT[VF.type];
+  openModal('<div class="modal-head"><h3 id="vfTitle">New '+T.label.toLowerCase()+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body"><div id="vfHead">'+vfHeadRP()+'</div><div id="vfLines">'+vfLinesHtml()+'</div>'
+    +'<div class="acx-hint" id="vfHint">'+esc(vfRpHint())+'</div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="vfPost" onclick="acxVfSave()">Post '+T.label.toLowerCase()+'</button></div>','lg');
+  vfLoadDocNo(); vfPaintBal();
+}
+function vfDraw(){ if(VT[VF.type].kind==='lines') return vfDrawRP(); return vfDrawBasic(); }
+function vfDrawBasic(){
   const T=VT[VF.type];
   openModal('<div class="modal-head"><h3>New '+T.label.toLowerCase()+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body"><div id="vfHead">'+vfHead()+'</div><div id="vfLines">'+vfLinesHtml()+'</div>'
     +'<div class="acx-hint">'+({receipt:'Debit goes to the bank / cash account; the lines below are credited.',payment:'Credit goes to the bank / cash account; the lines below are debited. To pay a vendor against its bills use “Pay a vendor”.',deposit:'Cash is taken to the bank.',withdrawal:'Cash is drawn from the bank.',contra:'Money moves between two cash / bank accounts.',journal:'A journal moves value between ledgers without touching bank or cash. Total debits must equal total credits. A credit to a vendor here does not create a bill to pay (bills come from Purchase and Engineering); a debit to a vendor appears under on-account and can be set against that vendor’s bills.'}[VF.type])+'</div></div>'
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="acxVfSave()">Post '+T.label.toLowerCase()+'</button></div>','lg');
 }
 function vfSyncHead(){
-  VF.date=val('vfDate')||VF.date; VF.bu=val('vfBu'); VF.mode=val('vfMode')||VF.mode; VF.inst=val('vfInst'); VF.instDate=val('vfInstDate');
-  if($('vfBank')) VF.bank=val('vfBank'); if($('vfParty')) VF.party=val('vfParty'); if($('vfNarr')) VF.narr=val('vfNarr'); if($('vfNarr2')) VF.narr=val('vfNarr2');
-  if($('vfAmount')) VF.amount=val('vfAmount'); if($('vfFrom')) VF.from=val('vfFrom'); if($('vfTo')) VF.to=val('vfTo');
+  const g=(id,f)=>{ if($(id)) f(val(id)); };
+  g('vfDate',v=>{VF.date=v||VF.date;}); g('vfBu',v=>{VF.bu=v;}); g('vfMode',v=>{VF.mode=v||VF.mode;}); g('vfInst',v=>{VF.inst=v;}); g('vfInstDate',v=>{VF.instDate=v;});
+  g('vfBank',v=>{VF.bank=v;}); g('vfParty',v=>{VF.party=v;}); g('vfNarr',v=>{VF.narr=v;}); g('vfNarr2',v=>{VF.narr=v;});
+  g('vfAmount',v=>{VF.amount=v;}); g('vfFrom',v=>{VF.from=v;}); g('vfTo',v=>{VF.to=v;});
 }
 window.acxVfMode=function(){ VF.mode=val('vfMode'); };
 window.acxVfF=function(i,k,v){ VF.lines[i][k]=v; };
-window.acxVfAmt=function(i,v){ VF.lines[i].amt=v; const t=$('vfTotal'); if(t) t.textContent=money(VF.lines.reduce((s,l)=>s+num(l.amt),0)); };
-window.acxVfAdd=function(){ vfSyncHead(); VF.lines.push(blankLine()); $('vfLines').innerHTML=vfLinesHtml(); };
-window.acxVfDel=function(i){ vfSyncHead(); const min=VF.type==='journal'?2:1; if(VF.lines.length>min) VF.lines.splice(i,1); else VF.lines[i]=blankLine(); $('vfLines').innerHTML=vfLinesHtml(); };
+window.acxVfAmt=function(i,v){ VF.lines[i].amt=v; const t=$('vfTotal'); if(t) t.textContent=money(VF.lines.reduce((s,l)=>s+num(l.amt),0)); vfPaintAfter(i,VF.lines[i].cur); };;
+window.acxVfAdd=function(){ vfSyncHead(); VF.lines.push(blankLine()); vfRedrawLines(); };
+window.acxVfDel=function(i){ vfSyncHead(); const min=VF.type==='journal'?2:1; if(VF.lines.length>min) VF.lines.splice(i,1); else VF.lines[i]=blankLine(); vfRedrawLines(); };
 window.acxVfLed=async function(i,v){
   vfSyncHead(); const l=VF.lines[i]; l.ledger=v; l.sub=''; l.subNew='';
   const led=v?ledgerById(parseInt(v,10)):null; if(led&&led.sub_ledger_type) await subsOf(led.id);
-  $('vfLines').innerHTML=vfLinesHtml();
+  vfRedrawLines();
 };
-window.acxVfSub=function(i,v){ vfSyncHead(); VF.lines[i].sub=v; $('vfLines').innerHTML=vfLinesHtml(); };
+window.acxVfSub=function(i,v){ vfSyncHead(); VF.lines[i].sub=v; vfRedrawLines(); };
 window.acxVfCost=async function(i,v){
   vfSyncHead(); const l=VF.lines[i]; l.cost=v; l.csub='';
   const led=v?ledgerById(parseInt(v,10)):null; if(led&&led.sub_ledger_type) await subsOf(led.id);
-  $('vfLines').innerHTML=vfLinesHtml();
+  vfRedrawLines();
 };
 window.acxVfSave=async function(){
   vfSyncHead(); const T=VT[VF.type];
@@ -629,6 +725,7 @@ window.acxVfSave=async function(){
     if(!(VF.narr||'').trim()){ toast('Write the narration — why is this entry being made?','err'); return; }
   }else if(T.kind==='lines'){
     if(!VF.bank){ toast('Choose the bank / cash account','err'); return; }
+    if(VF.type==='receipt'&&(VF.mode==='cheque'||VF.mode==='dd')&&!VF.inst){ toast('Enter the cheque / DD number (Other Info tab)','err'); VF.tab='other'; vfRedrawLines(); return; }
     const used=VF.lines.filter(l=>l.ledger||num(l.amt));
     if(!used.length){ toast('Add at least one line','err'); return; }
     let total=0;
