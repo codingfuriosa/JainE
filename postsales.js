@@ -2261,12 +2261,17 @@ window.psrpPdf=async function(btn){
     const mis=RP.theme==='mis', cols=RP.cols.filter(c=>!c.noExport);
     const doc=new jsPDF({orientation:'landscape',unit:'pt',format:'a4'});
     const W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight(), M=30;
-    const brand=[109,40,217];
+    // The same deep blue the screen uses. 109,40,217 is #6d28d9 - a saturated violet, printed as a
+  // 56pt band across the top of every report page, which is a lot of violet on a finance document.
+  const brand=[30,64,175];
     const header=()=>{
       if(mis){
         doc.setTextColor(0); doc.setFont('helvetica','bold');
         doc.setFontSize(13); doc.text(RP.title,W/2,M+8,{align:'center'});
-        doc.setFontSize(11.5); doc.text(RP.sub,W/2,M+26,{align:'center'});
+        // Wrapped to the page. A subtitle like "DREAM GURUKUL(DOLTALA MADHYAMGRAM) · as on
+      // 05-10-2026" is wider than A4 at this size and simply ran off the edge, taking the end of
+      // the project name with it - and the longest names belong to the biggest projects.
+      doc.setFontSize(11.5); doc.text(doc.splitTextToSize(RP.sub,W-2*M),W/2,M+26,{align:'center'});
         doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(120); doc.text(repCompany()+' · generated '+repStamp(),W/2,M+40,{align:'center'});
         return;
       }
@@ -2274,7 +2279,7 @@ window.psrpPdf=async function(btn){
       doc.setTextColor(255); doc.setFont('helvetica','bold'); doc.setFontSize(14); doc.text(repCompany(),M,24);
       doc.setFontSize(11); doc.text(RP.title,M,42);
       doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.text('Generated '+repStamp(),W-M,24,{align:'right'}); doc.text('JAIN-E Post Sales',W-M,42,{align:'right'});
-      doc.setTextColor(71,85,105); doc.setFontSize(9); doc.text(RP.sub,M,72);
+      doc.setTextColor(71,85,105); doc.setFontSize(9); doc.text(doc.splitTextToSize(RP.sub,W-2*M),M,72);
     };
     const tot=cols.map((c,i)=>i===0?(mis?'TOTAL':'Total ('+RP.rows.length+')'):(c.sum?cellText(c,{[c.k]:RP.rows.reduce((s,r)=>s+num(r[c.k]),0)}):''));
     const colStyles={}; cols.forEach((c,i)=>{ if(isNumCol(c)) colStyles[i]={halign:'right'}; else if(c.t==='d') colStyles[i]={halign:'center'}; });
@@ -2329,8 +2334,10 @@ window.psrpRender=async function(host,seg){
      +fl('Tower','<select onchange="RP_set(\'tower\',this.value)"><option value="">All towers</option>'+S.towers.map(t=>'<option value="'+t.id+'"'+(String(t.id)===String(RP.tower)?' selected':'')+'>'+esc(t.name)+'</option>').join('')+'</select>')
      +(key==='outstanding'?asOf:(key==='collection'||key==='demand'||key==='register'||key==='cancellation')?range:'')
      +(key!=='availability'&&key!=='demand'?fl('Search','<span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="psrpQ" value="'+esc(RP.q)+'" placeholder="Booking, flat or customer" oninput="RP_q(this.value)"></span>'):'');
-  host.innerHTML='<div style="margin-bottom:8px"><a href="javascript:void 0" onclick="navTo(\'postsales/reports\')" style="font-size:13px"><i class="fa-solid fa-arrow-left"></i> All reports</a></div>'
-    +'<div class="ps-head"><div class="t"><div class="sec-title"><i class="fa-solid '+R_[2]+'" style="color:#7e22ce"></i> '+esc(R_[1])+'</div><div class="pss-hint" style="margin:2px 0 0">'+esc(R_[3])+'</div></div>'
+  // Was an underlined <a>. Every other Back in Post Sales is a button, and this one is the same
+  // action, so it is the same control.
+  host.innerHTML='<div class="toolbar" style="margin-bottom:12px"><button class="btn btn-sm" onclick="navTo(\'postsales/reports\')"><i class="fa-solid fa-arrow-left"></i> All reports</button></div>'
+    +'<div class="ps-head"><div class="t"><div class="sec-title"><i class="fa-solid '+R_[2]+'" style="color:var(--ps-brand,#1e40af)"></i> '+esc(R_[1])+'</div><div class="pss-hint" style="margin:2px 0 0">'+esc(R_[3])+'</div></div>'
     +'<div class="acts"><button class="btn" onclick="psrpExcel(this)"><i class="fa-solid fa-file-excel" style="color:#15803d"></i> Excel</button><button class="btn" onclick="psrpPdf(this)"><i class="fa-solid fa-file-pdf" style="color:#dc2626"></i> PDF</button></div></div>'
     +'<div class="ps-filters">'+filters+'</div>'
     +'<div id="psrpBody"><div class="loader"><div class="spin"></div></div></div>';
