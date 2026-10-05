@@ -20247,7 +20247,11 @@ function cpaPhCss(){return `<style>
   .cph-rvgh span{color:var(--slate);font-size:12.5px;margin-right:auto}
   .cph-rvgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
   .cph-rvc{position:relative;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#fff;display:flex;flex-direction:column;transition:box-shadow .15s,border-color .15s}
-  .cph-rvc.sel{border-color:#1d4ed8;box-shadow:0 0 0 2px rgba(29,78,216,.25)}
+  /* Ticked. Its own class name: the site-wide .sel (dropdowns) is 36px tall and squashed the card. */
+  .cph-rvc.cph-picked{border-color:#1d4ed8;background:#eff6ff;box-shadow:0 0 0 2px rgba(29,78,216,.28)}
+  .cph-rvc.cph-picked .cph-rvm{opacity:.82}
+  .cph-rvc.cph-picked .cph-rvd{color:#1d4ed8}
+  .btn.cph-tickon{border-color:#1d4ed8;color:#1d4ed8;background:#eff6ff}
   .cph-rvck{position:absolute;top:7px;left:7px;z-index:2;background:rgba(255,255,255,.92);border-radius:6px;padding:3px 4px;line-height:0}
   .cph-rvck input{width:17px;height:17px;margin:0;cursor:pointer}
   .cph-rvm{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;cursor:zoom-in;background:#0f172a}
@@ -21006,10 +21010,11 @@ async function cpaRvList(projUnits){
       const ids=g.items.filter(p=>state.super||String(p.uploaded_by||'').toLowerCase()!==me).map(p=>p.id);
       return '<div class="cph-rvg"><div class="cph-rvgh"><b>'+esc(g.label)+'</b><span>'+g.items.length+' item'+(g.items.length===1?'':'s')+'</span>'
         +(canPublish&&ids.length?'<button class="btn btn-sm" onclick="cpaRvDecide(\'publish\','+JSON.stringify(ids)+')"><i class="fa-solid fa-check"></i> Publish all '+ids.length+'</button>':'')
-        +(ids.length&&CPA_RV.status!=='rejected'?'<button class="btn btn-sm" onclick="cpaRvTick('+JSON.stringify(ids)+')"><i class="fa-regular fa-square-check"></i> Tick all</button>':'')+'</div>'
+        +(ids.length&&CPA_RV.status!=='rejected'?'<button class="btn btn-sm" data-tick-ids="'+JSON.stringify(ids)+'" onclick="cpaRvTick('+JSON.stringify(ids)+')"><i class="fa-regular fa-square-check"></i> Tick all</button>':'')+'</div>'
         +'<div class="cph-rvgrid">'+g.items.map(p=>cardOf[p.id]).join('')+'</div></div>';
     }).join('')
       +(list.length>=240?'<div class="cph-empty">Showing the newest 240. Publish or reject these to see the rest.</div>':'');
+    cpaRvSyncTickAll();
     cpaRvBar();
   }catch(e){ host.innerHTML='<div class="cph-empty" style="color:var(--err)">'+esc((e&&e.message)||String(e))+'</div>'; }
 }
@@ -21033,7 +21038,7 @@ async function cpaRvCard(p,t){
   else if(p.status==='published')
     acts='<button class="cph-un" onclick="cpaRvDecide(\'unpublish\','+id+')" title="Unpublish - hide it from customers again"><i class="fa-solid fa-eye-slash"></i></button>'
         +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject and remove the file"><i class="fa-solid fa-xmark"></i></button>';
-  return '<div class="cph-rvc'+(on?' sel':'')+'" data-id="'+p.id+'">'
+  return '<div class="cph-rvc'+(on?' cph-picked':'')+'" data-id="'+p.id+'">'
     +(p.status!=='rejected'&&!mine?'<label class="cph-rvck"><input type="checkbox" '+(on?'checked':'')+' onchange="cpaRvToggle('+p.id+',this.checked)"></label>':'')
     +media
     +'<div class="cph-rvi"><div class="cph-rvd">'+esc(fmtDate(p.taken_on))+(area?' · '+esc(area):'')+'</div>'
@@ -21054,15 +21059,32 @@ function cpaRvBar(){
 }
 window.cpaRvToggle=function(id,on){
   if(on) CPA_RV.sel.add(id); else CPA_RV.sel.delete(id);
-  const c=document.querySelector('.cph-rvc[data-id="'+id+'"]'); if(c) c.classList.toggle('sel',on);
+  const c=document.querySelector('.cph-rvc[data-id="'+id+'"]'); if(c) c.classList.toggle('cph-picked',on);
+  cpaRvSyncTickAll();
   cpaRvBar();
 };
+// Tick all / Untick all for one group: ticks every photo in it, or - when they are all ticked
+// already - unticks them again.
 window.cpaRvTick=function(ids){
-  const mine=new Set((CPA_RV.shown||[]).filter(p=>String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super).map(p=>p.id));
-  ids.forEach(id=>{ if(!mine.has(id)){ CPA_RV.sel.add(id); const c=document.querySelector('.cph-rvc[data-id="'+id+'"]'); if(c){c.classList.add('sel'); const cb=c.querySelector('input'); if(cb) cb.checked=true;} } });
+  const all=ids.length&&ids.every(id=>CPA_RV.sel.has(id));
+  ids.forEach(id=>{
+    if(all) CPA_RV.sel.delete(id); else CPA_RV.sel.add(id);
+    const c=document.querySelector('.cph-rvc[data-id="'+id+'"]');
+    if(c){ c.classList.toggle('cph-picked',!all); const cb=c.querySelector('input'); if(cb) cb.checked=!all; }
+  });
+  cpaRvSyncTickAll();
   cpaRvBar();
 };
-window.cpaRvClearSel=function(){ CPA_RV.sel.clear(); document.querySelectorAll('.cph-rvc.sel').forEach(c=>{c.classList.remove('sel'); const cb=c.querySelector('input'); if(cb) cb.checked=false;}); cpaRvBar(); };
+// Each group's button says what it will do next.
+function cpaRvSyncTickAll(){
+  document.querySelectorAll('[data-tick-ids]').forEach(b=>{
+    let ids=[]; try{ ids=JSON.parse(b.getAttribute('data-tick-ids')); }catch(_e){}
+    const all=ids.length&&ids.every(id=>CPA_RV.sel.has(id));
+    b.innerHTML=all?'<i class="fa-solid fa-square-minus"></i> Untick all':'<i class="fa-regular fa-square-check"></i> Tick all';
+    b.classList.toggle('cph-tickon',!!all);
+  });
+}
+window.cpaRvClearSel=function(){ CPA_RV.sel.clear(); document.querySelectorAll('.cph-rvc.cph-picked').forEach(c=>{c.classList.remove('cph-picked'); const cb=c.querySelector('input'); if(cb) cb.checked=false;}); cpaRvSyncTickAll(); cpaRvBar(); };
 const CPA_RV_REASONS=['Blurred or out of focus','Wrong flat or block','Too dark','Not a construction photo','Duplicate','Shows people or private information'];
 window.cpaRvDecide=function(decision,ids){
   ids=(ids||[]).filter(Boolean);
