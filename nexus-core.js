@@ -47,8 +47,8 @@ function pageIdFromPath(pathname){
 // second visit in the same tab.
 // A page may list several scripts; they load one after another, in order (purchase-indent.js uses what
 // purchase.js defines).
-const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js']};
-const PAGE_SCRIPT_VERSION={'purchase.js':'20261004v','purchase-indent.js':'20261004k','purchase-rfq.js':'20261004e','purchase-po.js':'20261004d','purchase-stores.js':'20261004c','purchase-reports.js':'20261004a'};
+const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js'],accounts:['accounts.js','accounts-bank.js','accounts-books.js']};
+const PAGE_SCRIPT_VERSION={'accounts.js':'20261005c','accounts-bank.js':'20261005a','accounts-books.js':'20261005b','purchase.js':'20261004v','purchase-indent.js':'20261004k','purchase-rfq.js':'20261004e','purchase-po.js':'20261004d','purchase-stores.js':'20261004c','purchase-reports.js':'20261004a'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];
@@ -592,6 +592,7 @@ const NAV=[
   ]},
   {group:'Governance',items:[
     {id:'finance',label:'Finance Vault',icon:'fa-indian-rupee-sign'},
+    {id:'accounts',label:'Accounts',icon:'fa-calculator'},
     {id:'legal',label:'Legal',icon:'fa-scale-balanced'},
     {id:'compliance',label:'Renewals & Compliance',icon:'fa-calendar-check'},
   ]},
@@ -11001,6 +11002,7 @@ const USB_COL4={
      The line is almost always the same: a feature that DOES something carries a subject, and a
      feature you only LOOK AT does not. Create task has an assignee, Search tasks never will.
 
+  'accounts':             {header:'Time spent', keys:['time_spent']},
      hideDetails is set only where Details is empty too, so what is left is never a row of two
      dashes - on the rest Details already carries the query, the item, the case number or the
      check, which is why none of them loses anything by giving up the column. */
@@ -11831,6 +11833,22 @@ async function procFetch(cat){
 
 function procRefresh(cat){
   const host=$('procHost');if(!host)return;
+/* ===== ACCOUNTS MODULE =====
+   Two tabs. Transactions (vouchers, bills & on-account payments, bank reconciliation, cheque printing,
+   enterprise / company / business-unit structure) lives in accounts.js + accounts-bank.js; Ledgers &
+   postings (automatic GST / TDS / retention / Post Sales postings, chart of accounts, ledger opening,
+   ledgers and trial balance) lives in accounts-books.js. Loaded on demand - see PAGE_EXTRA_SCRIPT.
+   Spec: docs/accounts-spec.md. Tables and functions: supabase/migrations/2026100510*..2026100512*. */
+VIEWS.accounts=async function(v,seg){
+  setCrumb(['Governance','Accounts']);
+  const tabs=['Transactions','Ledgers & postings'];const ti=mTab(seg,tabs.length);
+  v.innerHTML=mHead('fa-calculator','#0e7490','Accounts')+mTabs('accounts',tabs,ti)+'<div id="acxBody" style="margin-top:16px"></div>';
+  const host=$('acxBody');
+  const fn=ti===0?window.acxRender:window.acxBooksRender;
+  if(typeof fn!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Accounts could not finish loading - refresh the page.</div></div>'; return; }
+  await fn(host,seg.slice(1));
+};
+
   procFetch(cat).then(docs=>{ host.innerHTML=procCardsHtml(docs,cat); procActionBar(cat); });
 }
 
@@ -29864,6 +29882,8 @@ const USAGE_VIEWS={
   'transcription/5':     'transcription.compilation.view_a_lead_s_combined_call_history',
   'transcription/view':  'transcription.call_detail.view_qualification_checklist_and_entities',
   'dashboard/0':         'dashboard.overview.view_home_dashboard_summary',
+  'accounts/0':          'accounts.transactions.view_transactions',
+  'accounts/1':          'accounts.ledgers_postings.view_ledgers_postings',
   'gtd/0':               'gtd.inbox.view_capture_inbox_clarify_queue',
   'gtd/1':               'gtd.next_actions.view_next_actions_by_context',
   'gtd/2':               'gtd.projects.view_active_projects_next_steps',
