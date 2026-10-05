@@ -1910,7 +1910,7 @@ async function interestDue(host,stale){
   const T=k=>rows.reduce((s,r)=>s+num(r[k]),0);
   host.innerHTML=invNav('interest')
     +'<div class="ps-head"><div class="t"><div class="sec-title">Interest on late payment (18% p.a.) - as of today</div><div class="pss-hint" style="margin:2px 0 0"><b>Suggested</b> = interest on payments that came in after their due date, not yet billed or waived. Open a booking to approve (bill) or waive it. <b>Running</b> = still building on demands not yet paid.</div></div></div>'
-    +'<div class="ps-filters">'+projSelect('psiIP',pid,'I.pid=this.value;route()','All projects')+'</div>'
+    +'<div class="ps-filters">'+projSelect('psiIP',pid,'psiProjPick(this.value,"interest")','All projects')+'</div>'
     +mKpis([['Suggested for billing',inr(T('suggested')),rows.filter(r=>num(r.suggested)>0.5).length+' bookings'],['Running',inr(T('running')),'on unpaid demands'],['Billed',inr(T('billed')),''],['Waived',inr(T('waived')),'']])
     +'<div class="card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Booking</th><th>Flat</th><th>Applicant</th><th class="pss-num">Paid late</th><th class="pss-num">Running</th><th class="pss-num">Billed</th><th class="pss-num">Waived</th><th class="pss-num">Suggested</th></tr></thead><tbody>'
     +(rows.map(r=>{const b=by[r.booking_id]||{},ap=(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq);return '<tr style="cursor:pointer" onclick="navTo(\'postsales/bookings/'+r.booking_id+'\')"><td><b>'+esc(b.booking_no||'')+'</b></td><td>'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+'</td><td>'+esc(ap[0]?ap[0].full_name:'')+'</td><td class="pss-num">'+inr(r.paid_late)+'</td><td class="pss-num">'+inr(r.running)+'</td><td class="pss-num">'+inr(r.billed)+'</td><td class="pss-num">'+inr(r.waived)+'</td><td class="pss-num"><b>'+inr(r.suggested)+'</b></td></tr>';}).join('')
@@ -1932,7 +1932,24 @@ async function progressView(host,stale){
     +(S.towers.map(t=>{const e=(ev||[]).filter(x=>x.tower_id===t.id);
       return '<div class="psb-sec"><h3>'+esc(t.name)+' <span class="tag t-gray">'+e.length+' stage'+(e.length===1?'':'s')+' complete</span></h3>'+(e.length?'<table class="psb-tbl"><thead><tr><th>Stage</th><th>Floor</th><th>Completed on</th><th class="r">Invoices raised</th><th>Recorded by</th></tr></thead><tbody>'+e.map(x=>'<tr><td>'+esc(sn(x.stage_id))+'</td><td>'+(x.floor_no==null?'<span style="color:var(--slate)">Whole tower</span>':esc(ordinal(x.floor_no)))+'</td><td>'+dmy(x.completed_on)+'</td><td class="r">'+(cnt[x.id]||0)+'</td><td>'+esc((x.created_by||'').split('@')[0])+'</td></tr>').join('')+'</tbody></table>':'<div class="pss-hint">Nothing recorded yet.</div>')+'</div>';}).join('')||'<div class="empty"><div>No towers set up for this project</div></div>');
 }
-window.psiProgressGo=function(){ I.pid=val('psiPP'); route(); };
+/* CHANGING THE PROJECT RE-RENDERS THIS VIEW, DIRECTLY.
+
+   Both of these used to set I.pid and call route(). route() re-renders from the URL hash, and the
+   hash does not change when you pick a project - the page is still postsales/invoices/interest -
+   so whether anything happened depended on the whole page tearing down and rebuilding around an
+   unchanged address. In practice the list stayed exactly as it was and the filter looked broken.
+
+   It was never the database: interest_summary filters correctly, 66 bookings across all projects
+   down to 42, 11, 8 and 0 for the individual ones. The answer was right and nobody asked for it.
+
+   Calling the view's own render with its own host asks for it. */
+window.psiProjPick=function(v,view){
+  I.pid=v||null;
+  const host=document.getElementById('psiBody');
+  if(host) psiRender(host, view==='list'?[]:[view]);
+  else route();          // the body div is gone, so the page really does need rebuilding
+};
+window.psiProgressGo=function(){ psiProjPick(val('psiPP'),'progress'); };
 
 /* ---- invoice view, cancel, print ---- */
 async function loadInvoice(id){

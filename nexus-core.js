@@ -57,6 +57,17 @@ function ensurePageScript(id){
 }
 function loadPageScript(src){
   if(_loadedPageScripts.has(src))return Promise.resolve();
+  /* A PAGE MAY ALREADY CARRY THE SCRIPT AS A PLAIN TAG, AND postsales.html DOES.
+     _loadedPageScripts only knows about the ones loaded from here, so on that page this appended
+     a second copy and the browser ran the file twice. The second run hits the first top-level
+     `const` and dies with "Identifier has already been declared" - the module half-initialises,
+     the console fills with an error nobody put there, and whatever ran before the throw ran
+     twice. Checking the document for the file settles it whichever way it arrived. */
+  const already=[].slice.call(document.scripts).some(function(s){
+    const u=(s.getAttribute('src')||'').split('?')[0];
+    return u===src||u.endsWith('/'+src);
+  });
+  if(already){ _loadedPageScripts.add(src); return Promise.resolve(); }
   return new Promise((resolve)=>{
     const s=document.createElement('script');
     /* Bump this whenever accountability.js or insp-items.js changes, the same way the pages bump
