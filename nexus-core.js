@@ -724,6 +724,24 @@ function canInventory(){
   const me=String(state.email||'').trim().toLowerCase();
   return INVENTORY_PEOPLE.indexOf(me)!==-1;
 }
+/* ACCOUNTS IS FOR THREE PEOPLE, BY NAME.
+   Administrator, Prerna and Vicky - the same people who hold the module's own administrator role in
+   accounts.access. Same arrangement as Inventory above: the test runs BEFORE the state.super shortcut
+   in pageAllowed, so the other super admins do not get the menu entry and cannot open the page.
+
+   This decides only whether the menu entry is drawn and the page opens. It is not a database rule:
+   accounts.can_read() still lets any super admin (or anyone granted 'accounts') read the accounts
+   tables through the API, and what anybody may post or change is enforced by the database separately
+   (accounts.access roles, posted vouchers are immutable).
+
+   To add someone for now, add an address here AND a row in accounts.access.
+   To open it up later, delete this block and the two checks for 'accounts' below. */
+const ACCOUNTS_PEOPLE=['ayushruia1@gmail.com','businessanalyst@thejaingroup.com','system3.thejaingroup@gmail.com'];
+function canAccounts(){
+  if(state.isCustomer||state.impersonating) return false;
+  const me=String(state.email||'').trim().toLowerCase();
+  return ACCOUNTS_PEOPLE.indexOf(me)!==-1;
+}
 /* WEEKLY STATUS IS FOR PRERNA ALONE, BY NAME.
    Same arrangement as the Feedback Hub and Inventory above: not granted through modules and not
    open to every superadmin, so the test runs BEFORE the state.super shortcut in pageAllowed.
@@ -737,14 +755,14 @@ function canWeeklyStatus(){
   const me=String(state.email||'').trim().toLowerCase();
   return WEEKLY_STATUS_PEOPLE.indexOf(me)!==-1;
 }
-function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(it.id==='weekly_status')?canWeeklyStatus():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
+function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(it.id==='accounts')?canAccounts():(it.id==='weekly_status')?canWeeklyStatus():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(hasUsability()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
