@@ -24,7 +24,7 @@ It replaces the placeholder tabs on the existing **Inventory** and **Procurement
 - **Stock is held in the issue UOM** when there is one, otherwise the receipt UOM. GRN is entered in the receipt UOM and converted on posting; issues and returns are in the issue UOM. **[?]** which one is the stock UOM.
 
 ### 1.3 Warehouses
-- **Multiple warehouses per project**, each with name, code and (optional) in-charge. A project belongs to a **legal entity / company**; this drives the transfer rule in §6.5. **[?]** whether the legal entity already exists anywhere in JainE.
+- **Multiple warehouses per project**, each with name, code and an Active / Inactive switch (the optional in-charge field was removed from the form and list on 2026-10-05; the database column is left in place, unused). A project belongs to a **legal entity / company**; this drives the transfer rule in §6.5. **[?]** whether the legal entity already exists anywhere in JainE.
 
 ---
 
