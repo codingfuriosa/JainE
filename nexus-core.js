@@ -20503,6 +20503,9 @@ function cpaPhCss(){return `<style>
   .cph-fixi .cph-th{width:54px;height:54px;flex:none}
   .cph-fixw{flex:1;min-width:0;font-size:12.5px;color:var(--slate);line-height:1.45}
   .cph-fixw b{display:block;color:var(--ink);font-size:13.5px}
+  .cph-retake{display:inline-flex;align-items:center;gap:6px;margin-top:5px;padding:5px 11px;border-radius:8px;cursor:pointer;
+    font:inherit;font-size:12px;font-weight:700;border:1px solid #1d4ed8;background:#1d4ed8;color:#fff}
+  .cph-retake:hover{background:#1e40af}
   @keyframes cphShim{to{background-position:-200% 0}}
   .cph-when{white-space:nowrap;font-weight:600;color:var(--ink)}
   .cph-area{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;
@@ -20669,65 +20672,86 @@ async function cpaPhPaint(projects,units){
   cpaPhFixList(projects,units);
 }
 
-/* TO RETAKE: what the reviewer rejected from this person's uploads, newest first. Retake opens the
-   camera at once for the same place (flat and section, block, or project) and points the form
-   there; the new photo, once uploaded, replaces the rejected one (cust.replace_rejected_media). */
+/* TO RETAKE: every rejected photo still waiting for a replacement, whoever took it - on site,
+   whoever is there retakes it. One line per place (flat and section, block, or project), because
+   one new photo there replaces all the rejected ones at that place (cust.replace_rejected_media).
+   Retake opens the camera at once and points the form at that place. The same Retake is on each
+   rejected row of "Already uploaded" (cpaPhRetakeBtn). */
 async function cpaPhFixList(projects,units){
   const host=$('cphFix'); if(!host) return;
-  const me=String(state.email||'').toLowerCase(); if(!me) return;
   const res=await Promise.all(CPA_RV_SECS.map(s=>sb.schema('cust').from(s[0]).select('*').eq('status','rejected')
-    .is('deleted_at',null).ilike('uploaded_by',me).order('reviewed_at',{ascending:false}).limit(60)));
+    .is('deleted_at',null).order('reviewed_at',{ascending:false}).limit(200)));
   if(!$('cphFix')) return;
-  const unitOf={}; (units||[]).forEach(u=>{unitOf[u.id]=u;});
   const projOf={}; (projects||[]).forEach(p=>{projOf[p.id]=p;});
-  const areas=cpaPhUploadAreas().map(a=>a[0]);
-  const items=[];
+  const byPlace={}, order=[];
   CPA_RV_SECS.forEach((s,k)=>((res[k]&&res[k].data)||[]).forEach(p=>{
-    const t=s[0]; let place, pid, can=true;
-    if(t==='unit_photos'){
-      const u=unitOf[p.unit_id]; pid=u&&u.project_id;
-      const a=(CPA_PH_AREAS.find(x=>x[0]===(p.area||'common'))||[0,p.area||''])[1];
-      place=(u?(u.tower?u.tower+' · ':'')+'Flat '+u.unit_code:'Flat')+' · '+a;
-      can=!!u&&areas.indexOf(p.area||'common')!==-1;
-    }else if(t==='tower_photos'){ pid=p.project_id; place=p.tower||'Block'; }
-    else { pid=p.project_id; place='Whole project'; }
-    const pn=projOf[pid]?String(projOf[pid].name).split('(')[0].trim():'';
-    items.push({t,p,place,pn,can,when:p.reviewed_at||p.created_at});
+    const t=s[0], w=cpaPhPlaceOf(t,p,units);
+    const key=t+'|'+w.key;
+    if(!byPlace[key]){ byPlace[key]={t,p,place:w.place,can:w.can,pn:projOf[w.pid]?String(projOf[w.pid].name).split('(')[0].trim():'',
+      n:0,when:p.reviewed_at||p.created_at,notes:[]}; order.push(key); }
+    const g=byPlace[key]; g.n++;
+    if(p.review_note&&g.notes.indexOf(p.review_note)===-1) g.notes.push(p.review_note);
   }));
-  items.sort((a,b)=>String(b.when).localeCompare(String(a.when)));
+  const items=order.map(k=>byPlace[k]).sort((a,b)=>String(b.when).localeCompare(String(a.when)));
   CPA_PH.fix=items;
   if(!items.length){ host.innerHTML=''; return; }
-  host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>To retake · '+items.length
+  const total=items.reduce((t,it)=>t+it.n,0);
+  host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>To retake · '+total
     +'<span class="cph-fixsub">The reviewer rejected these. A new photo for the same place replaces the rejected one.</span></div>'
     +'<div class="cph-fixl">'+items.map((it,i)=>{
       const p=it.p, isVid=(p.file_type||'').indexOf('video')===0;
       const th=isVid&&!p.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
         :'<img class="cph-th" '+cphThumbAttrs(p,it.t)+' alt="" decoding="async">';
       return '<div class="cph-fixi">'+th
-        +'<div class="cph-fixw"><b>'+esc(it.place)+'</b>'+esc([it.pn,p.review_note,'rejected '+fmtDate(it.when)].filter(Boolean).join(' · '))+'</div>'
+        +'<div class="cph-fixw"><b>'+esc(it.place)+'</b>'
+          +esc([it.pn,it.n>1?it.n+' rejected':'',it.notes.join(' · '),'rejected '+fmtDate(it.when)].filter(Boolean).join(' · '))+'</div>'
         +(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+i+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'')
         +'</div>';
     }).join('')+'</div></div>';
   cphLazy(host);
 }
-window.cpaPhRetake=function(i,isVid){
-  const it=(CPA_PH.fix||[])[i]; if(!it) return;
-  const p=it.p, units=CPA.units||[];
+// Where a photo belongs, in words, and whether this uploader's screen can take a new one there
+// (a photos-only uploader has no Bathroom section).
+function cpaPhPlaceOf(t,p,units){
+  if(t==='unit_photos'){
+    const u=(units||CPA.units||[]).find(x=>String(x.id)===String(p.unit_id));
+    const area=p.area||'common';
+    const a=(CPA_PH_AREAS.find(x=>x[0]===area)||[0,area])[1];
+    return {key:p.unit_id+'|'+area, pid:u&&u.project_id,
+      place:(u?(u.tower?u.tower+' · ':'')+'Flat '+u.unit_code:'Flat')+' · '+a,
+      can:!!u&&cpaPhUploadAreas().some(x=>x[0]===area)};
+  }
+  if(t==='tower_photos') return {key:p.project_id+'|'+p.tower, pid:p.project_id, place:p.tower||'Block', can:true};
+  if(t==='project_photos') return {key:String(p.project_id), pid:p.project_id, place:'Whole project', can:true};
+  return {key:t+p.id, pid:p.project_id, place:'Floor '+(p.floor_no||''), can:false};
+}
+window.cpaPhRetake=function(i,isVid){ const it=(CPA_PH.fix||[])[i]; if(it) cpaPhRetakeAt(it.t,it.p,it.place,isVid); };
+// Retake on a rejected row of "Already uploaded".
+const CPA_PH_REJ={};
+function cpaPhRetakeBtn(t,p){
+  const w=cpaPhPlaceOf(t,p); if(!w.can) return '';
+  CPA_PH_REJ[t+':'+p.id]=p;
+  const isVid=(p.file_type||'').indexOf('video')===0;
+  return '<button class="cph-retake" onclick="cpaPhRetakeRow(\''+t+'\','+p.id+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>';
+}
+window.cpaPhRetakeRow=function(t,id,isVid){ const p=CPA_PH_REJ[t+':'+id]; if(p) cpaPhRetakeAt(t,p,cpaPhPlaceOf(t,p).place,isVid); };
+function cpaPhRetakeAt(t,p,place,isVid){
+  const units=CPA.units||[];
   let key='all';
-  if(it.t==='unit_photos'){
+  if(t==='unit_photos'){
     const u=units.find(x=>String(x.id)===String(p.unit_id));
     CPA_PH.level='unit'; CPA_PH.project=String(u?u.project_id:CPA_PH.project); CPA_PH.tower=u?String(u.tower||''):''; CPA_PH.unit=String(p.unit_id);
     key=p.area||'common';
-  }else if(it.t==='tower_photos'){ CPA_PH.level='tower'; CPA_PH.project=String(p.project_id); CPA_PH.tower=String(p.tower||''); CPA_PH.unit=''; }
+  }else if(t==='tower_photos'){ CPA_PH.level='tower'; CPA_PH.project=String(p.project_id); CPA_PH.tower=String(p.tower||''); CPA_PH.unit=''; }
   else { CPA_PH.level='project'; CPA_PH.project=String(p.project_id); CPA_PH.tower=''; CPA_PH.unit=''; }
   // The camera has to open inside this tap - a phone refuses it once the click has been handled.
   cpaPhPick(key,isVid?'video':'photo',null,function(){
     const go=$('cphGo'); if(go){ go.scrollIntoView({behavior:'smooth',block:'center'}); }
-    toast('Added for '+it.place+' — press Upload','ok');
+    toast('Added for '+place+' — press Upload','ok');
   });
   cpaPhFollowPickers();
   cpaPhPaint().then(()=>{ const z=document.querySelector('.cph-zone[data-zone="'+key+'"]'); if(z) z.scrollIntoView({behavior:'smooth',block:'center'}); });
-};
+}
 
 // Latest upload per flat (any status, not deleted) - newest first, so the first row per flat wins.
 async function cpaPhLastUploads(ids){
@@ -21206,7 +21230,7 @@ async function cpaPhRows(list,table,cols,vals,emptyMsg){
     else thumb='<img class="cph-th" '+cphThumbAttrs(p,table)+' alt="" decoding="async" onclick="'+open+'" title="Open full size">';
     return '<tr><td>'+thumb+'</td>'
       +'<td class="cph-when">'+esc(fmtDate(p.taken_on))+'</td>'
-      +'<td>'+cpaMediaStatusTag(p)+'</td>'
+      +'<td>'+cpaMediaStatusTag(p)+(p.status==='rejected'?cpaPhRetakeBtn(table,p):'')+'</td>'
       +vals(p).map(v=>'<td>'+v+'</td>').join('')
       +'<td style="text-align:right"><button class="cph-rm" title="Remove from the customer portal" '
         +'onclick="cpaPhDelete(\''+table+'\','+p.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>';
