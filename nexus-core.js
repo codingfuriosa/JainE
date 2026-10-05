@@ -13004,9 +13004,22 @@ let RT_NOT_TESTABLE=null;
    how the send modal, the Share window and the per-position send came to word the same email
    three slightly different ways. */
 const RT_MAIL_SUBJECT = 'Check This Assessment Provided by JainGroup';
+/* THE TEST NAME IS A NAME, NOT A NOUN.
+
+   This read "Please complete the Project Manager below at your convenience", because the name was
+   dropped in where the thing being completed belongs. A candidate does not complete a Project
+   Manager. The name needs a noun after it, so it gets one.
+
+   Unless it already has one: a test called "Sales Aptitude Test" would otherwise become "the
+   Sales Aptitude Test assessment". If the name already ends in a word that does the job, it is
+   left to do it. */
+const RT_NAME_ALREADY_A_NOUN = /\b(test|assessment|paper|quiz|exam|questionnaire|exercise|round)$/i;
 function rtMailBody(testName){
-  return 'Hi,\n\nPlease complete the ' + String(testName || 'assessment').trim()
-       + ' below at your convenience.\n\nThanks';
+  const name = String(testName || '').trim().replace(/\s+/g, ' ');
+  const what = !name ? 'assessment'
+             : RT_NAME_ALREADY_A_NOUN.test(name) ? name
+             : name + ' assessment';
+  return 'Hi,\n\nPlease complete the ' + what + ' below at your convenience.\n\nThanks';
 }
 function rtTestable(feedback){
   if(!RT_NOT_TESTABLE) RT_NOT_TESTABLE=new Set(TP_STAGES.map(x=>x.toLowerCase()));
@@ -14045,6 +14058,12 @@ function mpAiPanel(rec){
         : '')
       +'<button class="btn btn-sm" onclick="mpAiCopyPost('+rec.id+')"><i class="fa-solid fa-copy"></i> Copy post text</button>'
       +'<button class="btn btn-sm" onclick="mpAiGenerate('+rec.id+',true)"><i class="fa-solid fa-rotate"></i> Rewrite</button>'
+      /* ADD IS WHAT PUTS IT IN THE LIBRARY. Nothing else does - not writing it, not approving the
+         hiring request. A description sits with its request until somebody decides it is good
+         enough to keep, which is the decision the old approval step was pretending to be. The
+         same button is in the email that announces the description, so it can be done from a
+         phone without opening JAIN-E. */
+      +'<span id="mpJdAddWrap'+rec.id+'"></span>'
       +'</div>'
       +(rec.ai_platform_post_text
         ? '<div class="mp-ai-post"><div class="mp-ai-lbl">Post text — for LinkedIn, Naukri or Indeed</div>'
@@ -14062,8 +14081,53 @@ function mpAiPanel(rec){
       +'<div class="mp-ai-acts"><button class="btn btn-sm btn-primary" onclick="mpAiGenerate('+rec.id+')">'
       +'<i class="fa-solid fa-wand-magic-sparkles"></i> '+(st==='failed'?'Try again':'Generate')+'</button></div>';
   }
-  return '<div class="mp-ai"><div class="mp-ai-hd"><i class="fa-solid fa-wand-magic-sparkles"></i> Job Description &amp; creative '+badge+'</div>'+inner+'</div>';
+  const html='<div class="mp-ai"><div class="mp-ai-hd"><i class="fa-solid fa-wand-magic-sparkles"></i> Job Description &amp; creative '+badge+'</div>'+inner+'</div>';
+  /* Whether this description is already in the library is a fact about the DESCRIPTION, held in
+     recruit.job_descriptions, not about the request - so it has to be looked up. Done after the
+     panel is on screen rather than before: the panel is drawn from data already in hand, and
+     holding it back for one more round trip would leave the whole request blank while it waited. */
+  if(st==='ready'&&hasJd) setTimeout(function(){ mpJdAddRefresh(rec.id); },0);
+  return html;
 }
+
+/* Draws the Add button, or says it is already added. Separate from mpAiPanel so pressing Add can
+   redraw just this one span instead of the whole request. */
+async function mpJdAddRefresh(reqId){
+  const host=$('mpJdAddWrap'+reqId); if(!host) return;
+  let jd=null;
+  try{
+    const {data}=await sb.schema('recruit').from('job_descriptions')
+      .select('id,in_library,added_by')
+      .eq('manpower_request_id',reqId).order('created_at',{ascending:false}).limit(1);
+    jd=(data||[])[0]||null;
+  }catch(_e){ return; }   // a failed lookup shows nothing rather than a button that cannot work
+  if(!jd){ host.innerHTML=''; return; }
+  host.innerHTML=jd.in_library
+    ? '<span class="tag t-green" title="'+esc(jd.added_by||'')+'"><i class="fa-solid fa-check"></i> In Descriptions</span>'
+    : '<button class="btn btn-sm btn-primary" id="mpJdAddBtn'+reqId+'" onclick="mpJdAdd('+reqId+',\''+esc(jd.id)+'\')">'
+      +'<i class="fa-solid fa-plus"></i> Add to Descriptions</button>';
+}
+
+window.mpJdAdd=async function(reqId,jdId){
+  if(!recGuard()) return;
+  const btn=$('mpJdAddBtn'+reqId);
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try{
+    // .select() for the same reason as jdEditorSave: an update that row-level security filters
+    // out comes back as success with nothing changed, and a button that lies is worse than one
+    // that fails.
+    const {data,error}=await sb.schema('recruit').from('job_descriptions')
+      .update({in_library:true,added_by:state.email,added_at:new Date().toISOString()})
+      .eq('id',jdId).select('id');
+    if(error) throw new Error(error.message);
+    if(!data||!data.length) throw new Error('nothing changed — you may not have permission');
+    toast('Added — it is in Recruitment › Job Descriptions now','ok');
+    mpJdAddRefresh(reqId);
+  }catch(e){
+    toast('Could not add it: '+((e&&e.message)||e),'err');
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-plus"></i> Add to Descriptions'; }
+  }
+};
 
 window.mpAiCopyPost=function(id){
   const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
@@ -14439,32 +14503,22 @@ async function recLoadJDs(v){
   // of a grid of a dozen, which reads exactly like it was never created.
   try{const {data,error}=await sb.schema('recruit').from('job_descriptions').select('*').order('created_at',{ascending:false});if(!error)uploaded=data||[];}catch(e){}
 
-  /* A DESCRIPTION IS JUDGED ON ITS OWN APPROVAL, NOT ITS REQUEST'S.
+  /* A DESCRIPTION IS HERE BECAUSE SOMEBODY ADDED IT, NOT BECAUSE IT WAS APPROVED.
 
-     This used to show an AI-written description only when the hiring request behind it was
-     Approved, which broke in two ways at once:
+     This used to hide an AI-written description until it had been APPROVED - its own approval, or
+     its hiring request's as a fallback. That gate was never opened: every one of the eight
+     AI-written descriptions sat at Pending, so none of them was ever visible here, while the eight
+     hand-uploaded ones showed because they had never been part of the workflow at all. A gate
+     nothing has passed through is not a safeguard.
 
-       - a request deleted later leaves its description with no request at all (the foreign key
-         clears the link deliberately, so the document survives) - and a description that can never
-         match an approved request id was hidden for good, with no way back;
-       - a request approved, then reopened, hid a description that had already been reviewed and
-         published.
+     Approval is gone. In its place is a plain Add, on the hiring request that produced the
+     description and in the email announcing it. Until somebody presses it the description still
+     exists and can be read and corrected from the request - it is simply not in the library.
 
-     Job descriptions carry their own approval_status now, set when the approval task is approved,
-     so that is what decides it. The request's status is still honoured as a fallback for rows
-     approved before that column existed. Manually uploaded reference JDs were never part of any
-     approval workflow and are shown unconditionally, same as always. */
-  const genReqIds=[...new Set(uploaded.filter(j=>j.source==='ai_generated'&&j.manpower_request_id!=null).map(j=>j.manpower_request_id))];
-  let approvedSet=new Set();
-  if(genReqIds.length){
-    try{
-      const {data:reqs}=await sb.schema('hr').from('manpower_requests').select('id,approval_status').in('id',genReqIds);
-      approvedSet=new Set((reqs||[]).filter(r=>r.approval_status==='Approved').map(r=>r.id));
-    }catch(e){}
-  }
-  uploaded=uploaded.filter(jd=>jd.source!=='ai_generated'
-    || jd.approval_status==='Approved'
-    || approvedSet.has(jd.manpower_request_id));
+     in_library is a stored column rather than a rule recomputed here, so the Descriptions tab, the
+     email's Add button and anything else all read the same answer. The backfill set it for exactly
+     what this filter used to show, so nothing that was visible yesterday vanished today. */
+  uploaded=uploaded.filter(jd=>jd.in_library===true);
   const uploadedCards=uploaded.map(jd=>({...jd,isDefault:false}));
   const allJDs=[...DEFAULT_JDS,...uploadedCards];
   window._recAllJDs=allJDs;
@@ -14974,9 +15028,14 @@ window.jdEditOpen=function(id){
 /* Called by the editor tab. Kept on this page because this is where the database connection and
    the PDF builder already live. */
 window.jdEditorSave=async function(id,text){
-  const {error}=await sb.schema('recruit').from('job_descriptions')
-    .update({content_text:String(text||'')}).eq('id',id);
+  /* .select() so the row that changed comes back, and an empty answer is treated as failure.
+     Without it this said "saved" for months while saving nothing: the table had no UPDATE policy,
+     row-level security filtered the row out, and PostgREST does not call an update that matched
+     nothing an error - it returns success. An unchecked write is not a write. */
+  const {data,error}=await sb.schema('recruit').from('job_descriptions')
+    .update({content_text:String(text||'')}).eq('id',id).select('id');
   if(error) throw new Error(error.message);
+  if(!data||!data.length) throw new Error('Nothing was saved — you may not have permission to change this description.');
   const jd=(window._recAllJDs||[]).find(j=>j.id===id);
   if(jd) jd.content_text=String(text||'');
   toast('Job description saved');
