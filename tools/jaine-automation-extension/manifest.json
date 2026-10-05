@@ -9,7 +9,8 @@
     "https://docs.google.com/*",
     "https://api.anthropic.com/*",
     "https://realtybucket.com/*",
-    "https://www.realtybucket.com/*"
+    "https://www.realtybucket.com/*",
+    "https://wbregistration.gov.in/*"
   ],
   "background": {
     "service_worker": "background.js",

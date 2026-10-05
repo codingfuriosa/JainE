@@ -25,7 +25,7 @@ One recording at a time, in order:
       ↓
    already transcribed?  ──yes──→  reuse it. No model call, no second bill.
       ↓ no
-   fetch audio into memory  ← never stored, only the URL is
+   fetch audio into memory  â† never stored, only the URL is
       ↓
    Gemini: transcribe, with diarization and MM:SS timestamps
       ↓
@@ -285,16 +285,16 @@ Do not remove them.
 ### What the QA step measures
 
 Seven assessments per follow-up, each carrying its own status, its evidence quoted from the transcript,
-and its reasoning. "Not Verifiable" is a real answer everywhere and is never penalised — guessing is
+and its reasoning. "Not Applicable" is a real answer everywhere and is never penalised — guessing is
 the only wrong answer.
 
 | | Statuses | The trap it is written to avoid |
 | --- | --- | --- |
-| **Pitch accuracy** | Accurate · Partially Accurate · Inaccurate · Not Verifiable | scoring a pitch that never happened. A call cut short is Not Verifiable and scores `null`, not 0 — a zero would drag the day's average down as though the agent had pitched badly. |
-| **Follow-up date accuracy** | Accurate · Inaccurate · Not Verifiable | marking a date wrong merely because the customer never named one. No discussion is **Not Verifiable**, never Inaccurate. Only a conversation that *contradicts* the CRM date is Inaccurate. |
-| **Lost reason accuracy** | Accurate · Inaccurate · Not Verifiable | inventing a specific reason. "Not interested, thank you" is not evidence of a budget problem. |
+| **Pitch accuracy** | Accurate · Partially Accurate · Inaccurate · Not Applicable | scoring a pitch that never happened. A call cut short is Not Applicable and scores `null`, not 0 — a zero would drag the day's average down as though the agent had pitched badly. |
+| **Follow-up date accuracy** | Accurate · Inaccurate · Not Applicable | marking a date wrong merely because the customer never named one. No discussion is **Not Applicable**, never Inaccurate. Only a conversation that *contradicts* the CRM date is Inaccurate. |
+| **Lost reason accuracy** | Accurate · Inaccurate · Not Applicable | inventing a specific reason. "Not interested, thank you" is not evidence of a budget problem. |
 | **Retention effort** (Lost leads only) | Pass · Partial · Fail · Not Applicable | counting a call as a real retention attempt when it was one perfunctory line ("are you sure?") with no engagement of the actual objection. Not Applicable outside Lost, or when the customer ended the call before the agent had any opening to try. |
-| **Remarks accuracy** | Accurate · Partially Accurate · Inaccurate · Not Verifiable | demanding the salesperson's shorthand match word for word. Meaning is judged, not wording. |
+| **Remarks accuracy** | Accurate · Partially Accurate · Inaccurate · Not Applicable | demanding the salesperson's shorthand match word for word. Meaning is judged, not wording. |
 | **Status assessment** | Lost · Qualified · In Follow Up · Unclear | deciding from one keyword. "I'm not interested right now" is usually In Follow Up; "send me the details" is usually not Qualified. |
 | **Personal mobile number requested** | Yes · No | counting a confirmation of the CRM's own number on file as a request — only a genuinely new number being asked for counts. Captures the number itself (`number_shared`) when the customer gave one. |
 

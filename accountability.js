@@ -3554,10 +3554,11 @@
        already covers every workflow, this one included. */
     const wfPastStep1Locked=function(c){ return id===39 && (c&&c.current_step>1) && !(c&&c.returned_at); };
     /* Reimbursement only: the case number of an existing claim of mine that is already in process
-       (past its first step, not Done/Cancelled, not sent back for correction) — mirrors the block
-       acc.wf_create_instance now enforces server-side (one open claim at a time), so "New
-       Reimbursement" reads as unavailable up front instead of only failing once the form is filled
-       in and submitted. */
+       (past its first step, not Done/Cancelled, not sent back for correction) — the same rule
+       acc.wf_new_instance_block_reason applies server-side, where the refusal actually happens.
+       Used ONLY to word the button's tooltip. It is deliberately not a gate: the database decides,
+       and a copy of the rule here that got the answer wrong would either refuse somebody the server
+       would have allowed, or promise a save that is about to be rejected. */
     const wfMyOpenReimbursement=id===39 ? (function(){
       const c=cases.find(function(x){ return eq(x&&x.created_by, mySelf) && x.current_step>1 && !x.returned_at && x.status!=='Done' && x.status!=='Cancelled'; });
       return c ? wfCaseNoText(c) : null;
@@ -3693,10 +3694,17 @@
       +'</span>'):'')
       +(canManageEdit?'<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>':'')
       +(canManage?'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>':'')
-      +(canEvent?(wfMyOpenReimbursement
-          ? '<button class="ac-btn primary" disabled title="Your '+esc2(N.lc)+' #'+esc2(wfMyOpenReimbursement)+' is still in process — raise a new one only after that is Done"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>'
-          : '<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>'
-        ):'')
+      /* THE BUTTON IS NEVER DISABLED, even for somebody who cannot submit yet. Disabling it opened
+         no form, and the form is the only way to reach Save draft - so the one person told to
+         "write the next one down and send it later" was the one person who could not. It opens,
+         they fill it in, they keep it. The refusal belongs on Submit, where acc.wf_create_instance
+         raises it with the claim number and what to do about it. The tooltip is a courtesy, not
+         the gate: it says the submit will be refused before the form is filled in rather than
+         after. */
+      +(canEvent?'<button class="ac-btn primary" title="'+esc2(wfMyOpenReimbursement
+            ? 'Your '+N.lc+' #'+wfMyOpenReimbursement+' has not finished yet — you can still fill this in and save it as a draft'
+            : 'Start a new '+N.lc)
+          +'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
     // Reimbursement only, and only these two named accounts (Accounts' own lookup tool — not a
@@ -7404,7 +7412,14 @@
        the task and the first to Receive it takes it. */
     let openSteps=[];
     let wfRegulars=[];
-    if(!editing){
+    /* ON EDIT TOO, which it did not used to be. The question "who does this step" was asked once,
+       on the New form, and never again — so a bill pointed at the wrong department could not be
+       re-routed by anybody, including the person who raised it and made the mistake. It is asked
+       again here, prefilled with whoever has it now, and only for steps that have not already
+       been forwarded: correcting where a bill is going is the point, rewriting who already
+       handled it is not. acc.wf_update_instance enforces the same bound. */
+    let memberPrefill=[];
+    {
       try{ const {data}=await ACC().from('flow_steps').select('seq,title,owner_from_trigger,owner_email,owner_emails')
         .eq('flow_id',flowId).order('seq',{ascending:true});
         const all=data||[];
@@ -7430,6 +7445,21 @@
         wfRegulars=seen;
       }catch(_e){}
     }
+    if(editing && openSteps.length){
+      /* Which of those steps this particular instance can still be re-pointed at, and who has
+         them at the moment. A step already forwarded drops out of the list entirely rather than
+         being offered and then refused on save. */
+      try{
+        const {data:cs}=await ACC().from('flow_case_steps')
+          .select('seq,person,candidates,forwarded_at').eq('case_id',caseId);
+        const bySeq={}; (cs||[]).forEach(function(x){ bySeq[x.seq]=x; });
+        openSteps=openSteps.filter(function(s){ const x=bySeq[s.seq]; return x && !x.forwarded_at; });
+        const now=openSteps.length?bySeq[openSteps[0].seq]:null;
+        memberPrefill=(now&&Array.isArray(now.candidates)&&now.candidates.length)
+          ? now.candidates.filter(Boolean)
+          : (now&&now.person?[now.person]:[]);
+      }catch(_e){ openSteps=[]; }
+    }
     /* ONE picker for every step left open to the triggering event owner, not one each. Whoever is
        named here does all of them and it's required — can't leave a step silently unassigned.
        Asking the same question once per step made the form long and invited answering it
@@ -7452,7 +7482,9 @@
             ? flow.trigger_step_assignable_overrides[(me()||'').toLowerCase()] : []);
     const membersHtml=openSteps.length
       ? '<label class="wf-lbl">Who does '+(openSteps.length===1?'this step':'these steps')+'? '
-          +tip('These steps have no fixed owner — whoever you name here does '+(openSteps.length===1?'it':'all of them')+'. Name more than one and they all receive it, with the first to accept it keeping it.')+'</label>'
+          +tip(editing
+               ? 'Change this to send it to somebody else. The task moves to them and leaves the current holder’s list. Steps that have already been forwarded are not listed — those are finished.'
+               : 'These steps have no fixed owner — whoever you name here does '+(openSteps.length===1?'it':'all of them')+'. Name more than one and they all receive it, with the first to accept it keeping it.')+'</label>'
         +'<div id="wfEvtMembers">'
           +'<div class="wf-evt-row wf-mem-row" data-seq="'+openSteps.map(function(s){return s.seq;}).join(',')+'">'
             +'<div class="ac-in wf-evt-labelro wf-mem-lbl" style="background:#f8fafc;color:var(--ink);display:flex;align-items:center;gap:7px;overflow:hidden" title="'+esc2(openSteps.map(function(s){return 'Step '+s.seq+' · '+(s.title||'');}).join('\n'))+'">'
@@ -7462,7 +7494,7 @@
                     ? ('Step '+openSteps[0].seq+' · '+esc2(openSteps[0].title||''))
                     : (openSteps.length+' steps · '+esc2(openSteps.map(function(s){return s.title||('Step '+s.seq);}).join(', '))))
               +'</span></div>'
-            +wfPersonPickerHtml([], true, false, '', wfRegulars, undefined, stepAssignRestrict.length?stepAssignRestrict:undefined)
+            +wfPersonPickerHtml(memberPrefill, true, false, '', wfRegulars, undefined, stepAssignRestrict.length?stepAssignRestrict:undefined)
           +'</div>'
         +'</div>'
       : '';
@@ -7760,7 +7792,20 @@
             if(o.indexOf('s3:')===0 && after.indexOf(o)===-1) replacedAtts.push(o);
           });
         }); }
-        const {error}=await ACC().rpc('wf_update_instance',{p_case_id:caseId, p_details:details}); if(error)throw error;
+        /* The same {seq:[emails]} the New form sends. Gathered the same way and from the same
+           row, because it IS the same picker — it is only that Edit never used to draw it. An
+           empty picker is a mistake, not "leave it alone": the step would be unassigned. */
+        const editMembers={};
+        const editMemRow=document.querySelector('#wfEvtMembers .wf-evt-row');
+        if(editMemRow){
+          const seqs=String(editMemRow.getAttribute('data-seq')||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+          const v=((editMemRow.querySelector('.wf-s-person')||{}).value||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+          if(!v.length){ toast('Please choose who does '+(seqs.length>1?'these steps':'this step'),'warn'); return; }
+          seqs.forEach(function(sq){ editMembers[sq]=v.slice(); });
+        }
+        const {error}=await ACC().rpc('wf_update_instance',
+          {p_case_id:caseId, p_details:details,
+           p_step_members:Object.keys(editMembers).length?editMembers:null}); if(error)throw error;
         // Independent of one another, so they go together rather than one signing round trip and
         // one delete at a time while the person waits on Save changes.
         await wfRunPool(replacedAtts, 3, async function(oldPath){ try{ await s3Delete(oldPath); }catch(_e){} });
@@ -7820,7 +7865,15 @@
           : (N.one+' created — first step assigned'),'ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       }
-    }catch(e){ toast('Could not save '+N.lc+': '+((e&&e.message)||e),'err'); }
+    }catch(e){
+      /* JE001 is the one-open-instance refusal, and it is not a failure to report as one: the
+         sentence already says which claim is in the way, what to do about it, and that this one
+         can be kept as a draft meanwhile. Prefixing it with "Could not save reimbursement:" would
+         contradict its own advice, so it is printed as it was written. Everything else keeps the
+         prefix, because an unexplained message needs saying what it was we could not do. */
+      if(e&&e.code==='JE001'){ toast((e&&e.message)||'','warn'); return; }
+      toast('Could not save '+N.lc+': '+((e&&e.message)||e),'err');
+    }
   };
 
 
@@ -8080,7 +8133,7 @@
       : ([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title);
     v.innerHTML='<div class="wf-tp"><div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2(wfHeadTitle)+'</div>'
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
-      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View '+esc2(wfNounOf(flow).lc)+' timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
       +(caseRow&&!(flow&&flow.id===41)?'<button class="ac-btn" title="Print this '+esc2(wfNounOf(flow).lc)+' — same as printing from the '+esc2(wfNounOf(flow).lc)+' itself" onclick="wfPrintCase('+caseRow.id+')"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print</span></button>':'')
       +A+'</div></div>'
@@ -8393,26 +8446,46 @@
     return best;
   }
   window.wfRejectStart=async function(fcsId, caseId){
-    let noun='instance', wantsReason=false;
+    let noun='instance', wantsReason=false, toRaiser=false, raiserName='';
     try{
-      const {data:mine}=await ACC().from('flow_case_steps').select('case_id').eq('id',fcsId).maybeSingle();
+      const {data:mine}=await ACC().from('flow_case_steps').select('case_id,seq').eq('id',fcsId).maybeSingle();
       const cid=(mine&&mine.case_id)||caseId;
       if(cid){
-        const {data:c}=await ACC().from('flow_cases').select('flow_id').eq('id',cid).maybeSingle();
+        const {data:c}=await ACC().from('flow_cases').select('flow_id,created_by').eq('id',cid).maybeSingle();
         if(c&&c.flow_id){
           const {data:f}=await ACC().from('flows').select('reject_deletes_instance,instance_noun').eq('id',c.flow_id).maybeSingle();
           wantsReason=!!(f&&f.reject_deletes_instance);
           noun=(f&&f.instance_noun)||'instance';
         }
+        /* From the FIRST step it now goes to whoever raised it — see acc.wf_reject. Which step is
+           first is read from this instance's own materialised steps rather than the flow, for the
+           same reason the database does: a flow can be edited after an instance is created. */
+        if(mine&&mine.seq!=null){
+          const {data:all}=await ACC().from('flow_case_steps').select('seq').eq('case_id',cid);
+          const firstSeq=(all||[]).reduce(function(m,s){ return (m==null||s.seq<m)?s.seq:m; }, null);
+          const raiser=(c&&c.created_by)||'';
+          toRaiser = firstSeq!=null && mine.seq===firstSeq && !!raiser && !eq(raiser,state.email);
+          if(toRaiser){
+            if(!WF_PEOPLE){ try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=[]; } }
+            raiserName=nameOf(WF_PEOPLE,raiser);
+          }
+        }
       }
     }catch(e){}
-    /* IT STAYS WITH YOU, so there is no destination to work out and nobody to name. The person
-       who says a bill is wrong is the person who knows what is wrong with it; it is marked Sent
-       Back and held here until that is settled, then forwarded like any other step. */
-    const warn='<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This '+esc2(noun)
-      +' is marked <b>Sent Back</b> and stays with <b>you</b> as a received task. Nothing after it '
-      +'is touched, nothing moves on until you forward it, and the reason is recorded on the '
-      +esc2(noun)+'.</span></div>';
+    /* THE DIALOG HAS TO SAY WHICH OF THE TWO THINGS WILL HAPPEN, because they are opposites and
+       the person is about to choose based on it.
+       From a later step it STAYS WITH YOU: whoever says a bill is wrong is the person who knows
+       what is wrong with it, so it is marked Sent Back and held until that is settled.
+       From the first step there is nobody before you, so holding it was a dead end — it now goes
+       back to whoever raised it, and leaves your list. */
+    const warn=toRaiser
+      ? '<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This is the first step, '
+        +'so this '+esc2(noun)+' goes back to <b>'+esc2(raiserName)+'</b>, who raised it, to correct and '
+        +'send again. It leaves your list.</span></div>'
+      : '<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This '+esc2(noun)
+        +' is marked <b>Sent Back</b> and stays with <b>you</b> as a received task. Nothing after it '
+        +'is touched, nothing moves on until you forward it, and the reason is recorded on the '
+        +esc2(noun)+'.</span></div>';
     openModal('<div class="modal-head"><h3><i class="fa-solid fa-rotate-left" style="color:var(--brand)"></i> Send this back</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body frm" style="width:min(94vw,520px)">'
         +warn
@@ -8440,15 +8513,18 @@
     const go=$('wfRejGo'); if(go){ go.disabled=true; go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
     const um=await wfStepUsageMeta(fcsId), cid=await wfCaseIdOfStep(fcsId);
     // nothing is deleted any more, so there are no files to collect first
-    try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
+    let went=null;
+    try{ const {data,error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; went=data; }
     catch(e){
       if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-rotate-left"></i> Mark Sent Back'; }
       toast('Could not send it back: '+((e&&e.message)||e),'err'); return;
     }
     await wfLogReject(um, cid);
     closeModal();
-    // No email: the one person who needs to know is the one who pressed it.
-    toast('Marked Sent Back — it is with you as a received task','ok');
+    /* The message is whatever acc.wf_reject says actually happened — it returns the name it went
+       back to, or nothing when it stayed here. Working it out a second time on this side is how
+       the old "it went to the previous person" line came to be wrong. */
+    toast(went?('Sent back to '+went+' to correct'):'Marked Sent Back — it is with you as a received task','ok');
     navTo('tasks/work');
   };
   window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; };
@@ -8458,12 +8534,13 @@
     const um=await wfStepUsageMeta(fcsId);
     const box=$('wfRejReason');
     const reason=((box&&box.value)||'').trim();
-    try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
+    let went=null;
+    try{ const {data,error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; went=data; }
     catch(e){ toast('Could not send it back: '+((e&&e.message)||e),'err'); return; }
     await wfLogReject(um, caseId!=null?caseId:await wfCaseIdOfStep(fcsId));
-    // It never went "to the previous person" - it said so, but the instance went to the raiser.
-    // Now it stays here, and the message says the thing that actually happened.
-    toast('Marked Sent Back — it is with you as a received task','ok'); navTo('tasks/work');
+    // Same as the dialog path: the server says where it went, this only prints it.
+    toast(went?('Sent back to '+went+' to correct'):'Marked Sent Back — it is with you as a received task','ok');
+    navTo('tasks/work');
   };
 
   // Revert: pull the flow back to me from whoever currently holds it
@@ -11119,6 +11196,16 @@
   }
   // Small "N of M joined" badge for list rows — shown instead of a generic Online/Offline tag once
   // real attendance data exists, falls back gracefully while it's still pending or unavailable.
+  // Google Meet counts anyone who so much as glanced into a call as "joined" — someone whose link
+  // failed and reconnected for 20 seconds shouldn't read as having attended. Auto-present for
+  // online meetings only counts a participant once their real connected time (already computed
+  // server-side from participantSessions, see google-meet-attendance-sync) passes this bar.
+  // Offline still has no equivalent signal (one shared room microphone, no per-person duration),
+  // so it stays manually ticked in the Wrap-up screen.
+  const MTG_PRESENT_MIN=1.5;
+  function mtgOnlinePresent(l){
+    return (l.participants||[]).filter(function(p){ return p.duration_min!=null && p.duration_min>MTG_PRESENT_MIN; });
+  }
   function mtgAttendanceBadgeHtml(l){
     if(l.mode==='offline'){
       if(l.attendance_status==='not_marked_done') return '<span class="mtg-log-badge none"><i class="fa-solid fa-calendar-xmark"></i> Not marked done</span>';
@@ -11127,7 +11214,7 @@
       return '<span class="mtg-log-badge none">Offline</span>';
     }
     const invited=(l.attendee_emails||[]).length;
-    if(l.attendance_status==='fetched') return '<span class="mtg-log-badge ready"><i class="fa-solid fa-user-check"></i> '+(l.participants||[]).length+' of '+invited+' joined</span>';
+    if(l.attendance_status==='fetched') return '<span class="mtg-log-badge ready"><i class="fa-solid fa-user-check"></i> '+mtgOnlinePresent(l).length+' of '+invited+' present</span>';
     if(l.attendance_status==='pending') return '<span class="mtg-log-badge pending">Fetching attendance…</span>';
     if(l.attendance_status==='not_held') return '<span class="mtg-log-badge none"><i class="fa-solid fa-calendar-xmark"></i> Not held</span>';
     return '<span class="mtg-log-badge none">No attendance data</span>';
@@ -11137,9 +11224,9 @@
   // list, the Meetings page's Completed-meetings section, or the Attendance tab), instead of a
   // single hardcoded guess. history.length===1 means there's nothing in-app to go back to (a
   // direct deep link, or this tab's very first page) — falls back to fallbackPath in that case.
-  window.mtgLogBack=function(fallbackPath){
-    if(window.history.length>1){ history.back(); } else { navTo(fallbackPath); }
-  };
+  /* Was history.length>1, which is already 2 when somebody arrives from an email or a search, so
+     Back took them out of JAIN-E. goBack walks the app's own trail and can only land inside it. */
+  window.mtgLogBack=function(fallbackPath){ goBack(fallbackPath); };
   // A meeting occurrence's detail — real routed page (not a modal), reached via
   // navTo('tasks/meetings/log/<id>') from the global Archive tab, a recurring meeting's own
   // day-wise list, the Meetings page's Completed-meetings section, or the Attendance tab.
@@ -11182,16 +11269,23 @@
       }
     } else if(l.attendance_status==='fetched'){
       const parts=(l.participants||[]);
-      const joinedRows=parts.length?parts.map(function(p){
+      const rowHtml=function(p,isPresent){
         // The actual clock times, not just the derived duration - "who joined and when" needs the
         // "when" spelled out, same IST-formatted style already used for the recording's own start/end.
         const timesLbl=(p.join?(' · joined '+esc2(mtgClockIST(p.join))):'')+(p.leave?(' – left '+esc2(mtgClockIST(p.leave))):'');
         const durLbl=p.duration_min!=null?(' ('+p.duration_min+' min)'):'';
         const rejoinLbl=p.rejoined?' <span style="color:#a16207;font-weight:600">(rejoined)</span>':'';
-        return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(p.name)+timesLbl+durLbl+rejoinLbl+'</div>';
-      }).join(''):'<p style="color:var(--slate);font-size:13px;margin:2px 0 0">Nobody joined this call.</p>';
+        const icon=isPresent?'<i class="fa-solid fa-circle-check" style="color:#16a34a"></i>':'<i class="fa-solid fa-clock" style="color:#94a3b8"></i>';
+        return '<div class="mtg-log-attendee"'+(isPresent?'':' style="color:var(--slate)"')+'>'+icon+' '+esc2(p.name)+timesLbl+durLbl+rejoinLbl+'</div>';
+      };
+      const present=mtgOnlinePresent(l);
+      const brief=parts.filter(function(p){return present.indexOf(p)===-1;});
+      const joinedRows=(parts.length
+        ? present.map(function(p){return rowHtml(p,true);}).join('')
+          +(brief.length?('<div style="margin-top:8px;color:var(--slate);font-size:12px">Joined '+MTG_PRESENT_MIN+' min or less — not counted as present</div>'+brief.map(function(p){return rowHtml(p,false);}).join('')):'')
+        : '<p style="color:var(--slate);font-size:13px;margin:2px 0 0">Nobody joined this call.</p>');
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
-        +'<div style="margin-top:8px"><b style="font-size:12.5px;color:var(--slate)">Joined ('+parts.length+' of '+invitedNames.length+')</b>'+joinedRows+'</div>';
+        +'<div style="margin-top:8px"><b style="font-size:12.5px;color:var(--slate)">Present ('+present.length+' of '+invitedNames.length+')</b>'+joinedRows+'</div>';
     } else if(l.attendance_status==='pending'){
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
         +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Fetching who actually joined from Google Meet — check back shortly.</p>';
@@ -11276,7 +11370,7 @@
       +'<div class="tp-sub">Meeting details</div></div>'
       +'<div class="tp-acts">'
         +(mine?('<button class="ac-btn ic" title="Edit meeting" onclick="mtgOpenCreate('+m.id+')"><i class="fa-solid fa-pen"></i></button>'):'')
-        +'<button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button>'
+        +'<button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +'</div></div>'
       +'<div class="tp-card">'+basicHtml+'</div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-calendar-days" style="color:#7c3aed"></i> Day-wise — who joined, and when</h3>'+dayRows+'</div>';
@@ -11299,7 +11393,7 @@
     v.innerHTML='<div class="tp-head">'
       +'<div><div class="tp-title"><i class="fa-solid fa-clock-rotate-left" style="color:#7c3aed"></i> Logs — '+esc2(m?m.title:'Meeting')+'</div>'
       +'<div class="tp-sub">Past completed occurrences</div></div>'
-      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button></div>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button></div>'
       +'</div>'
       +'<div class="tp-card">'+rows+'</div>';
   }
@@ -11740,8 +11834,8 @@
         +(absent.length?('<br><b>Absent:</b> '+esc2(absent.map(nm).join(', '))):'')+'</div>';
     }
     if(l.attendance_status!=='fetched') return '';
-    const names=(l.participants||[]).map(function(p){return p.name;});
-    return '<div class="mtg-att-names"><b>Joined:</b> '+esc2(names.join(', ')||'—')+'</div>';
+    const names=mtgOnlinePresent(l).map(function(p){return p.name;});
+    return '<div class="mtg-att-names"><b>Present:</b> '+esc2(names.join(', ')||'—')+'</div>';
   }
   // One meeting's row on the Attendance tab: its title plus whichever occurrence's register is the
   // most recent one available (l), or "No occurrence yet" if the meeting hasn't run once yet.
@@ -13121,7 +13215,7 @@
       <div><div class="tp-title"><i class="fa-solid fa-clipboard-check" style="color:#7c3aed"></i> ${esc2(t.title)} ${canEditThis?`<button class="ac-btn ic" style="height:26px;width:26px" title="Rename" onclick="accEditTitle(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div>
         <div class="tp-sub">${selfTask?'Self task':(verb+' to '+(members.map(e=>esc2(nameOf(list,e))).join(', ')||'nobody yet')+' by '+esc2(nameOf(list,t.delegator)))}</div></div>
       <div class="tp-acts">
-        <button class="ac-btn ic" title="Back" onclick="navTo('tasks/work')"><i class="fa-solid fa-arrow-left"></i></button>
+        <button class="ac-btn ic" title="Back" onclick="goBack('tasks/work')"><i class="fa-solid fa-arrow-left"></i></button>
         <button class="ac-btn ic" title="Sub-tasks" onclick="accSubtasksToggle()"><i class="fa-solid fa-list-check"></i></button>
         ${(amMember && !iHaveDelegated && !selfTask && !locked)?`<button class="ac-btn ic" title="Delegate" onclick="accDelegate(${tid})"><i class="fa-solid fa-people-arrows"></i></button>`:''}
         ${A}
