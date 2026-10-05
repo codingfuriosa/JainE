@@ -960,12 +960,24 @@ async function psUnlinkedWarn(){
     +'<i class="fa-solid fa-link-slash" style="color:#b91c1c"></i><div class="grow">'
     +'<b>'+rows.length+' flat'+(rows.length===1?' is':'s are')+' being billed in FarVision with no booking here'
     +' — '+inr(tot)+' is missing from every Post Sales figure, including the MIS.</b><br>'
-    +rows.slice(0,8).map(r=>'&bull; '+esc(r.project)+' — '+esc(r.tower||'')+' '+esc(r.unit_code)
-        +' — '+inr(r.outstanding)+' across '+(r.bills||0)+' demand'+((r.bills||0)===1?'':'s')
-        +' (first seen '+dmy(r.first_seen)+')').join('<br>')
-    +(rows.length>8?'<br>&hellip; and '+(rows.length-8)+' more':'')
-    +'<br>Raise the booking here and the next sync brings its demands and receipts across. '
-    +'The sync cannot do it for you — it has no applicants or payment plan to work from.</div></div>');
+    /* THE REASON AND THE FIX, not just the symptom.
+
+       import_farvision DOES create bookings from the Booking Register. It finds the Post Sales
+       tower, then looks the flat up in Setup - and `continue when v_fl.id is null` gives up on
+       that unit without a word if the flat is not there. Gateway Pailan 6B and 7H were sold on
+       02-10, arrived in the Booking Register, matched, created their units, and died at that
+       line because Block-3 has only 32 of its flats set up.
+
+       So the useful sentence is not "two flats are missing". It is "add flat 6B to Block-3". */
+    +'<ul style="margin:6px 0 0 18px;padding:0">'
+    +rows.slice(0,8).map(r=>'<li style="margin-bottom:7px">'
+        +'<b>'+esc(r.project)+' &mdash; '+esc(r.tower||'')+' '+esc(r.unit_code)+'</b>'
+        +(num(r.outstanding)?' &mdash; '+inr(r.outstanding)+' across '+(r.bills||0)+' demand'+((r.bills||0)===1?'':'s'):'')
+        +'<br><span style="color:var(--slate)">'+esc(r.reason||'')+'</span>'
+        +(r.fix?'<br><b>'+esc(r.fix)+'</b>':'')+'</li>').join('')
+    +'</ul>'
+    +(rows.length>8?'<div style="margin-top:4px">&hellip; and '+(rows.length-8)+' more</div>':'')
+    +'</div></div>');
 }
 window.psSyncNow=async function(btn){
   btn.disabled=true; const h=btn.innerHTML; btn.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Syncing';
@@ -1794,20 +1806,65 @@ window.psrPrint=async function(id){
   w.document.write('<!doctype html><meta charset="utf-8"><title>Preparing…</title><body style="font:14px system-ui;padding:30px">Preparing…</body>');
   const v=await loadReceipt(id); if(!v){ w.close(); return; }
   const {r,al}=v, b=r.bookings||{}, ap=(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq), proj=S.projects.find(p=>p.id===r.project_id);
-  const {data:setup}=await PS().from('project_setup').select('company_name').eq('project_id',r.project_id).maybeSingle();
+  const {data:setup}=await PS().from('project_setup').select('company_name,company_address,company_pan,company_gstin,company_cin,contact_phone,contact_email,demand_terms').eq('project_id',r.project_id).maybeSingle();
   const first=ap[0]||{}, addr=first.mailing_address==='office'?first.off_address:first.res_address;
-  const html='<!doctype html><html><head><meta charset="utf-8"><title>Money Receipt '+esc(r.receipt_no)+'</title><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111;margin:28px}h1{font-size:18px;margin:0}h2{font-size:14px;letter-spacing:4px;text-align:center;border:1px solid #333;padding:6px;margin:16px 0}table{width:100%;border-collapse:collapse}td{padding:7px 8px;border:1px solid #999;vertical-align:top}.k{width:24%;font-weight:bold;background:#f3f3f3}.amt{font-size:16px;font-weight:bold}.foot{margin-top:40px;display:flex;justify-content:space-between;font-size:12px}.void{color:#b91c1c;font-weight:bold;font-size:15px;text-align:center;border:2px solid #b91c1c;padding:6px;margin-top:10px}@media print{body{margin:12mm}}</style></head><body>'
-    +'<h1>'+esc(setup&&setup.company_name||'Jain Group')+'</h1><div>'+esc(proj?proj.name:'')+'</div>'
-    +'<h2>MONEY RECEIPT</h2>'
-    +'<table><tr><td class="k">Receipt no.</td><td>'+esc(r.receipt_no)+'</td><td class="k">Date</td><td>'+dmy(r.receipt_date)+'</td></tr>'
-    +'<tr><td class="k">Received with thanks from</td><td colspan="3">'+esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & '))+(addr?'<br><span style="font-size:12px">'+esc(addr)+'</span>':'')+'</td></tr>'
-    +'<tr><td class="k">Booking / unit</td><td colspan="3">'+esc(b.booking_no||'')+' - '+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+'</td></tr>'
-    +'<tr><td class="k">Amount</td><td colspan="3"><span class="amt">₹ '+Math.round(num(r.amount)).toLocaleString('en-IN')+'</span> &nbsp; (Rupees '+esc(inWords(r.amount))+' only)</td></tr>'
-    +'<tr><td class="k">Mode</td><td>'+esc(MODE_LBL[r.mode]||r.mode)+'</td><td class="k">Reference</td><td>'+esc(r.instrument_no||'—')+(r.instrument_date?' dated '+dmy(r.instrument_date):'')+(r.drawn_on?'<br>'+esc(r.drawn_on)+(r.drawn_branch?', '+esc(r.drawn_branch):''):'')+'</td></tr>'
-    +'<tr><td class="k">Towards</td><td colspan="3">'+(r.against_interest?'Interest on delayed payment':al.length?esc(al.map(a=>(a.invoices&&a.invoices.title||'')+' ('+(a.invoices&&a.invoices.invoice_no||'')+')').join('; ')):'Advance against booking')+'</td></tr></table>'
-    +(r.mode==='cheque'||r.mode==='dd'?'<div style="font-size:11.5px;margin-top:8px">Subject to realisation of the instrument.</div>':'')
-    +(r.status==='reversed'?'<div class="void">REVERSED on '+dmy(r.reversal_date)+' - '+esc(r.reversal_reason||'')+'</div>':'')
-    +'<div class="foot"><div>Entered by '+esc((r.created_by||'').split('@')[0])+'</div><div style="text-align:center">______________________<br>Authorised Signatory</div></div>'
+  /* LAID OUT LIKE FARVISION'S MONEY RECEIPT: company block with its registrations on the left,
+     "Receipt", the payer against receipt/project/unit details on the right, then the itemised
+     table of what the money was applied to. */
+  const rupees=Math.round(num(r.amount)).toLocaleString('en-IN');
+  const regs=(k,v)=>v?('<tr><td class="k"><b>'+esc(k)+'</b></td><td class="c">:</td><td>'+esc(v)+'</td></tr>'):'';
+  const html='<!doctype html><html><head><meta charset="utf-8"><title>Money Receipt '+esc(r.receipt_no)+'</title>'
+    +'<style>'+DOC_CSS+'.rcpt-amt{font-size:13px;font-weight:bold}</style></head><body>'
+    +docHead(setup,'',true)
+    +((setup&&(setup.company_gstin||setup.company_pan||setup.company_cin))
+       ? '<table class="ref" style="width:auto;margin-bottom:10px">'
+         +regs('GSTIN',setup.company_gstin)+regs('PAN',setup.company_pan)+regs('CIN',setup.company_cin)+'</table>'
+       : '')
+    +'<div class="doct">Receipt</div>'
+    +'<table><tr>'
+      +'<td style="width:50%;vertical-align:top" class="addr"><b>'
+        +esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & ')||'Customer')+'</b>'
+        +(addr?'<br>'+esc(addr):'')
+        +(ap.length>1?'<br><b>Co Applicant Name :</b> '+esc(ap.slice(1).map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(', ')):'')
+        +'<table class="ref" style="margin-top:10px">'
+          +docRef('Email', first.email)
+          +docRef('Contact No', first.mobile)
+          +docRef('Booking No', b.booking_no)
+        +'</table></td>'
+      +'<td style="vertical-align:top"><table class="ref">'
+        +docRef('Receipt No', r.receipt_no)
+        +docRef('Receipt Date', dmy(r.receipt_date))
+        +docRef('Project', proj?proj.name:'')
+        +docRef('Category', b.towers&&b.towers.name)
+        +docRef('Unit No', b.flats&&b.flats.flat_code)
+        +docRef('Adjustment Against', r.against_interest?'Interest':'Normal')
+        +docRef('Payment Mode', MODE_LBL[r.mode]||r.mode)
+        +docRef('Drawn On', r.drawn_on)
+        +docRef('Instn. No.', r.instrument_no)
+        +docRef('Instn. Date', r.instrument_date?dmy(r.instrument_date):'')
+        +'</table></td></tr></table>'
+    +(r.narration?'<div class="sm" style="margin-top:12px"><b>Remarks :</b> &nbsp;'+esc(r.narration)+'</div>':'')
+    +'<div class="sm" style="margin-top:10px"><b>Amount received :</b> '
+      +'<span class="rcpt-amt">Rs. '+rupees+'</span> &nbsp;(Rupees '+esc(inWords(r.amount))+' only)</div>'
+    +(al.length
+       ? '<table class="grid" style="margin-top:10px"><thead><tr><th style="width:5%">Sl. #</th><th style="width:9%">Type</th>'
+         +'<th>Schedule Name</th><th style="width:17%">Invoice No</th><th style="width:11%">Invoice Dt</th>'
+         +'<th class="r" style="width:14%">Total Amt</th></tr></thead><tbody>'
+         +al.map(function(a,ix){
+             const iv=a.invoices||{};
+             return '<tr><td style="text-align:center">'+(ix+1)+'</td><td>Bill</td><td>'+esc(iv.title||'')+'</td>'
+               +'<td>'+esc(iv.invoice_no||'')+'</td><td>'+(iv.invoice_date?dmy(iv.invoice_date):'')+'</td>'
+               +'<td class="r">'+Math.round(num(a.amount)).toLocaleString('en-IN')+'.00</td></tr>';
+           }).join('')
+         +'<tr class="tot"><td colspan="5">Total</td><td class="r">'+rupees+'.00</td></tr>'
+         +'</tbody></table>'
+       : '<div class="sm" style="margin-top:10px">Held as advance &mdash; no invoice was open on this booking when it was received.</div>')
+    +(r.mode==='cheque'||r.mode==='dd'?'<div class="sm" style="margin-top:8px">Subject to realisation of the instrument.</div>':'')
+    +(r.status==='reversed'?'<div class="void">REVERSED on '+dmy(r.reversal_date)+' &mdash; '+esc(r.reversal_reason||'')+'</div>':'')
+    +'<div style="border-top:1px solid #000;margin-top:26px;padding-top:10px;text-align:right" class="sm">'
+      +'<b>For, '+esc(setup&&setup.company_name||'The Jain Group')+'</b>'
+      +'<div style="margin-top:28px"><b>Authorised Signatory</b></div></div>'
+    +'<div class="sm" style="margin-top:12px">Entered by '+esc((r.created_by||'').split('@')[0])+'. This is a system generated receipt.</div>'
     +'<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>';
   w.document.open(); w.document.write(html); w.document.close();
 };
@@ -2069,30 +2126,140 @@ window.psiPrint=async function(id){
   const v=await loadInvoice(id); if(!v){ w.close(); return; }
   const {i,ln,al}=v, b=i.bookings||{}, ap=(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq), proj=S.projects.find(p=>p.id===i.project_id);
   const [{data:setup},{data:bal},{data:banks}]=await Promise.all([
-    PS().from('project_setup').select('company_name').eq('project_id',i.project_id).maybeSingle(),
+    PS().from('project_setup').select('company_name,company_address,company_pan,company_gstin,company_cin,contact_phone,contact_email,demand_terms').eq('project_id',i.project_id).maybeSingle(),
     PS().from('booking_balances').select('*').eq('booking_id',b.id).maybeSingle(),
     PS().from('bank_accounts').select('name,bank_name,account_no,ifsc').or('project_id.eq.'+i.project_id+',project_id.is.null').eq('active',true).is('deleted_at',null)]);
   const first=ap[0]||{}, addr=first.mailing_address==='office'?first.off_address:first.res_address;
   const n=x=>Math.round(num(x)).toLocaleString('en-IN'), paid=al.reduce((s,a)=>s+num(a.amount),0);
   const realBanks=(banks||[]).filter(x=>x.account_no);
-  const html='<!doctype html><html><head><meta charset="utf-8"><title>Demand Note '+esc(i.invoice_no)+'</title><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111;margin:28px}h1{font-size:18px;margin:0}h2{font-size:14px;letter-spacing:4px;text-align:center;border:1px solid #333;padding:6px;margin:16px 0}table{width:100%;border-collapse:collapse;margin-top:8px}td,th{padding:7px 8px;border:1px solid #999;vertical-align:top}th{background:#f3f3f3;text-align:left}.r{text-align:right;white-space:nowrap}.t td{font-weight:bold}.k{width:22%;font-weight:bold;background:#f3f3f3}.note{font-size:11.5px;margin-top:10px;line-height:1.5}.void{color:#b91c1c;font-weight:bold;text-align:center;border:2px solid #b91c1c;padding:6px;margin-top:10px}@media print{body{margin:12mm}}</style></head><body>'
-    +'<h1>'+esc(setup&&setup.company_name||'Jain Group')+'</h1><div>'+esc(proj?proj.name:'')+'</div><h2>'+(i.kind==='milestone'?'DEMAND NOTE':'INVOICE')+'</h2>'
-    +'<table><tr><td class="k">Invoice no.</td><td>'+esc(i.invoice_no)+'</td><td class="k">Date</td><td>'+dmy(i.invoice_date)+'</td></tr>'
-    +'<tr><td class="k">To</td><td colspan="3">'+esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & '))+(addr?'<br><span style="font-size:12px">'+esc(addr)+'</span>':'')+'</td></tr>'
-    +'<tr><td class="k">Booking / unit</td><td>'+esc(b.booking_no||'')+'</td><td class="k">Unit</td><td>'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+'</td></tr>'
-    +'<tr><td class="k">For</td><td colspan="3"><b>'+esc(i.title)+'</b></td></tr></table>'
-    +'<table><tr><th>Particulars</th><th class="r">Amount (₹)</th><th class="r">GST (₹)</th><th class="r">Total (₹)</th></tr>'+ln.map(l=>'<tr><td>'+esc(l.head)+'</td><td class="r">'+n(l.net)+'</td><td class="r">'+n(l.gst)+'</td><td class="r">'+n(l.total)+'</td></tr>').join('')
-    +'<tr class="t"><td>Total</td><td class="r">'+n(i.net)+'</td><td class="r">'+n(i.gst)+'</td><td class="r">'+n(i.total)+'</td></tr>'
-    +(paid?'<tr><td colspan="3">Less: already received against this invoice</td><td class="r">'+n(paid)+'</td></tr><tr class="t"><td colspan="3">Payable</td><td class="r">'+n(num(i.total)-paid)+'</td></tr>':'')+'</table>'
-    +'<div style="margin-top:8px"><b>Amount payable: ₹ '+n(num(i.total)-paid)+'</b> (Rupees '+esc(inWords(num(i.total)-paid))+' only) on or before <b>'+dmy(i.due_date)+'</b>.</div>'
-    +(bal?'<div style="margin-top:6px;font-size:12px">Total outstanding on this booking including this invoice: ₹ '+n(bal.principal_outstanding)+'.</div>':'')
-    +(realBanks.length?'<table><tr><th colspan="4">Pay by cheque / NEFT / RTGS in favour of '+esc(setup&&setup.company_name||'')+'</th></tr>'+realBanks.map(x=>'<tr><td>'+esc(x.bank_name||x.name)+'</td><td>A/c '+esc(x.account_no)+'</td><td colspan="2">'+esc(x.ifsc?'IFSC '+x.ifsc:'')+'</td></tr>').join('')+'</table>':'')
-    +'<div class="note">Interest at 18% per annum is chargeable on any amount not paid by the due date. Please quote the booking number with every payment.</div>'
-    +(i.status==='cancelled'?'<div class="void">CANCELLED - '+esc(i.cancel_reason||'')+'</div>':'')
-    +'<div style="margin-top:40px;text-align:right">______________________<br>Authorised Signatory</div>'
+  /* LAID OUT LIKE THE LETTER FARVISION ALREADY SENDS. Company block centred, DEMAND LETTER, the
+     addressee on the left against a reference column on the right, then the instalments table,
+     terms, notes, bank details and signatory. A customer should not be able to tell which system
+     printed it. */
+  const sqft=num(b.sba_sqft)?num(b.sba_sqft).toLocaleString('en-IN')+' SQ. FT.':'';
+  const terms=(setup&&setup.demand_terms)
+    || 'The above mentioned total due amount is excluding interest for late payment. You are therefore '
+      +'requested to remit/pay the above mentioned amount immediately to avoid further interest accrual '
+      +'@ 18 % p.a. However, interest on previous outstanding shall be payable till the date of payment. '
+      +'Please ignore this demand letter, if already paid.';
+  const html='<!doctype html><html><head><meta charset="utf-8"><title>Demand Letter '+esc(i.invoice_no)+'</title>'
+    +'<style>'+DOC_CSS+'</style></head><body>'
+    +docHead(setup,'DEMAND LETTER')
+    +'<table><tr>'
+      +'<td style="width:48%;vertical-align:top" class="addr"><b>To,</b><br>'
+        +esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & ')||'Customer')
+        +(addr?'<br>'+esc(addr):'')+'</td>'
+      +'<td style="vertical-align:top"><table class="ref">'
+        +docRef('Dated', dmy(i.invoice_date))
+        +docRef('Application Code No', b.booking_no)
+        +docRef('Project Name', proj?proj.name:'')
+        +docRef('Category', b.towers&&b.towers.name)
+        +docRef('Unit No', b.flats&&b.flats.flat_code)
+        +docRef('Total Sale Area', sqft)
+        +docRef('Rate', num(b.rate)?num(b.rate).toLocaleString('en-IN')+' per SQ.FT.':'')
+        +'</table></td></tr></table>'
+    +(ap.length>1?'<div class="addr" style="margin-top:12px"><b>Co Applicant(S)</b><br>'
+        +esc(ap.slice(1).map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(', '))+'</div>':'')
+    +'<div class="addr" style="margin:14px 0 8px">Dear Sir / Madam,<br>'
+      +'We wish to inform you that your following instalments are falling due on the dates indicated against them.</div>'
+    +'<table class="grid"><thead><tr><th style="width:11%">Due Date</th><th>Description</th>'
+      +'<th style="width:17%">Charge Type</th><th class="r" style="width:12%">Amount Due</th>'
+      +'<th class="r" style="width:12%">Amount Paid</th><th class="r" style="width:13%">Amount Payable</th></tr></thead><tbody>'
+    +ln.map(function(l){
+        const due=num(l.total);
+        return '<tr><td>'+dmy(i.due_date)+'</td><td>'+esc(i.title)+'</td><td>'+esc(l.head)+'</td>'
+          +'<td class="r">'+n(due)+'.00</td><td class="r">0.00</td><td class="r">'+n(due)+'.00</td></tr>';
+      }).join('')
+    +'<tr class="tot"><td colspan="3">Total Amount Due</td><td class="r">'+n(i.total)+'.00</td>'
+      +'<td class="r">'+n(paid)+'.00</td><td class="r">'+n(num(i.total)-paid)+'.00</td></tr>'
+    +'</tbody></table>'
+    +(i.status==='cancelled'?'<div class="void">CANCELLED &mdash; '+esc(i.cancel_reason||'')+'</div>':'')
+    +'<div class="sm" style="margin-top:12px"><b>Terms &amp; Condition:</b><br>'+esc(terms)+'</div>'
+    +'<div class="sm" style="margin-top:10px"><b>Note :</b><ul style="margin:4px 0 0 16px;padding:0">'
+      +((setup&&(setup.contact_email||setup.contact_phone))
+         ? '<li>Jain Group is committed towards transparency, customer satisfaction and highest ethics. Please mail '
+           +esc(setup.contact_email||'')+(setup.contact_phone?' or call '+esc(setup.contact_phone):'')
+           +', if any Jain Group employee requests cash, gifts or any benefits whatsoever.</li>' : '')
+      +'<li>Bank charges (if any) will also be payable plus GST.</li>'
+      +'<li>Interest @ 18% p.a. will be charged as applicable.</li>'
+      +'<li>If your accounts do not tally with our records, please contact us immediately.</li>'
+      +'<li>Please mention Customer Name, Project Name &amp; Payment details behind your cheque / DD.</li>'
+      +'</ul></div>'
+    +(realBanks.length
+       ? '<div class="sm" style="margin-top:10px">Kindly issue the cheque / draft / RTGS / NEFT in favour of '
+         +'<b>'+esc(setup&&setup.company_name||'')+'</b></div>'
+         +'<div class="sm" style="margin-top:6px"><b>Bank Details:</b></div>'
+         +realBanks.map(function(x){
+             return '<table class="ref" style="width:auto;margin-top:4px">'
+               +docRef('Bank Name', x.bank_name||x.name)
+               +docRef('Account No', x.account_no)
+               +docRef('IFSC Code', x.ifsc)+'</table>';
+           }).join('')
+       : '')
+    +'<div class="sm" style="margin-top:12px">Expecting your prompt action in this regard, and assuring you of our best services always, we remain.</div>'
+    +'<div class="sign">Yours faithfully,<br><b>For '+esc(setup&&setup.company_name||'The Jain Group')+'</b>'
+      +'<div style="margin-top:30px"><b>Authorised Signatory</b></div></div>'
+    +docRegs(setup)
+    +'<div class="sm" style="margin-top:14px">This is a system generated statement. No signature required.</div>'
     +'<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>';
   w.document.open(); w.document.write(html); w.document.close();
 };
+
+/* THE THREE PRINTED DOCUMENTS SHARE ONE LETTERHEAD AND ONE STYLESHEET.
+
+   The demand letter, the money receipt and the applicant ledger all go to customers, all carry
+   the same company block, and had three different looks between them. They are laid out to match
+   what FarVision prints today, because that is what customers already recognise - a letter that
+   suddenly looks different reads as a letter from somebody else.
+
+   Everything prints only when it is filled in. The reference demand letter leaves Service Tax
+   Registration No blank rather than inventing one, and so does this. */
+const DOC_CSS =
+   '@page{size:A4;margin:12mm}'
+  +':root{color-scheme:light}'
+  +'html,body{background:#fff}'
+  +'*{box-sizing:border-box}'
+  +'body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;margin:0;'
+    +'-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+  +'.co{text-align:center;margin-bottom:14px}'
+  +'.co .nm{font-size:14px;font-weight:bold;letter-spacing:.3px}'
+  +'.co .ad{font-size:10px;margin-top:5px;line-height:1.55}'
+  +'.doct{text-align:center;font-size:12.5px;font-weight:bold;margin:16px 0 12px}'
+  +'table{width:100%;border-collapse:collapse}'
+  +'.grid td,.grid th{border:1px solid #000;padding:4px 6px;vertical-align:top;font-size:10px}'
+  +'.grid th{background:#c8c8c8;font-weight:bold;text-align:center}'
+  +'.grid td.r,.grid th.r{text-align:right}'
+  +'.grid tr.tot td{background:#d8d8d8;font-weight:bold}'
+  +'.ref td{padding:1.5px 0;font-size:10.5px;vertical-align:top}'
+  +'.ref td.k{white-space:nowrap;padding-right:6px}'
+  +'.ref td.c{width:8px}'
+  +'.addr{font-size:10.5px;line-height:1.6}'
+  +'.sm{font-size:9.5px;line-height:1.6}'
+  +'.sign{margin-top:34px;font-size:10.5px}'
+  +'.void{color:#b91c1c;font-weight:bold;text-align:center;border:2px solid #b91c1c;padding:6px;margin-top:10px}'
+  +'tr{page-break-inside:avoid}thead{display:table-header-group}';
+
+/* The company block at the top of every printed document. */
+function docHead(setup, title, leftAlign){
+  const s=setup||{};
+  const addr=String(s.company_address||'').split(/\r?\n/).filter(Boolean).map(esc).join('<br>');
+  return '<div class="co"'+(leftAlign?' style="text-align:left"':'')+'>'
+    +'<div class="nm">'+esc(s.company_name||'The Jain Group')+'</div>'
+    +(addr?'<div class="ad">'+addr+'</div>':'')+'</div>'
+    +(title?'<div class="doct">'+esc(title)+'</div>':'');
+}
+/* A label : value row, skipped entirely when the value is empty rather than printed with nothing
+   after the colon - which is how the reference letter handles a blank Service Tax number. */
+function docRef(k,v){
+  return v?('<tr><td class="k">'+esc(k)+'</td><td class="c">:</td><td>'+esc(v)+'</td></tr>'):'';
+}
+/* PAN / GSTIN / CIN, printed under the signature the way the reference letter does. */
+function docRegs(setup){
+  const s=setup||{};
+  const row=(k,v)=>v?('<tr><td class="k"><b>'+esc(k)+'</b></td><td class="c">:</td><td>'+esc(v)+'</td></tr>'):'';
+  const body=row('PAN No.',s.company_pan)+row('GSTIN',s.company_gstin)+row('CIN',s.company_cin);
+  return body?'<table class="ref" style="width:auto;margin-top:18px">'+body+'</table>':'';
+}
 
 /* ---- booking page: milestone status + raise ---- */
 function milestoneStatus(b,ms,inv,al){
