@@ -1127,6 +1127,7 @@ async function bookingList(host,stale){
   psSyncInfo();
   window.psbFilter=function(){
     B.pid=val('psbProj')||null; const q=val('psbQ').toLowerCase();
+    psSyncTowerSelect('psbTower',B.pid,B.tower,"B.tower=this.value;psbFilter()");
     const tw=B.tower?Number(B.tower):null;
     const rows=B.list.filter(b=>(!B.pid||String(b.project_id)===B.pid)&&(!tw||b.tower_id===tw)&&(!q||[b.booking_no,b.flats&&b.flats.flat_code,b.towers&&b.towers.name,(b.booking_applicants||[]).map(a=>a.full_name).join(' ')].join(' ').toLowerCase().includes(q)));
     window._psbRows=rows;   // what the download sends: exactly what is on screen
@@ -1237,7 +1238,7 @@ function drawForm(host){
     +'<div><label>Why they chose it</label><input value="'+esc(d.reason_chosen)+'" oninput="psbSetD(\'reason_chosen\',this.value)"></div>'
     +'<div><label>Sales person / booking agent</label><input value="'+esc(d.sales_person)+'" oninput="psbSetD(\'sales_person\',this.value)"></div>'
     +'<div><label>CRM Lead ID</label><input value="'+esc(d.crm_lead_id)+'" oninput="psbSetD(\'crm_lead_id\',this.value)"></div>'
-    +'<div class="psb-span2"><label>Remarks</label><input value="'+esc(d.remarks)+'" oninput="psbSetD(\'remarks\',this.value)"></div>'
+
     +'</div><div class="psb-kyc" id="psbAtt"></div></div>';
   html+='<div class="psb-bar"><button class="btn" onclick="navTo(\'postsales/bookings'+(f.id?'/'+f.id:'')+'\')">Cancel</button><button class="btn btn-primary" id="psbSave" onclick="psbSave()"><i class="fa-solid fa-floppy-disk"></i> '+(f.id?'Save changes':'Save booking')+'</button></div>';
   host.innerHTML=html;
@@ -1926,6 +1927,7 @@ const I={list:[],tower:null,pid:null,status:'open',w:null};
 
 let IN_SEQ=0;
 window.psiRender=async function(host,seg){
+  PS_IN_HOST=host;
   host.classList.add('ps-root');
   css(); bcss();
   seg=seg||[];
@@ -1976,6 +1978,7 @@ async function invoiceList(host,stale){
     +'<div id="psiList"></div>';
   window.psiFilter=function(){
     I.pid=val('psiProj')||null; I.status=val('psiSt'); const q=val('psiQ').toLowerCase(), td=today();
+    psSyncTowerSelect('psiTower',I.pid,I.tower,"I.tower=this.value;psiFilter()");
     const itw=I.tower?Number(I.tower):null;
     const rows=I.list.filter(i=>{const b=i.bookings||{}, bal=num(i.total)-(I.paid[i.id]||0);
       if(I.pid&&String(i.project_id)!==I.pid) return false;
@@ -1989,8 +1992,10 @@ async function invoiceList(host,stale){
     let T=0,P=0; rows.forEach(i=>{ if(i.status==='open'){T+=num(i.total);P+=(I.paid[i.id]||0);} });
     const info=i=>{const p=I.paid[i.id]||0,bal=num(i.total)-p,od=i.status==='open'&&bal>0.5&&i.due_date<td;
       return {p,bal,od,tag:i.status==='cancelled'?'<span class="tag t-gray">Cancelled</span>':bal<=0.5?'<span class="tag t-green">Paid</span>':od?'<span class="tag t-red">Overdue</span>':p>0?'<span class="tag t-amber">Part paid</span>':'<span class="tag t-blue">Due</span>'};};
-    $('psiList').innerHTML=(rows.length?'<div class="psb-sum" style="margin:0 0 12px"><div>Invoiced (open)<b>'+inr(T)+'</b></div><div>Received<b>'+inr(P)+'</b></div><div>Balance<b>'+inr(T-P)+'</b></div></div>':'')
-      +listHtml('in','psiFilter',rows,
+    /* The three cards - Invoiced, Received, Balance - are gone by request. They restated the three
+       money columns already in the table, at the cost of pushing the first invoice below the fold
+       on a laptop. The totals row at the foot of the table still adds the same figures up. */
+    $('psiList').innerHTML=listHtml('in','psiFilter',rows,
       '<th>Invoice</th><th>Date</th><th>Due</th><th>Booking / flat</th><th>For</th><th class="pss-num">Amount</th><th class="pss-num">Received</th><th class="pss-num">Balance</th><th>Status</th>',
       i=>{const b=i.bookings||{},ap=(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq),x=info(i);
         return '<tr onclick="navTo(\'postsales/invoices/'+i.id+'\')"><td><b>'+esc(i.invoice_no)+'</b>'+(i.kind!=='milestone'?' <span class="tag t-purple">'+esc(KIND_LBL[i.kind])+'</span>':'')+'</td><td style="white-space:nowrap">'+dmy(i.invoice_date)+'</td><td style="white-space:nowrap'+(x.od?';color:#b91c1c;font-weight:600':'')+'">'+dmy(i.due_date)+'</td><td>'+esc(b.booking_no||'')+'<div class="pss-hint" style="margin:0">'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||'')+(ap[0]?' · '+ap[0].full_name:''))+'</div></td><td>'+esc(psLabel(i.title))+'<div class="pss-hint" style="margin:0">'+esc(VIA_LBL[i.raised_via]||'')+'</div></td><td class="pss-num">'+inr(i.total)+'</td><td class="pss-num">'+inr(x.p)+'</td><td class="pss-num"><b>'+inr(i.status==='open'?x.bal:0)+'</b></td><td>'+x.tag+'</td></tr>';},
@@ -2129,11 +2134,17 @@ async function progressView(host,stale){
    down to 42, 11, 8 and 0 for the individual ones. The answer was right and nobody asked for it.
 
    Calling the view's own render with its own host asks for it. */
+let PS_IN_HOST=null;     // the element psiRender last drew into - see psiProjPick
 window.psiProjPick=function(v,view){
   I.pid=v||null;
-  const host=document.getElementById('psiBody');
+  /* IT WAS LOOKING FOR THE WRONG ELEMENT. psiBody exists only inside the "mark stage complete"
+     wizard, so on the Invoices and Interest due views it was never found and this fell through to
+     route() - which re-renders from the URL, and the URL does not change when you pick a project.
+     Nothing happened, every time, which is why the filter looked dead.
+     psiRender records the host it drew into, so there is always something real to draw into. */
+  const host=PS_IN_HOST&&PS_IN_HOST.isConnected ? PS_IN_HOST : document.getElementById('psiBody');
   if(host) psiRender(host, view==='list'?[]:[view]);
-  else route();          // the body div is gone, so the page really does need rebuilding
+  else route();
 };
 window.psiProgressGo=function(){ psiProjPick(val('psiPP'),'progress'); };
 
@@ -2602,6 +2613,33 @@ function psTowerOptions(pid, sel, id, onch){
     +list.map(t=>'<option value="'+t.id+'"'+(String(t.id)===String(sel||'')?' selected':'')+'>'+esc(t.name)+'</option>').join('')
     +'</select>';
 }
+/* REBUILD THE BLOCK LIST WHEN THE PROJECT CHANGES.
+
+   psTowerOptions is called once, while the page is being written. Choosing a project after that
+   filtered the rows but left the block dropdown exactly as it had been built - and since both
+   lists open on "All projects", that was the disabled "Choose a project first" state. The blocks
+   never appeared, so a block could never be picked and the Excel and PDF buttons could never be
+   narrowed to one. Called from the filter, so the list a project has is always the list on screen. */
+async function psSyncTowerSelect(id,pid,sel,onch){
+  const el=document.getElementById(id);
+  if(!el) return;
+  const key=String(pid||'');
+  if(el.dataset.pid===key) return;     // same project, same blocks, leave the chosen one alone
+  el.dataset.pid=key;                  // claimed now, so two quick changes cannot both rebuild
+  /* S.towers only ever holds ONE project's blocks - loadProject replaces it - so rebuilding the
+     list from what is in memory would show the blocks of whichever project was opened last, or
+     none at all on a page that has not opened one. The project's own blocks are fetched first. */
+  if(pid && String(S.pid||'')!==key){
+    try{ await loadProject(Number(pid)); S.pid=Number(pid); }
+    catch(_e){ /* leave the dropdown as it is rather than showing another project's blocks */ return; }
+  }
+  const now=document.getElementById(id);
+  if(!now || now.dataset.pid!==key) return;   // the project changed again while this was loading
+  now.outerHTML=psTowerOptions(pid,sel,id,onch);
+  const fresh=document.getElementById(id);
+  if(fresh) fresh.dataset.pid=key;
+}
+
 /* Hands the current list to the Reports exporter and puts RP back as it was, so downloading from
    Bookings does not leave the Reports tab believing it is showing bookings. */
 async function psExport(how, btn, title, sub, cols, rows){
