@@ -27561,10 +27561,14 @@ function trcKpiHtml(rows,shownRows){
      stores the closest matching column for each (see 20260917110000's own note on where its
      pending/not_in_scope categories drift slightly from trcTrStatus's queue_status-truthiness split -
      an approximation, but a far closer one than reading undefined off every row not yet enriched). */
-  // "Not in scope" chip removed by request (2026-09-18) - a row that is out of scope still shows its
-  // own "Not in scope" tag in the table (see TRC_TR_META), this just drops it as a KPI-row filter chip.
+  /* "Not in scope" chip is back (it was dropped 2026-09-18) - this time counting LEADS, not calls. A
+     lead is out of scope when a call of theirs never entered the transcription queue (trcTrStatus), and
+     that needs row-level data, so it reads '…' until the fuller lead data has loaded, like the
+     missed-incoming / late-follow-up chips. */
+  const notInScopeLeads=haveDetail?leadsOf(function(r){return trcTrStatus(r)==='out_of_scope';}):null;
   const sub=[
     ['Waiting','not_transcribed',fast?fast.pending:n('not_transcribed'),'fa-clock'],
+    ['Not in scope','out_of_scope',notInScopeLeads===null?'…':notInScopeLeads+(notInScopeLeads===1?' lead':' leads'),'fa-user-slash'],
     ['No recording','no_recording',fast?(fast.total_followups-fast.recordings_available):n('no_recording'),'fa-phone-slash'],
     ['No conversation','non_transcribable',fast?fast.non_transcribable:n('non_transcribable'),'fa-volume-xmark'],
     ['Failed','failed',fast?fast.transcription_failed:rows.filter(trcProcFailed).length,'fa-circle-exclamation']
