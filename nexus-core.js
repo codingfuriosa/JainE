@@ -24517,15 +24517,13 @@ window.custNewReferralModal=async function(preProject){
     <label>Name</label><input id="custRefName" autocomplete="off" placeholder="Their full name">
     <label>Mobile number</label><input id="custRefPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="10-digit mobile number">
     <label>Email (optional)</label><input id="custRefEmail" type="email" autocomplete="off">
-    <label>Project they are interested in</label>
-    <div class="cref-projs" role="radiogroup" aria-label="Project">${projects.map(function(p){
+    <label>Projects they are interested in <span style="font-weight:400;color:var(--slate)">(choose one or more)</span></label>
+    <div class="cref-projs" role="group" aria-label="Projects">${projects.map(function(p){
       const pre=preProject&&String(p.name).toLowerCase()===String(preProject).toLowerCase();
-      return '<label class="cref-proj"><input type="radio" name="custRefProj" value="'+p.id+'"'+(pre?' checked':'')+'>'
+      return '<label class="cref-proj"><input type="checkbox" name="custRefProj" value="'+p.id+'"'+(pre?' checked':'')+'>'
         +'<span class="nm">'+esc(custRefTitle(p.name))+'</span>'
         +(p.location?'<span class="loc"><i class="fa-solid fa-location-dot"></i>'+esc(custRefTitle(p.location))+'</span>':'')+'</label>'; }).join('')}</div>
     <label>What are they looking for? (optional)</label><textarea id="custRefNotes" rows="2" maxlength="300" placeholder="e.g. 2BHK, budget around 80 lakh"></textarea>
-    <label class="cref-consent"><input type="checkbox" id="custRefOk">
-      <span>They are happy to be contacted by Jain Group about this, and I accept the <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>
     <p style="margin:10px 0 0;font-size:12px;color:var(--slate)">Our sales team will call them. You can follow every step on the Referrals page.</p></div>
     <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custRefBtn" onclick="custNewReferralSave()"><i class="fa-solid fa-paper-plane"></i> Submit referral</button></div>`);
   setTimeout(function(){ const n=$('custRefName'); if(n) n.focus(); },60);
@@ -24537,29 +24535,33 @@ window.custNewReferralSave=async function(){
   const digits=String(prospect_phone||'').replace(/\D/g,'');
   if(digits.length<10||digits.length>13){toast('Enter their mobile number (10 digits)','err');return;}
   if(prospect_email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(prospect_email)){toast('That email address does not look right','err');return;}
-  const pick=document.querySelector('input[name="custRefProj"]:checked');
-  const referral_project_id=pick?Number(pick.value):null;
-  if(!referral_project_id){toast('Choose the project they are interested in','err');return;}
-  if(!($('custRefOk')||{}).checked){toast('Please confirm they are happy to be contacted','err');return;}
+  let picked=[...document.querySelectorAll('input[name="custRefProj"]:checked')].map(function(i){ return Number(i.value); }).filter(Boolean);
+  if(!picked.length){toast('Choose at least one project they are interested in','err');return;}
   const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
-  // The same person twice from the same flat is one referral - the team would call them twice.
+  /* One referral per project, so each becomes its own CRM lead with that project's business unit -
+     and its own sales person (6 Oct 2026). The same person for the same project twice from the same
+     flat is one referral: the team would call them twice. */
+  const last10=digits.slice(-10);
   try{
-    const {data:mine}=await sb.schema('cust').from('referrals').select('prospect_phone').eq('unit_id',unit.id);
-    const last10=digits.slice(-10);
-    if((mine||[]).some(function(r){ return String(r.prospect_phone||'').replace(/\D/g,'').slice(-10)===last10; })){
-      toast('You have already referred this number','warn'); return; }
+    const {data:mine}=await sb.schema('cust').from('referrals').select('prospect_phone,referral_project_id').eq('unit_id',unit.id);
+    const had=new Set((mine||[]).filter(function(r){ return String(r.prospect_phone||'').replace(/\D/g,'').slice(-10)===last10; })
+      .map(function(r){ return Number(r.referral_project_id)||0; }));
+    // An old referral of this number with no project counts against every project.
+    if(had.has(0)) picked=[]; else picked=picked.filter(function(id){ return !had.has(id); });
+    if(!picked.length){ toast('You have already referred this number'+(had.has(0)?'':' for '+(had.size>1?'these projects':'this project')),'warn'); return; }
   }catch(_e){}
   const b=$('custRefBtn'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…'; }
-  // Saved here first; the database then sends it to the CRM (cust.referral_crm_send).
-  const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,notes,
-    referral_project_id,privacy_accepted:true,created_by:state.email});
+  // Saved here first; the database then sends each one to the CRM (cust.referral_crm_send).
+  // privacy_policy_accepted is required by the CRM and is sent as true - there is no tick box.
+  const {error}=await sb.schema('cust').from('referrals').insert(picked.map(function(id){
+    return {unit_id:unit.id,prospect_name,prospect_phone,prospect_email,notes,referral_project_id:id,privacy_accepted:true,created_by:state.email}; }));
   if(error&&b){ b.disabled=false; b.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit referral'; }
   if(error){toast('Could not submit: '+error.message,'err');return;}
   // Set directly rather than re-fetched: custLoadData's cache would otherwise hand route() the same
   // pre-submit CUST_DATA (same customerId, no force), and the sidebar's "Earn" badge would survive
   // the very referral that should have removed it.
   if(CUST_DATA)CUST_DATA.hasReferred=true;
-  closeModal();toast('Referral submitted — thank you!','ok');route();
+  closeModal();toast((picked.length>1?'Referral submitted for '+picked.length+' projects':'Referral submitted')+' — thank you!','ok');route();
 };
 window.custReferralStatusChange=async function(id,status){
   const {error}=await sb.schema('cust').from('referrals').update({status,updated_at:new Date().toISOString(),updated_by:state.email}).eq('id',id);
