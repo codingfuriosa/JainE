@@ -24238,8 +24238,11 @@ function custReferralCss(){
   .cref-pgrid{margin-bottom:24px}
   .cref-pbtns{display:flex;gap:8px;margin-top:11px}
   .cref-pbtns .btn{flex:1 1 0;justify-content:center;gap:7px;text-decoration:none;white-space:nowrap;padding-left:8px;padding-right:8px}
-  .cref-pref{background:#c8202f;border-color:#c8202f;color:#fff}
-  .cref-pref:hover{background:#a8121e;border-color:#a8121e;color:#fff}
+  /* Doubled up so it beats the customer portal's ".cust-view-fade .btn:not(.btn-primary)" (white
+     gradient), which otherwise left white text on a white button. */
+  .cref-pbtns .btn.cref-pref,.cust-view-fade .cref-pbtns .btn.cref-pref{background:#c8202f;border-color:#c8202f;color:#fff;
+    box-shadow:0 4px 12px -4px rgba(200,32,47,.45)}
+  .cref-pbtns .btn.cref-pref:hover,.cust-view-fade .cref-pbtns .btn.cref-pref:hover{background:#a8121e;border-color:#a8121e;color:#fff}
   @media(max-width:620px){ .cref-projs{grid-template-columns:1fr;max-height:260px} }
   .cref-pbox{position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,.88);display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:14px;padding:16px}
