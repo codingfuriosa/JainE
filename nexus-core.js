@@ -21902,20 +21902,21 @@ function supportStatusTag(t){
   return `<span class="tag ${cls}">${esc(label)}</span>`;
 }
 async function cpaRenderSupport(host){
-  const {data}=await sb.schema('cust').from('support_tickets').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
+  const {data}=await sb.schema('cust').from('support_tickets').select('*, units(unit_code), customers(full_name)').is('deleted_at',null).order('created_at',{ascending:false}).limit(300);
   const ticketIds=(data||[]).map(t=>t.id);
   const {data:atts}=ticketIds.length?await sb.schema('cust').from('support_ticket_attachments').select('*').in('ticket_id',ticketIds).is('deleted_at',null):{data:[]};
   const attsByTicket={};(atts||[]).forEach(a=>{(attsByTicket[a.ticket_id]=attsByTicket[a.ticket_id]||[]).push(a);});
-  const rows=(data||[]).map(t=>[esc((t.units&&t.units.unit_code)||'—'),esc(t.subject),esc(t.zoho_ticket_number||'—'),
+  const rows=(data||[]).map(t=>[esc((t.customers&&t.customers.full_name)||'—')+'<div style="font-size:11.5px;color:var(--slate)">'+esc((t.units&&t.units.unit_code)||'All flats')+'</div>',
+    esc(custTicketVia(t)[0]),esc(t.subject),esc(t.zoho_ticket_number||'—'),
     supportStatusTag(t),
     (attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}${a.zoho_attachment_id?' (in Zoho)':' (not in Zoho)'}"><i class="fa-solid fa-paperclip"></i></button>`).join(' ')||'—',
-    fmtDate(t.created_at),
+    fmtDate(t.zoho_created_time||t.created_at),
     (t.zoho_ticket_id?`<button class="btn btn-sm" onclick="cpaTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button> <button class="btn btn-sm" onclick="cpaSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="cpaRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`)]);
-  host.innerHTML=(rows.length?cpaTable(['Unit','Subject','Zoho #','Status','Attachments','Raised','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>')+
+  host.innerHTML=(rows.length?cpaTable(['Customer','Via','Subject','Zoho #','Status','Attachments','Raised','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>')+
     '<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself; "Refresh" pulls its current status and conversation back here. Attachment icons show whether that file made it to the Zoho ticket yet — "Retry" also re-attempts any that didn\'t.</div>';
 }
 function cpaBuildBubbles(t,threads,comments){
-  const msgs=[{time:t.created_at,author:'Customer',content:t.description||t.subject}]
+  const msgs=(t.source==='zoho'?[]:[{time:t.created_at,author:'Customer',content:t.description||t.subject}])
     .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,author:m.direction==='out'?'Support team':(m.author_name||'Customer'),content:m.content})))
     .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,author:m.posted_by_customer?(m.commenter_name||'Customer'):'Support team (comment)',content:m.content})));
   msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
@@ -23903,19 +23904,76 @@ async function custTabVideos(){
       :'<div class="card card-pad empty">Not available yet.</div>')+'<div style="margin-bottom:20px"></div>';
   }).join('');
 }
+/* SUPPORT: every ticket the customer has with us, wherever it started - raised here, or an email to
+   customer care that Zoho Desk turned into a ticket (6 Oct 2026). Opening the tab asks zoho-desk to
+   look the customer up in Zoho first ('pull', throttled to once every 3 minutes); a 10-minute import
+   catches the rest. A ticket that came in by email belongs to the customer, not to one flat, so it
+   shows on every flat's Support tab. */
+const CUST_TICKET_VIA={email:['Email','fa-envelope'],web:['Portal','fa-globe'],phone:['Phone','fa-phone'],chat:['Chat','fa-comments'],
+  whatsapp:['WhatsApp','fa-brands fa-whatsapp'],forums:['Forum','fa-users'],facebook:['Facebook','fa-brands fa-facebook'],twitter:['X','fa-brands fa-x-twitter']};
+function custTicketVia(t){
+  if(t.source!=='zoho') return CUST_TICKET_VIA.web;
+  const k=String(t.zoho_channel||'').toLowerCase();
+  return CUST_TICKET_VIA[k]||[t.zoho_channel||'Zoho','fa-headset'];
+}
+function custSupportCss(){
+  if(document.getElementById('custSupCss')) return;
+  const st=document.createElement('style'); st.id='custSupCss';
+  st.textContent=`
+  .csup-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .csup-head h3{margin:0;font-size:17px}
+  .csup-head p{margin:4px 0 0;font-size:12.5px;color:var(--slate);max-width:60ch}
+  .csup-list{display:flex;flex-direction:column;gap:10px}
+  .csup-t{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--csup-c,#94a3b8);border-radius:12px;
+    padding:13px 15px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .csup-main{flex:1 1 280px;min-width:0}
+  .csup-sub{font-size:14.5px;font-weight:700;color:var(--ink);line-height:1.35}
+  .csup-meta{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--slate);margin-top:4px}
+  .csup-meta i{margin-right:4px;opacity:.75}
+  .csup-acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .csup-sync{font-size:11.5px;color:var(--slate);margin-top:10px}
+  @media(max-width:620px){ .csup-acts{width:100%} .csup-acts .btn{flex:1 1 auto;justify-content:center} }`;
+  document.head.appendChild(st);
+}
 async function custTabSupport(unit){
-  const {data:tickets}=await sb.schema('cust').from('support_tickets').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
-  const ticketIds=(tickets||[]).map(t=>t.id);
+  custSupportCss();
+  // Ask Zoho for this customer's tickets first - at most a few seconds, then show what we have.
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    await Promise.race([
+      fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'pull'})}),
+      new Promise(r=>setTimeout(r,7000))]);
+  }catch(_e){}
+  const {data:tickets}=await sb.schema('cust').from('support_tickets').select('*')
+    .or('unit_id.eq.'+Number(unit.id)+',unit_id.is.null').is('deleted_at',null);
+  const list=(tickets||[]).sort((a,b)=>String(b.zoho_created_time||b.created_at).localeCompare(String(a.zoho_created_time||a.created_at)));
+  const ticketIds=list.map(t=>t.id);
   const {data:atts}=ticketIds.length?await sb.schema('cust').from('support_ticket_attachments').select('*').in('ticket_id',ticketIds).is('deleted_at',null):{data:[]};
   const attsByTicket={};(atts||[]).forEach(a=>{(attsByTicket[a.ticket_id]=attsByTicket[a.ticket_id]||[]).push(a);});
-  const rows=(tickets||[]).map(t=>[esc(t.subject),fmtDate(t.created_at),esc(t.zoho_ticket_number||'—'),supportStatusTag(t),
-    (attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}"><i class="fa-solid fa-paperclip"></i></button>`).join(' ')||'—',
-    (t.zoho_ticket_id?`<button class="btn btn-sm" onclick="custTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button> <button class="btn btn-sm" onclick="custSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="custRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`)]);
-  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Support tickets</div><button class="btn btn-primary" onclick="custNewTicketModal()"><i class="fa-solid fa-plus"></i> Raise a ticket</button></div>`+
-    (rows.length?cpaTable(['Subject','Raised','Ticket #','Status','Attachments','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>');
+  const colour={open:'#d97706',in_progress:'#1d4ed8',on_hold:'#64748b',closed:'#16a34a'};
+  const cards=list.map(t=>{
+    const via=custTicketVia(t);
+    const att=(attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}"><i class="fa-solid fa-paperclip"></i></button>`).join('');
+    const acts=t.zoho_ticket_id
+      ?`<button class="btn btn-sm btn-primary" onclick="custTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button><button class="btn btn-sm" onclick="custSyncTicket(${t.id})" title="Get the latest from our support team"><i class="fa-solid fa-rotate"></i></button>`
+      :`<button class="btn btn-sm" onclick="custRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Send again</button>`;
+    return `<div class="csup-t" style="--csup-c:${colour[t.status]||'#94a3b8'}">
+      <div class="csup-main"><div class="csup-sub">${esc(t.subject)}</div>
+        <div class="csup-meta">${t.zoho_ticket_number?'<span><i class="fa-solid fa-hashtag"></i>'+esc(t.zoho_ticket_number)+'</span>':''}
+          <span><i class="${via[1].indexOf('fa-brands')===0?via[1]:'fa-solid '+via[1]}"></i>via ${esc(via[0])}</span>
+          <span><i class="fa-regular fa-calendar"></i>${esc(fmtDate(t.zoho_created_time||t.created_at))}</span></div></div>
+      ${supportStatusTag(t)}
+      <div class="csup-acts">${att}${acts}</div></div>`;
+  }).join('');
+  return `<div class="csup-head"><div><h3>Support tickets</h3>
+      <p>Tickets you raise here, and emails you send to our customer care team, all show here with their latest status and replies.</p></div>
+      <button class="btn btn-primary" onclick="custNewTicketModal()"><i class="fa-solid fa-plus"></i> Raise a ticket</button></div>`
+    +(list.length?'<div class="csup-list">'+cards+'</div>':'<div class="card card-pad empty">No support tickets yet.</div>');
 }
 function custBuildBubbles(t,threads,comments){
-  const msgs=[{time:t.created_at,mine:true,author:'You',content:t.description||t.subject}]
+  // A ticket raised here opens with what the customer typed; one that came in by email opens with
+  // the email itself, which is already its first thread.
+  const msgs=(t.source==='zoho'?[]:[{time:t.created_at,mine:true,author:'You',content:t.description||t.subject}])
     .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,mine:m.direction!=='out',author:m.direction==='out'?'Support team':'You',content:m.content})))
     .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,mine:m.posted_by_customer,author:m.posted_by_customer?'You':'Support team',content:m.content})));
   msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
