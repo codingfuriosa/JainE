@@ -20627,7 +20627,6 @@ async function cpaPhPaint(projects,units){
   if(!$('cphWrap')) return;
   wrap.innerHTML=cpaPhModeBar()
     +'<div id="cphFix"></div>'
-    +(cpaIsPhotoApprover()&&!state.super?'':'<div class="cph-note"><i class="fa-solid fa-circle-info"></i>Everything uploaded here waits for approval by the post-sales team before customers can see it.</div>')
     +'<div class="cph-card">'
       +'<div class="cph-bar">'
         +'<div class="cph-levels">'
