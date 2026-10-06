@@ -22068,9 +22068,10 @@ window.cpaRetryTicket=async function(id){
 /* ---------- Tab 10: Referrals ---------- */
 const CPA_REFERRAL_STATUSES={submitted:'Submitted',contacted:'Contacted',interested:'Interested',visited_site:'Visited Site',booked:'Booked',not_interested:'Not Interested'};
 async function cpaRenderReferrals(host){
+  await custRefProjects();
   const {data}=await sb.schema('cust').from('referrals').select('*, units(unit_code), referral_projects(name)').order('created_at',{ascending:false}).limit(200);
   const rows=(data||[]).map(r=>[esc((r.units&&r.units.unit_code)||'—'),esc(r.prospect_name),esc(r.prospect_phone||'—'),esc(r.prospect_email||'—'),
-    esc((r.referral_projects&&r.referral_projects.name)||'—'),
+    esc(custRefProjectNames(r)||'—'),
     '<span style="font-size:12.5px;color:var(--slate)">'+esc(r.notes||'—')+'</span>',
     cpaReferralCrmCell(r),
     `<select onchange="cpaReferralStatusChange(${r.id},this.value)">${Object.keys(CPA_REFERRAL_STATUSES).map(k=>`<option value="${k}" ${k===r.status?'selected':''}>${CPA_REFERRAL_STATUSES[k]}</option>`).join('')}</select>`,
@@ -24476,6 +24477,7 @@ async function custTabReferrals(unit){
   const moving=list.filter(function(r){return ['contacted','interested','visited_site'].indexOf(r.status)!==-1;}).length;
 
   custRefPrefetch();
+  await custRefProjects();   // names for the projects of each referral below
   const hero=`<div class="cref-hero"><div class="cref-hero-in">
       <div class="cref-hero-txt">
         <div class="cref-eyebrow"><i class="fa-solid fa-bullhorn"></i> Refer &amp; Earn</div>
@@ -24541,8 +24543,8 @@ async function custTabReferrals(unit){
           return '<div class="cref-seg'+(i<done?' on':'')+'"></div>'; }).join('');
         const phone=r.prospect_phone?`<span><i class="fa-solid fa-phone"></i>${esc(r.prospect_phone)}</span>`:'';
         const mail=r.prospect_email?`<span><i class="fa-solid fa-envelope"></i>${esc(r.prospect_email)}</span>`:'';
-        const proj=r.referral_projects&&r.referral_projects.name
-          ?`<span class="cref-projtag"><i class="fa-solid fa-building"></i>${esc(custRefTitle(r.referral_projects.name))}</span>`:'';
+        const pn=custRefProjectNames(r);
+        const proj=pn?`<span class="cref-projtag"><i class="fa-solid fa-building"></i>${esc(pn)}</span>`:'';
         return `<div class="cref-card" style="--cref-c:${st.dot}">
             <div class="cref-who">
               <div class="cref-name">${esc(r.prospect_name)}</div>
@@ -24653,6 +24655,14 @@ async function custRefProjects(){
     CUST_REF_PROJECTS=data||[]; }catch(_e){ CUST_REF_PROJECTS=[]; }
   return CUST_REF_PROJECTS;
 }
+// "Dream One, Dream Gurukul": the main project first, then the others chosen with it.
+function custRefProjectNames(r){
+  const byId={}; (CUST_REF_PROJECTS||[]).forEach(function(p){ byId[p.id]=p.name; });
+  const main=r.referral_projects&&r.referral_projects.name;
+  const all=(r.referral_project_ids||[]).map(function(id){ return byId[id]; }).filter(Boolean);
+  const names=[main].concat(all.filter(function(n){ return n!==main; })).filter(Boolean);
+  return names.map(custRefTitle).join(', ');
+}
 function custRefTitle(s){ return String(s||'').toLowerCase().replace(/(^|[\s\-\/(])([a-z])/g,(m,a,b)=>a+b.toUpperCase()).trim(); }
 window.custNewReferralModal=async function(preProject){
   const projects=await custRefProjects();
@@ -24682,30 +24692,28 @@ window.custNewReferralSave=async function(){
   let picked=[...document.querySelectorAll('input[name="custRefProj"]:checked')].map(function(i){ return Number(i.value); }).filter(Boolean);
   if(!picked.length){toast('Choose at least one project they are interested in','err');return;}
   const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
-  /* One referral per project, so each becomes its own CRM lead with that project's business unit -
-     and its own sales person (6 Oct 2026). The same person for the same project twice from the same
-     flat is one referral: the team would call them twice. */
+  /* One referral - one CRM lead - however many projects are ticked (6 Oct 2026). The database makes
+     the highest-priced of them the main project, whose business unit gets the lead; the others are
+     named in its remarks (cust.referral_main_project, cust.referral_crm_send). The same person twice
+     from the same flat is one referral: the team would call them twice. */
   const last10=digits.slice(-10);
   try{
-    const {data:mine}=await sb.schema('cust').from('referrals').select('prospect_phone,referral_project_id').eq('unit_id',unit.id);
-    const had=new Set((mine||[]).filter(function(r){ return String(r.prospect_phone||'').replace(/\D/g,'').slice(-10)===last10; })
-      .map(function(r){ return Number(r.referral_project_id)||0; }));
-    // An old referral of this number with no project counts against every project.
-    if(had.has(0)) picked=[]; else picked=picked.filter(function(id){ return !had.has(id); });
-    if(!picked.length){ toast('You have already referred this number'+(had.has(0)?'':' for '+(had.size>1?'these projects':'this project')),'warn'); return; }
+    const {data:mine}=await sb.schema('cust').from('referrals').select('prospect_phone').eq('unit_id',unit.id);
+    if((mine||[]).some(function(r){ return String(r.prospect_phone||'').replace(/\D/g,'').slice(-10)===last10; })){
+      toast('You have already referred this number','warn'); return; }
   }catch(_e){}
   const b=$('custRefBtn'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…'; }
-  // Saved here first; the database then sends each one to the CRM (cust.referral_crm_send).
-  // privacy_policy_accepted is required by the CRM and is sent as true - there is no tick box.
-  const {error}=await sb.schema('cust').from('referrals').insert(picked.map(function(id){
-    return {unit_id:unit.id,prospect_name,prospect_phone,prospect_email,notes,referral_project_id:id,privacy_accepted:true,created_by:state.email}; }));
+  // Saved here first; the database then sends it to the CRM. privacy_policy_accepted is required by
+  // the CRM and is sent as true - there is no tick box.
+  const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,notes,
+    referral_project_id:picked[0],referral_project_ids:picked,privacy_accepted:true,created_by:state.email});
   if(error&&b){ b.disabled=false; b.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit referral'; }
   if(error){toast('Could not submit: '+error.message,'err');return;}
   // Set directly rather than re-fetched: custLoadData's cache would otherwise hand route() the same
   // pre-submit CUST_DATA (same customerId, no force), and the sidebar's "Earn" badge would survive
   // the very referral that should have removed it.
   if(CUST_DATA)CUST_DATA.hasReferred=true;
-  closeModal();toast((picked.length>1?'Referral submitted for '+picked.length+' projects':'Referral submitted')+' — thank you!','ok');route();
+  closeModal();toast('Referral submitted — thank you!','ok');route();
 };
 window.custReferralStatusChange=async function(id,status){
   const {error}=await sb.schema('cust').from('referrals').update({status,updated_at:new Date().toISOString(),updated_by:state.email}).eq('id',id);
