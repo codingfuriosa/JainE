@@ -20507,6 +20507,8 @@ function cpaPhCss(){return `<style>
   .cph-fixi .cph-th{width:54px;height:54px;flex:none}
   .cph-fixw{flex:1;min-width:0;font-size:12.5px;color:var(--slate);line-height:1.45}
   .cph-fixw b{display:block;color:var(--ink);font-size:13.5px}
+  .cph-fixg{font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#b91c1c;margin:6px 2px -2px}
+  .cph-fixg:first-child{margin-top:0}
   .cph-retake{display:inline-flex;align-items:center;gap:6px;margin-top:5px;padding:5px 11px;border-radius:8px;cursor:pointer;
     font:inherit;font-size:12px;font-weight:700;border:1px solid #1d4ed8;background:#1d4ed8;color:#fff}
   .cph-retake:hover{background:#1e40af}
@@ -20691,29 +20693,45 @@ async function cpaPhFixList(projects,units){
   CPA_RV_SECS.forEach((s,k)=>((res[k]&&res[k].data)||[]).forEach(p=>{
     const t=s[0], w=cpaPhPlaceOf(t,p,units);
     const key=t+'|'+w.key;
-    if(!byPlace[key]){ byPlace[key]={t,p,place:w.place,can:w.can,pn:projOf[w.pid]?String(projOf[w.pid].name).split('(')[0].trim():'',
+    if(!byPlace[key]){ byPlace[key]={t,p,w,place:w.place,can:w.can,pn:projOf[w.pid]?String(projOf[w.pid].name).split('(')[0].trim():'',
       n:0,when:p.reviewed_at||p.created_at,notes:[]}; order.push(key); }
     const g=byPlace[key]; g.n++;
     if(p.review_note&&g.notes.indexOf(p.review_note)===-1) g.notes.push(p.review_note);
   }));
-  const items=order.map(k=>byPlace[k]).sort((a,b)=>String(b.when).localeCompare(String(a.when)));
+  /* Floor-wise, the way the site is walked: project by project; within one, the whole-project
+     photos, then the blocks, then the flats - block by block, floor by floor (ground up), flat by
+     flat, section by section. Asked for on 6 Oct 2026. */
+  const nat=(a,b)=>String(a||'').localeCompare(String(b||''),undefined,{numeric:true,sensitivity:'base'});
+  const items=order.map(k=>byPlace[k]).sort((a,b)=>{
+    const x=a.w, y=b.w;
+    return nat(a.pn,b.pn)||(x.lvl-y.lvl)||nat(x.tower,y.tower)
+      ||((x.floor==null)-(y.floor==null))||((x.floor||0)-(y.floor||0))||nat(x.code,y.code)||((x.areaIdx||0)-(y.areaIdx||0));
+  });
   CPA_PH.fix=items;
   if(!items.length){ host.innerHTML=''; return; }
   const total=items.reduce((t,it)=>t+it.n,0);
   host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>To retake · '+total
     +'<span class="cph-fixsub">The reviewer rejected these. A new photo for the same place replaces the rejected one.</span></div>'
     +'<div class="cph-fixl">'+items.map((it,i)=>{
+      const w=it.w, prev=items[i-1];
+      const head=[it.pn, w.lvl===0?'Whole project':w.lvl===1?'Blocks':(w.tower||'Flats'),
+                  w.lvl===2?(w.floor==null?'Other units':(w.floor===0?'Ground floor':'Floor '+w.floor)):''].filter(Boolean).join(' · ');
+      const prevHead=prev?[prev.pn, prev.w.lvl===0?'Whole project':prev.w.lvl===1?'Blocks':(prev.w.tower||'Flats'),
+                  prev.w.lvl===2?(prev.w.floor==null?'Other units':(prev.w.floor===0?'Ground floor':'Floor '+prev.w.floor)):''].filter(Boolean).join(' · '):'';
       const p=it.p, isVid=(p.file_type||'').indexOf('video')===0;
       const th=isVid&&!p.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
         :'<img class="cph-th" '+cphThumbAttrs(p,it.t)+' alt="" decoding="async">';
-      return '<div class="cph-fixi">'+th
-        +'<div class="cph-fixw"><b>'+esc(it.place)+'</b>'
-          +esc([it.pn,it.n>1?it.n+' rejected':'',it.notes.join(' · '),'rejected '+fmtDate(it.when)].filter(Boolean).join(' · '))+'</div>'
+      return (head!==prevHead?'<div class="cph-fixg">'+esc(head)+'</div>':'')+'<div class="cph-fixi">'+th
+        +'<div class="cph-fixw"><b>'+esc(w.lvl===2&&w.tower?it.place.replace(w.tower+' · ',''):it.place)+'</b>'
+          +esc([it.n>1?it.n+' rejected':'',it.notes.join(' · '),'rejected '+fmtDate(it.when)].filter(Boolean).join(' · '))+'</div>'
         +(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+i+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'')
         +'</div>';
     }).join('')+'</div></div>';
   cphLazy(host);
 }
+// The floor a flat is on, from its code: 2G -> 2, 11A -> 11, 13-14A -> 13. Codes that do not start
+// with a number (the Eco City bungalows: A1, K6) have no floor and sort after the rest by code.
+function cpaFloorOf(code){ const m=/^(\d+)/.exec(String(code||'').trim()); return m?Number(m[1]):null; }
 // Where a photo belongs, in words, and whether this uploader's screen can take a new one there
 // (a photos-only uploader has no Bathroom section).
 function cpaPhPlaceOf(t,p,units){
@@ -20723,10 +20741,12 @@ function cpaPhPlaceOf(t,p,units){
     const a=(CPA_PH_AREAS.find(x=>x[0]===area)||[0,area])[1];
     return {key:p.unit_id+'|'+area, pid:u&&u.project_id,
       place:(u?(u.tower?u.tower+' · ':'')+'Flat '+u.unit_code:'Flat')+' · '+a,
-      can:!!u&&cpaPhUploadAreas().some(x=>x[0]===area)};
+      can:!!u&&cpaPhUploadAreas().some(x=>x[0]===area),
+      lvl:2, tower:u?String(u.tower||''):'', code:u?String(u.unit_code||''):'', floor:u?cpaFloorOf(u.unit_code):null,
+      areaIdx:Math.max(0,CPA_PH_AREAS.findIndex(x=>x[0]===area))};
   }
-  if(t==='tower_photos') return {key:p.project_id+'|'+p.tower, pid:p.project_id, place:p.tower||'Block', can:true};
-  if(t==='project_photos') return {key:String(p.project_id), pid:p.project_id, place:'Whole project', can:true};
+  if(t==='tower_photos') return {key:p.project_id+'|'+p.tower, pid:p.project_id, place:p.tower||'Block', can:true, lvl:1, tower:String(p.tower||'')};
+  if(t==='project_photos') return {key:String(p.project_id), pid:p.project_id, place:'Whole project', can:true, lvl:0};
   return {key:t+p.id, pid:p.project_id, place:'Floor '+(p.floor_no||''), can:false};
 }
 window.cpaPhRetake=function(i,isVid){ const it=(CPA_PH.fix||[])[i]; if(it) cpaPhRetakeAt(it.t,it.p,it.place,isVid); };
