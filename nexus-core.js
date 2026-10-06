@@ -24235,6 +24235,11 @@ function custReferralCss(){
   .cref-consent input{margin-top:2px;accent-color:#c8202f;width:15px;height:15px;flex:none}
   .cref-consent a{color:#c8202f;font-weight:600}
   .cref-projtag{display:inline-flex;align-items:center;gap:5px;color:#b3141f;font-weight:600}
+  .cref-pgrid{margin-bottom:24px}
+  .cref-pbtns{display:flex;gap:8px;margin-top:11px}
+  .cref-pbtns .btn{flex:1 1 0;justify-content:center;gap:7px;text-decoration:none;white-space:nowrap;padding-left:8px;padding-right:8px}
+  .cref-pref{background:#c8202f;border-color:#c8202f;color:#fff}
+  .cref-pref:hover{background:#a8121e;border-color:#a8121e;color:#fff}
   @media(max-width:620px){ .cref-projs{grid-template-columns:1fr;max-height:260px} }
   .cref-pbox{position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,.88);display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:14px;padding:16px}
@@ -24410,7 +24415,13 @@ async function custTabReferrals(unit){
     person you refer, at the slab it falls in, on a successful booking. Add them here so the referral is
     counted in your name. Terms and conditions apply.</p>`;
 
-  return hero+'<div class="cref-main">'+poster+'<div class="cref-side">'+slabs+steps+'</div></div>'+(list.length?'<div class="cref-sh">Your referrals</div>':'')+stats+body+fine;
+  /* Our ongoing projects, the same cards as the staff Projects page (CONS_ONGOING), so a customer
+     can see what there is to refer someone to. Refer a friend opens the form with that project
+     already chosen. Asked for on 6 Oct 2026. */
+  const projects=`<div class="cref-sh">Our ongoing projects</div>
+    <div class="proj-grid cref-pgrid">${CONS_ONGOING.map(custRefProjectCard).join('')}</div>`;
+
+  return hero+'<div class="cref-main">'+poster+'<div class="cref-side">'+slabs+steps+'</div></div>'+projects+(list.length?'<div class="cref-sh">Your referrals</div>':'')+stats+body+fine;
 }
 
 /* REFER & EARN, from the marketing creative (5 Oct 2026). The reward is a share of the total
@@ -24475,6 +24486,20 @@ window.custRefPoster=function(){
 /* Which project the friend is interested in decides the CRM business unit, and with it the sales
    person who calls them (cust.referral_projects). Names are shown in Title Case with the location. */
 let CUST_REF_PROJECTS=null;
+function custRefProjectCard(p){
+  return '<div class="proj-card cref-pcard2">'
+    +'<div class="proj-img" style="background-image:url(\''+esc(p.img)+'\')"><span class="proj-badge">Ongoing</span></div>'
+    +'<div class="proj-body">'
+      +'<h3>'+esc(p.n)+'</h3>'
+      +'<div class="proj-loc"><i class="fa-solid fa-location-dot"></i> '+esc(p.loc)+'</div>'
+      +'<div class="proj-meta">'+esc(p.meta)+'</div>'
+      +'<div class="proj-price">'+esc(p.price)+'</div>'
+      +'<div class="cref-pbtns">'
+        +'<a class="btn" href="'+esc(p.url)+'" target="_blank" rel="noopener">View project <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:11px"></i></a>'
+        +'<button class="btn cref-pref" onclick="custNewReferralModal(\''+esc(p.n).replace(/'/g,"\\'")+'\')"><i class="fa-solid fa-user-plus"></i> Refer a friend</button>'
+      +'</div>'
+    +'</div></div>';
+}
 async function custRefProjects(){
   if(CUST_REF_PROJECTS) return CUST_REF_PROJECTS;
   try{ const {data}=await sb.schema('cust').from('referral_projects').select('id,name,location').eq('active',true).order('sort').order('name');
@@ -24482,7 +24507,7 @@ async function custRefProjects(){
   return CUST_REF_PROJECTS;
 }
 function custRefTitle(s){ return String(s||'').toLowerCase().replace(/(^|[\s\-\/(])([a-z])/g,(m,a,b)=>a+b.toUpperCase()).trim(); }
-window.custNewReferralModal=async function(){
+window.custNewReferralModal=async function(preProject){
   const projects=await custRefProjects();
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-user-plus" style="color:#c8202f"></i> Refer a friend or family member</h3><span class="x" onclick="closeModal()">&times;</span></div>
     <div class="modal-body frm">
@@ -24491,7 +24516,8 @@ window.custNewReferralModal=async function(){
     <label>Email (optional)</label><input id="custRefEmail" type="email" autocomplete="off">
     <label>Project they are interested in</label>
     <div class="cref-projs" role="radiogroup" aria-label="Project">${projects.map(function(p){
-      return '<label class="cref-proj"><input type="radio" name="custRefProj" value="'+p.id+'">'
+      const pre=preProject&&String(p.name).toLowerCase()===String(preProject).toLowerCase();
+      return '<label class="cref-proj"><input type="radio" name="custRefProj" value="'+p.id+'"'+(pre?' checked':'')+'>'
         +'<span class="nm">'+esc(custRefTitle(p.name))+'</span>'
         +(p.location?'<span class="loc"><i class="fa-solid fa-location-dot"></i>'+esc(custRefTitle(p.location))+'</span>':'')+'</label>'; }).join('')}</div>
     <label>What are they looking for? (optional)</label><textarea id="custRefNotes" rows="2" maxlength="300" placeholder="e.g. 2BHK, budget around 80 lakh"></textarea>
