@@ -20695,6 +20695,9 @@ async function cpaPhFixList(projects,units){
   const byPlace={}, order=[];
   CPA_RV_SECS.forEach((s,k)=>((res[k]&&res[k].data)||[]).forEach(p=>{
     const t=s[0], w=cpaPhPlaceOf(t,p,units);
+    // Only what this person can retake: a photos-only uploader has no Bathroom section, so rejected
+    // Bathroom photos are not theirs to fix and are left out (6 Oct 2026).
+    if(!w.can) return;
     const key=t+'|'+w.key;
     if(!byPlace[key]){ byPlace[key]={t,p,w,place:w.place,can:w.can,pn:projOf[w.pid]?String(projOf[w.pid].name).split('(')[0].trim():'',
       n:0,when:p.reviewed_at||p.created_at,notes:[]}; order.push(key); }
