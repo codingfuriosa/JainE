@@ -12,7 +12,7 @@ window.__PUS_LOADED=true;
 const PU=()=>sb.schema('purchase');
 const SETUP_SECTIONS=[['items','Items'],['groups','Item groups'],['uoms','UOM'],['warehouses','Warehouses'],['entities','Legal entities'],['indent_types','Indent types'],['po_types','PO types'],['expense_heads','Expense heads']];
 const ADMIN_SECTIONS=[['approvals','Approvers'],['roles','Roles'],['rules','Rules'],['admins','Administrators']];
-const S={sec:'items',mode:'setup',perms:[],permCat:[],roles:[],rolePerms:[],roleMembers:[],settings:{},admins:[],isAdmin:false,groups:[],items:[],uoms:[],warehouses:[],entities:[],projEntity:[],projects:[],chains:[],users:[],q:'',groupId:'',whProject:''};
+const S={sec:'items',mode:'setup',perms:[],permCat:[],roles:[],rolePerms:[],roleMembers:[],settings:{},admins:[],isAdmin:false,groups:[],items:[],uoms:[],warehouses:[],entities:[],projEntity:[],projects:[],chains:[],users:[],q:'',groupId:'',whProject:'',bu:''};
 const can=p=>Array.isArray(S.perms)&&S.perms.includes(p);
 
 const num=v=>{const n=Number(v);return isFinite(n)?n:0;};
@@ -963,5 +963,10 @@ window.pusInviteCancel=async function(id){
 };
 
 // What purchase-indent.js (and the later Purchase stages) share with this file.
-window.PUS={PU,S,load,rule,can,val,num,fail,soft,css,vcss,modal,remove,groupById,uomCode,userName,chainOf,fmtDate};
+// Business-unit filter shared by the Stores and Stock & reports tabs. S.bu is a project id ('' = all business units) and is kept
+// while the page stays open, so the choice follows you from one section to the next.
+const buOptions=()=>'<option value="">All business units</option>'+S.projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(S.bu)?' selected':'')+'>'+esc(p.name)+'</option>').join('');
+const inBu=pid=>!S.bu||String(pid)===String(S.bu);
+window.pusBuSet=function(v){ S.bu=v||''; route(); };
+window.PUS={PU,S,load,rule,can,val,num,fail,soft,css,vcss,modal,remove,groupById,uomCode,userName,chainOf,fmtDate,buOptions,inBu};
 })();

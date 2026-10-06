@@ -55,8 +55,12 @@ window.pusStoresRender=async function(host,seg){
   if(id&&!stale()) ({grn:window.pusGrnOpen,issues:window.pusIssueOpen,adjustments:window.pusAdjOpen,transfers:window.pusTrfOpen}[CURSEC]||function(){})(id);
 };
 
+// Business-unit filter at the front of every list's filter row (shared state: U().S.bu, set by pusBuSet in purchase.js).
+const inBu=pid=>U().inBu(pid);
+const buSel=()=>'<select id="pstBu" onchange="pusBuSet(this.value)" title="Business unit">'+U().buOptions()+'</select>';
+const buBar=top=>top?top.replace('<div class="pus-top">','<div class="pus-top">'+buSel()):'<div class="pus-top">'+buSel()+'</div>';
 const listShell=(title,hint,addLabel,addFn,heads,rows,top)=>'<div class="toolbar"><div style="flex:1"><div class="sec-title" style="margin:0">'+esc(title)+'</div><div class="pus-hint" style="margin:0">'+hint+'</div></div>'
-  +(addFn?'<button class="btn btn-primary" onclick="'+addFn+'"><i class="fa-solid fa-plus"></i> '+esc(addLabel)+'</button>':'')+'</div>'+(top||'')
+  +(addFn?'<button class="btn btn-primary" onclick="'+addFn+'"><i class="fa-solid fa-plus"></i> '+esc(addLabel)+'</button>':'')+'</div>'+buBar(top)
   +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+heads.map(h=>'<th'+(h[1]?' class="pus-num"':'')+'>'+esc(h[0])+'</th>').join('')+'</tr></thead><tbody>'
   +(rows||'<tr><td colspan="'+heads.length+'"><div class="empty" style="padding:24px"><div>Nothing here yet</div></div></td></tr>')+'</tbody></table></div></div>';
 const tabsBar=(id,tabs)=>'<div class="pi-tabs" id="'+id+'">'+tabs.map(t=>'<a data-t="'+t[0]+'" onclick="'+id+'Go(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div>';
@@ -87,8 +91,8 @@ const poNo=id=>{const p=G.pos.find(x=>x.id===id);return p?(p.doc_no||'PO'):'—'
 function grnRender(host){
   host=host||$('pstBody'); if(!host) return;
   const q=G.q.toLowerCase();
-  const list=G.rows.filter(r=>(G.filter==='all'||r.status===G.filter)&&(!q||((r.doc_no||'')+' '+poNo(r.po_id)+' '+vName(r.vendor_id)+' '+(r.challan_no||'')+' '+(r.invoice_no||'')).toLowerCase().includes(q)));
-  const chips=[['all','All'],['draft','Draft'],['posted','Posted']].map(([k,l])=>'<span class="chip'+(G.filter===k?' active':'')+'" onclick="pusGrnFilter(\''+k+'\')">'+l+' ('+G.rows.filter(r=>k==='all'||r.status===k).length+')</span>').join('');
+  const list=G.rows.filter(r=>inBu(r.project_id)&&(G.filter==='all'||r.status===G.filter)&&(!q||((r.doc_no||'')+' '+poNo(r.po_id)+' '+vName(r.vendor_id)+' '+(r.challan_no||'')+' '+(r.invoice_no||'')).toLowerCase().includes(q)));
+  const chips=[['all','All'],['draft','Draft'],['posted','Posted']].map(([k,l])=>'<span class="chip'+(G.filter===k?' active':'')+'" onclick="pusGrnFilter(\''+k+'\')">'+l+' ('+G.rows.filter(r=>inBu(r.project_id)&&(k==='all'||r.status===k)).length+')</span>').join('');
   const rows=list.map(r=>{ const ls=G.lines.filter(x=>x.grn_id===r.id); const rej=ls.reduce((s,x)=>s+ +x.rejected_qty,0);
     return '<tr style="cursor:pointer" onclick="pusGrnOpen('+r.id+')"><td><span class="pus-code">'+esc(r.doc_no||('Draft #'+r.id))+'</span></td><td>'+esc(poNo(r.po_id))+'</td><td><b>'+esc(vName(r.vendor_id))+'</b></td><td>'+esc(whName(r.warehouse_id))+'</td>'
       +'<td style="white-space:nowrap">'+U().dmy(r.grn_date)+'</td><td>'+esc(r.invoice_no||(r.challan_no?'Challan '+r.challan_no:''))+'</td><td class="pus-num">'+ls.length+(rej>0?' <span class="tag t-amber" title="Some quantity was rejected">rejected '+qty(rej)+'</span>':'')+'</td>'
@@ -246,7 +250,7 @@ async function rtvList(host){
   const PU=U().PU;
   const [r,l,g,v]=await Promise.all([PU().from('rtvs').select('*').order('created_at',{ascending:false}),PU().from('rtv_lines').select('rtv_id,item_id,qty'),PU().from('grns').select('id,doc_no'),PU().from('vendors').select('id,legal_name,trade_name')]);
   const bad=[r,l,g,v].find(x=>x.error); if(bad) throw bad.error; G.vendors=v.data||[];
-  const rows=(r.data||[]).map(x=>{ const ls=(l.data||[]).filter(y=>y.rtv_id===x.id); const gn=(g.data||[]).find(y=>y.id===x.grn_id);
+  const rows=(r.data||[]).filter(x=>inBu(x.project_id)).map(x=>{ const ls=(l.data||[]).filter(y=>y.rtv_id===x.id); const gn=(g.data||[]).find(y=>y.id===x.grn_id);
     return '<tr><td><span class="pus-code">'+esc(x.doc_no)+'</span></td><td>'+esc(gn?gn.doc_no:'')+'</td><td><b>'+esc(vName(x.vendor_id))+'</b></td><td>'+esc(whName(x.warehouse_id))+'</td><td style="white-space:nowrap">'+U().dmy(x.rtv_date)+'</td><td>'+esc(x.reason)+'</td><td>'+ls.map(y=>esc(itemName(y.item_id))+' × '+qty(y.qty)).join(', ')+'</td><td>'+esc(uname(x.created_by))+'</td></tr>'; }).join('');
   host.innerHTML=listShell('Returns to vendor','Goods sent back to a vendor — quality or other reasons. Made from a posted GRN (open the GRN → Return to vendor).','',null,[['Return no'],['GRN'],['Vendor'],['Warehouse'],['Date'],['Reason'],['Items'],['By']],rows);
 }
@@ -261,12 +265,13 @@ async function issueList(host){
 }
 function issueRender(host){
   host=host||$('pstBody'); if(!host) return; const q=I.q.toLowerCase();
-  const list=I.rows.filter(r=>(!I.wh||String(r.warehouse_id)===I.wh)&&(!q||((r.doc_no||'')+' '+(r.requested_by||'')+' '+(r.activity||'')+' '+(r.block||'')).toLowerCase().includes(q)));
+  if(I.wh&&!inBu((whById(parseInt(I.wh,10))||{}).project_id)) I.wh='';   // the warehouse chosen earlier is not in this business unit
+  const list=I.rows.filter(r=>inBu(r.project_id)&&(!I.wh||String(r.warehouse_id)===I.wh)&&(!q||((r.doc_no||'')+' '+(r.requested_by||'')+' '+(r.activity||'')+' '+(r.block||'')).toLowerCase().includes(q)));
   const rows=list.map(r=>{ const ls=I.lines.filter(x=>x.issue_id===r.id); const val=ls.reduce((s,x)=>s+ +x.value,0);
     return '<tr style="cursor:pointer" onclick="pusIssueOpen('+r.id+')"><td><span class="pus-code">'+esc(r.doc_no)+'</span></td><td>'+esc(whName(r.warehouse_id))+'</td><td style="white-space:nowrap">'+U().dmy(r.issue_date)+'</td><td>'+esc([r.cost_project_id?projName(r.cost_project_id):'',r.block,r.activity].filter(Boolean).join(' · '))+'</td><td>'+esc(r.requested_by||'')+'</td><td class="pus-num">'+ls.length+'</td><td class="pus-num">'+money(val)+'</td><td>'+esc(uname(r.created_by))+'</td></tr>'; }).join('');
   host.innerHTML=listShell('Issues','Material given out of a warehouse for a purpose. Stock is reduced at the current average cost; an issue cannot take more than is in stock.','New issue',U().can('stock.issue')?'pusIssueNew()':'',
     [['Issue no'],['Warehouse'],['Date'],['For'],['Requested by'],['Items',1],['Value',1],['By']],rows,
-    '<div class="pus-top"><select id="pstWh" onchange="pusIssueFilter()"><option value="">All warehouses</option>'+U().S.warehouses.map(w=>'<option value="'+w.id+'"'+(String(w.id)===I.wh?' selected':'')+'>'+esc(w.name)+'</option>').join('')+'</select><input class="grow" id="pstQ" placeholder="Search by issue no, person, block or activity" value="'+esc(I.q)+'" oninput="pusIssueSearch()"></div>');
+    '<div class="pus-top"><select id="pstWh" onchange="pusIssueFilter()"><option value="">All warehouses</option>'+U().S.warehouses.filter(w=>inBu(w.project_id)).map(w=>'<option value="'+w.id+'"'+(String(w.id)===I.wh?' selected':'')+'>'+esc(w.name)+'</option>').join('')+'</select><input class="grow" id="pstQ" placeholder="Search by issue no, person, block or activity" value="'+esc(I.q)+'" oninput="pusIssueSearch()"></div>');
 }
 window.pusIssueFilter=function(){ I.wh=U().val('pstWh'); issueRender(); };
 window.pusIssueSearch=function(){ I.q=U().val('pstQ'); issueRender(); const e=$('pstQ'); if(e){ e.focus(); e.setSelectionRange(e.value.length,e.value.length); } };
@@ -340,7 +345,7 @@ async function returnList(host){
   const PU=U().PU;
   const [r,l,i]=await Promise.all([PU().from('issue_returns').select('*').order('created_at',{ascending:false}),PU().from('issue_return_lines').select('return_id,item_id,qty,value'),PU().from('issues').select('id,doc_no')]);
   const bad=[r,l,i].find(x=>x.error); if(bad) throw bad.error;
-  const rows=(r.data||[]).map(x=>{ const ls=(l.data||[]).filter(y=>y.return_id===x.id); const is=(i.data||[]).find(y=>y.id===x.issue_id);
+  const rows=(r.data||[]).filter(x=>inBu(x.project_id)).map(x=>{ const ls=(l.data||[]).filter(y=>y.return_id===x.id); const is=(i.data||[]).find(y=>y.id===x.issue_id);
     return '<tr><td><span class="pus-code">'+esc(x.doc_no)+'</span></td><td>'+esc(is?is.doc_no:'')+'</td><td>'+esc(whName(x.warehouse_id))+'</td><td style="white-space:nowrap">'+U().dmy(x.return_date)+'</td><td>'+ls.map(y=>esc(itemName(y.item_id))+' × '+qty(y.qty)).join(', ')+'</td><td class="pus-num">'+money(ls.reduce((s,y)=>s+ +y.value,0))+'</td><td>'+esc(x.reason||'')+'</td><td>'+esc(uname(x.created_by))+'</td></tr>'; }).join('');
   host.innerHTML=listShell('Issue returns','Material that came back into a warehouse after being issued. Made from an issue (open the issue → Return to store).','',null,[['Return no'],['Issue'],['Warehouse'],['Date'],['Items'],['Value',1],['Reason'],['By']],rows);
 }
@@ -359,8 +364,9 @@ const adjMine=a=>a.status==='pending_approval'&&(selfApproval()||a.raised_by.toL
 function adjRender(host){
   host=host||$('pstBody'); if(!host) return; const q=A.q.toLowerCase();
   const inF=(a,k)=>k==='all'||(k==='draft'&&a.status==='draft')||(k==='pending'&&a.status==='pending_approval')||(k==='mine'&&adjMine(a))||(k==='approved'&&a.status==='approved')||(k==='rejected'&&a.status==='rejected');
-  const list=A.rows.filter(a=>inF(a,A.filter)&&(!q||((a.doc_no||'')+' '+a.reason+' '+whName(a.warehouse_id)).toLowerCase().includes(q)));
-  const chips=[['all','All'],['draft','Drafts'],['pending','Awaiting approval'],['mine','Awaiting my approval'],['approved','Posted'],['rejected','Rejected']].map(([k,l])=>'<span class="chip'+(A.filter===k?' active':'')+'" onclick="pusAdjFilter(\''+k+'\')">'+l+' ('+A.rows.filter(a=>inF(a,k)).length+')</span>').join('');
+  const base=A.rows.filter(a=>inBu(a.project_id));
+  const list=base.filter(a=>inF(a,A.filter)&&(!q||((a.doc_no||'')+' '+a.reason+' '+whName(a.warehouse_id)).toLowerCase().includes(q)));
+  const chips=[['all','All'],['draft','Drafts'],['pending','Awaiting approval'],['mine','Awaiting my approval'],['approved','Posted'],['rejected','Rejected']].map(([k,l])=>'<span class="chip'+(A.filter===k?' active':'')+'" onclick="pusAdjFilter(\''+k+'\')">'+l+' ('+base.filter(a=>inF(a,k)).length+')</span>').join('');
   const rows=list.map(a=>{ const s=adjStatus(a), ls=A.lines.filter(x=>x.adjustment_id===a.id);
     return '<tr style="cursor:pointer" onclick="pusAdjOpen('+a.id+')"><td><span class="pus-code">'+esc(a.doc_no||('Draft #'+a.id))+'</span>'+(a.accounts_flag?' <span class="tag t-blue" title="Created by a transfer between legal entities - for Accounts">for Accounts</span>':'')+'</td><td>'+esc(whName(a.warehouse_id))+'</td><td style="white-space:nowrap">'+U().dmy(a.adj_date)+'</td><td>'+esc(ADJKIND[a.kind]||a.kind)+'</td><td>'+esc(a.reason)+'</td><td class="pus-num">'+ls.length+'</td><td class="pus-num">'+money(a.total_value)+'</td><td><span class="tag '+s[1]+'">'+esc(s[0])+'</span>'+(adjMine(a)?' <span class="tag t-blue">Your turn</span>'+U().rowDecide('pusAdjDecide',a.id):'')+'</td></tr>'; }).join('');
   host.innerHTML=listShell('Stock adjustments','Corrections for a physical count or damaged / lost material. They go through an approver before they change stock. (Transfers between legal entities create linked adjustments automatically.)','New adjustment',U().can('stock.adjust')?'pusAdjEdit()':'',
@@ -469,7 +475,8 @@ async function trfList(host){
 const trfStatus=t=>({in_transit:['In transit','t-amber'],received:['Received','t-green'],completed:['Completed','t-green']}[t.status]||[t.status,'t-gray']);
 function trfRender(host){
   host=host||$('pstBody'); if(!host) return; const q=T.q.toLowerCase();
-  const rows=T.rows.filter(t=>!q||((t.doc_no||'')+' '+whName(t.from_wh)+' '+whName(t.to_wh)).toLowerCase().includes(q)).map(t=>{ const ls=T.lines.filter(x=>x.transfer_id===t.id), s=trfStatus(t);
+  // a transfer belongs to both business units it touches: show it under either one
+  const rows=T.rows.filter(t=>(inBu(t.from_project_id)||inBu(t.to_project_id))&&(!q||((t.doc_no||'')+' '+whName(t.from_wh)+' '+whName(t.to_wh)).toLowerCase().includes(q))).map(t=>{ const ls=T.lines.filter(x=>x.transfer_id===t.id), s=trfStatus(t);
     return '<tr style="cursor:pointer" onclick="pusTrfOpen('+t.id+')"><td><span class="pus-code">'+esc(t.doc_no)+'</span></td><td>'+esc(whName(t.from_wh))+' <i class="fa-solid fa-arrow-right" style="color:var(--slate);font-size:11px"></i> '+esc(whName(t.to_wh))+'</td><td style="white-space:nowrap">'+U().dmy(t.transfer_date)+'</td>'
       +'<td>'+(t.kind==='same_entity'?'<span class="tag t-gray">Same legal entity</span>':'<span class="tag t-blue">Different legal entity</span>')+'</td><td class="pus-num">'+ls.length+'</td><td class="pus-num">'+money(ls.reduce((s,x)=>s+ +x.value,0))+'</td><td><span class="tag '+s[1]+'">'+esc(s[0])+'</span></td><td>'+esc(uname(t.dispatched_by))+'</td></tr>'; }).join('');
   host.innerHTML=listShell('Transfers between warehouses','Between sites of the same legal entity it is a pure transfer (out of one, received at the other, via "in transit" unless switched off in Admin → Rules). Between different legal entities it is recorded as a linked stock adjustment decrease and increase, flagged for Accounts.',
@@ -556,17 +563,21 @@ window.pusLedgerRender=async function(host,seg){
 };
 async function ledgerDraw(){
   const host=$('pslHost'); if(!host) return; const PU=U().PU;
-  const f=(L.wh?{warehouse_id:parseInt(L.wh,10)}:{}), it=L.item?parseInt(L.item,10):null;
+  const it=L.item?parseInt(L.item,10):null;
+  // business unit: only the warehouses of that unit (a warehouse chosen earlier that is not in it is dropped)
+  const buWhs=U().S.warehouses.filter(w=>inBu(w.project_id)).map(w=>w.id);
+  if(L.wh&&!buWhs.includes(parseInt(L.wh,10))) L.wh='';
+  const narrow=q=>L.wh?q.eq('warehouse_id',parseInt(L.wh,10)):(U().S.bu?q.in('warehouse_id',buWhs):q);
   let rowsHtml='', foot='';
   if(L.view==='balances'){
-    let q=PU().from('stock_balances').select('*').gt('qty',0); if(L.wh) q=q.eq('warehouse_id',parseInt(L.wh,10)); if(it) q=q.eq('item_id',it);
+    let q=narrow(PU().from('stock_balances').select('*').gt('qty',0)); if(it) q=q.eq('item_id',it);
     const {data,error}=await q; if(error){ host.innerHTML='<div class="empty"><div>'+esc(error.message)+'</div></div>'; return; }
     const list=(data||[]).sort((a,b)=>itemName(a.item_id).localeCompare(itemName(b.item_id))||whName(a.warehouse_id).localeCompare(whName(b.warehouse_id)));
     rowsHtml=list.map(b=>'<tr><td><b>'+esc(itemName(b.item_id))+'</b><div style="font-size:12px;color:var(--slate)">'+esc((itemById(b.item_id)||{}).code||'')+'</div></td><td>'+esc(whName(b.warehouse_id))+'</td><td>'+esc(stockUnit(b.item_id))+'</td><td class="pus-num"><b>'+qty(b.qty)+'</b></td><td class="pus-num">'+money(b.avg_rate)+'</td><td class="pus-num">'+money(b.value)+'</td></tr>').join('');
     foot='<tr style="background:#f8fafc"><td colspan="5"><b>Total stock value</b></td><td class="pus-num"><b>'+money(list.reduce((s,b)=>s+ +b.value,0))+'</b></td></tr>';
     host.innerHTML=ledgerBar()+'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Item</th><th>Warehouse</th><th>Unit</th><th class="pus-num">In stock</th><th class="pus-num">Average cost</th><th class="pus-num">Value</th></tr></thead><tbody>'+(rowsHtml||'<tr><td colspan="6"><div class="empty" style="padding:24px"><div>No stock</div></div></td></tr>')+foot+'</tbody></table></div></div>';
   } else {
-    let q=PU().from('stock_ledger').select('*').order('id',{ascending:false}).limit(300); if(L.wh) q=q.eq('warehouse_id',parseInt(L.wh,10)); if(it) q=q.eq('item_id',it);
+    let q=narrow(PU().from('stock_ledger').select('*').order('id',{ascending:false}).limit(300)); if(it) q=q.eq('item_id',it);
     const {data,error}=await q; if(error){ host.innerHTML='<div class="empty"><div>'+esc(error.message)+'</div></div>'; return; }
     rowsHtml=(data||[]).map(x=>'<tr><td style="white-space:nowrap">'+U().dmy(x.moved_on)+'</td><td>'+esc(whName(x.warehouse_id))+'</td><td><b>'+esc(itemName(x.item_id))+'</b></td><td><span class="pus-code">'+esc(x.doc_type)+'</span> '+esc(x.doc_no||'')+'<div style="font-size:12px;color:var(--slate)">'+esc(x.narration||'')+'</div></td>'
       +'<td class="pus-num" style="color:#15803d">'+(+x.qty>0?qty(x.qty):'')+'</td><td class="pus-num" style="color:#b91c1c">'+(+x.qty<0?qty(-x.qty):'')+'</td><td class="pus-num">'+money(x.rate)+'</td><td class="pus-num">'+money(x.value)+'</td><td class="pus-num"><b>'+qty(x.balance_qty)+'</b></td><td class="pus-num">'+money(x.balance_value)+'</td></tr>').join('');
@@ -577,7 +588,7 @@ async function ledgerDraw(){
 const ledgerBar=()=>'<div class="toolbar"><div style="flex:1"><div class="sec-title" style="margin:0">Stock ledger</div><div class="pus-hint" style="margin:0">Every movement is recorded and cannot be edited; stock is valued at the weighted-average cost.</div></div></div>'
   +'<div class="pus-top"><div class="pus-subs" style="margin:0"><span class="chip'+(L.view==='balances'?' active':'')+'" onclick="pusLedgerView(\'balances\')">Current stock</span><span class="chip'+(L.view==='ledger'?' active':'')+'" onclick="pusLedgerView(\'ledger\')">Movements</span>'
   +(U().can('report.view')?'<span class="chip" onclick="navTo(\'inventory/6/summary\')">Stock summary</span><span class="chip" onclick="navTo(\'inventory/6/item\')">Item ledger</span><span class="chip" onclick="navTo(\'inventory/6/ageing\')">Stock ageing</span>':'')+'</div>'
-  +'<select id="plWh" onchange="pusLedgerFilter()"><option value="">All warehouses</option>'+U().S.warehouses.map(w=>'<option value="'+w.id+'"'+(String(w.id)===L.wh?' selected':'')+'>'+esc(w.name)+'</option>').join('')+'</select>'
+  +buSel()+'<select id="plWh" onchange="pusLedgerFilter()"><option value="">All warehouses</option>'+U().S.warehouses.filter(w=>inBu(w.project_id)).map(w=>'<option value="'+w.id+'"'+(String(w.id)===L.wh?' selected':'')+'>'+esc(w.name)+'</option>').join('')+'</select>'
   +'<select id="plItem" onchange="pusLedgerFilter()"><option value="">All items</option>'+U().S.items.map(i=>'<option value="'+i.id+'"'+(String(i.id)===L.item?' selected':'')+'>'+esc(i.name)+'</option>').join('')+'</select></div>';
 window.pusLedgerView=function(v){ L.view=v; ledgerDraw(); };
 window.pusLedgerFilter=function(){ L.wh=U().val('plWh'); L.item=U().val('plItem'); ledgerDraw(); };

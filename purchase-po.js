@@ -80,6 +80,7 @@ let SEQ=0;
 window.pusPoRender=async function(host,seg){
   if(!window.PUS||!window.PUS.piCss){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Purchase could not finish loading - refresh the page.</div></div>'; return; }
   U().css(); U().vcss(); U().piCss();
+  P.project=U().S.bu||'';   // the business unit is shared with the Stores and Stock & reports tabs
   const mine=++SEQ, stale=()=>mine!==SEQ||!host.isConnected;
   seg=seg||[]; const explicit=seg[0]==='orders'||seg[0]==='revise';
   if(explicit) P.sec=seg[0];
@@ -150,7 +151,7 @@ function renderRevise(host){
 }
 window.pusPoRv=function(k){ P.rv=k; pRender(); };
 window.pusPoFilter=function(k){ P.filter=k; pRender(); };
-window.pusPoProject=function(){ P.project=U().val('pupProj'); pRender(); };
+window.pusPoProject=function(){ P.project=U().val('pupProj'); U().S.bu=P.project; pRender(); };
 window.pusPoSearch=function(){ P.q=U().val('pupQ'); const b=$('pupBody'); if(b) (P.sec==='revise'?renderRevise:renderOrders)(b); const e=$('pupQ'); if(e){ e.focus(); e.setSelectionRange(e.value.length,e.value.length); } };
 
 /* ---------------- detail ---------------- */
