@@ -4565,6 +4565,429 @@
     };
   }
 
+  /* ============================ THE BOOKING DOCUMENT EDITOR =====================================
+
+     The Check List, Welcome Letter and Allotment Letter all used to open in a modal: a sheet in a
+     box, with one button under it. You could type on the Check List but the letters were flat
+     PDFs, nothing survived closing the window, and the only thing you could take away was a Word
+     file for one of the three.
+
+     They now open the way a Job Description opens - a tab of their own, an A4 sheet on grey, a
+     toolbar across the top - and all three behave the same: edit, Save, Download Word, Download
+     PDF, Email. One editor, three documents, so a correction works the same wherever you are.
+
+     The sheet in the tab is the SAME HTML the builders already produce, and both the Word writer
+     and the PDF writer below walk that same HTML. There is no second description of what the
+     document looks like that could drift away from the first. */
+
+  const WF_PDF_W=595.28, WF_PDF_H=841.89, WF_PDF_M=58;
+
+  /* pdf-lib's standard fonts are WinAnsi, and a character outside it does not come out wrong - it
+     throws, and the download fails with nothing to show for it. The characters that actually turn
+     up in these documents are the rupee sign, the dashes and the curly quotes, so they are spelled
+     out rather than dropped, and anything else unexpected is removed rather than allowed to break
+     the file. */
+  function wfPdfText(s){
+    return String(s==null?'':s)
+      .replace(/ /g,' ')
+      .replace(/₹/g,'Rs. ')
+      .replace(/[‘’‛]/g,"'")
+      .replace(/[“”]/g,'"')
+      .replace(/[–—]/g,'-')
+      .replace(/…/g,'...')
+      .replace(/•/g,'-')
+      .replace(/[^\u0009\u000a -ÿ]/g,'');
+  }
+
+  /* A paragraph is not one string - it is bold bits and plain bits in a row, and the PDF has to
+     keep them apart to pick a font per bit. Walks the inline tree once and returns the runs in
+     order, carrying bold / italic / underline / small / soft down from whatever wrapped them. */
+  function wfPdfRuns(el){
+    const out=[];
+    (function walk(node, st){
+      [].slice.call(node.childNodes).forEach(function(c){
+        if(c.nodeType===3){
+          /* Collapsed but NOT trimmed. A text node that is nothing but a space still matters -
+             it is the space between two bold words - and the space at the end of one run is what
+             tells the next run whether to start with a gap. */
+          const t=wfPdfText(c.nodeValue).replace(/\s+/g,' ');
+          if(t) out.push({t:t,b:st.b,i:st.i,u:st.u,small:st.small,soft:st.soft});
+          return;
+        }
+        if(c.nodeType!==1) return;
+        const tag=c.tagName.toLowerCase();
+        if(tag==='br'){ out.push({br:true}); return; }
+        const cl=c.classList||{contains:function(){return false;}};
+        walk(c,{
+          b:st.b||tag==='b'||tag==='strong',
+          i:st.i||tag==='i'||tag==='em',
+          u:st.u||tag==='u',
+          small:st.small||cl.contains('wfd-small'),
+          soft:st.soft||cl.contains('wfd-soft')
+        });
+      });
+    })(el,{});
+    return out;
+  }
+
+  /* THE PAGE, DRAWN. Mirrors wfBodyXml exactly - a child of the sheet is a table, the logo, or a
+     paragraph, and nothing else - so the Word file and the PDF are two renderings of one document
+     rather than two documents that happen to look alike. */
+  async function wfBuildPdf(root, docTitle){
+    const L=await loadPdfLib();
+    if(!L) throw new Error('the PDF library could not be loaded');
+    const doc=await L.PDFDocument.create();
+    if(docTitle){ try{ doc.setTitle(String(docTitle)); }catch(_e){} }
+
+    const F={
+      reg:await doc.embedFont(L.StandardFonts.Helvetica),
+      bold:await doc.embedFont(L.StandardFonts.HelveticaBold),
+      ital:await doc.embedFont(L.StandardFonts.HelveticaOblique),
+      bi:await doc.embedFont(L.StandardFonts.HelveticaBoldOblique)
+    };
+    const pick=function(r){ return r.b?(r.i?F.bi:F.bold):(r.i?F.ital:F.reg); };
+    const INK=L.rgb(0.07,0.07,0.08), SOFT=L.rgb(0.42,0.45,0.49), RULE=L.rgb(0.55,0.57,0.60);
+    const BASE=10.5, SMALL=8.8, LH=15.6;
+    const TEXT_W=WF_PDF_W-2*WF_PDF_M;
+
+    let page=doc.addPage([WF_PDF_W,WF_PDF_H]);
+    let y=WF_PDF_H-WF_PDF_M;
+    const room=function(h){
+      if(y-h>=WF_PDF_M) return;
+      page=doc.addPage([WF_PDF_W,WF_PDF_H]);
+      y=WF_PDF_H-WF_PDF_M;
+    };
+
+    /* Lays runs out into lines no wider than w. Returns the lines; nothing is drawn here, because
+       the caller has to know how tall the block is before it decides which page it goes on.
+
+       THE SPACE BETWEEN TWO WORDS IS A GAP, NOT A CHARACTER. Drawing " GHOSH" with the space
+       inside the string came out as "PALLABITAGHOSH" - the width was reserved but the leading
+       space was not rendered, so every word after the first on a line sat one space too far left
+       and the gap closed up. Each word is now drawn on its own at an x that already has the gap
+       added, so the space is a measurement rather than something that has to survive being
+       encoded into a font. */
+    const layout=function(runs,w){
+      const lines=[]; let cur=[], used=0, gap=false;
+      const push=function(){ lines.push(cur); cur=[]; used=0; gap=false; };
+      runs.forEach(function(r){
+        if(r.br){ push(); return; }
+        const f=pick(r), size=r.small?SMALL:BASE;
+        const sp=f.widthOfTextAtSize(' ',size);
+        /* Split so the whitespace comes back as its own token. A gap is then something the text
+           actually had, not something assumed between every pair of words - which is what put a
+           space in front of the comma in "bold words, italic", where the comma begins its own
+           run and no space was written before it. */
+        r.t.split(/(\s+)/).forEach(function(tok){
+          if(!tok) return;
+          if(/^\s+$/.test(tok)){ gap=true; return; }
+          const ww=f.widthOfTextAtSize(tok,size);
+          let pre=(gap&&used>0)?sp:0;
+          if(used+pre+ww>w && used>0){ push(); pre=0; }
+          cur.push({t:tok,f:f,size:size,w:ww,pre:pre,u:r.u,soft:r.soft});
+          used+=pre+ww; gap=false;
+        });
+      });
+      if(cur.length) push();
+      return lines.length?lines:[[]];
+    };
+
+    const drawLines=function(lines,x,w,align){
+      lines.forEach(function(ln){
+        const lw=ln.reduce(function(a,p){ return a+p.pre+p.w; },0);
+        let cx=(align==='right')?(x+w-lw):(align==='center'?(x+(w-lw)/2):x);
+        ln.forEach(function(p){
+          cx+=p.pre;
+          page.drawText(p.t,{x:cx,y:y-p.size,size:p.size,font:p.f,color:p.soft?SOFT:INK});
+          if(p.u) page.drawLine({start:{x:cx,y:y-p.size-1.6},end:{x:cx+p.w,y:y-p.size-1.6},
+            thickness:0.6,color:p.soft?SOFT:INK});
+          cx+=p.w;
+        });
+        y-=LH;
+      });
+    };
+
+    const kids=[].slice.call(root.children);
+    for(let k=0;k<kids.length;k++){
+      const el=kids[k];
+      const tag=el.tagName.toLowerCase();
+      const cl=el.classList||{contains:function(){return false;}};
+
+      if(cl.contains('wfd-logo')){
+        const img=el.querySelector('img');
+        const src=img&&img.getAttribute('src')||'';
+        const m=src.match(/^data:image\/(png|jpe?g);base64,(.+)$/i);
+        if(m){
+          const raw=atob(m[2]);
+          const bytes=new Uint8Array(raw.length);
+          for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
+          const emb=/png/i.test(m[1])?await doc.embedPng(bytes):await doc.embedJpg(bytes);
+          const w=Number(img.dataset.wpt)||109.5, h=Number(img.dataset.hpt)||131.25;
+          room(h+12);
+          page.drawImage(emb,{x:WF_PDF_M,y:y-h,width:w,height:h});
+          y-=(h+12);
+        }
+        continue;
+      }
+
+      if(tag==='table'){
+        const rows=[].slice.call(el.querySelectorAll('tr'));
+        for(let r=0;r<rows.length;r++){
+          const tds=[].slice.call(rows[r].children).filter(function(c){
+            return c.tagName==='TD'||c.tagName==='TH'; });
+          if(!tds.length) continue;
+          /* An explicit data-w is a percentage of the sheet's text width - the same number the
+             Word writer turns into fiftieths - and a row without one shares the width evenly. */
+          const widths=tds.map(function(td){
+            const w=td.getAttribute('data-w');
+            return w?(Number(w)/100*TEXT_W):(TEXT_W/tds.length);
+          });
+          const cells=tds.map(function(td,i){ return layout(wfPdfRuns(td),Math.max(8,widths[i]-8)); });
+          const height=Math.max.apply(null,cells.map(function(c){ return c.length*LH; }))+3;
+          room(height+4);
+          const rowTop=y, rowBottom=y-height;
+          let x=WF_PDF_M;
+          cells.forEach(function(lines,i){
+            y=rowTop;
+            drawLines(lines,x,widths[i]-8,null);
+            /* The rule sits at the foot of the row, the full width of its own column, so a signing
+               line is as long as the column it belongs to rather than as long as what is on it. */
+            if(tds[i].classList&&tds[i].classList.contains('wfd-rule')){
+              page.drawLine({start:{x:x,y:rowBottom+3},end:{x:x+widths[i]-4,y:rowBottom+3},
+                thickness:0.7,color:RULE});
+            }
+            x+=widths[i];
+          });
+          y=rowBottom-3;
+        }
+        y-=6;
+        continue;
+      }
+
+      const runs=wfPdfRuns(el);
+      if(!runs.length){ y-=LH*0.5; continue; }
+      const lines=layout(runs,TEXT_W);
+      room(lines.length*LH);
+      drawLines(lines,WF_PDF_M,TEXT_W,cl.contains('wfd-right')?'right':null);
+      y-=cl.contains('wfd-gap')?12:4;
+    }
+
+    return await doc.save();
+  }
+
+  /* ----- Keeping a correction -------------------------------------------------------------- */
+
+  async function wfDocLoadEdit(caseId,kind){
+    try{
+      const {data}=await ACC().from('booking_doc_edits')
+        .select('html,updated_at,updated_by').eq('case_id',caseId).eq('kind',kind).maybeSingle();
+      return data||null;
+    }catch(_e){ return null; }
+  }
+
+  window.wfTabSave=async function(caseId,kind,html){
+    const {error}=await ACC().from('booking_doc_edits')
+      .upsert({case_id:caseId,kind:kind,html:html,updated_at:new Date().toISOString(),
+               updated_by:(me()||'')},{onConflict:'case_id,kind'});
+    if(error) throw new Error(error.message);
+    return true;
+  };
+  window.wfTabDiscard=async function(caseId,kind){
+    await ACC().from('booking_doc_edits').delete().eq('case_id',caseId).eq('kind',kind);
+    return true;
+  };
+
+  /* Built in the opener, not in the tab: JSZip, pdf-lib and the Supabase client are all loaded
+     here, and loading a second copy of each into every document tab would be slower and could
+     drift to a different version. The tab hands over its HTML and gets back a file. */
+  window.wfTabBuild=async function(html,filename,how,logoBytes){
+    const holder=document.createElement('div');
+    holder.className='wfd-page';
+    holder.innerHTML=html;
+    document.body.appendChild(holder);
+    holder.style.cssText='position:fixed;left:-99999px;top:0';
+    try{
+      let bytes,type;
+      if(how==='pdf'){
+        bytes=await wfBuildPdf(holder,filename);
+        type='application/pdf';
+      }else{
+        bytes=await wfBuildDocx(holder,logoBytes);
+        type='application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      }
+      /* application/octet-stream, for the same reason the Post Sales reports use it: a browser
+         previews what it can render, and it can render a PDF. */
+      const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
+      const a=document.createElement('a');
+      a.href=url; a.download=filename; a.rel='noopener'; a.style.display='none';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
+      return true;
+    } finally { holder.remove(); }
+  };
+
+  /* ----- The tab ---------------------------------------------------------------------------- */
+
+  async function wfOpenDocTab(html,opt){
+    opt=opt||{};
+    const title=opt.title||'Document';
+    const base=opt.base||'Document';
+    const caseId=opt.caseId, kind=opt.kind;
+    const logoBytes=opt.logoBytes||null;
+
+    let saved=null;
+    if(caseId&&kind) saved=await wfDocLoadEdit(caseId,kind);
+    const startHtml=(saved&&saved.html)?saved.html:html;
+
+    const tab=window.open('','_blank');
+    if(!tab){ toast('Your browser blocked the new tab','err'); return; }
+    const e=function(t){ return String(t==null?'':t)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+
+    tab.document.write('<!doctype html><meta charset="utf-8"><title>'+e(title)+'</title>'
+      +'<style>'
+      +'*{box-sizing:border-box}'
+      +'body{margin:0;font:14px/1.5 Segoe UI,Arial,sans-serif;background:#535659;color:#0f172a;overflow:hidden}'
+      +'header{position:fixed;inset:0 0 auto 0;z-index:5;background:#323639;color:#e8eaed}'
+      +'.bar{display:flex;align-items:center;gap:10px;padding:0 14px;height:52px}'
+      +'.bar2{display:flex;align-items:center;gap:6px;padding:0 14px 8px;flex-wrap:wrap}'
+      +'header h1{font-size:14px;margin:0;font-weight:600;flex:1;min-width:90px;overflow:hidden;'
+        +'text-overflow:ellipsis;white-space:nowrap}'
+      +'.grp{display:flex;align-items:center;gap:2px;background:#3c4043;border-radius:8px;padding:3px}'
+      +'.ic{min-width:32px;height:30px;border:0;border-radius:6px;background:transparent;color:#e8eaed;'
+        +'font-size:15px;cursor:pointer;line-height:1;padding:0 7px}'
+      +'.ic:hover{background:#4a4e51}.ic:disabled{opacity:.35;cursor:not-allowed}'
+      +'#zlabel{min-width:52px;text-align:center;font-size:12.5px;color:#e8eaed;cursor:pointer;'
+        +'user-select:none;padding:0 4px}'
+      +'button.txt{font:600 13px Segoe UI,Arial,sans-serif;padding:8px 14px;border-radius:7px;'
+        +'border:1px solid #5f6368;background:#3c4043;color:#e8eaed;cursor:pointer}'
+      +'button.txt:hover{background:#4a4e51}'
+      +'button.primary{background:#e0121c;border-color:#e0121c;color:#fff}'
+      +'button.txt:disabled{opacity:.5;cursor:not-allowed}'
+      +'#msg{font-size:12.5px;color:#bdc1c6;min-width:10px}'
+      +'#view{position:fixed;inset:96px 0 0 0;overflow:auto;padding:24px 0 48px}'
+      +'#wrap{transform-origin:top center;margin:0 auto;width:794px}'
+      /* The sheet is the same 794 x 1123 the preview used - A4 at 96dpi - so what is on screen is
+         the shape of what comes out, and the Word file was typeset to the same margins. */
+      +'.wfd-page{width:794px;min-height:1123px;margin:0 auto;background:#fff;color:#121214;'
+        +'padding:77px;box-sizing:border-box;font-family:Calibri,Segoe UI,Arial,sans-serif;'
+        +'font-size:14px;line-height:1.55;box-shadow:0 1px 3px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.25);outline:0}'
+      +'.wfd-page p{margin:0 0 6px}'
+      +'.wfd-page .wfd-h{font-weight:700;margin:16px 0 10px}'
+      +'.wfd-page .wfd-right{text-align:right}'
+      +'.wfd-page .wfd-gap{margin-bottom:18px}'
+      +'.wfd-page .wfd-soft{color:#6b7280}'
+      +'.wfd-page .wfd-small{font-size:11.5px}'
+      +'.wfd-page table{width:100%;border-collapse:collapse;margin:0 0 8px}'
+      +'.wfd-page td{vertical-align:bottom;padding:3px 6px 3px 0;border:0}'
+      +'.wfd-page td.wfd-rule{border-bottom:1px solid #8c9096}'
+      +'.wfd-page .wfd-cl td{padding-top:9px}'
+      +'.wfd-page .wfd-sign{margin-top:26px}'
+      +'.wfd-page .wfd-logo{margin:0 0 14px}'
+      +'.wfd-page .wfd-logo img{width:146px;height:175px;display:block}'
+      /* CTRL+B HAS TO LOOK LIKE CTRL+B. Calibri's bold is light, and against 14px body text a
+         <b> was barely a shade darker - people pressed it twice believing it had not worked.
+         700 on the page and 700 in the file, so the screen tells the truth about the download. */
+      +'.wfd-page b,.wfd-page strong{font-weight:700;color:#000}'
+      +'</style>'
+      +'<header>'
+        +'<div class="bar">'
+          +'<h1>'+e(title)+'</h1>'
+          +'<div class="grp">'
+            +'<button class="ic" id="zo" title="Zoom out">&#8722;</button>'
+            +'<span id="zlabel" title="Click to fit the width">100%</span>'
+            +'<button class="ic" id="zi" title="Zoom in">&#43;</button>'
+          +'</div>'
+          +'<span id="msg"></span>'
+          +'<button class="txt primary" id="save">Save</button>'
+          +'<button class="txt" id="dlw">Download Word</button>'
+          +'<button class="txt" id="dlp">Download PDF</button>'
+        +'</div>'
+        +'<div class="bar2">'
+          +'<div class="grp">'
+            +'<button class="ic" id="undo" title="Undo (Ctrl+Z)">&#8630;</button>'
+            +'<button class="ic" id="redo" title="Redo (Ctrl+Y)">&#8631;</button>'
+          +'</div>'
+          +'<div class="grp">'
+            +'<button class="ic" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>'
+            +'<button class="ic" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>'
+            +'<button class="ic" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>'
+          +'</div>'
+          +'<button class="ic" id="clr" style="min-width:auto;padding:0 10px;font-size:13px">Clear</button>'
+          +'<button class="ic" id="reset" style="min-width:auto;padding:0 10px;font-size:13px" '
+            +'title="Throw away the corrections and build this again from the booking">Rebuild from booking</button>'
+        +'</div>'
+      +'</header>'
+      +'<div id="view"><div id="wrap"><div id="sheet" class="wfd-page" contenteditable="true" spellcheck="true"></div></div></div>');
+    tab.document.close();
+
+    const d=tab.document;
+    const sheet=d.getElementById('sheet'), msg=d.getElementById('msg'),
+          wrap=d.getElementById('wrap'), zlabel=d.getElementById('zlabel');
+    sheet.innerHTML=startHtml;
+
+    let dirty=false, zoom=1;
+    const say=function(t){ msg.textContent=t||''; };
+    if(saved&&saved.updated_at) say('Saved copy from '+wfDT(saved.updated_at));
+
+    const applyZoom=function(){
+      wrap.style.transform='scale('+zoom+')';
+      wrap.style.marginBottom=((zoom-1)*1123)+'px';
+      zlabel.textContent=Math.round(zoom*100)+'%';
+    };
+    d.getElementById('zi').onclick=function(){ zoom=Math.min(2,zoom+0.1); applyZoom(); };
+    d.getElementById('zo').onclick=function(){ zoom=Math.max(0.5,zoom-0.1); applyZoom(); };
+    zlabel.onclick=function(){
+      const avail=tab.innerWidth-48;
+      zoom=Math.max(0.5,Math.min(2,avail/794)); applyZoom();
+    };
+    applyZoom();
+
+    sheet.addEventListener('input',function(){ dirty=true; say('Not saved yet'); });
+    [].slice.call(d.querySelectorAll('[data-cmd]')).forEach(function(b){
+      b.onclick=function(){ d.execCommand(b.getAttribute('data-cmd'),false,null); sheet.focus(); };
+    });
+    d.getElementById('undo').onclick=function(){ d.execCommand('undo'); };
+    d.getElementById('redo').onclick=function(){ d.execCommand('redo'); };
+    d.getElementById('clr').onclick=function(){ d.execCommand('removeFormat'); sheet.focus(); };
+
+    const doSave=async function(){
+      if(!caseId||!kind){ say('Nothing to save against'); return; }
+      const btn=d.getElementById('save'); btn.disabled=true; say('Saving...');
+      try{ await window.wfTabSave(caseId,kind,sheet.innerHTML); dirty=false;
+           say('Saved '+wfDT(new Date().toISOString())); }
+      catch(err){ say('Could not save: '+((err&&err.message)||err)); }
+      btn.disabled=false;
+    };
+    d.getElementById('save').onclick=doSave;
+
+    d.getElementById('reset').onclick=async function(){
+      if(!tab.confirm('Throw away the corrections and build this again from the booking?')) return;
+      try{ if(caseId&&kind) await window.wfTabDiscard(caseId,kind); }catch(_e){}
+      sheet.innerHTML=html; dirty=false; say('Rebuilt from the booking');
+    };
+
+    const dl=async function(how,btn){
+      const was=btn.textContent; btn.disabled=true; btn.textContent='Building...';
+      try{ await window.wfTabBuild(sheet.innerHTML,base+(how==='pdf'?'.pdf':'.docx'),how,logoBytes);
+           say((how==='pdf'?'PDF':'Word file')+' downloaded'); }
+      catch(err){ say('Could not build the file: '+((err&&err.message)||err)); }
+      btn.disabled=false; btn.textContent=was;
+    };
+    d.getElementById('dlw').onclick=function(){ dl('docx',this); };
+    d.getElementById('dlp').onclick=function(){ dl('pdf',this); };
+
+    /* Ctrl+S saves rather than offering to save the web page, which is what somebody correcting a
+       document will press without thinking. */
+    d.addEventListener('keydown',function(ev){
+      if((ev.ctrlKey||ev.metaKey)&&String(ev.key).toLowerCase()==='s'){ ev.preventDefault(); doSave(); }
+    });
+    tab.addEventListener('beforeunload',function(ev){
+      if(!dirty) return;
+      ev.preventDefault(); ev.returnValue='';
+    });
+  }
+
   function wfPreviewDoc(html,filename,toastMsg,logoBytes){
     openModal('<div class="modal-head"><h3>'+esc2(filename)+'</h3><span class="x" data-wfx>&times;</span></div>'
       +'<div class="modal-body" style="padding:0;background:#525659">'
@@ -5278,11 +5701,21 @@
     const n2=function(v){ return (typeof v==='number'&&isFinite(v))
       ? v.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : null; };
 
-    /* NO LETTERHEAD OF OUR OWN. This goes out on the company's printed paper, so the top of the
-       page is left clear for it - no logo drawn, and no rules under one. Raise CLEAR_TOP if the
-       printed letterhead runs deeper than this. */
-    const CLEAR_TOP=118;
-    let y=H-CLEAR_TOP;
+    /* THE LETTERHEAD IS DRAWN, the same one the Welcome Letter carries.
+
+       This used to leave the top of the page blank on the understanding that it would be printed
+       on the company's pre-printed paper. It is now emailed to the customer as often as it is
+       printed, and an emailed letter with nothing at the top of it does not look like it came
+       from anybody. Same logo, same width, same red rule beneath it, so the two letters a
+       customer receives look like a pair. */
+    const logoBytes=await jgLogo();
+    const logo=await doc.embedPng(logoBytes);
+    const lw=176, lh=lw*logo.height/logo.width;
+    const rule=L.rgb(0.80,0.13,0.16);
+    page.drawImage(logo,{x:M,y:H-56-lh,width:lw,height:lh});
+    let y=H-56-lh-26;
+    page.drawLine({start:{x:M,y:y},end:{x:W-M,y:y},thickness:1.6,color:rule});
+    y-=30;
 
     // The date this letter is written, in the form the example uses.
     const d=new Date(), p2=function(n){ return String(n).padStart(2,'0'); };
@@ -5444,7 +5877,7 @@
     let res=null;
     try{ res=await wfBookingReading(caseId); }
     catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
-    try{ await wfChecklistDoc(res); }
+    try{ await wfChecklistDoc(res,caseId); }
     catch(e){ toast('Could not build the check list: '+((e&&e.message)||e),'err'); }
   };
 
@@ -5469,7 +5902,7 @@
 
      The wording, the items and their order are the form's own and are not to be improved on;
      assets/forms/booking-check-list-blank.pdf stays in the repo as the reference for them. */
-  async function wfChecklistDoc(res){
+  async function wfChecklistDoc(res,caseId){
     const logoBytes=await jgLogo('classic');
     let b64=''; { let s=''; for(let i=0;i<logoBytes.length;i++) s+=String.fromCharCode(logoBytes[i]); b64=btoa(s); }
 
@@ -5703,7 +6136,8 @@
 
     const nm=(allotteeNames(res)[0]||v('customer_name')||'booking')
       .replace(/[^\w \-]/g,'').trim()||'booking';
-    wfPreviewDoc(h,'Booking Form Check List - '+nm+'.docx','Check list downloaded',logoBytes);
+    await wfOpenDocTab(h,{title:'Booking Form Check List \u2014 '+nm,
+      base:'Booking Form Check List - '+nm, caseId:caseId, kind:'checklist', logoBytes:logoBytes});
   }
   /* ----- Print an instance --------------------------------------------------------------------
      Reuses wfCaseSummaryHtml exactly as shown on screen (the day-wise table for an entry-wise
