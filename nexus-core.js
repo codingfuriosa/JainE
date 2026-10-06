@@ -20509,9 +20509,22 @@ function cpaPhCss(){return `<style>
   .cph-fixw b{display:block;color:var(--ink);font-size:13.5px}
   .cph-fixg{font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#b91c1c;margin:6px 2px -2px}
   .cph-fixg:first-child{margin-top:0}
-  .cph-fixo{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:var(--slate)}
-  .cph-fixc{border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:999px;padding:4px 11px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+  .cph-fixs{display:flex;flex-direction:column;gap:6px;margin:2px 0 4px}
+  .cph-fixr{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .cph-fixp{min-width:150px;font-size:13px;font-weight:700;color:var(--ink)}
+  .cph-fixcs{display:flex;gap:6px;flex-wrap:wrap}
+  .cph-fixc{display:inline-flex;align-items:center;gap:8px;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:999px;
+    padding:5px 6px 5px 13px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+  .cph-fixc b{min-width:22px;height:22px;padding:0 6px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:12px;
+    display:inline-grid;place-items:center;font-weight:800}
   .cph-fixc:hover{background:#fef2f2}
+  .cph-fixc.on{background:#b91c1c;border-color:#b91c1c;color:#fff}
+  .cph-fixc.on b{background:#fff;color:#b91c1c}
+  .cph-fixt{margin:12px 0 8px;padding-top:10px;border-top:1px solid #fde2e2;font-size:12px;font-weight:800;letter-spacing:.4px;
+    text-transform:uppercase;color:#7f1d1d}
+  .cph-fixhint{margin-top:10px;font-size:12.5px;color:var(--slate)}
+  .cph-fixhint i{color:#b91c1c;margin-right:4px}
+  @media(max-width:620px){ .cph-fixp{min-width:0;width:100%} }
   .cph-retake{display:inline-flex;align-items:center;gap:6px;margin-top:5px;padding:5px 11px;border-radius:8px;cursor:pointer;
     font:inherit;font-size:12px;font-weight:700;border:1px solid #1d4ed8;background:#1d4ed8;color:#fff}
   .cph-retake:hover{background:#1e40af}
@@ -20718,47 +20731,58 @@ async function cpaPhFixList(projects,units){
     return nat(a.pn,b.pn)||(x.lvl-y.lvl)||nat(x.tower,y.tower)
       ||((x.floor==null)-(y.floor==null))||((x.floor||0)-(y.floor||0))||nat(x.code,y.code)||((x.areaIdx||0)-(y.areaIdx||0));
   });
-  /* The list follows the screen: the project picked above, and the level being uploaded to -
-     Whole project shows whole-project photos, Block / Tower shows block photos (block by block),
-     Flat shows flat photos (block, floor, flat, section). What is waiting elsewhere is one tap
-     away underneath. Asked for on 6 Oct 2026. */
+  /* One summary of everything waiting, project by project: each project's levels (Whole project /
+     Blocks / Flats) with how many photos wait there. Tapping one opens that project and level, and
+     its photos are listed underneath. The project and level on screen are highlighted. (6 Oct 2026:
+     a single "none in Whole project" line with loose counts beside it read as a contradiction.) */
   const LV={project:0,tower:1,unit:2}, LVKEY=['project','tower','unit'], LVNAME=['Whole project','Blocks','Flats'];
   const cur=LV[CPA_PH.level]!=null?LV[CPA_PH.level]:0, pid=String(CPA_PH.project||'');
-  const here=it=>String(it.w.pid)===pid;
-  const shown=items.filter(it=>here(it)&&it.w.lvl===cur);
+  const shown=items.filter(it=>String(it.w.pid)===pid&&it.w.lvl===cur);
   CPA_PH.fix=shown;
   if(!items.length){ host.innerHTML=''; return; }
-  // Elsewhere: this project's other levels, then other projects.
   const cnt=list=>list.reduce((t,it)=>t+it.n,0);
-  const chips=[0,1,2].filter(l=>l!==cur).map(l=>{ const n=cnt(items.filter(it=>here(it)&&it.w.lvl===l));
-      return n?'<button class="cph-fixc" onclick="cpaPhSetLevel(\''+LVKEY[l]+'\')">'+LVNAME[l]+' · '+n+'</button>':''; }).join('');
-  const others=items.filter(it=>!here(it));
-  const otherChip=others.length?'<button class="cph-fixc" onclick="cpaPhFixGo('+(Number(others[0].w.pid)||0)+',\''+LVKEY[others[0].w.lvl]+'\')">'
-      +esc(others[0].pn?custRefTitle(others[0].pn):'Other projects')+(new Set(others.map(it=>String(it.w.pid))).size>1?' and more':'')+' · '+cnt(others)+'</button>':'';
-  const elsewhere=(chips||otherChip)?'<div class="cph-fixo"><span>Also to retake:</span>'+chips+otherChip+'</div>':'';
-  const total=cnt(shown);
-  host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>To retake · '
-      +(total?total+' in '+esc(LVNAME[cur]):'none in '+esc(LVNAME[cur]))
-    +'<span class="cph-fixsub">The reviewer rejected these. A new photo for the same place replaces the rejected one.</span></div>'
-    +(shown.length?'<div class="cph-fixl">'+shown.map((it,i)=>{
-      const w=it.w, prev=shown[i-1];
-      // Flats get a heading per block and floor; blocks and the whole project need none.
-      const headOf=x=>x.lvl===2?[x.tower||'Flats',x.floor==null?'Other units':(x.floor===0?'Ground floor':'Floor '+x.floor)].join(' · '):'';
-      const head=headOf(w), prevHead=prev?headOf(prev.w):'';
-      const p=it.p, isVid=(p.file_type||'').indexOf('video')===0;
-      const th=isVid&&!p.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
-        :'<img class="cph-th" '+cphThumbAttrs(p,it.t)+' alt="" decoding="async">';
-      return (head&&head!==prevHead?'<div class="cph-fixg">'+esc(head)+'</div>':'')+'<div class="cph-fixi">'+th
-        +'<div class="cph-fixw"><b>'+esc(w.lvl===2&&w.tower?it.place.replace(w.tower+' · ',''):it.place)+'</b>'
-          +esc([it.n>1?it.n+' rejected':'',it.notes.join(' · '),'rejected '+fmtDate(it.when)].filter(Boolean).join(' · '))+'</div>'
-        +(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+i+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'')
-        +'</div>';
-    }).join('')+'</div>':'')
-    +elsewhere+'</div>';
+  const byProj={}; items.forEach(it=>{ const k=String(it.w.pid); (byProj[k]=byProj[k]||{pn:it.pn,lv:[0,0,0]}).lv[it.w.lvl]+=it.n; });
+  const projIds=Object.keys(byProj).sort((a,b)=>(a===pid?-1:b===pid?1:0)||String(byProj[a].pn).localeCompare(String(byProj[b].pn)));
+  const summary='<div class="cph-fixs">'+projIds.map(k=>{
+      const g=byProj[k];
+      return '<div class="cph-fixr"><span class="cph-fixp">'+esc(g.pn?custRefTitle(g.pn):'Project')+'</span><span class="cph-fixcs">'
+        +[0,1,2].filter(l=>g.lv[l]).map(l=>{
+          const on=k===pid&&l===cur;
+          return '<button class="cph-fixc'+(on?' on':'')+'" onclick="cpaPhFixGo('+(Number(k)||0)+',\''+LVKEY[l]+'\')"'
+            +(on?' aria-current="true"':'')+'>'+LVNAME[l]+'<b>'+g.lv[l]+'</b></button>';
+        }).join('')+'</span></div>';
+    }).join('')+'</div>';
+  const total=cnt(items);
+  const curName=byProj[pid]&&byProj[pid].pn?custRefTitle(byProj[pid].pn):'';
+  host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>Photos to retake · '+total
+    +'<span class="cph-fixsub">Rejected by the reviewer. A new photo for the same place replaces the rejected one.</span></div>'
+    +summary
+    +(shown.length
+      ?'<div class="cph-fixt">'+esc([curName,LVNAME[cur]].filter(Boolean).join(' · '))+' · '+cnt(shown)+'</div>'
+        +'<div class="cph-fixl">'+shown.map((it,i)=>{
+          const w=it.w, prev=shown[i-1];
+          // Flats get a heading per block and floor; blocks and the whole project need none.
+          const headOf=x=>x.lvl===2?[x.tower||'Flats',x.floor==null?'Other units':(x.floor===0?'Ground floor':'Floor '+x.floor)].join(' · '):'';
+          const head=headOf(w), prevHead=prev?headOf(prev.w):'';
+          const p=it.p, isVid=(p.file_type||'').indexOf('video')===0;
+          const th=isVid&&!p.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
+            :'<img class="cph-th" '+cphThumbAttrs(p,it.t)+' alt="" decoding="async">';
+          return (head&&head!==prevHead?'<div class="cph-fixg">'+esc(head)+'</div>':'')+'<div class="cph-fixi">'+th
+            +'<div class="cph-fixw"><b>'+esc(w.lvl===2&&w.tower?it.place.replace(w.tower+' · ',''):it.place)+'</b>'
+              +esc([it.n>1?it.n+' rejected':'',it.notes.join(' · '),'rejected '+fmtDate(it.when)].filter(Boolean).join(' · '))+'</div>'
+            +(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+i+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'')
+            +'</div>';
+        }).join('')+'</div>'
+      :'<div class="cph-fixhint"><i class="fa-solid fa-hand-pointer"></i> Tap a number above to see those photos and retake them.</div>')
+    +'</div>';
   cphLazy(host);
 }
-// "Also to retake" in another project: open that project at that level.
-window.cpaPhFixGo=function(projectId,level){ CPA_PH.project=String(projectId); CPA_PH.tower=''; CPA_PH.unit=''; cpaPhSetLevel(level); };
+// A button in "Photos to retake": open that project at that level. Same project: only the level
+// changes, so the block and flat picked stay as they were.
+window.cpaPhFixGo=function(projectId,level){
+  if(String(projectId)!==String(CPA_PH.project)){ CPA_PH.project=String(projectId); CPA_PH.tower=''; CPA_PH.unit=''; }
+  cpaPhSetLevel(level);
+};
 // The floor a flat is on, from its code: 2G -> 2, 11A -> 11, 13-14A -> 13. Codes that do not start
 // with a number (the Eco City bungalows: A1, K6) have no floor and sort after the rest by code.
 function cpaFloorOf(code){ const m=/^(\d+)/.exec(String(code||'').trim()); return m?Number(m[1]):null; }
