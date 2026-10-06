@@ -20668,10 +20668,13 @@ async function cpaPhPaint(projects,units){
       +'</div>'
     +'</div>'
 
-    +'<div class="cph-card">'
+    // A photos-only account (the site team) has no "Already uploaded" list: what it needs to act on
+    // is in "To retake", and the review is the post-sales team's (6 Oct 2026). Without #cphList,
+    // cpaPhList() does nothing.
+    +(cpaPhotosOnly()?'':'<div class="cph-card">'
       +'<div class="cph-h"><i class="fa-solid fa-images"></i>Already uploaded</div>'
       +'<div id="cphList" class="cph-review"><div class="cph-empty">Loading\u2026</div></div>'
-    +'</div>';
+    +'</div>');
 
   cpaPhWireZones();
   cpaPhStaged();
