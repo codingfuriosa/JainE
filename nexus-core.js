@@ -20509,6 +20509,9 @@ function cpaPhCss(){return `<style>
   .cph-fixw b{display:block;color:var(--ink);font-size:13.5px}
   .cph-fixg{font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#b91c1c;margin:6px 2px -2px}
   .cph-fixg:first-child{margin-top:0}
+  .cph-fixo{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:var(--slate)}
+  .cph-fixc{border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:999px;padding:4px 11px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+  .cph-fixc:hover{background:#fef2f2}
   .cph-retake{display:inline-flex;align-items:center;gap:6px;margin-top:5px;padding:5px 11px;border-radius:8px;cursor:pointer;
     font:inherit;font-size:12px;font-weight:700;border:1px solid #1d4ed8;background:#1d4ed8;color:#fff}
   .cph-retake:hover{background:#1e40af}
@@ -20707,28 +20710,47 @@ async function cpaPhFixList(projects,units){
     return nat(a.pn,b.pn)||(x.lvl-y.lvl)||nat(x.tower,y.tower)
       ||((x.floor==null)-(y.floor==null))||((x.floor||0)-(y.floor||0))||nat(x.code,y.code)||((x.areaIdx||0)-(y.areaIdx||0));
   });
-  CPA_PH.fix=items;
+  /* The list follows the screen: the project picked above, and the level being uploaded to -
+     Whole project shows whole-project photos, Block / Tower shows block photos (block by block),
+     Flat shows flat photos (block, floor, flat, section). What is waiting elsewhere is one tap
+     away underneath. Asked for on 6 Oct 2026. */
+  const LV={project:0,tower:1,unit:2}, LVKEY=['project','tower','unit'], LVNAME=['Whole project','Blocks','Flats'];
+  const cur=LV[CPA_PH.level]!=null?LV[CPA_PH.level]:0, pid=String(CPA_PH.project||'');
+  const here=it=>String(it.w.pid)===pid;
+  const shown=items.filter(it=>here(it)&&it.w.lvl===cur);
+  CPA_PH.fix=shown;
   if(!items.length){ host.innerHTML=''; return; }
-  const total=items.reduce((t,it)=>t+it.n,0);
-  host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>To retake · '+total
+  // Elsewhere: this project's other levels, then other projects.
+  const cnt=list=>list.reduce((t,it)=>t+it.n,0);
+  const chips=[0,1,2].filter(l=>l!==cur).map(l=>{ const n=cnt(items.filter(it=>here(it)&&it.w.lvl===l));
+      return n?'<button class="cph-fixc" onclick="cpaPhSetLevel(\''+LVKEY[l]+'\')">'+LVNAME[l]+' · '+n+'</button>':''; }).join('');
+  const others=items.filter(it=>!here(it));
+  const otherChip=others.length?'<button class="cph-fixc" onclick="cpaPhFixGo('+(Number(others[0].w.pid)||0)+',\''+LVKEY[others[0].w.lvl]+'\')">'
+      +esc(others[0].pn?custRefTitle(others[0].pn):'Other projects')+(new Set(others.map(it=>String(it.w.pid))).size>1?' and more':'')+' · '+cnt(others)+'</button>':'';
+  const elsewhere=(chips||otherChip)?'<div class="cph-fixo"><span>Also to retake:</span>'+chips+otherChip+'</div>':'';
+  const total=cnt(shown);
+  host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>To retake · '
+      +(total?total+' in '+esc(LVNAME[cur]):'none in '+esc(LVNAME[cur]))
     +'<span class="cph-fixsub">The reviewer rejected these. A new photo for the same place replaces the rejected one.</span></div>'
-    +'<div class="cph-fixl">'+items.map((it,i)=>{
-      const w=it.w, prev=items[i-1];
-      const head=[it.pn, w.lvl===0?'Whole project':w.lvl===1?'Blocks':(w.tower||'Flats'),
-                  w.lvl===2?(w.floor==null?'Other units':(w.floor===0?'Ground floor':'Floor '+w.floor)):''].filter(Boolean).join(' · ');
-      const prevHead=prev?[prev.pn, prev.w.lvl===0?'Whole project':prev.w.lvl===1?'Blocks':(prev.w.tower||'Flats'),
-                  prev.w.lvl===2?(prev.w.floor==null?'Other units':(prev.w.floor===0?'Ground floor':'Floor '+prev.w.floor)):''].filter(Boolean).join(' · '):'';
+    +(shown.length?'<div class="cph-fixl">'+shown.map((it,i)=>{
+      const w=it.w, prev=shown[i-1];
+      // Flats get a heading per block and floor; blocks and the whole project need none.
+      const headOf=x=>x.lvl===2?[x.tower||'Flats',x.floor==null?'Other units':(x.floor===0?'Ground floor':'Floor '+x.floor)].join(' · '):'';
+      const head=headOf(w), prevHead=prev?headOf(prev.w):'';
       const p=it.p, isVid=(p.file_type||'').indexOf('video')===0;
       const th=isVid&&!p.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
         :'<img class="cph-th" '+cphThumbAttrs(p,it.t)+' alt="" decoding="async">';
-      return (head!==prevHead?'<div class="cph-fixg">'+esc(head)+'</div>':'')+'<div class="cph-fixi">'+th
+      return (head&&head!==prevHead?'<div class="cph-fixg">'+esc(head)+'</div>':'')+'<div class="cph-fixi">'+th
         +'<div class="cph-fixw"><b>'+esc(w.lvl===2&&w.tower?it.place.replace(w.tower+' · ',''):it.place)+'</b>'
           +esc([it.n>1?it.n+' rejected':'',it.notes.join(' · '),'rejected '+fmtDate(it.when)].filter(Boolean).join(' · '))+'</div>'
         +(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+i+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'')
         +'</div>';
-    }).join('')+'</div></div>';
+    }).join('')+'</div>':'')
+    +elsewhere+'</div>';
   cphLazy(host);
 }
+// "Also to retake" in another project: open that project at that level.
+window.cpaPhFixGo=function(projectId,level){ CPA_PH.project=String(projectId); CPA_PH.tower=''; CPA_PH.unit=''; cpaPhSetLevel(level); };
 // The floor a flat is on, from its code: 2G -> 2, 11A -> 11, 13-14A -> 13. Codes that do not start
 // with a number (the Eco City bungalows: A1, K6) have no floor and sort after the rest by code.
 function cpaFloorOf(code){ const m=/^(\d+)/.exec(String(code||'').trim()); return m?Number(m[1]):null; }
