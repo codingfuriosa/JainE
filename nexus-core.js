@@ -20691,6 +20691,9 @@ async function cpaPhPaint(projects,units){
    rejected row of "Already uploaded" (cpaPhRetakeBtn). */
 async function cpaPhFixList(projects,units){
   const host=$('cphFix'); if(!host) return;
+  // Retaking is the site team's job: only photos-only accounts get this list (6 Oct 2026). An admin
+  // sees rejected photos in "Already uploaded" and in Review > Rejected, without Retake.
+  if(!cpaPhotosOnly()){ host.innerHTML=''; return; }
   const res=await Promise.all(CPA_RV_SECS.map(s=>sb.schema('cust').from(s[0]).select('*').eq('status','rejected')
     .is('deleted_at',null).order('reviewed_at',{ascending:false}).limit(200)));
   if(!$('cphFix')) return;
@@ -20781,6 +20784,7 @@ window.cpaPhRetake=function(i,isVid){ const it=(CPA_PH.fix||[])[i]; if(it) cpaPh
 // Retake on a rejected row of "Already uploaded".
 const CPA_PH_REJ={};
 function cpaPhRetakeBtn(t,p){
+  if(!cpaPhotosOnly()) return '';
   const w=cpaPhPlaceOf(t,p); if(!w.can) return '';
   CPA_PH_REJ[t+':'+p.id]=p;
   const isVid=(p.file_type||'').indexOf('video')===0;
