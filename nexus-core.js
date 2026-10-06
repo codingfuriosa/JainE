@@ -20755,7 +20755,7 @@ async function cpaPhFixList(projects,units){
   const total=cnt(items);
   const curName=byProj[pid]&&byProj[pid].pn?custRefTitle(byProj[pid].pn):'';
   host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>Photos to retake · '+total
-    +'<span class="cph-fixsub">Rejected by the reviewer. A new photo for the same place replaces the rejected one.</span></div>'
+    +'</div>'
     +summary
     +(shown.length
       ?'<div class="cph-fixt">'+esc([curName,LVNAME[cur]].filter(Boolean).join(' · '))+' · '+cnt(shown)+'</div>'
