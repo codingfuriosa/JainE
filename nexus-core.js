@@ -26229,6 +26229,53 @@ let TRC_PREFETCH_GEN=0;
 /* Bumping the generation is all a cancel is: the in-flight loop compares against it after every
    await and returns the moment it no longer owns the prefetch. */
 function trcPrefetchCancel(){TRC_PREFETCH_GEN++;}
+/* Late follow-ups / Promised call not made / First call was late judge a lead's WHOLE history, so every
+   lead in scope needs that history loaded before any of those numbers or filters can be trusted -
+   not just the 25 leads on the current page. Until then those flags are "pending" (null), never
+   guessed from the date range's own rows, which is what made the counts jump around and a selected
+   chip drain to "Nothing matches" as histories trickled in. TRC_HIST_TRIED remembers ids whose
+   fetch was already attempted, so a failing fetch cannot loop forever. */
+const TRC_HIST_TRIED=Object.create(null);
+const TRC_HIST_MAX_AUTO=500;
+let TRC_HIST_PROMISE=null;
+function trcHistoriesReady(ids){
+  return (ids||[]).every(function(id){return id==null||TRC_HIST_TRIED[String(id)]||!!trcLeadCacheRead(id);});
+}
+async function trcEnsureHistories(ids){
+  while(TRC_HIST_PROMISE){try{await TRC_HIST_PROMISE;}catch(e){}}
+  const todo=[],seen=Object.create(null);
+  (ids||[]).forEach(function(id){
+    const k=String(id);
+    if(id==null||seen[k])return;
+    seen[k]=1;
+    if(!TRC_HIST_TRIED[k]&&!trcLeadCacheRead(id))todo.push(id);
+  });
+  if(!todo.length)return;
+  TRC_HIST_PROMISE=(async function(){
+    for(let i=0;i<todo.length;i+=TRC_PREFETCH_CHUNK){
+      const chunk=todo.slice(i,i+TRC_PREFETCH_CHUNK);
+      try{
+        const byId=await trcLeadFetchByIds(chunk);
+        chunk.forEach(function(id){
+          const d=byId[String(id)];
+          trcLeadCacheWrite(id,(d&&d.lead)||null,(d&&d.rows)||[]);
+        });
+      }catch(e){}
+      chunk.forEach(function(id){TRC_HIST_TRIED[String(id)]=1;});
+    }
+  })();
+  try{await TRC_HIST_PROMISE;}finally{TRC_HIST_PROMISE=null;}
+}
+/* Ids of every lead behind the current list, before the three history chips narrow it. */
+let TRC_LIST_LEAD_IDS=[];
+function trcHistChipOn(){return TRC_F.overdue==='1'||TRC_F.cadence==='1'||TRC_F.callbackTat==='1';}
+async function trcWarmListHistories(){
+  const ids=TRC_LIST_LEAD_IDS.slice();
+  if(!ids.length||trcHistoriesReady(ids))return;
+  if(ids.length>TRC_HIST_MAX_AUTO&&!trcHistChipOn())return;
+  await trcEnsureHistories(ids);
+  if($('trcRows'))trcRender(false,true);
+}
 async function trcPrefetchHistories(leadIds){
   const gen=++TRC_PREFETCH_GEN;
   const todo=[];
@@ -27166,8 +27213,12 @@ function trcLeads(rows){
        completion re-render (see its own note) picks it up. */
     const cachedHistory=trcLeadCacheRead(g.lead_id);
     const historyRows=cachedHistory?cachedHistory.rows:g.rows;
-    g.cadence=trcCadenceIssues(g.status,historyRows);
-    g.callbackTat=trcFirstCallbackTat(historyRows);
+    /* Pending until the real history has arrived (see trcEnsureHistories): scoring a lead off only
+       the one call in the date range gave answers that flipped the moment its history loaded. */
+    g.historyPending=!cachedHistory&&!TRC_HIST_TRIED[String(g.lead_id)];
+    g.cadence=g.historyPending?null:trcCadenceIssues(g.status,historyRows);
+    g.callbackTat=g.historyPending?null:trcFirstCallbackTat(historyRows);
+    if(!g.historyPending&&cachedHistory&&cachedHistory.rows.length)g.callbackOverdue=trcCallbackOverdue(g.status,cachedHistory.rows);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -27282,7 +27333,7 @@ function trcLeadSkeletonHtml(){
 
 /* ---- the dashboard. Same four cards and the same chips as before; what changed underneath is that
    a "call" is now a follow-up in the CRM's own history rather than a row we happened to import. ---- */
-function trcKpiHtml(rows){
+function trcKpiHtml(rows,shownRows){
   const n=function(st){return rows.filter(function(r){return trcTrStatus(r)===st;}).length;};
   /* The four cards, "QA assessed" and "Reused an existing transcript" all have one unambiguous,
      purely-additive definition each, verified to match acc.daily_qa_summary_v exactly (see
@@ -27351,9 +27402,11 @@ function trcKpiHtml(rows){
      carries (see TRC_LIGHT) - same enrichment tier the 'proc' cards already require. Computed by
      actually rolling `rows` up into leads (trcLeads), not a flat count, because "overdue" is a
      property of a LEAD's latest call, not of any one row. */
-  const overdueLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackOverdue;}).length:null;
-  const cadenceLeads=haveDetail?trcLeads(rows).filter(function(g){return g.cadence;}).length:null;
-  const callbackTatLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackTat;}).length:null;
+  const shownLeads=haveDetail?trcLeads(shownRows||rows):[];
+  const histDone=haveDetail&&shownLeads.every(function(g){return !g.historyPending;});
+  const overdueLeads=histDone?shownLeads.filter(function(g){return g.callbackOverdue;}).length:null;
+  const cadenceLeads=histDone?shownLeads.filter(function(g){return g.cadence;}).length:null;
+  const callbackTatLeads=histDone?shownLeads.filter(function(g){return g.callbackTat;}).length:null;
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
       const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
       return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
@@ -27368,11 +27421,11 @@ function trcKpiHtml(rows){
     }).join('')
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<button class="btn btn-sm'+(TRC_F.overdue==='1'?' btn-primary':'')+'" onclick="trcToggleOverdue()" title="A promised next-follow-up date that has passed with nothing logged since - not counted until the fuller lead data has loaded">'
-      +'<i class="fa-solid fa-phone-slash"></i> Promised call not made'+(overdueLeads===null?'':' <b>'+overdueLeads+'</b>')+'</button>'
+      +'<i class="fa-solid fa-phone-slash"></i> Promised call not made'+(overdueLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+overdueLeads+'</b>')+'</button>'
     +'<button class="btn btn-sm'+(TRC_F.cadence==='1'?' btn-primary':'')+'" onclick="trcToggleCadence()" title="At least one follow-up gap where the recontact was late - a scheduled date missed, or no date and more than 3 days passed. Not counted until the fuller lead data has loaded">'
-      +'<i class="fa-solid fa-hourglass-half"></i> Late follow-ups'+(cadenceLeads===null?'':' <b>'+cadenceLeads+'</b>')+'</button>'
+      +'<i class="fa-solid fa-hourglass-half"></i> Late follow-ups'+(cadenceLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+cadenceLeads+'</b>')+'</button>'
     +'<button class="btn btn-sm'+(TRC_F.callbackTat==='1'?' btn-primary':'')+'" onclick="trcToggleCallbackTat()" title="The first call on this lead happened after the day it first appeared in the CRM - not counted until the fuller lead data has loaded">'
-      +'<i class="fa-solid fa-phone-volume"></i> First call was late'+(callbackTatLeads===null?'':' <b>'+callbackTatLeads+'</b>')+'</button>'
+      +'<i class="fa-solid fa-phone-volume"></i> First call was late'+(callbackTatLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+callbackTatLeads+'</b>')+'</button>'
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<span style="font-size:12.5px;color:var(--slate)">QA assessed <b style="color:var(--ink)">'+assessed+'</b></span>'
     /* Deduplication is invisible unless it is counted. This is the number of follow-ups that reused a
@@ -27462,7 +27515,11 @@ window.trcCard=async function(kind,val){
    'proc' cards. */
 window.trcToggleOverdue=async function(){
   TRC_F.overdue=(TRC_F.overdue==='1'?'all':'1');
-  if(TRC_F.overdue==='1')await trcEnsureFullEnrichment();
+  if(TRC_F.overdue==='1'){
+    await trcEnsureFullEnrichment();
+    trcRender(true);
+    await trcEnsureHistories(TRC_LIST_LEAD_IDS);
+  }
   trcRender(true);
 };
 /* Same idea as trcToggleOverdue, narrowing to leads with at least one late follow-up gap (see
@@ -27470,14 +27527,22 @@ window.trcToggleOverdue=async function(){
    the check is skipped for Lost leads, which only lead_current_status (TRC_LIGHT) can tell it. */
 window.trcToggleCadence=async function(){
   TRC_F.cadence=(TRC_F.cadence==='1'?'all':'1');
-  if(TRC_F.cadence==='1')await trcEnsureFullEnrichment();
+  if(TRC_F.cadence==='1'){
+    await trcEnsureFullEnrichment();
+    trcRender(true);
+    await trcEnsureHistories(TRC_LIST_LEAD_IDS);
+  }
   trcRender(true);
 };
 /* Same idea again, narrowing to leads whose first-ever call landed later than lead_first_seen_date
    (see trcFirstCallbackTat). Needs the full join too - lead_first_seen_date only travels with it. */
 window.trcToggleCallbackTat=async function(){
   TRC_F.callbackTat=(TRC_F.callbackTat==='1'?'all':'1');
-  if(TRC_F.callbackTat==='1')await trcEnsureFullEnrichment();
+  if(TRC_F.callbackTat==='1'){
+    await trcEnsureFullEnrichment();
+    trcRender(true);
+    await trcEnsureHistories(TRC_LIST_LEAD_IDS);
+  }
   trcRender(true);
 };
 
@@ -27824,7 +27889,7 @@ function trcRender(full,keepPage){
   const all=TRC_ROWS||[];
   let rows=trcApply(all);
   const scope=trcApply(all,true);
-  const k=$('trcKpis');if(k)k.innerHTML=trcKpiHtml(scope);
+  const k=$('trcKpis');if(k)k.innerHTML=trcKpiHtml(scope,rows);
   if(full!==false){
     const f=$('trcFilters');if(f)f.innerHTML=trcFilterBar(all);
     const d=$('trcDates');if(d)d.innerHTML=trcDateBar();
@@ -27840,6 +27905,8 @@ function trcRender(full,keepPage){
     rows=rows.concat(TRC_PIN_ROWS);
   }
   let items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
+  TRC_LIST_LEAD_IDS=callLevel?[]:items.map(function(g){return g.lead_id;});
+  const histLoading=!callLevel&&trcHistChipOn()&&items.some(function(g){return g.historyPending;});
   // Missed callback is a per-LEAD fact (see trcCallbackOverdue) - it only narrows the lead rollup, not
   // the call-level Mismatch table, which trcLeads never runs over in the first place.
   if(!callLevel&&TRC_F.overdue==='1')items=items.filter(function(g){return g.callbackOverdue;});
@@ -27863,7 +27930,9 @@ function trcRender(full,keepPage){
   const pageOffset=TRC_PAGE*TRC_PAGE_SIZE;
   const pageItems=items.slice(pageOffset,pageOffset+TRC_PAGE_SIZE);
   TRC_PAGE_ROWS=pageItems;
-  const b=$('trcRows');if(b)b.innerHTML=trcTableHtml(pageItems,callLevel,pageOffset);
+  const b=$('trcRows');if(b)b.innerHTML=histLoading
+    ?'<tr><td colspan="'+TRC_LEAD_COLS+'"><div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i><div>Loading the full follow-up history of each lead…</div></div></td></tr>'
+    :trcTableHtml(pageItems,callLevel,pageOffset);
   const pg=$('trcPager');if(pg)pg.innerHTML=trcPagerHtml(totalItems,totalPages);
   const c=$('trcCount');
   if(c){
@@ -28035,6 +28104,7 @@ function trcAfterListRender(){
   trcEnrichVisiblePage();
   trcBackfillLastJudgement();
   trcPrefetchListedHistories();
+  trcWarmListHistories();
 }
 
 /* ================================================ ONE LEAD, THE WHOLE STORY */
