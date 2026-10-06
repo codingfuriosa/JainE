@@ -137,8 +137,18 @@ function htmlToText(html: string): string {
 // chat-style view where the original is already its own bubble. Split on that separator and keep
 // only what's before it. A message with no quote (the customer's original description thread, a
 // reply with the quote manually cleared) just passes through unchanged - no match, no-op.
+// Customers reply from their own mail apps, which quote differently: Gmail ("On Mon, 6 Oct 2026 at
+// 10:12, Name <a@b.c> wrote:"), Outlook ("From: ... Sent: ..." or "-----Original Message-----").
+// Each one is cut at the first quote marker found, so the thread shows only what was newly written.
 function stripQuotedReply(text: string): string {
-  return (text || "").split(/-{2,}\s*on\s+.+?\s+wrote\s*-{2,}/is)[0].trim();
+  let t = (text || "").split(/-{2,}\s*on\s+.+?\s+wrote\s*-{2,}/is)[0];
+  const markers = [
+    /\n[ \t>]*On\s[^\n]{4,200}?wrote:\s*(\n|$)/i,
+    /\n[ \t]*-{2,}\s*Original Message\s*-{2,}/i,
+    /\n[ \t]*From:\s[^\n]+\n[ \t]*(Sent|Date):\s/i,
+  ];
+  for (const m of markers) { const k = t.search(m); if (k > 0) t = t.slice(0, k); }
+  return t.trim();
 }
 
 // Pulls both Zoho conversation surfaces down into their mirror tables. Threads always get their
@@ -150,7 +160,9 @@ function stripQuotedReply(text: string): string {
 async function syncConversation(db: any, dc: string, accessToken: string, zohoTicketId: string, ticketId: number) {
   const zohoHeaders = { Authorization: "Zoho-oauthtoken " + accessToken };
 
-  const threadsRes = await fetch(`https://desk.zoho.${dc}/api/v1/tickets/${zohoTicketId}/threads`, { headers: zohoHeaders });
+  // Zoho lists only the first 10 unless asked: up to 200 threads and 100 comments is the whole
+  // conversation for any real ticket.
+  const threadsRes = await fetch(`https://desk.zoho.${dc}/api/v1/tickets/${zohoTicketId}/threads?limit=200`, { headers: zohoHeaders });
   const threadsOut = await threadsRes.json().catch(() => ({}));
   const threads = (threadsOut?.data || []).filter((t: any) => t.visibility === "public");
   for (const t of threads) {
@@ -166,7 +178,7 @@ async function syncConversation(db: any, dc: string, accessToken: string, zohoTi
     }, { onConflict: "ticket_id,zoho_thread_id" });
   }
 
-  const commentsRes = await fetch(`https://desk.zoho.${dc}/api/v1/tickets/${zohoTicketId}/comments`, { headers: zohoHeaders });
+  const commentsRes = await fetch(`https://desk.zoho.${dc}/api/v1/tickets/${zohoTicketId}/comments?limit=100`, { headers: zohoHeaders });
   const commentsOut = await commentsRes.json().catch(() => ({}));
   const comments = (commentsOut?.data || []).filter((c: any) => c.isPublic);
   if (comments.length) {
