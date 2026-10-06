@@ -23,7 +23,7 @@ X.renderBrs=async function(host){
     +'<div class="acx-top"><select id="brBank" onchange="acxBrChange()">'+banks.map(b=>opt(b.id,b.name+(b.account_no?' · '+b.account_no:''),BR.ledger)).join('')+'</select>'
     +'<span class="acx-hint">as on</span><input type="date" id="brAsOn" value="'+BR.asOn+'" onchange="acxBrChange()">'
     +'<div class="acx-subs" style="margin:0">'+[['uncleared','Not yet cleared'],['cleared','Cleared'],['all','All']].map(v=>'<span class="chip'+(BR.view===v[0]?' active':'')+'" onclick="acxBrView(\''+v[0]+'\')">'+v[1]+'</span>').join('')+'</div>'
-    +'<button class="btn acx-right" onclick="acxBrCsv()"><i class="fa-solid fa-file-csv"></i> CSV</button></div><div id="brBody"></div>';
+    +X.dlBtns('acxBrDownload','acx-right')+'</div><div id="brBody"></div>';
   await brLoad();
 };
 window.acxBrChange=function(){ BR.ledger=parseInt(val('brBank'),10); BR.asOn=val('brAsOn')||today(); brLoad(); };
@@ -92,12 +92,22 @@ window.acxBrStmtSave=async function(){
   const {error}=await AC().from('bank_statements').upsert({ledger_id:BR.ledger,as_on:BR.asOn,closing_balance:r2(num(raw)),updated_at:new Date().toISOString()},{onConflict:'ledger_id,as_on'});
   if(fail(error)) return; toast('Saved','ok'); brLoad();
 };
-window.acxBrCsv=function(){
+window.acxBrDownload=function(fmt,btn){
   if(!BR.sum) return; const s=BR.sum;
-  const rows=[['Bank reconciliation statement',s.ledger,'as on '+BR.asOn],['Balance as per books',s.book_balance],['Add: cheques issued not yet presented',s.total_payments],['Less: receipts / deposits not yet credited',s.total_receipts],['Balance as per bank (worked out)',s.balance_per_bank],['Balance on bank statement',s.statement_balance==null?'':s.statement_balance],[]];
-  rows.push(['Voucher','Date','Type','Mode','Instrument','Particulars','Receipt','Payment','Bank cleared']);
-  BR.lines.forEach(x=>rows.push([x.vouchers.doc_no,x.vouchers.voucher_date,x.vouchers.voucher_type,x.vouchers.mode||'',x.vouchers.instrument_no||'',x.vouchers.payee||x.vouchers.narration||'',x.dr||'',x.cr||'',x.cleared_on||'']));
-  csv('bank-reconciliation-'+BR.asOn+'.csv',[],rows);
+  const view={uncleared:'Entries not yet cleared',cleared:'Cleared entries',all:'All entries'}[BR.view]||'';
+  const bank=S.ledgers.find(l=>String(l.id)===String(BR.ledger))||{};
+  const sum=k=>BR.lines.reduce((a,x)=>a+Number(x[k]||0),0);
+  X.download(fmt,{title:'Bank reconciliation statement',file:'Bank_reconciliation_'+(s.ledger||''),
+    sub:(s.ledger||'')+(bank.account_no?' · A/c '+bank.account_no:'')+' · as on '+dmy(BR.asOn)+' · '+view,
+    summary:[['Balance as per books as on '+dmy(BR.asOn),s.book_balance,'b',true],
+      ['Add: cheques issued but not yet presented ('+(s.uncleared_payments||[]).length+')',s.total_payments,'n'],
+      ['Less: cheques / deposits not yet credited by the bank ('+(s.uncleared_receipts||[]).length+')',s.total_receipts,'n'],
+      ['Balance as per bank (worked out)',s.balance_per_bank,'b',true],
+      ['Balance on the bank statement'+(s.statement_as_on?' (entered for '+dmy(s.statement_as_on)+')':''),s.statement_balance==null?'Not entered':s.statement_balance,'b']
+    ].concat(s.difference!=null?[['Difference (statement - worked out)',Math.abs(s.difference)<0.005?'Reconciled':s.difference,'b',true]]:[]),
+    cols:[{h:'Voucher'},{h:'Date',t:'d'},{h:'Type'},{h:'Mode'},{h:'Instrument no'},{h:'Particulars'},{h:'Receipt',t:'n'},{h:'Payment',t:'n'},{h:'Bank cleared',t:'d'}],
+    rows:BR.lines.map(x=>{const v=x.vouchers; return [v.doc_no,v.voucher_date,(X.VTYPE[v.voucher_type]||[v.voucher_type])[0],MODE_LABEL[v.mode]||'',v.instrument_no||'',v.payee||v.narration||'',x.dr>0?x.dr:'',x.cr>0?x.cr:'',x.cleared_on||''];}),
+    foot:['Total ('+BR.lines.length+')','','','','','',sum('dr'),sum('cr'),'']},btn);
 };
 
 /* =================================================================== CHEQUE PRINTING */
@@ -131,25 +141,37 @@ async function cqLoad(){
   cqDraw();
 }
 function activeCheque(vid){ const l=CQ.cheques[vid]||[]; return l.filter(c=>c.status!=='cancelled').slice(-1)[0]||null; }
-function cqDraw(){
-  const body=$('cqBody'); if(!body) return; const q=CQ.q.toLowerCase();
-  const list=CQ.rows.filter(r=>{
+function cqList(){
+  const q=CQ.q.toLowerCase();
+  return CQ.rows.filter(r=>{
     const c=activeCheque(r.id), st=!c?'none':c.status;
     if(CQ.filter==='todo'&&st==='printed') return false; if(CQ.filter==='printed'&&st!=='printed') return false;
     return !q||((r.doc_no||'')+' '+(r.payee||'')+' '+(r.narration||'')+' '+(c?c.cheque_no:r.instrument_no||'')).toLowerCase().includes(q);
   });
+}
+function cqDraw(){
+  const body=$('cqBody'); if(!body) return; const q=CQ.q.toLowerCase();
+  const list=cqList();
   const rows=list.map(r=>{const c=activeCheque(r.id), bank=CQ.bankOf[r.id], st=!c?['No cheque yet','t-gray']:c.status==='printed'?['Printed','t-green']:['Issued, not printed','t-amber'];
     return '<tr><td><span class="acx-code acx-link" onclick="acxVoucherOpen('+r.id+')">'+esc(r.doc_no)+'</span></td><td style="white-space:nowrap">'+dmy(r.voucher_date)+'</td><td>'+esc(r.payee||r.narration||'—')+'</td><td>'+esc(bank?X.ledName(bank):'—')+'</td>'
       +'<td class="acx-num"><b>'+money(r.amount)+'</b></td><td>'+(c?'<b>'+esc(c.cheque_no)+'</b>':(r.instrument_no?esc(r.instrument_no):'—'))+(c&&c.print_count?'<div class="acx-hint">printed '+c.print_count+'×</div>':'')+'</td><td><span class="tag '+st[1]+'">'+st[0]+'</span></td>'
       +'<td class="acx-act">'+(S.canPost?'<button class="btn btn-sm '+(c&&c.status==='printed'?'':'btn-primary')+'" onclick="acxChequeFor('+r.id+')">'+(c?(c.status==='printed'?'Reprint':'Print'):'Issue &amp; print')+'</button>'+(c?'<button class="btn btn-sm btn-ghost" title="Cancel this cheque (spoilt / lost)" onclick="acxChequeCancel('+c.id+')"><i class="fa-solid fa-ban"></i></button>':''):'')+'</td></tr>';}).join('');
   body.innerHTML='<div class="acx-top"><div class="acx-subs" style="margin:0">'+[['todo','To print'],['printed','Printed'],['all','All']].map(f=>'<span class="chip'+(CQ.filter===f[0]?' active':'')+'" onclick="acxCqFilter(\''+f[0]+'\')">'+f[1]+'</span>').join('')+'</div>'
-    +'<input type="date" id="cqFrom" value="'+CQ.from+'" onchange="acxCqDates()"><span class="acx-hint">to</span><input type="date" id="cqTo" value="'+CQ.to+'" onchange="acxCqDates()"><input class="grow" id="cqQ" placeholder="Search by voucher, payee or cheque no." value="'+esc(CQ.q)+'" oninput="acxCqSearch()"></div>'
+    +'<input type="date" id="cqFrom" value="'+CQ.from+'" onchange="acxCqDates()"><span class="acx-hint">to</span><input type="date" id="cqTo" value="'+CQ.to+'" onchange="acxCqDates()"><input class="grow" id="cqQ" placeholder="Search by voucher, payee or cheque no." value="'+esc(CQ.q)+'" oninput="acxCqSearch()">'+X.dlBtns('acxCqDownload')+'</div>'
     +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Payment</th><th>Date</th><th>Payee</th><th>Bank account</th><th class="acx-num">Amount</th><th>Cheque no</th><th>Status</th><th></th></tr></thead><tbody>'
-    +(rows||'<tr><td colspan="8"><div class="empty" style="padding:24px"><div>No cheque payments here. Post a payment by cheque (Receipts & payments › New payment, or Pay a vendor) and it appears.</div></div></td></tr>')+'</tbody></table></div></div>';
+    +(rows||'<tr><td colspan="8"><div class="empty" style="padding:24px"><div>No cheque payments here. Post a payment by cheque (Receipts & payments › New payment, or Bills & on-account › Pay a vendor) and it appears.</div></div></td></tr>')+'</tbody></table></div></div>';
 }
 window.acxCqFilter=function(f){ CQ.filter=f; cqDraw(); };
 window.acxCqDates=function(){ CQ.from=val('cqFrom')||CQ.from; CQ.to=val('cqTo')||CQ.to; cqLoad(); };
 window.acxCqSearch=function(){ CQ.q=val('cqQ'); cqDraw(); const e=$('cqQ'); if(e){ e.focus(); e.setSelectionRange(e.value.length,e.value.length); } };
+window.acxCqDownload=function(fmt,btn){
+  const list=cqList(), fl={todo:'To print',printed:'Printed',all:'All'}[CQ.filter]||'';
+  X.download(fmt,{title:'Cheque register',file:'Cheque_register',
+    sub:fl+' · '+dmy(CQ.from)+' to '+dmy(CQ.to)+(S.buId?' · Business unit: '+X.buName(S.buId):' · All business units')+(CQ.q?' · Search: "'+CQ.q+'"':''),
+    cols:[{h:'Payment'},{h:'Date',t:'d'},{h:'Payee'},{h:'Bank account'},{h:'Amount',t:'n'},{h:'Cheque no'},{h:'Status'}],
+    rows:list.map(r=>{const c=activeCheque(r.id), bank=CQ.bankOf[r.id]; return [r.doc_no,r.voucher_date,r.payee||r.narration||'',bank?X.ledName(bank):'',r.amount,c?c.cheque_no:(r.instrument_no||''),!c?'No cheque yet':c.status==='printed'?'Printed':'Issued, not printed'];}),
+    foot:['Total ('+list.length+')','','','',list.reduce((s,r)=>s+Number(r.amount||0),0),'','']},btn);
+};
 window.acxChequeCancel=async function(id){
   const reason=await askReason('Cancel this cheque','Why? (spoilt, lost, stopped …)','Cancel cheque'); if(!reason) return;
   const {error}=await rpc('cheque_cancel',{p_id:id,p_reason:reason}); if(fail(error,'Could not cancel the cheque')) return; toast('Cheque cancelled — the next print uses the next number','ok');

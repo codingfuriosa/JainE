@@ -200,12 +200,144 @@ function inrWords(n){
 }
 X.inrWords=inrWords;
 
-function csv(filename,headers,rows){
-  const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
-  const text=[headers].concat(rows).map(r=>r.map(q).join(',')).join('\r\n');
-  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['﻿'+text],{type:'text/csv;charset=utf-8'})); a.download=filename; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);
+/* ---------------- downloads: Excel (.xlsx) and PDF ----------------
+   Every list and report offers both, laid out like the screen it came from (filters included): a header with the
+   company, the title, what was filtered and who made it, the table, and a totals row. Excel has real numbers and
+   dates; the PDF has page numbers. Built with ExcelJS and jsPDF + autoTable, loaded on first use (Post Sales and
+   Usability already use them).
+   spec = { title, sub, file, cols:[{h, t:'t'|'n'|'d'|'b'}], rows:[[...]], foot:[...], summary:[[label, value, type, bold]], orient }
+   column types: t text, n amount, d date, b balance (a signed number shown as "x Dr" / "x Cr") */
+const DL_BRAND='FF0E7490', DL_RGB=[14,116,144];
+const XL_IND2='[>=10000000]##\\,##\\,##\\,##0.00;[>=100000]##\\,##\\,##0.00;##,##0.00';
+function dlBtns(fn,first,all){
+  return '<button class="btn '+(all||'')+' '+(first||'')+'" onclick="'+fn+'(\'xlsx\',this)" title="Download as an Excel file"><i class="fa-solid fa-file-excel" style="color:#15803d"></i> Excel</button>'
+    +'<button class="btn '+(all||'')+'" onclick="'+fn+'(\'pdf\',this)" title="Download as a PDF"><i class="fa-solid fa-file-pdf" style="color:#b91c1c"></i> PDF</button>';
 }
-X.csv=csv;
+const dlCompany=()=>{const c=curCo(); return c?c.name:'Accounts';};
+const dlStamp=()=>{const d=new Date(); return dmy(today())+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+' by '+String((typeof state!=='undefined'&&state&&state.email)||'').split('@')[0];};
+const dlFile=(spec,ext)=>String(spec.file||spec.title).replace(/[^\w ]+/g,' ').trim().replace(/\s+/g,'_')+'_'+today()+'.'+ext;
+const dlTxt=(c,v,t)=>{
+  t=t||c.t; if(v==null||v==='') return '';
+  if(t==='d') return dmy(v);
+  if(t==='n') return money(v);
+  if(t==='b') return (typeof v==='number'||/^-?[0-9.]+$/.test(String(v)))?drcr(v):String(v);
+  return String(v);
+};
+const pdfSafe=s=>String(s==null?'':s).replace(/›/g,'>').replace(/₹/g,'Rs.').replace(/[^ -~ -ÿ–—‘’“”•…]/g,'?');
+const dlDate=v=>{const t=String(v).slice(0,10).split('-'); return new Date(Date.UTC(+t[0],+t[1]-1,+t[2]));};   // UTC, so Excel shows the same day in India
+
+async function dlExcel(spec){
+  if(!(await usbLoadXlsx())) throw new Error('could not load the spreadsheet library - check the internet connection and try again');
+  const cols=spec.cols, n=cols.length;
+  const wb=new ExcelJS.Workbook(); wb.creator='JAIN-E'; wb.created=new Date();
+  const ws=wb.addWorksheet(String(spec.title).replace(/[^\w &-]/g,'').slice(0,31).trim()||'Report');
+  const band=(row,text,font)=>{ if(n>1) ws.mergeCells(row,1,row,n); const c=ws.getCell(row,1); c.value=text; c.font=font; c.alignment={horizontal:'left',vertical:'middle'}; };
+  band(1,dlCompany(),{size:15,bold:true,color:{argb:DL_BRAND}}); ws.getRow(1).height=22;
+  band(2,spec.title,{size:13,bold:true}); ws.getRow(2).height=19;
+  band(3,spec.sub||'',{size:10.5,italic:true,color:{argb:'FF475569'}});
+  band(4,'Generated on '+dlStamp()+' · JAIN-E Accounts',{size:9,color:{argb:'FF94A3B8'}});
+  const thin={style:'thin',color:{argb:'FFE4E4E7'}};
+  let r=6;
+  if(spec.summary&&spec.summary.length){
+    const k=Math.max(1,n-2);
+    spec.summary.forEach(s=>{
+      if(k>1) ws.mergeCells(r,1,r,k); if(n>k+1) ws.mergeCells(r,k+1,r,n);
+      const a=ws.getCell(r,1), b=ws.getCell(r,k+1), t=s[2]||'t';
+      a.value=s[0]; a.font={size:10,bold:!!s[3]}; a.alignment={vertical:'middle',wrapText:true};
+      if(t==='n'&&s[1]!==''&&s[1]!=null){ b.value=Math.round(Number(s[1])*100)/100; b.numFmt=XL_IND2; } else b.value=dlTxt({t},s[1],t);
+      b.font={size:10,bold:!!s[3]}; b.alignment={horizontal:'right',vertical:'middle'};
+      for(let i=1;i<=n;i++){ ws.getCell(r,i).border={bottom:thin}; if(s[3]) ws.getCell(r,i).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF1F5F9'}}; }
+      r++;
+    });
+    r++;
+  }
+  const headRow=r, hr=ws.getRow(r); hr.values=cols.map(c=>c.h); hr.height=28;
+  hr.eachCell(c=>{ c.font={bold:true,color:{argb:'FFFFFFFF'},size:10}; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:DL_BRAND}}; c.alignment={vertical:'middle',horizontal:'center',wrapText:true}; c.border={top:thin,left:thin,bottom:thin,right:thin}; });
+  ws.views=[{state:'frozen',ySplit:headRow}];
+  const cell=(c,v)=>{ if(v==null||v==='') return null; if(c.t==='n') return Math.round(Number(v)*100)/100; if(c.t==='d') return dlDate(v); if(c.t==='b') return dlTxt(c,v); return v; };
+  spec.rows.forEach((rowv,ri)=>{
+    const row=ws.addRow(cols.map((c,i)=>cell(c,rowv[i])));
+    row.eachCell({includeEmpty:true},(cl,ci)=>{ const c=cols[ci-1]; cl.border={top:thin,left:thin,bottom:thin,right:thin}; cl.font={size:10};
+      if(ri%2===1) cl.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF0FDFA'}};
+      if(c.t==='n'){ cl.numFmt=XL_IND2; cl.alignment={horizontal:'right',vertical:'top'}; }
+      else if(c.t==='b') cl.alignment={horizontal:'right',vertical:'top'};
+      else if(c.t==='d'){ cl.numFmt='dd-mm-yyyy'; cl.alignment={horizontal:'center',vertical:'top'}; }
+      else cl.alignment={vertical:'top',wrapText:true}; });
+  });
+  if(spec.foot){
+    const tr=ws.addRow(cols.map((c,i)=>cell(c,spec.foot[i])));
+    tr.height=20;
+    tr.eachCell({includeEmpty:true},(cl,ci)=>{ const c=cols[ci-1]; cl.font={bold:true,size:10.5}; cl.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFCCFBF1'}};
+      cl.border={top:{style:'medium',color:{argb:DL_BRAND}},left:thin,bottom:{style:'double',color:{argb:DL_BRAND}},right:thin};
+      if(c.t==='n'){ cl.numFmt=XL_IND2; cl.alignment={horizontal:'right'}; } else if(c.t==='b') cl.alignment={horizontal:'right'}; });
+  }
+  cols.forEach((c,i)=>{ const lens=[String(c.h).length*0.85].concat(spec.rows.slice(0,400).map(rv=>dlTxt(c,rv[i]).length)).concat(spec.foot?[dlTxt(c,spec.foot[i]).length]:[]);
+    ws.getColumn(i+1).width=Math.max(c.t==='n'||c.t==='b'?15:(c.t==='d'?12:9),Math.min(46,Math.max.apply(null,lens)+3)); });
+  if(spec.rows.length) ws.autoFilter={from:{row:headRow,column:1},to:{row:headRow,column:n}};
+  ws.pageSetup={orientation:spec.orient==='portrait'?'portrait':'landscape',paperSize:9,fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:0.4,right:0.4,top:0.5,bottom:0.6,header:0.2,footer:0.3},printTitlesRow:headRow+':'+headRow};
+  ws.headerFooter={oddFooter:'&L&8'+dlCompany().replace(/&/g,'&&')+' · JAIN-E Accounts&C&8'+String(spec.title).replace(/&/g,'&&')+'&R&8Page &P of &N'};
+  const buf=await wb.xlsx.writeBuffer();
+  usbSaveBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),dlFile(spec,'xlsx'));
+}
+
+let _dlPdfP=null;
+function dlLoadPdf(){
+  if(window.jspdf&&window.jspdf.jsPDF&&window.jspdf.jsPDF.API.autoTable) return Promise.resolve(window.jspdf.jsPDF);
+  if(_dlPdfP) return _dlPdfP;
+  const add=src=>new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('could not load the PDF library - check the internet connection and try again'));document.head.appendChild(s);});
+  _dlPdfP=add('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+    .then(()=>add('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'))
+    .then(()=>window.jspdf.jsPDF).catch(e=>{_dlPdfP=null;throw e;});
+  return _dlPdfP;
+}
+async function dlPdf(spec){
+  const jsPDF=await dlLoadPdf(), cols=spec.cols;
+  const doc=new jsPDF({orientation:spec.orient==='portrait'?'portrait':'landscape',unit:'pt',format:'a4'});
+  const W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight(), M=30, done={};
+  const header=()=>{
+    const p=doc.internal.getCurrentPageInfo().pageNumber; if(done[p]) return; done[p]=1;
+    doc.setFillColor(...DL_RGB); doc.rect(0,0,W,56,'F');
+    doc.setTextColor(255); doc.setFont('helvetica','bold'); doc.setFontSize(14); doc.text(pdfSafe(dlCompany()),M,24);
+    doc.setFontSize(11); doc.text(pdfSafe(spec.title),M,42);
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.text(pdfSafe('Generated '+dlStamp()),W-M,24,{align:'right'}); doc.text('JAIN-E Accounts',W-M,42,{align:'right'});
+    doc.setTextColor(71,85,105); doc.setFontSize(9); doc.text(pdfSafe(spec.sub||'')+(spec.sub?'':''),M,72,{maxWidth:W-2*M});
+  };
+  const footer=()=>{ const p=doc.internal.getCurrentPageInfo().pageNumber; doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(148,163,184);
+    doc.text(pdfSafe(dlCompany()+' · '+spec.title),M,H-16); doc.text('Page '+p+' of {total}',W-M,H-16,{align:'right'}); };
+  let y=84;
+  if(spec.summary&&spec.summary.length){
+    doc.autoTable({ body:spec.summary.map(s=>[pdfSafe(s[0]),pdfSafe(dlTxt({t:s[2]||'t'},s[1],s[2]||'t'))]), startY:y, margin:{left:M,right:M,top:70,bottom:34}, theme:'plain',
+      styles:{font:'helvetica',fontSize:8.6,cellPadding:3.2,textColor:[15,23,42],lineColor:[228,228,231],lineWidth:0.3},
+      columnStyles:{0:{cellWidth:'auto'},1:{halign:'right',cellWidth:150}},
+      didParseCell:d=>{ if(spec.summary[d.row.index]&&spec.summary[d.row.index][3]){ d.cell.styles.fontStyle='bold'; d.cell.styles.fillColor=[241,245,249]; } },
+      didDrawPage:()=>{ header(); footer(); } });
+    y=doc.lastAutoTable.finalY+14;
+  }
+  const colStyles={}; cols.forEach((c,i)=>{ if(c.t==='n'||c.t==='b') colStyles[i]={halign:'right'}; else if(c.t==='d') colStyles[i]={halign:'center'}; });
+  doc.autoTable({
+    head:[cols.map(c=>pdfSafe(c.h))],
+    body:spec.rows.map(rv=>cols.map((c,i)=>pdfSafe(dlTxt(c,rv[i])))),
+    foot:spec.foot?[cols.map((c,i)=>pdfSafe(dlTxt(c,spec.foot[i])))]:undefined,
+    startY:y, margin:{left:M,right:M,top:84,bottom:34}, theme:'striped',
+    styles:{font:'helvetica',fontSize:cols.length>10?6.8:(cols.length>8?7.4:8),cellPadding:3.4,overflow:'linebreak',valign:'top',lineColor:[228,228,231],lineWidth:0.3,textColor:[15,23,42]},
+    headStyles:{fillColor:DL_RGB,textColor:255,fontStyle:'bold',halign:'center',valign:'middle'},
+    footStyles:{fillColor:[204,251,241],textColor:[19,78,74],fontStyle:'bold'},
+    alternateRowStyles:{fillColor:[240,253,250]},
+    columnStyles:colStyles,
+    didParseCell:d=>{ if(d.section==='foot'){ const c=cols[d.column.index]||{}; if(c.t==='n'||c.t==='b') d.cell.styles.halign='right'; } },
+    didDrawPage:()=>{ header(); footer(); }
+  });
+  if(typeof doc.putTotalPages==='function') doc.putTotalPages('{total}');
+  doc.save(dlFile(spec,'pdf'));
+}
+async function download(fmt,spec,btn){
+  if(!spec.rows.length&&!(spec.summary&&spec.summary.length)){ toast('Nothing to download for these filters','warn'); return; }
+  const restore=btn?btn.innerHTML:''; if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> '+(fmt==='pdf'?'PDF':'Excel'); }
+  try{ if(fmt==='pdf') await dlPdf(spec); else await dlExcel(spec); toast((fmt==='pdf'?'PDF':'Excel file')+' downloaded','ok'); }
+  catch(e){ console.error(e); toast('Could not build the '+(fmt==='pdf'?'PDF':'Excel file')+': '+((e&&e.message)||e),'err'); }
+  finally{ if(btn){ btn.disabled=false; btn.innerHTML=restore; } }
+}
+Object.assign(X,{download,dlBtns,dlCompany});
 
 function askReason(title,label,okLabel){
   return new Promise(res=>{
@@ -407,10 +539,11 @@ async function vrLoad(host){
   const {data,error}=await q; if(error) throw error;
   VR.rows=data||[]; vrDraw();
 }
+function vrList(){ const q=VR.q.toLowerCase(); return VR.rows.filter(v=>!q||((v.doc_no||'')+' '+(v.payee||'')+' '+(v.narration||'')+' '+(v.instrument_no||'')).toLowerCase().includes(q)); }
 function vrDraw(){
   const body=$('acxVrBody'); if(!body) return;
   const q=VR.q.toLowerCase();
-  const list=VR.rows.filter(v=>!q||((v.doc_no||'')+' '+(v.payee||'')+' '+(v.narration||'')+' '+(v.instrument_no||'')).toLowerCase().includes(q));
+  const list=vrList();
   const total=list.filter(v=>v.status==='posted').reduce((s,v)=>s+Number(v.amount||0),0);
   const rows=list.map(v=>'<tr style="cursor:pointer" onclick="acxVoucherOpen('+v.id+')"><td><span class="acx-code">'+esc(v.doc_no)+'</span></td><td style="white-space:nowrap">'+dmy(v.voucher_date)+'</td><td>'+vtag(v.voucher_type)+'</td>'
     +'<td>'+esc(v.payee||v.narration||'—')+(v.payee&&v.narration?'<div class="acx-hint">'+esc(v.narration)+'</div>':'')+'</td>'
@@ -420,7 +553,7 @@ function vrDraw(){
   body.innerHTML='<div class="acx-top"><div class="acx-subs" style="margin:0">'+[['posted','Posted'],['cancelled','Cancelled'],['all','All']].map(s=>'<span class="chip'+(VR.status===s[0]?' active':'')+'" onclick="acxVrStatus(\''+s[0]+'\')">'+s[1]+'</span>').join('')+'</div>'
     +'<input type="date" id="vrFrom" value="'+VR.from+'" onchange="acxVrDates()"><span class="acx-hint">to</span><input type="date" id="vrTo" value="'+VR.to+'" onchange="acxVrDates()">'
     +'<input class="grow" id="vrQ" placeholder="Search by number, party, narration or cheque no." value="'+esc(VR.q)+'" oninput="acxVrSearch()">'
-    +'<button class="btn" onclick="acxVrCsv()"><i class="fa-solid fa-file-csv"></i> CSV</button></div>'
+    +dlBtns('acxVrDownload')+'</div>'
     +'<div class="acx-hint" style="margin-bottom:8px">'+list.length+' voucher'+(list.length===1?'':'s')+' · total '+money(total)+(VR.rows.length>=1000?' · showing the latest 1,000 — narrow the dates':'')+'</div>'
     +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Voucher no</th><th>Date</th><th>Type</th><th>Particulars</th><th>Mode</th><th>Business unit</th><th class="acx-num">Amount</th><th>Status</th></tr></thead><tbody>'
     +(rows||'<tr><td colspan="8"><div class="empty" style="padding:24px"><div>No vouchers in this period</div></div></td></tr>')+'</tbody></table></div></div>';
@@ -428,8 +561,15 @@ function vrDraw(){
 window.acxVrStatus=function(s){ VR.status=s; vrLoad(); };
 window.acxVrDates=function(){ VR.from=val('vrFrom')||VR.from; VR.to=val('vrTo')||VR.to; vrLoad(); };
 window.acxVrSearch=function(){ VR.q=val('vrQ'); vrDraw(); const e=$('vrQ'); if(e){ e.focus(); e.setSelectionRange(e.value.length,e.value.length); } };
-window.acxVrCsv=function(){ csv('vouchers-'+VR.from+'-to-'+VR.to+'.csv',['Voucher no','Date','Type','Payee','Narration','Mode','Instrument','Business unit','Amount','Status'],
-  VR.rows.map(v=>[v.doc_no,v.voucher_date,(VTYPE[v.voucher_type]||[v.voucher_type])[0],v.payee||'',v.narration||'',MODE_LABEL[v.mode]||'',v.instrument_no||'',v.business_unit_id?buName(v.business_unit_id):'',v.amount,v.status])); };
+window.acxVrDownload=function(fmt,btn){
+  const list=vrList(), st={posted:'Posted',cancelled:'Cancelled',all:'Posted and cancelled'}[VR.status]||'';
+  const posted=list.filter(v=>v.status==='posted'), total=posted.reduce((s,v)=>s+Number(v.amount||0),0);
+  X.download(fmt,{title:VR.cfg.title,file:'Register_'+VR.cfg.title,
+    sub:dmy(VR.from)+' to '+dmy(VR.to)+' · '+st+(S.buId?' · Business unit: '+buName(S.buId):' · All business units')+(VR.q?' · Search: "'+VR.q+'"':''),
+    cols:[{h:'Voucher no'},{h:'Date',t:'d'},{h:'Type'},{h:'Payee'},{h:'Narration'},{h:'Mode'},{h:'Instrument no'},{h:'Business unit'},{h:'Amount',t:'n'},{h:'Status'}],
+    rows:list.map(v=>[v.doc_no,v.voucher_date,(VTYPE[v.voucher_type]||[v.voucher_type])[0],v.payee||'',v.narration||'',MODE_LABEL[v.mode]||'',v.instrument_no||'',v.business_unit_id?buName(v.business_unit_id):'Company level',v.amount,v.status==='posted'?'Posted':'Cancelled']),
+    foot:['Total ('+posted.length+' posted)','','','','','','','',total,'']},btn);
+};
 
 /* ---------------- one voucher ---------------- */
 async function voucherOpen(id){
@@ -761,6 +901,16 @@ async function renderBills(host){
   if(ids.length){ const {data}=await AC().from('sub_ledgers').select('id,name').in('id',ids); (data||[]).forEach(s=>BL.subs[s.id]=s.name); }
   blDraw(host);
 }
+function blList(){
+  const f=BL.filter, q=BL.q.toLowerCase();
+  return BL.rows.filter(r=>{
+    const out=Number(r.outstanding)>0.004;
+    if(f==='out'&&!(out&&r.kind==='bill')) return false; if(f==='over'&&!(out&&r.kind==='bill'&&r.due_date&&r.due_date<today())) return false;
+    if(f==='ret'&&!(out&&r.kind==='retention')) return false; if(f==='settled'&&out) return false;
+    if(BL.vendor&&String(r.vendor_id)!==String(BL.vendor)) return false;
+    return !q||((r.ref_no||'')+' '+vendorName(r.vendor_id)+' '+(r.voucher_no||'')).toLowerCase().includes(q);
+  });
+}
 function blDraw(host){
   host=host||$('acxSec'); if(!host) return;
   const bills=BL.rows.filter(r=>r.kind==='bill'), ret=BL.rows.filter(r=>r.kind==='retention');
@@ -770,13 +920,7 @@ function blDraw(host){
   const waiting=(BL.pend.bills||0)+(BL.pend.ra||0);
   const kpi=(k,v,s)=>'<div class="acx-kpi"><div class="k">'+k+'</div><div class="v">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
   const f=BL.filter, q=BL.q.toLowerCase();
-  const list=BL.rows.filter(r=>{
-    const out=Number(r.outstanding)>0.004;
-    if(f==='out'&&!(out&&r.kind==='bill')) return false; if(f==='over'&&!(out&&r.kind==='bill'&&r.due_date&&r.due_date<today())) return false;
-    if(f==='ret'&&!(out&&r.kind==='retention')) return false; if(f==='settled'&&out) return false;
-    if(BL.vendor&&String(r.vendor_id)!==String(BL.vendor)) return false;
-    return !q||((r.ref_no||'')+' '+vendorName(r.vendor_id)+' '+(r.voucher_no||'')).toLowerCase().includes(q);
-  });
+  const list=blList();
   const vendorsHere=[...new Set(BL.rows.map(r=>r.vendor_id))].sort((a,b)=>vendorName(a).localeCompare(vendorName(b)));
   const chips=[['out','Outstanding bills'],['over','Overdue'],['ret','Retention held'],['settled','Settled'],['all','All']].map(c=>'<span class="chip'+(f===c[0]?' active':'')+'" onclick="acxBlFilter(\''+c[0]+'\')">'+c[1]+'</span>').join('');
   const rows=list.map(r=>{const out=Number(r.outstanding),od=out>0.004&&r.kind==='bill'&&r.due_date&&r.due_date<today();
@@ -800,19 +944,44 @@ function blDraw(host){
     +(waiting?'<div class="acx-warn"><b>'+waiting+' booked bill'+(waiting===1?'':'s')+'</b> ('+(BL.pend.bills||0)+' purchase, '+(BL.pend.ra||0)+' RA) waiting to be posted. <span class="acx-link" onclick="navTo(\'accounts/1/postings\')">Open Bill postings →</span></div>':'')
     +'<div class="acx-kpis">'+kpi('Outstanding bills',money(sum(bills)),bills.filter(r=>Number(r.outstanding)>0.004).length+' bills')+kpi('Overdue',money(sum(overdue)),overdue.length+' bills past their due date')+kpi('Retention held',money(sum(ret)),'RA bill retention not yet released')
       +kpi('On account (unadjusted)',money(onTot),BL.onacct.length+' payment'+(BL.onacct.length===1?'':'s')+' not set against bills')+'</div>'
-    +'<div class="acx-top"><div class="acx-subs" style="margin:0">'+chips+'</div><select id="blVendor" onchange="acxBlVendor()">'+opt('','All vendors',BL.vendor)+vendorsHere.map(v=>opt(v,vendorName(v),BL.vendor)).join('')+'</select><input class="grow" id="blQ" placeholder="Search by vendor, invoice or voucher" value="'+esc(BL.q)+'" oninput="acxBlSearch()"></div>'
+    +'<div class="acx-top"><div class="acx-subs" style="margin:0">'+chips+'</div><select id="blVendor" onchange="acxBlVendor()">'+opt('','All vendors',BL.vendor)+vendorsHere.map(v=>opt(v,vendorName(v),BL.vendor)).join('')+'</select><input class="grow" id="blQ" placeholder="Search by vendor, invoice or voucher" value="'+esc(BL.q)+'" oninput="acxBlSearch()">'+dlBtns('acxBlDownload')+'</div>'
     +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Vendor</th><th>Invoice / bill</th><th>Business unit</th><th>Bill date</th><th>Due</th><th class="acx-num">Amount</th><th class="acx-num">Paid / adjusted</th><th class="acx-num">Outstanding</th><th></th></tr></thead><tbody>'
     +(rows||'<tr><td colspan="9"><div class="empty" style="padding:24px"><div>Nothing here</div></div></td></tr>')+'</tbody></table></div></div>'
-    +'<div class="acx-sec-title">Retention releases certified by Engineering'+(relReady.length?' <span class="tag t-blue" style="margin-left:6px">'+relReady.length+' ready to pay · '+money(relReady.reduce((s,r)=>s+Number(r.amount),0))+'</span>':'')+'</div>'
+    +'<div class="acx-sec-title" style="display:flex;align-items:center;gap:8px">Retention releases certified by Engineering'+(relReady.length?' <span class="tag t-blue" style="margin-left:6px">'+relReady.length+' ready to pay · '+money(relReady.reduce((s,r)=>s+Number(r.amount),0))+'</span>':'')+'<span style="flex:1"></span>'+dlBtns('acxRelDownload','','btn-sm')+'</div>'
     +'<div class="acx-hint" style="margin-bottom:8px">Retention held back from RA bills is paid only against a release that Engineering has requested and a second person has approved (Engineering › Retention). It is paid here, for exactly the approved amount.</div>'
     +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Release</th><th>Contractor</th><th class="acx-num">Amount</th><th>Why</th><th>Status</th><th></th></tr></thead><tbody>'
     +(relRows||'<tr><td colspan="6"><div class="empty" style="padding:20px"><div>No retention release has been requested yet</div></div></td></tr>')+'</tbody></table></div></div>'
-    +'<div class="acx-sec-title">On-account payments not yet set against bills</div><div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Vendor</th><th>Entry</th><th>Date</th><th>Narration</th><th class="acx-num">Amount</th><th class="acx-num">Adjusted</th><th class="acx-num">Available</th><th></th></tr></thead><tbody>'
+    +'<div class="acx-sec-title" style="display:flex;align-items:center;gap:8px">On-account payments not yet set against bills<span style="flex:1"></span>'+dlBtns('acxOaDownload','','btn-sm')+'</div><div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Vendor</th><th>Entry</th><th>Date</th><th>Narration</th><th class="acx-num">Amount</th><th class="acx-num">Adjusted</th><th class="acx-num">Available</th><th></th></tr></thead><tbody>'
     +(orows||'<tr><td colspan="8"><div class="empty" style="padding:20px"><div>No on-account balance</div></div></td></tr>')+'</tbody></table></div></div>';
 }
 window.acxBlFilter=function(f){ BL.filter=f; blDraw(); };
 window.acxBlVendor=function(){ BL.vendor=val('blVendor'); blDraw(); };
 window.acxBlSearch=function(){ BL.q=val('blQ'); blDraw(); const e=$('blQ'); if(e){ e.focus(); e.setSelectionRange(e.value.length,e.value.length); } };
+const sumOf=(l,k)=>l.reduce((s,r)=>s+Number(r[k]||0),0);
+window.acxBlDownload=function(fmt,btn){
+  const list=blList(), lab={out:'Outstanding bills',over:'Overdue bills',ret:'Retention held',settled:'Settled bills',all:'All bills'}[BL.filter]||'Bills';
+  X.download(fmt,{title:'Bills & payments - '+lab,file:'Bills_'+lab,
+    sub:lab+(BL.vendor?' · Vendor: '+vendorName(Number(BL.vendor)):' · All vendors')+(S.buId?' · Business unit: '+buName(S.buId):' · All business units')+(BL.q?' · Search: "'+BL.q+'"':'')+' · as on '+dmy(today()),
+    cols:[{h:'Vendor'},{h:'Invoice / bill'},{h:'Type'},{h:'Voucher'},{h:'Business unit'},{h:'Bill date',t:'d'},{h:'Due date',t:'d'},{h:'Amount',t:'n'},{h:'Paid / adjusted',t:'n'},{h:'Outstanding',t:'n'}],
+    rows:list.map(r=>[vendorName(r.vendor_id),String(r.ref_no||'').replace(/ retention$/,''),r.kind==='retention'?'Retention':'Bill',r.voucher_no||'',r.business_unit_id?buName(r.business_unit_id):'',r.ref_date,r.due_date||'',r.amount,r.settled,r.outstanding]),
+    foot:['Total ('+list.length+')','','','','','','',sumOf(list,'amount'),sumOf(list,'settled'),sumOf(list,'outstanding')]},btn);
+};
+window.acxOaDownload=function(fmt,btn){
+  const l=BL.onacct;
+  X.download(fmt,{title:'On-account payments not yet set against bills',file:'On-account_payments',
+    sub:'Payments made to vendors that are not yet set against their bills'+(S.buId?' · Business unit: '+buName(S.buId):' · All business units')+' · as on '+dmy(today()),
+    cols:[{h:'Vendor'},{h:'Entry'},{h:'Type'},{h:'Date',t:'d'},{h:'Narration'},{h:'Amount',t:'n'},{h:'Adjusted',t:'n'},{h:'Available',t:'n'}],
+    rows:l.map(x=>[BL.subs[x.sub_ledger_id]||'Vendor',x.doc_no,(VTYPE[x.voucher_type]||[x.voucher_type])[0],x.voucher_date,x.narration||'',x.amount,x.used,Number(x.amount)-Number(x.used)]),
+    foot:['Total ('+l.length+')','','','','',sumOf(l,'amount'),sumOf(l,'used'),l.reduce((s,x)=>s+Number(x.amount)-Number(x.used),0)]},btn);
+};
+window.acxRelDownload=function(fmt,btn){
+  const l=(BL.rel||[]).filter(r=>BL.relAll||(r.status!=='Rejected'&&r.status!=='Cancelled'));
+  X.download(fmt,{title:'Retention releases certified by Engineering',file:'Retention_releases',
+    sub:'Retention held back from RA bills, released against Engineering approvals'+(BL.relAll?' · including rejected and cancelled':'')+' · as on '+dmy(today()),
+    cols:[{h:'Release'},{h:'Contractor'},{h:'Work order'},{h:'Project'},{h:'Amount',t:'n'},{h:'Reason'},{h:'Status'},{h:'Paid by voucher'}],
+    rows:l.map(r=>[r.doc_no,r.vendor,r.wo_no,r.project,r.amount,r.reason,r.status,r.paid_voucher_no||'']),
+    foot:['Total ('+l.length+')','','','',sumOf(l,'amount'),'','','']},btn);
+};
 window.acxBillHist=async function(id){
   openModal('<div class="modal-body"><div class="loader"><div class="spin"></div></div></div>');
   const [p,a]=await Promise.all([AC().from('v_payables').select('*').eq('id',id).single(),AC().from('payable_allocations').select('*').eq('payable_id',id).order('id')]);

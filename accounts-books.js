@@ -9,7 +9,7 @@
 if(window.__ACX_BOOKS_LOADED) return;
 window.__ACX_BOOKS_LOADED=true;
 const X=window.ACX; if(!X){ console.error('accounts-books.js needs accounts.js first'); return; }
-const {S,AC,PU,num,r2,money,drcr,dmy,dmyTime,today,val,chk,fail,rpc,opt,opts,field,vtag,csv,askReason,SRC_LABEL}=X;
+const {S,AC,PU,num,r2,money,drcr,dmy,dmyTime,today,val,chk,fail,rpc,opt,opts,field,vtag,askReason,SRC_LABEL}=X;
 const SECS=[['postings','Bill postings'],['postsales','Post Sales flow'],['chart','Chart of accounts'],['openings','Ledger opening'],['ledgers','Ledgers & trial balance'],['rules','Posting ledgers']];
 
 window.acxBooksRender=function(host,seg){
@@ -131,7 +131,7 @@ async function renderChart(host){
     +(S.canPost?'<button class="btn" onclick="acxLedgerForm(0,\'general\')"><i class="fa-solid fa-plus"></i> Ledger</button><button class="btn" onclick="acxLedgerForm(0,\'cost\')"><i class="fa-solid fa-plus"></i> Cost / custom ledger</button>':'')
     +(adm?'<button class="btn" onclick="acxGroupForm()"><i class="fa-solid fa-plus"></i> Group</button>':'')+'</div>'
     +(!hasChart?'<div class="card"><div class="empty" style="padding:28px"><i class="fa-solid fa-list-check"></i><div>No chart of accounts yet.</div>'+(adm?'<div style="margin-top:10px"><button class="btn btn-primary" onclick="acxSeedChart('+S.coId+')">Load the standard chart</button></div>':'<div class="acx-hint">Ask an Accounts administrator to load it.</div>')+'</div></div>':'')
-    +(hasChart?'<div class="acx-top"><input class="grow" id="chQ" placeholder="Search ledgers" value="'+esc(CH.q)+'" oninput="acxChSearch()"><label class="acx-hint" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="chInact" '+(CH.inactive?'checked':'')+' onchange="acxChSearch()"> Show inactive</label><button class="btn" onclick="acxChartCsv()"><i class="fa-solid fa-file-csv"></i> CSV</button></div><div id="chBody"></div>':'');
+    +(hasChart?'<div class="acx-top"><input class="grow" id="chQ" placeholder="Search ledgers" value="'+esc(CH.q)+'" oninput="acxChSearch()"><label class="acx-hint" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="chInact" '+(CH.inactive?'checked':'')+' onchange="acxChSearch()"> Show inactive</label>'+X.dlBtns('acxChartDownload')+'</div><div id="chBody"></div>':'');
   if(hasChart) chDraw();
 }
 window.acxChSearch=function(){ CH.q=val('chQ'); CH.inactive=chk('chInact'); chDraw(); const e=$('chQ'); if(e){ e.focus(); e.setSelectionRange(e.value.length,e.value.length); } };
@@ -161,9 +161,12 @@ function chDraw(){
     +(cc.map(l=>'<tr><td><i class="fa-solid fa-diagram-successor" style="color:#94a3b8;margin-right:6px"></i><b>'+esc(l.name)+'</b>'+(l.active?'':' <span class="tag t-gray">Inactive</span>')+'</td><td><span class="acx-code">'+esc(l.code)+'</span></td><td><span class="tag t-gray">'+(l.ledger_type==='cost'?'Cost ledger':'Custom ledger')+'</span> '+(l.sub_ledger_type?'<span class="acx-pill">sub-ledgers: '+esc(l.sub_ledger_type)+'</span>':'')+'</td>'
       +'<td class="acx-act"><button class="btn btn-sm btn-ghost" title="Sub-ledgers" onclick="acxSubsOpen('+l.id+')"><i class="fa-solid fa-users"></i></button>'+(S.canPost?'<button class="btn btn-sm btn-ghost" title="Edit" onclick="acxLedgerForm('+l.id+')"><i class="fa-solid fa-pen"></i></button>':'')+'</td></tr>').join('')||'<tr><td colspan="4"><div class="empty" style="padding:18px"><div>None yet</div></div></td></tr>')+'</tbody></table></div></div>';
 }
-window.acxChartCsv=function(){
-  const gn=id=>X.groupName(id);
-  csv('chart-of-accounts-'+(X.curCo()||{}).short_code+'.csv',['Code','Ledger','Type','Group','Sub-ledger type','Bank','Cash','Role','Active'],S.ledgers.map(l=>[l.code,l.name,l.ledger_type,gn(l.group_id),l.sub_ledger_type||'',l.is_bank?'Yes':'',l.is_cash?'Yes':'',l.system_key||'',l.active?'Yes':'No']));
+window.acxChartDownload=function(fmt,btn){
+  const gn=id=>X.groupName(id), TL={general:'General',cost:'Cost',custom:'Custom'}, co=X.curCo()||{};
+  X.download(fmt,{title:'Chart of accounts',file:'Chart_of_accounts_'+(co.short_code||''),
+    sub:(co.name||'')+' · '+S.ledgers.length+' ledgers (including inactive ones)',
+    cols:[{h:'Code'},{h:'Ledger'},{h:'Type'},{h:'Group'},{h:'Sub-ledgers'},{h:'Bank'},{h:'Cash'},{h:'Role in automatic postings'},{h:'Active'}],
+    rows:S.ledgers.slice().sort((a,b)=>String(a.code).localeCompare(String(b.code))).map(l=>[l.code,l.name,TL[l.ledger_type]||l.ledger_type,gn(l.group_id),l.sub_ledger_type||'',l.is_bank?'Yes':'',l.is_cash?'Yes':'',l.system_key?(KEY_LABEL[l.system_key]||l.system_key):'',l.active?'Yes':'No'])},btn);
 };
 function groupOpts(sel,exclude){
   const out=[]; const walk=(pid,d)=>S.groups.filter(g=>(g.parent_id||null)===pid).sort((a,b)=>(a.sort_order-b.sort_order)||a.name.localeCompare(b.name)).forEach(g=>{ if(g.id!==exclude){ out.push(opt(g.id,'  '.repeat(d)+g.name,sel)); walk(g.id,d+1);} });
@@ -343,7 +346,7 @@ async function lgDraw(){
   if(led&&led.sub_ledger_type) subs=await X.subsOf(led.id);
   body.innerHTML='<div class="acx-top"><select id="lgLed" onchange="acxLgLedger()" style="max-width:340px">'+ledgerPick(LG.ledger)+'</select>'
     +(led&&led.sub_ledger_type?'<select id="lgSub" style="max-width:300px" onchange="acxLgRun()">'+opt('','All sub-ledgers',LG.sub)+subs.map(s=>opt(s.id,s.name,LG.sub)).join('')+'</select>':'')
-    +'<input type="date" id="lgFrom" value="'+LG.from+'" onchange="acxLgRun()"><span class="acx-hint">to</span><input type="date" id="lgTo" value="'+LG.to+'" onchange="acxLgRun()"><button class="btn acx-right" onclick="acxLgCsv()" '+(LG.data?'':'disabled')+'><i class="fa-solid fa-file-csv"></i> CSV</button></div><div id="lgOut"></div>';
+    +'<input type="date" id="lgFrom" value="'+LG.from+'" onchange="acxLgRun()"><span class="acx-hint">to</span><input type="date" id="lgTo" value="'+LG.to+'" onchange="acxLgRun()">'+X.dlBtns('acxLgDownload','acx-right')+'</div><div id="lgOut"></div>';
   if(led) await acxLgRun(true);
   else $('lgOut').innerHTML='<div class="empty" style="padding:30px"><i class="fa-solid fa-book"></i><div>Choose a ledger to see its statement.</div></div>';
 }
@@ -362,13 +365,17 @@ window.acxLgRun=async function(first){
     +'<tr style="background:#f8fafc"><td colspan="4"><b>Closing balance</b></td><td class="acx-num"><b>'+money(data.total_dr)+'</b></td><td class="acx-num"><b>'+money(data.total_cr)+'</b></td><td class="acx-num"><b>'+drcr(data.closing)+'</b></td></tr></tbody></table></div></div>';
   const b=document.querySelector('#lgBody .btn.right'); if(b) b.disabled=false;
 };
-window.acxLgCsv=function(){
-  const d=LG.data; if(!d) return;
-  const rows=[[d.ledger,'From '+d.from,'To '+d.to],['Opening',d.opening]].concat((d.rows||[]).map(r=>[r.dt,r.doc_no,r.narration||'',r.sub_ledger||'',r.dr||'',r.cr||'',r.balance])).concat([['Closing','','','',d.total_dr,d.total_cr,d.closing]]);
-  csv('ledger-'+String(d.ledger).replace(/[^A-Za-z0-9]+/g,'-')+'.csv',['Date','Voucher','Particulars','Sub-ledger','Debit','Credit','Balance'],rows);
+window.acxLgDownload=function(fmt,btn){
+  const d=LG.data; if(!d){ toast('Choose a ledger first','warn'); return; }
+  const subTxt=(LG.sub&&$('lgSub'))?(($('lgSub').selectedOptions[0]||{}).text||''):'';
+  const rows=[['','','Opening balance','',null,null,d.opening]].concat((d.rows||[]).map(r=>[r.dt,r.doc_no,(r.narration||'')+(r.ledger?' ('+r.ledger+')':''),r.sub_ledger||'',r.dr>0?r.dr:null,r.cr>0?r.cr:null,r.balance]));
+  X.download(fmt,{title:LG.dataType==='general'?'Ledger statement':'Cost / custom ledger statement',file:'Ledger_'+d.ledger,
+    sub:d.ledger+(subTxt?' · '+subTxt:'')+' · '+dmy(d.from)+' to '+dmy(d.to)+(S.buId?' · Business unit: '+X.buName(S.buId):' · All business units'),
+    cols:[{h:'Date',t:'d'},{h:'Voucher'},{h:'Particulars'},{h:'Sub-ledger'},{h:'Debit',t:'n'},{h:'Credit',t:'n'},{h:'Balance',t:'b'}],
+    rows:rows,foot:['','','Closing balance','',d.total_dr,d.total_cr,d.closing]},btn);
 };
 async function lgSubs(body){
-  body.innerHTML='<div class="acx-top"><select id="lgLed" onchange="acxLgSubsRun()" style="max-width:340px">'+ledgerPick(LG.ledger,true)+'</select><span class="acx-hint">as on</span><input type="date" id="lgAsOn" value="'+LG.asOn+'" onchange="acxLgSubsRun()"><button class="btn acx-right" onclick="acxLgSubsCsv()"><i class="fa-solid fa-file-csv"></i> CSV</button></div><div id="lgOut"></div>';
+  body.innerHTML='<div class="acx-top"><select id="lgLed" onchange="acxLgSubsRun()" style="max-width:340px">'+ledgerPick(LG.ledger,true)+'</select><span class="acx-hint">as on</span><input type="date" id="lgAsOn" value="'+LG.asOn+'" onchange="acxLgSubsRun()">'+X.dlBtns('acxLgSubsDownload','acx-right')+'</div><div id="lgOut"></div>';
   if(LG.ledger) await acxLgSubsRun(true); else $('lgOut').innerHTML='<div class="empty" style="padding:30px"><i class="fa-solid fa-users"></i><div>Choose a ledger that has sub-ledgers — Sundry creditors for vendors, Advance from customers for customers, or a cost ledger.</div></div>';
 }
 window.acxLgSubsRun=async function(){
@@ -380,9 +387,16 @@ window.acxLgSubsRun=async function(){
     +'<tr style="background:#f8fafc"><td><b>Total</b></td><td class="acx-num"><b>'+money(td)+'</b></td><td class="acx-num"><b>'+money(tc)+'</b></td><td class="acx-num"><b>'+drcr(td-tc)+'</b></td><td></td></tr></tbody></table></div></div>';
 };
 window.acxLgOpenSub=function(id){ LG.view='statement'; LG.sub=String(id); renderLedgers($('acxSec')); };
-window.acxLgSubsCsv=function(){ const d=LG.subs; if(!d) return; csv('sub-ledger-balances-'+String(d.ledger).replace(/[^A-Za-z0-9]+/g,'-')+'.csv',['Sub-ledger','Debit','Credit','Balance (Dr +)'],(d.rows||[]).map(r=>[r.name,r.dr,r.cr,r.balance])); };
+window.acxLgSubsDownload=function(fmt,btn){
+  const d=LG.subs; if(!d){ toast('Choose a ledger first','warn'); return; }
+  const rows=d.rows||[], td=rows.reduce((s,r)=>s+Number(r.dr||0),0), tc=rows.reduce((s,r)=>s+Number(r.cr||0),0);
+  X.download(fmt,{title:'Sub-ledger balances',file:'Sub-ledger_balances_'+d.ledger,
+    sub:d.ledger+' · as on '+dmy(LG.asOn)+(S.buId?' · Business unit: '+X.buName(S.buId):' · All business units'),
+    cols:[{h:'Sub-ledger'},{h:'Debit',t:'n'},{h:'Credit',t:'n'},{h:'Balance',t:'b'}],
+    rows:rows.map(r=>[r.name,r.dr,r.cr,r.balance]),foot:['Total ('+rows.length+')',td,tc,td-tc],orient:'portrait'},btn);
+};
 async function lgTb(body){
-  body.innerHTML='<div class="acx-top"><input type="date" id="tbFrom" value="'+LG.from+'" onchange="acxTbRun()"><span class="acx-hint">to</span><input type="date" id="tbTo" value="'+LG.to+'" onchange="acxTbRun()"><button class="btn acx-right" onclick="acxTbCsv()"><i class="fa-solid fa-file-csv"></i> CSV</button></div><div id="lgOut"></div>';
+  body.innerHTML='<div class="acx-top"><input type="date" id="tbFrom" value="'+LG.from+'" onchange="acxTbRun()"><span class="acx-hint">to</span><input type="date" id="tbTo" value="'+LG.to+'" onchange="acxTbRun()">'+X.dlBtns('acxTbDownload','acx-right')+'</div><div id="lgOut"></div>';
   await acxTbRun();
 }
 window.acxTbRun=async function(){
@@ -401,7 +415,14 @@ window.acxTbRun=async function(){
     +(html||'<tr><td colspan="6"><div class="empty" style="padding:18px"><div>No entries or opening balances</div></div></td></tr>')+'<tr style="background:#f8fafc"><td><b>Total</b></td><td class="acx-num"><b>'+drcr(od)+'</b></td><td class="acx-num"><b>'+money(sum('dr'))+'</b></td><td class="acx-num"><b>'+money(sum('cr'))+'</b></td><td class="acx-num"><b>'+drcr(net)+'</b></td><td></td></tr></tbody></table></div></div>';
 };
 window.acxTbOpen=function(id){ LG.view='statement'; LG.ledger=String(id); LG.sub=''; renderLedgers($('acxSec')); };
-window.acxTbCsv=function(){ const d=LG.tb; if(!d) return; csv('trial-balance-'+d.from+'-to-'+d.to+'.csv',['Ledger','Group','Nature','Opening (Dr +)','Debit','Credit','Closing (Dr +)'],(d.rows||[]).map(r=>[r.name,r.group,r.nature,r.opening,r.dr,r.cr,r.closing])); };
+window.acxTbDownload=function(fmt,btn){
+  const d=LG.tb; if(!d){ toast('Nothing to download yet','warn'); return; }
+  const rows=d.rows||[], s=k=>rows.reduce((a,r)=>a+Number(r[k]||0),0);
+  X.download(fmt,{title:'Trial balance',file:'Trial_balance_'+((X.curCo()||{}).short_code||''),
+    sub:dmy(d.from)+' to '+dmy(d.to)+(S.buId?' · Business unit: '+X.buName(S.buId):' · All business units'),
+    cols:[{h:'Ledger'},{h:'Group'},{h:'Nature'},{h:'Opening',t:'b'},{h:'Debit',t:'n'},{h:'Credit',t:'n'},{h:'Closing',t:'b'}],
+    rows:rows.map(r=>[r.name,r.group,r.nature,r.opening,r.dr,r.cr,r.closing]),foot:['Total ('+rows.length+')','','',s('opening'),s('dr'),s('cr'),s('closing')]},btn);
+};
 
 /* =================================================================== POSTING LEDGERS (rules) */
 const ROLE_ROWS=[
