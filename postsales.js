@@ -146,7 +146,7 @@ function css(){
   .ps-action .tx{flex:1;min-width:0}
   .ps-action .tx b{display:block;font-size:13.5px;margin-bottom:2px}
   .ps-action .tx div{font-size:12.5px;color:var(--slate);line-height:1.45;margin-bottom:10px}
-  .ps-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg-card,#fff);margin-bottom:14px}
+  .ps-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg-card,#fff);margin-bottom:14px}
   .ps-filters>*{flex:1 1 180px;min-width:0}
   .ps-filters select,.ps-filters input[type=date]{height:38px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font-size:13.5px;font-family:inherit;background:var(--bg-card,#fff);color:var(--ink);width:100%}
   .ps-filters .mu-sw{flex:2 1 240px}
@@ -198,7 +198,7 @@ function css(){
     .ps-root .psb-span2{grid-column:auto}
     .ps-root .psb-bar{flex-wrap:wrap}
     .ps-root .psb-bar .btn{flex:1 1 auto;justify-content:center}
-    .ps-root .psb-facts{gap:6px 14px;font-size:12.5px}
+    .ps-root .psb-facts{gap:10px 14px;font-size:12.5px}
     .ps-root table.tbl{font-size:12.5px}
     .ps-root table.tbl th,.ps-root table.tbl td{padding:9px 10px}
     .ps-root .psb-sum{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -1050,11 +1050,20 @@ function bcss(){
      date 05/10/2026  Due 04/11/2026  Type Milestone  Raised automatically by system" all crammed
      into the first third with white space after it. A grid gives each fact a share of the line,
      and stacks the label over the value so neither is squeezed. */
-  .psb-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 24px;font-size:13px;margin-top:10px;color:var(--slate)}
+  /* A LABEL SITS ABOVE ITS VALUE, NOT BESIDE IT.
+
+     These read "Deposited in -" and "Entered by farvision-sync" as one run of text, so in a column
+     170px wide a long value wrapped underneath its own label and the next label started wherever
+     that happened to end. Nothing lined up with anything: the Applicants block especially looked
+     like text scattered across the card. Label on its own line, small and grey; value under it, in
+     ink. Every column then starts in the same place whatever is in it. */
+  .psb-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px 24px;font-size:13px;margin-top:10px;color:var(--slate)}
+  .psb-facts>span>i{display:block;font-style:normal;font-size:10.5px;font-weight:600;
+    letter-spacing:.3px;text-transform:uppercase;color:var(--slate);margin:0 0 1px}
   /* block, not a column flex: some of these read "Raised <b>automatically</b> by <b>system</b>",
      and as flex items every fragment of that became its own line. */
-  .psb-facts>span{display:block;min-width:0;line-height:1.5}
-  .psb-facts b{color:var(--ink);font-weight:650;overflow-wrap:anywhere}
+  .psb-facts>span{display:block;min-width:0;line-height:1.45}
+  .psb-facts b{display:block;color:var(--ink);font-weight:600;overflow-wrap:anywhere}
   /* 6px of side padding put a right-aligned Amount hard against the left edge of Invoice beside
      it, with no visible gap at all - the two columns read as one. 12px, and a touch more height
      per row, is what separates them. */
@@ -1278,7 +1287,16 @@ function recalc(full){
   const ff=$('psbFlatFacts');
   if(ff){
     if(pr){ const src=rateSource(pr.flat,f.snap);
-      ff.innerHTML='<div class="psb-facts"><span>Floor <b>'+esc(pr.floor?(pr.floor.label||ordinal(pr.floor.floor_no)):'—')+'</b></span><span>Super built-up <b>'+num(pr.flat.sba_sqft)+' sq ft</b></span><span>Built-up <b>'+(pr.flat.built_up_sqft!=null?num(pr.flat.built_up_sqft):'—')+'</b></span><span>Carpet <b>'+(pr.flat.carpet_sqft!=null?num(pr.flat.carpet_sqft):'—')+'</b></span><span>BHK <b>'+esc(pr.flat.bhk||'—')+'</b></span><span>PLC <b>'+(src.plcs.length?esc(src.plcs.map(p=>p.name+' '+rate(p.rate)).join(', ')):'None')+'</b></span><span>Floor rise <b>'+(src.frc?rate(src.frc.rate)+'/sq ft':'None')+'</b></span></div>';
+      const ffact=(l,x)=>'<span><i>'+esc(l)+'</i><b>'+x+'</b></span>';
+      ff.innerHTML='<div class="psb-facts">'
+        +ffact('Floor',esc(pr.floor?(pr.floor.label||ordinal(pr.floor.floor_no)):'—'))
+        +ffact('Super built-up',num(pr.flat.sba_sqft)+' sq ft')
+        +ffact('Built-up',(pr.flat.built_up_sqft!=null?num(pr.flat.built_up_sqft):'—'))
+        +ffact('Carpet',(pr.flat.carpet_sqft!=null?num(pr.flat.carpet_sqft):'—'))
+        +ffact('BHK',esc(pr.flat.bhk||'—'))
+        +ffact('PLC',(src.plcs.length?esc(src.plcs.map(p=>p.name+' '+rate(p.rate)).join(', ')):'None'))
+        +ffact('Floor rise',(src.frc?rate(src.frc.rate)+'/sq ft':'None'))
+        +'</div>';
     } else ff.innerHTML='';
   }
   // cost sheet
@@ -1469,7 +1487,7 @@ async function bookingView(host,id,stale){
   const {b,ap,ch,ms}=v, proj=S.projects.find(p=>p.id===b.project_id);
   const stName=sid=>{const s=S.stages.find(x=>x.id===sid);return s?s.name:'';};
   const st={active:'<span class="tag t-green">Active</span>',cancelled:'<span class="tag t-red">Cancelled</span>',transferred:'<span class="tag t-gray">Transferred</span>'}[b.status]||'';
-  const fact=(l,x)=>'<span>'+esc(l)+' <b>'+x+'</b></span>';
+  const fact=(l,x)=>'<span><i>'+esc(l)+'</i><b>'+x+'</b></span>';
   const applHtml=ap.map(a=>'<div class="psb-appl"><div class="psb-appl-h"><b>'+(a.seq===1?'First applicant':'Joint applicant '+a.seq)+' - '+esc([a.title,a.full_name].filter(Boolean).join(' '))+'</b></div><div class="psb-facts" style="margin-top:2px">'
     +(a.relation_name?fact(a.relation_type||'',esc(a.relation_name)):'')+(a.dob?fact('DOB',dmy(a.dob)):'')+(a.pan?fact('PAN',esc(a.pan)):'')+(a.aadhaar?fact('Aadhaar','XXXX XXXX '+esc(String(a.aadhaar).slice(-4))):'')
     +(a.mobile?fact('Mobile',esc(a.mobile)):'')+(a.email?fact('Email',esc(a.email)):'')+(a.occupation?fact('Occupation',esc(OCC_LBL[a.occupation]||a.occupation)):'')+(a.company?fact('Company',esc(a.company)+(a.designation?', '+esc(a.designation):'')):'')
@@ -1821,7 +1839,7 @@ async function receiptView(host,id,stale){
   if(!v){ host.innerHTML='<div class="empty"><div>Receipt not found</div></div>'; return; }
   const {r,al}=v, b=r.bookings||{}, ap=(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq);
   const applied=al.reduce((s,a)=>s+num(a.amount),0);
-  const fact=(l,x)=>'<span>'+esc(l)+' <b>'+x+'</b></span>';
+  const fact=(l,x)=>'<span><i>'+esc(l)+'</i><b>'+x+'</b></span>';
   host.innerHTML='<div class="toolbar"><button class="btn btn-sm" onclick="navTo(\'postsales/receipts\')"><i class="fa-solid fa-arrow-left"></i> Receipts</button><div style="flex:1"><div class="sec-title" style="margin:0">'+esc(r.receipt_no)+' '+(r.status==='active'?'<span class="tag t-green">Received</span>':'<span class="tag t-red">Reversed</span>')+(r.against_interest?' <span class="tag t-purple">Against interest</span>':'')+'</div><div class="pss-hint" style="margin:0"><a href="javascript:void 0" onclick="navTo(\'postsales/bookings/'+b.id+'\')">'+esc(b.booking_no||'')+'</a> · '+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+' · '+esc(ap.map(a=>a.full_name).join(' & '))+'</div></div>'
     +'<button class="btn" onclick="psrPrint('+r.id+')"><i class="fa-solid fa-print"></i> Money receipt</button>'+(r.status==='active'?'<button class="btn btn-danger" onclick="psrReverseModal('+r.id+')"><i class="fa-solid fa-rotate-left"></i> Reverse</button>':'')+'</div>'
     +mKpis([['Amount',inr(r.amount),'Rupees '+inWords(r.amount)+' only'],['Applied to invoices',inr(r.status==='active'?applied:0),''],['Held as advance',inr(r.status==='active'?num(r.amount)-applied:0),'applied when the next demand is raised']])
