@@ -2666,6 +2666,20 @@ const isNumCol=c=>c.t==='inr'||c.t==='n'||c.t==='pct';
 const repCompany=()=>RP.theme==='mis'?'Jain Group':((S.setup&&S.setup.company_name)||'Jain Group');
 const repStamp=()=>{const d=new Date();return dmy(today())+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+' by '+String(state.email||'').split('@')[0];};
 const repFile=ext=>RP.title.replace(/[^\w ]+/g,' ').trim().replace(/\s+/g,'_')+'_'+today()+'.'+ext;
+/* SAVE THE FILE, DO NOT SHOW IT.
+
+   Both buttons were opening the report in a new tab instead of putting it in Downloads. A browser
+   decides that for itself from the blob's content type: it previews anything it knows how to
+   render, and it knows how to render a PDF. Handing it application/octet-stream instead says
+   "this is a file, not a page", so there is nothing for it to preview and it saves it under the
+   name on the anchor. Excel goes through the same path so the two buttons behave alike. */
+function repSave(blob, name){
+  const url=URL.createObjectURL(new Blob([blob],{type:'application/octet-stream'}));
+  const a=document.createElement('a');
+  a.href=url; a.download=name; a.rel='noopener'; a.style.display='none';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
+}
 const cellText=(c,r)=>{const v=r[c.k];if(c.text) return c.text(r);if(c.t==='d') return dmy(v);if(c.t==='pct') return v==null?'':num(v).toFixed(1)+'%';if(c.t==='inr'||c.t==='n') return (v==null||v==='')?'':(RP.theme==='mis'&&!num(v)?'—':indN(v,c.t==='n'&&num(v)%1!==0));return v==null?'':String(v);};
 
 window.psrpExcel=async function(btn){
@@ -2712,7 +2726,7 @@ window.psrpExcel=async function(btn){
     ws.pageSetup={orientation:'landscape',paperSize:9,fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:0.4,right:0.4,top:0.5,bottom:0.6,header:0.2,footer:0.3},printTitlesRow:'6:6'};
     ws.headerFooter={oddFooter:'&L&8'+repCompany().replace(/&/g,'&&')+' · JAIN-E Post Sales&C&8'+RP.title.replace(/&/g,'&&')+'&R&8Page &P of &N'};
     const buf=await wb.xlsx.writeBuffer();
-    usbSaveBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),repFile('xlsx'));
+    repSave(buf, repFile('xlsx'));
     toast('Excel downloaded','ok');
   }catch(e){ toast('Could not build the spreadsheet: '+((e&&e.message)||e),'err'); }
   finally{ if(btn){btn.disabled=false;btn.innerHTML=restore;} }
@@ -2773,7 +2787,7 @@ window.psrpPdf=async function(btn){
         doc.text(repCompany()+' · '+RP.title,M,H-16); doc.text('Page '+p+' of {total}',W-M,H-16,{align:'right'}); }
     });
     if(typeof doc.putTotalPages==='function') doc.putTotalPages('{total}');
-    doc.save(repFile('pdf'));
+    repSave(doc.output('blob'), repFile('pdf'));
     toast('PDF downloaded','ok');
   }catch(e){ toast('Could not build the PDF: '+((e&&e.message)||e),'err'); }
   finally{ if(btn){btn.disabled=false;btn.innerHTML=restore;} }
