@@ -2942,9 +2942,20 @@ async function repCollection(host,stale){
   if(stale()) return;
   RP._redraw=function(){
     const tw=RP.tower?Number(RP.tower):null;
-    const rows=rcs.filter(r=>r.bookings&&(!tw||r.bookings.tower_id===tw)&&matchQ(r.bookings)).map(r=>({date:r.receipt_date,no:r.receipt_no,booking:r.bookings.booking_no,flat:flatLbl(r.bookings),app:apName(r.bookings),mode:MODE_LBL[r.mode]||r.mode,ref:r.instrument_no||'',bank:r.bank_accounts&&r.bank_accounts.name||'',type:r.against_interest?'Interest':'Principal',amount:r.status==='active'?num(r.amount):0,status:r.status==='active'?'Received':'Reversed',_link:'postsales/receipts/'+r.id,_style:r.status!=='active'?'opacity:.55':''}));
+    /* A PTC TRANSFER IS NOT COLLECTION.
+
+       Money moved from one unit to another arrives here as a receipt like any other, and it was
+       being added into the period's total - so the report credited the same rupees twice over,
+       once where they left and once where they landed. Farvision's own books do not count them
+       as collection and neither does the MIS, which has always excluded mode 'transfer'.
+
+       The rows stay, because somebody looking for where a payment went needs to see that it was
+       transferred, but they are shown at nil the way a reversed receipt already is. */
+    const rows=rcs.filter(r=>r.bookings&&(!tw||r.bookings.tower_id===tw)&&matchQ(r.bookings)).map(r=>{
+      const off=r.status!=='active'||r.mode==='transfer';
+      return {date:r.receipt_date,no:r.receipt_no,booking:r.bookings.booking_no,flat:flatLbl(r.bookings),app:apName(r.bookings),mode:MODE_LBL[r.mode]||r.mode,ref:r.instrument_no||'',bank:r.bank_accounts&&r.bank_accounts.name||'',type:r.against_interest?'Interest':'Principal',amount:off?0:num(r.amount),status:r.status!=='active'?'Reversed':(r.mode==='transfer'?'Transfer':'Received'),_link:'postsales/receipts/'+r.id,_style:off?'opacity:.55':''};});
     const cols=[{h:'Date',k:'date',t:'d'},{h:'Receipt',k:'no'},{h:'Booking',k:'booking'},{h:'Flat',k:'flat'},{h:'Received from',k:'app'},{h:'Mode',k:'mode'},{h:'Ref.',k:'ref'},{h:'Deposited in',k:'bank'},{h:'Towards',k:'type'},{h:'Amount',k:'amount',t:'inr',sum:1},{h:'Status',k:'status'}];
-    repSet('Collection Report',subLine(dmy(RP.from)+' to '+dmy(RP.to)+' · reversed receipts shown at nil'),cols,rows);
+    repSet('Collection Report',subLine(dmy(RP.from)+' to '+dmy(RP.to)+' · reversed receipts and unit-to-unit transfers shown at nil'),cols,rows);
     const grp=k=>{const m={};rows.filter(r=>r.status==='Received').forEach(r=>{m[r[k]||'—']=(m[r[k]||'—']||0)+r.amount;});return Object.entries(m).sort((a,b)=>b[1]-a[1]);};
     const mini=(t,arr)=>'<div class="psb-sec" style="flex:1;min-width:260px"><h3>'+t+'</h3><table class="psb-tbl"><tbody>'+arr.map(x=>'<tr><td>'+esc(x[0])+'</td><td class="r">'+inr(x[1])+'</td></tr>').join('')+'</tbody></table></div>';
     host.innerHTML=repTable(cols,rows,{empty:'No receipts in this period'})+(rows.length?'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:14px">'+mini('By mode',grp('mode'))+mini('By bank account',grp('bank'))+'</div>':'');
