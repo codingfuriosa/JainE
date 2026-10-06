@@ -721,7 +721,11 @@ function canFeedbackHub(){
 
    To open it up later, delete this block, the two checks for 'inventory' below, and let it be granted
    through modules like any other page. To add someone for now, add an address here. */
-const INVENTORY_PEOPLE=['ayushruia1@gmail.com','businessanalyst@thejaingroup.com','system3.thejaingroup@gmail.com'];
+/* 2026-10-06: the Systems team (department "Systems" in adm.users) was added to the three administrators, and made
+   Purchase administrators too: system.admin@ (Ayush Ruia's other login), system1@, system2.thejaingroup@,
+   system6thejaingroup@, ai@. Keep this list and purchase.module_admins the same people. */
+const INVENTORY_PEOPLE=['ayushruia1@gmail.com','businessanalyst@thejaingroup.com','system3.thejaingroup@gmail.com',
+  'system.admin@thejaingroup.com','system1@thejaingroup.com','system2.thejaingroup@gmail.com','system6thejaingroup@gmail.com','ai@thejaingroup.com'];
 function canInventory(){
   if(state.isCustomer||state.impersonating) return false;
   const me=String(state.email||'').trim().toLowerCase();
