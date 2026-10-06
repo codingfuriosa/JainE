@@ -1063,7 +1063,7 @@ function bcss(){
   /* block, not a column flex: some of these read "Raised <b>automatically</b> by <b>system</b>",
      and as flex items every fragment of that became its own line. */
   .psb-facts>span{display:block;min-width:0;line-height:1.45}
-  .psb-facts b{display:block;color:var(--ink);font-weight:600;overflow-wrap:anywhere}
+  .psb-facts b{display:block;color:var(--ink);font-weight:600;overflow-wrap:break-word}
   /* 6px of side padding put a right-aligned Amount hard against the left edge of Invoice beside
      it, with no visible gap at all - the two columns read as one. 12px, and a touch more height
      per row, is what separates them. */
@@ -1129,14 +1129,14 @@ async function bookingList(host,stale){
   const pname=id=>{const p=S.projects.find(x=>x.id===id);return p?p.name:'';};
   const opts='<option value="">All projects</option>'+S.projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(B.pid||'')?' selected':'')+'>'+esc(p.name)+'</option>').join('');
   host.innerHTML='<div class="ps-head"><div class="t"><div class="sec-title">Bookings</div><div class="pss-hint" style="margin:2px 0 0">Tap a booking to see its cost sheet, payments, invoices and interest.</div></div><div class="acts"><span id="psSyncInfo" class="pss-hint" style="margin:0;align-self:center"></span><button class="btn" onclick="psSyncNow(this)" title="Pull the latest Farvision imports from Customer Portal"><i class="fa-solid fa-rotate"></i> Sync now</button><button class="btn btn-primary" onclick="navTo(\'postsales/bookings/new\')"><i class="fa-solid fa-plus"></i> New booking</button>'+psDlBtns('psbDownload')+'</div></div>'
-    +'<div class="ps-filters"><select id="psbProj" onchange="B.tower=\'\';psbFilter()">'+opts+'</select>'
-    +psTowerOptions(B.pid,B.tower,'psbTower','B.tower=this.value;psbFilter()')
+    +'<div class="ps-filters"><select id="psbProj" onchange="psbPick()">'+opts+'</select>'
+    +psTowerOptions(B.pid,B.tower,'psbTower','psbTowerPick(this.value)')
     +'<span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="psbQ" placeholder="Search booking no., flat or applicant" oninput="psbFilter()"></span></div>'
     +'<div id="psbList"></div>';
   psSyncInfo();
   window.psbFilter=function(){
     B.pid=val('psbProj')||null; const q=val('psbQ').toLowerCase();
-    psSyncTowerSelect('psbTower',B.pid,B.tower,"B.tower=this.value;psbFilter()");
+    psSyncTowerSelect('psbTower',B.pid,B.tower,'psbTowerPick(this.value)');
     const tw=B.tower?Number(B.tower):null;
     const rows=B.list.filter(b=>(!B.pid||String(b.project_id)===B.pid)&&(!tw||b.tower_id===tw)&&(!q||[b.booking_no,b.flats&&b.flats.flat_code,b.towers&&b.towers.name,(b.booking_applicants||[]).map(a=>a.full_name).join(' ')].join(' ').toLowerCase().includes(q)));
     window._psbRows=rows;   // what the download sends: exactly what is on screen
@@ -1234,7 +1234,7 @@ function drawForm(host){
   html+='<div class="psb-sec"><h3><span class="n">3</span> Payment plan <span id="psbStd"></span></h3><div class="frm psb-grid"><div class="psb-span2"><label>Standard plan</label><select id="psbPl" onchange="psbSetPlan(this.value)"><option value="">Choose…</option>'+plans.map(p=>'<option value="'+p.id+'"'+(p.id===f.planId?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select></div></div>'
     +'<div class="pss-hint" style="margin-top:8px">Edit any milestone below to make a non-standard plan for this booking only - no approval needed.</div>'
     +'<div style="overflow-x:auto"><table class="psb-tbl" style="margin-top:6px"><thead><tr><th>#</th><th style="min-width:220px">Milestone</th><th>Trigger</th><th>Fixed ₹</th><th>Less bkg</th><th>Unit %</th><th>Parking %</th><th>EDC %</th><th class="r">Unit</th><th class="r">Parking</th><th class="r">EDC</th><th class="r">Gross</th><th></th></tr></thead><tbody id="psbMs"></tbody><tfoot id="psbMsT"></tfoot></table></div>'
-    +'<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm" onclick="psbMsAdd()"><i class="fa-solid fa-plus"></i> Add milestone</button><button class="btn btn-sm btn-ghost" id="psbReset" onclick="psbSetPlan(B.f.planId)"><i class="fa-solid fa-rotate-left"></i> Reset to standard</button></div></div>';
+    +'<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm" onclick="psbMsAdd()"><i class="fa-solid fa-plus"></i> Add milestone</button><button class="btn btn-sm btn-ghost" id="psbReset" onclick="psbResetPlan()"><i class="fa-solid fa-rotate-left"></i> Reset to standard</button></div></div>';
   // 4 applicants
   html+='<div class="psb-sec"><h3><span class="n">4</span> Applicants</h3><div class="pss-hint">The first applicant is the one the Customer Portal login and all correspondence go to.</div><div id="psbAppl"></div><button class="btn btn-sm" onclick="psbApplAdd()"><i class="fa-solid fa-user-plus"></i> Add joint applicant</button></div>';
   // 5 details
@@ -1528,8 +1528,8 @@ async function bookingView(host,id,stale){
     +((b.attachments||[]).length
       ? '<div class="psb-sec"><h3>Attachments</h3><div class="psb-kyc">'
         +b.attachments.map(a=>'<span class="tag t-blue" style="cursor:pointer" onclick="s3OpenSigned(\''+esc(a.path)+'\')"><i class="fa-solid fa-paperclip"></i> '+esc(a.name)+'</span>').join('')
-        +'</div>'+(b.remarks?'<div class="pss-hint" style="margin-top:8px">'+esc(b.remarks)+'</div>':'')+'</div>'
-      : (b.remarks?'<div class="psb-sec"><h3>Remarks</h3><div class="pss-hint" style="margin:0">'+esc(b.remarks)+'</div></div>':''));
+        +'</div></div>'
+      : '');
   const [mo,irows,po]=await Promise.all([bookingMoney(b.id),interestRows(b.id),PS().from('payouts').select('*').eq('booking_id',b.id).order('payout_date')]);
   const box=$('psbMoney');
   if(stale()||!box) return;
@@ -1707,7 +1707,9 @@ async function receiptList(host,stale){
     window._psrRows=rows;   // the download sends exactly what is filtered here
     const act=rows.filter(r=>r.status==='active'), tot=act.reduce((s,r)=>s+num(r.amount),0);
     const stTag=r=>r.status==='active'?'<span class="tag t-green">Received</span>':'<span class="tag t-red">Reversed</span>';
-    $('psrList').innerHTML=(rows.length?'<div class="psb-sum" style="margin:0 0 12px"><div>Total received<b>'+inr(tot)+'</b></div><div>Receipts<b>'+act.length+'</b></div>'+(rows.length>act.length?'<div>Reversed<b>'+(rows.length-act.length)+'</b></div>':'')+'</div>':'')
+    /* The cards above the list are gone, as on Invoices: they restated what the table and its
+       totals row already say, and pushed the first receipt off the screen. */
+    $('psrList').innerHTML=
       +listHtml('rc','psrFilter',rows,
       '<th>Receipt</th><th>Date</th><th>Booking / flat</th><th>Received from</th><th>Mode</th><th class="pss-num">Amount</th><th>Status</th>',
       r=>{const b=r.bookings||{},ap=(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq);
@@ -1990,13 +1992,13 @@ async function invoiceList(host,stale){
       +'</div></div>'
     // null rather than an empty string: this lands inside a double-quoted HTML attribute, and a
     // quote character here would close it early.
-    +'<div class="ps-filters">'+projSelect('psiProj',I.pid,'I.tower=null;psiFilter()','All projects')+psTowerOptions(I.pid,I.tower,'psiTower','I.tower=this.value;psiFilter()')
+    +'<div class="ps-filters">'+projSelect('psiProj',I.pid,'psiPick()','All projects')+psTowerOptions(I.pid,I.tower,'psiTower','psiTowerPick(this.value)')
     +'<select id="psiSt" onchange="psiFilter()"><option value="open"'+(I.status==='open'?' selected':'')+'>Open invoices</option><option value="overdue"'+(I.status==='overdue'?' selected':'')+'>Overdue</option><option value="unpaid"'+(I.status==='unpaid'?' selected':'')+'>Not fully paid</option><option value="cancelled"'+(I.status==='cancelled'?' selected':'')+'>Cancelled</option><option value=""'+(I.status===''?' selected':'')+'>All invoices</option></select>'
     +'<span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="psiQ" placeholder="Search invoice, booking, flat, customer or milestone" oninput="psiFilter()"></span></div>'
     +'<div id="psiList"></div>';
   window.psiFilter=function(){
     I.pid=val('psiProj')||null; I.status=val('psiSt'); const q=val('psiQ').toLowerCase(), td=today();
-    psSyncTowerSelect('psiTower',I.pid,I.tower,"I.tower=this.value;psiFilter()");
+    psSyncTowerSelect('psiTower',I.pid,I.tower,'psiTowerPick(this.value)');
     const itw=I.tower?Number(I.tower):null;
     const rows=I.list.filter(i=>{const b=i.bookings||{}, bal=num(i.total)-(I.paid[i.id]||0);
       if(I.pid&&String(i.project_id)!==I.pid) return false;
@@ -2137,7 +2139,7 @@ async function progressView(host,stale){
   const sn=id=>{const s=S.stages.find(x=>x.id===id);return s?s.name:'';};
   host.innerHTML=invNav('progress')
     +'<div class="ps-head"><div class="t"><div class="sec-title">Construction progress</div><div class="pss-hint" style="margin:2px 0 0">Every stage recorded as complete, per tower (and per floor for floor-level stages), with the invoices it raised. New bookings in a tower are invoiced for these stages at booking.</div></div><div class="acts"><button class="btn btn-primary" onclick="navTo(\'postsales/invoices/stage\')"><i class="fa-solid fa-helmet-safety"></i> Mark stage complete</button></div></div>'
-    +'<div class="ps-filters">'+projSelect('psiPP',pid,'I.pid=this.value;psiProgressGo()','')+'</div>'
+    +'<div class="ps-filters">'+projSelect('psiPP',pid,'psiProgressPick(this.value)','')+'</div>'
     +(S.towers.map(t=>{const e=(ev||[]).filter(x=>x.tower_id===t.id);
       return '<div class="psb-sec"><h3>'+esc(t.name)+' <span class="tag t-gray">'+e.length+' stage'+(e.length===1?'':'s')+' complete</span></h3>'+(e.length?'<table class="psb-tbl"><thead><tr><th>Stage</th><th>Floor</th><th>Completed on</th><th class="r">Invoices raised</th><th>Recorded by</th></tr></thead><tbody>'+e.map(x=>'<tr><td>'+esc(sn(x.stage_id))+'</td><td>'+(x.floor_no==null?'<span style="color:var(--slate)">Whole tower</span>':esc(ordinal(x.floor_no)))+'</td><td>'+dmy(x.completed_on)+'</td><td class="r">'+(cnt[x.id]||0)+'</td><td>'+esc((x.created_by||'').split('@')[0])+'</td></tr>').join('')+'</tbody></table>':'<div class="pss-hint">Nothing recorded yet.</div>')+'</div>';}).join('')||'<div class="empty"><div>No towers set up for this project</div></div>');
 }
@@ -2631,6 +2633,29 @@ function psTowerOptions(pid, sel, id, onch){
     +list.map(t=>'<option value="'+t.id+'"'+(String(t.id)===String(sel||'')?' selected':'')+'>'+esc(t.name)+'</option>').join('')
     +'</select>';
 }
+/* AN INLINE HANDLER RUNS IN THE GLOBAL SCOPE. THIS FILE DOES NOT.
+
+   postsales.js is wrapped in an IIFE, so B, I and RP are private to it. onchange="B.tower='';
+   psbFilter()" therefore threw ReferenceError: B is not defined on the very first statement, before
+   it ever reached psbFilter - and an exception in an inline handler is swallowed by the browser, so
+   nothing moved and nothing was reported. That is the whole of "the dropdowns do nothing": not the
+   filter, not the query, not the data. psbFilter itself was fine and was simply never called.
+
+   It took out more than the project pickers - the block pickers, the project picker on
+   Construction progress, the Grid / List with price / Summary chips on Flat Availability, and
+   "Reset to standard" on the booking form, which passed B.f.planId as an argument and so blew up
+   evaluating it.
+
+   Every one of them now calls a function that IS on window, and the private state is touched on
+   this side of the fence where it exists. */
+window.psbPick=function(){ B.tower=''; psbFilter(); };
+window.psbTowerPick=function(v){ B.tower=v; psbFilter(); };
+window.psbResetPlan=function(){ psbSetPlan(B.f.planId); };
+window.psiPick=function(){ I.tower=null; psiFilter(); };
+window.psiTowerPick=function(v){ I.tower=v; psiFilter(); };
+window.psiProgressPick=function(v){ I.pid=v||null; psiProgressGo(); };
+window.repSetView=function(v){ RP.view=v; if(RP._redraw) RP._redraw(); };
+
 /* REBUILD THE BLOCK LIST WHEN THE PROJECT CHANGES.
 
    psTowerOptions is called once, while the page is being written. Choosing a project after that
@@ -2642,17 +2667,25 @@ async function psSyncTowerSelect(id,pid,sel,onch){
   const el=document.getElementById(id);
   if(!el) return;
   const key=String(pid||'');
-  if(el.dataset.pid===key) return;     // same project, same blocks, leave the chosen one alone
-  el.dataset.pid=key;                  // claimed now, so two quick changes cannot both rebuild
+  if(el.dataset.pid===key || el.dataset.loading===key) return;  // already showing it, or fetching it
+  /* MARKED AS IN FLIGHT, NOT AS DONE. Writing the project onto dataset.pid before the fetch meant a
+     fetch that failed left the dropdown claiming to be showing that project's blocks - so every
+     later attempt short-circuited on the first line and the list stayed disabled for good. The
+     project is recorded only once the blocks are actually on screen. */
+  el.dataset.loading=key;
   /* S.towers only ever holds ONE project's blocks - loadProject replaces it - so rebuilding the
      list from what is in memory would show the blocks of whichever project was opened last, or
      none at all on a page that has not opened one. The project's own blocks are fetched first. */
   if(pid && String(S.pid||'')!==key){
     try{ await loadProject(Number(pid)); S.pid=Number(pid); }
-    catch(_e){ /* leave the dropdown as it is rather than showing another project's blocks */ return; }
+    catch(_e){
+      const back=document.getElementById(id);
+      if(back) delete back.dataset.loading;   // so the next attempt tries again
+      return;
+    }
   }
   const now=document.getElementById(id);
-  if(!now || now.dataset.pid!==key) return;   // the project changed again while this was loading
+  if(!now || now.dataset.loading!==key) return;   // the project changed again while this was loading
   now.outerHTML=psTowerOptions(pid,sel,id,onch);
   const fresh=document.getElementById(id);
   if(fresh) fresh.dataset.pid=key;
@@ -2967,7 +3000,7 @@ async function repAvailability(host,stale){
     repSet('Flat Availability',subLine('as on '+dmy(today())),cols,rows);
     const summary={}; flats.forEach(f=>{const k=tName(f.tower_id)+'|'+(f.bhk||'—');summary[k]=summary[k]||{tower:tName(f.tower_id),bhk:f.bhk||'—',total:0,available:0,booked:0,other:0,availSba:0};const s=summary[k];s.total++;if(f.status==='available'){s.available++;s.availSba+=num(f.sba_sqft);}else if(f.status==='booked')s.booked++;else s.other++;});
     const scols=[{h:'Tower',k:'tower'},{h:'BHK',k:'bhk'},{h:'Flats',k:'total',t:'n',sum:1},{h:'Available',k:'available',t:'n',sum:1},{h:'Booked',k:'booked',t:'n',sum:1},{h:'Registered / possession / blocked',k:'other',t:'n',sum:1},{h:'Available area (sq ft)',k:'availSba',t:'n',sum:1}];
-    host.innerHTML='<div class="pss-subs"><span class="chip'+(RP.view==='grid'?' active':'')+'" onclick="RP.view=\'grid\';RP._redraw()">Grid</span><span class="chip'+(RP.view==='list'?' active':'')+'" onclick="RP.view=\'list\';RP._redraw()">List with price</span><span class="chip'+(RP.view==='summary'?' active':'')+'" onclick="RP.view=\'summary\';RP._redraw()">Summary</span></div>'
+    host.innerHTML='<div class="pss-subs"><span class="chip'+(RP.view==='grid'?' active':'')+'" onclick="repSetView(\'grid\')">Grid</span><span class="chip'+(RP.view==='list'?' active':'')+'" onclick="repSetView(\'list\')">List with price</span><span class="chip'+(RP.view==='summary'?' active':'')+'" onclick="repSetView(\'summary\')">Summary</span></div>'
       +(RP.view==='summary'?repTable(scols,Object.values(summary)):RP.view==='list'?repTable(cols,rows):'<div class="pss-legend">'+Object.keys(STATUS_LBL).map(k=>'<span class="pss-flat '+k+'">'+STATUS_LBL[k]+' ('+flats.filter(f=>f.status===k).length+')</span>').join('')+'</div>'+towers.map(t=>'<div class="sec-title" style="margin:14px 0 6px">'+esc(t.name)+'</div>'+flatGrid(t).replace(/onclick="pssFlatModal\(\d+\)"/g,'').replace(/<div style="margin-top:10px"><button[^]*?<\/button><\/div>/,'')).join(''));
     if(RP.view==='summary') repSet('Flat Availability - summary',subLine('as on '+dmy(today())),scols,Object.values(summary));
   };
