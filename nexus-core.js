@@ -20510,6 +20510,10 @@ function cpaPhCss(){return `<style>
   .cph-fixi .cph-th{width:54px;height:54px;flex:none}
   .cph-fixw{flex:1;min-width:0;font-size:12.5px;color:var(--slate);line-height:1.45}
   .cph-fixw b{display:block;color:var(--ink);font-size:13.5px}
+  .cph-fixpv{position:relative;flex:none;padding:0;border:0;background:none;cursor:zoom-in;border-radius:8px}
+  .cph-fixpv:hover .cph-th{box-shadow:0 0 0 2px #b91c1c}
+  .cph-fixpn{position:absolute;right:-6px;top:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b91c1c;
+    color:#fff;font-size:11px;font-weight:800;display:grid;place-items:center}
   .cph-fixg{font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#b91c1c;margin:6px 2px -2px}
   .cph-fixg:first-child{margin-top:0}
   .cph-fixs{display:flex;flex-direction:column;gap:6px;margin:2px 0 4px}
@@ -20722,7 +20726,7 @@ async function cpaPhFixList(projects,units){
     const key=t+'|'+w.key;
     if(!byPlace[key]){ byPlace[key]={t,p,w,place:w.place,can:w.can,pn:projOf[w.pid]?String(projOf[w.pid].name).split('(')[0].trim():'',
       n:0,when:p.reviewed_at||p.created_at,notes:[]}; order.push(key); }
-    const g=byPlace[key]; g.n++;
+    const g=byPlace[key]; g.n++; (g.ps=g.ps||[]).push(p);
     if(p.review_note&&g.notes.indexOf(p.review_note)===-1) g.notes.push(p.review_note);
   }));
   /* Floor-wise, the way the site is walked: project by project; within one, the whole-project
@@ -20768,9 +20772,12 @@ async function cpaPhFixList(projects,units){
           const headOf=x=>x.lvl===2?[x.tower||'Flats',x.floor==null?'Other units':(x.floor===0?'Ground floor':'Floor '+x.floor)].join(' · '):'';
           const head=headOf(w), prevHead=prev?headOf(prev.w):'';
           const p=it.p, isVid=(p.file_type||'').indexOf('video')===0;
-          const th=isVid&&!p.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
-            :'<img class="cph-th" '+cphThumbAttrs(p,it.t)+' alt="" decoding="async">';
-          return (head&&head!==prevHead?'<div class="cph-fixg">'+esc(head)+'</div>':'')+'<div class="cph-fixi">'+th
+          // Tapping the picture shows the rejected photo (or video) full size - every one at that place.
+          const th=(isVid&&!p.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
+            :'<img class="cph-th" '+cphThumbAttrs(p,it.t)+' alt="" decoding="async">');
+          const thBtn='<button type="button" class="cph-fixpv" onclick="cpaPhFixPreview('+i+',0)" title="See the rejected '+(isVid?'video':'photo')+' full size">'+th
+            +(it.n>1?'<span class="cph-fixpn">'+it.n+'</span>':'')+'</button>';
+          return (head&&head!==prevHead?'<div class="cph-fixg">'+esc(head)+'</div>':'')+'<div class="cph-fixi">'+thBtn
             +'<div class="cph-fixw"><b>'+esc(w.lvl===2&&w.tower?it.place.replace(w.tower+' · ',''):it.place)+'</b>'
               +esc([it.n>1?it.n+' rejected':'',it.notes.join(' · '),'rejected '+fmtDate(it.when)].filter(Boolean).join(' · '))+'</div>'
             +(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+i+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'')
@@ -20780,6 +20787,41 @@ async function cpaPhFixList(projects,units){
     +'</div>';
   cphLazy(host);
 }
+/* Full-size view of a rejected photo in "Photos to retake": the reviewer's reason and date on top,
+   arrows (and the keyboard) through every rejected photo at that place, and Retake right there. */
+window.cpaPhFixPreview=async function(i,k){
+  const it=(CPA_PH.fix||[])[i]; if(!it) return;
+  const ps=it.ps&&it.ps.length?it.ps:[it.p];
+  k=Math.max(0,Math.min(ps.length-1,k||0));
+  const p=ps[k], isVid=(p.file_type||'').indexOf('video')===0;
+  const old=$('cphFixPv'); if(old) old.remove();
+  const box=document.createElement('div'); box.className='cph-box cph-pv'; box.id='cphFixPv';
+  const info=[it.pn,p.review_note?'Reason: '+p.review_note:'','rejected '+fmtDate(p.reviewed_at||p.created_at)].filter(Boolean).join(' · ');
+  box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
+      +'<span class="nm"><b>'+esc(it.place)+'</b> · '+esc(info)+'</span>'
+      +(ps.length>1?'<span class="cph-pvn">'+(k+1)+' of '+ps.length+'</span>':'')
+      +'<button class="cph-boxx" title="Close (Esc)">&times;</button></div>'
+    +(k>0?'<button class="cph-pvnav l" title="Previous (←)"><i class="fa-solid fa-chevron-left"></i></button>':'')
+    +(k<ps.length-1?'<button class="cph-pvnav r" title="Next (→)"><i class="fa-solid fa-chevron-right"></i></button>':'')
+    +(it.can?'<div class="cph-pvacts"><button class="cph-pvbtn ok cph-fixrt"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button></div>':'')
+    +'<div class="cph-pvstage"><div class="cph-pvload"><i class="fa-solid fa-spinner fa-spin"></i></div></div>';
+  const shut=()=>{ document.removeEventListener('keydown',onKey); box.remove(); };
+  const onKey=e=>{ if(e.key==='Escape') shut(); else if(e.key==='ArrowRight'&&k<ps.length-1){ shut(); cpaPhFixPreview(i,k+1); }
+    else if(e.key==='ArrowLeft'&&k>0){ shut(); cpaPhFixPreview(i,k-1); } };
+  box.querySelector('.cph-boxx').onclick=shut;
+  const l=box.querySelector('.cph-pvnav.l'), r=box.querySelector('.cph-pvnav.r');
+  if(l) l.onclick=()=>{ shut(); cpaPhFixPreview(i,k-1); };
+  if(r) r.onclick=()=>{ shut(); cpaPhFixPreview(i,k+1); };
+  // Retake straight from here: the camera has to open inside this tap.
+  const rt=box.querySelector('.cph-fixrt'); if(rt) rt.onclick=()=>{ shut(); cpaPhRetake(i,isVid?1:0); };
+  box.onclick=e=>{ if(e.target===box) shut(); };
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(box);
+  const url=await cphSignedUrl(p.storage_path);
+  const stage=box.querySelector('.cph-pvstage'); if(!stage||!box.isConnected) return;
+  if(!url){ stage.innerHTML='<div class="cph-pvload">File not available</div>'; return; }
+  stage.innerHTML=isVid?'<video src="'+url+'" controls autoplay playsinline></video>':'<img src="'+url+'" alt="">';
+};
 // A button in "Photos to retake": open that project at that level. Same project: only the level
 // changes, so the block and flat picked stay as they were.
 window.cpaPhFixGo=function(projectId,level){
