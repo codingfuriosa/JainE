@@ -509,7 +509,7 @@ function orderRender(host){
   const list=B.orders.filter(o=>inF(o,B.ofilter)&&(!q||(eoNo(o)+' '+o.subject+' '+vName(o.vendor_id)+' '+projName(o.project_id)).toLowerCase().includes(q)));
   const chips=OSC.map(([k,l])=>'<span class="chip'+(B.ofilter===k?' active':'')+'" onclick="pusEoFilter(\''+k+'\')">'+l+' ('+B.orders.filter(o=>inF(o,k)).length+')</span>').join('');
   const rows=list.map(o=>'<tr style="cursor:pointer" onclick="pusEoOpen('+o.id+')"><td><span class="pus-code">'+esc(eoNo(o))+'</span></td><td>'+esc(KIND[o.kind])+'</td><td><b>'+esc(o.subject)+'</b></td><td>'+esc(vName(o.vendor_id))+'</td><td>'+esc(projName(o.project_id))+'</td><td style="white-space:nowrap">'+U().dmy(o.order_date)+'</td>'
-    +'<td class="pus-num"><b>'+money(o.total_amount)+'</b></td><td>'+oTag(o)+(oMine(o)?' <span class="tag t-blue">Your turn</span>':'')+'</td><td>'+esc(uname(o.raised_by))+'</td></tr>').join('');
+    +'<td class="pus-num"><b>'+money(o.total_amount)+'</b></td><td>'+oTag(o)+(oMine(o)?' <span class="tag t-blue">Your turn</span>'+U().rowDecide('pusEoDecide',o.id):'')+'</td><td>'+esc(uname(o.raised_by))+'</td></tr>').join('');
   host.innerHTML=listShell('Non-store purchases & service work orders','Expenses that do not go into stores, and services bought from a vendor. Each is approved through the project\'s approvers (Admin → Approvers) before a bill can be booked against it. Contractor work belongs to the Engineering module.',
     'New order',U().can('nonstore.purchase')?'pusEoForm()':'',[['Order no'],['Kind'],['For'],['Vendor'],['Project'],['Date'],['Amount',1],['Status'],['Raised by']],rows,
     '<div class="pus-top"><div class="pus-subs" style="margin:0">'+chips+'</div><input class="grow" id="papOq" placeholder="Search by number, subject, vendor or project" value="'+esc(B.oq)+'" oninput="pusEoSearch()"></div>');
@@ -616,7 +616,7 @@ window.pusEoOpen=async function(id,tab){
     if((o.status==='draft'&&mineRaised)||canEditPending) left.push('<button class="btn btn-ghost" onclick="pusEoDelete('+id+')"><i class="fa-solid fa-trash"></i> '+(o.status==='draft'?'Delete draft':'Delete')+'</button>');
   }
   openModal('<div class="modal-head"><h3>'+esc(KIND[o.kind])+' '+esc(eoNo(o))+' '+oTag(o)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto"><div class="pi-tabs" id="paoTabs">'+[['main','Main Info'],['items','Items'],['bills','Bills ('+CE.bills.length+')'],['approval','Approval History'],['history','Change History']].map(t=>'<a data-t="'+t[0]+'" onclick="pusEoTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="paoBody"></div></div>'
+    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto">'+U().stuckBanner({status:o.status,round:o.round,level:o.current_level,steps:CE.steps,raisedBy:o.raised_by,allowSelf:selfApproval(),what:'order'})+'<div class="pi-tabs" id="paoTabs">'+[['main','Main Info'],['items','Items'],['bills','Bills ('+CE.bills.length+')'],['approval','Approval History'],['history','Change History']].map(t=>'<a data-t="'+t[0]+'" onclick="pusEoTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="paoBody"></div></div>'
     +'<div class="modal-foot"><div style="margin-right:auto;display:flex;gap:6px">'+left.join('')+'</div><button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
   window.pusEoTab(tab||'main');
 };
@@ -645,7 +645,7 @@ function eBills(){
 function eApproval(){
   const {o,steps}=CE, done=steps.filter(s=>s.status==='approved'||s.status==='rejected'), pend=steps.filter(s=>s.status==='pending'&&s.round===o.round&&o.status==='pending_approval');
   const doneRows=done.map(s=>'<tr><td>'+esc(uname(s.acted_by))+'</td><td>'+esc(profile(s.acted_by))+'</td><td>Level '+s.level+' ('+(s.status==='approved'?'Approved By':'Rejected By')+')</td><td>'+(s.status==='approved'?'Approve':'Reject')+'</td><td style="white-space:nowrap">'+U().dmyTime(s.acted_at)+'</td><td>'+esc(s.remark||'')+'</td></tr>').join('');
-  const pendRows=pend.map(s=>s.approvers.map(e=>'<tr><td>'+esc(uname(e))+'</td><td>'+esc(profile(e))+'</td><td>Level '+s.level+' (Approval pending)</td></tr>').join('')).join('');
+  const pendRows=pend.map(s=>s.approvers.map(e=>'<tr><td>'+esc(uname(e))+'</td><td>'+esc(profile(e))+'</td><td>Level '+s.level+' (Approval pending with '+esc(uname(e))+')</td></tr>').join('')).join('');
   return ro('Document No',o.doc_no||'Not submitted yet')
     +'<div class="card" style="padding:0;margin-top:6px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Approved By</th><th>Profile</th><th>Action Information</th><th>Status</th><th>Date Time</th><th>Remarks</th></tr></thead><tbody>'+(doneRows||'<tr><td colspan="6"><div class="empty" style="padding:14px"><div>No decisions yet</div></div></td></tr>')+'</tbody></table></div></div>'
     +'<div class="card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Pending With</th><th>Profile</th><th>Action Information</th></tr></thead><tbody>'+(pendRows||'<tr><td colspan="3"><div class="empty" style="padding:14px"><div>Nothing pending</div></div></td></tr>')+'</tbody></table></div></div>';
@@ -663,8 +663,10 @@ window.pusEoDelete=async function(id){
   closeModal(); toast(pending?'Order deleted':'Draft deleted','ok'); navTo('inventory/7/orders');
 };
 window.pusEoDecide=function(id,approve){
-  openModal('<div class="modal-head"><h3>'+(approve?'Approve':'Reject')+' '+esc(eoNo(CE.o))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm"><div class="pus-hint" style="margin-top:0">Total '+money(CE.o.total_amount)+' to '+esc(vName(CE.o.vendor_id))+' — '+esc(CE.o.subject)+'.</div><label>'+(approve?'Remark (optional)':'Reason for rejecting')+'</label><textarea id="paoNote" rows="3" placeholder="'+(approve?'':'The raiser sees this and can correct and resubmit')+'"></textarea></div>'
+  const o=(CE&&CE.o&&CE.o.id===id)?CE.o:B.orders.find(x=>x.id===id);   // from the open order, or straight from a register row
+  if(!o) return;
+  openModal('<div class="modal-head"><h3>'+(approve?'Approve':'Reject')+' '+esc(eoNo(o))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm"><div class="pus-hint" style="margin-top:0">Total '+money(o.total_amount)+' to '+esc(vName(o.vendor_id))+' — '+esc(o.subject)+'.</div><label>'+(approve?'Remark (optional)':'Reason for rejecting')+'</label><textarea id="paoNote" rows="3" placeholder="'+(approve?'':'The raiser sees this and can correct and resubmit')+'"></textarea></div>'
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="pusEoDecideSave('+id+','+approve+')">'+(approve?'Approve':'Reject')+'</button></div>');
 };
 window.pusEoDecideSave=async function(id,approve){

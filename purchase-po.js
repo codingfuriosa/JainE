@@ -114,7 +114,7 @@ function renderOrders(host){
   const chips=SC.map(([k,l])=>'<span class="chip'+(P.filter===k?' active':'')+'" onclick="pusPoFilter(\''+k+'\')">'+l+' ('+base.filter(p=>inF(p,k)).length+')</span>').join('');
   const rows=list.map(p=>'<tr style="cursor:pointer" onclick="pusPoOpen('+p.id+')"><td>'+esc(projName(p.project_id))+'</td><td>'+esc(typeName(p.po_type_id))+'</td><td><span class="pus-code">'+esc(docNo(p))+'</span>'+revTag(p)+'</td>'
     +'<td style="white-space:nowrap">'+U().dmy(p.po_date)+'</td><td style="white-space:nowrap">'+esc(U().fy(p.po_date).label)+'</td><td><b>'+esc(vName(vendorById(p.vendor_id)))+'</b></td><td>'+esc(parentHead(p.vendor_id))+'</td>'
-    +'<td class="pus-num">'+totals(p.id).n+'</td><td class="pus-num"><b>'+money(p.total_amount)+'</b></td><td>'+statusTag(p)+(isMine(p)?' <span class="tag t-blue">Your turn</span>':'')+'</td><td>'+esc(U().userName(p.raised_by))+'</td></tr>').join('');
+    +'<td class="pus-num">'+totals(p.id).n+'</td><td class="pus-num"><b>'+money(p.total_amount)+'</b></td><td>'+statusTag(p)+(isMine(p)?' <span class="tag t-blue">Your turn</span>'+U().rowDecide('pusPoDecide',p.id):'')+'</td><td>'+esc(U().userName(p.raised_by))+'</td></tr>').join('');
   host.innerHTML='<div class="toolbar"><div style="flex:1"><div class="sec-title" style="margin:0">Purchase orders</div><div class="pus-hint" style="margin:0">Orders are created from the quotation comparison (RFQ & Quotes tab → open an RFQ → Comparison → Create purchase order). Here you finish, approve, cancel or short close them. Orders that were rejected, or reopened for an amendment, are under <b>Revise a purchase order</b>.</div></div></div>'
     +'<div class="pus-top"><div class="pus-subs" style="margin:0">'+chips+'</div>'+projSelect()
     +'<input class="grow" id="pupQ" placeholder="Search by document no, type, business unit, supplier or person" value="'+esc(P.q)+'" oninput="pusPoSearch()"></div>'
@@ -194,7 +194,7 @@ window.pusPoOpen=async function(id,tab){
   if(canEditPending(p)&&p.revision===0) left.push('<button class="btn btn-ghost" onclick="pusPoDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete</button>');
   const tabs=[['main','Main Info'],['items','Items'],['terms','Terms & Delivery'],['history','Change History'],['approval','Approval History']].concat(CUR.revs.length?[['revs','Revisions ('+CUR.revs.length+')']]:[]);
   openModal('<div class="modal-head"><h3>Purchase order '+esc(docNo(p))+' '+statusTag(p)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto"><div class="pi-tabs" id="ppTabs">'+tabs.map(t=>'<a data-t="'+t[0]+'" onclick="pusPoTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="ppBody"></div></div>'
+    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto">'+U().stuckBanner({status:p.status,round:p.round,level:p.current_level,steps:CUR.steps,raisedBy:p.raised_by,allowSelf:selfApproval(),what:'purchase order'})+'<div class="pi-tabs" id="ppTabs">'+tabs.map(t=>'<a data-t="'+t[0]+'" onclick="pusPoTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="ppBody"></div></div>'
     +'<div class="modal-foot"><div style="margin-right:auto;display:flex;gap:6px">'+left.join('')+'</div><button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
   window.pusPoTab(tab||'main');
 };
@@ -245,7 +245,7 @@ function tabApproval(){
   const {p,steps}=CUR, rounds=[...new Set(steps.map(s=>s.round))];
   const done=steps.filter(s=>s.status==='approved'||s.status==='rejected'), pend=steps.filter(s=>s.status==='pending'&&s.round===p.round&&p.status==='pending_approval');
   const doneRows=done.map(s=>'<tr><td>'+esc(U().userName(s.acted_by))+'</td><td>'+esc(profile(s.acted_by))+'</td><td>Level '+s.level+' ('+(s.status==='approved'?'Approved By':'Rejected By')+')</td><td>'+(s.status==='approved'?'Approve':'Reject')+'</td><td style="white-space:nowrap">'+U().dmyTime(s.acted_at)+'</td><td>'+esc(s.remark||'')+'</td><td>'+esc(U().userName(p.raised_by))+'</td></tr>').join('');
-  const pendRows=pend.map(s=>s.approvers.map(e=>'<tr><td>'+esc(U().userName(e))+'</td><td>'+esc(profile(e))+'</td><td>Level '+s.level+' (Approval pending)</td><td>'+esc(U().userName(p.raised_by))+'</td></tr>').join('')).join('');
+  const pendRows=pend.map(s=>s.approvers.map(e=>'<tr><td>'+esc(U().userName(e))+'</td><td>'+esc(profile(e))+'</td><td>Level '+s.level+' (Approval pending with '+esc(U().userName(e))+')</td><td>'+esc(U().userName(p.raised_by))+'</td></tr>').join('')).join('');
   return ro('Document No',p.doc_no||'Not submitted yet')
     +'<div class="pi-row"><div class="l">Narration</div><div class="v">PO No : <b>'+esc(p.doc_no||'—')+'</b> &nbsp; Date : <b>'+U().dmy(p.po_date)+'</b> &nbsp; Vendor : <b>'+esc(vName(vendorById(p.vendor_id)))+'</b> &nbsp; Amount : <b>'+money(p.total_amount)+'</b></div></div>'
     +'<div class="card" style="padding:0;margin-top:6px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Approved By</th><th>Profile</th><th>Action Information</th><th>Status</th><th>Date Time</th><th>Remarks</th><th>Created By</th></tr></thead><tbody>'
@@ -342,8 +342,10 @@ window.pusPoDelete=async function(id){
   closeModal(); toast(pending?'Purchase order deleted':'Draft deleted','ok'); navTo('inventory/4');
 };
 window.pusPoDecide=function(id,approve){
-  openModal('<div class="modal-head"><h3>'+(approve?'Approve':'Reject')+' purchase order '+esc(docNo(CUR.p))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm"><div class="pus-hint" style="margin-top:0">Total '+money(CUR.p.total_amount)+' to '+esc(vName(vendorById(CUR.p.vendor_id)))+'.</div><label>'+(approve?'Remark (optional)':'Reason for rejecting')+'</label><textarea id="ppNote" rows="3" placeholder="'+(approve?'':'The raiser sees this and can correct and resubmit')+'"></textarea></div>'
+  const p=(CUR&&CUR.p&&CUR.p.id===id)?CUR.p:P.rows.find(x=>x.id===id);   // from the open document, or straight from a register row
+  if(!p) return;
+  openModal('<div class="modal-head"><h3>'+(approve?'Approve':'Reject')+' purchase order '+esc(docNo(p))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm"><div class="pus-hint" style="margin-top:0">Total '+money(p.total_amount)+' to '+esc(vName(vendorById(p.vendor_id)))+'.</div><label>'+(approve?'Remark (optional)':'Reason for rejecting')+'</label><textarea id="ppNote" rows="3" placeholder="'+(approve?'':'The raiser sees this and can correct and resubmit')+'"></textarea></div>'
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="pusPoDecideSave('+id+','+approve+')">'+(approve?'Approve':'Reject')+'</button></div>');
 };
 window.pusPoDecideSave=async function(id,approve){

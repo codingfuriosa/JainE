@@ -170,7 +170,7 @@ function renderCreate(host){
   const chips=SC.map(([k,l])=>'<span class="chip'+(I.filter===k?' active':'')+'" onclick="pusIndFilter(\''+k+'\')">'+l+' ('+base.filter(r=>inFilter(r,k)).length+')</span>').join('');
   const rows=list.map(r=>'<tr style="cursor:pointer" onclick="pusIndOpen('+r.id+')"><td><span class="pus-code">'+esc(docNo(r))+'</span></td><td>'+esc(typeName(r.indent_type_id))+'</td><td>'+esc(projName(r.project_id))+'</td><td>'+esc(whName(r.warehouse_id))+'</td>'
     +'<td style="white-space:nowrap">'+dmy(r.indent_date)+'</td><td style="white-space:nowrap">'+dmy(r.required_by)+'</td><td class="pus-num">'+lineTotals(r.id).n+'</td>'
-    +'<td>'+esc(U().userName(r.raised_by))+'</td><td>'+statusTag(r)+(isMine(r)?' <span class="tag t-blue">Your turn</span>':'')+'</td></tr>').join('');
+    +'<td>'+esc(U().userName(r.raised_by))+'</td><td>'+statusTag(r)+(isMine(r)?' <span class="tag t-blue">Your turn</span>'+U().rowDecide('pusIndDecide',r.id):'')+'</td></tr>').join('');
   host.innerHTML='<div class="toolbar"><div style="flex:1"><div class="sec-title" style="margin:0">Create an indent</div><div class="pus-hint" style="margin:0">Raise what a site needs and send it for approval. Once approved it can be put out for quotation and ordered. An indent that is rejected moves to <b>Revise an indent</b>.</div></div>'
     +(U().can('indent.raise')?'<button class="btn btn-primary" onclick="pusIndEdit()"><i class="fa-solid fa-plus"></i> New indent</button>':'')+'</div>'
     +'<div class="pus-top"><div class="pus-subs" style="margin:0">'+chips+'</div>'+projSelect()
@@ -229,7 +229,7 @@ window.pusIndOpen=async function(id,tab){
   if(r.status==='approved'&&open&&U().can('indent.short_close')) btn.push('<button class="btn" onclick="pusIndShortClose('+id+')"><i class="fa-solid fa-scissors"></i> Short close…</button>');
   const del=(r.status==='draft'&&canEdit(r))||canEditPending(r)?'<button class="btn btn-ghost" style="margin-right:auto" onclick="pusIndDelete('+id+')"><i class="fa-solid fa-trash"></i> '+(r.status==='draft'?'Delete draft':'Delete')+'</button>':'';
   openModal('<div class="modal-head"><h3>Indent '+esc(docNo(r))+' '+statusTag(r)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto"><div class="pi-tabs" id="piTabs">'+TABS.map(t=>'<a data-t="'+t[0]+'" onclick="pusIndTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="piTabBody"></div></div>'
+    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto">'+U().stuckBanner({status:r.status,round:r.round,level:r.current_level,steps:CUR.steps,raisedBy:r.raised_by,allowSelf:selfApproval(),what:'indent'})+'<div class="pi-tabs" id="piTabs">'+TABS.map(t=>'<a data-t="'+t[0]+'" onclick="pusIndTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="piTabBody"></div></div>'
     +'<div class="modal-foot">'+del+'<button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
   window.pusIndTab(tab||'main');
 };
@@ -275,7 +275,7 @@ function tabApproval(){
   const rounds=[...new Set(steps.map(s=>s.round))];
   const done=steps.filter(s=>s.status==='approved'||s.status==='rejected'), pend=steps.filter(s=>s.status==='pending'&&s.round===r.round&&r.status==='pending_approval');
   const doneRows=done.map(s=>'<tr><td>'+esc(U().userName(s.acted_by))+'</td><td>'+esc(profile(s.acted_by))+'</td><td>Level '+s.level+' ('+(s.status==='approved'?'Approved By':'Rejected By')+')</td><td>'+(s.status==='approved'?'Approve':'Reject')+'</td><td style="white-space:nowrap">'+dmyTime(s.acted_at)+'</td><td>'+esc(s.remark||'')+'</td><td>'+esc(U().userName(r.raised_by))+'</td></tr>').join('');
-  const pendRows=pend.map(s=>s.approvers.map(e=>'<tr><td>'+esc(U().userName(e))+'</td><td>'+esc(profile(e))+'</td><td>Level '+s.level+' (Approval pending)</td><td>'+esc(U().userName(r.raised_by))+'</td></tr>').join('')).join('');
+  const pendRows=pend.map(s=>s.approvers.map(e=>'<tr><td>'+esc(U().userName(e))+'</td><td>'+esc(profile(e))+'</td><td>Level '+s.level+' (Approval pending with '+esc(U().userName(e))+')</td><td>'+esc(U().userName(r.raised_by))+'</td></tr>').join('')).join('');
   return roField('Document No',r.doc_no||'Not submitted yet')
     +'<div class="pi-row"><div class="l">Narration</div><div class="v">Document No : <b>'+esc(r.doc_no||'—')+'</b> &nbsp; Document Date : <b>'+dmy(r.indent_date)+'</b> &nbsp; Type : <b>'+esc(typeName(r.indent_type_id))+'</b> &nbsp; Financial Year : <b>'+esc(f.label)+'</b><br>Remarks : <b>'+esc(r.purpose||'')+'</b></div></div>'
     +'<div class="card" style="padding:0;margin-top:6px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Approved By</th><th>Profile</th><th>Action Information</th><th>Status</th><th>Date Time</th><th>Remarks</th><th>Created By</th></tr></thead><tbody>'
@@ -481,4 +481,19 @@ window.pusIndShortCloseSave=async function(id){
 };
 // Shared with purchase-rfq.js (same look: tabs, read-only fields).
 window.PUS.piCss=piCss; window.PUS.roField=roField; window.PUS.dmy=dmy; window.PUS.dmyTime=dmyTime; window.PUS.fy=fy;
+// Warning shown in a document that cannot move: every approver at its current level is the person who raised it, and self-approval is off.
+// o = {status, round, level, steps, raisedBy, allowSelf, what}; returns '' when the document is not stuck.
+window.PUS.stuckBanner=o=>{
+  if(o.status!=='pending_approval'||o.allowSelf) return '';
+  const maker=String(o.raisedBy||'').toLowerCase();
+  const who=[...new Set((o.steps||[]).filter(s=>s.round===o.round&&s.level===o.level&&s.status==='pending').flatMap(s=>s.approvers.map(e=>String(e).toLowerCase())))];
+  if(!who.length||who.some(e=>e!==maker)) return '';
+  const n=esc(U().userName(maker));
+  return '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:11px 14px;margin-bottom:12px;font-size:13.5px"><b style="color:#b91c1c"><i class="fa-solid fa-triangle-exclamation"></i> Waiting on the person who raised it</b>'
+    +'<div style="margin-top:4px">Level '+o.level+' is waiting for <b>'+n+'</b>, but <b>'+n+'</b> raised this '+esc(o.what)+', and nobody can approve a document they raised themselves. It cannot move until another approver is added for this document type (Admin → Approvers) and it is sent again (<b>Edit → Save &amp; send for approval again</b>), or self-approval is allowed (Admin → Rules).</div></div>';
+};
+// Approve / Reject buttons shown on a register row when it is the signed-in person's turn, so an approver does not have to open the
+// document first. fn is the screen's own decide function, e.g. 'pusPoDecide' (it asks for the remark / reason, then calls the database).
+window.PUS.rowDecide=(fn,id)=>'<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><button class="btn btn-sm btn-primary" onclick="event.stopPropagation();'+fn+'('+id+',true)"><i class="fa-solid fa-circle-check"></i> Approve</button>'
+  +'<button class="btn btn-sm" onclick="event.stopPropagation();'+fn+'('+id+',false)"><i class="fa-solid fa-circle-xmark"></i> Reject</button></div>';
 })();
