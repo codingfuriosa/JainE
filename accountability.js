@@ -5056,9 +5056,79 @@
     let res=null;
     try{ res=await wfBookingReading(caseId); }
     catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
-    try{ await wfWelcomePdf(res); }
+    try{ await wfWelcomeDoc(res,caseId); }
     catch(e){ toast('Could not build the letter: '+((e&&e.message)||e),'err'); }
   };
+
+  /* THE WELCOME LETTER, AS A PAGE RATHER THAN AS A PICTURE OF ONE.
+
+     It used to be drawn straight into a PDF, which meant it could be looked at and downloaded and
+     nothing else: a name the booking form had spelled badly stayed spelled badly, and a sentence
+     somebody wanted softened could not be softened. The words are unchanged - this builds the same
+     letter, paragraph for paragraph - but as the same .wfd-page HTML the Check List uses, so it
+     opens in the editor, can be corrected, saved, and taken away as either Word or PDF.
+
+     wfWelcomePdf is kept below. It is no longer the way the letter is produced, but it is the
+     record of how the typeset original read, and the two must not be allowed to disagree quietly:
+     if the wording here changes, change it there too or delete it. */
+  async function wfWelcomeDoc(res,caseId){
+    const logoBytes=await jgLogo();
+    let b64=''; { let t=''; for(let i=0;i<logoBytes.length;i++) t+=String.fromCharCode(logoBytes[i]); b64=btoa(t); }
+    const E=function(x){ return String(x==null?'':x)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+
+    const f=res.fields||{}, LT=res.letter||{};
+    const val=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+
+    const d=new Date();
+    const MON=['January','February','March','April','May','June','July','August','September',
+               'October','November','December'];
+    const dateTxt=d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear();
+
+    const who=allotteeNames(res);
+    const project=val('project_name')||'________________';
+    const locality=String(LT.locality||'').trim();
+    const flat=val('flat')||'____', block=val('block')||'____';
+    const fRaw=val('floor');
+    const fNum=(fRaw.match(/\d+/)||[])[0];
+    const floorTxt=fNum ? (ordinal(fNum)+' floor')
+                        : (fRaw ? (nameCase(fRaw)+' floor') : '____ floor');
+    const tokenNum=(LT.token&&typeof LT.token.value==='number'&&isFinite(LT.token.value))
+      ? LT.token.value : null;
+    const tokenFig=tokenNum!==null
+      ? tokenNum.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})
+      : '________';
+    const tokenWords=String((LT.token&&LT.token.in_words)||'').trim()
+      || (tokenNum!==null ? rupeesInWords(tokenNum) : '________________');
+
+    let h='';
+    h+='<div class="wfd-logo" contenteditable="false"><img alt="The Jain Group" '
+      +'data-wpt="132" data-hpt="158.4" src="data:image/jpeg;base64,'+b64+'"></div>';
+    h+='<p class="wfd-right wfd-gap"><span class="wfd-soft">'+E(dateTxt)+'</span></p>';
+    h+='<p class="wfd-gap"><b>Dear '+E(who.join(' & ')||'Sir / Madam')+',</b></p>';
+    h+='<p class="wfd-gap">Greetings from The Jain Group!</p>';
+    h+='<p class="wfd-gap">Whilst expressing our deep appreciation towards your investment in '
+      +'\u2018'+E(project)+'\u2019, we further feel privileged for having placed your trust on us '
+      +'in selecting your Dream Home.</p>';
+    h+='<p class="wfd-gap">By way of this letter, please be informed that we have received the '
+      +'application for Flat No. '+E(flat)+', '+E(floorTxt)+', Block-'+E(block)+' of '+E(project)
+      +(locality?(' '+E(locality)):'')+'.</p>';
+    h+='<p class="wfd-gap">We have received a token amount of '+E(tokenFig)+' ('+E(tokenWords)
+      +' only) against the above mentioned booking.</p>';
+    h+='<p class="wfd-gap">Please feel free to get in touch with the undersigned with any queries / '
+      +'feedback or for assistance. It is always our pleasure to be of service to you today and in '
+      +'the future.</p>';
+    h+='<p class="wfd-gap">Once again we warmly welcome you to the growing Jain Group family.</p>';
+    h+='<p class="wfd-gap">Thanking you,</p>';
+    h+='<p><b>Pallabita Ghosh</b></p>';
+    h+='<p><span class="wfd-soft">Manager \u2013 Post Sales</span></p>';
+    h+='<p><span class="wfd-soft">Reach me @ 8420541541</span></p>';
+
+    const name=(who[0]||val('customer_name')||'customer').replace(/[^\w \-]/g,'').trim()||'customer';
+    await wfOpenDocTab(h,{title:'Welcome Letter \u2014 '+name,
+      base:'Welcome Letter - '+name, caseId:caseId, kind:'welcome', logoBytes:logoBytes});
+  }
 
   /* A4, letterhead, one page. Every value is taken from the stored reading; nothing here is written
      by a model. Anything the documents did not state is left as a blank to be filled by hand rather
