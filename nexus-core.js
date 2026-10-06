@@ -21898,17 +21898,36 @@ window.cpaRetryTicket=async function(id){
 /* ---------- Tab 10: Referrals ---------- */
 const CPA_REFERRAL_STATUSES={submitted:'Submitted',contacted:'Contacted',interested:'Interested',visited_site:'Visited Site',booked:'Booked',not_interested:'Not Interested'};
 async function cpaRenderReferrals(host){
-  const {data}=await sb.schema('cust').from('referrals').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
+  const {data}=await sb.schema('cust').from('referrals').select('*, units(unit_code), referral_projects(name)').order('created_at',{ascending:false}).limit(200);
   const rows=(data||[]).map(r=>[esc((r.units&&r.units.unit_code)||'—'),esc(r.prospect_name),esc(r.prospect_phone||'—'),esc(r.prospect_email||'—'),
+    esc((r.referral_projects&&r.referral_projects.name)||'—'),
     '<span style="font-size:12.5px;color:var(--slate)">'+esc(r.notes||'—')+'</span>',
+    cpaReferralCrmCell(r),
     `<select onchange="cpaReferralStatusChange(${r.id},this.value)">${Object.keys(CPA_REFERRAL_STATUSES).map(k=>`<option value="${k}" ${k===r.status?'selected':''}>${CPA_REFERRAL_STATUSES[k]}</option>`).join('')}</select>`,
     fmtDate(r.created_at)]);
-  host.innerHTML=rows.length?cpaTable(['Unit','Prospect','Phone','Email','Looking for','Status','Submitted'],rows):'<div class="card card-pad empty">No referrals submitted yet.</div>';
+  host.innerHTML=rows.length?cpaTable(['Unit','Prospect','Phone','Email','Project','Looking for','CRM','Status','Submitted'],rows):'<div class="card card-pad empty">No referrals submitted yet.</div>';
 }
 window.cpaReferralStatusChange=async function(id,status){
   const {error}=await sb.schema('cust').from('referrals').update({status,updated_at:new Date().toISOString(),updated_by:state.email}).eq('id',id);
   if(error){toast('Update failed: '+error.message,'err');return;}
   toast('Status updated','ok');
+};
+// Where the referral is in the CRM: its lead number once created, or why it is not there yet.
+function cpaReferralCrmCell(r){
+  const again='<button class="btn btn-sm" style="margin-top:4px" onclick="cpaReferralCrmRetry('+r.id+',this)"><i class="fa-solid fa-rotate-right"></i> Send '+(r.crm_status?'again':'')+'</button>';
+  if(r.crm_status==='sent') return '<span class="tag t-green" title="Sent '+esc(fmtDate(r.crm_sent_at))+'"><i class="fa-solid fa-circle-check"></i> Lead '+esc(r.crm_lead_id||'')+'</span>';
+  if(r.crm_status==='sending') return '<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Sending…</span>';
+  if(r.crm_status==='failed') return '<span class="tag t-red" title="'+esc(r.crm_error||'')+'"><i class="fa-solid fa-triangle-exclamation"></i> Failed</span>'
+    +'<div style="font-size:11.5px;color:var(--err);max-width:220px;margin-top:3px">'+esc(r.crm_error||'')+'</div>'+again;
+  return '<span class="tag t-gray">Not sent</span><div>'+again+'</div>';
+}
+window.cpaReferralCrmRetry=async function(id,btn){
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  const {data,error}=await sb.schema('cust').rpc('referral_crm_retry',{p_id:id});
+  if(error){ toast(error.message,'err'); }
+  else if(!data){ toast('Not sent — sending to the CRM is switched off, or the referral has no consent','warn'); }
+  else toast('Sent to the CRM — the lead number appears here within a minute','ok');
+  route();
 };
 
 /* ---------- Tab 11: Maintenance (post-possession QR payments to confirm, upcoming demand preview) ---------- */
@@ -24118,6 +24137,21 @@ function custReferralCss(){
   .cref-calc-out em{display:block;font-style:normal;font-size:11.5px;color:var(--slate)}
   .cref-fine{font-size:11.5px;color:var(--slate);line-height:1.6;margin:14px 2px 0}
 
+  /* The project the friend is interested in: one card per project, its name and where it is. */
+  .cref-projs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:236px;overflow:auto;padding:2px;margin-bottom:4px}
+  .cref-projs .cref-proj{position:relative;display:flex;flex-direction:column;justify-content:center;gap:3px;padding:10px 12px 10px 34px;border:1.5px solid var(--line);
+    border-radius:11px;cursor:pointer;background:var(--card);transition:border-color .15s,background .15s;margin:0;font-weight:400;min-height:58px}
+  .cref-proj:hover{border-color:#f3b4ba}
+  .cref-proj input{position:absolute;left:12px;top:12px;margin:0;accent-color:#c8202f;width:15px;height:15px}
+  .cref-proj .nm{font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.25}
+  .cref-proj .loc{font-size:12px;color:var(--slate);display:flex;align-items:center;gap:5px}
+  .cref-proj .loc i{color:#c8202f;font-size:11px}
+  .cref-proj:has(input:checked){border-color:#c8202f;background:#fff5f5;box-shadow:0 0 0 3px rgba(200,32,47,.1)}
+  .cref-consent{display:flex;gap:9px;align-items:flex-start;margin-top:14px;font-size:12.5px;line-height:1.5;color:var(--slate);cursor:pointer}
+  .cref-consent input{margin-top:2px;accent-color:#c8202f;width:15px;height:15px;flex:none}
+  .cref-consent a{color:#c8202f;font-weight:600}
+  .cref-projtag{display:inline-flex;align-items:center;gap:5px;color:#b3141f;font-weight:600}
+  @media(max-width:620px){ .cref-projs{grid-template-columns:1fr;max-height:260px} }
   .cref-pbox{position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,.88);display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:14px;padding:16px}
   .cref-pbox img{max-width:min(94vw,560px);max-height:calc(100vh - 110px);border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
@@ -24199,7 +24233,7 @@ function custReferralCss(){
 
 async function custTabReferrals(unit){
   custReferralCss();
-  const {data:referrals}=await sb.schema('cust').from('referrals').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
+  const {data:referrals}=await sb.schema('cust').from('referrals').select('*, referral_projects(name,location)').eq('unit_id',unit.id).order('created_at',{ascending:false});
   const list=referrals||[];
   const stageIndex=function(k){ const i=CUST_REFERRAL_STAGES.findIndex(function(s){return s.k===k;}); return i<0?0:i; };
   const booked=list.filter(function(r){return r.status==='booked';}).length;
@@ -24271,10 +24305,12 @@ async function custTabReferrals(unit){
           return '<div class="cref-seg'+(i<done?' on':'')+'"></div>'; }).join('');
         const phone=r.prospect_phone?`<span><i class="fa-solid fa-phone"></i>${esc(r.prospect_phone)}</span>`:'';
         const mail=r.prospect_email?`<span><i class="fa-solid fa-envelope"></i>${esc(r.prospect_email)}</span>`:'';
+        const proj=r.referral_projects&&r.referral_projects.name
+          ?`<span class="cref-projtag"><i class="fa-solid fa-building"></i>${esc(custRefTitle(r.referral_projects.name))}</span>`:'';
         return `<div class="cref-card" style="--cref-c:${st.dot}">
             <div class="cref-who">
               <div class="cref-name">${esc(r.prospect_name)}</div>
-              <div class="cref-meta">${phone}${mail}${(phone||mail)?'':'<span>No contact details given</span>'}</div>
+              <div class="cref-meta">${proj}${phone}${mail}${(phone||mail||proj)?'':'<span>No contact details given</span>'}</div>
             </div>
             <div class="cref-rail">${rail}</div>
             <span class="cref-pill" style="background:${st.bg};color:${st.ink}">
@@ -24352,13 +24388,31 @@ window.custRefPoster=function(){
 };
 /* The mobile number is required: it is how the sales team reaches the person, and a referral without
    one cannot be followed up. "What are they looking for" goes to notes, which the team sees. */
-window.custNewReferralModal=function(){
+/* Which project the friend is interested in decides the CRM business unit, and with it the sales
+   person who calls them (cust.referral_projects). Names are shown in Title Case with the location. */
+let CUST_REF_PROJECTS=null;
+async function custRefProjects(){
+  if(CUST_REF_PROJECTS) return CUST_REF_PROJECTS;
+  try{ const {data}=await sb.schema('cust').from('referral_projects').select('id,name,location').eq('active',true).order('sort').order('name');
+    CUST_REF_PROJECTS=data||[]; }catch(_e){ CUST_REF_PROJECTS=[]; }
+  return CUST_REF_PROJECTS;
+}
+function custRefTitle(s){ return String(s||'').toLowerCase().replace(/(^|[\s\-\/(])([a-z])/g,(m,a,b)=>a+b.toUpperCase()).trim(); }
+window.custNewReferralModal=async function(){
+  const projects=await custRefProjects();
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-user-plus" style="color:#c8202f"></i> Refer a friend or family member</h3><span class="x" onclick="closeModal()">&times;</span></div>
     <div class="modal-body frm">
     <label>Name</label><input id="custRefName" autocomplete="off" placeholder="Their full name">
     <label>Mobile number</label><input id="custRefPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="10-digit mobile number">
     <label>Email (optional)</label><input id="custRefEmail" type="email" autocomplete="off">
-    <label>What are they looking for? (optional)</label><textarea id="custRefNotes" rows="2" maxlength="300" placeholder="e.g. 2BHK, Newtown, budget around 80 lakh"></textarea>
+    <label>Project they are interested in</label>
+    <div class="cref-projs" role="radiogroup" aria-label="Project">${projects.map(function(p){
+      return '<label class="cref-proj"><input type="radio" name="custRefProj" value="'+p.id+'">'
+        +'<span class="nm">'+esc(custRefTitle(p.name))+'</span>'
+        +(p.location?'<span class="loc"><i class="fa-solid fa-location-dot"></i>'+esc(custRefTitle(p.location))+'</span>':'')+'</label>'; }).join('')}</div>
+    <label>What are they looking for? (optional)</label><textarea id="custRefNotes" rows="2" maxlength="300" placeholder="e.g. 2BHK, budget around 80 lakh"></textarea>
+    <label class="cref-consent"><input type="checkbox" id="custRefOk">
+      <span>They are happy to be contacted by Jain Group about this, and I accept the <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>
     <p style="margin:10px 0 0;font-size:12px;color:var(--slate)">Our sales team will call them. You can follow every step on the Referrals page.</p></div>
     <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custRefBtn" onclick="custNewReferralSave()"><i class="fa-solid fa-paper-plane"></i> Submit referral</button></div>`);
   setTimeout(function(){ const n=$('custRefName'); if(n) n.focus(); },60);
@@ -24370,6 +24424,10 @@ window.custNewReferralSave=async function(){
   const digits=String(prospect_phone||'').replace(/\D/g,'');
   if(digits.length<10||digits.length>13){toast('Enter their mobile number (10 digits)','err');return;}
   if(prospect_email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(prospect_email)){toast('That email address does not look right','err');return;}
+  const pick=document.querySelector('input[name="custRefProj"]:checked');
+  const referral_project_id=pick?Number(pick.value):null;
+  if(!referral_project_id){toast('Choose the project they are interested in','err');return;}
+  if(!($('custRefOk')||{}).checked){toast('Please confirm they are happy to be contacted','err');return;}
   const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
   // The same person twice from the same flat is one referral - the team would call them twice.
   try{
@@ -24379,7 +24437,9 @@ window.custNewReferralSave=async function(){
       toast('You have already referred this number','warn'); return; }
   }catch(_e){}
   const b=$('custRefBtn'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…'; }
-  const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,notes,created_by:state.email});
+  // Saved here first; the database then sends it to the CRM (cust.referral_crm_send).
+  const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,notes,
+    referral_project_id,privacy_accepted:true,created_by:state.email});
   if(error&&b){ b.disabled=false; b.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit referral'; }
   if(error){toast('Could not submit: '+error.message,'err');return;}
   // Set directly rather than re-fetched: custLoadData's cache would otherwise hand route() the same
