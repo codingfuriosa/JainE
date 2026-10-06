@@ -4521,6 +4521,50 @@
   /* The preview, which is the document. Editable in place; Download writes whatever it now says.
      The logo is marked contenteditable="false" so it cannot be typed over or deleted by accident,
      while everything around it stays editable. */
+  /* COVERED OR OPEN, DECIDED BY THE COST SHEET AND NOT BY THE TICK BOX.
+
+     Two things on a booking say which parking it is, and they do not always agree:
+
+       - parking.marked  - the Covered / Open box ticked on the Booking Form.
+       - parking.rows[].label - the line the cost sheet prints, "1-Covered Car Parking".
+
+     Only the tick box was being read, and it goes wrong both ways. Booking 717 has a cost sheet
+     charging 3,00,000 for "1-Open Car Parking" and an EMPTY tick box, so the letter said there was
+     no parking at all. Booking 590 has the box read as COVERED against a sheet line that says
+     "1-Open Car Parking", so the letter said Covered when the customer is paying for Open.
+
+     The sheet line wins. It is printed rather than ticked, it cannot be a stray pen mark, and it
+     is the line that carries the money - if the two disagree, the one the customer was charged
+     under is the true one. The tick box is still used when the sheet says nothing, and when the
+     two disagree that is reported rather than buried, because somebody has to correct the form. */
+  function wfParkKind(res){
+    const park=(res&&res.parking)||{};
+    const rows=Array.isArray(park.rows)?park.rows:[];
+    let sheet='';
+    rows.forEach(function(r){
+      if(sheet) return;
+      const m=String((r&&r.label)||'').match(/\b(COVERED|OPEN)\b/i);
+      if(m) sheet=m[1].toUpperCase();
+    });
+    /* parking_value carries the same word on the sheets that print it as "COVERED 5,00,000", and
+       is read as a second sighting of the sheet rather than of the form. */
+    if(!sheet){
+      const m=String((res&&res.parking_value)||'').match(/^\s*(COVERED|OPEN)\b/i);
+      if(m) sheet=m[1].toUpperCase();
+    }
+    const marked=String((park.marked&&park.marked.value)||'').toUpperCase();
+    const ticked=(marked==='COVERED'||marked==='OPEN')?marked:'';
+    const kind=sheet||ticked;
+    return {
+      kind:kind,
+      word:kind?(kind.charAt(0)+kind.slice(1).toLowerCase()):'',
+      from:sheet?'cost sheet':(ticked?'booking form':''),
+      conflict:!!(sheet&&ticked&&sheet!==ticked),
+      ticked:ticked,
+      sheet:sheet
+    };
+  }
+
   function wfPreviewDoc(html,filename,toastMsg,logoBytes){
     openModal('<div class="modal-head"><h3>'+esc2(filename)+'</h3><span class="x" data-wfx>&times;</span></div>'
       +'<div class="modal-body" style="padding:0;background:#525659">'
@@ -4841,7 +4885,8 @@
       return (!t||t==='NIL')?'':t; };
     const rule=function(n){ return new Array((n||14)+1).join('_'); };
     const park=res.parking||{};
-    const kind=String((park.marked&&park.marked.value)||'').toUpperCase();
+    const PK=wfParkKind(res);
+    const kind=PK.kind;
     const rows=Array.isArray(park.rows)?park.rows:[];
     /* HOW MANY CAR PARKS, counted from the LABELS AND NOT BY ADDING THE ROWS UP.
 
@@ -4857,7 +4902,7 @@
       const m=String((r&&r.label)||'').match(/(\d+)\s*[-\s]?\s*(?:nos?\.?\s*)?(?:covered|open|car)/i);
       count=Math.max(count, m?Number(m[1]):1);
     });
-    if(!count && kind) count=1;
+    if(!count && (kind||rows.length)) count=1;
     /* The areas, from wherever the reading put them. unit_areas is where the reader files them
        now; unit.cost_sheet is where the built-up has always been, as the string the sheet prints
        ("709.0") - which the reader's own number check rejected for not being a number, so
@@ -5332,8 +5377,8 @@
     const flatNet=SM.net.flat,      flatGr=SM.gross.flat;
     const parkNet=SM.net.parking,   parkGr=SM.gross.parking;
     const hasPark=parkNet!==null||parkGr!==null;
-    const kind=String((res.parking&&res.parking.marked&&res.parking.marked.value)||'').toUpperCase();
-    const kindWord=(kind==='COVERED'||kind==='OPEN')?(kind.charAt(0)+kind.slice(1).toLowerCase()):'';
+    const PK=wfParkKind(res);
+    const kind=PK.kind, kindWord=PK.word;
     /* The sheet's own "TOTAL FLAT VALUE" is the apartment and its parking together, and it wins:
        it is the figure the customer signed against, so it beats one added up here. Only a sheet
        that prints no such row falls back to adding the two. */
@@ -5459,8 +5504,19 @@
        "Parking : COVERED 5,00,000", which reads as though COVERED were part of the amount. */
     const pv=String(res.parking_value||v('covered_parking')||'').trim();
     const pk=pv.match(/^(COVERED|OPEN)\s*(.*)$/i);
-    const parkLabel=pk?(pk[1].toUpperCase()+' Parking'):'Parking';
+    /* The kind now comes from wfParkKind, which reads the cost sheet rather than the tick box -
+       so a sheet that charges for an Open park is no longer labelled Covered because somebody
+       ticked the wrong box, and a blank box no longer erases a park the sheet charges for. */
+    const PKC=wfParkKind(res);
+    const parkLabel=(PKC.word?(PKC.kind+' Parking'):(pk?(pk[1].toUpperCase()+' Parking'):'Parking'))
+      +(PKC.conflict?' *':'');
     const parkValue=pk?((pk[2]||'').trim()||'NIL'):(pv||'NIL');
+    /* Said out loud at the foot of the sheet rather than silently resolved, because the Booking
+       Form itself is wrong and somebody has to go and correct it. */
+    const parkNote=PKC.conflict
+      ? ('* The cost sheet charges for '+PKC.sheet.toLowerCase()+' parking while the Booking Form is '
+         +'ticked '+PKC.ticked.toLowerCase()+'. The cost sheet is shown. Please correct the form.')
+      : '';
 
     // Base Rate and Discount come off the baserate check's own fields rather than being parsed
     // back out of a sentence - see booking-audit's baseRateCheck for the three cases.
@@ -5623,15 +5679,27 @@
       +E(String(cl['Payment Plan']||'AS PER COST SHEET /'))+'</b></p>';
 
     /* Discount Approved is a line for VC / HD to sign, not a value to fill - so it stays a line,
-       with whoever the documents named written on it when they named anybody. */
+       with whoever the documents named written on it when they named anybody.
+
+       THE LINE RUNS TO THE EDGE OF THE SHEET. It used to stop at 82% of the width because
+       "(VC / HD)" sat in a column of its own after it, which left a signing line visibly shorter
+       than every other rule on the page and too short to sign on. The note now sits under the
+       line instead of beside it, so the rule gets the whole width the other rows get. */
     (function(){
       const who=said(cl['Discount Approved']);
       h+='<table class="wfd-sign"><tr>'
         +'<td data-w="26">Discount Approved</td>'
-        +'<td data-w="56" class="wfd-rule">'+(who?('<b>'+E(who)+'</b>'):'&nbsp;')+'</td>'
-        +'<td data-w="18"><span class="wfd-soft">(VC / HD)</span></td>'
+        +'<td data-w="74" class="wfd-rule">'+(who?('<b>'+E(who)+'</b>'):'&nbsp;')+'</td>'
+        +'</tr><tr>'
+        +'<td data-w="26"></td>'
+        +'<td data-w="74"><span class="wfd-soft wfd-small">(VC / HD)</span></td>'
         +'</tr></table>';
     })();
+
+    /* The parking disagreement, when there is one - see wfParkKind. */
+    if(parkNote){
+      h+='<p class="wfd-small wfd-soft" style="margin-top:14px">'+E(parkNote)+'</p>';
+    }
 
     const nm=(allotteeNames(res)[0]||v('customer_name')||'booking')
       .replace(/[^\w \-]/g,'').trim()||'booking';
