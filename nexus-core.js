@@ -21106,7 +21106,11 @@ async function cpaPhList(){
     if(lvl!=='project') bar+=sel('tower','Block',towers.map(t=>[t,t]),CPA_PHF.tower,'All blocks');
     if(lvl==='unit'){
       bar+=sel('unit','Flat',flats.map(u=>[u.id,u.unit_code]),CPA_PHF.unit,'All flats');
-      bar+=sel('area','Section',CPA_PH_AREAS.map(x=>[x[0],x[1]]),CPA_PHF.area,'All sections');
+      // Only the sections this person uploads to: a photos-only account has no Bathroom, so it is
+      // neither offered here nor listed below (6 Oct 2026).
+      const areas=cpaPhUploadAreas();
+      if(CPA_PHF.area&&!areas.some(x=>x[0]===CPA_PHF.area)) CPA_PHF.area='';
+      bar+=sel('area','Section',areas.map(x=>[x[0],x[1]]),CPA_PHF.area,'All sections');
     }
     bar+='<span class="cph-fcount" id="cphCount"></span></div>';
 
@@ -21135,6 +21139,11 @@ async function cpaPhList(){
       }else{
         let q=sb.schema('cust').from('unit_photos').select('*').in('unit_id',ids);
         if(CPA_PHF.area) q=q.eq('area',CPA_PHF.area);
+        else if(cpaPhUploadAreas().length<CPA_PH_AREAS.length){
+          // An unset section counts as Common area, so it stays in.
+          const ok=cpaPhUploadAreas().map(x=>x[0]);
+          q=q.or('area.is.null,area.in.('+ok.join(',')+')');
+        }
         const {data}=await q.is('deleted_at',null).order('taken_on',{ascending:false});
         const list=data||[]; count=list.length;
         const byId={}; live.forEach(u=>{byId[u.id]=u;});
