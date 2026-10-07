@@ -26360,15 +26360,16 @@ function trcTrStatus(r){
 function trcProcFailed(r){
   return !!(r && (trcTrStatus(r)==='failed' || r.queue_status==='failed'));
 }
-/* Retry is offered for a recording that failed OR is queued/unfinished (Waiting, or transcribed but
-   its QA never ran). queue_status is what proves the call is really in the pipeline: a call that was
-   never queued has none and has nothing to retry. */
+/* Retry is offered for every Waiting call, for a recording that failed, and for one queued/unfinished
+   (transcribed but its QA never ran). A Waiting call the API flagged eligible but the queue build never
+   picked up has no queue_status yet - the retry creates its queue row, so it gets the button too. */
 function trcCanRetry(r){
   if(!r||!r.recording_url&&!r.has_recording&&!r.queue_status)return false;
   if(trcProcFailed(r))return true;
-  return ['pending','transcribing','qa_pending','qa_running'].indexOf(String(r.queue_status||''))>=0;
+  if(['pending','transcribing','qa_pending','qa_running'].indexOf(String(r.queue_status||''))>=0)return true;
+  return !!(r.has_recording&&trcRecordingEligible(r)&&trcEligBucket(r)==='not_transcribed');
 }
-function trcRetryLabel(r){return trcProcFailed(r)?'Retry':'Start now';}
+function trcRetryLabel(r){return 'Retry';}
 /* A Sales call still queues and is still attempted (a lead qualifies a whole day, Sales calls
    included - see TRANSCRIPTION-README.md), but one that never actually finished transcribing has
    nothing of its own worth putting in front of a reader: no CRM-vs-call comparison ran, so there is
@@ -29116,7 +29117,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
    failure never re-transcribes and never re-bills the audio call. */
 window.trcRetry=async function(followUpId){
   const btns=document.querySelectorAll('[onclick="trcRetry('+followUpId+')"]');
-  btns.forEach(function(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Queued';});
+  btns.forEach(function(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Transcribing…';});
   try{
     const {data:{session}}=await sb.auth.getSession();
     const token=session&&session.access_token;
@@ -29125,7 +29126,15 @@ window.trcRetry=async function(followUpId){
       body:JSON.stringify({action:'retry',follow_up_id:followUpId})});
     const out=await res.json().catch(function(){return {};});
     if(!res.ok||out.error)throw new Error(out.error||('HTTP '+res.status));
-    toast('Back in the queue','ok');
+    /* The request is not the result: say what the step actually did. */
+    const steps=(out.work&&out.work.steps)||[];
+    const failed=steps.filter(function(x){return x&&x.status==='failed';})[0];
+    if(failed)throw new Error(failed.error||'the step failed');
+    const step=steps[steps.length-1];
+    if(!step)toast('Queued, but not started yet: '+((out.work&&out.work.note)||'the worker is busy'),'err');
+    else if(step.phase==='qa')toast('QA finished for this call','ok');
+    else if(step.status==='non_transcribable')toast('Listened to it: '+(step.reason||'no conversation')+' - nothing to transcribe','ok');
+    else toast('Transcribed - QA is next','ok');
   }catch(e){
     toast('Could not retry: '+((e&&e.message)||e),'err');
   }

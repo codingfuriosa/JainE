@@ -1136,10 +1136,15 @@ async function promoteRetries(db: DB) {
 
 async function oneStep(db: DB, geminiKey: string, openaiKey: string, geminiModel: string, qaModel: string,
                        onlyFollowUpId?: number) {
-  /* STRICTLY ONE AT A TIME. */
-  const { count: inFlight } = await db.schema("acc").from("transcription_queue")
-    .select("id", { count: "exact", head: true }).in("status", IN_FLIGHT);
-  if ((inFlight ?? 0) > 0) return { done: false, skipped: "a recording is already being processed" };
+  /* STRICTLY ONE AT A TIME - for the scheduled worker. A HAND RETRY names one exact recording and
+     claims that single row atomically (the status predicate below is the lock), so it does not wait for,
+     or get refused by, whatever the scheduled worker happens to be doing: previously a click that landed
+     during a worker step was silently skipped and the call sat back in the queue unprocessed. */
+  if (!onlyFollowUpId) {
+    const { count: inFlight } = await db.schema("acc").from("transcription_queue")
+      .select("id", { count: "exact", head: true }).in("status", IN_FLIGHT);
+    if ((inFlight ?? 0) > 0) return { done: false, skipped: "a recording is already being processed" };
+  }
 
   /* NO OPENAI KEY PAUSES THE JUDGE, NOT THE NIGHT. A row keeps its queue_seq across both phases, so
      a qa_pending row sits AHEAD of every recording still to be transcribed - leaving it claimable
@@ -1217,7 +1222,10 @@ async function doWork(db: DB, geminiKey: string, openaiKey: string, geminiModel:
 
   for (let i = 0; i < Math.max(1, MAX_STEPS_PER_TICK); i++) {
     if (i > 0 && Date.now() - t0 > SOFT_BUDGET_MS) { note = "stopped early to stay inside the worker limit"; break; }
-    const step = await oneStep(db, geminiKey, openaiKey, geminiModel, qaModel, i === 0 ? firstFollowUpId : undefined);
+    /* A hand retry keeps working on ITS recording for both steps (transcribe, then QA): once it has no
+       claimable status left the next step finds nothing and the loop ends, so it never wanders on to
+       whatever else is in the queue. */
+    const step = await oneStep(db, geminiKey, openaiKey, geminiModel, qaModel, firstFollowUpId);
     if (!step.done) { if (i === 0) note = step.skipped || (step.empty ? "the queue is empty" : undefined); break; }
     steps.push(step.result);
   }
@@ -1345,11 +1353,38 @@ Deno.serve(async (req: Request) => {
          re-transcribes and never re-bills the audio call. */
       const followUpId = Number(body.follow_up_id || body.id);
       if (!followUpId) return j({ error: "missing follow_up_id" }, 400);
-      const { data: row, error: readErr } = await db.schema("acc").from("transcription_queue")
+      const { data: rowFound, error: readErr } = await db.schema("acc").from("transcription_queue")
         .select("id, status, fail_phase, transcript_id, attempt_count, qa_attempt_count, snapshot_date, call_date")
         .eq("follow_up_id", followUpId).maybeSingle();
       if (readErr) return j({ error: readErr.message }, 500);
-      if (!row) return j({ error: "no queued recording for that follow-up" }, 404);
+      let row = rowFound;
+      if (!row) {
+        /* A WAITING CALL THAT WAS NEVER QUEUED (the CRM API flagged it recording_eligible but the nightly
+           queue build did not pick it up) still has to be retryable by hand. It gets its own queue row
+           here, built from the CRM follow-up itself, and from then on is exactly an ordinary waiting row. */
+        const { data: fu, error: fuErr } = await db.schema("acc").from("crm_followups")
+          .select("follow_up_id, lead_id, call_date, recording_url, callid, has_recording")
+          .eq("follow_up_id", followUpId).maybeSingle();
+        if (fuErr) return j({ error: fuErr.message }, 500);
+        if (!fu) return j({ error: "no such follow-up" }, 404);
+        if (!fu.has_recording || !fu.recording_url) {
+          return j({ error: "this call has no recording to transcribe" }, 409);
+        }
+        const { data: seq0 } = await db.rpc("next_crm_queue_block", { n: 1 });
+        const { data: latest0 } = await db.schema("acc").from("transcription_queue")
+          .select("snapshot_date").order("snapshot_date", { ascending: false }).limit(1).maybeSingle();
+        const { error: insErr } = await db.schema("acc").from("transcription_queue").insert({
+          follow_up_id: fu.follow_up_id, lead_id: fu.lead_id, call_date: fu.call_date,
+          snapshot_date: latest0?.snapshot_date || null, recording_url: fu.recording_url, callid: fu.callid,
+          queue_seq: Number(seq0) || Date.now(), status: "pending",
+        });
+        if (insErr && !/duplicate key/i.test(insErr.message)) return j({ error: insErr.message }, 500);
+        const { data: made, error: madeErr } = await db.schema("acc").from("transcription_queue")
+          .select("id, status, fail_phase, transcript_id, attempt_count, qa_attempt_count, snapshot_date, call_date")
+          .eq("follow_up_id", followUpId).maybeSingle();
+        if (madeErr || !made) return j({ error: madeErr?.message || "could not queue that recording" }, 500);
+        row = made;
+      }
       /* WAITING OR STUCK, NOT ONLY FAILED. A recording that is still queued is started right now
          instead of waiting its turn; one "in flight" for longer than the stale window was killed by
          the worker limit and is reset. One genuinely running a moment ago is left alone. */
