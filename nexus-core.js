@@ -20515,6 +20515,20 @@ function cpaPhCss(){return `<style>
   .cph-fixpv:hover .cph-th{box-shadow:0 0 0 2px #b91c1c}
   .cph-fixpn{position:absolute;right:-6px;top:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b91c1c;
     color:#fff;font-size:11px;font-weight:800;display:grid;place-items:center}
+  .cph-cnts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}
+  .cph-cnt{display:flex;align-items:center;gap:9px;padding:10px 12px;border:1px solid var(--line);border-left:4px solid var(--c);
+    border-radius:10px;background:#fff;cursor:pointer;font:inherit;text-align:left}
+  .cph-cnt i{color:var(--c);font-size:15px}
+  .cph-cnt b{font-size:20px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+  .cph-cnt span{font-size:12.5px;color:var(--slate);font-weight:600}
+  .cph-cnt:hover{background:#f8fafc}
+  .cph-cnt.on{background:color-mix(in srgb,var(--c) 10%,#fff);border-color:var(--c)}
+  @media(max-width:620px){ .cph-cnts{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  .cph-cntline{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:10px 14px;margin-bottom:12px;border:1px solid var(--line);
+    border-radius:12px;background:#fff;font-size:13px}
+  .cph-cntline b{color:var(--ink)}
+  .cph-cntline span{display:inline-flex;align-items:center;gap:6px;color:var(--ink);font-weight:600}
+  .cph-cntline span i{color:var(--c)}
   .cph-fixg{font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#b91c1c;margin:6px 2px -2px}
   .cph-fixg:first-child{margin-top:0}
   .cph-fixs{display:flex;flex-direction:column;gap:6px;margin:2px 0 4px}
@@ -20647,6 +20661,7 @@ async function cpaPhPaint(projects,units){
   const lastUp=needUnit?await cpaPhLastUploads(flats.map(u=>u.id)):{};
   if(!$('cphWrap')) return;
   wrap.innerHTML=cpaPhModeBar()
+    +'<div id="cphCnt"></div>'
     +'<div id="cphFix"></div>'
     +'<div class="cph-card">'
       +'<div class="cph-bar">'
@@ -20702,6 +20717,19 @@ async function cpaPhPaint(projects,units){
   cpaPhList();
   cpaPhFillBadge();
   cpaPhFixList(projects,units);
+  cpaPhCountLine(projects,units);
+}
+// "Dream Gurukul: 120 approved · 40 waiting · 5 rejected" - every photo and video of the project
+// picked above, whole project, blocks and flats together.
+async function cpaPhCountLine(projects,units){
+  const host=$('cphCnt'); if(!host) return;
+  const pid=CPA_PH.project, c=await cpaMediaCounts(pid,units);
+  if(!$('cphCnt')||String(CPA_PH.project)!==String(pid)) return;
+  const p=(projects||[]).find(x=>String(x.id)===String(pid));
+  const name=p?custRefTitle(String(p.name).split('(')[0].trim()):'This project';
+  host.innerHTML='<div class="cph-cntline"><b>'+esc(name)+'</b>'
+    +['published','pending','rejected','unpublished'].filter(k=>k!=='unpublished'||c[k]).map(k=>{ const L=CPA_COUNT_LABEL[k];
+      return '<span style="--c:'+L[2]+'"><i class="fa-solid '+L[1]+'"></i>'+c[k]+' '+L[0].toLowerCase()+'</span>'; }).join('')+'</div>';
 }
 
 /* TO RETAKE: every rejected photo still waiting for a replacement, whoever took it - on site,
@@ -21411,6 +21439,28 @@ async function cpaRvPending(units){
   up.forEach(r=>{ const u=unitOf[r.unit_id]; if(u) add(u.project_id,'unit_photos',u.tower); });
   return out;
 }
+/* How many photos and videos are waiting / approved (published) / rejected / unpublished, for one
+   project - one section of it, or all three - and optionally one block (7 Oct 2026). Counted in the
+   database (head requests), so nothing is downloaded to count it. */
+const CPA_COUNT_KEYS=['pending','published','rejected','unpublished'];
+async function cpaMediaCounts(projectId,units,secs,tower){
+  const pid=Number(projectId), out={pending:0,published:0,rejected:0,unpublished:0};
+  if(!pid) return out;
+  const unitIds=(units||[]).filter(u=>u.status!=='cancelled'&&String(u.project_id)===String(pid)&&(!tower||u.tower===tower)).map(u=>u.id);
+  const jobs=[];
+  (secs||CPA_RV_SECS.map(x=>x[0])).forEach(function(t){
+    CPA_COUNT_KEYS.forEach(function(st){
+      let q=sb.schema('cust').from(t).select('id',{count:'exact',head:true}).eq('status',st).is('deleted_at',null);
+      if(t==='unit_photos'){ if(!unitIds.length) return; q=q.in('unit_id',unitIds); }
+      else { q=q.eq('project_id',pid); if(t==='tower_photos'&&tower) q=q.eq('tower',tower); }
+      jobs.push(q.then(r=>{ out[st]+=(r&&r.count)||0; },()=>{}));
+    });
+  });
+  await Promise.all(jobs);
+  return out;
+}
+const CPA_COUNT_LABEL={pending:['Waiting','fa-hourglass-half','#d97706'],published:['Approved','fa-circle-check','#16a34a'],
+  rejected:['Rejected','fa-circle-xmark','#dc2626'],unpublished:['Unpublished','fa-eye-slash','#64748b']};
 // The section of a project that has the most waiting, or the current one if nothing is waiting.
 function cpaRvBusiestSec(p){
   if(!p||!p.total) return CPA_RV.sec;
@@ -21438,6 +21488,8 @@ async function cpaRvPaint(projects,units){
   const waitTxt=n=>n?' ('+n+' waiting)':'';
   const projOpts=projects.map(p=>[p.id,p.name+waitTxt((pend[p.id]||{}).total)]);
   const towerOpts=towers.map(t=>{ const c=(pp.towers&&pp.towers[t])||{}; return [t,t+waitTxt(c[CPA_RV.sec]||0)]; });
+  const rvCounts=await cpaMediaCounts(CPA_RV.project,units,[CPA_RV.sec],CPA_RV.sec==='project_photos'?'':CPA_RV.tower);
+  if(!$('cphWrap')) return;
   const sel=(id,label,opts,val,allLabel)=>'<div class="cph-f"><label>'+esc(label)+'</label><div class="cph-sel"><select onchange="cpaRvSet(\''+id+'\',this.value)">'
     +(allLabel?'<option value=""'+(val?'':' selected')+'>'+esc(allLabel)+'</option>':'')
     +opts.map(o=>'<option value="'+esc(o[0])+'"'+(String(o[0])===String(val)?' selected':'')+'>'+esc(o[1])+'</option>').join('')+'</select></div></div>';
@@ -21450,8 +21502,12 @@ async function cpaRvPaint(projects,units){
       +'<div class="cph-filters" style="margin:0">'
         +sel('project','Project',projOpts,CPA_RV.project,'')
         +(CPA_RV.sec!=='project_photos'?sel('tower','Block',towerOpts,CPA_RV.tower,'All blocks'):'')
-        +sel('status','Showing',Object.keys(CPA_MEDIA_STATUS).map(k=>[k,CPA_MEDIA_STATUS[k][0]]),CPA_RV.status,'')
+        +sel('status','Showing',Object.keys(CPA_MEDIA_STATUS).map(k=>[k,CPA_MEDIA_STATUS[k][0]+(rvCounts[k]!=null?' ('+rvCounts[k]+')':'')]),CPA_RV.status,'')
       +'</div>'
+      // Tap a tile to see those: the counts are for the project, section and block chosen above.
+      +'<div class="cph-cnts">'+CPA_COUNT_KEYS.map(k=>{ const L=CPA_COUNT_LABEL[k];
+          return '<button class="cph-cnt'+(CPA_RV.status===k?' on':'')+'" style="--c:'+L[2]+'" onclick="cpaRvSet(\'status\',\''+k+'\')">'
+            +'<i class="fa-solid '+L[1]+'"></i><b>'+(rvCounts[k]||0)+'</b><span>'+L[0]+'</span></button>'; }).join('')+'</div>'
     +'</div>'
     +'<div class="cph-card"><div class="cph-rvbar" id="cphRvBar"></div><div id="cphRvList"><div class="cph-empty">Loading…</div></div></div>';
   cpaPhFillBadge();
