@@ -26379,6 +26379,25 @@ function trcRetryLabel(r){return trcProcFailed(r)?'Retry':'Start now';}
 function trcIsSkippedSalesCall(r){
   return !!(r && r.personnel_team==='Sales' && r.transcription_status!=='completed');
 }
+/* recording_eligible: the CRM API's own flag on each follow-up (stored in acc.crm_followups.recording_eligible,
+   generated from the raw payload). "Eligible for transcription" is exactly the calls the API flags true,
+   and every one of them lands in ONE of: transcribed, waiting, failed, no conversation, no recording
+   (trcEligBucket) - so those five always add up to the eligible total. The dashboard's call-level
+   numbers and lead list only cover these calls; the three history chips (Missed callback, Promised
+   call, Late follow-ups) judge a lead's WHOLE history, so they look at every call - a missed incoming
+   call has no recording and so can never be "eligible" itself. */
+function trcRecordingEligible(r){return !!(r&&r.recording_eligible===true);}
+/* Which single bucket an eligible call is in. Same precedence as acc.eligible_kpis (the SQL that the
+   cards read): no recording, then failed (the transcript OR the queue failed), then transcribed, then
+   no conversation, and whatever is left is still waiting. */
+function trcEligBucket(r){
+  if(!r)return '';
+  if(!r.has_recording)return 'no_recording';
+  if(trcProcFailed(r))return 'failed';
+  const st=String(r.transcription_status||'');
+  if(st==='completed'||st==='non_transcribable')return st;
+  return 'not_transcribed';
+}
 const TRC_AI_TAG = {Lost:'t-red','In Follow Up':'t-amber',Qualified:'t-green',Unclear:'t-gray'};
 /* "Qualified" alone reads as though the visit is done too - the one thing this label exists to say is
    that it is not, by requirement (2026-09-18). r.visit_pending comes off followup_qa (see
@@ -26595,7 +26614,7 @@ async function trcEnsureHistories(ids){
 }
 /* Ids of every lead behind the current list, before the history chips narrow it. */
 let TRC_LIST_LEAD_IDS=[];
-function trcHistChipOn(){return TRC_F.missedIn==='1'||TRC_F.cadence==='1';}
+function trcHistChipOn(){return TRC_F.missedIn==='1'||TRC_F.cadence==='1'||TRC_F.promised==='1';}
 async function trcWarmListHistories(){
   const ids=TRC_LIST_LEAD_IDS.slice();
   if(!ids.length||trcHistoriesReady(ids))return;
@@ -26699,7 +26718,7 @@ function trcSortHistory(rows){
      that transition is visible - which resets TRC_F back to these same defaults and clears this same
      key, so a reload caught right after landing here restores THIS visit, not the one before it. */
 const TRC_F=(function(){
-  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',missedIn:'all',cadence:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
+  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',missedIn:'all',cadence:'all',promised:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
   try{
     const saved=JSON.parse(sessionStorage.getItem('trc_filters_state')||'null');
     if(saved&&typeof saved==='object')return Object.assign(fallback,saved);
@@ -26719,7 +26738,7 @@ function trcResetFilters(){
   TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
   TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
   TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.missedIn='all';
-  TRC_F.cadence='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
+  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_PAGE=0;
   TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -26994,7 +27013,7 @@ const TRC_LIGHT_FIELDS=TRC_LIGHT.split(',');
 const TRC_CRM_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status:status,crm_status_raw:status_raw,status_detail,'
   +'crm_remarks:remarks,crm_lost_reason:lost_reason,recording_url,callid,has_recording,call_duration,'
-  +'personnel_id,personnel_name,personnel_email,personnel_role';
+  +'personnel_id,personnel_name,personnel_email,personnel_role,recording_eligible';
 
 /* A lead that already reached Qualified (or beyond) has no legitimate way back to Fresh or In Follow
    Up - acc.lead_level_progress_v already audits every follow-up for exactly this and marks the ones
@@ -27052,6 +27071,24 @@ async function trcFetch(force){
    until trcEnrichVisiblePage fills them in for whichever leads are actually on screen (see below) -
    trcRowDate, trcApply's crm/bu/personnel/q filters and trcLeads' grouping/sorting only ever needed
    the columns this DOES carry, so nothing downstream has to know which path a row came from. */
+/* Reads EVERY row of a query, however many there are. The API answers an over-long result with only its
+   first max-rows (1000) and no error, so a plain `await q` quietly drops everything past that - which is
+   how a day with 1183 calls lost its last 183: the cards (counted in the database) read 12 matched leads
+   while the table, built from the 1000 rows that arrived, could show only 10. A page that comes back with
+   1000 or more rows might have been cut short, so it keeps going from where it stopped until a page
+   comes back shorter. build() must return a fresh, fully ordered query each time. */
+async function trcReadAll(build){
+  let out=[],from=0;
+  for(;;){
+    const {data,error}=await build().range(from,from+19999);
+    if(error)throw error;
+    const batch=data||[];
+    out=out.concat(batch);
+    if(batch.length<1000||out.length>200000)break;
+    from+=batch.length;
+  }
+  return out;
+}
 async function trcFetchLight(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey)return TRC_ROWS;
@@ -27061,7 +27098,7 @@ async function trcFetchLight(force){
      of a lighter one. See trcFetchFull for the one place a full fetch also writes THIS key, because
      full data is strictly good enough to answer a light request too. */
   if(!force){
-    const cached=trCacheRead('trc_fetch_light_cache',rangeKey);
+    const cached=trCacheRead('trc_fetch_light_cache_v3',rangeKey);
     if(cached){
       TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;
       TRC_ROWS_ENRICHED=cached.length>0&&cached.every(function(r){return r._enriched;});
@@ -27074,23 +27111,25 @@ async function trcFetchLight(force){
     }
   }
   try{
-    let q=sb.schema('acc').from('crm_followups').select(TRC_CRM_LIGHT)
-      .order('call_date',{ascending:false,nullsFirst:false})
-      .order('communication_time',{ascending:false,nullsFirst:false})
-      .order('follow_up_id',{ascending:false});
-    if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
-    if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
-    const {data,error}=await q;
-    if(error)throw error;
-    const rows=data||[];
+    const rows=await trcReadAll(function(){
+      let q=sb.schema('acc').from('crm_followups').select(TRC_CRM_LIGHT)
+        .order('call_date',{ascending:false,nullsFirst:false})
+        .order('communication_time',{ascending:false,nullsFirst:false})
+        .order('follow_up_id',{ascending:false});
+      if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
+      if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
+      return q;
+    });
     /* lead_current_status/lead_current_lost_reason live on acc.crm_leads, one row per lead - a second
        light query, keyed on just the distinct leads this range actually has, rather than folding
        crm_leads into the query above and paying a join for it. */
     const leadIds=Array.from(new Set(rows.map(function(r){return r.lead_id;}).filter(function(v){return v!=null;})));
     let leadMap={};
-    if(leadIds.length){
+    /* In chunks: one .in() with every lead of a wide range is both a very long URL and a result the API
+       would cut at 1000 rows. */
+    for(let i=0;i<leadIds.length;i+=200){
       const {data:leads,error:e2}=await sb.schema('acc').from('crm_leads')
-        .select('lead_id,status,lost_reason').in('lead_id',leadIds);
+        .select('lead_id,status,lost_reason').in('lead_id',leadIds.slice(i,i+200));
       if(e2)throw e2;
       (leads||[]).forEach(function(l){leadMap[String(l.lead_id)]=l;});
     }
@@ -27105,7 +27144,7 @@ async function trcFetchLight(force){
       r.personnel_team=!email?null:((TRC_PERSONNEL||[]).some(function(p){return p.email===email;})?'Pre-Sales':'Sales');
     });
     TRC_ROWS=rows;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
-    trCacheWrite('trc_fetch_light_cache',rangeKey,rows);
+    trCacheWrite('trc_fetch_light_cache_v3',rangeKey,rows);
   }catch(e){
     TRC_ROWS=TRC_ROWS&&TRC_ROWS_RANGE===rangeKey?TRC_ROWS:[];TRC_ROWS_RANGE=null;TRC_QA_MERGED_RANGE=null;
     toast('Could not load the call history: '+((e&&e.message)||e),'err');
@@ -27123,7 +27162,7 @@ async function trcFetchFull(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey&&TRC_ROWS_ENRICHED)return TRC_ROWS;
   if(!force){
-    const cached=trCacheRead('trc_fetch_cache',rangeKey);
+    const cached=trCacheRead('trc_fetch_cache_v3',rangeKey);
     if(cached){TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=true;TRC_QA_MERGED_RANGE=null;return TRC_ROWS;}
   }
   /* followup_timeline_v joins lead_level_progress_v, which ranks every lead's whole follow-up
@@ -27134,28 +27173,37 @@ async function trcFetchFull(force){
      round trips for a table Postgres can hand back whole in one. PAGE now covers the entire table
      in a single request; the loop (and its 50000 backstop) stays only so a future row count that
      outgrows one page still pages correctly instead of silently truncating. */
-  const PAGE=20000;let out=[],from=0;
+  let out=[];
   try{
-    for(;;){
+    out=await trcReadAll(function(){
       let q=sb.schema('acc').from('followup_timeline_v').select(TRC_LIGHT)
         .order('call_date',{ascending:false,nullsFirst:false})
         .order('communication_time',{ascending:false,nullsFirst:false})
-        .order('follow_up_id',{ascending:false})
-        .range(from,from+PAGE-1);
+        .order('follow_up_id',{ascending:false});
       if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
       if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
-      const {data,error}=await q;
-      if(error)throw error;
-      const batch=data||[];out=out.concat(batch);
-      if(batch.length<PAGE)break;
-      from+=PAGE;if(from>50000)break;
-    }
+      return q;
+    });
+    /* followup_timeline_v does not carry the API's recording_eligible flag, so it is merged in from
+       acc.crm_followups (one indexed, join-free query over the same date range). */
+    try{
+      const el=await trcReadAll(function(){
+        let eq=sb.schema('acc').from('crm_followups').select('follow_up_id,recording_eligible')
+          .not('recording_eligible','is',null).order('follow_up_id',{ascending:false});
+        if(TRC_F.from)eq=eq.gte('call_date',TRC_F.from);
+        if(TRC_F.to)eq=eq.lte('call_date',TRC_F.to);
+        return eq;
+      });
+      const flag={};
+      (el||[]).forEach(function(e){flag[String(e.follow_up_id)]=e.recording_eligible;});
+      out.forEach(function(r){const v=flag[String(r.follow_up_id)];if(v!==undefined)r.recording_eligible=v;});
+    }catch(e){}
     out.forEach(function(r){r._enriched=true;});
     TRC_ROWS=out;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=true;TRC_QA_MERGED_RANGE=null;
-    trCacheWrite('trc_fetch_cache',rangeKey,out);
+    trCacheWrite('trc_fetch_cache_v3',rangeKey,out);
     // Full data answers a light request too (see trcFetchLight) - written under its key as well so a
     // later visit to this same range never fetches a step down from what is already sitting here.
-    trCacheWrite('trc_fetch_light_cache',rangeKey,out);
+    trCacheWrite('trc_fetch_light_cache_v3',rangeKey,out);
   }catch(e){
     TRC_ROWS=out.length?out:[];TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
     toast('Could not load the call history: '+((e&&e.message)||e),'err');
@@ -27186,14 +27234,15 @@ async function trcEnsureQaFieldsMerged(){
   if(TRC_QA_MERGED_RANGE===rangeKey)return;
   trcShowLoading();
   try{
-    let q=sb.schema('acc').from('followup_qa').select(
-      'follow_up_id,qa_id:id,pitch_score,pitch_status,followup_date_status,lost_reason_status,'
-      +'retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
-      +'qa_error,reused_transcription,is_latest_assessed');
-    if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
-    if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
-    const {data,error}=await q;
-    if(error)throw error;
+    const data=await trcReadAll(function(){
+      let q=sb.schema('acc').from('followup_qa').select(
+        'follow_up_id,qa_id:id,pitch_score,pitch_status,followup_date_status,lost_reason_status,'
+        +'retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+        +'qa_error,reused_transcription,is_latest_assessed').order('follow_up_id',{ascending:false});
+      if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
+      if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
+      return q;
+    });
     const byFollowUp={};
     (data||[]).forEach(function(r){byFollowUp[String(r.follow_up_id)]=r;});
     (TRC_ROWS||[]).forEach(function(r,i){
@@ -27265,7 +27314,7 @@ async function trcEnrichVisiblePage(){
     if(changed&&gen===TRC_ENRICH_GEN){
       // Persisted under the same key trcFetchLight reads, so a reload within the cache window comes
       // back with whichever leads this tab already paid to enrich, not the original blank snapshot.
-      trCacheWrite('trc_fetch_light_cache',TRC_ROWS_RANGE,TRC_ROWS);
+      trCacheWrite('trc_fetch_light_cache_v3',TRC_ROWS_RANGE,TRC_ROWS);
       trcRender(false,true);
     }
   }catch(e){
@@ -27335,33 +27384,21 @@ async function trcKpiFastFetch(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_KPI_FAST&&!force&&TRC_KPI_FAST_RANGE===rangeKey)return TRC_KPI_FAST;
   try{
-    let sq=sb.schema('acc').from('daily_qa_summary').select('*');
-    if(TRC_F.from)sq=sq.gte('date',TRC_F.from);
-    if(TRC_F.to)sq=sq.lte('date',TRC_F.to);
-    const lq=sb.schema('acc').rpc('crm_lead_count_in_range',{p_from:TRC_F.from||null,p_to:TRC_F.to||null});
-    const [{data:days,error:e1},{data:leadCount,error:e2}]=await Promise.all([sq,lq]);
-    if(e1||e2)throw (e1||e2);
-    const sum={total_followups:0,recordings_available:0,transcribed:0,already_transcribed:0,
-      non_transcribable:0,transcription_failed:0,pending:0,not_in_scope:0,qa_assessed:0,
-      pitch_score_sum:0,pitch_score_n:0,pitch_accurate:0,pitch_partially_accurate:0,pitch_inaccurate:0,
-      followup_date_accurate:0,followup_date_inaccurate:0,followup_date_not_verifiable:0,
-      lost_reason_accurate:0,lost_reason_inaccurate:0,lost_reason_not_verifiable:0,
-      remarks_accurate:0,remarks_partially_accurate:0,remarks_inaccurate:0,remarks_not_verifiable:0,
-      status_match:0,status_mismatch:0,lost_should_not_have_been_lost:0,
-      qualified_should_not_have_been_qualified:0,in_followup_should_have_been_lost:0,
-      in_followup_should_have_been_qualified:0,
-      agent_qa_score_sum:0,agent_qa_score_n:0,
-      reused_transcription:0,
-      /* Safe to sum day-by-day and add across a range, unlike total_leads - is_latest_assessed
-         (20260918100000) is unique per lead across the WHOLE table, so a lead's match/mismatch
-         contribution lands on exactly one day, ever. See 20260918110000. */
-      status_match_leads:0,status_mismatch_leads:0,
-      lost_should_not_have_been_lost_leads:0,qualified_should_not_have_been_qualified_leads:0,
-      in_followup_should_have_been_lost_leads:0,in_followup_should_have_been_qualified_leads:0};
-    (days||[]).forEach(function(d){
-      Object.keys(sum).forEach(function(k){sum[k]+=Number(d[k]||0);});
-    });
-    sum.total_leads=Number(leadCount||0);
+    /* One call to acc.eligible_kpis: counts over the calls the CRM API flags recording_eligible only,
+       each in exactly one bucket (transcribed / waiting / failed / no conversation / no recording), so
+       the cards can never disagree with the eligible total. Lead counts come from the same query. */
+    const {data,error}=await sb.schema('acc').rpc('eligible_kpis',{p_from:TRC_F.from||null,p_to:TRC_F.to||null});
+    if(error)throw error;
+    const d=data||{};
+    const sum={};
+    Object.keys(d).forEach(function(k){sum[k]=Number(d[k]||0);});
+    /* Names the rest of this page already reads. */
+    sum.total_followups=sum.eligible;
+    sum.total_leads=sum.eligible_leads;
+    sum.transcribed=sum.completed;
+    sum.pending=sum.not_transcribed;
+    sum.transcription_failed=sum.failed;
+    sum.reused_transcription=sum.reused;
     TRC_KPI_FAST=sum;TRC_KPI_FAST_RANGE=rangeKey;
   }catch(e){
     TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -27379,7 +27416,7 @@ async function trcKpiFastFetch(force){
    to bring it current. Only ever fires the extra request when there is actually something to fix. */
 async function trcFetchBoth(){
   await Promise.all([trcFetch(false),trcKpiFastFetch()]);
-  if(TRC_KPI_FAST&&TRC_ROWS&&TRC_KPI_FAST.total_followups!==TRC_ROWS.length){
+  if(TRC_KPI_FAST&&TRC_ROWS&&TRC_KPI_FAST.total_followups!==TRC_ROWS.filter(trcRecordingEligible).length){
     await trcFetch(true);
   }
 }
@@ -27410,10 +27447,11 @@ async function trcEnsurePinnedLead(){
 
 /* Every filter, applied together. skipCards lifts the two card filters so the four totals stay put
    while one of them is selected - clicking Mismatch must not collapse Transcribed to the mismatches. */
-function trcApply(rows,skipCards){
+function trcApply(rows,skipCards,allCalls){
   const q=String(TRC_F.q||'').trim().toLowerCase();
   const all=rows||[];
   return all.filter(function(r){
+    if(!allCalls&&!trcRecordingEligible(r))return false;
     const d=trcRowDate(r);
     if(TRC_F.from&&(!d||d<TRC_F.from))return false;
     if(TRC_F.to&&(!d||d>TRC_F.to))return false;
@@ -27461,8 +27499,7 @@ function trcApply(rows,skipCards){
       else if(String(r.personal_mobile_status||'')!==TRC_F.personalMobile)return false;
     }
     if(!skipCards){
-      if(TRC_F.proc==='failed'){ if(!trcProcFailed(r))return false; }
-      else if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
+      if(TRC_F.proc!=='all'&&trcEligBucket(r)!==TRC_F.proc)return false;
       // MATCH/MISMATCH mean "currently" (see trcCountsMatch/trcCountsMismatch) - a superseded old
       // verdict does not belong in either drill-down, only in the lead's own history.
       if(TRC_F.match==='MATCH'&&!trcCountsMatch(r))return false;
@@ -27542,7 +27579,8 @@ function trcLeads(rows){
     /* Pending until the real history has arrived (see trcEnsureHistories): scoring a lead off only
        the one call in the date range gave answers that flipped the moment its history loaded. */
     g.historyPending=!cachedHistory&&!TRC_HIST_TRIED[String(g.lead_id)];
-    g.cadence=g.historyPending?null:trcCadenceIssues(g.status,historyRows);
+    g.cadence=g.historyPending?null:trcCadenceIssues(g.status,historyRows,'late');
+    g.promised=g.historyPending?null:trcCadenceIssues(g.status,historyRows,'promised');
     g.missedIn=g.historyPending?null:trcMissedIncomingCallback(historyRows);
     g.trail=[];
     g.rows.forEach(function(r){
@@ -27659,7 +27697,7 @@ function trcLeadSkeletonHtml(){
 /* ---- the dashboard. Same four cards and the same chips as before; what changed underneath is that
    a "call" is now a follow-up in the CRM's own history rather than a row we happened to import. ---- */
 function trcKpiHtml(rows,shownRows){
-  const n=function(st){return rows.filter(function(r){return trcTrStatus(r)===st;}).length;};
+  const n=function(st){return rows.filter(function(r){return trcEligBucket(r)===st;}).length;};
   /* The four cards, "QA assessed" and "Reused an existing transcript" all have one unambiguous,
      purely-additive definition each, verified to match acc.daily_qa_summary_v exactly (see
      20260917110000) - so they can come from that day-summed table instead of scanning every fetched
@@ -27672,7 +27710,6 @@ function trcKpiHtml(rows,shownRows){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   const fast=(TRC_F.crm==='all'&&TRC_F.bu==='all'&&TRC_F.personnel==='all'&&!String(TRC_F.q||'').trim()
               &&TRC_KPI_FAST&&TRC_KPI_FAST_RANGE===rangeKey)?TRC_KPI_FAST:null;
-  const totalCalls=fast?fast.total_followups:rows.length;
   /* Every card's own lead count - always counted from `rows` (the fetched range, filtered by date/CRM
      status/business unit/personnel/search but not by which card is active), never from the fast path:
      there is no per-category distinct-lead total to sum from acc.daily_qa_summary (the same reason
@@ -27680,15 +27717,13 @@ function trcKpiHtml(rows,shownRows){
      days is one lead, not two), and this is cheap enough as a plain array scan that it never needed
      one. */
   const leadsOf=function(pred){return new Set(rows.filter(pred).map(function(r){return r.lead_id;})).size;};
-  const leadCount=fast?fast.total_leads:leadsOf(function(){return true;});
-  /* Total Calls' own lead count is safe unconditionally - lead_id is on every row whether or not it
-     has been enriched yet. Transcribed/Match/Mismatch's lead counts are NOT: they read
+  /* Transcribed/Match/Mismatch's lead counts need enrichment: they read
      trcTrStatus/status_match, which the fast crm_followups-only fetch never carries (see
      trcFetchLight) until trcEnrichVisiblePage fills in whichever leads are actually on screen. Asking
      for them across the whole range before that would silently undercount almost everything, so the
      subtitle just leaves the lead count off until the row data backs it up. */
   const haveDetail=TRC_ROWS_ENRICHED;
-  const transcribedLeads=haveDetail?leadsOf(function(r){return trcTrStatus(r)==='completed';}):null;
+  const transcribedLeads=fast?fast.completed_leads:(haveDetail?leadsOf(function(r){return trcEligBucket(r)==='completed';}):null);
   /* Match/Mismatch's lead counts, unlike Transcribed's, DO have a fast source now
      (acc.daily_qa_summary's *_leads columns, 20260918110000) - is_latest_assessed makes a lead's
      match/mismatch contribution land on exactly one day ever, so summing per-day distinct-lead
@@ -27699,10 +27734,15 @@ function trcKpiHtml(rows,shownRows){
   const matchLeads=fast?fast.status_match_leads:(haveDetail?leadsOf(trcCountsMatch):null);
   const mismatchLeads=fast?fast.status_mismatch_leads:(haveDetail?leadsOf(trcCountsMismatch):null);
   const inLeads=function(c){return c+' lead'+(c===1?'':'s');};
+  /* "Eligible for transcription": every call the CRM API flags recording_eligible (see
+     trcRecordingEligible) - this is the total that Waiting, Failed, Transcribed and so on break down.
+     `rows` is already narrowed to those calls, and lead_id is on every row, so it needs no enrichment. */
+  const eligibleCalls=fast?fast.eligible:rows.length;
+  const eligibleLeads=fast?fast.eligible_leads:leadsOf(function(){return true;});
   const cards=[
-    ['Total Calls',totalCalls,'follow-ups in '+inLeads(leadCount),'var(--slate)','all','proc'],
+    ['Eligible for transcription',eligibleCalls,'in '+inLeads(eligibleLeads),'var(--slate)','all','proc'],
     ['Transcribed',fast?fast.transcribed:n('completed'),
-      'with a full transcript'+(haveDetail?', in '+inLeads(transcribedLeads):''),'#16a34a','completed','proc'],
+      'with a full transcript'+(transcribedLeads!==null?', in '+inLeads(transcribedLeads):''),'#16a34a','completed','proc'],
     ['CRM Match',fast?fast.status_match:rows.filter(trcCountsMatch).length,
       'agrees with the CRM'+(haveMatchLeads?', in '+inLeads(matchLeads):''),'#16a34a','MATCH','match'],
     ['CRM Mismatch',fast?fast.status_mismatch:rows.filter(trcCountsMismatch).length,
@@ -27717,13 +27757,15 @@ function trcKpiHtml(rows,shownRows){
      lead is out of scope when a call of theirs never entered the transcription queue (trcTrStatus), and
      that needs row-level data, so it reads '…' until the fuller lead data has loaded, like the
      missed-incoming / late-follow-up chips. */
-  const notInScopeLeads=haveDetail?leadsOf(function(r){return trcTrStatus(r)==='out_of_scope';}):null;
+  /* "Not in scope" is gone (a call that never entered the queue is not an eligible call). "No recording" is
+     back, but now counts only ELIGIBLE calls: the API can flag a call eligible while its recording_url
+     is still empty, and those are exactly the calls that can never be transcribed. */
+  const noRecording=fast?fast.no_recording:n('no_recording');
   const sub=[
     ['Waiting','not_transcribed',fast?fast.pending:n('not_transcribed'),'fa-clock'],
-    ['Not in scope','out_of_scope',notInScopeLeads===null?'…':notInScopeLeads+(notInScopeLeads===1?' lead':' leads'),'fa-user-slash'],
-    ['No recording','no_recording',fast?(fast.total_followups-fast.recordings_available):n('no_recording'),'fa-phone-slash'],
+    ['Failed','failed',fast?fast.failed:n('failed'),'fa-circle-exclamation'],
     ['No conversation','non_transcribable',fast?fast.non_transcribable:n('non_transcribable'),'fa-volume-xmark'],
-    ['Failed','failed',fast?fast.transcription_failed:rows.filter(trcProcFailed).length,'fa-circle-exclamation']
+    ['No recording','no_recording',noRecording,'fa-phone-slash']
   ];
   const assessed=fast?fast.qa_assessed:rows.filter(function(r){return r.qa_id;}).length;
   const reused=fast?fast.reused_transcription:rows.filter(function(r){return r.reused_transcription;}).length;
@@ -27735,6 +27777,7 @@ function trcKpiHtml(rows,shownRows){
   const histDone=haveDetail&&shownLeads.every(function(g){return !g.historyPending;});
   const missedInLeads=histDone?shownLeads.filter(function(g){return g.missedIn;}).length:null;
   const cadenceLeads=histDone?shownLeads.filter(function(g){return g.cadence;}).length:null;
+  const promisedLeads=histDone?shownLeads.filter(function(g){return g.promised;}).length:null;
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
       const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
       return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
@@ -27742,22 +27785,29 @@ function trcKpiHtml(rows,shownRows){
         +'<div class="val">'+c[1]+'</div>'
         +'<div style="font-size:12px;color:'+c[3]+';margin-top:3px">'+esc(c[2])+'</div></div>';
     }).join('')+'</div>'
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">'+sub.map(function(s){
+    +'<div class="card card-pad" style="margin-top:12px;padding-top:10px;padding-bottom:10px">'
+    +'<div style="font-size:12px;font-weight:600;color:var(--slate);margin-bottom:8px">Eligible calls not transcribed yet</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+sub.map(function(s){
       const on=TRC_F.proc===s[1];
       return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcCard(\'proc\',\''+s[1]+'\')">'
         +'<i class="fa-solid '+s[3]+'"></i> '+esc(s[0])+' <b>'+s[2]+'</b></button>';
     }).join('')
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
-    +'<button class="btn btn-sm'+(TRC_F.missedIn==='1'?' btn-primary':'')+'" onclick="trcToggleMissedIn()" title="The lead called in and the call was missed (logged as incoming call missed), and no callback was logged within 24 hours. Not counted until the fuller lead data has loaded">'
-      +'<i class="fa-solid fa-phone-slash"></i> Missed incoming - not called back'+(missedInLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+missedInLeads+'</b>')+'</button>'
-    +'<button class="btn btn-sm'+(TRC_F.cadence==='1'?' btn-primary':'')+'" onclick="trcToggleCadence()" title="The agent set a next follow-up date and that date passed without a call. Not counted until the fuller lead data has loaded">'
-      +'<i class="fa-solid fa-hourglass-half"></i> Late follow-ups'+(cadenceLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+cadenceLeads+'</b>')+'</button>'
-    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<span style="font-size:12.5px;color:var(--slate)">QA assessed <b style="color:var(--ink)">'+assessed+'</b></span>'
     /* Deduplication is invisible unless it is counted. This is the number of follow-ups that reused a
        transcript already paid for, which is the whole point of keying on recording_url. */
     +'<span style="font-size:12.5px;color:var(--slate)">Reused an existing transcript <b style="color:var(--ink)">'+reused+'</b></span>'
-    +'</div>'
+    +'</div></div>'
+    +'<div class="card card-pad" style="margin-top:12px;padding-top:10px;padding-bottom:10px">'
+    +'<div style="font-size:12px;font-weight:600;color:var(--slate);margin-bottom:8px">Lead follow-up checks (whole call history)</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+    +'<button class="btn btn-sm'+(TRC_F.missedIn==='1'?' btn-primary':'')+'" onclick="trcToggleMissedIn()" title="The lead called in and the call was missed (logged as incoming call missed), and no callback was logged within 24 hours. Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-slash"></i> Missed callback'+(missedInLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+missedInLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.promised==='1'?' btn-primary':'')+'" onclick="trcTogglePromised()" title="The agent promised a call back on a set date, that date has passed, and no call has been logged since. Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-calendar-xmark"></i> Promised call - not called back'+(promisedLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+promisedLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.cadence==='1'?' btn-primary':'')+'" onclick="trcToggleCadence()" title="The agent set a next follow-up date and the next call came after that date (every call is checked against the date set on the call before it). Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-hourglass-half"></i> Late follow-ups'+(cadenceLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+cadenceLeads+'</b>')+'</button>'
+    +'</div></div>'
     +(TRC_F.match==='MISMATCH'?trcMismatchPanel(rows,fast):'');
 }
 
@@ -27852,6 +27902,18 @@ window.trcToggleMissedIn=async function(){
 window.trcToggleCadence=async function(){
   TRC_F.cadence=(TRC_F.cadence==='1'?'all':'1');
   if(TRC_F.cadence==='1'){
+    await trcEnsureFullEnrichment();
+    trcRender(true);
+    await trcEnsureHistories(TRC_LIST_LEAD_IDS);
+  }
+  trcRender(true);
+};
+
+/* Same shape again, for a promised follow-up date that passed with no call logged since (see
+   trcCadenceIssues, mode 'promised'). */
+window.trcTogglePromised=async function(){
+  TRC_F.promised=(TRC_F.promised==='1'?'all':'1');
+  if(TRC_F.promised==='1'){
     await trcEnsureFullEnrichment();
     trcRender(true);
     await trcEnsureHistories(TRC_LIST_LEAD_IDS);
@@ -28029,7 +28091,7 @@ window.trcSet=async function(k,v){
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
   TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.missedIn='all';
-  TRC_F.cadence='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
+  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_F.q='';
   // Not null/null - that was "All time". Clearing the filters resets the date range to the same
   // Previous day default the page opens with, rather than reopening that door.
@@ -28107,6 +28169,7 @@ function trcLeadRowHtml(g,sl){
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
           (g.regressions>1?g.regressions+' status regressions':'Status regressed')):'')
+      +(g.promised?' '+trcTag('t-amber','fa-calendar-xmark','','Promised call on '+(trcWall(g.promised.gaps[g.promised.gaps.length-1].limitDate)||'')+' - no call since'):'')
       +(g.missedIn?' '+trcTag('t-red','fa-phone-slash','',
           'Missed incoming call '+g.missedIn.count+' time'+(g.missedIn.count===1?'':'s')+' - not called back within 24 hours'):''))
     /* g.lastAssessedOutside only ever fires once g.lastAssessed itself is null (see trcLeads) - a
@@ -28198,9 +28261,11 @@ function trcColsHtml(){
 function trcRender(full,keepPage){
   trcSaveFilterState();
   const all=TRC_ROWS||[];
-  let rows=trcApply(all);
+  /* With a history chip on, the list is every lead that had ANY call in range (a missed incoming call
+     has no recording, so it is never an eligible call); otherwise only recording-eligible calls. */
+  let rows=trcApply(all,false,trcHistChipOn());
   const scope=trcApply(all,true);
-  const k=$('trcKpis');if(k)k.innerHTML=trcKpiHtml(scope,rows);
+  const k=$('trcKpis');if(k)k.innerHTML=trcKpiHtml(scope,trcApply(all,true,true));
   if(full!==false){
     const f=$('trcFilters');if(f)f.innerHTML=trcFilterBar(all);
     const d=$('trcDates');if(d)d.innerHTML=trcDateBar();
@@ -28222,6 +28287,7 @@ function trcRender(full,keepPage){
   // the call-level Mismatch table, which trcLeads never runs over in the first place.
   if(!callLevel&&TRC_F.missedIn==='1')items=items.filter(function(g){return g.missedIn;});
   if(!callLevel&&TRC_F.cadence==='1')items=items.filter(function(g){return g.cadence;});
+  if(!callLevel&&TRC_F.promised==='1')items=items.filter(function(g){return g.promised;});
   const totalItems=items.length;
   const totalPages=Math.max(1,Math.ceil(totalItems/TRC_PAGE_SIZE));
   if(!keepPage){
@@ -28738,7 +28804,7 @@ function trcMissedIncomingHtml(o){
    agent promised counts - a call with no date set is never "late". A missed incoming call is the
    customer's call, not the agent's follow-up, so it neither satisfies a promise nor starts one. Not
    evaluated once a lead is Lost. rows must be chronological, oldest-first. */
-function trcCadenceIssues(status,rows){
+function trcCadenceIssues(status,rows,mode){
   if(String(status||'')==='Lost')return null;
   const list=trcAsOf(rows).filter(function(r){return !trcIsMissedIncoming(r);});
   const today=trcDecisionDate();
@@ -28755,8 +28821,12 @@ function trcCadenceIssues(status,rows){
     gaps.push({follow_up_id:prev.follow_up_id,scheduled:scheduled,limitDate:limitDate,
       actualDate:nextRow?actualDate:null,daysLate:trcDaysBetween(limitDate,actualDate),open:!nextRow});
   }
-  if(!gaps.length)return null;
-  return {lateCount:gaps.length,totalGaps:list.length,gaps:gaps};
+  /* mode 'late': the promised date was missed but a call did follow, after it. mode 'promised': the
+     promised date passed and no call has been logged since. No mode (lead detail page): both. */
+  const shown=mode==='late'?gaps.filter(function(g){return !g.open;})
+    :mode==='promised'?gaps.filter(function(g){return g.open;}):gaps;
+  if(!shown.length)return null;
+  return {lateCount:shown.length,totalGaps:list.length,gaps:shown};
 }
 function trcCadenceIssuesHtml(o){
   if(!o)return '';
@@ -29061,8 +29131,8 @@ window.trcRetry=async function(followUpId){
   /* The repaint is what puts the button back, so it has to happen even when the refetch fails -
      otherwise a dropped connection leaves a dead spinner where the Retry button used to be. */
   TRC_ROWS=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
-  trCacheClear('trc_fetch_cache');
-  trCacheClear('trc_fetch_light_cache');
+  trCacheClear('trc_fetch_cache_v3');
+  trCacheClear('trc_fetch_light_cache_v3');
   /* Retry can be clicked from either of two screens now - a lead's own detail page (the per-call
      card's button) or the Failed list/table (the per-row buttons added alongside it) - and each has
      to repaint ITSELF, not drag the other screen's reader somewhere they didn't ask to go. $('trcRows')
