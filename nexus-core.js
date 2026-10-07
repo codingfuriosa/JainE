@@ -579,6 +579,7 @@ const NAV=[
   ]},
   {group:'Operations',items:[
     {id:'projects',label:'Projects',icon:'fa-building'},
+    {id:'scheduling',label:'Project Scheduling',icon:'fa-diagram-project'},
     {id:'construction',label:'Construction',icon:'fa-helmet-safety'},
     {id:'engineering',label:'Engineering',icon:'fa-compass-drafting'},
     {id:'inventory',label:'Inventory',icon:'fa-boxes-stacked'},
