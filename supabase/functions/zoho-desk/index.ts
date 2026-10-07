@@ -211,6 +211,10 @@ async function zohoGet(url: string, headers: Record<string, string>): Promise<{ 
 // How far back a ticket that started in Zoho is brought into the portal.
 const IMPORT_DAYS = 61;
 
+// Zoho's "Not a Ticket." status marks mail that is not a customer query (6 Oct 2026): such a ticket
+// is not brought in, and one brought in earlier is removed once Zoho marks it so.
+const isNotATicket = (status: any) => /not\s*a\s*ticket/i.test(String(status || ""));
+
 const last10 = (s: any) => String(s || "").replace(/\D/g, "").slice(-10);
 
 // Every customer we could match a Zoho ticket to: by email (an email field may hold more than one
@@ -244,7 +248,12 @@ function matchCustomer(t: any, idx: { byEmail: Map<string, number>; byPhone: Map
 async function upsertMirror(db: any, t: any, customerId: number): Promise<"new" | "updated" | "skipped"> {
   if (!t || !t.id || t.isSpam) return "skipped";
   const zohoStatus = t.status || "Open";
-  const { data: existing } = await db.schema("cust").from("support_tickets").select("id").eq("zoho_ticket_id", String(t.id)).maybeSingle();
+  const { data: existing } = await db.schema("cust").from("support_tickets").select("id,source").eq("zoho_ticket_id", String(t.id)).maybeSingle();
+  if (isNotATicket(zohoStatus)) {
+    if (existing && existing.source === "zoho") await dropMirror(db, existing.id);
+    else if (existing) await db.schema("cust").from("support_tickets").update({ zoho_status: zohoStatus, last_synced_at: new Date().toISOString() }).eq("id", existing.id);
+    return "skipped";
+  }
   // Only the last two months are brought in (asked for on 6 Oct 2026); one already here is kept up to date.
   if (!existing && t.createdTime && new Date(t.createdTime).getTime() < Date.now() - IMPORT_DAYS * 864e5) return "skipped";
   if (existing) {
@@ -266,6 +275,14 @@ async function upsertMirror(db: any, t: any, customerId: number): Promise<"new" 
   });
   // A unique-index clash means a parallel run got there first - that is fine.
   return error ? "skipped" : "new";
+}
+
+// Removes the portal's copy of a ticket that came in from Zoho (its messages with it). Zoho's own
+// ticket is untouched.
+async function dropMirror(db: any, id: number) {
+  await db.schema("cust").from("support_ticket_threads").delete().eq("ticket_id", id);
+  await db.schema("cust").from("support_ticket_comments").delete().eq("ticket_id", id);
+  await db.schema("cust").from("support_tickets").delete().eq("id", id).eq("source", "zoho");
 }
 
 // One customer's tickets, for the pull when they open Support: their Zoho contact(s) by email and
@@ -346,7 +363,7 @@ Deno.serve(async (req: Request) => {
         if (older || list.length < 100) break;
       }
       // Status of tickets still open here: a handful each run, longest-unchecked first.
-      const { data: open } = await db.schema("cust").from("support_tickets").select("id,zoho_ticket_id")
+      const { data: open } = await db.schema("cust").from("support_tickets").select("id,zoho_ticket_id,source")
         .not("zoho_ticket_id", "is", null).neq("status", "closed").is("deleted_at", null)
         .order("last_synced_at", { ascending: true, nullsFirst: true }).limit(25);
       let refreshed = 0;
@@ -354,6 +371,7 @@ Deno.serve(async (req: Request) => {
         const r = await zohoGet(`https://desk.zoho.${ZOHO_DC}/api/v1/tickets/${o.zoho_ticket_id}`, headers);
         if (!r.ok) continue;
         const zs = r.data.status || "Open";
+        if (isNotATicket(zs) && o.source === "zoho") { await dropMirror(db, o.id); refreshed++; continue; }
         await db.schema("cust").from("support_tickets").update({ zoho_status: zs, status: normaliseStatus(zs), last_synced_at: new Date().toISOString() }).eq("id", o.id);
         refreshed++;
       }
