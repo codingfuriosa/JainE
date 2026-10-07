@@ -634,7 +634,7 @@ const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i
 const MODLIST=[];NAV.forEach(g=>g.items.forEach(i=>MODLIST.push([i.id,i.label])));
 const MODSET=new Set(MODLIST.map(m=>m[0]));
 const LEVELS=['Manager','Employee','New','Intern'];
-const DEFAULT_MODULES=['dashboard','tasks','projects','settings','network'];
+const DEFAULT_MODULES=['dashboard','tasks','projects','settings','network','scheduling'];
 /* Modules nobody needs to be granted — they are part of the furniture, and were previously spelled
    out three separate times inside allowedSet() plus once more in pageAllowed(), which is how a new
    one gets added to some of them and not others.
