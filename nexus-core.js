@@ -20506,7 +20506,7 @@ function cpaPhCss(){return `<style>
   .cph-fix{border-color:#fecaca;background:#fffafa}
   .cph-fix .cph-h{color:#b91c1c}
   .cph-fixsub{font-weight:400;color:var(--slate);font-size:12px;margin-left:8px;text-transform:none;letter-spacing:0}
-  .cph-fixl{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow:auto}
+  .cph-fixl{display:flex;flex-direction:column;gap:8px;max-height:65vh;overflow:auto}
   .cph-fixi{display:flex;align-items:center;gap:12px;padding:8px 10px;border:1px solid #fee2e2;border-radius:10px;background:#fff}
   .cph-fixi .cph-th{width:54px;height:54px;flex:none}
   .cph-fixw{flex:1;min-width:0;font-size:12.5px;color:var(--slate);line-height:1.45}
@@ -20529,6 +20529,8 @@ function cpaPhCss(){return `<style>
   .cph-cntline b{color:var(--ink)}
   .cph-cntline span{display:inline-flex;align-items:center;gap:6px;color:var(--ink);font-weight:600}
   .cph-cntline span i{color:var(--c)}
+  .cph-fixbtns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  @media(max-width:620px){ .cph-fixi{flex-wrap:wrap} .cph-fixbtns{width:100%} .cph-fixbtns .btn{flex:1 1 0;justify-content:center} }
   .cph-fixg{font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#b91c1c;margin:6px 2px -2px}
   .cph-fixg:first-child{margin-top:0}
   .cph-fixs{display:flex;flex-direction:column;gap:6px;margin:2px 0 4px}
@@ -20767,86 +20769,91 @@ async function cpaPhFixList(projects,units){
     return nat(a.pn,b.pn)||(x.lvl-y.lvl)||nat(x.tower,y.tower)
       ||((x.floor==null)-(y.floor==null))||((x.floor||0)-(y.floor||0))||nat(x.code,y.code)||((x.areaIdx||0)-(y.areaIdx||0));
   });
-  /* One summary of everything waiting, project by project: each project's levels (Whole project /
-     Blocks / Flats) with how many photos wait there. Tapping one opens that project and level, and
-     its photos are listed underneath. The project and level on screen are highlighted. (6 Oct 2026:
-     a single "none in Whole project" line with loose counts beside it read as a contradiction.) */
+  /* The site team's view (7 Oct 2026): only the project picked above, counted in PLACES to
+     photograph - flats, blocks - not in photos (a flat whose Common area and Kitchen were both
+     rejected is one flat to visit). Flats are listed block by block ("A1 · 3 flats"), one row per
+     flat ("A1 - 2A"), with a Retake button for each section that needs one. */
   const LV={project:0,tower:1,unit:2}, LVKEY=['project','tower','unit'], LVNAME=['Whole project','Blocks','Flats'];
   const cur=LV[CPA_PH.level]!=null?LV[CPA_PH.level]:0, pid=String(CPA_PH.project||'');
-  const shown=items.filter(it=>String(it.w.pid)===pid&&it.w.lvl===cur);
-  CPA_PH.fix=shown;
-  if(!items.length){ host.innerHTML=''; return; }
-  const cnt=list=>list.reduce((t,it)=>t+it.n,0);
-  const byProj={}; items.forEach(it=>{ const k=String(it.w.pid); (byProj[k]=byProj[k]||{pn:it.pn,lv:[0,0,0]}).lv[it.w.lvl]+=it.n; });
-  const projIds=Object.keys(byProj).sort((a,b)=>(a===pid?-1:b===pid?1:0)||String(byProj[a].pn).localeCompare(String(byProj[b].pn)));
-  const summary='<div class="cph-fixs">'+projIds.map(k=>{
-      const g=byProj[k];
-      return '<div class="cph-fixr"><span class="cph-fixp">'+esc(g.pn?custRefTitle(g.pn):'Project')+'</span><span class="cph-fixcs">'
-        +[0,1,2].filter(l=>g.lv[l]).map(l=>{
-          const on=k===pid&&l===cur;
-          return '<button class="cph-fixc'+(on?' on':'')+'" onclick="cpaPhFixGo('+(Number(k)||0)+',\''+LVKEY[l]+'\')"'
-            +(on?' aria-current="true"':'')+'>'+LVNAME[l]+'<b>'+g.lv[l]+'</b></button>';
-        }).join('')+'</span></div>';
-    }).join('')+'</div>';
-  const total=cnt(items);
-  const curName=byProj[pid]&&byProj[pid].pn?custRefTitle(byProj[pid].pn):'';
-  host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>Photos to retake · '+total
-    +'</div>'
-    +summary
-    +(shown.length
-      ?'<div class="cph-fixt">'+esc([curName,LVNAME[cur]].filter(Boolean).join(' · '))+' · '+cnt(shown)+'</div>'
-        +'<div class="cph-fixl">'+shown.map((it,i)=>{
-          const w=it.w, prev=shown[i-1];
-          // Flats get a heading per block and floor; blocks and the whole project need none.
-          const headOf=x=>x.lvl===2?[x.tower||'Flats',x.floor==null?'Other units':(x.floor===0?'Ground floor':'Floor '+x.floor)].join(' · '):'';
-          const head=headOf(w), prevHead=prev?headOf(prev.w):'';
-          const p=it.p, isVid=(p.file_type||'').indexOf('video')===0;
-          // Tapping the picture shows the rejected photo (or video) full size - every one at that place.
-          const th=(isVid&&!p.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
-            :'<img class="cph-th" '+cphThumbAttrs(p,it.t)+' alt="" decoding="async">');
-          const thBtn='<button type="button" class="cph-fixpv" onclick="cpaPhFixPreview('+i+',0)" title="See the rejected '+(isVid?'video':'photo')+' full size">'+th
-            +(it.n>1?'<span class="cph-fixpn">'+it.n+'</span>':'')+'</button>';
-          return (head&&head!==prevHead?'<div class="cph-fixg">'+esc(head)+'</div>':'')+'<div class="cph-fixi">'+thBtn
-            +'<div class="cph-fixw"><b>'+esc(w.lvl===2&&w.tower?it.place.replace(w.tower+' · ',''):it.place)+'</b>'
-              +esc([it.n>1?it.n+' rejected':'',it.notes.join(' · '),'rejected '+fmtDate(it.when)].filter(Boolean).join(' · '))+'</div>'
-            +(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+i+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'')
-            +'</div>';
-        }).join('')+'</div>'
-      :'<div class="cph-fixhint"><i class="fa-solid fa-hand-pointer"></i> Tap a number above to see those photos and retake them.</div>')
+  const mine=items.filter(it=>String(it.w.pid)===pid);
+  CPA_PH.fix=mine;                      // Retake refers to these by index
+  if(!mine.length){ host.innerHTML=''; CPA_PH.fixGroups=[]; return; }
+  const idxOf=new Map(mine.map((it,k)=>[it,k]));
+  const groups=[], gmap={};
+  mine.forEach(it=>{ const w=it.w, key=w.lvl+'|'+(w.lvl===2?it.p.unit_id:w.lvl===1?w.tower:'p');
+    let g=gmap[key]; if(!g){ g=gmap[key]={lvl:w.lvl,w,items:[]}; groups.push(g); } g.items.push(it); });
+  CPA_PH.fixGroups=groups;              // the full-size view steps through one group's photos
+  const counts=[0,1,2].map(l=>groups.filter(g=>g.lvl===l).length);
+  const blk=t=>String(t||'').replace(/^block\s*/i,'').trim();
+  const titleOf=g=>g.lvl===2?(blk(g.w.tower)?blk(g.w.tower)+' - ':'')+(g.w.code||'Flat'):g.lvl===1?(g.w.tower||'Block'):'Whole project';
+  const chips='<div class="cph-fixcs" style="margin:2px 0 4px">'+[0,1,2].filter(l=>counts[l]).map(l=>{
+      const on=l===cur;
+      return '<button class="cph-fixc'+(on?' on':'')+'" onclick="cpaPhSetLevel(\''+LVKEY[l]+'\')"'+(on?' aria-current="true"':'')+'>'
+        +LVNAME[l]+'<b>'+counts[l]+'</b></button>'; }).join('')+'</div>';
+  const shown=groups.filter(g=>g.lvl===cur);
+  const perBlock={}; shown.forEach(g=>{ const k=g.w.tower||''; perBlock[k]=(perBlock[k]||0)+1; });
+  const rows=shown.map((g,n)=>{
+    const gi=groups.indexOf(g), prev=shown[n-1];
+    const head=g.lvl===2&&(!prev||prev.w.tower!==g.w.tower)
+      ?'<div class="cph-fixg">'+esc(blk(g.w.tower)||'Flats')+' · '+perBlock[g.w.tower||'']+' flat'+(perBlock[g.w.tower||'']===1?'':'s')+'</div>':'';
+    const first=g.items[0].p, vid0=(first.file_type||'').indexOf('video')===0;
+    const nPhotos=g.items.reduce((t,it)=>t+it.n,0);
+    const th=(vid0&&!first.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
+      :'<img class="cph-th" '+cphThumbAttrs(first,g.items[0].t)+' alt="" decoding="async">');
+    const thBtn='<button type="button" class="cph-fixpv" onclick="cpaPhFixPreview('+gi+',0)" title="See what was rejected, full size">'+th
+      +(nPhotos>1?'<span class="cph-fixpn">'+nPhotos+'</span>':'')+'</button>';
+    const notes=[]; g.items.forEach(it=>it.notes.forEach(x=>{ if(notes.indexOf(x)===-1) notes.push(x); }));
+    const secName=it=>(CPA_PH_AREAS.find(a=>a[0]===(it.p.area||'common'))||[0,'Photo'])[1];
+    const sub=g.lvl===2?g.items.map(secName).join(', '):'';
+    // One button per section to retake (a block or the whole project has just the one).
+    const btns=g.items.filter(it=>it.can).map(it=>{ const v=(it.p.file_type||'').indexOf('video')===0;
+      return '<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+idxOf.get(it)+','+(v?1:0)+')"><i class="fa-solid fa-'+(v?'video':'camera')+'"></i> '
+        +esc(g.lvl===2?secName(it):'Retake')+'</button>'; }).join('');
+    return head+'<div class="cph-fixi">'+thBtn
+      +'<div class="cph-fixw"><b>'+esc(titleOf(g))+'</b>'+esc([sub,notes.join(' · ')].filter(Boolean).join(' · '))+'</div>'
+      +'<div class="cph-fixbtns">'+btns+'</div></div>';
+  }).join('');
+  host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>Photos to retake</div>'
+    +chips
+    +(shown.length?'<div class="cph-fixl" style="margin-top:10px">'+rows+'</div>'
+      :'<div class="cph-fixhint"><i class="fa-solid fa-hand-pointer"></i> Tap a number above to see those and retake them.</div>')
     +'</div>';
   cphLazy(host);
 }
-/* Full-size view of a rejected photo in "Photos to retake": the reviewer's reason and date on top,
-   arrows (and the keyboard) through every rejected photo at that place, and Retake right there. */
-window.cpaPhFixPreview=async function(i,k){
-  const it=(CPA_PH.fix||[])[i]; if(!it) return;
-  const ps=it.ps&&it.ps.length?it.ps:[it.p];
-  k=Math.max(0,Math.min(ps.length-1,k||0));
-  const p=ps[k], isVid=(p.file_type||'').indexOf('video')===0;
+/* Full-size view of what was rejected for one flat (or block): every rejected photo there, section
+   by section, the reviewer's reason if given, and Retake for the section on screen. */
+window.cpaPhFixPreview=async function(gi,k){
+  const g=(CPA_PH.fixGroups||[])[gi]; if(!g) return;
+  const list=[]; g.items.forEach(it=>(it.ps&&it.ps.length?it.ps:[it.p]).forEach(ph=>list.push({it,ph})));
+  k=Math.max(0,Math.min(list.length-1,k||0));
+  const {it,ph}=list[k], isVid=(ph.file_type||'').indexOf('video')===0;
   const old=$('cphFixPv'); if(old) old.remove();
   const box=document.createElement('div'); box.className='cph-box cph-pv'; box.id='cphFixPv';
-  const info=[it.pn,p.review_note?'Reason: '+p.review_note:'','rejected '+fmtDate(p.reviewed_at||p.created_at)].filter(Boolean).join(' · ');
+  const blk=t=>String(t||'').replace(/^block\s*/i,'').trim();
+  const title=g.lvl===2?(blk(g.w.tower)?blk(g.w.tower)+' - ':'')+(g.w.code||'Flat'):g.lvl===1?(g.w.tower||'Block'):'Whole project';
+  const sec=g.lvl===2?((CPA_PH_AREAS.find(a=>a[0]===(ph.area||'common'))||[0,''])[1]):'';
+  const info=[sec,ph.review_note?'Reason: '+ph.review_note:''].filter(Boolean).join(' · ');
   box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
-      +'<span class="nm"><b>'+esc(it.place)+'</b> · '+esc(info)+'</span>'
-      +(ps.length>1?'<span class="cph-pvn">'+(k+1)+' of '+ps.length+'</span>':'')
+      +'<span class="nm"><b>'+esc(title)+'</b>'+(info?' · '+esc(info):'')+'</span>'
+      +(list.length>1?'<span class="cph-pvn">'+(k+1)+' of '+list.length+'</span>':'')
       +'<button class="cph-boxx" title="Close (Esc)">&times;</button></div>'
     +(k>0?'<button class="cph-pvnav l" title="Previous (←)"><i class="fa-solid fa-chevron-left"></i></button>':'')
-    +(k<ps.length-1?'<button class="cph-pvnav r" title="Next (→)"><i class="fa-solid fa-chevron-right"></i></button>':'')
-    +(it.can?'<div class="cph-pvacts"><button class="cph-pvbtn ok cph-fixrt"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button></div>':'')
+    +(k<list.length-1?'<button class="cph-pvnav r" title="Next (→)"><i class="fa-solid fa-chevron-right"></i></button>':'')
+    +(it.can?'<div class="cph-pvacts"><button class="cph-pvbtn ok cph-fixrt"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake'+(sec?' '+esc(sec):'')+'</button></div>':'')
     +'<div class="cph-pvstage"><div class="cph-pvload"><i class="fa-solid fa-spinner fa-spin"></i></div></div>';
   const shut=()=>{ document.removeEventListener('keydown',onKey); box.remove(); };
-  const onKey=e=>{ if(e.key==='Escape') shut(); else if(e.key==='ArrowRight'&&k<ps.length-1){ shut(); cpaPhFixPreview(i,k+1); }
-    else if(e.key==='ArrowLeft'&&k>0){ shut(); cpaPhFixPreview(i,k-1); } };
+  const onKey=e=>{ if(e.key==='Escape') shut(); else if(e.key==='ArrowRight'&&k<list.length-1){ shut(); cpaPhFixPreview(gi,k+1); }
+    else if(e.key==='ArrowLeft'&&k>0){ shut(); cpaPhFixPreview(gi,k-1); } };
   box.querySelector('.cph-boxx').onclick=shut;
   const l=box.querySelector('.cph-pvnav.l'), r=box.querySelector('.cph-pvnav.r');
-  if(l) l.onclick=()=>{ shut(); cpaPhFixPreview(i,k-1); };
-  if(r) r.onclick=()=>{ shut(); cpaPhFixPreview(i,k+1); };
+  if(l) l.onclick=()=>{ shut(); cpaPhFixPreview(gi,k-1); };
+  if(r) r.onclick=()=>{ shut(); cpaPhFixPreview(gi,k+1); };
   // Retake straight from here: the camera has to open inside this tap.
-  const rt=box.querySelector('.cph-fixrt'); if(rt) rt.onclick=()=>{ shut(); cpaPhRetake(i,isVid?1:0); };
+  const rt=box.querySelector('.cph-fixrt'); if(rt) rt.onclick=()=>{ shut(); cpaPhRetake(CPA_PH.fix.indexOf(it),isVid?1:0); };
   box.onclick=e=>{ if(e.target===box) shut(); };
   document.addEventListener('keydown',onKey);
   document.body.appendChild(box);
-  const url=await cphSignedUrl(p.storage_path);
+  const url=await cphSignedUrl(ph.storage_path);
   const stage=box.querySelector('.cph-pvstage'); if(!stage||!box.isConnected) return;
   if(!url){ stage.innerHTML='<div class="cph-pvload">File not available</div>'; return; }
   stage.innerHTML=isVid?'<video src="'+url+'" controls autoplay playsinline></video>':'<img src="'+url+'" alt="">';
