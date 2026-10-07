@@ -20530,6 +20530,7 @@ function cpaPhCss(){return `<style>
   .cph-cntline span{display:inline-flex;align-items:center;gap:6px;color:var(--ink);font-weight:600}
   .cph-cntline span i{color:var(--c)}
   .cph-fixbtns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .cph-fixsec{display:inline-block;margin-left:8px;padding:1px 9px;border-radius:999px;background:#fef2f2;color:#b91c1c;font-size:12px;font-weight:700}
   @media(max-width:620px){ .cph-fixi{flex-wrap:wrap} .cph-fixbtns{width:100%} .cph-fixbtns .btn{flex:1 1 0;justify-content:center} }
   .cph-fixg{font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#b91c1c;margin:6px 2px -2px}
   .cph-fixg:first-child{margin-top:0}
@@ -20769,49 +20770,42 @@ async function cpaPhFixList(projects,units){
     return nat(a.pn,b.pn)||(x.lvl-y.lvl)||nat(x.tower,y.tower)
       ||((x.floor==null)-(y.floor==null))||((x.floor||0)-(y.floor||0))||nat(x.code,y.code)||((x.areaIdx||0)-(y.areaIdx||0));
   });
-  /* The site team's view (7 Oct 2026): only the project picked above, counted in PLACES to
-     photograph - flats, blocks - not in photos (a flat whose Common area and Kitchen were both
-     rejected is one flat to visit). Flats are listed block by block ("A1 · 3 flats"), one row per
-     flat ("A1 - 2A"), with a Retake button for each section that needs one. */
+  /* The site team's view (7 Oct 2026): only the project picked above; the count on top is in
+     PLACES to photograph - flats, blocks - not photos. The list is block by block ("A1 · 3 flats"),
+     then one row per flat and section ("Flat 2A · Common area", "Flat 2A · Kitchen"), each with its
+     own Retake, floor by floor. */
   const LV={project:0,tower:1,unit:2}, LVKEY=['project','tower','unit'], LVNAME=['Whole project','Blocks','Flats'];
   const cur=LV[CPA_PH.level]!=null?LV[CPA_PH.level]:0, pid=String(CPA_PH.project||'');
   const mine=items.filter(it=>String(it.w.pid)===pid);
   CPA_PH.fix=mine;                      // Retake refers to these by index
-  if(!mine.length){ host.innerHTML=''; CPA_PH.fixGroups=[]; return; }
-  const idxOf=new Map(mine.map((it,k)=>[it,k]));
-  const groups=[], gmap={};
-  mine.forEach(it=>{ const w=it.w, key=w.lvl+'|'+(w.lvl===2?it.p.unit_id:w.lvl===1?w.tower:'p');
-    let g=gmap[key]; if(!g){ g=gmap[key]={lvl:w.lvl,w,items:[]}; groups.push(g); } g.items.push(it); });
-  CPA_PH.fixGroups=groups;              // the full-size view steps through one group's photos
-  const counts=[0,1,2].map(l=>groups.filter(g=>g.lvl===l).length);
+  // The full-size view steps through one row's photos: one group per row.
+  CPA_PH.fixGroups=mine.map(it=>({lvl:it.w.lvl,w:it.w,items:[it]}));
+  if(!mine.length){ host.innerHTML=''; return; }
+  const places=l=>new Set(mine.filter(it=>it.w.lvl===l).map(it=>l===2?String(it.p.unit_id):l===1?it.w.tower:'p')).size;
+  const counts=[places(0),places(1),places(2)];
   const blk=t=>String(t||'').replace(/^block\s*/i,'').trim();
-  const titleOf=g=>g.lvl===2?(blk(g.w.tower)?blk(g.w.tower)+' - ':'')+(g.w.code||'Flat'):g.lvl===1?(g.w.tower||'Block'):'Whole project';
+  const secName=it=>(CPA_PH_AREAS.find(a=>a[0]===(it.p.area||'common'))||[0,'Photo'])[1];
   const chips='<div class="cph-fixcs" style="margin:2px 0 4px">'+[0,1,2].filter(l=>counts[l]).map(l=>{
       const on=l===cur;
       return '<button class="cph-fixc'+(on?' on':'')+'" onclick="cpaPhSetLevel(\''+LVKEY[l]+'\')"'+(on?' aria-current="true"':'')+'>'
         +LVNAME[l]+'<b>'+counts[l]+'</b></button>'; }).join('')+'</div>';
-  const shown=groups.filter(g=>g.lvl===cur);
-  const perBlock={}; shown.forEach(g=>{ const k=g.w.tower||''; perBlock[k]=(perBlock[k]||0)+1; });
-  const rows=shown.map((g,n)=>{
-    const gi=groups.indexOf(g), prev=shown[n-1];
-    const head=g.lvl===2&&(!prev||prev.w.tower!==g.w.tower)
-      ?'<div class="cph-fixg">'+esc(blk(g.w.tower)||'Flats')+' · '+perBlock[g.w.tower||'']+' flat'+(perBlock[g.w.tower||'']===1?'':'s')+'</div>':'';
-    const first=g.items[0].p, vid0=(first.file_type||'').indexOf('video')===0;
-    const nPhotos=g.items.reduce((t,it)=>t+it.n,0);
-    const th=(vid0&&!first.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
-      :'<img class="cph-th" '+cphThumbAttrs(first,g.items[0].t)+' alt="" decoding="async">');
-    const thBtn='<button type="button" class="cph-fixpv" onclick="cpaPhFixPreview('+gi+',0)" title="See what was rejected, full size">'+th
-      +(nPhotos>1?'<span class="cph-fixpn">'+nPhotos+'</span>':'')+'</button>';
-    const notes=[]; g.items.forEach(it=>it.notes.forEach(x=>{ if(notes.indexOf(x)===-1) notes.push(x); }));
-    const secName=it=>(CPA_PH_AREAS.find(a=>a[0]===(it.p.area||'common'))||[0,'Photo'])[1];
-    const sub=g.lvl===2?g.items.map(secName).join(', '):'';
-    // One button per section to retake (a block or the whole project has just the one).
-    const btns=g.items.filter(it=>it.can).map(it=>{ const v=(it.p.file_type||'').indexOf('video')===0;
-      return '<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+idxOf.get(it)+','+(v?1:0)+')"><i class="fa-solid fa-'+(v?'video':'camera')+'"></i> '
-        +esc(g.lvl===2?secName(it):'Retake')+'</button>'; }).join('');
+  const shown=mine.filter(it=>it.w.lvl===cur);
+  const flatsIn={}; shown.forEach(it=>{ if(it.w.lvl===2) (flatsIn[it.w.tower||'']=flatsIn[it.w.tower||'']||new Set()).add(String(it.p.unit_id)); });
+  const rows=shown.map((it,n)=>{
+    const w=it.w, prev=shown[n-1], k=mine.indexOf(it);
+    const head=w.lvl===2&&(!prev||prev.w.tower!==w.tower)
+      ?'<div class="cph-fixg">'+esc(blk(w.tower)||'Flats')+' · '+flatsIn[w.tower||''].size+' flat'+(flatsIn[w.tower||''].size===1?'':'s')+'</div>':'';
+    const p=it.p, isVid=(p.file_type||'').indexOf('video')===0;
+    const th=(isVid&&!p.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
+      :'<img class="cph-th" '+cphThumbAttrs(p,it.t)+' alt="" decoding="async">');
+    const thBtn='<button type="button" class="cph-fixpv" onclick="cpaPhFixPreview('+k+',0)" title="See what was rejected, full size">'+th
+      +(it.n>1?'<span class="cph-fixpn">'+it.n+'</span>':'')+'</button>';
+    const title=w.lvl===2?'Flat '+(w.code||''):w.lvl===1?(w.tower||'Block'):'Whole project';
     return head+'<div class="cph-fixi">'+thBtn
-      +'<div class="cph-fixw"><b>'+esc(titleOf(g))+'</b>'+esc([sub,notes.join(' · ')].filter(Boolean).join(' · '))+'</div>'
-      +'<div class="cph-fixbtns">'+btns+'</div></div>';
+      +'<div class="cph-fixw"><b>'+esc(title)+(w.lvl===2?' <span class="cph-fixsec">'+esc(secName(it))+'</span>':'')+'</b>'
+        +esc(it.notes.join(' · '))+'</div>'
+      +(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+k+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'')
+      +'</div>';
   }).join('');
   host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>Photos to retake</div>'
     +chips
@@ -20830,7 +20824,7 @@ window.cpaPhFixPreview=async function(gi,k){
   const old=$('cphFixPv'); if(old) old.remove();
   const box=document.createElement('div'); box.className='cph-box cph-pv'; box.id='cphFixPv';
   const blk=t=>String(t||'').replace(/^block\s*/i,'').trim();
-  const title=g.lvl===2?(blk(g.w.tower)?blk(g.w.tower)+' - ':'')+(g.w.code||'Flat'):g.lvl===1?(g.w.tower||'Block'):'Whole project';
+  const title=g.lvl===2?(blk(g.w.tower)?blk(g.w.tower)+' · ':'')+'Flat '+(g.w.code||''):g.lvl===1?(g.w.tower||'Block'):'Whole project';
   const sec=g.lvl===2?((CPA_PH_AREAS.find(a=>a[0]===(ph.area||'common'))||[0,''])[1]):'';
   const info=[sec,ph.review_note?'Reason: '+ph.review_note:''].filter(Boolean).join(' · ');
   box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
