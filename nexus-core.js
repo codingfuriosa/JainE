@@ -20624,10 +20624,32 @@ function cpaPhCss(){return `<style>
 
 async function cpaRenderPhotos(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
-  if(!CPA_PH.project&&projects.length) CPA_PH.project=String(projects[0].id);
+  if(!CPA_PH.project&&projects.length) CPA_PH.project=await cpaPhStartProject(projects,units);
   host.innerHTML=cpaPhCss()+'<div class="cph-wrap" id="cphWrap"></div>';
   if(CPA_PH.mode==='review'&&cpaIsPhotoApprover()) cpaRvPaint(projects,units);
   else{ CPA_PH.mode='upload'; cpaPhPaint(projects,units); }
+}
+/* Which project Photos & Videos opens on (7 Oct 2026). The first one alphabetically was Dream
+   Ananta, so the site team - who work on Dream Gurukul - opened on a project with nothing for them.
+   Now: the project with the most rejected photos waiting for a retake (that this account can retake),
+   otherwise the one with the most flats. */
+async function cpaPhStartProject(projects,units){
+  const ids=new Set(projects.map(p=>String(p.id)));
+  const unitProj={}; (units||[]).forEach(u=>{ unitProj[u.id]=String(u.project_id); });
+  const score={};
+  try{
+    const areas=cpaPhUploadAreas().map(a=>a[0]);
+    const [up,tp,pp]=await Promise.all([
+      sb.schema('cust').from('unit_photos').select('unit_id,area').eq('status','rejected').is('deleted_at',null).limit(5000),
+      sb.schema('cust').from('tower_photos').select('project_id').eq('status','rejected').is('deleted_at',null).limit(5000),
+      sb.schema('cust').from('project_photos').select('project_id').eq('status','rejected').is('deleted_at',null).limit(5000)]);
+    ((up&&up.data)||[]).forEach(r=>{ if(areas.indexOf(r.area||'common')===-1) return; const k=unitProj[r.unit_id]; if(k) score[k]=(score[k]||0)+1; });
+    ((tp&&tp.data)||[]).concat((pp&&pp.data)||[]).forEach(r=>{ const k=String(r.project_id); score[k]=(score[k]||0)+1; });
+  }catch(_e){}
+  const flats={}; (units||[]).forEach(u=>{ if(u.status!=='cancelled'){ const k=String(u.project_id); flats[k]=(flats[k]||0)+1; } });
+  const best=Object.keys(score).filter(k=>ids.has(k)).sort((a,b)=>score[b]-score[a])[0]
+    ||Object.keys(flats).filter(k=>ids.has(k)).sort((a,b)=>flats[b]-flats[a])[0];
+  return best||String(projects[0].id);
 }
 // Upload | Review, for photo approvers. The Review count is everything still waiting, anywhere.
 function cpaPhModeBar(){
@@ -20664,7 +20686,6 @@ async function cpaPhPaint(projects,units){
   const lastUp=needUnit?await cpaPhLastUploads(flats.map(u=>u.id)):{};
   if(!$('cphWrap')) return;
   wrap.innerHTML=cpaPhModeBar()
-    +'<div id="cphCnt"></div>'
     +'<div id="cphFix"></div>'
     +'<div class="cph-card">'
       +'<div class="cph-bar">'
@@ -20720,19 +20741,6 @@ async function cpaPhPaint(projects,units){
   cpaPhList();
   cpaPhFillBadge();
   cpaPhFixList(projects,units);
-  cpaPhCountLine(projects,units);
-}
-// "Dream Gurukul: 120 approved · 40 waiting · 5 rejected" - every photo and video of the project
-// picked above, whole project, blocks and flats together.
-async function cpaPhCountLine(projects,units){
-  const host=$('cphCnt'); if(!host) return;
-  const pid=CPA_PH.project, c=await cpaMediaCounts(pid,units);
-  if(!$('cphCnt')||String(CPA_PH.project)!==String(pid)) return;
-  const p=(projects||[]).find(x=>String(x.id)===String(pid));
-  const name=p?custRefTitle(String(p.name).split('(')[0].trim()):'This project';
-  host.innerHTML='<div class="cph-cntline"><b>'+esc(name)+'</b>'
-    +['published','pending','rejected','unpublished'].filter(k=>k!=='unpublished'||c[k]).map(k=>{ const L=CPA_COUNT_LABEL[k];
-      return '<span style="--c:'+L[2]+'"><i class="fa-solid '+L[1]+'"></i>'+c[k]+' '+L[0].toLowerCase()+'</span>'; }).join('')+'</div>';
 }
 
 /* TO RETAKE: every rejected photo still waiting for a replacement, whoever took it - on site,
