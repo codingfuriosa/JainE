@@ -47,8 +47,8 @@ function pageIdFromPath(pathname){
 // second visit in the same tab.
 // A page may list several scripts; they load one after another, in order (purchase-indent.js uses what
 // purchase.js defines).
-const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js'],accounts:['accounts.js','accounts-bank.js','accounts-books.js']};
-const PAGE_SCRIPT_VERSION={'accounts.js':'20261005g','accounts-bank.js':'20261005b','accounts-books.js':'20261005d','purchase.js':'20261006a','purchase-indent.js':'20261006a','purchase-rfq.js':'20261005a','purchase-po.js':'20261006b','purchase-stores.js':'20261006b','purchase-reports.js':'20261006a'};
+const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js'],accounts:['accounts.js','accounts-bank.js','accounts-books.js'],scheduling:'scheduling.js'};
+const PAGE_SCRIPT_VERSION={'scheduling.js':'20261007a','accounts.js':'20261005g','accounts-bank.js':'20261005b','accounts-books.js':'20261005d','purchase.js':'20261006a','purchase-indent.js':'20261006a','purchase-rfq.js':'20261005a','purchase-po.js':'20261006b','purchase-stores.js':'20261006b','purchase-reports.js':'20261006a'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];
@@ -1412,6 +1412,18 @@ VIEWS.placeholder=function(v,seg){
    '<table><thead><tr>'+tab.cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+tab.rows.map(r=>'<tr>'+r.map(c=>'<td>'+esc(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
 };
 ['construction','procurement','reports'].forEach(m=>VIEWS[m]=VIEWS.placeholder);
+/* PROJECT SCHEDULING loads its own script (scheduling.js), which replaces this stub with the real view.
+   It used to be wired only by a <script> tag on scheduling.html, which left two ways to land on the
+   generic "Module not found" placeholder: opening it from the sidebar while on any other module (an
+   in-place navigation never fetches that tag), and a hard load where the router ran before the tag's
+   script had executed. The stub waits for the script, then hands over to the real view. */
+VIEWS.scheduling=async function(v,seg){
+  await ensurePageScript('scheduling');
+  const real=VIEWS.scheduling;
+  if(real&&!real.__stub) return real(v,seg);
+  v.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Project Scheduling could not finish loading</div><div style="font-size:12.5px;margin-top:4px">Check your connection and refresh the page.</div></div>';
+};
+VIEWS.scheduling.__stub=true;
 
 /* ============================ DOCUMENTS ENGINE (shared by Documents + Legal) ============================ */
 /* 'Site' is the site-based half of what used to sit under Operations - the store and site staff
