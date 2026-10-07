@@ -66,7 +66,34 @@ const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 
 const MAX_ATTEMPTS = Number(Deno.env.get("MAX_ATTEMPTS") || 3);
 const RETRY_AFTER_MINUTES = Number(Deno.env.get("RETRY_AFTER_MINUTES") || 10);
-const STALE_MINUTES = 15;
+/* A recording still "in flight" after this long was killed by the worker limit and is recovered. Measured
+   on 10,300+ finished queue rows: a normal step takes ~10s (p99 26s, slowest success 49s, slowest failure
+   126s), so 3 minutes is far past anything healthy. It must also stay ABOVE the external-call timeouts
+   below (30s + 100s for transcribe, 90s for QA) - otherwise a call still legitimately waiting on a
+   model could be recovered and started a second time. */
+const STALE_MINUTES = 3;
+
+/* HARD TIMEOUTS on every external call a recording step makes. Without them one hung request holds the
+   worker until the platform kills it (WORKER_RESOURCE_LIMIT / idle timeout), and because the queue is
+   strictly one at a time nothing behind that recording moves until stale recovery fires. With them the
+   request is aborted, the step fails CLEANLY with a named reason, the row is released (failed, retried
+   later, counted as an attempt) and the next recording goes on. */
+const AUDIO_FETCH_TIMEOUT_MS = Number(Deno.env.get("AUDIO_FETCH_TIMEOUT_MS") || 30000);
+const GEMINI_TIMEOUT_MS = Number(Deno.env.get("GEMINI_TIMEOUT_MS") || 100000);
+const OPENAI_TIMEOUT_MS = Number(Deno.env.get("OPENAI_TIMEOUT_MS") || 90000);
+
+/* Runs fn with an AbortSignal that fires after ms. The signal covers the WHOLE exchange, response body
+   included - a server that sends headers and then stalls mid-body is exactly the hang this exists for -
+   so the body must be read inside fn. An abort is rethrown as a plain, readable error. */
+async function withTimeout<T>(what: string, ms: number, fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const signal = AbortSignal.timeout(ms);
+  try {
+    return await fn(signal);
+  } catch (e) {
+    if (signal.aborted) throw new Error(`${what} timed out after ${Math.round(ms / 1000)}s`);
+    throw e;
+  }
+}
 
 const MAX_STEPS_PER_TICK = Number(Deno.env.get("MAX_STEPS_PER_TICK") || 2);
 const SOFT_BUDGET_MS = Number(Deno.env.get("SOFT_BUDGET_MS") || 60000);
@@ -405,14 +432,16 @@ async function transcribePhase(db: DB, item: any, geminiKey: string, geminiModel
   }
 
   // ---- 3. the audio, into memory only.
-  let audio: Uint8Array, mimeType = "audio/mpeg";
+  let audio!: Uint8Array, mimeType = "audio/mpeg";
   try {
-    const res = await fetch(item.recording_url);
-    if (!res.ok) throw new Error(`recording fetch failed (HTTP ${res.status})`);
-    /* Knowlarity serves these as "binary/octet-stream". octet-stream needs REPLACING, not exempting. */
-    const served = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
-    mimeType = /^(audio|video)\/[a-z0-9.+-]+$/.test(served) ? served : "audio/mpeg";
-    audio = new Uint8Array(await res.arrayBuffer());
+    await withTimeout("The recording download", AUDIO_FETCH_TIMEOUT_MS, async (signal) => {
+      const res = await fetch(item.recording_url, { signal });
+      if (!res.ok) throw new Error(`recording fetch failed (HTTP ${res.status})`);
+      /* Knowlarity serves these as "binary/octet-stream". octet-stream needs REPLACING, not exempting. */
+      const served = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      mimeType = /^(audio|video)\/[a-z0-9.+-]+$/.test(served) ? served : "audio/mpeg";
+      audio = new Uint8Array(await res.arrayBuffer());
+    });
     if (audio.length < 1024) throw new Error(`recording is empty (${audio.length} bytes)`);
     if (audio.length > MAX_AUDIO_BYTES) throw new Error(`recording too large (${Math.round(audio.length/1048576)} MB)`);
   } catch (e) {
@@ -443,22 +472,25 @@ async function transcribePhase(db: DB, item: any, geminiKey: string, geminiModel
   // ---- 4. Gemini. Listening only: no CRM data and no project figures are in this prompt.
   let rawText = "";
   try {
-    const gr = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`,
-      { method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
-        body: JSON.stringify({
-          contents: [{ parts: [
-            { text: TRANSCRIBE_PROMPT },
-            { inline_data: { mime_type: mimeType, data: encodeBase64(audio) } },
-          ] }],
-          generationConfig: {
-            temperature: 0,
-            responseMimeType: "application/json",
-            maxOutputTokens: 65536,
-          },
-        }) });
-    const gj = await gr.json().catch(() => ({}));
+    const body = JSON.stringify({
+      contents: [{ parts: [
+        { text: TRANSCRIBE_PROMPT },
+        { inline_data: { mime_type: mimeType, data: encodeBase64(audio) } },
+      ] }],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: "application/json",
+        maxOutputTokens: 65536,
+      },
+    });
+    const { gr, gj } = await withTimeout("The Gemini transcription call", GEMINI_TIMEOUT_MS, async (signal) => {
+      const gr = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`,
+        { method: "POST", signal,
+          headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey }, body });
+      const gj = await gr.json().catch((e) => { if (signal.aborted) throw e; return {}; });
+      return { gr, gj };
+    });
     if (!gr.ok) throw new Error(`Gemini failed (${gr.status}): ${JSON.stringify(gj).slice(0, 300)}`);
     rawText = String(gj?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
     if (!rawText) {
@@ -795,22 +827,25 @@ function agentQaStatusFor(qa: unknown, point: string): string | null {
    take it, and does not need it. */
 async function callOpenAiQa(key: string, model: string, system: string, user: string): Promise<string> {
   const reasoning = isReasoningModel(model);
-  const res = await fetch(`${OPENAI_URL}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      response_format: { type: "json_object" },
-      ...(reasoning
-        ? { max_completion_tokens: QA_MAX_TOKENS }
-        : { temperature: 0, max_tokens: QA_MAX_TOKENS }),
-    }),
+  const { res, out } = await withTimeout("The OpenAI QA call", OPENAI_TIMEOUT_MS, async (signal) => {
+    const res = await fetch(`${OPENAI_URL}/chat/completions`, {
+      method: "POST", signal,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        response_format: { type: "json_object" },
+        ...(reasoning
+          ? { max_completion_tokens: QA_MAX_TOKENS }
+          : { temperature: 0, max_tokens: QA_MAX_TOKENS }),
+      }),
+    });
+    const out = await res.json().catch((e) => { if (signal.aborted) throw e; return {}; });
+    return { res, out };
   });
-  const out = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(`OpenAI QA failed (${res.status}): ${String((out as any)?.error?.message || JSON.stringify(out)).slice(0, 300)}`);
   }

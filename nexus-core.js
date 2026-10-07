@@ -45,14 +45,24 @@ function pageIdFromPath(pathname){
 // the legacy-view race it guards against in VIEWS.tasks below). An in-place SPA navigation to one of
 // these needs the same script loaded on demand, once, before rendering — never re-fetched on a
 // second visit in the same tab.
-const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js'};
+// A page may list several scripts; they load one after another, in order (purchase-indent.js uses what
+// purchase.js defines).
+const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js'],accounts:['accounts.js','accounts-bank.js','accounts-books.js']};
+const PAGE_SCRIPT_VERSION={'accounts.js':'20261005g','accounts-bank.js':'20261005b','accounts-books.js':'20261005d','purchase.js':'20261006a','purchase-indent.js':'20261006a','purchase-rfq.js':'20261005a','purchase-po.js':'20261006b','purchase-stores.js':'20261006b','purchase-reports.js':'20261006a'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
-  const src=PAGE_EXTRA_SCRIPT[id];
-  if(!src||_loadedPageScripts.has(src))return Promise.resolve();
+  const entry=PAGE_EXTRA_SCRIPT[id];
+  if(!entry)return Promise.resolve();
+  return [].concat(entry).reduce((p,src)=>p.then(()=>loadPageScript(src)),Promise.resolve());
+}
+function loadPageScript(src){
+  if(_loadedPageScripts.has(src))return Promise.resolve();
   return new Promise((resolve)=>{
     const s=document.createElement('script');
-    s.src=src+'?v=20260913c';
+    /* Bump this whenever accountability.js or insp-items.js changes, the same way the pages bump
+       nexus-core.js. It had sat at 20260913c while thirty-five commits landed in
+       accountability.js — every one of them invisible to a browser holding that URL. */
+    s.src=src+'?v='+(PAGE_SCRIPT_VERSION[src]||'20261003a');
     s.onload=()=>{_loadedPageScripts.add(src);resolve();};
     // A failed load shouldn't hang navigation forever — render with whatever's already there
     // (the legacy VIEWS.tasks placeholder already has its own "could not finish loading" message
@@ -558,6 +568,9 @@ const NAV=[
     {id:'dashboard',label:'Home / Dashboards',icon:'fa-gauge-high'},
     {id:'tasks',label:'Accountability',icon:'fa-clipboard-check'},
     {id:'scoreboard',label:'Scoreboard',icon:'fa-ranking-star'},
+    /* Sits under Overview rather than Operations because it is read by the people who chair the
+       meeting, not only by the people doing the work it creates. */
+    {id:'weekly_status',label:'Weekly Status',icon:'fa-people-group'},
   ]},
   {group:'Sales',items:[
     {id:'gtd',label:'GTD',icon:'fa-brain'},
@@ -566,7 +579,9 @@ const NAV=[
   ]},
   {group:'Operations',items:[
     {id:'projects',label:'Projects',icon:'fa-building'},
+    {id:'scheduling',label:'Project Scheduling',icon:'fa-diagram-project'},
     {id:'construction',label:'Construction',icon:'fa-helmet-safety'},
+    {id:'engineering',label:'Engineering',icon:'fa-compass-drafting'},
     {id:'inventory',label:'Inventory',icon:'fa-boxes-stacked'},
     {id:'procurement',label:'Procurement',icon:'fa-cart-shopping'},
     {id:'maintenance',label:'Assets & Maintenance',icon:'fa-screwdriver-wrench'},
@@ -578,6 +593,7 @@ const NAV=[
   ]},
   {group:'Governance',items:[
     {id:'finance',label:'Finance Vault',icon:'fa-indian-rupee-sign'},
+    {id:'accounts',label:'Accounts',icon:'fa-calculator'},
     {id:'legal',label:'Legal',icon:'fa-scale-balanced'},
     {id:'compliance',label:'Renewals & Compliance',icon:'fa-calendar-check'},
   ]},
@@ -621,7 +637,7 @@ const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i
 const MODLIST=[];NAV.forEach(g=>g.items.forEach(i=>MODLIST.push([i.id,i.label])));
 const MODSET=new Set(MODLIST.map(m=>m[0]));
 const LEVELS=['Manager','Employee','New','Intern'];
-const DEFAULT_MODULES=['dashboard','tasks','projects','settings','network'];
+const DEFAULT_MODULES=['dashboard','tasks','projects','settings','network','scheduling'];
 /* Modules nobody needs to be granted — they are part of the furniture, and were previously spelled
    out three separate times inside allowedSet() plus once more in pageAllowed(), which is how a new
    one gets added to some of them and not others.
@@ -656,14 +672,23 @@ function expandModules(ss){
   Object.keys(MODULE_RENAMES).forEach(function(oldId){
     if(ss.has(oldId)) ss.add(MODULE_RENAMES[oldId]);
   });
-  if(ss.has('custportal_photos')) ss.add('custportal_admin');
+  if(ss.has('custportal_photos')||ss.has('custportal_photo_approver')||ss.has('custportal_photo_backup')) ss.add('custportal_admin');
   ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
 /* 'custportal_photos' = Customer Portal Admin limited to its Photos & Videos tab. The database
    enforces the same boundary (app.is_custportal_media_editor): such an account can write the four
    photo tables and read project names and a bare flat list, and nothing else in cust.*. */
-function cpaPhotosOnly(){ if(state.super)return false; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('custportal_photos')!==-1; }
+function cpaPhotosOnly(){ if(state.super)return false; const m=state.roles&&state.roles.modules;
+  // A photo approver without Customer Portal Admin of their own gets the same single Photos tab.
+  return Array.isArray(m)&&(m.indexOf('custportal_photos')!==-1||((m.indexOf('custportal_photo_approver')!==-1||m.indexOf('custportal_photo_backup')!==-1)&&m.indexOf('custportal_admin')===-1)); }
+/* 'custportal_photo_approver' = may publish or reject construction photos and videos (Photos & Videos
+   > Review). The database holds the same rule - app.is_photo_approver() in cust.review_media() - and
+   also refuses an approver's own uploads; this only decides whether to show the Review screen. */
+/* 'custportal_photo_backup' = a backup approver: may do everything an approver does, but the
+   database only tells them about photos that have waited more than 2 days (cust.media_daily_digest),
+   so they are not woken for what the approver is about to deal with anyway. */
+function cpaIsPhotoApprover(){ if(state.super)return true; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&(m.indexOf('custportal_photo_approver')!==-1||m.indexOf('custportal_photo_backup')!==-1); }
 function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return expandModules(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length)return expandModules(new Set(m));return expandModules(new Set());}
 /* Usability sits under Control Panel in Administration, but unlike Control Panel it is NOT
    superadmin-only: the Systems department are the people who actually read it, and they are not
@@ -687,14 +712,68 @@ function canFeedbackHub(){
   const me=String(state.email||'').trim().toLowerCase();
   return FEEDBACK_HUB_PEOPLE.indexOf(me)!==-1;
 }
-function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
+/* INVENTORY (PURCHASE & STORES) IS FOR THREE PEOPLE, BY NAME, WHILE IT IS BEING BUILT AND REVIEWED.
+
+   Same arrangement as the Feedback Hub above: not granted through modules, and not open to every
+   superadmin either, so the test runs BEFORE the state.super shortcut in pageAllowed. The three are
+   the module's own administrators (Administrator, Prerna, Vivky) - the same people listed in
+   purchase.module_admins.
+
+   This decides only whether the menu entry is drawn and the page opens. It is not a database rule:
+   the purchase tables stay readable by signed-in staff through the API, and what anybody may change is
+   enforced by the database separately (roles, approvers and module administrators in the purchase schema).
+
+   To open it up later, delete this block, the two checks for 'inventory' below, and let it be granted
+   through modules like any other page. To add someone for now, add an address here. */
+/* 2026-10-06: the Systems team (department "Systems" in adm.users) was added to the three administrators, and made
+   Purchase administrators too: system.admin@ (Ayush Ruia's other login), system1@, system2.thejaingroup@,
+   system6thejaingroup@, ai@. Keep this list and purchase.module_admins the same people. */
+const INVENTORY_PEOPLE=['ayushruia1@gmail.com','businessanalyst@thejaingroup.com','system3.thejaingroup@gmail.com',
+  'system.admin@thejaingroup.com','system1@thejaingroup.com','system2.thejaingroup@gmail.com','system6thejaingroup@gmail.com','ai@thejaingroup.com'];
+function canInventory(){
+  if(state.isCustomer||state.impersonating) return false;
+  const me=String(state.email||'').trim().toLowerCase();
+  return INVENTORY_PEOPLE.indexOf(me)!==-1;
+}
+/* ACCOUNTS IS FOR THREE PEOPLE, BY NAME.
+   Administrator, Prerna and Vicky - the same people who hold the module's own administrator role in
+   accounts.access. Same arrangement as Inventory above: the test runs BEFORE the state.super shortcut
+   in pageAllowed, so the other super admins do not get the menu entry and cannot open the page.
+
+   This decides only whether the menu entry is drawn and the page opens. It is not a database rule:
+   accounts.can_read() still lets any super admin (or anyone granted 'accounts') read the accounts
+   tables through the API, and what anybody may post or change is enforced by the database separately
+   (accounts.access roles, posted vouchers are immutable).
+
+   To add someone for now, add an address here AND a row in accounts.access.
+   To open it up later, delete this block and the two checks for 'accounts' below. */
+const ACCOUNTS_PEOPLE=['ayushruia1@gmail.com','businessanalyst@thejaingroup.com','system3.thejaingroup@gmail.com'];
+function canAccounts(){
+  if(state.isCustomer||state.impersonating) return false;
+  const me=String(state.email||'').trim().toLowerCase();
+  return ACCOUNTS_PEOPLE.indexOf(me)!==-1;
+}
+/* WEEKLY STATUS IS FOR PRERNA ALONE, BY NAME.
+   Same arrangement as the Feedback Hub and Inventory above: not granted through modules and not
+   open to every superadmin, so the test runs BEFORE the state.super shortcut in pageAllowed.
+   The database half of this is app.has_module('weekly_status'), which for this one module ignores
+   the superadmin bypass and needs the id in the person's own adm.users.modules - so the ops.*
+   tables and RPCs refuse anyone else even if they reach the page some other way.
+   To add someone: add the address here AND put 'weekly_status' in their adm.users.modules. */
+const WEEKLY_STATUS_PEOPLE=['businessanalyst@thejaingroup.com'];
+function canWeeklyStatus(){
+  if(state.isCustomer||state.impersonating) return false;
+  const me=String(state.email||'').trim().toLowerCase();
+  return WEEKLY_STATUS_PEOPLE.indexOf(me)!==-1;
+}
+function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(it.id==='accounts')?canAccounts():(it.id==='weekly_status')?canWeeklyStatus():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(hasUsability()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -755,17 +834,53 @@ function renderShell(){
     // dropdown appears (or with it dismissed) still lands on the lead instead of a text search for it.
     if(/^\d+$/.test(q)){
       try{
-        const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:[Number(q)]});
-        if(error)throw error;
-        const hit=(data||[])[0];
-        if(hit&&hit.lead){navTo('transcription/lead/'+hit.lead.lead_id);return;}
+        const route=await trcResolveLeadRoute(q);
+        if(route){navTo(route);return;}
+        if(PAGE==='transcription'){_gsDrop.innerHTML='<div style="padding:12px 14px;color:var(--slate);font-size:13px;text-align:center">No lead found with ID '+esc(q)+'</div>';_gsDrop.style.display='block';return;}
       }catch(e){}
     }
     navTo('documents/search/'+encodeURIComponent(q));
   });
+  /* On the Transcription page the search box doubles as a lead-id jump: a bare number opens that
+     lead's detail page as soon as the lookup finds it (no Enter needed), changing the number opens
+     the new lead, and clearing the box returns to the default Transcription list. Only a lead
+     detail route is left on clear - a tab the user chose themselves is not theirs to be pulled off.
+     _gsSeq discards a lookup that finished after the box had already changed again. */
+  let _gsSeq=0;
+  const _trLeadRoute=()=>/^#\/(lead|auto|r\d+)\/./i.test(location.hash);
+  /* Leaving a lead page by any other route (its Back button, the browser's back, a tab) empties the
+     box: the id in it described the page that is now gone. */
+  window.addEventListener('hashchange',()=>{
+    if(PAGE!=='transcription'||_trLeadRoute()||!_gs.value)return;
+    clearTimeout(_gsTimer);_gsSeq++;_gs.value='';_gsDrop.style.display='none';
+  });
   _gs.addEventListener('input',e=>{
-    clearTimeout(_gsTimer);const q=e.target.value.trim();
-    if(!q){_gsDrop.style.display='none';return;}
+    clearTimeout(_gsTimer);const q=e.target.value.trim();const seq=++_gsSeq;
+    if(!q){
+      _gsDrop.style.display='none';
+      if(PAGE==='transcription'&&_trLeadRoute())navTo('transcription');
+      return;
+    }
+    if(PAGE==='transcription'&&/^\d+$/.test(q)){
+      _gsTimer=setTimeout(async()=>{
+        try{
+          const route=await trcResolveLeadRoute(q);
+          if(seq!==_gsSeq)return;
+          if(route){
+            _gsDrop.style.display='none';
+            if(location.hash!=='#/'+route.split('/').slice(1).join('/'))navTo(route);
+            return;
+          }
+          _gsDrop.innerHTML='<div style="padding:12px 14px;color:var(--slate);font-size:13px;text-align:center">No lead found with ID '+esc(q)+'</div>';
+          _gsDrop.style.display='block';
+          return;
+        }catch(err){
+          if(seq===_gsSeq){_gsDrop.innerHTML='<div style="padding:12px 14px;color:var(--err);font-size:13px;text-align:center">Could not search leads: '+esc((err&&err.message)||String(err))+'</div>';_gsDrop.style.display='block';}
+          return;
+        }
+      },350);
+      return;
+    }
     _gsTimer=setTimeout(()=>gsLiveSearch(q),250);
   });
   document.addEventListener('click',e=>{if(!_gs.parentElement.contains(e.target))_gsDrop.style.display='none';});
@@ -778,6 +893,21 @@ function renderShell(){
 async function doSignOut(){ try{ await sb.auth.signOut(); }catch(e){} try{ Object.keys(localStorage).forEach(function(k){ if(/sb-.*-auth-token/.test(k)||k.indexOf('supabase')>=0) localStorage.removeItem(k); }); }catch(e){} try{ sessionStorage.removeItem(BOOT_CACHE_KEY); }catch(e){} location.replace(LOGIN_PAGE); }
 window.doSignOut=doSignOut;
 
+/* Where a typed lead id lives. crm_lead_detail answers every id asked for, so an unknown id still
+   comes back as a row with a null lead and no follow-ups - only a lead row or a history counts as
+   found. A lead can also exist ONLY as a transcribed call (acc.transcriptions, e.g. the lost-call sync
+   saw it before the CRM export did); that call's own page is the best thing to open for it. Returns
+   a navTo path, or null when the id is nowhere in Supabase. Throws on a failed query. */
+async function trcResolveLeadRoute(q){
+  const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:[Number(q)]});
+  if(error)throw error;
+  const hit=(data||[])[0];
+  if(hit&&(hit.lead||(Array.isArray(hit.followups)&&hit.followups.length)))return 'transcription/lead/'+Number(q);
+  const {data:tr,error:e2}=await sb.schema('acc').from('transcriptions').select('id').eq('lead_id',Number(q)).is('deleted_at',null).order('created_at',{ascending:false}).limit(1);
+  if(e2)throw e2;
+  if(tr&&tr.length)return 'transcription/auto/'+tr[0].id;
+  return null;
+}
 // Universal live document search (top nav)
 async function gsLiveSearch(q){
   const drop=document.getElementById('gsDrop');if(!drop)return;
@@ -913,8 +1043,21 @@ function notifGeneralMeta(n){
   if(n.kind==='project_owner_added')return {icon:'fa-user-shield',cls:'t-blue',text:'Added you as an owner',taskId:null};
   if(n.kind==='task_delegated')return {icon:'fa-share-nodes',cls:'t-amber',text:'Delegated a task to you',taskId:n.task_id||null};
   if(n.kind==='comment')return {icon:'fa-comment-dots',cls:'t-blue',text:'Commented on a task',taskId:n.task_id||null};
+  // Construction photo approval (cust.review_media / cust.notify_media_uploaded).
+  if(n.kind==='media_pending')return {icon:'fa-stamp',cls:'t-amber',text:'Photos to approve',taskId:null,go:"notifOpenMedia('review')"};
+  if(n.kind==='media_digest')return {icon:'fa-stamp',cls:'t-amber',text:n.body||'Photos waiting for approval',taskId:null,go:"notifOpenMedia('review')"};
+  if(n.kind==='media_rejected')return {icon:'fa-circle-xmark',cls:'t-red',text:n.body||'Photos rejected',taskId:null,go:"notifOpenMedia('upload')"};
+  if(n.kind==='media_published')return {icon:'fa-circle-check',cls:'t-green',text:'Photos published',taskId:null,go:"notifOpenMedia('upload')"};
   return {icon:'fa-bell',cls:'t-gray',text:n.body||'Notification',taskId:n.task_id||null};
 }
+// Opens Customer Portal Admin > Photos & Videos: Review for an approver's "to approve", the upload
+// list (with each item's status and any rejection reason) for the uploader.
+window.notifOpenMedia=function(mode){
+  const dd=$('notifDd'); if(dd) dd.classList.remove('show');
+  CPA_PH.mode=(mode==='review'&&cpaIsPhotoApprover())?'review':'upload';
+  if(CPA_PH.mode==='review'){ CPA_RV.status='pending'; CPA_RV.sel.clear(); CPA_RV.picked=false; }
+  navTo('custportal_admin/'+(cpaPhotosOnly()?0:3));
+};
 async function toggleNotif(){
   const dd=$('notifDd');dd.className='dropdown notif';
   dd.classList.toggle('show');if(!dd.classList.contains('show'))return;
@@ -940,7 +1083,7 @@ async function renderNotifDropdown(){
   if(general.length){
     html+=subhead('Updates','notifMarkAllGeneralRead()')+general.map(n=>{
       const meta=notifGeneralMeta(n);
-      return `<div class="n-it" onclick="notifMarkRead(${n.id});${meta.taskId?`goToTask(${meta.taskId})`:`$('notifDd').classList.remove('show')`}"><div class="n-ic ${meta.cls}"><i class="fa-solid ${meta.icon}"></i></div><div><div style="font-weight:600;font-size:13px">${esc(n.title||meta.text)}</div><div style="color:var(--slate);font-size:12px">${meta.text} · ${relTime(n.created_at)}</div></div></div>`;
+      return `<div class="n-it" onclick="notifMarkRead(${n.id});${meta.go?meta.go:meta.taskId?`goToTask(${meta.taskId})`:`$('notifDd').classList.remove('show')`}"><div class="n-ic ${meta.cls}"><i class="fa-solid ${meta.icon}"></i></div><div><div style="font-weight:600;font-size:13px">${esc(n.title||meta.text)}</div><div style="color:var(--slate);font-size:12px">${meta.text} · ${relTime(n.created_at)}</div></div></div>`;
     }).join('');
   }
   if(items.length){
@@ -5111,7 +5254,7 @@ window.msOpen=function(key){
 };
 window.msFieldClick=function(key,e){if(e)e.stopPropagation();msOpen(key);const inp=document.getElementById('ms_'+key+'_in');if(inp)inp.focus();};
 window.msToggle=function(key,e){if(e)e.stopPropagation();const p=document.getElementById('ms_'+key+'_panel');if(p&&p.classList.contains('show')){p.classList.remove('show');}else{msOpen(key);}};
-window.msPick=function(key,email){const m=MS[key];if(m.locked&&m.locked.has(email))return;const s=m.sel;s.has(email)?s.delete(email):s.add(email);msRenderChips(key);const inp=document.getElementById('ms_'+key+'_in');if(inp){inp.value='';inp.focus();}msRenderList(key);msPositionPanel(key);};
+window.msPick=function(key,email){const m=MS[key];if(m.locked&&m.locked.has(email))return;const s=m.sel;s.has(email)?s.delete(email):s.add(email);msRenderChips(key);const inp=document.getElementById('ms_'+key+'_in');if(inp){inp.value='';inp.focus();}msRenderList(key);msPositionPanel(key);if(typeof m.onChange==='function')m.onChange(email,s.has(email));};
 function getMS(key){return MS[key]?[...MS[key].sel]:[];}
 document.addEventListener('click',function(e){if(!e.target.closest('.ms'))document.querySelectorAll('.ms-panel.show').forEach(x=>x.classList.remove('show'));});
 window.addEventListener('scroll',function(){document.querySelectorAll('.ms-panel.show').forEach(p=>{const key=p.id.replace(/^ms_/,'').replace(/_panel$/,'');msPositionPanel(key);});},true);
@@ -8524,7 +8667,9 @@ async function secUserDetail(v,email){
       </div>
       <div style="padding:14px 16px 16px">
         <div class="tab-grid">${NAV.flatMap(g=>{const gi=g.items.filter(m=>MODSET.has(m.id));if(!gi.length)return[];return['<div class="tab-grid-head">'+esc(g.group)+'</div>',...gi.flatMap(m=>['<label class="chk-tile"><input type="checkbox" class="secMod" value="'+m.id+'" '+((m.id==='network'||mods.includes(m.id))?'checked':'')+' '+((u.super_admin||m.id==='network')?'disabled':'')+'><i class="fa-solid '+m.icon+' tile-ic"></i>'+esc(m.label)+'</label>']
-            .concat(m.id==='custportal_admin'?['<label class="chk-tile" title="Opens Customer Portal Admin with only the Photos &amp; Videos tab"><input type="checkbox" class="secMod" value="custportal_photos" '+(mods.includes('custportal_photos')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-photo-film tile-ic"></i>Customer Portal: Photos &amp; Videos only</label>']:[]))];}).join('')}</div>
+            .concat(m.id==='custportal_admin'?['<label class="chk-tile" title="Opens Customer Portal Admin with only the Photos &amp; Videos tab"><input type="checkbox" class="secMod" value="custportal_photos" '+(mods.includes('custportal_photos')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-photo-film tile-ic"></i>Customer Portal: Photos &amp; Videos only</label>',
+              '<label class="chk-tile" title="May publish or reject construction photos and videos before customers see them (Photos &amp; Videos &gt; Review)"><input type="checkbox" class="secMod" value="custportal_photo_approver" '+(mods.includes('custportal_photo_approver')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-stamp tile-ic"></i>Customer Portal: approve photos</label>',
+              '<label class="chk-tile" title="May approve like an approver, but is only told when photos have waited more than 2 days"><input type="checkbox" class="secMod" value="custportal_photo_backup" '+(mods.includes('custportal_photo_backup')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-user-shield tile-ic"></i>Customer Portal: backup photo approver</label>']:[]))];}).join('')}</div>
       </div>
     </div>
     ${u.super_admin?'<p style="color:var(--slate);font-size:13px;margin-top:12px">This person is an administrator and always has full access.</p>':`<div style="margin-top:18px;display:flex;justify-content:flex-end;gap:10px"><button class="btn" onclick="navTo('security')">Cancel</button><button class="btn btn-primary" id="secSaveBtn" onclick="secSave('${esc(email)}')"><i class="fa-solid fa-check"></i> Save access</button></div>`}
@@ -8615,6 +8760,437 @@ async function sbRenderCauselistBoard(host){
     +(rows.length?rows.map((r,i)=>'<tr><td>'+sbMedal(i)+'</td><td><b>'+esc(r.full_name||r.email)+'</b></td><td>'+r.tasks_assigned+'</td><td>'+r.tasks_completed+'</td><td>'+r.tasks_pending+'</td><td style="font-weight:800">'+r.score+'</td></tr>').join('')
        :'<tr><td colspan="6"><div class="empty" style="padding:22px">No causelist tasks yet</div></td></tr>')
     +'</tbody></table></div>';
+}
+
+/* ============================== WEEKLY STATUS ==============================
+   The OPS meeting: who was there, what was decided, who it landed on, and whether it ever got
+   done.
+
+   WHY THIS PAGE EXISTS. The minutes have been kept in one Google Sheet since February 2025 - 29
+   meetings, 495 action items - and the sheet answers exactly one question well: "what did we
+   decide on the 21st". It cannot answer the questions actually asked in the room: what is still
+   open, how long it has been open, who is carrying the most, and whether we close things faster
+   than we open them. Same data, read the other way round.
+
+   WHAT IS SHOWN, AND WHAT IT IS READ FROM. Every figure comes from ops.items and ops.meetings via
+   two RPCs; nothing is computed twice or kept in two places. The sheet's own words are carried on
+   every row - the Deadline cell exactly as typed, the Assigned To cell exactly as typed - so a
+   status this derived can always be checked against what somebody actually wrote. A dashboard that
+   cannot be checked gets quietly distrusted and then ignored.
+
+   FOUR TABS, BECAUSE THEY ARE FOUR DIFFERENT QUESTIONS.
+     Dashboard    - how are we doing, and what has been open longest.
+     Meetings     - the minutes, as minutes: date, who attended, what came out of it.
+     Action items - the list, filterable, where work is actually ticked off.
+     People       - who owes what. The one that makes a Monday meeting shorter.
+   Filters are shared across the last three and applied in the browser: 495 rows is nothing to
+   filter locally, and a round trip per keystroke would make it feel slow for no benefit. */
+
+const WS={items:null,meetings:null,err:'',tab:0,q:'',owner:'',project:'',status:'',onlyOpen:false,openMtg:new Set()};
+
+const WS_STATUS=[
+  ['done',       'Done',        '#15803d','#dcfce7'],
+  ['in_progress','In progress', '#b45309','#fef3c7'],
+  ['not_done',   'Not done',    '#b91c1c','#fee2e2'],
+  ['open',       'Open',        '#475569','#f1f5f9']
+];
+function wsStat(s){ return WS_STATUS.find(function(x){return x[0]===s;})||WS_STATUS[3]; }
+function wsChip(s){
+  const f=wsStat(s);
+  return '<span class="badge" style="background:'+f[3]+';color:'+f[2]+';white-space:nowrap">'+f[1]+'</span>';
+}
+
+const WS_CSS='<style id="wsCss">'
+  +'.ws-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:16px 0 4px}'
+  +'.ws-kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px}'
+  +'.ws-kpi b{display:block;font-size:26px;line-height:1.1;font-weight:800;letter-spacing:-.02em}'
+  +'.ws-kpi span{display:block;margin-top:5px;font-size:11.5px;color:var(--slate);line-height:1.35}'
+  +'.ws-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0 0}'
+  +'.ws-tab{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 15px;font-size:13px;'
+    +'font-weight:600;color:var(--slate);cursor:pointer;font-family:inherit;transition:all .15s}'
+  +'.ws-tab:hover{border-color:#c4b5fd;color:#6b21a8}'
+  +'.ws-tab.on{background:#f5f3ff;border-color:#c4b5fd;color:#6b21a8}'
+  +'.ws-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin:14px 0 0}'
+  +'.ws-f{display:flex;flex-direction:column;gap:5px;min-width:0}'
+  +'.ws-f>label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}'
+  +'.ws-f .sel,.ws-f input{height:36px;border:1px solid var(--line);border-radius:9px;padding:0 11px;font-size:13px;'
+    +'font-family:inherit;background:#fff;color:#334155}'
+  +'.ws-f .sel:focus,.ws-f input:focus{outline:none;border-color:#a78bfa;box-shadow:0 0 0 3px rgba(124,58,237,.13)}'
+  +'.ws-f input{min-width:230px}'
+  /* The split bar: one row per project or per person, the four states side by side to scale. It is
+     a bar rather than a pie because the eye compares lengths far better than angles, and because
+     every row has to be comparable with every other row. */
+  +'.ws-split{display:flex;height:9px;border-radius:999px;overflow:hidden;background:#f1f5f9;min-width:90px}'
+  +'.ws-split i{display:block;height:100%}'
+  +'.ws-mtg{border:1px solid var(--line);border-radius:14px;background:#fff;margin-bottom:10px;overflow:hidden}'
+  +'.ws-mtg-hd{display:flex;gap:14px;align-items:center;padding:13px 16px;cursor:pointer;flex-wrap:wrap}'
+  +'.ws-mtg-hd:hover{background:#faf5ff}'
+  +'.ws-mtg-d{font-weight:800;font-size:15px;letter-spacing:-.01em;white-space:nowrap}'
+  +'.ws-mtg-k{font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#6b21a8;'
+    +'background:#f5f3ff;border:1px solid #e9d5ff;border-radius:999px;padding:3px 9px;white-space:nowrap}'
+  +'.ws-mtg-b{padding:0 16px 14px;border-top:1px solid var(--line)}'
+  +'.ws-att{display:flex;flex-wrap:wrap;gap:5px;margin:12px 0 4px}'
+  +'.ws-att span{font-size:11.5px;background:#f8fafc;border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:#334155}'
+  +'.ws-proj{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);'
+    +'margin:14px 0 6px;padding-top:10px;border-top:1px dashed var(--line)}'
+  +'.ws-it{display:flex;gap:11px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #f6f7f9}'
+  +'.ws-it:last-child{border-bottom:0}'
+  +'.ws-it-x{flex:1 1 auto;min-width:0;font-size:13.5px;line-height:1.5}'
+  +'.ws-it-m{font-size:11.5px;color:var(--slate);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap}'
+  /* The status control is a <select> rather than a tick, because there are four states and a tick
+     can only say two of them. */
+  +'.ws-sel{height:28px;border:1px solid var(--line);border-radius:7px;font-size:11.5px;font-family:inherit;'
+    +'background:#fff;color:#334155;padding:0 6px;cursor:pointer;flex:none}'
+  +'.ws-sel:focus{outline:none;border-color:#a78bfa}'
+  +'.ws-late{color:#b91c1c;font-weight:700}'
+  +'.ws-row{cursor:pointer}.ws-row:hover{background:#faf5ff}'
+  +'@media(max-width:1000px){.ws-kpis{grid-template-columns:repeat(2,1fr)}}'
+  +'@media(max-width:620px){.ws-kpis{grid-template-columns:1fr}.ws-f input{min-width:0;width:100%}.ws-f{flex:1 1 100%}}'
++'</style>';
+
+VIEWS.weekly_status=async function(v){
+  setCrumb(['Overview','Weekly Status']);
+  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  await wsLoad();
+  if(WS.items===null){
+    v.innerHTML=mHead('fa-people-group','#7c3aed','Weekly Status')
+      +'<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-lock"></i>'
+      +'<div>'+esc(WS.err||'Could not load')+'</div></div>';
+    return;
+  }
+  v.innerHTML=WS_CSS+mHead('fa-people-group','#7c3aed','Weekly Status')
+    +'<p style="color:var(--slate);font-size:13px;margin:6px 2px 0">Every OPS meeting, what came out of it, '
+      +'and whether it was ever closed. Ticking something off here is a real change with your name on it.</p>'
+    +'<div id="wsBody"></div>';
+  wsPaint();
+};
+
+async function wsLoad(){
+  try{
+    const r=await Promise.all([sb.rpc('ops_weekly_meetings'), sb.rpc('ops_weekly_items')]);
+    if(r[0].error) throw r[0].error;
+    if(r[1].error) throw r[1].error;
+    WS.meetings=r[0].data||[]; WS.items=r[1].data||[];
+  }catch(e){ WS.items=null; WS.meetings=null; WS.err=(e&&e.message)||String(e); }
+}
+
+/* Repaints only the body, so changing a filter or ticking an item off does not re-run the two
+   RPCs. The page head and the stylesheet are written once by the view. */
+function wsPaint(){
+  const b=$('wsBody'); if(!b) return;
+  b.innerHTML=wsKpisHtml()+wsTabsHtml()
+    +(WS.tab===0?wsDashHtml():WS.tab===1?wsMeetingsHtml():WS.tab===2?wsItemsHtml():wsPeopleHtml());
+}
+window.wsGo=function(t){ WS.tab=t; wsPaint(); };
+window.wsSetFilter=function(k,val){ WS[k]=val; wsPaint(); };
+window.wsToggleMtg=function(id){
+  if(WS.openMtg.has(id)) WS.openMtg.delete(id); else WS.openMtg.add(id);
+  wsPaint();
+};
+
+function wsToday(){
+  try{ const d=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
+       return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  catch(e){ return new Date().toISOString().slice(0,10); }
+}
+function wsDaysSince(iso){
+  if(!iso) return 0;
+  return Math.max(0, Math.round((new Date(wsToday())-new Date(iso))/86400000));
+}
+/* Overdue means a due date that has passed on something still open. An item with no due date is
+   never called overdue - 473 of the 495 have none, and inventing a deadline for them would turn
+   the whole board red and tell nobody anything. */
+function wsOverdue(r){
+  return r.status!=='done' && !!r.due_date && r.due_date < wsToday();
+}
+
+function wsFiltered(){
+  const q=WS.q.trim().toLowerCase();
+  return (WS.items||[]).filter(function(r){
+    if(WS.onlyOpen && r.status==='done') return false;
+    if(WS.status && r.status!==WS.status) return false;
+    if(WS.owner  && (r.owner||'—')!==WS.owner) return false;
+    if(WS.project&& r.project!==WS.project) return false;
+    if(q){
+      const hay=(r.item+' '+(r.owner||'')+' '+(r.project||'')+' '+(r.comments||'')+' '+(r.due_raw||'')).toLowerCase();
+      if(hay.indexOf(q)===-1) return false;
+    }
+    return true;
+  });
+}
+
+function wsKpisHtml(){
+  const all=WS.items||[];
+  const done=all.filter(function(r){return r.status==='done';}).length;
+  const openish=all.length-done;
+  const late=all.filter(wsOverdue).length;
+  const pct=all.length?Math.round(100*done/all.length):0;
+  const last=(WS.meetings||[])[0];
+  const kpi=function(big,label,ink){
+    return '<div class="ws-kpi"><b'+(ink?' style="color:'+ink+'"':'')+'>'+big+'</b><span>'+label+'</span></div>';
+  };
+  return '<div class="ws-kpis">'
+    +kpi((WS.meetings||[]).length,'meetings recorded<br>since '+(((WS.meetings||[]).slice(-1)[0]||{}).meeting_date?fmtDate(WS.meetings[WS.meetings.length-1].meeting_date):'—'))
+    +kpi(all.length,'action items minuted')
+    +kpi(pct+'%','closed &middot; '+done+' of '+all.length, pct>=70?'#15803d':pct>=50?'#b45309':'#b91c1c')
+    +kpi(openish,'still not done', openish?'#b45309':'#15803d')
+    +kpi(late,'past a stated deadline', late?'#b91c1c':'#15803d')
+    +'</div>'
+    +(last?'<p style="color:var(--slate);font-size:12px;margin:8px 2px 0">Last meeting '
+       +esc(fmtDate(last.meeting_date))+' &middot; '+esc(last.kind)+(last.note?' &middot; '+esc(last.note):'')
+       +' &middot; '+last.item_count+' item'+(last.item_count===1?'':'s')+' raised, '+last.done_count+' since closed.</p>':'');
+}
+
+function wsTabsHtml(){
+  const tabs=['Dashboard','Meetings','Action items','People'];
+  return '<div class="ws-tabs">'+tabs.map(function(t,i){
+      return '<button class="ws-tab'+(WS.tab===i?' on':'')+'" onclick="wsGo('+i+')">'+t+'</button>';
+    }).join('')+'</div>';
+}
+
+/* The four states as one bar. Widths are percentages of the row's own total, so a project with 8
+   items and one with 135 are still comparable at a glance. */
+function wsSplitHtml(c){
+  const t=c.done+c.in_progress+c.not_done+c.open; if(!t) return '';
+  const seg=function(n,col){ return n?'<i style="width:'+(100*n/t)+'%;background:'+col+'" title="'+n+'"></i>':''; };
+  return '<div class="ws-split">'+seg(c.done,'#22c55e')+seg(c.in_progress,'#f59e0b')
+    +seg(c.not_done,'#ef4444')+seg(c.open,'#cbd5e1')+'</div>';
+}
+function wsGroup(rows,keyFn){
+  const m={};
+  rows.forEach(function(r){
+    const k=keyFn(r)||'—';
+    const c=m[k]||(m[k]={k:k,done:0,in_progress:0,not_done:0,open:0,total:0,late:0});
+    c[r.status]=(c[r.status]||0)+1; c.total++; if(wsOverdue(r)) c.late++;
+  });
+  return Object.keys(m).map(function(k){return m[k];}).sort(function(a,b){return b.total-a.total;});
+}
+
+function wsDashHtml(){
+  const all=WS.items||[];
+  const byProj=wsGroup(all,function(r){return r.project;}).slice(0,12);
+  const byPers=wsGroup(all.filter(function(r){return r.owner;}),function(r){return r.owner;}).slice(0,10);
+  /* Longest open, measured from the meeting that raised it. This is the list that changes
+     behaviour: an item agreed 19 months ago and never closed is a different conversation from one
+     raised last week. */
+  const oldest=all.filter(function(r){return r.status!=='done';})
+    .sort(function(a,b){ return a.meeting_date<b.meeting_date?-1:a.meeting_date>b.meeting_date?1:0; })
+    .slice(0,10);
+  const barRows=function(list,title,sub){
+    return '<div class="card" style="margin-top:14px"><div class="card-pad" style="padding-bottom:6px">'
+      +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-chart-simple" style="color:#7c3aed"></i> '+title+'</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">'+sub+'</div></div>'
+      +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
+        +'<th>'+(title.indexOf('project')>-1?'Project':'Person')+'</th><th style="width:150px">Split</th>'
+        +'<th style="width:70px">Items</th><th style="width:70px">Done</th><th style="width:80px">Closed</th>'
+      +'</tr></thead><tbody>'
+      +list.map(function(c){
+          const pct=c.total?Math.round(100*c.done/c.total):0;
+          return '<tr><td><b>'+esc(c.k)+'</b></td>'
+            +'<td>'+wsSplitHtml(c)+'</td>'
+            +'<td>'+c.total+'</td><td>'+c.done+'</td>'
+            +'<td style="font-weight:700;color:'+(pct>=70?'#15803d':pct>=40?'#b45309':'#b91c1c')+'">'+pct+'%</td></tr>';
+        }).join('')
+      +'</tbody></table></div></div>';
+  };
+  return '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">'
+      +WS_STATUS.map(function(s){
+          const n=all.filter(function(r){return r.status===s[0];}).length;
+          return '<div style="flex:1 1 150px;background:'+s[3]+';border-radius:12px;padding:12px 14px">'
+            +'<b style="display:block;font-size:22px;font-weight:800;color:'+s[2]+'">'+n+'</b>'
+            +'<span style="font-size:12px;color:'+s[2]+';opacity:.85">'+s[1]+'</span></div>';
+        }).join('')
+    +'</div>'
+    +barRows(byProj,'Where the work sits, by project','Green is closed, amber in progress, red not done, grey never picked up.')
+    +barRows(byPers,'Where the work sits, by person','Only people carrying at least one item. Names are resolved from the sheet’s initials.')
+    +'<div class="card" style="margin-top:14px"><div class="card-pad" style="padding-bottom:6px">'
+      +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-hourglass-half" style="color:#b45309"></i> Open the longest</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">Still not done, counted from the meeting that raised it.</div></div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
+      +'<th style="width:96px">Raised</th><th style="width:72px">Age</th><th>Item</th>'
+      +'<th style="width:130px">Owner</th><th style="width:110px">Status</th>'
+    +'</tr></thead><tbody>'
+    +(oldest.length?oldest.map(function(r){
+        const d=wsDaysSince(r.meeting_date);
+        return '<tr><td style="color:var(--slate);white-space:nowrap">'+esc(fmtDate(r.meeting_date))+'</td>'
+          +'<td style="font-weight:700;color:'+(d>365?'#b91c1c':d>120?'#b45309':'var(--slate)')+'">'+d+'d</td>'
+          +'<td>'+esc(r.item)+'<div style="font-size:11.5px;color:var(--slate);margin-top:2px">'+esc(r.project)+'</div></td>'
+          +'<td>'+esc(r.owner||'—')+'</td><td>'+wsChip(r.status)+'</td></tr>';
+      }).join('')
+      :'<tr><td colspan="5" style="color:var(--slate);padding:18px">Nothing is open. That would be a first.</td></tr>')
+    +'</tbody></table></div></div>';
+}
+
+function wsFilterBarHtml(withOwner){
+  const opts=function(list,cur){
+    return '<option value="">All</option>'+list.map(function(x){
+      return '<option value="'+esc(x)+'"'+(cur===x?' selected':'')+'>'+esc(x)+'</option>';
+    }).join('');
+  };
+  const projects=Array.from(new Set((WS.items||[]).map(function(r){return r.project;}))).sort();
+  const owners=Array.from(new Set((WS.items||[]).map(function(r){return r.owner;}).filter(Boolean))).sort();
+  return '<div class="ws-bar">'
+    +'<div class="ws-f"><label>Search</label><input id="wsQ" placeholder="Anything in the item, owner or comment…" '
+      +'value="'+esc(WS.q)+'" oninput="wsSetFilter(\'q\',this.value)"></div>'
+    +'<div class="ws-f"><label>Project</label><select class="sel" onchange="wsSetFilter(\'project\',this.value)">'+opts(projects,WS.project)+'</select></div>'
+    +(withOwner?'<div class="ws-f"><label>Owner</label><select class="sel" onchange="wsSetFilter(\'owner\',this.value)">'+opts(owners,WS.owner)+'</select></div>':'')
+    +'<div class="ws-f"><label>Status</label><select class="sel" onchange="wsSetFilter(\'status\',this.value)">'
+      +'<option value="">All</option>'
+      +WS_STATUS.map(function(s){return '<option value="'+s[0]+'"'+(WS.status===s[0]?' selected':'')+'>'+s[1]+'</option>';}).join('')
+    +'</select></div>'
+    +'<div class="ws-f"><label>&nbsp;</label><button class="ws-tab'+(WS.onlyOpen?' on':'')+'" style="height:36px" '
+      +'onclick="wsSetFilter(\'onlyOpen\','+(!WS.onlyOpen)+')">Hide finished</button></div>'
+    +'</div>';
+}
+
+/* The status control. Every change goes through the RPC and is reflected locally only once the
+   database has accepted it - an optimistic tick that silently failed would be worse than no tick,
+   because the whole point of this page is that it can be trusted over the sheet. */
+function wsStatusSelHtml(r){
+  return '<select class="ws-sel" onchange="wsSetStatus('+r.id+',this.value,this)">'
+    +WS_STATUS.map(function(s){
+        return '<option value="'+s[0]+'"'+(r.status===s[0]?' selected':'')+'>'+s[1]+'</option>';
+      }).join('')
+    +'</select>';
+}
+window.wsSetStatus=async function(id,status,el){
+  const row=(WS.items||[]).find(function(r){return r.id===id;});
+  const was=row?row.status:null;
+  if(el) el.disabled=true;
+  try{
+    const {error}=await sb.rpc('ops_item_set_status',{p_id:id,p_status:status});
+    if(error) throw error;
+    if(row){ row.status=status; row.updated_by=state.email; }
+    usageQueue('weekly_status.tick_an_action_item','update',{status:status});
+    toast(status==='done'?'Closed — with your name on it':'Marked '+wsStat(status)[1].toLowerCase(),'ok');
+    wsPaint();
+  }catch(e){
+    if(el){ el.disabled=false; if(was) el.value=was; }
+    toast('Could not update: '+((e&&e.message)||e),'err');
+  }
+};
+
+function wsMeetingsHtml(){
+  const rows=wsFiltered();
+  const byMtg={};
+  rows.forEach(function(r){ (byMtg[r.meeting_id]=byMtg[r.meeting_id]||[]).push(r); });
+  const list=(WS.meetings||[]).filter(function(m){ return byMtg[m.id]&&byMtg[m.id].length; });
+  if(!list.length){
+    return wsFilterBarHtml(true)+'<div class="card card-pad empty" style="margin-top:14px;padding:36px">'
+      +'<i class="fa-solid fa-people-group"></i><div>No meeting matches those filters</div></div>';
+  }
+  return wsFilterBarHtml(true)+'<div style="margin-top:14px">'
+    +list.map(function(m){
+        const items=byMtg[m.id];
+        const open=WS.openMtg.has(m.id);
+        const done=items.filter(function(r){return r.status==='done';}).length;
+        const pct=items.length?Math.round(100*done/items.length):0;
+        let body='';
+        if(open){
+          const projs=[]; items.forEach(function(r){ if(projs.indexOf(r.project)===-1) projs.push(r.project); });
+          body='<div class="ws-mtg-b">'
+            +'<div class="ws-att">'+((m.attendees||[]).length
+                ? m.attendees.map(function(a){return '<span>'+esc(a)+'</span>';}).join('')
+                : '<span style="color:var(--slate)">Attendance was not recorded for this meeting</span>')+'</div>'
+            +projs.map(function(p){
+                return '<div class="ws-proj">'+esc(p)+'</div>'
+                  +items.filter(function(r){return r.project===p;}).map(wsItemRowHtml).join('');
+              }).join('')
+            +'</div>';
+        }
+        return '<div class="ws-mtg">'
+          +'<div class="ws-mtg-hd" onclick="wsToggleMtg('+m.id+')">'
+            +'<i class="fa-solid fa-chevron-'+(open?'down':'right')+'" style="color:#c4b5fd;font-size:11px"></i>'
+            +'<span class="ws-mtg-d">'+esc(fmtDate(m.meeting_date))+'</span>'
+            +'<span class="ws-mtg-k">'+esc(m.kind)+'</span>'
+            +(m.note?'<span style="font-size:12px;color:var(--slate)">'+esc(m.note)+'</span>':'')
+            +'<span style="margin-left:auto;display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
+              +'<span style="font-size:12px;color:var(--slate)"><i class="fa-solid fa-users" style="opacity:.5"></i> '
+                +((m.attendees||[]).length||'—')+'</span>'
+              +'<span style="font-size:12px;color:var(--slate)">'+items.length+' item'+(items.length===1?'':'s')+'</span>'
+              +'<span style="font-size:12px;font-weight:700;color:'+(pct>=70?'#15803d':pct>=40?'#b45309':'#b91c1c')+'">'+pct+'% closed</span>'
+            +'</span>'
+          +'</div>'+body
+        +'</div>';
+      }).join('')
+    +'</div>';
+}
+
+function wsItemRowHtml(r){
+  const late=wsOverdue(r);
+  const meta=[];
+  if(r.owner) meta.push('<span><i class="fa-solid fa-user" style="opacity:.45"></i> '+esc(r.owner)+'</span>');
+  if(r.due_date) meta.push('<span'+(late?' class="ws-late"':'')+'><i class="fa-regular fa-calendar" style="opacity:.45"></i> '
+    +esc(fmtDate(r.due_date))+(late?' · overdue':'')+'</span>');
+  /* The sheet's own Deadline cell, shown whenever it is not a date - it is where "wip", "90%
+     Completed" and "approval need from VC sir" live, and those are the real status for most rows. */
+  if(!r.due_date && r.due_raw) meta.push('<span style="opacity:.8">“'+esc(r.due_raw)+'”</span>');
+  if(r.comments) meta.push('<span style="opacity:.8">'+esc(r.comments)+'</span>');
+  if(r.updated_by) meta.push('<span style="color:#6b21a8"><i class="fa-solid fa-pen" style="opacity:.6"></i> set here</span>');
+  return '<div class="ws-it">'
+    +wsStatusSelHtml(r)
+    +'<div class="ws-it-x">'+esc(r.item)
+      +(meta.length?'<div class="ws-it-m">'+meta.join('')+'</div>':'')
+    +'</div></div>';
+}
+
+function wsItemsHtml(){
+  const rows=wsFiltered();
+  return wsFilterBarHtml(true)
+    +'<p style="color:var(--slate);font-size:12px;margin:10px 2px 0">'+rows.length+' of '+(WS.items||[]).length+' items shown.</p>'
+    +'<div class="card" style="margin-top:8px"><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
+      +'<th style="width:112px">Status</th><th style="width:96px">Raised</th><th>Item</th>'
+      +'<th style="width:140px">Owner</th><th style="width:150px">Project</th><th style="width:120px">Deadline</th>'
+    +'</tr></thead><tbody>'
+    +(rows.length?rows.map(function(r){
+        const late=wsOverdue(r);
+        return '<tr><td>'+wsStatusSelHtml(r)+'</td>'
+          +'<td style="color:var(--slate);white-space:nowrap;font-size:12px">'+esc(fmtDate(r.meeting_date))+'</td>'
+          +'<td>'+esc(r.item)
+            +(r.comments?'<div style="font-size:11.5px;color:var(--slate);margin-top:2px">'+esc(r.comments)+'</div>':'')
+          +'</td>'
+          +'<td>'+(r.owner?esc(r.owner):'<span style="color:var(--slate)">—</span>')
+            /* The sheet's spelling, where it differs from the name this resolved to. Keeps the
+               resolution honest and checkable rather than something to be taken on trust. */
+            +(r.owner_raw&&r.owner_raw!==r.owner?'<div style="font-size:11px;color:var(--slate)">sheet: '+esc(r.owner_raw)+'</div>':'')
+          +'</td>'
+          +'<td style="font-size:12.5px;color:var(--slate)">'+esc(r.project)
+            /* Same honesty as the owner column: where "Dream One Block 4" was grouped under Dream
+               One, the sheet's own label is still on the row. */
+            +(r.project_raw&&r.project_raw!==r.project?'<div style="font-size:11px;opacity:.75">sheet: '+esc(r.project_raw)+'</div>':'')
+          +'</td>'
+          +'<td style="font-size:12px"'+(late?' class="ws-late"':'')+'>'
+            +(r.due_date?esc(fmtDate(r.due_date)):(r.due_raw?'<span style="color:var(--slate)">“'+esc(r.due_raw)+'”</span>':'<span style="color:var(--slate)">—</span>'))
+          +'</td></tr>';
+      }).join('')
+      :'<tr><td colspan="6" style="padding:20px;color:var(--slate)">Nothing matches those filters.</td></tr>')
+    +'</tbody></table></div></div>';
+}
+
+function wsPeopleHtml(){
+  const rows=wsFiltered().filter(function(r){return r.owner;});
+  const people=wsGroup(rows,function(r){return r.owner;});
+  return wsFilterBarHtml(false)
+    +'<div class="card" style="margin-top:14px"><div class="card-pad" style="padding-bottom:6px">'
+      +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-user-check" style="color:#7c3aed"></i> Who is carrying what</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">Click a name to see only their items.</div></div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
+      +'<th>Person</th><th style="width:160px">Split</th><th style="width:66px">Items</th>'
+      +'<th style="width:66px">Done</th><th style="width:86px">Still open</th>'
+      +'<th style="width:78px">Overdue</th><th style="width:76px">Closed</th>'
+    +'</tr></thead><tbody>'
+    +(people.length?people.map(function(c){
+        const openish=c.total-c.done, pct=c.total?Math.round(100*c.done/c.total):0;
+        return '<tr class="ws-row" onclick="wsSetFilter(\'owner\',\''+escJs(c.k)+'\');wsGo(2)">'
+          +'<td><b>'+esc(c.k)+'</b></td>'
+          +'<td>'+wsSplitHtml(c)+'</td>'
+          +'<td>'+c.total+'</td><td>'+c.done+'</td>'
+          +'<td style="'+(openish?'color:#b45309;font-weight:700':'color:var(--slate)')+'">'+openish+'</td>'
+          +'<td style="'+(c.late?'color:#b91c1c;font-weight:700':'color:var(--slate)')+'">'+c.late+'</td>'
+          +'<td style="font-weight:700;color:'+(pct>=70?'#15803d':pct>=40?'#b45309':'#b91c1c')+'">'+pct+'%</td></tr>';
+      }).join('')
+      :'<tr><td colspan="7" style="padding:20px;color:var(--slate)">Nothing matches those filters.</td></tr>')
+    +'</tbody></table></div></div>';
 }
 
 VIEWS.scoreboard=async function(v){
@@ -10513,6 +11089,7 @@ const USB_COL4={
   'inventory':            {header:'Time spent', keys:['time_spent']},
   'playbook':             {header:'Time spent', keys:['time_spent']},
   'finance':              {header:'Time spent', keys:['time_spent']},
+  'accounts':             {header:'Time spent', keys:['time_spent']},
 
   /* ---- features that inherit a column they cannot fill -------------------------------------
      Each of these resolves, by module or by tab, to a column that is a dash on every single event
@@ -10876,1083 +11453,25 @@ async function psaFetchAll(){
     });
   }catch(e){ return []; }
 }
-/* ============================== POST SALES — MIS REPORT ==============================
-   Outstanding against Collection, project by project, kept as a dated record.
-
-   HOW THE FIGURES GET HERE. FarVision is on the office network and JAIN-E is not, so nothing
-   here reaches into the ERP. What it does is take the files the morning extraction already
-   produces - one Receipt Register Summary and one Customer Outstanding Summary per business
-   unit - read them in the browser, and apply the same three rules that were being applied by
-   hand in Excel:
-
-     Current / Previous month collection : Money Receipt Date falls in that month,
-                                           AND Unit Status is Active, AND Is Reversed is No.
-     Outstanding                         : Customer Status is Active AND Net Outstanding > 0.
-
-   Nothing is typed in. Every figure on the report is a sum the browser did off the ERP's own
-   file, and every one of them keeps the file it came from and the number of receipts behind
-   it, so a line can be questioned later without re-running the extraction.
-
-   THE ORDER OF THE ROWS IS FIXED and lives in postsales.mis_bus, because the report is read
-   against last week's - a row that moved would make two dates uncomparable. A business unit
-   with no file that day is not dropped, it is shown blank, which is the honest answer.
-
-   The date comes out of the files themselves (the "To" of the receipt range, the "As On" of
-   the outstanding), not off the clock, so a set extracted yesterday and loaded today is filed
-   under the day it actually describes. */
-
-/* The save is misrSave, not misSave, and the button is misrSaveBtn. Legal has its own MIS -
-   the cause-list one, built on mis_cases - and it already owned window.misSave and a
-   #misSaveBtn. Both files load together, this module is further down, so for a few days this
-   module's save quietly replaced Legal's and saving a cause-list case did nothing at all. */
-const MIS = { bus: [], reports: [], staged: null, back: null, busy: false };
-
-function misIN(n, dash) {
-  if (n === null || n === undefined || n === '') return dash ? '—' : '0';
-  n = Math.round(Number(n) || 0);
-  if (!n) return dash ? '—' : '0';
-  const neg = n < 0;
-  let s = String(Math.abs(n));
-  const last3 = s.slice(-3);
-  let rest = s.slice(0, -3);
-  const parts = [];
-  while (rest.length > 2) { parts.push(rest.slice(-2)); rest = rest.slice(0, -2); }
-  if (rest) parts.push(rest);
-  parts.reverse();
-  return (neg ? '-' : '') + (parts.length ? parts.join(',') + ',' + last3 : last3);
-}
-const MIS_MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-function misMonthLabel(y, m /* 1-12 */) { return MIS_MON[m - 1] + "'" + String(y).slice(2); }
-// `instanceof Date` is not asked here. A Date that arrived from another realm - the sheet
-// reader's, a worker's - is still a Date in every way that matters, and it answers false.
-function misIsDate(v) { return Object.prototype.toString.call(v) === '[object Date]' && isFinite(v.getTime()); }
-function misDMY(d) {
-  const dt = misIsDate(d) ? d : new Date(d + 'T00:00:00');
-  return String(dt.getDate()).padStart(2, '0') + '.' + String(dt.getMonth() + 1).padStart(2, '0')
-       + '.' + dt.getFullYear();
-}
-function misISO(dt) {
-  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-'
-       + String(dt.getDate()).padStart(2, '0');
-}
-// The month before a given one, rolling the year back in January.
-function misPrevMonth(y, m) { return m > 1 ? { y: y, m: m - 1 } : { y: y - 1, m: 12 }; }
-
-/* Business unit names are compared with the punctuation taken out. The ERP writes
-   "DREAM DIAMOND." with a full stop and "DREAM ONE BLK 3 \ 4" with a backslash, and whether
-   those survive a download, a rename and a re-save is not something worth betting a match on. */
-function misNorm(s) {
-  return String(s || '').toUpperCase().replace(/[\\\/]/g, ' ')
-    .replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
-}
-
-/* ── reading one FarVision file ────────────────────────────────────────────────────────── */
-
-function misSheetRows(wb) {
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
-}
-// The header is not on a fixed row: Receipt Register puts it on 11, Customer Outstanding on 12,
-// and a future report banner would move both. It is found by the column that must be there.
-function misHeaderRow(rows, anchor) {
-  for (let r = 0; r < Math.min(rows.length, 30); r++) {
-    const row = rows[r] || [];
-    for (let c = 0; c < row.length; c++) {
-      if (typeof row[c] === 'string' && row[c].trim() === anchor) return r;
-    }
-  }
-  return -1;
-}
-function misIndex(row) {
-  const idx = {};
-  (row || []).forEach(function (h, i) { if (h != null) idx[String(h).trim()] = i; });
-  return idx;
-}
-function misBannerLine(rows, prefix) {
-  for (let r = 0; r < Math.min(rows.length, 12); r++) {
-    const v = (rows[r] || [])[0];
-    if (typeof v === 'string' && v.trim().toLowerCase().indexOf(prefix.toLowerCase()) === 0) {
-      return v.trim().slice(prefix.length).trim();
-    }
-  }
-  return '';
-}
-// d/m/yy or dd/mm/yyyy, the two spellings the banners use. Day first, always - these are
-// Indian ERP dates and "3/4" is the third of April.
-function misParseDMY(s) {
-  const m = String(s || '').match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{2,4})/);
-  if (!m) return null;
-  let y = +m[3];
-  if (y < 100) y += 2000;
-  const d = new Date(y, +m[2] - 1, +m[1]);
-  return isFinite(d.getTime()) ? d : null;
-}
-/* THE SHEET IS READ WITHOUT cellDates, AND THIS IS WHY.
-
-   Asking the reader for Date objects looks like the obvious thing and quietly moves money
-   between months. Excel serial 46266 is the 1st of September; the reader hands back
-   2026-08-31T18:29:50Z, which in Indian time is the 31st of August at 23:59:50 - ten seconds
-   short of midnight, because the serial-to-Date conversion loses a fraction. Read the month
-   off that and every receipt dated the 1st is counted in the month before. On the 28.09.2026
-   set that was 12.4 lakh landing in the wrong month across three projects, with the totals
-   still adding up, which is the worst kind of wrong.
-
-   The serial is an integer day count with no clock and no timezone in it. The reader's own
-   SSF.parse_date_code turns it into the year, month and day the cell actually shows. Nothing
-   to drift.
-
-   A Date is still accepted, because a file saved elsewhere can arrive with real ones, and it
-   is nudged half a minute forward first so the same ten-second deficit cannot bite. These are
-   date-only columns; nothing in them is a genuine timestamp thirty seconds before midnight. */
-function misCellDate(v) {
-  if (v == null) return null;
-  if (typeof v === 'number' && window.XLSX && XLSX.SSF && XLSX.SSF.parse_date_code) {
-    const p = XLSX.SSF.parse_date_code(v);
-    if (p && p.y) return new Date(p.y, p.m - 1, p.d);
-  }
-  if (misIsDate(v)) { const t = new Date(v.getTime() + 30000); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); }
-  return misParseDMY(v);
-}
-function misNum(v) {
-  if (v == null || v === '') return 0;
-  const n = Number(String(v).replace(/[,₹\s]/g, ''));
-  return isFinite(n) ? n : 0;
-}
-function misIsA(v, want) { return String(v == null ? '' : v).trim().toLowerCase() === want; }
-
-/* One Receipt Register Summary. Totals are worked out for whichever two months are asked for,
-   in a single pass, and the rows that were left out are counted rather than discarded - that
-   count is the difference between "this project collected nothing" and "the file was wrong". */
-function misReadCollection(wb, curr, prev) {
-  const rows = misSheetRows(wb);
-  const hr = misHeaderRow(rows, 'Money Receipt Date');
-  if (hr < 0) throw new Error('This does not look like a Receipt Register Summary — no "Money Receipt Date" column.');
-  const ix = misIndex(rows[hr]);
-  const cDate = ix['Money Receipt Date'], cAmt = ix['Amount'],
-        cUnit = ix['Unit Status'], cRev = ix['Is Reversed'];
-  if (cAmt == null) throw new Error('No "Amount" column in this Receipt Register Summary.');
-  const out = { curr: 0, prev: 0, nCurr: 0, nPrev: 0, excluded: 0, nRows: 0 };
-  for (let r = hr + 1; r < rows.length; r++) {
-    const row = rows[r] || [];
-    const d = misCellDate(row[cDate]);
-    if (!d) continue;
-    const y = d.getFullYear(), m = d.getMonth() + 1;
-    const isCurr = (y === curr.y && m === curr.m), isPrev = (y === prev.y && m === prev.m);
-    if (!isCurr && !isPrev) continue;
-    out.nRows++;
-    const keep = (cUnit == null || misIsA(row[cUnit], 'active'))
-              && (cRev == null || misIsA(row[cRev], 'no'));
-    if (!keep) { out.excluded++; continue; }
-    const amt = misNum(row[cAmt]);
-    if (isCurr) { out.curr += amt; out.nCurr++; } else { out.prev += amt; out.nPrev++; }
-  }
-  out.buName = misBannerLine(rows, 'Business Unit:');
-  out.range = misBannerLine(rows, 'Custom Date:');
-  out.asOn = misParseDMY((out.range.split(/\bTo\b/i)[1] || ''));
-  return out;
-}
-
-/* One Customer Outstanding Summary. Net Outstanding is what the report has always used, and
-   credit balances are left out with the cancelled bookings rather than netted off against
-   somebody else's dues - a project does not owe less because one customer paid ahead. */
-function misReadOutstanding(wb) {
-  const rows = misSheetRows(wb);
-  const hr = misHeaderRow(rows, 'Net Outstanding');
-  if (hr < 0) throw new Error('This does not look like a Customer Outstanding Summary — no "Net Outstanding" column.');
-  const ix = misIndex(rows[hr]);
-  const cNet = ix['Net Outstanding'], cSt = ix['Customer Status'];
-  const out = { total: 0, n: 0, excluded: 0, nRows: 0 };
-  for (let r = hr + 1; r < rows.length; r++) {
-    const row = rows[r] || [];
-    if (row[cNet] == null || row[cNet] === '') continue;
-    const v = misNum(row[cNet]);
-    out.nRows++;
-    if ((cSt == null || misIsA(row[cSt], 'active')) && v > 0) { out.total += v; out.n++; }
-    else out.excluded++;
-  }
-  out.buName = misBannerLine(rows, 'Business Unit:');
-  const asOn = misBannerLine(rows, 'As On Date:');
-  out.asOn = misParseDMY(asOn);
-  return out;
-}
-
-/* READING A FINISHED MIS REPORT BACK IN.
-
-   Every day before this one was worked out in Excel and saved as MIS_Report_<date>.xlsx. The
-   raw extracts behind them are long gone - the extraction archives them and only the last few
-   days survive - so the only way the history gets into the portal is by reading the finished
-   sheets. They have one fixed shape: a title line carrying the date, a header row starting
-   "Project Name", the business units, then TOTAL.
-
-   Two things this has to get right, both found in the real files:
-
-     - THE DATE COMES FROM THE SHEET, NOT THE FILENAME. MIS_Report_19.05.2026.xlsx has a title
-       reading "Date: 23.05.2026 [Data as of 19.05.2026 - ERP session expired, fresh download
-       pending]". The filename is right, the headline date is wrong, and the bracket says so.
-       Where a bracket gives a corrected date, that is the one used, and the whole bracket is
-       kept as the record's note so the reason travels with the figure.
-     - OLDER REPORTS HAVE ELEVEN ROWS, NOT TWELVE. DREAM ANANTA was added part-way through the
-       year. Whatever rows are there are read; nothing is assumed about how many. */
-function misParseIndian(v) {
-  if (v === null || v === undefined) return null;
-  if (typeof v === 'number') return Math.round(v);
-  const t = String(v).replace(/[,\u20B9\s]/g, '').trim();
-  if (t === '' || /^[\u2014\u2013-]$/.test(t)) return null;   // a dash means nothing, not zero
-  const n = Number(t);
-  return isFinite(n) ? Math.round(n) : null;
-}
-function misReadMisReport(rows) {
-  let title = '';
-  for (let r = 0; r < Math.min(rows.length, 10); r++) {
-    const v = (rows[r] || [])[0];
-    if (typeof v === 'string' && /Weekly Basis MIS Report/i.test(v)) { title = v.trim(); break; }
-  }
-  if (!title) return null;
-  let hr = -1;
-  for (let r = 0; r < Math.min(rows.length, 14); r++) {
-    if (String((rows[r] || [])[0] || '').trim() === 'Project Name') { hr = r; break; }
-  }
-  if (hr < 0) return null;
-
-  const found = [];
-  const re = /(\d{2})\.(\d{2})\.(\d{4})/g;
-  let m;
-  while ((m = re.exec(title)) !== null) found.push(new Date(+m[3], +m[2] - 1, +m[1]));
-  if (!found.length) return null;
-  const corrected = /data as of/i.test(title) && found.length > 1;
-  const date = corrected ? found[1] : found[0];
-  const note = title.indexOf('[') >= 0 ? title.slice(title.indexOf('[')).replace(/[\[\]]/g, '').trim() : null;
-
-  const head = rows[hr] || [];
-  const lbl = function (v, fallback) {
-    const mm = String(v || '').match(/Upto\s*[-\u2013\u2014]\s*(\S+)/i);
-    return mm ? mm[1] : fallback;
-  };
-  const cur = { y: date.getFullYear(), m: date.getMonth() + 1 };
-  const pv = misPrevMonth(cur.y, cur.m);
-
-  const out = [];
-  for (let r = hr + 1; r < rows.length; r++) {
-    const row = rows[r] || [];
-    const a = String(row[0] == null ? '' : row[0]).trim();
-    if (!a) continue;
-    if (a.toUpperCase() === 'TOTAL') break;
-    if (!row[1]) continue;
-    out.push({ project_name: a, bu_name: String(row[1]).trim(),
-      outstanding: misParseIndian(row[2]), curr: misParseIndian(row[3]), prev: misParseIndian(row[4]) });
-  }
-  if (!out.length) return null;
-  return { date: date, note: note,
-    currLabel: lbl(head[3], misMonthLabel(cur.y, cur.m)),
-    prevLabel: lbl(head[4], misMonthLabel(pv.y, pv.m)),
-    rows: out, title: title };
-}
-
-function misKindOf(rows) {
-  // A finished report is recognised first: it is the one file that is not an ERP extract.
-  for (let r = 0; r < Math.min(rows.length, 10); r++) {
-    const v = (rows[r] || [])[0];
-    if (typeof v === 'string' && /Weekly Basis MIS Report/i.test(v)) return 'report';
-  }
-  const head = String((rows[0] || [])[0] || '').toLowerCase();
-  if (head.indexOf('receipt register') >= 0) return 'collection';
-  if (head.indexOf('customer outstanding') >= 0) return 'outstanding';
-  if (misHeaderRow(rows, 'Money Receipt Date') >= 0) return 'collection';
-  if (misHeaderRow(rows, 'Net Outstanding') >= 0) return 'outstanding';
-  return null;
-}
-
-/* ── loading and drawing the tab ───────────────────────────────────────────────────────── */
-
-let MIS_CSS_DONE = false;
-function misCss() {
-  if (MIS_CSS_DONE) return;
-  MIS_CSS_DONE = true;
-  const st = document.createElement('style');
-  st.textContent = `
-  .mis-hint{flex:1;font-size:12.5px;color:var(--slate);display:flex;align-items:center;gap:8px;min-width:200px}
-  .mis-tbl td,.mis-tbl th{white-space:nowrap}
-  .mis-num{text-align:right;font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
-  .mis-tot td{font-weight:700;background:#f8fafc;border-top:2px solid var(--line)}
-  .mis-blank{color:#94a3b8}
-  .mis-prevwrap{max-height:62vh;overflow:auto}
-  .mis-doc{border:1px solid var(--line);border-radius:10px;padding:18px 20px;background:#fff}
-  .mis-doc h4{margin:0 0 2px;font-size:15px}
-  .mis-doc .sub{font-size:12.5px;color:var(--slate);margin-bottom:14px}
-  .mis-doc table{width:100%;border-collapse:collapse;font-size:13px}
-  /* The sheet's own header colour: FFFF00 with black bold text. */
-  .mis-doc th{background:#ffff00;color:#000;font-weight:800;font-size:11px;letter-spacing:.4px;
-    text-transform:uppercase;padding:9px 10px;text-align:left;vertical-align:middle;
-    border:1px solid #000}
-  .mis-doc td{padding:8px 10px;border-bottom:1px solid var(--line)}
-  .mis-stage{max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:9px}
-  .mis-stage table{width:100%;border-collapse:collapse;font-size:12.5px}
-  .mis-stage th{position:sticky;top:0;background:#f8fafc;padding:8px 10px;text-align:left;
-    font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--slate);
-    border-bottom:1px solid var(--line);z-index:1}
-  .mis-stage td{padding:7px 10px;border-bottom:1px solid var(--line)}
-  .mis-ok{color:#16a34a}.mis-miss{color:#94a3b8}
-  .mis-badfile{font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;
-    border-radius:8px;padding:9px 11px;margin-top:10px}
-  .mis-when{font-size:12px;color:var(--slate)}
-  `;
-  document.head.appendChild(st);
-}
-
-async function misLoadBus() {
-  const { data } = await sb.schema('postsales').from('mis_bus').select('*')
-    .eq('active', true).order('sort_order');
-  MIS.bus = data || [];
-}
-async function misLoadReports() {
-  const { data } = await sb.schema('postsales').from('mis_reports').select('*')
-    .order('report_date', { ascending: false }).limit(200);
-  MIS.reports = data || [];
-}
-
-function misRender() {
-  const host = $('misBody'); if (!host) return;
-  const latest = MIS.reports[0];
-  const kpis = mKpis([
-    ['Latest report', latest ? misDMY(latest.report_date) : '—',
-      latest ? (latest.bu_count + ' of ' + MIS.bus.length + ' business units') : 'nothing recorded yet'],
-    ['Outstanding', latest ? misIN(latest.total_outstanding) : '—',
-      latest ? ('as at ' + misDMY(latest.report_date)) : ''],
-    [latest ? ('Collection · ' + latest.curr_month_label) : 'Collection',
-      latest ? misIN(latest.total_curr) : '—',
-      latest ? (latest.prev_month_label + ': ' + misIN(latest.total_prev)) : ''],
-    ['Records', String(MIS.reports.length), MIS.reports.length === 1 ? 'report kept' : 'reports kept'],
-  ]);
-  const toolbar = '<div class="toolbar">'
-    + '<div class="mis-hint"><i class="fa-solid fa-file-invoice"></i> Drop the day’s Receipt Register and Customer Outstanding files and the report builds itself — Outstanding, this month’s collection and last month’s, per project.</div>'
-    + '<button class="btn btn-primary" onclick="misNewModal()"><i class="fa-solid fa-plus"></i> New MIS Report</button>'
-    + '</div>';
-  const body = MIS.reports.length ? MIS.reports.map(function (r) {
-    return '<tr>'
-      + '<td><b>' + esc(misDMY(r.report_date)) + '</b>'
-        + (r.bu_count < MIS.bus.length
-            ? '<div class="mis-when" style="color:#b45309">' + (MIS.bus.length - r.bu_count) + ' business unit' + ((MIS.bus.length - r.bu_count) === 1 ? '' : 's') + ' had no file</div>'
-            : '')
-        + '</td>'
-      + '<td class="mis-num">' + esc(misIN(r.total_outstanding)) + '</td>'
-      + '<td class="mis-num">' + esc(misIN(r.total_curr)) + '<div class="mis-when">' + esc(r.curr_month_label) + '</div></td>'
-      + '<td class="mis-num">' + esc(misIN(r.total_prev)) + '<div class="mis-when">' + esc(r.prev_month_label) + '</div></td>'
-      + '<td>' + esc((r.created_by || '').split('@')[0] || '—')
-        + '<div class="mis-when">' + esc(fmtDate(r.created_at)) + '</div></td>'
-      + '<td style="text-align:right;white-space:nowrap">'
-        + '<button class="btn btn-sm btn-ghost" title="Preview" onclick="misPreview(' + r.id + ')"><i class="fa-solid fa-eye"></i></button>'
-        + '<button class="btn btn-sm btn-ghost" title="Download as Excel" onclick="misExportXlsx(' + r.id + ',this)"><i class="fa-solid fa-file-excel"></i></button>'
-        + '<button class="btn btn-sm btn-ghost" title="Download as PDF" onclick="misExportPdf(' + r.id + ',this)"><i class="fa-solid fa-file-pdf"></i></button>'
-        + '<button class="btn btn-sm btn-ghost" title="Delete this record" onclick="misDelete(' + r.id + ')"><i class="fa-solid fa-trash"></i></button>'
-      + '</td></tr>';
-  }).join('')
-  : '<tr><td colspan="6"><div class="empty"><i class="fa-regular fa-file-lines"></i><div>No MIS report recorded yet</div>'
-    + '<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="misNewModal()"><i class="fa-solid fa-plus"></i> Build the first one</button></div></td></tr>';
-  host.innerHTML = kpis + toolbar
-    + '<div class="card"><div style="overflow-x:auto"><table class="tbl mis-tbl"><thead><tr>'
-    + '<th>Report date</th><th class="mis-num">Outstanding</th><th class="mis-num">Current month</th>'
-    + '<th class="mis-num">Previous month</th><th>Made by</th><th></th>'
-    + '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
-}
-
-/* ── building a new one ────────────────────────────────────────────────────────────────── */
-
-window.misNewModal = function () {
-  MIS.staged = null; MIS.back = null; MIS.stagedBad = null;
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-file-invoice" style="color:#7e22ce"></i> New MIS Report</h3></div>'
-    + '<div class="modal-body">'
-      + '<div style="font-size:13px;color:var(--slate);margin-bottom:12px">Select every file the extraction produced for the day — the <b>Receipt Register Summary</b> and the <b>Customer Outstanding Summary</b> for each business unit. They are read here in your browser; nothing is uploaded. A business unit with no file is left blank rather than counted as nil.</div>'
-      + '<div class="dropzone" ondragover="event.preventDefault()" ondrop="misDrop(event)" onclick="document.getElementById(\'misFiles\').click()">'
-        + '<i class="fa-solid fa-file-arrow-up"></i><div id="misPickName">Drag &amp; drop the files, or click to choose them</div>'
-        + '<div style="font-size:12px;margin-top:4px">.xlsx or .xls · up to ' + (MIS.bus.length * 2) + ' files · exactly as they download from FarVision</div>'
-      + '</div>'
-      + '<input type="file" id="misFiles" multiple accept=".xlsx,.xls" style="display:none" onchange="misFilesPicked(this.files)">'
-      + '<div id="misStageHost" style="margin-top:14px"></div>'
-    + '</div>'
-    + '<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
-      + '<button class="btn btn-primary" id="misrSaveBtn" disabled onclick="misrSave(this)"><i class="fa-solid fa-floppy-disk"></i> Save this report</button></div>', 'lg');
-};
-window.misDrop = function (e) {
-  e.preventDefault();
-  const f = e.dataTransfer && e.dataTransfer.files;
-  if (f && f.length) misFilesPicked(f);
-};
-
-window.misFilesPicked = async function (fileList) {
-  const files = Array.prototype.slice.call(fileList || []);
-  if (!files.length) return;
-  const host = $('misStageHost'); if (!host) return;
-  const pick = $('misPickName'); if (pick) pick.textContent = files.length + ' file' + (files.length === 1 ? '' : 's') + ' selected';
-  host.innerHTML = '<div class="loader"><div class="spin"></div></div>';
-  try {
-    if (!(await loadXLSX())) throw new Error('Could not load the spreadsheet reader. Check the connection and try again.');
-
-    /* WHICH DAY IS THIS. Every file carries its own as-at date, and they should agree because
-       they came out of one extraction run. The latest is taken as the report's date and any
-       disagreement is shown rather than hidden, because a stale file mixed into a fresh set is
-       exactly the mistake worth catching before it is filed. */
-    const read = [];      // raw ERP extracts, which together make ONE report
-    const done = [];      // finished MIS reports, each of which IS a report
-    const bad = [];
-    for (const f of files) {
-      try {
-        const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });   // serials, not Dates - see misCellDate
-        const rows = misSheetRows(wb);
-        const kind = misKindOf(rows);
-        if (kind === 'report') {
-          const rp = misReadMisReport(rows);
-          if (!rp) { bad.push([f.name, 'looks like an MIS report but could not be read']); continue; }
-          rp.src = f.name;
-          done.push(rp);
-          continue;
-        }
-        if (!kind) { bad.push([f.name, 'not a Receipt Register, Customer Outstanding summary or MIS report']); continue; }
-        read.push({ file: f, wb: wb, kind: kind, buName: misBannerLine(rows, 'Business Unit:') });
-      } catch (e) { bad.push([f.name, (e && e.message) || String(e)]); }
-    }
-    /* Finished reports first. Two files can carry the same day - 28.09 was saved twice, and a
-       mislabelled one turned out to be a different day once its own note was read - so they are
-       keyed by the date they claim and a second file for a day already covered is reported
-       rather than silently dropped or silently winning. */
-    const byDate = {};
-    done.sort(function (a, b) { return a.date - b.date; });
-    done.forEach(function (rp) {
-      const k = misISO(rp.date);
-      if (byDate[k]) { bad.push([rp.src, 'another file already covers ' + misDMY(rp.date) + ' — skipped']); return; }
-      byDate[k] = rp;
-    });
-    MIS.back = Object.keys(byDate).sort().map(function (k) { return byDate[k]; });
-
-    if (!read.length) {
-      if (!MIS.back.length) throw new Error('None of those files could be read as a FarVision summary or an MIS report.');
-      MIS.staged = null;
-      MIS.stagedBad = bad;
-      misStageRender();
-      return;
-    }
-
-    const dates = [];
-    read.forEach(function (r) {
-      try {
-        const rows = misSheetRows(r.wb);
-        const d = r.kind === 'collection'
-          ? misParseDMY((misBannerLine(rows, 'Custom Date:').split(/\bTo\b/i)[1] || ''))
-          : misParseDMY(misBannerLine(rows, 'As On Date:'));
-        if (d) { r.asOn = d; dates.push(d.getTime()); }
-      } catch (e) { /* a file with no readable banner still contributes its figures */ }
-    });
-    const reportDate = dates.length ? new Date(Math.max.apply(null, dates)) : new Date();
-    const spread = dates.length ? (Math.max.apply(null, dates) - Math.min.apply(null, dates)) : 0;
-    const curr = { y: reportDate.getFullYear(), m: reportDate.getMonth() + 1 };
-    const prev = misPrevMonth(curr.y, curr.m);
-
-    // Each file lands on its business unit by the name the ERP wrote inside it, not the filename.
-    const byBu = {};
-    MIS.bus.forEach(function (b) { byBu[b.bu_name] = { bu: b, coll: null, out: null, cf: '', of: '' }; });
-    read.forEach(function (r) {
-      const key = misNorm(r.buName);
-      const match = MIS.bus.find(function (b) { return misNorm(b.bu_name) === key; });
-      if (!match) { bad.push([r.file.name, 'business unit "' + (r.buName || 'unnamed') + '" is not on the report']); return; }
-      const slot = byBu[match.bu_name];
-      try {
-        if (r.kind === 'collection') { slot.coll = misReadCollection(r.wb, curr, prev); slot.cf = r.file.name; }
-        else { slot.out = misReadOutstanding(r.wb); slot.of = r.file.name; }
-      } catch (e) { bad.push([r.file.name, (e && e.message) || String(e)]); }
-    });
-
-    MIS.staged = {
-      date: reportDate, curr: curr, prev: prev,
-      currLabel: misMonthLabel(curr.y, curr.m), prevLabel: misMonthLabel(prev.y, prev.m),
-      byBu: byBu, bad: bad, spreadDays: Math.round(spread / 86400000)
-    };
-    MIS.stagedBad = bad;
-    misStageRender();
-  } catch (e) {
-    MIS.staged = null; MIS.back = null;
-    host.innerHTML = '<div class="mis-badfile"><i class="fa-solid fa-circle-exclamation"></i> '
-      + esc((e && e.message) || String(e)) + '</div>';
-    const b = $('misrSaveBtn'); if (b) b.disabled = true;
-  }
-};
-
-function misStageRows() {
-  const s = MIS.staged; if (!s) return [];
-  return MIS.bus.map(function (b) {
-    const slot = s.byBu[b.bu_name];
-    return {
-      bu: b,
-      outstanding: slot.out ? slot.out.total : null,
-      curr: slot.coll ? slot.coll.curr : null,
-      prev: slot.coll ? slot.coll.prev : null,
-      nCurr: slot.coll ? slot.coll.nCurr : null,
-      nPrev: slot.coll ? slot.coll.nPrev : null,
-      nOut: slot.out ? slot.out.n : null,
-      nExcl: (slot.coll ? slot.coll.excluded : 0) + (slot.out ? slot.out.excluded : 0),
-      cf: slot.cf, of: slot.of,
-      has: !!(slot.coll || slot.out)
-    };
-  });
-}
-
-/* A batch of finished reports, one line each. There is no per-business-unit checking to show
-   here the way there is for raw extracts - the figures were settled on the day and this is a
-   transcription, not a calculation - so the line says the date, how many rows came across, the
-   three totals, and whether it lands on a day already on record. */
-function misBackRender() {
-  const list = MIS.back || [];
-  if (!list.length) return '';
-  const known = {};
-  (MIS.reports || []).forEach(function (r) { known[r.report_date] = true; });
-  const rows = list.map(function (rp) {
-    const t = rp.rows.reduce(function (a, r) {
-      a.o += Number(r.outstanding || 0); a.c += Number(r.curr || 0); a.p += Number(r.prev || 0); return a;
-    }, { o: 0, c: 0, p: 0 });
-    const clash = !!known[misISO(rp.date)];
-    return '<tr><td><b>' + esc(misDMY(rp.date)) + '</b>'
-      + (rp.note ? '<div class="mis-when" style="color:#b45309">' + esc(rp.note) + '</div>' : '')
-      + '<div class="mis-when">' + esc(rp.src || '') + '</div></td>'
-      + '<td>' + rp.rows.length + '</td>'
-      + '<td class="mis-num">' + esc(misIN(t.o, true)) + '</td>'
-      + '<td class="mis-num">' + esc(misIN(t.c, true)) + '<div class="mis-when">' + esc(rp.currLabel) + '</div></td>'
-      + '<td class="mis-num">' + esc(misIN(t.p, true)) + '<div class="mis-when">' + esc(rp.prevLabel) + '</div></td>'
-      + '<td>' + (clash ? '<span class="tag t-amber">replaces</span>' : '<span class="tag t-green">new</span>') + '</td></tr>';
-  }).join('');
-  return '<div style="font-size:13px;margin:0 0 8px"><b>' + list.length + '</b> past report'
-    + (list.length === 1 ? '' : 's') + ' read from finished MIS files</div>'
-    + '<div class="mis-stage"><table><thead><tr><th>Date</th><th>Rows</th>'
-    + '<th class="mis-num">Outstanding</th><th class="mis-num">Current</th>'
-    + '<th class="mis-num">Previous</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
-}
-
-function misrSaveBtnLabel(b) {
-  const n = (MIS.back || []).length + (MIS.staged ? 1 : 0);
-  b.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> '
-    + (n > 1 ? ('Save ' + n + ' reports') : 'Save this report');
-}
-function misStageRender() {
-  const host = $('misStageHost'); const s = MIS.staged;
-  if (!host) return;
-  // Finished reports only - no raw extracts in the set.
-  if (!s) {
-    const bad = MIS.stagedBad || [];
-    host.innerHTML = misBackRender()
-      + (bad.length ? '<div class="mis-badfile"><b>' + bad.length + ' file' + (bad.length === 1 ? '' : 's')
-          + ' not used:</b><br>' + bad.map(function (b) { return esc(b[0]) + ' ' + '—' + ' ' + esc(b[1]); }).join('<br>') + '</div>' : '');
-    const b2 = $('misrSaveBtn');
-    if (b2) { b2.disabled = !(MIS.back || []).length; misrSaveBtnLabel(b2); }
-    return;
-  }
-  const rows = misStageRows();
-  const have = rows.filter(function (r) { return r.has; }).length;
-  const tot = rows.reduce(function (a, r) {
-    a.o += r.outstanding || 0; a.c += r.curr || 0; a.p += r.prev || 0; return a;
-  }, { o: 0, c: 0, p: 0 });
-
-  const tick = function (yes, fname) {
-    return yes ? '<i class="fa-solid fa-circle-check mis-ok" title="' + esc(fname) + '"></i>'
-               : '<i class="fa-regular fa-circle mis-miss" title="no file"></i>';
-  };
-  const cell = function (v, n, unit) {
-    if (v === null) return '<td class="mis-num mis-blank">—</td>';
-    return '<td class="mis-num">' + esc(misIN(v, true))
-      + (n ? '<div class="mis-when">' + n + ' ' + unit + (n === 1 ? '' : 's') + '</div>' : '') + '</td>';
-  };
-
-  const warn = [];
-  if (s.spreadDays > 0) warn.push('The files are not all from the same day — they span ' + s.spreadDays + ' day' + (s.spreadDays === 1 ? '' : 's') + '. The latest, ' + misDMY(s.date) + ', is being used.');
-  if (have < MIS.bus.length) warn.push((MIS.bus.length - have) + ' business unit' + ((MIS.bus.length - have) === 1 ? ' has' : 's have') + ' no file and will be left blank.');
-  const clash = MIS.reports.find(function (r) { return r.report_date === misISO(s.date); });
-  if (clash) warn.push('A report for ' + misDMY(s.date) + ' already exists. Saving will replace it.');
-
-  host.innerHTML =
-    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
-      + '<div style="font-size:13px"><b>' + esc(misDMY(s.date)) + '</b> · current month <b>' + esc(s.currLabel)
-        + '</b> · previous <b>' + esc(s.prevLabel) + '</b></div>'
-      + '<div style="margin-left:auto;font-size:12.5px;color:var(--slate)">' + have + ' of ' + MIS.bus.length + ' business units matched</div>'
-    + '</div>'
-    + (warn.length ? '<div class="mis-badfile" style="margin-top:0;margin-bottom:10px"><i class="fa-solid fa-triangle-exclamation"></i> ' + warn.map(esc).join('<br>') + '</div>' : '')
-    + '<div class="mis-stage"><table><thead><tr>'
-      + '<th>Business unit</th><th style="text-align:center">Coll.</th><th style="text-align:center">Outst.</th>'
-      + '<th class="mis-num">Outstanding</th><th class="mis-num">' + esc(s.currLabel) + '</th><th class="mis-num">' + esc(s.prevLabel) + '</th>'
-      + '</tr></thead><tbody>'
-      + rows.map(function (r) {
-          return '<tr' + (r.has ? '' : ' style="opacity:.55"') + '>'
-            + '<td>' + esc(r.bu.bu_name) + '<div class="mis-when">' + esc(r.bu.project_name) + '</div></td>'
-            + '<td style="text-align:center">' + tick(!!r.cf, r.cf) + '</td>'
-            + '<td style="text-align:center">' + tick(!!r.of, r.of) + '</td>'
-            + cell(r.outstanding, r.nOut, 'customer')
-            + cell(r.curr, r.nCurr, 'receipt')
-            + cell(r.prev, r.nPrev, 'receipt')
-            + '</tr>';
-        }).join('')
-      + '<tr class="mis-tot"><td colspan="3">TOTAL</td>'
-        + '<td class="mis-num">' + esc(misIN(tot.o)) + '</td>'
-        + '<td class="mis-num">' + esc(misIN(tot.c)) + '</td>'
-        + '<td class="mis-num">' + esc(misIN(tot.p)) + '</td></tr>'
-      + '</tbody></table></div>'
-    + (MIS.back && MIS.back.length ? '<div style="margin-top:14px">' + misBackRender() + '</div>' : '')
-    + (s.bad.length
-        ? '<div class="mis-badfile"><b>' + s.bad.length + ' file' + (s.bad.length === 1 ? '' : 's') + ' not used:</b><br>'
-          + s.bad.map(function (b) { return esc(b[0]) + ' — ' + esc(b[1]); }).join('<br>') + '</div>'
-        : '');
-  const btn = $('misrSaveBtn');
-  if (btn) { btn.disabled = !have && !(MIS.back || []).length; misrSaveBtnLabel(btn); }
-}
-
-/* One record per date, whether it was worked out from today's extracts or read back from a
-   finished sheet. A day already on record is replaced whole - its rows go with it - so a date
-   can never end up holding two half-reports. */
-async function misWriteOne(iso, currLabel, prevLabel, note, rows) {
-  const { data: old } = await sb.schema('postsales').from('mis_reports')
-    .select('id').eq('report_date', iso).maybeSingle();
-  if (old && old.id) await sb.schema('postsales').from('mis_reports').delete().eq('id', old.id);
-  /* The rows handed in here are already in the shape the table stores them in, so the totals
-     are summed off THOSE names. Reading r.curr here instead of r.curr_collection is what made
-     the first backfill store sixteen reports whose headline collection figures were all nil
-     while every row beneath them was right. */
-  const tot = rows.reduce(function (a, r) {
-    a.o += Number(r.outstanding || 0);
-    a.c += Number(r.curr_collection || 0);
-    a.p += Number(r.prev_collection || 0);
-    return a;
-  }, { o: 0, c: 0, p: 0 });
-  const { data: rep, error } = await sb.schema('postsales').from('mis_reports').insert({
-    report_date: iso, curr_month_label: currLabel, prev_month_label: prevLabel,
-    total_outstanding: Math.round(tot.o), total_curr: Math.round(tot.c), total_prev: Math.round(tot.p),
-    bu_count: rows.length, note: note || null,
-    created_by: (typeof state !== 'undefined' && state.email) || null
-  }).select('id').single();
-  if (error) throw error;
-  const { error: re } = await sb.schema('postsales').from('mis_rows')
-    .insert(rows.map(function (r) { r.report_id = rep.id; return r; }));
-  if (re) throw re;
-}
-
-window.misrSave = async function (btn) {
-  const s = MIS.staged;
-  const back = MIS.back || [];
-  if (!s && !back.length) return;
-  const rows = s ? misStageRows().filter(function (r) { return r.has; }) : [];
-  if (!rows.length && !back.length) { toast('Nothing matched \u2014 there is no report to save', 'warn'); return; }
-  const iso = s ? misISO(s.date) : null;
-  const known = {};
-  (MIS.reports || []).forEach(function (r) { known[r.report_date] = true; });
-  const clashes = (s && known[iso] ? [misDMY(s.date)] : [])
-    .concat(back.filter(function (rp) { return known[misISO(rp.date)]; }).map(function (rp) { return misDMY(rp.date); }));
-  if (clashes.length && !(await confirmDialog(
-      (clashes.length === 1 ? ('A report for ' + clashes[0] + ' is already on record. Replace it?')
-        : (clashes.length + ' of these days are already on record (' + clashes.slice(0, 4).join(', ')
-           + (clashes.length > 4 ? ', …' : '') + '). Replace them?')),
-      { title: 'Replace what is already there?', okLabel: 'Replace', icon: 'fa-rotate' }))) return;
-
-  const restore = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
-  try {
-    let saved = 0;
-    if (rows.length) {
-      await misWriteOne(iso, s.currLabel, s.prevLabel,
-        s.bad.length ? (s.bad.length + ' file(s) were not used') : null,
-        rows.map(function (r) {
-          return {
-            sort_order: r.bu.sort_order, project_name: r.bu.project_name, bu_name: r.bu.bu_name,
-            outstanding: r.outstanding === null ? null : Math.round(r.outstanding),
-            curr_collection: r.curr === null ? null : Math.round(r.curr),
-            prev_collection: r.prev === null ? null : Math.round(r.prev),
-            src_collection: r.cf || null, src_outstanding: r.of || null,
-            n_curr: r.nCurr, n_prev: r.nPrev, n_out: r.nOut, n_excluded: r.nExcl
-          };
-        }));
-      saved++;
-      try { usageQueue('postsales.mis.build_mis_report_from_farvision_files', 'create',
-        { title: misDMY(s.date), status: rows.length + ' of ' + MIS.bus.length + ' business units' }); } catch (e) {}
-    }
-    /* The order in the sheet is the order on the report, so the row's position in the file is
-       its sort order. Where the business unit is one the portal knows, its own fixed order wins,
-       so an old eleven-row report still lines up with a twelve-row one. */
-    for (const rp of back) {
-      if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ' + misDMY(rp.date) + '\u2026';
-      await misWriteOne(misISO(rp.date), rp.currLabel, rp.prevLabel,
-        rp.note || ('imported from ' + (rp.src || 'a finished MIS report')),
-        rp.rows.map(function (r, i) {
-          const known = MIS.bus.find(function (b) { return misNorm(b.bu_name) === misNorm(r.bu_name); });
-          return {
-            sort_order: known ? known.sort_order : (100 + i),
-            project_name: known ? known.project_name : r.project_name,
-            bu_name: known ? known.bu_name : r.bu_name,
-            outstanding: r.outstanding, curr_collection: r.curr, prev_collection: r.prev,
-            src_collection: null, src_outstanding: rp.src || null,
-            n_curr: null, n_prev: null, n_out: null, n_excluded: null
-          };
-        }));
-      saved++;
-    }
-    try { if (back.length) usageQueue('postsales.mis.import_past_mis_reports', 'create',
-      { status: back.length + ' report' + (back.length === 1 ? '' : 's') }); } catch (e) {}
-    closeModal();
-    await misLoadReports();
-    misRender();
-    toast(saved === 1 ? ('MIS report for ' + misDMY((s ? s.date : back[0].date)) + ' saved')
-                      : (saved + ' MIS reports saved'), 'ok');
-  } catch (e) {
-    toast('Could not save the report: ' + ((e && e.message) || e), 'err');
-    if (btn) { btn.disabled = false; btn.innerHTML = restore; }
-  }
-};
-
-window.misDelete = async function (id) {
-  const r = MIS.reports.find(function (x) { return x.id === id; });
-  if (!r) return;
-  if (!(await confirmDialog('Delete the MIS report for ' + misDMY(r.report_date) + '? It is removed for everyone.',
-    { title: 'Delete this record?' }))) return;
-  try {
-    const { error } = await sb.schema('postsales').from('mis_reports').delete().eq('id', id);
-    if (error) throw error;
-    await misLoadReports();
-    misRender();
-    toast('Report deleted', 'ok');
-  } catch (e) { toast('Could not delete: ' + ((e && e.message) || e), 'err'); }
-};
-
-/* ── one saved report, read back ───────────────────────────────────────────────────────── */
-
-/* Always read from the database, never from whatever happens to be in memory. A record is a
-   record: preview, Excel and PDF must all be showing the same thing, and the only way to be
-   sure of that is for all three to fetch it the same way. */
-async function misFetch(id) {
-  const rep = MIS.reports.find(function (x) { return x.id === id; });
-  const { data, error } = await sb.schema('postsales').from('mis_rows').select('*')
-    .eq('report_id', id).order('sort_order');
-  if (error) throw error;
-  // Every business unit gets a line whether or not it had a file that day, in the fixed order.
-  const byBu = {};
-  (data || []).forEach(function (r) { byBu[r.bu_name] = r; });
-  const rows = MIS.bus.map(function (b) {
-    const r = byBu[b.bu_name];
-    return {
-      project_name: b.project_name, bu_name: b.bu_name,
-      outstanding: r ? r.outstanding : null,
-      curr: r ? r.curr_collection : null,
-      prev: r ? r.prev_collection : null
-    };
-  });
-  // A business unit retired from the list but present in an old report still belongs to it.
-  (data || []).forEach(function (r) {
-    if (!MIS.bus.some(function (b) { return b.bu_name === r.bu_name; })) {
-      rows.push({ project_name: r.project_name, bu_name: r.bu_name,
-        outstanding: r.outstanding, curr: r.curr_collection, prev: r.prev_collection });
-    }
-  });
-  return { rep: rep, rows: rows };
-}
-function misTotals(rows) {
-  return rows.reduce(function (a, r) {
-    a.o += Number(r.outstanding || 0); a.c += Number(r.curr || 0); a.p += Number(r.prev || 0); return a;
-  }, { o: 0, c: 0, p: 0 });
-}
-function misTitleLines(rep) {
-  const d = misDMY(rep.report_date);
-  return {
-    heading: 'Project Wise Outstanding Status VS Collection Status As Per ERP',
-    sub: 'Weekly Basis MIS Report - Date: ' + d,
-    cOut: 'Current Outstanding Amount Till Date ' + d,
-    cCur: 'Current Month Collection Amount Upto - ' + rep.curr_month_label,
-    cPrv: 'Previous Month Collection Amount Upto - ' + rep.prev_month_label
-  };
-}
-
-window.misPreview = async function (id) {
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-eye" style="color:#7e22ce"></i> MIS Report</h3></div>'
-    + '<div class="modal-body"><div class="loader"><div class="spin"></div></div></div>', 'xl');
-  try {
-    const { rep, rows } = await misFetch(id);
-    const t = misTitleLines(rep), tot = misTotals(rows);
-    const host = document.querySelector('#modalHost .modal-body');
-    if (!host) return;
-    host.innerHTML = '<div class="mis-prevwrap"><div class="mis-doc">'
-      + '<h4>' + esc(t.heading) + '</h4>'
-      + '<div class="sub">' + esc(t.sub) + '</div>'
-      + '<table><thead><tr><th>Project Name</th><th>Business Unit Name</th>'
-        + '<th style="text-align:right">' + esc(t.cOut) + '</th>'
-        + '<th style="text-align:right">' + esc(t.cCur) + '</th>'
-        + '<th style="text-align:right">' + esc(t.cPrv) + '</th></tr></thead><tbody>'
-      + rows.map(function (r) {
-          return '<tr><td>' + esc(r.project_name) + '</td><td>' + esc(r.bu_name) + '</td>'
-            + '<td class="mis-num">' + esc(misIN(r.outstanding, true)) + '</td>'
-            + '<td class="mis-num">' + esc(misIN(r.curr, true)) + '</td>'
-            + '<td class="mis-num">' + esc(misIN(r.prev, true)) + '</td></tr>';
-        }).join('')
-      + '<tr class="mis-tot"><td>TOTAL</td><td></td>'
-        + '<td class="mis-num">' + esc(misIN(tot.o)) + '</td>'
-        + '<td class="mis-num">' + esc(misIN(tot.c)) + '</td>'
-        + '<td class="mis-num">' + esc(misIN(tot.p)) + '</td></tr>'
-      + '</tbody></table></div></div>';
-    const foot = document.querySelector('#modalHost .modal-foot');
-    if (!foot) {
-      document.querySelector('#modalHost .modal').insertAdjacentHTML('beforeend',
-        '<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>'
-        + '<button class="btn" onclick="misExportXlsx(' + id + ',this)"><i class="fa-solid fa-file-excel"></i> Excel</button>'
-        + '<button class="btn btn-primary" onclick="misExportPdf(' + id + ',this)"><i class="fa-solid fa-file-pdf"></i> PDF</button></div>');
-    }
-    try { usageQueue('postsales.mis.preview_an_mis_report', 'view', { title: misDMY(rep.report_date) }); } catch (e) {}
-  } catch (e) {
-    const host = document.querySelector('#modalHost .modal-body');
-    if (host) host.innerHTML = '<div class="mis-badfile">' + esc((e && e.message) || String(e)) + '</div>';
-  }
-};
-
-/* ── Excel ─────────────────────────────────────────────────────────────────────────────── */
-
-/* The figures go out as NUMBERS, not as the "2,13,84,025" strings the report is read in. The
-   template has always carried them as text, which is why the total at the bottom had to be
-   typed rather than summed - anybody who wanted to check a column had to retype it first.
-   The Indian grouping is a number format here, so it looks identical and still adds up. */
-const MIS_XL_FMT = '[>=10000000]##\\,##\\,##\\,##0;[>=100000]##\\,##\\,##0;##,##0';
-
-window.misExportXlsx = async function (id, btn) {
-  const restore = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
-  try {
-    const { rep, rows } = await misFetch(id);
-    const t = misTitleLines(rep), tot = misTotals(rows);
-    if (!(await usbLoadXlsx())) throw new Error('Could not load the spreadsheet library.');
-    const wb = new ExcelJS.Workbook();
-    wb.creator = 'JAIN-E'; wb.created = new Date();
-    const ws = wb.addWorksheet('Sheet1');
-    ws.columns = [{ width: 26 }, { width: 38 }, { width: 22 }, { width: 22 }, { width: 22 }];
-
-    ws.mergeCells('A2:E2');
-    ws.getCell('A2').value = t.heading;
-    ws.getCell('A2').font = { size: 13, bold: true };
-    ws.getCell('A2').alignment = { horizontal: 'center' };
-    ws.getRow(2).height = 22;
-    ws.mergeCells('A3:E3');
-    ws.getCell('A3').value = t.sub;
-    ws.getCell('A3').font = { size: 11, bold: true, color: { argb: 'FF000000' } };
-    ws.getCell('A3').alignment = { horizontal: 'center' };
-
-    const head = ws.getRow(4);
-    head.values = ['Project Name', 'Business Unit Name', t.cOut, t.cCur, t.cPrv];
-    head.height = 42;
-    head.eachCell(function (c) {
-      c.font = { bold: true, color: { argb: 'FF000000' }, size: 10.5 };
-      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-      c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-      c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-    });
-
-    /* A dash, not a nought. Nothing collected and no file to say so both read as a dash on the
-       screen and in the PDF, and a spreadsheet that showed 0 for the same line would look like a
-       different report. SUM steps over text, so a dash costs the total nothing. */
-    const cellVal = function (v) { return (v == null || Number(v) === 0) ? null : Number(v); };
-    rows.forEach(function (r) {
-      const row = ws.addRow([r.project_name, r.bu_name,
-        cellVal(r.outstanding), cellVal(r.curr), cellVal(r.prev)]);
-      [3, 4, 5].forEach(function (i) {
-        const c = row.getCell(i);
-        c.numFmt = MIS_XL_FMT;
-        c.alignment = { horizontal: 'right' };
-        if (c.value == null) { c.value = '—'; c.alignment = { horizontal: 'center' }; c.font = { color: { argb: 'FF94A3B8' } }; }
-      });
-      row.eachCell(function (c) { c.border = { top: { style: 'hair' }, left: { style: 'hair' }, bottom: { style: 'hair' }, right: { style: 'hair' } }; });
-    });
-
-    /* The total is a live SUM over the rows above it, so the sheet checks itself - and it
-       carries the answer with it. A formula written without a cached result is blank until
-       something recalculates the file; Excel does, a phone viewer and Google Sheets' preview
-       do not, and this report is forwarded more often than it is opened in Excel. */
-    const first = 5, last = 4 + rows.length;
-    const tr = ws.addRow(['TOTAL', null,
-      { formula: 'SUM(C' + first + ':C' + last + ')', result: Math.round(tot.o) },
-      { formula: 'SUM(D' + first + ':D' + last + ')', result: Math.round(tot.c) },
-      { formula: 'SUM(E' + first + ':E' + last + ')', result: Math.round(tot.p) }]);
-    tr.height = 20;
-    tr.eachCell(function (c, i) {
-      c.font = { bold: true, size: 11 };
-      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
-      c.border = { top: { style: 'medium' }, left: { style: 'thin' }, bottom: { style: 'double' }, right: { style: 'thin' } };
-      if (i >= 3) { c.numFmt = MIS_XL_FMT; c.alignment = { horizontal: 'right' }; }
-    });
-
-    const buf = await wb.xlsx.writeBuffer();
-    usbSaveBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-      'MIS_Report_' + misDMY(rep.report_date) + '.xlsx');
-    try { usageQueue('postsales.mis.download_mis_report_as_excel', 'export', { title: misDMY(rep.report_date) }); } catch (e) {}
-    toast('Excel downloaded', 'ok');
-  } catch (e) {
-    toast('Could not build the spreadsheet: ' + ((e && e.message) || e), 'err');
-  } finally { if (btn) { btn.disabled = false; btn.innerHTML = restore; } }
-};
-
-/* ── PDF ───────────────────────────────────────────────────────────────────────────────── */
-
-/* THE PDF IS THE SHEET. Landscape, a yellow header band with black bold text, a thin black
-   grid, the two centred title lines above it - the same document that has been circulated
-   every week, printed. The colours and weights are lifted from MIS_Template.xlsx rather than
-   chosen here: header fill FFFF00, every piece of text black, everything but the figures
-   bold, columns in the template's own proportions (35.5 / 49.8 / 41.8 / 36.4 / 42.0).
-
-   The column headings are the full ones the sheet carries. They were shortened while this was
-   a plain portrait page and there was no room; landscape gives the room back, and the whole
-   point of the exercise is that the printout looks like the sheet.
-
-   Helvetica stands in for Arial and Calibri - it is metrically the same as Arial, it is one of
-   the fonts every PDF reader already has, and embedding two font files to gain nothing visible
-   would add a quarter of a megabyte to a document that is otherwise nine kilobytes. */
-window.misExportPdf = async function (id, btn) {
-  const restore = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
-  try {
-    const { rep, rows } = await misFetch(id);
-    const t = misTitleLines(rep), tot = misTotals(rows);
-    const L = await loadPdfLib();
-    if (!L) throw new Error('Could not load the PDF library.');
-    const doc = await L.PDFDocument.create();
-    const reg = await doc.embedFont(L.StandardFonts.Helvetica);
-    const bold = await doc.embedFont(L.StandardFonts.HelveticaBold);
-
-    const W = 841.89, H = 595.28, M = 36;
-    const ink = L.rgb(0, 0, 0), yellow = L.rgb(1, 1, 0), line = L.rgb(0, 0, 0);
-    // the template's column widths, scaled to the page
-    const RAW = [35.5, 49.8, 41.8, 36.4, 42.0];
-    const span = W - M * 2, rawTot = RAW.reduce(function (a, b) { return a + b; }, 0);
-    const COL = RAW.map(function (w) { return w / rawTot * span; });
-    const X = []; { let x = M; COL.forEach(function (w) { X.push(x); x += w; }); }
-    const RIGHT = M + span;
-    const HEAD = ['Project Name', 'Business Unit Name', t.cOut, t.cCur, t.cPrv];
-
-    // Wrap to the column, because the three money headings are a line of prose each.
-    const wrap = function (str, f, size, room) {
-      const out = []; let cur = '';
-      String(str).split(' ').forEach(function (w) {
-        const test = cur ? cur + ' ' + w : w;
-        if (f.widthOfTextAtSize(test, size) > room && cur) { out.push(cur); cur = w; }
-        else cur = test;
-      });
-      if (cur) out.push(cur);
-      return out;
-    };
-    // A name too long for its column is set smaller rather than allowed to run into the figures.
-    const shrinkToFit = function (str, f, size, room) {
-      let sz = size;
-      while (sz > 6 && f.widthOfTextAtSize(str, sz) > room) sz -= 0.25;
-      return sz;
-    };
-
-    let page, y;
-    const vrules = function (top, bottom) {
-      for (let i = 0; i <= COL.length; i++) {
-        const x = (i === COL.length) ? RIGHT : X[i];
-        page.drawLine({ start: { x: x, y: top }, end: { x: x, y: bottom }, thickness: 0.7, color: line });
-      }
-    };
-    const HEADH = 34;
-    const drawHead = function () {
-      page.drawRectangle({ x: M, y: y - HEADH, width: span, height: HEADH, color: yellow });
-      HEAD.forEach(function (lab, i) {
-        const lines = wrap(lab, bold, 8.5, COL[i] - 12);
-        const startY = y - HEADH / 2 + (lines.length * 10) / 2 - 7.5;
-        lines.forEach(function (ln, k) {
-          const w = bold.widthOfTextAtSize(ln, 8.5);
-          const x = i < 2 ? X[i] + 6 : X[i] + COL[i] - 6 - w;
-          page.drawText(ln, { x: x, y: startY - k * 10, size: 8.5, font: bold, color: ink });
-        });
-      });
-      page.drawLine({ start: { x: M, y: y }, end: { x: RIGHT, y: y }, thickness: 0.7, color: line });
-      page.drawLine({ start: { x: M, y: y - HEADH }, end: { x: RIGHT, y: y - HEADH }, thickness: 0.7, color: line });
-      vrules(y, y - HEADH);
-      y -= HEADH;
-    };
-    const newPage = function (first) {
-      page = doc.addPage([W, H]);
-      y = H - M;
-      if (first) {
-        /* The two title lines sit INSIDE the grid, each in its own full-width bordered band,
-           the way the sheet has them - merged across A:E. Drawn as boxes rather than floating
-           text so the printout is the sheet rather than something resembling it. */
-        [[t.heading, 12, 25], [t.sub, 12.5, 26]].forEach(function (b) {
-          const txt = b[0], size = b[1], h = b[2];
-          page.drawRectangle({ x: M, y: y - h, width: span, height: h,
-            borderColor: line, borderWidth: 0.7 });
-          const cx = (span - bold.widthOfTextAtSize(txt, size)) / 2;
-          page.drawText(txt, { x: M + cx, y: y - h / 2 - size / 2 + 1.5, size: size, font: bold, color: ink });
-          y -= h;
-        });
-      }
-      drawHead();
-    };
-
-    newPage(true);
-    const RH = 21;
-    rows.forEach(function (r) {
-      if (y - RH < M + 24) newPage(false);
-      const ty = y - RH + 6.5;
-      [String(r.project_name || ''), String(r.bu_name || '')].forEach(function (txt, i) {
-        const room = COL[i] - 12;
-        const lines = wrap(txt, bold, 9, room);
-        if (lines.length === 1) {
-          page.drawText(txt, { x: X[i] + 6, y: ty, size: shrinkToFit(txt, bold, 9, room), font: bold, color: ink });
-        } else {
-          // two short lines beat one squeezed one, exactly as the sheet wraps them
-          lines.slice(0, 2).forEach(function (ln, k) {
-            page.drawText(ln, { x: X[i] + 6, y: ty + 4.5 - k * 9, size: 8, font: bold, color: ink });
-          });
-        }
-      });
-      [r.outstanding, r.curr, r.prev].forEach(function (v, k) {
-        const str = misIN(v, true), i = k + 2;
-        const w = reg.widthOfTextAtSize(str, 9);
-        page.drawText(str, { x: X[i] + COL[i] - 6 - w, y: ty, size: 9, font: reg, color: ink });
-      });
-      page.drawLine({ start: { x: M, y: y - RH }, end: { x: RIGHT, y: y - RH }, thickness: 0.7, color: line });
-      vrules(y, y - RH);
-      y -= RH;
-    });
-
-    if (y - 24 < M + 24) newPage(false);
-    const tty = y - 24 + 7.5;
-    page.drawText('TOTAL', { x: X[0] + 6, y: tty, size: 11.5, font: bold, color: ink });
-    [tot.o, tot.c, tot.p].forEach(function (v, k) {
-      const str = misIN(v), i = k + 2;
-      const w = bold.widthOfTextAtSize(str, 10);
-      page.drawText(str, { x: X[i] + COL[i] - 6 - w, y: tty, size: 10, font: bold, color: ink });
-    });
-    page.drawLine({ start: { x: M, y: y - 24 }, end: { x: RIGHT, y: y - 24 }, thickness: 0.7, color: line });
-    vrules(y, y - 24);
-
-    const pages = doc.getPages();
-    if (pages.length > 1) {
-      pages.forEach(function (pg, i) {
-        pg.drawText(String(i + 1) + ' / ' + pages.length,
-          { x: RIGHT - 30, y: M - 16, size: 8, font: reg, color: L.rgb(0.35, 0.35, 0.35) });
-      });
-    }
-
-    const bytes = await doc.save();
-    usbSaveBlob(new Blob([bytes], { type: 'application/pdf' }),
-      'MIS_Report_' + misDMY(rep.report_date) + '.pdf');
-    try { usageQueue('postsales.mis.download_mis_report_as_pdf', 'export', { title: misDMY(rep.report_date) }); } catch (e) {}
-    toast('PDF downloaded', 'ok');
-  } catch (e) {
-    toast('Could not build the PDF: ' + ((e && e.message) || e), 'err');
-  } finally { if (btn) { btn.disabled = false; btn.innerHTML = restore; } }
-};
-
-
 VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
-  const tabs=[['adhoc','ADHOC'],['mis','MIS']];
-  const tab=(seg&&seg[0])||'adhoc';
-  // One body div per tab rather than one shared one: the two are rendered by different code
+  // The old MIS tab (built by hand from Farvision files) was retired 02-Oct-2026 - the MIS Report now
+  // lives under Reports and is built from Post Sales data. An old #/mis link lands on Bookings.
+  const tabs=[['bookings','Bookings'],['invoices','Invoices'],['receipts','Receipts'],['reports','Reports'],['adhoc','ADHOC'],['setup','Setup']];
+  const tab=tabs.some(function(t){return t[0]===(seg&&seg[0]);})?seg[0]:'bookings';
+  // One body div per tab rather than one shared one: they are rendered by different code
   // that each look up their own host by id, and a shared id would have them fighting over it.
+  const bodyId={setup:'pssBody',bookings:'psbBody',receipts:'psrBody',invoices:'psiBody',reports:'psrpBodyHost'}[tab]||'psaBody';
   v.innerHTML=mHead('fa-headset','#7e22ce','Post Sales')
     +'<div class="tabs" style="margin-top:14px">'+tabs.map(function(t){return '<div class="tab '+(tab===t[0]?'active':'')+'" onclick="navTo(\'postsales/'+t[0]+'\')">'+t[1]+'</div>';}).join('')+'</div>'
-    +'<div id="'+(tab==='mis'?'misBody':'psaBody')+'" style="margin-top:16px"></div>';
-  if(tab==='mis'){
-    misCss();
-    const host=$('misBody'); if(host) loader(host);
-    await misLoadBus();
-    await misLoadReports();
-    misRender();
+    +'<div id="'+bodyId+'" style="margin-top:16px"></div>';
+  // Bookings and Setup (projects → towers → floors → flats, PLC, FRC, charges, parking, payment
+  // plans) live in postsales.js - see PAGE_EXTRA_SCRIPT and docs/post-sales-spec.md.
+  if(tab==='setup'||tab==='bookings'||tab==='receipts'||tab==='invoices'||tab==='reports'){
+    const host=$(bodyId); if(!host) return;
+    const fn={setup:window.pssRender,bookings:window.psbRender,receipts:window.psrRender,invoices:window.psiRender,reports:window.psrpRender}[tab];
+    if(typeof fn!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Post Sales could not finish loading - refresh the page.</div></div>'; return; }
+    await fn(host, seg.slice(1));
     return;
   }
   if(tab==='adhoc'){
@@ -12331,19 +11850,90 @@ async function psaProcessPdf(file){
   return {blob:blob,count:total};
 }
 
-VIEWS.inventory=function(v,seg){
+VIEWS.inventory=async function(v,seg){
   setCrumb(['Operations','Inventory']);
-  const tabs=['Indents & RFQ','Quote comparison','Purchase orders','GRN & QC','Stock ledger','Accounts payable'];const ti=mTab(seg,tabs.length);
-  let body;
+  const isAdmin=typeof window.pusIsAdmin==='function'&&await window.pusIsAdmin();
+  const tabs=['Setup','Vendors','Indents','RFQ & Quotes','Purchase orders','Stores','Stock & reports'].concat(isAdmin?['Admin']:[]);const ti=mTab(seg,tabs.length);
   if(ti===0){
-    body=mStep(['Indent','RFQ','Quote compare','PO + approval','Gate entry','GRN + QC','Stock'],'Quote compare')+
-      mTable(['Indent','Material','Qty','Project','Source','RFQ status'],[['IND-0512','OPC 53 cement','400 bags','Dream Valley','Auto (reorder)','<span class="tag t-blue">RFQ sent</span>'],['IND-0513','TMT steel Fe550','12 MT','Dream Valley','BOQ-002','<span class="tag t-amber">Quotes in</span>'],['IND-0514','Vitrified tiles','2,200 sqft','Trade Centre','Manual','<span class="tag t-gray">Draft</span>'],['IND-0515','Waterproof compound','60 drums','Green Acres','Maintenance','<span class="tag t-blue">RFQ sent</span>']]);
-  } else if(ti===1){ body=mTable(['RFQ','Item','Vendors','Best quote','Status'],[['RFQ-58','Tiles','4','₹3.1L','Open']]); }
-  else if(ti===2){ body=mTable(['PO No','Vendor','Amount','Status','Date'],[['PO-0042','ACC Cement','₹4.2L','Pending','27 Jun']]); }
-  else if(ti===3){ body=mTable(['GRN','PO','Supplier','QC','Status'],[['GRN-091','PO-0042','ACC Cement','Pass','Received']]); }
-  else if(ti===4){ body=mTable(['Item','Category','In stock','UoM','Value'],[['OPC 53 cement','Cement','420','Bags','₹1.6L']]); }
-  else { body=mTable(['Supplier','Invoice','Amount','Due','Status'],[['Tata Steel','INV-2291','₹9.1L','10 Jul','Submitted']]); }
-  v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div style="margin-top:16px">'+body+'</div>';
+    // Purchase & Stores setup (items, groups, UOM, warehouses, legal entities) lives in purchase.js -
+    // see PAGE_EXTRA_SCRIPT and docs/purchase-stores-spec.md.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Purchase setup could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusRender(host,seg.slice(1));
+    return;
+  }
+  if(ti===1){
+    // Vendor enlistment (Stage 2) - also in purchase.js.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusVendorRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Vendors could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusVendorRender(host);
+    return;
+  }
+  if(ti===2){
+    // Indents and their approval (Stage 3) - purchase-indent.js.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusIndentRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Indents could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusIndentRender(host,seg.slice(1));
+    return;
+  }
+  if(ti===7){
+    // Purchase administrators only (approvers, warehouses, legal entities, who the administrators are) -
+    // the tab is only listed for them, and the database refuses these writes to anyone else.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    await window.pusRender($('pusBody'),seg.slice(1),'admin');
+    return;
+  }
+  if(ti===3){
+    // RFQs and quotations (Stage 4) - purchase-rfq.js.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusRfqRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>RFQs could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusRfqRender(host,seg.slice(1));
+    return;
+  }
+  if(ti===4){
+    // Purchase orders (Stage 5) - purchase-po.js.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusPoRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Purchase orders could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusPoRender(host,seg.slice(1));
+    return;
+  }
+  if(ti===5){
+    // Stores (Stage 6): GRN, returns, issues, adjustments, transfers - purchase-stores.js.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusStoresRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Stores could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusStoresRender(host,seg.slice(1));
+    return;
+  }
+  if(ti===6){
+    // Stock ledger and current stock (Stage 6) - purchase-stores.js.
+    v.innerHTML=mHead('fa-boxes-stacked','#0f766e','Inventory & Procurement')+mTabs('inventory',tabs,ti)+'<div id="pusBody" style="margin-top:16px"></div>';
+    const host=$('pusBody');
+    if(typeof window.pusLedgerRender!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>The stock ledger could not finish loading - refresh the page.</div></div>'; return; }
+    await window.pusLedgerRender(host,seg.slice(1));
+    return;
+  }
+};
+
+/* ===== ACCOUNTS MODULE =====
+   Two tabs. Transactions (vouchers, bills & on-account payments, bank reconciliation, cheque printing,
+   enterprise / company / business-unit structure) lives in accounts.js + accounts-bank.js; Ledgers &
+   postings (automatic GST / TDS / retention / Post Sales postings, chart of accounts, ledger opening,
+   ledgers and trial balance) lives in accounts-books.js. Loaded on demand - see PAGE_EXTRA_SCRIPT.
+   Spec: docs/accounts-spec.md. Tables and functions: supabase/migrations/2026100510*..2026100512*. */
+VIEWS.accounts=async function(v,seg){
+  setCrumb(['Governance','Accounts']);
+  const tabs=['Transactions','Ledgers & postings'];const ti=mTab(seg,tabs.length);
+  v.innerHTML=mHead('fa-calculator','#0e7490','Accounts')+mTabs('accounts',tabs,ti)+'<div id="acxBody" style="margin-top:16px"></div>';
+  const host=$('acxBody');
+  const fn=ti===0?window.acxRender:window.acxBooksRender;
+  if(typeof fn!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Accounts could not finish loading - refresh the page.</div></div>'; return; }
+  await fn(host,seg.slice(1));
 };
 
 /* ===== PROCUREMENT MODULE ===== */
@@ -19771,6 +19361,13 @@ async function cpaStaffOptions(force){
 
 VIEWS.custportal_admin=async function(v,seg){
   setCrumb(['Stakeholder Portals','Customer Portal Admin']);
+  /* ".../custportal-admin.html#/3/review" - the "Review now" link in an approver's email - opens
+     Photos & Videos on Review. Taken once and dropped from the address, so switching back to Upload
+     afterwards is not overruled by it. */
+  if(Array.isArray(seg)&&seg.indexOf('review')!==-1){
+    if(cpaIsPhotoApprover()){ CPA_PH.mode='review'; CPA_RV.status='pending'; CPA_RV.sel.clear(); CPA_RV.picked=false; }
+    try{ history.replaceState(history.state,'',location.pathname+location.search+'#/'+seg.filter(s=>s!=='review').join('/')); }catch(_e){}
+  }
   if(cpaPhotosOnly()){
     v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',['Photos & Videos'],0)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
     const h=$('cpaBody');if(h) await cpaRenderPhotos(h);
@@ -19779,7 +19376,10 @@ VIEWS.custportal_admin=async function(v,seg){
   // Customer Features is last so every older tab keeps its number - the index is the route.
   const tabs=['Projects & Units','Customers','Farvision Import','Photos & Videos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals','Maintenance','Modification Requests','Customer Features'];
   const ti=mTab(seg,tabs.length);
-  v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',tabs,ti)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
+  // The tab strip stays in view under the top bar while a long list scrolls (6 Oct 2026).
+  v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')
+    +'<div style="position:sticky;top:var(--topbar,60px);z-index:25;background:var(--bg,#f4f6fb);margin:0 -4px;padding:6px 4px 0">'+mTabs('custportal_admin',tabs,ti)+'</div>'
+    +'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
   const host=$('cpaBody');if(!host)return;
   if(ti===0) await cpaRenderProjectsUnits(host);
   else if(ti===1) await cpaRenderCustomers(host);
@@ -21130,13 +20730,25 @@ function cpaTowersForProject(units,projectId){return [...new Set(units.filter(u=
 const CPA_PH_AREAS=[['common','Common area','fa-couch'],
                     ['bathroom','Bathroom','fa-bath'],
                     ['kitchen','Kitchen','fa-kitchen-set']];
+/* The sections offered when UPLOADING for a flat. The site supervisor (the 'Photos & Videos only'
+   tile) uploads Common area and Kitchen only - Bathroom was taken off his screen on 5 Oct 2026.
+   Everyone else still has all three, and bathroom photos already uploaded are untouched: the
+   lists, Review and the customer's view still know the section. */
+function cpaPhUploadAreas(){ return cpaPhotosOnly()?CPA_PH_AREAS.filter(a=>a[0]!=='bathroom'):CPA_PH_AREAS; }
 // level -> which of the three pickers it needs. Flat needs all three; the project level needs
 // only the project, so the pickers it does not use are hidden rather than left there to be
 // filled in pointlessly.
 const CPA_PH_LEVELS=[['project','Whole project','fa-city'],
                      ['tower','Block / Tower','fa-building'],
                      ['unit','Flat','fa-door-open']];
-let CPA_PH={level:'project',project:'',tower:'',unit:'',files:{all:[],common:[],bathroom:[],kitchen:[]}};
+let CPA_PH={mode:'upload',level:'project',project:'',tower:'',unit:'',files:{all:[],common:[],bathroom:[],kitchen:[]}};
+/* Review (photo approvers only): which section, project, block and status is being looked at, and
+   what is ticked. Nothing a site supervisor uploads reaches a customer until it is published here -
+   see supabase/migrations/20261005110000_construction_media_approval.sql. */
+const CPA_RV={sec:'unit_photos',project:'',tower:'',status:'pending',sel:new Set(),shown:[]};
+const CPA_RV_SECS=[['project_photos','Projects','fa-city'],['tower_photos','Blocks','fa-building'],['unit_photos','Flats','fa-door-open']];
+const CPA_MEDIA_STATUS={pending:['Waiting for approval','t-amber','fa-hourglass-half'],published:['Published','t-green','fa-circle-check'],
+  rejected:['Rejected','t-red','fa-circle-xmark'],unpublished:['Unpublished','t-gray','fa-eye-slash']};
 /* What the review panel is showing. It starts wherever the upload pickers are pointing, because
    that is almost always what you want to check straight after uploading - but '' means "all", so
    it can be widened to a whole block or a whole project without disturbing the upload target. */
@@ -21153,6 +20765,62 @@ function cpaPhCss(){return `<style>
   .cph-h{font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--slate);
     margin:0 0 14px;display:flex;align-items:center;gap:8px}
   .cph-h::after{content:"";flex:1;height:1px;background:var(--line)}
+  /* Upload | Review, and the approval screen */
+  .cph-modes{display:inline-flex;gap:4px;padding:4px;background:#eef2f7;border-radius:11px;align-self:flex-start}
+  .cph-md{border:0;background:transparent;padding:8px 16px;border-radius:8px;font:inherit;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+  .cph-md.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+  .cph-badge{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#e08600;color:#fff;font-size:11px;font-weight:700;margin-left:4px}
+  .cph-note{display:flex;gap:9px;align-items:flex-start;padding:10px 14px;border-radius:10px;background:#fffbeb;border:1px solid #f0dfa8;color:#92400e;font-size:13px}
+  .cph-note i{margin-top:2px}
+  .cph-why{font-size:11.5px;color:#b91c1c;margin-top:3px;line-height:1.35;max-width:240px}
+  .cph-rvbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;min-height:30px}
+  .cph-rvg{margin-bottom:18px}
+  .cph-rvgh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:9px;font-size:13.5px}
+  .cph-rvgh span{color:var(--slate);font-size:12.5px;margin-right:auto}
+  .cph-rvgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+  .cph-rvc{position:relative;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#fff;display:flex;flex-direction:column;transition:box-shadow .15s,border-color .15s}
+  /* Ticked. Its own class name: the site-wide .sel (dropdowns) is 36px tall and squashed the card. */
+  .cph-rvc.cph-picked{border-color:#1d4ed8;background:#eff6ff;box-shadow:0 0 0 2px rgba(29,78,216,.28)}
+  .cph-rvc.cph-picked .cph-rvm{opacity:.82}
+  .cph-rvc.cph-picked .cph-rvd{color:#1d4ed8}
+  .btn.cph-tickon{border-color:#1d4ed8;color:#1d4ed8;background:#eff6ff}
+  .cph-rvck{position:absolute;top:7px;left:7px;z-index:2;background:rgba(255,255,255,.92);border-radius:6px;padding:3px 4px;line-height:0}
+  .cph-rvck input{width:17px;height:17px;margin:0;cursor:pointer}
+  .cph-rvm{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;cursor:zoom-in;background:#0f172a}
+  .cph-rvm.vid{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:#cbd5e1;font-size:26px;cursor:pointer}
+  .cph-rvm.vid span{font-size:11.5px}
+  .cph-rvi{padding:8px 10px 4px;font-size:12px}
+  .cph-rvd{font-weight:600;color:var(--ink)}
+  .cph-rvu{color:var(--slate);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cph-rva{display:flex;gap:6px;padding:4px 10px 10px;margin-top:auto}
+  .cph-rva button{flex:1;height:34px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;font-size:14px}
+  .cph-ok{color:#15803d}.cph-ok:hover{background:#f0fdf4;border-color:#86efac}
+  .cph-no{color:#b91c1c}.cph-no:hover{background:#fef2f2;border-color:#fca5a5}
+  .cph-un{color:#475569}.cph-un:hover{background:#f1f5f9}
+  .cph-mine{font-size:11.5px;color:var(--slate);padding:8px 0}
+  /* Review preview */
+  .cph-box.cph-pv{padding:0;background:#000}
+  .cph-pv .cph-boxbar{z-index:3;padding:14px 18px 30px;background:linear-gradient(rgba(0,0,0,.7),transparent)}
+  .cph-pvstage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .cph-pv .cph-pvstage img,.cph-pv .cph-pvstage video{position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;
+    object-fit:contain;background:transparent;box-shadow:none;border-radius:0}
+  .cph-pvload{color:#cbd5e1;font-size:26px}
+  .cph-pvn{color:#cbd5e1;font-size:12.5px;margin-left:10px;white-space:nowrap}
+  .cph-pvnav{position:absolute;z-index:2;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:0;
+    background:rgba(255,255,255,.16);color:#fff;font-size:18px;cursor:pointer}
+  .cph-pvnav:hover{background:rgba(255,255,255,.3)}
+  .cph-pvnav.l{left:18px}.cph-pvnav.r{right:18px}
+  .cph-pvacts{position:absolute;z-index:3;top:62px;left:0;right:0;display:flex;justify-content:center;gap:12px;flex-wrap:wrap;
+    padding:0 16px;pointer-events:none}
+  .cph-pvacts>*{pointer-events:auto}
+  .cph-pvbtn{height:46px;padding:0 26px;border-radius:10px;border:0;font:inherit;font-size:15px;font-weight:700;cursor:pointer;
+    display:inline-flex;align-items:center;gap:9px;box-shadow:0 6px 20px rgba(0,0,0,.55)}
+  .cph-pvbtn.ok{background:#16a34a;color:#fff}.cph-pvbtn.ok:hover{background:#15803d}
+  .cph-pvbtn.no{background:#dc2626;color:#fff}.cph-pvbtn.no:hover{background:#b91c1c}
+  .cph-pvbtn.un{background:#fff;color:#334155}
+  .cph-pvnote{color:#e2e8f0;background:rgba(255,255,255,.12);padding:11px 16px;border-radius:10px;font-size:14px}
+  @media(max-width:760px){.cph-rvgrid{grid-template-columns:repeat(2,1fr)}.cph-md{padding:8px 12px}
+    .cph-pvnav{top:auto;bottom:18px;transform:none}.cph-pvbtn{height:44px;padding:0 20px}}
 
   /* level buttons and the pickers share one row on a wide screen */
   .cph-bar{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
@@ -21242,6 +20910,47 @@ function cpaPhCss(){return `<style>
   .cph-tbl tbody tr:hover{background:#f8fafc}
   .cph-th{width:46px;height:46px;border-radius:7px;object-fit:cover;display:block;cursor:pointer;border:1px solid var(--line)}
   .cph-th.vid{background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b}
+  img.cph-th:not([src]),img.cph-rvm:not([src]){background:linear-gradient(90deg,#eef2f7,#f8fafc,#eef2f7);background-size:200% 100%;animation:cphShim 1.2s linear infinite}
+  img.cph-noimg{animation:none;background:#eef2f7}
+  .cph-vth{position:relative;display:block}
+  .cph-vth>i{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;font-size:15px;
+    text-shadow:0 1px 6px rgba(0,0,0,.6);pointer-events:none}
+  .cph-rvc .cph-vth>i{font-size:30px}
+  /* To retake: the uploader's rejected photos, each one tap from the camera for the same place */
+  .cph-fix{border-color:#fecaca;background:#fffafa}
+  .cph-fix .cph-h{color:#b91c1c}
+  .cph-fixsub{font-weight:400;color:var(--slate);font-size:12px;margin-left:8px;text-transform:none;letter-spacing:0}
+  .cph-fixl{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow:auto}
+  .cph-fixi{display:flex;align-items:center;gap:12px;padding:8px 10px;border:1px solid #fee2e2;border-radius:10px;background:#fff}
+  .cph-fixi .cph-th{width:54px;height:54px;flex:none}
+  .cph-fixw{flex:1;min-width:0;font-size:12.5px;color:var(--slate);line-height:1.45}
+  .cph-fixw b{display:block;color:var(--ink);font-size:13.5px}
+  .cph-fixpv{position:relative;flex:none;padding:0;border:0;background:none;cursor:zoom-in;border-radius:8px}
+  .cph-fixpv:hover .cph-th{box-shadow:0 0 0 2px #b91c1c}
+  .cph-fixpn{position:absolute;right:-6px;top:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b91c1c;
+    color:#fff;font-size:11px;font-weight:800;display:grid;place-items:center}
+  .cph-fixg{font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#b91c1c;margin:6px 2px -2px}
+  .cph-fixg:first-child{margin-top:0}
+  .cph-fixs{display:flex;flex-direction:column;gap:6px;margin:2px 0 4px}
+  .cph-fixr{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .cph-fixp{min-width:150px;font-size:13px;font-weight:700;color:var(--ink)}
+  .cph-fixcs{display:flex;gap:6px;flex-wrap:wrap}
+  .cph-fixc{display:inline-flex;align-items:center;gap:8px;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:999px;
+    padding:5px 6px 5px 13px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+  .cph-fixc b{min-width:22px;height:22px;padding:0 6px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:12px;
+    display:inline-grid;place-items:center;font-weight:800}
+  .cph-fixc:hover{background:#fef2f2}
+  .cph-fixc.on{background:#b91c1c;border-color:#b91c1c;color:#fff}
+  .cph-fixc.on b{background:#fff;color:#b91c1c}
+  .cph-fixt{margin:12px 0 8px;padding-top:10px;border-top:1px solid #fde2e2;font-size:12px;font-weight:800;letter-spacing:.4px;
+    text-transform:uppercase;color:#7f1d1d}
+  .cph-fixhint{margin-top:10px;font-size:12.5px;color:var(--slate)}
+  .cph-fixhint i{color:#b91c1c;margin-right:4px}
+  @media(max-width:620px){ .cph-fixp{min-width:0;width:100%} }
+  .cph-retake{display:inline-flex;align-items:center;gap:6px;margin-top:5px;padding:5px 11px;border-radius:8px;cursor:pointer;
+    font:inherit;font-size:12px;font-weight:700;border:1px solid #1d4ed8;background:#1d4ed8;color:#fff}
+  .cph-retake:hover{background:#1e40af}
+  @keyframes cphShim{to{background-position:-200% 0}}
   .cph-when{white-space:nowrap;font-weight:600;color:var(--ink)}
   .cph-area{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;
     background:#eff6ff;color:#1e40af;white-space:nowrap}
@@ -21314,8 +21023,25 @@ async function cpaRenderPhotos(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
   if(!CPA_PH.project&&projects.length) CPA_PH.project=String(projects[0].id);
   host.innerHTML=cpaPhCss()+'<div class="cph-wrap" id="cphWrap"></div>';
-  cpaPhPaint(projects,units);
+  if(CPA_PH.mode==='review'&&cpaIsPhotoApprover()) cpaRvPaint(projects,units);
+  else{ CPA_PH.mode='upload'; cpaPhPaint(projects,units); }
 }
+// Upload | Review, for photo approvers. The Review count is everything still waiting, anywhere.
+function cpaPhModeBar(){
+  if(!cpaIsPhotoApprover()) return '';
+  const b=(m,ic,label,extra)=>'<button class="cph-md'+(CPA_PH.mode===m?' on':'')+'" onclick="cpaPhSetMode(\''+m+'\')"><i class="fa-solid '+ic+'"></i>'+label+(extra||'')+'</button>';
+  return '<div class="cph-modes">'+b('upload','fa-cloud-arrow-up','Upload')
+    +b('review','fa-stamp','Review','<span class="cph-badge" id="cphPendBadge" style="display:none"></span>')+'</div>';
+}
+async function cpaPhFillBadge(){
+  const el=$('cphPendBadge'); if(!el) return;
+  try{
+    const res=await Promise.all(CPA_RV_SECS.map(s=>sb.schema('cust').from(s[0]).select('id',{count:'exact',head:true}).eq('status','pending').is('deleted_at',null)));
+    const n=res.reduce((t,r)=>t+(r.count||0),0);
+    el.textContent=n>999?'999+':String(n); el.style.display=n?'inline-flex':'none';
+  }catch(_e){}
+}
+window.cpaPhSetMode=function(m){ CPA_PH.mode=m; CPA_RV.sel.clear(); if(m==='review'){ CPA_RV.status='pending'; CPA_RV.picked=false; } route(); };
 
 // Everything on screen is redrawn from CPA_PH, so there is one description of the state and no
 // way for the pickers, the form and the list to disagree about which flat is being looked at.
@@ -21331,8 +21057,12 @@ async function cpaPhPaint(projects,units){
   if(needUnit&&flats.length&&!flats.some(u=>String(u.id)===String(CPA_PH.unit))) CPA_PH.unit=String(flats[0].id);
 
   const today=new Date().toISOString().slice(0,10);
-  wrap.innerHTML=
-    '<div class="cph-card">'
+  // When each flat last had something uploaded, shown beside it in the Flat picker (dd/mm/yy).
+  const lastUp=needUnit?await cpaPhLastUploads(flats.map(u=>u.id)):{};
+  if(!$('cphWrap')) return;
+  wrap.innerHTML=cpaPhModeBar()
+    +'<div id="cphFix"></div>'
+    +'<div class="cph-card">'
       +'<div class="cph-bar">'
         +'<div class="cph-levels">'
           +CPA_PH_LEVELS.map(l=>'<button class="cph-lv'+(lvl===l[0]?' on':'')+'" onclick="cpaPhSetLevel(\''+l[0]+'\')">'
@@ -21347,7 +21077,8 @@ async function cpaPhPaint(projects,units){
                            :'<option value="">No blocks on record</option>')
           +'</select></div></div>':'')
           +(needUnit?'<div class="cph-f"><label>Flat</label><div class="cph-sel"><select id="cphUnit" onchange="cpaPhSet(\'unit\',this.value)">'
-            +(flats.length?flats.map(u=>'<option value="'+u.id+'"'+(String(u.id)===String(CPA_PH.unit)?' selected':'')+'>'+esc(u.unit_code)+'</option>').join('')
+            +(flats.length?flats.map(u=>'<option value="'+u.id+'"'+(String(u.id)===String(CPA_PH.unit)?' selected':'')+'>'+esc(u.unit_code)
+                +(lastUp[u.id]?'\u00a0\u00a0\u00a0\u00a0\u00b7\u00a0\u00a0\u00a0\u00a0'+cpaDdMmYy(lastUp[u.id]):'')+'</option>').join('')
                           :'<option value="">No flats in this block</option>')
           +'</select></div></div>':'')
         +'</div>'
@@ -21360,28 +21091,219 @@ async function cpaPhPaint(projects,units){
           +'<input type="date" class="cph-in" id="cphDate" value="'+today+'"></div>'
       +'</div>'
       +(lvl==='unit'
-        ? '<div class="cph-zones">'+CPA_PH_AREAS.map(a=>cpaPhZone(a[0],a[1],a[2])).join('')+'</div>'
+        ? '<div class="cph-zones">'+cpaPhUploadAreas().map(a=>cpaPhZone(a[0],a[1],a[2])).join('')+'</div>'
         : '<div class="cph-zones" style="grid-template-columns:1fr">'+cpaPhZone('all','Photos or videos','fa-images')+'</div>')
       +'<div class="cph-staged" id="cphStaged" style="display:none"></div>'
       +'<div class="cph-acts">'
         +'<button class="btn btn-primary" id="cphGo" onclick="cpaPhUpload()">'
           +'<i class="fa-solid fa-cloud-arrow-up"></i> Upload</button>'
         +'<button class="btn" id="cphClear" onclick="cpaPhClear()">Clear all</button>'
-        +(lvl==='unit'?'<span style="font-size:11.5px;color:var(--slate)">Any one, two or all three \u2014 they go up together.</span>':'')
+        +(lvl==='unit'?'<span style="font-size:11.5px;color:var(--slate)">'+(cpaPhUploadAreas().length===2?'Either or both':'Any one, two or all three')+' \u2014 they go up together.</span>':'')
       +'</div>'
     +'</div>'
 
-    +'<div class="cph-card">'
+    // A photos-only account (the site team) has no "Already uploaded" list: what it needs to act on
+    // is in "To retake", and the review is the post-sales team's (6 Oct 2026). Without #cphList,
+    // cpaPhList() does nothing.
+    +(cpaPhotosOnly()?'':'<div class="cph-card">'
       +'<div class="cph-h"><i class="fa-solid fa-images"></i>Already uploaded</div>'
       +'<div id="cphList" class="cph-review"><div class="cph-empty">Loading\u2026</div></div>'
-    +'</div>';
+    +'</div>');
 
   cpaPhWireZones();
   cpaPhStaged();
   cpaPhSyncActions();
   cpaPhList();
+  cpaPhFillBadge();
+  cpaPhFixList(projects,units);
 }
 
+/* TO RETAKE: every rejected photo still waiting for a replacement, whoever took it - on site,
+   whoever is there retakes it. One line per place (flat and section, block, or project), because
+   one new photo there replaces all the rejected ones at that place (cust.replace_rejected_media).
+   Retake opens the camera at once and points the form at that place. The same Retake is on each
+   rejected row of "Already uploaded" (cpaPhRetakeBtn). */
+async function cpaPhFixList(projects,units){
+  const host=$('cphFix'); if(!host) return;
+  // Retaking is the site team's job: only photos-only accounts get this list (6 Oct 2026). An admin
+  // sees rejected photos in "Already uploaded" and in Review > Rejected, without Retake.
+  if(!cpaPhotosOnly()){ host.innerHTML=''; return; }
+  const res=await Promise.all(CPA_RV_SECS.map(s=>sb.schema('cust').from(s[0]).select('*').eq('status','rejected')
+    .is('deleted_at',null).order('reviewed_at',{ascending:false}).limit(200)));
+  if(!$('cphFix')) return;
+  const projOf={}; (projects||[]).forEach(p=>{projOf[p.id]=p;});
+  const byPlace={}, order=[];
+  CPA_RV_SECS.forEach((s,k)=>((res[k]&&res[k].data)||[]).forEach(p=>{
+    const t=s[0], w=cpaPhPlaceOf(t,p,units);
+    // Only what this person can retake: a photos-only uploader has no Bathroom section, so rejected
+    // Bathroom photos are not theirs to fix and are left out (6 Oct 2026).
+    if(!w.can) return;
+    const key=t+'|'+w.key;
+    if(!byPlace[key]){ byPlace[key]={t,p,w,place:w.place,can:w.can,pn:projOf[w.pid]?String(projOf[w.pid].name).split('(')[0].trim():'',
+      n:0,when:p.reviewed_at||p.created_at,notes:[]}; order.push(key); }
+    const g=byPlace[key]; g.n++; (g.ps=g.ps||[]).push(p);
+    if(p.review_note&&g.notes.indexOf(p.review_note)===-1) g.notes.push(p.review_note);
+  }));
+  /* Floor-wise, the way the site is walked: project by project; within one, the whole-project
+     photos, then the blocks, then the flats - block by block, floor by floor (ground up), flat by
+     flat, section by section. Asked for on 6 Oct 2026. */
+  const nat=(a,b)=>String(a||'').localeCompare(String(b||''),undefined,{numeric:true,sensitivity:'base'});
+  const items=order.map(k=>byPlace[k]).sort((a,b)=>{
+    const x=a.w, y=b.w;
+    return nat(a.pn,b.pn)||(x.lvl-y.lvl)||nat(x.tower,y.tower)
+      ||((x.floor==null)-(y.floor==null))||((x.floor||0)-(y.floor||0))||nat(x.code,y.code)||((x.areaIdx||0)-(y.areaIdx||0));
+  });
+  /* One summary of everything waiting, project by project: each project's levels (Whole project /
+     Blocks / Flats) with how many photos wait there. Tapping one opens that project and level, and
+     its photos are listed underneath. The project and level on screen are highlighted. (6 Oct 2026:
+     a single "none in Whole project" line with loose counts beside it read as a contradiction.) */
+  const LV={project:0,tower:1,unit:2}, LVKEY=['project','tower','unit'], LVNAME=['Whole project','Blocks','Flats'];
+  const cur=LV[CPA_PH.level]!=null?LV[CPA_PH.level]:0, pid=String(CPA_PH.project||'');
+  const shown=items.filter(it=>String(it.w.pid)===pid&&it.w.lvl===cur);
+  CPA_PH.fix=shown;
+  if(!items.length){ host.innerHTML=''; return; }
+  const cnt=list=>list.reduce((t,it)=>t+it.n,0);
+  const byProj={}; items.forEach(it=>{ const k=String(it.w.pid); (byProj[k]=byProj[k]||{pn:it.pn,lv:[0,0,0]}).lv[it.w.lvl]+=it.n; });
+  const projIds=Object.keys(byProj).sort((a,b)=>(a===pid?-1:b===pid?1:0)||String(byProj[a].pn).localeCompare(String(byProj[b].pn)));
+  const summary='<div class="cph-fixs">'+projIds.map(k=>{
+      const g=byProj[k];
+      return '<div class="cph-fixr"><span class="cph-fixp">'+esc(g.pn?custRefTitle(g.pn):'Project')+'</span><span class="cph-fixcs">'
+        +[0,1,2].filter(l=>g.lv[l]).map(l=>{
+          const on=k===pid&&l===cur;
+          return '<button class="cph-fixc'+(on?' on':'')+'" onclick="cpaPhFixGo('+(Number(k)||0)+',\''+LVKEY[l]+'\')"'
+            +(on?' aria-current="true"':'')+'>'+LVNAME[l]+'<b>'+g.lv[l]+'</b></button>';
+        }).join('')+'</span></div>';
+    }).join('')+'</div>';
+  const total=cnt(items);
+  const curName=byProj[pid]&&byProj[pid].pn?custRefTitle(byProj[pid].pn):'';
+  host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>Photos to retake · '+total
+    +'</div>'
+    +summary
+    +(shown.length
+      ?'<div class="cph-fixt">'+esc([curName,LVNAME[cur]].filter(Boolean).join(' · '))+' · '+cnt(shown)+'</div>'
+        +'<div class="cph-fixl">'+shown.map((it,i)=>{
+          const w=it.w, prev=shown[i-1];
+          // Flats get a heading per block and floor; blocks and the whole project need none.
+          const headOf=x=>x.lvl===2?[x.tower||'Flats',x.floor==null?'Other units':(x.floor===0?'Ground floor':'Floor '+x.floor)].join(' · '):'';
+          const head=headOf(w), prevHead=prev?headOf(prev.w):'';
+          const p=it.p, isVid=(p.file_type||'').indexOf('video')===0;
+          // Tapping the picture shows the rejected photo (or video) full size - every one at that place.
+          const th=(isVid&&!p.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
+            :'<img class="cph-th" '+cphThumbAttrs(p,it.t)+' alt="" decoding="async">');
+          const thBtn='<button type="button" class="cph-fixpv" onclick="cpaPhFixPreview('+i+',0)" title="See the rejected '+(isVid?'video':'photo')+' full size">'+th
+            +(it.n>1?'<span class="cph-fixpn">'+it.n+'</span>':'')+'</button>';
+          return (head&&head!==prevHead?'<div class="cph-fixg">'+esc(head)+'</div>':'')+'<div class="cph-fixi">'+thBtn
+            +'<div class="cph-fixw"><b>'+esc(w.lvl===2&&w.tower?it.place.replace(w.tower+' · ',''):it.place)+'</b>'
+              +esc([it.n>1?it.n+' rejected':'',it.notes.join(' · '),'rejected '+fmtDate(it.when)].filter(Boolean).join(' · '))+'</div>'
+            +(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+i+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'')
+            +'</div>';
+        }).join('')+'</div>'
+      :'<div class="cph-fixhint"><i class="fa-solid fa-hand-pointer"></i> Tap a number above to see those photos and retake them.</div>')
+    +'</div>';
+  cphLazy(host);
+}
+/* Full-size view of a rejected photo in "Photos to retake": the reviewer's reason and date on top,
+   arrows (and the keyboard) through every rejected photo at that place, and Retake right there. */
+window.cpaPhFixPreview=async function(i,k){
+  const it=(CPA_PH.fix||[])[i]; if(!it) return;
+  const ps=it.ps&&it.ps.length?it.ps:[it.p];
+  k=Math.max(0,Math.min(ps.length-1,k||0));
+  const p=ps[k], isVid=(p.file_type||'').indexOf('video')===0;
+  const old=$('cphFixPv'); if(old) old.remove();
+  const box=document.createElement('div'); box.className='cph-box cph-pv'; box.id='cphFixPv';
+  const info=[it.pn,p.review_note?'Reason: '+p.review_note:'','rejected '+fmtDate(p.reviewed_at||p.created_at)].filter(Boolean).join(' · ');
+  box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
+      +'<span class="nm"><b>'+esc(it.place)+'</b> · '+esc(info)+'</span>'
+      +(ps.length>1?'<span class="cph-pvn">'+(k+1)+' of '+ps.length+'</span>':'')
+      +'<button class="cph-boxx" title="Close (Esc)">&times;</button></div>'
+    +(k>0?'<button class="cph-pvnav l" title="Previous (←)"><i class="fa-solid fa-chevron-left"></i></button>':'')
+    +(k<ps.length-1?'<button class="cph-pvnav r" title="Next (→)"><i class="fa-solid fa-chevron-right"></i></button>':'')
+    +(it.can?'<div class="cph-pvacts"><button class="cph-pvbtn ok cph-fixrt"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button></div>':'')
+    +'<div class="cph-pvstage"><div class="cph-pvload"><i class="fa-solid fa-spinner fa-spin"></i></div></div>';
+  const shut=()=>{ document.removeEventListener('keydown',onKey); box.remove(); };
+  const onKey=e=>{ if(e.key==='Escape') shut(); else if(e.key==='ArrowRight'&&k<ps.length-1){ shut(); cpaPhFixPreview(i,k+1); }
+    else if(e.key==='ArrowLeft'&&k>0){ shut(); cpaPhFixPreview(i,k-1); } };
+  box.querySelector('.cph-boxx').onclick=shut;
+  const l=box.querySelector('.cph-pvnav.l'), r=box.querySelector('.cph-pvnav.r');
+  if(l) l.onclick=()=>{ shut(); cpaPhFixPreview(i,k-1); };
+  if(r) r.onclick=()=>{ shut(); cpaPhFixPreview(i,k+1); };
+  // Retake straight from here: the camera has to open inside this tap.
+  const rt=box.querySelector('.cph-fixrt'); if(rt) rt.onclick=()=>{ shut(); cpaPhRetake(i,isVid?1:0); };
+  box.onclick=e=>{ if(e.target===box) shut(); };
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(box);
+  const url=await cphSignedUrl(p.storage_path);
+  const stage=box.querySelector('.cph-pvstage'); if(!stage||!box.isConnected) return;
+  if(!url){ stage.innerHTML='<div class="cph-pvload">File not available</div>'; return; }
+  stage.innerHTML=isVid?'<video src="'+url+'" controls autoplay playsinline></video>':'<img src="'+url+'" alt="">';
+};
+// A button in "Photos to retake": open that project at that level. Same project: only the level
+// changes, so the block and flat picked stay as they were.
+window.cpaPhFixGo=function(projectId,level){
+  if(String(projectId)!==String(CPA_PH.project)){ CPA_PH.project=String(projectId); CPA_PH.tower=''; CPA_PH.unit=''; }
+  cpaPhSetLevel(level);
+};
+// The floor a flat is on, from its code: 2G -> 2, 11A -> 11, 13-14A -> 13. Codes that do not start
+// with a number (the Eco City bungalows: A1, K6) have no floor and sort after the rest by code.
+function cpaFloorOf(code){ const m=/^(\d+)/.exec(String(code||'').trim()); return m?Number(m[1]):null; }
+// Where a photo belongs, in words, and whether this uploader's screen can take a new one there
+// (a photos-only uploader has no Bathroom section).
+function cpaPhPlaceOf(t,p,units){
+  if(t==='unit_photos'){
+    const u=(units||CPA.units||[]).find(x=>String(x.id)===String(p.unit_id));
+    const area=p.area||'common';
+    const a=(CPA_PH_AREAS.find(x=>x[0]===area)||[0,area])[1];
+    return {key:p.unit_id+'|'+area, pid:u&&u.project_id,
+      place:(u?(u.tower?u.tower+' · ':'')+'Flat '+u.unit_code:'Flat')+' · '+a,
+      can:!!u&&cpaPhUploadAreas().some(x=>x[0]===area),
+      lvl:2, tower:u?String(u.tower||''):'', code:u?String(u.unit_code||''):'', floor:u?cpaFloorOf(u.unit_code):null,
+      areaIdx:Math.max(0,CPA_PH_AREAS.findIndex(x=>x[0]===area))};
+  }
+  if(t==='tower_photos') return {key:p.project_id+'|'+p.tower, pid:p.project_id, place:p.tower||'Block', can:true, lvl:1, tower:String(p.tower||'')};
+  if(t==='project_photos') return {key:String(p.project_id), pid:p.project_id, place:'Whole project', can:true, lvl:0};
+  return {key:t+p.id, pid:p.project_id, place:'Floor '+(p.floor_no||''), can:false};
+}
+window.cpaPhRetake=function(i,isVid){ const it=(CPA_PH.fix||[])[i]; if(it) cpaPhRetakeAt(it.t,it.p,it.place,isVid); };
+// Retake on a rejected row of "Already uploaded".
+const CPA_PH_REJ={};
+function cpaPhRetakeBtn(t,p){
+  if(!cpaPhotosOnly()) return '';
+  const w=cpaPhPlaceOf(t,p); if(!w.can) return '';
+  CPA_PH_REJ[t+':'+p.id]=p;
+  const isVid=(p.file_type||'').indexOf('video')===0;
+  return '<button class="cph-retake" onclick="cpaPhRetakeRow(\''+t+'\','+p.id+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>';
+}
+window.cpaPhRetakeRow=function(t,id,isVid){ const p=CPA_PH_REJ[t+':'+id]; if(p) cpaPhRetakeAt(t,p,cpaPhPlaceOf(t,p).place,isVid); };
+function cpaPhRetakeAt(t,p,place,isVid){
+  const units=CPA.units||[];
+  let key='all';
+  if(t==='unit_photos'){
+    const u=units.find(x=>String(x.id)===String(p.unit_id));
+    CPA_PH.level='unit'; CPA_PH.project=String(u?u.project_id:CPA_PH.project); CPA_PH.tower=u?String(u.tower||''):''; CPA_PH.unit=String(p.unit_id);
+    key=p.area||'common';
+  }else if(t==='tower_photos'){ CPA_PH.level='tower'; CPA_PH.project=String(p.project_id); CPA_PH.tower=String(p.tower||''); CPA_PH.unit=''; }
+  else { CPA_PH.level='project'; CPA_PH.project=String(p.project_id); CPA_PH.tower=''; CPA_PH.unit=''; }
+  // The camera has to open inside this tap - a phone refuses it once the click has been handled.
+  cpaPhPick(key,isVid?'video':'photo',null,function(){
+    const go=$('cphGo'); if(go){ go.scrollIntoView({behavior:'smooth',block:'center'}); }
+    toast('Added for '+place+' — press Upload','ok');
+  });
+  cpaPhFollowPickers();
+  cpaPhPaint().then(()=>{ const z=document.querySelector('.cph-zone[data-zone="'+key+'"]'); if(z) z.scrollIntoView({behavior:'smooth',block:'center'}); });
+}
+
+// Latest upload per flat (any status, not deleted) - newest first, so the first row per flat wins.
+async function cpaPhLastUploads(ids){
+  if(!ids||!ids.length) return {};
+  try{
+    const {data}=await sb.schema('cust').from('unit_photos').select('unit_id,created_at').in('unit_id',ids)
+      .is('deleted_at',null).order('created_at',{ascending:false}).limit(1000);
+    const out={}; (data||[]).forEach(r=>{ if(!out[r.unit_id]) out[r.unit_id]=r.created_at; });
+    return out;
+  }catch(_e){ return {}; }
+}
+function cpaDdMmYy(d){ const x=new Date(d); if(isNaN(x)) return '';
+  return String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+'/'+String(x.getFullYear()).slice(2); }
 // The flats of the chosen project and block, cancelled rows dropped (a cancelled booking keeps
 // its row for audit, which is why the same physical flat could appear two to four times), and
 // filtered by whatever has been typed.
@@ -21480,13 +21402,13 @@ function cpaPhStaged(){
    Gallery is the multi-select picker. On a computer, capture is ignored and all three open the file
    picker. Every capture goes through cpaPhAdd, so shooting five photos one after another adds five,
    the same as picking five. */
-window.cpaPhPick=function(key,mode,ev){
+window.cpaPhPick=function(key,mode,ev,after){
   if(ev) ev.stopPropagation();
   const inp=document.createElement('input');
   inp.type='file';
   if(mode==='gallery'){ inp.multiple=true; inp.accept='image/*,video/*'; }
   else{ inp.accept=mode==='video'?'video/*':'image/*'; inp.setAttribute('capture','environment'); }
-  inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); };
+  inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); if(after&&inp.files.length) after(); };
   inp.click();
 };
 function cpaPhWireZones(){
@@ -21541,7 +21463,7 @@ function cpaPhRepaintZones(){
 }
 // The two buttons that act on what has been chosen sit together and know how much there is.
 function cpaPhSyncActions(){
-  const keys=CPA_PH.level==='unit'?CPA_PH_AREAS.map(a=>a[0]):['all'];
+  const keys=CPA_PH.level==='unit'?cpaPhUploadAreas().map(a=>a[0]):['all'];
   const total=keys.reduce((t,k)=>t+((CPA_PH.files[k]||[]).length),0);
   const go=$('cphGo'), clr=$('cphClear');
   if(go){
@@ -21577,7 +21499,7 @@ window.cpaPhUpload=async function(){
   if(lvl==='unit'){
     const unitId=Number(CPA_PH.unit);
     if(!unitId){ toast('Choose a flat first','err'); return; }
-    CPA_PH_AREAS.forEach(a=>(CPA_PH.files[a[0]]||[]).forEach(f=>jobs.push({f,area:a[0]})));
+    cpaPhUploadAreas().forEach(a=>(CPA_PH.files[a[0]]||[]).forEach(f=>jobs.push({f,area:a[0]})));
   } else {
     (CPA_PH.files.all||[]).forEach(f=>jobs.push({f,area:null}));
   }
@@ -21585,28 +21507,36 @@ window.cpaPhUpload=async function(){
   if(lvl==='tower'&&!CPA_PH.tower){ toast('Choose a block first','err'); return; }
 
   const go=$('cphGo'); go.disabled=true;
-  let ok=0; const failed=[];
+  let ok=0; const failed=[], newIds={};
   for(let i=0;i<jobs.length;i++){
     const {f,area}=jobs[i];
     go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading '+(i+1)+' of '+jobs.length+'…';
     try{
+      // Made smaller here first (cphPrepare), so a site upload over mobile data takes seconds.
+      const prep=await cphPrepare(f);
+      const name=prep.full!==f?f.name.replace(/\.[^.]*$/,'')+'.jpg':f.name;
       let key,table,row;
       if(lvl==='project'){
-        key=s3KeyForProjectPhoto(CPA_PH.project,f.name); table='project_photos';
+        key=s3KeyForProjectPhoto(CPA_PH.project,name); table='project_photos';
         row={project_id:Number(CPA_PH.project)};
       }else if(lvl==='tower'){
-        key=s3KeyForTowerPhoto(CPA_PH.project,CPA_PH.tower,f.name); table='tower_photos';
+        key=s3KeyForTowerPhoto(CPA_PH.project,CPA_PH.tower,name); table='tower_photos';
         row={project_id:Number(CPA_PH.project),tower:CPA_PH.tower};
       }else{
-        key=s3KeyForUnitPhoto(CPA_PH.unit,f.name); table='unit_photos';
+        key=s3KeyForUnitPhoto(CPA_PH.unit,name); table='unit_photos';
         row={unit_id:Number(CPA_PH.unit),area:area};
       }
-      const {data,error}=await uploadFileToS3(key,f);
+      const {data,error}=await uploadFileToS3(key,prep.full);
       if(error) throw new Error(error.message);
-      const {error:insErr}=await sb.schema('cust').from(table).insert(Object.assign(row,{
-        taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,
-        file_size:f.size,file_type:f.type,uploaded_by:state.email}));
+      // A thumbnail that fails to go up is not worth failing the photo for - one is made later.
+      let thumbPath=null;
+      if(prep.thumb){ try{ const tu=await uploadFileToS3(cphThumbKey(key),prep.thumb); if(!tu.error) thumbPath=tu.data.path; }catch(_e){} }
+      // Stored as 'pending' whatever is sent - the database sets that (media_status_guard).
+      const {data:ins,error:insErr}=await sb.schema('cust').from(table).insert(Object.assign(row,{
+        taken_on:takenOn,caption,storage_path:data.path,thumb_path:thumbPath,file_name:name,
+        file_size:prep.full.size,file_type:prep.full.type||f.type,uploaded_by:state.email})).select('id').single();
       if(insErr) throw new Error(insErr.message);
+      (newIds[table]=newIds[table]||[]).push(ins.id);
       ok++;
     }catch(e){ failed.push(f.name+' — '+((e&&e.message)||e)); }
   }
@@ -21614,7 +21544,18 @@ window.cpaPhUpload=async function(){
   /* Only what actually went up is cleared. A failed file stays in the list so it can be tried
      again, instead of being quietly dropped along with the ones that worked. */
   if(!failed.length) cpaPhClear(); else cpaPhRepaintZones();
-  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded','ok');
+  // One notification per batch to the approvers, not one per file.
+  let told=0, replaced=0;
+  for(const t of Object.keys(newIds)){
+    try{ const {data:n}=await sb.schema('cust').rpc('notify_media_uploaded',{p_table:t,p_ids:newIds[t]}); told=Math.max(told,Number(n||0)); }catch(_e){}
+    // What was rejected at the same place (flat and section, block, or project) is replaced by
+    // these. Only the rows leave the screens - photo files are never deleted from S3.
+    try{
+      const {data:old}=await sb.schema('cust').rpc('replace_rejected_media',{p_table:t,p_ids:newIds[t]});
+      replaced+=(old||[]).length;
+    }catch(_e){}
+  }
+  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded — waiting for approval'+(replaced?' · replaces '+replaced+' rejected':'')+(told?'':'. No photo approver is set up yet (Control Panel).'),told?'ok':'warn');
   if(failed.length) toast(failed.length+' could not be uploaded: '+failed[0],'err');
   cpaPhList();
 };
@@ -21655,7 +21596,11 @@ async function cpaPhList(){
     if(lvl!=='project') bar+=sel('tower','Block',towers.map(t=>[t,t]),CPA_PHF.tower,'All blocks');
     if(lvl==='unit'){
       bar+=sel('unit','Flat',flats.map(u=>[u.id,u.unit_code]),CPA_PHF.unit,'All flats');
-      bar+=sel('area','Section',CPA_PH_AREAS.map(x=>[x[0],x[1]]),CPA_PHF.area,'All sections');
+      // Only the sections this person uploads to: a photos-only account has no Bathroom, so it is
+      // neither offered here nor listed below (6 Oct 2026).
+      const areas=cpaPhUploadAreas();
+      if(CPA_PHF.area&&!areas.some(x=>x[0]===CPA_PHF.area)) CPA_PHF.area='';
+      bar+=sel('area','Section',areas.map(x=>[x[0],x[1]]),CPA_PHF.area,'All sections');
     }
     bar+='<span class="cph-fcount" id="cphCount"></span></div>';
 
@@ -21684,6 +21629,11 @@ async function cpaPhList(){
       }else{
         let q=sb.schema('cust').from('unit_photos').select('*').in('unit_id',ids);
         if(CPA_PHF.area) q=q.eq('area',CPA_PHF.area);
+        else if(cpaPhUploadAreas().length<CPA_PH_AREAS.length){
+          // An unset section counts as Common area, so it stays in.
+          const ok=cpaPhUploadAreas().map(x=>x[0]);
+          q=q.or('area.is.null,area.in.('+ok.join(',')+')');
+        }
         const {data}=await q.is('deleted_at',null).order('taken_on',{ascending:false});
         const list=data||[]; count=list.length;
         const byId={}; live.forEach(u=>{byId[u.id]=u;});
@@ -21697,8 +21647,123 @@ async function cpaPhList(){
       }
     }
     host.innerHTML=bar+rowsHtml;
+    cphLazy(host);
     const c=$('cphCount'); if(c) c.textContent=count?(count+(count===1?' item':' items')):'';
   }catch(e){ host.innerHTML='<div class="cph-empty" style="color:var(--err)">'+esc((e&&e.message)||String(e))+'</div>'; }
+}
+/* Thumbnails load only as they scroll into view, a few at a time, and a signed link is reused for a
+   few minutes. Signing every row's file up front - one s3-sign call each, now with an access check
+   behind it - and then decoding a full-size original per row is what made a long list hang while
+   scrolling (5 Oct 2026: a block with 100+ flat photos). */
+const CPH_URLS={};
+async function cphSignedUrl(path){
+  const c=CPH_URLS[path];
+  if(c&&Date.now()-c.t<240000) return c.url;   // signed links last 5 minutes
+  const url=await s3SignedUrl(path);
+  if(url) CPH_URLS[path]={url,t:Date.now()};
+  return url;
+}
+let cphIO=null; const cphQ=[]; let cphBusy=0;
+function cphPump(){
+  while(cphBusy<6&&cphQ.length){
+    const img=cphQ.shift(); if(!img.isConnected) continue;
+    cphBusy++;
+    // onerror: a file that is no longer in S3 (rejected before 5 Oct 2026 files were kept) shows
+    // as missing rather than as a broken image.
+    cphSignedUrl(img.getAttribute('data-ph')).then(u=>{ if(u){ img.onerror=()=>img.classList.add('cph-noimg');
+        img.onload=()=>{ const bf=img.getAttribute('data-bf'); if(bf) cphBackfill(bf); }; img.src=u; } else img.classList.add('cph-noimg'); })
+      .catch(()=>img.classList.add('cph-noimg')).finally(()=>{ cphBusy--; cphPump(); });
+  }
+}
+function cphLazy(root){
+  const imgs=(root||document).querySelectorAll('img[data-ph]:not([src])');
+  if(!('IntersectionObserver' in window)){ imgs.forEach(i=>cphQ.push(i)); cphPump(); return; }
+  if(!cphIO) cphIO=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting){ cphIO.unobserve(e.target); cphQ.push(e.target); cphPump(); } }),{rootMargin:'300px 0px'});
+  imgs.forEach(i=>cphIO.observe(i));
+}
+/* PHOTOS ARE MADE SMALLER ON THE PHONE, AND EACH GETS A THUMBNAIL (5 Oct 2026).
+
+   A phone photo is 4-8 MB and 4000px wide; nobody - customer or approver - looks at it larger than
+   a screen. Before upload it is redrawn at most 2560px on its long side (JPEG, quality 0.85: about
+   0.4-0.8 MB, no visible loss at screen size) plus a 480px thumbnail, and lists show the thumbnail.
+   The original is kept as taken when it is already smaller, or when the browser cannot read it
+   (some HEIC). Videos go up as they are, with a thumbnail from a frame at about one second. */
+const CPH_FULL=2560, CPH_THUMB=480;
+async function cphDecode(blob){
+  if(window.createImageBitmap){ try{ return await createImageBitmap(blob,{imageOrientation:'from-image'}); }catch(_e){} }
+  return await new Promise((res,rej)=>{ const u=URL.createObjectURL(blob); const im=new Image();
+    im.onload=()=>{ URL.revokeObjectURL(u); res(im); }; im.onerror=()=>{ URL.revokeObjectURL(u); rej(new Error('Could not read the image')); }; im.src=u; });
+}
+function cphJpeg(src,w,h,max,q){
+  if(!w||!h) return Promise.resolve(null);
+  const k=Math.min(1,max/Math.max(w,h)), cw=Math.max(1,Math.round(w*k)), ch=Math.max(1,Math.round(h*k));
+  const c=document.createElement('canvas'); c.width=cw; c.height=ch;
+  const g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,cw,ch); g.drawImage(src,0,0,cw,ch);
+  return new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',q));
+}
+// A frame from a video (a local file, or a signed S3 address for one already uploaded).
+function cphVideoFrame(src,local){
+  return new Promise(res=>{
+    const v=document.createElement('video'); v.muted=true; v.playsInline=true; v.preload='auto';
+    if(!local) v.crossOrigin='anonymous';
+    let done=false;
+    const fin=b=>{ if(done) return; done=true; clearTimeout(tm); if(local) URL.revokeObjectURL(src); try{ v.removeAttribute('src'); v.load(); }catch(_e){} res(b||null); };
+    const tm=setTimeout(()=>fin(null),12000);
+    v.onloadedmetadata=()=>{ try{ v.currentTime=Math.min(1,(v.duration||2)/2); }catch(_e){ fin(null); } };
+    v.onseeked=()=>{ cphJpeg(v,v.videoWidth,v.videoHeight,CPH_THUMB,0.72).then(fin,()=>fin(null)); };
+    v.onerror=()=>fin(null);
+    v.src=src;
+  });
+}
+// -> {full, thumb}: what to upload, and its thumbnail (null when none could be made).
+async function cphPrepare(file){
+  const t=file.type||'';
+  if(/^video\//.test(t)) return {full:file,thumb:await cphVideoFrame(URL.createObjectURL(file),true)};
+  if(!/^image\//.test(t)||/gif|svg/.test(t)) return {full:file,thumb:null};
+  try{
+    const im=await cphDecode(file); const w=im.width||im.naturalWidth, h=im.height||im.naturalHeight;
+    const big=await cphJpeg(im,w,h,CPH_FULL,0.85), thumb=await cphJpeg(im,w,h,CPH_THUMB,0.72);
+    if(im.close) im.close();
+    return {full:(big&&big.size<file.size)?big:file,thumb};
+  }catch(_e){ return {full:file,thumb:null}; }
+}
+// customer-portal/units/9/photos/123_a.png -> customer-portal/units/9/photos/thumbs/123_a.jpg
+function cphThumbKey(key){ return key.replace(/\/([^\/]+)$/,(m,n)=>'/thumbs/'+n.replace(/\.[^.]*$/,'')+'.jpg'); }
+
+/* Photos uploaded before thumbnails existed get one the first time a staff screen shows them: the
+   full file is read once more, shrunk here, and the thumbnail saved (cust.set_media_thumb). One at a
+   time, after the list itself has loaded, and at most once per photo per visit. Photos only - a
+   video frame from S3 is left to the next upload. */
+const cphBfQ=[], cphBfSeen=new Set(); let cphBfBusy=false;
+function cphBackfill(spec){ if(!spec||cphBfSeen.has(spec)) return; cphBfSeen.add(spec); cphBfQ.push(spec); cphBfPump(); }
+async function cphBfPump(){
+  if(cphBfBusy) return; const spec=cphBfQ.shift(); if(!spec) return; cphBfBusy=true;
+  try{
+    const i=spec.indexOf(':'), j=spec.indexOf(':',i+1);
+    const table=spec.slice(0,i), id=Number(spec.slice(i+1,j)), path=spec.slice(j+1);
+    const key=path.slice(3);
+    const {data,error}=await s3Sign('get',key);
+    if(!error&&data){
+      const r=await fetch(data.url);
+      if(r.ok){
+        const im=await cphDecode(await r.blob());
+        const thumb=await cphJpeg(im,im.width||im.naturalWidth,im.height||im.naturalHeight,CPH_THUMB,0.72);
+        if(im.close) im.close();
+        if(thumb){
+          const up=await uploadFileToS3(cphThumbKey(key),thumb);
+          if(!up.error) await sb.schema('cust').rpc('set_media_thumb',{p_table:table,p_id:id,p_thumb:up.data.path});
+        }
+      }
+    }
+  }catch(_e){}
+  cphBfBusy=false; setTimeout(cphBfPump,150);
+}
+// The image a list shows for a photo: its thumbnail, or the full file for one that has none yet
+// (data-bf asks for a thumbnail to be made once it has loaded).
+function cphThumbAttrs(p,table){
+  const isVideo=(p.file_type||'').indexOf('video')===0;
+  return 'data-ph="'+esc(p.thumb_path||p.storage_path)+'"'
+    +(!p.thumb_path&&!isVideo&&table?' data-bf="'+esc(table+':'+p.id+':'+p.storage_path)+'"':'');
 }
 // `cols` names the middle columns and `vals` fills them for one row, so the three levels share
 // one table rather than three that could drift apart.
@@ -21708,21 +21773,27 @@ async function cpaPhRows(list,table,cols,vals,emptyMsg){
     const isVideo=(p.file_type||'').indexOf('video')===0;
     const open="s3OpenSigned('"+p.storage_path.replace(/'/g,"\\'")+"')";
     let thumb;
-    if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
-    else{
-      const url=await s3SignedUrl(p.storage_path);
-      thumb=url?'<img class="cph-th" src="'+url+'" alt="" onclick="'+open+'" title="Open full size">'
-               :'<div class="cph-th vid" onclick="'+open+'"><i class="fa-solid fa-image"></i></div>';
-    }
+    if(isVideo&&p.thumb_path){ thumb='<span class="cph-vth" onclick="'+open+'" title="Open video"><img class="cph-th" '+cphThumbAttrs(p,table)+' alt="" decoding="async"><i class="fa-solid fa-circle-play"></i></span>'; }
+    else if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
+    else thumb='<img class="cph-th" '+cphThumbAttrs(p,table)+' alt="" decoding="async" onclick="'+open+'" title="Open full size">';
     return '<tr><td>'+thumb+'</td>'
       +'<td class="cph-when">'+esc(fmtDate(p.taken_on))+'</td>'
+      +'<td>'+cpaMediaStatusTag(p)+(p.status==='rejected'?cpaPhRetakeBtn(table,p):'')+'</td>'
       +vals(p).map(v=>'<td>'+v+'</td>').join('')
       +'<td style="text-align:right"><button class="cph-rm" title="Remove from the customer portal" '
         +'onclick="cpaPhDelete(\''+table+'\','+p.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>';
   }));
-  return '<table class="cph-tbl"><thead><tr><th style="width:56px"></th><th>Date</th>'
+  return '<table class="cph-tbl"><thead><tr><th style="width:56px"></th><th>Date</th><th>Status</th>'
     +cols.map(c=>'<th>'+esc(c)+'</th>').join('')
     +'<th style="width:44px"></th></tr></thead><tbody>'+rows.join('')+'</tbody></table>';
+}
+// Waiting / Published / Rejected (with the reason) / Unpublished, and who decided it.
+function cpaMediaStatusTag(p){
+  const s=CPA_MEDIA_STATUS[p.status]||CPA_MEDIA_STATUS.pending;
+  const who=p.reviewed_by&&p.status!=='pending'&&!/^already live/.test(p.reviewed_by)?' by '+String(p.reviewed_by).split('@')[0]:'';
+  return '<span class="tag '+s[1]+'" style="white-space:nowrap" title="'+esc(s[0]+who+(p.reviewed_at?' · '+fmtDate(p.reviewed_at):''))+'">'
+    +'<i class="fa-solid '+s[2]+'"></i> '+esc(s[0])+'</span>'
+    +(p.status==='rejected'?'<div class="cph-why">'+(p.review_note?esc(p.review_note)+' · ':'')+'Upload a new one to replace it</div>':'');
 }
 window.cpaPhDelete=async function(table,id){
   if(!await confirmDialog('Remove this from the customer portal? The customer will no longer see it.',
@@ -21731,6 +21802,306 @@ window.cpaPhDelete=async function(table,id){
   if(error){ toast('Could not remove it: '+error.message,'err'); return; }
   toast('Removed','ok'); cpaPhList();
 };
+
+/* ---------- Photos & Videos > Review: publish or reject before customers see anything ----------
+   Split the way things are uploaded - Projects (whole-project photos), Blocks, Flats - and within
+   that grouped by where they are, so a whole flat or block can be published in one go. Approve,
+   reject (one click; the file is kept, a rejected photo can still be published, and the
+   uploader's next photo for the same place replaces it) and unpublish all go through cust.review_media(), which also refuses an approver's own uploads. */
+/* Everything waiting, counted per project, per section and per block, so the pickers can say where
+   the work is. (5 Oct 2026: Review opened on the first project alphabetically, Dream Ananta, while
+   all 262 waiting photos were Dream Gurukul flats - the screen read "nothing waiting".) */
+async function cpaRvPending(units){
+  const unitOf={}; (units||[]).forEach(u=>{unitOf[u.id]=u;});
+  const q=(t,cols)=>sb.schema('cust').from(t).select(cols).eq('status','pending').is('deleted_at',null).limit(5000).then(r=>r.data||[],()=>[]);
+  const [pp,tp,up]=await Promise.all([q('project_photos','project_id'),q('tower_photos','project_id,tower'),q('unit_photos','unit_id')]);
+  const out={};
+  const add=(pid,sec,tower)=>{ if(pid==null) return;
+    const o=out[pid]=out[pid]||{total:0,project_photos:0,tower_photos:0,unit_photos:0,towers:{}};
+    o.total++; o[sec]++;
+    if(tower){ const t=o.towers[tower]=o.towers[tower]||{tower_photos:0,unit_photos:0}; t[sec]++; } };
+  pp.forEach(r=>add(r.project_id,'project_photos'));
+  tp.forEach(r=>add(r.project_id,'tower_photos',r.tower));
+  up.forEach(r=>{ const u=unitOf[r.unit_id]; if(u) add(u.project_id,'unit_photos',u.tower); });
+  return out;
+}
+// The section of a project that has the most waiting, or the current one if nothing is waiting.
+function cpaRvBusiestSec(p){
+  if(!p||!p.total) return CPA_RV.sec;
+  return CPA_RV_SECS.map(s=>s[0]).sort((a,b)=>(p[b]||0)-(p[a]||0))[0];
+}
+async function cpaRvPaint(projects,units){
+  projects=projects||await cpaProjects(); units=units||await cpaUnits();
+  const wrap=$('cphWrap'); if(!wrap) return;
+  const pend=await cpaRvPending(units);
+  CPA_RV.pend=pend;
+  // First time in (or arriving from a notification): go where the waiting items are.
+  if(!CPA_RV.picked){
+    const best=Object.keys(pend).sort((a,b)=>pend[b].total-pend[a].total)[0];
+    if(best&&CPA_RV.status==='pending'){ CPA_RV.project=String(best); CPA_RV.tower=''; CPA_RV.sec=cpaRvBusiestSec(pend[best]); }
+    CPA_RV.picked=true;
+  }
+  if(!CPA_RV.project&&projects.length) CPA_RV.project=CPA_PH.project||String(projects[0].id);
+  const live=(units||[]).filter(u=>u.status!=='cancelled');
+  const towers=cpaTowersForProject(live,CPA_RV.project);
+  if(CPA_RV.tower&&towers.indexOf(CPA_RV.tower)<0) CPA_RV.tower='';
+  const projUnits=live.filter(u=>String(u.project_id)===String(CPA_RV.project));
+  // Waiting counts per section for the chosen project - what the section buttons show.
+  const pp=pend[CPA_RV.project]||{};
+  const counts=CPA_RV_SECS.map(s=>pp[s[0]]||0);
+  const waitTxt=n=>n?' ('+n+' waiting)':'';
+  const projOpts=projects.map(p=>[p.id,p.name+waitTxt((pend[p.id]||{}).total)]);
+  const towerOpts=towers.map(t=>{ const c=(pp.towers&&pp.towers[t])||{}; return [t,t+waitTxt(c[CPA_RV.sec]||0)]; });
+  const sel=(id,label,opts,val,allLabel)=>'<div class="cph-f"><label>'+esc(label)+'</label><div class="cph-sel"><select onchange="cpaRvSet(\''+id+'\',this.value)">'
+    +(allLabel?'<option value=""'+(val?'':' selected')+'>'+esc(allLabel)+'</option>':'')
+    +opts.map(o=>'<option value="'+esc(o[0])+'"'+(String(o[0])===String(val)?' selected':'')+'>'+esc(o[1])+'</option>').join('')+'</select></div></div>';
+  wrap.innerHTML=cpaPhModeBar()
+    +'<div class="cph-card">'
+      +'<div class="cph-levels" style="margin-bottom:12px">'
+        +CPA_RV_SECS.map((s,i)=>'<button class="cph-lv'+(CPA_RV.sec===s[0]?' on':'')+'" onclick="cpaRvSet(\'sec\',\''+s[0]+'\')"><i class="fa-solid '+s[2]+'"></i>'+esc(s[1])
+          +(counts[i]?'<span class="cph-badge">'+counts[i]+'</span>':'')+'</button>').join('')
+      +'</div>'
+      +'<div class="cph-filters" style="margin:0">'
+        +sel('project','Project',projOpts,CPA_RV.project,'')
+        +(CPA_RV.sec!=='project_photos'?sel('tower','Block',towerOpts,CPA_RV.tower,'All blocks'):'')
+        +sel('status','Showing',Object.keys(CPA_MEDIA_STATUS).map(k=>[k,CPA_MEDIA_STATUS[k][0]]),CPA_RV.status,'')
+      +'</div>'
+    +'</div>'
+    +'<div class="cph-card"><div class="cph-rvbar" id="cphRvBar"></div><div id="cphRvList"><div class="cph-empty">Loading…</div></div></div>';
+  cpaPhFillBadge();
+  await cpaRvList(projUnits);
+}
+window.cpaRvSet=function(k,v){
+  CPA_RV[k]=v; CPA_RV.sel.clear();
+  if(k==='project'){
+    CPA_RV.tower='';
+    // A project chosen while looking at what is waiting opens on a section that has some.
+    const p=(CPA_RV.pend||{})[v];
+    if(CPA_RV.status==='pending'&&p&&p.total&&!p[CPA_RV.sec]) CPA_RV.sec=cpaRvBusiestSec(p);
+  }
+  cpaRvPaint();
+};
+async function cpaRvList(projUnits){
+  const host=$('cphRvList'); if(!host) return;
+  try{
+    if(!projUnits){ const units=await cpaUnits(); projUnits=(units||[]).filter(u=>u.status!=='cancelled'&&String(u.project_id)===String(CPA_RV.project)); }
+    const t=CPA_RV.sec, pid=Number(CPA_RV.project);
+    let q=sb.schema('cust').from(t).select('*').eq('status',CPA_RV.status).is('deleted_at',null);
+    let byUnit={};
+    if(t==='unit_photos'){
+      const scope=projUnits.filter(u=>!CPA_RV.tower||u.tower===CPA_RV.tower);
+      scope.forEach(u=>{byUnit[u.id]=u;});
+      CPA_RV.byUnit=byUnit;
+      const ids=scope.map(u=>u.id);
+      if(!ids.length){ host.innerHTML='<div class="cph-empty">No flats here.</div>'; cpaRvBar(); return; }
+      q=q.in('unit_id',ids);
+    }else{
+      q=q.eq('project_id',pid);
+      if(t==='tower_photos'&&CPA_RV.tower) q=q.eq('tower',CPA_RV.tower);
+    }
+    const {data,error}=await q.order('created_at',{ascending:false}).limit(240);
+    if(error) throw error;
+    const list=data||[];
+    CPA_RV.shown=list;
+    if(!list.length){
+      host.innerHTML='<div class="cph-empty">'+(CPA_RV.status==='pending'?'Nothing waiting for approval here. ✓':'Nothing '+esc(CPA_MEDIA_STATUS[CPA_RV.status][0].toLowerCase())+' here.')+'</div>';
+      cpaRvBar(); return;
+    }
+    // Group by place: one group for the project, one per block, one per flat.
+    const natural=(a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true});
+    const groups={};
+    list.forEach(p=>{
+      let k,label;
+      if(t==='unit_photos'){ const u=byUnit[p.unit_id]||{}; k='u'+p.unit_id; label=(u.tower||'')+' · Flat '+(u.unit_code||'?'); }
+      else if(t==='tower_photos'){ k='t'+p.tower; label=p.tower||'Block'; }
+      else { k='p'; label='Whole project'; }
+      (groups[k]=groups[k]||{label,items:[]}).items.push(p);
+    });
+    const keys=Object.keys(groups).sort((a,b)=>natural(groups[a].label,groups[b].label));
+    CPA_RV.order=keys.flatMap(k=>groups[k].items.map(p=>p.id));   // the preview's arrows follow this
+    const cards=await Promise.all(list.map(p=>cpaRvCard(p,t)));
+    const cardOf={}; list.forEach((p,i)=>{cardOf[p.id]=cards[i];});
+    const canPublish=CPA_RV.status!=='published';
+    const me=String(state.email||'').toLowerCase();
+    host.innerHTML=keys.map(k=>{
+      const g=groups[k];
+      // An approver's own uploads are left out: the database would refuse them anyway.
+      const ids=g.items.filter(p=>state.super||String(p.uploaded_by||'').toLowerCase()!==me).map(p=>p.id);
+      return '<div class="cph-rvg"><div class="cph-rvgh"><b>'+esc(g.label)+'</b><span>'+g.items.length+' item'+(g.items.length===1?'':'s')+'</span>'
+        +(canPublish&&ids.length?'<button class="btn btn-sm" onclick="cpaRvDecide(\'publish\','+JSON.stringify(ids)+')"><i class="fa-solid fa-check"></i> Publish all '+ids.length+'</button>':'')
+        +(ids.length?'<button class="btn btn-sm" data-tick-ids="'+JSON.stringify(ids)+'" onclick="cpaRvTick('+JSON.stringify(ids)+')"><i class="fa-regular fa-square-check"></i> Tick all</button>':'')+'</div>'
+        +'<div class="cph-rvgrid">'+g.items.map(p=>cardOf[p.id]).join('')+'</div></div>';
+    }).join('')
+      +(list.length>=240?'<div class="cph-empty">Showing the newest 240. Publish or reject these to see the rest.</div>':'');
+    cphLazy(host);
+    cpaRvSyncTickAll();
+    cpaRvBar();
+  }catch(e){ host.innerHTML='<div class="cph-empty" style="color:var(--err)">'+esc((e&&e.message)||String(e))+'</div>'; }
+}
+async function cpaRvCard(p,t){
+  const isVideo=(p.file_type||'').indexOf('video')===0;
+  const open="s3OpenSigned('"+String(p.storage_path||'').replace(/'/g,"\\'")+"')";
+  let media;
+  const prev='cpaRvPreview('+p.id+')';
+  if(isVideo&&p.thumb_path) media='<span class="cph-vth" onclick="'+prev+'" title="Play video"><img class="cph-rvm" '+cphThumbAttrs(p,t)+' alt="" decoding="async"><i class="fa-solid fa-circle-play"></i></span>';
+  else if(isVideo) media='<div class="cph-rvm vid" onclick="'+prev+'" title="Play video"><i class="fa-solid fa-circle-play"></i><span>Video</span></div>';
+  else media='<img class="cph-rvm" '+cphThumbAttrs(p,t)+' alt="" decoding="async" onclick="'+prev+'" title="Open larger, with Publish / Reject">';
+  const area=t==='unit_photos'?((CPA_PH_AREAS.find(a=>a[0]===(p.area||'common'))||[0,p.area])[1]):'';
+  const mine=String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super;
+  const on=CPA_RV.sel.has(p.id);
+  const id=JSON.stringify([p.id]);
+  let acts='';
+  if(mine) acts='<span class="cph-mine" title="Another approver has to review your own uploads">Your upload</span>';
+  else if(p.status==='pending'||p.status==='unpublished')
+    acts='<button class="cph-ok" onclick="cpaRvDecide(\'publish\','+id+')" title="Publish - customers will see it"><i class="fa-solid fa-check"></i></button>'
+        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject - the uploader is asked for a better one"><i class="fa-solid fa-xmark"></i></button>';
+  else if(p.status==='published')
+    acts='<button class="cph-un" onclick="cpaRvDecide(\'unpublish\','+id+')" title="Unpublish - hide it from customers again"><i class="fa-solid fa-eye-slash"></i></button>'
+        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject - hide it and ask the uploader for a better one"><i class="fa-solid fa-xmark"></i></button>';
+  else if(p.status==='rejected')
+    acts='<button class="cph-ok" onclick="cpaRvDecide(\'publish\','+id+')" title="Publish after all - customers will see it"><i class="fa-solid fa-check"></i></button>';
+  return '<div class="cph-rvc'+(on?' cph-picked':'')+'" data-id="'+p.id+'">'
+    +(!mine?'<label class="cph-rvck"><input type="checkbox" '+(on?'checked':'')+' onchange="cpaRvToggle('+p.id+',this.checked)"></label>':'')
+    +media
+    +'<div class="cph-rvi"><div class="cph-rvd">'+esc(fmtDate(p.taken_on))+(area?' · '+esc(area):'')+'</div>'
+      +'<div class="cph-rvu" title="'+esc(p.uploaded_by||'')+'">'+esc(String(p.uploaded_by||'').split('@')[0])+'</div>'
+      +(p.status==='rejected'&&p.review_note?'<div class="cph-why">'+esc(p.review_note)+'</div>':'')
+    +'</div>'
+    +'<div class="cph-rva">'+acts+'</div></div>';
+}
+function cpaRvBar(){
+  const bar=$('cphRvBar'); if(!bar) return;
+  const n=CPA_RV.sel.size, st=CPA_RV.status;
+  const ids=JSON.stringify([...CPA_RV.sel]);
+  bar.innerHTML='<span class="cph-fcount">'+(n?n+' ticked':'Tick photos to act on several at once')+'</span>'
+    +(n?(st!=='published'?'<button class="btn btn-sm btn-primary" onclick="cpaRvDecide(\'publish\','+ids+')"><i class="fa-solid fa-check"></i> Publish '+n+'</button>':'')
+      +(st==='published'?'<button class="btn btn-sm" onclick="cpaRvDecide(\'unpublish\','+ids+')"><i class="fa-solid fa-eye-slash"></i> Unpublish '+n+'</button>':'')
+      +(st!=='rejected'?'<button class="btn btn-sm btn-danger" onclick="cpaRvDecide(\'reject\','+ids+')"><i class="fa-solid fa-xmark"></i> Reject '+n+'</button>':'')
+      +'<button class="btn btn-sm" onclick="cpaRvClearSel()">Clear</button>':'');
+}
+window.cpaRvToggle=function(id,on){
+  if(on) CPA_RV.sel.add(id); else CPA_RV.sel.delete(id);
+  const c=document.querySelector('.cph-rvc[data-id="'+id+'"]'); if(c) c.classList.toggle('cph-picked',on);
+  cpaRvSyncTickAll();
+  cpaRvBar();
+};
+// Tick all / Untick all for one group: ticks every photo in it, or - when they are all ticked
+// already - unticks them again.
+window.cpaRvTick=function(ids){
+  const all=ids.length&&ids.every(id=>CPA_RV.sel.has(id));
+  ids.forEach(id=>{
+    if(all) CPA_RV.sel.delete(id); else CPA_RV.sel.add(id);
+    const c=document.querySelector('.cph-rvc[data-id="'+id+'"]');
+    if(c){ c.classList.toggle('cph-picked',!all); const cb=c.querySelector('input'); if(cb) cb.checked=!all; }
+  });
+  cpaRvSyncTickAll();
+  cpaRvBar();
+};
+// Each group's button says what it will do next.
+function cpaRvSyncTickAll(){
+  document.querySelectorAll('[data-tick-ids]').forEach(b=>{
+    let ids=[]; try{ ids=JSON.parse(b.getAttribute('data-tick-ids')); }catch(_e){}
+    const all=ids.length&&ids.every(id=>CPA_RV.sel.has(id));
+    b.innerHTML=all?'<i class="fa-solid fa-square-minus"></i> Untick all':'<i class="fa-regular fa-square-check"></i> Tick all';
+    b.classList.toggle('cph-tickon',!!all);
+  });
+}
+window.cpaRvClearSel=function(){ CPA_RV.sel.clear(); document.querySelectorAll('.cph-rvc.cph-picked').forEach(c=>{c.classList.remove('cph-picked'); const cb=c.querySelector('input'); if(cb) cb.checked=false;}); cpaRvSyncTickAll(); cpaRvBar(); };
+/* Larger preview with the decision buttons, so a photo can be checked properly before it is
+   published. Arrows (and the keyboard arrows) move through the list in the order it is shown;
+   after Publish / Reject / Unpublish it moves on to the next one by itself. */
+function cpaRvPlace(p){
+  const t=CPA_RV.sec;
+  if(t==='unit_photos'){ const u=(CPA_RV.byUnit||{})[p.unit_id]||{};
+    const area=(CPA_PH_AREAS.find(a=>a[0]===(p.area||'common'))||[0,p.area||''])[1];
+    return (u.tower||'')+' · Flat '+(u.unit_code||'?')+(area?' · '+area:''); }
+  if(t==='tower_photos') return p.tower||'Block';
+  return 'Whole project';
+}
+window.cpaRvPreview=async function(id){
+  const order=CPA_RV.order||[], i=order.indexOf(id);
+  const p=(CPA_RV.shown||[]).find(x=>x.id===id); if(!p) return;
+  cpaRvPreviewClose();
+  const isVid=(p.file_type||'').indexOf('video')===0;
+  const mine=String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super;
+  const one=JSON.stringify([p.id]);
+  let acts;
+  if(mine) acts='<span class="cph-pvnote">Your upload — another approver has to review it.</span>';
+  else if(p.status==='pending'||p.status==='unpublished')
+    acts='<button class="cph-pvbtn ok" onclick="cpaRvPvDecide(\'publish\','+p.id+')"><i class="fa-solid fa-check"></i> Publish</button>'
+        +'<button class="cph-pvbtn no" onclick="cpaRvPvDecide(\'reject\','+p.id+')"><i class="fa-solid fa-xmark"></i> Reject</button>';
+  else if(p.status==='published')
+    acts='<button class="cph-pvbtn un" onclick="cpaRvPvDecide(\'unpublish\','+p.id+')"><i class="fa-solid fa-eye-slash"></i> Unpublish</button>'
+        +'<button class="cph-pvbtn no" onclick="cpaRvPvDecide(\'reject\','+p.id+')"><i class="fa-solid fa-xmark"></i> Reject</button>';
+  else acts='<button class="cph-pvbtn ok" onclick="cpaRvPvDecide(\'publish\','+p.id+')"><i class="fa-solid fa-check"></i> Publish after all</button>';
+  const box=document.createElement('div');
+  box.className='cph-box cph-pv'; box.id='cphPv';
+  box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
+      +'<span class="nm"><b>'+esc(cpaRvPlace(p))+'</b> · '+esc(fmtDate(p.taken_on))+' · '+esc(String(p.uploaded_by||'').split('@')[0])+'</span>'
+      +'<span class="cph-pvn">'+(i+1)+' of '+order.length+'</span>'
+      +'<button class="cph-boxx" title="Close (Esc)" onclick="cpaRvPreviewClose()">&times;</button></div>'
+    +(i>0?'<button class="cph-pvnav l" title="Previous (←)" onclick="cpaRvPreviewStep(-1)"><i class="fa-solid fa-chevron-left"></i></button>':'')
+    +(i<order.length-1?'<button class="cph-pvnav r" title="Next (→)" onclick="cpaRvPreviewStep(1)"><i class="fa-solid fa-chevron-right"></i></button>':'')
+    +'<div class="cph-pvacts">'+acts+'</div>'
+    +'<div class="cph-pvstage"><div class="cph-pvload"><i class="fa-solid fa-spinner fa-spin"></i></div></div>';
+  box.onclick=function(e){ if(e.target===box) cpaRvPreviewClose(); };
+  document.body.appendChild(box);
+  CPA_RV.pvId=p.id;
+  if(!window.__cphPvKeys){ window.__cphPvKeys=true;
+    document.addEventListener('keydown',function(e){
+      if(!$('cphPv')) return;
+      if(e.key==='Escape') cpaRvPreviewClose();
+      else if(e.key==='ArrowRight') cpaRvPreviewStep(1);
+      else if(e.key==='ArrowLeft') cpaRvPreviewStep(-1);
+    }); }
+  // The thumbnail is usually signed already, so it shows at once; the full photo replaces it.
+  if(!isVid&&p.thumb_path){
+    cphSignedUrl(p.thumb_path).then(tu=>{ const st=box.querySelector('.cph-pvstage');
+      if(tu&&st&&box.isConnected&&!st.querySelector('img')) st.innerHTML='<img src="'+tu+'" alt="">'; });
+  }
+  const url=await cphSignedUrl(p.storage_path);
+  const stage=box.querySelector('.cph-pvstage'); if(!stage||!box.isConnected) return;
+  if(!url){ stage.innerHTML='<div class="cph-pvload">File not available</div>'; return; }
+  if(isVid){ stage.innerHTML='<video src="'+url+'" controls autoplay playsinline></video>'; return; }
+  const full=new Image();
+  full.onload=()=>{ if(box.isConnected){ stage.innerHTML=''; stage.appendChild(full); } };
+  full.onerror=()=>{ if(box.isConnected&&!stage.querySelector('img')) stage.innerHTML='<div class="cph-pvload">File not available</div>'; };
+  full.alt=''; full.src=url;
+};
+window.cpaRvPreviewClose=function(){ const b=$('cphPv'); if(b) b.remove(); };
+window.cpaRvPreviewStep=function(d){
+  const order=CPA_RV.order||[], i=order.indexOf(CPA_RV.pvId), j=i+d;
+  if(i<0||j<0||j>=order.length) return;
+  cpaRvPreview(order[j]);
+};
+// A decision from the preview: remember what comes next, so the preview reopens on it afterwards.
+window.cpaRvPvDecide=function(decision,id){
+  const order=CPA_RV.order||[], i=order.indexOf(id);
+  CPA_RV.pvNext=order[i+1]!=null?order[i+1]:(order[i-1]!=null?order[i-1]:null);
+  cpaRvPreviewClose();
+  cpaRvDecide(decision,[id],true);
+};
+// Reject is one click. Nothing is lost by it: the file stays, the photo can still be published
+// from 'Rejected', and the uploader's next photo for the same place replaces it.
+window.cpaRvDecide=function(decision,ids,fromPreview){
+  if(!fromPreview) CPA_RV.pvNext=null;
+  ids=(ids||[]).filter(Boolean);
+  if(!ids.length) return;
+  cpaRvDo(decision,ids,null);
+};
+async function cpaRvDo(decision,ids,note){
+  const {data,error}=await sb.schema('cust').rpc('review_media',{p_table:CPA_RV.sec,p_ids:ids,p_decision:decision,p_note:note});
+  if(error){ toast(error.message,'err'); return; }
+  const done=data||[];
+  const skipped=ids.length-done.length;
+  const verb={publish:'published',reject:'rejected',unpublish:'unpublished'}[decision];
+  toast(done.length+' '+verb+(skipped?' · '+skipped+' skipped (your own uploads, or already changed)':''),skipped&&!done.length?'warn':'ok');
+  CPA_RV.sel.clear();
+  const next=CPA_RV.pvNext; CPA_RV.pvNext=null;
+  await cpaRvPaint();
+  // Decided from the preview: carry on with the next photo, if it is still in the list.
+  if(next!=null&&(CPA_RV.order||[]).indexOf(next)!==-1) cpaRvPreview(next);
+}
 
 /* ---------- Tab 5: Inspection (checklist scan + dated photo/video update trail, per unit) ---------- */
 async function cpaRenderInspection(host){
@@ -21990,29 +22361,70 @@ function supportStatusTag(t){
   const label=t.zoho_status||(t.zoho_ticket_id?t.status:'Not yet in Zoho');
   return `<span class="tag ${cls}">${esc(label)}</span>`;
 }
+/* Admin Support list, filtered by Zoho status, how the ticket came in, and a search over subject,
+   customer and ticket number. All three filter the list already loaded, so changing one is instant. */
+let CPA_SUP={rows:null,status:'',via:'',q:''};
 async function cpaRenderSupport(host){
-  const {data}=await sb.schema('cust').from('support_tickets').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
-  const ticketIds=(data||[]).map(t=>t.id);
-  const {data:atts}=ticketIds.length?await sb.schema('cust').from('support_ticket_attachments').select('*').in('ticket_id',ticketIds).is('deleted_at',null):{data:[]};
-  const attsByTicket={};(atts||[]).forEach(a=>{(attsByTicket[a.ticket_id]=attsByTicket[a.ticket_id]||[]).push(a);});
-  const rows=(data||[]).map(t=>[esc((t.units&&t.units.unit_code)||'—'),esc(t.subject),esc(t.zoho_ticket_number||'—'),
-    supportStatusTag(t),
-    (attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}${a.zoho_attachment_id?' (in Zoho)':' (not in Zoho)'}"><i class="fa-solid fa-paperclip"></i></button>`).join(' ')||'—',
-    fmtDate(t.created_at),
-    (t.zoho_ticket_id?`<button class="btn btn-sm" onclick="cpaTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button> <button class="btn btn-sm" onclick="cpaSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="cpaRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`)]);
-  host.innerHTML=(rows.length?cpaTable(['Unit','Subject','Zoho #','Status','Attachments','Raised','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>')+
-    '<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself; "Refresh" pulls its current status and conversation back here. Attachment icons show whether that file made it to the Zoho ticket yet — "Retry" also re-attempts any that didn\'t.</div>';
+  const {data}=await sb.schema('cust').from('support_tickets').select('*, units(unit_code), customers(full_name)').is('deleted_at',null)
+    .order('created_at',{ascending:false}).limit(1000);
+  CPA_SUP.rows=(data||[]).sort((a,b)=>String(b.zoho_created_time||b.created_at).localeCompare(String(a.zoho_created_time||a.created_at)));
+  const ids=CPA_SUP.rows.map(t=>t.id);
+  const {data:atts}=ids.length?await sb.schema('cust').from('support_ticket_attachments').select('*').in('ticket_id',ids).is('deleted_at',null):{data:[]};
+  CPA_SUP.atts={};(atts||[]).forEach(a=>{(CPA_SUP.atts[a.ticket_id]=CPA_SUP.atts[a.ticket_id]||[]).push(a);});
+  const statusOf=t=>t.zoho_status||(t.zoho_ticket_id?t.status:'Not yet in Zoho');
+  const counts={};CPA_SUP.rows.forEach(t=>{const k=statusOf(t);counts[k]=(counts[k]||0)+1;});
+  const vias={};CPA_SUP.rows.forEach(t=>{const k=custTicketVia(t)[0];vias[k]=(vias[k]||0)+1;});
+  const opt=(v,l,cur)=>'<option value="'+esc(v)+'"'+(v===cur?' selected':'')+'>'+esc(l)+'</option>';
+  host.innerHTML='<div class="cph-filters" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">'
+      +'<div class="frm" style="min-width:200px"><label>Status</label><select onchange="CPA_SUP.status=this.value;cpaSupPaint()">'
+        +opt('','All statuses ('+CPA_SUP.rows.length+')',CPA_SUP.status)
+        +Object.keys(counts).sort((a,b)=>counts[b]-counts[a]).map(k=>opt(k,k+' ('+counts[k]+')',CPA_SUP.status)).join('')+'</select></div>'
+      +'<div class="frm" style="min-width:150px"><label>Via</label><select onchange="CPA_SUP.via=this.value;cpaSupPaint()">'
+        +opt('','All',CPA_SUP.via)+Object.keys(vias).sort().map(k=>opt(k,k+' ('+vias[k]+')',CPA_SUP.via)).join('')+'</select></div>'
+      +'<div class="frm" style="flex:1 1 220px"><label>Search</label><input placeholder="Subject, customer or ticket #" value="'+esc(CPA_SUP.q)+'" oninput="CPA_SUP.q=this.value;cpaSupPaint()"></div>'
+      +'<span id="cpaSupCount" style="font-size:12.5px;color:var(--slate);padding-bottom:9px"></span></div>'
+    +'<div id="cpaSupList"></div>'
+    +'<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself. Tickets customers email to customer care are brought in every 10 minutes (last two months). "Conversation" fetches the latest messages from Zoho as it opens.</div>';
+  cpaSupPaint();
 }
+window.cpaSupPaint=function(){
+  const host=$('cpaSupList'); if(!host||!CPA_SUP.rows) return;
+  const q=CPA_SUP.q.trim().toLowerCase();
+  const statusOf=t=>t.zoho_status||(t.zoho_ticket_id?t.status:'Not yet in Zoho');
+  const list=CPA_SUP.rows.filter(t=>(!CPA_SUP.status||statusOf(t)===CPA_SUP.status)&&(!CPA_SUP.via||custTicketVia(t)[0]===CPA_SUP.via)
+    &&(!q||[t.subject,t.zoho_ticket_number,t.customers&&t.customers.full_name,t.zoho_contact_email,t.units&&t.units.unit_code].some(x=>String(x||'').toLowerCase().indexOf(q)!==-1)));
+  const c=$('cpaSupCount'); if(c) c.textContent=list.length+' of '+CPA_SUP.rows.length;
+  const rows=list.map(t=>[esc((t.customers&&t.customers.full_name)||t.zoho_contact_email||'—')+'<div style="font-size:11.5px;color:var(--slate)">'+esc((t.units&&t.units.unit_code)||'All flats')+'</div>',
+    esc(custTicketVia(t)[0]),esc(t.subject),esc(t.zoho_ticket_number||'—'),
+    supportStatusTag(t),
+    (CPA_SUP.atts[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}${a.zoho_attachment_id?' (in Zoho)':' (not in Zoho)'}"><i class="fa-solid fa-paperclip"></i></button>`).join(' ')||'—',
+    fmtDate(t.zoho_created_time||t.created_at),
+    (t.zoho_ticket_id?`<button class="btn btn-sm" onclick="cpaTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button> <button class="btn btn-sm" onclick="cpaSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="cpaRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`)]);
+  host.innerHTML=rows.length?cpaTable(['Customer','Via','Subject','Zoho #','Status','Attachments','Raised','Actions'],rows)
+    :'<div class="card card-pad empty">No tickets match.</div>';
+};
 function cpaBuildBubbles(t,threads,comments){
-  const msgs=[{time:t.created_at,author:'Customer',content:t.description||t.subject}]
-    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,author:m.direction==='out'?'Support team':(m.author_name||'Customer'),content:m.content})))
-    .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,author:m.posted_by_customer?(m.commenter_name||'Customer'):'Support team (comment)',content:m.content})));
+  const msgs=(t.source==='zoho'?[]:[{time:t.created_at,author:'Customer',content:t.description||t.subject}])
+    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,out:m.direction==='out',author:m.direction==='out'?((m.author_name||'Agent')+' (agent)'):((m.author_name||'Customer')+' (customer)'),content:m.content})))
+    .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,out:!m.posted_by_customer,author:m.posted_by_customer?((m.commenter_name||'Customer')+' (customer, via portal)'):((m.commenter_name||'Agent')+' (agent comment)'),content:m.content})));
   msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
-  return msgs.map(m=>`<div style="margin-bottom:10px"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${fmtDate(m.time)}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px">${esc(m.content||'')}</div></div>`).join('')||'<div class="card card-pad empty">No messages yet.</div>';
+  // Agent messages on the right, customer messages on the left - and the time as well as the date.
+  const when=d=>d?new Date(d).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+  return msgs.map(m=>`<div style="margin-bottom:10px;display:flex;flex-direction:column;align-items:${m.out?'flex-end':'flex-start'}"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${esc(when(m.time))}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px;max-width:88%;background:${m.out?'#eff6ff':'#fff'}">${esc(m.content||'')}</div></div>`).join('')||'<div class="card card-pad empty">No messages yet.</div>';
 }
 let CPA_TICKET_POLL_TIMER=null;
+// Brings one ticket's status and whole conversation down from Zoho (zoho-desk 'sync'). Errors are
+// left for the caller's own message; a failure here still shows whatever is already stored.
+async function supTicketSync(id){
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'sync',ticketId:id})});
+    return await res.json().catch(()=>({}));
+  }catch(e){ return {error:String(e&&e.message||e)}; }
+}
 window.cpaTicketDetail=async function(id){
-  openModal('<div class="loader"><div class="spin"></div></div>');
+  openModal('<div class="card-pad" style="text-align:center;color:var(--slate)"><div class="loader"><div class="spin"></div></div>Fetching the conversation from Zoho…</div>');
+  await supTicketSync(id);
   const {data:t}=await sb.schema('cust').from('support_tickets').select('*').eq('id',id).maybeSingle();
   const [{data:threads},{data:comments}]=await Promise.all([
     sb.schema('cust').from('support_ticket_threads').select('*').eq('ticket_id',id),
@@ -22071,16 +22483,37 @@ window.cpaRetryTicket=async function(id){
 /* ---------- Tab 10: Referrals ---------- */
 const CPA_REFERRAL_STATUSES={submitted:'Submitted',contacted:'Contacted',interested:'Interested',visited_site:'Visited Site',booked:'Booked',not_interested:'Not Interested'};
 async function cpaRenderReferrals(host){
-  const {data}=await sb.schema('cust').from('referrals').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
+  await custRefProjects();
+  const {data}=await sb.schema('cust').from('referrals').select('*, units(unit_code), referral_projects(name)').order('created_at',{ascending:false}).limit(200);
   const rows=(data||[]).map(r=>[esc((r.units&&r.units.unit_code)||'—'),esc(r.prospect_name),esc(r.prospect_phone||'—'),esc(r.prospect_email||'—'),
+    esc(custRefProjectNames(r)||'—'),
+    '<span style="font-size:12.5px;color:var(--slate)">'+esc(r.notes||'—')+'</span>',
+    cpaReferralCrmCell(r),
     `<select onchange="cpaReferralStatusChange(${r.id},this.value)">${Object.keys(CPA_REFERRAL_STATUSES).map(k=>`<option value="${k}" ${k===r.status?'selected':''}>${CPA_REFERRAL_STATUSES[k]}</option>`).join('')}</select>`,
     fmtDate(r.created_at)]);
-  host.innerHTML=rows.length?cpaTable(['Unit','Prospect','Phone','Email','Status','Submitted'],rows):'<div class="card card-pad empty">No referrals submitted yet.</div>';
+  host.innerHTML=rows.length?cpaTable(['Unit','Prospect','Phone','Email','Project','Looking for','CRM','Status','Submitted'],rows):'<div class="card card-pad empty">No referrals submitted yet.</div>';
 }
 window.cpaReferralStatusChange=async function(id,status){
   const {error}=await sb.schema('cust').from('referrals').update({status,updated_at:new Date().toISOString(),updated_by:state.email}).eq('id',id);
   if(error){toast('Update failed: '+error.message,'err');return;}
   toast('Status updated','ok');
+};
+// Where the referral is in the CRM: its lead number once created, or why it is not there yet.
+function cpaReferralCrmCell(r){
+  const again='<button class="btn btn-sm" style="margin-top:4px" onclick="cpaReferralCrmRetry('+r.id+',this)"><i class="fa-solid fa-rotate-right"></i> Send '+(r.crm_status?'again':'')+'</button>';
+  if(r.crm_status==='sent') return '<span class="tag t-green" title="Sent '+esc(fmtDate(r.crm_sent_at))+'"><i class="fa-solid fa-circle-check"></i> Lead '+esc(r.crm_lead_id||'')+'</span>';
+  if(r.crm_status==='sending') return '<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Sending…</span>';
+  if(r.crm_status==='failed') return '<span class="tag t-red" title="'+esc(r.crm_error||'')+'"><i class="fa-solid fa-triangle-exclamation"></i> Failed</span>'
+    +'<div style="font-size:11.5px;color:var(--err);max-width:220px;margin-top:3px">'+esc(r.crm_error||'')+'</div>'+again;
+  return '<span class="tag t-gray">Not sent</span><div>'+again+'</div>';
+}
+window.cpaReferralCrmRetry=async function(id,btn){
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  const {data,error}=await sb.schema('cust').rpc('referral_crm_retry',{p_id:id});
+  if(error){ toast(error.message,'err'); }
+  else if(!data){ toast('Not sent — sending to the CRM is switched off, or the referral has no consent','warn'); }
+  else toast('Sent to the CRM — the lead number appears here within a minute','ok');
+  route();
 };
 
 /* ---------- Tab 11: Maintenance (post-possession QR payments to confirm, upcoming demand preview) ---------- */
@@ -22942,7 +23375,7 @@ function custReceiptDocHtml(r,items,unit,contact,forPrint){
     field('Instn. No.',r.instrument_no),
     field('Instn. Date',r.instrument_date?fmtDate(r.instrument_date):'')
   ].join('');
-  const rowsHtml=(items||[]).map((it,i)=>'<tr>'+
+  const rowsHtml=custAnantaReceiptItems(unit,items).map((it,i)=>'<tr>'+
     '<td>'+(i+1)+'</td>'+
     '<td>'+(it.line_type==='on_account'?'On Account':'Bill')+'</td>'+
     '<td>'+esc(it.schedule||'—')+'</td>'+
@@ -23134,9 +23567,7 @@ window.custDownloadSelectedDocs=async function(){
       ? await sb.schema('cust').from('receipt_items').select('against_demand_no,schedule,revenue_head,amount,line_type,particulars,receipt_id').in('receipt_id',rids2)
       : {data:[]};
     const receiptDates={};(rcpts2||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
-    const sba=Number(unit.super_built_up_area_sqft||0);
-    const unitCost=(csi||[]).find(i=>/unit cost/i.test(i.component||''));
-    const rate=sba&&unitCost?Math.round(Number(unitCost.amount||0)/sba):null;
+    const rate=custDocRate(unit,csi);
     const lateFee=Number((snap&&snap.late_fee_accrued)||0);
     (invs||[]).forEach(inv=>{
       const {data:its}={data:(allInv||[]).find(a=>a.document_no===inv.document_no)};
@@ -23241,7 +23672,7 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
     head='<th>Due Date</th><th>Description</th><th>Charge Type</th>'+
       '<th class="amt">Amount Due</th><th class="amt">Amount Paid</th><th class="amt">Amount Payable</th>';
     let due=0,paid=0;
-    rowsHtml=(ctx.plan||[]).map(r=>{
+    rowsHtml=custAnantaPlan(unit,ctx.plan).map(r=>{
       due+=r.due; paid+=r.paid;
       return '<tr><td>'+(r.dueDate?fmtDate(r.dueDate):'—')+'</td>'+
         '<td>'+esc(r.schedule||'—')+'</td><td>'+esc(r.head||'—')+'</td>'+
@@ -23263,7 +23694,7 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
     head='<th>Sl. #</th><th>Schedule Name</th><th>Revenue Name</th>'+
       '<th class="amt">Amount</th><th class="amt">GST</th><th class="amt">Total Amt</th>';
     let amt=0,tax=0,net=0;
-    rowsHtml=(ctx.items||[]).map((it,i)=>{
+    rowsHtml=custAnantaInvoiceItems(unit,ctx.items).map((it,i)=>{
       amt+=Number(it.amount||0); tax+=Number(it.tax||0); net+=Number(it.net_amount||0);
       return '<tr><td>'+(i+1)+'</td><td>'+esc(it.schedule||'—')+'</td><td>'+esc(it.revenue_head||'—')+'</td>'+
         '<td class="amt">'+custInr(it.amount||0)+'</td><td class="amt">'+custInr(it.tax||0)+'</td>'+
@@ -23342,7 +23773,7 @@ function custBuildPlan(allInv,alloc,beforeDate,receiptDates){
     (iv.invoice_items||[]).slice().sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).forEach(it=>{
       const due=Number(it.net_amount||0);
       const paid=Math.min(due,Number(paidByKey[key(iv.document_no,it.schedule,it.revenue_head)]||0));
-      plan.push({dueDate:iv.due_date||iv.document_date,schedule:it.schedule,head:it.revenue_head,due:due,paid:paid});
+      plan.push({doc:iv.document_no,dueDate:iv.due_date||iv.document_date,schedule:it.schedule,head:it.revenue_head,due:due,paid:paid});
       if(beforeDate&&iv.document_date&&iv.document_date<beforeDate) prevDues+=Math.max(0,due-paid);
     });
   });
@@ -23384,12 +23815,10 @@ window.custViewInvoice=async function(id){
   (rcpts||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
   const {plan,prevDues,onAccount}=custBuildPlan(allInv,alloc,inv.document_date,receiptDates);
 
-  const sba=Number(unit.super_built_up_area_sqft||0);
-  const unitCost=(csi||[]).find(i=>/unit cost/i.test(i.component||''));
   window._custInvoiceCache={
     inv:inv, items:its||[], plan:plan, prevDues:prevDues, onAccount:onAccount,
     lateFee:Number((snap&&snap.late_fee_accrued)||0),
-    rate:sba&&unitCost?Math.round(Number(unitCost.amount||0)/sba):null,
+    rate:custDocRate(unit,csi),
     unit:unit, contact:(cts&&cts[0])||null, fmt:'invoice'
   };
   custRenderInvoiceModal();
@@ -23461,6 +23890,64 @@ window.custPrintInvoice=function(){
    line, "Unit Price (Add On Premium Specification Pack)" (D/8G: 58,20,000 on 950 sq ft = 6,126.32).
    Every other project keeps Farvision's own line-by-line split. */
 const CUST_ANANTA_UNIT_PRICE=/^unit cost$|flc charges|plc charge|vehicle parking/i;
+const CUST_ANANTA_UNIT_PRICE_LABEL='Unit Price (Add On Premium Specification Pack)';
+function custIsAnanta(unit){ return /^dream ananta$/i.test(String((unit&&unit.projects&&unit.projects.name)||'').trim()); }
+/* The same one line on DREAM ANANTA's Tax Invoice and Demand Letter as on its cost sheet: Farvision
+   bills Unit Cost, FLC, PLC and Vehicle Parking as separate revenue heads of one schedule, and the
+   CRM shows them as "Unit Price (Add On Premium Specification Pack)". Lines are merged within the
+   same schedule (and, on the demand letter, the same invoice), so each instalment's total and what
+   has been paid against it are unchanged - only how many rows it takes to say it. The merged line
+   sits where the first of its parts was. Every other project is returned untouched. */
+function custAnantaInvoiceItems(unit,items){
+  if(!custIsAnanta(unit)) return items||[];
+  const out=[],at={};
+  (items||[]).forEach(it=>{
+    if(!CUST_ANANTA_UNIT_PRICE.test(String(it.revenue_head||'').trim())){ out.push(it); return; }
+    const k=String(it.schedule||'');
+    if(at[k]==null){ at[k]=out.length; out.push(Object.assign({},it,{revenue_head:CUST_ANANTA_UNIT_PRICE_LABEL,amount:0,tax:0,net_amount:0})); }
+    const m=out[at[k]];
+    m.amount=Number(m.amount)+Number(it.amount||0); m.tax=Number(m.tax)+Number(it.tax||0); m.net_amount=Number(m.net_amount)+Number(it.net_amount||0);
+  });
+  return out;
+}
+function custAnantaPlan(unit,plan){
+  if(!custIsAnanta(unit)) return plan||[];
+  const out=[],at={};
+  (plan||[]).forEach(r=>{
+    if(!CUST_ANANTA_UNIT_PRICE.test(String(r.head||'').trim())){ out.push(r); return; }
+    const k=String(r.doc||'')+'|'+String(r.dueDate||'')+'|'+String(r.schedule||'');
+    if(at[k]==null){ at[k]=out.length; out.push(Object.assign({},r,{head:CUST_ANANTA_UNIT_PRICE_LABEL,due:0,paid:0})); }
+    const m=out[at[k]]; m.due+=Number(r.due||0); m.paid+=Number(r.paid||0);
+  });
+  return out;
+}
+/* Money Receipt lines for DREAM ANANTA: what was paid against Unit Cost, FLC, PLC and Vehicle Parking
+   of the same invoice and schedule is one "Unit Price" line, as on its invoice. Lines are only merged
+   when they agree on Bill/On Account and on their particulars, so nothing a receipt line says
+   separately is lost; the receipt's total is its own figure and is unaffected. */
+function custAnantaReceiptItems(unit,items){
+  if(!custIsAnanta(unit)) return items||[];
+  const out=[],at={};
+  (items||[]).forEach(it=>{
+    if(!CUST_ANANTA_UNIT_PRICE.test(String(it.revenue_head||'').trim())){ out.push(it); return; }
+    const k=[it.line_type,it.against_demand_no,it.schedule,it.particulars].map(v=>String(v||'')).join('|');
+    if(at[k]==null){ at[k]=out.length; out.push(Object.assign({},it,{revenue_head:CUST_ANANTA_UNIT_PRICE_LABEL,amount:0})); }
+    out[at[k]].amount=Number(out[at[k]].amount)+Number(it.amount||0);
+  });
+  return out;
+}
+// The Rate printed on a demand letter: Unit Cost per sq ft, or for DREAM ANANTA the whole Unit Price
+// (Unit Cost + FLC + PLC + parking) per sq ft - the same 6,126.32 its cost sheet shows for D/8G.
+function custDocRate(unit,csi){
+  const sba=Number(unit&&unit.super_built_up_area_sqft||0);
+  if(!sba) return null;
+  if(custIsAnanta(unit)){
+    const amt=(csi||[]).filter(i=>CUST_ANANTA_UNIT_PRICE.test(String(i.component||'').trim())).reduce((s,i)=>s+Number(i.amount||0),0);
+    return amt?custFmtRate(amt/sba):null;
+  }
+  const unitCost=(csi||[]).find(i=>/unit cost/i.test(i.component||''));
+  return unitCost?Math.round(Number(unitCost.amount||0)/sba):null;
+}
 function custCostRows(unit,list,isUnitGroup){
   const sbu=Number(unit.super_built_up_area_sqft||0);
   const sum=(l,k)=>l.reduce((s,i)=>s+Number(i[k]||0),0);
@@ -23737,8 +24224,8 @@ function custPgCss(){return `<style>
 
 // One tile. `i` indexes CUST_PG.items, which is what the viewer walks through.
 function custPgTile(it,i,showRoom){
-  const media=it.url
-    ?(it.isVideo?'<video src="'+it.url+'#t=0.5" muted playsinline preload="metadata"></video>':'<img src="'+it.url+'" alt="" loading="lazy">')
+  const media=it.tile
+    ?(it.isVideo&&!it.thumb?'<video src="'+it.tile+'#t=0.5" muted playsinline preload="metadata"></video>':'<img src="'+it.tile+'" alt="" loading="lazy">')
     :'<div class="cpg-ph"><i class="fa-solid '+(it.isVideo?'fa-film':'fa-image')+'"></i></div>';
   return '<button type="button" class="cpg-tile" onclick="custPgOpen('+i+')" aria-label="Open '+esc(it.label)+' '+(it.isVideo?'video':'photo')+' of '+esc(fmtDate(it.date))+'">'
     +media+(it.isVideo?'<div class="cpg-play"><span><i class="fa-solid fa-play"></i></span></div>':'')
@@ -23773,15 +24260,19 @@ async function custTabProgress(unit){
      through the staff policy - showing exactly what the customer sees. */
   const flatOn=custFeatureOn(CUST_DATA&&CUST_DATA.featureRules,'flat_photos',unit.project_id,unit.tower);
   const [{data:tPhotos},{data:uPhotos}]=await Promise.all([
-    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
-    flatOn?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]})
+    // Published only: customers' RLS already says so; the filter keeps a staff preview the same.
+    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).eq('status','published').is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
+    flatOn?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).eq('status','published').is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]})
   ]);
   const block=tPhotos||[], flat=uPhotos||[];
   const roomOf=k=>(CUST_PG_AREAS.find(a=>a[0]===k)||CUST_PG_AREAS[0]);
   const raw=block.map(p=>({p,label:'Block',roomKey:null,room:null}))
     .concat(flat.map(p=>{const r=roomOf(p.area||'common');return {p,label:r[1],roomKey:r[0],room:r[1]};}));
-  const urls=await Promise.all(raw.map(r=>s3SignedUrl(r.p.storage_path).catch(()=>null)));
-  CUST_PG.items=raw.map((r,i)=>({url:urls[i],isVideo:(r.p.file_type||'').indexOf('video')===0,
+  /* The grid loads thumbnails; the full photo or video is fetched only when it is opened. Before
+     5 Oct 2026 every full-size file was signed and downloaded just to draw the grid. */
+  const tiles=await Promise.all(raw.map(r=>s3SignedUrl(r.p.thumb_path||r.p.storage_path).catch(()=>null)));
+  CUST_PG.items=raw.map((r,i)=>({tile:tiles[i],thumb:!!r.p.thumb_path,url:r.p.thumb_path?null:tiles[i],path:r.p.storage_path,
+    isVideo:(r.p.file_type||'').indexOf('video')===0,
     date:r.p.taken_on,label:r.label,roomKey:r.roomKey,room:r.room,where:r.roomKey?'Your flat':'Your block'}));
   CUST_PG.flat=CUST_PG.items.map((it,i)=>it.roomKey?i:-1).filter(i=>i>=0);
   CUST_PG.room='all';
@@ -23799,6 +24290,19 @@ async function custTabProgress(unit){
       +'<span class="cpg-chip"><i class="fa-solid fa-clock-rotate-left"></i>'+(latest?'Last update '+esc(fmtDate(latest)):'Updates coming soon')+'</span>'
       +(total?'<span class="cpg-chip"><i class="fa-solid fa-images"></i>'+[pics?pics+' photo'+(pics===1?'':'s'):'',vids?vids+' video'+(vids===1?'':'s'):''].filter(Boolean).join(' · ')+'</span>':'')
     +'</div></div>';
+
+  /* Set expectations before anyone opens a photo: these are working site pictures, taken by the site
+     team on a phone amid dust, poor light and scaffolding - some are not sharp - and they show work in
+     progress, not the finished flat. Asked for on 5 Oct 2026, once flat photos began to be published. */
+  if(total) out+='<div style="display:flex;gap:12px;align-items:flex-start;margin:0 0 18px;padding:14px 16px;border-radius:12px;'
+    +'background:#fffbeb;border:1px solid #f0dfa8;color:#78350f;font-size:13.5px;line-height:1.6">'
+    +'<i class="fa-solid fa-circle-info" style="color:#d97706;font-size:17px;margin-top:2px"></i>'
+    +'<div><b style="color:#92400e">About these photos</b><br>'
+    +'These photos and videos are taken on site by our construction team while work is going on. Because of dust, '
+    +'lighting and site conditions, some may look unclear or slightly blurred, and you may see construction materials, '
+    +'tools or debris lying around. They show work in progress, not the '
+    +'finished home — colours, finishes and fittings may look different at handover. If you have any question about '
+    +'your flat, please contact your relationship manager.</div></div>';
 
   // A section with nothing in it is not shown at all - no "No photos yet" boxes. Only when there is
   // nothing anywhere does the customer get one short line, so the tab is never blank.
@@ -23837,10 +24341,18 @@ window.custPgOpen=function(start){
   function shut(){ document.removeEventListener('keydown',onKey); if(box.parentNode) box.parentNode.removeChild(box); document.body.style.overflow=''; }
   function draw(){
     const it=CUST_PG.items[list[pos]];
+    // Opened for the first time: show the thumbnail, fetch the full file, then draw again.
+    if(!it.url&&it.path&&!it.loading){
+      it.loading=true;
+      s3SignedUrl(it.path).then(u=>{ it.url=u||null; it.failed=!u; }).catch(()=>{ it.failed=true; })
+        .finally(()=>{ it.loading=false; if(box.isConnected&&CUST_PG.items[list[pos]]===it) draw(); });
+    }
+    const src=it.url||(it.isVideo?null:it.tile);
     box.innerHTML='<div class="cpg-lbbar"><span class="t">'+esc(it.where)+(it.room?' · '+esc(it.room):'')+'</span><span>'+esc(fmtDate(it.date))+'</span>'
       +'<span class="c">'+(pos+1)+' / '+list.length+'</span><button class="cpg-lbx" title="Close">&times;</button></div>'
       +'<div class="cpg-lbstage">'
-        +(it.url?(it.isVideo?'<video src="'+it.url+'" controls autoplay playsinline></video>':'<img src="'+it.url+'" alt="">'):'<div style="color:#94a3b8">This file could not be loaded.</div>')
+        +(src?(it.isVideo?'<video src="'+src+'" controls autoplay playsinline></video>':'<img src="'+src+'" alt="">')
+             :'<div style="color:#94a3b8">'+(it.loading?'<i class="fa-solid fa-spinner fa-spin"></i>':'This file could not be loaded.')+'</div>')
         +(list.length>1?'<button class="cpg-lbnav prev" title="Previous"><i class="fa-solid fa-chevron-left"></i></button><button class="cpg-lbnav next" title="Next"><i class="fa-solid fa-chevron-right"></i></button>':'')
       +'</div>';
     box.querySelector('.cpg-lbx').onclick=shut;
@@ -23893,20 +24405,77 @@ async function custTabVideos(){
       :'<div class="card card-pad empty">Not available yet.</div>')+'<div style="margin-bottom:20px"></div>';
   }).join('');
 }
+/* SUPPORT: every ticket the customer has with us, wherever it started - raised here, or an email to
+   customer care that Zoho Desk turned into a ticket (6 Oct 2026). Opening the tab asks zoho-desk to
+   look the customer up in Zoho first ('pull', throttled to once every 3 minutes); a 10-minute import
+   catches the rest. A ticket that came in by email belongs to the customer, not to one flat, so it
+   shows on every flat's Support tab. */
+const CUST_TICKET_VIA={email:['Email','fa-envelope'],web:['Portal','fa-globe'],phone:['Phone','fa-phone'],chat:['Chat','fa-comments'],
+  whatsapp:['WhatsApp','fa-brands fa-whatsapp'],forums:['Forum','fa-users'],facebook:['Facebook','fa-brands fa-facebook'],twitter:['X','fa-brands fa-x-twitter']};
+function custTicketVia(t){
+  if(t.source!=='zoho') return CUST_TICKET_VIA.web;
+  const k=String(t.zoho_channel||'').toLowerCase();
+  return CUST_TICKET_VIA[k]||[t.zoho_channel||'Zoho','fa-headset'];
+}
+function custSupportCss(){
+  if(document.getElementById('custSupCss')) return;
+  const st=document.createElement('style'); st.id='custSupCss';
+  st.textContent=`
+  .csup-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .csup-head h3{margin:0;font-size:17px}
+  .csup-head p{margin:4px 0 0;font-size:12.5px;color:var(--slate);max-width:60ch}
+  .csup-list{display:flex;flex-direction:column;gap:10px}
+  .csup-t{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--csup-c,#94a3b8);border-radius:12px;
+    padding:13px 15px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .csup-main{flex:1 1 280px;min-width:0}
+  .csup-sub{font-size:14.5px;font-weight:700;color:var(--ink);line-height:1.35}
+  .csup-meta{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--slate);margin-top:4px}
+  .csup-meta i{margin-right:4px;opacity:.75}
+  .csup-acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .csup-sync{font-size:11.5px;color:var(--slate);margin-top:10px}
+  @media(max-width:620px){ .csup-acts{width:100%} .csup-acts .btn{flex:1 1 auto;justify-content:center} }`;
+  document.head.appendChild(st);
+}
 async function custTabSupport(unit){
-  const {data:tickets}=await sb.schema('cust').from('support_tickets').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
-  const ticketIds=(tickets||[]).map(t=>t.id);
+  custSupportCss();
+  // Ask Zoho for this customer's tickets first - at most a few seconds, then show what we have.
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    await Promise.race([
+      fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'pull'})}),
+      new Promise(r=>setTimeout(r,7000))]);
+  }catch(_e){}
+  const {data:tickets}=await sb.schema('cust').from('support_tickets').select('*')
+    .or('unit_id.eq.'+Number(unit.id)+',unit_id.is.null').is('deleted_at',null);
+  const list=(tickets||[]).sort((a,b)=>String(b.zoho_created_time||b.created_at).localeCompare(String(a.zoho_created_time||a.created_at)));
+  const ticketIds=list.map(t=>t.id);
   const {data:atts}=ticketIds.length?await sb.schema('cust').from('support_ticket_attachments').select('*').in('ticket_id',ticketIds).is('deleted_at',null):{data:[]};
   const attsByTicket={};(atts||[]).forEach(a=>{(attsByTicket[a.ticket_id]=attsByTicket[a.ticket_id]||[]).push(a);});
-  const rows=(tickets||[]).map(t=>[esc(t.subject),fmtDate(t.created_at),esc(t.zoho_ticket_number||'—'),supportStatusTag(t),
-    (attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}"><i class="fa-solid fa-paperclip"></i></button>`).join(' ')||'—',
-    (t.zoho_ticket_id?`<button class="btn btn-sm" onclick="custTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button> <button class="btn btn-sm" onclick="custSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="custRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`)]);
-  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Support tickets</div><button class="btn btn-primary" onclick="custNewTicketModal()"><i class="fa-solid fa-plus"></i> Raise a ticket</button></div>`+
-    (rows.length?cpaTable(['Subject','Raised','Ticket #','Status','Attachments','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>');
+  const colour={open:'#d97706',in_progress:'#1d4ed8',on_hold:'#64748b',closed:'#16a34a'};
+  const cards=list.map(t=>{
+    const via=custTicketVia(t);
+    const att=(attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}"><i class="fa-solid fa-paperclip"></i></button>`).join('');
+    const acts=t.zoho_ticket_id
+      ?`<button class="btn btn-sm btn-primary" onclick="custTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button><button class="btn btn-sm" onclick="custSyncTicket(${t.id})" title="Get the latest from our support team"><i class="fa-solid fa-rotate"></i></button>`
+      :`<button class="btn btn-sm" onclick="custRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Send again</button>`;
+    return `<div class="csup-t" style="--csup-c:${colour[t.status]||'#94a3b8'}">
+      <div class="csup-main"><div class="csup-sub">${esc(t.subject)}</div>
+        <div class="csup-meta">${t.zoho_ticket_number?'<span><i class="fa-solid fa-hashtag"></i>'+esc(t.zoho_ticket_number)+'</span>':''}
+          <span><i class="${via[1].indexOf('fa-brands')===0?via[1]:'fa-solid '+via[1]}"></i>via ${esc(via[0])}</span>
+          <span><i class="fa-regular fa-calendar"></i>${esc(fmtDate(t.zoho_created_time||t.created_at))}</span></div></div>
+      ${supportStatusTag(t)}
+      <div class="csup-acts">${att}${acts}</div></div>`;
+  }).join('');
+  return `<div class="csup-head"><div><h3>Support tickets</h3>
+      <p>Tickets you raise here, and emails you send to our customer care team, all show here with their latest status and replies.</p></div>
+      <button class="btn btn-primary" onclick="custNewTicketModal()"><i class="fa-solid fa-plus"></i> Raise a ticket</button></div>`
+    +(list.length?'<div class="csup-list">'+cards+'</div>':'<div class="card card-pad empty">No support tickets yet.</div>');
 }
 function custBuildBubbles(t,threads,comments){
-  const msgs=[{time:t.created_at,mine:true,author:'You',content:t.description||t.subject}]
-    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,mine:m.direction!=='out',author:m.direction==='out'?'Support team':'You',content:m.content})))
+  // A ticket raised here opens with what the customer typed; one that came in by email opens with
+  // the email itself, which is already its first thread.
+  const msgs=(t.source==='zoho'?[]:[{time:t.created_at,mine:true,author:'You',content:t.description||t.subject}])
+    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,mine:m.direction!=='out',author:m.direction==='out'?((m.author_name?String(m.author_name).split(' ')[0]+' · ':'')+'Customer care'):'You',content:m.content})))
     .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,mine:m.posted_by_customer,author:m.posted_by_customer?'You':'Support team',content:m.content})));
   msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
   return msgs.map(m=>`<div style="margin-bottom:10px;display:flex;flex-direction:column;align-items:${m.mine?'flex-end':'flex-start'}"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${fmtDate(m.time)}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px;max-width:85%;background:${m.mine?'var(--brand-50)':'#fff'}">${esc(m.content||'')}</div></div>`).join('')||'<div class="card card-pad empty">No messages yet.</div>';
@@ -23919,7 +24488,8 @@ function custBuildBubbles(t,threads,comments){
 // it writes into is gone (modal closed, or replaced by a different one).
 let CUST_TICKET_POLL_TIMER=null;
 window.custTicketDetail=async function(id){
-  openModal('<div class="loader"><div class="spin"></div></div>');
+  openModal('<div class="card-pad" style="text-align:center;color:var(--slate)"><div class="loader"><div class="spin"></div></div>Getting the latest replies…</div>');
+  await supTicketSync(id);
   const {data:t}=await sb.schema('cust').from('support_tickets').select('*').eq('id',id).maybeSingle();
   const [{data:threads},{data:comments}]=await Promise.all([
     sb.schema('cust').from('support_ticket_threads').select('*').eq('ticket_id',id),
@@ -24137,9 +24707,11 @@ function custReferralCss(){
   if(document.getElementById('custRefCss')) return;
   const s=document.createElement('style'); s.id='custRefCss';
   s.textContent=`
-  .cref-hero{position:relative;overflow:hidden;border-radius:16px;padding:30px 32px;margin-bottom:18px;
-    background:linear-gradient(125deg,#0f1e3d 0%,#16294f 38%,#1d4ed8 100%);color:#fff;
-    box-shadow:0 14px 34px -14px rgba(15,30,61,.55)}
+  /* Refer & Earn follows the marketing creative (assets/referral/refer-and-earn.jpg): Jain red,
+     white, and the pale pink of its slab cards. */
+  .cref-hero{position:relative;overflow:hidden;border-radius:16px;padding:28px 30px;margin-bottom:22px;
+    background:linear-gradient(125deg,#8f1119 0%,#c8202f 55%,#de3a45 100%);color:#fff;
+    box-shadow:0 14px 34px -14px rgba(143,17,25,.55)}
   /* A slow sheen travelling across the banner. It is the only moving thing on the page, which is
      what makes it read as "look here" rather than as decoration competing with the content. */
   .cref-hero::after{content:'';position:absolute;top:-60%;left:-30%;width:40%;height:220%;
@@ -24149,24 +24721,105 @@ function custReferralCss(){
   .cref-hero-in{position:relative;z-index:1;display:flex;gap:26px;align-items:center;flex-wrap:wrap}
   .cref-hero-txt{flex:1 1 320px;min-width:0}
   .cref-eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;
-    letter-spacing:.14em;text-transform:uppercase;color:#f0c964;margin-bottom:11px}
+    letter-spacing:.14em;text-transform:uppercase;color:#ffe1e3;margin-bottom:11px}
   .cref-hero h2{font-size:26px;line-height:1.2;font-weight:800;margin:0 0 9px;letter-spacing:-.02em;text-wrap:balance}
-  .cref-hero p{font-size:14.5px;line-height:1.6;color:#c9d6f0;margin:0;max-width:52ch}
+  .cref-hero p{font-size:14.5px;line-height:1.6;color:#ffe9ea;margin:0;max-width:54ch}
+  .cref-hero p b{color:#fff}
+  .cref-btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
   .cref-cta{display:inline-flex;align-items:center;gap:10px;border:0;cursor:pointer;
-    font-family:inherit;font-size:15px;font-weight:800;letter-spacing:.01em;color:#25324a;
-    padding:15px 28px;border-radius:999px;white-space:nowrap;
-    background:linear-gradient(135deg,#ffd97a 0%,#f0c964 45%,#dCA93a 100%);
-    box-shadow:0 8px 22px -6px rgba(240,201,100,.65);transition:transform .16s,box-shadow .16s}
-  .cref-cta:hover{transform:translateY(-2px);box-shadow:0 12px 28px -6px rgba(240,201,100,.8)}
+    font-family:inherit;font-size:15px;font-weight:800;letter-spacing:.01em;color:#b3141f;
+    padding:14px 26px;border-radius:999px;white-space:nowrap;background:#fff;
+    box-shadow:0 8px 22px -6px rgba(0,0,0,.35);transition:transform .16s,box-shadow .16s}
+  .cref-cta:hover{transform:translateY(-2px);box-shadow:0 12px 28px -6px rgba(0,0,0,.4)}
+  .cref-cta2{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-family:inherit;font-size:14.5px;
+    font-weight:700;color:#fff;padding:13px 22px;border-radius:999px;white-space:nowrap;
+    background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.7);transition:background .16s}
+  .cref-cta2:hover{background:rgba(255,255,255,.22)}
+  .cref-cta2 .fa-whatsapp{font-size:17px}
+  /* The poster is shown large enough to read on the page itself - beside the slabs and the
+     calculator on a computer, full width on a phone - and opens full size on a tap. */
+  .cref-main{display:grid;grid-template-columns:minmax(0,400px) minmax(0,1fr);gap:22px;align-items:start;margin-bottom:22px}
+  .cref-pcard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px;
+    box-shadow:0 10px 28px -16px rgba(143,17,25,.45)}
+  .cref-pimg{display:block;width:100%;padding:0;border:0;background:none;cursor:zoom-in}
+  .cref-pimg img{display:block;width:100%;height:auto;border-radius:10px}
+  .cref-pacts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .cref-pacts a,.cref-pacts button{flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+    font:inherit;font-size:13px;font-weight:700;padding:10px 8px;border-radius:10px;cursor:pointer;text-decoration:none;
+    border:1px solid #f3c4c8;background:#fff5f5;color:#b3141f;white-space:nowrap}
+  .cref-pacts a:hover,.cref-pacts button:hover{background:#fde4e6}
+  .cref-pacts .fa-whatsapp{font-size:15px}
+  .cref-side .cref-calc{margin-bottom:22px}
+  .cref-side .cref-steps{flex-direction:column;gap:10px;margin-bottom:0}
+  .cref-side .cref-step{flex:none}
+
+  .cref-sh{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;letter-spacing:.02em;
+    text-transform:uppercase;color:#c8202f;margin:4px 0 12px}
+  .cref-sh::after{content:'';flex:1;height:2px;background:linear-gradient(90deg,#f3c4c8,transparent)}
+  .cref-slabs{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0 14px}
+  .cref-slab{position:relative;background:#fde4e6;border:1px solid #f6c9cd;border-radius:14px;padding:24px 14px 16px;
+    text-align:center;transition:transform .18s,box-shadow .18s,border-color .18s}
+  .cref-slab .n{position:absolute;top:-13px;left:50%;transform:translateX(-50%);width:28px;height:28px;border-radius:50%;
+    background:#5f6368;color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center;border:3px solid #fff}
+  .cref-slab small{display:block;font-size:12.5px;font-weight:700;color:#b3141f;min-height:2.6em}
+  .cref-slab b{display:block;font-size:38px;line-height:1.05;font-weight:800;color:#c8202f;margin:4px 0;letter-spacing:-.02em}
+  .cref-slab em{font-style:normal;font-size:12px;font-weight:600;color:#b3141f}
+  .cref-slab.on{border-color:#c8202f;box-shadow:0 10px 24px -10px rgba(200,32,47,.55);transform:translateY(-3px)}
+  .cref-slab.on .n{background:#c8202f}
+
+  .cref-calc{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:22px;
+    display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+  .cref-calc-in{flex:1 1 300px;min-width:0}
+  .cref-calc-h{font-size:13.5px;font-weight:700;margin-bottom:2px}
+  .cref-calc-h i{color:#c8202f;margin-right:6px}
+  .cref-calc-l{font-size:12.5px;color:var(--slate);display:flex;justify-content:space-between;gap:10px;margin-bottom:6px}
+  .cref-calc-l b{color:var(--ink);font-size:14px}
+  .cref-calc input[type=range]{width:100%;accent-color:#c8202f}
+  .cref-calc-out{flex:0 0 auto;min-width:190px;text-align:center;background:#fff5f5;border:1px dashed #f3b4ba;border-radius:12px;padding:10px 16px}
+  .cref-calc-out span{display:block;font-size:12px;color:var(--slate);font-weight:600}
+  .cref-calc-out b{display:block;font-size:24px;font-weight:800;color:#16a34a;font-variant-numeric:tabular-nums}
+  .cref-calc-out em{display:block;font-style:normal;font-size:11.5px;color:var(--slate)}
+  .cref-fine{font-size:11.5px;color:var(--slate);line-height:1.6;margin:14px 2px 0}
+
+  /* The project the friend is interested in: one card per project, its name and where it is. */
+  .cref-projs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:236px;overflow:auto;padding:2px;margin-bottom:4px}
+  .cref-projs .cref-proj{position:relative;display:flex;flex-direction:column;justify-content:center;gap:3px;padding:10px 12px 10px 34px;border:1.5px solid var(--line);
+    border-radius:11px;cursor:pointer;background:var(--card);transition:border-color .15s,background .15s;margin:0;font-weight:400;min-height:58px}
+  .cref-proj:hover{border-color:#f3b4ba}
+  .cref-proj input{position:absolute;left:12px;top:12px;margin:0;accent-color:#c8202f;width:15px;height:15px}
+  .cref-proj .nm{font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.25}
+  .cref-proj .loc{font-size:12px;color:var(--slate);display:flex;align-items:center;gap:5px}
+  .cref-proj .loc i{color:#c8202f;font-size:11px}
+  .cref-proj:has(input:checked){border-color:#c8202f;background:#fff5f5;box-shadow:0 0 0 3px rgba(200,32,47,.1)}
+  .cref-consent{display:flex;gap:9px;align-items:flex-start;margin-top:14px;font-size:12.5px;line-height:1.5;color:var(--slate);cursor:pointer}
+  .cref-consent input{margin-top:2px;accent-color:#c8202f;width:15px;height:15px;flex:none}
+  .cref-consent a{color:#c8202f;font-weight:600}
+  .cref-projtag{display:inline-flex;align-items:center;gap:5px;color:#b3141f;font-weight:600}
+  .cref-pgrid{margin-bottom:24px}
+  .cref-pbtns{display:flex;gap:8px;margin-top:11px}
+  .cref-pbtns .btn{flex:1 1 0;justify-content:center;gap:7px;text-decoration:none;white-space:nowrap;padding-left:8px;padding-right:8px}
+  /* Doubled up so it beats the customer portal's ".cust-view-fade .btn:not(.btn-primary)" (white
+     gradient), which otherwise left white text on a white button. */
+  .cref-pbtns .btn.cref-pref,.cust-view-fade .cref-pbtns .btn.cref-pref{background:#c8202f;border-color:#c8202f;color:#fff;
+    box-shadow:0 4px 12px -4px rgba(200,32,47,.45)}
+  .cref-pbtns .btn.cref-pref:hover,.cust-view-fade .cref-pbtns .btn.cref-pref:hover{background:#a8121e;border-color:#a8121e;color:#fff}
+  @media(max-width:620px){ .cref-projs{grid-template-columns:1fr;max-height:260px} }
+  .cref-pbox{position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,.88);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:14px;padding:16px}
+  .cref-pbox img{max-width:min(94vw,560px);max-height:calc(100vh - 110px);border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .cref-pbox-acts{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  .cref-pbox-acts a,.cref-pbox-acts button{display:inline-flex;align-items:center;gap:8px;border:0;cursor:pointer;font:inherit;
+    font-size:14px;font-weight:700;padding:11px 20px;border-radius:999px;background:#fff;color:#b3141f;text-decoration:none}
+  .cref-pbox-acts .x{background:rgba(255,255,255,.15);color:#fff}
   .cref-cta:active{transform:translateY(0)}
   .cref-cta i{font-size:14px}
   /* The pulse stops the moment there is anything in the list - it is there to get a first referral
      out of somebody, not to keep nagging a customer who has already used the thing. */
   .cref-cta.pulse{animation:crefPulse 2.4s ease-out infinite}
   @keyframes crefPulse{
-    0%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 0 rgba(240,201,100,.55)}
-    70%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 16px rgba(240,201,100,0)}
-    100%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 0 rgba(240,201,100,0)}}
+    0%{box-shadow:0 8px 22px -6px rgba(0,0,0,.35),0 0 0 0 rgba(255,255,255,.6)}
+    70%{box-shadow:0 8px 22px -6px rgba(0,0,0,.35),0 0 0 16px rgba(255,255,255,0)}
+    100%{box-shadow:0 8px 22px -6px rgba(0,0,0,.35),0 0 0 0 rgba(255,255,255,0)}}
 
   .cref-stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
   .cref-stat{flex:1 1 150px;background:var(--card);border:1px solid var(--line);border-radius:13px;
@@ -24180,7 +24833,7 @@ function custReferralCss(){
   .cref-step{flex:1 1 200px;display:flex;gap:12px;align-items:flex-start;background:var(--card);
     border:1px solid var(--line);border-radius:13px;padding:15px 16px}
   .cref-step-n{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;
-    background:var(--brand-50);color:var(--brand);font-weight:800;font-size:13px}
+    background:#fde4e6;color:#c8202f;font-weight:800;font-size:13px}
   .cref-step b{display:block;font-size:13.5px;margin-bottom:2px}
   .cref-step span{font-size:12.5px;color:var(--slate);line-height:1.5}
 
@@ -24208,10 +24861,17 @@ function custReferralCss(){
   .cref-empty i{font-size:30px;color:var(--brand);opacity:.35}
   .cref-empty b{display:block;margin-top:12px;font-size:16px}
   .cref-empty span{display:block;margin-top:5px;font-size:13px;color:var(--slate)}
+  @media(max-width:900px){ .cref-main{grid-template-columns:minmax(0,1fr)} .cref-pcard{max-width:460px;width:100%;margin:0 auto} }
   @media(max-width:620px){
     .cref-hero{padding:24px 20px}
     .cref-hero h2{font-size:21px}
-    .cref-cta{width:100%;justify-content:center}
+    .cref-cta,.cref-cta2{width:100%;justify-content:center}
+    .cref-main{grid-template-columns:1fr;gap:18px}
+    .cref-slabs{grid-template-columns:1fr;gap:18px}
+    .cref-slab{display:grid;grid-template-columns:1fr auto;align-items:center;text-align:left;padding:16px 16px 14px;column-gap:12px}
+    .cref-slab b{grid-row:1/3;grid-column:2;font-size:32px}
+    .cref-slab small{min-height:0}
+    .cref-calc-out{width:100%}
   }
   /* Somebody who has asked the operating system to stop animations gets a page that still works and
      still looks like this - only the sheen and the pulse go. */
@@ -24225,23 +24885,51 @@ function custReferralCss(){
 
 async function custTabReferrals(unit){
   custReferralCss();
-  const {data:referrals}=await sb.schema('cust').from('referrals').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
+  const {data:referrals}=await sb.schema('cust').from('referrals').select('*, referral_projects(name,location)').eq('unit_id',unit.id).order('created_at',{ascending:false});
   const list=referrals||[];
   const stageIndex=function(k){ const i=CUST_REFERRAL_STAGES.findIndex(function(s){return s.k===k;}); return i<0?0:i; };
   const booked=list.filter(function(r){return r.status==='booked';}).length;
   const moving=list.filter(function(r){return ['contacted','interested','visited_site'].indexOf(r.status)!==-1;}).length;
 
+  custRefPrefetch();
+  await custRefProjects();   // names for the projects of each referral below
   const hero=`<div class="cref-hero"><div class="cref-hero-in">
       <div class="cref-hero-txt">
-        <div class="cref-eyebrow"><i class="fa-solid fa-gift"></i> Refer &amp; earn</div>
-        <h2>Know someone looking for a home?</h2>
-        <p>Tell us who they are and our sales team takes it from there — you can watch every
-           referral move along right here, from first call to booking.</p>
+        <div class="cref-eyebrow"><i class="fa-solid fa-bullhorn"></i> Refer &amp; Earn</div>
+        <h2>Earn up to 2% on every successful referral</h2>
+        <p>Help your friends and family find their safe haven with Jain Group. While they get the
+           home of their dreams, you <b>earn up to 2% of the agreement value</b> when they book.</p>
+        <div class="cref-btns">
+          <button class="cref-cta${list.length?'':' pulse'}" onclick="custNewReferralModal()">
+            <i class="fa-solid fa-user-plus"></i> Refer someone</button>
+          <button class="cref-cta2" onclick="custRefShare()"><i class="fa-brands fa-whatsapp"></i> Share with friends</button>
+        </div>
       </div>
-      <button class="cref-cta${list.length?'':' pulse'}" onclick="custNewReferralModal()">
-        <i class="fa-solid fa-user-plus"></i> Refer someone
-      </button>
     </div></div>`;
+
+  // The slabs, then what that means in rupees for a price the customer picks.
+  const start=12000000;
+  const poster=`<div class="cref-pcard">
+      <button class="cref-pimg" onclick="custRefPoster()" aria-label="Open the Refer and Earn poster full size">
+        <img src="${CUST_REF_POSTER}" alt="Refer and Earn - earn up to 2% of the agreement value on every successful referral" width="1066" height="1600"></button>
+      <div class="cref-pacts">
+        <button onclick="custRefPoster()"><i class="fa-solid fa-expand"></i> Full size</button>
+        <a href="${CUST_REF_POSTER}" download="Jain-Group-Refer-and-Earn.jpg"><i class="fa-solid fa-download"></i> Download</a>
+        <button onclick="custRefShare()"><i class="fa-brands fa-whatsapp"></i> Share</button>
+      </div></div>`;
+  const slabs=`<div class="cref-sh">Know your rewarding journey</div>
+    <div class="cref-slabs">${CUST_REF_SLABS.map(function(sl,i){
+      return '<div class="cref-slab'+(i===custRefSlab(start)?' on':'')+'" data-slab="'+i+'"><span class="n">'+(i+1)+'</span>'
+        +'<small>'+esc(sl.label)+'</small><b>'+sl.pct+'%</b><em>of total consideration</em></div>'; }).join('')}</div>
+    <div class="cref-calc">
+      <div class="cref-calc-in">
+        <div class="cref-calc-h"><i class="fa-solid fa-calculator"></i>What could you earn?</div>
+        <div class="cref-calc-l"><span>Price of the flat your friend books</span><b id="crefPrice">${custRefShort(start)}</b></div>
+        <input type="range" min="2000000" max="50000000" step="500000" value="${start}" oninput="custRefCalc(this.value)" aria-label="Flat price">
+      </div>
+      <div class="cref-calc-out"><span>You earn</span><b id="crefEarn">${custRefMoney(start*CUST_REF_SLABS[custRefSlab(start)].pct/100)}</b>
+        <em id="crefPct">${CUST_REF_SLABS[custRefSlab(start)].pct}% of total consideration</em></div>
+    </div>`;
 
   /* The counts only appear once there is something to count. On an empty tab they would be three
      zeroes, which says "this is not worth using" at exactly the moment it needs to say the
@@ -24252,13 +24940,13 @@ async function custTabReferrals(unit){
       <div class="cref-stat" style="--cref-c:#16a34a"><b>${booked}</b><span>Booked</span></div>
     </div>`:'';
 
-  const steps=`<div class="cref-steps">
+  const steps=`<div class="cref-sh">How it works</div><div class="cref-steps">
       <div class="cref-step"><div class="cref-step-n">1</div><div><b>You refer</b>
-        <span>Their name and a phone number is all we need.</span></div></div>
-      <div class="cref-step"><div class="cref-step-n">2</div><div><b>We reach out</b>
-        <span>Our sales team calls them and shows them around.</span></div></div>
-      <div class="cref-step"><div class="cref-step-n">3</div><div><b>You follow along</b>
-        <span>Every stage shows up on this page as it happens.</span></div></div>
+        <span>Add their name and mobile number here — it takes a few seconds.</span></div></div>
+      <div class="cref-step"><div class="cref-step-n">2</div><div><b>We take it from there</b>
+        <span>Our sales team calls them and shows them around. Follow each step on this page.</span></div></div>
+      <div class="cref-step"><div class="cref-step-n">3</div><div><b>They book, you earn</b>
+        <span>Up to 2% of the total consideration of the flat they book.</span></div></div>
     </div>`;
 
   const body=list.length
@@ -24270,10 +24958,12 @@ async function custTabReferrals(unit){
           return '<div class="cref-seg'+(i<done?' on':'')+'"></div>'; }).join('');
         const phone=r.prospect_phone?`<span><i class="fa-solid fa-phone"></i>${esc(r.prospect_phone)}</span>`:'';
         const mail=r.prospect_email?`<span><i class="fa-solid fa-envelope"></i>${esc(r.prospect_email)}</span>`:'';
+        const pn=custRefProjectNames(r);
+        const proj=pn?`<span class="cref-projtag"><i class="fa-solid fa-building"></i>${esc(pn)}</span>`:'';
         return `<div class="cref-card" style="--cref-c:${st.dot}">
             <div class="cref-who">
               <div class="cref-name">${esc(r.prospect_name)}</div>
-              <div class="cref-meta">${phone}${mail}${(phone||mail)?'':'<span>No contact details given</span>'}</div>
+              <div class="cref-meta">${proj}${phone}${mail}${(phone||mail||proj)?'':'<span>No contact details given</span>'}</div>
             </div>
             <div class="cref-rail">${rail}</div>
             <span class="cref-pill" style="background:${st.bg};color:${st.ink}">
@@ -24283,22 +24973,156 @@ async function custTabReferrals(unit){
       }).join('')+`</div>`
     : `<div class="cref-empty"><i class="fa-solid fa-user-group"></i>
          <b>No referrals yet</b>
-         <span>Be the first — it takes about ten seconds.</span></div>`;
+         <span>Refer someone, or share the poster with friends and family.</span></div>`;
 
-  return hero+stats+steps+body;
+  const fine=`<p class="cref-fine">The reward is a percentage of the total consideration of the flat booked by the
+    person you refer, at the slab it falls in, on a successful booking. Add them here so the referral is
+    counted in your name. Terms and conditions apply.</p>`;
+
+  /* Our ongoing projects, the same cards as the staff Projects page (CONS_ONGOING), so a customer
+     can see what there is to refer someone to. Refer a friend opens the form with that project
+     already chosen. Asked for on 6 Oct 2026. */
+  const projects=`<div class="cref-sh">Our ongoing projects</div>
+    <div class="proj-grid cref-pgrid">${CONS_ONGOING.map(custRefProjectCard).join('')}</div>`;
+
+  return hero+'<div class="cref-main">'+poster+'<div class="cref-side">'+slabs+steps+'</div></div>'+projects+(list.length?'<div class="cref-sh">Your referrals</div>':'')+stats+body+fine;
 }
-window.custNewReferralModal=function(){
-  openModal(`<div class="modal-head"><h3>Refer a prospect</h3><span class="x" onclick="closeModal()">&times;</span></div>
-    <div class="modal-body frm"><label>Name</label><input id="custRefName">
-    <label>Phone</label><input id="custRefPhone">
-    <label>Email (optional)</label><input id="custRefEmail"></div>
-    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custRefBtn" onclick="custNewReferralSave()">Submit</button></div>`);
+
+/* REFER & EARN, from the marketing creative (5 Oct 2026). The reward is a share of the total
+   consideration of the flat the referred person books: 1% up to Rs 1.50 Cr, 1.5% above that up to
+   Rs 2.50 Cr, 2% above Rs 2.50 Cr. One list, so the cards and the calculator cannot disagree. */
+const CUST_REF_SLABS=[
+  {upto:15000000, pct:1,   label:'Up to ₹1.50 Cr'},
+  {upto:25000000, pct:1.5, label:'Above ₹1.50 Cr, up to ₹2.50 Cr'},
+  {upto:Infinity, pct:2,   label:'Above ₹2.50 Cr'}];
+const CUST_REF_POSTER='assets/referral/refer-and-earn.jpg';
+const CUST_REF_SHARE_TEXT='Hi! I have a home with Jain Group and I think you would like their projects. '
+  +'If you or someone in your family is looking for a home, tell me and I will refer you - their team will call you.';
+function custRefSlab(v){ v=Number(v)||0; for(let i=0;i<CUST_REF_SLABS.length;i++) if(v<=CUST_REF_SLABS[i].upto) return i; return CUST_REF_SLABS.length-1; }
+function custRefMoney(v){ return '₹'+Math.round(v).toLocaleString('en-IN'); }
+function custRefShort(v){ v=Number(v)||0; return v>=1e7?'₹'+(v/1e7).toFixed(2)+' Cr':'₹'+Math.round(v/1e5)+' L'; }
+window.custRefCalc=function(v){
+  v=Number(v)||0; const i=custRefSlab(v), sl=CUST_REF_SLABS[i];
+  const pr=$('crefPrice'), er=$('crefEarn'), pc=$('crefPct');
+  if(pr) pr.textContent=custRefShort(v);
+  if(er) er.textContent=custRefMoney(v*sl.pct/100);
+  if(pc) pc.textContent=sl.pct+'% of total consideration';
+  document.querySelectorAll('.cref-slab').forEach(function(c){ c.classList.toggle('on',Number(c.getAttribute('data-slab'))===i); });
+};
+/* Sharing hands the poster itself to WhatsApp (or any app) where the phone allows sharing a file.
+   The file is fetched when the tab opens, because a phone only allows a share straight from the
+   tap - waiting for a download first would be refused. Elsewhere WhatsApp opens with the text. */
+let CUST_REF_FILE=null;
+function custRefPrefetch(){
+  if(CUST_REF_FILE||!navigator.canShare) return;
+  fetch(CUST_REF_POSTER).then(function(r){ return r.ok?r.blob():null; }).then(function(b){
+    if(!b) return;
+    const f=new File([b],'Jain-Group-Refer-and-Earn.jpg',{type:'image/jpeg'});
+    try{ if(navigator.canShare({files:[f]})) CUST_REF_FILE=f; }catch(_e){}
+  }).catch(function(){});
+}
+window.custRefShare=function(){
+  if(CUST_REF_FILE&&navigator.share){
+    navigator.share({files:[CUST_REF_FILE],text:CUST_REF_SHARE_TEXT})
+      .then(custRefShared).catch(function(e){ if(!e||e.name!=='AbortError') custRefWhatsApp(); });
+    return;
+  }
+  custRefWhatsApp();
+};
+function custRefWhatsApp(){ window.open('https://wa.me/?text='+encodeURIComponent(CUST_REF_SHARE_TEXT),'_blank'); custRefShared(); }
+function custRefShared(){ toast('When a friend is interested, add them with "Refer someone" so the referral counts for you','ok'); }
+window.custRefPoster=function(){
+  const box=document.createElement('div'); box.className='cref-pbox';
+  box.innerHTML='<img src="'+CUST_REF_POSTER+'" alt="Refer and Earn - Jain Group">'
+    +'<div class="cref-pbox-acts">'
+      +'<button onclick="custRefShare()"><i class="fa-brands fa-whatsapp"></i> Share</button>'
+      +'<a href="'+CUST_REF_POSTER+'" download="Jain-Group-Refer-and-Earn.jpg"><i class="fa-solid fa-download"></i> Download</a>'
+      +'<button class="x"><i class="fa-solid fa-xmark"></i> Close</button></div>';
+  const shut=function(){ document.removeEventListener('keydown',onKey); box.remove(); };
+  const onKey=function(e){ if(e.key==='Escape') shut(); };
+  box.onclick=function(e){ if(e.target===box) shut(); };
+  box.querySelector('.x').onclick=shut;
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(box);
+};
+/* The mobile number is required: it is how the sales team reaches the person, and a referral without
+   one cannot be followed up. "What are they looking for" goes to notes, which the team sees. */
+/* Which project the friend is interested in decides the CRM business unit, and with it the sales
+   person who calls them (cust.referral_projects). Names are shown in Title Case with the location. */
+let CUST_REF_PROJECTS=null;
+function custRefProjectCard(p){
+  return '<div class="proj-card cref-pcard2">'
+    +'<div class="proj-img" style="background-image:url(\''+esc(p.img)+'\')"><span class="proj-badge">Ongoing</span></div>'
+    +'<div class="proj-body">'
+      +'<h3>'+esc(p.n)+'</h3>'
+      +'<div class="proj-loc"><i class="fa-solid fa-location-dot"></i> '+esc(p.loc)+'</div>'
+      +'<div class="proj-meta">'+esc(p.meta)+'</div>'
+      +'<div class="proj-price">'+esc(p.price)+'</div>'
+      +'<div class="cref-pbtns">'
+        +'<a class="btn" href="'+esc(p.url)+'" target="_blank" rel="noopener">View project <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:11px"></i></a>'
+        +'<button class="btn cref-pref" onclick="custNewReferralModal(\''+esc(p.n).replace(/'/g,"\\'")+'\')"><i class="fa-solid fa-user-plus"></i> Refer a friend</button>'
+      +'</div>'
+    +'</div></div>';
+}
+async function custRefProjects(){
+  if(CUST_REF_PROJECTS) return CUST_REF_PROJECTS;
+  try{ const {data}=await sb.schema('cust').from('referral_projects').select('id,name,location').eq('active',true).order('sort').order('name');
+    CUST_REF_PROJECTS=data||[]; }catch(_e){ CUST_REF_PROJECTS=[]; }
+  return CUST_REF_PROJECTS;
+}
+// "Dream One, Dream Gurukul": the main project first, then the others chosen with it.
+function custRefProjectNames(r){
+  const byId={}; (CUST_REF_PROJECTS||[]).forEach(function(p){ byId[p.id]=p.name; });
+  const main=r.referral_projects&&r.referral_projects.name;
+  const all=(r.referral_project_ids||[]).map(function(id){ return byId[id]; }).filter(Boolean);
+  const names=[main].concat(all.filter(function(n){ return n!==main; })).filter(Boolean);
+  return names.map(custRefTitle).join(', ');
+}
+function custRefTitle(s){ return String(s||'').toLowerCase().replace(/(^|[\s\-\/(])([a-z])/g,(m,a,b)=>a+b.toUpperCase()).trim(); }
+window.custNewReferralModal=async function(preProject){
+  const projects=await custRefProjects();
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-user-plus" style="color:#c8202f"></i> Refer a friend or family member</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm">
+    <label>Name</label><input id="custRefName" autocomplete="off" placeholder="Their full name">
+    <label>Mobile number</label><input id="custRefPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="10-digit mobile number">
+    <label>Email (optional)</label><input id="custRefEmail" type="email" autocomplete="off">
+    <label>Projects they are interested in <span style="font-weight:400;color:var(--slate)">(choose one or more)</span></label>
+    <div class="cref-projs" role="group" aria-label="Projects">${projects.map(function(p){
+      const pre=preProject&&String(p.name).toLowerCase()===String(preProject).toLowerCase();
+      return '<label class="cref-proj"><input type="checkbox" name="custRefProj" value="'+p.id+'"'+(pre?' checked':'')+'>'
+        +'<span class="nm">'+esc(custRefTitle(p.name))+'</span>'
+        +(p.location?'<span class="loc"><i class="fa-solid fa-location-dot"></i>'+esc(custRefTitle(p.location))+'</span>':'')+'</label>'; }).join('')}</div>
+    <label>What are they looking for? (optional)</label><textarea id="custRefNotes" rows="2" maxlength="300" placeholder="e.g. 2BHK, budget around 80 lakh"></textarea>
+    <p style="margin:10px 0 0;font-size:12px;color:var(--slate)">Our sales team will call them. You can follow every step on the Referrals page.</p></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custRefBtn" onclick="custNewReferralSave()"><i class="fa-solid fa-paper-plane"></i> Submit referral</button></div>`);
+  setTimeout(function(){ const n=$('custRefName'); if(n) n.focus(); },60);
 };
 window.custNewReferralSave=async function(){
   const prospect_name=$('custRefName').value.trim(),prospect_phone=$('custRefPhone').value.trim()||null,prospect_email=$('custRefEmail').value.trim()||null;
-  if(!prospect_name){toast('Enter a name','err');return;}
+  const notes=(($('custRefNotes')||{}).value||'').trim()||null;
+  if(!prospect_name){toast('Enter their name','err');return;}
+  const digits=String(prospect_phone||'').replace(/\D/g,'');
+  if(digits.length<10||digits.length>13){toast('Enter their mobile number (10 digits)','err');return;}
+  if(prospect_email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(prospect_email)){toast('That email address does not look right','err');return;}
+  let picked=[...document.querySelectorAll('input[name="custRefProj"]:checked')].map(function(i){ return Number(i.value); }).filter(Boolean);
+  if(!picked.length){toast('Choose at least one project they are interested in','err');return;}
   const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
-  const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,created_by:state.email});
+  /* One referral - one CRM lead - however many projects are ticked (6 Oct 2026). The database makes
+     the highest-priced of them the main project, whose business unit gets the lead; the others are
+     named in its remarks (cust.referral_main_project, cust.referral_crm_send). The same person twice
+     from the same flat is one referral: the team would call them twice. */
+  const last10=digits.slice(-10);
+  try{
+    const {data:mine}=await sb.schema('cust').from('referrals').select('prospect_phone').eq('unit_id',unit.id);
+    if((mine||[]).some(function(r){ return String(r.prospect_phone||'').replace(/\D/g,'').slice(-10)===last10; })){
+      toast('You have already referred this number','warn'); return; }
+  }catch(_e){}
+  const b=$('custRefBtn'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…'; }
+  // Saved here first; the database then sends it to the CRM. privacy_policy_accepted is required by
+  // the CRM and is sent as true - there is no tick box.
+  const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,notes,
+    referral_project_id:picked[0],referral_project_ids:picked,privacy_accepted:true,created_by:state.email});
+  if(error&&b){ b.disabled=false; b.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit referral'; }
   if(error){toast('Could not submit: '+error.message,'err');return;}
   // Set directly rather than re-fetched: custLoadData's cache would otherwise hand route() the same
   // pre-submit CUST_DATA (same customerId, no force), and the sidebar's "Earn" badge would survive
@@ -25970,6 +26794,25 @@ function trcRetryLabel(r){return trcProcFailed(r)?'Retry':'Start now';}
 function trcIsSkippedSalesCall(r){
   return !!(r && r.personnel_team==='Sales' && r.transcription_status!=='completed');
 }
+/* recording_eligible: the CRM API's own flag on each follow-up (stored in acc.crm_followups.recording_eligible,
+   generated from the raw payload). "Eligible for transcription" is exactly the calls the API flags true,
+   and every one of them lands in ONE of: transcribed, waiting, failed, no conversation, no recording
+   (trcEligBucket) - so those five always add up to the eligible total. The dashboard's call-level
+   numbers and lead list only cover these calls; the three history chips (Missed callback, Promised
+   call, Late follow-ups) judge a lead's WHOLE history, so they look at every call - a missed incoming
+   call has no recording and so can never be "eligible" itself. */
+function trcRecordingEligible(r){return !!(r&&r.recording_eligible===true);}
+/* Which single bucket an eligible call is in. Same precedence as acc.eligible_kpis (the SQL that the
+   cards read): no recording, then failed (the transcript OR the queue failed), then transcribed, then
+   no conversation, and whatever is left is still waiting. */
+function trcEligBucket(r){
+  if(!r)return '';
+  if(!r.has_recording)return 'no_recording';
+  if(trcProcFailed(r))return 'failed';
+  const st=String(r.transcription_status||'');
+  if(st==='completed'||st==='non_transcribable')return st;
+  return 'not_transcribed';
+}
 const TRC_AI_TAG = {Lost:'t-red','In Follow Up':'t-amber',Qualified:'t-green',Unclear:'t-gray'};
 /* "Qualified" alone reads as though the visit is done too - the one thing this label exists to say is
    that it is not, by requirement (2026-09-18). r.visit_pending comes off followup_qa (see
@@ -26147,6 +26990,53 @@ let TRC_PREFETCH_GEN=0;
 /* Bumping the generation is all a cancel is: the in-flight loop compares against it after every
    await and returns the moment it no longer owns the prefetch. */
 function trcPrefetchCancel(){TRC_PREFETCH_GEN++;}
+/* Late follow-ups / Missed incoming call judge a lead's WHOLE history, so every
+   lead in scope needs that history loaded before any of those numbers or filters can be trusted -
+   not just the 25 leads on the current page. Until then those flags are "pending" (null), never
+   guessed from the date range's own rows, which is what made the counts jump around and a selected
+   chip drain to "Nothing matches" as histories trickled in. TRC_HIST_TRIED remembers ids whose
+   fetch was already attempted, so a failing fetch cannot loop forever. */
+const TRC_HIST_TRIED=Object.create(null);
+const TRC_HIST_MAX_AUTO=500;
+let TRC_HIST_PROMISE=null;
+function trcHistoriesReady(ids){
+  return (ids||[]).every(function(id){return id==null||TRC_HIST_TRIED[String(id)]||!!trcLeadCacheRead(id);});
+}
+async function trcEnsureHistories(ids){
+  while(TRC_HIST_PROMISE){try{await TRC_HIST_PROMISE;}catch(e){}}
+  const todo=[],seen=Object.create(null);
+  (ids||[]).forEach(function(id){
+    const k=String(id);
+    if(id==null||seen[k])return;
+    seen[k]=1;
+    if(!TRC_HIST_TRIED[k]&&!trcLeadCacheRead(id))todo.push(id);
+  });
+  if(!todo.length)return;
+  TRC_HIST_PROMISE=(async function(){
+    for(let i=0;i<todo.length;i+=TRC_PREFETCH_CHUNK){
+      const chunk=todo.slice(i,i+TRC_PREFETCH_CHUNK);
+      try{
+        const byId=await trcLeadFetchByIds(chunk);
+        chunk.forEach(function(id){
+          const d=byId[String(id)];
+          trcLeadCacheWrite(id,(d&&d.lead)||null,(d&&d.rows)||[]);
+        });
+      }catch(e){}
+      chunk.forEach(function(id){TRC_HIST_TRIED[String(id)]=1;});
+    }
+  })();
+  try{await TRC_HIST_PROMISE;}finally{TRC_HIST_PROMISE=null;}
+}
+/* Ids of every lead behind the current list, before the history chips narrow it. */
+let TRC_LIST_LEAD_IDS=[];
+function trcHistChipOn(){return TRC_F.missedIn==='1'||TRC_F.cadence==='1'||TRC_F.promised==='1';}
+async function trcWarmListHistories(){
+  const ids=TRC_LIST_LEAD_IDS.slice();
+  if(!ids.length||trcHistoriesReady(ids))return;
+  if(ids.length>TRC_HIST_MAX_AUTO&&!trcHistChipOn())return;
+  await trcEnsureHistories(ids);
+  if($('trcRows'))trcRender(false,true);
+}
 async function trcPrefetchHistories(leadIds){
   const gen=++TRC_PREFETCH_GEN;
   const todo=[];
@@ -26185,7 +27075,7 @@ async function trcPrefetchHistories(leadIds){
          for itself on click. A failed chunk simply stays uncached. */
     }
   }
-  /* Added so trcLeads' cadence/callbackTat (see its own note) stop reading the range-limited rows the
+  /* Added so trcLeads' cadence/missedIn (see its own note) stop reading the range-limited rows the
      moment each lead's real history lands - a soft repaint, same as trcEnrichVisiblePage/
      trcBackfillLastJudgement already do on their own completion. Gated on the same generation check as
      everything above: a newer prefetch (or a page/filter change) means this one's result is stale and
@@ -26243,7 +27133,7 @@ function trcSortHistory(rows){
      that transition is visible - which resets TRC_F back to these same defaults and clears this same
      key, so a reload caught right after landing here restores THIS visit, not the one before it. */
 const TRC_F=(function(){
-  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',overdue:'all',cadence:'all',callbackTat:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
+  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',missedIn:'all',cadence:'all',promised:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
   try{
     const saved=JSON.parse(sessionStorage.getItem('trc_filters_state')||'null');
     if(saved&&typeof saved==='object')return Object.assign(fallback,saved);
@@ -26262,8 +27152,8 @@ function trcResetFilters(){
   const y=traYesterday();
   TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
   TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
-  TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
-  TRC_F.cadence='all';TRC_F.callbackTat='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
+  TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.missedIn='all';
+  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_PAGE=0;
   TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -26538,7 +27428,7 @@ const TRC_LIGHT_FIELDS=TRC_LIGHT.split(',');
 const TRC_CRM_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status:status,crm_status_raw:status_raw,status_detail,'
   +'crm_remarks:remarks,crm_lost_reason:lost_reason,recording_url,callid,has_recording,call_duration,'
-  +'personnel_id,personnel_name,personnel_email,personnel_role';
+  +'personnel_id,personnel_name,personnel_email,personnel_role,recording_eligible';
 
 /* A lead that already reached Qualified (or beyond) has no legitimate way back to Fresh or In Follow
    Up - acc.lead_level_progress_v already audits every follow-up for exactly this and marks the ones
@@ -26596,6 +27486,24 @@ async function trcFetch(force){
    until trcEnrichVisiblePage fills them in for whichever leads are actually on screen (see below) -
    trcRowDate, trcApply's crm/bu/personnel/q filters and trcLeads' grouping/sorting only ever needed
    the columns this DOES carry, so nothing downstream has to know which path a row came from. */
+/* Reads EVERY row of a query, however many there are. The API answers an over-long result with only its
+   first max-rows (1000) and no error, so a plain `await q` quietly drops everything past that - which is
+   how a day with 1183 calls lost its last 183: the cards (counted in the database) read 12 matched leads
+   while the table, built from the 1000 rows that arrived, could show only 10. A page that comes back with
+   1000 or more rows might have been cut short, so it keeps going from where it stopped until a page
+   comes back shorter. build() must return a fresh, fully ordered query each time. */
+async function trcReadAll(build){
+  let out=[],from=0;
+  for(;;){
+    const {data,error}=await build().range(from,from+19999);
+    if(error)throw error;
+    const batch=data||[];
+    out=out.concat(batch);
+    if(batch.length<1000||out.length>200000)break;
+    from+=batch.length;
+  }
+  return out;
+}
 async function trcFetchLight(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey)return TRC_ROWS;
@@ -26605,7 +27513,7 @@ async function trcFetchLight(force){
      of a lighter one. See trcFetchFull for the one place a full fetch also writes THIS key, because
      full data is strictly good enough to answer a light request too. */
   if(!force){
-    const cached=trCacheRead('trc_fetch_light_cache',rangeKey);
+    const cached=trCacheRead('trc_fetch_light_cache_v3',rangeKey);
     if(cached){
       TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;
       TRC_ROWS_ENRICHED=cached.length>0&&cached.every(function(r){return r._enriched;});
@@ -26618,23 +27526,25 @@ async function trcFetchLight(force){
     }
   }
   try{
-    let q=sb.schema('acc').from('crm_followups').select(TRC_CRM_LIGHT)
-      .order('call_date',{ascending:false,nullsFirst:false})
-      .order('communication_time',{ascending:false,nullsFirst:false})
-      .order('follow_up_id',{ascending:false});
-    if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
-    if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
-    const {data,error}=await q;
-    if(error)throw error;
-    const rows=data||[];
+    const rows=await trcReadAll(function(){
+      let q=sb.schema('acc').from('crm_followups').select(TRC_CRM_LIGHT)
+        .order('call_date',{ascending:false,nullsFirst:false})
+        .order('communication_time',{ascending:false,nullsFirst:false})
+        .order('follow_up_id',{ascending:false});
+      if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
+      if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
+      return q;
+    });
     /* lead_current_status/lead_current_lost_reason live on acc.crm_leads, one row per lead - a second
        light query, keyed on just the distinct leads this range actually has, rather than folding
        crm_leads into the query above and paying a join for it. */
     const leadIds=Array.from(new Set(rows.map(function(r){return r.lead_id;}).filter(function(v){return v!=null;})));
     let leadMap={};
-    if(leadIds.length){
+    /* In chunks: one .in() with every lead of a wide range is both a very long URL and a result the API
+       would cut at 1000 rows. */
+    for(let i=0;i<leadIds.length;i+=200){
       const {data:leads,error:e2}=await sb.schema('acc').from('crm_leads')
-        .select('lead_id,status,lost_reason').in('lead_id',leadIds);
+        .select('lead_id,status,lost_reason').in('lead_id',leadIds.slice(i,i+200));
       if(e2)throw e2;
       (leads||[]).forEach(function(l){leadMap[String(l.lead_id)]=l;});
     }
@@ -26649,7 +27559,7 @@ async function trcFetchLight(force){
       r.personnel_team=!email?null:((TRC_PERSONNEL||[]).some(function(p){return p.email===email;})?'Pre-Sales':'Sales');
     });
     TRC_ROWS=rows;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
-    trCacheWrite('trc_fetch_light_cache',rangeKey,rows);
+    trCacheWrite('trc_fetch_light_cache_v3',rangeKey,rows);
   }catch(e){
     TRC_ROWS=TRC_ROWS&&TRC_ROWS_RANGE===rangeKey?TRC_ROWS:[];TRC_ROWS_RANGE=null;TRC_QA_MERGED_RANGE=null;
     toast('Could not load the call history: '+((e&&e.message)||e),'err');
@@ -26667,7 +27577,7 @@ async function trcFetchFull(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey&&TRC_ROWS_ENRICHED)return TRC_ROWS;
   if(!force){
-    const cached=trCacheRead('trc_fetch_cache',rangeKey);
+    const cached=trCacheRead('trc_fetch_cache_v3',rangeKey);
     if(cached){TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=true;TRC_QA_MERGED_RANGE=null;return TRC_ROWS;}
   }
   /* followup_timeline_v joins lead_level_progress_v, which ranks every lead's whole follow-up
@@ -26678,28 +27588,37 @@ async function trcFetchFull(force){
      round trips for a table Postgres can hand back whole in one. PAGE now covers the entire table
      in a single request; the loop (and its 50000 backstop) stays only so a future row count that
      outgrows one page still pages correctly instead of silently truncating. */
-  const PAGE=20000;let out=[],from=0;
+  let out=[];
   try{
-    for(;;){
+    out=await trcReadAll(function(){
       let q=sb.schema('acc').from('followup_timeline_v').select(TRC_LIGHT)
         .order('call_date',{ascending:false,nullsFirst:false})
         .order('communication_time',{ascending:false,nullsFirst:false})
-        .order('follow_up_id',{ascending:false})
-        .range(from,from+PAGE-1);
+        .order('follow_up_id',{ascending:false});
       if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
       if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
-      const {data,error}=await q;
-      if(error)throw error;
-      const batch=data||[];out=out.concat(batch);
-      if(batch.length<PAGE)break;
-      from+=PAGE;if(from>50000)break;
-    }
+      return q;
+    });
+    /* followup_timeline_v does not carry the API's recording_eligible flag, so it is merged in from
+       acc.crm_followups (one indexed, join-free query over the same date range). */
+    try{
+      const el=await trcReadAll(function(){
+        let eq=sb.schema('acc').from('crm_followups').select('follow_up_id,recording_eligible')
+          .not('recording_eligible','is',null).order('follow_up_id',{ascending:false});
+        if(TRC_F.from)eq=eq.gte('call_date',TRC_F.from);
+        if(TRC_F.to)eq=eq.lte('call_date',TRC_F.to);
+        return eq;
+      });
+      const flag={};
+      (el||[]).forEach(function(e){flag[String(e.follow_up_id)]=e.recording_eligible;});
+      out.forEach(function(r){const v=flag[String(r.follow_up_id)];if(v!==undefined)r.recording_eligible=v;});
+    }catch(e){}
     out.forEach(function(r){r._enriched=true;});
     TRC_ROWS=out;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=true;TRC_QA_MERGED_RANGE=null;
-    trCacheWrite('trc_fetch_cache',rangeKey,out);
+    trCacheWrite('trc_fetch_cache_v3',rangeKey,out);
     // Full data answers a light request too (see trcFetchLight) - written under its key as well so a
     // later visit to this same range never fetches a step down from what is already sitting here.
-    trCacheWrite('trc_fetch_light_cache',rangeKey,out);
+    trCacheWrite('trc_fetch_light_cache_v3',rangeKey,out);
   }catch(e){
     TRC_ROWS=out.length?out:[];TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
     toast('Could not load the call history: '+((e&&e.message)||e),'err');
@@ -26730,14 +27649,15 @@ async function trcEnsureQaFieldsMerged(){
   if(TRC_QA_MERGED_RANGE===rangeKey)return;
   trcShowLoading();
   try{
-    let q=sb.schema('acc').from('followup_qa').select(
-      'follow_up_id,qa_id:id,pitch_score,pitch_status,followup_date_status,lost_reason_status,'
-      +'retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
-      +'qa_error,reused_transcription,is_latest_assessed');
-    if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
-    if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
-    const {data,error}=await q;
-    if(error)throw error;
+    const data=await trcReadAll(function(){
+      let q=sb.schema('acc').from('followup_qa').select(
+        'follow_up_id,qa_id:id,pitch_score,pitch_status,followup_date_status,lost_reason_status,'
+        +'retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+        +'qa_error,reused_transcription,is_latest_assessed').order('follow_up_id',{ascending:false});
+      if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
+      if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
+      return q;
+    });
     const byFollowUp={};
     (data||[]).forEach(function(r){byFollowUp[String(r.follow_up_id)]=r;});
     (TRC_ROWS||[]).forEach(function(r,i){
@@ -26809,7 +27729,7 @@ async function trcEnrichVisiblePage(){
     if(changed&&gen===TRC_ENRICH_GEN){
       // Persisted under the same key trcFetchLight reads, so a reload within the cache window comes
       // back with whichever leads this tab already paid to enrich, not the original blank snapshot.
-      trCacheWrite('trc_fetch_light_cache',TRC_ROWS_RANGE,TRC_ROWS);
+      trCacheWrite('trc_fetch_light_cache_v3',TRC_ROWS_RANGE,TRC_ROWS);
       trcRender(false,true);
     }
   }catch(e){
@@ -26879,33 +27799,21 @@ async function trcKpiFastFetch(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_KPI_FAST&&!force&&TRC_KPI_FAST_RANGE===rangeKey)return TRC_KPI_FAST;
   try{
-    let sq=sb.schema('acc').from('daily_qa_summary').select('*');
-    if(TRC_F.from)sq=sq.gte('date',TRC_F.from);
-    if(TRC_F.to)sq=sq.lte('date',TRC_F.to);
-    const lq=sb.schema('acc').rpc('crm_lead_count_in_range',{p_from:TRC_F.from||null,p_to:TRC_F.to||null});
-    const [{data:days,error:e1},{data:leadCount,error:e2}]=await Promise.all([sq,lq]);
-    if(e1||e2)throw (e1||e2);
-    const sum={total_followups:0,recordings_available:0,transcribed:0,already_transcribed:0,
-      non_transcribable:0,transcription_failed:0,pending:0,not_in_scope:0,qa_assessed:0,
-      pitch_score_sum:0,pitch_score_n:0,pitch_accurate:0,pitch_partially_accurate:0,pitch_inaccurate:0,
-      followup_date_accurate:0,followup_date_inaccurate:0,followup_date_not_verifiable:0,
-      lost_reason_accurate:0,lost_reason_inaccurate:0,lost_reason_not_verifiable:0,
-      remarks_accurate:0,remarks_partially_accurate:0,remarks_inaccurate:0,remarks_not_verifiable:0,
-      status_match:0,status_mismatch:0,lost_should_not_have_been_lost:0,
-      qualified_should_not_have_been_qualified:0,in_followup_should_have_been_lost:0,
-      in_followup_should_have_been_qualified:0,
-      agent_qa_score_sum:0,agent_qa_score_n:0,
-      reused_transcription:0,
-      /* Safe to sum day-by-day and add across a range, unlike total_leads - is_latest_assessed
-         (20260918100000) is unique per lead across the WHOLE table, so a lead's match/mismatch
-         contribution lands on exactly one day, ever. See 20260918110000. */
-      status_match_leads:0,status_mismatch_leads:0,
-      lost_should_not_have_been_lost_leads:0,qualified_should_not_have_been_qualified_leads:0,
-      in_followup_should_have_been_lost_leads:0,in_followup_should_have_been_qualified_leads:0};
-    (days||[]).forEach(function(d){
-      Object.keys(sum).forEach(function(k){sum[k]+=Number(d[k]||0);});
-    });
-    sum.total_leads=Number(leadCount||0);
+    /* One call to acc.eligible_kpis: counts over the calls the CRM API flags recording_eligible only,
+       each in exactly one bucket (transcribed / waiting / failed / no conversation / no recording), so
+       the cards can never disagree with the eligible total. Lead counts come from the same query. */
+    const {data,error}=await sb.schema('acc').rpc('eligible_kpis',{p_from:TRC_F.from||null,p_to:TRC_F.to||null});
+    if(error)throw error;
+    const d=data||{};
+    const sum={};
+    Object.keys(d).forEach(function(k){sum[k]=Number(d[k]||0);});
+    /* Names the rest of this page already reads. */
+    sum.total_followups=sum.eligible;
+    sum.total_leads=sum.eligible_leads;
+    sum.transcribed=sum.completed;
+    sum.pending=sum.not_transcribed;
+    sum.transcription_failed=sum.failed;
+    sum.reused_transcription=sum.reused;
     TRC_KPI_FAST=sum;TRC_KPI_FAST_RANGE=rangeKey;
   }catch(e){
     TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -26923,7 +27831,7 @@ async function trcKpiFastFetch(force){
    to bring it current. Only ever fires the extra request when there is actually something to fix. */
 async function trcFetchBoth(){
   await Promise.all([trcFetch(false),trcKpiFastFetch()]);
-  if(TRC_KPI_FAST&&TRC_ROWS&&TRC_KPI_FAST.total_followups!==TRC_ROWS.length){
+  if(TRC_KPI_FAST&&TRC_ROWS&&TRC_KPI_FAST.total_followups!==TRC_ROWS.filter(trcRecordingEligible).length){
     await trcFetch(true);
   }
 }
@@ -26954,10 +27862,11 @@ async function trcEnsurePinnedLead(){
 
 /* Every filter, applied together. skipCards lifts the two card filters so the four totals stay put
    while one of them is selected - clicking Mismatch must not collapse Transcribed to the mismatches. */
-function trcApply(rows,skipCards){
+function trcApply(rows,skipCards,allCalls){
   const q=String(TRC_F.q||'').trim().toLowerCase();
   const all=rows||[];
   return all.filter(function(r){
+    if(!allCalls&&!trcRecordingEligible(r))return false;
     const d=trcRowDate(r);
     if(TRC_F.from&&(!d||d<TRC_F.from))return false;
     if(TRC_F.to&&(!d||d>TRC_F.to))return false;
@@ -27005,8 +27914,7 @@ function trcApply(rows,skipCards){
       else if(String(r.personal_mobile_status||'')!==TRC_F.personalMobile)return false;
     }
     if(!skipCards){
-      if(TRC_F.proc==='failed'){ if(!trcProcFailed(r))return false; }
-      else if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
+      if(TRC_F.proc!=='all'&&trcEligBucket(r)!==TRC_F.proc)return false;
       // MATCH/MISMATCH mean "currently" (see trcCountsMatch/trcCountsMismatch) - a superseded old
       // verdict does not belong in either drill-down, only in the lead's own history.
       if(TRC_F.match==='MATCH'&&!trcCountsMatch(r))return false;
@@ -27072,11 +27980,10 @@ function trcLeads(rows){
     g.mismatches=g.rows.filter(trcCountsMismatch).length;
     g.regressions=g.rows.filter(trcIsRegression).length;
     g.ovHealth=trcOvHealth(g.status,g.rows);
-    g.callbackOverdue=trcCallbackOverdue(g.status,g.rows);
     /* Cadence and callback TAT judge a lead's WHOLE follow-up history, not just whatever slice of it
        falls inside the selected date range - g.rows is range-limited, so judging off it directly would
        silently score a lead only on the one call that happened to land in the window (which is why
-       these two used to read exactly like g.callbackOverdue - both collapsing to "the latest call in
+       these used to collapse to "the latest call in
        range" when the range is a single day). The full history is exactly what trcPrefetchHistories
        already warms in the background for click-through (see trcAfterListRender) - reuse it once it
        has arrived; a lead not yet warmed simply falls back to the range-limited rows for this one
@@ -27084,8 +27991,12 @@ function trcLeads(rows){
        completion re-render (see its own note) picks it up. */
     const cachedHistory=trcLeadCacheRead(g.lead_id);
     const historyRows=cachedHistory?cachedHistory.rows:g.rows;
-    g.cadence=trcCadenceIssues(g.status,historyRows);
-    g.callbackTat=trcFirstCallbackTat(historyRows);
+    /* Pending until the real history has arrived (see trcEnsureHistories): scoring a lead off only
+       the one call in the date range gave answers that flipped the moment its history loaded. */
+    g.historyPending=!cachedHistory&&!TRC_HIST_TRIED[String(g.lead_id)];
+    g.cadence=g.historyPending?null:trcCadenceIssues(g.status,historyRows,'late');
+    g.promised=g.historyPending?null:trcCadenceIssues(g.status,historyRows,'promised');
+    g.missedIn=g.historyPending?null:trcMissedIncomingCallback(historyRows);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -27200,8 +28111,8 @@ function trcLeadSkeletonHtml(){
 
 /* ---- the dashboard. Same four cards and the same chips as before; what changed underneath is that
    a "call" is now a follow-up in the CRM's own history rather than a row we happened to import. ---- */
-function trcKpiHtml(rows){
-  const n=function(st){return rows.filter(function(r){return trcTrStatus(r)===st;}).length;};
+function trcKpiHtml(rows,shownRows){
+  const n=function(st){return rows.filter(function(r){return trcEligBucket(r)===st;}).length;};
   /* The four cards, "QA assessed" and "Reused an existing transcript" all have one unambiguous,
      purely-additive definition each, verified to match acc.daily_qa_summary_v exactly (see
      20260917110000) - so they can come from that day-summed table instead of scanning every fetched
@@ -27214,7 +28125,6 @@ function trcKpiHtml(rows){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   const fast=(TRC_F.crm==='all'&&TRC_F.bu==='all'&&TRC_F.personnel==='all'&&!String(TRC_F.q||'').trim()
               &&TRC_KPI_FAST&&TRC_KPI_FAST_RANGE===rangeKey)?TRC_KPI_FAST:null;
-  const totalCalls=fast?fast.total_followups:rows.length;
   /* Every card's own lead count - always counted from `rows` (the fetched range, filtered by date/CRM
      status/business unit/personnel/search but not by which card is active), never from the fast path:
      there is no per-category distinct-lead total to sum from acc.daily_qa_summary (the same reason
@@ -27222,15 +28132,13 @@ function trcKpiHtml(rows){
      days is one lead, not two), and this is cheap enough as a plain array scan that it never needed
      one. */
   const leadsOf=function(pred){return new Set(rows.filter(pred).map(function(r){return r.lead_id;})).size;};
-  const leadCount=fast?fast.total_leads:leadsOf(function(){return true;});
-  /* Total Calls' own lead count is safe unconditionally - lead_id is on every row whether or not it
-     has been enriched yet. Transcribed/Match/Mismatch's lead counts are NOT: they read
+  /* Transcribed/Match/Mismatch's lead counts need enrichment: they read
      trcTrStatus/status_match, which the fast crm_followups-only fetch never carries (see
      trcFetchLight) until trcEnrichVisiblePage fills in whichever leads are actually on screen. Asking
      for them across the whole range before that would silently undercount almost everything, so the
      subtitle just leaves the lead count off until the row data backs it up. */
   const haveDetail=TRC_ROWS_ENRICHED;
-  const transcribedLeads=haveDetail?leadsOf(function(r){return trcTrStatus(r)==='completed';}):null;
+  const transcribedLeads=fast?fast.completed_leads:(haveDetail?leadsOf(function(r){return trcEligBucket(r)==='completed';}):null);
   /* Match/Mismatch's lead counts, unlike Transcribed's, DO have a fast source now
      (acc.daily_qa_summary's *_leads columns, 20260918110000) - is_latest_assessed makes a lead's
      match/mismatch contribution land on exactly one day ever, so summing per-day distinct-lead
@@ -27241,10 +28149,15 @@ function trcKpiHtml(rows){
   const matchLeads=fast?fast.status_match_leads:(haveDetail?leadsOf(trcCountsMatch):null);
   const mismatchLeads=fast?fast.status_mismatch_leads:(haveDetail?leadsOf(trcCountsMismatch):null);
   const inLeads=function(c){return c+' lead'+(c===1?'':'s');};
+  /* "Eligible for transcription": every call the CRM API flags recording_eligible (see
+     trcRecordingEligible) - this is the total that Waiting, Failed, Transcribed and so on break down.
+     `rows` is already narrowed to those calls, and lead_id is on every row, so it needs no enrichment. */
+  const eligibleCalls=fast?fast.eligible:rows.length;
+  const eligibleLeads=fast?fast.eligible_leads:leadsOf(function(){return true;});
   const cards=[
-    ['Total Calls',totalCalls,'follow-ups in '+inLeads(leadCount),'var(--slate)','all','proc'],
+    ['Eligible for transcription',eligibleCalls,'in '+inLeads(eligibleLeads),'var(--slate)','all','proc'],
     ['Transcribed',fast?fast.transcribed:n('completed'),
-      'with a full transcript'+(haveDetail?', in '+inLeads(transcribedLeads):''),'#16a34a','completed','proc'],
+      'with a full transcript'+(transcribedLeads!==null?', in '+inLeads(transcribedLeads):''),'#16a34a','completed','proc'],
     ['CRM Match',fast?fast.status_match:rows.filter(trcCountsMatch).length,
       'agrees with the CRM'+(haveMatchLeads?', in '+inLeads(matchLeads):''),'#16a34a','MATCH','match'],
     ['CRM Mismatch',fast?fast.status_mismatch:rows.filter(trcCountsMismatch).length,
@@ -27255,13 +28168,19 @@ function trcKpiHtml(rows){
      stores the closest matching column for each (see 20260917110000's own note on where its
      pending/not_in_scope categories drift slightly from trcTrStatus's queue_status-truthiness split -
      an approximation, but a far closer one than reading undefined off every row not yet enriched). */
-  // "Not in scope" chip removed by request (2026-09-18) - a row that is out of scope still shows its
-  // own "Not in scope" tag in the table (see TRC_TR_META), this just drops it as a KPI-row filter chip.
+  /* "Not in scope" chip is back (it was dropped 2026-09-18) - this time counting LEADS, not calls. A
+     lead is out of scope when a call of theirs never entered the transcription queue (trcTrStatus), and
+     that needs row-level data, so it reads '…' until the fuller lead data has loaded, like the
+     missed-incoming / late-follow-up chips. */
+  /* "Not in scope" is gone (a call that never entered the queue is not an eligible call). "No recording" is
+     back, but now counts only ELIGIBLE calls: the API can flag a call eligible while its recording_url
+     is still empty, and those are exactly the calls that can never be transcribed. */
+  const noRecording=fast?fast.no_recording:n('no_recording');
   const sub=[
     ['Waiting','not_transcribed',fast?fast.pending:n('not_transcribed'),'fa-clock'],
-    ['No recording','no_recording',fast?(fast.total_followups-fast.recordings_available):n('no_recording'),'fa-phone-slash'],
+    ['Failed','failed',fast?fast.failed:n('failed'),'fa-circle-exclamation'],
     ['No conversation','non_transcribable',fast?fast.non_transcribable:n('non_transcribable'),'fa-volume-xmark'],
-    ['Failed','failed',fast?fast.transcription_failed:rows.filter(trcProcFailed).length,'fa-circle-exclamation']
+    ['No recording','no_recording',noRecording,'fa-phone-slash']
   ];
   const assessed=fast?fast.qa_assessed:rows.filter(function(r){return r.qa_id;}).length;
   const reused=fast?fast.reused_transcription:rows.filter(function(r){return r.reused_transcription;}).length;
@@ -27269,9 +28188,11 @@ function trcKpiHtml(rows){
      carries (see TRC_LIGHT) - same enrichment tier the 'proc' cards already require. Computed by
      actually rolling `rows` up into leads (trcLeads), not a flat count, because "overdue" is a
      property of a LEAD's latest call, not of any one row. */
-  const overdueLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackOverdue;}).length:null;
-  const cadenceLeads=haveDetail?trcLeads(rows).filter(function(g){return g.cadence;}).length:null;
-  const callbackTatLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackTat;}).length:null;
+  const shownLeads=haveDetail?trcLeads(shownRows||rows):[];
+  const histDone=haveDetail&&shownLeads.every(function(g){return !g.historyPending;});
+  const missedInLeads=histDone?shownLeads.filter(function(g){return g.missedIn;}).length:null;
+  const cadenceLeads=histDone?shownLeads.filter(function(g){return g.cadence;}).length:null;
+  const promisedLeads=histDone?shownLeads.filter(function(g){return g.promised;}).length:null;
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
       const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
       return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
@@ -27279,24 +28200,29 @@ function trcKpiHtml(rows){
         +'<div class="val">'+c[1]+'</div>'
         +'<div style="font-size:12px;color:'+c[3]+';margin-top:3px">'+esc(c[2])+'</div></div>';
     }).join('')+'</div>'
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">'+sub.map(function(s){
+    +'<div class="card card-pad" style="margin-top:12px;padding-top:10px;padding-bottom:10px">'
+    +'<div style="font-size:12px;font-weight:600;color:var(--slate);margin-bottom:8px">Eligible calls not transcribed yet</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+sub.map(function(s){
       const on=TRC_F.proc===s[1];
       return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcCard(\'proc\',\''+s[1]+'\')">'
         +'<i class="fa-solid '+s[3]+'"></i> '+esc(s[0])+' <b>'+s[2]+'</b></button>';
     }).join('')
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
-    +'<button class="btn btn-sm'+(TRC_F.overdue==='1'?' btn-primary':'')+'" onclick="trcToggleOverdue()" title="A promised next-follow-up date that has passed with nothing logged since - not counted until the fuller lead data has loaded">'
-      +'<i class="fa-solid fa-phone-slash"></i> Missed callback'+(overdueLeads===null?'':' <b>'+overdueLeads+'</b>')+'</button>'
-    +'<button class="btn btn-sm'+(TRC_F.cadence==='1'?' btn-primary':'')+'" onclick="trcToggleCadence()" title="At least one follow-up gap where the recontact was late - a scheduled date missed, or no date and more than 3 days passed. Not counted until the fuller lead data has loaded">'
-      +'<i class="fa-solid fa-hourglass-half"></i> Cadence issues'+(cadenceLeads===null?'':' <b>'+cadenceLeads+'</b>')+'</button>'
-    +'<button class="btn btn-sm'+(TRC_F.callbackTat==='1'?' btn-primary':'')+'" onclick="trcToggleCallbackTat()" title="The first call on this lead happened after the day it first appeared in the CRM - not counted until the fuller lead data has loaded">'
-      +'<i class="fa-solid fa-phone-volume"></i> Slow first callback'+(callbackTatLeads===null?'':' <b>'+callbackTatLeads+'</b>')+'</button>'
-    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<span style="font-size:12.5px;color:var(--slate)">QA assessed <b style="color:var(--ink)">'+assessed+'</b></span>'
     /* Deduplication is invisible unless it is counted. This is the number of follow-ups that reused a
        transcript already paid for, which is the whole point of keying on recording_url. */
     +'<span style="font-size:12.5px;color:var(--slate)">Reused an existing transcript <b style="color:var(--ink)">'+reused+'</b></span>'
-    +'</div>'
+    +'</div></div>'
+    +'<div class="card card-pad" style="margin-top:12px;padding-top:10px;padding-bottom:10px">'
+    +'<div style="font-size:12px;font-weight:600;color:var(--slate);margin-bottom:8px">Lead follow-up checks (whole call history)</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+    +'<button class="btn btn-sm'+(TRC_F.missedIn==='1'?' btn-primary':'')+'" onclick="trcToggleMissedIn()" title="The lead called in and the call was missed (logged as incoming call missed), and no callback was logged within 24 hours. Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-slash"></i> Missed callback'+(missedInLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+missedInLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.promised==='1'?' btn-primary':'')+'" onclick="trcTogglePromised()" title="The agent promised a call back on a set date, that date has passed, and no call has been logged since. Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-calendar-xmark"></i> Promised call - not called back'+(promisedLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+promisedLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.cadence==='1'?' btn-primary':'')+'" onclick="trcToggleCadence()" title="The agent set a next follow-up date and the next call came after that date (every call is checked against the date set on the call before it). Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-hourglass-half"></i> Late follow-ups'+(cadenceLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+cadenceLeads+'</b>')+'</button>'
+    +'</div></div>'
     +(TRC_F.match==='MISMATCH'?trcMismatchPanel(rows,fast):'');
 }
 
@@ -27373,29 +28299,40 @@ window.trcCard=async function(kind,val){
   trcRender(true);
 };
 
-/* An independent toggle, not a fourth tab in the group above - it narrows whichever set of leads is
-   already on screen (a card, a mismatch category, a search) down to the ones with a missed callback,
-   the same way the accuracy dropdowns in the filter bar narrow it, rather than replacing that set.
-   Needs lead_current_status (to exclude Lost leads) - only the full join carries that, same as the
-   'proc' cards. */
-window.trcToggleOverdue=async function(){
-  TRC_F.overdue=(TRC_F.overdue==='1'?'all':'1');
-  if(TRC_F.overdue==='1')await trcEnsureFullEnrichment();
+/* An independent toggle, not another tab in the group above - it narrows whichever set of leads is
+   already on screen down to the ones with a missed incoming call that was not called back properly
+   (see trcMissedIncomingCallback). */
+window.trcToggleMissedIn=async function(){
+  TRC_F.missedIn=(TRC_F.missedIn==='1'?'all':'1');
+  if(TRC_F.missedIn==='1'){
+    await trcEnsureFullEnrichment();
+    trcRender(true);
+    await trcEnsureHistories(TRC_LIST_LEAD_IDS);
+  }
   trcRender(true);
 };
-/* Same idea as trcToggleOverdue, narrowing to leads with at least one late follow-up gap (see
-   trcCadenceIssues) instead of only the current open one. Needs the full join for the same reason -
+/* Same idea as trcToggleMissedIn, narrowing to leads where a follow-up date the agent set was missed (see
+   trcCadenceIssues). Needs the full join for the same reason -
    the check is skipped for Lost leads, which only lead_current_status (TRC_LIGHT) can tell it. */
 window.trcToggleCadence=async function(){
   TRC_F.cadence=(TRC_F.cadence==='1'?'all':'1');
-  if(TRC_F.cadence==='1')await trcEnsureFullEnrichment();
+  if(TRC_F.cadence==='1'){
+    await trcEnsureFullEnrichment();
+    trcRender(true);
+    await trcEnsureHistories(TRC_LIST_LEAD_IDS);
+  }
   trcRender(true);
 };
-/* Same idea again, narrowing to leads whose first-ever call landed later than lead_first_seen_date
-   (see trcFirstCallbackTat). Needs the full join too - lead_first_seen_date only travels with it. */
-window.trcToggleCallbackTat=async function(){
-  TRC_F.callbackTat=(TRC_F.callbackTat==='1'?'all':'1');
-  if(TRC_F.callbackTat==='1')await trcEnsureFullEnrichment();
+
+/* Same shape again, for a promised follow-up date that passed with no call logged since (see
+   trcCadenceIssues, mode 'promised'). */
+window.trcTogglePromised=async function(){
+  TRC_F.promised=(TRC_F.promised==='1'?'all':'1');
+  if(TRC_F.promised==='1'){
+    await trcEnsureFullEnrichment();
+    trcRender(true);
+    await trcEnsureHistories(TRC_LIST_LEAD_IDS);
+  }
   trcRender(true);
 };
 
@@ -27568,8 +28505,8 @@ window.trcSet=async function(k,v){
 };
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
-  TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
-  TRC_F.cadence='all';TRC_F.callbackTat='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
+  TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.missedIn='all';
+  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_F.q='';
   // Not null/null - that was "All time". Clearing the filters resets the date range to the same
   // Previous day default the page opens with, rather than reopening that door.
@@ -27647,9 +28584,9 @@ function trcLeadRowHtml(g,sl){
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
           (g.regressions>1?g.regressions+' status regressions':'Status regressed')):'')
-      +(g.callbackOverdue?' '+trcTag('t-red','fa-phone-slash','',
-          'Missed callback - promised '+(trcWall(g.callbackOverdue.dueDate)||g.callbackOverdue.dueDate)
-          +', '+g.callbackOverdue.daysLate+' day'+(g.callbackOverdue.daysLate===1?'':'s')+' overdue'):''))
+      +(g.promised?' '+trcTag('t-amber','fa-calendar-xmark','','Promised call on '+(trcWall(g.promised.gaps[g.promised.gaps.length-1].limitDate)||'')+' - no call since'):'')
+      +(g.missedIn?' '+trcTag('t-red','fa-phone-slash','',
+          'Missed incoming call '+g.missedIn.count+' time'+(g.missedIn.count===1?'':'s')+' - not called back within 24 hours'):''))
     /* g.lastAssessedOutside only ever fires once g.lastAssessed itself is null (see trcLeads) - a
        carried-over verdict from another date, not this range's own, so it is labelled with exactly
        that date (trcBackfillLastJudgement) rather than left indistinguishable from a same-range one.
@@ -27672,8 +28609,7 @@ function trcLeadRowHtml(g,sl){
        g.lastAssessed). */
     +trcTextCell(last.personnel_name,140)
     +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px'
-      +(g.callbackOverdue?';color:#dc2626;font-weight:600':'')+'"'
-      +(g.callbackOverdue?' title="'+esc(g.callbackOverdue.daysLate+' day'+(g.callbackOverdue.daysLate===1?'':'s')+' overdue')+'"':'')+'>'
+      +'">'
       +esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
     +trcTextCell(last.crm_remarks,220)
@@ -27740,9 +28676,11 @@ function trcColsHtml(){
 function trcRender(full,keepPage){
   trcSaveFilterState();
   const all=TRC_ROWS||[];
-  let rows=trcApply(all);
+  /* With a history chip on, the list is every lead that had ANY call in range (a missed incoming call
+     has no recording, so it is never an eligible call); otherwise only recording-eligible calls. */
+  let rows=trcApply(all,false,trcHistChipOn());
   const scope=trcApply(all,true);
-  const k=$('trcKpis');if(k)k.innerHTML=trcKpiHtml(scope);
+  const k=$('trcKpis');if(k)k.innerHTML=trcKpiHtml(scope,trcApply(all,true,true));
   if(full!==false){
     const f=$('trcFilters');if(f)f.innerHTML=trcFilterBar(all);
     const d=$('trcDates');if(d)d.innerHTML=trcDateBar();
@@ -27758,11 +28696,13 @@ function trcRender(full,keepPage){
     rows=rows.concat(TRC_PIN_ROWS);
   }
   let items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
-  // Missed callback is a per-LEAD fact (see trcCallbackOverdue) - it only narrows the lead rollup, not
+  TRC_LIST_LEAD_IDS=callLevel?[]:items.map(function(g){return g.lead_id;});
+  const histLoading=!callLevel&&trcHistChipOn()&&items.some(function(g){return g.historyPending;});
+  // Missed incoming and late follow-ups are per-LEAD facts - they only narrow the lead rollup, not
   // the call-level Mismatch table, which trcLeads never runs over in the first place.
-  if(!callLevel&&TRC_F.overdue==='1')items=items.filter(function(g){return g.callbackOverdue;});
+  if(!callLevel&&TRC_F.missedIn==='1')items=items.filter(function(g){return g.missedIn;});
   if(!callLevel&&TRC_F.cadence==='1')items=items.filter(function(g){return g.cadence;});
-  if(!callLevel&&TRC_F.callbackTat==='1')items=items.filter(function(g){return g.callbackTat;});
+  if(!callLevel&&TRC_F.promised==='1')items=items.filter(function(g){return g.promised;});
   const totalItems=items.length;
   const totalPages=Math.max(1,Math.ceil(totalItems/TRC_PAGE_SIZE));
   if(!keepPage){
@@ -27781,7 +28721,9 @@ function trcRender(full,keepPage){
   const pageOffset=TRC_PAGE*TRC_PAGE_SIZE;
   const pageItems=items.slice(pageOffset,pageOffset+TRC_PAGE_SIZE);
   TRC_PAGE_ROWS=pageItems;
-  const b=$('trcRows');if(b)b.innerHTML=trcTableHtml(pageItems,callLevel,pageOffset);
+  const b=$('trcRows');if(b)b.innerHTML=histLoading
+    ?'<tr><td colspan="'+TRC_LEAD_COLS+'"><div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i><div>Loading the full follow-up history of each lead…</div></div></td></tr>'
+    :trcTableHtml(pageItems,callLevel,pageOffset);
   const pg=$('trcPager');if(pg)pg.innerHTML=trcPagerHtml(totalItems,totalPages);
   const c=$('trcCount');
   if(c){
@@ -27953,6 +28895,7 @@ function trcAfterListRender(){
   trcEnrichVisiblePage();
   trcBackfillLastJudgement();
   trcPrefetchListedHistories();
+  trcWarmListHistories();
 }
 
 /* ================================================ ONE LEAD, THE WHOLE STORY */
@@ -28217,64 +29160,88 @@ function trcDaysBetween(fromStr,toStr){
   const p=function(s){const a=String(s).split('-').map(Number);return Date.UTC(a[0],a[1]-1,a[2]);};
   return Math.round((p(toStr)-p(fromStr))/86400000);
 }
-/* A promised callback date that has passed with nothing logged since is a missed callback - the agent
-   said "I'll call back on X" and X came and went in silence. Computed the same way trcOvHealth checks
-   its own promised date: against traToday(), over whichever rows the caller hands in - the lead's full
-   history on the detail page (see trcLeadDetail), or only the selected range's rows on the list (see
-   trcLeads) - a call outside that set is invisible here exactly as everywhere else this page rolls up
-   a lead's calls. Not applicable to a lead that has closed the door (Lost) - there is nothing left to
-   call back about. "Lost, then Reopened" is deliberately NOT treated as Lost, same reasoning as
-   everywhere else on this page (see the status_assessment prompt): the "then Reopened" half means the
-   lead is live again. Only the LATEST call's own promise matters - rows arrives chronological
-   (oldest-first, the same order trcLeads and trcLeadDetail already sort it into), so an earlier call's
-   promise was superseded the moment a later call happened, on time or not. */
-function trcCallbackOverdue(status,rows){
-  if(String(status||'')==='Lost')return null;
-  const last=(rows||[])[(rows||[]).length-1];
-  if(!last||!last.next_follow_up_text)return null;
-  const dueDate=String(last.next_follow_up_text).slice(0,10);
-  const today=traToday();
-  if(!(dueDate<today))return null;
-  return {dueDate:dueDate,daysLate:trcDaysBetween(dueDate,today)};
+/* A lead who rang the agent and was not picked up. The CRM history carries no call-direction field, so
+   the agent's own log is the only marker: the follow-up remark reads "incoming call missed" (a remark
+   like "incoming received ..." is an answered call and "incoming call facility is not available" is a
+   failed OUTGOING attempt - neither counts). */
+/* The decision date is the day being judged - the end of the selected range (yesterday by default). Both
+   flags below are "as of" that day: calls logged after it are not yet known, and "today" for the
+   purpose of a promise or a callback window is the decision date itself, never the real clock. */
+function trcDecisionDate(){return TRC_F.to||TRC_F.from||traToday();}
+function trcAsOf(rows){
+  const d=trcDecisionDate();
+  return (rows||[]).filter(function(r){const x=trcRowDate(r);return !x||x<=d;});
 }
-function trcCallbackOverdueHtml(o){
+function trcIsMissedIncoming(r){
+  return /^\s*incoming call missed/i.test(String(r&&r.crm_remarks||''));
+}
+const TRC_MISSED_CALLBACK_HOURS=24;
+/* Was every missed incoming call followed by a callback? Each missed call needs some later logged call
+   (anything that is not itself another missed incoming) within TRC_MISSED_CALLBACK_HOURS of the miss.
+   rows chronological, oldest-first. Not skipped for Lost leads: the customer rang in, a callback is owed
+   whatever the lead's status says. */
+function trcMissedIncomingCallback(rows){
+  const list=trcAsOf(rows);
+  const stamp=function(r){const t=Date.parse(r.communication_time||'');return isNaN(t)?null:t;};
+  const now=Date.parse(trcDecisionDate()+'T23:59:59+05:30'),limit=TRC_MISSED_CALLBACK_HOURS*3600000;
+  const misses=[];
+  for(let i=0;i<list.length;i++){
+    if(!trcIsMissedIncoming(list[i]))continue;
+    const at=stamp(list[i]);
+    if(at===null)continue;
+    let back=null;
+    for(let j=i+1;j<list.length;j++){
+      if(trcIsMissedIncoming(list[j]))continue;
+      const t=stamp(list[j]);
+      if(t!==null){back=t;break;}
+    }
+    const calledBack=back!==null&&back-at<=limit;
+    /* Still inside the window at the end of the decision day with no callback yet - not late yet. */
+    if(calledBack||(back===null&&now-at<=limit))continue;
+    misses.push({follow_up_id:list[i].follow_up_id,missedAt:at,calledBackAt:back});
+  }
+  return misses.length?{count:misses.length,misses:misses}:null;
+}
+function trcMissedIncomingHtml(o){
   if(!o)return '';
+  const fmt=function(t){return esc(trcWall(new Date(t).toISOString().slice(0,10))||'');};
+  const rows=o.misses.slice().reverse().map(function(m){
+    return '<div style="margin-top:6px;font-size:12.5px;color:var(--slate)">Lead called in on '+fmt(m.missedAt)+' and was missed - '
+      +(m.calledBackAt===null?'no callback logged since.'
+        :'first callback on '+fmt(m.calledBackAt)+', '+Math.round((m.calledBackAt-m.missedAt)/3600000)+' hours later (target '+TRC_MISSED_CALLBACK_HOURS+').')
+      +'</div>';
+  }).join('');
   return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #dc2626">'
-    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-slash" style="color:#dc2626"></i> Missed callback</div>'
-    +'<div style="font-size:12.5px;color:var(--slate)">A callback was promised for '
-    +esc(trcWall(o.dueDate)||o.dueDate)+' and nothing has been logged against this lead since - '
-    +o.daysLate+' day'+(o.daysLate===1?'':'s')+' overdue.</div>'
-  +'</div>';
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-slash" style="color:#dc2626"></i> Missed incoming call not called back properly - '
+    +o.count+' time'+(o.count===1?'':'s')+'</div>'+rows+'</div>';
 }
-/* Follow-up frequency/cadence - was the recontact after each call made on time?
-   Scheduled   - the call named a next_follow_up_text date; late if the FOLLOWING call (or, for the
-                 lead's own still-open gap, today) falls after that date.
-   Unscheduled - the call named no date at all; late if more than TRC_CADENCE_UNSCHEDULED_DAYS days
-                 pass before the next call (or today, for the still-open gap).
-   Not evaluated once a lead is Lost - same reasoning as trcCallbackOverdue, there is nothing left to
-   call back about. rows must already be chronological, oldest-first (trcLeads/trcLeadDetail's own
-   order), since each gap is judged against the call that comes right after it. */
-const TRC_CADENCE_UNSCHEDULED_DAYS=3;
-function trcCadenceIssues(status,rows){
+/* Late follow-ups: the agent set a next follow-up date and that date passed with no call. Only a date the
+   agent promised counts - a call with no date set is never "late". A missed incoming call is the
+   customer's call, not the agent's follow-up, so it neither satisfies a promise nor starts one. Not
+   evaluated once a lead is Lost. rows must be chronological, oldest-first. */
+function trcCadenceIssues(status,rows,mode){
   if(String(status||'')==='Lost')return null;
-  const list=rows||[];
-  const today=traToday();
+  const list=trcAsOf(rows).filter(function(r){return !trcIsMissedIncoming(r);});
+  const today=trcDecisionDate();
   const gaps=[];
   for(let i=0;i<list.length;i++){
     const prev=list[i];
+    if(!prev.next_follow_up_text)continue;
     const nextRow=list[i+1]||null;
     const actualDate=nextRow?trcRowDate(nextRow):today;
     if(!actualDate)continue;
-    const scheduled=!!prev.next_follow_up_text;
-    const prevDate=trcRowDate(prev);
-    const limitDate=scheduled?String(prev.next_follow_up_text).slice(0,10)
-                             :(prevDate?trcAddDays(prevDate,TRC_CADENCE_UNSCHEDULED_DAYS):null);
-    if(!limitDate||!(actualDate>limitDate))continue;
+    const scheduled=true;
+    const limitDate=String(prev.next_follow_up_text).slice(0,10);
+    if(!(actualDate>limitDate))continue;
     gaps.push({follow_up_id:prev.follow_up_id,scheduled:scheduled,limitDate:limitDate,
       actualDate:nextRow?actualDate:null,daysLate:trcDaysBetween(limitDate,actualDate),open:!nextRow});
   }
-  if(!gaps.length)return null;
-  return {lateCount:gaps.length,totalGaps:list.length,gaps:gaps};
+  /* mode 'late': the promised date was missed but a call did follow, after it. mode 'promised': the
+     promised date passed and no call has been logged since. No mode (lead detail page): both. */
+  const shown=mode==='late'?gaps.filter(function(g){return !g.open;})
+    :mode==='promised'?gaps.filter(function(g){return g.open;}):gaps;
+  if(!shown.length)return null;
+  return {lateCount:shown.length,totalGaps:list.length,gaps:shown};
 }
 function trcCadenceIssuesHtml(o){
   if(!o)return '';
@@ -28291,32 +29258,6 @@ function trcCadenceIssuesHtml(o){
     +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-hourglass-half" style="color:#d97706"></i> Follow-up cadence - '
     +o.lateCount+' late of '+o.totalGaps+'</div>'
     +rows
-  +'</div>';
-}
-/* Inbound lead -> first callback turnaround: how long after this lead first appeared in the CRM the
-   first logged call actually happened. lead_first_seen_date (acc.crm_leads, not the per-follow-up
-   f.first_seen_date - see the view's own note) carries no time-of-day, so this is a calendar-day
-   proxy for a 24-hour target, not an hour-level measurement - same day counts as on time, anything
-   later is flagged. rows must be chronological, oldest-first. Only available where the row came from
-   the full join (TRC_LIGHT/followup_timeline_v) - on the fast crm_followups-only path this field is
-   simply absent and the function returns null, the same way trcIsRegression treats a light row. */
-function trcFirstCallbackTat(rows){
-  const list=rows||[];
-  const first=list[0];
-  if(!first||!first.lead_first_seen_date)return null;
-  const firstCallDate=trcRowDate(first);
-  if(!firstCallDate)return null;
-  const daysLate=trcDaysBetween(first.lead_first_seen_date,firstCallDate);
-  if(!(daysLate>0))return null;
-  return {leadSeenDate:first.lead_first_seen_date,firstCallDate:firstCallDate,daysLate:daysLate};
-}
-function trcFirstCallbackTatHtml(o){
-  if(!o)return '';
-  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #d97706">'
-    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-volume" style="color:#d97706"></i> First callback turnaround</div>'
-    +'<div style="font-size:12.5px;color:var(--slate)">Lead first seen '+esc(trcWall(o.leadSeenDate)||o.leadSeenDate)
-    +', first call logged '+esc(trcWall(o.firstCallDate)||o.firstCallDate)+' - '
-    +o.daysLate+' day'+(o.daysLate===1?'':'s')+' after.</div>'
   +'</div>';
 }
 /* The two-part OV rule: enforced here, not just checked by hand.
@@ -28555,16 +29496,14 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
     : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
   const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
-  const callbackOverdue=trcCallbackOverdueHtml(trcCallbackOverdue(lead&&lead.status,rows));
+  const missedIncoming=trcMissedIncomingHtml(trcMissedIncomingCallback(rows));
   const cadenceIssues=trcCadenceIssuesHtml(trcCadenceIssues(lead&&lead.status,rows));
-  const callbackTat=trcFirstCallbackTatHtml(trcFirstCallbackTat(rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
     +ovHealth
-    +callbackOverdue
+    +missedIncoming
     +cadenceIssues
-    +callbackTat
     +calls;
 
   if(!document.getElementById('trcTwoCss')){
@@ -28607,8 +29546,8 @@ window.trcRetry=async function(followUpId){
   /* The repaint is what puts the button back, so it has to happen even when the refetch fails -
      otherwise a dropped connection leaves a dead spinner where the Retry button used to be. */
   TRC_ROWS=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
-  trCacheClear('trc_fetch_cache');
-  trCacheClear('trc_fetch_light_cache');
+  trCacheClear('trc_fetch_cache_v3');
+  trCacheClear('trc_fetch_light_cache_v3');
   /* Retry can be clicked from either of two screens now - a lead's own detail page (the per-call
      card's button) or the Failed list/table (the per-row buttons added alongside it) - and each has
      to repaint ITSELF, not drag the other screen's reader somewhere they didn't ask to go. $('trcRows')
@@ -30233,12 +31172,14 @@ const USAGE_VIEWS={
   // Assistant is Help Desk's default landing tab, reached with NO segment in the hash at all
   // is the string '0', not the tab's name, so '0' has to be listed too for that landing to ever
   // match; clicking the Assistant tab explicitly (from Tickets) sets the hash to 'assistant' instead.
-  'inventory/0':         'inventory.indents_rfq.view_indent_rfq_pipeline',
-  'inventory/1':         'inventory.quote_comparison.view_quote_comparison',
-  'inventory/2':         'inventory.purchase_orders.view_purchase_orders',
-  'inventory/3':         'inventory.grn_qc.view_grn_qc_status',
-  'inventory/4':         'inventory.stock_ledger.view_stock_ledger',
-  'inventory/5':         'inventory.accounts_payable.view_accounts_payable',
+  'inventory/2':         'inventory.indents_rfq.view_indent_rfq_pipeline',
+  'inventory/3':         'inventory.quote_comparison.view_quote_comparison',
+  'inventory/4':         'inventory.purchase_orders.view_purchase_orders',
+  'inventory/5':         'inventory.grn_qc.view_grn_qc_status',
+  'inventory/6':         'inventory.stock_ledger.view_stock_ledger',
+  'inventory/7':         'inventory.admin.view_admin',
+  'inventory/0':         'inventory.setup.view_setup',
+  'inventory/1':         'inventory.vendors.view_vendors',
   'maintenance/0':       'maintenance.asset_register.view_asset_register',
   'maintenance/1':       'maintenance.preventive_maintenance.view_pm_schedule',
   'maintenance/2':       'maintenance.breakdowns_repairs.view_breakdown_repair_tickets',
@@ -30252,6 +31193,8 @@ const USAGE_VIEWS={
   'transcription/5':     'transcription.compilation.view_a_lead_s_combined_call_history',
   'transcription/view':  'transcription.call_detail.view_qualification_checklist_and_entities',
   'dashboard/0':         'dashboard.overview.view_home_dashboard_summary',
+  'accounts/0':          'accounts.transactions.view_transactions',
+  'accounts/1':          'accounts.ledgers_postings.view_ledgers_postings',
   'gtd/0':               'gtd.inbox.view_capture_inbox_clarify_queue',
   'gtd/1':               'gtd.next_actions.view_next_actions_by_context',
   'gtd/2':               'gtd.projects.view_active_projects_next_steps',
