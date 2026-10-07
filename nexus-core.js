@@ -20542,7 +20542,8 @@ function cpaPhCss(){return `<style>
   .cph-cntline span{display:inline-flex;align-items:center;gap:6px;color:var(--ink);font-weight:600}
   .cph-cntline span i{color:var(--c)}
   .cph-fixbtns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
-  .cph-fixsec{display:inline-block;margin-left:8px;padding:1px 9px;border-radius:999px;background:#fef2f2;color:#b91c1c;font-size:12px;font-weight:700}
+  /* The section always sits on its own line under the flat number, so every row lines up the same. */
+  .cph-fixsec{display:table;margin-top:4px;padding:1px 9px;border-radius:999px;background:#fef2f2;color:#b91c1c;font-size:12px;font-weight:700;white-space:nowrap}
   @media(max-width:620px){ .cph-fixi{flex-wrap:wrap} .cph-fixbtns{width:100%} .cph-fixbtns .btn{flex:1 1 0;justify-content:center} }
   .cph-fixg{font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#b91c1c;margin:6px 2px -2px}
   .cph-fixg:first-child{margin-top:0}
@@ -20822,7 +20823,7 @@ async function cpaPhFixList(projects,units){
       +(it.n>1?'<span class="cph-fixpn">'+it.n+'</span>':'')+'</button>';
     const title=w.lvl===2?'Flat '+(w.code||''):w.lvl===1?(w.tower||'Block'):'Whole project';
     return head+'<div class="cph-fixi">'+thBtn
-      +'<div class="cph-fixw"><b>'+esc(title)+(w.lvl===2?' <span class="cph-fixsec">'+esc(secName(it))+'</span>':'')+'</b>'
+      +'<div class="cph-fixw"><b>'+esc(title)+'</b>'+(w.lvl===2?'<span class="cph-fixsec">'+esc(secName(it))+'</span>':'')
         +esc(it.notes.join(' · '))+'</div>'
       +(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+k+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'')
       +'</div>';
