@@ -684,45 +684,46 @@
     /* Recurring view: a financial year in one table - weeks as columns with Monday-Sunday as rows,
        a column after each month, each quarter and the year that adds up what fell inside it - and a
        side panel like the Calendar's that opens only when something is clicked. */
-    .rq-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+    .rq-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px;margin-bottom:12px}
     .rq-nav{display:flex;align-items:center;gap:8px}
     .rq-nav .ac-btn{width:36px;justify-content:center;font-size:17px}
     .rq-nav b{font-size:15px;min-width:120px;text-align:center}
-    .rq-filter{height:36px;min-width:180px}
+    .rq-filter{height:36px;min-width:180px;margin-left:6px;border:1.5px solid #2563eb !important;color:#1d4ed8;font-weight:600}
     .rq-table{width:100%;background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
     .rq-grid{display:flex;width:max-content}
-    .rq-col{flex:none;width:124px;display:flex;flex-direction:column;border-left:1px solid var(--line)}
+    .rq-col{flex:none;width:156px;display:flex;flex-direction:column;border-left:1px solid var(--line)}
     .rq-col.days{width:48px;border-left:0;position:sticky;left:0;z-index:2;background:var(--bg-card,#fff);
       border-right:1px solid var(--line)}
-    .rq-col.sum{width:150px;background:var(--bg-soft,#f8fafc)}
+    .rq-col.sum{width:176px;background:var(--bg-soft,#f8fafc)}
     .rq-col.sum.q{background:#f6f3ff;border-left:1px solid #cbd5e1}
     .rq-col.sum.y{background:#fdf4f5;border-left:2px solid #cbd5e1}
     .rq-h{height:50px;box-sizing:border-box;padding:7px 9px;border:0;border-bottom:1px solid var(--line);
       display:flex;flex-direction:column;gap:2px;background:var(--bg-soft,#f8fafc);font:inherit;text-align:left;width:100%}
     button.rq-h{cursor:pointer}
     button.rq-h:hover{background:#eef2f7}
-    .rq-col.cur .rq-h{box-shadow:inset 0 -2px 0 #e0121c}
+    .rq-h.cur{box-shadow:inset 0 -2px 0 #e0121c}
     .rq-h b{font-size:12px;white-space:nowrap}
     .rq-h span{font-size:10.5px;color:var(--slate);white-space:nowrap}
-    .rq-dn{height:96px;box-sizing:border-box;border-top:1px solid var(--line);padding:7px 6px;font-size:11.5px;
+    .rq-dn{height:104px;box-sizing:border-box;border-top:1px solid var(--line);padding:7px 6px;font-size:11.5px;
       font-weight:700;color:var(--slate)}
-    .rq-cell{height:96px;box-sizing:border-box;border-top:1px solid var(--line);padding:4px;display:flex;
+    .rq-cell{height:104px;box-sizing:border-box;border-top:1px solid var(--line);padding:4px;display:flex;
       flex-direction:column;gap:3px;overflow:hidden;cursor:pointer}
     .rq-cell:hover{background:#f8fafc}
     .rq-cell.today{background:#fff4f4}
     .rq-cell .d{font-size:10.5px;font-weight:700;color:var(--slate);padding:1px 3px}
     .rq-cell.today .d{color:#e0121c}
+    .rq-cell.out{background:repeating-linear-gradient(135deg,transparent 0 6px,rgba(15,23,42,.03) 6px 12px);cursor:default}
+    .rq-cell.out:hover{background:repeating-linear-gradient(135deg,transparent 0 6px,rgba(15,23,42,.03) 6px 12px)}
     .rq-cell .more{font-size:10.5px;font-weight:600;color:var(--slate);padding:0 3px}
     .rq-chip{display:flex;align-items:center;gap:5px;width:100%;box-sizing:border-box;min-height:22px;padding:2px 6px;
       border-radius:5px;font:inherit;font-size:11px;font-weight:600;line-height:1.2;text-align:left;cursor:pointer;
       background:var(--cb);color:var(--cc);border:1.5px solid transparent}
-    .rq-chip span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .rq-chip span{flex:1;min-width:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
     .rq-chip.st-done{opacity:.55;text-decoration:line-through}
     .rq-chip.st-overdue{background:#fff;border-color:#dc2626}
     .rq-chip.st-next{opacity:.8}
     .rq-chip.st-held{background:transparent;border:1.5px dashed var(--cc)}
-    .rq-sumcell{flex:1;border:0;border-top:1px solid var(--line);background:transparent;font:inherit;text-align:left;
-      padding:10px;display:flex;flex-direction:column;gap:6px;cursor:pointer}
+    .rq-sumcell{flex:1;border-top:1px solid var(--line);padding:10px;display:flex;flex-direction:column;gap:5px;cursor:pointer}
     .rq-sumcell:hover{background:rgba(15,23,42,.03)}
     .rq-sumcell .n{font-size:20px;font-weight:700;line-height:1}
     .rq-sumcell .n small{font-size:11px;font-weight:600;color:var(--slate);margin-left:4px}
@@ -1153,60 +1154,67 @@
     REC_DATA.series=recSeries(data.tasks);
     recPaint(true);
   }
-  function recPaint(scrollToToday){
+  function recPaint(scrollToNext){
     const b=$('acBody'); if(!b||!REC_DATA) return;
     recBuild();
-    const v=REC_VIEW, today=istTodayISO(), fyLbl='FY '+v.fy+'–'+String(v.fy+1).slice(2);
+    const v=REC_VIEW, today=istTodayISO(), fyLbl='FY '+v.fy+'\u2013'+String(v.fy+1).slice(2);
     const chip=x=>{ const s=REC_DATA.series[x.i], f=REC_FQC(s.freq);
-      return '<button type="button" class="rq-chip st-'+x.o.st+'" style="--cc:'+f.c+';--cb:'+f.bg+'" title="'+esc2(s.title+' · '+f.label+' · '+REC_ST[x.o.st])+'"'
+      return '<button type="button" class="rq-chip st-'+x.o.st+'" style="--cc:'+f.c+';--cb:'+f.bg+'" title="'+esc2(s.title+' \u00b7 '+f.label+' \u00b7 '+REC_ST[x.o.st])+'"'
         +' onclick="event.stopPropagation();recOpen('+x.i+',\''+x.o.date+'\')"><span>'+esc2(s.title)+'</span></button>'; };
-    const sumCell=(from,to,label)=>{
-      const items=recIn(from,to), cnt={};
-      items.forEach(x=>{ const k=REC_DATA.series[x.i].freq; cnt[k]=(cnt[k]||0)+1; });
-      return '<button type="button" class="rq-sumcell" onclick="recPeriod(\''+from+'\',\''+to+'\',\''+esc2(label)+'\')">'
+    /* The Month column holds the monthly tasks of that month, the Quarter column the quarterly ones
+       and the Year column the annual ones - not everything that fell inside the period. */
+    const sumCell=(freq,from,to,label)=>{
+      const items=recIn(from,to).filter(x=>REC_DATA.series[x.i].freq===freq), f=REC_FQC(freq);
+      return '<div class="rq-sumcell" onclick="recPeriod(\''+freq+'\',\''+from+'\',\''+to+'\',\''+esc2(label)+'\')">'
         +'<span class="n">'+items.length+'<small>task'+(items.length===1?'':'s')+'</small></span>'
-        +REC_FQ.filter(f=>cnt[f.k]).map(f=>'<span class="l"><i class="rq-dot" style="background:'+f.c+'"></i>'+f.label+'<b>'+cnt[f.k]+'</b></span>').join('')
-        +'</button>'; };
+        +(items.length?'<span class="l"><i class="rq-dot" style="background:'+f.c+'"></i>'+f.label+'<b>'+items.length+'</b></span>'+items.map(chip).join(''):'')
+        +'</div>'; };
     let cols='<div class="rq-col days"><div class="rq-h"></div>'+['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>'<div class="rq-dn">'+d+'</div>').join('')+'</div>';
     for(let mi=0; mi<12; mi++){
-      const y=v.fy+Math.floor((3+mi)/12), m=(3+mi)%12;
-      let mon=dpAdd(dpIso(y,m,1),-((new Date(y,m,1).getDay()+6)%7));
-      if(dpParse(dpAdd(mon,3)).m!==m) mon=dpAdd(mon,7);
-      let wk=0;
-      while(dpParse(dpAdd(mon,3)).m===m){
+      const y=v.fy+Math.floor((3+mi)/12), m=(3+mi)%12, mFrom=dpIso(y,m,1), mTo=dpIso(y,m,dpDaysIn(y,m));
+      // every week that touches the month; days of the month before or after are left blank
+      let mon=dpAdd(mFrom,-((new Date(y,m,1).getDay()+6)%7)), wk=0;
+      while(mon<=mTo){
         wk++;
-        const end=dpAdd(mon,6), cur=today>=mon&&today<=end;
+        const end=dpAdd(mon,6), cFrom=mon<mFrom?mFrom:mon, cTo=end>mTo?mTo:end;
         let cells='';
         for(let k=0;k<7;k++){
-          const ds=dpAdd(mon,k), p=dpParse(ds), its=REC_DATA.byDate[ds]||[];
+          const ds=dpAdd(mon,k);
+          if(ds<mFrom||ds>mTo){ cells+='<div class="rq-cell out"></div>'; continue; }
+          const p=dpParse(ds), its=REC_DATA.byDate[ds]||[];
           cells+='<div class="rq-cell'+(ds===today?' today':'')+'" onclick="recDay(\''+ds+'\')">'
             +'<span class="d">'+p.d+' '+DP_MONS[p.m]+'</span>'
-            +its.slice(0,3).map(chip).join('')
-            +(its.length>3?'<span class="more">+'+(its.length-3)+' more</span>':'')+'</div>';
+            +its.slice(0,2).map(chip).join('')
+            +(its.length>2?'<span class="more">+'+(its.length-2)+' more</span>':'')+'</div>';
         }
-        cols+='<div class="rq-col'+(cur?' cur':'')+'"><button type="button" class="rq-h" onclick="recWeek(\''+mon+'\')" title="All tasks this week">'
-          +'<b>Wk '+wk+' · '+DP_MONS[m]+'</b><span>'+dpShort(mon).replace(/ \d{4}$/,'')+' – '+dpShort(end).replace(/ \d{4}$/,'')+'</span></button>'+cells+'</div>';
+        cols+='<div class="rq-col" data-from="'+cFrom+'" data-to="'+cTo+'"><button type="button" class="rq-h'+(today>=cFrom&&today<=cTo?' cur':'')+'" onclick="recWeek(\''+cFrom+'\',\''+cTo+'\')" title="All tasks this week">'
+          +'<b>Wk '+wk+' \u00b7 '+DP_MONS[m]+'</b><span>'+dpShort(cFrom).replace(/ \d{4}$/,'')+' \u2013 '+dpShort(cTo).replace(/ \d{4}$/,'')+'</span></button>'+cells+'</div>';
         mon=dpAdd(mon,7);
       }
-      const mFrom=dpIso(y,m,1), mTo=dpIso(y,m,dpDaysIn(y,m));
-      cols+='<div class="rq-col sum"><div class="rq-h"><b>'+DP_MONL[m]+'</b><span>Month total</span></div>'+sumCell(mFrom,mTo,DP_MONL[m]+' '+y)+'</div>';
+      cols+='<div class="rq-col sum"><div class="rq-h"><b>'+DP_MONL[m]+'</b><span>Monthly tasks</span></div>'+sumCell('monthly',mFrom,mTo,DP_MONL[m]+' '+y+' \u00b7 Monthly')+'</div>';
       if(mi%3===2){
         const q=(mi+1)/3, q0=3+(q-1)*3, qy=v.fy+Math.floor(q0/12), qFrom=dpIso(qy,q0%12,1);
-        cols+='<div class="rq-col sum q"><div class="rq-h"><b>Q'+q+'</b><span>'+DP_MONS[q0%12]+' – '+DP_MONS[m]+'</span></div>'+sumCell(qFrom,mTo,'Q'+q+' '+fyLbl)+'</div>';
+        cols+='<div class="rq-col sum q"><div class="rq-h"><b>Q'+q+'</b><span>Quarterly tasks</span></div>'+sumCell('quarterly',qFrom,mTo,'Q'+q+' '+fyLbl+' \u00b7 Quarterly')+'</div>';
       }
     }
-    cols+='<div class="rq-col sum y"><div class="rq-h"><b>'+fyLbl+'</b><span>Year total</span></div>'+sumCell(dpIso(v.fy,3,1),dpIso(v.fy+1,2,31),fyLbl)+'</div>';
+    cols+='<div class="rq-col sum y"><div class="rq-h"><b>'+fyLbl+'</b><span>Annual tasks</span></div>'+sumCell('yearly',dpIso(v.fy,3,1),dpIso(v.fy+1,2,31),fyLbl+' \u00b7 Annually')+'</div>';
     const opts='<option value="all">All frequencies</option>'+REC_FQ.filter(f=>f.k!=='daily'||REC_DATA.series.some(s=>s.freq==='daily'))
       .map(f=>'<option value="'+f.k+'"'+(v.filter===f.k?' selected':'')+'>'+f.label+'</option>').join('');
     b.innerHTML=recP3Html()
-      +'<div class="rq-bar"><div class="rq-nav"><button class="ac-btn" aria-label="Previous year" onclick="recYear(-1)">‹</button><b>'+fyLbl+'</b>'
-      +'<button class="ac-btn" aria-label="Next year" onclick="recYear(1)">›</button></div>'
-      +'<select class="ac-in rq-filter" aria-label="Frequency" onchange="recFilter(this.value)">'+opts+'</select></div>'
+      +'<div class="rq-bar"><div class="rq-nav"><button class="ac-btn" aria-label="Previous year" onclick="recYear(-1)">\u2039</button><b>'+fyLbl+'</b>'
+      +'<button class="ac-btn" aria-label="Next year" onclick="recYear(1)">\u203a</button>'
+      +'<select class="ac-in rq-filter" aria-label="Frequency" onchange="recFilter(this.value)">'+opts+'</select></div></div>'
       +'<div class="rq-table" id="rqTable"><div class="rq-grid">'+cols+'</div></div>'
-      +(REC_DATA.series.length?'':'<div class="ac-empty" style="cursor:default;margin-top:12px">No recurring tasks yet. Make one from a task’s due date: pick Weekly, Fortnightly, Monthly, Quarterly or Annually.</div>')
+      +(REC_DATA.series.length?'':'<div class="ac-empty" style="cursor:default;margin-top:12px">No recurring tasks yet. Make one from a task\u2019s due date: pick Weekly, Fortnightly, Monthly, Quarterly or Annually.</div>')
       +'<div class="rq-back" id="rqBack" onclick="recClose()"></div>'
       +'<div class="gcal-panel" id="rqPanel"><div class="gcal-panel-head"><b id="rqPanelHead">Details</b><div class="x" onclick="recClose()"><i class="fa-solid fa-xmark"></i></div></div><div class="gcal-panel-body" id="rqPanelBody"></div><div class="gcal-panel-foot" id="rqPanelFoot" style="display:none"></div></div>';
-    if(scrollToToday){ const t=$('rqTable'), c=t&&t.querySelector('.rq-col.cur'); if(c) t.scrollLeft=Math.max(0,c.offsetLeft-60); }
+    if(scrollToNext){
+      // open at the next task still to come (in the frequency shown), else at this week
+      const nx=REC_DATA.all.find(x=>x.o.date>=today&&x.o.st!=='done'), at=nx?nx.o.date:today;
+      const t=$('rqTable'); if(!t) return;
+      const c=Array.prototype.find.call(t.querySelectorAll('.rq-col[data-from]'),el=>at>=el.getAttribute('data-from')&&at<=el.getAttribute('data-to'));
+      if(c) t.scrollLeft=Math.max(0,c.offsetLeft-60);
+    }
   }
   function recShow(head,body,foot){
     const p=$('rqPanel'), bk=$('rqBack'); if(!p) return;
@@ -1232,8 +1240,8 @@
     if(items.length===1) return recOpen(items[0].i,ds);
     recShow(dpLong(ds),recItems(items,false));
   };
-  window.recWeek=function(mon){ recShow('Week of '+dpShort(mon),recGrouped(recIn(mon,dpAdd(mon,6)))); };
-  window.recPeriod=function(from,to,label){ recShow(label,recGrouped(recIn(from,to))); };
+  window.recWeek=function(from,to){ recShow(dpShort(from).replace(/ \d{4}$/,'')+' \u2013 '+dpShort(to),recGrouped(recIn(from,to))); };
+  window.recPeriod=function(freq,from,to,label){ recShow(label,recGrouped(recIn(from,to).filter(x=>REC_DATA.series[x.i].freq===freq))); };
   /* A task that is due now - overdue, due today, or done and waiting for approval - opens the task
      itself, since that is where it is acted on. Anything else - a task still to come, one waiting
      on the previous, or one already done - opens a short summary in the side panel. */
@@ -1254,13 +1262,15 @@
       h+=row('fa-circle-check',c?('Completed '+esc2(dpLong(c))+' · '+(late?'<b style="color:#b91c1c">'+late+' day'+(late===1?'':'s')+' late</b>':'<b style="color:#15803d">on time</b>')):'Completed');
     } else if(o.st==='held'){
       h+=row('fa-hourglass-half','Made once the '+esc2(dpShort(s.latest.due_date))+' one is complete');
+    } else if(!o.task){
+      h+=row('fa-circle-info','Not made yet \u2014 it is created on its day, once the one before it is complete. This is a preview of it.');
     }
     h+=row('fa-user',esc2(mem))+row('fa-user-pen','By '+esc2(nameOf(list,t.delegator)||t.delegator||'—'));
     const foot=o.task?'<button class="ac-btn" onclick="recClose();navTo(\'tasks/task/'+o.task.id+'\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> View task</button>':'';
     recShow(o.st==='done'?'Completed':'Coming up',h,foot);
   };
   window.recYear=function(d){ REC_VIEW.fy+=d; recPaint(true); };
-  window.recFilter=function(k){ REC_VIEW.filter=k; recPaint(false); };
+  window.recFilter=function(k){ REC_VIEW.filter=k; recPaint(true); };
 
   /* ---------- shared row/card renderers ---------- */
   function dueBadge(due,completedAt){
@@ -12729,6 +12739,7 @@
     if(!rule) return [];
     if(rule.freq==='none'||!rule.freq) return rule.date?[rule.date]:[];
     var out=[], cur=from||dpFloor(), guard=0;
+    if(rule.start){ if(!anchor) anchor=rule.start; if(cur<rule.start) cur=rule.start; }
     /* A new fortnightly rule is anchored on its first day, which is simply the next one of its
        weekday - the database does the same (recur_anchor = the first due date). */
     if(rule.freq==='fortnightly' && !anchor){
@@ -12782,7 +12793,34 @@
 
   var DP_ST=null, DP_VIEW=null, DP_MODE='date', DP_AM=null, DP_HOST=null, DP_OPTS=null;
 
-  function dpBlank(){ return {freq:'none',date:dpFloor(),weekdays:[],monthdays:[],monthdates:{},until:null}; }
+  function dpBlank(){ return {freq:'none',date:dpFloor(),weekdays:[],monthdays:[],monthdates:{},until:null,start:null}; }
+  /* Fortnightly and Quarterly have a phase as well as a day: every other Sunday from 11 Oct is not
+     every other Sunday from 18 Oct, and the 15th of Jan/Apr/Jul/Oct is not the 15th of
+     Feb/May/Aug/Nov. So they offer the next possible first dates and keep the chosen one as
+     rule.start; the first task is due that day, and the database counts on from it (recur_anchor
+     is the first due date). */
+  function dpStartChoices(st){
+    var out=[], f=dpFloor(), i;
+    if(st.freq==='fortnightly'&&st.weekdays.length){
+      var d=f; for(i=0;i<7&&new Date(dpParse(d).y,dpParse(d).m,dpParse(d).d).getDay()!==st.weekdays[0];i++) d=dpAdd(d,1);
+      out=[d,dpAdd(d,7)];
+    }
+    if(st.freq==='quarterly'&&st.monthdays.length){
+      var p=dpParse(f);
+      for(i=0;out.length<3&&i<5;i++){
+        var y=p.y+Math.floor((p.m+i)/12), m=(p.m+i)%12, c=dpIso(y,m,dpDayIn(y,m,st.monthdays[0]));
+        if(c>=f) out.push(c);
+      }
+    }
+    return out;
+  }
+  function dpStartOf(st){ var c=dpStartChoices(st); if(!c.length) return null; return c.indexOf(st.start)>-1?st.start:c[0]; }
+  function dpStartHtml(st){
+    var c=dpStartChoices(st); if(!c.length) return '';
+    var cur=dpStartOf(st);
+    return '<div class="dp-ask" style="margin-top:12px">First one</div><div class="dp-chips" style="grid-template-columns:repeat('+c.length+',1fr)">'
+      +c.map(function(d){ return '<button type="button" class="dp-chip wide'+(d===cur?' on':'')+'" data-dp="start" data-v="'+d+'">'+dpShort(d).replace(/ \d{4}$/,'')+'</button>'; }).join('')+'</div>';
+  }
 
   function dpMissing(r){
     var a=dpAsks(r.freq);
@@ -12858,8 +12896,8 @@
         h+='<button type="button" class="dp-chip'+(DP_ST.weekdays.indexOf(i)>-1?' on':'')+'"'
           +' data-dp="dow" data-v="'+i+'" title="'+DP_DOWL[i]+'">'+DP_DOW[i]+'</button>';
       h+='</div><div class="dp-note" style="margin-top:9px">'+(DP_ST.freq==='fortnightly'
-        ?'Every other week, starting from the first one.'
-        :'One day a week. Twice a week is two recurring tasks.')+'</div>';
+        ?'Every other week, counted from the first one.'
+        :'One day a week. Twice a week is two recurring tasks.')+'</div>'+dpStartHtml(DP_ST);
     }
     else if(a==='monthdays'){
       h+=dpAskLbl('Which date',true)+'<div class="dp-chips dom">';
@@ -12867,7 +12905,7 @@
         h+='<button type="button" class="dp-chip'+(DP_ST.monthdays.indexOf(i)>-1?' on':'')+'"'
           +' data-dp="dom" data-v="'+i+'">'+i+'</button>';
       h+='<button type="button" class="dp-chip wide'+(DP_ST.monthdays.indexOf('last')>-1?' on':'')+'"'
-        +' data-dp="dom" data-v="last">Last day</button></div>';
+        +' data-dp="dom" data-v="last">Last day</button></div>'+dpStartHtml(DP_ST);
     }
     else if(a==='monthdates'){
       h+=dpAskLbl('Which month',true)+'<div class="dp-chips mon">';
@@ -12939,6 +12977,7 @@
     if(a==='weekdays')        r.weekdays=st.weekdays.slice().sort(function(x,y){return x-y;});
     else if(a==='monthdays')  r.monthdays=dpSortDays(st.monthdays);
     else if(a==='monthdates') r.monthdates=JSON.parse(JSON.stringify(st.monthdates));
+    if(st.freq==='fortnightly'||st.freq==='quarterly'){ var s0=dpStartOf(st); if(s0) r.start=s0; }
     if(st.until) r.until=st.until;
     return r;
   }
@@ -12984,6 +13023,7 @@
       }
     }
     else if(a==='dow') DP_ST.weekdays=[Number(v)];
+    else if(a==='start') DP_ST.start=v;
     else if(a==='dom') DP_ST.monthdays=[v==='last'?'last':Number(v)];
     else if(a==='mon'){
       /* Clicking a month always selects it and points the grid at it; removing is the explicit
@@ -13029,6 +13069,7 @@
       if(recur.monthdates){ var mk=Object.keys(recur.monthdates).map(Number).sort(function(a,b){return a-b;})[0];
         if(mk!=null){ var vv=recur.monthdates[mk]; DP_ST.monthdates[mk]=(Array.isArray(vv)?dpSortDays(vv):(vv==null?[]:[vv])).slice(0,1); } }
       DP_ST.until=recur.until||null;
+      DP_ST.start=recur.start||null;
     } else {
       DP_ST.freq='none';
       DP_ST.date=(cur&&cur.due)||dpFloor();
