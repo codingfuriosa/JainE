@@ -57,6 +57,20 @@ function css(){
      .tbl th.pss-num is three selectors and wins. One line, and PLC, Car parking, Charges, Towers
      and every other list in here line up. */
   .tbl th.pss-num{text-align:right}
+  /* WHAT THE CARDS USED TO SAY, ON ONE LINE.
+
+     The three cards above these lists were taken off because they restated the table's own
+     columns and pushed the first row off a laptop screen. Taking them off left a heading, a
+     filter bar and a table - correct, and very bare. The same figures live in the filter bar now:
+     one line, right-aligned, costing no height at all, and they move with the filters, so they
+     always describe what is actually on screen. */
+  .ps-stat{margin-left:auto;font-size:12.5px;color:var(--slate);white-space:nowrap;
+    display:flex;gap:16px;align-items:baseline}
+  .ps-stat b{color:var(--ink);font-weight:650;font-variant-numeric:tabular-nums}
+  @media (max-width:860px){ .ps-stat{margin-left:0;width:100%;flex-wrap:wrap;gap:10px 14px} }
+  /* A row you can click should say so before you click it. */
+  .ps-root .tbl tbody tr[onclick]{cursor:pointer}
+  .ps-root .tbl tbody tr[onclick]:hover{background:var(--brand-a10,#eff6ff)}
   .pss-hint{font-size:12.5px;color:var(--slate);margin:2px 0 12px}
   .pss-banner{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 14px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px;margin-bottom:14px;font-size:13px;line-height:1.55}
   .pss-banner .grow{flex:1;min-width:220px}
@@ -1176,7 +1190,8 @@ async function bookingList(host,stale){
   host.innerHTML='<div class="ps-head"><div class="t"><div class="sec-title">Bookings</div><div class="pss-hint" style="margin:2px 0 0">Tap a booking to see its cost sheet, payments, invoices and interest.</div></div><div class="acts"><span id="psSyncInfo" class="pss-hint" style="margin:0;align-self:center"></span><button class="btn" onclick="psSyncNow(this)" title="Pull the latest Farvision imports from Customer Portal"><i class="fa-solid fa-rotate"></i> Sync now</button><button class="btn btn-primary" onclick="navTo(\'postsales/bookings/new\')"><i class="fa-solid fa-plus"></i> New booking</button>'+psDlBtns('psbDownload')+'</div></div>'
     +'<div class="ps-filters"><select id="psbProj" onchange="psbPick()">'+opts+'</select>'
     +psTowerOptions(B.pid,B.tower,'psbTower','psbTowerPick(this.value)')
-    +'<span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="psbQ" placeholder="Search booking no., flat or applicant" oninput="psbFilter()"></span></div>'
+    +'<span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="psbQ" placeholder="Search booking no., flat or applicant" oninput="psbFilter()"></span>'
+    +'<span class="ps-stat" id="psbStat"></span></div>'
     +'<div id="psbList"></div>';
   psSyncInfo();
   window.psbFilter=function(){
@@ -1185,6 +1200,12 @@ async function bookingList(host,stale){
     const tw=B.tower?Number(B.tower):null;
     const rows=B.list.filter(b=>(!B.pid||String(b.project_id)===B.pid)&&(!tw||b.tower_id===tw)&&(!q||[b.booking_no,b.flats&&b.flats.flat_code,b.towers&&b.towers.name,(b.booking_applicants||[]).map(a=>a.full_name).join(' ')].join(' ').toLowerCase().includes(q)));
     window._psbRows=rows;   // what the download sends: exactly what is on screen
+    (function(){ const el=$('psbStat'); if(!el) return;
+      const live=rows.filter(b=>b.status==='active');
+      const cons=live.reduce((t,b)=>t+num(b.total_consideration),0);
+      el.innerHTML='<span>Bookings <b>'+rows.length+'</b></span>'
+        +(rows.length!==live.length?'<span>Active <b>'+live.length+'</b></span>':'')
+        +'<span>Consideration <b>'+inr(cons)+'</b></span>'; })();
     const st={active:'<span class="tag t-green">Active</span>',cancelled:'<span class="tag t-red">Cancelled</span>',transferred:'<span class="tag t-gray">Transferred</span>'};
     const aps=b=>(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq).map(a=>a.full_name);
     $('psbList').innerHTML=listHtml('bk','psbFilter',rows,
@@ -1751,7 +1772,8 @@ async function receiptList(host,stale){
   host.innerHTML='<div class="ps-head"><div class="t"><div class="sec-title">Receipts</div><div class="pss-hint" style="margin:2px 0 0">Every payment received, newest first. Tap one to see what it was applied to, print it or reverse it.</div></div><div class="acts"><button class="btn btn-primary" onclick="navTo(\'postsales/receipts/new\')"><i class="fa-solid fa-plus"></i> Record payment</button>'+psDlBtns('psrDownload')+'</div></div>'
     +'<div class="ps-filters"><select id="psrProj" onchange="psrFilter()">'+opts+'</select>'
     +'<label class="fl">From<input type="date" id="psrFrom" onchange="psrFilter()"></label><label class="fl">To<input type="date" id="psrTo" onchange="psrFilter()"></label>'
-    +'<span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="psrQ" placeholder="Search receipt, booking, flat, applicant or reference" oninput="psrFilter()"></span></div>'
+    +'<span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="psrQ" placeholder="Search receipt, booking, flat, applicant or reference" oninput="psrFilter()"></span>'
+    +'<span class="ps-stat" id="psrStat"></span></div>'
     +'<div id="psrList"></div>';
   window.psrFilter=function(){
     R.pid=val('psrProj')||null; const q=val('psrQ').toLowerCase(), from=val('psrFrom'), to=val('psrTo');
@@ -1760,6 +1782,10 @@ async function receiptList(host,stale){
       return !q||[r.receipt_no,r.instrument_no,b.booking_no,b.flats&&b.flats.flat_code,b.towers&&b.towers.name,(b.booking_applicants||[]).map(a=>a.full_name).join(' ')].join(' ').toLowerCase().includes(q);});
     window._psrRows=rows;   // the download sends exactly what is filtered here
     const act=rows.filter(r=>r.status==='active'), tot=act.reduce((s,r)=>s+num(r.amount),0);
+    (function(){ const el=$('psrStat'); if(!el) return;
+      el.innerHTML='<span>Receipts <b>'+act.length+'</b></span>'
+        +(rows.length>act.length?'<span>Reversed <b>'+(rows.length-act.length)+'</b></span>':'')
+        +'<span>Received <b>'+inr(tot)+'</b></span>'; })();
     const stTag=r=>r.status==='active'?'<span class="tag t-green">Received</span>':'<span class="tag t-red">Reversed</span>';
     /* The cards above the list are gone, as on Invoices: they restated what the table and its
        totals row already say, and pushed the first receipt off the screen. */
