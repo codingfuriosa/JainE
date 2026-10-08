@@ -46,6 +46,17 @@ function css(){
   .pss-code{font-size:12px;font-weight:700;padding:3px 9px;border-radius:6px;background:#eff6ff;color:#1e40af}
   .pss-subs{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 16px}
   .pss-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  /* THE HEADING HAD TO BE TOLD TWICE.
+
+     nexus.css sets .tbl th{text-align:left}. That is two selectors to .pss-num's one, so it won
+     on every numeric heading in Post Sales: the figures sat hard right while RATE /SQ FT, PRICE
+     PER SPACE, GST, POSITIONS and FLATS sat hard left, a column's width away from their own
+     values. Nothing was truncated and nothing was broken - the heading and the number were simply
+     at opposite ends of the same column, which is what made the tables look wrong everywhere.
+
+     .tbl th.pss-num is three selectors and wins. One line, and PLC, Car parking, Charges, Towers
+     and every other list in here line up. */
+  .tbl th.pss-num{text-align:right}
   .pss-hint{font-size:12.5px;color:var(--slate);margin:2px 0 12px}
   .pss-banner{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 14px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px;margin-bottom:14px;font-size:13px;line-height:1.55}
   .pss-banner .grow{flex:1;min-width:220px}
@@ -1525,9 +1536,18 @@ async function bookingView(host,id,stale){
   const applHtml=ap.map(a=>'<div class="psb-appl"><div class="psb-appl-h"><b>'+(a.seq===1?'First applicant':'Joint applicant '+a.seq)+' - '+esc([a.title,a.full_name].filter(Boolean).join(' '))+'</b></div><div class="psb-facts" style="margin-top:2px">'
     +(a.relation_name?fact(a.relation_type||'',esc(a.relation_name)):'')+(a.dob?fact('DOB',dmy(a.dob)):'')+(a.pan?fact('PAN',esc(a.pan)):'')+(a.aadhaar?fact('Aadhaar','XXXX XXXX '+esc(String(a.aadhaar).slice(-4))):'')
     +(a.mobile?fact('Mobile',esc(a.mobile)):'')+(a.email?fact('Email',esc(a.email)):'')+(a.occupation?fact('Occupation',esc(OCC_LBL[a.occupation]||a.occupation)):'')+(a.company?fact('Company',esc(a.company)+(a.designation?', '+esc(a.designation):'')):'')
-    +(a.resident_status&&a.resident_status!=='resident'?fact('Status',a.resident_status==='nri'?'NRI':'Foreign national'):'')+'</div>'
-    +(a.res_address?'<div class="pss-hint" style="margin:6px 0 0">Residential: '+esc(a.res_address)+(a.mailing_address==='residential'?' <span class="tag t-gray">Mailing</span>':'')+'</div>':'')
-    +(a.off_address?'<div class="pss-hint" style="margin:2px 0 0">Office: '+esc(a.off_address)+(a.mailing_address==='office'?' <span class="tag t-gray">Mailing</span>':'')+'</div>':'')
+    +(a.resident_status&&a.resident_status!=='resident'?fact('Status',a.resident_status==='nri'?'NRI':'Foreign national'):'')
+    /* THE ADDRESSES BELONG WITH THE REST OF THE DETAILS. They hung underneath the grid as loose
+       grey sentences with the Mailing tag jammed in mid-line, so a long address ran the whole
+       width of the card while every field above it sat in a tidy column. They are facts like any
+       other now - same label above value - and simply span the grid, because an address needs the
+       width that a PAN does not. Which one receives post is said in the label rather than tacked
+       on to the end of the address. */
+    +(a.res_address?'<span style="grid-column:1/-1"><i>Residential address'
+        +(a.mailing_address==='residential'?' \u00b7 for post':'')+'</i><b>'+esc(a.res_address)+'</b></span>':'')
+    +(a.off_address?'<span style="grid-column:1/-1"><i>Office address'
+        +(a.mailing_address==='office'?' \u00b7 for post':'')+'</i><b>'+esc(a.off_address)+'</b></span>':'')
+    +'</div>'
     +((a.kyc||[]).length?'<div class="psb-kyc">'+a.kyc.map(k=>'<span class="tag t-blue" style="cursor:pointer" onclick="s3OpenSigned(\''+esc(k.path)+'\')"><i class="fa-solid fa-paperclip"></i> '+esc(k.type)+'</span>').join('')+'</div>':'')+'</div>').join('');
   const row=l=>'<tr'+(num(l.amount)<0?' class="neg"':'')+'><td>'+esc(psLabel(l.name))+'</td><td class="r">'+(l.basis==='per_sqft'?rate(l.rate)+' × '+num(l.qty):l.kind==='parking'?inr(l.rate)+' × '+num(l.qty):'Fixed')+'</td><td class="r">'+inr(l.amount)+'</td><td class="r">'+pct(l.gst_rate)+'</td><td class="r">'+inr(l.gst_amount)+'</td><td class="r">'+inr(num(l.amount)+num(l.gst_amount))+'</td></tr>';
   const sub=(lbl,n,g)=>'<tr class="t"><td colspan="2">'+lbl+'</td><td class="r">'+inr(n)+'</td><td></td><td class="r">'+inr(g)+'</td><td class="r">'+inr(num(n)+num(g))+'</td></tr>';
