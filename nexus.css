@@ -1316,3 +1316,108 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
 }
 @media(max-width:1024px){.cust-tab-bg{left:0}}
 
+
+/* ================= Project Scheduling (Operations) ================= */
+/* Schedule picker bar */
+.sch-bar{margin-bottom:16px}
+.sch-bar-top{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.sch-bar-pick label{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--slate);text-transform:uppercase;margin-bottom:5px}
+.sch-bar-pick .sel{min-width:190px}
+.sch-bar-meta{font-size:12.5px;color:#475569;display:flex;flex-direction:column;gap:4px;padding-bottom:2px}
+.sch-mk{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:#94a3b8;text-transform:uppercase;margin-right:6px}
+.sch-kpis{display:flex;align-items:center;gap:26px;flex-wrap:wrap;margin-top:15px;padding-top:14px;border-top:1px dashed var(--line)}
+.sch-kpi .n{font-size:20px;font-weight:700;letter-spacing:-.4px;line-height:1.1}
+.sch-kpi .l{font-size:11.5px;color:var(--slate);margin-top:2px}
+
+/* Activity grid */
+.sch-grid-wrap{overflow-x:auto;max-height:calc(100vh - 340px)}
+/* Specificity has to beat the responsive `.card table{min-width:560px}` rule: that width suits an
+   ordinary 5-column table, but this grid has 15 columns and must stay wide and scroll sideways
+   instead of cramming them into a phone's width. */
+.sch-grid-wrap table.sch-grid{min-width:1500px}
+.sch-grid thead th{position:sticky;top:0;background:#fff;z-index:3;box-shadow:inset 0 -1px 0 var(--line)}
+.sch-grid td{vertical-align:top}
+.sch-row:hover{background:#fafbfe}
+.sch-row.sch-group{background:#f8fafc}
+.sch-row.sch-group:hover{background:#f1f5f9}
+.sch-row.sch-group .sch-name{font-weight:700}
+.sch-row.sch-late .sch-name{color:#b91c1c}
+.sch-caret{width:14px;color:#94a3b8;cursor:pointer;font-size:12px;margin-right:4px}
+.sch-caret:hover{color:var(--brand)}
+.sch-caret-sp{display:inline-block;width:18px}
+.sch-code{display:inline-block;min-width:0;font-size:11px;font-weight:700;color:#94a3b8;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-right:7px}
+.sch-name{cursor:pointer}
+.sch-name:hover{color:var(--brand);text-decoration:underline}
+.sch-warn{color:#d97706;margin-left:6px;font-size:12px;cursor:help}
+.sch-lvl{font-size:11.5px;font-weight:600;color:#475569}
+.sch-loc{font-size:11.5px;color:var(--slate);margin-top:2px}
+.sch-acts{white-space:nowrap;text-align:right}
+.sch-ib{border:1px solid transparent;background:transparent;color:#94a3b8;width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:12.5px}
+.sch-ib:hover{background:var(--brand-50);color:var(--brand);border-color:#dbe6fd}
+.sch-ib.danger:hover{background:var(--err-50);color:var(--err);border-color:#f3c7c7}
+.sch-dim{opacity:.55}
+.sch-sel{background:var(--brand-50)}
+
+/* Small shared bits */
+.sch-hint{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:#475569;background:#f8fafc;border:1px solid var(--line);border-radius:9px;padding:10px 13px;margin-top:14px}
+.sch-hint i{color:var(--brand);margin-top:2px}
+.sch-alert{display:flex;gap:9px;align-items:flex-start;font-size:13px;padding:11px 18px;border-bottom:1px solid var(--line)}
+.sch-alert.err{background:var(--err-50);color:#b91c1c}
+.sch-alert.warn{background:var(--warn-50);color:#b45309}
+.sch-loc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.sch-actual-head{background:#f8fafc;border:1px solid var(--line);border-radius:9px;padding:12px 14px}
+.sch-run-items{border-top:1px solid var(--line)}
+.sch-wdays{display:flex;gap:8px;flex-wrap:wrap}
+.sch-wday{display:inline-flex!important;align-items:center;gap:6px;margin:0!important;padding:7px 11px;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600}
+.sch-wday input{width:auto!important}
+.sch-legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--slate)}
+.sch-legend span{display:inline-flex;align-items:center;gap:6px}
+.g-key{width:16px;height:9px;border-radius:3px;display:inline-block}
+.g-key.plan{background:#93b4f5}.g-key.wip{background:#1763A6}.g-key.done{background:#16855a}
+.g-key.late{background:#c83232}.g-key.grp{background:#334155;height:6px}
+.g-key.base{background:#cbd5e1;height:5px}.g-key.today{background:#7c3aed;width:3px;height:14px}
+
+/* Gantt */
+.gantt-wrap{overflow:auto;max-height:calc(100vh - 330px);position:relative}
+.g-head{display:flex;height:48px;position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line)}
+.g-lbl{width:290px;min-width:290px;position:sticky;left:0;z-index:2;background:#fff;border-right:1px solid var(--line);
+  display:flex;align-items:center;font-size:12.5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.g-head .g-lbl{z-index:6;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);padding-left:14px}
+.g-lbl-t{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer}
+.g-lbl-t:hover{color:var(--brand)}
+.g-lbl-t.b{font-weight:700}
+.g-track{position:relative;height:100%;flex:none}
+.g-body{position:relative}
+.g-row{display:flex;height:30px;border-bottom:1px solid var(--line-2)}
+.g-row.alt,.g-row.alt .g-lbl{background:#fafbfe}
+.g-row:hover,.g-row:hover .g-lbl{background:#f1f5f9}
+.g-month{position:absolute;top:0;height:24px;line-height:24px;font-size:11px;font-weight:700;color:#475569;
+  border-left:1px solid var(--line);padding-left:6px;overflow:hidden;white-space:nowrap;background:#fff;z-index:1}
+.g-tickrow{position:absolute;top:24px;left:0;right:0;height:24px}
+.g-tick{position:absolute;top:0;height:24px;line-height:24px;font-size:10px;color:#94a3b8;text-align:center;
+  border-left:1px solid var(--line-2);overflow:hidden}
+.g-tick.off{background:#f4f6fa;color:#cbd5e1}
+.g-off{position:absolute;top:0;bottom:0;background:#f6f8fc;pointer-events:none}
+.g-bar{position:absolute;top:7px;height:16px;border-radius:5px;background:#93b4f5;overflow:hidden;cursor:default}
+.g-bar.wip{background:#9dbfe0}
+.g-bar.done{background:#a9d9c1}
+.g-bar.late{background:#eeb4b4}
+.g-bar.grp{top:11px;height:8px;border-radius:3px;background:#334155}
+.g-fill{position:absolute;left:0;top:0;bottom:0;background:rgba(15,45,90,.55);border-radius:5px 0 0 5px}
+.g-bar.done .g-fill{background:#16855a}
+.g-bar.wip  .g-fill{background:#1763A6}
+.g-bar.late .g-fill{background:#c83232}
+.g-ms{position:absolute;top:9px;width:12px;height:12px;background:#7c3aed;transform:rotate(45deg);border-radius:2px}
+.g-base{position:absolute;top:25px;height:4px;border-radius:2px;background:#cbd5e1}
+.g-today{position:absolute;top:0;bottom:0;width:2px;background:#7c3aed;z-index:4;pointer-events:none}
+.g-today.body{position:absolute;top:0;opacity:.35}
+.g-links{position:absolute;top:0;pointer-events:none;z-index:3}
+.g-links polyline{fill:none;stroke:#94a3b8;stroke-width:1.2}
+.g-links polygon{fill:#94a3b8}
+
+@media(max-width:900px){
+  .sch-bar-top{gap:12px}
+  .sch-bar-meta{width:100%}
+  /* .g-lbl keeps its 290px width at every size — the Gantt's SVG link layer is offset by
+     exactly that number (GLBL in scheduling.js), so shrinking it here would skew the arrows. */
+}

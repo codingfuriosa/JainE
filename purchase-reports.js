@@ -21,7 +21,7 @@ const whById=id=>U().S.warehouses.find(w=>w.id===id);
 const projName=id=>{const p=U().S.projects.find(x=>x.id===id);return p?p.name:'—';};
 const groupName=id=>{const g=U().S.groups.find(x=>x.id===id);return g?g.name:'—';};
 const unitOf=id=>{const i=itemById(id);return i?U().uomCode(i.stock_uom_id):'';};
-const R={summary:{on:null,project:'',wh:'',group:''},item:{item:'',wh:'',from:null,to:null},ageing:{on:null,project:'',wh:'',group:'',show:'qty'}};
+const R={summary:{on:null,project:'',wh:'',group:''},item:{item:'',project:'',wh:'',from:null,to:null},ageing:{on:null,project:'',wh:'',group:'',show:'qty'}};
 const TITLES={summary:'Stock summary',item:'Item stock ledger',ageing:'Stock ageing'};
 let LAST={rows:[],head:[],name:'report'};   // what is on screen, for the CSV download
 
@@ -31,7 +31,7 @@ function groupOptions(sel){
   const walk=(pid,depth)=>gs.filter(g=>(g.parent_id||null)===pid).sort((a,b)=>String(a.name).localeCompare(b.name)).forEach(g=>{ out.push('<option value="'+g.id+'"'+(String(g.id)===String(sel)?' selected':'')+'>'+'&nbsp;&nbsp;'.repeat(depth)+esc(g.name)+'</option>'); walk(g.id,depth+1); });
   walk(null,0); return '<option value="">All item groups</option>'+out.join('');
 }
-const projOptions=sel=>'<option value="">All projects</option>'+U().S.projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(sel)?' selected':'')+'>'+esc(p.name)+'</option>').join('');
+const projOptions=sel=>'<option value="">All business units</option>'+U().S.projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(sel)?' selected':'')+'>'+esc(p.name)+'</option>').join('');
 const whOptions=(sel,project)=>'<option value="">All warehouses</option>'+U().S.warehouses.filter(w=>!project||String(w.project_id)===String(project)).map(w=>'<option value="'+w.id+'"'+(String(w.id)===String(sel)?' selected':'')+'>'+esc(w.name)+'</option>').join('');
 const bar=(which)=>'<div class="toolbar"><div style="flex:1"><div class="sec-title" style="margin:0">'+TITLES[which]+'</div><div class="pus-hint" style="margin:0">'+({
   summary:'Quantity and value of the stock in each warehouse as on a date. Stock is valued at the weighted-average cost.',
@@ -53,6 +53,8 @@ window.pusReportRender=async function(host,which){
   const mine=++SEQ, stale=()=>mine!==SEQ||!host.isConnected;
   if(!U().can('report.view')){ host.innerHTML=chipBar()+'<div class="empty" style="padding:30px"><i class="fa-solid fa-lock"></i><div>You do not have access to the stock reports. Ask a Purchase administrator for the Reports permission (Admin → Roles).</div></div>'; return; }
   R.summary.on=R.summary.on||today(); R.ageing.on=R.ageing.on||today(); R.item.from=R.item.from||fyStart(); R.item.to=R.item.to||today();
+  R.summary.project=R.item.project=R.ageing.project=U().S.bu||'';   // the business unit chosen anywhere in this module follows you here
+  [R.summary,R.item,R.ageing].forEach(s=>{ if(s.wh&&s.project){ const w=whById(parseInt(s.wh,10)); if(!w||String(w.project_id)!==String(s.project)) s.wh=''; } });
   host.innerHTML=chipBar()+'<div id="prpHost"></div>';
   await draw(stale);
 };
@@ -64,9 +66,10 @@ async function draw(stale){
   let filters;
   if(CUR==='item') filters='<div class="pus-top" style="align-items:flex-end;flex-wrap:wrap;gap:12px">'
     +field('Item','<select id="rpItem" style="min-width:260px" onchange="pusRpGo()"><option value="">Choose an item…</option>'+U().S.items.slice().sort((a,b)=>String(a.name).localeCompare(b.name)).map(i=>'<option value="'+i.id+'"'+(String(i.id)===String(s.item)?' selected':'')+'>'+esc(i.name)+' ('+esc(i.code)+')</option>').join('')+'</select>')
-    +field('Warehouse','<select id="rpWh" onchange="pusRpGo()">'+whOptions(s.wh,'')+'</select>')+field('From','<input id="rpFrom" type="date" value="'+esc(s.from)+'" onchange="pusRpGo()">')+field('To','<input id="rpTo" type="date" max="'+today()+'" value="'+esc(s.to)+'" onchange="pusRpGo()">')+'</div>';
+    +field('Business unit','<select id="rpProj" onchange="pusRpProj()">'+projOptions(s.project)+'</select>')
+    +field('Warehouse','<select id="rpWh" onchange="pusRpGo()">'+whOptions(s.wh,s.project)+'</select>')+field('From','<input id="rpFrom" type="date" value="'+esc(s.from)+'" onchange="pusRpGo()">')+field('To','<input id="rpTo" type="date" max="'+today()+'" value="'+esc(s.to)+'" onchange="pusRpGo()">')+'</div>';
   else filters='<div class="pus-top" style="align-items:flex-end;flex-wrap:wrap;gap:12px">'
-    +field('As on','<input id="rpOn" type="date" max="'+today()+'" value="'+esc(s.on)+'" onchange="pusRpGo()">')+field('Project','<select id="rpProj" onchange="pusRpProj()">'+projOptions(s.project)+'</select>')
+    +field('As on','<input id="rpOn" type="date" max="'+today()+'" value="'+esc(s.on)+'" onchange="pusRpGo()">')+field('Business unit','<select id="rpProj" onchange="pusRpProj()">'+projOptions(s.project)+'</select>')
     +field('Warehouse','<select id="rpWh" onchange="pusRpGo()">'+whOptions(s.wh,s.project)+'</select>')+field('Item group','<select id="rpGroup" onchange="pusRpGo()">'+groupOptions(s.group)+'</select>')
     +(CUR==='ageing'?'<div class="pus-subs" style="margin:0 0 4px"><span class="chip'+(s.show==='qty'?' active':'')+'" onclick="pusRpShow(\'qty\')">Quantity</span><span class="chip'+(s.show==='value'?' active':'')+'" onclick="pusRpShow(\'value\')">Value</span></div>':'')+'</div>';
   host.innerHTML=bar(CUR)+filters+'<div id="prpOut"></div>';
@@ -76,11 +79,11 @@ async function draw(stale){
 }
 function readFilters(){
   const v=U().val, s=R[CUR];
-  if(CUR==='item'){ s.item=v('rpItem'); s.wh=v('rpWh'); s.from=v('rpFrom')||s.from; s.to=v('rpTo')||s.to; }
+  if(CUR==='item'){ s.item=v('rpItem'); s.project=v('rpProj'); s.wh=v('rpWh'); s.from=v('rpFrom')||s.from; s.to=v('rpTo')||s.to; }
   else { s.on=v('rpOn')||s.on; s.project=v('rpProj'); s.wh=v('rpWh'); s.group=v('rpGroup'); }
 }
 window.pusRpGo=function(){ readFilters(); draw(); };
-window.pusRpProj=function(){ readFilters(); const s=R[CUR]; if(s.wh&&s.project){ const w=whById(parseInt(s.wh,10)); if(!w||String(w.project_id)!==String(s.project)) s.wh=''; } draw(); };
+window.pusRpProj=function(){ readFilters(); const s=R[CUR]; U().S.bu=s.project||''; if(s.wh&&s.project){ const w=whById(parseInt(s.wh,10)); if(!w||String(w.project_id)!==String(s.project)) s.wh=''; } draw(); };
 window.pusRpShow=function(k){ R.ageing.show=k; draw(); };
 const par=s=>({p_as_on:s.on,p_project:s.project?parseInt(s.project,10):null,p_warehouse:s.wh?parseInt(s.wh,10):null,p_group:s.group?parseInt(s.group,10):null});
 const table=(heads,rows,foot)=>'<div class="card" style="padding:0;margin-top:10px"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+heads.map(h=>'<th'+(h[1]?' class="pus-num"':'')+'>'+esc(h[0])+'</th>').join('')+'</tr></thead><tbody>'+rows+(foot||'')+'</tbody></table></div></div>';
@@ -98,7 +101,7 @@ async function drawSummary(out){
     rows+='<tr><td>'+esc(w.name||'')+'<div style="font-size:12px;color:var(--slate)">'+esc(projName(w.project_id))+'</div></td><td><b>'+esc(it.name||'')+'</b><div style="font-size:12px;color:var(--slate)">'+esc(it.code||'')+'</div></td><td>'+esc(groupName(it.group_id))+'</td><td>'+esc(unitOf(r.item_id))+'</td><td class="pus-num"><b>'+qty(r.qty)+'</b></td><td class="pus-num">'+money(r.avg_rate)+'</td><td class="pus-num">'+money(r.value)+'</td></tr>';
     csv.push([w.name,projName(w.project_id),it.code,it.name,groupName(it.group_id),unitOf(r.item_id),r.qty,r.avg_rate,r.value]); });
   flush();
-  LAST={name:'stock-summary-'+s.on,head:['Warehouse','Project','Item code','Item','Group','Unit','Quantity','Average cost','Value'],rows:csv};
+  LAST={name:'stock-summary-'+s.on,head:['Warehouse','Business unit','Item code','Item','Group','Unit','Quantity','Average cost','Value'],rows:csv};
   out.innerHTML='<div class="pus-hint" style="margin:10px 0 0">Stock as on <b>'+U().dmy(s.on)+'</b> · '+list.length+' item'+(list.length===1?'':'s')+' · total value <b>'+money(r2(total))+'</b></div>'
     +table([['Warehouse'],['Item'],['Group'],['Unit'],['Quantity',1],['Average cost',1],['Value',1]],rows||nothing(7,'No stock on this date for these filters'),list.length?'<tr style="background:#eef2f7"><td colspan="6" style="text-align:right"><b>Total stock value</b></td><td class="pus-num"><b>'+money(r2(total))+'</b></td></tr>':'');
 }
@@ -109,7 +112,24 @@ async function drawItem(out){
   const s=R.item;
   if(!s.item){ out.innerHTML='<div class="empty" style="padding:30px"><i class="fa-solid fa-magnifying-glass"></i><div>Choose an item to see its ledger.</div></div>'; LAST={rows:[],head:[],name:'item-ledger'}; return; }
   if(s.from>s.to){ out.innerHTML='<div class="empty" style="padding:30px"><div>The from date is after the to date.</div></div>'; LAST={rows:[],head:[],name:'item-ledger'}; return; }
-  const {data,error}=await U().PU().rpc('report_item_ledger',{p_item:parseInt(s.item,10),p_warehouse:s.wh?parseInt(s.wh,10):null,p_from:s.from,p_to:s.to}); if(error) throw error;
+  // One warehouse, or every warehouse (no business unit chosen): a single call. A business unit with no warehouse picked: one call per
+  // warehouse of that unit, combined here - opening = the openings added up, then one running balance over all movements in date order
+  // (the same arithmetic the database does when it adds up several warehouses).
+  const buWhs=(!s.wh&&s.project)?U().S.warehouses.filter(w=>String(w.project_id)===String(s.project)).map(w=>w.id):null;
+  let data;
+  if(buWhs){
+    if(!buWhs.length){ out.innerHTML='<div class="empty" style="padding:30px"><div>This business unit has no warehouse yet.</div></div>'; LAST={rows:[],head:[],name:'item-ledger'}; return; }
+    const calls=await Promise.all(buWhs.map(w=>U().PU().rpc('report_item_ledger',{p_item:parseInt(s.item,10),p_warehouse:w,p_from:s.from,p_to:s.to})));
+    const bad=calls.find(c=>c.error); if(bad) throw bad.error;
+    let oq=0, ov=0, mv=[];
+    calls.forEach(c=>(c.data||[]).forEach(x=>{ if(x.doc_type==='OPEN'){ oq+=+x.qty; ov+=+x.value; } else mv.push(x); }));
+    mv.sort((a,b)=>(a.moved_on<b.moved_on?-1:a.moved_on>b.moved_on?1:(+a.seq)-(+b.seq)));
+    let rq=oq, rv=ov; mv=mv.map(x=>{ rq+=+x.qty; rv+=+x.value; return Object.assign({},x,{run_qty:rq,run_value:rv}); });
+    data=[{seq:0,moved_on:s.from,doc_type:'OPEN',category:'opening',qty:oq,value:ov,run_qty:oq,run_value:ov}].concat(mv);
+  } else {
+    const res=await U().PU().rpc('report_item_ledger',{p_item:parseInt(s.item,10),p_warehouse:s.wh?parseInt(s.wh,10):null,p_from:s.from,p_to:s.to}); if(res.error) throw res.error;
+    data=res.data;
+  }
   const list=(data||[]).slice().sort((a,b)=>(a.moved_on<b.moved_on?-1:a.moved_on>b.moved_on?1:(+a.seq)-(+b.seq)));
   const open=list.find(x=>x.doc_type==='OPEN')||{qty:0,value:0}, mv=list.filter(x=>x.doc_type!=='OPEN');
   const closing=mv.length?mv[mv.length-1]:open, tot={}; CATS.forEach(c=>tot[c[0]]={q:0,v:0}); mv.forEach(x=>{ const t=tot[x.category]; if(t){ t.q+=+x.qty; t.v+=+x.value; } });
@@ -122,7 +142,7 @@ async function drawItem(out){
     return '<tr><td style="white-space:nowrap">'+U().dmy(x.moved_on)+'</td><td><span class="pus-code">'+esc(x.doc_type)+'</span> '+esc(x.doc_no||'')+'<div style="font-size:12px;color:var(--slate)">'+esc(x.narration||'')+'</div></td><td>'+esc(w.name||'')+'</td>'
       +'<td class="pus-num" style="color:#15803d">'+(+x.qty>0?qty(x.qty):'')+'</td><td class="pus-num" style="color:#b91c1c">'+(+x.qty<0?qty(-x.qty):'')+'</td><td class="pus-num"><b>'+qty(x.run_qty)+'</b></td><td class="pus-num">'+money(x.run_value)+'</td></tr>'; }).join('');
   LAST={name:'item-ledger-'+(it.code||s.item),head:['Date','Document','Warehouse','Narration','Quantity (+in / −out)','Balance quantity','Balance value'],rows:csv};
-  out.innerHTML='<div class="pus-hint" style="margin:10px 0 0"><b>'+esc(it.name||'')+'</b> ('+esc(it.code||'')+') · '+U().dmy(s.from)+' to '+U().dmy(s.to)+(s.wh?' · '+esc((whById(parseInt(s.wh,10))||{}).name||''):' · all warehouses')+'</div>'+summary
+  out.innerHTML='<div class="pus-hint" style="margin:10px 0 0"><b>'+esc(it.name||'')+'</b> ('+esc(it.code||'')+') · '+U().dmy(s.from)+' to '+U().dmy(s.to)+(s.wh?' · '+esc((whById(parseInt(s.wh,10))||{}).name||''):(s.project?' · '+esc(projName(parseInt(s.project,10)))+' · all its warehouses':' · all warehouses'))+'</div>'+summary
     +table([['Date'],['Document'],['Warehouse'],['In',1],['Out',1],['Balance',1],['Balance value',1]],'<tr style="background:#f8fafc"><td>'+U().dmy(s.from)+'</td><td colspan="2"><b>Opening balance</b></td><td></td><td></td><td class="pus-num"><b>'+qty(open.qty)+'</b></td><td class="pus-num">'+money(open.value)+'</td></tr>'+(rows||nothing(7,'No movements in this period')));
 }
 
