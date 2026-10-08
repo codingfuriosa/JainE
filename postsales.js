@@ -271,15 +271,21 @@ window.pssRender=async function(host,seg){
   S.pid=S.projects.some(p=>p.id===pid)?pid:null;
   S.sec=SECTIONS.some(s=>s[0]===seg[1])?seg[1]:'project';
   S.towerId=parseInt(seg[2],10)||null;
-  const opts='<option value="">Choose a project…</option>'+S.projects.map(p=>'<option value="'+p.id+'"'+(p.id===S.pid?' selected':'')+'>'+esc(p.name)+'</option>').join('');
-  const top='<div class="pss-top"><select onchange="pssPickProject(this.value)">'+opts+'</select><span id="pssCodeBadge"></span></div>';
+  /* NO PROJECT DROPDOWN ONCE A PROJECT IS OPEN. The overview IS the project list - it is what you
+     came through to get here - so a dropdown repeating it, plus the code badge beside it, were two
+     controls restating where you already are. Back returns to that list. */
+  const proj=S.projects.find(x=>x.id===S.pid);
+  const top=S.pid
+    ? '<div class="pss-top"><button class="btn btn-sm" onclick="navTo(\'postsales/setup\')">'
+        +'<i class="fa-solid fa-arrow-left"></i> All projects</button>'
+        +'<div class="sec-title" style="margin:0">'+esc(proj?proj.name:'')+'</div></div>'
+    : '';
   if(!S.pid){ host.innerHTML=top+'<div id="pssOverview"></div>'; await renderOverview(); return; }
   await loadProject(S.pid);
   if(stale()) return;
   host.innerHTML=top
     +'<div class="pss-subs">'+SECTIONS.map(s=>'<span class="chip'+(s[0]===S.sec?' active':'')+'" onclick="pssGo(\''+s[0]+'\')">'+esc(s[1])+'</span>').join('')+'</div>'
     +'<div id="pssSec"></div>';
-  $('pssCodeBadge').innerHTML=S.setup?'<span class="pss-code">'+esc(S.setup.code)+'</span>':'<span class="tag t-amber">Not set up yet</span>';
   const sec=$('pssSec');
   if(S.sec!=='project'&&!S.setup){ sec.innerHTML='<div class="pss-banner"><i class="fa-solid fa-circle-info"></i><div class="grow">Give this project a short code and its GST rates first - every document number uses the code.</div><button class="btn btn-primary btn-sm" onclick="pssGo(\'project\')">Set up project</button></div>'; return; }
   if(S.sec==='project') renderProjectSec(sec);
@@ -318,7 +324,9 @@ async function renderOverview(){
 function renderProjectSec(host){
   const s=S.setup||{code:'',unit_gst_rate:5,plc_gst_rate:5,frc_gst_rate:5};
   const proj=S.projects.find(p=>p.id===S.pid);
-  host.innerHTML='<div class="card" style="max-width:640px;padding:18px 20px"><div class="sec-title">'+esc(proj?proj.name:'')+'</div>'
+  /* Was max-width:640px - half the page, with every other section running the full width beside
+     it. The fields keep their own sizes; the card no longer stops short. */
+  host.innerHTML='<div class="card" style="padding:18px 20px"><div class="sec-title">'+esc(proj?proj.name:'')+'</div>'
     +'<div class="pss-hint">The code starts every document number for this project - receipts DG/MR/26-27/0001, invoices DG/INV/26-27/0001.</div>'
     +'<div class="frm"><label>Project code</label><input id="pssCode" maxlength="8" value="'+esc(s.code||'')+'" placeholder="e.g. DG" class="pss-up" style="max-width:200px">'
     +'<div class="sec-title" style="margin-top:18px">GST rates (%)</div>'
@@ -372,12 +380,14 @@ function renderTowers(host){
     ?'<div class="pss-banner"><i class="fa-solid fa-wand-magic-sparkles" style="color:#7c3aed"></i><div class="grow"><b>'+S.portalUnits+' bookings</b> for this project are already in the Customer Portal. Build the towers, flat positions and flats from them - floor and position come from each unit code (5A = 5th floor, flat A), areas from the bookings, and booked flats are marked booked. You can edit everything afterwards.</div><button class="btn btn-primary btn-sm" onclick="pssFromPortal()"><i class="fa-solid fa-wand-magic-sparkles"></i> Build from portal data</button></div>':'';
   const rows=S.towers.map(t=>{
     const st=towerStats(t.id), np=S.positions.filter(p=>p.tower_id===t.id).length;
-    return '<tr><td><a href="javascript:void 0" onclick="pssGo2(\'towers\','+t.id+')"><b>'+esc(t.name)+'</b></a>'+(t.portal_tower&&t.portal_tower.toLowerCase()!==t.name.toLowerCase()?'<div class="pss-hint" style="margin:0">Portal: '+esc(t.portal_tower)+'</div>':'')+'</td>'
+    return '<tr style="cursor:pointer" onclick="pssGo2(\'towers\','+t.id+')"><td><b>'+esc(t.name)+'</b>'+(t.portal_tower&&t.portal_tower.toLowerCase()!==t.name.toLowerCase()?'<div class="pss-hint" style="margin:0">Portal: '+esc(t.portal_tower)+'</div>':'')+'</td>'
       +'<td>'+esc(ordinal(t.floor_from))+' – '+esc(ordinal(t.floor_to))+'</td><td class="pss-num">'+np+'</td><td class="pss-num">'+st.n+'</td>'
       +'<td class="pss-num"><span class="tag t-green">'+st.a+'</span> <span class="tag t-blue">'+st.b+'</span></td>'
       +'<td class="pss-num">'+rate(t.base_rate)+'</td>'
       +'<td>'+(num(t.frc_rate)&&t.frc_start_floor!=null?rate(t.frc_rate)+'/floor from '+esc(ordinal(t.frc_start_floor)):'—')+'</td>'
-      +'<td style="white-space:nowrap"><button class="btn btn-sm" onclick="pssGo2(\'towers\','+t.id+')"><i class="fa-solid fa-table-cells"></i> Open</button> <button class="btn btn-sm btn-ghost" title="Edit" onclick="pssTowerModal('+t.id+')"><i class="fa-solid fa-pen"></i></button> <button class="btn btn-sm btn-ghost" title="Delete" onclick="pssTowerDelete('+t.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>';
+      /* Open is gone - the row itself opens the tower, the same as a booking row opens a booking.
+         Edit and Delete stop the click travelling up, or editing would open the tower underneath. */
+      +'<td style="white-space:nowrap;text-align:right"><button class="btn btn-sm btn-ghost" title="Edit" onclick="event.stopPropagation();pssTowerModal('+t.id+')"><i class="fa-solid fa-pen"></i></button> <button class="btn btn-sm btn-ghost" title="Delete" onclick="event.stopPropagation();pssTowerDelete('+t.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>';
   }).join('');
   host.innerHTML=banner
     +'<div class="toolbar"><div class="sec-title" style="margin:0;flex:1">Towers</div><button class="btn btn-primary" onclick="pssTowerModal()"><i class="fa-solid fa-plus"></i> New tower</button></div>'
@@ -591,8 +601,32 @@ async function softDelete(table,id,label,after){
 }
 
 function renderPlc(host){
-  const used=id=>{const pos=S.posPlcs.filter(x=>x.plc_type_id===id).map(x=>x.position_id);return S.positions.filter(p=>pos.includes(p.id)).map(p=>{const t=S.towers.find(x=>x.id===p.tower_id);return (t?t.name+' ':'')+p.code;});};
-  const rows=S.plcs.map(p=>{const u=used(p.id);return '<tr><td><b>'+esc(p.name)+'</b></td><td class="pss-num">'+rate(p.rate)+'</td><td>'+(u.length?esc(u.join(', ')):'<span style="color:var(--slate)">Not tagged on any position yet</span>')+'</td>'+actBtns('pssPlcModal('+p.id+')','pssPlcDelete('+p.id+')')+'</tr>';}).join('');
+  /* GROUPED BY TOWER, NOT ONE LONG RUN OF PAIRS.
+
+     This printed every tagged position as "tower code", comma separated, in whatever order the
+     positions happened to come back:
+
+       Block D C, Block E D, Block D D, Block E E, Block D E, Block E F, Block D F, ...
+
+     - the tower name repeated twelve times, the two towers interleaved, and nothing to show at a
+     glance which positions a PLC actually covers. Gathered per tower and the codes sorted, it
+     reads as what it is: Block D - C, D, E, F, G, H. */
+  const used=id=>{
+    const pos=S.posPlcs.filter(x=>x.plc_type_id===id).map(x=>x.position_id);
+    const by={};
+    S.positions.filter(p=>pos.includes(p.id)).forEach(p=>{
+      const t=S.towers.find(x=>x.id===p.tower_id);
+      const k=t?t.name:'\u2014';
+      (by[k]=by[k]||[]).push(p.code);
+    });
+    return Object.keys(by).sort().map(k=>({tower:k,codes:by[k].sort()}));
+  };
+  const rows=S.plcs.map(p=>{const u=used(p.id);
+    const tags=u.map(g=>'<div style="margin:1px 0"><b>'+esc(g.tower)+'</b> <span style="color:var(--slate)">'
+      +esc(g.codes.join(', '))+'</span></div>').join('');
+    return '<tr><td><b>'+esc(p.name)+'</b></td><td class="pss-num">'+rate(p.rate)+'</td><td>'
+      +(u.length?tags:'<span style="color:var(--slate)">Not tagged on any position yet</span>')+'</td>'
+      +actBtns('pssPlcModal('+p.id+')','pssPlcDelete('+p.id+')')+'</tr>';}).join('');
   host.innerHTML=listCard('PLC types','Rate per sq ft of super built-up area. Tag them on flat positions inside each tower. GST: '+esc(S.setup.plc_gst_rate)+'% (Project &amp; GST).','Add PLC type','pssPlcModal()',[['PLC'],['Rate /sq ft',1],['Tagged on']],rows);
 }
 window.pssPlcModal=function(id){
@@ -611,7 +645,7 @@ function cleanChargeName(s){
 }
 function renderCharges(host){
   const rows=S.charges.map(c=>'<tr><td><b>'+esc(c.name)+'</b></td><td>'+(c.charge_group==='edc'?'<span class="tag t-blue">EDC</span>':'<span class="tag t-gray">Other</span>')+'</td><td>'+esc(BASIS_LBL[c.basis])+'</td><td class="pss-num">'+(c.basis==='pct_unit'?pct(c.rate):rate(c.rate))+'</td><td class="pss-num">'+pct(c.gst_rate)+'</td>'+actBtns('pssChargeModal('+c.id+')','pssChargeDelete('+c.id+')')+'</tr>').join('');
-  const extra=S.portalUnits?'<button class="btn" onclick="pssChargesFromPortal()"><i class="fa-solid fa-wand-magic-sparkles"></i> Suggest from portal cost sheets</button>':'';
+  const extra='';   // "Suggest from portal cost sheets" removed by request
   host.innerHTML=listCard('Other charges','EDC charges are on every cost sheet and are split across the payment-plan milestones by each milestone\'s EDC %. "Other" charges (e.g. extra work) stay off the standard cost sheet and are billed on their own when raised.','Add charge','pssChargeModal()',[['Charge'],['Group'],['Basis'],['Rate',1],['GST',1]],rows,extra);
 }
 window.pssChargeModal=function(id,preset){
@@ -664,7 +698,7 @@ window.pssParkDelete=function(id){ const p=S.parking.find(x=>x.id===id); softDel
 
 function renderStages(host){
   const rows=S.stages.map(s=>'<tr><td><b>'+esc(s.name)+'</b></td><td>'+(s.level==='tower'?'<span class="tag t-blue">Tower level</span>':'<span class="tag t-purple">Floor level</span>')+'</td><td style="color:var(--slate);font-size:12.5px">'+(s.level==='tower'?'Completing it for a tower invoices every booked flat in that tower':'Completing it for a floor invoices every booked flat on that floor')+'</td>'+actBtns('pssStageModal('+s.id+')','pssStageDelete('+s.id+')')+'</tr>').join('');
-  const extra='<button class="btn" onclick="pssStagesQuick()"><i class="fa-solid fa-wand-magic-sparkles"></i> Add typical stages</button>';
+  const extra='';   // "Add typical stages" removed by request
   host.innerHTML=listCard('Construction stages','Construction-linked milestones in a payment plan wait on one of these. Marking a stage complete (Stage 4) raises the invoices in bulk.','Add stage','pssStageModal()',[['Stage'],['Level'],['Raises invoices for']],rows,extra);
 }
 window.pssStageModal=function(id){
@@ -1709,8 +1743,7 @@ async function receiptList(host,stale){
     const stTag=r=>r.status==='active'?'<span class="tag t-green">Received</span>':'<span class="tag t-red">Reversed</span>';
     /* The cards above the list are gone, as on Invoices: they restated what the table and its
        totals row already say, and pushed the first receipt off the screen. */
-    $('psrList').innerHTML=
-      +listHtml('rc','psrFilter',rows,
+    $('psrList').innerHTML=listHtml('rc','psrFilter',rows,
       '<th>Receipt</th><th>Date</th><th>Booking / flat</th><th>Received from</th><th>Mode</th><th class="pss-num">Amount</th><th>Status</th>',
       r=>{const b=r.bookings||{},ap=(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq);
         return '<tr onclick="navTo(\'postsales/receipts/'+r.id+'\')"><td><b>'+esc(r.receipt_no)+'</b>'+(r.against_interest?' <span class="tag t-purple">Interest</span>':'')+'</td><td>'+dmy(r.receipt_date)+'</td><td>'+esc(b.booking_no||'')+'<div class="pss-hint" style="margin:0">'+esc((b.towers&&b.towers.name||'')+' - '+(b.flats&&b.flats.flat_code||''))+'</div></td><td>'+esc(ap[0]?ap[0].full_name:'')+'</td><td>'+esc(MODE_LBL[r.mode]||r.mode)+(r.instrument_no?'<div class="pss-hint" style="margin:0">'+esc(r.instrument_no)+'</div>':'')+'</td><td class="pss-num">'+inr(r.amount)+'</td><td>'+stTag(r)+'</td></tr>';},
