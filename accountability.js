@@ -692,16 +692,84 @@
     .rec-btns{display:flex;gap:8px}
     .rec-note{font-size:12px;color:var(--slate);background:var(--bg-soft,#f8fafc);border:1px solid var(--line);
       border-radius:10px;padding:9px 12px;margin-bottom:14px;line-height:1.5}
-    .rec-row{display:flex;align-items:center;gap:12px;padding:10px 12px;border-left:3px solid var(--rc);
-      border-bottom:1px solid var(--line);cursor:pointer}
-    .rec-row:hover{background:var(--bg-soft,#f8fafc)}
-    .rec-cat{flex:none;font-size:10.5px;font-weight:700;color:var(--rc);white-space:nowrap;width:118px}
-    .rec-ti{flex:1;min-width:0}
-    .rec-ti .t{font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .rec-ti .s,.rec-dt .s{font-size:11.5px;color:var(--slate)}
-    .rec-dt{flex:none;text-align:right;font-size:12px}
-    .rec-dt .s.late{color:#b91c1c;font-weight:600}
-    @media (max-width:640px){ .rec-cat{display:none} .rec-row{flex-wrap:wrap} }
+    /* Recurring tab: the quarter table - weeks as columns, Monday-Sunday as rows, then a column
+       each for the month, the quarter and the financial year - with the detail panel beside it. */
+    .rq-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+    .rq-nav{display:flex;align-items:center;gap:8px}
+    .rq-nav .ac-btn{width:38px;justify-content:center;font-size:17px}
+    .rq-nav .ttl{min-width:200px}
+    .rq-nav .ttl b{display:block;font-size:16px}
+    .rq-nav .ttl span{font-size:12px;color:var(--slate)}
+    .rq-key{display:inline-flex;align-items:center;gap:6px}
+    .rq-key .dash{width:16px;height:11px;border-radius:3px;border:1.5px dashed #94a3b8}
+    .rq-key .red{width:16px;height:11px;border-radius:3px;border:1.5px solid #dc2626}
+    .rq-wrap{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+    .rq-table{flex:999 1 640px;min-width:0;background:var(--bg-card,#fff);border:1px solid var(--line);
+      border-radius:12px;overflow-x:auto}
+    .rq-grid{display:flex;width:max-content}
+    .rq-col{flex:none;width:132px;display:flex;flex-direction:column;border-left:1px solid var(--line)}
+    .rq-col.days{width:52px;border-left:0;position:sticky;left:0;z-index:1;background:var(--bg-card,#fff);
+      border-right:1px solid var(--line)}
+    .rq-col.agg{width:176px;background:var(--bg-soft,#f8fafc)}
+    .rq-col.agg.m{border-right:2px solid #cbd5e1}
+    .rq-col.agg.q{width:184px;background:#f6f3ff}
+    .rq-col.agg.y{width:192px;background:#fdf6f6}
+    .rq-h{height:56px;box-sizing:border-box;padding:8px 10px;border-bottom:1px solid var(--line);
+      display:flex;flex-direction:column;gap:2px;background:var(--bg-soft,#f8fafc)}
+    .rq-col.agg .rq-h{background:#eef2f7}
+    .rq-col.agg.q .rq-h{background:#ede9fe}
+    .rq-col.agg.y .rq-h{background:#fbe9e9}
+    .rq-h b{font-size:12.5px;white-space:nowrap}
+    .rq-h span{font-size:11px;color:var(--slate);white-space:nowrap}
+    .rq-dn{height:104px;box-sizing:border-box;border-top:1px solid var(--line);padding:8px;font-size:12px;
+      font-weight:700;color:var(--slate)}
+    .rq-cell{height:104px;box-sizing:border-box;border-top:1px solid var(--line);padding:5px;display:flex;
+      flex-direction:column;gap:4px;overflow-y:auto}
+    .rq-cell.we{background:var(--bg-soft,#fafbfc)}
+    .rq-cell.today{background:#fff4f4}
+    .rq-agg{flex:1;padding:8px;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line)}
+    .rq-none{font-size:12px;color:var(--slate);padding:4px 2px}
+    .rq-date{align-self:flex-start;border:0;background:transparent;padding:2px 6px;border-radius:5px;
+      font:inherit;font-size:11.5px;font-weight:700;color:var(--slate);cursor:pointer}
+    .rq-date.today{background:#e0121c;color:#fff}
+    .rq-date.sel{box-shadow:0 0 0 2px #0f172a}
+    .rq-chip{display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;min-height:26px;
+      padding:3px 7px;border-radius:6px;font:inherit;font-size:11.5px;font-weight:600;line-height:1.25;
+      text-align:left;cursor:pointer;background:var(--cb);color:var(--cc);border:1.5px solid transparent}
+    .rq-chip .dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--cc)}
+    .rq-chip .tt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .rq-chip .tt small{display:block;font-size:10.5px;font-weight:500;opacity:.85}
+    .rq-chip.st-done{opacity:.6;text-decoration:line-through}
+    .rq-chip.st-today{border-color:var(--cc)}
+    .rq-chip.st-overdue{background:#fff;border-color:#dc2626}
+    .rq-chip.st-next{border:1.5px dotted var(--cc)}
+    .rq-chip.st-held{background:transparent;color:#334155;border:1.5px dashed #94a3b8}
+    .rq-chip.st-held .dot{background:#94a3b8}
+    .rq-chip.sel{box-shadow:0 0 0 2px #0f172a}
+    .rq-tag{flex:none;font-size:10px;font-weight:700;padding:1px 5px;border-radius:4px;text-decoration:none}
+    .rq-tag.overdue{color:#991b1b;background:#fee2e2}
+    .rq-tag.held{color:#334155;background:#e2e8f0}
+    .rq-tag.await{color:#115e59;background:#fff}
+    .rq-tag.approve{color:#5b21b6;background:#fff}
+    .rq-panel{flex:1 1 320px;max-width:420px;min-width:260px;box-sizing:border-box;background:var(--bg-card,#fff);
+      border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px}
+    .rq-panel .ph{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+    .rq-panel .ph small{display:block;font-size:11.5px;font-weight:600;color:var(--slate);text-transform:uppercase;
+      letter-spacing:.06em}
+    .rq-panel .ph b{font-size:17px;line-height:1.3}
+    .rq-panel .hint{font-size:13px;color:var(--slate);line-height:1.5}
+    .rq-sum{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 11px;border-radius:8px;
+      background:var(--bg-soft,#f8fafc);font-size:13px}
+    .rq-sum span:first-child{display:inline-flex;align-items:center;gap:8px;font-weight:600}
+    .rq-sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+    .rq-gl{font-size:12px;font-weight:700;margin-top:4px}
+    .rq-pill{align-self:flex-start;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:20px}
+    .rq-facts{display:grid;grid-template-columns:104px 1fr;gap:7px 12px;font-size:13px}
+    .rq-facts span:nth-child(odd){color:var(--slate)}
+    .rq-note{font-size:12.5px;line-height:1.5;padding:9px 11px;border-radius:8px;background:#fff7ed;color:#7c2d12;
+      border:1px solid #fed7aa}
+    .rq-hist{display:flex;justify-content:space-between;font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line)}
+    @media (max-width:640px){ .rq-panel{max-width:none} }
 
     /* an instance's attachments, printed as pages rather than filenames */
     .wf-print-att{margin-top:16px;page-break-inside:avoid}
@@ -1037,51 +1105,187 @@
      New tasks can be made here both ways: a normal one-off task, or a recurring one. The calendar
      style report is still a prototype; this list is what it will be built on. */
   const REC_CATS=[
-    {k:'toMe', label:'Assigned to me',    color:'#2563eb'},
-    {k:'byMe', label:'Assigned by me',    color:'#d97706'},
-    {k:'pend', label:'Pending Approval',  color:'#7c3aed'},
-    {k:'awa',  label:'Awaiting Approval', color:'#0d9488'},
-    {k:'self', label:'Self Task',         color:'#16a34a'}
+    {k:'toMe', label:'Assigned to me',    color:'#1d4ed8', bg:'#dbeafe'},
+    {k:'byMe', label:'Assigned by me',    color:'#b45309', bg:'#fef3c7'},
+    {k:'pend', label:'Pending Approval',  color:'#6d28d9', bg:'#ede9fe'},
+    {k:'awa',  label:'Awaiting Approval', color:'#0f766e', bg:'#ccfbf1'},
+    {k:'self', label:'Self Task',         color:'#15803d', bg:'#dcfce7'}
   ];
+  const REC_CAT=k=>REC_CATS.find(c=>c.k===k)||REC_CATS[0];
   function recCatOf(t,asg){
     const st=stOf(t);
     if(isSelf(t,asg)) return 'self';
     if(st==='await') return isOwner(t)?'pend':'awa';
     return isOwner(t)?'byMe':'toMe';
   }
+  /* ---------- Recurring tab: the quarter table ----------
+     A quarter at a time. Each week is a column (Monday to Sunday as the rows) holding the weekly
+     and fortnightly tasks of that day; after a month's weeks, one column with that month's monthly
+     tasks; after the three months, one column for the quarter's quarterly tasks and one for the
+     financial year's annual tasks. Weeks belong to the month their Thursday falls in, so a week
+     that straddles two months is listed once.
+
+     A series is every ptask of the same recurring task (same owner, title, frequency and anchor -
+     the trigger copies all four onto each one it creates). Its real tasks are shown as they stand;
+     the dates after its latest one are projected from the rule: "Next" while the latest is
+     complete, "Held" while it is still open, since none of them is created until it is done. */
+  let REC_VIEW=null, REC_DATA=null;
+  const REC_ST={done:'Done',today:'Due today',upcoming:'Upcoming',overdue:'Overdue',await:'Done, awaiting approval',
+    approve:'Waiting for your approval',next:'Next one, created on its day',held:'Held back until the last one is complete'};
+  const REC_TAG={overdue:'Overdue',held:'Held',await:'Sent',approve:'Approve'};
+  function recFyQ(iso){ const p=dpParse(iso); return {fy:p.m>=3?p.y:p.y-1, q:Math.floor(((p.m+9)%12)/3)+1}; }
+  function recQMonths(v){ return [0,1,2].map(i=>{ const m=3+(v.q-1)*3+i; return {y:v.fy+Math.floor(m/12), m:m%12}; }); }
+  function recLong(iso){ return dpLong(iso); }
+  function recInstSt(t,asg){
+    const st=stOf(t), today=istTodayISO();
+    if(st==='approved') return 'done';
+    if(st==='await') return (isOwner(t)&&!isSelf(t,asg))?'approve':'await';
+    return t.due_date<today?'overdue':(t.due_date===today?'today':'upcoming');
+  }
+  function recSeries(tasks,asg){
+    const map={};
+    tasks.filter(t=>t.recur&&t.recur.freq&&t.recur.freq!=='none'&&t.flow_case_step_id==null&&t.due_date).forEach(t=>{
+      const k=[String(t.delegator||'').toLowerCase(),t.title,t.recur.freq,t.recur_anchor||''].join('|');
+      (map[k]=map[k]||{items:[]}).items.push(t);
+    });
+    return Object.keys(map).map(k=>{
+      const s=map[k];
+      s.items.sort((a,b)=>a.due_date<b.due_date?-1:(a.due_date>b.due_date?1:a.id-b.id));
+      s.latest=s.items[s.items.length-1]; s.rule=s.latest.recur; s.freq=s.rule.freq;
+      s.anchor=s.latest.recur_anchor||s.items[0].due_date; s.cat=recCatOf(s.latest,asg); s.title=s.latest.title;
+      return s;
+    });
+  }
+  // Every occurrence of series s between from and to (inclusive): its real tasks, then the projection.
+  function recOcc(s,from,to,asg){
+    const out=[];
+    s.items.forEach(t=>{ if(t.due_date>=from&&t.due_date<=to) out.push({date:t.due_date,st:recInstSt(t,asg),task:t}); });
+    const projSt=stOf(s.latest)==='approved'?'next':'held';
+    let cur=dpAdd(s.latest.due_date,1); if(cur<from) cur=from;
+    for(let g=0; cur<=to && g<800; g++){
+      if(s.rule.until&&cur>s.rule.until) break;
+      if(dpMatches(s.rule,cur,s.anchor)) out.push({date:cur,st:projSt,task:null});
+      cur=dpAdd(cur,1);
+    }
+    return out;
+  }
+  function recChip(i,o,withDate){
+    const s=REC_DATA.series[i], c=REC_CAT(s.cat), v=REC_VIEW;
+    const sel=v.mode==='task'&&v.si===i&&v.date===o.date;
+    const sub=withDate?('<small>'+esc2(dpShort(o.date).replace(/ \d{4}$/,''))+(withDate===2?' · '+esc2(DP_FREQ_LBL[s.freq]||''):'')+'</small>'):'';
+    return '<button type="button" class="rq-chip st-'+o.st+(sel?' sel':'')+'" style="--cc:'+c.color+';--cb:'+c.bg+'"'
+      +' title="'+esc2(s.title+' · '+REC_ST[o.st])+'" onclick="recPick('+i+',\''+o.date+'\')">'
+      +'<span class="dot"></span><span class="tt">'+esc2(s.title)+sub+'</span>'
+      +(REC_TAG[o.st]?'<span class="rq-tag '+o.st+'">'+REC_TAG[o.st]+'</span>':'')+'</button>';
+  }
   async function recurringTab(){
     const b=$('acBody'); if(!b) return;
     let data; try{ data=await loadAll(); }catch(e){ b.innerHTML='<div class="ac-empty">Could not load tasks</div>'; return; }
     const list=await people();
-    const {tasks,asg}=data;
-    const rec=tasks.filter(t=>t.recur&&t.recur.freq&&t.recur.freq!=='none'&&stOf(t)!=='approved'&&t.flow_case_step_id==null);
-    const order=['weekly','fortnightly','monthly','quarterly','yearly','daily'];
-    const cnt={}; REC_CATS.forEach(c=>cnt[c.k]=0); rec.forEach(t=>cnt[recCatOf(t,asg)]++);
-    const legend='<div class="rec-legend">'+REC_CATS.map(c=>'<span><i style="background:'+c.color+'"></i>'+c.label+' <b>'+cnt[c.k]+'</b></span>').join('')+'</div>';
-    const today=istTodayISO();
-    const secs=order.map(f=>{
-      const items=rec.filter(t=>t.recur.freq===f).sort((a,b)=>String(a.due_date||'').localeCompare(String(b.due_date||'')));
-      if(!items.length) return '';
-      const rows=items.map(t=>{
-        const c=REC_CATS.find(x=>x.k===recCatOf(t,asg));
-        const next=t.due_date?dpOccurrences(t.recur,1,dpAdd(t.due_date,1),t.recur_anchor||t.due_date)[0]:null;
-        const late=next&&next<=today;
-        return '<div class="rec-row" style="--rc:'+c.color+'" onclick="navTo(\'tasks/task/'+t.id+'\')">'
-          +'<span class="rec-cat" title="'+c.label+'">'+c.label+'</span>'
-          +'<div class="rec-ti"><div class="t">'+esc2(t.title)+'</div><div class="s">'+esc2(dpDescribe(t.recur))+'</div></div>'
-          +'<div class="rec-dt">'+(t.due_date?('Due '+fmtDate(t.due_date)):'')+dueBadge(t.due_date,null)
-          +(next?('<div class="s'+(late?' late':'')+'">'+(late?'Next one held back until this is done':'Next: '+fmtDate(next))+'</div>'):'')+'</div>'
-          +avatars(list,(asg[t.id]||[]))+'</div>';
-      }).join('');
-      return '<div class="ac-card"><div class="hd"><i class="fa-solid fa-rotate" style="color:#7c3aed"></i> '+(DP_FREQ_LBL[f]||f)+'<span class="cnt">'+items.length+'</span></div><div class="bd" style="max-height:none">'+rows+'</div></div>';
-    }).join('');
-    b.innerHTML='<div class="rec-top">'+legend+'<div class="rec-btns">'
-      +'<button class="ac-btn" onclick="recNewTask(false)"><i class="fa-solid fa-plus"></i> New task</button>'
-      +'<button class="ac-btn primary" onclick="recNewTask(true)"><i class="fa-solid fa-rotate"></i> New recurring task</button></div></div>'
-      +'<div class="rec-note"><i class="fa-solid fa-circle-info"></i> A recurring task\'s next one is created on its day once the current one is complete. '
-      +'If it is still open when the next date comes, everyone on it gets a reminder email, and the next one is created - already overdue - the moment this one is marked complete. Recurring tasks do not count on the Scoreboard.</div>'
-      +(secs||'<div class="ac-empty" style="cursor:default">No recurring tasks yet</div>');
+    if(!REC_VIEW){ const fq=recFyQ(istTodayISO()); REC_VIEW={fy:fq.fy,q:fq.q,mode:'none',date:null,si:null}; }
+    REC_DATA={asg:data.asg,list:list,series:recSeries(data.tasks,data.asg)};
+    recPaint();
   }
+  function recPaint(){
+    const b=$('acBody'); if(!b||!REC_DATA) return;
+    const v=REC_VIEW, asg=REC_DATA.asg, series=REC_DATA.series, today=istTodayISO();
+    const ms=recQMonths(v), qFrom=dpIso(ms[0].y,ms[0].m,1), qTo=dpIso(ms[2].y,ms[2].m,dpDaysIn(ms[2].y,ms[2].m));
+    const fyFrom=dpIso(v.fy,3,1), fyTo=dpIso(v.fy+1,2,31);
+    const idx=f=>series.map((s,i)=>i).filter(i=>{ const fr=series[i].freq; return Array.isArray(f)?f.indexOf(fr)>-1:fr===f; });
+    const weekly=idx(['weekly','fortnightly','daily']);
+    const sorted=(ids,from,to)=>{ const arr=[]; ids.forEach(i=>recOcc(series[i],from,to,asg).forEach(o=>arr.push({i:i,o:o}))); return arr.sort((x,y)=>x.o.date<y.o.date?-1:(x.o.date>y.o.date?1:0)); };
+    // weekly occurrences for the whole quarter, looked up by date
+    const byDate={};
+    sorted(weekly,dpAdd(qFrom,-6),dpAdd(qTo,6)).forEach(x=>{ (byDate[x.o.date]=byDate[x.o.date]||[]).push(x); });
+    let cols='<div class="rq-col days"><div class="rq-h"></div>'+['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>'<div class="rq-dn">'+d+'</div>').join('')+'</div>';
+    const aggCol=(cls,label,sub,items,unit)=>'<div class="rq-col agg '+cls+'"><div class="rq-h"><b>'+esc2(label)+'</b><span>'+esc2(sub)+'</span></div><div class="rq-agg">'
+      +(items.length?items.map(x=>recChip(x.i,x.o,1)).join(''):'<div class="rq-none">Nothing '+unit+'</div>')+'</div></div>';
+    ms.forEach(mo=>{
+      // first Monday whose Thursday is in this month
+      let mon=dpIso(mo.y,mo.m,1); const back=(new Date(mo.y,mo.m,1).getDay()+6)%7; mon=dpAdd(mon,-back);
+      if(dpParse(dpAdd(mon,3)).m!==mo.m) mon=dpAdd(mon,7);
+      let wk=0;
+      while(dpParse(dpAdd(mon,3)).m===mo.m){
+        wk++;
+        let cells='';
+        for(let k=0;k<7;k++){
+          const ds=dpAdd(mon,k), p=dpParse(ds), isT=ds===today, isSel=v.mode==='day'&&v.date===ds;
+          cells+='<div class="rq-cell'+(isT?' today':(k>=5?' we':''))+'">'
+            +'<button type="button" class="rq-date'+(isT?' today':'')+(isSel?' sel':'')+'" aria-label="Everything due '+esc2(recLong(ds))+'" onclick="recDay(\''+ds+'\')">'+p.d+' '+DP_MONS[p.m]+'</button>'
+            +(byDate[ds]||[]).map(x=>recChip(x.i,x.o,0)).join('')+'</div>';
+        }
+        cols+='<div class="rq-col"><div class="rq-h"><b>Wk '+wk+' · '+DP_MONS[mo.m]+'</b><span>'+dpShort(mon).replace(/ \d{4}$/,'')+' – '+dpShort(dpAdd(mon,6)).replace(/ \d{4}$/,'')+'</span></div>'+cells+'</div>';
+        mon=dpAdd(mon,7);
+      }
+      const mFrom=dpIso(mo.y,mo.m,1), mTo=dpIso(mo.y,mo.m,dpDaysIn(mo.y,mo.m));
+      cols+=aggCol('m',DP_MONL[mo.m],'Monthly',sorted(idx('monthly'),mFrom,mTo),'this month');
+    });
+    cols+=aggCol('q','Q'+v.q,'Quarterly · '+DP_MONS[ms[0].m]+' – '+DP_MONS[ms[2].m],sorted(idx('quarterly'),qFrom,qTo),'this quarter');
+    cols+=aggCol('y','FY '+v.fy+'–'+String(v.fy+1).slice(2),'Annually · Apr – Mar',sorted(idx('yearly'),fyFrom,fyTo),'this year');
+
+    const legend=REC_CATS.map(c=>'<span class="rq-key"><i class="rq-sw" style="background:'+c.color+'"></i>'+c.label+'</span>').join('')
+      +'<span class="rq-key"><i class="dash"></i>Held back</span><span class="rq-key"><i class="red"></i>Overdue</span>';
+    b.innerHTML='<div class="rec-top"><div class="rq-nav">'
+      +'<button class="ac-btn" aria-label="Previous quarter" onclick="recQ(-1)">‹</button>'
+      +'<div class="ttl"><b>Q'+v.q+' · FY '+v.fy+'–'+String(v.fy+1).slice(2)+'</b><span>'+DP_MONL[ms[0].m]+' – '+DP_MONL[ms[2].m]+' '+ms[2].y+'</span></div>'
+      +'<button class="ac-btn" aria-label="Next quarter" onclick="recQ(1)">›</button>'
+      +'<button class="ac-btn" onclick="recQ(0)">Today</button></div>'
+      +'<div class="rec-btns"><button class="ac-btn" onclick="recNewTask(false)"><i class="fa-solid fa-plus"></i> New task</button>'
+      +'<button class="ac-btn primary" onclick="recNewTask(true)"><i class="fa-solid fa-rotate"></i> New recurring task</button></div></div>'
+      +'<div class="rq-bar"><div class="rec-legend">'+legend+'</div></div>'
+      +'<div class="rq-wrap"><div class="rq-table"><div class="rq-grid">'+cols+'</div></div>'
+      +'<div class="rq-panel" id="rqPanel">'+recPanel(qFrom,qTo)+'</div></div>';
+  }
+  function recPanel(qFrom,qTo){
+    const v=REC_VIEW, asg=REC_DATA.asg, series=REC_DATA.series, list=REC_DATA.list;
+    const x='<button class="ac-btn ic" aria-label="Close" onclick="recClose()"><i class="fa-solid fa-xmark"></i></button>';
+    if(v.mode==='day'){
+      let h='<div class="ph"><div><small>Day</small><b>'+esc2(recLong(v.date))+'</b></div>'+x+'</div>', any=false;
+      REC_CATS.forEach(c=>{
+        const items=series.map((s,i)=>i).filter(i=>series[i].cat===c.k).map(i=>({i:i,o:recOcc(series[i],v.date,v.date,asg)[0]})).filter(z=>z.o);
+        if(!items.length) return; any=true;
+        h+='<div class="rq-gl" style="color:'+c.color+'">'+c.label+'</div>'+items.map(z=>recChip(z.i,z.o,2)).join('');
+      });
+      return h+(any?'':'<div class="hint">No recurring tasks on this day.</div>');
+    }
+    if(v.mode==='task'&&series[v.si]){
+      const s=series[v.si], c=REC_CAT(s.cat), o=recOcc(s,v.date,v.date,asg)[0]||{date:v.date,st:'next',task:null};
+      const t=o.task||s.latest, mem=(asg[t.id]||[]).map(e=>nameOf(list,e)||e).join(', ')||'—';
+      const nx=dpOccurrences(s.rule,1,dpAdd(v.date,1),s.anchor)[0];
+      const past=s.items.filter(z=>z.due_date<=v.date).slice(-4).reverse();
+      let note='';
+      if(o.st==='overdue'&&nx) note='Still open. The next one ('+dpShort(nx)+') is not created until this is marked complete. If it is still open on that day, everyone on it gets a reminder email; once it is completed, the next one is created straight away, already overdue.';
+      if(o.st==='held') note='Held back: the '+dpShort(s.latest.due_date)+' one is still open. This one is created the moment that is marked complete.';
+      if(o.st==='next') note='Not created yet: it appears on its day, because the one before it is complete.';
+      return '<div class="ph"><div style="display:flex;flex-direction:column;gap:6px"><span class="rq-pill" style="color:'+c.color+';background:'+c.bg+'">'+c.label+'</span><b>'+esc2(s.title)+'</b></div>'+x+'</div>'
+        +'<div class="rq-facts"><span>Repeats</span><span><b>'+esc2(dpDescribe(s.rule))+'</b></span>'
+        +'<span>This one</span><span>'+esc2(recLong(o.date))+'</span>'
+        +'<span>Status</span><span style="font-weight:700;color:'+(o.st==='overdue'?'#b91c1c':(o.st==='done'?'#15803d':c.color))+'">'+REC_ST[o.st]+'</span>'
+        +'<span>Assigned to</span><span>'+esc2(mem)+'</span>'
+        +'<span>Assigned by</span><span>'+esc2(nameOf(list,t.delegator)||t.delegator||'—')+'</span>'
+        +'<span>Next one</span><span>'+(nx?esc2(recLong(nx)):'—')+'</span></div>'
+        +(note?'<div class="rq-note">'+esc2(note)+'</div>':'')
+        +(past.length?'<div class="rq-gl" style="color:var(--slate)">Recent</div>'+past.map(z=>{ const st=recInstSt(z,asg); return '<div class="rq-hist"><span>'+esc2(recLong(z.due_date))+'</span><span style="font-weight:600;color:'+(st==='overdue'?'#b91c1c':(st==='done'?'#15803d':'#334155'))+'">'+REC_ST[st]+'</span></div>'; }).join(''):'')
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="ac-btn primary" onclick="navTo(\'tasks/task/'+t.id+'\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open '+(o.task?'task':'latest task')+'</button></div>';
+    }
+    let h='<div class="ph"><div><small>This quarter</small><b>Recurring tasks</b></div></div>'
+      +'<div class="hint">Click a task to open it here, or a date to see everything due that day. Recurring tasks do not count on the Scoreboard.</div>';
+    REC_CATS.forEach(c=>{
+      let open=0,over=0,held=0;
+      series.forEach(s=>{ if(s.cat!==c.k) return; recOcc(s,qFrom,qTo,asg).forEach(o=>{ if(o.st==='overdue') over++; else if(o.st==='held') held++; else if(o.st!=='done') open++; }); });
+      const bits=[open+' to come']; if(over) bits.push(over+' overdue'); if(held) bits.push(held+' held');
+      h+='<div class="rq-sum"><span><i class="rq-sw" style="background:'+c.color+'"></i>'+c.label+'</span><span>'+bits.join(' · ')+'</span></div>';
+    });
+    return h+(series.length?'':'<div class="hint">No recurring tasks yet — make one with “New recurring task”.</div>');
+  }
+  window.recQ=function(d){
+    if(d===0){ const fq=recFyQ(istTodayISO()); REC_VIEW.fy=fq.fy; REC_VIEW.q=fq.q; }
+    else { let q=REC_VIEW.q+d, fy=REC_VIEW.fy; if(q<1){q=4;fy--;} if(q>4){q=1;fy++;} REC_VIEW.q=q; REC_VIEW.fy=fy; }
+    REC_VIEW.mode='none'; recPaint();
+  };
+  window.recDay=function(ds){ REC_VIEW.mode='day'; REC_VIEW.date=ds; recPaint(); };
+  window.recPick=function(i,ds){ REC_VIEW.mode='task'; REC_VIEW.si=i; REC_VIEW.date=ds; recPaint(); };
+  window.recClose=function(){ REC_VIEW.mode='none'; recPaint(); };
   let REC_NEW=null;
   window.recNewTask=async function(recurring){
     const list=await people(); const others=list.filter(p=>!eq(p.email,me()));
