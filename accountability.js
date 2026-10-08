@@ -1207,7 +1207,7 @@
       +'<div class="rq-table" id="rqTable"><div class="rq-grid">'+cols+'</div></div>'
       +(REC_DATA.series.length?'':'<div class="ac-empty" style="cursor:default;margin-top:12px">No recurring tasks yet. Make one from a task\u2019s due date: pick Weekly, Fortnightly, Monthly, Quarterly or Annually.</div>')
       +'<div class="rq-back" id="rqBack" onclick="recClose()"></div>'
-      +'<div class="gcal-panel" id="rqPanel"><div class="gcal-panel-head"><b id="rqPanelHead">Details</b><div class="x" onclick="recClose()"><i class="fa-solid fa-xmark"></i></div></div><div class="gcal-panel-body" id="rqPanelBody"></div><div class="gcal-panel-foot" id="rqPanelFoot" style="display:none"></div></div>';
+      +'<div class="gcal-panel" id="rqPanel"><div class="gcal-panel-head"><div class="x" id="rqPanelBack" style="display:none;margin-left:0" title="Back" onclick="recBack()"><i class="fa-solid fa-arrow-left"></i></div><b id="rqPanelHead">Details</b><div class="x" onclick="recClose()"><i class="fa-solid fa-xmark"></i></div></div><div class="gcal-panel-body" id="rqPanelBody"></div><div class="gcal-panel-foot" id="rqPanelFoot" style="display:none"></div></div>';
     if(scrollToNext){
       // open at the next task still to come (in the frequency shown), else at this week
       const nx=REC_DATA.all.find(x=>x.o.date>=today&&x.o.st!=='done'), at=nx?nx.o.date:today;
@@ -1216,13 +1216,21 @@
       if(c) t.scrollLeft=Math.max(0,c.offsetLeft-60);
     }
   }
-  function recShow(head,body,foot){
+  /* kind 'list' (a day, week or period) or 'task'. A task opened from a list gets a back arrow to
+     that list; the x still closes the panel and returns to the table. */
+  let REC_LIST=null, REC_MODE=null;
+  function recShow(head,body,foot,kind){
     const p=$('rqPanel'), bk=$('rqBack'); if(!p) return;
+    const back=kind==='task'&&REC_MODE==='list'&&p.classList.contains('open')&&REC_LIST;
+    if(kind==='list') REC_LIST={head:head,body:body};
+    REC_MODE=back?'list-task':kind;
+    const bb=$('rqPanelBack'); if(bb) bb.style.display=back?'':'none';
     $('rqPanelHead').textContent=head; $('rqPanelBody').innerHTML=body;
     const f=$('rqPanelFoot'); f.innerHTML=foot||''; f.style.display=foot?'':'none';
     p.classList.add('open'); if(bk) bk.classList.add('open');
   }
-  window.recClose=function(){ const p=$('rqPanel'), bk=$('rqBack'); if(p) p.classList.remove('open'); if(bk) bk.classList.remove('open'); };
+  window.recBack=function(){ if(REC_LIST) recShow(REC_LIST.head,REC_LIST.body,'','list'); };
+  window.recClose=function(){ REC_MODE=null; const p=$('rqPanel'), bk=$('rqBack'); if(p) p.classList.remove('open'); if(bk) bk.classList.remove('open'); };
   function recItems(items,withDate){
     return items.map(x=>{ const s=REC_DATA.series[x.i], f=REC_FQC(s.freq), bad=x.o.st==='overdue';
       return '<button type="button" class="rq-item" onclick="recOpen('+x.i+',\''+x.o.date+'\')">'
@@ -1238,10 +1246,10 @@
     const items=REC_DATA.byDate[ds]||[];
     if(!items.length) return;
     if(items.length===1) return recOpen(items[0].i,ds);
-    recShow(dpLong(ds),recItems(items,false));
+    recShow(dpLong(ds),recItems(items,false),'','list');
   };
-  window.recWeek=function(from,to){ recShow(dpShort(from).replace(/ \d{4}$/,'')+' \u2013 '+dpShort(to),recGrouped(recIn(from,to))); };
-  window.recPeriod=function(freq,from,to,label){ recShow(label,recGrouped(recIn(from,to).filter(x=>REC_DATA.series[x.i].freq===freq))); };
+  window.recWeek=function(from,to){ recShow(dpShort(from).replace(/ \d{4}$/,'')+' \u2013 '+dpShort(to),recGrouped(recIn(from,to)),'','list'); };
+  window.recPeriod=function(freq,from,to,label){ recShow(label,recGrouped(recIn(from,to).filter(x=>REC_DATA.series[x.i].freq===freq)),'','list'); };
   /* A task that is due now - overdue, due today, or done and waiting for approval - opens the task
      itself, since that is where it is acted on. Anything else - a task still to come, one waiting
      on the previous, or one already done - opens a short summary in the side panel. */
@@ -1268,7 +1276,7 @@
     h+=row('fa-user',esc2(mem))+row('fa-user-pen','By '+esc2(nameOf(list,t.delegator)||t.delegator||'—'));
     // Only a completed one has a task worth opening from here; one still to come is shown, not opened.
     const foot=(o.task&&o.st==='done')?'<button class="ac-btn" onclick="recClose();navTo(\'tasks/task/'+o.task.id+'\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> View task</button>':'';
-    recShow(o.st==='done'?'Completed':'Coming up',h,foot);
+    recShow(o.st==='done'?'Completed':'Coming up',h,foot,'task');
   };
   window.recYear=function(d){ REC_VIEW.fy+=d; recPaint(true); };
   window.recFilter=function(k){ REC_VIEW.filter=k; recPaint(true); };
