@@ -1116,7 +1116,13 @@ function bcss(){
      that happened to end. Nothing lined up with anything: the Applicants block especially looked
      like text scattered across the card. Label on its own line, small and grey; value under it, in
      ink. Every column then starts in the same place whatever is in it. */
-  .psb-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px 24px;font-size:13px;margin-top:10px;color:var(--slate)}
+  /* 170px could not hold an email. syedferozakhtar07@hotmail.com is about 200px at this size, so
+     the track was always too narrow and break-word did what it is told - split it mid-domain,
+     "...@hotmail" on one line and ".com" on the next. 240px fits an ordinary address and still
+     gives two columns on a half-width card and three on a full one. A value that genuinely needs
+     more room asks for it (psb-wide) rather than every column being sized for the worst case. */
+  .psb-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 24px;font-size:13px;margin-top:10px;color:var(--slate)}
+  .psb-facts>span.psb-wide{grid-column:1/-1}
   .psb-facts>span>i{display:block;font-style:normal;font-size:10.5px;font-weight:600;
     letter-spacing:.3px;text-transform:uppercase;color:var(--slate);margin:0 0 1px}
   /* block, not a column flex: some of these read "Raised <b>automatically</b> by <b>system</b>",
@@ -1553,10 +1559,15 @@ async function bookingView(host,id,stale){
   const {b,ap,ch,ms}=v, proj=S.projects.find(p=>p.id===b.project_id);
   const stName=sid=>{const s=S.stages.find(x=>x.id===sid);return s?s.name:'';};
   const st={active:'<span class="tag t-green">Active</span>',cancelled:'<span class="tag t-red">Cancelled</span>',transferred:'<span class="tag t-gray">Transferred</span>'}[b.status]||'';
-  const fact=(l,x)=>'<span><i>'+esc(l)+'</i><b>'+x+'</b></span>';
+  const fact=(l,x,wide)=>'<span'+(wide?' class="psb-wide"':'')+'><i>'+esc(l)+'</i><b>'+x+'</b></span>';
+  /* An address is always the longest thing on the card, so it takes the whole row rather than
+     being squeezed into a third of it. Which one receives post is said after the address in
+     ordinary words - it was in the label, which this card prints in capitals, and
+     "RESIDENTIAL ADDRESS - FOR POST" shouted something that is only a footnote. */
+  const post='<span style="font-weight:400;color:var(--slate)"> &middot; for post</span>';
   const applHtml=ap.map(a=>'<div class="psb-appl"><div class="psb-appl-h"><b>'+(a.seq===1?'First applicant':'Joint applicant '+a.seq)+' - '+esc([a.title,a.full_name].filter(Boolean).join(' '))+'</b></div><div class="psb-facts" style="margin-top:2px">'
     +(a.relation_name?fact(a.relation_type||'',esc(a.relation_name)):'')+(a.dob?fact('DOB',dmy(a.dob)):'')+(a.pan?fact('PAN',esc(a.pan)):'')+(a.aadhaar?fact('Aadhaar','XXXX XXXX '+esc(String(a.aadhaar).slice(-4))):'')
-    +(a.mobile?fact('Mobile',esc(a.mobile)):'')+(a.email?fact('Email',esc(a.email)):'')+(a.occupation?fact('Occupation',esc(OCC_LBL[a.occupation]||a.occupation)):'')+(a.company?fact('Company',esc(a.company)+(a.designation?', '+esc(a.designation):'')):'')
+    +(a.mobile?fact('Mobile',esc(a.mobile)):'')+(a.email?fact('Email',esc(a.email),String(a.email).length>28):'')+(a.occupation?fact('Occupation',esc(OCC_LBL[a.occupation]||a.occupation)):'')+(a.company?fact('Company',esc(a.company)+(a.designation?', '+esc(a.designation):'')):'')
     +(a.resident_status&&a.resident_status!=='resident'?fact('Status',a.resident_status==='nri'?'NRI':'Foreign national'):'')
     /* THE ADDRESSES BELONG WITH THE REST OF THE DETAILS. They hung underneath the grid as loose
        grey sentences with the Mailing tag jammed in mid-line, so a long address ran the whole
@@ -1564,10 +1575,10 @@ async function bookingView(host,id,stale){
        other now - same label above value - and simply span the grid, because an address needs the
        width that a PAN does not. Which one receives post is said in the label rather than tacked
        on to the end of the address. */
-    +(a.res_address?'<span style="grid-column:1/-1"><i>Residential address'
-        +(a.mailing_address==='residential'?' \u00b7 for post':'')+'</i><b>'+esc(a.res_address)+'</b></span>':'')
-    +(a.off_address?'<span style="grid-column:1/-1"><i>Office address'
-        +(a.mailing_address==='office'?' \u00b7 for post':'')+'</i><b>'+esc(a.off_address)+'</b></span>':'')
+    +(a.res_address?fact('Residential address',
+        esc(a.res_address)+(a.mailing_address==='residential'?post:''),true):'')
+    +(a.off_address?fact('Office address',
+        esc(a.off_address)+(a.mailing_address==='office'?post:''),true):'')
     +'</div>'
     +((a.kyc||[]).length?'<div class="psb-kyc">'+a.kyc.map(k=>'<span class="tag t-blue" style="cursor:pointer" onclick="s3OpenSigned(\''+esc(k.path)+'\')"><i class="fa-solid fa-paperclip"></i> '+esc(k.type)+'</span>').join('')+'</div>':'')+'</div>').join('');
   const row=l=>'<tr'+(num(l.amount)<0?' class="neg"':'')+'><td>'+esc(psLabel(l.name))+'</td><td class="r">'+(l.basis==='per_sqft'?rate(l.rate)+' × '+num(l.qty):l.kind==='parking'?inr(l.rate)+' × '+num(l.qty):'Fixed')+'</td><td class="r">'+inr(l.amount)+'</td><td class="r">'+pct(l.gst_rate)+'</td><td class="r">'+inr(l.gst_amount)+'</td><td class="r">'+inr(num(l.amount)+num(l.gst_amount))+'</td></tr>';
