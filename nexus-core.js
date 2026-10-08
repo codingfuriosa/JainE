@@ -48,7 +48,15 @@ function pageIdFromPath(pathname){
 // A page may list several scripts; they load one after another, in order (purchase-indent.js uses what
 // purchase.js defines).
 const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js']};
-const PAGE_SCRIPT_VERSION={'purchase.js':'20261004v','purchase-indent.js':'20261004j','purchase-rfq.js':'20261004e','purchase-po.js':'20261004c','purchase-stores.js':'20261004b','purchase-reports.js':'20261004a'};
+/* EVERY PAGE SCRIPT NEEDS A VERSION HERE, not just the purchase ones.
+   accountability.js, insp-items.js and postsales.js were missing, so loadPageScript fell back
+   to the default '20261003a' - and _headers tells the browser a .js URL is immutable for a
+   year. Anyone who had opened Post Sales or Tasks since 3 October was pinned to that copy and
+   saw none of the changes since, while someone landing on postsales.html directly got
+   postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
+   Two people on the same build could see two different apps, which is exactly what "for some
+   it is still the same" was. Both spellings are bumped together from now on. */
+const PAGE_SCRIPT_VERSION={'accountability.js':'20261008a','insp-items.js':'20261008a','postsales.js':'20261008a','purchase.js':'20261004v','purchase-indent.js':'20261004j','purchase-rfq.js':'20261004e','purchase-po.js':'20261004c','purchase-stores.js':'20261004b','purchase-reports.js':'20261004a'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];

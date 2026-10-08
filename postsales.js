@@ -1738,17 +1738,19 @@ async function psbCostSheetPdf(v){
   };
 
   // ── letterhead ───────────────────────────────────────────────────────────────────────────
+  /* THE COMPANY, THEN THE TITLE. NOTHING BETWEEN THEM.
+
+     The address line came out as one run-on string - "KOLKATA-19KOLKATA, WEST BENGAL..." - because
+     clean() strips the newline out of company_address before anything gets to split on it, so the
+     two lines of the address were simply concatenated. It is off the sheet by request rather than
+     repaired: this goes out on paper that already carries the address, and the two headings now
+     have room to breathe between them. */
   const co=clean((setup&&setup.company_name)||'THE JAIN GROUP').toUpperCase();
   page.drawText(co,{x:PSB_M+(TW-bold.widthOfTextAtSize(co,11))/2,y:y-11,size:11,font:bold,color:INK});
-  y-=16;
-  const addr=clean((setup&&setup.company_address)||'').split(/\r?\n/)[0];
-  if(addr){
-    page.drawText(addr,{x:PSB_M+(TW-reg.widthOfTextAtSize(addr,7.5))/2,y:y-7.5,size:7.5,font:reg,color:INK});
-    y-=12;
-  }
+  y-=30;
   const title='COST SHEET';
   page.drawText(title,{x:PSB_M+(TW-bold.widthOfTextAtSize(title,10))/2,y:y-10,size:10,font:bold,color:INK});
-  y-=18;
+  y-=22;
 
   // ── the particulars grid ─────────────────────────────────────────────────────────────────
   const hw=[52,148,48,88,62,133.28];     // label / value x3  = 531.28
