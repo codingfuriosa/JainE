@@ -679,6 +679,29 @@
       padding:2px 9px;border-radius:20px;white-space:nowrap;background:var(--brand-50,#eff4ff);
       color:var(--brand-700,#1e40af);border:1px solid var(--brand-a10,#eef2ff)}
     .dp-chip-rep i{font-size:9.5px}
+    /* a recurring task, told apart from a normal one in every list */
+    .ac-rec-tag{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;
+      color:#7c3aed;background:#f5f3ff;border:1px solid #ede9fe;padding:1px 7px;border-radius:10px;
+      margin-right:6px;white-space:nowrap;vertical-align:1px}
+    .ac-rec-tag i{font-size:9px}
+    .rec-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+    .rec-legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--slate)}
+    .rec-legend span{display:inline-flex;align-items:center;gap:6px}
+    .rec-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+    .rec-legend b{color:var(--ink,#0f172a)}
+    .rec-btns{display:flex;gap:8px}
+    .rec-note{font-size:12px;color:var(--slate);background:var(--bg-soft,#f8fafc);border:1px solid var(--line);
+      border-radius:10px;padding:9px 12px;margin-bottom:14px;line-height:1.5}
+    .rec-row{display:flex;align-items:center;gap:12px;padding:10px 12px;border-left:3px solid var(--rc);
+      border-bottom:1px solid var(--line);cursor:pointer}
+    .rec-row:hover{background:var(--bg-soft,#f8fafc)}
+    .rec-cat{flex:none;font-size:10.5px;font-weight:700;color:var(--rc);white-space:nowrap;width:118px}
+    .rec-ti{flex:1;min-width:0}
+    .rec-ti .t{font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .rec-ti .s,.rec-dt .s{font-size:11.5px;color:var(--slate)}
+    .rec-dt{flex:none;text-align:right;font-size:12px}
+    .rec-dt .s.late{color:#b91c1c;font-weight:600}
+    @media (max-width:640px){ .rec-cat{display:none} .rec-row{flex-wrap:wrap} }
 
     /* an instance's attachments, printed as pages rather than filenames */
     .wf-print-att{margin-top:16px;page-break-inside:avoid}
@@ -997,13 +1020,97 @@
       <div class="ac-tab ${tab==='calendar'?'active':''}" onclick="navTo('tasks/calendar')"><i class="fa-solid fa-calendar-days"></i> Calendar</div>
       <div class="ac-tab ${tab==='meetings'?'active':''}" onclick="navTo('tasks/meetings')"><i class="fa-solid fa-video"></i> Meetings</div>
       <div class="ac-tab ${tab==='workflow'?'active':''}" onclick="navTo('tasks/workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow</div>
+      <div class="ac-tab ${tab==='recurring'?'active':''}" onclick="navTo('tasks/recurring')"><i class="fa-solid fa-rotate"></i> Recurring</div>
       <div class="ac-tab ${tab==='archive'?'active':''}" onclick="navTo('tasks/archive')"><i class="fa-solid fa-box-archive"></i> Archive</div>
     </div><div id="acBody"><div class="loader"><div class="spin"></div></div></div>`;
     if (tab==='meetings') return meetingsTab();
     if (tab==='calendar') return calendarTab();
     if (tab==='archive') return archiveTab();
     if (tab==='workflow') return workflowTab();
+    if (tab==='recurring') return recurringTab();
     return tasksScreen();
+  };
+
+  /* ---------- Recurring tab ----------
+     Every recurring task I am part of, one row per series (the open instance), grouped by how
+     often it repeats, and coloured by what it is to me - the same five buckets the Tasks tab uses.
+     New tasks can be made here both ways: a normal one-off task, or a recurring one. The calendar
+     style report is still a prototype; this list is what it will be built on. */
+  const REC_CATS=[
+    {k:'toMe', label:'Assigned to me',    color:'#2563eb'},
+    {k:'byMe', label:'Assigned by me',    color:'#d97706'},
+    {k:'pend', label:'Pending Approval',  color:'#7c3aed'},
+    {k:'awa',  label:'Awaiting Approval', color:'#0d9488'},
+    {k:'self', label:'Self Task',         color:'#16a34a'}
+  ];
+  function recCatOf(t,asg){
+    const st=stOf(t);
+    if(isSelf(t,asg)) return 'self';
+    if(st==='await') return isOwner(t)?'pend':'awa';
+    return isOwner(t)?'byMe':'toMe';
+  }
+  async function recurringTab(){
+    const b=$('acBody'); if(!b) return;
+    let data; try{ data=await loadAll(); }catch(e){ b.innerHTML='<div class="ac-empty">Could not load tasks</div>'; return; }
+    const list=await people();
+    const {tasks,asg}=data;
+    const rec=tasks.filter(t=>t.recur&&t.recur.freq&&t.recur.freq!=='none'&&stOf(t)!=='approved'&&t.flow_case_step_id==null);
+    const order=['weekly','fortnightly','monthly','quarterly','yearly','daily'];
+    const cnt={}; REC_CATS.forEach(c=>cnt[c.k]=0); rec.forEach(t=>cnt[recCatOf(t,asg)]++);
+    const legend='<div class="rec-legend">'+REC_CATS.map(c=>'<span><i style="background:'+c.color+'"></i>'+c.label+' <b>'+cnt[c.k]+'</b></span>').join('')+'</div>';
+    const today=istTodayISO();
+    const secs=order.map(f=>{
+      const items=rec.filter(t=>t.recur.freq===f).sort((a,b)=>String(a.due_date||'').localeCompare(String(b.due_date||'')));
+      if(!items.length) return '';
+      const rows=items.map(t=>{
+        const c=REC_CATS.find(x=>x.k===recCatOf(t,asg));
+        const next=t.due_date?dpOccurrences(t.recur,1,dpAdd(t.due_date,1),t.recur_anchor||t.due_date)[0]:null;
+        const late=next&&next<=today;
+        return '<div class="rec-row" style="--rc:'+c.color+'" onclick="navTo(\'tasks/task/'+t.id+'\')">'
+          +'<span class="rec-cat" title="'+c.label+'">'+c.label+'</span>'
+          +'<div class="rec-ti"><div class="t">'+esc2(t.title)+'</div><div class="s">'+esc2(dpDescribe(t.recur))+'</div></div>'
+          +'<div class="rec-dt">'+(t.due_date?('Due '+fmtDate(t.due_date)):'')+dueBadge(t.due_date,null)
+          +(next?('<div class="s'+(late?' late':'')+'">'+(late?'Next one held back until this is done':'Next: '+fmtDate(next))+'</div>'):'')+'</div>'
+          +avatars(list,(asg[t.id]||[]))+'</div>';
+      }).join('');
+      return '<div class="ac-card"><div class="hd"><i class="fa-solid fa-rotate" style="color:#7c3aed"></i> '+(DP_FREQ_LBL[f]||f)+'<span class="cnt">'+items.length+'</span></div><div class="bd" style="max-height:none">'+rows+'</div></div>';
+    }).join('');
+    b.innerHTML='<div class="rec-top">'+legend+'<div class="rec-btns">'
+      +'<button class="ac-btn" onclick="recNewTask(false)"><i class="fa-solid fa-plus"></i> New task</button>'
+      +'<button class="ac-btn primary" onclick="recNewTask(true)"><i class="fa-solid fa-rotate"></i> New recurring task</button></div></div>'
+      +'<div class="rec-note"><i class="fa-solid fa-circle-info"></i> A recurring task\'s next one is created on its day once the current one is complete. '
+      +'If it is still open when the next date comes, everyone on it gets a reminder email, and the next one is created - already overdue - the moment this one is marked complete. Recurring tasks do not count on the Scoreboard.</div>'
+      +(secs||'<div class="ac-empty" style="cursor:default">No recurring tasks yet</div>');
+  }
+  let REC_NEW=null;
+  window.recNewTask=async function(recurring){
+    const list=await people(); const others=list.filter(p=>!eq(p.email,me()));
+    REC_NEW={recurring:!!recurring,r:null};
+    openModal('<div class="modal-head"><h3>'+(recurring?'New recurring task':'New task')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body" style="min-width:min(94vw,460px)">'
+      +'<label>Title</label><input class="ac-in" id="recNewTitle" placeholder="What needs doing" style="width:100%;margin-bottom:12px">'
+      +'<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="recNewSelf" onchange="document.getElementById(\'recNewMemWrap\').style.display=this.checked?\'none\':\'\'"> Self task (only me)</label>'
+      +'<div id="recNewMemWrap"><label>Assign to</label>'+msWidget('recNewMembers',others,[])+'</div>'
+      +'<label style="display:block;margin-top:12px">'+(recurring?'Repeats':'Due date')+'</label><div id="recNewDp" class="dp-inline"></div>'
+      +'</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="recNewSave()"><i class="fa-solid fa-check"></i> Create</button></div>','md');
+    accDpMount(document.getElementById('recNewDp'), recurring?{recur:{freq:'weekly'}}:null,
+      {footer:false,onChange:function(r){ REC_NEW.r=r; }});
+  };
+  window.recNewSave=async function(){
+    if(!REC_NEW) return;
+    const title=(($('recNewTitle')||{}).value||'').trim(); if(!title){toast('Type a title','err');return;}
+    const self=$('recNewSelf')&&$('recNewSelf').checked;
+    const mem=self?[me()]:msGet('recNewMembers'); if(!mem.length){toast('Pick at least one person, or tick Self task','err');return;}
+    const r=REC_NEW.r; if(!r||!r.due){toast('Finish choosing the date','err');return;}
+    if(REC_NEW.recurring&&!r.recur){toast('Pick how often it repeats','err');return;}
+    try{
+      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:r.due,order_index:0,recur:r.recur||null}).select().single();
+      if(error) throw error;
+      await ACC().from('ptask_assignees').insert(mem.map(e=>({task_id:t.id,email:e})));
+      await appendRankForMe(t.id);
+      try{ usageQueue('tasks.tasks.create_task','create',{title:title,assignee:await usageNames(mem)}); }catch(_e){}
+      REC_NEW=null; closeModal(); toast(r.recur?'Recurring task created':'Task created','ok'); recurringTab();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
   };
 
   /* ---------- shared row/card renderers ---------- */
@@ -1043,7 +1150,7 @@
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
     const wfCombined=wfRowTitle(wfInfo,list,t&&t.description);
     const titleHtml=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
-    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon}${titleHtml}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
+    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon}${recTag(t)}${titleHtml}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
   }
   function summaryCard(title,icon,color,count,inner){ return `<div class="ac-card sm"><div class="hd"><i class="fa-solid ${icon}" style="color:${color}"></i> ${title}<span class="cnt">${count}</span></div><div class="bd" style="height:180px;max-height:180px;min-height:0">${inner}</div></div>`; }
   /* WHAT YOU SEARCHED FOR COMES TO THE TOP.
@@ -12365,11 +12472,14 @@
      what that choice actually needs:
 
        Does not repeat  a date, required
-       Every day        nothing
-       Every week       which weekdays
-       Every month      which dates of the month (several allowed, plus "last day")
-       Every 3 months   the same, every third month counted from the first one
-       Every year       which months, and for each of them its own dates
+       Weekly           one day of the week
+       Fortnightly      one day of the week, every other week from the first one
+       Monthly          one date of the month (or "last day")
+       Quarterly        one date, every third month counted from the first one
+       Annually         one month and one date in it
+
+     One day / date / month each - a task that has to happen twice a week is two recurring tasks.
+     "Every day" is gone from the list; old daily tasks still run and still show their rule.
 
      What gets saved is a due_date (the next real occurrence) plus a rule stored as jsonb in
      acc.ptasks.recur. dpMatches() below is a deliberate mirror of acc.recur_matches() in the
@@ -12377,13 +12487,20 @@
      the dates the server will actually create. Change one and you must change the other.
      proto/due-date-picker.html is the standalone version. */
   const DP_FREQS=[
-    {k:'none',      label:'Does not repeat', asks:'date'},
-    {k:'daily',     label:'Every day',       asks:'nothing'},
-    {k:'weekly',    label:'Every week',      asks:'weekdays'},
-    {k:'monthly',   label:'Every month',     asks:'monthdays'},
-    {k:'quarterly', label:'Every 3 months',  asks:'monthdays'},
-    {k:'yearly',    label:'Every year',      asks:'monthdates'}
+    {k:'none',        label:'Does not repeat', asks:'date'},
+    {k:'daily',       label:'Every day',       asks:'nothing', hidden:true},   // legacy only
+    {k:'weekly',      label:'Weekly',          asks:'weekdays'},
+    {k:'fortnightly', label:'Fortnightly',     asks:'weekdays'},
+    {k:'monthly',     label:'Monthly',         asks:'monthdays'},
+    {k:'quarterly',   label:'Quarterly',       asks:'monthdays'},
+    {k:'yearly',      label:'Annually',        asks:'monthdates'}
   ];
+  const DP_FREQ_LBL={daily:'Daily',weekly:'Weekly',fortnightly:'Fortnightly',monthly:'Monthly',quarterly:'Quarterly',yearly:'Annually'};
+  /* The tag that tells a recurring task apart from a normal one, wherever it is listed. */
+  function recTag(t){
+    const f=t&&t.recur&&t.recur.freq; if(!f||f==='none') return '';
+    return '<span class="ac-rec-tag" title="Recurring \u00b7 '+esc2(dpDescribe(t.recur))+'"><i class="fa-solid fa-rotate"></i> '+(DP_FREQ_LBL[f]||'Recurring')+'</span>';
+  }
   const DP_DOW=['S','M','T','W','T','F','S'];
   const DP_DOWL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const DP_MONL=['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -12436,6 +12553,13 @@
     var p=dpParse(isoDate);
     if(rule.freq==='daily') return true;
     if(rule.freq==='weekly') return (rule.weekdays||[]).indexOf(new Date(p.y,p.m,p.d).getDay())>-1;
+    if(rule.freq==='fortnightly'){
+      if((rule.weekdays||[]).indexOf(new Date(p.y,p.m,p.d).getDay())<0) return false;
+      if(!anchor) return true;
+      var an=dpParse(anchor);
+      var diff=Math.round((Date.UTC(p.y,p.m,p.d)-Date.UTC(an.y,an.m,an.d))/86400000);
+      return ((diff%14)+14)%14===0;
+    }
     if(rule.freq==='monthly'||rule.freq==='quarterly'){
       if(rule.freq==='quarterly'){
         var a=dpParse(anchor||isoDate);
@@ -12452,6 +12576,12 @@
     if(!rule) return [];
     if(rule.freq==='none'||!rule.freq) return rule.date?[rule.date]:[];
     var out=[], cur=from||dpFloor(), guard=0;
+    /* A new fortnightly rule is anchored on its first day, which is simply the next one of its
+       weekday - the database does the same (recur_anchor = the first due date). */
+    if(rule.freq==='fortnightly' && !anchor){
+      while(guard++<8 && !dpMatches(rule,cur,null)) cur=dpAdd(cur,1);
+      anchor=cur; guard=0;
+    }
     while(out.length<n && guard++<800){
       if(rule.until && cur>rule.until) break;
       if(dpMatches(rule,cur,anchor||from)) out.push(cur);
@@ -12469,11 +12599,11 @@
     if(!r.freq||r.freq==='none') return r.date?dpLong(r.date):'Set due date';
     var s='';
     if(r.freq==='daily') s='Every day';
-    else if(r.freq==='weekly')
-      s='Every '+dpList((r.weekdays||[]).slice().sort(function(a,b){return a-b;}).map(function(d){return DP_DOWL[d];}));
+    else if(r.freq==='weekly'||r.freq==='fortnightly')
+      s=(r.freq==='fortnightly'?'Every other ':'Every ')+dpList((r.weekdays||[]).slice().sort(function(a,b){return a-b;}).map(function(d){return DP_DOWL[d];}));
     else if(r.freq==='monthly'||r.freq==='quarterly'){
       var ds=dpList(dpSortDays(r.monthdays).map(dpOrd));
-      s=(r.freq==='quarterly')?('The '+ds+', every 3 months'):('The '+ds+' of every month');
+      s=(r.freq==='quarterly')?('The '+ds+', quarterly'):('The '+ds+' of every month');
     }
     else if(r.freq==='yearly'){
       var ms=Object.keys(r.monthdates||{}).map(Number).sort(function(a,b){return a-b;});
@@ -12505,13 +12635,13 @@
     var a=dpAsks(r.freq);
     if(a==='date')      return r.date?null:'Pick the date it is due.';
     if(a==='nothing')   return null;
-    if(a==='weekdays')  return r.weekdays.length?null:'Pick at least one day of the week.';
-    if(a==='monthdays') return r.monthdays.length?null:'Pick at least one date of the month.';
+    if(a==='weekdays')  return r.weekdays.length?null:'Pick the day of the week.';
+    if(a==='monthdays') return r.monthdays.length?null:'Pick the date of the month.';
     if(a==='monthdates'){
       var ms=Object.keys(r.monthdates);
-      if(!ms.length) return 'Pick at least one month.';
+      if(!ms.length) return 'Pick the month.';
       for(var i=0;i<ms.length;i++){
-        if(!(r.monthdates[ms[i]]||[]).length) return 'Pick the dates in '+DP_MONL[+ms[i]]+'.';
+        if(!(r.monthdates[ms[i]]||[]).length) return 'Pick the date in '+DP_MONL[+ms[i]]+'.';
       }
       return null;
     }
@@ -12570,14 +12700,16 @@
         +'<div class="dp-note">Nothing to choose &mdash; it comes back every day.<br><br>The first one is due today.</div>';
     }
     else if(a==='weekdays'){
-      h+=dpAskLbl('Which days',true)+'<div class="dp-chips dow">';
+      h+=dpAskLbl('Which day',true)+'<div class="dp-chips dow">';
       for(i=0;i<7;i++)
         h+='<button type="button" class="dp-chip'+(DP_ST.weekdays.indexOf(i)>-1?' on':'')+'"'
           +' data-dp="dow" data-v="'+i+'" title="'+DP_DOWL[i]+'">'+DP_DOW[i]+'</button>';
-      h+='</div><div class="dp-note" style="margin-top:9px">Twice a week is two days, not two tasks.</div>';
+      h+='</div><div class="dp-note" style="margin-top:9px">'+(DP_ST.freq==='fortnightly'
+        ?'Every other week, starting from the first one.'
+        :'One day a week. Twice a week is two recurring tasks.')+'</div>';
     }
     else if(a==='monthdays'){
-      h+=dpAskLbl('Which dates',true)+'<div class="dp-chips dom">';
+      h+=dpAskLbl('Which date',true)+'<div class="dp-chips dom">';
       for(i=1;i<=31;i++)
         h+='<button type="button" class="dp-chip'+(DP_ST.monthdays.indexOf(i)>-1?' on':'')+'"'
           +' data-dp="dom" data-v="'+i+'">'+i+'</button>';
@@ -12585,7 +12717,7 @@
         +' data-dp="dom" data-v="last">Last day</button></div>';
     }
     else if(a==='monthdates'){
-      h+=dpAskLbl('Which months',true)+'<div class="dp-chips mon">';
+      h+=dpAskLbl('Which month',true)+'<div class="dp-chips mon">';
       for(i=0;i<12;i++){
         var picked=DP_ST.monthdates[i]!==undefined;
         var hasDates=picked&&(DP_ST.monthdates[i]||[]).length>0;
@@ -12598,8 +12730,7 @@
          choosing ten months does not make the panel ten rows taller. */
       if(DP_AM!==null && DP_ST.monthdates[DP_AM]!==undefined){
         var sel=DP_ST.monthdates[DP_AM]||[];
-        h+='<div class="dp-sub"><span class="lbl">Dates in '+DP_MONL[DP_AM]+'</span>'
-          +'<button type="button" class="rm" data-dp="unmon" data-v="'+DP_AM+'">Remove month</button></div>'
+        h+='<div class="dp-sub"><span class="lbl">Date in '+DP_MONL[DP_AM]+'</span></div>'
           +'<div class="dp-chips dom">';
         for(i=1;i<=31;i++)
           h+='<button type="button" class="dp-chip'+(sel.indexOf(i)>-1?' on':'')+'"'
@@ -12607,8 +12738,7 @@
         h+='<button type="button" class="dp-chip wide'+(sel.indexOf('last')>-1?' on':'')+'"'
           +' data-dp="ymd" data-v="last">Last day</button></div>';
       } else {
-        h+='<div class="dp-empty">Pick a month above, then choose its dates here.<br>'
-          +'Each month keeps its own &mdash; 15 and 30 June, just the 1st in December.</div>';
+        h+='<div class="dp-empty">Pick a month above, then choose its date here.</div>';
       }
     }
     return h+'</div>';
@@ -12627,6 +12757,9 @@
          : 'A 29th, 30th or 31st falls on the last day of a shorter month.')+'</div>';
     if(DP_ST.freq==='quarterly') h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
       +'Every 3 months, counting from the first one.</div>';
+    if(DP_ST.freq!=='none') h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
+      +'The next one is only created once this one is complete. Left open past the next date, '
+      +'everyone on it gets a reminder email instead.</div>';
     if(DP_ST.freq!=='none'){
       h+='<div class="ends">'+(DP_ST.until
         ? 'Ends '+dpShort(DP_ST.until)+' &middot; <button type="button" data-dp="noend">remove</button>'
@@ -12665,7 +12798,7 @@
 
   function dpPaint(){
     if(!DP_HOST) return;
-    var railH='<div class="dp-rail">'+DP_FREQS.map(function(f){
+    var railH='<div class="dp-rail">'+DP_FREQS.filter(function(f){ return !f.hidden||DP_ST.freq===f.k; }).map(function(f){
       return '<button type="button" class="dp-opt'+(DP_ST.freq===f.k?' on':'')+'" data-dp="freq" data-v="'+f.k+'">'+f.label+'</button>';
     }).join('')+'</div>';
     var h='<div class="dp-body">'+railH+dpPane()+'</div>'+dpSays();
@@ -12676,7 +12809,6 @@
     if(DP_OPTS.onChange) DP_OPTS.onChange(dpResult());
   }
 
-  function dpToggle(arr,v){ var i=arr.indexOf(v); if(i>-1) arr.splice(i,1); else arr.push(v); }
 
   function dpClick(e){
     var el=e.target.closest('[data-dp]'); if(!el) return;
@@ -12698,20 +12830,21 @@
         var q=dpParse(v); DP_VIEW={y:q.y,m:q.m};
       }
     }
-    else if(a==='dow') dpToggle(DP_ST.weekdays,Number(v));
-    else if(a==='dom') dpToggle(DP_ST.monthdays, v==='last'?'last':Number(v));
+    else if(a==='dow') DP_ST.weekdays=[Number(v)];
+    else if(a==='dom') DP_ST.monthdays=[v==='last'?'last':Number(v)];
     else if(a==='mon'){
       /* Clicking a month always selects it and points the grid at it; removing is the explicit
          "Remove month", so one click cannot quietly discard dates already set for a month you
          only meant to look at. */
+      /* One month only: picking another moves the date across rather than adding a second month. */
       m=Number(v);
-      if(DP_ST.monthdates[m]===undefined) DP_ST.monthdates[m]=[];
+      var keep=[]; for(var k0 in DP_ST.monthdates){ if((DP_ST.monthdates[k0]||[]).length){ keep=DP_ST.monthdates[k0].slice(0,1); break; } }
+      DP_ST.monthdates={}; DP_ST.monthdates[m]=keep;
       DP_AM=m;
     }
     else if(a==='ymd'){
       if(DP_AM===null) return;
-      if(!DP_ST.monthdates[DP_AM]) DP_ST.monthdates[DP_AM]=[];
-      dpToggle(DP_ST.monthdates[DP_AM], v==='last'?'last':Number(v));
+      DP_ST.monthdates[DP_AM]=[v==='last'?'last':Number(v)];
     }
     else if(a==='unmon'){
       delete DP_ST.monthdates[v];
@@ -12735,13 +12868,13 @@
     var recur=cur&&cur.recur;
     if(recur&&recur.freq){
       DP_ST.freq=recur.freq;
-      DP_ST.weekdays=(recur.weekdays||[]).slice();
-      DP_ST.monthdays=(recur.monthdays||[]).slice();
+      /* Older rules could hold several days / dates / months; the picker now takes one of each,
+         so such a rule opens on its first and only changes if it is saved again. */
+      DP_ST.weekdays=(recur.weekdays||[]).slice(0,1);
+      DP_ST.monthdays=dpSortDays(recur.monthdays||[]).slice(0,1);
       DP_ST.monthdates={};
-      if(recur.monthdates) for(var k in recur.monthdates){
-        var vv=recur.monthdates[k];
-        DP_ST.monthdates[k]=Array.isArray(vv)?vv.slice():(vv==null?[]:[vv]);
-      }
+      if(recur.monthdates){ var mk=Object.keys(recur.monthdates).map(Number).sort(function(a,b){return a-b;})[0];
+        if(mk!=null){ var vv=recur.monthdates[mk]; DP_ST.monthdates[mk]=(Array.isArray(vv)?dpSortDays(vv):(vv==null?[]:[vv])).slice(0,1); } }
       DP_ST.until=recur.until||null;
     } else {
       DP_ST.freq='none';
@@ -13046,7 +13179,7 @@
     // never mentions the workflow's name or its JainE id at all otherwise.
     const wfSearch=wfInfo?esc2([wfInfo.flowName,wfInfo.triggerEvent,
       wfInfo.caseNo?((wfInfo.idLabel||'Id')+' '+wfInfo.caseNo):''].filter(Boolean).join(' ')):'';
-    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" data-id="${t.id}"${wfSearch?` data-wf="${wfSearch}"`:''} onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
+    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" data-id="${t.id}"${wfSearch?` data-wf="${wfSearch}"`:''} onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon2}${recTag(t)}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
   }
 
   function wirePointerDrag(col,sel,persist,onSwipeLeft){ col.querySelectorAll(sel).forEach(row=>{ const grip=row.querySelector('.grip'); if(!grip)return; grip.style.touchAction='none'; grip.addEventListener('pointerdown',function(e){ e.preventDefault(); e.stopPropagation(); try{grip.setPointerCapture(e.pointerId);}catch(_){} const startX=e.clientX,startY=e.clientY,isTouch=e.pointerType==='touch'; let mode=null,lastDx=0; window._dragging=true; function move(ev){ const dx=ev.clientX-startX,dy=ev.clientY-startY; lastDx=dx; if(mode===null){ if(Math.abs(dx)>10||Math.abs(dy)>10){ if(onSwipeLeft&&isTouch&&dx<0&&Math.abs(dx)>Math.abs(dy)*1.2){ mode='swipe'; } else { mode='drag'; row.classList.add('drag'); } } } if(mode==='swipe'){ row.style.transition='none'; row.style.transform='translateX('+Math.max(dx,-88)+'px)'; } else if(mode==='drag'){ const el=document.elementFromPoint(ev.clientX,ev.clientY); const tgt=el&&el.closest(sel); if(tgt&&tgt!==row&&col.contains(tgt)){ const r=tgt.getBoundingClientRect(); if(ev.clientY<r.top+r.height/2)col.insertBefore(row,tgt); else col.insertBefore(row,tgt.nextSibling); } } } function up(){ try{grip.releasePointerCapture(e.pointerId);}catch(_){} window._dragging=false; row.classList.remove('drag'); row.style.transition='transform .15s'; row.style.transform=''; document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); if(mode==='swipe'&&lastDx<-44)onSwipeLeft(row); else if(mode==='drag')persist(col); } document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); }); }); }
@@ -13472,7 +13605,11 @@
       /* recur_anchor is left alone on purpose: the trigger sets it on the first save and it must
          not move afterwards, or a quarterly rule would re-phase and a clamped monthly 31st would
          re-anchor to whatever short month it last landed on. */
-      await ACC().from('ptasks').update({due_date:due,overdue_emailed:false,due_emailed:false,recur:newRecur}).eq('id',tid);
+      const upd={due_date:due,overdue_emailed:false,due_emailed:false,recur:newRecur};
+      // ...except when the kind of repeat itself changes: a fortnightly rule counts its weeks from
+      // its anchor, which has to be a day of the new rule, so a new frequency starts from the new due date.
+      if(((prevRecur&&prevRecur.freq)||'')!==((newRecur&&newRecur.freq)||'')) upd.recur_anchor=newRecur?due:null;
+      await ACC().from('ptasks').update(upd).eq('id',tid);
       if(JSON.stringify(prevRecur)!==JSON.stringify(newRecur)){
         await ACC().from('ptask_activity').insert({task_id:tid,action:'repeat changed',detail:'Repeat '+(prevRecur?dpDescribe(prevRecur):'none')+' \u2192 '+(newRecur?dpDescribe(newRecur):'none')});
       }
