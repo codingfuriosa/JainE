@@ -20403,6 +20403,8 @@ function cpaPhCss(){return `<style>
   .cph-pv .cph-pvstage img,.cph-pv .cph-pvstage video{position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;
     object-fit:contain;background:transparent;box-shadow:none;border-radius:0}
   .cph-pvload{color:#cbd5e1;font-size:26px}
+  .cph-pvhint{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:2;background:rgba(15,23,42,.72);color:#e2e8f0;
+    font-size:12.5px;padding:6px 12px;border-radius:999px;white-space:nowrap}
   .cph-pvn{color:#cbd5e1;font-size:12.5px;margin-left:10px;white-space:nowrap}
   .cph-pvnav{position:absolute;z-index:2;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:0;
     background:rgba(255,255,255,.16);color:#fff;font-size:18px;cursor:pointer}
@@ -20907,10 +20909,9 @@ window.cpaPhFixPreview=async function(gi,k){
   box.onclick=e=>{ if(e.target===box) shut(); };
   document.addEventListener('keydown',onKey);
   document.body.appendChild(box);
-  const url=await cphSignedUrl(ph.storage_path);
-  const stage=box.querySelector('.cph-pvstage'); if(!stage||!box.isConnected) return;
-  if(!url){ stage.innerHTML='<div class="cph-pvload">File not available</div>'; return; }
-  stage.innerHTML=isVid?'<video src="'+url+'" controls autoplay playsinline></video>':'<img src="'+url+'" alt="">';
+  const stage=box.querySelector('.cph-pvstage'); if(!stage) return;
+  cphPreload(list[k+1]&&list[k+1].ph); cphPreload(list[k-1]&&list[k-1].ph);
+  await cphFullInto(stage,box,ph);
 };
 // A button in "Photos to retake": open that project at that level. Same project: only the level
 // changes, so the block and flat picked stay as they were.
@@ -21499,6 +21500,38 @@ async function cphBfPump(){
   }catch(_e){}
   cphBfBusy=false; setTimeout(cphBfPump,150);
 }
+/* FULL-SIZE VIEWS OPEN AT ONCE (8 Oct 2026). Most photos uploaded before 5 Oct are the phone's
+   original, several MB, and over site mobile data the view sat on a spinner. The thumbnail - already
+   signed and loaded for the list - is shown straight away (cphFullInto), the full photo takes its
+   place when it has arrived, and the photos either side are fetched ahead (cphPreload) so the
+   arrows do not wait either. */
+const cphPreloaded=new Map();
+function cphPreload(ph){
+  if(!ph||!ph.storage_path||cphPreloaded.has(ph.storage_path)) return;
+  if((ph.file_type||'').indexOf('video')===0) return;
+  cphPreloaded.set(ph.storage_path,true);
+  cphSignedUrl(ph.storage_path).then(u=>{ if(u){ const im=new Image(); im.decoding='async'; im.src=u; cphPreloaded.set(ph.storage_path,im); } });
+}
+async function cphFullInto(stage,box,ph){
+  const isVid=(ph.file_type||'').indexOf('video')===0;
+  if(!isVid&&ph.thumb_path){
+    const tu=await cphSignedUrl(ph.thumb_path);
+    if(tu&&box.isConnected&&!stage.querySelector('img.cph-full'))
+      stage.innerHTML='<img src="'+tu+'" alt=""><div class="cph-pvhint"><i class="fa-solid fa-spinner fa-spin"></i> Loading full photo…</div>';
+  }
+  const url=await cphSignedUrl(ph.storage_path);
+  if(!box.isConnected) return;
+  if(!url){ if(!stage.querySelector('img')) stage.innerHTML='<div class="cph-pvload">File not available</div>'; return; }
+  if(isVid){ stage.innerHTML='<video src="'+url+'" controls autoplay playsinline></video>'; return; }
+  const pre=cphPreloaded.get(ph.storage_path);
+  const full=(pre&&pre.complete&&pre.naturalWidth)?pre:new Image();
+  full.className='cph-full'; full.alt='';
+  const show=()=>{ if(box.isConnected){ stage.innerHTML=''; stage.appendChild(full); } };
+  if(full.complete&&full.naturalWidth){ show(); return; }
+  full.onload=show;
+  full.onerror=()=>{ if(box.isConnected){ const h=stage.querySelector('.cph-pvhint'); if(h) h.remove(); if(!stage.querySelector('img')) stage.innerHTML='<div class="cph-pvload">File not available</div>'; } };
+  full.src=url;
+}
 // The image a list shows for a photo: its thumbnail, or the full file for one that has none yet
 // (data-bf asks for a thumbnail to be made once it has loaded).
 function cphThumbAttrs(p,table){
@@ -21823,19 +21856,11 @@ window.cpaRvPreview=async function(id){
       else if(e.key==='ArrowRight') cpaRvPreviewStep(1);
       else if(e.key==='ArrowLeft') cpaRvPreviewStep(-1);
     }); }
-  // The thumbnail is usually signed already, so it shows at once; the full photo replaces it.
-  if(!isVid&&p.thumb_path){
-    cphSignedUrl(p.thumb_path).then(tu=>{ const st=box.querySelector('.cph-pvstage');
-      if(tu&&st&&box.isConnected&&!st.querySelector('img')) st.innerHTML='<img src="'+tu+'" alt="">'; });
-  }
-  const url=await cphSignedUrl(p.storage_path);
-  const stage=box.querySelector('.cph-pvstage'); if(!stage||!box.isConnected) return;
-  if(!url){ stage.innerHTML='<div class="cph-pvload">File not available</div>'; return; }
-  if(isVid){ stage.innerHTML='<video src="'+url+'" controls autoplay playsinline></video>'; return; }
-  const full=new Image();
-  full.onload=()=>{ if(box.isConnected){ stage.innerHTML=''; stage.appendChild(full); } };
-  full.onerror=()=>{ if(box.isConnected&&!stage.querySelector('img')) stage.innerHTML='<div class="cph-pvload">File not available</div>'; };
-  full.alt=''; full.src=url;
+  // The thumbnail at once, the full photo when it has arrived, and the next ones fetched ahead.
+  const stage=box.querySelector('.cph-pvstage'); if(!stage) return;
+  const shownList=CPA_RV.shown||[], byId=id=>shownList.find(x=>x.id===id);
+  cphPreload(byId(order[i+1])); cphPreload(byId(order[i+2])); cphPreload(byId(order[i-1]));
+  await cphFullInto(stage,box,p);
 };
 window.cpaRvPreviewClose=function(){ const b=$('cphPv'); if(b) b.remove(); };
 window.cpaRvPreviewStep=function(d){
