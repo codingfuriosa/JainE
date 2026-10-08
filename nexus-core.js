@@ -20542,6 +20542,10 @@ function cpaPhCss(){return `<style>
   .cph-cntline span{display:inline-flex;align-items:center;gap:6px;color:var(--ink);font-weight:600}
   .cph-cntline span i{color:var(--c)}
   .cph-fixbtns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .cph-fixst{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;white-space:nowrap}
+  .cph-fixst.busy{color:#1d4ed8;padding:0 6px}
+  .cph-fixst.taken{background:#dcfce7;border-color:#86efac;color:#15803d}
+  .cph-fixi.st-busy,.cph-fixi.st-taken{border-color:#bbf7d0;background:#f7fef9}
   /* The section always sits on its own line under the flat number, so every row lines up the same. */
   .cph-fixsec{display:table;margin-top:4px;padding:1px 9px;border-radius:999px;background:#fef2f2;color:#b91c1c;font-size:12px;font-weight:700;white-space:nowrap}
   @media(max-width:620px){ .cph-fixi{flex-wrap:wrap} .cph-fixbtns{width:100%} .cph-fixbtns .btn{flex:1 1 0;justify-content:center} }
@@ -20763,6 +20767,8 @@ async function cpaPhPaint(projects,units){
    rejected row of "Already uploaded" (cpaPhRetakeBtn). */
 async function cpaPhFixList(projects,units){
   const host=$('cphFix'); if(!host) return;
+  projects=projects||CPA_PH.fixProjects||await cpaProjects(); units=units||CPA.units||await cpaUnits();
+  CPA_PH.fixProjects=projects;
   // Retaking is the site team's job: only photos-only accounts get this list (6 Oct 2026). An admin
   // sees rejected photos in "Already uploaded" and in Review > Rejected, without Retake.
   if(!cpaPhotosOnly()){ host.innerHTML=''; return; }
@@ -20791,6 +20797,23 @@ async function cpaPhFixList(projects,units){
     return nat(a.pn,b.pn)||(x.lvl-y.lvl)||nat(x.tower,y.tower)
       ||((x.floor==null)-(y.floor==null))||((x.floor||0)-(y.floor||0))||nat(x.code,y.code)||((x.areaIdx||0)-(y.areaIdx||0));
   });
+  CPA_PH.fixItems=items;
+  cpaPhFixRender();
+}
+/* Where a row stands right now (8 Oct 2026), so it is never unclear what has been taken: being
+   uploaded; taken and waiting in the upload form (the upload failed, or it was added by hand); or
+   still to retake. */
+function cpaPhFixState(it){
+  const key=it.t+'|'+it.w.key;
+  if(CPA_PH.fixBusy&&CPA_PH.fixBusy===key) return 'busy';
+  const f=CPA_PH.files||{};
+  if(it.w.lvl===2) return (CPA_PH.level==='unit'&&String(CPA_PH.unit)===String(it.p.unit_id)&&(f[it.p.area||'common']||[]).length)?'taken':'';
+  if(it.w.lvl===1) return (CPA_PH.level==='tower'&&String(CPA_PH.project)===String(it.w.pid)&&CPA_PH.tower===it.w.tower&&(f.all||[]).length)?'taken':'';
+  return (CPA_PH.level==='project'&&String(CPA_PH.project)===String(it.w.pid)&&(f.all||[]).length)?'taken':'';
+}
+function cpaPhFixRender(){
+  const host=$('cphFix'); if(!host||!CPA_PH.fixItems) return;
+  const items=CPA_PH.fixItems;
   /* The site team's view (7 Oct 2026): only the project picked above; the count on top is in
      PLACES to photograph - flats, blocks - not photos. The list is block by block ("A1 · 3 flats"),
      then one row per flat and section ("Flat 2A · Common area", "Flat 2A · Kitchen"), each with its
@@ -20822,10 +20845,14 @@ async function cpaPhFixList(projects,units){
     const thBtn='<button type="button" class="cph-fixpv" onclick="cpaPhFixPreview('+k+',0)" title="See what was rejected, full size">'+th
       +(it.n>1?'<span class="cph-fixpn">'+it.n+'</span>':'')+'</button>';
     const title=w.lvl===2?'Flat '+(w.code||''):w.lvl===1?(w.tower||'Block'):'Whole project';
-    return head+'<div class="cph-fixi">'+thBtn
+    const st=cpaPhFixState(it);
+    const right=st==='busy'?'<span class="cph-fixst busy"><i class="fa-solid fa-spinner fa-spin"></i> Uploading…</span>'
+      :st==='taken'?'<button class="btn btn-sm cph-fixst taken" onclick="cpaPhUpload()" title="The new photo is in the upload form below"><i class="fa-solid fa-circle-check"></i> Taken — Upload</button>'
+      :(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+k+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'');
+    return head+'<div class="cph-fixi'+(st?' st-'+st:'')+'">'+thBtn
       +'<div class="cph-fixw"><b>'+esc(title)+'</b>'+(w.lvl===2?'<span class="cph-fixsec">'+esc(secName(it))+'</span>':'')
         +esc(it.notes.join(' · '))+'</div>'
-      +(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+k+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'')
+      +right
       +'</div>';
   }).join('');
   host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>Photos to retake</div>'
@@ -20919,13 +20946,18 @@ function cpaPhRetakeAt(t,p,place,isVid){
     key=p.area||'common';
   }else if(t==='tower_photos'){ CPA_PH.level='tower'; CPA_PH.project=String(p.project_id); CPA_PH.tower=String(p.tower||''); CPA_PH.unit=''; }
   else { CPA_PH.level='project'; CPA_PH.project=String(p.project_id); CPA_PH.tower=''; CPA_PH.unit=''; }
+  /* Taken, then uploaded straight away (8 Oct 2026): pressing Upload as a second step left the row
+     in the list looking untaken, and retaking the next flat before uploading would have moved the
+     first photo to that flat. The row shows "Uploading…", then leaves the list once it is up. */
+  const placeKey=t+'|'+cpaPhPlaceOf(t,p).key;
   // The camera has to open inside this tap - a phone refuses it once the click has been handled.
-  cpaPhPick(key,isVid?'video':'photo',null,function(){
-    const go=$('cphGo'); if(go){ go.scrollIntoView({behavior:'smooth',block:'center'}); }
-    toast('Added for '+place+' — press Upload','ok');
+  cpaPhPick(key,isVid?'video':'photo',null,async function(){
+    CPA_PH.fixBusy=placeKey; cpaPhFixRender();
+    try{ await painted; await cpaPhUpload(); }
+    finally{ CPA_PH.fixBusy=null; cpaPhFixRender(); }
   });
   cpaPhFollowPickers();
-  cpaPhPaint().then(()=>{ const z=document.querySelector('.cph-zone[data-zone="'+key+'"]'); if(z) z.scrollIntoView({behavior:'smooth',block:'center'}); });
+  const painted=cpaPhPaint();
 }
 
 // Latest upload per flat (any status, not deleted) - newest first, so the first row per flat wins.
@@ -21085,6 +21117,8 @@ window.cpaPhClear=function(){
 /* Redrawing one zone in place keeps the caret and the scroll position of the others, which
    matters when three of them are on screen. */
 function cpaPhRepaintZones(){
+  // "Taken — Upload" in Photos to retake follows what is chosen here.
+  setTimeout(cpaPhFixRender,0);
   Array.prototype.forEach.call(document.querySelectorAll('.cph-zone'),function(z){
     const key=z.getAttribute('data-zone');
     const meta=CPA_PH_AREAS.concat([['all','Photos or videos','fa-images']]).find(a=>a[0]===key);
@@ -21194,6 +21228,8 @@ window.cpaPhUpload=async function(){
   if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded — waiting for approval'+(replaced?' · replaces '+replaced+' rejected':'')+(told?'':'. No photo approver is set up yet (Control Panel).'),told?'ok':'warn');
   if(failed.length) toast(failed.length+' could not be uploaded: '+failed[0],'err');
   cpaPhList();
+  // What was replaced leaves "Photos to retake" at once - no page refresh.
+  await cpaPhFixList();
 };
 
 /* What is already there, as thumbnails rather than a table of 52px squares. At flat level it is
