@@ -1262,11 +1262,12 @@
       h+=row('fa-circle-check',c?('Completed '+esc2(dpLong(c))+' · '+(late?'<b style="color:#b91c1c">'+late+' day'+(late===1?'':'s')+' late</b>':'<b style="color:#15803d">on time</b>')):'Completed');
     } else if(o.st==='held'){
       h+=row('fa-hourglass-half','Made once the '+esc2(dpShort(s.latest.due_date))+' one is complete');
-    } else if(!o.task){
+    } else {
       h+=row('fa-circle-info','Not made yet \u2014 it is created on its day, once the one before it is complete. This is a preview of it.');
     }
     h+=row('fa-user',esc2(mem))+row('fa-user-pen','By '+esc2(nameOf(list,t.delegator)||t.delegator||'—'));
-    const foot=o.task?'<button class="ac-btn" onclick="recClose();navTo(\'tasks/task/'+o.task.id+'\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> View task</button>':'';
+    // Only a completed one has a task worth opening from here; one still to come is shown, not opened.
+    const foot=(o.task&&o.st==='done')?'<button class="ac-btn" onclick="recClose();navTo(\'tasks/task/'+o.task.id+'\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> View task</button>':'';
     recShow(o.st==='done'?'Completed':'Coming up',h,foot);
   };
   window.recYear=function(d){ REC_VIEW.fy+=d; recPaint(true); };
