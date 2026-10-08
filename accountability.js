@@ -1263,7 +1263,7 @@
     } else if(o.st==='held'){
       h+=row('fa-hourglass-half','Made once the '+esc2(dpShort(s.latest.due_date))+' one is complete');
     } else {
-      h+=row('fa-circle-info','Not made yet \u2014 it is created on its day, once the one before it is complete. This is a preview of it.');
+      h+=row('fa-circle-info',o.task?'Scheduled \u2014 it shows in your tasks from its day.':'Not made yet \u2014 it is created on its day, once the one before it is complete.');
     }
     h+=row('fa-user',esc2(mem))+row('fa-user-pen','By '+esc2(nameOf(list,t.delegator)||t.delegator||'—'));
     // Only a completed one has a task worth opening from here; one still to come is shown, not opened.
