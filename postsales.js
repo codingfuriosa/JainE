@@ -2041,74 +2041,267 @@ window.psrReverse=async function(id){
   if(fail(error,'Could not reverse')) return;
   closeModal(); toast('Receipt reversed','ok'); route();
 };
+/* ============================== THE MONEY RECEIPT ========================================
+
+   Laid out like the one FarVision prints: the company block with its registrations, "Receipt",
+   the payer on the left against the receipt's own details on the right, the amount in figures and
+   words, then the itemised table of what the money was applied to.
+
+   Drawn rather than printed, for the same reason as the Cost Sheet and the Demand Note - a print
+   window stamps the browser's own date and title across the top and gives you nothing to keep. */
 window.psrPrint=async function(id){
-  const w=window.open('','_blank');
-  if(!w){ toast('Allow pop-ups to print the receipt','err'); return; }
-  w.document.write('<!doctype html><meta charset="utf-8"><title>Preparing…</title><body style="font:14px system-ui;padding:30px">Preparing…</body>');
-  const v=await loadReceipt(id); if(!v){ w.close(); return; }
-  const {r,al}=v, b=r.bookings||{}, ap=(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq), proj=S.projects.find(p=>p.id===r.project_id);
-  const {data:setup}=await PS().from('project_setup').select('company_name,company_address,company_pan,company_gstin,company_cin,contact_phone,contact_email,demand_terms').eq('project_id',r.project_id).maybeSingle();
-  const first=ap[0]||{}, addr=first.mailing_address==='office'?first.off_address:first.res_address;
-  /* LAID OUT LIKE FARVISION'S MONEY RECEIPT: company block with its registrations on the left,
-     "Receipt", the payer against receipt/project/unit details on the right, then the itemised
-     table of what the money was applied to. */
-  const rupees=Math.round(num(r.amount)).toLocaleString('en-IN');
-  const regs=(k,v)=>v?('<tr><td class="k"><b>'+esc(k)+'</b></td><td class="c">:</td><td>'+esc(v)+'</td></tr>'):'';
-  const html='<!doctype html><html><head><meta charset="utf-8"><title>Money Receipt '+esc(r.receipt_no)+'</title>'
-    +'<style>'+DOC_CSS+'.rcpt-amt{font-size:13px;font-weight:bold}</style></head><body>'
-    +docHead(setup,'',true)
-    +((setup&&(setup.company_gstin||setup.company_pan||setup.company_cin))
-       ? '<table class="ref" style="width:auto;margin-bottom:10px">'
-         +regs('GSTIN',setup.company_gstin)+regs('PAN',setup.company_pan)+regs('CIN',setup.company_cin)+'</table>'
-       : '')
-    +'<div class="doct">Receipt</div>'
-    +'<table><tr>'
-      +'<td style="width:50%;vertical-align:top" class="addr"><b>'
-        +esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & ')||'Customer')+'</b>'
-        +(addr?'<br>'+esc(addr):'')
-        +(ap.length>1?'<br><b>Co Applicant Name :</b> '+esc(ap.slice(1).map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(', ')):'')
-        +'<table class="ref" style="margin-top:10px">'
-          +docRef('Email', first.email)
-          +docRef('Contact No', first.mobile)
-          +docRef('Booking No', b.booking_no)
-        +'</table></td>'
-      +'<td style="vertical-align:top"><table class="ref">'
-        +docRef('Receipt No', r.receipt_no)
-        +docRef('Receipt Date', dmy(r.receipt_date))
-        +docRef('Project', proj?proj.name:'')
-        +docRef('Category', b.towers&&b.towers.name)
-        +docRef('Unit No', b.flats&&b.flats.flat_code)
-        +docRef('Adjustment Against', r.against_interest?'Interest':'Normal')
-        +docRef('Payment Mode', MODE_LBL[r.mode]||r.mode)
-        +docRef('Drawn On', r.drawn_on)
-        +docRef('Instn. No.', r.instrument_no)
-        +docRef('Instn. Date', r.instrument_date?dmy(r.instrument_date):'')
-        +'</table></td></tr></table>'
-    +(r.narration?'<div class="sm" style="margin-top:12px"><b>Remarks :</b> &nbsp;'+esc(r.narration)+'</div>':'')
-    +'<div class="sm" style="margin-top:10px"><b>Amount received :</b> '
-      +'<span class="rcpt-amt">Rs. '+rupees+'</span> &nbsp;(Rupees '+esc(inWords(r.amount))+' only)</div>'
-    +(al.length
-       ? '<table class="grid" style="margin-top:10px"><thead><tr><th style="width:5%">Sl. #</th><th style="width:9%">Type</th>'
-         +'<th>Schedule Name</th><th style="width:17%">Invoice No</th><th style="width:11%">Invoice Dt</th>'
-         +'<th class="r" style="width:14%">Total Amt</th></tr></thead><tbody>'
-         +al.map(function(a,ix){
-             const iv=a.invoices||{};
-             return '<tr><td style="text-align:center">'+(ix+1)+'</td><td>Bill</td><td>'+esc(psLabel(iv.title||''))+'</td>'
-               +'<td>'+esc(iv.invoice_no||'')+'</td><td>'+(iv.invoice_date?dmy(iv.invoice_date):'')+'</td>'
-               +'<td class="r">'+Math.round(num(a.amount)).toLocaleString('en-IN')+'.00</td></tr>';
-           }).join('')
-         +'<tr class="tot"><td colspan="5">Total</td><td class="r">'+rupees+'.00</td></tr>'
-         +'</tbody></table>'
-       : '<div class="sm" style="margin-top:10px">Held as advance &mdash; no invoice was open on this booking when it was received.</div>')
-    +(r.mode==='cheque'||r.mode==='dd'?'<div class="sm" style="margin-top:8px">Subject to realisation of the instrument.</div>':'')
-    +(r.status==='reversed'?'<div class="void">REVERSED on '+dmy(r.reversal_date)+' &mdash; '+esc(r.reversal_reason||'')+'</div>':'')
-    +'<div style="border-top:1px solid #000;margin-top:26px;padding-top:10px;text-align:right" class="sm">'
-      +'<b>For, '+esc(setup&&setup.company_name||'The Jain Group')+'</b>'
-      +'<div style="margin-top:28px"><b>Authorised Signatory</b></div></div>'
-    +'<div class="sm" style="margin-top:12px">Entered by '+esc((r.created_by||'').split('@')[0])+'. This is a system generated receipt.</div>'
-    +'<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>';
-  w.document.open(); w.document.write(html); w.document.close();
+  let v=null;
+  try{ v=await loadReceipt(id); }
+  catch(e){ toast('Could not read the receipt: '+((e&&e.message)||e),'err'); return; }
+  if(!v) return;
+  try{ await psrReceiptPdf(v); }
+  catch(e){ toast('Could not build the receipt: '+((e&&e.message)||e),'err'); }
 };
+
+async function psrReceiptPdf(v){
+  const L=await loadPdfLib();
+  if(!L) throw new Error('the PDF library could not be loaded');
+  const {r,al}=v, b=r.bookings||{},
+        ap=(b.booking_applicants||[]).sort(function(x,y){return x.seq-y.seq;}),
+        proj=S.projects.find(function(p){return p.id===r.project_id;});
+  const {data:setup}=await PS().from('project_setup')
+    .select('company_name,company_pan,company_gstin,company_cin')
+    .eq('project_id',r.project_id).maybeSingle();
+
+  const doc=await L.PDFDocument.create();
+  doc.setTitle('Money Receipt '+(r.receipt_no||''));
+  const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+  const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+  const K=psPdfKit(L,doc,reg,bold);
+  K.newPage();
+
+  const first=ap[0]||{};
+  const addr=first.mailing_address==='office'?first.off_address:first.res_address;
+  const who=ap.map(function(a){return K.clean([a.title,a.full_name].filter(Boolean).join(' '));})
+              .filter(Boolean);
+
+  // ── company, left, with its registrations under it ───────────────────────────────────────
+  K.text(((setup&&setup.company_name)||'THE JAIN GROUP').toUpperCase(),{bold:true,size:11});
+  K.gap(2);
+  [['GSTIN',setup&&setup.company_gstin],['PAN',setup&&setup.company_pan],
+   ['CIN',setup&&setup.company_cin]].forEach(function(x){
+    if(x[1]) K.text(x[0]+' : '+x[1],{size:7.4});
+  });
+  K.gap(10);
+  K.text('RECEIPT',{bold:true,size:10,align:'center'});
+  K.gap(12);
+
+  // ── payer on the left, the receipt's own details on the right ────────────────────────────
+  const half=K.TW/2;
+  const left=[who[0]||'Customer'].concat(addr?K.wrap(addr,half-10,reg,8):[]);
+  if(who.length>1) left.push('Co Applicant: '+who.slice(1).join(', '));
+  if(first.email) left.push('Email : '+first.email);
+  if(first.mobile) left.push('Contact No : '+first.mobile);
+  left.push('Booking No : '+(b.booking_no||''));
+
+  const refs=[['Receipt No',r.receipt_no||''],
+              ['Receipt Date',dmy(r.receipt_date)],
+              ['Project',proj?proj.name:''],
+              ['Category',(b.towers&&b.towers.name)||''],
+              ['Unit No',(b.flats&&b.flats.flat_code)||''],
+              ['Adjustment Against',r.against_interest?'Interest':'Normal'],
+              ['Payment Mode',MODE_LBL[r.mode]||r.mode||''],
+              ['Drawn On',r.drawn_on||''],
+              ['Instn. No.',r.instrument_no||''],
+              ['Instn. Date',r.instrument_date?dmy(r.instrument_date):'']]
+             .filter(function(x){return x[1];});
+
+  const topY=K.y();
+  left.forEach(function(t,ix){
+    K.page().drawText(K.clean(t),{x:K.M,y:topY-8-(ix*11.5),size:8,
+      font:(ix===0?bold:reg),color:K.INK});
+  });
+  refs.forEach(function(x,ix){
+    const yy=topY-8-(ix*11.5);
+    K.page().drawText(K.clean(x[0]),{x:K.M+half,y:yy,size:8,font:reg,color:K.INK});
+    K.page().drawText(':',{x:K.M+half+88,y:yy,size:8,font:reg,color:K.INK});
+    K.page().drawText(K.clean(x[1]),{x:K.M+half+96,y:yy,size:8,font:bold,color:K.INK});
+  });
+  K.gap(8+11.5*Math.max(left.length,refs.length)+8);
+
+  if(r.narration){ K.text('Remarks : '+r.narration,{size:7.8}); K.gap(4); }
+
+  K.text('Amount received : Rs. '+psbMoney(r.amount)
+    +'   (Rupees '+inWords(r.amount)+' only)',{bold:true,size:9});
+  K.gap(10);
+
+  // ── what the money was applied to ────────────────────────────────────────────────────────
+  if(al.length){
+    const cw=[32,52,189.28,110,68,80];     // = 531.28
+    const head=function(){
+      K.row([{t:'Sl. #',w:cw[0],align:'center',bold:true,fill:K.SOFT},
+             {t:'Type',w:cw[1],bold:true,fill:K.SOFT},
+             {t:'Schedule Name',w:cw[2],bold:true,fill:K.SOFT},
+             {t:'Invoice No',w:cw[3],bold:true,fill:K.SOFT},
+             {t:'Invoice Dt',w:cw[4],bold:true,fill:K.SOFT},
+             {t:'Total Amt',w:cw[5],align:'right',bold:true,fill:K.SOFT}]);
+    };
+    K.setBreak(head); head();
+    al.forEach(function(a,ix){
+      const iv=a.invoices||{};
+      K.row([{t:String(ix+1),w:cw[0],align:'center'},
+             {t:'Bill',w:cw[1]},
+             {t:psLabel(iv.title||''),w:cw[2]},
+             {t:iv.invoice_no||'',w:cw[3]},
+             {t:iv.invoice_date?dmy(iv.invoice_date):'',w:cw[4]},
+             {t:psbMoney(a.amount)+'.00',w:cw[5],align:'right'}]);
+    });
+    K.row([{t:'Total',w:cw[0]+cw[1]+cw[2]+cw[3]+cw[4],bold:true},
+           {t:psbMoney(r.amount)+'.00',w:cw[5],align:'right',bold:true}],{fill:K.BAND});
+    K.setBreak(null);
+  } else {
+    K.text('Held as advance - no invoice was open on this booking when it was received.',{size:7.8});
+  }
+
+  if(r.mode==='cheque'||r.mode==='dd'){
+    K.gap(6);
+    K.text('Subject to realisation of the instrument.',{size:7.4});
+  }
+  if(r.status==='reversed'){
+    K.gap(8);
+    K.text('REVERSED on '+dmy(r.reversal_date)+' - '+(r.reversal_reason||''),
+      {bold:true,size:9,color:L.rgb(0.73,0.11,0.11)});
+  }
+
+  K.need(70);
+  K.gap(26);
+  K.text('For, '+((setup&&setup.company_name)||'The Jain Group'),
+    {bold:true,size:8,x:PSB_W-PSB_M-200,w:200,align:'right'});
+  K.gap(28);
+  K.text('Authorised Signatory',{bold:true,size:8,x:PSB_W-PSB_M-200,w:200,align:'right'});
+  K.gap(10);
+  K.text('Entered by '+String(r.created_by||'').split('@')[0]
+    +'. This is a system generated receipt.',{size:7});
+
+  psPageNumbers(doc,reg,L);
+  const nm=(r.receipt_no||'receipt').replace(/[^\w\- ]/g,'_');
+  psSaveFile(await doc.save(),'Money Receipt - '+nm+'.pdf');
+  toast('Money receipt downloaded','ok');
+}
+
+/* ============================== THE APPLICANT LEDGER ======================================
+
+   The statement a customer is sent: what the flat costs, how that cost breaks down, what has
+   fallen due, what has been received and what is left. The running debit/credit table on screen
+   is the useful thing for Accounts and it stays there; this is the document.
+
+   Everything comes from the booking - booking_charges carries every revenue head with its rate,
+   quantity, amount and GST, and the invoices and receipts give due against received as on a date.
+   Nothing is recalculated here that the booking does not already hold. */
+window.psrpLedgerPrint=async function(bookingId){
+  let v=null;
+  try{ v=await loadBooking(bookingId); }
+  catch(e){ toast('Could not read the booking: '+((e&&e.message)||e),'err'); return; }
+  if(!v){ toast('Booking not found','err'); return; }
+  try{ await psrpLedgerPdf(v); }
+  catch(e){ toast('Could not build the ledger: '+((e&&e.message)||e),'err'); }
+};
+
+async function psrpLedgerPdf(v){
+  const L=await loadPdfLib();
+  if(!L) throw new Error('the PDF library could not be loaded');
+  const {b,ap,ch}=v, proj=S.projects.find(function(p){return p.id===b.project_id;});
+  const [{data:setup},mo]=await Promise.all([
+    PS().from('project_setup').select('company_name,project_address')
+        .eq('project_id',b.project_id).maybeSingle(),
+    bookingMoney(b.id)]);
+
+  const doc=await L.PDFDocument.create();
+  doc.setTitle('Customer Ledger '+(b.booking_no||''));
+  const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+  const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+  const K=psPdfKit(L,doc,reg,bold);
+  K.newPage();
+
+  const asOf=today();
+  const grp=function(k){ return ch.filter(function(l){return l.col===k;}); };
+  const tot=function(a,f){ return a.reduce(function(s,x){return s+num(x[f]);},0); };
+  /* Due is what has actually been demanded by today, not the whole schedule - the schedule shows
+     separately as "with future bills". Received is every rupee against those demands. */
+  const dueInv=(mo.inv||[]).filter(function(i){return i.status==='open'&&i.invoice_date<=asOf;});
+  const dueTot=dueInv.reduce(function(s,i){return s+num(i.total);},0);
+  const gotTot=num(mo.bal&&mo.bal.principal_received);
+  const grand=num(b.grand_total), netCost=num(b.total_consideration);
+  const pct=function(x){ return grand?(' ('+(num(x)/grand*100).toFixed(2)+'%)'):''; };
+
+  K.text(((setup&&setup.company_name)||'THE JAIN GROUP').toUpperCase(),{bold:true,size:11,align:'center'});
+  K.gap(14);
+  K.text('CUSTOMER LEDGER',{bold:true,size:10,align:'center'});
+  K.gap(6);
+  K.text('Run date '+dmy(asOf),{size:7.4,align:'right'});
+  K.gap(8);
+
+  const lw=[118,413.28];                  // = 531.28
+  const line=function(k,val){ K.row([{t:k,w:lw[0],bold:true,fill:K.SOFT},{t:val,w:lw[1]}]); };
+  line('Name of project',(proj?proj.name:'')
+    +((setup&&setup.project_address)?'  -  '+setup.project_address:''));
+  line('Name of party',
+    ap.map(function(a){return K.clean([a.title,a.full_name].filter(Boolean).join(' '));}).join(' & ')
+    +'   Booking No : '+(b.booking_no||'')
+    +(ap.length>1?'   Co-Allottees : '+ap.slice(1).map(function(a){return K.clean(a.full_name);}).join(', '):''));
+  line('Basic cost',psbMoney(tot(grp('unit'),'amount')));
+  line('Cost breakup','Basic Cost + Extra Charges + Parking + Taxes   '
+    +psbMoney(tot(grp('unit'),'amount'))+' + '+psbMoney(tot(grp('edc'),'amount'))
+    +' + '+psbMoney(tot(grp('parking'),'amount'))+' + '+psbMoney(tot(ch,'gst_amount'))
+    +'      Total without tax : '+psbMoney(netCost)+'   Total with tax : '+psbMoney(grand));
+  line('Payment plan',b.plan_name||'');
+  line('Due as on '+dmy(asOf),psbMoney(dueTot)+pct(dueTot));
+  line('Received till '+dmy(asOf),psbMoney(gotTot)+pct(gotTot));
+  line('Balance as on '+dmy(asOf),
+    (dueTot-gotTot>=0?psbMoney(dueTot-gotTot):psbMoney(gotTot-dueTot)+' Advance'));
+  line('Total due (with future bills)',psbMoney(grand-gotTot));
+
+  K.gap(10);
+  K.band('PROPERTY DETAILS');
+  const pw=[70,120,85,60,80,56,60.28];    // = 531.28
+  K.row([{t:'Unit No',w:pw[0],bold:true,fill:K.SOFT},{t:'Revenue Head',w:pw[1],bold:true,fill:K.SOFT},
+         {t:'Block / Tower',w:pw[2],bold:true,fill:K.SOFT},{t:'Floor',w:pw[3],bold:true,fill:K.SOFT},
+         {t:'Saleable Area',w:pw[4],align:'right',bold:true,fill:K.SOFT},
+         {t:'Rate',w:pw[5],align:'right',bold:true,fill:K.SOFT},
+         {t:'Amount',w:pw[6],align:'right',bold:true,fill:K.SOFT}]);
+  K.row([{t:(b.flats&&b.flats.flat_code)||'',w:pw[0]},{t:'Unit Cost',w:pw[1]},
+         {t:(b.towers&&b.towers.name)||'',w:pw[2]},
+         {t:b.floor_no==null?'':ordinal(b.floor_no),w:pw[3]},
+         {t:psbMoney(b.sba_sqft),w:pw[4],align:'right'},
+         {t:psbMoney(b.rate),w:pw[5],align:'right'},
+         {t:psbMoney(tot(grp('unit'),'amount')),w:pw[6],align:'right'}]);
+
+  K.gap(10);
+  K.band('COST BREAKUP WITHOUT TAX');
+  const bw=[231.28,90,80,60,70];          // = 531.28
+  const bhead=function(){
+    K.row([{t:'Revenue Head',w:bw[0],bold:true,fill:K.SOFT},
+           {t:'Rate',w:bw[1],align:'right',bold:true,fill:K.SOFT},
+           {t:'Quantity',w:bw[2],align:'right',bold:true,fill:K.SOFT},
+           {t:'Discount',w:bw[3],align:'right',bold:true,fill:K.SOFT},
+           {t:'Gross',w:bw[4],align:'right',bold:true,fill:K.SOFT}]);
+  };
+  K.setBreak(bhead); bhead();
+  ch.forEach(function(l){
+    K.row([{t:psLabel(l.name),w:bw[0]},
+           {t:psbMoney(l.rate),w:bw[1],align:'right'},
+           {t:psbMoney(l.qty),w:bw[2],align:'right'},
+           {t:'0',w:bw[3],align:'right'},
+           {t:psbMoney(l.amount),w:bw[4],align:'right'}]);
+  });
+  K.row([{t:'Total',w:bw[0]+bw[1]+bw[2]+bw[3],bold:true},
+         {t:psbMoney(netCost),w:bw[4],align:'right',bold:true}],{fill:K.BAND});
+  K.setBreak(null);
+
+  K.gap(12);
+  K.text('This is a system generated statement. No signature required.',{size:7});
+
+  psPageNumbers(doc,reg,L);
+  const nm=(b.booking_no||'ledger').replace(/[^\w\- ]/g,'_');
+  psSaveFile(await doc.save(),'Applicant Ledger - '+nm+'.pdf');
+  toast('Applicant ledger downloaded','ok');
+}
+
 
 /* ============================ POST SALES — INVOICING (Stage 4) ============================
    Spec: docs/post-sales-spec.md §4. Functions: supabase/migrations/20261001210000_postsales_invoicing.sql.
@@ -2750,90 +2943,6 @@ function docRegs(setup){
    Everything comes from the booking: booking_charges carries every revenue head with its rate,
    quantity, amount and GST, and the invoices and receipts give due against received as on a date.
    Nothing is recalculated here that the booking does not already hold. */
-window.psrpLedgerPrint=async function(bookingId){
-  const w=window.open('','_blank');
-  if(!w){ toast('Allow pop-ups to print the ledger','err'); return; }
-  w.document.write('<!doctype html><meta charset="utf-8"><title>Preparing</title>'
-    +'<body style="font:14px system-ui;padding:30px">Preparing the ledger&hellip;</body>');
-  const v=await loadBooking(bookingId);
-  if(!v){ w.close(); toast('Booking not found','err'); return; }
-  const {b,ap,ch,ms}=v, proj=S.projects.find(p=>p.id===b.project_id);
-  const [{data:setup},mo]=await Promise.all([
-    PS().from('project_setup').select('company_name,company_address,project_address')
-        .eq('project_id',b.project_id).maybeSingle(),
-    bookingMoney(b.id)]);
-
-  const asOf=today(), n=x=>Math.round(num(x)).toLocaleString('en-IN');
-  const L=k=>ch.filter(l=>l.col===k);
-  const sum=(a,f)=>a.reduce((s,x)=>s+num(f(x)),0);
-
-  /* Due is what has actually been demanded by today, not the whole schedule - the schedule is
-     shown separately as "with future bills". Received is every rupee against those demands. */
-  const dueInv=(mo.inv||[]).filter(i=>i.status==='open'&&i.invoice_date<=asOf);
-  const dueTot=sum(dueInv,i=>i.total);
-  const gotTot=num(mo.bal&&mo.bal.principal_received);
-  const grand=num(b.grand_total), netCost=num(b.total_consideration);
-  const pct=x=>grand?((num(x)/grand*100).toFixed(2)+'%'):'';
-  const taxOf=a=>sum(a,x=>x.gst_amount);
-
-  const row=(k,v)=>'<tr><td class="lk">'+esc(k)+'</td><td>'+v+'</td></tr>';
-  const headRow=(cols)=>'<tr>'+cols.map(c=>'<th'+(c[1]?' class="r"':'')+'>'+esc(c[0])+'</th>').join('')+'</tr>';
-
-  const html='<!doctype html><html><head><meta charset="utf-8"><title>Customer Ledger - '+esc(b.booking_no)+'</title>'
-    +'<style>'+DOC_CSS
-      +'.led td,.led th{border:1px solid #000;padding:4px 6px;font-size:10px;vertical-align:top}'
-      +'.led td.lk{width:21%;font-weight:bold;background:#f2f2f2;white-space:nowrap}'
-      +'.led th{background:#d8d8d8;text-align:center;font-weight:bold}'
-      +'.led td.r,.led th.r{text-align:right}'
-      +'.secrow td{background:#d8d8d8;font-weight:bold;text-align:center}'
-    +'</style></head><body>'
-    +'<div class="co"><div class="nm">'+esc(setup&&setup.company_name||'The Jain Group')+'</div>'
-      +(setup&&setup.company_address?'<div class="ad">'+esc(setup.company_address)+'</div>':'')+'</div>'
-    +'<table style="margin-bottom:8px"><tr>'
-      +'<td style="text-align:center"><b style="font-size:12px">Customer Ledger</b><div class="sm">'+dmy(b.booking_date)+'</div></td>'
-      +'<td style="width:28%" class="sm"><table class="ref">'
-        +docRef('Run Date', dmy(asOf))
-        +docRef('Page', '1')
-        +'</table></td></tr></table>'
-    +'<table class="led">'
-      +row('Name of project', esc(proj?proj.name:'')
-            +(setup&&setup.project_address?'<br>'+esc(setup.project_address):''))
-      +row('Name of party', '<b>'+esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & ')||'')+'</b>'
-            +'<br>Booking No : '+esc(b.booking_no)
-            +(ap.length>1?'<br>Co-Allottees : '+esc(ap.slice(1).map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(', ')):'<br>Co-Allottees :'))
-      +row('Basic cost', n(sum(L('unit'),x=>x.amount))
-            +' &nbsp;&nbsp; Net Basic Cost : '+n(sum(L('unit'),x=>x.amount)))
-      +row('Cost breakup', 'Basic Cost + Extra Charges + Contracted Extra Charges + Taxes + Parking'
-            +'<br>'+n(sum(L('unit'),x=>x.amount))+' + '+n(sum(L('edc'),x=>x.amount))
-            +' + '+n(sum(L('parking'),x=>x.amount))+' + '+n(taxOf(ch))
-            +'<br>Total cost without tax : '+n(netCost)+' &nbsp;&nbsp; Total cost with tax : '+n(grand))
-      +row('Payment plan', esc(b.plan_name||''))
-      +row('Due as on '+dmy(asOf), n(dueTot)+' &nbsp;('+pct(dueTot)+')')
-      +row('Received till '+dmy(asOf), n(gotTot)+' &nbsp;('+pct(gotTot)+')')
-      +row('Balance as on '+dmy(asOf), (dueTot-gotTot>=0?n(dueTot-gotTot):n(gotTot-dueTot)+' Advance'))
-      +row('Total Due (with Future Bills)', '<b>'+n(grand-gotTot)+'</b>')
-    +'</table>'
-    +'<table class="led" style="margin-top:10px"><tr class="secrow"><td colspan="7">Property details</td></tr>'
-      +headRow([['Unit No'],['Revenue Head'],['Block/Tower'],['Floor'],['Saleable Area',1],['Rate',1],['Amount',1]])
-      +'<tr><td>'+esc(b.flats&&b.flats.flat_code||'')+'</td><td>Unit Cost</td>'
-        +'<td>'+esc(b.towers&&b.towers.name||'')+'</td><td>'+esc(ordinal(b.floor_no))+'</td>'
-        +'<td class="r">'+n(b.sba_sqft)+'</td><td class="r">'+n(b.rate)+'</td>'
-        +'<td class="r">'+n(sum(L('unit'),x=>x.amount))+'</td></tr>'
-    +'</table>'
-    +'<table class="led" style="margin-top:10px"><tr class="secrow"><td colspan="5">Cost Breakup Without Tax</td></tr>'
-      +headRow([['Revenue Head'],['Rate',1],['Quantity',1],['Discount',1],['Gross',1]])
-      +ch.map(function(l){
-          return '<tr><td>'+esc(psLabel(l.name))+'</td><td class="r">'+n(l.rate)+'</td>'
-            +'<td class="r">'+n(l.qty)+'</td><td class="r">0</td>'
-            +'<td class="r">'+n(l.amount)+'</td></tr>';
-        }).join('')
-      +'<tr class="tot"><td><b>Total</b></td><td></td><td></td><td></td>'
-        +'<td class="r"><b>'+n(netCost)+'</b></td></tr>'
-    +'</table>'
-    +'<div class="sm" style="margin-top:12px">This is a system generated statement. No signature required.</div>'
-    +'<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>';
-  w.document.open(); w.document.write(html); w.document.close();
-};
 
 /* ---- booking page: milestone status + raise ---- */
 function milestoneStatus(b,ms,inv,al){
