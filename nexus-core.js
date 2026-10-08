@@ -20546,6 +20546,13 @@ function cpaPhCss(){return `<style>
   .cph-fixst.busy{color:#1d4ed8;padding:0 6px}
   .cph-fixst.taken{background:#dcfce7;border-color:#86efac;color:#15803d}
   .cph-fixi.st-busy,.cph-fixi.st-taken{border-color:#bbf7d0;background:#f7fef9}
+  .cph-fixnew{position:relative;flex:none;padding:0;border:0;background:none;cursor:zoom-in}
+  .cph-fixnew .cph-th{width:54px;height:54px;border:2px solid #16a34a}
+  .cph-fixok{position:absolute;right:-6px;top:-6px;width:18px;height:18px;border-radius:50%;background:#16a34a;color:#fff;font-size:10px;display:grid;place-items:center}
+  .cph-fixup{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:4px 0 10px;padding:10px 12px;
+    border:1px solid #86efac;background:#f0fdf4;border-radius:10px;font-size:13px;color:#166534;font-weight:600}
+  .cph-fixup span i{margin-right:5px}
+  @media(max-width:620px){ .cph-fixup .btn{width:100%;justify-content:center} }
   /* The section always sits on its own line under the flat number, so every row lines up the same. */
   .cph-fixsec{display:table;margin-top:4px;padding:1px 9px;border-radius:999px;background:#fef2f2;color:#b91c1c;font-size:12px;font-weight:700;white-space:nowrap}
   @media(max-width:620px){ .cph-fixi{flex-wrap:wrap} .cph-fixbtns{width:100%} .cph-fixbtns .btn{flex:1 1 0;justify-content:center} }
@@ -20805,11 +20812,8 @@ async function cpaPhFixList(projects,units){
    still to retake. */
 function cpaPhFixState(it){
   const key=it.t+'|'+it.w.key;
-  if(CPA_PH.fixBusy&&CPA_PH.fixBusy===key) return 'busy';
-  const f=CPA_PH.files||{};
-  if(it.w.lvl===2) return (CPA_PH.level==='unit'&&String(CPA_PH.unit)===String(it.p.unit_id)&&(f[it.p.area||'common']||[]).length)?'taken':'';
-  if(it.w.lvl===1) return (CPA_PH.level==='tower'&&String(CPA_PH.project)===String(it.w.pid)&&CPA_PH.tower===it.w.tower&&(f.all||[]).length)?'taken':'';
-  return (CPA_PH.level==='project'&&String(CPA_PH.project)===String(it.w.pid)&&(f.all||[]).length)?'taken':'';
+  if(CPA_PH.fixBusy&&CPA_PH.fixBusy.has&&CPA_PH.fixBusy.has(key)) return 'busy';
+  return (CPA_PH.retakes||{})[key]?'taken':'';
 }
 function cpaPhFixRender(){
   const host=$('cphFix'); if(!host||!CPA_PH.fixItems) return;
@@ -20845,9 +20849,13 @@ function cpaPhFixRender(){
     const thBtn='<button type="button" class="cph-fixpv" onclick="cpaPhFixPreview('+k+',0)" title="See what was rejected, full size">'+th
       +(it.n>1?'<span class="cph-fixpn">'+it.n+'</span>':'')+'</button>';
     const title=w.lvl===2?'Flat '+(w.code||''):w.lvl===1?(w.tower||'Block'):'Whole project';
-    const st=cpaPhFixState(it);
+    const st=cpaPhFixState(it), rkey=it.t+'|'+w.key, rt=(CPA_PH.retakes||{})[rkey];
+    const newPic=rt?'<button type="button" class="cph-fixnew" onclick="cpaPhRetakeView(\''+rkey.replace(/'/g,"\\'")+'\')" title="Check the new photo full size">'
+        +(rt.isVid||!rt.url?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>':'<img class="cph-th" src="'+rt.url+'" alt="">')
+        +'<span class="cph-fixok"><i class="fa-solid fa-check"></i></span></button>':'';
     const right=st==='busy'?'<span class="cph-fixst busy"><i class="fa-solid fa-spinner fa-spin"></i> Uploading…</span>'
-      :st==='taken'?'<button class="btn btn-sm cph-fixst taken" onclick="cpaPhUpload()" title="The new photo is in the upload form below"><i class="fa-solid fa-circle-check"></i> Taken — Upload</button>'
+      :st==='taken'?newPic+'<div class="cph-fixbtns"><button class="btn btn-sm" onclick="cpaPhRetake('+k+','+(isVid?1:0)+')"><i class="fa-solid fa-camera-rotate"></i> Retake again</button>'
+          +'<button class="btn btn-sm" onclick="cpaPhRetakeDrop(\''+rkey.replace(/'/g,"\\'")+'\')" title="Discard the new photo">&times;</button></div>'
       :(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+k+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'');
     return head+'<div class="cph-fixi'+(st?' st-'+st:'')+'">'+thBtn
       +'<div class="cph-fixw"><b>'+esc(title)+'</b>'+(w.lvl===2?'<span class="cph-fixsec">'+esc(secName(it))+'</span>':'')
@@ -20855,7 +20863,11 @@ function cpaPhFixRender(){
       +right
       +'</div>';
   }).join('');
+  const nTaken=Object.keys(CPA_PH.retakes||{}).length, uploading=!!(CPA_PH.fixBusy&&CPA_PH.fixBusy.size);
+  const upBar=nTaken||uploading?'<div class="cph-fixup"><span><i class="fa-solid fa-circle-check"></i> '+(uploading?'Uploading…':nTaken+' new photo'+(nTaken===1?'':'s')+' taken - check them, then upload')+'</span>'
+      +'<button class="btn btn-primary" onclick="cpaPhRetakeUpload()"'+(uploading?' disabled':'')+'><i class="fa-solid fa-'+(uploading?'spinner fa-spin':'cloud-arrow-up')+'"></i> Upload'+(nTaken?' '+nTaken+' photo'+(nTaken===1?'':'s'):'')+'</button></div>':'';
   host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>Photos to retake</div>'
+    +upBar
     +chips
     +(shown.length?'<div class="cph-fixl" style="margin-top:10px">'+rows+'</div>'
       :'<div class="cph-fixhint"><i class="fa-solid fa-hand-pointer"></i> Tap a number above to see those and retake them.</div>')
@@ -20937,28 +20949,87 @@ function cpaPhRetakeBtn(t,p){
   return '<button class="cph-retake" onclick="cpaPhRetakeRow(\''+t+'\','+p.id+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>';
 }
 window.cpaPhRetakeRow=function(t,id,isVid){ const p=CPA_PH_REJ[t+':'+id]; if(p) cpaPhRetakeAt(t,p,cpaPhPlaceOf(t,p).place,isVid); };
+/* RETAKE (8 Oct 2026): the camera opens and the new photo is kept in its row - not uploaded - so
+   it can be looked at and retaken again until it is clear. "Upload N photos" at the top of the card
+   sends every retaken photo to its own flat and section in one go (cpaPhRetakeUpload). The upload
+   form below is not touched, so a retake can never go up under another flat. */
 function cpaPhRetakeAt(t,p,place,isVid){
-  const units=CPA.units||[];
-  let key='all';
-  if(t==='unit_photos'){
-    const u=units.find(x=>String(x.id)===String(p.unit_id));
-    CPA_PH.level='unit'; CPA_PH.project=String(u?u.project_id:CPA_PH.project); CPA_PH.tower=u?String(u.tower||''):''; CPA_PH.unit=String(p.unit_id);
-    key=p.area||'common';
-  }else if(t==='tower_photos'){ CPA_PH.level='tower'; CPA_PH.project=String(p.project_id); CPA_PH.tower=String(p.tower||''); CPA_PH.unit=''; }
-  else { CPA_PH.level='project'; CPA_PH.project=String(p.project_id); CPA_PH.tower=''; CPA_PH.unit=''; }
-  /* Taken, then uploaded straight away (8 Oct 2026): pressing Upload as a second step left the row
-     in the list looking untaken, and retaking the next flat before uploading would have moved the
-     first photo to that flat. The row shows "Uploading…", then leaves the list once it is up. */
-  const placeKey=t+'|'+cpaPhPlaceOf(t,p).key;
+  CPA_PH.retakes=CPA_PH.retakes||{};
+  const key=t+'|'+cpaPhPlaceOf(t,p).key;
   // The camera has to open inside this tap - a phone refuses it once the click has been handled.
-  cpaPhPick(key,isVid?'video':'photo',null,async function(){
-    CPA_PH.fixBusy=placeKey; cpaPhFixRender();
-    try{ await painted; await cpaPhUpload(); }
-    finally{ CPA_PH.fixBusy=null; cpaPhFixRender(); }
-  });
-  cpaPhFollowPickers();
-  const painted=cpaPhPaint();
+  const inp=document.createElement('input');
+  inp.type='file'; inp.accept=isVid?'video/*':'image/*'; inp.setAttribute('capture','environment');
+  inp.onchange=function(){
+    const f=inp.files&&inp.files[0]; if(!f) return;
+    const old=CPA_PH.retakes[key]; if(old&&old.url){ try{ URL.revokeObjectURL(old.url); }catch(_e){} }
+    let url=''; try{ url=URL.createObjectURL(f); }catch(_e){}
+    CPA_PH.retakes[key]={file:f,url,t,p,place,isVid:/^video\//.test(f.type||'')};
+    cpaPhFixRender();
+    toast('Taken for '+place+' — check it, then Upload','ok');
+  };
+  inp.click();
 }
+window.cpaPhRetakeDrop=function(key){
+  const r=(CPA_PH.retakes||{})[key]; if(!r) return;
+  if(r.url){ try{ URL.revokeObjectURL(r.url); }catch(_e){} }
+  delete CPA_PH.retakes[key]; cpaPhFixRender();
+};
+// The retaken photo, full size, before it is uploaded.
+window.cpaPhRetakeView=function(key){
+  const r=(CPA_PH.retakes||{})[key]; if(!r||!r.url) return;
+  const box=document.createElement('div'); box.className='cph-box';
+  box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(r.isVid?'fa-circle-play':'fa-image')+'"></i><span class="nm"><b>New photo</b> · '+esc(r.place)+'</span>'
+    +'<button class="cph-boxx" title="Close (Esc)">&times;</button></div>'
+    +(r.isVid?'<video src="'+r.url+'" controls autoplay playsinline></video>':'<img src="'+r.url+'" alt="">');
+  const shut=()=>{ document.removeEventListener('keydown',onKey); box.remove(); };
+  const onKey=e=>{ if(e.key==='Escape') shut(); };
+  box.onclick=e=>{ if(e.target===box) shut(); };
+  box.querySelector('.cph-boxx').onclick=shut;
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(box);
+};
+// Sends every retaken photo to its own place: made smaller first, a thumbnail, a pending row, the
+// approvers told, and the rejected photo at that place replaced - the same as an ordinary upload.
+window.cpaPhRetakeUpload=async function(){
+  const all=CPA_PH.retakes||{}, keys=Object.keys(all); if(!keys.length) return;
+  const takenOn=($('cphDate')||{}).value||new Date().toISOString().slice(0,10);
+  CPA_PH.fixBusy=new Set(keys); cpaPhFixRender();
+  let ok=0; const failed=[], newIds={};
+  for(const key of keys){
+    const r=all[key], f=r.file, p=r.p, t=r.t;
+    try{
+      const prep=await cphPrepare(f);
+      const name=prep.full!==f?String(f.name||'photo').replace(/\.[^.]*$/,'')+'.jpg':(f.name||'photo');
+      let sk,row;
+      if(t==='unit_photos'){ sk=s3KeyForUnitPhoto(p.unit_id,name); row={unit_id:Number(p.unit_id),area:p.area||'common'}; }
+      else if(t==='tower_photos'){ sk=s3KeyForTowerPhoto(p.project_id,p.tower,name); row={project_id:Number(p.project_id),tower:p.tower}; }
+      else { sk=s3KeyForProjectPhoto(p.project_id,name); row={project_id:Number(p.project_id)}; }
+      const {data,error}=await uploadFileToS3(sk,prep.full);
+      if(error) throw new Error(error.message);
+      let thumbPath=null;
+      if(prep.thumb){ try{ const tu=await uploadFileToS3(cphThumbKey(sk),prep.thumb); if(!tu.error) thumbPath=tu.data.path; }catch(_e){} }
+      const {data:ins,error:insErr}=await sb.schema('cust').from(t).insert(Object.assign(row,{
+        taken_on:takenOn,caption:null,storage_path:data.path,thumb_path:thumbPath,file_name:name,
+        file_size:prep.full.size,file_type:prep.full.type||f.type,uploaded_by:state.email})).select('id').single();
+      if(insErr) throw new Error(insErr.message);
+      (newIds[t]=newIds[t]||[]).push(ins.id);
+      ok++;
+      if(r.url){ try{ URL.revokeObjectURL(r.url); }catch(_e){} }
+      delete all[key];
+    }catch(e){ failed.push(r.place+' — '+((e&&e.message)||e)); }
+    CPA_PH.fixBusy.delete(key); cpaPhFixRender();
+  }
+  let told=0, replaced=0;
+  for(const t of Object.keys(newIds)){
+    try{ const {data:n}=await sb.schema('cust').rpc('notify_media_uploaded',{p_table:t,p_ids:newIds[t]}); told=Math.max(told,Number(n||0)); }catch(_e){}
+    try{ const {data:old}=await sb.schema('cust').rpc('replace_rejected_media',{p_table:t,p_ids:newIds[t]}); replaced+=(old||[]).length; }catch(_e){}
+  }
+  CPA_PH.fixBusy=null;
+  if(ok) toast(ok+' photo'+(ok===1?'':'s')+' uploaded — waiting for approval'+(replaced?' · replaces '+replaced+' rejected':''),'ok');
+  if(failed.length) toast(failed.length+' could not be uploaded (they are kept - try again): '+failed[0],'err');
+  await cpaPhFixList();
+  cpaPhList();
+};
 
 // Latest upload per flat (any status, not deleted) - newest first, so the first row per flat wins.
 async function cpaPhLastUploads(ids){
@@ -21117,8 +21188,6 @@ window.cpaPhClear=function(){
 /* Redrawing one zone in place keeps the caret and the scroll position of the others, which
    matters when three of them are on screen. */
 function cpaPhRepaintZones(){
-  // "Taken — Upload" in Photos to retake follows what is chosen here.
-  setTimeout(cpaPhFixRender,0);
   Array.prototype.forEach.call(document.querySelectorAll('.cph-zone'),function(z){
     const key=z.getAttribute('data-zone');
     const meta=CPA_PH_AREAS.concat([['all','Photos or videos','fa-images']]).find(a=>a[0]===key);
