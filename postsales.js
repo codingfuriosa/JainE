@@ -1684,69 +1684,12 @@ async function psbCostSheetPdf(v){
   doc.setTitle('Cost Sheet '+(b.booking_no||''));
   const reg=await doc.embedFont(L.StandardFonts.Helvetica);
   const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
-  const INK=L.rgb(0,0,0), LINE=L.rgb(0,0,0);
-  const BAND=L.rgb(0.82,0.82,0.82);      // the grey section bars
-  const SOFT=L.rgb(0.93,0.93,0.93);      // totals rows
-  const TW=PSB_W-2*PSB_M;                // table width
+  /* Shared with the Demand Note - see psPdfKit. Both are bordered grids that break across pages
+     carrying their headings, and written twice they would drift apart. */
+  const K=psPdfKit(L,doc,reg,bold);
+  const row=K.row, band=K.band, clean=K.clean, TW=K.TW, SOFT=K.SOFT, BAND=K.BAND, INK=K.INK;
+  K.newPage();
 
-  let page=null, y=0;
-  const newPage=function(){
-    page=doc.addPage([PSB_W,PSB_H]);
-    y=PSB_H-PSB_M;
-  };
-  newPage();
-
-  const clean=function(t){
-    return String(t==null?'':t)
-      .replace(/₹/g,'').replace(/ /g,' ')
-      .replace(/[‘’]/g,"'").replace(/[“”]/g,'"')
-      .replace(/[–—]/g,'-').replace(/[^ -ÿ]/g,'').trim();
-  };
-  const wrap=function(t,w,f,size){
-    const words=clean(t).split(/\s+/).filter(Boolean);
-    if(!words.length) return [''];
-    const out=[]; let line='';
-    words.forEach(function(wd){
-      const test=line?line+' '+wd:wd;
-      if(f.widthOfTextAtSize(test,size)>w && line){ out.push(line); line=wd; }
-      else line=test;
-    });
-    if(line) out.push(line);
-    return out;
-  };
-
-  /* One row of a bordered table. cells = [{t,w,align,bold,size,fill}] - the height comes from
-     whichever cell wraps to the most lines, so a long milestone description cannot overlap the
-     row beneath it, which is what the old print window did. */
-  const row=function(cells,opt){
-    opt=opt||{};
-    const size=opt.size||7.6, pad=3.5, lh=size+2.6;
-    const laid=cells.map(function(c){
-      const f=(c.bold||opt.bold)?bold:reg;
-      return {c:c,f:f,lines:wrap(c.t,Math.max(6,c.w-2*pad),f,c.size||size)};
-    });
-    const h=Math.max.apply(null,laid.map(function(x){return x.lines.length;}))*lh+2*pad;
-    if(y-h<PSB_M+(opt.reserve||0)){ newPage(); if(opt.onBreak) opt.onBreak(); }
-    let x=PSB_M;
-    laid.forEach(function(it){
-      const c=it.c, fill=c.fill||opt.fill;
-      if(fill) page.drawRectangle({x:x,y:y-h,width:c.w,height:h,color:fill});
-      page.drawRectangle({x:x,y:y-h,width:c.w,height:h,borderColor:LINE,borderWidth:0.6});
-      const fs=c.size||size;
-      it.lines.forEach(function(ln,i){
-        const tw=it.f.widthOfTextAtSize(ln,fs);
-        const al=c.align||'left';
-        const tx=al==='right' ? (x+c.w-pad-tw) : al==='center' ? (x+(c.w-tw)/2) : (x+pad);
-        page.drawText(ln,{x:tx,y:y-pad-fs-(i*lh)+1.5,size:fs,font:it.f,color:INK});
-      });
-      x+=c.w;
-    });
-    y-=h;
-    return h;
-  };
-  const band=function(text){
-    row([{t:text,w:TW,align:'center',bold:true,size:8.4,fill:BAND}]);
-  };
 
   // ── letterhead ───────────────────────────────────────────────────────────────────────────
   /* THE COMPANY, THEN THE TITLE. NOTHING BETWEEN THEM.
@@ -1756,12 +1699,11 @@ async function psbCostSheetPdf(v){
      two lines of the address were simply concatenated. It is off the sheet by request rather than
      repaired: this goes out on paper that already carries the address, and the two headings now
      have room to breathe between them. */
-  const co=clean((setup&&setup.company_name)||'THE JAIN GROUP').toUpperCase();
-  page.drawText(co,{x:PSB_M+(TW-bold.widthOfTextAtSize(co,11))/2,y:y-11,size:11,font:bold,color:INK});
-  y-=30;
-  const title='COST SHEET';
-  page.drawText(title,{x:PSB_M+(TW-bold.widthOfTextAtSize(title,10))/2,y:y-10,size:10,font:bold,color:INK});
-  y-=22;
+  K.text(((setup&&setup.company_name)||'THE JAIN GROUP').toUpperCase(),
+    {bold:true,size:11,align:'center'});
+  K.gap(16);
+  K.text('COST SHEET',{bold:true,size:10,align:'center'});
+  K.gap(14);
 
   // ── the particulars grid ─────────────────────────────────────────────────────────────────
   const hw=[52,148,48,88,62,133.28];     // label / value x3  = 531.28
@@ -1779,7 +1721,7 @@ async function psbCostSheetPdf(v){
        'BHK', (b.flats&&b.flats.bhk)||'');
   pair('Applicant', ap.map(function(a){return clean([a.title,a.full_name].filter(Boolean).join(' '));}).join(' & '),
        'Booking No', b.booking_no||'', 'Date', b.booking_date?dmy(b.booking_date):'');
-  y-=8;
+  K.gap(8);
 
   // ── the five money columns ───────────────────────────────────────────────────────────────
   const cw=[231.28,85,55,75,85];         // = 531.28
@@ -1833,7 +1775,7 @@ async function psbCostSheetPdf(v){
     tot(ch,'amount'), null, tot(ch,'gst_amount'), {bold:true,fill:BAND});
 
   // ── the payment schedule ─────────────────────────────────────────────────────────────────
-  y-=10;
+  K.gap(10);
   const pw=[231.28,85,70,70,75];         // = 531.28
   const schedHead=function(){
     row([{t:'Event Particulars',w:pw[0],bold:true,fill:SOFT},
@@ -1862,33 +1804,21 @@ async function psbCostSheetPdf(v){
       {fill:BAND,onBreak:schedHead});
 
   // ── signature ────────────────────────────────────────────────────────────────────────────
-  if(y-70<PSB_M) newPage();
-  y-=46;
-  page.drawLine({start:{x:PSB_W-PSB_M-150,y:y},end:{x:PSB_W-PSB_M,y:y},thickness:0.6,color:LINE});
-  page.drawText('Authorised Signatory',
-    {x:PSB_W-PSB_M-150,y:y-11,size:7.6,font:reg,color:INK});
+  K.need(70);
+  K.gap(46);
+  K.page().drawLine({start:{x:PSB_W-PSB_M-150,y:K.y()},end:{x:PSB_W-PSB_M,y:K.y()},
+    thickness:0.6,color:K.LINE});
+  K.gap(12);
+  K.text('Authorised Signatory',{size:7.6,x:PSB_W-PSB_M-150,w:150});
 
-  // page numbers, once everything is laid out and the count is known
-  const pages=doc.getPages();
-  pages.forEach(function(pg,i){
-    const t=(i+1)+' / '+pages.length;
-    pg.drawText(t,{x:PSB_W-PSB_M-reg.widthOfTextAtSize(t,7),y:PSB_M-14,size:7,font:reg,color:L.rgb(.45,.45,.45)});
-  });
+  psPageNumbers(doc,reg,L);
 
   const name=(b.booking_no||'cost-sheet').replace(/[^\w\- ]/g,'_');
   psSaveFile(await doc.save(),'Cost Sheet - '+name+'.pdf');
   toast('Cost sheet downloaded','ok');
 }
 
-/* Straight to Downloads, never to a tab. application/octet-stream for the same reason the reports
-   use it: a browser previews what it can render, and it can render a PDF. */
-function psSaveFile(bytes,filename){
-  const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
-  const a=document.createElement('a');
-  a.href=url; a.download=filename; a.rel='noopener'; a.style.display='none';
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
-}
+
 
 
 /* ============================ POST SALES — MONEY RECEIVED (Stage 3) ============================
@@ -2446,91 +2376,306 @@ window.psiCancel=async function(id){
   if(fail(error,'Could not cancel')) return;
   closeModal(); toast('Invoice cancelled','ok'); route();
 };
+/* ONE DRAWING KIT, TWO DOCUMENTS.
+
+   The Cost Sheet and the Demand Note are both bordered grids of the same kind, and both have to
+   break across pages carrying their column headings with them. Written twice they would drift -
+   a border weight changed on one, a wrap fixed on the other - so the page, the cursor, the
+   wrapping, the row borders and the page breaks live here and both documents ask for rows.
+
+   It owns the page and the cursor deliberately. A row cannot know whether it fits until it has
+   been measured, and whoever measures it has to be the one allowed to start a new page. */
+function psPdfKit(L,doc,reg,bold){
+  const M=PSB_M, TW=PSB_W-2*M;
+  const INK=L.rgb(0,0,0), LINE=L.rgb(0,0,0);
+  const BAND=L.rgb(0.82,0.82,0.82), SOFT=L.rgb(0.93,0.93,0.93);
+  let page=null, y=0, onBreak=null;
+
+  const newPage=function(){ page=doc.addPage([PSB_W,PSB_H]); y=PSB_H-M; return page; };
+
+  /* pdf-lib's standard fonts are WinAnsi and THROW on anything outside it rather than drawing it
+     wrong, so one stray character in a customer's name would fail the whole download. */
+  const clean=function(t){
+    return String(t==null?'':t)
+      .replace(/₹/g,'').replace(/ /g,' ')
+      .replace(/[‘’]/g,"'").replace(/[“”]/g,'"')
+      .replace(/[–—]/g,'-').replace(/…/g,'...')
+      .replace(/[^ -ÿ]/g,'').trim();
+  };
+  const wrap=function(t,w,f,size){
+    const words=clean(t).split(/\s+/).filter(Boolean);
+    if(!words.length) return [''];
+    const out=[]; let line='';
+    words.forEach(function(wd){
+      const test=line?line+' '+wd:wd;
+      if(f.widthOfTextAtSize(test,size)>w && line){ out.push(line); line=wd; }
+      else line=test;
+    });
+    if(line) out.push(line);
+    return out;
+  };
+
+  /* One row of a bordered table. The height comes from whichever cell wraps to the most lines, so
+     a long description cannot overlap the row beneath it - which is what the overlapping PDFs
+     were. A row that will not fit starts a new page and redraws the table's heading first. */
+  const row=function(cells,opt){
+    opt=opt||{};
+    const size=opt.size||7.6, pad=3.5, lh=size+2.6;
+    const laid=cells.map(function(c){
+      const f=(c.bold||opt.bold)?bold:reg;
+      return {c:c,f:f,lines:wrap(c.t,Math.max(6,c.w-2*pad),f,c.size||size)};
+    });
+    const h=Math.max.apply(null,laid.map(function(x){return x.lines.length;}))*lh+2*pad;
+    if(y-h<M){ newPage(); const cb=opt.onBreak||onBreak; if(cb) cb(); }
+    let x=M;
+    laid.forEach(function(it){
+      const c=it.c, fill=c.fill||opt.fill;
+      if(fill) page.drawRectangle({x:x,y:y-h,width:c.w,height:h,color:fill});
+      page.drawRectangle({x:x,y:y-h,width:c.w,height:h,borderColor:LINE,borderWidth:0.6});
+      const fs=c.size||size;
+      it.lines.forEach(function(ln,i){
+        const tw=it.f.widthOfTextAtSize(ln,fs);
+        const al=c.align||'left';
+        const tx=al==='right'?(x+c.w-pad-tw):al==='center'?(x+(c.w-tw)/2):(x+pad);
+        page.drawText(ln,{x:tx,y:y-pad-fs-(i*lh)+1.5,size:fs,font:it.f,color:INK});
+      });
+      x+=c.w;
+    });
+    y-=h;
+    return h;
+  };
+  const band=function(t){ row([{t:t,w:TW,align:'center',bold:true,size:8.4,fill:BAND}]); };
+
+  /* Free text outside any table - headings, paragraphs, the signature block. */
+  const text=function(t,o){
+    o=o||{};
+    const f=o.bold?bold:reg, size=o.size||8, lh=o.lh||(size+3.2);
+    const w=o.w||TW, x0=o.x==null?M:o.x;
+    const lines=o.nowrap?[clean(t)]:wrap(t,w,f,size);
+    lines.forEach(function(ln){
+      if(y-lh<M) newPage();
+      const tw=f.widthOfTextAtSize(ln,size);
+      const tx=o.align==='center'?(x0+(w-tw)/2):o.align==='right'?(x0+w-tw):x0;
+      page.drawText(ln,{x:tx,y:y-size,size:size,font:f,color:o.color||INK});
+      y-=lh;
+    });
+  };
+
+  return {
+    newPage:newPage, row:row, band:band, text:text, clean:clean, wrap:wrap,
+    gap:function(n){ y-=n; },
+    need:function(h){ if(y-h<M) newPage(); },
+    page:function(){ return page; },
+    y:function(){ return y; },
+    setBreak:function(fn){ onBreak=fn; },
+    M:M, TW:TW, INK:INK, LINE:LINE, BAND:BAND, SOFT:SOFT
+  };
+}
+
+/* Page numbers, once the layout is done and the count is finally known. */
+function psPageNumbers(doc,reg,L){
+  const pages=doc.getPages();
+  if(pages.length<2) return;
+  pages.forEach(function(pg,i){
+    const t=(i+1)+' / '+pages.length;
+    pg.drawText(t,{x:PSB_W-PSB_M-reg.widthOfTextAtSize(t,7),y:PSB_M-14,
+      size:7,font:reg,color:L.rgb(.45,.45,.45)});
+  });
+}
+
+/* Straight to Downloads, never to a tab. application/octet-stream for the same reason the reports
+   use it: a browser previews what it can render, and it can render a PDF. */
+function psSaveFile(bytes,filename){
+  const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
+  const a=document.createElement('a');
+  a.href=url; a.download=filename; a.rel='noopener'; a.style.display='none';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
+}
+
+/* ============================== THE DEMAND NOTE ==========================================
+
+   The letter FarVision sends when an instalment falls due. Same shape as the one it prints:
+   company block, DEMAND LETTER, the addressee against a reference column, the instalments table,
+   terms, notes, bank details, signatory.
+
+   Drawn rather than printed, for the same reason as the Cost Sheet: going through a print window
+   stamped Chrome's own "08/10/2026, 14:21 Demand Letter OHINV/0005226-27" across the top of the
+   page, and left it something you could only print - never download. */
 window.psiPrint=async function(id){
-  const w=window.open('','_blank');
-  if(!w){ toast('Allow pop-ups to print the demand note','err'); return; }
-  w.document.write('<!doctype html><meta charset="utf-8"><title>Preparing…</title><body style="font:14px system-ui;padding:30px">Preparing…</body>');
-  const v=await loadInvoice(id); if(!v){ w.close(); return; }
-  const {i,ln,al}=v, b=i.bookings||{}, ap=(b.booking_applicants||[]).sort((x,y)=>x.seq-y.seq), proj=S.projects.find(p=>p.id===i.project_id);
-  const [{data:setup},{data:bal},{data:banks}]=await Promise.all([
-    PS().from('project_setup').select('company_name,company_address,company_pan,company_gstin,company_cin,contact_phone,contact_email,demand_terms').eq('project_id',i.project_id).maybeSingle(),
-    PS().from('booking_balances').select('*').eq('booking_id',b.id).maybeSingle(),
-    PS().from('bank_accounts').select('name,bank_name,account_no,ifsc').or('project_id.eq.'+i.project_id+',project_id.is.null').eq('active',true).is('deleted_at',null)]);
-  const first=ap[0]||{}, addr=first.mailing_address==='office'?first.off_address:first.res_address;
-  const n=x=>Math.round(num(x)).toLocaleString('en-IN'), paid=al.reduce((s,a)=>s+num(a.amount),0);
-  const realBanks=(banks||[]).filter(x=>x.account_no);
-  /* LAID OUT LIKE THE LETTER FARVISION ALREADY SENDS. Company block centred, DEMAND LETTER, the
-     addressee on the left against a reference column on the right, then the instalments table,
-     terms, notes, bank details and signatory. A customer should not be able to tell which system
-     printed it. */
-  const sqft=num(b.sba_sqft)?num(b.sba_sqft).toLocaleString('en-IN')+' SQ. FT.':'';
+  let v=null;
+  try{ v=await loadInvoice(id); }
+  catch(e){ toast('Could not read the demand: '+((e&&e.message)||e),'err'); return; }
+  if(!v){ return; }
+  try{ await psiDemandPdf(v); }
+  catch(e){ toast('Could not build the demand note: '+((e&&e.message)||e),'err'); }
+};
+
+async function psiDemandPdf(v){
+  const L=await loadPdfLib();
+  if(!L) throw new Error('the PDF library could not be loaded');
+  const {i,ln,al}=v, b=i.bookings||{},
+        ap=(b.booking_applicants||[]).sort(function(x,y){return x.seq-y.seq;}),
+        proj=S.projects.find(function(p){return p.id===i.project_id;});
+
+  const [{data:setup},{data:banks}]=await Promise.all([
+    PS().from('project_setup')
+      .select('company_name,company_pan,company_gstin,company_cin,contact_phone,contact_email,demand_terms')
+      .eq('project_id',i.project_id).maybeSingle(),
+    PS().from('bank_accounts').select('name,bank_name,account_no,ifsc')
+      .or('project_id.eq.'+i.project_id+',project_id.is.null')
+      .eq('active',true).is('deleted_at',null)]);
+
+  const doc=await L.PDFDocument.create();
+  doc.setTitle('Demand Letter '+(i.invoice_no||''));
+  const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+  const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+  const K=psPdfKit(L,doc,reg,bold);
+  K.newPage();
+
+  const first=ap[0]||{};
+  const addr=first.mailing_address==='office'?first.off_address:first.res_address;
+  const paid=al.reduce(function(s,a){return s+num(a.amount);},0);
+  const who=ap.map(function(a){return K.clean([a.title,a.full_name].filter(Boolean).join(' '));})
+              .filter(Boolean);
+
+  // ── heading ──────────────────────────────────────────────────────────────────────────────
+  K.text(((setup&&setup.company_name)||'THE JAIN GROUP').toUpperCase(),{bold:true,size:11,align:'center'});
+  K.gap(14);
+  K.text('DEMAND LETTER',{bold:true,size:10,align:'center'});
+  K.gap(16);
+
+  // ── addressee on the left, the reference column on the right ─────────────────────────────
+  const half=K.TW/2;
+  const refs=[['Dated',dmy(i.invoice_date)],
+              ['Application Code No',b.booking_no||''],
+              ['Project Name',proj?proj.name:''],
+              ['Category',(b.towers&&b.towers.name)||''],
+              ['Unit No',(b.flats&&b.flats.flat_code)||''],
+              ['Total Sale Area',num(b.sba_sqft)?num(b.sba_sqft).toLocaleString('en-IN')+' SQ. FT.':''],
+              ['Rate',num(b.rate)?num(b.rate).toLocaleString('en-IN')+' per SQ.FT.':'']]
+             .filter(function(r){return r[1];});
+  const left=['To,',who[0]||'Customer'].concat(addr?K.wrap(addr,half-10,reg,8):[]);
+  const topY=K.y();
+  left.forEach(function(t,ix){
+    K.page().drawText(K.clean(t),{x:K.M,y:topY-8-(ix*11.5),size:8,
+      font:(ix===1?bold:reg),color:K.INK});
+  });
+  refs.forEach(function(r,ix){
+    const yy=topY-8-(ix*11.5);
+    K.page().drawText(K.clean(r[0]),{x:K.M+half,y:yy,size:8,font:reg,color:K.INK});
+    K.page().drawText(':',{x:K.M+half+95,y:yy,size:8,font:reg,color:K.INK});
+    K.page().drawText(K.clean(r[1]),{x:K.M+half+104,y:yy,size:8,font:bold,color:K.INK});
+  });
+  K.gap(8+11.5*Math.max(left.length,refs.length)+6);
+
+  if(who.length>1){
+    K.text('Co Applicant(s): '+who.slice(1).join(', '),{size:8});
+    K.gap(4);
+  }
+  K.text('Dear Sir / Madam,',{size:8});
+  K.text('We wish to inform you that your following instalments are falling due on the dates indicated '
+        +'against them.',{size:8});
+  K.gap(8);
+
+  // ── the instalments ──────────────────────────────────────────────────────────────────────
+  const cw=[62,160,100,70,65,74.28];     // = 531.28
+  const head=function(){
+    K.row([{t:'Due Date',w:cw[0],bold:true,fill:K.SOFT},
+           {t:'Description',w:cw[1],bold:true,fill:K.SOFT},
+           {t:'Charge Type',w:cw[2],bold:true,fill:K.SOFT},
+           {t:'Amount Due',w:cw[3],align:'right',bold:true,fill:K.SOFT},
+           {t:'Amount Paid',w:cw[4],align:'right',bold:true,fill:K.SOFT},
+           {t:'Amount Payable',w:cw[5],align:'right',bold:true,fill:K.SOFT}]);
+  };
+  K.setBreak(head);
+  head();
+  ln.forEach(function(l){
+    const due=num(l.total);
+    K.row([{t:dmy(i.due_date),w:cw[0]},
+           {t:psLabel(i.title),w:cw[1]},
+           {t:psLabel(l.head),w:cw[2]},
+           {t:psbMoney(due)+'.00',w:cw[3],align:'right'},
+           {t:'0.00',w:cw[4],align:'right'},
+           {t:psbMoney(due)+'.00',w:cw[5],align:'right'}]);
+  });
+  K.row([{t:'Total Amount Due',w:cw[0]+cw[1]+cw[2],bold:true},
+         {t:psbMoney(i.total)+'.00',w:cw[3],align:'right',bold:true},
+         {t:psbMoney(paid)+'.00',w:cw[4],align:'right',bold:true},
+         {t:psbMoney(num(i.total)-paid)+'.00',w:cw[5],align:'right',bold:true}],{fill:K.BAND});
+  K.setBreak(null);
+
+  if(i.status==='cancelled'){
+    K.gap(8);
+    K.text('CANCELLED - '+(i.cancel_reason||''),{bold:true,size:9,color:L.rgb(0.73,0.11,0.11)});
+  }
+
+  // ── terms, notes, bank, signature ────────────────────────────────────────────────────────
   const terms=(setup&&setup.demand_terms)
     || 'The above mentioned total due amount is excluding interest for late payment. You are therefore '
       +'requested to remit/pay the above mentioned amount immediately to avoid further interest accrual '
       +'@ 18 % p.a. However, interest on previous outstanding shall be payable till the date of payment. '
       +'Please ignore this demand letter, if already paid.';
-  const html='<!doctype html><html><head><meta charset="utf-8"><title>Demand Letter '+esc(i.invoice_no)+'</title>'
-    +'<style>'+DOC_CSS+'</style></head><body>'
-    +docHead(setup,'DEMAND LETTER')
-    +'<table><tr>'
-      +'<td style="width:48%;vertical-align:top" class="addr"><b>To,</b><br>'
-        +esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & ')||'Customer')
-        +(addr?'<br>'+esc(addr):'')+'</td>'
-      +'<td style="vertical-align:top"><table class="ref">'
-        +docRef('Dated', dmy(i.invoice_date))
-        +docRef('Application Code No', b.booking_no)
-        +docRef('Project Name', proj?proj.name:'')
-        +docRef('Category', b.towers&&b.towers.name)
-        +docRef('Unit No', b.flats&&b.flats.flat_code)
-        +docRef('Total Sale Area', sqft)
-        +docRef('Rate', num(b.rate)?num(b.rate).toLocaleString('en-IN')+' per SQ.FT.':'')
-        +'</table></td></tr></table>'
-    +(ap.length>1?'<div class="addr" style="margin-top:12px"><b>Co Applicant(S)</b><br>'
-        +esc(ap.slice(1).map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(', '))+'</div>':'')
-    +'<div class="addr" style="margin:14px 0 8px">Dear Sir / Madam,<br>'
-      +'We wish to inform you that your following instalments are falling due on the dates indicated against them.</div>'
-    +'<table class="grid"><thead><tr><th style="width:11%">Due Date</th><th>Description</th>'
-      +'<th style="width:17%">Charge Type</th><th class="r" style="width:12%">Amount Due</th>'
-      +'<th class="r" style="width:12%">Amount Paid</th><th class="r" style="width:13%">Amount Payable</th></tr></thead><tbody>'
-    +ln.map(function(l){
-        const due=num(l.total);
-        return '<tr><td>'+dmy(i.due_date)+'</td><td>'+esc(psLabel(i.title))+'</td><td>'+esc(psLabel(l.head))+'</td>'
-          +'<td class="r">'+n(due)+'.00</td><td class="r">0.00</td><td class="r">'+n(due)+'.00</td></tr>';
-      }).join('')
-    +'<tr class="tot"><td colspan="3">Total Amount Due</td><td class="r">'+n(i.total)+'.00</td>'
-      +'<td class="r">'+n(paid)+'.00</td><td class="r">'+n(num(i.total)-paid)+'.00</td></tr>'
-    +'</tbody></table>'
-    +(i.status==='cancelled'?'<div class="void">CANCELLED &mdash; '+esc(i.cancel_reason||'')+'</div>':'')
-    +'<div class="sm" style="margin-top:12px"><b>Terms &amp; Condition:</b><br>'+esc(terms)+'</div>'
-    +'<div class="sm" style="margin-top:10px"><b>Note :</b><ul style="margin:4px 0 0 16px;padding:0">'
-      +((setup&&(setup.contact_email||setup.contact_phone))
-         ? '<li>Jain Group is committed towards transparency, customer satisfaction and highest ethics. Please mail '
-           +esc(setup.contact_email||'')+(setup.contact_phone?' or call '+esc(setup.contact_phone):'')
-           +', if any Jain Group employee requests cash, gifts or any benefits whatsoever.</li>' : '')
-      +'<li>Bank charges (if any) will also be payable plus GST.</li>'
-      +'<li>Interest @ 18% p.a. will be charged as applicable.</li>'
-      +'<li>If your accounts do not tally with our records, please contact us immediately.</li>'
-      +'<li>Please mention Customer Name, Project Name &amp; Payment details behind your cheque / DD.</li>'
-      +'</ul></div>'
-    +(realBanks.length
-       ? '<div class="sm" style="margin-top:10px">Kindly issue the cheque / draft / RTGS / NEFT in favour of '
-         +'<b>'+esc(setup&&setup.company_name||'')+'</b></div>'
-         +'<div class="sm" style="margin-top:6px"><b>Bank Details:</b></div>'
-         +realBanks.map(function(x){
-             return '<table class="ref" style="width:auto;margin-top:4px">'
-               +docRef('Bank Name', x.bank_name||x.name)
-               +docRef('Account No', x.account_no)
-               +docRef('IFSC Code', x.ifsc)+'</table>';
-           }).join('')
-       : '')
-    +'<div class="sm" style="margin-top:12px">Expecting your prompt action in this regard, and assuring you of our best services always, we remain.</div>'
-    +'<div class="sign">Yours faithfully,<br><b>For '+esc(setup&&setup.company_name||'The Jain Group')+'</b>'
-      +'<div style="margin-top:30px"><b>Authorised Signatory</b></div></div>'
-    +docRegs(setup)
-    +'<div class="sm" style="margin-top:14px">This is a system generated statement. No signature required.</div>'
-    +'<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>';
-  w.document.open(); w.document.write(html); w.document.close();
-};
+  K.gap(10);
+  K.text('Terms & Condition:',{bold:true,size:8});
+  K.text(terms,{size:7.6});
+
+  K.gap(6);
+  K.text('Note :',{bold:true,size:8});
+  const notes=[];
+  if(setup&&(setup.contact_email||setup.contact_phone)){
+    notes.push('Jain Group is committed towards transparency, customer satisfaction and highest ethics. '
+      +'Please mail '+(setup.contact_email||'')
+      +(setup.contact_phone?' or call '+setup.contact_phone:'')
+      +', if any Jain Group employee requests cash, gifts or any benefits whatsoever.');
+  }
+  notes.push('Bank charges (if any) will also be payable plus GST.');
+  notes.push('Interest @ 18% p.a. will be charged as applicable.');
+  notes.push('If your accounts do not tally with our records, please contact us immediately.');
+  notes.push('Please mention Customer Name, Project Name & Payment details behind your cheque / DD.');
+  notes.forEach(function(t){ K.text('-  '+t,{size:7.6,x:K.M+8,w:K.TW-8}); });
+
+  const realBanks=(banks||[]).filter(function(x){return x.account_no;});
+  if(realBanks.length){
+    K.gap(6);
+    K.text('Kindly issue the cheque / draft / RTGS / NEFT in favour of '
+      +((setup&&setup.company_name)||''),{size:7.6});
+    K.gap(2);
+    K.text('Bank Details:',{bold:true,size:8});
+    const bw=[150,381.28];
+    realBanks.forEach(function(x){
+      K.row([{t:'Bank Name',w:bw[0],fill:K.SOFT},{t:x.bank_name||x.name||'',w:bw[1],bold:true}]);
+      K.row([{t:'Account No',w:bw[0],fill:K.SOFT},{t:x.account_no||'',w:bw[1],bold:true}]);
+      K.row([{t:'IFSC Code',w:bw[0],fill:K.SOFT},{t:x.ifsc||'',w:bw[1],bold:true}]);
+      K.gap(5);
+    });
+  }
+
+  K.gap(8);
+  K.text('Expecting your prompt action in this regard, and assuring you of our best services always, '
+        +'we remain.',{size:7.6});
+  K.need(72);
+  K.gap(12);
+  K.text('Yours faithfully,',{size:8});
+  K.text('For '+((setup&&setup.company_name)||'The Jain Group'),{bold:true,size:8});
+  K.gap(30);
+  K.text('Authorised Signatory',{bold:true,size:8});
+
+  const regs=[['PAN No.',setup&&setup.company_pan],['GSTIN',setup&&setup.company_gstin],
+              ['CIN',setup&&setup.company_cin]].filter(function(r){return r[1];});
+  if(regs.length){
+    K.gap(8);
+    regs.forEach(function(r){ K.text(r[0]+' : '+r[1],{size:7.4}); });
+  }
+  K.gap(4);
+  K.text('This is a system generated statement. No signature required.',{size:7});
+
+  psPageNumbers(doc,reg,L);
+  const nm=(i.invoice_no||'demand').replace(/[^\w\- ]/g,'_');
+  psSaveFile(await doc.save(),'Demand Note - '+nm+'.pdf');
+  toast('Demand note downloaded','ok');
+}
+
 
 /* THE THREE PRINTED DOCUMENTS SHARE ONE LETTERHEAD AND ONE STYLESHEET.
 
