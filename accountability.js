@@ -685,7 +685,7 @@
        a column after each month, each quarter and the year that adds up what fell inside it - and a
        side panel like the Calendar's that opens only when something is clicked. */
     .rq-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px;margin-bottom:12px}
-    .rq-nav{display:flex;align-items:center;gap:8px}
+    .rq-nav{display:flex;align-items:center;gap:8px;margin-left:auto}
     .rq-nav .ac-btn{width:36px;justify-content:center;font-size:17px}
     .rq-nav b{font-size:15px;min-width:120px;text-align:center}
     .rq-filter{height:36px;min-width:180px;margin-left:6px;border:1.5px solid #2563eb !important;color:#1d4ed8;font-weight:600}
@@ -1141,9 +1141,9 @@
     REC_DATA.all=all; REC_DATA.byDate=byDate;
   }
   function recIn(from,to){ return REC_DATA.all.filter(x=>x.o.date>=from&&x.o.date<=to); }
-  function recP3Html(){
+  function recP3Html(right){
     const p3=(k,ic,l)=>`<button class="ac-pbtn ${P3===k?'on':''}" onclick="accP3('${k}')"><i class="fa-solid ${ic}"></i> ${l}</button>`;
-    return `<div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}${p3('recurring','fa-rotate','Recurring')}</div>`;
+    return `<div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}${p3('recurring','fa-rotate','Recurring')}${right?'<div class="rq-nav">'+right+'</div>':''}</div>`;
   }
   async function recurringView(){
     const b=$('acBody'); if(!b) return;
@@ -1200,10 +1200,10 @@
     cols+='<div class="rq-col sum y"><div class="rq-h"><b>'+fyLbl+'</b><span>Annual tasks</span></div>'+sumCell('yearly',dpIso(v.fy,3,1),dpIso(v.fy+1,2,31),fyLbl+' \u00b7 Annually')+'</div>';
     const opts='<option value="all">All frequencies</option>'+REC_FQ.filter(f=>f.k!=='daily'||REC_DATA.series.some(s=>s.freq==='daily'))
       .map(f=>'<option value="'+f.k+'"'+(v.filter===f.k?' selected':'')+'>'+f.label+'</option>').join('');
-    b.innerHTML=recP3Html()
-      +'<div class="rq-bar"><div class="rq-nav"><button class="ac-btn" aria-label="Previous year" onclick="recYear(-1)">\u2039</button><b>'+fyLbl+'</b>'
+    // the year arrows and the frequency filter share the pills' row, so the table starts higher up
+    b.innerHTML=recP3Html('<button class="ac-btn" aria-label="Previous year" onclick="recYear(-1)">\u2039</button><b>'+fyLbl+'</b>'
       +'<button class="ac-btn" aria-label="Next year" onclick="recYear(1)">\u203a</button>'
-      +'<select class="ac-in rq-filter" aria-label="Frequency" onchange="recFilter(this.value)">'+opts+'</select></div></div>'
+      +'<select class="ac-in rq-filter" aria-label="Frequency" onchange="recFilter(this.value)">'+opts+'</select>')
       +'<div class="rq-table" id="rqTable"><div class="rq-grid">'+cols+'</div></div>'
       +(REC_DATA.series.length?'':'<div class="ac-empty" style="cursor:default;margin-top:12px">No recurring tasks yet. Make one from a task\u2019s due date: pick Weekly, Fortnightly, Monthly, Quarterly or Annually.</div>')
       +'<div class="rq-back" id="rqBack" onclick="recClose()"></div>'
