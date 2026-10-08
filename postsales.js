@@ -1629,99 +1629,254 @@ async function bookingView(host,id,stale){
       +'</tbody></table></div>':'<div class="pss-hint" style="margin-top:10px">No payments recorded yet.</div>');
 }
 // The Estimated Offer Price sheet, laid out like the one stapled into the application form.
+/* ================= THE COST SHEET, BUILT TO MATCH THE ONE FARVISION PRINTS =================
+
+   This is the sheet the customer signs, so it is not "a cost sheet of our own that carries the
+   same figures" - it is the same document: the same bordered grid, the same section bands, the
+   same five columns, the same order, the same payment schedule running on to a second page.
+
+   It is DRAWN rather than typeset from HTML. Every earlier attempt went through a print window,
+   which is why the page carried Chrome's own "08/10/2026, 14:21 Demand Letter ..." header across
+   the top and why it could only ever be printed rather than downloaded. Drawing it gives a file
+   that downloads, with nothing on it that we did not put there.
+
+   NO RUPEE GLYPH. pdf-lib's standard fonts are WinAnsi and throw on U+20B9 rather than drawing it
+   wrong, and embedding a font for one character would add a megabyte to every download. The money
+   columns say their unit in the heading - "Total (Rs.)" - exactly as the printed sheet does. */
+
+const PSB_W=595.28, PSB_H=841.89, PSB_M=32;
+
+function psbMoney(x){
+  const v=Math.round(num(x));
+  return (v<0?'-':'')+Math.abs(v).toLocaleString('en-IN');
+}
+function psbPctTxt(x){ return (Math.round(num(x)*100)/100)+'%'; }
+
 window.psbPrint=async function(id){
-  const w=window.open('','_blank');
-  if(!w){ toast('Allow pop-ups to print the Estimated Offer Price','err'); return; }
-  w.document.write('<!doctype html><meta charset="utf-8"><title>Preparing…</title><body style="font:14px system-ui;padding:30px">Preparing…</body>');
-  const v=(B.view&&B.view.b.id===id)?B.view:await loadBooking(id);
-  if(!v){ w.close(); toast('Booking not found','err'); return; }
-  const {b,ap,ch,ms}=v, proj=S.projects.find(p=>p.id===b.project_id);
-  /* THE COST SHEET IS ONE OF THE FOUR DOCUMENTS, AND WAS THE ONLY ONE WITHOUT A LETTERHEAD.
-
-     It never loaded project_setup at all - it opened straight onto a centred title over a table,
-     while the demand letter, money receipt and customer ledger all carry the company block. Next
-     to them it read as a loose spreadsheet rather than something the company had issued, which is
-     what "it still looks bad" was about once the layout itself was fixed.
-
-     It uses DOC_CSS and docHead like the other three now, so all four are recognisably the same
-     family of document, and ends with the same registrations block. */
-  const {data:setup}=await PS().from('project_setup')
-    .select('company_name,company_address,company_pan,company_gstin,company_cin')
-    .eq('project_id',b.project_id).maybeSingle();
-  const n=x=>{const v=Math.round(num(x));return (v<0?'-':'')+Math.abs(v).toLocaleString('en-IN');};
-  const rs=x=>n(x);
-  const L=k=>ch.filter(l=>l.col===k);
-  const sum=k=>ms.reduce((s,m)=>s+num(m[k]),0);
-  const ln=l=>'<tr><td>'+esc(psLabel(l.name))+'</td>'
-    +'<td class="r">'+(l.basis==='per_sqft'?num(l.rate).toLocaleString('en-IN')
-        :l.kind==='parking'?n(l.rate)+' × '+num(l.qty):'')+'</td>'
-    +'<td class="r">'+rs(l.amount)+'</td><td class="r">'+num(l.gst_rate)+'%</td>'
-    +'<td class="r">'+rs(l.gst_amount)+'</td><td class="r">'+rs(num(l.amount)+num(l.gst_amount))+'</td></tr>';
-  const tot=(lbl,a,g)=>'<tr class="tot"><td colspan="2">'+esc(lbl)+'</td><td class="r">'+rs(a)+'</td>'
-    +'<td></td><td class="r">'+rs(g)+'</td><td class="r">'+rs(num(a)+num(g))+'</td></tr>';
-  const sec=(lbl,span)=>'<tr class="secrow"><td colspan="'+span+'">'+esc(lbl)+'</td></tr>';
-
-  const html='<!doctype html><html><head><meta charset="utf-8"><title>Estimated Offer Price - '+esc(b.booking_no)+'</title>'
-    +'<style>'+DOC_CSS
-      +'.secrow td{background:#d8d8d8;font-weight:bold;text-align:center;letter-spacing:.4px}'
-      +'.grid tr.gt td{background:#bfbfbf;font-weight:bold;font-size:11px}'
-    +'</style></head><body>'
-    +docHead(setup,'ESTIMATED OFFER PRICE')
-    /* The unit's particulars, in the same label : value column the demand letter uses, so the two
-       documents for the same flat read the same way. */
-    +'<table><tr>'
-      +'<td style="width:50%;vertical-align:top"><table class="ref">'
-        +docRef('Project', proj?proj.name:'')
-        +docRef('Block', b.towers&&b.towers.name)
-        +docRef('Unit No', b.flats&&b.flats.flat_code)
-        +docRef('Floor', ordinal(b.floor_no))
-        +docRef('BHK', b.flats&&b.flats.bhk)
-        +'</table></td>'
-      +'<td style="vertical-align:top"><table class="ref">'
-        +docRef('Booking No', b.booking_no)
-        +docRef('Date', dmy(b.booking_date))
-        +docRef('Super Built-up', num(b.sba_sqft)?num(b.sba_sqft).toLocaleString('en-IN')+' sq ft':'')
-        +docRef('Built-up', b.flats&&b.flats.built_up_sqft!=null?num(b.flats.built_up_sqft).toLocaleString('en-IN')+' sq ft':'')
-        +docRef('Carpet', b.flats&&b.flats.carpet_sqft!=null?num(b.flats.carpet_sqft).toLocaleString('en-IN')+' sq ft':'')
-        +'</table></td></tr></table>'
-    +'<div class="addr" style="margin:10px 0 2px"><b>Applicant:</b> '
-      +esc(ap.map(a=>[a.title,a.full_name].filter(Boolean).join(' ')).join(' & ')||'')+'</div>'
-    +'<table class="grid" style="margin-top:10px">'
-      +sec('Unit Charges Details',6)
-      +'<tr><th>Particulars</th><th class="r">Rate</th><th class="r">Total (Rs.)</th>'
-        +'<th class="r">GST</th><th class="r">GST Amount</th><th class="r">Gross Amount</th></tr>'
-      +L('unit').map(ln).join('')+tot('Total flat value',b.unit_net,b.unit_gst)
-      +(L('parking').length?sec('Car Parking',6)+L('parking').map(ln).join('')+tot('Total',b.parking_net,b.parking_gst):'')
-      +(L('edc').length?sec('Extra Development Charges (EDC)',6)+L('edc').map(ln).join('')+tot('Total',b.edc_net,b.edc_gst):'')
-      +'<tr class="gt"><td colspan="2">GRAND TOTAL</td><td class="r">'+rs(b.total_consideration)+'</td><td></td>'
-        +'<td class="r">'+rs(num(b.unit_gst)+num(b.parking_gst)+num(b.edc_gst))+'</td>'
-        +'<td class="r">'+rs(b.grand_total)+'</td></tr>'
-    +'</table>'
-    +'<table class="grid" style="margin-top:12px">'
-      +sec('Payment Schedule'+(b.plan_name?' — '+b.plan_name:''),5)
-      +'<tr><th>Event Particulars</th><th class="r">Unit</th><th class="r">Parking</th>'
-        +'<th class="r">EDC</th><th class="r">Gross Amount</th></tr>'
-      +ms.map(m=>'<tr><td>'+esc(psLabel(m.name))+(msDescribe(m)?' <span class="sm">'+esc(msDescribe(m))+'</span>':'')+'</td>'
-        +'<td class="r">'+n(num(m.unit_net)+num(m.unit_gst))+'</td>'
-        +'<td class="r">'+n(num(m.parking_net)+num(m.parking_gst))+'</td>'
-        +'<td class="r">'+n(num(m.edc_net)+num(m.edc_gst))+'</td>'
-        +'<td class="r">'+rs(m.gross_total)+'</td></tr>').join('')
-      +'<tr class="gt"><td>TOTAL</td><td class="r">'+n(sum('unit_net')+sum('unit_gst'))+'</td>'
-        +'<td class="r">'+n(sum('parking_net')+sum('parking_gst'))+'</td>'
-        +'<td class="r">'+n(sum('edc_net')+sum('edc_gst'))+'</td>'
-        +'<td class="r">'+rs(sum('gross_total'))+'</td></tr>'
-    +'</table>'
-    +'<div class="sm" style="margin-top:12px;padding:9px 11px;border:1px solid #000"><b>Please note</b><br>'
-      +'1. The above is an indicative offer price only.<br>'
-      +'2. Taxes apply as per government norms prevailing at the time of payment.<br>'
-      +'3. Please check all calculations and revert with any discrepancy.<br>'
-      +'4. Figures may move slightly through rounding to the rupee.</div>'
-    +docRegs(setup)
-    +'<div class="sm" style="margin-top:12px">'+esc(b.booking_no)+' &middot; generated '+dmy(today())
-      +'. This is a system generated statement. No signature required.</div>'
-    +'<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>';
-  w.document.open(); w.document.write(html); w.document.close();
+  let v=null;
+  try{ v=(B.view&&B.view.b.id===id)?B.view:await loadBooking(id); }
+  catch(e){ toast('Could not read the booking: '+((e&&e.message)||e),'err'); return; }
+  if(!v){ toast('Booking not found','err'); return; }
+  try{ await psbCostSheetPdf(v); }
+  catch(e){ toast('Could not build the cost sheet: '+((e&&e.message)||e),'err'); }
 };
+
+async function psbCostSheetPdf(v){
+  const L=await loadPdfLib();
+  if(!L) throw new Error('the PDF library could not be loaded');
+  const {b,ap,ch,ms}=v, proj=S.projects.find(p=>p.id===b.project_id);
+  const {data:setup}=await PS().from('project_setup')
+    .select('company_name,company_address,project_address')
+    .eq('project_id',b.project_id).maybeSingle();
+
+  const doc=await L.PDFDocument.create();
+  doc.setTitle('Cost Sheet '+(b.booking_no||''));
+  const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+  const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+  const INK=L.rgb(0,0,0), LINE=L.rgb(0,0,0);
+  const BAND=L.rgb(0.82,0.82,0.82);      // the grey section bars
+  const SOFT=L.rgb(0.93,0.93,0.93);      // totals rows
+  const TW=PSB_W-2*PSB_M;                // table width
+
+  let page=null, y=0;
+  const newPage=function(){
+    page=doc.addPage([PSB_W,PSB_H]);
+    y=PSB_H-PSB_M;
+  };
+  newPage();
+
+  const clean=function(t){
+    return String(t==null?'':t)
+      .replace(/₹/g,'').replace(/ /g,' ')
+      .replace(/[‘’]/g,"'").replace(/[“”]/g,'"')
+      .replace(/[–—]/g,'-').replace(/[^ -ÿ]/g,'').trim();
+  };
+  const wrap=function(t,w,f,size){
+    const words=clean(t).split(/\s+/).filter(Boolean);
+    if(!words.length) return [''];
+    const out=[]; let line='';
+    words.forEach(function(wd){
+      const test=line?line+' '+wd:wd;
+      if(f.widthOfTextAtSize(test,size)>w && line){ out.push(line); line=wd; }
+      else line=test;
+    });
+    if(line) out.push(line);
+    return out;
+  };
+
+  /* One row of a bordered table. cells = [{t,w,align,bold,size,fill}] - the height comes from
+     whichever cell wraps to the most lines, so a long milestone description cannot overlap the
+     row beneath it, which is what the old print window did. */
+  const row=function(cells,opt){
+    opt=opt||{};
+    const size=opt.size||7.6, pad=3.5, lh=size+2.6;
+    const laid=cells.map(function(c){
+      const f=(c.bold||opt.bold)?bold:reg;
+      return {c:c,f:f,lines:wrap(c.t,Math.max(6,c.w-2*pad),f,c.size||size)};
+    });
+    const h=Math.max.apply(null,laid.map(function(x){return x.lines.length;}))*lh+2*pad;
+    if(y-h<PSB_M+(opt.reserve||0)){ newPage(); if(opt.onBreak) opt.onBreak(); }
+    let x=PSB_M;
+    laid.forEach(function(it){
+      const c=it.c, fill=c.fill||opt.fill;
+      if(fill) page.drawRectangle({x:x,y:y-h,width:c.w,height:h,color:fill});
+      page.drawRectangle({x:x,y:y-h,width:c.w,height:h,borderColor:LINE,borderWidth:0.6});
+      const fs=c.size||size;
+      it.lines.forEach(function(ln,i){
+        const tw=it.f.widthOfTextAtSize(ln,fs);
+        const al=c.align||'left';
+        const tx=al==='right' ? (x+c.w-pad-tw) : al==='center' ? (x+(c.w-tw)/2) : (x+pad);
+        page.drawText(ln,{x:tx,y:y-pad-fs-(i*lh)+1.5,size:fs,font:it.f,color:INK});
+      });
+      x+=c.w;
+    });
+    y-=h;
+    return h;
+  };
+  const band=function(text){
+    row([{t:text,w:TW,align:'center',bold:true,size:8.4,fill:BAND}]);
+  };
+
+  // ── letterhead ───────────────────────────────────────────────────────────────────────────
+  const co=clean((setup&&setup.company_name)||'THE JAIN GROUP').toUpperCase();
+  page.drawText(co,{x:PSB_M+(TW-bold.widthOfTextAtSize(co,11))/2,y:y-11,size:11,font:bold,color:INK});
+  y-=16;
+  const addr=clean((setup&&setup.company_address)||'').split(/\r?\n/)[0];
+  if(addr){
+    page.drawText(addr,{x:PSB_M+(TW-reg.widthOfTextAtSize(addr,7.5))/2,y:y-7.5,size:7.5,font:reg,color:INK});
+    y-=12;
+  }
+  const title='COST SHEET';
+  page.drawText(title,{x:PSB_M+(TW-bold.widthOfTextAtSize(title,10))/2,y:y-10,size:10,font:bold,color:INK});
+  y-=18;
+
+  // ── the particulars grid ─────────────────────────────────────────────────────────────────
+  const hw=[52,148,48,88,62,133.28];     // label / value x3  = 531.28
+  const pair=function(l1,v1,l2,v2,l3,v3){
+    row([{t:l1,w:hw[0],bold:true,fill:SOFT},{t:v1,w:hw[1]},
+         {t:l2,w:hw[2],bold:true,fill:SOFT},{t:v2,w:hw[3]},
+         {t:l3,w:hw[4],bold:true,fill:SOFT},{t:v3,w:hw[5]}]);
+  };
+  const area=function(x){ return num(x)?String(num(x)):''; };
+  pair('Project', (proj&&proj.name)||'', 'Block', (b.towers&&b.towers.name)||'',
+       'Address', clean((setup&&setup.project_address)||''));
+  pair('SBA', area(b.sba_sqft), 'Built-Up', area(b.flats&&b.flats.built_up_sqft),
+       'Carpet Area', area(b.flats&&b.flats.carpet_sqft));
+  pair('Floor', b.floor_no==null?'':ordinal(b.floor_no), 'Flat', (b.flats&&b.flats.flat_code)||'',
+       'BHK', (b.flats&&b.flats.bhk)||'');
+  pair('Applicant', ap.map(function(a){return clean([a.title,a.full_name].filter(Boolean).join(' '));}).join(' & '),
+       'Booking No', b.booking_no||'', 'Date', b.booking_date?dmy(b.booking_date):'');
+  y-=8;
+
+  // ── the five money columns ───────────────────────────────────────────────────────────────
+  const cw=[231.28,85,55,75,85];         // = 531.28
+  const chargeHead=function(){
+    row([{t:'Particulars',w:cw[0],bold:true,fill:SOFT},
+         {t:'Total (Rs.)',w:cw[1],align:'right',bold:true,fill:SOFT},
+         {t:'GST %',w:cw[2],align:'right',bold:true,fill:SOFT},
+         {t:'GST Amount',w:cw[3],align:'right',bold:true,fill:SOFT},
+         {t:'Gross Amount',w:cw[4],align:'right',bold:true,fill:SOFT}]);
+  };
+  const chargeRow=function(name,amt,gstRate,gstAmt,opt){
+    opt=opt||{};
+    row([{t:name,w:cw[0],bold:opt.bold},
+         {t:psbMoney(amt),w:cw[1],align:'right',bold:opt.bold},
+         {t:gstRate==null?'':psbPctTxt(gstRate),w:cw[2],align:'right',bold:opt.bold},
+         {t:psbMoney(gstAmt),w:cw[3],align:'right',bold:opt.bold},
+         {t:psbMoney(num(amt)+num(gstAmt)),w:cw[4],align:'right',bold:opt.bold}],
+        {fill:opt.fill,onBreak:chargeHead});
+  };
+  const grp=function(k){ return ch.filter(function(l){return l.col===k;}); };
+  const tot=function(list,f){ return list.reduce(function(s,l){return s+num(l[f]);},0); };
+
+  const unit=grp('unit'), park=grp('parking'), edc=grp('edc');
+
+  band('UNIT CHARGES');
+  chargeHead();
+  unit.forEach(function(l){ chargeRow(psLabel(l.name),l.amount,l.gst_rate,l.gst_amount); });
+
+  if(park.length){
+    band('CAR PARKING');
+    chargeHead();
+    park.forEach(function(l){
+      const nm=(num(l.qty)>1?num(l.qty)+'-':'1-')+psLabel(l.name);
+      chargeRow(nm,l.amount,l.gst_rate,l.gst_amount);
+    });
+    chargeRow('TOTAL',tot(park,'amount'),null,tot(park,'gst_amount'),{bold:true,fill:SOFT});
+  }
+
+  chargeRow('TOTAL FLAT VALUE',
+    tot(unit,'amount')+tot(park,'amount'), null,
+    tot(unit,'gst_amount')+tot(park,'gst_amount'), {bold:true,fill:BAND});
+
+  if(edc.length){
+    band('EXTRA DEVELOPMENT CHARGES');
+    chargeHead();
+    edc.forEach(function(l){ chargeRow(psLabel(l.name),l.amount,l.gst_rate,l.gst_amount); });
+    chargeRow('TOTAL',tot(edc,'amount'),null,tot(edc,'gst_amount'),{bold:true,fill:SOFT});
+  }
+
+  chargeRow('GRAND TOTAL',
+    tot(ch,'amount'), null, tot(ch,'gst_amount'), {bold:true,fill:BAND});
+
+  // ── the payment schedule ─────────────────────────────────────────────────────────────────
+  y-=10;
+  const pw=[231.28,85,70,70,75];         // = 531.28
+  const schedHead=function(){
+    row([{t:'Event Particulars',w:pw[0],bold:true,fill:SOFT},
+         {t:'Unit',w:pw[1],align:'right',bold:true,fill:SOFT},
+         {t:'Parking',w:pw[2],align:'right',bold:true,fill:SOFT},
+         {t:'EDC',w:pw[3],align:'right',bold:true,fill:SOFT},
+         {t:'Gross Amount',w:pw[4],align:'right',bold:true,fill:SOFT}]);
+  };
+  band('PAYMENT SCHEDULE'+(b.plan_name?' - '+clean(b.plan_name):''));
+  schedHead();
+  const sum=function(f){ return ms.reduce(function(s,m){return s+num(m[f]);},0); };
+  ms.forEach(function(m){
+    const d=msDescribe(m);
+    row([{t:psLabel(m.name)+(d?'  ('+d+')':''),w:pw[0]},
+         {t:psbMoney(num(m.unit_net)+num(m.unit_gst)),w:pw[1],align:'right'},
+         {t:psbMoney(num(m.parking_net)+num(m.parking_gst)),w:pw[2],align:'right'},
+         {t:psbMoney(num(m.edc_net)+num(m.edc_gst)),w:pw[3],align:'right'},
+         {t:psbMoney(m.gross_total),w:pw[4],align:'right'}],
+        {onBreak:schedHead});
+  });
+  row([{t:'TOTAL',w:pw[0],bold:true},
+       {t:psbMoney(sum('unit_net')+sum('unit_gst')),w:pw[1],align:'right',bold:true},
+       {t:psbMoney(sum('parking_net')+sum('parking_gst')),w:pw[2],align:'right',bold:true},
+       {t:psbMoney(sum('edc_net')+sum('edc_gst')),w:pw[3],align:'right',bold:true},
+       {t:psbMoney(sum('gross_total')),w:pw[4],align:'right',bold:true}],
+      {fill:BAND,onBreak:schedHead});
+
+  // ── signature ────────────────────────────────────────────────────────────────────────────
+  if(y-70<PSB_M) newPage();
+  y-=46;
+  page.drawLine({start:{x:PSB_W-PSB_M-150,y:y},end:{x:PSB_W-PSB_M,y:y},thickness:0.6,color:LINE});
+  page.drawText('Authorised Signatory',
+    {x:PSB_W-PSB_M-150,y:y-11,size:7.6,font:reg,color:INK});
+
+  // page numbers, once everything is laid out and the count is known
+  const pages=doc.getPages();
+  pages.forEach(function(pg,i){
+    const t=(i+1)+' / '+pages.length;
+    pg.drawText(t,{x:PSB_W-PSB_M-reg.widthOfTextAtSize(t,7),y:PSB_M-14,size:7,font:reg,color:L.rgb(.45,.45,.45)});
+  });
+
+  const name=(b.booking_no||'cost-sheet').replace(/[^\w\- ]/g,'_');
+  psSaveFile(await doc.save(),'Cost Sheet - '+name+'.pdf');
+  toast('Cost sheet downloaded','ok');
+}
+
+/* Straight to Downloads, never to a tab. application/octet-stream for the same reason the reports
+   use it: a browser previews what it can render, and it can render a PDF. */
+function psSaveFile(bytes,filename){
+  const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
+  const a=document.createElement('a');
+  a.href=url; a.download=filename; a.rel='noopener'; a.style.display='none';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
+}
+
 
 /* ============================ POST SALES — MONEY RECEIVED (Stage 3) ============================
    Spec: docs/post-sales-spec.md §3. Tables: supabase/migrations/20261001180000_postsales_receipts.sql.
