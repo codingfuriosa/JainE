@@ -428,6 +428,18 @@ Distinguish carefully between these five situations:
      customer refused any further contact) -> "Inaccurate".
 DO NOT mark a date inaccurate merely because the customer did not state one. Absence of discussion is
 (c), not a fault.
+SITE VISIT AGREED -> FOLLOW-UP TWO DAYS BEFORE THE VISIT. When the customer agreed to a site visit on
+a specific date (or a day that resolves to one, e.g. "this Sunday"), the agent must set
+next_follow_up_date to 2 days BEFORE that visit date, as a reminder/confirmation call. This overrides
+(a)-(d) for that case:
+  - CRM date is on the day two days before the visit (or, if that is already past/too close, the
+    nearest sensible day before the visit)                       -> "Accurate".
+  - CRM date is on or after the visit day, or well off the 2-day-before mark (e.g. 5 days before, or
+    no follow-up date set at all)                                -> "Inaccurate"; say in "reason" that the
+    follow-up should have been two days before the visit, and give that date in "customer_agreed_date"
+    as "visit on <date>; follow-up due <date minus 2 days>".
+  - The customer agreed to visit but gave no resolvable date     -> fall back to (a)-(e).
+Visit already happened or was not agreed: this rule does not apply.
 Put the CRM's value in "crm_date" exactly as given, and what the customer actually agreed to - in
 their own terms, e.g. "tomorrow around 11 AM" - in "customer_agreed_date" (null if none).
 Also give "score", 0-100: 100 when the CRM date matches exactly, scaling down the further the actual
