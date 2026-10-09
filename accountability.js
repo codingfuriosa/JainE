@@ -716,8 +716,8 @@
     .rq-cell.out{background:repeating-linear-gradient(135deg,transparent 0 6px,rgba(15,23,42,.03) 6px 12px);cursor:default}
     .rq-cell.out:hover{background:repeating-linear-gradient(135deg,transparent 0 6px,rgba(15,23,42,.03) 6px 12px)}
     .rq-cell .more{font-size:10.5px;font-weight:600;color:var(--slate);padding:0 3px}
-    .rq-chip{display:flex;align-items:center;gap:5px;width:100%;box-sizing:border-box;min-height:22px;padding:4px 8px;
-      border-radius:6px;font:inherit;font-size:12px;font-weight:600;line-height:1.2;text-align:left;cursor:pointer;
+    .rq-chip{display:flex;align-items:center;gap:5px;width:100%;box-sizing:border-box;min-height:30px;padding:6px 10px;
+      border-radius:6px;font:inherit;font-size:12px;font-weight:600;line-height:1.3;text-align:left;cursor:pointer;
       background:var(--cb);color:var(--cc);border:1.5px solid transparent}
     .rq-chip span{flex:1;min-width:0;overflow-wrap:anywhere}
     .rq-chip small{display:block;font-size:10.5px;font-weight:500;opacity:.8}
@@ -725,11 +725,12 @@
     .rq-chip.st-overdue{background:#fff;border-color:#dc2626}
     .rq-chip.st-next{opacity:.8}
     .rq-chip.st-held{background:transparent;border:1.5px dashed var(--cc)}
-    .rq-sumcell{flex:1;border-top:1px solid var(--line);padding:10px;display:flex;flex-direction:column;gap:5px;cursor:pointer}
+    .rq-sumcell{flex:1;border-top:1px solid var(--line);padding:14px 12px;display:flex;flex-direction:column;gap:8px;cursor:pointer}
     .rq-sumcell:hover{background:rgba(15,23,42,.03)}
-    .rq-sumcell .n{font-size:20px;font-weight:700;line-height:1}
+    .rq-sumcell .n{font-size:20px;font-weight:700;line-height:1;margin-bottom:4px}
     .rq-sumcell .n small{font-size:11px;font-weight:600;color:var(--slate);margin-left:4px}
-    .rq-sumcell .l{display:flex;align-items:center;gap:6px;font-size:11.5px;color:#334155}
+    .rq-sumcell .l{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#334155;margin-top:8px}
+    .rq-sumcell .n+.l{margin-top:2px}
     .rq-sumcell .l b{margin-left:auto}
     .rq-dot{flex:none;width:8px;height:8px;border-radius:50%;display:inline-block}
     .rq-back{position:fixed;inset:0;background:rgba(15,23,42,.18);opacity:0;pointer-events:none;transition:opacity .2s;z-index:199}
