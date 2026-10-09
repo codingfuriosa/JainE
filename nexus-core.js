@@ -7144,8 +7144,8 @@ async function muRenderDetail(b){
    nothing has to be taken down by hand. */
 function muHireCell(r,open,canAppr){
   if(!r.manpower_id) return '<span style="color:var(--slate-2)">—</span>';
-  if((r.approval_status||'Pending')!=='Approved'){
-    return '<span class="tag t-gray" title="A position is only live once it is approved">Not live</span>';
+  if(!r.has_description){
+    return '<span class="tag t-gray" title="A position goes live once its job description is written">Not live</span>';
   }
   const live='<span class="tag t-green" title="'+esc('Live at /career/'+(r.slug||''))+'">Hiring</span>';
   const shut='<span class="tag t-gray" title="'+esc(r.closed_at?('Closed '+muWhen(r.closed_at)):'Closed')+'">Closed</span>';
@@ -7697,12 +7697,14 @@ window.rsFilter=function(q){
 };
 window.rsClearFilter=function(){ rsFilter(''); };
 /* THE OPEN POSITIONS, WHICH IS WHAT A CV CAN BE UPLOADED AGAINST.
-   Approved and still Open: an unapproved request is not a vacancy yet, and a closed one is not a
-   vacancy any more, so neither should be able to collect CVs. */
+   Written up and still Open: a position with no job description is not a vacancy yet - there is
+   nothing to advertise and nothing for a CV to be judged against - and a closed one is not a
+   vacancy any more, so neither should be able to collect CVs. The same rule is in the database
+   (hr.open_positions, hr.public_position), so the portal and the website cannot disagree. */
 async function hrOpenPositions(){
   const {data,error}=await sb.schema('hr').from('manpower_requests')
     .select('id,job_title,department')
-    .eq('approval_status','Approved').eq('status','Open')
+    .not('ai_job_description_json','is',null).eq('status','Open')
     .order('job_title',{ascending:true});
   if(error) throw error;
   return data||[];
@@ -7728,7 +7730,7 @@ window.rsUploadModal=async function(preselectId){
     openModal('<div class="modal-head"><h3><i class="fa-solid fa-upload"></i> Upload CVs</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body frm"><div style="padding:18px;text-align:center;color:var(--slate);font-size:13.5px">'
       +'There are no open positions to upload against yet.<br><br>'
-      +'A position appears here once its hiring request has been approved and is still open.'
+      +'A position appears here once its job description has been written and it is still open.'
       +'</div></div>'
       +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>');
     return;
@@ -13071,12 +13073,25 @@ async function rtTrackerPeople(force){
      then fail to record it - the worst of both. Asking which candidates are approved here means
      they are simply not in the list, with the reason said once above it rather than as a failure
      per person. */
+  /* AND NOBODY ON A FINISHED POSITION IS OFFERED ONE EITHER.
+     Marking a position Complete in Monthly Progress closes the hiring out - feedback is locked for
+     everyone on it. Sending those people a test afterwards is a form that cannot be acted on, so
+     they come out of the list here, for the same reason and in the same way as the unapproved. */
   const ids=[...new Set((data||[]).map(r=>r.candidate_id).filter(x=>x!=null))];
-  let approved=new Set();
+  let approved=new Set(), onFinished=new Set();
   if(ids.length){
     const {data:cands}=await sb.schema('hr').from('candidates')
-      .select('id,approval_status').in('id',ids);
+      .select('id,approval_status,tracker_row_id').in('id',ids);
     (cands||[]).forEach(c=>{ if((c.approval_status||'Approved')==='Approved') approved.add(c.id); });
+    const rowIds=[...new Set((cands||[]).map(c=>c.tracker_row_id).filter(x=>x!=null))];
+    if(rowIds.length){
+      const {data:done}=await sb.schema('hr').from('tracker_rows')
+        .select('id').in('id',rowIds).not('completed_at','is',null);
+      const doneSet=new Set((done||[]).map(x=>x.id));
+      (cands||[]).forEach(function(c){
+        if(c.tracker_row_id!=null&&doneSet.has(c.tracker_row_id)) onFinished.add(c.id);
+      });
+    }
   }
 
   /* Counted apart, because they are different problems with different answers. "Waiting to be
@@ -13098,6 +13113,9 @@ async function rtTrackerPeople(force){
     const em=String(r.email||'').trim().toLowerCase();
     if(!em) continue;
     const pos=r.position||'';
+    if(r.candidate_id!=null && onFinished.has(r.candidate_id)){
+      excluded.push({position:pos,reason:'completed'}); continue;
+    }
     if(r.candidate_id!=null && !approved.has(r.candidate_id)){
       excluded.push({position:pos,reason:'waiting'}); continue;
     }
@@ -13120,8 +13138,15 @@ function rtWhyNobody(position){
     return position==null || String(x.position||'')===String(position); });
   const waiting=rows.filter(function(x){return x.reason==='waiting';}).length;
   const movedOn=rows.filter(function(x){return x.reason==='moved_on';}).length;
+  const finished=rows.filter(function(x){return x.reason==='completed';}).length;
   const who=position?('\u201c'+position+'\u201d'):'the Interview Tracker';
   if(!rows.length) return 'There is nobody on '+who+' to send a test to.';
+  /* Said first and on its own, because it is the one reason with a single obvious answer: the
+     position was closed out on purpose, and Undo on its Monthly Progress row reopens it. */
+  if(finished&&!waiting&&!movedOn){
+    return who+' is marked Complete in Monthly Progress, so nothing can be sent to its candidates '
+      +'\u2014 press Undo on its row to reopen it.';
+  }
   if(waiting&&movedOn){
     return 'Nobody on '+who+' can be sent a test right now '+'—'+' '+movedOn+' '
       +(movedOn===1?'has':'have')+' already been sent one or moved on, and '+waiting+' '
@@ -16654,7 +16679,7 @@ window.tpMpShowDetail=function(id){
              buried everything under it. It is a document: the line above says whether one exists,
              and Open puts it in a tab where it can actually be read. -->
       </div>
-      ${(rec.approval_status==='Approved')?`<div class="card" style="padding:12px;margin-top:12px">
+      ${rec.ai_job_description_json?`<div class="card" style="padding:12px;margin-top:12px">
         <div style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate);margin-bottom:8px">Careers page</div>
         ${rec.status==='Open'?`
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -16665,7 +16690,7 @@ window.tpMpShowDetail=function(id){
           <div style="font-size:11px;color:var(--slate);margin-top:6px">Live now — anyone with this link can apply. Closing hiring takes the page down.</div>`
         :`<div style="font-size:12.5px;color:var(--slate)">Hiring is closed for this position — its page is no longer live.</div>
           <button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="tpMpReopenHiring(${rec.id})"><i class="fa-solid fa-unlock"></i> Reopen Hiring</button>`}
-      </div>`:`<div style="font-size:11.5px;color:var(--slate);margin-top:10px"><i class="fa-solid fa-circle-info"></i> The careers page link appears here once this request is approved.</div>`}
+      </div>`:`<div style="font-size:11.5px;color:var(--slate);margin-top:10px"><i class="fa-solid fa-circle-info"></i> The careers page link appears here once a job description has been written \u2014 use <b>Generate with AI</b> above.</div>`}
     </div>
   </div>`;
   panel.scrollIntoView({behavior:'smooth',block:'nearest'});
@@ -17014,7 +17039,7 @@ async function tpEnsurePositions(){
 window.tpRefConnect=async function(id){if(!rtRefConnectGuard())return;
   const rec=(TP_REF_RECORDS||[]).find(r=>r.id===id); if(!rec)return;
   await tpEnsurePositions();
-  const openReqs=(MP_RECORDS||[]).filter(r=>(r.approval_status||'Pending')==='Approved'&&(r.status||'Open')==='Open');
+  const openReqs=(MP_RECORDS||[]).filter(r=>r.ai_job_description_json&&(r.status||'Open')==='Open');
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Connect Referral</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>${esc(rec.referred_name)} — connect to which open position?</label>
@@ -17141,7 +17166,7 @@ async function tpTracker(){
     // Two FKs exist between these tables now (candidates.tracker_id -> interview_tracker, and
     // interview_tracker.candidate_id -> candidates), so PostgREST can no longer guess which one an
     // unqualified embed means - named explicitly by the FK that actually points the way we want.
-    const {data,error}=await sb.schema('hr').from('interview_tracker').select('*,candidates!interview_tracker_candidate_id_fkey(tracker_row_id)').order('id',{ascending:false});
+    const {data,error}=await sb.schema('hr').from('interview_tracker').select('*,candidates!interview_tracker_candidate_id_fkey(tracker_row_id,approval_status)').order('id',{ascending:false});
     if(error)throw error; TP_TR_RECORDS=data||[];
     /* Loaded here, with the list, rather than after the Add window is already open. Fetching them
        afterwards meant the Source dropdown was empty the first time anybody used it and filled in
@@ -17215,7 +17240,18 @@ function tpTrRender(){
     </tr></thead>
     <tbody>${rows.length?rows.map(r=>`<tr>
       ${canAct?`<td><input type="checkbox" class="tp-tr-cb" data-id="${r.id}" data-email="${esc(r.email||'')}" onchange="tpTrRowCheck(this)"></td>`:''}
-      <td style="font-weight:600">${esc(r.candidate_name||'—')}</td>
+      <!-- WHETHER SOMEBODY HAS BEEN APPROVED IS SAID ON THEIR ROW, NOT ONLY WHEN YOU TRY TO ACT.
+           Every candidate who is not a referral raises an approval task in Accountability, and
+           until it is decided they cannot be sent a test or moved on. That was true already and
+           invisible here: a waiting candidate looked exactly like an approved one, and the first
+           anybody heard of it was the Email window refusing to list them. The chip says it where
+           the person is, and the tooltip says where to go and do something about it. -->
+      <td style="font-weight:600">${esc(r.candidate_name||'—')}${(()=>{
+        const ap=String((r.candidates&&r.candidates.approval_status)||'Approved');
+        if(ap==='Pending')return ' <span class="tag t-amber" style="font-size:10px" title="Waiting to be approved in Accountability \u203a Pending Approval \u2014 they cannot be sent a test until then">to approve</span>';
+        if(ap==='Rejected')return ' <span class="tag t-red" style="font-size:10px" title="This candidate was not approved">not approved</span>';
+        return '';
+      })()}</td>
       <td>${esc(r.position||'—')}</td>
       <!-- SOURCE IS EDITABLE, THE SAME WAY STAGE IS. It was printed as text, so a row that came in
            with the wrong source - or none, which is what a hand-added candidate starts with - could
@@ -17389,7 +17425,7 @@ window.tpTrSource=async function(trackerId,value){
 window.tpTrAdd=async function(){
   if(!recGuard())return;
   await tpEnsurePositions();
-  const openReqs=(MP_RECORDS||[]).filter(r=>(r.approval_status||'Pending')==='Approved');
+  const openReqs=(MP_RECORDS||[]).filter(r=>r.ai_job_description_json);
   const entities=(window._tpEntities||[]);
   const sources=(window._tpSources||[]);
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Candidate</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -17538,9 +17574,22 @@ window.tpTrEmailSel=async function(){
       tests=data||[];}catch(_e){ tests=[]; }
   }
   const noCand=withEmail.filter(r=>!r.candidate_id).length;
-  const list=withEmail.map(r=>'<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px solid var(--line-2)">'
-      +'<span style="font-weight:600">'+esc(r.candidate_name||'\u2014')+'</span>'
-      +'<span style="color:var(--slate);font-size:12px">'+esc(r.email)+'</span></div>').join('');
+  /* A TEST CANNOT GO TO SOMEBODY WHO HAS ALREADY MOVED ON - THE MESSAGE STILL CAN.
+     Somebody who has Joined, been selected, rejected, put on hold or already sent a test is past
+     the point where an assessment means anything, and the database refuses the stage change in any
+     case. That is a reason not to attach a TEST to them, not a reason they cannot be written to:
+     a joining letter, an interview time or a thank-you is exactly the mail you send such a person.
+     So they stay in the list, are told apart in it, and the attachment simply skips them. */
+  const noTest=withEmail.filter(r=>!rtTestable(r.feedback)).length;
+  const list=withEmail.map(function(r){
+    const can=rtTestable(r.feedback);
+    return '<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px solid var(--line-2)">'
+      +'<span style="font-weight:600">'+esc(r.candidate_name||'\u2014')
+      +(can?'':'<span class="tag t-gray" style="margin-left:6px;font-size:10px" title="'
+          +esc('Already at '+(r.feedback||'a later stage')+' \u2014 no test will be attached for this person')
+          +'">no test</span>')+'</span>'
+      +'<span style="color:var(--slate);font-size:12px">'+esc(r.email)+'</span></div>';
+  }).join('');
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-envelope"></i> Email Selected</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm" style="max-height:72vh;overflow-y:auto">
     ${RT_CAN_SEND_AS_SELF
@@ -17559,7 +17608,7 @@ window.tpTrEmailSel=async function(){
       <option value="">\u2014 No test \u2014</option>
       ${tests.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}
     </select>
-    ${tests.length?`<div style="font-size:11.5px;color:var(--slate);margin-top:4px">Each candidate gets their own link, and moves to <b>Tests Sent</b> on the Monthly Update.${noCand?` ${noCand} of them ${noCand>1?'have':'has'} no candidate record, so ${noCand>1?'they':'it'} cannot be given one \u2014 ${noCand>1?'they':'it'} will still receive the message.`:''}</div>`
+    ${tests.length?`<div style="font-size:11.5px;color:var(--slate);margin-top:4px">Each candidate gets their own link, and moves to <b>Tests Sent</b> on the Monthly Update.${noCand?` ${noCand} of them ${noCand>1?'have':'has'} no candidate record, so ${noCand>1?'they':'it'} cannot be given one \u2014 ${noCand>1?'they':'it'} will still receive the message.`:''}${noTest?` ${noTest} ${noTest>1?'have':'has'} already moved past the test stage \u2014 ${noTest>1?'they':'it'} will get the message without a test link.`:''}</div>`
       :`<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No tests exist yet \u2014 create one in the Tests tab to be able to attach it here.</div>`}
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpTrMailBtn" onclick="tpTrEmailSelSend()"><i class="fa-solid fa-paper-plane"></i> Send</button></div>`);
@@ -17606,7 +17655,10 @@ window.tpTrEmailSelSend=async function(){
          record gets the message but not a link, rather than being quietly dropped. */
       for(const r of rows){
         let link='';
-        if(r.candidate_id){
+        /* rtTestable is the same rule the Email Test window uses and the same one the database
+           enforces, so "no link for this person" is decided here rather than discovered as a
+           failure after the mail has gone. They still get the message. */
+        if(r.candidate_id&&rtTestable(r.feedback)){
           try{
             const {data,error}=await sb.functions.invoke('recruit-test-generate-link',
               {body:{test_id:testId,candidate_id:r.candidate_id,candidate_email:r.email,origin:location.origin}});
@@ -17724,13 +17776,24 @@ function tpMuRender(counts){
      choosing three and then being told you cannot, so the control only allows what the action
      allows. */
   const selPos=TP_MU_SEL;
+  /* A POSITION THAT HAS BEEN COMPLETED CANNOT BE UPLOADED TO OR EMAILED FROM.
+     Complete means the hiring is closed out: feedback is locked for everyone on it and the send
+     window has nobody left to offer. Leaving the two buttons live meant opening a form that could
+     not be submitted and being told why only afterwards. They are switched off instead, with the
+     reason - and the way to undo it - in the tooltip. */
+  const selRow=selPos!=null?rows.find(function(r){return String(r.position||'')===String(selPos);}):null;
+  const selDone=!!(selRow&&selRow.completed_at);
+  const actWhy=!selPos?'Select a position first'
+    :selDone?('\u201c'+selPos+'\u201d is marked Complete \u2014 press Undo on its row to reopen it')
+    :'';
+  const canUse=!!selPos&&!selDone;
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
     <div class="sec-title" style="margin:0">Monthly Progress</div>
     <select class="sel" style="margin-left:8px" onchange="tpMuSwitchMonth(this.value)">${(TP_MU_MONTHS||[]).map(m=>`<option value="${m}"${m===TP_MU_CUR?' selected':''}>${tpMuMonthLabel(m)}</option>`).join('')}</select>
     ${canAct?`<div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      ${selPos?`<span style="font-size:12px;color:var(--slate)">Selected: <b>${esc(selPos)}</b></span>`:'<span style="font-size:12px;color:var(--slate)">Select a position to upload or email</span>'}
-      <button class="btn" ${selPos?'':'disabled style="opacity:.45;cursor:not-allowed"'} onclick="tpMuUpload()"><i class="fa-solid fa-upload"></i> Upload</button>
-      <button class="btn" ${selPos?'':'disabled style="opacity:.45;cursor:not-allowed"'} onclick="tpMuEmail()"><i class="fa-solid fa-envelope"></i> Email</button>
+      ${selPos?`<span style="font-size:12px;color:var(--slate)">Selected: <b>${esc(selPos)}</b>${selDone?' <span class="tag t-gray" style="font-size:10px">complete</span>':''}</span>`:'<span style="font-size:12px;color:var(--slate)">Select a position to upload or email</span>'}
+      <button class="btn" ${canUse?'':'disabled style="opacity:.45;cursor:not-allowed"'} title="${esc(actWhy||('Upload CVs for '+selPos))}" onclick="tpMuUpload()"><i class="fa-solid fa-upload"></i> Upload</button>
+      <button class="btn" ${canUse?'':'disabled style="opacity:.45;cursor:not-allowed"'} title="${esc(actWhy||('Email the candidates on '+selPos))}" onclick="tpMuEmail()"><i class="fa-solid fa-envelope"></i> Email</button>
     </div>`:''}
   </div>
   <style>
@@ -17757,7 +17820,7 @@ function tpMuRender(counts){
         <td style="font-size:12px;color:var(--slate)">${esc((r.manpower_requests&&r.manpower_requests.department)||'—')}</td>
         ${TP_MU_COLS.map(s=>`<td style="text-align:center">${c[s]||0}</td>`).join('')}
         ${canAct?`<td onclick="event.stopPropagation()">${r.completed_at
-            ?`<button class="btn btn-sm" onclick="tpMuUncompleteRow(${r.id})" title="Completed ${esc(new Date(r.completed_at).toLocaleDateString())} — click to reopen"><i class="fa-solid fa-lock"></i> Un-complete</button>`
+            ?`<button class="btn btn-sm" onclick="tpMuUncompleteRow(${r.id})" title="Completed ${esc(new Date(r.completed_at).toLocaleDateString())} — click to reopen"><i class="fa-solid fa-rotate-left"></i> Undo</button>`
             :`<button class="btn btn-sm btn-primary" onclick="tpMuCompleteRow(${r.id})"><i class="fa-solid fa-check-double"></i> Complete</button>`}</td>`:''}
       </tr>`;
     }).join(''):`<tr><td colspan="${2+TP_MU_COLS.length+(canAct?2:0)}" style="text-align:center;padding:40px;color:var(--slate)">No positions for this month yet</td></tr>`}
@@ -17793,6 +17856,7 @@ window.tpMuSwitchMonth=function(m){TP_MU_CUR=m;TP_MU_SEL=null;tpMuLoad();};
 window.tpMuUpload=async function(){
   const position=TP_MU_SEL;
   if(!position){ toast('Choose a position first','err'); return; }
+  if(tpMuRowDone(position)){ toast(tpMuDoneWhy(position),'err'); return; }
   let positions=[];
   try{ positions=await hrOpenPositions(); }
   catch(e){ toast('Could not read the open positions: '+((e&&e.message)||e),'err'); return; }
@@ -17848,9 +17912,19 @@ window.rsUploadFiles=async function(files,posId,posText){
    already sent a test or past that stage is not in it. Pre-ticking is the only difference: on a
    position's own row the normal case is "all of them", and unticking the odd one is less work than
    ticking nine. */
+/* The buttons are already switched off for a completed position; these are here for a screen
+   left open while somebody else closed it out. */
+function tpMuRowDone(position){
+  const r=(TP_MU_ROWS||[]).find(function(x){return String(x.position||'')===String(position||'');});
+  return !!(r&&r.completed_at);
+}
+function tpMuDoneWhy(position){
+  return '\u201c'+position+'\u201d is marked Complete \u2014 press Undo on its row to reopen it';
+}
 window.tpMuEmail=async function(){
   const position=TP_MU_SEL;
   if(!position){ toast('Choose a position first','err'); return; }
+  if(tpMuRowDone(position)){ toast(tpMuDoneWhy(position),'err'); return; }
   if(!rtCanManage()){ toast('Only the test owners can email candidates','err'); return; }
   if(!RT_RECORDS){
     try{
@@ -17884,7 +17958,7 @@ window.tpMuUncompleteRow=async function(id){
   if(!recGuard())return;
   const {error}=await sb.schema('hr').from('tracker_rows').update({completed_at:null}).eq('id',id);
   if(error){toast(error.message,'err');return;}
-  toast('Reopened');await tpMuLoad();
+  toast('Reopened \u2014 this position can take candidates again');await tpMuLoad();
 };
 
 VIEWS.campaigns=async function(v,seg){
