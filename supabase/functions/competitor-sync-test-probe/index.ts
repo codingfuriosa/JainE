@@ -112,21 +112,65 @@ function s3() {
    job had ever saved - while the ads from the other path, which did prefix correctly, were fine.
    Writing the prefix here repairs them on the next run as a side effect, because this job
    re-copies the creative each night and overwrites the stored key with it. */
+/* WHAT CAME BACK IS CHECKED BEFORE IT IS KEPT, AND KEPT AS WHAT IT ACTUALLY IS.
+
+   The second time this screen filled with "Media unavailable" (see the note above for the first)
+   the files were present in S3 and served a clean 200 - they simply were not pictures. Every DTC
+   page failed on every ad, Godrej never failed, and opening one of the files directly gave a
+   broken-image icon. The download had answered 200 with something that was not an image - an
+   expired-link page, an error document, a redirect body - and this function wrote it out under a
+   .jpg name with an image/jpeg label. S3 then served that garbage faithfully and the browser could
+   not decode it. "Did the request succeed" and "is this a picture" are not the same question, and
+   only the first was being asked.
+
+   So the first bytes are read before anything is stored. A JPEG begins FF D8 FF, a PNG with the
+   8-byte signature, GIF with "GIF8", WebP with "RIFF....WEBP", and an MP4/MOV carries "ftyp" at
+   offset 4. Anything else is not media this screen can show, and is refused rather than saved -
+   a tile that stays empty is recoverable on the next run, a stored impostor is not.
+
+   The extension and the content type now follow the bytes. Everything used to be written as .jpg
+   whatever it was, which is why not one video has been recorded since 24 September while the
+   September run captured 360 of them: a video ad was saved as a picture and could never display. */
+const MEDIA_KINDS: Array<{ ext: string; mime: string; is: (b: Uint8Array) => boolean }> = [
+  { ext: "jpg",  mime: "image/jpeg", is: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  { ext: "png",  mime: "image/png",  is: (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 },
+  { ext: "gif",  mime: "image/gif",  is: (b) => b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38 },
+  { ext: "webp", mime: "image/webp", is: (b) => b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46
+                                                && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50 },
+  { ext: "mp4",  mime: "video/mp4",  is: (b) => b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70 },
+];
+function sniffMedia(bytes: Uint8Array) {
+  if (bytes.byteLength < 12) return null;
+  return MEDIA_KINDS.find((k) => k.is(bytes)) || null;
+}
+/* Returns {path, mediaType} so the caller can record what it really is, or a reason when nothing
+   was stored - the reason is counted in the run's report rather than thrown away, because a job
+   that writes nothing and still calls itself "succeeded" is how both of these faults survived for
+   weeks. */
 async function copyMedia(url: string, wlId: number, adId: string) {
   const c = s3();
-  if (!c) return null;
+  if (!c) return { path: null, mediaType: null, why: "no S3 credentials" };
   try {
     const r = await fetch(url);
-    if (!r.ok) return null;
+    if (!r.ok) return { path: null, mediaType: null, why: "source returned " + r.status };
     const bytes = new Uint8Array(await r.arrayBuffer());
-    if (!bytes.byteLength) return null;
-    const key = "portal/competitors/" + wlId + "/" + adId + "_0.jpg";
+    if (!bytes.byteLength) return { path: null, mediaType: null, why: "source returned 0 bytes" };
+    const kind = sniffMedia(bytes);
+    if (!kind) {
+      /* Said with the first bytes in hex, because the useful question afterwards is always "what
+         WAS it then" - HTML starts 3c 21 or 3c 68, JSON 7b 22. */
+      const head = Array.from(bytes.slice(0, 4)).map((x) => x.toString(16).padStart(2, "0")).join(" ");
+      return { path: null, mediaType: null,
+               why: "not an image or video (" + bytes.byteLength + " bytes, starts " + head + ")" };
+    }
+    const key = "portal/competitors/" + wlId + "/" + adId + "_0." + kind.ext;
     const dest = "https://" + c.bucket + ".s3." + c.region + ".amazonaws.com/"
       + key.split("/").map(encodeURIComponent).join("/");
     const put = await c.aws.fetch(dest, { method: "PUT", body: bytes,
-      headers: { "Content-Type": "image/jpeg" } });
-    return put.ok ? "s3:" + key : null;
-  } catch (_e) { return null; }
+      headers: { "Content-Type": kind.mime } });
+    if (!put.ok) return { path: null, mediaType: null, why: "S3 refused the upload (" + put.status + ")" };
+    return { path: "s3:" + key, mediaType: kind.mime.startsWith("video/") ? "video" : "image", why: null };
+  } catch (e) { return { path: null, mediaType: null, why: String((e as Error)?.message || e) }; }
 }
 
 Deno.serve(async (req) => {
@@ -203,7 +247,8 @@ Deno.serve(async (req) => {
       await mcp(token, "notifications/initialized", {}, init.session, true);
 
       const rep: any = { of_watchlist: all.length, slice: { skip, take, names: wl.map((w) => w.name) },
-        found: 0, written: 0, media_copied: 0, media_failed: 0, dry_run: !write,
+        found: 0, written: 0, media_copied: 0, media_failed: 0,
+        media_why: {} as Record<string, number>, media_examples: [] as string[], dry_run: !write,
         per_page: {} as Record<string, number>, errors: [] as string[] };
 
       const call = await mcp(token, "tools/call", { name: "get_meta_ads", arguments: {
@@ -226,11 +271,24 @@ Deno.serve(async (req) => {
             for (const a of list) {
               const id = String(a?.ad_id || "").trim(); if (!id) continue;
               const src = media[id] || null;
-              let items: any = null, first: string | null = null;
+              let items: any = null, first: string | null = null, firstType: string | null = null;
               if (src && withMedia) {
-                const path = await copyMedia(String(src), w.id, id);
-                if (path) { first = path; items = [{ s3_path: path, media_type: "image" }]; rep.media_copied++; }
-                else rep.media_failed++;
+                const got = await copyMedia(String(src), w.id, id);
+                if (got.path) {
+                  first = got.path; firstType = got.mediaType;
+                  items = [{ s3_path: got.path, media_type: got.mediaType }];
+                  rep.media_copied++;
+                } else {
+                  rep.media_failed++;
+                  /* Kept per reason rather than as one total, so "the link had expired" and "S3
+                     refused it" are not reported as the same thing. Capped: a page that fails on
+                     every ad must not turn the report into a wall of identical lines. */
+                  const why = got.why || "unknown";
+                  rep.media_why[why] = (rep.media_why[why] || 0) + 1;
+                  if (rep.media_examples.length < 5) {
+                    rep.media_examples.push((w?.name || pageId) + " / " + id + ": " + why);
+                  }
+                }
               }
               const out: any = { id, watchlist_id: w.id, page_id: String(pageId),
                 page_name: a?.page_name || a?.advertiser_name || w.name,
@@ -246,7 +304,7 @@ Deno.serve(async (req) => {
                 last_seen_at: new Date().toISOString() };
               /* Only overwrite the picture when a new one was actually copied - a failed download
                  must not wipe a good image stored on an earlier run. */
-              if (items) { out.media_items = items; out.media_s3_path = first; out.media_type = "image"; }
+              if (items) { out.media_items = items; out.media_s3_path = first; out.media_type = firstType; }
               const ins = await fetch(SB + "/rest/v1/competitor_ads?on_conflict=id", { method: "POST",
                 headers: { ...H, Prefer: "resolution=merge-duplicates,return=minimal" },
                 body: JSON.stringify(out) });
