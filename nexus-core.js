@@ -22660,28 +22660,13 @@ async function custLoadData(customerId,force){
     const {data}=await sb.schema('cust').from('farvision_contacts').select('*').in('unit_id',unitIds).eq('is_current',true);
     contacts=data||[];
   }
-  /* Anything the customer corrected themselves wins over the imported row. It is kept in its own
-     table because farvision_contacts is rewritten by the nightly import - an edit written there
-     would quietly disappear overnight. Blank fields in the override mean "no correction", so the
-     imported value still shows through. */
-  let overrides=[];
-  if(unitIds.length){
-    const {data}=await sb.schema('cust').from('contact_overrides').select('*').in('unit_id',unitIds);
-    overrides=data||[];
-  }
-  const ovByUnit={};overrides.forEach(o=>{ovByUnit[o.unit_id]=o;});
+  /* Contact details are Farvision's, exactly as imported (10 Oct 2026). Customers could briefly edit
+     their phone / email / address here; that is gone - a customer edit would have replaced
+     Farvision's details on screen and on the Tax Invoice and Demand Letter without anyone in
+     post-sales knowing. A correction is a Support request; once Farvision is updated, the next
+     daily import brings it here. */
   const contactByUnit={};
-  contacts.forEach(c=>{
-    const o=ovByUnit[c.unit_id];
-    contactByUnit[c.unit_id]=o
-      ? Object.assign({},c,{
-          contact_phone:   o.contact_phone   || c.contact_phone,
-          contact_email:   o.contact_email   || c.contact_email,
-          contact_address: o.contact_address || c.contact_address,
-          _edited:{phone:!!o.contact_phone,email:!!o.contact_email,address:!!o.contact_address}
-        })
-      : c;
-  });
+  contacts.forEach(c=>{ contactByUnit[c.unit_id]=c; });
   // Whether this customer has ever submitted a referral, across all their units (the sidebar is
   // shared across units, not per-unit) - drives the "Earn" badge in custSidebarTabs. Left undefined
   // rather than defaulted to false until this resolves, so the sidebar's very first paint (before
@@ -22841,59 +22826,16 @@ const CUST_FIGURES_NOTICE='<div style="display:flex;gap:10px;align-items:flex-st
   '<i class="fa-solid fa-circle-info" style="margin-top:2px"></i><div><b>Your figures are being updated.</b> '+
   'We are reconciling this account against our accounting system, so the amounts are not being shown right now. '+
   'Please contact us before making any payment.</div></div>';
-/* One profile row, able to turn into an input. Rendered as text; custProfileEditStart swaps in the
-   field beside it rather than re-rendering the page, so a half-typed address survives a stray
-   click. "Updated by you" marks a value the customer corrected, so it is obvious which figures are
-   ours and which are theirs. */
-function custProfileField(key,icon,label,value,delay,c){
-  const edited=c&&c._edited&&c._edited[key];
+// One read-only profile row.
+function custProfileField(key,icon,label,value,delay){
   const isAddr=key==='address';
   return '<div class="cust-profile-item'+(isAddr?' cust-profile-addr':'')+'" style="animation-delay:'+delay+'">'
     +'<div class="cust-profile-icon"><i class="fa-solid '+icon+'"></i></div>'
     +'<div style="min-width:0;flex:1">'
-      +'<div class="cust-profile-label">'+esc(label)
-        +(edited?' <span style="color:#16855a;font-weight:600">· updated by you</span>':'')+'</div>'
-      +'<div class="cust-profile-value" id="custPV_'+key+'">'+esc(value||'—')+'</div>'
-      +(isAddr
-        ? '<textarea id="custPI_'+key+'" rows="3" style="display:none;width:100%;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13.5px;resize:vertical"></textarea>'
-        : '<input id="custPI_'+key+'" type="'+(key==='email'?'email':'tel')+'" style="display:none;width:100%;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13.5px">')
+      +'<div class="cust-profile-label">'+esc(label)+'</div>'
+      +'<div class="cust-profile-value">'+esc(value||'—')+'</div>'
     +'</div></div>';
 }
-const CUST_PROFILE_KEYS=['phone','email','address'];
-function custProfileToggle(editing){
-  CUST_PROFILE_KEYS.forEach(function(k){
-    const v=$('custPV_'+k), i=$('custPI_'+k);
-    if(!v||!i)return;
-    if(editing){ i.value=(v.textContent==='—'?'':v.textContent); }
-    v.style.display=editing?'none':'';
-    i.style.display=editing?'':'none';
-  });
-  ['custProfileCancel','custProfileSave','custProfileHint'].forEach(function(id){
-    const el=$(id); if(el) el.style.display=editing?'':'none';
-  });
-  const e=$('custProfileEdit'); if(e) e.style.display=editing?'none':'';
-}
-window.custProfileEditStart=function(){ custProfileToggle(true); const p=$('custPI_phone'); if(p)try{p.focus();}catch(_e){} };
-window.custProfileEditCancel=function(){ custProfileToggle(false); };
-window.custProfileSave=async function(unitId){
-  const btn=$('custProfileSave');
-  const vals={}; CUST_PROFILE_KEYS.forEach(function(k){ const i=$('custPI_'+k); vals[k]=i?i.value.trim():''; });
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
-  try{
-    const {error}=await sb.schema('cust').rpc('save_my_contact',
-      {p_unit_id:unitId,p_phone:vals.phone,p_email:vals.email,p_address:vals.address});
-    if(error)throw error;
-  }catch(e){
-    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Save'; }
-    // The database writes these messages for the customer to read, so show it rather than a generic one.
-    toast((e&&e.message)||'Could not save your details','err');
-    return;
-  }
-  toast('Your details have been updated','ok');
-  // Re-read so the page shows what was actually stored, not what was typed.
-  CUST_DATA=null;
-  renderPage();
-};
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
   const [{data:invRows},{data:rcptRows},{data:revRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
@@ -23073,19 +23015,9 @@ async function custTabOverview(data,unit){
         '</div>'+
       '</div>'+
       '<div class="cust-profile-details">'+
-        custProfileField('phone','fa-phone','Phone',c.contact_phone,'.1s',c)+
-        custProfileField('email','fa-envelope','Email',c.contact_email,'.15s',c)+
-        custProfileField('address','fa-location-dot','Correspondence address',c.contact_address,'.2s',c)+
-      '</div>'+
-      /* The customer can correct how we reach them. The registered name is NOT here: it is the
-         name on the booking and appears on receipts and demand letters, so it has to match the
-         agreement rather than follow a text box. */
-      '<div class="cust-profile-edit-bar" style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
-        '<span id="custProfileHint" style="margin-right:auto;font-size:12px;color:var(--slate);display:none">'+
-          'Changing these updates how we contact you. Your name and flat details cannot be changed here — please call us for those.</span>'+
-        '<button class="btn" id="custProfileEdit" onclick="custProfileEditStart('+unit.id+')"><i class="fa-solid fa-pen"></i> Update my details</button>'+
-        '<button class="btn" id="custProfileCancel" style="display:none" onclick="custProfileEditCancel()">Cancel</button>'+
-        '<button class="btn btn-primary" id="custProfileSave" style="display:none" onclick="custProfileSave('+unit.id+')"><i class="fa-solid fa-check"></i> Save</button>'+
+        custProfileField('phone','fa-phone','Phone',c.contact_phone,'.1s')+
+        custProfileField('email','fa-envelope','Email',c.contact_email,'.15s')+
+        custProfileField('address','fa-location-dot','Correspondence address',c.contact_address,'.2s')+
       '</div>'+
     '</div>'
     :'<div class="card card-pad empty">Profile not yet available — this updates after our next records sync.</div>';
