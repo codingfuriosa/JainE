@@ -23568,11 +23568,13 @@ window.custDownloadSelectedDocs=async function(){
     const receiptDates={};(rcpts2||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
     const rate=custDocRate(unit,csi);
     const lateFee=Number((snap&&snap.late_fee_accrued)||0);
+    const money=await custLoadMoney(unit.id);
     (invs||[]).forEach(inv=>{
       const {data:its}={data:(allInv||[]).find(a=>a.document_no===inv.document_no)};
       const items=its&&its.invoice_items?its.invoice_items:[];
       const {plan,prevDues}=custBuildPlan(allInv,alloc2,inv.document_date,receiptDates);
-      pages.push(custInvoiceDocHtml({inv:inv,items:items,plan:plan,prevDues:prevDues,lateFee:lateFee,rate:rate,unit:unit,contact:contact},'invoice',true));
+      const prevSplit=custPrevDuesSplit(inv,allInv,money);
+      pages.push(custInvoiceDocHtml({inv:inv,items:items,plan:plan,prevDues:prevDues,prevSplit:prevSplit,lateFee:lateFee,rate:rate,unit:unit,contact:contact},'invoice',true));
     });
   }
   if(!pages.length){try{w.close();}catch(_e){} toast('No documents could be loaded','err');return;}
@@ -23699,26 +23701,27 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
         '<td class="amt">'+custInr(it.amount||0)+'</td><td class="amt">'+custInr(it.tax||0)+'</td>'+
         '<td class="amt">'+custInr(it.net_amount||0)+'</td></tr>';
     }).join('');
-    // Previous dues is what is still unpaid on invoices raised before this one. It can only be
-    // stated as a single figure: receipts allocate against the net of a line, never split across
-    // its basic and tax, so an amount/GST breakup of a part-paid line would be invented.
-    const prev=Number(ctx.prevDues||0);
+    /* Previous dues, as Farvision prints it (9 Oct 2026, checked against its Tax Invoice
+       DA/0003226-27): everything billed on earlier invoices LESS everything received up to this
+       invoice's date - so it goes negative when the customer has paid ahead, and Total Payable
+       then shows the credit (-1,470 there, where the portal used to say 9,79,470 was payable on an
+       invoice paid in full the same day). Its Amount / GST split comes from custPrevDuesSplit. */
+    const ps=ctx.prevSplit||{amt:0,tax:0,net:Number(ctx.prevDues||0)};
     const lateFee=Number(ctx.lateFee||0);
+    const inr=v=>Number(v)<0?'-'+custInr(-Number(v)):custInr(v);
     const sumRow=(label,a,t,n,strong)=>'<tr'+(strong?' class="rcpt-strong"':'')+'><td colspan="3">'+esc(label)+'</td>'+
       '<td class="amt">'+a+'</td><td class="amt">'+t+'</td><td class="amt">'+n+'</td></tr>';
-    // Previous dues and late fees carry no basic/GST split of their own, so a running total can
-    // only show those two columns while both are nil - which is the normal case, and then the
-    // running totals simply repeat the invoice's own figures, exactly as Farvision prints them.
-    // Once either is non-nil the split is genuinely unknown and the column shows a dash rather
-    // than a made-up number.
-    const carry=(v,blocked)=>blocked?'—':custInr(v);
+    // A late fee carries no basic/GST split of its own, so once there is one the running total's
+    // two split columns show a dash rather than a made-up number.
+    const carry=(v,blocked)=>blocked?'—':inr(v);
+    const payNet=net+ps.net, withFee=payNet+lateFee;
     foot=
-      sumRow('Total Invoice Amount :',custInr(amt),custInr(tax),custInr(net))+
-      sumRow('Previous dues :',carry(0,prev),carry(0,prev),custInr(prev))+
-      sumRow('Total Payable :',carry(amt,prev),carry(tax,prev),custInr(net+prev),true)+
-      sumRow('Late Payment fees :',carry(0,lateFee),carry(0,lateFee),custInr(lateFee))+
-      sumRow('Total payable with interest :',carry(amt,prev||lateFee),carry(tax,prev||lateFee),custInr(net+prev+lateFee),true)+
-      '<tr><td colspan="6" class="rcpt-words">Amount in Words : '+esc(custAmountInWords(net+prev+lateFee))+'</td></tr>';
+      sumRow('Total Invoice Amount :',inr(amt),inr(tax),inr(net))+
+      sumRow('Previous dues :',inr(ps.amt),inr(ps.tax),inr(ps.net))+
+      sumRow('Total Payable :',inr(amt+ps.amt),inr(tax+ps.tax),inr(payNet),true)+
+      sumRow('Late Payment fees :',carry(0,lateFee),carry(0,lateFee),inr(lateFee))+
+      sumRow('Total payable with interest :',carry(amt+ps.amt,lateFee),carry(tax+ps.tax,lateFee),inr(withFee),true)+
+      '<tr><td colspan="6" class="rcpt-words">Amount in Words : '+esc((withFee<0?'Minus ':'')+custAmountInWords(withFee))+'</td></tr>';
   }
   return ''+
     '<div class="rcpt-doc'+(forPrint?' print':'')+'">'+
@@ -23741,6 +23744,70 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
       '<div class="rcpt-addr" style="margin-top:14px">PAN NO : '+esc(CUST_RECEIPT_ISSUER.pan)+' &nbsp;·&nbsp; GSTIN : '+esc(CUST_RECEIPT_ISSUER.gstin)+'</div>'+
       '<div class="rcpt-addr">This is a system generated document. No signature required.</div>'+
     '</div>';
+}
+
+/* Previous dues on a Tax Invoice, the way Farvision states it: billed on invoices raised before
+   this one, less money received up to this invoice's date. Money received is counted the way the
+   Ledger counts it - receipt lines against this unit's live demands (a payment against a cancelled
+   booking's demand is not this customer's), unallocated / on-account money, less cheque returns,
+   plus transfers in, less transfers out and refunds.
+   The Amount / GST split follows Farvision: a payment against a line is split in that line's own
+   GST proportion, rounded per receipt (50,000 against the 2,10,000 booking line of DA/0003226-27 is
+   47,619 + 2,381); money not set against a line (on account, transfers, returns) is all Amount.
+   money: {receipts:[{id,receipt_date,total_amount}], items:[receipt_items], reversals, ptcIn, ptcOut} */
+function custPrevDuesSplit(inv,allInv,money){
+  const SEP=String.fromCharCode(31), d=String(inv&&inv.document_date||''), no=String(inv&&inv.document_no||'');
+  const isBefore=iv=>{ const id=String(iv.document_date||''), ino=String(iv.document_no||'');
+    return ino!==no&&(id<d||(id===d&&ino<no)); };
+  const upTo=x=>!d||!x||String(x).slice(0,10)<=d;
+  const lines={}, live=new Set(); let bAmt=0,bTax=0;
+  (allInv||[]).forEach(iv=>{
+    live.add(iv.document_no);
+    (iv.invoice_items||[]).forEach(it=>{
+      const k=[iv.document_no,it.schedule||'',it.revenue_head||''].join(SEP);
+      const l=lines[k]=lines[k]||{tax:0,net:0};
+      l.tax+=Number(it.tax||0); l.net+=Number(it.net_amount||0);
+      if(isBefore(iv)){ bAmt+=Number(it.amount||0); bTax+=Number(it.tax||0); }
+    });
+  });
+  const m=money||{}, byReceipt={};
+  (m.items||[]).forEach(i=>{(byReceipt[i.receipt_id]=byReceipt[i.receipt_id]||[]).push(i);});
+  let rAmt=0,rTax=0;
+  (m.receipts||[]).forEach(r=>{
+    if(!upTo(r.receipt_date)) return;
+    const its=byReceipt[r.id]||[];
+    if(!its.length){ rAmt+=Number(r.total_amount||0); return; }
+    const perLine={};
+    its.forEach(i=>{
+      if(i.against_demand_no&&!live.has(i.against_demand_no)) return;
+      const k=i.against_demand_no?[i.against_demand_no,i.schedule||'',i.revenue_head||''].join(SEP):'';
+      perLine[k]=(perLine[k]||0)+Number(i.amount||0);
+    });
+    Object.keys(perLine).forEach(k=>{
+      const paid=perLine[k], l=k?lines[k]:null;
+      const t=(l&&l.net)?Math.round(paid*l.tax/l.net):0;
+      rTax+=t; rAmt+=paid-t;
+    });
+  });
+  (m.reversals||[]).forEach(v=>{ if(upTo(v.receipt_reversal_date)) rAmt-=Number(v.reversal_amount||0); });
+  (m.ptcIn||[]).forEach(p=>{ if(upTo(p.document_date)) rAmt+=Number(p.amount||0); });
+  (m.ptcOut||[]).forEach(p=>{ if(upTo(p.document_date)) rAmt-=Number(p.amount||0); });
+  const r2=v=>Math.round(v*100)/100;
+  const amt=r2(bAmt-rAmt), tax=r2(bTax-rTax);
+  return {amt:amt,tax:tax,net:r2(amt+tax)};
+}
+async function custLoadMoney(unitId){
+  const [{data:receipts},{data:reversals},{data:ptcIn},{data:ptcOut}]=await Promise.all([
+    sb.schema('cust').from('money_receipts').select('id,receipt_date,total_amount').eq('unit_id',unitId).eq('is_current',true),
+    sb.schema('cust').from('receipt_reversals').select('receipt_reversal_date,reversal_amount').eq('unit_id',unitId).eq('is_current',true),
+    sb.schema('cust').from('ptc_transfers').select('document_date,amount').eq('transferee_unit_id',unitId).eq('is_reversed',false).is('deleted_at',null),
+    sb.schema('cust').from('ptc_transfers').select('document_date,amount').eq('source_unit_id',unitId).eq('is_reversed',false).is('deleted_at',null)
+  ]);
+  const ids=(receipts||[]).map(r=>r.id).filter(Boolean);
+  const {data:items}=ids.length
+    ? await sb.schema('cust').from('receipt_items').select('receipt_id,against_demand_no,schedule,revenue_head,amount,line_type,particulars').in('receipt_id',ids)
+    : {data:[]};
+  return {receipts:receipts||[],items:items||[],reversals:reversals||[],ptcIn:ptcIn||[],ptcOut:ptcOut||[]};
 }
 
 // Every billed line for the unit with what has been paid against it, plus what was still unpaid
@@ -23813,9 +23880,10 @@ window.custViewInvoice=async function(id){
   const receiptDates={};
   (rcpts||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
   const {plan,prevDues,onAccount}=custBuildPlan(allInv,alloc,inv.document_date,receiptDates);
+  const prevSplit=custPrevDuesSplit(inv,allInv,await custLoadMoney(unit.id));
 
   window._custInvoiceCache={
-    inv:inv, items:its||[], plan:plan, prevDues:prevDues, onAccount:onAccount,
+    inv:inv, items:its||[], plan:plan, prevDues:prevDues, prevSplit:prevSplit, onAccount:onAccount,
     lateFee:Number((snap&&snap.late_fee_accrued)||0),
     rate:custDocRate(unit,csi),
     unit:unit, contact:(cts&&cts[0])||null, fmt:'invoice'
