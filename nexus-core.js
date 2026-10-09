@@ -24379,6 +24379,33 @@ VIEWS.mail=function(v,seg){
    the `transcription-analyze` edge function. Results land in acc.transcriptions. */
 const TR_LANG_NAMES={hi:'Hindi',en:'English',bn:'Bengali',ur:'Urdu',ta:'Tamil',te:'Telugu',mr:'Marathi',gu:'Gujarati',pa:'Punjabi'};
 const TR_TIMERS={};
+/* EVERY COLUMN EXCEPT THE FIVE ONLY A DETAIL SCREEN EVER READS.
+
+   acc.transcriptions is 9.7MB over 1,373 rows and the two list fetches both asked for '*'. Of
+   that, utterances (1.2MB), transcript_bn (1.5MB), qa_evaluation (793KB), original_crm_response
+   (307KB) and analysis (146KB) - 4MB, 41% of the table - are never touched by a list row. They
+   are read by traDetail and trDetail, and BOTH of those re-fetch their own row with select('*')
+   before rendering, so dropping them here costs those screens nothing at all.
+
+   What is deliberately KEPT, because a list row genuinely does use it:
+     call_history / pending_calls - traCallCount() counts them in the list
+     transcript / transcript_en   - trDownloadRows() exports them straight from list rows
+     criteria                     - trExportHtml() reads it from list rows
+
+   Listed out rather than expressed as "* minus five" because PostgREST has no such syntax. A new
+   column added to the table will not appear here until it is added by hand - which is the usual
+   cost of naming columns, and the reason the list says plainly what it leaves out. */
+const TR_LIST_COLS='id,title,file_name,s3_path,size_bytes,duration_seconds,status,gladia_id,'
+  +'result_url,languages,transcript,summary,error_text,created_by,created_at,updated_at,phone,'
+  +'customer_name,project,qualification,reason,criteria,transcript_en,folder,pinned,pin_rank,'
+  +'deleted_at,deleted_by,lead_id,business_unit_name,source,source_url,lead_mobile,'
+  +'telephony_call_id,recording_url,non_transcribable_reason,dashboard_fields,summary_verdict,'
+  +'crm_status,report_date,call_uuid,ai_lead_category,mismatch,mismatch_severity,mismatch_reason,'
+  +'verification,qa_score,synced_at,attempts,crm_lost_reason,crm_remarks,next_follow_up_date,'
+  +'discrepancy,has_discrepancy,ai_lost_reason,lost_reason_match,queue_seq,queued_at,'
+  +'processing_started_at,completed_at,attempt_count,last_error,source_date,sync_run_id,'
+  +'transcription_status,comparison_status,comparison_reason,call_history,pending_calls,'
+  +'status_trail,processed_call_uuids,gemini_model,merged_into';
 let TR_ROWS=null;
 let TR_DELETED_ROWS=null; // soft-deleted calls, shown on their own "Deleted" tab
 let TR_FILTER='all'; // 'all'|'qualified'|'followup'|'notqualified'|'nil' — driven by the KPI cards
@@ -24433,7 +24460,7 @@ async function trFetch(force){
   const PAGE=1000; let out=[], from=0;
   try{
     for(;;){
-      const {data,error}=await sb.schema('acc').from('transcriptions').select('*')
+      const {data,error}=await sb.schema('acc').from('transcriptions').select(TR_LIST_COLS)
         .is('deleted_at',null).order('created_at',{ascending:false}).range(from,from+PAGE-1);
       if(error)throw error;
       const batch=data||[];
@@ -25065,7 +25092,7 @@ async function traFetch(force){
   const PAGE=1000;let out=[],from=0;
   try{
     for(;;){
-      const {data,error}=await sb.schema('acc').from('transcriptions').select('*')
+      const {data,error}=await sb.schema('acc').from('transcriptions').select(TR_LIST_COLS)
         .eq('source','lost_call_sync').is('deleted_at',null)
         .order('source_date',{ascending:false}).order('id',{ascending:false})
         .range(from,from+PAGE-1);
@@ -25591,8 +25618,20 @@ window.traDetailRefresh=async function(id){
 async function traDetail(v,id){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Call']);
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
-  let r=null;
-  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').eq('id',id).single();r=data;}catch(e){}
+  /* THE CALL AND ITS REMARKS ARE FETCHED TOGETHER, NOT ONE AFTER THE OTHER.
+     The remarks query is keyed on the id from the address bar, not on anything inside the call,
+     so waiting for the call to come back before asking for them was dead time - two round trips
+     to Mumbai in series where one pair in parallel does. Each still fails on its own: a missing
+     call is the "not found" card below, and remarks that fail to load leave the panel empty
+     rather than taking the whole screen down with them. */
+  const [rowRes,cmtRes]=await Promise.all([
+    sb.schema('acc').from('transcriptions').select('*').eq('id',id).single()
+      .then(function(x){return x;},function(){return {data:null};}),
+    sb.schema('acc').from('transcription_comments').select('*')
+      .eq('transcription_id',id).order('created_at')
+      .then(function(x){return x;},function(){return {data:[]};})
+  ]);
+  const r=rowRes&&rowRes.data;
   if(!r){
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
       +'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Call not found</div>'
@@ -25600,12 +25639,7 @@ async function traDetail(v,id){
     return;
   }
   const st=traStatus(r);
-  let remarks=[];
-  try{
-    const {data:cd}=await sb.schema('acc').from('transcription_comments')
-      .select('*').eq('transcription_id',id).order('created_at');
-    remarks=cd||[];
-  }catch(e){ remarks=[]; }
+  const remarks=(cmtRes&&cmtRes.data)||[];
   const crm=r.original_crm_response||{};
   const back='<button class="btn btn-sm" onclick="goBack(\'transcription/0\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
   const retry=(st==='failed')
@@ -29304,8 +29338,17 @@ window.trUploadStart=async function(){
 async function trDetail(v,id){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Recording']);
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
-  let r=null;
-  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').eq('id',id).single();r=data;}catch(e){}
+  /* The recording and its comments go out together - see traDetail for the reasoning. Each
+     still fails independently: no recording is the "not found" card, and comments that fail
+     leave an empty comment list rather than an empty screen. */
+  const [rowRes,cmtRes]=await Promise.all([
+    sb.schema('acc').from('transcriptions').select('*').eq('id',id).single()
+      .then(function(x){return x;},function(){return {data:null};}),
+    sb.schema('acc').from('transcription_comments').select('*')
+      .eq('transcription_id',id).order('created_at')
+      .then(function(x){return x;},function(){return {data:[]};})
+  ]);
+  const r=rowRes&&rowRes.data;
   if(!r){v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Recording not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription\')">Back</button></div>';return;}
   const phone=r.phone||r.title||'';
   const name=phone?trPhoneFmt(phone):(r.file_name||'Recording');
@@ -29313,8 +29356,7 @@ async function trDetail(v,id){
   const sub=(r.customer_name?esc(r.customer_name)+' · ':'')+fmtDate(r.created_at)+' · '+esc((r.created_by||'').split('@')[0]);
   const o=trOutcome(r.qualification)||TR_OUTCOMES['Not Qualified'];
   const banner=(r.status==='done'&&r.qualification)?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+o.colour+'"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span class="tag '+o.tag+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+o.icon+'"></i> '+esc(r.qualification)+'</span>'+(r.project&&r.project!=='Unclear'?'<span style="font-weight:700;color:#0d9488;font-size:15px">'+esc(r.project)+'</span>':'')+'</div>'+(r.reason?'<div style="margin-top:10px;font-size:14px;line-height:1.55">'+esc(r.reason)+'</div>':'')+'</div>'):'';
-  let comments=[];
-  try{const {data:cd}=await sb.schema('acc').from('transcription_comments').select('*').eq('transcription_id',id).order('created_at');comments=cd||[];}catch(e){}
+  const comments=(cmtRes&&cmtRes.data)||[];
   const backBtn='<button class="btn btn-sm" onclick="goBack(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
   v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
     +'<div id="trAudio" style="margin:6px 0 16px"></div>'
