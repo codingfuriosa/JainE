@@ -691,10 +691,10 @@
     .rq-filter{height:36px;min-width:180px;margin-left:6px;border:1.5px solid #2563eb !important;color:#1d4ed8;font-weight:600}
     .rq-table{width:100%;background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
     .rq-grid{display:flex;width:max-content}
-    .rq-col{flex:none;width:156px;display:flex;flex-direction:column;border-left:1px solid var(--line)}
+    .rq-col{flex:none;width:208px;display:flex;flex-direction:column;border-left:1px solid var(--line);min-height:560px}
     .rq-col.days{width:48px;border-left:0;position:sticky;left:0;z-index:2;background:var(--bg-card,#fff);
       border-right:1px solid var(--line)}
-    .rq-col.sum{width:176px;background:var(--bg-soft,#f8fafc)}
+    .rq-col.sum{width:208px;background:var(--bg-soft,#f8fafc)}
     .rq-col.sum.q{background:#f6f3ff;border-left:1px solid #cbd5e1}
     .rq-col.sum.y{background:#fdf4f5;border-left:2px solid #cbd5e1}
     .rq-h{height:50px;box-sizing:border-box;padding:7px 9px;border:0;border-bottom:1px solid var(--line);
@@ -702,6 +702,7 @@
     button.rq-h{cursor:pointer}
     button.rq-h:hover{background:#eef2f7}
     .rq-h.cur{box-shadow:inset 0 -2px 0 #e0121c}
+    .rq-col.cur{background:#fffafa}
     .rq-h b{font-size:12px;white-space:nowrap}
     .rq-h span{font-size:10.5px;color:var(--slate);white-space:nowrap}
     .rq-dn{height:104px;box-sizing:border-box;border-top:1px solid var(--line);padding:7px 6px;font-size:11.5px;
@@ -715,10 +716,11 @@
     .rq-cell.out{background:repeating-linear-gradient(135deg,transparent 0 6px,rgba(15,23,42,.03) 6px 12px);cursor:default}
     .rq-cell.out:hover{background:repeating-linear-gradient(135deg,transparent 0 6px,rgba(15,23,42,.03) 6px 12px)}
     .rq-cell .more{font-size:10.5px;font-weight:600;color:var(--slate);padding:0 3px}
-    .rq-chip{display:flex;align-items:center;gap:5px;width:100%;box-sizing:border-box;min-height:22px;padding:2px 6px;
-      border-radius:5px;font:inherit;font-size:11px;font-weight:600;line-height:1.2;text-align:left;cursor:pointer;
+    .rq-chip{display:flex;align-items:center;gap:5px;width:100%;box-sizing:border-box;min-height:22px;padding:4px 8px;
+      border-radius:6px;font:inherit;font-size:12px;font-weight:600;line-height:1.2;text-align:left;cursor:pointer;
       background:var(--cb);color:var(--cc);border:1.5px solid transparent}
-    .rq-chip span{flex:1;min-width:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+    .rq-chip span{flex:1;min-width:0;overflow-wrap:anywhere}
+    .rq-chip small{display:block;font-size:10.5px;font-weight:500;opacity:.8}
     .rq-chip.st-done{opacity:.55;text-decoration:line-through}
     .rq-chip.st-overdue{background:#fff;border-color:#dc2626}
     .rq-chip.st-next{opacity:.8}
@@ -1158,46 +1160,42 @@
     const b=$('acBody'); if(!b||!REC_DATA) return;
     recBuild();
     const v=REC_VIEW, today=istTodayISO(), fyLbl='FY '+v.fy+'\u2013'+String(v.fy+1).slice(2);
-    const chip=x=>{ const s=REC_DATA.series[x.i], f=REC_FQC(s.freq);
-      return '<button type="button" class="rq-chip st-'+x.o.st+'" style="--cc:'+f.c+';--cb:'+f.bg+'" title="'+esc2(s.title+' \u00b7 '+f.label+' \u00b7 '+REC_ST[x.o.st])+'"'
-        +' onclick="event.stopPropagation();recOpen('+x.i+',\''+x.o.date+'\')"><span>'+esc2(s.title)+'</span></button>'; };
-    /* The Month column holds the monthly tasks of that month, the Quarter column the quarterly ones
-       and the Year column the annual ones - not everything that fell inside the period. */
-    const sumCell=(freq,from,to,label)=>{
-      const items=recIn(from,to).filter(x=>REC_DATA.series[x.i].freq===freq), f=REC_FQC(freq);
-      return '<div class="rq-sumcell" onclick="recPeriod(\''+freq+'\',\''+from+'\',\''+to+'\',\''+esc2(label)+'\')">'
-        +'<span class="n">'+items.length+'<small>task'+(items.length===1?'':'s')+'</small></span>'
-        +(items.length?'<span class="l"><i class="rq-dot" style="background:'+f.c+'"></i>'+f.label+'<b>'+items.length+'</b></span>'+items.map(chip).join(''):'')
-        +'</div>'; };
-    let cols='<div class="rq-col days"><div class="rq-h"></div>'+['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>'<div class="rq-dn">'+d+'</div>').join('')+'</div>';
+    const chip=x=>{ const s=REC_DATA.series[x.i], f=REC_FQC(s.freq), p=dpParse(x.o.date);
+      return '<button type="button" class="rq-chip st-'+x.o.st+'" style="--cc:'+f.c+';--cb:'+f.bg+'" title="'+esc2(s.title+' · '+f.label+' · '+REC_ST[x.o.st])+'"'
+        +' onclick="event.stopPropagation();recOpen('+x.i+',\''+x.o.date+'\')"><span>'+esc2(s.title)+'<small>'+DP_DOWL[new Date(p.y,p.m,p.d).getDay()].slice(0,3)+' '+p.d+' '+DP_MONS[p.m]+'</small></span></button>'; };
+    /* Every column reads the same way: how many tasks, then the tasks grouped by frequency, each
+       with its date. A week column holds everything due that week; the Month column only the
+       monthly tasks, the Quarter column the quarterly ones and the Year column the annual ones. */
+    const body=(items,onclick)=>{
+      let h='<div class="rq-sumcell" onclick="'+onclick+'"><span class="n">'+items.length+'<small>task'+(items.length===1?'':'s')+'</small></span>';
+      REC_FQ.forEach(f=>{
+        const its=items.filter(x=>REC_DATA.series[x.i].freq===f.k); if(!its.length) return;
+        h+='<span class="l"><i class="rq-dot" style="background:'+f.c+'"></i>'+f.label+'<b>'+its.length+'</b></span>'+its.map(chip).join('');
+      });
+      return h+'</div>';
+    };
+    const sumCell=(freq,from,to,label)=>body(recIn(from,to).filter(x=>REC_DATA.series[x.i].freq===freq),
+      'recPeriod(\''+freq+'\',\''+from+'\',\''+to+'\',\''+esc2(label)+'\')');
+    let cols='';
     for(let mi=0; mi<12; mi++){
       const y=v.fy+Math.floor((3+mi)/12), m=(3+mi)%12, mFrom=dpIso(y,m,1), mTo=dpIso(y,m,dpDaysIn(y,m));
-      // every week that touches the month; days of the month before or after are left blank
+      // every week that touches the month, cut to the month's own days
       let mon=dpAdd(mFrom,-((new Date(y,m,1).getDay()+6)%7)), wk=0;
       while(mon<=mTo){
         wk++;
-        const end=dpAdd(mon,6), cFrom=mon<mFrom?mFrom:mon, cTo=end>mTo?mTo:end;
-        let cells='';
-        for(let k=0;k<7;k++){
-          const ds=dpAdd(mon,k);
-          if(ds<mFrom||ds>mTo){ cells+='<div class="rq-cell out"></div>'; continue; }
-          const p=dpParse(ds), its=REC_DATA.byDate[ds]||[];
-          cells+='<div class="rq-cell'+(ds===today?' today':'')+'" onclick="recDay(\''+ds+'\')">'
-            +'<span class="d">'+p.d+' '+DP_MONS[p.m]+'</span>'
-            +its.slice(0,2).map(chip).join('')
-            +(its.length>2?'<span class="more">+'+(its.length-2)+' more</span>':'')+'</div>';
-        }
-        cols+='<div class="rq-col" data-from="'+cFrom+'" data-to="'+cTo+'"><button type="button" class="rq-h'+(today>=cFrom&&today<=cTo?' cur':'')+'" onclick="recWeek(\''+cFrom+'\',\''+cTo+'\')" title="All tasks this week">'
-          +'<b>Wk '+wk+' \u00b7 '+DP_MONS[m]+'</b><span>'+dpShort(cFrom).replace(/ \d{4}$/,'')+' \u2013 '+dpShort(cTo).replace(/ \d{4}$/,'')+'</span></button>'+cells+'</div>';
+        const end=dpAdd(mon,6), cFrom=mon<mFrom?mFrom:mon, cTo=end>mTo?mTo:end, cur=today>=cFrom&&today<=cTo;
+        cols+='<div class="rq-col'+(cur?' cur':'')+'" data-from="'+cFrom+'" data-to="'+cTo+'"><button type="button" class="rq-h'+(cur?' cur':'')+'" onclick="recWeek(\''+cFrom+'\',\''+cTo+'\')" title="All tasks this week">'
+          +'<b>Wk '+wk+' · '+DP_MONS[m]+'</b><span>'+dpShort(cFrom).replace(/ \d{4}$/,'')+' – '+dpShort(cTo).replace(/ \d{4}$/,'')+'</span></button>'
+          +body(recIn(cFrom,cTo),'recWeek(\''+cFrom+'\',\''+cTo+'\')')+'</div>';
         mon=dpAdd(mon,7);
       }
-      cols+='<div class="rq-col sum"><div class="rq-h"><b>'+DP_MONL[m]+'</b><span>Monthly tasks</span></div>'+sumCell('monthly',mFrom,mTo,DP_MONL[m]+' '+y+' \u00b7 Monthly')+'</div>';
+      cols+='<div class="rq-col sum"><div class="rq-h"><b>'+DP_MONL[m]+'</b><span>Monthly tasks</span></div>'+sumCell('monthly',mFrom,mTo,DP_MONL[m]+' '+y+' · Monthly')+'</div>';
       if(mi%3===2){
         const q=(mi+1)/3, q0=3+(q-1)*3, qy=v.fy+Math.floor(q0/12), qFrom=dpIso(qy,q0%12,1);
-        cols+='<div class="rq-col sum q"><div class="rq-h"><b>Q'+q+'</b><span>Quarterly tasks</span></div>'+sumCell('quarterly',qFrom,mTo,'Q'+q+' '+fyLbl+' \u00b7 Quarterly')+'</div>';
+        cols+='<div class="rq-col sum q"><div class="rq-h"><b>Q'+q+'</b><span>Quarterly tasks</span></div>'+sumCell('quarterly',qFrom,mTo,'Q'+q+' '+fyLbl+' · Quarterly')+'</div>';
       }
     }
-    cols+='<div class="rq-col sum y"><div class="rq-h"><b>'+fyLbl+'</b><span>Annual tasks</span></div>'+sumCell('yearly',dpIso(v.fy,3,1),dpIso(v.fy+1,2,31),fyLbl+' \u00b7 Annually')+'</div>';
+    cols+='<div class="rq-col sum y"><div class="rq-h"><b>'+fyLbl+'</b><span>Annual tasks</span></div>'+sumCell('yearly',dpIso(v.fy,3,1),dpIso(v.fy+1,2,31),fyLbl+' · Annually')+'</div>';
     const opts='<option value="all">All frequencies</option>'+REC_FQ.filter(f=>f.k!=='daily'||REC_DATA.series.some(s=>s.freq==='daily'))
       .map(f=>'<option value="'+f.k+'"'+(v.filter===f.k?' selected':'')+'>'+f.label+'</option>').join('');
     // the year arrows and the frequency filter share the pills' row, so the table starts higher up
