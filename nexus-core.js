@@ -152,7 +152,57 @@ function dgRowLabelHtml(word,toEmails,byEmail){
 function fileIcon(ft){ft=(ft||'').toLowerCase();if(ft.includes('pdf'))return '<span class="ftype fp-pdf"><i class="fa-solid fa-file-pdf"></i></span>';if(ft.includes('xls')||ft.includes('csv'))return '<span class="ftype fp-xlsx"><i class="fa-solid fa-file-excel"></i></span>';if(ft.includes('doc'))return '<span class="ftype fp-docx"><i class="fa-solid fa-file-word"></i></span>';if(ft.match(/png|jpg|jpeg|gif|webp|svg/))return '<span class="ftype fp-img"><i class="fa-solid fa-file-image"></i></span>';return '<span class="ftype fp-other"><i class="fa-solid fa-file-lines"></i></span>';}
 function statusTag(s){const m={'Active':'t-green','Completed':'t-green','Archived':'t-gray','Draft':'t-amber','In Progress':'t-blue','Not Started':'t-gray','Blocked':'t-red','Upcoming':'t-gray','Current':'t-blue','Due':'t-red','Pending':'t-amber','Awaiting Approval':'t-amber','Done':'t-blue'};return '<span class="tag '+(m[s]||'t-gray')+'">'+esc(s||'—')+'</span>';}
 function prioTag(p){const m={'Urgent':'t-red','High':'t-amber','Medium':'t-blue','Low':'t-gray'};return '<span class="tag '+(m[p]||'t-gray')+'">'+esc(p||'—')+'</span>';}
-function loader(host){host.innerHTML='<div class="loader"><div class="spin"></div></div>';}
+/* THE SCREEN YOU ALREADY HAVE STAYS UP WHILE THE NEXT LOAD RUNS.
+
+   Every screen used to begin by wiping itself to a spinner and then going to fetch. On a fast
+   database nobody notices; on a slow one you spend the day watching a circle turn, and worse, you
+   lose the thing you were reading in order to be shown it again a moment later. Changing a filter,
+   switching a tab, saving a row - each one blanked the screen you were working in.
+
+   So: when a redraw belongs to the SAME module that is already on screen, the content stays put
+   and a thin bar runs across the top of the window instead. Nothing is faster. It simply stops
+   throwing your work away while it waits.
+
+   WHY ONLY THE SAME MODULE. The HTML on screen is only half of a screen - the other half is the
+   arrays in memory its buttons read. Within a module those are still there, so every row and
+   button on the kept HTML still works. Across modules they are not: Post Sales' lists are not
+   loaded while you are in Accountability, and a click on a stale row would act on nothing. That
+   case still blanks, deliberately. */
+let LOAD_BAR_TIMER=null;
+function loadBarShow(){
+  let el=document.getElementById('loadBar');
+  if(!el){ el=document.createElement('div'); el.id='loadBar'; document.body.appendChild(el); }
+  el.classList.add('on');
+  clearTimeout(LOAD_BAR_TIMER);
+  /* A backstop, because nothing here can know that a fetch has given up. A view that throws before
+     it redraws would otherwise leave the bar running for ever, which reads as "still loading" when
+     nothing is. Fifteen seconds is longer than any screen should honestly take. */
+  LOAD_BAR_TIMER=setTimeout(loadBarHide,15000);
+}
+function loadBarHide(){
+  clearTimeout(LOAD_BAR_TIMER); LOAD_BAR_TIMER=null;
+  const el=document.getElementById('loadBar'); if(el)el.classList.remove('on');
+}
+/* The bar comes down when the host actually redraws, which is the only honest signal available -
+   a view finishing is a view replacing its contents. Attached once per element. */
+function loaderWatch(host){
+  if(host.__loadObs) return;
+  try{
+    const obs=new MutationObserver(function(){ loadBarHide(); });
+    obs.observe(host,{childList:true});
+    host.__loadObs=obs;
+  }catch(_e){ /* no observer here - the timer above still brings it down */ }
+}
+function loader(host){
+  if(!host) return;
+  const keep = host.dataset.loaderPage===PAGE
+            && host.innerHTML
+            && host.innerHTML.indexOf('class="loader"')<0;
+  host.dataset.loaderPage=PAGE;
+  if(keep){ loaderWatch(host); loadBarShow(); return; }
+  loadBarHide();
+  host.innerHTML='<div class="loader"><div class="spin"></div></div>';
+}
 
 /* modal */
 function openModal(html,size){const h=$('modalHost');h.innerHTML='<div class="modal '+(size||'')+'">'+html+'</div>';$('overlay').classList.add('show');}
@@ -4830,7 +4880,7 @@ VIEWS.tasks=async function legacyTasksView(v,seg){
      Painting a loader and returning removes the race at its source — nothing is left in flight to
      overwrite the real UI, and accountability.js repaints as soon as it is in place. */
   if(PAGE==='tasks'){
-    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    loader(v);
     /* If accountability.js never arrives at all (a failed or blocked download), say so plainly
        rather than spinning forever — and only if the real view is still not installed by then. */
     clearTimeout(window.__accWaitTimer);
@@ -8558,7 +8608,7 @@ async function secList(v){
 }
 async function secUserDetail(v,email){
   setCrumb(['Control Panel',email]);
-  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  loader(v);
   let users=[];try{const {data}=await sb.schema('adm').rpc('admin_list_users');users=data||[];}catch(e){}
   const u=(users||[]).find(x=>x.email===email);
   if(!u){v.innerHTML='<div class="card card-pad empty">User not found</div>';return;}
@@ -8757,7 +8807,7 @@ const WS_CSS='<style id="wsCss">'
 
 VIEWS.weekly_status=async function(v){
   setCrumb(['Overview','Weekly Status']);
-  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  loader(v);
   await wsLoad();
   if(WS.items===null){
     v.innerHTML=mHead('fa-people-group','#7c3aed','Weekly Status')
@@ -9424,7 +9474,7 @@ async function fhLoadForms(force){
 /* ---- Design tab: a plain row list, one line per form ---- */
 async function fhDesign(){
   const b=$('fhBody');if(!b)return;
-  b.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  loader(b);
   await fhLoadForms();
   FH_EDIT=null;
   fhDesignRender();
@@ -9498,7 +9548,7 @@ window.fhShowQR=async function(id){
 };
 window.fhRenderQR=async function(retry){
   const box=$('fhQrBox');if(!box||!FH_QR_CUR)return;
-  box.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  loader(box);
   const lib=await loadQRLib(retry);
   if(!lib){
     box.innerHTML=`<div style="max-width:260px"><div style="color:var(--err);font-size:13px;margin-bottom:10px"><i class="fa-solid fa-triangle-exclamation"></i> Couldn't load the QR generator. Check your connection.</div><button class="btn btn-sm" onclick="fhRenderQR(true)"><i class="fa-solid fa-rotate"></i> Retry</button></div>`;
@@ -9827,7 +9877,7 @@ async function fhPreviewPage(v){
 /* ---- Records ---- */
 async function fhRecords(){
   const b=$('fhBody');if(!b)return;
-  b.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  loader(b);
   await fhLoadForms();
   const rows=FH_FORMS||[];
   if(!rows.length){
@@ -10424,7 +10474,7 @@ function usbModuleDetailHtml(moduleId){
    today"; a range picker invites it to be read as a trend report, which is the other page's job. */
 VIEWS.daily_checks=async function(v){
   setCrumb(['Administration','Daily Checks']);
-  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  loader(v);
   await usbLoad();
   const head=mHead('fa-list-check','#b8902f','Daily Checks');
   if(USB.rows===null){
@@ -11206,7 +11256,7 @@ function usbRerenderDetail(){
 }
 VIEWS.usability=async function(v,seg){
   setCrumb(['Administration','Usability']);
-  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  loader(v);
   await usbLoad();
   if(USB.rows===null){
     v.innerHTML=mHead('fa-chart-simple','#7c3aed','Usability')
@@ -12521,7 +12571,7 @@ VIEWS.recruitment_new=async function(v,seg){
 let RT_SEL=new Set();
 async function recTests(){
   const b=$('recBody');
-  b.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  loader(b);
   if(!RT_RECORDS){
     try{const{data,error}=await sb.schema('recruit').from('tests').select('*').order('sl',{ascending:true});
       if(error)throw error; RT_RECORDS=data||[];}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:var(--err)">'+esc(e.message)+'</div>';return;}
@@ -12663,7 +12713,7 @@ window.rtManageQuestions=async function(testId){
   RT_QUESTIONS_TEST=test;
   const panel=$('rtQuestionsPanel'); if(!panel)return;
   panel.style.display='';
-  panel.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  loader(panel);
   panel.scrollIntoView({behavior:'smooth',block:'start'});
   const{data,error}=await sb.schema('recruit').from('test_questions').select('*').eq('test_id',testId).order('seq',{ascending:true});
   if(error){panel.innerHTML='<div class="empty" style="padding:20px;color:var(--err)">'+esc(error.message)+'</div>';return;}
@@ -13567,7 +13617,7 @@ window.rtResultsNative=async function(testId,showPreviews){
 };
 window.rtResultsAttemptDetail=async function(attemptId){
   const rb=$('rtResultsBody');if(!rb)return;
-  rb.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  rloader(b);
   try{
     // The cached row from the results list doesn't carry test_id, so the full attempt is re-fetched here.
     const{data:full}=await sb.schema('recruit').from('test_attempts').select('*').eq('id',attemptId).single();
@@ -25617,7 +25667,7 @@ window.traDetailRefresh=async function(id){
 
 async function traDetail(v,id){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Call']);
-  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  loader(v);
   /* THE CALL AND ITS REMARKS ARE FETCHED TOGETHER, NOT ONE AFTER THE OTHER.
      The remarks query is keyed on the id from the address bar, not on anything inside the call,
      so waiting for the call to come back before asking for them was dead time - two round trips
@@ -29337,7 +29387,7 @@ window.trUploadStart=async function(){
 
 async function trDetail(v,id){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Recording']);
-  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  loader(v);
   /* The recording and its comments go out together - see traDetail for the reasoning. Each
      still fails independently: no recording is the "not found" card, and comments that fail
      leave an empty comment list rather than an empty screen. */
