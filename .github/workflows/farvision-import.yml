@@ -1,0 +1,38 @@
+# Automatic Farvision import - the reader. See tools/farvision-import/index.mjs.
+# Farvision emails the day's reports at about 10:12 IST. This reads them; the database
+# (cust.fv_import_tick, every 5 minutes) imports the whole day at once when every file is in.
+name: Farvision auto import
+
+on:
+  schedule:
+    - cron: '45 4 * * *'        # 10:15 IST
+    - cron: '*/15 5-6 * * *'    # 10:30 - 12:15 IST
+    - cron: '30 7-12 * * *'     # 13:00 - 18:00 IST, hourly
+  workflow_dispatch:
+
+concurrency:
+  group: farvision-import
+  cancel-in-progress: false
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            nexus-core.js
+            tools/farvision-import
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install the spreadsheet reader
+        run: npm install --no-audit --no-fund
+        working-directory: tools/farvision-import
+      - name: Read today's files
+        run: node tools/farvision-import/index.mjs
+        env:
+          FARVISION_IMPORT_KEY: ${{ secrets.FARVISION_IMPORT_KEY }}
+          TZ: Asia/Kolkata

@@ -172,6 +172,49 @@ Deno.serve(async (req)=>{
     return j({ok:true});
   }
 
+  /* Automatic Farvision import (9 Oct 2026): done / held / failed / missing. Only the notice's id
+     comes in; recipients, subject and text are read from cust.import_notices, and the row is claimed
+     (queued -> sending) so a repeated call cannot send it twice. */
+  if(type==='import_notice'){
+    const id = Number(body.id);
+    if(!id) return j({error:'id required'},400);
+    const CP={...H,'Content-Profile':'cust','Accept-Profile':'cust','Content-Type':'application/json','Prefer':'return=representation'} as any;
+    const claim = await fetch(SB+'/rest/v1/import_notices?id=eq.'+id+'&status=eq.queued',{method:'PATCH',headers:CP,body:JSON.stringify({status:'sending'})});
+    const rows = claim.ok ? await claim.json() : [];
+    const n:any = Array.isArray(rows) ? rows[0] : null;
+    if(!n) return j({ok:true,skipped:'not queued'});
+    if(Date.now()-new Date(n.created_at).getTime() > 60*60*1000) return j({ok:true,skipped:'too old'});
+    const recips:string[] = (n.recipients||[]).filter((x:string)=>!!x);
+    const tone = n.kind==='success' ? {c:'#15803d',bg:'#f0fdf4',bar:'#16a34a',label:'Imported'}
+               : n.kind==='hold' ? {c:'#92400e',bg:'#fffbeb',bar:'#f59e0b',label:'Held - needs your decision'}
+               : {c:'#b91c1c',bg:'#fef2f2',bar:'#e0121c',label:n.kind==='failed'?'Failed':'Not imported'};
+    const link = PORTAL+'/custportal-admin.html#/2';
+    const lines = String(n.body||'').split('\n').filter((l:string)=>l.trim());
+    const nText = 'Hello,\n\n'+n.subject+'\n\n'+lines.join('\n')+'\n\nOpen the Import page: '+link+'\n\nJAIN-E Customer Portal (automated message, please do not reply).';
+    const head = HEADER.replace('>Workflow<','>Farvision Import<');
+    const foot = "<div style='padding:14px 24px;background:#f8fafc;border-top:1px solid #e2e8f0'><p style='margin:0;color:#94a3b8;font-size:12px;line-height:1.5'>Automated message from JAIN-E &middot; Customer Portal Admin. Please do not reply to this email.</p></div>";
+    const nHtml = "<div style='margin:0;padding:24px;background:#f1f5f9;font-family:Segoe UI,Arial,sans-serif'><div style='max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0'>"+head
+      +"<div style='padding:24px'><p style='margin:0 0 14px;color:#0f172a;font-size:15px'>Hello,</p>"
+      +"<div style='margin:0 0 18px;padding:14px 16px;background:"+tone.bg+";border-left:3px solid "+tone.bar+";border-radius:6px'>"
+      +"<div style='font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:"+tone.c+";margin-bottom:5px'>"+esc(tone.label)+"</div>"
+      +"<div style='color:#0f172a;font-size:15px;font-weight:600;line-height:1.45'>"+esc(n.subject)+"</div>"
+      +lines.map((l:string)=>"<div style='color:#334155;font-size:14px;line-height:1.55;margin-top:6px'>"+esc(l)+"</div>").join('')
+      +"</div><div style='margin:4px 0'><a href='"+link+"' style='display:inline-block;background:#e0121c;color:#ffffff;text-decoration:none;padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600'>Open the Import page</a></div></div>"
+      +foot+"</div></div>";
+    let client:any=null, sent=0; const errs:string[]=[];
+    try{
+      client = new SMTPClient({connection:{hostname:'smtp.gmail.com',port:465,tls:true,auth:{username:GU,password:GP}}});
+      for(const r of recips){
+        try{ await client.send({from:GU,to:r,subject:n.subject,content:nText,html:nHtml}); sent++; }
+        catch(e){ errs.push(r+': '+String(e).slice(0,150)); }
+      }
+    }catch(e){ errs.push(String(e).slice(0,300)); }
+    finally { try{ if(client) await client.close(); }catch(_){} }
+    await fetch(SB+'/rest/v1/import_notices?id=eq.'+id,{method:'PATCH',headers:{...CP,'Prefer':'return=minimal'},
+      body:JSON.stringify({status: sent===recips.length && sent>0 ? 'sent' : (sent ? 'partly sent' : 'failed'), error: errs.join(' | ')||null})}).catch(()=>{});
+    return j({ok:sent>0,sent,errors:errs});
+  }
+
   let to='', subject='', html='', text='', wide=false;
 
   /* Two shapes of the same news, sharing the entry table.

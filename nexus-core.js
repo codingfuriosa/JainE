@@ -19576,6 +19576,10 @@ window.cpaCustomerSave=async function(id){
 // additionally uses a 3-tier merged header for its cost-sheet columns (Charge Type -> Basic/Tax ->
 // component name) - none of that survives a CSV round-trip. maintenance_bills/maintenance_receipts
 // still use the older generic CSV path below (no real maintenance export has been reconciled yet).
+/* ==FARVISION-PARSERS-START== (9 Oct 2026)
+   Everything between this line and FARVISION-PARSERS-END is also run, unchanged, by the automatic
+   daily import (tools/farvision-auto-import.mjs on GitHub Actions), so a fix to a parser here is a
+   fix to both. Keep it self-contained: only XLSX (and window.XLSX) may be used inside. */
 function xlsxSheetRows(wb){ const ws=wb.Sheets[wb.SheetNames[0]]; return {ws,rows:XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null})}; }
 function xlsxFindHeaderRow(rows,mustContain){ for(let r=0;r<rows.length;r++){ const row=rows[r]||[]; if(row.some(v=>typeof v==='string'&&v.trim()===mustContain)) return r; } return -1; }
 function xlsxMergedLabel(ws,rows,r,c){
@@ -19731,6 +19735,33 @@ function cpaParsePTC(wb){
     isReversed:String(get('Is Reversed')||'').trim().toUpperCase()==='YES',
   }));
 }
+// Which of the seven reports a workbook is, from its header row. Most specific first - Booking
+// Register has "Payment Plan" too, so "Booking Id" is checked before "Payment Plan".
+function cpaDetectReportType(wb){
+  const {rows}=xlsxSheetRows(wb);
+  for(let r=0;r<Math.min(rows.length,20);r++){
+    const vals=(rows[r]||[]).map(v=>typeof v==='string'?v.trim():'');
+    if(vals.includes('Receipt Reversal No')) return 'receipt_reversal';
+    if(vals.includes('Money Receipt No')&&vals.includes('Drawn On')) return 'receipt_register';
+    if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')) return 'invoice_register';
+    if(vals.includes('Net Outstanding')&&vals.includes('Bill Outstanding')) return 'outstanding';
+    if(vals.includes('Booking Id')&&!vals.includes('Total Basic')) return 'booking_register';
+    if(vals.includes('PTC Created By')) return 'ptc_transfer';
+    if(vals.includes('Payment Plan')&&vals.includes('Total Basic')) return 'sales_details';
+  }
+  return null;
+}
+function cpaParseByType(type,wb){
+  if(type==='sales_details') return cpaParseSalesDetails(wb);
+  if(type==='outstanding') return cpaParseOutstanding(wb);
+  if(type==='invoice_register') return cpaParseInvoiceRegister(wb);
+  if(type==='receipt_register') return cpaParseReceiptRegister(wb);
+  if(type==='receipt_reversal') return cpaParseReceiptReversal(wb);
+  if(type==='booking_register') return cpaParseBookingRegister(wb);
+  if(type==='ptc_transfer') return cpaParsePTC(wb);
+  throw new Error('Type '+type+' not yet supported for auto-import');
+}
+/* ==FARVISION-PARSERS-END== */
 // Booking No is the real join key (unlike unit_code, which repeats across towers). A record that
 // carries a Booking No resolves by it or not at all: falling back to (tower, unit code) whenever the
 // lookup missed attached every cancelled booking's invoices, receipts and Outstanding row to whoever
@@ -19793,6 +19824,7 @@ async function cpaRenderImport(host,seg){
   const typeOpts=Object.keys(CPA_IMPORT_COLUMNS).concat(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register'])
     .map(k=>`<option value="${k}">${esc(CPA_IMPORT_LABELS[k]||k)}</option>`).join('');
   host.innerHTML=`<div class="tabs" style="margin-bottom:14px"><div class="tab active">Import</div><div class="tab" onclick="navTo('custportal_admin/2/history')">Import History</div></div>
+    <div id="cpaAutoCard"></div>
     ${queueHtml}
     <div class="card card-pad frm"><div class="two"><div><label>Import type</label><select id="cpaImpType" onchange="cpaImportTypeChange()">${typeOpts}</select></div>
     <div id="cpaImpProjectWrap"><label>Project (for matching unit codes)</label><select id="cpaImpProject">${projOpts}</select></div></div>
@@ -19802,7 +19834,75 @@ async function cpaRenderImport(host,seg){
     </div><div id="cpaImpPreview" style="margin-top:16px"></div>`;
   window.cpaImportTypeChange();
   // No auto-import on load — user clicks "Import all" when ready
+  cpaAutoImportCard();
 }
+/* AUTOMATIC IMPORT status (9 Oct 2026). What the unattended daily import did today - see
+   supabase/migrations/20261009100000_farvision_auto_import.sql. In test mode it applies the day's
+   files, compares the result with what is already there (the manual import) and undoes it; in live
+   mode it keeps it. Retry / Import anyway are the two decisions it can ask staff for. */
+const CPA_AUTO_LABEL={sales_details:'Sales Details',booking_register:'Booking Register',invoice_register:'Invoice Register',
+  receipt_register:'Receipt Register',receipt_reversal:'Receipt Reversal',ptc_transfer:'Payment To Customer',outstanding:'Customer Outstanding'};
+async function cpaAutoImportCard(){
+  const host=$('cpaAutoCard'); if(!host) return;
+  const [{data:runs},{data:cfg}]=await Promise.all([
+    sb.schema('cust').from('import_runs').select('id,run_date,status,mode,attempts,last_error,summary,applied_at,updated_at').order('run_date',{ascending:false}).limit(1),
+    sb.schema('cust').from('import_config').select('mode,alert_after,give_up_after').maybeSingle()]);
+  if(!cfg) return;
+  const run=(runs||[])[0], sm=(run&&run.summary)||{}, w=sm.waiting||{};
+  const live=cfg.mode==='live', test=cfg.mode==='dry_run';
+  const today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
+  const isToday=run&&run.run_date===today;
+  const time=t=>t?new Date(t).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'}):'';
+  const list=a=>(a||[]).map(x=>esc(CPA_AUTO_LABEL[x]||x)).join(', ');
+  let tone='#eff6ff',bd='#bfdbfe',icon='fa-clock',head='',lines=[],btns='';
+  const st=isToday?run.status:'none';
+  if(st==='none'){ head='No Farvision files today yet'; lines.push('Files usually arrive at about 10:12.'); }
+  else if(st==='collecting'||st==='applying'){
+    head='Waiting for the full set of files';
+    if(w.files_today!=null) lines.push(w.files_today+' file'+(w.files_today===1?'':'s')+' received so far.');
+    if((w.missing||[]).length) lines.push('Not received yet: '+list(w.missing)+'.');
+    if((w.not_read||[]).length) lines.push((w.not_read||[]).length+' file'+((w.not_read||[]).length===1?'':'s')+' still to be read by the automatic reader.');
+    if((w.unreadable||[]).length){ lines.push('Could not be read: '+(w.unreadable||[]).map(esc).join('; ')); tone='#fffbeb'; bd='#f0dfa8'; }
+    if(test&&!(w.missing||[]).length&&!(w.not_read||[]).length) lines.push('Test mode: it runs once your own "Import all" has finished.');
+  }else if(st==='applied'){
+    tone='#f0fdf4'; bd='#bbf7d0'; icon='fa-circle-check';
+    const a=sm.after||{};
+    head='Imported automatically at '+time(run.applied_at);
+    lines.push((sm.file_count||0)+' files. '+((a.live_units||0)-(a.ledger_mismatch||0))+' of '+(a.live_units||0)+' flats match Farvision.');
+  }else if(st==='dry_run_ok'){
+    tone='#f0fdf4'; bd='#bbf7d0'; icon='fa-circle-check';
+    head='Test run matched your import exactly';
+    lines.push('The automatic import read the same '+(sm.file_count||0)+' files and produced exactly the figures already on the portal. Nothing was changed.');
+  }else if(st==='dry_run_diff'){
+    tone='#fffbeb'; bd='#f0dfa8'; icon='fa-triangle-exclamation';
+    head='Test run differs from your import in '+(sm.diff_count||0)+' place'+(sm.diff_count===1?'':'s');
+    lines.push('Nothing was changed. First differences: '+(sm.diff||[]).slice(0,8).map(d=>esc((d.tower||'')+' '+(d.unit||'')+' - '+d.part)).join('; ')+'.');
+  }else if(st==='needs_approval'){
+    tone='#fffbeb'; bd='#f0dfa8'; icon='fa-hand';
+    head='Held - nothing was changed';
+    (sm.problems||[]).forEach(x=>lines.push(esc(x)));
+    if(live) btns='<button class="btn btn-sm btn-primary" onclick="cpaAutoAction('+run.id+',\'force\')"><i class="fa-solid fa-check"></i> Import anyway</button>'
+      +' <button class="btn btn-sm" onclick="cpaAutoAction('+run.id+',\'retry\')"><i class="fa-solid fa-rotate"></i> Check again</button>';
+  }else if(st==='failed'){
+    tone='#fef2f2'; bd='#fecaca'; icon='fa-circle-xmark';
+    head='Failed - nothing was changed';
+    lines.push(esc(run.last_error||sm.error||'Unknown error')+' (tried '+run.attempts+' time'+(run.attempts===1?'':'s')+')');
+    btns='<button class="btn btn-sm btn-primary" onclick="cpaAutoAction('+run.id+',\'retry\')"><i class="fa-solid fa-rotate"></i> Retry</button>';
+  }
+  if((sm.sales_details_missing||[]).length&&st!=='collecting') lines.push('No Sales Details for: '+(sm.sales_details_missing||[]).map(esc).join(', ')+' - their cost sheets stay as last imported.');
+  const modeTag=live?'<span class="tag t-green">Live</span>':test?'<span class="tag t-amber">Test mode - changes nothing</span>':'<span class="tag">Off</span>';
+  host.innerHTML='<div class="card card-pad" style="background:'+tone+';border-color:'+bd+';margin-bottom:16px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">'
+    +'<div><i class="fa-solid '+icon+'" style="color:var(--brand)"></i> <b>Automatic import</b> · '+esc(head)+'</div>'+modeTag+'</div>'
+    +lines.map(l=>'<div style="font-size:13px;color:var(--slate);margin-top:3px">'+l+'</div>').join('')
+    +(btns?'<div style="margin-top:10px">'+btns+'</div>':'')+'</div>';
+}
+window.cpaAutoAction=async function(runId,action){
+  const {error}=await sb.schema('cust').rpc('fv_run_action',{p_run:runId,p_action:action});
+  if(error){ toast('Could not do that: '+error.message,'err'); return; }
+  toast(action==='force'?'Importing anyway - it runs within 5 minutes':'Will check again within 5 minutes','ok');
+  cpaAutoImportCard();
+};
 // Queue: auto-detect type, parse, and import directly — no manual steps
 window.cpaQueueImport=async function(queueId){
   const {data:q,error}=await sb.schema('cust').from('import_queue').select('*').eq('id',queueId).single();
@@ -19816,32 +19916,10 @@ window.cpaQueueImport=async function(queueId){
     const buf=await blob.arrayBuffer();
     // Serials, not Dates - the same as a manual upload, and read to the exact day by xlsxExcelDate.
     const wb=XL.read(new Uint8Array(buf),{type:'array'});
-    // Detect type
-    const {rows}=xlsxSheetRows(wb);
-    let type=null;
-    for(let r=0;r<Math.min(rows.length,20);r++){
-      const vals=(rows[r]||[]).map(v=>typeof v==='string'?v.trim():'');
-      // Check most specific first — Booking Register has "Payment Plan" too, so
-      // must check "Booking Id" (unique to it) before "Payment Plan"
-      if(vals.includes('Receipt Reversal No')){type='receipt_reversal';break;}
-      if(vals.includes('Money Receipt No')&&vals.includes('Drawn On')){type='receipt_register';break;}
-      if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')){type='invoice_register';break;}
-      if(vals.includes('Net Outstanding')&&vals.includes('Bill Outstanding')){type='outstanding';break;}
-      if(vals.includes('Booking Id')&&!vals.includes('Total Basic')){type='booking_register';break;}
-      if(vals.includes('PTC Created By')){type='ptc_transfer';break;}
-      if(vals.includes('Payment Plan')&&vals.includes('Total Basic')){type='sales_details';break;}
-    }
+    // Detect type, then parse - the same two steps the automatic import runs
+    const type=cpaDetectReportType(wb);
     if(!type) throw new Error('Could not detect report type');
-    // Parse
-    let parsed;
-    if(type==='sales_details') parsed=cpaParseSalesDetails(wb);
-    else if(type==='outstanding') parsed=cpaParseOutstanding(wb);
-    else if(type==='invoice_register') parsed=cpaParseInvoiceRegister(wb);
-    else if(type==='receipt_register') parsed=cpaParseReceiptRegister(wb);
-    else if(type==='receipt_reversal') parsed=cpaParseReceiptReversal(wb);
-    else if(type==='booking_register') parsed=cpaParseBookingRegister(wb);
-    else if(type==='ptc_transfer') parsed=cpaParsePTC(wb);
-    else throw new Error('Type '+type+' not yet supported for auto-import');
+    const parsed=cpaParseByType(type,wb);
     // Match to projects/units (only registered projects pass through)
     const projects=await cpaProjects();
     const units=await cpaUnits();
