@@ -16,7 +16,10 @@ const S={sec:'items',mode:'setup',perms:[],permCat:[],roles:[],rolePerms:[],role
 const can=p=>Array.isArray(S.perms)&&S.perms.includes(p);
 
 const num=v=>{const n=Number(v);return isFinite(n)?n:0;};
-const val=id=>{const e=$(id);return e?String(e.value).trim():'';};
+const val=id=>{const e=$(id);if(!e)return '';const s=String(e.value);
+  /* Only a grouped AMOUNT field is stripped. val() reads every kind of field here, and a vendor
+     called "Bengal Constructions, Pvt Ltd" must keep its comma. */
+  return (e.dataset&&e.dataset.money==='1'?moneyStrip(s):s).trim();};
 const soft=()=>({deleted_at:new Date().toISOString(),deleted_by:state.email});
 function fail(error,what){
   if(!error) return false;

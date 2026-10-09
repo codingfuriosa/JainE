@@ -18,7 +18,11 @@ const TRIGGER_LBL={individual:'Individual',tower:'Tower level',floor:'Floor leve
 const S={projects:[],pid:null,sec:'project',towerId:null,setup:null,towers:[],positions:[],plcs:[],posPlcs:[],floors:[],flats:[],charges:[],parking:[],stages:[],plans:[],milestones:[],banks:[],portalUnits:0};
 
 const num=v=>{const n=Number(v);return isFinite(n)?n:0;};
-const val=id=>{const e=$(id);return e?String(e.value).trim():'';};
+const val=id=>{const e=$(id);if(!e)return '';const s=String(e.value);
+  /* A grouped amount field holds "12,34,567" — stripped so every caller's Number() still works.
+     Only amount fields: val() reads customer names and notes here too, and a name with a comma
+     in it must survive. */
+  return (e.dataset&&e.dataset.money==='1'?moneyStrip(s):s).trim();};
 const numOrNull=id=>{const v=val(id);return v===''?null:Number(v);};
 const intOrNull=id=>{const v=val(id);return v===''?null:parseInt(v,10);};
 const inr=n=>{const v=Math.round(num(n));return v<0?'−'+custInr(-v):custInr(v);};

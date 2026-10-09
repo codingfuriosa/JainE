@@ -15,6 +15,86 @@ const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;
    parser - the other way round would HTML-encode the apostrophe to &#39;, which the browser decodes
    back to a bare ' before the JS is ever parsed, leaving the bug exactly where it was. */
 const escJs=s=>esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
+
+/* ============================ AMOUNTS, GROUPED THE INDIAN WAY ============================
+   Every field somebody types money into shows 12,34,567.89 as they type — last three digits,
+   then pairs.
+
+   WHY THE FIELDS HAD TO STOP BEING type="number". A number input cannot hold a comma: the browser
+   rejects the character and, worse, silently reports an empty value for anything it considers
+   invalid. So a money field is text with inputmode="decimal", which still brings up the numeric
+   keypad on a phone but lets us control what is displayed.
+
+   THE DANGEROUS HALF IS READING IT BACK. The moment a field can contain "12,34,567", every
+   Number()/parseFloat() in a save path turns it into NaN — silently, on financial data. So the
+   grouping is only ever applied to inputs this code has marked, and the handful of shared value
+   readers (purchase.js val, engineering.js val/numOrNull, accounts.js num) strip commas. Nothing
+   is formatted that is not also read back through one of those.
+
+   moneyStrip is exported deliberately: anything that reads a money field's .value directly should
+   call it rather than inventing another replace(/,/g,''). */
+const moneyStrip=s=>String(s==null?'':s).replace(/,/g,'');
+/* Groups the INTEGER part only, and leaves everything else exactly as typed — a trailing "."
+   while somebody is mid-number, a half-typed decimal, a leading minus. Formatting as you type is
+   only tolerable if it never fights the typing. */
+function inrGroup(s){
+  s=String(s==null?'':s);
+  const neg=/^-/.test(s.trim());
+  let v=moneyStrip(s).replace(/[^\d.]/g,'');
+  const dot=v.indexOf('.');
+  let ip=dot<0?v:v.slice(0,dot), fp=dot<0?'':v.slice(dot+1);
+  ip=ip.replace(/^0+(?=\d)/,'');
+  if(ip.length>3){
+    const last3=ip.slice(-3);
+    const rest=ip.slice(0,-3).replace(/\B(?=(\d{2})+(?!\d))/g,',');
+    ip=rest+','+last3;
+  }
+  return (neg?'-':'')+ip+(dot<0?'':'.'+fp);
+}
+/* Reformats as the person types without the caret jumping to the end — the thing that makes most
+   as-you-type formatting unusable. Counts the digits before the caret, rewrites, then puts the
+   caret back after that same number of digits. */
+function moneyFormatEl(el){
+  if(!el||el.dataset.money!=='1')return;
+  const before=el.value, pos=el.selectionStart==null?before.length:el.selectionStart;
+  const digitsBefore=moneyStrip(before.slice(0,pos)).replace(/[^\d.-]/g,'').length;
+  const after=inrGroup(before);
+  if(after===before)return;
+  el.value=after;
+  let seen=0,i=0;
+  for(;i<after.length&&seen<digitsBefore;i++){ if(after[i]!==',')seen++; }
+  try{ el.setSelectionRange(i,i); }catch(e){}
+}
+/* Turns the money fields inside `root` into grouped text inputs, once each.
+   WHICH FIELDS: anything already marked data-money, plus number inputs stepping in hundredths —
+   which across this app is how money is written and quantities (step 0.001) are not. Percentages
+   also step in hundredths and are swept up, which is harmless: no percentage reaches four digits,
+   so no comma ever appears in one. */
+function moneyUpgrade(root){
+  const scope=root&&root.querySelectorAll?root:document;
+  let list=[];
+  try{ list=scope.querySelectorAll('input[data-money="1"]:not([data-money-ready]),input[type="number"][step="0.01"],input.n[inputmode="decimal"]:not([data-money-ready])'); }
+  catch(e){ return; }
+  [].slice.call(list).forEach(function(el){
+    if(el.dataset.moneyReady==='1')return;
+    if(el.type==='number'){ try{ el.type='text'; }catch(e){ return; } el.setAttribute('inputmode','decimal'); }
+    el.dataset.money='1'; el.dataset.moneyReady='1';
+    if(el.value!=='')el.value=inrGroup(el.value);
+  });
+}
+/* One delegated listener for the whole app rather than a listener per field: money inputs are
+   drawn inside modals that are rebuilt constantly, and per-field listeners leak with them. */
+document.addEventListener('input',function(e){
+  const el=e.target;
+  if(el&&el.tagName==='INPUT'&&el.dataset&&el.dataset.money==='1')moneyFormatEl(el);
+},true);
+/* Fields appear whenever a view or a modal draws, which happens from dozens of places. Watching
+   the DOM catches all of them without every caller having to remember to ask. */
+try{
+  new MutationObserver(function(muts){
+    for(const m of muts){ if(m.addedNodes&&m.addedNodes.length){ moneyUpgrade(document); return; } }
+  }).observe(document.documentElement,{childList:true,subtree:true});
+}catch(e){}
 const state={user:null,email:null,profile:null,roles:null,super:false};
 // The access token, kept current from boot() and every onAuthStateChange firing. Usage telemetry's
 // unload-time flush needs it synchronously (a pagehide handler can't safely await getSession()) —
@@ -48,7 +128,7 @@ function pageIdFromPath(pathname){
 // A page may list several scripts; they load one after another, in order (purchase-indent.js uses what
 // purchase.js defines).
 const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js'],accounts:['accounts.js','accounts-bank.js','accounts-books.js'],scheduling:'scheduling.js'};
-const PAGE_SCRIPT_VERSION={'accountability.js':'20261009a','scheduling.js':'20261007a','accounts.js':'20261005g','accounts-bank.js':'20261005b','accounts-books.js':'20261005d','purchase.js':'20261006a','purchase-indent.js':'20261006a','purchase-rfq.js':'20261005a','purchase-po.js':'20261006b','purchase-stores.js':'20261006b','purchase-reports.js':'20261006a'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'20261009a','postsales.js':'20261009a','scheduling.js':'20261007a','accounts.js':'20261005g','accounts-bank.js':'20261005b','accounts-books.js':'20261005d','purchase.js':'20261009a','purchase-indent.js':'20261006a','purchase-rfq.js':'20261005a','purchase-po.js':'20261006b','purchase-stores.js':'20261006b','purchase-reports.js':'20261006a'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];

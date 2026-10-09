@@ -14,15 +14,20 @@
 
   /* ---------- formatting ---------- */
   const lc=s=>String(s||'').toLowerCase();
-  const num=n=>Number(n||0);
+  /* Takes a field value as readily as a number — a grouped "12,34,567" must not become NaN. */
+  const num=n=>{const v=typeof n==='string'?moneyStrip(n):n;return Number(v||0);};
   const inr=n=>'₹'+num(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
   const cr=n=>{n=num(n);const a=Math.abs(n);return a>=1e7?'₹'+(n/1e7).toFixed(2)+' Cr':a>=1e5?'₹'+(n/1e5).toFixed(2)+' L':inr(n);};
   const q=n=>num(n).toLocaleString('en-IN',{maximumFractionDigits:3});
   const dt=d=>{if(!d)return '—';const x=/^\d{4}-\d{2}-\d{2}$/.test(d)?new Date(d+'T00:00:00'):new Date(d);return isNaN(x)?'—':x.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});};
   const istToday=()=>new Date(Date.now()+19800000).toISOString().slice(0,10);   // Asia/Kolkata, same clock the database checks against
   const pct=(a,b)=>b>0?Math.round(a/b*1000)/10:0;
-  const val=id=>{const x=document.getElementById(id);return x?x.value:'';};
-  const numOrNull=s=>{s=String(s==null?'':s).trim();if(s==='')return null;const n=Number(s);return isNaN(n)?NaN:n;};
+  /* A grouped amount field holds "12,34,567" — stripped here so every caller's Number() still
+     works. Only amount fields: val() reads names and notes too, and those keep their commas. */
+  const val=id=>{const x=document.getElementById(id);if(!x)return '';
+    const s=String(x.value==null?'':x.value);
+    return (x.dataset&&x.dataset.money==='1')?moneyStrip(s):s;};
+  const numOrNull=s=>{s=moneyStrip(String(s==null?'':s)).trim();if(s==='')return null;const n=Number(s);return isNaN(n)?NaN:n;};
   const TAGC={Draft:'t-amber',Issued:'t-blue',Closed:'t-green',Cancelled:'t-gray',Entered:'t-amber',Verified:'t-green',Rejected:'t-red',Booked:'t-green',Active:'t-green',Inactive:'t-gray'};
   const stTag=s=>'<span class="tag '+(TAGC[s]||'t-gray')+'">'+esc(s==='Entered'?'Awaiting verification':s)+'</span>';
   const LVC={Project:'t-purple',Block:'t-blue',Floor:'t-blue',Flat:'t-green',Portion:'t-amber','Activity Group':'t-blue',Material:'t-amber'};
