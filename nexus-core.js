@@ -19904,7 +19904,53 @@ window.cpaAutoAction=async function(runId,action){
   cpaAutoImportCard();
 };
 // Queue: auto-detect type, parse, and import directly — no manual steps
+/* LIVE AUTOMATIC IMPORT (10 Oct 2026): once cust.import_config.mode is 'live', "Import all" and
+   the per-file Import button no longer write customer data from the browser. They read today's
+   files with the same parsers and hand the rows to the same staging table the GitHub reader uses;
+   the database then applies the whole day at once (all or nothing) within 5 minutes. */
+async function cpaAutoMode(){
+  try{ const {data}=await sb.schema('cust').from('import_config').select('mode').maybeSingle(); return (data&&data.mode)||'dry_run'; }
+  catch(_e){ return 'dry_run'; }
+}
+async function cpaAutoReadNow(){
+  const btn=document.getElementById('cpaAutoImportBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading…';}
+  try{
+    const XL=await loadXLSX(); if(!XL) throw new Error('Could not load spreadsheet reader');
+    const {data:list,error}=await sb.schema('cust').rpc('fv_staff_files');
+    if(error) throw error;
+    const todo=((list&&list.files)||[]).filter(f=>!f.staged);
+    if(!todo.length){ toast('All of today\'s files are already read - the automatic import takes it from here','ok'); return; }
+    let done=0; const bad=[];
+    for(const f of todo){
+      const base={p_run:list.run_id,p_queue:f.queue_id,p_file:f.file_name,p_created:f.created_at};
+      const {data:blob,error:dlErr}=await sb.storage.from('farvision-imports').download(f.storage_path);
+      if(dlErr||!blob){ bad.push(f.file_name+' (download failed)'); continue; }
+      let type=null, rows;
+      try{
+        const wb=XL.read(new Uint8Array(await blob.arrayBuffer()),{type:'array'});
+        type=cpaDetectReportType(wb);
+        if(!type) throw new Error('Could not detect report type');
+        rows=JSON.parse(JSON.stringify(cpaParseByType(type,wb)));
+      }catch(e){
+        await sb.schema('cust').rpc('fv_staff_stage',{...base,p_type:type,p_rows_total:0,p_chunk:0,p_chunks:1,p_rows:[],p_parse_error:String(e.message||e).slice(0,300)});
+        bad.push(f.file_name+' (could not be read)'); continue;
+      }
+      const CH=2000, chunks=Math.max(1,Math.ceil(rows.length/CH));
+      let ok=true;
+      for(let c=0;c<chunks&&ok;c++){
+        const {error:se}=await sb.schema('cust').rpc('fv_staff_stage',{...base,p_type:type,p_rows_total:rows.length,p_chunk:c,p_chunks:chunks,p_rows:rows.slice(c*CH,(c+1)*CH),p_parse_error:null});
+        if(se){ ok=false; bad.push(f.file_name+' ('+se.message+')'); }
+      }
+      if(ok) done++;
+      if(btn) btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading '+(done+bad.length)+'/'+todo.length+'…';
+    }
+    toast(done+' file'+(done===1?'':'s')+' read - the automatic import applies the whole day within 5 minutes'+(bad.length?'. Not read: '+bad.join('; '):''),bad.length?'warn':'ok');
+  }catch(e){ toast('Could not read the files: '+(e.message||e),'err'); }
+  finally{ if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-bolt"></i> Import all';} cpaAutoImportCard(); }
+}
 window.cpaQueueImport=async function(queueId){
+  if(await cpaAutoMode()==='live'){ await cpaAutoReadNow(); return true; }
   const {data:q,error}=await sb.schema('cust').from('import_queue').select('*').eq('id',queueId).single();
   if(error||!q){toast('Queue item not found','err');return;}
   await sb.schema('cust').from('import_queue').update({status:'processing'}).eq('id',queueId);
@@ -19962,6 +20008,7 @@ window.cpaQueueImport=async function(queueId){
   }
 };
 window.cpaQueueImportAll=async function(){
+  if(await cpaAutoMode()==='live'){ await cpaAutoReadNow(); return; }
   const {data:pending}=await sb.schema('cust').from('import_queue').select('id,file_name').eq('status','pending').order('created_at');
   if(!pending||!pending.length){toast('No pending files','ok');return;}
   const btn=document.getElementById('cpaAutoImportBtn');
