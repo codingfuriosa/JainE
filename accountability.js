@@ -3513,7 +3513,10 @@
        which colleague is sitting on it right now, and that is between the approvers. A flow with a
        named trigger-owner list (Invoice Processing) is untouched: there the people who raise bills
        are meant to be able to see exactly where each one has reached. */
-    const hideLiveState=(flow.trigger_owner==='__ALL__') && !isStepHolder && !eq(mySelf,'ayushruia1@gmail.com');
+    /* The Administrator and Prerna (businessanalyst@) are exempt: they read this tracker to see where
+       every claim has actually got to, not as claimants. */
+    const hideLiveState=(flow.trigger_owner==='__ALL__') && !isStepHolder
+      && !eq(mySelf,'ayushruia1@gmail.com') && !eq(mySelf,'businessanalyst@thejaingroup.com');
 
     // Default timeline panel = the workflow's step definition
     const defTL=wfTimelineHtml(steps,{})||'<div class="ac-empty" style="cursor:default">No steps yet</div>';
