@@ -143,6 +143,52 @@ function sniffMedia(bytes: Uint8Array) {
   if (bytes.byteLength < 12) return null;
   return MEDIA_KINDS.find((k) => k.is(bytes)) || null;
 }
+/* HOW FAR THE AD ACTUALLY GOT, WHICH IS THE ONE THING ON THIS BOARD WORTH KNOWING.
+
+   The Ad Library puts a "Low impression count" badge beside Active on some ads, with
+   "Impressions: <100" and "Total active time 22 hrs" under it. Everything else the board shows
+   says what a competitor IS running; this says whether it went anywhere.
+
+   THE FIELD NAMES ARE NOT KNOWN. Proxy's get_meta_ads reply is not documented anywhere we hold,
+   and the live call returns no ads today, so there was no way to look. Rather than guess one name
+   and quietly record nothing, each value is read from any of several plausible names, and the
+   union of keys actually present is reported back as ad_fields_seen. The next run that returns
+   ads therefore tells us what Proxy really calls these - at which point this list can be cut down
+   to the real name and the guessing removed.
+
+   The impression figure is kept as Meta's own words. It is a RANGE ("<100", "1K-5K"), and turning
+   it into a number would invent a precision Meta deliberately withholds. */
+function pickText(a: any, names: string[]) {
+  for (const n of names) {
+    const v = a?.[n];
+    if (v === null || v === undefined || v === "") continue;
+    if (typeof v === "object") continue;
+    return String(v);
+  }
+  return null;
+}
+function pickBool(a: any, names: string[]) {
+  for (const n of names) {
+    const v = a?.[n];
+    if (v === true || v === false) return v;
+    if (typeof v === "string" && /^(true|false)$/i.test(v)) return /^true$/i.test(v);
+  }
+  return null;
+}
+const IMPRESSION_KEYS = ["impressions", "impressions_text", "impression_range", "total_impressions",
+                         "impressions_range", "reach", "eu_total_reach"];
+const LOW_KEYS = ["low_impression", "is_low_impression", "low_impression_count", "has_low_impressions"];
+const ACTIVE_TIME_KEYS = ["total_active_time", "active_time", "total_time_active", "duration"];
+/* The badge is Meta's own judgement and an ad can carry a range without being flagged, so the two
+   are read separately. When only the range is given, "<100" is itself the low-impression case -
+   that is the exact wording the badge accompanies - so it is inferred rather than left blank. */
+function readImpressions(a: any) {
+  const text = pickText(a, IMPRESSION_KEYS);
+  let low = pickBool(a, LOW_KEYS);
+  if (low === null && text) low = /^\s*<\s*100\s*$/.test(text) ? true : null;
+  return { text, low, activeTime: pickText(a, ACTIVE_TIME_KEYS) };
+}
+
 /* Returns {path, mediaType} so the caller can record what it really is, or a reason when nothing
    was stored - the reason is counted in the run's report rather than thrown away, because a job
    that writes nothing and still calls itself "succeeded" is how both of these faults survived for
@@ -248,7 +294,8 @@ Deno.serve(async (req) => {
 
       const rep: any = { of_watchlist: all.length, slice: { skip, take, names: wl.map((w) => w.name) },
         found: 0, written: 0, media_copied: 0, media_failed: 0,
-        media_why: {} as Record<string, number>, media_examples: [] as string[], dry_run: !write,
+        media_why: {} as Record<string, number>, media_examples: [] as string[],
+        ad_fields_seen: [] as string[], impressions_seen: 0, low_flagged: 0, dry_run: !write,
         per_page: {} as Record<string, number>, errors: [] as string[] };
 
       const call = await mcp(token, "tools/call", { name: "get_meta_ads", arguments: {
@@ -302,6 +349,17 @@ Deno.serve(async (req) => {
                 cta_text: a?.cta_text || null, redirect_url: a?.link_url || null,
                 display_format: a?.media_type || null,
                 last_seen_at: new Date().toISOString() };
+              const impr = readImpressions(a);
+              if (impr.text !== null) { out.impressions_text = impr.text; rep.impressions_seen++; }
+              if (impr.low !== null) { out.low_impression = impr.low; if (impr.low) rep.low_flagged++; }
+              if (impr.activeTime !== null) out.total_active_time = impr.activeTime;
+              /* Every key this ad carried, so one real run names the fields instead of us
+                 guessing. Union across the slice, capped - it is a diagnostic, not a dump. */
+              for (const key of Object.keys(a || {})) {
+                if (rep.ad_fields_seen.length < 60 && !rep.ad_fields_seen.includes(key)) {
+                  rep.ad_fields_seen.push(key);
+                }
+              }
               /* Only overwrite the picture when a new one was actually copied - a failed download
                  must not wipe a good image stored on an earlier run. */
               if (items) { out.media_items = items; out.media_s3_path = first; out.media_type = firstType; }

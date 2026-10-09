@@ -18708,6 +18708,34 @@ function compPlatformIcons(a){
     return icon?'<i class="fa-brands '+icon+'" title="'+esc(p)+'" style="color:var(--slate);font-size:12px"></i>':'<i class="fa-solid fa-share-nodes" title="'+esc(p)+'" style="color:var(--slate);font-size:12px"></i>';
   }).join(' ');
 }
+/* HOW FAR THE AD GOT, SHOWN WHERE META SHOWS IT - beside Active, because that is where somebody
+   looking at a competitor's ad already is.
+
+   "Low impression count" is Meta's own badge and its own wording, kept rather than reworded: an
+   advertiser arguing about it will go to the Ad Library and should find the same phrase. The
+   figure is a RANGE ("<100"), never a number, so it is printed as given.
+
+   ABSENCE IS NOT A HEALTHY AD. Meta only flags the low ones, the two sync routes do not all
+   report it, and every ad collected before today has nothing stored. So an ad with nothing here
+   is "not flagged", which is not the same as "did well" - and the tooltip on the figure says so
+   rather than letting a blank card imply good news. */
+function compReachBits(a){
+  const flagged=a.low_impression===true;
+  const txt=String(a.impressions_text||'').trim();
+  let out='';
+  if(flagged){
+    out+=' <span class="tag t-amber" style="font-size:10px" title="'
+      +esc('Meta flags this ad as having had very few impressions')
+      +'"><i class="fa-solid fa-circle-exclamation"></i> Low impressions</span>';
+  }
+  if(txt){
+    out+=' <span style="font-size:10.5px;color:var(--slate)" title="'
+      +esc('Meta publishes a range, not an exact count. Nothing here means Meta did not report it '
+           +'for this ad, not that the ad reached many people.')
+      +'"><i class="fa-regular fa-eye"></i> '+esc(txt)+'</span>';
+  }
+  return out;
+}
 function compAdCard(a){
   const stillRunning=!a.ad_delivery_stop_time;
   const t=compAdText(a);
@@ -18718,11 +18746,12 @@ function compAdCard(a){
     :(a.ad_snapshot_url?'<a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);font-size:12px;text-decoration:none">View on Facebook →</a>':'');
   return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px;cursor:pointer" onclick="compOpenDetail(\''+esc(a.id)+'\')">'
     +thumb
-    +'<div style="display:flex;align-items:center;gap:6px;margin-top:8px"><span class="tag '+(stillRunning?'t-green':'t-gray')+'">'+(stillRunning?'Active':'Inactive')+'</span>'+compPlatformIcons(a)+'</div>'
+    +'<div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap"><span class="tag '+(stillRunning?'t-green':'t-gray')+'">'+(stillRunning?'Active':'Inactive')+'</span>'+compReachBits(a)+compPlatformIcons(a)+'</div>'
     +'<div style="font-size:12.5px;margin:6px 0 4px;line-height:1.4;max-height:56px;overflow:hidden">'+esc(bodyText)+'</div>'
     +(a.cta_text?'<div style="margin:4px 0"><span class="tag t-blue">'+esc(a.cta_text)+'</span></div>':'')
     +'<div style="font-size:11px;color:var(--slate)">'+esc(a.page_name||'')+'</div>'
-    +'<div style="font-size:11px;color:var(--slate);margin-top:2px">Running since '+fmtDate(a.ad_delivery_start_time)+'</div>'
+    +'<div style="font-size:11px;color:var(--slate);margin-top:2px">Running since '+fmtDate(a.ad_delivery_start_time)
+      +(a.total_active_time?' \u00b7 active '+esc(a.total_active_time):'')+'</div>'
     +'<div style="font-size:10.5px;color:var(--slate);margin-top:4px;opacity:.7">ID '+esc(a.id)+'</div>'
   +'</div>';
 }
