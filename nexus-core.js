@@ -23572,7 +23572,7 @@ window.custDownloadSelectedDocs=async function(){
     (invs||[]).forEach(inv=>{
       const {data:its}={data:(allInv||[]).find(a=>a.document_no===inv.document_no)};
       const items=its&&its.invoice_items?its.invoice_items:[];
-      const {plan,prevDues}=custBuildPlan(allInv,alloc2,inv.document_date,receiptDates);
+      const {plan,prevDues}=custBuildPlan(allInv,alloc2,inv.document_date,receiptDates,money);
       const prevSplit=custPrevDuesSplit(inv,allInv,money);
       pages.push(custInvoiceDocHtml({inv:inv,items:items,plan:plan,prevDues:prevDues,prevSplit:prevSplit,lateFee:lateFee,rate:rate,unit:unit,contact:contact},'invoice',true));
     });
@@ -23673,17 +23673,18 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
     head='<th>Due Date</th><th>Description</th><th>Charge Type</th>'+
       '<th class="amt">Amount Due</th><th class="amt">Amount Paid</th><th class="amt">Amount Payable</th>';
     let due=0,paid=0;
+    const dinr=v=>Number(v)<0?'-'+custInr(-Number(v)):custInr(v);
     rowsHtml=custAnantaPlan(unit,ctx.plan).map(r=>{
       due+=r.due; paid+=r.paid;
       return '<tr><td>'+(r.dueDate?fmtDate(r.dueDate):'—')+'</td>'+
         '<td>'+esc(r.schedule||'—')+'</td><td>'+esc(r.head||'—')+'</td>'+
-        '<td class="amt">'+custInr(r.due)+'</td><td class="amt">'+custInr(r.paid)+'</td>'+
-        '<td class="amt">'+custInr(r.due-r.paid)+'</td></tr>';
+        '<td class="amt">'+dinr(r.due)+'</td><td class="amt">'+dinr(r.paid)+'</td>'+
+        '<td class="amt">'+dinr(r.due-r.paid)+'</td></tr>';
     }).join('');
-    // On-account receipts are rows in the table above, so the totals already account for them.
+    // On-account receipts and transfers are rows in the table above, so the totals already account for them.
     const payable=due-paid;
-    foot='<tr><td colspan="3">Total Amount Due</td><td class="amt">'+custInr(due)+'</td>'+
-      '<td class="amt">'+custInr(paid)+'</td><td class="amt">'+custInr(payable)+'</td></tr>'+
+    foot='<tr><td colspan="3">Total Amount Due</td><td class="amt">'+dinr(due)+'</td>'+
+      '<td class="amt">'+dinr(paid)+'</td><td class="amt">'+dinr(payable)+'</td></tr>'+
       '<tr><td colspan="6" class="rcpt-words">Amount payable in words : '+esc(custAmountInWords(Math.max(0,payable)))+'</td></tr>';
     tail='<div class="rcpt-terms">'+
       '<h4>Terms &amp; Condition:</h4>'+
@@ -23798,10 +23799,10 @@ function custPrevDuesSplit(inv,allInv,money){
 }
 async function custLoadMoney(unitId){
   const [{data:receipts},{data:reversals},{data:ptcIn},{data:ptcOut}]=await Promise.all([
-    sb.schema('cust').from('money_receipts').select('id,receipt_date,total_amount').eq('unit_id',unitId).eq('is_current',true),
-    sb.schema('cust').from('receipt_reversals').select('receipt_reversal_date,reversal_amount').eq('unit_id',unitId).eq('is_current',true),
-    sb.schema('cust').from('ptc_transfers').select('document_date,amount').eq('transferee_unit_id',unitId).eq('is_reversed',false).is('deleted_at',null),
-    sb.schema('cust').from('ptc_transfers').select('document_date,amount').eq('source_unit_id',unitId).eq('is_reversed',false).is('deleted_at',null)
+    sb.schema('cust').from('money_receipts').select('id,receipt_no,receipt_date,total_amount').eq('unit_id',unitId).eq('is_current',true),
+    sb.schema('cust').from('receipt_reversals').select('receipt_no,receipt_reversal_date,reversal_amount').eq('unit_id',unitId).eq('is_current',true),
+    sb.schema('cust').from('ptc_transfers').select('document_no,document_date,amount,narration').eq('transferee_unit_id',unitId).eq('is_reversed',false).is('deleted_at',null),
+    sb.schema('cust').from('ptc_transfers').select('document_no,document_date,amount,narration').eq('source_unit_id',unitId).eq('is_reversed',false).is('deleted_at',null)
   ]);
   const ids=(receipts||[]).map(r=>r.id).filter(Boolean);
   const {data:items}=ids.length
@@ -23814,8 +23815,24 @@ async function custLoadMoney(unitId){
 // on invoices raised before `beforeDate`. Receipts are matched the way Farvision allocates them:
 // against the invoice number, then the schedule and revenue head within it. Kept pure so it can
 // be checked against the ledger and against Farvision's own demand letter without a round trip.
-function custBuildPlan(allInv,alloc,beforeDate,receiptDates){
+/* money (optional, from custLoadMoney) - checked 10 Oct 2026 against Farvision's own figures for
+   every flat: Amount Paid on the demand letter now equals Farvision's received + on-account on 297
+   of 300 (the other 3 are flats where Farvision's own reports disagree with each other).
+     * A cheque that bounced is not a payment: a receipt whose cheque returns add up to the whole
+       receipt is left out. (Farvision keeps the bounced receipt and records the return separately,
+       so counting the receipt showed Gateway 8C as paid 3,10,346 more than it was.)
+     * Money transferred in from an earlier booking (Farvision's PTC) is a payment on this booking;
+       it was missing entirely, so Gurukul A1 5E - paid 45,91,452 by transfer - read as unpaid. It is
+       shown as its own row, like on-account money, rather than spread over lines by guesswork.
+       Money transferred out or refunded is the same row with a minus. */
+function custBuildPlan(allInv,alloc,beforeDate,receiptDates,money){
   const SEP=String.fromCharCode(31);
+  if(money){
+    const revByNo={};
+    (money.reversals||[]).forEach(v=>{ revByNo[v.receipt_no]=(revByNo[v.receipt_no]||0)+Number(v.reversal_amount||0); });
+    const bounced=new Set((money.receipts||[]).filter(r=>(revByNo[r.receipt_no]||0)>=Number(r.total_amount||0)-1).map(r=>r.id));
+    if(bounced.size) alloc=(alloc||[]).filter(a=>!bounced.has(a.receipt_id));
+  }
   const key=(doc,sch,head)=>[String(doc||''),String(sch||''),String(head||'')].join(SEP);
   // An "On Account" receipt line is money received against the unit but not applied to any
   // particular demand, so it has no invoice number to match on. It still belongs in the table as
@@ -23844,6 +23861,12 @@ function custBuildPlan(allInv,alloc,beforeDate,receiptDates){
     });
   });
   onAccountRows.forEach(r=>plan.push(r));
+  if(money){
+    (money.ptcIn||[]).forEach(p=>plan.push({dueDate:p.document_date,schedule:p.narration||'Transferred from earlier booking',
+      head:'Transfer '+(p.document_no||''),due:0,paid:Number(p.amount||0)}));
+    (money.ptcOut||[]).forEach(p=>plan.push({dueDate:p.document_date,schedule:p.narration||'Transferred out / refunded',
+      head:'Transfer '+(p.document_no||''),due:0,paid:-Number(p.amount||0)}));
+  }
   plan.sort((a,b)=>String(a.dueDate||'').localeCompare(String(b.dueDate||''))||
     String(a.schedule||'').localeCompare(String(b.schedule||''))||
     String(a.head||'').localeCompare(String(b.head||'')));
@@ -23879,8 +23902,9 @@ window.custViewInvoice=async function(id){
     : {data:[]};
   const receiptDates={};
   (rcpts||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
-  const {plan,prevDues,onAccount}=custBuildPlan(allInv,alloc,inv.document_date,receiptDates);
-  const prevSplit=custPrevDuesSplit(inv,allInv,await custLoadMoney(unit.id));
+  const money=await custLoadMoney(unit.id);
+  const {plan,prevDues,onAccount}=custBuildPlan(allInv,alloc,inv.document_date,receiptDates,money);
+  const prevSplit=custPrevDuesSplit(inv,allInv,money);
 
   window._custInvoiceCache={
     inv:inv, items:its||[], plan:plan, prevDues:prevDues, prevSplit:prevSplit, onAccount:onAccount,
