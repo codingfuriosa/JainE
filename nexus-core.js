@@ -16338,16 +16338,39 @@ async function tpManpower(){
    the map empty, which unlocks Edit rather than locking everything - the database refuses the
    edit anyway, so the worst case is a clear error instead of a silent wrong state. */
 let TP_MP_APPLIED={};
+/* CANDIDATES ON EACH POSITION, AND HOW MANY HAVE BEEN MOVED PAST "APPLIED".
+   Two more things hang on this now: whether clicking the row has anywhere to go, and whether the
+   request may still be deleted. Most candidates carry no manpower_request_id - they were entered
+   straight into Interviews - so the position is matched on the job title as well, compared
+   without case. Read for everybody rather than only for people who can edit, because the row
+   click is not an edit; if the read fails the map stays empty, rows simply do not open and
+   nothing is deleted by accident. */
+let TP_MP_CAND={};
+function tpMpCandOf(id){ return TP_MP_CAND[id]||{n:0,started:0}; }
 async function tpMpLoadApplied(){
-  TP_MP_APPLIED={};
-  if(!recCanWrite()) return;
+  TP_MP_APPLIED={}; TP_MP_CAND={};
+  const byTitle={};
+  (MP_RECORDS||[]).forEach(function(r){
+    TP_MP_CAND[r.id]={n:0,started:0};
+    const t=String(r.job_title||'').trim().toLowerCase();
+    if(t) byTitle[t]=r.id;
+  });
   try{
     const {data,error}=await sb.schema('hr').from('candidates')
-      .select('manpower_request_id').not('manpower_request_id','is',null);
+      .select('manpower_request_id,position,max_stage_seq');
     if(error) throw error;
     (data||[]).forEach(function(c){
-      const k=c.manpower_request_id;
-      TP_MP_APPLIED[k]=(TP_MP_APPLIED[k]||0)+1;
+      if(c.manpower_request_id!=null)
+        TP_MP_APPLIED[c.manpower_request_id]=(TP_MP_APPLIED[c.manpower_request_id]||0)+1;
+      let id=c.manpower_request_id;
+      if(id==null||!TP_MP_CAND[id]){
+        const t=String(c.position||'').trim().toLowerCase();
+        id=t?byTitle[t]:undefined;
+      }
+      const slot=(id!=null)?TP_MP_CAND[id]:null;
+      if(!slot) return;
+      slot.n++;
+      if(Number(c.max_stage_seq||0)>0) slot.started++;
     });
   }catch(_e){ /* leave it empty - see above */ }
 }
@@ -16359,6 +16382,11 @@ function tpMpRender(){
      phantom in the count. */
   TP_MP_SEL=new Set([...TP_MP_SEL].filter(id=>rows.some(r=>r.id===id)));
   const nSel=TP_MP_SEL.size;
+  /* A POSITION WHOSE CANDIDATES HAVE STARTED THEIR STAGES CANNOT BE DELETED, and the button says
+     so before it is pressed. Deleting it would leave people halfway through interviews for a job
+     that no longer exists anywhere in the portal. */
+  const delBlocked=[...TP_MP_SEL].filter(id=>tpMpCandOf(id).started>0)
+    .map(id=>(rows.find(r=>r.id===id)||{}).job_title||('#'+id));
   const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
   b.innerHTML=TP_NOTE_CSS+`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
     <div class="sec-title" style="margin:0">Hiring Requests <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
@@ -16389,9 +16417,10 @@ function tpMpRender(){
           title="${why}"
           onclick="tpMpEditSel()">${applied&&nSel===1?'<i class="fa-solid fa-lock"></i>':'<i class="fa-solid fa-pen"></i>'} Edit</button>`;
       })()+`
-        <button class="btn" ${nSel?'style="color:var(--err);border-color:var(--err)"':'disabled style="opacity:.45;cursor:not-allowed"'}
-          title="${nSel?('Delete the '+nSel+' ticked request'+(nSel===1?'':'s')):'Tick at least one request to delete it'}"
-          onclick="tpMpDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
+        <button class="btn" ${nSel&&!delBlocked.length?'style="color:var(--err);border-color:var(--err)"':'disabled style="opacity:.45;cursor:not-allowed"'}
+          title="${delBlocked.length?('Locked \u2014 candidates for '+delBlocked.join(', ')+' have already started their stages')
+            :(nSel?('Delete the '+nSel+' ticked request'+(nSel===1?'':'s')):'Tick at least one request to delete it')}"
+          onclick="tpMpDeleteSel()">${delBlocked.length?'<i class="fa-solid fa-lock"></i>':'<i class="fa-solid fa-trash"></i>'} Delete</button>`:''}
       <button class="btn btn-primary" onclick="tpMpFillForm()"><i class="fa-solid fa-plus"></i> New Request</button>
     </div>
   </div>
@@ -16406,24 +16435,28 @@ function tpMpRender(){
          columns of their own and neither answers a question anybody asks of a list - the count
          matters once you open the request, and Priority only matters when it is Urgent. So Urgent
          now rides next to the job title as a red chip, where it is more visible than a column of
-         mostly "Not Urgent", and both columns are gone. Location and Raised By took their place. -->
-    <thead><tr>${canOpen?'<th style="width:34px;text-align:center"><input type="checkbox" onchange="tpMpToggleAll(this)"></th>':''}<th>Job Title</th><th>Department</th><th>Location</th><th>Raised By</th><th>Date</th><th>Status</th>${canOpen?'<th style="width:90px"></th>':''}</tr></thead>
+         mostly "Not Urgent", and both columns are gone. Location and Raised By took their place.
+         Status went the same way: a description written for a position is published and linked
+         straight away, so there is no approval left for a column to report. -->
+    <thead><tr>${canOpen?'<th style="width:34px;text-align:center"><input type="checkbox" onchange="tpMpToggleAll(this)"></th>':''}<th>Job Title</th><th>Department</th><th>Location</th><th>Raised By</th><th>Date</th>${canOpen?'<th style="width:90px"></th>':''}</tr></thead>
     <!-- CLICKING A ROW SHOWS THE PEOPLE ON THAT POSITION, the same way a Monthly Progress row
          does. A hiring request is a position, and the question you usually have of one is "who
          have we got for it" - which meant going to Interviews and filtering by hand. The tick box
          and the Details button keep their own jobs and stop the click reaching the row. -->
-    <tbody>${rows.length?rows.map(r=>`<tr class="tp-mp-row tp-mp-click" data-id="${r.id}"
-      onclick="tpMuOpenPeople(${esc(JSON.stringify(r.job_title||''))})"
-      title="See the candidates on ${esc(r.job_title||'this position')}">
+    <!-- A POSITION WITH NOBODY ON IT DOES NOT OPEN. It used to go to an empty filtered list,
+         which reads as a broken screen rather than as "no applicants yet" - so the row stays put
+         and the tooltip says why. -->
+    <tbody>${rows.length?rows.map(r=>{const cd=tpMpCandOf(r.id);return `<tr class="tp-mp-row${cd.n?' tp-mp-click':''}" data-id="${r.id}"
+      ${cd.n?`onclick="tpMuOpenPeople(${esc(JSON.stringify(r.job_title||''))})"`:''}
+      title="${cd.n?('See the '+cd.n+' candidate'+(cd.n===1?'':'s')+' on '+esc(r.job_title||'this position')):'Nobody has applied for this position yet'}">
       ${canOpen?`<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="tp-mp-cb" value="${r.id}"${TP_MP_SEL.has(r.id)?' checked':''} onchange="tpMpPick(${r.id},this.checked)"></td>`:''}
       <td style="font-weight:600">${esc(r.job_title||'—')}${r.priority==='Urgent'?' <span class="tag t-red" style="font-size:10px">Urgent</span>':''}</td>
       <td>${esc(r.department||'—')}</td>
       <td style="font-size:12px">${esc(r.location||'—')}</td>
       <td style="font-size:12px;color:var(--slate);overflow-wrap:anywhere">${esc(r.raised_by||'—')}</td>
       <td style="color:var(--slate);font-size:12px;white-space:nowrap">${esc(mpFmtDate(r.date_of_request))}</td>
-      <td>${tpApprovalTag(r)}</td>
       ${canOpen?`<td style="text-align:right" onclick="event.stopPropagation()"><button class="btn btn-sm" style="font-size:12px" onclick="tpMpShowDetail(${r.id})"><i class="fa-solid fa-eye"></i> Details</button></td>`:''}
-    </tr>`).join(''):`<tr><td colspan="${canOpen?8:6}" style="text-align:center;padding:40px;color:var(--slate)">No hiring requests yet — click <b>New Request</b> to raise one</td></tr>`}
+    </tr>`;}).join(''):`<tr><td colspan="${canOpen?7:5}" style="text-align:center;padding:40px;color:var(--slate)">No hiring requests yet — click <b>New Request</b> to raise one</td></tr>`}
     </tbody>
   </table>
   </div>
@@ -16451,6 +16484,15 @@ window.tpMpEditSel=function(){
 window.tpMpDeleteSel=async function(){
   if(!recGuard())return;
   const ids=[...TP_MP_SEL]; if(!ids.length){toast('Tick a request first','err');return;}
+  // The button is already switched off for this; the check is here for a screen left open while
+  // somebody else moved a candidate forward.
+  const held=ids.filter(id=>tpMpCandOf(id).started>0)
+    .map(id=>((MP_RECORDS||[]).find(r=>r.id===id)||{}).job_title||('#'+id));
+  if(held.length){
+    toast('Cannot delete '+held.join(', ')+' \u2014 candidates for '
+          +(held.length===1?'it':'them')+' have already started their stages','err');
+    return;
+  }
   /* Says what else goes, because it is not obvious: the approval tasks are about the request and
      follow it down. The job description does NOT - it is a document in its own right and keeps
      existing, unlinked. */
@@ -16697,6 +16739,12 @@ window.tpMpRejectConfirm=async function(id){
   }
 };
 window.tpMpDeleteOne=async function(id){if(!recGuard())return;
+  const started=tpMpCandOf(id).started;
+  if(started){
+    toast('This position cannot be deleted \u2014 '+started+' candidate'
+          +(started===1?' has':'s have')+' already started their stages','err');
+    return;
+  }
   if(!await confirmDialog('Delete this hiring request?'))return;
   const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
   if(error){toast(error.message,'err');return;}
