@@ -1,11 +1,38 @@
+# WHY THE SITE WAS SLOW.
+#
+# Every .js, .css and .html here was served "no-cache", which does not mean "do not store" - it
+# means the browser must ASK the server every single time before it may use what it already has.
+# nexus-core.js is 2.1MB of source (600KB over the wire after brotli). Every page in JAIN-E is a
+# separate HTML file that loads it again, so moving from Bookings to Invoices to CRM meant a
+# round trip to Netlify and a re-parse of 2.1MB of JavaScript, on every move. Measured at 3.2
+# seconds for that one file.
+#
+# The app already solves this properly: every script tag carries ?v=<number>, and that number is
+# bumped on every change. A URL that changes when its contents change can be cached FOREVER -
+# that is the entire point of versioning it. "no-cache" threw that away and made the ?v= do
+# nothing but add characters.
+#
+# So: the HTML is still no-cache, because the HTML is what carries the new ?v= and it must be
+# picked up the moment it ships. Everything the HTML points at is immutable, because its URL
+# changes whenever it does.
+#
+# ───────────────────────────────────────────────────────────────────────────────────────────
+# THE ONE RULE THIS DEPENDS ON: bump ?v= in the HTML whenever a .js or .css file changes.
+# Ship a change without bumping it and browsers will keep the old file for a year. Every page's
+# script tags are stamped together, so bumping means a search and replace across *.html, not
+# remembering which page uses what.
+# ───────────────────────────────────────────────────────────────────────────────────────────
+
 /*.html
   Cache-Control: no-cache
 
 /*.js
-  Cache-Control: no-cache
+  Cache-Control: public, max-age=31536000, immutable
 
 /*.css
-  Cache-Control: no-cache
+  Cache-Control: public, max-age=31536000, immutable
 
-/assets/*.png
-  Cache-Control: no-cache
+# Images are not versioned, so they get a day rather than a year: long enough to stop them being
+# re-fetched on every page, short enough that replacing a logo reaches people the same week.
+/assets/*
+  Cache-Control: public, max-age=86400

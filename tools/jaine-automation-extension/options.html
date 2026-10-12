@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>JainE Automation -- Settings</title>
+<style>
+  body { font: 14px system-ui, sans-serif; max-width: 480px; margin: 24px auto; padding: 0 16px; }
+  label { display: block; margin-top: 12px; font-weight: 600; }
+  input { width: 100%; box-sizing: border-box; padding: 6px; margin-top: 4px; }
+  button { margin-top: 16px; padding: 8px 16px; }
+  #status { margin-top: 12px; color: #146c2e; }
+  p.hint { color: #666; font-size: 12px; margin: 2px 0 0; }
+</style>
+</head>
+<body>
+  <h2>JainE Automation</h2>
+
+  <label>Supabase URL
+    <input id="supabaseUrl" placeholder="https://rkxsgtauigjrpcjkmccu.supabase.co">
+  </label>
+
+  <label>Supabase anon key
+    <input id="supabaseAnonKey">
+    <p class="hint">The same publishable anon key JainE's own frontend uses.</p>
+  </label>
+
+  <label>Sheet-bot secret
+    <input id="sheetBotSecret">
+    <p class="hint">From: select value from acc.job_secrets where name = 'sheet_bot';</p>
+  </label>
+
+  <label>Anthropic API key
+    <input id="anthropicApiKey">
+    <p class="hint">Only used for the Aadhaar-disambiguation decision (2+ candidates).</p>
+  </label>
+
+  <label>Target Google Sheet URL
+    <input id="sheetUrl">
+  </label>
+
+  <h3>Universal automation queue</h3>
+
+  <label>Automation-bot secret
+    <input id="automationBotSecret">
+    <p class="hint">From: select value from acc.job_secrets where name = 'automation_bot'; -- leave blank to disable this queue.</p>
+  </label>
+
+  <button id="save">Save</button>
+  <div id="status"></div>
+
+  <script src="options.js" type="module"></script>
+</body>
+</html>
