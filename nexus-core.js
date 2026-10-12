@@ -15,6 +15,86 @@ const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;
    parser - the other way round would HTML-encode the apostrophe to &#39;, which the browser decodes
    back to a bare ' before the JS is ever parsed, leaving the bug exactly where it was. */
 const escJs=s=>esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
+
+/* ============================ AMOUNTS, GROUPED THE INDIAN WAY ============================
+   Every field somebody types money into shows 12,34,567.89 as they type — last three digits,
+   then pairs.
+
+   WHY THE FIELDS HAD TO STOP BEING type="number". A number input cannot hold a comma: the browser
+   rejects the character and, worse, silently reports an empty value for anything it considers
+   invalid. So a money field is text with inputmode="decimal", which still brings up the numeric
+   keypad on a phone but lets us control what is displayed.
+
+   THE DANGEROUS HALF IS READING IT BACK. The moment a field can contain "12,34,567", every
+   Number()/parseFloat() in a save path turns it into NaN — silently, on financial data. So the
+   grouping is only ever applied to inputs this code has marked, and the handful of shared value
+   readers (purchase.js val, engineering.js val/numOrNull, accounts.js num) strip commas. Nothing
+   is formatted that is not also read back through one of those.
+
+   moneyStrip is exported deliberately: anything that reads a money field's .value directly should
+   call it rather than inventing another replace(/,/g,''). */
+const moneyStrip=s=>String(s==null?'':s).replace(/,/g,'');
+/* Groups the INTEGER part only, and leaves everything else exactly as typed — a trailing "."
+   while somebody is mid-number, a half-typed decimal, a leading minus. Formatting as you type is
+   only tolerable if it never fights the typing. */
+function inrGroup(s){
+  s=String(s==null?'':s);
+  const neg=/^-/.test(s.trim());
+  let v=moneyStrip(s).replace(/[^\d.]/g,'');
+  const dot=v.indexOf('.');
+  let ip=dot<0?v:v.slice(0,dot), fp=dot<0?'':v.slice(dot+1);
+  ip=ip.replace(/^0+(?=\d)/,'');
+  if(ip.length>3){
+    const last3=ip.slice(-3);
+    const rest=ip.slice(0,-3).replace(/\B(?=(\d{2})+(?!\d))/g,',');
+    ip=rest+','+last3;
+  }
+  return (neg?'-':'')+ip+(dot<0?'':'.'+fp);
+}
+/* Reformats as the person types without the caret jumping to the end — the thing that makes most
+   as-you-type formatting unusable. Counts the digits before the caret, rewrites, then puts the
+   caret back after that same number of digits. */
+function moneyFormatEl(el){
+  if(!el||el.dataset.money!=='1')return;
+  const before=el.value, pos=el.selectionStart==null?before.length:el.selectionStart;
+  const digitsBefore=moneyStrip(before.slice(0,pos)).replace(/[^\d.-]/g,'').length;
+  const after=inrGroup(before);
+  if(after===before)return;
+  el.value=after;
+  let seen=0,i=0;
+  for(;i<after.length&&seen<digitsBefore;i++){ if(after[i]!==',')seen++; }
+  try{ el.setSelectionRange(i,i); }catch(e){}
+}
+/* Turns the money fields inside `root` into grouped text inputs, once each.
+   WHICH FIELDS: anything already marked data-money, plus number inputs stepping in hundredths —
+   which across this app is how money is written and quantities (step 0.001) are not. Percentages
+   also step in hundredths and are swept up, which is harmless: no percentage reaches four digits,
+   so no comma ever appears in one. */
+function moneyUpgrade(root){
+  const scope=root&&root.querySelectorAll?root:document;
+  let list=[];
+  try{ list=scope.querySelectorAll('input[data-money="1"]:not([data-money-ready]),input[type="number"][step="0.01"],input.n[inputmode="decimal"]:not([data-money-ready])'); }
+  catch(e){ return; }
+  [].slice.call(list).forEach(function(el){
+    if(el.dataset.moneyReady==='1')return;
+    if(el.type==='number'){ try{ el.type='text'; }catch(e){ return; } el.setAttribute('inputmode','decimal'); }
+    el.dataset.money='1'; el.dataset.moneyReady='1';
+    if(el.value!=='')el.value=inrGroup(el.value);
+  });
+}
+/* One delegated listener for the whole app rather than a listener per field: money inputs are
+   drawn inside modals that are rebuilt constantly, and per-field listeners leak with them. */
+document.addEventListener('input',function(e){
+  const el=e.target;
+  if(el&&el.tagName==='INPUT'&&el.dataset&&el.dataset.money==='1')moneyFormatEl(el);
+},true);
+/* Fields appear whenever a view or a modal draws, which happens from dozens of places. Watching
+   the DOM catches all of them without every caller having to remember to ask. */
+try{
+  new MutationObserver(function(muts){
+    for(const m of muts){ if(m.addedNodes&&m.addedNodes.length){ moneyUpgrade(document); return; } }
+  }).observe(document.documentElement,{childList:true,subtree:true});
+}catch(e){}
 const state={user:null,email:null,profile:null,roles:null,super:false};
 // The access token, kept current from boot() and every onAuthStateChange firing. Usage telemetry's
 // unload-time flush needs it synchronously (a pagehide handler can't safely await getSession()) —
@@ -48,7 +128,7 @@ function pageIdFromPath(pathname){
 // A page may list several scripts; they load one after another, in order (purchase-indent.js uses what
 // purchase.js defines).
 const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js'],accounts:['accounts.js','accounts-bank.js','accounts-books.js'],scheduling:'scheduling.js'};
-const PAGE_SCRIPT_VERSION={'scheduling.js':'20261007a','accounts.js':'20261005g','accounts-bank.js':'20261005b','accounts-books.js':'20261005d','purchase.js':'20261006a','purchase-indent.js':'20261006a','purchase-rfq.js':'20261005a','purchase-po.js':'20261006b','purchase-stores.js':'20261006b','purchase-reports.js':'20261006a'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'20261009a','postsales.js':'20261009a','scheduling.js':'20261007a','accounts.js':'20261005g','accounts-bank.js':'20261005b','accounts-books.js':'20261005d','purchase.js':'20261009a','purchase-indent.js':'20261006a','purchase-rfq.js':'20261005a','purchase-po.js':'20261006b','purchase-stores.js':'20261006b','purchase-reports.js':'20261006a'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];
@@ -19496,6 +19576,10 @@ window.cpaCustomerSave=async function(id){
 // additionally uses a 3-tier merged header for its cost-sheet columns (Charge Type -> Basic/Tax ->
 // component name) - none of that survives a CSV round-trip. maintenance_bills/maintenance_receipts
 // still use the older generic CSV path below (no real maintenance export has been reconciled yet).
+/* ==FARVISION-PARSERS-START== (9 Oct 2026)
+   Everything between this line and FARVISION-PARSERS-END is also run, unchanged, by the automatic
+   daily import (tools/farvision-auto-import.mjs on GitHub Actions), so a fix to a parser here is a
+   fix to both. Keep it self-contained: only XLSX (and window.XLSX) may be used inside. */
 function xlsxSheetRows(wb){ const ws=wb.Sheets[wb.SheetNames[0]]; return {ws,rows:XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null})}; }
 function xlsxFindHeaderRow(rows,mustContain){ for(let r=0;r<rows.length;r++){ const row=rows[r]||[]; if(row.some(v=>typeof v==='string'&&v.trim()===mustContain)) return r; } return -1; }
 function xlsxMergedLabel(ws,rows,r,c){
@@ -19651,6 +19735,33 @@ function cpaParsePTC(wb){
     isReversed:String(get('Is Reversed')||'').trim().toUpperCase()==='YES',
   }));
 }
+// Which of the seven reports a workbook is, from its header row. Most specific first - Booking
+// Register has "Payment Plan" too, so "Booking Id" is checked before "Payment Plan".
+function cpaDetectReportType(wb){
+  const {rows}=xlsxSheetRows(wb);
+  for(let r=0;r<Math.min(rows.length,20);r++){
+    const vals=(rows[r]||[]).map(v=>typeof v==='string'?v.trim():'');
+    if(vals.includes('Receipt Reversal No')) return 'receipt_reversal';
+    if(vals.includes('Money Receipt No')&&vals.includes('Drawn On')) return 'receipt_register';
+    if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')) return 'invoice_register';
+    if(vals.includes('Net Outstanding')&&vals.includes('Bill Outstanding')) return 'outstanding';
+    if(vals.includes('Booking Id')&&!vals.includes('Total Basic')) return 'booking_register';
+    if(vals.includes('PTC Created By')) return 'ptc_transfer';
+    if(vals.includes('Payment Plan')&&vals.includes('Total Basic')) return 'sales_details';
+  }
+  return null;
+}
+function cpaParseByType(type,wb){
+  if(type==='sales_details') return cpaParseSalesDetails(wb);
+  if(type==='outstanding') return cpaParseOutstanding(wb);
+  if(type==='invoice_register') return cpaParseInvoiceRegister(wb);
+  if(type==='receipt_register') return cpaParseReceiptRegister(wb);
+  if(type==='receipt_reversal') return cpaParseReceiptReversal(wb);
+  if(type==='booking_register') return cpaParseBookingRegister(wb);
+  if(type==='ptc_transfer') return cpaParsePTC(wb);
+  throw new Error('Type '+type+' not yet supported for auto-import');
+}
+/* ==FARVISION-PARSERS-END== */
 // Booking No is the real join key (unlike unit_code, which repeats across towers). A record that
 // carries a Booking No resolves by it or not at all: falling back to (tower, unit code) whenever the
 // lookup missed attached every cancelled booking's invoices, receipts and Outstanding row to whoever
@@ -19713,6 +19824,7 @@ async function cpaRenderImport(host,seg){
   const typeOpts=Object.keys(CPA_IMPORT_COLUMNS).concat(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register'])
     .map(k=>`<option value="${k}">${esc(CPA_IMPORT_LABELS[k]||k)}</option>`).join('');
   host.innerHTML=`<div class="tabs" style="margin-bottom:14px"><div class="tab active">Import</div><div class="tab" onclick="navTo('custportal_admin/2/history')">Import History</div></div>
+    <div id="cpaAutoCard"></div>
     ${queueHtml}
     <div class="card card-pad frm"><div class="two"><div><label>Import type</label><select id="cpaImpType" onchange="cpaImportTypeChange()">${typeOpts}</select></div>
     <div id="cpaImpProjectWrap"><label>Project (for matching unit codes)</label><select id="cpaImpProject">${projOpts}</select></div></div>
@@ -19722,9 +19834,123 @@ async function cpaRenderImport(host,seg){
     </div><div id="cpaImpPreview" style="margin-top:16px"></div>`;
   window.cpaImportTypeChange();
   // No auto-import on load — user clicks "Import all" when ready
+  cpaAutoImportCard();
 }
+/* AUTOMATIC IMPORT status (9 Oct 2026). What the unattended daily import did today - see
+   supabase/migrations/20261009100000_farvision_auto_import.sql. In test mode it applies the day's
+   files, compares the result with what is already there (the manual import) and undoes it; in live
+   mode it keeps it. Retry / Import anyway are the two decisions it can ask staff for. */
+const CPA_AUTO_LABEL={sales_details:'Sales Details',booking_register:'Booking Register',invoice_register:'Invoice Register',
+  receipt_register:'Receipt Register',receipt_reversal:'Receipt Reversal',ptc_transfer:'Payment To Customer',outstanding:'Customer Outstanding'};
+async function cpaAutoImportCard(){
+  const host=$('cpaAutoCard'); if(!host) return;
+  const [{data:runs},{data:cfg}]=await Promise.all([
+    sb.schema('cust').from('import_runs').select('id,run_date,status,mode,attempts,last_error,summary,applied_at,updated_at').order('run_date',{ascending:false}).limit(1),
+    sb.schema('cust').from('import_config').select('mode,alert_after,give_up_after').maybeSingle()]);
+  if(!cfg) return;
+  const run=(runs||[])[0], sm=(run&&run.summary)||{}, w=sm.waiting||{};
+  const live=cfg.mode==='live', test=cfg.mode==='dry_run';
+  const today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
+  const isToday=run&&run.run_date===today;
+  const time=t=>t?new Date(t).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'}):'';
+  const list=a=>(a||[]).map(x=>esc(CPA_AUTO_LABEL[x]||x)).join(', ');
+  let tone='#eff6ff',bd='#bfdbfe',icon='fa-clock',head='',lines=[],btns='';
+  const st=isToday?run.status:'none';
+  if(st==='none'){ head='No Farvision files today yet'; lines.push('Files usually arrive at about 10:12.'); }
+  else if(st==='collecting'||st==='applying'){
+    head='Waiting for the full set of files';
+    if(w.files_today!=null) lines.push(w.files_today+' file'+(w.files_today===1?'':'s')+' received so far.');
+    if((w.missing||[]).length) lines.push('Not received yet: '+list(w.missing)+'.');
+    if((w.not_read||[]).length) lines.push((w.not_read||[]).length+' file'+((w.not_read||[]).length===1?'':'s')+' still to be read by the automatic reader.');
+    if((w.unreadable||[]).length){ lines.push('Could not be read: '+(w.unreadable||[]).map(esc).join('; ')); tone='#fffbeb'; bd='#f0dfa8'; }
+    if(test&&!(w.missing||[]).length&&!(w.not_read||[]).length) lines.push('Test mode: it runs once your own "Import all" has finished.');
+  }else if(st==='applied'){
+    tone='#f0fdf4'; bd='#bbf7d0'; icon='fa-circle-check';
+    const a=sm.after||{};
+    head='Imported automatically at '+time(run.applied_at);
+    lines.push((sm.file_count||0)+' files. '+((a.live_units||0)-(a.ledger_mismatch||0))+' of '+(a.live_units||0)+' flats match Farvision.');
+  }else if(st==='dry_run_ok'){
+    tone='#f0fdf4'; bd='#bbf7d0'; icon='fa-circle-check';
+    head='Test run matched your import exactly';
+    lines.push('The automatic import read the same '+(sm.file_count||0)+' files and produced exactly the figures already on the portal. Nothing was changed.');
+  }else if(st==='dry_run_diff'){
+    tone='#fffbeb'; bd='#f0dfa8'; icon='fa-triangle-exclamation';
+    head='Test run differs from your import in '+(sm.diff_count||0)+' place'+(sm.diff_count===1?'':'s');
+    lines.push('Nothing was changed. First differences: '+(sm.diff||[]).slice(0,8).map(d=>esc((d.tower||'')+' '+(d.unit||'')+' - '+d.part)).join('; ')+'.');
+  }else if(st==='needs_approval'){
+    tone='#fffbeb'; bd='#f0dfa8'; icon='fa-hand';
+    head='Held - nothing was changed';
+    (sm.problems||[]).forEach(x=>lines.push(esc(x)));
+    if(live) btns='<button class="btn btn-sm btn-primary" onclick="cpaAutoAction('+run.id+',\'force\')"><i class="fa-solid fa-check"></i> Import anyway</button>'
+      +' <button class="btn btn-sm" onclick="cpaAutoAction('+run.id+',\'retry\')"><i class="fa-solid fa-rotate"></i> Check again</button>';
+  }else if(st==='failed'){
+    tone='#fef2f2'; bd='#fecaca'; icon='fa-circle-xmark';
+    head='Failed - nothing was changed';
+    lines.push(esc(run.last_error||sm.error||'Unknown error')+' (tried '+run.attempts+' time'+(run.attempts===1?'':'s')+')');
+    btns='<button class="btn btn-sm btn-primary" onclick="cpaAutoAction('+run.id+',\'retry\')"><i class="fa-solid fa-rotate"></i> Retry</button>';
+  }
+  if((sm.sales_details_missing||[]).length&&st!=='collecting') lines.push('No Sales Details for: '+(sm.sales_details_missing||[]).map(esc).join(', ')+' - their cost sheets stay as last imported.');
+  const modeTag=live?'<span class="tag t-green">Live</span>':test?'<span class="tag t-amber">Test mode - changes nothing</span>':'<span class="tag">Off</span>';
+  host.innerHTML='<div class="card card-pad" style="background:'+tone+';border-color:'+bd+';margin-bottom:16px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">'
+    +'<div><i class="fa-solid '+icon+'" style="color:var(--brand)"></i> <b>Automatic import</b> · '+esc(head)+'</div>'+modeTag+'</div>'
+    +lines.map(l=>'<div style="font-size:13px;color:var(--slate);margin-top:3px">'+l+'</div>').join('')
+    +(btns?'<div style="margin-top:10px">'+btns+'</div>':'')+'</div>';
+}
+window.cpaAutoAction=async function(runId,action){
+  const {error}=await sb.schema('cust').rpc('fv_run_action',{p_run:runId,p_action:action});
+  if(error){ toast('Could not do that: '+error.message,'err'); return; }
+  toast(action==='force'?'Importing anyway - it runs within 5 minutes':'Will check again within 5 minutes','ok');
+  cpaAutoImportCard();
+};
 // Queue: auto-detect type, parse, and import directly — no manual steps
+/* LIVE AUTOMATIC IMPORT (10 Oct 2026): once cust.import_config.mode is 'live', "Import all" and
+   the per-file Import button no longer write customer data from the browser. They read today's
+   files with the same parsers and hand the rows to the same staging table the GitHub reader uses;
+   the database then applies the whole day at once (all or nothing) within 5 minutes. */
+async function cpaAutoMode(){
+  try{ const {data}=await sb.schema('cust').from('import_config').select('mode').maybeSingle(); return (data&&data.mode)||'dry_run'; }
+  catch(_e){ return 'dry_run'; }
+}
+async function cpaAutoReadNow(){
+  const btn=document.getElementById('cpaAutoImportBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading…';}
+  try{
+    const XL=await loadXLSX(); if(!XL) throw new Error('Could not load spreadsheet reader');
+    const {data:list,error}=await sb.schema('cust').rpc('fv_staff_files');
+    if(error) throw error;
+    const todo=((list&&list.files)||[]).filter(f=>!f.staged);
+    if(!todo.length){ toast('All of today\'s files are already read - the automatic import takes it from here','ok'); return; }
+    let done=0; const bad=[];
+    for(const f of todo){
+      const base={p_run:list.run_id,p_queue:f.queue_id,p_file:f.file_name,p_created:f.created_at};
+      const {data:blob,error:dlErr}=await sb.storage.from('farvision-imports').download(f.storage_path);
+      if(dlErr||!blob){ bad.push(f.file_name+' (download failed)'); continue; }
+      let type=null, rows;
+      try{
+        const wb=XL.read(new Uint8Array(await blob.arrayBuffer()),{type:'array'});
+        type=cpaDetectReportType(wb);
+        if(!type) throw new Error('Could not detect report type');
+        rows=JSON.parse(JSON.stringify(cpaParseByType(type,wb)));
+      }catch(e){
+        await sb.schema('cust').rpc('fv_staff_stage',{...base,p_type:type,p_rows_total:0,p_chunk:0,p_chunks:1,p_rows:[],p_parse_error:String(e.message||e).slice(0,300)});
+        bad.push(f.file_name+' (could not be read)'); continue;
+      }
+      const CH=2000, chunks=Math.max(1,Math.ceil(rows.length/CH));
+      let ok=true;
+      for(let c=0;c<chunks&&ok;c++){
+        const {error:se}=await sb.schema('cust').rpc('fv_staff_stage',{...base,p_type:type,p_rows_total:rows.length,p_chunk:c,p_chunks:chunks,p_rows:rows.slice(c*CH,(c+1)*CH),p_parse_error:null});
+        if(se){ ok=false; bad.push(f.file_name+' ('+se.message+')'); }
+      }
+      if(ok) done++;
+      if(btn) btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading '+(done+bad.length)+'/'+todo.length+'…';
+    }
+    toast(done+' file'+(done===1?'':'s')+' read - the automatic import applies the whole day within 5 minutes'+(bad.length?'. Not read: '+bad.join('; '):''),bad.length?'warn':'ok');
+  }catch(e){ toast('Could not read the files: '+(e.message||e),'err'); }
+  finally{ if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-bolt"></i> Import all';} cpaAutoImportCard(); }
+}
 window.cpaQueueImport=async function(queueId){
+  if(await cpaAutoMode()==='live'){ await cpaAutoReadNow(); return true; }
   const {data:q,error}=await sb.schema('cust').from('import_queue').select('*').eq('id',queueId).single();
   if(error||!q){toast('Queue item not found','err');return;}
   await sb.schema('cust').from('import_queue').update({status:'processing'}).eq('id',queueId);
@@ -19736,32 +19962,10 @@ window.cpaQueueImport=async function(queueId){
     const buf=await blob.arrayBuffer();
     // Serials, not Dates - the same as a manual upload, and read to the exact day by xlsxExcelDate.
     const wb=XL.read(new Uint8Array(buf),{type:'array'});
-    // Detect type
-    const {rows}=xlsxSheetRows(wb);
-    let type=null;
-    for(let r=0;r<Math.min(rows.length,20);r++){
-      const vals=(rows[r]||[]).map(v=>typeof v==='string'?v.trim():'');
-      // Check most specific first — Booking Register has "Payment Plan" too, so
-      // must check "Booking Id" (unique to it) before "Payment Plan"
-      if(vals.includes('Receipt Reversal No')){type='receipt_reversal';break;}
-      if(vals.includes('Money Receipt No')&&vals.includes('Drawn On')){type='receipt_register';break;}
-      if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')){type='invoice_register';break;}
-      if(vals.includes('Net Outstanding')&&vals.includes('Bill Outstanding')){type='outstanding';break;}
-      if(vals.includes('Booking Id')&&!vals.includes('Total Basic')){type='booking_register';break;}
-      if(vals.includes('PTC Created By')){type='ptc_transfer';break;}
-      if(vals.includes('Payment Plan')&&vals.includes('Total Basic')){type='sales_details';break;}
-    }
+    // Detect type, then parse - the same two steps the automatic import runs
+    const type=cpaDetectReportType(wb);
     if(!type) throw new Error('Could not detect report type');
-    // Parse
-    let parsed;
-    if(type==='sales_details') parsed=cpaParseSalesDetails(wb);
-    else if(type==='outstanding') parsed=cpaParseOutstanding(wb);
-    else if(type==='invoice_register') parsed=cpaParseInvoiceRegister(wb);
-    else if(type==='receipt_register') parsed=cpaParseReceiptRegister(wb);
-    else if(type==='receipt_reversal') parsed=cpaParseReceiptReversal(wb);
-    else if(type==='booking_register') parsed=cpaParseBookingRegister(wb);
-    else if(type==='ptc_transfer') parsed=cpaParsePTC(wb);
-    else throw new Error('Type '+type+' not yet supported for auto-import');
+    const parsed=cpaParseByType(type,wb);
     // Match to projects/units (only registered projects pass through)
     const projects=await cpaProjects();
     const units=await cpaUnits();
@@ -19804,6 +20008,7 @@ window.cpaQueueImport=async function(queueId){
   }
 };
 window.cpaQueueImportAll=async function(){
+  if(await cpaAutoMode()==='live'){ await cpaAutoReadNow(); return; }
   const {data:pending}=await sb.schema('cust').from('import_queue').select('id,file_name').eq('status','pending').order('created_at');
   if(!pending||!pending.length){toast('No pending files','ok');return;}
   const btn=document.getElementById('cpaAutoImportBtn');
@@ -22455,28 +22660,13 @@ async function custLoadData(customerId,force){
     const {data}=await sb.schema('cust').from('farvision_contacts').select('*').in('unit_id',unitIds).eq('is_current',true);
     contacts=data||[];
   }
-  /* Anything the customer corrected themselves wins over the imported row. It is kept in its own
-     table because farvision_contacts is rewritten by the nightly import - an edit written there
-     would quietly disappear overnight. Blank fields in the override mean "no correction", so the
-     imported value still shows through. */
-  let overrides=[];
-  if(unitIds.length){
-    const {data}=await sb.schema('cust').from('contact_overrides').select('*').in('unit_id',unitIds);
-    overrides=data||[];
-  }
-  const ovByUnit={};overrides.forEach(o=>{ovByUnit[o.unit_id]=o;});
+  /* Contact details are Farvision's, exactly as imported (10 Oct 2026). Customers could briefly edit
+     their phone / email / address here; that is gone - a customer edit would have replaced
+     Farvision's details on screen and on the Tax Invoice and Demand Letter without anyone in
+     post-sales knowing. A correction is a Support request; once Farvision is updated, the next
+     daily import brings it here. */
   const contactByUnit={};
-  contacts.forEach(c=>{
-    const o=ovByUnit[c.unit_id];
-    contactByUnit[c.unit_id]=o
-      ? Object.assign({},c,{
-          contact_phone:   o.contact_phone   || c.contact_phone,
-          contact_email:   o.contact_email   || c.contact_email,
-          contact_address: o.contact_address || c.contact_address,
-          _edited:{phone:!!o.contact_phone,email:!!o.contact_email,address:!!o.contact_address}
-        })
-      : c;
-  });
+  contacts.forEach(c=>{ contactByUnit[c.unit_id]=c; });
   // Whether this customer has ever submitted a referral, across all their units (the sidebar is
   // shared across units, not per-unit) - drives the "Earn" badge in custSidebarTabs. Left undefined
   // rather than defaulted to false until this resolves, so the sidebar's very first paint (before
@@ -22636,59 +22826,16 @@ const CUST_FIGURES_NOTICE='<div style="display:flex;gap:10px;align-items:flex-st
   '<i class="fa-solid fa-circle-info" style="margin-top:2px"></i><div><b>Your figures are being updated.</b> '+
   'We are reconciling this account against our accounting system, so the amounts are not being shown right now. '+
   'Please contact us before making any payment.</div></div>';
-/* One profile row, able to turn into an input. Rendered as text; custProfileEditStart swaps in the
-   field beside it rather than re-rendering the page, so a half-typed address survives a stray
-   click. "Updated by you" marks a value the customer corrected, so it is obvious which figures are
-   ours and which are theirs. */
-function custProfileField(key,icon,label,value,delay,c){
-  const edited=c&&c._edited&&c._edited[key];
+// One read-only profile row.
+function custProfileField(key,icon,label,value,delay){
   const isAddr=key==='address';
   return '<div class="cust-profile-item'+(isAddr?' cust-profile-addr':'')+'" style="animation-delay:'+delay+'">'
     +'<div class="cust-profile-icon"><i class="fa-solid '+icon+'"></i></div>'
     +'<div style="min-width:0;flex:1">'
-      +'<div class="cust-profile-label">'+esc(label)
-        +(edited?' <span style="color:#16855a;font-weight:600">· updated by you</span>':'')+'</div>'
-      +'<div class="cust-profile-value" id="custPV_'+key+'">'+esc(value||'—')+'</div>'
-      +(isAddr
-        ? '<textarea id="custPI_'+key+'" rows="3" style="display:none;width:100%;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13.5px;resize:vertical"></textarea>'
-        : '<input id="custPI_'+key+'" type="'+(key==='email'?'email':'tel')+'" style="display:none;width:100%;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13.5px">')
+      +'<div class="cust-profile-label">'+esc(label)+'</div>'
+      +'<div class="cust-profile-value">'+esc(value||'—')+'</div>'
     +'</div></div>';
 }
-const CUST_PROFILE_KEYS=['phone','email','address'];
-function custProfileToggle(editing){
-  CUST_PROFILE_KEYS.forEach(function(k){
-    const v=$('custPV_'+k), i=$('custPI_'+k);
-    if(!v||!i)return;
-    if(editing){ i.value=(v.textContent==='—'?'':v.textContent); }
-    v.style.display=editing?'none':'';
-    i.style.display=editing?'':'none';
-  });
-  ['custProfileCancel','custProfileSave','custProfileHint'].forEach(function(id){
-    const el=$(id); if(el) el.style.display=editing?'':'none';
-  });
-  const e=$('custProfileEdit'); if(e) e.style.display=editing?'none':'';
-}
-window.custProfileEditStart=function(){ custProfileToggle(true); const p=$('custPI_phone'); if(p)try{p.focus();}catch(_e){} };
-window.custProfileEditCancel=function(){ custProfileToggle(false); };
-window.custProfileSave=async function(unitId){
-  const btn=$('custProfileSave');
-  const vals={}; CUST_PROFILE_KEYS.forEach(function(k){ const i=$('custPI_'+k); vals[k]=i?i.value.trim():''; });
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
-  try{
-    const {error}=await sb.schema('cust').rpc('save_my_contact',
-      {p_unit_id:unitId,p_phone:vals.phone,p_email:vals.email,p_address:vals.address});
-    if(error)throw error;
-  }catch(e){
-    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Save'; }
-    // The database writes these messages for the customer to read, so show it rather than a generic one.
-    toast((e&&e.message)||'Could not save your details','err');
-    return;
-  }
-  toast('Your details have been updated','ok');
-  // Re-read so the page shows what was actually stored, not what was typed.
-  CUST_DATA=null;
-  renderPage();
-};
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
   const [{data:invRows},{data:rcptRows},{data:revRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
@@ -22868,19 +23015,9 @@ async function custTabOverview(data,unit){
         '</div>'+
       '</div>'+
       '<div class="cust-profile-details">'+
-        custProfileField('phone','fa-phone','Phone',c.contact_phone,'.1s',c)+
-        custProfileField('email','fa-envelope','Email',c.contact_email,'.15s',c)+
-        custProfileField('address','fa-location-dot','Correspondence address',c.contact_address,'.2s',c)+
-      '</div>'+
-      /* The customer can correct how we reach them. The registered name is NOT here: it is the
-         name on the booking and appears on receipts and demand letters, so it has to match the
-         agreement rather than follow a text box. */
-      '<div class="cust-profile-edit-bar" style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
-        '<span id="custProfileHint" style="margin-right:auto;font-size:12px;color:var(--slate);display:none">'+
-          'Changing these updates how we contact you. Your name and flat details cannot be changed here — please call us for those.</span>'+
-        '<button class="btn" id="custProfileEdit" onclick="custProfileEditStart('+unit.id+')"><i class="fa-solid fa-pen"></i> Update my details</button>'+
-        '<button class="btn" id="custProfileCancel" style="display:none" onclick="custProfileEditCancel()">Cancel</button>'+
-        '<button class="btn btn-primary" id="custProfileSave" style="display:none" onclick="custProfileSave('+unit.id+')"><i class="fa-solid fa-check"></i> Save</button>'+
+        custProfileField('phone','fa-phone','Phone',c.contact_phone,'.1s')+
+        custProfileField('email','fa-envelope','Email',c.contact_email,'.15s')+
+        custProfileField('address','fa-location-dot','Correspondence address',c.contact_address,'.2s')+
       '</div>'+
     '</div>'
     :'<div class="card card-pad empty">Profile not yet available — this updates after our next records sync.</div>';
@@ -23363,11 +23500,13 @@ window.custDownloadSelectedDocs=async function(){
     const receiptDates={};(rcpts2||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
     const rate=custDocRate(unit,csi);
     const lateFee=Number((snap&&snap.late_fee_accrued)||0);
+    const money=await custLoadMoney(unit.id);
     (invs||[]).forEach(inv=>{
       const {data:its}={data:(allInv||[]).find(a=>a.document_no===inv.document_no)};
       const items=its&&its.invoice_items?its.invoice_items:[];
-      const {plan,prevDues}=custBuildPlan(allInv,alloc2,inv.document_date,receiptDates);
-      pages.push(custInvoiceDocHtml({inv:inv,items:items,plan:plan,prevDues:prevDues,lateFee:lateFee,rate:rate,unit:unit,contact:contact},'invoice',true));
+      const {plan,prevDues}=custBuildPlan(allInv,alloc2,inv.document_date,receiptDates,money);
+      const prevSplit=custPrevDuesSplit(inv,allInv,money);
+      pages.push(custInvoiceDocHtml({inv:inv,items:items,plan:plan,prevDues:prevDues,prevSplit:prevSplit,lateFee:lateFee,rate:rate,unit:unit,contact:contact},'invoice',true));
     });
   }
   if(!pages.length){try{w.close();}catch(_e){} toast('No documents could be loaded','err');return;}
@@ -23466,17 +23605,18 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
     head='<th>Due Date</th><th>Description</th><th>Charge Type</th>'+
       '<th class="amt">Amount Due</th><th class="amt">Amount Paid</th><th class="amt">Amount Payable</th>';
     let due=0,paid=0;
+    const dinr=v=>Number(v)<0?'-'+custInr(-Number(v)):custInr(v);
     rowsHtml=custAnantaPlan(unit,ctx.plan).map(r=>{
       due+=r.due; paid+=r.paid;
       return '<tr><td>'+(r.dueDate?fmtDate(r.dueDate):'—')+'</td>'+
         '<td>'+esc(r.schedule||'—')+'</td><td>'+esc(r.head||'—')+'</td>'+
-        '<td class="amt">'+custInr(r.due)+'</td><td class="amt">'+custInr(r.paid)+'</td>'+
-        '<td class="amt">'+custInr(r.due-r.paid)+'</td></tr>';
+        '<td class="amt">'+dinr(r.due)+'</td><td class="amt">'+dinr(r.paid)+'</td>'+
+        '<td class="amt">'+dinr(r.due-r.paid)+'</td></tr>';
     }).join('');
-    // On-account receipts are rows in the table above, so the totals already account for them.
+    // On-account receipts and transfers are rows in the table above, so the totals already account for them.
     const payable=due-paid;
-    foot='<tr><td colspan="3">Total Amount Due</td><td class="amt">'+custInr(due)+'</td>'+
-      '<td class="amt">'+custInr(paid)+'</td><td class="amt">'+custInr(payable)+'</td></tr>'+
+    foot='<tr><td colspan="3">Total Amount Due</td><td class="amt">'+dinr(due)+'</td>'+
+      '<td class="amt">'+dinr(paid)+'</td><td class="amt">'+dinr(payable)+'</td></tr>'+
       '<tr><td colspan="6" class="rcpt-words">Amount payable in words : '+esc(custAmountInWords(Math.max(0,payable)))+'</td></tr>';
     tail='<div class="rcpt-terms">'+
       '<h4>Terms &amp; Condition:</h4>'+
@@ -23494,26 +23634,27 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
         '<td class="amt">'+custInr(it.amount||0)+'</td><td class="amt">'+custInr(it.tax||0)+'</td>'+
         '<td class="amt">'+custInr(it.net_amount||0)+'</td></tr>';
     }).join('');
-    // Previous dues is what is still unpaid on invoices raised before this one. It can only be
-    // stated as a single figure: receipts allocate against the net of a line, never split across
-    // its basic and tax, so an amount/GST breakup of a part-paid line would be invented.
-    const prev=Number(ctx.prevDues||0);
+    /* Previous dues, as Farvision prints it (9 Oct 2026, checked against its Tax Invoice
+       DA/0003226-27): everything billed on earlier invoices LESS everything received up to this
+       invoice's date - so it goes negative when the customer has paid ahead, and Total Payable
+       then shows the credit (-1,470 there, where the portal used to say 9,79,470 was payable on an
+       invoice paid in full the same day). Its Amount / GST split comes from custPrevDuesSplit. */
+    const ps=ctx.prevSplit||{amt:0,tax:0,net:Number(ctx.prevDues||0)};
     const lateFee=Number(ctx.lateFee||0);
+    const inr=v=>Number(v)<0?'-'+custInr(-Number(v)):custInr(v);
     const sumRow=(label,a,t,n,strong)=>'<tr'+(strong?' class="rcpt-strong"':'')+'><td colspan="3">'+esc(label)+'</td>'+
       '<td class="amt">'+a+'</td><td class="amt">'+t+'</td><td class="amt">'+n+'</td></tr>';
-    // Previous dues and late fees carry no basic/GST split of their own, so a running total can
-    // only show those two columns while both are nil - which is the normal case, and then the
-    // running totals simply repeat the invoice's own figures, exactly as Farvision prints them.
-    // Once either is non-nil the split is genuinely unknown and the column shows a dash rather
-    // than a made-up number.
-    const carry=(v,blocked)=>blocked?'—':custInr(v);
+    // A late fee carries no basic/GST split of its own, so once there is one the running total's
+    // two split columns show a dash rather than a made-up number.
+    const carry=(v,blocked)=>blocked?'—':inr(v);
+    const payNet=net+ps.net, withFee=payNet+lateFee;
     foot=
-      sumRow('Total Invoice Amount :',custInr(amt),custInr(tax),custInr(net))+
-      sumRow('Previous dues :',carry(0,prev),carry(0,prev),custInr(prev))+
-      sumRow('Total Payable :',carry(amt,prev),carry(tax,prev),custInr(net+prev),true)+
-      sumRow('Late Payment fees :',carry(0,lateFee),carry(0,lateFee),custInr(lateFee))+
-      sumRow('Total payable with interest :',carry(amt,prev||lateFee),carry(tax,prev||lateFee),custInr(net+prev+lateFee),true)+
-      '<tr><td colspan="6" class="rcpt-words">Amount in Words : '+esc(custAmountInWords(net+prev+lateFee))+'</td></tr>';
+      sumRow('Total Invoice Amount :',inr(amt),inr(tax),inr(net))+
+      sumRow('Previous dues :',inr(ps.amt),inr(ps.tax),inr(ps.net))+
+      sumRow('Total Payable :',inr(amt+ps.amt),inr(tax+ps.tax),inr(payNet),true)+
+      sumRow('Late Payment fees :',carry(0,lateFee),carry(0,lateFee),inr(lateFee))+
+      sumRow('Total payable with interest :',carry(amt+ps.amt,lateFee),carry(tax+ps.tax,lateFee),inr(withFee),true)+
+      '<tr><td colspan="6" class="rcpt-words">Amount in Words : '+esc((withFee<0?'Minus ':'')+custAmountInWords(withFee))+'</td></tr>';
   }
   return ''+
     '<div class="rcpt-doc'+(forPrint?' print':'')+'">'+
@@ -23538,12 +23679,92 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
     '</div>';
 }
 
+/* Previous dues on a Tax Invoice, the way Farvision states it: billed on invoices raised before
+   this one, less money received up to this invoice's date. Money received is counted the way the
+   Ledger counts it - receipt lines against this unit's live demands (a payment against a cancelled
+   booking's demand is not this customer's), unallocated / on-account money, less cheque returns,
+   plus transfers in, less transfers out and refunds.
+   The Amount / GST split follows Farvision: a payment against a line is split in that line's own
+   GST proportion, rounded per receipt (50,000 against the 2,10,000 booking line of DA/0003226-27 is
+   47,619 + 2,381); money not set against a line (on account, transfers, returns) is all Amount.
+   money: {receipts:[{id,receipt_date,total_amount}], items:[receipt_items], reversals, ptcIn, ptcOut} */
+function custPrevDuesSplit(inv,allInv,money){
+  const SEP=String.fromCharCode(31), d=String(inv&&inv.document_date||''), no=String(inv&&inv.document_no||'');
+  const isBefore=iv=>{ const id=String(iv.document_date||''), ino=String(iv.document_no||'');
+    return ino!==no&&(id<d||(id===d&&ino<no)); };
+  const upTo=x=>!d||!x||String(x).slice(0,10)<=d;
+  const lines={}, live=new Set(); let bAmt=0,bTax=0;
+  (allInv||[]).forEach(iv=>{
+    live.add(iv.document_no);
+    (iv.invoice_items||[]).forEach(it=>{
+      const k=[iv.document_no,it.schedule||'',it.revenue_head||''].join(SEP);
+      const l=lines[k]=lines[k]||{tax:0,net:0};
+      l.tax+=Number(it.tax||0); l.net+=Number(it.net_amount||0);
+      if(isBefore(iv)){ bAmt+=Number(it.amount||0); bTax+=Number(it.tax||0); }
+    });
+  });
+  const m=money||{}, byReceipt={};
+  (m.items||[]).forEach(i=>{(byReceipt[i.receipt_id]=byReceipt[i.receipt_id]||[]).push(i);});
+  let rAmt=0,rTax=0;
+  (m.receipts||[]).forEach(r=>{
+    if(!upTo(r.receipt_date)) return;
+    const its=byReceipt[r.id]||[];
+    if(!its.length){ rAmt+=Number(r.total_amount||0); return; }
+    const perLine={};
+    its.forEach(i=>{
+      if(i.against_demand_no&&!live.has(i.against_demand_no)) return;
+      const k=i.against_demand_no?[i.against_demand_no,i.schedule||'',i.revenue_head||''].join(SEP):'';
+      perLine[k]=(perLine[k]||0)+Number(i.amount||0);
+    });
+    Object.keys(perLine).forEach(k=>{
+      const paid=perLine[k], l=k?lines[k]:null;
+      const t=(l&&l.net)?Math.round(paid*l.tax/l.net):0;
+      rTax+=t; rAmt+=paid-t;
+    });
+  });
+  (m.reversals||[]).forEach(v=>{ if(upTo(v.receipt_reversal_date)) rAmt-=Number(v.reversal_amount||0); });
+  (m.ptcIn||[]).forEach(p=>{ if(upTo(p.document_date)) rAmt+=Number(p.amount||0); });
+  (m.ptcOut||[]).forEach(p=>{ if(upTo(p.document_date)) rAmt-=Number(p.amount||0); });
+  const r2=v=>Math.round(v*100)/100;
+  const amt=r2(bAmt-rAmt), tax=r2(bTax-rTax);
+  return {amt:amt,tax:tax,net:r2(amt+tax)};
+}
+async function custLoadMoney(unitId){
+  const [{data:receipts},{data:reversals},{data:ptcIn},{data:ptcOut}]=await Promise.all([
+    sb.schema('cust').from('money_receipts').select('id,receipt_no,receipt_date,total_amount').eq('unit_id',unitId).eq('is_current',true),
+    sb.schema('cust').from('receipt_reversals').select('receipt_no,receipt_reversal_date,reversal_amount').eq('unit_id',unitId).eq('is_current',true),
+    sb.schema('cust').from('ptc_transfers').select('document_no,document_date,amount,narration').eq('transferee_unit_id',unitId).eq('is_reversed',false).is('deleted_at',null),
+    sb.schema('cust').from('ptc_transfers').select('document_no,document_date,amount,narration').eq('source_unit_id',unitId).eq('is_reversed',false).is('deleted_at',null)
+  ]);
+  const ids=(receipts||[]).map(r=>r.id).filter(Boolean);
+  const {data:items}=ids.length
+    ? await sb.schema('cust').from('receipt_items').select('receipt_id,against_demand_no,schedule,revenue_head,amount,line_type,particulars').in('receipt_id',ids)
+    : {data:[]};
+  return {receipts:receipts||[],items:items||[],reversals:reversals||[],ptcIn:ptcIn||[],ptcOut:ptcOut||[]};
+}
+
 // Every billed line for the unit with what has been paid against it, plus what was still unpaid
 // on invoices raised before `beforeDate`. Receipts are matched the way Farvision allocates them:
 // against the invoice number, then the schedule and revenue head within it. Kept pure so it can
 // be checked against the ledger and against Farvision's own demand letter without a round trip.
-function custBuildPlan(allInv,alloc,beforeDate,receiptDates){
+/* money (optional, from custLoadMoney) - checked 10 Oct 2026 against Farvision's own figures for
+   every flat: Amount Paid on the demand letter now equals Farvision's received + on-account on 297
+   of 300 (the other 3 are flats where Farvision's own reports disagree with each other).
+     * A cheque that bounced is not a payment: a receipt whose cheque returns add up to the whole
+       receipt is left out. (Farvision keeps the bounced receipt and records the return separately,
+       so counting the receipt showed Gateway 8C as paid 3,10,346 more than it was.)
+     * Money transferred in from an earlier booking (Farvision's PTC) is a payment on this booking;
+       it was missing entirely, so Gurukul A1 5E - paid 45,91,452 by transfer - read as unpaid. It is
+       shown as its own row, like on-account money, rather than spread over lines by guesswork.
+       Money transferred out or refunded is the same row with a minus. */
+function custBuildPlan(allInv,alloc,beforeDate,receiptDates,money){
   const SEP=String.fromCharCode(31);
+  if(money){
+    const revByNo={};
+    (money.reversals||[]).forEach(v=>{ revByNo[v.receipt_no]=(revByNo[v.receipt_no]||0)+Number(v.reversal_amount||0); });
+    const bounced=new Set((money.receipts||[]).filter(r=>(revByNo[r.receipt_no]||0)>=Number(r.total_amount||0)-1).map(r=>r.id));
+    if(bounced.size) alloc=(alloc||[]).filter(a=>!bounced.has(a.receipt_id));
+  }
   const key=(doc,sch,head)=>[String(doc||''),String(sch||''),String(head||'')].join(SEP);
   // An "On Account" receipt line is money received against the unit but not applied to any
   // particular demand, so it has no invoice number to match on. It still belongs in the table as
@@ -23572,6 +23793,12 @@ function custBuildPlan(allInv,alloc,beforeDate,receiptDates){
     });
   });
   onAccountRows.forEach(r=>plan.push(r));
+  if(money){
+    (money.ptcIn||[]).forEach(p=>plan.push({dueDate:p.document_date,schedule:p.narration||'Transferred from earlier booking',
+      head:'Transfer '+(p.document_no||''),due:0,paid:Number(p.amount||0)}));
+    (money.ptcOut||[]).forEach(p=>plan.push({dueDate:p.document_date,schedule:p.narration||'Transferred out / refunded',
+      head:'Transfer '+(p.document_no||''),due:0,paid:-Number(p.amount||0)}));
+  }
   plan.sort((a,b)=>String(a.dueDate||'').localeCompare(String(b.dueDate||''))||
     String(a.schedule||'').localeCompare(String(b.schedule||''))||
     String(a.head||'').localeCompare(String(b.head||'')));
@@ -23607,10 +23834,12 @@ window.custViewInvoice=async function(id){
     : {data:[]};
   const receiptDates={};
   (rcpts||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
-  const {plan,prevDues,onAccount}=custBuildPlan(allInv,alloc,inv.document_date,receiptDates);
+  const money=await custLoadMoney(unit.id);
+  const {plan,prevDues,onAccount}=custBuildPlan(allInv,alloc,inv.document_date,receiptDates,money);
+  const prevSplit=custPrevDuesSplit(inv,allInv,money);
 
   window._custInvoiceCache={
-    inv:inv, items:its||[], plan:plan, prevDues:prevDues, onAccount:onAccount,
+    inv:inv, items:its||[], plan:plan, prevDues:prevDues, prevSplit:prevSplit, onAccount:onAccount,
     lateFee:Number((snap&&snap.late_fee_accrued)||0),
     rate:custDocRate(unit,csi),
     unit:unit, contact:(cts&&cts[0])||null, fmt:'invoice'
