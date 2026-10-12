@@ -321,6 +321,12 @@ Deno.serve(async (req) => {
       else {
         const u = unwrap(call.payload?.result);
         if (!u.data) rep.errors.push("unreadable reply: " + call.text.slice(0, 140));
+        /* A REFUSAL IS NOT AN EMPTY RESULT. When the plan's daily credits run out Proxy answers
+           with a message and no ads at all, and this used to read that as "found 0, no errors" -
+           pages that run 20 ads showed none and the run still looked clean. No ads key means
+           Proxy did not answer the question, so its words are passed on as the error. */
+        else if (!u.data.ads) rep.errors.push("Proxy returned no ads list: "
+          + String(u.data.error || u.data.message || call.text).slice(0, 200));
         else {
           const ads = u.data.ads || {};
           const media = u.media || {};
