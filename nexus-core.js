@@ -18609,7 +18609,9 @@ function compPageNameOf(w){
 function compWlTableHtml(wl){
   const ads=window._compAdsAll||[];
   const rows=wl.map(function(w){
-    const n=ads.filter(function(a){return a.watchlist_id===w.id;}).length;
+    const mine=ads.filter(function(a){return a.watchlist_id===w.id;});
+    const n=mine.length;
+    const live=mine.filter(function(a){return !a.ad_delivery_stop_time;}).length;
     const pn=compPageNameOf(w);
     const pinned=!!String(w.page_id||'').trim();
     return '<tr>'
@@ -18622,6 +18624,7 @@ function compWlTableHtml(wl){
             +'<div style="font-size:10.5px;color:var(--slate);margin-top:3px">not pulled</div>'))
       +'</td>'
       +'<td style="text-align:center">'+n+'</td>'
+      +'<td style="text-align:center">'+(live?'<b style="color:#16a34a">'+live+'</b>':'<span style="color:var(--slate)">0</span>')+'</td>'
       +'<td style="white-space:nowrap;font-size:12px;color:var(--slate)">'+(w.last_sync_at?esc(fmtDate(w.last_sync_at)):'never')+'</td>'
       +'<td>'+(w.page_url?('<a href="'+esc(w.page_url)+'" target="_blank" rel="noopener" style="font-size:12px">'+esc(String(w.page_url).replace(/^https?:\/\/(www\.)?facebook\.com\//,'').replace(/\/$/,''))+'</a>'):'<span style="color:var(--slate);font-size:12px">—</span>')+'</td>'
       +'<td style="white-space:nowrap">'
@@ -18641,7 +18644,7 @@ function compWlTableHtml(wl){
     +'</summary>'
     +'<div style="overflow-x:auto;border-top:1px solid var(--line)">'
       +'<table class="tbl" style="width:100%;font-size:12.5px">'
-        +'<thead><tr><th>'+esc(compTabNoun())+'</th><th>Targeting</th><th style="text-align:center">Ads</th><th>Last pulled</th><th>Facebook page</th><th>Actions</th></tr></thead>'
+        +'<thead><tr><th>'+esc(compTabNoun())+'</th><th>Targeting</th><th style="text-align:center">Ads</th><th style="text-align:center" title="Ads still running">Live now</th><th>Last pulled</th><th>Facebook page</th><th>Actions</th></tr></thead>'
         +'<tbody>'+rows+'</tbody>'
       +'</table>'
     +'</div>'
@@ -18756,8 +18759,17 @@ function compReachBits(a){
   }
   return out;
 }
+// Whole days an ad has run: start to stop, or start to today while it still runs. Meta gives both
+// dates for every ad, so unlike spend or views this is a fact, not an estimate.
+function compDaysRunning(a){
+  const s=a.ad_delivery_start_time?new Date(a.ad_delivery_start_time):null;
+  if(!s||isNaN(s)) return null;
+  const e=a.ad_delivery_stop_time?new Date(a.ad_delivery_stop_time):new Date();
+  return Math.max(0,Math.floor((e-s)/86400000));
+}
 function compAdCard(a){
   const stillRunning=!a.ad_delivery_stop_time;
+  const days=compDaysRunning(a);
   const t=compAdText(a);
   const bodyText=t.text?t.text.slice(0,140):(t.dynamic?'Catalogue ad — wording changes per product':'(no ad text)');
   const th=compThumbFor(a);
@@ -18770,8 +18782,12 @@ function compAdCard(a){
     +'<div style="font-size:12.5px;margin:6px 0 4px;line-height:1.4;max-height:56px;overflow:hidden">'+esc(bodyText)+'</div>'
     +(a.cta_text?'<div style="margin:4px 0"><span class="tag t-blue">'+esc(a.cta_text)+'</span></div>':'')
     +'<div style="font-size:11px;color:var(--slate)">'+esc(a.page_name||'')+'</div>'
-    +'<div style="font-size:11px;color:var(--slate);margin-top:2px">Running since '+fmtDate(a.ad_delivery_start_time)
-      +(a.total_active_time?' \u00b7 active '+esc(a.total_active_time):'')+'</div>'
+    +'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:4px">'
+      +'<span style="font-size:11px;color:var(--slate)">'+(stillRunning?'Since ':'Ran from ')+fmtDate(a.ad_delivery_start_time)
+        +(a.total_active_time?' \u00b7 active '+esc(a.total_active_time):'')+'</span>'
+      +(days!=null?'<span title="'+(stillRunning?'Days running so far':'Days it ran')+'" style="font-size:13px;font-weight:700;white-space:nowrap;color:'+(stillRunning?'#16a34a':'var(--slate)')+'">'
+        +days+' day'+(days===1?'':'s')+'</span>':'')
+    +'</div>'
     +'<div style="font-size:10.5px;color:var(--slate);margin-top:4px;opacity:.7">ID '+esc(a.id)+'</div>'
   +'</div>';
 }
