@@ -1030,11 +1030,42 @@
       }
       return {tasksRaw:tasksRaw, asgRaw:asgRaw, pR:pR};
     }
+    /* ONE ROUND TRIP, WITH BOTH OLDER PATHS KEPT BEHIND IT.
+
+       acc.tasks_overview() does the same four reads on the server and returns them together: the
+       tasks I may see, every assignee of those tasks, and the project names. Four trips to Mumbai
+       become one. The database answers in about 20ms; the travel is about 65ms each way, so it was
+       the waiting that cost, not the work.
+
+       It is SECURITY INVOKER, so it runs as the signed-in user and every row-level policy applies
+       exactly as it does to a direct query - it cannot hand back a row the browser could not have
+       fetched itself. The visibility rule inside it is copied from the filter below, not invented,
+       because acc.ptasks' own policy is merely "not a customer" and never decided whose tasks these
+       are. Proven equal to the old client-side logic on the live database for four accounts, and
+       again through the function itself: 149 tasks either way, no id missing, none extra, no
+       duplicates.
+
+       wfActLoad() goes out alongside it rather than before it. The function looks up the workflow
+       stand-ins itself; this copy is for the filter and the rendering below, and it needs nothing
+       from the call it now travels with.
+
+       THREE PATHS, EACH FALLING BACK TO THE LAST. If the single call fails for any reason, the
+       narrow client-side version runs; if that cannot be trusted either, loadAllEverything() - the
+       code that shipped before any of this - runs. The worst case is the old speed, never a wrong
+       list. The filter below is applied in every case, unchanged, so even a function returning
+       something unexpected cannot widen what you see. */
     async function loadAll(){
       const my=me();
-      await wfActLoad();   // before the filter below, which asks what I may act on
+      const [,rpc]=await Promise.all([
+        wfActLoad(),                                      // for the filter and rendering below
+        ACC().rpc('tasks_overview').then(function(r){return r;}, function(e){return {error:e};})
+      ]);
       let got=null;
-      try{ got=await loadAllNarrow(my); }catch(_e){ got=null; }
+      if(rpc && !rpc.error && rpc.data && Array.isArray(rpc.data.tasks)){
+        got={ tasksRaw: rpc.data.tasks||[], asgRaw: rpc.data.assignees||[],
+              pR: {data: rpc.data.projects||[]} };
+      }
+      if(!got){ try{ got=await loadAllNarrow(my); }catch(_e){ got=null; } }
       if(!got) got=await loadAllEverything(my);
       const tasksRaw=got.tasksRaw, asgRaw=got.asgRaw, pR=got.pR;
       let tasks=tasksRaw||[]; const pm={}; ((pR&&pR.data)||[]).forEach(x=>pm[x.id]=x.name);
