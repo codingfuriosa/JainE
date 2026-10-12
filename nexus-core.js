@@ -18617,8 +18617,9 @@ function compWlTableHtml(wl){
       +'<td>'+(pinned
           ?('<span class="tag t-green" title="Only this page\'s own ads"><i class="fa-solid fa-thumbtack"></i> Page ID</span>'
             +'<div style="font-size:10.5px;color:var(--slate);margin-top:3px">'+esc(w.page_id)+'</div>')
-          :('<span class="tag t-amber" title="May return ads by others that mention this name">Keyword</span>'
-            +'<div style="font-size:10.5px;color:var(--slate);margin-top:3px">"'+esc(w.search_term||w.name)+'"</div>'))
+          // Pulls go by Page ID only, so a row without one is listed but never pulled.
+          :('<span class="tag t-amber" title="Not pulled until a Page ID is added - paste their Ad Library link in Edit">No Page ID</span>'
+            +'<div style="font-size:10.5px;color:var(--slate);margin-top:3px">not pulled</div>'))
       +'</td>'
       +'<td style="text-align:center">'+n+'</td>'
       +'<td style="white-space:nowrap;font-size:12px;color:var(--slate)">'+(w.last_sync_at?esc(fmtDate(w.last_sync_at)):'never')+'</td>'
@@ -18635,7 +18636,7 @@ function compWlTableHtml(wl){
   return '<details class="card" id="compWlPanel" style="margin-bottom:14px" '+(keyword?'open':'')+'>'
     +'<summary style="cursor:pointer;padding:13px 15px;font-weight:700;font-size:13.5px;list-style:none;display:flex;align-items:center;gap:9px">'
       +'<i class="fa-solid fa-list-check" style="color:#0369a1"></i> '+esc(compTabDef()[1])+' <span class="tag t-gray">'+wl.length+'</span>'
-      +(keyword?'<span class="tag t-amber" title="These still search by keyword">'+keyword+' without a Page ID</span>':'<span class="tag t-green">all pinned to a Page ID</span>')
+      +(keyword?'<span class="tag t-amber" title="Not pulled until a Page ID is added">'+keyword+' without a Page ID</span>':'<span class="tag t-green">all pinned to a Page ID</span>')
       +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate);font-weight:500">click to open / close</span>'
     +'</summary>'
     +'<div style="overflow-x:auto;border-top:1px solid var(--line)">'
@@ -18657,7 +18658,7 @@ function compWlCardHtml(w){
       +'<div style="color:var(--slate);font-size:12px">'
         +(w.page_id
           ?('<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Targets Page ID <b>'+esc(w.page_id)+'</b> — their own ads only')
-          :('<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> Keyword search: "'+esc(w.search_term)+'" — may catch anyone mentioning the name'))
+          :('<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> No Page ID yet, so this page is not pulled — paste their Ad Library link in Edit'))
         +' · '+ads.length+' ad(s) stored · '+running+' running</div>'
       +'<div style="margin-top:5px;font-size:12px;display:flex;gap:12px;flex-wrap:wrap">'
         +'<a href="'+esc(compAdLibUrl(w))+'" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open in Ad Library</a>'
@@ -18867,12 +18868,12 @@ function compFormHtml(w){
     +'<label>Ad Library link or Page ID'
       +'<input id="compPageId" value="'+esc(w.page_id||'')+'" placeholder="Paste their Ad Library link, or the Page ID">'
       +'<div style="font-size:11.5px;color:var(--slate);margin-top:5px;line-height:1.5">'
-        +'Best option — fetches <b>only that page\'s own ads</b>. Open the competitor in Meta\'s Ad Library, copy the address bar, paste it here; the Page ID is picked out for you.'
+        +'Needed to pull their ads — the weekly pull goes by Page ID only. Open the page in Meta\'s Ad Library, copy the address bar, paste it here; the Page ID is picked out for you.'
       +'</div>'
     +'</label>'
-    +'<label>Search term (used only when there is no Page ID)'
+    +'<label>Search term (only for the Ad Library link when there is no Page ID)'
       +'<input id="compSearchTerm" value="'+esc(w.search_term||'')+'" placeholder="Defaults to the name above">'
-      +'<div style="font-size:11.5px;color:var(--slate);margin-top:5px">Keyword search also returns ads by other people that mention this name.</div>'
+      +'<div style="font-size:11.5px;color:var(--slate);margin-top:5px">Nothing is pulled by search term; it only opens a keyword search in the Ad Library.</div>'
     +'</label>'
   +'</div>';
 }
