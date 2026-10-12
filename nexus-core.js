@@ -18960,9 +18960,11 @@ function compPaintStatus(){
   const spare=Math.max(1,budget-weeklyPerDay);
   const pendingManual=Number(s.pending_manual)||0;
   if(btn && !btn.dataset.busy){
-    btn.disabled=!left;
-    btn.title=left?('Pull every page on all tabs. Uses 1 of '+limit+' manual pulls this month.')
-                  :('Both manual pulls for this month are used. They reset on the 1st; the weekly pull carries on.');
+    // A pull still working through the queue blocks another (the database refuses it, uncounted).
+    btn.disabled=!left||pendingManual>0;
+    btn.title=pendingManual>0?('A manual pull is still running ('+pendingManual+' pages to go). You can start another once it finishes.')
+      :left?('Pull every page on all tabs. Uses 1 of '+limit+' manual pulls this month.')
+      :('Both manual pulls for this month are used. They reset on the 1st; the weekly pull carries on.');
     btn.innerHTML='<i class="fa-solid fa-rotate"></i> Pull all now <span style="opacity:.8;font-weight:500">('+left+' of '+limit+' left)</span>';
   }
   if(!host) return;

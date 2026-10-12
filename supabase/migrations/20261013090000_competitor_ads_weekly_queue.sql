@@ -126,6 +126,12 @@ begin
   end if;
   -- Serialise requests, so two people pressing at once cannot both take the last pull of the month.
   perform pg_advisory_xact_lock(hashtext('camp.competitor_request_manual_pull'));
+  -- A second request while the first is still working through the queue would add nothing (every
+  -- page is already waiting) yet spend one of the month's pulls, so it is refused, uncounted.
+  if exists (select 1 from competitor_pull_queue where reason = 'manual' and status in ('pending', 'running')) then
+    raise exception 'A manual pull is still in progress (% pages to go). You can start another once it finishes; this did not use one of your monthly pulls.',
+      (select count(*) from competitor_pull_queue where reason = 'manual' and status in ('pending', 'running'));
+  end if;
   select manual_pulls_per_month into v_limit from competitor_sync_settings where id = 1;
   select count(*) into v_used from competitor_manual_runs where requested_at >= v_month_start;
   if v_used >= coalesce(v_limit, 2) then
