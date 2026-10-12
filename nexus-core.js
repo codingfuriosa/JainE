@@ -18414,14 +18414,23 @@ const COMP_RANGES=[
 const COMP_MEDIA=[['all','All media','fa-shapes'],['image','Images','fa-image'],['video','Videos','fa-video'],['carousel','Carousels','fa-images']];
 const COMP_STATUS=[['all','Active & inactive','fa-layer-group'],['active','Active only','fa-circle-play'],['inactive','Inactive only','fa-circle-stop']];
 let COMP_F={wl:'all',range:'last_30',from:'',to:'',status:'all',media:'all',q:''};
-/* Two tabs over the one watchlist: other developers, and our own pages (is_own_brand). Everything
-   below - the picker, the table, the grid, the fetch - only ever sees the rows of the open tab, so
-   our ads never sit among a competitor's and a fetch on one tab never spends on the other. */
+/* Three tabs over the one watchlist, by its category: other developers, our own pages, and our
+   channel partners. Everything below - the picker, the table, the grid - only ever sees the rows
+   of the open tab, so our ads never sit among a competitor's or a partner's.
+   Each entry: [route segment, tab title, icon, category, [singular, plural], noun for buttons]. */
 let COMP_TAB='competitors';
-const COMP_TABS=[['competitors','Competitors','fa-chess-knight'],['brands','Our Brands','fa-building-flag']];
+const COMP_TABS=[
+  ['competitors','Competitors','fa-chess-knight','competitor',['competitor','competitors'],'Competitor'],
+  ['brands','Our Brands','fa-building-flag','brand',['brand','brands'],'Brand'],
+  ['partners','Channel Partners','fa-handshake','partner',['channel partner','channel partners'],'Channel Partner']
+];
+function compTabDef(){ return COMP_TABS.filter(function(t){ return t[0]===COMP_TAB; })[0]||COMP_TABS[0]; }
 function compIsBrandTab(){ return COMP_TAB==='brands'; }
-function compWord(n){ return compIsBrandTab()?(n===1?'brand':'brands'):(n===1?'competitor':'competitors'); }
-function compTabWl(){ return (window._compWl||[]).filter(function(w){ return !!w.is_own_brand===compIsBrandTab(); }); }
+function compWord(n){ return compTabDef()[4][n===1?0:1]; }
+function compTabNoun(){ return compTabDef()[5]; }
+// Rows from before the category column fall back to is_own_brand.
+function compCategoryOf(w){ return w.category||(w.is_own_brand?'brand':'competitor'); }
+function compTabWl(){ const c=compTabDef()[3]; return (window._compWl||[]).filter(function(w){ return compCategoryOf(w)===c; }); }
 /* Stored ads show straight away. They used to wait for a fetch in this visit, because the old
    scraper fetched exactly the filtered slice; the Proxy pull now runs every night for every page,
    so what is stored is current and the filters simply narrow it. */
@@ -18502,27 +18511,31 @@ window.compSetDate=function(which,val){
 window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) compPaintGrid(); usageQueueDebounced('competitors.overview.search_ad_text_headline_or_page', val); };
 
 VIEWS.competitors=async function(v,seg){
-  const tab=(seg&&seg[0]==='brands')?'brands':'competitors';
+  const want=seg&&seg[0];
+  const tab=COMP_TABS.some(function(t){ return t[0]===want; })?want:'competitors';
   if(tab!==COMP_TAB){ COMP_TAB=tab; COMP_F.wl='all'; }
-  setCrumb(['Growth & Strategy','Competitor Ads',compIsBrandTab()?'Our Brands':'Competitors']);
+  setCrumb(['Growth & Strategy','Competitor Ads',compTabDef()[1]]);
+  const blurb={
+    competitors:'Public ad creative from Meta\'s Ad Library — the creative itself, when it started and where it ran.',
+    brands:'Our own pages as Meta\'s Ad Library shows them to the public — what is running, since when, and where.',
+    partners:'What our channel partners are advertising on Meta — which projects they push, since when, and where.'
+  }[COMP_TAB];
   v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Ads')
     +'<div class="tabs" style="margin-top:-6px">'+COMP_TABS.map(function(t){
-        return '<div class="tab '+(COMP_TAB===t[0]?'active':'')+'" onclick="navTo(\'competitors'+(t[0]==='brands'?'/brands':'')+'\')"><i class="fa-solid '+t[2]+'"></i> '+t[1]+'</div>';
+        return '<div class="tab '+(COMP_TAB===t[0]?'active':'')+'" onclick="navTo(\'competitors'+(t[0]==='competitors'?'':'/'+t[0])+'\')"><i class="fa-solid '+t[2]+'"></i> '+t[1]+'</div>';
       }).join('')+'</div>'
-    +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 16px">'
-      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">'
-        +(compIsBrandTab()
-          ?'Our own pages as Meta\'s Ad Library shows them to the public — what is running, since when, and where.'
-          :'Public ad creative from Meta\'s Ad Library — the creative itself, when it started and where it ran.')
-        +' Meta never publishes spend or reach for ordinary commercial ads. Pulled automatically every night.</p>'
+    +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 12px">'
+      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">'+blurb
+        +' Meta never publishes spend or reach for ordinary commercial ads.</p>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
-        +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add '+(compIsBrandTab()?'Brand':'Competitor')+'</button>'
-        +'<button class="btn btn-primary" id="compSyncBtn" onclick="compSyncFiltered()"><i class="fa-solid fa-rotate"></i> Fetch from Meta</button>'
+        +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add '+esc(compTabNoun())+'</button>'
+        +'<button class="btn btn-primary" id="compSyncBtn" onclick="compManualPull()"><i class="fa-solid fa-rotate"></i> Pull all now</button>'
       +'</div>'
     +'</div>'
+    +'<div id="compPullStatus"></div>'
     +'<div id="compToolbar"></div>'
     +'<div id="compBody"><div class="loader"><div class="spin"></div></div></div>';
-  await compRender();
+  await Promise.all([compRender(), compLoadStatus()]);
 };
 function compSelHtml(id,list,cur,onchange){
   return '<select class="comp-sel" id="'+id+'" onchange="'+onchange+'">'
@@ -18564,13 +18577,10 @@ function compToolbarHtml(wl){
     +compSelHtml('compMedia',COMP_MEDIA.map(function(r){return [r[0],r[1]];}),COMP_F.media,'compSetFilter(\'media\',this.value)')
     +'<div class="comp-search"><i class="fa-solid fa-magnifying-glass"></i>'
       +'<input placeholder="Search ad text, headline, page…" value="'+esc(COMP_F.q)+'" oninput="compSearch(this.value)"></div>'
-    // Ads stored before videos carried a poster still have none; this re-downloads their media.
-    +'<button class="btn" id="compPosterBtn" onclick="compRefreshMedia()" title="Re-download media for ads already stored, saving a small preview image for each video so tiles load quickly"><i class="fa-solid fa-image"></i> Rebuild previews</button>'
   +'</div>'
-  // Says exactly what pressing Fetch will do, so nobody is surprised by what arrives. Proxy pulls
-  // each page's latest ads whatever the filters say; the filters then narrow what is shown here.
-  +'<div class="comp-note"><i class="fa-solid fa-circle-info"></i><span>Fetch from Meta pulls the latest ads for '
-    +'<b>'+esc(cur?cur.name:'all '+wl.length+' '+compWord(2))+'</b>, the same pull that runs every night'
+  // The filters only narrow what is stored; they never change what gets pulled.
+  +'<div class="comp-note"><i class="fa-solid fa-circle-info"></i><span>Showing stored ads for '
+    +'<b>'+esc(cur?cur.name:'all '+wl.length+' '+compWord(2))+'</b>'
     +(function(){
         const ts=(cur?[cur]:wl).map(function(w){return w.last_sync_at||'';}).filter(Boolean).sort();
         return ts.length?' (last pulled '+esc(fmtDate(ts[ts.length-1]))+')':'';
@@ -18624,13 +18634,13 @@ function compWlTableHtml(wl){
   const keyword=wl.filter(function(w){return !String(w.page_id||'').trim();}).length;
   return '<details class="card" id="compWlPanel" style="margin-bottom:14px" '+(keyword?'open':'')+'>'
     +'<summary style="cursor:pointer;padding:13px 15px;font-weight:700;font-size:13.5px;list-style:none;display:flex;align-items:center;gap:9px">'
-      +'<i class="fa-solid fa-list-check" style="color:#0369a1"></i> '+(compIsBrandTab()?'Our Brands':'Competitors')+' <span class="tag t-gray">'+wl.length+'</span>'
+      +'<i class="fa-solid fa-list-check" style="color:#0369a1"></i> '+esc(compTabDef()[1])+' <span class="tag t-gray">'+wl.length+'</span>'
       +(keyword?'<span class="tag t-amber" title="These still search by keyword">'+keyword+' without a Page ID</span>':'<span class="tag t-green">all pinned to a Page ID</span>')
       +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate);font-weight:500">click to open / close</span>'
     +'</summary>'
     +'<div style="overflow-x:auto;border-top:1px solid var(--line)">'
       +'<table class="tbl" style="width:100%;font-size:12.5px">'
-        +'<thead><tr><th>'+(compIsBrandTab()?'Brand':'Competitor')+'</th><th>Targeting</th><th style="text-align:center">Ads</th><th>Last pulled</th><th>Facebook page</th><th>Actions</th></tr></thead>'
+        +'<thead><tr><th>'+esc(compTabNoun())+'</th><th>Targeting</th><th style="text-align:center">Ads</th><th>Last pulled</th><th>Facebook page</th><th>Actions</th></tr></thead>'
         +'<tbody>'+rows+'</tbody>'
       +'</table>'
     +'</div>'
@@ -18867,7 +18877,7 @@ function compFormHtml(w){
   +'</div>';
 }
 window.compAddModal=function(){
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add '+(compIsBrandTab()?'Brand':'Competitor')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add '+esc(compTabNoun())+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +compFormHtml({})
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="compSave()"><i class="fa-solid fa-check"></i> Add</button></div>','md');
 };
@@ -18891,7 +18901,8 @@ window.compSave=async function(id){
   if(!name){toast('Enter a name','err');try{usageQueue(fk,'error');}catch(_e){}return;}
   if(raw&&!pageId){toast('That doesn\'t look like an Ad Library link or Page ID — leave it blank to search by keyword','warn');try{usageQueue(fk,'error');}catch(_e){}return;}
   const row={name:name,search_term:term,page_id:pageId||null};
-  if(!id) row.is_own_brand=compIsBrandTab();   // added on Our Brands -> it is ours
+  // A row added on a tab belongs to that tab; is_own_brand is kept in step for older readers.
+  if(!id){ row.category=compTabDef()[3]; row.is_own_brand=(row.category==='brand'); }
   const {error}=id
     ? await sb.schema('camp').from('competitor_watchlist').update(row).eq('id',id)
     : await sb.schema('camp').from('competitor_watchlist').insert(row);
@@ -18922,59 +18933,110 @@ window.compRemove=async function(id){
 // featureKey is logged directly here, at the point the fetch actually succeeds or fails, rather
 // than through USAGE_MAP - a click here can genuinely fail (network error, Meta error, wrong-page
 // rows skipped), so the generic wrapper would have counted a failed sync as a real one.
-/* THE BUTTON PULLS THROUGH PROXY, THE SAME ROUTE AS THE NIGHTLY CRON (competitor-ads-proxy-daily
-   -> competitor-sync-test-probe). It used to call competitor-ads-sync, the self-hosted Playwright
-   scraper, so the screen and the nightly job filled the same tables two different ways.
-   One call cannot copy every creative for every page (Supabase's resource ceiling), so the page
-   walks the list four pages at a time with auto:false and says how far it has got. */
-async function compRunSync(ids,btn,busyLabel,idleLabel,featureKey,extra){
-  const setBtn=function(t){ if(btn) btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> '+t; };
-  if(btn) btn.disabled=true;
-  setBtn(busyLabel||'');
-  let found=0, written=0, failed=0, skip=0, total=ids.length;
-  const errors=[];
+/* PULLS RUN ON PROXY'S FREE ALLOWANCE (20 credits a day, no carry-over), THROUGH A QUEUE.
+   Every page on all three tabs is pulled once a week, each on its own weekday, by the
+   competitor-ads-weekly-enqueue / competitor-ads-queue-worker cron jobs. On top of that the whole
+   watchlist can be pulled by hand twice a calendar month; a third request is refused by the
+   database, not just hidden here. A manual pull takes whatever today's leftover credits allow at
+   once and finishes over the following days - the status line says how far it has got and roughly
+   how long is left. Nothing here can ask Proxy for more than the day's budget: the database hands
+   the worker only what the budget allows. */
+window._compStatus=window._compStatus||null;
+async function compLoadStatus(){
+  try{
+    const {data,error}=await sb.schema('camp').rpc('competitor_pull_status');
+    if(!error) window._compStatus=data;
+  }catch(e){}
+  compPaintStatus();
+}
+function compPaintStatus(){
+  const s=window._compStatus;
+  const btn=$('compSyncBtn');
+  const host=$('compPullStatus');
+  if(!s){ if(host) host.innerHTML=''; return; }
+  const limit=Number(s.manual_limit)||0, used=Number(s.manual_used)||0, left=Math.max(0,limit-used);
+  const budget=Number(s.budget)||0, tracked=Number(s.pages_tracked)||0;
+  const weeklyPerDay=Math.ceil(tracked/7);
+  const spare=Math.max(1,budget-weeklyPerDay);
+  const pendingManual=Number(s.pending_manual)||0;
+  if(btn && !btn.dataset.busy){
+    btn.disabled=!left;
+    btn.title=left?('Pull every page on all tabs. Uses 1 of '+limit+' manual pulls this month.')
+                  :('Both manual pulls for this month are used. They reset on the 1st; the weekly pull carries on.');
+    btn.innerHTML='<i class="fa-solid fa-rotate"></i> Pull all now <span style="opacity:.8;font-weight:500">('+left+' of '+limit+' left)</span>';
+  }
+  if(!host) return;
+  const run=s.run;
+  let runLine='';
+  if(run && Number(run.finished)<Number(run.pages)){
+    const days=Math.ceil(pendingManual/spare);
+    runLine='<div><i class="fa-solid fa-spinner fa-spin" style="color:#0369a1"></i> Manual pull from '+esc(fmtDate(run.requested_at))
+      +': <b>'+Number(run.finished)+' of '+Number(run.pages)+'</b> pages done'
+      +(pendingManual?' · about '+days+' more day'+(days===1?'':'s')+' on the free allowance':'')+'</div>';
+  }else if(run && Number(run.pages)){
+    runLine='<div><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Last manual pull ('+esc(fmtDate(run.requested_at))+') finished: '
+      +Number(run.pages)+' pages'+(Number(run.failed)?' · '+Number(run.failed)+' could not be pulled':'')+'</div>';
+  }
+  host.innerHTML='<div class="comp-note" style="flex-direction:column;align-items:flex-start;gap:4px;margin:0 0 14px">'
+    +'<div><i class="fa-solid fa-calendar-week" style="color:#0369a1"></i> Every page on all tabs is pulled once a week ('
+      +tracked+' pages, about '+weeklyPerDay+' a day) on Proxy\'s free allowance · today <b>'+Number(s.used_today)+' of '+budget+'</b> credits used'
+      +(s.exhausted_today?' — Proxy has no credits left today, pulls resume tomorrow':'')+'</div>'
+    +runLine
+  +'</div>';
+}
+// Asks the worker to pull whatever today's credits still allow. Returns its report.
+async function compWork(){
   try{
     const {data:{session}}=await sb.auth.getSession();
-    const token=session&&session.access_token;
-    for(let guard=0; guard<30 && skip!=null; guard++){
-      const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-sync-test-probe?action=sync',{method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-        body:JSON.stringify(Object.assign({write:true, auto:false, skip:skip, take:4, watchlist_ids:ids},extra||{}))});
-      const jr=await res.json().catch(function(){return {};});
-      if(!res.ok||jr.error){ errors.push(jr.error||('HTTP '+res.status)); break; }
-      found+=jr.found||0; written+=jr.written||0; failed+=jr.media_failed||0;
-      (jr.errors||[]).forEach(function(e){ if(errors.length<3) errors.push(e); });
-      if(jr.of_watchlist) total=jr.of_watchlist;
-      skip=jr.next_skip;
-      if(skip!=null) setBtn((busyLabel||'')+' '+Math.min(skip,total)+'/'+total);
-    }
-    if(errors.length&&!written){ toast('Fetch failed — '+errors[0],'err'); try{usageQueue(featureKey,'error');}catch(_e){} }
-    else {
-      const bits=[found+' found', written+' saved'];
-      if(failed) bits.push(failed+' images not copied');
-      if(errors.length) bits.push(errors.length+' error(s)');
-      toast('Fetched — '+bits.join(' · '),errors.length?'warn':'ok');
-      try{usageQueue(featureKey,'update');}catch(_e){}
-    }
-  }catch(e){toast('Fetch failed','err'); try{usageQueue(featureKey,'error');}catch(_e){}}
-  if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-'+(featureKey.indexOf('rebuild')>-1?'image':'rotate')+'"></i> '+(idleLabel||'Sync');}
-  await compRender();
+    const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-sync-test-probe?action=work',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+((session&&session.access_token)||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({max:4})});
+    const jr=await res.json().catch(function(){return {};});
+    if(!res.ok&&!jr.error) jr.error='HTTP '+res.status;
+    return jr;
+  }catch(e){ return {error:'network error'}; }
 }
-// The pages a fetch covers: the one picked, or every page on the open tab.
-function compSyncIds(){
-  if(COMP_F.wl!=='all') return [Number(COMP_F.wl)];
-  return compTabWl().filter(function(w){ return w.active && String(w.page_id||'').trim(); }).map(function(w){ return w.id; });
-}
-window.compSyncFiltered=function(){
-  const ids=compSyncIds();
-  if(!ids.length){ toast('Nothing to fetch — no '+compWord(2)+' here have a Page ID and auto-sync on','warn'); return; }
-  compRunSync(ids,$('compSyncBtn'),'Fetching…','Fetch from Meta','competitors.overview.fetch_ads_from_meta_ad_library');
-};
-// The same pull, but every ad's media is copied again rather than only the new ads'.
-window.compRefreshMedia=function(){
-  const ids=compSyncIds();
-  if(!ids.length){ toast('Nothing to rebuild — no '+compWord(2)+' here have a Page ID','warn'); return; }
-  compRunSync(ids,$('compPosterBtn'),'Rebuilding…','Rebuild previews','competitors.overview.rebuild_ad_media_previews',{refresh_media:true});
+// featureKey is logged directly, after the database has accepted or refused the request, rather
+// than through USAGE_MAP - the third request in a month is refused, and must not count as a pull.
+window.compManualPull=async function(){
+  const fk='competitors.overview.fetch_ads_from_meta_ad_library';
+  const s=window._compStatus;
+  if(s && Number(s.manual_used)>=Number(s.manual_limit)){
+    toast('Monthly limit reached ('+s.manual_used+' of '+s.manual_limit+'). Manual pulls reset on the 1st; the weekly pull carries on.','warn');
+    try{usageQueue(fk,'error');}catch(_e){}
+    return;
+  }
+  const left=s?Math.max(0,Number(s.manual_limit)-Number(s.manual_used)):null;
+  const ok=await confirmDialog('Pull every page on all three tabs now?'
+    +(left!=null?' This uses 1 of the '+left+' manual pull'+(left===1?'':'s')+' left this month.':'')
+    +' What fits in today\'s free credits is pulled straight away; the rest finishes over the next few days.',{okLabel:'Pull all'});
+  if(!ok) return;
+  const btn=$('compSyncBtn');
+  if(btn){ btn.dataset.busy='1'; btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Queuing…'; }
+  const {data,error}=await sb.schema('camp').rpc('competitor_request_manual_pull');
+  if(error){
+    toast(error.message,'err');
+    try{usageQueue(fk,'error');}catch(_e){}
+    if(btn) delete btn.dataset.busy;
+    await compLoadStatus();
+    return;
+  }
+  try{usageQueue(fk,'update',{pages:data&&data.pages});}catch(_e){}
+  // Pull what today's credits allow now, a few pages per call, so the first ads land straight away.
+  let pages=0, saved=0, note='';
+  for(let i=0;i<6;i++){
+    if(btn) btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Pulling… '+pages+' done';
+    const jr=await compWork();
+    if(jr.error){ note=jr.error; break; }
+    if(jr.refused){ note='Proxy has no credits left today'; break; }
+    if(jr.idle||!jr.claimed) break;
+    pages+=jr.answered||0; saved+=jr.written||0;
+  }
+  const queued=(data&&data.pages)||0;
+  toast('Manual pull started for '+queued+' pages — '+pages+' pulled now ('+saved+' ads saved)'
+    +(queued>pages?', the rest over the next few days':'')+(note?' · '+note:''),note?'warn':'ok');
+  if(btn) delete btn.dataset.busy;
+  await Promise.all([compRender(), compLoadStatus()]);
 };
 window.compOpenDetail=function(id){
   const a=window._compAdsAll.find(function(x){return String(x.id)===String(id);});
@@ -30100,7 +30162,7 @@ const USAGE_MAP={
   compShowOnly:{key:'competitors.overview.drill_into_a_single_competitor', meta:usbCompMeta},
   compSetFilter:{key:'competitors.overview.filter_by_competitor_date_range_status_or_media', meta:usbCompMeta},
   compSetDate:{key:'competitors.overview.filter_by_competitor_date_range_status_or_media', meta:usbCompMeta},
-  // compSave, compRunSync (compSyncFiltered/compRefreshMedia), compToggleActive, compRemove and
+  // compSave, compManualPull, compToggleActive, compRemove and
   // compOpenDetail are NOT mapped here on purpose - each has a real success/failure (or
   // found/not-found, or confirmed/cancelled) branch and logs directly, only once that branch is
   // actually known, same as misExportCauselist/taskSave above. compSearch is likewise unmapped -

@@ -30,6 +30,15 @@ const CORS = { "Access-Control-Allow-Origin": "*",
 const json = (o: unknown, s = 200) => new Response(JSON.stringify(o, null, 2),
   { status: s, headers: { ...CORS, "Content-Type": "application/json" } });
 
+// Calls a camp.* database function as the service role (H carries the camp profile).
+async function rpc(fn: string, args: unknown) {
+  const r = await fetch(SB + "/rest/v1/rpc/" + fn, { method: "POST", headers: H, body: JSON.stringify(args) });
+  const text = await r.text();
+  let data: any = null;
+  try { data = JSON.parse(text); } catch (_e) { /* not JSON */ }
+  return { ok: r.ok, data, text };
+}
+
 async function row() {
   const r = await fetch(SB + "/rest/v1/proxy_oauth?id=eq.1&select=*", { headers: H });
   const rows = await r.json().catch(() => []);
@@ -286,6 +295,9 @@ async function pullProxy(ids: string[], country: string, perPage: number, rep: a
       return { id, row, media: media[id] ? [{ url: String(media[id]) }] : [], raw: a };
     }));
   }
+  /* Proxy answered, so a page it left out simply has no ads: recorded as pulled-with-nothing, not
+     as a failure the queue would retry and pay for again. */
+  for (const p of ids) if (!out.has(p)) out.set(p, []);
   return out;
 }
 
@@ -363,6 +375,149 @@ async function pullScrapeCreators(key: string, ids: string[], country: string, r
   return out;
 }
 
+/* ONE PULL, SHARED. The "sync" action (a slice of the watchlist) and the "work" action (whatever
+   the weekly/manual queue hands it) both come here, so a page is pulled, stored and stamped the
+   same way whichever route asked for it. wl rows need id, name and page_id. */
+async function pullAndWrite(wl: any[], body: any) {
+  const write = body?.write === true;
+  const withMedia = body?.media !== false;
+  const country = String(body?.country || "IN").toUpperCase().slice(0, 2);
+  const perPage = Math.min(Number(body?.limit) || 25, 100);
+  const ids = wl.map((w) => String(w.page_id || "").trim()).filter(Boolean);
+  if (!ids.length) return { rep: { found: 0, written: 0, per_page: {}, errors: [] as string[] } as any,
+    pulled: new Map<string, NormAd[]>(), answered: [] as any[] };
+  const byPage = new Map<string, any>(); wl.forEach((w) => byPage.set(String(w.page_id).trim(), w));
+
+  /* WHICH SERVICE ANSWERS. "both" (the default once the ScrapeCreators key is set): Proxy is
+     asked first because its 20 credits a day are free, and every page it refuses (credits
+     spent) or returns nothing for is asked again of ScrapeCreators, at 1 credit a page from a
+     pack that never expires. Without the key it is Proxy alone. body.provider forces one
+     ("proxy", "scrapecreators" or "both"), for testing them side by side. */
+  const scKey = Deno.env.get("SCRAPECREATORS_API_KEY") || "";
+  const provider = ["proxy", "scrapecreators", "both"].includes(String(body?.provider))
+    ? String(body.provider) : (scKey ? "both" : "proxy");
+  if (provider !== "proxy" && !scKey) throw new Error("SCRAPECREATORS_API_KEY is not set");
+  const refresh = body?.refresh_media === true;
+  /* A pull that copies media for a page's whole history the first time can outrun the edge
+     function's time limit, and a timed-out run writes nothing. So media copying stops at the
+     budget; the ads are still saved, and their pictures arrive on the next run because an ad
+     without media_items is always picked up again. */
+  const deadline = Date.now() + Math.max(20, Math.min(Number(body?.budget_s) || 110, 300)) * 1000;
+
+  const rep: any = { provider,
+    found: 0, written: 0, media_copied: 0, media_failed: 0, media_skipped_for_time: 0,
+    media_why: {} as Record<string, number>, media_examples: [] as string[],
+    ad_fields_seen: [] as string[], impressions_seen: 0, low_flagged: 0, dry_run: !write,
+    per_page: {} as Record<string, number>, errors: [] as string[] };
+
+  let pulled: Map<string, NormAd[]>;
+  rep.source = {} as Record<string, string>;   // page name -> which service its ads came from
+  if (provider === "scrapecreators") pulled = await pullScrapeCreators(scKey, ids, country, rep);
+  else {
+    try { pulled = await pullProxy(ids, country, perPage, rep); }
+    catch (e) {
+      // Proxy unreachable or signed out: on its own that ends the run; with both, it is a gap.
+      if (provider === "proxy") throw e;
+      rep.errors.push("Proxy: " + String((e as Error)?.message || e).slice(0, 160));
+      pulled = new Map();
+    }
+    if (provider === "both") {
+      /* Proxy's refusals are not failures of the run when ScrapeCreators can cover them, so
+         they are moved aside as notes; only what ScrapeCreators cannot answer stays an error. */
+      rep.proxy_notes = rep.errors.splice(0);
+      const gaps = ids.filter((p) => !(pulled.get(p) || []).length);
+      if (gaps.length) {
+        const more = await pullScrapeCreators(scKey, gaps, country, rep);
+        for (const [p, list] of more) { pulled.set(p, list); rep.source[byPage.get(p)?.name || p] = "scrapecreators"; }
+      }
+    }
+    for (const p of pulled.keys()) {
+      const n = byPage.get(p)?.name || p;
+      if (!rep.source[n]) rep.source[n] = "proxy";
+    }
+  }
+
+  /* Ads that already hold their media are not copied again unless asked (Rebuild previews).
+     ScrapeCreators gives up to three creatives per ad and Proxy only one, so with both in
+     play a later Proxy pull must not replace a carousel with a single picture - and only new
+     ads cost downloads. Proxy on its own keeps its old behaviour (re-copy every night),
+     which is what repaired its older storage keys. */
+  const haveMedia = new Set<string>();
+  if (write && provider !== "proxy" && !refresh) {
+    const r = await fetch(SB + "/rest/v1/competitor_ads?select=id&media_items=not.is.null&watchlist_id=in.("
+      + wl.map((w) => Number(w.id)).join(",") + ")", { headers: H });
+    const rows: any[] = await r.json().catch(() => []);
+    if (Array.isArray(rows)) rows.forEach((x) => haveMedia.add(String(x.id)));
+  }
+
+  for (const [pageId, list] of pulled) {
+    const w = byPage.get(String(pageId));
+    rep.per_page[(w?.name || pageId)] = list.length;
+    rep.found += list.length;
+    if (!w || !write) continue;
+    await pool(list, 4, async (n: NormAd) => {
+      const id = n.id;
+      let items: any[] | null = null;
+      const wantMedia = withMedia && n.media.length && (refresh || !haveMedia.has(id));
+      if (wantMedia && Date.now() > deadline) rep.media_skipped_for_time++;
+      else if (wantMedia) {
+        items = [];
+        for (let i = 0; i < n.media.length; i++) {
+          const m = n.media[i];
+          const got = await copyMedia(m.url, w.id, id, String(i));
+          if (got.path) {
+            const it: any = { s3_path: got.path, media_type: got.mediaType };
+            /* A video gets its own still, so the grid shows a picture without downloading
+               the clip - the page uses `poster` whenever it is there. */
+            if (got.mediaType === "video" && m.poster) {
+              const p = await copyMedia(m.poster, w.id, id, i + "p");
+              if (p.path && p.mediaType === "image") it.poster = p.path;
+            }
+            items.push(it);
+            rep.media_copied++;
+          } else {
+            rep.media_failed++;
+            /* Kept per reason rather than as one total, so "the link had expired" and "S3
+               refused it" are not reported as the same thing. Capped: a page that fails on
+               every ad must not turn the report into a wall of identical lines. */
+            const why = got.why || "unknown";
+            rep.media_why[why] = (rep.media_why[why] || 0) + 1;
+            if (rep.media_examples.length < 5) rep.media_examples.push((w?.name || pageId) + " / " + id + ": " + why);
+          }
+        }
+        if (!items.length) items = null;
+      }
+      const out: any = { ...n.row, id, watchlist_id: w.id, page_id: String(pageId), country,
+        page_name: n.row.page_name || w.name, last_seen_at: new Date().toISOString() };
+      if (out.impressions_text) rep.impressions_seen++;
+      if (out.low_impression) rep.low_flagged++;
+      /* Every key this ad carried, so one real run names the fields instead of us guessing.
+         Union across the slice, capped - it is a diagnostic, not a dump. */
+      for (const key of Object.keys(n.raw || {})) {
+        if (rep.ad_fields_seen.length < 60 && !rep.ad_fields_seen.includes(key)) rep.ad_fields_seen.push(key);
+      }
+      /* Only overwrite the picture when a new one was actually copied - a failed download
+         must not wipe a good image stored on an earlier run. */
+      if (items) { out.media_items = items; out.media_s3_path = items[0].s3_path; out.media_type = items[0].media_type; }
+      const ins = await fetch(SB + "/rest/v1/competitor_ads?on_conflict=id", { method: "POST",
+        headers: { ...H, Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify(out) });
+      if (ins.ok) rep.written++;
+      else if (rep.errors.length < 5) rep.errors.push("save " + id + ": " + (await ins.text()).slice(0, 140));
+    });
+  }
+  /* Stamped only for the pages the service actually answered for, so "last pulled" on the
+     screen means a pull that worked - including one that honestly found no ads - and never a
+     failed call or a refusal. */
+  const answered = wl.filter((w) => pulled.has(String(w.page_id).trim()));
+  if (write && answered.length) {
+    await fetch(SB + "/rest/v1/competitor_watchlist?id=in.(" + answered.map((w) => Number(w.id)).join(",") + ")", {
+      method: "PATCH", headers: { ...H, Prefer: "return=minimal" },
+      body: JSON.stringify({ last_sync_at: new Date().toISOString() }) }).catch(() => {});
+  }
+  return { rep, pulled, answered };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   const url = new URL(req.url);
@@ -400,13 +555,52 @@ Deno.serve(async (req) => {
       return json({ ok: true, connected: true });
     }
 
+    /* THE QUEUE WORKER - the route that spends credits. The cron wakes it every ten minutes when
+       something is waiting, and the screen calls it straight after a manual pull is requested so
+       the first pages land at once. It never decides how much to pull: competitor_claim_pulls hands
+       it only what today's credit budget allows (at most four pages, one Proxy call), and
+       competitor_finish_pulls takes the outcome back, so the budget holds however often it is
+       called and by whom. */
+    if (action === "work") {
+      if (req.method !== "POST") return json({ error: "POST only" }, 405);
+      const body = await req.json().catch(() => ({}));
+      const max = Math.max(1, Math.min(Number(body?.max) || 4, 4));
+      const claim = await rpc("competitor_claim_pulls", { p_max: max });
+      if (!claim.ok) return json({ error: "could not claim from the queue: " + claim.text.slice(0, 200) }, 500);
+      const rows: any[] = Array.isArray(claim.data) ? claim.data : [];
+      if (!rows.length) return json({ ok: true, idle: true, claimed: 0 });
+
+      const wl = rows.map((r) => ({ id: r.watchlist_id, name: r.name, page_id: r.page_id, queue_id: r.queue_id }));
+      let rep: any = { errors: [] as string[], per_page: {} };
+      let answered: any[] = [];
+      try {
+        ({ rep, answered } = await pullAndWrite(wl, { write: true, provider: body?.provider }));
+      } catch (e) {
+        rep.errors.push(String((e as Error)?.message || e).slice(0, 300));
+      }
+      const ok = new Set(answered.map((w) => Number(w.id)));
+      const said = [...(rep.errors || []), ...(rep.proxy_notes || [])].join(" | ");
+      /* Nothing answered and Proxy talked about credits or limits: the day's allowance is gone,
+         whatever our own count says. Those pages go back in line and the day is closed. */
+      const refused = !ok.size && /credit|limit|quota|exhaust/i.test(said);
+      const results = wl.map((w) => ({ queue_id: w.queue_id, ok: ok.has(Number(w.id)),
+        ads: rep.per_page?.[w.name] ?? 0, error: ok.has(Number(w.id)) ? null : (said.slice(0, 300) || "no answer") }));
+      const fin = await rpc("competitor_finish_pulls", { p_results: results, p_refused: refused });
+      if (!fin.ok) rep.errors.push("could not report back to the queue: " + fin.text.slice(0, 200));
+      return json({ ok: true, claimed: wl.length, answered: ok.size, refused,
+        pages: wl.map((w) => w.name), ...rep });
+    }
+
     if (action === "sync") {
       if (req.method !== "POST") return json({ error: "POST only" }, 405);
       const body = await req.json().catch(() => ({}));
       const write = body?.write === true;
-      const withMedia = body?.media !== false;
-      const country = String(body?.country || "IN").toUpperCase().slice(0, 2);
-      const perPage = Math.min(Number(body?.limit) || 25, 100);
+      /* Writing through sync skips the credit budget, so only the server itself may do it - for a
+         one-off backfill run by hand. The screen and the cron go through "work". A dry run (no
+         write) stays open for checking what Proxy returns. */
+      if (write && req.headers.get("Authorization") !== "Bearer " + SRV) {
+        return json({ error: "Pulls go through the queue now (action=work); sync with write is server-only." }, 403);
+      }
       /* IT RUNS IN SLICES BECAUSE ONE INVOCATION CANNOT DO THE LOT. Copying every creative for 24
          competitors in a single call exceeded Supabase's resource ceiling and came back 546 with
          nothing written. skip/take walk the watchlist a few at a time; next_skip in the reply says
@@ -434,139 +628,11 @@ Deno.serve(async (req) => {
       const listed: any[] = await wlRes.json().catch(() => []);
       const all = only ? listed.filter((w) => only.has(Number(w.id))) : listed;
       const wl = all.slice(skip, skip + take);
-      const ids = wl.map((w) => String(w.page_id || "").trim()).filter(Boolean);
-      if (!ids.length) return json({ ok: true, done: true, next_skip: null, of_watchlist: all.length,
+      if (!wl.length) return json({ ok: true, done: true, next_skip: null, of_watchlist: all.length,
         found: 0, written: 0, message: "nothing left in the watchlist from skip " + skip });
-      const byPage = new Map<string, any>(); wl.forEach((w) => byPage.set(String(w.page_id).trim(), w));
-
-      /* WHICH SERVICE ANSWERS. "both" (the default once the ScrapeCreators key is set): Proxy is
-         asked first because its 20 credits a day are free, and every page it refuses (credits
-         spent) or returns nothing for is asked again of ScrapeCreators, at 1 credit a page from a
-         pack that never expires. Without the key it is Proxy alone. body.provider forces one
-         ("proxy", "scrapecreators" or "both"), for testing them side by side. */
-      const scKey = Deno.env.get("SCRAPECREATORS_API_KEY") || "";
-      const provider = ["proxy", "scrapecreators", "both"].includes(String(body?.provider))
-        ? String(body.provider) : (scKey ? "both" : "proxy");
-      if (provider !== "proxy" && !scKey) return json({ error: "SCRAPECREATORS_API_KEY is not set" }, 400);
-      const refresh = body?.refresh_media === true;
-      /* A pull that copies media for a page's whole history the first time can outrun the edge
-         function's time limit, and a timed-out run writes nothing. So media copying stops at the
-         budget; the ads are still saved, and their pictures arrive on the next run because an ad
-         without media_items is always picked up again. */
-      const deadline = Date.now() + Math.max(20, Math.min(Number(body?.budget_s) || 110, 300)) * 1000;
-
-      const rep: any = { provider, of_watchlist: all.length,
-        slice: { skip, take, names: wl.map((w) => w.name) },
-        found: 0, written: 0, media_copied: 0, media_failed: 0, media_skipped_for_time: 0,
-        media_why: {} as Record<string, number>, media_examples: [] as string[],
-        ad_fields_seen: [] as string[], impressions_seen: 0, low_flagged: 0, dry_run: !write,
-        per_page: {} as Record<string, number>, errors: [] as string[] };
-
-      let pulled: Map<string, NormAd[]>;
-      rep.source = {} as Record<string, string>;   // page name -> which service its ads came from
-      if (provider === "scrapecreators") pulled = await pullScrapeCreators(scKey, ids, country, rep);
-      else {
-        try { pulled = await pullProxy(ids, country, perPage, rep); }
-        catch (e) {
-          // Proxy unreachable or signed out: on its own that ends the run; with both, it is a gap.
-          if (provider === "proxy") throw e;
-          rep.errors.push("Proxy: " + String((e as Error)?.message || e).slice(0, 160));
-          pulled = new Map();
-        }
-        if (provider === "both") {
-          /* Proxy's refusals are not failures of the run when ScrapeCreators can cover them, so
-             they are moved aside as notes; only what ScrapeCreators cannot answer stays an error. */
-          rep.proxy_notes = rep.errors.splice(0);
-          const gaps = ids.filter((p) => !(pulled.get(p) || []).length);
-          if (gaps.length) {
-            const more = await pullScrapeCreators(scKey, gaps, country, rep);
-            for (const [p, list] of more) { pulled.set(p, list); rep.source[byPage.get(p)?.name || p] = "scrapecreators"; }
-          }
-        }
-        for (const p of pulled.keys()) {
-          const n = byPage.get(p)?.name || p;
-          if (!rep.source[n]) rep.source[n] = "proxy";
-        }
-      }
-
-      /* Ads that already hold their media are not copied again unless asked (Rebuild previews).
-         ScrapeCreators gives up to three creatives per ad and Proxy only one, so with both in
-         play a later Proxy pull must not replace a carousel with a single picture - and only new
-         ads cost downloads. Proxy on its own keeps its old behaviour (re-copy every night),
-         which is what repaired its older storage keys. */
-      const haveMedia = new Set<string>();
-      if (write && provider !== "proxy" && !refresh) {
-        const r = await fetch(SB + "/rest/v1/competitor_ads?select=id&media_items=not.is.null&watchlist_id=in.("
-          + wl.map((w) => Number(w.id)).join(",") + ")", { headers: H });
-        const rows: any[] = await r.json().catch(() => []);
-        if (Array.isArray(rows)) rows.forEach((x) => haveMedia.add(String(x.id)));
-      }
-
-      for (const [pageId, list] of pulled) {
-        const w = byPage.get(String(pageId));
-        rep.per_page[(w?.name || pageId)] = list.length;
-        rep.found += list.length;
-        if (!w || !write) continue;
-        await pool(list, 4, async (n: NormAd) => {
-          const id = n.id;
-          let items: any[] | null = null;
-          const wantMedia = withMedia && n.media.length && (refresh || !haveMedia.has(id));
-          if (wantMedia && Date.now() > deadline) rep.media_skipped_for_time++;
-          else if (wantMedia) {
-            items = [];
-            for (let i = 0; i < n.media.length; i++) {
-              const m = n.media[i];
-              const got = await copyMedia(m.url, w.id, id, String(i));
-              if (got.path) {
-                const it: any = { s3_path: got.path, media_type: got.mediaType };
-                /* A video gets its own still, so the grid shows a picture without downloading
-                   the clip - the page uses `poster` whenever it is there. */
-                if (got.mediaType === "video" && m.poster) {
-                  const p = await copyMedia(m.poster, w.id, id, i + "p");
-                  if (p.path && p.mediaType === "image") it.poster = p.path;
-                }
-                items.push(it);
-                rep.media_copied++;
-              } else {
-                rep.media_failed++;
-                /* Kept per reason rather than as one total, so "the link had expired" and "S3
-                   refused it" are not reported as the same thing. Capped: a page that fails on
-                   every ad must not turn the report into a wall of identical lines. */
-                const why = got.why || "unknown";
-                rep.media_why[why] = (rep.media_why[why] || 0) + 1;
-                if (rep.media_examples.length < 5) rep.media_examples.push((w?.name || pageId) + " / " + id + ": " + why);
-              }
-            }
-            if (!items.length) items = null;
-          }
-          const out: any = { ...n.row, id, watchlist_id: w.id, page_id: String(pageId), country,
-            page_name: n.row.page_name || w.name, last_seen_at: new Date().toISOString() };
-          if (out.impressions_text) rep.impressions_seen++;
-          if (out.low_impression) rep.low_flagged++;
-          /* Every key this ad carried, so one real run names the fields instead of us guessing.
-             Union across the slice, capped - it is a diagnostic, not a dump. */
-          for (const key of Object.keys(n.raw || {})) {
-            if (rep.ad_fields_seen.length < 60 && !rep.ad_fields_seen.includes(key)) rep.ad_fields_seen.push(key);
-          }
-          /* Only overwrite the picture when a new one was actually copied - a failed download
-             must not wipe a good image stored on an earlier run. */
-          if (items) { out.media_items = items; out.media_s3_path = items[0].s3_path; out.media_type = items[0].media_type; }
-          const ins = await fetch(SB + "/rest/v1/competitor_ads?on_conflict=id", { method: "POST",
-            headers: { ...H, Prefer: "resolution=merge-duplicates,return=minimal" },
-            body: JSON.stringify(out) });
-          if (ins.ok) rep.written++;
-          else if (rep.errors.length < 5) rep.errors.push("save " + id + ": " + (await ins.text()).slice(0, 140));
-        });
-      }
-      /* Stamped only for the pages the service actually answered for, so "last pulled" on the
-         screen means a pull that worked - including one that honestly found no ads - and never a
-         failed call or a refusal. */
-      const answered = wl.filter((w) => pulled.has(String(w.page_id).trim()));
-      if (write && answered.length) {
-        await fetch(SB + "/rest/v1/competitor_watchlist?id=in.(" + answered.map((w) => Number(w.id)).join(",") + ")", {
-          method: "PATCH", headers: { ...H, Prefer: "return=minimal" },
-          body: JSON.stringify({ last_sync_at: new Date().toISOString() }) }).catch(() => {});
-      }
+      const { rep } = await pullAndWrite(wl, body);
+      rep.of_watchlist = all.length;
+      rep.slice = { skip, take, names: wl.map((w) => w.name) };
       const next = skip + take;
       rep.next_skip = next < all.length ? next : null;
       rep.done = rep.next_skip === null;
@@ -584,7 +650,8 @@ Deno.serve(async (req) => {
       return json({ ok: true, ...rep });
     }
 
-    return json({ actions: ["status", "prepare", "adopt (POST)", "sync (POST, skip/take, watchlist_ids)"] });
+    return json({ actions: ["status", "prepare", "adopt (POST)", "work (POST, max)",
+      "sync (POST, skip/take, watchlist_ids; write is server-only)"] });
   } catch (e) {
     return json({ error: String((e as any)?.message || e) }, 500);
   }
