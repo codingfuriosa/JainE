@@ -16,8 +16,15 @@ const SRV = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const H = { apikey: SRV, Authorization: "Bearer " + SRV, "Content-Type": "application/json",
   "Accept-Profile": "camp", "Content-Profile": "camp" };
 
+/* THE BROWSER ASKS FIRST. Until the Fetch from Meta button moved here this function was only ever
+   called server-to-server by the cron, so it never answered the browser's CORS preflight - the
+   OPTIONS came back 405, the browser refused to send the POST, and the button said "Fetch failed"
+   without the function ever running. The caller is still checked: verify_jwt stays on. */
+const CORS = { "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info" };
 const json = (o: unknown, s = 200) => new Response(JSON.stringify(o, null, 2),
-  { status: s, headers: { "Content-Type": "application/json" } });
+  { status: s, headers: { ...CORS, "Content-Type": "application/json" } });
 
 async function row() {
   const r = await fetch(SB + "/rest/v1/proxy_oauth?id=eq.1&select=*", { headers: H });
@@ -220,6 +227,7 @@ async function copyMedia(url: string, wlId: number, adId: string) {
 }
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   const url = new URL(req.url);
   const action = url.searchParams.get("action") || "";
   try {
