@@ -3,14 +3,14 @@
 // Sign-in happened once on a laptop because Proxy refuses non-allow-listed redirects; refreshing
 // carries no redirect, so this renews unattended for ever.
 //
-// THIS IS THE ONE ROUTE INTO THE COMPETITOR ADS TABLES. The nightly cron
-// (competitor-ads-proxy-daily) and the Fetch from Meta button on the screen both call it, so the
-// screen and the nightly job always pull the same way. competitor-ads-sync, the self-hosted
-// Playwright scraper the button used to call, is no longer reached from the page.
+// THIS IS THE ONE ROUTE INTO THE COMPETITOR ADS TABLES. Its "work" action is the queue worker: the
+// competitor-ads-queue-worker cron and the Pull all now button both call it, and the database
+// (camp.competitor_claim_pulls) decides what it may pull within the day's free Proxy credits - see
+// supabase/migrations/20261013090000_competitor_ads_weekly_queue.sql. competitor-ads-sync, the
+// self-hosted Playwright scraper the button once called, is no longer reached from the page.
 //
-// It pulls from ScrapeCreators when the SCRAPECREATORS_API_KEY secret is set, and from Proxy
-// otherwise. Proxy's Free plan (20 credits a day) could not cover the 28-page watchlist; whichever
-// pages the credits ran out on simply showed nothing.
+// It pulls from Proxy, and asks ScrapeCreators for the gaps only if the SCRAPECREATORS_API_KEY
+// secret is set (it is not: the setup is meant to cost nothing).
 
 import { AwsClient } from "https://esm.sh/aws4fetch@1.0.20";
 
