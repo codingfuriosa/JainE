@@ -2537,8 +2537,10 @@ async function legalNav(reuse){
   // — that was the slow part. Cache them and reuse on toggle; a full navigation to the page (or an
   // upload/move/delete, which re-routes) refetches fresh.
   if(!(reuse && window._legalNavData)){
-    const allF=await docFetch({dept:'Legal'});
-    const listF=await legalFolderTree();
+    /* The folder list does not depend on the document list, so both go out at once. Sequentially
+       this was two trips to Mumbai, about 65ms each; now it is one. Promise.all is what actually
+       sends them together - a Supabase builder does nothing until something calls .then() on it. */
+    const [allF,listF]=await Promise.all([docFetch({dept:'Legal'}), legalFolderTree()]);
     window._legalNavData={all:allF,list:listF};
   }
   const all=window._legalNavData.all;
@@ -3175,10 +3177,19 @@ async function legalMIS(){
      anything to open and the row can say so at a glance. One small query for the whole table. */
   window._misDocCounts={}; window._misDocFolders={};
   try{
-    const {data:fo}=await sb.from('mis_case_folders').select('id,case_id,doc_folder_id');
+    /* Both reads go out together. mis_case_files is selected with no filter at all - it never
+       depended on which folders came back, only on there being some - so waiting for the folder
+       list first bought nothing and cost a round trip, about 65ms. The guard below is kept: with no
+       folders, byFolder is empty, every lookup misses and the counts stay empty exactly as before,
+       so the extra read cannot change what is shown. */
+    const [foRes,fiRes]=await Promise.all([
+      sb.from('mis_case_folders').select('id,case_id,doc_folder_id'),
+      sb.from('mis_case_files').select('folder_id')
+    ]);
+    const fo=foRes&&foRes.data;
     const byFolder={}; (fo||[]).forEach(function(f){ byFolder[f.id]=f.case_id; if(f.doc_folder_id) window._misDocFolders[f.case_id]=f.doc_folder_id; });
     if((fo||[]).length){
-      const {data:fi}=await sb.from('mis_case_files').select('folder_id');
+      const fi=fiRes&&fiRes.data;
       (fi||[]).forEach(function(x){ const cid=byFolder[x.folder_id]; if(cid!=null) window._misDocCounts[cid]=(window._misDocCounts[cid]||0)+1; });
     }
   }catch(e){}
