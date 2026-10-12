@@ -861,7 +861,13 @@
     try{ await ACC().from('notifications').update({read:true})
       .eq('recipient',me()).eq('task_id',tid).eq('read',false).neq('kind','approval'); }catch(e){}
   }
-  async function notifLoad(){
+  /* The bell asked for the same 50 notifications twice on every page load: once here, and again
+     a moment later because the window raises a focus event as it finishes opening. Seen in the
+     network panel as two identical requests. The timed refresh and the explicit reloads after
+     approving or marking all read are untouched - only a focus arriving on the heels of the first
+     load is skipped, and it could only ever have returned the same rows. */
+  let NOTIF_LAST_AT=0;
+  async function notifLoad(){ NOTIF_LAST_AT=Date.now();
     try{ const {data}=await ACC().from('notifications').select('*').eq('recipient',me()).order('created_at',{ascending:false}).limit(50); NOTIFS=data||[]; }catch(e){ NOTIFS=[]; }
     // Drop anything whose task has already been dealt with, in one pass rather than per row.
     try{
@@ -2145,13 +2151,35 @@
     // inside is limited to their own instances by row-level security.
     try{
       // Being OFFERED a step counts too, not just having claimed one. A step shared between people
-      // has nobody in `person` until somebody takes it, so matching on person alone hid the
-      // workflow from everybody it was waiting on.
-      const mine=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
-        .select('case_id,person,candidates').order('id',{ascending:true}); });
-      const caseIds=Array.from(new Set((mine||[])
-        .filter(function(s){ return eq(s.person,me()) || (Array.isArray(s.candidates)&&s.candidates.some(function(e){return eq(e,me());})); })
-        .map(function(s){return s.case_id;}).filter(function(x){return x!=null;})));
+      /* THE CASE IDS ARE ASKED FOR DIRECTLY, NOT SIFTED OUT OF THE WHOLE TABLE.
+
+         This used to read every flow_case_steps row the viewer was allowed to see and pick its own
+         out in the browser. Seen in the network panel: five paged requests, offsets 0 to 4000. For
+         a director who can see everything that is 4,708 rows and 460KB, and in the measured case
+         not one of them was a match. The rows were never the answer - the handful of case ids
+         inside them were.
+
+         acc.wf_my_case_ids() returns exactly those ids. It is SECURITY INVOKER, so the same
+         row-level policy applies as to the read it replaces, and the rule inside it is this same
+         line - person, or one of the candidates, compared without regard to case. Checked against
+         this very filter on the live database for a user with real cases: 479 ids either way,
+         none missing, none extra.
+
+         The old path is kept directly below. If the call fails for any reason the page reads the
+         table and filters as before, so the worst case is the speed it had this morning. */
+      let caseIds=[];
+      const idRes=await ACC().rpc('wf_my_case_ids').then(function(r){return r;}, function(e){return {error:e};});
+      if(idRes && !idRes.error && Array.isArray(idRes.data)){
+        caseIds=Array.from(new Set(idRes.data.map(function(r){return r.case_id;}).filter(function(x){return x!=null;})));
+      }else{
+        // has nobody in `person` until somebody takes it, so matching on person alone hid the
+        // workflow from everybody it was waiting on.
+        const mine=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
+          .select('case_id,person,candidates').order('id',{ascending:true}); });
+        caseIds=Array.from(new Set((mine||[])
+          .filter(function(s){ return eq(s.person,me()) || (Array.isArray(s.candidates)&&s.candidates.some(function(e){return eq(e,me());})); })
+          .map(function(s){return s.case_id;}).filter(function(x){return x!=null;})));
+      }
       if(caseIds.length){ const {data:cs}=await ACC().from('flow_cases').select('flow_id').in('id',caseIds); (cs||[]).forEach(function(c){ myFlowIds[c.flow_id]=true; }); }
     }catch(e){}
     // You see a workflow if you created it / own a step / it's shared with your department, OR you have
@@ -14536,7 +14564,7 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
   });
 
   function init(){
-    injectCss(); wireBell(); notifLoad(); setInterval(notifLoad,45000); window.addEventListener('focus',notifLoad);
+    injectCss(); wireBell(); notifLoad(); setInterval(notifLoad,45000); window.addEventListener('focus',function(){ if(Date.now()-NOTIF_LAST_AT>5000) notifLoad(); });
     try{ mtgStartBrowserTranscriber(); }catch(e){}
     try{
       const qs=new URLSearchParams(location.search);
