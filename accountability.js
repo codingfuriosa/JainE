@@ -681,71 +681,94 @@
     .dp-chip-rep i{font-size:9.5px}
     /* a recurring task, told apart from a normal one in every list: a purple outline, nothing more */
     .ac-row.ac-row-rec{box-shadow:inset 0 0 0 1.5px #a78bfa;border-radius:8px}
-    /* Recurring view: a financial year in one table - weeks as columns with Monday-Sunday as rows,
-       a column after each month, each quarter and the year that adds up what fell inside it - and a
-       side panel like the Calendar's that opens only when something is clicked. */
-    .rq-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px;margin-bottom:12px}
+    /* Recurring view: "Due soon" columns, or a year table - tasks frozen on the left, the timeline
+       across - and a side panel like the Calendar's that opens only when something is clicked. */
     .rq-nav{display:flex;align-items:center;gap:8px;margin-left:auto}
     .rq-nav .ac-btn{width:36px;justify-content:center;font-size:17px}
-    .rq-nav b{font-size:15px;min-width:120px;text-align:center}
-    .rq-filter{height:36px;min-width:180px;margin-left:6px;border:1.5px solid #2563eb !important;color:#1d4ed8;font-weight:600}
-    .rq-table{width:100%;background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
-    .rq-grid{display:flex;width:max-content}
-    .rq-col{flex:none;width:208px;display:flex;flex-direction:column;border-left:1px solid var(--line);min-height:560px}
-    .rq-col.days{width:48px;border-left:0;position:sticky;left:0;z-index:2;background:var(--bg-card,#fff);
-      border-right:1px solid var(--line)}
-    .rq-col.sum{width:208px;background:var(--bg-soft,#f8fafc)}
-    .rq-col.sum.q{background:#f6f3ff;border-left:1px solid #cbd5e1}
-    .rq-col.sum.y{background:#fdf4f5;border-left:2px solid #cbd5e1}
-    .rq-h{height:50px;box-sizing:border-box;padding:7px 9px;border:0;border-bottom:1px solid var(--line);
-      display:flex;flex-direction:column;gap:2px;background:var(--bg-soft,#f8fafc);font:inherit;text-align:left;width:100%}
-    button.rq-h{cursor:pointer}
-    button.rq-h:hover{background:#eef2f7}
-    .rq-h.cur{box-shadow:inset 0 -2px 0 #e0121c}
-    .rq-col.cur{background:#fffafa}
-    .rq-h b{font-size:12px;white-space:nowrap}
-    .rq-h span{font-size:10.5px;color:var(--slate);white-space:nowrap}
-    .rq-dn{height:104px;box-sizing:border-box;border-top:1px solid var(--line);padding:7px 6px;font-size:11.5px;
-      font-weight:700;color:var(--slate)}
-    .rq-cell{height:104px;box-sizing:border-box;border-top:1px solid var(--line);padding:4px;display:flex;
-      flex-direction:column;gap:3px;overflow:hidden;cursor:pointer}
-    .rq-cell:hover{background:#f8fafc}
-    .rq-cell.today{background:#fff4f4}
-    .rq-cell .d{font-size:10.5px;font-weight:700;color:var(--slate);padding:1px 3px}
-    .rq-cell.today .d{color:#e0121c}
-    .rq-cell.out{background:repeating-linear-gradient(135deg,transparent 0 6px,rgba(15,23,42,.03) 6px 12px);cursor:default}
-    .rq-cell.out:hover{background:repeating-linear-gradient(135deg,transparent 0 6px,rgba(15,23,42,.03) 6px 12px)}
-    .rq-cell .more{font-size:10.5px;font-weight:600;color:var(--slate);padding:0 3px}
-    .rq-chip{display:flex;align-items:center;gap:5px;width:100%;box-sizing:border-box;min-height:30px;padding:6px 10px;
-      border-radius:6px;font:inherit;font-size:12px;font-weight:600;line-height:1.3;text-align:left;cursor:pointer;
-      background:var(--cb);color:var(--cc);border:1.5px solid transparent}
-    .rq-chip span{flex:1;min-width:0;overflow-wrap:anywhere}
-    .rq-chip small{display:block;font-size:10.5px;font-weight:500;opacity:.8}
-    .rq-chip.st-done{opacity:.55;text-decoration:line-through}
-    .rq-chip.st-overdue{background:#fff;border-color:#dc2626}
-    .rq-chip.st-next{opacity:.8}
-    .rq-chip.st-held{background:transparent;border:1.5px dashed var(--cc)}
-    .rq-sumcell{flex:1;border-top:1px solid var(--line);padding:14px 12px;display:flex;flex-direction:column;gap:8px;cursor:pointer}
-    .rq-sumcell:hover{background:rgba(15,23,42,.03)}
-    .rq-sumcell .n{font-size:20px;font-weight:700;line-height:1;margin-bottom:4px}
-    .rq-sumcell .n small{font-size:11px;font-weight:600;color:var(--slate);margin-left:4px}
-    .rq-sumcell .l{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#334155;margin-top:8px}
-    .rq-sumcell .n+.l{margin-top:2px}
-    .rq-sumcell .l b{margin-left:auto}
+    .rq-nav b{font-size:15px;min-width:96px;text-align:center}
+    .rq-dd{position:relative;margin-left:6px}
+    .rq-ddb{height:36px;min-width:176px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 12px;
+      border-radius:8px;border:1.5px solid #2563eb;background:#fff;color:#1d4ed8;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
+    .rq-ddb i{font-size:11px}
+    .rq-ddl{position:absolute;right:0;top:42px;z-index:20;min-width:196px;background:#fff;border:1px solid #dfe3e8;border-radius:10px;
+      box-shadow:0 10px 28px rgba(15,23,42,.14);padding:6px;display:flex;flex-direction:column}
+    .rq-ddl button{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border:0;border-radius:7px;background:transparent;
+      font:inherit;font-size:13.5px;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-ddl button:hover{background:#f1f5f9}
+    .rq-ddl button.on{background:#eff4ff;color:#1d4ed8;font-weight:700}
+    .rq-key{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;font-size:12px;color:#475569;margin:2px 0 12px}
+    .rq-key span{display:inline-flex;align-items:center;gap:6px}
+    .rq-key i{width:8px;height:8px;border-radius:50%;display:inline-block}
+    .rq-key em{font-style:normal}
+    .rq-key b{font-weight:800}
     .rq-dot{flex:none;width:8px;height:8px;border-radius:50%;display:inline-block}
+    .rq-none{font-size:13px;color:#94a3b8;padding:4px 0}
+    .rq-none.big{padding:48px 24px;text-align:center;color:#64748b;font-size:14px}
+    /* Due soon: four full-height columns, two to a row on a narrower screen - never three */
+    .rq-soon{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;height:calc(100vh - 300px);min-height:560px}
+    @media (max-width:1100px){.rq-soon{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:max(420px,calc(100vh - 300px));height:auto;min-height:0}}
+    .rq-sc{display:flex;flex-direction:column;min-height:0;background:#fff;border:1px solid #dfe3e8;border-radius:12px;overflow:hidden}
+    .rq-sc.today{box-shadow:inset 0 3px 0 #c8101a}
+    .rq-sch{flex-shrink:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;padding:12px 14px;border:0;
+      border-bottom:1px solid #eef0f3;background:#f8fafc;font:inherit;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-sch.od{background:#fef2f2}
+    .rq-sch:hover{filter:brightness(.98)}
+    .rq-sch b{font-size:14px}
+    .rq-sch span{font-size:12px;color:#64748b}
+    .rq-scb{flex:1;min-height:0;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
+    .rq-scb .n{font-size:22px;font-weight:700;line-height:1}
+    .rq-scb .n small{font-size:12px;font-weight:600;color:#64748b;margin-left:5px}
+    .rq-scb .l{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#334155;margin-top:8px}
+    .rq-scb .l b{margin-left:auto}
+    .rq-chip{display:flex;width:100%;box-sizing:border-box;padding:8px 10px;border-radius:8px;font:inherit;font-size:12.5px;font-weight:600;
+      line-height:1.3;text-align:left;cursor:pointer;color:var(--cc);background:var(--cb);border:1.5px solid transparent}
+    .rq-chip.od{background:#fff;border-color:#dc2626}
+    .rq-chip span{flex:1;min-width:0;overflow-wrap:anywhere}
+    .rq-chip small{display:block;font-size:11px;margin-top:2px;font-weight:500;opacity:.8}
+    .rq-chip small.late{color:#b91c1c;font-weight:800;opacity:1}
+    /* the year table */
+    .rq-table{width:100%;background:#fff;border:1px solid #dfe3e8;border-radius:12px;overflow:auto;max-height:calc(100vh - 260px);min-height:320px}
+    .rq-in{width:max-content;min-width:100%}
+    .rq-tr{display:flex;border-bottom:1px solid #eef0f3}
+    .rq-tc{flex:none;width:300px;position:sticky;left:0;z-index:2;background:#fff;border-right:1px solid #dfe3e8;box-sizing:border-box}
+    .rq-hd,.rq-band{position:sticky;z-index:3;background:#fff}
+    .rq-band{top:0;height:28px}
+    .rq-hd{top:0;height:54px;border-bottom:1px solid #dfe3e8}
+    .rq-band+.rq-hd{top:29px}
+    .rq-hd .rq-tc{z-index:4;padding:0 16px;display:flex;align-items:center;font-size:11.5px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.06em}
+    .rq-band .rq-tc{z-index:4}
+    .rq-bd{min-width:0;box-sizing:border-box;padding:0 10px;display:flex;align-items:center;font-size:12px;font-weight:700;white-space:nowrap;
+      overflow:hidden;border-left:2px solid #cbd5e1;color:#334155}
+    .rq-ch{flex:1 0 84px;min-width:84px;height:54px;box-sizing:border-box;padding:0 4px;display:flex;flex-direction:column;align-items:center;
+      justify-content:center;gap:2px;border:0;border-left:1px solid #eef0f3;font:inherit;cursor:pointer;color:#0f172a}
+    .rq-ch:hover{filter:brightness(.97)}
+    .rq-ch.cur{box-shadow:inset 0 -3px 0 #c8101a}
+    .rq-ch b{font-size:12px;white-space:nowrap}
+    .rq-ch span{font-size:10.5px;color:#64748b;white-space:nowrap}
+    .rq-tn{height:46px;padding:0 16px;display:flex;align-items:center;gap:10px;border:0;border-right:1px solid #dfe3e8;font:inherit;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-tn:hover{background:#f8fafc}
+    .rq-tn i{flex:none;width:3px;height:22px;border-radius:2px}
+    .rq-tn span{flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rq-cl{flex:1 0 84px;min-width:84px;height:46px;box-sizing:border-box;border-left:1px solid #eef0f3;display:flex;align-items:center;justify-content:center;gap:3px}
+    .rq-cl.on{cursor:pointer;font-size:12.5px}
+    .rq-cl.on:hover{box-shadow:inset 0 0 0 1px #cbd5e1}
+    .rq-cl small{font-size:11.5px}
+    /* the side panel */
     .rq-back{position:fixed;inset:0;background:rgba(15,23,42,.18);opacity:0;pointer-events:none;transition:opacity .2s;z-index:199}
     .rq-back.open{opacity:1;pointer-events:auto}
-    .rq-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 4px;border:0;border-bottom:1px solid var(--line);
-      background:transparent;font:inherit;text-align:left;cursor:pointer}
+    .rq-sub{font-size:13px;color:#475569;margin-bottom:6px}
+    .rq-item{display:flex;align-items:center;gap:10px;width:100%;padding:11px 4px;border:0;border-bottom:1px solid #eef0f3;
+      background:transparent;font:inherit;text-align:left;cursor:pointer;color:#0f172a}
     .rq-item:hover{background:#f8fafc}
-    .rq-item .tt{flex:1;min-width:0}
-    .rq-item .tt b{display:block;font-size:13.5px;font-weight:600;overflow-wrap:anywhere}
-    .rq-item .tt span{font-size:12px;color:var(--slate)}
-    .rq-item .st{font-size:11.5px;font-weight:600;color:var(--slate);white-space:nowrap}
-    .rq-item .st.bad{color:#b91c1c}
-    .rq-gl{font-size:11.5px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 2px}
-    .rq-gl:first-child{margin-top:0}
-    .rq-pill{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:20px;margin-bottom:10px}
+    .rq-item .rq-bar{flex:none;width:3px;height:30px;border-radius:2px}
+    .rq-item .tt{flex:1;min-width:0;display:flex;flex-direction:column}
+    .rq-item .tt b{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rq-item .tt span{font-size:12px;color:#64748b}
+    .rq-item .go{color:#94a3b8}
+    .rq-st{font-size:12px;white-space:nowrap}
+    .rq-dl{display:grid;grid-template-columns:96px 1fr;gap:10px 12px;font-size:13.5px;line-height:1.45}
+    .rq-dl .k{color:#64748b}
+    .rq-pill{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:20px;margin:8px 0 12px}
 
     /* an instance's attachments, printed as pages rather than filenames */
     .wf-print-att{margin-top:16px;page-break-inside:avoid}
@@ -1074,41 +1097,40 @@
     return tasksScreen();
   };
 
-  /* ---------- Recurring tab ----------
-     Every recurring task I am part of, one row per series (the open instance), grouped by how
-     often it repeats, and coloured by what it is to me - the same five buckets the Tasks tab uses.
-     New tasks can be made here both ways: a normal one-off task, or a recurring one. The calendar
-     style report is still a prototype; this list is what it will be built on. */
   /* ---------- Recurring view (the "Recurring" pill on Tasks) ----------
-     One financial year (April to March) in a single table. Each week is a column with Monday to
-     Sunday as its rows, and every recurring task sits on the day it falls on, whatever its
-     frequency. After each month's weeks comes a column that adds up what fell in that month; after
-     every third month, one for the quarter; at the end, one for the year. Weeks belong to the month
-     their Thursday is in, so a week across two months is listed once. Colours are the frequency.
+     Two ways to read the same recurring tasks, picked from the frequency menu:
+
+       Due soon (the default) - four columns: anything overdue, then today, tomorrow and the day
+         after. Each lists its tasks grouped by frequency, with the deadline on every one.
+       The year table - one row per recurring task, frozen on the left, and one financial year
+         (April to March) of columns across. "All frequencies" shows week columns only: weeks are
+         numbered inside each month and cut at its edge, so a week never holds another month's
+         dates, and monthly, quarterly and annual deadlines sit in the week they fall in. Picking
+         one frequency shows only its own columns (weeks, months, quarters or the year).
+
+     A cell holds the deadline - the day for weekly and fortnightly tasks, DD/MM otherwise - and how
+     far off it was finished: black for still to come, green for done on time or early, red for done
+     late, bold red for overdue and still open. Clicking a task opens its history; clicking a cell,
+     that deadline; clicking a column header, everything in that column.
 
      A series is every task of one recurring task (same owner, title, frequency and anchor - the
      database copies all four onto each one it creates). Its real tasks show as they stand; dates
-     after its latest one are worked out from the rule: "Coming up" while the latest is complete,
-     "Waiting" while it is still open, since the next is only made once the current one is done. */
+     after its latest one are worked out from the rule, and are "held" while the latest is still
+     open, since the next is only made once the current one is done. */
   const REC_FQ=[
-    {k:'weekly',      label:'Weekly',      c:'#1d4ed8', bg:'#dbeafe'},
-    {k:'fortnightly', label:'Fortnightly', c:'#0f766e', bg:'#ccfbf1'},
-    {k:'monthly',     label:'Monthly',     c:'#b45309', bg:'#fef3c7'},
-    {k:'quarterly',   label:'Quarterly',   c:'#6d28d9', bg:'#ede9fe'},
-    {k:'yearly',      label:'Annually',    c:'#be123c', bg:'#ffe4e6'},
-    {k:'daily',       label:'Daily',       c:'#475569', bg:'#e2e8f0'}
+    {k:'weekly',      label:'Weekly',      c:'#1d4ed8', bg:'#dbeafe', col:'week'},
+    {k:'fortnightly', label:'Fortnightly', c:'#0f766e', bg:'#ccfbf1', col:'week'},
+    {k:'monthly',     label:'Monthly',     c:'#b45309', bg:'#fef3c7', col:'month'},
+    {k:'quarterly',   label:'Quarterly',   c:'#6d28d9', bg:'#ede9fe', col:'quarter'},
+    {k:'yearly',      label:'Annually',    c:'#be123c', bg:'#ffe4e6', col:'year'},
+    {k:'daily',       label:'Daily',       c:'#475569', bg:'#e2e8f0', col:'week'}
   ];
   const REC_FQC=k=>REC_FQ.find(f=>f.k===k)||REC_FQ[0];
-  const REC_ST={done:'Done',today:'Due today',upcoming:'Coming up',overdue:'Overdue',await:'Done, waiting for approval',
-    approve:'Waiting for your approval',next:'Coming up',held:'Waiting for the previous one'};
   let REC_VIEW=null, REC_DATA=null;
   function recFy(iso){ const p=dpParse(iso); return p.m>=3?p.y:p.y-1; }
-  function recInstSt(t){
-    const st=stOf(t), today=istTodayISO(), asg=REC_DATA.asg;
-    if(st==='approved') return 'done';
-    if(st==='await') return (isOwner(t)&&!isSelf(t,asg))?'approve':'await';
-    return t.due_date<today?'overdue':(t.due_date===today?'today':'upcoming');
-  }
+  function recDays(a,b){ const x=dpParse(a), y=dpParse(b); return Math.round((Date.UTC(x.y,x.m,x.d)-Date.UTC(y.y,y.m,y.d))/86400000); }
+  // the IST calendar day a timestamp falls on
+  function recDayOf(ts){ if(!ts) return null; const d=new Date(new Date(ts).getTime()+330*60000); return isNaN(d)?null:d.toISOString().slice(0,10); }
   function recSeries(tasks){
     const map={};
     tasks.filter(t=>t.recur&&t.recur.freq&&t.recur.freq!=='none'&&t.flow_case_step_id==null&&t.due_date).forEach(t=>{
@@ -1121,29 +1143,45 @@
       s.latest=s.items[s.items.length-1]; s.rule=s.latest.recur; s.freq=s.rule.freq; s.title=s.latest.title;
       s.anchor=s.latest.recur_anchor||s.items[0].due_date;
       return s;
-    });
+    }).sort((a,b)=>a.title.localeCompare(b.title));
+  }
+  /* Where one deadline stands: kind is upcoming / held / ontime / late / overdue, delta the days
+     early (-) or late (+). Finished means marked done, whether or not it is approved yet. */
+  function recState(o){
+    const today=istTodayISO(), t=o.task;
+    if(t&&stOf(t)!=='open'){
+      const f=recDayOf(t.completed_at)||today, d=recDays(f,o.date);
+      return {kind:d>0?'late':'ontime',delta:d,finished:f,approved:stOf(t)==='approved'};
+    }
+    if(!t) return {kind:o.held?'held':'upcoming',delta:0};
+    if(o.date<today) return {kind:'overdue',delta:recDays(today,o.date)};
+    return {kind:'upcoming',delta:0};
   }
   function recOcc(s,from,to){
     const out=[];
-    s.items.forEach(t=>{ if(t.due_date>=from&&t.due_date<=to) out.push({date:t.due_date,st:recInstSt(t),task:t}); });
-    const projSt=stOf(s.latest)==='approved'?'next':'held';
+    s.items.forEach(t=>{ if(t.due_date>=from&&t.due_date<=to) out.push({date:t.due_date,task:t}); });
+    const held=stOf(s.latest)!=='approved';   // nothing after it is made until it is approved
     let cur=dpAdd(s.latest.due_date,1); if(cur<from) cur=from;
     for(let g=0; cur<=to && g<800; g++){
       if(s.rule.until&&cur>s.rule.until) break;
-      if(dpMatches(s.rule,cur,s.anchor)) out.push({date:cur,st:projSt,task:null});
+      if(dpMatches(s.rule,cur,s.anchor)) out.push({date:cur,task:null,held:held});
       cur=dpAdd(cur,1);
     }
+    out.forEach(o=>o.st=recState(o));
     return out;
   }
-  // Every occurrence in the year on show, filtered, worked out once per paint.
-  function recBuild(){
-    const v=REC_VIEW, from=dpAdd(dpIso(v.fy,3,1),-7), to=dpAdd(dpIso(v.fy+1,2,31),7), all=[];
-    REC_DATA.series.forEach((s,i)=>{ if(v.filter!=='all'&&s.freq!==v.filter) return; recOcc(s,from,to).forEach(o=>all.push({i:i,o:o})); });
-    all.sort((a,b)=>a.o.date<b.o.date?-1:(a.o.date>b.o.date?1:REC_DATA.series[a.i].title.localeCompare(REC_DATA.series[b.i].title)));
-    const byDate={}; all.forEach(x=>{ (byDate[x.o.date]=byDate[x.o.date]||[]).push(x); });
-    REC_DATA.all=all; REC_DATA.byDate=byDate;
+  const REC_COLOUR=k=>k==='ontime'?'#15803d':k==='late'?'#dc2626':k==='overdue'?'#b91c1c':'#0f172a';
+  function recStatus(st){
+    if(st.kind==='upcoming') return 'Yet to come';
+    if(st.kind==='held') return 'Held — made once the open one is done';
+    const wait=st.approved===false?' · awaiting approval':'';
+    if(st.kind==='ontime') return (st.delta<0?'Done '+(-st.delta)+'d early':'Done on time')+wait;
+    if(st.kind==='late') return 'Done '+st.delta+'d late'+wait;
+    return 'Not done · '+st.delta+'d overdue';
   }
-  function recIn(from,to){ return REC_DATA.all.filter(x=>x.o.date>=from&&x.o.date<=to); }
+  const recDdmm=s=>{ const p=dpParse(s); return dpPad(p.d)+'/'+dpPad(p.m+1); };
+  const recDow=s=>{ const p=dpParse(s); return DP_DOWL[new Date(p.y,p.m,p.d).getDay()].slice(0,3); };
+  const recNoYear=s=>dpLong(s).replace(/ \d{4}$/,'');
   function recP3Html(right){
     const p3=(k,ic,l)=>`<button class="ac-pbtn ${P3===k?'on':''}" onclick="accP3('${k}')"><i class="fa-solid ${ic}"></i> ${l}</button>`;
     return `<div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}${p3('recurring','fa-rotate','Recurring')}${right?'<div class="rq-nav">'+right+'</div>':''}</div>`;
@@ -1152,133 +1190,183 @@
     const b=$('acBody'); if(!b) return;
     let data; try{ data=await loadAll(); }catch(e){ b.innerHTML='<div class="ac-empty">Could not load tasks</div>'; return; }
     const list=await people();
-    if(!REC_VIEW) REC_VIEW={fy:recFy(istTodayISO()),filter:'all'};
-    REC_DATA={asg:data.asg,list:list,series:[]};
-    REC_DATA.series=recSeries(data.tasks);
+    if(!REC_VIEW) REC_VIEW={fy:recFy(istTodayISO()),filter:'soon',menu:false};
+    REC_DATA={asg:data.asg,list:list,series:recSeries(data.tasks)};
     recPaint(true);
   }
-  function recPaint(scrollToNext){
-    const b=$('acBody'); if(!b||!REC_DATA) return;
-    recBuild();
-    const v=REC_VIEW, today=istTodayISO(), fyLbl='FY '+v.fy+'\u2013'+String(v.fy+1).slice(2);
-    const chip=x=>{ const s=REC_DATA.series[x.i], f=REC_FQC(s.freq), p=dpParse(x.o.date);
-      return '<button type="button" class="rq-chip st-'+x.o.st+'" style="--cc:'+f.c+';--cb:'+f.bg+'" title="'+esc2(s.title+' · '+f.label+' · '+REC_ST[x.o.st])+'"'
-        +' onclick="event.stopPropagation();recOpen('+x.i+',\''+x.o.date+'\')"><span>'+esc2(s.title)+'<small>'+DP_DOWL[new Date(p.y,p.m,p.d).getDay()].slice(0,3)+' '+p.d+' '+DP_MONS[p.m]+'</small></span></button>'; };
-    /* Every column reads the same way: how many tasks, then the tasks grouped by frequency, each
-       with its date. A week column holds everything due that week; the Month column only the
-       monthly tasks, the Quarter column the quarterly ones and the Year column the annual ones. */
-    const body=(items,onclick)=>{
-      let h='<div class="rq-sumcell" onclick="'+onclick+'"><span class="n">'+items.length+'<small>task'+(items.length===1?'':'s')+'</small></span>';
-      REC_FQ.forEach(f=>{
-        const its=items.filter(x=>REC_DATA.series[x.i].freq===f.k); if(!its.length) return;
-        h+='<span class="l"><i class="rq-dot" style="background:'+f.c+'"></i>'+f.label+'<b>'+its.length+'</b></span>'+its.map(chip).join('');
-      });
-      return h+'</div>';
+  /* The columns on show. Each knows how to find a series' one deadline that belongs in it. */
+  function recCols(){
+    const v=REC_VIEW, today=istTodayISO(), fy=v.fy, soon=v.filter==='soon';
+    const show=v.filter==='all'?null:soon?'soon':REC_FQC(v.filter).col;
+    const series=REC_DATA.series.filter(s=>v.filter==='all'||soon||s.freq===v.filter);
+    const fyLbl='FY '+String(fy).slice(2)+'–'+String(fy+1).slice(2), cols=[];
+    if(soon){
+      const day=(k,label,d)=>cols.push({type:'soon',key:k,label:label,sub:d?recNoYear(d):'Not done, past deadline',
+        find:s=>{
+          if(d){ const o=recOcc(s,d,d)[0]; return o&&o.st.kind!=='held'?o:null; }
+          return s.items.filter(t=>stOf(t)==='open'&&t.due_date<today).map(t=>({date:t.due_date,task:t,st:recState({date:t.due_date,task:t})}))[0]||null;
+        }});
+      day('overdue','Overdue',null); day('today','Today',today); day('tomorrow','Tomorrow',dpAdd(today,1)); day('after','Day after',dpAdd(today,2));
+      return {cols,series,show,fyLbl};
+    }
+    const push=(type,label,sub,from,to,band,tint,tip)=>{
+      if(show?show!==type:type!=='week') return;
+      if(show==='week'&&!series.some(s=>recOcc(s,from,to).length)) return;
+      const bg=(type==='quarter'&&!show)?'#fdf2f8':(type==='year'&&!show)?'#fdf6f7':(tint?'#f5f7fb':'#ffffff');
+      cols.push({type,label,sub,from,to,band,bg,tip:tip||'',cur:today>=from&&today<=to,
+        find:s=>{ if((show?REC_FQC(s.freq).col:'week')!==type) return null; return recOcc(s,from,to)[0]||null; }});
     };
-    const sumCell=(freq,from,to,label)=>body(recIn(from,to).filter(x=>REC_DATA.series[x.i].freq===freq),
-      'recPeriod(\''+freq+'\',\''+from+'\',\''+to+'\',\''+esc2(label)+'\')');
-    let cols='';
     for(let mi=0; mi<12; mi++){
-      const y=v.fy+Math.floor((3+mi)/12), m=(3+mi)%12, mFrom=dpIso(y,m,1), mTo=dpIso(y,m,dpDaysIn(y,m));
-      // every week that touches the month, cut to the month's own days
+      const y=fy+Math.floor((3+mi)/12), m=(3+mi)%12, mFrom=dpIso(y,m,1), mTo=dpIso(y,m,dpDaysIn(y,m));
       let mon=dpAdd(mFrom,-((new Date(y,m,1).getDay()+6)%7)), wk=0;
       while(mon<=mTo){
         wk++;
-        const end=dpAdd(mon,6), cFrom=mon<mFrom?mFrom:mon, cTo=end>mTo?mTo:end, cur=today>=cFrom&&today<=cTo;
-        cols+='<div class="rq-col'+(cur?' cur':'')+'" data-from="'+cFrom+'" data-to="'+cTo+'"><button type="button" class="rq-h'+(cur?' cur':'')+'" onclick="recWeek(\''+cFrom+'\',\''+cTo+'\')" title="All tasks this week">'
-          +'<b>Wk '+wk+' · '+DP_MONS[m]+'</b><span>'+dpShort(cFrom).replace(/ \d{4}$/,'')+' – '+dpShort(cTo).replace(/ \d{4}$/,'')+'</span></button>'
-          +body(recIn(cFrom,cTo),'recWeek(\''+cFrom+'\',\''+cTo+'\')')+'</div>';
+        const end=dpAdd(mon,6), cFrom=mon<mFrom?mFrom:mon, cTo=end>mTo?mTo:end, d1=dpParse(cFrom).d, d2=dpParse(cTo).d;
+        push('week','Wk '+wk,(d1===d2?d1:d1+'–'+d2)+' '+DP_MONS[m],cFrom,cTo,'m'+mi,mi%2===1,
+          DP_MONL[m]+' week '+wk+' · '+dpShort(cFrom).replace(/ \d{4}$/,'')+' – '+dpShort(cTo).replace(/ \d{4}$/,''));
         mon=dpAdd(mon,7);
       }
-      cols+='<div class="rq-col sum"><div class="rq-h"><b>'+DP_MONL[m]+'</b><span>Monthly tasks</span></div>'+sumCell('monthly',mFrom,mTo,DP_MONL[m]+' '+y+' · Monthly')+'</div>';
-      if(mi%3===2){
-        const q=(mi+1)/3, q0=3+(q-1)*3, qy=v.fy+Math.floor(q0/12), qFrom=dpIso(qy,q0%12,1);
-        cols+='<div class="rq-col sum q"><div class="rq-h"><b>Q'+q+'</b><span>Quarterly tasks</span></div>'+sumCell('quarterly',qFrom,mTo,'Q'+q+' '+fyLbl+' · Quarterly')+'</div>';
-      }
+      push('month',DP_MONS[m]+' - '+String(y).slice(2),'Month',mFrom,mTo,'m'+mi,mi%2===1,DP_MONL[m]+' '+y);
+      if(mi%3===2){ const q=(mi+1)/3, q0=3+(q-1)*3; push('quarter','Q'+q,DP_MONS[q0%12]+'–'+DP_MONS[m],dpIso(fy+Math.floor(q0/12),q0%12,1),mTo,'q'+q,q%2===0,'Q'+q+' '+fyLbl); }
     }
-    cols+='<div class="rq-col sum y"><div class="rq-h"><b>'+fyLbl+'</b><span>Annual tasks</span></div>'+sumCell('yearly',dpIso(v.fy,3,1),dpIso(v.fy+1,2,31),fyLbl+' · Annually')+'</div>';
-    const opts='<option value="all">All frequencies</option>'+REC_FQ.filter(f=>f.k!=='daily'||REC_DATA.series.some(s=>s.freq==='daily'))
-      .map(f=>'<option value="'+f.k+'"'+(v.filter===f.k?' selected':'')+'>'+f.label+'</option>').join('');
-    // the year arrows and the frequency filter share the pills' row, so the table starts higher up
-    b.innerHTML=recP3Html('<button class="ac-btn" aria-label="Previous year" onclick="recYear(-1)">\u2039</button><b>'+fyLbl+'</b>'
-      +'<button class="ac-btn" aria-label="Next year" onclick="recYear(1)">\u203a</button>'
-      +'<select class="ac-in rq-filter" aria-label="Frequency" onchange="recFilter(this.value)">'+opts+'</select>')
-      +'<div class="rq-table" id="rqTable"><div class="rq-grid">'+cols+'</div></div>'
-      +(REC_DATA.series.length?'':'<div class="ac-empty" style="cursor:default;margin-top:12px">No recurring tasks yet. Make one from a task\u2019s due date: pick Weekly, Fortnightly, Monthly, Quarterly or Annually.</div>')
+    push('year',fyLbl,'Year',dpIso(fy,3,1),dpIso(fy+1,2,31),'y',false,fyLbl);
+    return {cols,series,show,fyLbl};
+  }
+  // everything in one column, frequency by frequency
+  function recColItems(c,series){
+    const out=[];
+    REC_FQ.forEach(f=>series.filter(s=>s.freq===f.k).forEach(s=>{ const o=c.find(s); if(o) out.push({s:s,o:o}); }));
+    return out;
+  }
+  function recPaint(scrollToNow){
+    const b=$('acBody'); if(!b||!REC_DATA) return;
+    const v=REC_VIEW, soon=v.filter==='soon', R=recCols(), cols=R.cols;
+    REC_DATA.cols=cols; REC_DATA.shown=R.series;
+    const idx=s=>REC_DATA.series.indexOf(s);
+    let main='';
+    if(soon){
+      main='<div class="rq-soon">'+cols.map((c,ci)=>{
+        const items=recColItems(c,REC_DATA.series);
+        let h='<div class="rq-sc'+(c.key==='today'?' today':'')+'"><button type="button" class="rq-sch'+(c.key==='overdue'?' od':'')+'" onclick="recCol('+ci+')" title="All tasks in this column"><b>'+c.label+'</b><span>'+esc2(c.sub)+'</span></button>'
+          +'<div class="rq-scb"><span class="n">'+items.length+'<small>task'+(items.length===1?'':'s')+'</small></span>';
+        REC_FQ.forEach(f=>{
+          const its=items.filter(x=>x.s.freq===f.k); if(!its.length) return;
+          h+='<span class="l"><i class="rq-dot" style="background:'+f.c+'"></i>'+f.label+'<b>'+its.length+'</b></span>'
+            +its.map(x=>{ const late=x.o.st.kind==='overdue';
+              return '<button type="button" class="rq-chip'+(late?' od':'')+'" style="--cc:'+f.c+';--cb:'+f.bg+'" title="'+esc2(x.s.title)+'" onclick="recCell('+idx(x.s)+',\''+x.o.date+'\')"><span>'+esc2(x.s.title)
+                +'<small'+(late?' class="late"':'')+'>'+recNoYear(x.o.date)+(late?' · '+x.o.st.delta+' day'+(x.o.st.delta===1?'':'s')+' late':'')+'</small></span></button>'; }).join('');
+        });
+        if(!items.length) h+='<div class="rq-none">Nothing here.</div>';
+        return h+'</div></div>';
+      }).join('')+'</div>';
+    } else {
+      const hasBand=!R.show||R.show==='week';
+      // the month band: one label over each month's columns
+      let band='';
+      if(hasBand){
+        const bands=[];
+        cols.forEach(c=>{ const l=bands[bands.length-1]; if(l&&l.key===c.band){ l.n++; return; } bands.push({key:c.band,n:1,c:c}); });
+        band='<div class="rq-tr rq-band"><div class="rq-tc"></div>'+bands.map(x=>{
+          const k=x.key.charAt(0), i=+x.key.slice(1)||0, y=v.fy+Math.floor((3+i)/12);
+          const label=k==='m'&&x.c.type==='week'?DP_MONS[(3+i)%12]+' - '+String(y).slice(2):'';
+          const bg=k==='m'?(i%2?'#eef2f8':'#f8fafc'):k==='q'?(R.show?(i%2?'#f8fafc':'#eef2f8'):'#fbe7f1'):(R.show?'#f8fafc':'#fbeef0');
+          return '<div class="rq-bd" style="flex:'+x.n+' 0 '+(x.n*84)+'px;background:'+bg+'">'+label+'</div>'; }).join('')+'</div>';
+      }
+      const head='<div class="rq-tr rq-hd"><div class="rq-tc">Task</div>'+cols.map((c,ci)=>
+        '<button type="button" class="rq-ch'+(c.cur?' cur':'')+'" style="background:'+c.bg+'" title="'+esc2(c.tip)+'" data-cur="'+(c.cur?1:0)+'" onclick="recCol('+ci+')"><b>'+esc2(c.label)+'</b><span>'+esc2(c.sub)+'</span></button>').join('')+'</div>';
+      let rows='';
+      REC_FQ.forEach(f=>R.series.filter(s=>s.freq===f.k).forEach(s=>{
+        const i=idx(s);
+        rows+='<div class="rq-tr"><button type="button" class="rq-tc rq-tn" title="'+esc2(s.title)+'" onclick="recHistory('+i+')"><i style="background:'+f.c+'"></i><span>'+esc2(s.title)+'</span></button>'
+          +cols.map(c=>{
+            const o=c.find(s), bg=c.cur?'#fffafa':c.bg;
+            if(!o) return '<div class="rq-cl" style="background:'+bg+'"></div>';
+            const st=o.st, col=REC_COLOUR(st.kind), w=st.kind==='overdue'?800:400;
+            const dt=f.col==='week'?recDow(o.date):recDdmm(o.date);
+            const dl=(st.kind==='upcoming'||st.kind==='held'||!st.delta)?'':(st.delta>0?'+'+st.delta:'−'+(-st.delta));
+            return '<div class="rq-cl on" style="background:'+bg+';color:'+col+';font-weight:'+w+'" title="'+esc2(s.title+' · deadline '+dpLong(o.date)+' · '+recStatus(st))+'" onclick="recCell('+i+',\''+o.date+'\')"><span>'+dt+'</span>'+(dl?'<small>'+dl+'</small>':'')+'</div>';
+          }).join('')+'</div>';
+      }));
+      main='<div class="rq-table" id="rqTable"><div class="rq-in">'+band+head+rows
+        +(rows?'':'<div class="rq-none big">No recurring tasks here.</div>')+'</div></div>';
+    }
+    const opts=[{k:'soon',label:'Due soon',c:'#c8101a'},{k:'all',label:'All frequencies',c:'#94a3b8'}]
+      .concat(REC_FQ.filter(f=>f.k!=='daily'||REC_DATA.series.some(s=>s.freq==='daily')).map(f=>({k:f.k,label:f.label,c:f.c})));
+    const cur=opts.find(o=>o.k===v.filter)||opts[0];
+    const menu='<div class="rq-dd"><button type="button" class="rq-ddb" aria-haspopup="listbox" aria-expanded="'+(v.menu?'true':'false')+'" onclick="event.stopPropagation();recMenu()">'+cur.label+'<i class="fa-solid fa-chevron-down"></i></button>'
+      +(v.menu?'<div class="rq-ddl" role="listbox">'+opts.map(o=>'<button type="button" role="option" aria-selected="'+(o.k===v.filter)+'" class="'+(o.k===v.filter?'on':'')+'" onclick="recFilter(\''+o.k+'\')"><i class="rq-dot" style="background:'+o.c+'"></i>'+o.label+'</button>').join('')+'</div>':'')+'</div>';
+    const key='<div class="rq-key"><span><i style="background:#0f172a"></i>Yet to come</span><span><i style="background:#15803d"></i>Done on time · <em style="color:#15803d">−2 days</em> early</span>'
+      +'<span><i style="background:#dc2626"></i>Done late · <em style="color:#dc2626">+2 days</em> late</span><span><i style="background:#b91c1c"></i><b style="color:#b91c1c">Not done, overdue · +3 days late</b></span></div>';
+    b.innerHTML=recP3Html('<button class="ac-btn" aria-label="Previous year" onclick="recYear(-1)">‹</button><b>'+R.fyLbl+'</b>'
+      +'<button class="ac-btn" aria-label="Next year" onclick="recYear(1)">›</button>'+menu)
+      +key+main
+      +(REC_DATA.series.length?'':'<div class="ac-empty" style="cursor:default;margin-top:12px">No recurring tasks yet. Make one from a task’s due date: pick Weekly, Fortnightly, Monthly, Quarterly or Annually.</div>')
       +'<div class="rq-back" id="rqBack" onclick="recClose()"></div>'
       +'<div class="gcal-panel" id="rqPanel"><div class="gcal-panel-head"><div class="x" id="rqPanelBack" style="display:none;margin-left:0" title="Back" onclick="recBack()"><i class="fa-solid fa-arrow-left"></i></div><b id="rqPanelHead">Details</b><div class="x" onclick="recClose()"><i class="fa-solid fa-xmark"></i></div></div><div class="gcal-panel-body" id="rqPanelBody"></div><div class="gcal-panel-foot" id="rqPanelFoot" style="display:none"></div></div>';
-    if(scrollToNext){
-      // open at the next task still to come (in the frequency shown), else at this week
-      const nx=REC_DATA.all.find(x=>x.o.date>=today&&x.o.st!=='done'), at=nx?nx.o.date:today;
-      const t=$('rqTable'); if(!t) return;
-      const c=Array.prototype.find.call(t.querySelectorAll('.rq-col[data-from]'),el=>at>=el.getAttribute('data-from')&&at<=el.getAttribute('data-to'));
-      if(c) t.scrollLeft=Math.max(0,c.offsetLeft-60);
+    if(scrollToNow&&!soon){
+      // open on the column holding today rather than at April
+      const t=$('rqTable'), c=t&&t.querySelector('.rq-ch[data-cur="1"]');
+      if(c) t.scrollLeft=Math.max(0,c.offsetLeft-300-84);
     }
   }
-  /* kind 'list' (a day, week or period) or 'task'. A task opened from a list gets a back arrow to
-     that list; the x still closes the panel and returns to the table. */
-  let REC_LIST=null, REC_MODE=null;
-  function recShow(head,body,foot,kind){
-    const p=$('rqPanel'), bk=$('rqBack'); if(!p) return;
-    const back=kind==='task'&&REC_MODE==='list'&&p.classList.contains('open')&&REC_LIST;
-    if(kind==='list') REC_LIST={head:head,body:body};
-    REC_MODE=back?'list-task':kind;
-    const bb=$('rqPanelBack'); if(bb) bb.style.display=back?'':'none';
-    $('rqPanelHead').textContent=head; $('rqPanelBody').innerHTML=body;
-    const f=$('rqPanelFoot'); f.innerHTML=foot||''; f.style.display=foot?'':'none';
-    p.classList.add('open'); if(bk) bk.classList.add('open');
+  /* The side panel. Each view remembers the one it was opened from, so a back arrow returns
+     there; the x closes the panel and goes back to the table. */
+  let REC_PANEL=null;
+  function recShow(p){
+    REC_PANEL=p;
+    const el=$('rqPanel'), bk=$('rqBack'); if(!el) return;
+    const bb=$('rqPanelBack'); if(bb) bb.style.display=p.back?'':'none';
+    $('rqPanelHead').textContent=p.head; $('rqPanelBody').innerHTML=p.body;
+    const f=$('rqPanelFoot'); f.innerHTML=p.foot||''; f.style.display=p.foot?'':'none';
+    el.classList.add('open'); if(bk) bk.classList.add('open');
   }
-  window.recBack=function(){ if(REC_LIST) recShow(REC_LIST.head,REC_LIST.body,'','list'); };
-  window.recClose=function(){ REC_MODE=null; const p=$('rqPanel'), bk=$('rqBack'); if(p) p.classList.remove('open'); if(bk) bk.classList.remove('open'); };
-  function recItems(items,withDate){
-    return items.map(x=>{ const s=REC_DATA.series[x.i], f=REC_FQC(s.freq), bad=x.o.st==='overdue';
-      return '<button type="button" class="rq-item" onclick="recOpen('+x.i+',\''+x.o.date+'\')">'
-        +'<i class="rq-dot" style="background:'+f.c+'"></i><span class="tt"><b>'+esc2(s.title)+'</b><span>'
-        +(withDate?esc2(dpLong(x.o.date))+' · ':'')+f.label+'</span></span><span class="st'+(bad?' bad':'')+'">'+REC_ST[x.o.st]+'</span></button>'; }).join('');
-  }
-  function recGrouped(items){
-    let h='', last=null;
-    items.forEach(x=>{ if(x.o.date!==last){ last=x.o.date; h+='<div class="rq-gl">'+esc2(dpLong(x.o.date))+'</div>'; } h+=recItems([x],false); });
-    return h||'<div style="color:var(--slate);font-size:13px">Nothing here.</div>';
-  }
-  window.recDay=function(ds){
-    const items=REC_DATA.byDate[ds]||[];
-    if(!items.length) return;
-    if(items.length===1) return recOpen(items[0].i,ds);
-    recShow(dpLong(ds),recItems(items,false),'','list');
+  window.recBack=function(){ if(REC_PANEL&&REC_PANEL.back) recShow(REC_PANEL.back); };
+  window.recClose=function(){ REC_PANEL=null; const p=$('rqPanel'), bk=$('rqBack'); if(p) p.classList.remove('open'); if(bk) bk.classList.remove('open'); };
+  const recSt=(st,w)=>'<span class="rq-st" style="color:'+REC_COLOUR(st.kind)+';font-weight:'+(st.kind==='overdue'?800:(w||400))+'">'+esc2(recStatus(st).split(' — ')[0])+'</span>';
+  window.recCol=function(ci){
+    const c=REC_DATA.cols[ci]; if(!c) return;
+    const items=recColItems(c,REC_DATA.shown);
+    const body='<div class="rq-sub">'+esc2(c.type==='soon'?c.sub:(c.tip||c.sub))+'</div>'
+      +(items.map(x=>{ const f=REC_FQC(x.s.freq);
+        return '<button type="button" class="rq-item" onclick="recCell('+REC_DATA.series.indexOf(x.s)+',\''+x.o.date+'\',1)"><i class="rq-bar" style="background:'+f.c+'"></i><span class="tt"><b>'+esc2(x.s.title)+'</b><span>'+esc2(dpLong(x.o.date))+' · '+f.label+'</span></span>'+recSt(x.o.st)+'<span class="go">›</span></button>'; }).join('')
+        ||'<div class="rq-none">No tasks in this column.</div>');
+    recShow({head:c.label,body:body});
   };
-  window.recWeek=function(from,to){ recShow(dpShort(from).replace(/ \d{4}$/,'')+' \u2013 '+dpShort(to),recGrouped(recIn(from,to)),'','list'); };
-  window.recPeriod=function(freq,from,to,label){ recShow(label,recGrouped(recIn(from,to).filter(x=>REC_DATA.series[x.i].freq===freq)),'','list'); };
-  /* A task that is due now - overdue, due today, or done and waiting for approval - opens the task
-     itself, since that is where it is acted on. Anything else - a task still to come, one waiting
-     on the previous, or one already done - opens a short summary in the side panel. */
-  window.recOpen=function(i,ds){
+  // everything so far this year, newest first, and the next one still to come
+  window.recHistory=function(i){
+    const s=REC_DATA.series[i]; if(!s) return;
+    const v=REC_VIEW, today=istTodayISO(), fyFrom=dpIso(v.fy,3,1), fyTo=dpIso(v.fy+1,2,31);
+    const past=recOcc(s,fyFrom,today<fyTo?today:fyTo), next=recOcc(s,dpAdd(today,1),dpAdd(today,400))[0];
+    const all=past.concat(next?[next]:[]).reverse();
+    const f=REC_FQC(s.freq), mem=recMembers(s.latest);
+    const body='<div class="gcal-panel-title">'+esc2(s.title)+'</div><span class="rq-pill" style="color:'+f.c+';background:'+f.bg+'">'+f.label+'</span>'
+      +'<div class="rq-sub">'+esc2(dpDescribe(s.rule))+' · '+esc2(mem)+'</div>'
+      +(all.map(o=>'<button type="button" class="rq-item" onclick="recCell('+i+',\''+o.date+'\',2)"><span class="tt"><b style="font-weight:400">'+esc2(dpLong(o.date))+'</b></span>'+recSt(o.st,600)+'<span class="go">›</span></button>').join('')
+        ||'<div class="rq-none">Nothing yet this year.</div>');
+    recShow({head:'History',body:body});
+  };
+  function recMembers(t){ const list=REC_DATA.list; return (REC_DATA.asg[t.id]||[]).map(e=>nameOf(list,e)||e).join(', ')||'—'; }
+  // one deadline; from=1 a column list, 2 the history - either gets a back arrow to it
+  window.recCell=function(i,ds,from){
     const s=REC_DATA.series[i]; if(!s) return;
     const o=recOcc(s,ds,ds)[0]; if(!o) return;
-    if(o.task&&['overdue','today','await','approve'].indexOf(o.st)>-1){ recClose(); return navTo('tasks/task/'+o.task.id); }
-    const f=REC_FQC(s.freq), list=REC_DATA.list, t=o.task||s.latest;
-    const mem=(REC_DATA.asg[t.id]||[]).map(e=>nameOf(list,e)||e).join(', ')||'—';
-    const row=(ic,txt)=>'<div class="gcal-panel-row"><i class="fa-solid '+ic+'"></i><span>'+txt+'</span></div>';
-    let h='<div class="gcal-panel-title">'+esc2(s.title)+'</div>'
-      +'<span class="rq-pill" style="color:'+f.c+';background:'+f.bg+'">'+f.label+'</span>'
-      +row('fa-rotate',esc2(dpDescribe(s.rule)))
-      +row('fa-calendar',(o.st==='done'?'Was due ':'Due ')+esc2(dpLong(o.date)));
-    if(o.st==='done'){
-      const c=t.completed_at?String(t.completed_at).slice(0,10):null;
-      const late=c&&c>o.date?Math.round((new Date(c)-new Date(o.date))/86400000):0;
-      h+=row('fa-circle-check',c?('Completed '+esc2(dpLong(c))+' · '+(late?'<b style="color:#b91c1c">'+late+' day'+(late===1?'':'s')+' late</b>':'<b style="color:#15803d">on time</b>')):'Completed');
-    } else if(o.st==='held'){
-      h+=row('fa-hourglass-half','Made once the '+esc2(dpShort(s.latest.due_date))+' one is complete');
-    } else {
-      h+=row('fa-circle-info',o.task?'Scheduled \u2014 it shows in your tasks from its day.':'Not made yet \u2014 it is created on its day, once the one before it is complete.');
-    }
-    h+=row('fa-user',esc2(mem))+row('fa-user-pen','By '+esc2(nameOf(list,t.delegator)||t.delegator||'—'));
-    // Only a completed one has a task worth opening from here; one still to come is shown, not opened.
-    const foot=(o.task&&o.st==='done')?'<button class="ac-btn" onclick="recClose();navTo(\'tasks/task/'+o.task.id+'\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> View task</button>':'';
-    recShow(o.st==='done'?'Completed':'Coming up',h,foot,'task');
+    const f=REC_FQC(s.freq), t=o.task||s.latest, st=o.st, list=REC_DATA.list;
+    const row=(k,val,style)=>'<span class="k">'+k+'</span><span'+(style?' style="'+style+'"':'')+'>'+val+'</span>';
+    const status=(st.kind==='ontime'||st.kind==='late')?recStatus(st)+' · finished '+dpLong(st.finished):recStatus(st);
+    const body='<div class="gcal-panel-title">'+esc2(s.title)+'</div><span class="rq-pill" style="color:'+f.c+';background:'+f.bg+'">'+f.label+'</span>'
+      +'<div class="rq-dl">'+row('Repeats',esc2(dpDescribe(s.rule)))+row('Deadline',esc2(dpLong(o.date)))
+      +row('Status',esc2(status),'font-weight:'+(st.kind==='overdue'?800:600)+';color:'+REC_COLOUR(st.kind))
+      +row('Assigned to',esc2(recMembers(t)))+row('By',esc2(nameOf(list,t.delegator)||t.delegator||'—'))+'</div>';
+    // a task still to come is only shown; one that exists and is due or done can be opened
+    const foot=(o.task&&st.kind!=='upcoming'&&st.kind!=='held')?'<button class="ac-btn primary" onclick="recClose();navTo(\'tasks/task/'+o.task.id+'\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> View this task</button>':'';
+    recShow({head:st.kind==='upcoming'||st.kind==='held'?'Coming up':'Task',body:body,foot:foot,back:from?REC_PANEL:null});
   };
-  window.recYear=function(d){ REC_VIEW.fy+=d; recPaint(true); };
-  window.recFilter=function(k){ REC_VIEW.filter=k; recPaint(true); };
+  window.recMenu=function(){ REC_VIEW.menu=!REC_VIEW.menu; recPaint(false); };
+  window.recYear=function(d){ REC_VIEW.fy+=d; REC_VIEW.menu=false; recPaint(true); };
+  window.recFilter=function(k){ REC_VIEW.filter=k; REC_VIEW.menu=false; recPaint(true); };
+  document.addEventListener('click',function(e){
+    if(REC_VIEW&&REC_VIEW.menu&&!(e.target.closest&&e.target.closest('.rq-dd'))){ REC_VIEW.menu=false; if($('rqTable')||document.querySelector('.rq-soon')) recPaint(false); }
+  });
 
   /* ---------- shared row/card renderers ---------- */
   function dueBadge(due,completedAt){
