@@ -11922,10 +11922,10 @@ VIEWS.playbook=function(v,seg){
 };
 
 /* ---------- COMPETITOR ADS — Meta Ad Library watchlist ---------- */
-// Tracks a fixed watchlist of competitors against Meta's public Ad Library, scraped by our own
-// Playwright-based Apify Actor (not the official ads_archive API, which never exposes spend/reach
-// for ordinary commercial ads) via the competitor-ads-sync edge function. Sourced from
-// camp.competitor_watchlist / camp.competitor_ads.
+// Tracks a watchlist of competitors - and, on the Our Brands tab, our own pages - against Meta's
+// public Ad Library, pulled through Proxy by the competitor-sync-test-probe edge function both
+// nightly (cron) and from the Fetch button. Sourced from camp.competitor_watchlist /
+// camp.competitor_ads; is_own_brand decides which tab a page sits on.
 const COMP_PLATFORM_ICON={FACEBOOK:'fa-facebook',INSTAGRAM:'fa-instagram'};
 window._compAdsAll=window._compAdsAll||[];
 window._compSignCache=window._compSignCache||{};
@@ -11945,10 +11945,17 @@ const COMP_RANGES=[
 const COMP_MEDIA=[['all','All media','fa-shapes'],['image','Images','fa-image'],['video','Videos','fa-video'],['carousel','Carousels','fa-images']];
 const COMP_STATUS=[['all','Active & inactive','fa-layer-group'],['active','Active only','fa-circle-play'],['inactive','Inactive only','fa-circle-stop']];
 let COMP_F={wl:'all',range:'last_30',from:'',to:'',status:'all',media:'all',q:''};
-/* Ads are shown only after a fetch in THIS visit. Opening the page shows the competitor list and
-   nothing else, so what is on screen is always the answer to a fetch you just asked for, never a
-   pile of whatever happened to be stored from a different date range weeks ago. */
-window._compFetched=window._compFetched||{};   // watchlist id (or 'all') -> true once fetched here
+/* Two tabs over the one watchlist: other developers, and our own pages (is_own_brand). Everything
+   below - the picker, the table, the grid, the fetch - only ever sees the rows of the open tab, so
+   our ads never sit among a competitor's and a fetch on one tab never spends on the other. */
+let COMP_TAB='competitors';
+const COMP_TABS=[['competitors','Competitors','fa-chess-knight'],['brands','Our Brands','fa-building-flag']];
+function compIsBrandTab(){ return COMP_TAB==='brands'; }
+function compWord(n){ return compIsBrandTab()?(n===1?'brand':'brands'):(n===1?'competitor':'competitors'); }
+function compTabWl(){ return (window._compWl||[]).filter(function(w){ return !!w.is_own_brand===compIsBrandTab(); }); }
+/* Stored ads show straight away. They used to wait for a fetch in this visit, because the old
+   scraper fetched exactly the filtered slice; the Proxy pull now runs every night for every page,
+   so what is stored is current and the filters simply narrow it. */
 function compRangeDates(){
   const d=new Date(); d.setHours(12,0,0,0);
   const iso=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
@@ -11973,7 +11980,9 @@ function compFiltered(){
   const all=window._compAdsAll||[];
   const win=compRangeDates();
   const q=(COMP_F.q||'').trim().toLowerCase();
+  const onTab={}; compTabWl().forEach(function(w){ onTab[w.id]=true; });
   return all.filter(function(a){
+    if(!onTab[a.watchlist_id]) return false;
     if(COMP_F.wl!=='all' && String(a.watchlist_id)!==String(COMP_F.wl)) return false;
     const running=!a.ad_delivery_stop_time;
     if(COMP_F.status==='active' && !running) return false;
@@ -11997,12 +12006,11 @@ function compFiltered(){
     return true;
   }).sort(function(x,y){ return String(y.ad_delivery_start_time||'').localeCompare(String(x.ad_delivery_start_time||'')); });
 }
-// Picking a competitor from the table fetches their ads there and then, rather than showing
-// whatever was left over from a previous range.
+// Picking a row narrows the board to that page. Its stored ads are current (pulled nightly), so
+// nothing is fetched here - Fetch from Meta is still there for a pull right now.
 window.compShowOnly=function(id){
   COMP_F.wl=String(id);
   compPaint();
-  compSyncFiltered();
 };
 window.compSetFilter=function(k,val){
   COMP_F[k]=val;
@@ -12025,12 +12033,21 @@ window.compSetDate=function(which,val){
 window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) compPaintGrid(); usageQueueDebounced('competitors.overview.search_ad_text_headline_or_page', val); };
 
 VIEWS.competitors=async function(v,seg){
-  setCrumb(['Growth & Strategy','Competitor Ads']);
+  const tab=(seg&&seg[0]==='brands')?'brands':'competitors';
+  if(tab!==COMP_TAB){ COMP_TAB=tab; COMP_F.wl='all'; }
+  setCrumb(['Growth & Strategy','Competitor Ads',compIsBrandTab()?'Our Brands':'Competitors']);
   v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Ads')
-    +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:-8px 0 16px">'
-      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">Public ad creative from Meta\'s Ad Library — the creative itself, when it started and where it ran. Meta never publishes spend or reach for ordinary commercial ads.</p>'
+    +'<div class="tabs" style="margin-top:-6px">'+COMP_TABS.map(function(t){
+        return '<div class="tab '+(COMP_TAB===t[0]?'active':'')+'" onclick="navTo(\'competitors'+(t[0]==='brands'?'/brands':'')+'\')"><i class="fa-solid '+t[2]+'"></i> '+t[1]+'</div>';
+      }).join('')+'</div>'
+    +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 16px">'
+      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">'
+        +(compIsBrandTab()
+          ?'Our own pages as Meta\'s Ad Library shows them to the public — what is running, since when, and where.'
+          :'Public ad creative from Meta\'s Ad Library — the creative itself, when it started and where it ran.')
+        +' Meta never publishes spend or reach for ordinary commercial ads. Pulled through Proxy every night.</p>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
-        +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add Competitor</button>'
+        +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add '+(compIsBrandTab()?'Brand':'Competitor')+'</button>'
         +'<button class="btn btn-primary" id="compSyncBtn" onclick="compSyncFiltered()"><i class="fa-solid fa-rotate"></i> Fetch from Meta</button>'
       +'</div>'
     +'</div>'
@@ -12045,7 +12062,7 @@ function compSelHtml(id,list,cur,onchange){
 }
 function compToolbarHtml(wl){
   const win=compRangeDates();
-  const opts=[['all','All competitors ('+wl.length+')']].concat(wl.map(function(w){
+  const opts=[['all','All '+compWord(2)+' ('+wl.length+')']].concat(wl.map(function(w){
     const n=(window._compAdsAll||[]).filter(function(a){return a.watchlist_id===w.id;}).length;
     return [String(w.id), w.name+' ('+n+')'];
   }));
@@ -12081,14 +12098,16 @@ function compToolbarHtml(wl){
     // Ads stored before videos carried a poster still have none; this re-downloads their media.
     +'<button class="btn" id="compPosterBtn" onclick="compRefreshMedia()" title="Re-download media for ads already stored, saving a small preview image for each video so tiles load quickly"><i class="fa-solid fa-image"></i> Rebuild previews</button>'
   +'</div>'
-  // Says exactly what pressing Fetch will ask Meta for, so nobody is surprised by what arrives.
-  +'<div class="comp-note"><i class="fa-solid fa-circle-info"></i><span>Fetch from Meta will ask the Ad Library for '
-    +'<b>'+esc(cur?cur.name:'all '+wl.length+' competitors')+'</b>, '
-    +'<b>'+esc(win?(win.from+' to '+win.to):'any start date')+'</b>, '
-    +'<b>'+esc((COMP_STATUS.filter(function(s){return s[0]===COMP_F.status;})[0]||[])[1]||'')+'</b>'
-    +(COMP_F.media==='carousel'?', all media types (carousel is filtered here, Meta has no carousel filter)'
-       :(COMP_F.media==='all'?', all media types':', '+esc((COMP_MEDIA.filter(function(s){return s[0]===COMP_F.media;})[0]||[])[1]||'').toLowerCase()))
-    +'.'+(cur&&!cur.page_id?' <b>'+esc(cur.name)+'</b> has no Page ID yet, so it searches by keyword — set one for their ads only.':'')+'</span></div>';
+  // Says exactly what pressing Fetch will do, so nobody is surprised by what arrives. Proxy pulls
+  // each page's latest ads whatever the filters say; the filters then narrow what is shown here.
+  +'<div class="comp-note"><i class="fa-solid fa-circle-info"></i><span>Fetch from Meta pulls the latest ads for '
+    +'<b>'+esc(cur?cur.name:'all '+wl.length+' '+compWord(2))+'</b> through Proxy, the same pull that runs every night'
+    +(function(){
+        const ts=(cur?[cur]:wl).map(function(w){return w.last_sync_at||'';}).filter(Boolean).sort();
+        return ts.length?' (last pulled '+esc(fmtDate(ts[ts.length-1]))+')':'';
+      })()
+    +'. The date, status and media filters narrow what is shown.'
+    +(cur&&!cur.page_id?' <b>'+esc(cur.name)+'</b> has no Page ID yet, so Proxy cannot pull it — paste their Ad Library link in Edit.':'')+'</span></div>';
 }
 // The Ad Library address for a competitor, rebuilt from its Page ID rather than stored, so the
 // link can never drift out of step with what the sync actually asks Meta for.
@@ -12123,10 +12142,11 @@ function compWlTableHtml(wl){
             +'<div style="font-size:10.5px;color:var(--slate);margin-top:3px">"'+esc(w.search_term||w.name)+'"</div>'))
       +'</td>'
       +'<td style="text-align:center">'+n+'</td>'
+      +'<td style="white-space:nowrap;font-size:12px;color:var(--slate)">'+(w.last_sync_at?esc(fmtDate(w.last_sync_at)):'never')+'</td>'
       +'<td>'+(w.page_url?('<a href="'+esc(w.page_url)+'" target="_blank" rel="noopener" style="font-size:12px">'+esc(String(w.page_url).replace(/^https?:\/\/(www\.)?facebook\.com\//,'').replace(/\/$/,''))+'</a>'):'<span style="color:var(--slate);font-size:12px">—</span>')+'</td>'
       +'<td style="white-space:nowrap">'
         +'<a class="btn btn-sm" href="'+esc(compAdLibUrl(w))+'" target="_blank" rel="noopener" title="Open in Meta Ad Library"><i class="fa-solid fa-arrow-up-right-from-square"></i></a> '
-        +'<button class="btn btn-sm" onclick="compShowOnly('+w.id+')" title="Show only this competitor — fetches their ads for the current filters"><i class="fa-solid fa-filter"></i></button> '
+        +'<button class="btn btn-sm" onclick="compShowOnly('+w.id+')" title="Show only this page\'s ads"><i class="fa-solid fa-filter"></i></button> '
         +'<button class="btn btn-sm" onclick="compEditModal('+w.id+')" title="Edit"><i class="fa-solid fa-pen"></i></button> '
         +'<button class="btn btn-sm btn-danger" onclick="compRemove('+w.id+')" title="Remove"><i class="fa-solid fa-trash"></i></button>'
       +'</td>'
@@ -12135,13 +12155,13 @@ function compWlTableHtml(wl){
   const keyword=wl.filter(function(w){return !String(w.page_id||'').trim();}).length;
   return '<details class="card" id="compWlPanel" style="margin-bottom:14px" '+(keyword?'open':'')+'>'
     +'<summary style="cursor:pointer;padding:13px 15px;font-weight:700;font-size:13.5px;list-style:none;display:flex;align-items:center;gap:9px">'
-      +'<i class="fa-solid fa-list-check" style="color:#0369a1"></i> Competitors <span class="tag t-gray">'+wl.length+'</span>'
+      +'<i class="fa-solid fa-list-check" style="color:#0369a1"></i> '+(compIsBrandTab()?'Our Brands':'Competitors')+' <span class="tag t-gray">'+wl.length+'</span>'
       +(keyword?'<span class="tag t-amber" title="These still search by keyword">'+keyword+' without a Page ID</span>':'<span class="tag t-green">all pinned to a Page ID</span>')
       +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate);font-weight:500">click to open / close</span>'
     +'</summary>'
     +'<div style="overflow-x:auto;border-top:1px solid var(--line)">'
       +'<table class="tbl" style="width:100%;font-size:12.5px">'
-        +'<thead><tr><th>Competitor</th><th>Targeting</th><th style="text-align:center">Ads</th><th>Facebook page</th><th>Actions</th></tr></thead>'
+        +'<thead><tr><th>'+(compIsBrandTab()?'Brand':'Competitor')+'</th><th>Targeting</th><th style="text-align:center">Ads</th><th>Last pulled</th><th>Facebook page</th><th>Actions</th></tr></thead>'
         +'<tbody>'+rows+'</tbody>'
       +'</table>'
     +'</div>'
@@ -12185,37 +12205,34 @@ function compPaintGrid(){
   compHydrateThumbs();
 }
 function compPaint(){
-  const tb=$('compToolbar'); if(tb) tb.innerHTML=compToolbarHtml(window._compWl||[]);
+  const wl=compTabWl();
+  const tb=$('compToolbar'); if(tb) tb.innerHTML=compToolbarHtml(wl);
   const host=$('compBody'); if(!host) return;
-  const wl=window._compWl||[];
-  if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
+  if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No '+compWord(2)+' added yet.</div></div>'; return; }
   const cur=(COMP_F.wl!=='all')?wl.filter(function(w){return String(w.id)===String(COMP_F.wl);})[0]:null;
-  // Ads appear only once a fetch has been made for this selection during this visit.
-  const fetched=!!window._compFetched[String(COMP_F.wl)];
   host.innerHTML=(cur?compWlCardHtml(cur):compWlTableHtml(wl))
-    +(fetched
-      ?('<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
-          +'<div id="compCount" style="font-size:12.5px;color:var(--slate);font-weight:600"></div>'
-        +'</div>'
-        +'<div class="comp-grid" id="compGrid"></div>'
-        +'<div class="empty" id="compEmpty" style="padding:36px;display:none"><i class="fa-regular fa-folder-open"></i>'
-          +'<div>Meta returned nothing for these filters.</div>'
-          +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px">Try a wider date range, or Active &amp; inactive.</div>'
-        +'</div>')
-      :('<div class="empty" style="padding:40px"><i class="fa-solid fa-cloud-arrow-down" style="color:#0369a1"></i>'
-          +'<div style="font-weight:600">'+(cur?esc(cur.name)+' — not fetched yet':'Choose a competitor, or fetch them all')+'</div>'
-          +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px;max-width:430px;margin-left:auto;margin-right:auto;line-height:1.55">'
-            +'Set the date range, status and media above, then press <b>Fetch from Meta</b> — or use the filter button beside a competitor to fetch just that one. '
-            +'Nothing is shown until it has actually been fetched, so what you see always matches the filters you asked for.</div>'
-        +'</div>'));
-  if(fetched) compPaintGrid();
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
+      +'<div id="compCount" style="font-size:12.5px;color:var(--slate);font-weight:600"></div>'
+    +'</div>'
+    +'<div class="comp-grid" id="compGrid"></div>'
+    +'<div class="empty" id="compEmpty" style="padding:36px;display:none"><i class="fa-regular fa-folder-open"></i>'
+      +'<div>No ads stored for these filters.</div>'
+      +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px">Try a wider date range or Active &amp; inactive, or press <b>Fetch from Meta</b> to pull the latest now.</div>'
+    +'</div>';
+  compPaintGrid();
 }
 async function compRender(){
   const host=$('compBody'); if(!host)return;
   let wl=[],ads=[];
   try{ const {data}=await sb.schema('camp').from('competitor_watchlist').select('*').order('name',{ascending:true}); wl=data||[]; }catch(e){}
-  try{ const {data}=await sb.schema('camp').from('competitor_ads').select('*').order('ad_delivery_start_time',{ascending:false}).limit(1000); ads=data||[]; }catch(e){}
-  window._compWl=wl; window._compAdsAll=ads;
+  window._compWl=wl;
+  // Only the open tab's ads, so a handful of our own never get pushed past the row cap by the
+  // hundreds a busy competitor runs.
+  const ids=compTabWl().map(function(w){return w.id;});
+  if(ids.length){
+    try{ const {data}=await sb.schema('camp').from('competitor_ads').select('*').in('watchlist_id',ids).order('ad_delivery_start_time',{ascending:false}).limit(2000); ads=data||[]; }catch(e){}
+  }
+  window._compAdsAll=ads;
   compPaint();
 }
 function compFirstMedia(a){
@@ -12352,7 +12369,7 @@ function compFormHtml(w){
   +'</div>';
 }
 window.compAddModal=function(){
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Competitor</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add '+(compIsBrandTab()?'Brand':'Competitor')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +compFormHtml({})
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="compSave()"><i class="fa-solid fa-check"></i> Add</button></div>','md');
 };
@@ -12376,6 +12393,7 @@ window.compSave=async function(id){
   if(!name){toast('Enter a name','err');try{usageQueue(fk,'error');}catch(_e){}return;}
   if(raw&&!pageId){toast('That doesn\'t look like an Ad Library link or Page ID — leave it blank to search by keyword','warn');try{usageQueue(fk,'error');}catch(_e){}return;}
   const row={name:name,search_term:term,page_id:pageId||null};
+  if(!id) row.is_own_brand=compIsBrandTab();   // added on Our Brands -> it is ours
   const {error}=id
     ? await sb.schema('camp').from('competitor_watchlist').update(row).eq('id',id)
     : await sb.schema('camp').from('competitor_watchlist').insert(row);
@@ -12406,54 +12424,59 @@ window.compRemove=async function(id){
 // featureKey is logged directly here, at the point the fetch actually succeeds or fails, rather
 // than through USAGE_MAP - a click here can genuinely fail (network error, Meta error, wrong-page
 // rows skipped), so the generic wrapper would have counted a failed sync as a real one.
-async function compRunSync(payload,btn,busyLabel,idleLabel,featureKey){
-  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'+(busyLabel?' '+busyLabel:'');}
+/* THE BUTTON PULLS THROUGH PROXY, THE SAME ROUTE AS THE NIGHTLY CRON (competitor-ads-proxy-daily
+   -> competitor-sync-test-probe). It used to call competitor-ads-sync, the self-hosted Playwright
+   scraper, so the screen and the nightly job filled the same tables two different ways.
+   One call cannot copy every creative for every page (Supabase's resource ceiling), so the page
+   walks the list four pages at a time with auto:false and says how far it has got. */
+async function compRunSync(ids,btn,busyLabel,idleLabel,featureKey){
+  const setBtn=function(t){ if(btn) btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> '+t; };
+  if(btn) btn.disabled=true;
+  setBtn(busyLabel||'');
+  let found=0, written=0, failed=0, skip=0, total=ids.length;
+  const errors=[];
   try{
     const {data:{session}}=await sb.auth.getSession();
     const token=session&&session.access_token;
-    const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-ads-sync',{method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify(payload)});
-    const jr=await res.json().catch(function(){return {};});
-    if(jr.error){toast(jr.error,'err'); try{usageQueue(featureKey,'error');}catch(_e){}}
-    else if(jr.skipped){toast(jr.message||'Sync skipped','err'); try{usageQueue(featureKey,'error');}catch(_e){}}
+    for(let guard=0; guard<30 && skip!=null; guard++){
+      const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-sync-test-probe?action=sync',{method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+        body:JSON.stringify({write:true, auto:false, skip:skip, take:4, watchlist_ids:ids})});
+      const jr=await res.json().catch(function(){return {};});
+      if(!res.ok||jr.error){ errors.push(jr.error||('HTTP '+res.status)); break; }
+      found+=jr.found||0; written+=jr.written||0; failed+=jr.media_failed||0;
+      (jr.errors||[]).forEach(function(e){ if(errors.length<3) errors.push(e); });
+      if(jr.of_watchlist) total=jr.of_watchlist;
+      skip=jr.next_skip;
+      if(skip!=null) setBtn((busyLabel||'')+' '+Math.min(skip,total)+'/'+total);
+    }
+    if(errors.length&&!written){ toast('Fetch failed — '+errors[0],'err'); try{usageQueue(featureKey,'error');}catch(_e){} }
     else {
-      // Mark this selection as fetched so the grid is allowed to appear.
-      window._compFetched[String(payload.watchlist_id!=null?payload.watchlist_id:'all')]=true;
-      if(payload.watchlist_id==null) window._compFetched['all']=true;
-      const bits=[(jr.newAds||0)+' new', (jr.synced||0)+' seen'];
-      if(jr.replaced) bits.push(jr.replaced+' replaced');
-      if(jr.skippedWrongPage) bits.push(jr.skippedWrongPage+' from other pages ignored');
-      toast('Fetched — '+bits.join(' · '),'ok');
+      const bits=[found+' found', written+' saved'];
+      if(failed) bits.push(failed+' images not copied');
+      if(errors.length) bits.push(errors.length+' error(s)');
+      toast('Fetched — '+bits.join(' · '),errors.length?'warn':'ok');
       try{usageQueue(featureKey,'update');}catch(_e){}
     }
   }catch(e){toast('Fetch failed','err'); try{usageQueue(featureKey,'error');}catch(_e){}}
-  if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-rotate"></i> '+(idleLabel||'Sync');}
+  if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-'+(featureKey.indexOf('rebuild')>-1?'image':'rotate')+'"></i> '+(idleLabel||'Sync');}
   await compRender();
 }
-window.compSync=function(id,btn){ compRunSync({watchlist_id:id},btn,'','Sync'); };
-// Fetches exactly the slice the filter bar is showing. Carousel is a local distinction only -
-// Meta has no carousel filter - so it asks for all media and the grid narrows it afterwards.
+// The pages a fetch covers: the one picked, or every page on the open tab.
+function compSyncIds(){
+  if(COMP_F.wl!=='all') return [Number(COMP_F.wl)];
+  return compTabWl().filter(function(w){ return w.active && String(w.page_id||'').trim(); }).map(function(w){ return w.id; });
+}
 window.compSyncFiltered=function(){
-  const win=compRangeDates();
-  if(COMP_F.range==='custom'&&!win){ toast('Pick both a From and a To date first','warn'); try{usageQueue('competitors.overview.fetch_ads_from_meta_ad_library','error');}catch(_e){} return; }
-  const payload={
-    active_status:COMP_F.status,
-    media_type:(COMP_F.media==='carousel'?'all':COMP_F.media),
-    date_from:win?win.from:undefined,
-    date_to:win?win.to:undefined
-  };
-  if(COMP_F.wl!=='all') payload.watchlist_id=Number(COMP_F.wl);
-  compRunSync(payload,$('compSyncBtn'),'Fetching…','Fetch from Meta','competitors.overview.fetch_ads_from_meta_ad_library');
+  const ids=compSyncIds();
+  if(!ids.length){ toast('Nothing to fetch — no '+compWord(2)+' here have a Page ID and auto-sync on','warn'); return; }
+  compRunSync(ids,$('compSyncBtn'),'Fetching…','Fetch from Meta','competitors.overview.fetch_ads_from_meta_ad_library');
 };
-// Same fetch, but it also re-downloads media for ads already held that have no preview image yet.
+// Proxy re-copies every creative on each pull, so rebuilding previews is the same pull.
 window.compRefreshMedia=function(){
-  const win=compRangeDates();
-  const payload={refresh_media:true, active_status:COMP_F.status,
-    media_type:(COMP_F.media==='carousel'?'all':COMP_F.media),
-    date_from:win?win.from:undefined, date_to:win?win.to:undefined};
-  if(COMP_F.wl!=='all') payload.watchlist_id=Number(COMP_F.wl);
-  compRunSync(payload,$('compPosterBtn'),'Rebuilding…','Rebuild previews','competitors.overview.rebuild_ad_media_previews');
+  const ids=compSyncIds();
+  if(!ids.length){ toast('Nothing to rebuild — no '+compWord(2)+' here have a Page ID','warn'); return; }
+  compRunSync(ids,$('compPosterBtn'),'Rebuilding…','Rebuild previews','competitors.overview.rebuild_ad_media_previews');
 };
 window.compOpenDetail=function(id){
   const a=window._compAdsAll.find(function(x){return String(x.id)===String(id);});
