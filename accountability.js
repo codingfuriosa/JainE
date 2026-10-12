@@ -958,29 +958,91 @@
   }
   async function loadAssignees(ids){ if(!ids.length)return {}; try{const {data}=await ACC().from('ptask_assignees').select('*').in('task_id',ids);const m={};(data||[]).forEach(a=>{(m[a.task_id]=m[a.task_id]||[]).push(a.email);});return m;}catch(e){return {};} }
   async function loadProjectsMap(){ try{const {data}=await ACC().from('projects').select('id,name');const m={};(data||[]).forEach(p=>m[p.id]=p.name);return m;}catch(e){return {};} }
-  async function loadAll(){
-    const my=me();
-    /* PostgREST caps one response at 1000 rows, silently. Both of these had passed it: 892 tasks
-       and 1008 assignee rows. The assignee list is the damaging one, because the filter below
-       DROPS any task whose assignee rows did not arrive - so the newest eight assignments were
-       invisible to everybody, including the person who created them, and every new task pushed
-       another one out. A task that had plainly been created simply was not in the list.
+    /* ONLY THE TASKS THAT COULD SURVIVE THE FILTER ARE FETCHED.
+
+       This read used to pull EVERY task and EVERY assignee row in the system and then throw away
+       what was not yours, in the browser. Measured on the live database: 2,944 tasks and 3,089
+       assignee rows, 2,493KB of JSON, to show about 170 tasks needing 118KB. Ninety-five per cent
+       of it was downloaded, parsed and discarded on every visit to the page - more data than
+       nexus-core.js itself.
+
+       THE FILTER BELOW IS UNTOUCHED, and that is what makes this safe rather than merely faster. It
+       keeps a task when you are the delegator, OR you are one of its assignees, OR you are standing
+       in on its workflow step - and only when the task has at least one assignee. So the complete
+       set of tasks that can possibly survive it is:
+
+           delegator = me   UNION   tasks naming me as an assignee   UNION   wf stand-in tasks
+
+       Every one of those three is known before the task list is read: the first is a column, the
+       second is one small query against ptask_assignees, the third is already in WF_ACT_TASKS from
+       wfActLoad() above. Fetching exactly that union and then running the ORIGINAL filter over it
+       cannot change the answer - anything left out would have been dropped by the filter anyway.
+       The assignee rows for those tasks are then fetched in full, not just mine, because the filter
+       asks whether a task has any assignee at all and the list shows who they are.
+
+       IF ANYTHING ABOUT THE NARROW PATH IS UNSAFE IT DOES NOT RUN. An email containing a character
+       PostgREST reads as syntax, an id list long enough to make an unreasonable URL, or any error
+       from the two preparatory queries, and this falls through to loadAllEverything() - the exact
+       code that ran before. The worst case is today's speed, never a wrong list. */
+    /* THE OLD PATH, KEPT WHOLE AS THE FALLBACK.
+       PostgREST caps one response at 1000 rows, silently. Both of these had passed it: 892 tasks
+       and 1008 assignee rows. The assignee list is the damaging one, because the filter DROPS any
+       task whose assignee rows did not arrive - so the newest eight assignments were invisible to
+       everybody, including the person who created them, and every new task pushed another one out.
+       A task that had plainly been created simply was not in the list. That is why both reads are
+       paged, here and on the narrow path below.
        Ordered explicitly as well: without a sort, pages can overlap or skip. order_index is 0 on
        every row today, so id is what actually makes the paging stable. */
-    await wfActLoad();   // before the filter below, which asks what I may act on
-    const [tasksRaw,asgRaw,pR]=await Promise.all([
-      wfFetchPaged(function(){ return ACC().from('ptasks').select('*')
-        .order('order_index',{ascending:true}).order('id',{ascending:true}); }),
-      wfFetchPaged(function(){ return ACC().from('ptask_assignees').select('*')
-        .order('id',{ascending:true}); }),
-      ACC().from('projects').select('id,name')
-    ]);
-    let tasks=tasksRaw||[]; const pm={}; (pR.data||[]).forEach(x=>pm[x.id]=x.name);
-    const asg={}; (asgRaw||[]).forEach(a=>{(asg[a.task_id]=asg[a.task_id]||[]).push(a.email);});
-    tasks=tasks.filter(t=>(eq(t.delegator,my)||(asg[t.id]||[]).some(e=>eq(e,my))||wfActTask(t)) && (asg[t.id]||[]).length>0);
-    tasks.forEach(t=>t._projName=t.project_id?pm[t.project_id]:'');
-    return {tasks,asg,pm};
-  }
+    async function loadAllEverything(my){
+      const [tasksRaw,asgRaw,pR]=await Promise.all([
+        wfFetchPaged(function(){ return ACC().from('ptasks').select('*')
+          .order('order_index',{ascending:true}).order('id',{ascending:true}); }),
+        wfFetchPaged(function(){ return ACC().from('ptask_assignees').select('*')
+          .order('id',{ascending:true}); }),
+        ACC().from('projects').select('id,name')
+      ]);
+      return {tasksRaw:tasksRaw||[], asgRaw:asgRaw||[], pR:pR};
+    }
+    async function loadAllNarrow(my){
+      // An address PostgREST would mis-read as syntax: do not build a filter out of it.
+      if(/[,()]/.test(my)) return null;
+      const [mineRes,pR]=await Promise.all([
+        ACC().from('ptask_assignees').select('task_id').ilike('email',my),
+        ACC().from('projects').select('id,name')
+      ]);
+      if(!mineRes || mineRes.error || !mineRes.data) return null;
+      const ids={};
+      mineRes.data.forEach(function(r){ if(r && r.task_id!=null) ids[r.task_id]=true; });
+      Object.keys(WF_ACT_TASKS||{}).forEach(function(k){ if(k!=='') ids[k]=true; });
+      const idList=Object.keys(ids);
+      if(idList.length>900) return null;              // too many for one sane URL - take the old road
+      const or='delegator.ilike.'+my+(idList.length?(',id.in.('+idList.join(',')+')'):'');
+      const tasksRaw=await wfFetchPaged(function(){ return ACC().from('ptasks').select('*')
+        .or(or).order('order_index',{ascending:true}).order('id',{ascending:true}); });
+      if(!tasksRaw) return null;
+      const taskIds=tasksRaw.map(function(t){ return t.id; });
+      // every assignee of those tasks, not only mine - the filter counts them and the list shows them
+      let asgRaw=[];
+      if(taskIds.length){
+        asgRaw=await wfFetchPaged(function(){ return ACC().from('ptask_assignees').select('*')
+          .in('task_id',taskIds).order('id',{ascending:true}); });
+        if(!asgRaw) return null;
+      }
+      return {tasksRaw:tasksRaw, asgRaw:asgRaw, pR:pR};
+    }
+    async function loadAll(){
+      const my=me();
+      await wfActLoad();   // before the filter below, which asks what I may act on
+      let got=null;
+      try{ got=await loadAllNarrow(my); }catch(_e){ got=null; }
+      if(!got) got=await loadAllEverything(my);
+      const tasksRaw=got.tasksRaw, asgRaw=got.asgRaw, pR=got.pR;
+      let tasks=tasksRaw||[]; const pm={}; ((pR&&pR.data)||[]).forEach(x=>pm[x.id]=x.name);
+      const asg={}; (asgRaw||[]).forEach(a=>{(asg[a.task_id]=asg[a.task_id]||[]).push(a.email);});
+      tasks=tasks.filter(t=>(eq(t.delegator,my)||(asg[t.id]||[]).some(e=>eq(e,my))||wfActTask(t)) && (asg[t.id]||[]).length>0);
+      tasks.forEach(t=>t._projName=t.project_id?pm[t.project_id]:'');
+      return {tasks,asg,pm};
+    }
   const isOwner = t => eq(t.delegator,me());
   /* A step I am standing in on counts as mine for WHERE IT IS LISTED and WHETHER I GET BUTTONS,
      which is the whole point - it has to reach me to be actionable. It deliberately does NOT make
