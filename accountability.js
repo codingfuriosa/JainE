@@ -2740,7 +2740,7 @@
     if(!steps.length) steps=[{},{}]; // start with two blank step rows (both mandatory)
     const stepsHtml=steps.map(function(s,i){ return wfStepRowHtml(i+1,s); }).join('');
     v.innerHTML='<div class="wf-page">'
-      +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+(id?'Edit workflow':'New workflow')+'</h1></div>'
+      +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/workflow\')"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+(id?'Edit workflow':'New workflow')+'</h1></div>'
       +'<div class="wf-card">'
       +'<div class="wf-form" data-id="'+(id||'')+'" data-trigger-method="'+esc2(flow.trigger_method||'')+'">'
         // Section 1 — what the workflow is. Paired fields sit side by side on a wide screen.
@@ -4263,7 +4263,7 @@
     v.innerHTML='<div class="wf-page">'
       /* An observer sees a page with no buttons on it, which reads as something being broken rather
          than as something being deliberate. Say so once, plainly, next to the title. */
-      +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+esc2(flow.name||'Workflow')+'</h1>'
+      +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/workflow\')"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+esc2(flow.name||'Workflow')+'</h1>'
       +((wfIsCaseViewer(flow)&&!canManage&&!canEvent)
         ? '<span class="wf-pill" style="background:#eef2ff;color:#3730a3;margin-left:8px" title="You can see these records but not change them. Anything that needs action stays with the person the '+esc2(N.lc)+' is assigned to."><i class="fa-solid fa-eye"></i> View only</span>'
         : '')
