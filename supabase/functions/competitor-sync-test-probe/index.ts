@@ -7,6 +7,10 @@
 // (competitor-ads-proxy-daily) and the Fetch from Meta button on the screen both call it, so the
 // screen and the nightly job always pull the same way. competitor-ads-sync, the self-hosted
 // Playwright scraper the button used to call, is no longer reached from the page.
+//
+// It pulls from ScrapeCreators when the SCRAPECREATORS_API_KEY secret is set, and from Proxy
+// otherwise. Proxy's Free plan (20 credits a day) could not cover the 28-page watchlist; whichever
+// pages the credits ran out on simply showed nothing.
 
 import { AwsClient } from "https://esm.sh/aws4fetch@1.0.20";
 
@@ -200,7 +204,7 @@ function readImpressions(a: any) {
    was stored - the reason is counted in the run's report rather than thrown away, because a job
    that writes nothing and still calls itself "succeeded" is how both of these faults survived for
    weeks. */
-async function copyMedia(url: string, wlId: number, adId: string) {
+async function copyMedia(url: string, wlId: number, adId: string, slot = "0") {
   const c = s3();
   if (!c) return { path: null, mediaType: null, why: "no S3 credentials" };
   try {
@@ -216,7 +220,7 @@ async function copyMedia(url: string, wlId: number, adId: string) {
       return { path: null, mediaType: null,
                why: "not an image or video (" + bytes.byteLength + " bytes, starts " + head + ")" };
     }
-    const key = "portal/competitors/" + wlId + "/" + adId + "_0." + kind.ext;
+    const key = "portal/competitors/" + wlId + "/" + adId + "_" + slot + "." + kind.ext;
     const dest = "https://" + c.bucket + ".s3." + c.region + ".amazonaws.com/"
       + key.split("/").map(encodeURIComponent).join("/");
     const put = await c.aws.fetch(dest, { method: "PUT", body: bytes,
@@ -224,6 +228,139 @@ async function copyMedia(url: string, wlId: number, adId: string) {
     if (!put.ok) return { path: null, mediaType: null, why: "S3 refused the upload (" + put.status + ")" };
     return { path: "s3:" + key, mediaType: kind.mime.startsWith("video/") ? "video" : "image", why: null };
   } catch (e) { return { path: null, mediaType: null, why: String((e as Error)?.message || e) }; }
+}
+
+/* ONE SHAPE FOR EVERY SOURCE. Each provider's reply is turned into rows the competitor_ads table
+   already holds plus a list of media to copy, so the writer below never needs to know which
+   service answered. */
+type NormMedia = { url: string; poster?: string | null };
+type NormAd = { id: string; row: Record<string, unknown>; media: NormMedia[]; raw: any };
+
+async function pool<T>(items: T[], n: number, fn: (x: T) => Promise<void>) {
+  let i = 0;
+  const run = async () => { while (i < items.length) { const x = items[i++]; await fn(x); } };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, run));
+}
+const uniq = (xs: unknown[]) => Array.from(new Set(xs.filter((t) => typeof t === "string" && t.trim()) as string[]));
+
+async function pullProxy(ids: string[], country: string, perPage: number, rep: any) {
+  const out = new Map<string, NormAd[]>();
+  const token = await accessToken();
+  const init = await mcp(token, "initialize", { protocolVersion: "2024-11-05",
+    capabilities: {}, clientInfo: { name: "jaine", version: "1" } });
+  await mcp(token, "notifications/initialized", {}, init.session, true);
+  const call = await mcp(token, "tools/call", { name: "get_meta_ads", arguments: {
+    platform_ids: ids, country, limit: perPage,
+    context: "Collect competitor property ads for the Jain Group competitor board." } },
+    init.session);
+  if (call.payload?.error) { rep.errors.push(String(call.payload.error.message || "error")); return out; }
+  const u = unwrap(call.payload?.result);
+  if (!u.data) { rep.errors.push("unreadable reply: " + call.text.slice(0, 140)); return out; }
+  /* A REFUSAL IS NOT AN EMPTY RESULT. When the plan's daily credits run out Proxy answers with a
+     message and no ads at all, and this used to read that as "found 0, no errors" - pages that
+     run 20 ads showed none and the run still looked clean. No ads key means Proxy did not answer
+     the question, so its words are passed on as the error. */
+  if (!u.data.ads) {
+    rep.errors.push("Proxy returned no ads list: " + String(u.data.error || u.data.message || call.text).slice(0, 200));
+    return out;
+  }
+  const media = u.media || {};
+  for (const pageId of Object.keys(u.data.ads)) {
+    const list = Array.isArray(u.data.ads[pageId]) ? u.data.ads[pageId] : [];
+    out.set(String(pageId), list.filter((a: any) => String(a?.ad_id || "").trim()).map((a: any) => {
+      const id = String(a.ad_id).trim();
+      const row: any = { page_name: a?.page_name || a?.advertiser_name || null,
+        ad_creative_bodies: a?.body ? [String(a.body)] : null,
+        ad_creative_link_titles: a?.headline ? [String(a.headline)] : null,
+        headline: a?.headline || null, description: a?.link_description || null,
+        ad_snapshot_url: "https://www.facebook.com/ads/library/?id=" + id,
+        ad_delivery_start_time: a?.start_date || null,
+        ad_delivery_stop_time: a?.is_active ? null : (a?.end_date || null),
+        publisher_platforms: a?.advertiser_platform ? [String(a.advertiser_platform)] : null,
+        cta_text: a?.cta_text || null, redirect_url: a?.link_url || null,
+        display_format: a?.media_type || null };
+      const impr = readImpressions(a);
+      if (impr.text !== null) row.impressions_text = impr.text;
+      if (impr.low !== null) row.low_impression = impr.low;
+      if (impr.activeTime !== null) row.total_active_time = impr.activeTime;
+      return { id, row, media: media[id] ? [{ url: String(media[id]) }] : [], raw: a };
+    }));
+  }
+  return out;
+}
+
+/* SCRAPECREATORS: one call per page, 1 credit each, answering with the Ad Library's own record -
+   copy, cards, dates, platforms and fresh media links. Only the first page of results (about 20,
+   newest first) is asked for: run nightly that keeps up with everything new, and each further
+   page would cost another credit. The key is a Supabase secret, never in the repo or the page. */
+const SC_URL = "https://api.scrapecreators.com/v1/facebook/adLibrary/company/ads";
+const scIso = (s?: string | null, n?: number | null) =>
+  (s ? String(s) : (n ? new Date(Number(n) * 1000).toISOString() : null));
+
+function scNormalize(a: any): NormAd | null {
+  const id = String(a?.ad_archive_id || a?.ad_id || "").trim();
+  if (!id) return null;
+  const s = a?.snapshot || {};
+  const cards: any[] = Array.isArray(s.cards) ? s.cards : [];
+  const c0 = cards[0] || {};
+  const bodies = uniq([s?.body?.text, ...cards.map((c) => c?.body)]);
+  const titles = uniq([s?.title, ...cards.map((c) => c?.title)]);
+  const row: any = { page_name: s.page_name || a?.page_name || null,
+    ad_creative_bodies: bodies.length ? bodies.slice(0, 5) : null,
+    ad_creative_link_titles: titles.length ? titles.slice(0, 5) : null,
+    headline: s.title || c0.title || null,
+    description: s.link_description || c0.link_description || null,
+    ad_snapshot_url: a?.url || ("https://www.facebook.com/ads/library/?id=" + id),
+    ad_delivery_start_time: scIso(a?.start_date_string, a?.start_date),
+    // Meta fills end_date with "today" while an ad still runs, so only a finished ad gets one.
+    ad_delivery_stop_time: a?.is_active ? null : scIso(a?.end_date_string, a?.end_date),
+    publisher_platforms: Array.isArray(a?.publisher_platform) ? a.publisher_platform.map(String) : null,
+    cta_text: s.cta_text || c0.cta_text || null,
+    redirect_url: s.link_url || c0.link_url || null,
+    display_format: s.display_format || null };
+  const links = uniq(Array.isArray(s.extra_links) ? s.extra_links : []);
+  if (links.length) row.extra_links = links;
+  const impr = a?.impressions_with_index?.impressions_text;
+  if (impr) { row.impressions_text = String(impr); if (/^\s*<\s*100\s*$/.test(String(impr))) row.low_impression = true; }
+  if (a?.total_active_time !== null && a?.total_active_time !== undefined) row.total_active_time = String(a.total_active_time);
+  /* A carousel or dynamic ad keeps its creatives in cards; a single ad in images/videos. Up to
+     three are copied - enough for the board to show it as a carousel without copying a 10-card
+     catalogue in full. */
+  const srcs: any[] = cards.length ? cards
+    : [...(Array.isArray(s.videos) ? s.videos : []), ...(Array.isArray(s.images) ? s.images : [])];
+  const media: NormMedia[] = [];
+  for (const m of srcs) {
+    const video = m?.video_sd_url || m?.video_hd_url;
+    const image = m?.original_image_url || m?.resized_image_url;
+    if (video) media.push({ url: String(video), poster: m?.video_preview_image_url || image || null });
+    else if (image) media.push({ url: String(image) });
+    if (media.length >= 3) break;
+  }
+  return { id, row, media, raw: a };
+}
+
+async function pullScrapeCreators(key: string, ids: string[], country: string, rep: any) {
+  const out = new Map<string, NormAd[]>();
+  await pool(ids, 4, async (pageId) => {
+    try {
+      const r = await fetch(SC_URL + "?pageId=" + encodeURIComponent(pageId) + "&country=" + country,
+        { headers: { "x-api-key": key } });
+      const d: any = await r.json().catch(() => ({}));
+      if (!r.ok || d?.success === false) {
+        rep.errors.push("ScrapeCreators " + r.status + " for page " + pageId + ": "
+          + String(d?.message || d?.error || "").slice(0, 160));
+        return;
+      }
+      if (typeof d?.credits_remaining === "number") {
+        rep.credits_remaining = Math.min(rep.credits_remaining ?? Infinity, d.credits_remaining);
+      }
+      const list = (Array.isArray(d?.results) ? d.results : []).map(scNormalize).filter(Boolean) as NormAd[];
+      out.set(String(pageId), list);
+    } catch (e) {
+      rep.errors.push("ScrapeCreators failed for page " + pageId + ": " + String((e as Error)?.message || e).slice(0, 160));
+    }
+  });
+  return out;
 }
 
 Deno.serve(async (req) => {
@@ -302,101 +439,131 @@ Deno.serve(async (req) => {
         found: 0, written: 0, message: "nothing left in the watchlist from skip " + skip });
       const byPage = new Map<string, any>(); wl.forEach((w) => byPage.set(String(w.page_id).trim(), w));
 
-      const token = await accessToken();
-      const init = await mcp(token, "initialize", { protocolVersion: "2024-11-05",
-        capabilities: {}, clientInfo: { name: "jaine", version: "1" } });
-      await mcp(token, "notifications/initialized", {}, init.session, true);
+      /* WHICH SERVICE ANSWERS. "both" (the default once the ScrapeCreators key is set): Proxy is
+         asked first because its 20 credits a day are free, and every page it refuses (credits
+         spent) or returns nothing for is asked again of ScrapeCreators, at 1 credit a page from a
+         pack that never expires. Without the key it is Proxy alone. body.provider forces one
+         ("proxy", "scrapecreators" or "both"), for testing them side by side. */
+      const scKey = Deno.env.get("SCRAPECREATORS_API_KEY") || "";
+      const provider = ["proxy", "scrapecreators", "both"].includes(String(body?.provider))
+        ? String(body.provider) : (scKey ? "both" : "proxy");
+      if (provider !== "proxy" && !scKey) return json({ error: "SCRAPECREATORS_API_KEY is not set" }, 400);
+      const refresh = body?.refresh_media === true;
+      /* A pull that copies media for a page's whole history the first time can outrun the edge
+         function's time limit, and a timed-out run writes nothing. So media copying stops at the
+         budget; the ads are still saved, and their pictures arrive on the next run because an ad
+         without media_items is always picked up again. */
+      const deadline = Date.now() + Math.max(20, Math.min(Number(body?.budget_s) || 110, 300)) * 1000;
 
-      const rep: any = { of_watchlist: all.length, slice: { skip, take, names: wl.map((w) => w.name) },
-        found: 0, written: 0, media_copied: 0, media_failed: 0,
+      const rep: any = { provider, of_watchlist: all.length,
+        slice: { skip, take, names: wl.map((w) => w.name) },
+        found: 0, written: 0, media_copied: 0, media_failed: 0, media_skipped_for_time: 0,
         media_why: {} as Record<string, number>, media_examples: [] as string[],
         ad_fields_seen: [] as string[], impressions_seen: 0, low_flagged: 0, dry_run: !write,
         per_page: {} as Record<string, number>, errors: [] as string[] };
 
-      const call = await mcp(token, "tools/call", { name: "get_meta_ads", arguments: {
-        platform_ids: ids, country, limit: perPage,
-        context: "Collect competitor property ads for the Jain Group competitor board." } },
-        init.session);
-      if (call.payload?.error) rep.errors.push(String(call.payload.error.message || "error"));
+      let pulled: Map<string, NormAd[]>;
+      rep.source = {} as Record<string, string>;   // page name -> which service its ads came from
+      if (provider === "scrapecreators") pulled = await pullScrapeCreators(scKey, ids, country, rep);
       else {
-        const u = unwrap(call.payload?.result);
-        if (!u.data) rep.errors.push("unreadable reply: " + call.text.slice(0, 140));
-        /* A REFUSAL IS NOT AN EMPTY RESULT. When the plan's daily credits run out Proxy answers
-           with a message and no ads at all, and this used to read that as "found 0, no errors" -
-           pages that run 20 ads showed none and the run still looked clean. No ads key means
-           Proxy did not answer the question, so its words are passed on as the error. */
-        else if (!u.data.ads) rep.errors.push("Proxy returned no ads list: "
-          + String(u.data.error || u.data.message || call.text).slice(0, 200));
-        else {
-          const ads = u.data.ads || {};
-          const media = u.media || {};
-          for (const pageId of Object.keys(ads)) {
-            const list = Array.isArray(ads[pageId]) ? ads[pageId] : [];
-            const w = byPage.get(String(pageId));
-            rep.per_page[(w?.name || pageId)] = list.length;
-            rep.found += list.length;
-            if (!w || !write) continue;
-            for (const a of list) {
-              const id = String(a?.ad_id || "").trim(); if (!id) continue;
-              const src = media[id] || null;
-              let items: any = null, first: string | null = null, firstType: string | null = null;
-              if (src && withMedia) {
-                const got = await copyMedia(String(src), w.id, id);
-                if (got.path) {
-                  first = got.path; firstType = got.mediaType;
-                  items = [{ s3_path: got.path, media_type: got.mediaType }];
-                  rep.media_copied++;
-                } else {
-                  rep.media_failed++;
-                  /* Kept per reason rather than as one total, so "the link had expired" and "S3
-                     refused it" are not reported as the same thing. Capped: a page that fails on
-                     every ad must not turn the report into a wall of identical lines. */
-                  const why = got.why || "unknown";
-                  rep.media_why[why] = (rep.media_why[why] || 0) + 1;
-                  if (rep.media_examples.length < 5) {
-                    rep.media_examples.push((w?.name || pageId) + " / " + id + ": " + why);
-                  }
-                }
-              }
-              const out: any = { id, watchlist_id: w.id, page_id: String(pageId),
-                page_name: a?.page_name || a?.advertiser_name || w.name,
-                ad_creative_bodies: a?.body ? [String(a.body)] : null,
-                ad_creative_link_titles: a?.headline ? [String(a.headline)] : null,
-                headline: a?.headline || null, description: a?.link_description || null, country,
-                ad_snapshot_url: "https://www.facebook.com/ads/library/?id=" + id,
-                ad_delivery_start_time: a?.start_date || null,
-                ad_delivery_stop_time: a?.is_active ? null : (a?.end_date || null),
-                publisher_platforms: a?.advertiser_platform ? [String(a.advertiser_platform)] : null,
-                cta_text: a?.cta_text || null, redirect_url: a?.link_url || null,
-                display_format: a?.media_type || null,
-                last_seen_at: new Date().toISOString() };
-              const impr = readImpressions(a);
-              if (impr.text !== null) { out.impressions_text = impr.text; rep.impressions_seen++; }
-              if (impr.low !== null) { out.low_impression = impr.low; if (impr.low) rep.low_flagged++; }
-              if (impr.activeTime !== null) out.total_active_time = impr.activeTime;
-              /* Every key this ad carried, so one real run names the fields instead of us
-                 guessing. Union across the slice, capped - it is a diagnostic, not a dump. */
-              for (const key of Object.keys(a || {})) {
-                if (rep.ad_fields_seen.length < 60 && !rep.ad_fields_seen.includes(key)) {
-                  rep.ad_fields_seen.push(key);
-                }
-              }
-              /* Only overwrite the picture when a new one was actually copied - a failed download
-                 must not wipe a good image stored on an earlier run. */
-              if (items) { out.media_items = items; out.media_s3_path = first; out.media_type = firstType; }
-              const ins = await fetch(SB + "/rest/v1/competitor_ads?on_conflict=id", { method: "POST",
-                headers: { ...H, Prefer: "resolution=merge-duplicates,return=minimal" },
-                body: JSON.stringify(out) });
-              if (ins.ok) rep.written++;
-              else if (rep.errors.length < 5) rep.errors.push("save " + id + ": " + (await ins.text()).slice(0, 140));
-            }
+        try { pulled = await pullProxy(ids, country, perPage, rep); }
+        catch (e) {
+          // Proxy unreachable or signed out: on its own that ends the run; with both, it is a gap.
+          if (provider === "proxy") throw e;
+          rep.errors.push("Proxy: " + String((e as Error)?.message || e).slice(0, 160));
+          pulled = new Map();
+        }
+        if (provider === "both") {
+          /* Proxy's refusals are not failures of the run when ScrapeCreators can cover them, so
+             they are moved aside as notes; only what ScrapeCreators cannot answer stays an error. */
+          rep.proxy_notes = rep.errors.splice(0);
+          const gaps = ids.filter((p) => !(pulled.get(p) || []).length);
+          if (gaps.length) {
+            const more = await pullScrapeCreators(scKey, gaps, country, rep);
+            for (const [p, list] of more) { pulled.set(p, list); rep.source[byPage.get(p)?.name || p] = "scrapecreators"; }
           }
         }
+        for (const p of pulled.keys()) {
+          const n = byPage.get(p)?.name || p;
+          if (!rep.source[n]) rep.source[n] = "proxy";
+        }
       }
-      /* Stamped only when Proxy actually answered, so "last synced" on the screen means a pull
-         that worked - including one that honestly found no ads - and never a failed call. */
-      if (write && !rep.errors.length) {
-        await fetch(SB + "/rest/v1/competitor_watchlist?id=in.(" + wl.map((w) => Number(w.id)).join(",") + ")", {
+
+      /* Ads that already hold their media are not copied again unless asked (Rebuild previews).
+         ScrapeCreators gives up to three creatives per ad and Proxy only one, so with both in
+         play a later Proxy pull must not replace a carousel with a single picture - and only new
+         ads cost downloads. Proxy on its own keeps its old behaviour (re-copy every night),
+         which is what repaired its older storage keys. */
+      const haveMedia = new Set<string>();
+      if (write && provider !== "proxy" && !refresh) {
+        const r = await fetch(SB + "/rest/v1/competitor_ads?select=id&media_items=not.is.null&watchlist_id=in.("
+          + wl.map((w) => Number(w.id)).join(",") + ")", { headers: H });
+        const rows: any[] = await r.json().catch(() => []);
+        if (Array.isArray(rows)) rows.forEach((x) => haveMedia.add(String(x.id)));
+      }
+
+      for (const [pageId, list] of pulled) {
+        const w = byPage.get(String(pageId));
+        rep.per_page[(w?.name || pageId)] = list.length;
+        rep.found += list.length;
+        if (!w || !write) continue;
+        await pool(list, 4, async (n: NormAd) => {
+          const id = n.id;
+          let items: any[] | null = null;
+          const wantMedia = withMedia && n.media.length && (refresh || !haveMedia.has(id));
+          if (wantMedia && Date.now() > deadline) rep.media_skipped_for_time++;
+          else if (wantMedia) {
+            items = [];
+            for (let i = 0; i < n.media.length; i++) {
+              const m = n.media[i];
+              const got = await copyMedia(m.url, w.id, id, String(i));
+              if (got.path) {
+                const it: any = { s3_path: got.path, media_type: got.mediaType };
+                /* A video gets its own still, so the grid shows a picture without downloading
+                   the clip - the page uses `poster` whenever it is there. */
+                if (got.mediaType === "video" && m.poster) {
+                  const p = await copyMedia(m.poster, w.id, id, i + "p");
+                  if (p.path && p.mediaType === "image") it.poster = p.path;
+                }
+                items.push(it);
+                rep.media_copied++;
+              } else {
+                rep.media_failed++;
+                /* Kept per reason rather than as one total, so "the link had expired" and "S3
+                   refused it" are not reported as the same thing. Capped: a page that fails on
+                   every ad must not turn the report into a wall of identical lines. */
+                const why = got.why || "unknown";
+                rep.media_why[why] = (rep.media_why[why] || 0) + 1;
+                if (rep.media_examples.length < 5) rep.media_examples.push((w?.name || pageId) + " / " + id + ": " + why);
+              }
+            }
+            if (!items.length) items = null;
+          }
+          const out: any = { ...n.row, id, watchlist_id: w.id, page_id: String(pageId), country,
+            page_name: n.row.page_name || w.name, last_seen_at: new Date().toISOString() };
+          if (out.impressions_text) rep.impressions_seen++;
+          if (out.low_impression) rep.low_flagged++;
+          /* Every key this ad carried, so one real run names the fields instead of us guessing.
+             Union across the slice, capped - it is a diagnostic, not a dump. */
+          for (const key of Object.keys(n.raw || {})) {
+            if (rep.ad_fields_seen.length < 60 && !rep.ad_fields_seen.includes(key)) rep.ad_fields_seen.push(key);
+          }
+          /* Only overwrite the picture when a new one was actually copied - a failed download
+             must not wipe a good image stored on an earlier run. */
+          if (items) { out.media_items = items; out.media_s3_path = items[0].s3_path; out.media_type = items[0].media_type; }
+          const ins = await fetch(SB + "/rest/v1/competitor_ads?on_conflict=id", { method: "POST",
+            headers: { ...H, Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify(out) });
+          if (ins.ok) rep.written++;
+          else if (rep.errors.length < 5) rep.errors.push("save " + id + ": " + (await ins.text()).slice(0, 140));
+        });
+      }
+      /* Stamped only for the pages the service actually answered for, so "last pulled" on the
+         screen means a pull that worked - including one that honestly found no ads - and never a
+         failed call or a refusal. */
+      const answered = wl.filter((w) => pulled.has(String(w.page_id).trim()));
+      if (write && answered.length) {
+        await fetch(SB + "/rest/v1/competitor_watchlist?id=in.(" + answered.map((w) => Number(w.id)).join(",") + ")", {
           method: "PATCH", headers: { ...H, Prefer: "return=minimal" },
           body: JSON.stringify({ last_sync_at: new Date().toISOString() }) }).catch(() => {});
       }

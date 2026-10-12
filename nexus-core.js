@@ -18395,7 +18395,7 @@ VIEWS.playbook=function(v,seg){
 // public Ad Library, pulled through Proxy by the competitor-sync-test-probe edge function both
 // nightly (cron) and from the Fetch button. Sourced from camp.competitor_watchlist /
 // camp.competitor_ads; is_own_brand decides which tab a page sits on.
-const COMP_PLATFORM_ICON={FACEBOOK:'fa-facebook',INSTAGRAM:'fa-instagram'};
+const COMP_PLATFORM_ICON={FACEBOOK:'fa-facebook',INSTAGRAM:'fa-instagram',WHATSAPP:'fa-whatsapp',MESSENGER:'fa-facebook-messenger',THREADS:'fa-threads'};
 window._compAdsAll=window._compAdsAll||[];
 window._compSignCache=window._compSignCache||{};
 /* ---- Competitor Ads -----------------------------------------------------------------------
@@ -18514,7 +18514,7 @@ VIEWS.competitors=async function(v,seg){
         +(compIsBrandTab()
           ?'Our own pages as Meta\'s Ad Library shows them to the public — what is running, since when, and where.'
           :'Public ad creative from Meta\'s Ad Library — the creative itself, when it started and where it ran.')
-        +' Meta never publishes spend or reach for ordinary commercial ads. Pulled through Proxy every night.</p>'
+        +' Meta never publishes spend or reach for ordinary commercial ads. Pulled automatically every night.</p>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
         +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add '+(compIsBrandTab()?'Brand':'Competitor')+'</button>'
         +'<button class="btn btn-primary" id="compSyncBtn" onclick="compSyncFiltered()"><i class="fa-solid fa-rotate"></i> Fetch from Meta</button>'
@@ -18570,13 +18570,13 @@ function compToolbarHtml(wl){
   // Says exactly what pressing Fetch will do, so nobody is surprised by what arrives. Proxy pulls
   // each page's latest ads whatever the filters say; the filters then narrow what is shown here.
   +'<div class="comp-note"><i class="fa-solid fa-circle-info"></i><span>Fetch from Meta pulls the latest ads for '
-    +'<b>'+esc(cur?cur.name:'all '+wl.length+' '+compWord(2))+'</b> through Proxy, the same pull that runs every night'
+    +'<b>'+esc(cur?cur.name:'all '+wl.length+' '+compWord(2))+'</b>, the same pull that runs every night'
     +(function(){
         const ts=(cur?[cur]:wl).map(function(w){return w.last_sync_at||'';}).filter(Boolean).sort();
         return ts.length?' (last pulled '+esc(fmtDate(ts[ts.length-1]))+')':'';
       })()
     +'. The date, status and media filters narrow what is shown.'
-    +(cur&&!cur.page_id?' <b>'+esc(cur.name)+'</b> has no Page ID yet, so Proxy cannot pull it — paste their Ad Library link in Edit.':'')+'</span></div>';
+    +(cur&&!cur.page_id?' <b>'+esc(cur.name)+'</b> has no Page ID yet, so it cannot be pulled — paste their Ad Library link in Edit.':'')+'</span></div>';
 }
 // The Ad Library address for a competitor, rebuilt from its Page ID rather than stored, so the
 // link can never drift out of step with what the sync actually asks Meta for.
@@ -18927,7 +18927,7 @@ window.compRemove=async function(id){
    scraper, so the screen and the nightly job filled the same tables two different ways.
    One call cannot copy every creative for every page (Supabase's resource ceiling), so the page
    walks the list four pages at a time with auto:false and says how far it has got. */
-async function compRunSync(ids,btn,busyLabel,idleLabel,featureKey){
+async function compRunSync(ids,btn,busyLabel,idleLabel,featureKey,extra){
   const setBtn=function(t){ if(btn) btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> '+t; };
   if(btn) btn.disabled=true;
   setBtn(busyLabel||'');
@@ -18939,7 +18939,7 @@ async function compRunSync(ids,btn,busyLabel,idleLabel,featureKey){
     for(let guard=0; guard<30 && skip!=null; guard++){
       const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-sync-test-probe?action=sync',{method:'POST',
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-        body:JSON.stringify({write:true, auto:false, skip:skip, take:4, watchlist_ids:ids})});
+        body:JSON.stringify(Object.assign({write:true, auto:false, skip:skip, take:4, watchlist_ids:ids},extra||{}))});
       const jr=await res.json().catch(function(){return {};});
       if(!res.ok||jr.error){ errors.push(jr.error||('HTTP '+res.status)); break; }
       found+=jr.found||0; written+=jr.written||0; failed+=jr.media_failed||0;
@@ -18970,11 +18970,11 @@ window.compSyncFiltered=function(){
   if(!ids.length){ toast('Nothing to fetch — no '+compWord(2)+' here have a Page ID and auto-sync on','warn'); return; }
   compRunSync(ids,$('compSyncBtn'),'Fetching…','Fetch from Meta','competitors.overview.fetch_ads_from_meta_ad_library');
 };
-// Proxy re-copies every creative on each pull, so rebuilding previews is the same pull.
+// The same pull, but every ad's media is copied again rather than only the new ads'.
 window.compRefreshMedia=function(){
   const ids=compSyncIds();
   if(!ids.length){ toast('Nothing to rebuild — no '+compWord(2)+' here have a Page ID','warn'); return; }
-  compRunSync(ids,$('compPosterBtn'),'Rebuilding…','Rebuild previews','competitors.overview.rebuild_ad_media_previews');
+  compRunSync(ids,$('compPosterBtn'),'Rebuilding…','Rebuild previews','competitors.overview.rebuild_ad_media_previews',{refresh_media:true});
 };
 window.compOpenDetail=function(id){
   const a=window._compAdsAll.find(function(x){return String(x.id)===String(id);});
