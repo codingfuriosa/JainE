@@ -2021,13 +2021,24 @@
   async function wfRenderList(){
     const b=$('acBody'); if(!b)return;
     let flows=[], stepCounts={}, ownersByFlow={}, myFlowIds={};
-    try{ const {data}=await ACC().from('flows').select('*').order('id',{ascending:false}); flows=data||[]; }
-    catch(e){ toast('Could not load workflows: '+((e&&e.message)||e),'err'); }
+    /* BOTH READS GO OUT AT ONCE. flow_steps is not filtered by anything flows returns, so waiting
+       for the first before asking for the second bought nothing and cost a whole round trip - about
+       190ms, measured. Promise.all is what actually sends them together: a Supabase query builder
+       does nothing until something calls .then() on it, so merely assigning it to a variable would
+       still have run them one after the other.
+       Each carries its own rejection handler, so a failure in one cannot take the other down with
+       it - flows still toasts, flow_steps still fails quietly, exactly as before. */
+    const [flowsRes, stepsRes] = await Promise.all([
+      ACC().from('flows').select('*').order('id',{ascending:false}).then(function(r){return r;}, function(e){return {threw:e};}),
+      ACC().from('flow_steps').select('flow_id,owner_email,owner_emails').then(function(r){return r;}, function(e){return {threw:e};})
+    ]);
+    if(flowsRes && flowsRes.threw){ toast('Could not load workflows: '+((flowsRes.threw&&flowsRes.threw.message)||flowsRes.threw),'err'); }
+    flows=(flowsRes&&flowsRes.data)||[];
     /* Every owner of every step, not just the first. owner_email holds only the first person on a
        step; owner_emails holds them all. Reading owner_email alone left a second owner without a
        circle here - and worse, this same list decides who SEES a workflow at all, so somebody added
        as a second owner could be missing the workflow from their list entirely. */
-    try{ const {data}=await ACC().from('flow_steps').select('flow_id,owner_email,owner_emails');
+    try{ const data=(stepsRes&&stepsRes.data)||[];
       (data||[]).forEach(function(s){
         stepCounts[s.flow_id]=(stepCounts[s.flow_id]||0)+1;
         const owners=(Array.isArray(s.owner_emails)&&s.owner_emails.length)?s.owner_emails:(s.owner_email?[s.owner_email]:[]);
@@ -2925,26 +2936,52 @@
      Nothing here should ever depend on a result set happening to fit. Callers pass a builder rather
      than a query so each page is a fresh request, and an explicit order makes the pages stable -
      without one PostgREST may return rows in any order and pages can overlap or skip. */
+  /* PAGES ARE FETCHED TOGETHER, NOT ONE AFTER ANOTHER.
+
+     Each round trip to Supabase costs about 190ms (measured, five runs). flow_case_steps holds
+     4,621 rows, so at 1,000 a page this loop was five trips end to end - roughly 950ms of waiting
+     before the Workflow tab or the Tasks tab could draw anything, on top of the chain of other
+     queries around it.
+
+     The first page is still fetched alone. That matters: most call sites here return well under
+     1,000 rows, and asking for pages nobody needs would put four pointless requests on the
+     database every time the tab opens. Only when page one comes back FULL - the one reliable sign
+     there is more - are the rest requested in parallel batches. Five pages now cost two trips
+     instead of five.
+
+     Everything else is deliberately unchanged: the three attempts with a growing pause, stopping
+     at the first short page, and returning what was collected so far if a page finally fails. The
+     pages are reassembled in order regardless of which request finishes first. */
   async function wfFetchPaged(build, pageSize){
     pageSize = pageSize || 1000;
-    const out=[];
-    for(let from=0;;from+=pageSize){
-      // A page can fail on a transient blip - a dropped connection, a momentary auth hiccup - and
-      // giving up on the first error used to return whatever had already loaded as if it were
-      // everything, with no error shown anywhere: a fully-progressed bill's tracker row rendered
-      // as the blank "not yet" dot over every step, because ONE page out of several silently
-      // failed to load. Three attempts with a short, growing pause give a blip a real chance to
-      // clear before this falls back to the old behaviour of just stopping where it is.
-      let data=null, error=null;
+    const BATCH = 4;                       // pages requested together after the first
+    // One page, with the same three attempts and growing pause as before. null means it never
+    // arrived, which the caller treats as "stop here and keep what we have".
+    async function fetchPage(from){
       for(let attempt=0; attempt<3; attempt++){
-        const r=await build().range(from, from+pageSize-1);
-        data=r.data; error=r.error;
-        if(!error) break;
+        const r = await build().range(from, from+pageSize-1);
+        if(!r.error && r.data) return r.data;
         if(attempt<2) await new Promise(function(res){ setTimeout(res, 500*(attempt+1)); });
       }
-      if(error||!data) break;
-      out.push.apply(out,data);
-      if(data.length<pageSize) break;   // a short page is the last page
+      return null;
+    }
+    const out=[];
+    const first = await fetchPage(0);
+    if(!first) return out;
+    out.push.apply(out, first);
+    if(first.length < pageSize) return out;   // a short first page is the only page
+    for(let from=pageSize;;from+=BATCH*pageSize){
+      const pages = await Promise.all(
+        Array.from({length:BATCH}, function(_,i){ return fetchPage(from + i*pageSize); })
+      );
+      let done=false;
+      for(let i=0;i<pages.length;i++){
+        const p=pages[i];
+        if(!p){ done=true; break; }            // failed after three attempts - stop, keep the rest
+        out.push.apply(out, p);
+        if(p.length < pageSize){ done=true; break; }   // short page: the end, ignore any after it
+      }
+      if(done) break;
     }
     return out;
   }
@@ -12352,16 +12389,46 @@
         // go to, rather than saying "the next person" - owner_from_trigger and the rest of the
         // step DEFINITION aren't columns on this table at all (flow_steps only), so they're
         // looked up from stepDefByFlowSeq below instead of selected here.
-        let allc=[]; if(caseIds.length){ allc=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
-          .select('case_id,seq,received_at,forwarded_at,person,candidates,title')
-          .in('case_id',caseIds).order('id',{ascending:true}); }); }
-        /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
-           It was missing from this select, so the owner silently vanished from the name shown in the
-           list - for everyone, not just the person who raised it. */
-        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,jaine_id,flow_id,trigger_details,created_by,skipped_seqs,route,route_seqs').in('id',caseIds); casesD=(r&&r.data)||[]; }
+        /* THE INSTANCE'S STEPS AND ITS CASES ARE ASKED FOR TOGETHER. Both are filtered by caseIds,
+           which is already known by this point, so neither ever needed the other - the second just
+           waited, at about 190ms a round trip, and the first is the paged one so the wait was the
+           longer of the two.
+           person/candidates come along so the Forward button can name who the step is about to go
+           to, rather than saying "the next person" - owner_from_trigger and the rest of the step
+           DEFINITION aren't columns on this table at all (flow_steps only), so they're looked up
+           from stepDefByFlowSeq below instead of selected here.
+           created_by is what the task name leads with on a claim-named workflow (Reimbursement).
+           It was once missing from this select, so the owner silently vanished from the name shown
+           in the list - for everyone, not just the person who raised it.
+           No rejection handlers here on purpose: a throw must still reach the enclosing try, which
+           is what blanks _wfStepInfo rather than leaving it half-filled. */
+        let allc=[], casesD=[];
+        if(caseIds.length){
+          const both = await Promise.all([
+            wfFetchPaged(function(){ return ACC().from('flow_case_steps')
+              .select('case_id,seq,received_at,forwarded_at,person,candidates,title')
+              .in('case_id',caseIds).order('id',{ascending:true}); }),
+            ACC().from('flow_cases').select('id,case_no,jaine_id,flow_id,trigger_details,created_by,skipped_seqs,route,route_seqs').in('id',caseIds)
+          ]);
+          allc=both[0]||[];
+          casesD=(both[1]&&both[1].data)||[];
+        }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
-        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields,id_label').in('id',flowIds); flowsD=(r&&r.data)||[]; }
+        /* THE DEFINITION'S FLOWS AND ITS STEPS ARE ASKED FOR TOGETHER. Both are filtered by the
+           same flowIds, which is already known here, so the second never needed the first to come
+           back - it just waited for it, at about 190ms a round trip. Promise.all is what sends
+           them at once: a Supabase builder stays idle until something calls .then() on it, so
+           assigning it to a variable would have changed nothing. Each keeps its own rejection
+           handler so one failing cannot take the other with it. */
+        let flowsD=[], stepsRes=null;
+        if(flowIds.length){
+          const pair = await Promise.all([
+            ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields,id_label').in('id',flowIds),
+            ACC().from('flow_steps').select('flow_id,seq,confirm_only,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').in('flow_id',flowIds)
+          ]);
+          flowsD=(pair[0]&&pair[0].data)||[]; stepsRes=pair[1];
+        }
         const flowMap={}; flowsD.forEach(function(f){ flowMap[f.id]=f; });
         /* How far the workflow actually runs, taken from its DEFINITION. Working "is this the last
            step?" out purely from the instance's own steps meant it depended on being able to READ
@@ -12370,7 +12437,7 @@
            the Done flag while its own page correctly offered Forward. The definition is readable
            to anyone who can see the workflow, so it settles the question either way. */
         const maxSeqByFlow={}, minSeqByFlow={}, confirmOnly={}, stepDefByFlowSeq={};
-        if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq,confirm_only,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').in('flow_id',flowIds);
+        if(flowIds.length){ try{ const r=stepsRes;
           (((r&&r.data)||[])).forEach(function(s){
             if(!(s.flow_id in maxSeqByFlow)||s.seq>maxSeqByFlow[s.flow_id]) maxSeqByFlow[s.flow_id]=s.seq;
             if(!(s.flow_id in minSeqByFlow)||s.seq<minSeqByFlow[s.flow_id]) minSeqByFlow[s.flow_id]=s.seq;
