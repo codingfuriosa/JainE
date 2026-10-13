@@ -3343,6 +3343,8 @@
     /* The pinned columns are measured from what is on screen, and a hidden pane measures zero - so
        this has to happen once the pane is actually showing, not when the table was built. */
     if(which==='tracker'){ try{ wfTrackerFreeze(); }catch(_e){} }
+    // server-side paging: the Tracker's data is fetched the first time its tab is opened
+    if(which==='tracker' && window._wfSrv && !window._wfSrv.trackerLoaded){ wfSrvLoadTracker(); }
   };
   if(!window._wfTkResizeWired){
     window._wfTkResizeWired=true;
@@ -3407,18 +3409,64 @@
     // Reset — wfShowCase (called below when selCaseId is set) sets this itself; otherwise a case
     // panel shown on a previous visit must not be mistaken for the one now on screen.
     window._wfShownCaseId=null;
-    try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=WF_PEOPLE||[]; }
-    let flow=null, steps=[], cases=[], fcs=[];
-    try{ const {data}=await ACC().from('flows').select('*').eq('id',id).maybeSingle(); flow=data; }catch(e){}
-    try{ const {data}=await ACC().from('flow_steps').select('*').eq('flow_id',id).order('seq',{ascending:true}); steps=data||[]; }catch(e){}
+    /* EVERYTHING THIS PAGE NEEDS GOES OUT AT ONCE. None of these depends on another, and asked one
+       after another they were six waits of a network round trip each before anything showed.
+       Drafts are only ever this person's own - the row-level rule enforces it, and asking for
+       everyone's would return nothing anyway.
+       SERVER-SIDE PAGING - Invoice Processing only: its first page is asked for in the same breath,
+       from acc.wf_case_page, which filters, sorts and counts in the database; the DataTable then
+       asks it for each further page (wfInstMakeDataTable). Not for the two coordinators' overdue
+       view, which needs every bill's step dates to decide what is late - that answer is simply not
+       used once the workflow says the viewer is one of them. If the call fails for any reason the
+       page falls back to the full load below rather than showing nothing. */
+    window._wfSrv=null;
+    /* Every workflow pages in the database now, not just Invoice Processing. Kept on the full load:
+       the two coordinators' overdue view (wfIsChaser, below) and Accounts' two claimant-lookup
+       accounts on Reimbursement (pcSearchOn) - both are built from every instance at once. */
+    const wfPcAccount = id===39 && (eq(me(),'jaingrouppc2.ankita@gmail.com') || eq(me(),'pc.thejaingroup1@gmail.com'));
+    const S0=wfPcAccount ? null : {flowId:id, ticked:new Map(), timer:null, trackerLoaded:false, pageLen:WF_SRV_PAGE};
+    const rowsOf=function(q){ return q.then(function(r){ return (r&&r.data)||null; }, function(){ return null; }); };
+    const got=await Promise.all([
+      people().catch(function(){ return null; }),
+      rowsOf(ACC().from('flows').select('*').eq('id',id).maybeSingle()),
+      rowsOf(ACC().from('flow_steps').select('*').eq('flow_id',id).order('seq',{ascending:true})),
+      rowsOf(ACC().from('flow_drafts').select('*').eq('flow_id',id).order('updated_at',{ascending:false})),
+      rowsOf(ACC().from('flow_forms').select('*').eq('flow_id',id).order('sl',{ascending:true})),
+      S0 ? wfCasePage({offset:0, limit:S0.pageLen, counts:true}, S0).catch(function(){ return null; }) : null
+    ]);
+    WF_PEOPLE=got[0]||WF_PEOPLE||[];
+    let flow=got[1], steps=got[2]||[], cases=[], fcs=[];
+    const drafts=got[3]||[], forms=got[4]||[];
     if(!flow){ toast('Workflow not found','err'); return navTo('tasks/workflow'); }
+    let srvFirst=null;
+    /* A workflow that limits who its instances may be handed to decides who sees its Tracker from
+       every instance's step people (wfRosterAccess) - one page cannot answer that, so such a flow
+       keeps the full load. Invoice Processing is exempt there already (everyone sees its Tracker). */
+    const wfRosterIsPerCase=!!String(flow.trigger_step_assignable_to||'').trim() && id!==26;
+    if(S0 && got[5] && !wfIsChaser(flow) && !wfRosterIsPerCase){
+      srvFirst=got[5];
+      /* A workflow that archives finished instances lists only the running ones until Archive is
+         opened, so its first page is asked for again with that filter, along with how many are in
+         the Archive for the tab's own count. */
+      if(flow.archive_done){
+        try{
+          const both=await Promise.all([
+            wfCasePage({offset:0, limit:WF_SRV_PAGE, status:'active', counts:true}, S0),
+            wfCasePage({offset:0, limit:1, status:'done'}, S0)
+          ]);
+          srvFirst=both[0]; S0.doneCount=both[1].filtered; S0.prefetchStatus='active';
+        }catch(e){ srvFirst=null; }
+      }
+      if(srvFirst){
+        window._wfSrv=Object.assign(S0, {flow:flow, steps:steps, prefetch:srvFirst, prefetchLimit:WF_SRV_PAGE});
+        cases=srvFirst.rows; fcs=srvFirst.steps;
+      }
+    }
+    const srv=!!srvFirst;
+    if(!srv){
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('flow_id',id).order('case_no',{ascending:true}); cases=data||[]; }catch(e){}
-    /* Only ever this person's own - the row-level rule enforces it, and asking for everyone's
-       would return nothing anyway. A draft is working-out, not something colleagues should read. */
-    let drafts=[];
-    try{ const {data}=await ACC().from('flow_drafts').select('*').eq('flow_id',id)
-           .order('updated_at',{ascending:false}); drafts=data||[]; }catch(e){}
-    if(cases.length){ try{ const wfCaseIds=cases.map(function(c){return c.id;});
+    }
+    if(!srv && cases.length){ try{ const wfCaseIds=cases.map(function(c){return c.id;});
       fcs=await wfFetchPaged(function(){ return ACC().from('flow_case_steps').select('*')
         .in('case_id',wfCaseIds).order('id',{ascending:true}); }); }catch(e){} }
     /* Booking Form only. Its form asks for nothing but the attachments — the customer, the project
@@ -3433,8 +3481,15 @@
         (data||[]).forEach(function(r){ window._wfBk[r.case_id]=wfBkFields(r); });
       }catch(_e){}
     }
-    let forms=[];
-    try{ const {data}=await ACC().from('flow_forms').select('*').eq('flow_id',id).order('sl',{ascending:true}); forms=data||[]; }catch(e){}
+    // Reimbursement: is one of my own claims already in process? (only for its New button's tooltip)
+    let srvMyOpenClaim=null;
+    if(srv && id===39){
+      try{
+        const {data}=await ACC().from('flow_cases').select('id,flow_id,case_no,jaine_id,created_by,current_step,returned_at,status')
+          .eq('flow_id',39).gt('current_step',1).is('returned_at',null).not('status','in','("Done","Cancelled")');
+        srvMyOpenClaim=(data||[]).find(function(x){ return eq(x&&x.created_by, me()); })||null;
+      }catch(_e){}
+    }
     window._wfForms=forms; window._wfSteps=steps;
     const mySelf=me();
     const isCreator=eq(flow.created_by||'',mySelf);
@@ -3501,6 +3556,8 @@
       if(cs.received_at){ if(eq(cs.person,mySelf)) myRecv++; }
       else if(cands.some(function(e){return eq(e,mySelf);})) myWait++;
     });
+    // With server-side paging only one page is here, so the database counted across all of them.
+    if(srv){ myWait=Number(srvFirst.my_wait)||0; myRecv=Number(srvFirst.my_recv)||0; }
     // The badge itself — not just its number — is restricted to the Administrator and whoever is
     // actually assigned somewhere in this workflow (a step owner, or its trigger owner). Someone
     // who can merely see the workflow page (e.g. through department-wide visibility) but has no
@@ -3560,7 +3617,8 @@
        and a copy of the rule here that got the answer wrong would either refuse somebody the server
        would have allowed, or promise a save that is about to be rejected. */
     const wfMyOpenReimbursement=id===39 ? (function(){
-      const c=cases.find(function(x){ return eq(x&&x.created_by, mySelf) && x.current_step>1 && !x.returned_at && x.status!=='Done' && x.status!=='Cancelled'; });
+      // server-side paging holds one page, so the claim was looked up on its own (srvMyOpenClaim)
+      const c=srv ? srvMyOpenClaim : cases.find(function(x){ return eq(x&&x.created_by, mySelf) && x.current_step>1 && !x.returned_at && x.status!=='Done' && x.status!=='Cancelled'; });
       return c ? wfCaseNoText(c) : null;
     })() : null;
     const wfBookingStarted=function(c){
@@ -3581,7 +3639,11 @@
       return eq(c&&c.created_by, mySelf);
     };
     const canDeleteCase=function(c){ return !wfPastStep1Locked(c) && (eq(c&&c.created_by, mySelf) || eq(mySelf,'ayushruia1@gmail.com')); };
-    const anyActionable=cases.some(function(c){ return canEditCase(c)||canDeleteCase(c); });
+    // Server-side paging has only the first page here, so whether the Edit/Delete buttons are worth
+    // showing cannot be read off every bill - anyone who may raise bills, or the Administrator, gets
+    // them, and each row still carries its own data-can-edit / data-can-del, which is what decides.
+    const anyActionable=cases.some(function(c){ return canEditCase(c)||canDeleteCase(c); })
+      || (srv && (canEvent || eq(mySelf,'ayushruia1@gmail.com')));
     /* PRINTING is not editing. Bulk print is for the people who have to file these - the claimant
        whose claim it is, and HR and Accounts sitting on the steps - none of whom may touch a claim
        once it has moved past step 1, so the edit/delete gate would have hidden the checkboxes from
@@ -3591,7 +3653,8 @@
       // businessanalyst@ isn't a step owner here (deliberately, see the removal further up in this
       // file's history) but still needs to run "Print New Reimbursements", same as cfo@ already can.
       || (id===39 && eq(mySelf,'businessanalyst@thejaingroup.com'))
-      || cases.some(function(c){ return eq(c&&c.created_by, mySelf); });
+      || cases.some(function(c){ return eq(c&&c.created_by, mySelf); })
+      || (srv && canEvent);
     const showChk=anyActionable||canPrintBulk;
     /* FINISHED WORK MOVES OUT OF THE WAY.
        A workflow that opts in (flows.archive_done) shows only its running instances in the main
@@ -3601,13 +3664,16 @@
        of which are wired to one set. This way every one of them keeps working, within whichever
        view is open. */
     const archiveOn=!!(flow&&flow.archive_done);
-    const activeCount=cases.filter(function(c){ return c.status!=='Done'; }).length;
-    const doneCount=cases.length-activeCount;
+    // server-side paging: the database counted both halves (see the archive_done fetch above)
+    const activeCount=srv ? (archiveOn ? srvFirst.filtered : srvFirst.total) : cases.filter(function(c){ return c.status!=='Done'; }).length;
+    const doneCount=srv ? (archiveOn ? (Number(window._wfSrv.doneCount)||0) : 0) : cases.length-activeCount;
     window._wfArchOn=archiveOn;
     window._wfArchView='active';
     window._wfInstNoun=N.many;
     let tableHtml='';
-    if(cases.length){
+    // server-side: nothing running on page one can still mean finished ones waiting in the Archive
+    const wfHasList = cases.length>0 || (srv && (srvFirst.total>0 || doneCount>0));
+    if(wfHasList){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       // the two coordinators get a different list from everybody else - see wfIsChaser
       const chaser=wfIsChaser(flow);
@@ -3617,7 +3683,9 @@
         // count their instances under a plain "No.".
         +'<th>'+(wfIdLabel(flow))+'</th>'+(isBill?'<th>Wheredoc Id</th>':'')
         +'<th>'+esc2(N.one)+'</th>'+(chaser?'<th>Dept Owner</th>':'')+(isBill?'<th>Route</th>':'')+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
-      const rows=cases.map(function(c){
+      // One bill's <tr>. A function of its own because server-side paging builds every later page
+      // from what the database sends back, and it has to come out identical to the first.
+      const rowHtml=function(c, byCase){
         const cells=steps.map(function(s){
           // This instance deliberately bypassed this step (Invoice Processing's No-Cheque path) —
           // it never happened for this bill, which is a different thing from not-yet-reached.
@@ -3649,8 +3717,15 @@
         return '<tr data-case="'+c.id+'" data-done="'+(c.status==='Done'?'1':'0')+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-text="'+esc2(xtra.text)+'" data-curstep="'+(c.current_step==null?'':c.current_step)+'" data-late="'+(wfCaseIsLate(byCase[c.id], c.current_step)?'1':'0')+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(showChk?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
           +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+(chaser?('<td>'+esc2(wfDeptNameOf(byCase[c.id], firstSeq))+'</td>'):'')+(isBill?('<td>'+wfRoutePill(c.route)+'</td>'):'')+cells+'</tr>';
-      }).join('');
-      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> <span id="wfInstTitle">'+esc2(N.many)+'</span> <span class="cnt" id="wfInstCount">'+(archiveOn?activeCount:cases.length)+'</span>'
+      };
+      const rows=cases.map(function(c){ return rowHtml(c, byCase); }).join('');
+      if(srv){
+        window._wfSrv.rowHtml=rowHtml;
+        // which header sorts on what in the database; every other column is not sortable here
+        let ci=showChk?1:0; window._wfSrv.colKey={}; window._wfSrv.colKey[ci]='no';
+        ci+=1+(isBill?1:0); window._wfSrv.colKey[ci]='bill';
+      }
+      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> <span id="wfInstTitle">'+esc2(N.many)+'</span> <span class="cnt" id="wfInstCount">'+(srv?srvFirst.filtered:(archiveOn?activeCount:cases.length))+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(showChk?('<span class="wf-inst-tools">'
           // Booking Form only: no Print here — printing a case with customer KYC/Aadhaar on it is
@@ -3736,7 +3811,13 @@
     /* Built up front rather than inline below: rendering the tracker is what works out whether it
        has an Owner column worth searching, and the tab strip - which carries the search box - is
        concatenated before it in the same expression. */
-    const trackerHtml=wfTrackerHtml(flow,steps,trackerCases,fcs);
+    /* With server-side paging the Tracker - every bill against every step - is not built until its
+       tab is opened (wfSrvLoadTracker); opening the page no longer pays for it. Its search box is
+       built with it, so none from a previously opened workflow may linger on the tab strip. */
+    if(srv) window._wfTkFindBar='';
+    const trackerHtml=srv
+      ? '<div class="loader"><div class="spin"></div></div>'
+      : wfTrackerHtml(flow,steps,trackerCases,fcs);
     v.innerHTML='<div class="wf-page">'
       /* An observer sees a page with no buttons on it, which reads as something being broken rather
          than as something being deliberate. Say so once, plainly, next to the title. */
@@ -3781,9 +3862,9 @@
       // Gated as well as the tab: a hidden pane still ships its rows to the browser, and "you cannot
       // click to it" is not the same as "you were not sent it".
       +(maySeeRoster?('<div id="wfPane_tracker" style="display:none"><div class="wf-card">'
-          +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">'+trackerCases.length+'</span>'
+          +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt" id="wfTrackerCount">'+(srv?srvFirst.total:trackerCases.length)+'</span>'
           +tip('Every '+N.lc+' against every step: when the step was due (Planned), when it was actually forwarded on (Actual), and by how much it ran over (Time Delay). Scroll sideways to see all the steps.')+'</div>'
-          +trackerHtml
+          +'<div id="wfTrackerBody">'+trackerHtml+'</div>'
         +'</div></div>'):'')
       +(flow.allow_drafts?('<div id="wfPane_drafts" style="display:none"><div class="wf-card">'
           +'<div class="wf-card-hd"><i class="fa-regular fa-floppy-disk"></i> Drafts'
@@ -3812,7 +3893,8 @@
     /* Invoice Processing only (flow 26, the id the rest of this file knows it by - isBill keys off
        a Wheredoc Id field the live flow no longer has). Not awaited: the plain table is already
        usable while the DataTable libraries load. */
-    if(id===26 && cases.length){ wfInstMakeDataTable(); }
+    // every workflow's list is a DataTable now: server-side where srv, otherwise over what is loaded
+    if(wfHasList){ wfInstMakeDataTable(); }
   }
 
   function wfN(){ return window._wfNoun || {one:'Event',many:'Events',lc:'event',lcMany:'events'}; }
@@ -3872,12 +3954,158 @@
   /* Every row's tick box, in the order the table is sorted. A DataTable keeps only the current
      page in the document, so asking the document would lose ticks made on other pages. */
   function wfInstAllChks(){
+    if(window._wfSrv && wfInstDT()) return wfSrvSyncTicks();
     const dt=wfInstDT();
     if(!dt) return [].slice.call(document.querySelectorAll('.wf-inst-chk'));
     return dt.rows({order:'applied'}).nodes().toArray()
       .map(function(tr){ return tr.querySelector('.wf-inst-chk'); }).filter(Boolean);
   }
   function wfInstCheckedChks(){ return wfInstAllChks().filter(function(c){ return c.checked; }); }
+
+  /* ---------- SERVER-SIDE PAGING (Invoice Processing) ----------
+     The list holds one page at a time and every page, sort, search and date range is answered by
+     acc.wf_case_page in the database - nothing is filtered in the browser. */
+  const WF_SRV_PAGE=25;                       // always 25 rows a page - there is no size picker
+  async function wfCasePage(o, S){
+    S=S||window._wfSrv;
+    const {data,error}=await ACC().rpc('wf_case_page',{
+      p_flow_id:S.flowId, p_offset:o.offset||0, p_limit:(o.limit==null?WF_SRV_PAGE:o.limit),
+      p_search:o.search||null, p_from:o.from||null, p_to:o.to||null, p_status:o.status||null,
+      p_order:o.order||null, p_dir:o.dir||'asc', p_counts:!!o.counts });
+    if(error) throw error;
+    if(!data || !Array.isArray(data.rows)) throw new Error('unexpected reply from wf_case_page');
+    return data;
+  }
+  // What the list is currently asking for: the DataTable's page and sort, plus the page's own
+  // search box, date range and Archive tab.
+  function wfSrvParams(req){
+    const S=window._wfSrv, o=(req.order&&req.order[0])||null, dates=window._wfInstDateFilter||{};
+    return { offset:req.start, limit:req.length,
+             search:((($('wfInstSearch')||{}).value)||'').trim()||null,
+             from:dates.from||null, to:dates.to||null,
+             status:window._wfArchOn ? (window._wfArchView==='archive'?'done':'active') : null,
+             order:o ? (S.colKey[o.column]||null) : null, dir:o ? o.dir : 'asc' };
+  }
+  /* A row comes back from rowHtml as a <tr> string; the DataTable wants each cell's content, and
+     the row's and cells' own attributes (data-case, the onclick, the tick-box cell's class) are put
+     back on by createdRow. */
+  function wfSrvRowArr(html){
+    const tb=document.createElement('tbody'); tb.innerHTML=html;
+    const tr=tb.rows[0]; if(!tr) return [];
+    const attrs=function(el){ return [].map.call(el.attributes,function(a){ return [a.name,a.value]; }); };
+    const arr=[].map.call(tr.cells,function(td){ return td.innerHTML; });
+    arr.meta={ tr:attrs(tr), tds:[].map.call(tr.cells,attrs) };
+    return arr;
+  }
+  function wfSrvApplyAttrs(el, list){
+    (list||[]).forEach(function(p){
+      if(p[0]==='class') p[1].split(/\s+/).filter(Boolean).forEach(function(c){ el.classList.add(c); });
+      else el.setAttribute(p[0],p[1]);
+    });
+  }
+  /* Booking Form names each row from what its documents say (booking_audits, see window._wfBk), not
+     from anything on the instance itself - so each page's readings are fetched with the page. */
+  function wfSrvBookingNames(S, rows){
+    if(!S || S.flowId!==41) return Promise.resolve();
+    const ids=(rows||[]).map(function(c){ return c.id; }).filter(function(cid){ return !window._wfBk[cid]; });
+    if(!ids.length) return Promise.resolve();
+    return ACC().from('booking_audits').select('case_id,status,result').in('case_id',ids)
+      .then(function(r){ ((r&&r.data)||[]).forEach(function(a){ window._wfBk[a.case_id]=wfBkFields(a); }); },
+            function(){});
+  }
+  // Same question, same answer: two requests are the same page if every parameter matches.
+  function wfSrvKey(p){ return JSON.stringify([p.offset,p.limit,p.search,p.from,p.to,p.status,p.order,p.dir]); }
+  function wfSrvAjax(req, cb){
+    const S=window._wfSrv;
+    const p=wfSrvParams(req);
+    const key=wfSrvKey(p);
+    // the first page was already fetched to draw the page - used once, unless something is filtered
+    const pre=S.prefetch; S.prefetch=null;
+    const usePre=pre && p.offset===0 && p.limit===S.prefetchLimit && !p.search && !p.from && !p.to && !p.order
+      && (p.status||null)===(S.prefetchStatus||null);
+    // the page after the one on screen is fetched in the background (below), so "next" is usually
+    // already here when it is clicked
+    const ahead=(S.next && S.next.key===key) ? S.next.promise : null;
+    S.next=null;
+    (usePre ? Promise.resolve(pre) : (ahead || wfCasePage(p))).then(function(d){
+      return wfSrvBookingNames(S, d.rows).then(function(){ return d; });
+    }).then(function(d){
+      const byCase={}; (d.steps||[]).forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
+      const cnt=$('wfInstCount'); if(cnt) cnt.textContent=d.filtered;
+      cb({ draw:req.draw, recordsTotal:d.total, recordsFiltered:d.filtered,
+           data:(d.rows||[]).map(function(c){ return wfSrvRowArr(S.rowHtml(c, byCase)); }) });
+      /* Fetch the NEXT page now, while this one is being read. Only one page ahead, and only if
+         there is one; a failed prefetch is dropped quietly and the click simply asks again. */
+      if(p.limit>0 && p.offset+p.limit < d.filtered && window._wfSrv===S){
+        const np=Object.assign({}, p, {offset:p.offset+p.limit});
+        const prom=wfCasePage(np, S);
+        prom.catch(function(){ if(S.next && S.next.promise===prom) S.next=null; });
+        S.next={key:wfSrvKey(np), promise:prom};
+      }
+    }).catch(function(e){
+      toast('Could not load '+wfN().lcMany+': '+((e&&e.message)||e),'err');
+      cb({ draw:req.draw, recordsTotal:0, recordsFiltered:0, data:[] });
+    });
+  }
+  /* Ticks are kept by bill id, so a tick on page 1 is still there after moving to page 3 and back
+     - the rows themselves are rebuilt on every page. The detached copies carry the same data-can-*
+     attributes Edit, Delete and Print read. Printed in the order they were ticked. */
+  function wfSrvSyncTicks(){
+    const S=window._wfSrv;
+    [].slice.call(document.querySelectorAll('#wfInstTable .wf-inst-chk')).forEach(function(c){
+      const id=c.getAttribute('data-case');
+      if(c.checked){ if(!S.ticked.has(id)){ const k=c.cloneNode(); k.checked=true; S.ticked.set(id,k); } }
+      else S.ticked.delete(id);
+    });
+    return Array.from(S.ticked.values());
+  }
+  function wfSrvRestoreTicks(){
+    const S=window._wfSrv; if(!S) return;
+    [].slice.call(document.querySelectorAll('#wfInstTable .wf-inst-chk')).forEach(function(c){
+      if(S.ticked.has(c.getAttribute('data-case'))) c.checked=true;
+    });
+    const shown=window._wfShownCaseId;
+    if(shown!=null){
+      const tr=document.querySelector('#wfInstTable tbody tr[data-case="'+shown+'"]');
+      if(tr) tr.classList.add('sel');
+    }
+  }
+  /* The Tracker - every bill against every step - only once its tab is opened, and through the same
+     database function with no page limit: one request with visibility checked once per bill,
+     where reading the tables directly took six requests and checked it on every step row. The
+     direct read stays as the fallback. */
+  async function wfSrvLoadTracker(){
+    const S=window._wfSrv;
+    if(!S || S.trackerLoading || S.trackerLoaded) return;
+    S.trackerLoading=true;
+    let cases=[], fcs=[];
+    try{
+      const d=await wfCasePage({offset:0, limit:-1}, S);
+      cases=d.rows||[]; fcs=d.steps||[];
+      // the Tracker lists bills in their own order, as it always has
+      cases.sort(function(a,b){ return (a.case_no-b.case_no)||(a.id-b.id); });
+    }catch(e){
+      try{ const {data}=await ACC().from('flow_cases').select('*').eq('flow_id',S.flowId).order('case_no',{ascending:true}); cases=data||[]; }catch(_e){}
+      if(cases.length){ try{ const ids=cases.map(function(c){return c.id;});
+        fcs=await wfFetchPaged(function(){ return ACC().from('flow_case_steps').select('*')
+          .in('case_id',ids).order('id',{ascending:true}); }); }catch(_e){} }
+    }
+    await wfSrvBookingNames(S, cases);               // Booking Form's rows are named by their documents
+    S.trackerLoading=false;
+    const body=$('wfTrackerBody');
+    if(window._wfSrv!==S || !body) return;          // the page moved on while this loaded
+    body.innerHTML=wfTrackerHtml(S.flow, S.steps, cases, fcs);
+    S.trackerLoaded=true;
+    const cnt=$('wfTrackerCount'); if(cnt) cnt.textContent=cases.length;
+    const right=$('wfTabsRight');
+    if(right){
+      right.innerHTML=window._wfTkFindBar||'';
+      const on=$('wfTabBtn_tracker');
+      right.style.display=(on && on.classList.contains('on') && window._wfTkFindBar)?'':'none';
+    }
+    try{ wfTrackerSticky(); }catch(_e){}
+    try{ wfTrackerFreeze(); }catch(_e){}
+  }
   async function wfInstMakeDataTable(){
     const tbl=$('wfInstTable'); if(!tbl) return;
     const ok=await wfDataTablesReady();
@@ -3896,16 +4124,37 @@
     [].slice.call(tbl.tBodies[0].rows).forEach(function(r){ r.style.display=''; });
     const wrap=tbl.parentNode;
     const hasChk=!!tbl.querySelector('thead th.wf-chk-col');
-    const dt=jq(tbl).DataTable({
+    const S=window._wfSrv;
+    const common={
       order:[],                                   // keep the list's own order until a header is clicked
-      pageLength:25,
-      lengthMenu:[[10,25,50,100,-1],[10,25,50,100,'All']],
+      pageLength:WF_SRV_PAGE,
+      lengthChange:false,                         // 25 a page, fixed
       autoWidth:false,
-      columnDefs:hasChk?[{targets:0, orderable:false, searchable:false}]:[],
-      layout:{ topStart:'pageLength', topEnd:null, bottomStart:'info', bottomEnd:'paging' },
-      language:{ lengthMenu:'Show _MENU_ per page', info:'Showing _START_ to _END_ of _TOTAL_',
-                 infoEmpty:'Nothing to show', infoFiltered:'', zeroRecords:'No matches', emptyTable:'Nothing here yet' }
-    });
+      layout:{ topStart:null, topEnd:null, bottomStart:'info', bottomEnd:'paging' },
+      pagingType:'simple_numbers',                // previous / pages / next - no first & last
+      language:{ info:'Showing <b>_START_–_END_</b> of <b>_TOTAL_</b>',
+                 paginate:{ previous:'<i class="fa-solid fa-chevron-left"></i>', next:'<i class="fa-solid fa-chevron-right"></i>' },
+                 infoEmpty:'Nothing to show', infoFiltered:'', zeroRecords:'No matches', emptyTable:'Nothing here yet',
+                 processing:'Loading…' }
+    };
+    /* Server-side: every page, sort, length change, search and date range is a call to
+       acc.wf_case_page (wfSrvAjax). Only the JainE id and Bill columns sort - those are the ones the
+       database can order by; a step column's pill has no meaningful order across pages. */
+    const dt=S
+      ? jq(tbl).DataTable(Object.assign(common, {
+          serverSide:true, processing:true, searching:false,
+          columns:[].map.call(tbl.tHead.rows[0].cells, function(_th,i){ return {orderable:!!S.colKey[i]}; }),
+          ajax:wfSrvAjax,
+          createdRow:function(row, data){
+            const m=data && data.meta; if(!m) return;
+            wfSrvApplyAttrs(row, m.tr);
+            m.tds.forEach(function(a,i){ if(row.cells[i]) wfSrvApplyAttrs(row.cells[i], a); });
+          },
+          drawCallback:function(){ wfSrvRestoreTicks(); }
+        }))
+      : jq(tbl).DataTable(Object.assign(common, {
+          columnDefs:hasChk?[{targets:0, orderable:false, searchable:false}]:[]
+        }));
     window._wfInstDT=dt;
     /* Twelve steps make the table several screens wide. The sideways scroll belongs to the table
        alone - left wrapped around the whole DataTable, the page picker and the page buttons would
@@ -3918,6 +4167,7 @@
       wrap.insertBefore(tbl, wrap.firstChild);
     }
     const nm=$('wfInstNoMatch'); if(nm) nm.style.display='none';   // DataTables says it itself now
+    if(S) return;          // server-side: the first draw has already asked the database for the page
     wfInstFilter();
     // A bill opened by link is highlighted in the list - turn to the page it sits on.
     const sel=tbl.querySelector('tbody tr.sel')||null;
@@ -3935,6 +4185,16 @@
   // than read straight from the inputs on every filter pass.
   window._wfInstDateFilter={from:'',to:''};
   window.wfInstFilter=function(){
+    /* Server-side paging: the search box, the dates and the Archive tab are sent to the database
+       with the next page request (wfSrvParams) - nothing is filtered here. Typing waits a moment so
+       each keystroke is not its own request. */
+    const srvDt=window._wfSrv ? wfInstDT() : null;
+    if(srvDt){
+      const S=window._wfSrv;
+      clearTimeout(S.timer);
+      S.timer=setTimeout(function(){ try{ srvDt.draw(); }catch(_e){} }, 300);
+      return;
+    }
     const q=(($('wfInstSearch')||{}).value||'').trim();
     // the coordinators' step picker stands where the search box would be
     const picker=$('wfInstStepPick');
@@ -9769,14 +10029,18 @@
     .wf-itable tbody tr.sel{background:var(--brand-a10,#eef2ff)}
     .wf-itable tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
     .wf-itable tbody tr:last-child td{border-bottom:0}
-    /* Invoice Processing's list as a DataTable (wfInstMakeDataTable): the library's stylesheet
+    /* Every workflow's list as a DataTable (wfInstMakeDataTable): the library's stylesheet
        outranks the rules above, so the table is put back to looking like every other list here and
-       only the page picker, the count and the page buttons are new. */
+       only the count and the page buttons are new. */
     .wf-card .dt-container{font-size:13px;color:var(--ink)}
-    .wf-card .dt-container .dt-layout-row{margin:8px 0}
     .wf-card .dt-container .dt-layout-row.dt-layout-table{margin:0}
-    .wf-card .dt-container .dt-length select{border:1px solid var(--line);border-radius:8px;padding:4px 8px;margin:0 6px;background:#fff;color:var(--ink)}
-    .wf-card .dt-container .dt-info{color:var(--slate)}
+    /* The footer: "Showing 1 to 25 of 379" on the left, the pages on the right, one line. The
+       library stacks and centres both below 768px, which is most of a laptop with the sidebar open. */
+    .wf-card .dt-container .dt-layout-row:not(.dt-layout-table){display:flex!important;align-items:center;justify-content:space-between;gap:10px;margin:12px 2px 2px}
+    .wf-card .dt-container .dt-layout-row:not(.dt-layout-table)>.dt-layout-cell{display:block!important;padding:0!important;text-align:left!important}
+    .wf-card .dt-container .dt-layout-row:not(.dt-layout-table)>.dt-layout-end{margin-left:auto}
+    .wf-card .dt-container .dt-info{color:var(--slate);font-size:12.5px;padding:0!important}
+    .wf-card .dt-container .dt-info b{color:var(--ink);font-weight:700}
     table.dataTable.wf-itable{margin:0;border-collapse:collapse}
     table.dataTable.wf-itable>thead>tr>th{padding:11px 14px;border-bottom:1px solid var(--line);background:var(--bg,#f8fafc)}
     table.dataTable.wf-itable>tbody>tr>td{padding:11px 14px;border-top:0;border-bottom:1px solid var(--line)}
@@ -9784,11 +10048,24 @@
     table.dataTable.wf-itable>tbody>tr.sel>*{box-shadow:none;background:var(--brand-a10,#eef2ff)}
     table.dataTable.wf-itable>tbody>tr.sel>td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
     table.dataTable.wf-itable thead>tr>th.dt-orderable-asc:hover,table.dataTable.wf-itable thead>tr>th.dt-orderable-desc:hover{outline:none;background:var(--line-2,#eef2f7)}
-    .wf-card .dt-container .dt-paging .dt-paging-button{border:1px solid var(--line)!important;border-radius:8px;padding:4px 10px;margin-left:4px;background:#fff!important;color:var(--ink)!important}
-    .wf-card .dt-container .dt-paging .dt-paging-button.current{background:var(--brand)!important;border-color:var(--brand)!important;color:#fff!important}
-    .wf-card .dt-container .dt-paging .dt-paging-button.disabled{opacity:.45}
-    .wf-card .dt-container .dt-paging .dt-paging-button:hover:not(.disabled):not(.current){background:var(--bg,#f8fafc)!important}
-    @media(max-width:640px){.wf-card .dt-container .dt-layout-row{flex-wrap:wrap;gap:8px}}
+    /* The page buttons: one rounded bar rather than a row of separate boxes, chevrons for previous
+       and next, the open page as a filled square, and the dots between page numbers as plain text. */
+    .wf-card .dt-container .dt-paging{display:inline-flex;align-items:center;gap:2px;padding:3px;border:1px solid var(--line);border-radius:10px;background:#fff}
+    .wf-card .dt-container .dt-paging nav{display:inline-flex;align-items:center;gap:2px}
+    .wf-card .dt-container .dt-paging .dt-paging-button{min-width:30px;height:30px;padding:0 9px!important;margin:0!important;border:0!important;border-radius:7px!important;background:transparent!important;color:var(--ink)!important;font-weight:600;font-size:12.5px;line-height:30px;display:inline-flex;align-items:center;justify-content:center;box-shadow:none!important;cursor:pointer;transition:background .12s,color .12s}
+    .wf-card .dt-container .dt-paging .dt-paging-button:hover:not(.disabled):not(.current){background:var(--bg,#f1f5f9)!important;color:var(--brand)!important}
+    .wf-card .dt-container .dt-paging .dt-paging-button.current,
+    .wf-card .dt-container .dt-paging .dt-paging-button.current:hover{background:var(--brand)!important;color:#fff!important}
+    .wf-card .dt-container .dt-paging .dt-paging-button.disabled{color:var(--slate)!important;opacity:.35;cursor:default}
+    .wf-card .dt-container .dt-paging .dt-paging-button.previous,
+    .wf-card .dt-container .dt-paging .dt-paging-button.next{color:var(--slate)!important;font-size:11px}
+    .wf-card .dt-container .dt-paging .ellipsis{min-width:20px;text-align:center;color:var(--slate);padding:0 2px}
+    .wf-card .dt-container .dt-processing{border:0;box-shadow:none;background:transparent;color:var(--slate)}
+    /* a phone: the count above, the pages below, both full width and centred */
+    @media(max-width:520px){
+      .wf-card .dt-container .dt-layout-row:not(.dt-layout-table){flex-direction:column;align-items:center}
+      .wf-card .dt-container .dt-layout-row:not(.dt-layout-table)>.dt-layout-end{margin-left:0}
+    }
     .wf-trigcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
     /* Tracker tab — the strip needs real air above it, otherwise it reads as part of the
        timeline card that sits directly above. */

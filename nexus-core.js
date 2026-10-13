@@ -56,7 +56,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'20261013n','insp-items.js':'20261008a','postsales.js':'20261008a','purchase.js':'20261004v','purchase-indent.js':'20261004j','purchase-rfq.js':'20261004e','purchase-po.js':'20261004c','purchase-stores.js':'20261004b','purchase-reports.js':'20261004a'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'20261013g','insp-items.js':'20261008a','postsales.js':'20261008a','purchase.js':'20261004v','purchase-indent.js':'20261004j','purchase-rfq.js':'20261004e','purchase-po.js':'20261004c','purchase-stores.js':'20261004b','purchase-reports.js':'20261004a'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];
