@@ -56,7 +56,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'20261008a','insp-items.js':'20261008a','postsales.js':'20261008a','purchase.js':'20261004v','purchase-indent.js':'20261004j','purchase-rfq.js':'20261004e','purchase-po.js':'20261004c','purchase-stores.js':'20261004b','purchase-reports.js':'20261004a'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'20261013n','insp-items.js':'20261008a','postsales.js':'20261008a','purchase.js':'20261004v','purchase-indent.js':'20261004j','purchase-rfq.js':'20261004e','purchase-po.js':'20261004c','purchase-stores.js':'20261004b','purchase-reports.js':'20261004a'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];
@@ -103,15 +103,33 @@ async function activateModule(id){
   document.title=(LABELS[id]||id)+' · Nexus-RE · Jain Group';
   renderPage();
 }
+/* ONE DRAW PER NAVIGATION. Changing location.hash fires BOTH popstate and hashchange, and navTo()
+   also draws the page itself straight after setting it - so every in-module click drew the page
+   three times, and every plain hash change twice, each draw firing all of that page's requests
+   again (the Tasks page sent ~37 where ~13 were needed). renderPage() records the hash it drew;
+   the two events skip a hash that is already on screen. Back/Forward to a different hash still
+   draws, because that hash is not the one recorded. */
+let LAST_RENDER_HASH=null;
 window.addEventListener('popstate',function(){
   const id=pageIdFromPath(location.pathname);
-  if(id!==PAGE){ activateModule(id); }else{ renderPage(); }
+  if(id!==PAGE){ activateModule(id); }
+  else if(location.hash!==LAST_RENDER_HASH){ renderPage(); }
 });
+/* Move to a hash on this page and draw it exactly once. Setting location.hash already draws it -
+   Chrome fires popstate synchronously, and hashchange follows - so drawing again straight after
+   was the second of every in-module click's two draws. Only when the hash did not change (a tab
+   clicked again, a view refreshing itself) does nothing else draw it, so that case draws here. */
+function showHash(h){
+  const before=location.hash;
+  location.hash=h;
+  if(location.hash===before || location.hash!==LAST_RENDER_HASH) renderPage();
+}
+window.showHash=showHash;
 function navTo(path){
   const seg=String(path).split('/');
   const first=seg[0];
   const hash=seg.length>1?('#/'+seg.slice(1).join('/')):'';
-  if(first===PAGE){ location.hash=hash||'#/'; renderPage(); return; }
+  if(first===PAGE){ showHash(hash||'#/'); return; }
   // Customer sessions (and an admin previewing one) never have a sidebar item for another module
   // to begin with, but navTo() is also called from things like breadcrumbs — staying on the current
   // real document for a customer session is the one case still worth a true navigation rather than
@@ -121,7 +139,7 @@ function navTo(path){
   activateModule(first);
 }
 window.navTo=navTo;
-function goToTask(id){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); if(PAGE==='tasks'){location.hash='#/task/'+id;renderPage();} else navTo('tasks/task/'+id); }
+function goToTask(id){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); if(PAGE==='tasks'){showHash('#/task/'+id);} else navTo('tasks/task/'+id); }
 
 /* ============================ HELPERS ============================ */
 function toast(msg,type){if(type==='err')console.error('[toast]',msg);const t=el('div','toast '+(type||''),'<i class="fa-solid fa-'+(type==='err'?'circle-exclamation':type==='ok'?'circle-check':type==='warn'?'triangle-exclamation':'circle-info')+'"></i>'+esc(msg));$('toasts').appendChild(t);setTimeout(()=>t.remove(),(type==='err'||type==='warn')?9000:3400);}
@@ -1144,6 +1162,7 @@ window.goBack=function(fallback){
   navTo(prev||fallback||'dashboard');
 };
 function renderPage(){
+  LAST_RENDER_HASH=location.hash;
   let seg=location.hash.replace(/^#\/?/,'').split('/').filter(Boolean);
   if(seg[0]===PAGE)seg=seg.slice(1);
   navRecord(PAGE+(seg.length?'/'+seg.join('/'):''));
@@ -1155,7 +1174,7 @@ function renderPage(){
   refreshNotifState();
 }
 function route(){renderPage();}
-window.addEventListener('hashchange',function(){renderPage();});
+window.addEventListener('hashchange',function(){ if(location.hash!==LAST_RENDER_HASH) renderPage(); });
 // Whenever a tab bar's active tab changes (a fresh page render, or a view re-rendering just its own
 // tabs after an async fetch), scroll that tab into view within its own horizontally-scrolling row -
 // otherwise a page with enough tabs to overflow (e.g. Campaign Analytics' source/period sub-tabs)
@@ -15543,7 +15562,7 @@ function cmpRunAlerts(){
   if(window._cmpAlertsRan)return; window._cmpAlertsRan=true;
   try{ fetch(SUPABASE_URL+'/functions/v1/campaign-alerts',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY},body:'{}'}).catch(function(){}); }catch(e){}
 }
-window.cmpSetSource=function(s){CMP_SOURCE=s;CMP_AD_PAGE=0;location.hash='#/campaigns';renderPage();};
+window.cmpSetSource=function(s){CMP_SOURCE=s;CMP_AD_PAGE=0;showHash('#/campaigns');};
 function cmpSourceBar(){return '<div style="margin-bottom:12px"><div class="seg"><button class="seg-btn'+(CMP_SOURCE==='meta'?' on':'')+'" onclick="cmpSetSource(\'meta\')"><i class="fa-brands fa-facebook"></i> &nbsp;Meta</button><button class="seg-btn'+(CMP_SOURCE==='google'?' on':'')+'" onclick="cmpSetSource(\'google\')"><i class="fa-brands fa-google"></i> &nbsp;Google Ads</button><button class="seg-btn'+(CMP_SOURCE==='both'?' on':'')+'" onclick="cmpSetSource(\'both\')"><i class="fa-solid fa-layer-group"></i> &nbsp;Both</button></div></div>';}
 window.cmpSetPeriod=function(p){CMP_PERIOD=p;if(p!=='custom'){CMP_SINCE='';CMP_UNTIL='';}renderPage();};
 window.cmpSetCustom=function(){const s=$('cmpSince')&&$('cmpSince').value,u=$('cmpUntil')&&$('cmpUntil').value;if(!s||!u){toast('Pick both dates','err');return;}if(s>u){toast('Start date must be before end date','err');return;}CMP_SINCE=s;CMP_UNTIL=u;CMP_PERIOD='custom';renderPage();};
