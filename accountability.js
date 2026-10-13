@@ -3684,7 +3684,7 @@
             +'<button class="ac-btn ic" title="Clear filters" onclick="wfInstFilterClear()"><i class="fa-solid fa-xmark"></i></button>'
           +'</div>'
         +'</div>'
-        +'<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table><div id="wfInstNoMatch" class="ac-empty" style="cursor:default;display:none">No matches</div></div></div>';
+        +'<div class="wf-tablewrap"><table class="wf-itable" id="wfInstTable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table><div id="wfInstNoMatch" class="ac-empty" style="cursor:default;display:none">No matches</div></div></div>';
     }
 
     const headActs='<div class="wf-head-acts">'
@@ -3809,9 +3809,127 @@
        touch one of them, which is the whole bug this tab exists to avoid. */
     if(archiveOn){ try{ wfInstFilter(); }catch(_e){} }
     if(selCaseId){ wfShowCase(selCaseId, null); }
+    /* Invoice Processing only (flow 26, the id the rest of this file knows it by - isBill keys off
+       a Wheredoc Id field the live flow no longer has). Not awaited: the plain table is already
+       usable while the DataTable libraries load. */
+    if(id===26 && cases.length){ wfInstMakeDataTable(); }
   }
 
   function wfN(){ return window._wfNoun || {one:'Event',many:'Events',lc:'event',lcMany:'events'}; }
+
+  /* INVOICE PROCESSING'S LIST IS A jQUERY DATATABLE - sortable columns, pages, a rows-per-page
+     picker and a "Showing 1 to 25 of 240" count. Every other workflow keeps the plain table.
+
+     The libraries are fetched the first time a bill list opens and never on any other page, so
+     nothing else gets heavier for it. jQuery is put back in its box straight after loading
+     (noConflict) - the app's own $ is a const in nexus-core.js and is not touched either way.
+
+     The search box, the date range, the Archive tab and the chasers' step picker above the table
+     are NOT replaced by DataTables' own search. wfInstFilter still decides which rows qualify; on
+     this table it marks each row (data-wfok) instead of hiding it, and the filter registered
+     below lets DataTables page and count only the rows that passed. Hiding rows by hand would
+     have left DataTables paging and counting the hidden ones. */
+  const WF_DT_JS=['https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js',
+                  'https://cdnjs.cloudflare.com/ajax/libs/datatables.net/2.1.8/dataTables.min.js'];
+  const WF_DT_CSS='https://cdnjs.cloudflare.com/ajax/libs/datatables.net-dt/2.1.8/css/dataTables.dataTables.min.css';
+  let wfDtLibP=null;
+  function wfLoadJs(src){
+    return new Promise(function(res,rej){
+      const sc=document.createElement('script'); sc.src=src; sc.onload=res;
+      sc.onerror=function(){ rej(new Error('could not load '+src)); };
+      document.head.appendChild(sc);
+    });
+  }
+  function wfDataTablesReady(){
+    if(window.jQuery && window.jQuery.fn && window.jQuery.fn.dataTable) return Promise.resolve(true);
+    if(wfDtLibP) return wfDtLibP;
+    wfDtLibP=(async function(){
+      /* The stylesheet is waited for as well: DataTables measures its page buttons when it first
+         draws, and measured unstyled it decided only "1" would fit. A stylesheet that fails to
+         load still lets the table work, just plainer. */
+      const css=new Promise(function(res){
+        if(document.getElementById('wfDtCss')) return res();
+        const l=document.createElement('link'); l.id='wfDtCss'; l.rel='stylesheet'; l.href=WF_DT_CSS;
+        l.onload=res; l.onerror=res;
+        document.head.appendChild(l);
+      });
+      if(!window.jQuery){ await wfLoadJs(WF_DT_JS[0]); window.jQuery.noConflict(); }
+      await wfLoadJs(WF_DT_JS[1]);
+      await css;
+      return !!(window.jQuery && window.jQuery.fn.dataTable);
+    })().catch(function(){ wfDtLibP=null; return false; });   // cleared, so the next visit retries
+    return wfDtLibP;
+  }
+  // The live DataTable on the instances list, or null - a re-render replaces the table, and an
+  // instance whose table has left the page must not be mistaken for the one on screen.
+  function wfInstDT(){
+    const dt=window._wfInstDT;
+    if(!dt) return null;
+    try{ if(document.body.contains(dt.table().node())) return dt; }catch(_e){}
+    window._wfInstDT=null;
+    return null;
+  }
+  /* Every row's tick box, in the order the table is sorted. A DataTable keeps only the current
+     page in the document, so asking the document would lose ticks made on other pages. */
+  function wfInstAllChks(){
+    const dt=wfInstDT();
+    if(!dt) return [].slice.call(document.querySelectorAll('.wf-inst-chk'));
+    return dt.rows({order:'applied'}).nodes().toArray()
+      .map(function(tr){ return tr.querySelector('.wf-inst-chk'); }).filter(Boolean);
+  }
+  function wfInstCheckedChks(){ return wfInstAllChks().filter(function(c){ return c.checked; }); }
+  async function wfInstMakeDataTable(){
+    const tbl=$('wfInstTable'); if(!tbl) return;
+    const ok=await wfDataTablesReady();
+    // the page may have moved on while the libraries were loading
+    if(!ok || !document.body.contains(tbl) || tbl.classList.contains('dataTable')) return;
+    const jq=window.jQuery;
+    if(!window._wfDtFilterWired){
+      window._wfDtFilterWired=true;
+      jq.fn.dataTable.ext.search.push(function(settings, _data, idx){
+        if(!settings.nTable || settings.nTable.id!=='wfInstTable') return true;
+        const tr=new jq.fn.dataTable.Api(settings).row(idx).node();
+        return !tr || tr.getAttribute('data-wfok')!=='0';
+      });
+    }
+    // rows the plain filter already hid by hand would otherwise stay hidden inside a page
+    [].slice.call(tbl.tBodies[0].rows).forEach(function(r){ r.style.display=''; });
+    const wrap=tbl.parentNode;
+    const hasChk=!!tbl.querySelector('thead th.wf-chk-col');
+    const dt=jq(tbl).DataTable({
+      order:[],                                   // keep the list's own order until a header is clicked
+      pageLength:25,
+      lengthMenu:[[10,25,50,100,-1],[10,25,50,100,'All']],
+      autoWidth:false,
+      columnDefs:hasChk?[{targets:0, orderable:false, searchable:false}]:[],
+      layout:{ topStart:'pageLength', topEnd:null, bottomStart:'info', bottomEnd:'paging' },
+      language:{ lengthMenu:'Show _MENU_ per page', info:'Showing _START_ to _END_ of _TOTAL_',
+                 infoEmpty:'Nothing to show', infoFiltered:'', zeroRecords:'No matches', emptyTable:'Nothing here yet' }
+    });
+    window._wfInstDT=dt;
+    /* Twelve steps make the table several screens wide. The sideways scroll belongs to the table
+       alone - left wrapped around the whole DataTable, the page picker and the page buttons would
+       scroll off with it. */
+    const container=tbl.closest('.dt-container');
+    if(container && wrap && wrap.classList.contains('wf-tablewrap')){
+      const cell=tbl.parentNode;
+      wrap.parentNode.insertBefore(container, wrap);
+      cell.appendChild(wrap);
+      wrap.insertBefore(tbl, wrap.firstChild);
+    }
+    const nm=$('wfInstNoMatch'); if(nm) nm.style.display='none';   // DataTables says it itself now
+    wfInstFilter();
+    // A bill opened by link is highlighted in the list - turn to the page it sits on.
+    const sel=tbl.querySelector('tbody tr.sel')||null;
+    const selId=window._wfShownCaseId;
+    const target=sel||(selId!=null?dt.rows().nodes().toArray().find(function(tr){ return tr.getAttribute('data-case')===String(selId); }):null);
+    if(target){
+      const at=dt.rows({order:'applied', search:'applied'}).nodes().toArray().indexOf(target);
+      const len=dt.page.len();                    // -1 is "All": everything is already on one page
+      if(at>=0 && len>0) dt.page(Math.floor(at/len)).draw(false);
+      target.classList.add('sel');
+    }
+  }
   // Instance search (by the instance No. only) is live as you type; the created-date range only takes effect
   // once "Update" is clicked (not on every date pick), so it's tracked separately here rather
   // than read straight from the inputs on every filter pass.
@@ -3827,7 +3945,11 @@
        the page at once (the tabs just set display:none), so the bare selector hid every Tracker row
        as soon as anything was typed here - the Tracker then read as empty until its own search box
        was touched. */
-    const rows=[].slice.call(document.querySelectorAll('.wf-itable:not(.wf-tktable) tbody tr'));
+    // A DataTable (Invoice Processing) holds rows that are not on the current page, so they are
+    // read from it rather than from the document - see wfInstMakeDataTable.
+    const dt=wfInstDT();
+    const rows=dt ? dt.rows().nodes().toArray()
+                  : [].slice.call(document.querySelectorAll('.wf-itable:not(.wf-tktable) tbody tr'));
     let shown=0;
     const qLower=q.toLowerCase();
     rows.forEach(function(r){
@@ -3859,10 +3981,12 @@
            && text.indexOf(qLower)===-1) ok=false;
       if(ok && from && created && created<from) ok=false;
       if(ok && to && created && created>to) ok=false;
-      r.style.display=ok?'':'none';
+      if(dt) r.setAttribute('data-wfok', ok?'1':'0');
+      else r.style.display=ok?'':'none';
       if(ok) shown++;
     });
-    const nm=$('wfInstNoMatch'); if(nm) nm.style.display=(rows.length&&!shown)?'':'none';
+    if(dt) dt.draw();   // re-pages and re-counts against the marks just set
+    const nm=$('wfInstNoMatch'); if(nm) nm.style.display=(!dt&&rows.length&&!shown)?'':'none';
     const cnt=$('wfInstCount'); if(cnt) cnt.textContent=shown;
   };
   // To can never be earlier than From — once From is picked, To's minimum becomes that date
@@ -3883,7 +4007,7 @@
     wfInstFilter();
   };
   window.wfInstSelChange=function(){
-    const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
+    const checks=wfInstCheckedChks();
     const eb=$('wfInstEdit'), db=$('wfInstDel'), pb=$('wfInstPrint'), N=wfN();
     // Print asks nothing of the row beyond existing - any selection at all can be printed.
     if(pb){
@@ -3915,15 +4039,14 @@
     /* Printed in the order the table shows them, not the order they happened to be ticked in -
        whoever is filing these is working down the list, and a stack that does not match the screen
        is a stack that has to be re-sorted by hand. */
-    const ids=[].slice.call(document.querySelectorAll('.wf-inst-chk'))
-      .filter(function(c){ return c.checked; })
+    const ids=wfInstCheckedChks()
       .map(function(c){ return Number(c.getAttribute('data-case')); })
       .filter(function(n){ return !isNaN(n); });
     if(!ids.length){ toast('Tick the ones you want to print first','warn'); return; }
     window.wfPrintCases(ids);
   };
   window.wfInstEditSel=function(){
-    const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
+    const checks=wfInstCheckedChks();
     if(checks.length!==1) return;
     if(checks[0].getAttribute('data-inst-over')==='1'){ toast('Can’t edit — this '+wfN().lc+' is already over','err'); return; }
     if(checks[0].getAttribute('data-can-edit')!=='1'){ toast('Only the Administrator, or whoever started this '+wfN().lc+', can edit it','err'); return; }
@@ -3980,7 +4103,7 @@
   }
 
   window.wfInstDelSel=function(){
-    const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
+    const checks=wfInstCheckedChks();
     if(!checks.length) return;
     const N=wfN();
     if(checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; })){ toast('Can’t delete — a selected '+N.lc+' has already started (first step received)','err'); return; }
@@ -9646,6 +9769,26 @@
     .wf-itable tbody tr.sel{background:var(--brand-a10,#eef2ff)}
     .wf-itable tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
     .wf-itable tbody tr:last-child td{border-bottom:0}
+    /* Invoice Processing's list as a DataTable (wfInstMakeDataTable): the library's stylesheet
+       outranks the rules above, so the table is put back to looking like every other list here and
+       only the page picker, the count and the page buttons are new. */
+    .wf-card .dt-container{font-size:13px;color:var(--ink)}
+    .wf-card .dt-container .dt-layout-row{margin:8px 0}
+    .wf-card .dt-container .dt-layout-row.dt-layout-table{margin:0}
+    .wf-card .dt-container .dt-length select{border:1px solid var(--line);border-radius:8px;padding:4px 8px;margin:0 6px;background:#fff;color:var(--ink)}
+    .wf-card .dt-container .dt-info{color:var(--slate)}
+    table.dataTable.wf-itable{margin:0;border-collapse:collapse}
+    table.dataTable.wf-itable>thead>tr>th{padding:11px 14px;border-bottom:1px solid var(--line);background:var(--bg,#f8fafc)}
+    table.dataTable.wf-itable>tbody>tr>td{padding:11px 14px;border-top:0;border-bottom:1px solid var(--line)}
+    table.dataTable.wf-itable>tbody>tr:last-child>td{border-bottom:0}
+    table.dataTable.wf-itable>tbody>tr.sel>*{box-shadow:none;background:var(--brand-a10,#eef2ff)}
+    table.dataTable.wf-itable>tbody>tr.sel>td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
+    table.dataTable.wf-itable thead>tr>th.dt-orderable-asc:hover,table.dataTable.wf-itable thead>tr>th.dt-orderable-desc:hover{outline:none;background:var(--line-2,#eef2f7)}
+    .wf-card .dt-container .dt-paging .dt-paging-button{border:1px solid var(--line)!important;border-radius:8px;padding:4px 10px;margin-left:4px;background:#fff!important;color:var(--ink)!important}
+    .wf-card .dt-container .dt-paging .dt-paging-button.current{background:var(--brand)!important;border-color:var(--brand)!important;color:#fff!important}
+    .wf-card .dt-container .dt-paging .dt-paging-button.disabled{opacity:.45}
+    .wf-card .dt-container .dt-paging .dt-paging-button:hover:not(.disabled):not(.current){background:var(--bg,#f8fafc)!important}
+    @media(max-width:640px){.wf-card .dt-container .dt-layout-row{flex-wrap:wrap;gap:8px}}
     .wf-trigcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
     /* Tracker tab — the strip needs real air above it, otherwise it reads as part of the
        timeline card that sits directly above. */
