@@ -2920,8 +2920,16 @@ async function legalDocsView(seg){
     if(path.length)crumbTail=path.join(' / ');
   }
   setCrumb(['Legal',crumbTail]);
+  /* NO UPLOAD FROM "All Documents". Every Legal document belongs in a folder - the folder is what
+     the S3 key is built from and, for a notice, what triggers it being read. With none selected
+     the dialog would open on whichever folder happened to be first in the list and file the
+     document somewhere nobody chose. Pick a folder first; the button says so on hover. */
   const hAct=$('legalHeadActions');
-  if(hAct)hAct.innerHTML=`<button class="btn btn-primary" onclick="docUploadModal('Legal')"><i class="fa-solid fa-upload"></i> Upload</button>`;
+  if(hAct){
+    hAct.innerHTML = DOC.cat
+      ? `<button class="btn btn-primary" onclick="docUploadModal('Legal')"><i class="fa-solid fa-upload"></i> Upload</button>`
+      : `<button class="btn" disabled title="Choose a folder on the left before uploading" style="opacity:.45;cursor:not-allowed"><i class="fa-solid fa-upload"></i> Upload</button>`;
+  }
   const body=$('legalBody');if(!body)return;
   body.innerHTML=`<div class="split"><div><div class="subnav" id="legalNav"></div></div><div><div id="docTableHost"></div></div></div>`;
   legalNav();
@@ -4526,20 +4534,33 @@ async function legalNotices(){
   const head=['Sent by Whom','Clients / Applicants','Subject','Type','Uploaded','Due','Completion Date','Status'];
   const kpis=[['Total notices',rows.length,'#1e3a8a'],['Outstanding',open,'#b45309'],['Overdue',late,'#dc2626']];
 
-  let h='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">';
+  const BTN='display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 13px;'
+    +'border-radius:8px;font-size:12.5px;font-weight:600;line-height:1;cursor:pointer;'
+    +'background:var(--bg-card,#fff);transition:opacity .12s,background .12s';
+
+  let h='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">';
   kpis.forEach(function(k){
-    h+='<div class="card card-pad" style="min-width:150px"><div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)">'+k[0]+'</div>'
-      +'<div style="font-size:24px;font-weight:800;color:'+k[2]+';margin-top:2px">'+k[1]+'</div></div>';
+    h+='<div class="card" style="min-width:146px;padding:11px 15px">'
+      +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate)">'+k[0]+'</div>'
+      +'<div style="font-size:23px;font-weight:800;line-height:1.15;color:'+k[2]+';margin-top:3px">'+k[1]+'</div></div>';
   });
+
+  /* margin-left:auto pins the actions to the right edge of the same row. On a narrow window the
+     row wraps and they drop below the cards rather than squeezing them - which is why the count
+     line sits inside the group and not between the cards and the buttons. */
+  h+='<div id="lnBar" style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    +'<span id="lnCount" style="font-size:12px;color:var(--slate);margin-right:2px"></span>'
+    +'<button id="lnEditBtn" onclick="lnEditSelected()" style="'+BTN+';border:1px solid var(--line,#e2e8f0);color:var(--ink,#0f172a)">'
+      +'<i class="fa-solid fa-pen" style="font-size:11px"></i> Edit</button>'
+    +'<button id="lnDelBtn" onclick="lnDeleteSelected()" style="'+BTN+';border:1px solid #fecaca;color:#dc2626">'
+      +'<i class="fa-solid fa-trash" style="font-size:11px"></i> Delete</button>'
+    +'<button id="lnClrBtn" onclick="lnClearSel()" style="'+BTN+';border:1px solid transparent;color:var(--slate)">Clear</button>'
+  +'</div>';
   h+='</div>';
 
-  h+='<div id="lnBar" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:9px 12px;border-radius:8px;background:#f8fafc;border:1px solid var(--line-2,#e2e8f0)">'
-    +'<span id="lnCount" style="font-size:12.5px;font-weight:600;color:var(--slate)"></span>'
-    +'<button class="btn-sm" id="lnEditBtn" onclick="lnEditSelected()"><i class="fa-solid fa-pen"></i> Edit</button>'
-    +'<button class="btn-sm" id="lnDelBtn" style="color:#dc2626;border-color:#fecaca" onclick="lnDeleteSelected()"><i class="fa-solid fa-trash"></i> Delete</button>'
-    +'<button class="btn-sm" id="lnClrBtn" style="margin-left:auto" onclick="lnClearSel()">Clear</button>'
-  +'</div>';
-
+  h+='<style>.ln-row:hover{background:var(--bg-subtle,#f8fafc)}'
+    +'#lnBar button:not(:disabled):hover{background:var(--bg-subtle,#f1f5f9)}'
+    +'.lnChk{width:15px;height:15px;cursor:pointer;accent-color:#1e3a8a;vertical-align:middle}</style>';
   h+='<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'
     +'<thead><tr style="background:var(--bg-subtle,#f8fafc)">'
       +'<th style="padding:10px 12px;width:34px"><input type="checkbox" id="lnAll" onclick="lnToggleAll(this)" title="Select all"></th>';
@@ -4555,7 +4576,7 @@ async function legalNotices(){
       /* The task is the thing people act on, so the row opens it. The checkbox cell stops the
          click, otherwise selecting a row would navigate away from the list. */
       const go=r.task_id?(' onclick="navTo(\'tasks/task/'+r.task_id+'\')" style="cursor:pointer"'):'';
-      h+='<tr'+go+' style="border-bottom:1px solid var(--line-2)">'
+      h+='<tr'+go+' class="ln-row" style="border-bottom:1px solid var(--line-2)">'
         +'<td style="padding:11px 12px" onclick="event.stopPropagation()"><input type="checkbox" class="lnChk" value="'+r.id+'" onclick="event.stopPropagation();lnSelSync()"></td>'
         +'<td style="padding:11px 12px;font-weight:600">'+esc(r.sent_by||'—')+'</td>'
         +'<td style="padding:11px 12px">'+esc(parties)+'</td>'
@@ -4585,8 +4606,7 @@ function lnSelected(){ return [...document.querySelectorAll('.lnChk:checked')].m
 window.lnSelSync=function(){
   const n=lnSelected().length;
   const cnt=$('lnCount'), ed=$('lnEditBtn'), del=$('lnDelBtn'), clr=$('lnClrBtn'), all=$('lnAll');
-  if(cnt) cnt.textContent = n ? (n + (n===1?' notice selected':' notices selected'))
-                              : 'Select a notice to edit or delete it';
+  if(cnt) cnt.textContent = n ? (n + ' selected') : '';
   /* Both actions stay on the page and grey out instead of appearing and disappearing - a button
      that is not there cannot be discovered, and a row of controls that jumps into existence
      moves the table under the pointer. */
@@ -4596,7 +4616,7 @@ window.lnSelSync=function(){
   // version of that, so it is offered only when exactly one row is ticked.
   grey(ed,  n===1, n ? 'Select exactly one notice to edit' : 'Select one notice to edit');
   grey(del, n>0,   'Select at least one notice to delete');
-  grey(clr, n>0,   'Nothing selected');
+  if(clr) clr.style.display = n>0 ? '' : 'none';
   const boxes=[...document.querySelectorAll('.lnChk')];
   if(all){ all.checked = boxes.length>0 && n===boxes.length; all.indeterminate = n>0 && n<boxes.length; }
 };

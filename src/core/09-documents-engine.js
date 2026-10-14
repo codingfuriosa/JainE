@@ -1069,8 +1069,16 @@ async function legalDocsView(seg){
     if(path.length)crumbTail=path.join(' / ');
   }
   setCrumb(['Legal',crumbTail]);
+  /* NO UPLOAD FROM "All Documents". Every Legal document belongs in a folder - the folder is what
+     the S3 key is built from and, for a notice, what triggers it being read. With none selected
+     the dialog would open on whichever folder happened to be first in the list and file the
+     document somewhere nobody chose. Pick a folder first; the button says so on hover. */
   const hAct=$('legalHeadActions');
-  if(hAct)hAct.innerHTML=`<button class="btn btn-primary" onclick="docUploadModal('Legal')"><i class="fa-solid fa-upload"></i> Upload</button>`;
+  if(hAct){
+    hAct.innerHTML = DOC.cat
+      ? `<button class="btn btn-primary" onclick="docUploadModal('Legal')"><i class="fa-solid fa-upload"></i> Upload</button>`
+      : `<button class="btn" disabled title="Choose a folder on the left before uploading" style="opacity:.45;cursor:not-allowed"><i class="fa-solid fa-upload"></i> Upload</button>`;
+  }
   const body=$('legalBody');if(!body)return;
   body.innerHTML=`<div class="split"><div><div class="subnav" id="legalNav"></div></div><div><div id="docTableHost"></div></div></div>`;
   legalNav();
