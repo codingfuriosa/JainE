@@ -4560,7 +4560,10 @@ async function legalNotices(){
 
   h+='<style>.ln-row:hover{background:var(--bg-subtle,#f8fafc)}'
     +'#lnBar button:not(:disabled):hover{background:var(--bg-subtle,#f1f5f9)}'
-    +'.lnChk{width:15px;height:15px;cursor:pointer;accent-color:#1e3a8a;vertical-align:middle}</style>';
+    +'.lnChk{width:15px;height:15px;cursor:pointer;accent-color:#1e3a8a;vertical-align:middle}'
+    /* after the plain hover rule, so an overdue row keeps its wash when hovered */
+    +'.ln-late{background:rgba(220,38,38,.07)}'
+    +'.ln-late:hover{background:rgba(220,38,38,.13)}</style>';
   h+='<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'
     +'<thead><tr style="background:var(--bg-subtle,#f8fafc)">'
       +'<th style="padding:10px 12px;width:34px"><input type="checkbox" id="lnAll" onclick="lnToggleAll(this)" title="Select all"></th>';
@@ -4576,7 +4579,7 @@ async function legalNotices(){
       /* The task is the thing people act on, so the row opens it. The checkbox cell stops the
          click, otherwise selecting a row would navigate away from the list. */
       const go=r.task_id?(' onclick="navTo(\'tasks/task/'+r.task_id+'\')" style="cursor:pointer"'):'';
-      h+='<tr'+go+' class="ln-row" style="border-bottom:1px solid var(--line-2)">'
+      h+='<tr'+go+' class="ln-row'+(r.state==='Overdue'?' ln-late':'')+'" style="border-bottom:1px solid var(--line-2)">'
         +'<td style="padding:11px 12px" onclick="event.stopPropagation()"><input type="checkbox" class="lnChk" value="'+r.id+'" onclick="event.stopPropagation();lnSelSync()"></td>'
         +'<td style="padding:11px 12px;font-weight:600">'+esc(r.sent_by||'—')+'</td>'
         +'<td style="padding:11px 12px">'+esc(parties)+'</td>'
@@ -4742,7 +4745,9 @@ async function legalScoreboardNotice(){
     +'Every notice is due seven days after it was uploaded. A notice still outstanding is listed but not yet scored.'
   +'</div>';
 
-  h+='<style>.lns-row:hover{background:var(--bg-subtle,#f8fafc)}</style>';
+  h+='<style>.lns-row:hover{background:var(--bg-subtle,#f8fafc)}'
+    +'.ln-late{background:rgba(220,38,38,.07)}'
+    +'.ln-late:hover{background:rgba(220,38,38,.13)}</style>';
   h+='<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'
     +'<thead><tr style="background:var(--bg-subtle,#f8fafc)">';
   ['Notice','Assignee','Status','Completed','Due','Timing','Points'].forEach(function(l){
@@ -4753,7 +4758,7 @@ async function legalScoreboardNotice(){
   if(rows.length){
     rows.forEach(function(r){
       const unscored=(r.points===null||r.points===undefined);
-      h+='<tr class="lns-row" style="border-bottom:1px solid var(--line-2)">'
+      h+='<tr class="lns-row'+(r.state==='Overdue'?' ln-late':'')+'" style="border-bottom:1px solid var(--line-2)">'
         +'<td style="padding:11px 12px;font-weight:600">'+esc(r.notice||'—')+'</td>'
         +'<td style="padding:11px 12px">'+(r.assignee?esc(r.assignee):'<span style="color:var(--slate)">—</span>')+'</td>'
         +'<td style="padding:11px 12px">'+lnPill(r.state)+'</td>'
