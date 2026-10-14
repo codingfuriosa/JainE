@@ -1498,9 +1498,14 @@
     }
     const meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
     const wfIcon='';
+    /* A task nobody delegated shows WHERE IT CAME FROM, not a person. Workflow already did;
+       a legal notice fell through to the avatar stack and rendered the delegator "notices"
+       as a grey "N", which tells the reader nothing. Same treatment, Legal's own colour. */
     const ownerVis=(t.flow_case_step_id!=null)
       ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-diagram-project"></i></span>`
-      : (emails.length?avatars(list,emails):'');
+      : (t.source==='notice'
+        ? `<span title="Owner: Legal Notice" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1e3a8a;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-envelope-open-text"></i></span>`
+        : (emails.length?avatars(list,emails):''));
     // Workflow rows show the full concatenated title (step + filled-in details), same as taskRow, and
     // in Completed This Week (showDoneDate) the title wraps in full instead of clipping.
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
@@ -14681,9 +14686,14 @@
       meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
     }
     const wfIcon2='';
+    /* A task nobody delegated shows WHERE IT CAME FROM, not a person. Workflow already did;
+       a legal notice fell through to the avatar stack and rendered the delegator "notices"
+       as a grey "N", which tells the reader nothing. Same treatment, Legal's own colour. */
     const ownerVis=(t.flow_case_step_id!=null)
       ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-diagram-project"></i></span>`
-      : (emails.length?avatars(list,emails):'');
+      : (t.source==='notice'
+        ? `<span title="Owner: Legal Notice" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1e3a8a;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-envelope-open-text"></i></span>`
+        : (emails.length?avatars(list,emails):''));
     const wfCombined=wfRowTitle(wfInfo,list,t&&t.description);
     const wfTitle=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
     // Searchable but not necessarily shown: the workflow's own name/noun and JAINE's OWN instance

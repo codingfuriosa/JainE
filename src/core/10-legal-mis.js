@@ -1550,11 +1550,11 @@ async function legalNotices(){
   });
   h+='</div>';
 
-  h+='<div id="lnBar" style="display:none;align-items:center;gap:10px;margin-bottom:10px;padding:9px 12px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe">'
-    +'<span id="lnCount" style="font-size:12.5px;font-weight:600;color:#1e3a8a"></span>'
+  h+='<div id="lnBar" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:9px 12px;border-radius:8px;background:#f8fafc;border:1px solid var(--line-2,#e2e8f0)">'
+    +'<span id="lnCount" style="font-size:12.5px;font-weight:600;color:var(--slate)"></span>'
     +'<button class="btn-sm" id="lnEditBtn" onclick="lnEditSelected()"><i class="fa-solid fa-pen"></i> Edit</button>'
-    +'<button class="btn-sm" style="color:#dc2626;border-color:#fecaca" onclick="lnDeleteSelected()"><i class="fa-solid fa-trash"></i> Delete</button>'
-    +'<button class="btn-sm" style="margin-left:auto" onclick="lnClearSel()">Clear</button>'
+    +'<button class="btn-sm" id="lnDelBtn" style="color:#dc2626;border-color:#fecaca" onclick="lnDeleteSelected()"><i class="fa-solid fa-trash"></i> Delete</button>'
+    +'<button class="btn-sm" id="lnClrBtn" style="margin-left:auto" onclick="lnClearSel()">Clear</button>'
   +'</div>';
 
   h+='<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'
@@ -1600,13 +1600,20 @@ async function legalNotices(){
 /* ---- selection -------------------------------------------------------------------------- */
 function lnSelected(){ return [...document.querySelectorAll('.lnChk:checked')].map(c=>Number(c.value)); }
 window.lnSelSync=function(){
-  const n=lnSelected().length, bar=$('lnBar'), cnt=$('lnCount'), ed=$('lnEditBtn'), all=$('lnAll');
-  if(bar) bar.style.display = n ? 'flex' : 'none';
-  if(cnt) cnt.textContent = n + (n===1?' notice selected':' notices selected');
+  const n=lnSelected().length;
+  const cnt=$('lnCount'), ed=$('lnEditBtn'), del=$('lnDelBtn'), clr=$('lnClrBtn'), all=$('lnAll');
+  if(cnt) cnt.textContent = n ? (n + (n===1?' notice selected':' notices selected'))
+                              : 'Select a notice to edit or delete it';
+  /* Both actions stay on the page and grey out instead of appearing and disappearing - a button
+     that is not there cannot be discovered, and a row of controls that jumps into existence
+     moves the table under the pointer. */
+  const grey=(b,on,why)=>{ if(!b) return; b.disabled=!on; b.style.opacity=on?'':'0.4';
+                           b.style.cursor=on?'':'not-allowed'; b.title=on?'':why; };
   // Editing is correcting ONE document against what is printed on it; there is no sensible bulk
   // version of that, so it is offered only when exactly one row is ticked.
-  if(ed){ ed.disabled = n!==1; ed.style.opacity = n===1 ? '' : '0.45';
-          ed.title = n===1 ? '' : 'Select exactly one notice to edit'; }
+  grey(ed,  n===1, n ? 'Select exactly one notice to edit' : 'Select one notice to edit');
+  grey(del, n>0,   'Select at least one notice to delete');
+  grey(clr, n>0,   'Nothing selected');
   const boxes=[...document.querySelectorAll('.lnChk')];
   if(all){ all.checked = boxes.length>0 && n===boxes.length; all.indeterminate = n>0 && n<boxes.length; }
 };
