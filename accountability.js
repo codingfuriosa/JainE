@@ -13976,7 +13976,8 @@
      acc.ptasks.recur. dpMatches() below is a deliberate mirror of acc.recur_matches() in the
      database - both walk a day at a time and test the same predicate, so the dates shown here are
      the dates the server will actually create. Change one and you must change the other.
-     proto/due-date-picker.html is the standalone version. */
+       A standalone proto/due-date-picker.html used to sit beside this as a scratch copy; it
+       was deleted, so this is now the only implementation. */
   const DP_FREQS=[
     {k:'none',        label:'Does not repeat', asks:'date'},
     {k:'daily',       label:'Every day',       asks:'nothing', hidden:true},   // legacy only

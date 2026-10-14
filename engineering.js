@@ -1,7 +1,8 @@
 /* ===========================================================================
    JAIN-E · ENGINEERING — core, Overview, Budget, Masters   [loads after nexus-core.js]
    Flow:  Activities -> Budget -> BOQ -> Work Order (tags BOQ) -> Work Done (verified) -> RA Bill
-   Data:  schema `eng` (db/engineering-schema.sql). Projects/blocks/floors/flats are read from
+   Data:  schema `eng` (defined in supabase/migrations/, not the deleted db/*.sql scratch copies).
+          Projects/blocks/floors/flats are read from
           cust.projects + postsales.*; contractors/materials/UoM from purchase.vendors/items/uoms.
    Rules (quantity caps, maker-checker, locking) are enforced by triggers in the database; this
    file only presents them and shows the database's message when it refuses something.

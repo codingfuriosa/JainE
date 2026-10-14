@@ -394,7 +394,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'6d61d8369f','insp-items.js':'af05d4a323','postsales.js':'149a60e1a2','scheduling.js':'50da5d7188','accounts.js':'c31ffa60bc','accounts-bank.js':'ea9648a540','accounts-books.js':'ed1ddeecec','purchase.js':'8109127afb','purchase-indent.js':'f6a398b898','purchase-rfq.js':'e6b7d700d5','purchase-po.js':'7239d968b5','purchase-stores.js':'5ff625e1d0','purchase-reports.js':'62c2dbe660'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'62ebf4807c','insp-items.js':'af05d4a323','postsales.js':'149a60e1a2','scheduling.js':'50da5d7188','accounts.js':'c31ffa60bc','accounts-bank.js':'ea9648a540','accounts-books.js':'ed1ddeecec','purchase.js':'8109127afb','purchase-indent.js':'f6a398b898','purchase-rfq.js':'e6b7d700d5','purchase-po.js':'7239d968b5','purchase-stores.js':'5ff625e1d0','purchase-reports.js':'62c2dbe660'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];
@@ -13355,7 +13355,8 @@ VIEWS.network=async function(v,seg){
 
 // ── Recruitment ──────────────────────────────────────────────────────────────
 let RT_RECORDS=null; // cached tests from DB
-// Default JDs bundled with the app (from ./jd/ folder)
+// Default JDs used to ship as PDFs in a ./jd/ folder; that folder is deleted and the array
+// stays empty because every JD now lives in recruit.job_descriptions.
 const DEFAULT_JDS=[]; // all JDs now stored in Supabase (recruit.job_descriptions)
 let REC_SEL=new Set();
 // Recruitment (New) -- retired recruitment.html's four tabs, ManPower Form/Referrals rebuilt on

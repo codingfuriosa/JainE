@@ -531,7 +531,8 @@ VIEWS.network=async function(v,seg){
 
 // ── Recruitment ──────────────────────────────────────────────────────────────
 let RT_RECORDS=null; // cached tests from DB
-// Default JDs bundled with the app (from ./jd/ folder)
+// Default JDs used to ship as PDFs in a ./jd/ folder; that folder is deleted and the array
+// stays empty because every JD now lives in recruit.job_descriptions.
 const DEFAULT_JDS=[]; // all JDs now stored in Supabase (recruit.job_descriptions)
 let REC_SEL=new Set();
 // Recruitment (New) -- retired recruitment.html's four tabs, ManPower Form/Referrals rebuilt on

@@ -18,3 +18,8 @@ node_modules/
 
 # Supabase CLI scratch state
 supabase/.temp/
+
+# The jaine-agent source was removed from the repo, but a 444MB virtualenv and a Chrome
+# profile remain on disk from when it ran. Ignored so they do not clutter git status; delete
+# the folder by hand if the agent is not coming back.
+jaine-agent/

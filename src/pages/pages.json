@@ -38,11 +38,6 @@
     "page": "construction"
   },
   {
-    "file": "control.html",
-    "title": "control · JAIN-E · Jain Group",
-    "page": "control"
-  },
-  {
     "file": "crm.html",
     "title": "CRM · Nexus-RE · Jain Group",
     "page": "crm"
@@ -114,11 +109,6 @@
     "before": [
       "insp-items.js"
     ]
-  },
-  {
-    "file": "intranet.html",
-    "title": "intranet · JAIN-E · Jain Group",
-    "page": "intranet"
   },
   {
     "file": "inventory.html",
@@ -224,11 +214,6 @@
     "file": "supplier.html",
     "title": "supplier · JAIN-E · Jain Group",
     "page": "supplier"
-  },
-  {
-    "file": "training.html",
-    "title": "training · JAIN-E · Jain Group",
-    "page": "training"
   },
   {
     "file": "transcription.html",
