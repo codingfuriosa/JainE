@@ -2412,7 +2412,6 @@ window.docUploadModal=async function(presetDept){
     <div class="dropzone" onclick="document.getElementById('upFile').click()"><i class="fa-solid fa-cloud-arrow-up"></i><div id="upName">Drag & drop or click to select files</div><div style="font-size:12px;margin-top:4px">PDF, Word, Excel, images — multiple allowed. Each file's name can be edited below.</div></div>
     <input type="file" id="upFile" class="hidden" multiple onchange="docUpPick()">
     <div id="upList" style="margin-top:8px"></div>
-    <div id="upNoticeNote" style="display:none;margin:4px 0 2px;padding:9px 11px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;font-size:12.5px;color:#1e3a8a"><i class="fa-solid fa-circle-info"></i> Filing to <b>Legal &rsaquo; Legal Notice</b>. Nothing else to fill in - the notice is read automatically and a task is raised for the Legal team, due in 7 days. <a href="#" onclick="event.preventDefault();docUpShowWhere()" style="color:#1d4ed8;text-decoration:underline">Send somewhere else</a></div>
     <div class="two" id="upWhere">
       <div><label>Department ${locked?'<span style="color:#94a3b8;font-weight:400">(locked)</span>':''}</label><select id="upDept" ${locked?'disabled':''}>${DEPARTMENTS.map(x=>'<option '+(x===dept?'selected':'')+'>'+x+'</option>').join('')}</select></div>
       ${catField}
@@ -2451,27 +2450,17 @@ window.docUpPick=function(){const fs=[...$('upFile').files];$('upName').textCont
     }catch(e){ _noticeFolderIds=new Set(); }
     return _noticeFolderIds;
   }
-  /* Reveals Department + Category again and keeps them revealed, so choosing another folder
-     does not fight with the next sync. */
-  window.docUpShowWhere=function(){
-    const where=$('upWhere'), note=$('upNoticeNote');
-    if(where){ where.dataset.forced='1'; where.style.display=''; }
-    if(note) note.style.display='none';
-    const extra=$('upExtra'); if(extra) extra.style.display='';
-  };
   window.docUpNoticeSync=async function(){
-    const sel=$('upFolderId'), extra=$('upExtra'), note=$('upNoticeNote');
+    const sel=$('upFolderId'), extra=$('upExtra');
     if(!extra) return;                       // not the Legal dialog
     const ids=await noticeFolderIds();
     const isNotice=!!(sel && ids.has(Number(sel.value)));
     extra.style.display = isNotice ? 'none' : '';
     /* Department and Category go too. A legal notice has exactly one destination, so asking is
-       pointless - and the note below says where it is going instead. The row is only hidden
-       while the destination IS the notice folder, and docUpShowWhere() brings it back for the
-       rare case of opening this dialog there and meaning to file somewhere else. */
+       asking a question with one answer. Hidden only while the destination IS the notice folder,
+       so the dialog is unchanged everywhere else in JAIN-E. */
     const where=$('upWhere');
-    if(where && !where.dataset.forced) where.style.display = isNotice ? 'none' : '';
-    if(note) note.style.display = isNotice ? '' : 'none';
+    if(where) where.style.display = isNotice ? 'none' : '';
     // The name boxes are rebuilt on every file pick, so they are hidden by their wrapper row.
     document.querySelectorAll('.upTitleIn').forEach(function(inp){
       const row=inp.parentElement; if(row) row.style.display = isNotice ? 'none' : '';
