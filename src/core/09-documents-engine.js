@@ -576,7 +576,7 @@ window.docUploadModal=async function(presetDept){
     const {roots}=buildFolderTree(list);
     const opts=flattenTreeOptions(roots,0);
     const curFolderId=DOC.cat?Number(DOC.cat):(opts[0]?opts[0].id:'');
-    catField=`<div><label>Category</label><select id="upFolderId">${opts.map(o=>'<option value="'+o.id+'" '+(o.id===curFolderId?'selected':'')+'>'+esc(o.label)+'</option>').join('')}</select></div>`;
+    catField=`<div><label>Category</label><select id="upFolderId" onchange="docUpNoticeSync()">${opts.map(o=>'<option value="'+o.id+'" '+(o.id===curFolderId?'selected':'')+'>'+esc(o.label)+'</option>').join('')}</select></div>`;
   } else {
     const curCat=(DOC.cat&&DOC.cat!=='All')?DOC.cat:'';
     let cats=[];
@@ -589,17 +589,61 @@ window.docUploadModal=async function(presetDept){
     <div class="dropzone" onclick="document.getElementById('upFile').click()"><i class="fa-solid fa-cloud-arrow-up"></i><div id="upName">Drag & drop or click to select files</div><div style="font-size:12px;margin-top:4px">PDF, Word, Excel, images — multiple allowed. Each file's name can be edited below.</div></div>
     <input type="file" id="upFile" class="hidden" multiple onchange="docUpPick()">
     <div id="upList" style="margin-top:8px"></div>
+    <div id="upNoticeNote" style="display:none;margin:4px 0 2px;padding:9px 11px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;font-size:12.5px;color:#1e3a8a"><i class="fa-solid fa-circle-info"></i> Nothing else to fill in. The notice is read automatically and a task is raised for the Legal team, due in 7 days.</div>
     <div class="two">
       <div><label>Department ${locked?'<span style="color:#94a3b8;font-weight:400">(locked)</span>':''}</label><select id="upDept" ${locked?'disabled':''}>${DEPARTMENTS.map(x=>'<option '+(x===dept?'selected':'')+'>'+x+'</option>').join('')}</select></div>
       ${catField}
     </div>
+    <div id="upExtra">
     <div class="two"><div><label>Version</label><input id="upVer" value="v1"></div><div><label>Visibility</label><select id="upVis">${VIS.map(x=>'<option '+(x==='Internal'?'selected':'')+'>'+x+'</option>').join('')}</select></div></div>
     <label>Description</label><textarea id="upDesc" placeholder="Short description…"></textarea>
     <div class="two"><div><label>Status</label><select id="upStatus">${DOCSTATUS.map(x=>'<option>'+x+'</option>').join('')}</select></div><div><label>Confidential</label><select id="upConf"><option value="false">No</option><option value="true">Yes (super-admin only)</option></select></div></div>
+    </div><!-- /upExtra -->
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="upBtn" onclick="docUploadSave()"><i class="fa-solid fa-upload"></i> Upload</button></div>`,'lg');
+    docUpNoticeSync();
 };
-window.docUpPick=function(){const fs=[...$('upFile').files];$('upName').textContent=fs.length?fs.length+' file(s) selected — edit names below':'Drag & drop or click to select files';$('upList').innerHTML=fs.map((f,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-2)">${fileIcon(f.name.split('.').pop())}<input class="upTitleIn" data-i="${i}" value="${esc(f.name.replace(/\.[^.]+$/,''))}" title="${esc(f.name)}" style="flex:1;font-size:13px;font-weight:500;border:1px solid var(--line);border-radius:7px;padding:6px 9px;color:var(--ink)"><span style="color:var(--slate);font-size:12px;white-space:nowrap">${fmtBytes(f.size)}</span></div>`).join('');};
+window.docUpPick=function(){const fs=[...$('upFile').files];$('upName').textContent=fs.length?fs.length+' file(s) selected — edit names below':'Drag & drop or click to select files';$('upList').innerHTML=fs.map((f,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-2)">${fileIcon(f.name.split('.').pop())}<input class="upTitleIn" data-i="${i}" value="${esc(f.name.replace(/\.[^.]+$/,''))}" title="${esc(f.name)}" style="flex:1;font-size:13px;font-weight:500;border:1px solid var(--line);border-radius:7px;padding:6px 9px;color:var(--ink)"><span style="color:var(--slate);font-size:12px;white-space:nowrap">${fmtBytes(f.size)}</span></div>`).join('');docUpNoticeSync();};
+  /* UPLOADING A LEGAL NOTICE ASKS FOR THE FILE AND NOTHING ELSE.
+     Every other field on this dialog - version, visibility, description, status, confidential,
+     and the per-file name box - already has a sensible default, and none of them tells the
+     notice reader anything it does not take off the page itself. So for the Legal Notice folder
+     they are hidden rather than removed: docUploadSave() still reads them, still gets v1 /
+     Internal / the filename, and needs no special case of its own.
+
+     Which folders count is answered by the database (acc.legal_notice_folder_ids), not by
+     matching the name here - the folder can be renamed, and sub-folders of it count too. The
+     answer is fetched once and kept, because it changes about never.
+
+     If that call fails the fields simply stay visible: a notice uploaded through the full form
+     is still a notice and is still read. Failing open costs a few seconds of typing; failing
+     closed would silently drop uploads. */
+  let _noticeFolderIds=null;
+  async function noticeFolderIds(){
+    if(_noticeFolderIds) return _noticeFolderIds;
+    try{
+      const {data,error}=await sb.schema('acc').rpc('legal_notice_folder_ids');
+      if(error) throw error;
+      _noticeFolderIds=new Set((data||[]).map(r=>Number(r.folder_id)));
+    }catch(e){ _noticeFolderIds=new Set(); }
+    return _noticeFolderIds;
+  }
+  window.docUpNoticeSync=async function(){
+    const sel=$('upFolderId'), extra=$('upExtra'), note=$('upNoticeNote');
+    if(!extra) return;                       // not the Legal dialog
+    const ids=await noticeFolderIds();
+    const isNotice=!!(sel && ids.has(Number(sel.value)));
+    extra.style.display = isNotice ? 'none' : '';
+    if(note) note.style.display = isNotice ? '' : 'none';
+    // The name boxes are rebuilt on every file pick, so they are hidden by their wrapper row.
+    document.querySelectorAll('.upTitleIn').forEach(function(inp){
+      const row=inp.parentElement; if(row) row.style.display = isNotice ? 'none' : '';
+    });
+    const nm=$('upName');
+    if(nm && isNotice && $('upFile') && $('upFile').files.length){
+      nm.textContent=$('upFile').files.length+' file(s) selected';
+    }
+  };
 async function loadPdfJs(){
   if(window.pdfjsLib)return window.pdfjsLib;
   await new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';sc.onload=res;sc.onerror=rej;document.head.appendChild(sc);});
@@ -984,13 +1028,14 @@ async function legalOcrBarPaint(){
 }
 window.legalOcrBarPaint=legalOcrBarPaint;
 VIEWS.legal=async function(v,seg){
-  const known={mis:1,scoreboard:1,actions:1,advocates:1,causelist:1};
+  const known={mis:1,scoreboard:1,actions:1,advocates:1,causelist:1,notices:1};
   const tab=known[seg[0]]?seg[0]:'docs';
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-scale-balanced" style="color:#1e3a8a"></i> Legal</h1><p>Document vault and litigation MIS for the Legal department</p></div>
     <div id="legalHeadActions" style="display:flex;gap:10px;flex-wrap:wrap"></div></div>
     <div class="tabs">
       <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('legal')"><i class="fa-solid fa-folder-open"></i> Documents</div>
       <div class="tab ${tab==='mis'?'active':''}" onclick="navTo('legal/mis')"><i class="fa-solid fa-gavel"></i> MIS</div>
+      <div class="tab ${tab==='notices'?'active':''}" onclick="navTo('legal/notices')"><i class="fa-solid fa-envelope-open-text"></i> Notices</div>
       <div class="tab ${tab==='actions'?'active':''}" onclick="navTo('legal/actions')"><i class="fa-solid fa-list-check"></i> Actions</div>
       <div class="tab ${tab==='causelist'?'active':''}" onclick="navTo('legal/causelist')"><i class="fa-solid fa-clipboard-check"></i> Causelist Reviews</div>
       <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
@@ -1000,7 +1045,9 @@ VIEWS.legal=async function(v,seg){
     <div id="legalBody"><div class="loader"><div class="spin"></div></div></div>`;
   legalOcrBarPaint();
   if(tab==='mis') legalMIS();
-  else if(tab==='scoreboard') legalScoreboard();
+  else if(tab==='notices') legalNotices();
+  // seg[1] picks the Scoreboard's own tab - 'mis' unless the url asks for 'notice'.
+  else if(tab==='scoreboard') legalScoreboard(seg[1]==='notice'?'notice':'mis');
   else if(tab==='actions') legalActions();
   else if(tab==='causelist') legalCauselistReviews();
   else if(tab==='advocates') legalAdvocates();

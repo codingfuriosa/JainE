@@ -1433,10 +1433,25 @@ function misActionScore(a){
    have just been cleared for a fresh start, so any figure it showed now would be meaningless.
    The workings below are left intact - flip SCOREBOARD_LIVE back to true to bring it back. */
 const SCOREBOARD_LIVE=false;
-async function legalScoreboard(){
-  setCrumb(['Legal','Scoreboard']);
+/* THE SCOREBOARD HAS TWO OF ITS OWN TABS.
+   MIS scores a CASE on how much notice an action was given before its date. Notice scores a
+   NOTICE on how many days before its deadline the task was finished. Different things measured
+   differently, so they are two tables rather than one with a type column. This wrapper owns the
+   tab strip; each renderer writes into #legalSbHost beneath it. */
+async function legalScoreboard(which){
+  const sbTab=(which==='notice')?'notice':'mis';
+  setCrumb(['Legal','Scoreboard',sbTab==='notice'?'Notice':'MIS']);
   const hAct=$('legalHeadActions');if(hAct)hAct.innerHTML='';
-  const body=$('legalBody');if(!body)return;
+  const host=$('legalBody');if(!host)return;
+  host.innerHTML=`<div class="tabs" style="margin:0 0 14px">
+      <div class="tab ${sbTab==='mis'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-gavel"></i> MIS</div>
+      <div class="tab ${sbTab==='notice'?'active':''}" onclick="navTo('legal/scoreboard/notice')"><i class="fa-solid fa-envelope-open-text"></i> Notice</div>
+    </div><div id="legalSbHost"><div class="loader"><div class="spin"></div></div></div>`;
+  if(sbTab==='notice') legalScoreboardNotice(); else legalScoreboardMIS();
+}
+
+async function legalScoreboardMIS(){
+  const body=$('legalSbHost');if(!body)return;
   if(!SCOREBOARD_LIVE){
     body.innerHTML='<div class="card card-pad" style="max-width:620px;margin:26px auto;text-align:center">'
       +'<div style="font-size:34px;color:#1e3a8a;margin-bottom:12px"><i class="fa-solid fa-ranking-star"></i></div>'
@@ -1487,6 +1502,130 @@ async function legalScoreboard(){
     </tr></tfoot>`:''}
   </table></div></div>`;
 }
+/* ============================ LEGAL NOTICES ============================
+   A notice uploaded to Legal > Legal Notice is read by the Gemini pass in legal-ocr-batch, which
+   pulls four fields off the page and raises one task for the Legal team. These two screens are
+   the other end of that: the tracker shows every notice and whether it has been dealt with, the
+   scoreboard scores the ones that have.
+
+   Both read a SECURITY DEFINER function rather than the table, so the visibility rule is applied
+   once per query instead of once per row - and so that staff who can reach Legal but hold no
+   `doc` role can still see their own work. */
+function lnPill(state){
+  const m={Done:['#16a34a','#dcfce7'],Overdue:['#dc2626','#fee2e2'],Outstanding:['#b45309','#fef3c7']};
+  const c=m[state]||['#64748b','#f1f5f9'];
+  return `<span style="font-size:10.5px;font-weight:700;color:${c[0]};background:${c[1]};padding:2px 8px;border-radius:999px;white-space:nowrap">${esc(state||'—')}</span>`;
+}
+function lnTypeTag(t){
+  if(!t) return '<span style="color:var(--slate)">—</span>';
+  const c=t==='Government'?'#1d4ed8':(t==='Customer'?'#7c3aed':'#64748b');
+  return `<span style="font-size:10.5px;font-weight:700;color:${c}">${esc(t)}</span>`;
+}
+
+async function legalNotices(){
+  setCrumb(['Legal','Notices']);
+  const hAct=$('legalHeadActions');if(hAct)hAct.innerHTML='';
+  const body=$('legalBody');if(!body)return;
+  loader(body);
+  let rows=[];
+  try{
+    const {data,error}=await sb.schema('acc').rpc('legal_notice_tracker');
+    if(error)throw error;
+    rows=data||[];
+  }catch(e){
+    body.innerHTML=`<div class="empty" style="padding:40px"><i class="fa-regular fa-circle-xmark"></i><div>Could not load notices</div><div style="font-size:12px;color:var(--slate);margin-top:6px">${esc((e&&e.message)||'')}</div></div>`;
+    return;
+  }
+
+  const open=rows.filter(r=>r.state!=='Done').length;
+  const late=rows.filter(r=>r.state==='Overdue').length;
+  const head=['Sent by Whom','Clients / Applicants','Subject','Type','Uploaded','Due','Completion Date','Status'];
+
+  body.innerHTML=`
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      ${[['Total notices',rows.length,'#1e3a8a'],['Outstanding',open,'#b45309'],['Overdue',late,'#dc2626']]
+        .map(k=>`<div class="card card-pad" style="min-width:150px"><div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)">${k[0]}</div><div style="font-size:24px;font-weight:800;color:${k[2]};margin-top:2px">${k[1]}</div></div>`).join('')}
+    </div>
+    <div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:var(--bg-subtle,#f8fafc)">
+        ${head.map(l=>`<th style="padding:10px 12px;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);white-space:nowrap">${l}</th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${rows.length?rows.map(r=>{
+          const parties=(r.parties&&r.parties.length)?r.parties.join('; '):'—';
+          /* The task is the thing people act on, so the row opens it rather than the file - the
+             file is one click further on, from inside the task. */
+          const go=r.task_id?` onclick="navTo('tasks/task/${r.task_id}')" style="cursor:pointer"`:'';
+          return `<tr${go} style="border-bottom:1px solid var(--line-2)${r.task_id?';cursor:pointer':''}">
+            <td style="padding:11px 12px;font-weight:600">${esc(r.sent_by||'—')}</td>
+            <td style="padding:11px 12px">${esc(parties)}</td>
+            <td style="padding:11px 12px;color:var(--slate);max-width:320px">${esc(r.subject||'—')}</td>
+            <td style="padding:11px 12px">${lnTypeTag(r.notice_type)}</td>
+            <td style="padding:11px 12px;color:var(--slate);white-space:nowrap">${r.uploaded_on?fmtDate(r.uploaded_on):'—'}</td>
+            <td style="padding:11px 12px;color:var(--slate);white-space:nowrap">${r.due_date?fmtDate(r.due_date):'—'}</td>
+            <td style="padding:11px 12px;white-space:nowrap">${r.completed_on?fmtDate(r.completed_on):'<span style="color:var(--slate)">—</span>'}</td>
+            <td style="padding:11px 12px">${lnPill(r.state)}</td>
+          </tr>`;
+        }).join(''):`<tr><td colspan="${head.length}"><div class="empty" style="padding:34px"><i class="fa-regular fa-envelope"></i><div>No legal notices yet</div><div style="font-size:12px;color:var(--slate);margin-top:6px">Upload one to Documents &rsaquo; Legal Notice. It is read automatically and a task is raised for the Legal team.</div></div></td></tr>`}
+      </tbody>
+    </table></div></div>`;
+}
+
+/* +1 two or more days early, 0 one day early or on the day, -1 late. The gap at one day is
+   deliberate and was asked for: a notice answered the day before it was due was not answered
+   early, it was answered just in time. The figures come from the database so the page and any
+   later report cannot disagree about a score. */
+async function legalScoreboardNotice(){
+  const body=$('legalSbHost');if(!body)return;
+  loader(body);
+  let rows=[];
+  try{
+    const {data,error}=await sb.schema('acc').rpc('legal_notice_scoreboard');
+    if(error)throw error;
+    rows=data||[];
+  }catch(e){
+    body.innerHTML=`<div class="empty" style="padding:40px"><i class="fa-regular fa-circle-xmark"></i><div>Could not load the notice scoreboard</div><div style="font-size:12px;color:var(--slate);margin-top:6px">${esc((e&&e.message)||'')}</div></div>`;
+    return;
+  }
+  const grand=rows.reduce((a,r)=>a+(Number(r.points)||0),0);
+  const cell=n=>{const c=n>0?'#16a34a':(n<0?'#dc2626':'#64748b');return `<span style="font-weight:800;color:${c}">${n>0?'+':''}${n}</span>`;};
+  const when=r=>{
+    const d=Number(r.days_early);
+    if(!isFinite(d)) return '—';
+    if(d>0) return d+' day'+(d===1?'':'s')+' early';
+    if(d===0) return 'on the due date';
+    return (-d)+' day'+(d===-1?'':'s')+' late';
+  };
+
+  body.innerHTML=`
+    <div class="card card-pad" style="margin-bottom:12px;font-size:12.5px;color:var(--slate)">
+      <b style="color:var(--ink)">How it is scored.</b>
+      <span style="color:#16a34a;font-weight:700">+1</span> finished two or more days before the due date &nbsp;·&nbsp;
+      <span style="color:#64748b;font-weight:700">0</span> one day early, or on the day &nbsp;·&nbsp;
+      <span style="color:#dc2626;font-weight:700">-1</span> finished late.
+      Every notice is due seven days after it was uploaded. A notice still outstanding is not scored yet.
+    </div>
+    <div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:var(--bg-subtle,#f8fafc)">
+        ${['Notice','Assignee','Completed','Due','Timing','Points'].map(l=>`<th style="padding:10px 12px;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);white-space:nowrap">${l}</th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${rows.length?rows.map(r=>`<tr style="border-bottom:1px solid var(--line-2)">
+            <td style="padding:11px 12px;font-weight:600">${esc(r.notice||'—')}</td>
+            <td style="padding:11px 12px">${esc(r.assignee||'—')}</td>
+            <td style="padding:11px 12px;color:var(--slate);white-space:nowrap">${r.completed_on?fmtDate(r.completed_on):'—'}</td>
+            <td style="padding:11px 12px;color:var(--slate);white-space:nowrap">${r.due_date?fmtDate(r.due_date):'—'}</td>
+            <td style="padding:11px 12px;color:var(--slate);white-space:nowrap">${esc(when(r))}</td>
+            <td style="padding:11px 12px">${cell(Number(r.points)||0)}</td>
+          </tr>`).join(''):`<tr><td colspan="6"><div class="empty" style="padding:34px"><i class="fa-regular fa-star"></i><div>Nothing scored yet</div><div style="font-size:12px;color:var(--slate);margin-top:6px">A notice is scored once its task is marked done.</div></div></td></tr>`}
+      </tbody>
+      ${rows.length?`<tfoot><tr style="background:var(--bg-subtle,#f8fafc)">
+        <td colspan="5" style="padding:11px 12px;text-align:right;font-weight:700;border-top:2px solid var(--line)">Total across ${rows.length} notice${rows.length===1?'':'s'}</td>
+        <td style="padding:11px 12px;font-weight:800;border-top:2px solid var(--line)">${cell(grand)}</td>
+      </tr></tfoot>`:''}
+    </table></div></div>`;
+}
+
 /* ---- Causelist export ------------------------------------------------------------------
    Mirrors CAUSTLIST - AUGUST26.pdf: title, generated stamp, then
    SL NO. | CASE TYPE | CASE DETAILS | CASE NO. | DATE | Advocate incharge | Court Name |
