@@ -65,8 +65,12 @@ const BRAND = {
             + '    </div>',
 };
 const FOOT = { operations: 'Operations Portal', customer: 'Customer Portal' };
-const CHART = '<script src="vendor/chart-4.4.1.umd.min.js" defer></script>\n';
-const tag = (file, v) => `<script src="${file}?v=${v}" defer></script>\n`;
+/* Plain, in-order script tags - no defer. A module's own script (engineering.js, ...) comes after
+   nexus-core.js and must have run before the page is first drawn; deferred, it could arrive late
+   and leave the generic "Module not found" on screen. The libraries are served from vendor/ and
+   kept by the browser, so blocking costs next to nothing. */
+const CHART = '<script src="vendor/chart-4.4.1.umd.min.js"></script>\n';
+const tag = (file, v) => `<script src="${file}?v=${v}"></script>\n`;
 
 const outputs = { 'nexus-core.js': coreOut };
 for (const p of pages) {
@@ -80,7 +84,7 @@ for (const p of pages) {
     .replace('{{BRAND}}', BRAND[portal])
     .replace('{{FOOT}}', FOOT[portal])
     .replace('{{PAGE}}', p.page)
-    .replace('{{SCRIPTS}}', scripts)
+    .replace('{{SCRIPTS}}', () => scripts + (p.tail || ''))   // tail: a page's own inline script, after its script tags
     // every local script and stylesheet the template itself names (nexus.css, vendor/...) gets its
     // content version too; the page's own scripts were stamped above
     .replace(/\b(src|href)="((?!https?:|\/\/)[\w./-]+\.(?:js|css))"/g, (m, attr, file) => `${attr}="${file}?v=${versionOf(file)}"`);

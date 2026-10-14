@@ -79,7 +79,8 @@
       "engineering-amend.js",
       "engineering-ra.js",
       "engineering-ret.js"
-    ]
+    ],
+    "tail": "<script>\n/* nexus-core.js draws the page as soon as sign-in finishes, which on a slow connection can happen before the Engineering\n   scripts above have downloaded — the router then finds no view and shows \"Module not found\". Once everything has loaded,\n   draw the page again if it is still showing that (or nothing). */\nwindow.addEventListener('load',function(){\n  try{\n    if(typeof state==='undefined'||!state.user||typeof renderPage!=='function')return;   // not signed in yet: the normal first draw will find everything loaded\n    var v=document.getElementById('view');\n    if(!v||v.textContent.trim()===''||/Module not found|Unknown page/.test(v.textContent))renderPage();\n  }catch(e){}\n});\n</script>\n"
   },
   {
     "file": "feedback_hub.html",
@@ -122,7 +123,15 @@
   {
     "file": "inventory.html",
     "title": "Inventory · Nexus-RE · Jain Group",
-    "page": "inventory"
+    "page": "inventory",
+    "before": [
+      "purchase.js",
+      "purchase-indent.js",
+      "purchase-rfq.js",
+      "purchase-po.js",
+      "purchase-stores.js",
+      "purchase-reports.js"
+    ]
   },
   {
     "file": "legal.html",
