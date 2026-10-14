@@ -2895,9 +2895,7 @@ VIEWS.legal=async function(v,seg){
       <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
-    <div id="legalOcrBar"></div>
     <div id="legalBody"><div class="loader"><div class="spin"></div></div></div>`;
-  legalOcrBarPaint();
   if(tab==='mis') legalMIS();
   else if(tab==='notices') legalNotices();
   // seg[1] picks the Scoreboard's own tab - 'mis' unless the url asks for 'notice'.
@@ -4518,43 +4516,155 @@ async function legalNotices(){
     if(error)throw error;
     rows=data||[];
   }catch(e){
-    body.innerHTML=`<div class="empty" style="padding:40px"><i class="fa-regular fa-circle-xmark"></i><div>Could not load notices</div><div style="font-size:12px;color:var(--slate);margin-top:6px">${esc((e&&e.message)||'')}</div></div>`;
+    body.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-circle-xmark"></i><div>Could not load notices</div><div style="font-size:12px;color:var(--slate);margin-top:6px">'+esc((e&&e.message)||'')+'</div></div>';
     return;
   }
+  window._lnRows=rows;   // the edit dialog reads the row it is correcting from here
 
   const open=rows.filter(r=>r.state!=='Done').length;
   const late=rows.filter(r=>r.state==='Overdue').length;
   const head=['Sent by Whom','Clients / Applicants','Subject','Type','Uploaded','Due','Completion Date','Status'];
+  const kpis=[['Total notices',rows.length,'#1e3a8a'],['Outstanding',open,'#b45309'],['Overdue',late,'#dc2626']];
 
-  body.innerHTML=`
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-      ${[['Total notices',rows.length,'#1e3a8a'],['Outstanding',open,'#b45309'],['Overdue',late,'#dc2626']]
-        .map(k=>`<div class="card card-pad" style="min-width:150px"><div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)">${k[0]}</div><div style="font-size:24px;font-weight:800;color:${k[2]};margin-top:2px">${k[1]}</div></div>`).join('')}
-    </div>
-    <div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr style="background:var(--bg-subtle,#f8fafc)">
-        ${head.map(l=>`<th style="padding:10px 12px;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);white-space:nowrap">${l}</th>`).join('')}
-      </tr></thead>
-      <tbody>
-        ${rows.length?rows.map(r=>{
-          const parties=(r.parties&&r.parties.length)?r.parties.join('; '):'—';
-          /* The task is the thing people act on, so the row opens it rather than the file - the
-             file is one click further on, from inside the task. */
-          const go=r.task_id?` onclick="navTo('tasks/task/${r.task_id}')" style="cursor:pointer"`:'';
-          return `<tr${go} style="border-bottom:1px solid var(--line-2)${r.task_id?';cursor:pointer':''}">
-            <td style="padding:11px 12px;font-weight:600">${esc(r.sent_by||'—')}</td>
-            <td style="padding:11px 12px">${esc(parties)}</td>
-            <td style="padding:11px 12px;color:var(--slate);max-width:320px">${esc(r.subject||'—')}</td>
-            <td style="padding:11px 12px">${lnTypeTag(r.notice_type)}</td>
-            <td style="padding:11px 12px;color:var(--slate);white-space:nowrap">${r.uploaded_on?fmtDate(r.uploaded_on):'—'}</td>
-            <td style="padding:11px 12px;color:var(--slate);white-space:nowrap">${r.due_date?fmtDate(r.due_date):'—'}</td>
-            <td style="padding:11px 12px;white-space:nowrap">${r.completed_on?fmtDate(r.completed_on):'<span style="color:var(--slate)">—</span>'}</td>
-            <td style="padding:11px 12px">${lnPill(r.state)}</td>
-          </tr>`;
-        }).join(''):`<tr><td colspan="${head.length}"><div class="empty" style="padding:34px"><i class="fa-regular fa-envelope"></i><div>No legal notices yet</div><div style="font-size:12px;color:var(--slate);margin-top:6px">Upload one to Documents &rsaquo; Legal Notice. It is read automatically and a task is raised for the Legal team.</div></div></td></tr>`}
-      </tbody>
-    </table></div></div>`;
+  let h='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">';
+  kpis.forEach(function(k){
+    h+='<div class="card card-pad" style="min-width:150px"><div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)">'+k[0]+'</div>'
+      +'<div style="font-size:24px;font-weight:800;color:'+k[2]+';margin-top:2px">'+k[1]+'</div></div>';
+  });
+  h+='</div>';
+
+  h+='<div id="lnBar" style="display:none;align-items:center;gap:10px;margin-bottom:10px;padding:9px 12px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe">'
+    +'<span id="lnCount" style="font-size:12.5px;font-weight:600;color:#1e3a8a"></span>'
+    +'<button class="btn-sm" id="lnEditBtn" onclick="lnEditSelected()"><i class="fa-solid fa-pen"></i> Edit</button>'
+    +'<button class="btn-sm" style="color:#dc2626;border-color:#fecaca" onclick="lnDeleteSelected()"><i class="fa-solid fa-trash"></i> Delete</button>'
+    +'<button class="btn-sm" style="margin-left:auto" onclick="lnClearSel()">Clear</button>'
+  +'</div>';
+
+  h+='<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'
+    +'<thead><tr style="background:var(--bg-subtle,#f8fafc)">'
+      +'<th style="padding:10px 12px;width:34px"><input type="checkbox" id="lnAll" onclick="lnToggleAll(this)" title="Select all"></th>';
+  head.forEach(function(l){
+    h+='<th style="padding:10px 12px;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);white-space:nowrap">'+l+'</th>';
+  });
+  h+='</tr></thead><tbody>';
+
+  if(rows.length){
+    rows.forEach(function(r){
+      const parties=(r.parties&&r.parties.length)?r.parties.join('; '):'—';
+      const subj=r.subject||'—';
+      /* The task is the thing people act on, so the row opens it. The checkbox cell stops the
+         click, otherwise selecting a row would navigate away from the list. */
+      const go=r.task_id?(' onclick="navTo(\'tasks/task/'+r.task_id+'\')" style="cursor:pointer"'):'';
+      h+='<tr'+go+' style="border-bottom:1px solid var(--line-2)">'
+        +'<td style="padding:11px 12px" onclick="event.stopPropagation()"><input type="checkbox" class="lnChk" value="'+r.id+'" onclick="event.stopPropagation();lnSelSync()"></td>'
+        +'<td style="padding:11px 12px;font-weight:600">'+esc(r.sent_by||'—')+'</td>'
+        +'<td style="padding:11px 12px">'+esc(parties)+'</td>'
+        /* Subjects on a legal notice run to a paragraph - the whole property description. One
+           line with an ellipsis keeps the table readable; the full text is the hover title. */
+        +'<td style="padding:11px 12px;color:var(--slate);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(subj)+'">'+esc(subj)+'</td>'
+        +'<td style="padding:11px 12px">'+lnTypeTag(r.notice_type)+'</td>'
+        +'<td style="padding:11px 12px;color:var(--slate);white-space:nowrap">'+(r.uploaded_on?fmtDate(r.uploaded_on):'—')+'</td>'
+        +'<td style="padding:11px 12px;color:var(--slate);white-space:nowrap">'+(r.due_date?fmtDate(r.due_date):'—')+'</td>'
+        +'<td style="padding:11px 12px;white-space:nowrap">'+(r.completed_on?fmtDate(r.completed_on):'<span style="color:var(--slate)">—</span>')+'</td>'
+        +'<td style="padding:11px 12px">'+lnPill(r.state)+'</td>'
+      +'</tr>';
+    });
+  } else {
+    h+='<tr><td colspan="'+(head.length+1)+'"><div class="empty" style="padding:34px"><i class="fa-regular fa-envelope"></i>'
+      +'<div>No legal notices yet</div><div style="font-size:12px;color:var(--slate);margin-top:6px">'
+      +'Upload one to Documents &rsaquo; Legal Notice. It is read automatically and a task is raised for the Legal team.</div></div></td></tr>';
+  }
+  h+='</tbody></table></div></div>';
+
+  body.innerHTML=h;
+  lnSelSync();
 }
+
+/* ---- selection -------------------------------------------------------------------------- */
+function lnSelected(){ return [...document.querySelectorAll('.lnChk:checked')].map(c=>Number(c.value)); }
+window.lnSelSync=function(){
+  const n=lnSelected().length, bar=$('lnBar'), cnt=$('lnCount'), ed=$('lnEditBtn'), all=$('lnAll');
+  if(bar) bar.style.display = n ? 'flex' : 'none';
+  if(cnt) cnt.textContent = n + (n===1?' notice selected':' notices selected');
+  // Editing is correcting ONE document against what is printed on it; there is no sensible bulk
+  // version of that, so it is offered only when exactly one row is ticked.
+  if(ed){ ed.disabled = n!==1; ed.style.opacity = n===1 ? '' : '0.45';
+          ed.title = n===1 ? '' : 'Select exactly one notice to edit'; }
+  const boxes=[...document.querySelectorAll('.lnChk')];
+  if(all){ all.checked = boxes.length>0 && n===boxes.length; all.indeterminate = n>0 && n<boxes.length; }
+};
+window.lnToggleAll=function(cb){ document.querySelectorAll('.lnChk').forEach(c=>{c.checked=cb.checked;}); lnSelSync(); };
+window.lnClearSel=function(){ document.querySelectorAll('.lnChk').forEach(c=>{c.checked=false;}); lnSelSync(); };
+
+/* ---- correcting what the model read ----------------------------------------------------- */
+window.lnEditSelected=function(){
+  const s=lnSelected();
+  if(s.length!==1){ toast('Select exactly one notice to edit','err'); return; }
+  lnEditModal(s[0]);
+};
+window.lnEditModal=function(id){
+  const r=(window._lnRows||[]).filter(x=>String(x.id)===String(id))[0];
+  if(!r){ toast('Notice not found','err'); return; }
+  const types=['Customer','Government','Other'];
+  let opts='';
+  types.forEach(function(t){ opts+='<option'+(t===r.notice_type?' selected':'')+'>'+t+'</option>'; });
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Correct notice details</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'
+      +'<div style="font-size:12px;color:var(--slate);margin-bottom:4px">'+esc(r.file_name||'')+'</div>'
+      +'<label>Sent by whom<input id="lnF_header" value="'+esc(r.sent_by||'')+'" placeholder="The name in large type at the top"></label>'
+      +'<div class="two">'
+        +'<label>Type<select id="lnF_type">'+opts+'</select></label>'
+        +'<label>Clients / Applicants<input id="lnF_parties" value="'+esc((r.parties||[]).join('; '))+'" placeholder="Separate with a semicolon"></label>'
+      +'</div>'
+      +'<label>Subject<textarea id="lnF_subject" rows="4">'+esc(r.subject||'')+'</textarea></label>'
+      +'<div style="font-size:11.5px;color:var(--slate)">The task is renamed to match the sender. Its due date and who it is assigned to do not change.</div>'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+    +'<button class="btn btn-primary" onclick="lnEditSave('+id+')"><i class="fa-solid fa-check"></i> Save</button></div>','md');
+};
+window.lnEditSave=async function(id){
+  const g=k=>{const el=$('lnF_'+k);return el?(el.value||'').trim():'';};
+  const header=g('header');
+  if(!header){ toast('A notice needs a sender','err'); return; }
+  // Semicolons separate people, because a client name can itself contain a comma.
+  const parties=g('parties').split(';').map(x=>x.trim()).filter(Boolean);
+  try{
+    const {error}=await sb.schema('acc').rpc('legal_notice_edit',
+      {p_id:Number(id),p_header:header,p_type:g('type'),p_parties:parties,p_subject:g('subject')});
+    if(error)throw error;
+    closeModal(); toast('Notice updated','ok'); legalNotices();
+  }catch(e){ toast((e&&e.message)||'Could not save','err'); }
+};
+
+/* ---- removing a notice ------------------------------------------------------------------- */
+window.lnDeleteSelected=function(){
+  const ids=lnSelected();
+  if(!ids.length){ toast('Nothing selected','err'); return; }
+  const rows=(window._lnRows||[]).filter(r=>ids.indexOf(Number(r.id))>=0);
+  let names='';
+  rows.slice(0,6).forEach(function(r){ names+='<li>'+esc(r.sent_by||r.file_name||('#'+r.id))+'</li>'; });
+  if(rows.length>6) names+='<li>and '+(rows.length-6)+' more</li>';
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-triangle-exclamation" style="color:#dc2626"></i> Delete '+ids.length+' notice'+(ids.length>1?'s':'')+'?</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body">'
+      +'<ul style="margin:0 0 12px 18px;font-size:13px">'+names+'</ul>'
+      +'<div style="font-size:12.5px;color:var(--slate);line-height:1.6">This removes the notice from this tracker, the task raised for it, and the document record. '
+      +'<b>The uploaded file itself stays in storage</b> and can be re-filed if this was a mistake. This cannot be undone from here.</div>'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+    +'<button class="btn" style="background:#dc2626;color:#fff;border-color:#dc2626" onclick="lnDeleteRun()"><i class="fa-solid fa-trash"></i> Delete</button></div>','md');
+  window._lnPendingDelete=ids;
+};
+window.lnDeleteRun=async function(){
+  const ids=window._lnPendingDelete||[];
+  try{
+    const {data,error}=await sb.schema('acc').rpc('legal_notice_delete',{p_ids:ids});
+    if(error)throw error;
+    closeModal();
+    const n=(data||[]).length;
+    toast(n+' notice'+(n===1?'':'s')+' deleted','ok');
+    window._lnPendingDelete=null; legalNotices();
+  }catch(e){ toast((e&&e.message)||'Could not delete','err'); }
+};
 
 /* +1 two or more days early, 0 one day early or on the day, -1 late. The gap at one day is
    deliberate and was asked for: a notice answered the day before it was due was not answered

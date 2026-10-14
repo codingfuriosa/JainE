@@ -1044,9 +1044,7 @@ VIEWS.legal=async function(v,seg){
       <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
-    <div id="legalOcrBar"></div>
     <div id="legalBody"><div class="loader"><div class="spin"></div></div></div>`;
-  legalOcrBarPaint();
   if(tab==='mis') legalMIS();
   else if(tab==='notices') legalNotices();
   // seg[1] picks the Scoreboard's own tab - 'mis' unless the url asks for 'notice'.
