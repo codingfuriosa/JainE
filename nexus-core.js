@@ -85,25 +85,43 @@ function bgLoadReads(){
   }catch(_e){}
   return {};
 }
+function bgSaveRoute(route, list){
+  if(!route || !list.length || !state.email) return;
+  // most recent last; past 16 pages the longest-unvisited workflow pages are forgotten
+  const routes=bgLoadReads(); delete routes[route]; routes[route]=list;
+  const keys=Object.keys(routes);
+  for(let i=0; keys.length-i>16 && i<keys.length; i++){ if(BG_TARGETS.indexOf(keys[i])===-1) delete routes[keys[i]]; }
+  try{ localStorage.setItem(BG_STORE_KEY, JSON.stringify({owner:String(state.email).toLowerCase(), routes:routes})); }catch(_e){}
+}
 function bgSaveReads(){
   clearTimeout(BG_SAVE_T);
   const route=BG_ROUTE, list=BG_REC.slice();
-  BG_SAVE_T=setTimeout(function(){
-    if(!route || !list.length || !state.email) return;
-    // most recent last; past 12 pages the longest-unvisited workflow pages are forgotten
-    const routes=bgLoadReads(); delete routes[route]; routes[route]=list;
-    const keys=Object.keys(routes);
-    for(let i=0; keys.length-i>12 && i<keys.length; i++){ if(BG_TARGETS.indexOf(keys[i])===-1) delete routes[keys[i]]; }
-    try{ localStorage.setItem(BG_STORE_KEY, JSON.stringify({owner:String(state.email).toLowerCase(), routes:routes})); }catch(_e){}
-  }, 1500);
+  BG_SAVE_T=setTimeout(function(){ bgSaveRoute(route, list); }, 1500);
 }
+function bgReadEntry(r){ const h=Object.assign({}, r.headers); delete h.authorization; return {u:r.url, m:r.method, h:h, b:r.body}; }
 // Remembers the reads a target page makes in the few seconds after it is drawn.
 function bgRecord(r){
   if(!BG_ROUTE || Date.now()-BG_ROUTE_AT>8000 || BG_REC.length>=60) return;
-  const h=Object.assign({}, r.headers); delete h.authorization;
-  BG_REC.push({u:r.url, m:r.method, h:h, b:r.body});
+  BG_REC.push(bgReadEntry(r));
   bgSaveReads();
 }
+/* WARMING A PAGE THAT IS NOT ON SCREEN. fn() makes exactly the reads that page makes when it opens
+   (Accountability passes each workflow's own loading function - nothing is drawn); while it runs,
+   every read is kept in memory AND remembered under that page's route, so from then on it is kept
+   ready like any page that has been visited. One page at a time - see wfWarmAll. */
+let BG_CAPTURE=null;
+async function bgCapture(route, fn){
+  if(document.hidden || !state.email || state.isCustomer || state.impersonating) return null;
+  const cap={route:route, rec:[], until:Date.now()+15000};
+  BG_CAPTURE=cap;
+  try{ return await fn(); }
+  finally{
+    if(BG_CAPTURE===cap) BG_CAPTURE=null;
+    if(cap.rec.length) bgSaveRoute(route, cap.rec.slice(0,60));
+    BG_LAST[route]=Date.now();
+  }
+}
+window.bgCapture=bgCapture;
 function bgFetch(input, init){
   let r; try{ r=bgReq(input, init); }catch(_e){ return BG_NATIVE_FETCH(input, init); }
   const isApi=r.url.indexOf(SUPABASE_URL+'/rest/v1/')===0 || r.url.indexOf(SUPABASE_URL+'/functions/v1/')===0;
@@ -119,7 +137,8 @@ function bgFetch(input, init){
     BG_REFILL_T=setTimeout(function(){ for(const k in BG_LAST) delete BG_LAST[k]; bgPrefetchOthers(); }, 1500);
     return BG_NATIVE_FETCH(input, init);
   }
-  bgRecord(r);
+  const cap=(BG_CAPTURE && Date.now()<BG_CAPTURE.until) ? BG_CAPTURE : null;
+  if(cap) cap.rec.push(bgReadEntry(r)); else bgRecord(r);
   const k=bgKey(r), hit=BG_CACHE.get(k);
   /* Held answers are for a page that is being DRAWN - its first few seconds. A page that keeps
      checking afterwards (a transcript being waited on, a live status) always reaches the database. */
@@ -130,7 +149,7 @@ function bgFetch(input, init){
   if(hit) BG_CACHE.delete(k);                  // too old to show
   const live=BG_NATIVE_FETCH(input, init);
   // a target page's own reads are kept as they arrive, so coming back to it is instant
-  if(BG_ROUTE && Date.now()-BG_ROUTE_AT<=8000){
+  if(cap || (BG_ROUTE && Date.now()-BG_ROUTE_AT<=8000)){
     const held=live.then(function(res){ const c=res.clone(); return c.arrayBuffer().then(function(b){
       return {status:res.status, statusText:res.statusText, headers:Array.from(c.headers.entries()), body:b}; }); });
     held.catch(function(){});
@@ -267,7 +286,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'c8cea0b7c6','insp-items.js':'af05d4a323','postsales.js':'f296cc2f8e','purchase.js':'598cf3fffd','purchase-indent.js':'128a321831','purchase-rfq.js':'f74c3dd771','purchase-po.js':'3eb77f8cb5','purchase-stores.js':'bc4ef52a2c','purchase-reports.js':'0f5e6a41cd'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'db02ab7964','insp-items.js':'af05d4a323','postsales.js':'f296cc2f8e','purchase.js':'598cf3fffd','purchase-indent.js':'128a321831','purchase-rfq.js':'f74c3dd771','purchase-po.js':'3eb77f8cb5','purchase-stores.js':'bc4ef52a2c','purchase-reports.js':'0f5e6a41cd'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];

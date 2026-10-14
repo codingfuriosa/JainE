@@ -974,6 +974,8 @@
   let ROUTE={tab:'work',taskId:null};
   VIEWS.tasks = async function(v, seg){
     injectCss();
+    // every workflow made ready in the background, once this page has had time to load its own
+    setTimeout(function(){ try{ wfWarmAll(); }catch(_e){} }, 2500);
     if (seg[0]==='task' && seg[1]) { ROUTE={tab:'task',taskId:Number(seg[1])}; return taskPage(v, seg[1], seg[2]==='ro'); }
     if (seg[0]==='meetings' && seg[1]==='detail' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgDetailPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='logs' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogsPage(v, Number(seg[2])); }
@@ -3403,6 +3405,103 @@
   window.wfPcBack=function(){ window._wfPcSelEmail=null; wfPcRenderList(); };
   window.wfPcOpenBill=function(caseId){ const panel=document.getElementById('ms_wfpc_panel'); if(panel)panel.classList.remove('show'); wfTabShow('main'); wfShowCase(caseId,null); };
 
+  /* EVERYTHING A WORKFLOW PAGE NEEDS, fetched without drawing or touching anything on screen - so
+     the page itself and background warming (wfWarmAll) make exactly the same requests, and a warmed
+     answer is one the page will actually use. warm=true skips the full load: a workflow that cannot
+     page in the database is not worth fetching ahead.
+
+     Everything goes out at once - asked one after another they were six round trips before anything
+     showed. Drafts are only ever this person's own; the row-level rule enforces it.
+     SERVER-SIDE PAGING for every workflow: its first page comes from acc.wf_case_page, which filters,
+     sorts and counts in the database; the DataTable then asks it for each further page
+     (wfInstMakeDataTable). Kept on the full load: the two coordinators' overdue view (wfIsChaser)
+     and Accounts' two claimant-lookup accounts on Reimbursement - both are built from every instance
+     at once - and any workflow whose Tracker access depends on every instance's step people. */
+  async function wfDetailFetch(id, warm){
+    const wfPcAccount = id===39 && (eq(me(),'jaingrouppc2.ankita@gmail.com') || eq(me(),'pc.thejaingroup1@gmail.com'));
+    const S0=wfPcAccount ? null : {flowId:id, ticked:new Map(), timer:null, trackerLoaded:false, pageLen:WF_SRV_PAGE};
+    const rowsOf=function(q){ return q.then(function(r){ return (r&&r.data)||null; }, function(){ return null; }); };
+    const got=await Promise.all([
+      people().catch(function(){ return null; }),
+      rowsOf(ACC().from('flows').select('*').eq('id',id).maybeSingle()),
+      rowsOf(ACC().from('flow_steps').select('*').eq('flow_id',id).order('seq',{ascending:true})),
+      rowsOf(ACC().from('flow_drafts').select('*').eq('flow_id',id).order('updated_at',{ascending:false})),
+      rowsOf(ACC().from('flow_forms').select('*').eq('flow_id',id).order('sl',{ascending:true})),
+      S0 ? wfCasePage({offset:0, limit:S0.pageLen, counts:true}, S0).catch(function(){ return null; }) : null
+    ]);
+    const out={people:got[0], flow:got[1], steps:got[2]||[], drafts:got[3]||[], forms:got[4]||[],
+               S0:null, srvFirst:null, cases:[], fcs:[], bk:{}, myOpenClaim:null};
+    const flow=out.flow;
+    if(!flow) return out;
+    const wfRosterIsPerCase=!!String(flow.trigger_step_assignable_to||'').trim() && id!==26;
+    if(S0 && got[5] && !wfIsChaser(flow) && !wfRosterIsPerCase){
+      let srvFirst=got[5];
+      /* A workflow that archives finished instances lists only the running ones until Archive is
+         opened, so its first page is asked for again with that filter, along with how many are in
+         the Archive for the tab's own count. */
+      if(flow.archive_done){
+        try{
+          const both=await Promise.all([
+            wfCasePage({offset:0, limit:WF_SRV_PAGE, status:'active', counts:true}, S0),
+            wfCasePage({offset:0, limit:1, status:'done'}, S0)
+          ]);
+          srvFirst=both[0]; S0.doneCount=both[1].filtered; S0.prefetchStatus='active';
+        }catch(e){ srvFirst=null; }
+      }
+      if(srvFirst){
+        Object.assign(S0, {flow:flow, steps:out.steps, prefetch:srvFirst, prefetchLimit:WF_SRV_PAGE});
+        out.S0=S0; out.srvFirst=srvFirst; out.cases=srvFirst.rows||[]; out.fcs=srvFirst.steps||[];
+      }
+    }
+    if(!out.srvFirst){
+      if(warm) return out;
+      try{ const {data}=await ACC().from('flow_cases').select('*').eq('flow_id',id).order('case_no',{ascending:true}); out.cases=data||[]; }catch(e){}
+      if(out.cases.length){ try{ const wfCaseIds=out.cases.map(function(c){return c.id;});
+        out.fcs=await wfFetchPaged(function(){ return ACC().from('flow_case_steps').select('*')
+          .in('case_id',wfCaseIds).order('id',{ascending:true}); }); }catch(e){} }
+    }
+    /* Booking Form only. Its form asks for nothing but the attachments — the customer, the project
+       and the unit are what the documents themselves say, so they are read out of the stored
+       check list rather than typed by whoever uploaded the file. Both the Instances column and the
+       Tracker's own columns come from here; a booking still being read simply has no row yet. */
+    if(id===41 && out.cases.length){
+      try{
+        const {data}=await ACC().from('booking_audits').select('case_id,status,result')
+          .in('case_id',out.cases.map(function(c){ return c.id; }));
+        (data||[]).forEach(function(r){ out.bk[r.case_id]=wfBkFields(r); });
+      }catch(_e){}
+    }
+    // Reimbursement: is one of my own claims already in process? (only for its New button's tooltip)
+    if(out.srvFirst && id===39){
+      try{
+        const {data}=await ACC().from('flow_cases').select('id,flow_id,case_no,jaine_id,created_by,current_step,returned_at,status')
+          .eq('flow_id',39).gt('current_step',1).is('returned_at',null).not('status','in','("Done","Cancelled")');
+        out.myOpenClaim=(data||[]).find(function(x){ return eq(x&&x.created_by, me()); })||null;
+      }catch(_e){}
+    }
+    return out;
+  }
+  /* EVERY WORKFLOW READY BEFORE IT IS OPENED. Once Accountability is open, each workflow this
+     person can see is fetched in the background - one at a time, through wfDetailFetch, so it is
+     exactly what that page asks for - and remembered (bgCapture), so from then on opening JainE gets
+     them ready too. Not the Tracker: that is every bill against every step, and it is only fetched
+     when its tab is opened. Runs at most once every 10 minutes. */
+  let wfWarmBusy=false, wfWarmAt=0;
+  async function wfWarmAll(){
+    if(wfWarmBusy || typeof window.bgCapture!=='function' || document.hidden) return;
+    if(Date.now()-wfWarmAt < 600000) return;
+    wfWarmBusy=true; wfWarmAt=Date.now();
+    try{
+      const {data}=await ACC().from('flows').select('id').order('id',{ascending:true});
+      for(const f of (data||[])){
+        if(document.hidden) break;
+        if(String(location.hash).indexOf('/workflow/'+f.id)!==-1) continue;     // the one on screen
+        await window.bgCapture('tasks#/workflow/'+f.id, function(){ return wfDetailFetch(f.id, true); });
+      }
+    }catch(_e){}
+    finally{ wfWarmBusy=false; }
+  }
+  window.wfWarmAll=wfWarmAll;
   async function wfDetailPage(v, id, selCaseId){
     wfInjectCss(); setCrumb(['Accountability','Workflow']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -3420,76 +3519,15 @@
        used once the workflow says the viewer is one of them. If the call fails for any reason the
        page falls back to the full load below rather than showing nothing. */
     window._wfSrv=null;
-    /* Every workflow pages in the database now, not just Invoice Processing. Kept on the full load:
-       the two coordinators' overdue view (wfIsChaser, below) and Accounts' two claimant-lookup
-       accounts on Reimbursement (pcSearchOn) - both are built from every instance at once. */
-    const wfPcAccount = id===39 && (eq(me(),'jaingrouppc2.ankita@gmail.com') || eq(me(),'pc.thejaingroup1@gmail.com'));
-    const S0=wfPcAccount ? null : {flowId:id, ticked:new Map(), timer:null, trackerLoaded:false, pageLen:WF_SRV_PAGE};
-    const rowsOf=function(q){ return q.then(function(r){ return (r&&r.data)||null; }, function(){ return null; }); };
-    const got=await Promise.all([
-      people().catch(function(){ return null; }),
-      rowsOf(ACC().from('flows').select('*').eq('id',id).maybeSingle()),
-      rowsOf(ACC().from('flow_steps').select('*').eq('flow_id',id).order('seq',{ascending:true})),
-      rowsOf(ACC().from('flow_drafts').select('*').eq('flow_id',id).order('updated_at',{ascending:false})),
-      rowsOf(ACC().from('flow_forms').select('*').eq('flow_id',id).order('sl',{ascending:true})),
-      S0 ? wfCasePage({offset:0, limit:S0.pageLen, counts:true}, S0).catch(function(){ return null; }) : null
-    ]);
-    WF_PEOPLE=got[0]||WF_PEOPLE||[];
-    let flow=got[1], steps=got[2]||[], cases=[], fcs=[];
-    const drafts=got[3]||[], forms=got[4]||[];
+    const D=await wfDetailFetch(id, false);
+    WF_PEOPLE=D.people||WF_PEOPLE||[];
+    let flow=D.flow, steps=D.steps, cases=D.cases, fcs=D.fcs;
+    const drafts=D.drafts, forms=D.forms;
     if(!flow){ toast('Workflow not found','err'); return navTo('tasks/workflow'); }
-    let srvFirst=null;
-    /* A workflow that limits who its instances may be handed to decides who sees its Tracker from
-       every instance's step people (wfRosterAccess) - one page cannot answer that, so such a flow
-       keeps the full load. Invoice Processing is exempt there already (everyone sees its Tracker). */
-    const wfRosterIsPerCase=!!String(flow.trigger_step_assignable_to||'').trim() && id!==26;
-    if(S0 && got[5] && !wfIsChaser(flow) && !wfRosterIsPerCase){
-      srvFirst=got[5];
-      /* A workflow that archives finished instances lists only the running ones until Archive is
-         opened, so its first page is asked for again with that filter, along with how many are in
-         the Archive for the tab's own count. */
-      if(flow.archive_done){
-        try{
-          const both=await Promise.all([
-            wfCasePage({offset:0, limit:WF_SRV_PAGE, status:'active', counts:true}, S0),
-            wfCasePage({offset:0, limit:1, status:'done'}, S0)
-          ]);
-          srvFirst=both[0]; S0.doneCount=both[1].filtered; S0.prefetchStatus='active';
-        }catch(e){ srvFirst=null; }
-      }
-      if(srvFirst){
-        window._wfSrv=Object.assign(S0, {flow:flow, steps:steps, prefetch:srvFirst, prefetchLimit:WF_SRV_PAGE});
-        cases=srvFirst.rows; fcs=srvFirst.steps;
-      }
-    }
-    const srv=!!srvFirst;
-    if(!srv){
-    try{ const {data}=await ACC().from('flow_cases').select('*').eq('flow_id',id).order('case_no',{ascending:true}); cases=data||[]; }catch(e){}
-    }
-    if(!srv && cases.length){ try{ const wfCaseIds=cases.map(function(c){return c.id;});
-      fcs=await wfFetchPaged(function(){ return ACC().from('flow_case_steps').select('*')
-        .in('case_id',wfCaseIds).order('id',{ascending:true}); }); }catch(e){} }
-    /* Booking Form only. Its form asks for nothing but the attachments — the customer, the project
-       and the unit are what the documents themselves say, so they are read out of the stored
-       check list rather than typed by whoever uploaded the file. Both the Instances column and the
-       Tracker's own columns come from here; a booking still being read simply has no row yet. */
-    window._wfBk={};
-    if(id===41 && cases.length){
-      try{
-        const {data}=await ACC().from('booking_audits').select('case_id,status,result')
-          .in('case_id',cases.map(function(c){ return c.id; }));
-        (data||[]).forEach(function(r){ window._wfBk[r.case_id]=wfBkFields(r); });
-      }catch(_e){}
-    }
-    // Reimbursement: is one of my own claims already in process? (only for its New button's tooltip)
-    let srvMyOpenClaim=null;
-    if(srv && id===39){
-      try{
-        const {data}=await ACC().from('flow_cases').select('id,flow_id,case_no,jaine_id,created_by,current_step,returned_at,status')
-          .eq('flow_id',39).gt('current_step',1).is('returned_at',null).not('status','in','("Done","Cancelled")');
-        srvMyOpenClaim=(data||[]).find(function(x){ return eq(x&&x.created_by, me()); })||null;
-      }catch(_e){}
-    }
+    const srvFirst=D.srvFirst, srv=!!srvFirst;
+    if(srv) window._wfSrv=D.S0;
+    window._wfBk=D.bk;
+    const srvMyOpenClaim=D.myOpenClaim;
     window._wfForms=forms; window._wfSteps=steps;
     const mySelf=me();
     const isCreator=eq(flow.created_by||'',mySelf);
@@ -4027,9 +4065,15 @@
     // already here when it is clicked
     const ahead=(S.next && S.next.key===key) ? S.next.promise : null;
     S.next=null;
+    /* No "Loading..." box: an answer already held arrives at once and should simply appear. Only a
+       request still waiting after 150 ms fades the table, so a slow one is still visibly happening. */
+    const wrapEl=document.querySelector('#wfInstTable') && document.querySelector('#wfInstTable').closest('.wf-tablewrap');
+    const fadeT=setTimeout(function(){ if(wrapEl) wrapEl.classList.add('wf-loading'); }, 150);
+    const unfade=function(){ clearTimeout(fadeT); if(wrapEl) wrapEl.classList.remove('wf-loading'); };
     (usePre ? Promise.resolve(pre) : (ahead || wfCasePage(p))).then(function(d){
       return wfSrvBookingNames(S, d.rows).then(function(){ return d; });
     }).then(function(d){
+      unfade();
       const byCase={}; (d.steps||[]).forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       const cnt=$('wfInstCount'); if(cnt) cnt.textContent=d.filtered;
       cb({ draw:req.draw, recordsTotal:d.total, recordsFiltered:d.filtered,
@@ -4043,6 +4087,7 @@
         S.next={key:wfSrvKey(np), promise:prom};
       }
     }).catch(function(e){
+      unfade();
       toast('Could not load '+wfN().lcMany+': '+((e&&e.message)||e),'err');
       cb({ draw:req.draw, recordsTotal:0, recordsFiltered:0, data:[] });
     });
@@ -4134,15 +4179,18 @@
       pagingType:'simple_numbers',                // previous / pages / next - no first & last
       language:{ info:'Showing <b>_START_–_END_</b> of <b>_TOTAL_</b>',
                  paginate:{ previous:'<i class="fa-solid fa-chevron-left"></i>', next:'<i class="fa-solid fa-chevron-right"></i>' },
-                 infoEmpty:'Nothing to show', infoFiltered:'', zeroRecords:'No matches', emptyTable:'Nothing here yet',
-                 processing:'Loading…' }
+                 infoEmpty:'Nothing to show', infoFiltered:'', zeroRecords:'No matches', emptyTable:'Nothing here yet' }
     };
     /* Server-side: every page, sort, length change, search and date range is a call to
        acc.wf_case_page (wfSrvAjax). Only the JainE id and Bill columns sort - those are the ones the
        database can order by; a step column's pill has no meaningful order across pages. */
     const dt=S
       ? jq(tbl).DataTable(Object.assign(common, {
-          serverSide:true, processing:true, searching:false,
+          serverSide:true, processing:false, searching:false,
+          /* The first page is already on screen - drawn with the page from the same answer. Without
+             this the DataTable threw those rows away and asked for page 1 again behind a
+             "Loading..." box, every time a workflow opened. */
+          deferLoading: S.prefetch ? [S.prefetch.filtered, S.prefetch.total] : null,
           columns:[].map.call(tbl.tHead.rows[0].cells, function(_th,i){ return {orderable:!!S.colKey[i]}; }),
           ajax:wfSrvAjax,
           createdRow:function(row, data){
@@ -4167,7 +4215,19 @@
       wrap.insertBefore(tbl, wrap.firstChild);
     }
     const nm=$('wfInstNoMatch'); if(nm) nm.style.display='none';   // DataTables says it itself now
-    if(S) return;          // server-side: the first draw has already asked the database for the page
+    if(S){
+      // the first page is the one drawn with the page; get page 2 ready the way every later page
+      // gets its next one (see wfSrvAjax)
+      const first=S.prefetch;
+      if(first && first.filtered>WF_SRV_PAGE && !S.next){
+        const np=wfSrvParams({start:WF_SRV_PAGE, length:WF_SRV_PAGE, order:[]});
+        const prom=wfCasePage(np, S);
+        prom.catch(function(){ if(S.next && S.next.promise===prom) S.next=null; });
+        S.next={key:wfSrvKey(np), promise:prom};
+      }
+      wfSrvRestoreTicks();
+      return;
+    }
     wfInstFilter();
     // A bill opened by link is highlighted in the list - turn to the page it sits on.
     const sel=tbl.querySelector('tbody tr.sel')||null;
@@ -10060,7 +10120,9 @@
     .wf-card .dt-container .dt-paging .dt-paging-button.previous,
     .wf-card .dt-container .dt-paging .dt-paging-button.next{color:var(--slate)!important;font-size:11px}
     .wf-card .dt-container .dt-paging .ellipsis{min-width:20px;text-align:center;color:var(--slate);padding:0 2px}
-    .wf-card .dt-container .dt-processing{border:0;box-shadow:none;background:transparent;color:var(--slate)}
+    .wf-card .dt-container .dt-processing{display:none!important}
+    /* a page still loading after 150 ms: the rows fade rather than a "Loading..." box covering them */
+    .wf-tablewrap.wf-loading>table{opacity:.45;transition:opacity .15s;pointer-events:none}
     /* a phone: the count above, the pages below, both full width and centred */
     @media(max-width:520px){
       .wf-card .dt-container .dt-layout-row:not(.dt-layout-table){flex-direction:column;align-items:center}
