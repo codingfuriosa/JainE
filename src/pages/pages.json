@@ -1,0 +1,243 @@
+[
+  {
+    "file": "accountability.html",
+    "title": "Accountability · Nexus-RE · Jain Group",
+    "page": "tasks",
+    "after": [
+      "accountability.js"
+    ]
+  },
+  {
+    "file": "campaigns.html",
+    "title": "campaigns · JAIN-E · Jain Group",
+    "page": "campaigns"
+  },
+  {
+    "file": "competitors.html",
+    "title": "competitors · JAIN-E · Jain Group",
+    "page": "competitors"
+  },
+  {
+    "file": "compliance.html",
+    "title": "compliance · JAIN-E · Jain Group",
+    "page": "compliance"
+  },
+  {
+    "file": "construction.html",
+    "title": "Construction · JAIN-E · Jain Group",
+    "page": "construction"
+  },
+  {
+    "file": "control.html",
+    "title": "control · JAIN-E · Jain Group",
+    "page": "control"
+  },
+  {
+    "file": "crm.html",
+    "title": "CRM · Nexus-RE · Jain Group",
+    "page": "crm"
+  },
+  {
+    "file": "customer.html",
+    "title": "customer · JAIN-E · Jain Group",
+    "page": "customer",
+    "portal": "customer"
+  },
+  {
+    "file": "custportal-admin.html",
+    "title": "Customer Portal Admin · JAIN-E · Jain Group",
+    "page": "custportal_admin"
+  },
+  {
+    "file": "daily_checks.html",
+    "title": "Daily Checks · Nexus-RE · Jain Group",
+    "page": "daily_checks"
+  },
+  {
+    "file": "documents.html",
+    "title": "Documents · Nexus-RE · Jain Group",
+    "page": "documents"
+  },
+  {
+    "file": "engineering.html",
+    "title": "Engineering · Nexus-RE · Jain Group",
+    "page": "engineering",
+    "after": [
+      "engineering.js",
+      "engineering-boq.js",
+      "engineering-wo.js",
+      "engineering-amend.js",
+      "engineering-ra.js"
+    ]
+  },
+  {
+    "file": "feedback_hub.html",
+    "title": "feedback_hub · JAIN-E · Jain Group",
+    "page": "feedback_hub"
+  },
+  {
+    "file": "finance.html",
+    "title": "Finance · Nexus-RE · Jain Group",
+    "page": "finance"
+  },
+  {
+    "file": "gtd.html",
+    "title": "gtd · JAIN-E · Jain Group",
+    "page": "gtd"
+  },
+  {
+    "file": "hr_new.html",
+    "title": "hr_new · JAIN-E · Jain Group",
+    "page": "hr_new"
+  },
+  {
+    "file": "index.html",
+    "title": "Home · Dashboard · Nexus-RE · Jain Group",
+    "page": "dashboard"
+  },
+  {
+    "file": "inspection.html",
+    "title": "Inspection · JAIN-E · Jain Group",
+    "page": "inspection",
+    "before": [
+      "insp-items.js"
+    ]
+  },
+  {
+    "file": "intranet.html",
+    "title": "intranet · JAIN-E · Jain Group",
+    "page": "intranet"
+  },
+  {
+    "file": "inventory.html",
+    "title": "Inventory · Nexus-RE · Jain Group",
+    "page": "inventory"
+  },
+  {
+    "file": "legal.html",
+    "title": "Legal Vault · Nexus-RE · Jain Group",
+    "page": "legal"
+  },
+  {
+    "file": "mail.html",
+    "title": "mail · JAIN-E · Jain Group",
+    "page": "mail"
+  },
+  {
+    "file": "maintenance.html",
+    "title": "Maintenance · Nexus-RE · Jain Group",
+    "page": "maintenance"
+  },
+  {
+    "file": "network.html",
+    "title": "Internet Speed · Nexus-RE · Jain Group",
+    "page": "network"
+  },
+  {
+    "file": "organic.html",
+    "title": "Posts &amp; Reels · JAIN-E · Jain Group",
+    "page": "organic"
+  },
+  {
+    "file": "playbook.html",
+    "title": "playbook · JAIN-E · Jain Group",
+    "page": "playbook"
+  },
+  {
+    "file": "postsales.html",
+    "title": "Post Sales · JAIN-E · Jain Group",
+    "page": "postsales",
+    "before": [
+      "postsales.js"
+    ]
+  },
+  {
+    "file": "procurement.html",
+    "title": "Procurement · Nexus-RE · Jain Group",
+    "page": "procurement"
+  },
+  {
+    "file": "projects.html",
+    "title": "Projects · Nexus-RE · Jain Group",
+    "page": "projects"
+  },
+  {
+    "file": "recruitment_new.html",
+    "title": "recruitment_new · JAIN-E · Jain Group",
+    "page": "recruitment_new"
+  },
+  {
+    "file": "reports.html",
+    "title": "Reports · Nexus-RE · Jain Group",
+    "page": "reports"
+  },
+  {
+    "file": "scaling.html",
+    "title": "scaling · JAIN-E · Jain Group",
+    "page": "scaling"
+  },
+  {
+    "file": "scheduling.html",
+    "title": "Project Scheduling · JAIN-E · Jain Group",
+    "page": "scheduling",
+    "before": [
+      "insp-items.js"
+    ],
+    "after": [
+      "scheduling.js"
+    ]
+  },
+  {
+    "file": "scoreboard.html",
+    "title": "Scoreboard · Nexus-RE · Jain Group",
+    "page": "scoreboard",
+    "chart": false
+  },
+  {
+    "file": "security.html",
+    "title": "Credentials · JAIN-E · Jain Group",
+    "page": "security"
+  },
+  {
+    "file": "settings.html",
+    "title": "Settings · Nexus-RE · Jain Group",
+    "page": "settings"
+  },
+  {
+    "file": "supplier.html",
+    "title": "supplier · JAIN-E · Jain Group",
+    "page": "supplier"
+  },
+  {
+    "file": "training.html",
+    "title": "training · JAIN-E · Jain Group",
+    "page": "training"
+  },
+  {
+    "file": "transcription.html",
+    "title": "Transcription · JAIN-E · Jain Group",
+    "page": "transcription",
+    "chart": false
+  },
+  {
+    "file": "usability.html",
+    "title": "Usability · JAIN-E · Jain Group",
+    "page": "usability"
+  },
+  {
+    "file": "video.html",
+    "title": "video · JAIN-E · Jain Group",
+    "page": "video"
+  },
+  {
+    "file": "weekly_status.html",
+    "title": "Weekly Status · Nexus-RE · Jain Group",
+    "page": "weekly_status",
+    "chart": false
+  },
+  {
+    "file": "whatsapp.html",
+    "title": "whatsapp · JAIN-E · Jain Group",
+    "page": "whatsapp"
+  }
+]
