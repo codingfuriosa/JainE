@@ -35,11 +35,18 @@ const BG_READ_RPCS=new Set(('_bu_company,_check_open,_doc_prefix,_eng_guard,_fy_
    every module. Letting it drop everything held is what made Tasks load again after Documents. */
 const BG_HARMLESS_WRITES=new Set(['erp_log_usage']);
 let BG_REFILL_T=null;
-/* ACCOUNTABILITY ONLY - its five tabs, and each workflow's own page (Invoice Processing,
-   Reimbursement, ...) once it has been opened. No other module is touched. Individual task and
-   meeting pages are left out: there are thousands of them and each is opened once. */
-const BG_TARGETS=['tasks#/work','tasks#/calendar','tasks#/meetings','tasks#/workflow','tasks#/archive'];
+/* WHICH PAGES ARE KEPT READY. Accountability's five tabs and each workflow's own page (Invoice
+   Processing, Reimbursement, ...), and the landing page of CRM & Sales, Post Sales, Campaign
+   Analytics, Competitor Ads, Transcription and Legal. Each only for someone who has that module
+   (pageAllowed - the same check the sidebar uses): nobody's browser fetches a module they cannot
+   open. Individual task, meeting and lead pages are left out: there are thousands of them and each
+   is opened once. */
+const BG_TARGETS=['tasks#/work','tasks#/calendar','tasks#/meetings','tasks#/workflow','tasks#/archive',
+                  'crm#/','postsales#/','campaigns#/','competitors#/','transcription#/','legal#/'];
 function bgIsTarget(route){ return BG_TARGETS.indexOf(route)!==-1 || /^tasks#\/workflow\/\d+$/.test(route); }
+function bgAllowed(route){
+  try{ return typeof pageAllowed==='function' && !!pageAllowed(String(route).split('#')[0]); }catch(_e){ return false; }
+}
 const BG_ALIASES={'tasks#/':'tasks#/work','tasks#/home':'tasks#/work'};
 const BG_STORE_KEY='jaine_bg_reads_v1';
 const BG_CACHE=new Map();                    // request -> {at, p} - memory only, never stored
@@ -90,7 +97,7 @@ function bgSaveRoute(route, list){
   // most recent last; past 16 pages the longest-unvisited workflow pages are forgotten
   const routes=bgLoadReads(); delete routes[route]; routes[route]=list;
   const keys=Object.keys(routes);
-  for(let i=0; keys.length-i>16 && i<keys.length; i++){ if(BG_TARGETS.indexOf(keys[i])===-1) delete routes[keys[i]]; }
+  for(let i=0; keys.length-i>24 && i<keys.length; i++){ if(BG_TARGETS.indexOf(keys[i])===-1) delete routes[keys[i]]; }
   try{ localStorage.setItem(BG_STORE_KEY, JSON.stringify({owner:String(state.email).toLowerCase(), routes:routes})); }catch(_e){}
 }
 function bgSaveReads(){
@@ -160,12 +167,14 @@ function bgFetch(input, init){
 // Repeats a target page's remembered reads and holds the answers.
 async function bgPrefetch(route){
   if(document.hidden || state.isCustomer || state.impersonating) return;
+  if(!bgAllowed(route)) return;                // not their module: never fetched
   if(Date.now()-(BG_LAST[route]||0) < BG_MIN_GAP_MS) return;
   const list=bgLoadReads()[route]; if(!list || !list.length) return;
   BG_LAST[route]=Date.now();
   let token=null;
   try{ const {data}=await sb.auth.getSession(); token=data&&data.session&&data.session.access_token; }catch(_e){}
   if(!token) return;
+  const sent=[];
   list.forEach(function(q){
     const k=bgKey({url:q.u, method:q.m, headers:q.h, body:q.b});
     // re-fetched once it is 20 s old, so a fresh answer replaces it before it expires at 30 s
@@ -175,7 +184,10 @@ async function bgPrefetch(route){
         return {status:res.status, statusText:res.statusText, headers:Array.from(res.headers.entries()), body:b}; }); });
     p.catch(function(){});
     BG_CACHE.set(k, {at:Date.now(), p:p});
+    sent.push(p);
   });
+  // resolves once this page's reads are all back, so the next page waits its turn (bgPrefetchOthers)
+  await Promise.all(sent.map(function(p){ return p.catch(function(){}); }));
 }
 // Called on every draw: starts remembering if this is a target page, and straight away gets the
 // OTHER target pages ready - from the Dashboard on, so they are waiting before they are opened.
@@ -192,12 +204,27 @@ function bgOnRender(){
    a round - about 2.5 a second per person with JainE open - which is more load than the gain is
    worth on the database's size; the other tabs are still made ready whenever any page is drawn. */
 const BG_KEEP_WARM=['tasks#/work','tasks#/workflow'];
-function bgPrefetchOthers(tabsOnly){
-  const here=bgRouteNow();
-  const routes=(tabsOnly===true) ? BG_KEEP_WARM.slice() : BG_TARGETS.slice();
-  if(tabsOnly!==true) Object.keys(bgLoadReads()).forEach(function(r){ if(bgIsTarget(r) && routes.indexOf(r)===-1) routes.push(r); });
-  routes.forEach(function(t){ if(t!==here) bgPrefetch(t); });
+/* ONE PAGE AT A TIME. With six more modules a person can have a dozen pages kept ready; sending
+   all of their reads at once would put a burst of a few hundred requests on the database on every
+   page draw. Each page's reads go out together, and the next page waits until they are back. */
+let BG_QUEUE_BUSY=false, BG_QUEUE_AGAIN=false;
+async function bgPrefetchOthers(tabsOnly){
   bgWarmScripts();
+  if(BG_QUEUE_BUSY){ BG_QUEUE_AGAIN=true; return; }
+  BG_QUEUE_BUSY=true;
+  try{
+    do{
+      BG_QUEUE_AGAIN=false;
+      const here=bgRouteNow();
+      const routes=(tabsOnly===true) ? BG_KEEP_WARM.slice() : BG_TARGETS.slice();
+      if(tabsOnly!==true) Object.keys(bgLoadReads()).forEach(function(r){ if(bgIsTarget(r) && routes.indexOf(r)===-1) routes.push(r); });
+      for(const t of routes){
+        if(t===here || !bgAllowed(t)) continue;
+        try{ await bgPrefetch(t); }catch(_e){}
+      }
+      tabsOnly=false;
+    } while(BG_QUEUE_AGAIN);
+  } finally { BG_QUEUE_BUSY=false; }
 }
 /* A target page in another module also needs that module's own script (accountability.js for
    Tasks and Workflow, ~1 MB) before it can draw, and the first in-place visit used to wait for the
@@ -206,6 +233,7 @@ function bgPrefetchOthers(tabsOnly){
 function bgWarmScripts(){
   if(document.hidden) return;
   BG_TARGETS.forEach(function(t){
+    if(!bgAllowed(t)) return;                  // only the code of modules this person can open
     const entry=PAGE_EXTRA_SCRIPT[t.split('#')[0]]; if(!entry) return;
     [].concat(entry).forEach(function(src){
       if(_loadedPageScripts.has(src)) return;
@@ -366,7 +394,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'452bf8ae09','insp-items.js':'af05d4a323','postsales.js':'149a60e1a2','scheduling.js':'50da5d7188','accounts.js':'c31ffa60bc','accounts-bank.js':'ea9648a540','accounts-books.js':'ed1ddeecec','purchase.js':'8109127afb','purchase-indent.js':'f6a398b898','purchase-rfq.js':'e6b7d700d5','purchase-po.js':'7239d968b5','purchase-stores.js':'5ff625e1d0','purchase-reports.js':'62c2dbe660'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'c850688d30','insp-items.js':'af05d4a323','postsales.js':'149a60e1a2','scheduling.js':'50da5d7188','accounts.js':'c31ffa60bc','accounts-bank.js':'ea9648a540','accounts-books.js':'ed1ddeecec','purchase.js':'8109127afb','purchase-indent.js':'f6a398b898','purchase-rfq.js':'e6b7d700d5','purchase-po.js':'7239d968b5','purchase-stores.js':'5ff625e1d0','purchase-reports.js':'62c2dbe660'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];
