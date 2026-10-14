@@ -12,6 +12,8 @@ if(window.__PAP_LOADED) return;
 window.__PAP_LOADED=true;
 
 const U=()=>window.PUS;
+// Same rule as purchase orders (po.allow_self_approval); the database enforces it.
+const selfApproval=()=>U().rule('po.allow_self_approval')==='true';
 const qty=n=>Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:3});
 const money=n=>(n==null||n==='')?'—':'₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const me=()=>String(state.email||'').toLowerCase();
@@ -244,7 +246,7 @@ function bfRender(){
     +field('GST','<select id="bfGstType" onchange="pusBfCalc()"><option value="intra"'+(h.gst_type!=='inter'?' selected':'')+'>Within the state — CGST + SGST</option><option value="inter"'+(h.gst_type==='inter'?' selected':'')+'>Inter-state — IGST</option></select>');
   const head=BF.mode==='direct'?'<th>#</th><th>Description</th><th>HSN / SAC *</th><th>Unit</th><th>Qty</th><th>Rate (₹)</th><th>GST %</th><th class="pus-num">Line total</th><th></th>'
     :'<th></th><th>Item</th><th>'+(BF.type==='goods'?'HSN':'HSN / SAC')+'</th><th>Unit</th><th class="pus-num">Can bill</th><th>Qty billed</th><th>Rate (₹)</th><th>GST %</th><th class="pus-num">Line total</th>';
-  openModal('<div class="modal-head"><h3>'+(BF.id?'Edit':'New')+' '+(BF.type==='goods'?'goods':BF.type==='non_store'?'non-store purchase':'service')+' bill</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:74vh;overflow:auto">'
+  openModal('<div class="modal-head"><h3>'+(BF.id?'Edit':'New')+' '+(BF.type==='goods'?'goods':BF.type==='non_store'?'non-store purchase':'service')+' bill</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'
     +(BF.mode==='goods'?'<div class="pus-hint" style="margin-top:0">Tick the lines this invoice covers. The most you can bill on a line is what was accepted, less returns and anything already billed. The agreed rate is the rate on the purchase order.</div>':BF.mode==='order'?'<div class="pus-hint" style="margin-top:0">Tick the lines this invoice covers. The most you can bill on a line is what is left of the order.</div>':'<div class="pus-hint" style="margin-top:0">A direct service bill has no work order. Describe each service and give its HSN / SAC code.</div>')
     +'<div class="pi-form"><div>'+left+'</div><div>'+right+'</div></div>'
     +'<div class="card" style="padding:0;margin-top:8px"><div style="overflow-x:auto"><table class="tbl" id="bfTbl"><thead><tr>'+head+'</tr></thead><tbody id="bfBody">'+bfRowsHtml()+'</tbody></table></div></div>'
@@ -345,7 +347,7 @@ window.pusBillOpen=async function(id,tab){
   if(b.status==='booked'&&U().can(perm)){ btn.push('<button class="btn" onclick="pusDnNew('+id+')"><i class="fa-solid fa-file-circle-minus"></i> Raise debit note…</button>'); if(b.accounts_status!=='posted') left.push('<button class="btn btn-ghost" onclick="pusBillCancel('+id+')"><i class="fa-solid fa-ban"></i> Cancel bill</button>'); }
   const issued=CB.dns.filter(x=>x.status==='issued').length;
   openModal('<div class="modal-head"><h3>Bill '+esc(billNo(b))+' '+billTag(b)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="max-height:74vh;overflow:auto"><div class="pi-tabs" id="pabTabs">'+[['main','Main Info'],['items','Items'],['dn','Debit notes'+(issued?' ('+issued+')':'')],['history','Change History']].map(t=>'<a data-t="'+t[0]+'" onclick="pusBillTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="pabBody"></div></div>'
+    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto"><div class="pi-tabs" id="pabTabs">'+[['main','Main Info'],['items','Items'],['dn','Debit notes'+(issued?' ('+issued+')':'')],['history','Change History']].map(t=>'<a data-t="'+t[0]+'" onclick="pusBillTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="pabBody"></div></div>'
     +'<div class="modal-foot"><div style="margin-right:auto;display:flex;gap:6px">'+left.join('')+'</div><button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
   window.pusBillTab(tab||'main');
 };
@@ -492,7 +494,7 @@ function oStatus(o){
   return [o.status,'t-gray'];
 }
 const oTag=o=>{const s=oStatus(o);return '<span class="tag '+s[1]+'">'+esc(s[0])+'</span>';};
-const oMine=o=>o.status==='pending_approval'&&String(o.raised_by).toLowerCase()!==me()&&B.oapp.some(a=>a.order_id===o.id&&a.approvers.some(e=>e.toLowerCase()===me()));
+const oMine=o=>o.status==='pending_approval'&&(selfApproval()||String(o.raised_by).toLowerCase()!==me())&&B.oapp.some(a=>a.order_id===o.id&&a.approvers.some(e=>e.toLowerCase()===me()));
 async function orderList(host){
   const PU=U().PU;
   const [o,l,a]=await Promise.all([PU().from('expense_orders').select('*').is('deleted_at',null).order('created_at',{ascending:false}),PU().from('expense_order_lines').select('id,order_id,qty,billed_qty'),PU().from('expense_order_approvals').select('order_id,level,approvers,round,status').eq('status','pending')]);
@@ -507,7 +509,7 @@ function orderRender(host){
   const list=B.orders.filter(o=>inF(o,B.ofilter)&&(!q||(eoNo(o)+' '+o.subject+' '+vName(o.vendor_id)+' '+projName(o.project_id)).toLowerCase().includes(q)));
   const chips=OSC.map(([k,l])=>'<span class="chip'+(B.ofilter===k?' active':'')+'" onclick="pusEoFilter(\''+k+'\')">'+l+' ('+B.orders.filter(o=>inF(o,k)).length+')</span>').join('');
   const rows=list.map(o=>'<tr style="cursor:pointer" onclick="pusEoOpen('+o.id+')"><td><span class="pus-code">'+esc(eoNo(o))+'</span></td><td>'+esc(KIND[o.kind])+'</td><td><b>'+esc(o.subject)+'</b></td><td>'+esc(vName(o.vendor_id))+'</td><td>'+esc(projName(o.project_id))+'</td><td style="white-space:nowrap">'+U().dmy(o.order_date)+'</td>'
-    +'<td class="pus-num"><b>'+money(o.total_amount)+'</b></td><td>'+oTag(o)+(oMine(o)?' <span class="tag t-blue">Your turn</span>':'')+'</td><td>'+esc(uname(o.raised_by))+'</td></tr>').join('');
+    +'<td class="pus-num"><b>'+money(o.total_amount)+'</b></td><td>'+oTag(o)+(oMine(o)?' <span class="tag t-blue">Your turn</span>'+U().rowDecide('pusEoDecide',o.id):'')+'</td><td>'+esc(uname(o.raised_by))+'</td></tr>').join('');
   host.innerHTML=listShell('Non-store purchases & service work orders','Expenses that do not go into stores, and services bought from a vendor. Each is approved through the project\'s approvers (Admin → Approvers) before a bill can be booked against it. Contractor work belongs to the Engineering module.',
     'New order',U().can('nonstore.purchase')?'pusEoForm()':'',[['Order no'],['Kind'],['For'],['Vendor'],['Project'],['Date'],['Amount',1],['Status'],['Raised by']],rows,
     '<div class="pus-top"><div class="pus-subs" style="margin:0">'+chips+'</div><input class="grow" id="papOq" placeholder="Search by number, subject, vendor or project" value="'+esc(B.oq)+'" oninput="pusEoSearch()"></div>');
@@ -531,9 +533,10 @@ window.pusEoForm=async function(id){
     o=h.data; rows=(l.data||[]).map(x=>({description:x.description,hsn_sac:x.hsn_sac,qty:+x.qty,unit:x.unit,rate:+x.rate,gst:+x.gst_rate}));
   }
   closeModal();
-  EF={id:id||null,kind:o?o.kind:'non_store',rows,o};
+  EF={id:id||null,kind:o?o.kind:'non_store',rows,o,pending:!!(o&&o.status==='pending_approval')};
   const f=EF.o||{}, ven=efVendors(EF.kind), heads=B.heads.filter(x=>x.active||x.id===f.expense_head_id);
-  openModal('<div class="modal-head"><h3>'+(id?'Edit '+esc(eoNo(o)):'New non-store purchase / service order')+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:74vh;overflow:auto">'
+  const pendingNote='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:11px 14px;margin-bottom:12px;font-size:13.5px"><b style="color:#b45309"><i class="fa-solid fa-hourglass-half"></i> Awaiting approval</b><div style="margin-top:4px">Saving your changes pulls this order back and sends it to the first approver again. Approvals given so far no longer count. Press Cancel to leave it as it is.</div></div>';
+  openModal('<div class="modal-head"><h3>'+(id?'Edit '+esc(eoNo(o)):'New non-store purchase / service order')+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'+(EF.pending?pendingNote:'')
     +'<div class="pus-hint" style="margin-top:0">Non-store purchases are expenses that do not go into stores. A service work order is for a service bought from a vendor (not a contractor — that is the Engineering module). HSN / SAC is mandatory on every line.</div>'
     +'<div class="pi-form"><div>'
       +(id?ro('Kind',KIND[o.kind])+ro('Project',projName(o.project_id)):field('Kind','<select id="efKind" onchange="pusEfKind()"><option value="non_store">Non-store purchase</option><option value="service">Service work order</option></select>')+field('Project','<select id="efProj"><option value="">Choose…</option>'+U().S.projects.map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join('')+'</select>'))
@@ -548,7 +551,7 @@ window.pusEoForm=async function(id){
     +'<div class="card" style="padding:0;margin-top:8px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>#</th><th>Description</th><th>HSN / SAC *</th><th>Qty</th><th>Unit</th><th>Rate (₹)</th><th>GST %</th><th class="pus-num">Line total</th><th></th></tr></thead><tbody id="efBody">'+efRowsHtml()+'</tbody><tfoot><tr><td colspan="7" style="text-align:right"><b>Order total</b></td><td class="pus-num"><b id="efTotal"></b></td><td></td></tr></tfoot></table></div></div>'
     +'<div style="margin-top:8px"><button class="btn btn-sm" onclick="pusEfAdd()"><i class="fa-solid fa-plus"></i> Add a line</button></div>'
     +field('Remarks','<textarea id="efRem" rows="2">'+esc(f.remarks||'')+'</textarea>')+'</div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn" onclick="pusEfSave(false)">Save as draft</button><button class="btn btn-primary" onclick="pusEfSave(true)">Save & submit</button></div>','xl');
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'+(EF.pending?'':'<button class="btn" onclick="pusEfSave(false)">Save as draft</button>')+'<button class="btn btn-primary" onclick="pusEfSave(true)">'+(EF.pending?'Save & send for approval again':'Save & submit')+'</button></div>','xl');
   window.pusEfCalc();
 };
 window.pusEfKind=function(){ const k=U().val('efKind'); EF.kind=k; const cur=U().val('efVendor'); $('efVendor').innerHTML='<option value="">Choose…</option>'+efVendors(k).map(x=>'<option value="'+x.id+'"'+(String(x.id)===cur?' selected':'')+'>'+esc(x.trade_name||x.legal_name)+'</option>').join(''); };
@@ -573,12 +576,17 @@ window.pusEfSave=async function(submit){
     if(!(num(r.gst)>=0&&num(r.gst)<=100)){ toast('Line '+(i+1)+': GST must be between 0 and 100','err'); return; }
     lines.push({description:String(r.description).trim(),hsn_sac:String(r.hsn_sac).trim(),qty:num(r.qty),unit:String(r.unit).trim()||'Nos',rate:num(r.rate),gst_rate:num(r.gst)});
   }
+  let pulledBack=false;
+  if(EF.pending){                      // awaiting approval: pull it back first (database function), then it is an ordinary draft
+    const w=await U().PU().rpc('eo_withdraw',{p_id:EF.id}); if(U().fail(w.error,'Could not pull the order back from approval')) return;
+    pulledBack=true; submit=true;
+  }
   const {data:id,error}=await U().PU().rpc('eo_save',{p_id:EF.id,p_head:head,p_lines:lines});
-  if(U().fail(error,'Could not save')) return;
+  if(U().fail(error,'Could not save')){ if(pulledBack) toast('The order was pulled back from approval and is now a draft. Fix the problem, then send it again.','warn'); return; }
   if(submit){
     const r=await U().PU().rpc('eo_submit',{p_id:id});
     if(r.error){ toast('Saved, but it could not be submitted: '+r.error.message.replace(/Admin > Approvers/,'Admin → Approvers'),'warn'); closeModal(); navTo('inventory/7/orders/'+id); return; }
-    closeModal(); toast('Submitted as '+r.data,'ok'); navTo('inventory/7/orders/'+id); return;
+    closeModal(); toast(pulledBack?'Saved and sent for approval again as '+r.data:'Submitted as '+r.data,'ok'); navTo('inventory/7/orders/'+id); return;
   }
   closeModal(); toast('Saved as a draft','ok'); navTo('inventory/7/orders/'+id);
 };
@@ -594,18 +602,21 @@ window.pusEoOpen=async function(id,tab){
   const o=h.data; if(!o||o.deleted_at){ toast('That order no longer exists','err'); return; }
   CE={o,lines:l.data||[],steps:a.data||[],bills:b.data||[],log:lg};
   const perm='nonstore.purchase', mineRaised=canAct(o,perm), btn=[], left=[];
-  const my=o.status==='pending_approval'&&String(o.raised_by).toLowerCase()!==me()&&CE.steps.some(s=>s.round===o.round&&s.level===o.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
+  // While it is awaiting approval its maker can still change or delete it. Once approved: never.
+  const canEditPending=o.status==='pending_approval'&&mineRaised;
+  const my=o.status==='pending_approval'&&(selfApproval()||String(o.raised_by).toLowerCase()!==me())&&CE.steps.some(s=>s.round===o.round&&s.level===o.current_level&&s.status==='pending'&&s.approvers.some(e=>e.toLowerCase()===me()));
   const open=CE.lines.some(x=>+x.qty-+x.billed_qty>0.0005), billed=CE.lines.some(x=>+x.billed_qty>0);
   if(mineRaised&&['draft','rejected'].includes(o.status)) btn.push('<button class="btn" onclick="pusEoForm('+id+')"><i class="fa-solid fa-pen"></i> Edit</button>','<button class="btn btn-primary" onclick="pusEoSubmit('+id+')"><i class="fa-solid fa-paper-plane"></i> '+(o.status==='rejected'?'Resubmit for approval':'Submit for approval')+'</button>');
+  if(canEditPending) btn.push('<button class="btn" onclick="pusEoForm('+id+')" title="Pulls it back from approval; saving sends it to the first approver again"><i class="fa-solid fa-pen"></i> Edit</button>');
   if(my) btn.push('<button class="btn" onclick="pusEoDecide('+id+',false)"><i class="fa-solid fa-circle-xmark"></i> Reject</button>','<button class="btn btn-primary" onclick="pusEoDecide('+id+',true)"><i class="fa-solid fa-circle-check"></i> Approve</button>');
   if(o.status==='approved'&&open&&U().can(permFor(o.kind==='non_store'?'non_store':'service'))) btn.push('<button class="btn btn-primary" onclick="pusEoBill('+id+')"><i class="fa-solid fa-file-invoice"></i> Book a bill…</button>');
   if(U().can(perm)){
     if(o.status==='approved') left.push('<button class="btn btn-ghost" onclick="pusEoAsk('+id+',\'close\')"><i class="fa-solid fa-lock"></i> Close order…</button>');
     if(['draft','rejected'].includes(o.status)&&mineRaised||(o.status==='approved'&&!billed)) left.push('<button class="btn btn-ghost" onclick="pusEoAsk('+id+',\'cancel\')"><i class="fa-solid fa-ban"></i> Cancel order…</button>');
-    if(o.status==='draft'&&mineRaised) left.push('<button class="btn btn-ghost" onclick="pusEoDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete draft</button>');
+    if((o.status==='draft'&&mineRaised)||canEditPending) left.push('<button class="btn btn-ghost" onclick="pusEoDelete('+id+')"><i class="fa-solid fa-trash"></i> '+(o.status==='draft'?'Delete draft':'Delete')+'</button>');
   }
   openModal('<div class="modal-head"><h3>'+esc(KIND[o.kind])+' '+esc(eoNo(o))+' '+oTag(o)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="max-height:74vh;overflow:auto"><div class="pi-tabs" id="paoTabs">'+[['main','Main Info'],['items','Items'],['bills','Bills ('+CE.bills.length+')'],['approval','Approval History'],['history','Change History']].map(t=>'<a data-t="'+t[0]+'" onclick="pusEoTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="paoBody"></div></div>'
+    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto">'+U().stuckBanner({status:o.status,round:o.round,level:o.current_level,steps:CE.steps,raisedBy:o.raised_by,allowSelf:selfApproval(),what:'order'})+'<div class="pi-tabs" id="paoTabs">'+[['main','Main Info'],['items','Items'],['bills','Bills ('+CE.bills.length+')'],['approval','Approval History'],['history','Change History']].map(t=>'<a data-t="'+t[0]+'" onclick="pusEoTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="paoBody"></div></div>'
     +'<div class="modal-foot"><div style="margin-right:auto;display:flex;gap:6px">'+left.join('')+'</div><button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
   window.pusEoTab(tab||'main');
 };
@@ -634,7 +645,7 @@ function eBills(){
 function eApproval(){
   const {o,steps}=CE, done=steps.filter(s=>s.status==='approved'||s.status==='rejected'), pend=steps.filter(s=>s.status==='pending'&&s.round===o.round&&o.status==='pending_approval');
   const doneRows=done.map(s=>'<tr><td>'+esc(uname(s.acted_by))+'</td><td>'+esc(profile(s.acted_by))+'</td><td>Level '+s.level+' ('+(s.status==='approved'?'Approved By':'Rejected By')+')</td><td>'+(s.status==='approved'?'Approve':'Reject')+'</td><td style="white-space:nowrap">'+U().dmyTime(s.acted_at)+'</td><td>'+esc(s.remark||'')+'</td></tr>').join('');
-  const pendRows=pend.map(s=>s.approvers.map(e=>'<tr><td>'+esc(uname(e))+'</td><td>'+esc(profile(e))+'</td><td>Level '+s.level+' (Approval pending)</td></tr>').join('')).join('');
+  const pendRows=pend.map(s=>s.approvers.map(e=>'<tr><td>'+esc(uname(e))+'</td><td>'+esc(profile(e))+'</td><td>Level '+s.level+' (Approval pending with '+esc(uname(e))+')</td></tr>').join('')).join('');
   return ro('Document No',o.doc_no||'Not submitted yet')
     +'<div class="card" style="padding:0;margin-top:6px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Approved By</th><th>Profile</th><th>Action Information</th><th>Status</th><th>Date Time</th><th>Remarks</th></tr></thead><tbody>'+(doneRows||'<tr><td colspan="6"><div class="empty" style="padding:14px"><div>No decisions yet</div></div></td></tr>')+'</tbody></table></div></div>'
     +'<div class="card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Pending With</th><th>Profile</th><th>Action Information</th></tr></thead><tbody>'+(pendRows||'<tr><td colspan="3"><div class="empty" style="padding:14px"><div>Nothing pending</div></div></td></tr>')+'</tbody></table></div></div>';
@@ -645,14 +656,17 @@ window.pusEoSubmit=async function(id){
   closeModal(); toast('Submitted as '+data,'ok'); navTo('inventory/7/orders/'+id);
 };
 window.pusEoDelete=async function(id){
-  if(!await confirmDialog('Delete this draft order?')) return;
+  const pending=!!(CE&&CE.o.id===id&&CE.o.status==='pending_approval');
+  if(!await confirmDialog(pending?'Delete this order? It is awaiting approval — the approvers will no longer see it. This cannot be undone.':'Delete this draft order?')) return;
   const {error}=await U().PU().rpc('eo_delete',{p_id:id});
   if(U().fail(error,'Delete failed')) return;
-  closeModal(); toast('Draft deleted','ok'); navTo('inventory/7/orders');
+  closeModal(); toast(pending?'Order deleted':'Draft deleted','ok'); navTo('inventory/7/orders');
 };
 window.pusEoDecide=function(id,approve){
-  openModal('<div class="modal-head"><h3>'+(approve?'Approve':'Reject')+' '+esc(eoNo(CE.o))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm"><div class="pus-hint" style="margin-top:0">Total '+money(CE.o.total_amount)+' to '+esc(vName(CE.o.vendor_id))+' — '+esc(CE.o.subject)+'.</div><label>'+(approve?'Remark (optional)':'Reason for rejecting')+'</label><textarea id="paoNote" rows="3" placeholder="'+(approve?'':'The raiser sees this and can correct and resubmit')+'"></textarea></div>'
+  const o=(CE&&CE.o&&CE.o.id===id)?CE.o:B.orders.find(x=>x.id===id);   // from the open order, or straight from a register row
+  if(!o) return;
+  openModal('<div class="modal-head"><h3>'+(approve?'Approve':'Reject')+' '+esc(eoNo(o))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm"><div class="pus-hint" style="margin-top:0">Total '+money(o.total_amount)+' to '+esc(vName(o.vendor_id))+' — '+esc(o.subject)+'.</div><label>'+(approve?'Remark (optional)':'Reason for rejecting')+'</label><textarea id="paoNote" rows="3" placeholder="'+(approve?'':'The raiser sees this and can correct and resubmit')+'"></textarea></div>'
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="pusEoDecideSave('+id+','+approve+')">'+(approve?'Approve':'Reject')+'</button></div>');
 };
 window.pusEoDecideSave=async function(id,approve){

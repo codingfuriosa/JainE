@@ -8,6 +8,16 @@
     ]
   },
   {
+    "file": "accounts.html",
+    "title": "Accounts · Nexus-RE · Jain Group",
+    "page": "accounts",
+    "before": [
+      "accounts.js",
+      "accounts-bank.js",
+      "accounts-books.js"
+    ]
+  },
+  {
     "file": "campaigns.html",
     "title": "campaigns · JAIN-E · Jain Group",
     "page": "campaigns"
@@ -67,7 +77,8 @@
       "engineering-boq.js",
       "engineering-wo.js",
       "engineering-amend.js",
-      "engineering-ra.js"
+      "engineering-ra.js",
+      "engineering-ret.js"
     ]
   },
   {
@@ -182,9 +193,6 @@
     "page": "scheduling",
     "before": [
       "insp-items.js"
-    ],
-    "after": [
-      "scheduling.js"
     ]
   },
   {

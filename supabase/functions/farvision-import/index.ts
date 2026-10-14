@@ -221,6 +221,35 @@ Deno.serve(async (req) => {
       for (const q of qs) { const res = await gmail(`messages?q=${encodeURIComponent(q)}&maxResults=3`); r.push({ query: q, count: (res.messages || []).length }); }
       return json({ ok: true, results: r });
     }
+    /* AUTOMATIC IMPORT (9 Oct 2026). The GitHub Actions job (.github/workflows/farvision-import.yml)
+       cannot read the private bucket or write the staging table itself, so it asks here, with the
+       shared key kept in acc.job_secrets ('farvision_import'):
+         auto_files - today's files, each with a short-lived download link
+         auto_stage - one chunk of parsed rows for one file
+       Nothing customer facing changes here; cust.fv_import_tick() applies the staged day. */
+    if (action === "auto_files" || action === "auto_stage") {
+      const key = String(body.key || "");
+      const { data: sec } = await db.schema("acc").from("job_secrets").select("value").eq("name", "farvision_import").maybeSingle();
+      if (!sec?.value || !key || key !== sec.value) return json({ error: "unauthorized" }, 401);
+      if (action === "auto_files") {
+        const { data, error } = await db.schema("cust").rpc("fv_auto_files");
+        if (error) return json({ error: error.message }, 500);
+        const files: any[] = (data as any)?.files || [];
+        for (const f of files) {
+          if (f.staged) continue;
+          const { data: s } = await db.storage.from(STORAGE_BUCKET).createSignedUrl(f.storage_path, 1800);
+          f.url = s?.signedUrl || null;
+        }
+        return json({ ok: true, run_id: (data as any)?.run_id, mode: (data as any)?.mode, files });
+      }
+      const { error } = await db.schema("cust").rpc("fv_auto_stage", {
+        p_run: body.run_id, p_queue: body.queue_id, p_file: body.file_name, p_created: body.created_at || null,
+        p_type: body.report_type || null, p_rows_total: body.row_count ?? null, p_chunk: body.chunk ?? 0,
+        p_chunks: body.chunks ?? 1, p_rows: body.rows || [], p_parse_error: body.parse_error || null,
+      });
+      if (error) return json({ error: error.message }, 500);
+      return json({ ok: true });
+    }
     if (action === "poll" || action === "push") {
       return json({ ok: true, action, ...await processEmails(db) });
     }

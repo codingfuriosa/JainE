@@ -1,0 +1,9 @@
+{
+  "name": "farvision-auto-import",
+  "private": true,
+  "type": "module",
+  "description": "Reads the day's Farvision reports for the automatic import (run by .github/workflows/farvision-import.yml)",
+  "dependencies": {
+    "xlsx": "0.18.5"
+  }
+}

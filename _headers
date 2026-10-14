@@ -1,26 +1,35 @@
-# WHY THE SITE WAS SLOW.
+# WHY THE SITE IS SLOW, AND WHAT THIS CHANGES.
 #
-# Every .js, .css and .html here was served "no-cache", which does not mean "do not store" - it
-# means the browser must ASK the server every single time before it may use what it already has.
-# nexus-core.js is 2.1MB of source (600KB over the wire after brotli). Every page in JAIN-E is a
-# separate HTML file that loads it again, so moving from Bookings to Invoices to CRM meant a
-# round trip to Netlify and a re-parse of 2.1MB of JavaScript, on every move. Measured at 3.2
-# seconds for that one file.
+# Every .js and .css here was served "no-cache". That does not mean "do not store" - it means
+# nobody may use a copy they already hold without asking the server first. It costs twice:
 #
-# The app already solves this properly: every script tag carries ?v=<number>, and that number is
-# bumped on every change. A URL that changes when its contents change can be cached FOREVER -
-# that is the entire point of versioning it. "no-cache" threw that away and made the ?v= do
-# nothing but add characters.
+#   1. THE BROWSER re-fetches nexus-core.js on every page. Measured against the live site, that
+#      one file is 637KB over the wire and takes ~1.2s. Every page in JAIN-E is a separate HTML
+#      document that loads it again, so moving from Accountability to Invoices to CRM pays it
+#      each time. In the same page load, chart.js and supabase-js - which ARE cacheable - came
+#      back in 9ms from cache while nexus-core.js took 1,358ms.
 #
-# So: the HTML is still no-cache, because the HTML is what carries the new ?v= and it must be
-# picked up the moment it ships. Everything the HTML points at is immutable, because its URL
-# changes whenever it does.
+#   2. NETLIFY'S OWN EDGE cannot serve it either. The response header says it plainly:
+#         Cache-Status: "Netlify Edge"; fwd=stale; fwd-status=304
+#         Age: 0
+#      Every request walks back to the origin. That is why this site answers in 0.54-0.94s while
+#      cdnjs and jsDelivr - the CDNs it borrows from - answer in 0.15-0.32s from Delhi.
+#
+# The app already solves this: every script tag carries ?v=<number>, bumped whenever the file
+# changes. A URL that changes when its contents change can be cached forever - that is the whole
+# point of stamping it. "no-cache" threw that away and left the ?v= doing nothing but adding
+# characters.
+#
+# So the HTML stays no-cache, because the HTML is what carries the new ?v= and must be picked up
+# the moment it ships. Everything the HTML points at becomes immutable, because its URL changes
+# whenever it does.
 #
 # ───────────────────────────────────────────────────────────────────────────────────────────
-# THE ONE RULE THIS DEPENDS ON: bump ?v= in the HTML whenever a .js or .css file changes.
-# Ship a change without bumping it and browsers will keep the old file for a year. Every page's
-# script tags are stamped together, so bumping means a search and replace across *.html, not
-# remembering which page uses what.
+# THE ONE RULE THIS DEPENDS ON: every ?v= must change whenever its file does. That is done by
+#   node tools/build.mjs
+# which stamps each script and stylesheet link (and the module loader's PAGE_SCRIPT_VERSION)
+# with a hash of the file's own content. Run it before every deploy - a change shipped without it
+# is a change browsers keep the old file over for a year.
 # ───────────────────────────────────────────────────────────────────────────────────────────
 
 /*.html
@@ -36,3 +45,10 @@
 # re-fetched on every page, short enough that replacing a logo reaches people the same week.
 /assets/*
   Cache-Control: public, max-age=86400
+
+# THE BROWSER EXTENSION IS PUBLISHED TOO, and its files carry no ?v= at all - popup.js and
+# options.js are loaded by name from its own HTML. /tools/* is reachable over HTTP (verified:
+# /tools/jaine-automation-extension/popup.js returns 200), so the rules above would otherwise
+# freeze them for a year with no way to push a correction. This rule comes last so it wins.
+/tools/*
+  Cache-Control: no-cache

@@ -65,7 +65,7 @@ const BRAND = {
             + '    </div>',
 };
 const FOOT = { operations: 'Operations Portal', customer: 'Customer Portal' };
-const CHART = '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>\n';
+const CHART = '<script src="vendor/chart-4.4.1.umd.min.js" defer></script>\n';
 const tag = (file, v) => `<script src="${file}?v=${v}" defer></script>\n`;
 
 const outputs = { 'nexus-core.js': coreOut };
@@ -81,7 +81,9 @@ for (const p of pages) {
     .replace('{{FOOT}}', FOOT[portal])
     .replace('{{PAGE}}', p.page)
     .replace('{{SCRIPTS}}', scripts)
-    .replace('href="nexus.css"', `href="nexus.css?v=${cssVersion}"`);
+    // every local script and stylesheet the template itself names (nexus.css, vendor/...) gets its
+    // content version too; the page's own scripts were stamped above
+    .replace(/\b(src|href)="((?!https?:|\/\/)[\w./-]+\.(?:js|css))"/g, (m, attr, file) => `${attr}="${file}?v=${versionOf(file)}"`);
   if (/\{\{\w+\}\}/.test(html)) throw new Error(`${p.file}: a placeholder was left unfilled`);
   html = html.replace('<!DOCTYPE html>\n', `<!DOCTYPE html>\n${PAGE_MARK}\n`);
   outputs[p.file] = html;

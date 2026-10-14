@@ -679,6 +679,96 @@
       padding:2px 9px;border-radius:20px;white-space:nowrap;background:var(--brand-50,#eff4ff);
       color:var(--brand-700,#1e40af);border:1px solid var(--brand-a10,#eef2ff)}
     .dp-chip-rep i{font-size:9.5px}
+    /* a recurring task, told apart from a normal one in every list: a purple outline, nothing more */
+    .ac-row.ac-row-rec{box-shadow:inset 0 0 0 1.5px #a78bfa;border-radius:8px}
+    /* Recurring view: "Due soon" columns, or a year table - tasks frozen on the left, the timeline
+       across - and a side panel like the Calendar's that opens only when something is clicked. */
+    .rq-nav{display:flex;align-items:center;gap:8px;margin-left:auto}
+    .rq-nav .ac-btn{width:36px;justify-content:center;font-size:17px}
+    .rq-nav b{font-size:15px;min-width:96px;text-align:center}
+    .rq-dd{position:relative;margin-left:6px}
+    .rq-ddb{height:36px;min-width:176px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 12px;
+      border-radius:8px;border:1.5px solid #2563eb;background:#fff;color:#1d4ed8;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
+    .rq-ddb i{font-size:11px}
+    .rq-ddl{position:absolute;right:0;top:42px;z-index:20;min-width:196px;background:#fff;border:1px solid #dfe3e8;border-radius:10px;
+      box-shadow:0 10px 28px rgba(15,23,42,.14);padding:6px;display:flex;flex-direction:column}
+    .rq-ddl button{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border:0;border-radius:7px;background:transparent;
+      font:inherit;font-size:13.5px;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-ddl button:hover{background:#f1f5f9}
+    .rq-ddl button.on{background:#eff4ff;color:#1d4ed8;font-weight:700}
+    .rq-key{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;font-size:12px;color:#475569;margin:2px 0 12px}
+    .rq-key span{display:inline-flex;align-items:center;gap:6px}
+    .rq-key i{width:8px;height:8px;border-radius:50%;display:inline-block}
+    .rq-key em{font-style:normal}
+    .rq-key b{font-weight:800}
+    .rq-dot{flex:none;width:8px;height:8px;border-radius:50%;display:inline-block}
+    .rq-none{font-size:13px;color:#94a3b8;padding:4px 0}
+    .rq-none.big{padding:48px 24px;text-align:center;color:#64748b;font-size:14px}
+    /* Due soon: four full-height columns, two to a row on a narrower screen - never three */
+    .rq-soon{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;height:calc(100vh - 300px);min-height:560px}
+    @media (max-width:1100px){.rq-soon{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:max(420px,calc(100vh - 300px));height:auto;min-height:0}}
+    .rq-sc{display:flex;flex-direction:column;min-height:0;background:#fff;border:1px solid #dfe3e8;border-radius:12px;overflow:hidden}
+    .rq-sc.today{box-shadow:inset 0 3px 0 #c8101a}
+    .rq-sch{flex-shrink:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;padding:12px 14px;border:0;
+      border-bottom:1px solid #eef0f3;background:#f8fafc;font:inherit;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-sch.od{background:#fef2f2}
+    .rq-sch:hover{filter:brightness(.98)}
+    .rq-sch b{font-size:14px}
+    .rq-sch span{font-size:12px;color:#64748b}
+    .rq-scb{flex:1;min-height:0;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
+    .rq-scb .n{font-size:22px;font-weight:700;line-height:1}
+    .rq-scb .n small{font-size:12px;font-weight:600;color:#64748b;margin-left:5px}
+    .rq-scb .l{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#334155;margin-top:8px}
+    .rq-scb .l b{margin-left:auto}
+    .rq-chip{display:flex;width:100%;box-sizing:border-box;padding:8px 10px;border-radius:8px;font:inherit;font-size:12.5px;font-weight:600;
+      line-height:1.3;text-align:left;cursor:pointer;color:var(--cc);background:var(--cb);border:1.5px solid transparent}
+    .rq-chip.od{background:#fff;border-color:#dc2626}
+    .rq-chip span{flex:1;min-width:0;overflow-wrap:anywhere}
+    .rq-chip small{display:block;font-size:11px;margin-top:2px;font-weight:500;opacity:.8}
+    .rq-chip small.late{color:#b91c1c;font-weight:800;opacity:1}
+    /* the year table */
+    .rq-table{width:100%;background:#fff;border:1px solid #dfe3e8;border-radius:12px;overflow:auto;max-height:calc(100vh - 260px);min-height:320px}
+    .rq-in{width:max-content;min-width:100%}
+    .rq-tr{display:flex;border-bottom:1px solid #eef0f3}
+    .rq-tc{flex:none;width:300px;position:sticky;left:0;z-index:2;background:#fff;border-right:1px solid #dfe3e8;box-sizing:border-box}
+    .rq-hd,.rq-band{position:sticky;z-index:3;background:#fff}
+    .rq-band{top:0;height:28px}
+    .rq-hd{top:0;height:54px;border-bottom:1px solid #dfe3e8}
+    .rq-band+.rq-hd{top:29px}
+    .rq-hd .rq-tc{z-index:4;padding:0 16px;display:flex;align-items:center;font-size:11.5px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.06em}
+    .rq-band .rq-tc{z-index:4}
+    .rq-bd{min-width:0;box-sizing:border-box;padding:0 10px;display:flex;align-items:center;font-size:12px;font-weight:700;white-space:nowrap;
+      overflow:hidden;border-left:2px solid #cbd5e1;color:#334155}
+    .rq-ch{flex:1 0 84px;min-width:84px;height:54px;box-sizing:border-box;padding:0 4px;display:flex;flex-direction:column;align-items:center;
+      justify-content:center;gap:2px;border:0;border-left:1px solid #eef0f3;font:inherit;cursor:pointer;color:#0f172a}
+    .rq-ch:hover{filter:brightness(.97)}
+    .rq-ch.cur{box-shadow:inset 0 -3px 0 #c8101a}
+    .rq-ch b{font-size:12px;white-space:nowrap}
+    .rq-ch span{font-size:10.5px;color:#64748b;white-space:nowrap}
+    .rq-tn{height:46px;padding:0 16px;display:flex;align-items:center;gap:10px;border:0;border-right:1px solid #dfe3e8;font:inherit;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-tn:hover{background:#f8fafc}
+    .rq-tn i{flex:none;width:3px;height:22px;border-radius:2px}
+    .rq-tn span{flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rq-cl{flex:1 0 84px;min-width:84px;height:46px;box-sizing:border-box;border-left:1px solid #eef0f3;display:flex;align-items:center;justify-content:center;gap:3px}
+    .rq-cl.on{cursor:pointer;font-size:12.5px}
+    .rq-cl.on:hover{box-shadow:inset 0 0 0 1px #cbd5e1}
+    .rq-cl small{font-size:11.5px}
+    /* the side panel */
+    .rq-back{position:fixed;inset:0;background:rgba(15,23,42,.18);opacity:0;pointer-events:none;transition:opacity .2s;z-index:199}
+    .rq-back.open{opacity:1;pointer-events:auto}
+    .rq-sub{font-size:13px;color:#475569;margin-bottom:6px}
+    .rq-item{display:flex;align-items:center;gap:10px;width:100%;padding:11px 4px;border:0;border-bottom:1px solid #eef0f3;
+      background:transparent;font:inherit;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-item:hover{background:#f8fafc}
+    .rq-item .rq-bar{flex:none;width:3px;height:30px;border-radius:2px}
+    .rq-item .tt{flex:1;min-width:0;display:flex;flex-direction:column}
+    .rq-item .tt b{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rq-item .tt span{font-size:12px;color:#64748b}
+    .rq-item .go{color:#94a3b8}
+    .rq-st{font-size:12px;white-space:nowrap}
+    .rq-dl{display:grid;grid-template-columns:96px 1fr;gap:10px 12px;font-size:13.5px;line-height:1.45}
+    .rq-dl .k{color:#64748b}
+    .rq-pill{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:20px;margin:8px 0 12px}
 
     /* an instance's attachments, printed as pages rather than filenames */
     .wf-print-att{margin-top:16px;page-break-inside:avoid}
@@ -771,7 +861,13 @@
     try{ await ACC().from('notifications').update({read:true})
       .eq('recipient',me()).eq('task_id',tid).eq('read',false).neq('kind','approval'); }catch(e){}
   }
-  async function notifLoad(){
+  /* The bell asked for the same 50 notifications twice on every page load: once here, and again
+     a moment later because the window raises a focus event as it finishes opening. Seen in the
+     network panel as two identical requests. The timed refresh and the explicit reloads after
+     approving or marking all read are untouched - only a focus arriving on the heels of the first
+     load is skipped, and it could only ever have returned the same rows. */
+  let NOTIF_LAST_AT=0;
+  async function notifLoad(){ NOTIF_LAST_AT=Date.now();
     try{ const {data}=await ACC().from('notifications').select('*').eq('recipient',me()).order('created_at',{ascending:false}).limit(50); NOTIFS=data||[]; }catch(e){ NOTIFS=[]; }
     // Drop anything whose task has already been dealt with, in one pass rather than per row.
     try{
@@ -868,29 +964,122 @@
   }
   async function loadAssignees(ids){ if(!ids.length)return {}; try{const {data}=await ACC().from('ptask_assignees').select('*').in('task_id',ids);const m={};(data||[]).forEach(a=>{(m[a.task_id]=m[a.task_id]||[]).push(a.email);});return m;}catch(e){return {};} }
   async function loadProjectsMap(){ try{const {data}=await ACC().from('projects').select('id,name');const m={};(data||[]).forEach(p=>m[p.id]=p.name);return m;}catch(e){return {};} }
-  async function loadAll(){
-    const my=me();
-    /* PostgREST caps one response at 1000 rows, silently. Both of these had passed it: 892 tasks
-       and 1008 assignee rows. The assignee list is the damaging one, because the filter below
-       DROPS any task whose assignee rows did not arrive - so the newest eight assignments were
-       invisible to everybody, including the person who created them, and every new task pushed
-       another one out. A task that had plainly been created simply was not in the list.
+    /* ONLY THE TASKS THAT COULD SURVIVE THE FILTER ARE FETCHED.
+
+       This read used to pull EVERY task and EVERY assignee row in the system and then throw away
+       what was not yours, in the browser. Measured on the live database: 2,944 tasks and 3,089
+       assignee rows, 2,493KB of JSON, to show about 170 tasks needing 118KB. Ninety-five per cent
+       of it was downloaded, parsed and discarded on every visit to the page - more data than
+       nexus-core.js itself.
+
+       THE FILTER BELOW IS UNTOUCHED, and that is what makes this safe rather than merely faster. It
+       keeps a task when you are the delegator, OR you are one of its assignees, OR you are standing
+       in on its workflow step - and only when the task has at least one assignee. So the complete
+       set of tasks that can possibly survive it is:
+
+           delegator = me   UNION   tasks naming me as an assignee   UNION   wf stand-in tasks
+
+       Every one of those three is known before the task list is read: the first is a column, the
+       second is one small query against ptask_assignees, the third is already in WF_ACT_TASKS from
+       wfActLoad() above. Fetching exactly that union and then running the ORIGINAL filter over it
+       cannot change the answer - anything left out would have been dropped by the filter anyway.
+       The assignee rows for those tasks are then fetched in full, not just mine, because the filter
+       asks whether a task has any assignee at all and the list shows who they are.
+
+       IF ANYTHING ABOUT THE NARROW PATH IS UNSAFE IT DOES NOT RUN. An email containing a character
+       PostgREST reads as syntax, an id list long enough to make an unreasonable URL, or any error
+       from the two preparatory queries, and this falls through to loadAllEverything() - the exact
+       code that ran before. The worst case is today's speed, never a wrong list. */
+    /* THE OLD PATH, KEPT WHOLE AS THE FALLBACK.
+       PostgREST caps one response at 1000 rows, silently. Both of these had passed it: 892 tasks
+       and 1008 assignee rows. The assignee list is the damaging one, because the filter DROPS any
+       task whose assignee rows did not arrive - so the newest eight assignments were invisible to
+       everybody, including the person who created them, and every new task pushed another one out.
+       A task that had plainly been created simply was not in the list. That is why both reads are
+       paged, here and on the narrow path below.
        Ordered explicitly as well: without a sort, pages can overlap or skip. order_index is 0 on
        every row today, so id is what actually makes the paging stable. */
-    await wfActLoad();   // before the filter below, which asks what I may act on
-    const [tasksRaw,asgRaw,pR]=await Promise.all([
-      wfFetchPaged(function(){ return ACC().from('ptasks').select('*')
-        .order('order_index',{ascending:true}).order('id',{ascending:true}); }),
-      wfFetchPaged(function(){ return ACC().from('ptask_assignees').select('*')
-        .order('id',{ascending:true}); }),
-      ACC().from('projects').select('id,name')
-    ]);
-    let tasks=tasksRaw||[]; const pm={}; (pR.data||[]).forEach(x=>pm[x.id]=x.name);
-    const asg={}; (asgRaw||[]).forEach(a=>{(asg[a.task_id]=asg[a.task_id]||[]).push(a.email);});
-    tasks=tasks.filter(t=>(eq(t.delegator,my)||(asg[t.id]||[]).some(e=>eq(e,my))||wfActTask(t)) && (asg[t.id]||[]).length>0);
-    tasks.forEach(t=>t._projName=t.project_id?pm[t.project_id]:'');
-    return {tasks,asg,pm};
-  }
+    async function loadAllEverything(my){
+      const [tasksRaw,asgRaw,pR]=await Promise.all([
+        wfFetchPaged(function(){ return ACC().from('ptasks').select('*')
+          .order('order_index',{ascending:true}).order('id',{ascending:true}); }),
+        wfFetchPaged(function(){ return ACC().from('ptask_assignees').select('*')
+          .order('id',{ascending:true}); }),
+        ACC().from('projects').select('id,name')
+      ]);
+      return {tasksRaw:tasksRaw||[], asgRaw:asgRaw||[], pR:pR};
+    }
+    async function loadAllNarrow(my){
+      // An address PostgREST would mis-read as syntax: do not build a filter out of it.
+      if(/[,()]/.test(my)) return null;
+      const [mineRes,pR]=await Promise.all([
+        ACC().from('ptask_assignees').select('task_id').ilike('email',my),
+        ACC().from('projects').select('id,name')
+      ]);
+      if(!mineRes || mineRes.error || !mineRes.data) return null;
+      const ids={};
+      mineRes.data.forEach(function(r){ if(r && r.task_id!=null) ids[r.task_id]=true; });
+      Object.keys(WF_ACT_TASKS||{}).forEach(function(k){ if(k!=='') ids[k]=true; });
+      const idList=Object.keys(ids);
+      if(idList.length>900) return null;              // too many for one sane URL - take the old road
+      const or='delegator.ilike.'+my+(idList.length?(',id.in.('+idList.join(',')+')'):'');
+      const tasksRaw=await wfFetchPaged(function(){ return ACC().from('ptasks').select('*')
+        .or(or).order('order_index',{ascending:true}).order('id',{ascending:true}); });
+      if(!tasksRaw) return null;
+      const taskIds=tasksRaw.map(function(t){ return t.id; });
+      // every assignee of those tasks, not only mine - the filter counts them and the list shows them
+      let asgRaw=[];
+      if(taskIds.length){
+        asgRaw=await wfFetchPaged(function(){ return ACC().from('ptask_assignees').select('*')
+          .in('task_id',taskIds).order('id',{ascending:true}); });
+        if(!asgRaw) return null;
+      }
+      return {tasksRaw:tasksRaw, asgRaw:asgRaw, pR:pR};
+    }
+    /* ONE ROUND TRIP, WITH BOTH OLDER PATHS KEPT BEHIND IT.
+
+       acc.tasks_overview() does the same four reads on the server and returns them together: the
+       tasks I may see, every assignee of those tasks, and the project names. Four trips to Mumbai
+       become one. The database answers in about 20ms; the travel is about 65ms each way, so it was
+       the waiting that cost, not the work.
+
+       It is SECURITY INVOKER, so it runs as the signed-in user and every row-level policy applies
+       exactly as it does to a direct query - it cannot hand back a row the browser could not have
+       fetched itself. The visibility rule inside it is copied from the filter below, not invented,
+       because acc.ptasks' own policy is merely "not a customer" and never decided whose tasks these
+       are. Proven equal to the old client-side logic on the live database for four accounts, and
+       again through the function itself: 149 tasks either way, no id missing, none extra, no
+       duplicates.
+
+       wfActLoad() goes out alongside it rather than before it. The function looks up the workflow
+       stand-ins itself; this copy is for the filter and the rendering below, and it needs nothing
+       from the call it now travels with.
+
+       THREE PATHS, EACH FALLING BACK TO THE LAST. If the single call fails for any reason, the
+       narrow client-side version runs; if that cannot be trusted either, loadAllEverything() - the
+       code that shipped before any of this - runs. The worst case is the old speed, never a wrong
+       list. The filter below is applied in every case, unchanged, so even a function returning
+       something unexpected cannot widen what you see. */
+    async function loadAll(){
+      const my=me();
+      const [,rpc]=await Promise.all([
+        wfActLoad(),                                      // for the filter and rendering below
+        ACC().rpc('tasks_overview').then(function(r){return r;}, function(e){return {error:e};})
+      ]);
+      let got=null;
+      if(rpc && !rpc.error && rpc.data && Array.isArray(rpc.data.tasks)){
+        got={ tasksRaw: rpc.data.tasks||[], asgRaw: rpc.data.assignees||[],
+              pR: {data: rpc.data.projects||[]} };
+      }
+      if(!got){ try{ got=await loadAllNarrow(my); }catch(_e){ got=null; } }
+      if(!got) got=await loadAllEverything(my);
+      const tasksRaw=got.tasksRaw, asgRaw=got.asgRaw, pR=got.pR;
+      let tasks=tasksRaw||[]; const pm={}; ((pR&&pR.data)||[]).forEach(x=>pm[x.id]=x.name);
+      const asg={}; (asgRaw||[]).forEach(a=>{(asg[a.task_id]=asg[a.task_id]||[]).push(a.email);});
+      tasks=tasks.filter(t=>(eq(t.delegator,my)||(asg[t.id]||[]).some(e=>eq(e,my))||wfActTask(t)) && (asg[t.id]||[]).length>0);
+      tasks.forEach(t=>t._projName=t.project_id?pm[t.project_id]:'');
+      return {tasks,asg,pm};
+    }
   const isOwner = t => eq(t.delegator,me());
   /* A step I am standing in on counts as mine for WHERE IT IS LISTED and WHETHER I GET BUTTONS,
      which is the whole point - it has to reach me to be actionable. It deliberately does NOT make
@@ -991,6 +1180,7 @@
     // old tab — a bookmark, a pasted link, a stale open tab — goes there rather than to a blank tab.
     if (seg[0]==='scoreboard') { navTo('scoreboard'); return; }
     let tab = seg[0] || 'work'; if(tab==='home')tab='work';
+    if(tab==='recurring'){ P3='recurring'; tab='work'; }   // the old Recurring tab is now a pill on Tasks
     ROUTE={tab:tab,taskId:null};
     setCrumb(['Accountability', tab==='work'?'Tasks':(tab.charAt(0).toUpperCase()+tab.slice(1))]);
     v.innerHTML = `<div class="page-head"><div><h1><i class="fa-solid fa-list-check" style="color:#1d4ed8"></i> Accountability</h1><p>Tasks &amp; delegation</p></div></div>
@@ -1007,6 +1197,277 @@
     if (tab==='workflow') return workflowTab();
     return tasksScreen();
   };
+
+  /* ---------- Recurring view (the "Recurring" pill on Tasks) ----------
+     Two ways to read the same recurring tasks, picked from the frequency menu:
+
+       Due soon (the default) - four columns: anything overdue, then today, tomorrow and the day
+         after. Each lists its tasks grouped by frequency, with the deadline on every one.
+       The year table - one row per recurring task, frozen on the left, and one financial year
+         (April to March) of columns across. "All frequencies" shows week columns only: weeks are
+         numbered inside each month and cut at its edge, so a week never holds another month's
+         dates, and monthly, quarterly and annual deadlines sit in the week they fall in. Picking
+         one frequency shows only its own columns (weeks, months, quarters or the year).
+
+     A cell holds the deadline - the day for weekly and fortnightly tasks, DD/MM otherwise - and how
+     far off it was finished: black for still to come, green for done on time or early, red for done
+     late, bold red for overdue and still open. Clicking a task opens its history; clicking a cell,
+     that deadline; clicking a column header, everything in that column.
+
+     A series is every task of one recurring task (same owner, title, frequency and anchor - the
+     database copies all four onto each one it creates). Its real tasks show as they stand; dates
+     after its latest one are worked out from the rule, and are "held" while the latest is still
+     open, since the next is only made once the current one is done. */
+  const REC_FQ=[
+    {k:'weekly',      label:'Weekly',      c:'#1d4ed8', bg:'#dbeafe', col:'week'},
+    {k:'fortnightly', label:'Fortnightly', c:'#0f766e', bg:'#ccfbf1', col:'week'},
+    {k:'monthly',     label:'Monthly',     c:'#b45309', bg:'#fef3c7', col:'month'},
+    {k:'quarterly',   label:'Quarterly',   c:'#6d28d9', bg:'#ede9fe', col:'quarter'},
+    {k:'yearly',      label:'Annually',    c:'#be123c', bg:'#ffe4e6', col:'year'},
+    {k:'daily',       label:'Daily',       c:'#475569', bg:'#e2e8f0', col:'week'}
+  ];
+  const REC_FQC=k=>REC_FQ.find(f=>f.k===k)||REC_FQ[0];
+  let REC_VIEW=null, REC_DATA=null;
+  function recFy(iso){ const p=dpParse(iso); return p.m>=3?p.y:p.y-1; }
+  function recDays(a,b){ const x=dpParse(a), y=dpParse(b); return Math.round((Date.UTC(x.y,x.m,x.d)-Date.UTC(y.y,y.m,y.d))/86400000); }
+  // the IST calendar day a timestamp falls on
+  function recDayOf(ts){ if(!ts) return null; const d=new Date(new Date(ts).getTime()+330*60000); return isNaN(d)?null:d.toISOString().slice(0,10); }
+  function recSeries(tasks){
+    const map={};
+    tasks.filter(t=>t.recur&&t.recur.freq&&t.recur.freq!=='none'&&t.flow_case_step_id==null&&t.due_date).forEach(t=>{
+      const k=[String(t.delegator||'').toLowerCase(),t.title,t.recur.freq,t.recur_anchor||''].join('|');
+      (map[k]=map[k]||{items:[]}).items.push(t);
+    });
+    return Object.keys(map).map(k=>{
+      const s=map[k];
+      s.items.sort((a,b)=>a.due_date<b.due_date?-1:(a.due_date>b.due_date?1:a.id-b.id));
+      s.latest=s.items[s.items.length-1]; s.rule=s.latest.recur; s.freq=s.rule.freq; s.title=s.latest.title;
+      s.anchor=s.latest.recur_anchor||s.items[0].due_date;
+      return s;
+    }).sort((a,b)=>a.title.localeCompare(b.title));
+  }
+  /* Where one deadline stands: kind is upcoming / held / ontime / late / overdue, delta the days
+     early (-) or late (+). Finished means marked done, whether or not it is approved yet. */
+  function recState(o){
+    const today=istTodayISO(), t=o.task;
+    if(t&&stOf(t)!=='open'){
+      const f=recDayOf(t.completed_at)||today, d=recDays(f,o.date);
+      return {kind:d>0?'late':'ontime',delta:d,finished:f,approved:stOf(t)==='approved'};
+    }
+    if(!t) return {kind:o.held?'held':'upcoming',delta:0};
+    if(o.date<today) return {kind:'overdue',delta:recDays(today,o.date)};
+    return {kind:'upcoming',delta:0};
+  }
+  function recOcc(s,from,to){
+    const out=[];
+    s.items.forEach(t=>{ if(t.due_date>=from&&t.due_date<=to) out.push({date:t.due_date,task:t}); });
+    const held=stOf(s.latest)!=='approved';   // nothing after it is made until it is approved
+    let cur=dpAdd(s.latest.due_date,1); if(cur<from) cur=from;
+    for(let g=0; cur<=to && g<800; g++){
+      if(s.rule.until&&cur>s.rule.until) break;
+      if(dpMatches(s.rule,cur,s.anchor)) out.push({date:cur,task:null,held:held});
+      cur=dpAdd(cur,1);
+    }
+    out.forEach(o=>o.st=recState(o));
+    return out;
+  }
+  const REC_COLOUR=k=>k==='ontime'?'#15803d':k==='late'?'#dc2626':k==='overdue'?'#b91c1c':'#0f172a';
+  function recStatus(st){
+    if(st.kind==='upcoming') return 'Yet to come';
+    if(st.kind==='held') return 'Held — made once the open one is done';
+    const wait=st.approved===false?' · awaiting approval':'';
+    if(st.kind==='ontime') return (st.delta<0?'Done '+(-st.delta)+'d early':'Done on time')+wait;
+    if(st.kind==='late') return 'Done '+st.delta+'d late'+wait;
+    return 'Not done · '+st.delta+'d overdue';
+  }
+  const recDdmm=s=>{ const p=dpParse(s); return dpPad(p.d)+'/'+dpPad(p.m+1); };
+  const recDow=s=>{ const p=dpParse(s); return DP_DOWL[new Date(p.y,p.m,p.d).getDay()].slice(0,3); };
+  const recNoYear=s=>dpLong(s).replace(/ \d{4}$/,'');
+  function recP3Html(right){
+    const p3=(k,ic,l)=>`<button class="ac-pbtn ${P3===k?'on':''}" onclick="accP3('${k}')"><i class="fa-solid ${ic}"></i> ${l}</button>`;
+    return `<div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}${p3('recurring','fa-rotate','Recurring')}${right?'<div class="rq-nav">'+right+'</div>':''}</div>`;
+  }
+  async function recurringView(){
+    const b=$('acBody'); if(!b) return;
+    let data; try{ data=await loadAll(); }catch(e){ b.innerHTML='<div class="ac-empty">Could not load tasks</div>'; return; }
+    const list=await people();
+    if(!REC_VIEW) REC_VIEW={fy:recFy(istTodayISO()),filter:'soon',menu:false};
+    REC_DATA={asg:data.asg,list:list,series:recSeries(data.tasks)};
+    recPaint(true);
+  }
+  /* The columns on show. Each knows how to find a series' one deadline that belongs in it. */
+  function recCols(){
+    const v=REC_VIEW, today=istTodayISO(), fy=v.fy, soon=v.filter==='soon';
+    const show=v.filter==='all'?null:soon?'soon':REC_FQC(v.filter).col;
+    const series=REC_DATA.series.filter(s=>v.filter==='all'||soon||s.freq===v.filter);
+    const fyLbl='FY '+String(fy).slice(2)+'–'+String(fy+1).slice(2), cols=[];
+    if(soon){
+      const day=(k,label,d)=>cols.push({type:'soon',key:k,label:label,sub:d?recNoYear(d):'Not done, past deadline',
+        find:s=>{
+          if(d){ const o=recOcc(s,d,d)[0]; return o&&o.st.kind!=='held'?o:null; }
+          return s.items.filter(t=>stOf(t)==='open'&&t.due_date<today).map(t=>({date:t.due_date,task:t,st:recState({date:t.due_date,task:t})}))[0]||null;
+        }});
+      day('overdue','Overdue',null); day('today','Today',today); day('tomorrow','Tomorrow',dpAdd(today,1)); day('after','Day after',dpAdd(today,2));
+      return {cols,series,show,fyLbl};
+    }
+    const push=(type,label,sub,from,to,band,tint,tip)=>{
+      if(show?show!==type:type!=='week') return;
+      if(show==='week'&&!series.some(s=>recOcc(s,from,to).length)) return;
+      const bg=(type==='quarter'&&!show)?'#fdf2f8':(type==='year'&&!show)?'#fdf6f7':(tint?'#f5f7fb':'#ffffff');
+      cols.push({type,label,sub,from,to,band,bg,tip:tip||'',cur:today>=from&&today<=to,
+        find:s=>{ if((show?REC_FQC(s.freq).col:'week')!==type) return null; return recOcc(s,from,to)[0]||null; }});
+    };
+    for(let mi=0; mi<12; mi++){
+      const y=fy+Math.floor((3+mi)/12), m=(3+mi)%12, mFrom=dpIso(y,m,1), mTo=dpIso(y,m,dpDaysIn(y,m));
+      let mon=dpAdd(mFrom,-((new Date(y,m,1).getDay()+6)%7)), wk=0;
+      while(mon<=mTo){
+        wk++;
+        const end=dpAdd(mon,6), cFrom=mon<mFrom?mFrom:mon, cTo=end>mTo?mTo:end, d1=dpParse(cFrom).d, d2=dpParse(cTo).d;
+        push('week','Wk '+wk,(d1===d2?d1:d1+'–'+d2)+' '+DP_MONS[m],cFrom,cTo,'m'+mi,mi%2===1,
+          DP_MONL[m]+' week '+wk+' · '+dpShort(cFrom).replace(/ \d{4}$/,'')+' – '+dpShort(cTo).replace(/ \d{4}$/,''));
+        mon=dpAdd(mon,7);
+      }
+      push('month',DP_MONS[m]+' - '+String(y).slice(2),'Month',mFrom,mTo,'m'+mi,mi%2===1,DP_MONL[m]+' '+y);
+      if(mi%3===2){ const q=(mi+1)/3, q0=3+(q-1)*3; push('quarter','Q'+q,DP_MONS[q0%12]+'–'+DP_MONS[m],dpIso(fy+Math.floor(q0/12),q0%12,1),mTo,'q'+q,q%2===0,'Q'+q+' '+fyLbl); }
+    }
+    push('year',fyLbl,'Year',dpIso(fy,3,1),dpIso(fy+1,2,31),'y',false,fyLbl);
+    return {cols,series,show,fyLbl};
+  }
+  // everything in one column, frequency by frequency
+  function recColItems(c,series){
+    const out=[];
+    REC_FQ.forEach(f=>series.filter(s=>s.freq===f.k).forEach(s=>{ const o=c.find(s); if(o) out.push({s:s,o:o}); }));
+    return out;
+  }
+  function recPaint(scrollToNow){
+    const b=$('acBody'); if(!b||!REC_DATA) return;
+    const v=REC_VIEW, soon=v.filter==='soon', R=recCols(), cols=R.cols;
+    REC_DATA.cols=cols; REC_DATA.shown=R.series;
+    const idx=s=>REC_DATA.series.indexOf(s);
+    let main='';
+    if(soon){
+      main='<div class="rq-soon">'+cols.map((c,ci)=>{
+        const items=recColItems(c,REC_DATA.series);
+        let h='<div class="rq-sc'+(c.key==='today'?' today':'')+'"><button type="button" class="rq-sch'+(c.key==='overdue'?' od':'')+'" onclick="recCol('+ci+')" title="All tasks in this column"><b>'+c.label+'</b><span>'+esc2(c.sub)+'</span></button>'
+          +'<div class="rq-scb"><span class="n">'+items.length+'<small>task'+(items.length===1?'':'s')+'</small></span>';
+        REC_FQ.forEach(f=>{
+          const its=items.filter(x=>x.s.freq===f.k); if(!its.length) return;
+          h+='<span class="l"><i class="rq-dot" style="background:'+f.c+'"></i>'+f.label+'<b>'+its.length+'</b></span>'
+            +its.map(x=>{ const late=x.o.st.kind==='overdue';
+              return '<button type="button" class="rq-chip'+(late?' od':'')+'" style="--cc:'+f.c+';--cb:'+f.bg+'" title="'+esc2(x.s.title)+'" onclick="recCell('+idx(x.s)+',\''+x.o.date+'\')"><span>'+esc2(x.s.title)
+                +'<small'+(late?' class="late"':'')+'>'+recNoYear(x.o.date)+(late?' · '+x.o.st.delta+' day'+(x.o.st.delta===1?'':'s')+' late':'')+'</small></span></button>'; }).join('');
+        });
+        if(!items.length) h+='<div class="rq-none">Nothing here.</div>';
+        return h+'</div></div>';
+      }).join('')+'</div>';
+    } else {
+      const hasBand=!R.show||R.show==='week';
+      // the month band: one label over each month's columns
+      let band='';
+      if(hasBand){
+        const bands=[];
+        cols.forEach(c=>{ const l=bands[bands.length-1]; if(l&&l.key===c.band){ l.n++; return; } bands.push({key:c.band,n:1,c:c}); });
+        band='<div class="rq-tr rq-band"><div class="rq-tc"></div>'+bands.map(x=>{
+          const k=x.key.charAt(0), i=+x.key.slice(1)||0, y=v.fy+Math.floor((3+i)/12);
+          const label=k==='m'&&x.c.type==='week'?DP_MONS[(3+i)%12]+' - '+String(y).slice(2):'';
+          const bg=k==='m'?(i%2?'#eef2f8':'#f8fafc'):k==='q'?(R.show?(i%2?'#f8fafc':'#eef2f8'):'#fbe7f1'):(R.show?'#f8fafc':'#fbeef0');
+          return '<div class="rq-bd" style="flex:'+x.n+' 0 '+(x.n*84)+'px;background:'+bg+'">'+label+'</div>'; }).join('')+'</div>';
+      }
+      const head='<div class="rq-tr rq-hd"><div class="rq-tc">Task</div>'+cols.map((c,ci)=>
+        '<button type="button" class="rq-ch'+(c.cur?' cur':'')+'" style="background:'+c.bg+'" title="'+esc2(c.tip)+'" data-cur="'+(c.cur?1:0)+'" onclick="recCol('+ci+')"><b>'+esc2(c.label)+'</b><span>'+esc2(c.sub)+'</span></button>').join('')+'</div>';
+      let rows='';
+      REC_FQ.forEach(f=>R.series.filter(s=>s.freq===f.k).forEach(s=>{
+        const i=idx(s);
+        rows+='<div class="rq-tr"><button type="button" class="rq-tc rq-tn" title="'+esc2(s.title)+'" onclick="recHistory('+i+')"><i style="background:'+f.c+'"></i><span>'+esc2(s.title)+'</span></button>'
+          +cols.map(c=>{
+            const o=c.find(s), bg=c.cur?'#fffafa':c.bg;
+            if(!o) return '<div class="rq-cl" style="background:'+bg+'"></div>';
+            const st=o.st, col=REC_COLOUR(st.kind), w=st.kind==='overdue'?800:400;
+            const dt=f.col==='week'?recDow(o.date):recDdmm(o.date);
+            const dl=(st.kind==='upcoming'||st.kind==='held'||!st.delta)?'':(st.delta>0?'+'+st.delta:'−'+(-st.delta));
+            return '<div class="rq-cl on" style="background:'+bg+';color:'+col+';font-weight:'+w+'" title="'+esc2(s.title+' · deadline '+dpLong(o.date)+' · '+recStatus(st))+'" onclick="recCell('+i+',\''+o.date+'\')"><span>'+dt+'</span>'+(dl?'<small>'+dl+'</small>':'')+'</div>';
+          }).join('')+'</div>';
+      }));
+      main='<div class="rq-table" id="rqTable"><div class="rq-in">'+band+head+rows
+        +(rows?'':'<div class="rq-none big">No recurring tasks here.</div>')+'</div></div>';
+    }
+    const opts=[{k:'soon',label:'Due soon',c:'#c8101a'},{k:'all',label:'All frequencies',c:'#94a3b8'}]
+      .concat(REC_FQ.filter(f=>f.k!=='daily'||REC_DATA.series.some(s=>s.freq==='daily')).map(f=>({k:f.k,label:f.label,c:f.c})));
+    const cur=opts.find(o=>o.k===v.filter)||opts[0];
+    const menu='<div class="rq-dd"><button type="button" class="rq-ddb" aria-haspopup="listbox" aria-expanded="'+(v.menu?'true':'false')+'" onclick="event.stopPropagation();recMenu()">'+cur.label+'<i class="fa-solid fa-chevron-down"></i></button>'
+      +(v.menu?'<div class="rq-ddl" role="listbox">'+opts.map(o=>'<button type="button" role="option" aria-selected="'+(o.k===v.filter)+'" class="'+(o.k===v.filter?'on':'')+'" onclick="recFilter(\''+o.k+'\')"><i class="rq-dot" style="background:'+o.c+'"></i>'+o.label+'</button>').join('')+'</div>':'')+'</div>';
+    const key='<div class="rq-key"><span><i style="background:#0f172a"></i>Yet to come</span><span><i style="background:#15803d"></i>Done on time · <em style="color:#15803d">−2 days</em> early</span>'
+      +'<span><i style="background:#dc2626"></i>Done late · <em style="color:#dc2626">+2 days</em> late</span><span><i style="background:#b91c1c"></i><b style="color:#b91c1c">Not done, overdue · +3 days late</b></span></div>';
+    b.innerHTML=recP3Html('<button class="ac-btn" aria-label="Previous year" onclick="recYear(-1)">‹</button><b>'+R.fyLbl+'</b>'
+      +'<button class="ac-btn" aria-label="Next year" onclick="recYear(1)">›</button>'+menu)
+      +key+main
+      +(REC_DATA.series.length?'':'<div class="ac-empty" style="cursor:default;margin-top:12px">No recurring tasks yet. Make one from a task’s due date: pick Weekly, Fortnightly, Monthly, Quarterly or Annually.</div>')
+      +'<div class="rq-back" id="rqBack" onclick="recClose()"></div>'
+      +'<div class="gcal-panel" id="rqPanel"><div class="gcal-panel-head"><div class="x" id="rqPanelBack" style="display:none;margin-left:0" title="Back" onclick="recBack()"><i class="fa-solid fa-arrow-left"></i></div><b id="rqPanelHead">Details</b><div class="x" onclick="recClose()"><i class="fa-solid fa-xmark"></i></div></div><div class="gcal-panel-body" id="rqPanelBody"></div><div class="gcal-panel-foot" id="rqPanelFoot" style="display:none"></div></div>';
+    if(scrollToNow&&!soon){
+      // open on the column holding today rather than at April
+      const t=$('rqTable'), c=t&&t.querySelector('.rq-ch[data-cur="1"]');
+      if(c) t.scrollLeft=Math.max(0,c.offsetLeft-300-84);
+    }
+  }
+  /* The side panel. Each view remembers the one it was opened from, so a back arrow returns
+     there; the x closes the panel and goes back to the table. */
+  let REC_PANEL=null;
+  function recShow(p){
+    REC_PANEL=p;
+    const el=$('rqPanel'), bk=$('rqBack'); if(!el) return;
+    const bb=$('rqPanelBack'); if(bb) bb.style.display=p.back?'':'none';
+    $('rqPanelHead').textContent=p.head; $('rqPanelBody').innerHTML=p.body;
+    const f=$('rqPanelFoot'); f.innerHTML=p.foot||''; f.style.display=p.foot?'':'none';
+    el.classList.add('open'); if(bk) bk.classList.add('open');
+  }
+  window.recBack=function(){ if(REC_PANEL&&REC_PANEL.back) recShow(REC_PANEL.back); };
+  window.recClose=function(){ REC_PANEL=null; const p=$('rqPanel'), bk=$('rqBack'); if(p) p.classList.remove('open'); if(bk) bk.classList.remove('open'); };
+  const recSt=(st,w)=>'<span class="rq-st" style="color:'+REC_COLOUR(st.kind)+';font-weight:'+(st.kind==='overdue'?800:(w||400))+'">'+esc2(recStatus(st).split(' — ')[0])+'</span>';
+  window.recCol=function(ci){
+    const c=REC_DATA.cols[ci]; if(!c) return;
+    const items=recColItems(c,REC_DATA.shown);
+    const body='<div class="rq-sub">'+esc2(c.type==='soon'?c.sub:(c.tip||c.sub))+'</div>'
+      +(items.map(x=>{ const f=REC_FQC(x.s.freq);
+        return '<button type="button" class="rq-item" onclick="recCell('+REC_DATA.series.indexOf(x.s)+',\''+x.o.date+'\',1)"><i class="rq-bar" style="background:'+f.c+'"></i><span class="tt"><b>'+esc2(x.s.title)+'</b><span>'+esc2(dpLong(x.o.date))+' · '+f.label+'</span></span>'+recSt(x.o.st)+'<span class="go">›</span></button>'; }).join('')
+        ||'<div class="rq-none">No tasks in this column.</div>');
+    recShow({head:c.label,body:body});
+  };
+  // everything so far this year, newest first, and the next one still to come
+  window.recHistory=function(i){
+    const s=REC_DATA.series[i]; if(!s) return;
+    const v=REC_VIEW, today=istTodayISO(), fyFrom=dpIso(v.fy,3,1), fyTo=dpIso(v.fy+1,2,31);
+    const past=recOcc(s,fyFrom,today<fyTo?today:fyTo), next=recOcc(s,dpAdd(today,1),dpAdd(today,400))[0];
+    const all=past.concat(next?[next]:[]).reverse();
+    const f=REC_FQC(s.freq), mem=recMembers(s.latest);
+    const body='<div class="gcal-panel-title">'+esc2(s.title)+'</div><span class="rq-pill" style="color:'+f.c+';background:'+f.bg+'">'+f.label+'</span>'
+      +'<div class="rq-sub">'+esc2(dpDescribe(s.rule))+' · '+esc2(mem)+'</div>'
+      +(all.map(o=>'<button type="button" class="rq-item" onclick="recCell('+i+',\''+o.date+'\',2)"><span class="tt"><b style="font-weight:400">'+esc2(dpLong(o.date))+'</b></span>'+recSt(o.st,600)+'<span class="go">›</span></button>').join('')
+        ||'<div class="rq-none">Nothing yet this year.</div>');
+    recShow({head:'History',body:body});
+  };
+  function recMembers(t){ const list=REC_DATA.list; return (REC_DATA.asg[t.id]||[]).map(e=>nameOf(list,e)||e).join(', ')||'—'; }
+  // one deadline; from=1 a column list, 2 the history - either gets a back arrow to it
+  window.recCell=function(i,ds,from){
+    const s=REC_DATA.series[i]; if(!s) return;
+    const o=recOcc(s,ds,ds)[0]; if(!o) return;
+    const f=REC_FQC(s.freq), t=o.task||s.latest, st=o.st, list=REC_DATA.list;
+    const row=(k,val,style)=>'<span class="k">'+k+'</span><span'+(style?' style="'+style+'"':'')+'>'+val+'</span>';
+    const status=(st.kind==='ontime'||st.kind==='late')?recStatus(st)+' · finished '+dpLong(st.finished):recStatus(st);
+    const body='<div class="gcal-panel-title">'+esc2(s.title)+'</div><span class="rq-pill" style="color:'+f.c+';background:'+f.bg+'">'+f.label+'</span>'
+      +'<div class="rq-dl">'+row('Repeats',esc2(dpDescribe(s.rule)))+row('Deadline',esc2(dpLong(o.date)))
+      +row('Status',esc2(status),'font-weight:'+(st.kind==='overdue'?800:600)+';color:'+REC_COLOUR(st.kind))
+      +row('Assigned to',esc2(recMembers(t)))+row('By',esc2(nameOf(list,t.delegator)||t.delegator||'—'))+'</div>';
+    // a task still to come is only shown; one that exists and is due or done can be opened
+    const foot=(o.task&&st.kind!=='upcoming'&&st.kind!=='held')?'<button class="ac-btn primary" onclick="recClose();navTo(\'tasks/task/'+o.task.id+'\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> View this task</button>':'';
+    recShow({head:st.kind==='upcoming'||st.kind==='held'?'Coming up':'Task',body:body,foot:foot,back:from?REC_PANEL:null});
+  };
+  window.recMenu=function(){ REC_VIEW.menu=!REC_VIEW.menu; recPaint(false); };
+  window.recYear=function(d){ REC_VIEW.fy+=d; REC_VIEW.menu=false; recPaint(true); };
+  window.recFilter=function(k){ REC_VIEW.filter=k; REC_VIEW.menu=false; recPaint(true); };
+  document.addEventListener('click',function(e){
+    if(REC_VIEW&&REC_VIEW.menu&&!(e.target.closest&&e.target.closest('.rq-dd'))){ REC_VIEW.menu=false; if($('rqTable')||document.querySelector('.rq-soon')) recPaint(false); }
+  });
 
   /* ---------- shared row/card renderers ---------- */
   function dueBadge(due,completedAt){
@@ -1045,7 +1506,7 @@
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
     const wfCombined=wfRowTitle(wfInfo,list,t&&t.description);
     const titleHtml=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
-    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon}${titleHtml}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
+    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}${isRec(t)?' ac-row-rec':''}" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon}${titleHtml}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
   }
   function summaryCard(title,icon,color,count,inner){ return `<div class="ac-card sm"><div class="hd"><i class="fa-solid ${icon}" style="color:${color}"></i> ${title}<span class="cnt">${count}</span></div><div class="bd" style="height:180px;max-height:180px;min-height:0">${inner}</div></div>`; }
   /* WHAT YOU SEARCHED FOR COMES TO THE TOP.
@@ -1661,13 +2122,24 @@
   async function wfRenderList(){
     const b=$('acBody'); if(!b)return;
     let flows=[], stepCounts={}, ownersByFlow={}, myFlowIds={};
-    try{ const {data}=await ACC().from('flows').select('*').order('id',{ascending:false}); flows=data||[]; }
-    catch(e){ toast('Could not load workflows: '+((e&&e.message)||e),'err'); }
+    /* BOTH READS GO OUT AT ONCE. flow_steps is not filtered by anything flows returns, so waiting
+       for the first before asking for the second bought nothing and cost a whole round trip - about
+       190ms, measured. Promise.all is what actually sends them together: a Supabase query builder
+       does nothing until something calls .then() on it, so merely assigning it to a variable would
+       still have run them one after the other.
+       Each carries its own rejection handler, so a failure in one cannot take the other down with
+       it - flows still toasts, flow_steps still fails quietly, exactly as before. */
+    const [flowsRes, stepsRes] = await Promise.all([
+      ACC().from('flows').select('*').order('id',{ascending:false}).then(function(r){return r;}, function(e){return {threw:e};}),
+      ACC().from('flow_steps').select('flow_id,owner_email,owner_emails').then(function(r){return r;}, function(e){return {threw:e};})
+    ]);
+    if(flowsRes && flowsRes.threw){ toast('Could not load workflows: '+((flowsRes.threw&&flowsRes.threw.message)||flowsRes.threw),'err'); }
+    flows=(flowsRes&&flowsRes.data)||[];
     /* Every owner of every step, not just the first. owner_email holds only the first person on a
        step; owner_emails holds them all. Reading owner_email alone left a second owner without a
        circle here - and worse, this same list decides who SEES a workflow at all, so somebody added
        as a second owner could be missing the workflow from their list entirely. */
-    try{ const {data}=await ACC().from('flow_steps').select('flow_id,owner_email,owner_emails');
+    try{ const data=(stepsRes&&stepsRes.data)||[];
       (data||[]).forEach(function(s){
         stepCounts[s.flow_id]=(stepCounts[s.flow_id]||0)+1;
         const owners=(Array.isArray(s.owner_emails)&&s.owner_emails.length)?s.owner_emails:(s.owner_email?[s.owner_email]:[]);
@@ -1681,13 +2153,35 @@
     // inside is limited to their own instances by row-level security.
     try{
       // Being OFFERED a step counts too, not just having claimed one. A step shared between people
-      // has nobody in `person` until somebody takes it, so matching on person alone hid the
-      // workflow from everybody it was waiting on.
-      const mine=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
-        .select('case_id,person,candidates').order('id',{ascending:true}); });
-      const caseIds=Array.from(new Set((mine||[])
-        .filter(function(s){ return eq(s.person,me()) || (Array.isArray(s.candidates)&&s.candidates.some(function(e){return eq(e,me());})); })
-        .map(function(s){return s.case_id;}).filter(function(x){return x!=null;})));
+      /* THE CASE IDS ARE ASKED FOR DIRECTLY, NOT SIFTED OUT OF THE WHOLE TABLE.
+
+         This used to read every flow_case_steps row the viewer was allowed to see and pick its own
+         out in the browser. Seen in the network panel: five paged requests, offsets 0 to 4000. For
+         a director who can see everything that is 4,708 rows and 460KB, and in the measured case
+         not one of them was a match. The rows were never the answer - the handful of case ids
+         inside them were.
+
+         acc.wf_my_case_ids() returns exactly those ids. It is SECURITY INVOKER, so the same
+         row-level policy applies as to the read it replaces, and the rule inside it is this same
+         line - person, or one of the candidates, compared without regard to case. Checked against
+         this very filter on the live database for a user with real cases: 479 ids either way,
+         none missing, none extra.
+
+         The old path is kept directly below. If the call fails for any reason the page reads the
+         table and filters as before, so the worst case is the speed it had this morning. */
+      let caseIds=[];
+      const idRes=await ACC().rpc('wf_my_case_ids').then(function(r){return r;}, function(e){return {error:e};});
+      if(idRes && !idRes.error && Array.isArray(idRes.data)){
+        caseIds=Array.from(new Set(idRes.data.map(function(r){return r.case_id;}).filter(function(x){return x!=null;})));
+      }else{
+        // has nobody in `person` until somebody takes it, so matching on person alone hid the
+        // workflow from everybody it was waiting on.
+        const mine=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
+          .select('case_id,person,candidates').order('id',{ascending:true}); });
+        caseIds=Array.from(new Set((mine||[])
+          .filter(function(s){ return eq(s.person,me()) || (Array.isArray(s.candidates)&&s.candidates.some(function(e){return eq(e,me());})); })
+          .map(function(s){return s.case_id;}).filter(function(x){return x!=null;})));
+      }
       if(caseIds.length){ const {data:cs}=await ACC().from('flow_cases').select('flow_id').in('id',caseIds); (cs||[]).forEach(function(c){ myFlowIds[c.flow_id]=true; }); }
     }catch(e){}
     // You see a workflow if you created it / own a step / it's shared with your department, OR you have
@@ -2248,7 +2742,7 @@
     if(!steps.length) steps=[{},{}]; // start with two blank step rows (both mandatory)
     const stepsHtml=steps.map(function(s,i){ return wfStepRowHtml(i+1,s); }).join('');
     v.innerHTML='<div class="wf-page">'
-      +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+(id?'Edit workflow':'New workflow')+'</h1></div>'
+      +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/workflow\')"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+(id?'Edit workflow':'New workflow')+'</h1></div>'
       +'<div class="wf-card">'
       +'<div class="wf-form" data-id="'+(id||'')+'" data-trigger-method="'+esc2(flow.trigger_method||'')+'">'
         // Section 1 — what the workflow is. Paired fields sit side by side on a wide screen.
@@ -2565,26 +3059,52 @@
      Nothing here should ever depend on a result set happening to fit. Callers pass a builder rather
      than a query so each page is a fresh request, and an explicit order makes the pages stable -
      without one PostgREST may return rows in any order and pages can overlap or skip. */
+  /* PAGES ARE FETCHED TOGETHER, NOT ONE AFTER ANOTHER.
+
+     Each round trip to Supabase costs about 190ms (measured, five runs). flow_case_steps holds
+     4,621 rows, so at 1,000 a page this loop was five trips end to end - roughly 950ms of waiting
+     before the Workflow tab or the Tasks tab could draw anything, on top of the chain of other
+     queries around it.
+
+     The first page is still fetched alone. That matters: most call sites here return well under
+     1,000 rows, and asking for pages nobody needs would put four pointless requests on the
+     database every time the tab opens. Only when page one comes back FULL - the one reliable sign
+     there is more - are the rest requested in parallel batches. Five pages now cost two trips
+     instead of five.
+
+     Everything else is deliberately unchanged: the three attempts with a growing pause, stopping
+     at the first short page, and returning what was collected so far if a page finally fails. The
+     pages are reassembled in order regardless of which request finishes first. */
   async function wfFetchPaged(build, pageSize){
     pageSize = pageSize || 1000;
-    const out=[];
-    for(let from=0;;from+=pageSize){
-      // A page can fail on a transient blip - a dropped connection, a momentary auth hiccup - and
-      // giving up on the first error used to return whatever had already loaded as if it were
-      // everything, with no error shown anywhere: a fully-progressed bill's tracker row rendered
-      // as the blank "not yet" dot over every step, because ONE page out of several silently
-      // failed to load. Three attempts with a short, growing pause give a blip a real chance to
-      // clear before this falls back to the old behaviour of just stopping where it is.
-      let data=null, error=null;
+    const BATCH = 4;                       // pages requested together after the first
+    // One page, with the same three attempts and growing pause as before. null means it never
+    // arrived, which the caller treats as "stop here and keep what we have".
+    async function fetchPage(from){
       for(let attempt=0; attempt<3; attempt++){
-        const r=await build().range(from, from+pageSize-1);
-        data=r.data; error=r.error;
-        if(!error) break;
+        const r = await build().range(from, from+pageSize-1);
+        if(!r.error && r.data) return r.data;
         if(attempt<2) await new Promise(function(res){ setTimeout(res, 500*(attempt+1)); });
       }
-      if(error||!data) break;
-      out.push.apply(out,data);
-      if(data.length<pageSize) break;   // a short page is the last page
+      return null;
+    }
+    const out=[];
+    const first = await fetchPage(0);
+    if(!first) return out;
+    out.push.apply(out, first);
+    if(first.length < pageSize) return out;   // a short first page is the only page
+    for(let from=pageSize;;from+=BATCH*pageSize){
+      const pages = await Promise.all(
+        Array.from({length:BATCH}, function(_,i){ return fetchPage(from + i*pageSize); })
+      );
+      let done=false;
+      for(let i=0;i<pages.length;i++){
+        const p=pages[i];
+        if(!p){ done=true; break; }            // failed after three attempts - stop, keep the rest
+        out.push.apply(out, p);
+        if(p.length < pageSize){ done=true; break; }   // short page: the end, ignore any after it
+      }
+      if(done) break;
     }
     return out;
   }
@@ -3608,7 +4128,10 @@
        which colleague is sitting on it right now, and that is between the approvers. A flow with a
        named trigger-owner list (Invoice Processing) is untouched: there the people who raise bills
        are meant to be able to see exactly where each one has reached. */
-    const hideLiveState=(flow.trigger_owner==='__ALL__') && !isStepHolder && !eq(mySelf,'ayushruia1@gmail.com');
+    /* The Administrator and Prerna (businessanalyst@) are exempt: they read this tracker to see where
+       every claim has actually got to, not as claimants. */
+    const hideLiveState=(flow.trigger_owner==='__ALL__') && !isStepHolder
+      && !eq(mySelf,'ayushruia1@gmail.com') && !eq(mySelf,'businessanalyst@thejaingroup.com');
 
     // Default timeline panel = the workflow's step definition
     const defTL=wfTimelineHtml(steps,{})||'<div class="ac-empty" style="cursor:default">No steps yet</div>';
@@ -3859,7 +4382,7 @@
     v.innerHTML='<div class="wf-page">'
       /* An observer sees a page with no buttons on it, which reads as something being broken rather
          than as something being deliberate. Say so once, plainly, next to the title. */
-      +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+esc2(flow.name||'Workflow')+'</h1>'
+      +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="goBack(\'tasks/workflow\')"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+esc2(flow.name||'Workflow')+'</h1>'
       +((wfIsCaseViewer(flow)&&!canManage&&!canEvent)
         ? '<span class="wf-pill" style="background:#eef2ff;color:#3730a3;margin-left:8px" title="You can see these records but not change them. Anything that needs action stays with the person the '+esc2(N.lc)+' is assigned to."><i class="fa-solid fa-eye"></i> View only</span>'
         : '')
@@ -12988,7 +13511,14 @@
   let P3='priority', PEND_HOVER=null;
   async function tasksScreen(){
     const b=$('acBody');
-    const [list,{tasks,asg,pm},myRanks]=await Promise.all([people(), loadAll(), loadMyRanks()]);
+    if(P3==='recurring') return recurringView();
+    const [list,loaded,myRanks]=await Promise.all([people(), loadAll(), loadMyRanks()]);
+    const {asg,pm}=loaded;
+    /* A recurring task is listed from its own day, not from the moment it is made: a Sunday task
+       made on a Wednesday turns up on Sunday, and once Sunday's is done the next one waits for the
+       following Sunday. Until then it is only in the Recurring view. */
+    const todayIso=istTodayISO();
+    const tasks=loaded.tasks.filter(t=>!(t.recur&&t.recur.freq&&t.recur.freq!=='none'&&t.due_date&&t.due_date>todayIso&&stOf(t)!=='approved'));
     const delegatedByMeIds=new Set(tasks.filter(t=>t.parent_task_id&&isOwner(t)).map(t=>t.parent_task_id));
     /* When each interview is and whether it has been answered, so a card can decide whether to
        offer Reschedule. Read once for the whole visible list rather than a query per card. */
@@ -13013,16 +13543,46 @@
         // go to, rather than saying "the next person" - owner_from_trigger and the rest of the
         // step DEFINITION aren't columns on this table at all (flow_steps only), so they're
         // looked up from stepDefByFlowSeq below instead of selected here.
-        let allc=[]; if(caseIds.length){ allc=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
-          .select('case_id,seq,received_at,forwarded_at,person,candidates,title')
-          .in('case_id',caseIds).order('id',{ascending:true}); }); }
-        /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
-           It was missing from this select, so the owner silently vanished from the name shown in the
-           list - for everyone, not just the person who raised it. */
-        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,jaine_id,flow_id,trigger_details,created_by,skipped_seqs,route,route_seqs').in('id',caseIds); casesD=(r&&r.data)||[]; }
+        /* THE INSTANCE'S STEPS AND ITS CASES ARE ASKED FOR TOGETHER. Both are filtered by caseIds,
+           which is already known by this point, so neither ever needed the other - the second just
+           waited, at about 190ms a round trip, and the first is the paged one so the wait was the
+           longer of the two.
+           person/candidates come along so the Forward button can name who the step is about to go
+           to, rather than saying "the next person" - owner_from_trigger and the rest of the step
+           DEFINITION aren't columns on this table at all (flow_steps only), so they're looked up
+           from stepDefByFlowSeq below instead of selected here.
+           created_by is what the task name leads with on a claim-named workflow (Reimbursement).
+           It was once missing from this select, so the owner silently vanished from the name shown
+           in the list - for everyone, not just the person who raised it.
+           No rejection handlers here on purpose: a throw must still reach the enclosing try, which
+           is what blanks _wfStepInfo rather than leaving it half-filled. */
+        let allc=[], casesD=[];
+        if(caseIds.length){
+          const both = await Promise.all([
+            wfFetchPaged(function(){ return ACC().from('flow_case_steps')
+              .select('case_id,seq,received_at,forwarded_at,person,candidates,title')
+              .in('case_id',caseIds).order('id',{ascending:true}); }),
+            ACC().from('flow_cases').select('id,case_no,jaine_id,flow_id,trigger_details,created_by,skipped_seqs,route,route_seqs').in('id',caseIds)
+          ]);
+          allc=both[0]||[];
+          casesD=(both[1]&&both[1].data)||[];
+        }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
-        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields,id_label').in('id',flowIds); flowsD=(r&&r.data)||[]; }
+        /* THE DEFINITION'S FLOWS AND ITS STEPS ARE ASKED FOR TOGETHER. Both are filtered by the
+           same flowIds, which is already known here, so the second never needed the first to come
+           back - it just waited for it, at about 190ms a round trip. Promise.all is what sends
+           them at once: a Supabase builder stays idle until something calls .then() on it, so
+           assigning it to a variable would have changed nothing. Each keeps its own rejection
+           handler so one failing cannot take the other with it. */
+        let flowsD=[], stepsRes=null;
+        if(flowIds.length){
+          const pair = await Promise.all([
+            ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields,id_label').in('id',flowIds),
+            ACC().from('flow_steps').select('flow_id,seq,confirm_only,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').in('flow_id',flowIds)
+          ]);
+          flowsD=(pair[0]&&pair[0].data)||[]; stepsRes=pair[1];
+        }
         const flowMap={}; flowsD.forEach(function(f){ flowMap[f.id]=f; });
         /* How far the workflow actually runs, taken from its DEFINITION. Working "is this the last
            step?" out purely from the instance's own steps meant it depended on being able to READ
@@ -13031,7 +13591,7 @@
            the Done flag while its own page correctly offered Forward. The definition is readable
            to anyone who can see the workflow, so it settles the question either way. */
         const maxSeqByFlow={}, minSeqByFlow={}, confirmOnly={}, stepDefByFlowSeq={};
-        if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq,confirm_only,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').in('flow_id',flowIds);
+        if(flowIds.length){ try{ const r=stepsRes;
           (((r&&r.data)||[])).forEach(function(s){
             if(!(s.flow_id in maxSeqByFlow)||s.seq>maxSeqByFlow[s.flow_id]) maxSeqByFlow[s.flow_id]=s.seq;
             if(!(s.flow_id in minSeqByFlow)||s.seq<minSeqByFlow[s.flow_id]) minSeqByFlow[s.flow_id]=s.seq;
@@ -13288,7 +13848,7 @@
 
     b.innerHTML=`
     <input class="ac-in" id="acTaskSearch" placeholder="Search tasks…" style="margin-bottom:14px;width:100%" oninput="accTaskSearch(this.value)">
-    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}</div>
+    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}${p3('recurring','fa-rotate','Recurring')}</div>
     <div class="ac-cols">
       <div class="ac-col">
         <div class="ac-colh"><i class="fa-solid fa-inbox" style="color:#0369a1"></i> Todo</div>
@@ -13398,11 +13958,14 @@
      what that choice actually needs:
 
        Does not repeat  a date, required
-       Every day        nothing
-       Every week       which weekdays
-       Every month      which dates of the month (several allowed, plus "last day")
-       Every 3 months   the same, every third month counted from the first one
-       Every year       which months, and for each of them its own dates
+       Weekly           one day of the week
+       Fortnightly      one day of the week, every other week from the first one
+       Monthly          one date of the month (or "last day")
+       Quarterly        one date, every third month counted from the first one
+       Annually         one month and one date in it
+
+     One day / date / month each - a task that has to happen twice a week is two recurring tasks.
+     "Every day" is gone from the list; old daily tasks still run and still show their rule.
 
      What gets saved is a due_date (the next real occurrence) plus a rule stored as jsonb in
      acc.ptasks.recur. dpMatches() below is a deliberate mirror of acc.recur_matches() in the
@@ -13410,13 +13973,17 @@
      the dates the server will actually create. Change one and you must change the other.
      proto/due-date-picker.html is the standalone version. */
   const DP_FREQS=[
-    {k:'none',      label:'Does not repeat', asks:'date'},
-    {k:'daily',     label:'Every day',       asks:'nothing'},
-    {k:'weekly',    label:'Every week',      asks:'weekdays'},
-    {k:'monthly',   label:'Every month',     asks:'monthdays'},
-    {k:'quarterly', label:'Every 3 months',  asks:'monthdays'},
-    {k:'yearly',    label:'Every year',      asks:'monthdates'}
+    {k:'none',        label:'Does not repeat', asks:'date'},
+    {k:'daily',       label:'Every day',       asks:'nothing', hidden:true},   // legacy only
+    {k:'weekly',      label:'Weekly',          asks:'weekdays'},
+    {k:'fortnightly', label:'Fortnightly',     asks:'weekdays'},
+    {k:'monthly',     label:'Monthly',         asks:'monthdays'},
+    {k:'quarterly',   label:'Quarterly',       asks:'monthdays'},
+    {k:'yearly',      label:'Annually',        asks:'monthdates'}
   ];
+  const DP_FREQ_LBL={daily:'Daily',weekly:'Weekly',fortnightly:'Fortnightly',monthly:'Monthly',quarterly:'Quarterly',yearly:'Annually'};
+  /* A recurring task, told apart from a normal one by a purple outline on its row. */
+  function isRec(t){ return !!(t&&t.recur&&t.recur.freq&&t.recur.freq!=='none'); }
   const DP_DOW=['S','M','T','W','T','F','S'];
   const DP_DOWL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const DP_MONL=['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -13469,6 +14036,13 @@
     var p=dpParse(isoDate);
     if(rule.freq==='daily') return true;
     if(rule.freq==='weekly') return (rule.weekdays||[]).indexOf(new Date(p.y,p.m,p.d).getDay())>-1;
+    if(rule.freq==='fortnightly'){
+      if((rule.weekdays||[]).indexOf(new Date(p.y,p.m,p.d).getDay())<0) return false;
+      if(!anchor) return true;
+      var an=dpParse(anchor);
+      var diff=Math.round((Date.UTC(p.y,p.m,p.d)-Date.UTC(an.y,an.m,an.d))/86400000);
+      return ((diff%14)+14)%14===0;
+    }
     if(rule.freq==='monthly'||rule.freq==='quarterly'){
       if(rule.freq==='quarterly'){
         var a=dpParse(anchor||isoDate);
@@ -13485,6 +14059,13 @@
     if(!rule) return [];
     if(rule.freq==='none'||!rule.freq) return rule.date?[rule.date]:[];
     var out=[], cur=from||dpFloor(), guard=0;
+    if(rule.start){ if(!anchor) anchor=rule.start; if(cur<rule.start) cur=rule.start; }
+    /* A new fortnightly rule is anchored on its first day, which is simply the next one of its
+       weekday - the database does the same (recur_anchor = the first due date). */
+    if(rule.freq==='fortnightly' && !anchor){
+      while(guard++<8 && !dpMatches(rule,cur,null)) cur=dpAdd(cur,1);
+      anchor=cur; guard=0;
+    }
     while(out.length<n && guard++<800){
       if(rule.until && cur>rule.until) break;
       if(dpMatches(rule,cur,anchor||from)) out.push(cur);
@@ -13502,11 +14083,11 @@
     if(!r.freq||r.freq==='none') return r.date?dpLong(r.date):'Set due date';
     var s='';
     if(r.freq==='daily') s='Every day';
-    else if(r.freq==='weekly')
-      s='Every '+dpList((r.weekdays||[]).slice().sort(function(a,b){return a-b;}).map(function(d){return DP_DOWL[d];}));
+    else if(r.freq==='weekly'||r.freq==='fortnightly')
+      s=(r.freq==='fortnightly'?'Every other ':'Every ')+dpList((r.weekdays||[]).slice().sort(function(a,b){return a-b;}).map(function(d){return DP_DOWL[d];}));
     else if(r.freq==='monthly'||r.freq==='quarterly'){
       var ds=dpList(dpSortDays(r.monthdays).map(dpOrd));
-      s=(r.freq==='quarterly')?('The '+ds+', every 3 months'):('The '+ds+' of every month');
+      s=(r.freq==='quarterly')?('The '+ds+', quarterly'):('The '+ds+' of every month');
     }
     else if(r.freq==='yearly'){
       var ms=Object.keys(r.monthdates||{}).map(Number).sort(function(a,b){return a-b;});
@@ -13532,19 +14113,46 @@
 
   var DP_ST=null, DP_VIEW=null, DP_MODE='date', DP_AM=null, DP_HOST=null, DP_OPTS=null;
 
-  function dpBlank(){ return {freq:'none',date:dpFloor(),weekdays:[],monthdays:[],monthdates:{},until:null}; }
+  function dpBlank(){ return {freq:'none',date:dpFloor(),weekdays:[],monthdays:[],monthdates:{},until:null,start:null}; }
+  /* Fortnightly and Quarterly have a phase as well as a day: every other Sunday from 11 Oct is not
+     every other Sunday from 18 Oct, and the 15th of Jan/Apr/Jul/Oct is not the 15th of
+     Feb/May/Aug/Nov. So they offer the next possible first dates and keep the chosen one as
+     rule.start; the first task is due that day, and the database counts on from it (recur_anchor
+     is the first due date). */
+  function dpStartChoices(st){
+    var out=[], f=dpFloor(), i;
+    if(st.freq==='fortnightly'&&st.weekdays.length){
+      var d=f; for(i=0;i<7&&new Date(dpParse(d).y,dpParse(d).m,dpParse(d).d).getDay()!==st.weekdays[0];i++) d=dpAdd(d,1);
+      out=[d,dpAdd(d,7)];
+    }
+    if(st.freq==='quarterly'&&st.monthdays.length){
+      var p=dpParse(f);
+      for(i=0;out.length<3&&i<5;i++){
+        var y=p.y+Math.floor((p.m+i)/12), m=(p.m+i)%12, c=dpIso(y,m,dpDayIn(y,m,st.monthdays[0]));
+        if(c>=f) out.push(c);
+      }
+    }
+    return out;
+  }
+  function dpStartOf(st){ var c=dpStartChoices(st); if(!c.length) return null; return c.indexOf(st.start)>-1?st.start:c[0]; }
+  function dpStartHtml(st){
+    var c=dpStartChoices(st); if(!c.length) return '';
+    var cur=dpStartOf(st);
+    return '<div class="dp-ask" style="margin-top:12px">First one</div><div class="dp-chips" style="grid-template-columns:repeat('+c.length+',1fr)">'
+      +c.map(function(d){ return '<button type="button" class="dp-chip wide'+(d===cur?' on':'')+'" data-dp="start" data-v="'+d+'">'+dpShort(d).replace(/ \d{4}$/,'')+'</button>'; }).join('')+'</div>';
+  }
 
   function dpMissing(r){
     var a=dpAsks(r.freq);
     if(a==='date')      return r.date?null:'Pick the date it is due.';
     if(a==='nothing')   return null;
-    if(a==='weekdays')  return r.weekdays.length?null:'Pick at least one day of the week.';
-    if(a==='monthdays') return r.monthdays.length?null:'Pick at least one date of the month.';
+    if(a==='weekdays')  return r.weekdays.length?null:'Pick the day of the week.';
+    if(a==='monthdays') return r.monthdays.length?null:'Pick the date of the month.';
     if(a==='monthdates'){
       var ms=Object.keys(r.monthdates);
-      if(!ms.length) return 'Pick at least one month.';
+      if(!ms.length) return 'Pick the month.';
       for(var i=0;i<ms.length;i++){
-        if(!(r.monthdates[ms[i]]||[]).length) return 'Pick the dates in '+DP_MONL[+ms[i]]+'.';
+        if(!(r.monthdates[ms[i]]||[]).length) return 'Pick the date in '+DP_MONL[+ms[i]]+'.';
       }
       return null;
     }
@@ -13603,22 +14211,24 @@
         +'<div class="dp-note">Nothing to choose &mdash; it comes back every day.<br><br>The first one is due today.</div>';
     }
     else if(a==='weekdays'){
-      h+=dpAskLbl('Which days',true)+'<div class="dp-chips dow">';
+      h+=dpAskLbl('Which day',true)+'<div class="dp-chips dow">';
       for(i=0;i<7;i++)
         h+='<button type="button" class="dp-chip'+(DP_ST.weekdays.indexOf(i)>-1?' on':'')+'"'
           +' data-dp="dow" data-v="'+i+'" title="'+DP_DOWL[i]+'">'+DP_DOW[i]+'</button>';
-      h+='</div><div class="dp-note" style="margin-top:9px">Twice a week is two days, not two tasks.</div>';
+      h+='</div><div class="dp-note" style="margin-top:9px">'+(DP_ST.freq==='fortnightly'
+        ?'Every other week, counted from the first one.'
+        :'One day a week. Twice a week is two recurring tasks.')+'</div>'+dpStartHtml(DP_ST);
     }
     else if(a==='monthdays'){
-      h+=dpAskLbl('Which dates',true)+'<div class="dp-chips dom">';
+      h+=dpAskLbl('Which date',true)+'<div class="dp-chips dom">';
       for(i=1;i<=31;i++)
         h+='<button type="button" class="dp-chip'+(DP_ST.monthdays.indexOf(i)>-1?' on':'')+'"'
           +' data-dp="dom" data-v="'+i+'">'+i+'</button>';
       h+='<button type="button" class="dp-chip wide'+(DP_ST.monthdays.indexOf('last')>-1?' on':'')+'"'
-        +' data-dp="dom" data-v="last">Last day</button></div>';
+        +' data-dp="dom" data-v="last">Last day</button></div>'+dpStartHtml(DP_ST);
     }
     else if(a==='monthdates'){
-      h+=dpAskLbl('Which months',true)+'<div class="dp-chips mon">';
+      h+=dpAskLbl('Which month',true)+'<div class="dp-chips mon">';
       for(i=0;i<12;i++){
         var picked=DP_ST.monthdates[i]!==undefined;
         var hasDates=picked&&(DP_ST.monthdates[i]||[]).length>0;
@@ -13631,8 +14241,7 @@
          choosing ten months does not make the panel ten rows taller. */
       if(DP_AM!==null && DP_ST.monthdates[DP_AM]!==undefined){
         var sel=DP_ST.monthdates[DP_AM]||[];
-        h+='<div class="dp-sub"><span class="lbl">Dates in '+DP_MONL[DP_AM]+'</span>'
-          +'<button type="button" class="rm" data-dp="unmon" data-v="'+DP_AM+'">Remove month</button></div>'
+        h+='<div class="dp-sub"><span class="lbl">Date in '+DP_MONL[DP_AM]+'</span></div>'
           +'<div class="dp-chips dom">';
         for(i=1;i<=31;i++)
           h+='<button type="button" class="dp-chip'+(sel.indexOf(i)>-1?' on':'')+'"'
@@ -13640,8 +14249,7 @@
         h+='<button type="button" class="dp-chip wide'+(sel.indexOf('last')>-1?' on':'')+'"'
           +' data-dp="ymd" data-v="last">Last day</button></div>';
       } else {
-        h+='<div class="dp-empty">Pick a month above, then choose its dates here.<br>'
-          +'Each month keeps its own &mdash; 15 and 30 June, just the 1st in December.</div>';
+        h+='<div class="dp-empty">Pick a month above, then choose its date here.</div>';
       }
     }
     return h+'</div>';
@@ -13660,6 +14268,9 @@
          : 'A 29th, 30th or 31st falls on the last day of a shorter month.')+'</div>';
     if(DP_ST.freq==='quarterly') h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
       +'Every 3 months, counting from the first one.</div>';
+    if(DP_ST.freq!=='none') h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
+      +'The next one is only created once this one is complete. Left open past the next date, '
+      +'everyone on it gets a reminder email instead.</div>';
     if(DP_ST.freq!=='none'){
       h+='<div class="ends">'+(DP_ST.until
         ? 'Ends '+dpShort(DP_ST.until)+' &middot; <button type="button" data-dp="noend">remove</button>'
@@ -13686,6 +14297,7 @@
     if(a==='weekdays')        r.weekdays=st.weekdays.slice().sort(function(x,y){return x-y;});
     else if(a==='monthdays')  r.monthdays=dpSortDays(st.monthdays);
     else if(a==='monthdates') r.monthdates=JSON.parse(JSON.stringify(st.monthdates));
+    if(st.freq==='fortnightly'||st.freq==='quarterly'){ var s0=dpStartOf(st); if(s0) r.start=s0; }
     if(st.until) r.until=st.until;
     return r;
   }
@@ -13698,7 +14310,7 @@
 
   function dpPaint(){
     if(!DP_HOST) return;
-    var railH='<div class="dp-rail">'+DP_FREQS.map(function(f){
+    var railH='<div class="dp-rail">'+DP_FREQS.filter(function(f){ return !f.hidden||DP_ST.freq===f.k; }).map(function(f){
       return '<button type="button" class="dp-opt'+(DP_ST.freq===f.k?' on':'')+'" data-dp="freq" data-v="'+f.k+'">'+f.label+'</button>';
     }).join('')+'</div>';
     var h='<div class="dp-body">'+railH+dpPane()+'</div>'+dpSays();
@@ -13709,7 +14321,6 @@
     if(DP_OPTS.onChange) DP_OPTS.onChange(dpResult());
   }
 
-  function dpToggle(arr,v){ var i=arr.indexOf(v); if(i>-1) arr.splice(i,1); else arr.push(v); }
 
   function dpClick(e){
     var el=e.target.closest('[data-dp]'); if(!el) return;
@@ -13731,20 +14342,22 @@
         var q=dpParse(v); DP_VIEW={y:q.y,m:q.m};
       }
     }
-    else if(a==='dow') dpToggle(DP_ST.weekdays,Number(v));
-    else if(a==='dom') dpToggle(DP_ST.monthdays, v==='last'?'last':Number(v));
+    else if(a==='dow') DP_ST.weekdays=[Number(v)];
+    else if(a==='start') DP_ST.start=v;
+    else if(a==='dom') DP_ST.monthdays=[v==='last'?'last':Number(v)];
     else if(a==='mon'){
       /* Clicking a month always selects it and points the grid at it; removing is the explicit
          "Remove month", so one click cannot quietly discard dates already set for a month you
          only meant to look at. */
+      /* One month only: picking another moves the date across rather than adding a second month. */
       m=Number(v);
-      if(DP_ST.monthdates[m]===undefined) DP_ST.monthdates[m]=[];
+      var keep=[]; for(var k0 in DP_ST.monthdates){ if((DP_ST.monthdates[k0]||[]).length){ keep=DP_ST.monthdates[k0].slice(0,1); break; } }
+      DP_ST.monthdates={}; DP_ST.monthdates[m]=keep;
       DP_AM=m;
     }
     else if(a==='ymd'){
       if(DP_AM===null) return;
-      if(!DP_ST.monthdates[DP_AM]) DP_ST.monthdates[DP_AM]=[];
-      dpToggle(DP_ST.monthdates[DP_AM], v==='last'?'last':Number(v));
+      DP_ST.monthdates[DP_AM]=[v==='last'?'last':Number(v)];
     }
     else if(a==='unmon'){
       delete DP_ST.monthdates[v];
@@ -13768,14 +14381,15 @@
     var recur=cur&&cur.recur;
     if(recur&&recur.freq){
       DP_ST.freq=recur.freq;
-      DP_ST.weekdays=(recur.weekdays||[]).slice();
-      DP_ST.monthdays=(recur.monthdays||[]).slice();
+      /* Older rules could hold several days / dates / months; the picker now takes one of each,
+         so such a rule opens on its first and only changes if it is saved again. */
+      DP_ST.weekdays=(recur.weekdays||[]).slice(0,1);
+      DP_ST.monthdays=dpSortDays(recur.monthdays||[]).slice(0,1);
       DP_ST.monthdates={};
-      if(recur.monthdates) for(var k in recur.monthdates){
-        var vv=recur.monthdates[k];
-        DP_ST.monthdates[k]=Array.isArray(vv)?vv.slice():(vv==null?[]:[vv]);
-      }
+      if(recur.monthdates){ var mk=Object.keys(recur.monthdates).map(Number).sort(function(a,b){return a-b;})[0];
+        if(mk!=null){ var vv=recur.monthdates[mk]; DP_ST.monthdates[mk]=(Array.isArray(vv)?dpSortDays(vv):(vv==null?[]:[vv])).slice(0,1); } }
       DP_ST.until=recur.until||null;
+      DP_ST.start=recur.start||null;
     } else {
       DP_ST.freq='none';
       DP_ST.date=(cur&&cur.due)||dpFloor();
@@ -14079,7 +14693,7 @@
     // never mentions the workflow's name or its JainE id at all otherwise.
     const wfSearch=wfInfo?esc2([wfInfo.flowName,wfInfo.triggerEvent,
       wfInfo.caseNo?((wfInfo.idLabel||'Id')+' '+wfInfo.caseNo):''].filter(Boolean).join(' ')):'';
-    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" data-id="${t.id}"${wfSearch?` data-wf="${wfSearch}"`:''} onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
+    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}${isRec(t)?' ac-row-rec':''}" data-id="${t.id}"${wfSearch?` data-wf="${wfSearch}"`:''} onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
   }
 
   function wirePointerDrag(col,sel,persist,onSwipeLeft){ col.querySelectorAll(sel).forEach(row=>{ const grip=row.querySelector('.grip'); if(!grip)return; grip.style.touchAction='none'; grip.addEventListener('pointerdown',function(e){ e.preventDefault(); e.stopPropagation(); try{grip.setPointerCapture(e.pointerId);}catch(_){} const startX=e.clientX,startY=e.clientY,isTouch=e.pointerType==='touch'; let mode=null,lastDx=0; window._dragging=true; function move(ev){ const dx=ev.clientX-startX,dy=ev.clientY-startY; lastDx=dx; if(mode===null){ if(Math.abs(dx)>10||Math.abs(dy)>10){ if(onSwipeLeft&&isTouch&&dx<0&&Math.abs(dx)>Math.abs(dy)*1.2){ mode='swipe'; } else { mode='drag'; row.classList.add('drag'); } } } if(mode==='swipe'){ row.style.transition='none'; row.style.transform='translateX('+Math.max(dx,-88)+'px)'; } else if(mode==='drag'){ const el=document.elementFromPoint(ev.clientX,ev.clientY); const tgt=el&&el.closest(sel); if(tgt&&tgt!==row&&col.contains(tgt)){ const r=tgt.getBoundingClientRect(); if(ev.clientY<r.top+r.height/2)col.insertBefore(row,tgt); else col.insertBefore(row,tgt.nextSibling); } } } function up(){ try{grip.releasePointerCapture(e.pointerId);}catch(_){} window._dragging=false; row.classList.remove('drag'); row.style.transition='transform .15s'; row.style.transform=''; document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); if(mode==='swipe'&&lastDx<-44)onSwipeLeft(row); else if(mode==='drag')persist(col); } document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); }); }); }
@@ -14505,7 +15119,11 @@
       /* recur_anchor is left alone on purpose: the trigger sets it on the first save and it must
          not move afterwards, or a quarterly rule would re-phase and a clamped monthly 31st would
          re-anchor to whatever short month it last landed on. */
-      await ACC().from('ptasks').update({due_date:due,overdue_emailed:false,due_emailed:false,recur:newRecur}).eq('id',tid);
+      const upd={due_date:due,overdue_emailed:false,due_emailed:false,recur:newRecur};
+      // ...except when the kind of repeat itself changes: a fortnightly rule counts its weeks from
+      // its anchor, which has to be a day of the new rule, so a new frequency starts from the new due date.
+      if(((prevRecur&&prevRecur.freq)||'')!==((newRecur&&newRecur.freq)||'')) upd.recur_anchor=newRecur?due:null;
+      await ACC().from('ptasks').update(upd).eq('id',tid);
       if(JSON.stringify(prevRecur)!==JSON.stringify(newRecur)){
         await ACC().from('ptask_activity').insert({task_id:tid,action:'repeat changed',detail:'Repeat '+(prevRecur?dpDescribe(prevRecur):'none')+' \u2192 '+(newRecur?dpDescribe(newRecur):'none')});
       }
@@ -14943,7 +15561,7 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
   });
 
   function init(){
-    injectCss(); wireBell(); notifLoad(); setInterval(notifLoad,45000); window.addEventListener('focus',notifLoad);
+    injectCss(); wireBell(); notifLoad(); setInterval(notifLoad,45000); window.addEventListener('focus',function(){ if(Date.now()-NOTIF_LAST_AT>5000) notifLoad(); });
     try{ mtgStartBrowserTranscriber(); }catch(e){}
     try{
       const qs=new URLSearchParams(location.search);

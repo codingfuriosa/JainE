@@ -245,6 +245,86 @@ const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;
    parser - the other way round would HTML-encode the apostrophe to &#39;, which the browser decodes
    back to a bare ' before the JS is ever parsed, leaving the bug exactly where it was. */
 const escJs=s=>esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
+
+/* ============================ AMOUNTS, GROUPED THE INDIAN WAY ============================
+   Every field somebody types money into shows 12,34,567.89 as they type — last three digits,
+   then pairs.
+
+   WHY THE FIELDS HAD TO STOP BEING type="number". A number input cannot hold a comma: the browser
+   rejects the character and, worse, silently reports an empty value for anything it considers
+   invalid. So a money field is text with inputmode="decimal", which still brings up the numeric
+   keypad on a phone but lets us control what is displayed.
+
+   THE DANGEROUS HALF IS READING IT BACK. The moment a field can contain "12,34,567", every
+   Number()/parseFloat() in a save path turns it into NaN — silently, on financial data. So the
+   grouping is only ever applied to inputs this code has marked, and the handful of shared value
+   readers (purchase.js val, engineering.js val/numOrNull, accounts.js num) strip commas. Nothing
+   is formatted that is not also read back through one of those.
+
+   moneyStrip is exported deliberately: anything that reads a money field's .value directly should
+   call it rather than inventing another replace(/,/g,''). */
+const moneyStrip=s=>String(s==null?'':s).replace(/,/g,'');
+/* Groups the INTEGER part only, and leaves everything else exactly as typed — a trailing "."
+   while somebody is mid-number, a half-typed decimal, a leading minus. Formatting as you type is
+   only tolerable if it never fights the typing. */
+function inrGroup(s){
+  s=String(s==null?'':s);
+  const neg=/^-/.test(s.trim());
+  let v=moneyStrip(s).replace(/[^\d.]/g,'');
+  const dot=v.indexOf('.');
+  let ip=dot<0?v:v.slice(0,dot), fp=dot<0?'':v.slice(dot+1);
+  ip=ip.replace(/^0+(?=\d)/,'');
+  if(ip.length>3){
+    const last3=ip.slice(-3);
+    const rest=ip.slice(0,-3).replace(/\B(?=(\d{2})+(?!\d))/g,',');
+    ip=rest+','+last3;
+  }
+  return (neg?'-':'')+ip+(dot<0?'':'.'+fp);
+}
+/* Reformats as the person types without the caret jumping to the end — the thing that makes most
+   as-you-type formatting unusable. Counts the digits before the caret, rewrites, then puts the
+   caret back after that same number of digits. */
+function moneyFormatEl(el){
+  if(!el||el.dataset.money!=='1')return;
+  const before=el.value, pos=el.selectionStart==null?before.length:el.selectionStart;
+  const digitsBefore=moneyStrip(before.slice(0,pos)).replace(/[^\d.-]/g,'').length;
+  const after=inrGroup(before);
+  if(after===before)return;
+  el.value=after;
+  let seen=0,i=0;
+  for(;i<after.length&&seen<digitsBefore;i++){ if(after[i]!==',')seen++; }
+  try{ el.setSelectionRange(i,i); }catch(e){}
+}
+/* Turns the money fields inside `root` into grouped text inputs, once each.
+   WHICH FIELDS: anything already marked data-money, plus number inputs stepping in hundredths —
+   which across this app is how money is written and quantities (step 0.001) are not. Percentages
+   also step in hundredths and are swept up, which is harmless: no percentage reaches four digits,
+   so no comma ever appears in one. */
+function moneyUpgrade(root){
+  const scope=root&&root.querySelectorAll?root:document;
+  let list=[];
+  try{ list=scope.querySelectorAll('input[data-money="1"]:not([data-money-ready]),input[type="number"][step="0.01"],input.n[inputmode="decimal"]:not([data-money-ready])'); }
+  catch(e){ return; }
+  [].slice.call(list).forEach(function(el){
+    if(el.dataset.moneyReady==='1')return;
+    if(el.type==='number'){ try{ el.type='text'; }catch(e){ return; } el.setAttribute('inputmode','decimal'); }
+    el.dataset.money='1'; el.dataset.moneyReady='1';
+    if(el.value!=='')el.value=inrGroup(el.value);
+  });
+}
+/* One delegated listener for the whole app rather than a listener per field: money inputs are
+   drawn inside modals that are rebuilt constantly, and per-field listeners leak with them. */
+document.addEventListener('input',function(e){
+  const el=e.target;
+  if(el&&el.tagName==='INPUT'&&el.dataset&&el.dataset.money==='1')moneyFormatEl(el);
+},true);
+/* Fields appear whenever a view or a modal draws, which happens from dozens of places. Watching
+   the DOM catches all of them without every caller having to remember to ask. */
+try{
+  new MutationObserver(function(muts){
+    for(const m of muts){ if(m.addedNodes&&m.addedNodes.length){ moneyUpgrade(document); return; } }
+  }).observe(document.documentElement,{childList:true,subtree:true});
+}catch(e){}
 const state={user:null,email:null,profile:null,roles:null,super:false};
 // The access token, kept current from boot() and every onAuthStateChange firing. Usage telemetry's
 // unload-time flush needs it synchronously (a pagehide handler can't safely await getSession()) —
@@ -277,7 +357,7 @@ function pageIdFromPath(pathname){
 // second visit in the same tab.
 // A page may list several scripts; they load one after another, in order (purchase-indent.js uses what
 // purchase.js defines).
-const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js']};
+const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js'],accounts:['accounts.js','accounts-bank.js','accounts-books.js'],scheduling:'scheduling.js'};
 /* EVERY PAGE SCRIPT NEEDS A VERSION HERE, not just the purchase ones.
    accountability.js, insp-items.js and postsales.js were missing, so loadPageScript fell back
    to the default '20261003a' - and _headers tells the browser a .js URL is immutable for a
@@ -286,7 +366,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'db02ab7964','insp-items.js':'af05d4a323','postsales.js':'f296cc2f8e','purchase.js':'598cf3fffd','purchase-indent.js':'128a321831','purchase-rfq.js':'f74c3dd771','purchase-po.js':'3eb77f8cb5','purchase-stores.js':'bc4ef52a2c','purchase-reports.js':'0f5e6a41cd'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'452bf8ae09','insp-items.js':'af05d4a323','postsales.js':'149a60e1a2','scheduling.js':'50da5d7188','accounts.js':'c31ffa60bc','accounts-bank.js':'ea9648a540','accounts-books.js':'ed1ddeecec','purchase.js':'8109127afb','purchase-indent.js':'f6a398b898','purchase-rfq.js':'e6b7d700d5','purchase-po.js':'7239d968b5','purchase-stores.js':'5ff625e1d0','purchase-reports.js':'62c2dbe660'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];
@@ -910,6 +990,7 @@ const NAV=[
   ]},
   {group:'Governance',items:[
     {id:'finance',label:'Finance Vault',icon:'fa-indian-rupee-sign'},
+    {id:'accounts',label:'Accounts',icon:'fa-calculator'},
     {id:'legal',label:'Legal',icon:'fa-scale-balanced'},
     {id:'compliance',label:'Renewals & Compliance',icon:'fa-calendar-check'},
   ]},
@@ -985,7 +1066,7 @@ function expandModules(ss){
   Object.keys(MODULE_RENAMES).forEach(function(oldId){
     if(ss.has(oldId)) ss.add(MODULE_RENAMES[oldId]);
   });
-  if(ss.has('custportal_photos')||ss.has('custportal_photo_approver')) ss.add('custportal_admin');
+  if(ss.has('custportal_photos')||ss.has('custportal_photo_approver')||ss.has('custportal_photo_backup')) ss.add('custportal_admin');
   ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
@@ -994,11 +1075,14 @@ function expandModules(ss){
    photo tables and read project names and a bare flat list, and nothing else in cust.*. */
 function cpaPhotosOnly(){ if(state.super)return false; const m=state.roles&&state.roles.modules;
   // A photo approver without Customer Portal Admin of their own gets the same single Photos tab.
-  return Array.isArray(m)&&(m.indexOf('custportal_photos')!==-1||(m.indexOf('custportal_photo_approver')!==-1&&m.indexOf('custportal_admin')===-1)); }
+  return Array.isArray(m)&&(m.indexOf('custportal_photos')!==-1||((m.indexOf('custportal_photo_approver')!==-1||m.indexOf('custportal_photo_backup')!==-1)&&m.indexOf('custportal_admin')===-1)); }
 /* 'custportal_photo_approver' = may publish or reject construction photos and videos (Photos & Videos
    > Review). The database holds the same rule - app.is_photo_approver() in cust.review_media() - and
    also refuses an approver's own uploads; this only decides whether to show the Review screen. */
-function cpaIsPhotoApprover(){ if(state.super)return true; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('custportal_photo_approver')!==-1; }
+/* 'custportal_photo_backup' = a backup approver: may do everything an approver does, but the
+   database only tells them about photos that have waited more than 2 days (cust.media_daily_digest),
+   so they are not woken for what the approver is about to deal with anyway. */
+function cpaIsPhotoApprover(){ if(state.super)return true; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&(m.indexOf('custportal_photo_approver')!==-1||m.indexOf('custportal_photo_backup')!==-1); }
 function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return expandModules(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length)return expandModules(new Set(m));return expandModules(new Set());}
 /* Usability sits under Control Panel in Administration, but unlike Control Panel it is NOT
    superadmin-only: the Systems department are the people who actually read it, and they are not
@@ -1035,20 +1119,55 @@ function canFeedbackHub(){
 
    To open it up later, delete this block, the two checks for 'inventory' below, and let it be granted
    through modules like any other page. To add someone for now, add an address here. */
-const INVENTORY_PEOPLE=['ayushruia1@gmail.com','businessanalyst@thejaingroup.com','system3.thejaingroup@gmail.com'];
+/* 2026-10-06: the Systems team (department "Systems" in adm.users) was added to the three administrators, and made
+   Purchase administrators too: system.admin@ (Ayush Ruia's other login), system1@, system2.thejaingroup@,
+   system6thejaingroup@, ai@. Keep this list and purchase.module_admins the same people. */
+const INVENTORY_PEOPLE=['ayushruia1@gmail.com','businessanalyst@thejaingroup.com','system3.thejaingroup@gmail.com',
+  'system.admin@thejaingroup.com','system1@thejaingroup.com','system2.thejaingroup@gmail.com','system6thejaingroup@gmail.com','ai@thejaingroup.com'];
 function canInventory(){
   if(state.isCustomer||state.impersonating) return false;
   const me=String(state.email||'').trim().toLowerCase();
   return INVENTORY_PEOPLE.indexOf(me)!==-1;
 }
-function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
+/* ACCOUNTS IS FOR THREE PEOPLE, BY NAME.
+   Administrator, Prerna and Vicky - the same people who hold the module's own administrator role in
+   accounts.access. Same arrangement as Inventory above: the test runs BEFORE the state.super shortcut
+   in pageAllowed, so the other super admins do not get the menu entry and cannot open the page.
+
+   This decides only whether the menu entry is drawn and the page opens. It is not a database rule:
+   accounts.can_read() still lets any super admin (or anyone granted 'accounts') read the accounts
+   tables through the API, and what anybody may post or change is enforced by the database separately
+   (accounts.access roles, posted vouchers are immutable).
+
+   To add someone for now, add an address here AND a row in accounts.access.
+   To open it up later, delete this block and the two checks for 'accounts' below. */
+const ACCOUNTS_PEOPLE=['ayushruia1@gmail.com','businessanalyst@thejaingroup.com','system3.thejaingroup@gmail.com'];
+function canAccounts(){
+  if(state.isCustomer||state.impersonating) return false;
+  const me=String(state.email||'').trim().toLowerCase();
+  return ACCOUNTS_PEOPLE.indexOf(me)!==-1;
+}
+/* WEEKLY STATUS IS FOR PRERNA ALONE, BY NAME.
+   Same arrangement as the Feedback Hub and Inventory above: not granted through modules and not
+   open to every superadmin, so the test runs BEFORE the state.super shortcut in pageAllowed.
+   The database half of this is app.has_module('weekly_status'), which for this one module ignores
+   the superadmin bypass and needs the id in the person's own adm.users.modules - so the ops.*
+   tables and RPCs refuse anyone else even if they reach the page some other way.
+   To add someone: add the address here AND put 'weekly_status' in their adm.users.modules. */
+const WEEKLY_STATUS_PEOPLE=['businessanalyst@thejaingroup.com'];
+function canWeeklyStatus(){
+  if(state.isCustomer||state.impersonating) return false;
+  const me=String(state.email||'').trim().toLowerCase();
+  return WEEKLY_STATUS_PEOPLE.indexOf(me)!==-1;
+}
+function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(it.id==='accounts')?canAccounts():(it.id==='weekly_status')?canWeeklyStatus():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(hasUsability()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -1109,17 +1228,53 @@ function renderShell(){
     // dropdown appears (or with it dismissed) still lands on the lead instead of a text search for it.
     if(/^\d+$/.test(q)){
       try{
-        const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:[Number(q)]});
-        if(error)throw error;
-        const hit=(data||[])[0];
-        if(hit&&hit.lead){navTo('transcription/lead/'+hit.lead.lead_id);return;}
+        const route=await trcResolveLeadRoute(q);
+        if(route){navTo(route);return;}
+        if(PAGE==='transcription'){_gsDrop.innerHTML='<div style="padding:12px 14px;color:var(--slate);font-size:13px;text-align:center">No lead found with ID '+esc(q)+'</div>';_gsDrop.style.display='block';return;}
       }catch(e){}
     }
     navTo('documents/search/'+encodeURIComponent(q));
   });
+  /* On the Transcription page the search box doubles as a lead-id jump: a bare number opens that
+     lead's detail page as soon as the lookup finds it (no Enter needed), changing the number opens
+     the new lead, and clearing the box returns to the default Transcription list. Only a lead
+     detail route is left on clear - a tab the user chose themselves is not theirs to be pulled off.
+     _gsSeq discards a lookup that finished after the box had already changed again. */
+  let _gsSeq=0;
+  const _trLeadRoute=()=>/^#\/(lead|auto|r\d+)\/./i.test(location.hash);
+  /* Leaving a lead page by any other route (its Back button, the browser's back, a tab) empties the
+     box: the id in it described the page that is now gone. */
+  window.addEventListener('hashchange',()=>{
+    if(PAGE!=='transcription'||_trLeadRoute()||!_gs.value)return;
+    clearTimeout(_gsTimer);_gsSeq++;_gs.value='';_gsDrop.style.display='none';
+  });
   _gs.addEventListener('input',e=>{
-    clearTimeout(_gsTimer);const q=e.target.value.trim();
-    if(!q){_gsDrop.style.display='none';return;}
+    clearTimeout(_gsTimer);const q=e.target.value.trim();const seq=++_gsSeq;
+    if(!q){
+      _gsDrop.style.display='none';
+      if(PAGE==='transcription'&&_trLeadRoute())navTo('transcription');
+      return;
+    }
+    if(PAGE==='transcription'&&/^\d+$/.test(q)){
+      _gsTimer=setTimeout(async()=>{
+        try{
+          const route=await trcResolveLeadRoute(q);
+          if(seq!==_gsSeq)return;
+          if(route){
+            _gsDrop.style.display='none';
+            if(location.hash!=='#/'+route.split('/').slice(1).join('/'))navTo(route);
+            return;
+          }
+          _gsDrop.innerHTML='<div style="padding:12px 14px;color:var(--slate);font-size:13px;text-align:center">No lead found with ID '+esc(q)+'</div>';
+          _gsDrop.style.display='block';
+          return;
+        }catch(err){
+          if(seq===_gsSeq){_gsDrop.innerHTML='<div style="padding:12px 14px;color:var(--err);font-size:13px;text-align:center">Could not search leads: '+esc((err&&err.message)||String(err))+'</div>';_gsDrop.style.display='block';}
+          return;
+        }
+      },350);
+      return;
+    }
     _gsTimer=setTimeout(()=>gsLiveSearch(q),250);
   });
   document.addEventListener('click',e=>{if(!_gs.parentElement.contains(e.target))_gsDrop.style.display='none';});
@@ -1132,6 +1287,21 @@ function renderShell(){
 async function doSignOut(){ bgForget(); try{ await sb.auth.signOut(); }catch(e){} try{ Object.keys(localStorage).forEach(function(k){ if(/sb-.*-auth-token/.test(k)||k.indexOf('supabase')>=0) localStorage.removeItem(k); }); }catch(e){} try{ sessionStorage.removeItem(BOOT_CACHE_KEY); }catch(e){} location.replace(LOGIN_PAGE); }
 window.doSignOut=doSignOut;
 
+/* Where a typed lead id lives. crm_lead_detail answers every id asked for, so an unknown id still
+   comes back as a row with a null lead and no follow-ups - only a lead row or a history counts as
+   found. A lead can also exist ONLY as a transcribed call (acc.transcriptions, e.g. the lost-call sync
+   saw it before the CRM export did); that call's own page is the best thing to open for it. Returns
+   a navTo path, or null when the id is nowhere in Supabase. Throws on a failed query. */
+async function trcResolveLeadRoute(q){
+  const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:[Number(q)]});
+  if(error)throw error;
+  const hit=(data||[])[0];
+  if(hit&&(hit.lead||(Array.isArray(hit.followups)&&hit.followups.length)))return 'transcription/lead/'+Number(q);
+  const {data:tr,error:e2}=await sb.schema('acc').from('transcriptions').select('id').eq('lead_id',Number(q)).is('deleted_at',null).order('created_at',{ascending:false}).limit(1);
+  if(e2)throw e2;
+  if(tr&&tr.length)return 'transcription/auto/'+tr[0].id;
+  return null;
+}
 // Universal live document search (top nav)
 async function gsLiveSearch(q){
   const drop=document.getElementById('gsDrop');if(!drop)return;
@@ -1269,6 +1439,7 @@ function notifGeneralMeta(n){
   if(n.kind==='comment')return {icon:'fa-comment-dots',cls:'t-blue',text:'Commented on a task',taskId:n.task_id||null};
   // Construction photo approval (cust.review_media / cust.notify_media_uploaded).
   if(n.kind==='media_pending')return {icon:'fa-stamp',cls:'t-amber',text:'Photos to approve',taskId:null,go:"notifOpenMedia('review')"};
+  if(n.kind==='media_digest')return {icon:'fa-stamp',cls:'t-amber',text:n.body||'Photos waiting for approval',taskId:null,go:"notifOpenMedia('review')"};
   if(n.kind==='media_rejected')return {icon:'fa-circle-xmark',cls:'t-red',text:n.body||'Photos rejected',taskId:null,go:"notifOpenMedia('upload')"};
   if(n.kind==='media_published')return {icon:'fa-circle-check',cls:'t-green',text:'Photos published',taskId:null,go:"notifOpenMedia('upload')"};
   return {icon:'fa-bell',cls:'t-gray',text:n.body||'Notification',taskId:n.task_id||null};
@@ -1637,6 +1808,18 @@ VIEWS.placeholder=function(v,seg){
    '<table><thead><tr>'+tab.cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+tab.rows.map(r=>'<tr>'+r.map(c=>'<td>'+esc(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
 };
 ['construction','procurement','reports'].forEach(m=>VIEWS[m]=VIEWS.placeholder);
+/* PROJECT SCHEDULING loads its own script (scheduling.js), which replaces this stub with the real view.
+   It used to be wired only by a <script> tag on scheduling.html, which left two ways to land on the
+   generic "Module not found" placeholder: opening it from the sidebar while on any other module (an
+   in-place navigation never fetches that tag), and a hard load where the router ran before the tag's
+   script had executed. The stub waits for the script, then hands over to the real view. */
+VIEWS.scheduling=async function(v,seg){
+  await ensurePageScript('scheduling');
+  const real=VIEWS.scheduling;
+  if(real&&!real.__stub) return real(v,seg);
+  v.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Project Scheduling could not finish loading</div><div style="font-size:12.5px;margin-top:4px">Check your connection and refresh the page.</div></div>';
+};
+VIEWS.scheduling.__stub=true;
 
 /* ============================ DOCUMENTS ENGINE (shared by Documents + Legal) ============================ */
 /* 'Site' is the site-based half of what used to sit under Operations - the store and site staff
@@ -2673,8 +2856,10 @@ async function legalNav(reuse){
   // — that was the slow part. Cache them and reuse on toggle; a full navigation to the page (or an
   // upload/move/delete, which re-routes) refetches fresh.
   if(!(reuse && window._legalNavData)){
-    const allF=await docFetch({dept:'Legal'});
-    const listF=await legalFolderTree();
+    /* The folder list does not depend on the document list, so both go out at once. Sequentially
+       this was two trips to Mumbai, about 65ms each; now it is one. Promise.all is what actually
+       sends them together - a Supabase builder does nothing until something calls .then() on it. */
+    const [allF,listF]=await Promise.all([docFetch({dept:'Legal'}), legalFolderTree()]);
     window._legalNavData={all:allF,list:listF};
   }
   const all=window._legalNavData.all;
@@ -3311,10 +3496,19 @@ async function legalMIS(){
      anything to open and the row can say so at a glance. One small query for the whole table. */
   window._misDocCounts={}; window._misDocFolders={};
   try{
-    const {data:fo}=await sb.from('mis_case_folders').select('id,case_id,doc_folder_id');
+    /* Both reads go out together. mis_case_files is selected with no filter at all - it never
+       depended on which folders came back, only on there being some - so waiting for the folder
+       list first bought nothing and cost a round trip, about 65ms. The guard below is kept: with no
+       folders, byFolder is empty, every lookup misses and the counts stay empty exactly as before,
+       so the extra read cannot change what is shown. */
+    const [foRes,fiRes]=await Promise.all([
+      sb.from('mis_case_folders').select('id,case_id,doc_folder_id'),
+      sb.from('mis_case_files').select('folder_id')
+    ]);
+    const fo=foRes&&foRes.data;
     const byFolder={}; (fo||[]).forEach(function(f){ byFolder[f.id]=f.case_id; if(f.doc_folder_id) window._misDocFolders[f.case_id]=f.doc_folder_id; });
     if((fo||[]).length){
-      const {data:fi}=await sb.from('mis_case_files').select('folder_id');
+      const fi=fiRes&&fiRes.data;
       (fi||[]).forEach(function(x){ const cid=byFolder[x.folder_id]; if(cid!=null) window._misDocCounts[cid]=(window._misDocCounts[cid]||0)+1; });
     }
   }catch(e){}
@@ -8877,7 +9071,8 @@ async function secUserDetail(v,email){
       <div style="padding:14px 16px 16px">
         <div class="tab-grid">${NAV.flatMap(g=>{const gi=g.items.filter(m=>MODSET.has(m.id));if(!gi.length)return[];return['<div class="tab-grid-head">'+esc(g.group)+'</div>',...gi.flatMap(m=>['<label class="chk-tile"><input type="checkbox" class="secMod" value="'+m.id+'" '+((m.id==='network'||mods.includes(m.id))?'checked':'')+' '+((u.super_admin||m.id==='network')?'disabled':'')+'><i class="fa-solid '+m.icon+' tile-ic"></i>'+esc(m.label)+'</label>']
             .concat(m.id==='custportal_admin'?['<label class="chk-tile" title="Opens Customer Portal Admin with only the Photos &amp; Videos tab"><input type="checkbox" class="secMod" value="custportal_photos" '+(mods.includes('custportal_photos')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-photo-film tile-ic"></i>Customer Portal: Photos &amp; Videos only</label>',
-              '<label class="chk-tile" title="May publish or reject construction photos and videos before customers see them (Photos &amp; Videos &gt; Review)"><input type="checkbox" class="secMod" value="custportal_photo_approver" '+(mods.includes('custportal_photo_approver')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-stamp tile-ic"></i>Customer Portal: approve photos</label>']:[]))];}).join('')}</div>
+              '<label class="chk-tile" title="May publish or reject construction photos and videos before customers see them (Photos &amp; Videos &gt; Review)"><input type="checkbox" class="secMod" value="custportal_photo_approver" '+(mods.includes('custportal_photo_approver')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-stamp tile-ic"></i>Customer Portal: approve photos</label>',
+              '<label class="chk-tile" title="May approve like an approver, but is only told when photos have waited more than 2 days"><input type="checkbox" class="secMod" value="custportal_photo_backup" '+(mods.includes('custportal_photo_backup')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-user-shield tile-ic"></i>Customer Portal: backup photo approver</label>']:[]))];}).join('')}</div>
       </div>
     </div>
     ${u.super_admin?'<p style="color:var(--slate);font-size:13px;margin-top:12px">This person is an administrator and always has full access.</p>':`<div style="margin-top:18px;display:flex;justify-content:flex-end;gap:10px"><button class="btn" onclick="navTo('security')">Cancel</button><button class="btn btn-primary" id="secSaveBtn" onclick="secSave('${esc(email)}')"><i class="fa-solid fa-check"></i> Save access</button></div>`}
@@ -11297,6 +11492,7 @@ const USB_COL4={
   'inventory':            {header:'Time spent', keys:['time_spent']},
   'playbook':             {header:'Time spent', keys:['time_spent']},
   'finance':              {header:'Time spent', keys:['time_spent']},
+  'accounts':             {header:'Time spent', keys:['time_spent']},
 
   /* ---- features that inherit a column they cannot fill -------------------------------------
      Each of these resolves, by module or by tab, to a column that is a dash on every single event
@@ -12118,6 +12314,22 @@ VIEWS.inventory=async function(v,seg){
     await window.pusLedgerRender(host,seg.slice(1));
     return;
   }
+};
+
+/* ===== ACCOUNTS MODULE =====
+   Two tabs. Transactions (vouchers, bills & on-account payments, bank reconciliation, cheque printing,
+   enterprise / company / business-unit structure) lives in accounts.js + accounts-bank.js; Ledgers &
+   postings (automatic GST / TDS / retention / Post Sales postings, chart of accounts, ledger opening,
+   ledgers and trial balance) lives in accounts-books.js. Loaded on demand - see PAGE_EXTRA_SCRIPT.
+   Spec: docs/accounts-spec.md. Tables and functions: supabase/migrations/2026100510*..2026100512*. */
+VIEWS.accounts=async function(v,seg){
+  setCrumb(['Governance','Accounts']);
+  const tabs=['Transactions','Ledgers & postings'];const ti=mTab(seg,tabs.length);
+  v.innerHTML=mHead('fa-calculator','#0e7490','Accounts')+mTabs('accounts',tabs,ti)+'<div id="acxBody" style="margin-top:16px"></div>';
+  const host=$('acxBody');
+  const fn=ti===0?window.acxRender:window.acxBooksRender;
+  if(typeof fn!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Accounts could not finish loading - refresh the page.</div></div>'; return; }
+  await fn(host,seg.slice(1));
 };
 
 /* ===== PROCUREMENT MODULE ===== */
@@ -19508,7 +19720,10 @@ VIEWS.custportal_admin=async function(v,seg){
   // Customer Features is last so every older tab keeps its number - the index is the route.
   const tabs=['Projects & Units','Customers','Farvision Import','Photos & Videos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals','Maintenance','Modification Requests','Customer Features'];
   const ti=mTab(seg,tabs.length);
-  v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',tabs,ti)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
+  // The tab strip stays in view under the top bar while a long list scrolls (6 Oct 2026).
+  v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')
+    +'<div style="position:sticky;top:var(--topbar,60px);z-index:25;background:var(--bg,#f4f6fb);margin:0 -4px;padding:6px 4px 0">'+mTabs('custportal_admin',tabs,ti)+'</div>'
+    +'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
   const host=$('cpaBody');if(!host)return;
   if(ti===0) await cpaRenderProjectsUnits(host);
   else if(ti===1) await cpaRenderCustomers(host);
@@ -20027,6 +20242,10 @@ window.cpaCustomerSave=async function(id){
 // additionally uses a 3-tier merged header for its cost-sheet columns (Charge Type -> Basic/Tax ->
 // component name) - none of that survives a CSV round-trip. maintenance_bills/maintenance_receipts
 // still use the older generic CSV path below (no real maintenance export has been reconciled yet).
+/* ==FARVISION-PARSERS-START== (9 Oct 2026)
+   Everything between this line and FARVISION-PARSERS-END is also run, unchanged, by the automatic
+   daily import (tools/farvision-auto-import.mjs on GitHub Actions), so a fix to a parser here is a
+   fix to both. Keep it self-contained: only XLSX (and window.XLSX) may be used inside. */
 function xlsxSheetRows(wb){ const ws=wb.Sheets[wb.SheetNames[0]]; return {ws,rows:XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null})}; }
 function xlsxFindHeaderRow(rows,mustContain){ for(let r=0;r<rows.length;r++){ const row=rows[r]||[]; if(row.some(v=>typeof v==='string'&&v.trim()===mustContain)) return r; } return -1; }
 function xlsxMergedLabel(ws,rows,r,c){
@@ -20182,6 +20401,33 @@ function cpaParsePTC(wb){
     isReversed:String(get('Is Reversed')||'').trim().toUpperCase()==='YES',
   }));
 }
+// Which of the seven reports a workbook is, from its header row. Most specific first - Booking
+// Register has "Payment Plan" too, so "Booking Id" is checked before "Payment Plan".
+function cpaDetectReportType(wb){
+  const {rows}=xlsxSheetRows(wb);
+  for(let r=0;r<Math.min(rows.length,20);r++){
+    const vals=(rows[r]||[]).map(v=>typeof v==='string'?v.trim():'');
+    if(vals.includes('Receipt Reversal No')) return 'receipt_reversal';
+    if(vals.includes('Money Receipt No')&&vals.includes('Drawn On')) return 'receipt_register';
+    if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')) return 'invoice_register';
+    if(vals.includes('Net Outstanding')&&vals.includes('Bill Outstanding')) return 'outstanding';
+    if(vals.includes('Booking Id')&&!vals.includes('Total Basic')) return 'booking_register';
+    if(vals.includes('PTC Created By')) return 'ptc_transfer';
+    if(vals.includes('Payment Plan')&&vals.includes('Total Basic')) return 'sales_details';
+  }
+  return null;
+}
+function cpaParseByType(type,wb){
+  if(type==='sales_details') return cpaParseSalesDetails(wb);
+  if(type==='outstanding') return cpaParseOutstanding(wb);
+  if(type==='invoice_register') return cpaParseInvoiceRegister(wb);
+  if(type==='receipt_register') return cpaParseReceiptRegister(wb);
+  if(type==='receipt_reversal') return cpaParseReceiptReversal(wb);
+  if(type==='booking_register') return cpaParseBookingRegister(wb);
+  if(type==='ptc_transfer') return cpaParsePTC(wb);
+  throw new Error('Type '+type+' not yet supported for auto-import');
+}
+/* ==FARVISION-PARSERS-END== */
 // Booking No is the real join key (unlike unit_code, which repeats across towers). A record that
 // carries a Booking No resolves by it or not at all: falling back to (tower, unit code) whenever the
 // lookup missed attached every cancelled booking's invoices, receipts and Outstanding row to whoever
@@ -20244,6 +20490,7 @@ async function cpaRenderImport(host,seg){
   const typeOpts=Object.keys(CPA_IMPORT_COLUMNS).concat(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register'])
     .map(k=>`<option value="${k}">${esc(CPA_IMPORT_LABELS[k]||k)}</option>`).join('');
   host.innerHTML=`<div class="tabs" style="margin-bottom:14px"><div class="tab active">Import</div><div class="tab" onclick="navTo('custportal_admin/2/history')">Import History</div></div>
+    <div id="cpaAutoCard"></div>
     ${queueHtml}
     <div class="card card-pad frm"><div class="two"><div><label>Import type</label><select id="cpaImpType" onchange="cpaImportTypeChange()">${typeOpts}</select></div>
     <div id="cpaImpProjectWrap"><label>Project (for matching unit codes)</label><select id="cpaImpProject">${projOpts}</select></div></div>
@@ -20253,9 +20500,123 @@ async function cpaRenderImport(host,seg){
     </div><div id="cpaImpPreview" style="margin-top:16px"></div>`;
   window.cpaImportTypeChange();
   // No auto-import on load — user clicks "Import all" when ready
+  cpaAutoImportCard();
 }
+/* AUTOMATIC IMPORT status (9 Oct 2026). What the unattended daily import did today - see
+   supabase/migrations/20261009100000_farvision_auto_import.sql. In test mode it applies the day's
+   files, compares the result with what is already there (the manual import) and undoes it; in live
+   mode it keeps it. Retry / Import anyway are the two decisions it can ask staff for. */
+const CPA_AUTO_LABEL={sales_details:'Sales Details',booking_register:'Booking Register',invoice_register:'Invoice Register',
+  receipt_register:'Receipt Register',receipt_reversal:'Receipt Reversal',ptc_transfer:'Payment To Customer',outstanding:'Customer Outstanding'};
+async function cpaAutoImportCard(){
+  const host=$('cpaAutoCard'); if(!host) return;
+  const [{data:runs},{data:cfg}]=await Promise.all([
+    sb.schema('cust').from('import_runs').select('id,run_date,status,mode,attempts,last_error,summary,applied_at,updated_at').order('run_date',{ascending:false}).limit(1),
+    sb.schema('cust').from('import_config').select('mode,alert_after,give_up_after').maybeSingle()]);
+  if(!cfg) return;
+  const run=(runs||[])[0], sm=(run&&run.summary)||{}, w=sm.waiting||{};
+  const live=cfg.mode==='live', test=cfg.mode==='dry_run';
+  const today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
+  const isToday=run&&run.run_date===today;
+  const time=t=>t?new Date(t).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'}):'';
+  const list=a=>(a||[]).map(x=>esc(CPA_AUTO_LABEL[x]||x)).join(', ');
+  let tone='#eff6ff',bd='#bfdbfe',icon='fa-clock',head='',lines=[],btns='';
+  const st=isToday?run.status:'none';
+  if(st==='none'){ head='No Farvision files today yet'; lines.push('Files usually arrive at about 10:12.'); }
+  else if(st==='collecting'||st==='applying'){
+    head='Waiting for the full set of files';
+    if(w.files_today!=null) lines.push(w.files_today+' file'+(w.files_today===1?'':'s')+' received so far.');
+    if((w.missing||[]).length) lines.push('Not received yet: '+list(w.missing)+'.');
+    if((w.not_read||[]).length) lines.push((w.not_read||[]).length+' file'+((w.not_read||[]).length===1?'':'s')+' still to be read by the automatic reader.');
+    if((w.unreadable||[]).length){ lines.push('Could not be read: '+(w.unreadable||[]).map(esc).join('; ')); tone='#fffbeb'; bd='#f0dfa8'; }
+    if(test&&!(w.missing||[]).length&&!(w.not_read||[]).length) lines.push('Test mode: it runs once your own "Import all" has finished.');
+  }else if(st==='applied'){
+    tone='#f0fdf4'; bd='#bbf7d0'; icon='fa-circle-check';
+    const a=sm.after||{};
+    head='Imported automatically at '+time(run.applied_at);
+    lines.push((sm.file_count||0)+' files. '+((a.live_units||0)-(a.ledger_mismatch||0))+' of '+(a.live_units||0)+' flats match Farvision.');
+  }else if(st==='dry_run_ok'){
+    tone='#f0fdf4'; bd='#bbf7d0'; icon='fa-circle-check';
+    head='Test run matched your import exactly';
+    lines.push('The automatic import read the same '+(sm.file_count||0)+' files and produced exactly the figures already on the portal. Nothing was changed.');
+  }else if(st==='dry_run_diff'){
+    tone='#fffbeb'; bd='#f0dfa8'; icon='fa-triangle-exclamation';
+    head='Test run differs from your import in '+(sm.diff_count||0)+' place'+(sm.diff_count===1?'':'s');
+    lines.push('Nothing was changed. First differences: '+(sm.diff||[]).slice(0,8).map(d=>esc((d.tower||'')+' '+(d.unit||'')+' - '+d.part)).join('; ')+'.');
+  }else if(st==='needs_approval'){
+    tone='#fffbeb'; bd='#f0dfa8'; icon='fa-hand';
+    head='Held - nothing was changed';
+    (sm.problems||[]).forEach(x=>lines.push(esc(x)));
+    if(live) btns='<button class="btn btn-sm btn-primary" onclick="cpaAutoAction('+run.id+',\'force\')"><i class="fa-solid fa-check"></i> Import anyway</button>'
+      +' <button class="btn btn-sm" onclick="cpaAutoAction('+run.id+',\'retry\')"><i class="fa-solid fa-rotate"></i> Check again</button>';
+  }else if(st==='failed'){
+    tone='#fef2f2'; bd='#fecaca'; icon='fa-circle-xmark';
+    head='Failed - nothing was changed';
+    lines.push(esc(run.last_error||sm.error||'Unknown error')+' (tried '+run.attempts+' time'+(run.attempts===1?'':'s')+')');
+    btns='<button class="btn btn-sm btn-primary" onclick="cpaAutoAction('+run.id+',\'retry\')"><i class="fa-solid fa-rotate"></i> Retry</button>';
+  }
+  if((sm.sales_details_missing||[]).length&&st!=='collecting') lines.push('No Sales Details for: '+(sm.sales_details_missing||[]).map(esc).join(', ')+' - their cost sheets stay as last imported.');
+  const modeTag=live?'<span class="tag t-green">Live</span>':test?'<span class="tag t-amber">Test mode - changes nothing</span>':'<span class="tag">Off</span>';
+  host.innerHTML='<div class="card card-pad" style="background:'+tone+';border-color:'+bd+';margin-bottom:16px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">'
+    +'<div><i class="fa-solid '+icon+'" style="color:var(--brand)"></i> <b>Automatic import</b> · '+esc(head)+'</div>'+modeTag+'</div>'
+    +lines.map(l=>'<div style="font-size:13px;color:var(--slate);margin-top:3px">'+l+'</div>').join('')
+    +(btns?'<div style="margin-top:10px">'+btns+'</div>':'')+'</div>';
+}
+window.cpaAutoAction=async function(runId,action){
+  const {error}=await sb.schema('cust').rpc('fv_run_action',{p_run:runId,p_action:action});
+  if(error){ toast('Could not do that: '+error.message,'err'); return; }
+  toast(action==='force'?'Importing anyway - it runs within 5 minutes':'Will check again within 5 minutes','ok');
+  cpaAutoImportCard();
+};
 // Queue: auto-detect type, parse, and import directly — no manual steps
+/* LIVE AUTOMATIC IMPORT (10 Oct 2026): once cust.import_config.mode is 'live', "Import all" and
+   the per-file Import button no longer write customer data from the browser. They read today's
+   files with the same parsers and hand the rows to the same staging table the GitHub reader uses;
+   the database then applies the whole day at once (all or nothing) within 5 minutes. */
+async function cpaAutoMode(){
+  try{ const {data}=await sb.schema('cust').from('import_config').select('mode').maybeSingle(); return (data&&data.mode)||'dry_run'; }
+  catch(_e){ return 'dry_run'; }
+}
+async function cpaAutoReadNow(){
+  const btn=document.getElementById('cpaAutoImportBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading…';}
+  try{
+    const XL=await loadXLSX(); if(!XL) throw new Error('Could not load spreadsheet reader');
+    const {data:list,error}=await sb.schema('cust').rpc('fv_staff_files');
+    if(error) throw error;
+    const todo=((list&&list.files)||[]).filter(f=>!f.staged);
+    if(!todo.length){ toast('All of today\'s files are already read - the automatic import takes it from here','ok'); return; }
+    let done=0; const bad=[];
+    for(const f of todo){
+      const base={p_run:list.run_id,p_queue:f.queue_id,p_file:f.file_name,p_created:f.created_at};
+      const {data:blob,error:dlErr}=await sb.storage.from('farvision-imports').download(f.storage_path);
+      if(dlErr||!blob){ bad.push(f.file_name+' (download failed)'); continue; }
+      let type=null, rows;
+      try{
+        const wb=XL.read(new Uint8Array(await blob.arrayBuffer()),{type:'array'});
+        type=cpaDetectReportType(wb);
+        if(!type) throw new Error('Could not detect report type');
+        rows=JSON.parse(JSON.stringify(cpaParseByType(type,wb)));
+      }catch(e){
+        await sb.schema('cust').rpc('fv_staff_stage',{...base,p_type:type,p_rows_total:0,p_chunk:0,p_chunks:1,p_rows:[],p_parse_error:String(e.message||e).slice(0,300)});
+        bad.push(f.file_name+' (could not be read)'); continue;
+      }
+      const CH=2000, chunks=Math.max(1,Math.ceil(rows.length/CH));
+      let ok=true;
+      for(let c=0;c<chunks&&ok;c++){
+        const {error:se}=await sb.schema('cust').rpc('fv_staff_stage',{...base,p_type:type,p_rows_total:rows.length,p_chunk:c,p_chunks:chunks,p_rows:rows.slice(c*CH,(c+1)*CH),p_parse_error:null});
+        if(se){ ok=false; bad.push(f.file_name+' ('+se.message+')'); }
+      }
+      if(ok) done++;
+      if(btn) btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading '+(done+bad.length)+'/'+todo.length+'…';
+    }
+    toast(done+' file'+(done===1?'':'s')+' read - the automatic import applies the whole day within 5 minutes'+(bad.length?'. Not read: '+bad.join('; '):''),bad.length?'warn':'ok');
+  }catch(e){ toast('Could not read the files: '+(e.message||e),'err'); }
+  finally{ if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-bolt"></i> Import all';} cpaAutoImportCard(); }
+}
 window.cpaQueueImport=async function(queueId){
+  if(await cpaAutoMode()==='live'){ await cpaAutoReadNow(); return true; }
   const {data:q,error}=await sb.schema('cust').from('import_queue').select('*').eq('id',queueId).single();
   if(error||!q){toast('Queue item not found','err');return;}
   await sb.schema('cust').from('import_queue').update({status:'processing'}).eq('id',queueId);
@@ -20267,32 +20628,10 @@ window.cpaQueueImport=async function(queueId){
     const buf=await blob.arrayBuffer();
     // Serials, not Dates - the same as a manual upload, and read to the exact day by xlsxExcelDate.
     const wb=XL.read(new Uint8Array(buf),{type:'array'});
-    // Detect type
-    const {rows}=xlsxSheetRows(wb);
-    let type=null;
-    for(let r=0;r<Math.min(rows.length,20);r++){
-      const vals=(rows[r]||[]).map(v=>typeof v==='string'?v.trim():'');
-      // Check most specific first — Booking Register has "Payment Plan" too, so
-      // must check "Booking Id" (unique to it) before "Payment Plan"
-      if(vals.includes('Receipt Reversal No')){type='receipt_reversal';break;}
-      if(vals.includes('Money Receipt No')&&vals.includes('Drawn On')){type='receipt_register';break;}
-      if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')){type='invoice_register';break;}
-      if(vals.includes('Net Outstanding')&&vals.includes('Bill Outstanding')){type='outstanding';break;}
-      if(vals.includes('Booking Id')&&!vals.includes('Total Basic')){type='booking_register';break;}
-      if(vals.includes('PTC Created By')){type='ptc_transfer';break;}
-      if(vals.includes('Payment Plan')&&vals.includes('Total Basic')){type='sales_details';break;}
-    }
+    // Detect type, then parse - the same two steps the automatic import runs
+    const type=cpaDetectReportType(wb);
     if(!type) throw new Error('Could not detect report type');
-    // Parse
-    let parsed;
-    if(type==='sales_details') parsed=cpaParseSalesDetails(wb);
-    else if(type==='outstanding') parsed=cpaParseOutstanding(wb);
-    else if(type==='invoice_register') parsed=cpaParseInvoiceRegister(wb);
-    else if(type==='receipt_register') parsed=cpaParseReceiptRegister(wb);
-    else if(type==='receipt_reversal') parsed=cpaParseReceiptReversal(wb);
-    else if(type==='booking_register') parsed=cpaParseBookingRegister(wb);
-    else if(type==='ptc_transfer') parsed=cpaParsePTC(wb);
-    else throw new Error('Type '+type+' not yet supported for auto-import');
+    const parsed=cpaParseByType(type,wb);
     // Match to projects/units (only registered projects pass through)
     const projects=await cpaProjects();
     const units=await cpaUnits();
@@ -20335,6 +20674,7 @@ window.cpaQueueImport=async function(queueId){
   }
 };
 window.cpaQueueImportAll=async function(){
+  if(await cpaAutoMode()==='live'){ await cpaAutoReadNow(); return; }
   const {data:pending}=await sb.schema('cust').from('import_queue').select('id,file_name').eq('status','pending').order('created_at');
   if(!pending||!pending.length){toast('No pending files','ok');return;}
   const btn=document.getElementById('cpaAutoImportBtn');
@@ -20859,6 +21199,11 @@ function cpaTowersForProject(units,projectId){return [...new Set(units.filter(u=
 const CPA_PH_AREAS=[['common','Common area','fa-couch'],
                     ['bathroom','Bathroom','fa-bath'],
                     ['kitchen','Kitchen','fa-kitchen-set']];
+/* The sections offered when UPLOADING for a flat. The site supervisor (the 'Photos & Videos only'
+   tile) uploads Common area and Kitchen only - Bathroom was taken off his screen on 5 Oct 2026.
+   Everyone else still has all three, and bathroom photos already uploaded are untouched: the
+   lists, Review and the customer's view still know the section. */
+function cpaPhUploadAreas(){ return cpaPhotosOnly()?CPA_PH_AREAS.filter(a=>a[0]!=='bathroom'):CPA_PH_AREAS; }
 // level -> which of the three pickers it needs. Flat needs all three; the project level needs
 // only the project, so the pickers it does not use are hidden rather than left there to be
 // filled in pointlessly.
@@ -20922,22 +21267,25 @@ function cpaPhCss(){return `<style>
   .cph-no{color:#b91c1c}.cph-no:hover{background:#fef2f2;border-color:#fca5a5}
   .cph-un{color:#475569}.cph-un:hover{background:#f1f5f9}
   .cph-mine{font-size:11.5px;color:var(--slate);padding:8px 0}
-  .cph-reasons{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
-  .cph-reason{border:1px solid var(--line);background:#f8fafc;border-radius:16px;padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer}
-  .cph-reason:hover{border-color:#1d4ed8;color:#1d4ed8}
   /* Review preview */
-  .cph-pv{flex-direction:column}
-  .cph-pvstage{display:flex;align-items:center;justify-content:center;max-width:92vw;min-height:30vh;margin-top:40px}
-  .cph-pv .cph-pvstage img,.cph-pv .cph-pvstage video{max-width:88vw;max-height:calc(100vh - 170px);border-radius:10px;display:block;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  .cph-box.cph-pv{padding:0;background:#000}
+  .cph-pv .cph-boxbar{z-index:3;padding:14px 18px 30px;background:linear-gradient(rgba(0,0,0,.7),transparent)}
+  .cph-pvstage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .cph-pv .cph-pvstage img,.cph-pv .cph-pvstage video{position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;
+    object-fit:contain;background:transparent;box-shadow:none;border-radius:0}
   .cph-pvload{color:#cbd5e1;font-size:26px}
+  .cph-pvhint{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:2;background:rgba(15,23,42,.72);color:#e2e8f0;
+    font-size:12.5px;padding:6px 12px;border-radius:999px;white-space:nowrap}
   .cph-pvn{color:#cbd5e1;font-size:12.5px;margin-left:10px;white-space:nowrap}
-  .cph-pvnav{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:0;
+  .cph-pvnav{position:absolute;z-index:2;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:0;
     background:rgba(255,255,255,.16);color:#fff;font-size:18px;cursor:pointer}
   .cph-pvnav:hover{background:rgba(255,255,255,.3)}
   .cph-pvnav.l{left:18px}.cph-pvnav.r{right:18px}
-  .cph-pvacts{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;padding:0 16px;margin-top:16px}
+  .cph-pvacts{position:absolute;z-index:3;top:62px;left:0;right:0;display:flex;justify-content:center;gap:12px;flex-wrap:wrap;
+    padding:0 16px;pointer-events:none}
+  .cph-pvacts>*{pointer-events:auto}
   .cph-pvbtn{height:46px;padding:0 26px;border-radius:10px;border:0;font:inherit;font-size:15px;font-weight:700;cursor:pointer;
-    display:inline-flex;align-items:center;gap:9px;box-shadow:0 6px 18px rgba(0,0,0,.3)}
+    display:inline-flex;align-items:center;gap:9px;box-shadow:0 6px 20px rgba(0,0,0,.55)}
   .cph-pvbtn.ok{background:#16a34a;color:#fff}.cph-pvbtn.ok:hover{background:#15803d}
   .cph-pvbtn.no{background:#dc2626;color:#fff}.cph-pvbtn.no:hover{background:#b91c1c}
   .cph-pvbtn.un{background:#fff;color:#334155}
@@ -21035,6 +21383,73 @@ function cpaPhCss(){return `<style>
   .cph-th.vid{background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b}
   img.cph-th:not([src]),img.cph-rvm:not([src]){background:linear-gradient(90deg,#eef2f7,#f8fafc,#eef2f7);background-size:200% 100%;animation:cphShim 1.2s linear infinite}
   img.cph-noimg{animation:none;background:#eef2f7}
+  .cph-vth{position:relative;display:block}
+  .cph-vth>i{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;font-size:15px;
+    text-shadow:0 1px 6px rgba(0,0,0,.6);pointer-events:none}
+  .cph-rvc .cph-vth>i{font-size:30px}
+  /* To retake: the uploader's rejected photos, each one tap from the camera for the same place */
+  .cph-fix{border-color:#fecaca;background:#fffafa}
+  .cph-fix .cph-h{color:#b91c1c}
+  .cph-fixsub{font-weight:400;color:var(--slate);font-size:12px;margin-left:8px;text-transform:none;letter-spacing:0}
+  .cph-fixl{display:flex;flex-direction:column;gap:8px;max-height:65vh;overflow:auto}
+  .cph-fixi{display:flex;align-items:center;gap:12px;padding:8px 10px;border:1px solid #fee2e2;border-radius:10px;background:#fff}
+  .cph-fixi .cph-th{width:54px;height:54px;flex:none}
+  .cph-fixw{flex:1;min-width:0;font-size:12.5px;color:var(--slate);line-height:1.45}
+  .cph-fixw b{display:block;color:var(--ink);font-size:13.5px}
+  .cph-fixpv{position:relative;flex:none;padding:0;border:0;background:none;cursor:zoom-in;border-radius:8px}
+  .cph-fixpv:hover .cph-th{box-shadow:0 0 0 2px #b91c1c}
+  .cph-fixpn{position:absolute;right:-6px;top:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b91c1c;
+    color:#fff;font-size:11px;font-weight:800;display:grid;place-items:center}
+  .cph-cnts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}
+  .cph-cnt{display:flex;align-items:center;gap:9px;padding:10px 12px;border:1px solid var(--line);border-left:4px solid var(--c);
+    border-radius:10px;background:#fff;cursor:pointer;font:inherit;text-align:left}
+  .cph-cnt i{color:var(--c);font-size:15px}
+  .cph-cnt b{font-size:20px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+  .cph-cnt span{font-size:12.5px;color:var(--slate);font-weight:600}
+  .cph-cnt:hover{background:#f8fafc}
+  .cph-cnt.on{background:color-mix(in srgb,var(--c) 10%,#fff);border-color:var(--c)}
+  @media(max-width:620px){ .cph-cnts{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  .cph-cntline{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:10px 14px;margin-bottom:12px;border:1px solid var(--line);
+    border-radius:12px;background:#fff;font-size:13px}
+  .cph-cntline b{color:var(--ink)}
+  .cph-cntline span{display:inline-flex;align-items:center;gap:6px;color:var(--ink);font-weight:600}
+  .cph-cntline span i{color:var(--c)}
+  .cph-fixbtns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .cph-fixst{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;white-space:nowrap}
+  .cph-fixst.busy{color:#1d4ed8;padding:0 6px}
+  .cph-fixst.taken{background:#dcfce7;border-color:#86efac;color:#15803d}
+  .cph-fixi.st-busy,.cph-fixi.st-taken{border-color:#bbf7d0;background:#f7fef9}
+  .cph-fixnew{position:relative;flex:none;padding:0;border:0;background:none;cursor:zoom-in}
+  .cph-fixnew .cph-th{width:54px;height:54px;border:2px solid #16a34a}
+  .cph-fixok{position:absolute;right:-6px;top:-6px;width:18px;height:18px;border-radius:50%;background:#16a34a;color:#fff;font-size:10px;display:grid;place-items:center}
+  .cph-fixup{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:4px 0 10px;padding:10px 12px;
+    border:1px solid #86efac;background:#f0fdf4;border-radius:10px;font-size:13px;color:#166534;font-weight:600}
+  .cph-fixup span i{margin-right:5px}
+  @media(max-width:620px){ .cph-fixup .btn{width:100%;justify-content:center} }
+  /* The section always sits on its own line under the flat number, so every row lines up the same. */
+  .cph-fixsec{display:table;margin-top:4px;padding:1px 9px;border-radius:999px;background:#fef2f2;color:#b91c1c;font-size:12px;font-weight:700;white-space:nowrap}
+  @media(max-width:620px){ .cph-fixi{flex-wrap:wrap} .cph-fixbtns{width:100%} .cph-fixbtns .btn{flex:1 1 0;justify-content:center} }
+  .cph-fixg{font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#b91c1c;margin:6px 2px -2px}
+  .cph-fixg:first-child{margin-top:0}
+  .cph-fixs{display:flex;flex-direction:column;gap:6px;margin:2px 0 4px}
+  .cph-fixr{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .cph-fixp{min-width:150px;font-size:13px;font-weight:700;color:var(--ink)}
+  .cph-fixcs{display:flex;gap:6px;flex-wrap:wrap}
+  .cph-fixc{display:inline-flex;align-items:center;gap:8px;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:999px;
+    padding:5px 6px 5px 13px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+  .cph-fixc b{min-width:22px;height:22px;padding:0 6px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:12px;
+    display:inline-grid;place-items:center;font-weight:800}
+  .cph-fixc:hover{background:#fef2f2}
+  .cph-fixc.on{background:#b91c1c;border-color:#b91c1c;color:#fff}
+  .cph-fixc.on b{background:#fff;color:#b91c1c}
+  .cph-fixt{margin:12px 0 8px;padding-top:10px;border-top:1px solid #fde2e2;font-size:12px;font-weight:800;letter-spacing:.4px;
+    text-transform:uppercase;color:#7f1d1d}
+  .cph-fixhint{margin-top:10px;font-size:12.5px;color:var(--slate)}
+  .cph-fixhint i{color:#b91c1c;margin-right:4px}
+  @media(max-width:620px){ .cph-fixp{min-width:0;width:100%} }
+  .cph-retake{display:inline-flex;align-items:center;gap:6px;margin-top:5px;padding:5px 11px;border-radius:8px;cursor:pointer;
+    font:inherit;font-size:12px;font-weight:700;border:1px solid #1d4ed8;background:#1d4ed8;color:#fff}
+  .cph-retake:hover{background:#1e40af}
   @keyframes cphShim{to{background-position:-200% 0}}
   .cph-when{white-space:nowrap;font-weight:600;color:var(--ink)}
   .cph-area{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;
@@ -21106,10 +21521,32 @@ function cpaPhCss(){return `<style>
 
 async function cpaRenderPhotos(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
-  if(!CPA_PH.project&&projects.length) CPA_PH.project=String(projects[0].id);
+  if(!CPA_PH.project&&projects.length) CPA_PH.project=await cpaPhStartProject(projects,units);
   host.innerHTML=cpaPhCss()+'<div class="cph-wrap" id="cphWrap"></div>';
   if(CPA_PH.mode==='review'&&cpaIsPhotoApprover()) cpaRvPaint(projects,units);
   else{ CPA_PH.mode='upload'; cpaPhPaint(projects,units); }
+}
+/* Which project Photos & Videos opens on (7 Oct 2026). The first one alphabetically was Dream
+   Ananta, so the site team - who work on Dream Gurukul - opened on a project with nothing for them.
+   Now: the project with the most rejected photos waiting for a retake (that this account can retake),
+   otherwise the one with the most flats. */
+async function cpaPhStartProject(projects,units){
+  const ids=new Set(projects.map(p=>String(p.id)));
+  const unitProj={}; (units||[]).forEach(u=>{ unitProj[u.id]=String(u.project_id); });
+  const score={};
+  try{
+    const areas=cpaPhUploadAreas().map(a=>a[0]);
+    const [up,tp,pp]=await Promise.all([
+      sb.schema('cust').from('unit_photos').select('unit_id,area').eq('status','rejected').is('deleted_at',null).limit(5000),
+      sb.schema('cust').from('tower_photos').select('project_id').eq('status','rejected').is('deleted_at',null).limit(5000),
+      sb.schema('cust').from('project_photos').select('project_id').eq('status','rejected').is('deleted_at',null).limit(5000)]);
+    ((up&&up.data)||[]).forEach(r=>{ if(areas.indexOf(r.area||'common')===-1) return; const k=unitProj[r.unit_id]; if(k) score[k]=(score[k]||0)+1; });
+    ((tp&&tp.data)||[]).concat((pp&&pp.data)||[]).forEach(r=>{ const k=String(r.project_id); score[k]=(score[k]||0)+1; });
+  }catch(_e){}
+  const flats={}; (units||[]).forEach(u=>{ if(u.status!=='cancelled'){ const k=String(u.project_id); flats[k]=(flats[k]||0)+1; } });
+  const best=Object.keys(score).filter(k=>ids.has(k)).sort((a,b)=>score[b]-score[a])[0]
+    ||Object.keys(flats).filter(k=>ids.has(k)).sort((a,b)=>flats[b]-flats[a])[0];
+  return best||String(projects[0].id);
 }
 // Upload | Review, for photo approvers. The Review count is everything still waiting, anywhere.
 function cpaPhModeBar(){
@@ -21146,7 +21583,7 @@ async function cpaPhPaint(projects,units){
   const lastUp=needUnit?await cpaPhLastUploads(flats.map(u=>u.id)):{};
   if(!$('cphWrap')) return;
   wrap.innerHTML=cpaPhModeBar()
-    +(cpaIsPhotoApprover()&&!state.super?'':'<div class="cph-note"><i class="fa-solid fa-circle-info"></i>Everything uploaded here waits for approval by the post-sales team before customers can see it.</div>')
+    +'<div id="cphFix"></div>'
     +'<div class="cph-card">'
       +'<div class="cph-bar">'
         +'<div class="cph-levels">'
@@ -21163,7 +21600,7 @@ async function cpaPhPaint(projects,units){
           +'</select></div></div>':'')
           +(needUnit?'<div class="cph-f"><label>Flat</label><div class="cph-sel"><select id="cphUnit" onchange="cpaPhSet(\'unit\',this.value)">'
             +(flats.length?flats.map(u=>'<option value="'+u.id+'"'+(String(u.id)===String(CPA_PH.unit)?' selected':'')+'>'+esc(u.unit_code)
-                +(lastUp[u.id]?' · '+cpaDdMmYy(lastUp[u.id]):'')+'</option>').join('')
+                +(lastUp[u.id]?'\u00a0\u00a0\u00a0\u00a0\u00b7\u00a0\u00a0\u00a0\u00a0'+cpaDdMmYy(lastUp[u.id]):'')+'</option>').join('')
                           :'<option value="">No flats in this block</option>')
           +'</select></div></div>':'')
         +'</div>'
@@ -21176,28 +21613,295 @@ async function cpaPhPaint(projects,units){
           +'<input type="date" class="cph-in" id="cphDate" value="'+today+'"></div>'
       +'</div>'
       +(lvl==='unit'
-        ? '<div class="cph-zones">'+CPA_PH_AREAS.map(a=>cpaPhZone(a[0],a[1],a[2])).join('')+'</div>'
+        ? '<div class="cph-zones">'+cpaPhUploadAreas().map(a=>cpaPhZone(a[0],a[1],a[2])).join('')+'</div>'
         : '<div class="cph-zones" style="grid-template-columns:1fr">'+cpaPhZone('all','Photos or videos','fa-images')+'</div>')
       +'<div class="cph-staged" id="cphStaged" style="display:none"></div>'
       +'<div class="cph-acts">'
         +'<button class="btn btn-primary" id="cphGo" onclick="cpaPhUpload()">'
           +'<i class="fa-solid fa-cloud-arrow-up"></i> Upload</button>'
         +'<button class="btn" id="cphClear" onclick="cpaPhClear()">Clear all</button>'
-        +(lvl==='unit'?'<span style="font-size:11.5px;color:var(--slate)">Any one, two or all three \u2014 they go up together.</span>':'')
+        +(lvl==='unit'?'<span style="font-size:11.5px;color:var(--slate)">'+(cpaPhUploadAreas().length===2?'Either or both':'Any one, two or all three')+' \u2014 they go up together.</span>':'')
       +'</div>'
     +'</div>'
 
-    +'<div class="cph-card">'
+    // A photos-only account (the site team) has no "Already uploaded" list: what it needs to act on
+    // is in "To retake", and the review is the post-sales team's (6 Oct 2026). Without #cphList,
+    // cpaPhList() does nothing.
+    +(cpaPhotosOnly()?'':'<div class="cph-card">'
       +'<div class="cph-h"><i class="fa-solid fa-images"></i>Already uploaded</div>'
       +'<div id="cphList" class="cph-review"><div class="cph-empty">Loading\u2026</div></div>'
-    +'</div>';
+    +'</div>');
 
   cpaPhWireZones();
   cpaPhStaged();
   cpaPhSyncActions();
   cpaPhList();
   cpaPhFillBadge();
+  cpaPhFixList(projects,units);
 }
+
+/* TO RETAKE: every rejected photo still waiting for a replacement, whoever took it - on site,
+   whoever is there retakes it. One line per place (flat and section, block, or project), because
+   one new photo there replaces all the rejected ones at that place (cust.replace_rejected_media).
+   Retake opens the camera at once and points the form at that place. The same Retake is on each
+   rejected row of "Already uploaded" (cpaPhRetakeBtn). */
+async function cpaPhFixList(projects,units){
+  const host=$('cphFix'); if(!host) return;
+  projects=projects||CPA_PH.fixProjects||await cpaProjects(); units=units||CPA.units||await cpaUnits();
+  CPA_PH.fixProjects=projects;
+  // Retaking is the site team's job: only photos-only accounts get this list (6 Oct 2026). An admin
+  // sees rejected photos in "Already uploaded" and in Review > Rejected, without Retake.
+  if(!cpaPhotosOnly()){ host.innerHTML=''; return; }
+  const res=await Promise.all(CPA_RV_SECS.map(s=>sb.schema('cust').from(s[0]).select('*').eq('status','rejected')
+    .is('deleted_at',null).order('reviewed_at',{ascending:false}).limit(200)));
+  if(!$('cphFix')) return;
+  const projOf={}; (projects||[]).forEach(p=>{projOf[p.id]=p;});
+  const byPlace={}, order=[];
+  CPA_RV_SECS.forEach((s,k)=>((res[k]&&res[k].data)||[]).forEach(p=>{
+    const t=s[0], w=cpaPhPlaceOf(t,p,units);
+    // Only what this person can retake: a photos-only uploader has no Bathroom section, so rejected
+    // Bathroom photos are not theirs to fix and are left out (6 Oct 2026).
+    if(!w.can) return;
+    const key=t+'|'+w.key;
+    if(!byPlace[key]){ byPlace[key]={t,p,w,place:w.place,can:w.can,pn:projOf[w.pid]?String(projOf[w.pid].name).split('(')[0].trim():'',
+      n:0,when:p.reviewed_at||p.created_at,notes:[]}; order.push(key); }
+    const g=byPlace[key]; g.n++; (g.ps=g.ps||[]).push(p);
+    if(p.review_note&&g.notes.indexOf(p.review_note)===-1) g.notes.push(p.review_note);
+  }));
+  /* Floor-wise, the way the site is walked: project by project; within one, the whole-project
+     photos, then the blocks, then the flats - block by block, floor by floor (ground up), flat by
+     flat, section by section. Asked for on 6 Oct 2026. */
+  const nat=(a,b)=>String(a||'').localeCompare(String(b||''),undefined,{numeric:true,sensitivity:'base'});
+  const items=order.map(k=>byPlace[k]).sort((a,b)=>{
+    const x=a.w, y=b.w;
+    return nat(a.pn,b.pn)||(x.lvl-y.lvl)||nat(x.tower,y.tower)
+      ||((x.floor==null)-(y.floor==null))||((x.floor||0)-(y.floor||0))||nat(x.code,y.code)||((x.areaIdx||0)-(y.areaIdx||0));
+  });
+  CPA_PH.fixItems=items;
+  cpaPhFixRender();
+}
+/* Where a row stands right now (8 Oct 2026), so it is never unclear what has been taken: being
+   uploaded; taken and waiting in the upload form (the upload failed, or it was added by hand); or
+   still to retake. */
+function cpaPhFixState(it){
+  const key=it.t+'|'+it.w.key;
+  if(CPA_PH.fixBusy&&CPA_PH.fixBusy.has&&CPA_PH.fixBusy.has(key)) return 'busy';
+  return (CPA_PH.retakes||{})[key]?'taken':'';
+}
+function cpaPhFixRender(){
+  const host=$('cphFix'); if(!host||!CPA_PH.fixItems) return;
+  const items=CPA_PH.fixItems;
+  /* The site team's view (7 Oct 2026): only the project picked above; the count on top is in
+     PLACES to photograph - flats, blocks - not photos. The list is block by block ("A1 · 3 flats"),
+     then one row per flat and section ("Flat 2A · Common area", "Flat 2A · Kitchen"), each with its
+     own Retake, floor by floor. */
+  const LV={project:0,tower:1,unit:2}, LVKEY=['project','tower','unit'], LVNAME=['Whole project','Blocks','Flats'];
+  const cur=LV[CPA_PH.level]!=null?LV[CPA_PH.level]:0, pid=String(CPA_PH.project||'');
+  const mine=items.filter(it=>String(it.w.pid)===pid);
+  CPA_PH.fix=mine;                      // Retake refers to these by index
+  // The full-size view steps through one row's photos: one group per row.
+  CPA_PH.fixGroups=mine.map(it=>({lvl:it.w.lvl,w:it.w,items:[it]}));
+  if(!mine.length){ host.innerHTML=''; return; }
+  const places=l=>new Set(mine.filter(it=>it.w.lvl===l).map(it=>l===2?String(it.p.unit_id):l===1?it.w.tower:'p')).size;
+  const counts=[places(0),places(1),places(2)];
+  const blk=t=>String(t||'').replace(/^block\s*/i,'').trim();
+  const secName=it=>(CPA_PH_AREAS.find(a=>a[0]===(it.p.area||'common'))||[0,'Photo'])[1];
+  const chips='<div class="cph-fixcs" style="margin:2px 0 4px">'+[0,1,2].filter(l=>counts[l]).map(l=>{
+      const on=l===cur;
+      return '<button class="cph-fixc'+(on?' on':'')+'" onclick="cpaPhSetLevel(\''+LVKEY[l]+'\')"'+(on?' aria-current="true"':'')+'>'
+        +LVNAME[l]+'<b>'+counts[l]+'</b></button>'; }).join('')+'</div>';
+  const shown=mine.filter(it=>it.w.lvl===cur);
+  const flatsIn={}; shown.forEach(it=>{ if(it.w.lvl===2) (flatsIn[it.w.tower||'']=flatsIn[it.w.tower||'']||new Set()).add(String(it.p.unit_id)); });
+  const rows=shown.map((it,n)=>{
+    const w=it.w, prev=shown[n-1], k=mine.indexOf(it);
+    const head=w.lvl===2&&(!prev||prev.w.tower!==w.tower)
+      ?'<div class="cph-fixg">'+esc(blk(w.tower)||'Flats')+' · '+flatsIn[w.tower||''].size+' flat'+(flatsIn[w.tower||''].size===1?'':'s')+'</div>':'';
+    const p=it.p, isVid=(p.file_type||'').indexOf('video')===0;
+    const th=(isVid&&!p.thumb_path?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>'
+      :'<img class="cph-th" '+cphThumbAttrs(p,it.t)+' alt="" decoding="async">');
+    const thBtn='<button type="button" class="cph-fixpv" onclick="cpaPhFixPreview('+k+',0)" title="See what was rejected, full size">'+th
+      +(it.n>1?'<span class="cph-fixpn">'+it.n+'</span>':'')+'</button>';
+    const title=w.lvl===2?'Flat '+(w.code||''):w.lvl===1?(w.tower||'Block'):'Whole project';
+    const st=cpaPhFixState(it), rkey=it.t+'|'+w.key, rt=(CPA_PH.retakes||{})[rkey];
+    const newPic=rt?'<button type="button" class="cph-fixnew" onclick="cpaPhRetakeView(\''+rkey.replace(/'/g,"\\'")+'\')" title="Check the new photo full size">'
+        +(rt.isVid||!rt.url?'<div class="cph-th vid"><i class="fa-solid fa-circle-play"></i></div>':'<img class="cph-th" src="'+rt.url+'" alt="">')
+        +'<span class="cph-fixok"><i class="fa-solid fa-check"></i></span></button>':'';
+    const right=st==='busy'?'<span class="cph-fixst busy"><i class="fa-solid fa-spinner fa-spin"></i> Uploading…</span>'
+      :st==='taken'?newPic+'<div class="cph-fixbtns"><button class="btn btn-sm" onclick="cpaPhRetake('+k+','+(isVid?1:0)+')"><i class="fa-solid fa-camera-rotate"></i> Retake again</button>'
+          +'<button class="btn btn-sm" onclick="cpaPhRetakeDrop(\''+rkey.replace(/'/g,"\\'")+'\')" title="Discard the new photo">&times;</button></div>'
+      :(it.can?'<button class="btn btn-sm btn-primary" onclick="cpaPhRetake('+k+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>':'');
+    return head+'<div class="cph-fixi'+(st?' st-'+st:'')+'">'+thBtn
+      +'<div class="cph-fixw"><b>'+esc(title)+'</b>'+(w.lvl===2?'<span class="cph-fixsec">'+esc(secName(it))+'</span>':'')
+        +esc(it.notes.join(' · '))+'</div>'
+      +right
+      +'</div>';
+  }).join('');
+  const nTaken=Object.keys(CPA_PH.retakes||{}).length, uploading=!!(CPA_PH.fixBusy&&CPA_PH.fixBusy.size);
+  const upBar=nTaken||uploading?'<div class="cph-fixup"><span><i class="fa-solid fa-circle-check"></i> '+(uploading?'Uploading…':nTaken+' new photo'+(nTaken===1?'':'s')+' taken - check them, then upload')+'</span>'
+      +'<button class="btn btn-primary" onclick="cpaPhRetakeUpload()"'+(uploading?' disabled':'')+'><i class="fa-solid fa-'+(uploading?'spinner fa-spin':'cloud-arrow-up')+'"></i> Upload'+(nTaken?' '+nTaken+' photo'+(nTaken===1?'':'s'):'')+'</button></div>':'';
+  host.innerHTML='<div class="cph-card cph-fix"><div class="cph-h"><i class="fa-solid fa-camera-rotate"></i>Photos to retake</div>'
+    +upBar
+    +chips
+    +(shown.length?'<div class="cph-fixl" style="margin-top:10px">'+rows+'</div>'
+      :'<div class="cph-fixhint"><i class="fa-solid fa-hand-pointer"></i> Tap a number above to see those and retake them.</div>')
+    +'</div>';
+  cphLazy(host);
+}
+/* Full-size view of what was rejected for one flat (or block): every rejected photo there, section
+   by section, the reviewer's reason if given, and Retake for the section on screen. */
+window.cpaPhFixPreview=async function(gi,k){
+  const g=(CPA_PH.fixGroups||[])[gi]; if(!g) return;
+  const list=[]; g.items.forEach(it=>(it.ps&&it.ps.length?it.ps:[it.p]).forEach(ph=>list.push({it,ph})));
+  k=Math.max(0,Math.min(list.length-1,k||0));
+  const {it,ph}=list[k], isVid=(ph.file_type||'').indexOf('video')===0;
+  const old=$('cphFixPv'); if(old) old.remove();
+  const box=document.createElement('div'); box.className='cph-box cph-pv'; box.id='cphFixPv';
+  const blk=t=>String(t||'').replace(/^block\s*/i,'').trim();
+  const title=g.lvl===2?(blk(g.w.tower)?blk(g.w.tower)+' · ':'')+'Flat '+(g.w.code||''):g.lvl===1?(g.w.tower||'Block'):'Whole project';
+  const sec=g.lvl===2?((CPA_PH_AREAS.find(a=>a[0]===(ph.area||'common'))||[0,''])[1]):'';
+  const info=[sec,ph.review_note?'Reason: '+ph.review_note:''].filter(Boolean).join(' · ');
+  box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
+      +'<span class="nm"><b>'+esc(title)+'</b>'+(info?' · '+esc(info):'')+'</span>'
+      +(list.length>1?'<span class="cph-pvn">'+(k+1)+' of '+list.length+'</span>':'')
+      +'<button class="cph-boxx" title="Close (Esc)">&times;</button></div>'
+    +(k>0?'<button class="cph-pvnav l" title="Previous (←)"><i class="fa-solid fa-chevron-left"></i></button>':'')
+    +(k<list.length-1?'<button class="cph-pvnav r" title="Next (→)"><i class="fa-solid fa-chevron-right"></i></button>':'')
+    +(it.can?'<div class="cph-pvacts"><button class="cph-pvbtn ok cph-fixrt"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake'+(sec?' '+esc(sec):'')+'</button></div>':'')
+    +'<div class="cph-pvstage"><div class="cph-pvload"><i class="fa-solid fa-spinner fa-spin"></i></div></div>';
+  const shut=()=>{ document.removeEventListener('keydown',onKey); box.remove(); };
+  const onKey=e=>{ if(e.key==='Escape') shut(); else if(e.key==='ArrowRight'&&k<list.length-1){ shut(); cpaPhFixPreview(gi,k+1); }
+    else if(e.key==='ArrowLeft'&&k>0){ shut(); cpaPhFixPreview(gi,k-1); } };
+  box.querySelector('.cph-boxx').onclick=shut;
+  const l=box.querySelector('.cph-pvnav.l'), r=box.querySelector('.cph-pvnav.r');
+  if(l) l.onclick=()=>{ shut(); cpaPhFixPreview(gi,k-1); };
+  if(r) r.onclick=()=>{ shut(); cpaPhFixPreview(gi,k+1); };
+  // Retake straight from here: the camera has to open inside this tap.
+  const rt=box.querySelector('.cph-fixrt'); if(rt) rt.onclick=()=>{ shut(); cpaPhRetake(CPA_PH.fix.indexOf(it),isVid?1:0); };
+  box.onclick=e=>{ if(e.target===box) shut(); };
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(box);
+  const stage=box.querySelector('.cph-pvstage'); if(!stage) return;
+  cphPreload(list[k+1]&&list[k+1].ph); cphPreload(list[k-1]&&list[k-1].ph);
+  await cphFullInto(stage,box,ph);
+};
+// A button in "Photos to retake": open that project at that level. Same project: only the level
+// changes, so the block and flat picked stay as they were.
+window.cpaPhFixGo=function(projectId,level){
+  if(String(projectId)!==String(CPA_PH.project)){ CPA_PH.project=String(projectId); CPA_PH.tower=''; CPA_PH.unit=''; }
+  cpaPhSetLevel(level);
+};
+// The floor a flat is on, from its code: 2G -> 2, 11A -> 11, 13-14A -> 13. Codes that do not start
+// with a number (the Eco City bungalows: A1, K6) have no floor and sort after the rest by code.
+function cpaFloorOf(code){ const m=/^(\d+)/.exec(String(code||'').trim()); return m?Number(m[1]):null; }
+// Where a photo belongs, in words, and whether this uploader's screen can take a new one there
+// (a photos-only uploader has no Bathroom section).
+function cpaPhPlaceOf(t,p,units){
+  if(t==='unit_photos'){
+    const u=(units||CPA.units||[]).find(x=>String(x.id)===String(p.unit_id));
+    const area=p.area||'common';
+    const a=(CPA_PH_AREAS.find(x=>x[0]===area)||[0,area])[1];
+    return {key:p.unit_id+'|'+area, pid:u&&u.project_id,
+      place:(u?(u.tower?u.tower+' · ':'')+'Flat '+u.unit_code:'Flat')+' · '+a,
+      can:!!u&&cpaPhUploadAreas().some(x=>x[0]===area),
+      lvl:2, tower:u?String(u.tower||''):'', code:u?String(u.unit_code||''):'', floor:u?cpaFloorOf(u.unit_code):null,
+      areaIdx:Math.max(0,CPA_PH_AREAS.findIndex(x=>x[0]===area))};
+  }
+  if(t==='tower_photos') return {key:p.project_id+'|'+p.tower, pid:p.project_id, place:p.tower||'Block', can:true, lvl:1, tower:String(p.tower||'')};
+  if(t==='project_photos') return {key:String(p.project_id), pid:p.project_id, place:'Whole project', can:true, lvl:0};
+  return {key:t+p.id, pid:p.project_id, place:'Floor '+(p.floor_no||''), can:false};
+}
+window.cpaPhRetake=function(i,isVid){ const it=(CPA_PH.fix||[])[i]; if(it) cpaPhRetakeAt(it.t,it.p,it.place,isVid); };
+// Retake on a rejected row of "Already uploaded".
+const CPA_PH_REJ={};
+function cpaPhRetakeBtn(t,p){
+  if(!cpaPhotosOnly()) return '';
+  const w=cpaPhPlaceOf(t,p); if(!w.can) return '';
+  CPA_PH_REJ[t+':'+p.id]=p;
+  const isVid=(p.file_type||'').indexOf('video')===0;
+  return '<button class="cph-retake" onclick="cpaPhRetakeRow(\''+t+'\','+p.id+','+(isVid?1:0)+')"><i class="fa-solid fa-'+(isVid?'video':'camera')+'"></i> Retake</button>';
+}
+window.cpaPhRetakeRow=function(t,id,isVid){ const p=CPA_PH_REJ[t+':'+id]; if(p) cpaPhRetakeAt(t,p,cpaPhPlaceOf(t,p).place,isVid); };
+/* RETAKE (8 Oct 2026): the camera opens and the new photo is kept in its row - not uploaded - so
+   it can be looked at and retaken again until it is clear. "Upload N photos" at the top of the card
+   sends every retaken photo to its own flat and section in one go (cpaPhRetakeUpload). The upload
+   form below is not touched, so a retake can never go up under another flat. */
+function cpaPhRetakeAt(t,p,place,isVid){
+  CPA_PH.retakes=CPA_PH.retakes||{};
+  const key=t+'|'+cpaPhPlaceOf(t,p).key;
+  // The camera has to open inside this tap - a phone refuses it once the click has been handled.
+  const inp=document.createElement('input');
+  inp.type='file'; inp.accept=isVid?'video/*':'image/*'; inp.setAttribute('capture','environment');
+  inp.onchange=function(){
+    const f=inp.files&&inp.files[0]; if(!f) return;
+    const old=CPA_PH.retakes[key]; if(old&&old.url){ try{ URL.revokeObjectURL(old.url); }catch(_e){} }
+    let url=''; try{ url=URL.createObjectURL(f); }catch(_e){}
+    CPA_PH.retakes[key]={file:f,url,t,p,place,isVid:/^video\//.test(f.type||'')};
+    cpaPhFixRender();
+    toast('Taken for '+place+' — check it, then Upload','ok');
+  };
+  inp.click();
+}
+window.cpaPhRetakeDrop=function(key){
+  const r=(CPA_PH.retakes||{})[key]; if(!r) return;
+  if(r.url){ try{ URL.revokeObjectURL(r.url); }catch(_e){} }
+  delete CPA_PH.retakes[key]; cpaPhFixRender();
+};
+// The retaken photo, full size, before it is uploaded.
+window.cpaPhRetakeView=function(key){
+  const r=(CPA_PH.retakes||{})[key]; if(!r||!r.url) return;
+  const box=document.createElement('div'); box.className='cph-box';
+  box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(r.isVid?'fa-circle-play':'fa-image')+'"></i><span class="nm"><b>New photo</b> · '+esc(r.place)+'</span>'
+    +'<button class="cph-boxx" title="Close (Esc)">&times;</button></div>'
+    +(r.isVid?'<video src="'+r.url+'" controls autoplay playsinline></video>':'<img src="'+r.url+'" alt="">');
+  const shut=()=>{ document.removeEventListener('keydown',onKey); box.remove(); };
+  const onKey=e=>{ if(e.key==='Escape') shut(); };
+  box.onclick=e=>{ if(e.target===box) shut(); };
+  box.querySelector('.cph-boxx').onclick=shut;
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(box);
+};
+// Sends every retaken photo to its own place: made smaller first, a thumbnail, a pending row, the
+// approvers told, and the rejected photo at that place replaced - the same as an ordinary upload.
+window.cpaPhRetakeUpload=async function(){
+  const all=CPA_PH.retakes||{}, keys=Object.keys(all); if(!keys.length) return;
+  const takenOn=($('cphDate')||{}).value||new Date().toISOString().slice(0,10);
+  CPA_PH.fixBusy=new Set(keys); cpaPhFixRender();
+  let ok=0; const failed=[], newIds={};
+  for(const key of keys){
+    const r=all[key], f=r.file, p=r.p, t=r.t;
+    try{
+      const prep=await cphPrepare(f);
+      const name=prep.full!==f?String(f.name||'photo').replace(/\.[^.]*$/,'')+'.jpg':(f.name||'photo');
+      let sk,row;
+      if(t==='unit_photos'){ sk=s3KeyForUnitPhoto(p.unit_id,name); row={unit_id:Number(p.unit_id),area:p.area||'common'}; }
+      else if(t==='tower_photos'){ sk=s3KeyForTowerPhoto(p.project_id,p.tower,name); row={project_id:Number(p.project_id),tower:p.tower}; }
+      else { sk=s3KeyForProjectPhoto(p.project_id,name); row={project_id:Number(p.project_id)}; }
+      const {data,error}=await uploadFileToS3(sk,prep.full);
+      if(error) throw new Error(error.message);
+      let thumbPath=null;
+      if(prep.thumb){ try{ const tu=await uploadFileToS3(cphThumbKey(sk),prep.thumb); if(!tu.error) thumbPath=tu.data.path; }catch(_e){} }
+      const {data:ins,error:insErr}=await sb.schema('cust').from(t).insert(Object.assign(row,{
+        taken_on:takenOn,caption:null,storage_path:data.path,thumb_path:thumbPath,file_name:name,
+        file_size:prep.full.size,file_type:prep.full.type||f.type,uploaded_by:state.email})).select('id').single();
+      if(insErr) throw new Error(insErr.message);
+      (newIds[t]=newIds[t]||[]).push(ins.id);
+      ok++;
+      if(r.url){ try{ URL.revokeObjectURL(r.url); }catch(_e){} }
+      delete all[key];
+    }catch(e){ failed.push(r.place+' — '+((e&&e.message)||e)); }
+    CPA_PH.fixBusy.delete(key); cpaPhFixRender();
+  }
+  let told=0, replaced=0;
+  for(const t of Object.keys(newIds)){
+    try{ const {data:n}=await sb.schema('cust').rpc('notify_media_uploaded',{p_table:t,p_ids:newIds[t]}); told=Math.max(told,Number(n||0)); }catch(_e){}
+    try{ const {data:old}=await sb.schema('cust').rpc('replace_rejected_media',{p_table:t,p_ids:newIds[t]}); replaced+=(old||[]).length; }catch(_e){}
+  }
+  CPA_PH.fixBusy=null;
+  if(ok) toast(ok+' photo'+(ok===1?'':'s')+' uploaded — waiting for approval'+(replaced?' · replaces '+replaced+' rejected':''),'ok');
+  if(failed.length) toast(failed.length+' could not be uploaded (they are kept - try again): '+failed[0],'err');
+  await cpaPhFixList();
+  cpaPhList();
+};
 
 // Latest upload per flat (any status, not deleted) - newest first, so the first row per flat wins.
 async function cpaPhLastUploads(ids){
@@ -21309,13 +22013,13 @@ function cpaPhStaged(){
    Gallery is the multi-select picker. On a computer, capture is ignored and all three open the file
    picker. Every capture goes through cpaPhAdd, so shooting five photos one after another adds five,
    the same as picking five. */
-window.cpaPhPick=function(key,mode,ev){
+window.cpaPhPick=function(key,mode,ev,after){
   if(ev) ev.stopPropagation();
   const inp=document.createElement('input');
   inp.type='file';
   if(mode==='gallery'){ inp.multiple=true; inp.accept='image/*,video/*'; }
   else{ inp.accept=mode==='video'?'video/*':'image/*'; inp.setAttribute('capture','environment'); }
-  inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); };
+  inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); if(after&&inp.files.length) after(); };
   inp.click();
 };
 function cpaPhWireZones(){
@@ -21370,7 +22074,7 @@ function cpaPhRepaintZones(){
 }
 // The two buttons that act on what has been chosen sit together and know how much there is.
 function cpaPhSyncActions(){
-  const keys=CPA_PH.level==='unit'?CPA_PH_AREAS.map(a=>a[0]):['all'];
+  const keys=CPA_PH.level==='unit'?cpaPhUploadAreas().map(a=>a[0]):['all'];
   const total=keys.reduce((t,k)=>t+((CPA_PH.files[k]||[]).length),0);
   const go=$('cphGo'), clr=$('cphClear');
   if(go){
@@ -21406,7 +22110,7 @@ window.cpaPhUpload=async function(){
   if(lvl==='unit'){
     const unitId=Number(CPA_PH.unit);
     if(!unitId){ toast('Choose a flat first','err'); return; }
-    CPA_PH_AREAS.forEach(a=>(CPA_PH.files[a[0]]||[]).forEach(f=>jobs.push({f,area:a[0]})));
+    cpaPhUploadAreas().forEach(a=>(CPA_PH.files[a[0]]||[]).forEach(f=>jobs.push({f,area:a[0]})));
   } else {
     (CPA_PH.files.all||[]).forEach(f=>jobs.push({f,area:null}));
   }
@@ -21419,23 +22123,29 @@ window.cpaPhUpload=async function(){
     const {f,area}=jobs[i];
     go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading '+(i+1)+' of '+jobs.length+'…';
     try{
+      // Made smaller here first (cphPrepare), so a site upload over mobile data takes seconds.
+      const prep=await cphPrepare(f);
+      const name=prep.full!==f?f.name.replace(/\.[^.]*$/,'')+'.jpg':f.name;
       let key,table,row;
       if(lvl==='project'){
-        key=s3KeyForProjectPhoto(CPA_PH.project,f.name); table='project_photos';
+        key=s3KeyForProjectPhoto(CPA_PH.project,name); table='project_photos';
         row={project_id:Number(CPA_PH.project)};
       }else if(lvl==='tower'){
-        key=s3KeyForTowerPhoto(CPA_PH.project,CPA_PH.tower,f.name); table='tower_photos';
+        key=s3KeyForTowerPhoto(CPA_PH.project,CPA_PH.tower,name); table='tower_photos';
         row={project_id:Number(CPA_PH.project),tower:CPA_PH.tower};
       }else{
-        key=s3KeyForUnitPhoto(CPA_PH.unit,f.name); table='unit_photos';
+        key=s3KeyForUnitPhoto(CPA_PH.unit,name); table='unit_photos';
         row={unit_id:Number(CPA_PH.unit),area:area};
       }
-      const {data,error}=await uploadFileToS3(key,f);
+      const {data,error}=await uploadFileToS3(key,prep.full);
       if(error) throw new Error(error.message);
+      // A thumbnail that fails to go up is not worth failing the photo for - one is made later.
+      let thumbPath=null;
+      if(prep.thumb){ try{ const tu=await uploadFileToS3(cphThumbKey(key),prep.thumb); if(!tu.error) thumbPath=tu.data.path; }catch(_e){} }
       // Stored as 'pending' whatever is sent - the database sets that (media_status_guard).
       const {data:ins,error:insErr}=await sb.schema('cust').from(table).insert(Object.assign(row,{
-        taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,
-        file_size:f.size,file_type:f.type,uploaded_by:state.email})).select('id').single();
+        taken_on:takenOn,caption,storage_path:data.path,thumb_path:thumbPath,file_name:name,
+        file_size:prep.full.size,file_type:prep.full.type||f.type,uploaded_by:state.email})).select('id').single();
       if(insErr) throw new Error(insErr.message);
       (newIds[table]=newIds[table]||[]).push(ins.id);
       ok++;
@@ -21446,13 +22156,21 @@ window.cpaPhUpload=async function(){
      again, instead of being quietly dropped along with the ones that worked. */
   if(!failed.length) cpaPhClear(); else cpaPhRepaintZones();
   // One notification per batch to the approvers, not one per file.
-  let told=0;
+  let told=0, replaced=0;
   for(const t of Object.keys(newIds)){
     try{ const {data:n}=await sb.schema('cust').rpc('notify_media_uploaded',{p_table:t,p_ids:newIds[t]}); told=Math.max(told,Number(n||0)); }catch(_e){}
+    // What was rejected at the same place (flat and section, block, or project) is replaced by
+    // these. Only the rows leave the screens - photo files are never deleted from S3.
+    try{
+      const {data:old}=await sb.schema('cust').rpc('replace_rejected_media',{p_table:t,p_ids:newIds[t]});
+      replaced+=(old||[]).length;
+    }catch(_e){}
   }
-  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded — waiting for approval'+(told?'':'. No photo approver is set up yet (Control Panel).'),told?'ok':'warn');
+  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded — waiting for approval'+(replaced?' · replaces '+replaced+' rejected':'')+(told?'':'. No photo approver is set up yet (Control Panel).'),told?'ok':'warn');
   if(failed.length) toast(failed.length+' could not be uploaded: '+failed[0],'err');
   cpaPhList();
+  // What was replaced leaves "Photos to retake" at once - no page refresh.
+  await cpaPhFixList();
 };
 
 /* What is already there, as thumbnails rather than a table of 52px squares. At flat level it is
@@ -21491,7 +22209,11 @@ async function cpaPhList(){
     if(lvl!=='project') bar+=sel('tower','Block',towers.map(t=>[t,t]),CPA_PHF.tower,'All blocks');
     if(lvl==='unit'){
       bar+=sel('unit','Flat',flats.map(u=>[u.id,u.unit_code]),CPA_PHF.unit,'All flats');
-      bar+=sel('area','Section',CPA_PH_AREAS.map(x=>[x[0],x[1]]),CPA_PHF.area,'All sections');
+      // Only the sections this person uploads to: a photos-only account has no Bathroom, so it is
+      // neither offered here nor listed below (6 Oct 2026).
+      const areas=cpaPhUploadAreas();
+      if(CPA_PHF.area&&!areas.some(x=>x[0]===CPA_PHF.area)) CPA_PHF.area='';
+      bar+=sel('area','Section',areas.map(x=>[x[0],x[1]]),CPA_PHF.area,'All sections');
     }
     bar+='<span class="cph-fcount" id="cphCount"></span></div>';
 
@@ -21520,6 +22242,11 @@ async function cpaPhList(){
       }else{
         let q=sb.schema('cust').from('unit_photos').select('*').in('unit_id',ids);
         if(CPA_PHF.area) q=q.eq('area',CPA_PHF.area);
+        else if(cpaPhUploadAreas().length<CPA_PH_AREAS.length){
+          // An unset section counts as Common area, so it stays in.
+          const ok=cpaPhUploadAreas().map(x=>x[0]);
+          q=q.or('area.is.null,area.in.('+ok.join(',')+')');
+        }
         const {data}=await q.is('deleted_at',null).order('taken_on',{ascending:false});
         const list=data||[]; count=list.length;
         const byId={}; live.forEach(u=>{byId[u.id]=u;});
@@ -21554,7 +22281,10 @@ function cphPump(){
   while(cphBusy<6&&cphQ.length){
     const img=cphQ.shift(); if(!img.isConnected) continue;
     cphBusy++;
-    cphSignedUrl(img.getAttribute('data-ph')).then(u=>{ if(u){ img.src=u; } else img.classList.add('cph-noimg'); })
+    // onerror: a file that is no longer in S3 (rejected before 5 Oct 2026 files were kept) shows
+    // as missing rather than as a broken image.
+    cphSignedUrl(img.getAttribute('data-ph')).then(u=>{ if(u){ img.onerror=()=>img.classList.add('cph-noimg');
+        img.onload=()=>{ const bf=img.getAttribute('data-bf'); if(bf) cphBackfill(bf); }; img.src=u; } else img.classList.add('cph-noimg'); })
       .catch(()=>img.classList.add('cph-noimg')).finally(()=>{ cphBusy--; cphPump(); });
   }
 }
@@ -21564,6 +22294,122 @@ function cphLazy(root){
   if(!cphIO) cphIO=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting){ cphIO.unobserve(e.target); cphQ.push(e.target); cphPump(); } }),{rootMargin:'300px 0px'});
   imgs.forEach(i=>cphIO.observe(i));
 }
+/* PHOTOS ARE MADE SMALLER ON THE PHONE, AND EACH GETS A THUMBNAIL (5 Oct 2026).
+
+   A phone photo is 4-8 MB and 4000px wide; nobody - customer or approver - looks at it larger than
+   a screen. Before upload it is redrawn at most 2560px on its long side (JPEG, quality 0.85: about
+   0.4-0.8 MB, no visible loss at screen size) plus a 480px thumbnail, and lists show the thumbnail.
+   The original is kept as taken when it is already smaller, or when the browser cannot read it
+   (some HEIC). Videos go up as they are, with a thumbnail from a frame at about one second. */
+const CPH_FULL=2560, CPH_THUMB=480;
+async function cphDecode(blob){
+  if(window.createImageBitmap){ try{ return await createImageBitmap(blob,{imageOrientation:'from-image'}); }catch(_e){} }
+  return await new Promise((res,rej)=>{ const u=URL.createObjectURL(blob); const im=new Image();
+    im.onload=()=>{ URL.revokeObjectURL(u); res(im); }; im.onerror=()=>{ URL.revokeObjectURL(u); rej(new Error('Could not read the image')); }; im.src=u; });
+}
+function cphJpeg(src,w,h,max,q){
+  if(!w||!h) return Promise.resolve(null);
+  const k=Math.min(1,max/Math.max(w,h)), cw=Math.max(1,Math.round(w*k)), ch=Math.max(1,Math.round(h*k));
+  const c=document.createElement('canvas'); c.width=cw; c.height=ch;
+  const g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,cw,ch); g.drawImage(src,0,0,cw,ch);
+  return new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',q));
+}
+// A frame from a video (a local file, or a signed S3 address for one already uploaded).
+function cphVideoFrame(src,local){
+  return new Promise(res=>{
+    const v=document.createElement('video'); v.muted=true; v.playsInline=true; v.preload='auto';
+    if(!local) v.crossOrigin='anonymous';
+    let done=false;
+    const fin=b=>{ if(done) return; done=true; clearTimeout(tm); if(local) URL.revokeObjectURL(src); try{ v.removeAttribute('src'); v.load(); }catch(_e){} res(b||null); };
+    const tm=setTimeout(()=>fin(null),12000);
+    v.onloadedmetadata=()=>{ try{ v.currentTime=Math.min(1,(v.duration||2)/2); }catch(_e){ fin(null); } };
+    v.onseeked=()=>{ cphJpeg(v,v.videoWidth,v.videoHeight,CPH_THUMB,0.72).then(fin,()=>fin(null)); };
+    v.onerror=()=>fin(null);
+    v.src=src;
+  });
+}
+// -> {full, thumb}: what to upload, and its thumbnail (null when none could be made).
+async function cphPrepare(file){
+  const t=file.type||'';
+  if(/^video\//.test(t)) return {full:file,thumb:await cphVideoFrame(URL.createObjectURL(file),true)};
+  if(!/^image\//.test(t)||/gif|svg/.test(t)) return {full:file,thumb:null};
+  try{
+    const im=await cphDecode(file); const w=im.width||im.naturalWidth, h=im.height||im.naturalHeight;
+    const big=await cphJpeg(im,w,h,CPH_FULL,0.85), thumb=await cphJpeg(im,w,h,CPH_THUMB,0.72);
+    if(im.close) im.close();
+    return {full:(big&&big.size<file.size)?big:file,thumb};
+  }catch(_e){ return {full:file,thumb:null}; }
+}
+// customer-portal/units/9/photos/123_a.png -> customer-portal/units/9/photos/thumbs/123_a.jpg
+function cphThumbKey(key){ return key.replace(/\/([^\/]+)$/,(m,n)=>'/thumbs/'+n.replace(/\.[^.]*$/,'')+'.jpg'); }
+
+/* Photos uploaded before thumbnails existed get one the first time a staff screen shows them: the
+   full file is read once more, shrunk here, and the thumbnail saved (cust.set_media_thumb). One at a
+   time, after the list itself has loaded, and at most once per photo per visit. Photos only - a
+   video frame from S3 is left to the next upload. */
+const cphBfQ=[], cphBfSeen=new Set(); let cphBfBusy=false;
+function cphBackfill(spec){ if(!spec||cphBfSeen.has(spec)) return; cphBfSeen.add(spec); cphBfQ.push(spec); cphBfPump(); }
+async function cphBfPump(){
+  if(cphBfBusy) return; const spec=cphBfQ.shift(); if(!spec) return; cphBfBusy=true;
+  try{
+    const i=spec.indexOf(':'), j=spec.indexOf(':',i+1);
+    const table=spec.slice(0,i), id=Number(spec.slice(i+1,j)), path=spec.slice(j+1);
+    const key=path.slice(3);
+    const {data,error}=await s3Sign('get',key);
+    if(!error&&data){
+      const r=await fetch(data.url);
+      if(r.ok){
+        const im=await cphDecode(await r.blob());
+        const thumb=await cphJpeg(im,im.width||im.naturalWidth,im.height||im.naturalHeight,CPH_THUMB,0.72);
+        if(im.close) im.close();
+        if(thumb){
+          const up=await uploadFileToS3(cphThumbKey(key),thumb);
+          if(!up.error) await sb.schema('cust').rpc('set_media_thumb',{p_table:table,p_id:id,p_thumb:up.data.path});
+        }
+      }
+    }
+  }catch(_e){}
+  cphBfBusy=false; setTimeout(cphBfPump,150);
+}
+/* FULL-SIZE VIEWS OPEN AT ONCE (8 Oct 2026). Most photos uploaded before 5 Oct are the phone's
+   original, several MB, and over site mobile data the view sat on a spinner. The thumbnail - already
+   signed and loaded for the list - is shown straight away (cphFullInto), the full photo takes its
+   place when it has arrived, and the photos either side are fetched ahead (cphPreload) so the
+   arrows do not wait either. */
+const cphPreloaded=new Map();
+function cphPreload(ph){
+  if(!ph||!ph.storage_path||cphPreloaded.has(ph.storage_path)) return;
+  if((ph.file_type||'').indexOf('video')===0) return;
+  cphPreloaded.set(ph.storage_path,true);
+  cphSignedUrl(ph.storage_path).then(u=>{ if(u){ const im=new Image(); im.decoding='async'; im.src=u; cphPreloaded.set(ph.storage_path,im); } });
+}
+async function cphFullInto(stage,box,ph){
+  const isVid=(ph.file_type||'').indexOf('video')===0;
+  if(!isVid&&ph.thumb_path){
+    const tu=await cphSignedUrl(ph.thumb_path);
+    if(tu&&box.isConnected&&!stage.querySelector('img.cph-full'))
+      stage.innerHTML='<img src="'+tu+'" alt=""><div class="cph-pvhint"><i class="fa-solid fa-spinner fa-spin"></i> Loading full photo…</div>';
+  }
+  const url=await cphSignedUrl(ph.storage_path);
+  if(!box.isConnected) return;
+  if(!url){ if(!stage.querySelector('img')) stage.innerHTML='<div class="cph-pvload">File not available</div>'; return; }
+  if(isVid){ stage.innerHTML='<video src="'+url+'" controls autoplay playsinline></video>'; return; }
+  const pre=cphPreloaded.get(ph.storage_path);
+  const full=(pre&&pre.complete&&pre.naturalWidth)?pre:new Image();
+  full.className='cph-full'; full.alt='';
+  const show=()=>{ if(box.isConnected){ stage.innerHTML=''; stage.appendChild(full); } };
+  if(full.complete&&full.naturalWidth){ show(); return; }
+  full.onload=show;
+  full.onerror=()=>{ if(box.isConnected){ const h=stage.querySelector('.cph-pvhint'); if(h) h.remove(); if(!stage.querySelector('img')) stage.innerHTML='<div class="cph-pvload">File not available</div>'; } };
+  full.src=url;
+}
+// The image a list shows for a photo: its thumbnail, or the full file for one that has none yet
+// (data-bf asks for a thumbnail to be made once it has loaded).
+function cphThumbAttrs(p,table){
+  const isVideo=(p.file_type||'').indexOf('video')===0;
+  return 'data-ph="'+esc(p.thumb_path||p.storage_path)+'"'
+    +(!p.thumb_path&&!isVideo&&table?' data-bf="'+esc(table+':'+p.id+':'+p.storage_path)+'"':'');
+}
 // `cols` names the middle columns and `vals` fills them for one row, so the three levels share
 // one table rather than three that could drift apart.
 async function cpaPhRows(list,table,cols,vals,emptyMsg){
@@ -21572,13 +22418,12 @@ async function cpaPhRows(list,table,cols,vals,emptyMsg){
     const isVideo=(p.file_type||'').indexOf('video')===0;
     const open="s3OpenSigned('"+p.storage_path.replace(/'/g,"\\'")+"')";
     let thumb;
-    // A rejected file has been removed from S3 - there is nothing to show or open.
-    if(p.status==='rejected'){ thumb='<div class="cph-th vid" title="File removed when it was rejected"><i class="fa-solid fa-ban"></i></div>'; }
+    if(isVideo&&p.thumb_path){ thumb='<span class="cph-vth" onclick="'+open+'" title="Open video"><img class="cph-th" '+cphThumbAttrs(p,table)+' alt="" decoding="async"><i class="fa-solid fa-circle-play"></i></span>'; }
     else if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
-    else thumb='<img class="cph-th" data-ph="'+esc(p.storage_path)+'" alt="" decoding="async" onclick="'+open+'" title="Open full size">';
+    else thumb='<img class="cph-th" '+cphThumbAttrs(p,table)+' alt="" decoding="async" onclick="'+open+'" title="Open full size">';
     return '<tr><td>'+thumb+'</td>'
       +'<td class="cph-when">'+esc(fmtDate(p.taken_on))+'</td>'
-      +'<td>'+cpaMediaStatusTag(p)+'</td>'
+      +'<td>'+cpaMediaStatusTag(p)+(p.status==='rejected'?cpaPhRetakeBtn(table,p):'')+'</td>'
       +vals(p).map(v=>'<td>'+v+'</td>').join('')
       +'<td style="text-align:right"><button class="cph-rm" title="Remove from the customer portal" '
         +'onclick="cpaPhDelete(\''+table+'\','+p.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>';
@@ -21593,7 +22438,7 @@ function cpaMediaStatusTag(p){
   const who=p.reviewed_by&&p.status!=='pending'&&!/^already live/.test(p.reviewed_by)?' by '+String(p.reviewed_by).split('@')[0]:'';
   return '<span class="tag '+s[1]+'" style="white-space:nowrap" title="'+esc(s[0]+who+(p.reviewed_at?' · '+fmtDate(p.reviewed_at):''))+'">'
     +'<i class="fa-solid '+s[2]+'"></i> '+esc(s[0])+'</span>'
-    +(p.status==='rejected'&&p.review_note?'<div class="cph-why">'+esc(p.review_note)+'</div>':'');
+    +(p.status==='rejected'?'<div class="cph-why">'+(p.review_note?esc(p.review_note)+' · ':'')+'Upload a new one to replace it</div>':'');
 }
 window.cpaPhDelete=async function(table,id){
   if(!await confirmDialog('Remove this from the customer portal? The customer will no longer see it.',
@@ -21606,8 +22451,8 @@ window.cpaPhDelete=async function(table,id){
 /* ---------- Photos & Videos > Review: publish or reject before customers see anything ----------
    Split the way things are uploaded - Projects (whole-project photos), Blocks, Flats - and within
    that grouped by where they are, so a whole flat or block can be published in one go. Approve,
-   reject (a reason is required; the uploader is told it, and the file is removed from S3) and
-   unpublish all go through cust.review_media(), which also refuses an approver's own uploads. */
+   reject (one click; the file is kept, a rejected photo can still be published, and the
+   uploader's next photo for the same place replaces it) and unpublish all go through cust.review_media(), which also refuses an approver's own uploads. */
 /* Everything waiting, counted per project, per section and per block, so the pickers can say where
    the work is. (5 Oct 2026: Review opened on the first project alphabetically, Dream Ananta, while
    all 262 waiting photos were Dream Gurukul flats - the screen read "nothing waiting".) */
@@ -21625,6 +22470,28 @@ async function cpaRvPending(units){
   up.forEach(r=>{ const u=unitOf[r.unit_id]; if(u) add(u.project_id,'unit_photos',u.tower); });
   return out;
 }
+/* How many photos and videos are waiting / approved (published) / rejected / unpublished, for one
+   project - one section of it, or all three - and optionally one block (7 Oct 2026). Counted in the
+   database (head requests), so nothing is downloaded to count it. */
+const CPA_COUNT_KEYS=['pending','published','rejected','unpublished'];
+async function cpaMediaCounts(projectId,units,secs,tower){
+  const pid=Number(projectId), out={pending:0,published:0,rejected:0,unpublished:0};
+  if(!pid) return out;
+  const unitIds=(units||[]).filter(u=>u.status!=='cancelled'&&String(u.project_id)===String(pid)&&(!tower||u.tower===tower)).map(u=>u.id);
+  const jobs=[];
+  (secs||CPA_RV_SECS.map(x=>x[0])).forEach(function(t){
+    CPA_COUNT_KEYS.forEach(function(st){
+      let q=sb.schema('cust').from(t).select('id',{count:'exact',head:true}).eq('status',st).is('deleted_at',null);
+      if(t==='unit_photos'){ if(!unitIds.length) return; q=q.in('unit_id',unitIds); }
+      else { q=q.eq('project_id',pid); if(t==='tower_photos'&&tower) q=q.eq('tower',tower); }
+      jobs.push(q.then(r=>{ out[st]+=(r&&r.count)||0; },()=>{}));
+    });
+  });
+  await Promise.all(jobs);
+  return out;
+}
+const CPA_COUNT_LABEL={pending:['Waiting','fa-hourglass-half','#d97706'],published:['Approved','fa-circle-check','#16a34a'],
+  rejected:['Rejected','fa-circle-xmark','#dc2626'],unpublished:['Unpublished','fa-eye-slash','#64748b']};
 // The section of a project that has the most waiting, or the current one if nothing is waiting.
 function cpaRvBusiestSec(p){
   if(!p||!p.total) return CPA_RV.sec;
@@ -21652,6 +22519,8 @@ async function cpaRvPaint(projects,units){
   const waitTxt=n=>n?' ('+n+' waiting)':'';
   const projOpts=projects.map(p=>[p.id,p.name+waitTxt((pend[p.id]||{}).total)]);
   const towerOpts=towers.map(t=>{ const c=(pp.towers&&pp.towers[t])||{}; return [t,t+waitTxt(c[CPA_RV.sec]||0)]; });
+  const rvCounts=await cpaMediaCounts(CPA_RV.project,units,[CPA_RV.sec],CPA_RV.sec==='project_photos'?'':CPA_RV.tower);
+  if(!$('cphWrap')) return;
   const sel=(id,label,opts,val,allLabel)=>'<div class="cph-f"><label>'+esc(label)+'</label><div class="cph-sel"><select onchange="cpaRvSet(\''+id+'\',this.value)">'
     +(allLabel?'<option value=""'+(val?'':' selected')+'>'+esc(allLabel)+'</option>':'')
     +opts.map(o=>'<option value="'+esc(o[0])+'"'+(String(o[0])===String(val)?' selected':'')+'>'+esc(o[1])+'</option>').join('')+'</select></div></div>';
@@ -21664,8 +22533,12 @@ async function cpaRvPaint(projects,units){
       +'<div class="cph-filters" style="margin:0">'
         +sel('project','Project',projOpts,CPA_RV.project,'')
         +(CPA_RV.sec!=='project_photos'?sel('tower','Block',towerOpts,CPA_RV.tower,'All blocks'):'')
-        +sel('status','Showing',Object.keys(CPA_MEDIA_STATUS).map(k=>[k,CPA_MEDIA_STATUS[k][0]]),CPA_RV.status,'')
+        +sel('status','Showing',Object.keys(CPA_MEDIA_STATUS).map(k=>[k,CPA_MEDIA_STATUS[k][0]+(rvCounts[k]!=null?' ('+rvCounts[k]+')':'')]),CPA_RV.status,'')
       +'</div>'
+      // Tap a tile to see those: the counts are for the project, section and block chosen above.
+      +'<div class="cph-cnts">'+CPA_COUNT_KEYS.map(k=>{ const L=CPA_COUNT_LABEL[k];
+          return '<button class="cph-cnt'+(CPA_RV.status===k?' on':'')+'" style="--c:'+L[2]+'" onclick="cpaRvSet(\'status\',\''+k+'\')">'
+            +'<i class="fa-solid '+L[1]+'"></i><b>'+(rvCounts[k]||0)+'</b><span>'+L[0]+'</span></button>'; }).join('')+'</div>'
     +'</div>'
     +'<div class="cph-card"><div class="cph-rvbar" id="cphRvBar"></div><div id="cphRvList"><div class="cph-empty">Loading…</div></div></div>';
   cpaPhFillBadge();
@@ -21721,7 +22594,7 @@ async function cpaRvList(projUnits){
     CPA_RV.order=keys.flatMap(k=>groups[k].items.map(p=>p.id));   // the preview's arrows follow this
     const cards=await Promise.all(list.map(p=>cpaRvCard(p,t)));
     const cardOf={}; list.forEach((p,i)=>{cardOf[p.id]=cards[i];});
-    const canPublish=CPA_RV.status==='pending'||CPA_RV.status==='unpublished';
+    const canPublish=CPA_RV.status!=='published';
     const me=String(state.email||'').toLowerCase();
     host.innerHTML=keys.map(k=>{
       const g=groups[k];
@@ -21729,7 +22602,7 @@ async function cpaRvList(projUnits){
       const ids=g.items.filter(p=>state.super||String(p.uploaded_by||'').toLowerCase()!==me).map(p=>p.id);
       return '<div class="cph-rvg"><div class="cph-rvgh"><b>'+esc(g.label)+'</b><span>'+g.items.length+' item'+(g.items.length===1?'':'s')+'</span>'
         +(canPublish&&ids.length?'<button class="btn btn-sm" onclick="cpaRvDecide(\'publish\','+JSON.stringify(ids)+')"><i class="fa-solid fa-check"></i> Publish all '+ids.length+'</button>':'')
-        +(ids.length&&CPA_RV.status!=='rejected'?'<button class="btn btn-sm" data-tick-ids="'+JSON.stringify(ids)+'" onclick="cpaRvTick('+JSON.stringify(ids)+')"><i class="fa-regular fa-square-check"></i> Tick all</button>':'')+'</div>'
+        +(ids.length?'<button class="btn btn-sm" data-tick-ids="'+JSON.stringify(ids)+'" onclick="cpaRvTick('+JSON.stringify(ids)+')"><i class="fa-regular fa-square-check"></i> Tick all</button>':'')+'</div>'
         +'<div class="cph-rvgrid">'+g.items.map(p=>cardOf[p.id]).join('')+'</div></div>';
     }).join('')
       +(list.length>=240?'<div class="cph-empty">Showing the newest 240. Publish or reject these to see the rest.</div>':'');
@@ -21743,9 +22616,9 @@ async function cpaRvCard(p,t){
   const open="s3OpenSigned('"+String(p.storage_path||'').replace(/'/g,"\\'")+"')";
   let media;
   const prev='cpaRvPreview('+p.id+')';
-  if(p.status==='rejected') media='<div class="cph-rvm vid"><i class="fa-solid fa-ban"></i><span>File removed</span></div>';
+  if(isVideo&&p.thumb_path) media='<span class="cph-vth" onclick="'+prev+'" title="Play video"><img class="cph-rvm" '+cphThumbAttrs(p,t)+' alt="" decoding="async"><i class="fa-solid fa-circle-play"></i></span>';
   else if(isVideo) media='<div class="cph-rvm vid" onclick="'+prev+'" title="Play video"><i class="fa-solid fa-circle-play"></i><span>Video</span></div>';
-  else media='<img class="cph-rvm" data-ph="'+esc(p.storage_path)+'" alt="" decoding="async" onclick="'+prev+'" title="Open larger, with Publish / Reject">';
+  else media='<img class="cph-rvm" '+cphThumbAttrs(p,t)+' alt="" decoding="async" onclick="'+prev+'" title="Open larger, with Publish / Reject">';
   const area=t==='unit_photos'?((CPA_PH_AREAS.find(a=>a[0]===(p.area||'common'))||[0,p.area])[1]):'';
   const mine=String(p.uploaded_by||'').toLowerCase()===String(state.email||'').toLowerCase()&&!state.super;
   const on=CPA_RV.sel.has(p.id);
@@ -21754,12 +22627,14 @@ async function cpaRvCard(p,t){
   if(mine) acts='<span class="cph-mine" title="Another approver has to review your own uploads">Your upload</span>';
   else if(p.status==='pending'||p.status==='unpublished')
     acts='<button class="cph-ok" onclick="cpaRvDecide(\'publish\','+id+')" title="Publish - customers will see it"><i class="fa-solid fa-check"></i></button>'
-        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject - tell the uploader why"><i class="fa-solid fa-xmark"></i></button>';
+        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject - the uploader is asked for a better one"><i class="fa-solid fa-xmark"></i></button>';
   else if(p.status==='published')
     acts='<button class="cph-un" onclick="cpaRvDecide(\'unpublish\','+id+')" title="Unpublish - hide it from customers again"><i class="fa-solid fa-eye-slash"></i></button>'
-        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject and remove the file"><i class="fa-solid fa-xmark"></i></button>';
+        +'<button class="cph-no" onclick="cpaRvDecide(\'reject\','+id+')" title="Reject - hide it and ask the uploader for a better one"><i class="fa-solid fa-xmark"></i></button>';
+  else if(p.status==='rejected')
+    acts='<button class="cph-ok" onclick="cpaRvDecide(\'publish\','+id+')" title="Publish after all - customers will see it"><i class="fa-solid fa-check"></i></button>';
   return '<div class="cph-rvc'+(on?' cph-picked':'')+'" data-id="'+p.id+'">'
-    +(p.status!=='rejected'&&!mine?'<label class="cph-rvck"><input type="checkbox" '+(on?'checked':'')+' onchange="cpaRvToggle('+p.id+',this.checked)"></label>':'')
+    +(!mine?'<label class="cph-rvck"><input type="checkbox" '+(on?'checked':'')+' onchange="cpaRvToggle('+p.id+',this.checked)"></label>':'')
     +media
     +'<div class="cph-rvi"><div class="cph-rvd">'+esc(fmtDate(p.taken_on))+(area?' · '+esc(area):'')+'</div>'
       +'<div class="cph-rvu" title="'+esc(p.uploaded_by||'')+'">'+esc(String(p.uploaded_by||'').split('@')[0])+'</div>'
@@ -21772,7 +22647,7 @@ function cpaRvBar(){
   const n=CPA_RV.sel.size, st=CPA_RV.status;
   const ids=JSON.stringify([...CPA_RV.sel]);
   bar.innerHTML='<span class="cph-fcount">'+(n?n+' ticked':'Tick photos to act on several at once')+'</span>'
-    +(n?((st==='pending'||st==='unpublished')?'<button class="btn btn-sm btn-primary" onclick="cpaRvDecide(\'publish\','+ids+')"><i class="fa-solid fa-check"></i> Publish '+n+'</button>':'')
+    +(n?(st!=='published'?'<button class="btn btn-sm btn-primary" onclick="cpaRvDecide(\'publish\','+ids+')"><i class="fa-solid fa-check"></i> Publish '+n+'</button>':'')
       +(st==='published'?'<button class="btn btn-sm" onclick="cpaRvDecide(\'unpublish\','+ids+')"><i class="fa-solid fa-eye-slash"></i> Unpublish '+n+'</button>':'')
       +(st!=='rejected'?'<button class="btn btn-sm btn-danger" onclick="cpaRvDecide(\'reject\','+ids+')"><i class="fa-solid fa-xmark"></i> Reject '+n+'</button>':'')
       +'<button class="btn btn-sm" onclick="cpaRvClearSel()">Clear</button>':'');
@@ -21831,7 +22706,7 @@ window.cpaRvPreview=async function(id){
   else if(p.status==='published')
     acts='<button class="cph-pvbtn un" onclick="cpaRvPvDecide(\'unpublish\','+p.id+')"><i class="fa-solid fa-eye-slash"></i> Unpublish</button>'
         +'<button class="cph-pvbtn no" onclick="cpaRvPvDecide(\'reject\','+p.id+')"><i class="fa-solid fa-xmark"></i> Reject</button>';
-  else acts='<span class="cph-pvnote">Rejected'+(p.review_note?': '+esc(p.review_note):'')+'</span>';
+  else acts='<button class="cph-pvbtn ok" onclick="cpaRvPvDecide(\'publish\','+p.id+')"><i class="fa-solid fa-check"></i> Publish after all</button>';
   const box=document.createElement('div');
   box.className='cph-box cph-pv'; box.id='cphPv';
   box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
@@ -21840,8 +22715,8 @@ window.cpaRvPreview=async function(id){
       +'<button class="cph-boxx" title="Close (Esc)" onclick="cpaRvPreviewClose()">&times;</button></div>'
     +(i>0?'<button class="cph-pvnav l" title="Previous (←)" onclick="cpaRvPreviewStep(-1)"><i class="fa-solid fa-chevron-left"></i></button>':'')
     +(i<order.length-1?'<button class="cph-pvnav r" title="Next (→)" onclick="cpaRvPreviewStep(1)"><i class="fa-solid fa-chevron-right"></i></button>':'')
-    +'<div class="cph-pvstage"><div class="cph-pvload"><i class="fa-solid fa-spinner fa-spin"></i></div></div>'
-    +'<div class="cph-pvacts">'+acts+'</div>';
+    +'<div class="cph-pvacts">'+acts+'</div>'
+    +'<div class="cph-pvstage"><div class="cph-pvload"><i class="fa-solid fa-spinner fa-spin"></i></div></div>';
   box.onclick=function(e){ if(e.target===box) cpaRvPreviewClose(); };
   document.body.appendChild(box);
   CPA_RV.pvId=p.id;
@@ -21852,10 +22727,11 @@ window.cpaRvPreview=async function(id){
       else if(e.key==='ArrowRight') cpaRvPreviewStep(1);
       else if(e.key==='ArrowLeft') cpaRvPreviewStep(-1);
     }); }
-  const url=p.status==='rejected'?null:await cphSignedUrl(p.storage_path);
-  const stage=box.querySelector('.cph-pvstage'); if(!stage||!box.isConnected) return;
-  stage.innerHTML=!url?'<div class="cph-pvload">File not available</div>'
-    :isVid?'<video src="'+url+'" controls autoplay playsinline></video>':'<img src="'+url+'" alt="">';
+  // The thumbnail at once, the full photo when it has arrived, and the next ones fetched ahead.
+  const stage=box.querySelector('.cph-pvstage'); if(!stage) return;
+  const shownList=CPA_RV.shown||[], byId=id=>shownList.find(x=>x.id===id);
+  cphPreload(byId(order[i+1])); cphPreload(byId(order[i+2])); cphPreload(byId(order[i-1]));
+  await cphFullInto(stage,box,p);
 };
 window.cpaRvPreviewClose=function(){ const b=$('cphPv'); if(b) b.remove(); };
 window.cpaRvPreviewStep=function(d){
@@ -21870,34 +22746,18 @@ window.cpaRvPvDecide=function(decision,id){
   cpaRvPreviewClose();
   cpaRvDecide(decision,[id],true);
 };
-const CPA_RV_REASONS=['Blurred or out of focus','Wrong flat or block','Too dark','Not a construction photo','Duplicate','Shows people or private information'];
+// Reject is one click. Nothing is lost by it: the file stays, the photo can still be published
+// from 'Rejected', and the uploader's next photo for the same place replaces it.
 window.cpaRvDecide=function(decision,ids,fromPreview){
   if(!fromPreview) CPA_RV.pvNext=null;
   ids=(ids||[]).filter(Boolean);
   if(!ids.length) return;
-  if(decision!=='reject'){ cpaRvDo(decision,ids,null); return; }
-  const n=ids.length;
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-circle-xmark" style="color:var(--err)"></i> Reject '+n+' item'+(n===1?'':'s')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm"><p style="margin:0 0 8px;font-size:13px;color:var(--slate)">The uploader is told this reason in their notifications, and the file'+(n===1?' is':'s are')+' removed. Customers never see '+(n===1?'it':'them')+'.</p>'
-    +'<div class="cph-reasons">'+CPA_RV_REASONS.map(r=>'<button type="button" class="cph-reason" onclick="$(\'cphRvWhy\').value=this.textContent;$(\'cphRvWhy\').focus()">'+esc(r)+'</button>').join('')+'</div>'
-    +'<label>Reason</label><textarea id="cphRvWhy" rows="3" maxlength="300" placeholder="What should be fixed?"></textarea></div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
-    +'<button class="btn btn-danger-solid" id="cphRvGo" onclick="cpaRvRejectGo('+JSON.stringify(ids)+')"><i class="fa-solid fa-xmark"></i> Reject</button></div>');
-  setTimeout(()=>{const t=$('cphRvWhy'); if(t) t.focus();},60);
-};
-window.cpaRvRejectGo=async function(ids){
-  const why=($('cphRvWhy')||{}).value||'';
-  if(!why.trim()){ toast('Please give a reason','err'); return; }
-  const b=$('cphRvGo'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Rejecting…'; }
-  closeModal();
-  await cpaRvDo('reject',ids,why.trim());
+  cpaRvDo(decision,ids,null);
 };
 async function cpaRvDo(decision,ids,note){
   const {data,error}=await sb.schema('cust').rpc('review_media',{p_table:CPA_RV.sec,p_ids:ids,p_decision:decision,p_note:note});
   if(error){ toast(error.message,'err'); return; }
   const done=data||[];
-  // A rejected file is not kept: remove it from S3 (the row stays, so the uploader can see why).
-  if(decision==='reject') await Promise.all(done.map(r=>r.storage_path?s3Delete(r.storage_path).catch(()=>null):null));
   const skipped=ids.length-done.length;
   const verb={publish:'published',reject:'rejected',unpublish:'unpublished'}[decision];
   toast(done.length+' '+verb+(skipped?' · '+skipped+' skipped (your own uploads, or already changed)':''),skipped&&!done.length?'warn':'ok');
@@ -22166,29 +23026,70 @@ function supportStatusTag(t){
   const label=t.zoho_status||(t.zoho_ticket_id?t.status:'Not yet in Zoho');
   return `<span class="tag ${cls}">${esc(label)}</span>`;
 }
+/* Admin Support list, filtered by Zoho status, how the ticket came in, and a search over subject,
+   customer and ticket number. All three filter the list already loaded, so changing one is instant. */
+let CPA_SUP={rows:null,status:'',via:'',q:''};
 async function cpaRenderSupport(host){
-  const {data}=await sb.schema('cust').from('support_tickets').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
-  const ticketIds=(data||[]).map(t=>t.id);
-  const {data:atts}=ticketIds.length?await sb.schema('cust').from('support_ticket_attachments').select('*').in('ticket_id',ticketIds).is('deleted_at',null):{data:[]};
-  const attsByTicket={};(atts||[]).forEach(a=>{(attsByTicket[a.ticket_id]=attsByTicket[a.ticket_id]||[]).push(a);});
-  const rows=(data||[]).map(t=>[esc((t.units&&t.units.unit_code)||'—'),esc(t.subject),esc(t.zoho_ticket_number||'—'),
-    supportStatusTag(t),
-    (attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}${a.zoho_attachment_id?' (in Zoho)':' (not in Zoho)'}"><i class="fa-solid fa-paperclip"></i></button>`).join(' ')||'—',
-    fmtDate(t.created_at),
-    (t.zoho_ticket_id?`<button class="btn btn-sm" onclick="cpaTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button> <button class="btn btn-sm" onclick="cpaSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="cpaRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`)]);
-  host.innerHTML=(rows.length?cpaTable(['Unit','Subject','Zoho #','Status','Attachments','Raised','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>')+
-    '<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself; "Refresh" pulls its current status and conversation back here. Attachment icons show whether that file made it to the Zoho ticket yet — "Retry" also re-attempts any that didn\'t.</div>';
+  const {data}=await sb.schema('cust').from('support_tickets').select('*, units(unit_code), customers(full_name)').is('deleted_at',null)
+    .order('created_at',{ascending:false}).limit(1000);
+  CPA_SUP.rows=(data||[]).sort((a,b)=>String(b.zoho_created_time||b.created_at).localeCompare(String(a.zoho_created_time||a.created_at)));
+  const ids=CPA_SUP.rows.map(t=>t.id);
+  const {data:atts}=ids.length?await sb.schema('cust').from('support_ticket_attachments').select('*').in('ticket_id',ids).is('deleted_at',null):{data:[]};
+  CPA_SUP.atts={};(atts||[]).forEach(a=>{(CPA_SUP.atts[a.ticket_id]=CPA_SUP.atts[a.ticket_id]||[]).push(a);});
+  const statusOf=t=>t.zoho_status||(t.zoho_ticket_id?t.status:'Not yet in Zoho');
+  const counts={};CPA_SUP.rows.forEach(t=>{const k=statusOf(t);counts[k]=(counts[k]||0)+1;});
+  const vias={};CPA_SUP.rows.forEach(t=>{const k=custTicketVia(t)[0];vias[k]=(vias[k]||0)+1;});
+  const opt=(v,l,cur)=>'<option value="'+esc(v)+'"'+(v===cur?' selected':'')+'>'+esc(l)+'</option>';
+  host.innerHTML='<div class="cph-filters" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">'
+      +'<div class="frm" style="min-width:200px"><label>Status</label><select onchange="CPA_SUP.status=this.value;cpaSupPaint()">'
+        +opt('','All statuses ('+CPA_SUP.rows.length+')',CPA_SUP.status)
+        +Object.keys(counts).sort((a,b)=>counts[b]-counts[a]).map(k=>opt(k,k+' ('+counts[k]+')',CPA_SUP.status)).join('')+'</select></div>'
+      +'<div class="frm" style="min-width:150px"><label>Via</label><select onchange="CPA_SUP.via=this.value;cpaSupPaint()">'
+        +opt('','All',CPA_SUP.via)+Object.keys(vias).sort().map(k=>opt(k,k+' ('+vias[k]+')',CPA_SUP.via)).join('')+'</select></div>'
+      +'<div class="frm" style="flex:1 1 220px"><label>Search</label><input placeholder="Subject, customer or ticket #" value="'+esc(CPA_SUP.q)+'" oninput="CPA_SUP.q=this.value;cpaSupPaint()"></div>'
+      +'<span id="cpaSupCount" style="font-size:12.5px;color:var(--slate);padding-bottom:9px"></span></div>'
+    +'<div id="cpaSupList"></div>'
+    +'<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself. Tickets customers email to customer care are brought in every 10 minutes (last two months). "Conversation" fetches the latest messages from Zoho as it opens.</div>';
+  cpaSupPaint();
 }
+window.cpaSupPaint=function(){
+  const host=$('cpaSupList'); if(!host||!CPA_SUP.rows) return;
+  const q=CPA_SUP.q.trim().toLowerCase();
+  const statusOf=t=>t.zoho_status||(t.zoho_ticket_id?t.status:'Not yet in Zoho');
+  const list=CPA_SUP.rows.filter(t=>(!CPA_SUP.status||statusOf(t)===CPA_SUP.status)&&(!CPA_SUP.via||custTicketVia(t)[0]===CPA_SUP.via)
+    &&(!q||[t.subject,t.zoho_ticket_number,t.customers&&t.customers.full_name,t.zoho_contact_email,t.units&&t.units.unit_code].some(x=>String(x||'').toLowerCase().indexOf(q)!==-1)));
+  const c=$('cpaSupCount'); if(c) c.textContent=list.length+' of '+CPA_SUP.rows.length;
+  const rows=list.map(t=>[esc((t.customers&&t.customers.full_name)||t.zoho_contact_email||'—')+'<div style="font-size:11.5px;color:var(--slate)">'+esc((t.units&&t.units.unit_code)||'All flats')+'</div>',
+    esc(custTicketVia(t)[0]),esc(t.subject),esc(t.zoho_ticket_number||'—'),
+    supportStatusTag(t),
+    (CPA_SUP.atts[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}${a.zoho_attachment_id?' (in Zoho)':' (not in Zoho)'}"><i class="fa-solid fa-paperclip"></i></button>`).join(' ')||'—',
+    fmtDate(t.zoho_created_time||t.created_at),
+    (t.zoho_ticket_id?`<button class="btn btn-sm" onclick="cpaTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button> <button class="btn btn-sm" onclick="cpaSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="cpaRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`)]);
+  host.innerHTML=rows.length?cpaTable(['Customer','Via','Subject','Zoho #','Status','Attachments','Raised','Actions'],rows)
+    :'<div class="card card-pad empty">No tickets match.</div>';
+};
 function cpaBuildBubbles(t,threads,comments){
-  const msgs=[{time:t.created_at,author:'Customer',content:t.description||t.subject}]
-    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,author:m.direction==='out'?'Support team':(m.author_name||'Customer'),content:m.content})))
-    .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,author:m.posted_by_customer?(m.commenter_name||'Customer'):'Support team (comment)',content:m.content})));
+  const msgs=(t.source==='zoho'?[]:[{time:t.created_at,author:'Customer',content:t.description||t.subject}])
+    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,out:m.direction==='out',author:m.direction==='out'?((m.author_name||'Agent')+' (agent)'):((m.author_name||'Customer')+' (customer)'),content:m.content})))
+    .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,out:!m.posted_by_customer,author:m.posted_by_customer?((m.commenter_name||'Customer')+' (customer, via portal)'):((m.commenter_name||'Agent')+' (agent comment)'),content:m.content})));
   msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
-  return msgs.map(m=>`<div style="margin-bottom:10px"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${fmtDate(m.time)}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px">${esc(m.content||'')}</div></div>`).join('')||'<div class="card card-pad empty">No messages yet.</div>';
+  // Agent messages on the right, customer messages on the left - and the time as well as the date.
+  const when=d=>d?new Date(d).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+  return msgs.map(m=>`<div style="margin-bottom:10px;display:flex;flex-direction:column;align-items:${m.out?'flex-end':'flex-start'}"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${esc(when(m.time))}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px;max-width:88%;background:${m.out?'#eff6ff':'#fff'}">${esc(m.content||'')}</div></div>`).join('')||'<div class="card card-pad empty">No messages yet.</div>';
 }
 let CPA_TICKET_POLL_TIMER=null;
+// Brings one ticket's status and whole conversation down from Zoho (zoho-desk 'sync'). Errors are
+// left for the caller's own message; a failure here still shows whatever is already stored.
+async function supTicketSync(id){
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'sync',ticketId:id})});
+    return await res.json().catch(()=>({}));
+  }catch(e){ return {error:String(e&&e.message||e)}; }
+}
 window.cpaTicketDetail=async function(id){
-  openModal('<div class="loader"><div class="spin"></div></div>');
+  openModal('<div class="card-pad" style="text-align:center;color:var(--slate)"><div class="loader"><div class="spin"></div></div>Fetching the conversation from Zoho…</div>');
+  await supTicketSync(id);
   const {data:t}=await sb.schema('cust').from('support_tickets').select('*').eq('id',id).maybeSingle();
   const [{data:threads},{data:comments}]=await Promise.all([
     sb.schema('cust').from('support_ticket_threads').select('*').eq('ticket_id',id),
@@ -22247,16 +23148,37 @@ window.cpaRetryTicket=async function(id){
 /* ---------- Tab 10: Referrals ---------- */
 const CPA_REFERRAL_STATUSES={submitted:'Submitted',contacted:'Contacted',interested:'Interested',visited_site:'Visited Site',booked:'Booked',not_interested:'Not Interested'};
 async function cpaRenderReferrals(host){
-  const {data}=await sb.schema('cust').from('referrals').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
+  await custRefProjects();
+  const {data}=await sb.schema('cust').from('referrals').select('*, units(unit_code), referral_projects(name)').order('created_at',{ascending:false}).limit(200);
   const rows=(data||[]).map(r=>[esc((r.units&&r.units.unit_code)||'—'),esc(r.prospect_name),esc(r.prospect_phone||'—'),esc(r.prospect_email||'—'),
+    esc(custRefProjectNames(r)||'—'),
+    '<span style="font-size:12.5px;color:var(--slate)">'+esc(r.notes||'—')+'</span>',
+    cpaReferralCrmCell(r),
     `<select onchange="cpaReferralStatusChange(${r.id},this.value)">${Object.keys(CPA_REFERRAL_STATUSES).map(k=>`<option value="${k}" ${k===r.status?'selected':''}>${CPA_REFERRAL_STATUSES[k]}</option>`).join('')}</select>`,
     fmtDate(r.created_at)]);
-  host.innerHTML=rows.length?cpaTable(['Unit','Prospect','Phone','Email','Status','Submitted'],rows):'<div class="card card-pad empty">No referrals submitted yet.</div>';
+  host.innerHTML=rows.length?cpaTable(['Unit','Prospect','Phone','Email','Project','Looking for','CRM','Status','Submitted'],rows):'<div class="card card-pad empty">No referrals submitted yet.</div>';
 }
 window.cpaReferralStatusChange=async function(id,status){
   const {error}=await sb.schema('cust').from('referrals').update({status,updated_at:new Date().toISOString(),updated_by:state.email}).eq('id',id);
   if(error){toast('Update failed: '+error.message,'err');return;}
   toast('Status updated','ok');
+};
+// Where the referral is in the CRM: its lead number once created, or why it is not there yet.
+function cpaReferralCrmCell(r){
+  const again='<button class="btn btn-sm" style="margin-top:4px" onclick="cpaReferralCrmRetry('+r.id+',this)"><i class="fa-solid fa-rotate-right"></i> Send '+(r.crm_status?'again':'')+'</button>';
+  if(r.crm_status==='sent') return '<span class="tag t-green" title="Sent '+esc(fmtDate(r.crm_sent_at))+'"><i class="fa-solid fa-circle-check"></i> Lead '+esc(r.crm_lead_id||'')+'</span>';
+  if(r.crm_status==='sending') return '<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Sending…</span>';
+  if(r.crm_status==='failed') return '<span class="tag t-red" title="'+esc(r.crm_error||'')+'"><i class="fa-solid fa-triangle-exclamation"></i> Failed</span>'
+    +'<div style="font-size:11.5px;color:var(--err);max-width:220px;margin-top:3px">'+esc(r.crm_error||'')+'</div>'+again;
+  return '<span class="tag t-gray">Not sent</span><div>'+again+'</div>';
+}
+window.cpaReferralCrmRetry=async function(id,btn){
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  const {data,error}=await sb.schema('cust').rpc('referral_crm_retry',{p_id:id});
+  if(error){ toast(error.message,'err'); }
+  else if(!data){ toast('Not sent — sending to the CRM is switched off, or the referral has no consent','warn'); }
+  else toast('Sent to the CRM — the lead number appears here within a minute','ok');
+  route();
 };
 
 /* ---------- Tab 11: Maintenance (post-possession QR payments to confirm, upcoming demand preview) ---------- */
@@ -22404,28 +23326,13 @@ async function custLoadData(customerId,force){
     const {data}=await sb.schema('cust').from('farvision_contacts').select('*').in('unit_id',unitIds).eq('is_current',true);
     contacts=data||[];
   }
-  /* Anything the customer corrected themselves wins over the imported row. It is kept in its own
-     table because farvision_contacts is rewritten by the nightly import - an edit written there
-     would quietly disappear overnight. Blank fields in the override mean "no correction", so the
-     imported value still shows through. */
-  let overrides=[];
-  if(unitIds.length){
-    const {data}=await sb.schema('cust').from('contact_overrides').select('*').in('unit_id',unitIds);
-    overrides=data||[];
-  }
-  const ovByUnit={};overrides.forEach(o=>{ovByUnit[o.unit_id]=o;});
+  /* Contact details are Farvision's, exactly as imported (10 Oct 2026). Customers could briefly edit
+     their phone / email / address here; that is gone - a customer edit would have replaced
+     Farvision's details on screen and on the Tax Invoice and Demand Letter without anyone in
+     post-sales knowing. A correction is a Support request; once Farvision is updated, the next
+     daily import brings it here. */
   const contactByUnit={};
-  contacts.forEach(c=>{
-    const o=ovByUnit[c.unit_id];
-    contactByUnit[c.unit_id]=o
-      ? Object.assign({},c,{
-          contact_phone:   o.contact_phone   || c.contact_phone,
-          contact_email:   o.contact_email   || c.contact_email,
-          contact_address: o.contact_address || c.contact_address,
-          _edited:{phone:!!o.contact_phone,email:!!o.contact_email,address:!!o.contact_address}
-        })
-      : c;
-  });
+  contacts.forEach(c=>{ contactByUnit[c.unit_id]=c; });
   // Whether this customer has ever submitted a referral, across all their units (the sidebar is
   // shared across units, not per-unit) - drives the "Earn" badge in custSidebarTabs. Left undefined
   // rather than defaulted to false until this resolves, so the sidebar's very first paint (before
@@ -22585,59 +23492,16 @@ const CUST_FIGURES_NOTICE='<div style="display:flex;gap:10px;align-items:flex-st
   '<i class="fa-solid fa-circle-info" style="margin-top:2px"></i><div><b>Your figures are being updated.</b> '+
   'We are reconciling this account against our accounting system, so the amounts are not being shown right now. '+
   'Please contact us before making any payment.</div></div>';
-/* One profile row, able to turn into an input. Rendered as text; custProfileEditStart swaps in the
-   field beside it rather than re-rendering the page, so a half-typed address survives a stray
-   click. "Updated by you" marks a value the customer corrected, so it is obvious which figures are
-   ours and which are theirs. */
-function custProfileField(key,icon,label,value,delay,c){
-  const edited=c&&c._edited&&c._edited[key];
+// One read-only profile row.
+function custProfileField(key,icon,label,value,delay){
   const isAddr=key==='address';
   return '<div class="cust-profile-item'+(isAddr?' cust-profile-addr':'')+'" style="animation-delay:'+delay+'">'
     +'<div class="cust-profile-icon"><i class="fa-solid '+icon+'"></i></div>'
     +'<div style="min-width:0;flex:1">'
-      +'<div class="cust-profile-label">'+esc(label)
-        +(edited?' <span style="color:#16855a;font-weight:600">· updated by you</span>':'')+'</div>'
-      +'<div class="cust-profile-value" id="custPV_'+key+'">'+esc(value||'—')+'</div>'
-      +(isAddr
-        ? '<textarea id="custPI_'+key+'" rows="3" style="display:none;width:100%;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13.5px;resize:vertical"></textarea>'
-        : '<input id="custPI_'+key+'" type="'+(key==='email'?'email':'tel')+'" style="display:none;width:100%;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13.5px">')
+      +'<div class="cust-profile-label">'+esc(label)+'</div>'
+      +'<div class="cust-profile-value">'+esc(value||'—')+'</div>'
     +'</div></div>';
 }
-const CUST_PROFILE_KEYS=['phone','email','address'];
-function custProfileToggle(editing){
-  CUST_PROFILE_KEYS.forEach(function(k){
-    const v=$('custPV_'+k), i=$('custPI_'+k);
-    if(!v||!i)return;
-    if(editing){ i.value=(v.textContent==='—'?'':v.textContent); }
-    v.style.display=editing?'none':'';
-    i.style.display=editing?'':'none';
-  });
-  ['custProfileCancel','custProfileSave','custProfileHint'].forEach(function(id){
-    const el=$(id); if(el) el.style.display=editing?'':'none';
-  });
-  const e=$('custProfileEdit'); if(e) e.style.display=editing?'none':'';
-}
-window.custProfileEditStart=function(){ custProfileToggle(true); const p=$('custPI_phone'); if(p)try{p.focus();}catch(_e){} };
-window.custProfileEditCancel=function(){ custProfileToggle(false); };
-window.custProfileSave=async function(unitId){
-  const btn=$('custProfileSave');
-  const vals={}; CUST_PROFILE_KEYS.forEach(function(k){ const i=$('custPI_'+k); vals[k]=i?i.value.trim():''; });
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
-  try{
-    const {error}=await sb.schema('cust').rpc('save_my_contact',
-      {p_unit_id:unitId,p_phone:vals.phone,p_email:vals.email,p_address:vals.address});
-    if(error)throw error;
-  }catch(e){
-    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Save'; }
-    // The database writes these messages for the customer to read, so show it rather than a generic one.
-    toast((e&&e.message)||'Could not save your details','err');
-    return;
-  }
-  toast('Your details have been updated','ok');
-  // Re-read so the page shows what was actually stored, not what was typed.
-  CUST_DATA=null;
-  renderPage();
-};
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
   const [{data:invRows},{data:rcptRows},{data:revRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
@@ -22817,19 +23681,9 @@ async function custTabOverview(data,unit){
         '</div>'+
       '</div>'+
       '<div class="cust-profile-details">'+
-        custProfileField('phone','fa-phone','Phone',c.contact_phone,'.1s',c)+
-        custProfileField('email','fa-envelope','Email',c.contact_email,'.15s',c)+
-        custProfileField('address','fa-location-dot','Correspondence address',c.contact_address,'.2s',c)+
-      '</div>'+
-      /* The customer can correct how we reach them. The registered name is NOT here: it is the
-         name on the booking and appears on receipts and demand letters, so it has to match the
-         agreement rather than follow a text box. */
-      '<div class="cust-profile-edit-bar" style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'+
-        '<span id="custProfileHint" style="margin-right:auto;font-size:12px;color:var(--slate);display:none">'+
-          'Changing these updates how we contact you. Your name and flat details cannot be changed here — please call us for those.</span>'+
-        '<button class="btn" id="custProfileEdit" onclick="custProfileEditStart('+unit.id+')"><i class="fa-solid fa-pen"></i> Update my details</button>'+
-        '<button class="btn" id="custProfileCancel" style="display:none" onclick="custProfileEditCancel()">Cancel</button>'+
-        '<button class="btn btn-primary" id="custProfileSave" style="display:none" onclick="custProfileSave('+unit.id+')"><i class="fa-solid fa-check"></i> Save</button>'+
+        custProfileField('phone','fa-phone','Phone',c.contact_phone,'.1s')+
+        custProfileField('email','fa-envelope','Email',c.contact_email,'.15s')+
+        custProfileField('address','fa-location-dot','Correspondence address',c.contact_address,'.2s')+
       '</div>'+
     '</div>'
     :'<div class="card card-pad empty">Profile not yet available — this updates after our next records sync.</div>';
@@ -23312,11 +24166,13 @@ window.custDownloadSelectedDocs=async function(){
     const receiptDates={};(rcpts2||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
     const rate=custDocRate(unit,csi);
     const lateFee=Number((snap&&snap.late_fee_accrued)||0);
+    const money=await custLoadMoney(unit.id);
     (invs||[]).forEach(inv=>{
       const {data:its}={data:(allInv||[]).find(a=>a.document_no===inv.document_no)};
       const items=its&&its.invoice_items?its.invoice_items:[];
-      const {plan,prevDues}=custBuildPlan(allInv,alloc2,inv.document_date,receiptDates);
-      pages.push(custInvoiceDocHtml({inv:inv,items:items,plan:plan,prevDues:prevDues,lateFee:lateFee,rate:rate,unit:unit,contact:contact},'invoice',true));
+      const {plan,prevDues}=custBuildPlan(allInv,alloc2,inv.document_date,receiptDates,money);
+      const prevSplit=custPrevDuesSplit(inv,allInv,money);
+      pages.push(custInvoiceDocHtml({inv:inv,items:items,plan:plan,prevDues:prevDues,prevSplit:prevSplit,lateFee:lateFee,rate:rate,unit:unit,contact:contact},'invoice',true));
     });
   }
   if(!pages.length){try{w.close();}catch(_e){} toast('No documents could be loaded','err');return;}
@@ -23415,17 +24271,18 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
     head='<th>Due Date</th><th>Description</th><th>Charge Type</th>'+
       '<th class="amt">Amount Due</th><th class="amt">Amount Paid</th><th class="amt">Amount Payable</th>';
     let due=0,paid=0;
+    const dinr=v=>Number(v)<0?'-'+custInr(-Number(v)):custInr(v);
     rowsHtml=custAnantaPlan(unit,ctx.plan).map(r=>{
       due+=r.due; paid+=r.paid;
       return '<tr><td>'+(r.dueDate?fmtDate(r.dueDate):'—')+'</td>'+
         '<td>'+esc(r.schedule||'—')+'</td><td>'+esc(r.head||'—')+'</td>'+
-        '<td class="amt">'+custInr(r.due)+'</td><td class="amt">'+custInr(r.paid)+'</td>'+
-        '<td class="amt">'+custInr(r.due-r.paid)+'</td></tr>';
+        '<td class="amt">'+dinr(r.due)+'</td><td class="amt">'+dinr(r.paid)+'</td>'+
+        '<td class="amt">'+dinr(r.due-r.paid)+'</td></tr>';
     }).join('');
-    // On-account receipts are rows in the table above, so the totals already account for them.
+    // On-account receipts and transfers are rows in the table above, so the totals already account for them.
     const payable=due-paid;
-    foot='<tr><td colspan="3">Total Amount Due</td><td class="amt">'+custInr(due)+'</td>'+
-      '<td class="amt">'+custInr(paid)+'</td><td class="amt">'+custInr(payable)+'</td></tr>'+
+    foot='<tr><td colspan="3">Total Amount Due</td><td class="amt">'+dinr(due)+'</td>'+
+      '<td class="amt">'+dinr(paid)+'</td><td class="amt">'+dinr(payable)+'</td></tr>'+
       '<tr><td colspan="6" class="rcpt-words">Amount payable in words : '+esc(custAmountInWords(Math.max(0,payable)))+'</td></tr>';
     tail='<div class="rcpt-terms">'+
       '<h4>Terms &amp; Condition:</h4>'+
@@ -23443,26 +24300,27 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
         '<td class="amt">'+custInr(it.amount||0)+'</td><td class="amt">'+custInr(it.tax||0)+'</td>'+
         '<td class="amt">'+custInr(it.net_amount||0)+'</td></tr>';
     }).join('');
-    // Previous dues is what is still unpaid on invoices raised before this one. It can only be
-    // stated as a single figure: receipts allocate against the net of a line, never split across
-    // its basic and tax, so an amount/GST breakup of a part-paid line would be invented.
-    const prev=Number(ctx.prevDues||0);
+    /* Previous dues, as Farvision prints it (9 Oct 2026, checked against its Tax Invoice
+       DA/0003226-27): everything billed on earlier invoices LESS everything received up to this
+       invoice's date - so it goes negative when the customer has paid ahead, and Total Payable
+       then shows the credit (-1,470 there, where the portal used to say 9,79,470 was payable on an
+       invoice paid in full the same day). Its Amount / GST split comes from custPrevDuesSplit. */
+    const ps=ctx.prevSplit||{amt:0,tax:0,net:Number(ctx.prevDues||0)};
     const lateFee=Number(ctx.lateFee||0);
+    const inr=v=>Number(v)<0?'-'+custInr(-Number(v)):custInr(v);
     const sumRow=(label,a,t,n,strong)=>'<tr'+(strong?' class="rcpt-strong"':'')+'><td colspan="3">'+esc(label)+'</td>'+
       '<td class="amt">'+a+'</td><td class="amt">'+t+'</td><td class="amt">'+n+'</td></tr>';
-    // Previous dues and late fees carry no basic/GST split of their own, so a running total can
-    // only show those two columns while both are nil - which is the normal case, and then the
-    // running totals simply repeat the invoice's own figures, exactly as Farvision prints them.
-    // Once either is non-nil the split is genuinely unknown and the column shows a dash rather
-    // than a made-up number.
-    const carry=(v,blocked)=>blocked?'—':custInr(v);
+    // A late fee carries no basic/GST split of its own, so once there is one the running total's
+    // two split columns show a dash rather than a made-up number.
+    const carry=(v,blocked)=>blocked?'—':inr(v);
+    const payNet=net+ps.net, withFee=payNet+lateFee;
     foot=
-      sumRow('Total Invoice Amount :',custInr(amt),custInr(tax),custInr(net))+
-      sumRow('Previous dues :',carry(0,prev),carry(0,prev),custInr(prev))+
-      sumRow('Total Payable :',carry(amt,prev),carry(tax,prev),custInr(net+prev),true)+
-      sumRow('Late Payment fees :',carry(0,lateFee),carry(0,lateFee),custInr(lateFee))+
-      sumRow('Total payable with interest :',carry(amt,prev||lateFee),carry(tax,prev||lateFee),custInr(net+prev+lateFee),true)+
-      '<tr><td colspan="6" class="rcpt-words">Amount in Words : '+esc(custAmountInWords(net+prev+lateFee))+'</td></tr>';
+      sumRow('Total Invoice Amount :',inr(amt),inr(tax),inr(net))+
+      sumRow('Previous dues :',inr(ps.amt),inr(ps.tax),inr(ps.net))+
+      sumRow('Total Payable :',inr(amt+ps.amt),inr(tax+ps.tax),inr(payNet),true)+
+      sumRow('Late Payment fees :',carry(0,lateFee),carry(0,lateFee),inr(lateFee))+
+      sumRow('Total payable with interest :',carry(amt+ps.amt,lateFee),carry(tax+ps.tax,lateFee),inr(withFee),true)+
+      '<tr><td colspan="6" class="rcpt-words">Amount in Words : '+esc((withFee<0?'Minus ':'')+custAmountInWords(withFee))+'</td></tr>';
   }
   return ''+
     '<div class="rcpt-doc'+(forPrint?' print':'')+'">'+
@@ -23487,12 +24345,92 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
     '</div>';
 }
 
+/* Previous dues on a Tax Invoice, the way Farvision states it: billed on invoices raised before
+   this one, less money received up to this invoice's date. Money received is counted the way the
+   Ledger counts it - receipt lines against this unit's live demands (a payment against a cancelled
+   booking's demand is not this customer's), unallocated / on-account money, less cheque returns,
+   plus transfers in, less transfers out and refunds.
+   The Amount / GST split follows Farvision: a payment against a line is split in that line's own
+   GST proportion, rounded per receipt (50,000 against the 2,10,000 booking line of DA/0003226-27 is
+   47,619 + 2,381); money not set against a line (on account, transfers, returns) is all Amount.
+   money: {receipts:[{id,receipt_date,total_amount}], items:[receipt_items], reversals, ptcIn, ptcOut} */
+function custPrevDuesSplit(inv,allInv,money){
+  const SEP=String.fromCharCode(31), d=String(inv&&inv.document_date||''), no=String(inv&&inv.document_no||'');
+  const isBefore=iv=>{ const id=String(iv.document_date||''), ino=String(iv.document_no||'');
+    return ino!==no&&(id<d||(id===d&&ino<no)); };
+  const upTo=x=>!d||!x||String(x).slice(0,10)<=d;
+  const lines={}, live=new Set(); let bAmt=0,bTax=0;
+  (allInv||[]).forEach(iv=>{
+    live.add(iv.document_no);
+    (iv.invoice_items||[]).forEach(it=>{
+      const k=[iv.document_no,it.schedule||'',it.revenue_head||''].join(SEP);
+      const l=lines[k]=lines[k]||{tax:0,net:0};
+      l.tax+=Number(it.tax||0); l.net+=Number(it.net_amount||0);
+      if(isBefore(iv)){ bAmt+=Number(it.amount||0); bTax+=Number(it.tax||0); }
+    });
+  });
+  const m=money||{}, byReceipt={};
+  (m.items||[]).forEach(i=>{(byReceipt[i.receipt_id]=byReceipt[i.receipt_id]||[]).push(i);});
+  let rAmt=0,rTax=0;
+  (m.receipts||[]).forEach(r=>{
+    if(!upTo(r.receipt_date)) return;
+    const its=byReceipt[r.id]||[];
+    if(!its.length){ rAmt+=Number(r.total_amount||0); return; }
+    const perLine={};
+    its.forEach(i=>{
+      if(i.against_demand_no&&!live.has(i.against_demand_no)) return;
+      const k=i.against_demand_no?[i.against_demand_no,i.schedule||'',i.revenue_head||''].join(SEP):'';
+      perLine[k]=(perLine[k]||0)+Number(i.amount||0);
+    });
+    Object.keys(perLine).forEach(k=>{
+      const paid=perLine[k], l=k?lines[k]:null;
+      const t=(l&&l.net)?Math.round(paid*l.tax/l.net):0;
+      rTax+=t; rAmt+=paid-t;
+    });
+  });
+  (m.reversals||[]).forEach(v=>{ if(upTo(v.receipt_reversal_date)) rAmt-=Number(v.reversal_amount||0); });
+  (m.ptcIn||[]).forEach(p=>{ if(upTo(p.document_date)) rAmt+=Number(p.amount||0); });
+  (m.ptcOut||[]).forEach(p=>{ if(upTo(p.document_date)) rAmt-=Number(p.amount||0); });
+  const r2=v=>Math.round(v*100)/100;
+  const amt=r2(bAmt-rAmt), tax=r2(bTax-rTax);
+  return {amt:amt,tax:tax,net:r2(amt+tax)};
+}
+async function custLoadMoney(unitId){
+  const [{data:receipts},{data:reversals},{data:ptcIn},{data:ptcOut}]=await Promise.all([
+    sb.schema('cust').from('money_receipts').select('id,receipt_no,receipt_date,total_amount').eq('unit_id',unitId).eq('is_current',true),
+    sb.schema('cust').from('receipt_reversals').select('receipt_no,receipt_reversal_date,reversal_amount').eq('unit_id',unitId).eq('is_current',true),
+    sb.schema('cust').from('ptc_transfers').select('document_no,document_date,amount,narration').eq('transferee_unit_id',unitId).eq('is_reversed',false).is('deleted_at',null),
+    sb.schema('cust').from('ptc_transfers').select('document_no,document_date,amount,narration').eq('source_unit_id',unitId).eq('is_reversed',false).is('deleted_at',null)
+  ]);
+  const ids=(receipts||[]).map(r=>r.id).filter(Boolean);
+  const {data:items}=ids.length
+    ? await sb.schema('cust').from('receipt_items').select('receipt_id,against_demand_no,schedule,revenue_head,amount,line_type,particulars').in('receipt_id',ids)
+    : {data:[]};
+  return {receipts:receipts||[],items:items||[],reversals:reversals||[],ptcIn:ptcIn||[],ptcOut:ptcOut||[]};
+}
+
 // Every billed line for the unit with what has been paid against it, plus what was still unpaid
 // on invoices raised before `beforeDate`. Receipts are matched the way Farvision allocates them:
 // against the invoice number, then the schedule and revenue head within it. Kept pure so it can
 // be checked against the ledger and against Farvision's own demand letter without a round trip.
-function custBuildPlan(allInv,alloc,beforeDate,receiptDates){
+/* money (optional, from custLoadMoney) - checked 10 Oct 2026 against Farvision's own figures for
+   every flat: Amount Paid on the demand letter now equals Farvision's received + on-account on 297
+   of 300 (the other 3 are flats where Farvision's own reports disagree with each other).
+     * A cheque that bounced is not a payment: a receipt whose cheque returns add up to the whole
+       receipt is left out. (Farvision keeps the bounced receipt and records the return separately,
+       so counting the receipt showed Gateway 8C as paid 3,10,346 more than it was.)
+     * Money transferred in from an earlier booking (Farvision's PTC) is a payment on this booking;
+       it was missing entirely, so Gurukul A1 5E - paid 45,91,452 by transfer - read as unpaid. It is
+       shown as its own row, like on-account money, rather than spread over lines by guesswork.
+       Money transferred out or refunded is the same row with a minus. */
+function custBuildPlan(allInv,alloc,beforeDate,receiptDates,money){
   const SEP=String.fromCharCode(31);
+  if(money){
+    const revByNo={};
+    (money.reversals||[]).forEach(v=>{ revByNo[v.receipt_no]=(revByNo[v.receipt_no]||0)+Number(v.reversal_amount||0); });
+    const bounced=new Set((money.receipts||[]).filter(r=>(revByNo[r.receipt_no]||0)>=Number(r.total_amount||0)-1).map(r=>r.id));
+    if(bounced.size) alloc=(alloc||[]).filter(a=>!bounced.has(a.receipt_id));
+  }
   const key=(doc,sch,head)=>[String(doc||''),String(sch||''),String(head||'')].join(SEP);
   // An "On Account" receipt line is money received against the unit but not applied to any
   // particular demand, so it has no invoice number to match on. It still belongs in the table as
@@ -23521,6 +24459,12 @@ function custBuildPlan(allInv,alloc,beforeDate,receiptDates){
     });
   });
   onAccountRows.forEach(r=>plan.push(r));
+  if(money){
+    (money.ptcIn||[]).forEach(p=>plan.push({dueDate:p.document_date,schedule:p.narration||'Transferred from earlier booking',
+      head:'Transfer '+(p.document_no||''),due:0,paid:Number(p.amount||0)}));
+    (money.ptcOut||[]).forEach(p=>plan.push({dueDate:p.document_date,schedule:p.narration||'Transferred out / refunded',
+      head:'Transfer '+(p.document_no||''),due:0,paid:-Number(p.amount||0)}));
+  }
   plan.sort((a,b)=>String(a.dueDate||'').localeCompare(String(b.dueDate||''))||
     String(a.schedule||'').localeCompare(String(b.schedule||''))||
     String(a.head||'').localeCompare(String(b.head||'')));
@@ -23556,10 +24500,12 @@ window.custViewInvoice=async function(id){
     : {data:[]};
   const receiptDates={};
   (rcpts||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
-  const {plan,prevDues,onAccount}=custBuildPlan(allInv,alloc,inv.document_date,receiptDates);
+  const money=await custLoadMoney(unit.id);
+  const {plan,prevDues,onAccount}=custBuildPlan(allInv,alloc,inv.document_date,receiptDates,money);
+  const prevSplit=custPrevDuesSplit(inv,allInv,money);
 
   window._custInvoiceCache={
-    inv:inv, items:its||[], plan:plan, prevDues:prevDues, onAccount:onAccount,
+    inv:inv, items:its||[], plan:plan, prevDues:prevDues, prevSplit:prevSplit, onAccount:onAccount,
     lateFee:Number((snap&&snap.late_fee_accrued)||0),
     rate:custDocRate(unit,csi),
     unit:unit, contact:(cts&&cts[0])||null, fmt:'invoice'
@@ -23967,8 +24913,8 @@ function custPgCss(){return `<style>
 
 // One tile. `i` indexes CUST_PG.items, which is what the viewer walks through.
 function custPgTile(it,i,showRoom){
-  const media=it.url
-    ?(it.isVideo?'<video src="'+it.url+'#t=0.5" muted playsinline preload="metadata"></video>':'<img src="'+it.url+'" alt="" loading="lazy">')
+  const media=it.tile
+    ?(it.isVideo&&!it.thumb?'<video src="'+it.tile+'#t=0.5" muted playsinline preload="metadata"></video>':'<img src="'+it.tile+'" alt="" loading="lazy">')
     :'<div class="cpg-ph"><i class="fa-solid '+(it.isVideo?'fa-film':'fa-image')+'"></i></div>';
   return '<button type="button" class="cpg-tile" onclick="custPgOpen('+i+')" aria-label="Open '+esc(it.label)+' '+(it.isVideo?'video':'photo')+' of '+esc(fmtDate(it.date))+'">'
     +media+(it.isVideo?'<div class="cpg-play"><span><i class="fa-solid fa-play"></i></span></div>':'')
@@ -24011,8 +24957,11 @@ async function custTabProgress(unit){
   const roomOf=k=>(CUST_PG_AREAS.find(a=>a[0]===k)||CUST_PG_AREAS[0]);
   const raw=block.map(p=>({p,label:'Block',roomKey:null,room:null}))
     .concat(flat.map(p=>{const r=roomOf(p.area||'common');return {p,label:r[1],roomKey:r[0],room:r[1]};}));
-  const urls=await Promise.all(raw.map(r=>s3SignedUrl(r.p.storage_path).catch(()=>null)));
-  CUST_PG.items=raw.map((r,i)=>({url:urls[i],isVideo:(r.p.file_type||'').indexOf('video')===0,
+  /* The grid loads thumbnails; the full photo or video is fetched only when it is opened. Before
+     5 Oct 2026 every full-size file was signed and downloaded just to draw the grid. */
+  const tiles=await Promise.all(raw.map(r=>s3SignedUrl(r.p.thumb_path||r.p.storage_path).catch(()=>null)));
+  CUST_PG.items=raw.map((r,i)=>({tile:tiles[i],thumb:!!r.p.thumb_path,url:r.p.thumb_path?null:tiles[i],path:r.p.storage_path,
+    isVideo:(r.p.file_type||'').indexOf('video')===0,
     date:r.p.taken_on,label:r.label,roomKey:r.roomKey,room:r.room,where:r.roomKey?'Your flat':'Your block'}));
   CUST_PG.flat=CUST_PG.items.map((it,i)=>it.roomKey?i:-1).filter(i=>i>=0);
   CUST_PG.room='all';
@@ -24039,7 +24988,8 @@ async function custTabProgress(unit){
     +'<i class="fa-solid fa-circle-info" style="color:#d97706;font-size:17px;margin-top:2px"></i>'
     +'<div><b style="color:#92400e">About these photos</b><br>'
     +'These photos and videos are taken on site by our construction team while work is going on. Because of dust, '
-    +'lighting and site conditions, some may look unclear or slightly blurred. They show work in progress, not the '
+    +'lighting and site conditions, some may look unclear or slightly blurred, and you may see construction materials, '
+    +'tools or debris lying around. They show work in progress, not the '
     +'finished home — colours, finishes and fittings may look different at handover. If you have any question about '
     +'your flat, please contact your relationship manager.</div></div>';
 
@@ -24080,10 +25030,18 @@ window.custPgOpen=function(start){
   function shut(){ document.removeEventListener('keydown',onKey); if(box.parentNode) box.parentNode.removeChild(box); document.body.style.overflow=''; }
   function draw(){
     const it=CUST_PG.items[list[pos]];
+    // Opened for the first time: show the thumbnail, fetch the full file, then draw again.
+    if(!it.url&&it.path&&!it.loading){
+      it.loading=true;
+      s3SignedUrl(it.path).then(u=>{ it.url=u||null; it.failed=!u; }).catch(()=>{ it.failed=true; })
+        .finally(()=>{ it.loading=false; if(box.isConnected&&CUST_PG.items[list[pos]]===it) draw(); });
+    }
+    const src=it.url||(it.isVideo?null:it.tile);
     box.innerHTML='<div class="cpg-lbbar"><span class="t">'+esc(it.where)+(it.room?' · '+esc(it.room):'')+'</span><span>'+esc(fmtDate(it.date))+'</span>'
       +'<span class="c">'+(pos+1)+' / '+list.length+'</span><button class="cpg-lbx" title="Close">&times;</button></div>'
       +'<div class="cpg-lbstage">'
-        +(it.url?(it.isVideo?'<video src="'+it.url+'" controls autoplay playsinline></video>':'<img src="'+it.url+'" alt="">'):'<div style="color:#94a3b8">This file could not be loaded.</div>')
+        +(src?(it.isVideo?'<video src="'+src+'" controls autoplay playsinline></video>':'<img src="'+src+'" alt="">')
+             :'<div style="color:#94a3b8">'+(it.loading?'<i class="fa-solid fa-spinner fa-spin"></i>':'This file could not be loaded.')+'</div>')
         +(list.length>1?'<button class="cpg-lbnav prev" title="Previous"><i class="fa-solid fa-chevron-left"></i></button><button class="cpg-lbnav next" title="Next"><i class="fa-solid fa-chevron-right"></i></button>':'')
       +'</div>';
     box.querySelector('.cpg-lbx').onclick=shut;
@@ -24136,20 +25094,77 @@ async function custTabVideos(){
       :'<div class="card card-pad empty">Not available yet.</div>')+'<div style="margin-bottom:20px"></div>';
   }).join('');
 }
+/* SUPPORT: every ticket the customer has with us, wherever it started - raised here, or an email to
+   customer care that Zoho Desk turned into a ticket (6 Oct 2026). Opening the tab asks zoho-desk to
+   look the customer up in Zoho first ('pull', throttled to once every 3 minutes); a 10-minute import
+   catches the rest. A ticket that came in by email belongs to the customer, not to one flat, so it
+   shows on every flat's Support tab. */
+const CUST_TICKET_VIA={email:['Email','fa-envelope'],web:['Portal','fa-globe'],phone:['Phone','fa-phone'],chat:['Chat','fa-comments'],
+  whatsapp:['WhatsApp','fa-brands fa-whatsapp'],forums:['Forum','fa-users'],facebook:['Facebook','fa-brands fa-facebook'],twitter:['X','fa-brands fa-x-twitter']};
+function custTicketVia(t){
+  if(t.source!=='zoho') return CUST_TICKET_VIA.web;
+  const k=String(t.zoho_channel||'').toLowerCase();
+  return CUST_TICKET_VIA[k]||[t.zoho_channel||'Zoho','fa-headset'];
+}
+function custSupportCss(){
+  if(document.getElementById('custSupCss')) return;
+  const st=document.createElement('style'); st.id='custSupCss';
+  st.textContent=`
+  .csup-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .csup-head h3{margin:0;font-size:17px}
+  .csup-head p{margin:4px 0 0;font-size:12.5px;color:var(--slate);max-width:60ch}
+  .csup-list{display:flex;flex-direction:column;gap:10px}
+  .csup-t{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--csup-c,#94a3b8);border-radius:12px;
+    padding:13px 15px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .csup-main{flex:1 1 280px;min-width:0}
+  .csup-sub{font-size:14.5px;font-weight:700;color:var(--ink);line-height:1.35}
+  .csup-meta{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--slate);margin-top:4px}
+  .csup-meta i{margin-right:4px;opacity:.75}
+  .csup-acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .csup-sync{font-size:11.5px;color:var(--slate);margin-top:10px}
+  @media(max-width:620px){ .csup-acts{width:100%} .csup-acts .btn{flex:1 1 auto;justify-content:center} }`;
+  document.head.appendChild(st);
+}
 async function custTabSupport(unit){
-  const {data:tickets}=await sb.schema('cust').from('support_tickets').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
-  const ticketIds=(tickets||[]).map(t=>t.id);
+  custSupportCss();
+  // Ask Zoho for this customer's tickets first - at most a few seconds, then show what we have.
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    await Promise.race([
+      fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'pull'})}),
+      new Promise(r=>setTimeout(r,7000))]);
+  }catch(_e){}
+  const {data:tickets}=await sb.schema('cust').from('support_tickets').select('*')
+    .or('unit_id.eq.'+Number(unit.id)+',unit_id.is.null').is('deleted_at',null);
+  const list=(tickets||[]).sort((a,b)=>String(b.zoho_created_time||b.created_at).localeCompare(String(a.zoho_created_time||a.created_at)));
+  const ticketIds=list.map(t=>t.id);
   const {data:atts}=ticketIds.length?await sb.schema('cust').from('support_ticket_attachments').select('*').in('ticket_id',ticketIds).is('deleted_at',null):{data:[]};
   const attsByTicket={};(atts||[]).forEach(a=>{(attsByTicket[a.ticket_id]=attsByTicket[a.ticket_id]||[]).push(a);});
-  const rows=(tickets||[]).map(t=>[esc(t.subject),fmtDate(t.created_at),esc(t.zoho_ticket_number||'—'),supportStatusTag(t),
-    (attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}"><i class="fa-solid fa-paperclip"></i></button>`).join(' ')||'—',
-    (t.zoho_ticket_id?`<button class="btn btn-sm" onclick="custTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button> <button class="btn btn-sm" onclick="custSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="custRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`)]);
-  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Support tickets</div><button class="btn btn-primary" onclick="custNewTicketModal()"><i class="fa-solid fa-plus"></i> Raise a ticket</button></div>`+
-    (rows.length?cpaTable(['Subject','Raised','Ticket #','Status','Attachments','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>');
+  const colour={open:'#d97706',in_progress:'#1d4ed8',on_hold:'#64748b',closed:'#16a34a'};
+  const cards=list.map(t=>{
+    const via=custTicketVia(t);
+    const att=(attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}"><i class="fa-solid fa-paperclip"></i></button>`).join('');
+    const acts=t.zoho_ticket_id
+      ?`<button class="btn btn-sm btn-primary" onclick="custTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button><button class="btn btn-sm" onclick="custSyncTicket(${t.id})" title="Get the latest from our support team"><i class="fa-solid fa-rotate"></i></button>`
+      :`<button class="btn btn-sm" onclick="custRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Send again</button>`;
+    return `<div class="csup-t" style="--csup-c:${colour[t.status]||'#94a3b8'}">
+      <div class="csup-main"><div class="csup-sub">${esc(t.subject)}</div>
+        <div class="csup-meta">${t.zoho_ticket_number?'<span><i class="fa-solid fa-hashtag"></i>'+esc(t.zoho_ticket_number)+'</span>':''}
+          <span><i class="${via[1].indexOf('fa-brands')===0?via[1]:'fa-solid '+via[1]}"></i>via ${esc(via[0])}</span>
+          <span><i class="fa-regular fa-calendar"></i>${esc(fmtDate(t.zoho_created_time||t.created_at))}</span></div></div>
+      ${supportStatusTag(t)}
+      <div class="csup-acts">${att}${acts}</div></div>`;
+  }).join('');
+  return `<div class="csup-head"><div><h3>Support tickets</h3>
+      <p>Tickets you raise here, and emails you send to our customer care team, all show here with their latest status and replies.</p></div>
+      <button class="btn btn-primary" onclick="custNewTicketModal()"><i class="fa-solid fa-plus"></i> Raise a ticket</button></div>`
+    +(list.length?'<div class="csup-list">'+cards+'</div>':'<div class="card card-pad empty">No support tickets yet.</div>');
 }
 function custBuildBubbles(t,threads,comments){
-  const msgs=[{time:t.created_at,mine:true,author:'You',content:t.description||t.subject}]
-    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,mine:m.direction!=='out',author:m.direction==='out'?'Support team':'You',content:m.content})))
+  // A ticket raised here opens with what the customer typed; one that came in by email opens with
+  // the email itself, which is already its first thread.
+  const msgs=(t.source==='zoho'?[]:[{time:t.created_at,mine:true,author:'You',content:t.description||t.subject}])
+    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,mine:m.direction!=='out',author:m.direction==='out'?((m.author_name?String(m.author_name).split(' ')[0]+' · ':'')+'Customer care'):'You',content:m.content})))
     .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,mine:m.posted_by_customer,author:m.posted_by_customer?'You':'Support team',content:m.content})));
   msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
   return msgs.map(m=>`<div style="margin-bottom:10px;display:flex;flex-direction:column;align-items:${m.mine?'flex-end':'flex-start'}"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${fmtDate(m.time)}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px;max-width:85%;background:${m.mine?'var(--brand-50)':'#fff'}">${esc(m.content||'')}</div></div>`).join('')||'<div class="card card-pad empty">No messages yet.</div>';
@@ -24162,7 +25177,8 @@ function custBuildBubbles(t,threads,comments){
 // it writes into is gone (modal closed, or replaced by a different one).
 let CUST_TICKET_POLL_TIMER=null;
 window.custTicketDetail=async function(id){
-  openModal('<div class="loader"><div class="spin"></div></div>');
+  openModal('<div class="card-pad" style="text-align:center;color:var(--slate)"><div class="loader"><div class="spin"></div></div>Getting the latest replies…</div>');
+  await supTicketSync(id);
   const {data:t}=await sb.schema('cust').from('support_tickets').select('*').eq('id',id).maybeSingle();
   const [{data:threads},{data:comments}]=await Promise.all([
     sb.schema('cust').from('support_ticket_threads').select('*').eq('ticket_id',id),
@@ -24380,9 +25396,11 @@ function custReferralCss(){
   if(document.getElementById('custRefCss')) return;
   const s=document.createElement('style'); s.id='custRefCss';
   s.textContent=`
-  .cref-hero{position:relative;overflow:hidden;border-radius:16px;padding:30px 32px;margin-bottom:18px;
-    background:linear-gradient(125deg,#0f1e3d 0%,#16294f 38%,#1d4ed8 100%);color:#fff;
-    box-shadow:0 14px 34px -14px rgba(15,30,61,.55)}
+  /* Refer & Earn follows the marketing creative (assets/referral/refer-and-earn.jpg): Jain red,
+     white, and the pale pink of its slab cards. */
+  .cref-hero{position:relative;overflow:hidden;border-radius:16px;padding:28px 30px;margin-bottom:22px;
+    background:linear-gradient(125deg,#8f1119 0%,#c8202f 55%,#de3a45 100%);color:#fff;
+    box-shadow:0 14px 34px -14px rgba(143,17,25,.55)}
   /* A slow sheen travelling across the banner. It is the only moving thing on the page, which is
      what makes it read as "look here" rather than as decoration competing with the content. */
   .cref-hero::after{content:'';position:absolute;top:-60%;left:-30%;width:40%;height:220%;
@@ -24392,24 +25410,105 @@ function custReferralCss(){
   .cref-hero-in{position:relative;z-index:1;display:flex;gap:26px;align-items:center;flex-wrap:wrap}
   .cref-hero-txt{flex:1 1 320px;min-width:0}
   .cref-eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;
-    letter-spacing:.14em;text-transform:uppercase;color:#f0c964;margin-bottom:11px}
+    letter-spacing:.14em;text-transform:uppercase;color:#ffe1e3;margin-bottom:11px}
   .cref-hero h2{font-size:26px;line-height:1.2;font-weight:800;margin:0 0 9px;letter-spacing:-.02em;text-wrap:balance}
-  .cref-hero p{font-size:14.5px;line-height:1.6;color:#c9d6f0;margin:0;max-width:52ch}
+  .cref-hero p{font-size:14.5px;line-height:1.6;color:#ffe9ea;margin:0;max-width:54ch}
+  .cref-hero p b{color:#fff}
+  .cref-btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
   .cref-cta{display:inline-flex;align-items:center;gap:10px;border:0;cursor:pointer;
-    font-family:inherit;font-size:15px;font-weight:800;letter-spacing:.01em;color:#25324a;
-    padding:15px 28px;border-radius:999px;white-space:nowrap;
-    background:linear-gradient(135deg,#ffd97a 0%,#f0c964 45%,#dCA93a 100%);
-    box-shadow:0 8px 22px -6px rgba(240,201,100,.65);transition:transform .16s,box-shadow .16s}
-  .cref-cta:hover{transform:translateY(-2px);box-shadow:0 12px 28px -6px rgba(240,201,100,.8)}
+    font-family:inherit;font-size:15px;font-weight:800;letter-spacing:.01em;color:#b3141f;
+    padding:14px 26px;border-radius:999px;white-space:nowrap;background:#fff;
+    box-shadow:0 8px 22px -6px rgba(0,0,0,.35);transition:transform .16s,box-shadow .16s}
+  .cref-cta:hover{transform:translateY(-2px);box-shadow:0 12px 28px -6px rgba(0,0,0,.4)}
+  .cref-cta2{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-family:inherit;font-size:14.5px;
+    font-weight:700;color:#fff;padding:13px 22px;border-radius:999px;white-space:nowrap;
+    background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.7);transition:background .16s}
+  .cref-cta2:hover{background:rgba(255,255,255,.22)}
+  .cref-cta2 .fa-whatsapp{font-size:17px}
+  /* The poster is shown large enough to read on the page itself - beside the slabs and the
+     calculator on a computer, full width on a phone - and opens full size on a tap. */
+  .cref-main{display:grid;grid-template-columns:minmax(0,400px) minmax(0,1fr);gap:22px;align-items:start;margin-bottom:22px}
+  .cref-pcard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px;
+    box-shadow:0 10px 28px -16px rgba(143,17,25,.45)}
+  .cref-pimg{display:block;width:100%;padding:0;border:0;background:none;cursor:zoom-in}
+  .cref-pimg img{display:block;width:100%;height:auto;border-radius:10px}
+  .cref-pacts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .cref-pacts a,.cref-pacts button{flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+    font:inherit;font-size:13px;font-weight:700;padding:10px 8px;border-radius:10px;cursor:pointer;text-decoration:none;
+    border:1px solid #f3c4c8;background:#fff5f5;color:#b3141f;white-space:nowrap}
+  .cref-pacts a:hover,.cref-pacts button:hover{background:#fde4e6}
+  .cref-pacts .fa-whatsapp{font-size:15px}
+  .cref-side .cref-calc{margin-bottom:22px}
+  .cref-side .cref-steps{flex-direction:column;gap:10px;margin-bottom:0}
+  .cref-side .cref-step{flex:none}
+
+  .cref-sh{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;letter-spacing:.02em;
+    text-transform:uppercase;color:#c8202f;margin:4px 0 12px}
+  .cref-sh::after{content:'';flex:1;height:2px;background:linear-gradient(90deg,#f3c4c8,transparent)}
+  .cref-slabs{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0 14px}
+  .cref-slab{position:relative;background:#fde4e6;border:1px solid #f6c9cd;border-radius:14px;padding:24px 14px 16px;
+    text-align:center;transition:transform .18s,box-shadow .18s,border-color .18s}
+  .cref-slab .n{position:absolute;top:-13px;left:50%;transform:translateX(-50%);width:28px;height:28px;border-radius:50%;
+    background:#5f6368;color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center;border:3px solid #fff}
+  .cref-slab small{display:block;font-size:12.5px;font-weight:700;color:#b3141f;min-height:2.6em}
+  .cref-slab b{display:block;font-size:38px;line-height:1.05;font-weight:800;color:#c8202f;margin:4px 0;letter-spacing:-.02em}
+  .cref-slab em{font-style:normal;font-size:12px;font-weight:600;color:#b3141f}
+  .cref-slab.on{border-color:#c8202f;box-shadow:0 10px 24px -10px rgba(200,32,47,.55);transform:translateY(-3px)}
+  .cref-slab.on .n{background:#c8202f}
+
+  .cref-calc{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:22px;
+    display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+  .cref-calc-in{flex:1 1 300px;min-width:0}
+  .cref-calc-h{font-size:13.5px;font-weight:700;margin-bottom:2px}
+  .cref-calc-h i{color:#c8202f;margin-right:6px}
+  .cref-calc-l{font-size:12.5px;color:var(--slate);display:flex;justify-content:space-between;gap:10px;margin-bottom:6px}
+  .cref-calc-l b{color:var(--ink);font-size:14px}
+  .cref-calc input[type=range]{width:100%;accent-color:#c8202f}
+  .cref-calc-out{flex:0 0 auto;min-width:190px;text-align:center;background:#fff5f5;border:1px dashed #f3b4ba;border-radius:12px;padding:10px 16px}
+  .cref-calc-out span{display:block;font-size:12px;color:var(--slate);font-weight:600}
+  .cref-calc-out b{display:block;font-size:24px;font-weight:800;color:#16a34a;font-variant-numeric:tabular-nums}
+  .cref-calc-out em{display:block;font-style:normal;font-size:11.5px;color:var(--slate)}
+  .cref-fine{font-size:11.5px;color:var(--slate);line-height:1.6;margin:14px 2px 0}
+
+  /* The project the friend is interested in: one card per project, its name and where it is. */
+  .cref-projs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:236px;overflow:auto;padding:2px;margin-bottom:4px}
+  .cref-projs .cref-proj{position:relative;display:flex;flex-direction:column;justify-content:center;gap:3px;padding:10px 12px 10px 34px;border:1.5px solid var(--line);
+    border-radius:11px;cursor:pointer;background:var(--card);transition:border-color .15s,background .15s;margin:0;font-weight:400;min-height:58px}
+  .cref-proj:hover{border-color:#f3b4ba}
+  .cref-proj input{position:absolute;left:12px;top:12px;margin:0;accent-color:#c8202f;width:15px;height:15px}
+  .cref-proj .nm{font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.25}
+  .cref-proj .loc{font-size:12px;color:var(--slate);display:flex;align-items:center;gap:5px}
+  .cref-proj .loc i{color:#c8202f;font-size:11px}
+  .cref-proj:has(input:checked){border-color:#c8202f;background:#fff5f5;box-shadow:0 0 0 3px rgba(200,32,47,.1)}
+  .cref-consent{display:flex;gap:9px;align-items:flex-start;margin-top:14px;font-size:12.5px;line-height:1.5;color:var(--slate);cursor:pointer}
+  .cref-consent input{margin-top:2px;accent-color:#c8202f;width:15px;height:15px;flex:none}
+  .cref-consent a{color:#c8202f;font-weight:600}
+  .cref-projtag{display:inline-flex;align-items:center;gap:5px;color:#b3141f;font-weight:600}
+  .cref-pgrid{margin-bottom:24px}
+  .cref-pbtns{display:flex;gap:8px;margin-top:11px}
+  .cref-pbtns .btn{flex:1 1 0;justify-content:center;gap:7px;text-decoration:none;white-space:nowrap;padding-left:8px;padding-right:8px}
+  /* Doubled up so it beats the customer portal's ".cust-view-fade .btn:not(.btn-primary)" (white
+     gradient), which otherwise left white text on a white button. */
+  .cref-pbtns .btn.cref-pref,.cust-view-fade .cref-pbtns .btn.cref-pref{background:#c8202f;border-color:#c8202f;color:#fff;
+    box-shadow:0 4px 12px -4px rgba(200,32,47,.45)}
+  .cref-pbtns .btn.cref-pref:hover,.cust-view-fade .cref-pbtns .btn.cref-pref:hover{background:#a8121e;border-color:#a8121e;color:#fff}
+  @media(max-width:620px){ .cref-projs{grid-template-columns:1fr;max-height:260px} }
+  .cref-pbox{position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,.88);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:14px;padding:16px}
+  .cref-pbox img{max-width:min(94vw,560px);max-height:calc(100vh - 110px);border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .cref-pbox-acts{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  .cref-pbox-acts a,.cref-pbox-acts button{display:inline-flex;align-items:center;gap:8px;border:0;cursor:pointer;font:inherit;
+    font-size:14px;font-weight:700;padding:11px 20px;border-radius:999px;background:#fff;color:#b3141f;text-decoration:none}
+  .cref-pbox-acts .x{background:rgba(255,255,255,.15);color:#fff}
   .cref-cta:active{transform:translateY(0)}
   .cref-cta i{font-size:14px}
   /* The pulse stops the moment there is anything in the list - it is there to get a first referral
      out of somebody, not to keep nagging a customer who has already used the thing. */
   .cref-cta.pulse{animation:crefPulse 2.4s ease-out infinite}
   @keyframes crefPulse{
-    0%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 0 rgba(240,201,100,.55)}
-    70%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 16px rgba(240,201,100,0)}
-    100%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 0 rgba(240,201,100,0)}}
+    0%{box-shadow:0 8px 22px -6px rgba(0,0,0,.35),0 0 0 0 rgba(255,255,255,.6)}
+    70%{box-shadow:0 8px 22px -6px rgba(0,0,0,.35),0 0 0 16px rgba(255,255,255,0)}
+    100%{box-shadow:0 8px 22px -6px rgba(0,0,0,.35),0 0 0 0 rgba(255,255,255,0)}}
 
   .cref-stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
   .cref-stat{flex:1 1 150px;background:var(--card);border:1px solid var(--line);border-radius:13px;
@@ -24423,7 +25522,7 @@ function custReferralCss(){
   .cref-step{flex:1 1 200px;display:flex;gap:12px;align-items:flex-start;background:var(--card);
     border:1px solid var(--line);border-radius:13px;padding:15px 16px}
   .cref-step-n{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;
-    background:var(--brand-50);color:var(--brand);font-weight:800;font-size:13px}
+    background:#fde4e6;color:#c8202f;font-weight:800;font-size:13px}
   .cref-step b{display:block;font-size:13.5px;margin-bottom:2px}
   .cref-step span{font-size:12.5px;color:var(--slate);line-height:1.5}
 
@@ -24451,10 +25550,17 @@ function custReferralCss(){
   .cref-empty i{font-size:30px;color:var(--brand);opacity:.35}
   .cref-empty b{display:block;margin-top:12px;font-size:16px}
   .cref-empty span{display:block;margin-top:5px;font-size:13px;color:var(--slate)}
+  @media(max-width:900px){ .cref-main{grid-template-columns:minmax(0,1fr)} .cref-pcard{max-width:460px;width:100%;margin:0 auto} }
   @media(max-width:620px){
     .cref-hero{padding:24px 20px}
     .cref-hero h2{font-size:21px}
-    .cref-cta{width:100%;justify-content:center}
+    .cref-cta,.cref-cta2{width:100%;justify-content:center}
+    .cref-main{grid-template-columns:1fr;gap:18px}
+    .cref-slabs{grid-template-columns:1fr;gap:18px}
+    .cref-slab{display:grid;grid-template-columns:1fr auto;align-items:center;text-align:left;padding:16px 16px 14px;column-gap:12px}
+    .cref-slab b{grid-row:1/3;grid-column:2;font-size:32px}
+    .cref-slab small{min-height:0}
+    .cref-calc-out{width:100%}
   }
   /* Somebody who has asked the operating system to stop animations gets a page that still works and
      still looks like this - only the sheen and the pulse go. */
@@ -24468,23 +25574,51 @@ function custReferralCss(){
 
 async function custTabReferrals(unit){
   custReferralCss();
-  const {data:referrals}=await sb.schema('cust').from('referrals').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
+  const {data:referrals}=await sb.schema('cust').from('referrals').select('*, referral_projects(name,location)').eq('unit_id',unit.id).order('created_at',{ascending:false});
   const list=referrals||[];
   const stageIndex=function(k){ const i=CUST_REFERRAL_STAGES.findIndex(function(s){return s.k===k;}); return i<0?0:i; };
   const booked=list.filter(function(r){return r.status==='booked';}).length;
   const moving=list.filter(function(r){return ['contacted','interested','visited_site'].indexOf(r.status)!==-1;}).length;
 
+  custRefPrefetch();
+  await custRefProjects();   // names for the projects of each referral below
   const hero=`<div class="cref-hero"><div class="cref-hero-in">
       <div class="cref-hero-txt">
-        <div class="cref-eyebrow"><i class="fa-solid fa-gift"></i> Refer &amp; earn</div>
-        <h2>Know someone looking for a home?</h2>
-        <p>Tell us who they are and our sales team takes it from there — you can watch every
-           referral move along right here, from first call to booking.</p>
+        <div class="cref-eyebrow"><i class="fa-solid fa-bullhorn"></i> Refer &amp; Earn</div>
+        <h2>Earn up to 2% on every successful referral</h2>
+        <p>Help your friends and family find their safe haven with Jain Group. While they get the
+           home of their dreams, you <b>earn up to 2% of the agreement value</b> when they book.</p>
+        <div class="cref-btns">
+          <button class="cref-cta${list.length?'':' pulse'}" onclick="custNewReferralModal()">
+            <i class="fa-solid fa-user-plus"></i> Refer someone</button>
+          <button class="cref-cta2" onclick="custRefShare()"><i class="fa-brands fa-whatsapp"></i> Share with friends</button>
+        </div>
       </div>
-      <button class="cref-cta${list.length?'':' pulse'}" onclick="custNewReferralModal()">
-        <i class="fa-solid fa-user-plus"></i> Refer someone
-      </button>
     </div></div>`;
+
+  // The slabs, then what that means in rupees for a price the customer picks.
+  const start=12000000;
+  const poster=`<div class="cref-pcard">
+      <button class="cref-pimg" onclick="custRefPoster()" aria-label="Open the Refer and Earn poster full size">
+        <img src="${CUST_REF_POSTER}" alt="Refer and Earn - earn up to 2% of the agreement value on every successful referral" width="1066" height="1600"></button>
+      <div class="cref-pacts">
+        <button onclick="custRefPoster()"><i class="fa-solid fa-expand"></i> Full size</button>
+        <a href="${CUST_REF_POSTER}" download="Jain-Group-Refer-and-Earn.jpg"><i class="fa-solid fa-download"></i> Download</a>
+        <button onclick="custRefShare()"><i class="fa-brands fa-whatsapp"></i> Share</button>
+      </div></div>`;
+  const slabs=`<div class="cref-sh">Know your rewarding journey</div>
+    <div class="cref-slabs">${CUST_REF_SLABS.map(function(sl,i){
+      return '<div class="cref-slab'+(i===custRefSlab(start)?' on':'')+'" data-slab="'+i+'"><span class="n">'+(i+1)+'</span>'
+        +'<small>'+esc(sl.label)+'</small><b>'+sl.pct+'%</b><em>of total consideration</em></div>'; }).join('')}</div>
+    <div class="cref-calc">
+      <div class="cref-calc-in">
+        <div class="cref-calc-h"><i class="fa-solid fa-calculator"></i>What could you earn?</div>
+        <div class="cref-calc-l"><span>Price of the flat your friend books</span><b id="crefPrice">${custRefShort(start)}</b></div>
+        <input type="range" min="2000000" max="50000000" step="500000" value="${start}" oninput="custRefCalc(this.value)" aria-label="Flat price">
+      </div>
+      <div class="cref-calc-out"><span>You earn</span><b id="crefEarn">${custRefMoney(start*CUST_REF_SLABS[custRefSlab(start)].pct/100)}</b>
+        <em id="crefPct">${CUST_REF_SLABS[custRefSlab(start)].pct}% of total consideration</em></div>
+    </div>`;
 
   /* The counts only appear once there is something to count. On an empty tab they would be three
      zeroes, which says "this is not worth using" at exactly the moment it needs to say the
@@ -24495,13 +25629,13 @@ async function custTabReferrals(unit){
       <div class="cref-stat" style="--cref-c:#16a34a"><b>${booked}</b><span>Booked</span></div>
     </div>`:'';
 
-  const steps=`<div class="cref-steps">
+  const steps=`<div class="cref-sh">How it works</div><div class="cref-steps">
       <div class="cref-step"><div class="cref-step-n">1</div><div><b>You refer</b>
-        <span>Their name and a phone number is all we need.</span></div></div>
-      <div class="cref-step"><div class="cref-step-n">2</div><div><b>We reach out</b>
-        <span>Our sales team calls them and shows them around.</span></div></div>
-      <div class="cref-step"><div class="cref-step-n">3</div><div><b>You follow along</b>
-        <span>Every stage shows up on this page as it happens.</span></div></div>
+        <span>Add their name and mobile number here — it takes a few seconds.</span></div></div>
+      <div class="cref-step"><div class="cref-step-n">2</div><div><b>We take it from there</b>
+        <span>Our sales team calls them and shows them around. Follow each step on this page.</span></div></div>
+      <div class="cref-step"><div class="cref-step-n">3</div><div><b>They book, you earn</b>
+        <span>Up to 2% of the total consideration of the flat they book.</span></div></div>
     </div>`;
 
   const body=list.length
@@ -24513,10 +25647,12 @@ async function custTabReferrals(unit){
           return '<div class="cref-seg'+(i<done?' on':'')+'"></div>'; }).join('');
         const phone=r.prospect_phone?`<span><i class="fa-solid fa-phone"></i>${esc(r.prospect_phone)}</span>`:'';
         const mail=r.prospect_email?`<span><i class="fa-solid fa-envelope"></i>${esc(r.prospect_email)}</span>`:'';
+        const pn=custRefProjectNames(r);
+        const proj=pn?`<span class="cref-projtag"><i class="fa-solid fa-building"></i>${esc(pn)}</span>`:'';
         return `<div class="cref-card" style="--cref-c:${st.dot}">
             <div class="cref-who">
               <div class="cref-name">${esc(r.prospect_name)}</div>
-              <div class="cref-meta">${phone}${mail}${(phone||mail)?'':'<span>No contact details given</span>'}</div>
+              <div class="cref-meta">${proj}${phone}${mail}${(phone||mail||proj)?'':'<span>No contact details given</span>'}</div>
             </div>
             <div class="cref-rail">${rail}</div>
             <span class="cref-pill" style="background:${st.bg};color:${st.ink}">
@@ -24526,22 +25662,156 @@ async function custTabReferrals(unit){
       }).join('')+`</div>`
     : `<div class="cref-empty"><i class="fa-solid fa-user-group"></i>
          <b>No referrals yet</b>
-         <span>Be the first — it takes about ten seconds.</span></div>`;
+         <span>Refer someone, or share the poster with friends and family.</span></div>`;
 
-  return hero+stats+steps+body;
+  const fine=`<p class="cref-fine">The reward is a percentage of the total consideration of the flat booked by the
+    person you refer, at the slab it falls in, on a successful booking. Add them here so the referral is
+    counted in your name. Terms and conditions apply.</p>`;
+
+  /* Our ongoing projects, the same cards as the staff Projects page (CONS_ONGOING), so a customer
+     can see what there is to refer someone to. Refer a friend opens the form with that project
+     already chosen. Asked for on 6 Oct 2026. */
+  const projects=`<div class="cref-sh">Our ongoing projects</div>
+    <div class="proj-grid cref-pgrid">${CONS_ONGOING.map(custRefProjectCard).join('')}</div>`;
+
+  return hero+'<div class="cref-main">'+poster+'<div class="cref-side">'+slabs+steps+'</div></div>'+projects+(list.length?'<div class="cref-sh">Your referrals</div>':'')+stats+body+fine;
 }
-window.custNewReferralModal=function(){
-  openModal(`<div class="modal-head"><h3>Refer a prospect</h3><span class="x" onclick="closeModal()">&times;</span></div>
-    <div class="modal-body frm"><label>Name</label><input id="custRefName">
-    <label>Phone</label><input id="custRefPhone">
-    <label>Email (optional)</label><input id="custRefEmail"></div>
-    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custRefBtn" onclick="custNewReferralSave()">Submit</button></div>`);
+
+/* REFER & EARN, from the marketing creative (5 Oct 2026). The reward is a share of the total
+   consideration of the flat the referred person books: 1% up to Rs 1.50 Cr, 1.5% above that up to
+   Rs 2.50 Cr, 2% above Rs 2.50 Cr. One list, so the cards and the calculator cannot disagree. */
+const CUST_REF_SLABS=[
+  {upto:15000000, pct:1,   label:'Up to ₹1.50 Cr'},
+  {upto:25000000, pct:1.5, label:'Above ₹1.50 Cr, up to ₹2.50 Cr'},
+  {upto:Infinity, pct:2,   label:'Above ₹2.50 Cr'}];
+const CUST_REF_POSTER='assets/referral/refer-and-earn.jpg';
+const CUST_REF_SHARE_TEXT='Hi! I have a home with Jain Group and I think you would like their projects. '
+  +'If you or someone in your family is looking for a home, tell me and I will refer you - their team will call you.';
+function custRefSlab(v){ v=Number(v)||0; for(let i=0;i<CUST_REF_SLABS.length;i++) if(v<=CUST_REF_SLABS[i].upto) return i; return CUST_REF_SLABS.length-1; }
+function custRefMoney(v){ return '₹'+Math.round(v).toLocaleString('en-IN'); }
+function custRefShort(v){ v=Number(v)||0; return v>=1e7?'₹'+(v/1e7).toFixed(2)+' Cr':'₹'+Math.round(v/1e5)+' L'; }
+window.custRefCalc=function(v){
+  v=Number(v)||0; const i=custRefSlab(v), sl=CUST_REF_SLABS[i];
+  const pr=$('crefPrice'), er=$('crefEarn'), pc=$('crefPct');
+  if(pr) pr.textContent=custRefShort(v);
+  if(er) er.textContent=custRefMoney(v*sl.pct/100);
+  if(pc) pc.textContent=sl.pct+'% of total consideration';
+  document.querySelectorAll('.cref-slab').forEach(function(c){ c.classList.toggle('on',Number(c.getAttribute('data-slab'))===i); });
+};
+/* Sharing hands the poster itself to WhatsApp (or any app) where the phone allows sharing a file.
+   The file is fetched when the tab opens, because a phone only allows a share straight from the
+   tap - waiting for a download first would be refused. Elsewhere WhatsApp opens with the text. */
+let CUST_REF_FILE=null;
+function custRefPrefetch(){
+  if(CUST_REF_FILE||!navigator.canShare) return;
+  fetch(CUST_REF_POSTER).then(function(r){ return r.ok?r.blob():null; }).then(function(b){
+    if(!b) return;
+    const f=new File([b],'Jain-Group-Refer-and-Earn.jpg',{type:'image/jpeg'});
+    try{ if(navigator.canShare({files:[f]})) CUST_REF_FILE=f; }catch(_e){}
+  }).catch(function(){});
+}
+window.custRefShare=function(){
+  if(CUST_REF_FILE&&navigator.share){
+    navigator.share({files:[CUST_REF_FILE],text:CUST_REF_SHARE_TEXT})
+      .then(custRefShared).catch(function(e){ if(!e||e.name!=='AbortError') custRefWhatsApp(); });
+    return;
+  }
+  custRefWhatsApp();
+};
+function custRefWhatsApp(){ window.open('https://wa.me/?text='+encodeURIComponent(CUST_REF_SHARE_TEXT),'_blank'); custRefShared(); }
+function custRefShared(){ toast('When a friend is interested, add them with "Refer someone" so the referral counts for you','ok'); }
+window.custRefPoster=function(){
+  const box=document.createElement('div'); box.className='cref-pbox';
+  box.innerHTML='<img src="'+CUST_REF_POSTER+'" alt="Refer and Earn - Jain Group">'
+    +'<div class="cref-pbox-acts">'
+      +'<button onclick="custRefShare()"><i class="fa-brands fa-whatsapp"></i> Share</button>'
+      +'<a href="'+CUST_REF_POSTER+'" download="Jain-Group-Refer-and-Earn.jpg"><i class="fa-solid fa-download"></i> Download</a>'
+      +'<button class="x"><i class="fa-solid fa-xmark"></i> Close</button></div>';
+  const shut=function(){ document.removeEventListener('keydown',onKey); box.remove(); };
+  const onKey=function(e){ if(e.key==='Escape') shut(); };
+  box.onclick=function(e){ if(e.target===box) shut(); };
+  box.querySelector('.x').onclick=shut;
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(box);
+};
+/* The mobile number is required: it is how the sales team reaches the person, and a referral without
+   one cannot be followed up. "What are they looking for" goes to notes, which the team sees. */
+/* Which project the friend is interested in decides the CRM business unit, and with it the sales
+   person who calls them (cust.referral_projects). Names are shown in Title Case with the location. */
+let CUST_REF_PROJECTS=null;
+function custRefProjectCard(p){
+  return '<div class="proj-card cref-pcard2">'
+    +'<div class="proj-img" style="background-image:url(\''+esc(p.img)+'\')"><span class="proj-badge">Ongoing</span></div>'
+    +'<div class="proj-body">'
+      +'<h3>'+esc(p.n)+'</h3>'
+      +'<div class="proj-loc"><i class="fa-solid fa-location-dot"></i> '+esc(p.loc)+'</div>'
+      +'<div class="proj-meta">'+esc(p.meta)+'</div>'
+      +'<div class="proj-price">'+esc(p.price)+'</div>'
+      +'<div class="cref-pbtns">'
+        +'<a class="btn" href="'+esc(p.url)+'" target="_blank" rel="noopener">View project <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:11px"></i></a>'
+        +'<button class="btn cref-pref" onclick="custNewReferralModal(\''+esc(p.n).replace(/'/g,"\\'")+'\')"><i class="fa-solid fa-user-plus"></i> Refer a friend</button>'
+      +'</div>'
+    +'</div></div>';
+}
+async function custRefProjects(){
+  if(CUST_REF_PROJECTS) return CUST_REF_PROJECTS;
+  try{ const {data}=await sb.schema('cust').from('referral_projects').select('id,name,location').eq('active',true).order('sort').order('name');
+    CUST_REF_PROJECTS=data||[]; }catch(_e){ CUST_REF_PROJECTS=[]; }
+  return CUST_REF_PROJECTS;
+}
+// "Dream One, Dream Gurukul": the main project first, then the others chosen with it.
+function custRefProjectNames(r){
+  const byId={}; (CUST_REF_PROJECTS||[]).forEach(function(p){ byId[p.id]=p.name; });
+  const main=r.referral_projects&&r.referral_projects.name;
+  const all=(r.referral_project_ids||[]).map(function(id){ return byId[id]; }).filter(Boolean);
+  const names=[main].concat(all.filter(function(n){ return n!==main; })).filter(Boolean);
+  return names.map(custRefTitle).join(', ');
+}
+function custRefTitle(s){ return String(s||'').toLowerCase().replace(/(^|[\s\-\/(])([a-z])/g,(m,a,b)=>a+b.toUpperCase()).trim(); }
+window.custNewReferralModal=async function(preProject){
+  const projects=await custRefProjects();
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-user-plus" style="color:#c8202f"></i> Refer a friend or family member</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm">
+    <label>Name</label><input id="custRefName" autocomplete="off" placeholder="Their full name">
+    <label>Mobile number</label><input id="custRefPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="10-digit mobile number">
+    <label>Email (optional)</label><input id="custRefEmail" type="email" autocomplete="off">
+    <label>Projects they are interested in <span style="font-weight:400;color:var(--slate)">(choose one or more)</span></label>
+    <div class="cref-projs" role="group" aria-label="Projects">${projects.map(function(p){
+      const pre=preProject&&String(p.name).toLowerCase()===String(preProject).toLowerCase();
+      return '<label class="cref-proj"><input type="checkbox" name="custRefProj" value="'+p.id+'"'+(pre?' checked':'')+'>'
+        +'<span class="nm">'+esc(custRefTitle(p.name))+'</span>'
+        +(p.location?'<span class="loc"><i class="fa-solid fa-location-dot"></i>'+esc(custRefTitle(p.location))+'</span>':'')+'</label>'; }).join('')}</div>
+    <label>What are they looking for? (optional)</label><textarea id="custRefNotes" rows="2" maxlength="300" placeholder="e.g. 2BHK, budget around 80 lakh"></textarea>
+    <p style="margin:10px 0 0;font-size:12px;color:var(--slate)">Our sales team will call them. You can follow every step on the Referrals page.</p></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custRefBtn" onclick="custNewReferralSave()"><i class="fa-solid fa-paper-plane"></i> Submit referral</button></div>`);
+  setTimeout(function(){ const n=$('custRefName'); if(n) n.focus(); },60);
 };
 window.custNewReferralSave=async function(){
   const prospect_name=$('custRefName').value.trim(),prospect_phone=$('custRefPhone').value.trim()||null,prospect_email=$('custRefEmail').value.trim()||null;
-  if(!prospect_name){toast('Enter a name','err');return;}
+  const notes=(($('custRefNotes')||{}).value||'').trim()||null;
+  if(!prospect_name){toast('Enter their name','err');return;}
+  const digits=String(prospect_phone||'').replace(/\D/g,'');
+  if(digits.length<10||digits.length>13){toast('Enter their mobile number (10 digits)','err');return;}
+  if(prospect_email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(prospect_email)){toast('That email address does not look right','err');return;}
+  let picked=[...document.querySelectorAll('input[name="custRefProj"]:checked')].map(function(i){ return Number(i.value); }).filter(Boolean);
+  if(!picked.length){toast('Choose at least one project they are interested in','err');return;}
   const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
-  const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,created_by:state.email});
+  /* One referral - one CRM lead - however many projects are ticked (6 Oct 2026). The database makes
+     the highest-priced of them the main project, whose business unit gets the lead; the others are
+     named in its remarks (cust.referral_main_project, cust.referral_crm_send). The same person twice
+     from the same flat is one referral: the team would call them twice. */
+  const last10=digits.slice(-10);
+  try{
+    const {data:mine}=await sb.schema('cust').from('referrals').select('prospect_phone').eq('unit_id',unit.id);
+    if((mine||[]).some(function(r){ return String(r.prospect_phone||'').replace(/\D/g,'').slice(-10)===last10; })){
+      toast('You have already referred this number','warn'); return; }
+  }catch(_e){}
+  const b=$('custRefBtn'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…'; }
+  // Saved here first; the database then sends it to the CRM. privacy_policy_accepted is required by
+  // the CRM and is sent as true - there is no tick box.
+  const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,notes,
+    referral_project_id:picked[0],referral_project_ids:picked,privacy_accepted:true,created_by:state.email});
+  if(error&&b){ b.disabled=false; b.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit referral'; }
   if(error){toast('Could not submit: '+error.message,'err');return;}
   // Set directly rather than re-fetched: custLoadData's cache would otherwise hand route() the same
   // pre-submit CUST_DATA (same customerId, no force), and the sidebar's "Earn" badge would survive
@@ -26227,15 +27497,16 @@ function trcTrStatus(r){
 function trcProcFailed(r){
   return !!(r && (trcTrStatus(r)==='failed' || r.queue_status==='failed'));
 }
-/* Retry is offered for a recording that failed OR is queued/unfinished (Waiting, or transcribed but
-   its QA never ran). queue_status is what proves the call is really in the pipeline: a call that was
-   never queued has none and has nothing to retry. */
+/* Retry is offered for every Waiting call, for a recording that failed, and for one queued/unfinished
+   (transcribed but its QA never ran). A Waiting call the API flagged eligible but the queue build never
+   picked up has no queue_status yet - the retry creates its queue row, so it gets the button too. */
 function trcCanRetry(r){
   if(!r||!r.recording_url&&!r.has_recording&&!r.queue_status)return false;
   if(trcProcFailed(r))return true;
-  return ['pending','transcribing','qa_pending','qa_running'].indexOf(String(r.queue_status||''))>=0;
+  if(['pending','transcribing','qa_pending','qa_running'].indexOf(String(r.queue_status||''))>=0)return true;
+  return !!(r.has_recording&&trcRecordingEligible(r)&&trcEligBucket(r)==='not_transcribed');
 }
-function trcRetryLabel(r){return trcProcFailed(r)?'Retry':'Start now';}
+function trcRetryLabel(r){return 'Retry';}
 /* A Sales call still queues and is still attempted (a lead qualifies a whole day, Sales calls
    included - see TRANSCRIPTION-README.md), but one that never actually finished transcribing has
    nothing of its own worth putting in front of a reader: no CRM-vs-call comparison ran, so there is
@@ -26246,6 +27517,25 @@ function trcRetryLabel(r){return trcProcFailed(r)?'Retry':'Start now';}
    is shown exactly like any other. */
 function trcIsSkippedSalesCall(r){
   return !!(r && r.personnel_team==='Sales' && r.transcription_status!=='completed');
+}
+/* recording_eligible: the CRM API's own flag on each follow-up (stored in acc.crm_followups.recording_eligible,
+   generated from the raw payload). "Eligible for transcription" is exactly the calls the API flags true,
+   and every one of them lands in ONE of: transcribed, waiting, failed, no conversation, no recording
+   (trcEligBucket) - so those five always add up to the eligible total. The dashboard's call-level
+   numbers and lead list only cover these calls; the three history chips (Missed callback, Promised
+   call, Late follow-ups) judge a lead's WHOLE history, so they look at every call - a missed incoming
+   call has no recording and so can never be "eligible" itself. */
+function trcRecordingEligible(r){return !!(r&&r.recording_eligible===true);}
+/* Which single bucket an eligible call is in. Same precedence as acc.eligible_kpis (the SQL that the
+   cards read): no recording, then failed (the transcript OR the queue failed), then transcribed, then
+   no conversation, and whatever is left is still waiting. */
+function trcEligBucket(r){
+  if(!r)return '';
+  if(!r.has_recording)return 'no_recording';
+  if(trcProcFailed(r))return 'failed';
+  const st=String(r.transcription_status||'');
+  if(st==='completed'||st==='non_transcribable')return st;
+  return 'not_transcribed';
 }
 const TRC_AI_TAG = {Lost:'t-red','In Follow Up':'t-amber',Qualified:'t-green',Unclear:'t-gray'};
 /* "Qualified" alone reads as though the visit is done too - the one thing this label exists to say is
@@ -26424,6 +27714,53 @@ let TRC_PREFETCH_GEN=0;
 /* Bumping the generation is all a cancel is: the in-flight loop compares against it after every
    await and returns the moment it no longer owns the prefetch. */
 function trcPrefetchCancel(){TRC_PREFETCH_GEN++;}
+/* Late follow-ups / Missed incoming call judge a lead's WHOLE history, so every
+   lead in scope needs that history loaded before any of those numbers or filters can be trusted -
+   not just the 25 leads on the current page. Until then those flags are "pending" (null), never
+   guessed from the date range's own rows, which is what made the counts jump around and a selected
+   chip drain to "Nothing matches" as histories trickled in. TRC_HIST_TRIED remembers ids whose
+   fetch was already attempted, so a failing fetch cannot loop forever. */
+const TRC_HIST_TRIED=Object.create(null);
+const TRC_HIST_MAX_AUTO=500;
+let TRC_HIST_PROMISE=null;
+function trcHistoriesReady(ids){
+  return (ids||[]).every(function(id){return id==null||TRC_HIST_TRIED[String(id)]||!!trcLeadCacheRead(id);});
+}
+async function trcEnsureHistories(ids){
+  while(TRC_HIST_PROMISE){try{await TRC_HIST_PROMISE;}catch(e){}}
+  const todo=[],seen=Object.create(null);
+  (ids||[]).forEach(function(id){
+    const k=String(id);
+    if(id==null||seen[k])return;
+    seen[k]=1;
+    if(!TRC_HIST_TRIED[k]&&!trcLeadCacheRead(id))todo.push(id);
+  });
+  if(!todo.length)return;
+  TRC_HIST_PROMISE=(async function(){
+    for(let i=0;i<todo.length;i+=TRC_PREFETCH_CHUNK){
+      const chunk=todo.slice(i,i+TRC_PREFETCH_CHUNK);
+      try{
+        const byId=await trcLeadFetchByIds(chunk);
+        chunk.forEach(function(id){
+          const d=byId[String(id)];
+          trcLeadCacheWrite(id,(d&&d.lead)||null,(d&&d.rows)||[]);
+        });
+      }catch(e){}
+      chunk.forEach(function(id){TRC_HIST_TRIED[String(id)]=1;});
+    }
+  })();
+  try{await TRC_HIST_PROMISE;}finally{TRC_HIST_PROMISE=null;}
+}
+/* Ids of every lead behind the current list, before the history chips narrow it. */
+let TRC_LIST_LEAD_IDS=[];
+function trcHistChipOn(){return TRC_F.missedIn==='1'||TRC_F.cadence==='1'||TRC_F.promised==='1';}
+async function trcWarmListHistories(){
+  const ids=TRC_LIST_LEAD_IDS.slice();
+  if(!ids.length||trcHistoriesReady(ids))return;
+  if(ids.length>TRC_HIST_MAX_AUTO&&!trcHistChipOn())return;
+  await trcEnsureHistories(ids);
+  if($('trcRows'))trcRender(false,true);
+}
 async function trcPrefetchHistories(leadIds){
   const gen=++TRC_PREFETCH_GEN;
   const todo=[];
@@ -26462,7 +27799,7 @@ async function trcPrefetchHistories(leadIds){
          for itself on click. A failed chunk simply stays uncached. */
     }
   }
-  /* Added so trcLeads' cadence/callbackTat (see its own note) stop reading the range-limited rows the
+  /* Added so trcLeads' cadence/missedIn (see its own note) stop reading the range-limited rows the
      moment each lead's real history lands - a soft repaint, same as trcEnrichVisiblePage/
      trcBackfillLastJudgement already do on their own completion. Gated on the same generation check as
      everything above: a newer prefetch (or a page/filter change) means this one's result is stale and
@@ -26520,7 +27857,7 @@ function trcSortHistory(rows){
      that transition is visible - which resets TRC_F back to these same defaults and clears this same
      key, so a reload caught right after landing here restores THIS visit, not the one before it. */
 const TRC_F=(function(){
-  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',overdue:'all',cadence:'all',callbackTat:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
+  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',missedIn:'all',cadence:'all',promised:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
   try{
     const saved=JSON.parse(sessionStorage.getItem('trc_filters_state')||'null');
     if(saved&&typeof saved==='object')return Object.assign(fallback,saved);
@@ -26539,8 +27876,8 @@ function trcResetFilters(){
   const y=traYesterday();
   TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
   TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
-  TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
-  TRC_F.cadence='all';TRC_F.callbackTat='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
+  TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.missedIn='all';
+  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_PAGE=0;
   TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -26815,7 +28152,7 @@ const TRC_LIGHT_FIELDS=TRC_LIGHT.split(',');
 const TRC_CRM_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status:status,crm_status_raw:status_raw,status_detail,'
   +'crm_remarks:remarks,crm_lost_reason:lost_reason,recording_url,callid,has_recording,call_duration,'
-  +'personnel_id,personnel_name,personnel_email,personnel_role';
+  +'personnel_id,personnel_name,personnel_email,personnel_role,recording_eligible';
 
 /* A lead that already reached Qualified (or beyond) has no legitimate way back to Fresh or In Follow
    Up - acc.lead_level_progress_v already audits every follow-up for exactly this and marks the ones
@@ -26873,6 +28210,24 @@ async function trcFetch(force){
    until trcEnrichVisiblePage fills them in for whichever leads are actually on screen (see below) -
    trcRowDate, trcApply's crm/bu/personnel/q filters and trcLeads' grouping/sorting only ever needed
    the columns this DOES carry, so nothing downstream has to know which path a row came from. */
+/* Reads EVERY row of a query, however many there are. The API answers an over-long result with only its
+   first max-rows (1000) and no error, so a plain `await q` quietly drops everything past that - which is
+   how a day with 1183 calls lost its last 183: the cards (counted in the database) read 12 matched leads
+   while the table, built from the 1000 rows that arrived, could show only 10. A page that comes back with
+   1000 or more rows might have been cut short, so it keeps going from where it stopped until a page
+   comes back shorter. build() must return a fresh, fully ordered query each time. */
+async function trcReadAll(build){
+  let out=[],from=0;
+  for(;;){
+    const {data,error}=await build().range(from,from+19999);
+    if(error)throw error;
+    const batch=data||[];
+    out=out.concat(batch);
+    if(batch.length<1000||out.length>200000)break;
+    from+=batch.length;
+  }
+  return out;
+}
 async function trcFetchLight(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey)return TRC_ROWS;
@@ -26882,7 +28237,7 @@ async function trcFetchLight(force){
      of a lighter one. See trcFetchFull for the one place a full fetch also writes THIS key, because
      full data is strictly good enough to answer a light request too. */
   if(!force){
-    const cached=trCacheRead('trc_fetch_light_cache',rangeKey);
+    const cached=trCacheRead('trc_fetch_light_cache_v3',rangeKey);
     if(cached){
       TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;
       TRC_ROWS_ENRICHED=cached.length>0&&cached.every(function(r){return r._enriched;});
@@ -26895,23 +28250,25 @@ async function trcFetchLight(force){
     }
   }
   try{
-    let q=sb.schema('acc').from('crm_followups').select(TRC_CRM_LIGHT)
-      .order('call_date',{ascending:false,nullsFirst:false})
-      .order('communication_time',{ascending:false,nullsFirst:false})
-      .order('follow_up_id',{ascending:false});
-    if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
-    if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
-    const {data,error}=await q;
-    if(error)throw error;
-    const rows=data||[];
+    const rows=await trcReadAll(function(){
+      let q=sb.schema('acc').from('crm_followups').select(TRC_CRM_LIGHT)
+        .order('call_date',{ascending:false,nullsFirst:false})
+        .order('communication_time',{ascending:false,nullsFirst:false})
+        .order('follow_up_id',{ascending:false});
+      if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
+      if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
+      return q;
+    });
     /* lead_current_status/lead_current_lost_reason live on acc.crm_leads, one row per lead - a second
        light query, keyed on just the distinct leads this range actually has, rather than folding
        crm_leads into the query above and paying a join for it. */
     const leadIds=Array.from(new Set(rows.map(function(r){return r.lead_id;}).filter(function(v){return v!=null;})));
     let leadMap={};
-    if(leadIds.length){
+    /* In chunks: one .in() with every lead of a wide range is both a very long URL and a result the API
+       would cut at 1000 rows. */
+    for(let i=0;i<leadIds.length;i+=200){
       const {data:leads,error:e2}=await sb.schema('acc').from('crm_leads')
-        .select('lead_id,status,lost_reason').in('lead_id',leadIds);
+        .select('lead_id,status,lost_reason').in('lead_id',leadIds.slice(i,i+200));
       if(e2)throw e2;
       (leads||[]).forEach(function(l){leadMap[String(l.lead_id)]=l;});
     }
@@ -26926,7 +28283,7 @@ async function trcFetchLight(force){
       r.personnel_team=!email?null:((TRC_PERSONNEL||[]).some(function(p){return p.email===email;})?'Pre-Sales':'Sales');
     });
     TRC_ROWS=rows;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
-    trCacheWrite('trc_fetch_light_cache',rangeKey,rows);
+    trCacheWrite('trc_fetch_light_cache_v3',rangeKey,rows);
   }catch(e){
     TRC_ROWS=TRC_ROWS&&TRC_ROWS_RANGE===rangeKey?TRC_ROWS:[];TRC_ROWS_RANGE=null;TRC_QA_MERGED_RANGE=null;
     toast('Could not load the call history: '+((e&&e.message)||e),'err');
@@ -26944,7 +28301,7 @@ async function trcFetchFull(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey&&TRC_ROWS_ENRICHED)return TRC_ROWS;
   if(!force){
-    const cached=trCacheRead('trc_fetch_cache',rangeKey);
+    const cached=trCacheRead('trc_fetch_cache_v3',rangeKey);
     if(cached){TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=true;TRC_QA_MERGED_RANGE=null;return TRC_ROWS;}
   }
   /* followup_timeline_v joins lead_level_progress_v, which ranks every lead's whole follow-up
@@ -26955,28 +28312,37 @@ async function trcFetchFull(force){
      round trips for a table Postgres can hand back whole in one. PAGE now covers the entire table
      in a single request; the loop (and its 50000 backstop) stays only so a future row count that
      outgrows one page still pages correctly instead of silently truncating. */
-  const PAGE=20000;let out=[],from=0;
+  let out=[];
   try{
-    for(;;){
+    out=await trcReadAll(function(){
       let q=sb.schema('acc').from('followup_timeline_v').select(TRC_LIGHT)
         .order('call_date',{ascending:false,nullsFirst:false})
         .order('communication_time',{ascending:false,nullsFirst:false})
-        .order('follow_up_id',{ascending:false})
-        .range(from,from+PAGE-1);
+        .order('follow_up_id',{ascending:false});
       if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
       if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
-      const {data,error}=await q;
-      if(error)throw error;
-      const batch=data||[];out=out.concat(batch);
-      if(batch.length<PAGE)break;
-      from+=PAGE;if(from>50000)break;
-    }
+      return q;
+    });
+    /* followup_timeline_v does not carry the API's recording_eligible flag, so it is merged in from
+       acc.crm_followups (one indexed, join-free query over the same date range). */
+    try{
+      const el=await trcReadAll(function(){
+        let eq=sb.schema('acc').from('crm_followups').select('follow_up_id,recording_eligible')
+          .not('recording_eligible','is',null).order('follow_up_id',{ascending:false});
+        if(TRC_F.from)eq=eq.gte('call_date',TRC_F.from);
+        if(TRC_F.to)eq=eq.lte('call_date',TRC_F.to);
+        return eq;
+      });
+      const flag={};
+      (el||[]).forEach(function(e){flag[String(e.follow_up_id)]=e.recording_eligible;});
+      out.forEach(function(r){const v=flag[String(r.follow_up_id)];if(v!==undefined)r.recording_eligible=v;});
+    }catch(e){}
     out.forEach(function(r){r._enriched=true;});
     TRC_ROWS=out;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=true;TRC_QA_MERGED_RANGE=null;
-    trCacheWrite('trc_fetch_cache',rangeKey,out);
+    trCacheWrite('trc_fetch_cache_v3',rangeKey,out);
     // Full data answers a light request too (see trcFetchLight) - written under its key as well so a
     // later visit to this same range never fetches a step down from what is already sitting here.
-    trCacheWrite('trc_fetch_light_cache',rangeKey,out);
+    trCacheWrite('trc_fetch_light_cache_v3',rangeKey,out);
   }catch(e){
     TRC_ROWS=out.length?out:[];TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
     toast('Could not load the call history: '+((e&&e.message)||e),'err');
@@ -27007,14 +28373,15 @@ async function trcEnsureQaFieldsMerged(){
   if(TRC_QA_MERGED_RANGE===rangeKey)return;
   trcShowLoading();
   try{
-    let q=sb.schema('acc').from('followup_qa').select(
-      'follow_up_id,qa_id:id,pitch_score,pitch_status,followup_date_status,lost_reason_status,'
-      +'retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
-      +'qa_error,reused_transcription,is_latest_assessed');
-    if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
-    if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
-    const {data,error}=await q;
-    if(error)throw error;
+    const data=await trcReadAll(function(){
+      let q=sb.schema('acc').from('followup_qa').select(
+        'follow_up_id,qa_id:id,pitch_score,pitch_status,followup_date_status,lost_reason_status,'
+        +'retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+        +'qa_error,reused_transcription,is_latest_assessed').order('follow_up_id',{ascending:false});
+      if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
+      if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
+      return q;
+    });
     const byFollowUp={};
     (data||[]).forEach(function(r){byFollowUp[String(r.follow_up_id)]=r;});
     (TRC_ROWS||[]).forEach(function(r,i){
@@ -27086,7 +28453,7 @@ async function trcEnrichVisiblePage(){
     if(changed&&gen===TRC_ENRICH_GEN){
       // Persisted under the same key trcFetchLight reads, so a reload within the cache window comes
       // back with whichever leads this tab already paid to enrich, not the original blank snapshot.
-      trCacheWrite('trc_fetch_light_cache',TRC_ROWS_RANGE,TRC_ROWS);
+      trCacheWrite('trc_fetch_light_cache_v3',TRC_ROWS_RANGE,TRC_ROWS);
       trcRender(false,true);
     }
   }catch(e){
@@ -27156,33 +28523,21 @@ async function trcKpiFastFetch(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_KPI_FAST&&!force&&TRC_KPI_FAST_RANGE===rangeKey)return TRC_KPI_FAST;
   try{
-    let sq=sb.schema('acc').from('daily_qa_summary').select('*');
-    if(TRC_F.from)sq=sq.gte('date',TRC_F.from);
-    if(TRC_F.to)sq=sq.lte('date',TRC_F.to);
-    const lq=sb.schema('acc').rpc('crm_lead_count_in_range',{p_from:TRC_F.from||null,p_to:TRC_F.to||null});
-    const [{data:days,error:e1},{data:leadCount,error:e2}]=await Promise.all([sq,lq]);
-    if(e1||e2)throw (e1||e2);
-    const sum={total_followups:0,recordings_available:0,transcribed:0,already_transcribed:0,
-      non_transcribable:0,transcription_failed:0,pending:0,not_in_scope:0,qa_assessed:0,
-      pitch_score_sum:0,pitch_score_n:0,pitch_accurate:0,pitch_partially_accurate:0,pitch_inaccurate:0,
-      followup_date_accurate:0,followup_date_inaccurate:0,followup_date_not_verifiable:0,
-      lost_reason_accurate:0,lost_reason_inaccurate:0,lost_reason_not_verifiable:0,
-      remarks_accurate:0,remarks_partially_accurate:0,remarks_inaccurate:0,remarks_not_verifiable:0,
-      status_match:0,status_mismatch:0,lost_should_not_have_been_lost:0,
-      qualified_should_not_have_been_qualified:0,in_followup_should_have_been_lost:0,
-      in_followup_should_have_been_qualified:0,
-      agent_qa_score_sum:0,agent_qa_score_n:0,
-      reused_transcription:0,
-      /* Safe to sum day-by-day and add across a range, unlike total_leads - is_latest_assessed
-         (20260918100000) is unique per lead across the WHOLE table, so a lead's match/mismatch
-         contribution lands on exactly one day, ever. See 20260918110000. */
-      status_match_leads:0,status_mismatch_leads:0,
-      lost_should_not_have_been_lost_leads:0,qualified_should_not_have_been_qualified_leads:0,
-      in_followup_should_have_been_lost_leads:0,in_followup_should_have_been_qualified_leads:0};
-    (days||[]).forEach(function(d){
-      Object.keys(sum).forEach(function(k){sum[k]+=Number(d[k]||0);});
-    });
-    sum.total_leads=Number(leadCount||0);
+    /* One call to acc.eligible_kpis: counts over the calls the CRM API flags recording_eligible only,
+       each in exactly one bucket (transcribed / waiting / failed / no conversation / no recording), so
+       the cards can never disagree with the eligible total. Lead counts come from the same query. */
+    const {data,error}=await sb.schema('acc').rpc('eligible_kpis',{p_from:TRC_F.from||null,p_to:TRC_F.to||null});
+    if(error)throw error;
+    const d=data||{};
+    const sum={};
+    Object.keys(d).forEach(function(k){sum[k]=Number(d[k]||0);});
+    /* Names the rest of this page already reads. */
+    sum.total_followups=sum.eligible;
+    sum.total_leads=sum.eligible_leads;
+    sum.transcribed=sum.completed;
+    sum.pending=sum.not_transcribed;
+    sum.transcription_failed=sum.failed;
+    sum.reused_transcription=sum.reused;
     TRC_KPI_FAST=sum;TRC_KPI_FAST_RANGE=rangeKey;
   }catch(e){
     TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -27200,7 +28555,7 @@ async function trcKpiFastFetch(force){
    to bring it current. Only ever fires the extra request when there is actually something to fix. */
 async function trcFetchBoth(){
   await Promise.all([trcFetch(false),trcKpiFastFetch()]);
-  if(TRC_KPI_FAST&&TRC_ROWS&&TRC_KPI_FAST.total_followups!==TRC_ROWS.length){
+  if(TRC_KPI_FAST&&TRC_ROWS&&TRC_KPI_FAST.total_followups!==TRC_ROWS.filter(trcRecordingEligible).length){
     await trcFetch(true);
   }
 }
@@ -27231,10 +28586,11 @@ async function trcEnsurePinnedLead(){
 
 /* Every filter, applied together. skipCards lifts the two card filters so the four totals stay put
    while one of them is selected - clicking Mismatch must not collapse Transcribed to the mismatches. */
-function trcApply(rows,skipCards){
+function trcApply(rows,skipCards,allCalls){
   const q=String(TRC_F.q||'').trim().toLowerCase();
   const all=rows||[];
   return all.filter(function(r){
+    if(!allCalls&&!trcRecordingEligible(r))return false;
     const d=trcRowDate(r);
     if(TRC_F.from&&(!d||d<TRC_F.from))return false;
     if(TRC_F.to&&(!d||d>TRC_F.to))return false;
@@ -27282,8 +28638,7 @@ function trcApply(rows,skipCards){
       else if(String(r.personal_mobile_status||'')!==TRC_F.personalMobile)return false;
     }
     if(!skipCards){
-      if(TRC_F.proc==='failed'){ if(!trcProcFailed(r))return false; }
-      else if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
+      if(TRC_F.proc!=='all'&&trcEligBucket(r)!==TRC_F.proc)return false;
       // MATCH/MISMATCH mean "currently" (see trcCountsMatch/trcCountsMismatch) - a superseded old
       // verdict does not belong in either drill-down, only in the lead's own history.
       if(TRC_F.match==='MATCH'&&!trcCountsMatch(r))return false;
@@ -27349,11 +28704,10 @@ function trcLeads(rows){
     g.mismatches=g.rows.filter(trcCountsMismatch).length;
     g.regressions=g.rows.filter(trcIsRegression).length;
     g.ovHealth=trcOvHealth(g.status,g.rows);
-    g.callbackOverdue=trcCallbackOverdue(g.status,g.rows);
     /* Cadence and callback TAT judge a lead's WHOLE follow-up history, not just whatever slice of it
        falls inside the selected date range - g.rows is range-limited, so judging off it directly would
        silently score a lead only on the one call that happened to land in the window (which is why
-       these two used to read exactly like g.callbackOverdue - both collapsing to "the latest call in
+       these used to collapse to "the latest call in
        range" when the range is a single day). The full history is exactly what trcPrefetchHistories
        already warms in the background for click-through (see trcAfterListRender) - reuse it once it
        has arrived; a lead not yet warmed simply falls back to the range-limited rows for this one
@@ -27361,8 +28715,12 @@ function trcLeads(rows){
        completion re-render (see its own note) picks it up. */
     const cachedHistory=trcLeadCacheRead(g.lead_id);
     const historyRows=cachedHistory?cachedHistory.rows:g.rows;
-    g.cadence=trcCadenceIssues(g.status,historyRows);
-    g.callbackTat=trcFirstCallbackTat(historyRows);
+    /* Pending until the real history has arrived (see trcEnsureHistories): scoring a lead off only
+       the one call in the date range gave answers that flipped the moment its history loaded. */
+    g.historyPending=!cachedHistory&&!TRC_HIST_TRIED[String(g.lead_id)];
+    g.cadence=g.historyPending?null:trcCadenceIssues(g.status,historyRows,'late');
+    g.promised=g.historyPending?null:trcCadenceIssues(g.status,historyRows,'promised');
+    g.missedIn=g.historyPending?null:trcMissedIncomingCallback(historyRows);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -27477,8 +28835,8 @@ function trcLeadSkeletonHtml(){
 
 /* ---- the dashboard. Same four cards and the same chips as before; what changed underneath is that
    a "call" is now a follow-up in the CRM's own history rather than a row we happened to import. ---- */
-function trcKpiHtml(rows){
-  const n=function(st){return rows.filter(function(r){return trcTrStatus(r)===st;}).length;};
+function trcKpiHtml(rows,shownRows){
+  const n=function(st){return rows.filter(function(r){return trcEligBucket(r)===st;}).length;};
   /* The four cards, "QA assessed" and "Reused an existing transcript" all have one unambiguous,
      purely-additive definition each, verified to match acc.daily_qa_summary_v exactly (see
      20260917110000) - so they can come from that day-summed table instead of scanning every fetched
@@ -27491,7 +28849,6 @@ function trcKpiHtml(rows){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   const fast=(TRC_F.crm==='all'&&TRC_F.bu==='all'&&TRC_F.personnel==='all'&&!String(TRC_F.q||'').trim()
               &&TRC_KPI_FAST&&TRC_KPI_FAST_RANGE===rangeKey)?TRC_KPI_FAST:null;
-  const totalCalls=fast?fast.total_followups:rows.length;
   /* Every card's own lead count - always counted from `rows` (the fetched range, filtered by date/CRM
      status/business unit/personnel/search but not by which card is active), never from the fast path:
      there is no per-category distinct-lead total to sum from acc.daily_qa_summary (the same reason
@@ -27499,15 +28856,13 @@ function trcKpiHtml(rows){
      days is one lead, not two), and this is cheap enough as a plain array scan that it never needed
      one. */
   const leadsOf=function(pred){return new Set(rows.filter(pred).map(function(r){return r.lead_id;})).size;};
-  const leadCount=fast?fast.total_leads:leadsOf(function(){return true;});
-  /* Total Calls' own lead count is safe unconditionally - lead_id is on every row whether or not it
-     has been enriched yet. Transcribed/Match/Mismatch's lead counts are NOT: they read
+  /* Transcribed/Match/Mismatch's lead counts need enrichment: they read
      trcTrStatus/status_match, which the fast crm_followups-only fetch never carries (see
      trcFetchLight) until trcEnrichVisiblePage fills in whichever leads are actually on screen. Asking
      for them across the whole range before that would silently undercount almost everything, so the
      subtitle just leaves the lead count off until the row data backs it up. */
   const haveDetail=TRC_ROWS_ENRICHED;
-  const transcribedLeads=haveDetail?leadsOf(function(r){return trcTrStatus(r)==='completed';}):null;
+  const transcribedLeads=fast?fast.completed_leads:(haveDetail?leadsOf(function(r){return trcEligBucket(r)==='completed';}):null);
   /* Match/Mismatch's lead counts, unlike Transcribed's, DO have a fast source now
      (acc.daily_qa_summary's *_leads columns, 20260918110000) - is_latest_assessed makes a lead's
      match/mismatch contribution land on exactly one day ever, so summing per-day distinct-lead
@@ -27518,10 +28873,15 @@ function trcKpiHtml(rows){
   const matchLeads=fast?fast.status_match_leads:(haveDetail?leadsOf(trcCountsMatch):null);
   const mismatchLeads=fast?fast.status_mismatch_leads:(haveDetail?leadsOf(trcCountsMismatch):null);
   const inLeads=function(c){return c+' lead'+(c===1?'':'s');};
+  /* "Eligible for transcription": every call the CRM API flags recording_eligible (see
+     trcRecordingEligible) - this is the total that Waiting, Failed, Transcribed and so on break down.
+     `rows` is already narrowed to those calls, and lead_id is on every row, so it needs no enrichment. */
+  const eligibleCalls=fast?fast.eligible:rows.length;
+  const eligibleLeads=fast?fast.eligible_leads:leadsOf(function(){return true;});
   const cards=[
-    ['Total Calls',totalCalls,'follow-ups in '+inLeads(leadCount),'var(--slate)','all','proc'],
+    ['Eligible for transcription',eligibleCalls,'in '+inLeads(eligibleLeads),'var(--slate)','all','proc'],
     ['Transcribed',fast?fast.transcribed:n('completed'),
-      'with a full transcript'+(haveDetail?', in '+inLeads(transcribedLeads):''),'#16a34a','completed','proc'],
+      'with a full transcript'+(transcribedLeads!==null?', in '+inLeads(transcribedLeads):''),'#16a34a','completed','proc'],
     ['CRM Match',fast?fast.status_match:rows.filter(trcCountsMatch).length,
       'agrees with the CRM'+(haveMatchLeads?', in '+inLeads(matchLeads):''),'#16a34a','MATCH','match'],
     ['CRM Mismatch',fast?fast.status_mismatch:rows.filter(trcCountsMismatch).length,
@@ -27532,13 +28892,19 @@ function trcKpiHtml(rows){
      stores the closest matching column for each (see 20260917110000's own note on where its
      pending/not_in_scope categories drift slightly from trcTrStatus's queue_status-truthiness split -
      an approximation, but a far closer one than reading undefined off every row not yet enriched). */
-  // "Not in scope" chip removed by request (2026-09-18) - a row that is out of scope still shows its
-  // own "Not in scope" tag in the table (see TRC_TR_META), this just drops it as a KPI-row filter chip.
+  /* "Not in scope" chip is back (it was dropped 2026-09-18) - this time counting LEADS, not calls. A
+     lead is out of scope when a call of theirs never entered the transcription queue (trcTrStatus), and
+     that needs row-level data, so it reads '…' until the fuller lead data has loaded, like the
+     missed-incoming / late-follow-up chips. */
+  /* "Not in scope" is gone (a call that never entered the queue is not an eligible call). "No recording" is
+     back, but now counts only ELIGIBLE calls: the API can flag a call eligible while its recording_url
+     is still empty, and those are exactly the calls that can never be transcribed. */
+  const noRecording=fast?fast.no_recording:n('no_recording');
   const sub=[
     ['Waiting','not_transcribed',fast?fast.pending:n('not_transcribed'),'fa-clock'],
-    ['No recording','no_recording',fast?(fast.total_followups-fast.recordings_available):n('no_recording'),'fa-phone-slash'],
+    ['Failed','failed',fast?fast.failed:n('failed'),'fa-circle-exclamation'],
     ['No conversation','non_transcribable',fast?fast.non_transcribable:n('non_transcribable'),'fa-volume-xmark'],
-    ['Failed','failed',fast?fast.transcription_failed:rows.filter(trcProcFailed).length,'fa-circle-exclamation']
+    ['No recording','no_recording',noRecording,'fa-phone-slash']
   ];
   const assessed=fast?fast.qa_assessed:rows.filter(function(r){return r.qa_id;}).length;
   const reused=fast?fast.reused_transcription:rows.filter(function(r){return r.reused_transcription;}).length;
@@ -27546,9 +28912,11 @@ function trcKpiHtml(rows){
      carries (see TRC_LIGHT) - same enrichment tier the 'proc' cards already require. Computed by
      actually rolling `rows` up into leads (trcLeads), not a flat count, because "overdue" is a
      property of a LEAD's latest call, not of any one row. */
-  const overdueLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackOverdue;}).length:null;
-  const cadenceLeads=haveDetail?trcLeads(rows).filter(function(g){return g.cadence;}).length:null;
-  const callbackTatLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackTat;}).length:null;
+  const shownLeads=haveDetail?trcLeads(shownRows||rows):[];
+  const histDone=haveDetail&&shownLeads.every(function(g){return !g.historyPending;});
+  const missedInLeads=histDone?shownLeads.filter(function(g){return g.missedIn;}).length:null;
+  const cadenceLeads=histDone?shownLeads.filter(function(g){return g.cadence;}).length:null;
+  const promisedLeads=histDone?shownLeads.filter(function(g){return g.promised;}).length:null;
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
       const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
       return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
@@ -27556,24 +28924,29 @@ function trcKpiHtml(rows){
         +'<div class="val">'+c[1]+'</div>'
         +'<div style="font-size:12px;color:'+c[3]+';margin-top:3px">'+esc(c[2])+'</div></div>';
     }).join('')+'</div>'
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">'+sub.map(function(s){
+    +'<div class="card card-pad" style="margin-top:12px;padding-top:10px;padding-bottom:10px">'
+    +'<div style="font-size:12px;font-weight:600;color:var(--slate);margin-bottom:8px">Eligible calls not transcribed yet</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+sub.map(function(s){
       const on=TRC_F.proc===s[1];
       return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcCard(\'proc\',\''+s[1]+'\')">'
         +'<i class="fa-solid '+s[3]+'"></i> '+esc(s[0])+' <b>'+s[2]+'</b></button>';
     }).join('')
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
-    +'<button class="btn btn-sm'+(TRC_F.overdue==='1'?' btn-primary':'')+'" onclick="trcToggleOverdue()" title="A promised next-follow-up date that has passed with nothing logged since - not counted until the fuller lead data has loaded">'
-      +'<i class="fa-solid fa-phone-slash"></i> Missed callback'+(overdueLeads===null?'':' <b>'+overdueLeads+'</b>')+'</button>'
-    +'<button class="btn btn-sm'+(TRC_F.cadence==='1'?' btn-primary':'')+'" onclick="trcToggleCadence()" title="At least one follow-up gap where the recontact was late - a scheduled date missed, or no date and more than 3 days passed. Not counted until the fuller lead data has loaded">'
-      +'<i class="fa-solid fa-hourglass-half"></i> Cadence issues'+(cadenceLeads===null?'':' <b>'+cadenceLeads+'</b>')+'</button>'
-    +'<button class="btn btn-sm'+(TRC_F.callbackTat==='1'?' btn-primary':'')+'" onclick="trcToggleCallbackTat()" title="The first call on this lead happened after the day it first appeared in the CRM - not counted until the fuller lead data has loaded">'
-      +'<i class="fa-solid fa-phone-volume"></i> Slow first callback'+(callbackTatLeads===null?'':' <b>'+callbackTatLeads+'</b>')+'</button>'
-    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<span style="font-size:12.5px;color:var(--slate)">QA assessed <b style="color:var(--ink)">'+assessed+'</b></span>'
     /* Deduplication is invisible unless it is counted. This is the number of follow-ups that reused a
        transcript already paid for, which is the whole point of keying on recording_url. */
     +'<span style="font-size:12.5px;color:var(--slate)">Reused an existing transcript <b style="color:var(--ink)">'+reused+'</b></span>'
-    +'</div>'
+    +'</div></div>'
+    +'<div class="card card-pad" style="margin-top:12px;padding-top:10px;padding-bottom:10px">'
+    +'<div style="font-size:12px;font-weight:600;color:var(--slate);margin-bottom:8px">Lead follow-up checks (whole call history)</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+    +'<button class="btn btn-sm'+(TRC_F.missedIn==='1'?' btn-primary':'')+'" onclick="trcToggleMissedIn()" title="The lead called in and the call was missed (logged as incoming call missed), and no callback was logged within 24 hours. Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-slash"></i> Missed callback'+(missedInLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+missedInLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.promised==='1'?' btn-primary':'')+'" onclick="trcTogglePromised()" title="The agent promised a call back on a set date, that date has passed, and no call has been logged since. Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-calendar-xmark"></i> Promised call - not called back'+(promisedLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+promisedLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.cadence==='1'?' btn-primary':'')+'" onclick="trcToggleCadence()" title="The agent set a next follow-up date and the next call came after that date (every call is checked against the date set on the call before it). Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-hourglass-half"></i> Late follow-ups'+(cadenceLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+cadenceLeads+'</b>')+'</button>'
+    +'</div></div>'
     +(TRC_F.match==='MISMATCH'?trcMismatchPanel(rows,fast):'');
 }
 
@@ -27650,29 +29023,40 @@ window.trcCard=async function(kind,val){
   trcRender(true);
 };
 
-/* An independent toggle, not a fourth tab in the group above - it narrows whichever set of leads is
-   already on screen (a card, a mismatch category, a search) down to the ones with a missed callback,
-   the same way the accuracy dropdowns in the filter bar narrow it, rather than replacing that set.
-   Needs lead_current_status (to exclude Lost leads) - only the full join carries that, same as the
-   'proc' cards. */
-window.trcToggleOverdue=async function(){
-  TRC_F.overdue=(TRC_F.overdue==='1'?'all':'1');
-  if(TRC_F.overdue==='1')await trcEnsureFullEnrichment();
+/* An independent toggle, not another tab in the group above - it narrows whichever set of leads is
+   already on screen down to the ones with a missed incoming call that was not called back properly
+   (see trcMissedIncomingCallback). */
+window.trcToggleMissedIn=async function(){
+  TRC_F.missedIn=(TRC_F.missedIn==='1'?'all':'1');
+  if(TRC_F.missedIn==='1'){
+    await trcEnsureFullEnrichment();
+    trcRender(true);
+    await trcEnsureHistories(TRC_LIST_LEAD_IDS);
+  }
   trcRender(true);
 };
-/* Same idea as trcToggleOverdue, narrowing to leads with at least one late follow-up gap (see
-   trcCadenceIssues) instead of only the current open one. Needs the full join for the same reason -
+/* Same idea as trcToggleMissedIn, narrowing to leads where a follow-up date the agent set was missed (see
+   trcCadenceIssues). Needs the full join for the same reason -
    the check is skipped for Lost leads, which only lead_current_status (TRC_LIGHT) can tell it. */
 window.trcToggleCadence=async function(){
   TRC_F.cadence=(TRC_F.cadence==='1'?'all':'1');
-  if(TRC_F.cadence==='1')await trcEnsureFullEnrichment();
+  if(TRC_F.cadence==='1'){
+    await trcEnsureFullEnrichment();
+    trcRender(true);
+    await trcEnsureHistories(TRC_LIST_LEAD_IDS);
+  }
   trcRender(true);
 };
-/* Same idea again, narrowing to leads whose first-ever call landed later than lead_first_seen_date
-   (see trcFirstCallbackTat). Needs the full join too - lead_first_seen_date only travels with it. */
-window.trcToggleCallbackTat=async function(){
-  TRC_F.callbackTat=(TRC_F.callbackTat==='1'?'all':'1');
-  if(TRC_F.callbackTat==='1')await trcEnsureFullEnrichment();
+
+/* Same shape again, for a promised follow-up date that passed with no call logged since (see
+   trcCadenceIssues, mode 'promised'). */
+window.trcTogglePromised=async function(){
+  TRC_F.promised=(TRC_F.promised==='1'?'all':'1');
+  if(TRC_F.promised==='1'){
+    await trcEnsureFullEnrichment();
+    trcRender(true);
+    await trcEnsureHistories(TRC_LIST_LEAD_IDS);
+  }
   trcRender(true);
 };
 
@@ -27845,8 +29229,8 @@ window.trcSet=async function(k,v){
 };
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
-  TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
-  TRC_F.cadence='all';TRC_F.callbackTat='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
+  TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.missedIn='all';
+  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_F.q='';
   // Not null/null - that was "All time". Clearing the filters resets the date range to the same
   // Previous day default the page opens with, rather than reopening that door.
@@ -27924,9 +29308,9 @@ function trcLeadRowHtml(g,sl){
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
           (g.regressions>1?g.regressions+' status regressions':'Status regressed')):'')
-      +(g.callbackOverdue?' '+trcTag('t-red','fa-phone-slash','',
-          'Missed callback - promised '+(trcWall(g.callbackOverdue.dueDate)||g.callbackOverdue.dueDate)
-          +', '+g.callbackOverdue.daysLate+' day'+(g.callbackOverdue.daysLate===1?'':'s')+' overdue'):''))
+      +(g.promised?' '+trcTag('t-amber','fa-calendar-xmark','','Promised call on '+(trcWall(g.promised.gaps[g.promised.gaps.length-1].limitDate)||'')+' - no call since'):'')
+      +(g.missedIn?' '+trcTag('t-red','fa-phone-slash','',
+          'Missed incoming call '+g.missedIn.count+' time'+(g.missedIn.count===1?'':'s')+' - not called back within 24 hours'):''))
     /* g.lastAssessedOutside only ever fires once g.lastAssessed itself is null (see trcLeads) - a
        carried-over verdict from another date, not this range's own, so it is labelled with exactly
        that date (trcBackfillLastJudgement) rather than left indistinguishable from a same-range one.
@@ -27949,8 +29333,7 @@ function trcLeadRowHtml(g,sl){
        g.lastAssessed). */
     +trcTextCell(last.personnel_name,140)
     +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px'
-      +(g.callbackOverdue?';color:#dc2626;font-weight:600':'')+'"'
-      +(g.callbackOverdue?' title="'+esc(g.callbackOverdue.daysLate+' day'+(g.callbackOverdue.daysLate===1?'':'s')+' overdue')+'"':'')+'>'
+      +'">'
       +esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
     +trcTextCell(last.crm_remarks,220)
@@ -28017,9 +29400,11 @@ function trcColsHtml(){
 function trcRender(full,keepPage){
   trcSaveFilterState();
   const all=TRC_ROWS||[];
-  let rows=trcApply(all);
+  /* With a history chip on, the list is every lead that had ANY call in range (a missed incoming call
+     has no recording, so it is never an eligible call); otherwise only recording-eligible calls. */
+  let rows=trcApply(all,false,trcHistChipOn());
   const scope=trcApply(all,true);
-  const k=$('trcKpis');if(k)k.innerHTML=trcKpiHtml(scope);
+  const k=$('trcKpis');if(k)k.innerHTML=trcKpiHtml(scope,trcApply(all,true,true));
   if(full!==false){
     const f=$('trcFilters');if(f)f.innerHTML=trcFilterBar(all);
     const d=$('trcDates');if(d)d.innerHTML=trcDateBar();
@@ -28035,11 +29420,13 @@ function trcRender(full,keepPage){
     rows=rows.concat(TRC_PIN_ROWS);
   }
   let items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
-  // Missed callback is a per-LEAD fact (see trcCallbackOverdue) - it only narrows the lead rollup, not
+  TRC_LIST_LEAD_IDS=callLevel?[]:items.map(function(g){return g.lead_id;});
+  const histLoading=!callLevel&&trcHistChipOn()&&items.some(function(g){return g.historyPending;});
+  // Missed incoming and late follow-ups are per-LEAD facts - they only narrow the lead rollup, not
   // the call-level Mismatch table, which trcLeads never runs over in the first place.
-  if(!callLevel&&TRC_F.overdue==='1')items=items.filter(function(g){return g.callbackOverdue;});
+  if(!callLevel&&TRC_F.missedIn==='1')items=items.filter(function(g){return g.missedIn;});
   if(!callLevel&&TRC_F.cadence==='1')items=items.filter(function(g){return g.cadence;});
-  if(!callLevel&&TRC_F.callbackTat==='1')items=items.filter(function(g){return g.callbackTat;});
+  if(!callLevel&&TRC_F.promised==='1')items=items.filter(function(g){return g.promised;});
   const totalItems=items.length;
   const totalPages=Math.max(1,Math.ceil(totalItems/TRC_PAGE_SIZE));
   if(!keepPage){
@@ -28058,7 +29445,9 @@ function trcRender(full,keepPage){
   const pageOffset=TRC_PAGE*TRC_PAGE_SIZE;
   const pageItems=items.slice(pageOffset,pageOffset+TRC_PAGE_SIZE);
   TRC_PAGE_ROWS=pageItems;
-  const b=$('trcRows');if(b)b.innerHTML=trcTableHtml(pageItems,callLevel,pageOffset);
+  const b=$('trcRows');if(b)b.innerHTML=histLoading
+    ?'<tr><td colspan="'+TRC_LEAD_COLS+'"><div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i><div>Loading the full follow-up history of each lead…</div></div></td></tr>'
+    :trcTableHtml(pageItems,callLevel,pageOffset);
   const pg=$('trcPager');if(pg)pg.innerHTML=trcPagerHtml(totalItems,totalPages);
   const c=$('trcCount');
   if(c){
@@ -28230,6 +29619,7 @@ function trcAfterListRender(){
   trcEnrichVisiblePage();
   trcBackfillLastJudgement();
   trcPrefetchListedHistories();
+  trcWarmListHistories();
 }
 
 /* ================================================ ONE LEAD, THE WHOLE STORY */
@@ -28494,64 +29884,88 @@ function trcDaysBetween(fromStr,toStr){
   const p=function(s){const a=String(s).split('-').map(Number);return Date.UTC(a[0],a[1]-1,a[2]);};
   return Math.round((p(toStr)-p(fromStr))/86400000);
 }
-/* A promised callback date that has passed with nothing logged since is a missed callback - the agent
-   said "I'll call back on X" and X came and went in silence. Computed the same way trcOvHealth checks
-   its own promised date: against traToday(), over whichever rows the caller hands in - the lead's full
-   history on the detail page (see trcLeadDetail), or only the selected range's rows on the list (see
-   trcLeads) - a call outside that set is invisible here exactly as everywhere else this page rolls up
-   a lead's calls. Not applicable to a lead that has closed the door (Lost) - there is nothing left to
-   call back about. "Lost, then Reopened" is deliberately NOT treated as Lost, same reasoning as
-   everywhere else on this page (see the status_assessment prompt): the "then Reopened" half means the
-   lead is live again. Only the LATEST call's own promise matters - rows arrives chronological
-   (oldest-first, the same order trcLeads and trcLeadDetail already sort it into), so an earlier call's
-   promise was superseded the moment a later call happened, on time or not. */
-function trcCallbackOverdue(status,rows){
-  if(String(status||'')==='Lost')return null;
-  const last=(rows||[])[(rows||[]).length-1];
-  if(!last||!last.next_follow_up_text)return null;
-  const dueDate=String(last.next_follow_up_text).slice(0,10);
-  const today=traToday();
-  if(!(dueDate<today))return null;
-  return {dueDate:dueDate,daysLate:trcDaysBetween(dueDate,today)};
+/* A lead who rang the agent and was not picked up. The CRM history carries no call-direction field, so
+   the agent's own log is the only marker: the follow-up remark reads "incoming call missed" (a remark
+   like "incoming received ..." is an answered call and "incoming call facility is not available" is a
+   failed OUTGOING attempt - neither counts). */
+/* The decision date is the day being judged - the end of the selected range (yesterday by default). Both
+   flags below are "as of" that day: calls logged after it are not yet known, and "today" for the
+   purpose of a promise or a callback window is the decision date itself, never the real clock. */
+function trcDecisionDate(){return TRC_F.to||TRC_F.from||traToday();}
+function trcAsOf(rows){
+  const d=trcDecisionDate();
+  return (rows||[]).filter(function(r){const x=trcRowDate(r);return !x||x<=d;});
 }
-function trcCallbackOverdueHtml(o){
+function trcIsMissedIncoming(r){
+  return /^\s*incoming call missed/i.test(String(r&&r.crm_remarks||''));
+}
+const TRC_MISSED_CALLBACK_HOURS=24;
+/* Was every missed incoming call followed by a callback? Each missed call needs some later logged call
+   (anything that is not itself another missed incoming) within TRC_MISSED_CALLBACK_HOURS of the miss.
+   rows chronological, oldest-first. Not skipped for Lost leads: the customer rang in, a callback is owed
+   whatever the lead's status says. */
+function trcMissedIncomingCallback(rows){
+  const list=trcAsOf(rows);
+  const stamp=function(r){const t=Date.parse(r.communication_time||'');return isNaN(t)?null:t;};
+  const now=Date.parse(trcDecisionDate()+'T23:59:59+05:30'),limit=TRC_MISSED_CALLBACK_HOURS*3600000;
+  const misses=[];
+  for(let i=0;i<list.length;i++){
+    if(!trcIsMissedIncoming(list[i]))continue;
+    const at=stamp(list[i]);
+    if(at===null)continue;
+    let back=null;
+    for(let j=i+1;j<list.length;j++){
+      if(trcIsMissedIncoming(list[j]))continue;
+      const t=stamp(list[j]);
+      if(t!==null){back=t;break;}
+    }
+    const calledBack=back!==null&&back-at<=limit;
+    /* Still inside the window at the end of the decision day with no callback yet - not late yet. */
+    if(calledBack||(back===null&&now-at<=limit))continue;
+    misses.push({follow_up_id:list[i].follow_up_id,missedAt:at,calledBackAt:back});
+  }
+  return misses.length?{count:misses.length,misses:misses}:null;
+}
+function trcMissedIncomingHtml(o){
   if(!o)return '';
+  const fmt=function(t){return esc(trcWall(new Date(t).toISOString().slice(0,10))||'');};
+  const rows=o.misses.slice().reverse().map(function(m){
+    return '<div style="margin-top:6px;font-size:12.5px;color:var(--slate)">Lead called in on '+fmt(m.missedAt)+' and was missed - '
+      +(m.calledBackAt===null?'no callback logged since.'
+        :'first callback on '+fmt(m.calledBackAt)+', '+Math.round((m.calledBackAt-m.missedAt)/3600000)+' hours later (target '+TRC_MISSED_CALLBACK_HOURS+').')
+      +'</div>';
+  }).join('');
   return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #dc2626">'
-    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-slash" style="color:#dc2626"></i> Missed callback</div>'
-    +'<div style="font-size:12.5px;color:var(--slate)">A callback was promised for '
-    +esc(trcWall(o.dueDate)||o.dueDate)+' and nothing has been logged against this lead since - '
-    +o.daysLate+' day'+(o.daysLate===1?'':'s')+' overdue.</div>'
-  +'</div>';
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-slash" style="color:#dc2626"></i> Missed incoming call not called back properly - '
+    +o.count+' time'+(o.count===1?'':'s')+'</div>'+rows+'</div>';
 }
-/* Follow-up frequency/cadence - was the recontact after each call made on time?
-   Scheduled   - the call named a next_follow_up_text date; late if the FOLLOWING call (or, for the
-                 lead's own still-open gap, today) falls after that date.
-   Unscheduled - the call named no date at all; late if more than TRC_CADENCE_UNSCHEDULED_DAYS days
-                 pass before the next call (or today, for the still-open gap).
-   Not evaluated once a lead is Lost - same reasoning as trcCallbackOverdue, there is nothing left to
-   call back about. rows must already be chronological, oldest-first (trcLeads/trcLeadDetail's own
-   order), since each gap is judged against the call that comes right after it. */
-const TRC_CADENCE_UNSCHEDULED_DAYS=3;
-function trcCadenceIssues(status,rows){
+/* Late follow-ups: the agent set a next follow-up date and that date passed with no call. Only a date the
+   agent promised counts - a call with no date set is never "late". A missed incoming call is the
+   customer's call, not the agent's follow-up, so it neither satisfies a promise nor starts one. Not
+   evaluated once a lead is Lost. rows must be chronological, oldest-first. */
+function trcCadenceIssues(status,rows,mode){
   if(String(status||'')==='Lost')return null;
-  const list=rows||[];
-  const today=traToday();
+  const list=trcAsOf(rows).filter(function(r){return !trcIsMissedIncoming(r);});
+  const today=trcDecisionDate();
   const gaps=[];
   for(let i=0;i<list.length;i++){
     const prev=list[i];
+    if(!prev.next_follow_up_text)continue;
     const nextRow=list[i+1]||null;
     const actualDate=nextRow?trcRowDate(nextRow):today;
     if(!actualDate)continue;
-    const scheduled=!!prev.next_follow_up_text;
-    const prevDate=trcRowDate(prev);
-    const limitDate=scheduled?String(prev.next_follow_up_text).slice(0,10)
-                             :(prevDate?trcAddDays(prevDate,TRC_CADENCE_UNSCHEDULED_DAYS):null);
-    if(!limitDate||!(actualDate>limitDate))continue;
+    const scheduled=true;
+    const limitDate=String(prev.next_follow_up_text).slice(0,10);
+    if(!(actualDate>limitDate))continue;
     gaps.push({follow_up_id:prev.follow_up_id,scheduled:scheduled,limitDate:limitDate,
       actualDate:nextRow?actualDate:null,daysLate:trcDaysBetween(limitDate,actualDate),open:!nextRow});
   }
-  if(!gaps.length)return null;
-  return {lateCount:gaps.length,totalGaps:list.length,gaps:gaps};
+  /* mode 'late': the promised date was missed but a call did follow, after it. mode 'promised': the
+     promised date passed and no call has been logged since. No mode (lead detail page): both. */
+  const shown=mode==='late'?gaps.filter(function(g){return !g.open;})
+    :mode==='promised'?gaps.filter(function(g){return g.open;}):gaps;
+  if(!shown.length)return null;
+  return {lateCount:shown.length,totalGaps:list.length,gaps:shown};
 }
 function trcCadenceIssuesHtml(o){
   if(!o)return '';
@@ -28568,32 +29982,6 @@ function trcCadenceIssuesHtml(o){
     +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-hourglass-half" style="color:#d97706"></i> Follow-up cadence - '
     +o.lateCount+' late of '+o.totalGaps+'</div>'
     +rows
-  +'</div>';
-}
-/* Inbound lead -> first callback turnaround: how long after this lead first appeared in the CRM the
-   first logged call actually happened. lead_first_seen_date (acc.crm_leads, not the per-follow-up
-   f.first_seen_date - see the view's own note) carries no time-of-day, so this is a calendar-day
-   proxy for a 24-hour target, not an hour-level measurement - same day counts as on time, anything
-   later is flagged. rows must be chronological, oldest-first. Only available where the row came from
-   the full join (TRC_LIGHT/followup_timeline_v) - on the fast crm_followups-only path this field is
-   simply absent and the function returns null, the same way trcIsRegression treats a light row. */
-function trcFirstCallbackTat(rows){
-  const list=rows||[];
-  const first=list[0];
-  if(!first||!first.lead_first_seen_date)return null;
-  const firstCallDate=trcRowDate(first);
-  if(!firstCallDate)return null;
-  const daysLate=trcDaysBetween(first.lead_first_seen_date,firstCallDate);
-  if(!(daysLate>0))return null;
-  return {leadSeenDate:first.lead_first_seen_date,firstCallDate:firstCallDate,daysLate:daysLate};
-}
-function trcFirstCallbackTatHtml(o){
-  if(!o)return '';
-  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #d97706">'
-    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-volume" style="color:#d97706"></i> First callback turnaround</div>'
-    +'<div style="font-size:12.5px;color:var(--slate)">Lead first seen '+esc(trcWall(o.leadSeenDate)||o.leadSeenDate)
-    +', first call logged '+esc(trcWall(o.firstCallDate)||o.firstCallDate)+' - '
-    +o.daysLate+' day'+(o.daysLate===1?'':'s')+' after.</div>'
   +'</div>';
 }
 /* The two-part OV rule: enforced here, not just checked by hand.
@@ -28832,16 +30220,14 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
     : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
   const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
-  const callbackOverdue=trcCallbackOverdueHtml(trcCallbackOverdue(lead&&lead.status,rows));
+  const missedIncoming=trcMissedIncomingHtml(trcMissedIncomingCallback(rows));
   const cadenceIssues=trcCadenceIssuesHtml(trcCadenceIssues(lead&&lead.status,rows));
-  const callbackTat=trcFirstCallbackTatHtml(trcFirstCallbackTat(rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
     +ovHealth
-    +callbackOverdue
+    +missedIncoming
     +cadenceIssues
-    +callbackTat
     +calls;
 
   if(!document.getElementById('trcTwoCss')){
@@ -28868,7 +30254,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
    failure never re-transcribes and never re-bills the audio call. */
 window.trcRetry=async function(followUpId){
   const btns=document.querySelectorAll('[onclick="trcRetry('+followUpId+')"]');
-  btns.forEach(function(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Queued';});
+  btns.forEach(function(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Transcribing…';});
   try{
     const {data:{session}}=await sb.auth.getSession();
     const token=session&&session.access_token;
@@ -28877,15 +30263,23 @@ window.trcRetry=async function(followUpId){
       body:JSON.stringify({action:'retry',follow_up_id:followUpId})});
     const out=await res.json().catch(function(){return {};});
     if(!res.ok||out.error)throw new Error(out.error||('HTTP '+res.status));
-    toast('Back in the queue','ok');
+    /* The request is not the result: say what the step actually did. */
+    const steps=(out.work&&out.work.steps)||[];
+    const failed=steps.filter(function(x){return x&&x.status==='failed';})[0];
+    if(failed)throw new Error(failed.error||'the step failed');
+    const step=steps[steps.length-1];
+    if(!step)toast('Queued, but not started yet: '+((out.work&&out.work.note)||'the worker is busy'),'err');
+    else if(step.phase==='qa')toast('QA finished for this call','ok');
+    else if(step.status==='non_transcribable')toast('Listened to it: '+(step.reason||'no conversation')+' - nothing to transcribe','ok');
+    else toast('Transcribed - QA is next','ok');
   }catch(e){
     toast('Could not retry: '+((e&&e.message)||e),'err');
   }
   /* The repaint is what puts the button back, so it has to happen even when the refetch fails -
      otherwise a dropped connection leaves a dead spinner where the Retry button used to be. */
   TRC_ROWS=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
-  trCacheClear('trc_fetch_cache');
-  trCacheClear('trc_fetch_light_cache');
+  trCacheClear('trc_fetch_cache_v3');
+  trCacheClear('trc_fetch_light_cache_v3');
   /* Retry can be clicked from either of two screens now - a lead's own detail page (the per-call
      card's button) or the Failed list/table (the per-row buttons added alongside it) - and each has
      to repaint ITSELF, not drag the other screen's reader somewhere they didn't ask to go. $('trcRows')
@@ -30539,6 +31933,8 @@ const USAGE_VIEWS={
   'transcription/5':     'transcription.compilation.view_a_lead_s_combined_call_history',
   'transcription/view':  'transcription.call_detail.view_qualification_checklist_and_entities',
   'dashboard/0':         'dashboard.overview.view_home_dashboard_summary',
+  'accounts/0':          'accounts.transactions.view_transactions',
+  'accounts/1':          'accounts.ledgers_postings.view_ledgers_postings',
   'gtd/0':               'gtd.inbox.view_capture_inbox_clarify_queue',
   'gtd/1':               'gtd.next_actions.view_next_actions_by_context',
   'gtd/2':               'gtd.projects.view_active_projects_next_steps',

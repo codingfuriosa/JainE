@@ -22,6 +22,18 @@
 //      instead, with the customer's name spelled out in the text since Zoho's own commenter metadata
 //      will show whichever agent identity this integration is connected as, not the customer.
 //
+//   6. Tickets that START in Zoho - a customer's email to customer care, a call an agent logged - are
+//      mirrored too, so the customer sees them in the portal (6 Oct 2026). {action:'cron'} (pg_cron
+//      'zoho-ticket-import', every 10 minutes, authenticated by the shared secret 'zoho_sync' in
+//      acc.job_secrets) reads Zoho's newest tickets and matches each to a customer by its contact
+//      email, or the last 10 digits of its phone - tickets from the last two months - then
+//      refreshes the status of open ones. {action:
+//      'pull'} does the same for the signed-in customer alone when they open Support (throttled).
+//      Such a ticket has customer_id but no unit_id, and source 'zoho'.
+//
+// Deployed with verify_jwt OFF: 'cron' has no user, and every other action checks the caller's
+// token itself (auth.getUser below) before doing anything.
+//
 // Authorization is delegated to Postgres RLS wherever possible rather than reimplemented here: every
 // lookup of the ticket row itself runs AS THE CALLER (their own JWT), so cust.support_tickets' own
 // select policy (owning customer, or staff) is what decides whether they may act on that ticket at
@@ -125,8 +137,18 @@ function htmlToText(html: string): string {
 // chat-style view where the original is already its own bubble. Split on that separator and keep
 // only what's before it. A message with no quote (the customer's original description thread, a
 // reply with the quote manually cleared) just passes through unchanged - no match, no-op.
+// Customers reply from their own mail apps, which quote differently: Gmail ("On Mon, 6 Oct 2026 at
+// 10:12, Name <a@b.c> wrote:"), Outlook ("From: ... Sent: ..." or "-----Original Message-----").
+// Each one is cut at the first quote marker found, so the thread shows only what was newly written.
 function stripQuotedReply(text: string): string {
-  return (text || "").split(/-{2,}\s*on\s+.+?\s+wrote\s*-{2,}/is)[0].trim();
+  let t = (text || "").split(/-{2,}\s*on\s+.+?\s+wrote\s*-{2,}/is)[0];
+  const markers = [
+    /\n[ \t>]*On\s[^\n]{4,200}?wrote:\s*(\n|$)/i,
+    /\n[ \t]*-{2,}\s*Original Message\s*-{2,}/i,
+    /\n[ \t]*From:\s[^\n]+\n[ \t]*(Sent|Date):\s/i,
+  ];
+  for (const m of markers) { const k = t.search(m); if (k > 0) t = t.slice(0, k); }
+  return t.trim();
 }
 
 // Pulls both Zoho conversation surfaces down into their mirror tables. Threads always get their
@@ -138,7 +160,9 @@ function stripQuotedReply(text: string): string {
 async function syncConversation(db: any, dc: string, accessToken: string, zohoTicketId: string, ticketId: number) {
   const zohoHeaders = { Authorization: "Zoho-oauthtoken " + accessToken };
 
-  const threadsRes = await fetch(`https://desk.zoho.${dc}/api/v1/tickets/${zohoTicketId}/threads`, { headers: zohoHeaders });
+  // Zoho lists only the first 10 unless asked: up to 200 threads and 100 comments is the whole
+  // conversation for any real ticket.
+  const threadsRes = await fetch(`https://desk.zoho.${dc}/api/v1/tickets/${zohoTicketId}/threads?limit=200`, { headers: zohoHeaders });
   const threadsOut = await threadsRes.json().catch(() => ({}));
   const threads = (threadsOut?.data || []).filter((t: any) => t.visibility === "public");
   for (const t of threads) {
@@ -154,7 +178,7 @@ async function syncConversation(db: any, dc: string, accessToken: string, zohoTi
     }, { onConflict: "ticket_id,zoho_thread_id" });
   }
 
-  const commentsRes = await fetch(`https://desk.zoho.${dc}/api/v1/tickets/${zohoTicketId}/comments`, { headers: zohoHeaders });
+  const commentsRes = await fetch(`https://desk.zoho.${dc}/api/v1/tickets/${zohoTicketId}/comments?limit=100`, { headers: zohoHeaders });
   const commentsOut = await commentsRes.json().catch(() => ({}));
   const comments = (commentsOut?.data || []).filter((c: any) => c.isPublic);
   if (comments.length) {
@@ -173,6 +197,110 @@ async function zohoAccessToken(dc: string, clientId: string, clientSecret: strin
   const out = await res.json().catch(() => ({}));
   if (!res.ok || !out.access_token) throw new Error("Zoho OAuth failed: " + (out.error || res.status));
   return out.access_token as string;
+}
+
+// ---------- Tickets that started in Zoho (an email to customer care, a call logged by an agent) ----------
+// Zoho answers an empty list with 204 No Content - read that as "nothing", not as a failure.
+async function zohoGet(url: string, headers: Record<string, string>): Promise<{ ok: boolean; status: number; data: any }> {
+  const res = await fetch(url, { headers });
+  if (res.status === 204) return { ok: true, status: 204, data: { data: [] } };
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+// How far back a ticket that started in Zoho is brought into the portal.
+const IMPORT_DAYS = 61;
+
+// Zoho's "Not a Ticket." status marks mail that is not a customer query (6 Oct 2026): such a ticket
+// is not brought in, and one brought in earlier is removed once Zoho marks it so.
+const isNotATicket = (status: any) => /not\s*a\s*ticket/i.test(String(status || ""));
+
+const last10 = (s: any) => String(s || "").replace(/\D/g, "").slice(-10);
+
+// Every customer we could match a Zoho ticket to: by email (an email field may hold more than one
+// address) and by the last 10 digits of their phone - a phone shared by two customers is ambiguous
+// and is not used for matching at all.
+async function customerIndex(db: any) {
+  const byEmail = new Map<string, number>(), byPhone = new Map<string, number>(), dupPhone = new Set<string>();
+  for (let from = 0; ; from += 1000) {
+    const { data } = await db.schema("cust").from("customers").select("id,email,phone").is("deleted_at", null).range(from, from + 999);
+    for (const c of data || []) {
+      for (const e of String(c.email || "").toLowerCase().split(/[\s,;]+/)) if (e.includes("@")) byEmail.set(e, c.id);
+      const p = last10(c.phone);
+      if (p.length === 10) { if (byPhone.has(p) && byPhone.get(p) !== c.id) dupPhone.add(p); else byPhone.set(p, c.id); }
+    }
+    if (!data || data.length < 1000) break;
+  }
+  dupPhone.forEach((p) => byPhone.delete(p));
+  return { byEmail, byPhone };
+}
+
+function matchCustomer(t: any, idx: { byEmail: Map<string, number>; byPhone: Map<string, number> }): number | null {
+  const emails = [t.email, t.contact && t.contact.email].map((e) => String(e || "").toLowerCase().trim()).filter(Boolean);
+  for (const e of emails) if (idx.byEmail.has(e)) return idx.byEmail.get(e)!;
+  const phones = [t.phone, t.contact && t.contact.phone, t.contact && t.contact.mobile].map(last10).filter((p) => p.length === 10);
+  for (const p of phones) if (idx.byPhone.has(p)) return idx.byPhone.get(p)!;
+  return null;
+}
+
+// One Zoho ticket into the mirror: a new row (source 'zoho', no flat), or - for one already there,
+// including tickets raised from the portal - just its current status.
+async function upsertMirror(db: any, t: any, customerId: number): Promise<"new" | "updated" | "skipped"> {
+  if (!t || !t.id || t.isSpam) return "skipped";
+  const zohoStatus = t.status || "Open";
+  const { data: existing } = await db.schema("cust").from("support_tickets").select("id,source").eq("zoho_ticket_id", String(t.id)).maybeSingle();
+  if (isNotATicket(zohoStatus)) {
+    if (existing && existing.source === "zoho") await dropMirror(db, existing.id);
+    else if (existing) await db.schema("cust").from("support_tickets").update({ zoho_status: zohoStatus, last_synced_at: new Date().toISOString() }).eq("id", existing.id);
+    return "skipped";
+  }
+  // Only the last two months are brought in (asked for on 6 Oct 2026); one already here is kept up to date.
+  if (!existing && t.createdTime && new Date(t.createdTime).getTime() < Date.now() - IMPORT_DAYS * 864e5) return "skipped";
+  if (existing) {
+    await db.schema("cust").from("support_tickets").update({
+      zoho_status: zohoStatus, status: normaliseStatus(zohoStatus),
+      zoho_ticket_number: t.ticketNumber || undefined, zoho_channel: t.channel || undefined,
+      last_synced_at: new Date().toISOString(),
+    }).eq("id", existing.id);
+    return "updated";
+  }
+  const { error } = await db.schema("cust").from("support_tickets").insert({
+    customer_id: customerId, unit_id: null, source: "zoho",
+    subject: String(t.subject || "(no subject)").slice(0, 500), description: null,
+    status: normaliseStatus(zohoStatus), zoho_status: zohoStatus,
+    zoho_ticket_id: String(t.id), zoho_ticket_number: t.ticketNumber || null, zoho_channel: t.channel || null,
+    zoho_created_time: t.createdTime || null, created_at: t.createdTime || new Date().toISOString(),
+    zoho_contact_email: (t.email || (t.contact && t.contact.email) || null),
+    created_by: "zoho", last_synced_at: new Date().toISOString(),
+  });
+  // A unique-index clash means a parallel run got there first - that is fine.
+  return error ? "skipped" : "new";
+}
+
+// Removes the portal's copy of a ticket that came in from Zoho (its messages with it). Zoho's own
+// ticket is untouched.
+async function dropMirror(db: any, id: number) {
+  await db.schema("cust").from("support_ticket_threads").delete().eq("ticket_id", id);
+  await db.schema("cust").from("support_ticket_comments").delete().eq("ticket_id", id);
+  await db.schema("cust").from("support_tickets").delete().eq("id", id).eq("source", "zoho");
+}
+
+// One customer's tickets, for the pull when they open Support: their Zoho contact(s) by email and
+// each contact's tickets; if this connection may not read contacts, Zoho's ticket search by email.
+async function zohoTicketsForEmail(dc: string, headers: Record<string, string>, email: string): Promise<{ tickets: any[]; via: string; error?: string }> {
+  const base = `https://desk.zoho.${dc}/api/v1`;
+  const cs = await zohoGet(`${base}/contacts/search?email=${encodeURIComponent(email)}&limit=10`, headers);
+  if (cs.ok) {
+    const out: any[] = [];
+    for (const c of cs.data?.data || []) {
+      const ts = await zohoGet(`${base}/contacts/${c.id}/tickets?limit=100&include=contacts`, headers);
+      if (ts.ok) for (const t of ts.data?.data || []) out.push({ ...t, email: t.email || c.email });
+    }
+    return { tickets: out, via: "contacts" };
+  }
+  const ts = await zohoGet(`${base}/tickets/search?email=${encodeURIComponent(email)}&limit=100`, headers);
+  if (ts.ok) return { tickets: ts.data?.data || [], via: "search" };
+  return { tickets: [], via: "none", error: `contacts ${cs.status}: ${zohoErrorText(cs.data, cs.status)}; search ${ts.status}: ${zohoErrorText(ts.data, ts.status)}` };
 }
 
 Deno.serve(async (req: Request) => {
@@ -197,24 +325,135 @@ Deno.serve(async (req: Request) => {
     return j({ error: "Zoho Desk is not configured yet - store ZOHO_CLIENT_ID/ZOHO_CLIENT_SECRET/ZOHO_REFRESH_TOKEN/ZOHO_ORG_ID in Vault (see the comment at the top of this file)" }, 500);
   }
 
+  let body: any = {};
+  try { body = await req.json(); } catch { /* empty body */ }
+  const action = String(body.action || "");
+
+  // ---------- the scheduled import (pg_cron 'zoho-ticket-import', every 10 minutes) ----------
+  // Authenticated by the shared secret in acc.job_secrets, not a user: it runs for every customer.
+  if (action === "cron") {
+    const given = req.headers.get("x-sync-secret") || "";
+    const { data: sec } = await db.schema("acc").from("job_secrets").select("value").eq("name", "zoho_sync").maybeSingle();
+    if (!sec?.value || given !== sec.value) return j({ error: "unauthorized" }, 401);
+    try {
+      const accessToken = await zohoAccessToken(ZOHO_DC, ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN);
+      const headers = { Authorization: "Zoho-oauthtoken " + accessToken, orgId: ZOHO_ORG_ID };
+      const { data: state } = await db.schema("cust").from("zoho_sync_state").select("*").eq("id", 1).maybeSingle();
+      const firstRun = !state?.last_created_time;
+      // New tickets, newest first, down to where the last run got to (an hour's overlap, so one
+      // created as the last run read its page is not missed). The first run reaches back two months.
+      const stopAt = firstRun ? Date.now() - IMPORT_DAYS * 864e5 : new Date(state.last_created_time).getTime() - 3600e3;
+      const idx = await customerIndex(db);
+      let seen = 0, matched = 0, added = 0, newest = state?.last_created_time ? new Date(state.last_created_time).getTime() : 0, pageError = "";
+      for (let page = 0; page < (firstRun ? 20 : 5); page++) {
+        const r = await zohoGet(`https://desk.zoho.${ZOHO_DC}/api/v1/tickets?include=contacts&sortBy=-createdTime&limit=100&from=${page * 100}`, headers);
+        if (!r.ok) { pageError = `tickets ${r.status}: ${zohoErrorText(r.data, r.status)}`; break; }
+        const list = r.data?.data || [];
+        let older = false;
+        for (const t of list) {
+          seen++;
+          const ct = t.createdTime ? new Date(t.createdTime).getTime() : 0;
+          if (ct > newest) newest = ct;
+          if (ct && ct < stopAt) { older = true; continue; }
+          const cid = matchCustomer(t, idx);
+          if (!cid) continue;
+          matched++;
+          if ((await upsertMirror(db, t, cid)) === "new") added++;
+        }
+        if (older || list.length < 100) break;
+      }
+      // Status of tickets still open here: a handful each run, longest-unchecked first.
+      const { data: open } = await db.schema("cust").from("support_tickets").select("id,zoho_ticket_id,source")
+        .not("zoho_ticket_id", "is", null).neq("status", "closed").is("deleted_at", null)
+        .order("last_synced_at", { ascending: true, nullsFirst: true }).limit(25);
+      let refreshed = 0;
+      for (const o of open || []) {
+        const r = await zohoGet(`https://desk.zoho.${ZOHO_DC}/api/v1/tickets/${o.zoho_ticket_id}`, headers);
+        if (!r.ok) continue;
+        const zs = r.data.status || "Open";
+        if (isNotATicket(zs) && o.source === "zoho") { await dropMirror(db, o.id); refreshed++; continue; }
+        await db.schema("cust").from("support_tickets").update({ zoho_status: zs, status: normaliseStatus(zs), last_synced_at: new Date().toISOString() }).eq("id", o.id);
+        refreshed++;
+      }
+      const result = { seen, matched, added, refreshed, firstRun, pageError: pageError || undefined };
+      await db.schema("cust").from("zoho_sync_state").update({
+        last_created_time: newest ? new Date(newest).toISOString() : state?.last_created_time || null,
+        last_run_at: new Date().toISOString(), last_result: result,
+      }).eq("id", 1);
+      return j({ ok: !pageError, ...result });
+    } catch (e) {
+      return j({ error: String((e as Error).message || e) }, 500);
+    }
+  }
+
   const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   if (!bearer) return j({ error: "unauthorized" }, 401);
   const asUser = createClient(SB, ANON, { global: { headers: { Authorization: "Bearer " + bearer } } });
   const { data: userData, error: userErr } = await asUser.auth.getUser();
   if (userErr || !userData?.user) return j({ error: "unauthorized" }, 401);
 
-  let body: any = {};
-  try { body = await req.json(); } catch { /* empty body */ }
-  const action = String(body.action || "");
+  // ---------- a customer opened Support: fetch their tickets from Zoho now ----------
+  // Throttled to once every 3 minutes per customer. Staff may pull for one customer (customerId).
+  if (action === "pull") {
+    let customer: any = null;
+    const { data: me } = await db.schema("cust").from("customers").select("id,email,zoho_pulled_at")
+      .eq("auth_user_id", userData.user.id).eq("status", "active").is("deleted_at", null).maybeSingle();
+    customer = me;
+    if (!customer && body.customerId) {
+      const { data: isStaff } = await asUser.schema("app").rpc("is_custportal_staff");
+      if (isStaff === true) {
+        const { data: c } = await db.schema("cust").from("customers").select("id,email,zoho_pulled_at").eq("id", Number(body.customerId)).maybeSingle();
+        customer = c;
+      }
+    }
+    if (!customer) return j({ ok: true, skipped: "not a customer" });
+    if (!body.force && customer.zoho_pulled_at && Date.now() - new Date(customer.zoho_pulled_at).getTime() < 3 * 60e3) {
+      return j({ ok: true, skipped: "recently pulled" });
+    }
+    try {
+      const accessToken = await zohoAccessToken(ZOHO_DC, ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN);
+      const headers = { Authorization: "Zoho-oauthtoken " + accessToken, orgId: ZOHO_ORG_ID };
+      let found = 0, added = 0, via = "", err = "";
+      for (const email of String(customer.email || "").toLowerCase().split(/[\s,;]+/).filter((e) => e.includes("@"))) {
+        const r = await zohoTicketsForEmail(ZOHO_DC, headers, email);
+        via = r.via; if (r.error) err = r.error;
+        for (const t of r.tickets) {
+          // Only tickets whose contact really is this email - a search can be loose.
+          const te = String(t.email || (t.contact && t.contact.email) || "").toLowerCase();
+          if (te && te !== email) continue;
+          found++;
+          if ((await upsertMirror(db, t, customer.id)) === "new") added++;
+        }
+      }
+      await db.schema("cust").from("customers").update({ zoho_pulled_at: new Date().toISOString() }).eq("id", customer.id);
+      return j({ ok: !err, found, added, via, error: err || undefined });
+    } catch (e) {
+      return j({ error: String((e as Error).message || e) }, 500);
+    }
+  }
+
   const ticketId = Number(body.ticketId);
   if (!ticketId) return j({ error: "ticketId is required" }, 400);
 
   // RLS on cust.support_tickets decides whether this caller may see this ticket at all (their own
-  // unit, or staff) - if this comes back empty, they aren't authorised, full stop.
+  // flat or, for one that came in by email, their own customer record - or staff) - if this comes
+  // back empty, they aren't authorised, full stop.
   const { data: ticket, error: ticketErr } = await asUser.schema("cust").from("support_tickets")
-    .select("id,unit_id,subject,description,zoho_ticket_id").eq("id", ticketId).is("deleted_at", null).maybeSingle();
+    .select("id,unit_id,customer_id,subject,description,zoho_ticket_id").eq("id", ticketId).is("deleted_at", null).maybeSingle();
   if (ticketErr) return j({ error: ticketErr.message }, 500);
   if (!ticket) return j({ error: "Ticket not found or not accessible" }, 404);
+
+  // The customer behind a ticket: through its flat, or directly for one that came in by email.
+  async function ticketCustomer(fields: string) {
+    let cid = ticket.customer_id;
+    if (!cid && ticket.unit_id) {
+      const { data: unit } = await db.schema("cust").from("units").select("customer_id").eq("id", ticket.unit_id).maybeSingle();
+      cid = unit?.customer_id;
+    }
+    if (!cid) return null;
+    const { data } = await db.schema("cust").from("customers").select(fields).eq("id", cid).maybeSingle();
+    return data as any;
+  }
 
   try {
     const accessToken = await zohoAccessToken(ZOHO_DC, ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN);
@@ -223,10 +462,7 @@ Deno.serve(async (req: Request) => {
     if (action === "create") {
       if (ticket.zoho_ticket_id) return j({ error: "This ticket was already created in Zoho Desk" }, 400);
 
-      const { data: unit } = await db.schema("cust").from("units").select("customer_id").eq("id", ticket.unit_id).maybeSingle();
-      const { data: customer } = unit?.customer_id
-        ? await db.schema("cust").from("customers").select("full_name,email,phone").eq("id", unit.customer_id).maybeSingle()
-        : { data: null };
+      const customer = await ticketCustomer("full_name,email,phone");
 
       const { firstName, lastName } = splitName(customer?.full_name || "Customer");
       const payload: any = {
@@ -245,6 +481,7 @@ Deno.serve(async (req: Request) => {
       const { error: updErr } = await db.schema("cust").from("support_tickets").update({
         zoho_ticket_id: out.id, zoho_ticket_number: out.ticketNumber, zoho_status: zohoStatus,
         status: normaliseStatus(zohoStatus), last_synced_at: new Date().toISOString(),
+        zoho_channel: out.channel || "Web", zoho_created_time: out.createdTime || null,
       }).eq("id", ticketId);
       if (updErr) return j({ error: updErr.message }, 500);
 
@@ -309,10 +546,7 @@ Deno.serve(async (req: Request) => {
       const message = String(body.message || "").trim();
       if (!message) return j({ error: "message is required" }, 400);
 
-      const { data: unit } = await db.schema("cust").from("units").select("customer_id").eq("id", ticket.unit_id).maybeSingle();
-      const { data: customer } = unit?.customer_id
-        ? await db.schema("cust").from("customers").select("full_name").eq("id", unit.customer_id).maybeSingle()
-        : { data: null };
+      const customer = await ticketCustomer("full_name");
       const customerName = customer?.full_name || "Customer";
 
       // See the note at the top of this file: Zoho's API has no way to post this as the contact, so
@@ -336,7 +570,7 @@ Deno.serve(async (req: Request) => {
       return j({ ok: true });
     }
 
-    return j({ error: "Unknown action - expected 'create', 'sync' or 'reply'" }, 400);
+    return j({ error: "Unknown action - expected 'create', 'sync', 'reply', 'pull' or 'cron'" }, 400);
   } catch (e) {
     return j({ error: String((e as Error).message || e) }, 500);
   }

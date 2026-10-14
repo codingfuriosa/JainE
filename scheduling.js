@@ -20,6 +20,9 @@
    =========================================================================== */
 (function(){
 if(typeof sb==='undefined'||typeof VIEWS==='undefined')return;
+// Loaded on demand by nexus-core.js (PAGE_EXTRA_SCRIPT.scheduling); never run twice in one tab.
+if(window.__SCHED_LOADED)return;
+window.__SCHED_LOADED=true;
 
 const ACC=()=>sb.schema('acc');
 const me =()=>((state&&state.email)||'').toLowerCase();

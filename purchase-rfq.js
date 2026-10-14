@@ -119,7 +119,7 @@ window.pusRfqOpen=async function(id,tab){
   }
   const del=can&&r.status==='draft'?'<button class="btn btn-ghost" style="margin-right:auto" onclick="pusRfqDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete draft</button>':'';
   openModal('<div class="modal-head"><h3>RFQ '+esc(docNo(r))+' '+statusTag(r)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="max-height:74vh;overflow:auto"><div class="pi-tabs" id="prTabs">'+TABS.map(t=>'<a data-t="'+t[0]+'" onclick="pusRfqTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="prBody"></div></div>'
+    +'<div class="modal-body" style="max-height:calc(90vh - 150px);overflow:auto"><div class="pi-tabs" id="prTabs">'+TABS.map(t=>'<a data-t="'+t[0]+'" onclick="pusRfqTab(\''+t[0]+'\')">'+t[1]+'</a>').join('')+'</div><div id="prBody"></div></div>'
     +'<div class="modal-foot">'+del+'<button class="btn" onclick="closeModal()">Close</button>'+btn.join('')+'</div>','xl');
   window.pusRfqTab(tab||'details');
 };
@@ -223,7 +223,7 @@ window.pusRfqQuote=async function(rvId){
   }).join('');
   const t=f=>esc(cur&&cur[f]||'');
   openModal('<div class="modal-head"><h3>'+(cur?'Revise':'Enter')+' quotation — '+esc(vName(v))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm" style="max-height:74vh;overflow:auto"><div class="pus-hint" style="margin-top:0">Entered by you on the vendor\'s behalf. Saving creates a new revision'+(cur?' (the current one is revision '+cur.revision+')':'')+'; earlier ones stay on record. Tick "Quoting" off for items the vendor will not quote.</div>'
+    +'<div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto"><div class="pus-hint" style="margin-top:0">Entered by you on the vendor\'s behalf. Saving creates a new revision'+(cur?' (the current one is revision '+cur.revision+')':'')+'; earlier ones stay on record. Tick "Quoting" off for items the vendor will not quote.</div>'
     +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>#</th><th>Item</th><th>Quoting</th><th>Unit</th><th>Rate (₹)</th><th>GST %</th><th>Make</th><th>Remark</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
     +'<div class="pus-sub">Terms (common to all items)</div>'
     +'<div class="two"><div><label>Payment terms</label><input id="pqPay" value="'+t('payment_terms')+'" placeholder="e.g. 30 days from invoice"></div><div><label>Delivery</label><input id="pqDel" value="'+t('delivery_terms')+'" placeholder="e.g. within 7 days of order"></div></div>'
@@ -251,13 +251,13 @@ window.pusRfqQuoteSave=async function(rvId){
 
 /* ---------------- state changes ---------------- */
 window.pusRfqSend=async function(id){
-  if(!await confirmDialog('Send this RFQ to the invited vendors? It gets its number and the vendors\' links become active.')) return;
+  if(!await confirmDialog('Send this RFQ to the invited vendors? It gets its number and the vendors\' links become active.',{title:'Send RFQ',okLabel:'Send',danger:false})) return;
   const {data,error}=await U().PU().rpc('rfq_send',{p_id:id});
   if(U().fail(error,'Could not send')) return;
   toast('Sent as '+data+' — now email or copy each vendor\'s link under Vendors & Quotations','ok'); closeModal(); route();
 };
 window.pusRfqClose=async function(id){
-  if(!await confirmDialog('Close quotations? Vendors will no longer be able to quote. You can reopen it.')) return;
+  if(!await confirmDialog('Close quotations? Vendors will no longer be able to quote. You can reopen it.',{title:'Close quotations',okLabel:'Close quotations',danger:false})) return;
   const {error}=await U().PU().rpc('rfq_close',{p_id:id});
   if(U().fail(error,'Could not close')) return;
   toast('Quotations closed','ok'); closeModal(); route();
@@ -356,7 +356,7 @@ window.pusRfqEdit=async function(id){
   ED={id:id||null,project:r?r.project_id:(parseInt(R.project,10)||null),picks:{},avail:[],q:'',vendors:new Set(rvs.map(x=>x.vendor_id))};
   const edit=!!r;
   openModal('<div class="modal-head"><h3>'+(edit?'Edit draft RFQ':'New RFQ')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm" style="max-height:74vh;overflow:auto">'
+    +'<div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'
     +'<div class="two"><div><label>Business unit <span style="color:var(--slate);font-weight:400">(project)</span></label><select id="prProj" onchange="pusRfqProjectPick()"'+(edit?' disabled':'')+'><option value="">Choose…</option>'+U().S.projects.map(p=>'<option value="'+p.id+'"'+(p.id===ED.project?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select></div>'
     +'<div><label>Last date for quotations</label><input id="prDue" type="date" min="'+today()+'" value="'+esc(r&&r.due_date||'')+'"></div></div>'
     +(edit?'<div class="pus-hint">The items of a draft cannot be changed — delete the draft and start again to change them. You can still change the vendors, date and notes.</div>':'<div class="pus-sub">Select from the indents made earlier <span style="font-weight:400;text-transform:none;letter-spacing:0">— approved indents of this business unit, with what is still open. The same item on several indents is quoted once.</span></div>'
@@ -490,7 +490,7 @@ function tabBids(){
 /* ---- counter offer ---- */
 window.pusCmpCounter=function(){
   const M=cmpModel();
-  openModal('<div class="modal-head"><h3>Counter offer</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:74vh;overflow:auto">'
+  openModal('<div class="modal-head"><h3>Counter offer</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'
     +'<div class="pus-hint" style="margin-top:0">Ask the vendors you choose to sharpen their quotation. They revise through the same personal link, and every round is kept in the bid history. A target rate is optional.</div>'
     +'<div class="pus-sub">Send to</div>'+M.vs.map(rv=>'<label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" class="co-v" value="'+rv.id+'" style="width:auto" onchange="pusCmpCounterTargets()"> '+esc(vName(vendorById(rv.vendor_id)))+'</label>').join('')
     +'<div class="pus-sub">Target rates <span style="font-weight:400;text-transform:none;letter-spacing:0">— optional, per item</span></div><div id="coTargets"><div class="pus-hint">Choose the vendors above first.</div></div>'
@@ -524,7 +524,7 @@ window.pusCmpMakePo=function(){
     const rows=byV[vid].map(lid=>{ const l=M.lines.find(x=>x.id===lid), x=M.cells[lid+'|'+vid]; const b=Number(x.c.rate)*Number(l.qty); basic+=b; gst+=b*Number(x.c.gst_rate||0)/100;
       return '<tr><td>'+esc(l.items.name)+'</td><td class="pus-num">'+qty(l.qty)+' '+esc(U().uomCode(l.uom_id))+'</td><td class="pus-num">'+money(x.c.rate)+'</td><td class="pus-num">'+money(b)+'</td></tr>'; }).join('');
     return '<div class="card card-pad" style="margin-bottom:10px"><b>'+esc(vName(vendorById(rv.vendor_id)))+'</b> <span class="tag t-gray">1 purchase order</span><table class="tbl" style="margin-top:8px"><tbody>'+rows+'</tbody></table><div style="text-align:right;margin-top:6px">Basic '+money(basic)+' + GST '+money(gst)+' = <b>'+money(basic+gst)+'</b></div></div>'; }).join('');
-  openModal('<div class="modal-head"><h3>Create purchase orders</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:74vh;overflow:auto">'
+  openModal('<div class="modal-head"><h3>Create purchase orders</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body frm" style="max-height:calc(90vh - 150px);overflow:auto">'
     +'<div class="pus-hint" style="margin-top:0">One draft purchase order is made for each vendor, with their quoted rates, GST, make and terms. You can adjust a draft, then submit it for approval; the indent quantity is reserved when it is submitted.</div>'
     +blocks+'<div class="two"><div><label>Document Type</label><select id="cmpType">'+R.poTypes.filter(t=>t.active).map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('')+'</select></div><div></div></div>'
     +'<label>Deliver to (warehouse)</label><select id="cmpWh">'+(wh.length?'<option value="">Choose…</option>'+wh.map(w=>'<option value="'+w.id+'">'+esc(w.name)+' ('+esc(w.code)+')</option>').join(''):'<option value="">No warehouse for this project</option>')+'</select></div>'
