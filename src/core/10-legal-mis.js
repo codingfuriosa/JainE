@@ -1706,6 +1706,15 @@ window.lnDeleteRun=async function(){
    deliberate and was asked for: a notice answered the day before it was due was not answered
    early, it was answered just in time. The figures come from the database so the page and any
    later report cannot disagree about a score. */
+/* +1 two or more days early, 0 one day early or on the day, -1 late. The gap at one day is
+   deliberate and was asked for: a notice answered the day before it was due was not answered
+   early, it was answered just in time.
+
+   EVERY notice has a row, finished or not. Listing only the scored ones meant a notice uploaded
+   this morning was simply absent, so this screen disagreed with the tracker about how many
+   notices exist - which reads as broken rather than as "nothing to score yet". An outstanding
+   notice shows a dash, not a zero: it has not been scored, which is a different thing from
+   having scored nothing, and the total ignores it entirely. */
 async function legalScoreboardNotice(){
   const body=$('legalSbHost');if(!body)return;
   loader(body);
@@ -1715,12 +1724,18 @@ async function legalScoreboardNotice(){
     if(error)throw error;
     rows=data||[];
   }catch(e){
-    body.innerHTML=`<div class="empty" style="padding:40px"><i class="fa-regular fa-circle-xmark"></i><div>Could not load the notice scoreboard</div><div style="font-size:12px;color:var(--slate);margin-top:6px">${esc((e&&e.message)||'')}</div></div>`;
+    body.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-circle-xmark"></i><div>Could not load the notice scoreboard</div><div style="font-size:12px;color:var(--slate);margin-top:6px">'+esc((e&&e.message)||'')+'</div></div>';
     return;
   }
-  const grand=rows.reduce((a,r)=>a+(Number(r.points)||0),0);
-  const cell=n=>{const c=n>0?'#16a34a':(n<0?'#dc2626':'#64748b');return `<span style="font-weight:800;color:${c}">${n>0?'+':''}${n}</span>`;};
-  const when=r=>{
+
+  const scored=rows.filter(function(r){ return r.points!==null && r.points!==undefined; });
+  const grand=scored.reduce(function(a,r){ return a+(Number(r.points)||0); },0);
+  const cell=function(n){
+    const c=n>0?'#16a34a':(n<0?'#dc2626':'#64748b');
+    return '<span style="font-weight:800;color:'+c+'">'+(n>0?'+':'')+n+'</span>';
+  };
+  const when=function(r){
+    if(r.points===null||r.points===undefined) return '<span style="color:var(--slate)">not scored yet</span>';
     const d=Number(r.days_early);
     if(!isFinite(d)) return '—';
     if(d>0) return d+' day'+(d===1?'':'s')+' early';
@@ -1728,33 +1743,54 @@ async function legalScoreboardNotice(){
     return (-d)+' day'+(d===-1?'':'s')+' late';
   };
 
-  body.innerHTML=`
-    <div class="card card-pad" style="margin-bottom:12px;font-size:12.5px;color:var(--slate)">
-      <b style="color:var(--ink)">How it is scored.</b>
-      <span style="color:#16a34a;font-weight:700">+1</span> finished two or more days before the due date &nbsp;·&nbsp;
-      <span style="color:#64748b;font-weight:700">0</span> one day early, or on the day &nbsp;·&nbsp;
-      <span style="color:#dc2626;font-weight:700">-1</span> finished late.
-      Every notice is due seven days after it was uploaded. A notice still outstanding is not scored yet.
-    </div>
-    <div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr style="background:var(--bg-subtle,#f8fafc)">
-        ${['Notice','Assignee','Completed','Due','Timing','Points'].map(l=>`<th style="padding:10px 12px;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);white-space:nowrap">${l}</th>`).join('')}
-      </tr></thead>
-      <tbody>
-        ${rows.length?rows.map(r=>`<tr style="border-bottom:1px solid var(--line-2)">
-            <td style="padding:11px 12px;font-weight:600">${esc(r.notice||'—')}</td>
-            <td style="padding:11px 12px">${esc(r.assignee||'—')}</td>
-            <td style="padding:11px 12px;color:var(--slate);white-space:nowrap">${r.completed_on?fmtDate(r.completed_on):'—'}</td>
-            <td style="padding:11px 12px;color:var(--slate);white-space:nowrap">${r.due_date?fmtDate(r.due_date):'—'}</td>
-            <td style="padding:11px 12px;color:var(--slate);white-space:nowrap">${esc(when(r))}</td>
-            <td style="padding:11px 12px">${cell(Number(r.points)||0)}</td>
-          </tr>`).join(''):`<tr><td colspan="6"><div class="empty" style="padding:34px"><i class="fa-regular fa-star"></i><div>Nothing scored yet</div><div style="font-size:12px;color:var(--slate);margin-top:6px">A notice is scored once its task is marked done.</div></div></td></tr>`}
-      </tbody>
-      ${rows.length?`<tfoot><tr style="background:var(--bg-subtle,#f8fafc)">
-        <td colspan="5" style="padding:11px 12px;text-align:right;font-weight:700;border-top:2px solid var(--line)">Total across ${rows.length} notice${rows.length===1?'':'s'}</td>
-        <td style="padding:11px 12px;font-weight:800;border-top:2px solid var(--line)">${cell(grand)}</td>
-      </tr></tfoot>`:''}
-    </table></div></div>`;
+  let h='<div class="card card-pad" style="margin-bottom:12px;font-size:12.5px;color:var(--slate)">'
+    +'<b style="color:var(--ink)">How it is scored.</b> '
+    +'<span style="color:#16a34a;font-weight:700">+1</span> finished two or more days before the due date &nbsp;·&nbsp; '
+    +'<span style="color:#64748b;font-weight:700">0</span> one day early, or on the day &nbsp;·&nbsp; '
+    +'<span style="color:#dc2626;font-weight:700">-1</span> finished late. '
+    +'Every notice is due seven days after it was uploaded. A notice still outstanding is listed but not yet scored.'
+  +'</div>';
+
+  h+='<style>.lns-row:hover{background:var(--bg-subtle,#f8fafc)}</style>';
+  h+='<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'
+    +'<thead><tr style="background:var(--bg-subtle,#f8fafc)">';
+  ['Notice','Assignee','Status','Completed','Due','Timing','Points'].forEach(function(l){
+    h+='<th style="padding:10px 12px;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);white-space:nowrap">'+l+'</th>';
+  });
+  h+='</tr></thead><tbody>';
+
+  if(rows.length){
+    rows.forEach(function(r){
+      const unscored=(r.points===null||r.points===undefined);
+      h+='<tr class="lns-row" style="border-bottom:1px solid var(--line-2)">'
+        +'<td style="padding:11px 12px;font-weight:600">'+esc(r.notice||'—')+'</td>'
+        +'<td style="padding:11px 12px">'+(r.assignee?esc(r.assignee):'<span style="color:var(--slate)">—</span>')+'</td>'
+        +'<td style="padding:11px 12px">'+lnPill(r.state)+'</td>'
+        +'<td style="padding:11px 12px;color:var(--slate);white-space:nowrap">'+(r.completed_on?fmtDate(r.completed_on):'<span style="color:var(--slate)">—</span>')+'</td>'
+        +'<td style="padding:11px 12px;color:var(--slate);white-space:nowrap">'+(r.due_date?fmtDate(r.due_date):'—')+'</td>'
+        +'<td style="padding:11px 12px;color:var(--slate);white-space:nowrap">'+when(r)+'</td>'
+        +'<td style="padding:11px 12px">'+(unscored?'<span style="color:var(--slate)">—</span>':cell(Number(r.points)||0))+'</td>'
+      +'</tr>';
+    });
+  } else {
+    h+='<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-regular fa-star"></i>'
+      +'<div>No notices yet</div><div style="font-size:12px;color:var(--slate);margin-top:6px">'
+      +'A notice appears here as soon as it is uploaded, and is scored once its task is marked done.</div></div></td></tr>';
+  }
+  h+='</tbody>';
+
+  if(scored.length){
+    h+='<tfoot><tr style="background:var(--bg-subtle,#f8fafc)">'
+      +'<td colspan="6" style="padding:11px 12px;text-align:right;font-weight:700;border-top:2px solid var(--line)">'
+      +'Total across '+scored.length+' scored notice'+(scored.length===1?'':'s')
+      +(rows.length>scored.length?(' · '+(rows.length-scored.length)+' still outstanding'):'')
+      +'</td>'
+      +'<td style="padding:11px 12px;font-weight:800;border-top:2px solid var(--line)">'+cell(grand)+'</td>'
+    +'</tr></tfoot>';
+  }
+  h+='</table></div></div>';
+
+  body.innerHTML=h;
 }
 
 /* ---- Causelist export ------------------------------------------------------------------

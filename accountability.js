@@ -14631,7 +14631,7 @@
     // Workflow steps use explicit Receive / Reject / Forward / Done buttons (below), never a checkbox.
     const chk=opt.checkable?(t.flow_case_step_id!=null
       ? ''
-      : `<input type="checkbox" class="ac-rowchk" title="${opt.owner?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!opt.owner},this)">`):'';
+      : `<input type="checkbox" class="ac-rowchk" title="${(opt.owner||t.source==='notice')?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!(opt.owner||t.source==='notice')},this)">`):'';
     const wfIsFirst=wfInfo&&wfInfo.minSeq!=null&&wfInfo.seq===wfInfo.minSeq;
     const wfIsLastStep=wfInfo&&!wfInfo.nextExists;
     let wfRR='';
@@ -14840,7 +14840,15 @@
     const members=(aR.data||[]).map(r=>r.email), subL=sR.data||[], comments=cR.data||[], acts=actR.data||[], files=fR.data||[];
     let projName=''; if(t.project_id){ const pm=await loadProjectsMap(); projName=pm[t.project_id]||''; }
     const amOwner=eq(t.delegator,me()), amMember=members.some(e=>eq(e,me())), st=stOf(t); const iHaveDelegated=(dR.data||[]).length>0;
-    const selfTask=amOwner&&amMember;
+    /* A NOTICE TASK HAS NOBODY TO APPROVE IT.
+       It arrives from "Notices" with delegator='notices', which is not a person, so amOwner is
+       false for everyone and Mark Done sent it to Awaiting Approval - a queue whose approver does
+       not exist. It sat there, the completion trigger never fired, and both the tracker and the
+       scoreboard stayed empty while the work had in fact been done.
+       Treating it as a self-assigned task is the whole fix: whoever is on it finishes it outright,
+       which is what a notice is - work handed to Legal, not work delegated by somebody. */
+    const noApproval=!!(t&&t.source==='notice');
+    const selfTask=(amOwner&&amMember)||(noApproval&&amMember);
     const locked=ro&&st==='approved';
     /* AN HR APPROVAL TASK BELONGS TO ALL FOUR APPROVERS, NOT TO ONE OF THEM.
 
