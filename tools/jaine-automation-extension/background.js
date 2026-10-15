@@ -1,6 +1,6 @@
 import { getConfig } from './lib/config.js';
-import { claimSheetJob, finishSheetJob, claimAutomationJob, finishAutomationJob } from './lib/supabase-rpc.js';
-import { SHEET_JOB_HANDLER, runAutomationJob } from './lib/job-handlers.js';
+import { claimAutomationJob, finishAutomationJob } from './lib/supabase-rpc.js';
+import { runAutomationJob } from './lib/job-handlers.js';
 
 const ALARM_NAME = 'jaine-automation-poll';
 const POLL_MINUTES = 1; // chrome.alarms' own minimum period
@@ -30,18 +30,7 @@ async function drainEverything() {
   const config = await getConfig(); // throws if the core Supabase/Claude settings are missing
   const summary = [];
 
-  if (config.sheetBotSecret && config.sheetUrl) {
-    const n = await drainQueue(config, {
-      claim: claimSheetJob,
-      finish: finishSheetJob,
-      run: SHEET_JOB_HANDLER,
-      label: 'sheet_jobs',
-    });
-    summary.push(`sheet_jobs: ${n} processed`);
-  } else {
-    summary.push('sheet_jobs: not configured, skipped');
-  }
-
+  // The Google Sheet queue (acc.sheet_jobs) was a test and was removed on 15 Oct 2026.
   if (config.automationBotSecret) {
     const n = await drainQueue(config, {
       claim: claimAutomationJob,

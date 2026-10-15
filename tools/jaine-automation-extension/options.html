@@ -24,18 +24,9 @@
     <p class="hint">The same publishable anon key JainE's own frontend uses.</p>
   </label>
 
-  <label>Sheet-bot secret
-    <input id="sheetBotSecret">
-    <p class="hint">From: select value from acc.job_secrets where name = 'sheet_bot';</p>
-  </label>
-
   <label>Anthropic API key
     <input id="anthropicApiKey">
-    <p class="hint">Only used for the Aadhaar-disambiguation decision (2+ candidates).</p>
-  </label>
-
-  <label>Target Google Sheet URL
-    <input id="sheetUrl">
+    <p class="hint">Only used by the agentic fallback (an automation job with no purpose-built handler).</p>
   </label>
 
   <h3>Universal automation queue</h3>

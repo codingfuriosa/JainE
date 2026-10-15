@@ -27,22 +27,6 @@ async function callRpc(config, name, args) {
   return JSON.parse(text);
 }
 
-/** Claims one pending job. Returns null if nothing is pending, otherwise
- *  { job_id, case_id, case_no, audit_result }. */
-export async function claimSheetJob(config) {
-  const rows = await callRpc(config, 'sheet_job_claim', { p_secret: config.sheetBotSecret });
-  return rows?.[0] ?? null;
-}
-
-export async function finishSheetJob(config, jobId, ok, note) {
-  await callRpc(config, 'sheet_job_finish', {
-    p_secret: config.sheetBotSecret,
-    p_job_id: jobId,
-    p_ok: ok,
-    p_note: note,
-  });
-}
-
 /** Claims one pending job from the universal queue. Returns null if nothing is
  *  pending, otherwise { job_id, kind, instructions, payload }. */
 export async function claimAutomationJob(config) {

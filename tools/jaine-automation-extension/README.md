@@ -1,5 +1,9 @@
 # JainE Automation -- a Chrome extension, not a separate process
 
+> **15 Oct 2026: the Google Sheet queue (`acc.sheet_jobs`) was a test and has been removed** - from
+> this extension, from the database, and `tools/sheet-bot/` with it. Only the universal
+> `acc.automation_jobs` queue below is live. Anything here about sheet_jobs is history.
+
 Runs inside your real, already-signed-in Chrome. Two independent queues:
 
 - **`acc.sheet_jobs`** -- proven, deterministic: when a Booking Form's OCR finishes, appends the

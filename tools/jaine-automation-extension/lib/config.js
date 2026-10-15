@@ -14,7 +14,7 @@ const CORE = ['supabaseUrl', 'supabaseAnonKey'];
 // market_valuation, has no business being blocked on a setting it never touches. Both of those
 // call sites already fail closed on their own (a missing/invalid key just gets a 401 they treat
 // as "couldn't decide", not a crash), so there is nothing left for this file to enforce upfront.
-export const ALL_FIELDS = [...CORE, 'anthropicApiKey', 'sheetBotSecret', 'sheetUrl', 'automationBotSecret'];
+export const ALL_FIELDS = [...CORE, 'anthropicApiKey', 'automationBotSecret'];
 
 export async function getConfig() {
   const stored = await chrome.storage.local.get(ALL_FIELDS);
