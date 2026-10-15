@@ -588,7 +588,8 @@ async function dwcAreaLookup(blockRaw: unknown, floorRaw: unknown, flatRaw: unkn
    nothing else - genuinely different from asking harder in the same breath as everything else,
    which is all three earlier attempts amounted to. Reuses the file already uploaded in this run,
    so it costs one extra short Gemini call, not a re-upload. */
-async function geminiRecheckParking(fileParts: any[], model: string, charged: string | null = null): Promise<any> {
+async function geminiRecheckParking(fileParts: any[], model: string, charged: string | null = null,
+                                    opts: { resolution?: string | null; stepwise?: boolean } = {}): Promise<any> {
   const hint = charged === "OPEN" || charged === "COVERED"
     ? `
 
@@ -617,19 +618,71 @@ Return ONLY JSON:
 {"value": "COVERED" or "OPEN" or null, "how_marked": "how it is marked, e.g. \\"a small tick above the word\\"",
  "found_in": "which page", "what_you_see": "plainly describe what is on, above, below and beside each of the two words"}
 Give null only if you have looked closely at both words and there is truly nothing near either one.${hint}`;
+  /* STEPWISE: find the line first and say what is printed on it, then go round each word in turn,
+     before any answer is given - an answer given first gets explained afterwards, not checked. */
+  const stepwise = `\n\nWork in this order and put each step in "steps" before "value":
+1. Which page carries the Car Park line, and the exact printed text of that line.
+2. Every handwritten mark within a finger's width of "Covered" - above, below, on, left, right.
+3. The same for "Open".
+4. The marks the applicant made on two other checkbox lines of the same form, and their style.
+Only then give value. Add "steps": ["...","...","...","..."] to the JSON.`;
   const fileOnly = fileParts.filter((p) => p.file_data);
+  const gen: any = { temperature: 0, responseMimeType: "application/json", maxOutputTokens: 8000 };
+  if (opts.resolution) gen.mediaResolution = opts.resolution;
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": GKEY },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, ...fileOnly] }],
-        generationConfig: { temperature: 0, responseMimeType: "application/json", maxOutputTokens: 1000 } }) });
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt + (opts.stepwise ? stepwise : "") }, ...fileOnly] }],
+        generationConfig: gen }) });
+  if (!r.ok) return { error: `${r.status} ${(await r.text()).slice(0, 300)}` };
   const gj = await r.json().catch(() => ({}));
   const raw = String(gj?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
-  if (!raw) return null;
-  try { return JSON.parse(raw); }
+  // An empty reply is reported as such - a thinking model that spent its whole output budget
+  // thinking returns no text at all, which used to read exactly like "nothing is marked".
+  if (!raw) return { value: null, empty: true, finish: gj?.candidates?.[0]?.finishReason || null };
+  /* THE ANSWER COMES BACK WRAPPED IN A LIST more often than not - [{"value":"OPEN",...}] - and
+     the caller reads .value off what it is given. A list has no .value, so every correct second
+     look was thrown away as "nothing found": booking 717's tick through "Open" was seen and
+     described on every run (15 Oct 2026) and still reported as unmarked. One object, always. */
+  const one = (x: any) => Array.isArray(x) ? (x.find((y: any) => y && typeof y === "object") ?? null) : x;
+  try { return one(JSON.parse(raw)); }
   catch (_) {
     const m = raw.match(/\{[\s\S]*\}/);
-    return m ? JSON.parse(m[0]) : null;
+    return m ? one(JSON.parse(m[0])) : null;
   }
+}
+
+/* PARKING PROBE - for testing only, never stored. Uploads one booking's files and asks the Car Park
+   question several ways side by side, so a change to how it is asked can be judged on real
+   bookings before it is made to the reading itself. {case_id, parking_probe:true, variants?} */
+async function parkingProbe(caseId: number, variants: any[]): Promise<any> {
+  const cr = await fetch(`${SB}/rest/v1/flow_cases?id=eq.${caseId}&select=id,trigger_details`, { headers: HA });
+  const kase = (await cr.json().catch(() => []))?.[0];
+  if (!kase) return { error: "instance not found" };
+  let paths: string[] = [];
+  for (const d of (Array.isArray(kase.trigger_details) ? kase.trigger_details : [])) paths = paths.concat(valuePaths(d?.value));
+  const bucket = Deno.env.get("S3_BUCKET"), region = Deno.env.get("S3_REGION");
+  const aws = new AwsClient({ accessKeyId: Deno.env.get("AWS_ACCESS_KEY_ID")!,
+    secretAccessKey: Deno.env.get("AWS_SECRET_ACCESS_KEY")!, region: region!, service: "s3" });
+  const s3url = (p: string) =>
+    `https://${bucket}.s3.${region}.amazonaws.com/${p.replace(/^s3:/,"").split("/").map(encodeURIComponent).join("/")}`;
+  const parts: any[] = [];
+  for (const p of paths) {
+    const name = fileName(p), mime = mimeOf(name);
+    if (!mime) continue;
+    const r = await aws.fetch(s3url(p)); if (!r.ok) continue;
+    const up = await geminiUpload(new Uint8Array(await r.arrayBuffer()), mime, name);
+    parts.push({ file_data: { mime_type: up.mime, file_uri: up.uri } });
+  }
+  if (!parts.length) return { error: "no readable files" };
+  const out = await Promise.all(variants.map(async (v: any) => {
+    const t = Date.now();
+    try {
+      const a = await geminiRecheckParking(parts, String(v.model || DEFAULT_MODEL), v.charged ?? null,
+        { resolution: v.resolution ?? null, stepwise: v.stepwise === true });
+      return { variant: v, ms: Date.now() - t, answer: a };
+    } catch (e) { return { variant: v, error: String(e) }; }
+  }));
+  return { ok: true, case_id: caseId, files: parts.length, results: out };
 }
 
 async function chatgptCheck(evidence: unknown) {
@@ -746,7 +799,14 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
     && (!firstMark || (chargedKind && firstMark !== chargedKind));
   if (parkingDoubt) {
     try {
-      const recheck = await geminiRecheckParking(parts, model, chargedKind);
+      /* STEPWISE, AT HIGH RESOLUTION, AND NOT TOLD WHAT IS CHARGED. Tried side by side on the four
+         bookings that kept failing (parking_probe, 15 Oct 2026): this way found the tick on 717,
+         431 and 590 - each one confirmed by the cost sheet, 431 also by hand - where the plain
+         question found nothing on 431 and 590; and on 724, whose upload carries no booking form
+         at all, it still found nothing, as it should. It needed no hint about the cost sheet to
+         do it, so it is given none: nothing here can lean the answer towards what was charged. */
+      const recheck = await geminiRecheckParking(parts, model, null,
+        { resolution: "MEDIA_RESOLUTION_HIGH", stepwise: true });
       if ((recheck?.value === "COVERED" || recheck?.value === "OPEN")
           && (!firstMark || recheck.value !== firstMark)) {
         ex.parking_choice = recheck;
@@ -1350,6 +1410,11 @@ Deno.serve(async (req) => {
 
   const caseId = Number(body?.case_id || 0);
   if (!caseId) return j({ error: "case_id is required" }, 400);
+  if (body?.parking_probe) {
+    const variants = Array.isArray(body?.variants) && body.variants.length ? body.variants.slice(0, 6)
+      : [{ resolution: null }];
+    return j(await parkingProbe(caseId, variants));
+  }
 
   let res: any;
   try { res = await audit(caseId, model, body?.probe === true); }
