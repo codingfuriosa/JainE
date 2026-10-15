@@ -6408,7 +6408,7 @@
           +'<button class="txt" id="dlp" title="Download as PDF">Download</button>'
           +(canMail
             ? ('<button class="txt" id="mail" disabled title="Checking whether it can be sent…">Email</button>'
-              +'<button class="txt warn" id="rej" disabled>Reject</button>')
+              +'<button class="txt primary" id="rej" disabled>Reject</button>')
             : '')
        +'</div>'
       +'</header>'
@@ -6811,7 +6811,6 @@
     }
 
     let h='';
-    h+='<p class="wfd-gap">Subject - Allotment Payment Letter</p>';
     h+='<p class="wfd-gap">Dear Sir,</p>';
     h+='<p class="wfd-gap">We hope this email finds you well.</p>';
     h+='<p class="wfd-gap">We are pleased to inform you that the construction and development work at <b>'
