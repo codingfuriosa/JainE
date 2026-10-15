@@ -402,7 +402,11 @@ function startSessionGuard(){
 }
 sb.auth.onAuthStateChange((ev,session)=>{
   if(session&&session.access_token) USAGE_TOKEN=session.access_token;   // stays current across TOKEN_REFRESHED, not just the initial boot()
-  if(ev==='SIGNED_IN'||ev==='TOKEN_REFRESHED') checkClockSkew(session,true);
+  /* TOKEN_REFRESHED only. supabase-js also reports SIGNED_IN when a tab comes back into view or a
+     stored sign-in is recovered, carrying the SAME old token - an hour-old iat then read as a clock
+     an hour fast, and the red bar came up on a PC whose clock was right (15 Oct 2026). Only a
+     refresh is guaranteed to hand over a token issued this moment. */
+  if(ev==='TOKEN_REFRESHED') checkClockSkew(session,true);
   if(ev==='SIGNED_OUT'){ bgForget(); location.replace(LOGIN_PAGE); } else if(ev==='PASSWORD_RECOVERY'){ if(typeof resetPasswordModal==='function') resetPasswordModal(); }
 });
 

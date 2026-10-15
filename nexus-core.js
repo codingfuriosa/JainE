@@ -409,7 +409,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'df0b69df01','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'7ba2d819eb','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];
@@ -1049,7 +1049,11 @@ function startSessionGuard(){
 }
 sb.auth.onAuthStateChange((ev,session)=>{
   if(session&&session.access_token) USAGE_TOKEN=session.access_token;   // stays current across TOKEN_REFRESHED, not just the initial boot()
-  if(ev==='SIGNED_IN'||ev==='TOKEN_REFRESHED') checkClockSkew(session,true);
+  /* TOKEN_REFRESHED only. supabase-js also reports SIGNED_IN when a tab comes back into view or a
+     stored sign-in is recovered, carrying the SAME old token - an hour-old iat then read as a clock
+     an hour fast, and the red bar came up on a PC whose clock was right (15 Oct 2026). Only a
+     refresh is guaranteed to hand over a token issued this moment. */
+  if(ev==='TOKEN_REFRESHED') checkClockSkew(session,true);
   if(ev==='SIGNED_OUT'){ bgForget(); location.replace(LOGIN_PAGE); } else if(ev==='PASSWORD_RECOVERY'){ if(typeof resetPasswordModal==='function') resetPasswordModal(); }
 });
 

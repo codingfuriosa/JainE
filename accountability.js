@@ -5048,6 +5048,7 @@
     const auditBtn=(c.flow_id===41&&wfBookingCanView)
       ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Open the Booking Form Check List \u2014 editable, downloads as Word"><i class="fa-solid fa-list-check"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfWelcomeLetter('+c.id+')" title="Download the customer\'s Welcome Letter"><i class="fa-solid fa-envelope-open-text"></i></button>'
+        +'<button class="wf-tlhead-x" onclick="wfWelcome2Letter('+c.id+')" title="Open the 2nd Welcome Letter — the allotment payment demand"><i class="fa-solid fa-file-invoice-dollar"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfAllotmentLetter('+c.id+')" title="Download the Allotment Letter"><i class="fa-solid fa-file-signature"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfAgreement('+c.id+')" title="Download the Agreement for Sale — a draft to be checked and completed, not a final deed"><i class="fa-solid fa-file-contract"></i></button>'
       : '';
@@ -6166,9 +6167,13 @@
      Like Save, these run here in the opener, where the Supabase client lives; the tab only calls
      them. wfTabStatus hands back the status row plus a sentence already written, so the names and
      dates read the way they do everywhere else in JAIN-E. */
+  /* welcome2 is the 2nd Welcome Letter - the allotment payment demand - see wfWelcome2Doc. Like
+     the Welcome Letter it is mailed as the body of the email, not as an attachment. */
+  const WF_DOC_TEXTMAIL={welcome:true, welcome2:true};
   const WF_DOC_LABEL={checklist:'Booking Form Check List', welcome:'Welcome Letter',
+    welcome2:'2nd Welcome Letter',
                       allotment:'Allotment Letter', agreement:'Agreement for Sale'};
-  const WF_DOC_MAILABLE={welcome:true, allotment:true, agreement:true};
+  const WF_DOC_MAILABLE={welcome:true, welcome2:true, allotment:true, agreement:true};
 
   window.wfTabStatus=async function(caseId,kind){
     const {data,error}=await ACC().from('booking_doc_status').select('*')
@@ -6204,7 +6209,7 @@
     if(!WF_DOC_MAILABLE[kind]) throw new Error('this document is not sent to customers');
     const body={action:'booking_doc_mail', case_id:caseId, kind:kind, modified:!!modified,
                 filename:filename};
-    if(kind==='welcome'){
+    if(WF_DOC_TEXTMAIL[kind]){
       body.letter_html=html;
     }else{
       const bytes=await wfWithHolder(html,function(holder){ return wfBuildPdf(holder,filename,style); });
@@ -6263,10 +6268,13 @@
     const logoBytes=opt.logoBytes||null;
     const style=opt.style||null;
     const label=WF_DOC_LABEL[kind]||'document';
-    /* The status line is shown on the three customer documents to anybody who can open them;
-       the two buttons that change it only to those who may act - see wfBookingActor. */
+    /* Email and Reject are on the customer documents only, and only for those who may act - see
+       wfBookingActor. opt.mailBlock is a reason the document cannot be emailed at all as built
+       (the 2nd Welcome Letter with no booking date): it is shown as a banner and keeps Email off,
+       while the sheet stays editable and downloadable. */
     const mailable=!!(caseId&&WF_DOC_MAILABLE[kind]);
     const canMail=mailable&&!!opt.canAct;
+    const mailBlock=opt.mailBlock||'';
 
     let tab=opt.tab||null;
     let saved=null;
@@ -6287,11 +6295,30 @@
       +'<style>'
       +'*{box-sizing:border-box}'
       +'body{margin:0;font:14px/1.5 Segoe UI,Arial,sans-serif;background:#535659;color:#0f172a;overflow:hidden}'
-      +'header{position:fixed;inset:0 0 auto 0;z-index:5;background:#323639;color:#e8eaed}'
-      +'.bar{display:flex;align-items:center;gap:10px;padding:0 14px;height:52px}'
-      +'.bar2{display:flex;align-items:center;gap:6px;padding:0 14px 8px;flex-wrap:wrap}'
-      +'header h1{font-size:14px;margin:0;font-weight:600;flex:1;min-width:90px;overflow:hidden;'
+      /* TWO ROWS, TWO SIDES. Left: the title with the zoom right beside it, and under them the
+         editing tools. Right: the actions as a grid - Save and Download on top, Email and Reject
+         beneath them on the customer documents. Nothing wraps, and it fits at ~900px. */
+      +'header{position:fixed;inset:0 0 auto 0;z-index:5;background:#323639;color:#e8eaed;'
+        +'display:flex;align-items:flex-start;gap:14px;padding:8px 14px;height:88px}'
+      +'.hl{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}'
+      +'.bar{display:flex;align-items:center;gap:10px;height:34px;min-width:0}'
+      +'.bar2{display:flex;align-items:center;gap:6px;height:34px;min-width:0}'
+      +'header h1{font-size:14px;margin:0;font-weight:600;flex:0 1 auto;min-width:60px;overflow:hidden;'
         +'text-overflow:ellipsis;white-space:nowrap}'
+      +'.acts{flex:0 0 auto;display:grid;grid-template-columns:repeat(2,minmax(104px,auto));gap:6px}'
+      +'.acts button.txt{height:34px;padding:0 14px;white-space:nowrap}'
+      +'#warnb{max-width:794px;margin:0 auto 14px;background:#fff4e5;color:#7a4100;'
+        +'border:1px solid #f0b46b;border-radius:8px;padding:10px 14px;font-size:13.5px}'
+      +'#dlg{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.45);display:none;'
+        +'align-items:center;justify-content:center}'
+      +'#dlg .box{background:#fff;color:#0f172a;border-radius:10px;width:min(440px,90vw);'
+        +'padding:20px 22px 16px;box-shadow:0 10px 40px rgba(0,0,0,.4)}'
+      +'#dlg .t{font-size:15px;font-weight:700;margin:0 0 8px}'
+      +'#dlg .m{font-size:14px;line-height:1.5;margin:0 0 18px}'
+      +'#dlg .b{display:flex;justify-content:flex-end;gap:8px}'
+      +'#dlg button{font:600 13px Segoe UI,Arial,sans-serif;padding:8px 16px;border-radius:7px;'
+        +'border:1px solid #cbd5e1;background:#fff;color:#0f172a;cursor:pointer}'
+      +'#dlg button.ok{background:#e0121c;border-color:#e0121c;color:#fff}'
       +'.grp{display:flex;align-items:center;gap:2px;background:#3c4043;border-radius:8px;padding:3px}'
       +'.ic{min-width:32px;height:30px;border:0;border-radius:6px;background:transparent;color:#e8eaed;'
         +'font-size:15px;cursor:pointer;line-height:1;padding:0 7px}'
@@ -6306,14 +6333,11 @@
       +'button.warn{border-color:#8a5a00;color:#ffcf7a}'
       +'#msg{font-size:12.5px;color:#bdc1c6;min-width:10px;max-width:26vw;white-space:nowrap;'
         +'overflow:hidden;text-overflow:ellipsis}'
-      +'#dstat{margin-left:auto;font-size:12px;color:#bdc1c6;max-width:62%;text-align:right;'
-        +'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
-      +'#dstat.test b{color:#ffcf7a}'
       +'#ttoast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:9;max-width:80%;'
         +'background:#202124;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;'
         +'box-shadow:0 4px 18px rgba(0,0,0,.4);display:none}'
       +'#ttoast.err{background:#b91c1c}'
-      +'#view{position:fixed;inset:96px 0 0 0;overflow:auto;padding:24px 0 48px}'
+      +'#view{position:fixed;inset:88px 0 0 0;overflow:auto;padding:24px 0 48px}'
       +'#wrap{transform-origin:top center;margin:0 auto;width:794px}'
       /* The sheet is the same 794 x 1123 the preview used - A4 at 96dpi - so what is on screen is
          the shape of what comes out, and the Word file was typeset to the same margins. */
@@ -6352,21 +6376,15 @@
       +'.wfd-page b,.wfd-page strong{font-weight:700;color:#000}'
       +'</style>'
       +'<header>'
+       +'<div class="hl">'
         +'<div class="bar">'
-          +'<h1>'+e(title)+'</h1>'
+          +'<h1 title="'+e(title)+'">'+e(title)+'</h1>'
           +'<div class="grp">'
             +'<button class="ic" id="zo" title="Zoom out">&#8722;</button>'
             +'<span id="zlabel" title="Click to fit the width">100%</span>'
             +'<button class="ic" id="zi" title="Zoom in">&#43;</button>'
           +'</div>'
           +'<span id="msg"></span>'
-          +'<button class="txt primary" id="save">Save</button>'
-          +'<button class="txt" id="dlw">Download Word</button>'
-          +'<button class="txt" id="dlp">Download PDF</button>'
-          +(canMail
-            ? ('<button class="txt" id="mail" disabled title="Checking whether it can be sent…">Email</button>'
-              +'<button class="txt warn" id="rej" disabled>Reject</button>')
-            : '')
         +'</div>'
         +'<div class="bar2">'
           +'<div class="grp">'
@@ -6381,11 +6399,25 @@
           +'<button class="ic" id="clr" style="min-width:auto;padding:0 10px;font-size:13px">Clear</button>'
           +'<button class="ic" id="reset" style="min-width:auto;padding:0 10px;font-size:13px" '
             +'title="Throw away the corrections and build this again from the booking">Rebuild from booking</button>'
-          +(mailable?'<span id="dstat"></span>':'')
         +'</div>'
+       +'</div>'
+       /* Download is the PDF. The Word download is gone from the toolbar - wfBuildDocx stays in
+          the file, unused here, for when it is wanted again. */
+       +'<div class="acts">'
+          +'<button class="txt primary" id="save">Save</button>'
+          +'<button class="txt" id="dlp" title="Download as PDF">Download</button>'
+          +(canMail
+            ? ('<button class="txt" id="mail" disabled title="Checking whether it can be sent…">Email</button>'
+              +'<button class="txt warn" id="rej" disabled>Reject</button>')
+            : '')
+       +'</div>'
       +'</header>'
-      +'<div id="view"><div id="wrap"><div id="sheet" class="wfd-page'+((style&&style.serif)?' wfd-serif':'')
+      +'<div id="view">'
+        +(mailBlock?('<div id="warnb">'+e(mailBlock)+'</div>'):'')
+        +'<div id="wrap"><div id="sheet" class="wfd-page'+((style&&style.serif)?' wfd-serif':'')
         +'" contenteditable="true" spellcheck="true"></div></div></div>'
+      +'<div id="dlg"><div class="box"><p class="t" id="dlgT"></p><p class="m" id="dlgM"></p>'
+        +'<div class="b"><button id="dlgNo">Cancel</button><button class="ok" id="dlgOk">Confirm</button></div></div></div>'
       +'<div id="ttoast"></div>');
     tab.document.close();
 
@@ -6408,6 +6440,29 @@
       const el=d.getElementById('ttoast'); if(!el) return;
       el.textContent=t; el.className=(kindOf==='err')?'err':''; el.style.display='block';
       clearTimeout(toastT); toastT=setTimeout(function(){ el.style.display='none'; },ms||7000);
+    };
+
+    /* A CONFIRMATION INSIDE THE TAB, not window.confirm. A browser's own confirm box names the
+       site rather than the document, can be suppressed for the page after the second one, and
+       blocks the tab while it is up. This is an ordinary dialog: a title, the question, Cancel
+       and Confirm; Escape cancels, Enter confirms. Resolves true only on Confirm. */
+    const ask=function(t,m,okLabel){
+      return new Promise(function(resolve){
+        const box=d.getElementById('dlg'), ok=d.getElementById('dlgOk'), no=d.getElementById('dlgNo');
+        d.getElementById('dlgT').textContent=t; d.getElementById('dlgM').textContent=m;
+        ok.textContent=okLabel||'Confirm';
+        const key=function(ev){
+          if(ev.key==='Escape'){ ev.preventDefault(); ev.stopPropagation(); done(false); }
+          else if(ev.key==='Enter'){ ev.preventDefault(); ev.stopPropagation(); done(true); }
+        };
+        const done=function(v){ box.style.display='none'; d.removeEventListener('keydown',key,true);
+          ok.onclick=no.onclick=box.onclick=null; resolve(v); };
+        ok.onclick=function(){ done(true); };
+        no.onclick=function(){ done(false); };
+        box.onclick=function(ev){ if(ev.target===box) done(false); };
+        d.addEventListener('keydown',key,true);
+        box.style.display='flex'; ok.focus();
+      });
     };
 
     const applyZoom=function(){
@@ -6447,7 +6502,8 @@
     d.getElementById('save').onclick=doSave;
 
     d.getElementById('reset').onclick=async function(){
-      if(!tab.confirm('Throw away the corrections and build this again from the booking?')) return;
+      if(!(await ask('Rebuild from booking',
+        'Throw away the corrections and build this again from the booking?','Rebuild'))) return;
       try{ if(caseId&&kind){ await window.wfTabDiscard(caseId,kind); hasEdit=false; } }catch(_e){}
       sheet.innerHTML=html; dirty=false; say('Rebuilt from the booking');
     };
@@ -6459,28 +6515,21 @@
       catch(err){ say('Could not build the file: '+((err&&err.message)||err)); }
       btn.disabled=false; btn.textContent=was;
     };
-    d.getElementById('dlw').onclick=function(){ dl('docx',this); };
     d.getElementById('dlp').onclick=function(){ dl('pdf',this); };
 
     /* ----- Email / Reject - see the note on wfTabEmail ----- */
-    if(mailable){
-      const dstat=d.getElementById('dstat');
+    /* No status line any more: the status row is read only to know whether the document is
+       rejected, which decides whether Email is on and whether the other button says Reject or
+       Undo reject. What was sent where is in the toast at the moment of sending. */
+    if(canMail){
       const mailBtn=d.getElementById('mail'), rejBtn=d.getElementById('rej');
-      let rejected=false, known=false, busy=false, testMode=false;
-      const paint=function(text){
-        if(!dstat) return;
-        dstat.className=testMode?'test':'';
-        dstat.innerHTML=e(text||'')
-          +(testMode?('  ·  <b>TEST MODE – mail goes to the test inbox</b>'):'');
-        dstat.title=dstat.textContent;
-      };
+      let rejected=false, known=false, busy=false;
       const applyMailState=function(){
-        if(!canMail) return;
         /* Until the status has been read, Email stays off: it might be rejected. If the status
            cannot be read at all it is allowed, because the function checks rejection itself. */
-        mailBtn.disabled=busy||rejected||!known;
-        mailBtn.title=rejected?'Rejected – cannot be emailed'
-          :('Email the '+label+' to the customer');
+        mailBtn.disabled=busy||rejected||!known||!!mailBlock;
+        mailBtn.title=mailBlock?mailBlock
+          :(rejected?'Rejected – cannot be emailed':('Email the '+label+' to the customer'));
         rejBtn.disabled=busy||!known;
         rejBtn.textContent=rejected?'Undo reject':'Reject';
         rejBtn.title=rejected?('Allow the '+label+' to be emailed again')
@@ -6489,17 +6538,20 @@
       const refreshStatus=async function(){
         try{
           const st=await window.wfTabStatus(caseId,kind);
-          rejected=st.rejected; testMode=testMode||st.test; paint(st.text);
-        }catch(_e){ paint(''); }
+          rejected=st.rejected;
+        }catch(_e){}
         known=true; applyMailState();
       };
-      if(canMail){
+      {
         mailBtn.onclick=async function(){
-          if(busy||rejected) return;
+          if(busy||rejected||mailBlock) return;
+          /* "modified" is decided before the save below, from what is on the sheet: unsaved
+             changes mean it differs from the booking's own build just as a saved copy does. */
+          const modified=hasEdit||dirty;
+          if(!(await ask('Email the '+label,
+            'Email the '+label+(modified?' (modified version)':'')+' to the customer?','Email'))) return;
           // Unsaved changes are saved first: what is mailed is what is kept.
           if(dirty){ const ok=await doSave(); if(!ok) return; }
-          const modified=hasEdit;
-          if(!tab.confirm('Email the '+label+(modified?' (modified version)':'')+' to the customer?')) return;
           busy=true; applyMailState();
           const was=mailBtn.textContent; mailBtn.textContent='Sending...'; say('Sending...');
           try{
@@ -6507,7 +6559,6 @@
             const sent=(Array.isArray(r.sent_to)?r.sent_to:[]).join(', ')||'nobody';
             const meant=(Array.isArray(r.intended_to)?r.intended_to:[]).join(', ');
             if(r.test){
-              testMode=true;
               const t='TEST send – the '+label+' went to '+sent
                 +(meant?(' instead of the customer ('+meant+')'):'')+'.';
               say('Sent to the test inbox'); tabToast(t);
@@ -6524,10 +6575,10 @@
         rejBtn.onclick=async function(){
           if(busy) return;
           const undo=rejected;
-          if(!tab.confirm(undo
-            ? ('Undo the rejection of the '+label+'? It can then be emailed again.')
-            : ('Reject the '+label+'? It stays editable and downloadable, but it cannot be emailed '
-               +'until the rejection is undone.'))) return;
+          if(!(await (undo
+            ? ask('Undo reject','Undo the rejection of this '+label+'? It can then be emailed again.','Undo reject')
+            : ask('Reject','Reject this '+label+'? It can still be edited and downloaded, but it cannot '
+               +'be emailed.','Reject')))) return;
           busy=true; applyMailState();
           try{
             await window.wfTabReject(caseId,kind,!undo);
@@ -6696,6 +6747,100 @@
     await wfOpenDocTab(h,{title:'Welcome Letter \u2014 '+name,
       base:'Welcome Letter - '+name, caseId:caseId, kind:'welcome', logoBytes:logoBytes,
       tab:tab, canAct:wfBookingActor()});
+  }
+
+  /* ── 2nd welcome letter ─────────────────────────────────────────────────────────────────────
+     THE ALLOTMENT PAYMENT DEMAND. The second letter a customer gets after booking: the 10% due on
+     allotment, and the date it is due by. Kind 'welcome2'. It is a text letter like the first -
+     mailed as the body of the email (letter_html), not as an attachment - and opens in the same
+     editor with Save, Download, Email and Reject. No letterhead logo: it reads as an email.
+
+     The wording is Post Sales' own and is set here exactly as given. Three values go into it:
+       project and Block {block}/{flat}  - the Booking Form's own fields;
+       the amount                        - WF_ALLOTMENT_DUE, below;
+       the due date                      - the booking date plus 30 days.
+
+     NO BOOKING DATE, NO DUE DATE. A demand notice with an invented due date is worse than none,
+     so when the reading has no booking date the date is left as a blank, the tab says so in a
+     banner, and Email stays off (customer-invite refuses it too). It can still be edited and
+     downloaded - somebody may want to fill the date in by hand and send it some other way. */
+
+  /* THE ALLOTMENT AMOUNT DUE, BY PROJECT. One figure for every project for now - 1,00,000.00 -
+     under '*'. When a project gets its own figure, add it here by its exact project name
+     ('Dream Gurukul': 150000) and it wins over '*' for that project only. Rupees, as a number. */
+  const WF_ALLOTMENT_DUE={'*':100000};
+
+  // The tab is opened first, on the click - see wfPendingTab.
+  window.wfWelcome2Letter=async function(caseId){
+    const tab=wfPendingTab('the 2nd Welcome Letter');
+    let res=null;
+    try{ res=await wfBookingReading(caseId); }
+    catch(e){ wfClosePending(tab); toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfWelcome2Doc(res,caseId,tab); }
+    catch(e){ wfClosePending(tab); toast('Could not build the letter: '+((e&&e.message)||e),'err'); }
+  };
+
+  async function wfWelcome2Doc(res,caseId,tab){
+    const E=function(x){ return String(x==null?'':x)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+    const f=res.fields||{};
+    const val=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+
+    const project=val('project_name')||'________________';
+    const block=val('block')||'____', flat=val('flat')||'____';
+    const dueNum=(WF_ALLOTMENT_DUE[val('project_name')]!=null)
+      ? WF_ALLOTMENT_DUE[val('project_name')] : WF_ALLOTMENT_DUE['*'];
+    const amount=Number(dueNum).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+    /* The booking date as the reader found it on the form, dd/mm/yyyy. A field the reader marked
+       found:false, or wrote as NIL, is no date at all. Thirty days on, written with dots the way
+       the other letters write a date. */
+    const bd=f.booking_date||null;
+    const bdRaw=(bd && bd.found!==false) ? String(bd.value==null?'':bd.value).trim() : '';
+    const m=(bdRaw && bdRaw.toUpperCase()!=='NIL')
+      ? bdRaw.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/) : null;
+    let due='';
+    if(m){
+      const dt=new Date(+m[3], +m[2]-1, +m[1]);
+      if(!isNaN(dt) && dt.getDate()===+m[1]){
+        dt.setDate(dt.getDate()+30);
+        const p2=function(n){ return String(n).padStart(2,'0'); };
+        due=p2(dt.getDate())+'.'+p2(dt.getMonth()+1)+'.'+dt.getFullYear();
+      }
+    }
+
+    let h='';
+    h+='<p class="wfd-gap">Subject - Allotment Payment Letter</p>';
+    h+='<p class="wfd-gap">Dear Sir,</p>';
+    h+='<p class="wfd-gap">We hope this email finds you well.</p>';
+    h+='<p class="wfd-gap">We are pleased to inform you that the construction and development work at <b>'
+      +E(project)+'</b> is progressing steadily as per our planned schedule.</p>';
+    h+='<p class="wfd-gap">Following the successful booking of your unit <b>Block '+E(block)+'/'+E(flat)
+      +'</b>, this email serves as an official demand notice for the <b>Allotment Payment</b>, which '
+      +'constitutes 10% of the total consideration value of your property.</p>';
+    h+='<p>Here are the payment details for your quick reference:</p>';
+    h+='<p>• <b><u>Total Allotment Amount Due: '+E(amount)+'</u></b></p>';
+    h+='<p class="wfd-gap">• <b><u>Due Date: '+E(due||'____')+'</u></b></p>';
+    h+='<p class="wfd-gap">Timely payments ensure that the development of your dream home continues '
+      +'without any delays.</p>';
+    h+='<p class="wfd-gap">If you have already made this payment, please disregard this notice and share '
+      +'the receipt details with us.</p>';
+    h+='<p class="wfd-gap">If you have any questions or require clarification regarding your payment '
+      +'schedule, please feel free to reach out to us.</p>';
+    h+='<p class="wfd-gap">Thank you for your continued cooperation and partnership.</p>';
+    h+='<p class="wfd-gap">Warm regards,</p>';
+    h+='<p><b>Pallabita Ghosh (Manager - Post Sales)</b></p>';
+    h+='<p><b>Reach me @8420541541</b></p>';
+    h+='<p>Customer Relations Team</p>';
+
+    const who=allotteeNames(res);
+    const name=(who[0]||val('customer_name')||'customer').replace(/[^\w \-]/g,'').trim()||'customer';
+    await wfOpenDocTab(h,{title:'2nd Welcome Letter — '+name,
+      base:'2nd Welcome Letter - '+name, caseId:caseId, kind:'welcome2', logoBytes:null,
+      tab:tab, canAct:wfBookingActor(),
+      mailBlock:due?'':'No booking date was read from this booking — the due date cannot be set, '
+        +'so this letter cannot be emailed.'});
   }
 
   /* A4, letterhead, one page. Every value is taken from the stored reading; nothing here is written
