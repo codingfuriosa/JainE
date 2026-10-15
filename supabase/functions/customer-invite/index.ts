@@ -163,7 +163,7 @@ Deno.serve(async (req: Request) => {
   const action = String(body.action || "");
 
   // ------------------------------------------------- booking documents (staff, or the job)
-  if (action === "booking_doc_mail" || action === "booking_welcome_auto") {
+  if (action === "booking_doc_mail" || action === "booking_welcome_auto" || action === "booking_welcome2_reminders") {
     try { return await handleBookingMail(req, body, db, j, SB, SRV, createClient); }
     catch (e) { return j({ error: "Could not email the document: " + String((e as Error).message || e).slice(0, 300) }, 500); }
   }

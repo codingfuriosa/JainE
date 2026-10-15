@@ -28,11 +28,70 @@ import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 type J = (o: unknown, status?: number) => Response;
 
-const KINDS = ["welcome", "allotment", "agreement"];
+const KINDS = ["welcome", "welcome2", "allotment", "agreement"];
+const TEXT_KINDS = ["welcome", "welcome2"];   // go as the body of the email, never as a file
 const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 const DOC_NAME: Record<string, string> = {
-  welcome: "Welcome Letter", allotment: "Allotment Letter", agreement: "Agreement Draft",
+  welcome: "Welcome Letter", welcome2: "2nd Welcome Letter",
+  allotment: "Allotment Letter", agreement: "Agreement Draft",
 };
+
+/* THE ALLOTMENT PAYMENT DUE, project by project. Rs 1,00,000 for every project until Post Sales
+   sends the list - add a project's own figure under its name (as the reader spells it, e.g.
+   "Dream Gurukul") and it wins over '*'. Keep in step with WF_ALLOTMENT_DUE in accountability.js. */
+const ALLOTMENT_DUE: Record<string, number> = { "*": 100000 };
+
+/* The due date is the booking date plus 30 days. A booking with no booking date read off it has
+   no due date, and a demand notice without one is not sent - null here, and the caller refuses. */
+function dueDate(res: any): string | null {
+  const b = res?.fields?.booking_date;
+  const m = String(b?.value ?? "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m || b?.found === false) return null;
+  const d = new Date(Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]) + 30));
+  if (isNaN(d.getTime())) return null;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getUTCDate())}.${p(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}`;
+}
+
+/* THE 2nd WELCOME LETTER - the Allotment Payment Letter - in the wording Post Sales gave. */
+export function welcome2Email(res: any) {
+  const f = res?.fields || {};
+  const val = (k: string) => { const t = String(f?.[k]?.value ?? "").trim(); return (!t || t === "NIL") ? "" : t; };
+  const project = val("project_name") || "________________";
+  const unit = `Block ${val("block") || "____"}/${val("flat") || "____"}`;
+  const amt = ALLOTMENT_DUE[project] ?? ALLOTMENT_DUE["*"];
+  const amount = amt.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const due = dueDate(res);
+  const P = (h: string) => `<p style="margin:0 0 14px">${h}</p>`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111827">`
+    + P(`Dear Sir,`)
+    + P(`We hope this email finds you well.`)
+    + P(`We are pleased to inform you that the construction and development work at <b>${esc(project)}</b> is progressing steadily as per our planned schedule.`)
+    + P(`Following the successful booking of your unit <b>${esc(unit)}</b>, this email serves as an official demand notice for the <b>Allotment Payment</b>, which constitutes 10% of the total consideration value of your property.`)
+    + P(`Here are the payment details for your quick reference:`)
+    + `<ul style="margin:0 0 14px;padding-left:22px">`
+    + `<li><b><u>Total Allotment Amount Due: ${esc(amount)}</u></b></li>`
+    + `<li><b><u>Due Date: ${esc(due || "____")}</u></b></li></ul>`
+    + P(`Timely payments ensure that the development of your dream home continues without any delays.`)
+    + P(`If you have already made this payment, please disregard this notice and share the receipt details with us.`)
+    + P(`If you have any questions or require clarification regarding your payment schedule, please feel free to reach out to us.`)
+    + P(`Thank you for your continued cooperation and partnership.`)
+    + P(`Warm regards,`)
+    + `<p style="margin:0"><b>Pallabita Ghosh (Manager - Post Sales)</b></p>`
+    + `<p style="margin:0"><b>Reach me @8420541541</b></p>`
+    + `<p style="margin:0">Customer Relations Team</p></div>`;
+  const text = `Dear Sir,\n\nWe hope this email finds you well.\n\n`
+    + `We are pleased to inform you that the construction and development work at ${project} is progressing steadily as per our planned schedule.\n\n`
+    + `Following the successful booking of your unit ${unit}, this email serves as an official demand notice for the Allotment Payment, which constitutes 10% of the total consideration value of your property.\n\n`
+    + `Here are the payment details for your quick reference:\n\n`
+    + `* Total Allotment Amount Due: ${amount}\n* Due Date: ${due || "____"}\n\n`
+    + `Timely payments ensure that the development of your dream home continues without any delays.\n`
+    + `If you have already made this payment, please disregard this notice and share the receipt details with us.\n`
+    + `If you have any questions or require clarification regarding your payment schedule, please feel free to reach out to us.\n`
+    + `Thank you for your continued cooperation and partnership.\n\nWarm regards,\n`
+    + `Pallabita Ghosh (Manager - Post Sales)\nReach me @8420541541\nCustomer Relations Team`;
+  return { html, text, due };
+}
 
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
@@ -166,6 +225,7 @@ export function letterHtmlToEmail(raw: string) {
     const close = m.startsWith("</");
     const map: Record<string, string> = { b: "b", strong: "b", i: "i", em: "i", u: "u", br: "br", p: "p", div: "p" };
     const to = map[t];
+    if (t === "li") return close ? "</p>" : '<p style="margin:0 0 6px">• ';
     if (!to) return "";
     if (to === "br") return close ? "" : "<br>";
     if (to === "p") return close ? "</p>" : '<p style="margin:0 0 14px">';
@@ -195,6 +255,7 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
                                         createClient: any): Promise<Response> {
   const action = String(body.action || "");
   const acc = db.schema("acc");
+  if (action === "booking_welcome2_reminders") return await welcome2Reminders(req, acc, j);
   const caseId = Number(body.case_id || 0);
   if (!caseId) return j({ error: "case_id is required" }, 400);
 
@@ -249,14 +310,20 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
   // ---- the message
   const modified = action !== "booking_welcome_auto" && body.modified === true;
   const w = welcomeEmail(res);
-  let subject = `${DOC_NAME[kind]} - ${w.customer}` + (modified ? " (MODIFIED)" : "");
+  const w2 = welcome2Email(res);
+  if (kind === "welcome2" && !w2.due) {
+    return j({ error: "No booking date was read from this booking, so the due date cannot be set and the 2nd Welcome Letter cannot be emailed." }, 422);
+  }
+  let subject = (kind === "welcome2" ? "Allotment Payment Letter" : `${DOC_NAME[kind]} - ${w.customer}`)
+    + (modified ? " (MODIFIED)" : "");
   let html = "", text = "";
   const attachments: any[] = [];
-  if (kind === "welcome") {
+  if (TEXT_KINDS.includes(kind)) {
     if (modified && String(body.letter_html || "").trim()) {
       const m = letterHtmlToEmail(String(body.letter_html));
       html = m.html; text = m.text;
-    } else { html = w.html; text = w.text; }
+    } else if (kind === "welcome2") { html = w2.html; text = w2.text; }
+    else { html = w.html; text = w.text; }
   } else {
     const b64 = String(body.pdf_base64 || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
     if (!b64) return j({ error: "The document's PDF was not attached." }, 400);
@@ -316,4 +383,60 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
   }, { onConflict: "case_id,kind" });
 
   return j({ ok: true, test: !live, sent_to: to, intended_to: intended, subject });
+}
+
+/* THE 2nd WELCOME LETTER REMINDER - the job only (x-audit-secret), every evening.
+   For each booking whose reminder day has come (the day after upload, Monday when that is a
+   Sunday) and whose 2nd Welcome Letter has still not been emailed, Pallabita Ghosh gets one email
+   saying so. Once per booking: reminder_sent_at is stamped whether or not more follow. In test
+   mode it goes to the test inbox. */
+async function welcome2Reminders(req: Request, acc: any, j: J): Promise<Response> {
+  const secret = req.headers.get("x-audit-secret") || "";
+  const { data: s } = await acc.from("job_secrets").select("value").eq("name", "booking_audit").maybeSingle();
+  if (!secret || !s?.value || s.value !== secret) return j({ error: "unauthorized" }, 401);
+  const CU = Deno.env.get("CUSTOMER_MAIL_USER"), CP = Deno.env.get("CUSTOMER_MAIL_APP_PASSWORD");
+  if (!CU || !CP) return j({ error: "Pallabita Ghosh's mailbox is not connected." }, 500);
+
+  const { data: due, error } = await acc.rpc("booking_welcome2_due");
+  if (error) return j({ error: error.message }, 500);
+  if (!due || !due.length) return j({ ok: true, reminded: 0 });
+
+  const { data: secrets } = await acc.from("job_secrets").select("name,value")
+    .in("name", ["booking_mail_mode", "booking_mail_test_to"]);
+  const conf: Record<string, string> = {};
+  for (const r of (secrets || [])) conf[r.name] = String(r.value || "");
+  const live = conf.booking_mail_mode === "live";
+  const to = live ? CU : (conf.booking_mail_test_to || "").trim();
+  if (!EMAIL_RE.test(to)) return j({ error: "no reminder inbox" }, 500);
+
+  const ids = due.map((d: any) => Number(d.case_id));
+  const { data: cases } = await acc.from("flow_cases").select("id,case_no").in("id", ids);
+  const { data: audits } = await acc.from("booking_audits").select("case_id,result").in("case_id", ids);
+  const no: Record<number, any> = {}; for (const c of (cases || [])) no[c.id] = c.case_no;
+  const rs: Record<number, any> = {}; for (const a of (audits || [])) rs[a.case_id] = a.result;
+
+  const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true,
+    auth: { username: CU, password: CP } } });
+  const sent: number[] = [];
+  try {
+    for (const d of due) {
+      const id = Number(d.case_id), res = rs[id] || {};
+      const v = welcomeValues(res);
+      const who = v.who.join(" and ") || "the customer";
+      const subj = `${live ? "" : "[TEST] "}Reminder: 2nd Welcome Letter not sent - ${who} (Booking Form No. ${no[id] ?? id})`;
+      const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111827">`
+        + `<p style="margin:0 0 14px">The <b>2nd Welcome Letter</b> (Allotment Payment Letter) has not been emailed yet for:</p>`
+        + `<p style="margin:0 0 14px"><b>${esc(who)}</b> - Flat No. ${esc(v.flat)}, ${esc(v.floor)}, Block-${esc(v.block)}, ${esc(v.project)}<br>`
+        + `Booking Form No. ${esc(no[id] ?? id)}, uploaded ${esc(d.uploaded)}.</p>`
+        + `<p style="margin:0">Please open the booking in JAIN-E and email the 2nd Welcome Letter.</p></div>`;
+      const text = html.replace(/<br>/g, "\n").replace(/<\/p>/g, "\n\n").replace(/<[^>]+>/g, "").trim();
+      try {
+        await client.send({ from: `JAIN-E Post Sales <${CU}>`, to, subject: subj, content: text, html });
+        sent.push(id);
+        await acc.from("booking_doc_status").upsert({ case_id: id, kind: "welcome2", reminder_sent_at: new Date().toISOString() },
+          { onConflict: "case_id,kind" });
+      } catch (_e) { /* left for tomorrow evening's run */ }
+    }
+  } finally { try { await client.close(); } catch { /* ignore */ } }
+  return j({ ok: true, reminded: sent.length, cases: sent, test: !live });
 }
