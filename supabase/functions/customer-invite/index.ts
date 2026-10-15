@@ -6,6 +6,8 @@
 //   { action: "invite", customerIds, resend?, helpLine? }   STAFF ONLY (caller's JWT is checked)
 //                                      -> emails each customer the "your portal is open" invitation
 //   { action: "invite_test", helpLine? }  STAFF ONLY -> the same invitation, to the caller's own email
+//   { action: "booking_doc_mail" | "booking_welcome_auto", ... }  Booking Form documents (Welcome
+//                                      Letter, Allotment Letter, Agreement Draft) - see booking-mail.ts
 //
 // Customer mail (invitations and sign-in codes) goes out from customercare1@thejaingroup.com:
 // CUSTOMER_MAIL_USER / CUSTOMER_MAIL_APP_PASSWORD. Invitations need them; codes fall back to the
@@ -25,6 +27,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import { handleBookingMail } from "./booking-mail.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -158,6 +161,12 @@ Deno.serve(async (req: Request) => {
   let body: any = {};
   try { body = await req.json(); } catch { /* empty body */ }
   const action = String(body.action || "");
+
+  // ------------------------------------------------- booking documents (staff, or the job)
+  if (action === "booking_doc_mail" || action === "booking_welcome_auto") {
+    try { return await handleBookingMail(req, body, db, j, SB, SRV, createClient); }
+    catch (e) { return j({ error: "Could not email the document: " + String((e as Error).message || e).slice(0, 300) }, 500); }
+  }
 
   // ------------------------------------------------------ invite (staff)
   if (action === "invite" || action === "invite_test") {
