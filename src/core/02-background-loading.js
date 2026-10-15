@@ -125,8 +125,20 @@ async function bgCapture(route, fn){
   }
 }
 window.bgCapture=bgCapture;
+/* A rate-limited token refresh is "try again shortly", not "your sign-in is over" - but supabase-js
+   only treats 5xx answers that way, and on a 429 it deletes the stored session, which every open
+   JainE page then reads as a sign-out. Reported to it as 503 instead, it keeps the session, backs off
+   and tries again later (see authTransient in the auth code). */
+function bgAuthFetch(input, init){
+  return BG_NATIVE_FETCH(input, init).then(function(res){
+    if(res.status!==429) return res;
+    console.warn('[auth] token refresh rate-limited (429) - kept the session, will retry');
+    return new Response(null, {status:503, statusText:'Rate limited (429)', headers:res.headers});
+  });
+}
 function bgFetch(input, init){
   let r; try{ r=bgReq(input, init); }catch(_e){ return BG_NATIVE_FETCH(input, init); }
+  if(r.url.indexOf(SUPABASE_URL+'/auth/v1/token')===0) return bgAuthFetch(input, init);
   const isApi=r.url.indexOf(SUPABASE_URL+'/rest/v1/')===0 || r.url.indexOf(SUPABASE_URL+'/functions/v1/')===0;
   if(!isApi) return BG_NATIVE_FETCH(input, init);
   // anything that is not a read may change what a held answer says - drop them all
@@ -167,8 +179,11 @@ async function bgPrefetch(route){
   if(Date.now()-(BG_LAST[route]||0) < BG_MIN_GAP_MS) return;
   const list=bgLoadReads()[route]; if(!list || !list.length) return;
   BG_LAST[route]=Date.now();
-  let token=null;
-  try{ const {data}=await sb.auth.getSession(); token=data&&data.session&&data.session.access_token; }catch(_e){}
+  /* The token the auth listener already holds. Asking getSession() here meant one more chance to
+     refresh per page kept ready - a dozen per page draw - which on a PC with a wrong clock was most
+     of the refresh storm that got people signed out. */
+  let token=(typeof USAGE_TOKEN!=='undefined' && USAGE_TOKEN) || null;
+  if(!token){ try{ const {data}=await sb.auth.getSession(); token=data&&data.session&&data.session.access_token; }catch(_e){} }
   if(!token) return;
   const sent=[];
   list.forEach(function(q){

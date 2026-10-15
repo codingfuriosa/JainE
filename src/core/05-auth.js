@@ -5,6 +5,53 @@ function fatal(msg){
 }
 window.addEventListener('error',function(e){ if(!state.user){ fatal((e.message||'A script error occurred')+'.'); } });
 
+/* WRONG COMPUTER CLOCK. A sign-in lasts an hour, and supabase-js decides when it has run out by the
+   computer's own clock. A PC running two hours fast therefore sees every token as already expired and
+   asks for a new one on every getSession() - several a second across the session guard, background
+   loading and the page itself - until Supabase answers 429 and the library signs the person out. It
+   looked like "JainE logs me out after a few seconds" (15 Oct 2026: one PC, 2h fast, Windows Time
+   stopped). Nothing in the browser can correct the clock, so the person is told plainly how to.
+   The measure: a token's iat is the server's time when it was issued. Right after a sign-in or a
+   refresh, now - iat is the clock error (plus a second or two of network). Any token issued "in the
+   future" means the clock is slow - that holds for an old token too. */
+const CLOCK_SKEW_LIMIT_S=300;
+let CLOCK_BANNER_SHOWN=false;
+function tokenIssuedAt(token){
+  try{
+    const part=String(token||'').split('.')[1]; if(!part) return null;
+    const json=JSON.parse(atob(part.replace(/-/g,'+').replace(/_/g,'/')));
+    return typeof json.iat==='number'?json.iat:null;
+  }catch(_e){ return null; }
+}
+// fresh: the token was issued just now (SIGNED_IN / TOKEN_REFRESHED), so a fast clock shows too
+function checkClockSkew(session, fresh){
+  const iat=tokenIssuedAt(session&&session.access_token); if(iat==null) return;
+  const skew=Math.round(Date.now()/1000-iat);     // >0: this computer is ahead of the server
+  if(skew<-CLOCK_SKEW_LIMIT_S || (fresh && skew>CLOCK_SKEW_LIMIT_S)) showClockBanner(skew);
+}
+function showClockBanner(skew){
+  if(CLOCK_BANNER_SHOWN) return; CLOCK_BANNER_SHOWN=true;
+  const mins=Math.round(Math.abs(skew)/60), h=Math.floor(mins/60), m=mins%60;
+  const by=(h?h+' hour'+(h>1?'s':''):'')+(h&&m?' ':'')+(m?m+' minute'+(m>1?'s':''):'');
+  const b=document.createElement('div');
+  b.id='clockSkewBanner';
+  b.setAttribute('role','alert');
+  b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:100000;background:#b91c1c;color:#fff;padding:10px 44px 10px 16px;font:500 13.5px/1.45 Inter,system-ui,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.25)';
+  b.innerHTML='<i class="fa-solid fa-clock"></i> <b>This computer\'s clock is about '+esc(by)+' '+(skew>0?'fast':'slow')+'.</b> '+
+    'JainE cannot keep you signed in until it is correct. On Windows: Settings &rarr; Time &amp; language &rarr; Date &amp; time &rarr; turn on <b>Set time automatically</b> &rarr; <b>Sync now</b>. Then reload this page.'+
+    '<button type="button" aria-label="Dismiss" style="position:absolute;right:10px;top:8px;background:none;border:0;color:#fff;font-size:18px;cursor:pointer">&times;</button>';
+  b.querySelector('button').onclick=function(){ b.remove(); };
+  (document.body||document.documentElement).appendChild(b);
+  console.warn('[clock] this computer is '+skew+'s '+(skew>0?'ahead of':'behind')+' the server');
+}
+/* A failed token refresh that is only "try again later" (rate limit, server busy) leaves getSession()
+   with no session AND an error. That is not a sign-out: the stored sign-in is still there and works
+   once the refresh goes through, so none of the checks below send the person to the login page for it.
+   bgFetch reports a 429 on /auth/v1/token as 503 so supabase-js files it under this kind. */
+function authTransient(error){
+  return !!error && (error.name==='AuthRetryableFetchError' || error.status===429 || error.status===503);
+}
+
 // Every navigation between modules is a full page load of a different .html file (each pulling in
 // this same multi-megabyte script fresh), so boot()'s who-is-this + profile/roles/permissions
 // fetches used to re-run in full on every single click between tabs — the visible "Loading your
@@ -38,17 +85,23 @@ async function autoProvisionGoogleProfile(){
   }catch(e){}
 }
 async function boot(){
-  let sess;
-  try{ const {data}=await sb.auth.getSession(); sess=data.session; }
+  let sess, sessErr=null;
+  try{ const {data,error}=await sb.auth.getSession(); sess=data.session; sessErr=error||null; }
   catch(err){ fatal('Could not reach the authentication service. Check your internet connection. ('+err.message+')'); return; }
   if(!sess){
     // Right after a Google-sign-in redirect, a brand-new page load can momentarily
     // read no session before it's finished settling — wait a beat and check once
     // more before concluding there's really no session (avoids a login-page flash).
     await new Promise(r=>setTimeout(r,700));
-    try{ const {data}=await sb.auth.getSession(); sess=data.session; }catch(e){}
+    try{ const {data,error}=await sb.auth.getSession(); sess=data.session; sessErr=error||null; }catch(e){}
+  }
+  if(!sess && authTransient(sessErr)){
+    fatal('Your sign-in could not be renewed just now. Wait a minute and reload the page.'+
+      (CLOCK_BANNER_SHOWN?' First correct this computer\'s clock (see the red bar at the top).':''));
+    return;
   }
   if(!sess){ location.replace(LOGIN_PAGE); return; }
+  checkClockSkew(sess,false);
   state.user=sess.user; state.email=state.user.email;
   // Cached for usageFlushOnUnload's hand-built fetch — getSession() itself only reads a local
   // cache, but a tab-close/hide handler can't safely await anything, so the token is kept ready
@@ -308,7 +361,7 @@ function startSessionGuard(){
   let kicking=false;
   async function kick(){
     if(kicking)return; kicking=true;
-    try{ const {data}=await sb.auth.getSession(); if(!data||!data.session){ location.replace(LOGIN_PAGE); } }
+    try{ const {data,error}=await sb.auth.getSession(); if((!data||!data.session) && !authTransient(error)){ location.replace(LOGIN_PAGE); } }
     catch(e){ location.replace(LOGIN_PAGE); }
     finally{ kicking=false; }
   }
@@ -319,8 +372,8 @@ function startSessionGuard(){
   async function kickHard(){
     if(kickingHard)return; kickingHard=true;
     try{
-      const {data:sd}=await sb.auth.getSession();
-      if(!sd||!sd.session){ location.replace(LOGIN_PAGE); return; }
+      const {data:sd,error:sdErr}=await sb.auth.getSession();
+      if(!sd||!sd.session){ if(!authTransient(sdErr)) location.replace(LOGIN_PAGE); return; }
       // getUser() actually asks Supabase to validate the token against auth.users —
       // if the account was deleted (e.g. from the admin panel) this comes back with
       // an error even though the locally-cached JWT hasn't expired yet.
@@ -349,6 +402,7 @@ function startSessionGuard(){
 }
 sb.auth.onAuthStateChange((ev,session)=>{
   if(session&&session.access_token) USAGE_TOKEN=session.access_token;   // stays current across TOKEN_REFRESHED, not just the initial boot()
+  if(ev==='SIGNED_IN'||ev==='TOKEN_REFRESHED') checkClockSkew(session,true);
   if(ev==='SIGNED_OUT'){ bgForget(); location.replace(LOGIN_PAGE); } else if(ev==='PASSWORD_RECOVERY'){ if(typeof resetPasswordModal==='function') resetPasswordModal(); }
 });
 
