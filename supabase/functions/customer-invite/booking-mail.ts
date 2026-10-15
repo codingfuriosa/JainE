@@ -5,8 +5,8 @@
 //       STAFF ONLY - the Email button in the document editor. The caller's own token is checked and
 //       acc.booking_doc_can_act() must say yes (the Administrator and Post Sales).
 //       welcome    goes as TEXT in the body of the email - never as an attachment. When the letter
-//                  has been edited (modified), the edited wording is what is sent, and the subject
-//                  says MODIFIED.
+//                  has been edited (modified), the edited wording is what is sent, under the same
+//                  subject - nothing in the email says it was edited.
 //       allotment  goes as the PDF built from the editor's current page, attached.
 //       agreement  the same.
 //   { action: "booking_welcome_auto", case_id }
@@ -314,8 +314,8 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
   if (kind === "welcome2" && !w2.due) {
     return j({ error: "No booking date was read from this booking, so the due date cannot be set and the 2nd Welcome Letter cannot be emailed." }, 422);
   }
-  let subject = (kind === "welcome2" ? "Allotment Payment Letter" : `${DOC_NAME[kind]} - ${w.customer}`)
-    + (modified ? " (MODIFIED)" : "");
+  // No "(MODIFIED)" in the subject: an edited letter goes out under the same subject (15 Oct 2026).
+  let subject = kind === "welcome2" ? "Allotment Payment Letter" : `${DOC_NAME[kind]} - ${w.customer}`;
   let html = "", text = "";
   const attachments: any[] = [];
   if (TEXT_KINDS.includes(kind)) {
@@ -334,7 +334,7 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
     const v = welcomeValues(res);
     html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111827">`
       + `<p style="margin:0 0 14px">Dear <b>${esc(v.who.join(" and ") || "Sir / Madam")}</b>,</p>`
-      + `<p style="margin:0 0 14px">Please find attached the ${esc(DOC_NAME[kind])}${modified ? " (modified version)" : ""} `
+      + `<p style="margin:0 0 14px">Please find attached the ${esc(DOC_NAME[kind])} `
       + `for <b>Flat No. ${esc(v.flat)}, ${esc(v.floor)}, Block-${esc(v.block)} of ${esc(v.project)}</b>.</p>`
       + `<p style="margin:0 0 14px">Please feel free to get in touch with the undersigned with any queries.</p>`
       + `<p style="margin:0 0 14px">Thanking you,</p>`
