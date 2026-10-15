@@ -538,6 +538,15 @@
     .wfd-page .wfd-sign{margin-top:26px}
     .wfd-page .wfd-logo{margin:0 0 14px}
     .wfd-page .wfd-logo img{width:146px;height:175px;display:block}
+    /* The letters' pieces - the same rules the document tab carries (see wfOpenDocTab). A logo
+       that is not the classic one carries its own inline size, which beats the rule above. */
+    .wfd-page .wfd-center{text-align:center}
+    .wfd-page .wfd-big{font-size:17px}
+    .wfd-page .wfd-redrule{height:0;border-bottom:2px solid #cc2129;margin:18px 0 30px}
+    .wfd-page .wfd-foot{border-top:1px solid #d9dbdf;margin-top:32px;padding-top:8px;text-align:center}
+    .wfd-page table.wfd-grid td{border:1px solid #b8bdc6;padding:4px 7px;vertical-align:top}
+    .wfd-page table.wfd-grid tr.wfd-head td,.wfd-page table.wfd-grid tr.wfd-band td{background:#f1f2f4}
+    .wfd-page td.wfd-num{text-align:right}
     /* A caret has to be visible on a page somebody is meant to correct. */
     .wfd-page:focus-within{box-shadow:0 2px 14px rgba(0,0,0,.35),0 0 0 2px var(--brand)}
     /* THE TASKS SEARCH BAR IS OUTLINED BEFORE IT IS CLICKED. Every other box on the page is a
@@ -5131,6 +5140,122 @@
     return out;
   }
 
+  /* WHAT A PICTURE IS, AND WHAT SHAPE IT IS - READ OFF ITS OWN BYTES.
+
+     The Welcome Letter was smudged. It carries the CURRENT logo, a wide PNG (874 x 203), but it had
+     been given the check list's box for the CLASSIC logo, a tall JPEG (293 x 351): 132 x 158pt on
+     the page and a stylesheet rule of 146 x 175px on screen. A wide mark squeezed into a tall box
+     comes out as a grey smear. It was also labelled data:image/jpeg, which a browser forgives and
+     a PDF or Word writer does not.
+
+     So nothing about a logo is assumed any more. The first bytes of a file say what it is - a PNG
+     always starts 89 50 4E 47 and carries its width and height at bytes 16-23; a JPEG starts FF D8
+     and carries them in its start-of-frame marker - and the box is sized from that. */
+  function wfImgInfo(bytes){
+    if(!bytes||bytes.length<24) return null;
+    if(bytes[0]===0x89&&bytes[1]===0x50&&bytes[2]===0x4E&&bytes[3]===0x47){
+      const be=function(i){ return ((bytes[i]<<24)|(bytes[i+1]<<16)|(bytes[i+2]<<8)|bytes[i+3])>>>0; };
+      return {type:'png', mime:'image/png', ext:'png', w:be(16), h:be(20)};
+    }
+    if(bytes[0]===0xFF&&bytes[1]===0xD8){
+      let i=2, w=0, h=0;
+      while(i+8<bytes.length){
+        if(bytes[i]!==0xFF){ i++; continue; }
+        const mk=bytes[i+1];
+        if(mk===0xFF){ i++; continue; }
+        if(mk===0x01||(mk>=0xD0&&mk<=0xD8)){ i+=2; continue; }
+        const len=(bytes[i+2]<<8)|bytes[i+3];
+        // SOF0..SOF15, less the three markers in that range that are not frames (DHT, JPG, DAC)
+        if(mk>=0xC0&&mk<=0xCF&&mk!==0xC4&&mk!==0xC8&&mk!==0xCC){
+          h=(bytes[i+5]<<8)|bytes[i+6]; w=(bytes[i+7]<<8)|bytes[i+8]; break;
+        }
+        if(mk===0xDA||len<2) break;          // the image data itself: no frame header was found
+        i+=2+len;
+      }
+      return {type:'jpeg', mime:'image/jpeg', ext:'jpeg', w:w, h:h};
+    }
+    return null;
+  }
+  function wfB64ToBytes(b64){
+    const bin=atob(b64), out=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
+    return out;
+  }
+  // In slices, because String.fromCharCode.apply on a whole PDF overflows the call stack.
+  function wfBytesToB64(bytes){
+    let t='';
+    for(let i=0;i<bytes.length;i+=0x8000)
+      t+=String.fromCharCode.apply(null,bytes.subarray?bytes.subarray(i,i+0x8000):[].slice.call(bytes,i,i+0x8000));
+    return btoa(t);
+  }
+
+  /* The current logo goes on a letter at 176pt wide - the width the typeset allotment letter
+     always drew it at - and as tall as its own proportions make it. */
+  const WF_LOGO_WIDE_PT=176;
+
+  /* The size a logo box is drawn at. The box's own numbers are kept whenever they already agree
+     with the picture (within 2%, so the check list's classic logo - 109.5 x 131.25 for a
+     293 x 351 picture - is left exactly as it always was); when they do not, the width is kept and
+     the height worked out from the picture, and a WIDE picture in a box shaped for a tall one is
+     put back at the letterhead width. */
+  function wfLogoSize(wPt,hPt,info){
+    if(!info||!info.w||!info.h) return {w:wPt,h:hPt,fixed:false};
+    const want=info.h/info.w, have=hPt/wPt;
+    if(isFinite(have) && Math.abs(have-want)/want<=0.02) return {w:wPt,h:hPt,fixed:false};
+    const w=(info.w>info.h && have>=1) ? WF_LOGO_WIDE_PT : wPt;
+    return {w:w, h:Math.round(w*want*100)/100, fixed:true};
+  }
+
+  /* The logo's <img>, for a document builder. wPt is the width on the page in points; the height
+     comes from the picture unless hPt is given and agrees with it. A box that is not the classic
+     109.5 x 131.25 also carries its size inline (points to pixels at 4/3), because the stylesheet
+     sizes .wfd-logo img for the classic mark and an inline size is the one thing that beats it -
+     the check list's own logo carries no inline size and keeps the stylesheet's. */
+  function wfLogoImg(bytes,wPt,hPt){
+    const info=wfImgInfo(bytes)||{mime:'image/jpeg',w:0,h:0};
+    const sz=wfLogoSize(wPt, hPt||(info.w?(Math.round(wPt*info.h/info.w*100)/100):wPt), info);
+    const custom=Math.abs(sz.w-109.5)>0.01||Math.abs(sz.h-131.25)>0.01;
+    return '<img alt="The Jain Group" '
+      +(custom?('class="wfd-logo-fit" style="width:'+(Math.round(sz.w*4/3*100)/100)+'px;height:'
+        +(Math.round(sz.h*4/3*100)/100)+'px" '):'')
+      +'data-wpt="'+sz.w+'" data-hpt="'+sz.h+'" src="data:'+info.mime+';base64,'+wfBytesToB64(bytes)+'">';
+  }
+
+  /* SAVED CORRECTIONS STILL CARRY THE OLD, SQUASHED LOGO. A letter somebody corrected and saved
+     before this fix holds the <img> exactly as it was then - mislabelled, in the tall box - and a
+     saved copy wins over a fresh build when the document opens. So the logo inside a saved copy is
+     put right as it is loaded: the true type from its bytes, the true shape from its header. Only
+     a logo that actually needs it is touched, and the HTML is handed back unchanged otherwise -
+     so the check list's saved copies, whose logo was always right, are not even re-serialised. */
+  function wfFixLogoHtml(html){
+    if(!html||String(html).indexOf('wfd-logo')<0) return html;
+    const box=document.createElement('div');
+    box.innerHTML=html;
+    let changed=false;
+    [].slice.call(box.querySelectorAll('.wfd-logo img')).forEach(function(img){
+      const src=img.getAttribute('src')||'';
+      const m=src.match(/^data:([^;,]*);base64,(.+)$/i);
+      if(!m) return;
+      let bytes=null;
+      try{ bytes=wfB64ToBytes(m[2]); }catch(_e){ return; }
+      const info=wfImgInfo(bytes);
+      if(!info) return;
+      const wpt=Number(img.getAttribute('data-wpt'))||109.5, hpt=Number(img.getAttribute('data-hpt'))||131.25;
+      const sz=wfLogoSize(wpt,hpt,info);
+      if(String(m[1]).toLowerCase()!==info.mime && !(info.type==='jpeg'&&/^image\/jpe?g$/i.test(m[1]))){
+        img.setAttribute('src','data:'+info.mime+';base64,'+m[2]); changed=true;
+      }
+      if(sz.fixed){
+        img.setAttribute('data-wpt',String(sz.w)); img.setAttribute('data-hpt',String(sz.h));
+        img.classList.add('wfd-logo-fit');
+        img.style.width=(Math.round(sz.w*4/3*100)/100)+'px';
+        img.style.height=(Math.round(sz.h*4/3*100)/100)+'px';
+        changed=true;
+      }
+    });
+    return changed?box.innerHTML:html;
+  }
+
   /* Indian numbering, in words: lakh and crore, not million. Written out here rather than asked of
      a model because it has exactly one right answer, and because a letter that tells a customer the
      wrong amount in words is a serious thing to get wrong. */
@@ -5327,11 +5452,17 @@
        colour, then size. Word is usually forgiving about it and then one day is not, which shows
        up as "the file cannot be opened because there are problems with the contents" rather than
        anything that names the cause - so it is written in the order the schema states. */
-    const pr=['<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>'];
+    /* st.font is only ever set by the Agreement, which is a deed and is set in Times like every
+       executed copy of one. Everything else stays Calibri, as it always was. Underline goes AFTER
+       the size - that is where the schema puts it - and is new: the editor has always had a U
+       button, but until now an underline typed on the sheet was quietly dropped from the Word file. */
+    const fnt=st.font||'Calibri';
+    const pr=['<w:rFonts w:ascii="'+fnt+'" w:hAnsi="'+fnt+'"/>'];
     if(st.b) pr.push('<w:b/>');
     if(st.i) pr.push('<w:i/>');
     if(st.color) pr.push('<w:color w:val="'+st.color+'"/>');
     pr.push('<w:sz w:val="'+(st.sz||21)+'"/>');
+    if(st.u) pr.push('<w:u w:val="single"/>');
     return '<w:r><w:rPr>'+pr.join('')+'</w:rPr>'
       +'<w:t xml:space="preserve">'+wfXml(text)+'</w:t></w:r>';
   }
@@ -5345,13 +5476,16 @@
       if(n.nodeType!==1) return;
       const tag=n.tagName.toLowerCase();
       if(tag==='br'){ out+='<w:r><w:br/></w:r>'; return; }
-      const s={b:st.b,i:st.i,sz:st.sz,color:st.color};
+      const s={b:st.b,i:st.i,u:st.u,sz:st.sz,color:st.color,font:st.font};
       if(tag==='b'||tag==='strong') s.b=true;
       if(tag==='i'||tag==='em') s.i=true;
+      if(tag==='u') s.u=true;
       const inline=n.getAttribute&&n.getAttribute('style')||'';
       if(/font-weight\s*:\s*(bold|[6-9]00)/i.test(inline)) s.b=true;
       if(n.classList&&n.classList.contains('wfd-soft')) s.color='6B7280';
       if(n.classList&&n.classList.contains('wfd-small')) s.sz=17;
+      // A title (ALLOTMENT LETTER) is 13pt, as the typeset letter set it.
+      if(n.classList&&n.classList.contains('wfd-big')) s.sz=26;
       out+=wfRunsOf(n,s);
     });
     return out;
@@ -5362,25 +5496,68 @@
     const runs=wfRunsOf(el,st||{});
     // Same sequence rule as w:rPr above: pBdr, then spacing, then jc.
     const pr=[];
-    if(opt.border) pr.push('<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="8C9096"/></w:pBdr>');
-    pr.push('<w:spacing w:after="'+(opt.after==null?80:opt.after)+'" w:line="240" w:lineRule="auto"/>');
+    /* A rule above or below the paragraph. The letterhead's red rule and the footer's grey one are
+       both drawn this way - a paragraph border is the one kind of line Word keeps where it was put
+       however the text above it reflows. */
+    if(opt.border) pr.push('<w:pBdr><w:'+(opt.borderSide||'bottom')+' w:val="single" w:sz="'+(opt.borderSz||6)
+      +'" w:space="1" w:color="'+(opt.borderColor||'8C9096')+'"/></w:pBdr>');
+    pr.push('<w:spacing'+(opt.before?(' w:before="'+opt.before+'"'):'')
+      +' w:after="'+(opt.after==null?80:opt.after)+'" w:line="240" w:lineRule="auto"/>');
     if(opt.align) pr.push('<w:jc w:val="'+opt.align+'"/>');
     return '<w:p><w:pPr>'+pr.join('')+'</w:pPr>'+(runs||'<w:r><w:t xml:space="preserve"></w:t></w:r>')+'</w:p>';
   }
 
   /* A table cell's bottom border is how the sheet draws the rule a value sits on, so it is read
      off the cell's own class rather than guessed from where it sits. */
-  function wfCell(td,widthPct){
+  function wfCell(td,widthPct,base){
     const ruled=td.classList&&td.classList.contains('wfd-rule');
     const borders=ruled
       ? '<w:tcBorders><w:bottom w:val="single" w:sz="6" w:space="0" w:color="8C9096"/></w:tcBorders>'
       : '<w:tcBorders><w:bottom w:val="nil"/></w:tcBorders>';
     return '<w:tc><w:tcPr><w:tcW w:w="'+widthPct+'" w:type="pct"/>'+borders
       +'<w:vAlign w:val="bottom"/></w:tcPr>'
-      + wfPara(td,{},{after:20}) + '</w:tc>';
+      + wfPara(td,Object.assign({},base||{}),{after:20}) + '</w:tc>';
   }
 
-  function wfTable(tbl){
+  /* A RULED TABLE - every cell boxed - which is what a price table and the agreement's schedules
+     are. The check list's tables are deliberately NOT this kind (they are a label and a line to
+     write on), so a ruled table is asked for by class, wfd-grid, and nothing that already exists
+     carries that class. A row marked wfd-head is the header: shaded, and repeated at the top of
+     every page the table runs on to. A row marked wfd-band is shaded too (a Total line). A cell
+     marked wfd-num is money, and money reads right-aligned. */
+  function wfGridTable(tbl,base){
+    const rows=[].slice.call(tbl.querySelectorAll('tr'));
+    if(!rows.length) return '';
+    const B='w:val="single" w:sz="4" w:space="0" w:color="B8BDC6"';
+    let x='<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/>'
+      +'<w:tblBorders><w:top '+B+'/><w:left '+B+'/><w:bottom '+B+'/><w:right '+B+'/>'
+      +'<w:insideH '+B+'/><w:insideV '+B+'/></w:tblBorders>'
+      +'<w:tblCellMar><w:top w:w="40" w:type="dxa"/><w:left w:w="90" w:type="dxa"/>'
+      +'<w:bottom w:w="40" w:type="dxa"/><w:right w:w="90" w:type="dxa"/></w:tblCellMar>'
+      +'</w:tblPr>';
+    rows.forEach(function(tr){
+      const tds=[].slice.call(tr.children).filter(function(c){ return c.tagName==='TD'||c.tagName==='TH'; });
+      if(!tds.length) return;
+      const head=tr.classList&&tr.classList.contains('wfd-head');
+      const band=head||(tr.classList&&tr.classList.contains('wfd-band'));
+      x+='<w:tr>'+(head?'<w:trPr><w:tblHeader/></w:trPr>':'');
+      tds.forEach(function(td){
+        const w=td.getAttribute('data-w');
+        const pct=Math.round(w?Number(w)*50:(5000/tds.length));
+        const num=td.classList&&td.classList.contains('wfd-num');
+        // tcPr order is part of the schema too: tcW, then shd, then vAlign.
+        x+='<w:tc><w:tcPr><w:tcW w:w="'+pct+'" w:type="pct"/>'
+          +(band?'<w:shd w:val="clear" w:color="auto" w:fill="F1F2F4"/>':'')
+          +'<w:vAlign w:val="top"/></w:tcPr>'
+          +wfPara(td,Object.assign({},base||{}),{after:0,align:num?'right':null})+'</w:tc>';
+      });
+      x+='</w:tr>';
+    });
+    return x+'</w:tbl>';
+  }
+
+  function wfTable(tbl,base){
+    if(tbl.classList&&tbl.classList.contains('wfd-grid')) return wfGridTable(tbl,base);
     const rows=[].slice.call(tbl.querySelectorAll('tr'));
     if(!rows.length) return '';
     let x='<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/>'
@@ -5395,7 +5572,7 @@
       tds.forEach(function(td){
         // an explicit width wins; otherwise the row is shared out evenly
         const w=td.getAttribute('data-w');
-        x+=wfCell(td, w?Number(w)*50:Math.round(5000/tds.length));
+        x+=wfCell(td, w?Number(w)*50:Math.round(5000/tds.length), base);
       });
       x+='</w:tr>';
     });
@@ -5418,32 +5595,61 @@
 
   /* Walks the edited page and returns the body XML. Anything that is not a table is a paragraph,
      which is what keeps a line somebody typed themselves from being dropped. */
-  function wfBodyXml(root,hasLogo){
+  /* base is the document's own type: {} for everything sans-serif (Calibri 10.5, as always), and
+     Times 10 for the Agreement. logoInfo is the real shape of the picture in the package, so a
+     logo box saved at the wrong proportions still comes out at the right ones - see wfImgInfo.
+     justify sets body paragraphs flush both sides, which only the Agreement asks for. */
+  function wfBodyXml(root,hasLogo,base,logoInfo,justify){
+    base=base||{};
     let body='';
     [].slice.call(root.children).forEach(function(el){
       const tag=el.tagName.toLowerCase();
-      if(tag==='table'){ body+=wfTable(el); return; }
-      if(el.classList&&el.classList.contains('wfd-logo')){
+      const has=function(c){ return !!(el.classList&&el.classList.contains(c)); };
+      if(tag==='table'){ body+=wfTable(el,base); return; }
+      if(has('wfd-logo')){
         /* Only when the image part was actually written. A drawing pointing at a relationship
            that is not in the package is exactly the kind of thing Word refuses to open, and it
            would be introduced by nothing more than calling this without a logo. */
         const img=el.querySelector('img');
-        if(img&&hasLogo) body+=wfImagePara(Number(img.dataset.wpt)||109.5,Number(img.dataset.hpt)||131.25);
+        if(img&&hasLogo){
+          const sz=wfLogoSize(Number(img.dataset.wpt)||109.5,Number(img.dataset.hpt)||131.25,logoInfo);
+          body+=wfImagePara(sz.w,sz.h);
+        }
+        return;
+      }
+      // The letterhead's red rule: an empty paragraph with a heavy red border under it.
+      if(has('wfd-redrule')){
+        body+=wfPara(el,{},{after:400,border:true,borderSz:12,borderColor:'CC2129'});
         return;
       }
       const opt={};
-      if(el.classList&&el.classList.contains('wfd-right')) opt.align='right';
-      if(el.classList&&el.classList.contains('wfd-gap')) opt.after=320;
-      const st={};
-      if(tag==='h1'||tag==='h2'||(el.classList&&el.classList.contains('wfd-h'))) st.b=true;
+      if(has('wfd-right')) opt.align='right';
+      else if(has('wfd-center')) opt.align='center';
+      else if(justify && tag==='p' && !has('wfd-h')) opt.align='both';
+      if(has('wfd-gap')) opt.after=320;
+      if(has('wfd-foot')){ opt.border=true; opt.borderSide='top'; opt.borderColor='D9DBDF'; opt.before=480; }
+      const st=Object.assign({},base);
+      if(tag==='h1'||tag==='h2'||has('wfd-h')) st.b=true;
       body+=wfPara(el,st,opt);
     });
     return body;
   }
 
-  async function wfBuildDocx(root,logoBytes){
+  /* style: what kind of document this is, beyond its HTML. {serif:true} sets it in Times at 10pt,
+     justified, and {pageNumbers:true} puts a number at the foot of every page - both for the
+     Agreement, which is a deed of thirty-odd pages. Omitted, the file comes out exactly as the
+     check list always has. */
+  async function wfBuildDocx(root,logoBytes,style){
+    style=style||{};
     const JSZipC=await loadJsZip();
     const zip=new JSZipC();
+    /* THE PICTURE IS WHAT ITS BYTES SAY IT IS. This used to file every logo as logo.jpeg, which
+       was true of the check list's classic mark and not of the current one, a PNG - Word was being
+       handed a PNG with a JPEG's name on it. The magic number decides now, and both types are
+       declared so either opens. */
+    const logoInfo=logoBytes?wfImgInfo(logoBytes):null;
+    const logoExt=(logoInfo&&logoInfo.ext)||'jpeg';
+    const base=style.serif?{font:'Times New Roman',sz:20}:{};
 
     zip.file('[Content_Types].xml',
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -5451,7 +5657,9 @@
       +'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
       +'<Default Extension="xml" ContentType="application/xml"/>'
       +'<Default Extension="jpeg" ContentType="image/jpeg"/>'
+      +'<Default Extension="png" ContentType="image/png"/>'
       +'<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+      +(style.pageNumbers?'<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>':'')
       +'</Types>');
 
     zip.folder('_rels').file('.rels',
@@ -5463,8 +5671,26 @@
     const wordRels=['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
       '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'];
     if(logoBytes){
-      wordRels.push('<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.jpeg"/>');
-      zip.folder('word').folder('media').file('logo.jpeg',logoBytes);
+      wordRels.push('<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.'+logoExt+'"/>');
+      zip.folder('word').folder('media').file('logo.'+logoExt,logoBytes);
+    }
+    /* The page number is a PAGE field in a footer part, so Word numbers the pages itself however
+       the text reflows after somebody edits it. */
+    if(style.pageNumbers){
+      wordRels.push('<Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>');
+      const ff=base.font||'Calibri';
+      const fr='<w:rPr><w:rFonts w:ascii="'+ff+'" w:hAnsi="'+ff+'"/><w:color w:val="5A6170"/><w:sz w:val="18"/></w:rPr>';
+      zip.folder('word').file('footer1.xml',
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        +'<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+        +' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        +'<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
+        +'<w:r>'+fr+'<w:fldChar w:fldCharType="begin"/></w:r>'
+        +'<w:r>'+fr+'<w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>'
+        +'<w:r>'+fr+'<w:fldChar w:fldCharType="separate"/></w:r>'
+        +'<w:r>'+fr+'<w:t>1</w:t></w:r>'
+        +'<w:r>'+fr+'<w:fldChar w:fldCharType="end"/></w:r>'
+        +'</w:p></w:ftr>');
     }
     wordRels.push('</Relationships>');
     zip.folder('word').folder('_rels').file('document.xml.rels',wordRels.join(''));
@@ -5478,10 +5704,11 @@
       +' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"'
       +' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
       +' xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
-      +'<w:body>'+wfBodyXml(root,!!logoBytes)
-      +'<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
+      +'<w:body>'+wfBodyXml(root,!!logoBytes,base,logoInfo,!!style.serif)
+      +'<w:sectPr>'+(style.pageNumbers?'<w:footerReference w:type="default" r:id="rId7"/>':'')
+      +'<w:pgSz w:w="11906" w:h="16838"/>'
       +'<w:pgMar w:top="'+M+'" w:right="'+M+'" w:bottom="'+M+'" w:left="'+M+'"'
-      +' w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>'
+      +' w:header="0" w:footer="'+(style.pageNumbers?500:0)+'" w:gutter="0"/></w:sectPr>'
       +'</w:body></w:document>';
     zip.folder('word').file('document.xml',doc);
 
@@ -5582,7 +5809,7 @@
              it is the space between two bold words - and the space at the end of one run is what
              tells the next run whether to start with a gap. */
           const t=wfPdfText(c.nodeValue).replace(/\s+/g,' ');
-          if(t) out.push({t:t,b:st.b,i:st.i,u:st.u,small:st.small,soft:st.soft});
+          if(t) out.push({t:t,b:st.b,i:st.i,u:st.u,small:st.small,soft:st.soft,big:st.big});
           return;
         }
         if(c.nodeType!==1) return;
@@ -5594,7 +5821,8 @@
           i:st.i||tag==='i'||tag==='em',
           u:st.u||tag==='u',
           small:st.small||cl.contains('wfd-small'),
-          soft:st.soft||cl.contains('wfd-soft')
+          soft:st.soft||cl.contains('wfd-soft'),
+          big:st.big||cl.contains('wfd-big')
         });
       });
     })(el,{});
@@ -5604,21 +5832,34 @@
   /* THE PAGE, DRAWN. Mirrors wfBodyXml exactly - a child of the sheet is a table, the logo, or a
      paragraph, and nothing else - so the Word file and the PDF are two renderings of one document
      rather than two documents that happen to look alike. */
-  async function wfBuildPdf(root, docTitle){
+  /* style is the same object wfBuildDocx takes. {serif:true} is the Agreement: Times, 10pt on a
+     14.2pt lead, as the typeset deed was set - left ragged in the PDF, as the typeset deed was too
+     (see the note in wfAgreementPdf on why a justified line is not drawn word by word on a
+     contract). {pageNumbers:true} numbers every page at its foot. With no style the check list
+     and the letters draw exactly as they always have. */
+  async function wfBuildPdf(root, docTitle, style){
+    style=style||{};
     const L=await loadPdfLib();
     if(!L) throw new Error('the PDF library could not be loaded');
     const doc=await L.PDFDocument.create();
     if(docTitle){ try{ doc.setTitle(String(docTitle)); }catch(_e){} }
 
-    const F={
-      reg:await doc.embedFont(L.StandardFonts.Helvetica),
-      bold:await doc.embedFont(L.StandardFonts.HelveticaBold),
-      ital:await doc.embedFont(L.StandardFonts.HelveticaOblique),
-      bi:await doc.embedFont(L.StandardFonts.HelveticaBoldOblique)
+    const SF=L.StandardFonts;
+    const F=style.serif ? {
+      reg:await doc.embedFont(SF.TimesRoman),
+      bold:await doc.embedFont(SF.TimesRomanBold),
+      ital:await doc.embedFont(SF.TimesRomanItalic),
+      bi:await doc.embedFont(SF.TimesRomanBoldItalic)
+    } : {
+      reg:await doc.embedFont(SF.Helvetica),
+      bold:await doc.embedFont(SF.HelveticaBold),
+      ital:await doc.embedFont(SF.HelveticaOblique),
+      bi:await doc.embedFont(SF.HelveticaBoldOblique)
     };
     const pick=function(r){ return r.b?(r.i?F.bi:F.bold):(r.i?F.ital:F.reg); };
     const INK=L.rgb(0.07,0.07,0.08), SOFT=L.rgb(0.42,0.45,0.49), RULE=L.rgb(0.55,0.57,0.60);
-    const BASE=10.5, SMALL=8.8, LH=15.6;
+    const RED=L.rgb(0.80,0.13,0.16), GRID=L.rgb(0.72,0.75,0.80), BAND=L.rgb(0.95,0.95,0.96);
+    const BASE=style.serif?10:10.5, SMALL=style.serif?8.5:8.8, LH=style.serif?14.2:15.6, BIG=13;
     const TEXT_W=WF_PDF_W-2*WF_PDF_M;
 
     let page=doc.addPage([WF_PDF_W,WF_PDF_H]);
@@ -5638,13 +5879,25 @@
        and the gap closed up. Each word is now drawn on its own at an x that already has the gap
        added, so the space is a measurement rather than something that has to survive being
        encoded into a font. */
+    /* A WORD IS MEASURED LETTER BY LETTER, WITHOUT KERNING. pdf-lib's widthOfTextAtSize for the
+       standard fonts takes the font's kerning pairs off - A-V, A-T, V-A and the like - but
+       drawText does not apply them, so a word like PRIVATE was measured 2.5pt narrower than it is
+       drawn, and the next word, placed by that measurement, landed on top of the gap: PRIVATE and
+       LIMITED came out touching, PAN and NO as PANNO. That is the "two points that went missing"
+       the note in wfAgreementPdf could not account for. Summing the letters one at a time gives
+       the width that is actually drawn. */
+    const textW=function(f,t,size){
+      let w=0;
+      for(let i=0;i<t.length;i++) w+=f.widthOfTextAtSize(t.charAt(i),size);
+      return w;
+    };
     const layout=function(runs,w){
       const lines=[]; let cur=[], used=0, gap=false;
       const push=function(){ lines.push(cur); cur=[]; used=0; gap=false; };
       runs.forEach(function(r){
         if(r.br){ push(); return; }
-        const f=pick(r), size=r.small?SMALL:BASE;
-        const sp=f.widthOfTextAtSize(' ',size);
+        const f=pick(r), size=r.big?BIG:(r.small?SMALL:BASE);
+        const sp=textW(f,' ',size);
         /* Split so the whitespace comes back as its own token. A gap is then something the text
            actually had, not something assumed between every pair of words - which is what put a
            space in front of the comma in "bold words, italic", where the comma begins its own
@@ -5652,7 +5905,7 @@
         r.t.split(/(\s+)/).forEach(function(tok){
           if(!tok) return;
           if(/^\s+$/.test(tok)){ gap=true; return; }
-          const ww=f.widthOfTextAtSize(tok,size);
+          const ww=textW(f,tok,size);
           let pre=(gap&&used>0)?sp:0;
           if(used+pre+ww>w && used>0){ push(); pre=0; }
           cur.push({t:tok,f:f,size:size,w:ww,pre:pre,u:r.u,soft:r.soft});
@@ -5667,12 +5920,15 @@
       lines.forEach(function(ln){
         const lw=ln.reduce(function(a,p){ return a+p.pre+p.w; },0);
         let cx=(align==='right')?(x+w-lw):(align==='center'?(x+(w-lw)/2):x);
+        let prevU=false;
         ln.forEach(function(p){
+          // An underline runs on under the gap between two underlined words, as it does in Word.
+          const uFrom=(p.u&&prevU)?cx:(cx+p.pre);
           cx+=p.pre;
           page.drawText(p.t,{x:cx,y:y-p.size,size:p.size,font:p.f,color:p.soft?SOFT:INK});
-          if(p.u) page.drawLine({start:{x:cx,y:y-p.size-1.6},end:{x:cx+p.w,y:y-p.size-1.6},
+          if(p.u) page.drawLine({start:{x:uFrom,y:y-p.size-1.6},end:{x:cx+p.w,y:y-p.size-1.6},
             thickness:0.6,color:p.soft?SOFT:INK});
-          cx+=p.w;
+          cx+=p.w; prevU=!!p.u;
         });
         y-=LH;
       });
@@ -5692,12 +5948,75 @@
           const raw=atob(m[2]);
           const bytes=new Uint8Array(raw.length);
           for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
-          const emb=/png/i.test(m[1])?await doc.embedPng(bytes):await doc.embedJpg(bytes);
-          const w=Number(img.dataset.wpt)||109.5, h=Number(img.dataset.hpt)||131.25;
+          /* The bytes decide, not the label: a PNG labelled image/jpeg (every Welcome Letter
+             saved before the logo fix) would otherwise go to the JPEG decoder and fail. And the
+             box is drawn at the picture's own proportions - see wfLogoSize. */
+          const info=wfImgInfo(bytes);
+          const isPng=info?(info.type==='png'):/png/i.test(m[1]);
+          const emb=isPng?await doc.embedPng(bytes):await doc.embedJpg(bytes);
+          const sz=wfLogoSize(Number(img.dataset.wpt)||109.5, Number(img.dataset.hpt)||131.25,
+            {w:emb.width,h:emb.height});
+          const w=sz.w, h=sz.h;
           room(h+12);
           page.drawImage(emb,{x:WF_PDF_M,y:y-h,width:w,height:h});
           y-=(h+12);
         }
+        continue;
+      }
+
+      // The letterhead's red rule, as the typeset letters drew it: 1.6pt, the full text width.
+      if(cl.contains('wfd-redrule')){
+        room(40);
+        y-=14;
+        page.drawLine({start:{x:WF_PDF_M,y:y},end:{x:WF_PDF_M+TEXT_W,y:y},thickness:1.6,color:RED});
+        y-=26;
+        continue;
+      }
+
+      /* A RULED TABLE (wfd-grid): every cell boxed, the header row and any banded row shaded, a
+         money cell right-aligned. A row that will not fit starts a new page, and the header row
+         comes with it - a schedule whose column headings are on the previous page is unreadable,
+         which is why the typeset agreement repeated them and this does too. */
+      if(tag==='table' && cl.contains('wfd-grid')){
+        const rows=[].slice.call(el.querySelectorAll('tr'));
+        const PAD=5;
+        const measure=function(tr){
+          const tds=[].slice.call(tr.children).filter(function(c){
+            return c.tagName==='TD'||c.tagName==='TH'; });
+          const widths=tds.map(function(td){
+            const w=td.getAttribute('data-w');
+            return w?(Number(w)/100*TEXT_W):(TEXT_W/tds.length);
+          });
+          const cells=tds.map(function(td,i){ return layout(wfPdfRuns(td),Math.max(8,widths[i]-2*PAD)); });
+          const h=Math.max.apply(null,cells.map(function(c){ return c.length*LH; }))+2*PAD-2;
+          return {tr:tr,tds:tds,widths:widths,cells:cells,h:h,
+                  head:!!(tr.classList&&tr.classList.contains('wfd-head')),
+                  band:!!(tr.classList&&tr.classList.contains('wfd-band'))};
+        };
+        const ms=rows.map(measure).filter(function(r){ return r.tds.length; });
+        const headRow=ms.filter(function(r){ return r.head; })[0]||null;
+        const drawRow=function(r){
+          const rowTop=y, rowBottom=y-r.h;
+          let x=WF_PDF_M;
+          r.cells.forEach(function(lines,i){
+            const w=r.widths[i];
+            if(r.head||r.band) page.drawRectangle({x:x,y:rowBottom,width:w,height:r.h,color:BAND});
+            page.drawRectangle({x:x,y:rowBottom,width:w,height:r.h,borderColor:GRID,borderWidth:0.7,opacity:0,borderOpacity:1});
+            y=rowTop-PAD+2;
+            const num=r.tds[i].classList&&r.tds[i].classList.contains('wfd-num');
+            drawLines(lines,x+PAD,w-2*PAD,num?'right':null);
+            x+=w;
+          });
+          y=rowBottom;
+        };
+        if(ms.length) room(Math.min(ms[0].h+(ms[1]?ms[1].h:0), WF_PDF_H-2*WF_PDF_M));
+        ms.forEach(function(r){
+          const before=page;
+          room(r.h);
+          if(page!==before && headRow && !r.head) drawRow(headRow);
+          drawRow(r);
+        });
+        y-=10;
         continue;
       }
 
@@ -5714,7 +6033,10 @@
             return w?(Number(w)/100*TEXT_W):(TEXT_W/tds.length);
           });
           const cells=tds.map(function(td,i){ return layout(wfPdfRuns(td),Math.max(8,widths[i]-8)); });
-          const height=Math.max.apply(null,cells.map(function(c){ return c.length*LH; }))+3;
+          /* wfd-facts (the allotment letter's labelled Property Details) is set close, the way the
+             typeset letter set it, so the letter still fits its one page. Nothing else carries it. */
+          const tight=cl.contains('wfd-facts');
+          const height=Math.max.apply(null,cells.map(function(c){ return c.length*LH; }))+(tight?0:3);
           room(height+4);
           const rowTop=y, rowBottom=y-height;
           let x=WF_PDF_M;
@@ -5729,18 +6051,43 @@
             }
             x+=widths[i];
           });
-          y=rowBottom-3;
+          y=rowBottom-(tight?0:3);
         }
         y-=6;
+        continue;
+      }
+
+      /* The letters' footer: a thin grey rule, and the line under it centred. It sits at the foot
+         of the page, inside the bottom margin, where the typeset letters put it - and, as there,
+         rises above 58pt only when the text above would otherwise run into it. It takes no room
+         from the text, so it never pushes a one-page letter on to a second page by itself. */
+      if(cl.contains('wfd-foot')){
+        if(y-34-13<20){ page=doc.addPage([WF_PDF_W,WF_PDF_H]); y=WF_PDF_H-WF_PDF_M; }
+        const footY=Math.min(58,y-34);
+        page.drawLine({start:{x:WF_PDF_M,y:footY},end:{x:WF_PDF_M+TEXT_W,y:footY},thickness:0.6,color:GRID});
+        y=footY-4;
+        drawLines(layout(wfPdfRuns(el),TEXT_W),WF_PDF_M,TEXT_W,'center');
         continue;
       }
 
       const runs=wfPdfRuns(el);
       if(!runs.length){ y-=LH*0.5; continue; }
       const lines=layout(runs,TEXT_W);
+      /* A heading on the deed gets a little air above it, the way the typeset agreement set one -
+         only on the serif document, so the check list's own headings sit exactly where they did. */
+      if(style.serif && cl.contains('wfd-h')){ room(LH*2+6); y-=6; }
       room(lines.length*LH);
-      drawLines(lines,WF_PDF_M,TEXT_W,cl.contains('wfd-right')?'right':null);
-      y-=cl.contains('wfd-gap')?12:4;
+      drawLines(lines,WF_PDF_M,TEXT_W,
+        cl.contains('wfd-right')?'right':(cl.contains('wfd-center')?'center':null));
+      y-=cl.contains('wfd-gap')?12:(style.serif?6:4);
+    }
+
+    /* Page numbers go on last, when the number of pages is known. */
+    if(style.pageNumbers){
+      doc.getPages().forEach(function(p,i){
+        const t=String(i+1);
+        p.drawText(t,{x:(WF_PDF_W-F.reg.widthOfTextAtSize(t,9))/2,y:34,size:9,font:F.reg,color:SOFT});
+      });
     }
 
     return await doc.save();
@@ -5771,20 +6118,21 @@
   /* Built in the opener, not in the tab: JSZip, pdf-lib and the Supabase client are all loaded
      here, and loading a second copy of each into every document tab would be slower and could
      drift to a different version. The tab hands over its HTML and gets back a file. */
-  window.wfTabBuild=async function(html,filename,how,logoBytes){
+  async function wfWithHolder(html,fn){
     const holder=document.createElement('div');
     holder.className='wfd-page';
     holder.innerHTML=html;
     document.body.appendChild(holder);
     holder.style.cssText='position:fixed;left:-99999px;top:0';
-    try{
-      let bytes,type;
+    try{ return await fn(holder); } finally { holder.remove(); }
+  }
+  window.wfTabBuild=async function(html,filename,how,logoBytes,style){
+    return await wfWithHolder(html,async function(holder){
+      let bytes;
       if(how==='pdf'){
-        bytes=await wfBuildPdf(holder,filename);
-        type='application/pdf';
+        bytes=await wfBuildPdf(holder,filename,style);
       }else{
-        bytes=await wfBuildDocx(holder,logoBytes);
-        type='application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        bytes=await wfBuildDocx(holder,logoBytes,style);
       }
       /* application/octet-stream, for the same reason the Post Sales reports use it: a browser
          previews what it can render, and it can render a PDF. */
@@ -5794,10 +6142,118 @@
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
       return true;
-    } finally { holder.remove(); }
+    });
+  };
+
+  /* ----- Emailing and rejecting a letter ----------------------------------------------------
+
+     THE THREE CUSTOMER DOCUMENTS CAN BE SENT FROM THE TAB THEY ARE CORRECTED IN. The Welcome
+     Letter, the Allotment Letter and the Agreement go to the customer; the Check List never does -
+     it is an internal sheet carrying the verdicts on their KYC - so it gets neither button.
+
+     The sending is the customer-invite function's (action booking_doc_mail), not this file's: it
+     looks up who the customer is, decides whether mail is live or still going to the test inbox,
+     and records what went where in acc.booking_doc_status. All this side does is hand over the
+     document AS IT NOW READS - the letter's own HTML for the Welcome Letter, which is mailed as the
+     body, and a PDF of the current sheet for the other two, which go as attachments - and say
+     whether it differs from the one the booking would build (a saved correction exists).
+
+     REJECTED means somebody has looked at the document and decided it must not go out as it is.
+     It stays open, editable and downloadable - a rejected letter is usually one to be corrected -
+     but Email is switched off until the rejection is undone. The function checks the same flag
+     on its own side, so a stale tab cannot get round it.
+
+     Like Save, these run here in the opener, where the Supabase client lives; the tab only calls
+     them. wfTabStatus hands back the status row plus a sentence already written, so the names and
+     dates read the way they do everywhere else in JAIN-E. */
+  const WF_DOC_LABEL={checklist:'Booking Form Check List', welcome:'Welcome Letter',
+                      allotment:'Allotment Letter', agreement:'Agreement for Sale'};
+  const WF_DOC_MAILABLE={welcome:true, allotment:true, agreement:true};
+
+  window.wfTabStatus=async function(caseId,kind){
+    const {data,error}=await ACC().from('booking_doc_status').select('*')
+      .eq('case_id',caseId).eq('kind',kind).maybeSingle();
+    if(error) throw new Error(error.message);
+    const r=data||null, bits=[];
+    if(r){
+      if(r.rejected) bits.push('Rejected'+(r.rejected_by?(' by '+wfNm(r.rejected_by)):'')
+        +(r.rejected_at?(' on '+wfDT(r.rejected_at)):'')+' – cannot be emailed');
+      if(r.auto_emailed_at) bits.push('Emailed automatically on '+wfDT(r.auto_emailed_at));
+      /* The automatic send also stamps last_emailed_at, with nobody's name on it; said once, not
+         twice. A send by a person always carries who. */
+      if(r.last_emailed_at && (r.last_emailed_by || r.last_emailed_at!==r.auto_emailed_at)){
+        const to=Array.isArray(r.last_email_to)?r.last_email_to.filter(Boolean).join(', '):'';
+        bits.push('Last emailed by '+(r.last_emailed_by?wfNm(r.last_emailed_by):'JAIN-E')
+          +' on '+wfDT(r.last_emailed_at)+(r.last_email_modified?' (modified)':'')
+          +(to?(' to '+to):'')+(r.last_email_test?' – test send':''));
+      }
+      if(Number(r.email_count)>1) bits.push('Sent '+Number(r.email_count)+' times in all');
+    }
+    if(!bits.length) bits.push('Not emailed yet');
+    return {row:r, text:bits.join('  ·  '), rejected:!!(r&&r.rejected), test:!!(r&&r.last_email_test)};
+  };
+
+  window.wfTabReject=async function(caseId,kind,rejected){
+    const {error}=await ACC().rpc('booking_doc_set_rejected',
+      {p_case_id:caseId, p_kind:kind, p_rejected:!!rejected});
+    if(error) throw new Error(error.message);
+    return true;
+  };
+
+  window.wfTabEmail=async function(caseId,kind,html,filename,modified,style){
+    if(!WF_DOC_MAILABLE[kind]) throw new Error('this document is not sent to customers');
+    const body={action:'booking_doc_mail', case_id:caseId, kind:kind, modified:!!modified,
+                filename:filename};
+    if(kind==='welcome'){
+      body.letter_html=html;
+    }else{
+      const bytes=await wfWithHolder(html,function(holder){ return wfBuildPdf(holder,filename,style); });
+      body.pdf_base64=wfBytesToB64(bytes);
+    }
+    const {data,error}=await sb.functions.invoke('customer-invite',{body:body});
+    if(error){
+      /* A non-2xx reply arrives as a FunctionsHttpError whose message says only that; the
+         function's own words are in the response body. */
+      let m=(error&&error.message)||String(error);
+      try{ const j=await error.context.json(); if(j&&j.error) m=j.error; }catch(_e){}
+      throw new Error(m);
+    }
+    if(!data||data.error||data.ok===false) throw new Error((data&&data.error)||'the mail was not sent');
+    return data;
   };
 
   /* ----- The tab ---------------------------------------------------------------------------- */
+
+  /* THE TAB IS OPENED ON THE CLICK, BEFORE ANYTHING IS LOOKED UP.
+
+     A browser lets a page open a new tab only while it is still handling the click that asked for
+     it. These documents used to read the booking, fetch the logo and look up a saved copy first,
+     and only then call window.open - by which time the click was long over, and a browser that
+     blocks pop-ups blocked it, so pressing the button appeared to do nothing. The entry functions
+     now open an empty tab saying "Opening..." synchronously, as the very first thing, and hand it
+     down to wfOpenDocTab to fill; on any failure on the way it is closed again, so nobody is left
+     looking at a blank tab with the error in another window. */
+  function wfPendingTab(what){
+    let t=null;
+    try{ t=window.open('','_blank'); }catch(_e){ t=null; }
+    if(t){
+      try{
+        t.document.open();
+        t.document.write('<!doctype html><meta charset="utf-8"><title>Opening…</title>'
+          +'<body style="margin:0;background:#535659;color:#e8eaed;font:15px/1.5 Segoe UI,Arial,sans-serif;'
+          +'display:flex;align-items:center;justify-content:center;height:100vh">'
+          +'Opening '+esc2(what||'the document')+'…</body>');
+        t.document.close();
+      }catch(_e){}
+    }
+    return t;
+  }
+  function wfClosePending(t){ try{ if(t&&!t.closed) t.close(); }catch(_e){} }
+
+  /* Who may email or reject a booking document: the same people who may act on a Booking Form
+     at all - the Administrator and Post Sales. See wfBookingCanAct in the instance panel; the
+     Sales Head's viewing exemption deliberately does not reach this far. */
+  function wfBookingActor(){ return eq(me(),'ayushruia1@gmail.com')||wfInDept('Post Sales'); }
 
   async function wfOpenDocTab(html,opt){
     opt=opt||{};
@@ -5805,16 +6261,28 @@
     const base=opt.base||'Document';
     const caseId=opt.caseId, kind=opt.kind;
     const logoBytes=opt.logoBytes||null;
+    const style=opt.style||null;
+    const label=WF_DOC_LABEL[kind]||'document';
+    /* The status line is shown on the three customer documents to anybody who can open them;
+       the two buttons that change it only to those who may act - see wfBookingActor. */
+    const mailable=!!(caseId&&WF_DOC_MAILABLE[kind]);
+    const canMail=mailable&&!!opt.canAct;
 
+    let tab=opt.tab||null;
     let saved=null;
-    if(caseId&&kind) saved=await wfDocLoadEdit(caseId,kind);
-    const startHtml=(saved&&saved.html)?saved.html:html;
+    try{
+      if(caseId&&kind) saved=await wfDocLoadEdit(caseId,kind);
+    }catch(_e){ saved=null; }
+    // A saved copy made before the logo fix carries the squashed logo - see wfFixLogoHtml.
+    const startHtml=(saved&&saved.html)?wfFixLogoHtml(saved.html):html;
 
-    const tab=window.open('','_blank');
+    if(!tab||tab.closed) tab=window.open('','_blank');
     if(!tab){ toast('Your browser blocked the new tab','err'); return; }
     const e=function(t){ return String(t==null?'':t)
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
 
+    // The pending tab already holds the "Opening..." page; open() starts the document afresh.
+    tab.document.open();
     tab.document.write('<!doctype html><meta charset="utf-8"><title>'+e(title)+'</title>'
       +'<style>'
       +'*{box-sizing:border-box}'
@@ -5835,7 +6303,16 @@
       +'button.txt:hover{background:#4a4e51}'
       +'button.primary{background:#e0121c;border-color:#e0121c;color:#fff}'
       +'button.txt:disabled{opacity:.5;cursor:not-allowed}'
-      +'#msg{font-size:12.5px;color:#bdc1c6;min-width:10px}'
+      +'button.warn{border-color:#8a5a00;color:#ffcf7a}'
+      +'#msg{font-size:12.5px;color:#bdc1c6;min-width:10px;max-width:26vw;white-space:nowrap;'
+        +'overflow:hidden;text-overflow:ellipsis}'
+      +'#dstat{margin-left:auto;font-size:12px;color:#bdc1c6;max-width:62%;text-align:right;'
+        +'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+      +'#dstat.test b{color:#ffcf7a}'
+      +'#ttoast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:9;max-width:80%;'
+        +'background:#202124;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;'
+        +'box-shadow:0 4px 18px rgba(0,0,0,.4);display:none}'
+      +'#ttoast.err{background:#b91c1c}'
       +'#view{position:fixed;inset:96px 0 0 0;overflow:auto;padding:24px 0 48px}'
       +'#wrap{transform-origin:top center;margin:0 auto;width:794px}'
       /* The sheet is the same 794 x 1123 the preview used - A4 at 96dpi - so what is on screen is
@@ -5856,6 +6333,19 @@
       +'.wfd-page .wfd-sign{margin-top:26px}'
       +'.wfd-page .wfd-logo{margin:0 0 14px}'
       +'.wfd-page .wfd-logo img{width:146px;height:175px;display:block}'
+      /* The letters' pieces - see wfAllotmentDoc and wfAgreementDoc. None of these classes is on
+         the check list, so none of these rules can move anything on it. */
+      +'.wfd-page .wfd-center{text-align:center}'
+      +'.wfd-page .wfd-big{font-size:17px}'
+      +'.wfd-page .wfd-redrule{height:0;border-bottom:2px solid #cc2129;margin:18px 0 30px}'
+      +'.wfd-page .wfd-foot{border-top:1px solid #d9dbdf;margin-top:32px;padding-top:8px;text-align:center}'
+      +'.wfd-page table.wfd-grid td{border:1px solid #b8bdc6;padding:4px 7px;vertical-align:top}'
+      +'.wfd-page table.wfd-grid tr.wfd-head td,.wfd-page table.wfd-grid tr.wfd-band td{background:#f1f2f4}'
+      +'.wfd-page td.wfd-num{text-align:right}'
+      +'.wfd-page.wfd-serif{font-family:"Times New Roman",Times,serif;font-size:13.4px;line-height:1.45}'
+      +'.wfd-page.wfd-serif p{text-align:justify;margin:0 0 8px}'
+      +'.wfd-page.wfd-serif p.wfd-center{text-align:center}'
+      +'.wfd-page.wfd-serif table.wfd-grid td{font-size:12.6px}'
       /* CTRL+B HAS TO LOOK LIKE CTRL+B. Calibri's bold is light, and against 14px body text a
          <b> was barely a shade darker - people pressed it twice believing it had not worked.
          700 on the page and 700 in the file, so the screen tells the truth about the download. */
@@ -5873,6 +6363,10 @@
           +'<button class="txt primary" id="save">Save</button>'
           +'<button class="txt" id="dlw">Download Word</button>'
           +'<button class="txt" id="dlp">Download PDF</button>'
+          +(canMail
+            ? ('<button class="txt" id="mail" disabled title="Checking whether it can be sent…">Email</button>'
+              +'<button class="txt warn" id="rej" disabled>Reject</button>')
+            : '')
         +'</div>'
         +'<div class="bar2">'
           +'<div class="grp">'
@@ -5887,9 +6381,12 @@
           +'<button class="ic" id="clr" style="min-width:auto;padding:0 10px;font-size:13px">Clear</button>'
           +'<button class="ic" id="reset" style="min-width:auto;padding:0 10px;font-size:13px" '
             +'title="Throw away the corrections and build this again from the booking">Rebuild from booking</button>'
+          +(mailable?'<span id="dstat"></span>':'')
         +'</div>'
       +'</header>'
-      +'<div id="view"><div id="wrap"><div id="sheet" class="wfd-page" contenteditable="true" spellcheck="true"></div></div></div>');
+      +'<div id="view"><div id="wrap"><div id="sheet" class="wfd-page'+((style&&style.serif)?' wfd-serif':'')
+        +'" contenteditable="true" spellcheck="true"></div></div></div>'
+      +'<div id="ttoast"></div>');
     tab.document.close();
 
     const d=tab.document;
@@ -5898,8 +6395,20 @@
     sheet.innerHTML=startHtml;
 
     let dirty=false, zoom=1;
+    /* Whether a saved correction exists for this document - which is what "modified" means when
+       it is emailed: the customer is getting something other than what the booking would build. */
+    let hasEdit=!!(saved&&saved.html);
     const say=function(t){ msg.textContent=t||''; };
     if(saved&&saved.updated_at) say('Saved copy from '+wfDT(saved.updated_at));
+
+    /* A toast of the tab's own. The app's toast would appear in the window behind this one, where
+       nobody is looking. */
+    let toastT=null;
+    const tabToast=function(t,kindOf,ms){
+      const el=d.getElementById('ttoast'); if(!el) return;
+      el.textContent=t; el.className=(kindOf==='err')?'err':''; el.style.display='block';
+      clearTimeout(toastT); toastT=setTimeout(function(){ el.style.display='none'; },ms||7000);
+    };
 
     const applyZoom=function(){
       wrap.style.transform='scale('+zoom+')';
@@ -5913,6 +6422,8 @@
       zoom=Math.max(0.5,Math.min(2,avail/794)); applyZoom();
     };
     applyZoom();
+    // Anything the builder wants said as the document opens (the Agreement's note on its blanks).
+    if(opt.note) tabToast(opt.note,null,12000);
 
     sheet.addEventListener('input',function(){ dirty=true; say('Not saved yet'); });
     [].slice.call(d.querySelectorAll('[data-cmd]')).forEach(function(b){
@@ -5922,31 +6433,114 @@
     d.getElementById('redo').onclick=function(){ d.execCommand('redo'); };
     d.getElementById('clr').onclick=function(){ d.execCommand('removeFormat'); sheet.focus(); };
 
+    // Returns whether the sheet is now saved, so Email can refuse to send an unsaved one.
     const doSave=async function(){
-      if(!caseId||!kind){ say('Nothing to save against'); return; }
+      if(!caseId||!kind){ say('Nothing to save against'); return false; }
       const btn=d.getElementById('save'); btn.disabled=true; say('Saving...');
-      try{ await window.wfTabSave(caseId,kind,sheet.innerHTML); dirty=false;
+      let ok=false;
+      try{ await window.wfTabSave(caseId,kind,sheet.innerHTML); dirty=false; hasEdit=true; ok=true;
            say('Saved '+wfDT(new Date().toISOString())); }
       catch(err){ say('Could not save: '+((err&&err.message)||err)); }
       btn.disabled=false;
+      return ok;
     };
     d.getElementById('save').onclick=doSave;
 
     d.getElementById('reset').onclick=async function(){
       if(!tab.confirm('Throw away the corrections and build this again from the booking?')) return;
-      try{ if(caseId&&kind) await window.wfTabDiscard(caseId,kind); }catch(_e){}
+      try{ if(caseId&&kind){ await window.wfTabDiscard(caseId,kind); hasEdit=false; } }catch(_e){}
       sheet.innerHTML=html; dirty=false; say('Rebuilt from the booking');
     };
 
     const dl=async function(how,btn){
       const was=btn.textContent; btn.disabled=true; btn.textContent='Building...';
-      try{ await window.wfTabBuild(sheet.innerHTML,base+(how==='pdf'?'.pdf':'.docx'),how,logoBytes);
+      try{ await window.wfTabBuild(sheet.innerHTML,base+(how==='pdf'?'.pdf':'.docx'),how,logoBytes,style);
            say((how==='pdf'?'PDF':'Word file')+' downloaded'); }
       catch(err){ say('Could not build the file: '+((err&&err.message)||err)); }
       btn.disabled=false; btn.textContent=was;
     };
     d.getElementById('dlw').onclick=function(){ dl('docx',this); };
     d.getElementById('dlp').onclick=function(){ dl('pdf',this); };
+
+    /* ----- Email / Reject - see the note on wfTabEmail ----- */
+    if(mailable){
+      const dstat=d.getElementById('dstat');
+      const mailBtn=d.getElementById('mail'), rejBtn=d.getElementById('rej');
+      let rejected=false, known=false, busy=false, testMode=false;
+      const paint=function(text){
+        if(!dstat) return;
+        dstat.className=testMode?'test':'';
+        dstat.innerHTML=e(text||'')
+          +(testMode?('  ·  <b>TEST MODE – mail goes to the test inbox</b>'):'');
+        dstat.title=dstat.textContent;
+      };
+      const applyMailState=function(){
+        if(!canMail) return;
+        /* Until the status has been read, Email stays off: it might be rejected. If the status
+           cannot be read at all it is allowed, because the function checks rejection itself. */
+        mailBtn.disabled=busy||rejected||!known;
+        mailBtn.title=rejected?'Rejected – cannot be emailed'
+          :('Email the '+label+' to the customer');
+        rejBtn.disabled=busy||!known;
+        rejBtn.textContent=rejected?'Undo reject':'Reject';
+        rejBtn.title=rejected?('Allow the '+label+' to be emailed again')
+          :('Mark the '+label+' as not to be sent – it stays editable and downloadable');
+      };
+      const refreshStatus=async function(){
+        try{
+          const st=await window.wfTabStatus(caseId,kind);
+          rejected=st.rejected; testMode=testMode||st.test; paint(st.text);
+        }catch(_e){ paint(''); }
+        known=true; applyMailState();
+      };
+      if(canMail){
+        mailBtn.onclick=async function(){
+          if(busy||rejected) return;
+          // Unsaved changes are saved first: what is mailed is what is kept.
+          if(dirty){ const ok=await doSave(); if(!ok) return; }
+          const modified=hasEdit;
+          if(!tab.confirm('Email the '+label+(modified?' (modified version)':'')+' to the customer?')) return;
+          busy=true; applyMailState();
+          const was=mailBtn.textContent; mailBtn.textContent='Sending...'; say('Sending...');
+          try{
+            const r=await window.wfTabEmail(caseId,kind,sheet.innerHTML,base+'.pdf',modified,style);
+            const sent=(Array.isArray(r.sent_to)?r.sent_to:[]).join(', ')||'nobody';
+            const meant=(Array.isArray(r.intended_to)?r.intended_to:[]).join(', ');
+            if(r.test){
+              testMode=true;
+              const t='TEST send – the '+label+' went to '+sent
+                +(meant?(' instead of the customer ('+meant+')'):'')+'.';
+              say('Sent to the test inbox'); tabToast(t);
+            }else{
+              say('Emailed'); tabToast('The '+label+(modified?' (modified)':'')+' was emailed to '+sent+'.');
+            }
+          }catch(err){
+            const t='Could not email: '+((err&&err.message)||err);
+            say(t); tabToast(t,'err');
+          }
+          mailBtn.textContent=was; busy=false;
+          await refreshStatus();
+        };
+        rejBtn.onclick=async function(){
+          if(busy) return;
+          const undo=rejected;
+          if(!tab.confirm(undo
+            ? ('Undo the rejection of the '+label+'? It can then be emailed again.')
+            : ('Reject the '+label+'? It stays editable and downloadable, but it cannot be emailed '
+               +'until the rejection is undone.'))) return;
+          busy=true; applyMailState();
+          try{
+            await window.wfTabReject(caseId,kind,!undo);
+            tabToast(undo?'Rejection undone – it can be emailed again':'Marked as rejected – it cannot be emailed');
+          }catch(err){
+            tabToast('Could not '+(undo?'undo the rejection':'reject it')+': '+((err&&err.message)||err),'err');
+          }
+          busy=false;
+          await refreshStatus();
+        };
+      }
+      refreshStatus();
+    }
 
     /* Ctrl+S saves rather than offering to save the web page, which is what somebody correcting a
        document will press without thinking. */
@@ -6023,12 +6617,14 @@
     },30);
   }
 
+  // The tab is opened first, on the click - see wfPendingTab.
   window.wfWelcomeLetter=async function(caseId){
+    const tab=wfPendingTab('the Welcome Letter');
     let res=null;
     try{ res=await wfBookingReading(caseId); }
-    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
-    try{ await wfWelcomeDoc(res,caseId); }
-    catch(e){ toast('Could not build the letter: '+((e&&e.message)||e),'err'); }
+    catch(e){ wfClosePending(tab); toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfWelcomeDoc(res,caseId,tab); }
+    catch(e){ wfClosePending(tab); toast('Could not build the letter: '+((e&&e.message)||e),'err'); }
   };
 
   /* THE WELCOME LETTER, AS A PAGE RATHER THAN AS A PICTURE OF ONE.
@@ -6042,9 +6638,8 @@
      wfWelcomePdf is kept below. It is no longer the way the letter is produced, but it is the
      record of how the typeset original read, and the two must not be allowed to disagree quietly:
      if the wording here changes, change it there too or delete it. */
-  async function wfWelcomeDoc(res,caseId){
+  async function wfWelcomeDoc(res,caseId,tab){
     const logoBytes=await jgLogo();
-    let b64=''; { let t=''; for(let i=0;i<logoBytes.length;i++) t+=String.fromCharCode(logoBytes[i]); b64=btoa(t); }
     const E=function(x){ return String(x==null?'':x)
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
 
@@ -6074,8 +6669,9 @@
       || (tokenNum!==null ? rupeesInWords(tokenNum) : '________________');
 
     let h='';
-    h+='<div class="wfd-logo" contenteditable="false"><img alt="The Jain Group" '
-      +'data-wpt="132" data-hpt="158.4" src="data:image/jpeg;base64,'+b64+'"></div>';
+    /* The current logo is a wide PNG; it goes on at the letterhead width and its own proportions,
+       labelled as the PNG it is - see wfImgInfo for how it used to come out squashed. */
+    h+='<div class="wfd-logo" contenteditable="false">'+wfLogoImg(logoBytes,WF_LOGO_WIDE_PT)+'</div>';
     h+='<p class="wfd-right wfd-gap"><span class="wfd-soft">'+E(dateTxt)+'</span></p>';
     h+='<p class="wfd-gap"><b>Dear '+E(who.join(' & ')||'Sir / Madam')+',</b></p>';
     h+='<p class="wfd-gap">Greetings from The Jain Group!</p>';
@@ -6098,7 +6694,8 @@
 
     const name=(who[0]||val('customer_name')||'customer').replace(/[^\w \-]/g,'').trim()||'customer';
     await wfOpenDocTab(h,{title:'Welcome Letter \u2014 '+name,
-      base:'Welcome Letter - '+name, caseId:caseId, kind:'welcome', logoBytes:logoBytes});
+      base:'Welcome Letter - '+name, caseId:caseId, kind:'welcome', logoBytes:logoBytes,
+      tab:tab, canAct:wfBookingActor()});
   }
 
   /* A4, letterhead, one page. Every value is taken from the stored reading; nothing here is written
@@ -6480,14 +7077,125 @@
   }
 
   window.wfAgreement=async function(caseId){
+    const tab=wfPendingTab('the Agreement for Sale');
     let res=null;
     try{ res=await wfBookingReading(caseId); }
-    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
-    try{ await wfAgreementPdf(res); }
-    catch(e){ toast('Could not build the agreement: '+((e&&e.message)||e),'err'); }
+    catch(e){ wfClosePending(tab); toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfAgreementDoc(res,caseId,tab); }
+    catch(e){ wfClosePending(tab); toast('Could not build the agreement: '+((e&&e.message)||e),'err'); }
   };
 
-  /* A4, thirty-odd pages, numbered. Serif, because it is a deed and every executed copy of one
+  /* THE AGREEMENT, AS A PAGE RATHER THAN AS A PICTURE OF ONE.
+
+     Same reasoning as the Welcome Letter: a draft deed nobody can correct is a draft somebody
+     retypes, and retyping a contract is how a clause changes without anybody meaning it to. So
+     this builds the agreement as the same .wfd-page HTML the Check List uses and opens it in the
+     editor - Save, Word, PDF, Rebuild - and the template's words reach the page exactly as
+     wfAgreementPdf typeset them: every block in order, every {{token}} filled from wfAgValues by
+     the same fill (an unknown token is left showing rather than blanked), the blanks it leaves as
+     underscored rules, the four tables it drew (specs, price, edc, plan - the deposits table in
+     the template was never drawn, and still is not) with the same column proportions and the same
+     right-aligned money, and the same three execution blocks at the end.
+
+     It is set in Times and numbered, as the deed was - {serif, pageNumbers} is passed through to
+     both file writers. Justified on screen and in Word; the PDF stays ragged right, as the typeset
+     one deliberately was (see the note in wfAgreementPdf).
+
+     wfAgreementPdf is kept below, unused, as the record of how the typeset draft read. */
+  async function wfAgreementDoc(res,caseId,tab){
+    const f=res.fields||{};
+    const project=String(((f.project_name||{}).value)||'').trim();
+    const tmpl=await wfAgTemplate(project);
+    const vals=wfAgValues(res), tables=wfAgTables(res);
+    const E=function(x){ return String(x==null?'':x)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+    const fill=function(text){
+      return String(text==null?'':text).replace(/\{\{(\w+)\}\}/g, function(_m,k){
+        return (vals[k]===undefined||vals[k]===null)?('{{'+k+'}}'):String(vals[k]);
+      });
+    };
+    const heading=function(t){ return '<p class="wfd-h wfd-center"><b>'+E(String(t||'').trim())+'</b></p>'; };
+
+    /* Column widths. The template gives them in points against the typeset page's text width
+       (A4 less 64pt a side), with a 0 for the one column that takes what is left; here they become
+       the percentages the sheet and both writers use, so the proportions carry across. */
+    const CW=595.28-2*64;
+    const grid=function(head,rows,widths){
+      if(!rows||!rows.length) return '';
+      const cols=(widths||[]).slice();
+      while(cols.length<head.length) cols.push(0);
+      const fixed=cols.reduce(function(a,b){ return a+(Number(b)||0); },0);
+      const flexAt=cols.indexOf(0);
+      if(flexAt>=0) cols[flexAt]=Math.max(20,CW-fixed);
+      const sum=cols.reduce(function(a,b){ return a+b; },0)||1;
+      const pct=cols.map(function(c){ return Math.round(c/sum*1000)/10; });
+      let x='<table class="wfd-grid"><tr class="wfd-head">'
+        +head.map(function(c,i){ return '<td data-w="'+pct[i]+'"><b>'+E(c)+'</b></td>'; }).join('')+'</tr>';
+      rows.forEach(function(r,ri){
+        // The last row is bold when it is a total, as the typeset table set it.
+        const strong=(ri===rows.length-1) && /total/i.test(String(r[1]||r[0]||''));
+        x+='<tr>'+r.map(function(c,i){
+          const t=String(c==null?'':c);
+          // the money column is the last one and reads right-aligned, as money does
+          const num=(i===r.length-1 && /^[\d,.\u2014%]+$/.test(t.trim()));
+          return '<td data-w="'+pct[i]+'"'+(num?' class="wfd-num"':'')+'>'
+            +(strong?('<b>'+E(t)+'</b>'):E(t))+'</td>';
+        }).join('')+'</tr>';
+      });
+      return x+'</table>';
+    };
+
+    let h='';
+    tmpl.blocks.forEach(function(b){
+      if(!b) return;
+      if(b.t==='h'){ h+=heading(fill(b.x)); return; }
+      if(b.t==='table'){
+        if(b.id==='specs')      h+=grid(b.head,b.rows,b.w);
+        else if(b.id==='price') h+=grid(b.head,tables.price,b.w);
+        else if(b.id==='edc')   h+=grid(b.head,tables.edc,b.w);
+        else if(b.id==='plan')  h+=grid(b.head,tables.plan,b.w);
+        return;
+      }
+      const t=fill(b.x);
+      // The allottees' block: a paragraph per person, the ANDs between them centred.
+      if(b.x==='{{ALLOTTEES}}'){
+        t.split('\n').forEach(function(chunk){
+          const c=chunk.trim();
+          if(c==='AND'){ h+=heading('AND'); return; }
+          h+='<p>'+E(c)+'</p>';
+        });
+        return;
+      }
+      h+='<p>'+E(t)+'</p>';
+    });
+
+    // The execution block. Three signatures, each with room to actually sign.
+    [['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED OWNERS','IN THE PRESENCE OF:'],
+     ['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED PROMOTER','IN THE PRESENCE OF:'],
+     ['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED ALLOTTEE','IN THE PRESENCE OF:']]
+      .forEach(function(blk,i){
+        h+=(i?'':'<p>&nbsp;</p>')+'<p class="wfd-h"><b>'+blk.map(E).join('<br>')+'</b></p>'
+          +'<p>&nbsp;</p><p>&nbsp;</p>'
+          +'<table class="wfd-sign"><tr><td data-w="45" class="wfd-rule">&nbsp;</td><td data-w="55"></td></tr></table>';
+      });
+
+    const who=(allotteeNames(res)[0]||'agreement').replace(/[^A-Za-z0-9 ]/g,'').trim()||'agreement';
+    /* Said as the tab opens rather than printed on the deed: a line on the face of an agreement
+       saying which template it came from would travel with it to the customer. */
+    const onGurukul=(tmpl.project===project);
+    const note='The blanks are for the values the documents do not state'
+      +(onGurukul?'' : ('. It is set on the '+tmpl.project+' template, not '
+        +(project||'this booking\u2019s project')+' \u2014 check the recitals before it goes out'));
+    await wfOpenDocTab(h,{title:'Agreement for Sale \u2014 '+who,
+      base:'Agreement for Sale - '+who, caseId:caseId, kind:'agreement', logoBytes:null,
+      style:{serif:true,pageNumbers:true}, note:note, tab:tab, canAct:wfBookingActor()});
+  }
+
+  /* NO LONGER USED - wfAgreementDoc above builds the agreement now, as an editable page. Kept as
+     the record of how the typeset draft read; if the wording or the filling changes there, change
+     it here too or delete this.
+
+     A4, thirty-odd pages, numbered. Serif, because it is a deed and every executed copy of one
      is set in serif; justified, for the same reason. */
   async function wfAgreementPdf(res){
     const L=await loadPdfLib();
@@ -6717,13 +7425,142 @@
     return {net:one(byBasis('NET')||sheets[0]||null), gross:one(byBasis('GROSS'))};
   }
   window.wfAllotmentLetter=async function(caseId){
+    const tab=wfPendingTab('the Allotment Letter');
     let res=null;
     try{ res=await wfBookingReading(caseId); }
-    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
-    try{ await wfAllotmentPdf(res); }
-    catch(e){ toast('Could not build the allotment letter: '+((e&&e.message)||e),'err'); }
+    catch(e){ wfClosePending(tab); toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfAllotmentDoc(res,caseId,tab); }
+    catch(e){ wfClosePending(tab); toast('Could not build the allotment letter: '+((e&&e.message)||e),'err'); }
   };
 
+  /* THE ALLOTMENT LETTER, AS A PAGE RATHER THAN AS A PICTURE OF ONE.
+
+     Same change as the Welcome Letter and for the same reason: it was drawn straight into a PDF,
+     so a wrong figure or a misspelt name could only be fixed by going back to the documents. It is
+     now built as the same .wfd-page HTML the Check List uses and opens in the editor.
+
+     The words, the values and the layout are wfAllotmentPdf's, line for line: the letterhead (the
+     current logo at 176pt and the red rule under it), the date in dots on the right, To / the
+     allottees / their address and PIN, the underlined title, the three paragraphs, the labelled
+     Property Details, the ruled three-line price table with its Total banded and the total in
+     words beneath it, the signature block, and the footer line. Every figure still comes from
+     wfSheetMoney - never the stored letter.price - for the reason given there.
+
+     wfAllotmentPdf is kept below, unused, as the record of how the typeset letter read. */
+  async function wfAllotmentDoc(res,caseId,tab){
+    const logoBytes=await jgLogo();
+    const E=function(x){ return String(x==null?'':x)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+
+    const f=res.fields||{}, LT=res.letter||{};
+    const val=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const n2=function(v){ return (typeof v==='number'&&isFinite(v))
+      ? v.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : null; };
+
+    const d=new Date(), p2=function(n){ return String(n).padStart(2,'0'); };
+    const today=p2(d.getDate())+'.'+p2(d.getMonth()+1)+'.'+d.getFullYear();
+    const who=allotteeNames(res);
+    const addr=(Array.isArray(LT.address)?LT.address:[]).slice(0,4);
+    const pin=LT.pin?('PIN '+String(LT.pin).replace(/^PIN\s*/i,'')):'';
+
+    const project=val('project_name')||'________';
+    const place=String(LT.locality||'').trim();
+    const placed=project.toUpperCase()+(place?('\u201d, '+place):'\u201d');
+    const bookingDate=(res.checklist&&res.checklist['Booking Date']
+      && res.checklist['Booking Date']!=='--')
+      ? String(res.checklist['Booking Date']).replace(/[\/\-]/g,'.') : '________';
+    const flat=val('flat')||'____', block=val('block')||'____';
+    const fRaw=val('floor'), fNum=(fRaw.match(/\d+/)||[])[0];
+    const floorTxt=fNum?ordinal(fNum):(fRaw||'____');
+    const flatOnly=flat.replace(/^\s*\d+\s*/,'');
+    const typeTxt=(fNum && flat && !/^\d/.test(flat)) ? (fNum+flatOnly) : (flat||'____');
+    const company=String(LT.addressed_to||'').trim()||'Dream Gateway Hotels Ltd';
+
+    // The money - exactly as wfAllotmentPdf works it out; see the note there and on wfSheetMoney.
+    const SM=wfSheetMoney(res);
+    const flatNet=SM.net.flat,      flatGr=SM.gross.flat;
+    const parkNet=SM.net.parking,   parkGr=SM.gross.parking;
+    const hasPark=parkNet!==null||parkGr!==null;
+    const kindWord=wfParkKind(res).word;
+    const totNet=SM.net.total, totGr=SM.gross.total;
+    const costNet=(totNet!==null)?totNet
+                 :((flatNet===null&&parkNet===null)?null:((flatNet||0)+(parkNet||0)));
+    const costGr =(totGr!==null)?totGr
+                 :((flatGr===null&&parkGr===null)?null:((flatGr||0)+(parkGr||0)));
+    const extra=(costNet!==null&&costGr!==null)?(costGr-costNet):null;
+    const costLabel=hasPark
+      ? ('Cost of apartment including 1 '+(kindWord||'Car')+' Parking')
+      : 'Cost of apartment';
+    const rows=[[costLabel,n2(costNet)],
+                ['Extra charge (GST)',n2(extra)],
+                ['Total Purchase Price (inclusive of all)',n2(costGr)]];
+
+    let h='';
+    h+='<div class="wfd-logo" contenteditable="false">'+wfLogoImg(logoBytes,WF_LOGO_WIDE_PT)+'</div>';
+    h+='<div class="wfd-redrule" contenteditable="false"></div>';
+    h+='<p class="wfd-right wfd-gap">'+E(today)+'</p>';
+    /* To, the allottees, and the customer's own address as the booking form prints it - one block,
+       a line each. When the form gave no address the lines are simply absent: a letter with an
+       invented address is worse than one with none. */
+    h+='<p class="wfd-gap">To,<br><b>'+E(who.join(' & ')||'The Applicant')+'</b>'
+      +addr.map(function(l){ return '<br>'+E(l); }).join('')+(pin?('<br>'+E(pin)):'')+'</p>';
+    h+='<p class="wfd-center wfd-gap"><b><u><span class="wfd-big">ALLOTMENT LETTER</span></u></b></p>';
+    h+='<p class="wfd-gap">Dear Sir / Madam,</p>';
+    h+='<p class="wfd-gap">This has reference to your Application dated '+E(bookingDate)
+      +' for booking of an Apartment in \u201c'+E(placed)+'.</p>';
+    h+='<p class="wfd-gap">We are pleased to allot you Flat No. '+E(flat)+' on the '+E(floorTxt)
+      +' Floor in Block '+E(block)+', at '+E(project)+(place?(', '+E(place)):'')
+      +'. We take this opportunity to congratulate you for being a part of \u201c'
+      +E(project.toUpperCase())+'\u201d.</p>';
+    h+='<p class="wfd-gap">Please find enclosed the \u201cSchedule of Payments\u201d for the captioned '
+      +'property. You are requested to kindly remit the payments as per the schedule. Also note that '
+      +'the payment has to be remitted in favour of \u201c'+E(company)+'\u201d.</p>';
+
+    h+='<p><b>Property Details</b></p>';
+    h+='<table class="wfd-facts">';
+    [['Project',project+(place?(', '+place):'')],
+     ['Super Built up area',(val('area_sqft')?(val('area_sqft')+' sq.ft.'):'________')],
+     ['Tower Name',block],
+     ['Type',typeTxt]].forEach(function(kv){
+      h+='<tr><td data-w="27"><span class="wfd-soft">'+E(kv[0])+'</span></td>'
+        +'<td data-w="73"><b>'+E(kv[1])+'</b></td></tr>';
+    });
+    h+='</table>';
+
+    /* The price table, ruled, its Total banded - a price a customer is asked to pay should look
+       like a statement, not a sentence. A figure the sheet did not give prints a dash. */
+    h+='<table class="wfd-grid">';
+    rows.forEach(function(r,i){
+      const last=(i===rows.length-1);
+      const amt=r[1]?('Rs. '+r[1]):'\u2014';
+      h+='<tr'+(last?' class="wfd-band"':'')+'>'
+        +'<td data-w="68">'+(last?('<b>'+E(r[0])+'</b>'):E(r[0]))+'</td>'
+        +'<td data-w="32" class="wfd-num">'+(last?('<b>'+E(amt)+'</b>'):E(amt))+'</td></tr>';
+    });
+    h+='</table>';
+    // The total in words, under the table, the way the example gives it.
+    if(costGr!==null){
+      h+='<p class="wfd-right wfd-gap"><span class="wfd-soft wfd-small">('
+        +E(rupeesInWords(costGr))+' only)</span></p>';
+    }
+
+    h+='<p class="wfd-gap">Thanking you and assuring you the best of our services at all times.</p>';
+    h+='<p><b>For '+E(company)+'</b></p>';
+    h+='<p>&nbsp;</p>';
+    h+='<p>Authorized Signatory</p>';
+    h+='<p class="wfd-center wfd-foot"><span class="wfd-soft wfd-small">THE JAIN GROUP&nbsp;&nbsp;\u00b7&nbsp;&nbsp;'
+      +'CARING FOR YOUR DREAMS</span></p>';
+
+    const nm=(who[0]||val('customer_name')||'customer').replace(/[^\w \-]/g,'').trim()||'customer';
+    await wfOpenDocTab(h,{title:'Allotment Letter \u2014 '+nm,
+      base:'Allotment Letter - '+nm, caseId:caseId, kind:'allotment', logoBytes:logoBytes,
+      tab:tab, canAct:wfBookingActor()});
+  }
+
+  /* NO LONGER USED - wfAllotmentDoc above builds the letter now, as an editable page. Kept as the
+     record of how the typeset letter read; if the wording changes there, change it here too or
+     delete this. */
   async function wfAllotmentPdf(res){
     const L=await loadPdfLib();
     if(!L) throw new Error('the PDF library could not be loaded');
@@ -6915,11 +7752,12 @@
     wfPreviewPdf(bytes,'Allotment Letter - '+nm+'.pdf','Allotment letter downloaded');
   }
   window.wfChecklistDownload=async function(caseId){
+    const tab=wfPendingTab('the Booking Form Check List');
     let res=null;
     try{ res=await wfBookingReading(caseId); }
-    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
-    try{ await wfChecklistDoc(res,caseId); }
-    catch(e){ toast('Could not build the check list: '+((e&&e.message)||e),'err'); }
+    catch(e){ wfClosePending(tab); toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfChecklistDoc(res,caseId,tab); }
+    catch(e){ wfClosePending(tab); toast('Could not build the check list: '+((e&&e.message)||e),'err'); }
   };
 
   /* Typeset at A4 and downloaded. Every value comes from the stored reading; nothing on the sheet
@@ -6943,7 +7781,7 @@
 
      The wording, the items and their order are the form's own and are not to be improved on;
      assets/forms/booking-check-list-blank.pdf stays in the repo as the reference for them. */
-  async function wfChecklistDoc(res,caseId){
+  async function wfChecklistDoc(res,caseId,tab){
     const logoBytes=await jgLogo('classic');
     let b64=''; { let s=''; for(let i=0;i<logoBytes.length;i++) s+=String.fromCharCode(logoBytes[i]); b64=btoa(s); }
 
@@ -7178,7 +8016,8 @@
     const nm=(allotteeNames(res)[0]||v('customer_name')||'booking')
       .replace(/[^\w \-]/g,'').trim()||'booking';
     await wfOpenDocTab(h,{title:'Booking Form Check List \u2014 '+nm,
-      base:'Booking Form Check List - '+nm, caseId:caseId, kind:'checklist', logoBytes:logoBytes});
+      base:'Booking Form Check List - '+nm, caseId:caseId, kind:'checklist', logoBytes:logoBytes,
+      tab:tab});
   }
   /* ----- Print an instance --------------------------------------------------------------------
      Reuses wfCaseSummaryHtml exactly as shown on screen (the day-wise table for an entry-wise
