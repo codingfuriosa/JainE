@@ -588,7 +588,12 @@ async function dwcAreaLookup(blockRaw: unknown, floorRaw: unknown, flatRaw: unkn
    nothing else - genuinely different from asking harder in the same breath as everything else,
    which is all three earlier attempts amounted to. Reuses the file already uploaded in this run,
    so it costs one extra short Gemini call, not a re-upload. */
-async function geminiRecheckParking(fileParts: any[], model: string): Promise<any> {
+async function geminiRecheckParking(fileParts: any[], model: string, charged: string | null = null): Promise<any> {
+  const hint = charged === "OPEN" || charged === "COVERED"
+    ? `
+
+The cost sheet in this file charges for ${charged} car parking, so examine the word "${charged === "OPEN" ? "Open" : "Covered"}" first and most closely - above it, below it and beside it. This is a place to look, not an answer: report the mark that is actually on the page, and if the mark is on the other word, say so.`
+    : "";
   const prompt = `Look ONLY at the "Right to use Car Park" line on the booking form - the one that
 prints "Covered / Open" (or similar wording) for the customer to mark. Ignore every other field on
 every other page; this is the only thing you are being asked about.
@@ -611,7 +616,7 @@ applicant marks everything this way, so expect and look hard for the same shape 
 Return ONLY JSON:
 {"value": "COVERED" or "OPEN" or null, "how_marked": "how it is marked, e.g. \\"a small tick above the word\\"",
  "found_in": "which page", "what_you_see": "plainly describe what is on, above, below and beside each of the two words"}
-Give null only if you have looked closely at both words and there is truly nothing near either one.`;
+Give null only if you have looked closely at both words and there is truly nothing near either one.${hint}`;
   const fileOnly = fileParts.filter((p) => p.file_data);
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": GKEY },
@@ -727,11 +732,23 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
      pass found nothing AND the cost sheet charges for parking anyway - a booking with no parking
      at all has nothing to look for a second time. Never makes things worse: kept only when it
      actually finds one of the two words marked, otherwise the first pass's null stands. */
-  if (!ex?.parking_choice?.value
-      && Array.isArray(ex?.parking_rows_in_cost_sheets) && ex.parking_rows_in_cost_sheets.length) {
+  /* 15 Oct 2026: also when the first pass found a mark that DISAGREES with the one kind the cost
+     sheet charges (booking 590: read as Covered, Open charged). A wrong mark is the same misreading
+     as a missed one and was never looked at twice. The recheck is told which kind is charged, as
+     the word to examine first - it still has to describe the mark it sees, and a recheck that
+     finds the other word, or nothing, leaves the first pass standing. */
+  const chargedKinds = Array.isArray(ex?.parking_rows_in_cost_sheets)
+    ? [...new Set(ex.parking_rows_in_cost_sheets.map((r: any) => String(r?.says || "").toUpperCase())
+        .filter((k: string) => k === "OPEN" || k === "COVERED"))] : [];
+  const chargedKind = chargedKinds.length === 1 ? String(chargedKinds[0]) : null;
+  const firstMark = String(ex?.parking_choice?.value || "").toUpperCase() || null;
+  const parkingDoubt = Array.isArray(ex?.parking_rows_in_cost_sheets) && ex.parking_rows_in_cost_sheets.length
+    && (!firstMark || (chargedKind && firstMark !== chargedKind));
+  if (parkingDoubt) {
     try {
-      const recheck = await geminiRecheckParking(parts, model);
-      if (recheck?.value === "COVERED" || recheck?.value === "OPEN") {
+      const recheck = await geminiRecheckParking(parts, model, chargedKind);
+      if ((recheck?.value === "COVERED" || recheck?.value === "OPEN")
+          && (!firstMark || recheck.value !== firstMark)) {
         ex.parking_choice = recheck;
         ex.notes = String(ex?.notes || "").trim();
         if (recheck.what_you_see) ex.notes += (ex.notes ? " " : "")
