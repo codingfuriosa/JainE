@@ -151,13 +151,19 @@ async function uploadFileToS3(key,file,onProgress){
 
    If the tab is blocked anyway (some browsers block even this when pop-ups are disabled outright),
    the address is handed over rather than lost. */
-async function s3OpenSigned(storagePath,downloadName){
-  const key=storagePath.slice(3);
-  const tab=downloadName?null:window.open('','_blank');
+function openPendingTab(){
+  const tab=window.open('','_blank');
   if(tab){
     try{ tab.document.write('<!doctype html><meta charset="utf-8"><title>Opening…</title>'
       +'<body style="font:16px system-ui;padding:40px;color:#334155">Opening the file…</body>'); }catch(_e){}
   }
+  return tab;
+}
+/* preTab: a tab the caller already opened on the click (openPendingTab), for callers that have to
+   look something up before they know the file - by then the click is too old to open one here. */
+async function s3OpenSigned(storagePath,downloadName,preTab){
+  const key=storagePath.slice(3);
+  const tab=downloadName?null:(preTab||openPendingTab());
   const {data,error}=await s3Sign('get',key);
   if(error){
     if(tab) try{ tab.close(); }catch(_e){}
@@ -473,15 +479,24 @@ async function getDoc(id){const {data}=await sb.schema('doc').from('documents').
    fires on the click with nothing but the row id, which is why every "Preview / download document"
    row in the report reads "—": 55 of them, and not one says which document. The name is the only
    thing that makes the row mean anything. */
+/* The tab is opened on the click, before the document row is fetched - the same reason as
+   s3OpenSigned above: waiting on getDoc first let the click lapse whenever the database was slow,
+   and the browser then blocked the tab as a pop-up. */
 window.docPreview=async function(id){
-  const d=await getDoc(id);if(!d)return;
+  const tab=openPendingTab();
+  const shut=function(){ if(tab) try{ tab.close(); }catch(_e){} };
+  const go=function(url){
+    if(tab&&!tab.closed){ try{ tab.location.href=url; return; }catch(_e){} }
+    window.open(url,'_blank');
+  };
+  const d=await getDoc(id);if(!d){ shut(); return; }
   try{ usageQueue('legal.documents.preview_download_document','view',
         {title:d.title||d.file_name||null, category:d.category||d.folder||null}); }catch(_e){}
-  if(!d.storage_path){ if(d.link){window.open(d.link,'_blank');return;} toast('No file attached to this record.','');return; }
-  if(isS3Path(d.storage_path)){ await s3OpenSigned(d.storage_path); return; }
+  if(!d.storage_path){ if(d.link){go(d.link);return;} shut(); toast('No file attached to this record.','');return; }
+  if(isS3Path(d.storage_path)){ await s3OpenSigned(d.storage_path,null,tab); return; }
   const {data,error}=await sb.storage.from(bucketFor(d.department)).createSignedUrl(d.storage_path,120);
-  if(error){toast('Preview failed: '+error.message,'err');return;}
-  window.open(data.signedUrl,'_blank');
+  if(error){shut(); toast('Preview failed: '+error.message,'err');return;}
+  go(data.signedUrl);
 };
 window.docDownload=async function(id){
   const d=await getDoc(id);if(!d)return;
