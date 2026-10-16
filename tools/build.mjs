@@ -50,7 +50,70 @@ core = core.replace(/const PAGE_SCRIPT_VERSION=\{([^}]*)\};/, (whole, body) => {
   return `const PAGE_SCRIPT_VERSION={${stamped}};`;
 });
 const coreOut = CORE_MARK + core;
-const coreVersion = short(coreOut);
+
+// ---------------------------------------------------------------- min/ - what the browser loads
+/* SHRUNK COPIES, FOR SPEED (15 Oct 2026). The files above are written for people - long comments,
+   wide spacing - and the browser downloads and parses every byte of them: nexus-core.js was ~690KB
+   compressed, accountability.js ~330KB. esbuild strips the comments and spacing and shortens names
+   INSIDE functions only; it never renames a top-level name, so every onclick="wfDone(..)" and
+   every global one file calls in another still resolves exactly as before. Measured: 690 -> 435KB
+   and 330 -> 175KB compressed.
+
+   The readable files are still built and kept exactly as they were - the Farvision import
+   (tools/farvision-import) reads nexus-core.js by its comment markers - and min/ sits beside them.
+   Pages load min/; each shrunk file carries a source map, so an error in the console still points
+   at the readable line.
+
+   If esbuild cannot be run (no network the first time npx fetches it), the readable file is copied
+   into min/ unshrunk: slower, never broken. */
+import { execFileSync } from 'child_process';
+import os from 'os';
+const ESBUILD = 'esbuild@0.24.0';
+let esbuildOk = true;
+function shrink(name, text) {
+  if (!esbuildOk) return { code: text, map: null };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jaine-min-'));
+  const src = path.join(tmp, 'in', path.basename(name)), out = path.join(tmp, path.basename(name));
+  fs.mkdirSync(path.dirname(src), { recursive: true });
+  fs.writeFileSync(src, text);
+  // npx run through node itself: works the same on Windows (where npx is a .cmd) and elsewhere
+  const npxCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
+  const [cmd, pre] = fs.existsSync(npxCli) ? [process.execPath, [npxCli]] : ['npx', []];
+  try {
+    execFileSync(cmd, [...pre, '--yes', ESBUILD, src, '--minify', '--sourcemap', '--log-level=error',
+      `--outfile=${out}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // the map points at the readable file beside min/, not at the temporary copy it was made from
+    const map = JSON.parse(fs.readFileSync(out + '.map', 'utf8'));
+    map.sources = ['../' + name]; delete map.sourcesContent;
+    return { code: fs.readFileSync(out, 'utf8'), map: JSON.stringify(map) };
+  } catch (e) {
+    esbuildOk = false;
+    console.warn(`esbuild could not run (${String(e.message || e).split('\n')[0]}) - min/ gets unshrunk copies`);
+    return { code: text, map: null };
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+const minOut = {};                       // 'min/x.js' -> text, 'min/x.js.map' -> map
+const minVersion = {};                   // 'x.js' -> hash of min/x.js
+function addMin(name, text) {
+  const r = shrink(name, text);
+  minOut['min/' + name] = r.code;
+  if (r.map) minOut['min/' + name + '.map'] = r.map;
+  minVersion[name] = short(r.code);
+}
+// every module script the core can load on demand, and every script a page names directly
+const pagesJson = JSON.parse(read('src/pages/pages.json'));
+const moduleFiles = new Set();
+core.replace(/const PAGE_SCRIPT_VERSION=\{([^}]*)\};/, (w, body) => {
+  body.replace(/'([\w.-]+\.js)':/g, (m, f) => moduleFiles.add(f)); return w; });
+for (const p of pagesJson) for (const f of [...(p.before || []), ...(p.after || [])]) moduleFiles.add(f);
+for (const f of moduleFiles) addMin(f, read(f).replace(/\r\n/g, '\n'));
+// the core the pages load: modules from min/, stamped with the min files' own versions
+const coreForMin = coreOut
+  .replace("const PAGE_SCRIPT_DIR='';", "const PAGE_SCRIPT_DIR='min/';")
+  .replace(/const PAGE_SCRIPT_VERSION=\{([^}]*)\};/, (whole, body) =>
+    `const PAGE_SCRIPT_VERSION={${body.replace(/'([\w.-]+\.js)':'[^']*'/g, (m, f) => `'${f}':'${minVersion[f]}'`)}};`);
+addMin('nexus-core.js', coreForMin);
+const coreVersion = minVersion['nexus-core.js'];
 
 // ---------------------------------------------------------------- pages
 const shell = read('src/pages/shell.html');
@@ -70,16 +133,26 @@ const FOOT = { operations: 'Operations Portal', customer: 'Customer Portal' };
    and leave the generic "Module not found" on screen. The libraries are served from vendor/ and
    kept by the browser, so blocking costs next to nothing. */
 const CHART = '<script src="vendor/chart-4.4.1.umd.min.js"></script>\n';
-const tag = (file, v) => `<script src="${file}?v=${v}"></script>\n`;
+const tag = (file, v) => `<script src="min/${file}?v=${v}"></script>\n`;
+/* PRELOAD (15 Oct 2026). The page's scripts sit at the end of <body>, so the browser only finds
+   them after reading the whole page; the ones in <head> are found first and fetched one after
+   another. A preload line for each, in <head>, starts every download at the first moment, side by
+   side. It only fetches early - what runs, and in what order, is exactly as before - and each line
+   names the very same URL its <script> tag does, so nothing is fetched twice. */
+const preload = (url) => `<link rel="preload" as="script" href="${url}">\n`;
 
-const outputs = { 'nexus-core.js': coreOut };
+const outputs = { 'nexus-core.js': coreOut, ...minOut };
 for (const p of pages) {
   const portal = p.portal || 'operations';
-  const scripts = [...(p.before || []).map((f) => tag(f, versionOf(f))),
+  const scripts = [...(p.before || []).map((f) => tag(f, minVersion[f])),
                    tag('nexus-core.js', coreVersion),
-                   ...(p.after || []).map((f) => tag(f, versionOf(f)))].join('');
+                   ...(p.after || []).map((f) => tag(f, minVersion[f]))].join('');
+  const preloads = [...(p.before || []).map((f) => preload(`min/${f}?v=${minVersion[f]}`)),
+                    preload(`min/nexus-core.js?v=${coreVersion}`),
+                    ...(p.after || []).map((f) => preload(`min/${f}?v=${minVersion[f]}`))].join('');
   let html = shell
     .replace('{{TITLE}}', p.title)
+    .replace('{{PRELOAD}}', () => preloads.replace(/\n$/, ''))
     .replace('{{CHART}}', p.chart === false ? '' : CHART)
     .replace('{{BRAND}}', BRAND[portal])
     .replace('{{FOOT}}', FOOT[portal])
@@ -115,7 +188,7 @@ if (handEdited.length && !FORCE) {
 }
 const next = {};
 for (const [file, content] of Object.entries(outputs)) {
-  if (stale.includes(file)) fs.writeFileSync(at(file), content);
+  if (stale.includes(file)) { fs.mkdirSync(path.dirname(at(file)), { recursive: true }); fs.writeFileSync(at(file), content); }
   next[file] = sha(content);
 }
 fs.writeFileSync(at(MANIFEST), JSON.stringify(next, null, 2) + '\n');

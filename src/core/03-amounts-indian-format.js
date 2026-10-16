@@ -119,6 +119,10 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
 const PAGE_SCRIPT_VERSION={'accountability.js':'20261009a','insp-items.js':'x','postsales.js':'20261009a','scheduling.js':'20261007a','accounts.js':'20261005g','accounts-bank.js':'20261005b','accounts-books.js':'20261005d','purchase.js':'20261009a','purchase-indent.js':'20261006a','purchase-rfq.js':'20261005a','purchase-po.js':'20261006b','purchase-stores.js':'20261006b','purchase-reports.js':'20261006a'};
+/* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
+   in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
+   files beside it. See tools/build.mjs. */
+const PAGE_SCRIPT_DIR='';
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];
@@ -143,7 +147,7 @@ function loadPageScript(src){
     /* Bump this whenever accountability.js or insp-items.js changes, the same way the pages bump
        nexus-core.js. It had sat at 20260913c while thirty-five commits landed in
        accountability.js — every one of them invisible to a browser holding that URL. */
-    s.src=src+'?v='+(PAGE_SCRIPT_VERSION[src]||'20261003a');
+    s.src=PAGE_SCRIPT_DIR+src+'?v='+(PAGE_SCRIPT_VERSION[src]||'20261003a');
     s.onload=()=>{_loadedPageScripts.add(src);resolve();};
     // A failed load shouldn't hang navigation forever — render with whatever's already there
     // (the legacy VIEWS.tasks placeholder already has its own "could not finish loading" message

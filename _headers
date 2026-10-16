@@ -41,6 +41,11 @@
 /*.css
   Cache-Control: public, max-age=31536000, immutable
 
+# The shrunk scripts the pages actually load (and their source maps) - versioned by ?v= exactly
+# like the files above. See tools/build.mjs, "min/".
+/min/*
+  Cache-Control: public, max-age=31536000, immutable
+
 # Images are not versioned, so they get a day rather than a year: long enough to stop them being
 # re-fetched on every page, short enough that replacing a logo reaches people the same week.
 /assets/*

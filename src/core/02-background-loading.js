@@ -248,9 +248,10 @@ function bgWarmScripts(){
     const entry=PAGE_EXTRA_SCRIPT[t.split('#')[0]]; if(!entry) return;
     [].concat(entry).forEach(function(src){
       if(_loadedPageScripts.has(src)) return;
-      const already=[].slice.call(document.scripts).some(function(s){ return (s.getAttribute('src')||'').split('?')[0]===src; });
+      const already=[].slice.call(document.scripts).some(function(s){
+        const u=(s.getAttribute('src')||'').split('?')[0]; return u===src||u.endsWith('/'+src); });
       if(already) return;
-      const href=src+'?v='+(PAGE_SCRIPT_VERSION[src]||'20261003a');
+      const href=PAGE_SCRIPT_DIR+src+'?v='+(PAGE_SCRIPT_VERSION[src]||'20261003a');
       if(document.querySelector('link[rel="prefetch"][href="'+href+'"]')) return;
       const l=document.createElement('link'); l.rel='prefetch'; l.as='script'; l.href=href;
       document.head.appendChild(l);
