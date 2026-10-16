@@ -10605,7 +10605,9 @@
         A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'+rejectBtn;
       } else {
         A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>'+rejectBtn;
-        if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
+        if(isLast) A+=(flow&&flow.id===26)
+          ? '<button class="ac-btn ok" title="File this bill in Wheredoc - this completes the workflow" onclick="wdFileOpen('+fcs.id+')"><i class="fa-solid fa-box-archive"></i> File</button>'
+          : '<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
         /* BILL BOOKING DECIDES WHETHER THIS IS A PAYMENT.
            Forward sends it the ordinary way - Bill Checking, Audit Checking, then RTP. Payment
            sends it down the route where the money moves first: RTP, Cheque Preparation, and only
@@ -10906,6 +10908,121 @@
     catch(e){ toast('Could not complete: '+((e&&e.message)||e),'err'); return; }
     try{ usageQueue('tasks.workflow.mark_final_step_done','update',um); }catch(_e){}
     toast('Workflow completed','ok'); navTo('tasks/work');
+  };
+
+  /* ----- Bill Filing -> Wheredoc (Invoice Processing's last step) -----
+     Instead of Done, Tapan presses File: this form asks what Wheredoc's own Bills form asks (bill
+     type, project, credit period, GST, remarks) and which box file it goes in, with the bill's
+     details already filled from the instance. The wheredoc-file function then originates the bill
+     in Wheredoc with the JainE Id as its DocId, uploads the instance's files and files it in that
+     box file - and only once Wheredoc has it, completes the step exactly as Done would. If filing
+     fails, nothing is completed and the step stays with Tapan. */
+  async function wdCall(body){
+    const {data:{session}}=await sb.auth.getSession();
+    try{
+      const r=await fetch(SUPABASE_URL+'/functions/v1/wheredoc-file',{method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+((session&&session.access_token)||''),'apikey':SUPABASE_KEY},
+        body:JSON.stringify(body)});
+      return await r.json().catch(function(){ return {ok:false,error:'Unexpected answer (HTTP '+r.status+')'}; });
+    }catch(e){ return {ok:false,error:'Could not reach JainE: '+((e&&e.message)||e)}; }
+  }
+  const wdBox=function(f){ return [f.desc1,f.desc2,f.desc3].filter(Boolean).join(' · ')+(f.fileno?' ('+f.fileno+')':'')+(f.period?' · '+f.period:''); };
+  window.wdFileOpen=async function(fcsId){
+    const head='<div class="modal-head"><h3><i class="fa-solid fa-box-archive"></i> File this bill in Wheredoc</h3><span class="x" onclick="closeModal()">&times;</span></div>';
+    openModal(head+'<div class="modal-body" style="min-width:min(94vw,640px)"><div class="loader"><div class="spin"></div></div>'
+      +'<div style="text-align:center;color:var(--slate);font-size:13px">Reading the projects and box files from Wheredoc…</div></div>');
+    const o=await wdCall({action:'options',fcs_id:fcsId});
+    if(!o||!o.ok){
+      openModal(head+'<div class="modal-body" style="min-width:min(94vw,520px)"><div style="color:#b91c1c;font-size:13.5px;line-height:1.6"><i class="fa-solid fa-triangle-exclamation"></i> '
+        +esc2((o&&o.error)||'Could not open the filing form.')+'</div></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Close</button></div>');
+      return;
+    }
+    window._wd={fcs:fcsId,o:o,box:null,newBox:false};
+    const b=o.bill||{};
+    const sel=function(id,list,ph){ return '<select id="'+id+'" class="ac-in"><option value="">'+esc2(ph)+'</option>'+list.map(function(x){ return '<option value="'+esc2(x[0])+'">'+esc2(x[1])+'</option>'; }).join('')+'</select>'; };
+    const lbl=function(t,req){ return '<label class="wf-lbl" style="margin:10px 0 4px">'+t+(req?' <span style="color:#dc2626">*</span>':'')+'</label>'; };
+    const files=(b.files||[]);
+    openModal(head+'<style>#wdForm .ac-in{width:100%;box-sizing:border-box;max-width:none}</style><div id="wdForm" class="modal-body" style="width:min(88vw,600px);max-width:100%;box-sizing:border-box;max-height:72vh;overflow:auto;overflow-x:hidden">'
+      +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:4px">DocId in Wheredoc: <b style="color:var(--ink)">'+esc2(String(o.jaine_id))+'</b> (the JainE Id)</div>'
+      +'<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 12px">'
+        +'<div>'+lbl('Bill No.',1)+'<input id="wdBillNo" class="ac-in" value="'+esc2(b.bill_no||'')+'"></div>'
+        +'<div>'+lbl('Bill Date',1)+'<input id="wdBillDate" class="ac-in" type="date" value="'+esc2(String(b.bill_date||'').slice(0,10))+'"></div>'
+        +'<div>'+lbl('Vendor',1)+'<input id="wdVendor" class="ac-in" value="'+esc2(b.vendor||'')+'"></div>'
+        +'<div>'+lbl('Amount',1)+'<input id="wdAmount" class="ac-in" inputmode="decimal" value="'+esc2(String(b.amount||''))+'"></div>'
+        +'<div>'+lbl('Bill type',1)+sel('wdType',(o.doctypes||[]).map(function(t){ return [t,t]; }),'Choose the bill type')+'</div>'
+        +'<div>'+lbl('Project',1)+sel('wdSite',(o.sites||[]).map(function(s){ return [s.id,s.name]; }),'Choose the project')+'</div>'
+        +'<div>'+lbl('Credit period (days)')+'<input id="wdCredit" class="ac-in" type="number" min="0" value="15"></div>'
+        +'<div>'+lbl('GST invoice')+sel('wdGst',[['yes','Yes'],['no','No']],'Not set')+'</div>'
+      +'</div>'
+      +lbl('Remarks')+'<input id="wdRemarks" class="ac-in" placeholder="Optional">'
+      +lbl('Box file',1)
+      +'<div id="wdBoxPicked" style="font-size:13px;margin-bottom:6px;color:var(--slate)">None chosen yet</div>'
+      +'<input id="wdBoxQ" class="ac-in" placeholder="Search box files by number, description, file no. or period…" oninput="wdBoxList()">'
+      +'<div id="wdBoxes" style="max-height:190px;overflow:auto;border:1px solid var(--line,#e2e8f0);border-radius:8px;margin-top:6px"></div>'
+      +'<div id="wdNewBox" style="display:none;border:1px dashed var(--line,#cbd5e1);border-radius:10px;padding:2px 12px 12px;margin-top:8px">'
+        +'<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 12px">'
+          +'<div>'+lbl('Department',1)+sel('wdNbDept',(o.departments||[]).map(function(d){ return [d,d]; }),'Choose')+'</div>'
+          +'<div>'+lbl('Description 1',1)+'<input id="wdNbD1" class="ac-in"></div>'
+          +'<div>'+lbl('Description 2')+'<input id="wdNbD2" class="ac-in"></div>'
+          +'<div>'+lbl('Description 3')+'<input id="wdNbD3" class="ac-in"></div>'
+          +'<div>'+lbl('File no.')+'<input id="wdNbNo" class="ac-in"></div>'
+          +'<div>'+lbl('Period')+'<input id="wdNbPeriod" class="ac-in"></div>'
+          +'<div>'+lbl('Location')+'<input id="wdNbLoc" class="ac-in"></div>'
+        +'</div></div>'
+      +'<div style="font-size:12.5px;color:var(--slate);margin-top:12px"><i class="fa-solid fa-paperclip"></i> '
+        +(files.length?(files.length+' file'+(files.length>1?'s':'')+' go with it: '+esc2(files.join(', '))):'No file on this instance')+'</div>'
+      +'<div id="wdErr" style="color:#b91c1c;font-size:13px;margin-top:10px;display:none"></div>'
+      +'</div>'
+      +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button>'
+      +'<button class="ac-btn ok" id="wdGo" onclick="wdFileSubmit()"><i class="fa-solid fa-box-archive"></i> File in Wheredoc</button></div>');
+    wdBoxList();
+  };
+  window.wdBoxList=function(){
+    const st=window._wd; if(!st) return;
+    const q=(($('wdBoxQ')||{}).value||'').toLowerCase().trim();
+    const all=st.o.folders||[];
+    const hits=all.filter(function(f){ return !q||(String(f.serial)+' '+wdBox(f)).toLowerCase().indexOf(q)>-1; });
+    const row=function(f){ const on=st.box===f.serial&&!st.newBox;
+      return '<div onclick="wdPickBox('+f.serial+')" style="padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--line-2,#f1f5f9);font-size:13px;'+(on?'background:#eff6ff;font-weight:700':'')+'"><b>'+f.serial+'</b> · '+esc2(wdBox(f)||'(no description)')+'</div>'; };
+    $('wdBoxes').innerHTML=hits.slice(0,200).map(row).join('')
+      +(hits.length>200?'<div style="padding:8px 11px;font-size:12px;color:var(--slate)">'+(hits.length-200)+' more - narrow the search</div>':'')
+      +(!hits.length?'<div style="padding:8px 11px;font-size:12.5px;color:var(--slate)">No box file matches.</div>':'')
+      +'<div onclick="wdPickBox(0)" style="padding:8px 11px;cursor:pointer;font-size:13px;color:#1d4ed8;'+(st.newBox?'background:#eff6ff;font-weight:700':'')+'"><i class="fa-solid fa-plus"></i> New box file</div>';
+  };
+  window.wdPickBox=function(serial){
+    const st=window._wd; st.newBox=!serial; st.box=serial||null;
+    const f=(st.o.folders||[]).filter(function(x){ return x.serial===serial; })[0];
+    $('wdBoxPicked').innerHTML=serial?('Box file <b style="color:var(--ink)">'+serial+'</b> · '+esc2(wdBox(f)||'')):'<b style="color:var(--ink)">A new box file</b> - fill in its details below';
+    $('wdNewBox').style.display=serial?'none':'';
+    wdBoxList();
+  };
+  window.wdFileSubmit=async function(){
+    const st=window._wd; if(!st) return;
+    const v=function(id){ return (($(id)||{}).value||'').trim(); };
+    const err=function(m){ const e=$('wdErr'); e.textContent=m; e.style.display=m?'':'none'; };
+    const form={ bill_no:v('wdBillNo'), bill_date:v('wdBillDate'), party_name:v('wdVendor'), bill_amount:v('wdAmount').replace(/,/g,''),
+      doctype:v('wdType'), site_id:v('wdSite'), site_name:(($('wdSite')||{}).selectedOptions||[{}])[0].text||null,
+      credit_period:v('wdCredit')||'15', gst_invoice:v('wdGst')==='yes'?true:(v('wdGst')==='no'?false:null), bill_remarks:v('wdRemarks')||null };
+    if(!form.bill_no||!form.bill_date||!form.party_name||!form.bill_amount) return err('Bill No., Bill Date, Vendor and Amount are all needed.');
+    if(!/^-?\d+(\.\d+)?$/.test(form.bill_amount)) return err('Amount must be a number.');
+    if(!form.doctype) return err('Choose the bill type.');
+    if(!form.site_id) return err('Choose the project.');
+    if(st.newBox){
+      form.new_folder={department:v('wdNbDept'),desc1:v('wdNbD1'),desc2:v('wdNbD2'),desc3:v('wdNbD3'),fileno:v('wdNbNo'),period:v('wdNbPeriod'),location:v('wdNbLoc')};
+      if(!form.new_folder.department||!form.new_folder.desc1) return err('A new box file needs a department and Description 1.');
+    } else if(st.box){ form.folder_serial=st.box; }
+    else return err('Choose the box file, or New box file.');
+    err('');
+    const go=$('wdGo'); go.disabled=true; go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Filing - sending the files to Wheredoc…';
+    const um=await wfStepUsageMeta(st.fcs);
+    const r=await wdCall({action:'file',fcs_id:st.fcs,form:form});
+    if(!r||!r.ok){
+      go.disabled=false; go.innerHTML='<i class="fa-solid fa-box-archive"></i> File in Wheredoc';
+      return err((r&&r.error)||'Filing failed.');
+    }
+    try{ usageQueue('tasks.workflow.mark_final_step_done','update',um); }catch(_e){}
+    closeModal(); window._wd=null;
+    toast('Filed in Wheredoc - DocId '+r.docid+', box file '+r.folder_serial,'ok'); navTo('tasks/work');
   };
 
   /* ----- Confirmation steps (Reimbursement's "Payment Received") -----
@@ -14640,7 +14757,7 @@
           // wfWhoOfStep/wfStepWhoText need the next step's DEFINITION (owner_emails/owner_from_trigger/...)
           // merged in - nextStep itself only ever carries the instance-row fields (person/candidates).
           const nextDef=nextStep?(stepDefByFlowSeq[c.flow_id+':'+nextStep.seq]||null):null;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:wfCaseNoText(c),idLabel:f.id_label||'',flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:wfCaseNoText(c),idLabel:f.id_label||'',flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),fileToWheredoc:(c.flow_id===26),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -15649,6 +15766,8 @@
           : wfInfo.chequeChoice
           ? `<button class="ac-btn primary ic" style="height:30px;width:30px" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice(${t.flow_case_step_id},true)"><i class="fa-solid fa-indian-rupee-sign"></i></button>`
             +`<button class="ac-btn primary ic" style="height:30px;width:30px" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice(${t.flow_case_step_id},false)"><i class="fa-solid fa-ban"></i></button>`
+          : wfIsLastStep&&wfInfo.fileToWheredoc
+          ? `<button class="ac-btn ok ic" style="height:30px;width:30px" title="File in Wheredoc — completes this workflow" onclick="wdFileOpen(${t.flow_case_step_id})"><i class="fa-solid fa-box-archive"></i></button>`
           : wfIsLastStep
           ? `<button class="ac-btn ok ic" style="height:30px;width:30px" title="Done — complete this workflow" onclick="wfDone(${t.flow_case_step_id})"><i class="fa-solid fa-flag-checkered"></i></button>`
           : `<button class="ac-btn primary ic" style="height:30px;width:30px" title="${esc2(fwdTip)}" onclick="wfForward(${t.flow_case_step_id})"><i class="fa-solid fa-paper-plane"></i></button>`}</div>`;
