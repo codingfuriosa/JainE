@@ -1,0 +1,10 @@
+import { reraList, reraDetail } from '../../supabase/functions/public-intel/parse.ts';
+const tmp = Deno.env.get('TEMP')!;
+const all = reraList(Deno.readTextFileSync(tmp + '/rera_all.html'), 'approved');
+console.log('approved rows', all.rows.length, all.error, all.header, all.rows[0]);
+const d = reraDetail(Deno.readTextFileSync(tmp + '/rera_detail.html'));
+console.log(d);
+const UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+const r = await fetch('https://rera.wb.gov.in/district_project.php?dcode=0&page=rejected', { headers: { 'User-Agent': UA } });
+const rej = reraList(await r.text(), 'rejected');
+console.log('rejected', r.status, rej.rows.length, rej.error, rej.header, rej.rows[0]);

@@ -37,8 +37,13 @@ const NAV=[
     {id:'compliance',label:'Renewals & Compliance',icon:'fa-calendar-check'},
   ]},
   {group:'Growth & Strategy',items:[
-    {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},
-    {id:'competitors',label:'Competitor Ads',icon:'fa-magnifying-glass-chart'},
+    /* Grouped by WHOSE data it is (16 Oct 2026) - see src/core/40-marketing-modules.js. 'campaigns'
+       and 'competitors' keep their ids (were Campaign Analytics and Competitor Ads) so the access
+       people already hold in adm.users.modules carries over; only the labels changed. Digital
+       Metrics no longer has a page: its tabs live in Our Brand and Competitor Data. */
+    {id:'campaigns',label:'Our Brand',icon:'fa-bullhorn'},
+    {id:'competitors',label:'Competitor Data',icon:'fa-magnifying-glass-chart'},
+    {id:'channel_partners',label:'Channel Partners',icon:'fa-people-arrows'},
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
     {id:'scaling',label:'Scaling Up',icon:'fa-arrow-trend-up'},
     {id:'playbook',label:'Playbook',icon:'fa-book-open'},

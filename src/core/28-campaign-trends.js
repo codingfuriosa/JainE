@@ -341,8 +341,18 @@ window.cmpShowProjectAds=function(accId){
     'lg'
   );
 };
+/* The numbered analytics tabs of the Our Brand page (formerly Campaign Analytics), one list per
+   Meta / Google / Both source. Kept in one place because the Our Brand page's own extra tabs
+   (Meta Ad Library, YouTube, Maps... - src/core/40-marketing-modules.js) redraw this same bar
+   when one of them is open, and must show exactly the tabs the source would have shown, at the
+   same numeric routes (campaigns/0, campaigns/1, ...) that USAGE_VIEWS and bookmarks already use. */
+function cmpBaseTabs(){
+  if(CMP_SOURCE==='google') return ['Overview','Accounts','Campaigns','Ads','Trend','Ad Fatigue'];
+  if(CMP_SOURCE==='both') return ['Overview','Sources','Trend','Ad Fatigue'];
+  return ['Overview','Campaigns','By Project','Ads','Trend','Ad Fatigue','AI Insights'];
+}
 async function cmpBothView(v,seg){
-  const tabs=['Overview','Sources','Trend','Ad Fatigue'];const ti=mTab(seg,tabs.length);
+  const tabs=cmpBaseTabs();const ti=mTab(seg,tabs.length);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
@@ -509,7 +519,7 @@ async function cmpBothView(v,seg){
     body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Meta + Google · campaign level');
   }
   const showKpis=(ti!==2&&ti!==3);
-  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+legend+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Our Brand')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const opt={responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}}}};
@@ -518,7 +528,7 @@ async function cmpBothView(v,seg){
   },60);}
 }
 async function cmpGoogleView(v,seg){
-  const tabs=['Overview','Accounts','Campaigns','Ads','Trend','Ad Fatigue'];const ti=mTab(seg,tabs.length);
+  const tabs=cmpBaseTabs();const ti=mTab(seg,tabs.length);
   const needGAds=(ti===3||ti===5);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
@@ -711,7 +721,7 @@ async function cmpGoogleView(v,seg){
     body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Google · CTR trend (Google publishes no per-person frequency)',true);
   }
   const showKpis=(ti!==4&&ti!==5);
-  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+cap+legend+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Our Brand')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+cap+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=rows.map(function(r){return r.a.name;});
@@ -2697,10 +2707,10 @@ window.tpMuUncompleteRow=async function(id){
 };
 
 VIEWS.campaigns=async function(v,seg){
-  setCrumb(['Growth & Strategy','Campaign Analytics']);
+  setCrumb(['Growth & Strategy','Our Brand']);
   if(CMP_SOURCE==='google'){ return cmpGoogleView(v,seg); }
   if(CMP_SOURCE==='both'){ return cmpBothView(v,seg); }
-  const tabs=['Overview','Campaigns','By Project','Ads','Trend','Ad Fatigue','AI Insights'];const ti=mTab(seg,tabs.length);
+  const tabs=cmpBaseTabs();const ti=mTab(seg,tabs.length);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const needAd=(ti===3||ti===5);
   // AI Insights: Opportunity Score, anomalies and performance trend from the Meta Ads MCP tool -
@@ -3031,7 +3041,7 @@ VIEWS.campaigns=async function(v,seg){
     +(CMP_PERIOD==='custom'?'<div class="cmp-cap" style="color:#c2410c"><i class="fa-solid fa-triangle-exclamation"></i> Custom ranges aren\'t fetched by the MCP refresh task — pick one of the preset periods above, or ask for this range to be pulled directly.</div>':'');
   const legend='<div class="cmp-legend"><span>Trend compares with '+esc(cmpPrevLabel())+'</span><span>Fatigue = times each person saw the ad + whether CTR is falling</span></div>';
   const showKpis=(ti!==4&&ti!==5&&ti!==6);
-  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+syncCap+legend+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Our Brand')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+syncCap+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=projRows.map(r=>r.acc.name);
@@ -3098,10 +3108,14 @@ const COMP_RANGES=[
 const COMP_MEDIA=[['all','All media','fa-shapes'],['image','Images','fa-image'],['video','Videos','fa-video'],['carousel','Carousels','fa-images']];
 const COMP_STATUS=[['all','Active & inactive','fa-layer-group'],['active','Active only','fa-circle-play'],['inactive','Inactive only','fa-circle-stop']];
 let COMP_F={wl:'all',range:'last_30',from:'',to:'',status:'all',media:'all',q:''};
-/* Three tabs over the one watchlist, by its category: other developers, our own pages, and our
+/* Three views over the one watchlist, by its category: other developers, our own pages, and our
    channel partners. Everything below - the picker, the table, the grid - only ever sees the rows
-   of the open tab, so our ads never sit among a competitor's or a partner's.
-   Each entry: [route segment, tab title, icon, category, [singular, plural], noun for buttons]. */
+   of the open view, so our ads never sit among a competitor's or a partner's.
+   They used to be three tabs of one Competitor Ads page. Since 16 Oct 2026 each lives in its own
+   module (src/core/40-marketing-modules.js): competitors on Competitor Data (competitors), our
+   own pages as the Meta Ad Library tab of Our Brand (campaigns/meta-ads), and partners on Channel
+   Partners (channel_partners). compMetaView() draws whichever one into the host it is given.
+   Each entry: [key, title, icon, category, [singular, plural], noun for buttons]. */
 let COMP_TAB='competitors';
 const COMP_TABS=[
   ['competitors','Competitors','fa-chess-knight','competitor',['competitor','competitors'],'Competitor'],
@@ -3194,20 +3208,19 @@ window.compSetDate=function(which,val){
 };
 window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) compPaintGrid(); usageQueueDebounced('competitors.overview.search_ad_text_headline_or_page', val); };
 
-VIEWS.competitors=async function(v,seg){
-  const want=seg&&seg[0];
-  const tab=COMP_TABS.some(function(t){ return t[0]===want; })?want:'competitors';
+/* Draws one watchlist view - key 'competitors', 'brands' or 'partners' (COMP_TABS) - into host,
+   below whatever page header and tab bar the calling module has already drawn. The page shells
+   live in src/core/40-marketing-modules.js; this only owns the Meta Ad Library part. Switching
+   view clears the "one page only" pick, because a competitor's id means nothing on Our Brand. */
+async function compMetaView(host,key){
+  const tab=COMP_TABS.some(function(t){ return t[0]===key; })?key:'competitors';
   if(tab!==COMP_TAB){ COMP_TAB=tab; COMP_F.wl='all'; }
-  setCrumb(['Growth & Strategy','Competitor Ads',compTabDef()[1]]);
   const blurb={
     competitors:'Public ad creative from Meta\'s Ad Library — the creative itself, when it started and where it ran.',
     brands:'Our own pages as Meta\'s Ad Library shows them to the public — what is running, since when, and where.',
     partners:'What our channel partners are advertising on Meta — which projects they push, since when, and where.'
   }[COMP_TAB];
-  v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Ads')
-    +'<div class="tabs" style="margin-top:-6px">'+COMP_TABS.map(function(t){
-        return '<div class="tab '+(COMP_TAB===t[0]?'active':'')+'" onclick="navTo(\'competitors'+(t[0]==='competitors'?'':'/'+t[0])+'\')"><i class="fa-solid '+t[2]+'"></i> '+t[1]+'</div>';
-      }).join('')+'</div>'
+  host.innerHTML=''
     +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 12px">'
       +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">'+blurb
         +' Meta never publishes spend or reach for ordinary commercial ads.</p>'
@@ -3220,7 +3233,7 @@ VIEWS.competitors=async function(v,seg){
     +'<div id="compToolbar"></div>'
     +'<div id="compBody"><div class="loader"><div class="spin"></div></div></div>';
   await Promise.all([compRender(), compLoadStatus()]);
-};
+}
 function compSelHtml(id,list,cur,onchange){
   return '<select class="comp-sel" id="'+id+'" onchange="'+onchange+'">'
     +list.map(function(o){ return '<option value="'+o[0]+'"'+(String(cur)===String(o[0])?' selected':'')+'>'+esc(o[1])+'</option>'; }).join('')
@@ -3635,7 +3648,7 @@ window.compRemove=async function(id){
 // than through USAGE_MAP - a click here can genuinely fail (network error, Meta error, wrong-page
 // rows skipped), so the generic wrapper would have counted a failed sync as a real one.
 /* PULLS RUN ON PROXY'S FREE ALLOWANCE (20 credits a day, no carry-over), THROUGH A QUEUE.
-   Every page on all three tabs is pulled once a week, each on its own weekday, by the
+   Every watched page (competitors, our own, channel partners) is pulled once a week, each on its own weekday, by the
    competitor-ads-weekly-enqueue / competitor-ads-queue-worker cron jobs. On top of that the whole
    watchlist can be pulled by hand twice a calendar month; a third request is refused by the
    database, not just hidden here. A manual pull takes whatever today's leftover credits allow at
@@ -3664,7 +3677,7 @@ function compPaintStatus(){
     // A pull still working through the queue blocks another (the database refuses it, uncounted).
     btn.disabled=!left||pendingManual>0;
     btn.title=pendingManual>0?('A manual pull is still running ('+pendingManual+' pages to go). You can start another once it finishes.')
-      :left?('Pull every page on all tabs. Uses 1 of '+limit+' manual pulls this month.')
+      :left?('Pull every watched page - competitors, our own and channel partners. Uses 1 of '+limit+' manual pulls this month.')
       :('Both manual pulls for this month are used. They reset on the 1st; the weekly pull carries on.');
     btn.innerHTML='<i class="fa-solid fa-rotate"></i> Pull all now <span style="opacity:.8;font-weight:500">('+left+' of '+limit+' left)</span>';
   }
@@ -3681,7 +3694,7 @@ function compPaintStatus(){
       +Number(run.pages)+' pages'+(Number(run.failed)?' · '+Number(run.failed)+' could not be pulled':'')+'</div>';
   }
   host.innerHTML='<div class="comp-note" style="flex-direction:column;align-items:flex-start;gap:4px;margin:0 0 14px">'
-    +'<div><i class="fa-solid fa-calendar-week" style="color:#0369a1"></i> Every page on all tabs is pulled once a week ('
+    +'<div><i class="fa-solid fa-calendar-week" style="color:#0369a1"></i> Every watched page - competitors, our own and channel partners - is pulled once a week ('
       +tracked+' pages, about '+weeklyPerDay+' a day) on Proxy\'s free allowance · today <b>'+Number(s.used_today)+' of '+budget+'</b> credits used'
       +(s.exhausted_today?' — Proxy has no credits left today, pulls resume tomorrow':'')+'</div>'
     +runLine
@@ -3710,7 +3723,7 @@ window.compManualPull=async function(){
     return;
   }
   const left=s?Math.max(0,Number(s.manual_limit)-Number(s.manual_used)):null;
-  const ok=await confirmDialog('Pull every page on all three tabs now?'
+  const ok=await confirmDialog('Pull every page now - competitors, our own pages and channel partners?'
     +(left!=null?' This uses 1 of the '+left+' manual pull'+(left===1?'':'s')+' left this month.':'')
     +' What fits in today\'s free credits is pulled straight away; the rest finishes over the next few days.',{okLabel:'Pull all'});
   if(!ok) return;
