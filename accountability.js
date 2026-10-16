@@ -10943,16 +10943,16 @@
     const lbl=function(t,req){ return '<label class="wf-lbl" style="margin:10px 0 4px">'+t+(req?' <span style="color:#dc2626">*</span>':'')+'</label>'; };
     const files=(b.files||[]);
     openModal(head+'<style>#wdForm .ac-in{width:100%;box-sizing:border-box;max-width:none}</style><div id="wdForm" class="modal-body" style="width:min(88vw,600px);max-width:100%;box-sizing:border-box;max-height:72vh;overflow:auto;overflow-x:hidden">'
-      +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:4px">DocId in Wheredoc: <b style="color:var(--ink)">'+esc2(String(o.jaine_id))+'</b> (the JainE Id)</div>'
+      /* Bill No., date and amount go across exactly as the instance has them, so they are shown,
+         not asked. Credit period goes as Wheredoc's own default (15 days) and GST is left unset -
+         neither is required by Wheredoc. Only what JainE cannot know is asked. */
+      +'<div style="font-size:12.5px;color:var(--slate);line-height:1.6;margin-bottom:2px">DocId in Wheredoc <b style="color:var(--ink)">'+esc2(String(o.jaine_id))+'</b> (the JainE Id) · '
+        +'Bill <b style="color:var(--ink)">'+esc2(b.bill_no||'—')+'</b> · '+esc2(b.bill_date?fmtDate(String(b.bill_date).slice(0,10)):'—')
+        +' · ₹'+esc2(Number(String(b.amount||'').replace(/,/g,''))?Number(String(b.amount).replace(/,/g,'')).toLocaleString('en-IN',{maximumFractionDigits:2}):(b.amount||'—'))+'</div>'
+      +lbl('Vendor',1)+'<input id="wdVendor" class="ac-in" value="'+esc2(b.vendor||'')+'">'
       +'<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 12px">'
-        +'<div>'+lbl('Bill No.',1)+'<input id="wdBillNo" class="ac-in" value="'+esc2(b.bill_no||'')+'"></div>'
-        +'<div>'+lbl('Bill Date',1)+'<input id="wdBillDate" class="ac-in" type="date" value="'+esc2(String(b.bill_date||'').slice(0,10))+'"></div>'
-        +'<div>'+lbl('Vendor',1)+'<input id="wdVendor" class="ac-in" value="'+esc2(b.vendor||'')+'"></div>'
-        +'<div>'+lbl('Amount',1)+'<input id="wdAmount" class="ac-in" inputmode="decimal" value="'+esc2(String(b.amount||''))+'"></div>'
-        +'<div>'+lbl('Bill type',1)+sel('wdType',(o.doctypes||[]).map(function(t){ return [t,t]; }),'Choose the bill type')+'</div>'
         +'<div>'+lbl('Project',1)+sel('wdSite',(o.sites||[]).map(function(s){ return [s.id,s.name]; }),'Choose the project')+'</div>'
-        +'<div>'+lbl('Credit period (days)')+'<input id="wdCredit" class="ac-in" type="number" min="0" value="15"></div>'
-        +'<div>'+lbl('GST invoice')+sel('wdGst',[['yes','Yes'],['no','No']],'Not set')+'</div>'
+        +'<div>'+lbl('Bill type',1)+sel('wdType',(o.doctypes||[]).map(function(t){ return [t,t]; }),'Choose the bill type')+'</div>'
       +'</div>'
       +lbl('Remarks')+'<input id="wdRemarks" class="ac-in" placeholder="Optional">'
       +lbl('Box file',1)
@@ -11000,13 +11000,13 @@
     const st=window._wd; if(!st) return;
     const v=function(id){ return (($(id)||{}).value||'').trim(); };
     const err=function(m){ const e=$('wdErr'); e.textContent=m; e.style.display=m?'':'none'; };
-    const form={ bill_no:v('wdBillNo'), bill_date:v('wdBillDate'), party_name:v('wdVendor'), bill_amount:v('wdAmount').replace(/,/g,''),
+    // Bill No., date and amount are not sent: the function takes them from the instance itself.
+    const form={ party_name:v('wdVendor'),
       doctype:v('wdType'), site_id:v('wdSite'), site_name:(($('wdSite')||{}).selectedOptions||[{}])[0].text||null,
-      credit_period:v('wdCredit')||'15', gst_invoice:v('wdGst')==='yes'?true:(v('wdGst')==='no'?false:null), bill_remarks:v('wdRemarks')||null };
-    if(!form.bill_no||!form.bill_date||!form.party_name||!form.bill_amount) return err('Bill No., Bill Date, Vendor and Amount are all needed.');
-    if(!/^-?\d+(\.\d+)?$/.test(form.bill_amount)) return err('Amount must be a number.');
-    if(!form.doctype) return err('Choose the bill type.');
+      bill_remarks:v('wdRemarks')||null };
+    if(!form.party_name) return err('The vendor is needed.');
     if(!form.site_id) return err('Choose the project.');
+    if(!form.doctype) return err('Choose the bill type.');
     if(st.newBox){
       form.new_folder={department:v('wdNbDept'),desc1:v('wdNbD1'),desc2:v('wdNbD2'),desc3:v('wdNbD3'),fileno:v('wdNbNo'),period:v('wdNbPeriod'),location:v('wdNbLoc')};
       if(!form.new_folder.department||!form.new_folder.desc1) return err('A new box file needs a department and Description 1.');
