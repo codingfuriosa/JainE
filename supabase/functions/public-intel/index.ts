@@ -11,7 +11,8 @@
 //   google_ads   one advertiser/domain, <= 10 pages 6 s apart. Every ad is read: a long list goes
 //                on over several ticks from Google's own "next page" token (see gadsTick); after
 //                that the newest pages daily and the whole list weekly
-//   gads_detail  <= 15 ad preview scripts 1.5 s apart - what each ad says (words, picture, video)
+//   gads_detail  <= 6 ad preview scripts 4 s apart, every 10 min - what each ad says (words, picture,
+//                video). 15 every 5 min drew a 429 from Google after ~45 reads (16 Oct 2026)
 //   rera_list    both public lists (approved, rejected), once a week
 //   rera_detail  <= 18 project pages 1.5 s apart, stopping after 90 s (first pass: every project
 //                once, newest first; then followed promoters weekly, everyone else every 90 days)
@@ -149,15 +150,15 @@ async function gadsTick(trigger: string, force: boolean) {
   });
 }
 
-/* WHAT EACH AD SAYS (gads_detail). Reads the preview script of up to 15 creatives a tick, 1.5 s
+/* WHAT EACH AD SAYS (gads_detail). Reads the preview script of up to 6 creatives every 10 min, 4 s
    apart, newest first, and stores what gadsDetail() finds in it. Only creatives that need it:
    videos (for the YouTube id) and ads with no stored picture. Text ads that Google already gives as
    a picture of the ad (image_url) are shown as that picture and are not read again. Each creative
    is read once; a failure is kept in detail_error and not retried, so one odd ad cannot hold the
    queue. A CAPTCHA/429 stops the unit and the source waits 6 hours like every other. */
-const GDET_N = 15;
+const GDET_N = 6;
 async function gadsDetailTick(trigger: string, force: boolean) {
-  const wait = await gate('gads_detail', force ? 60e3 : 4 * 60e3);
+  const wait = await gate('gads_detail', force ? 60e3 : 9 * 60e3);
   if (wait) return { source: 'gads_detail', skipped: wait };
   const { data: pick, error: pe } = await db.from('pi_gads_creatives').select('creative_id,preview_url,format')
     .is('detail_at', null).not('preview_url', 'is', null).or('image_url.is.null,format.eq.video')
@@ -170,7 +171,7 @@ async function gadsDetailTick(trigger: string, force: boolean) {
     for (let i = 0; i < pick.length; i++) {
       if (Date.now() - started > 80e3) break;
       const p: any = pick[i];
-      if (i) await sleep(1500);
+      if (i) await sleep(4000);
       const now = new Date().toISOString();
       let d: any;
       try {

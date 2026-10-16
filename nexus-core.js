@@ -33245,31 +33245,72 @@ window.ciAdOpen=function(id){
 };
 
 // ---------------------------------------------------------------- RERA
-/* ONLY THE FOLLOWED COMPANIES' PROJECTS, on both pages (16 Oct 2026, as asked): Competitor Data
-   shows our competitors' projects and nothing else - no whole register, no search across it, no
-   other companies, no register-wide counts. WBRERA lists projects by the PROMOTER - the legal
-   company - and prints that name only on each project's own page, so which companies are a
-   competitor's is set by hand in camp.pi_targets (source 'rera', kind 'promoter', watchlist_id of
-   the competitor), from names the user has confirmed - never guessed from project names. The
-   collector still reads every project page in the background, because that is how a competitor's
-   projects are found; until a competitor's companies are confirmed the tab only says so. Our Brand
-   follows our own promoter the same way. */
+/* COMPETITORS' PROJECTS ONLY, SHOWN AT ONCE (16 Oct 2026, as asked). WBRERA lists projects by the
+   PROMOTER - the legal company - and prints that name only on each project's own page, which the
+   collector reads one by one in the background. Competitor Data never shows the whole register or
+   any company that matches no competitor. A competitor's projects are those whose promoter name
+   contains the competitor's name as a whole word (CI_RERA_STEMS); each row shows the exact company
+   name RERA prints, so it is plain which company it is.
+     confirmed            - the name is in camp.pi_targets (source 'rera', kind 'promoter', active)
+                            for that competitor
+     to confirm           - matched by name only; "Confirm" / "Not theirs" decide it
+                            (camp.pi_rera_decide: a Not theirs row is kept with active = false and
+                            hides that company for that competitor)
+   Our Brand shows only our own followed promoter's projects, as before. */
+// [watchlist id, whole-word pattern for the company name]. One row per competitor - the watchlist
+// also holds per-project Meta pages (DTC Skyler, Projects By Merlin, ...), which are not companies.
+const CI_RERA_STEMS=[
+  [2,/\bDTC\b/i],            // DTC Group
+  [17,/\bGodrej\b/i],        // Godrej Properties Limited
+  [10,/\bSrijan\b/i],        // Srijan Realty Private Limited
+  [20,/\bMerlin\b/i],        // Merlin Group
+  [12,/\bSiddha\b/i],        // Siddha Group
+  [18,/\bEden\b/i],          // Eden Realty Group
+  [14,/\bOrbit\b/i],         // Orbit Group Kolkata
+  [21,/\bP\.?\s?S\.?\s+Group\b/i], // PS Group / P.S. Group
+  [16,/\bAlcove\b/i],        // Alcove Realty
+  [15,/\bMani\b/i]           // Mani Group
+];
 async function ciRera(){
-  const tg=await sb.schema('camp').from('pi_targets').select('*').eq('source','rera');
+  const tg=await sb.schema('camp').from('pi_targets').select('*').eq('source','rera').eq('kind','promoter');
   const brand=CI_SCOPE==='brand';
-  const targets=(tg.data||[]).filter(function(t){ return t.active!==false&&ciTargetScope(t)===(brand?'brand':'competitor'); });
-  const names=targets.map(function(t){ return String(t.value); });
+  const mine=(tg.data||[]).filter(function(t){ return ciTargetScope(t)===(brand?'brand':'competitor'); });
   const cols='procode,project_id,name,reg_no,reg_date,completion_date,district,block,project_status,extension_date,apartments,promoter_name,source_url';
-  const [projects,ch]=await Promise.all([
-    names.length?ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).in('promoter_name',names).order('reg_date',{ascending:false}); }):Promise.resolve([]),
-    names.length?sb.schema('camp').from('pi_rera_changes').select('*').order('changed_at',{ascending:false}).limit(300):Promise.resolve({data:[]})
-  ]);
-  window._ciRera=projects; window._ciRTargets=targets;
+  let projects, read=0, total=0;
+  if(brand){
+    const names=mine.filter(function(t){ return t.active!==false; }).map(function(t){ return String(t.value); });
+    projects=names.length?await ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).in('promoter_name',names).order('reg_date',{ascending:false}); }):[];
+  }else{
+    // Every project whose page is read, then kept only if it belongs to a competitor (ciReraOwner).
+    const [all,c1,c2]=await Promise.all([
+      ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).not('promoter_name','is',null).order('reg_date',{ascending:false}); }),
+      sb.schema('camp').from('pi_rera_projects').select('procode',{count:'exact',head:true}).not('detail_fetched_at','is',null),
+      sb.schema('camp').from('pi_rera_projects').select('procode',{count:'exact',head:true})
+    ]);
+    read=c1.count||0; total=c2.count||0;
+    window._ciRDec=mine;
+    projects=all.filter(function(p){ return ciReraOwner(p.promoter_name); });
+  }
+  window._ciRera=projects; window._ciRTargets=mine;
+  const ch=projects.length?await sb.schema('camp').from('pi_rera_changes').select('*').order('changed_at',{ascending:false}).limit(300):{data:[]};
   // Changes only for the projects shown; the change log itself does not carry a promoter.
   const on={}; projects.forEach(function(p){ on[p.procode]=1; });
   window._ciRChanges=(ch.data||[]).filter(function(c){ return on[c.procode]; }).slice(0,30);
-  await ciStatus(['rera_list','rera_detail'],(brand?'Our':'Our competitors\'')+' projects on the public <a href="https://rera.wb.gov.in/district_project.php?dcode=0" target="_blank" rel="noopener">West Bengal RERA register</a>: area, status, number of flats, registration, promised completion and any extension. Each project\'s page is re-read regularly and changes are listed.');
+  await ciStatus(['rera_list','rera_detail'],(brand?'Our':'Our competitors\'')+' projects on the public <a href="https://rera.wb.gov.in/district_project.php?dcode=0" target="_blank" rel="noopener">West Bengal RERA register</a>: area, status, number of flats, registration, promised completion and any extension. Each project\'s page is re-read regularly and changes are listed.',
+    brand?'':'RERA pages read: <b>'+ciN(read)+' of '+ciN(total)+'</b> - competitor projects keep appearing as pages are read');
   ciReraPaint();
+}
+/* Which competitor a RERA company belongs to, and how sure: {wl, confirmed} or null.
+   A confirmed decision wins; a "Not theirs" decision removes the name match for that competitor. */
+function ciReraOwner(name){
+  if(!name) return null;
+  const dec=window._ciRDec||[], low=String(name).toLowerCase();
+  const said=dec.filter(function(t){ return String(t.value).toLowerCase()===low; });
+  const yes=said.filter(function(t){ return t.active!==false; })[0];
+  if(yes) return {wl:yes.watchlist_id,confirmed:true};
+  const no={}; said.forEach(function(t){ if(t.active===false) no[t.watchlist_id]=1; });
+  const hit=CI_RERA_STEMS.filter(function(s){ return !no[s[0]]&&s[1].test(name); })[0];
+  return hit?{wl:hit[0],confirmed:false}:null;
 }
 function ciReraTable(list,withCompany){
   const tr=function(p){
@@ -33285,33 +33326,70 @@ function ciReraTable(list,withCompany){
     +'<thead><tr><th>Project</th>'+(withCompany?'<th>Company on RERA</th>':'')+'<th>Area</th><th>Status</th><th class="ci-num">Flats</th><th>Registered</th><th>Completion</th><th>Extended to</th></tr></thead>'
     +'<tbody>'+list.map(tr).join('')+'</tbody></table></div>';
 }
-function ciReraPaint(){
-  const all=window._ciRera||[], targets=window._ciRTargets||[], brand=CI_SCOPE==='brand', W=window._ciWl||{};
-  if(!targets.length){
-    $('ciBody').innerHTML='<div class="ci-explain">'+(brand?'No promoter of ours is followed yet.'
-      :'<b>Competitor projects will appear here</b> once the RERA project pages have been read and the companies that belong to each competitor are confirmed. RERA lists every project under the legal company that registered it, so those names are checked with you rather than guessed.')+'</div>';
-    return;
-  }
-  // Projects of each followed company, grouped under the brand / competitor it belongs to.
-  const byWl={}; targets.forEach(function(t){ const k=t.watchlist_id||0; (byWl[k]=byWl[k]||{})[String(t.value).toLowerCase()]=1; });
-  const sections=Object.keys(byWl).map(function(id){
-    const names=byWl[id];
-    const ps=all.filter(function(p){ return names[String(p.promoter_name||'').toLowerCase()]; });
-    const flats=ps.reduce(function(s,p){ return s+(p.apartments||0); },0);
-    return '<div class="card" style="margin-bottom:14px"><div style="padding:12px 15px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)">'
-        +'<b style="font-size:14px">'+esc((W[id]||{}).name||'Followed company')+'</b>'
-        +'<span class="tag t-gray">'+ps.length+' project'+(ps.length===1?'':'s')+'</span><span class="tag t-gray">'+ciN(flats)+' flats</span>'
-        +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate)">on RERA as '+esc(targets.filter(function(t){ return String(t.watchlist_id||0)===id; }).map(function(t){ return t.value; }).join(', '))+'</span></div>'
-      +(ps.length?ciReraTable(ps,Object.keys(names).length>1):'<div class="card-pad" style="color:var(--slate);font-size:12.5px">No projects found yet - they appear as the RERA project pages are read.</div>')
-    +'</div>';
-  }).join('');
+function ciReraChanges(all){
   const chg=(window._ciRChanges||[]).map(function(c){
     const p=all.filter(function(x){ return x.procode===c.procode; })[0]||{};
     return '<tr><td>'+ciDateTime(c.changed_at)+'</td><td>'+esc(p.name||c.procode)+'</td><td>'+esc(c.field)+'</td><td>'+esc(c.old_value||'—')+'</td><td>'+esc(c.new_value||'—')+'</td></tr>';
   }).join('');
-  const changes=chg?'<div class="card" style="overflow-x:auto;margin-bottom:14px"><div style="padding:10px 14px;font-weight:700;font-size:13px">Recent changes</div><table class="tbl" style="width:100%;font-size:12.5px"><thead><tr><th>Seen</th><th>Project</th><th>What</th><th>Was</th><th>Now</th></tr></thead><tbody>'+chg+'</tbody></table></div>':'';
-  $('ciBody').innerHTML=sections+changes;
+  return chg?'<div class="card" style="overflow-x:auto;margin-bottom:14px"><div style="padding:10px 14px;font-weight:700;font-size:13px">Recent changes</div><table class="tbl" style="width:100%;font-size:12.5px"><thead><tr><th>Seen</th><th>Project</th><th>What</th><th>Was</th><th>Now</th></tr></thead><tbody>'+chg+'</tbody></table></div>':'';
 }
+function ciReraPaint(){
+  const all=window._ciRera||[], W=window._ciWl||{};
+  const head=function(name,ps){
+    const flats=ps.reduce(function(s,p){ return s+(p.apartments||0); },0);
+    return '<div style="padding:12px 15px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)">'
+      +'<b style="font-size:14px">'+esc(name)+'</b>'
+      +'<span class="tag t-gray">'+ps.length+' project'+(ps.length===1?'':'s')+'</span><span class="tag t-gray">'+ciN(flats)+' flats</span></div>';
+  };
+  if(CI_SCOPE==='brand'){
+    const t=(window._ciRTargets||[]).filter(function(x){ return x.active!==false; });
+    $('ciBody').innerHTML=(t.length?'<div class="card" style="margin-bottom:14px">'+head((W[t[0].watchlist_id]||{}).name||'Our projects',all)
+        +'<div style="padding:8px 15px;font-size:12px;color:var(--slate)">On RERA as '+esc(t.map(function(x){ return x.value; }).join(', '))+'</div>'
+        +(all.length?ciReraTable(all,t.length>1):'<div class="card-pad" style="color:var(--slate);font-size:12.5px">No projects found yet.</div>')+'</div>'
+      :'<div class="card card-pad" style="color:var(--slate)">No promoter of ours is followed yet.</div>')+ciReraChanges(all);
+    return;
+  }
+  // Competitor -> company name -> projects, in the stem order above.
+  const by={}; all.forEach(function(p){
+    const o=ciReraOwner(p.promoter_name); if(!o) return;
+    const c=(by[o.wl]=by[o.wl]||{}); (c[p.promoter_name]=c[p.promoter_name]||{confirmed:o.confirmed,ps:[]}).ps.push(p);
+  });
+  const order=CI_RERA_STEMS.map(function(s){ return String(s[0]); });
+  Object.keys(by).forEach(function(k){ if(order.indexOf(k)<0) order.push(k); });
+  const shown=order.filter(function(k){ return by[k]; });
+  const none=CI_RERA_STEMS.filter(function(s){ return !by[s[0]]; }).map(function(s){ return (W[s[0]]||{}).name||('#'+s[0]); });
+  const sections=shown.map(function(id){
+    const comps=by[id], names=Object.keys(comps).sort();
+    const ps=[]; names.forEach(function(n){ ps.push.apply(ps,comps[n].ps); });
+    return '<div class="card" style="margin-bottom:14px">'+head((W[id]||{}).name||('#'+id),ps)
+      +names.map(function(n){
+        const c=comps[n], arg=esc(JSON.stringify(n));
+        return '<div style="padding:9px 15px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--bg-soft,#f8fafc);border-bottom:1px solid var(--line);font-size:12.5px">'
+            +'<span style="color:var(--slate)">Company on RERA:</span> <b>'+esc(n)+'</b>'
+            +(c.confirmed?'<span class="tag t-green"><i class="fa-solid fa-check"></i> confirmed</span>'
+              :'<span class="tag t-amber">matched by company name - to confirm</span>'
+                +'<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm btn-primary" onclick="ciReraDecide('+arg+','+id+',true)"><i class="fa-solid fa-check"></i> Confirm</button>'
+                +'<button class="btn btn-sm" onclick="ciReraDecide('+arg+','+id+',false)">Not theirs</button></span>')
+          +'</div>'
+          +ciReraTable(c.ps,false);
+      }).join('')
+    +'</div>';
+  }).join('');
+  $('ciBody').innerHTML=(sections||'<div class="ci-explain">No competitor projects found yet - they appear here as the RERA project pages are read.</div>')
+    +(sections&&none.length?'<div style="font-size:12px;color:var(--slate);margin:-4px 0 14px">No projects found yet for: '+esc(none.join(', '))+' - more appear as pages are read.</div>':'')
+    +ciReraChanges(all);
+}
+window.ciReraDecide=async function(name,wl,theirs){
+  const W=window._ciWl||{}, who=(W[wl]||{}).name||'this competitor';
+  if(!theirs){
+    const ok=await confirmDialog('Hide "'+name+'" from '+who+'? Its projects will no longer show under '+who+'.',{okLabel:'Not theirs'});
+    if(!ok) return;
+  }
+  const {error}=await sb.schema('camp').rpc('pi_rera_decide',{p_promoter:name,p_watchlist_id:wl,p_theirs:!!theirs});
+  if(error){ toast(error.message,'err'); return; }
+  toast(theirs?'Confirmed: '+name+' is '+who:'Hidden from '+who,'ok');
+  await ciRera();
+};
 
 // ---------------------------------------------------------------- Search Trends
 /* Google Trends gives an index, not search counts, so each group is explained in plain words and
