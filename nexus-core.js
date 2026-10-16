@@ -252,9 +252,10 @@ function bgWarmScripts(){
     const entry=PAGE_EXTRA_SCRIPT[t.split('#')[0]]; if(!entry) return;
     [].concat(entry).forEach(function(src){
       if(_loadedPageScripts.has(src)) return;
-      const already=[].slice.call(document.scripts).some(function(s){ return (s.getAttribute('src')||'').split('?')[0]===src; });
+      const already=[].slice.call(document.scripts).some(function(s){
+        const u=(s.getAttribute('src')||'').split('?')[0]; return u===src||u.endsWith('/'+src); });
       if(already) return;
-      const href=src+'?v='+(PAGE_SCRIPT_VERSION[src]||'20261003a');
+      const href=PAGE_SCRIPT_DIR+src+'?v='+(PAGE_SCRIPT_VERSION[src]||'20261003a');
       if(document.querySelector('link[rel="prefetch"][href="'+href+'"]')) return;
       const l=document.createElement('link'); l.rel='prefetch'; l.as='script'; l.href=href;
       document.head.appendChild(l);
@@ -410,6 +411,10 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
 const PAGE_SCRIPT_VERSION={'accountability.js':'98a78704c7','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
+/* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
+   in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
+   files beside it. See tools/build.mjs. */
+const PAGE_SCRIPT_DIR='';
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const entry=PAGE_EXTRA_SCRIPT[id];
@@ -434,7 +439,7 @@ function loadPageScript(src){
     /* Bump this whenever accountability.js or insp-items.js changes, the same way the pages bump
        nexus-core.js. It had sat at 20260913c while thirty-five commits landed in
        accountability.js — every one of them invisible to a browser holding that URL. */
-    s.src=src+'?v='+(PAGE_SCRIPT_VERSION[src]||'20261003a');
+    s.src=PAGE_SCRIPT_DIR+src+'?v='+(PAGE_SCRIPT_VERSION[src]||'20261003a');
     s.onload=()=>{_loadedPageScripts.add(src);resolve();};
     // A failed load shouldn't hang navigation forever — render with whatever's already there
     // (the legacy VIEWS.tasks placeholder already has its own "could not finish loading" message
@@ -1096,9 +1101,13 @@ const NAV=[
     {id:'compliance',label:'Renewals & Compliance',icon:'fa-calendar-check'},
   ]},
   {group:'Growth & Strategy',items:[
-    {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},
-    {id:'competitors',label:'Competitor Ads',icon:'fa-magnifying-glass-chart'},
-    {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},
+    /* Grouped by WHOSE data it is (16 Oct 2026) - see src/core/40-marketing-modules.js. 'campaigns'
+       and 'competitors' keep their ids (were Campaign Analytics and Competitor Ads) so the access
+       people already hold in adm.users.modules carries over; only the labels changed. Digital
+       Metrics no longer has a page: its tabs live in Our Brand and Competitor Data. */
+    {id:'campaigns',label:'Our Brand',icon:'fa-bullhorn'},
+    {id:'competitors',label:'Competitor Data',icon:'fa-magnifying-glass-chart'},
+    {id:'channel_partners',label:'Channel Partners',icon:'fa-people-arrows'},
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
     {id:'scaling',label:'Scaling Up',icon:'fa-arrow-trend-up'},
     {id:'playbook',label:'Playbook',icon:'fa-book-open'},
@@ -16603,8 +16612,18 @@ window.cmpShowProjectAds=function(accId){
     'lg'
   );
 };
+/* The numbered analytics tabs of the Our Brand page (formerly Campaign Analytics), one list per
+   Meta / Google / Both source. Kept in one place because the Our Brand page's own extra tabs
+   (Meta Ad Library, YouTube, Maps... - src/core/40-marketing-modules.js) redraw this same bar
+   when one of them is open, and must show exactly the tabs the source would have shown, at the
+   same numeric routes (campaigns/0, campaigns/1, ...) that USAGE_VIEWS and bookmarks already use. */
+function cmpBaseTabs(){
+  if(CMP_SOURCE==='google') return ['Overview','Accounts','Campaigns','Ads','Trend','Ad Fatigue'];
+  if(CMP_SOURCE==='both') return ['Overview','Sources','Trend','Ad Fatigue'];
+  return ['Overview','Campaigns','By Project','Ads','Trend','Ad Fatigue','AI Insights'];
+}
 async function cmpBothView(v,seg){
-  const tabs=['Overview','Sources','Trend','Ad Fatigue'];const ti=mTab(seg,tabs.length);
+  const tabs=cmpBaseTabs();const ti=mTab(seg,tabs.length);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
@@ -16771,7 +16790,7 @@ async function cmpBothView(v,seg){
     body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Meta + Google · campaign level');
   }
   const showKpis=(ti!==2&&ti!==3);
-  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+legend+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Our Brand')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const opt={responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}}}};
@@ -16780,7 +16799,7 @@ async function cmpBothView(v,seg){
   },60);}
 }
 async function cmpGoogleView(v,seg){
-  const tabs=['Overview','Accounts','Campaigns','Ads','Trend','Ad Fatigue'];const ti=mTab(seg,tabs.length);
+  const tabs=cmpBaseTabs();const ti=mTab(seg,tabs.length);
   const needGAds=(ti===3||ti===5);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
@@ -16973,7 +16992,7 @@ async function cmpGoogleView(v,seg){
     body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Google · CTR trend (Google publishes no per-person frequency)',true);
   }
   const showKpis=(ti!==4&&ti!==5);
-  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+cap+legend+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Our Brand')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+cap+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=rows.map(function(r){return r.a.name;});
@@ -18959,10 +18978,10 @@ window.tpMuUncompleteRow=async function(id){
 };
 
 VIEWS.campaigns=async function(v,seg){
-  setCrumb(['Growth & Strategy','Campaign Analytics']);
+  setCrumb(['Growth & Strategy','Our Brand']);
   if(CMP_SOURCE==='google'){ return cmpGoogleView(v,seg); }
   if(CMP_SOURCE==='both'){ return cmpBothView(v,seg); }
-  const tabs=['Overview','Campaigns','By Project','Ads','Trend','Ad Fatigue','AI Insights'];const ti=mTab(seg,tabs.length);
+  const tabs=cmpBaseTabs();const ti=mTab(seg,tabs.length);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const needAd=(ti===3||ti===5);
   // AI Insights: Opportunity Score, anomalies and performance trend from the Meta Ads MCP tool -
@@ -19293,7 +19312,7 @@ VIEWS.campaigns=async function(v,seg){
     +(CMP_PERIOD==='custom'?'<div class="cmp-cap" style="color:#c2410c"><i class="fa-solid fa-triangle-exclamation"></i> Custom ranges aren\'t fetched by the MCP refresh task — pick one of the preset periods above, or ask for this range to be pulled directly.</div>':'');
   const legend='<div class="cmp-legend"><span>Trend compares with '+esc(cmpPrevLabel())+'</span><span>Fatigue = times each person saw the ad + whether CTR is falling</span></div>';
   const showKpis=(ti!==4&&ti!==5&&ti!==6);
-  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+syncCap+legend+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Our Brand')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+syncCap+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=projRows.map(r=>r.acc.name);
@@ -19360,10 +19379,14 @@ const COMP_RANGES=[
 const COMP_MEDIA=[['all','All media','fa-shapes'],['image','Images','fa-image'],['video','Videos','fa-video'],['carousel','Carousels','fa-images']];
 const COMP_STATUS=[['all','Active & inactive','fa-layer-group'],['active','Active only','fa-circle-play'],['inactive','Inactive only','fa-circle-stop']];
 let COMP_F={wl:'all',range:'last_30',from:'',to:'',status:'all',media:'all',q:''};
-/* Three tabs over the one watchlist, by its category: other developers, our own pages, and our
+/* Three views over the one watchlist, by its category: other developers, our own pages, and our
    channel partners. Everything below - the picker, the table, the grid - only ever sees the rows
-   of the open tab, so our ads never sit among a competitor's or a partner's.
-   Each entry: [route segment, tab title, icon, category, [singular, plural], noun for buttons]. */
+   of the open view, so our ads never sit among a competitor's or a partner's.
+   They used to be three tabs of one Competitor Ads page. Since 16 Oct 2026 each lives in its own
+   module (src/core/40-marketing-modules.js): competitors on Competitor Data (competitors), our
+   own pages as the Meta Ad Library tab of Our Brand (campaigns/meta-ads), and partners on Channel
+   Partners (channel_partners). compMetaView() draws whichever one into the host it is given.
+   Each entry: [key, title, icon, category, [singular, plural], noun for buttons]. */
 let COMP_TAB='competitors';
 const COMP_TABS=[
   ['competitors','Competitors','fa-chess-knight','competitor',['competitor','competitors'],'Competitor'],
@@ -19456,20 +19479,19 @@ window.compSetDate=function(which,val){
 };
 window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) compPaintGrid(); usageQueueDebounced('competitors.overview.search_ad_text_headline_or_page', val); };
 
-VIEWS.competitors=async function(v,seg){
-  const want=seg&&seg[0];
-  const tab=COMP_TABS.some(function(t){ return t[0]===want; })?want:'competitors';
+/* Draws one watchlist view - key 'competitors', 'brands' or 'partners' (COMP_TABS) - into host,
+   below whatever page header and tab bar the calling module has already drawn. The page shells
+   live in src/core/40-marketing-modules.js; this only owns the Meta Ad Library part. Switching
+   view clears the "one page only" pick, because a competitor's id means nothing on Our Brand. */
+async function compMetaView(host,key){
+  const tab=COMP_TABS.some(function(t){ return t[0]===key; })?key:'competitors';
   if(tab!==COMP_TAB){ COMP_TAB=tab; COMP_F.wl='all'; }
-  setCrumb(['Growth & Strategy','Competitor Ads',compTabDef()[1]]);
   const blurb={
     competitors:'Public ad creative from Meta\'s Ad Library — the creative itself, when it started and where it ran.',
     brands:'Our own pages as Meta\'s Ad Library shows them to the public — what is running, since when, and where.',
     partners:'What our channel partners are advertising on Meta — which projects they push, since when, and where.'
   }[COMP_TAB];
-  v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Ads')
-    +'<div class="tabs" style="margin-top:-6px">'+COMP_TABS.map(function(t){
-        return '<div class="tab '+(COMP_TAB===t[0]?'active':'')+'" onclick="navTo(\'competitors'+(t[0]==='competitors'?'':'/'+t[0])+'\')"><i class="fa-solid '+t[2]+'"></i> '+t[1]+'</div>';
-      }).join('')+'</div>'
+  host.innerHTML=''
     +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 12px">'
       +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">'+blurb
         +' Meta never publishes spend or reach for ordinary commercial ads.</p>'
@@ -19482,7 +19504,7 @@ VIEWS.competitors=async function(v,seg){
     +'<div id="compToolbar"></div>'
     +'<div id="compBody"><div class="loader"><div class="spin"></div></div></div>';
   await Promise.all([compRender(), compLoadStatus()]);
-};
+}
 function compSelHtml(id,list,cur,onchange){
   return '<select class="comp-sel" id="'+id+'" onchange="'+onchange+'">'
     +list.map(function(o){ return '<option value="'+o[0]+'"'+(String(cur)===String(o[0])?' selected':'')+'>'+esc(o[1])+'</option>'; }).join('')
@@ -19897,7 +19919,7 @@ window.compRemove=async function(id){
 // than through USAGE_MAP - a click here can genuinely fail (network error, Meta error, wrong-page
 // rows skipped), so the generic wrapper would have counted a failed sync as a real one.
 /* PULLS RUN ON PROXY'S FREE ALLOWANCE (20 credits a day, no carry-over), THROUGH A QUEUE.
-   Every page on all three tabs is pulled once a week, each on its own weekday, by the
+   Every watched page (competitors, our own, channel partners) is pulled once a week, each on its own weekday, by the
    competitor-ads-weekly-enqueue / competitor-ads-queue-worker cron jobs. On top of that the whole
    watchlist can be pulled by hand twice a calendar month; a third request is refused by the
    database, not just hidden here. A manual pull takes whatever today's leftover credits allow at
@@ -19926,7 +19948,7 @@ function compPaintStatus(){
     // A pull still working through the queue blocks another (the database refuses it, uncounted).
     btn.disabled=!left||pendingManual>0;
     btn.title=pendingManual>0?('A manual pull is still running ('+pendingManual+' pages to go). You can start another once it finishes.')
-      :left?('Pull every page on all tabs. Uses 1 of '+limit+' manual pulls this month.')
+      :left?('Pull every watched page - competitors, our own and channel partners. Uses 1 of '+limit+' manual pulls this month.')
       :('Both manual pulls for this month are used. They reset on the 1st; the weekly pull carries on.');
     btn.innerHTML='<i class="fa-solid fa-rotate"></i> Pull all now <span style="opacity:.8;font-weight:500">('+left+' of '+limit+' left)</span>';
   }
@@ -19943,7 +19965,7 @@ function compPaintStatus(){
       +Number(run.pages)+' pages'+(Number(run.failed)?' · '+Number(run.failed)+' could not be pulled':'')+'</div>';
   }
   host.innerHTML='<div class="comp-note" style="flex-direction:column;align-items:flex-start;gap:4px;margin:0 0 14px">'
-    +'<div><i class="fa-solid fa-calendar-week" style="color:#0369a1"></i> Every page on all tabs is pulled once a week ('
+    +'<div><i class="fa-solid fa-calendar-week" style="color:#0369a1"></i> Every watched page - competitors, our own and channel partners - is pulled once a week ('
       +tracked+' pages, about '+weeklyPerDay+' a day) on Proxy\'s free allowance · today <b>'+Number(s.used_today)+' of '+budget+'</b> credits used'
       +(s.exhausted_today?' — Proxy has no credits left today, pulls resume tomorrow':'')+'</div>'
     +runLine
@@ -19972,7 +19994,7 @@ window.compManualPull=async function(){
     return;
   }
   const left=s?Math.max(0,Number(s.manual_limit)-Number(s.manual_used)):null;
-  const ok=await confirmDialog('Pull every page on all three tabs now?'
+  const ok=await confirmDialog('Pull every page now - competitors, our own pages and channel partners?'
     +(left!=null?' This uses 1 of the '+left+' manual pull'+(left===1?'':'s')+' left this month.':'')
     +' What fits in today\'s free credits is pulled straight away; the rest finishes over the next few days.',{okLabel:'Pull all'});
   if(!ok) return;
@@ -26719,461 +26741,6 @@ window.trClearDateRange=function(){
   const dd=$('trDateDd');if(dd)dd.classList.remove('show');
   trRenderDateBtn();trRenderList();trRenderFolderRows();
 };
-
-/* ==========================================================================================
-   ORGANIC — Posts & Reels  (mirrors Business Suite > Content, for our own Pages + Instagram)
-   ========================================================================================== */
-let ORG_PERIOD='last_28d', ORG_SINCE='', ORG_UNTIL='', ORG_NET='all', ORG_KIND='all',
-    ORG_PAGE='all', ORG_SORT='date', ORG_Q='', ORG_PG=0, ORG_ROWS=null, ORG_PAGES=null, ORG_OPEN=false;
-const ORG_PER=25;
-const ORG_PRESETS=[
-  ['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_28d','Last 28 days'],['last_90d','Last 90 days'],
-  ['this_week','This week'],['this_month','This month'],['this_year','This year'],
-  ['last_week','Last week'],['last_month','Last month'],['lifetime','Lifetime'],['custom','Custom']
-];
-function orgDay(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
-function orgAdd(d,n){const x=new Date(d.getTime());x.setDate(x.getDate()+n);return x;}
-// Monday-start weeks, to match how Business Suite reports.
-function orgMonday(d){const x=new Date(d.getTime());const off=(x.getDay()+6)%7;x.setDate(x.getDate()-off);return x;}
-function orgRange(){
-  const today=new Date(); today.setHours(12,0,0,0);
-  const P=ORG_PERIOD;
-  if(P==='lifetime')   return {since:'',until:''};
-  if(P==='custom')     return {since:ORG_SINCE,until:ORG_UNTIL};
-  if(P==='yesterday'){ const d=orgAdd(today,-1); return {since:orgDay(d),until:orgDay(d)}; }
-  if(P==='last_7d')    return {since:orgDay(orgAdd(today,-7)),  until:orgDay(orgAdd(today,-1))};
-  if(P==='last_28d')   return {since:orgDay(orgAdd(today,-28)), until:orgDay(orgAdd(today,-1))};
-  if(P==='last_90d')   return {since:orgDay(orgAdd(today,-90)), until:orgDay(orgAdd(today,-1))};
-  if(P==='this_week')  return {since:orgDay(orgMonday(today)), until:orgDay(today)};
-  if(P==='this_month') return {since:orgDay(new Date(today.getFullYear(),today.getMonth(),1)), until:orgDay(today)};
-  if(P==='this_year')  return {since:orgDay(new Date(today.getFullYear(),0,1)), until:orgDay(today)};
-  if(P==='last_week'){ const m=orgMonday(today); return {since:orgDay(orgAdd(m,-7)), until:orgDay(orgAdd(m,-1))}; }
-  if(P==='last_month'){ const f=new Date(today.getFullYear(),today.getMonth()-1,1), l=new Date(today.getFullYear(),today.getMonth(),0);
-                        return {since:orgDay(f),until:orgDay(l)}; }
-  return {since:'',until:''};
-}
-function orgRangeLabel(){
-  if(ORG_PERIOD==='lifetime') return 'All time';
-  const r=orgRange(); if(!r.since||!r.until) return 'Pick two dates';
-  const f=function(s){const d=new Date(s+'T00:00:00');return d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});};
-  return r.since===r.until ? f(r.since) : (f(r.since)+' – '+f(r.until));
-}
-function orgPresetLabel(){ return ((ORG_PRESETS.find(function(p){return p[0]===ORG_PERIOD;})||[])[1])||'Custom'; }
-
-const ORG_CSS='<style id="orgCss">'
-+'.org-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}'
-+'.org-dp{position:relative}'
-+'.org-dp-btn{display:flex;align-items:center;gap:10px;height:42px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg-card);cursor:pointer;transition:.15s;min-width:0}'
-+'.org-dp-btn:hover{border-color:var(--brand)}'
-+'.org-dp.open .org-dp-btn{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10,#eef2ff)}'
-+'.org-dp-btn i.cal{color:var(--brand);font-size:14px}'
-+'.org-dp-lab{display:flex;flex-direction:column;align-items:flex-start;line-height:1.25;min-width:0}'
-+'.org-dp-lab b{font-size:13px;font-weight:700;color:var(--ink);white-space:nowrap}'
-+'.org-dp-lab span{font-size:11px;color:var(--slate);white-space:nowrap}'
-+'.org-dp-btn i.cv{margin-left:6px;color:var(--slate);font-size:11px;transition:transform .15s}'
-+'.org-dp.open .org-dp-btn i.cv{transform:rotate(180deg)}'
-+'.org-dp-pan{position:absolute;top:calc(100% + 6px);left:0;z-index:80;background:var(--bg-card);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 38px rgba(15,23,42,.18);padding:9px;display:none;width:352px;max-width:92vw;box-sizing:border-box}'
-+'.org-dp.open .org-dp-pan{display:block}'
-+'.org-dp-list{display:grid;grid-template-columns:1fr 1fr;gap:3px}'
-+'.org-dp-opt{padding:8px 11px;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer;white-space:nowrap;border:1px solid transparent}'
-+'.org-dp-opt:hover{background:var(--bg,#f8fafc)}'
-+'.org-dp-opt.on{background:var(--brand-a10,#eef2ff);color:var(--brand);border-color:var(--brand)}'
-+'.org-dp-cus{border-top:1px solid var(--line);margin-top:8px;padding-top:10px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}'
-+'.org-dp-cus label{display:flex;flex-direction:column;gap:4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);flex:1 1 130px;min-width:0}'
-+'.org-dp-cus input{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font-size:13px;font-family:inherit;color:var(--ink);background:var(--bg-card);width:100%;box-sizing:border-box}'
-+'.org-dp-cus button{height:36px;padding:0 16px;border-radius:8px;border:0;background:var(--brand);color:#fff;font-size:13px;font-weight:700;cursor:pointer}'
-+'.org-fbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center}'
-+'.org-fbtn{height:34px;padding:0 13px;border:1px solid var(--line);border-radius:20px;background:var(--bg-card);font-size:12.5px;font-weight:600;color:var(--slate);cursor:pointer;transition:.14s;display:inline-flex;align-items:center;gap:6px}'
-+'.org-fbtn:hover{border-color:var(--brand);color:var(--brand)}'
-+'.org-fbtn.on{background:var(--brand);border-color:var(--brand);color:#fff}'
-+'.org-fbtn .n{font-size:11px;opacity:.75;font-weight:700}'
-+'.org-search{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 12px;font-size:13px;font-family:inherit;min-width:190px;flex:1 1 190px;max-width:300px;background:var(--bg-card);color:var(--ink);box-sizing:border-box}'
-+'.org-sel{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 30px 0 11px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 12 8\'%3E%3Cpath d=\'M1 1l5 5 5-5\' stroke=\'%2364748b\' stroke-width=\'1.8\' fill=\'none\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:11px 8px}'
-+'.org-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}'
-+'.org-kpi{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:13px 15px}'
-+'.org-kpi .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);display:flex;align-items:center;gap:6px}'
-+'.org-kpi .v{font-size:22px;font-weight:800;color:var(--ink);margin-top:5px;letter-spacing:-.02em}'
-+'.org-kpi .s{font-size:11.5px;color:var(--slate);margin-top:2px}'
-+'.org-tblwrap{border:1px solid var(--line);border-radius:12px;overflow-x:auto;background:var(--bg-card)}'
-+'.org-tbl{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}'
-+'.org-tbl th{text-align:left;padding:11px 13px;background:var(--bg,#f8fafc);color:var(--slate);font-weight:700;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--line);position:sticky;top:0}'
-+'.org-tbl th.n,.org-tbl td.n{text-align:right}'
-+'.org-tbl td{padding:11px 13px;border-bottom:1px solid var(--line);color:var(--ink);vertical-align:middle}'
-+'.org-tbl tbody tr{cursor:pointer;transition:background .12s}'
-+'.org-tbl tbody tr:hover{background:var(--bg,#f8fafc)}'
-+'.org-tbl tbody tr:last-child td{border-bottom:0}'
-+'.org-post{display:flex;align-items:center;gap:11px;min-width:0;max-width:390px}'
-+'.org-thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none;background:var(--bg,#f1f5f9);border:1px solid var(--line)}'
-+'.org-thumb-ph{width:44px;height:44px;border-radius:8px;flex:none;background:var(--bg,#f1f5f9);border:1px solid var(--line);display:grid;place-items:center;color:#cbd5e1;font-size:15px}'
-+'.org-ptxt{min-width:0}'
-+'.org-ptxt b{display:block;font-size:13px;font-weight:600;color:var(--ink);line-height:1.35;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}'
-+'.org-ptxt span{font-size:11.5px;color:var(--slate)}'
-+'.org-tag{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:capitalize;white-space:nowrap}'
-+'.org-tag.reel{background:#fae8ff;color:#a21caf}.org-tag.video{background:#e0e7ff;color:#3730a3}.org-tag.photo{background:#dcfce7;color:#166534}'
-+'.org-tag.carousel{background:#fef3c7;color:#92400e}.org-tag.link{background:#e0f2fe;color:#075985}.org-tag.post,.org-tag.status{background:#f1f5f9;color:#475569}'
-+'.org-net{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--slate);white-space:nowrap}'
-+'.org-net i.fa-facebook{color:#1877f2}.org-net i.fa-instagram{color:#e1306c}'
-+'.org-er{font-weight:700}'
-+'.org-na{color:#cbd5e1;cursor:help}'
-+'.org-zero{color:#94a3b8}'
-+'.org-date{white-space:nowrap;font-size:12.5px;color:var(--slate)}'
-+'.org-netic{margin-left:auto;flex:none;font-size:13px;opacity:.55}'
-+'.org-netic.fa-facebook{color:#1877f2}.org-netic.fa-instagram{color:#e1306c}'
-+'.org-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap}'
-+'.org-pager .info{font-size:12.5px;color:var(--slate)}'
-+'.org-pager button{height:34px;padding:0 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg-card);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}'
-+'.org-pager button:disabled{opacity:.45;cursor:not-allowed}'
-+'.org-note{display:flex;align-items:flex-start;gap:9px;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:10px 13px;font-size:12px;color:var(--slate);line-height:1.55;margin:-6px 0 16px}'
-+'.org-note i{color:#94a3b8;margin-top:2px;flex:none}'
-+'.org-empty{border:1px dashed var(--line);border-radius:12px;padding:34px 20px;text-align:center;color:var(--slate);font-size:13.5px;line-height:1.6}'
-+'.org-empty i{font-size:26px;color:#cbd5e1;display:block;margin-bottom:10px}'
-+'.org-dtl-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;margin-top:4px}'
-+'.org-dtl-f{min-width:0}'
-+'.org-dtl-f .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)}'
-+'.org-dtl-f .v{font-size:14px;font-weight:700;color:var(--ink);margin-top:2px;overflow-wrap:anywhere}'
-/* the whole picture, letterboxed - never cropped, never wider than the dialog */
-+'.org-dtl-img{width:100%;max-width:100%;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden;display:flex;align-items:center;justify-content:center}'
-+'.org-dtl-img img{max-width:100%;max-height:340px;width:auto;height:auto;object-fit:contain;display:block}'
-+'.org-dtl-img .org-thumb-ph{width:100%;height:150px}'
-+'.org-dtl-msg{font-size:13.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;max-height:170px;overflow-y:auto;overflow-x:hidden}'
-+'.org-dtl *{max-width:100%;box-sizing:border-box}'
-+'.org-fresh{font-size:11.5px;color:var(--slate);margin-left:auto;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}'
-+'@media(max-width:1100px){.org-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}'
-+'@media(max-width:760px){.org-dp-list{grid-template-columns:1fr}.org-kpi .v{font-size:19px}.org-post{max-width:220px}.org-fresh{margin-left:0}}'
-+'@media(max-width:480px){.org-kpis{grid-template-columns:1fr}}'
-+'</style>';
-
-function orgN(v){const n=Number(v)||0; if(n>=1e7)return (n/1e7).toFixed(2).replace(/\.00$/,'')+' Cr'; if(n>=1e5)return (n/1e5).toFixed(2).replace(/\.00$/,'')+' L'; if(n>=1000)return (n/1000).toFixed(1).replace(/\.0$/,'')+'k'; return String(n);}
-function orgDT(s){ if(!s)return '—'; try{return new Date(s).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return String(s);} }
-function orgEng(r){ return (Number(r.likes)||0)+(Number(r.comments)||0)+(Number(r.shares)||0)+(Number(r.saves)||0); }
-// Meta retired per-post reach on the API, so an engagement RATE is only meaningful where a
-// reach/impression figure actually came back (reels, Instagram). Elsewhere we show '—'.
-function orgHasReach(r){ return (Number(r.reach)||0)>0; }
-function orgER(r){ const reach=Number(r.reach)||0; return reach? (orgEng(r)/reach*100) : null; }
-function orgKindLabel(k){ return k==='reel'?'Reel':(k==='carousel'?'Carousel':'Post'); }
-// Meta reports watch time in milliseconds.
-function orgSecs(ms){ const s=(Number(ms)||0)/1000; return s>=60?(Math.floor(s/60)+'m '+Math.round(s%60)+'s'):(s<10?s.toFixed(1)+'s':Math.round(s)+'s'); }
-function orgWatch(ms){ const s=(Number(ms)||0)/1000;
-  if(s>=3600){ const h=Math.floor(s/3600); return h+'h '+Math.round((s%3600)/60)+'m'; }
-  if(s>=60) return Math.floor(s/60)+'m '+Math.round(s%60)+'s';
-  return Math.round(s)+'s'; }
-// Some thumbnails 404 or are blocked; swap in a placeholder rather than a broken image.
-window.orgThumbFail=function(img){
-  const ph=document.createElement('div'); ph.className=img.className.replace('org-thumb','org-thumb-ph');
-  ph.innerHTML='<i class="fa-regular fa-image"></i>';
-  if(img.parentNode) img.parentNode.replaceChild(ph,img);
-};
-
-window.orgToggleDp=function(e){ if(e)e.stopPropagation(); ORG_OPEN=!ORG_OPEN; renderPage(); };
-window.orgSetPeriod=function(p){
-  ORG_PERIOD=p; ORG_PG=0;
-  if(p==='custom'){ if(!ORG_SINCE||!ORG_UNTIL){ const r=orgRange(); const t=new Date(); ORG_UNTIL=orgDay(t); ORG_SINCE=orgDay(orgAdd(t,-27)); } renderPage(); return; }
-  ORG_OPEN=false; renderPage();
-};
-// Logged directly rather than through USAGE_MAP - unlike orgSetPeriod's presets, this has real
-// validation (missing dates, From after To) that can silently stop it without applying anything.
-window.orgApplyCustom=function(){
-  const a=document.getElementById('orgFrom'), b=document.getElementById('orgTo');
-  if(!a||!b||!a.value||!b.value){ toast('Pick both dates','warn'); try{usageQueue('organic.all_content.filter_by_date_range','error');}catch(_e){} return; }
-  if(a.value>b.value){ toast('The From date must come before the To date','warn'); try{usageQueue('organic.all_content.filter_by_date_range','error');}catch(_e){} return; }
-  ORG_SINCE=a.value; ORG_UNTIL=b.value; ORG_PERIOD='custom'; ORG_OPEN=false; ORG_PG=0; renderPage();
-  try{usageQueue('organic.all_content.filter_by_date_range','update');}catch(_e){}
-};
-window.orgSetNet=function(n){ORG_NET=n;ORG_PG=0;renderPage();};
-window.orgSetKind=function(k){ORG_KIND=k;ORG_PG=0;renderPage();};
-window.orgSetPageId=function(v){ORG_PAGE=v;ORG_PG=0;renderPage();};
-window.orgSetSort=function(v){ORG_SORT=v;ORG_PG=0;renderPage();};
-window.orgSearch=function(v){ORG_Q=v;ORG_PG=0;
-  clearTimeout(window._orgQT); window._orgQT=setTimeout(function(){renderPage(); const el=document.getElementById('orgQ'); if(el){el.focus(); el.setSelectionRange(el.value.length,el.value.length);} },320);
-  usageQueueDebounced('organic.all_content.search_caption_or_page', v);
-};
-window.orgGo=function(d){ORG_PG=Math.max(0,ORG_PG+d);renderPage();};
-
-// Refresh in the background whenever the page is opened, so there is no button to press.
-// Rows already on screen stay visible while it runs; the table re-renders when it lands.
-window.orgAutoSync=async function(){
-  if(window._orgSyncing) return;
-  window._orgSyncing=true;
-  const tag=document.getElementById('orgFresh');
-  if(tag) tag.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Updating…';
-  try{
-    const {data:{session}}=await sb.auth.getSession();
-    const token=session&&session.access_token;
-    // Deliberately NOT bounded by the displayed date range. Preset ranges like "Last 28 days"
-    // end yesterday, so passing them as the sync window skipped anything posted today and left
-    // fresh content showing stale view counts. Facebook returns newest-first, so paging from the
-    // top always refreshes the most recent content; the range still filters what's displayed.
-    const res=await fetch(SUPABASE_URL+'/functions/v1/social-organic-live',{method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify(ORG_PERIOD==='lifetime'?{max_pages:8,reel_pages:4}:{max_pages:2,reel_pages:1})});
-    const jr=await res.json().catch(function(){return {};});
-    if(jr.error){ if(tag) tag.innerHTML='<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> '+esc(String(jr.error).slice(0,90)); window._orgSyncing=false; return; }
-    ORG_ROWS=null; ORG_PAGES=null;
-    window._orgSyncing=false; window._orgSyncedAt=Date.now();
-    if(ROUTE_PAGE()==='organic') renderPage();
-    return;
-  }catch(e){ if(tag) tag.innerHTML='<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> Could not refresh'; }
-  window._orgSyncing=false;
-};
-function ROUTE_PAGE(){ return PAGE; }
-
-window.orgSync=async function(){
-  const btn=document.getElementById('orgSyncBtn');
-  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Syncing…';}
-  try{
-    const {data:{session}}=await sb.auth.getSession();
-    const token=session&&session.access_token;
-    const r=orgRange();
-    const res=await fetch(SUPABASE_URL+'/functions/v1/social-organic-live',{method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify(ORG_PERIOD==='lifetime'?{full:true}:{since:r.since,until:r.until})});
-    const jr=await res.json().catch(function(){return{};});
-    if(jr.error){ toast(jr.error,'err'); }
-    else { toast('Synced '+(jr.posts||0)+' posts, '+(jr.reels||0)+' reels'+(jr.ig?', '+jr.ig+' Instagram':''),'ok');
-           if((jr.errors||[]).length) console.warn('organic sync notes:',jr.errors); }
-  }catch(e){ toast('Sync failed: '+((e&&e.message)||e),'err'); }
-  ORG_ROWS=null; renderPage();
-};
-
-window.orgOpen=function(id){
-  const r=(ORG_ROWS||[]).find(function(x){return String(x.id)===String(id);}); if(!r)return;
-  const rx=r.reactions||{};
-  const f=function(k,v){return '<div class="org-dtl-f"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';};
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-photo-film"></i> '+esc(orgKindLabel(r.kind))+' details</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    // width is capped and everything inside is box-sized, so the body never scrolls sideways;
-    // the image is CONTAINed rather than cropped, so the whole picture is visible
-    +'<div class="modal-body org-dtl" style="width:min(94vw,640px);max-width:100%;box-sizing:border-box;overflow-x:hidden">'
-      +(r.thumbnail?'<div class="org-dtl-img"><img src="'+esc(r.thumbnail)+'" referrerpolicy="no-referrer" onerror="orgThumbFail(this)"></div>':'')
-      +'<div class="org-dtl-msg">'+esc(r.message||'(no caption)')+'</div>'
-      +'<div style="font-size:12px;color:var(--slate);margin:10px 0 4px">'+esc(r.page_name||'')+' · '+orgDT(r.created_time)+'</div>'
-      +'<div class="org-dtl-grid">'
-        +f('Interactions',orgN(orgEng(r)))
-        +f('Likes',orgN(r.likes))+f('Comments',orgN(r.comments))+f('Shares',orgN(r.shares))
-        +(Number(r.reach)?f('Reach',orgN(r.reach)):'')
-        +(Number(r.video_views)?f('Views',orgN(r.video_views)):'')
-        +(Number(r.viewers)?f('Viewers',orgN(r.viewers)):'')
-        +(Number(r.follows)?f('Follows',orgN(r.follows)):'')
-        +(Number(r.clicks)?f('Clicks on post',orgN(r.clicks)):'')
-        +(Number(r.saves)?f('Saves',orgN(r.saves)):'')
-        +(Number(r.video_total_time_ms)?f('Watch time',orgWatch(r.video_total_time_ms)):'')
-        +(Number(r.video_avg_watch_ms)?f('Avg play time',orgSecs(r.video_avg_watch_ms)):'')
-        +(Number(r.video_length_s)?f('Duration',orgSecs(Number(r.video_length_s)*1000)):'')
-        +(orgHasReach(r)?f('Engagement rate',(orgER(r)||0).toFixed(2)+'%'):'')
-        +((rx.like||rx.love||rx.wow||rx.haha||rx.sad||rx.angry||rx.care)
-           ?f('Reactions','👍 '+orgN(rx.like)+'  ❤️ '+orgN(rx.love)+'  😮 '+orgN(rx.wow)+'  😂 '+orgN(rx.haha)+'  😢 '+orgN(rx.sad)+'  😠 '+orgN(rx.angry)+'  🤗 '+orgN(rx.care)):'')
-      +'</div>'
-    +'</div>'
-    +'<div class="modal-foot">'+(r.permalink?'<a class="btn" target="_blank" rel="noopener" href="'+esc(r.permalink)+'"><i class="fa-solid fa-arrow-up-right-from-square"></i> View on '+(r.network==='instagram'?'Instagram':'Facebook')+'</a>':'')
-      +'<button class="btn primary" onclick="closeModal()">Close</button></div>','md');
-};
-
-function orgDatePicker(){
-  const opts=ORG_PRESETS.map(function(p){
-    return '<div class="org-dp-opt'+(ORG_PERIOD===p[0]?' on':'')+'" onclick="event.stopPropagation();orgSetPeriod(\''+p[0]+'\')">'+esc(p[1])+'</div>';
-  }).join('');
-  const cus=ORG_PERIOD==='custom'
-    ? '<div class="org-dp-cus" onclick="event.stopPropagation()">'
-      +'<label>From<input type="date" id="orgFrom" value="'+esc(ORG_SINCE||'')+'"></label>'
-      +'<label>To<input type="date" id="orgTo" value="'+esc(ORG_UNTIL||'')+'"></label>'
-      +'<button onclick="orgApplyCustom()">Apply</button></div>'
-    : '';
-  return '<div class="org-dp'+(ORG_OPEN?' open':'')+'" id="orgDp">'
-    +'<div class="org-dp-btn" onclick="orgToggleDp(event)">'
-      +'<i class="fa-regular fa-calendar cal"></i>'
-      +'<span class="org-dp-lab"><b>'+esc(orgPresetLabel())+'</b><span>'+esc(orgRangeLabel())+'</span></span>'
-      +'<i class="fa-solid fa-chevron-down cv"></i></div>'
-    +'<div class="org-dp-pan"><div class="org-dp-list">'+opts+'</div>'+cus+'</div></div>';
-}
-
-VIEWS.organic=async function(v,seg){
-  setCrumb(['Growth & Strategy','Posts & Reels']);
-  const tabs=['Overview','All content','Top performers'];
-  const ti=mTab(seg,tabs.length);
-  if(!window._orgDocWired){ window._orgDocWired=true;
-    document.addEventListener('click',function(e){ if(ORG_OPEN && !(e.target&&e.target.closest&&e.target.closest('.org-dp'))){ ORG_OPEN=false; renderPage(); } });
-  }
-  v.innerHTML=ORG_CSS+mHead('fa-photo-film','#7c3aed','Posts & Reels')+'<div class="loader"><div class="spin"></div></div>';
-
-  if(!ORG_PAGES){ try{ const {data}=await sb.schema('camp').from('social_pages').select('*').order('name'); ORG_PAGES=data||[]; }catch(e){ ORG_PAGES=[]; } }
-  if(!ORG_ROWS){ try{ const {data}=await sb.schema('camp').from('social_posts').select('*').order('created_time',{ascending:false}).limit(3000); ORG_ROWS=data||[]; }catch(e){ ORG_ROWS=[]; } }
-
-  const R=orgRange();
-  let rows=(ORG_ROWS||[]).filter(function(r){
-    if(R.since && r.created_time && String(r.created_time).slice(0,10) < R.since) return false;
-    if(R.until && r.created_time && String(r.created_time).slice(0,10) > R.until) return false;
-    if(ORG_NET!=='all'  && r.network!==ORG_NET) return false;
-    if(ORG_KIND!=='all' && r.kind!==ORG_KIND) return false;
-    if(ORG_PAGE!=='all' && String(r.page_id)!==String(ORG_PAGE)) return false;
-    if(ORG_Q){ const q=ORG_Q.toLowerCase(); if(!String(r.message||'').toLowerCase().includes(q) && !String(r.page_name||'').toLowerCase().includes(q)) return false; }
-    return true;
-  });
-  const S=ORG_SORT;
-  const nOf=function(r,k){return Number(r[k])||0;};
-  rows.sort(function(a,b){
-    const vw=function(r){return nOf(r,'video_views')||nOf(r,'impressions');};
-    if(S==='views')        return vw(b)-vw(a);
-    if(S==='interactions') return orgEng(b)-orgEng(a);
-    if(S==='follows')      return nOf(b,'follows')-nOf(a,'follows');
-    if(S==='watch')        return nOf(b,'video_total_time_ms')-nOf(a,'video_total_time_ms');
-    if(S==='avgwatch')     return nOf(b,'video_avg_watch_ms')-nOf(a,'video_avg_watch_ms');
-    return String(b.created_time||'').localeCompare(String(a.created_time||''));
-  });
-
-  const tot=rows.reduce(function(a,r){
-    a.reach+=Number(r.reach)||0; a.eng+=orgEng(r);
-    a.likes+=Number(r.likes)||0; a.comments+=Number(r.comments)||0; a.shares+=Number(r.shares)||0;
-    a.clicks+=Number(r.clicks)||0; a.vv+=(Number(r.video_views)||Number(r.impressions)||0);
-    a.viewers+=Number(r.viewers)||0; a.follows+=Number(r.follows)||0;
-    a.watch+=Number(r.video_total_time_ms)||0;
-    return a;
-  },{reach:0,eng:0,likes:0,comments:0,shares:0,clicks:0,vv:0,viewers:0,follows:0,watch:0});
-
-  const kpi=function(icon,k,val,sub){return '<div class="org-kpi"><div class="k"><i class="fa-solid '+icon+'"></i> '+k+'</div><div class="v">'+val+'</div>'+(sub?'<div class="s">'+sub+'</div>':'')+'</div>';};
-  // Exactly eight cards, four to a row. Reach and Viewers are deliberately absent: Facebook
-  // rejects every per-post impression metric on every API version from v18 to v25, so a card for
-  // them could only ever read zero.
-  const nReels=rows.filter(function(r){return r.kind==='reel';}).length;
-  const avgEng=rows.length?Math.round(tot.eng/rows.length):0;
-  const kpis='<div class="org-kpis">'
-    +kpi('fa-layer-group','Posts',String(rows.length),rows.length?(nReels+' reels · '+(rows.length-nReels)+' posts'):'')
-    +kpi('fa-users','Reach',tot.reach?orgN(tot.reach):'—','Instagram only')
-    +kpi('fa-play','Views',tot.vv?orgN(tot.vv):'—','plays & post views')
-    +kpi('fa-hand-pointer','Interactions',orgN(tot.eng),'')
-    +kpi('fa-user-plus','Follows',tot.follows?orgN(tot.follows):'—','from video')
-    +kpi('fa-clock','Total Watch Time',tot.watch?orgWatch(tot.watch):'—','')
-    +kpi('fa-stopwatch','Avg Watch Time',tot.watch&&nReels?orgSecs(tot.watch/Math.max(1,nReels)):'—','per reel')
-    +kpi('fa-chart-simple','Avg per post',orgN(avgEng),'interactions')
-    +'</div>'
-    +'<div class="org-note"><i class="fa-solid fa-circle-info"></i> Columns adapt to what Facebook reports for the content on screen — reels carry watch time and duration; photo posts carry shares and clicks. <b>Views</b> is Meta\'s current measure (it replaced Impressions in Nov 2025) and now fills for every content type.</div>';
-
-  // filter bar
-  const kinds=['all','post','reel','carousel'];
-  const kc={}; rows.forEach(function(r){kc[r.kind]=(kc[r.kind]||0)+1;});
-  const kbtns=kinds.map(function(k){
-    const n=k==='all'?rows.length:(kc[k]||0);
-    if(k!=='all'&&!n&&ORG_KIND!==k) return '';
-    const lbl=k==='all'?'All types':(k==='post'?'Posts':(k==='reel'?'Reels':'Carousel'));
-    return '<button class="org-fbtn'+(ORG_KIND===k?' on':'')+'" onclick="orgSetKind(\''+k+'\')">'+esc(lbl)+'<span class="n">'+n+'</span></button>';
-  }).join('');
-  const nbtns=[['all','All'],['facebook','Facebook'],['instagram','Instagram']].map(function(n){
-    return '<button class="org-fbtn'+(ORG_NET===n[0]?' on':'')+'" onclick="orgSetNet(\''+n[0]+'\')">'+esc(n[1])+'</button>';
-  }).join('');
-  const pageSel='<select class="org-sel" onchange="orgSetPageId(this.value)"><option value="all"'+(ORG_PAGE==='all'?' selected':'')+'>All pages</option>'
-    +(ORG_PAGES||[]).map(function(p){return '<option value="'+esc(p.id)+'"'+(String(ORG_PAGE)===String(p.id)?' selected':'')+'>'+esc(p.name||p.id)+'</option>';}).join('')+'</select>';
-  const sortSel='<select class="org-sel" onchange="orgSetSort(this.value)">'
-    +[['date','Newest first'],['views','Most views'],['interactions','Most interactions'],['follows','Most follows'],['watch','Most watch time'],['avgwatch','Longest avg watch']]
-      .map(function(o){return '<option value="'+o[0]+'"'+(ORG_SORT===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>';
-
-  const bar='<div class="org-bar">'+orgDatePicker()
-    +'<input class="org-search" id="orgQ" placeholder="Search caption or page…" value="'+esc(ORG_Q)+'" oninput="orgSearch(this.value)">'
-    +pageSel+sortSel
-    +'<span class="org-fresh" id="orgFresh"></span></div>'
-    +'<div class="org-bar">'+nbtns+'<span style="width:8px"></span>'+kbtns+'</div>';
-
-  // ---- body ----
-  let body='';
-  if(!rows.length){
-    const anyData=(ORG_ROWS||[]).length>0;
-    body='<div class="org-empty"><i class="fa-regular fa-folder-open"></i>'
-      +(anyData?'No content in this date range or filter.<br>Try widening the dates, or choose <b>Lifetime</b>.'
-               :'Fetching your content from Meta…<br>If nothing appears, the system user needs the Pages assigned with the <b>Insights</b> task.')
-      +'</div>';
-  } else if(ti===0){
-    // Overview: breakdown by type and by page
-    const agg=function(keyFn){
-      const o={}; rows.forEach(function(r){ const k=keyFn(r)||'—';
-        (o[k]=o[k]||{n:0,views:0,eng:0,likes:0,comments:0});
-        o[k].n++; o[k].views+=Number(r.video_views)||0; o[k].eng+=orgEng(r);
-        o[k].likes+=Number(r.likes)||0; o[k].comments+=Number(r.comments)||0; });
-      return o;
-    };
-    const byKind=agg(function(r){return r.kind||'post';});
-    const byPage=agg(function(r){return r.page_name;});
-    const tbl=function(obj,lbl){
-      const keys=Object.keys(obj).sort(function(a,b){return obj[b].eng-obj[a].eng;});
-      return '<div class="org-tblwrap" style="margin-bottom:14px"><table class="org-tbl" style="min-width:560px"><thead><tr><th>'+lbl+'</th><th class="n">Posts</th><th class="n">Views</th><th class="n">Likes</th><th class="n">Comments</th><th class="n">Engagement</th><th class="n">Avg / post</th></tr></thead><tbody>'
-        +keys.map(function(k){const o=obj[k];return '<tr style="cursor:default"><td><b>'+esc(k)+'</b></td><td class="n">'+o.n+'</td>'
-          +'<td class="n">'+(o.views?orgN(o.views):'—')+'</td><td class="n">'+orgN(o.likes)+'</td><td class="n">'+orgN(o.comments)+'</td>'
-          +'<td class="n">'+orgN(o.eng)+'</td><td class="n org-er">'+orgN(Math.round(o.eng/o.n))+'</td></tr>';}).join('')
-        +'</tbody></table></div>';
-    };
-    body=tbl(byKind,'Content type')+tbl(byPage,'Page');
-  } else {
-    const list=(ti===2)?rows.slice().sort(function(a,b){return orgEng(b)-orgEng(a);}).slice(0,20):rows;
-    const pages=Math.max(1,Math.ceil(list.length/ORG_PER));
-    if(ORG_PG>=pages)ORG_PG=pages-1;
-    const slice=(ti===2)?list:list.slice(ORG_PG*ORG_PER,(ORG_PG+1)*ORG_PER);
-    // Only show a metric column if something on screen actually has that metric. Facebook gives
-    // completely different fields per content type — reels have views/watch/duration but never
-    // shares or clicks; photo posts have shares and clicks but no video data at all — so a fixed
-    // column set leaves most cells blank. Filtering to Reels or Posts narrows the table to just
-    // the numbers that type reports.
-    // The requested column set. `has` says whether Facebook reports the metric for that content
-    // type, so a genuine 0 is distinguishable from "not applicable" (which shows a dot + tooltip).
-    // These columns are ALWAYS shown even when empty — they were asked for explicitly — except
-    // the video-only ones, which appear when there is video on screen.
-    const isReel=function(r){return r.kind==='reel';};
-    const hasVideo=function(r){return isReel(r)||Number(r.video_views)>0||Number(r.video_length_s)>0;};
-    const COLS=[
-      // Reach: no per-post reach metric exists on Facebook — 30 names and 42 permutations probed
-      // across v18-v25. Business Suite shows it because Meta computes it internally without
-      // exposing it. Instagram does report true unique reach, so this fills for IG content.
-      {k:'Reach',            get:function(r){return Number(r.reach)||0;},               fmt:orgN,
-       has:function(r){return r.network==='instagram';},
-       why:'Facebook does not expose per-post Reach through its API — Instagram does'},
-      {k:'Views',            get:function(r){return Number(r.video_views)||Number(r.impressions)||0;}, fmt:orgN,
-       has:function(){return true;}},
-      {k:'Interactions',     get:function(r){return orgEng(r);},                        fmt:orgN, strong:true,
-       has:function(){return true;}},
-      {k:'Follows',          get:function(r){return Number(r.follows)||0;},             fmt:orgN, has:hasVideo,
-       why:'follows gained are only reported for video'},
-      {k:'Duration',         get:function(r){return (Number(r.video_length_s)||0)*1000;},fmt:orgSecs, has:hasVideo,
-       why:'video only'},
-      {k:'Avg Watch Time',   get:function(r){return Number(r.video_avg_watch_ms)||0;},  fmt:orgSecs,  has:hasVideo,
-       why:'video only'},
-      {k:'Total Watch Time', get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch, has:hasVideo,
-       why:'video only'}
-    ];
-
-    body='<div class="org-tblwrap"><table class="org-tbl"><thead><tr>'
-      +'<th>Post Date</th><th>Post</th><th>Format</th>'
-      +COLS.map(function(c){return '<th class="n">'+esc(c.k)+'</th>';}).join('')
-      +'</tr></thead><tbody>'
-      +slice.map(function(r){
-        const thumb=r.thumbnail?'<img class="org-thumb" src="'+esc(r.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" onerror="orgThumbFail(this)">'
-                               :'<div class="org-thumb-ph"><i class="fa-regular fa-image"></i></div>';
-        const txt=String(r.message||'').replace(/\s+/g,' ').trim()||'(no caption)';
-        return '<tr onclick="orgOpen(\''+esc(String(r.id))+'\')">'
-          +'<td class="org-date">'+orgDT(r.created_time)+'</td>'
-          +'<td><div class="org-post">'+thumb+'<div class="org-ptxt"><b>'+esc(txt.slice(0,120))+'</b></div>'
-            +'<i class="fa-brands '+(r.network==='instagram'?'fa-instagram':'fa-facebook')+' org-netic" title="'+esc(r.page_name||'')+'"></i></div></td>'
-          +'<td><span class="org-tag '+esc(r.kind||'post')+'">'+esc(orgKindLabel(r.kind))+'</span></td>'
-          // A genuine zero is data — a post published an hour ago really does have 0 likes.
-          // Show it as 0 (muted) rather than a dot, which read as "missing" and made the table
-          // look half-broken. The dot is reserved for a metric this content type cannot report.
-          +COLS.map(function(c){ const v=c.get(r), na=!c.has(r);
-            const tip=c.why||('Facebook does not report this for a '+orgKindLabel(r.kind));
-            return '<td class="n'+(c.strong?' org-er':'')+'">'
-              +(na?'<span class="org-na" title="'+esc(tip)+'">·</span>'
-                  :(v?c.fmt(v):'<span class="org-zero">0</span>'))+'</td>'; }).join('')
-        +'</tr>';
-      }).join('')+'</tbody></table></div>'
-      +(ti===2?'':'<div class="org-pager"><span class="info">Showing '+(ORG_PG*ORG_PER+1)+'–'+Math.min((ORG_PG+1)*ORG_PER,list.length)+' of '+list.length+'</span>'
-        +'<span><button onclick="orgGo(-1)"'+(ORG_PG<=0?' disabled':'')+'><i class="fa-solid fa-chevron-left"></i> Previous</button> '
-        +'<button onclick="orgGo(1)"'+(ORG_PG>=pages-1?' disabled':'')+'>Next <i class="fa-solid fa-chevron-right"></i></button></span></div>');
-  }
-
-  v.innerHTML=ORG_CSS+mHead('fa-photo-film','#7c3aed','Posts & Reels')+bar+mTabs('organic',tabs,ti)
-    +'<div style="margin-top:14px">'+(rows.length?kpis:'')+body+'</div>';
-  // Refresh once per visit, and again if the page has been open a while. The sync is no longer
-  // tied to the date range, so changing dates just re-filters what is already held.
-  const STALE_MS=5*60*1000;
-  const age=Date.now()-(window._orgSyncedAt||0);
-  if(!window._orgSyncedAt || age>STALE_MS){ window._orgSyncedAt=Date.now(); orgAutoSync(); }
-  else { const tag=document.getElementById('orgFresh');
-         if(tag&&!window._orgSyncing) tag.innerHTML='<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Updated '+Math.max(1,Math.round(age/60000))+'m ago'; }
-};
-
 /* ==================== AUTOMATIC PROCESSING (lost-call pipeline) ====================
    The daily CRM-imported calls: dashboard, filters, table, detail. Reads acc.transcriptions where
    source='lost_call_sync' - the same rows the transcription-sync edge function writes. Manual
@@ -32785,3 +32352,1014 @@ window.addEventListener('load', function(){ usageInstall(); setTimeout(usageInst
 // Anything still queued when the tab goes away would otherwise be lost.
 window.addEventListener('pagehide', usageFlushOnUnload);
 document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='hidden') usageFlushOnUnload(); });
+/* ============================ DIGITAL METRICS ============================
+   Google data for our brand and for our competitors (16 Oct 2026): YouTube, Google Maps,
+   Search Console, Analytics, and Setup (the Google connection, what is being pulled, run log).
+
+   NO PAGE OF ITS OWN ANY MORE. This started as a standalone Digital Metrics module showing ours
+   beside theirs. The marketing modules were then regrouped by WHOSE data it is, so the same tab
+   renderers are now drawn by two pages (src/core/40-marketing-modules.js) through dmTabView(),
+   each time told a scope:
+     'brand'      - Our Brand (route campaigns/...): YouTube, Google Maps, Search Console,
+                    Analytics, Setup. Only our own channel, listings, sites and properties.
+     'competitor' - Competitor Data (route competitors/...): YouTube, Google Maps. Only rows that
+                    are not ours. Search Console and Analytics are private to each company, so
+                    there is nothing to show for competitors, and Setup is ours alone.
+   "Ours" is the is_own flag the tables already carry (dm_yt_channels / dm_places, and what the
+   dm_*_compare functions return) - the flag the Add dialogs set from the brand picked.
+
+   WHERE THE NUMBERS COME FROM. Only Google's official APIs, pulled every night at 02:30 IST by the
+   digital-metrics-sync function into camp.dm_* tables, which this page only reads:
+     our channel / listings / sites / GA4  - the marketing Google connection (Setup tab), read-only
+     competitors' YouTube                  - public counts (YouTube Data API), saved as a reading a day
+     competitors' Google Maps              - public rating and review count (Places API), a reading a day
+   Competitors' Search Console and Analytics are private to them and are not shown - there is no
+   official way to read them.
+
+   NOTHING ON THIS PAGE IS ESTIMATED. Totals for a period are added up in the database from the
+   daily rows Google gave (camp.dm_* read functions). Ratios are recomputed from their parts, never
+   averaged. "Growth" for a competitor is today's reading minus the reading nearest before the period
+   began; when tracking started inside the period, the page says from which date it is counting.
+   GA4 users are never added across days (a person who visits on two days is one user) - the period
+   figures are Google's own. A blank means Google has not reported it, not zero. */
+let DM_TAB='youtube', DM_DAYS=28, DM_SITE=null, DM_PROP=null, DM_CHAN=null, DM_CHARTS=[];
+// Which side the open tab is drawing ('brand' or 'competitor') - set by dmTabView, read by the
+// renderers and by the Add dialogs, so a channel added on Competitor Data cannot be filed as ours.
+let DM_SCOPE='brand';
+/* [route segment, title, icon, icon set, scopes it appears in]. Route segments are the ones the
+   two pages use (campaigns/search-console, competitors/youtube, ...). */
+const DM_TABS=[['youtube','YouTube','fa-youtube','fa-brands',['brand','competitor']],['maps','Google Maps','fa-location-dot','fa-solid',['brand','competitor']],
+  ['search-console','Search Console','fa-magnifying-glass','fa-solid',['brand']],['analytics','Analytics','fa-chart-line','fa-solid',['brand']],['setup','Setup','fa-plug','fa-solid',['brand']]];
+// The route the Setup tab lives at, for every "connect Google first" link on either page.
+const DM_SETUP_ROUTE='campaigns/setup';
+const DM_FN=SUPABASE_URL+'/functions/v1/digital-metrics-sync';
+function dmCamp(){ return sb.schema('camp'); }
+function dmIst(){ return new Date(Date.now()+5.5*3600000).toISOString().slice(0,10); }
+function dmAdd(d,n){ return new Date(Date.parse(d+'T00:00:00Z')+n*86400000).toISOString().slice(0,10); }
+// The period always ends YESTERDAY: today's figures are still being counted by Google.
+function dmRange(){ const to=dmAdd(dmIst(),-1); return {from:dmAdd(to,-(DM_DAYS-1)),to:to}; }
+function dmN(x,dp){ if(x===null||x===undefined||x===''||isNaN(Number(x)))return '—'; return Number(x).toLocaleString('en-IN',{maximumFractionDigits:dp===undefined?0:dp}); }
+function dmPct(x,dp){ return (x===null||x===undefined||isNaN(Number(x)))?'—':(Number(x)*100).toFixed(dp===undefined?1:dp)+'%'; }
+function dmDelta(now,base){
+  if(now===null||now===undefined||base===null||base===undefined)return '';
+  const d=Number(now)-Number(base); if(!d)return '<div style="font-size:11.5px;color:var(--slate)">no change</div>';
+  return '<div style="font-size:11.5px;font-weight:600;color:'+(d>0?'var(--ok)':'var(--err)')+'">'+(d>0?'+':'')+dmN(d)+'</div>';
+}
+function dmArg(s){ return esc(JSON.stringify(String(s==null?'':s))); }
+function dmDur(sec){ if(sec==null||isNaN(sec))return '—'; sec=Math.round(sec); const m=Math.floor(sec/60),s=sec%60; return m+':'+String(s).padStart(2,'0'); }
+function dmKill(){ DM_CHARTS.forEach(function(c){ try{c.destroy();}catch(e){} }); DM_CHARTS=[]; }
+function dmKpi(label,val,sub,ic,color){
+  return '<div class="kpi"><div class="top"><div class="lbl">'+esc(label)+'</div><div class="ic" style="background:'+color+'1a;color:'+color+'"><i class="'+ic+'"></i></div></div>'
+    +'<div class="val">'+val+'</div>'+(sub?'<div style="font-size:12px;color:var(--slate);margin-top:4px">'+sub+'</div>':'')+'</div>';
+}
+function dmCard(title,sub,body,extra){
+  return '<div class="card card-pad" style="margin-bottom:16px">'
+    +'<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start"><div><div class="sec-title">'+title+'</div>'
+    +(sub?'<div class="sec-sub">'+sub+'</div>':'<div style="height:10px"></div>')+'</div>'+(extra||'')+'</div>'+body+'</div>';
+}
+function dmNote(icon,html){ return '<div style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px dashed var(--line);border-radius:10px;color:var(--slate);font-size:13px;margin:6px 0 4px"><i class="fa-solid '+icon+'" style="margin-top:2px"></i><div>'+html+'</div></div>'; }
+function dmTable(heads,rows,empty){
+  if(!rows.length)return dmNote('fa-circle-info',empty||'Nothing for this period yet.');
+  return '<div style="overflow-x:auto"><table><thead><tr>'+heads.map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+    +rows.map(function(r){return '<tr>'+r.map(function(c){return '<td>'+c+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div>';
+}
+function dmChart(id,labels,sets){
+  const elc=document.getElementById(id); if(!elc||typeof Chart==='undefined')return;
+  const colors=['#2563eb','#16a34a','#ea580c','#9333ea','#dc2626'];
+  try{ DM_CHARTS.push(new Chart(elc,{type:'line',data:{labels:labels,datasets:sets.map(function(s,i){
+      return {label:s.label,data:s.data,borderColor:colors[i%5],backgroundColor:colors[i%5]+'22',tension:.25,pointRadius:labels.length>40?0:2,fill:i===0,yAxisID:s.axis||'y',spanGaps:false};})},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:sets.length>1}},
+      scales:Object.assign({x:{ticks:{maxTicksLimit:10}},y:{beginAtZero:true}},sets.some(function(s){return s.axis==='y2';})?{y2:{position:'right',beginAtZero:true,grid:{drawOnChartArea:false}}}:{})}})); }catch(e){}
+}
+async function dmCall(body){
+  const {data:{session}}=await sb.auth.getSession();
+  const r=await fetch(DM_FN,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify(body)});
+  const jr=await r.json().catch(function(){return {};});
+  if(!r.ok||jr.error)throw new Error(jr.error||('server said '+r.status));
+  return jr;
+}
+async function dmSources(kind){
+  const {data}=await dmCamp().from('dm_sources').select('*').eq('kind',kind).order('label');
+  return data||[];
+}
+async function dmWatchlist(){
+  if(window._dmWl)return window._dmWl;
+  const {data}=await dmCamp().from('competitor_watchlist').select('id,name,category').in('category',['brand','competitor']).order('name');
+  return (window._dmWl=data||[]);
+}
+
+/* Back from Google's consent screen: ?google=ok|err&msg=... (the callback keeps it out of the hash
+   so the router never sees it). The callback lands on campaigns.html#/setup; Our Brand calls this
+   on every draw, and it does nothing unless the flag is there. */
+function dmOauthReturn(){
+  try{
+    const q=new URLSearchParams(location.search);
+    if(!q.get('google'))return;
+    if(q.get('google')==='ok')toast('Google connected for Our Brand. Finding your sites and channels…','ok');
+    else toast('Google connection failed: '+(q.get('msg')||'unknown reason'),'err');
+    history.replaceState(history.state,'',location.pathname+location.hash);
+    if(q.get('google')==='ok')dmCall({action:'discover'}).then(function(){ if(PAGE==='campaigns')renderPage(); }).catch(function(e){toast('Discover: '+e.message,'err');});
+  }catch(e){}
+}
+function dmTabDef(tab){ return DM_TABS.filter(function(t){return t[0]===tab;})[0]; }
+/* Draws one Digital Metrics tab into host, below the calling page's own header and tab bar.
+   tab: a DM_TABS route segment ('search' and 'connect' are the old names, still accepted so an
+   old bookmark lands on the right tab). scope: 'brand' or 'competitor'. A tab that does not exist
+   for that scope (Search Console on Competitor Data) falls back to YouTube rather than showing
+   someone else's - here, our own - data on the wrong page. */
+async function dmTabView(host,tab,scope){
+  dmKill();
+  DM_SCOPE=scope==='competitor'?'competitor':'brand';
+  if(tab==='search')tab='search-console'; if(tab==='connect')tab='setup';
+  const def=dmTabDef(tab);
+  DM_TAB=(def&&def[4].indexOf(DM_SCOPE)!==-1)?tab:'youtube';
+  const r=dmRange();
+  host.innerHTML=(DM_TAB==='setup'?'':'<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 14px">'
+      +'<div class="seg">'+[7,28,90].map(function(d){return '<button class="seg-btn'+(DM_DAYS===d?' on':'')+'" onclick="dmSetDays('+d+')">Last '+d+' days</button>';}).join('')+'</div>'
+      +'<span style="color:var(--slate);font-size:12.5px">'+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+' · straight from Google, refreshed nightly</span></div>')
+    +'<div id="dmBody"><div class="loader"><div class="spin"></div></div></div>';
+  const body=$('dmBody');
+  try{
+    if(DM_TAB==='youtube')await dmYouTube(body,r);
+    else if(DM_TAB==='maps')await dmMaps(body,r);
+    else if(DM_TAB==='search-console')await dmSearch(body,r);
+    else if(DM_TAB==='analytics')await dmAnalytics(body,r);
+    else await dmConnect(body);
+  }catch(e){ body.innerHTML=dmNote('fa-triangle-exclamation','Could not load: '+esc(e.message||String(e))); }
+}
+// Rows of a dm_* table or compare function that belong on the open page.
+function dmInScope(x){ return DM_SCOPE==='brand'?!!x.is_own:!x.is_own; }
+window.dmSetDays=function(d){ DM_DAYS=d; renderPage(); };
+window.dmPick=function(which,val){ if(which==='site')DM_SITE=val; if(which==='prop')DM_PROP=val; if(which==='chan')DM_CHAN=val; renderPage(); };
+function dmSelect(which,list,cur){
+  return '<select class="mu-sel" style="max-width:340px" onchange="dmPick(\''+which+'\',this.value)">'
+    +list.map(function(s){return '<option value="'+esc(s.source_id)+'"'+(s.source_id===cur?' selected':'')+'>'+esc(s.label||s.source_id)+'</option>';}).join('')+'</select>';
+}
+function dmNeedConnect(what){
+  return dmNote('fa-plug',esc(what)+' needs the marketing Google connection. Open <a href="#" onclick="navTo(DM_SETUP_ROUTE);return false">Setup</a> on Our Brand, connect the company Google account that owns it, and the next nightly pull fills this in.');
+}
+
+/* ---------------------------------------------------------------- YouTube */
+async function dmYouTube(body,r){
+  // Our own channel's private analytics (YouTube Analytics API) only ever appear on Our Brand.
+  const own=DM_SCOPE==='brand'?(await dmSources('yt_channel')).filter(function(s){return s.enabled;}):[];
+  if(own.length&&!own.some(function(s){return s.source_id===DM_CHAN;}))DM_CHAN=own[0].source_id;
+  let html='';
+  if(DM_SCOPE==='brand'&&!own.length) html+=dmCard('Our channel','YouTube Analytics - views, watch time, subscribers gained and lost.',dmNeedConnect('Our YouTube channel'));
+  else if(own.length){
+    const ch=DM_CHAN;
+    const [{data:days},top,traffic,country,device,subs,demo]=await Promise.all([
+      dmCamp().from('dm_yt_own_daily').select('*').eq('channel_id',ch).eq('video_id','').gte('day',r.from).lte('day',r.to).order('day'),
+      dmCamp().rpc('dm_yt_top_videos',{p_channel:ch,p_from:r.from,p_to:r.to,p_limit:15}),
+      dmCamp().rpc('dm_yt_breakdown',{p_channel:ch,p_dim:'insightTrafficSourceType',p_from:r.from,p_to:r.to}),
+      dmCamp().rpc('dm_yt_breakdown',{p_channel:ch,p_dim:'country',p_from:r.from,p_to:r.to}),
+      dmCamp().rpc('dm_yt_breakdown',{p_channel:ch,p_dim:'deviceType',p_from:r.from,p_to:r.to}),
+      dmCamp().rpc('dm_yt_breakdown',{p_channel:ch,p_dim:'subscribedStatus',p_from:r.from,p_to:r.to}),
+      dmCamp().rpc('dm_yt_breakdown',{p_channel:ch,p_dim:'ageGroup,gender',p_from:r.from,p_to:r.to})]);
+    const d=days||[]; const sum=function(k){ return d.length?d.reduce(function(a,x){return a+(Number(x[k])||0);},0):null; };
+    const views=sum('views'),mins=sum('estimated_minutes_watched');
+    const kpis='<div class="grid kpis" style="margin-bottom:14px">'
+      +dmKpi('Views',dmN(views),d.length+' day'+(d.length===1?'':'s')+' reported','fa-solid fa-eye','#dc2626')
+      +dmKpi('Watch time',mins==null?'—':dmN(mins/60,0)+' h','avg '+(views?dmDur(mins*60/views):'—')+' per view','fa-solid fa-clock','#2563eb')
+      +dmKpi('Subscribers',d.length?((sum('subscribers_gained')-sum('subscribers_lost')>=0?'+':'')+dmN(sum('subscribers_gained')-sum('subscribers_lost'))):'—','+'+dmN(sum('subscribers_gained'))+' gained · −'+dmN(sum('subscribers_lost'))+' lost','fa-solid fa-user-plus','#16a34a')
+      +dmKpi('Engagement',dmN(sum('likes')),'likes · '+dmN(sum('comments'))+' comments · '+dmN(sum('shares'))+' shares · '+dmN(sum('videos_added_to_playlists'))+' playlist adds','fa-solid fa-heart','#9333ea')
+      +'</div>';
+    const bd=function(title,res,fmtKey){
+      const rows=(res&&res.data)||[];
+      const span=rows.length&&rows[0].period_from&&rows[0].period_to&&(rows[0].period_from!==r.from||rows[0].period_to!==r.to)?'<div style="font-size:11.5px;color:var(--slate);margin-bottom:6px">Google gives this one only as a total: '+esc(fmtDate(rows[0].period_from))+' – '+esc(fmtDate(rows[0].period_to))+'</div>':'';
+      return '<div><div style="font-weight:700;font-size:13px;margin-bottom:6px">'+title+'</div>'+span+dmTable(
+        rows.length&&rows[0].viewer_percentage!=null?['Viewers','Share of views']:['','Views','Watch hours'],
+        rows.slice(0,10).map(function(x){ return x.viewer_percentage!=null
+          ?[esc(String(x.dim_value).replace('|',' · ').replace('age','')),dmN(x.viewer_percentage,1)+'%']
+          :[esc(fmtKey?fmtKey(x.dim_value):x.dim_value),dmN(x.views),dmN(x.minutes/60,1)]; }),'Not reported yet.')+'</div>';
+    };
+    html+=dmCard('Our channel'+(own.length>1?'':' · '+esc(own[0].label||'')),'YouTube Analytics for our channel. Google finalises the last 2–3 days later, so those can still rise.',
+      kpis+'<div style="height:240px;margin-bottom:16px"><canvas id="dmYtCh"></canvas></div>'
+      +'<div style="font-weight:700;font-size:13px;margin-bottom:6px">Most-watched videos in this period</div>'
+      +dmTable(['Video','Published','Views','Watch hours','Likes','Comments','Shares','Subs gained'],((top&&top.data)||[]).map(function(x){
+        return ['<a href="https://youtu.be/'+esc(x.video_id)+'" target="_blank" rel="noopener">'+esc(x.title||x.video_id)+'</a>',esc(x.published_at?fmtDate(x.published_at):'—'),dmN(x.views),dmN(x.minutes/60,1),dmN(x.likes),dmN(x.comments),dmN(x.shares),dmN(x.subscribers_gained)];}),'No video-level figures for this period yet.')
+      +'<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:16px">'
+      +bd('Traffic source',traffic,function(s){return String(s).replace(/_/g,' ').toLowerCase();})+bd('Country',country)+bd('Device',device,function(s){return String(s).toLowerCase();})
+      +bd('Subscribed?',subs,function(s){return s==='SUBSCRIBED'?'Subscribers':s==='UNSUBSCRIBED'?'Not subscribed':s;})+bd('Age & gender (viewers)',demo)+'</div>',
+      own.length>1?dmSelect('chan',own,ch):'');
+    setTimeout(function(){ dmChart('dmYtCh',d.map(function(x){return fmtDateShort(x.day);}),[{label:'Views',data:d.map(function(x){return x.views;})},{label:'Watch hours',data:d.map(function(x){return x.estimated_minutes_watched==null?null:Math.round(x.estimated_minutes_watched/6)/10;}),axis:'y2'}]); },0);
+  }
+  // public counts - ours on Our Brand, everybody else's on Competitor Data
+  const {data:cmp,error}=await dmCamp().rpc('dm_yt_public_compare',{p_from:r.from});
+  if(error)throw error;
+  const rows=(cmp||[]).filter(dmInScope).map(function(x){
+    const since=x.base_date&&x.base_date>r.from?'<div style="font-size:11px;color:var(--slate)">counting from '+esc(fmtDateShort(x.base_date))+'</div>':'';
+    return [(x.is_own?'<span class="tag t-blue">Ours</span> ':'')+esc(x.brand||'—'),
+      '<a href="https://www.youtube.com/channel/'+esc(x.channel_id)+'" target="_blank" rel="noopener">'+esc(x.title||x.channel_id)+'</a>'+(x.handle?'<div style="font-size:11.5px;color:var(--slate)">'+esc(x.handle)+'</div>':''),
+      x.hidden_subscribers?'<span style="color:var(--slate)">hidden by channel</span>':dmN(x.subscribers)+(x.base_date&&x.latest_date!==x.base_date?dmDelta(x.subscribers,x.base_subscribers):'')+since,
+      dmN(x.views)+(x.base_date&&x.latest_date!==x.base_date?dmDelta(x.views,x.base_views):''),
+      dmN(x.videos),x.latest_date?dmN(x.uploads_in_period):'—',x.latest_date?dmN(x.upload_views):'—',esc(x.latest_date?fmtDateShort(x.latest_date):'not read yet')];
+  });
+  html+=dmCard(DM_SCOPE==='brand'?'Our channels in public':'Competitors on YouTube',(DM_SCOPE==='brand'?'What anybody sees on our channels - the same public counts Competitor Data reads for other developers, so the two can be set side by side. ':'')
+      +'Public YouTube counts, read once a day. YouTube itself rounds public subscriber counts (e.g. 18.9K is shown to everyone as 18,900). Growth = latest reading minus the reading from the start of the period.',
+    dmTable(['Brand','Channel','Subscribers','Total views','Videos','Uploads this period','Views on those uploads','As of'],rows,'No confirmed channels yet - add and confirm them below.'));
+  html+=await dmTrackedChannels();
+  body.innerHTML=html;
+}
+async function dmTrackedChannels(){
+  const [{data:ch},wl]=await Promise.all([dmCamp().from('dm_yt_channels').select('*').order('is_own',{ascending:false}).order('title'),dmWatchlist()]);
+  const name=function(id){ const w=wl.filter(function(x){return x.id===id;})[0]; return w?w.name:'—'; };
+  return dmCard(DM_SCOPE==='brand'?'Our channels being tracked':'Competitor channels being tracked','Only <b>confirmed</b> channels are read. Confirm a channel once you have checked it really is that brand\'s official channel.',
+    dmTable(['Brand','Channel','Channel ID','Status',''],(ch||[]).filter(dmInScope).map(function(x){
+      return [(x.is_own?'<span class="tag t-blue">Ours</span> ':'')+esc(x.is_own&&!x.watchlist_id?'The Jain Group':name(x.watchlist_id)),esc(x.title||'(name fills in after the first read)'),
+        '<code style="font-size:11.5px">'+esc(x.channel_id)+'</code>',
+        x.confirmed?'<span class="tag t-green">Confirmed</span>':'<span class="tag t-amber">Waiting for a check</span>',
+        '<div style="display:flex;gap:6px;justify-content:flex-end">'+(x.confirmed?'':'<button class="btn btn-sm btn-primary" onclick="dmYtConfirm('+dmArg(x.channel_id)+',true)">Confirm</button>')
+          +(x.confirmed?'<button class="btn btn-sm" onclick="dmYtConfirm('+dmArg(x.channel_id)+',false)">Pause</button>':'')
+          +'<button class="btn btn-sm" onclick="dmYtRemove('+dmArg(x.channel_id)+')"><i class="fa-solid fa-trash"></i></button></div>'];}),'No channels yet.'),
+    '<button class="btn btn-sm btn-primary" onclick="dmYtAddModal()"><i class="fa-solid fa-plus"></i> Add channel</button>');
+}
+window.dmYtConfirm=async function(id,on){
+  const {error}=await dmCamp().from('dm_yt_channels').update({confirmed:on,updated_at:new Date().toISOString()}).eq('channel_id',id);
+  if(error)return toast(error.message,'err'); toast(on?'Confirmed - read from tonight (or press Pull now in Our Brand → Setup)':'Paused','ok'); renderPage();
+};
+window.dmYtRemove=async function(id){
+  if(!await confirmDialog('Stop tracking this channel and delete its stored readings?'))return;
+  const {error}=await dmCamp().from('dm_yt_channels').delete().eq('channel_id',id);
+  if(error)return toast(error.message,'err'); renderPage();
+};
+// Only the brands of the open page: ours on Our Brand, competitors on Competitor Data - so a
+// channel or place can never be filed on the other side by picking the wrong row here.
+function dmBrandSelect(wl){
+  const mine=DM_SCOPE==='brand';
+  return '<label>Brand<select id="dmBrand">'+(mine?'<option value="own">The Jain Group (ours)</option>':'')
+    +wl.filter(function(w){return mine?w.category==='brand':w.category!=='brand';})
+      .map(function(w){return '<option value="'+w.id+'">'+esc(w.name)+(w.category==='brand'?' (ours)':'')+'</option>';}).join('')+'</select></label>';
+}
+window.dmYtAddModal=async function(){
+  const wl=await dmWatchlist();
+  openModal('<div class="modal-head"><h3><i class="fa-brands fa-youtube" style="color:#dc2626"></i> Add a YouTube channel</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'+dmBrandSelect(wl)
+    +'<label>Channel link, @handle, channel ID, or a name to search<input id="dmYtQ" placeholder="https://www.youtube.com/@orbitgroupkol" onkeydown="if(event.key===\'Enter\')dmYtFind()"></label>'
+    +'<button class="btn" onclick="dmYtFind()"><i class="fa-solid fa-magnifying-glass"></i> Find</button>'
+    +'<div id="dmYtRes" style="margin-top:12px"></div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>');
+};
+window.dmYtFind=async function(){
+  const box=$('dmYtRes'); box.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  try{
+    const jr=await dmCall({action:'find_channel',q:$('dmYtQ').value});
+    box.innerHTML=(jr.results||[]).length?jr.results.map(function(x){
+      return '<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-2)">'
+        +(x.thumbnail?'<img src="'+esc(x.thumbnail)+'" style="width:36px;height:36px;border-radius:50%">':'')
+        +'<div style="flex:1;min-width:0"><b>'+esc(x.title||'')+'</b> '+(x.handle?'<span style="color:var(--slate)">'+esc(x.handle)+'</span>':'')
+        +'<div style="font-size:11.5px;color:var(--slate)">'+esc(x.channel_id)+(x.subscribers!=null?' · '+dmN(x.subscribers)+' subscribers':'')+'</div></div>'
+        +'<a class="btn btn-sm" href="https://www.youtube.com/channel/'+esc(x.channel_id)+'" target="_blank" rel="noopener">Open</a>'
+        +'<button class="btn btn-sm btn-primary" onclick="dmYtAdd('+dmArg(x.channel_id)+','+dmArg(x.title||'')+','+dmArg(x.handle||'')+')">Add</button></div>';}).join('')
+      :dmNote('fa-circle-info','No channel found.');
+  }catch(e){ box.innerHTML=dmNote('fa-triangle-exclamation',esc(e.message)); }
+};
+window.dmYtAdd=async function(id,title,handle){
+  const b=$('dmBrand').value;
+  const row={channel_id:id,title:title||null,handle:handle||null,is_own:b==='own'||(window._dmWl||[]).some(function(w){return String(w.id)===b&&w.category==='brand';}),
+    watchlist_id:b==='own'?null:Number(b),confirmed:false,active:true,updated_at:new Date().toISOString()};
+  const {error}=await dmCamp().from('dm_yt_channels').upsert(row,{onConflict:'channel_id'});
+  if(error)return toast(error.message,'err');
+  toast('Added - open it on YouTube to check it is the right one, then press Confirm','ok'); closeModal(); renderPage();
+};
+
+/* ---------------------------------------------------------------- Google Maps */
+const DM_GBP={search:['BUSINESS_IMPRESSIONS_DESKTOP_SEARCH','BUSINESS_IMPRESSIONS_MOBILE_SEARCH'],maps:['BUSINESS_IMPRESSIONS_DESKTOP_MAPS','BUSINESS_IMPRESSIONS_MOBILE_MAPS']};
+async function dmMaps(body,r){
+  // Our listings' Business Profile figures are private to us - Our Brand only.
+  const locs=DM_SCOPE==='brand'?(await dmSources('gbp_location')).filter(function(s){return s.enabled;}):[];
+  let html='';
+  if(DM_SCOPE!=='brand'){ /* competitors: public Places figures only, below */ }
+  else if(!locs.length) html+=dmCard('Our listings','Business Profile - how often our listings were seen on Google Search and Maps, and what people did.',
+    dmNeedConnect('Our Google Maps listings')+dmNote('fa-hourglass-half','Google also has to approve Business Profile API access for our Cloud project once (a form; usually a few days). Steps are in the setup guide.'));
+  else{
+    const [{data:sums},{data:series},{data:kwLatest},{data:revs}]=await Promise.all([
+      dmCamp().rpc('dm_gbp_sum',{p_from:r.from,p_to:r.to}),dmCamp().rpc('dm_gbp_series',{p_from:r.from,p_to:r.to}),
+      dmCamp().from('dm_gbp_keywords_monthly').select('month').order('month',{ascending:false}).limit(1),
+      dmCamp().from('dm_gbp_reviews').select('*').order('create_time',{ascending:false}).limit(25)]);
+    const by={}; (sums||[]).forEach(function(x){ (by[x.location]=by[x.location]||{})[x.metric]=x.value; });
+    const tot=function(ms,loc){ let any=false,s=0; Object.keys(by).forEach(function(l){ if(loc&&l!==loc)return; ms.forEach(function(m){ if(by[l][m]!=null){any=true;s+=Number(by[l][m]);} }); }); return any?s:null; };
+    html+=dmCard('Our listings','Business Profile performance, as Google reports it per listing. Google publishes these a few days late.',
+      '<div class="grid kpis" style="margin-bottom:14px">'
+        +dmKpi('Seen on Google Search',dmN(tot(DM_GBP.search)),'mobile '+dmN(tot(['BUSINESS_IMPRESSIONS_MOBILE_SEARCH']))+' · desktop '+dmN(tot(['BUSINESS_IMPRESSIONS_DESKTOP_SEARCH'])),'fa-brands fa-google','#2563eb')
+        +dmKpi('Seen on Google Maps',dmN(tot(DM_GBP.maps)),'mobile '+dmN(tot(['BUSINESS_IMPRESSIONS_MOBILE_MAPS']))+' · desktop '+dmN(tot(['BUSINESS_IMPRESSIONS_DESKTOP_MAPS'])),'fa-solid fa-map','#16a34a')
+        +dmKpi('Calls',dmN(tot(['CALL_CLICKS'])),'taps on the call button','fa-solid fa-phone','#ea580c')
+        +dmKpi('Directions · website',dmN(tot(['BUSINESS_DIRECTION_REQUESTS']))+' · '+dmN(tot(['WEBSITE_CLICKS'])),'direction requests · website clicks · '+dmN(tot(['BUSINESS_CONVERSATIONS']))+' chats','fa-solid fa-route','#9333ea')
+      +'</div><div style="height:220px;margin-bottom:16px"><canvas id="dmGbpCh"></canvas></div>'
+      +dmTable(['Listing','Search views','Maps views','Calls','Directions','Website clicks','Chats'],locs.map(function(s){
+        return ['<b>'+esc(s.label||s.source_id)+'</b>'+(s.meta&&s.meta.address?'<div style="font-size:11.5px;color:var(--slate)">'+esc(s.meta.address)+'</div>':''),
+          dmN(tot(DM_GBP.search,s.source_id)),dmN(tot(DM_GBP.maps,s.source_id)),dmN(tot(['CALL_CLICKS'],s.source_id)),dmN(tot(['BUSINESS_DIRECTION_REQUESTS'],s.source_id)),
+          dmN(tot(['WEBSITE_CLICKS'],s.source_id)),dmN(tot(['BUSINESS_CONVERSATIONS'],s.source_id))];})));
+    // keywords people searched to find us (Google reports these by month, not by day)
+    const month=kwLatest&&kwLatest[0]&&kwLatest[0].month;
+    if(month){
+      const {data:kw}=await dmCamp().from('dm_gbp_keywords_monthly').select('*').eq('month',month).order('value',{ascending:false,nullsFirst:false}).limit(200);
+      const agg={}; (kw||[]).forEach(function(x){ const a=agg[x.keyword]=agg[x.keyword]||{v:null,t:null}; if(x.value!=null)a.v=(a.v||0)+Number(x.value); if(x.threshold!=null)a.t=Math.max(a.t||0,Number(x.threshold)); });
+      const list=Object.keys(agg).map(function(k){return [k,agg[k]];}).sort(function(a,b){return (b[1].v||0)-(a[1].v||0);}).slice(0,30);
+      html+=dmCard('What people searched to find us · '+esc(new Date(month).toLocaleDateString('en-IN',{month:'long',year:'numeric'})),'Google gives an exact count for common searches and only "fewer than N" for rare ones.',
+        dmTable(['Search term','Times our listing was shown'],list.map(function(x){return [esc(x[0]),x[1].v!=null?dmN(x[1].v):'fewer than '+dmN(x[1].t)];})));
+    }
+    const lname=function(l){ const s=locs.filter(function(x){return x.source_id===l;})[0]; return s?s.label:l; };
+    html+=dmCard('Latest reviews on our listings','Newest first, with whether we have replied.',dmTable(['Date','Listing','Stars','Review','Our reply'],(revs||[]).map(function(x){
+      return [esc(fmtDateShort(x.create_time)),esc(lname(x.location)),x.star_rating!=null?'<b>'+x.star_rating+'</b> ★':'—',esc((x.comment||'(rating only)').slice(0,220)),
+        x.reply_comment?'<span class="tag t-green">Replied</span>':'<span class="tag t-amber">No reply</span>'];}),'No reviews stored yet.'));
+    setTimeout(function(){
+      const days=[...new Set((series||[]).map(function(x){return x.day;}))].sort();
+      const val=function(d,ms){ let s=null; (series||[]).forEach(function(x){ if(x.day===d&&ms.indexOf(x.metric)!==-1&&x.value!=null)s=(s||0)+Number(x.value); }); return s; };
+      dmChart('dmGbpCh',days.map(fmtDateShort),[{label:'Search views',data:days.map(function(d){return val(d,DM_GBP.search);})},{label:'Maps views',data:days.map(function(d){return val(d,DM_GBP.maps);})},
+        {label:'Calls + directions + website',data:days.map(function(d){return val(d,['CALL_CLICKS','BUSINESS_DIRECTION_REQUESTS','WEBSITE_CLICKS']);}),axis:'y2'}]);
+    },0);
+  }
+  // Public ratings: the compare function returns every tracked place with its is_own flag; the
+  // reviews are then asked for only those places, so the 25 newest are the 25 newest ON THIS SIDE
+  // rather than 25 overall with ours (or theirs) filtered out afterwards.
+  const {data:cmpAll,error}=await dmCamp().rpc('dm_places_compare',{p_from:r.from});
+  if(error)throw error;
+  const cmp=(cmpAll||[]).filter(dmInScope);
+  const pids=cmp.map(function(x){return x.place_id;});
+  const {data:prev}=pids.length?await dmCamp().from('dm_place_reviews').select('*').in('place_id',pids).order('publish_time',{ascending:false}).limit(25):{data:[]};
+  html+=dmCard(DM_SCOPE==='brand'?'Our places on Google Maps - public rating':'Competitors on Google Maps','Public rating and number of reviews, read once a day from Google\'s Places API. Change = latest reading minus the one from the start of the period.',
+    dmTable(['Brand','Place','Rating','Reviews','As of'],cmp.map(function(x){
+      const since=x.base_date&&x.base_date>r.from?'<div style="font-size:11px;color:var(--slate)">counting from '+esc(fmtDateShort(x.base_date))+'</div>':'';
+      return [(x.is_own?'<span class="tag t-blue">Ours</span> ':'')+esc(x.brand||(x.is_own?'The Jain Group':'—')),
+        (x.maps_uri?'<a href="'+esc(x.maps_uri)+'" target="_blank" rel="noopener">':'')+esc(x.name||x.label||x.place_id)+(x.maps_uri?'</a>':'')+(x.address?'<div style="font-size:11.5px;color:var(--slate)">'+esc(x.address)+'</div>':''),
+        x.rating!=null?'<b>'+Number(x.rating).toFixed(1)+'</b> ★'+(x.base_rating!=null&&x.base_date!==x.latest_date&&Number(x.base_rating)!==Number(x.rating)?'<div style="font-size:11.5px;color:var(--slate)">was '+Number(x.base_rating).toFixed(1)+'</div>':''):'—',
+        dmN(x.user_ratings_total)+(x.base_date&&x.base_date!==x.latest_date?dmDelta(x.user_ratings_total,x.base_total):'')+since,
+        esc(x.latest_date?fmtDateShort(x.latest_date):'not read yet')];}),'No confirmed places yet - add and confirm them below.'));
+  const plabel={}; cmp.forEach(function(x){ plabel[x.place_id]=(x.brand?x.brand+' · ':'')+(x.name||x.label||''); });
+  html+=dmCard(DM_SCOPE==='brand'?'Newest public reviews on our places':'Newest public reviews on competitors\' places','Google shows at most 5 reviews per place at a time; each one is kept from the day it first appeared.',
+    dmTable(['Date','Place','Stars','Review'],(prev||[]).map(function(x){ return [esc(x.publish_time?fmtDateShort(x.publish_time):'—'),esc(plabel[x.place_id]||x.place_id),x.rating!=null?x.rating+' ★':'—',esc((x.text||'').slice(0,220))]; }),'No reviews stored yet.'));
+  html+=await dmTrackedPlaces();
+  body.innerHTML=html;
+}
+async function dmTrackedPlaces(){
+  const [{data:pl},wl]=await Promise.all([dmCamp().from('dm_places').select('*').order('is_own',{ascending:false}).order('label'),dmWatchlist()]);
+  const name=function(id){ const w=wl.filter(function(x){return x.id===id;})[0]; return w?w.name:'—'; };
+  return dmCard(DM_SCOPE==='brand'?'Our places being tracked':'Competitor places being tracked','Only <b>confirmed</b> places are read. Open each on Google Maps and confirm it is the right office or project before relying on it.',
+    dmTable(['Brand','Place','Status',''],(pl||[]).filter(dmInScope).map(function(x){
+      return [(x.is_own?'<span class="tag t-blue">Ours</span> ':'')+esc(x.is_own&&!x.watchlist_id?'The Jain Group':name(x.watchlist_id)),
+        (x.maps_uri?'<a href="'+esc(x.maps_uri)+'" target="_blank" rel="noopener">'+esc(x.label||x.place_id)+'</a>':esc(x.label||x.place_id))+(x.address?'<div style="font-size:11.5px;color:var(--slate)">'+esc(x.address)+'</div>':''),
+        x.confirmed?'<span class="tag t-green">Confirmed</span>':'<span class="tag t-amber">Waiting for a check</span>',
+        '<div style="display:flex;gap:6px;justify-content:flex-end">'+(x.confirmed?'<button class="btn btn-sm" onclick="dmPlConfirm('+dmArg(x.place_id)+',false)">Pause</button>':'<button class="btn btn-sm btn-primary" onclick="dmPlConfirm('+dmArg(x.place_id)+',true)">Confirm</button>')
+          +'<button class="btn btn-sm" onclick="dmPlRemove('+dmArg(x.place_id)+')"><i class="fa-solid fa-trash"></i></button></div>'];}),'No places yet.'),
+    '<button class="btn btn-sm btn-primary" onclick="dmPlAddModal()"><i class="fa-solid fa-plus"></i> Add place</button>');
+}
+window.dmPlConfirm=async function(id,on){
+  const {error}=await dmCamp().from('dm_places').update({confirmed:on,updated_at:new Date().toISOString()}).eq('place_id',id);
+  if(error)return toast(error.message,'err'); toast(on?'Confirmed - read from tonight (or press Pull now in Our Brand → Setup)':'Paused','ok'); renderPage();
+};
+window.dmPlRemove=async function(id){
+  if(!await confirmDialog('Stop tracking this place and delete its stored readings?'))return;
+  const {error}=await dmCamp().from('dm_places').delete().eq('place_id',id);
+  if(error)return toast(error.message,'err'); renderPage();
+};
+window.dmPlAddModal=async function(){
+  const wl=await dmWatchlist();
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-location-dot" style="color:#16a34a"></i> Add a Google Maps place</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'+dmBrandSelect(wl)
+    +'<label>Search Google Maps (project or office name and area)<input id="dmPlQ" placeholder="Siddha Galaxia Rajarhat" onkeydown="if(event.key===\'Enter\')dmPlFind()"></label>'
+    +'<button class="btn" onclick="dmPlFind()"><i class="fa-solid fa-magnifying-glass"></i> Find</button>'
+    +'<div id="dmPlRes" style="margin-top:12px"></div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>');
+};
+window.dmPlFind=async function(){
+  const box=$('dmPlRes'); box.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  try{
+    const jr=await dmCall({action:'find_place',q:$('dmPlQ').value});
+    box.innerHTML=(jr.results||[]).length?jr.results.map(function(x){
+      return '<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-2)"><div style="flex:1;min-width:0"><b>'+esc(x.name||'')+'</b>'
+        +'<div style="font-size:11.5px;color:var(--slate)">'+esc(x.address||'')+(x.rating!=null?' · '+Number(x.rating).toFixed(1)+' ★ ('+dmN(x.user_ratings_total)+')':'')+'</div></div>'
+        +(x.maps_uri?'<a class="btn btn-sm" href="'+esc(x.maps_uri)+'" target="_blank" rel="noopener">Open</a>':'')
+        +'<button class="btn btn-sm btn-primary" onclick="dmPlAdd('+dmArg(x.place_id)+','+dmArg(x.name||'')+','+dmArg(x.address||'')+','+dmArg(x.maps_uri||'')+')">Add</button></div>';}).join('')
+      :dmNote('fa-circle-info','Nothing found.');
+  }catch(e){ box.innerHTML=dmNote('fa-triangle-exclamation',esc(e.message)); }
+};
+window.dmPlAdd=async function(id,label,address,uri){
+  const b=$('dmBrand').value;
+  const row={place_id:id,label:label||null,address:address||null,maps_uri:uri||null,is_own:b==='own'||(window._dmWl||[]).some(function(w){return String(w.id)===b&&w.category==='brand';}),
+    watchlist_id:b==='own'?null:Number(b),confirmed:false,active:true,updated_at:new Date().toISOString()};
+  const {error}=await dmCamp().from('dm_places').upsert(row,{onConflict:'place_id'});
+  if(error)return toast(error.message,'err');
+  toast('Added - check it on Maps, then press Confirm','ok'); closeModal(); renderPage();
+};
+
+/* ---------------------------------------------------------------- Search Console */
+async function dmSearch(body,r){
+  const sites=(await dmSources('gsc_site')).filter(function(s){return s.enabled;});
+  if(!sites.length){ body.innerHTML=dmCard('Search Console','Our websites in Google Search: clicks, impressions, click rate and position.',dmNeedConnect('Search Console'))
+    +dmNote('fa-lock','Competitors\' Search Console data is private to them - Google offers no way to read it.'); return; }
+  if(!sites.some(function(s){return s.source_id===DM_SITE;}))DM_SITE=sites[0].source_id;
+  const site=DM_SITE;
+  const [{data:days},q,p,c,d]=await Promise.all([
+    dmCamp().from('dm_gsc_rows').select('day,clicks,impressions,ctr,position').eq('site_url',site).eq('dim','date').gte('day',r.from).lte('day',r.to).order('day'),
+    dmCamp().rpc('dm_gsc_top',{p_site:site,p_dim:'query',p_from:r.from,p_to:r.to,p_limit:50}),
+    dmCamp().rpc('dm_gsc_top',{p_site:site,p_dim:'page',p_from:r.from,p_to:r.to,p_limit:30}),
+    dmCamp().rpc('dm_gsc_top',{p_site:site,p_dim:'country',p_from:r.from,p_to:r.to,p_limit:15}),
+    dmCamp().rpc('dm_gsc_top',{p_site:site,p_dim:'device',p_from:r.from,p_to:r.to,p_limit:5})]);
+  const dd=days||[];
+  const clicks=dd.length?dd.reduce(function(a,x){return a+Number(x.clicks||0);},0):null, imps=dd.length?dd.reduce(function(a,x){return a+Number(x.impressions||0);},0):null;
+  const pos=imps?dd.reduce(function(a,x){return a+Number(x.position||0)*Number(x.impressions||0);},0)/imps:null;
+  const t=function(res,first){ return dmTable([first,'Clicks','Impressions','Click rate','Avg position'],((res&&res.data)||[]).map(function(x){
+    return [first==='Page'?'<a href="'+esc(x.key)+'" target="_blank" rel="noopener" style="word-break:break-all">'+esc(x.key.replace(/^https?:\/\/[^/]+/,'')||'/')+'</a>':esc(x.key),dmN(x.clicks),dmN(x.impressions),dmPct(x.ctr),dmN(x.avg_position,1)];})); };
+  body.innerHTML=dmCard('Google Search · '+esc(site),'Clicks and impressions for our site in Google Search. Click rate and position are recomputed from the daily figures (position weighted by impressions). Google keeps rare searches private, so the query table adds up to less than the total.',
+    '<div class="grid kpis" style="margin-bottom:14px">'
+      +dmKpi('Clicks',dmN(clicks),dd.length+' days reported','fa-solid fa-arrow-pointer','#2563eb')
+      +dmKpi('Impressions',dmN(imps),'times we appeared in results','fa-solid fa-eye','#16a34a')
+      +dmKpi('Click rate',imps?dmPct(clicks/imps,2):'—','clicks ÷ impressions','fa-solid fa-percent','#ea580c')
+      +dmKpi('Average position',pos==null?'—':pos.toFixed(1),'1 = top result','fa-solid fa-ranking-star','#9333ea')
+    +'</div><div style="height:240px;margin-bottom:16px"><canvas id="dmGscCh"></canvas></div>'
+    +'<div style="font-weight:700;font-size:13px;margin-bottom:6px">Top searches</div>'+t(q,'Search')
+    +'<div style="font-weight:700;font-size:13px;margin:16px 0 6px">Top pages</div>'+t(p,'Page')
+    +'<div class="grid grid-2" style="margin-top:16px"><div><div style="font-weight:700;font-size:13px;margin-bottom:6px">Country</div>'+t(c,'Country')+'</div>'
+    +'<div><div style="font-weight:700;font-size:13px;margin-bottom:6px">Device</div>'+t(d,'Device')+'</div></div>',
+    sites.length>1?dmSelect('site',sites,site):'')
+    +dmNote('fa-lock','Competitors\' Search Console data is private to them - Google offers no way to read it.');
+  setTimeout(function(){ dmChart('dmGscCh',dd.map(function(x){return fmtDateShort(x.day);}),[{label:'Clicks',data:dd.map(function(x){return x.clicks;})},{label:'Impressions',data:dd.map(function(x){return x.impressions;}),axis:'y2'}]); },0);
+}
+
+/* ---------------------------------------------------------------- Analytics (GA4) */
+async function dmAnalytics(body,r){
+  const props=(await dmSources('ga4_property')).filter(function(s){return s.enabled;});
+  if(!props.length){ body.innerHTML=dmCard('Google Analytics','Our websites\' visitors: users, sessions, where they came from, which pages they landed on, enquiries.',dmNeedConnect('Google Analytics'))
+    +dmNote('fa-circle-check','Checked 16 Oct 2026: thejaingroup.com has GA4 installed (via Google Tag Manager GTM-TSVVQQR, measurement ID G-95JRH2F94T), and so do dreamworldcity.co.in, dreamecocity.com, dreamone.co.in and dreamvalley.net.in.')
+    +dmNote('fa-lock','Competitors\' Analytics data is private to them - Google offers no way to read it.'); return; }
+  if(!props.some(function(s){return s.source_id===DM_PROP;}))DM_PROP=props[0].source_id;
+  const prop=DM_PROP;
+  const [{data:per},{data:days},src,land,city,dev,ev]=await Promise.all([
+    dmCamp().from('dm_ga4_rows').select('day,metrics').eq('property_id',prop).eq('report','period').eq('key',DM_DAYS+'d').lte('day',r.to).order('day',{ascending:false}).limit(1),
+    dmCamp().from('dm_ga4_rows').select('day,metrics').eq('property_id',prop).eq('report','overview').gte('day',r.from).lte('day',r.to).order('day'),
+    dmCamp().rpc('dm_ga4_top',{p_prop:prop,p_report:'source',p_from:r.from,p_to:r.to,p_order:'sessions',p_limit:25}),
+    dmCamp().rpc('dm_ga4_top',{p_prop:prop,p_report:'landing',p_from:r.from,p_to:r.to,p_order:'sessions',p_limit:25}),
+    dmCamp().rpc('dm_ga4_top',{p_prop:prop,p_report:'city',p_from:r.from,p_to:r.to,p_order:'sessions',p_limit:15}),
+    dmCamp().rpc('dm_ga4_top',{p_prop:prop,p_report:'device',p_from:r.from,p_to:r.to,p_order:'sessions',p_limit:5}),
+    dmCamp().rpc('dm_ga4_top',{p_prop:prop,p_report:'event',p_from:r.from,p_to:r.to,p_order:'eventCount',p_limit:25})]);
+  const P=per&&per[0]; const m=P?P.metrics:{};
+  const pd=P?'Google\'s own total for '+esc(fmtDateShort(dmAdd(P.day,-(DM_DAYS-1))))+' – '+esc(fmtDateShort(P.day)):'not read yet';
+  const dd=days||[];
+  const t=function(res,cols){ return dmTable(cols.map(function(c){return c[0];}),((res&&res.data)||[]).map(function(x){
+    return cols.map(function(c,i){ return i===0?esc(c[1](x)):dmN(x.metrics[c[1]]); });}),'Nothing for this period yet.'); };
+  const label=props.filter(function(s){return s.source_id===prop;})[0];
+  body.innerHTML=dmCard('Website visitors · '+esc((label&&label.label)||prop),'GA4. The figures at the top are Google\'s totals for the whole period: users are never added up day by day, because somebody who visits on two days is still one person.',
+    '<div class="grid kpis" style="margin-bottom:14px">'
+      +dmKpi('Users',dmN(m.totalUsers),dmN(m.newUsers)+' new · '+pd,'fa-solid fa-users','#2563eb')
+      +dmKpi('Sessions',dmN(m.sessions),dmN(m.engagedSessions)+' engaged ('+dmPct(m.engagementRate)+')','fa-solid fa-window-maximize','#16a34a')
+      +dmKpi('Pages viewed',dmN(m.screenPageViews),'avg session '+dmDur(m.averageSessionDuration),'fa-solid fa-file-lines','#ea580c')
+      +dmKpi('Key events',dmN(m.keyEvents),'enquiries / form submits marked as key events in GA4','fa-solid fa-flag-checkered','#9333ea')
+    +'</div><div style="height:240px;margin-bottom:16px"><canvas id="dmGaCh"></canvas></div>'
+    +'<div style="font-weight:700;font-size:13px;margin-bottom:6px">Where sessions came from</div>'
+    +dmTable(['Source','Medium','Campaign','Sessions','Engaged','Key events'],((src&&src.data)||[]).map(function(x){
+      return [esc(x.dims.sessionSource||''),esc(x.dims.sessionMedium||''),esc(x.dims.sessionCampaignName||''),dmN(x.metrics.sessions),dmN(x.metrics.engagedSessions),dmN(x.metrics.keyEvents)];}),'Nothing for this period yet.')
+    +'<div style="font-weight:700;font-size:13px;margin:16px 0 6px">Landing pages</div>'
+    +t(land,[['Page',function(x){return x.dims.landingPage||'';}],['Sessions','sessions'],['Engaged','engagedSessions'],['Key events','keyEvents']])
+    +'<div class="grid grid-2" style="margin-top:16px"><div><div style="font-weight:700;font-size:13px;margin-bottom:6px">City</div>'
+    +t(city,[['City',function(x){return x.dims.city||'';}],['Sessions','sessions'],['Key events','keyEvents']])+'</div>'
+    +'<div><div style="font-weight:700;font-size:13px;margin-bottom:6px">Device</div>'
+    +t(dev,[['Device',function(x){return x.dims.deviceCategory||'';}],['Sessions','sessions'],['Engaged','engagedSessions'],['Key events','keyEvents']])+'</div></div>'
+    +'<div style="font-weight:700;font-size:13px;margin:16px 0 6px">Events (form_submit, generate_lead and the rest)</div>'
+    +t(ev,[['Event',function(x){return x.dims.eventName||'';}],['Times','eventCount'],['Counted as key event','keyEvents']]),
+    props.length>1?dmSelect('prop',props,prop):'')
+    +dmNote('fa-lock','Competitors\' Analytics data is private to them - Google offers no way to read it.');
+  setTimeout(function(){ dmChart('dmGaCh',dd.map(function(x){return fmtDateShort(x.day);}),[{label:'Sessions',data:dd.map(function(x){return x.metrics.sessions;})},{label:'Users that day',data:dd.map(function(x){return x.metrics.totalUsers;})},{label:'Key events',data:dd.map(function(x){return x.metrics.keyEvents;}),axis:'y2'}]); },0);
+}
+
+/* ---------------------------------------------------------------- Setup */
+const DM_PARTS=[['yt_public','YouTube - public counts (ours + competitors)','YOUTUBE_API_KEY'],['yt_own','YouTube - our channel analytics','marketing connection'],
+  ['places','Google Maps - public ratings (ours + competitors)','GOOGLE_PLACES_API_KEY'],['gbp','Google Maps - our listings (Business Profile)','marketing connection + Google approval'],
+  ['gsc','Search Console','marketing connection'],['ga4','Analytics (GA4)','marketing connection']];
+const DM_KIND_LABEL={gsc_site:'Search Console sites',ga4_property:'GA4 properties',gbp_location:'Business Profile listings',yt_channel:'YouTube channels'};
+async function dmConnect(body){
+  const [{data:conn},{data:src},{data:log}]=await Promise.all([dmCamp().rpc('dm_connection_status'),
+    dmCamp().from('dm_sources').select('*').order('kind').order('label'),
+    dmCamp().from('dm_sync_log').select('*').order('started_at',{ascending:false}).limit(80)]);
+  const last={}; (log||[]).forEach(function(x){ if(!last[x.part])last[x.part]=x; });
+  const scopes=function(s){ return ['youtube.readonly','yt-analytics.readonly','webmasters.readonly','analytics.readonly','business.manage']
+    .map(function(k){ const ok=String(s||'').indexOf(k)!==-1; return '<span class="tag '+(ok?'t-green':'t-amber')+'" style="margin:2px">'+(ok?'✓ ':'✗ ')+k+'</span>'; }).join(''); };
+  let html=dmCard('Marketing Google connection','A company Google account (ideally a @thejaingroup.com address) that owns or can see our YouTube channel, Search Console sites, GA4 properties and Maps listings. Read-only. Separate from the Calendar / Gmail connection people use for Meetings.',
+    ((conn||[]).length?dmTable(['Google account','Permissions granted','Connected by','When'],(conn||[]).map(function(c){
+      return [esc(c.google_email),scopes(c.scope),esc(c.connected_by||''),esc(fmtDate(c.updated_at))];})):dmNote('fa-plug','Not connected yet.'))
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn btn-primary" onclick="dmConnectGoogle()"><i class="fa-brands fa-google"></i> '+((conn||[]).length?'Reconnect / add another account':'Connect Google for Marketing')+'</button>'
+    +((conn||[]).length?'<button class="btn" id="dmDiscBtn" onclick="dmDiscover()"><i class="fa-solid fa-magnifying-glass"></i> Find our sites, properties, listings and channels</button>':'')+'</div>');
+  const kinds=['yt_channel','gsc_site','ga4_property','gbp_location'];
+  html+=dmCard('What is being pulled','Everything the connected account can see. Switch off anything that is not ours or not wanted.',
+    kinds.map(function(k){ const rows=(src||[]).filter(function(s){return s.kind===k;});
+      return '<div style="font-weight:700;font-size:13px;margin:8px 0 6px">'+DM_KIND_LABEL[k]+'</div>'+dmTable(['Name','ID','Account','Pull'],rows.map(function(s){
+        return [esc(s.label||''),'<code style="font-size:11.5px">'+esc(s.source_id)+'</code>',esc(s.google_email||''),
+          '<label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" '+(s.enabled?'checked':'')+' onchange="dmToggleSource('+dmArg(s.kind)+','+dmArg(s.source_id)+',this.checked)"> '+(s.enabled?'On':'Off')+'</label>'];}),'None found yet.'); }).join(''));
+  html+=dmCard('Nightly pull (02:30 IST)','Last run of each part. "Pull now" runs it immediately; a first pull goes back up to a year (YouTube), 18 months (Maps), 16 months (Search Console) or 6 months (GA4).',
+    dmTable(['Part','Needs','Last run','Result',''],DM_PARTS.map(function(p){ const l=last[p[0]];
+      return [esc(p[1]),'<span style="font-size:12px;color:var(--slate)">'+esc(p[2])+'</span>',l?esc(fmtDate(l.started_at))+' '+esc(new Date(l.started_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})):'never',
+        !l?'—':l.ok===null?'<span class="tag t-blue">running…</span>':l.ok?'<span class="tag t-green">'+dmN(l.rows)+' rows</span>'+(l.message&&l.message!=='ok'?'<div style="font-size:11.5px;color:var(--slate)">'+esc(l.message)+'</div>':''):'<span class="tag" style="background:var(--err-50,#fef2f2);color:#b91c1c">failed</span><div style="font-size:11.5px;color:var(--slate);max-width:420px">'+esc(l.message||'')+'</div>',
+        '<button class="btn btn-sm" id="dmPull_'+p[0]+'" onclick="dmPullNow(\''+p[0]+'\')"><i class="fa-solid fa-rotate"></i> Pull now</button>'];})));
+  html+=dmCard('What only you can do in Google','Full step-by-step guide: <code>docs/digital-metrics-setup.md</code> in the JAIN-E repository.',
+    '<ol style="margin:0 0 0 18px;padding:0;font-size:13.5px;line-height:1.7">'
+    +'<li>Google Cloud Console → <b>APIs &amp; Services → Library</b>: enable YouTube Data API v3, YouTube Analytics API, Google Search Console API, Google Analytics Data API, Google Analytics Admin API, Places API (New), and the Business Profile APIs.</li>'
+    +'<li><b>OAuth consent screen → User type: Internal</b> (needs the Cloud project to sit inside the thejaingroup.com Google Workspace organisation). Internal apps need no Google review and their sign-ins do not expire after 7 days the way "Testing" apps do.</li>'
+    +'<li><b>Credentials → Create API key</b>, restrict it to YouTube Data API v3 and Places API (New), then add it in Supabase → Edge Functions → Secrets as <code>YOUTUBE_API_KEY</code> (and the same or a second key as <code>GOOGLE_PLACES_API_KEY</code>).</li>'
+    +'<li>Business Profile: submit Google\'s API access request form for the Cloud project (one time, usually a few days).</li>'
+    +'<li>Come back here and press <b>Connect Google for Marketing</b> with the company account.</li></ol>');
+  body.innerHTML=html;
+}
+window.dmConnectGoogle=async function(){
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const r=await fetch(SUPABASE_URL+'/functions/v1/google-oauth-start?mode=marketing&return='+encodeURIComponent(location.origin),
+      {headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')}});
+    const jr=await r.json().catch(function(){return {};});
+    if(!r.ok||!jr.url)throw new Error(jr.error||('server said '+r.status));
+    location.href=jr.url;
+  }catch(e){ toast('Could not start the Google connection: '+e.message,'err'); }
+};
+window.dmDiscover=async function(){
+  const b=$('dmDiscBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Looking…';}
+  try{ const jr=await dmCall({action:'discover'});
+    toast('Found '+jr.yt_channel+' channel(s), '+jr.gsc_site+' site(s), '+jr.ga4_property+' GA4 propert'+(jr.ga4_property===1?'y':'ies')+', '+jr.gbp_location+' listing(s)'+(jr.errors&&jr.errors.length?' - '+jr.errors.length+' could not be read (see the run log)':''),jr.errors&&jr.errors.length?'warn':'ok');
+    if(jr.errors&&jr.errors.length)jr.errors.forEach(function(e){console.warn('[digital metrics]',e);});
+  }catch(e){ toast('Discover failed: '+e.message,'err'); }
+  renderPage();
+};
+window.dmToggleSource=async function(kind,id,on){
+  const {error}=await dmCamp().from('dm_sources').update({enabled:on}).eq('kind',kind).eq('source_id',id);
+  if(error){ toast(error.message,'err'); } renderPage();
+};
+window.dmPullNow=async function(part){
+  const b=$('dmPull_'+part); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Pulling…';}
+  try{ const jr=await dmCall({action:'sync',part:part}); const x=jr[part]||{};
+    if(x.ok)toast('Pulled '+dmN(x.rows)+' rows','ok'); else toast(x.error||'failed','err');
+  }catch(e){ toast('Pull failed: '+e.message,'err'); }
+  renderPage();
+};
+
+/* ---- Google Ads Transparency, RERA Projects, Search Trends tabs ------------------------------
+   Public, logged-out data collected by the public-intel edge function (see its header): Google's
+   Ads Transparency Center, the WBRERA project register, and Google Trends.
+   Every figure on these tabs links back to the public page it came from and shows when it was
+   read; a failed read is shown as failed, never filled in.
+
+   ONE SET OF RENDERERS, THREE PAGES. These tabs first sat on the old Competitor Ads page with ours
+   and theirs mixed. The marketing modules were then split by whose data it is, so ciTabView() is
+   now called by each page shell in src/core/40-marketing-modules.js with a scope:
+     'brand'      - Our Brand        (campaigns/google-ads, campaigns/trends, campaigns/rera)
+     'competitor' - Competitor Data  (competitors/google-ads, competitors/trends, competitors/rera)
+     'partner'    - Channel Partners (channel_partners/google-ads)
+   WHOSE A ROW IS comes from camp.pi_targets.watchlist_id -> camp.competitor_watchlist.category
+   ('brand' / 'competitor' / 'partner'; old rows without a category fall back to is_own_brand,
+   the same rule as the Meta tabs - compCategoryOf()). A followed target with no watchlist row is
+   counted as a competitor, except a Search Trends group none of whose terms belongs to anybody
+   (the "Localities" group): that is the market, not a company, and is shown on Competitor Data
+   only, labelled as such.                                                                       */
+const CI_TABS=[
+  ['google-ads','Google Ads Transparency','fa-rectangle-ad','competitors.google_ads.view_google_ads'],
+  ['rera','RERA Projects','fa-landmark','competitors.rera_projects.view_rera_projects'],
+  ['trends','Search Trends','fa-chart-line','competitors.search_trends.view_search_trends']
+];
+// The open tab's side and the route it lives at, set by ciTabView and used by the redraws.
+let CI_SCOPE='competitor', CI_ROUTE='competitors/google-ads';
+function ciCategoryOf(w){ return w?compCategoryOf(w):'competitor'; }
+function ciTargetScope(t){ return t.watchlist_id?ciCategoryOf((window._ciWl||{})[t.watchlist_id]):'competitor'; }
+async function ciLoadWatchlist(){
+  const {data}=await sb.schema('camp').from('competitor_watchlist').select('id,name,category,is_own_brand');
+  window._ciWl={}; (data||[]).forEach(function(w){ window._ciWl[w.id]=w; });
+}
+const CI_SCOPE_WORD={brand:'our brand',competitor:'competitors',partner:'channel partners'};
+const CI_SOURCE_LABEL={google_ads:'Google Ads',rera_list:'RERA project list',rera_detail:'RERA project pages',trends:'Google Trends'};
+let CI_F={wl:'all',fmt:'all',recent:'all',q:'',rq:'',rdist:'all',rfollow:'followed',geo:'IN-WB'};
+
+const CI_CSS='<style>'
+  +'.ci-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg-card);margin-bottom:14px}'
+  +'.ci-bar select{height:36px;padding:0 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer}'
+  +'.ci-bar input{height:36px;padding:0 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink);flex:1;min-width:200px;max-width:360px}'
+  +'</style>';
+// Typing in a search box redraws the list; put the cursor back where it was.
+function ciSearchInput(id,key,paint,ph){
+  return '<input id="'+id+'" placeholder="'+esc(ph)+'" value="'+esc(CI_F[key])+'" oninput="CI_F.'+key+'=this.value;clearTimeout(window._ciT);window._ciT=setTimeout(function(){'+paint+'();var e=document.getElementById(\''+id+'\');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}},350)">';
+}
+function ciAgo(d){
+  if(!d) return '—';
+  const m=Math.round((Date.now()-new Date(d).getTime())/60000);
+  if(m<1) return 'just now'; if(m<60) return m+' min ago';
+  const h=Math.round(m/60); if(h<48) return h+' h ago';
+  return Math.round(h/24)+' days ago';
+}
+function ciDateTime(d){ return d?new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—'; }
+async function ciAll(q){
+  // PostgREST pages at 1000 rows; the RERA register is ~5,000.
+  const out=[]; for(let from=0;;from+=1000){
+    const {data,error}=await q().range(from,from+999);
+    if(error) throw error;
+    out.push.apply(out,data||[]); if(!data||data.length<1000) break;
+  }
+  return out;
+}
+
+/* Draws one of the three tabs into host, below the calling page's header and tab bar.
+   tab: 'google-ads' | 'rera' | 'trends'. scope: 'brand' | 'competitor' | 'partner'.
+   route: where this tab lives (e.g. 'campaigns/rera'), so Fetch now redraws the same tab.
+   The usage catalogue's three keys belong to the competitors module (erp_feature_catalog), so a
+   view is logged against them only on Competitor Data - logging Our Brand's RERA tab as a
+   competitors feature would put a visit on the wrong module's line in the Usability report. */
+async function ciTabView(host,tab,scope,route){
+  const t=CI_TABS.filter(function(x){ return x[0]===tab; })[0]||CI_TABS[0];
+  CI_SCOPE=scope||'competitor'; CI_ROUTE=route||('competitors/'+t[0]);
+  if(CI_SCOPE==='competitor'){ try{ usageQueue(t[3],'view'); }catch(e){} }
+  host.innerHTML=CI_CSS+'<div id="ciRuns"></div>'
+    +'<div id="ciBody"><div class="loader"><div class="spin"></div></div></div>';
+  window._ciTab=t[0];
+  try{
+    await ciLoadWatchlist();
+    if(t[0]==='google-ads') await ciGads();
+    else if(t[0]==='rera') await ciRera();
+    else await ciTrends();
+  }catch(e){
+    const b=$('ciBody'); if(b) b.innerHTML='<div class="card card-pad" style="color:#b91c1c"><i class="fa-solid fa-circle-exclamation"></i> Could not load: '+esc(e.message||String(e))+'</div>';
+  }
+}
+
+// ---------------------------------------------------------------- collection status + Fetch now
+async function ciRunsPanel(sources,blurb){
+  const {data}=await sb.schema('camp').from('pi_runs').select('*').in('source',sources).order('started_at',{ascending:false}).limit(40);
+  const runs=data||[];
+  const last={}; runs.forEach(function(r){ if(!last[r.source]) last[r.source]=r; });
+  const chips=sources.map(function(s){
+    const r=last[s];
+    if(!r) return '<span class="tag t-gray">'+esc(CI_SOURCE_LABEL[s])+': not run yet</span>';
+    const cls=r.ok===true?'t-green':(r.ok===false?(r.refused?'t-amber':'t-red'):'t-gray');
+    const word=r.ok===true?'ok':(r.ok===false?(r.refused?'site asked us to slow down':'failed'):'running');
+    return '<span class="tag '+cls+'" title="'+esc((r.error||r.note||'')+' ('+(r.unit||'')+')')+'">'+esc(CI_SOURCE_LABEL[s])+': '+word+' · '+ciAgo(r.started_at)+'</span>';
+  }).join(' ');
+  const rows=runs.slice(0,25).map(function(r){
+    return '<tr><td>'+ciDateTime(r.started_at)+'</td><td>'+esc(CI_SOURCE_LABEL[r.source]||r.source)+'</td>'
+      +'<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.unit||'')+'">'+esc(r.unit||'')+'</td>'
+      +'<td>'+(r.ok===true?'<span class="tag t-green">ok</span>':r.ok===false?(r.refused?'<span class="tag t-amber">refused</span>':'<span class="tag t-red">failed</span>'):'<span class="tag t-gray">running</span>')+'</td>'
+      +'<td style="text-align:right">'+(r.items==null?'—':r.items)+'</td>'
+      +'<td style="font-size:11.5px;color:var(--slate);max-width:420px;word-break:break-word">'+esc(r.error||r.note||'')+'</td></tr>';
+  }).join('');
+  const btn=sources.filter(function(s){ return s!=='rera_list'; })[0];
+  $('ciRuns').innerHTML='<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 12px">'
+      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">'+blurb+'</p>'
+      +'<button class="btn" id="ciFetchBtn" onclick="ciFetchNow(\''+btn+'\')"><i class="fa-solid fa-rotate"></i> Fetch next now</button>'
+    +'</div>'
+    +'<details class="card" style="margin-bottom:14px"><summary style="cursor:pointer;padding:11px 15px;font-size:13px;list-style:none;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+      +'<i class="fa-solid fa-clock-rotate-left" style="color:#0369a1"></i> <b>Collection log</b> '+chips
+      +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate)">click to open / close</span></summary>'
+      +'<div style="overflow-x:auto;border-top:1px solid var(--line)"><table class="tbl" style="width:100%;font-size:12.5px">'
+        +'<thead><tr><th>Started</th><th>Source</th><th>What</th><th>Result</th><th style="text-align:right">Rows</th><th>Note / error</th></tr></thead>'
+        +'<tbody>'+(rows||'<tr><td colspan="6" style="color:var(--slate)">Nothing collected yet - the schedule runs every 5 minutes.</td></tr>')+'</tbody></table></div>'
+    +'</details>';
+}
+window.ciFetchNow=async function(source){
+  const b=$('ciFetchBtn'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Fetching - up to a minute…'; }
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const res=await fetch(SUPABASE_URL+'/functions/v1/public-intel',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+((session&&session.access_token)||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({action:'tick',source:source})});
+    const jr=await res.json().catch(function(){ return {}; });
+    if(!res.ok||jr.error) throw new Error(jr.error||('HTTP '+res.status));
+    const r=(jr.results||[])[0]||{};
+    if(r.skipped) toast('Not fetched: '+r.skipped,'warn');
+    else if(r.ok) toast('Fetched '+(r.items||0)+' row(s) - '+(r.unit||''),'ok');
+    else toast('Failed: '+(r.error||'unknown'),'err');
+  }catch(e){ toast('Fetch failed: '+(e.message||e),'err'); }
+  navTo(CI_ROUTE);
+};
+
+// ---------------------------------------------------------------- Google Ads
+async function ciGads(){
+  await ciRunsPanel(['google_ads'],'Ads that Google shows in its public <a href="https://adstransparency.google.com/?region=IN" target="_blank" rel="noopener">Ads Transparency Center</a> for India - the creative, its format, and the first and last day Google shows it running. Google does not publish spend or clicks. Each advertiser is read once a day.');
+  // Only the open side's advertisers, and only their creatives (asked for by watchlist id, so a
+  // busy competitor's thousands are never downloaded to draw our own handful).
+  const tg=await sb.schema('camp').from('pi_targets').select('*').eq('source','google_ads').order('sort');
+  const targets=(tg.data||[]).filter(function(t){ return t.watchlist_id&&ciTargetScope(t)===CI_SCOPE; });
+  const ids=[]; targets.forEach(function(t){ if(ids.indexOf(t.watchlist_id)<0) ids.push(t.watchlist_id); });
+  const ads=ids.length?await ciAll(function(){ return sb.schema('camp').from('pi_gads_creatives').select('creative_id,advertiser_id,advertiser_name,domain,format,first_shown,last_shown,days_shown,image_url,watchlist_id,fetched_at,first_seen_at,source_url').in('watchlist_id',ids).order('last_shown',{ascending:false}); }):[];
+  window._ciAds=ads; window._ciGTargets=targets;
+  if(CI_F.wl!=='all'&&ids.map(String).indexOf(CI_F.wl)<0) CI_F.wl='all';
+  ciGadsPaint();
+}
+function ciGadsPaint(){
+  const ads=window._ciAds||[], targets=window._ciGTargets||[], W=window._ciWl||{};
+  const wlIds=[]; targets.forEach(function(t){ if(t.watchlist_id&&wlIds.indexOf(t.watchlist_id)<0) wlIds.push(t.watchlist_id); });
+  if(!wlIds.length){
+    $('ciBody').innerHTML='<div class="card card-pad" style="color:var(--slate);font-size:13px"><i class="fa-solid fa-circle-info"></i> No Google advertiser is followed for '+esc(CI_SCOPE_WORD[CI_SCOPE]||CI_SCOPE)+' yet. '
+      +'Followed advertisers are rows in camp.pi_targets (source google_ads) whose watchlist entry is '+(CI_SCOPE==='partner'?'a channel partner':CI_SCOPE==='brand'?'one of our brands':'a competitor')+'; there is no screen to add them yet.</div>';
+    return;
+  }
+  const since30=Date.now()-30*864e5;
+  const summary=wlIds.map(function(id){
+    const a=ads.filter(function(x){ return x.watchlist_id===id; });
+    const cnt=function(f){ return a.filter(function(x){ return x.format===f; }).length; };
+    const recent=a.filter(function(x){ return x.last_shown&&new Date(x.last_shown).getTime()>=since30; }).length;
+    const who=targets.filter(function(t){ return t.watchlist_id===id; }).map(function(t){
+      const url=t.kind==='advertiser'?'https://adstransparency.google.com/advertiser/'+t.value+'?region=IN':'https://adstransparency.google.com/?region=IN&domain='+encodeURIComponent(t.value);
+      return '<a href="'+url+'" target="_blank" rel="noopener" title="'+esc(t.kind)+'">'+esc(t.label||t.value)+'</a>';
+    }).join('<br>');
+    const w=W[id]||{};
+    return '<tr style="cursor:pointer" onclick="ciGSet(\'wl\',\''+id+'\')"><td><b>'+esc(w.name||('#'+id))+'</b> '+(w.category==='brand'?'<span class="tag t-blue">ours</span>':'')+'</td>'
+      +'<td style="font-size:11.5px">'+who+'</td>'
+      +'<td style="text-align:center">'+a.length+'</td><td style="text-align:center">'+recent+'</td>'
+      +'<td style="text-align:center">'+cnt('text')+'</td><td style="text-align:center">'+cnt('image')+'</td><td style="text-align:center">'+cnt('video')+'</td></tr>';
+  }).join('');
+  const q=(CI_F.q||'').toLowerCase();
+  const rows=ads.filter(function(a){
+    if(CI_F.wl!=='all'&&String(a.watchlist_id)!==CI_F.wl) return false;
+    if(CI_F.fmt!=='all'&&a.format!==CI_F.fmt) return false;
+    if(CI_F.recent==='30'&&!(a.last_shown&&new Date(a.last_shown).getTime()>=since30)) return false;
+    if(q&&[a.advertiser_name,a.domain,a.creative_id].join(' ').toLowerCase().indexOf(q)<0) return false;
+    return true;
+  });
+  const opts=[['all','All advertisers']].concat(wlIds.map(function(id){ return [String(id),(W[id]||{}).name||('#'+id)]; }));
+  const card=function(a){
+    return '<div class="card" style="overflow:hidden;display:flex;flex-direction:column">'
+      +'<div style="height:150px;background:var(--bg-soft,#f1f5f9);display:flex;align-items:center;justify-content:center;overflow:hidden">'
+        +(a.image_url?'<img src="'+esc(a.image_url)+'" loading="lazy" referrerpolicy="no-referrer" style="max-width:100%;max-height:150px;object-fit:contain">'
+          :'<a href="'+esc(a.source_url)+'" target="_blank" rel="noopener" style="font-size:12.5px;text-align:center;padding:10px"><i class="fa-solid '+(a.format==='video'?'fa-video':'fa-font')+'" style="font-size:22px;display:block;margin-bottom:6px"></i>'+(a.format==='video'?'Video ad':'Text ad')+' - open on Google</a>')
+      +'</div>'
+      +'<div style="padding:9px 11px;font-size:12px;line-height:1.5">'
+        +'<div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(a.advertiser_name||'')+'">'+esc(a.advertiser_name||a.advertiser_id)+'</div>'
+        +'<div style="color:var(--slate)">'+esc(a.domain||'')+' · <span class="tag t-gray">'+esc(a.format||'?')+'</span></div>'
+        +'<div>'+fmtDate(a.first_shown)+' → '+fmtDate(a.last_shown)+(a.days_shown!=null?' · '+a.days_shown+' days':'')+'</div>'
+        +'<div style="color:var(--slate);font-size:11px">read '+ciAgo(a.fetched_at)+' · <a href="'+esc(a.source_url)+'" target="_blank" rel="noopener">source</a></div>'
+      +'</div></div>';
+  };
+  $('ciBody').innerHTML='<div class="card" style="margin-bottom:14px;overflow-x:auto"><table class="tbl" style="width:100%;font-size:12.5px">'
+      +'<thead><tr><th>'+({brand:'Brand',competitor:'Competitor',partner:'Channel partner'}[CI_SCOPE]||'Brand / competitor')+'</th><th>Google advertiser / website</th><th style="text-align:center">Ads stored</th><th style="text-align:center" title="Last shown within 30 days">Shown in last 30 days</th><th style="text-align:center">Text</th><th style="text-align:center">Image</th><th style="text-align:center">Video</th></tr></thead>'
+      +'<tbody>'+summary+'</tbody></table></div>'
+    +'<div class="ci-bar">'
+      +compSelHtml('ciGWl',opts,CI_F.wl,"ciGSet('wl',this.value)")
+      +compSelHtml('ciGFmt',[['all','All formats'],['text','Text'],['image','Image'],['video','Video']],CI_F.fmt,"ciGSet('fmt',this.value)")
+      +compSelHtml('ciGRec',[['all','Any time'],['30','Shown in last 30 days']],CI_F.recent,"ciGSet('recent',this.value)")
+      +ciSearchInput('ciGQ','q','ciGadsPaint','Search advertiser or website')
+      +'<span style="margin-left:auto;font-size:12.5px;color:var(--slate)">'+rows.length+' ad'+(rows.length===1?'':'s')+(rows.length>200?' (first 200 shown)':'')+'</span>'
+    +'</div>'
+    +(rows.length?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">'+rows.slice(0,200).map(card).join('')+'</div>'
+      :'<div class="card card-pad" style="color:var(--slate)">No ads stored for this selection yet.</div>');
+}
+window.ciGSet=function(k,v){ CI_F[k]=v; ciGadsPaint(); };
+
+// ---------------------------------------------------------------- RERA
+async function ciRera(){
+  await ciRunsPanel(['rera_list','rera_detail'],'Every project on the public <a href="https://rera.wb.gov.in/district_project.php?dcode=0" target="_blank" rel="noopener">WBRERA register</a>. The list is read weekly; each project\'s own page (promoter, flats, areas, status, extension) is read one by one, a few a minute - the first full pass takes about three days. Followed promoters are re-read weekly and changes are logged.');
+  /* Our Brand sees only our own promoters' projects: the register is read for exactly those names
+     (WBRERA's spelling, which is what pi_targets stores) instead of all ~5,000 projects. Competitor
+     Data reads the whole register, because "All promoters" is where new competitor promoters get
+     picked out - but every project of one of OUR promoters is taken out of it first. */
+  const tg=await sb.schema('camp').from('pi_targets').select('*').eq('source','rera');
+  const allTargets=tg.data||[];
+  const ownNames=allTargets.filter(function(t){ return ciTargetScope(t)==='brand'; }).map(function(t){ return String(t.value); });
+  const cols='procode,project_id,name,reg_no,reg_date,completion_date,district,block,project_status,extension_date,apartments,land_area_sqm,promoter_name,promoter_cin,promoter_website,litigations,detail_fetched_at,detail_error,source_url,list_seen_at';
+  const brand=CI_SCOPE==='brand';
+  const [projects,ch,rej]=await Promise.all([
+    brand?(ownNames.length?ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).in('promoter_name',ownNames).order('reg_date',{ascending:false}); }):Promise.resolve([]))
+      :ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).order('reg_date',{ascending:false}); }),
+    sb.schema('camp').from('pi_rera_changes').select('*').order('changed_at',{ascending:false}).limit(brand?200:60),
+    sb.schema('camp').from('pi_rera_rejected').select('project_id',{count:'exact',head:true})
+  ]);
+  const own={}; ownNames.forEach(function(n){ own[n.toLowerCase()]=1; });
+  const mine=projects.filter(function(p){ return !!own[String(p.promoter_name||'').toLowerCase()]; });
+  window._ciRera=brand?mine:projects.filter(function(p){ return !own[String(p.promoter_name||'').toLowerCase()]; });
+  window._ciRTargets=allTargets.filter(function(t){ return ciTargetScope(t)===(brand?'brand':'competitor'); });
+  // Changes only for projects on this side; the change log itself does not carry a promoter.
+  const on={}; window._ciRera.forEach(function(p){ on[p.procode]=1; });
+  window._ciRChanges=(ch.data||[]).filter(function(c){ return on[c.procode]; }).slice(0,30);
+  window._ciRRej=rej.count||0;
+  if(brand) CI_F.rfollow='followed';
+  ciReraPaint();
+}
+function ciReraPaint(){
+  const all=window._ciRera||[], targets=window._ciRTargets||[], brand=CI_SCOPE==='brand';
+  const followed={}; targets.forEach(function(t){ followed[String(t.value).toLowerCase()]=t; });
+  const read=all.filter(function(p){ return p.detail_fetched_at; }).length;
+  const failed=all.filter(function(p){ return p.detail_error; }).length;
+  const dists={}; all.forEach(function(p){ if(p.district) dists[p.district]=1; });
+  const q=(CI_F.rq||'').toLowerCase();
+  const rows=all.filter(function(p){
+    // A search looks through the whole register; without one, the chosen promoter filter applies.
+    if(!q&&CI_F.rfollow==='followed'&&!followed[String(p.promoter_name||'').toLowerCase()]) return false;
+    if(CI_F.rdist!=='all'&&p.district!==CI_F.rdist) return false;
+    if(q&&[p.name,p.promoter_name,p.district,p.block,p.reg_no,p.project_id].join(' ').toLowerCase().indexOf(q)<0) return false;
+    return true;
+  });
+  // Promoters among the rows, biggest first - this is where competitor promoters get picked out.
+  const byProm={}; rows.forEach(function(p){
+    const k=p.promoter_name||'(page not read yet)';
+    const o=byProm[k]||(byProm[k]={n:0,flats:0,d:{}}); o.n++; o.flats+=p.apartments||0; if(p.district) o.d[p.district]=1;
+  });
+  const prom=Object.keys(byProm).sort(function(a,b){ return byProm[b].n-byProm[a].n; }).slice(0,15).map(function(k){
+    const o=byProm[k];
+    return '<tr style="cursor:pointer" onclick="ciRSet(\'rq\','+esc(JSON.stringify(k==='(page not read yet)'?'':k))+')"><td>'+esc(k)+(followed[k.toLowerCase()]?' <span class="tag t-blue">followed</span>':'')+'</td><td style="text-align:center">'+o.n+'</td><td style="text-align:center">'+o.flats+'</td><td>'+esc(Object.keys(o.d).join(', '))+'</td></tr>';
+  }).join('');
+  const tr=function(p){
+    return '<tr><td><a href="'+esc(p.source_url||('https://rera.wb.gov.in/project_details.php?procode='+p.procode))+'" target="_blank" rel="noopener"><b>'+esc(p.name||'')+'</b></a><div style="font-size:11px;color:var(--slate)">'+esc(p.reg_no||'')+'</div></td>'
+      +'<td>'+esc(p.promoter_name||'—')+'</td>'
+      +'<td>'+esc([p.block,p.district].filter(Boolean).join(', ')||'—')+'</td>'
+      +'<td>'+esc(p.project_status||'—')+'</td>'
+      +'<td style="text-align:right">'+(p.apartments==null?'—':p.apartments)+'</td>'
+      +'<td>'+fmtDate(p.reg_date)+'</td><td>'+fmtDate(p.completion_date)+'</td>'
+      +'<td>'+esc(p.extension_date&&p.extension_date!=='NA'?p.extension_date:'—')+'</td>'
+      +'<td style="font-size:11px;color:var(--slate)">'+(p.detail_error?'<span class="tag t-red" title="'+esc(p.detail_error)+'">read failed</span>':(p.detail_fetched_at?ciAgo(p.detail_fetched_at):'list only'))+'</td></tr>';
+  };
+  const chg=(window._ciRChanges||[]).map(function(c){
+    const p=all.filter(function(x){ return x.procode===c.procode; })[0]||{};
+    return '<tr><td>'+ciDateTime(c.changed_at)+'</td><td>'+esc(p.name||c.procode)+'</td><td>'+esc(c.field)+'</td><td>'+esc(c.old_value||'—')+'</td><td>'+esc(c.new_value||'—')+'</td></tr>';
+  }).join('');
+  $('ciBody').innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+      +'<span class="tag t-gray">'+all.length+(brand?' of our projects on the register (promoter'+(targets.length===1?'':'s')+': '+esc(targets.map(function(t){ return t.value; }).join(', ')||'none followed')+')':' approved projects on the register, ours left out')+'</span>'
+      +'<span class="tag '+(read===all.length&&all.length?'t-green':'t-amber')+'">project pages read: '+read+' of '+all.length+'</span>'
+      +(failed?'<span class="tag t-red">'+failed+' page(s) could not be read</span>':'')
+      +(brand?'':'<span class="tag t-gray">'+window._ciRRej+' rejected / revoked</span>')
+    +'</div>'
+    +'<div class="ci-bar">'
+      +(brand?'':compSelHtml('ciRF',[['followed','Followed competitor promoters ('+targets.length+')'],['all','All promoters']],CI_F.rfollow,"ciRSet('rfollow',this.value)"))
+      +compSelHtml('ciRD',[['all','All districts']].concat(Object.keys(dists).sort().map(function(d){ return [d,d]; })),CI_F.rdist,"ciRSet('rdist',this.value)")
+      +ciSearchInput('ciRQ','rq','ciReraPaint','Search project, promoter, area, reg. no.')
+      +'<span style="margin-left:auto;font-size:12.5px;color:var(--slate)">'+rows.length+' project'+(rows.length===1?'':'s')+(q?' in the whole register':'')+(rows.length>300?' (first 300 shown)':'')+'</span>'
+    +'</div>'
+    +'<div class="card" style="margin-bottom:14px;overflow-x:auto"><div style="padding:10px 14px;font-weight:700;font-size:13px">Promoters in this view</div>'
+      +'<table class="tbl" style="width:100%;font-size:12.5px"><thead><tr><th>Promoter (as WBRERA prints it)</th><th style="text-align:center">Projects</th><th style="text-align:center">Flats</th><th>Districts</th></tr></thead><tbody>'
+      +(prom||'<tr><td colspan="4" style="color:var(--slate)">No projects in this view yet'+(brand?' - the promoter name comes from each project\'s own page, so our projects appear here as those pages are read.'
+        :CI_F.rfollow==='followed'?' - project pages are still being read; switch to "All promoters" to search the whole register.':'.')+'</td></tr>')+'</tbody></table></div>'
+    +'<div class="card" style="margin-bottom:14px;overflow-x:auto"><table class="tbl" style="width:100%;font-size:12.5px">'
+      +'<thead><tr><th>Project</th><th>Promoter</th><th>Area</th><th>Status</th><th style="text-align:right">Flats</th><th>Registered</th><th>Completion</th><th>Extended to</th><th>Page read</th></tr></thead>'
+      +'<tbody>'+rows.slice(0,300).map(tr).join('')+'</tbody></table></div>'
+    +(chg?'<div class="card" style="overflow-x:auto"><div style="padding:10px 14px;font-weight:700;font-size:13px">Recent changes on the register</div><table class="tbl" style="width:100%;font-size:12.5px"><thead><tr><th>Seen</th><th>Project</th><th>Field</th><th>Was</th><th>Now</th></tr></thead><tbody>'+chg+'</tbody></table></div>':'');
+}
+window.ciRSet=function(k,v){ CI_F[k]=v; if(k==='rq'&&v) CI_F.rfollow='all'; ciReraPaint(); };
+
+// ---------------------------------------------------------------- Search Trends
+async function ciTrends(){
+  await ciRunsPanel(['trends'],'Weekly Google search interest over the last 12 months, from <a href="https://trends.google.com/trends/explore?geo=IN-WB" target="_blank" rel="noopener">Google Trends</a>. Google gives an index, not search counts: 100 is the busiest week of the busiest term <i>in that chart</i>. Every chart includes "flats in kolkata", so charts can be compared through it. Kolkata on its own is not a region Google Trends offers, so the regions are West Bengal and India. Each chart is refreshed weekly.');
+  const [pts,tg,runs]=await Promise.all([
+    ciAll(function(){ return sb.schema('camp').from('pi_trends_points').select('*').order('week_start'); }),
+    sb.schema('camp').from('pi_targets').select('*').eq('source','trends').order('grp').order('sort'),
+    sb.schema('camp').from('pi_runs').select('unit,note,started_at').eq('source','trends').eq('ok',true).order('started_at',{ascending:false}).limit(100)
+  ]);
+  /* A group is drawn whole or not at all - Google scales every term in a request against the
+     others in that same request, so lifting one term out of its chart would change what its line
+     means. A group belongs to the side its terms belong to (the anchor term has no owner and does
+     not count); a group with no owned term at all is market context, shown on Competitor Data. */
+  const all=tg.data||[];
+  const side={};
+  all.forEach(function(t){ if(t.kind==='anchor'||!t.watchlist_id) return; side[t.grp]=side[t.grp]||ciTargetScope(t); });
+  const market={};
+  const keep=all.filter(function(t){
+    const s=side[t.grp]||'market'; if(s==='market') market[t.grp]=1;
+    return s===CI_SCOPE||(s==='market'&&CI_SCOPE==='competitor');
+  });
+  window._ciPts=pts; window._ciTT=keep; window._ciTMarket=market; window._ciTRuns=runs.data||[];
+  ciTrendsPaint();
+}
+function ciTrendsPaint(){
+  const pts=window._ciPts||[], tg=window._ciTT||[];
+  const groups=[]; tg.forEach(function(t){ if(groups.indexOf(t.grp)<0) groups.push(t.grp); });
+  if(!groups.length){
+    $('ciBody').innerHTML='<div class="card card-pad" style="color:var(--slate);font-size:13px"><i class="fa-solid fa-circle-info"></i> No Search Trends group is followed for '+esc(CI_SCOPE_WORD[CI_SCOPE]||CI_SCOPE)+' yet.</div>';
+    return;
+  }
+  const colors=['#0369a1','#16a34a','#d97706','#7c3aed','#94a3b8'];
+  let html='<div class="ci-bar">'
+    +compSelHtml('ciTGeo',[['IN-WB','West Bengal'],['IN','India']],CI_F.geo,"CI_F.geo=this.value;ciTrendsPaint()")+'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:14px">';
+  groups.forEach(function(g,gi){
+    const p=pts.filter(function(x){ return x.grp===g&&x.geo===CI_F.geo; });
+    const run=(window._ciTRuns||[]).filter(function(r){ return r.unit===g+'|'+CI_F.geo; })[0];
+    const link=run&&run.note?String(run.note).split(' | ')[0]:'';
+    const terms=tg.filter(function(t){ return t.grp===g; }).map(function(t){ return t.value; });
+    const none=terms.filter(function(t){ return p.length&&!p.some(function(x){ return x.term===t&&x.has_data; }); });
+    html+='<div class="card card-pad"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b>'+esc(g)+'</b>'
+      +((window._ciTMarket||{})[g]?' <span class="tag t-gray" title="None of these terms is a company - general searches for the market">market</span>':'')
+      +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate)">'+(p.length?'read '+ciAgo(p[0].fetched_at):'not fetched yet')+(link?' · <a href="'+esc(link)+'" target="_blank" rel="noopener">open on Google</a>':'')+'</span></div>'
+      +(p.length?'<div style="height:220px"><canvas id="ciTC'+gi+'"></canvas></div>':'<div style="color:var(--slate);font-size:12.5px;padding:30px 0;text-align:center">Waiting for the weekly fetch.</div>')
+      +(none.length?'<div style="font-size:11.5px;color:#b45309;margin-top:6px">Too few searches for Google to show: '+esc(none.join(', '))+'</div>':'')
+    +'</div>';
+  });
+  $('ciBody').innerHTML=html+'</div>';
+  groups.forEach(function(g,gi){
+    const c=$('ciTC'+gi); if(!c||typeof Chart==='undefined') return;
+    const p=pts.filter(function(x){ return x.grp===g&&x.geo===CI_F.geo; });
+    const weeks=[]; p.forEach(function(x){ if(weeks.indexOf(x.week_start)<0) weeks.push(x.week_start); });
+    const terms=tg.filter(function(t){ return t.grp===g; });
+    new Chart(c,{type:'line',data:{labels:weeks.map(function(w){ return fmtDateShort(w); }),datasets:terms.map(function(t,i){
+      return {label:t.value,data:weeks.map(function(w){ const x=p.filter(function(y){ return y.week_start===w&&y.term===t.value; })[0]; return x&&x.has_data?x.value:null; }),
+        borderColor:t.kind==='anchor'?colors[4]:colors[i%4],borderDash:t.kind==='anchor'?[4,4]:[],borderWidth:2,pointRadius:0,tension:.25,spanGaps:false};
+    })},options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{min:0,max:100}},plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7,font:{size:11}}}}}});
+  });
+}
+
+/* ============================ MARKETING MODULES ============================
+   Our Brand · Competitor Data · Channel Partners (16 Oct 2026).
+
+   WHY THREE PAGES. Marketing data used to be grouped by SOURCE: Campaign Analytics (our paid
+   campaigns), Competitor Ads (Meta Ad Library for competitors AND our own pages AND channel
+   partners, plus Google Ads / RERA / Trends for everybody) and Digital Metrics (Google data for us
+   beside competitors). The same screen kept mixing our figures with theirs. It is now grouped by
+   WHOSE data it is:
+     Our Brand        (module id 'campaigns')        - every tab about us, nothing about anybody else
+     Competitor Data  (module id 'competitors')      - competitors only
+     Channel Partners (module id 'channel_partners') - our channel partners only
+   The first two keep their old module ids on purpose: people's access lives in adm.users.modules
+   by id, and renaming the id would have silently taken both pages away from everybody holding
+   them (the recruitment -> recruitment_new lesson, see MODULE_RENAMES in 06-nav.js). Only the
+   labels changed (NAV in 06-nav.js, the page headers and crumbs). Channel Partners is new, so it
+   needs its own grant: anyone who should see it must hold 'channel_partners'.
+
+   NOTHING IS DRAWN TWICE. This file only owns the page shells - header, crumb, tab bar - and hands
+   each tab to the renderer that already existed, telling it whose rows to show:
+     Meta Ad Library      compMetaView(host, 'brands' | 'competitors' | 'partners')  28-campaign-trends.js
+     YouTube, Maps, GSC,
+     GA4, Setup           dmTabView(host, tab, 'brand' | 'competitor')               38-digital-metrics.js
+     Google Ads Transp.,
+     Search Trends, RERA  ciTabView(host, tab, 'brand' | 'competitor' | 'partner', route)  39-competitor-intel.js
+   The old Campaign Analytics tabs (numeric routes campaigns/0..6, which USAGE_VIEWS and bookmarks
+   use) are untouched and drawn by the original VIEWS.campaigns; the new tabs have readable named
+   routes (campaigns/meta-ads, competitors/youtube, channel_partners/google-ads, ...).
+
+   Each tab entry: [route segment, title, icon classes, renderer: 'meta' | 'dm' | 'ci']. */
+const MK_SEP='<div style="width:1px;background:var(--line);margin:6px 4px"></div>';
+function mkTab(base,t,active){
+  return '<div class="tab '+(active===t[0]?'active':'')+'" onclick="navTo(\''+base+(t[0]?'/'+t[0]:'')+'\')"><i class="'+t[2]+'"></i> '+esc(t[1])+'</div>';
+}
+// One tab of any of the three pages, into host. scope is the renderers' word for whose rows.
+async function mkDrawTab(host,base,t,scope,metaKey){
+  if(t[3]==='meta') return compMetaView(host,metaKey);
+  if(t[3]==='dm') return dmTabView(host,t[0],scope);
+  return ciTabView(host,t[0],scope,base+'/'+t[0]);
+}
+
+/* ---------------------------------------------------------------- Our Brand ('campaigns') */
+const OB_TABS=[
+  ['meta-ads','Meta Ad Library','fa-brands fa-meta','meta'],
+  ['youtube','YouTube','fa-brands fa-youtube','dm'],
+  ['maps','Google Maps','fa-solid fa-location-dot','dm'],
+  ['search-console','Search Console','fa-solid fa-magnifying-glass','dm'],
+  ['analytics','Analytics','fa-solid fa-chart-line','dm'],
+  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci'],
+  ['trends','Search Trends','fa-solid fa-arrow-trend-up','ci'],
+  ['rera','RERA','fa-solid fa-landmark','ci'],
+  ['setup','Setup','fa-solid fa-plug','dm']
+];
+/* The Our Brand tab bar: the analytics tabs of the chosen source (cmpBaseTabs - Meta / Google /
+   Both), a divider, then the tabs above. ti is the open analytics tab (-1 when one of ours is
+   open); extra is the open named tab. Drawn by the analytics views themselves too, so the bar is
+   the same whichever kind of tab is open. */
+function cmpTabsBar(tabs,ti,extra){
+  return '<div class="tabs">'+tabs.map(function(t,i){
+      return '<div class="tab '+(i===ti?'active':'')+'" onclick="navTo(\'campaigns/'+i+'\')">'+esc(t)+'</div>';
+    }).join('')+MK_SEP+OB_TABS.map(function(t){ return mkTab('campaigns',t,extra); }).join('')+'</div>';
+}
+const _obAnalyticsView=VIEWS.campaigns;
+VIEWS.campaigns=async function(v,seg){
+  dmOauthReturn();                         // back from Google's consent screen (Setup tab)
+  let want=seg&&seg[0];
+  if(want==='connect') want='setup';       // the old Digital Metrics route name
+  if(want==='search') want='search-console';
+  const t=OB_TABS.filter(function(x){ return x[0]===want; })[0];
+  if(!t) return _obAnalyticsView(v,seg);
+  setCrumb(['Growth & Strategy','Our Brand',t[1]]);
+  v.innerHTML=mHead('fa-bullhorn','#db2777','Our Brand')+cmpTabsBar(cmpBaseTabs(),-1,t[0])
+    +'<div id="mkHost" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
+  await mkDrawTab($('mkHost'),'campaigns',t,'brand','brands');
+};
+
+/* ---------------------------------------------------------------- Competitor Data ('competitors') */
+const CD_TABS=[
+  ['','Meta Ads','fa-brands fa-meta','meta'],
+  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci'],
+  ['youtube','YouTube','fa-brands fa-youtube','dm'],
+  ['maps','Google Maps','fa-solid fa-location-dot','dm'],
+  ['trends','Search Trends','fa-solid fa-arrow-trend-up','ci'],
+  ['rera','RERA Projects','fa-solid fa-landmark','ci']
+];
+VIEWS.competitors=async function(v,seg){
+  const want=(seg&&seg[0])||'';
+  // The two tabs that moved out of this page. An old bookmark follows them rather than landing on
+  // the competitors' ads and leaving the person wondering where ours went.
+  if(want==='brands'){ navTo('campaigns/meta-ads'); return; }
+  if(want==='partners'){ navTo('channel_partners'); return; }
+  const t=CD_TABS.filter(function(x){ return x[0]===want; })[0]||CD_TABS[0];
+  setCrumb(['Growth & Strategy','Competitor Data',t[1]]);
+  v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Data')
+    +'<div class="tabs" style="margin-top:-6px">'+CD_TABS.map(function(x){ return mkTab('competitors',x,t[0]); }).join('')+'</div>'
+    +'<div id="mkHost"><div class="loader"><div class="spin"></div></div></div>';
+  await mkDrawTab($('mkHost'),'competitors',t,'competitor','competitors');
+};
+
+/* ---------------------------------------------------------------- Channel Partners ('channel_partners')
+   Meta Ads is the old Channel Partners tab of Competitor Ads (watchlist category 'partner').
+   Google Ads Transparency shows advertisers followed in camp.pi_targets whose watchlist entry is
+   a partner - the data model tells partners apart through that category, but none is followed
+   yet, so the tab says so until one is added. YouTube / Maps / Trends / RERA are not offered:
+   dm_yt_channels and dm_places only know "ours or not" (is_own), and Trends and RERA follow
+   developers, not brokers. */
+const CP_TABS=[
+  ['','Meta Ads','fa-brands fa-meta','meta'],
+  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci']
+];
+VIEWS.channel_partners=async function(v,seg){
+  const want=(seg&&seg[0])||'';
+  const t=CP_TABS.filter(function(x){ return x[0]===want; })[0]||CP_TABS[0];
+  setCrumb(['Growth & Strategy','Channel Partners',t[1]]);
+  v.innerHTML=mHead('fa-people-arrows','#0f766e','Channel Partners')
+    +'<div class="tabs" style="margin-top:-6px">'+CP_TABS.map(function(x){ return mkTab('channel_partners',x,t[0]); }).join('')+'</div>'
+    +'<div id="mkHost"><div class="loader"><div class="spin"></div></div></div>';
+  await mkDrawTab($('mkHost'),'channel_partners',t,'partner','partners');
+};
