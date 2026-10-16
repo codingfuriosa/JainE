@@ -88,6 +88,18 @@ Deno.serve(async (req) => {
   if (!who.ok) return j({ error: "Please sign in again." }, 401);
   const email = String((await who.json()).email || "").toLowerCase();
   let body: any = {}; try { body = await req.json(); } catch { /* empty */ }
+  // Connection check for whoever is signed in: does Wheredoc answer, and does the token match?
+  // Says only that - no Wheredoc data comes back.
+  if (body.action === "ping") {
+    // check_email: is that person a Wheredoc user (yes/no only) - e.g. before Tapan's first filing
+    const who = String(body.check_email || email).trim().toLowerCase();
+    try { await wdOptions(WD, who); return j({ ok: true, connected: true, email: who, wheredoc_user: true }); }
+    catch (e) {
+      const m = String((e as Error).message || e);
+      if (/is not a Wheredoc user/.test(m)) return j({ ok: true, connected: true, email: who, wheredoc_user: false });
+      return j({ ok: false, connected: false, error: m === "not allowed" ? "Wheredoc refused the token - WHEREDOC_API_TOKEN and JAINE_API_TOKEN differ." : m });
+    }
+  }
   const fcsId = Number(body.fcs_id || 0);
   if (!fcsId) return j({ error: "fcs_id is required" }, 400);
 
