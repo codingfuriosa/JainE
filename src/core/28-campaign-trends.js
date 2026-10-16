@@ -3226,7 +3226,10 @@ async function compMetaView(host,key){
         +' Meta never publishes spend or reach for ordinary commercial ads.</p>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
         +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add '+esc(compTabNoun())+'</button>'
-        +'<button class="btn btn-primary" id="compSyncBtn" onclick="compManualPull()"><i class="fa-solid fa-rotate"></i> Pull all now</button>'
+        // Competitor Data has no pull button (16 Oct 2026, as asked): competitors' pages are pulled
+        // only by the weekly cron (competitor-ads-weekly-enqueue / -queue-worker). Our Brand and
+        // Channel Partners keep it.
+        +(COMP_TAB==='competitors'?'':'<button class="btn btn-primary" id="compSyncBtn" onclick="compManualPull()"><i class="fa-solid fa-rotate"></i> Pull all now</button>')
       +'</div>'
     +'</div>'
     +'<div id="compPullStatus"></div>'
@@ -3397,7 +3400,7 @@ function compPaint(){
     +'<div class="comp-grid" id="compGrid"></div>'
     +'<div class="empty" id="compEmpty" style="padding:36px;display:none"><i class="fa-regular fa-folder-open"></i>'
       +'<div>No ads stored for these filters.</div>'
-      +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px">Try a wider date range or Active &amp; inactive, or press <b>Fetch from Meta</b> to pull the latest now.</div>'
+      +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px">Try a wider date range or Active &amp; inactive'+(COMP_TAB==='competitors'?' - new ads arrive with the weekly automatic pull.':', or press <b>Pull all now</b> to pull the latest.')+'</div>'
     +'</div>';
   compPaintGrid();
 }

@@ -19497,7 +19497,10 @@ async function compMetaView(host,key){
         +' Meta never publishes spend or reach for ordinary commercial ads.</p>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
         +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add '+esc(compTabNoun())+'</button>'
-        +'<button class="btn btn-primary" id="compSyncBtn" onclick="compManualPull()"><i class="fa-solid fa-rotate"></i> Pull all now</button>'
+        // Competitor Data has no pull button (16 Oct 2026, as asked): competitors' pages are pulled
+        // only by the weekly cron (competitor-ads-weekly-enqueue / -queue-worker). Our Brand and
+        // Channel Partners keep it.
+        +(COMP_TAB==='competitors'?'':'<button class="btn btn-primary" id="compSyncBtn" onclick="compManualPull()"><i class="fa-solid fa-rotate"></i> Pull all now</button>')
       +'</div>'
     +'</div>'
     +'<div id="compPullStatus"></div>'
@@ -19668,7 +19671,7 @@ function compPaint(){
     +'<div class="comp-grid" id="compGrid"></div>'
     +'<div class="empty" id="compEmpty" style="padding:36px;display:none"><i class="fa-regular fa-folder-open"></i>'
       +'<div>No ads stored for these filters.</div>'
-      +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px">Try a wider date range or Active &amp; inactive, or press <b>Fetch from Meta</b> to pull the latest now.</div>'
+      +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px">Try a wider date range or Active &amp; inactive'+(COMP_TAB==='competitors'?' - new ads arrive with the weekly automatic pull.':', or press <b>Pull all now</b> to pull the latest.')+'</div>'
     +'</div>';
   compPaintGrid();
 }
@@ -32903,21 +32906,27 @@ window.dmPullNow=async function(part){
 /* ---- Google Ads Transparency, RERA Projects, Search Trends tabs ------------------------------
    Public, logged-out data collected by the public-intel edge function (see its header): Google's
    Ads Transparency Center, the WBRERA project register, and Google Trends.
-   Every figure on these tabs links back to the public page it came from and shows when it was
-   read; a failed read is shown as failed, never filled in.
+   Every figure on these tabs is exactly what the source shows; a value the source does not give is
+   shown as a dash or "not read yet", never filled in.
 
    ONE SET OF RENDERERS, THREE PAGES. These tabs first sat on the old Competitor Ads page with ours
    and theirs mixed. The marketing modules were then split by whose data it is, so ciTabView() is
    now called by each page shell in src/core/40-marketing-modules.js with a scope:
      'brand'      - Our Brand        (campaigns/google-ads, campaigns/trends, campaigns/rera)
      'competitor' - Competitor Data  (competitors/google-ads, competitors/trends, competitors/rera)
-     'partner'    - Channel Partners (channel_partners/google-ads)
+     'partner'    - Channel Partners (no longer drawn - that page is Meta only)
    WHOSE A ROW IS comes from camp.pi_targets.watchlist_id -> camp.competitor_watchlist.category
    ('brand' / 'competitor' / 'partner'; old rows without a category fall back to is_own_brand,
    the same rule as the Meta tabs - compCategoryOf()). A followed target with no watchlist row is
    counted as a competitor, except a Search Trends group none of whose terms belongs to anybody
    (the "Localities" group): that is the market, not a company, and is shown on Competitor Data
-   only, labelled as such.                                                                       */
+   only, labelled as such.
+
+   DATA FIRST (16 Oct 2026, as asked). No collection log and, on Competitor Data, no fetch buttons:
+   collection runs only on the 5-minute schedule, and each tab says when it was last updated. Our
+   Brand keeps its "Fetch next now". Google ads are shown inside JainE - picture, rendered text ad
+   or YouTube player - instead of sending people to Google; which Google account paid for an ad is
+   not shown: every ad found under a competitor's accounts or website counts as that competitor's. */
 const CI_TABS=[
   ['google-ads','Google Ads Transparency','fa-rectangle-ad','competitors.google_ads.view_google_ads'],
   ['rera','RERA Projects','fa-landmark','competitors.rera_projects.view_rera_projects'],
@@ -32932,17 +32941,50 @@ async function ciLoadWatchlist(){
   window._ciWl={}; (data||[]).forEach(function(w){ window._ciWl[w.id]=w; });
 }
 const CI_SCOPE_WORD={brand:'our brand',competitor:'competitors',partner:'channel partners'};
-const CI_SOURCE_LABEL={google_ads:'Google Ads',rera_list:'RERA project list',rera_detail:'RERA project pages',trends:'Google Trends'};
-let CI_F={wl:'all',gown:'all',fmt:'all',recent:'all',q:'',rq:'',rdist:'all',rfollow:'followed',geo:'IN-WB'};
+let CI_F={wl:'all',fmt:'all',recent:'all',q:'',rq:'',rdist:'all',geo:'IN-WB'};
+// How many ad cards / register rows are drawn; "Show more" adds a page. Reset by every filter.
+const CI_PAGE=60;
+let CI_SHOW=CI_PAGE, CI_RSHOW=100;
 
 const CI_CSS='<style>'
   +'.ci-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg-card);margin-bottom:14px}'
   +'.ci-bar select{height:36px;padding:0 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer}'
   +'.ci-bar input{height:36px;padding:0 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink);flex:1;min-width:200px;max-width:360px}'
+  +'.ci-upd{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--slate);margin:0 0 12px;flex-wrap:wrap}'
+  +'.ci-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}'
+  +'.ci-ad{border:1px solid var(--line);border-radius:12px;background:var(--bg-card);overflow:hidden;cursor:pointer;display:flex;flex-direction:column;transition:box-shadow .15s,transform .15s}'
+  +'.ci-ad:hover{box-shadow:0 6px 18px rgba(15,23,42,.12);transform:translateY(-1px)}'
+  +'.ci-pv{height:180px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;border-bottom:1px solid var(--line)}'
+  +'.ci-pv img{max-width:100%;max-height:100%;object-fit:contain;display:block}'
+  +'.ci-pv img.cover{width:100%;height:100%;object-fit:cover}'
+  +'.ci-pv .none{color:#64748b;font-size:12px;text-align:center;padding:12px;line-height:1.5}'
+  +'.ci-pv .none i{font-size:22px;display:block;margin-bottom:6px;opacity:.6}'
+  +'.ci-play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}'
+  +'.ci-play span{width:48px;height:48px;border-radius:50%;background:rgba(0,0,0,.62);color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;padding-left:3px;box-sizing:border-box}'
+  +'.ci-dur{position:absolute;right:7px;bottom:7px;background:rgba(0,0,0,.75);color:#fff;font-size:10.5px;border-radius:4px;padding:1px 6px}'
+  +'.ci-serp{background:#fff;color:#202124;padding:13px 15px;width:100%;height:100%;box-sizing:border-box;text-align:left;font-family:Arial,Helvetica,sans-serif;overflow:hidden}'
+  +'.ci-serp .sp{font-size:11.5px;font-weight:700;color:#202124}'
+  +'.ci-serp .du{font-size:12px;color:#4d5156;margin:1px 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.ci-serp .hl{font-size:15.5px;color:#1a0dab;line-height:1.3;margin-bottom:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}'
+  +'.ci-serp .ds{font-size:12.5px;color:#4d5156;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}'
+  +'.ci-serp .kw{text-decoration:underline dotted;text-underline-offset:3px}'
+  +'.ci-serp.big{padding:20px 22px;border:1px solid #dadce0;border-radius:10px}'
+  +'.ci-serp.big .hl{font-size:20px;-webkit-line-clamp:unset}'
+  +'.ci-serp.big .ds{font-size:14px;-webkit-line-clamp:unset}'
+  +'.ci-serp .sl{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:13.5px}'
+  +'.ci-serp .sl span{color:#1a0dab}'
+  +'.ci-serp .cta{display:inline-block;margin-top:10px;border:1px solid #dadce0;border-radius:16px;padding:4px 12px;font-size:12.5px;color:#1a73e8}'
+  +'.ci-meta{padding:10px 12px 12px;font-size:12px;line-height:1.55;flex:1;display:flex;flex-direction:column;gap:4px}'
+  +'.ci-meta .ttl{font-weight:600;font-size:12.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}'
+  +'.ci-meta .when{color:var(--slate);font-size:11.5px;margin-top:auto}'
+  +'.tbl tr.sel td{background:rgba(3,105,161,.08)}'
+  +'.ci-num{text-align:center;font-variant-numeric:tabular-nums}'
+  +'.ci-up{color:#15803d;font-weight:600}.ci-down{color:#b91c1c;font-weight:600}.ci-flat{color:var(--slate)}'
+  +'.ci-explain{background:var(--bg-card);border:1px solid var(--line);border-left:4px solid #0369a1;border-radius:10px;padding:12px 15px;font-size:13px;line-height:1.6;margin-bottom:14px}'
   +'</style>';
 // Typing in a search box redraws the list; put the cursor back where it was.
 function ciSearchInput(id,key,paint,ph){
-  return '<input id="'+id+'" placeholder="'+esc(ph)+'" value="'+esc(CI_F[key])+'" oninput="CI_F.'+key+'=this.value;clearTimeout(window._ciT);window._ciT=setTimeout(function(){'+paint+'();var e=document.getElementById(\''+id+'\');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}},350)">';
+  return '<input id="'+id+'" placeholder="'+esc(ph)+'" value="'+esc(CI_F[key])+'" oninput="CI_F.'+key+'=this.value;CI_SHOW=CI_PAGE;CI_RSHOW=100;clearTimeout(window._ciT);window._ciT=setTimeout(function(){'+paint+'();var e=document.getElementById(\''+id+'\');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}},350)">';
 }
 function ciAgo(d){
   if(!d) return '—';
@@ -32952,8 +32994,9 @@ function ciAgo(d){
   return Math.round(h/24)+' days ago';
 }
 function ciDateTime(d){ return d?new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—'; }
+function ciN(n){ return n==null?'—':Number(n).toLocaleString('en-IN'); }
 async function ciAll(q){
-  // PostgREST pages at 1000 rows; the RERA register is ~5,000.
+  // PostgREST pages at 1000 rows; the RERA register is ~5,000 and a busy advertiser has thousands of ads.
   const out=[]; for(let from=0;;from+=1000){
     const {data,error}=await q().range(from,from+999);
     if(error) throw error;
@@ -32971,6 +33014,7 @@ async function ciAll(q){
 async function ciTabView(host,tab,scope,route){
   const t=CI_TABS.filter(function(x){ return x[0]===tab; })[0]||CI_TABS[0];
   CI_SCOPE=scope||'competitor'; CI_ROUTE=route||('competitors/'+t[0]);
+  CI_SHOW=CI_PAGE; CI_RSHOW=100;
   if(CI_SCOPE==='competitor'){ try{ usageQueue(t[3],'view'); }catch(e){} }
   host.innerHTML=CI_CSS+'<div id="ciRuns"></div>'
     +'<div id="ciBody"><div class="loader"><div class="spin"></div></div></div>';
@@ -32985,37 +33029,21 @@ async function ciTabView(host,tab,scope,route){
   }
 }
 
-// ---------------------------------------------------------------- collection status + Fetch now
-async function ciRunsPanel(sources,blurb){
-  const {data}=await sb.schema('camp').from('pi_runs').select('*').in('source',sources).order('started_at',{ascending:false}).limit(40);
-  const runs=data||[];
-  const last={}; runs.forEach(function(r){ if(!last[r.source]) last[r.source]=r; });
-  const chips=sources.map(function(s){
-    const r=last[s];
-    if(!r) return '<span class="tag t-gray">'+esc(CI_SOURCE_LABEL[s])+': not run yet</span>';
-    const cls=r.ok===true?'t-green':(r.ok===false?(r.refused?'t-amber':'t-red'):'t-gray');
-    const word=r.ok===true?'ok':(r.ok===false?(r.refused?'site asked us to slow down':'failed'):'running');
-    return '<span class="tag '+cls+'" title="'+esc((r.error||r.note||'')+' ('+(r.unit||'')+')')+'">'+esc(CI_SOURCE_LABEL[s])+': '+word+' · '+ciAgo(r.started_at)+'</span>';
-  }).join(' ');
-  const rows=runs.slice(0,25).map(function(r){
-    return '<tr><td>'+ciDateTime(r.started_at)+'</td><td>'+esc(CI_SOURCE_LABEL[r.source]||r.source)+'</td>'
-      +'<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.unit||'')+'">'+esc(r.unit||'')+'</td>'
-      +'<td>'+(r.ok===true?'<span class="tag t-green">ok</span>':r.ok===false?(r.refused?'<span class="tag t-amber">refused</span>':'<span class="tag t-red">failed</span>'):'<span class="tag t-gray">running</span>')+'</td>'
-      +'<td style="text-align:right">'+(r.items==null?'—':r.items)+'</td>'
-      +'<td style="font-size:11.5px;color:var(--slate);max-width:420px;word-break:break-word">'+esc(r.error||r.note||'')+'</td></tr>';
-  }).join('');
-  const btn=sources.filter(function(s){ return s!=='rera_list'; })[0];
-  $('ciRuns').innerHTML='<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 12px">'
-      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">'+blurb+'</p>'
-      +'<button class="btn" id="ciFetchBtn" onclick="ciFetchNow(\''+btn+'\')"><i class="fa-solid fa-rotate"></i> Fetch next now</button>'
+// ---------------------------------------------------------------- "updated automatically" line
+/* What used to be the Collection log. People want the data, not the log: one line saying the tab
+   fills itself and when it last did, plus anything still in progress (extra). Our Brand keeps its
+   "Fetch next now" button; Competitor Data has none - only the schedule collects there. */
+async function ciStatus(sources,blurb,extra){
+  const {data}=await sb.schema('camp').from('pi_runs').select('finished_at').in('source',sources).eq('ok',true).order('finished_at',{ascending:false}).limit(1);
+  const last=data&&data[0]&&data[0].finished_at;
+  const btn=CI_SCOPE==='brand'?sources.filter(function(s){ return s!=='rera_list'&&s!=='gads_detail'; })[0]:null;
+  $('ciRuns').innerHTML='<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 8px">'
+      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px;line-height:1.55">'+blurb+'</p>'
+      +(btn?'<button class="btn" id="ciFetchBtn" onclick="ciFetchNow(\''+btn+'\')"><i class="fa-solid fa-rotate"></i> Fetch next now</button>':'')
     +'</div>'
-    +'<details class="card" style="margin-bottom:14px"><summary style="cursor:pointer;padding:11px 15px;font-size:13px;list-style:none;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
-      +'<i class="fa-solid fa-clock-rotate-left" style="color:#0369a1"></i> <b>Collection log</b> '+chips
-      +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate)">click to open / close</span></summary>'
-      +'<div style="overflow-x:auto;border-top:1px solid var(--line)"><table class="tbl" style="width:100%;font-size:12.5px">'
-        +'<thead><tr><th>Started</th><th>Source</th><th>What</th><th>Result</th><th style="text-align:right">Rows</th><th>Note / error</th></tr></thead>'
-        +'<tbody>'+(rows||'<tr><td colspan="6" style="color:var(--slate)">Nothing collected yet - the schedule runs every 5 minutes.</td></tr>')+'</tbody></table></div>'
-    +'</details>';
+    +'<div class="ci-upd"><i class="fa-solid fa-clock-rotate-left" style="color:#0369a1"></i> Updated automatically'
+      +(last?' - last updated <b title="'+esc(ciDateTime(last))+'">'+ciAgo(last)+'</b>':' - nothing collected yet')
+      +(extra?' · '+extra:'')+'</div>';
 }
 window.ciFetchNow=async function(source){
   const b=$('ciFetchBtn'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Fetching - up to a minute…'; }
@@ -33028,228 +33056,270 @@ window.ciFetchNow=async function(source){
     if(!res.ok||jr.error) throw new Error(jr.error||('HTTP '+res.status));
     const r=(jr.results||[])[0]||{};
     if(r.skipped) toast('Not fetched: '+r.skipped,'warn');
-    else if(r.ok) toast('Fetched '+(r.items||0)+' row(s) - '+(r.unit||''),'ok');
+    else if(r.ok) toast('Fetched '+(r.items||0)+' row(s)','ok');
     else toast('Failed: '+(r.error||'unknown'),'err');
   }catch(e){ toast('Fetch failed: '+(e.message||e),'err'); }
   navTo(CI_ROUTE);
 };
 
 // ---------------------------------------------------------------- Google Ads
+const CI_FMT_WORD={text:'Text ad',image:'Image ad',video:'Video ad'};
+const CI_GCOLS='creative_id,format,first_shown,last_shown,days_shown,image_url,watchlist_id,ad_layout,ad_headline,ad_long_headline,ad_description,ad_display_url,ad_business,ad_cta,ad_image_url,ad_logo_url,video_id,video_duration,ad_extra,detail_at,detail_error';
 async function ciGads(){
-  await ciRunsPanel(['google_ads'],'Ads that Google shows in its public <a href="https://adstransparency.google.com/?region=IN" target="_blank" rel="noopener">Ads Transparency Center</a> for India - the creative, its format, and the first and last day Google shows it running. Google does not publish spend or clicks, and gives no city - these are India-wide (Godrej, for one, advertises all over India). Each advertiser is read once a day.');
-  // Only the open side's advertisers, and only their creatives (asked for by watchlist id, so a
-  // busy competitor's thousands are never downloaded to draw our own handful).
+  // Only the open side's companies, and only their creatives (asked for by watchlist id, so a busy
+  // competitor's thousands are never downloaded to draw our own handful).
   const tg=await sb.schema('camp').from('pi_targets').select('*').eq('source','google_ads').order('sort');
   const targets=(tg.data||[]).filter(function(t){ return t.watchlist_id&&ciTargetScope(t)===CI_SCOPE; });
   const ids=[]; targets.forEach(function(t){ if(ids.indexOf(t.watchlist_id)<0) ids.push(t.watchlist_id); });
-  const [ads,gr]=await Promise.all([
-    ids.length?ciAll(function(){ return sb.schema('camp').from('pi_gads_creatives').select('creative_id,advertiser_id,advertiser_name,domain,format,first_shown,last_shown,days_shown,image_url,watchlist_id,fetched_at,first_seen_at,source_url').in('watchlist_id',ids).order('last_shown',{ascending:false}); }):Promise.resolve([]),
-    sb.schema('camp').from('pi_runs').select('unit,ok,refused,note,error,started_at').eq('source','google_ads').order('started_at',{ascending:false}).limit(200)
-  ]);
-  /* The newest finished read of each followed advertiser / website, so the table can tell
-     "not read yet" and "Google lists more than we keep" apart from a real count. */
-  const lastRun={}; (gr.data||[]).forEach(function(r){ if(r.ok!=null&&!lastRun[r.unit]) lastRun[r.unit]=r; });
-  window._ciAds=ads; window._ciGTargets=targets; window._ciGRuns=lastRun;
+  const ads=ids.length?await ciAll(function(){ return sb.schema('camp').from('pi_gads_creatives').select(CI_GCOLS).in('watchlist_id',ids).order('last_shown',{ascending:false}).order('creative_id'); }):[];
+  window._ciAds=ads; window._ciGTargets=targets;
   if(CI_F.wl!=='all'&&ids.map(String).indexOf(CI_F.wl)<0) CI_F.wl='all';
+  /* Still in progress: a company whose ad list Google has not been read to the end, and ads whose
+     words / picture / video are not read yet. Said plainly so a small count is not taken as final. */
+  const W=window._ciWl||{};
+  const reading={}; targets.forEach(function(t){ if(t.cursor||!t.full_at) reading[t.watchlist_id]=1; });
+  const readingNames=Object.keys(reading).map(function(id){ return (W[id]||{}).name||('#'+id); });
+  const pending=ads.filter(function(a){ return !a.detail_at&&(!a.image_url||a.format==='video'); }).length;
+  const extra=[readingNames.length?'still reading the full ad list for <b>'+esc(readingNames.join(', '))+'</b> - more ads appear as it goes':'',
+    pending?ciN(pending)+' ad'+(pending===1?'':'s')+' still being opened to show their content':''].filter(Boolean).join(' · ');
+  await ciStatus(['google_ads','gads_detail'],'Every ad Google shows for '+(CI_SCOPE==='brand'?'us':'each competitor')+' in its public Ads Transparency Center (India) - the ad itself, its format, and the first and last day Google showed it. Google publishes no spend, clicks or city, so these are India-wide'+(CI_SCOPE==='brand'?'':' (Godrej, for one, advertises all over India)')+'. Click an ad to see it full size.',extra);
   ciGadsPaint();
+}
+const ciRecent=function(a){ return a.last_shown&&new Date(a.last_shown).getTime()>=Date.now()-30*864e5; };
+// Google's keyword insertion: {KeyWord:Flats in Madhyamgram} shows the searched words, or the
+// words after the colon when they do not fit. The default is what is shown, marked as such.
+function ciKw(s){
+  return esc(s||'').replace(/\{key[wW]ord:([^}]*)\}/gi,function(_,d){ return '<span class="kw" title="Google puts the person\'s own search words here; these are the words it shows otherwise">'+d+'</span>'; });
+}
+// The ad drawn the way Google shows a search ad: Sponsored, web address, blue headline, text.
+function ciSerp(a,big){
+  const ex=a.ad_extra||{};
+  return '<div class="ci-serp'+(big?' big':'')+'">'
+    +'<div class="sp">Sponsored</div>'
+    +(a.ad_business&&big?'<div style="font-size:13px;color:#202124;margin-top:3px">'+esc(a.ad_business)+'</div>':'')
+    +'<div class="du">'+esc(a.ad_display_url||'')+'</div>'
+    +'<div class="hl">'+ciKw(a.ad_headline)+'</div>'
+    +'<div class="ds">'+ciKw(a.ad_description)+'</div>'
+    +(big&&ex.sitelinks&&ex.sitelinks.length?'<div class="sl">'+ex.sitelinks.map(function(s){ return '<span>'+esc(s)+'</span>'; }).join('')+'</div>':'')
+    +(big&&(ex.place||ex.address)?'<div style="font-size:13px;color:#4d5156;margin-top:10px"><i class="fa-solid fa-location-dot"></i> '+esc([ex.place,ex.address].filter(Boolean).join(' - '))+'</div>':'')
+    +(big&&a.ad_cta?'<div class="cta">'+esc(a.ad_cta)+'</div>':'')
+  +'</div>';
+}
+function ciYtThumb(id){ return 'https://i.ytimg.com/vi/'+encodeURIComponent(id)+'/hqdefault.jpg'; }
+// The preview area of a card: the ad's own picture, a rendered text ad, or the video's still.
+function ciAdPreview(a){
+  if(a.video_id) return '<img class="cover" src="'+esc(ciYtThumb(a.video_id))+'" loading="lazy" referrerpolicy="no-referrer" alt="">'
+    +'<div class="ci-play"><span><i class="fa-solid fa-play"></i></span></div>'+(a.video_duration?'<span class="ci-dur">'+esc(a.video_duration)+'</span>':'');
+  if(a.image_url) return '<img src="'+esc(a.image_url)+'" loading="lazy" referrerpolicy="no-referrer" alt="">';
+  if(a.ad_image_url) return '<img class="cover" src="'+esc(a.ad_image_url)+'" loading="lazy" referrerpolicy="no-referrer" alt="">';
+  if(a.ad_headline) return ciSerp(a,false);
+  if(!a.detail_at) return '<div class="none"><i class="fa-solid fa-hourglass-half"></i>Being read from Google<br>- shows here within a few hours</div>';
+  return '<div class="none"><i class="fa-regular fa-eye-slash"></i>Google does not show this ad\'s content</div>';
+}
+function ciAdCard(a,showWho){
+  const W=window._ciWl||{};
+  const ttl=(a.video_id||a.ad_image_url)?(a.ad_headline||''):'';
+  return '<div class="ci-ad" onclick="ciAdOpen(\''+esc(a.creative_id)+'\')">'
+    +'<div class="ci-pv">'+ciAdPreview(a)+'</div>'
+    +'<div class="ci-meta">'
+      +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+        +'<span class="tag t-gray">'+esc(CI_FMT_WORD[a.format]||'Ad')+'</span>'
+        +(ciRecent(a)?'<span class="tag t-green" title="Google showed this ad in the last 30 days">Active</span>':'')
+        +(showWho?'<span style="margin-left:auto;font-weight:700;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px" title="'+esc((W[a.watchlist_id]||{}).name||'')+'">'+esc((W[a.watchlist_id]||{}).name||'')+'</span>':'')
+      +'</div>'
+      +(ttl?'<div class="ttl">'+ciKw(ttl)+'</div>':'')
+      +'<div class="when">Running since '+fmtDate(a.first_shown)+' · last seen '+fmtDate(a.last_shown)+'</div>'
+    +'</div></div>';
+}
+function ciGadsRows(){
+  const ads=window._ciAds||[], q=(CI_F.q||'').toLowerCase();
+  return ads.filter(function(a){
+    if(CI_F.wl!=='all'&&String(a.watchlist_id)!==CI_F.wl) return false;
+    if(CI_F.fmt!=='all'&&a.format!==CI_F.fmt) return false;
+    if(CI_F.recent==='30'&&!ciRecent(a)) return false;
+    if(q&&[a.ad_headline,a.ad_long_headline,a.ad_description,a.ad_display_url,a.ad_business].join(' ').toLowerCase().indexOf(q)<0) return false;
+    return true;
+  });
 }
 function ciGadsPaint(){
   const ads=window._ciAds||[], targets=window._ciGTargets||[], W=window._ciWl||{};
   const wlIds=[]; targets.forEach(function(t){ if(t.watchlist_id&&wlIds.indexOf(t.watchlist_id)<0) wlIds.push(t.watchlist_id); });
   if(!wlIds.length){
-    $('ciBody').innerHTML='<div class="card card-pad" style="color:var(--slate);font-size:13px"><i class="fa-solid fa-circle-info"></i> No Google advertiser is followed for '+esc(CI_SCOPE_WORD[CI_SCOPE]||CI_SCOPE)+' yet. '
-      +'Followed advertisers are rows in camp.pi_targets (source google_ads) whose watchlist entry is '+(CI_SCOPE==='partner'?'a channel partner':CI_SCOPE==='brand'?'one of our brands':'a competitor')+'; there is no screen to add them yet.</div>';
+    $('ciBody').innerHTML='<div class="card card-pad" style="color:var(--slate);font-size:13px"><i class="fa-solid fa-circle-info"></i> No Google advertiser is followed for '+esc(CI_SCOPE_WORD[CI_SCOPE]||CI_SCOPE)+' yet.</div>';
     return;
   }
-  const since30=Date.now()-30*864e5, R=window._ciGRuns||{};
-  /* WHOSE AD IT IS. A website is followed as well as the company's own Google account, and Google
-     lists every advertiser whose ads lead to that website - a broker or channel partner advertising
-     the developer's site shows up there too (DTC's site brings Caifu Wealth Creators' ads). Those are
-     real ads for the brand but not the brand's own spending, so they are counted apart and tagged,
-     never added into the brand's own figures. "Own" = an advertiser account followed for that
-     brand; when only a website is followed, its biggest advertiser is taken as the brand's own. */
-  const ownAdv={};
-  wlIds.forEach(function(id){
-    const accs=targets.filter(function(t){ return t.watchlist_id===id&&t.kind==='advertiser'; }).map(function(t){ return String(t.value); });
-    if(!accs.length){
-      const n={}; ads.forEach(function(x){ if(x.watchlist_id===id) n[x.advertiser_id]=(n[x.advertiser_id]||0)+1; });
-      const top=Object.keys(n).sort(function(a,b){ return n[b]-n[a]; })[0]; if(top) accs.push(top);
-    }
-    ownAdv[id]={}; accs.forEach(function(a){ ownAdv[id][a]=1; });
-  });
-  const isOwn=function(a){ return !!(ownAdv[a.watchlist_id]||{})[a.advertiser_id]; };
-  window._ciIsOwn=isOwn;
-  const runWord=function(t){
-    const r=R[t.kind+':'+t.value];
-    if(!r) return '<span class="tag t-gray">not read yet</span>';
-    if(r.ok===false) return '<span class="tag '+(r.refused?'t-amber':'t-red')+'" title="'+esc(r.error||'')+'">'+(r.refused?'Google asked us to slow down':'read failed')+' · '+ciAgo(r.started_at)+'</span>';
-    return '<span style="color:var(--slate)">read '+ciAgo(r.started_at)+'</span>';
-  };
   const summary=wlIds.map(function(id){
-    const all=ads.filter(function(x){ return x.watchlist_id===id; });
-    const a=all.filter(isOwn), others=all.filter(function(x){ return !isOwn(x); });
+    const a=ads.filter(function(x){ return x.watchlist_id===id; });
     const cnt=function(f){ return a.filter(function(x){ return x.format===f; }).length; };
-    const recent=a.filter(function(x){ return x.last_shown&&new Date(x.last_shown).getTime()>=since30; }).length;
+    const last=a.reduce(function(m,x){ return x.last_shown&&(!m||x.last_shown>m)?x.last_shown:m; },null);
     const tg=targets.filter(function(t){ return t.watchlist_id===id; });
-    const who=tg.map(function(t){
-      const url=t.kind==='advertiser'?'https://adstransparency.google.com/advertiser/'+t.value+'?region=IN':'https://adstransparency.google.com/?region=IN&domain='+encodeURIComponent(t.value);
-      return '<a href="'+url+'" target="_blank" rel="noopener">'+esc(t.label||t.value)+'</a> <span style="color:var(--slate)">('+(t.kind==='advertiser'?'Google account':'website')+')</span> · '+runWord(t);
-    }).join('<br>');
-    // Google lists newest first and only the newest 200 per account are kept; say so instead of
-    // letting "200" read as the account's total.
-    const capped=tg.some(function(t){ const r=R[t.kind+':'+t.value]; return r&&r.ok&&/more exist/.test(r.note||''); });
-    const unread=tg.every(function(t){ return !R[t.kind+':'+t.value]; });
-    const oth={}; others.forEach(function(x){ const k=x.advertiser_name||x.advertiser_id; oth[k]=(oth[k]||0)+1; });
-    const w=W[id]||{};
-    const c=function(n){ return unread?'—':n; };
-    return '<tr style="cursor:pointer" onclick="ciGSet(\'wl\',\''+id+'\')"><td><b>'+esc(w.name||('#'+id))+'</b> '+(w.category==='brand'?'<span class="tag t-blue">ours</span>':'')+'</td>'
-      +'<td style="font-size:11.5px;line-height:1.7">'+who+'</td>'
-      +'<td style="text-align:center"><b>'+c(a.length)+'</b>'+(capped?'<div style="font-size:10.5px;color:#b45309" title="Google lists more ads for this account; only the newest 200 are kept">newest only - Google has more</div>':'')+'</td>'
-      +'<td style="text-align:center">'+c(recent)+'</td>'
-      +'<td style="text-align:center">'+c(cnt('text'))+'</td><td style="text-align:center">'+c(cnt('image'))+'</td><td style="text-align:center">'+c(cnt('video'))+'</td>'
-      +'<td style="font-size:11.5px">'+(others.length?Object.keys(oth).map(function(k){ return esc(k)+' ('+oth[k]+')'; }).join('<br>'):'<span style="color:var(--slate)">none</span>')+'</td></tr>';
+    const unread=!a.length&&tg.every(function(t){ return !t.full_at&&!t.pass_pages; });
+    const partial=tg.some(function(t){ return t.cursor||!t.full_at; });
+    const c=function(n){ return unread?'—':ciN(n); };
+    return '<tr style="cursor:pointer" onclick="ciGSet(\'wl\',\''+id+'\')"'+(CI_F.wl===String(id)?' class="sel"':'')+'><td><b>'+esc((W[id]||{}).name||('#'+id))+'</b></td>'
+      +'<td class="ci-num"><b>'+c(a.length)+'</b>'+(partial&&!unread?'<div style="font-size:10.5px;color:#b45309">still counting</div>':'')+'</td>'
+      +'<td class="ci-num">'+c(a.filter(ciRecent).length)+'</td>'
+      +'<td class="ci-num">'+c(cnt('text'))+'</td><td class="ci-num">'+c(cnt('image'))+'</td><td class="ci-num">'+c(cnt('video'))+'</td>'
+      +'<td>'+(last?fmtDate(last):'—')+'</td></tr>';
   }).join('');
-  const q=(CI_F.q||'').toLowerCase();
-  const rows=ads.filter(function(a){
-    if(CI_F.wl!=='all'&&String(a.watchlist_id)!==CI_F.wl) return false;
-    if(CI_F.gown==='own'&&!isOwn(a)) return false;
-    if(CI_F.gown==='others'&&isOwn(a)) return false;
-    if(CI_F.fmt!=='all'&&a.format!==CI_F.fmt) return false;
-    if(CI_F.recent==='30'&&!(a.last_shown&&new Date(a.last_shown).getTime()>=since30)) return false;
-    if(q&&[a.advertiser_name,a.domain,a.creative_id].join(' ').toLowerCase().indexOf(q)<0) return false;
-    return true;
-  });
-  const opts=[['all','All advertisers']].concat(wlIds.map(function(id){ return [String(id),(W[id]||{}).name||('#'+id)]; }));
-  const card=function(a){
-    return '<div class="card" style="overflow:hidden;display:flex;flex-direction:column">'
-      +'<div style="height:150px;background:var(--bg-soft,#f1f5f9);display:flex;align-items:center;justify-content:center;overflow:hidden">'
-        +(a.image_url?'<img src="'+esc(a.image_url)+'" loading="lazy" referrerpolicy="no-referrer" style="max-width:100%;max-height:150px;object-fit:contain">'
-          :'<a href="'+esc(a.source_url)+'" target="_blank" rel="noopener" style="font-size:12.5px;text-align:center;padding:10px"><i class="fa-solid '+(a.format==='video'?'fa-video':a.format==='image'?'fa-image':'fa-font')+'" style="font-size:22px;display:block;margin-bottom:6px"></i>'+(a.format==='video'?'Video ad':a.format==='image'?'Image ad':'Text ad')+' - open on Google</a>')
-      +'</div>'
-      +'<div style="padding:9px 11px;font-size:12px;line-height:1.5">'
-        +'<div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(a.advertiser_name||'')+'">'+esc(a.advertiser_name||a.advertiser_id)+'</div>'
-        +(isOwn(a)?'':'<div><span class="tag t-amber" title="This ad leads to '+esc((W[a.watchlist_id]||{}).name||'')+'\'s website but is paid for by another Google account">by another advertiser for '+esc((W[a.watchlist_id]||{}).name||'')+'</span></div>')
-        +'<div style="color:var(--slate)">'+esc(a.domain||'')+' · <span class="tag t-gray">'+esc(a.format||'?')+'</span></div>'
-        +'<div>'+fmtDate(a.first_shown)+' → '+fmtDate(a.last_shown)+(a.days_shown!=null?' · '+a.days_shown+' days':'')+'</div>'
-        +'<div style="color:var(--slate);font-size:11px">read '+ciAgo(a.fetched_at)+' · <a href="'+esc(a.source_url)+'" target="_blank" rel="noopener">source</a></div>'
-      +'</div></div>';
-  };
-  $('ciBody').innerHTML='<div class="card" style="margin-bottom:14px;overflow-x:auto"><table class="tbl" style="width:100%;font-size:12.5px">'
-      +'<thead><tr><th>'+({brand:'Brand',competitor:'Competitor',partner:'Channel partner'}[CI_SCOPE]||'Brand / competitor')+'</th><th>Followed on Google</th><th style="text-align:center">Their own ads</th><th style="text-align:center" title="Their own ads last shown within 30 days">Shown in last 30 days</th><th style="text-align:center">Text</th><th style="text-align:center">Image</th><th style="text-align:center">Video</th><th title="Other Google accounts whose ads lead to this brand\'s website - brokers, partners, agencies">Ads by others for their website</th></tr></thead>'
+  const rows=ciGadsRows();
+  const opts=[['all','All '+(CI_SCOPE==='brand'?'our brands':'competitors')]].concat(wlIds.map(function(id){ return [String(id),(W[id]||{}).name||('#'+id)]; }));
+  const shown=rows.slice(0,CI_SHOW);
+  $('ciBody').innerHTML='<div class="card" style="margin-bottom:14px;overflow-x:auto"><table class="tbl" style="width:100%;font-size:13px">'
+      +'<thead><tr><th>'+(CI_SCOPE==='brand'?'Brand':'Competitor')+'</th><th class="ci-num">Ads</th><th class="ci-num" title="Ads Google showed within the last 30 days">Running in last 30 days</th><th class="ci-num">Text</th><th class="ci-num">Image</th><th class="ci-num">Video</th><th>Last seen</th></tr></thead>'
       +'<tbody>'+summary+'</tbody></table></div>'
     +'<div class="ci-bar">'
       +compSelHtml('ciGWl',opts,CI_F.wl,"ciGSet('wl',this.value)")
-      +compSelHtml('ciGOwn',[['all','Own ads and others\''],['own','Their own ads only'],['others','By other advertisers only']],CI_F.gown,"ciGSet('gown',this.value)")
-      +compSelHtml('ciGFmt',[['all','All formats'],['text','Text'],['image','Image'],['video','Video']],CI_F.fmt,"ciGSet('fmt',this.value)")
-      +compSelHtml('ciGRec',[['all','Any time'],['30','Shown in last 30 days']],CI_F.recent,"ciGSet('recent',this.value)")
-      +ciSearchInput('ciGQ','q','ciGadsPaint','Search advertiser or website')
-      +'<span style="margin-left:auto;font-size:12.5px;color:var(--slate)">'+rows.length+' ad'+(rows.length===1?'':'s')+(rows.length>200?' (first 200 shown)':'')+'</span>'
+      +compSelHtml('ciGFmt',[['all','All formats'],['text','Text ads'],['image','Image ads'],['video','Video ads']],CI_F.fmt,"ciGSet('fmt',this.value)")
+      +compSelHtml('ciGRec',[['all','Any time'],['30','Running in last 30 days']],CI_F.recent,"ciGSet('recent',this.value)")
+      +ciSearchInput('ciGQ','q','ciGadsPaint','Search the ads\' words')
+      +'<span style="margin-left:auto;font-size:12.5px;color:var(--slate)">'+ciN(rows.length)+' ad'+(rows.length===1?'':'s')+'</span>'
     +'</div>'
-    +(rows.length?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">'+rows.slice(0,200).map(card).join('')+'</div>'
-      :'<div class="card card-pad" style="color:var(--slate)">No ads stored for this selection yet.</div>');
+    +(rows.length?'<div class="ci-grid">'+shown.map(function(a){ return ciAdCard(a,CI_F.wl==='all'&&wlIds.length>1); }).join('')+'</div>'
+      +(rows.length>shown.length?'<div style="text-align:center;margin:18px 0 6px"><button class="btn" onclick="CI_SHOW+=CI_PAGE;ciGadsPaint()">Show more <span style="color:var(--slate);font-weight:500">('+ciN(shown.length)+' of '+ciN(rows.length)+' shown)</span></button></div>':'')
+      :'<div class="card card-pad" style="color:var(--slate)">No ads for this selection yet.</div>');
 }
-window.ciGSet=function(k,v){ CI_F[k]=v; ciGadsPaint(); };
+window.ciGSet=function(k,v){ CI_F[k]=CI_F[k]===v&&k==='wl'?'all':v; CI_SHOW=CI_PAGE; ciGadsPaint(); };
+// One ad, full size, inside JainE: the picture, the text ad as Google lays it out, or the video.
+window.ciAdOpen=function(id){
+  const a=(window._ciAds||[]).filter(function(x){ return x.creative_id===id; })[0];
+  if(!a) return;
+  const W=window._ciWl||{};
+  let main;
+  if(a.video_id) main='<div style="position:relative;width:100%;max-width:760px;margin:0 auto;aspect-ratio:16/9;background:#000;border-radius:10px;overflow:hidden">'
+    +'<iframe src="https://www.youtube-nocookie.com/embed/'+encodeURIComponent(a.video_id)+'?rel=0" style="position:absolute;inset:0;width:100%;height:100%;border:0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>';
+  else if(a.image_url) main='<div style="text-align:center;background:#f1f5f9;border-radius:10px;padding:14px"><img src="'+esc(a.image_url)+'" referrerpolicy="no-referrer" style="max-width:100%;max-height:70vh" alt=""></div>';
+  else if(a.ad_image_url) main='<div style="text-align:center;background:#f1f5f9;border-radius:10px;padding:14px"><img src="'+esc(a.ad_image_url)+'" referrerpolicy="no-referrer" style="max-width:100%;max-height:60vh" alt=""></div>';
+  else if(a.ad_headline) main=ciSerp(a,true);
+  else main='<div class="card card-pad" style="text-align:center;color:var(--slate)">'+(a.detail_at?'Google does not show this ad\'s content.':'This ad\'s content is still being read from Google - it shows here within a few hours.')+'</div>';
+  // The words of a video / picture ad, under it, when Google gives them.
+  const words=(a.video_id||a.image_url||a.ad_image_url)&&(a.ad_headline||a.ad_description)
+    ?'<div style="margin-top:14px;font-size:13.5px;line-height:1.55">'
+      +(a.ad_headline?'<div style="font-weight:700;font-size:15px">'+ciKw(a.ad_headline)+'</div>':'')
+      +(a.ad_long_headline&&a.ad_long_headline!==a.ad_headline?'<div>'+esc(a.ad_long_headline)+'</div>':'')
+      +(a.ad_description?'<div style="color:var(--slate)">'+esc(a.ad_description)+'</div>':'')
+      +(a.ad_cta?'<div style="margin-top:6px"><span class="tag t-blue">'+esc(a.ad_cta)+'</span></div>':'')
+    +'</div>':'';
+  const kwNote=/\{key[wW]ord:/i.test((a.ad_headline||'')+(a.ad_description||''))?'<div style="font-size:12px;color:var(--slate);margin-top:8px"><i class="fa-solid fa-circle-info"></i> The underlined words change: Google puts in what the person searched for, and shows these words otherwise.</div>':'';
+  const fact=function(k,v){ return '<div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.04em">'+k+'</div><div style="font-weight:600">'+v+'</div></div>'; };
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-rectangle-ad"></i> '+esc((W[a.watchlist_id]||{}).name||'Ad')+' - '+esc(CI_FMT_WORD[a.format]||'Ad')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body">'+CI_CSS+main+words+kwNote
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:16px;font-size:13px">'
+        +fact('Running since',fmtDate(a.first_shown))+fact('Last seen',fmtDate(a.last_shown))
+        +fact('Status',ciRecent(a)?'<span style="color:#15803d">Active (last 30 days)</span>':'Not seen in 30 days')
+        +(a.days_shown!=null?fact('Days Google showed it',ciN(a.days_shown)):'')
+      +'</div>'
+      +'<div style="font-size:11px;color:var(--slate);margin-top:14px">From Google\'s public Ads Transparency Center (India) · ad '+esc(a.creative_id)+'</div>'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','lg');
+};
 
 // ---------------------------------------------------------------- RERA
+/* Competitor Data shows each competitor's projects. WBRERA lists projects by the PROMOTER - the
+   legal company - and prints that name only on each project's own page, so which companies are a
+   competitor's is set by hand in camp.pi_targets (source 'rera', kind 'promoter', watchlist_id of
+   the competitor), from names the user has confirmed - never guessed from project names. Until a
+   competitor's companies are confirmed the tab says so, and the whole register can be searched
+   meanwhile. Our Brand follows our own promoter the same way. */
 async function ciRera(){
-  await ciRunsPanel(['rera_list','rera_detail'],'Every project on the public <a href="https://rera.wb.gov.in/district_project.php?dcode=0" target="_blank" rel="noopener">WBRERA register</a>. The list is read weekly; each project\'s own page (promoter, flats, areas, status, extension) is read one by one, a few a minute - the first full pass takes about three days. Followed promoters are re-read weekly and changes are logged.');
-  /* Our Brand sees only our own promoters' projects: the register is read for exactly those names
-     (WBRERA's spelling, which is what pi_targets stores) instead of all ~5,000 projects. Competitor
-     Data reads the whole register, because "All promoters" is where new competitor promoters get
-     picked out - but every project of one of OUR promoters is taken out of it first. */
   const tg=await sb.schema('camp').from('pi_targets').select('*').eq('source','rera');
   const allTargets=tg.data||[];
   const ownNames=allTargets.filter(function(t){ return ciTargetScope(t)==='brand'; }).map(function(t){ return String(t.value); });
-  const cols='procode,project_id,name,reg_no,reg_date,completion_date,district,block,project_status,extension_date,apartments,land_area_sqm,promoter_name,promoter_cin,promoter_website,litigations,detail_fetched_at,detail_error,source_url,list_seen_at';
+  const cols='procode,project_id,name,reg_no,reg_date,completion_date,district,block,project_status,extension_date,apartments,promoter_name,detail_fetched_at,detail_error,source_url';
   const brand=CI_SCOPE==='brand';
-  const [projects,ch,rej]=await Promise.all([
+  const [projects,ch,cnt]=await Promise.all([
     brand?(ownNames.length?ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).in('promoter_name',ownNames).order('reg_date',{ascending:false}); }):Promise.resolve([]))
       :ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).order('reg_date',{ascending:false}); }),
-    sb.schema('camp').from('pi_rera_changes').select('*').order('changed_at',{ascending:false}).limit(brand?200:60),
-    sb.schema('camp').from('pi_rera_rejected').select('project_id',{count:'exact',head:true})
+    sb.schema('camp').from('pi_rera_changes').select('*').order('changed_at',{ascending:false}).limit(300),
+    sb.schema('camp').from('pi_rera_projects').select('procode',{count:'exact',head:true}).not('detail_fetched_at','is',null)
   ]);
   const own={}; ownNames.forEach(function(n){ own[n.toLowerCase()]=1; });
-  const mine=projects.filter(function(p){ return !!own[String(p.promoter_name||'').toLowerCase()]; });
-  window._ciRera=brand?mine:projects.filter(function(p){ return !own[String(p.promoter_name||'').toLowerCase()]; });
+  window._ciRera=brand?projects:projects.filter(function(p){ return !own[String(p.promoter_name||'').toLowerCase()]; });
   window._ciRTargets=allTargets.filter(function(t){ return ciTargetScope(t)===(brand?'brand':'competitor'); });
-  // Changes only for projects on this side; the change log itself does not carry a promoter.
-  const on={}; window._ciRera.forEach(function(p){ on[p.procode]=1; });
+  window._ciRAllRead=cnt.count||0; window._ciRTotal=projects.length;
+  // Changes only for projects shown as ours / a confirmed competitor's; the log has no promoter.
+  const fol={}; window._ciRTargets.forEach(function(t){ fol[String(t.value).toLowerCase()]=1; });
+  const on={}; window._ciRera.forEach(function(p){ if(fol[String(p.promoter_name||'').toLowerCase()]) on[p.procode]=1; });
   window._ciRChanges=(ch.data||[]).filter(function(c){ return on[c.procode]; }).slice(0,30);
-  window._ciRRej=rej.count||0;
-  if(brand) CI_F.rfollow='followed';
-  // With no competitor promoter followed yet, "followed" would be an empty page; open on the whole
-  // register instead and say why (ciReraPaint).
-  else if(!window._ciRTargets.length) CI_F.rfollow='all';
+  const total=brand?null:projects.length, read=window._ciRAllRead;
+  await ciStatus(['rera_list','rera_detail'],'Projects on the public <a href="https://rera.wb.gov.in/district_project.php?dcode=0" target="_blank" rel="noopener">West Bengal RERA register</a>: area, status, number of flats, registration, promised completion and any extension. The register is read weekly and every project\'s own page is read in turn.',
+    brand?'':'project pages read: <b>'+ciN(read)+' of '+ciN(total)+'</b>'+(read<total?' (about '+Math.max(1,Math.round((total-read)/200))+' h to go)':''));
   ciReraPaint();
 }
-function ciReraPaint(){
-  const all=window._ciRera||[], targets=window._ciRTargets||[], brand=CI_SCOPE==='brand';
-  const followed={}; targets.forEach(function(t){ followed[String(t.value).toLowerCase()]=t; });
-  const read=all.filter(function(p){ return p.detail_fetched_at; }).length;
-  const failed=all.filter(function(p){ return p.detail_error; }).length;
-  const dists={}; all.forEach(function(p){ if(p.district) dists[p.district]=1; });
-  const q=(CI_F.rq||'').toLowerCase();
-  const rows=all.filter(function(p){
-    // A search looks through the whole register; without one, the chosen promoter filter applies.
-    if(!q&&CI_F.rfollow==='followed'&&!followed[String(p.promoter_name||'').toLowerCase()]) return false;
-    if(CI_F.rdist!=='all'&&p.district!==CI_F.rdist) return false;
-    if(q&&[p.name,p.promoter_name,p.district,p.block,p.reg_no,p.project_id].join(' ').toLowerCase().indexOf(q)<0) return false;
-    return true;
-  });
-  // Promoters among the rows, biggest first - this is where competitor promoters get picked out.
-  const byProm={}; rows.forEach(function(p){
-    const k=p.promoter_name||'(page not read yet)';
-    const o=byProm[k]||(byProm[k]={n:0,flats:0,d:{}}); o.n++; o.flats+=p.apartments||0; if(p.district) o.d[p.district]=1;
-  });
-  const prom=Object.keys(byProm).sort(function(a,b){ return byProm[b].n-byProm[a].n; }).slice(0,15).map(function(k){
-    const o=byProm[k];
-    return '<tr style="cursor:pointer" onclick="ciRSet(\'rq\','+esc(JSON.stringify(k==='(page not read yet)'?'':k))+')"><td>'+esc(k)+(followed[k.toLowerCase()]?' <span class="tag t-blue">followed</span>':'')+'</td><td style="text-align:center">'+o.n+'</td><td style="text-align:center">'+o.flats+'</td><td>'+esc(Object.keys(o.d).join(', '))+'</td></tr>';
-  }).join('');
+function ciReraTable(list,withCompany){
   const tr=function(p){
     return '<tr><td><a href="'+esc(p.source_url||('https://rera.wb.gov.in/project_details.php?procode='+p.procode))+'" target="_blank" rel="noopener"><b>'+esc(p.name||'')+'</b></a><div style="font-size:11px;color:var(--slate)">'+esc(p.reg_no||'')+'</div></td>'
-      +'<td>'+esc(p.promoter_name||'—')+'</td>'
+      +(withCompany?'<td style="font-size:12px">'+(p.promoter_name?esc(p.promoter_name):'<span style="color:var(--slate)">page not read yet</span>')+'</td>':'')
       +'<td>'+esc([p.block,p.district].filter(Boolean).join(', ')||'—')+'</td>'
       +'<td>'+esc(p.project_status||'—')+'</td>'
-      +'<td style="text-align:right">'+(p.apartments==null?'—':p.apartments)+'</td>'
+      +'<td class="ci-num">'+(p.apartments==null?'—':ciN(p.apartments))+'</td>'
       +'<td>'+fmtDate(p.reg_date)+'</td><td>'+fmtDate(p.completion_date)+'</td>'
-      +'<td>'+esc(p.extension_date&&p.extension_date!=='NA'?p.extension_date:'—')+'</td>'
-      +'<td style="font-size:11px;color:var(--slate)">'+(p.detail_error?'<span class="tag t-red" title="'+esc(p.detail_error)+'">read failed</span>':(p.detail_fetched_at?ciAgo(p.detail_fetched_at):'list only'))+'</td></tr>';
+      +'<td>'+esc(p.extension_date&&p.extension_date!=='NA'?p.extension_date:'—')+'</td></tr>';
   };
+  return '<div style="overflow-x:auto"><table class="tbl" style="width:100%;font-size:12.5px">'
+    +'<thead><tr><th>Project</th>'+(withCompany?'<th>Company on RERA</th>':'')+'<th>Area</th><th>Status</th><th class="ci-num">Flats</th><th>Registered</th><th>Completion</th><th>Extended to</th></tr></thead>'
+    +'<tbody>'+list.map(tr).join('')+'</tbody></table></div>';
+}
+function ciReraPaint(){
+  const all=window._ciRera||[], targets=window._ciRTargets||[], brand=CI_SCOPE==='brand', W=window._ciWl||{};
+  // Projects of each followed company, grouped under the brand / competitor it belongs to.
+  const byWl={}; targets.forEach(function(t){ const k=t.watchlist_id||0; (byWl[k]=byWl[k]||{})[String(t.value).toLowerCase()]=1; });
+  const sections=Object.keys(byWl).map(function(id){
+    const names=byWl[id];
+    const ps=all.filter(function(p){ return names[String(p.promoter_name||'').toLowerCase()]; });
+    const flats=ps.reduce(function(s,p){ return s+(p.apartments||0); },0);
+    return '<div class="card" style="margin-bottom:14px"><div style="padding:12px 15px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)">'
+        +'<b style="font-size:14px">'+esc((W[id]||{}).name||'Followed company')+'</b>'
+        +'<span class="tag t-gray">'+ps.length+' project'+(ps.length===1?'':'s')+'</span><span class="tag t-gray">'+ciN(flats)+' flats</span>'
+        +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate)">on RERA as '+esc(targets.filter(function(t){ return String(t.watchlist_id||0)===id; }).map(function(t){ return t.value; }).join(', '))+'</span></div>'
+      +(ps.length?ciReraTable(ps,Object.keys(names).length>1):'<div class="card-pad" style="color:var(--slate);font-size:12.5px">No projects found yet - they appear as each project\'s page is read.</div>')
+    +'</div>';
+  }).join('');
   const chg=(window._ciRChanges||[]).map(function(c){
     const p=all.filter(function(x){ return x.procode===c.procode; })[0]||{};
     return '<tr><td>'+ciDateTime(c.changed_at)+'</td><td>'+esc(p.name||c.procode)+'</td><td>'+esc(c.field)+'</td><td>'+esc(c.old_value||'—')+'</td><td>'+esc(c.new_value||'—')+'</td></tr>';
   }).join('');
-  $('ciBody').innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
-      +'<span class="tag t-gray">'+all.length+(brand?' of our projects on the register (promoter'+(targets.length===1?'':'s')+': '+esc(targets.map(function(t){ return t.value; }).join(', ')||'none followed')+')':' approved projects on the register (ours left out once their page is read)')+'</span>'
-      +'<span class="tag '+(read===all.length&&all.length?'t-green':'t-amber')+'">project pages read: '+read+' of '+all.length+'</span>'
-      +(failed?'<span class="tag t-red">'+failed+' page(s) could not be read</span>':'')
-      +(brand?'':'<span class="tag t-gray">'+window._ciRRej+' rejected / revoked</span>')
-    +'</div>'
-    +(!brand&&!targets.length?'<div class="card card-pad" style="color:var(--slate);font-size:13px;margin-bottom:12px"><i class="fa-solid fa-circle-info"></i> No competitor promoter is followed yet, so the whole register is shown. WBRERA prints the promoter\'s legal company name only on each project\'s own page, and those pages are still being read ('+read+' of '+all.length+'). Once they are, the competitors\' companies will be picked from the "Promoters" table and followed - not guessed from project names.</div>':'')
+  const changes=chg?'<div class="card" style="overflow-x:auto;margin-bottom:14px"><div style="padding:10px 14px;font-weight:700;font-size:13px">Recent changes</div><table class="tbl" style="width:100%;font-size:12.5px"><thead><tr><th>Seen</th><th>Project</th><th>What</th><th>Was</th><th>Now</th></tr></thead><tbody>'+chg+'</tbody></table></div>':'';
+  if(brand){
+    $('ciBody').innerHTML=(sections||'<div class="card card-pad" style="color:var(--slate)">No promoter of ours is followed yet.</div>')+changes;
+    return;
+  }
+  // Competitor Data: until the competitors' RERA companies are confirmed, say so and offer the
+  // whole register to search.
+  const note=targets.length?'':'<div class="ci-explain"><b>Competitor projects are being matched.</b> RERA lists projects under the legal company that registered them (for example "Srijan Realty Private Limited"), and prints that name only on each project\'s own page. Those pages are being read now ('+ciN(window._ciRAllRead)+' of '+ciN(window._ciRTotal)+'). Once they are, the company names that belong to each competitor will be confirmed with you and each competitor\'s projects will show here. Until then, search the whole register below.</div>';
+  const dists={}; all.forEach(function(p){ if(p.district) dists[p.district]=1; });
+  const q=(CI_F.rq||'').toLowerCase();
+  const rows=all.filter(function(p){
+    if(CI_F.rdist!=='all'&&p.district!==CI_F.rdist) return false;
+    if(q&&[p.name,p.promoter_name,p.district,p.block,p.reg_no,p.project_id].join(' ').toLowerCase().indexOf(q)<0) return false;
+    return true;
+  });
+  const shown=rows.slice(0,CI_RSHOW);
+  $('ciBody').innerHTML=note+sections+changes
+    +'<div style="font-weight:700;font-size:14px;margin:6px 0 10px">Every project on the West Bengal RERA register</div>'
     +'<div class="ci-bar">'
-      +(brand?'':compSelHtml('ciRF',[['followed','Followed competitor promoters ('+targets.length+')'],['all','All promoters']],CI_F.rfollow,"ciRSet('rfollow',this.value)"))
       +compSelHtml('ciRD',[['all','All districts']].concat(Object.keys(dists).sort().map(function(d){ return [d,d]; })),CI_F.rdist,"ciRSet('rdist',this.value)")
-      +ciSearchInput('ciRQ','rq','ciReraPaint','Search project, promoter, area, reg. no.')
-      +'<span style="margin-left:auto;font-size:12.5px;color:var(--slate)">'+rows.length+' project'+(rows.length===1?'':'s')+(q?' in the whole register':'')+(rows.length>300?' (first 300 shown)':'')+'</span>'
+      +ciSearchInput('ciRQ','rq','ciReraPaint','Search project, company, area, reg. no.')
+      +'<span style="margin-left:auto;font-size:12.5px;color:var(--slate)">'+ciN(rows.length)+' project'+(rows.length===1?'':'s')+'</span>'
     +'</div>'
-    +'<div class="card" style="margin-bottom:14px;overflow-x:auto"><div style="padding:10px 14px;font-weight:700;font-size:13px">Promoters in this view</div>'
-      +'<table class="tbl" style="width:100%;font-size:12.5px"><thead><tr><th>Promoter (as WBRERA prints it)</th><th style="text-align:center">Projects</th><th style="text-align:center">Flats</th><th>Districts</th></tr></thead><tbody>'
-      +(prom||'<tr><td colspan="4" style="color:var(--slate)">No projects in this view yet'+(brand?' - the promoter name comes from each project\'s own page, so our projects appear here as those pages are read.'
-        :CI_F.rfollow==='followed'?' - project pages are still being read; switch to "All promoters" to search the whole register.':'.')+'</td></tr>')+'</tbody></table></div>'
-    +'<div class="card" style="margin-bottom:14px;overflow-x:auto"><table class="tbl" style="width:100%;font-size:12.5px">'
-      +'<thead><tr><th>Project</th><th>Promoter</th><th>Area</th><th>Status</th><th style="text-align:right">Flats</th><th>Registered</th><th>Completion</th><th>Extended to</th><th>Page read</th></tr></thead>'
-      +'<tbody>'+rows.slice(0,300).map(tr).join('')+'</tbody></table></div>'
-    +(chg?'<div class="card" style="overflow-x:auto"><div style="padding:10px 14px;font-weight:700;font-size:13px">Recent changes on the register</div><table class="tbl" style="width:100%;font-size:12.5px"><thead><tr><th>Seen</th><th>Project</th><th>Field</th><th>Was</th><th>Now</th></tr></thead><tbody>'+chg+'</tbody></table></div>':'');
+    +'<div class="card" style="margin-bottom:14px">'+ciReraTable(shown,true)+'</div>'
+    +(rows.length>shown.length?'<div style="text-align:center;margin:0 0 10px"><button class="btn" onclick="CI_RSHOW+=200;ciReraPaint()">Show more <span style="color:var(--slate);font-weight:500">('+ciN(shown.length)+' of '+ciN(rows.length)+' shown)</span></button></div>':'');
 }
-window.ciRSet=function(k,v){ CI_F[k]=v; if(k==='rq'&&v) CI_F.rfollow='all'; ciReraPaint(); };
+window.ciRSet=function(k,v){ CI_F[k]=v; CI_RSHOW=100; ciReraPaint(); };
 
 // ---------------------------------------------------------------- Search Trends
+/* Google Trends gives an index, not search counts, so each group is explained in plain words and
+   summed up per term in a small table - average interest over the year, the last 4 weeks against
+   the 4 before, and the busiest week - with the chart underneath. All figures are worked out from
+   Google's weekly values exactly as stored; a term Google had too little data for is marked, not
+   drawn as zero. */
+// Names that unrelated companies share, so their searches are mixed into the line.
+const CI_SHARED_NAMES=['ps group','orbit group','siddha group'];
 async function ciTrends(){
-  await ciRunsPanel(['trends'],'Weekly Google search interest over the last 12 months, from <a href="https://trends.google.com/trends/explore?geo=IN-WB" target="_blank" rel="noopener">Google Trends</a>. Google gives an index, not search counts: 100 is the busiest week of the busiest term <i>in that chart</i>. Every chart includes "flats in kolkata", so charts can be compared through it. Kolkata on its own is not a region Google Trends offers, so the regions are West Bengal and India. Each chart is refreshed weekly.');
   const [pts,tg,runs]=await Promise.all([
     ciAll(function(){ return sb.schema('camp').from('pi_trends_points').select('*').order('week_start'); }),
     sb.schema('camp').from('pi_targets').select('*').eq('source','trends').order('grp').order('sort'),
-    sb.schema('camp').from('pi_runs').select('unit,ok,refused,error,note,started_at').eq('source','trends').not('ok','is',null).order('started_at',{ascending:false}).limit(100)
+    sb.schema('camp').from('pi_runs').select('unit,ok,refused,started_at').eq('source','trends').not('ok','is',null).order('started_at',{ascending:false}).limit(100)
   ]);
   /* A group is drawn whole or not at all - Google scales every term in a request against the
      others in that same request, so lifting one term out of its chart would change what its line
@@ -33264,7 +33334,22 @@ async function ciTrends(){
     return s===CI_SCOPE||(s==='market'&&CI_SCOPE==='competitor');
   });
   window._ciPts=pts; window._ciTT=keep; window._ciTMarket=market; window._ciTRuns=runs.data||[];
+  await ciStatus(['trends'],'How much people searched Google for each name, week by week over the last 12 months, from <a href="https://trends.google.com/trends/explore?geo=IN-WB" target="_blank" rel="noopener">Google Trends</a>. Each chart is refreshed weekly.');
   ciTrendsPaint();
+}
+/* A week Google marks as having too few searches to measure (has_data false) is drawn as 0 on
+   Google's own chart, and Google's help says the same: 0 means not enough data. It is counted as 0
+   here too - averaging only the few measurable weeks would make a rarely searched name look busy.
+   How many weeks were measurable is returned, so the screen can say so. */
+const ciTV=function(x){ return x.has_data?Number(x.value):0; };
+function ciTrendsStats(p,term){
+  const pts=p.filter(function(x){ return x.term===term; }).sort(function(a,b){ return a.week_start<b.week_start?-1:1; });
+  const hd=pts.filter(function(x){ return x.has_data; });
+  if(!hd.length) return null;
+  const avg=function(a){ return a.length?a.reduce(function(s,x){ return s+ciTV(x); },0)/a.length:null; };
+  const last4=pts.slice(-4), prev4=pts.slice(-8,-4);
+  const peak=hd.reduce(function(m,x){ return Number(x.value)>Number(m.value)?x:m; },hd[0]);
+  return {avg:avg(pts),last:avg(last4),prev:prev4.length===4?avg(prev4):null,peak:peak,weeks:pts.length,measured:hd.length};
 }
 function ciTrendsPaint(){
   const pts=window._ciPts||[], tg=window._ciTT||[];
@@ -33273,26 +33358,44 @@ function ciTrendsPaint(){
     $('ciBody').innerHTML='<div class="card card-pad" style="color:var(--slate);font-size:13px"><i class="fa-solid fa-circle-info"></i> No Search Trends group is followed for '+esc(CI_SCOPE_WORD[CI_SCOPE]||CI_SCOPE)+' yet.</div>';
     return;
   }
+  const region=CI_F.geo==='IN'?'India':'West Bengal';
   const colors=['#0369a1','#16a34a','#d97706','#7c3aed','#94a3b8'];
-  let html='<div class="ci-bar">'
+  let html='<div class="ci-explain"><b>How to read this.</b> Google does not say how many searches there were. It gives each week a score from <b>0 to 100</b>: <b>100</b> is the busiest week of the busiest name <i>in that chart</i>, and every other week is a share of that (50 = half as many searches). So scores compare names <i>within one chart</i>, not between charts. A week with too few searches for Google to measure counts as 0, the same as on the Google Trends chart. '
+      +'Every chart includes "flats in kolkata" as a common yardstick. Kolkata on its own is not offered by Google Trends, so the choice is West Bengal or all of India.</div>'
+    +'<div class="ci-bar"><span style="font-size:13px;font-weight:600">Searches made in</span>'
     +compSelHtml('ciTGeo',[['IN-WB','West Bengal'],['IN','India']],CI_F.geo,"CI_F.geo=this.value;ciTrendsPaint()")+'</div>'
-    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:14px">';
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(480px,100%),1fr));gap:14px">';
   groups.forEach(function(g,gi){
     const p=pts.filter(function(x){ return x.grp===g&&x.geo===CI_F.geo; });
     const mine=(window._ciTRuns||[]).filter(function(r){ return r.unit===g+'|'+CI_F.geo; });
-    const run=mine.filter(function(r){ return r.ok; })[0], lastTry=mine[0];
-    const link=run&&run.note?String(run.note).split(' | ')[0]:'';
-    // The newest attempt failed: say so, rather than "waiting" (no data yet) or silently showing
-    // the older chart as if it were fresh.
-    const failNote=lastTry&&!lastTry.ok?'<div style="font-size:11.5px;color:#b45309;margin-top:6px"><i class="fa-solid fa-triangle-exclamation"></i> '
-      +(lastTry.refused?'Google asked us to slow down':'The read failed')+' '+ciAgo(lastTry.started_at)+(p.length?' - this chart is from the read before.':'.')+' It is tried again by itself after a 6-hour pause.</div>':'';
-    const terms=tg.filter(function(t){ return t.grp===g; }).map(function(t){ return t.value; });
-    const none=terms.filter(function(t){ return p.length&&!p.some(function(x){ return x.term===t&&x.has_data; }); });
-    html+='<div class="card card-pad"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b>'+esc(g)+'</b>'
+    const lastTry=mine[0];
+    const failNote=lastTry&&!lastTry.ok?'<div style="font-size:11.5px;color:#b45309;margin-top:8px"><i class="fa-solid fa-triangle-exclamation"></i> '
+      +(lastTry.refused?'Google asked us to slow down':'The latest read failed')+' '+ciAgo(lastTry.started_at)+(p.length?' - these figures are from the read before.':'.')+' It is tried again by itself later.</div>':'';
+    const terms=tg.filter(function(t){ return t.grp===g; });
+    const shared=terms.filter(function(t){ return CI_SHARED_NAMES.indexOf(String(t.value).toLowerCase())>=0; }).map(function(t){ return t.value; });
+    const rows=terms.map(function(t,i){
+      const s=p.length?ciTrendsStats(p,t.value):null;
+      const dot='<span style="display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:'+(t.kind==='anchor'?colors[4]:colors[i%4])+'"></span>';
+      const name=dot+esc(t.value)+(t.kind==='anchor'?' <span style="font-size:11px;color:var(--slate)">(yardstick)</span>':'');
+      if(!s) return '<tr><td>'+name+'</td><td colspan="3" style="color:#b45309;font-size:12px">'+(p.length?'Too few searches - Google shows no figures for this name':'Not read yet')+'</td></tr>';
+      let trend='<span class="ci-flat">—</span>';
+      if(s.prev!=null){
+        const a=Math.round(s.prev), b=Math.round(s.last);
+        trend=b>a?'<span class="ci-up">▲ up</span> <span style="color:var(--slate);font-size:11.5px">('+a+' → '+b+')</span>'
+          :b<a?'<span class="ci-down">▼ down</span> <span style="color:var(--slate);font-size:11.5px">('+a+' → '+b+')</span>'
+          :'<span class="ci-flat">same ('+a+')</span>';
+      }
+      const thin=s.measured<s.weeks/2?'<div style="font-size:11px;color:#b45309;margin-left:16px">enough searches to measure in only '+s.measured+' of '+s.weeks+' weeks</div>':'';
+      const av=s.avg<1&&s.avg>0?'&lt;1':Math.round(s.avg);
+      return '<tr><td>'+name+thin+'</td><td class="ci-num"><b>'+av+'</b></td><td>'+trend+'</td><td style="font-size:12px">'+fmtDate(s.peak.week_start)+' <span style="color:var(--slate)">('+s.peak.value+')</span></td></tr>';
+    }).join('');
+    html+='<div class="card card-pad"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b style="font-size:14px">'+esc(g)+'</b>'
       +((window._ciTMarket||{})[g]?' <span class="tag t-gray" title="None of these terms is a company - general searches for the market">market</span>':'')
-      +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate)">'+(p.length?'read '+ciAgo(p[0].fetched_at):'not fetched yet')+(link?' · <a href="'+esc(link)+'" target="_blank" rel="noopener">open on Google</a>':'')+'</span></div>'
-      +(p.length?'<div style="height:220px"><canvas id="ciTC'+gi+'"></canvas></div>':'<div style="color:var(--slate);font-size:12.5px;padding:30px 0;text-align:center">Waiting for the weekly fetch.</div>')
-      +(none.length?'<div style="font-size:11.5px;color:#b45309;margin-top:6px">Too few searches for Google to show: '+esc(none.join(', '))+'</div>':'')
+      +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate)">'+(p.length?'updated '+ciAgo(p[0].fetched_at):'not read yet')+'</span></div>'
+      +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:10px">Searches in '+region+' for these names over the last 12 months, compared with each other.</div>'
+      +'<table class="tbl" style="width:100%;font-size:12.5px;margin-bottom:12px"><thead><tr><th>Search term</th><th class="ci-num" title="Average weekly score over the 12 months (0-100)">Average interest</th><th title="Average of the last 4 weeks against the 4 weeks before">Last 4 weeks vs 4 before</th><th title="The week with the highest score">Busiest week</th></tr></thead><tbody>'+rows+'</tbody></table>'
+      +(shared.length?'<div style="font-size:11.5px;color:#b45309;margin-bottom:10px"><i class="fa-solid fa-circle-info"></i> '+esc(shared.join(', '))+(shared.length===1?' is a name':' are names')+' other, unrelated companies also use, so '+(shared.length===1?'its line':'their lines')+' may include searches for them.</div>':'')
+      +(p.length?'<div style="height:220px"><canvas id="ciTC'+gi+'"></canvas></div>':'')
       +failNote
     +'</div>';
   });
@@ -33303,9 +33406,9 @@ function ciTrendsPaint(){
     const weeks=[]; p.forEach(function(x){ if(weeks.indexOf(x.week_start)<0) weeks.push(x.week_start); });
     const terms=tg.filter(function(t){ return t.grp===g; });
     new Chart(c,{type:'line',data:{labels:weeks.map(function(w){ return fmtDateShort(w); }),datasets:terms.map(function(t,i){
-      return {label:t.value,data:weeks.map(function(w){ const x=p.filter(function(y){ return y.week_start===w&&y.term===t.value; })[0]; return x&&x.has_data?x.value:null; }),
+      return {label:t.value,data:weeks.map(function(w){ const x=p.filter(function(y){ return y.week_start===w&&y.term===t.value; })[0]; return x?ciTV(x):null; }),
         borderColor:t.kind==='anchor'?colors[4]:colors[i%4],borderDash:t.kind==='anchor'?[4,4]:[],borderWidth:2,pointRadius:0,tension:.25,spanGaps:false};
-    })},options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{min:0,max:100}},plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7,font:{size:11}}}}}});
+    })},options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{min:0,max:100,title:{display:true,text:'interest (0-100)'}}},plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7,font:{size:11}}}}}});
   });
 }
 

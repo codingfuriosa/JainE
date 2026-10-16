@@ -8,10 +8,13 @@
 //
 // GENTLE BY DESIGN. The cron calls `tick` every 5 minutes. A tick does at most ONE small unit per
 // source, and only if that unit is due:
-//   google_ads   one advertiser/domain, <= 5 pages 6 s apart; each target once a day, 10 min apart
+//   google_ads   one advertiser/domain, <= 10 pages 6 s apart. Every ad is read: a long list goes
+//                on over several ticks from Google's own "next page" token (see gadsTick); after
+//                that the newest pages daily and the whole list weekly
+//   gads_detail  <= 15 ad preview scripts 1.5 s apart - what each ad says (words, picture, video)
 //   rera_list    both public lists (approved, rejected), once a week
-//   rera_detail  6 project pages 4 s apart (first pass: every project once, newest first; then
-//                followed promoters weekly, everyone else every 90 days)
+//   rera_detail  <= 18 project pages 1.5 s apart, stopping after 90 s (first pass: every project
+//                once, newest first; then followed promoters weekly, everyone else every 90 days)
 //   trends       one group in one region, 3 requests ~10 s apart; each once a week, 10 min apart
 // A site that answers "too many requests" or shows a CAPTCHA page is left alone for 6 hours. The
 // CAPTCHA is never solved or worked around.
@@ -22,7 +25,7 @@
 // WHO MAY CALL. The cron (x-pi-secret = acc.job_secrets 'public_intel'), or a signed-in staff member
 // (camp.pi_allowed()) for "Fetch now", which runs one unit of the chosen source even if not due.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
-import { gadsCreatives, reraList, reraDetail, trendsPoints } from "./parse.ts";
+import { gadsCreatives, gadsDetail, reraList, reraDetail, trendsPoints } from "./parse.ts";
 
 const SB = Deno.env.get('SUPABASE_URL')!, SRV = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const db = createClient(SB, SRV, { db: { schema: 'camp' } });
@@ -77,38 +80,116 @@ async function upsertChunks(table: string, rows: any[], onConflict: string) {
 }
 
 // ---------------------------------------------------------------- Google Ads Transparency Center
+/* EVERY AD, A FEW PAGES AT A TIME. Google lists an advertiser's ads newest first, 40 to a page, with
+   a "next page" token. A tick reads up to 10 pages (6 s apart, and never past ~90 s) and saves
+   Google's token in pi_targets.cursor; the next tick carries on from it, so a busy advertiser's
+   thousands of ads are read over a few hours without a burst. When Google gives no further token
+   the pass is complete (full_at, full_ads). What is due, in order:
+     1. a target never read to the end and not started yet       - starts its first pass
+     2. a target in the middle of a pass (it has a cursor)       - every tick until done
+     3. a target last read fully more than 7 days ago             - starts a whole new pass
+     4. a target whose first pages were not read in 20 h            - re-reads the newest 10 pages
+   Pages saved before a failure stay saved (each page is upserted as it arrives); the cursor is
+   only moved past a page once that page is stored. */
 const GADS = 'https://adstransparency.google.com/anji/_/rpc/SearchService/SearchCreatives?authuser=';
+const GADS_PAGES = 10, GADS_BUDGET_MS = 90e3;
 async function gadsTick(trigger: string, force: boolean) {
-  const wait = await gate('google_ads', force ? 2 * 60e3 : 10 * 60e3);
+  const wait = await gate('google_ads', force ? 2 * 60e3 : 4 * 60e3);
   if (wait) return { source: 'google_ads', skipped: wait };
   const { data: targets } = await db.from('pi_targets').select('*').eq('source', 'google_ads').eq('active', true).order('sort');
   const okRecently = new Set((await lastRuns('google_ads', 20 * HOUR)).filter((r: any) => r.ok).map((r: any) => r.unit));
   const key = (t: any) => t.kind + ':' + t.value;
-  // forced: the stalest target even if done today; otherwise only targets not done in 20 h
-  const due = (targets || []).filter((t: any) => !okRecently.has(key(t)));
-  const t = due[0] || (force ? (targets || [])[0] : null);
+  const all = targets || [];
+  const weekAgo = Date.now() - 7 * 24 * HOUR;
+  // A target never read to the end and not yet started goes first, so one busy advertiser's long
+  // list cannot keep the small ones waiting for hours; then the passes in progress.
+  // A target whose read failed in the last 6 h steps aside, so it cannot hold up the others.
+  const failed = new Set((await lastRuns('google_ads', 6 * HOUR)).filter((r: any) => r.ok === false).map((r: any) => r.unit));
+  let t = all.find((x: any) => !x.full_at && !x.cursor && !failed.has(key(x)));
+  let mode = 'full';
+  if (!t) { t = all.find((x: any) => x.cursor); mode = 'continue'; }
+  if (!t) { t = all.find((x: any) => Date.parse(x.full_at) < weekAgo); mode = 'full'; }
+  if (!t) { t = all.find((x: any) => !okRecently.has(key(x))); mode = 'refresh'; }
+  if (!t && force) { t = all[0]; mode = 'refresh'; }
   if (!t) return { source: 'google_ads', skipped: 'nothing due' };
   return unit('google_ads', key(t), trigger, async (runId) => {
     const filter: any = { '8': [2356] };   // 2356 = India, as the site's own region picker sends it
     if (t.kind === 'advertiser') filter['13'] = { '1': [t.value] }; else filter['12'] = { '1': t.value, '2': true };
-    let token: string | null = null, page = 0, n = 0, status = 200, more = false;
-    const seen: any[] = [];
+    const started = Date.now();
+    let token: string | null = mode === 'continue' ? t.cursor : null, page = 0, n = 0, status = 200;
+    let passPages = mode === 'continue' ? (t.pass_pages || 0) : 0, passAds = mode === 'continue' ? (t.pass_ads || 0) : 0;
+    const passStart = mode === 'continue' ? t.pass_started_at : new Date().toISOString();
     do {
       if (page) await sleep(6000);
       const req: any = { '2': 40, '3': filter, '7': { '1': 1, '2': 0, '3': 2356 } };
       if (token) req['4'] = token;
       const r = await fetch(GADS, { method: 'POST', headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'https://adstransparency.google.com', Referer: 'https://adstransparency.google.com/?region=IN' }, body: 'f.req=' + encodeURIComponent(JSON.stringify(req)) });
       const text = await r.text(); status = r.status;
-      if (looksBlocked(r.status, text)) throw new Refused('Google showed a rate-limit/CAPTCHA page (HTTP ' + r.status + ') on page ' + (page + 1), r.status);
-      if (!r.ok) throw new Error('HTTP ' + r.status + ' on page ' + (page + 1));
-      let json: any; try { json = JSON.parse(text); } catch (_) { throw new Error('reply was not JSON on page ' + (page + 1)); }
+      if (looksBlocked(r.status, text)) throw new Refused('Google showed a rate-limit/CAPTCHA page (HTTP ' + r.status + ') on page ' + (passPages + 1), r.status);
+      if (!r.ok) {
+        // A continuation token Google no longer accepts: drop it, so the next pass starts over.
+        if (mode === 'continue' && page === 0) await db.from('pi_targets').update({ cursor: null }).eq('id', t.id);
+        throw new Error('HTTP ' + r.status + ' on page ' + (passPages + 1));
+      }
+      let json: any; try { json = JSON.parse(text); } catch (_) { throw new Error('reply was not JSON on page ' + (passPages + 1)); }
       const { creatives, next } = gadsCreatives(json);
-      seen.push(...creatives); n += creatives.length; page++;
-      token = next; more = !!next;
-    } while (token && page < 5);
-    const now = new Date().toISOString();
-    await upsertChunks('pi_gads_creatives', seen.map((c) => ({ ...c, region: 'IN', target_id: t.id, watchlist_id: t.watchlist_id, fetched_at: now, run_id: runId })), 'creative_id');
-    return { items: n, http_status: status, note: page + ' page(s)' + (more ? '; more exist beyond 5 pages (newest kept)' : '') };
+      const now = new Date().toISOString();
+      await upsertChunks('pi_gads_creatives', creatives.map((c) => ({ ...c, region: 'IN', target_id: t.id, watchlist_id: t.watchlist_id, fetched_at: now, run_id: runId })), 'creative_id');
+      n += creatives.length; page++; passPages++; passAds += creatives.length;
+      token = next;
+      if (mode !== 'refresh') {
+        const upd: any = token ? { cursor: token, pass_started_at: passStart, pass_pages: passPages, pass_ads: passAds }
+          : { cursor: null, pass_started_at: passStart, pass_pages: passPages, pass_ads: passAds, full_at: now, full_ads: passAds };
+        const { error } = await db.from('pi_targets').update(upd).eq('id', t.id);
+        if (error) throw new Error('saving the page position: ' + error.message);
+      }
+    } while (token && page < GADS_PAGES && Date.now() - started < GADS_BUDGET_MS);
+    const where = mode === 'refresh' ? 'newest ' + page + ' page(s) re-read' : (token ? 'pages ' + (passPages - page + 1) + '-' + passPages + ' read; the rest continue next tick' : 'all ' + passPages + ' page(s) read - ' + passAds + ' ads in this pass');
+    return { items: n, http_status: status, note: where };
+  });
+}
+
+/* WHAT EACH AD SAYS (gads_detail). Reads the preview script of up to 15 creatives a tick, 1.5 s
+   apart, newest first, and stores what gadsDetail() finds in it. Only creatives that need it:
+   videos (for the YouTube id) and ads with no stored picture. Text ads that Google already gives as
+   a picture of the ad (image_url) are shown as that picture and are not read again. Each creative
+   is read once; a failure is kept in detail_error and not retried, so one odd ad cannot hold the
+   queue. A CAPTCHA/429 stops the unit and the source waits 6 hours like every other. */
+const GDET_N = 15;
+async function gadsDetailTick(trigger: string, force: boolean) {
+  const wait = await gate('gads_detail', force ? 60e3 : 4 * 60e3);
+  if (wait) return { source: 'gads_detail', skipped: wait };
+  const { data: pick, error: pe } = await db.from('pi_gads_creatives').select('creative_id,preview_url,format')
+    .is('detail_at', null).not('preview_url', 'is', null).or('image_url.is.null,format.eq.video')
+    .order('last_shown', { ascending: false, nullsFirst: false }).limit(GDET_N);
+  if (pe) return { source: 'gads_detail', ok: false, error: pe.message };
+  if (!pick?.length) return { source: 'gads_detail', skipped: 'nothing due' };
+  return unit('gads_detail', pick.length + ' creative(s): ' + pick.map((p: any) => p.creative_id).join(','), trigger, async (runId) => {
+    let ok = 0; const errs: string[] = [];
+    const started = Date.now();
+    for (let i = 0; i < pick.length; i++) {
+      if (Date.now() - started > 80e3) break;
+      const p: any = pick[i];
+      if (i) await sleep(1500);
+      const now = new Date().toISOString();
+      let d: any;
+      try {
+        const r = await fetch(p.preview_url, { headers: { 'User-Agent': UA, Referer: 'https://adstransparency.google.com/' } });
+        const text = await r.text();
+        if (looksBlocked(r.status, text)) throw new Refused('Google showed a rate-limit/CAPTCHA page (HTTP ' + r.status + ')', r.status);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        d = gadsDetail(text);
+      } catch (e) {
+        if (e instanceof Refused) throw e;
+        d = { error: (e as Error).message };
+      }
+      const err = d.error || null; delete d.error;
+      const { error } = await db.from('pi_gads_creatives').update({ ...d, detail_at: now, detail_error: err }).eq('creative_id', p.creative_id);
+      if (error) errs.push(p.creative_id + ': save ' + error.message);
+      else if (err) errs.push(p.creative_id + ': ' + err); else ok++;
+    }
+    if (!ok && errs.length) throw new Error(errs.join(' | '));
+    return { items: ok, note: errs.length ? errs.length + ' not read: ' + errs.join(' | ') : null };
   });
 }
 
@@ -154,27 +235,32 @@ async function reraListTick(trigger: string, force: boolean) {
     return { items: appr.rows.length + rej.rows.length, note: appr.rows.length + ' approved, ' + rej.rows.length + ' rejected/revoked, ' + changes.length + ' completion-date changes' };
   });
 }
+// 18 pages a tick, 1.5 s apart, one at a time - about three times the old 6 - but a tick stops
+// starting new pages after 90 s (the site often takes 3-4 s a page), so it never runs into the
+// edge function's time limit. Still one request at a time, never in parallel.
+const RERA_N = 18, RERA_BUDGET_MS = 90e3;
 const TRACKED = ['name', 'project_status', 'completion_date', 'extension_date', 'apartments', 'promoter_name', 'litigations'];
 async function reraDetailTick(trigger: string, force: boolean) {
   const wait = await gate('rera_detail', force ? 60e3 : 4 * 60e3);
   if (wait) return { source: 'rera_detail', skipped: wait };
   // 1) never fetched, newest registration first
   let { data: pick } = await db.from('pi_rera_projects').select('*').is('detail_fetched_at', null).eq('list_status', 'approved')
-    .order('reg_date', { ascending: false, nullsFirst: false }).limit(6);
+    .order('reg_date', { ascending: false, nullsFirst: false }).limit(RERA_N);
   if (!pick?.length) {
     // 2) followed promoters, weekly; 3) everyone else, every 90 days
     const { data: tg } = await db.from('pi_targets').select('value').eq('source', 'rera').eq('active', true);
     const names = (tg || []).map((t: any) => t.value);
     const weekAgo = new Date(Date.now() - 7 * 24 * HOUR).toISOString();
-    if (names.length) ({ data: pick } = await db.from('pi_rera_projects').select('*').in('promoter_name', names).lt('detail_fetched_at', weekAgo).order('detail_fetched_at').limit(6));
-    if (!pick?.length) ({ data: pick } = await db.from('pi_rera_projects').select('*').lt('detail_fetched_at', new Date(Date.now() - 90 * 24 * HOUR).toISOString()).order('detail_fetched_at').limit(6));
+    if (names.length) ({ data: pick } = await db.from('pi_rera_projects').select('*').in('promoter_name', names).lt('detail_fetched_at', weekAgo).order('detail_fetched_at').limit(RERA_N));
+    if (!pick?.length) ({ data: pick } = await db.from('pi_rera_projects').select('*').lt('detail_fetched_at', new Date(Date.now() - 90 * 24 * HOUR).toISOString()).order('detail_fetched_at').limit(RERA_N));
   }
   if (!pick?.length) return { source: 'rera_detail', skipped: 'nothing due' };
   return unit('rera_detail', pick.map((p: any) => p.procode).join(','), trigger, async (runId) => {
-    let ok = 0; const errs: string[] = []; const changes: any[] = [];
+    let ok = 0; const errs: string[] = []; const changes: any[] = []; const started = Date.now();
     for (let i = 0; i < pick!.length; i++) {
       const p: any = pick![i];
-      if (i) await sleep(4000);
+      if (Date.now() - started > RERA_BUDGET_MS) break;   // stay well inside the edge time limit
+      if (i) await sleep(1500);
       const url = RERA + 'project_details.php?procode=' + p.procode;
       const now = new Date().toISOString();
       let html: string;
@@ -276,7 +362,7 @@ async function caller(req: Request): Promise<string | null> {
 }
 
 const SOURCES: Record<string, (trigger: string, force: boolean) => Promise<any>> = {
-  google_ads: gadsTick, rera_list: reraListTick, rera_detail: reraDetailTick, trends: trendsTick,
+  google_ads: gadsTick, gads_detail: gadsDetailTick, rera_list: reraListTick, rera_detail: reraDetailTick, trends: trendsTick,
 };
 
 Deno.serve(async (req) => {
