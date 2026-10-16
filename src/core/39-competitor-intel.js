@@ -18,9 +18,9 @@
    (the "Localities" group): that is the market, not a company, and is shown on Competitor Data
    only, labelled as such.
 
-   DATA FIRST (16 Oct 2026, as asked). No collection log and, on Competitor Data, no fetch buttons:
+   DATA FIRST (16 Oct 2026, as asked). Competitor Data has no collection log and no fetch buttons:
    collection runs only on the 5-minute schedule, and each tab says when it was last updated. Our
-   Brand keeps its "Fetch next now". Google ads are shown inside JainE - picture, rendered text ad
+   Brand keeps its "Fetch next now" and Collection log. Google ads are shown inside JainE - picture, rendered text ad
    or YouTube player - instead of sending people to Google; which Google account paid for an ad is
    not shown: every ad found under a competitor's accounts or website counts as that competitor's. */
 const CI_TABS=[
@@ -37,10 +37,10 @@ async function ciLoadWatchlist(){
   window._ciWl={}; (data||[]).forEach(function(w){ window._ciWl[w.id]=w; });
 }
 const CI_SCOPE_WORD={brand:'our brand',competitor:'competitors',partner:'channel partners'};
-let CI_F={wl:'all',fmt:'all',recent:'all',q:'',rq:'',rdist:'all',geo:'IN-WB'};
-// How many ad cards / register rows are drawn; "Show more" adds a page. Reset by every filter.
+let CI_F={wl:'all',fmt:'all',recent:'all',q:'',geo:'IN-WB'};
+// How many ad cards are drawn; "Show more" adds a page. Reset by every filter.
 const CI_PAGE=60;
-let CI_SHOW=CI_PAGE, CI_RSHOW=100;
+let CI_SHOW=CI_PAGE;
 
 const CI_CSS='<style>'
   +'.ci-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg-card);margin-bottom:14px}'
@@ -80,7 +80,7 @@ const CI_CSS='<style>'
   +'</style>';
 // Typing in a search box redraws the list; put the cursor back where it was.
 function ciSearchInput(id,key,paint,ph){
-  return '<input id="'+id+'" placeholder="'+esc(ph)+'" value="'+esc(CI_F[key])+'" oninput="CI_F.'+key+'=this.value;CI_SHOW=CI_PAGE;CI_RSHOW=100;clearTimeout(window._ciT);window._ciT=setTimeout(function(){'+paint+'();var e=document.getElementById(\''+id+'\');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}},350)">';
+  return '<input id="'+id+'" placeholder="'+esc(ph)+'" value="'+esc(CI_F[key])+'" oninput="CI_F.'+key+'=this.value;CI_SHOW=CI_PAGE;clearTimeout(window._ciT);window._ciT=setTimeout(function(){'+paint+'();var e=document.getElementById(\''+id+'\');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}},350)">';
 }
 function ciAgo(d){
   if(!d) return '—';
@@ -110,7 +110,7 @@ async function ciAll(q){
 async function ciTabView(host,tab,scope,route){
   const t=CI_TABS.filter(function(x){ return x[0]===tab; })[0]||CI_TABS[0];
   CI_SCOPE=scope||'competitor'; CI_ROUTE=route||('competitors/'+t[0]);
-  CI_SHOW=CI_PAGE; CI_RSHOW=100;
+  CI_SHOW=CI_PAGE;
   if(CI_SCOPE==='competitor'){ try{ usageQueue(t[3],'view'); }catch(e){} }
   host.innerHTML=CI_CSS+'<div id="ciRuns"></div>'
     +'<div id="ciBody"><div class="loader"><div class="spin"></div></div></div>';
@@ -126,20 +126,50 @@ async function ciTabView(host,tab,scope,route){
 }
 
 // ---------------------------------------------------------------- "updated automatically" line
-/* What used to be the Collection log. People want the data, not the log: one line saying the tab
-   fills itself and when it last did, plus anything still in progress (extra). Our Brand keeps its
-   "Fetch next now" button; Competitor Data has none - only the schedule collects there. */
+/* One line saying the tab fills itself and when it last did, plus anything still in progress
+   (extra). Competitor Data shows only that - no Collection log, no fetch button: people there want
+   the data, and only the schedule collects it. Our Brand (every non-competitor view) keeps its
+   "Fetch next now" button and the Collection log below it, as asked on 16 Oct 2026. */
+const CI_SOURCE_LABEL={google_ads:'Google Ads',gads_detail:'Google ad contents',rera_list:'RERA project list',rera_detail:'RERA project pages',trends:'Google Trends'};
 async function ciStatus(sources,blurb,extra){
   const {data}=await sb.schema('camp').from('pi_runs').select('finished_at').in('source',sources).eq('ok',true).order('finished_at',{ascending:false}).limit(1);
   const last=data&&data[0]&&data[0].finished_at;
-  const btn=CI_SCOPE==='brand'?sources.filter(function(s){ return s!=='rera_list'&&s!=='gads_detail'; })[0]:null;
+  const btn=CI_SCOPE!=='competitor'?sources.filter(function(s){ return s!=='rera_list'&&s!=='gads_detail'; })[0]:null;
   $('ciRuns').innerHTML='<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 8px">'
       +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px;line-height:1.55">'+blurb+'</p>'
       +(btn?'<button class="btn" id="ciFetchBtn" onclick="ciFetchNow(\''+btn+'\')"><i class="fa-solid fa-rotate"></i> Fetch next now</button>':'')
     +'</div>'
     +'<div class="ci-upd"><i class="fa-solid fa-clock-rotate-left" style="color:#0369a1"></i> Updated automatically'
       +(last?' - last updated <b title="'+esc(ciDateTime(last))+'">'+ciAgo(last)+'</b>':' - nothing collected yet')
-      +(extra?' · '+extra:'')+'</div>';
+      +(extra?' · '+extra:'')+'</div>'
+    +(CI_SCOPE!=='competitor'?await ciRunsLog(sources):'');
+}
+// The Collection log: the latest run of each source, then the last 25 runs. Non-competitor views only.
+async function ciRunsLog(sources){
+  const {data}=await sb.schema('camp').from('pi_runs').select('*').in('source',sources).order('started_at',{ascending:false}).limit(40);
+  const runs=data||[];
+  const last={}; runs.forEach(function(r){ if(!last[r.source]) last[r.source]=r; });
+  const chips=sources.map(function(s){
+    const r=last[s];
+    if(!r) return '<span class="tag t-gray">'+esc(CI_SOURCE_LABEL[s]||s)+': not run yet</span>';
+    const cls=r.ok===true?'t-green':(r.ok===false?(r.refused?'t-amber':'t-red'):'t-gray');
+    const word=r.ok===true?'ok':(r.ok===false?(r.refused?'site asked us to slow down':'failed'):'running');
+    return '<span class="tag '+cls+'" title="'+esc((r.error||r.note||'')+' ('+(r.unit||'')+')')+'">'+esc(CI_SOURCE_LABEL[s]||s)+': '+word+' · '+ciAgo(r.started_at)+'</span>';
+  }).join(' ');
+  const rows=runs.slice(0,25).map(function(r){
+    return '<tr><td>'+ciDateTime(r.started_at)+'</td><td>'+esc(CI_SOURCE_LABEL[r.source]||r.source)+'</td>'
+      +'<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.unit||'')+'">'+esc(r.unit||'')+'</td>'
+      +'<td>'+(r.ok===true?'<span class="tag t-green">ok</span>':r.ok===false?(r.refused?'<span class="tag t-amber">refused</span>':'<span class="tag t-red">failed</span>'):'<span class="tag t-gray">running</span>')+'</td>'
+      +'<td style="text-align:right">'+(r.items==null?'—':r.items)+'</td>'
+      +'<td style="font-size:11.5px;color:var(--slate);max-width:420px;word-break:break-word">'+esc(r.error||r.note||'')+'</td></tr>';
+  }).join('');
+  return '<details class="card" style="margin-bottom:14px"><summary style="cursor:pointer;padding:11px 15px;font-size:13px;list-style:none;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+      +'<i class="fa-solid fa-clock-rotate-left" style="color:#0369a1"></i> <b>Collection log</b> '+chips
+      +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate)">click to open / close</span></summary>'
+      +'<div style="overflow-x:auto;border-top:1px solid var(--line)"><table class="tbl" style="width:100%;font-size:12.5px">'
+        +'<thead><tr><th>Started</th><th>Source</th><th>What</th><th>Result</th><th style="text-align:right">Rows</th><th>Note / error</th></tr></thead>'
+        +'<tbody>'+(rows||'<tr><td colspan="6" style="color:var(--slate)">Nothing collected yet - the schedule runs every 5 minutes.</td></tr>')+'</tbody></table></div>'
+    +'</details>';
 }
 window.ciFetchNow=async function(source){
   const b=$('ciFetchBtn'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Fetching - up to a minute…'; }
@@ -311,41 +341,36 @@ window.ciAdOpen=function(id){
 };
 
 // ---------------------------------------------------------------- RERA
-/* Competitor Data shows each competitor's projects. WBRERA lists projects by the PROMOTER - the
-   legal company - and prints that name only on each project's own page, so which companies are a
+/* ONLY THE FOLLOWED COMPANIES' PROJECTS, on both pages (16 Oct 2026, as asked): Competitor Data
+   shows our competitors' projects and nothing else - no whole register, no search across it, no
+   other companies, no register-wide counts. WBRERA lists projects by the PROMOTER - the legal
+   company - and prints that name only on each project's own page, so which companies are a
    competitor's is set by hand in camp.pi_targets (source 'rera', kind 'promoter', watchlist_id of
-   the competitor), from names the user has confirmed - never guessed from project names. Until a
-   competitor's companies are confirmed the tab says so, and the whole register can be searched
-   meanwhile. Our Brand follows our own promoter the same way. */
+   the competitor), from names the user has confirmed - never guessed from project names. The
+   collector still reads every project page in the background, because that is how a competitor's
+   projects are found; until a competitor's companies are confirmed the tab only says so. Our Brand
+   follows our own promoter the same way. */
 async function ciRera(){
   const tg=await sb.schema('camp').from('pi_targets').select('*').eq('source','rera');
-  const allTargets=tg.data||[];
-  const ownNames=allTargets.filter(function(t){ return ciTargetScope(t)==='brand'; }).map(function(t){ return String(t.value); });
-  const cols='procode,project_id,name,reg_no,reg_date,completion_date,district,block,project_status,extension_date,apartments,promoter_name,detail_fetched_at,detail_error,source_url';
   const brand=CI_SCOPE==='brand';
-  const [projects,ch,cnt]=await Promise.all([
-    brand?(ownNames.length?ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).in('promoter_name',ownNames).order('reg_date',{ascending:false}); }):Promise.resolve([]))
-      :ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).order('reg_date',{ascending:false}); }),
-    sb.schema('camp').from('pi_rera_changes').select('*').order('changed_at',{ascending:false}).limit(300),
-    sb.schema('camp').from('pi_rera_projects').select('procode',{count:'exact',head:true}).not('detail_fetched_at','is',null)
+  const targets=(tg.data||[]).filter(function(t){ return t.active!==false&&ciTargetScope(t)===(brand?'brand':'competitor'); });
+  const names=targets.map(function(t){ return String(t.value); });
+  const cols='procode,project_id,name,reg_no,reg_date,completion_date,district,block,project_status,extension_date,apartments,promoter_name,source_url';
+  const [projects,ch]=await Promise.all([
+    names.length?ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).in('promoter_name',names).order('reg_date',{ascending:false}); }):Promise.resolve([]),
+    names.length?sb.schema('camp').from('pi_rera_changes').select('*').order('changed_at',{ascending:false}).limit(300):Promise.resolve({data:[]})
   ]);
-  const own={}; ownNames.forEach(function(n){ own[n.toLowerCase()]=1; });
-  window._ciRera=brand?projects:projects.filter(function(p){ return !own[String(p.promoter_name||'').toLowerCase()]; });
-  window._ciRTargets=allTargets.filter(function(t){ return ciTargetScope(t)===(brand?'brand':'competitor'); });
-  window._ciRAllRead=cnt.count||0; window._ciRTotal=projects.length;
-  // Changes only for projects shown as ours / a confirmed competitor's; the log has no promoter.
-  const fol={}; window._ciRTargets.forEach(function(t){ fol[String(t.value).toLowerCase()]=1; });
-  const on={}; window._ciRera.forEach(function(p){ if(fol[String(p.promoter_name||'').toLowerCase()]) on[p.procode]=1; });
+  window._ciRera=projects; window._ciRTargets=targets;
+  // Changes only for the projects shown; the change log itself does not carry a promoter.
+  const on={}; projects.forEach(function(p){ on[p.procode]=1; });
   window._ciRChanges=(ch.data||[]).filter(function(c){ return on[c.procode]; }).slice(0,30);
-  const total=brand?null:projects.length, read=window._ciRAllRead;
-  await ciStatus(['rera_list','rera_detail'],'Projects on the public <a href="https://rera.wb.gov.in/district_project.php?dcode=0" target="_blank" rel="noopener">West Bengal RERA register</a>: area, status, number of flats, registration, promised completion and any extension. The register is read weekly and every project\'s own page is read in turn.',
-    brand?'':'project pages read: <b>'+ciN(read)+' of '+ciN(total)+'</b>'+(read<total?' (about '+Math.max(1,Math.round((total-read)/200))+' h to go)':''));
+  await ciStatus(['rera_list','rera_detail'],(brand?'Our':'Our competitors\'')+' projects on the public <a href="https://rera.wb.gov.in/district_project.php?dcode=0" target="_blank" rel="noopener">West Bengal RERA register</a>: area, status, number of flats, registration, promised completion and any extension. Each project\'s page is re-read regularly and changes are listed.');
   ciReraPaint();
 }
 function ciReraTable(list,withCompany){
   const tr=function(p){
     return '<tr><td><a href="'+esc(p.source_url||('https://rera.wb.gov.in/project_details.php?procode='+p.procode))+'" target="_blank" rel="noopener"><b>'+esc(p.name||'')+'</b></a><div style="font-size:11px;color:var(--slate)">'+esc(p.reg_no||'')+'</div></td>'
-      +(withCompany?'<td style="font-size:12px">'+(p.promoter_name?esc(p.promoter_name):'<span style="color:var(--slate)">page not read yet</span>')+'</td>':'')
+      +(withCompany?'<td style="font-size:12px">'+esc(p.promoter_name||'')+'</td>':'')
       +'<td>'+esc([p.block,p.district].filter(Boolean).join(', ')||'—')+'</td>'
       +'<td>'+esc(p.project_status||'—')+'</td>'
       +'<td class="ci-num">'+(p.apartments==null?'—':ciN(p.apartments))+'</td>'
@@ -358,6 +383,11 @@ function ciReraTable(list,withCompany){
 }
 function ciReraPaint(){
   const all=window._ciRera||[], targets=window._ciRTargets||[], brand=CI_SCOPE==='brand', W=window._ciWl||{};
+  if(!targets.length){
+    $('ciBody').innerHTML='<div class="ci-explain">'+(brand?'No promoter of ours is followed yet.'
+      :'<b>Competitor projects will appear here</b> once the RERA project pages have been read and the companies that belong to each competitor are confirmed. RERA lists every project under the legal company that registered it, so those names are checked with you rather than guessed.')+'</div>';
+    return;
+  }
   // Projects of each followed company, grouped under the brand / competitor it belongs to.
   const byWl={}; targets.forEach(function(t){ const k=t.watchlist_id||0; (byWl[k]=byWl[k]||{})[String(t.value).toLowerCase()]=1; });
   const sections=Object.keys(byWl).map(function(id){
@@ -368,7 +398,7 @@ function ciReraPaint(){
         +'<b style="font-size:14px">'+esc((W[id]||{}).name||'Followed company')+'</b>'
         +'<span class="tag t-gray">'+ps.length+' project'+(ps.length===1?'':'s')+'</span><span class="tag t-gray">'+ciN(flats)+' flats</span>'
         +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate)">on RERA as '+esc(targets.filter(function(t){ return String(t.watchlist_id||0)===id; }).map(function(t){ return t.value; }).join(', '))+'</span></div>'
-      +(ps.length?ciReraTable(ps,Object.keys(names).length>1):'<div class="card-pad" style="color:var(--slate);font-size:12.5px">No projects found yet - they appear as each project\'s page is read.</div>')
+      +(ps.length?ciReraTable(ps,Object.keys(names).length>1):'<div class="card-pad" style="color:var(--slate);font-size:12.5px">No projects found yet - they appear as the RERA project pages are read.</div>')
     +'</div>';
   }).join('');
   const chg=(window._ciRChanges||[]).map(function(c){
@@ -376,32 +406,8 @@ function ciReraPaint(){
     return '<tr><td>'+ciDateTime(c.changed_at)+'</td><td>'+esc(p.name||c.procode)+'</td><td>'+esc(c.field)+'</td><td>'+esc(c.old_value||'—')+'</td><td>'+esc(c.new_value||'—')+'</td></tr>';
   }).join('');
   const changes=chg?'<div class="card" style="overflow-x:auto;margin-bottom:14px"><div style="padding:10px 14px;font-weight:700;font-size:13px">Recent changes</div><table class="tbl" style="width:100%;font-size:12.5px"><thead><tr><th>Seen</th><th>Project</th><th>What</th><th>Was</th><th>Now</th></tr></thead><tbody>'+chg+'</tbody></table></div>':'';
-  if(brand){
-    $('ciBody').innerHTML=(sections||'<div class="card card-pad" style="color:var(--slate)">No promoter of ours is followed yet.</div>')+changes;
-    return;
-  }
-  // Competitor Data: until the competitors' RERA companies are confirmed, say so and offer the
-  // whole register to search.
-  const note=targets.length?'':'<div class="ci-explain"><b>Competitor projects are being matched.</b> RERA lists projects under the legal company that registered them (for example "Srijan Realty Private Limited"), and prints that name only on each project\'s own page. Those pages are being read now ('+ciN(window._ciRAllRead)+' of '+ciN(window._ciRTotal)+'). Once they are, the company names that belong to each competitor will be confirmed with you and each competitor\'s projects will show here. Until then, search the whole register below.</div>';
-  const dists={}; all.forEach(function(p){ if(p.district) dists[p.district]=1; });
-  const q=(CI_F.rq||'').toLowerCase();
-  const rows=all.filter(function(p){
-    if(CI_F.rdist!=='all'&&p.district!==CI_F.rdist) return false;
-    if(q&&[p.name,p.promoter_name,p.district,p.block,p.reg_no,p.project_id].join(' ').toLowerCase().indexOf(q)<0) return false;
-    return true;
-  });
-  const shown=rows.slice(0,CI_RSHOW);
-  $('ciBody').innerHTML=note+sections+changes
-    +'<div style="font-weight:700;font-size:14px;margin:6px 0 10px">Every project on the West Bengal RERA register</div>'
-    +'<div class="ci-bar">'
-      +compSelHtml('ciRD',[['all','All districts']].concat(Object.keys(dists).sort().map(function(d){ return [d,d]; })),CI_F.rdist,"ciRSet('rdist',this.value)")
-      +ciSearchInput('ciRQ','rq','ciReraPaint','Search project, company, area, reg. no.')
-      +'<span style="margin-left:auto;font-size:12.5px;color:var(--slate)">'+ciN(rows.length)+' project'+(rows.length===1?'':'s')+'</span>'
-    +'</div>'
-    +'<div class="card" style="margin-bottom:14px">'+ciReraTable(shown,true)+'</div>'
-    +(rows.length>shown.length?'<div style="text-align:center;margin:0 0 10px"><button class="btn" onclick="CI_RSHOW+=200;ciReraPaint()">Show more <span style="color:var(--slate);font-weight:500">('+ciN(shown.length)+' of '+ciN(rows.length)+' shown)</span></button></div>':'');
+  $('ciBody').innerHTML=sections+changes;
 }
-window.ciRSet=function(k,v){ CI_F[k]=v; CI_RSHOW=100; ciReraPaint(); };
 
 // ---------------------------------------------------------------- Search Trends
 /* Google Trends gives an index, not search counts, so each group is explained in plain words and
