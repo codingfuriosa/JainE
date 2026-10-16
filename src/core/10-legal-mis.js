@@ -1558,6 +1558,11 @@ async function legalNotices(){
      row wraps and they drop below the cards rather than squeezing them - which is why the count
      line sits inside the group and not between the cards and the buttons. */
   h+='<div id="lnBar" style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    /* Search narrows the list to notices whose sender or client/applicant contains what is typed.
+       It filters the rows already on the page, so it is instant and keeps working offline. */
+    +'<div style="position:relative"><i class="fa-solid fa-magnifying-glass" style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--slate)"></i>'
+      +'<input id="lnSearch" type="search" placeholder="Search sender or client…" value="'+esc(window._lnQ||'')+'" oninput="lnFilter(this.value)" '
+      +'style="height:34px;width:240px;padding:0 12px 0 31px;border:1px solid var(--line,#e2e8f0);border-radius:8px;font:inherit;font-size:12.5px;background:var(--bg-card,#fff);color:var(--ink,#0f172a)"></div>'
     +'<span id="lnCount" style="font-size:12px;color:var(--slate);margin-right:2px"></span>'
     +'<button id="lnEditBtn" onclick="lnEditSelected()" style="'+BTN+';border:1px solid var(--line,#e2e8f0);color:var(--ink,#0f172a)">'
       +'<i class="fa-solid fa-pen" style="font-size:11px"></i> Edit</button>'
@@ -1588,7 +1593,8 @@ async function legalNotices(){
       /* The task is the thing people act on, so the row opens it. The checkbox cell stops the
          click, otherwise selecting a row would navigate away from the list. */
       const go=r.task_id?(' onclick="navTo(\'tasks/task/'+r.task_id+'\')" style="cursor:pointer"'):'';
-      h+='<tr'+go+' class="ln-row'+(r.state==='Overdue'?' ln-late':'')+'" style="border-bottom:1px solid var(--line-2)">'
+      const q=((r.sent_by||'')+' '+((r.parties||[]).join(' '))).toLowerCase();
+      h+='<tr'+go+' class="ln-row'+(r.state==='Overdue'?' ln-late':'')+'" data-q="'+esc(q)+'" style="border-bottom:1px solid var(--line-2)">'
         +'<td style="padding:11px 12px" onclick="event.stopPropagation()"><input type="checkbox" class="lnChk" value="'+r.id+'" onclick="event.stopPropagation();lnSelSync()"></td>'
         +'<td style="padding:11px 12px;font-weight:600">'+esc(r.sent_by||'—')+'</td>'
         +'<td style="padding:11px 12px">'+esc(parties)+'</td>'
@@ -1607,11 +1613,32 @@ async function legalNotices(){
       +'<div>No legal notices yet</div><div style="font-size:12px;color:var(--slate);margin-top:6px">'
       +'Upload one to Documents &rsaquo; Legal Notice. It is read automatically and a task is raised for the Legal team.</div></div></td></tr>';
   }
+  h+='<tr id="lnNoMatch" style="display:none"><td colspan="'+(head.length+1)+'"><div class="empty" style="padding:28px"><i class="fa-solid fa-magnifying-glass"></i>'
+    +'<div>No notice matches that sender or client</div></div></td></tr>';
   h+='</tbody></table></div></div>';
 
   body.innerHTML=h;
-  lnSelSync();
+  lnFilter(window._lnQ||'');
 }
+
+/* ---- search: sender and clients/applicants ----------------------------------------------- */
+window.lnFilter=function(v){
+  window._lnQ=v||'';
+  const words=window._lnQ.toLowerCase().split(/\s+/).filter(Boolean);
+  let shown=0;
+  document.querySelectorAll('tr.ln-row').forEach(function(tr){
+    // every word typed must appear, in any order ("sharma notice" finds "Notice from R. Sharma")
+    const ok=!words.length||words.every(w=>(tr.dataset.q||'').indexOf(w)>-1);
+    tr.style.display=ok?'':'none';
+    // a hidden row cannot stay ticked, or Delete would act on notices nobody can see
+    if(!ok){ const c=tr.querySelector('.lnChk'); if(c) c.checked=false; }
+    if(ok) shown++;
+  });
+  const nm=$('lnNoMatch'); if(nm) nm.style.display=(words.length&&!shown&&document.querySelector('tr.ln-row'))?'':'none';
+  lnSelSync();
+};
+// the rows the search leaves on screen
+function lnVisibleBoxes(){ return [...document.querySelectorAll('tr.ln-row')].filter(tr=>tr.style.display!=='none').map(tr=>tr.querySelector('.lnChk')).filter(Boolean); }
 
 /* ---- selection -------------------------------------------------------------------------- */
 function lnSelected(){ return [...document.querySelectorAll('.lnChk:checked')].map(c=>Number(c.value)); }
@@ -1629,10 +1656,14 @@ window.lnSelSync=function(){
   grey(ed,  n===1, n ? 'Select exactly one notice to edit' : 'Select one notice to edit');
   grey(del, n>0,   'Select at least one notice to delete');
   if(clr) clr.style.display = n>0 ? '' : 'none';
-  const boxes=[...document.querySelectorAll('.lnChk')];
+  const boxes=lnVisibleBoxes();
   if(all){ all.checked = boxes.length>0 && n===boxes.length; all.indeterminate = n>0 && n<boxes.length; }
+  // while searching, say how many of the notices are showing
+  const tot=document.querySelectorAll('tr.ln-row').length;
+  if(cnt&&!n&&(window._lnQ||'').trim()) cnt.textContent=boxes.length+' of '+tot+' shown';
 };
-window.lnToggleAll=function(cb){ document.querySelectorAll('.lnChk').forEach(c=>{c.checked=cb.checked;}); lnSelSync(); };
+// select-all ticks only the notices the search is showing
+window.lnToggleAll=function(cb){ lnVisibleBoxes().forEach(c=>{c.checked=cb.checked;}); lnSelSync(); };
 window.lnClearSel=function(){ document.querySelectorAll('.lnChk').forEach(c=>{c.checked=false;}); lnSelSync(); };
 
 /* ---- correcting what the model read ----------------------------------------------------- */
