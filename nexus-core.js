@@ -32499,12 +32499,23 @@ function dmNeedConnect(what){
   return dmNote('fa-plug',esc(what)+' needs the marketing Google connection. Open <a href="#" onclick="navTo(DM_SETUP_ROUTE);return false">Setup</a> on Our Brand, connect the company Google account that owns it, and the next nightly pull fills this in.');
 }
 
+/* Why a tab is empty, in one line at its top. The nightly pull writes each part's result to
+   camp.dm_sync_log; when the newest one failed (most often: an API key not added yet) the tab says
+   that, instead of tables that read "no channels yet" while the channels are all there. */
+async function dmPartStatus(part,what){
+  const {data}=await dmCamp().from('dm_sync_log').select('ok,message,started_at,rows').eq('part',part).order('started_at',{ascending:false}).limit(1);
+  const x=data&&data[0];
+  if(!x) return dmNote('fa-hourglass-half',esc(what)+' has not been read yet - the first pull runs tonight.');
+  if(x.ok) return '';
+  return '<div style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid #fcd34d;background:#fffbeb;border-radius:10px;color:#92400e;font-size:13px;margin:0 0 14px"><i class="fa-solid fa-triangle-exclamation" style="margin-top:2px"></i><div><b>No '+esc(what)+' figures yet.</b> The last pull ('+esc(fmtDateShort(x.started_at))+') stopped: '+esc(x.message||'unknown error')+'. Nothing below is filled in until that is fixed - the steps are in Our Brand → Setup.</div></div>';
+}
+
 /* ---------------------------------------------------------------- YouTube */
 async function dmYouTube(body,r){
   // Our own channel's private analytics (YouTube Analytics API) only ever appear on Our Brand.
   const own=DM_SCOPE==='brand'?(await dmSources('yt_channel')).filter(function(s){return s.enabled;}):[];
   if(own.length&&!own.some(function(s){return s.source_id===DM_CHAN;}))DM_CHAN=own[0].source_id;
-  let html='';
+  let html=await dmPartStatus('yt_public','YouTube public');
   if(DM_SCOPE==='brand'&&!own.length) html+=dmCard('Our channel','YouTube Analytics - views, watch time, subscribers gained and lost.',dmNeedConnect('Our YouTube channel'));
   else if(own.length){
     const ch=DM_CHAN;
@@ -32557,7 +32568,7 @@ async function dmYouTube(body,r){
   });
   html+=dmCard(DM_SCOPE==='brand'?'Our channels in public':'Competitors on YouTube',(DM_SCOPE==='brand'?'What anybody sees on our channels - the same public counts Competitor Data reads for other developers, so the two can be set side by side. ':'')
       +'Public YouTube counts, read once a day. YouTube itself rounds public subscriber counts (e.g. 18.9K is shown to everyone as 18,900). Growth = latest reading minus the reading from the start of the period.',
-    dmTable(['Brand','Channel','Subscribers','Total views','Videos','Uploads this period','Views on those uploads','As of'],rows,'No confirmed channels yet - add and confirm them below.'));
+    dmTable(['Brand','Channel','Subscribers','Total views','Videos','Uploads this period','Views on those uploads','As of'],rows,'No public counts read yet for the channels listed below.'));
   html+=await dmTrackedChannels();
   body.innerHTML=html;
 }
@@ -32628,7 +32639,7 @@ const DM_GBP={search:['BUSINESS_IMPRESSIONS_DESKTOP_SEARCH','BUSINESS_IMPRESSION
 async function dmMaps(body,r){
   // Our listings' Business Profile figures are private to us - Our Brand only.
   const locs=DM_SCOPE==='brand'?(await dmSources('gbp_location')).filter(function(s){return s.enabled;}):[];
-  let html='';
+  let html=await dmPartStatus('places','Google Maps rating');
   if(DM_SCOPE!=='brand'){ /* competitors: public Places figures only, below */ }
   else if(!locs.length) html+=dmCard('Our listings','Business Profile - how often our listings were seen on Google Search and Maps, and what people did.',
     dmNeedConnect('Our Google Maps listings')+dmNote('fa-hourglass-half','Google also has to approve Business Profile API access for our Cloud project once (a form; usually a few days). Steps are in the setup guide.'));
@@ -32922,7 +32933,7 @@ async function ciLoadWatchlist(){
 }
 const CI_SCOPE_WORD={brand:'our brand',competitor:'competitors',partner:'channel partners'};
 const CI_SOURCE_LABEL={google_ads:'Google Ads',rera_list:'RERA project list',rera_detail:'RERA project pages',trends:'Google Trends'};
-let CI_F={wl:'all',fmt:'all',recent:'all',q:'',rq:'',rdist:'all',rfollow:'followed',geo:'IN-WB'};
+let CI_F={wl:'all',gown:'all',fmt:'all',recent:'all',q:'',rq:'',rdist:'all',rfollow:'followed',geo:'IN-WB'};
 
 const CI_CSS='<style>'
   +'.ci-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg-card);margin-bottom:14px}'
@@ -33025,14 +33036,20 @@ window.ciFetchNow=async function(source){
 
 // ---------------------------------------------------------------- Google Ads
 async function ciGads(){
-  await ciRunsPanel(['google_ads'],'Ads that Google shows in its public <a href="https://adstransparency.google.com/?region=IN" target="_blank" rel="noopener">Ads Transparency Center</a> for India - the creative, its format, and the first and last day Google shows it running. Google does not publish spend or clicks. Each advertiser is read once a day.');
+  await ciRunsPanel(['google_ads'],'Ads that Google shows in its public <a href="https://adstransparency.google.com/?region=IN" target="_blank" rel="noopener">Ads Transparency Center</a> for India - the creative, its format, and the first and last day Google shows it running. Google does not publish spend or clicks, and gives no city - these are India-wide (Godrej, for one, advertises all over India). Each advertiser is read once a day.');
   // Only the open side's advertisers, and only their creatives (asked for by watchlist id, so a
   // busy competitor's thousands are never downloaded to draw our own handful).
   const tg=await sb.schema('camp').from('pi_targets').select('*').eq('source','google_ads').order('sort');
   const targets=(tg.data||[]).filter(function(t){ return t.watchlist_id&&ciTargetScope(t)===CI_SCOPE; });
   const ids=[]; targets.forEach(function(t){ if(ids.indexOf(t.watchlist_id)<0) ids.push(t.watchlist_id); });
-  const ads=ids.length?await ciAll(function(){ return sb.schema('camp').from('pi_gads_creatives').select('creative_id,advertiser_id,advertiser_name,domain,format,first_shown,last_shown,days_shown,image_url,watchlist_id,fetched_at,first_seen_at,source_url').in('watchlist_id',ids).order('last_shown',{ascending:false}); }):[];
-  window._ciAds=ads; window._ciGTargets=targets;
+  const [ads,gr]=await Promise.all([
+    ids.length?ciAll(function(){ return sb.schema('camp').from('pi_gads_creatives').select('creative_id,advertiser_id,advertiser_name,domain,format,first_shown,last_shown,days_shown,image_url,watchlist_id,fetched_at,first_seen_at,source_url').in('watchlist_id',ids).order('last_shown',{ascending:false}); }):Promise.resolve([]),
+    sb.schema('camp').from('pi_runs').select('unit,ok,refused,note,error,started_at').eq('source','google_ads').order('started_at',{ascending:false}).limit(200)
+  ]);
+  /* The newest finished read of each followed advertiser / website, so the table can tell
+     "not read yet" and "Google lists more than we keep" apart from a real count. */
+  const lastRun={}; (gr.data||[]).forEach(function(r){ if(r.ok!=null&&!lastRun[r.unit]) lastRun[r.unit]=r; });
+  window._ciAds=ads; window._ciGTargets=targets; window._ciGRuns=lastRun;
   if(CI_F.wl!=='all'&&ids.map(String).indexOf(CI_F.wl)<0) CI_F.wl='all';
   ciGadsPaint();
 }
@@ -33044,24 +33061,59 @@ function ciGadsPaint(){
       +'Followed advertisers are rows in camp.pi_targets (source google_ads) whose watchlist entry is '+(CI_SCOPE==='partner'?'a channel partner':CI_SCOPE==='brand'?'one of our brands':'a competitor')+'; there is no screen to add them yet.</div>';
     return;
   }
-  const since30=Date.now()-30*864e5;
+  const since30=Date.now()-30*864e5, R=window._ciGRuns||{};
+  /* WHOSE AD IT IS. A website is followed as well as the company's own Google account, and Google
+     lists every advertiser whose ads lead to that website - a broker or channel partner advertising
+     the developer's site shows up there too (DTC's site brings Caifu Wealth Creators' ads). Those are
+     real ads for the brand but not the brand's own spending, so they are counted apart and tagged,
+     never added into the brand's own figures. "Own" = an advertiser account followed for that
+     brand; when only a website is followed, its biggest advertiser is taken as the brand's own. */
+  const ownAdv={};
+  wlIds.forEach(function(id){
+    const accs=targets.filter(function(t){ return t.watchlist_id===id&&t.kind==='advertiser'; }).map(function(t){ return String(t.value); });
+    if(!accs.length){
+      const n={}; ads.forEach(function(x){ if(x.watchlist_id===id) n[x.advertiser_id]=(n[x.advertiser_id]||0)+1; });
+      const top=Object.keys(n).sort(function(a,b){ return n[b]-n[a]; })[0]; if(top) accs.push(top);
+    }
+    ownAdv[id]={}; accs.forEach(function(a){ ownAdv[id][a]=1; });
+  });
+  const isOwn=function(a){ return !!(ownAdv[a.watchlist_id]||{})[a.advertiser_id]; };
+  window._ciIsOwn=isOwn;
+  const runWord=function(t){
+    const r=R[t.kind+':'+t.value];
+    if(!r) return '<span class="tag t-gray">not read yet</span>';
+    if(r.ok===false) return '<span class="tag '+(r.refused?'t-amber':'t-red')+'" title="'+esc(r.error||'')+'">'+(r.refused?'Google asked us to slow down':'read failed')+' · '+ciAgo(r.started_at)+'</span>';
+    return '<span style="color:var(--slate)">read '+ciAgo(r.started_at)+'</span>';
+  };
   const summary=wlIds.map(function(id){
-    const a=ads.filter(function(x){ return x.watchlist_id===id; });
+    const all=ads.filter(function(x){ return x.watchlist_id===id; });
+    const a=all.filter(isOwn), others=all.filter(function(x){ return !isOwn(x); });
     const cnt=function(f){ return a.filter(function(x){ return x.format===f; }).length; };
     const recent=a.filter(function(x){ return x.last_shown&&new Date(x.last_shown).getTime()>=since30; }).length;
-    const who=targets.filter(function(t){ return t.watchlist_id===id; }).map(function(t){
+    const tg=targets.filter(function(t){ return t.watchlist_id===id; });
+    const who=tg.map(function(t){
       const url=t.kind==='advertiser'?'https://adstransparency.google.com/advertiser/'+t.value+'?region=IN':'https://adstransparency.google.com/?region=IN&domain='+encodeURIComponent(t.value);
-      return '<a href="'+url+'" target="_blank" rel="noopener" title="'+esc(t.kind)+'">'+esc(t.label||t.value)+'</a>';
+      return '<a href="'+url+'" target="_blank" rel="noopener">'+esc(t.label||t.value)+'</a> <span style="color:var(--slate)">('+(t.kind==='advertiser'?'Google account':'website')+')</span> · '+runWord(t);
     }).join('<br>');
+    // Google lists newest first and only the newest 200 per account are kept; say so instead of
+    // letting "200" read as the account's total.
+    const capped=tg.some(function(t){ const r=R[t.kind+':'+t.value]; return r&&r.ok&&/more exist/.test(r.note||''); });
+    const unread=tg.every(function(t){ return !R[t.kind+':'+t.value]; });
+    const oth={}; others.forEach(function(x){ const k=x.advertiser_name||x.advertiser_id; oth[k]=(oth[k]||0)+1; });
     const w=W[id]||{};
+    const c=function(n){ return unread?'—':n; };
     return '<tr style="cursor:pointer" onclick="ciGSet(\'wl\',\''+id+'\')"><td><b>'+esc(w.name||('#'+id))+'</b> '+(w.category==='brand'?'<span class="tag t-blue">ours</span>':'')+'</td>'
-      +'<td style="font-size:11.5px">'+who+'</td>'
-      +'<td style="text-align:center">'+a.length+'</td><td style="text-align:center">'+recent+'</td>'
-      +'<td style="text-align:center">'+cnt('text')+'</td><td style="text-align:center">'+cnt('image')+'</td><td style="text-align:center">'+cnt('video')+'</td></tr>';
+      +'<td style="font-size:11.5px;line-height:1.7">'+who+'</td>'
+      +'<td style="text-align:center"><b>'+c(a.length)+'</b>'+(capped?'<div style="font-size:10.5px;color:#b45309" title="Google lists more ads for this account; only the newest 200 are kept">newest only - Google has more</div>':'')+'</td>'
+      +'<td style="text-align:center">'+c(recent)+'</td>'
+      +'<td style="text-align:center">'+c(cnt('text'))+'</td><td style="text-align:center">'+c(cnt('image'))+'</td><td style="text-align:center">'+c(cnt('video'))+'</td>'
+      +'<td style="font-size:11.5px">'+(others.length?Object.keys(oth).map(function(k){ return esc(k)+' ('+oth[k]+')'; }).join('<br>'):'<span style="color:var(--slate)">none</span>')+'</td></tr>';
   }).join('');
   const q=(CI_F.q||'').toLowerCase();
   const rows=ads.filter(function(a){
     if(CI_F.wl!=='all'&&String(a.watchlist_id)!==CI_F.wl) return false;
+    if(CI_F.gown==='own'&&!isOwn(a)) return false;
+    if(CI_F.gown==='others'&&isOwn(a)) return false;
     if(CI_F.fmt!=='all'&&a.format!==CI_F.fmt) return false;
     if(CI_F.recent==='30'&&!(a.last_shown&&new Date(a.last_shown).getTime()>=since30)) return false;
     if(q&&[a.advertiser_name,a.domain,a.creative_id].join(' ').toLowerCase().indexOf(q)<0) return false;
@@ -33072,20 +33124,22 @@ function ciGadsPaint(){
     return '<div class="card" style="overflow:hidden;display:flex;flex-direction:column">'
       +'<div style="height:150px;background:var(--bg-soft,#f1f5f9);display:flex;align-items:center;justify-content:center;overflow:hidden">'
         +(a.image_url?'<img src="'+esc(a.image_url)+'" loading="lazy" referrerpolicy="no-referrer" style="max-width:100%;max-height:150px;object-fit:contain">'
-          :'<a href="'+esc(a.source_url)+'" target="_blank" rel="noopener" style="font-size:12.5px;text-align:center;padding:10px"><i class="fa-solid '+(a.format==='video'?'fa-video':'fa-font')+'" style="font-size:22px;display:block;margin-bottom:6px"></i>'+(a.format==='video'?'Video ad':'Text ad')+' - open on Google</a>')
+          :'<a href="'+esc(a.source_url)+'" target="_blank" rel="noopener" style="font-size:12.5px;text-align:center;padding:10px"><i class="fa-solid '+(a.format==='video'?'fa-video':a.format==='image'?'fa-image':'fa-font')+'" style="font-size:22px;display:block;margin-bottom:6px"></i>'+(a.format==='video'?'Video ad':a.format==='image'?'Image ad':'Text ad')+' - open on Google</a>')
       +'</div>'
       +'<div style="padding:9px 11px;font-size:12px;line-height:1.5">'
         +'<div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(a.advertiser_name||'')+'">'+esc(a.advertiser_name||a.advertiser_id)+'</div>'
+        +(isOwn(a)?'':'<div><span class="tag t-amber" title="This ad leads to '+esc((W[a.watchlist_id]||{}).name||'')+'\'s website but is paid for by another Google account">by another advertiser for '+esc((W[a.watchlist_id]||{}).name||'')+'</span></div>')
         +'<div style="color:var(--slate)">'+esc(a.domain||'')+' · <span class="tag t-gray">'+esc(a.format||'?')+'</span></div>'
         +'<div>'+fmtDate(a.first_shown)+' → '+fmtDate(a.last_shown)+(a.days_shown!=null?' · '+a.days_shown+' days':'')+'</div>'
         +'<div style="color:var(--slate);font-size:11px">read '+ciAgo(a.fetched_at)+' · <a href="'+esc(a.source_url)+'" target="_blank" rel="noopener">source</a></div>'
       +'</div></div>';
   };
   $('ciBody').innerHTML='<div class="card" style="margin-bottom:14px;overflow-x:auto"><table class="tbl" style="width:100%;font-size:12.5px">'
-      +'<thead><tr><th>'+({brand:'Brand',competitor:'Competitor',partner:'Channel partner'}[CI_SCOPE]||'Brand / competitor')+'</th><th>Google advertiser / website</th><th style="text-align:center">Ads stored</th><th style="text-align:center" title="Last shown within 30 days">Shown in last 30 days</th><th style="text-align:center">Text</th><th style="text-align:center">Image</th><th style="text-align:center">Video</th></tr></thead>'
+      +'<thead><tr><th>'+({brand:'Brand',competitor:'Competitor',partner:'Channel partner'}[CI_SCOPE]||'Brand / competitor')+'</th><th>Followed on Google</th><th style="text-align:center">Their own ads</th><th style="text-align:center" title="Their own ads last shown within 30 days">Shown in last 30 days</th><th style="text-align:center">Text</th><th style="text-align:center">Image</th><th style="text-align:center">Video</th><th title="Other Google accounts whose ads lead to this brand\'s website - brokers, partners, agencies">Ads by others for their website</th></tr></thead>'
       +'<tbody>'+summary+'</tbody></table></div>'
     +'<div class="ci-bar">'
       +compSelHtml('ciGWl',opts,CI_F.wl,"ciGSet('wl',this.value)")
+      +compSelHtml('ciGOwn',[['all','Own ads and others\''],['own','Their own ads only'],['others','By other advertisers only']],CI_F.gown,"ciGSet('gown',this.value)")
       +compSelHtml('ciGFmt',[['all','All formats'],['text','Text'],['image','Image'],['video','Video']],CI_F.fmt,"ciGSet('fmt',this.value)")
       +compSelHtml('ciGRec',[['all','Any time'],['30','Shown in last 30 days']],CI_F.recent,"ciGSet('recent',this.value)")
       +ciSearchInput('ciGQ','q','ciGadsPaint','Search advertiser or website')
@@ -33123,6 +33177,9 @@ async function ciRera(){
   window._ciRChanges=(ch.data||[]).filter(function(c){ return on[c.procode]; }).slice(0,30);
   window._ciRRej=rej.count||0;
   if(brand) CI_F.rfollow='followed';
+  // With no competitor promoter followed yet, "followed" would be an empty page; open on the whole
+  // register instead and say why (ciReraPaint).
+  else if(!window._ciRTargets.length) CI_F.rfollow='all';
   ciReraPaint();
 }
 function ciReraPaint(){
@@ -33163,11 +33220,12 @@ function ciReraPaint(){
     return '<tr><td>'+ciDateTime(c.changed_at)+'</td><td>'+esc(p.name||c.procode)+'</td><td>'+esc(c.field)+'</td><td>'+esc(c.old_value||'—')+'</td><td>'+esc(c.new_value||'—')+'</td></tr>';
   }).join('');
   $('ciBody').innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
-      +'<span class="tag t-gray">'+all.length+(brand?' of our projects on the register (promoter'+(targets.length===1?'':'s')+': '+esc(targets.map(function(t){ return t.value; }).join(', ')||'none followed')+')':' approved projects on the register, ours left out')+'</span>'
+      +'<span class="tag t-gray">'+all.length+(brand?' of our projects on the register (promoter'+(targets.length===1?'':'s')+': '+esc(targets.map(function(t){ return t.value; }).join(', ')||'none followed')+')':' approved projects on the register (ours left out once their page is read)')+'</span>'
       +'<span class="tag '+(read===all.length&&all.length?'t-green':'t-amber')+'">project pages read: '+read+' of '+all.length+'</span>'
       +(failed?'<span class="tag t-red">'+failed+' page(s) could not be read</span>':'')
       +(brand?'':'<span class="tag t-gray">'+window._ciRRej+' rejected / revoked</span>')
     +'</div>'
+    +(!brand&&!targets.length?'<div class="card card-pad" style="color:var(--slate);font-size:13px;margin-bottom:12px"><i class="fa-solid fa-circle-info"></i> No competitor promoter is followed yet, so the whole register is shown. WBRERA prints the promoter\'s legal company name only on each project\'s own page, and those pages are still being read ('+read+' of '+all.length+'). Once they are, the competitors\' companies will be picked from the "Promoters" table and followed - not guessed from project names.</div>':'')
     +'<div class="ci-bar">'
       +(brand?'':compSelHtml('ciRF',[['followed','Followed competitor promoters ('+targets.length+')'],['all','All promoters']],CI_F.rfollow,"ciRSet('rfollow',this.value)"))
       +compSelHtml('ciRD',[['all','All districts']].concat(Object.keys(dists).sort().map(function(d){ return [d,d]; })),CI_F.rdist,"ciRSet('rdist',this.value)")
@@ -33191,7 +33249,7 @@ async function ciTrends(){
   const [pts,tg,runs]=await Promise.all([
     ciAll(function(){ return sb.schema('camp').from('pi_trends_points').select('*').order('week_start'); }),
     sb.schema('camp').from('pi_targets').select('*').eq('source','trends').order('grp').order('sort'),
-    sb.schema('camp').from('pi_runs').select('unit,note,started_at').eq('source','trends').eq('ok',true).order('started_at',{ascending:false}).limit(100)
+    sb.schema('camp').from('pi_runs').select('unit,ok,refused,error,note,started_at').eq('source','trends').not('ok','is',null).order('started_at',{ascending:false}).limit(100)
   ]);
   /* A group is drawn whole or not at all - Google scales every term in a request against the
      others in that same request, so lifting one term out of its chart would change what its line
@@ -33221,8 +33279,13 @@ function ciTrendsPaint(){
     +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:14px">';
   groups.forEach(function(g,gi){
     const p=pts.filter(function(x){ return x.grp===g&&x.geo===CI_F.geo; });
-    const run=(window._ciTRuns||[]).filter(function(r){ return r.unit===g+'|'+CI_F.geo; })[0];
+    const mine=(window._ciTRuns||[]).filter(function(r){ return r.unit===g+'|'+CI_F.geo; });
+    const run=mine.filter(function(r){ return r.ok; })[0], lastTry=mine[0];
     const link=run&&run.note?String(run.note).split(' | ')[0]:'';
+    // The newest attempt failed: say so, rather than "waiting" (no data yet) or silently showing
+    // the older chart as if it were fresh.
+    const failNote=lastTry&&!lastTry.ok?'<div style="font-size:11.5px;color:#b45309;margin-top:6px"><i class="fa-solid fa-triangle-exclamation"></i> '
+      +(lastTry.refused?'Google asked us to slow down':'The read failed')+' '+ciAgo(lastTry.started_at)+(p.length?' - this chart is from the read before.':'.')+' It is tried again by itself after a 6-hour pause.</div>':'';
     const terms=tg.filter(function(t){ return t.grp===g; }).map(function(t){ return t.value; });
     const none=terms.filter(function(t){ return p.length&&!p.some(function(x){ return x.term===t&&x.has_data; }); });
     html+='<div class="card card-pad"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b>'+esc(g)+'</b>'
@@ -33230,6 +33293,7 @@ function ciTrendsPaint(){
       +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate)">'+(p.length?'read '+ciAgo(p[0].fetched_at):'not fetched yet')+(link?' · <a href="'+esc(link)+'" target="_blank" rel="noopener">open on Google</a>':'')+'</span></div>'
       +(p.length?'<div style="height:220px"><canvas id="ciTC'+gi+'"></canvas></div>':'<div style="color:var(--slate);font-size:12.5px;padding:30px 0;text-align:center">Waiting for the weekly fetch.</div>')
       +(none.length?'<div style="font-size:11.5px;color:#b45309;margin-top:6px">Too few searches for Google to show: '+esc(none.join(', '))+'</div>':'')
+      +failNote
     +'</div>';
   });
   $('ciBody').innerHTML=html+'</div>';
@@ -33344,22 +33408,17 @@ VIEWS.competitors=async function(v,seg){
 };
 
 /* ---------------------------------------------------------------- Channel Partners ('channel_partners')
-   Meta Ads is the old Channel Partners tab of Competitor Ads (watchlist category 'partner').
-   Google Ads Transparency shows advertisers followed in camp.pi_targets whose watchlist entry is
-   a partner - the data model tells partners apart through that category, but none is followed
-   yet, so the tab says so until one is added. YouTube / Maps / Trends / RERA are not offered:
-   dm_yt_channels and dm_places only know "ours or not" (is_own), and Trends and RERA follow
-   developers, not brokers. */
+   META ADS ONLY (16 Oct 2026, as asked): the old Channel Partners tab of Competitor Ads (watchlist
+   category 'partner'). A Google Ads Transparency tab was offered here for a day and taken out -
+   partners are tracked on Meta alone. With one view there is no tab bar; an old
+   channel_partners/google-ads link simply lands on Meta Ads. */
 const CP_TABS=[
-  ['','Meta Ads','fa-brands fa-meta','meta'],
-  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci']
+  ['','Meta Ads','fa-brands fa-meta','meta']
 ];
 VIEWS.channel_partners=async function(v,seg){
-  const want=(seg&&seg[0])||'';
-  const t=CP_TABS.filter(function(x){ return x[0]===want; })[0]||CP_TABS[0];
-  setCrumb(['Growth & Strategy','Channel Partners',t[1]]);
+  const t=CP_TABS[0];
+  setCrumb(['Growth & Strategy','Channel Partners']);
   v.innerHTML=mHead('fa-people-arrows','#0f766e','Channel Partners')
-    +'<div class="tabs" style="margin-top:-6px">'+CP_TABS.map(function(x){ return mkTab('channel_partners',x,t[0]); }).join('')+'</div>'
     +'<div id="mkHost"><div class="loader"><div class="spin"></div></div></div>';
   await mkDrawTab($('mkHost'),'channel_partners',t,'partner','partners');
 };

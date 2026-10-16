@@ -145,12 +145,23 @@ function dmNeedConnect(what){
   return dmNote('fa-plug',esc(what)+' needs the marketing Google connection. Open <a href="#" onclick="navTo(DM_SETUP_ROUTE);return false">Setup</a> on Our Brand, connect the company Google account that owns it, and the next nightly pull fills this in.');
 }
 
+/* Why a tab is empty, in one line at its top. The nightly pull writes each part's result to
+   camp.dm_sync_log; when the newest one failed (most often: an API key not added yet) the tab says
+   that, instead of tables that read "no channels yet" while the channels are all there. */
+async function dmPartStatus(part,what){
+  const {data}=await dmCamp().from('dm_sync_log').select('ok,message,started_at,rows').eq('part',part).order('started_at',{ascending:false}).limit(1);
+  const x=data&&data[0];
+  if(!x) return dmNote('fa-hourglass-half',esc(what)+' has not been read yet - the first pull runs tonight.');
+  if(x.ok) return '';
+  return '<div style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid #fcd34d;background:#fffbeb;border-radius:10px;color:#92400e;font-size:13px;margin:0 0 14px"><i class="fa-solid fa-triangle-exclamation" style="margin-top:2px"></i><div><b>No '+esc(what)+' figures yet.</b> The last pull ('+esc(fmtDateShort(x.started_at))+') stopped: '+esc(x.message||'unknown error')+'. Nothing below is filled in until that is fixed - the steps are in Our Brand → Setup.</div></div>';
+}
+
 /* ---------------------------------------------------------------- YouTube */
 async function dmYouTube(body,r){
   // Our own channel's private analytics (YouTube Analytics API) only ever appear on Our Brand.
   const own=DM_SCOPE==='brand'?(await dmSources('yt_channel')).filter(function(s){return s.enabled;}):[];
   if(own.length&&!own.some(function(s){return s.source_id===DM_CHAN;}))DM_CHAN=own[0].source_id;
-  let html='';
+  let html=await dmPartStatus('yt_public','YouTube public');
   if(DM_SCOPE==='brand'&&!own.length) html+=dmCard('Our channel','YouTube Analytics - views, watch time, subscribers gained and lost.',dmNeedConnect('Our YouTube channel'));
   else if(own.length){
     const ch=DM_CHAN;
@@ -203,7 +214,7 @@ async function dmYouTube(body,r){
   });
   html+=dmCard(DM_SCOPE==='brand'?'Our channels in public':'Competitors on YouTube',(DM_SCOPE==='brand'?'What anybody sees on our channels - the same public counts Competitor Data reads for other developers, so the two can be set side by side. ':'')
       +'Public YouTube counts, read once a day. YouTube itself rounds public subscriber counts (e.g. 18.9K is shown to everyone as 18,900). Growth = latest reading minus the reading from the start of the period.',
-    dmTable(['Brand','Channel','Subscribers','Total views','Videos','Uploads this period','Views on those uploads','As of'],rows,'No confirmed channels yet - add and confirm them below.'));
+    dmTable(['Brand','Channel','Subscribers','Total views','Videos','Uploads this period','Views on those uploads','As of'],rows,'No public counts read yet for the channels listed below.'));
   html+=await dmTrackedChannels();
   body.innerHTML=html;
 }
@@ -274,7 +285,7 @@ const DM_GBP={search:['BUSINESS_IMPRESSIONS_DESKTOP_SEARCH','BUSINESS_IMPRESSION
 async function dmMaps(body,r){
   // Our listings' Business Profile figures are private to us - Our Brand only.
   const locs=DM_SCOPE==='brand'?(await dmSources('gbp_location')).filter(function(s){return s.enabled;}):[];
-  let html='';
+  let html=await dmPartStatus('places','Google Maps rating');
   if(DM_SCOPE!=='brand'){ /* competitors: public Places figures only, below */ }
   else if(!locs.length) html+=dmCard('Our listings','Business Profile - how often our listings were seen on Google Search and Maps, and what people did.',
     dmNeedConnect('Our Google Maps listings')+dmNote('fa-hourglass-half','Google also has to approve Business Profile API access for our Cloud project once (a form; usually a few days). Steps are in the setup guide.'));

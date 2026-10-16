@@ -98,22 +98,17 @@ VIEWS.competitors=async function(v,seg){
 };
 
 /* ---------------------------------------------------------------- Channel Partners ('channel_partners')
-   Meta Ads is the old Channel Partners tab of Competitor Ads (watchlist category 'partner').
-   Google Ads Transparency shows advertisers followed in camp.pi_targets whose watchlist entry is
-   a partner - the data model tells partners apart through that category, but none is followed
-   yet, so the tab says so until one is added. YouTube / Maps / Trends / RERA are not offered:
-   dm_yt_channels and dm_places only know "ours or not" (is_own), and Trends and RERA follow
-   developers, not brokers. */
+   META ADS ONLY (16 Oct 2026, as asked): the old Channel Partners tab of Competitor Ads (watchlist
+   category 'partner'). A Google Ads Transparency tab was offered here for a day and taken out -
+   partners are tracked on Meta alone. With one view there is no tab bar; an old
+   channel_partners/google-ads link simply lands on Meta Ads. */
 const CP_TABS=[
-  ['','Meta Ads','fa-brands fa-meta','meta'],
-  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci']
+  ['','Meta Ads','fa-brands fa-meta','meta']
 ];
 VIEWS.channel_partners=async function(v,seg){
-  const want=(seg&&seg[0])||'';
-  const t=CP_TABS.filter(function(x){ return x[0]===want; })[0]||CP_TABS[0];
-  setCrumb(['Growth & Strategy','Channel Partners',t[1]]);
+  const t=CP_TABS[0];
+  setCrumb(['Growth & Strategy','Channel Partners']);
   v.innerHTML=mHead('fa-people-arrows','#0f766e','Channel Partners')
-    +'<div class="tabs" style="margin-top:-6px">'+CP_TABS.map(function(x){ return mkTab('channel_partners',x,t[0]); }).join('')+'</div>'
     +'<div id="mkHost"><div class="loader"><div class="spin"></div></div></div>';
   await mkDrawTab($('mkHost'),'channel_partners',t,'partner','partners');
 };
