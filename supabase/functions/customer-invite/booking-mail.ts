@@ -36,18 +36,47 @@ const DOC_NAME: Record<string, string> = {
   allotment: "Allotment Letter", agreement: "Agreement Draft",
 };
 
-/* THE ALLOTMENT PAYMENT DUE, project by project. Rs 1,00,000 for every project until Post Sales
-   sends the list - add a project's own figure under its name (as the reader spells it, e.g.
-   "Dream Gurukul") and it wins over '*'. Keep in step with WF_ALLOTMENT_DUE in accountability.js. */
-const ALLOTMENT_DUE: Record<string, number> = { "*": 100000 };
+/* THE ALLOTMENT PAYMENT TERMS, project by project (Post Sales, 16 Oct 2026): the share of the
+   flat's total cost due, and how many days after the booking date. Keyed by the project's name as
+   the reader spells it. Keep in step with WF_ALLOTMENT_TERMS in accountability.js. */
+const ALLOTMENT_TERMS: Record<string, { pct: number; days: number }> = {
+  "Dream World City": { pct: 100, days: 45 },
+  "Dream Gurukul": { pct: 95, days: 30 },
+  "Dream Ananta": { pct: 10, days: 30 },
+};
 
-/* The due date is the booking date plus 30 days. A booking with no booking date read off it has
-   no due date, and a demand notice without one is not sent - null here, and the caller refuses. */
-function dueDate(res: any): string | null {
+/* The flat's total cost: the Allotment Letter's "Total Purchase Price (inclusive of all)" - the
+   gross cost sheet's own TOTAL FLAT VALUE, else its flat and parking charges added up. The same
+   arithmetic as wfSheetMoney / wfTotalCost in accountability.js. Null when it was not read. */
+function totalCost(res: any): number | null {
+  const sheets: any[] = Array.isArray(res?.cost_sheets) ? res.cost_sheets : [];
+  const sheet = sheets.find((s) => String(s?.basis || "").toUpperCase() === "GROSS");
+  if (!sheet) return null;
+  const norm = (l: unknown) => String(l ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const isPark = (it: any) => /PARKING|GARAGE/.test(norm(it?.label));
+  let parking: number | null = null, total: number | null = null, sum = 0, any = false, sub: number | null = null;
+  for (const it of (Array.isArray(sheet.line_items) ? sheet.line_items : [])) {
+    const amt = typeof it?.amount === "number" ? it.amount : null;
+    if (amt === null) continue;
+    const kind = String(it?.kind || "CHARGE").toUpperCase(), sec = String(it?.section || "").toUpperCase();
+    if (kind === "CHARGE" && isPark(it)) { parking = (parking || 0) + amt; continue; }
+    if (kind === "CHARGE" && sec === "FLAT") { sum += amt; any = true; continue; }
+    if (kind !== "CHARGE" && /FLATVALUE|TOTALFLAT/.test(norm(it?.label)) && total === null) total = amt;
+    else if (kind === "SUBTOTAL" && sec === "FLAT" && sub === null && !isPark(it)) sub = amt;
+  }
+  if (total !== null) return total;
+  const flat = any ? sum : (sub !== null ? sub - (parking || 0) : null);
+  return (flat === null && parking === null) ? null : (flat || 0) + (parking || 0);
+}
+
+/* The due date is the booking date plus the project's days. A booking with no booking date read
+   off it has no due date, and a demand notice without one is not sent - null here, and the caller
+   refuses. */
+function dueDate(res: any, days: number): string | null {
   const b = res?.fields?.booking_date;
-  const m = String(b?.value ?? "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const m = String(b?.value ?? "").trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
   if (!m || b?.found === false) return null;
-  const d = new Date(Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]) + 30));
+  const d = new Date(Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]) + days));
   if (isNaN(d.getTime())) return null;
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getUTCDate())}.${p(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}`;
@@ -59,18 +88,21 @@ export function welcome2Email(res: any) {
   const val = (k: string) => { const t = String(f?.[k]?.value ?? "").trim(); return (!t || t === "NIL") ? "" : t; };
   const project = val("project_name") || "________________";
   const unit = `Block ${val("block") || "____"}/${val("flat") || "____"}`;
-  const amt = ALLOTMENT_DUE[project] ?? ALLOTMENT_DUE["*"];
-  const amount = amt.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const due = dueDate(res);
+  const terms = ALLOTMENT_TERMS[val("project_name")] || null;
+  const total = totalCost(res);
+  const amt = (terms && total !== null) ? Math.round(total * terms.pct) / 100 : null;
+  const amount = amt !== null ? amt.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
+  const pct = terms ? String(terms.pct) : "____";
+  const due = terms ? dueDate(res, terms.days) : null;
   const P = (h: string) => `<p style="margin:0 0 14px">${h}</p>`;
   const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111827">`
     + P(`Dear Sir,`)
     + P(`We hope this email finds you well.`)
     + P(`We are pleased to inform you that the construction and development work at <b>${esc(project)}</b> is progressing steadily as per our planned schedule.`)
-    + P(`Following the successful booking of your unit <b>${esc(unit)}</b>, this email serves as an official demand notice for the <b>Allotment Payment</b>, which constitutes 10% of the total consideration value of your property.`)
+    + P(`Following the successful booking of your unit <b>${esc(unit)}</b>, this email serves as an official demand notice for the <b>Allotment Payment</b>, which constitutes ${pct}% of the total consideration value of your property.`)
     + P(`Here are the payment details for your quick reference:`)
     + `<ul style="margin:0 0 14px;padding-left:22px">`
-    + `<li><b><u>Total Allotment Amount Due: ${esc(amount)}</u></b></li>`
+    + `<li><b><u>Total Allotment Amount Due: ${esc(amount || "________")}</u></b></li>`
     + `<li><b><u>Due Date: ${esc(due || "____")}</u></b></li></ul>`
     + P(`Timely payments ensure that the development of your dream home continues without any delays.`)
     + P(`If you have already made this payment, please disregard this notice and share the receipt details with us.`)
@@ -82,15 +114,15 @@ export function welcome2Email(res: any) {
     + `<p style="margin:0">Customer Relations Team</p></div>`;
   const text = `Dear Sir,\n\nWe hope this email finds you well.\n\n`
     + `We are pleased to inform you that the construction and development work at ${project} is progressing steadily as per our planned schedule.\n\n`
-    + `Following the successful booking of your unit ${unit}, this email serves as an official demand notice for the Allotment Payment, which constitutes 10% of the total consideration value of your property.\n\n`
+    + `Following the successful booking of your unit ${unit}, this email serves as an official demand notice for the Allotment Payment, which constitutes ${pct}% of the total consideration value of your property.\n\n`
     + `Here are the payment details for your quick reference:\n\n`
-    + `* Total Allotment Amount Due: ${amount}\n* Due Date: ${due || "____"}\n\n`
+    + `* Total Allotment Amount Due: ${amount || "________"}\n* Due Date: ${due || "____"}\n\n`
     + `Timely payments ensure that the development of your dream home continues without any delays.\n`
     + `If you have already made this payment, please disregard this notice and share the receipt details with us.\n`
     + `If you have any questions or require clarification regarding your payment schedule, please feel free to reach out to us.\n`
     + `Thank you for your continued cooperation and partnership.\n\nWarm regards,\n`
     + `Pallabita Ghosh (Manager - Post Sales)\nReach me @8420541541\nCustomer Relations Team`;
-  return { html, text, due };
+  return { html, text, due, amount, terms, project: val("project_name") };
 }
 
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g,
@@ -311,8 +343,14 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
   const modified = action !== "booking_welcome_auto" && body.modified === true;
   const w = welcomeEmail(res);
   const w2 = welcome2Email(res);
+  if (kind === "welcome2" && !w2.terms) {
+    return j({ error: `There are no allotment payment terms for ${w2.project || "this project"}, so the 2nd Welcome Letter cannot be emailed.` }, 422);
+  }
   if (kind === "welcome2" && !w2.due) {
     return j({ error: "No booking date was read from this booking, so the due date cannot be set and the 2nd Welcome Letter cannot be emailed." }, 422);
+  }
+  if (kind === "welcome2" && !w2.amount) {
+    return j({ error: "The flat's total cost was not read from the cost sheet, so the amount cannot be set and the 2nd Welcome Letter cannot be emailed." }, 422);
   }
   // No "(MODIFIED)" in the subject: an edited letter goes out under the same subject (15 Oct 2026).
   let subject = kind === "welcome2" ? "Allotment Payment Letter" : `${DOC_NAME[kind]} - ${w.customer}`;

@@ -6750,25 +6750,37 @@
   }
 
   /* ── 2nd welcome letter ─────────────────────────────────────────────────────────────────────
-     THE ALLOTMENT PAYMENT DEMAND. The second letter a customer gets after booking: the 10% due on
-     allotment, and the date it is due by. Kind 'welcome2'. It is a text letter like the first -
+     THE ALLOTMENT PAYMENT DEMAND. The second letter a customer gets after booking: the share of
+     the flat's cost due on allotment, and the date it is due by (WF_ALLOTMENT_TERMS, by project). Kind 'welcome2'. It is a text letter like the first -
      mailed as the body of the email (letter_html), not as an attachment - and opens in the same
      editor with Save, Download, Email and Reject. No letterhead logo: it reads as an email.
 
      The wording is Post Sales' own and is set here exactly as given. Three values go into it:
        project and Block {block}/{flat}  - the Booking Form's own fields;
-       the amount                        - WF_ALLOTMENT_DUE, below;
-       the due date                      - the booking date plus 30 days.
+       the amount                        - the project's share of the flat's total cost, below;
+       the due date                      - the booking date plus the project's days.
 
      NO BOOKING DATE, NO DUE DATE. A demand notice with an invented due date is worse than none,
      so when the reading has no booking date the date is left as a blank, the tab says so in a
      banner, and Email stays off (customer-invite refuses it too). It can still be edited and
      downloaded - somebody may want to fill the date in by hand and send it some other way. */
 
-  /* THE ALLOTMENT AMOUNT DUE, BY PROJECT. One figure for every project for now - 1,00,000.00 -
-     under '*'. When a project gets its own figure, add it here by its exact project name
-     ('Dream Gurukul': 150000) and it wins over '*' for that project only. Rupees, as a number. */
-  const WF_ALLOTMENT_DUE={'*':100000};
+  /* THE ALLOTMENT PAYMENT TERMS, BY PROJECT (Post Sales, 16 Oct 2026): what share of the flat's
+     total cost is due, and how many days after the booking date. Keyed by the project's name as
+     the reader spells it. The amount is that share of the Allotment Letter's "Total Purchase Price
+     (inclusive of all)" - wfSheetMoney's gross cost. A project not listed here, or a booking whose
+     total cost was not read, gets a blank amount and cannot be emailed: a demand notice with an
+     invented figure is worse than none. Keep in step with ALLOTMENT_TERMS in customer-invite. */
+  const WF_ALLOTMENT_TERMS={
+    'Dream World City':{pct:100, days:45},
+    'Dream Gurukul':   {pct:95,  days:30},
+    'Dream Ananta':    {pct:10,  days:30}
+  };
+  function wfTotalCost(res){
+    const SM=wfSheetMoney(res), g=SM.gross;
+    if(g.total!==null) return g.total;
+    return (g.flat===null&&g.parking===null)?null:((g.flat||0)+(g.parking||0));
+  }
 
   // The tab is opened first, on the click - see wfPendingTab.
   window.wfWelcome2Letter=async function(caseId){
@@ -6789,9 +6801,11 @@
 
     const project=val('project_name')||'________________';
     const block=val('block')||'____', flat=val('flat')||'____';
-    const dueNum=(WF_ALLOTMENT_DUE[val('project_name')]!=null)
-      ? WF_ALLOTMENT_DUE[val('project_name')] : WF_ALLOTMENT_DUE['*'];
-    const amount=Number(dueNum).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const terms=WF_ALLOTMENT_TERMS[val('project_name')]||null;
+    const total=wfTotalCost(res);
+    const dueNum=(terms&&total!==null)?Math.round(total*terms.pct)/100:null;
+    const amount=(dueNum!==null)
+      ? dueNum.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
 
     /* The booking date as the reader found it on the form, dd/mm/yyyy. A field the reader marked
        found:false, or wrote as NIL, is no date at all. Thirty days on, written with dots the way
@@ -6801,10 +6815,10 @@
     const m=(bdRaw && bdRaw.toUpperCase()!=='NIL')
       ? bdRaw.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/) : null;
     let due='';
-    if(m){
+    if(m && terms){
       const dt=new Date(+m[3], +m[2]-1, +m[1]);
       if(!isNaN(dt) && dt.getDate()===+m[1]){
-        dt.setDate(dt.getDate()+30);
+        dt.setDate(dt.getDate()+terms.days);
         const p2=function(n){ return String(n).padStart(2,'0'); };
         due=p2(dt.getDate())+'.'+p2(dt.getMonth()+1)+'.'+dt.getFullYear();
       }
@@ -6817,9 +6831,9 @@
       +E(project)+'</b> is progressing steadily as per our planned schedule.</p>';
     h+='<p class="wfd-gap">Following the successful booking of your unit <b>Block '+E(block)+'/'+E(flat)
       +'</b>, this email serves as an official demand notice for the <b>Allotment Payment</b>, which '
-      +'constitutes 10% of the total consideration value of your property.</p>';
+      +'constitutes '+(terms?terms.pct:'____')+'% of the total consideration value of your property.</p>';
     h+='<p>Here are the payment details for your quick reference:</p>';
-    h+='<p>• <b><u>Total Allotment Amount Due: '+E(amount)+'</u></b></p>';
+    h+='<p>• <b><u>Total Allotment Amount Due: '+E(amount||'________')+'</u></b></p>';
     h+='<p class="wfd-gap">• <b><u>Due Date: '+E(due||'____')+'</u></b></p>';
     h+='<p class="wfd-gap">Timely payments ensure that the development of your dream home continues '
       +'without any delays.</p>';
@@ -6838,8 +6852,12 @@
     await wfOpenDocTab(h,{title:'2nd Welcome Letter — '+name,
       base:'2nd Welcome Letter - '+name, caseId:caseId, kind:'welcome2', logoBytes:null,
       tab:tab, canAct:wfBookingActor(),
-      mailBlock:due?'':'No booking date was read from this booking — the due date cannot be set, '
-        +'so this letter cannot be emailed.'});
+      mailBlock:!terms?('There are no allotment payment terms for '+(val('project_name')||'this project')
+          +' — the amount and due date cannot be set, so this letter cannot be emailed.')
+        :!due?'No booking date was read from this booking — the due date cannot be set, '
+          +'so this letter cannot be emailed.'
+        :!amount?'The flat’s total cost was not read from the cost sheet — the amount cannot be set, '
+          +'so this letter cannot be emailed.':''});
   }
 
   /* A4, letterhead, one page. Every value is taken from the stored reading; nothing here is written
