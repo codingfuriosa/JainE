@@ -215,9 +215,107 @@ async function dmYouTube(body,r){
   html+=dmCard(DM_SCOPE==='brand'?'Our channels in public':'Competitors on YouTube',(DM_SCOPE==='brand'?'What anybody sees on our channels - the same public counts Competitor Data reads for other developers, so the two can be set side by side. ':'')
       +'Public YouTube counts, read once a day. YouTube itself rounds public subscriber counts (e.g. 18.9K is shown to everyone as 18,900). Growth = latest reading minus the reading from the start of the period.',
     dmTable(['Brand','Channel','Subscribers','Total views','Videos','Uploads this period','Views on those uploads','As of'],rows,'No public counts read yet for the channels listed below.'));
+  html+='<div id="dmYtVids"></div>';
   html+=await dmTrackedChannels();
   body.innerHTML=html;
+  await dmYtVideos((cmp||[]).filter(dmInScope),r);
 }
+
+/* EVERY VIDEO OF THE CHANNELS ON THIS PAGE (16 Oct 2026): ours on Our Brand, competitors' on
+   Competitor Data. Public counts exactly as YouTube gives them, read daily for every video; "gained"
+   is the latest reading minus the reading at the start of the period, shown only when both exist.
+   Short / Video is worked out from the length (60 s or less), because YouTube's API does not say -
+   the label says so. Videos play inside JAIN-E (youtube-nocookie embed). */
+let DM_V={ch:'all',q:'',sort:'new',show:48};
+async function dmYtVideos(chans,r){
+  const host=$('dmYtVids'); if(!host)return;
+  const ids=chans.map(function(c){return c.channel_id;});
+  if(!ids.length){ host.innerHTML=''; return; }
+  host.innerHTML=dmCard('Videos','',' <div class="loader"><div class="spin"></div></div>');
+  // The database hands back at most 1,000 rows a request; competitors have ~3,300 videos.
+  const data=[];
+  for(let from=0;;from+=1000){
+    const res=await dmCamp().rpc('dm_yt_video_list',{p_channels:ids,p_from:r.from}).range(from,from+999);
+    if(res.error){ host.innerHTML=dmCard('Videos','',dmNote('fa-triangle-exclamation','Could not load the videos: '+esc(res.error.message))); return; }
+    data.push.apply(data,res.data||[]); if(!res.data||res.data.length<1000)break;
+  }
+  window._dmVids=data; window._dmVChans=chans; window._dmVRange=r;
+  if(DM_V.ch!=='all'&&ids.indexOf(DM_V.ch)<0)DM_V.ch='all';
+  dmYtVideosPaint();
+}
+function dmYtVideosPaint(){
+  const host=$('dmYtVids'); if(!host)return;
+  const all=window._dmVids||[], chans=window._dmVChans||[], r=window._dmVRange;
+  const cname={}; chans.forEach(function(c){ cname[c.channel_id]=c.title||c.brand||c.channel_id; });
+  const q=DM_V.q.trim().toLowerCase();
+  const key={views:'views',likes:'likes',comments:'comments'}[DM_V.sort];
+  const list=all.filter(function(v){
+    if(DM_V.ch!=='all'&&v.channel_id!==DM_V.ch)return false;
+    if(q&&String(v.title||'').toLowerCase().indexOf(q)<0)return false;
+    return true;
+  }).sort(function(a,b){
+    if(key){ const x=a[key],y=b[key]; if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1; return Number(y)-Number(x); }
+    return String(b.published_at||'').localeCompare(String(a.published_at||''));
+  });
+  const shown=list.slice(0,DM_V.show);
+  const card=function(v){
+    const short=v.duration_sec!=null&&v.duration_sec<=60;
+    const gained=v.base_date&&v.latest_date&&v.base_date<v.latest_date&&v.base_views!=null&&v.views!=null
+      ?'<div style="font-size:11.5px;font-weight:600;color:var(--ok);margin-top:3px">+'+dmN(v.views-v.base_views)+' views '+(v.base_date>r.from?'since '+esc(fmtDateShort(v.base_date)):'in this period')+'</div>':'';
+    return '<div class="dmv" onclick="dmYtPlay('+dmArg(v.video_id)+')">'
+      +'<div class="dmv-th">'+(v.thumbnail?'<img src="'+esc(v.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" alt="">':'')
+        +'<div class="dmv-play"><span><i class="fa-solid fa-play"></i></span></div>'
+        +(v.duration_sec!=null?'<span class="dmv-dur">'+dmDur(v.duration_sec)+'</span>':'')+'</div>'
+      +'<div style="padding:9px 11px 11px;display:flex;flex-direction:column;gap:3px;flex:1">'
+        +'<div class="dmv-t" title="'+esc(v.title||'')+'">'+esc(v.title||v.video_id)+'</div>'
+        +'<div style="font-size:11.5px;color:var(--slate)">'+esc(cname[v.channel_id]||'')+' · '+esc(v.published_at?fmtDate(v.published_at):'—')
+          +' · <span class="tag t-gray" style="font-size:10px" title="Worked out from the length - 60 seconds or less counts as a Short. YouTube\'s API does not say which it is.">'+(v.duration_sec==null?'—':short?'Short':'Video')+'</span></div>'
+        +'<div style="font-size:12px;margin-top:auto;padding-top:4px;display:flex;gap:10px;flex-wrap:wrap">'
+          +'<span title="Views"><i class="fa-solid fa-eye" style="color:var(--slate)"></i> '+dmN(v.views)+'</span>'
+          +'<span title="Likes"><i class="fa-solid fa-thumbs-up" style="color:var(--slate)"></i> '+(v.likes==null&&v.views!=null?'hidden':dmN(v.likes))+'</span>'
+          +'<span title="Comments"><i class="fa-solid fa-comment" style="color:var(--slate)"></i> '+(v.comments==null&&v.views!=null?'off':dmN(v.comments))+'</span></div>'
+        +gained
+      +'</div></div>';
+  };
+  const opts=[['all',DM_SCOPE==='brand'?'All our channels':'All competitors']].concat(chans.map(function(c){ return [c.channel_id,(c.title||c.channel_id)]; }));
+  host.innerHTML='<style>'
+      +'.dmv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:13px}'
+      +'.dmv{border:1px solid var(--line);border-radius:11px;overflow:hidden;cursor:pointer;background:var(--bg-card);display:flex;flex-direction:column;transition:box-shadow .15s,transform .15s}'
+      +'.dmv:hover{box-shadow:0 6px 18px rgba(15,23,42,.12);transform:translateY(-1px)}'
+      +'.dmv-th{position:relative;aspect-ratio:16/9;background:#0f172a;overflow:hidden}.dmv-th img{width:100%;height:100%;object-fit:cover;display:block}'
+      +'.dmv-play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}.dmv-play span{width:42px;height:42px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;display:flex;align-items:center;justify-content:center;padding-left:3px;box-sizing:border-box}'
+      +'.dmv-dur{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.78);color:#fff;font-size:10.5px;border-radius:4px;padding:1px 5px}'
+      +'.dmv-t{font-weight:600;font-size:12.5px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}'
+      +'.dmv-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}.dmv-bar input{height:36px;padding:0 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink);flex:1;min-width:180px;max-width:340px}'
+    +'</style>'
+    +dmCard('Videos',dmN(all.length)+' videos on '+(DM_SCOPE==='brand'?'our channel'+(chans.length===1?'':'s'):'competitors\' channels')+', every one with YouTube\'s public views, likes and comments, read daily. Click a video to play it here.',
+      '<div class="dmv-bar">'
+        +(chans.length>1?compSelHtml('dmVCh',opts,DM_V.ch,"DM_V.ch=this.value;DM_V.show=48;dmYtVideosPaint()"):'')
+        +compSelHtml('dmVSort',[['new','Newest first'],['views','Most views'],['likes','Most likes'],['comments','Most comments']],DM_V.sort,"DM_V.sort=this.value;DM_V.show=48;dmYtVideosPaint()")
+        +'<input id="dmVQ" placeholder="Search video titles" value="'+esc(DM_V.q)+'" oninput="DM_V.q=this.value;DM_V.show=48;clearTimeout(window._dmVT);window._dmVT=setTimeout(function(){dmYtVideosPaint();var e=$(\'dmVQ\');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}},300)">'
+        +'<span style="margin-left:auto;font-size:12.5px;color:var(--slate)">'+dmN(list.length)+' video'+(list.length===1?'':'s')+'</span>'
+      +'</div>'
+      +(shown.length?'<div class="dmv-grid">'+shown.map(card).join('')+'</div>'
+        +(list.length>shown.length?'<div style="text-align:center;margin-top:16px"><button class="btn" onclick="DM_V.show+=48;dmYtVideosPaint()">Show more <span style="color:var(--slate);font-weight:500">('+dmN(shown.length)+' of '+dmN(list.length)+' shown)</span></button></div>':'')
+        :dmNote('fa-circle-info',all.length?'No video matches this search.':'No videos read yet - they arrive with the next daily read.')));
+}
+window.dmYtPlay=function(id){
+  const v=(window._dmVids||[]).filter(function(x){return x.video_id===id;})[0]; if(!v)return;
+  const c=(window._dmVChans||[]).filter(function(x){return x.channel_id===v.channel_id;})[0]||{};
+  const short=v.duration_sec!=null&&v.duration_sec<=60;
+  const fact=function(k,val){ return '<div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.04em">'+k+'</div><div style="font-weight:600">'+val+'</div></div>'; };
+  openModal('<div class="modal-head"><h3><i class="fa-brands fa-youtube" style="color:#dc2626"></i> '+esc(c.title||'Video')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body">'
+      +'<div style="position:relative;width:100%;max-width:'+(short?'380px':'820px')+';margin:0 auto;aspect-ratio:'+(short?'9/16':'16/9')+';max-height:70vh;background:#000;border-radius:10px;overflow:hidden">'
+        +'<iframe src="https://www.youtube-nocookie.com/embed/'+encodeURIComponent(v.video_id)+'?rel=0" style="position:absolute;inset:0;width:100%;height:100%;border:0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>'
+      +'<div style="font-weight:700;font-size:15px;margin-top:14px">'+esc(v.title||'')+'</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-top:12px;font-size:13px">'
+        +fact('Published',esc(v.published_at?fmtDate(v.published_at):'—'))+fact('Length',dmDur(v.duration_sec)+' · '+(v.duration_sec==null?'—':short?'Short':'Video'))
+        +fact('Views',dmN(v.views))+fact('Likes',v.likes==null&&v.views!=null?'hidden by channel':dmN(v.likes))+fact('Comments',v.comments==null&&v.views!=null?'turned off':dmN(v.comments))
+      +'</div>'
+      +'<div style="font-size:11px;color:var(--slate);margin-top:12px">YouTube\'s public counts as read on '+esc(v.latest_date?fmtDate(v.latest_date):'—')+'. Short / Video is worked out from the length (60 s or less = Short).</div>'
+    +'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','lg');
+};
 async function dmTrackedChannels(){
   const [{data:ch},wl]=await Promise.all([dmCamp().from('dm_yt_channels').select('*').order('is_own',{ascending:false}).order('title'),dmWatchlist()]);
   const name=function(id){ const w=wl.filter(function(x){return x.id===id;})[0]; return w?w.name:'—'; };

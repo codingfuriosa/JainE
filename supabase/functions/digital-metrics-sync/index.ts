@@ -5,8 +5,10 @@
 
    PARTS ({action:'sync', part}) - each is independent; the nightly cron fires all six side by side:
      yt_public  YouTube Data API v3 with YOUTUBE_API_KEY - public subscriber / view / video counts for
-                every CONFIRMED channel in camp.dm_yt_channels (ours and competitors'), plus the latest
-                50 uploads of each and their public view / like / comment counts. Daily snapshots.
+                every CONFIRMED channel in camp.dm_yt_channels (ours and competitors'), plus EVERY upload
+                of each (whole uploads playlist, resumed across runs via dm_yt_channels.list_cursor;
+                afterwards only the newest page for new uploads) and each video's public view / like /
+                comment counts, re-read daily for all stored videos. ~100-150 quota units a day.
      yt_own     YouTube Analytics API on the marketing connection - our channel(s) only.
      places     Places API (New) with GOOGLE_PLACES_API_KEY - rating, review count and the (at most 5)
                 reviews Google shows, for every CONFIRMED place in camp.dm_places.
@@ -38,8 +40,12 @@ const YT_KEY = Deno.env.get('YOUTUBE_API_KEY') || '';
 const PLACES_KEY = Deno.env.get('GOOGLE_PLACES_API_KEY') || YT_KEY;
 const H = { apikey: SRV, Authorization: 'Bearer ' + SRV, 'Content-Type': 'application/json' };
 const BUDGET_MS = 135_000;
-const T0 = Date.now();
+// Reset at the start of every request: a warm instance serves many requests, and a start time left
+// over from an earlier one would make a run think it is already out of time.
+let T0 = Date.now();
 const timeLeft = () => BUDGET_MS - (Date.now() - T0);
+// Set by a part for its log line (e.g. quota used), and when it stopped before finishing.
+let partNote = '', stoppedEarly = false;
 
 // ---------------------------------------------------------------- database (PostgREST, schema camp)
 async function dbGet(path: string, schema = 'camp') {
@@ -190,8 +196,9 @@ const isoDur = (s: string) => {
 };
 const num = (x: any) => (x === undefined || x === null || x === '' ? null : Number(x));
 async function ytPublic() {
+  let units = 0;
   if (!YT_KEY) throw new Error('YOUTUBE_API_KEY is not set as a Supabase secret yet');
-  const chans = await dbGet('dm_yt_channels?confirmed=is.true&active=is.true&select=channel_id,uploads_playlist_id');
+  const chans = await dbGet('dm_yt_channels?confirmed=is.true&active=is.true&select=channel_id,uploads_playlist_id,list_cursor,list_full_at');
   const today = istToday();
   let n = 0;
   for (let i = 0; i < chans.length; i += 50) {
@@ -208,24 +215,71 @@ async function ytPublic() {
     }
     n += await dbUpsert('dm_yt_channel_daily', snaps, 'channel_id,snap_date');
   }
+  units += Math.ceil(chans.length / 50);
+  /* EVERY VIDEO. A channel not yet read to the end (or stopped mid-way - list_cursor) has its whole
+     uploads playlist read, 50 a page, each page's videos looked up at once (title, length, counts).
+     The page token is saved after every page, so a run that runs short of time carries on next run.
+     A channel already read to the end has only its newest page read, which is where new uploads are. */
+  const seenToday = new Set<string>();
   for (const c of chans) {
-    if (!c.uploads_playlist_id || timeLeft() < 15_000) continue;
-    let pl: any;
-    try { pl = await gfetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=50&playlistId=${c.uploads_playlist_id}&key=${YT_KEY}`); }
-    catch (e) { if ((e as any).status === 404) continue; throw e; }   // a channel with no uploads has no playlist
-    const vids = (pl.items || []).map((x: any) => x.contentDetails.videoId);
-    if (!vids.length) continue;
-    const v = await gfetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${vids.join(',')}&key=${YT_KEY}`);
-    const meta: any[] = [], daily: any[] = [];
-    for (const x of (v.items || [])) {
-      meta.push({ video_id: x.id, channel_id: c.channel_id, title: x.snippet.title, published_at: x.snippet.publishedAt,
-        duration_sec: isoDur(x.contentDetails.duration), thumbnail: x.snippet.thumbnails?.medium?.url || null, last_seen: new Date().toISOString() });
-      const st = x.statistics || {};
-      daily.push({ video_id: x.id, snap_date: today, views: num(st.viewCount), likes: num(st.likeCount), comments: num(st.commentCount), fetched_at: new Date().toISOString() });
+    if (!c.uploads_playlist_id) continue;
+    const whole = !c.list_full_at || !!c.list_cursor;
+    let token: string | null = whole ? (c.list_cursor || null) : null;
+    do {
+      if (timeLeft() < 30_000) { stoppedEarly = true; break; }
+      let pl: any;
+      try { pl = await gfetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=50&playlistId=${c.uploads_playlist_id}${token ? '&pageToken=' + token : ''}&key=${YT_KEY}`); }
+      catch (e) { if ((e as any).status === 404) break; throw e; }   // a channel with no uploads has no playlist
+      units++;
+      const vids = (pl.items || []).map((x: any) => x.contentDetails.videoId);
+      if (vids.length) {
+        const v = await gfetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${vids.join(',')}&key=${YT_KEY}`);
+        units++;
+        const meta: any[] = [], daily: any[] = [];
+        for (const x of (v.items || [])) {
+          meta.push({ video_id: x.id, channel_id: c.channel_id, title: x.snippet.title, published_at: x.snippet.publishedAt,
+            duration_sec: isoDur(x.contentDetails.duration), thumbnail: x.snippet.thumbnails?.medium?.url || null, last_seen: new Date().toISOString() });
+          const st = x.statistics || {};
+          daily.push({ video_id: x.id, snap_date: today, views: num(st.viewCount), likes: num(st.likeCount), comments: num(st.commentCount), fetched_at: new Date().toISOString() });
+          seenToday.add(x.id);
+        }
+        await dbUpsert('dm_yt_videos', meta, 'video_id');
+        n += await dbUpsert('dm_yt_video_daily', daily, 'video_id,snap_date');
+      }
+      token = pl.nextPageToken || null;
+      if (whole) await dbPatch('dm_yt_channels', `channel_id=eq.${c.channel_id}`,
+        token ? { list_cursor: token } : { list_cursor: null, list_full_at: new Date().toISOString() });
+    } while (whole && token);
+  }
+  /* TODAY'S COUNTS FOR EVERY STORED VIDEO not already read above: videos.list, statistics only, 50
+     ids a call (1 quota unit each - ~3,600 videos is ~72 units). A video YouTube no longer returns
+     (deleted or made private) simply gets no reading. */
+  const ids: string[] = [];
+  for (const c of chans) {
+    for (let off = 0; ; off += 1000) {
+      const r = await dbGet(`dm_yt_videos?channel_id=eq.${c.channel_id}&select=video_id&order=video_id&limit=1000&offset=${off}`);
+      r.forEach((x: any) => { if (!seenToday.has(x.video_id)) ids.push(x.video_id); });
+      if (r.length < 1000) break;
     }
-    await dbUpsert('dm_yt_videos', meta, 'video_id');
+  }
+  const have = new Set<string>();
+  for (let off = 0; ; off += 1000) {
+    const r = await dbGet(`dm_yt_video_daily?snap_date=eq.${today}&select=video_id&order=video_id&limit=1000&offset=${off}`);
+    r.forEach((x: any) => have.add(x.video_id));
+    if (r.length < 1000) break;
+  }
+  const todo = ids.filter((id) => !have.has(id));
+  for (let i = 0; i < todo.length; i += 50) {
+    if (timeLeft() < 20_000) { stoppedEarly = true; break; }
+    const v = await gfetch(`https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${todo.slice(i, i + 50).join(',')}&key=${YT_KEY}`);
+    units++;
+    const daily = (v.items || []).map((x: any) => {
+      const st = x.statistics || {};
+      return { video_id: x.id, snap_date: today, views: num(st.viewCount), likes: num(st.likeCount), comments: num(st.commentCount), fetched_at: new Date().toISOString() };
+    });
     n += await dbUpsert('dm_yt_video_daily', daily, 'video_id,snap_date');
   }
+  partNote = units + ' YouTube API quota units used (daily limit 10,000)';
   return n;
 }
 
@@ -502,6 +556,7 @@ async function caller(req: Request): Promise<string | null> {
 }
 
 Deno.serve(async (req) => {
+  T0 = Date.now();
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   let body: any = {};
   try { body = await req.json(); } catch (_) { /* empty */ }
@@ -524,7 +579,8 @@ Deno.serve(async (req) => {
         // picked up by itself; the parts running beside it see it from the following night.
         if (who === 'cron' && p === 'gsc') { try { await discover(); } catch (_) { /* reported by the part itself */ } }
         const id = await logStart(p, who);
-        try { const rows = await PARTS[p](); await logEnd(id, true, rows, timeLeft() < 25_000 ? 'stopped early for time - the rest continues on the next run' : 'ok'); out[p] = { ok: true, rows }; }
+        partNote = ''; stoppedEarly = false;
+        try { const rows = await PARTS[p](); await logEnd(id, true, rows, (partNote ? partNote + '; ' : '') + (stoppedEarly || timeLeft() < 25_000 ? 'stopped early for time - the rest continues on the next run' : 'ok')); out[p] = { ok: true, rows, note: partNote || undefined, more: stoppedEarly || undefined }; }
         catch (e) { await logEnd(id, false, 0, (e as Error).message); out[p] = { ok: false, error: (e as Error).message }; }
       }
       return j(out);
