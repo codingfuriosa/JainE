@@ -39,7 +39,6 @@ const NAV=[
   {group:'Growth & Strategy',items:[
     {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},
     {id:'competitors',label:'Competitor Ads',icon:'fa-magnifying-glass-chart'},
-    {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
     {id:'scaling',label:'Scaling Up',icon:'fa-arrow-trend-up'},
     {id:'playbook',label:'Playbook',icon:'fa-book-open'},
