@@ -125,6 +125,21 @@ export function welcome2Email(res: any) {
   return { html, text, due, amount, terms, project: val("project_name") };
 }
 
+/* THE EMAIL'S TEXT AND HTML, PACKED AS BASE64. denomailer 1.6.0 packs them as quoted-printable
+   itself, and gets it wrong: it writes "=3d" in lower case (some mail apps then show the email
+   as raw code - style=3d'...') and its line-wrapping can drop characters. Handing it base64 parts
+   it writes as they are, which every mail app reads, and the wording arrives exactly as written. */
+function b64Part(mimeType: string, s: string) {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const b64 = btoa(bin).replace(/.{76}(?=.)/g, "$&\r\n");
+  return { mimeType: `${mimeType}; charset="utf-8"`, content: b64, transferEncoding: "base64" };
+}
+export function mailBody(text: string, html: string) {
+  return { mimeContent: [b64Part("text/plain", text), b64Part("text/html", html)] };
+}
+
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
@@ -402,7 +417,7 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
   const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true,
     auth: { username: CU, password: CP } } });
   try {
-    await client.send({ from: `Pallabita Ghosh - The Jain Group <${CU}>`, to, subject, content: text, html,
+    await client.send({ from: `Pallabita Ghosh - The Jain Group <${CU}>`, to, subject, ...mailBody(text, html),
       ...(attachments.length ? { attachments } : {}) });
   } catch (e) {
     if (action === "booking_welcome_auto") {
@@ -469,7 +484,7 @@ async function welcome2Reminders(req: Request, acc: any, j: J): Promise<Response
         + `<p style="margin:0">Please open the booking in JAIN-E and email the 2nd Welcome Letter.</p></div>`;
       const text = html.replace(/<br>/g, "\n").replace(/<\/p>/g, "\n\n").replace(/<[^>]+>/g, "").trim();
       try {
-        await client.send({ from: `JAIN-E Post Sales <${CU}>`, to, subject: subj, content: text, html });
+        await client.send({ from: `JAIN-E Post Sales <${CU}>`, to, subject: subj, ...mailBody(text, html) });
         sent.push(id);
         await acc.from("booking_doc_status").upsert({ case_id: id, kind: "welcome2", reminder_sent_at: new Date().toISOString() },
           { onConflict: "case_id,kind" });
