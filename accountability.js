@@ -6255,10 +6255,10 @@
   }
   function wfClosePending(t){ try{ if(t&&!t.closed) t.close(); }catch(_e){} }
 
-  /* Who may email or reject a booking document: the same people who may act on a Booking Form
-     at all - the Administrator and Post Sales. See wfBookingCanAct in the instance panel; the
-     Sales Head's viewing exemption deliberately does not reach this far. */
-  function wfBookingActor(){ return eq(me(),'ayushruia1@gmail.com')||wfInDept('Post Sales'); }
+  /* Who may email or reject a booking document: Pallabita Ghosh (Manager - Post Sales) and nobody
+     else (17 Oct 2026) - the Email and Reject buttons are not even shown to anyone else. The server
+     holds the same rule (acc.booking_doc_can_act). Opening, editing and downloading are unchanged. */
+  function wfBookingActor(){ return eq(me(),'customercare1@thejaingroup.com'); }
 
   async function wfOpenDocTab(html,opt){
     opt=opt||{};

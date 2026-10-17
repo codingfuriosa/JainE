@@ -3,7 +3,7 @@
 //
 //   { action: "booking_doc_mail", case_id, kind, modified, letter_html?, pdf_base64?, filename? }
 //       STAFF ONLY - the Email button in the document editor. The caller's own token is checked and
-//       acc.booking_doc_can_act() must say yes (the Administrator and Post Sales).
+//       acc.booking_doc_can_act() must say yes (Pallabita Ghosh only).
 //       welcome    goes as TEXT in the body of the email - never as an attachment. When the letter
 //                  has been edited (modified), the edited wording is what is sent, under the same
 //                  subject - nothing in the email says it was edited.
@@ -11,7 +11,7 @@
 //       agreement  the same.
 //   { action: "booking_welcome_auto", case_id }
 //       THE JOB ONLY (x-audit-secret, the same secret the booking reader uses) - fired by the
-//       database the first time a booking's reading finishes. Sends the Welcome Letter once, never
+//       database (trg_booking_welcome_auto) when a booking's reading finishes. Sends the Welcome Letter once, never
 //       again automatically, and never for a booking read before this existed (auto_skip).
 //
 // A REJECTED document is never emailed, by hand or automatically. It can still be opened, edited
@@ -319,7 +319,7 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
     const { data: who } = await asUser.auth.getUser();
     if (!who?.user) return j({ error: "Please sign in again." }, 401);
     const { data: can } = await asUser.schema("acc").rpc("booking_doc_can_act");
-    if (!can) return j({ error: "Only the Administrator and Post Sales can email booking documents." }, 403);
+    if (!can) return j({ error: "Only Pallabita Ghosh can email booking documents." }, 403);
     sender = who.user.email || "staff";
   }
 
