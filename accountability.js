@@ -3399,12 +3399,14 @@
       /* The whole row opens it, the way a bill's row opens the bill. A button that repeats what
          clicking the row already does is a second thing to aim at for no gain. Delete stops the
          click travelling, or tidying up would open the draft on the way past. */
-      return '<tr class="wf-draft-row" title="Open this draft" onclick="wfEventOpen('+flow.id+',null,'+d.id+')">'
+      // A Wow Moment draft is outlined in its colour, like its instances, and reopens as one.
+      const vCol=wfVariantColor(flow, d.variant);
+      return '<tr class="wf-draft-row'+(vCol?' wf-var-row':'')+'"'+(vCol?' style="--wf-var:'+vCol+'"':'')+' title="Open this draft" onclick="wfEventOpen('+flow.id+',null,'+d.id+')">'
         /* Numbered, not priced. A draft has no "reimbursement number" - it takes one only when it
            is submitted - so this is simply its place in the list, newest first. */
         +'<td><b>'+(i+1)+'</b></td>'
         +'<td><b>'+(tot?wfMoney(tot):'\u2014')+'</b></td>'
-        +'<td class="wf-trigcell">'+(what||'<span style="color:var(--slate)">nothing filled in yet</span>')+'</td>'
+        +'<td class="wf-trigcell">'+wfVariantBadge(flow, d.variant)+(what||'<span style="color:var(--slate)">nothing filled in yet</span>')+'</td>'
         +'<td>'+filled.length+' of '+det.length+' filled</td>'
         +'<td>'+esc2(wfDT(d.updated_at||d.created_at))+'</td>'
         +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
@@ -4008,9 +4010,10 @@
     // Reimbursement: is one of my own claims already in process? (only for its New button's tooltip)
     if(out.srvFirst && id===39){
       try{
-        const {data}=await ACC().from('flow_cases').select('id,flow_id,case_no,jaine_id,created_by,current_step,returned_at,status')
+        const {data}=await ACC().from('flow_cases').select('id,flow_id,case_no,jaine_id,created_by,current_step,returned_at,status,variant')
           .eq('flow_id',39).gt('current_step',1).is('returned_at',null).not('status','in','("Done","Cancelled")');
-        out.myOpenClaim=(data||[]).find(function(x){ return eq(x&&x.created_by, me()); })||null;
+        // ordinary claims only: an open Wow Moment does not hold up an ordinary claim
+        out.myOpenClaim=(data||[]).find(function(x){ return eq(x&&x.created_by, me()) && !x.variant; })||null;
       }catch(_e){}
     }
     return out;
@@ -4193,7 +4196,7 @@
        would have allowed, or promise a save that is about to be rejected. */
     const wfMyOpenReimbursement=id===39 ? (function(){
       // server-side paging holds one page, so the claim was looked up on its own (srvMyOpenClaim)
-      const c=srv ? srvMyOpenClaim : cases.find(function(x){ return eq(x&&x.created_by, mySelf) && x.current_step>1 && !x.returned_at && x.status!=='Done' && x.status!=='Cancelled'; });
+      const c=srv ? srvMyOpenClaim : cases.find(function(x){ return eq(x&&x.created_by, mySelf) && !x.variant && x.current_step>1 && !x.returned_at && x.status!=='Done' && x.status!=='Cancelled'; });
       return c ? wfCaseNoText(c) : null;
     })() : null;
     const wfBookingStarted=function(c){
@@ -4289,9 +4292,11 @@
         // Searchable by everyone responsible for it, not just whoever raised it - see wfOwnerKey.
         const ownerKey=wfOwnerKey(c, byCase);
         const xtra=wfFindExtra(Array.isArray(c.trigger_details)?c.trigger_details:[], flow);
-        return '<tr data-case="'+c.id+'" data-done="'+(c.status==='Done'?'1':'0')+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-text="'+esc2(xtra.text)+'" data-curstep="'+(c.current_step==null?'':c.current_step)+'" data-late="'+(wfCaseIsLate(byCase[c.id], c.current_step)?'1':'0')+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
+        // A variant's instance (a Wow Moment) is outlined in its colour, running or archived alike.
+        const vCol=wfVariantColor(flow, c.variant);
+        return '<tr'+(vCol?' class="wf-var-row" style="--wf-var:'+vCol+'"':'')+' data-case="'+c.id+'" data-done="'+(c.status==='Done'?'1':'0')+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-text="'+esc2(xtra.text)+'" data-curstep="'+(c.current_step==null?'':c.current_step)+'" data-late="'+(wfCaseIsLate(byCase[c.id], c.current_step)?'1':'0')+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(showChk?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
-          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+(chaser?('<td>'+esc2(wfDeptNameOf(byCase[c.id], firstSeq))+'</td>'):'')+(isBill?('<td>'+wfRoutePill(c.route)+'</td>'):'')+cells+'</tr>';
+          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+wfVariantBadge(flow, c.variant)+esc2(wfTrigShort(c,flow).short)+'</td>'+(chaser?('<td>'+esc2(wfDeptNameOf(byCase[c.id], firstSeq))+'</td>'):'')+(isBill?('<td>'+wfRoutePill(c.route)+'</td>'):'')+cells+'</tr>';
       };
       const rows=cases.map(function(c){ return rowHtml(c, byCase); }).join('');
       if(srv){
@@ -4337,13 +4342,23 @@
         +'<div class="wf-tablewrap"><table class="wf-itable" id="wfInstTable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table><div id="wfInstNoMatch" class="ac-empty" style="cursor:default;display:none">No matches</div></div></div>';
     }
 
+    /* Editing or deleting the WORKFLOW is the rare, admin-only action, so it is two small icons
+       beside the title rather than two full buttons competing with "New" for attention. */
+    const adminActs=(canManageEdit||canManage)
+      ? '<div class="wf-head-admin">'
+        +(canManageEdit?'<button class="ac-btn ic" title="Edit this workflow" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i></button>':'')
+        +(canManage?'<button class="ac-btn ic danger" title="Delete this workflow (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i></button>':'')
+        +'</div>'
+      : '';
+    const myVariants=canEvent?wfVariantsICanRaise(flow):[];
     const headActs='<div class="wf-head-acts">'
       +(canSeeWaitRecv?('<span class="wf-my-wr" title="Your own count for this workflow — only you can see this">'
         +'<span class="wf-wr-seg wf-wr-wait"><i class="fa-solid fa-hourglass-half"></i> Waiting <b>'+myWait+'</b></span>'
         +'<span class="wf-wr-seg wf-wr-recv"><i class="fa-solid fa-inbox"></i> Received <b>'+myRecv+'</b></span>'
       +'</span>'):'')
-      +(canManageEdit?'<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>':'')
-      +(canManage?'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>':'')
+      /* The "New" buttons travel together as one group: side by side on a computer, and an equal
+         pair filling the width on a phone, rather than each wrapping wherever it happens to fit. */
+      +'<div class="wf-head-new'+(myVariants.length?' wf-head-new-n':'')+'">'
       /* THE BUTTON IS NEVER DISABLED, even for somebody who cannot submit yet. Disabling it opened
          no form, and the form is the only way to reach Save draft - so the one person told to
          "write the next one down and send it later" was the one person who could not. It opens,
@@ -4354,7 +4369,17 @@
       +(canEvent?'<button class="ac-btn primary" title="'+esc2(wfMyOpenReimbursement
             ? 'Your '+N.lc+' #'+wfMyOpenReimbursement+' has not finished yet — you can still fill this in and save it as a draft'
             : 'Start a new '+N.lc)
-          +'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
+          +'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-plus"></i><span class="wf-btxt"><span class="wf-new-pre">New </span>'+esc2(N.one)+'</span></button>':'')
+      /* The workflow's other kinds (flows.variants), each its own button for the people allowed to
+         raise it - Reimbursement's "New Wow Moment" for the two Sales Managers. Same form, same
+         UPI / phone / QR memory; it simply routes to its own checker. A soft tint of its colour,
+         not a second solid block, so the page has one loud button and not two. */
+      +myVariants.map(function(k){
+          const v=wfVariantOf(flow,k), c=v.color||'#7c3aed';
+          return '<button class="ac-btn wf-var-btn" style="--wf-var:'+c+'" title="Start a new '+esc2(String(v.label||k).toLowerCase())+'" onclick="wfNewInstance('+id+',\''+esc2(k)+'\')">'
+            +'<i class="fa-solid fa-star"></i><span class="wf-btxt"><span class="wf-new-pre">New </span>'+esc2(v.label||k)+'</span></button>';
+        }).join('')
+      +'</div>'
       +'</div>';
 
     // Reimbursement only, and only these two named accounts (Accounts' own lookup tool — not a
@@ -4400,7 +4425,7 @@
       +((wfIsCaseViewer(flow)&&!canManage&&!canEvent)
         ? '<span class="wf-pill" style="background:#eef2ff;color:#3730a3;margin-left:8px" title="You can see these records but not change them. Anything that needs action stays with the person the '+esc2(N.lc)+' is assigned to."><i class="fa-solid fa-eye"></i> View only</span>'
         : '')
-      +headActs+'</div>'
+      +adminActs+headActs+'</div>'
       +pcSearchHtml
       +'<div class="wf-card wf-meta">'
         +(flow.description?'<div class="wf-desc">'+esc2(flow.description)+'</div>':'')
@@ -9567,10 +9592,33 @@
     const t=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
     return t.length>0 && t.every(function(f){ return f && f.type==='attachment'; });
   }
-  window.wfNewInstance=function(flowId){
+  // `variant` names a flows.variants entry (Reimbursement's 'wow'); omitted for the ordinary kind.
+  window.wfNewInstance=function(flowId, variant){
     if(window._wfAttachOnly && Number(flowId)===Number(window._wfFlowId)) return wfQuickAttach(flowId);
-    return wfEventOpen(flowId);
+    return wfEventOpen(flowId, null, null, variant||null);
   };
+  /* A workflow's other kinds of instance (flows.variants) and whether this person may raise one.
+     ONLY the named raisers - not even the Administrator, since a Wow Moment is the Sales Managers'
+     own spend. The database checks the same list in acc.wf_create_instance; this only decides
+     whether the button is drawn. */
+  function wfVariantOf(flow, key){
+    const v=flow&&flow.variants&&key?flow.variants[key]:null;
+    return (v&&typeof v==='object')?v:null;
+  }
+  function wfVariantsICanRaise(flow){
+    const all=(flow&&flow.variants&&typeof flow.variants==='object')?flow.variants:{};
+    return Object.keys(all).filter(function(k){
+      const v=all[k]; if(!v||typeof v!=='object') return false;
+      return (Array.isArray(v.raisers)?v.raisers:[]).some(function(e){ return eq(e,me()); });
+    });
+  }
+  // Marks a row as a variant's: the coloured border and a small label naming the kind.
+  function wfVariantColor(flow, key){ const v=wfVariantOf(flow,key); return v?(v.color||'#7c3aed'):''; }
+  function wfVariantBadge(flow, key){
+    const v=wfVariantOf(flow,key); if(!v) return '';
+    const c=v.color||'#7c3aed';
+    return '<span class="wf-var-badge" style="color:'+c+';border-color:'+c+'"><i class="fa-solid fa-star"></i> '+esc2(v.label||key)+'</span>';
+  }
   window.wfQuickAttach=function(flowId){
     const inp=document.createElement('input');
     inp.type='file'; inp.multiple=true;
@@ -9734,7 +9782,7 @@
     }
   }
 
-  window.wfEventOpen=async function(flowId, caseId, draftId){
+  window.wfEventOpen=async function(flowId, caseId, draftId, variant){
     wfInjectCss();
     /* Anything left over from a previous session that was closed without Cancel - the overlay,
        Escape, navigating away - is swept now. Doing it on the way IN covers every exit, without
@@ -9755,6 +9803,13 @@
       else { toast('That draft could not be opened','err'); return; }
     }
     if(!flow){ toast('Workflow not found','err'); return; }
+    /* WHICH KIND. Asked for by the button, or carried by the draft or instance being reopened - a
+       Wow Moment draft must reopen as a Wow Moment, not quietly turn back into an ordinary claim. */
+    const vKey=variant||(draftRow&&draftRow.variant)||(caseRow&&caseRow.variant)||null;
+    const vCfg=wfVariantOf(flow, vKey);
+    window._wfEvtVariant=vCfg?vKey:null;
+    const vLabel=vCfg?(vCfg.label||vKey):'';
+    const vHide=vCfg&&Array.isArray(vCfg.hide_fields)?vCfg.hide_fields:[];
     const N=wfNounOf(flow); window._wfNoun=N; window._wfIsBill=wfIsBillFlow(flow);
     window._wfEvtSumKey=(flow.tracker_sum_field||'').trim();   // 'Amount' on Reimbursement
     // The least a claim may come to, if this workflow sets one (Reimbursement: 200).
@@ -9804,6 +9859,16 @@
       if(!t || t.type!=='attachment') return t;
       return (t.optional===false) ? t : Object.assign({},t,{optional:true});
     });
+    /* A variant leaves out what it already answers - a Wow Moment is not travel or a meal, so the
+       Transport / Food picker (and Km, which only follows it) are not asked. Taken off the template
+       itself, so the form, the save and the total all agree on what is there. */
+    if(vCfg){
+      template=template.filter(function(t){ return !vHide.some(function(h){ return eq(h,(t&&t.label)||''); }); })
+        .map(function(t){
+          return (t && /description/i.test(t.label||'') && t.type!=='attachment')
+            ? Object.assign({},t,{placeholder:'What the '+vLabel+' was for'}) : t;
+        });
+    }
     // "Multiple" lets the whole set of fields repeat — one group per entry (Entry 1, Entry 2…).
     // Grouping saved values by `d.group` (missing group = 0) also reads legacy single-group data
     // exactly as before, so this is one code path for both.
@@ -10042,7 +10107,9 @@
           +'</div>'
         +'</div>'
       : '';
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow?wfCaseNoText(caseRow):caseId)):('New '+N.one))+'</h3><span class="x" onclick="wfEventCancel()">&times;</span></div>'
+    const formNoun=vCfg?vLabel:N.one;
+    const vColor=vCfg?(vCfg.color||'#7c3aed'):'';
+    openModal('<div class="modal-head"'+(vCfg?' style="border-top:4px solid '+vColor+'"':'')+'><h3>'+(vCfg?'<i class="fa-solid fa-star" style="color:'+vColor+'"></i> ':'<i class="fa-solid fa-bolt"></i> ')+esc2(editing?('Edit '+formNoun+' '+(caseRow?wfCaseNoText(caseRow):caseId)):('New '+formNoun))+'</h3><span class="x" onclick="wfEventCancel()">&times;</span></div>'
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" data-multiple="'+(allowMultiple?'1':'0')+'" style="min-width:min(94vw,660px)">'
         +membersHtml
         +(dateMode?commonHtml:'')
@@ -10062,7 +10129,7 @@
       +'</div>'
       +'<div class="modal-foot">'
       +(window._wfEvtSumKey?'<div id="wfEvtTotal" class="wf-evt-total"></div>':'')
-      +'<button class="ac-btn" onclick="wfEventCancel()">Cancel</button>'+((flow.allow_drafts && !editing)?('<button class="ac-btn ic" style="height:34px;width:34px" title="Save as draft \u2014 keep this and finish it later. Nothing is sent to anyone and no '+esc2(N.lc)+' number is taken until you submit it." onclick="wfEventSaveDraft('+flowId+')"><i class="fa-regular fa-floppy-disk"></i></button>'):'')+'<button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
+      +'<button class="ac-btn" onclick="wfEventCancel()">Cancel</button>'+((flow.allow_drafts && !editing)?('<button class="ac-btn ic" style="height:34px;width:34px" title="Save as draft \u2014 keep this and finish it later. Nothing is sent to anyone and no '+esc2(N.lc)+' number is taken until you submit it." onclick="wfEventSaveDraft('+flowId+')"><i class="fa-regular fa-floppy-disk"></i></button>'):'')+'<button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+formNoun))+'</button></div>','wf-evt-modal');
     wfUpiHydrate();
     wfPhoneHydrate();
     wfShowWhenSyncAll();
@@ -10301,6 +10368,8 @@
       if(DRAFT){
         const body={flow_id:flowId, created_by:me(), details:details,
                     updated_at:new Date().toISOString()};
+        // which kind it will be raised as, so it reopens as that kind
+        if(window._wfEvtVariant) body.variant=window._wfEvtVariant;
         try{
           if(window._wfDraftId){
             const {error}=await ACC().from('flow_drafts')
@@ -10374,8 +10443,12 @@
           if(!v.length){ toast('Please choose who does '+(seqs.length>1?'these steps':'this step'),'warn'); return; }
           seqs.forEach(function(sq){ members[sq]=v.slice(); });
         }
+        /* A variant travels as one '__variant' detail, which acc.wf_create_instance takes out before
+           storing anything and uses to route the claim (a Wow Moment goes to Shafat, not HR). */
+        const sendDetails=window._wfEvtVariant
+          ? details.concat([{label:'__variant', value:window._wfEvtVariant}]) : details;
         const {data:newCaseId,error}=await ACC().rpc('wf_create_instance',
-          {p_flow_id:flowId, p_details:details, p_step_members:Object.keys(members).length?members:null});
+          {p_flow_id:flowId, p_details:sendDetails, p_step_members:Object.keys(members).length?members:null});
         if(error)throw error;
         // same on creation: attached, thought better of it, then created
         try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
@@ -11280,7 +11353,20 @@
     .wf-page-head{display:flex;align-items:center;gap:10px;margin:0 0 14px;flex-wrap:wrap}
     .wf-page-head h1{font-size:18px;font-weight:700;color:var(--ink);margin:0;display:flex;align-items:center;gap:9px;flex:1;min-width:0;letter-spacing:-.01em}
     .wf-page-head h1 i{color:var(--brand);font-size:16px}
-    .wf-head-acts{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+    .wf-head-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .wf-head-admin{display:flex;gap:6px;flex:none}
+    .wf-head-new{display:flex;gap:8px;margin-left:auto}
+    .wf-head-new .ac-btn{white-space:nowrap}
+    /* A variant's "New" button (Wow Moment): its colour as a soft tint, so only "New Reimbursement"
+       is a solid block and the header has one loud button rather than two. */
+    .ac-btn.wf-var-btn{background:color-mix(in srgb,var(--wf-var,#7c3aed) 9%,transparent);color:var(--wf-var,#7c3aed);border-color:color-mix(in srgb,var(--wf-var,#7c3aed) 40%,transparent)}
+    .ac-btn.wf-var-btn:hover{background:color-mix(in srgb,var(--wf-var,#7c3aed) 16%,transparent)}
+    /* Not enough room beside the title (tablets, narrow windows): the counts and the New buttons
+       take their own line underneath - counts on the left, New on the right - instead of being
+       squeezed against the title until they overlap it. */
+    @media(max-width:1100px){
+      .wf-head-acts{flex:1 1 100%}
+    }
     .wf-my-wr{display:flex;align-items:stretch;font-size:11.5px;font-weight:700;border-radius:20px;overflow:hidden;white-space:nowrap}
     .wf-wr-seg{display:flex;align-items:center;gap:5px;padding:6px 12px}
     .wf-wr-seg b{font-weight:800;font-size:12.5px}
@@ -11808,6 +11894,14 @@
     .wf-tktable{min-width:100%;font-size:12px}
     .wf-tktable th,.wf-tktable td{padding:8px 11px;white-space:nowrap;border-right:1px solid var(--line)}
     .wf-tktable tbody tr.wf-tk-row{cursor:pointer}
+    /* A variant's row (Reimbursement's Wow Moment) - drafts, running and archived instances alike -
+       outlined in the variant's colour so it reads apart from an ordinary claim at a glance. On the
+       cells, not the row: a table row with collapsed borders does not draw its own. */
+    .wf-itable tbody tr.wf-var-row>td{border-top:2px solid var(--wf-var,#7c3aed);border-bottom:2px solid var(--wf-var,#7c3aed);background:color-mix(in srgb,var(--wf-var,#7c3aed) 5%,transparent)}
+    .wf-itable tbody tr.wf-var-row>td:first-child{border-left:4px solid var(--wf-var,#7c3aed)}
+    .wf-itable tbody tr.wf-var-row>td:last-child{border-right:2px solid var(--wf-var,#7c3aed)}
+    .wf-var-badge{display:inline-flex;align-items:center;gap:4px;margin-right:6px;padding:1px 7px;border:1px solid;border-radius:999px;font-size:10.5px;font-weight:600;white-space:nowrap;vertical-align:1px}
+    .wf-var-badge i{font-size:9px}
     .wf-itable tbody tr.wf-draft-row{cursor:pointer}
     .wf-itable tbody tr.wf-draft-row:hover{background:var(--bg-subtle,#f1f5f9)}
     .wf-tktable tbody tr:nth-child(even){background:var(--bg-subtle,#fafbfc)}
@@ -11904,12 +11998,16 @@
     .wf-updlist::-webkit-scrollbar,.wf-updmini-list::-webkit-scrollbar{width:6px}
     .wf-updlist::-webkit-scrollbar-thumb,.wf-updmini-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
     @media(max-width:640px){
-      .wf-page-head h1{font-size:16px;flex:1 1 100%;order:2}
-      .wf-page-head .ac-btn.ic:first-child{order:1}
-      /* header buttons: wrap onto their own line and keep a readable width instead of
-         being squeezed into three slivers */
-      .wf-head-acts{order:3;flex:1 1 100%;gap:8px}
-      .wf-head-acts .ac-btn{flex:1 1 auto;min-width:104px;justify-content:center}
+      /* Phone: back, title and the admin icons share the first line; the counts get a line of
+         their own; the New buttons are an equal pair filling the width, labelled without the
+         repeated "New" so each name fits. */
+      .wf-page-head h1{font-size:16px}
+      .wf-head-acts{gap:8px}
+      .wf-my-wr{flex:1 1 100%}
+      .wf-my-wr .wf-wr-seg{flex:1;justify-content:center}
+      .wf-head-new{flex:1 1 100%;margin-left:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr))}
+      .wf-head-new .ac-btn{justify-content:center;min-width:0}
+      .wf-head-new-n .wf-new-pre{display:none}
       .wf-btxt{display:inline}
       .wf-card{padding:14px}
       /* workflow list: name/trigger on one line, people + step count underneath */
