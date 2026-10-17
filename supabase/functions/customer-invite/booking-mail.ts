@@ -303,6 +303,7 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
   const action = String(body.action || "");
   const acc = db.schema("acc");
   if (action === "booking_welcome2_reminders") return await welcome2Reminders(req, acc, j);
+  if (action === "booking_read_failed") return await readFailedNotice(req, acc, j, Number(body.case_id || 0));
   const caseId = Number(body.case_id || 0);
   if (!caseId) return j({ error: "case_id is required" }, 400);
 
@@ -436,6 +437,62 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
   }, { onConflict: "case_id,kind" });
 
   return j({ ok: true, test: !live, sent_to: to, intended_to: intended, subject });
+}
+
+/* A BOOKING THAT COULD NOT BE READ - the job only (x-audit-secret). Fired by the database
+   (trg_booking_read_failed) when a reading has failed for good: three tries, ten minutes apart.
+   Pallabita Ghosh gets one email naming the booking and why, because nothing else will happen for
+   it - no Check List, no documents, and no automatic Welcome Letter. In test mode it goes to the
+   test inbox, like the other reminders. */
+async function readFailedNotice(req: Request, acc: any, j: J, caseId: number): Promise<Response> {
+  const secret = req.headers.get("x-audit-secret") || "";
+  const { data: s } = await acc.from("job_secrets").select("value").eq("name", "booking_audit").maybeSingle();
+  if (!secret || !s?.value || s.value !== secret) return j({ error: "unauthorized" }, 401);
+  if (!caseId) return j({ error: "case_id is required" }, 400);
+  const CU = Deno.env.get("CUSTOMER_MAIL_USER"), CP = Deno.env.get("CUSTOMER_MAIL_APP_PASSWORD");
+  if (!CU || !CP) return j({ error: "Pallabita Ghosh's mailbox is not connected." }, 500);
+
+  const { data: a } = await acc.from("booking_audits").select("status,error,attempts").eq("case_id", caseId).maybeSingle();
+  if (!a || a.status !== "failed") return j({ ok: true, skipped: "not failed" });
+  const { data: c } = await acc.from("flow_cases").select("case_no,created_by,created_at,trigger_details").eq("id", caseId).maybeSingle();
+
+  const { data: secrets } = await acc.from("job_secrets").select("name,value")
+    .in("name", ["booking_mail_mode", "booking_mail_test_to"]);
+  const conf: Record<string, string> = {};
+  for (const r of (secrets || [])) conf[r.name] = String(r.value || "");
+  const live = conf.booking_mail_mode === "live";
+  const to = live ? CU : (conf.booking_mail_test_to || "").trim();
+  if (!EMAIL_RE.test(to)) return j({ error: "no inbox" }, 500);
+
+  // The booking's own file name is the best name it has until it is read ("Riya_Bose_Block_D_3E").
+  const files = (Array.isArray(c?.trigger_details) ? c.trigger_details : [])
+    .map((d: any) => String(d?.value ?? "")).filter((v: string) => v.startsWith("s3:"))
+    .map((v: string) => v.split("/").pop()!.replace(/^\d+_[a-z0-9]+_/i, ""));
+  const err = String(a.error || "unknown reason");
+  const why = /503|UNAVAILABLE|high demand|overloaded|429|RESOURCE_EXHAUSTED|timed? ?out|timeout/i.test(err)
+    ? "Google's AI reading service was busy or did not answer, each time it was tried."
+    : err.slice(0, 300);
+  const no = c?.case_no ?? caseId;
+  const uploaded = c?.created_at ? new Date(c.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" }) : "";
+  const subject = `${live ? "" : "[TEST] "}Booking could not be read - Booking Form No. ${no}`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111827">`
+    + `<p style="margin:0 0 14px">JAIN-E could not read the documents of this booking, after ${esc(a.attempts || 3)} tries:</p>`
+    + `<p style="margin:0 0 14px"><b>Booking Form No. ${esc(no)}</b>${files.length ? " - " + esc(files.join(", ")) : ""}<br>`
+    + `Uploaded by ${esc(c?.created_by || "-")}${uploaded ? ", " + esc(uploaded) : ""}.</p>`
+    + `<p style="margin:0 0 14px">Why: ${esc(why)}</p>`
+    + `<p style="margin:0 0 14px">So there is no Check List for it yet, and its <b>Welcome Letter has not been sent</b> to the customer.</p>`
+    + `<p style="margin:0">Please let the JAIN-E Administrator know, so the booking can be read again.</p></div>`;
+  const text = html.replace(/<br>/g, "\n").replace(/<\/p>/g, "\n\n").replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').trim();
+
+  const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true,
+    auth: { username: CU, password: CP } } });
+  try {
+    await client.send({ from: `JAIN-E Post Sales <${CU}>`, to, subject, ...mailBody(text, html) });
+  } catch (e) {
+    return j({ error: "Could not send: " + String((e as Error).message || e).slice(0, 300) }, 502);
+  } finally { try { await client.close(); } catch { /* ignore */ } }
+  return j({ ok: true, sent_to: to, test: !live });
 }
 
 /* THE 2nd WELCOME LETTER REMINDER - the job only (x-audit-secret), every evening.
