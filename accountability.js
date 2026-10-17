@@ -10957,6 +10957,57 @@
     toast('Received — timer started','ok'); renderPage();
   };
 
+  /* REIMBURSEMENT: RECEIVE OR FORWARD SEVERAL AT ONCE (17 Oct 2026). Reimbursement tasks on the
+     Tasks tab get a checkbox that only selects them, and the pills row gets small Receive and
+     Forward buttons. Each button acts on the ticked tasks it fits and leaves the rest exactly as
+     they are: Receive takes the waiting ones, Forward moves on the received ones. Receive stays
+     off until a waiting task is ticked, Forward until a received one is. Each step goes through
+     the same wf_receive / wf_forward calls as its own buttons - neither asks for anything else.
+     Reimbursement only (flow 39), and not its "Payment Received" step, which is a question for the
+     claimant rather than work to receive and pass on. */
+  function wfIsRbSelectable(info){ return !!(info&&info.flowId===39&&!info.confirmOnly&&info.nextExists); }
+  window.wfRbSelSync=function(){
+    const sel=[...document.querySelectorAll('.wf-rbsel:checked')];
+    const r=document.getElementById('wfRbRecv'), f=document.getElementById('wfRbFwd');
+    if(r) r.disabled=!sel.some(function(c){ return c.dataset.st==='waiting'; });
+    if(f) f.disabled=!sel.some(function(c){ return c.dataset.st==='received'; });
+  };
+  window.wfRbBulk=async function(kind){
+    const sel=[...document.querySelectorAll('.wf-rbsel:checked')];
+    const want=(kind==='receive')?'waiting':'received';
+    const ids=sel.filter(function(c){ return c.dataset.st===want; }).map(function(c){ return Number(c.dataset.fcs); });
+    const left=sel.length-ids.length;
+    if(!ids.length) return;
+    const run=async function(){
+      ['wfRbRecv','wfRbFwd'].forEach(function(id){ const b=document.getElementById(id); if(b) b.disabled=true; });
+      let ok=0; const fails=[];
+      for(const fcsId of ids){
+        try{
+          const um=await wfStepUsageMeta(fcsId);
+          if(kind==='receive'){
+            const {error}=await ACC().rpc('wf_receive',{p_fcs_id:fcsId}); if(error) throw error;
+            try{ usageQueue('tasks.workflow.receive_a_step','update',um); }catch(_e){}
+          }else{
+            const cid=await wfCaseIdOfStep(fcsId);
+            const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error) throw error;
+            await wfLogForward(fcsId, um, cid);
+          }
+          ok++;
+        }catch(e){ fails.push((e&&e.message)||String(e)); }
+      }
+      const verb=(kind==='receive')?'Received':'Forwarded';
+      let msg=verb+' '+ok+' reimbursement'+(ok===1?'':'s');
+      if(left) msg+=' · '+left+' '+(kind==='receive'?'already received':'still waiting')+', left as '+(left===1?'it is':'they are');
+      if(fails.length) msg+=' · '+fails.length+' could not be '+verb.toLowerCase()+': '+fails[0];
+      toast(msg, fails.length?'err':'ok');
+      renderPage();
+    };
+    if(kind==='forward'){
+      accConfirm('Forward '+ids.length+' reimbursement'+(ids.length===1?'':'s')+' to the next step?'
+        +(left?(' '+left+' still waiting '+(left===1?'is':'are')+' not forwarded and stay'+(left===1?'s':'')+' as '+(left===1?'it is':'they are')+'.'):''), run);
+    }else{ await run(); }
+  };
+
   window.wfForward=async function(fcsId){
     const label=await wfComputeForwardLabel(fcsId);
     const um=await wfStepUsageMeta(fcsId);
@@ -14873,7 +14924,7 @@
           // wfWhoOfStep/wfStepWhoText need the next step's DEFINITION (owner_emails/owner_from_trigger/...)
           // merged in - nextStep itself only ever carries the instance-row fields (person/candidates).
           const nextDef=nextStep?(stepDefByFlowSeq[c.flow_id+':'+nextStep.seq]||null):null;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:wfCaseNoText(c),idLabel:f.id_label||'',flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),fileToWheredoc:(c.flow_id===26),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,flowId:c.flow_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:wfCaseNoText(c),idLabel:f.id_label||'',flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),fileToWheredoc:(c.flow_id===26),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -15069,7 +15120,7 @@
 
     b.innerHTML=`
     <input class="ac-in" id="acTaskSearch" placeholder="Search tasks…" style="margin-bottom:14px;width:100%" oninput="accTaskSearch(this.value)">
-    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}${p3('recurring','fa-rotate','Recurring')}</div>
+    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}${p3('recurring','fa-rotate','Recurring')}${toMeArr.some(function(x){ return x.flow_case_step_id!=null&&wfIsRbSelectable((window._wfStepInfo||{})[x.flow_case_step_id]); })?`<div style="margin-left:auto;display:flex;gap:6px" title="Tick Reimbursement tasks to receive or forward them together"><button class="ac-btn" id="wfRbRecv" style="height:28px;font-size:12px;padding:0 10px" disabled onclick="wfRbBulk('receive')"><i class="fa-solid fa-inbox"></i> Receive</button><button class="ac-btn" id="wfRbFwd" style="height:28px;font-size:12px;padding:0 10px" disabled onclick="wfRbBulk('forward')"><i class="fa-solid fa-paper-plane"></i> Forward</button></div>`:''}</div>
     <div class="ac-cols">
       <div class="ac-col">
         <div class="ac-colh"><i class="fa-solid fa-inbox" style="color:#0369a1"></i> Todo</div>
@@ -15844,9 +15895,13 @@
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
     const wfReceived=wfInfo&&!!wfInfo.received_at;
     const wfNeedsReceive=wfInfo&&!wfReceived;
-    // Workflow steps use explicit Receive / Reject / Forward / Done buttons (below), never a checkbox.
+    // Workflow steps use explicit Receive / Reject / Forward / Done buttons (below), never a checkbox -
+    // except Reimbursement's, whose checkbox only SELECTS the row for the bulk Receive / Forward
+    // buttons at the right of the pills row (wfRbBulk). Its "Payment Received" step has neither.
     const chk=opt.checkable?(t.flow_case_step_id!=null
-      ? ''
+      ? (wfIsRbSelectable(wfInfo)
+          ? `<input type="checkbox" class="ac-rowchk wf-rbsel" data-fcs="${t.flow_case_step_id}" data-st="${wfInfo.received_at?'received':'waiting'}" title="Select for Receive / Forward" onclick="event.stopPropagation()" onchange="wfRbSelSync()">`
+          : '')
       : `<input type="checkbox" class="ac-rowchk" title="${(opt.owner||t.source==='notice')?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!(opt.owner||t.source==='notice')},this)">`):'';
     const wfIsFirst=wfInfo&&wfInfo.minSeq!=null&&wfInfo.seq===wfInfo.minSeq;
     const wfIsLastStep=wfInfo&&!wfInfo.nextExists;
