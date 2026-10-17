@@ -16201,7 +16201,10 @@
         // the same storage_path, and a comment could too.
         const {data:othersF}=await ACC().from('ptask_files').select('id').eq('storage_path',path).limit(1);
         const {data:othersC}=await ACC().from('ptask_comments').select('id').eq('attach_path',path).limit(1);
-        if((!othersF||!othersF.length)&&(!othersC||!othersC.length)) await s3Delete(path);
+        // A legal notice task's attachment is also filed in Legal > Legal Notice Answers on the same
+        // file (acc.legal_notice_answer_file) - the document there keeps it.
+        let docUses=true; try{ const r=await ACC().rpc('storage_path_in_use',{p_path:path,p_except_doc:null,p_except_ptask_file:fid}); docUses=r.error?true:(r.data!==false); }catch(_e){ docUses=true; }
+        if((!othersF||!othersF.length)&&(!othersC||!othersC.length)&&!docUses) await s3Delete(path);
         await ACC().from('ptask_activity').insert({task_id:tid,action:'deleted attachment',detail:'Deleted '+(fname||'an attachment')});
         await sysMsg(tid,'deleted the attachment "'+(fname||'file')+'"');
         toast('Attachment "'+(fname||'')+'" deleted','ok');

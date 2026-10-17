@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en"><head><base href="/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Accountability · Nexus-RE · Jain Group</title>
+<link rel="preload" as="script" href="min/nexus-core.js?v=51747a7566">
+<link rel="preload" as="script" href="min/accountability.js?v=3c4b2269db">
+<link href="vendor/inter/inter.css?v=6c0a0c51b3" rel="stylesheet">
+<link rel="stylesheet" href="vendor/font-awesome/css/all.min.css?v=c22cfb6520">
+<link rel="stylesheet" href="nexus.css?v=09a101e697">
+
+
+<style id="accCss">
+    /* Hide scrollbars page-wide on Accountability — scrolling still works, just no visible bar (vertical or horizontal) */
+    *{scrollbar-width:none;-ms-overflow-style:none}
+    *::-webkit-scrollbar{width:0;height:0;display:none}
+    .ac-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--line)}
+    .ac-tab{padding:9px 15px;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:7px}
+    .ac-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+    @media(max-width:700px){.ac-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:8px;border-bottom:0;padding:2px 2px 8px;margin-bottom:12px}.ac-tabs::-webkit-scrollbar{display:none}.ac-tab{flex:0 0 auto;white-space:nowrap;justify-content:center;border:1px solid var(--line);border-radius:20px;padding:9px 15px;font-size:13px;gap:7px}.ac-tab.active{background:var(--brand-a10,#eef2ff);border-color:var(--brand);color:var(--brand)}}
+    .ac-3p{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+    .ac-pbtn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border:1px solid var(--line);border-radius:20px;background:var(--bg-card);color:var(--body);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
+    .ac-pbtn.on{background:var(--brand);border-color:var(--brand);color:#fff}
+    .ac-btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 13px;border:1px solid var(--line);border-radius:9px;background:var(--bg-card);color:var(--ink);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+    .ac-btn:hover{border-color:var(--brand);color:var(--brand)}
+    .wf-inst-tools .ac-btn:disabled{opacity:.4;cursor:default;pointer-events:none}
+    .ac-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}.ac-btn.primary:hover{color:#fff;filter:brightness(.94)}
+    .ac-btn.ok{background:#16a34a;border-color:#16a34a;color:#fff}.ac-btn.ok:hover{color:#fff}
+    .ac-btn.danger{color:#b91c1c}.ac-btn.danger:hover{border-color:#b91c1c}
+    .ac-btn.ic{padding:0;width:36px;justify-content:center}
+    .ac-hdrow{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:8px}
+    @media(max-width:900px){.ac-hdrow{grid-template-columns:1fr}}
+    .ac-hdrow .h{font-size:15px;font-weight:800;color:var(--ink);display:flex;align-items:center;gap:8px}
+    .ac-cardgrid{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:16px}
+    @media(max-width:900px){.ac-cardgrid{grid-template-columns:1fr}}
+    .ac-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+    @media(max-width:900px){.ac-cols{grid-template-columns:1fr}}
+    .ac-col{display:flex;flex-direction:column;gap:16px;min-width:0}
+    .ac-colh{font-size:15px;font-weight:800;color:var(--ink);display:flex;align-items:center;gap:8px;margin-bottom:-4px}
+    .ac-row .ti{min-width:0}
+    .tp-title{word-break:break-word}
+    .ac-card{border:1px solid var(--line);border-radius:14px;background:var(--bg-card);display:flex;flex-direction:column;min-width:0}
+    .ac-card > .hd{padding:13px 15px;border-bottom:1px solid var(--line-2);display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;color:var(--ink)}
+    .ac-card > .hd .cnt{margin-left:auto;background:var(--brand-a10,#eef2ff);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px;font-weight:700}
+    .ac-card > .bd{padding:12px 13px;overflow:auto;height:320px}
+    .ac-seclbl{font-size:10.5px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.05em;margin:8px 2px 6px}
+    .ac-seclbl:first-child{margin-top:0}
+    .ac-seclist{min-height:6px}
+    .ac-arch-list{display:flex;flex-direction:column;gap:8px}
+    .ac-row{display:flex;align-items:center;gap:11px;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;padding:6px 12px;margin-bottom:0;cursor:pointer;transition:border-color .1s}
+    .ac-row:hover{border-color:var(--brand);box-shadow:0 1px 6px rgba(2,6,23,.05)}
+    .ac-row.drag{opacity:.4}
+    .ac-row .grip{color:#cbd5e1;cursor:grab;font-size:13px;padding:5px 4px}
+    .ac-rowchk{width:16px;height:16px;flex:none;cursor:pointer;accent-color:var(--brand);margin:0}
+    .grip{touch-action:none;color:#cbd5e1;cursor:grab;font-size:13px;padding:5px 4px}
+    @media(hover:none){ .grip{font-size:16px;padding:13px 10px} }
+    .ac-row .ti{flex:1;min-width:0}
+    .ac-row .ti .t{font-weight:700;font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    /* Awaiting Approval + Completed This Week rows: keep the title on ONE line with an ellipsis (no
+       wrapping to two lines). The full title is shown on hover via the row's title attribute. */
+    .ac-row.ac-row-full .ti .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ac-row .ti .m{font-size:11.5px;color:var(--slate);display:flex;gap:10px;align-items:center;margin-top:3px;flex-wrap:wrap}
+    .ac-avs{display:flex;flex:none}
+    .ac-av{width:24px;height:24px;border-radius:50%;color:#fff;font-size:9.5px;font-weight:700;display:grid;place-items:center;margin-left:-6px;border:2px solid var(--bg-card)}
+    .ac-av:first-child{margin-left:0}
+    .ac-row .rt .rtd{font-size:11px;color:var(--slate);white-space:nowrap;display:flex;align-items:center;gap:4px}
+    .ac-row .rt{display:flex;align-items:center;gap:8px;flex:none}
+    .ac-pnum{flex:none;width:20px;height:20px;border-radius:6px;background:var(--brand-a10,#eef2ff);color:var(--brand);font-size:11px;font-weight:800;display:grid;place-items:center}
+    .grip-sp{width:21px;flex:none}
+    .ac-row.swap-tgt{outline:2px dashed var(--brand);outline-offset:-2px}
+    .ac-grpbox{display:flex;flex-direction:column;gap:2px}
+    .ac-secwrap.drag{opacity:.4}
+    .ac-sechdr{display:flex;align-items:center;gap:6px}
+    .ac-sechdr .grip{cursor:grab}
+    .ac-ins{height:8px;margin:0;border-radius:4px;cursor:cell;position:relative;display:flex;align-items:center;justify-content:center}
+    .ac-ins::before{content:'';position:absolute;left:4px;right:4px;top:50%;border-top:1px dashed var(--line);transform:translateY(-50%)}
+    .ac-ins::after{content:'+ Add task here';position:relative;z-index:1;background:var(--bg-card);color:var(--brand);font-size:10px;font-weight:700;padding:0 8px;opacity:0;transition:opacity .12s}
+    .ac-ins:hover::after{opacity:1}
+    @media(hover:none){ .ac-ins{display:none} }
+    .tp-attach-chip{display:inline-flex;align-items:center;gap:6px;margin-top:6px;padding:5px 10px;border-radius:8px;background:rgba(0,0,0,.06);font-size:12px;cursor:pointer;width:fit-content}
+    .tp-attach-chip:hover{background:rgba(0,0,0,.1)}
+    .ac-empty{color:var(--slate);font-size:12.5px;text-align:center;padding:14px 8px;cursor:cell;border:1px dashed var(--line);border-radius:10px}
+    .ac-empty:hover{border-color:var(--brand);color:var(--brand)}
+    /* Workflow builder */
+    .wf-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink);margin:14px 0 5px}
+    .wf-lbl:first-child{margin-top:0}
+    .wf-hint{font-weight:500;color:var(--slate)}
+    .wf-tip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--slate);color:#fff;font:italic 700 11px/1 Georgia,'Times New Roman',serif;letter-spacing:0;text-transform:none;cursor:pointer;position:relative;flex:none;margin-left:5px;vertical-align:middle;outline:none;user-select:none;padding-right:1px}
+    .wf-tip:hover,.wf-tip:focus{background:var(--brand)}
+    .wf-poptip{position:relative;cursor:pointer}
+    /* the bubble text lives in the markup only as the content source - it is never shown in place
+       (cards/modals with overflow would clip it). wfTipShow() copies it into #wfTipLayer on <body>. */
+    .wf-tip-txt{display:none}
+    #wfTipLayer{position:fixed;top:0;left:0;z-index:2147483600;background:#1e293b;color:#fff;padding:7px 10px;border-radius:7px;font-size:11.5px;font-weight:500;line-height:1.5;width:max-content;max-width:min(260px,80vw);text-align:center;white-space:normal;pointer-events:none;opacity:0;visibility:hidden;transition:opacity .12s;box-shadow:0 8px 22px rgba(0,0,0,.28)}
+    #wfTipLayer.show{opacity:1;visibility:visible}
+    #wfTipLayer::after{content:'';position:absolute;top:100%;left:var(--tipx,50%);transform:translateX(-50%);border:5px solid transparent;border-top-color:#1e293b}
+    #wfTipLayer.below::after{top:auto;bottom:100%;border-top-color:transparent;border-bottom-color:#1e293b}
+    /* ----- Workflow builder form -----
+       Two sections (Basics, Steps). Paired fields go side by side from 760px up and
+       stack below that; every field owns its own label so nothing drifts out of line. */
+    .wf-form{display:flex;flex-direction:column;gap:24px}
+    .wf-fsec{display:flex;flex-direction:column;gap:13px}
+    .wf-fsec-h{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+    .wf-fsec-h i{color:var(--brand);font-size:12px}
+    .wf-fgrid{display:grid;grid-template-columns:1fr 1fr;gap:15px 20px;align-items:start}
+    .wf-fld{display:flex;flex-direction:column;min-width:0}
+    .wf-fld-wide{grid-column:1/-1}
+    .wf-fld .wf-lbl{margin:0 0 6px}
+    /* Every control in the builder is exactly 40px tall and shares one text inset, so the
+       labels, inputs, person pickers and dropdowns all line up on the same edges. */
+    .wf-fld .ac-in{width:100%;box-sizing:border-box}
+    .wf-fld input.ac-in,.wf-step-fields input.ac-in,.wf-evt-form input.ac-in{height:40px;padding-top:0;padding-bottom:0}
+    .wf-fld .ac-in,.wf-step-fields .ac-in,.wf-step-fields .wf-pp-nm,.wf-step-fields .wf-pp-ph{font-size:13px}
+    .wf-fld .ac-in::placeholder,.wf-step-fields .ac-in::placeholder{font-size:13px;color:#94a3b8}
+    .wf-step-sub input[type=number].ac-in{appearance:textfield;-moz-appearance:textfield}
+    .wf-step-sub input[type=number].ac-in::-webkit-outer-spin-button,.wf-step-sub input[type=number].ac-in::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+    /* native selects sit at a different height/inset per OS — draw our own caret instead */
+    .wf-step-sub select.ac-in,.wf-fld select.ac-in{appearance:none;-webkit-appearance:none;-moz-appearance:none;height:40px;padding:0 30px 0 12px;cursor:pointer;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:11px 8px}
+    .wf-step-sub select.ac-in::-ms-expand,.wf-fld select.ac-in::-ms-expand{display:none}
+    .wf-steps-head{margin-top:20px}
+    /* Step card: a header strip carries the number and the remove button, so the inputs
+       underneath run the full width of the card rather than being pinched between them. */
+    .wf-step{display:block;padding:12px 13px 13px;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;background:var(--bg-card)}
+    .wf-step:hover{border-color:#cbd5e1}
+    .wf-step-hd{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+    .wf-step-num{flex:0 0 24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+    .wf-step-hd-t{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate)}
+    .wf-step-fields{min-width:0;display:flex;flex-direction:column;gap:8px}
+    .wf-step-sub{display:flex;gap:8px;min-width:0}
+    .wf-step-sub .wf-s-person{flex:1 1 auto;min-width:0}
+    .wf-step-sub .wf-s-dur{flex:0 0 104px;min-width:0}
+    .wf-step-sub .wf-s-unit{flex:0 0 108px;min-width:0}
+    .wf-s-del{margin-left:auto;flex:0 0 auto}
+    .wf-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+    .wf-trig{font-size:11.5px;color:var(--brand);margin-top:3px}
+    .wf-desc{color:var(--slate);font-size:13px;margin-bottom:10px}
+    .wf-trig-box{background:var(--brand-a10,#eef2ff);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13px;margin-bottom:18px}
+    .wf-timeline{display:flex;flex-direction:column}
+    .wf-tl-item{display:flex;gap:12px;padding-bottom:16px;position:relative}
+    .wf-tl-item:not(:last-child)::before{content:'';position:absolute;left:13px;top:28px;bottom:0;width:2px;background:var(--line)}
+    .wf-tl-num{flex:0 0 28px;height:28px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;z-index:1}
+    .wf-tl-body{flex:1;min-width:0;padding-top:3px}
+    .wf-tl-title{font-weight:600;font-size:14px;color:var(--ink)}
+    .wf-tl-meta{display:flex;align-items:center;gap:14px;margin-top:6px;flex-wrap:wrap}
+    .wf-who{display:inline-flex;align-items:center}
+    .wf-av{width:22px;height:22px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;margin-right:7px}
+    .wf-who-nm{font-size:12.5px;color:var(--ink);font-weight:600}
+    .wf-dept{font-size:11.5px;color:var(--slate);margin-left:7px}
+    .wf-dur{font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:5px}
+    /* Workflow step person picker (avatar + department-grouped).
+       NOTE the .ac-in.wf-pp-btn selector: the picker also carries .ac-in, whose padding rule is
+       declared further down this sheet and would otherwise win on source order and make the
+       picker 46px tall next to 40px inputs. The doubled class keeps it aligned. */
+    .wf-step-sub .wf-pp{flex:2;min-width:0}
+    .wf-pp{position:relative}
+    .ac-in.wf-pp-btn{width:100%;height:40px;min-height:40px;box-sizing:border-box;display:flex;align-items:center;gap:9px;padding:0 12px;text-align:left;cursor:pointer;line-height:1;overflow:hidden}
+    .ac-in.wf-pp-btn:hover{border-color:var(--brand)}
+    .wf-pp.open>.ac-in.wf-pp-btn{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    .wf-pp-av{width:22px;height:22px;border-radius:50%;color:#fff;font-size:9.5px;font-weight:700;display:grid;place-items:center;flex:none}
+    .wf-pp-nm{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+    .wf-pp-ph{font-size:13px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+    .wf-pp-caret{margin-left:auto;color:var(--slate);font-size:11px;flex:none;transition:transform .15s}
+    .wf-pp.open .wf-pp-caret{transform:rotate(180deg)}
+    /* Panel matches the trigger's width exactly (left:0 + right:0, no min-width). Anything
+       wider — the old min-width:220px — pushed past the card and gave the page a sideways
+       scrollbar whenever the picker sat in a narrow column. */
+    .wf-pp-panel{position:absolute;top:calc(100% + 5px);left:0;right:0;width:auto;min-width:0;max-width:none;z-index:60;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,.18);padding:6px;display:none;max-height:min(300px,50vh);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+    .wf-pp.open .wf-pp-panel{display:block}
+    .wf-pp-panel .ms-search{margin-bottom:6px;width:100%;box-sizing:border-box;height:36px}
+    /* The person list reuses the shared .ms-dept / .ms-opt / avatar styles (nexus.css) so it
+       matches the app's other member dropdown exactly. */
+    .wf-pp-panel .ms-opt.on{background:var(--brand-a10,#eef2ff)}
+    /* Workflow form responsiveness — kept AFTER the picker rules above, otherwise
+       the wf-step-sub wf-pp flex:2 rule wins on source order and the picker stays squashed. */
+    @media(max-width:760px){.wf-fgrid{grid-template-columns:1fr;gap:14px}}
+    @media(max-width:700px){
+      .wf-step-sub{flex-wrap:wrap}
+      .wf-step-sub .wf-s-person,.wf-step-sub .wf-pp{flex:1 1 100%}
+      /* duration + unit split the row evenly instead of leaving a ragged gap */
+      .wf-step-sub .wf-s-dur,.wf-step-sub .wf-s-unit{flex:1 1 0;min-width:0}
+      .wf-step{padding:11px}
+      .wf-form{gap:20px}
+      .wf-actions .ac-btn{flex:1;justify-content:center}
+      .wf-owner-pick{flex-wrap:wrap}
+      .wf-owner-pick .wf-pp{flex:1 1 100%}
+    }
+    .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:3px;line-height:1.5}
+    .ac-addrow{display:flex;gap:8px;margin:3px 0}
+    .ac-addrow-ghost{display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:9px;border:1px dashed var(--line);color:var(--slate);font-size:13px;cursor:pointer;margin:3px 0;transition:.15s}
+    .ac-addrow-ghost:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-a10)}
+    .ac-addrow input{flex:1;border:1px solid var(--brand);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;box-shadow:0 0 0 3px var(--brand-a10)}
+    @media(hover:none){ .ac-in,.ac-addrow input,input,select,textarea{font-size:16px} }
+    .ac-chip{display:inline-flex;align-items:center;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;white-space:nowrap}
+    .ac-c-Pending{background:#fef3c7;color:#92400e}.ac-c-Awaiting{background:#dbeafe;color:#1e40af}.ac-c-Completed{background:#dcfce7;color:#166534}
+    /* calendar (Google-Calendar-inspired shell) */
+    .gcal-shell{display:flex;gap:16px;align-items:flex-start;color:#1f2937}
+    .gcal-sidebar{width:250px;flex:none;display:flex;flex-direction:column;gap:16px}
+    .gcal-create{display:flex;align-items:center;justify-content:center;gap:8px;background:#fff;border:1px solid #e5e7eb;border-radius:24px;padding:12px 18px;font-weight:600;font-size:14px;color:#1f2937;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.08);transition:box-shadow .15s,background .15s}
+    .gcal-create:hover{box-shadow:0 2px 8px rgba(0,0,0,.12);background:#f8fafc}
+    .gcal-create i{color:#2563eb;font-size:16px}
+    .gcal-create.disabled{color:#9ca3af;cursor:not-allowed;box-shadow:none}
+    .gcal-create.disabled:hover{box-shadow:none;background:#fff}
+    .gcal-create.disabled i{color:#c3cad4}
+    .gcal-mini{border:1px solid #e5e7eb;border-radius:12px;padding:12px;background:#fff}
+    .gcal-mini-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+    .gcal-mini-title{font-size:13px;font-weight:700;color:#1f2937}
+    .gcal-mini-nav{display:flex;gap:2px}
+    .gcal-mini-nav button{border:0;background:transparent;color:#6b7280;width:22px;height:22px;border-radius:50%;cursor:pointer;font-size:11px}
+    .gcal-mini-nav button:hover{background:#f1f5f9;color:#1f2937}
+    .gcal-mini-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center;justify-content:center}
+    .gcal-mini-dow{font-size:10px;color:#6b7280;font-weight:700;padding:2px 0}
+    .gcal-mini-day{width:24px;height:24px;line-height:24px;margin:1px auto;font-size:11.5px;color:#1f2937;border-radius:50%;cursor:pointer;transition:background .1s;box-sizing:border-box}
+    .gcal-mini-day:hover{background:#f1f5f9}
+    .gcal-mini-day.other{color:#c3cad4}
+    .gcal-mini-day.today{color:#2563eb;font-weight:700}
+    .gcal-mini-day.selected{background:#2563eb;color:#fff;font-weight:700}
+    .gcal-mini-day.has::after{content:'';display:block;width:4px;height:4px;border-radius:50%;background:#2563eb;margin:-3px auto 0}
+    .gcal-mini-day.selected.has::after{background:#fff}
+    .gcal-filters{border:1px solid #e5e7eb;border-radius:12px;padding:12px;background:#fff}
+    .gcal-filters-title{font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
+    .gcal-filter-row{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13.5px;color:#1f2937;cursor:pointer}
+    .gcal-filter-row input{width:15px;height:15px;cursor:pointer}
+    .gcal-filter-dot{width:10px;height:10px;border-radius:3px;flex:none}
+    .gcal-filter-row.soon{color:#9ca3af;cursor:default}
+    .gcal-main{flex:1;min-width:0;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#fff}
+    .gcal-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid #e5e7eb}
+    .gcal-tb-nav{display:flex;align-items:center;gap:8px}
+    .gcal-tbtn{border:1px solid #e5e7eb;background:#fff;color:#1f2937;border-radius:8px;height:34px;padding:0 12px;font-size:13px;font-weight:600;cursor:pointer;transition:background .12s;flex-shrink:0}
+    .gcal-tbtn:hover{background:#f8fafc}
+    .gcal-tbtn.ic{width:34px;padding:0}
+    .gcal-toolbar-title{font-size:19px;font-weight:600;color:#1f2937;margin:0 6px;white-space:nowrap}
+    .gcal-views{display:flex;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-left:auto}
+    .gcal-view-btn{border:0;background:#fff;color:#6b7280;font-size:12.5px;font-weight:600;padding:0 13px;height:34px;cursor:pointer;border-left:1px solid #e5e7eb}
+    .gcal-view-btn:first-child{border-left:0}
+    .gcal-view-btn.active{background:#eff6ff;color:#2563eb}
+    .gcal-search{display:flex;align-items:center;gap:8px;border:1px solid #e5e7eb;border-radius:8px;height:34px;padding:0 10px;color:#6b7280;font-size:13px;flex:1 1 240px;min-width:200px;max-width:480px}
+    .gcal-search input{border:0;outline:0;font-size:13px;flex:1;color:#1f2937;background:transparent;min-width:0}
+    .gcal-body{padding:0}
+    .gcal-mgrid{display:grid;grid-template-columns:repeat(7,1fr)}
+    .gcal-mdow{text-align:center;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;padding:8px 0;border-bottom:1px solid #e5e7eb}
+    .gcal-mcell{min-height:104px;min-width:0;overflow:hidden;border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;padding:6px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .1s}
+    .gcal-mcell:nth-child(7n){border-right:0}
+    .gcal-mcell:hover{background:#f8fafc}
+    .gcal-mcell.other{background:#fafafa}
+    .gcal-mcell.other .gcal-mnum{color:#c3cad4}
+    .gcal-mcell.today .gcal-mnum{background:#2563eb;color:#fff}
+    .gcal-mnum{font-size:12.5px;font-weight:600;color:#1f2937;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:50%;flex:none}
+    .gcal-mevents{display:flex;flex-direction:column;gap:3px;overflow:hidden}
+    .gcal-mev{font-size:11px;padding:2px 6px;border-radius:5px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;font-weight:600;max-width:100%;min-width:0}
+    .gcal-mev[data-task]{cursor:grab;position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+    .gcal-mev[data-task]::before{content:'';position:absolute;top:-6px;left:-6px;right:-6px;bottom:-6px}
+    .gcal-mev.gcal-dragging{opacity:.35;cursor:grabbing}
+    .gcal-mev.gcal-armed{outline:2px solid rgba(37,99,235,.55);outline-offset:1px}
+    .gcal-mcell.gcal-drop-hover,.gcal-allday-col.gcal-drop-hover{outline:2px dashed #2563eb;outline-offset:-2px;background:rgba(37,99,235,.08)}
+    .gcal-wrap{display:flex;flex-direction:column;max-height:66vh;overflow:auto}
+    .gcal-allday{display:flex;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:2}
+    .gcal-allday-label{width:56px;flex:none;font-size:10.5px;color:#6b7280;padding:6px 6px 6px 0;text-align:right}
+    .gcal-allday-cols{flex:1;display:grid;gap:0}
+    .gcal-allday-col{border-left:1px solid #e5e7eb;padding:4px;display:flex;flex-direction:column;gap:3px;min-height:32px}
+    .gcal-timegrid{display:flex}
+    .gcal-hours{width:56px;flex:none}
+    .gcal-hour{height:48px;font-size:10.5px;color:#6b7280;text-align:right;padding-right:6px;position:relative;top:-6px}
+    .gcal-daycols{flex:1;display:grid;position:relative}
+    .gcal-daycol{border-left:1px solid #e5e7eb;position:relative}
+    .gcal-hourline{height:48px;border-bottom:1px solid #eef1f4}
+    .gcal-nowline{position:absolute;left:0;right:0;height:0;border-top:2px solid #ea4335;z-index:3}
+    .gcal-nowdot{position:absolute;left:-4px;top:-4px;width:8px;height:8px;border-radius:50%;background:#ea4335}
+    .gcal-daycolhead{text-align:center;padding:8px 0;border-left:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:600;color:#6b7280}
+    .gcal-daycolhead .n{font-size:16px;color:#1f2937;font-weight:700;display:block;margin-top:2px}
+    .gcal-daycolhead.today .n{color:#2563eb}
+    /* Name + time sit on ONE line (flex row) instead of stacking — keeps short meetings from
+       looking "thick"/oversized. left/width are set inline per-block by gcalMtgLayout() so
+       meetings that overlap in time sit side-by-side instead of drawing on top of each other. */
+    .gcal-mtgblock{position:absolute;display:flex;align-items:center;gap:6px;border-radius:6px;color:#fff;padding:3px 7px;overflow:hidden;cursor:pointer;font-size:11px;line-height:1.35;box-shadow:0 1px 2px rgba(0,0,0,.15);z-index:2}
+    .gcal-mtgblock b{flex:1;min-width:0;font-size:11.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .gcal-mtgblock span{flex:none;font-size:10px;opacity:.9;white-space:nowrap}
+    .gcal-mtgblock[data-meeting-time]{cursor:grab;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;touch-action:none}
+    .gcal-mtgblock.gcal-dragging{opacity:.55;cursor:grabbing;box-shadow:0 4px 10px rgba(0,0,0,.3)}
+    .gcal-tbtn:disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+    /* Agenda list (used by Week view, and by Month's day-click slide-in panel) */
+    .gcal-list-wrap{max-height:66vh;overflow:auto}
+    .gcal-list{padding:4px 0}
+    .gcal-lday{border-bottom:1px solid #eef1f4;padding:10px 16px}
+    .gcal-lday:last-child{border-bottom:0}
+    .gcal-lday-head{font-size:13px;font-weight:700;color:#1f2937;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+    .gcal-lday.today .gcal-lday-head{color:#2563eb}
+    .gcal-lday-badge{background:#2563eb;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px}
+    .gcal-lday-rows{display:flex;flex-direction:column;gap:5px}
+    .gcal-lrow{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;font-size:13px;color:#1f2937;cursor:pointer;transition:background .1s}
+    .gcal-lrow:hover{background:#f8fafc}
+    .gcal-lrow.empty{color:#9ca3af;cursor:default;font-size:12.5px}
+    .gcal-lrow.empty:hover{background:transparent}
+    .gcal-lrow-dot{width:9px;height:9px;border-radius:50%;flex:none}
+    .gcal-lrow-title{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+    .gcal-lrow-tag{font-size:11px;color:#6b7280;flex:none}
+    .gcal-lrow[data-task],.gcal-lrow[data-meeting]{cursor:grab;position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+    .gcal-lrow.gcal-dragging{opacity:.4;cursor:grabbing;background:#eff6ff}
+    .gcal-lrow.gcal-armed{outline:2px solid rgba(37,99,235,.55);outline-offset:-2px}
+    .gcal-lday.gcal-drop-hover{background:rgba(37,99,235,.06);outline:2px dashed #2563eb;outline-offset:-2px}
+    .gcal-yeargrid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;padding:18px}
+    .gcal-year-month{border:1px solid #e5e7eb;border-radius:10px;padding:10px}
+    .gcal-year-month-title{font-size:12.5px;font-weight:700;color:#1f2937;margin-bottom:6px;cursor:pointer;text-align:center}
+    .gcal-year-month-title:hover{color:#2563eb}
+    .gcal-empty-view{padding:60px 20px;text-align:center;color:#9ca3af;font-size:13.5px}
+    .gcal-panel{position:fixed;top:0;right:0;height:100%;width:360px;max-width:92vw;background:#fff;border-left:1px solid #e5e7eb;box-shadow:-6px 0 24px rgba(15,23,42,.10);transform:translateX(100%);transition:transform .22s ease;z-index:200;display:flex;flex-direction:column}
+    .gcal-panel.open{transform:translateX(0)}
+    .gcal-panel-head{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#1f2937}
+    .gcal-panel-head .x{margin-left:auto;cursor:pointer;color:#6b7280;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+    .gcal-panel-head .x:hover{background:#f1f5f9;color:#1f2937}
+    .gcal-panel-body{flex:1;overflow-y:auto;overflow-x:hidden;padding:18px}
+    .gcal-panel-title{font-size:16px;font-weight:700;color:#1f2937;margin-bottom:14px;line-height:1.4;overflow-wrap:anywhere}
+    .gcal-panel-row{display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;font-size:13.5px;color:#374151;line-height:1.5;min-width:0;overflow-wrap:anywhere}
+    .gcal-panel-row i{width:16px;color:#6b7280;margin-top:2px;flex:none}
+    /* Inside the panel/menu specifically, long titles wrap to a new line instead of the ellipsis
+       truncation used elsewhere (e.g. the Week view list) — no horizontal scroll in here either way. */
+    .gcal-panel .gcal-lrow{align-items:flex-start}
+    .gcal-panel .gcal-lrow-title{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+    .gcal-panel-foot{padding:14px 18px;border-top:1px solid #e5e7eb;display:flex;gap:8px}
+    .gcal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.15);z-index:199;opacity:0;pointer-events:none;transition:opacity .18s}
+    .gcal-backdrop.open{opacity:1;pointer-events:auto}
+    .gcal-fab{position:fixed;right:28px;bottom:28px;width:56px;height:56px;border-radius:50%;background:#2563eb;color:#fff;border:0;box-shadow:0 4px 14px rgba(37,99,235,.35);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .12s,box-shadow .12s;z-index:150}
+    .gcal-fab:hover{transform:scale(1.06);box-shadow:0 6px 18px rgba(37,99,235,.45)}
+    .gcal-fab.disabled{background:#cbd5e1;box-shadow:none;cursor:not-allowed}
+    .gcal-fab.disabled:hover{transform:none;box-shadow:none}
+    @media(max-width:900px){
+      .gcal-shell{flex-direction:column;align-items:stretch}
+      .gcal-main{width:100%}
+      .gcal-sidebar{width:100%;flex-direction:row;flex-wrap:wrap}
+      .gcal-mini{flex:1;min-width:220px}
+      .gcal-filters{flex:1;min-width:200px}
+      .gcal-create{width:100%}
+      .gcal-toolbar{flex-direction:column;align-items:stretch}
+      .gcal-tb-nav{width:100%;justify-content:center}
+      .gcal-toolbar-title{font-size:16px;flex:1;text-align:center;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .gcal-search{width:100%;max-width:none;flex:none}
+      .gcal-views{width:100%;margin-left:0;flex-wrap:wrap}
+      .gcal-views .gcal-view-btn{flex:1 1 auto}
+      .gcal-yeargrid{grid-template-columns:repeat(1,1fr);gap:12px;padding:12px}
+      .gcal-mcell{min-height:56px}
+      .gcal-mevents{flex-direction:row;flex-wrap:wrap;gap:4px}
+      .gcal-mevents .gcal-mev{font-size:0;line-height:0;padding:0;width:6px;height:6px;min-width:6px;border-radius:50%;white-space:normal;overflow:visible}
+      .gcal-panel{width:100%;max-width:100%}
+      .gcal-fab{right:18px;bottom:18px}
+    }
+    /* meetings */
+    .mtg-page{color:#1f2937}
+    .mtg-main{width:100%;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#fff}
+    .mtg-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:16px;border-bottom:1px solid #e5e7eb}
+    .mtg-toolbar-title{font-size:19px;font-weight:600;color:#1f2937}
+    .mtg-create{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--brand);border:1px solid var(--brand);border-radius:20px;padding:0 16px;height:38px;font-weight:600;font-size:13.5px;color:#fff;cursor:pointer;margin-left:auto}
+    .mtg-gstatus{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:16px}
+    .mtg-gstatus.connected{background:#dcfce7;color:#16a34a}
+    .mtg-gstatus.connect{background:#fff;border:1px solid #d1d5db;color:#374151;cursor:pointer}
+    .mtg-gstatus.connect:hover{background:#f9fafb}
+    .mtg-gate{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;padding:70px 24px;min-height:320px}
+    .mtg-gate .mtg-gate-icon{font-size:34px;color:#4285f4}
+    .mtg-gate h3{font-size:17px;font-weight:600;color:#1f2937;margin:0}
+    .mtg-gate p{font-size:13px;color:var(--slate);max-width:340px;margin:0}
+    .mtg-gate-warn{font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;max-width:360px;display:flex;align-items:center;gap:6px;text-align:left}
+    .mtg-gate button{display:flex;align-items:center;justify-content:center;gap:8px;background:#fff;border:1px solid #d1d5db;border-radius:20px;padding:0 20px;height:42px;font-weight:600;font-size:13.5px;color:#374151;cursor:pointer}
+    .mtg-gate button:hover{background:#f9fafb}
+    .mtg-gate button i{color:#4285f4}
+    .mtg-auto-link{font-size:12.5px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:6px}
+    .mtg-auto-link.warn{background:#fffbeb;border-color:#fde68a;color:#92400e}
+    .mtg-auto-link a{color:inherit;font-weight:600;text-decoration:underline}
+    /* Non-blocking "you can still use Offline meetings" banner (shown when Google isn't connected) */
+    .mtg-connect-banner{display:flex;align-items:center;gap:12px;background:#f8fafc;border:1px solid var(--line);border-radius:11px;padding:11px 14px;margin:0 0 14px}
+    .mtg-connect-banner .mcb-ico{font-size:20px;color:#4285f4;flex:0 0 auto}
+    .mtg-connect-banner .mcb-txt{flex:1;min-width:0;font-size:12.5px;color:var(--slate);line-height:1.45}
+    .mtg-connect-banner .mcb-txt b{color:var(--ink);font-weight:600}
+    .mtg-connect-banner .mcb-btn{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid #d1d5db;border-radius:20px;padding:0 15px;height:36px;font-weight:600;font-size:13px;color:#374151;cursor:pointer;font-family:inherit}
+    .mtg-connect-banner .mcb-btn:hover{background:#f9fafb}
+    .mtg-connect-banner .mcb-btn i{color:#4285f4}
+    @media(max-width:600px){.mtg-connect-banner{flex-wrap:wrap}.mtg-connect-banner .mcb-btn{width:100%;justify-content:center}}
+    /* Non-blocking scheduling-conflict warning shown in the meeting form's attendee picker */
+    .mtg-conflict-warn{font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-top:6px;line-height:1.5}
+    .mtg-conflict-mark{margin-left:2px}
+    .mtg-log-attendee{font-size:13px;color:var(--body);padding:4px 0;display:flex;align-items:center;gap:8px}
+    .mtg-create:hover{filter:brightness(.94)}
+    .mtg-grouptabs{display:flex;gap:6px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc}
+    .mtg-gtab{border:1px solid #e5e7eb;background:#fff;color:#475569;font-size:13px;font-weight:600;padding:0 16px;height:34px;border-radius:8px;cursor:pointer}
+    .mtg-gtab.active{background:var(--brand);border-color:var(--brand);color:#fff}
+    .mtg-body{padding:16px}
+    .mtg-sec-label{font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;margin:18px 0 10px}
+    .mtg-sec-label:first-child{margin-top:0}
+    .mtg-log-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #e5e7eb;border-radius:10px;padding:11px 14px;margin-bottom:8px;cursor:pointer;transition:box-shadow .12s,border-color .12s}
+    .mtg-log-row:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
+    .mtg-log-title{font-size:13.5px;font-weight:700;color:#1f2937}
+    .mtg-log-meta{font-size:12px;color:#6b7280;margin-top:2px}
+    .mtg-att-names{font-size:12px;color:#475569;margin-top:5px;line-height:1.5}
+    .mtg-att-names b{color:#1f2937;font-weight:600}
+    .mtg-log-badge{flex:none;font-size:11px;font-weight:600;padding:4px 10px;border-radius:99px;white-space:nowrap}
+    .mtg-log-badge.ready{background:#dcfce7;color:#16a34a}
+    .mtg-log-badge.pending{background:#fef9c3;color:#a16207}
+    .mtg-log-badge.none{background:#f1f5f9;color:#94a3b8}
+    .mtg-log-transcript{margin-top:6px;font-size:13px;color:#334155;line-height:1.6;max-height:260px;overflow:auto;background:#f8fafc;border-radius:8px;padding:12px}
+    .mtg-log-summary{margin:6px 0 12px;font-size:13px;color:#334155;line-height:1.65;background:#fff;border:1px solid var(--line);border-left:3px solid #0d9488;border-radius:8px;padding:11px 13px}
+    .mtg-log-sumh{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#0d9488;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+    .mtg-tr-facts{display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 12px}
+    .mtg-tr-fact{flex:1 1 110px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px}
+    .mtg-tr-fact .k{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#a3adbe}
+    .mtg-tr-fact .v{font-size:17px;font-weight:650;color:var(--ink);margin-top:3px;font-variant-numeric:tabular-nums}
+    .mtg-tr-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+    .mtg-tr-h{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#8a94a6;display:flex;align-items:center;gap:7px}
+    .mtg-tr-btns{display:flex;gap:6px}
+    .mtg-tr-btns .ac-btn{padding:5px 12px;font-size:12.5px}
+    .mtg-card{display:flex;align-items:stretch;gap:14px;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;transition:box-shadow .12s,border-color .12s}
+    .mtg-card:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
+    .mtg-bar{width:4px;border-radius:3px;flex:none}
+    .mtg-time{width:146px;flex:none;font-size:12.5px;color:#6b7280;font-weight:600;padding-top:1px;line-height:1.35}
+    .mtg-when{font-size:13px;font-weight:800;color:#334155}
+    .mtg-when.now{color:#16a34a}
+    .mtg-when.late{color:#b45309}
+    .mtg-clock{font-size:12px;font-weight:600;color:#6b7280;margin-top:2px}
+    .mtg-dur{font-size:11px;font-weight:600;color:#9ca3af;margin-top:1px}
+    .mtg-chips{display:flex;flex-wrap:wrap;gap:6px;margin:1px 0 5px}
+    .mtg-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#475569;background:#f1f5f9;border-radius:99px;padding:3px 9px;white-space:nowrap}
+    .mtg-chip.ok{background:#dcfce7;color:#15803d}
+    .mtg-chip.warn{background:#fef3c7;color:#b45309}
+    .mtg-chip.pend{background:#e0f2fe;color:#0369a1}
+    .mtg-chip.click{cursor:pointer}
+    .mtg-chip.click:hover{filter:brightness(.95)}
+    .mtg-info{flex:1;min-width:0}
+    .mtg-title{font-size:14px;font-weight:700;color:#1f2937;margin-bottom:4px}
+    .mtg-recur-tag{font-size:10.5px;font-weight:600;color:#7c3aed;background:#f5f3ff;padding:2px 7px;border-radius:10px;margin-left:6px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+    .mtg-meta{display:flex;align-items:center;gap:8px;font-size:12px;color:#6b7280;flex-wrap:wrap}
+    .mtg-avatars{display:flex;margin-left:6px}
+    .mtg-avatar{width:20px;height:20px;border-radius:50%;color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:-6px}
+    .mtg-avatar:first-child{margin-left:0}
+    .mtg-actions{display:flex;align-items:center;flex:none}
+    .mtg-join{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--brand);background:var(--brand);color:#fff;border-radius:8px;height:32px;padding:0 14px;font-size:12.5px;font-weight:600;cursor:pointer;text-decoration:none}
+    .mtg-join:hover{filter:brightness(.94)}
+    .mtg-join.disabled{border-color:#e5e7eb;background:#f8fafc;color:#9ca3af;cursor:not-allowed}
+    .mtg-join.ghost{border-color:#e5e7eb;background:#fff;color:#475569;cursor:default}
+    .mtg-owed{margin:14px 16px 0;border:1px solid #fde68a;background:#fffbeb;border-radius:11px;padding:13px 15px}
+    .mtg-owed-h{font-size:13.5px;font-weight:800;color:#92400e;display:flex;align-items:center;gap:8px}
+    .mtg-owed-sub{font-size:12.5px;color:#a16207;line-height:1.5;margin:5px 0 10px}
+    .mtg-owed-row{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid #fde68a;border-radius:9px;padding:8px 11px;margin-bottom:6px}
+    .mtg-owed-t b{font-size:13px;color:#1f2937;display:block}
+    .mtg-owed-when{font-size:11.5px;color:#a16207}
+    .mtg-owed-more{font-size:12px;color:#a16207;margin-top:2px}
+    .mtg-join.alt{border-color:#cbd5e1;background:#fff;color:#334155}
+    .mtg-join.alt:hover{border-color:#94a3b8;background:#f8fafc;filter:none}
+    .mtg-del{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;padding:0 8px;height:32px;border-radius:6px;margin-left:6px}
+    .mtg-del:hover{color:#dc2626;background:#fef2f2}
+    .mtg-static-hint{height:38px;display:flex;align-items:center;color:#94a3b8;font-size:13px;font-style:italic}
+    @media(max-width:900px){
+      .mtg-toolbar{flex-direction:column;align-items:stretch}
+      .mtg-create{margin-left:0;width:100%}
+      .mtg-grouptabs{gap:6px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:10px 14px}
+      .mtg-grouptabs::-webkit-scrollbar{display:none}
+      .mtg-gtab{flex:0 0 auto;white-space:nowrap;padding:0 13px;font-size:12.5px}
+      .mtg-card{flex-direction:column;align-items:stretch;gap:2px;position:relative;padding:6px 10px 6px 14px;margin-bottom:6px}
+      .mtg-bar{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:2px}
+      .mtg-time{width:auto;order:1;padding-top:0;line-height:1.15;font-size:11px}
+      .mtg-info{order:2}
+      .mtg-title{font-size:13px;margin-bottom:1px}
+      .mtg-meta{font-size:11px}
+      .mtg-when{font-size:12px;display:inline}
+      .mtg-clock{display:inline;margin:0 0 0 6px}
+      .mtg-dur{display:inline;margin:0 0 0 6px}
+      .mtg-chips{gap:4px;margin:2px 0 3px}
+      .mtg-chip{font-size:10.5px;padding:2px 7px;gap:4px}
+      .mtg-owed{margin:12px 14px 0;padding:11px 12px}
+      .mtg-owed-row{flex-direction:column;align-items:stretch;gap:7px}
+      .mtg-owed-row .mtg-join.alt{width:100%}
+      .mtg-actions{order:3;width:100%;justify-content:flex-end;gap:0;margin-top:2px}
+      .mtg-join{height:26px;padding:0 10px;font-size:11.5px}
+      .mtg-del{height:26px;width:26px}
+    }
+    /* task page */
+    .tp-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+    .tp-title{font-size:20px;font-weight:800;color:var(--ink);display:flex;align-items:center;gap:10px}
+    .tp-sub{font-size:12.5px;color:var(--slate);margin-top:3px}
+    .tp-acts{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+    .tp-card{border:1px solid var(--line);border-radius:14px;background:var(--bg-card);padding:16px;margin-bottom:14px;min-width:0;overflow-wrap:anywhere}
+    .tp-desc{font-size:13px;color:var(--body);line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+    .tp-card h3{margin:0 0 12px;font-size:14px;color:var(--ink);display:flex;align-items:center;gap:8px}
+    .tp-card h3 .r{margin-left:auto;display:flex;gap:6px}
+    .tp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+    @media(max-width:640px){.tp-grid{grid-template-columns:1fr 1fr;gap:10px}}
+    .tp-f .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);font-weight:700}
+    .tp-f .v{font-size:13px;color:var(--ink);margin-top:3px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .tp-f .v a{color:var(--brand);cursor:pointer;font-weight:600}
+    .tp-chat{display:flex;flex-direction:column;gap:8px;max-height:230px;overflow:auto;padding:2px}
+    .tp-msg{max-width:82%;padding:8px 11px;border-radius:12px;font-size:13px;line-height:1.4;overflow-wrap:anywhere;word-break:break-word}
+    .tp-msg.them{background:#f1f5f9;color:var(--ink);border-radius:12px 12px 12px 2px}
+    .tp-msg.mine{background:var(--brand);color:#fff;align-self:flex-end;border-radius:12px 12px 2px 12px}
+    .tp-msg .who{font-size:10px;opacity:.75;margin-bottom:2px}
+    .tp-sub-item{display:flex;align-items:center;gap:9px;background:var(--bg-card);border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:2px}
+    .tp-sub-item.drag{opacity:.4}
+    .ac-in{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13.5px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+    .ac-in:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    /* THE CHECK LIST PREVIEW IS THE DOCUMENT. An A4 sheet on the viewer's grey, typed into
+       directly - so what is corrected here is what the Word file contains. Sized in points
+       against a 96dpi screen (1pt = 1.333px) so the preview and the .docx agree on where things
+       sit rather than only roughly resembling each other. */
+    .wfd-page{width:794px;min-height:1123px;margin:0 auto;background:#fff;color:#121214;
+      padding:77px;box-sizing:border-box;font-family:Calibri,Segoe UI,Arial,sans-serif;
+      font-size:14px;line-height:1.55;box-shadow:0 2px 14px rgba(0,0,0,.35);outline:none}
+    .wfd-page p{margin:0 0 6px}
+    .wfd-page .wfd-h{font-weight:700;margin:16px 0 10px}
+    .wfd-page .wfd-right{text-align:right}
+    .wfd-page .wfd-gap{margin-bottom:18px}
+    .wfd-page .wfd-soft{color:#6b7280}
+    .wfd-page .wfd-small{font-size:11.5px}
+    .wfd-page table{width:100%;border-collapse:collapse;margin:0 0 8px}
+    .wfd-page td{vertical-align:bottom;padding:3px 6px 3px 0;border:0}
+    .wfd-page td.wfd-rule{border-bottom:1px solid #8c9096}
+    .wfd-page .wfd-cl td{padding-top:9px}
+    .wfd-page .wfd-sign{margin-top:26px}
+    .wfd-page .wfd-logo{margin:0 0 14px}
+    .wfd-page .wfd-logo img{width:146px;height:175px;display:block}
+    /* The letters' pieces - the same rules the document tab carries (see wfOpenDocTab). A logo
+       that is not the classic one carries its own inline size, which beats the rule above. */
+    .wfd-page .wfd-center{text-align:center}
+    .wfd-page .wfd-big{font-size:17px}
+    .wfd-page .wfd-redrule{height:0;border-bottom:2px solid #cc2129;margin:18px 0 30px}
+    .wfd-page .wfd-foot{border-top:1px solid #d9dbdf;margin-top:32px;padding-top:8px;text-align:center}
+    .wfd-page table.wfd-grid td{border:1px solid #b8bdc6;padding:4px 7px;vertical-align:top}
+    .wfd-page table.wfd-grid tr.wfd-head td,.wfd-page table.wfd-grid tr.wfd-band td{background:#f1f2f4}
+    .wfd-page td.wfd-num{text-align:right}
+    /* A caret has to be visible on a page somebody is meant to correct. */
+    .wfd-page:focus-within{box-shadow:0 2px 14px rgba(0,0,0,.35),0 0 0 2px var(--brand)}
+    /* THE TASKS SEARCH BAR IS OUTLINED BEFORE IT IS CLICKED. Every other box on the page is a
+       field you fill in, and they all share the same grey outline until focused - so the one
+       control that is there to FIND something looked identical to the ones that are there to
+       record something, and people scrolled past it. Carrying the brand colour from the start
+       makes it the first thing the eye lands on. Focus still adds the glow, so it is still
+       obvious which box the keyboard is in. */
+    #acTaskSearch{border-color:var(--brand)}
+    textarea.ac-in{min-height:150px;resize:vertical}
+    .ac-lbl{display:block;font-size:12.5px;font-weight:600;color:#334155;margin:12px 0 6px}
+    .ac-msrow{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--line);border-radius:9px;padding:8px;max-height:150px;overflow:auto}
+    .ac-mschk{display:flex;align-items:center;gap:6px;font-size:12.5px;background:#f1f5f9;border-radius:20px;padding:4px 10px;cursor:pointer}
+    .ms-list{border:1px solid var(--line);border-radius:10px;max-height:300px;overflow-y:auto;overflow-x:hidden;padding:4px;box-sizing:border-box;width:100%}
+    .ms-grp{font-size:10.5px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.05em;padding:8px 10px 4px;background:var(--bg-card)}
+    .ms-row{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer;min-width:0}
+    .ms-row:hover{background:#f1f5f9}.ms-row.on{background:var(--brand-a10,#eef2ff)}
+    .ms-av{width:28px;height:28px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center;flex:none}
+    .ms-nm{flex:1;min-width:0;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ms-ck{color:var(--brand);opacity:0}.ms-row.on .ms-ck{opacity:1}
+    select.ac-in{appearance:none;-webkit-appearance:none;padding-right:32px;background-image:linear-gradient(45deg,transparent 50%,#64748b 50%),linear-gradient(135deg,#64748b 50%,transparent 50%);background-position:calc(100% - 18px) 55%,calc(100% - 13px) 55%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;cursor:pointer}
+    .ac-dd{position:relative}
+    .ac-dd-btn{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13.5px;background:var(--bg-card);color:var(--ink);cursor:pointer;box-sizing:border-box}
+    .ac-dd-btn i{margin-left:auto;color:var(--slate);font-size:11px}
+    .ac-dd-menu{position:fixed;z-index:100000;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 32px rgba(2,6,23,.22);max-height:240px;overflow:auto;padding:4px}
+    .ac-dd-item{padding:9px 11px;border-radius:7px;font-size:13px;color:var(--ink);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ac-dd-item:hover{background:var(--brand-a10,#eef2ff);color:var(--brand)}
+    .ac-dd-item.new{color:var(--brand);font-weight:600;border-top:1px solid var(--line-2);margin-top:4px}
+    .bell-ring{animation:bellRing 1.1s ease-in-out infinite;transform-origin:top center}
+    @keyframes bellRing{0%,60%,100%{transform:rotate(0)}10%{transform:rotate(16deg)}20%{transform:rotate(-14deg)}30%{transform:rotate(10deg)}40%{transform:rotate(-6deg)}50%{transform:rotate(2deg)}}
+    #notifBtn{position:relative}
+    #notifBtn .dot{position:absolute;top:-1px;right:-1px;min-width:14px;height:14px;padding:0 2px;border-radius:7px;font-size:8.5px;font-weight:700;color:#fff;background:#dc2626;display:none;align-items:center;justify-content:center;box-sizing:border-box}
+    .nt-item{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line-2);cursor:pointer}.nt-item:hover{background:#f8fafc}.nt-item.unread{background:var(--brand-a10,#f5f7ff)}
+    .nt-item.urg{background:#fef2f2}
+    #notifDd{width:340px;max-width:92vw}
+
+    /* ── due date + repeat picker ──────────────────────────────────────────────────────────
+       How often on the left; on the right, only what that choice needs. One fixed height, so
+       the panel does not grow or shrink as options are clicked. */
+    /* Capped to the window, and its own body scrolls. The panel is position:fixed, so anything
+       hanging below the fold cannot be scrolled into view - which is what made Done unreachable
+       and read as "the page will not scroll". The summary line and the footer stay put; only the
+       rail and the calendar scroll. */
+    .dp-pop{width:432px;max-width:min(94vw,432px);background:#fff;border:1px solid var(--line);
+      border-radius:12px;box-shadow:0 10px 30px rgba(16,24,40,.16);overflow:hidden;
+      display:flex;flex-direction:column;max-height:calc(100vh - 20px)}
+    .dp-body{display:flex;align-items:stretch;overflow-y:auto;min-height:0}
+    .dp-says,.dp-foot{flex:none}
+    .dp-rail{width:142px;flex:none;border-right:1px solid var(--line);background:#fbfcfe;
+      padding:8px 7px;display:flex;flex-direction:column;gap:1px}
+    .dp-opt{width:100%;height:31px;padding:0 10px;border:0;border-radius:7px;background:transparent;
+      font:inherit;font-size:12.5px;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
+    .dp-opt:hover{background:var(--brand-a10,#eef2ff)}
+    .dp-opt.on{background:var(--brand,#1d4ed8);color:#fff;font-weight:600}
+    .dp-main{flex:1;min-width:0;padding:10px 12px 12px;min-height:314px;display:flex;flex-direction:column}
+    .dp-ask{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate);margin-bottom:8px}
+    .dp-ask .req{color:var(--brand,#1d4ed8);letter-spacing:0;text-transform:none;font-weight:600}
+    .dp-note{font-size:11.5px;color:var(--slate);line-height:1.55}
+    .dp-head{display:flex;align-items:center;gap:2px;margin-bottom:4px}
+    .dp-title{flex:1;text-align:center;font-size:12.5px;font-weight:700}
+    .dp-nav{width:25px;height:25px;flex:none;display:flex;align-items:center;justify-content:center;
+      border:0;border-radius:7px;background:transparent;color:var(--slate);cursor:pointer;font-size:11px}
+    .dp-nav:hover{background:var(--brand-a10,#eef2ff);color:var(--brand,#1d4ed8)}
+    .dp-dow{display:grid;grid-template-columns:repeat(7,1fr)}
+    .dp-dow span{text-align:center;font-size:10px;font-weight:700;color:var(--slate-2,#94a3b8);
+      padding-bottom:2px}
+    .dp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px}
+    .dp-day{height:30px;border:0;border-radius:7px;background:transparent;font:inherit;
+      font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink);cursor:pointer;
+      position:relative;padding:0}
+    .dp-day:hover:not([disabled]):not(.on){background:var(--brand-a10,#eef2ff)}
+    .dp-day.pad{color:var(--slate-2,#94a3b8);opacity:.4}
+    .dp-day[disabled]{color:var(--slate-2,#94a3b8);opacity:.3;cursor:default}
+    .dp-day.on{background:var(--brand,#1d4ed8);color:#fff;font-weight:700}
+    .dp-day.today:not(.on)::after{content:'';position:absolute;left:50%;bottom:4px;width:3px;
+      height:3px;margin-left:-1.5px;border-radius:50%;background:var(--brand,#1d4ed8)}
+    /* the multi-select grids: weekdays, dates of the month, months of the year */
+    .dp-chips{display:grid;gap:4px}
+    .dp-chips.dow{grid-template-columns:repeat(7,1fr)}
+    .dp-chips.dom{grid-template-columns:repeat(7,1fr)}
+    /* six across, two rows: twelve months in half the height, which is what leaves room for the
+       chosen month's dates underneath without the panel growing */
+    .dp-chips.mon{grid-template-columns:repeat(6,1fr)}
+    .dp-chips.mon .dp-chip{font-size:11px;height:28px;flex-direction:column;gap:0;line-height:1}
+    .dp-chip{height:30px;border:1px solid var(--line);border-radius:7px;background:#fff;font:inherit;
+      font-size:12px;font-variant-numeric:tabular-nums;color:var(--ink);cursor:pointer;padding:0;
+      display:flex;align-items:center;justify-content:center}
+    .dp-chip:hover{border-color:var(--brand,#1d4ed8);color:var(--brand,#1d4ed8);
+      background:var(--brand-50,#eff4ff)}
+    .dp-chip.on{background:var(--brand,#1d4ed8);border-color:var(--brand,#1d4ed8);color:#fff;
+      font-weight:700}
+    .dp-chip.wide{grid-column:span 3}
+    /* a dot, not a number: at 44px wide a count would crowd the month name */
+    .dp-chip .pip{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.75;
+      margin-top:2px}
+    /* which month the date grid belongs to */
+    .dp-chip.active{box-shadow:0 0 0 2px var(--brand-a10,#eef2ff),0 0 0 3px var(--brand,#1d4ed8)}
+    .dp-sub{display:flex;align-items:baseline;gap:8px;margin:11px 0 7px;padding-top:10px;
+      border-top:1px solid var(--line)}
+    .dp-sub .lbl{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate)}
+    .dp-sub .rm{margin-left:auto;border:0;background:transparent;padding:0;font:inherit;font-size:11px;
+      color:var(--slate-2,#94a3b8);cursor:pointer;text-decoration:underline}
+    .dp-sub .rm:hover{color:#dc2626}
+    .dp-empty{margin-top:11px;padding-top:10px;border-top:1px solid var(--line);font-size:11.5px;
+      color:var(--slate);line-height:1.55}
+    .dp-quick{display:flex;gap:4px;margin-top:7px}
+    .dp-quick button{flex:1;height:26px;border:1px solid var(--line);border-radius:7px;background:#fff;
+      font:inherit;font-size:11.5px;font-weight:500;color:var(--slate);cursor:pointer;
+      white-space:nowrap;padding:0}
+    .dp-quick button:hover{border-color:var(--brand,#1d4ed8);color:var(--brand,#1d4ed8);
+      background:var(--brand-50,#eff4ff)}
+    .dp-mode{display:flex;align-items:center;gap:7px;margin-bottom:6px;padding:6px 9px;
+      border-radius:7px;background:var(--brand-50,#eff4ff);color:var(--brand-700,#1e40af);
+      font-size:11.5px;font-weight:600}
+    .dp-mode button{margin-left:auto;border:0;background:transparent;font:inherit;font-size:11.5px;
+      font-weight:600;color:var(--brand,#1d4ed8);cursor:pointer;text-decoration:underline;padding:0}
+    /* min-height so the footer does not shuffle as the sentence wraps */
+    .dp-says{border-top:1px solid var(--line);background:#f8fafc;padding:9px 12px;font-size:11.5px;
+      color:var(--slate);line-height:1.55;min-height:56px}
+    .dp-says b{color:var(--ink);font-weight:600}
+    .dp-says .warn{color:var(--brand,#1d4ed8);margin-top:2px}
+    .dp-says .miss{color:#dc2626;font-weight:600}
+    .dp-says .ends{margin-top:4px}
+    .dp-says .ends button{border:0;background:transparent;padding:0;font:inherit;font-size:11.5px;
+      color:var(--brand,#1d4ed8);cursor:pointer;text-decoration:underline}
+    .dp-foot{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding:9px 12px}
+    .dp-foot .dp-clear{border:0;background:transparent;padding:0;font:inherit;font-size:12px;
+      color:var(--slate);cursor:pointer}
+    .dp-foot .dp-clear:hover{color:#dc2626}
+    .dp-foot .dp-done{margin-left:auto;height:31px;padding:0 17px;border:0;border-radius:8px;
+      background:var(--brand,#1d4ed8);color:#fff;font:inherit;font-size:12px;font-weight:600;
+      cursor:pointer}
+    .dp-foot .dp-done[disabled]{opacity:.45;cursor:not-allowed}
+    .dp-inline{box-shadow:none;width:100%;max-width:100%}
+    /* the repeat, said on the task itself so a saved rule is visible without reopening the picker */
+    .dp-chip-rep{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
+      padding:2px 9px;border-radius:20px;white-space:nowrap;background:var(--brand-50,#eff4ff);
+      color:var(--brand-700,#1e40af);border:1px solid var(--brand-a10,#eef2ff)}
+    .dp-chip-rep i{font-size:9.5px}
+    /* a recurring task, told apart from a normal one in every list: a purple outline, nothing more */
+    .ac-row.ac-row-rec{box-shadow:inset 0 0 0 1.5px #a78bfa;border-radius:8px}
+    /* Recurring view: "Due soon" columns, or a year table - tasks frozen on the left, the timeline
+       across - and a side panel like the Calendar's that opens only when something is clicked. */
+    .rq-nav{display:flex;align-items:center;gap:8px;margin-left:auto}
+    .rq-nav .ac-btn{width:36px;justify-content:center;font-size:17px}
+    .rq-nav b{font-size:15px;min-width:96px;text-align:center}
+    .rq-dd{position:relative;margin-left:6px}
+    .rq-ddb{height:36px;min-width:176px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 12px;
+      border-radius:8px;border:1.5px solid #2563eb;background:#fff;color:#1d4ed8;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
+    .rq-ddb i{font-size:11px}
+    .rq-ddl{position:absolute;right:0;top:42px;z-index:20;min-width:196px;background:#fff;border:1px solid #dfe3e8;border-radius:10px;
+      box-shadow:0 10px 28px rgba(15,23,42,.14);padding:6px;display:flex;flex-direction:column}
+    .rq-ddl button{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border:0;border-radius:7px;background:transparent;
+      font:inherit;font-size:13.5px;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-ddl button:hover{background:#f1f5f9}
+    .rq-ddl button.on{background:#eff4ff;color:#1d4ed8;font-weight:700}
+    .rq-key{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;font-size:12px;color:#475569;margin:2px 0 12px}
+    .rq-key span{display:inline-flex;align-items:center;gap:6px}
+    .rq-key i{width:8px;height:8px;border-radius:50%;display:inline-block}
+    .rq-key em{font-style:normal}
+    .rq-key b{font-weight:800}
+    .rq-dot{flex:none;width:8px;height:8px;border-radius:50%;display:inline-block}
+    .rq-none{font-size:13px;color:#94a3b8;padding:4px 0}
+    .rq-none.big{padding:48px 24px;text-align:center;color:#64748b;font-size:14px}
+    /* Due soon: four full-height columns, two to a row on a narrower screen - never three */
+    .rq-soon{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;height:calc(100vh - 300px);min-height:560px}
+    @media (max-width:1100px){.rq-soon{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:max(420px,calc(100vh - 300px));height:auto;min-height:0}}
+    .rq-sc{display:flex;flex-direction:column;min-height:0;background:#fff;border:1px solid #dfe3e8;border-radius:12px;overflow:hidden}
+    .rq-sc.today{box-shadow:inset 0 3px 0 #c8101a}
+    .rq-sch{flex-shrink:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;padding:12px 14px;border:0;
+      border-bottom:1px solid #eef0f3;background:#f8fafc;font:inherit;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-sch.od{background:#fef2f2}
+    .rq-sch:hover{filter:brightness(.98)}
+    .rq-sch b{font-size:14px}
+    .rq-sch span{font-size:12px;color:#64748b}
+    .rq-scb{flex:1;min-height:0;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
+    .rq-scb .n{font-size:22px;font-weight:700;line-height:1}
+    .rq-scb .n small{font-size:12px;font-weight:600;color:#64748b;margin-left:5px}
+    .rq-scb .l{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#334155;margin-top:8px}
+    .rq-scb .l b{margin-left:auto}
+    .rq-chip{display:flex;width:100%;box-sizing:border-box;padding:8px 10px;border-radius:8px;font:inherit;font-size:12.5px;font-weight:600;
+      line-height:1.3;text-align:left;cursor:pointer;color:var(--cc);background:var(--cb);border:1.5px solid transparent}
+    .rq-chip.od{background:#fff;border-color:#dc2626}
+    .rq-chip span{flex:1;min-width:0;overflow-wrap:anywhere}
+    .rq-chip small{display:block;font-size:11px;margin-top:2px;font-weight:500;opacity:.8}
+    .rq-chip small.late{color:#b91c1c;font-weight:800;opacity:1}
+    /* the year table */
+    .rq-table{width:100%;background:#fff;border:1px solid #dfe3e8;border-radius:12px;overflow:auto;max-height:calc(100vh - 260px);min-height:320px}
+    .rq-in{width:max-content;min-width:100%}
+    .rq-tr{display:flex;border-bottom:1px solid #eef0f3}
+    .rq-tc{flex:none;width:300px;position:sticky;left:0;z-index:2;background:#fff;border-right:1px solid #dfe3e8;box-sizing:border-box}
+    .rq-hd,.rq-band{position:sticky;z-index:3;background:#fff}
+    .rq-band{top:0;height:28px}
+    .rq-hd{top:0;height:54px;border-bottom:1px solid #dfe3e8}
+    .rq-band+.rq-hd{top:29px}
+    .rq-hd .rq-tc{z-index:4;padding:0 16px;display:flex;align-items:center;font-size:11.5px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.06em}
+    .rq-band .rq-tc{z-index:4}
+    .rq-bd{min-width:0;box-sizing:border-box;padding:0 10px;display:flex;align-items:center;font-size:12px;font-weight:700;white-space:nowrap;
+      overflow:hidden;border-left:2px solid #cbd5e1;color:#334155}
+    .rq-ch{flex:1 0 84px;min-width:84px;height:54px;box-sizing:border-box;padding:0 4px;display:flex;flex-direction:column;align-items:center;
+      justify-content:center;gap:2px;border:0;border-left:1px solid #eef0f3;font:inherit;cursor:pointer;color:#0f172a}
+    .rq-ch:hover{filter:brightness(.97)}
+    .rq-ch.cur{box-shadow:inset 0 -3px 0 #c8101a}
+    .rq-ch b{font-size:12px;white-space:nowrap}
+    .rq-ch span{font-size:10.5px;color:#64748b;white-space:nowrap}
+    .rq-tn{height:46px;padding:0 16px;display:flex;align-items:center;gap:10px;border:0;border-right:1px solid #dfe3e8;font:inherit;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-tn:hover{background:#f8fafc}
+    .rq-tn i{flex:none;width:3px;height:22px;border-radius:2px}
+    .rq-tn span{flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rq-cl{flex:1 0 84px;min-width:84px;height:46px;box-sizing:border-box;border-left:1px solid #eef0f3;display:flex;align-items:center;justify-content:center;gap:3px}
+    .rq-cl.on{cursor:pointer;font-size:12.5px}
+    .rq-cl.on:hover{box-shadow:inset 0 0 0 1px #cbd5e1}
+    .rq-cl small{font-size:11.5px}
+    /* the side panel */
+    .rq-back{position:fixed;inset:0;background:rgba(15,23,42,.18);opacity:0;pointer-events:none;transition:opacity .2s;z-index:199}
+    .rq-back.open{opacity:1;pointer-events:auto}
+    .rq-sub{font-size:13px;color:#475569;margin-bottom:6px}
+    .rq-item{display:flex;align-items:center;gap:10px;width:100%;padding:11px 4px;border:0;border-bottom:1px solid #eef0f3;
+      background:transparent;font:inherit;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-item:hover{background:#f8fafc}
+    .rq-item .rq-bar{flex:none;width:3px;height:30px;border-radius:2px}
+    .rq-item .tt{flex:1;min-width:0;display:flex;flex-direction:column}
+    .rq-item .tt b{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rq-item .tt span{font-size:12px;color:#64748b}
+    .rq-item .go{color:#94a3b8}
+    .rq-st{font-size:12px;white-space:nowrap}
+    .rq-dl{display:grid;grid-template-columns:96px 1fr;gap:10px 12px;font-size:13.5px;line-height:1.45}
+    .rq-dl .k{color:#64748b}
+    .rq-pill{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:20px;margin:8px 0 12px}
+
+    /* an instance's attachments, printed as pages rather than filenames */
+    .wf-print-att{margin-top:16px;page-break-inside:avoid}
+    .wf-print-att-h{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate);margin-bottom:6px}
+    .wf-print-att-img{display:block;width:100%;max-width:100%;height:auto;border:1px solid var(--line);
+      border-radius:4px;margin-bottom:10px;page-break-inside:avoid;page-break-after:auto}
+    .wf-print-att-miss{font-size:12px;color:#b91c1c}
+
+      color:#991b1b;font-size:13px}
+      margin-bottom:12px;font-size:12.5px;color:#92400e}
+      margin-bottom:6px}
+      color:var(--slate)}
+      font-size:12px;color:var(--slate);line-height:1.6}
+      border-top:1px solid var(--line)}
+    @media (max-width:520px){
+      .dp-body{flex-direction:column}
+      .dp-rail{width:100%;border-right:0;border-bottom:1px solid var(--line);
+        flex-direction:row;flex-wrap:wrap;gap:4px}
+      .dp-opt{width:auto;flex:1 1 30%;text-align:center}
+      .dp-main{min-height:0}
+    }
+    </style><link rel="prefetch" as="script" href="min/postsales.js?v=9d5dbcd9da"></head>
+<body>
+<div id="authLoad" style="display: none;"><div class="loader"><div class="spin"></div><div style="margin-top:14px">Loading your workspace…</div></div></div>
+<div id="shell" style="display: block;"><div class="sb-backdrop" id="sbBackdrop"></div>
+  <aside class="sidebar">
+    <a href="index.html" class="sb-brand" style="text-decoration:none" title="Back to Home" data-spa-bound="1">
+      <img src="assets/jaine-logo-full-white.png?v=2" alt="JAIN-E" class="sb-logo-img">
+    </a>
+    <nav class="sb-nav" id="sbNav"><div class="sb-group">Administration</div><a class="sb-item" href="security.html" data-id="security"><i class="fa-solid fa-sliders"></i> Control Panel</a><a class="sb-item" href="usability.html" data-id="usability"><i class="fa-solid fa-chart-simple"></i> Usability</a><a class="sb-item" href="daily_checks.html" data-id="daily_checks"><i class="fa-solid fa-list-check"></i> Daily Checks</a><div class="sb-group">Feedback</div><a class="sb-item" href="feedback_hub.html" data-id="feedback_hub"><i class="fa-solid fa-qrcode"></i> Feedback Hub</a><div class="sb-group">Overview</div><a class="sb-item" href="index.html" data-id="dashboard"><i class="fa-solid fa-gauge-high"></i> Home / Dashboards</a><a class="sb-item active" href="accountability.html" data-id="tasks"><i class="fa-solid fa-clipboard-check"></i> Accountability</a><a class="sb-item" href="scoreboard.html" data-id="scoreboard"><i class="fa-solid fa-ranking-star"></i> Scoreboard</a><div class="sb-group">Sales</div><a class="sb-item" href="gtd.html" data-id="gtd"><i class="fa-solid fa-brain"></i> GTD</a><a class="sb-item" href="crm.html" data-id="crm"><i class="fa-solid fa-handshake"></i> CRM &amp; Sales</a><a class="sb-item" href="postsales.html" data-id="postsales"><i class="fa-solid fa-headset"></i> Post Sales</a><div class="sb-group">Operations</div><a class="sb-item" href="projects.html" data-id="projects"><i class="fa-solid fa-building"></i> Projects</a><a class="sb-item" href="scheduling.html" data-id="scheduling"><i class="fa-solid fa-diagram-project"></i> Project Scheduling</a><a class="sb-item" href="construction.html" data-id="construction"><i class="fa-solid fa-helmet-safety"></i> Construction</a><a class="sb-item" href="engineering.html" data-id="engineering"><i class="fa-solid fa-compass-drafting"></i> Engineering</a><a class="sb-item" href="inventory.html" data-id="inventory"><i class="fa-solid fa-boxes-stacked"></i> Inventory</a><a class="sb-item" href="procurement.html" data-id="procurement"><i class="fa-solid fa-cart-shopping"></i> Procurement</a><a class="sb-item" href="maintenance.html" data-id="maintenance"><i class="fa-solid fa-screwdriver-wrench"></i> Assets &amp; Maintenance</a><a class="sb-item" href="inspection.html" data-id="inspection"><i class="fa-solid fa-clipboard-list"></i> Inspection</a><div class="sb-group">People</div><a class="sb-item" href="recruitment_new.html" data-id="recruitment_new"><i class="fa-solid fa-user-plus"></i> Recruitment</a><a class="sb-item" href="hr_new.html" data-id="hr_new"><i class="fa-solid fa-users"></i> Human Resources</a><div class="sb-group">Governance</div><a class="sb-item" href="finance.html" data-id="finance"><i class="fa-solid fa-indian-rupee-sign"></i> Finance Vault</a><a class="sb-item" href="accounts.html" data-id="accounts"><i class="fa-solid fa-calculator"></i> Accounts</a><a class="sb-item" href="legal.html" data-id="legal"><i class="fa-solid fa-scale-balanced"></i> Legal</a><a class="sb-item" href="compliance.html" data-id="compliance"><i class="fa-solid fa-calendar-check"></i> Renewals &amp; Compliance</a><div class="sb-group">Growth &amp; Strategy</div><a class="sb-item" href="campaigns.html" data-id="campaigns"><i class="fa-solid fa-bullhorn"></i> Our Brand</a><a class="sb-item" href="competitors.html" data-id="competitors"><i class="fa-solid fa-magnifying-glass-chart"></i> Competitor Data</a><a class="sb-item" href="channel_partners.html" data-id="channel_partners"><i class="fa-solid fa-people-arrows"></i> Channel Partners</a><a class="sb-item" href="transcription.html" data-id="transcription"><i class="fa-solid fa-microphone-lines"></i> Transcription</a><a class="sb-item" href="scaling.html" data-id="scaling"><i class="fa-solid fa-arrow-trend-up"></i> Scaling Up</a><a class="sb-item" href="playbook.html" data-id="playbook"><i class="fa-solid fa-book-open"></i> Playbook</a><div class="sb-group">Knowledge</div><a class="sb-item" href="documents.html" data-id="documents"><i class="fa-solid fa-folder-open"></i> Document Library</a><a class="sb-item" href="video.html" data-id="video"><i class="fa-solid fa-clapperboard"></i> Video Library</a><a class="sb-item" href="reports.html" data-id="reports"><i class="fa-solid fa-chart-pie"></i> Reports</a><div class="sb-group">Stakeholder Portals</div><a class="sb-item" href="custportal-admin.html" data-id="custportal_admin"><i class="fa-solid fa-address-card"></i> Customer Portal Admin</a><a class="sb-item" href="supplier.html" data-id="supplier"><i class="fa-solid fa-truck"></i> Supplier Portal</a><a class="sb-item" href="whatsapp.html" data-id="whatsapp"><i class="fa-solid fa-comment-dots"></i> WhatsApp Bot</a><a class="sb-item" href="mail.html" data-id="mail"><i class="fa-solid fa-envelope"></i> Naren's Mail</a><div class="sb-group">System</div><a class="sb-item" href="settings.html" data-id="settings"><i class="fa-solid fa-gear"></i> Settings</a><div class="sb-group">IT &amp; Support</div><a class="sb-item" href="network.html" data-id="network"><i class="fa-solid fa-wifi"></i> Internet Speed</a></nav>
+    <div class="sb-foot">v1.0 · Operations Portal</div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <button class="hamburger" id="hamburger" aria-label="Menu"><i class="fa-solid fa-bars"></i></button><div class="crumb" id="crumb"><span class="cl" onclick="location.hash='#/tasks'">Accountability</span> <i class="fa-solid fa-chevron-right"></i><span class="cur">Tasks</span></div>
+      <div class="search-box" style="position: relative;"><i class="fa-solid fa-magnifying-glass"></i><input id="globalSearch" placeholder="Search documents, tasks, people…" value=""><div id="gsDrop" style="position: absolute; top: 100%; left: 0px; right: 0px; background: rgb(255, 255, 255); border: 1px solid var(--line); border-radius: 10px; box-shadow: rgba(0, 0, 0, 0.12) 0px 8px 24px; z-index: 9999; max-height: 340px; overflow-y: auto; display: none;"></div></div>
+      <div class="topbar-actions">
+        <button class="ic-btn bell-ring" id="notifBtn" title="Notifications"><i class="fa-regular fa-bell"></i><span class="dot" style="display: flex;">17</span></button>
+        <div class="profile-wrap"><div class="avatar" id="profileBtn" style="background: rgb(15, 118, 110);">A</div><div class="dropdown" id="notifDd"></div><div class="dropdown" id="profileDd"><div class="dd-head"><span class="avatar-sm" style="background:#0f766e" title="ayushruia1@gmail.com">A</span><div class="dd-head-txt" title="ayushruia1@gmail.com"><div class="nm">Administrator</div><div class="em">ayushruia1@gmail.com</div></div></div><div class="dd-item" onclick="navTo('tasks/profile')"><i class="fa-regular fa-user"></i> My Profile</div><div class="dd-item" onclick="navTo('settings')"><i class="fa-solid fa-gear"></i> Settings</div><div class="dd-item"><i class="fa-solid fa-shield-halved"></i> Super Admin <span class="tag t-purple" style="margin-left:auto">ON</span></div><div style="height:1px;background:var(--line-2);margin:6px 0"></div><div class="dd-item" style="color:var(--err)" onclick="doSignOut()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Sign Out</div></div></div>
+      </div>
+    </header>
+    <main class="view" id="view"><div class="page-head"><div><h1><i class="fa-solid fa-list-check" style="color:#1d4ed8"></i> Accountability</h1><p>Tasks &amp; delegation</p></div></div>
+    <div class="ac-tabs">
+      <div class="ac-tab active" onclick="navTo('tasks/work')"><i class="fa-solid fa-list-check"></i> Tasks</div>
+      <div class="ac-tab " onclick="navTo('tasks/calendar')"><i class="fa-solid fa-calendar-days"></i> Calendar</div>
+      <div class="ac-tab " onclick="navTo('tasks/meetings')"><i class="fa-solid fa-video"></i> Meetings</div>
+      <div class="ac-tab " onclick="navTo('tasks/workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow</div>
+      <div class="ac-tab " onclick="navTo('tasks/archive')"><i class="fa-solid fa-box-archive"></i> Archive</div>
+    </div><div id="acBody"><div class="ac-3p"><button class="ac-pbtn " onclick="accP3('priority')"><i class="fa-solid fa-arrow-down-1-9"></i> Priority</button><button class="ac-pbtn " onclick="accP3('project')"><i class="fa-solid fa-tag"></i> Tags</button><button class="ac-pbtn " onclick="accP3('person')"><i class="fa-solid fa-user"></i> Person</button><button class="ac-pbtn " onclick="accP3('workflow')"><i class="fa-solid fa-sitemap"></i> Workflow</button><button class="ac-pbtn on" onclick="accP3('recurring')"><i class="fa-solid fa-rotate"></i> Recurring</button><div class="rq-nav"><button class="ac-btn" aria-label="Previous year" onclick="recYear(-1)">‹</button><b>FY 26–27</b><button class="ac-btn" aria-label="Next year" onclick="recYear(1)">›</button><div class="rq-dd"><button type="button" class="rq-ddb" aria-haspopup="listbox" aria-expanded="true" onclick="event.stopPropagation();recMenu()">Due soon<i class="fa-solid fa-chevron-down"></i></button><div class="rq-ddl" role="listbox"><button type="button" role="option" aria-selected="true" class="on" onclick="recFilter('soon')"><i class="rq-dot" style="background:#c8101a"></i>Due soon</button><button type="button" role="option" aria-selected="false" class="" onclick="recFilter('all')"><i class="rq-dot" style="background:#94a3b8"></i>All frequencies</button><button type="button" role="option" aria-selected="false" class="" onclick="recFilter('weekly')"><i class="rq-dot" style="background:#1d4ed8"></i>Weekly</button><button type="button" role="option" aria-selected="false" class="" onclick="recFilter('fortnightly')"><i class="rq-dot" style="background:#0f766e"></i>Fortnightly</button><button type="button" role="option" aria-selected="false" class="" onclick="recFilter('monthly')"><i class="rq-dot" style="background:#b45309"></i>Monthly</button><button type="button" role="option" aria-selected="false" class="" onclick="recFilter('quarterly')"><i class="rq-dot" style="background:#6d28d9"></i>Quarterly</button><button type="button" role="option" aria-selected="false" class="" onclick="recFilter('yearly')"><i class="rq-dot" style="background:#be123c"></i>Annually</button></div></div></div></div><div class="rq-key"><span><i style="background:#0f172a"></i>Yet to come</span><span><i style="background:#15803d"></i>Done on time · <em style="color:#15803d">−2 days</em> early</span><span><i style="background:#dc2626"></i>Done late · <em style="color:#dc2626">+2 days</em> late</span><span><i style="background:#b91c1c"></i><b style="color:#b91c1c">Not done, overdue · +3 days late</b></span></div><div class="rq-soon"><div class="rq-sc"><button type="button" class="rq-sch od" onclick="recCol(0)" title="All tasks in this column"><b>Overdue</b><span>Not done, past deadline</span></button><div class="rq-scb"><span class="n">4<small>tasks</small></span><span class="l"><i class="rq-dot" style="background:#1d4ed8"></i>Weekly<b>3</b></span><button type="button" class="rq-chip od" style="--cc:#1d4ed8;--cb:#dbeafe" title="Collections follow-up" onclick="recCell(0,'2026-10-02')"><span>Collections follow-up<small class="late">Fri 2 Oct · 14 days late</small></span></button><button type="button" class="rq-chip od" style="--cc:#1d4ed8;--cb:#dbeafe" title="Site safety walk – Tower B and the basement parking levels" onclick="recCell(6,'2026-10-14')"><span>Site safety walk – Tower B and the basement parking levels<small class="late">Wed 14 Oct · 2 days late</small></span></button><button type="button" class="rq-chip od" style="--cc:#1d4ed8;--cb:#dbeafe" title="Weekly sales review" onclick="recCell(10,'2026-10-12')"><span>Weekly sales review<small class="late">Mon 12 Oct · 4 days late</small></span></button><span class="l"><i class="rq-dot" style="background:#b45309"></i>Monthly<b>1</b></span><button type="button" class="rq-chip od" style="--cc:#b45309;--cb:#fef3c7" title="Monthly MIS report for the management committee" onclick="recCell(4,'2026-09-30')"><span>Monthly MIS report for the management committee<small class="late">Wed 30 Sep · 16 days late</small></span></button></div></div><div class="rq-sc today"><button type="button" class="rq-sch" onclick="recCol(1)" title="All tasks in this column"><b>Today</b><span>Fri 16 Oct</span></button><div class="rq-scb"><span class="n">1<small>task</small></span><span class="l"><i class="rq-dot" style="background:#1d4ed8"></i>Weekly<b>1</b></span><button type="button" class="rq-chip" style="--cc:#1d4ed8;--cb:#dbeafe" title="Weekly site progress report" onclick="recCell(11,'2026-10-16')"><span>Weekly site progress report<small>Fri 16 Oct</small></span></button></div></div><div class="rq-sc"><button type="button" class="rq-sch" onclick="recCol(2)" title="All tasks in this column"><b>Tomorrow</b><span>Sat 17 Oct</span></button><div class="rq-scb"><span class="n">1<small>task</small></span><span class="l"><i class="rq-dot" style="background:#1d4ed8"></i>Weekly<b>1</b></span><button type="button" class="rq-chip" style="--cc:#1d4ed8;--cb:#dbeafe" title="Stores stock check" onclick="recCell(7,'2026-10-17')"><span>Stores stock check<small>Sat 17 Oct</small></span></button></div></div><div class="rq-sc"><button type="button" class="rq-sch" onclick="recCol(3)" title="All tasks in this column"><b>Day after</b><span>Sun 18 Oct</span></button><div class="rq-scb"><span class="n">0<small>tasks</small></span><div class="rq-none">Nothing here.</div></div></div></div><div class="rq-back" id="rqBack" onclick="recClose()"></div><div class="gcal-panel" id="rqPanel"><div class="gcal-panel-head"><div class="x" id="rqPanelBack" style="display:none;margin-left:0" title="Back" onclick="recBack()"><i class="fa-solid fa-arrow-left"></i></div><b id="rqPanelHead">Details</b><div class="x" onclick="recClose()"><i class="fa-solid fa-xmark"></i></div></div><div class="gcal-panel-body" id="rqPanelBody"></div><div class="gcal-panel-foot" id="rqPanelFoot" style="display:none"></div></div></div></main>
+  </div>
+</div>
+<div class="overlay" id="overlay"><div id="modalHost"></div></div>
+<div id="toasts"></div>
+
+
+
+
+
+</body></html>

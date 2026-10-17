@@ -1,0 +1,343 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<title>Recurring Tasks - JainE</title>
+<!--
+  RECURRING TASKS EXPLAINER (landscape 1920x1080).
+  Every screen is a real JainE screen: states/sNN.html are snapshots of the live Accountability page
+  (captured 16 Oct 2026, nothing saved). This page only moves a camera, a cursor and captions over
+  them. Positions are read from the snapshots themselves, so nothing is placed by eye.
+  window.seek(t) draws the frame at t seconds (used by render.mjs to make the MP4); without
+  ?render the page plays itself in real time. ?t=NN starts from second NN.
+-->
+<link rel="stylesheet" href="/vendor/inter/inter.css">
+<style>
+  html,body{margin:0;background:#0b1220;overflow:hidden}
+  #stage{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;background:#fff;transform-origin:0 0;font-family:Inter,system-ui,sans-serif}
+  #cam{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0}
+  #cam iframe{position:absolute;left:0;top:0;width:1920px;height:1080px;border:0;opacity:0;background:#fff;pointer-events:none}
+  #fx{position:absolute;left:0;top:0;width:1920px;height:1080px;pointer-events:none}
+  .hl{position:absolute;border-radius:10px;box-shadow:0 0 0 4px #e0121c,0 0 0 9999px rgba(15,23,42,.0);opacity:0}
+  .ripple{position:absolute;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;border:4px solid #e0121c;opacity:0}
+  #cursor{position:absolute;left:0;top:0;width:34px;height:34px;filter:drop-shadow(0 3px 5px rgba(0,0,0,.35));z-index:5}
+  #cap{position:absolute;left:50%;bottom:54px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;
+    background:rgba(15,23,42,.92);color:#fff;padding:18px 30px 18px 18px;border-radius:18px;max-width:1500px;opacity:0;z-index:6}
+  #cap .n{flex:none;min-width:46px;height:46px;padding:0 6px;box-sizing:border-box;border-radius:12px;background:#e0121c;color:#fff;font-weight:800;font-size:22px;display:flex;align-items:center;justify-content:center}
+  #cap .t{font-size:30px;font-weight:700;line-height:1.25}
+  #cap .s{font-size:21px;font-weight:500;color:#cbd5e1;margin-top:4px;line-height:1.3}
+  .card{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;z-index:8}
+  #intro{background:#fff}
+  #intro .bar,#outro .bar{width:120px;height:8px;border-radius:4px;background:#e0121c;margin-bottom:34px}
+  #intro h1,#outro h1{margin:0;font-size:92px;font-weight:800;color:#0f172a;letter-spacing:-2px}
+  #intro p,#outro p{margin:22px 0 0;font-size:36px;color:#475569;font-weight:500}
+  #intro .chip{margin-top:44px;display:flex;gap:14px}
+  #intro .chip span{font-size:24px;font-weight:700;padding:10px 20px;border-radius:30px}
+  #outro{background:#fff}
+  #outro ul{list-style:none;margin:40px 0 0;padding:0;display:flex;gap:22px}
+  #outro li{font-size:25px;font-weight:600;color:#0f172a;background:#f1f5f9;border-radius:14px;padding:16px 24px}
+  #outro li b{color:#e0121c}
+  #logo{background:#fff}
+  #logo img{width:760px}
+  #prog{position:absolute;left:0;bottom:0;height:5px;background:#e0121c;z-index:9}
+</style></head>
+<body>
+<div id="stage">
+  <div id="cam"></div>
+  <div id="fx"></div>
+  <svg id="cursor" viewBox="0 0 24 24"><path d="M4 2 L4 20 L9 15.5 L12.2 22 L15 20.7 L11.9 14.3 L18.5 14.3 Z" fill="#0f172a" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>
+  <div id="cap"><div class="n"></div><div><div class="t"></div><div class="s"></div></div></div>
+  <div class="card" id="intro">
+    <div class="bar"></div>
+    <h1>Recurring Tasks</h1>
+    <p>New in JainE Accountability</p>
+    <div class="chip">
+      <span style="background:#dbeafe;color:#1d4ed8">Weekly</span><span style="background:#ccfbf1;color:#0f766e">Fortnightly</span>
+      <span style="background:#fef3c7;color:#b45309">Monthly</span><span style="background:#ede9fe;color:#6d28d9">Quarterly</span>
+      <span style="background:#ffe4e6;color:#be123c">Annually</span>
+    </div>
+  </div>
+  <div class="card" id="outro">
+    <div class="bar"></div>
+    <h1>Set it once. JainE remembers.</h1>
+    <ul><li><b>1</b> Pick a repeat in the due date</li><li><b>2</b> Purple border = recurring</li><li><b>3</b> Track it all in Recurring</li></ul>
+  </div>
+  <div class="card" id="logo"><img src="logo.png" alt="Jain Group"></div>
+  <div id="prog"></div>
+</div>
+<script>
+'use strict';
+/* ------------------------------------------------------------------ helpers */
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const ease=x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;          // easeInOutCubic
+const lerp=(a,b,x)=>a+(b-a)*x;
+// value of a keyframe track [[t,v...],...] at time t, eased between neighbours
+function track(kf,t){
+  if(t<=kf[0][0]) return kf[0].slice(1);
+  for(let i=1;i<kf.length;i++){ if(t<=kf[i][0]){ const a=kf[i-1],b=kf[i]; const x=ease(clamp((t-a[0])/(b[0]-a[0]||1),0,1)); return a.slice(1).map((v,j)=>lerp(v,b[j+1],x)); } }
+  return kf[kf.length-1].slice(1);
+}
+const STATES=['s01','s02','s03','s04','s05','s06','s07','s08','s09','s10','s11','s12','s13','s14','s15','s16','s17','s18','s19','s20','s21','s22','s23','s24'];
+const F={}; // iframe per state
+function el(id,sel,text){
+  const d=F[id].contentDocument; let list=[...d.querySelectorAll(sel)];
+  if(text) list=list.filter(e=>text.test((e.innerText||e.textContent||'').trim()));
+  return list[0]||null;
+}
+function rect(id,sel,text,pad){
+  const e=el(id,sel,text); if(!e) { console.warn('missing',id,sel,text); return [960,540,10,10]; }
+  const r=e.getBoundingClientRect(); pad=pad||0; return [r.left-pad,r.top-pad,r.width+2*pad,r.height+2*pad];
+}
+const mid=r=>[r[0]+r[2]/2,r[1]+r[3]/2];
+
+/* ------------------------------------------------------------------ load the snapshots */
+function loadAll(){
+  return Promise.all(STATES.map(id=>new Promise(res=>{
+    const f=document.createElement('iframe'); f.src='states/'+id+'.html'; f.onload=()=>{
+      const d=f.contentDocument;
+      // scroll positions saved at capture time
+      d.querySelectorAll('[data-sl]').forEach(e=>{ e.scrollLeft=+e.dataset.sl; e.scrollTop=+e.dataset.st; });
+      const st=d.createElement('style');
+      st.textContent='*{transition:none!important;animation:none!important;caret-color:transparent!important}.ac-ins.hov::after{opacity:1!important}html,body{overflow:hidden!important}::-webkit-scrollbar{height:10px}';
+      d.head.appendChild(st);
+      res();
+    };
+    F[id]=f; document.getElementById('cam').appendChild(f);
+  })));
+}
+
+/* ------------------------------------------------------------------ the script */
+let SHOTS=[], CAM=[], CUR=[], CLICKS=[], CAPS=[], HLS=[], SCROLLS=[], HOOKS=[], CARDS=[], DUR=0;
+function build(){
+  // Each shot: [from, to, state]. Crossfade 0.35 s into the next.
+  const S=(a,b,id)=>SHOTS.push([a,b,id]);
+  const C=(t,s,cx,cy)=>CAM.push([t,s,cx,cy]);           // camera: zoom s centred on (cx,cy)
+  const M=(t,p)=>CUR.push([t,p[0],p[1]]);                 // cursor position
+  const K=t=>CLICKS.push(t);
+  const T=(a,b,n,t,s)=>CAPS.push([a,b,n,t,s||'']);
+  const H=(a,b,r,col)=>HLS.push([a,b,r,col||'#e0121c']);
+
+  let t=0;
+  // INTRO - held so there is time to speak over it
+  CARDS.push(['intro',0,8]); t=8;
+  C(0,1,960,540);
+
+  // 1. tasks screen, "+ Add task here" between rows
+  const gap=rect('s01','.ac-ins');
+  S(t,t+5.2,'s01'); M(t,[1500,820]);
+  T(t+.4,t+5,'1','Create a task the way you always do','Point between two tasks and click “+ Add task here”');
+  HOOKS.push([t+1.6,t+5.2,()=>{ const e=el('s01','.ac-ins'); e&&e.classList.add('hov'); },()=>{ const e=el('s01','.ac-ins'); e&&e.classList.remove('hov'); }]);
+  M(t+2.6,mid(gap)); K(t+3.6);
+  C(t,1,960,540); C(t+2,1,960,540); C(t+4,1.35,700,470);
+  t+=5.2;
+
+  // 2. type the name
+  const inp=rect('s02','#selfInsInput');
+  S(t,t+1.6,'s02'); S(t+1.6,t+4.2,'s03');
+  M(t,[inp[0]+60,inp[1]+inp[3]/2]);
+  T(t+.2,t+4,'2','Type the task’s name','Here: “Weekly site progress report”');
+  C(t+4.2,1.35,700,470);
+  t+=4.2;
+
+  // 3. open the due date
+  const db=rect('s03','#selfInsDateBtn');
+  S(t,t+2,'s03'); M(t+1.2,mid(db)); K(t+1.6);
+  T(t+.2,t+2,'3','Click the calendar to set the due date','');
+  C(t+1,1.35,800,470); C(t+2.8,1.4,1180,660);
+  t+=2;
+
+  // 4. the six options, one by one, slowly
+  const box=rect('s04','#acDpBox'); const rail=rect('s04','.dp-rail');
+  S(t,t+9,'s04');
+  T(t+.3,t+9,'4','The due date can now repeat','Six choices, on the left of the date picker');
+  H(t+.6,t+2.4,[rail[0]-4,rail[1]-4,rail[2]+8,rail[3]+8]);
+  const opts=['none','weekly','fortnightly','monthly','quarterly','yearly'];
+  const labels=['Does not repeat - a one-time task, as before','Weekly - one day of the week','Fortnightly - one day, every other week','Monthly - one date every month, or the last day','Quarterly - one date, every third month','Annually - one month and one date in it'];
+  opts.forEach((o,i)=>{
+    const r=rect('s04','[data-dp=freq][data-v='+o+']',null,3);
+    const a=t+2.6+i*1.05; H(a,a+1.05,r,'#2563eb'); M(a,[r[0]+r[2]-24,r[1]+r[3]/2]);
+    CAPS.push([a,a+1.05,'4',['Does not repeat','Weekly','Fortnightly','Monthly','Quarterly','Annually'][i],labels[i]]);
+  });
+  // drop the general caption while the per-option ones run
+  CAPS.find(c=>c[0]===t+.3)[1]=t+2.6;
+  t+=9;
+
+  // 5..9 each frequency: click it, then pick
+  const FQ=[
+    ['weekly','s05','s06','[data-dp=dow][data-v="5"]','Weekly','Pick the day - here, every Friday. One day a week; twice a week is two tasks.'],
+    ['fortnightly','s07','s08','[data-dp=dow][data-v="5"]','Fortnightly','Pick the day - it repeats every other week from the first one.'],
+    ['monthly','s09','s10','[data-dp=dom][data-v="5"]','Monthly','Pick the date - here, the 5th of every month. “Last day” is there too.'],
+    ['quarterly','s11','s12','[data-dp=dom][data-v="10"]','Quarterly','Pick the date - it repeats every third month from the first one.'],
+    ['yearly','s13','s14','[data-dp=mon][data-v="3"]','Annually','Pick the month, then the date - here, every 15 April.']
+  ];
+  FQ.forEach((q,i)=>{
+    const prevState=i===0?'s04':FQ[i-1][2];
+    const o=rect(prevState,'[data-dp=freq][data-v='+q[0]+']');
+    const p=rect(q[1],q[3]);
+    S(t,t+1.1,prevState); M(t+.2,mid(o)); K(t+.8);
+    S(t+1.1,t+3,q[1]); M(t+2.2,mid(p)); K(t+2.7);
+    if(q[0]==='yearly'){
+      const d15=rect('s14','[data-dp=ymd][data-v="15"]');
+      S(t+3,t+5.6,'s14'); M(t+3.6,mid(d15)); K(t+4.1);
+      H(t+4.4,t+5.6,rect('s14','.dp-says',null,4),'#2563eb');
+      T(t,t+5.6,'5',q[4],q[5]); t+=5.6;
+    }else{
+      S(t+3,t+5,q[2]);
+      T(t,t+5,'5',q[4],q[5]); t+=5;
+    }
+  });
+
+  // 10. back to Weekly, Friday - the one we make - and Done
+  const wk=rect('s14','[data-dp=freq][data-v=weekly]');
+  const done=rect('s15','#acDpBox button',/^Done$/);
+  S(t,t+1,'s14'); M(t+.2,mid(wk)); K(t+.7);
+  S(t+1,t+5,'s15');
+  T(t,t+5,'6','Our task: Weekly, every Friday','Below the picker it shows the next dates. Click Done, then Enter to save.');
+  H(t+1.4,t+3.6,rect('s15','#acDpBox',null,0),'#2563eb');
+  M(t+3.6,mid(done)); K(t+4.3);
+  C(t+4.6,1.4,1180,660);
+  t+=5;
+
+  // 11. the purple border
+  const row=rect('s16','.ac-row',/Weekly site progress report/);
+  S(t,t+7,'s16');
+  C(t+1,1,960,540); C(t+2.6,1.55,row[0]+row[2]/2,row[1]+80);
+  M(t+.5,[row[0]+row[2]-80,row[1]+row[3]+60]);
+  T(t+.3,t+7,'7','A recurring task has a purple border','So you can tell it apart from a one-time task in every list');
+  H(t+3,t+7,[row[0]-6,row[1]-6,row[2]+12,row[3]+12],'#7c3aed');
+  t+=7;
+
+  // 12. the Recurring pill -> Due soon
+  const pill=rect('s16','.ac-3p *',/^Recurring$/);
+  S(t,t+2,'s16'); C(t,1.55,row[0]+row[2]/2,row[1]+80); C(t+1.4,1.25,900,400);
+  M(t+.8,mid(pill)); K(t+1.6);
+  T(t+.2,t+2,'8','Open the Recurring pill on Tasks','');
+  t+=2;
+  S(t,t+12,'s17'); C(t,1,960,540);
+  T(t+.3,t+3.4,'8','Due soon - what needs doing next','Opens on this view every time');
+  const cols=[...F.s17.contentDocument.querySelectorAll('.rq-sc')].map(e=>{const r=e.getBoundingClientRect();return [r.left,r.top,r.width,r.height];});
+  const colTxt=[['Overdue','Repeats not done yet, past their deadline'],['Today','Every repeat due today'],['Tomorrow','What is coming tomorrow'],['Day after','And the day after - grouped by frequency, with the deadline on each']];
+  cols.forEach((r,i)=>{ const a=t+3.4+i*2.15; H(a,a+2.15,[r[0]-3,r[1]-3,r[2]+6,Math.min(r[3],620)+6],i===0?'#e0121c':'#2563eb'); M(a,[r[0]+r[2]/2,r[1]+60]); CAPS.push([a,a+2.15,'8',colTxt[i][0],colTxt[i][1]]); });
+  t+=12;
+
+  // 13. the menu -> All frequencies
+  const ddb=rect('s17','.rq-ddb');
+  const allI=rect('s18','.rq-ddl button',/^All frequencies$/);
+  S(t,t+1,'s17'); M(t+.2,mid(ddb)); K(t+.7);
+  S(t+1,t+4.4,'s18'); C(t+1,1,960,540); C(t+1.8,1.6,1500,330);
+  T(t+.2,t+4.4,'9','Change the view from this menu','Due soon, All frequencies, or one frequency at a time');
+  H(t+1.6,t+3.2,rect('s18','.rq-ddl',null,2),'#2563eb');
+  M(t+3.2,mid(allI)); K(t+3.8);
+  t+=4.4;
+
+  // 14. All frequencies - the year, scrolled across
+  S(t,t+24,'s19'); C(t,1.6,1500,330); C(t+1.2,1,960,540);
+  T(t+.4,t+4,'10','All frequencies - the whole financial year','Every recurring task on the left, April to March across, week by week');
+  const tbl=el('s19','.rq-table'); const startSL=tbl?tbl.scrollLeft:0; const maxSL=tbl?tbl.scrollWidth-tbl.clientWidth:0;
+  SCROLLS.push(['s19','.rq-table',[[t+3.8,startSL],[t+5.3,0],[t+13.5,maxSL],[t+15.5,maxSL],[t+18,startSL]]]);
+  T(t+4,t+15.5,'10','Scroll sideways through the year','Each cell shows the day or date it is due');
+  M(t+4,[1300,700]);
+  // the colour key
+  const key=rect('s19','.rq-key',null,6);
+  const kitems=[...F.s19.contentDocument.querySelectorAll('.rq-key > span')].map(e=>{const r=e.getBoundingClientRect();return [r.left-6,r.top-6,r.width+12,r.height+12];});
+  const ktxt=[['Black - yet to come','Due later; nothing to do yet'],['Green - done on time','The small number says how many days early'],['Red - done late','The number says how many days late'],['Bold red - not done, overdue','Still open after the deadline, with the days it is late']];
+  C(t+18,1,960,540); C(t+19,1.9,key[0]+520,key[1]+8);
+  kitems.slice(0,4).forEach((r,i)=>{ const a=t+19.2+i*1.2; H(a,a+1.2,r,'#e0121c'); });
+  CAPS.push([t+18.2,t+19.2,'11','The colour code','']);
+  kitems.slice(0,4).forEach((r,i)=>{ const a=t+19.2+i*1.2; CAPS.push([a,a+1.2,'11',ktxt[i][0],ktxt[i][1]]); M(a,[r[0]+r[2]/2,r[1]+r[3]+24]); });
+  t+=24;
+  // show the frequency colour bars on the left of each task
+  S(t,t+4,'s19'); C(t,1.9,key[0]+520,key[1]+8); C(t+1,1.5,600,560);
+  T(t+.2,t+4,'11','The coloured bar shows the frequency','Blue weekly · teal fortnightly · amber monthly · purple quarterly · rose annually');
+  t+=4;
+
+  // 15. each frequency filter
+  const FL=[['Weekly','s20','Weekly only - a column for every week'],['Fortnightly','s21','Fortnightly - every other week'],['Monthly','s22','Monthly - one column per month'],['Quarterly','s23','Quarterly - one column per quarter'],['Annually','s24','Annually - the year at a glance']];
+  let prev='s19';
+  // a slight zoom that still keeps the menu (top right) and the task names (left) in view
+  C(t+.8,1.2,1150,470);
+  FL.forEach(f=>{
+    const d=rect(prev,'.rq-ddb'); const it=rect('s18','.rq-ddl button',new RegExp('^'+f[0]+'$'));
+    S(t,t+1.6,prev); M(t+.2,mid(d)); K(t+.6);
+    HOOKS.push([t+.6,t+1.6,(()=>{ const id=prev; return ()=>showMenu(id,f[0]); })(),(()=>{ const id=prev; return ()=>hideMenu(id); })()]);
+    M(t+1.1,mid(it)); K(t+1.45);
+    S(t+1.6,t+4.6,f[1]);
+    T(t,t+4.6,'12','Filter by frequency',f[2]);
+    prev=f[1]; t+=4.6;
+  });
+
+  // OUTRO - held for speaking, then the logo
+  CARDS.push(['outro',t,t+8]); t+=8;
+  CARDS.push(['logo',t,t+5]); t+=5;
+  DUR=t;
+  // cursor hidden on cards: park it off-screen
+  CUR.sort((a,b)=>a[0]-b[0]);
+}
+// a frequency menu drawn inside a snapshot, copied from the real one (s18)
+function showMenu(id,on){
+  const d=F[id].contentDocument; if(d.getElementById('mmenu')) return;
+  const src=F.s18.contentDocument.querySelector('.rq-ddl'); const host=d.querySelector('.rq-dd'); if(!src||!host) return;
+  const m=src.cloneNode(true); m.id='mmenu';
+  [...m.querySelectorAll('button')].forEach(b=>b.classList.toggle('on',b.innerText.trim()===on));
+  host.appendChild(m);
+}
+function hideMenu(id){ const m=F[id].contentDocument.getElementById('mmenu'); if(m) m.remove(); }
+
+/* ------------------------------------------------------------------ draw one frame */
+const $=id=>document.getElementById(id);
+let hlEls=[], ripEls=[];
+function seek(t){
+  // cards
+  let cardOn=false;
+  // intro: on from the start, fades out in its last 0.6 s; outro: fades in and out; logo: fades in and stays
+  ['intro','outro','logo'].forEach(k=>{ const c=CARDS.find(x=>x[0]===k); let o=0;
+    if(c&&t>=c[1]&&t<c[2]+(k==='logo'?99:0)){
+      const fin=k==='intro'?1:(t-c[1])/(k==='logo'?.9:.6), fout=k==='logo'?1:(c[2]-t)/.6;
+      o=Math.min(1,fin,fout); }
+    o=clamp(o,0,1); $(k).style.opacity=o; if(o>.6) cardOn=true; });
+  // intro text rises in
+  const ih=$('intro'); ih.style.transform='translateY('+(Math.max(0,1-t/1.2)*30)+'px)';
+  // shots with crossfade
+  STATES.forEach(id=>F[id].style.opacity=0);
+  SHOTS.forEach(([a,b,id])=>{ if(t>=a-.35&&t<b){ const o=clamp((t-(a-.35))/.35,0,1); if(+F[id].style.opacity<o) F[id].style.opacity=o; } });
+  // hooks (state tweaks inside snapshots)
+  HOOKS.forEach(h=>{ if(t>=h[0]&&t<h[1]) h[2](); else h[3](); });
+  // scrolls
+  SCROLLS.forEach(([id,sel,kf])=>{ const e=el(id,sel); if(e) e.scrollLeft=track(kf,t)[0]; });
+  // camera
+  const [s,cx,cy]=CAM.length?track(CAM.slice().sort((a,b)=>a[0]-b[0]),t):[1,960,540];
+  const tx=clamp(960-cx*s,1920-1920*s,0), ty=clamp(540-cy*s,1080-1080*s,0);
+  $('cam').style.transform='translate('+tx+'px,'+ty+'px) scale('+s+')';
+  const P=(x,y)=>[x*s+tx,y*s+ty];
+  // highlights
+  hlEls.forEach(e=>e.style.opacity=0);
+  HLS.forEach((h,i)=>{ const e=hlEls[i]||(hlEls[i]=Object.assign(document.createElement('div'),{className:'hl'})); if(!e.parentNode) $('fx').appendChild(e);
+    if(t>=h[0]&&t<h[1]){ const [x,y]=P(h[2][0],h[2][1]); e.style.left=x+'px'; e.style.top=y+'px'; e.style.width=h[2][2]*s+'px'; e.style.height=h[2][3]*s+'px';
+      e.style.boxShadow='0 0 0 4px '+h[3]+', 0 0 24px 6px '+h[3]+'55'; e.style.opacity=Math.min(1,(t-h[0])/.25,(h[1]-t)/.25); } });
+  // cursor + clicks
+  const [mx,my]=CUR.length?track(CUR,t):[2000,1200];
+  const [px,py]=P(mx,my);
+  const cur=$('cursor'); const down=CLICKS.some(c=>t>=c&&t<c+.15);
+  cur.style.transform='translate('+(px-6)+'px,'+(py-4)+'px) scale('+(down?.85:1)+')';
+  cur.style.opacity=cardOn?0:1;
+  ripEls.forEach(e=>e.style.opacity=0);
+  CLICKS.forEach((c,i)=>{ const e=ripEls[i]||(ripEls[i]=Object.assign(document.createElement('div'),{className:'ripple'})); if(!e.parentNode) $('fx').appendChild(e);
+    if(t>=c&&t<c+.6){ const x=(t-c)/.6; const [cx2,cy2]=P(...track(CUR,c)); e.style.left=cx2+'px'; e.style.top=cy2+'px'; e.style.transform='scale('+(.3+x)+')'; e.style.opacity=1-x; } });
+  // caption: the latest one that covers t
+  const c=CAPS.filter(c=>t>=c[0]&&t<c[1]).pop(); const cap=$('cap');
+  if(c&&!cardOn){ cap.querySelector('.n').textContent=c[2]; cap.querySelector('.t').textContent=c[3]; cap.querySelector('.s').textContent=c[4];
+    cap.querySelector('.s').style.display=c[4]?'':'none'; cap.style.opacity=1; } else cap.style.opacity=0;
+  $('prog').style.width=(t/DUR*100)+'%';
+}
+window.seek=seek;
+
+/* ------------------------------------------------------------------ fit the window and play */
+function fit(){ const k=Math.min(innerWidth/1920,innerHeight/1080); const st=$('stage'); st.style.transform='scale('+k+')';
+  st.style.left=(innerWidth-1920*k)/2+'px'; st.style.top=(innerHeight-1080*k)/2+'px'; }
+const Q=new URLSearchParams(location.search);
+window.READY=loadAll().then(()=>new Promise(r=>setTimeout(r,600))).then(()=>{ build(); window.DURATION=DUR;
+  if(Q.has('render')){ $('prog').style.display='none'; seek(0); return; }
+  fit(); addEventListener('resize',fit);
+  const t0=performance.now()-(+Q.get('t')||0)*1000;
+  (function loop(){ const t=(performance.now()-t0)/1000; seek(t%(DUR+1)); requestAnimationFrame(loop); })();
+});
+</script>
+</body></html>

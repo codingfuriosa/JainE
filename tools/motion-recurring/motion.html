@@ -1,0 +1,463 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<title>Recurring Tasks - JainE</title>
+<!--
+  RECURRING TASKS EXPLAINER (landscape 1920x1080).
+  Every screen is a real JainE screen: states/sNN.html are snapshots of the live Accountability page
+  (captured 16 Oct 2026, nothing saved). This page only moves a camera, a cursor and captions over
+  them. Positions are read from the snapshots themselves, so nothing is placed by eye.
+  window.seek(t) draws the frame at t seconds (used by render.mjs to make the MP4); without
+  ?render the page plays itself in real time. ?t=NN starts from second NN.
+-->
+<link rel="stylesheet" href="/vendor/inter/inter.css">
+<style>
+  html,body{margin:0;background:#0b1220;overflow:hidden}
+  #stage{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;background:#fff;transform-origin:0 0;font-family:Inter,system-ui,sans-serif}
+  #cam{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0}
+  #cam iframe{position:absolute;left:0;top:0;width:1920px;height:1080px;border:0;opacity:0;background:#fff;pointer-events:none}
+  #fx{position:absolute;left:0;top:0;width:1920px;height:1080px;pointer-events:none}
+  .hl{position:absolute;border-radius:10px;box-shadow:0 0 0 4px #e0121c,0 0 0 9999px rgba(15,23,42,.0);opacity:0}
+  .ripple{position:absolute;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;border:4px solid #e0121c;opacity:0}
+  #cursor{position:absolute;left:0;top:0;width:34px;height:34px;filter:drop-shadow(0 3px 5px rgba(0,0,0,.35));z-index:5}
+  #cap{position:absolute;left:50%;bottom:54px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;
+    background:rgba(15,23,42,.92);color:#fff;padding:18px 30px 18px 18px;border-radius:18px;max-width:1500px;opacity:0;z-index:6}
+  #cap .n{flex:none;min-width:46px;height:46px;padding:0 6px;box-sizing:border-box;border-radius:12px;background:#e0121c;color:#fff;font-weight:800;font-size:22px;display:flex;align-items:center;justify-content:center}
+  #cap .t{font-size:30px;font-weight:700;line-height:1.25}
+  #cap .s{font-size:21px;font-weight:500;color:#cbd5e1;margin-top:4px;line-height:1.3}
+  .card{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;z-index:8}
+  #intro{background:#fff}
+  #intro .bar,#outro .bar{width:120px;height:8px;border-radius:4px;background:#e0121c;margin-bottom:34px}
+  #intro h1,#outro h1{margin:0;font-size:92px;font-weight:800;color:#0f172a;letter-spacing:-2px}
+  #intro p,#outro p{margin:22px 0 0;font-size:36px;color:#475569;font-weight:500}
+  #intro .chip{margin-top:44px;display:flex;gap:14px}
+  #intro .chip span{font-size:24px;font-weight:700;padding:10px 20px;border-radius:30px}
+  #outro{background:#fff}
+  #outro ul{list-style:none;margin:40px 0 0;padding:0;display:flex;gap:22px}
+  #outro li{font-size:25px;font-weight:600;color:#0f172a;background:#f1f5f9;border-radius:14px;padding:16px 24px}
+  #outro li b{color:#e0121c}
+  #logo{background:#fff}
+  #logo img{width:760px}
+  #panel{position:absolute;right:70px;top:300px;width:640px;background:#fff;border-radius:20px;box-shadow:0 24px 60px rgba(15,23,42,.28);padding:26px 30px;opacity:0;z-index:7}
+  #panel .ph{font-size:26px;font-weight:800;color:#0f172a;margin-bottom:14px;display:flex;align-items:center;gap:12px}
+  #panel .ph span{font-size:15px;font-weight:700;color:#64748b;background:#f1f5f9;border-radius:20px;padding:4px 12px;text-transform:uppercase;letter-spacing:.06em}
+  #panel .ex{display:flex;align-items:center;gap:22px;padding:12px 14px;border-radius:14px;opacity:.38;transition:none}
+  #panel .ex.lit{opacity:1;background:#f8fafc;box-shadow:inset 0 0 0 3px #e0121c}
+  #panel .cl{flex:none;width:150px;height:62px;border:1px solid #e2e8f0;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:24px;font-family:Inter,system-ui,sans-serif}
+  #panel .cl small{font-size:21px}
+  #panel .ex b{display:block;font-size:22px;color:#0f172a}
+  #panel .ex div:last-child{font-size:20px;color:#475569;line-height:1.35}
+  #prog{position:absolute;left:0;bottom:0;height:5px;background:#e0121c;z-index:9}
+</style></head>
+<body>
+<div id="stage">
+  <div id="cam"></div>
+  <div id="fx"></div>
+  <svg id="cursor" viewBox="0 0 24 24"><path d="M4 2 L4 20 L9 15.5 L12.2 22 L15 20.7 L11.9 14.3 L18.5 14.3 Z" fill="#0f172a" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>
+  <div id="cap"><div class="n"></div><div><div class="t"></div><div class="s"></div></div></div>
+  <div class="card" id="intro">
+    <div class="bar"></div>
+    <h1>Recurring Tasks</h1>
+    <p>New in JainE Accountability</p>
+    <div class="chip">
+      <span style="background:#dbeafe;color:#1d4ed8">Weekly</span><span style="background:#ccfbf1;color:#0f766e">Fortnightly</span>
+      <span style="background:#fef3c7;color:#b45309">Monthly</span><span style="background:#ede9fe;color:#6d28d9">Quarterly</span>
+      <span style="background:#ffe4e6;color:#be123c">Annually</span>
+    </div>
+  </div>
+  <div class="card" id="outro">
+    <div class="bar"></div>
+    <h1>Set it once. JainE remembers.</h1>
+    <ul><li><b>1</b> Pick a repeat in the due date</li><li><b>2</b> Purple border = recurring</li><li><b>3</b> Track it all in Recurring</li></ul>
+  </div>
+  <div class="card" id="logo"><img src="logo.png" alt="Jain Group"></div>
+  <div id="panel"><div class="ph">How to read a cell <span>example</span></div><div class="ex"><div class="cl" style="color:#0f172a">Fri</div><div><b>No number</b>Yet to come</div></div><div class="ex"><div class="cl" style="color:#15803d">Fri<small>−2</small></div><div><b>Minus, in green</b>Done 2 days early</div></div><div class="ex"><div class="cl" style="color:#dc2626">Fri<small>+2</small></div><div><b>Plus, in red</b>Done 2 days late</div></div><div class="ex"><div class="cl" style="color:#b91c1c;font-weight:800">Fri<small>+3</small></div><div><b>Plus, in bold red</b>Not done yet - 3 days past the deadline</div></div></div>
+  <div id="prog"></div>
+</div>
+<script>
+'use strict';
+/* ------------------------------------------------------------------ helpers */
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const ease=x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;          // easeInOutCubic
+const lerp=(a,b,x)=>a+(b-a)*x;
+// value of a keyframe track [[t,v...],...] at time t, eased between neighbours
+function track(kf,t){
+  if(t<=kf[0][0]) return kf[0].slice(1);
+  for(let i=1;i<kf.length;i++){ if(t<=kf[i][0]){ const a=kf[i-1],b=kf[i]; const x=ease(clamp((t-a[0])/(b[0]-a[0]||1),0,1)); return a.slice(1).map((v,j)=>lerp(v,b[j+1],x)); } }
+  return kf[kf.length-1].slice(1);
+}
+const STATES=['s01','s02','s03','s04','s05','s06','s07','s08','s09','s10','s11','s12','s13','s14','s15','s16','s17','s18','s19','s20','s21','s22','s23','s24','s25'];
+const F={}; // iframe per state
+function el(id,sel,text){
+  const d=F[id].contentDocument; let list=[...d.querySelectorAll(sel)];
+  if(text) list=list.filter(e=>text.test((e.innerText||e.textContent||'').trim()));
+  return list[0]||null;
+}
+function rect(id,sel,text,pad){
+  const e=el(id,sel,text); if(!e) { console.warn('missing',id,sel,text); return [960,540,10,10]; }
+  const r=e.getBoundingClientRect(); pad=pad||0; return [r.left-pad,r.top-pad,r.width+2*pad,r.height+2*pad];
+}
+const mid=r=>[r[0]+r[2]/2,r[1]+r[3]/2];
+
+/* ------------------------------------------------------------------ load the snapshots */
+function loadAll(){
+  return Promise.all(STATES.map(id=>new Promise(res=>{
+    const f=document.createElement('iframe'); f.src='states/'+id+'.html'; f.onload=()=>{
+      const d=f.contentDocument;
+      // scroll positions saved at capture time
+      d.querySelectorAll('[data-sl]').forEach(e=>{ e.scrollLeft=+e.dataset.sl; e.scrollTop=+e.dataset.st; });
+      const st=d.createElement('style');
+      st.textContent='*{transition:none!important;animation:none!important;caret-color:transparent!important}.ac-ins.hov::after{opacity:1!important}html,body{overflow:hidden!important}::-webkit-scrollbar{height:10px}';
+      // one-frequency views with only a row or two: the table shrinks to its rows (JainE gives it a
+      // 320 px minimum, which leaves a white block under one row)
+      if(/^s2[0-5]$/.test(id)) st.textContent+='.rq-table{min-height:0!important}';
+      d.head.appendChild(st);
+      res();
+    };
+    F[id]=f; document.getElementById('cam').appendChild(f);
+  })));
+}
+
+/* ------------------------------------------------------------------ the script */
+let SHOTS=[], CAM=[], CUR=[], CLICKS=[], CAPS=[], HLS=[], SCROLLS=[], HOOKS=[], CARDS=[], DUR=0;
+/* SCRIPT-LED TIMING. lines.json is the voiceover script, one entry per scene, with the words some
+   moments wait for (cues). When voice-timing.json exists (made by align.mjs from the recorded voice)
+   every scene starts on its line and every cue on its word; until then the timing is estimated from
+   the number of words. A scene that needs longer on screen than its line gets a pause after the line.
+   VO_SEGS tells the renderer where to place each piece of the recording. */
+const LEAD=0.6;                       // the voice starts this long after the video
+const WPS=0.4;                        // estimated seconds per word, before there is a recording
+let LINES=[], TIMING=null, VO_SEGS=[], SEG={};
+const words=s=>s.replace(/[“”"]/g,'').split(/\s+/).filter(Boolean);
+async function loadScript(){
+  LINES=await (await fetch('lines.json?'+Date.now())).json();
+  try{ const r=await fetch('voice-timing.json?'+Date.now()); if(r.ok) TIMING=await r.json(); }catch(e){}
+  let a=0, v=0;
+  LINES.forEach((L,i)=>{
+    let a0,a1,cues={};
+    if(TIMING&&TIMING[L.id]){ a0=TIMING[L.id].a0; a1=TIMING[L.id].a1; cues=TIMING[L.id].cues||{}; }
+    else{
+      const w=words(L.text); a0=a; a1=a+w.length*WPS+.5; a=a1;
+      // a cue sits where its word is in the line
+      Object.entries(L.cues||{}).forEach(([k,c])=>{ const [word,nth]=c.split('#'); let n=+(nth||1), idx=-1;
+        w.forEach((x,j)=>{ if(idx<0&&x.replace(/[^\w]/g,'').toLowerCase()===word.toLowerCase()&&--n===0) idx=j; });
+        cues[k]=a0+Math.max(0,idx)*WPS; });
+    }
+    /* A line with "split" is cut into parts at the pauses before its split words (TIMING cuts, set by
+       snap.mjs), and every part is held at least split.min seconds - so a list read quickly
+       ("Weekly. Fortnightly. Monthly.") still gives each item its own moment, each starting on its
+       word. Cuts are always inside pauses, so no word is broken. */
+    const src=(TIMING&&TIMING[L.id]&&TIMING[L.id].src)||0, lead=i===0?LEAD:0;
+    const cuts=TIMING&&TIMING[L.id]&&TIMING[L.id].cuts||{};
+    const keyed=(L.split?L.split.keys:[]).map(k=>[k,cuts[k]!=null?cuts[k]:(TIMING?null:cues[k])]).filter(x=>x[1]!=null&&x[1]>a0+.05&&x[1]<a1);
+    const bounds=[a0].concat(keyed.map(x=>x[1])).concat([a1]), bkey=[null].concat(keyed.map(x=>x[0]));
+    /* override: a part's sound taken from elsewhere in the recordings (the list's "Weekly" came out
+       as "Weegle"; the same voice says it cleanly in the filter list). trim: stretches of a line's
+       audio left out (an over-long pause). */
+    const ov=TIMING&&TIMING[L.id]&&TIMING[L.id].override||{}, trims=TIMING&&TIMING[L.id]&&TIMING[L.id].trim||[];
+    const parts=[]; let pv=v;
+    for(let j=0;j<bounds.length-1;j++){
+      const o=ov[bkey[j]];
+      // pieces: a line whose sound is assembled from several takes (a clean word dropped in)
+      const pc=TIMING&&TIMING[L.id]&&TIMING[L.id].pieces;
+      let pieces=o?[[o.a0,o.a1,o.src||0]]:(pc&&bounds.length===2?pc.map(p=>p.slice()):[[bounds[j],bounds[j+1],src]]);
+      trims.forEach(([s,e])=>{ pieces=pieces.flatMap(p=>s>p[0]&&e<p[1]?[[p[0],s,p[2]],[e,p[1],p[2]]]:[p]); });
+      const len=pieces.reduce((n,p)=>n+p[1]-p[0],0), l2=(j===0?lead:0);
+      const pd=Math.max(l2+len, L.split&&bounds.length>2?L.split.min:0);
+      parts.push({v:pv,a0:bounds[j],a1:bounds[j+1],lead:l2});
+      if(TIMING){ let at=pv+l2; pieces.forEach(p=>{ VO_SEGS.push([+at.toFixed(3),p[0],p[1],p[2]]); at+=p[1]-p[0]; }); }
+      pv+=pd;
+    }
+    const d=Math.max(pv-v,L.min);
+    SEG[L.id]={v:v,d:d,a0:a0,a1:a1,lead:lead,cues:cues,parts:parts};
+    v+=d;
+  });
+  SEG.logo={v:v,d:5};
+  window.VO_SEGS=VO_SEGS;
+}
+// video time of a cue word in a line (or of a moment ds seconds into the line)
+function cue(id,k){ const s=SEG[id]; const a=typeof k==='number'?s.a0+k:(s.cues[k]!=null?s.cues[k]:s.a0);
+  const p=s.parts.filter(x=>a>=x.a0-.001).pop()||s.parts[0]; return p.v+p.lead+(a-p.a0); }
+
+function build(){
+  const S=(a,b,id)=>SHOTS.push([a,b,id]);
+  const C=(t,s,cx,cy)=>CAM.push([t,s,cx,cy]);
+  const M=(t,p)=>CUR.push([t,p[0],p[1]]);
+  const K=t=>CLICKS.push(t);
+  const T=(a,b,n,t,s)=>CAPS.push([a,b,n,t,s||'']);
+  const H=(a,b,r,col)=>HLS.push([a,b,r,col||'#e0121c']);
+  const g=k=>SEG[k];
+  let s,t,D;
+
+  // INTRO
+  CARDS.push(['intro',0,g('intro').d]);
+  C(0,1,960,540);
+
+  // add a task
+  s=g('add'); t=s.v; D=s.d;
+  const gap=rect('s01','.ac-ins');
+  S(t,t+D,'s01'); M(t,[1500,820]);
+  T(t+.3,t+D,'1','Create a task the way you always do','Point between two tasks and click “+ Add task here”');
+  const pt=t+Math.min(2,D*.4);
+  HOOKS.push([pt+.3,t+D,()=>{ const e=el('s01','.ac-ins'); e&&e.classList.add('hov'); },()=>{ const e=el('s01','.ac-ins'); e&&e.classList.remove('hov'); }]);
+  M(pt,mid(gap)); K(t+D-1);
+  C(t,1,960,540); C(pt,1,960,540); C(t+D,1.35,700,470);
+
+  // type the name
+  s=g('type'); t=s.v; D=s.d;
+  const inp=rect('s02','#selfInsInput');
+  S(t,t+D*.4,'s02'); S(t+D*.4,t+D,'s03');
+  M(t,[inp[0]+60,inp[1]+inp[3]/2]);
+  T(t+.2,t+D,'2','Type the task’s name','Here: “Weekly site progress report”');
+
+  // open the due date
+  s=g('cal'); t=s.v; D=s.d;
+  const db=rect('s03','#selfInsDateBtn');
+  S(t,t+D,'s03'); M(t+.6,mid(db)); K(t+1.1);
+  T(t+.1,t+D,'3','Click the calendar to set the due date','');
+  C(t+.4,1.35,800,470); C(t+D+.6,1.4,1180,660);
+
+  // the six options, each lit as it is said
+  s=g('opts'); t=s.v; D=s.d;
+  S(t,t+D,'s04');
+  const opts=['none','weekly','fortnightly','monthly','quarterly','yearly'];
+  const names=['Does not repeat','Weekly','Fortnightly','Monthly','Quarterly','Annually'];
+  const labels=['A one-time task, as before','One day of the week','One day, every other week','One date every month, or the last day','One date, every third month','One month and one date in it'];
+  opts.forEach((o,i)=>{
+    const r=rect('s04','[data-dp=freq][data-v='+o+']',null,3);
+    const a=i?cue('opts',o):t, b=i<5?cue('opts',opts[i+1]):t+D;
+    H(a,b,r,'#2563eb'); M(Math.max(t,a-.25),[r[0]+r[2]-24,r[1]+r[3]/2]);
+    CAPS.push([a,b,'4',names[i],labels[i]]);
+  });
+
+  // each frequency: click it, then pick
+  const FQ=[
+    ['weekly','s05','s06','[data-dp=dow][data-v="5"]','Weekly','Pick the day - here, every Friday'],
+    ['fortnightly','s07','s08','[data-dp=dow][data-v="5"]','Fortnightly','Pick the day - it repeats every other week'],
+    ['monthly','s09','s10','[data-dp=dom][data-v="5"]','Monthly','Pick the date - here, the 5th of every month'],
+    ['quarterly','s11','s12','[data-dp=dom][data-v="10"]','Quarterly','Pick the date - it repeats every third month'],
+    ['yearly','s13','s14','[data-dp=mon][data-v="3"]','Annually','Pick the month, then the date - here, every 15 April']
+  ];
+  FQ.forEach((q,i)=>{
+    const sg=g(q[0]); const a=sg.v, d=sg.d;
+    const prevState=i===0?'s04':FQ[i-1][2];
+    const o=rect(prevState,'[data-dp=freq][data-v='+q[0]+']');
+    const p=rect(q[1],q[3]);
+    const pickAt=sg.cues.pick!=null?Math.max(a+1.2,cue(q[0],'pick')):a+d*.5;
+    S(a,a+.7,prevState); M(a,mid(o)); K(a+.4);
+    S(a+.7,pickAt+.35,q[1]); M(pickAt-.35,mid(p)); K(pickAt);
+    if(q[0]==='yearly'){
+      const d15=rect('s14','[data-dp=ymd][data-v="15"]');
+      const dAt=Math.max(pickAt+.8,cue('yearly','date'));
+      S(pickAt+.35,a+d,'s14'); M(dAt-.35,mid(d15)); K(dAt);
+      H(Math.max(dAt+.3,cue('yearly','says')),a+d,rect('s14','.dp-says',null,4),'#2563eb');
+    }else S(pickAt+.35,a+d,q[2]);
+    T(a,a+d,'5',q[4],q[5]);
+  });
+
+  // back to Weekly, Friday - and Done
+  s=g('done'); t=s.v; D=s.d;
+  const wk=rect('s14','[data-dp=freq][data-v=weekly]');
+  const done=rect('s15','#acDpBox button',/^Done$/);
+  const dn=Math.max(t+1.6,cue('done','done'));
+  S(t,t+.8,'s14'); M(t,mid(wk)); K(t+.5);
+  S(t+.8,t+D,'s15');
+  T(t,t+D,'6','Our task: Weekly, every Friday','Below the picker it shows the next dates. Click Done, then Enter to save.');
+  H(t+1,dn,rect('s15','#acDpBox',null,0),'#2563eb');
+  M(dn-.1,mid(done)); K(dn+.4);
+  C(t+D-.4,1.4,1180,660);
+
+  // the purple border
+  s=g('purple'); t=s.v; D=s.d;
+  const row=rect('s16','.ac-row',/Weekly site progress report/);
+  S(t,t+D,'s16');
+  C(t+.8,1,960,540); C(t+2.2,1.55,row[0]+row[2]/2,row[1]+80);
+  M(t+.4,[row[0]+row[2]-80,row[1]+row[3]+60]);
+  T(t+.2,t+D,'7','A recurring task has a purple border','So you can tell it apart from a one-time task in every list');
+  H(Math.max(t+1,cue('purple','purple')),t+D,[row[0]-6,row[1]-6,row[2]+12,row[3]+12],'#7c3aed');
+
+  // the Recurring pill
+  s=g('pill'); t=s.v; D=s.d;
+  const pill=rect('s16','.ac-3p *',/^Recurring$/);
+  S(t,t+D,'s16'); C(t,1.55,row[0]+row[2]/2,row[1]+80); C(t+1,1.25,900,400);
+  M(t+.5,mid(pill)); K(t+D-.4);
+  T(t+.1,t+D,'8','Open the Recurring pill on Tasks','');
+
+  // Due soon
+  s=g('soon'); t=s.v; D=s.d;
+  S(t,t+D,'s17'); C(t,1,960,540);
+  const colKeys=['overdue','today','tomorrow','after'];
+  T(t+.3,cue('soon','overdue'),'8','Due soon - what needs doing next','Opens on this view every time');
+  const cols=[...F.s17.contentDocument.querySelectorAll('.rq-sc')].map(e=>{const r=e.getBoundingClientRect();return [r.left,r.top,r.width,r.height];});
+  const colTxt=[['Overdue','Repeats not done yet, past their deadline'],['Today','Every repeat due today'],['Tomorrow','What is coming tomorrow'],['Day after','And the day after - with the deadline on each']];
+  cols.forEach((r,i)=>{ const a=cue('soon',colKeys[i]), b=i<3?cue('soon',colKeys[i+1]):t+D;
+    H(a,b,[r[0]-3,r[1]-3,r[2]+6,Math.min(r[3],620)+6],i===0?'#e0121c':'#2563eb'); M(a-.2,[r[0]+r[2]/2,r[1]+60]); CAPS.push([a,b,'8',colTxt[i][0],colTxt[i][1]]); });
+
+  // the menu -> All frequencies
+  s=g('menu'); t=s.v; D=s.d;
+  const ddb=rect('s17','.rq-ddb');
+  const allI=rect('s18','.rq-ddl button',/^All frequencies$/);
+  const ch=Math.max(t+1.8,cue('menu','choose'));
+  S(t,t+1,'s17'); M(t+.1,mid(ddb)); K(t+.6);
+  S(t+1,t+D,'s18'); C(t+1,1,960,540); C(t+1.8,1.6,1500,330);
+  T(t+.1,t+D,'9','Change the view from this menu','Due soon, All frequencies, or one frequency at a time');
+  H(t+1.4,ch,rect('s18','.rq-ddl',null,2),'#2563eb');
+  M(ch,mid(allI)); K(ch+.6);
+
+  // All frequencies - the year, scrolled across
+  s=g('year'); t=s.v; D=s.d;
+  S(t,t+D,'s19'); C(t,1.6,1500,330); C(t+1.2,1,960,540);
+  const sc=Math.max(t+3,cue('year','scroll'));
+  T(t+.3,sc,'10','All frequencies - the whole financial year','Every recurring task on the left, April to March across, week by week');
+  const tbl=el('s19','.rq-table'); const startSL=tbl?tbl.scrollLeft:0; const maxSL=tbl?tbl.scrollWidth-tbl.clientWidth:0;
+  SCROLLS.push(['s19','.rq-table',[[t+2.6,startSL],[t+4,0],[sc+.3,0],[t+D-2.6,maxSL],[t+D-1.2,maxSL],[t+D+1.4,startSL]]]);
+  T(sc,t+D,'10','Scroll sideways through the year','Each cell shows the day or date it is due');
+  M(t+2,[1300,700]);
+
+  // the colour key, each one lit as it is said - framed so "Yet to come" on the left is in view
+  s=g('key'); t=s.v; D=s.d;
+  S(t,t+D,'s19');
+  const key=rect('s19','.rq-key',null,6);
+  const KZ=1.7, kcx=key[0]-18+960/KZ, kcy=key[1]+8;
+  const kitems=[...F.s19.contentDocument.querySelectorAll('.rq-key > span')].map(e=>{const r=e.getBoundingClientRect();return [r.left-6,r.top-6,r.width+12,r.height+12];});
+  const ktxt=[['Black - yet to come','Due later; nothing to do yet'],['Green - done on time','Finished by the deadline'],['Red - done late','Finished after the deadline'],['Bold red - not done, overdue','Still open after the deadline']];
+  const kk=['black','green','red','bold'];
+  C(t+.2,1,960,540); C(t+1.6,KZ,kcx,kcy);
+  CAPS.push([t,cue('key','black'),'11','The colour code','']);
+  kitems.slice(0,4).forEach((r,i)=>{ const a=Math.max(t+1.6,cue('key',kk[i])), b=i<3?cue('key',kk[i+1]):t+D; H(a,b,r,'#e0121c'); CAPS.push([a,b,'11',ktxt[i][0],ktxt[i][1]]); M(a-.25,[r[0]+r[2]/2,r[1]+r[3]+24]); });
+
+  // the numbers: a "how to read a cell" panel, then the real overdue cells in the table
+  s=g('logic'); t=s.v; D=s.d;
+  S(t,t+D,'s19'); C(t,KZ,kcx,kcy); C(t+1.2,1,960,540);
+  const lk=['plain','minus','plus','plus3'];
+  PANEL=[t+.4,t+D-.2,lk.map(k=>cue('logic',k))];
+  T(t+.2,cue('logic','plain'),'12','The number shows how many days early or late','For example:');
+  const ltxt=[['Fri - no number','Yet to come'],['Fri −2, in green','Done 2 days early (no number = done on the day)'],['Fri +2, in red','Done 2 days late'],['Fri +3, in bold red','Not done - 3 days overdue']];
+  lk.forEach((k,i)=>{ const a=cue('logic',k), b=i<3?cue('logic',lk[i+1]):t+D; CAPS.push([a,b,'12',ltxt[i][0],ltxt[i][1]]); });
+  // real open cells on this table (bold red), lit while the bold-red example is explained
+  const od=[...F.s19.contentDocument.querySelectorAll('.rq-cl.on')].filter(e=>/overdue/.test(e.title)&&e.getBoundingClientRect().left>600&&e.getBoundingClientRect().right<1890);
+  od.slice(0,3).forEach(e=>{ const r=e.getBoundingClientRect(); H(cue('logic','goes'),t+D,[r.left,r.top,r.width,r.height],'#b91c1c'); });
+  M(t+1.4,[1500,760]);
+
+  // the frequency colour bars - framed to keep the page title and tabs in view
+  s=g('bars'); t=s.v; D=s.d;
+  S(t,t+D,'s19'); C(t,1,960,540);
+  const bars=[...F.s19.contentDocument.querySelectorAll('.rq-tn i')].map(e=>e.getBoundingClientRect()).filter(r=>r.height);
+  if(bars.length){ const x0=Math.min(...bars.map(r=>r.left)), y0=bars[0].top, y1=bars[bars.length-1].bottom; H(t+.8,t+D,[x0-10,y0-8,32,y1-y0+16],'#e0121c'); M(t+.6,[x0+40,(y0+y1)/2]); }
+  T(t+.1,t+D,'13','The coloured bar shows the frequency','Blue weekly · teal fortnightly · amber monthly · purple quarterly · rose annually');
+
+  // one frequency at a time - a light zoom that keeps the title, the task names and the menu in view
+  s=g('filters'); t=s.v; D=s.d;
+  S(t,t+D,'s19'); C(t+.8,1.15,1085,470);
+  T(t+.1,t+D,'14','Or look at one frequency at a time','');
+  const FL=[['Weekly','s20','f-weekly','A column for every week'],['Fortnightly','s21','f-fortnightly','Every other week'],['Monthly','s22','f-monthly','One column per month'],['Quarterly','s23','f-quarterly','One column per quarter'],['Annually','s24','f-yearly','The year at a glance']];
+  let prev='s19';
+  FL.forEach(f=>{
+    const sg=g(f[2]); const a=sg.v, d=sg.d;
+    const dd=rect(prev,'.rq-ddb'); const it=rect('s18','.rq-ddl button',new RegExp('^'+f[0]+'$'));
+    const open=a-.9;
+    M(open-.4,mid(dd)); K(open);
+    HOOKS.push([open,a,(()=>{ const id=prev; return ()=>showMenu(id,f[0]); })(),(()=>{ const id=prev; return ()=>hideMenu(id); })()]);
+    M(a-.45,mid(it)); K(a-.15);
+    if(f[2]==='f-yearly'){
+      const nx=[...F.s24.contentDocument.querySelectorAll('.rq-nav .ac-btn')].pop().getBoundingClientRect();
+      const sw=a+1.1;   // straight on to next year: FY 26-27 has no date for the June renewal
+      S(a,sw,'s24'); M(sw-.7,[nx.left+nx.width/2,nx.top+nx.height/2]); K(sw-.25); S(sw,a+d,'s25');
+      T(a,sw,'14',f[0],'One column per year');
+      T(sw,a+d,'14','Annually · FY 27–28','Both annual tasks: Fire NOC 18 Nov, Insurance renewal 15 Jun 2027');
+    }else{ S(a,a+d,f[1]); T(a,a+d,'14',f[0],f[3]); }
+    prev=f[1];
+  });
+
+  // OUTRO then the logo
+  CARDS.push(['outro',g('outro').v,g('outro').v+g('outro').d]);
+  CARDS.push(['logo',g('logo').v,g('logo').v+g('logo').d]);
+  DUR=g('logo').v+g('logo').d;
+  CUR.sort((a,b)=>a[0]-b[0]);
+  // the cursor stays on what it clicks: without this it was already gliding to its next spot when
+  // the click landed, and clicked beside the target
+  const holds=CLICKS.map(c=>{ const k=CUR.filter(x=>x[0]<=c).pop()||CUR[0]; return [[c-.05,k[1],k[2]],[c+.4,k[1],k[2]]]; }).flat();
+  CUR=CUR.concat(holds).sort((a,b)=>a[0]-b[0]);
+}
+
+/* "How to read a cell": four example cells drawn like the real ones (same size, colours, weights),
+   lit one at a time as the voice explains them. They are examples, labelled as such - not data. */
+let PANEL=null;
+function drawPanel(t){
+  const p=document.getElementById('panel');
+  if(!PANEL||t<PANEL[0]||t>=PANEL[1]){ p.style.opacity=0; return; }
+  p.style.opacity=Math.min(1,(t-PANEL[0])/.4,(PANEL[1]-t)/.4);
+  const at=PANEL[2]; let on=-1; at.forEach((a,i)=>{ if(t>=a) on=i; });
+  [...p.querySelectorAll('.ex')].forEach((e,i)=>e.classList.toggle('lit',i===on));
+}
+
+// a frequency menu drawn inside a snapshot, copied from the real one (s18)
+function showMenu(id,on){
+  const d=F[id].contentDocument; if(d.getElementById('mmenu')) return;
+  const src=F.s18.contentDocument.querySelector('.rq-ddl'); const host=d.querySelector('.rq-dd'); if(!src||!host) return;
+  const m=src.cloneNode(true); m.id='mmenu';
+  [...m.querySelectorAll('button')].forEach(b=>b.classList.toggle('on',b.innerText.trim()===on));
+  host.appendChild(m);
+}
+function hideMenu(id){ const m=F[id].contentDocument.getElementById('mmenu'); if(m) m.remove(); }
+
+/* ------------------------------------------------------------------ draw one frame */
+const $=id=>document.getElementById(id);
+let hlEls=[], ripEls=[];
+function seek(t){
+  // cards
+  let cardOn=false;
+  // intro: on from the start, fades out in its last 0.6 s; outro: fades in and out; logo: fades in and stays
+  ['intro','outro','logo'].forEach(k=>{ const c=CARDS.find(x=>x[0]===k); let o=0;
+    if(c&&t>=c[1]&&t<c[2]+(k==='logo'?99:0)){
+      const fin=k==='intro'?1:(t-c[1])/(k==='logo'?.9:.6), fout=k==='logo'?1:(c[2]-t)/.6;
+      o=Math.min(1,fin,fout); }
+    o=clamp(o,0,1); $(k).style.opacity=o; if(o>.6) cardOn=true; });
+  // intro text rises in
+  const ih=$('intro'); ih.style.transform='translateY('+(Math.max(0,1-t/1.2)*30)+'px)';
+  // shots with crossfade
+  STATES.forEach(id=>F[id].style.opacity=0);
+  SHOTS.forEach(([a,b,id])=>{ if(t>=a-.35&&t<b){ const o=clamp((t-(a-.35))/.35,0,1); if(+F[id].style.opacity<o) F[id].style.opacity=o; } });
+  // hooks (state tweaks inside snapshots)
+  HOOKS.forEach(h=>{ if(t>=h[0]&&t<h[1]) h[2](); else h[3](); });
+  // scrolls
+  SCROLLS.forEach(([id,sel,kf])=>{ const e=el(id,sel); if(e) e.scrollLeft=track(kf,t)[0]; });
+  // camera
+  const [s,cx,cy]=CAM.length?track(CAM.slice().sort((a,b)=>a[0]-b[0]),t):[1,960,540];
+  const tx=clamp(960-cx*s,1920-1920*s,0), ty=clamp(540-cy*s,1080-1080*s,0);
+  $('cam').style.transform='translate('+tx+'px,'+ty+'px) scale('+s+')';
+  const P=(x,y)=>[x*s+tx,y*s+ty];
+  // highlights
+  hlEls.forEach(e=>e.style.opacity=0);
+  HLS.forEach((h,i)=>{ const e=hlEls[i]||(hlEls[i]=Object.assign(document.createElement('div'),{className:'hl'})); if(!e.parentNode) $('fx').appendChild(e);
+    if(t>=h[0]&&t<h[1]){ const [x,y]=P(h[2][0],h[2][1]); e.style.left=x+'px'; e.style.top=y+'px'; e.style.width=h[2][2]*s+'px'; e.style.height=h[2][3]*s+'px';
+      e.style.boxShadow='0 0 0 4px '+h[3]+', 0 0 24px 6px '+h[3]+'55'; e.style.opacity=Math.min(1,(t-h[0])/.25,(h[1]-t)/.25); } });
+  // cursor + clicks
+  const [mx,my]=CUR.length?track(CUR,t):[2000,1200];
+  const [px,py]=P(mx,my);
+  const cur=$('cursor'); const down=CLICKS.some(c=>t>=c&&t<c+.15);
+  cur.style.transform='translate('+(px-6)+'px,'+(py-4)+'px) scale('+(down?.85:1)+')';
+  cur.style.opacity=cardOn?0:1;
+  ripEls.forEach(e=>e.style.opacity=0);
+  CLICKS.forEach((c,i)=>{ const e=ripEls[i]||(ripEls[i]=Object.assign(document.createElement('div'),{className:'ripple'})); if(!e.parentNode) $('fx').appendChild(e);
+    if(t>=c&&t<c+.6){ const x=(t-c)/.6; const [cx2,cy2]=P(...track(CUR,c)); e.style.left=cx2+'px'; e.style.top=cy2+'px'; e.style.transform='scale('+(.3+x)+')'; e.style.opacity=1-x; } });
+  // caption: the latest one that covers t
+  const c=CAPS.filter(c=>t>=c[0]&&t<c[1]).pop(); const cap=$('cap');
+  if(c&&!cardOn){ cap.querySelector('.n').textContent=c[2]; cap.querySelector('.t').textContent=c[3]; cap.querySelector('.s').textContent=c[4];
+    cap.querySelector('.s').style.display=c[4]?'':'none'; cap.style.opacity=1; } else cap.style.opacity=0;
+  drawPanel(t);
+  $('prog').style.width=(t/DUR*100)+'%';
+}
+window.seek=seek;
+
+/* ------------------------------------------------------------------ fit the window and play */
+function fit(){ const k=Math.min(innerWidth/1920,innerHeight/1080); const st=$('stage'); st.style.transform='scale('+k+')';
+  st.style.left=(innerWidth-1920*k)/2+'px'; st.style.top=(innerHeight-1080*k)/2+'px'; }
+const Q=new URLSearchParams(location.search);
+window.READY=loadAll().then(loadScript).then(()=>new Promise(r=>setTimeout(r,600))).then(()=>{ build(); window.DURATION=DUR;
+  if(Q.has('render')){ $('prog').style.display='none'; seek(0); return; }
+  fit(); addEventListener('resize',fit);
+  const t0=performance.now()-(+Q.get('t')||0)*1000;
+  (function loop(){ const t=(performance.now()-t0)/1000; seek(t%(DUR+1)); requestAnimationFrame(loop); })();
+});
+</script>
+</body></html>

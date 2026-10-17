@@ -538,9 +538,24 @@ window.docDelete=async function(id){
   const d=await getDoc(id);
   openModal(`<div class="modal-head"><h3>Delete document</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body">Delete <b>${esc(d.title)}</b>? This removes the file and its metadata permanently.</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="docDeleteConfirm(${id})"><i class="fa-solid fa-trash"></i> Delete</button></div>`);
 };
+/* A Legal Notice Answers document is the same stored file as the notice task's attachment (see
+   acc.legal_notice_answer_file), so deleting the document must not delete a file the task still
+   shows - nor one another document still points at. If the lookup itself fails, the file is kept:
+   a stray file costs nothing, a missing one cannot be got back. */
+async function docFileShared(path,docId){
+  try{
+    const {data,error}=await sb.schema('acc').rpc('storage_path_in_use',{p_path:path,p_except_doc:docId||null,p_except_ptask_file:null});
+    return error ? true : data!==false;
+  }catch(_e){ return true; }
+}
+async function docDeleteFile(d){
+  if(!d||!d.storage_path) return;
+  if(await docFileShared(d.storage_path,d.id)) return;
+  if(isS3Path(d.storage_path)) await s3Delete(d.storage_path); else await sb.storage.from(bucketFor(d.department)).remove([d.storage_path]);
+}
 window.docDeleteConfirm=async function(id){
   const d=await getDoc(id);
-  if(d.storage_path){ if(isS3Path(d.storage_path)) await s3Delete(d.storage_path); else await sb.storage.from(bucketFor(d.department)).remove([d.storage_path]); }
+  await docDeleteFile(d);
   const {error}=await sb.schema('doc').from('documents').delete().eq('id',id);
   if(error){toast(error.message,'err');return;}
   DOC.sel.delete(id);closeModal();toast('Deleted','ok');route();
@@ -550,7 +565,7 @@ async function docBulkDelete(){
   openModal(`<div class="modal-head"><h3>Delete ${DOC.sel.size} documents</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body">Permanently delete the selected documents and their files?</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="docBulkDeleteConfirm()"><i class="fa-solid fa-trash"></i> Delete all</button></div>`);
 }
 window.docBulkDeleteConfirm=async function(){
-  for(const id of DOC.sel){const d=await getDoc(id);if(d&&d.storage_path){ if(isS3Path(d.storage_path)) await s3Delete(d.storage_path); else await sb.storage.from(bucketFor(d.department)).remove([d.storage_path]); } await sb.schema('doc').from('documents').delete().eq('id',id);}
+  for(const id of DOC.sel){const d=await getDoc(id);await docDeleteFile(d); await sb.schema('doc').from('documents').delete().eq('id',id);}
   DOC.sel.clear();closeModal();toast('Deleted','ok');route();
 };
 window.docVersions=async function(id){
@@ -601,6 +616,7 @@ window.docUploadModal=async function(presetDept){
   }
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-upload"></i> Upload document${dept?' · '+esc(dept):''}</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
+    ${isLegal?legalRenameWarnHtml():''}
     <div class="dropzone" onclick="document.getElementById('upFile').click()"><i class="fa-solid fa-cloud-arrow-up"></i><div id="upName">Drag & drop or click to select files</div><div style="font-size:12px;margin-top:4px">PDF, Word, Excel, images — multiple allowed. Each file's name can be edited below.</div></div>
     <input type="file" id="upFile" class="hidden" multiple onchange="docUpPick()">
     <div id="upList" style="margin-top:8px"></div>
@@ -617,6 +633,18 @@ window.docUploadModal=async function(presetDept){
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="upBtn" onclick="docUploadSave()"><i class="fa-solid fa-upload"></i> Upload</button></div>`,'lg');
     docUpNoticeSync();
 };
+/* EVERY LEGAL UPLOAD, IN ANY FOLDER, SAYS THIS FIRST (17 Oct 2026). Scans arrive as "scan_0012.pdf"
+   or "IMG_2034.jpg", and a name like that tells nobody what the paper is - the file is in the vault
+   but cannot be found by looking. Shown above the file picker on the Documents upload dialog and on
+   Legal MIS case documents, before anything is chosen, because MIS uploads the moment files are picked. */
+function legalRenameWarnHtml(){
+  return '<div style="display:flex;gap:10px;align-items:flex-start;margin:0 0 12px;padding:10px 12px;'
+    +'background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;color:#92400e;font-size:13px;line-height:1.5">'
+    +'<i class="fa-solid fa-triangle-exclamation" style="margin-top:3px"></i>'
+    +'<div><b>Check the file names before uploading.</b> Some documents are hard to find by looking at their '
+    +'file names (for example <i>scan_0012.pdf</i> or <i>IMG_2034.jpg</i>), so kindly rename such documents '
+    +'to say what they are - e.g. <i>Reply to Fire Notice 06-10-2026.pdf</i>.</div></div>';
+}
 window.docUpPick=function(){const fs=[...$('upFile').files];$('upName').textContent=fs.length?fs.length+' file(s) selected — edit names below':'Drag & drop or click to select files';$('upList').innerHTML=fs.map((f,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-2)">${fileIcon(f.name.split('.').pop())}<input class="upTitleIn" data-i="${i}" value="${esc(f.name.replace(/\.[^.]+$/,''))}" title="${esc(f.name)}" style="flex:1;font-size:13px;font-weight:500;border:1px solid var(--line);border-radius:7px;padding:6px 9px;color:var(--ink)"><span style="color:var(--slate);font-size:12px;white-space:nowrap">${fmtBytes(f.size)}</span></div>`).join('');docUpNoticeSync();};
   /* UPLOADING A LEGAL NOTICE ASKS FOR THE FILE AND NOTHING ELSE.
      Every other field on this dialog - version, visibility, description, status, confidential,

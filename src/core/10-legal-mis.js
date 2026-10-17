@@ -424,6 +424,7 @@ window.misDocsOpen=async function(caseId){
       +'<div class="mis-doc-path"><i class="fa-solid fa-folder-tree"></i> Legal Documents · Litigation · '
         +'<b id="misDocPathCat">'+esc(cat)+'</b> · <b id="misDocPathName">'+esc(name)+'</b></div>'
      +'</div>'
+    +legalRenameWarnHtml()
     +'<div class="dropzone" onclick="document.getElementById(\'misDocInput\').click()">'
       +'<i class="fa-solid fa-cloud-arrow-up"></i><div>Click to choose files</div>'
       +'<div style="font-size:12px;margin-top:4px">PDF, Word, images — several at once</div></div>'
