@@ -955,6 +955,7 @@
      action functions will actually grant come from one definition and cannot drift apart. */
   let WF_ACT_FOR=[];      // [{principal_email, flow_id}] - whose work I may act on
   let WF_ACT_TASKS={};    // task_id -> whose it is, for the steps open to me right now
+  let WF_ACT_AT=0;        // when the two above were last read - the instance timeline reuses a recent read
   const wfActForPerson=(email,flowId)=>WF_ACT_FOR.some(function(x){
     return eq(x.principal_email,email)
         && (x.flow_id==null || flowId==null || Number(x.flow_id)===Number(flowId));
@@ -969,6 +970,7 @@
       WF_ACT_FOR=(pr&&pr.data)||[];
       WF_ACT_TASKS={};
       (((tk&&tk.data))||[]).forEach(function(r){ WF_ACT_TASKS[r.task_id]=r.principal_email; });
+      WF_ACT_AT=Date.now();
     }catch(_e){ WF_ACT_FOR=[]; WF_ACT_TASKS={}; }   // no stand-in arrangement is the normal case
   }
   async function loadAssignees(ids){ if(!ids.length)return {}; try{const {data}=await ACC().from('ptask_assignees').select('*').in('task_id',ids);const m={};(data||[]).forEach(a=>{(m[a.task_id]=m[a.task_id]||[]).push(a.email);});return m;}catch(e){return {};} }
@@ -3159,6 +3161,13 @@
         const cur=!done && (s.status==='received'||s.received_at||s.appeared_at);
         cls=done?'wf-tl-done':(cur?'wf-tl-cur':'wf-tl-wait');
         badge=done?'<span class="wf-badge ok">Done</span>':(cur?'<span class="wf-badge cur">In progress</span>':'<span class="wf-badge wait">Waiting</span>');
+        /* With the instance's own actions on show (opt.actions), a step that has reached somebody
+           but not been received says so - "In progress" read as though work had started - and the
+           step that is the signed-in person's to act on is marked Yours. */
+        if(opt.actions){
+          if(!done && cur && !s.received_at) badge='<span class="wf-badge cur">Awaiting receipt</span>';
+          if(opt.actions.mine && opt.actions.mine[s.id]) badge+=' <span class="wf-badge yours">Yours</span>';
+        }
         // both moments, with full date + time
         if(s.received_at) whenHtml+='<span class="wf-tl-when"><b>Received</b> '+esc2(wfDTFull(s.received_at))+'</span>';
         if(s.forwarded_at) whenHtml+='<span class="wf-tl-when done"><b>Done</b> '+esc2(wfDTFull(s.forwarded_at))+'</span>';
@@ -3176,7 +3185,15 @@
           const rt=wfDaysHoursText(retMs);
           if(rt) whenHtml+='<span class="wf-tl-when'+(s.forwarded_at?' done':'')+'"><b>Retention</b> '+esc2(rt)+(s.forwarded_at?'':' · running')+'</span>';
         }
+        // A step that has arrived but not been received has no times yet - say when it arrived
+        // and how long it is allowed, which is what the person holding it wants to know.
+        if(opt.actions && !done && !s.received_at && s.appeared_at){
+          whenHtml+='<span class="wf-tl-when"><b>Arrived</b> '+esc2(wfDTFull(s.appeared_at))+'</span>';
+          if(dur) whenHtml+='<span class="wf-tl-when"><b>Allotted</b> '+esc2(dur)+'</span>';
+        }
       }
+      const actHtml=(opt.actions && opt.actions.btns && opt.actions.btns[s.id])
+        ? '<div class="wf-tl-acts" onclick="event.stopPropagation()">'+opt.actions.btns[s.id]+'</div>' : '';
       /* On a phone every step printed its four timestamps underneath, so a ten-step instance was a
          wall of dates you had to scroll past. The times now live in a collapsed half that opens on
          tap, one step at a time (wfTlTap). On a desktop nothing is hidden — the CSS only collapses
@@ -3188,6 +3205,7 @@
         +'<div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body">'
         +'<div class="wf-tl-row"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div><div class="wf-tl-meta">'+who+durHtml+'</div></div>'
         +'<div class="wf-tl-times">'+whenHtml+'</div>'
+        +actHtml
       +'</div></div>';
     }).join('');
   }
@@ -5015,6 +5033,8 @@
   window.wfShowDef=function(){ window._wfShownCaseId=null; const box=$('wfTL'); if(box&&window._wfDefTL!=null) box.innerHTML=window._wfDefTL; document.querySelectorAll('.wf-itable tbody tr.sel').forEach(function(r){r.classList.remove('sel');}); };
 
   window.wfShowCase=async function(caseId, rowEl){
+    // Clicking through rows quickly starts several of these at once; only the latest may draw.
+    const myReq=window._wfShowReq=(window._wfShowReq||0)+1;
     const box=$('wfTL'); if(box) box.innerHTML='<div class="loader"><div class="spin"></div></div>';
     document.querySelectorAll('.wf-itable tbody tr.sel').forEach(function(r){r.classList.remove('sel');});
     const tr=rowEl||document.querySelector('.wf-itable tbody tr[data-case="'+caseId+'"]'); if(tr)tr.classList.add('sel');
@@ -5029,6 +5049,10 @@
     const attsByUpdate={}; atts.forEach(function(a){ (attsByUpdate[a.update_id]=attsByUpdate[a.update_id]||[]).push(a); });
     if(!box)return;
     if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Not found</div>'; return; }
+    // What this person can do on each step, right on the timeline (the step's own task page offers
+    // the same, from the same function). A failed read means no buttons, not a broken panel.
+    const tlActions=await wfCaseActions(c, fcs, flow);
+    if(!$('wfTL') || myReq!==window._wfShowReq) return;   // moved on while that loaded
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=wfCaseSummaryHtml(c,flow) || wfDetListHtml(det,flow);
     const pinned=wfOriginalAttachmentHtml(c,flow)+wfQrCodeAttachmentHtml(c,flow);
@@ -5105,7 +5129,7 @@
           })()
         : '')
       +detHtml
-      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(wfStepsInRouteOrder(fcs, c&&c.route_seqs),{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
+      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(wfStepsInRouteOrder(fcs, c&&c.route_seqs),{live:true,caseStatus:c.status,caseCreatedAt:c.created_at,actions:tlActions})||'')+'</div>'
       // Same Updates & Feedback section every step-task page already has (post a note, attach a
       // file) — this panel used to only ever show past updates read-only, with no way to add one,
       // so anyone who only ever sees an instance from the Tracker (never gets a step task of their
@@ -10616,6 +10640,185 @@
     return '<div class="wf-upd'+(mine?' me':'')+'"><span class="wf-upd-av" style="background:'+colorFor(u.author)+'">'+esc2(iniOf(wfNm(u.author)).toUpperCase())+'</span><div class="wf-upd-b"><div class="wf-upd-meta"><b>'+esc2(wfNm(u.author))+'</b> · '+wfDT(u.created_at)+'</div>'+(u.body?('<div class="wf-upd-body">'+esc2(u.body)+'</div>'):'')+attHtml+'</div></div>';
   }
 
+  /* THE BUTTONS A WORKFLOW STEP OFFERS WHOEVER HOLDS IT - one definition, used by the step's own
+     task page and by the instance timeline on the Workflow tab, so the two cannot come to offer
+     different things. Who may act and where the instance goes next are decided by the database
+     (wf_receive, wf_forward, wf_reject, wf_revert ... re-check on every call); this only decides
+     which of those to put in front of the person.
+
+     x = { fcs, caseRow, flow, nextStep, isLast, confirmOnly, amAssignee, received, forwarded,
+           caseActive }                                   - read off the step, as the task page always did
+         + { timeline, stay, canRevert }                  - only the instance timeline sets these
+
+     Task page (no `timeline`): exactly what it has always shown, including the greyed "Received" and
+     "Completed" placeholders and Reopen on a finished instance.
+     Timeline: only live actions. The step card already says Received / Done, so no greyed
+     placeholders; Reopen on a finished instance's last step as on the task page; and Revert only
+     where the caller says this is the person's latest finished step - a card for every step they
+     ever passed on would offer to unwind work from weeks ago.
+     stay: every call carries {stay:true}, so when the action is done the open instance reloads
+     where it is, instead of the old jump to the Tasks tab. */
+  function wfStepActionBtns(x){
+    const fcs=x.fcs, flow=x.flow, caseRow=x.caseRow, tl=!!x.timeline;
+    const call=function(fn){
+      const a=[].slice.call(arguments,1);
+      if(x.stay) a.push('{stay:true}');
+      return fn+'('+a.join(',')+')';
+    };
+    let A='';
+    if(x.forwarded){
+      // This step is completed and sits in Completed This Week / Archive.
+      if(caseRow && caseRow.status==='Done'){
+        if(x.isLast && x.amAssignee) A='<button class="ac-btn" onclick="'+call('wfReopen',fcs.id)+'"><i class="fa-solid fa-rotate-left"></i> Reopen</button>';
+        else if(!tl) A='<button class="ac-btn ok" disabled><i class="fa-solid fa-circle-check"></i> Completed</button>';
+      } else if(x.amAssignee){
+        if(!tl || x.canRevert) A='<button class="ac-btn danger" onclick="'+call('wfRevert',fcs.id)+'"><i class="fa-solid fa-rotate-left"></i> Revert</button>';
+      } else if(!tl){
+        A='<button class="ac-btn ok" disabled><i class="fa-solid fa-circle-check"></i> Completed</button>';
+      }
+    } else if(x.amAssignee && x.caseActive && x.confirmOnly){
+      /* A confirmation step asks one question - did the money arrive? - so it offers exactly two
+         answers and nothing else. No Receive: there is nothing to work through and no timer worth
+         starting, and making people click Receive before they may answer would only put a step in
+         front of a yes/no. No Forward either: this is the end of the line.
+         Reject here means "it did not arrive", which is a matter for Accounts and nobody else, so
+         it goes back one step to them rather than all the way to the claimant - who is the person
+         pressing the button. That is also why no reason is asked for: the reason is the button. */
+      A='<button class="ac-btn ok" onclick="'+call('wfConfirmDone',fcs.id)+'"><i class="fa-solid fa-circle-check"></i> Done</button>'
+       +'<button class="ac-btn danger" onclick="'+call('wfConfirmReject',fcs.id)+'"><i class="fa-solid fa-rotate-left"></i> Reject</button>';
+    } else if(x.amAssignee && x.caseActive){
+      /* Send back is on offer at any point the step is yours - on arrival, and also after you have
+         received it, because a problem is as often spotted while working through something as at
+         first glance. It goes to the PERSON BEFORE YOU on this instance's route - or all the way to
+         reject_to_seq where a flow sets one, as Invoice Processing does. The confirmation names
+         whoever that turns out to be before anything happens. Not styled as a destructive action,
+         since nothing is destroyed - it is a return. */
+      const rejectBtn='<button class="ac-btn" title="Mark this '+esc2(wfNounOf(flow).lc)+' Sent Back and hold it yourself until it is corrected" onclick="'+call('wfRejectStart',fcs.id,fcs.case_id)+'"><i class="fa-solid fa-rotate-left"></i> Send back</button>';
+      if(!x.received){
+        A='<button class="ac-btn primary" onclick="'+call('wfReceive',fcs.id)+'"><i class="fa-solid fa-inbox"></i> Receive</button>'+rejectBtn;
+      } else {
+        A=(tl?'':'<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>')+rejectBtn;
+        if(x.isLast) A+=(flow&&flow.id===26)
+          ? '<button class="ac-btn ok" title="File this bill in Wheredoc - this completes the workflow" onclick="'+call('wdFileOpen',fcs.id)+'"><i class="fa-solid fa-box-archive"></i> File</button>'
+          : '<button class="ac-btn ok" onclick="'+call('wfDone',fcs.id)+'"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
+        /* BILL BOOKING DECIDES WHETHER THIS IS A PAYMENT.
+           Forward sends it the ordinary way - Bill Checking, Audit Checking, then RTP. Payment
+           sends it down the route where the money moves first: RTP, Cheque Preparation, and only
+           then Bill Checking and Audit Work before filing. Both are forwards; one of them also
+           fixes which path the bill follows from here. */
+        else if(flow&&flow.id===26&&fcs.seq===2){
+          const fwd2=wfForwardLabel({nextWho:x.nextStep?wfWhoOfStep(x.nextStep):''});
+          A+='<button class="ac-btn primary" title="'+esc2(fwd2)+'" onclick="'+call('wfForward',fcs.id)+'"><i class="fa-solid fa-paper-plane"></i> '+esc2(fwd2)+'</button>'
+           +'<button class="ac-btn primary" title="Payment — RTP, then Cheque Preparation, then Bill Checking and Audit Work, then filing" onclick="'+call('wfForwardPaymentChoice',fcs.id,true)+'"><i class="fa-solid fa-indian-rupee-sign"></i> Payment</button>';
+        }
+        // The Cheque / No Cheque choice belongs to RTP - but a bill already on the Payment route
+        // reached RTP with its path settled, so there is nothing left to choose and it forwards on.
+        else if(flow&&flow.id===26&&fcs.seq===5&&(caseRow&&caseRow.route)!=='payment'){
+          A+='<button class="ac-btn primary" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="'+call('wfForwardChequeChoice',fcs.id,true)+'"><i class="fa-solid fa-indian-rupee-sign"></i> Cheque</button>'
+           +'<button class="ac-btn primary" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="'+call('wfForwardChequeChoice',fcs.id,false)+'"><i class="fa-solid fa-ban"></i> No Cheque</button>';
+        }
+        else{
+          // The button says where it is going, and so does its hover — no guessing who is next.
+          const fwd=wfForwardLabel({nextWho:x.nextStep?wfWhoOfStep(x.nextStep):''});
+          A+='<button class="ac-btn primary" title="'+esc2(fwd)+'" onclick="'+call('wfForward',fcs.id)+'"><i class="fa-solid fa-paper-plane"></i> '+esc2(fwd)+'</button>';
+        }
+      }
+    }
+    return A;
+  }
+
+  /* What each step of ONE instance offers the signed-in person, for the timeline on the Workflow
+     tab. Same inputs the step's own task page reads, gathered for every step at once: who each
+     step's task belongs to (ptask_assignees), which steps are confirmation-only (flow_steps), and
+     any stand-in arrangement (wfActLoad). Returns { btns: {stepId: html}, mine: {stepId: true} }.
+     Never throws - a failed read just means no buttons, and the timeline reads as it always did. */
+  async function wfCaseActions(c, fcs, flow){
+    const out={btns:{}, mine:{}};
+    try{
+      if(!c || !Array.isArray(fcs) || !fcs.length) return out;
+      if(!WF_ACT_AT || Date.now()-WF_ACT_AT>60000) await wfActLoad();
+      const taskIds=fcs.map(function(s){return s.task_id;}).filter(function(i){return i!=null;});
+      const [asg,defs]=await Promise.all([
+        taskIds.length ? ACC().from('ptask_assignees').select('task_id,email').in('task_id',taskIds) : Promise.resolve({data:[]}),
+        c.flow_id!=null ? ACC().from('flow_steps').select('seq,confirm_only').eq('flow_id',c.flow_id) : Promise.resolve({data:[]})
+      ]);
+      const members={}; ((asg&&asg.data)||[]).forEach(function(r){ (members[r.task_id]=members[r.task_id]||[]).push(r.email); });
+      const confirmBy={}; ((defs&&defs.data)||[]).forEach(function(d){ confirmBy[d.seq]=!!d.confirm_only; });
+      const isMine=function(s){
+        return (members[s.task_id]||[]).some(function(e){ return eq(e,me())||wfActForPerson(e,flow&&flow.id); });
+      };
+      const caseActive=c.status!=='Done';
+      // Revert is offered on the person's most recent finished step only.
+      let latest=null;
+      if(caseActive) fcs.forEach(function(s){
+        if(s.forwarded_at && isMine(s) && (!latest || new Date(s.forwarded_at)>new Date(latest.forwarded_at))) latest=s;
+      });
+      fcs.forEach(function(s){
+        const forwarded=!!s.forwarded_at;
+        if(!forwarded && (s.task_id==null || !s.appeared_at)) return;      // not with anyone yet
+        const mine=isMine(s);
+        if(!mine) return;
+        // Same next-step / last-step reading as the step's own task page, route and all.
+        const rn=wfRouteNext(c.route_seqs, s.seq);
+        const nextStep=rn.routed
+          ? (rn.seq==null ? null : (fcs.filter(function(y){ return y.seq===rn.seq; })[0]||null))
+          : fcs.filter(function(y){ return y.seq>s.seq; }).reduce(function(a,b){ return (!a||b.seq<a.seq)?b:a; }, null);
+        const dl=wfRouteIsLast(c.route_seqs, s.seq);
+        const isLast=(dl!==null)?dl:!nextStep;
+        const html=wfStepActionBtns({fcs:s, caseRow:c, flow:flow, nextStep:nextStep, isLast:isLast,
+          confirmOnly:!!confirmBy[s.seq], amAssignee:true, received:!!s.received_at, forwarded:forwarded,
+          caseActive:caseActive, timeline:true, stay:true, canRevert:!!(latest&&latest.id===s.id)});
+        if(html){ out.btns[s.id]=html; if(!forwarded) out.mine[s.id]=true; }
+      });
+    }catch(_e){ return {btns:{}, mine:{}}; }
+    return out;
+  }
+
+  /* After an action. From a step's own task page it has always gone to Tasks; from the instance
+     timeline (opts.stay) it reloads that instance where it is, so the person keeps their place and
+     sees what their click did. `fallback` is where the old behaviour went when it was not Tasks. */
+  async function wfAfterAct(opts, fallback){
+    if(opts && opts.stay){
+      const id=window._wfShownCaseId;
+      if(id){ await wfShowCase(id,null); wfRefreshInstanceList(); return; }
+      renderPage(); return;
+    }
+    if(fallback) fallback(); else navTo('tasks/work');
+  }
+
+  /* After an action taken from the instance timeline: bring the list behind it up to date without
+     reloading the page. The page of rows on screen is asked for again - same page, sort, search and
+     dates - so the instance's pills, and whether it still belongs in this view (a bill that has just
+     finished leaves the active list for the Archive), come from the same database function that
+     drew them in the first place, not from a second opinion computed here. Then the person's own
+     Waiting / Received counters and the Archive count follow, and the Tracker is marked stale so it
+     is read afresh the next time its tab is opened.
+     Quiet on failure: the instance panel is already right, and the list is simply as it was. */
+  async function wfRefreshInstanceList(){
+    const S=window._wfSrv; if(!S) return;
+    S.prefetch=null; S.next=null; S.trackerLoaded=false;       // nothing read before the action may be reused
+    const dt=wfInstDT();
+    if(dt){ try{ dt.ajax.reload(null,false); }catch(_e){} }     // false: stay on the same page of rows
+    try{
+      const first=await wfCasePage({offset:0, limit:1, status:window._wfArchOn?'active':null, counts:true}, S);
+      if(window._wfSrv!==S) return;                             // they left this workflow meanwhile
+      const w=document.querySelector('.wf-my-wr .wf-wr-wait b'), r=document.querySelector('.wf-my-wr .wf-wr-recv b');
+      if(w) w.textContent=Number(first.my_wait)||0;
+      if(r) r.textContent=Number(first.my_recv)||0;
+      if(window._wfArchOn){
+        const done=await wfCasePage({offset:0, limit:1, status:'done'}, S);
+        if(window._wfSrv!==S) return;
+        S.doneCount=done.filtered;
+        const b=document.getElementById('wfTabBtn_archive');
+        if(b){
+          let cnt=b.querySelector('.cnt');
+          if(done.filtered){ if(!cnt){ cnt=document.createElement('span'); cnt.className='cnt'; b.appendChild(document.createTextNode(' ')); b.appendChild(cnt); } cnt.textContent=done.filtered; }
+          else if(cnt) cnt.remove();
+        }
+      }
+    }catch(_e){}
+  }
+
   /* ----- Workflow task detail (rendered from taskPage when a task is a workflow step) ----- */
   async function wfTaskPage(v, t, members, list, ro){
     wfInjectCss(); window._wfDelId=null; window._wfShownCaseId=null; setCrumb(['Accountability','Workflow','Task']);
@@ -10663,65 +10866,8 @@
     });
     const received=!!fcs.received_at, forwarded=!!fcs.forwarded_at;
     const caseActive=caseRow && caseRow.status!=='Done';
-    let A='';
-    if(forwarded){
-      // This step is completed and sits in Completed This Week / Archive.
-      if(caseRow && caseRow.status==='Done'){
-        if(isLast && amAssignee) A='<button class="ac-btn" onclick="wfReopen('+fcs.id+')"><i class="fa-solid fa-rotate-left"></i> Reopen</button>';
-        else A='<button class="ac-btn ok" disabled><i class="fa-solid fa-circle-check"></i> Completed</button>';
-      } else if(amAssignee){
-        A='<button class="ac-btn danger" onclick="wfRevert('+fcs.id+')"><i class="fa-solid fa-rotate-left"></i> Revert</button>';
-      } else {
-        A='<button class="ac-btn ok" disabled><i class="fa-solid fa-circle-check"></i> Completed</button>';
-      }
-    } else if(amAssignee && caseActive && confirmOnly){
-      /* A confirmation step asks one question - did the money arrive? - so it offers exactly two
-         answers and nothing else. No Receive: there is nothing to work through and no timer worth
-         starting, and making people click Receive before they may answer would only put a step in
-         front of a yes/no. No Forward either: this is the end of the line.
-         Reject here means "it did not arrive", which is a matter for Accounts and nobody else, so
-         it goes back one step to them rather than all the way to the claimant - who is the person
-         pressing the button. That is also why no reason is asked for: the reason is the button. */
-      A='<button class="ac-btn ok" onclick="wfConfirmDone('+fcs.id+')"><i class="fa-solid fa-circle-check"></i> Done</button>'
-       +'<button class="ac-btn danger" onclick="wfConfirmReject('+fcs.id+')"><i class="fa-solid fa-rotate-left"></i> Reject</button>';
-    } else if(amAssignee && caseActive){
-      /* Send back is on offer at any point the step is yours - on arrival, and also after you have
-         received it, because a problem is as often spotted while working through something as at
-         first glance. It goes to the PERSON BEFORE YOU on this instance's route - or all the way to
-         reject_to_seq where a flow sets one, as Invoice Processing does. The confirmation names
-         whoever that turns out to be before anything happens. Not styled as a destructive action,
-         since nothing is destroyed - it is a return. */
-      const rejectBtn='<button class="ac-btn" title="Mark this '+esc2(wfNounOf(flow).lc)+' Sent Back and hold it yourself until it is corrected" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-rotate-left"></i> Send back</button>';
-      if(!received){
-        A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'+rejectBtn;
-      } else {
-        A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>'+rejectBtn;
-        if(isLast) A+=(flow&&flow.id===26)
-          ? '<button class="ac-btn ok" title="File this bill in Wheredoc - this completes the workflow" onclick="wdFileOpen('+fcs.id+')"><i class="fa-solid fa-box-archive"></i> File</button>'
-          : '<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
-        /* BILL BOOKING DECIDES WHETHER THIS IS A PAYMENT.
-           Forward sends it the ordinary way - Bill Checking, Audit Checking, then RTP. Payment
-           sends it down the route where the money moves first: RTP, Cheque Preparation, and only
-           then Bill Checking and Audit Work before filing. Both are forwards; one of them also
-           fixes which path the bill follows from here. */
-        else if(flow&&flow.id===26&&fcs.seq===2){
-          const fwd2=wfForwardLabel({nextWho:nextStep?wfWhoOfStep(nextStep):''});
-          A+='<button class="ac-btn primary" title="'+esc2(fwd2)+'" onclick="wfForward('+fcs.id+')"><i class="fa-solid fa-paper-plane"></i> '+esc2(fwd2)+'</button>'
-           +'<button class="ac-btn primary" title="Payment — RTP, then Cheque Preparation, then Bill Checking and Audit Work, then filing" onclick="wfForwardPaymentChoice('+fcs.id+',true)"><i class="fa-solid fa-indian-rupee-sign"></i> Payment</button>';
-        }
-        // The Cheque / No Cheque choice belongs to RTP - but a bill already on the Payment route
-        // reached RTP with its path settled, so there is nothing left to choose and it forwards on.
-        else if(flow&&flow.id===26&&fcs.seq===5&&(caseRow&&caseRow.route)!=='payment'){
-          A+='<button class="ac-btn primary" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice('+fcs.id+',true)"><i class="fa-solid fa-indian-rupee-sign"></i> Cheque</button>'
-           +'<button class="ac-btn primary" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice('+fcs.id+',false)"><i class="fa-solid fa-ban"></i> No Cheque</button>';
-        }
-        else{
-          // The button says where it is going, and so does its hover — no guessing who is next.
-          const fwd=wfForwardLabel({nextWho:nextStep?wfWhoOfStep(nextStep):''});
-          A+='<button class="ac-btn primary" title="'+esc2(fwd)+'" onclick="wfForward('+fcs.id+')"><i class="fa-solid fa-paper-plane"></i> '+esc2(fwd)+'</button>';
-        }
-      }
-    }
+    const A=wfStepActionBtns({fcs:fcs, caseRow:caseRow, flow:flow, nextStep:nextStep, isLast:isLast,
+      confirmOnly:confirmOnly, amAssignee:amAssignee, received:received, forwarded:forwarded, caseActive:caseActive});
     const dueTxt=fcs.due_at?wfDT(fcs.due_at):(t.due_date?fmtDateY(t.due_date):'—');
     const statusChip=forwarded?'<span class="ac-chip ac-c-Completed">Completed</span>':'<span class="ac-chip ac-c-Pending">Pending</span>';
     let takenTxt='—'; if(fcs.received_at&&fcs.forwarded_at) takenTxt=wfHms(new Date(fcs.forwarded_at)-new Date(fcs.received_at)); else if(fcs.received_at) takenTxt='running · '+wfHms(Date.now()-new Date(fcs.received_at));
@@ -10949,12 +11095,12 @@
     }catch(_e){}
   }
 
-  window.wfReceive=async function(fcsId){
+  window.wfReceive=async function(fcsId, opts){
     const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_receive',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not receive: '+((e&&e.message)||e),'err'); return; }
     try{ usageQueue('tasks.workflow.receive_a_step','update',um); }catch(_e){}
-    toast('Received — timer started','ok'); renderPage();
+    toast('Received — timer started','ok'); wfAfterAct(opts, function(){ renderPage(); });
   };
 
   /* REIMBURSEMENT: RECEIVE OR FORWARD SEVERAL AT ONCE (17 Oct 2026). Reimbursement tasks on the
@@ -11008,30 +11154,30 @@
     }else{ await run(); }
   };
 
-  window.wfForward=async function(fcsId){
+  window.wfForward=async function(fcsId, opts){
     const label=await wfComputeForwardLabel(fcsId);
     const um=await wfStepUsageMeta(fcsId);
     const cid=await wfCaseIdOfStep(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
     await wfLogForward(fcsId, um, cid);
-    toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); navTo('tasks/work');
+    toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); wfAfterAct(opts);
   };
 
-  window.wfForwardChequeChoice=async function(fcsId,cheque){
+  window.wfForwardChequeChoice=async function(fcsId,cheque,opts){
     const um=await wfStepUsageMeta(fcsId);
     const cid=await wfCaseIdOfStep(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward_rtp_cheque_choice',{p_fcs_id:fcsId,p_cheque:cheque}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
     await wfLogForward(fcsId, Object.assign({route:cheque?'Cheque':'GST Approval only'}, um||{}), cid);
     toast(cheque?'Forwarded — cheque steps continue as normal':'Forwarded — GST Approval only, cheque steps skipped','ok');
-    navTo('tasks/work');
+    wfAfterAct(opts);
   };
 
   /* Bill Booking's Payment button. Deliberately a separate call from a plain Forward: it decides
      the bill's whole route, so it is worth being an explicit act rather than a variant of a
      forward that happens to take an argument. */
-  window.wfForwardPaymentChoice=async function(fcsId,payment){
+  window.wfForwardPaymentChoice=async function(fcsId,payment,opts){
     const um=await wfStepUsageMeta(fcsId);
     const cid=await wfCaseIdOfStep(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward_bill_booking_choice',
@@ -11041,15 +11187,15 @@
     toast(payment
       ? 'Forwarded on the Payment route — RTP next, then the cheque, then checking'
       : 'Forwarded','ok');
-    navTo('tasks/work');
+    wfAfterAct(opts);
   };
 
-  window.wfDone=async function(fcsId){
+  window.wfDone=async function(fcsId, opts){
     const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_done',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not complete: '+((e&&e.message)||e),'err'); return; }
     try{ usageQueue('tasks.workflow.mark_final_step_done','update',um); }catch(_e){}
-    toast('Workflow completed','ok'); navTo('tasks/work');
+    toast('Workflow completed','ok'); wfAfterAct(opts);
   };
 
   /* ----- Bill Filing -> Wheredoc (Invoice Processing's last step) -----
@@ -11069,7 +11215,7 @@
     }catch(e){ return {ok:false,error:'Could not reach JainE: '+((e&&e.message)||e)}; }
   }
   const wdBox=function(f){ return [f.desc1,f.desc2,f.desc3].filter(Boolean).join(' · ')+(f.fileno?' ('+f.fileno+')':'')+(f.period?' · '+f.period:''); };
-  window.wdFileOpen=async function(fcsId){
+  window.wdFileOpen=async function(fcsId, opts){
     const head='<div class="modal-head"><h3><i class="fa-solid fa-box-archive"></i> File this bill in Wheredoc</h3><span class="x" onclick="closeModal()">&times;</span></div>';
     openModal(head+'<div class="modal-body" style="min-width:min(94vw,640px)"><div class="loader"><div class="spin"></div></div>'
       +'<div style="text-align:center;color:var(--slate);font-size:13px">Reading the projects and box files from Wheredoc…</div></div>');
@@ -11079,7 +11225,7 @@
         +esc2((o&&o.error)||'Could not open the filing form.')+'</div></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Close</button></div>');
       return;
     }
-    window._wd={fcs:fcsId,o:o,box:null,newBox:false};
+    window._wd={fcs:fcsId,o:o,box:null,newBox:false,stay:!!(opts&&opts.stay)};
     const b=o.bill||{};
     const sel=function(id,list,ph){ return '<select id="'+id+'" class="ac-in"><option value="">'+esc2(ph)+'</option>'+list.map(function(x){ return '<option value="'+esc2(x[0])+'">'+esc2(x[1])+'</option>'; }).join('')+'</select>'; };
     const lbl=function(t,req){ return '<label class="wf-lbl" style="margin:10px 0 4px">'+t+(req?' <span style="color:#dc2626">*</span>':'')+'</label>'; };
@@ -11164,7 +11310,7 @@
     }
     try{ usageQueue('tasks.workflow.mark_final_step_done','update',um); }catch(_e){}
     closeModal(); window._wd=null;
-    toast('Filed in Wheredoc - DocId '+r.docid+', box file '+r.folder_serial,'ok'); navTo('tasks/work');
+    toast('Filed in Wheredoc - DocId '+r.docid+', box file '+r.folder_serial,'ok'); wfAfterAct(st.stay?{stay:true}:null);
   };
 
   /* ----- Confirmation steps (Reimbursement's "Payment Received") -----
@@ -11175,7 +11321,7 @@
      Reject goes through the ONE-argument wf_reject, which steps back exactly one place. The
      two-argument version would send the claim all the way home to the claimant - who is the person
      clicking Reject - and demand a reason on the way. */
-  window.wfConfirmDone=function(fcsId){
+  window.wfConfirmDone=function(fcsId, opts){
     wfConfirm({ title:'Confirm you received the payment?',
       body:'This closes the reimbursement for good. Only do this once the money is actually in your account.',
       okLabel:'Yes, I received it', okClass:'ok',
@@ -11186,10 +11332,10 @@
         // Reimbursement's "I received the payment" closes the claim for good and logged nothing at
         // all, so the confirmation step of the busiest workflow was invisible in the report.
         try{ usageQueue('tasks.workflow.mark_final_step_done','update',um); }catch(_e){}
-        toast('Confirmed — this reimbursement is complete','ok'); navTo('tasks/work');
+        toast('Confirmed — this reimbursement is complete','ok'); wfAfterAct(opts);
       }});
   };
-  window.wfConfirmReject=function(fcsId){
+  window.wfConfirmReject=function(fcsId, opts){
     wfConfirm({ title:'Payment not received?',
       body:'This goes straight back to Accounts so they can look into it. You will get it again once they have sorted it out.',
       okLabel:'Send back to Accounts', okClass:'danger',
@@ -11198,7 +11344,7 @@
         try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
         catch(e){ toast('Could not send it back: '+((e&&e.message)||e),'err'); return; }
         await wfLogReject(um, cid);
-        toast('Sent back to Accounts','ok'); navTo('tasks/work');
+        toast('Sent back to Accounts','ok'); wfAfterAct(opts);
       }});
   };
 
@@ -11230,7 +11376,7 @@
     (steps||[]).forEach(function(s){ if(s.seq<mySeq && (best==null||s.seq>best)) best=s.seq; });
     return best;
   }
-  window.wfRejectStart=async function(fcsId, caseId){
+  window.wfRejectStart=async function(fcsId, caseId, opts){
     let noun='instance', wantsReason=false, toRaiser=false, raiserName='';
     try{
       const {data:mine}=await ACC().from('flow_case_steps').select('case_id,seq').eq('id',fcsId).maybeSingle();
@@ -11283,11 +11429,11 @@
           : '')
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button>'
-        +'<button class="ac-btn primary" id="wfRejGo" onclick="wfRejectConfirm('+fcsId+','+(wantsReason?'true':'false')+',true)">'
+        +'<button class="ac-btn primary" id="wfRejGo" onclick="wfRejectConfirm('+fcsId+','+(wantsReason?'true':'false')+',true'+((opts&&opts.stay)?',true':'')+')">'
         +'<i class="fa-solid fa-rotate-left"></i> Mark Sent Back</button></div>','md');
     if(wantsReason) setTimeout(function(){ const t=$('wfRejReason'); if(t)try{t.focus();}catch(_){} },40);
   };
-  window.wfRejectConfirm=async function(fcsId, needReason, ends){
+  window.wfRejectConfirm=async function(fcsId, needReason, ends, stay){
     const box=$('wfRejReason'), err=$('wfRejErr');
     const reason=((box&&box.value)||'').trim();
     if(needReason && reason.length<3){
@@ -11310,7 +11456,7 @@
        back to, or nothing when it stayed here. Working it out a second time on this side is how
        the old "it went to the previous person" line came to be wrong. */
     toast(went?('Sent back to '+went+' to correct'):'Marked Sent Back — it is with you as a received task','ok');
-    navTo('tasks/work');
+    wfAfterAct(stay?{stay:true}:null);
   };
   window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; };
   // From a task-list row: same confirmation popup, no navigation needed.
@@ -11329,7 +11475,7 @@
   };
 
   // Revert: pull the flow back to me from whoever currently holds it
-  window.wfRevert=function(fcsId){
+  window.wfRevert=function(fcsId, opts){
     wfConfirm({ title:'Revert this step?', body:'The task will be pulled back to you from whoever currently has it, and any steps after yours will be cleared.', okLabel:'Revert', okClass:'danger', onOk:async function(){
       const um=await wfStepUsageMeta(fcsId), cid=await wfCaseIdOfStep(fcsId);
       try{ const {error}=await ACC().rpc('wf_revert',{p_fcs_id:fcsId}); if(error)throw error; }
@@ -11341,18 +11487,19 @@
         usageQueue('tasks.workflow.revert_a_forwarded_step','update',Object.keys(m).length?m:null);
       }catch(_e){}
       toast('Reverted — the task is back with you','ok');
-      if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/work'); }
+      if(opts&&opts.stay){ wfAfterAct(opts); }
+      else if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/work'); }
     }});
   };
 
   // Reopen: bring the completed final step back (instance Done -> In progress)
-  window.wfReopen=function(fcsId){
+  window.wfReopen=function(fcsId, opts){
     wfConfirm({ title:'Reopen this workflow?', body:'The final step comes back to you and this '+wfN().lc+' moves from Done back to In progress.', okLabel:'Reopen', okClass:'primary', onOk:async function(){
       const um=await wfStepUsageMeta(fcsId);
       try{ const {error}=await ACC().rpc('wf_reopen',{p_fcs_id:fcsId}); if(error)throw error; }
       catch(e){ toast('Could not reopen: '+((e&&e.message)||e),'err'); return; }
       try{ usageQueue('tasks.workflow.reopen_a_completed_instance','update',um); }catch(_e){}
-      toast('Reopened','ok'); navTo('tasks/work');
+      toast('Reopened','ok'); wfAfterAct(opts);
     }});
   };
 
@@ -11696,6 +11843,11 @@
     .wf-dur{font-size:12.5px;color:var(--slate);display:inline-flex;align-items:center;gap:6px}
     .wf-badge{font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:20px;text-transform:none;letter-spacing:0}
     .wf-badge.ok{background:#dcfce7;color:#166534}.wf-badge.cur{background:#dbeafe;color:#1e40af}.wf-badge.wait{background:#eef2f6;color:#94a3b8}
+    .wf-badge.yours{background:#0f172a;color:#fff}
+    /* The actions a person has on a step, inside its card on the instance timeline. */
+    .wf-tl-acts{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:9px;border-top:1px dashed var(--line)}
+    .wf-tl-cur .wf-tl-acts{border-top-color:#c7d2fe}
+    .wf-tl-acts .ac-btn{white-space:nowrap}
     .wf-tl-track{font-size:11.5px;color:var(--slate);margin-top:7px;padding-top:7px;border-top:1px dashed var(--line)}
     /* form */
     .wf-ro{background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:14px;color:var(--ink)}
