@@ -1,0 +1,313 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<title>Wow Moments - JainE</title>
+<!--
+  WOW MOMENTS EXPLAINER (landscape 1920x1080), built the same way as the Recurring Tasks video.
+  Every screen is a real JainE screen: states/wNN.html are snapshots of the live Reimbursement page and
+  its New Wow Moment form (captured 24 Oct 2026, nothing saved). The claims in the list are sample
+  claims put in the snapshot only - the real list carries staff names and UPI numbers. The purple
+  button is JainE's own markup for the two Sales Managers. The "How a Wow Moment moves" popup is drawn
+  for the video. Timing comes from the recorded voice (voice.wav, word times in words.json).
+  window.seek(t) draws the frame at t seconds; ?t=NN starts the live preview from second NN.
+-->
+<link rel="stylesheet" href="/vendor/inter/inter.css">
+<link rel="stylesheet" href="/vendor/font-awesome/css/all.min.css">
+<style>
+  html,body{margin:0;background:#0b1220;overflow:hidden}
+  #stage{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;background:#fff;transform-origin:0 0;font-family:Inter,system-ui,sans-serif}
+  #cam{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0}
+  #cam iframe{position:absolute;left:0;top:0;width:1920px;height:1080px;border:0;opacity:0;background:#fff;pointer-events:none}
+  #fx{position:absolute;left:0;top:0;width:1920px;height:1080px;pointer-events:none}
+  .hl{position:absolute;border-radius:10px;opacity:0}
+  .ripple{position:absolute;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;border:4px solid #7c3aed;opacity:0}
+  .tag{position:absolute;background:#7c3aed;color:#fff;font-weight:800;font-size:22px;padding:9px 18px;border-radius:999px;box-shadow:0 10px 26px rgba(124,58,237,.35);opacity:0;white-space:nowrap}
+  #cursor{position:absolute;left:0;top:0;width:34px;height:34px;filter:drop-shadow(0 3px 5px rgba(0,0,0,.35));z-index:5}
+  #cap{position:absolute;left:50%;bottom:54px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;
+    background:rgba(15,23,42,.92);color:#fff;padding:18px 30px 18px 18px;border-radius:18px;max-width:1500px;opacity:0;z-index:7}
+  #flowDim,#flow{z-index:6!important}
+  #cap.top{bottom:auto;top:40px}
+  #cap .n{flex:none;min-width:46px;height:46px;padding:0 6px;box-sizing:border-box;border-radius:12px;background:#7c3aed;color:#fff;font-weight:800;font-size:22px;display:flex;align-items:center;justify-content:center}
+  #cap .t{font-size:30px;font-weight:700;line-height:1.25}
+  #cap .s{font-size:21px;font-weight:500;color:#cbd5e1;margin-top:4px;line-height:1.3}
+  .card{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;z-index:8;background:#fff}
+  .card .bar{width:120px;height:8px;border-radius:4px;background:#7c3aed;margin-bottom:34px}
+  .card h1{margin:0;font-size:96px;font-weight:800;color:#0f172a;letter-spacing:-2px;display:flex;align-items:center;gap:26px}
+  .card h1 i{color:#7c3aed;font-size:78px}
+  .card p{margin:24px 0 0;font-size:38px;color:#475569;font-weight:500}
+  #logo img{width:760px}
+  /* the "How a Wow Moment moves" popup */
+  #flow{position:absolute;left:50%;top:50%;width:1260px;transform:translate(-50%,-50%);background:#fff;border-radius:24px;box-shadow:0 30px 90px rgba(15,23,42,.35);padding:34px 40px 30px;opacity:0;z-index:7;box-sizing:border-box}
+  #flowDim{position:absolute;inset:0;background:rgba(15,23,42,.45);opacity:0;z-index:7}
+  #flow .fh{display:flex;align-items:center;gap:14px;font-size:34px;font-weight:800;color:#0f172a;margin-bottom:26px}
+  #flow .fh i{color:#7c3aed}
+  #flow .fh span{margin-left:auto;font-size:17px;font-weight:700;color:#7c3aed;background:#f3e8ff;border-radius:999px;padding:6px 14px}
+  #flow .steps{display:flex;align-items:stretch;gap:0}
+  #flow .st{flex:1;border:2px solid #e2e8f0;border-radius:18px;padding:22px 22px 20px;opacity:.35;background:#fff}
+  #flow .st.lit{opacity:1;border-color:#7c3aed;box-shadow:0 0 0 5px #ede9fe}
+  #flow .st.past{opacity:.75}
+  #flow .arr{flex:none;width:46px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:26px}
+  #flow .no{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:50%;background:#7c3aed;color:#fff;font-weight:800;font-size:20px}
+  #flow .tl{font-size:24px;font-weight:800;color:#0f172a;margin:12px 0 4px}
+  #flow .who{font-size:21px;font-weight:700;color:#7c3aed;margin-bottom:12px}
+  #flow .what{font-size:19px;color:#475569;line-height:1.45}
+  #flow .what b{color:#0f172a}
+  #flow .rule{margin-top:24px;display:flex;align-items:center;gap:14px;padding:16px 20px;border-radius:14px;background:#f8fafc;font-size:22px;font-weight:600;color:#0f172a;opacity:.35}
+  #flow .rule.lit{opacity:1;background:#fef3c7;box-shadow:inset 0 0 0 2px #f59e0b}
+  #flow .rule i{color:#b45309;font-size:24px}
+  #done{display:inline-flex;align-items:center;gap:8px;margin-top:12px;padding:8px 16px;border-radius:10px;background:#16a34a;color:#fff;font-weight:700;font-size:19px}
+  /* who sees the button - the two headers side by side */
+  #who{position:absolute;left:50%;top:50%;width:1180px;transform:translate(-50%,-50%);background:#fff;border-radius:24px;box-shadow:0 30px 90px rgba(15,23,42,.35);padding:34px 40px;opacity:0;z-index:6;box-sizing:border-box}
+  #whoDim{position:absolute;inset:0;background:rgba(15,23,42,.45);opacity:0;z-index:6}
+  #who .wh{font-size:34px;font-weight:800;color:#0f172a;margin-bottom:24px}
+  #who .wr{display:flex;align-items:center;gap:24px;padding:22px 24px;border-radius:16px;border:2px solid #e2e8f0;margin-top:16px}
+  #who .wr.sm{border-color:#7c3aed;background:#faf5ff}
+  #who .wl{width:300px;flex:none;font-size:24px;font-weight:800;color:#0f172a}
+  #who .wl small{display:block;font-size:18px;font-weight:600;color:#64748b;margin-top:4px}
+  #who .wb{display:flex;gap:14px;align-items:center}
+  #who .b{display:inline-flex;align-items:center;gap:10px;height:56px;padding:0 22px;border-radius:12px;font-size:23px;font-weight:700;white-space:nowrap}
+  #who .b.blue{background:#2563eb;color:#fff}
+  #who .b.wow{background:#f3e8ff;color:#7c3aed;border:2px solid #c4b5fd}
+  #who .b.none{border:2px dashed #cbd5e1;color:#94a3b8;background:#fff}
+  #prog{position:absolute;left:0;bottom:0;height:5px;background:#7c3aed;z-index:9}
+</style></head>
+<body>
+<div id="stage">
+  <div id="cam"></div>
+  <div id="fx"></div>
+  <div id="whoDim"></div>
+  <div id="who">
+    <div class="wh">Who sees the New Wow Moment button</div>
+    <div class="wr sm"><div class="wl">Sales Managers<small>See both buttons</small></div>
+      <div class="wb"><span class="b blue"><i class="fa-solid fa-plus"></i> New Reimbursement</span><span class="b wow"><i class="fa-solid fa-star"></i> New Wow Moment</span></div></div>
+    <div class="wr"><div class="wl">Everyone else<small>The button is not there</small></div>
+      <div class="wb"><span class="b blue"><i class="fa-solid fa-plus"></i> New Reimbursement</span><span class="b none"><i class="fa-solid fa-ban"></i> no Wow Moment button</span></div></div>
+  </div>
+  <div id="flowDim"></div>
+  <div id="flow">
+    <div class="fh"><i class="fa-solid fa-star"></i> How a Wow Moment moves <span>Reimbursement · Wow Moment</span></div>
+    <div class="steps">
+      <div class="st"><span class="no">1</span><div class="tl">Wow Moment Check</div><div class="who">Shafat Mehar</div>
+        <div class="what"><b>Receives</b> it, then <b>Forwards</b> it to Accounts - or <b>Sends it back</b> with a reason.</div></div>
+      <div class="arr"><i class="fa-solid fa-arrow-right"></i></div>
+      <div class="st"><span class="no">2</span><div class="tl">Accounts Review &amp; Payment</div><div class="who">Gyan Prakash Sah / Gyan Prakash Pandey</div>
+        <div class="what">Whoever <b>receives</b> it first checks it, <b>pays</b> it and forwards it.</div></div>
+      <div class="arr"><i class="fa-solid fa-arrow-right"></i></div>
+      <div class="st"><span class="no">3</span><div class="tl">Payment Received</div><div class="who">The Sales Manager who raised it</div>
+        <div class="what">Clicks <b>Done</b> when the money arrives - or <b>Rejects</b> it back to Accounts if it didn't.</div><div id="done"><i class="fa-solid fa-circle-check"></i> Done</div></div>
+    </div>
+    <div class="rule"><i class="fa-solid fa-circle-info"></i> A Wow Moment counts as a Reimbursement - only one claim can be open at a time.</div>
+  </div>
+  <svg id="cursor" viewBox="0 0 24 24"><path d="M4 2 L4 20 L9 15.5 L12.2 22 L15 20.7 L11.9 14.3 L18.5 14.3 Z" fill="#0f172a" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>
+  <div id="cap"><div class="n"></div><div><div class="t"></div><div class="s"></div></div></div>
+  <div class="card" id="intro"><div class="bar"></div><h1><i class="fa-solid fa-star"></i>Introducing Wow Moments</h1><p>For the moments that win a customer over.</p></div>
+  <div class="card" id="outro"><div class="bar"></div><h1><i class="fa-solid fa-star"></i>Wow Moments</h1><p>Spend on the customer - we'll take care of the rest.</p></div>
+  <div class="card" id="logo"><img src="logo.png" alt="Jain Group"></div>
+  <div id="prog"></div>
+</div>
+<script>
+'use strict';
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const ease=x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+const lerp=(a,b,x)=>a+(b-a)*x;
+function track(kf,t){
+  if(t<=kf[0][0]) return kf[0].slice(1);
+  for(let i=1;i<kf.length;i++){ if(t<=kf[i][0]){ const a=kf[i-1],b=kf[i]; const x=ease(clamp((t-a[0])/(b[0]-a[0]||1),0,1)); return a.slice(1).map((v,j)=>lerp(v,b[j+1],x)); } }
+  return kf[kf.length-1].slice(1);
+}
+const STATES=['w01','w02','w03','w04','w05'];
+const F={};
+function el(id,sel,text){ const d=F[id].contentDocument; let list=[...d.querySelectorAll(sel)];
+  if(text) list=list.filter(e=>text.test((e.innerText||e.textContent||'').trim())); return list[0]||null; }
+function rect(id,sel,text,pad){ const e=el(id,sel,text); if(!e){ console.warn('missing',id,sel,text); return [960,540,10,10]; }
+  const r=e.getBoundingClientRect(); pad=pad||0; return [r.left-pad,r.top-pad,r.width+2*pad,r.height+2*pad]; }
+const mid=r=>[r[0]+r[2]/2,r[1]+r[3]/2];
+function loadAll(){
+  return Promise.all(STATES.map(id=>new Promise(res=>{
+    const f=document.createElement('iframe'); f.src='states/'+id+'.html'; f.onload=()=>{
+      const d=f.contentDocument;
+      d.querySelectorAll('[data-sl]').forEach(e=>{ e.scrollLeft=+e.dataset.sl; e.scrollTop=+e.dataset.st; });
+      const st=d.createElement('style');
+      st.textContent='*{transition:none!important;animation:none!important;caret-color:transparent!important}html,body{overflow:hidden!important}';
+      d.head.appendChild(st); res(); };
+    F[id]=f; document.getElementById('cam').appendChild(f);
+  })));
+}
+
+/* VOICE TIMING. One recording (voice.wav, 61.9 s) played from LEAD seconds. Each scene starts on the
+   first word of its line; W[] are word start times read off the recording (words.json). */
+/* voice2.wav: voice.wav with "No transport or kilometres to fill in" cut out (23.0-25.6 s), so every
+   word after it is 2.6 s earlier. Date / what you spent on / amount / receipt are the starts of those
+   phrases measured from the recording's own pauses (not the transcript's word guesses). */
+const LEAD=0.6, VOICE_LEN=59.28;
+const W={ what:4.14, only:11.72, nobody:15.04, click:16.70, fill:18.24, date:18.39, spent:19.46, amount:20.79, receipt:21.80,
+  upi:23.22, submit:26.56, purple:29.02, open:31.64, first:35.10, forwards:37.20, sends:39.06, accounts:40.86,
+  back:43.10, money:45.48, done:46.62, rule:48.16, normal:51.48, outro:55.28 };
+const v=k=>W[k]+LEAD;   // video time of a word
+let SHOTS=[], CAM=[], CUR=[], CLICKS=[], CAPS=[], HLS=[], TAGS=[], CARDS=[], DUR=0, FLOW=null, WHO=null, FILL=null;
+window.VO_SEGS=[[LEAD,0,VOICE_LEN,0]];
+
+function build(){
+  const S=(a,b,id)=>SHOTS.push([a,b,id]);
+  const C=(t,s,cx,cy)=>CAM.push([t,s,cx,cy]);
+  const M=(t,p)=>CUR.push([t,p[0],p[1]]);
+  const K=t=>CLICKS.push(t);
+  const T=(a,b,n,t,s,top)=>CAPS.push([a,b,n,t,s||'',!!top]);
+  const H=(a,b,r,col)=>HLS.push([a,b,r,col||'#7c3aed']);
+
+  // 1 intro
+  CARDS.push(['intro',0,v('what')-.2]);
+  C(0,1,960,540);
+
+  // 2 what it is - the Reimbursement page, settling on the New buttons
+  const btn=rect('w01','.wf-var-btn'), heads=rect('w01','.wf-head-new',null,6);
+  S(v('what')-.4,v('click')+.9,'w01');
+  M(v('what'),[1450,620]);
+  T(v('what')+.2,v('only'),'1','Wow Moments - inside Reimbursement','For money a Sales Manager spends to delight a customer');
+  C(v('what'),1,960,540); C(v('what')+3,1,960,540); C(v('only')-.6,1.7,heads[0]+heads[2]/2-120,heads[1]+180);
+
+  // 3 who sees it - the purple button, then somebody else's page without it
+  H(v('only')+.2,v('nobody'),[btn[0]-5,btn[1]-5,btn[2]+10,btn[3]+10]);
+  TAGS.push([v('only')+.5,v('nobody'),'Sales Managers only',btn[0]+btn[2]/2,btn[1]+btn[3]+34]);
+  T(v('only')+.2,v('nobody'),'2','The New Wow Moment button','Only for our Sales Managers');
+  // nobody else sees it: the two headers side by side
+  WHO={on:v('nobody')-.1, off:v('click')-.05};
+  T(v('nobody'),v('click'),'2','Nobody else sees it','Everyone else gets only New Reimbursement');
+  M(v('only')+.6,[btn[0]+btn[2]/2,btn[1]+btn[3]+80]);
+  // away from the buttons while somebody else's page is shown, so nothing looks clicked
+  M(v('nobody')+.1,[btn[0]-420,btn[1]+230]); M(v('click')-.6,[btn[0]-420,btn[1]+230]);
+
+  // 4 click New Wow Moment
+  M(v('click')+.1,mid(btn)); K(v('click')+.55);
+  T(v('click'),v('click')+.9,'3','Click New Wow Moment','');
+  T(v('click')+.9,v('fill'),'3','Click New Wow Moment','',true);
+  // the form fills in as it is said: w04 throughout, its values revealed on their words (drawFill)
+  FILL={desc:[v('spent'),v('amount')-.15], amount:v('amount')+.2, receipt:v('receipt')+.35};
+  C(v('click')+.6,1.7,heads[0]+heads[2]/2-120,heads[1]+180); C(v('click')+1.2,1,960,540);
+
+  // 5 fill it in - date, what it was for, amount, receipt
+  const row=(id,re)=>rect(id,'.wf-evt-row',re,4);
+  const modal=rect('w04','.wf-evt-modal');
+  C(v('fill')+.2,1.25,mid(modal)[0],mid(modal)[1]+20);
+  S(v('click')+.9,v('submit')+.8,'w04');
+  const fields=[['date','Date','Date',/^Date/],['spent','spent','What you spent on',/^Description/],['amount','amount','Amount',/^Amount/],['receipt','receipt','The receipt',/^Attachment/]];
+  fields.forEach((f,i)=>{ const a=v(f[1]), b=i<3?v(fields[i+1][1]):v('upi'); const r=row('w04',f[3]);
+    H(a,b,r); M(a-.3,[r[0]+r[2]-70,r[1]+r[3]/2]); T(a,b,'4','Fill in the claim',f[2],true); });
+
+  // 6 the UPI details are remembered
+  const upi=row('w04',/^UPI/), ph=row('w04',/^Phone/);
+  H(v('upi'),v('submit'),[upi[0],upi[1],upi[2],ph[1]+ph[3]-upi[1]],'#16a34a');
+  T(v('upi'),v('submit'),'5','Your UPI details are remembered','Filled in from your last claim',true);
+  M(v('upi')-.2,[upi[0]+upi[2]-70,upi[1]+upi[3]+10]);
+
+  // 7 submit - the claim is outlined in purple
+  const sub=rect('w04','.wf-evt-modal button',/^Create Wow Moment$/);
+  M(v('submit')-.1,mid(sub)); K(v('submit')+.35);
+  T(v('submit'),v('submit')+1.1,'6','Create Wow Moment','',true);
+  T(v('submit')+1.1,v('purple')-.2,'6','Create Wow Moment','');
+  S(v('submit')+.8,v('back')+99,'w05');
+  C(v('submit')+.5,1.25,mid(modal)[0],mid(modal)[1]+20); C(v('submit')+1.1,1,960,540);
+  const wrow=rect('w05','tr.wf-var-row',null,0);
+  C(v('purple')-.3,1,960,540); C(v('purple')+.6,1.45,wrow[0]+wrow[2]/2,wrow[1]+40);
+  H(v('purple'),v('open')+.6,[wrow[0]-6,wrow[1]-6,wrow[2]+12,wrow[3]+12]);
+  T(v('purple')-.2,v('open'),'6','Outlined in purple','So a Wow Moment is easy to spot in the list');
+  M(v('purple')+.4,[wrow[0]+380,wrow[1]+wrow[3]+40]);
+
+  // 8 open it - how it moves
+  M(v('open'),[wrow[0]+380,wrow[1]+wrow[3]/2]); K(v('open')+.4);
+  C(v('open')+.6,1,960,540);
+  FLOW={on:v('open')+.8, off:v('outro')-.3, lit:[v('first'),v('accounts'),v('back'),v('rule')], done:v('done')};
+  T(v('open')+.8,v('first'),'7','Open it - and see where it goes','');
+  T(v('first'),v('accounts'),'7','Step 1 · Shafat Mehar','Checks it - forwards it to Accounts, or sends it back with a reason');
+  T(v('accounts'),v('back'),'7','Step 2 · Accounts','Gyan Prakash Sah or Gyan Prakash Pandey receives it and pays');
+  T(v('back'),v('rule'),'7','Step 3 · Back to you','When the money reaches you, click Done');
+  T(v('rule'),v('outro')-.3,'8','One claim at a time','A Wow Moment counts as a Reimbursement');
+
+  // outro, then the logo
+  CARDS.push(['outro',v('outro')-.2,LEAD+VOICE_LEN+1.2]);
+  CARDS.push(['logo',LEAD+VOICE_LEN+1.2,LEAD+VOICE_LEN+5.2]);
+  DUR=LEAD+VOICE_LEN+5.2;
+  CUR.sort((a,b)=>a[0]-b[0]);
+  const holds=CLICKS.map(c=>{ const k=CUR.filter(x=>x[0]<=c).pop()||CUR[0]; return [[c-.05,k[1],k[2]],[c+.4,k[1],k[2]]]; }).flat();
+  CUR=CUR.concat(holds).sort((a,b)=>a[0]-b[0]);
+}
+
+// the two-header comparison card
+function drawWho(t){
+  const c=$('who'), dim=$('whoDim');
+  if(!WHO||t<WHO.on||t>=WHO.off){ c.style.opacity=0; dim.style.opacity=0; return; }
+  const o=Math.min(1,(t-WHO.on)/.35,(WHO.off-t)/.35); c.style.opacity=o; dim.style.opacity=o;
+  c.style.transform='translate(-50%,-50%) scale('+(0.95+0.05*Math.min(1,(t-WHO.on)/.35))+')';
+}
+// the form's values appear as they are said; before then the boxes are empty, as on a new form
+let FILLSRC=null;
+function drawFill(t){
+  if(!FILL) return; const d=F.w04.contentDocument;
+  const ta=d.querySelector('.wf-evt-form textarea'), am=d.querySelector('.wf-amt-seg'), chip=d.querySelector('.wf-evt-attlist .wf-evt-att-name'), tot=d.querySelector('#wfEvtTotal b');
+  if(!FILLSRC) FILLSRC={desc:ta?ta.textContent:''};
+  if(ta){ const k=clamp((t-FILL.desc[0])/(FILL.desc[1]-FILL.desc[0]),0,1); const s=FILLSRC.desc.slice(0,Math.round(FILLSRC.desc.length*k)); if(ta.value!==s){ ta.value=s; ta.textContent=s; } }
+  if(am){ const on=t>=FILL.amount; am.value=on?'2,450':''; }
+  if(tot) tot.textContent=t>=FILL.amount?'₹2,450':'₹0';
+  if(chip) chip.style.visibility=t>=FILL.receipt?'visible':'hidden';
+}
+function drawFlow(t){
+  const f=$('flow'), dim=$('flowDim');
+  if(!FLOW||t<FLOW.on||t>=FLOW.off){ f.style.opacity=0; dim.style.opacity=0; return; }
+  const o=Math.min(1,(t-FLOW.on)/.45,(FLOW.off-t)/.45);
+  f.style.opacity=o; dim.style.opacity=o;
+  f.style.transform='translate(-50%,-50%) scale('+(0.94+0.06*Math.min(1,(t-FLOW.on)/.45))+')';
+  let on=-1; FLOW.lit.forEach((a,i)=>{ if(t>=a) on=i; });
+  [...f.querySelectorAll('.st')].forEach((e,i)=>{ e.classList.toggle('lit',i===on); e.classList.toggle('past',on>i); });
+  f.querySelector('.rule').classList.toggle('lit',on===3);
+  const d=$('done'); const k=t-FLOW.done; d.style.transform='scale('+(k>0&&k<.6?1+.18*Math.sin(k/.6*Math.PI):1)+')';
+}
+
+const $=id=>document.getElementById(id);
+let hlEls=[], ripEls=[], tagEls=[];
+function seek(t){
+  let cardOn=false;
+  ['intro','outro','logo'].forEach(k=>{ const c=CARDS.find(x=>x[0]===k); let o=0;
+    if(c&&t>=c[1]&&t<c[2]+(k==='logo'?99:0)){
+      const fin=k==='intro'?1:(t-c[1])/(k==='logo'?.9:.6), fout=k==='logo'?1:(c[2]-t)/.6;
+      o=Math.min(1,fin,fout); }
+    o=clamp(o,0,1); $(k).style.opacity=o; if(o>.6) cardOn=true; });
+  $('intro').style.transform='translateY('+(Math.max(0,1-t/1.2)*30)+'px)';
+  STATES.forEach(id=>F[id].style.opacity=0);
+  SHOTS.forEach(([a,b,id])=>{ if(t>=a-.35&&t<b){ const o=clamp((t-(a-.35))/.35,0,1); if(+F[id].style.opacity<o) F[id].style.opacity=o; } });
+  const [s,cx,cy]=CAM.length?track(CAM.slice().sort((a,b)=>a[0]-b[0]),t):[1,960,540];
+  const tx=clamp(960-cx*s,1920-1920*s,0), ty=clamp(540-cy*s,1080-1080*s,0);
+  $('cam').style.transform='translate('+tx+'px,'+ty+'px) scale('+s+')';
+  const P=(x,y)=>[x*s+tx,y*s+ty];
+  hlEls.forEach(e=>e.style.opacity=0);
+  HLS.forEach((h,i)=>{ const e=hlEls[i]||(hlEls[i]=Object.assign(document.createElement('div'),{className:'hl'})); if(!e.parentNode) $('fx').appendChild(e);
+    if(t>=h[0]&&t<h[1]){ const [x,y]=P(h[2][0],h[2][1]); e.style.left=x+'px'; e.style.top=y+'px'; e.style.width=h[2][2]*s+'px'; e.style.height=h[2][3]*s+'px';
+      e.style.boxShadow='0 0 0 4px '+h[3]+', 0 0 24px 6px '+h[3]+'55'; e.style.opacity=Math.min(1,(t-h[0])/.25,(h[1]-t)/.25); } });
+  tagEls.forEach(e=>e.style.opacity=0);
+  TAGS.forEach((g,i)=>{ const e=tagEls[i]||(tagEls[i]=Object.assign(document.createElement('div'),{className:'tag'})); if(!e.parentNode) $('fx').appendChild(e);
+    if(t>=g[0]&&t<g[1]){ e.textContent=g[2]; const [x,y]=P(g[3],g[4]); e.style.left=(x-e.offsetWidth/2)+'px'; e.style.top=y+'px'; e.style.opacity=Math.min(1,(t-g[0])/.3,(g[1]-t)/.3); } });
+  const [mx,my]=CUR.length?track(CUR,t):[2000,1200];
+  const [px,py]=P(mx,my);
+  const cur=$('cursor'); const down=CLICKS.some(c=>t>=c&&t<c+.15);
+  cur.style.transform='translate('+(px-6)+'px,'+(py-4)+'px) scale('+(down?.85:1)+')';
+  cur.style.opacity=(cardOn||(FLOW&&t>=FLOW.on+.3&&t<FLOW.off)||(WHO&&t>=WHO.on+.2&&t<WHO.off-.1))?0:1;
+  ripEls.forEach(e=>e.style.opacity=0);
+  CLICKS.forEach((c,i)=>{ const e=ripEls[i]||(ripEls[i]=Object.assign(document.createElement('div'),{className:'ripple'})); if(!e.parentNode) $('fx').appendChild(e);
+    if(t>=c&&t<c+.6){ const x=(t-c)/.6; const [cx2,cy2]=P(...track(CUR,c)); e.style.left=cx2+'px'; e.style.top=cy2+'px'; e.style.transform='scale('+(.3+x)+')'; e.style.opacity=1-x; } });
+  const c=CAPS.filter(c=>t>=c[0]&&t<c[1]).pop(); const cap=$('cap');
+  if(c&&!cardOn){ cap.querySelector('.n').textContent=c[2]; cap.querySelector('.t').textContent=c[3]; cap.querySelector('.s').textContent=c[4];
+    cap.querySelector('.s').style.display=c[4]?'':'none'; cap.classList.toggle('top',!!c[5]); cap.style.opacity=1; } else cap.style.opacity=0;
+  drawFlow(t); drawWho(t); drawFill(t);
+  $('prog').style.width=(t/DUR*100)+'%';
+}
+window.seek=seek;
+
+function fit(){ const k=Math.min(innerWidth/1920,innerHeight/1080); const st=$('stage'); st.style.transform='scale('+k+')';
+  st.style.left=(innerWidth-1920*k)/2+'px'; st.style.top=(innerHeight-1080*k)/2+'px'; }
+const Q=new URLSearchParams(location.search);
+window.READY=loadAll().then(()=>new Promise(r=>setTimeout(r,600))).then(()=>{ build(); window.DURATION=DUR;
+  if(Q.has('render')){ $('prog').style.display='none'; seek(0); return; }
+  fit(); addEventListener('resize',fit);
+  const t0=performance.now()-(+Q.get('t')||0)*1000;
+  (function loop(){ const t=(performance.now()-t0)/1000; seek(t%(DUR+1)); requestAnimationFrame(loop); })();
+});
+</script>
+</body></html>

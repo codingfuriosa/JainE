@@ -1,0 +1,1515 @@
+<!doctype html>
+<html lang="en"><head><base href="/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Accountability · Nexus-RE · Jain Group</title>
+<link rel="preload" as="script" href="min/nexus-core.js?v=e0f297c580">
+<link rel="preload" as="script" href="min/accountability.js?v=56e01fa6fc">
+<link href="vendor/inter/inter.css?v=6c0a0c51b3" rel="stylesheet">
+<link rel="stylesheet" href="vendor/font-awesome/css/all.min.css?v=c22cfb6520">
+<link rel="stylesheet" href="nexus.css?v=09a101e697">
+
+
+<style id="accCss">
+    /* Hide scrollbars page-wide on Accountability — scrolling still works, just no visible bar (vertical or horizontal) */
+    *{scrollbar-width:none;-ms-overflow-style:none}
+    *::-webkit-scrollbar{width:0;height:0;display:none}
+    .ac-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--line)}
+    .ac-tab{padding:9px 15px;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:7px}
+    .ac-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+    @media(max-width:700px){.ac-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:8px;border-bottom:0;padding:2px 2px 8px;margin-bottom:12px}.ac-tabs::-webkit-scrollbar{display:none}.ac-tab{flex:0 0 auto;white-space:nowrap;justify-content:center;border:1px solid var(--line);border-radius:20px;padding:9px 15px;font-size:13px;gap:7px}.ac-tab.active{background:var(--brand-a10,#eef2ff);border-color:var(--brand);color:var(--brand)}}
+    .ac-3p{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+    .ac-pbtn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border:1px solid var(--line);border-radius:20px;background:var(--bg-card);color:var(--body);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
+    .ac-pbtn.on{background:var(--brand);border-color:var(--brand);color:#fff}
+    .ac-btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 13px;border:1px solid var(--line);border-radius:9px;background:var(--bg-card);color:var(--ink);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+    .ac-btn:hover{border-color:var(--brand);color:var(--brand)}
+    .wf-inst-tools .ac-btn:disabled{opacity:.4;cursor:default;pointer-events:none}
+    .ac-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}.ac-btn.primary:hover{color:#fff;filter:brightness(.94)}
+    .ac-btn.ok{background:#16a34a;border-color:#16a34a;color:#fff}.ac-btn.ok:hover{color:#fff}
+    .ac-btn.danger{color:#b91c1c}.ac-btn.danger:hover{border-color:#b91c1c}
+    .ac-btn.ic{padding:0;width:36px;justify-content:center}
+    .ac-hdrow{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:8px}
+    @media(max-width:900px){.ac-hdrow{grid-template-columns:1fr}}
+    .ac-hdrow .h{font-size:15px;font-weight:800;color:var(--ink);display:flex;align-items:center;gap:8px}
+    .ac-cardgrid{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:16px}
+    @media(max-width:900px){.ac-cardgrid{grid-template-columns:1fr}}
+    .ac-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+    @media(max-width:900px){.ac-cols{grid-template-columns:1fr}}
+    .ac-col{display:flex;flex-direction:column;gap:16px;min-width:0}
+    .ac-colh{font-size:15px;font-weight:800;color:var(--ink);display:flex;align-items:center;gap:8px;margin-bottom:-4px}
+    .ac-row .ti{min-width:0}
+    .tp-title{word-break:break-word}
+    .ac-card{border:1px solid var(--line);border-radius:14px;background:var(--bg-card);display:flex;flex-direction:column;min-width:0}
+    .ac-card > .hd{padding:13px 15px;border-bottom:1px solid var(--line-2);display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;color:var(--ink)}
+    .ac-card > .hd .cnt{margin-left:auto;background:var(--brand-a10,#eef2ff);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px;font-weight:700}
+    .ac-card > .bd{padding:12px 13px;overflow:auto;height:320px}
+    .ac-seclbl{font-size:10.5px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.05em;margin:8px 2px 6px}
+    .ac-seclbl:first-child{margin-top:0}
+    .ac-seclist{min-height:6px}
+    .ac-arch-list{display:flex;flex-direction:column;gap:8px}
+    .ac-row{display:flex;align-items:center;gap:11px;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;padding:6px 12px;margin-bottom:0;cursor:pointer;transition:border-color .1s}
+    .ac-row:hover{border-color:var(--brand);box-shadow:0 1px 6px rgba(2,6,23,.05)}
+    .ac-row.drag{opacity:.4}
+    .ac-row .grip{color:#cbd5e1;cursor:grab;font-size:13px;padding:5px 4px}
+    .ac-rowchk{width:16px;height:16px;flex:none;cursor:pointer;accent-color:var(--brand);margin:0}
+    .grip{touch-action:none;color:#cbd5e1;cursor:grab;font-size:13px;padding:5px 4px}
+    @media(hover:none){ .grip{font-size:16px;padding:13px 10px} }
+    .ac-row .ti{flex:1;min-width:0}
+    .ac-row .ti .t{font-weight:700;font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    /* Awaiting Approval + Completed This Week rows: keep the title on ONE line with an ellipsis (no
+       wrapping to two lines). The full title is shown on hover via the row's title attribute. */
+    .ac-row.ac-row-full .ti .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ac-row .ti .m{font-size:11.5px;color:var(--slate);display:flex;gap:10px;align-items:center;margin-top:3px;flex-wrap:wrap}
+    .ac-avs{display:flex;flex:none}
+    .ac-av{width:24px;height:24px;border-radius:50%;color:#fff;font-size:9.5px;font-weight:700;display:grid;place-items:center;margin-left:-6px;border:2px solid var(--bg-card)}
+    .ac-av:first-child{margin-left:0}
+    .ac-row .rt .rtd{font-size:11px;color:var(--slate);white-space:nowrap;display:flex;align-items:center;gap:4px}
+    .ac-row .rt{display:flex;align-items:center;gap:8px;flex:none}
+    .ac-pnum{flex:none;width:20px;height:20px;border-radius:6px;background:var(--brand-a10,#eef2ff);color:var(--brand);font-size:11px;font-weight:800;display:grid;place-items:center}
+    .grip-sp{width:21px;flex:none}
+    .ac-row.swap-tgt{outline:2px dashed var(--brand);outline-offset:-2px}
+    .ac-grpbox{display:flex;flex-direction:column;gap:2px}
+    .ac-secwrap.drag{opacity:.4}
+    .ac-sechdr{display:flex;align-items:center;gap:6px}
+    .ac-sechdr .grip{cursor:grab}
+    .ac-ins{height:8px;margin:0;border-radius:4px;cursor:cell;position:relative;display:flex;align-items:center;justify-content:center}
+    .ac-ins::before{content:'';position:absolute;left:4px;right:4px;top:50%;border-top:1px dashed var(--line);transform:translateY(-50%)}
+    .ac-ins::after{content:'+ Add task here';position:relative;z-index:1;background:var(--bg-card);color:var(--brand);font-size:10px;font-weight:700;padding:0 8px;opacity:0;transition:opacity .12s}
+    .ac-ins:hover::after{opacity:1}
+    @media(hover:none){ .ac-ins{display:none} }
+    .tp-attach-chip{display:inline-flex;align-items:center;gap:6px;margin-top:6px;padding:5px 10px;border-radius:8px;background:rgba(0,0,0,.06);font-size:12px;cursor:pointer;width:fit-content}
+    .tp-attach-chip:hover{background:rgba(0,0,0,.1)}
+    .ac-empty{color:var(--slate);font-size:12.5px;text-align:center;padding:14px 8px;cursor:cell;border:1px dashed var(--line);border-radius:10px}
+    .ac-empty:hover{border-color:var(--brand);color:var(--brand)}
+    /* Workflow builder */
+    .wf-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink);margin:14px 0 5px}
+    .wf-lbl:first-child{margin-top:0}
+    .wf-hint{font-weight:500;color:var(--slate)}
+    .wf-tip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--slate);color:#fff;font:italic 700 11px/1 Georgia,'Times New Roman',serif;letter-spacing:0;text-transform:none;cursor:pointer;position:relative;flex:none;margin-left:5px;vertical-align:middle;outline:none;user-select:none;padding-right:1px}
+    .wf-tip:hover,.wf-tip:focus{background:var(--brand)}
+    .wf-poptip{position:relative;cursor:pointer}
+    /* the bubble text lives in the markup only as the content source - it is never shown in place
+       (cards/modals with overflow would clip it). wfTipShow() copies it into #wfTipLayer on <body>. */
+    .wf-tip-txt{display:none}
+    #wfTipLayer{position:fixed;top:0;left:0;z-index:2147483600;background:#1e293b;color:#fff;padding:7px 10px;border-radius:7px;font-size:11.5px;font-weight:500;line-height:1.5;width:max-content;max-width:min(260px,80vw);text-align:center;white-space:normal;pointer-events:none;opacity:0;visibility:hidden;transition:opacity .12s;box-shadow:0 8px 22px rgba(0,0,0,.28)}
+    #wfTipLayer.show{opacity:1;visibility:visible}
+    #wfTipLayer::after{content:'';position:absolute;top:100%;left:var(--tipx,50%);transform:translateX(-50%);border:5px solid transparent;border-top-color:#1e293b}
+    #wfTipLayer.below::after{top:auto;bottom:100%;border-top-color:transparent;border-bottom-color:#1e293b}
+    /* ----- Workflow builder form -----
+       Two sections (Basics, Steps). Paired fields go side by side from 760px up and
+       stack below that; every field owns its own label so nothing drifts out of line. */
+    .wf-form{display:flex;flex-direction:column;gap:24px}
+    .wf-fsec{display:flex;flex-direction:column;gap:13px}
+    .wf-fsec-h{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+    .wf-fsec-h i{color:var(--brand);font-size:12px}
+    .wf-fgrid{display:grid;grid-template-columns:1fr 1fr;gap:15px 20px;align-items:start}
+    .wf-fld{display:flex;flex-direction:column;min-width:0}
+    .wf-fld-wide{grid-column:1/-1}
+    .wf-fld .wf-lbl{margin:0 0 6px}
+    /* Every control in the builder is exactly 40px tall and shares one text inset, so the
+       labels, inputs, person pickers and dropdowns all line up on the same edges. */
+    .wf-fld .ac-in{width:100%;box-sizing:border-box}
+    .wf-fld input.ac-in,.wf-step-fields input.ac-in,.wf-evt-form input.ac-in{height:40px;padding-top:0;padding-bottom:0}
+    .wf-fld .ac-in,.wf-step-fields .ac-in,.wf-step-fields .wf-pp-nm,.wf-step-fields .wf-pp-ph{font-size:13px}
+    .wf-fld .ac-in::placeholder,.wf-step-fields .ac-in::placeholder{font-size:13px;color:#94a3b8}
+    .wf-step-sub input[type=number].ac-in{appearance:textfield;-moz-appearance:textfield}
+    .wf-step-sub input[type=number].ac-in::-webkit-outer-spin-button,.wf-step-sub input[type=number].ac-in::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+    /* native selects sit at a different height/inset per OS — draw our own caret instead */
+    .wf-step-sub select.ac-in,.wf-fld select.ac-in{appearance:none;-webkit-appearance:none;-moz-appearance:none;height:40px;padding:0 30px 0 12px;cursor:pointer;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:11px 8px}
+    .wf-step-sub select.ac-in::-ms-expand,.wf-fld select.ac-in::-ms-expand{display:none}
+    .wf-steps-head{margin-top:20px}
+    /* Step card: a header strip carries the number and the remove button, so the inputs
+       underneath run the full width of the card rather than being pinched between them. */
+    .wf-step{display:block;padding:12px 13px 13px;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;background:var(--bg-card)}
+    .wf-step:hover{border-color:#cbd5e1}
+    .wf-step-hd{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+    .wf-step-num{flex:0 0 24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+    .wf-step-hd-t{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate)}
+    .wf-step-fields{min-width:0;display:flex;flex-direction:column;gap:8px}
+    .wf-step-sub{display:flex;gap:8px;min-width:0}
+    .wf-step-sub .wf-s-person{flex:1 1 auto;min-width:0}
+    .wf-step-sub .wf-s-dur{flex:0 0 104px;min-width:0}
+    .wf-step-sub .wf-s-unit{flex:0 0 108px;min-width:0}
+    .wf-s-del{margin-left:auto;flex:0 0 auto}
+    .wf-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+    .wf-trig{font-size:11.5px;color:var(--brand);margin-top:3px}
+    .wf-desc{color:var(--slate);font-size:13px;margin-bottom:10px}
+    .wf-trig-box{background:var(--brand-a10,#eef2ff);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13px;margin-bottom:18px}
+    .wf-timeline{display:flex;flex-direction:column}
+    .wf-tl-item{display:flex;gap:12px;padding-bottom:16px;position:relative}
+    .wf-tl-item:not(:last-child)::before{content:'';position:absolute;left:13px;top:28px;bottom:0;width:2px;background:var(--line)}
+    .wf-tl-num{flex:0 0 28px;height:28px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;z-index:1}
+    .wf-tl-body{flex:1;min-width:0;padding-top:3px}
+    .wf-tl-title{font-weight:600;font-size:14px;color:var(--ink)}
+    .wf-tl-meta{display:flex;align-items:center;gap:14px;margin-top:6px;flex-wrap:wrap}
+    .wf-who{display:inline-flex;align-items:center}
+    .wf-av{width:22px;height:22px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;margin-right:7px}
+    .wf-who-nm{font-size:12.5px;color:var(--ink);font-weight:600}
+    .wf-dept{font-size:11.5px;color:var(--slate);margin-left:7px}
+    .wf-dur{font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:5px}
+    /* Workflow step person picker (avatar + department-grouped).
+       NOTE the .ac-in.wf-pp-btn selector: the picker also carries .ac-in, whose padding rule is
+       declared further down this sheet and would otherwise win on source order and make the
+       picker 46px tall next to 40px inputs. The doubled class keeps it aligned. */
+    .wf-step-sub .wf-pp{flex:2;min-width:0}
+    .wf-pp{position:relative}
+    .ac-in.wf-pp-btn{width:100%;height:40px;min-height:40px;box-sizing:border-box;display:flex;align-items:center;gap:9px;padding:0 12px;text-align:left;cursor:pointer;line-height:1;overflow:hidden}
+    .ac-in.wf-pp-btn:hover{border-color:var(--brand)}
+    .wf-pp.open>.ac-in.wf-pp-btn{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    .wf-pp-av{width:22px;height:22px;border-radius:50%;color:#fff;font-size:9.5px;font-weight:700;display:grid;place-items:center;flex:none}
+    .wf-pp-nm{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+    .wf-pp-ph{font-size:13px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+    .wf-pp-caret{margin-left:auto;color:var(--slate);font-size:11px;flex:none;transition:transform .15s}
+    .wf-pp.open .wf-pp-caret{transform:rotate(180deg)}
+    /* Panel matches the trigger's width exactly (left:0 + right:0, no min-width). Anything
+       wider — the old min-width:220px — pushed past the card and gave the page a sideways
+       scrollbar whenever the picker sat in a narrow column. */
+    .wf-pp-panel{position:absolute;top:calc(100% + 5px);left:0;right:0;width:auto;min-width:0;max-width:none;z-index:60;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,.18);padding:6px;display:none;max-height:min(300px,50vh);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+    .wf-pp.open .wf-pp-panel{display:block}
+    .wf-pp-panel .ms-search{margin-bottom:6px;width:100%;box-sizing:border-box;height:36px}
+    /* The person list reuses the shared .ms-dept / .ms-opt / avatar styles (nexus.css) so it
+       matches the app's other member dropdown exactly. */
+    .wf-pp-panel .ms-opt.on{background:var(--brand-a10,#eef2ff)}
+    /* Workflow form responsiveness — kept AFTER the picker rules above, otherwise
+       the wf-step-sub wf-pp flex:2 rule wins on source order and the picker stays squashed. */
+    @media(max-width:760px){.wf-fgrid{grid-template-columns:1fr;gap:14px}}
+    @media(max-width:700px){
+      .wf-step-sub{flex-wrap:wrap}
+      .wf-step-sub .wf-s-person,.wf-step-sub .wf-pp{flex:1 1 100%}
+      /* duration + unit split the row evenly instead of leaving a ragged gap */
+      .wf-step-sub .wf-s-dur,.wf-step-sub .wf-s-unit{flex:1 1 0;min-width:0}
+      .wf-step{padding:11px}
+      .wf-form{gap:20px}
+      .wf-actions .ac-btn{flex:1;justify-content:center}
+      .wf-owner-pick{flex-wrap:wrap}
+      .wf-owner-pick .wf-pp{flex:1 1 100%}
+    }
+    .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:3px;line-height:1.5}
+    .ac-addrow{display:flex;gap:8px;margin:3px 0}
+    .ac-addrow-ghost{display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:9px;border:1px dashed var(--line);color:var(--slate);font-size:13px;cursor:pointer;margin:3px 0;transition:.15s}
+    .ac-addrow-ghost:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-a10)}
+    .ac-addrow input{flex:1;border:1px solid var(--brand);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;box-shadow:0 0 0 3px var(--brand-a10)}
+    @media(hover:none){ .ac-in,.ac-addrow input,input,select,textarea{font-size:16px} }
+    .ac-chip{display:inline-flex;align-items:center;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;white-space:nowrap}
+    .ac-c-Pending{background:#fef3c7;color:#92400e}.ac-c-Awaiting{background:#dbeafe;color:#1e40af}.ac-c-Completed{background:#dcfce7;color:#166534}
+    /* calendar (Google-Calendar-inspired shell) */
+    .gcal-shell{display:flex;gap:16px;align-items:flex-start;color:#1f2937}
+    .gcal-sidebar{width:250px;flex:none;display:flex;flex-direction:column;gap:16px}
+    .gcal-create{display:flex;align-items:center;justify-content:center;gap:8px;background:#fff;border:1px solid #e5e7eb;border-radius:24px;padding:12px 18px;font-weight:600;font-size:14px;color:#1f2937;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.08);transition:box-shadow .15s,background .15s}
+    .gcal-create:hover{box-shadow:0 2px 8px rgba(0,0,0,.12);background:#f8fafc}
+    .gcal-create i{color:#2563eb;font-size:16px}
+    .gcal-create.disabled{color:#9ca3af;cursor:not-allowed;box-shadow:none}
+    .gcal-create.disabled:hover{box-shadow:none;background:#fff}
+    .gcal-create.disabled i{color:#c3cad4}
+    .gcal-mini{border:1px solid #e5e7eb;border-radius:12px;padding:12px;background:#fff}
+    .gcal-mini-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+    .gcal-mini-title{font-size:13px;font-weight:700;color:#1f2937}
+    .gcal-mini-nav{display:flex;gap:2px}
+    .gcal-mini-nav button{border:0;background:transparent;color:#6b7280;width:22px;height:22px;border-radius:50%;cursor:pointer;font-size:11px}
+    .gcal-mini-nav button:hover{background:#f1f5f9;color:#1f2937}
+    .gcal-mini-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center;justify-content:center}
+    .gcal-mini-dow{font-size:10px;color:#6b7280;font-weight:700;padding:2px 0}
+    .gcal-mini-day{width:24px;height:24px;line-height:24px;margin:1px auto;font-size:11.5px;color:#1f2937;border-radius:50%;cursor:pointer;transition:background .1s;box-sizing:border-box}
+    .gcal-mini-day:hover{background:#f1f5f9}
+    .gcal-mini-day.other{color:#c3cad4}
+    .gcal-mini-day.today{color:#2563eb;font-weight:700}
+    .gcal-mini-day.selected{background:#2563eb;color:#fff;font-weight:700}
+    .gcal-mini-day.has::after{content:'';display:block;width:4px;height:4px;border-radius:50%;background:#2563eb;margin:-3px auto 0}
+    .gcal-mini-day.selected.has::after{background:#fff}
+    .gcal-filters{border:1px solid #e5e7eb;border-radius:12px;padding:12px;background:#fff}
+    .gcal-filters-title{font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
+    .gcal-filter-row{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13.5px;color:#1f2937;cursor:pointer}
+    .gcal-filter-row input{width:15px;height:15px;cursor:pointer}
+    .gcal-filter-dot{width:10px;height:10px;border-radius:3px;flex:none}
+    .gcal-filter-row.soon{color:#9ca3af;cursor:default}
+    .gcal-main{flex:1;min-width:0;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#fff}
+    .gcal-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid #e5e7eb}
+    .gcal-tb-nav{display:flex;align-items:center;gap:8px}
+    .gcal-tbtn{border:1px solid #e5e7eb;background:#fff;color:#1f2937;border-radius:8px;height:34px;padding:0 12px;font-size:13px;font-weight:600;cursor:pointer;transition:background .12s;flex-shrink:0}
+    .gcal-tbtn:hover{background:#f8fafc}
+    .gcal-tbtn.ic{width:34px;padding:0}
+    .gcal-toolbar-title{font-size:19px;font-weight:600;color:#1f2937;margin:0 6px;white-space:nowrap}
+    .gcal-views{display:flex;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-left:auto}
+    .gcal-view-btn{border:0;background:#fff;color:#6b7280;font-size:12.5px;font-weight:600;padding:0 13px;height:34px;cursor:pointer;border-left:1px solid #e5e7eb}
+    .gcal-view-btn:first-child{border-left:0}
+    .gcal-view-btn.active{background:#eff6ff;color:#2563eb}
+    .gcal-search{display:flex;align-items:center;gap:8px;border:1px solid #e5e7eb;border-radius:8px;height:34px;padding:0 10px;color:#6b7280;font-size:13px;flex:1 1 240px;min-width:200px;max-width:480px}
+    .gcal-search input{border:0;outline:0;font-size:13px;flex:1;color:#1f2937;background:transparent;min-width:0}
+    .gcal-body{padding:0}
+    .gcal-mgrid{display:grid;grid-template-columns:repeat(7,1fr)}
+    .gcal-mdow{text-align:center;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;padding:8px 0;border-bottom:1px solid #e5e7eb}
+    .gcal-mcell{min-height:104px;min-width:0;overflow:hidden;border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;padding:6px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .1s}
+    .gcal-mcell:nth-child(7n){border-right:0}
+    .gcal-mcell:hover{background:#f8fafc}
+    .gcal-mcell.other{background:#fafafa}
+    .gcal-mcell.other .gcal-mnum{color:#c3cad4}
+    .gcal-mcell.today .gcal-mnum{background:#2563eb;color:#fff}
+    .gcal-mnum{font-size:12.5px;font-weight:600;color:#1f2937;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:50%;flex:none}
+    .gcal-mevents{display:flex;flex-direction:column;gap:3px;overflow:hidden}
+    .gcal-mev{font-size:11px;padding:2px 6px;border-radius:5px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;font-weight:600;max-width:100%;min-width:0}
+    .gcal-mev[data-task]{cursor:grab;position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+    .gcal-mev[data-task]::before{content:'';position:absolute;top:-6px;left:-6px;right:-6px;bottom:-6px}
+    .gcal-mev.gcal-dragging{opacity:.35;cursor:grabbing}
+    .gcal-mev.gcal-armed{outline:2px solid rgba(37,99,235,.55);outline-offset:1px}
+    .gcal-mcell.gcal-drop-hover,.gcal-allday-col.gcal-drop-hover{outline:2px dashed #2563eb;outline-offset:-2px;background:rgba(37,99,235,.08)}
+    .gcal-wrap{display:flex;flex-direction:column;max-height:66vh;overflow:auto}
+    .gcal-allday{display:flex;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:2}
+    .gcal-allday-label{width:56px;flex:none;font-size:10.5px;color:#6b7280;padding:6px 6px 6px 0;text-align:right}
+    .gcal-allday-cols{flex:1;display:grid;gap:0}
+    .gcal-allday-col{border-left:1px solid #e5e7eb;padding:4px;display:flex;flex-direction:column;gap:3px;min-height:32px}
+    .gcal-timegrid{display:flex}
+    .gcal-hours{width:56px;flex:none}
+    .gcal-hour{height:48px;font-size:10.5px;color:#6b7280;text-align:right;padding-right:6px;position:relative;top:-6px}
+    .gcal-daycols{flex:1;display:grid;position:relative}
+    .gcal-daycol{border-left:1px solid #e5e7eb;position:relative}
+    .gcal-hourline{height:48px;border-bottom:1px solid #eef1f4}
+    .gcal-nowline{position:absolute;left:0;right:0;height:0;border-top:2px solid #ea4335;z-index:3}
+    .gcal-nowdot{position:absolute;left:-4px;top:-4px;width:8px;height:8px;border-radius:50%;background:#ea4335}
+    .gcal-daycolhead{text-align:center;padding:8px 0;border-left:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:600;color:#6b7280}
+    .gcal-daycolhead .n{font-size:16px;color:#1f2937;font-weight:700;display:block;margin-top:2px}
+    .gcal-daycolhead.today .n{color:#2563eb}
+    /* Name + time sit on ONE line (flex row) instead of stacking — keeps short meetings from
+       looking "thick"/oversized. left/width are set inline per-block by gcalMtgLayout() so
+       meetings that overlap in time sit side-by-side instead of drawing on top of each other. */
+    .gcal-mtgblock{position:absolute;display:flex;align-items:center;gap:6px;border-radius:6px;color:#fff;padding:3px 7px;overflow:hidden;cursor:pointer;font-size:11px;line-height:1.35;box-shadow:0 1px 2px rgba(0,0,0,.15);z-index:2}
+    .gcal-mtgblock b{flex:1;min-width:0;font-size:11.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .gcal-mtgblock span{flex:none;font-size:10px;opacity:.9;white-space:nowrap}
+    .gcal-mtgblock[data-meeting-time]{cursor:grab;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;touch-action:none}
+    .gcal-mtgblock.gcal-dragging{opacity:.55;cursor:grabbing;box-shadow:0 4px 10px rgba(0,0,0,.3)}
+    .gcal-tbtn:disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+    /* Agenda list (used by Week view, and by Month's day-click slide-in panel) */
+    .gcal-list-wrap{max-height:66vh;overflow:auto}
+    .gcal-list{padding:4px 0}
+    .gcal-lday{border-bottom:1px solid #eef1f4;padding:10px 16px}
+    .gcal-lday:last-child{border-bottom:0}
+    .gcal-lday-head{font-size:13px;font-weight:700;color:#1f2937;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+    .gcal-lday.today .gcal-lday-head{color:#2563eb}
+    .gcal-lday-badge{background:#2563eb;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px}
+    .gcal-lday-rows{display:flex;flex-direction:column;gap:5px}
+    .gcal-lrow{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;font-size:13px;color:#1f2937;cursor:pointer;transition:background .1s}
+    .gcal-lrow:hover{background:#f8fafc}
+    .gcal-lrow.empty{color:#9ca3af;cursor:default;font-size:12.5px}
+    .gcal-lrow.empty:hover{background:transparent}
+    .gcal-lrow-dot{width:9px;height:9px;border-radius:50%;flex:none}
+    .gcal-lrow-title{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+    .gcal-lrow-tag{font-size:11px;color:#6b7280;flex:none}
+    .gcal-lrow[data-task],.gcal-lrow[data-meeting]{cursor:grab;position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+    .gcal-lrow.gcal-dragging{opacity:.4;cursor:grabbing;background:#eff6ff}
+    .gcal-lrow.gcal-armed{outline:2px solid rgba(37,99,235,.55);outline-offset:-2px}
+    .gcal-lday.gcal-drop-hover{background:rgba(37,99,235,.06);outline:2px dashed #2563eb;outline-offset:-2px}
+    .gcal-yeargrid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;padding:18px}
+    .gcal-year-month{border:1px solid #e5e7eb;border-radius:10px;padding:10px}
+    .gcal-year-month-title{font-size:12.5px;font-weight:700;color:#1f2937;margin-bottom:6px;cursor:pointer;text-align:center}
+    .gcal-year-month-title:hover{color:#2563eb}
+    .gcal-empty-view{padding:60px 20px;text-align:center;color:#9ca3af;font-size:13.5px}
+    .gcal-panel{position:fixed;top:0;right:0;height:100%;width:360px;max-width:92vw;background:#fff;border-left:1px solid #e5e7eb;box-shadow:-6px 0 24px rgba(15,23,42,.10);transform:translateX(100%);transition:transform .22s ease;z-index:200;display:flex;flex-direction:column}
+    .gcal-panel.open{transform:translateX(0)}
+    .gcal-panel-head{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#1f2937}
+    .gcal-panel-head .x{margin-left:auto;cursor:pointer;color:#6b7280;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+    .gcal-panel-head .x:hover{background:#f1f5f9;color:#1f2937}
+    .gcal-panel-body{flex:1;overflow-y:auto;overflow-x:hidden;padding:18px}
+    .gcal-panel-title{font-size:16px;font-weight:700;color:#1f2937;margin-bottom:14px;line-height:1.4;overflow-wrap:anywhere}
+    .gcal-panel-row{display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;font-size:13.5px;color:#374151;line-height:1.5;min-width:0;overflow-wrap:anywhere}
+    .gcal-panel-row i{width:16px;color:#6b7280;margin-top:2px;flex:none}
+    /* Inside the panel/menu specifically, long titles wrap to a new line instead of the ellipsis
+       truncation used elsewhere (e.g. the Week view list) — no horizontal scroll in here either way. */
+    .gcal-panel .gcal-lrow{align-items:flex-start}
+    .gcal-panel .gcal-lrow-title{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+    .gcal-panel-foot{padding:14px 18px;border-top:1px solid #e5e7eb;display:flex;gap:8px}
+    .gcal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.15);z-index:199;opacity:0;pointer-events:none;transition:opacity .18s}
+    .gcal-backdrop.open{opacity:1;pointer-events:auto}
+    .gcal-fab{position:fixed;right:28px;bottom:28px;width:56px;height:56px;border-radius:50%;background:#2563eb;color:#fff;border:0;box-shadow:0 4px 14px rgba(37,99,235,.35);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .12s,box-shadow .12s;z-index:150}
+    .gcal-fab:hover{transform:scale(1.06);box-shadow:0 6px 18px rgba(37,99,235,.45)}
+    .gcal-fab.disabled{background:#cbd5e1;box-shadow:none;cursor:not-allowed}
+    .gcal-fab.disabled:hover{transform:none;box-shadow:none}
+    @media(max-width:900px){
+      .gcal-shell{flex-direction:column;align-items:stretch}
+      .gcal-main{width:100%}
+      .gcal-sidebar{width:100%;flex-direction:row;flex-wrap:wrap}
+      .gcal-mini{flex:1;min-width:220px}
+      .gcal-filters{flex:1;min-width:200px}
+      .gcal-create{width:100%}
+      .gcal-toolbar{flex-direction:column;align-items:stretch}
+      .gcal-tb-nav{width:100%;justify-content:center}
+      .gcal-toolbar-title{font-size:16px;flex:1;text-align:center;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .gcal-search{width:100%;max-width:none;flex:none}
+      .gcal-views{width:100%;margin-left:0;flex-wrap:wrap}
+      .gcal-views .gcal-view-btn{flex:1 1 auto}
+      .gcal-yeargrid{grid-template-columns:repeat(1,1fr);gap:12px;padding:12px}
+      .gcal-mcell{min-height:56px}
+      .gcal-mevents{flex-direction:row;flex-wrap:wrap;gap:4px}
+      .gcal-mevents .gcal-mev{font-size:0;line-height:0;padding:0;width:6px;height:6px;min-width:6px;border-radius:50%;white-space:normal;overflow:visible}
+      .gcal-panel{width:100%;max-width:100%}
+      .gcal-fab{right:18px;bottom:18px}
+    }
+    /* meetings */
+    .mtg-page{color:#1f2937}
+    .mtg-main{width:100%;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#fff}
+    .mtg-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:16px;border-bottom:1px solid #e5e7eb}
+    .mtg-toolbar-title{font-size:19px;font-weight:600;color:#1f2937}
+    .mtg-create{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--brand);border:1px solid var(--brand);border-radius:20px;padding:0 16px;height:38px;font-weight:600;font-size:13.5px;color:#fff;cursor:pointer;margin-left:auto}
+    .mtg-gstatus{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:16px}
+    .mtg-gstatus.connected{background:#dcfce7;color:#16a34a}
+    .mtg-gstatus.connect{background:#fff;border:1px solid #d1d5db;color:#374151;cursor:pointer}
+    .mtg-gstatus.connect:hover{background:#f9fafb}
+    .mtg-gate{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;padding:70px 24px;min-height:320px}
+    .mtg-gate .mtg-gate-icon{font-size:34px;color:#4285f4}
+    .mtg-gate h3{font-size:17px;font-weight:600;color:#1f2937;margin:0}
+    .mtg-gate p{font-size:13px;color:var(--slate);max-width:340px;margin:0}
+    .mtg-gate-warn{font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;max-width:360px;display:flex;align-items:center;gap:6px;text-align:left}
+    .mtg-gate button{display:flex;align-items:center;justify-content:center;gap:8px;background:#fff;border:1px solid #d1d5db;border-radius:20px;padding:0 20px;height:42px;font-weight:600;font-size:13.5px;color:#374151;cursor:pointer}
+    .mtg-gate button:hover{background:#f9fafb}
+    .mtg-gate button i{color:#4285f4}
+    .mtg-auto-link{font-size:12.5px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:6px}
+    .mtg-auto-link.warn{background:#fffbeb;border-color:#fde68a;color:#92400e}
+    .mtg-auto-link a{color:inherit;font-weight:600;text-decoration:underline}
+    /* Non-blocking "you can still use Offline meetings" banner (shown when Google isn't connected) */
+    .mtg-connect-banner{display:flex;align-items:center;gap:12px;background:#f8fafc;border:1px solid var(--line);border-radius:11px;padding:11px 14px;margin:0 0 14px}
+    .mtg-connect-banner .mcb-ico{font-size:20px;color:#4285f4;flex:0 0 auto}
+    .mtg-connect-banner .mcb-txt{flex:1;min-width:0;font-size:12.5px;color:var(--slate);line-height:1.45}
+    .mtg-connect-banner .mcb-txt b{color:var(--ink);font-weight:600}
+    .mtg-connect-banner .mcb-btn{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid #d1d5db;border-radius:20px;padding:0 15px;height:36px;font-weight:600;font-size:13px;color:#374151;cursor:pointer;font-family:inherit}
+    .mtg-connect-banner .mcb-btn:hover{background:#f9fafb}
+    .mtg-connect-banner .mcb-btn i{color:#4285f4}
+    @media(max-width:600px){.mtg-connect-banner{flex-wrap:wrap}.mtg-connect-banner .mcb-btn{width:100%;justify-content:center}}
+    /* Non-blocking scheduling-conflict warning shown in the meeting form's attendee picker */
+    .mtg-conflict-warn{font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-top:6px;line-height:1.5}
+    .mtg-conflict-mark{margin-left:2px}
+    .mtg-log-attendee{font-size:13px;color:var(--body);padding:4px 0;display:flex;align-items:center;gap:8px}
+    .mtg-create:hover{filter:brightness(.94)}
+    .mtg-grouptabs{display:flex;gap:6px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc}
+    .mtg-gtab{border:1px solid #e5e7eb;background:#fff;color:#475569;font-size:13px;font-weight:600;padding:0 16px;height:34px;border-radius:8px;cursor:pointer}
+    .mtg-gtab.active{background:var(--brand);border-color:var(--brand);color:#fff}
+    .mtg-body{padding:16px}
+    .mtg-sec-label{font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;margin:18px 0 10px}
+    .mtg-sec-label:first-child{margin-top:0}
+    .mtg-log-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #e5e7eb;border-radius:10px;padding:11px 14px;margin-bottom:8px;cursor:pointer;transition:box-shadow .12s,border-color .12s}
+    .mtg-log-row:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
+    .mtg-log-title{font-size:13.5px;font-weight:700;color:#1f2937}
+    .mtg-log-meta{font-size:12px;color:#6b7280;margin-top:2px}
+    .mtg-att-names{font-size:12px;color:#475569;margin-top:5px;line-height:1.5}
+    .mtg-att-names b{color:#1f2937;font-weight:600}
+    .mtg-log-badge{flex:none;font-size:11px;font-weight:600;padding:4px 10px;border-radius:99px;white-space:nowrap}
+    .mtg-log-badge.ready{background:#dcfce7;color:#16a34a}
+    .mtg-log-badge.pending{background:#fef9c3;color:#a16207}
+    .mtg-log-badge.none{background:#f1f5f9;color:#94a3b8}
+    .mtg-log-transcript{margin-top:6px;font-size:13px;color:#334155;line-height:1.6;max-height:260px;overflow:auto;background:#f8fafc;border-radius:8px;padding:12px}
+    .mtg-log-summary{margin:6px 0 12px;font-size:13px;color:#334155;line-height:1.65;background:#fff;border:1px solid var(--line);border-left:3px solid #0d9488;border-radius:8px;padding:11px 13px}
+    .mtg-log-sumh{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#0d9488;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+    .mtg-tr-facts{display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 12px}
+    .mtg-tr-fact{flex:1 1 110px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px}
+    .mtg-tr-fact .k{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#a3adbe}
+    .mtg-tr-fact .v{font-size:17px;font-weight:650;color:var(--ink);margin-top:3px;font-variant-numeric:tabular-nums}
+    .mtg-tr-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+    .mtg-tr-h{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#8a94a6;display:flex;align-items:center;gap:7px}
+    .mtg-tr-btns{display:flex;gap:6px}
+    .mtg-tr-btns .ac-btn{padding:5px 12px;font-size:12.5px}
+    .mtg-card{display:flex;align-items:stretch;gap:14px;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;transition:box-shadow .12s,border-color .12s}
+    .mtg-card:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
+    .mtg-bar{width:4px;border-radius:3px;flex:none}
+    .mtg-time{width:146px;flex:none;font-size:12.5px;color:#6b7280;font-weight:600;padding-top:1px;line-height:1.35}
+    .mtg-when{font-size:13px;font-weight:800;color:#334155}
+    .mtg-when.now{color:#16a34a}
+    .mtg-when.late{color:#b45309}
+    .mtg-clock{font-size:12px;font-weight:600;color:#6b7280;margin-top:2px}
+    .mtg-dur{font-size:11px;font-weight:600;color:#9ca3af;margin-top:1px}
+    .mtg-chips{display:flex;flex-wrap:wrap;gap:6px;margin:1px 0 5px}
+    .mtg-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#475569;background:#f1f5f9;border-radius:99px;padding:3px 9px;white-space:nowrap}
+    .mtg-chip.ok{background:#dcfce7;color:#15803d}
+    .mtg-chip.warn{background:#fef3c7;color:#b45309}
+    .mtg-chip.pend{background:#e0f2fe;color:#0369a1}
+    .mtg-chip.click{cursor:pointer}
+    .mtg-chip.click:hover{filter:brightness(.95)}
+    .mtg-info{flex:1;min-width:0}
+    .mtg-title{font-size:14px;font-weight:700;color:#1f2937;margin-bottom:4px}
+    .mtg-recur-tag{font-size:10.5px;font-weight:600;color:#7c3aed;background:#f5f3ff;padding:2px 7px;border-radius:10px;margin-left:6px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+    .mtg-meta{display:flex;align-items:center;gap:8px;font-size:12px;color:#6b7280;flex-wrap:wrap}
+    .mtg-avatars{display:flex;margin-left:6px}
+    .mtg-avatar{width:20px;height:20px;border-radius:50%;color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:-6px}
+    .mtg-avatar:first-child{margin-left:0}
+    .mtg-actions{display:flex;align-items:center;flex:none}
+    .mtg-join{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--brand);background:var(--brand);color:#fff;border-radius:8px;height:32px;padding:0 14px;font-size:12.5px;font-weight:600;cursor:pointer;text-decoration:none}
+    .mtg-join:hover{filter:brightness(.94)}
+    .mtg-join.disabled{border-color:#e5e7eb;background:#f8fafc;color:#9ca3af;cursor:not-allowed}
+    .mtg-join.ghost{border-color:#e5e7eb;background:#fff;color:#475569;cursor:default}
+    .mtg-owed{margin:14px 16px 0;border:1px solid #fde68a;background:#fffbeb;border-radius:11px;padding:13px 15px}
+    .mtg-owed-h{font-size:13.5px;font-weight:800;color:#92400e;display:flex;align-items:center;gap:8px}
+    .mtg-owed-sub{font-size:12.5px;color:#a16207;line-height:1.5;margin:5px 0 10px}
+    .mtg-owed-row{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid #fde68a;border-radius:9px;padding:8px 11px;margin-bottom:6px}
+    .mtg-owed-t b{font-size:13px;color:#1f2937;display:block}
+    .mtg-owed-when{font-size:11.5px;color:#a16207}
+    .mtg-owed-more{font-size:12px;color:#a16207;margin-top:2px}
+    .mtg-join.alt{border-color:#cbd5e1;background:#fff;color:#334155}
+    .mtg-join.alt:hover{border-color:#94a3b8;background:#f8fafc;filter:none}
+    .mtg-del{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;padding:0 8px;height:32px;border-radius:6px;margin-left:6px}
+    .mtg-del:hover{color:#dc2626;background:#fef2f2}
+    .mtg-static-hint{height:38px;display:flex;align-items:center;color:#94a3b8;font-size:13px;font-style:italic}
+    @media(max-width:900px){
+      .mtg-toolbar{flex-direction:column;align-items:stretch}
+      .mtg-create{margin-left:0;width:100%}
+      .mtg-grouptabs{gap:6px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:10px 14px}
+      .mtg-grouptabs::-webkit-scrollbar{display:none}
+      .mtg-gtab{flex:0 0 auto;white-space:nowrap;padding:0 13px;font-size:12.5px}
+      .mtg-card{flex-direction:column;align-items:stretch;gap:2px;position:relative;padding:6px 10px 6px 14px;margin-bottom:6px}
+      .mtg-bar{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:2px}
+      .mtg-time{width:auto;order:1;padding-top:0;line-height:1.15;font-size:11px}
+      .mtg-info{order:2}
+      .mtg-title{font-size:13px;margin-bottom:1px}
+      .mtg-meta{font-size:11px}
+      .mtg-when{font-size:12px;display:inline}
+      .mtg-clock{display:inline;margin:0 0 0 6px}
+      .mtg-dur{display:inline;margin:0 0 0 6px}
+      .mtg-chips{gap:4px;margin:2px 0 3px}
+      .mtg-chip{font-size:10.5px;padding:2px 7px;gap:4px}
+      .mtg-owed{margin:12px 14px 0;padding:11px 12px}
+      .mtg-owed-row{flex-direction:column;align-items:stretch;gap:7px}
+      .mtg-owed-row .mtg-join.alt{width:100%}
+      .mtg-actions{order:3;width:100%;justify-content:flex-end;gap:0;margin-top:2px}
+      .mtg-join{height:26px;padding:0 10px;font-size:11.5px}
+      .mtg-del{height:26px;width:26px}
+    }
+    /* task page */
+    .tp-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+    .tp-title{font-size:20px;font-weight:800;color:var(--ink);display:flex;align-items:center;gap:10px}
+    .tp-sub{font-size:12.5px;color:var(--slate);margin-top:3px}
+    .tp-acts{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+    .tp-card{border:1px solid var(--line);border-radius:14px;background:var(--bg-card);padding:16px;margin-bottom:14px;min-width:0;overflow-wrap:anywhere}
+    .tp-desc{font-size:13px;color:var(--body);line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+    .tp-card h3{margin:0 0 12px;font-size:14px;color:var(--ink);display:flex;align-items:center;gap:8px}
+    .tp-card h3 .r{margin-left:auto;display:flex;gap:6px}
+    .tp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+    @media(max-width:640px){.tp-grid{grid-template-columns:1fr 1fr;gap:10px}}
+    .tp-f .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);font-weight:700}
+    .tp-f .v{font-size:13px;color:var(--ink);margin-top:3px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .tp-f .v a{color:var(--brand);cursor:pointer;font-weight:600}
+    .tp-chat{display:flex;flex-direction:column;gap:8px;max-height:230px;overflow:auto;padding:2px}
+    .tp-msg{max-width:82%;padding:8px 11px;border-radius:12px;font-size:13px;line-height:1.4;overflow-wrap:anywhere;word-break:break-word}
+    .tp-msg.them{background:#f1f5f9;color:var(--ink);border-radius:12px 12px 12px 2px}
+    .tp-msg.mine{background:var(--brand);color:#fff;align-self:flex-end;border-radius:12px 12px 2px 12px}
+    .tp-msg .who{font-size:10px;opacity:.75;margin-bottom:2px}
+    .tp-sub-item{display:flex;align-items:center;gap:9px;background:var(--bg-card);border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:2px}
+    .tp-sub-item.drag{opacity:.4}
+    .ac-in{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13.5px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+    .ac-in:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    /* THE CHECK LIST PREVIEW IS THE DOCUMENT. An A4 sheet on the viewer's grey, typed into
+       directly - so what is corrected here is what the Word file contains. Sized in points
+       against a 96dpi screen (1pt = 1.333px) so the preview and the .docx agree on where things
+       sit rather than only roughly resembling each other. */
+    .wfd-page{width:794px;min-height:1123px;margin:0 auto;background:#fff;color:#121214;
+      padding:77px;box-sizing:border-box;font-family:Calibri,Segoe UI,Arial,sans-serif;
+      font-size:14px;line-height:1.55;box-shadow:0 2px 14px rgba(0,0,0,.35);outline:none}
+    .wfd-page p{margin:0 0 6px}
+    .wfd-page .wfd-h{font-weight:700;margin:16px 0 10px}
+    .wfd-page .wfd-right{text-align:right}
+    .wfd-page .wfd-gap{margin-bottom:18px}
+    .wfd-page .wfd-soft{color:#6b7280}
+    .wfd-page .wfd-small{font-size:11.5px}
+    .wfd-page table{width:100%;border-collapse:collapse;margin:0 0 8px}
+    .wfd-page td{vertical-align:bottom;padding:3px 6px 3px 0;border:0}
+    .wfd-page td.wfd-rule{border-bottom:1px solid #8c9096}
+    .wfd-page .wfd-cl td{padding-top:9px}
+    .wfd-page .wfd-sign{margin-top:26px}
+    .wfd-page .wfd-logo{margin:0 0 14px}
+    .wfd-page .wfd-logo img{width:146px;height:175px;display:block}
+    /* The letters' pieces - the same rules the document tab carries (see wfOpenDocTab). A logo
+       that is not the classic one carries its own inline size, which beats the rule above. */
+    .wfd-page .wfd-center{text-align:center}
+    .wfd-page .wfd-big{font-size:17px}
+    .wfd-page .wfd-redrule{height:0;border-bottom:2px solid #cc2129;margin:18px 0 30px}
+    .wfd-page .wfd-foot{border-top:1px solid #d9dbdf;margin-top:32px;padding-top:8px;text-align:center}
+    .wfd-page table.wfd-grid td{border:1px solid #b8bdc6;padding:4px 7px;vertical-align:top}
+    .wfd-page table.wfd-grid tr.wfd-head td,.wfd-page table.wfd-grid tr.wfd-band td{background:#f1f2f4}
+    .wfd-page td.wfd-num{text-align:right}
+    /* A caret has to be visible on a page somebody is meant to correct. */
+    .wfd-page:focus-within{box-shadow:0 2px 14px rgba(0,0,0,.35),0 0 0 2px var(--brand)}
+    /* THE TASKS SEARCH BAR IS OUTLINED BEFORE IT IS CLICKED. Every other box on the page is a
+       field you fill in, and they all share the same grey outline until focused - so the one
+       control that is there to FIND something looked identical to the ones that are there to
+       record something, and people scrolled past it. Carrying the brand colour from the start
+       makes it the first thing the eye lands on. Focus still adds the glow, so it is still
+       obvious which box the keyboard is in. */
+    #acTaskSearch{border-color:var(--brand)}
+    textarea.ac-in{min-height:150px;resize:vertical}
+    .ac-lbl{display:block;font-size:12.5px;font-weight:600;color:#334155;margin:12px 0 6px}
+    .ac-msrow{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--line);border-radius:9px;padding:8px;max-height:150px;overflow:auto}
+    .ac-mschk{display:flex;align-items:center;gap:6px;font-size:12.5px;background:#f1f5f9;border-radius:20px;padding:4px 10px;cursor:pointer}
+    .ms-list{border:1px solid var(--line);border-radius:10px;max-height:300px;overflow-y:auto;overflow-x:hidden;padding:4px;box-sizing:border-box;width:100%}
+    .ms-grp{font-size:10.5px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.05em;padding:8px 10px 4px;background:var(--bg-card)}
+    .ms-row{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer;min-width:0}
+    .ms-row:hover{background:#f1f5f9}.ms-row.on{background:var(--brand-a10,#eef2ff)}
+    .ms-av{width:28px;height:28px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center;flex:none}
+    .ms-nm{flex:1;min-width:0;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ms-ck{color:var(--brand);opacity:0}.ms-row.on .ms-ck{opacity:1}
+    select.ac-in{appearance:none;-webkit-appearance:none;padding-right:32px;background-image:linear-gradient(45deg,transparent 50%,#64748b 50%),linear-gradient(135deg,#64748b 50%,transparent 50%);background-position:calc(100% - 18px) 55%,calc(100% - 13px) 55%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;cursor:pointer}
+    .ac-dd{position:relative}
+    .ac-dd-btn{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13.5px;background:var(--bg-card);color:var(--ink);cursor:pointer;box-sizing:border-box}
+    .ac-dd-btn i{margin-left:auto;color:var(--slate);font-size:11px}
+    .ac-dd-menu{position:fixed;z-index:100000;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 32px rgba(2,6,23,.22);max-height:240px;overflow:auto;padding:4px}
+    .ac-dd-item{padding:9px 11px;border-radius:7px;font-size:13px;color:var(--ink);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ac-dd-item:hover{background:var(--brand-a10,#eef2ff);color:var(--brand)}
+    .ac-dd-item.new{color:var(--brand);font-weight:600;border-top:1px solid var(--line-2);margin-top:4px}
+    .bell-ring{animation:bellRing 1.1s ease-in-out infinite;transform-origin:top center}
+    @keyframes bellRing{0%,60%,100%{transform:rotate(0)}10%{transform:rotate(16deg)}20%{transform:rotate(-14deg)}30%{transform:rotate(10deg)}40%{transform:rotate(-6deg)}50%{transform:rotate(2deg)}}
+    #notifBtn{position:relative}
+    #notifBtn .dot{position:absolute;top:-1px;right:-1px;min-width:14px;height:14px;padding:0 2px;border-radius:7px;font-size:8.5px;font-weight:700;color:#fff;background:#dc2626;display:none;align-items:center;justify-content:center;box-sizing:border-box}
+    .nt-item{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line-2);cursor:pointer}.nt-item:hover{background:#f8fafc}.nt-item.unread{background:var(--brand-a10,#f5f7ff)}
+    .nt-item.urg{background:#fef2f2}
+    #notifDd{width:340px;max-width:92vw}
+
+    /* ── due date + repeat picker ──────────────────────────────────────────────────────────
+       How often on the left; on the right, only what that choice needs. One fixed height, so
+       the panel does not grow or shrink as options are clicked. */
+    /* Capped to the window, and its own body scrolls. The panel is position:fixed, so anything
+       hanging below the fold cannot be scrolled into view - which is what made Done unreachable
+       and read as "the page will not scroll". The summary line and the footer stay put; only the
+       rail and the calendar scroll. */
+    .dp-pop{width:432px;max-width:min(94vw,432px);background:#fff;border:1px solid var(--line);
+      border-radius:12px;box-shadow:0 10px 30px rgba(16,24,40,.16);overflow:hidden;
+      display:flex;flex-direction:column;max-height:calc(100vh - 20px)}
+    .dp-body{display:flex;align-items:stretch;overflow-y:auto;min-height:0}
+    .dp-says,.dp-foot{flex:none}
+    .dp-rail{width:142px;flex:none;border-right:1px solid var(--line);background:#fbfcfe;
+      padding:8px 7px;display:flex;flex-direction:column;gap:1px}
+    .dp-opt{width:100%;height:31px;padding:0 10px;border:0;border-radius:7px;background:transparent;
+      font:inherit;font-size:12.5px;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
+    .dp-opt:hover{background:var(--brand-a10,#eef2ff)}
+    .dp-opt.on{background:var(--brand,#1d4ed8);color:#fff;font-weight:600}
+    .dp-main{flex:1;min-width:0;padding:10px 12px 12px;min-height:314px;display:flex;flex-direction:column}
+    .dp-ask{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate);margin-bottom:8px}
+    .dp-ask .req{color:var(--brand,#1d4ed8);letter-spacing:0;text-transform:none;font-weight:600}
+    .dp-note{font-size:11.5px;color:var(--slate);line-height:1.55}
+    .dp-head{display:flex;align-items:center;gap:2px;margin-bottom:4px}
+    .dp-title{flex:1;text-align:center;font-size:12.5px;font-weight:700}
+    .dp-nav{width:25px;height:25px;flex:none;display:flex;align-items:center;justify-content:center;
+      border:0;border-radius:7px;background:transparent;color:var(--slate);cursor:pointer;font-size:11px}
+    .dp-nav:hover{background:var(--brand-a10,#eef2ff);color:var(--brand,#1d4ed8)}
+    .dp-dow{display:grid;grid-template-columns:repeat(7,1fr)}
+    .dp-dow span{text-align:center;font-size:10px;font-weight:700;color:var(--slate-2,#94a3b8);
+      padding-bottom:2px}
+    .dp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px}
+    .dp-day{height:30px;border:0;border-radius:7px;background:transparent;font:inherit;
+      font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink);cursor:pointer;
+      position:relative;padding:0}
+    .dp-day:hover:not([disabled]):not(.on){background:var(--brand-a10,#eef2ff)}
+    .dp-day.pad{color:var(--slate-2,#94a3b8);opacity:.4}
+    .dp-day[disabled]{color:var(--slate-2,#94a3b8);opacity:.3;cursor:default}
+    .dp-day.on{background:var(--brand,#1d4ed8);color:#fff;font-weight:700}
+    .dp-day.today:not(.on)::after{content:'';position:absolute;left:50%;bottom:4px;width:3px;
+      height:3px;margin-left:-1.5px;border-radius:50%;background:var(--brand,#1d4ed8)}
+    /* the multi-select grids: weekdays, dates of the month, months of the year */
+    .dp-chips{display:grid;gap:4px}
+    .dp-chips.dow{grid-template-columns:repeat(7,1fr)}
+    .dp-chips.dom{grid-template-columns:repeat(7,1fr)}
+    /* six across, two rows: twelve months in half the height, which is what leaves room for the
+       chosen month's dates underneath without the panel growing */
+    .dp-chips.mon{grid-template-columns:repeat(6,1fr)}
+    .dp-chips.mon .dp-chip{font-size:11px;height:28px;flex-direction:column;gap:0;line-height:1}
+    .dp-chip{height:30px;border:1px solid var(--line);border-radius:7px;background:#fff;font:inherit;
+      font-size:12px;font-variant-numeric:tabular-nums;color:var(--ink);cursor:pointer;padding:0;
+      display:flex;align-items:center;justify-content:center}
+    .dp-chip:hover{border-color:var(--brand,#1d4ed8);color:var(--brand,#1d4ed8);
+      background:var(--brand-50,#eff4ff)}
+    .dp-chip.on{background:var(--brand,#1d4ed8);border-color:var(--brand,#1d4ed8);color:#fff;
+      font-weight:700}
+    .dp-chip.wide{grid-column:span 3}
+    /* a dot, not a number: at 44px wide a count would crowd the month name */
+    .dp-chip .pip{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.75;
+      margin-top:2px}
+    /* which month the date grid belongs to */
+    .dp-chip.active{box-shadow:0 0 0 2px var(--brand-a10,#eef2ff),0 0 0 3px var(--brand,#1d4ed8)}
+    .dp-sub{display:flex;align-items:baseline;gap:8px;margin:11px 0 7px;padding-top:10px;
+      border-top:1px solid var(--line)}
+    .dp-sub .lbl{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate)}
+    .dp-sub .rm{margin-left:auto;border:0;background:transparent;padding:0;font:inherit;font-size:11px;
+      color:var(--slate-2,#94a3b8);cursor:pointer;text-decoration:underline}
+    .dp-sub .rm:hover{color:#dc2626}
+    .dp-empty{margin-top:11px;padding-top:10px;border-top:1px solid var(--line);font-size:11.5px;
+      color:var(--slate);line-height:1.55}
+    .dp-quick{display:flex;gap:4px;margin-top:7px}
+    .dp-quick button{flex:1;height:26px;border:1px solid var(--line);border-radius:7px;background:#fff;
+      font:inherit;font-size:11.5px;font-weight:500;color:var(--slate);cursor:pointer;
+      white-space:nowrap;padding:0}
+    .dp-quick button:hover{border-color:var(--brand,#1d4ed8);color:var(--brand,#1d4ed8);
+      background:var(--brand-50,#eff4ff)}
+    .dp-mode{display:flex;align-items:center;gap:7px;margin-bottom:6px;padding:6px 9px;
+      border-radius:7px;background:var(--brand-50,#eff4ff);color:var(--brand-700,#1e40af);
+      font-size:11.5px;font-weight:600}
+    .dp-mode button{margin-left:auto;border:0;background:transparent;font:inherit;font-size:11.5px;
+      font-weight:600;color:var(--brand,#1d4ed8);cursor:pointer;text-decoration:underline;padding:0}
+    /* min-height so the footer does not shuffle as the sentence wraps */
+    .dp-says{border-top:1px solid var(--line);background:#f8fafc;padding:9px 12px;font-size:11.5px;
+      color:var(--slate);line-height:1.55;min-height:56px}
+    .dp-says b{color:var(--ink);font-weight:600}
+    .dp-says .warn{color:var(--brand,#1d4ed8);margin-top:2px}
+    .dp-says .miss{color:#dc2626;font-weight:600}
+    .dp-says .ends{margin-top:4px}
+    .dp-says .ends button{border:0;background:transparent;padding:0;font:inherit;font-size:11.5px;
+      color:var(--brand,#1d4ed8);cursor:pointer;text-decoration:underline}
+    .dp-foot{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding:9px 12px}
+    .dp-foot .dp-clear{border:0;background:transparent;padding:0;font:inherit;font-size:12px;
+      color:var(--slate);cursor:pointer}
+    .dp-foot .dp-clear:hover{color:#dc2626}
+    .dp-foot .dp-done{margin-left:auto;height:31px;padding:0 17px;border:0;border-radius:8px;
+      background:var(--brand,#1d4ed8);color:#fff;font:inherit;font-size:12px;font-weight:600;
+      cursor:pointer}
+    .dp-foot .dp-done[disabled]{opacity:.45;cursor:not-allowed}
+    .dp-inline{box-shadow:none;width:100%;max-width:100%}
+    /* the repeat, said on the task itself so a saved rule is visible without reopening the picker */
+    .dp-chip-rep{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
+      padding:2px 9px;border-radius:20px;white-space:nowrap;background:var(--brand-50,#eff4ff);
+      color:var(--brand-700,#1e40af);border:1px solid var(--brand-a10,#eef2ff)}
+    .dp-chip-rep i{font-size:9.5px}
+    /* a recurring task, told apart from a normal one in every list: a purple outline, nothing more */
+    .ac-row.ac-row-rec{box-shadow:inset 0 0 0 1.5px #a78bfa;border-radius:8px}
+    /* Recurring view: "Due soon" columns, or a year table - tasks frozen on the left, the timeline
+       across - and a side panel like the Calendar's that opens only when something is clicked. */
+    .rq-nav{display:flex;align-items:center;gap:8px;margin-left:auto}
+    .rq-nav .ac-btn{width:36px;justify-content:center;font-size:17px}
+    .rq-nav b{font-size:15px;min-width:96px;text-align:center}
+    .rq-dd{position:relative;margin-left:6px}
+    .rq-ddb{height:36px;min-width:176px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 12px;
+      border-radius:8px;border:1.5px solid #2563eb;background:#fff;color:#1d4ed8;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
+    .rq-ddb i{font-size:11px}
+    .rq-ddl{position:absolute;right:0;top:42px;z-index:20;min-width:196px;background:#fff;border:1px solid #dfe3e8;border-radius:10px;
+      box-shadow:0 10px 28px rgba(15,23,42,.14);padding:6px;display:flex;flex-direction:column}
+    .rq-ddl button{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border:0;border-radius:7px;background:transparent;
+      font:inherit;font-size:13.5px;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-ddl button:hover{background:#f1f5f9}
+    .rq-ddl button.on{background:#eff4ff;color:#1d4ed8;font-weight:700}
+    .rq-key{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;font-size:12px;color:#475569;margin:2px 0 12px}
+    .rq-key span{display:inline-flex;align-items:center;gap:6px}
+    .rq-key i{width:8px;height:8px;border-radius:50%;display:inline-block}
+    .rq-key em{font-style:normal}
+    .rq-key b{font-weight:800}
+    .rq-dot{flex:none;width:8px;height:8px;border-radius:50%;display:inline-block}
+    .rq-none{font-size:13px;color:#94a3b8;padding:4px 0}
+    .rq-none.big{padding:48px 24px;text-align:center;color:#64748b;font-size:14px}
+    /* Due soon: four full-height columns, two to a row on a narrower screen - never three */
+    .rq-soon{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;height:calc(100vh - 300px);min-height:560px}
+    @media (max-width:1100px){.rq-soon{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:max(420px,calc(100vh - 300px));height:auto;min-height:0}}
+    .rq-sc{display:flex;flex-direction:column;min-height:0;background:#fff;border:1px solid #dfe3e8;border-radius:12px;overflow:hidden}
+    .rq-sc.today{box-shadow:inset 0 3px 0 #c8101a}
+    .rq-sch{flex-shrink:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;padding:12px 14px;border:0;
+      border-bottom:1px solid #eef0f3;background:#f8fafc;font:inherit;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-sch.od{background:#fef2f2}
+    .rq-sch:hover{filter:brightness(.98)}
+    .rq-sch b{font-size:14px}
+    .rq-sch span{font-size:12px;color:#64748b}
+    .rq-scb{flex:1;min-height:0;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
+    .rq-scb .n{font-size:22px;font-weight:700;line-height:1}
+    .rq-scb .n small{font-size:12px;font-weight:600;color:#64748b;margin-left:5px}
+    .rq-scb .l{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#334155;margin-top:8px}
+    .rq-scb .l b{margin-left:auto}
+    .rq-chip{display:flex;width:100%;box-sizing:border-box;padding:8px 10px;border-radius:8px;font:inherit;font-size:12.5px;font-weight:600;
+      line-height:1.3;text-align:left;cursor:pointer;color:var(--cc);background:var(--cb);border:1.5px solid transparent}
+    .rq-chip.od{background:#fff;border-color:#dc2626}
+    .rq-chip span{flex:1;min-width:0;overflow-wrap:anywhere}
+    .rq-chip small{display:block;font-size:11px;margin-top:2px;font-weight:500;opacity:.8}
+    .rq-chip small.late{color:#b91c1c;font-weight:800;opacity:1}
+    /* the year table */
+    .rq-table{width:100%;background:#fff;border:1px solid #dfe3e8;border-radius:12px;overflow:auto;max-height:calc(100vh - 260px);min-height:320px}
+    .rq-in{width:max-content;min-width:100%}
+    .rq-tr{display:flex;border-bottom:1px solid #eef0f3}
+    .rq-tc{flex:none;width:300px;position:sticky;left:0;z-index:2;background:#fff;border-right:1px solid #dfe3e8;box-sizing:border-box}
+    .rq-hd,.rq-band{position:sticky;z-index:3;background:#fff}
+    .rq-band{top:0;height:28px}
+    .rq-hd{top:0;height:54px;border-bottom:1px solid #dfe3e8}
+    .rq-band+.rq-hd{top:29px}
+    .rq-hd .rq-tc{z-index:4;padding:0 16px;display:flex;align-items:center;font-size:11.5px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.06em}
+    .rq-band .rq-tc{z-index:4}
+    .rq-bd{min-width:0;box-sizing:border-box;padding:0 10px;display:flex;align-items:center;font-size:12px;font-weight:700;white-space:nowrap;
+      overflow:hidden;border-left:2px solid #cbd5e1;color:#334155}
+    .rq-ch{flex:1 0 84px;min-width:84px;height:54px;box-sizing:border-box;padding:0 4px;display:flex;flex-direction:column;align-items:center;
+      justify-content:center;gap:2px;border:0;border-left:1px solid #eef0f3;font:inherit;cursor:pointer;color:#0f172a}
+    .rq-ch:hover{filter:brightness(.97)}
+    .rq-ch.cur{box-shadow:inset 0 -3px 0 #c8101a}
+    .rq-ch b{font-size:12px;white-space:nowrap}
+    .rq-ch span{font-size:10.5px;color:#64748b;white-space:nowrap}
+    .rq-tn{height:46px;padding:0 16px;display:flex;align-items:center;gap:10px;border:0;border-right:1px solid #dfe3e8;font:inherit;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-tn:hover{background:#f8fafc}
+    .rq-tn i{flex:none;width:3px;height:22px;border-radius:2px}
+    .rq-tn span{flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rq-cl{flex:1 0 84px;min-width:84px;height:46px;box-sizing:border-box;border-left:1px solid #eef0f3;display:flex;align-items:center;justify-content:center;gap:3px}
+    .rq-cl.on{cursor:pointer;font-size:12.5px}
+    .rq-cl.on:hover{box-shadow:inset 0 0 0 1px #cbd5e1}
+    .rq-cl small{font-size:11.5px}
+    /* the side panel */
+    .rq-back{position:fixed;inset:0;background:rgba(15,23,42,.18);opacity:0;pointer-events:none;transition:opacity .2s;z-index:199}
+    .rq-back.open{opacity:1;pointer-events:auto}
+    .rq-sub{font-size:13px;color:#475569;margin-bottom:6px}
+    .rq-item{display:flex;align-items:center;gap:10px;width:100%;padding:11px 4px;border:0;border-bottom:1px solid #eef0f3;
+      background:transparent;font:inherit;text-align:left;cursor:pointer;color:#0f172a}
+    .rq-item:hover{background:#f8fafc}
+    .rq-item .rq-bar{flex:none;width:3px;height:30px;border-radius:2px}
+    .rq-item .tt{flex:1;min-width:0;display:flex;flex-direction:column}
+    .rq-item .tt b{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rq-item .tt span{font-size:12px;color:#64748b}
+    .rq-item .go{color:#94a3b8}
+    .rq-st{font-size:12px;white-space:nowrap}
+    .rq-dl{display:grid;grid-template-columns:96px 1fr;gap:10px 12px;font-size:13.5px;line-height:1.45}
+    .rq-dl .k{color:#64748b}
+    .rq-pill{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:20px;margin:8px 0 12px}
+
+    /* an instance's attachments, printed as pages rather than filenames */
+    .wf-print-att{margin-top:16px;page-break-inside:avoid}
+    .wf-print-att-h{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate);margin-bottom:6px}
+    .wf-print-att-img{display:block;width:100%;max-width:100%;height:auto;border:1px solid var(--line);
+      border-radius:4px;margin-bottom:10px;page-break-inside:avoid;page-break-after:auto}
+    .wf-print-att-miss{font-size:12px;color:#b91c1c}
+
+      color:#991b1b;font-size:13px}
+      margin-bottom:12px;font-size:12.5px;color:#92400e}
+      margin-bottom:6px}
+      color:var(--slate)}
+      font-size:12px;color:var(--slate);line-height:1.6}
+      border-top:1px solid var(--line)}
+    @media (max-width:520px){
+      .dp-body{flex-direction:column}
+      .dp-rail{width:100%;border-right:0;border-bottom:1px solid var(--line);
+        flex-direction:row;flex-wrap:wrap;gap:4px}
+      .dp-opt{width:auto;flex:1 1 30%;text-align:center}
+      .dp-main{min-height:0}
+    }
+    </style><style id="wfCss">
+    .wf-page{width:100%}
+    .wf-page-head{display:flex;align-items:center;gap:10px;margin:0 0 14px;flex-wrap:wrap}
+    .wf-page-head h1{font-size:18px;font-weight:700;color:var(--ink);margin:0;display:flex;align-items:center;gap:9px;flex:1;min-width:0;letter-spacing:-.01em}
+    .wf-page-head h1 i{color:var(--brand);font-size:16px}
+    .wf-head-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .wf-head-admin{display:flex;gap:6px;flex:none}
+    .wf-head-new{display:flex;gap:8px;margin-left:auto}
+    .wf-head-new .ac-btn{white-space:nowrap}
+    /* A variant's "New" button (Wow Moment): its colour as a soft tint, so only "New Reimbursement"
+       is a solid block and the header has one loud button rather than two. */
+    .ac-btn.wf-var-btn{background:color-mix(in srgb,var(--wf-var,#7c3aed) 9%,transparent);color:var(--wf-var,#7c3aed);border-color:color-mix(in srgb,var(--wf-var,#7c3aed) 40%,transparent)}
+    .ac-btn.wf-var-btn:hover{background:color-mix(in srgb,var(--wf-var,#7c3aed) 16%,transparent)}
+    /* Not enough room beside the title (tablets, narrow windows): the counts and the New buttons
+       take their own line underneath - counts on the left, New on the right - instead of being
+       squeezed against the title until they overlap it. */
+    @media(max-width:1100px){
+      .wf-head-acts{flex:1 1 100%}
+    }
+    .wf-my-wr{display:flex;align-items:stretch;font-size:11.5px;font-weight:700;border-radius:20px;overflow:hidden;white-space:nowrap}
+    .wf-wr-seg{display:flex;align-items:center;gap:5px;padding:6px 12px}
+    .wf-wr-seg b{font-weight:800;font-size:12.5px}
+    .wf-wr-seg i{font-size:10.5px}
+    .wf-wr-wait{background:#fef3c7;color:#92400e}
+    .wf-wr-recv{background:#dbeafe;color:#1e40af}
+    .wf-card{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+    .wf-card.wf-meta{padding:14px 18px}
+    .wf-card.wf-tlcard{padding:16px 18px}
+    /* The instance-detail card grid (wfCaseSummaryHtml): the default 1fr-column grid stretched a
+       short value like "1" into a column as wide as "2026-08-20, 2026-08-21" sitting next to it.
+       (Two content-hugging attempts were tried and rejected here first — content-width flex/grid
+       left the whole right-hand half of a wide panel empty, which read as worse, not better.) */
+    .wf-tlcard .tp-grid{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
+    /* The cards fill the width of the panel. Packing each one to its own content left the whole
+       right-hand half of the row empty while the details huddled on the left — the panel is wide,
+       so use it. flex-grow shares the spare width out, and because the basis is auto it is shared
+       ON TOP of each card's natural size, so a long value like a list of dates still ends up wider
+       than a bare number rather than every card being forced to an identical column.
+       They may shrink too: without that a long value sized its card past the panel and the text
+       was cut off at the edge. min-width sets the floor and lets the text wrap instead. */
+    .wf-tlcard .tp-f{flex:1 1 auto;min-width:150px;max-width:100%;
+      /* They are called cards, so they look like cards. As bare label-over-value text with only a
+         gap between them, a value that itself contains commas ("Auto, Bus", "Breakfast, Lunch")
+         gave no clue where one detail ended and the next began. */
+      background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:8px 12px}
+    .wf-tlcard .tp-f .v{overflow-wrap:anywhere;word-break:break-word;margin-top:2px}
+    .wf-tlcard .tp-f-wide{flex:1 1 100%;width:100%;min-width:0}
+    /* ---- day-wise instance: table on a wide screen, stacked blocks on a phone ---- */
+    /* UPI field: a typed box with a real dropdown of everything saved. Opening the list always
+       shows every id — what is typed is not a filter, they are there to be picked. */
+    .wf-evt-upi.wf-bad{border-color:#dc2626;background:#fef2f2}
+    /* Amount: a line per thing claimed for — what it is, then what it cost. */
+    .wf-amt{flex:1;min-width:0}
+    .wf-amt-plain .wf-amt-seg{width:100%;height:38px;border:1px solid var(--line);border-radius:9px;
+      background:var(--bg-card,#fff);color:var(--ink);font:inherit;padding:0 11px;outline:none}
+    .wf-amt-plain .wf-amt-seg:focus{border-color:var(--brand)}
+    .wf-amt-list{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--bg-card,#fff)}
+    .wf-amt-line{display:flex;align-items:center;gap:8px;padding:7px 11px;border-top:1px solid var(--line);cursor:text}
+    .wf-amt-line:first-child{border-top:0}
+    .wf-amt-line:focus-within{background:#f8faff}
+    /* The label sizes to its own word instead of stretching across the row — as flex:1 it took all
+       the spare width and the left half of every line read as a heavy empty block. Lighter weight
+       and colour too, so the figure is what the eye lands on. */
+    .wf-amt-for{flex:0 1 auto;max-width:52%;font-size:12px;font-weight:600;color:var(--slate);
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wf-amt-cur{color:var(--slate);font-size:12px;flex:none;margin-left:auto}
+    .wf-amt-seg{flex:0 1 92px;width:92px;min-width:56px;border:0;background:transparent;color:var(--ink);
+      font:inherit;font-weight:600;padding:2px 0;outline:none;text-align:right;font-variant-numeric:tabular-nums}
+    .wf-amt-hint{margin-top:4px;font-size:11.5px;color:var(--slate)}
+    .wf-amt.locked .wf-amt-list,.wf-amt.locked .wf-amt-plain{opacity:.55;background:var(--bg,#f8fafc)}
+    .wf-amt.locked .wf-amt-seg{cursor:not-allowed}
+    .wf-amt-total{display:flex;align-items:baseline;gap:9px;margin-top:6px;padding:0 2px;font-size:12.5px}
+    .wf-amt-total>span:first-child{color:var(--slate);font-size:10.5px;font-weight:700;
+      text-transform:uppercase;letter-spacing:.04em}
+    .wf-amt-total b{color:var(--ink);font-size:13.5px}
+    .wf-amt-miss{margin-left:auto;color:#b45309;font-weight:600;font-size:11.5px}
+    .wf-rej-oldwarn{display:flex;gap:9px;align-items:flex-start;padding:11px 13px;margin-bottom:14px;
+      background:#fef2f2;border:1px solid #fecaca;border-radius:9px;color:#991b1b;font-size:13px;line-height:1.55}
+    .wf-rej-oldwarn i{margin-top:2px}
+    .wf-rej-note{display:flex;gap:9px;align-items:flex-start;line-height:1.6;
+      padding:11px 13px;margin-bottom:14px;background:var(--brand-a10,#eef2ff);border:1px solid var(--line);
+      border-left:3px solid var(--brand);
+      border-radius:9px;color:var(--ink);font-size:12.5px}
+    .wf-rej-note i{margin-top:2px;color:var(--brand);flex:none}
+    .wf-rej-err{margin-top:7px;color:#dc2626;font-size:12.5px;font-weight:600}
+    .wf-upi-wrap{position:relative;flex:1;min-width:0;display:flex;align-items:center}
+    .wf-upi-wrap .wf-evt-upi,.wf-upi-wrap .wf-evt-phone{width:100%;padding-right:32px}
+    .wf-upi-caret{position:absolute;right:4px;top:50%;transform:translateY(-50%);height:26px;width:26px;
+      display:flex;align-items:center;justify-content:center;border:0;background:transparent;
+      color:var(--slate);cursor:pointer;border-radius:6px;font-size:11px}
+    .wf-upi-caret:hover{background:var(--bg,#f1f5f9);color:var(--ink)}
+    .wf-upi-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:40;
+      background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:9px;
+      box-shadow:0 12px 28px rgba(15,23,42,.14);max-height:210px;overflow-y:auto;padding:4px}
+    .wf-upi-wrap.open .wf-upi-panel{display:block}
+    .wf-upi-opt{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:7px;
+      font-size:13px;color:var(--ink);cursor:pointer}
+    .wf-upi-opt:hover{background:var(--bg,#f1f5f9)}
+    .wf-upi-opt.on{color:var(--brand);font-weight:650}
+    .wf-upi-opt span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wf-upi-ic{font-size:10px;color:var(--slate);width:13px;text-align:center;flex:none}
+    .wf-upi-opt.on .wf-upi-ic{color:var(--brand)}
+    .wf-upi-empty{padding:9px 10px;font-size:12px;color:var(--slate);line-height:1.5}
+    .wf-evt-selopt{display:flex;align-items:center;gap:9px}
+    .wf-evt-selic{width:15px;text-align:center;font-size:11.5px;color:var(--slate);flex:none}
+    .wf-evt-selopt.on .wf-evt-selic{color:var(--brand)}
+    .wf-evt-selic-sp{width:15px;flex:none}
+    .wf-evt-seltxt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wf-evt-upi{width:100%}
+    .wf-dw{margin-top:10px}
+    .wf-dw-common{display:flex;flex-wrap:wrap;gap:6px 20px;margin-bottom:10px;font-size:13px;color:var(--ink)}
+    .wf-dw-common b{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);margin-right:5px}
+    .wf-dw-tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+    .wf-dw-table{width:100%;border-collapse:collapse;font-size:13px}
+    .wf-dw-table th{background:var(--bg,#f8fafc);text-align:left;font-size:10.5px;font-weight:700;
+      text-transform:uppercase;letter-spacing:.04em;color:var(--slate);padding:8px 11px;
+      border-bottom:1px solid var(--line);white-space:nowrap}
+    .wf-dw-table td{padding:8px 11px;border-top:1px solid var(--line);vertical-align:top;color:var(--ink)}
+    .wf-dw-table tbody tr:first-child td{border-top:0}
+    .wf-dw-table .wf-dw-n{width:34px;color:var(--slate);text-align:center;white-space:nowrap}
+    .wf-dw-table .wf-dw-amt{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+    .wf-dw-table .wf-dw-rem{min-width:170px;overflow-wrap:anywhere}
+    .wf-dw-table .wf-dw-attcol{white-space:nowrap}
+    .wf-dw-table tfoot td{border-top:2px solid var(--line);background:var(--bg,#f8fafc);padding:8px 11px}
+    .wf-dw-none{color:var(--slate)}
+    .wf-dw-att{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
+      color:var(--brand);cursor:pointer;background:var(--brand-a10,rgba(224,18,28,.07));
+      border-radius:7px;padding:3px 8px}
+    .wf-dw-att:hover{text-decoration:underline}
+    /* On a phone this stays a TABLE and scrolls sideways — a row per entry is the whole point, and
+       stacking each entry into a block loses the ability to read down a column and compare. */
+    @media(max-width:760px){
+      .wf-dw-table{min-width:660px}
+      .wf-dw-tablewrap{-webkit-overflow-scrolling:touch}
+      .wf-dw-common{flex-direction:column;gap:4px}
+      .wf-dw-table th,.wf-dw-table td{padding:7px 9px}
+      .wf-dw-table .wf-dw-rem{min-width:150px}
+    }
+    .wf-remark-entry{padding:7px 0;border-bottom:1px dashed var(--line)}
+    .wf-remark-entry:last-child{border-bottom:none;padding-bottom:0}
+    .wf-remark-entry:first-child{padding-top:0}
+    .wf-remark-day{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--brand);margin-bottom:3px}
+    .wf-remark-txt{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+    /* WRAPS. On Reimbursement this row carries a print-all button with a four-word label plus
+       edit and delete, and with nowrap the cluster ran 146px past the right edge of a 390px
+       screen - taking the whole page into sideways scroll, which is the one thing a layout must
+       never do. It wraps to a second line instead, and the title is allowed to shrink so the
+       wrap happens at the sensible place. */
+    .wf-card-hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:700;font-size:13px;color:var(--ink);margin-bottom:12px;text-transform:uppercase;letter-spacing:.03em}
+    .wf-card-hd>span:not(.cnt):not(.wf-tip):not(.wf-inst-tools){min-width:0;overflow:hidden;text-overflow:ellipsis}
+    .wf-card-hd i{color:var(--slate);font-size:13px}
+    .wf-card-hd .cnt{background:var(--brand-a10,#eef2ff);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px}
+    .wf-inst-filterbar{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px}
+    .wf-inst-filter-search{position:relative;flex:1;min-width:180px}
+    .wf-inst-filter-search i{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--slate);font-size:12px;pointer-events:none}
+    .wf-inst-filter-search .ac-in{width:100%;padding-left:30px;box-sizing:border-box}
+    .wf-inst-filter-dates{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
+    .wf-inst-filterbar .wf-lbl{font-size:11px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;display:flex;flex-direction:column;gap:5px;margin:0}
+    .wf-inst-filterbar .wf-lbl .ac-in{min-width:140px}
+    .wf-daterange-sep{color:var(--slate);font-size:12px;margin:0 -2px 9px}
+    .wf-inst-filter-dates .ac-btn.primary{height:38px}
+    /* On a phone the strip wrapped wherever it happened to run out of room: the two date boxes
+       split across lines, the arrow between them stranded, and Update landing on its own row at a
+       different height from everything else. Laid out deliberately instead — search across the
+       top, the two dates sharing a row underneath, then the buttons. */
+    @media (max-width:640px){
+      .wf-inst-filterbar{gap:10px;padding:10px}
+      .wf-inst-filter-search{flex:1 1 100%;min-width:0}
+      .wf-inst-filter-dates{flex:1 1 100%;display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end}
+      .wf-inst-filterbar .wf-lbl{min-width:0}
+      .wf-inst-filterbar .wf-lbl .ac-in{min-width:0;width:100%;box-sizing:border-box}
+      .wf-daterange-sep{display:none}                 /* From/To already say which is which */
+      .wf-inst-filter-dates .ac-btn.primary{grid-column:1;justify-content:center}
+      /* the clear button fills its half rather than sitting as a lone 38px square beside a
+         full-width Update, which read as a mistake */
+      .wf-inst-filter-dates .ac-btn.ic{grid-column:2;justify-content:center;height:38px;width:auto}
+    }
+    .wf-card-hint{font-weight:500;text-transform:none;letter-spacing:0;color:var(--slate);font-size:12px}
+    /* list header + full-width rows */
+    /* Workflow task Details: always two columns of three, never one long list */
+    .wf-tp .tp-grid{grid-template-columns:1fr 1fr;gap:12px 22px}
+    .wf-tp .tp-f{min-width:0}
+    .wf-tp .tp-f .v{overflow-wrap:anywhere}
+    .wf-listhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+    .wf-listhead-t{font-size:15px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:9px}
+    .wf-listhead-t i{color:var(--brand)}
+    .wf-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg-card)}
+    .wf-lrow{display:flex;align-items:center;gap:14px;padding:14px 16px;cursor:pointer;border-left:3px solid transparent;border-bottom:1px solid var(--line);transition:background .13s,border-color .13s}
+    .wf-lrow:last-child{border-bottom:0}
+    .wf-lrow:hover{background:var(--brand-a10,#eef2ff);border-left-color:var(--brand)}
+    .wf-lrow-main{flex:1;min-width:0}
+    .wf-lrow-name{font-weight:650;font-size:14.5px;color:var(--ink);line-height:1.35;overflow:hidden;text-overflow:ellipsis}
+    .wf-lrow-trig{font-size:12.5px;color:var(--slate);display:flex;align-items:center;gap:6px;margin-top:3px}
+    .wf-lrow-trig i{color:var(--brand);font-size:11px}
+    .wf-lrow-right{display:flex;align-items:center;gap:14px;flex:none}
+    .wf-lrow-steps{font-size:12px;font-weight:600;color:var(--slate);background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:20px;padding:3px 11px;white-space:nowrap}
+    .wf-go{color:#cbd5e1;font-size:13px}
+    .wf-circles{display:inline-flex;align-items:center}
+    .wf-circle{width:28px;height:28px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid var(--bg-card);margin-left:-7px}
+    .wf-circle:first-child{margin-left:0}
+    .wf-circle.wf-more{background:#94a3b8}
+    .wf-circle.wf-none{background:#eef2f6;color:#94a3b8;border-style:dashed}
+    /* meta card */
+    .wf-desc{color:var(--slate);font-size:13.5px;margin-bottom:12px;line-height:1.6}
+    /* Two levels of nesting need more width than the default 560px. The mobile rules already
+       force 94vw with !important, so this only affects desktop. */
+    .modal.wf-evt-modal{max-width:700px}
+    .wf-evt-common{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+    .wf-evt-dgroup{border:1px solid var(--line);border-radius:10px;padding:10px 11px 11px;margin-bottom:12px;background:var(--card,#fff)}
+    .wf-evt-dgroup>.wf-evt-group-hd{margin:-2px 0 8px}
+    .wf-evt-daterow{margin-bottom:10px}
+    .wf-evt-exps{display:flex;flex-direction:column;gap:9px}
+    .wf-evt-exp{border:1px dashed var(--line);border-radius:9px;padding:9px 10px 10px;background:var(--bg,#f8fafc)}
+    .wf-evt-exp-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;
+      font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate)}
+    .wf-add-exp{margin-top:9px}
+    .wf-add-date{margin-top:2px}
+    .wf-duo .wf-evt-selopt{padding-left:12px}
+    .wf-duo-opt{color:var(--slate);font-weight:400;text-transform:none;letter-spacing:0}
+    .wf-evt-selph{color:var(--slate)}
+    .wf-returned{border:1px solid #fcd34d;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:8px;
+      padding:10px 13px;font-size:12.5px;color:#78350f;margin:10px 0 0}
+    .wf-returned-h{font-weight:700;display:flex;align-items:center;gap:7px;margin-bottom:4px}
+    .wf-returned-b{line-height:1.6}
+    .wf-pill.back{background:#fef3c7;color:#92400e}
+    .wf-tabs-right{margin-left:auto;display:flex;align-items:center}
+    .wf-tk-find{display:flex;align-items:center;gap:6px;position:relative}
+    .wf-tk-find>i{position:absolute;left:11px;font-size:12px;color:var(--slate);pointer-events:none}
+    .wf-tk-find .ac-in{padding-left:31px;width:230px;max-width:44vw}
+    @media(max-width:620px){ .wf-tabs-right{margin-left:0;width:100%;padding-top:8px} .wf-tk-find .ac-in{width:100%;max-width:none} }
+    .wf-evt-att-multi{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0}
+    .wf-evt-attlist{display:flex;flex-direction:column;gap:4px;width:100%;min-width:0}
+    .wf-evt-att-multi .wf-evt-att-name{max-width:100%}
+    .wf-trig-box{background:linear-gradient(0deg,var(--brand-a10,#eef2ff),var(--brand-a10,#eef2ff));border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:8px;padding:10px 13px;font-size:13px;color:var(--ink)}
+    .wf-trig-box i{color:var(--brand)}
+    .wf-members-row{display:flex;align-items:center;gap:10px;margin:12px 0 0}
+    .wf-mini-lbl{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate)}
+    /* timeline panel */
+    .wf-tlhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+    /* min-width:0 lets the title actually shrink. Without it a long instance number holds the row
+       open at its full width and pushes the buttons off the side of a phone. */
+    .wf-tlhead-t{font-size:13px;font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;flex-wrap:wrap}
+    .wf-tlhead-t i{color:var(--slate)}
+    /* Edit + close sit together as one action group on the right, not spread apart by the
+       header's own space-between (which only expects two children: the title, and this group). */
+    .wf-tlhead-acts{display:flex;align-items:center;gap:8px;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end}
+    .wf-tlhead-x{border:1px solid var(--line);background:var(--bg-card);color:var(--slate);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:12px;flex:none}
+    .wf-tlhead-x:hover{border-color:var(--brand);color:var(--brand)}
+    /* On a phone this row carries six buttons - edit, check list, welcome letter, allotment
+       letter, print, close - which will not fit beside the title. They take a row of their own,
+       left-aligned like everything else, and grow to a size a thumb can actually hit. */
+    @media (max-width:560px){
+      .wf-tlhead-acts{width:100%;justify-content:flex-start}
+      .wf-tlhead-x{width:36px;height:36px;font-size:14px}
+    }
+    .wf-timeline{display:flex;flex-direction:column}
+    /* Slim timeline row: one line on a normal screen, wrapping to two on a phone. */
+    .wf-tl-item{display:flex;gap:12px;padding-bottom:10px;position:relative}
+    .wf-tl-item:last-child{padding-bottom:0}
+    .wf-tl-item:not(:last-child)::before{content:'';position:absolute;left:12px;top:26px;bottom:0;width:2px;background:var(--line)}
+    .wf-tl-done:not(:last-child)::before{background:#bbf7d0}
+    .wf-tl-num{flex:0 0 26px;height:26px;border-radius:50%;background:#cbd5e1;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;z-index:1;margin-top:5px}
+    .wf-tl-cur .wf-tl-num{background:var(--brand);box-shadow:0 0 0 4px var(--brand-a10,#eef2ff)}
+    .wf-tl-done .wf-tl-num{background:#16a34a}
+    .wf-tl-wait .wf-tl-num{background:#cbd5e1}
+    /* line 1 = what + who, line 2 = the timestamps on their own rule, so a fully-stamped
+       step reads as two calm rows instead of one crowded one */
+    .wf-tl-body{flex:1;min-width:0;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:9px 15px;display:flex;flex-direction:column;gap:7px}
+    .wf-tl-row{display:flex;align-items:center;justify-content:space-between;gap:6px 24px;flex-wrap:wrap;min-width:0}
+    .wf-tl-times{display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap;min-width:0;padding-top:7px;border-top:1px dashed var(--line)}
+    .wf-tl-times:empty{display:none}
+    .wf-tl-cur .wf-tl-body{background:var(--brand-a10,#eef2ff);border-color:var(--brand)}
+    .wf-tl-cur .wf-tl-times{border-top-color:#c7d2fe}
+    .wf-tl-title{font-weight:650;font-size:13.5px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:8px;flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+    .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:4px;line-height:1.5}
+    .wf-tl-meta{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;min-width:0;flex:0 1 auto}
+    .wf-tl-when{font-size:11.5px;color:var(--slate);display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+    /* PHONE: a step is just its name and who has it. Received / Done / Transition / Retention are
+       folded away until the step is tapped, and only one step is open at a time — ten steps used to
+       print forty timestamps down the screen. Desktop is unaffected. */
+    @media (max-width:760px){
+      .wf-tl-tappable{cursor:pointer}
+      .wf-tl-tappable .wf-tl-times{display:none}
+      .wf-tl-tappable.wf-tl-open .wf-tl-times{display:flex}
+      .wf-tl-tappable .wf-tl-title::after{content:'\f078';font-family:'Font Awesome 6 Free';font-weight:900;
+        font-size:9px;color:var(--slate);margin-left:auto;padding-left:8px;transition:transform .15s}
+      .wf-tl-tappable.wf-tl-open .wf-tl-title::after{transform:rotate(180deg)}
+    }
+    .wf-tl-when b{font-weight:700;color:var(--ink);font-size:10.5px;text-transform:uppercase;letter-spacing:.03em}
+    .wf-tl-when.done b{color:#16a34a}
+    .wf-who{display:inline-flex;align-items:center;min-width:0;max-width:100%}
+    .wf-av{width:22px;height:22px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;margin-right:7px;flex:none}
+    .wf-who-nm{font-size:12.5px;color:var(--ink);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wf-dept{font-size:11.5px;color:var(--slate);margin-left:8px}
+    .wf-dur{font-size:12.5px;color:var(--slate);display:inline-flex;align-items:center;gap:6px}
+    .wf-badge{font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:20px;text-transform:none;letter-spacing:0}
+    .wf-badge.ok{background:#dcfce7;color:#166534}.wf-badge.cur{background:#dbeafe;color:#1e40af}.wf-badge.wait{background:#eef2f6;color:#94a3b8}
+    .wf-tl-track{font-size:11.5px;color:var(--slate);margin-top:7px;padding-top:7px;border-top:1px dashed var(--line)}
+    /* form */
+    .wf-ro{background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:14px;color:var(--ink)}
+    .wf-addstep-ghost{display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 12px;border:1px dashed var(--line);border-radius:10px;color:var(--slate);font-size:13px;font-weight:600;cursor:pointer;margin-top:8px;transition:.15s}
+    .wf-addstep-ghost:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-a10,#eef2ff)}
+    .wf-keyhint{font-size:11.5px;color:var(--slate);text-align:right;margin-top:12px}
+    .wf-evt-row{display:flex;gap:8px;margin-bottom:8px}
+    .wf-evt-row .wf-evt-label{flex:0 0 40%;min-width:0}
+    .wf-evt-row .wf-evt-value{flex:1;min-width:0}
+    .wf-evt-row textarea.wf-evt-value{height:auto;min-height:70px;padding-top:10px;resize:vertical;line-height:1.4}
+    /* Dropdowns in this form matched the plain text inputs, so a field with a list looked no
+       different from one you type into. Now they carry their own caret and hover/focus states. */
+    .wf-evt-row select.wf-evt-value{appearance:none;-webkit-appearance:none;-moz-appearance:none;
+      height:40px;padding:0 34px 0 12px;cursor:pointer;font-weight:500;
+      background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23e0121c' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat:no-repeat;background-position:right 12px center;background-size:11px 8px;
+      transition:border-color .12s,box-shadow .12s}
+    .wf-evt-row select.wf-evt-value:hover{border-color:var(--slate)}
+    .wf-evt-row select.wf-evt-value:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10,rgba(224,18,28,.12))}
+    .wf-evt-row select.wf-evt-value optgroup{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--slate)}
+    .wf-evt-row select.wf-evt-value option{font-size:13.5px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink);padding:6px 8px}
+    /* A wide summary card (e.g. Reimbursement's Remarks) spans the whole row instead of one cell;
+       long text scrolls inside its own box rather than stretching the card indefinitely. */
+    .tp-f-wide{grid-column:1/-1}
+    /* Remarks show in full. This was capped at 110px with an inner scrollbar, which cut the list
+       off part-way through a day's entries — the box looked broken rather than scrollable, and the
+       days below it were simply invisible. The panel it sits in scrolls perfectly well on its own,
+       so there is nothing to gain by clipping here. */
+    .tp-f-wide .v.tp-f-scroll{display:block;overflow:visible;white-space:pre-wrap;
+      overflow-wrap:anywhere;word-break:break-word;
+      font-weight:500;line-height:1.6;color:var(--ink);margin-top:5px;padding:10px 12px;
+      background:var(--bg-subtle,#f8fafc);border:1px solid var(--line);border-radius:9px}
+    /* Custom dropdown for a select-type detail field — replaces the native <select> so the open
+       menu is actually styleable (a native popup's hover highlight follows the OS accent color
+       and can't be overridden with CSS in any browser). */
+    .wf-evt-row .wf-evt-selbox{position:relative;flex:1;min-width:0}
+    .wf-evt-selbtn{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;height:40px;cursor:pointer;text-align:left;font-family:inherit}
+    .wf-evt-selph{color:#94a3b8}
+    .wf-evt-selcaret{font-size:11px;color:var(--slate);transition:transform .15s;flex:none}
+    .wf-evt-selbox.open .wf-evt-selcaret{transform:rotate(180deg)}
+    .wf-evt-selpanel{display:none;position:absolute;top:calc(100% + 5px);left:0;right:0;z-index:90;max-height:260px;overflow:auto;
+      background:var(--bg-card);border:1px solid var(--line);border-radius:10px;padding:5px;box-shadow:0 12px 30px rgba(15,23,42,.17)}
+    .wf-evt-selbox.open .wf-evt-selpanel{display:block}
+    /* An open dropdown has to win against the modal's own button strip, which is position:sticky at
+       the bottom of the scrolling body and so paints over anything that reaches it. Raising the
+       panel alone is not enough - a z-index only competes within its own stacking context, so the
+       BOX it sits in has to be lifted too. Applied only while open, otherwise every closed field
+       would sit above the buttons for no reason. */
+    /* Pinned to the viewport by wfPinPanel, so it clears both the sticky button strip AND the
+       modal's own overflow clipping - which no z-index alone could do. */
+    .wf-evt-selbox.open .wf-evt-selpanel,.wf-upi-wrap.open .wf-upi-panel{z-index:1200}
+    .modal-foot{z-index:5}
+    .wf-evt-selopt{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:7px;
+      font-size:13.5px;color:var(--ink);cursor:pointer}
+    .wf-evt-selopt:hover{background:var(--bg-subtle,#f8fafc)}
+    .wf-evt-selopt.on{background:var(--brand-a10,#eef2ff);color:var(--brand);font-weight:600}
+    .wf-evt-selopt i{color:var(--brand);font-size:11px}
+    /* File picker: the browser's raw "Choose File" control replaced by a proper dashed drop box
+       with the real input laid invisibly over it, so it still works with one click. */
+    /* The member picker was squeezed into the narrow value column; here the label takes a fixed
+       share and the picker gets the rest, and the panel overlays instead of pushing the form. */
+    /* The field list reads as one block: a bordered panel, rows separated by a hairline, and the
+       label given the same breathing room as any other section rather than butting against the
+       control above it. */
+    .wf-tmpl-block{margin-top:6px}
+    .wf-tmpl-block > .wf-lbl{margin-top:4px !important}
+    .wf-tmpl-hd{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+    .wf-tmpl-hd > .wf-lbl{margin-top:4px !important}
+    .wf-t-multi{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--slate);white-space:nowrap;cursor:pointer;user-select:none}
+    .wf-t-multi input{width:15px;height:15px;accent-color:var(--brand);cursor:pointer}
+    /* No overflow:hidden here — it clipped the type menu when it opened inside a row. The corners
+       are rounded on the first and last rows instead, which looks the same and clips nothing. */
+    #wfTmplRows{border:1px solid var(--line);border-radius:11px;background:var(--bg-card)}
+    #wfTmplRows:empty{display:none}
+    .wf-tmpl-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:9px 11px;border-top:1px solid var(--line)}
+    .wf-tmpl-row:first-child{border-top:0;border-radius:11px 11px 0 0}
+    .wf-tmpl-row:last-child{border-radius:0 0 11px 11px}
+    .wf-tmpl-row:only-child{border-radius:11px}
+    .wf-tmpl-row:hover{background:var(--bg-subtle,#fafbfc)}
+    /* the row holding an open menu sits above its neighbours so the panel is not covered */
+    .wf-tmpl-row:has(.wf-tmenu.open){position:relative;z-index:5}
+    /* Name / type / optional / remove always share one line — only the Dropdown options box
+       (flex-basis 100%, below) is allowed to drop to a line of its own. */
+    .wf-tmpl-main{display:flex;flex-wrap:nowrap;gap:10px;align-items:center;flex:1 1 100%;min-width:0}
+    .wf-tmpl-row .wf-t-label{flex:1 1 auto;min-width:0}
+    .wf-tmpl-row .wf-tmenu{flex:0 0 158px;position:relative}
+    .wf-tmenu-btn{width:100%;display:flex;align-items:center;gap:8px;cursor:pointer;text-align:left;font-weight:500}
+    .wf-tmenu-btn:hover{border-color:var(--slate)}
+    .wf-tmenu-ic{color:var(--brand);font-size:12px;width:14px;text-align:center;flex:none}
+    .wf-tmenu-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wf-tmenu-caret{font-size:9px;color:var(--slate);transition:transform .15s;flex:none}
+    .wf-tmenu.open .wf-tmenu-btn{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10,rgba(224,18,28,.12))}
+    .wf-tmenu.open .wf-tmenu-caret{transform:rotate(180deg)}
+    .wf-tmenu-panel{display:none;position:absolute;top:calc(100% + 5px);left:0;right:0;min-width:172px;z-index:90;
+      background:var(--bg-card);border:1px solid var(--line);border-radius:10px;padding:5px;
+      box-shadow:0 12px 30px rgba(15,23,42,.17)}
+    .wf-tmenu.open .wf-tmenu-panel{display:block}
+    .wf-tmenu-opt{width:100%;display:flex;align-items:center;gap:9px;padding:7px 9px;border:0;border-radius:7px;
+      background:transparent;color:var(--ink);font-size:13px;font-family:inherit;cursor:pointer;text-align:left}
+    .wf-tmenu-opt:hover{background:var(--bg-subtle,#f8fafc)}
+    .wf-tmenu-opt > i:first-child{width:14px;text-align:center;color:var(--slate);font-size:12px}
+    .wf-tmenu-opt span{flex:1;min-width:0}
+    .wf-tmenu-tick{font-size:11px;color:var(--brand);opacity:0}
+    .wf-tmenu-opt.on{background:var(--brand-a10,rgba(224,18,28,.08));color:var(--brand);font-weight:600}
+    .wf-tmenu-opt.on > i:first-child{color:var(--brand)}
+    .wf-tmenu-opt.on .wf-tmenu-tick{opacity:1}
+    .wf-tmpl-row .wf-t-opt{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate);white-space:nowrap;cursor:pointer;user-select:none}
+    .wf-tmpl-row .wf-t-optional{width:15px;height:15px;accent-color:var(--brand);cursor:pointer}
+    /* Dropdown's own setup: one bordered box, the placeholder on top and the option capsules
+       below it — a single field, not two. */
+    .wf-t-opts{flex:1 1 100%;border:1px solid var(--line);border-radius:9px;background:#fff;overflow:hidden}
+    .wf-t-ph-row{display:flex;align-items:center;gap:8px;padding:7px 9px;border-bottom:1px solid var(--line)}
+    .wf-t-ph-lbl{flex:none;font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.03em}
+    .wf-t-placeholder{flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:12.5px;font-family:inherit;color:var(--ink);padding:2px}
+    .wf-t-chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:7px 9px}
+    .wf-t-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 5px 4px 11px;border-radius:100px;font-size:12px;font-weight:500;background:var(--brand-a10,rgba(224,18,28,.09));color:var(--brand-700,var(--brand));white-space:nowrap}
+    .wf-t-chip-x{border:0;background:none;padding:0;width:16px;height:16px;display:flex;align-items:center;justify-content:center;border-radius:50%;color:inherit;cursor:pointer;opacity:.65;font-size:9px}
+    .wf-t-chip-x:hover{opacity:1;background:rgba(0,0,0,.08)}
+    .wf-t-chip-in{flex:1 1 140px;min-width:140px;border:0;outline:0;background:transparent;font-size:12.5px;font-family:inherit;color:var(--ink);padding:4px 2px}
+    .wf-tmpl-block .wf-addstep-ghost{margin-top:9px}
+    /* Dropdown options tag input — was completely unstyled before */
+    .wf-t-optswrap{display:flex;flex-wrap:wrap;align-items:center;gap:6px;flex:1 1 220px;min-width:170px;
+      border:1px solid var(--line);border-radius:9px;padding:5px 7px;background:var(--bg-card);box-sizing:border-box}
+    .wf-t-optswrap:focus-within{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    .wf-t-opttag{display:inline-flex;align-items:center;gap:5px;background:var(--brand-a10,#eef2ff);color:var(--brand);
+      border-radius:20px;padding:4px 6px 4px 11px;font-size:12.5px;font-weight:600;white-space:nowrap}
+    .wf-t-opttag i{cursor:pointer;font-size:10px;opacity:.65;padding:3px;border-radius:50%}
+    .wf-t-opttag i:hover{opacity:1;background:rgba(0,0,0,.06)}
+    .wf-t-opttyping{flex:1 1 120px;min-width:110px;border:0;outline:none;font-size:13px;padding:4px 2px;background:transparent;color:var(--ink)}
+    /* Repeated multi-entry sets ("Day 1", "Day 2", ...) — was completely unstyled before */
+    .wf-evt-group{border:1px solid var(--line);border-radius:11px;padding:12px;margin-bottom:12px;background:var(--bg-subtle,#fafbfc)}
+    .wf-evt-group-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;
+      font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.04em}
+    .wf-evt-group-hd .ac-btn{padding:6px 9px}
+    @media(max-width:640px){
+      .wf-tmpl-main{flex-wrap:wrap;gap:8px}
+      .wf-tmpl-row .wf-t-label{flex:1 1 100%}
+      .wf-tmpl-row .wf-tmenu{flex:1 1 auto}
+    }
+    .wf-mem-row{gap:8px}
+    .wf-mem-row .wf-mem-lbl{flex:0 0 44%;min-width:0}
+    .wf-mem-row .wf-pp{flex:1 1 auto;min-width:0}
+    .wf-mem-row .wf-pp-btn{width:100%}
+    .wf-mem-row .wf-pp-panel{min-width:270px}
+    @media(max-width:560px){
+      .wf-mem-row{flex-wrap:wrap}
+      .wf-mem-row .wf-mem-lbl,.wf-mem-row .wf-pp{flex:1 1 100%}
+    }
+    .wf-evt-people{flex:1;min-width:0}
+    .wf-evt-people .wf-pp{width:100%}
+    .wf-evt-people .wf-pp-btn{width:100%}
+    .wf-evt-att{flex:1;min-width:0;display:flex;align-items:center}
+    .wf-evt-attbox{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:8px;
+      height:40px;padding:0 22px;border:1.5px dashed var(--line);border-radius:9px;background:var(--bg,#f8fafc);
+      color:var(--slate);font-size:12.5px;font-weight:600;cursor:pointer;transition:border-color .12s,color .12s,background .12s}
+    .wf-evt-attbox:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-a10,rgba(224,18,28,.06))}
+    .wf-evt-attbox i{font-size:12px}
+    .wf-evt-att .wf-evt-attinput{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+    .wf-evt-attbox.busy{opacity:.6;pointer-events:none}
+    .wf-evt-att-name{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink);background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:8px 12px;width:100%;min-width:0}
+    .wf-evt-att-name i{flex:none}
+    .wf-evt-att-name .ac-btn{flex:none;margin-left:auto}
+    .wf-evt-att-fname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    /* A chip holding a place in the list while its file goes up — muted and dashed so it reads as
+       not-yet-there next to the solid chips of files that have arrived. */
+    .wf-evt-att-pending{color:var(--slate);border-style:dashed}
+    /* instances table */
+    .wf-tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
+    .wf-itable{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}
+    .wf-itable th{text-align:left;padding:11px 14px;background:var(--bg,#f8fafc);color:var(--slate);font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--line)}
+    .wf-itable td{padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;color:var(--ink)}
+    .wf-itable tbody tr{cursor:pointer;transition:background .12s;border-left:3px solid transparent}
+    .wf-itable tbody tr:hover{background:var(--bg,#f8fafc)}
+    .wf-itable tbody tr.sel{background:var(--brand-a10,#eef2ff)}
+    .wf-itable tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
+    .wf-itable tbody tr:last-child td{border-bottom:0}
+    /* Every workflow's list as a DataTable (wfInstMakeDataTable): the library's stylesheet
+       outranks the rules above, so the table is put back to looking like every other list here and
+       only the count and the page buttons are new. */
+    .wf-card .dt-container{font-size:13px;color:var(--ink)}
+    .wf-card .dt-container .dt-layout-row.dt-layout-table{margin:0}
+    /* The footer: "Showing 1 to 25 of 379" on the left, the pages on the right, one line. The
+       library stacks and centres both below 768px, which is most of a laptop with the sidebar open. */
+    .wf-card .dt-container .dt-layout-row:not(.dt-layout-table){display:flex!important;align-items:center;justify-content:space-between;gap:10px;margin:12px 2px 2px}
+    .wf-card .dt-container .dt-layout-row:not(.dt-layout-table)>.dt-layout-cell{display:block!important;padding:0!important;text-align:left!important}
+    .wf-card .dt-container .dt-layout-row:not(.dt-layout-table)>.dt-layout-end{margin-left:auto}
+    .wf-card .dt-container .dt-info{color:var(--slate);font-size:12.5px;padding:0!important}
+    .wf-card .dt-container .dt-info b{color:var(--ink);font-weight:700}
+    table.dataTable.wf-itable{margin:0;border-collapse:collapse}
+    table.dataTable.wf-itable>thead>tr>th{padding:11px 14px;border-bottom:1px solid var(--line);background:var(--bg,#f8fafc)}
+    table.dataTable.wf-itable>tbody>tr>td{padding:11px 14px;border-top:0;border-bottom:1px solid var(--line)}
+    table.dataTable.wf-itable>tbody>tr:last-child>td{border-bottom:0}
+    table.dataTable.wf-itable>tbody>tr.sel>*{box-shadow:none;background:var(--brand-a10,#eef2ff)}
+    table.dataTable.wf-itable>tbody>tr.sel>td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
+    table.dataTable.wf-itable thead>tr>th.dt-orderable-asc:hover,table.dataTable.wf-itable thead>tr>th.dt-orderable-desc:hover{outline:none;background:var(--line-2,#eef2f7)}
+    /* The page buttons: one rounded bar rather than a row of separate boxes, chevrons for previous
+       and next, the open page as a filled square, and the dots between page numbers as plain text. */
+    .wf-card .dt-container .dt-paging{display:inline-flex;align-items:center;gap:2px;padding:3px;border:1px solid var(--line);border-radius:10px;background:#fff}
+    .wf-card .dt-container .dt-paging nav{display:inline-flex;align-items:center;gap:2px}
+    .wf-card .dt-container .dt-paging .dt-paging-button{min-width:30px;height:30px;padding:0 9px!important;margin:0!important;border:0!important;border-radius:7px!important;background:transparent!important;color:var(--ink)!important;font-weight:600;font-size:12.5px;line-height:30px;display:inline-flex;align-items:center;justify-content:center;box-shadow:none!important;cursor:pointer;transition:background .12s,color .12s}
+    .wf-card .dt-container .dt-paging .dt-paging-button:hover:not(.disabled):not(.current){background:var(--bg,#f1f5f9)!important;color:var(--brand)!important}
+    .wf-card .dt-container .dt-paging .dt-paging-button.current,
+    .wf-card .dt-container .dt-paging .dt-paging-button.current:hover{background:var(--brand)!important;color:#fff!important}
+    .wf-card .dt-container .dt-paging .dt-paging-button.disabled{color:var(--slate)!important;opacity:.35;cursor:default}
+    .wf-card .dt-container .dt-paging .dt-paging-button.previous,
+    .wf-card .dt-container .dt-paging .dt-paging-button.next{color:var(--slate)!important;font-size:11px}
+    .wf-card .dt-container .dt-paging .ellipsis{min-width:20px;text-align:center;color:var(--slate);padding:0 2px}
+    .wf-card .dt-container .dt-processing{display:none!important}
+    /* a page still loading after 150 ms: the rows fade rather than a "Loading..." box covering them */
+    .wf-tablewrap.wf-loading>table{opacity:.45;transition:opacity .15s;pointer-events:none}
+    /* a phone: the count above, the pages below, both full width and centred */
+    @media(max-width:520px){
+      .wf-card .dt-container .dt-layout-row:not(.dt-layout-table){flex-direction:column;align-items:center}
+      .wf-card .dt-container .dt-layout-row:not(.dt-layout-table)>.dt-layout-end{margin-left:0}
+    }
+    .wf-trigcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+    /* Tracker tab — the strip needs real air above it, otherwise it reads as part of the
+       timeline card that sits directly above. */
+    .wf-tabs{display:flex;gap:4px;margin:26px 0 14px;padding:4px;background:var(--bg-subtle,#f1f5f9);border-radius:11px;overflow-x:auto}
+    .wf-tab{flex:none;display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 16px;border:0;border-radius:8px;background:transparent;color:var(--slate);font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;transition:background .14s,color .14s,box-shadow .14s}
+    .wf-tab i{font-size:12px}
+    .wf-tab:hover{color:var(--ink)}
+    .wf-tab.on{background:var(--bg-card,#fff);color:var(--brand);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+    .wf-tk-wrap{max-height:72vh;overflow:auto;border-radius:10px}
+    /* The sideways scrollbar is the only thing on screen saying there is more table to the right,
+       so it gets a real track instead of the thin overlay some systems fade in only while moving. */
+    .wf-tk-wrap{scrollbar-color:var(--slate) var(--bg-subtle,#f1f5f9);scrollbar-width:auto}
+    .wf-tk-wrap::-webkit-scrollbar{height:13px;width:13px}
+    .wf-tk-wrap::-webkit-scrollbar-track{background:var(--bg-subtle,#f1f5f9)}
+    .wf-tk-wrap::-webkit-scrollbar-thumb{background:var(--slate);border-radius:8px;border:3px solid var(--bg-subtle,#f1f5f9)}
+    .wf-tk-wrap::-webkit-scrollbar-thumb:hover{background:var(--ink)}
+    .wf-tk-wrap::-webkit-scrollbar-corner{background:var(--bg-subtle,#f1f5f9)}
+    /* ---- the pinned instance columns (wfTrackerFreeze decides which, and measures the offsets) --
+       A sticky cell is painted over by whatever scrolls beneath it unless it carries a ground of
+       its own. The row stripe and the hover tint are set on the ROW, which a sticky cell does not
+       paint from, so each of those states is restated here on the cell itself - otherwise the step
+       columns show straight through the pinned block as they pass. */
+    .wf-tktable .wf-tk-frozen{position:sticky;z-index:2;background:var(--bg-card,#fff)}
+    .wf-tktable thead .wf-tk-frozen{z-index:4;background:var(--bg-subtle,#f8fafc)}
+    .wf-tktable tbody tr:nth-child(even) .wf-tk-frozen{background:var(--bg-subtle,#fafbfc)}
+    .wf-tktable tbody tr:hover .wf-tk-frozen{background:var(--brand-a10,#eef2ff)}
+    /* The seam. A rule alone reads as just another column divider, so it gets a short shadow too -
+       the step columns then visibly pass UNDER the pinned block rather than appearing to stop at
+       it. Drawn as a shadow rather than a border because a sticky cell in a border-collapse table
+       drops its own borders in some browsers, and the seam is the one that must not go missing. */
+    .wf-tktable .wf-tk-frozen-last{box-shadow:inset -2px 0 0 var(--line), 7px 0 9px -7px rgba(15,23,42,.3)}
+    .wf-tktable{min-width:100%;font-size:12px}
+    .wf-tktable th,.wf-tktable td{padding:8px 11px;white-space:nowrap;border-right:1px solid var(--line)}
+    .wf-tktable tbody tr.wf-tk-row{cursor:pointer}
+    /* A variant's row (Reimbursement's Wow Moment) - drafts, running and archived instances alike -
+       outlined in the variant's colour so it reads apart from an ordinary claim at a glance. On the
+       cells, not the row: a table row with collapsed borders does not draw its own. */
+    .wf-itable tbody tr.wf-var-row>td{border-top:2px solid var(--wf-var,#7c3aed);border-bottom:2px solid var(--wf-var,#7c3aed);background:color-mix(in srgb,var(--wf-var,#7c3aed) 5%,transparent)}
+    .wf-itable tbody tr.wf-var-row>td:first-child{border-left:4px solid var(--wf-var,#7c3aed)}
+    .wf-itable tbody tr.wf-var-row>td:last-child{border-right:2px solid var(--wf-var,#7c3aed)}
+    .wf-var-badge{display:inline-flex;align-items:center;gap:4px;margin-right:6px;padding:1px 7px;border:1px solid;border-radius:999px;font-size:10.5px;font-weight:600;white-space:nowrap;vertical-align:1px}
+    .wf-var-badge i{font-size:9px}
+    .wf-itable tbody tr.wf-draft-row{cursor:pointer}
+    .wf-itable tbody tr.wf-draft-row:hover{background:var(--bg-subtle,#f1f5f9)}
+    .wf-tktable tbody tr:nth-child(even){background:var(--bg-subtle,#fafbfc)}
+    .wf-tktable tbody tr:hover{background:var(--brand-a10,#eef2ff)}
+    /* Each step's three columns are banded together with a heavier divider, so at a glance you
+       can see where one step ends and the next begins across a very wide table. */
+    .wf-tktable th.wf-tk-gap,.wf-tktable td.wf-tk-gap{border-left:2px solid var(--line)}
+    /* The step bands read across, so they get a centred, sentence-case look of their own rather
+       than the uppercase column-header styling. */
+    .wf-tk-code th{text-align:center;background:var(--brand);color:#fff;font-size:11px;font-weight:700;letter-spacing:.08em;padding-top:6px;padding-bottom:6px}
+    .wf-tk-code th.wf-tk-nocode{background:var(--bg-subtle,#f8fafc)}
+    .wf-tk-band th{text-align:center;text-transform:none;letter-spacing:0;font-weight:600;font-size:11px;color:var(--slate);
+      max-width:260px;white-space:normal;line-height:1.45;vertical-align:middle}
+    .wf-tk-band th[colspan]{padding-left:12px;padding-right:12px}
+    .wf-tk-bandlbl{text-align:left !important;color:var(--ink) !important;font-weight:800 !important;letter-spacing:.06em !important;text-transform:uppercase !important;white-space:nowrap !important;font-size:10.5px !important}
+    .wf-tk-cols th{border-bottom:2px solid var(--line);font-size:10.5px}
+    .wf-tk-late{color:#dc2626;font-weight:700}
+    .wf-tk-date{height:28px;border:1px solid var(--line);border-radius:6px;padding:0 6px;font-size:11.5px;
+      font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer}
+    .wf-tk-date:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-a10,rgba(224,18,28,.12))}
+    .wf-tk-date:disabled{opacity:.6}
+    @media(max-width:760px){
+      .wf-tabs{margin-top:20px}
+      .wf-tab{padding:0 12px;font-size:12.5px}
+      .wf-tktable th,.wf-tktable td{padding:7px 8px}
+    }
+    /* The left-hand instance columns ARE pinned now (see wfTrackerFreeze) - they were not, on the
+       argument that a wide table should read as one sheet rather than two halves. Twelve steps
+       later that stopped being true in practice: scrolling to a step took the bill number with it.
+       The header bands still scroll vertically with everything else; only the sideways pin was
+       restored, and only on a screen wide enough for it to leave something worth reading. */
+    .wf-tktable thead th{background:var(--bg-subtle,#f8fafc)}
+    .wf-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
+    .wf-pill.ok{background:#dcfce7;color:#166534}
+    .wf-pill.cur{background:#dbeafe;color:#1e40af}
+    /* The dot for a step the instance has not reached yet. It was #cbd5e1 on #f1f5f9 - 1.36:1,
+       which is not a faint dot, it is an invisible one. On a three-step workflow nobody noticed;
+       Invoice Processing has twelve, so most of every row read as blank and the table looked
+       like it had simply failed to draw. Still quieter than the real statuses, but legible. */
+    .wf-evt-total{display:flex;align-items:center;gap:9px;margin-right:auto;font-size:13px;color:var(--slate)}
+    .wf-evt-total b{font-size:17px;color:var(--ink);font-weight:800;letter-spacing:-.2px}
+    .wf-evt-total-k{font-weight:600}
+    .wf-evt-total-miss{font-size:11px;font-weight:700;color:#92400e;background:#fef3c7;padding:2px 9px;border-radius:20px}
+    .wf-pill.wait{background:#f1f5f9;color:#64748b;padding:3px 12px}
+    .wf-pill.wt{background:#fef3c7;color:#92400e}
+    .wf-upd-sys{text-align:center;font-size:12px;color:var(--slate);margin:2px 0;padding:4px 8px}
+    .wf-upd-sys i{opacity:.6;margin-right:4px}
+    .wf-inst-tools{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+    .wf-chk-col{width:36px;text-align:center;white-space:nowrap}
+    .wf-inst-chk{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
+    .wf-owner-pick{display:flex;gap:8px;align-items:center}
+    .wf-owner-pick .wf-pp{flex:1;min-width:0}
+    .wf-cell{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600}
+    .wf-cell.ok{color:#16a34a}.wf-cell.cur{color:var(--brand)}.wf-cell.wait{color:#cbd5e1}
+    /* trigger details list */
+    .wf-detlist{margin:12px 0 0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+    .wf-detlist li{font-size:13px;color:var(--ink);background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:8px;padding:8px 11px;line-height:1.45}
+    .wf-detk{font-weight:700;color:var(--slate);display:block;font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:1px}
+    /* task page bits */
+    .wf-ownerchip{display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#fff;font-size:11px;font-weight:800;letter-spacing:.04em;padding:3px 10px;border-radius:20px}
+    .wf-inline-who{display:inline-flex;align-items:center;gap:7px}
+    /* Roughly five messages tall, then it scrolls — the card never keeps growing. */
+    /* overscroll-behavior was "contain", which swallowed the wheel once this list hit its own end -
+       rest the cursor anywhere over Updates and the page underneath simply would not move. "auto"
+       lets the scroll carry on to the page as soon as the list has nothing left to give. */
+    .wf-updlist{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:auto;margin-bottom:12px;padding-right:4px}
+    .wf-upd{display:flex;gap:10px;align-items:flex-start}
+    .wf-upd.me{flex-direction:row-reverse}
+    .wf-upd-av{width:30px;height:30px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none}
+    .wf-upd-b{background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:12px;padding:8px 12px;max-width:78%}
+    .wf-upd.me .wf-upd-b{background:var(--brand-a10,#eef2ff)}
+    .wf-upd-meta{font-size:11px;color:var(--slate);margin-bottom:2px}
+    .wf-upd-body{font-size:13.5px;color:var(--ink);line-height:1.5;white-space:pre-wrap;word-break:break-word}
+    .wf-att-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+    .wf-att-thumb{display:inline-block;width:64px;height:64px;border-radius:8px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:var(--bg,#f1f5f9)}
+    .wf-att-img{width:100%;height:100%;object-fit:cover;display:block}
+  /* Amber, not red: the claim is fine, only its picture is gone. */
+  .wf-att-missing{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:6px;
+    background:#fef3c7;color:#92400e;font-size:11.5px;font-weight:600;white-space:nowrap;cursor:help}
+    .wf-att-file{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--brand);background:var(--brand-a10,#eef2ff);border-radius:8px;padding:6px 10px;cursor:pointer}
+    .wf-upd-pinned{background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px}
+    .wf-upd-pinned-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+    .wf-updfile-list{font-size:12px;color:var(--slate);margin-top:6px}
+    .wf-updbar{display:flex;gap:8px;align-items:center}
+    .wf-updbar .ac-in{flex:1}
+    .wf-reject-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:9px;padding:9px 12px;font-size:12.5px;font-weight:600;margin-bottom:10px}
+    .wf-reject-acts{display:flex;gap:7px;flex:none}
+    .wf-updmini{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+    .wf-updmini-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:10px;display:flex;align-items:center;gap:7px}
+    .wf-updmini-list{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:auto;padding-right:4px}
+    .wf-updmini .wf-updbar{margin-top:12px}
+    /* thin, unobtrusive scrollbars on the message lists */
+    .wf-updlist,.wf-updmini-list{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+    .wf-updlist::-webkit-scrollbar,.wf-updmini-list::-webkit-scrollbar{width:6px}
+    .wf-updlist::-webkit-scrollbar-thumb,.wf-updmini-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+    @media(max-width:640px){
+      /* Phone: back, title and the admin icons share the first line; the counts get a line of
+         their own; the New buttons are an equal pair filling the width, labelled without the
+         repeated "New" so each name fits. */
+      .wf-page-head h1{font-size:16px}
+      .wf-head-acts{gap:8px}
+      .wf-my-wr{flex:1 1 100%}
+      .wf-my-wr .wf-wr-seg{flex:1;justify-content:center}
+      .wf-head-new{flex:1 1 100%;margin-left:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr))}
+      .wf-head-new .ac-btn{justify-content:center;min-width:0}
+      .wf-head-new-n .wf-new-pre{display:none}
+      .wf-btxt{display:inline}
+      .wf-card{padding:14px}
+      /* workflow list: name/trigger on one line, people + step count underneath */
+      .wf-lrow{flex-wrap:wrap;padding:13px 14px;gap:9px}
+      .wf-lrow-main{flex:1 1 100%}
+      .wf-lrow-right{flex:1 1 100%;justify-content:flex-start;gap:10px}
+      .wf-lrow-right .wf-go{margin-left:auto}
+      .wf-tl-body{padding:8px 12px;gap:5px 14px}
+      .wf-tl-body .wf-who-nm{max-width:46vw}
+      .wf-upd-b{max-width:82%}
+      .wf-detlist{grid-template-columns:1fr}
+      .wf-tp .tp-head{flex-wrap:wrap;gap:10px}
+      .wf-tp .tp-acts{flex-wrap:wrap;width:100%}
+      .wf-tp .tp-acts .ac-btn{flex:1 1 auto;justify-content:center}
+      .wf-tp .wf-updbar .ac-in{min-width:0}
+
+      /* A placeholder written for a desktop box ("Search by No. or Wheredoc Id…") is longer than a
+         phone is wide, so it ran under the edge and the box looked broken. Smaller here, and the
+         search field is given the whole row rather than sharing it. */
+      .wf-inst-filterbar .ac-in::placeholder,
+      .wf-inst-filter-search input::placeholder{font-size:11.5px}
+      .wf-inst-filter-search{flex:1 1 100%;min-width:0}
+
+      /* Date boxes take the room they need without pushing the row out. The TEXT inside stays at
+         16px on purpose — there is a deliberate 16px !important on inputs under (hover:none)
+         elsewhere in the app, because anything smaller makes iOS zoom the whole page the moment a
+         field is tapped. So the bulk comes off the padding and the fixed width instead: the
+         control shrinks to its column rather than sizing the column to itself. */
+      .wf-inst-filterbar input[type=date],
+      .wf-evt-form input[type=date],
+      .wf-tp input[type=date],
+      .ac-in[type=date]{padding-left:8px;padding-right:6px;min-width:0;width:100%;box-sizing:border-box}
+
+      /* An attachment's file name is one unbroken run of characters and was setting the width of
+         everything around it. It gets the leftover space and ellipsises; the paperclip and the
+         remove button keep their size. */
+      .wf-evt-att,.wf-evt-att-name{max-width:100%;min-width:0}
+      .wf-evt-att-name{font-size:12.5px;padding:7px 9px;gap:6px}
+      .wf-evt-att-fname{flex:1 1 auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      /* The chip in Updates carries the whole file name. Ellipsis needs a width to ellipsise
+         against and an inline-flex chip sizes itself to its text, so it just grew — 514px inside a
+         363px card, which stretched the page. Letting the name wrap cannot overflow whatever the
+         name is. */
+      .wf-att-row{flex-wrap:wrap;gap:7px;min-width:0;max-width:100%}
+      .wf-att-file,.wf-att-thumb{max-width:100%;min-width:0}
+      .wf-att-file{display:flex;align-items:flex-start;gap:6px;font-size:12.5px;line-height:1.45;
+        white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+      .wf-att-file i{flex:none;margin-top:2px}
+    }
+    </style><link rel="prefetch" as="script" href="min/postsales.js?v=9d5dbcd9da"><link id="wfDtCss" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/datatables.net-dt/2.1.8/css/dataTables.dataTables.min.css"></head>
+<body>
+<div id="authLoad" style="display: none;"><div class="loader"><div class="spin"></div><div style="margin-top:14px">Loading your workspace…</div></div></div>
+<div id="shell" style="display: block;"><div class="sb-backdrop" id="sbBackdrop"></div>
+  <aside class="sidebar">
+    <a href="index.html" class="sb-brand" style="text-decoration:none" title="Back to Home" data-spa-bound="1">
+      <img src="assets/jaine-logo-full-white.png?v=2" alt="JAIN-E" class="sb-logo-img">
+    </a>
+    <nav class="sb-nav" id="sbNav"><div class="sb-group">Administration</div><a class="sb-item" href="security.html" data-id="security"><i class="fa-solid fa-sliders"></i> Control Panel</a><a class="sb-item" href="usability.html" data-id="usability"><i class="fa-solid fa-chart-simple"></i> Usability</a><a class="sb-item" href="daily_checks.html" data-id="daily_checks"><i class="fa-solid fa-list-check"></i> Daily Checks</a><div class="sb-group">Feedback</div><a class="sb-item" href="feedback_hub.html" data-id="feedback_hub"><i class="fa-solid fa-qrcode"></i> Feedback Hub</a><div class="sb-group">Overview</div><a class="sb-item" href="index.html" data-id="dashboard"><i class="fa-solid fa-gauge-high"></i> Home / Dashboards</a><a class="sb-item active" href="accountability.html" data-id="tasks"><i class="fa-solid fa-clipboard-check"></i> Accountability</a><a class="sb-item" href="scoreboard.html" data-id="scoreboard"><i class="fa-solid fa-ranking-star"></i> Scoreboard</a><div class="sb-group">Sales</div><a class="sb-item" href="gtd.html" data-id="gtd"><i class="fa-solid fa-brain"></i> GTD</a><a class="sb-item" href="crm.html" data-id="crm"><i class="fa-solid fa-handshake"></i> CRM &amp; Sales</a><a class="sb-item" href="postsales.html" data-id="postsales"><i class="fa-solid fa-headset"></i> Post Sales</a><div class="sb-group">Operations</div><a class="sb-item" href="projects.html" data-id="projects"><i class="fa-solid fa-building"></i> Projects</a><a class="sb-item" href="scheduling.html" data-id="scheduling"><i class="fa-solid fa-diagram-project"></i> Project Scheduling</a><a class="sb-item" href="construction.html" data-id="construction"><i class="fa-solid fa-helmet-safety"></i> Construction</a><a class="sb-item" href="engineering.html" data-id="engineering"><i class="fa-solid fa-compass-drafting"></i> Engineering</a><a class="sb-item" href="inventory.html" data-id="inventory"><i class="fa-solid fa-boxes-stacked"></i> Inventory</a><a class="sb-item" href="procurement.html" data-id="procurement"><i class="fa-solid fa-cart-shopping"></i> Procurement</a><a class="sb-item" href="maintenance.html" data-id="maintenance"><i class="fa-solid fa-screwdriver-wrench"></i> Assets &amp; Maintenance</a><a class="sb-item" href="inspection.html" data-id="inspection"><i class="fa-solid fa-clipboard-list"></i> Inspection</a><div class="sb-group">People</div><a class="sb-item" href="recruitment_new.html" data-id="recruitment_new"><i class="fa-solid fa-user-plus"></i> Recruitment</a><a class="sb-item" href="hr_new.html" data-id="hr_new"><i class="fa-solid fa-users"></i> Human Resources</a><div class="sb-group">Governance</div><a class="sb-item" href="finance.html" data-id="finance"><i class="fa-solid fa-indian-rupee-sign"></i> Finance Vault</a><a class="sb-item" href="accounts.html" data-id="accounts"><i class="fa-solid fa-calculator"></i> Accounts</a><a class="sb-item" href="legal.html" data-id="legal"><i class="fa-solid fa-scale-balanced"></i> Legal</a><a class="sb-item" href="compliance.html" data-id="compliance"><i class="fa-solid fa-calendar-check"></i> Renewals &amp; Compliance</a><div class="sb-group">Growth &amp; Strategy</div><a class="sb-item" href="campaigns.html" data-id="campaigns"><i class="fa-solid fa-bullhorn"></i> Our Brand</a><a class="sb-item" href="competitors.html" data-id="competitors"><i class="fa-solid fa-magnifying-glass-chart"></i> Competitor Data</a><a class="sb-item" href="channel_partners.html" data-id="channel_partners"><i class="fa-solid fa-people-arrows"></i> Channel Partners</a><a class="sb-item" href="transcription.html" data-id="transcription"><i class="fa-solid fa-microphone-lines"></i> Transcription</a><a class="sb-item" href="scaling.html" data-id="scaling"><i class="fa-solid fa-arrow-trend-up"></i> Scaling Up</a><a class="sb-item" href="playbook.html" data-id="playbook"><i class="fa-solid fa-book-open"></i> Playbook</a><div class="sb-group">Knowledge</div><a class="sb-item" href="documents.html" data-id="documents"><i class="fa-solid fa-folder-open"></i> Document Library</a><a class="sb-item" href="video.html" data-id="video"><i class="fa-solid fa-clapperboard"></i> Video Library</a><a class="sb-item" href="reports.html" data-id="reports"><i class="fa-solid fa-chart-pie"></i> Reports</a><div class="sb-group">Stakeholder Portals</div><a class="sb-item" href="custportal-admin.html" data-id="custportal_admin"><i class="fa-solid fa-address-card"></i> Customer Portal Admin</a><a class="sb-item" href="supplier.html" data-id="supplier"><i class="fa-solid fa-truck"></i> Supplier Portal</a><a class="sb-item" href="whatsapp.html" data-id="whatsapp"><i class="fa-solid fa-comment-dots"></i> WhatsApp Bot</a><a class="sb-item" href="mail.html" data-id="mail"><i class="fa-solid fa-envelope"></i> Naren's Mail</a><div class="sb-group">System</div><a class="sb-item" href="settings.html" data-id="settings"><i class="fa-solid fa-gear"></i> Settings</a><div class="sb-group">IT &amp; Support</div><a class="sb-item" href="network.html" data-id="network"><i class="fa-solid fa-wifi"></i> Internet Speed</a></nav>
+    <div class="sb-foot">v1.0 · Operations Portal</div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <button class="hamburger" id="hamburger" aria-label="Menu"><i class="fa-solid fa-bars"></i></button><div class="crumb" id="crumb"><span class="cl" onclick="location.hash='#/tasks'">Accountability</span> <i class="fa-solid fa-chevron-right"></i><span class="cur">Workflow</span></div>
+      <div class="search-box" style="position: relative;"><i class="fa-solid fa-magnifying-glass"></i><input id="globalSearch" placeholder="Search documents, tasks, people…" value=""><div id="gsDrop" style="position: absolute; top: 100%; left: 0px; right: 0px; background: rgb(255, 255, 255); border: 1px solid var(--line); border-radius: 10px; box-shadow: rgba(0, 0, 0, 0.12) 0px 8px 24px; z-index: 9999; max-height: 340px; overflow-y: auto; display: none;"></div></div>
+      <div class="topbar-actions">
+        <button class="ic-btn ringing bell-ring" id="notifBtn" title="Notifications"><i class="fa-regular fa-bell"></i><span class="dot" style="display: flex;">16</span></button>
+        <div class="profile-wrap"><div class="avatar" id="profileBtn" style="background: rgb(15, 118, 110);">A</div><div class="dropdown" id="notifDd"></div><div class="dropdown" id="profileDd"><div class="dd-head"><span class="avatar-sm" style="background:#0f766e" title="ayushruia1@gmail.com">A</span><div class="dd-head-txt" title="ayushruia1@gmail.com"><div class="nm">Administrator</div><div class="em">ayushruia1@gmail.com</div></div></div><div class="dd-item" onclick="navTo('tasks/profile')"><i class="fa-regular fa-user"></i> My Profile</div><div class="dd-item" onclick="navTo('settings')"><i class="fa-solid fa-gear"></i> Settings</div><div class="dd-item"><i class="fa-solid fa-shield-halved"></i> Super Admin <span class="tag t-purple" style="margin-left:auto">ON</span></div><div style="height:1px;background:var(--line-2);margin:6px 0"></div><div class="dd-item" style="color:var(--err)" onclick="doSignOut()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Sign Out</div></div></div>
+      </div>
+    </header>
+    <main class="view" id="view" data-loader-page="tasks"><div class="wf-page"><div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="goBack('tasks/workflow')"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> Reimbursement</h1><div class="wf-head-admin"><button class="ac-btn ic" title="Edit this workflow" onclick="wfEdit(39)"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" title="Delete this workflow (Del key)" onclick="wfDelete(39)"><i class="fa-solid fa-trash"></i></button></div><div class="wf-head-acts"><span class="wf-my-wr" title="Your own count for this workflow — only you can see this"><span class="wf-wr-seg wf-wr-wait"><i class="fa-solid fa-hourglass-half"></i> Waiting <b>0</b></span><span class="wf-wr-seg wf-wr-recv"><i class="fa-solid fa-inbox"></i> Received <b>0</b></span></span><div class="wf-head-new wf-head-new-n"><button class="ac-btn primary" title="Start a new reimbursement" onclick="wfNewInstance(39)"><i class="fa-solid fa-plus"></i><span class="wf-btxt"><span class="wf-new-pre">New </span>Reimbursement</span></button><button class="ac-btn wf-var-btn" style="--wf-var:#7c3aed" title="Start a new wow moment" onclick="wfNewInstance(39,'wow')"><i class="fa-solid fa-star"></i><span class="wf-btxt"><span class="wf-new-pre">New </span>Wow Moment</span></button></div></div></div><div class="wf-card wf-meta"><div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> Reimburse required</div><div class="wf-members-row"><span class="wf-mini-lbl">People</span><span class="wf-circles wf-poptip " tabindex="0" role="button" aria-label="Show all people" onclick="event.stopPropagation();wfPopToggle(this)"><span class="wf-circle" style="background:#0369a1">SD</span><span class="wf-circle" style="background:#1d4ed8">UA</span><span class="wf-circle" style="background:#0f766e">KS</span><span class="wf-circle" style="background:#0f766e">GS</span><span class="wf-circle" style="background:#0f766e">GP</span><span class="wf-tip-txt">Shuchandra Das<br>Uzma Ahmed<br>Khusbu Singh<br>GyanPrakash Sah<br>Gyan Prakash Pandey</span></span></div></div><div class="wf-tabs"><button class="wf-tab on" id="wfTabBtn_main" onclick="wfTabShow('main')"><i class="fa-solid fa-list-check"></i> Reimbursements</button><button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow('tracker')"><i class="fa-solid fa-table-columns"></i> Tracker</button><button class="wf-tab" id="wfTabBtn_drafts" onclick="wfTabShow('drafts')"><i class="fa-regular fa-floppy-disk"></i> Drafts <span class="cnt">1</span></button><button class="wf-tab" id="wfTabBtn_archive" onclick="wfTabShow('archive')"><i class="fa-solid fa-box-archive"></i> Archive <span class="cnt">107</span></button><span class="wf-tabs-right" id="wfTabsRight" style="display:none"></span></div><div id="wfPane_main"><div class="wf-card wf-tlcard"><div id="wfTL"><div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-list-ol"></i> Workflow steps<span class="wf-tip" tabindex="0" role="button" aria-label="More information">i<span class="wf-tip-txt">The steps every reimbursement goes through, in order, with who does each one and how long they have. Click a row in the table below to see how a particular reimbursement is progressing.</span></span></div></div><div class="wf-tl-item " onclick="wfTlTap(this)"><div class="wf-tl-num">1</div><div class="wf-tl-body"><div class="wf-tl-row"><div class="wf-tl-title">HR Review </div><div class="wf-tl-meta"><span class="wf-who"><span class="wf-av" style="background:#0369a1" title="Shuchandra Das">SD</span><span class="wf-av" style="background:#1d4ed8" title="Uzma Ahmed">UA</span><span class="wf-av" style="background:#0f766e" title="Khusbu Singh">KS</span><span class="wf-who-nm">Shuchandra Das / Uzma Ahmed / Khusbu Singh</span></span><span class="wf-dur"><i class="fa-regular fa-clock"></i> 1 day</span></div></div><div class="wf-tl-times"></div></div></div><div class="wf-tl-item " onclick="wfTlTap(this)"><div class="wf-tl-num">2</div><div class="wf-tl-body"><div class="wf-tl-row"><div class="wf-tl-title">Accounts Review &amp; Payment </div><div class="wf-tl-meta"><span class="wf-who"><span class="wf-av" style="background:#0f766e" title="GyanPrakash Sah">GS</span><span class="wf-av" style="background:#0f766e" title="Gyan Prakash Pandey">GP</span><span class="wf-who-nm">GyanPrakash Sah / Gyan Prakash Pandey</span></span><span class="wf-dur"><i class="fa-regular fa-clock"></i> 1 day</span></div></div><div class="wf-tl-times"></div></div></div><div class="wf-tl-item " onclick="wfTlTap(this)"><div class="wf-tl-num">3</div><div class="wf-tl-body"><div class="wf-tl-row"><div class="wf-tl-title">Payment Received </div><div class="wf-tl-meta"><span class="wf-who-nm" style="color:var(--slate)">Unassigned</span><span class="wf-dur"><i class="fa-regular fa-clock"></i> 1 day</span></div></div><div class="wf-tl-times"></div></div></div></div></div><div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> <span id="wfInstTitle">Reimbursements</span> <span class="cnt" id="wfInstCount">3</span><span class="wf-tip" tabindex="0" role="button" aria-label="More information">i<span class="wf-tip-txt">One row per reimbursement. Can’t be deleted once its first step is received, or edited once it’s completed.</span></span><span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstPrint" title="Print selected" disabled="" onclick="wfInstPrintSel()"><i class="fa-solid fa-print"></i></button><button class="ac-btn" title="Print every claim Accounts has received that has not been printed before" onclick="wfBulkPrintNewReceipts()"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print New Reimbursements</span></button><button class="ac-btn ic" id="wfInstEdit" title="Edit selected reimbursement" disabled="" onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled="" onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div><div class="wf-inst-filterbar"><div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="Search by No., anyone it is with, amount, description or anything it was raised with…" oninput="wfInstFilter()" value=""></div><div class="wf-inst-filter-dates"><label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()" value=""></label><i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i><label class="wf-lbl">To<input type="date" class="ac-in" id="wfInstDateTo" value=""></label><button class="ac-btn primary" onclick="wfInstDateApply()"><i class="fa-solid fa-check"></i> Update</button><button class="ac-btn ic" title="Clear filters" onclick="wfInstFilterClear()"><i class="fa-solid fa-xmark"></i></button></div></div><div id="wfInstTable_wrapper" class="dt-container dt-empty-footer"><div class="dt-layout-row dt-layout-table"><div class="dt-layout-cell  dt-layout-full"><div class="wf-tablewrap"><table class="wf-itable dataTable" id="wfInstTable" aria-describedby="wfInstTable_info"><colgroup><col data-dt-column="0"><col data-dt-column="1"><col data-dt-column="2"><col data-dt-column="3"><col data-dt-column="4"><col data-dt-column="5"></colgroup><thead><tr><th class="wf-chk-col dt-orderable-none" data-dt-column="0" rowspan="1" colspan="1" aria-label=""><span class="dt-column-title"></span><span class="dt-column-order"></span></th><th data-dt-column="1" rowspan="1" colspan="1" class="dt-type-numeric dt-orderable-asc dt-orderable-desc" aria-label="No.: Activate to sort" tabindex="0"><span class="dt-column-title" role="button">No.</span><span class="dt-column-order"></span></th><th data-dt-column="2" rowspan="1" colspan="1" class="dt-orderable-asc dt-orderable-desc" aria-label="Reimbursement: Activate to sort" tabindex="0"><span class="dt-column-title" role="button">Reimbursement</span><span class="dt-column-order"></span></th><th title="HR Review" data-dt-column="3" rowspan="1" colspan="1" class="dt-orderable-none" aria-label="HR Review"><span class="dt-column-title">HR Review</span><span class="dt-column-order"></span></th><th title="Accounts Review &amp; Payment" data-dt-column="4" rowspan="1" colspan="1" class="dt-orderable-none" aria-label="Accounts Review &amp;amp; Payment"><span class="dt-column-title">Accounts Review &amp; Payment</span><span class="dt-column-order"></span></th><th title="Payment Received" data-dt-column="5" rowspan="1" colspan="1" class="dt-orderable-none" aria-label="Payment Received"><span class="dt-column-title">Payment Received</span><span class="dt-column-order"></span></th></tr></thead><tbody><tr data-sample="124"><td class="wf-chk-col"><input type="checkbox" class="wf-inst-chk"></td><td class="dt-type-numeric"><b>124</b></td><td class="wf-trigcell">Sales Manager · 22-10-2026 · ₹640 · Site visit with a customer, Dream World City</td><td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td><td><span class="wf-pill cur"><i class="fa-solid fa-inbox"></i> Received</span></td><td><span class="wf-pill wait">·</span></td></tr><tr data-sample="121"><td class="wf-chk-col"><input type="checkbox" class="wf-inst-chk"></td><td class="dt-type-numeric"><b>121</b></td><td class="wf-trigcell">Sales Manager · 20-10-2026 · ₹1,180 · Customer meeting, Dream Ananta</td><td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td><td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td><td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td></tr><tr data-sample="118"><td class="wf-chk-col"><input type="checkbox" class="wf-inst-chk"></td><td class="dt-type-numeric"><b>118</b></td><td class="wf-trigcell">Sales Manager · 17-10-2026 · ₹420 · Office to Dream Gurukul and back</td><td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td><td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td><td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td></tr></tbody><tfoot></tfoot></table><div id="wfInstNoMatch" class="ac-empty" style="cursor:default;display:none">No matches</div></div></div></div><div class="dt-layout-row"><div class="dt-layout-cell dt-layout-start"><div class="dt-info" aria-live="polite" id="wfInstTable_info" role="status">Showing <b>1–3</b> of <b>3</b> </div></div><div class="dt-layout-cell dt-layout-end"><div class="dt-paging paging_simple_numbers"><nav aria-label="pagination"><button class="dt-paging-button disabled previous" role="link" type="button" aria-controls="wfInstTable" aria-disabled="true" aria-label="Previous" data-dt-idx="previous" tabindex="-1"><i class="fa-solid fa-chevron-left"></i></button><button class="dt-paging-button current" role="link" type="button" aria-controls="wfInstTable" aria-current="page" data-dt-idx="0">1</button><button class="dt-paging-button disabled next" role="link" type="button" aria-controls="wfInstTable" aria-disabled="true" aria-label="Next" data-dt-idx="next" tabindex="-1"><i class="fa-solid fa-chevron-right"></i></button></nav></div></div></div></div></div></div><div id="wfPane_tracker" style="display:none"><div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt" id="wfTrackerCount">124</span><span class="wf-tip" tabindex="0" role="button" aria-label="More information">i<span class="wf-tip-txt">Every reimbursement against every step: when the step was due (Planned), when it was actually forwarded on (Actual), and by how much it ran over (Time Delay). Scroll sideways to see all the steps.</span></span></div><div id="wfTrackerBody"><div class="loader"><div class="spin"></div></div></div></div></div><div id="wfPane_drafts" style="display:none"><div class="wf-card"><div class="wf-card-hd"><i class="fa-regular fa-floppy-disk"></i> Drafts <span class="cnt">1</span><span class="wf-tip" tabindex="0" role="button" aria-label="More information">i<span class="wf-tip-txt">Your own unfinished reimbursements. A draft is not sent to anyone, takes no reimbursement number, and the minimum does not apply to it. It becomes a real reimbursement when you open it and submit it.</span></span></div><div class="wf-tablewrap"><table class="wf-itable"><thead><tr><th>No.</th><th>Amount</th><th>What is in it</th><th>Filled</th><th>Last saved</th><th></th></tr></thead><tbody><tr class="wf-draft-row" title="Open this draft" onclick="wfEventOpen(39,null,2)"><td><b>1</b></td><td><b>—</b></td><td class="wf-trigcell">03-09-2026 · 9876543210@okaxis</td><td>2 of 9 filled</td><td>03-09-2026, 16:36</td><td style="white-space:nowrap" onclick="event.stopPropagation()"><button class="ac-btn danger ic" title="Delete this draft" onclick="wfDraftDelete(2)"><i class="fa-solid fa-trash"></i></button></td></tr></tbody></table></div></div></div></div></main>
+  </div>
+</div>
+<div class="overlay" id="overlay"><div id="modalHost"></div></div>
+<div id="toasts"></div>
+
+
+
+
+
+</body></html>

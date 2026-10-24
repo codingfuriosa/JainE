@@ -3424,7 +3424,7 @@
            is submitted - so this is simply its place in the list, newest first. */
         +'<td><b>'+(i+1)+'</b></td>'
         +'<td><b>'+(tot?wfMoney(tot):'\u2014')+'</b></td>'
-        +'<td class="wf-trigcell">'+wfVariantBadge(flow, d.variant)+(what||'<span style="color:var(--slate)">nothing filled in yet</span>')+'</td>'
+        +'<td class="wf-trigcell">'+(what||'<span style="color:var(--slate)">nothing filled in yet</span>')+'</td>'
         +'<td>'+filled.length+' of '+det.length+' filled</td>'
         +'<td>'+esc2(wfDT(d.updated_at||d.created_at))+'</td>'
         +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
@@ -4315,7 +4315,7 @@
         const vCol=wfVariantColor(flow, c.variant);
         return '<tr'+(vCol?' class="wf-var-row" style="--wf-var:'+vCol+'"':'')+' data-case="'+c.id+'" data-done="'+(c.status==='Done'?'1':'0')+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-text="'+esc2(xtra.text)+'" data-curstep="'+(c.current_step==null?'':c.current_step)+'" data-late="'+(wfCaseIsLate(byCase[c.id], c.current_step)?'1':'0')+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(showChk?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
-          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+wfVariantBadge(flow, c.variant)+esc2(wfTrigShort(c,flow).short)+'</td>'+(chaser?('<td>'+esc2(wfDeptNameOf(byCase[c.id], firstSeq))+'</td>'):'')+(isBill?('<td>'+wfRoutePill(c.route)+'</td>'):'')+cells+'</tr>';
+          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+(chaser?('<td>'+esc2(wfDeptNameOf(byCase[c.id], firstSeq))+'</td>'):'')+(isBill?('<td>'+wfRoutePill(c.route)+'</td>'):'')+cells+'</tr>';
       };
       const rows=cases.map(function(c){ return rowHtml(c, byCase); }).join('');
       if(srv){
@@ -9637,13 +9637,8 @@
       return (Array.isArray(v.raisers)?v.raisers:[]).some(function(e){ return eq(e,me()); });
     });
   }
-  // Marks a row as a variant's: the coloured border and a small label naming the kind.
+  // Marks a row as a variant's: the coloured border alone (24 Oct 2026 - no label pill in the row).
   function wfVariantColor(flow, key){ const v=wfVariantOf(flow,key); return v?(v.color||'#7c3aed'):''; }
-  function wfVariantBadge(flow, key){
-    const v=wfVariantOf(flow,key); if(!v) return '';
-    const c=v.color||'#7c3aed';
-    return '<span class="wf-var-badge" style="color:'+c+';border-color:'+c+'"><i class="fa-solid fa-star"></i> '+esc2(v.label||key)+'</span>';
-  }
   window.wfQuickAttach=function(flowId){
     const inp=document.createElement('input');
     inp.type='file'; inp.multiple=true;
