@@ -4030,8 +4030,9 @@
       try{
         const {data}=await ACC().from('flow_cases').select('id,flow_id,case_no,jaine_id,created_by,current_step,returned_at,status,variant')
           .eq('flow_id',39).gt('current_step',1).is('returned_at',null).not('status','in','("Done","Cancelled")');
-        // ordinary claims only: an open Wow Moment does not hold up an ordinary claim
-        out.myOpenClaim=(data||[]).find(function(x){ return eq(x&&x.created_by, me()) && !x.variant; })||null;
+        // either kind: a Wow Moment is a Reimbursement too, so an open one holds up a new claim of
+        // either kind, and an open ordinary claim holds up a Wow Moment (24 Oct 2026)
+        out.myOpenClaim=(data||[]).find(function(x){ return eq(x&&x.created_by, me()); })||null;
       }catch(_e){}
     }
     return out;
@@ -4214,7 +4215,7 @@
        would have allowed, or promise a save that is about to be rejected. */
     const wfMyOpenReimbursement=id===39 ? (function(){
       // server-side paging holds one page, so the claim was looked up on its own (srvMyOpenClaim)
-      const c=srv ? srvMyOpenClaim : cases.find(function(x){ return eq(x&&x.created_by, mySelf) && !x.variant && x.current_step>1 && !x.returned_at && x.status!=='Done' && x.status!=='Cancelled'; });
+      const c=srv ? srvMyOpenClaim : cases.find(function(x){ return eq(x&&x.created_by, mySelf) && x.current_step>1 && !x.returned_at && x.status!=='Done' && x.status!=='Cancelled'; });
       return c ? wfCaseNoText(c) : null;
     })() : null;
     const wfBookingStarted=function(c){
