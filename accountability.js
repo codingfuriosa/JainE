@@ -7135,10 +7135,22 @@
 
      TEMPLATES is keyed by project so adding the next one is a line here and a file beside it;
      FALLBACK is what makes today's behaviour temporary rather than baked in. */
-  const AG_TEMPLATES={'Dream Gurukul':{src:'assets/forms/agreement-gurukul.js', key:'AGREEMENT_GURUKUL'}};
-  const AG_FALLBACK='Dream Gurukul';
-  async function wfAgTemplate(project){
-    const T=AG_TEMPLATES[project]||AG_TEMPLATES[AG_FALLBACK];
+  /* WHICH FORMAT (26 Oct 2026, as asked). Dream World City has two agreements of its own, one per
+     promoter company - DREAM GATEWAY HOTELS LIMITED (Precinct I) and JAIN GROUP PROJECTS PRIVATE
+     LIMITED (Precinct II) - made from the Word files supplied (tools/agreement/docx_template.mjs).
+     The booking does not say which company a DWC flat is sold by, and its block names are not
+     consistent enough to work it out, so the person opening the agreement picks the company. Every
+     other project - Dream Gurukul, Dream Ananta and the rest - uses the Dream Gurukul format, with
+     no company rule. */
+  const AG_TEMPLATES={
+    gurukul:  {src:'assets/forms/agreement-gurukul.js',   key:'AGREEMENT_GURUKUL'},
+    dwc_dghl: {src:'assets/forms/agreement-dwc-dghl.js',  key:'AGREEMENT_DWC_DGHL',  company:'Dream Gateway Hotels Ltd.'},
+    dwc_jgppl:{src:'assets/forms/agreement-dwc-jgppl.js', key:'AGREEMENT_DWC_JGPPL', company:'Jain Group Projects Pvt. Ltd.'}
+  };
+  const AG_FALLBACK='gurukul';
+  const wfIsDwc=function(project){ return /world\s*city|\bdwc\b/i.test(String(project||'')); };
+  async function wfAgTemplate(id){
+    const T=AG_TEMPLATES[id]||AG_TEMPLATES[AG_FALLBACK];
     if(!T) throw new Error('no agreement template is available');
     if(!window[T.key]){
       await new Promise(function(res,rej){
@@ -7288,6 +7300,82 @@
     };
   }
 
+  /* THE DREAM WORLD CITY FILL-INS, on top of wfAgValues. Same rule as everywhere in this file: a
+     figure the booking does not state prints as a rule to complete by hand, never a guess.
+
+     Two areas are worked out rather than read, and only by the agreement's own definitions (clause
+     21 of Schedule A-2): the super built-up area is the built-up area plus the proportionate common
+     area, so common = super built-up - built-up; and the built-up area is carpet + balcony + the
+     external walls, so walls = built-up - carpet - balcony. Each needs every figure it uses; a
+     missing one leaves the line blank. */
+  function wfAgDwcValues(res){
+    const f=res.fields||{}, LT=res.letter||{};
+    const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const rule=function(n){ return new Array((n||14)+1).join('_'); };
+    const num=function(x){ const n=Number(String(x==null?'':x).replace(/[^0-9.]/g,''));
+      return (isFinite(n)&&n>0)?n:null; };
+    const sq=function(n){ return (n===null)?null:String(Math.round(n*100)/100); };
+    const inr=function(n){ return (typeof n==='number'&&isFinite(n))?Math.round(n).toLocaleString('en-IN'):null; };
+    const areas=wfUnitAreas(res);
+    const carpet=num(areas.carpet_sqft), balcony=num(areas.balcony_sqft), built=num(areas.builtup_sqft);
+    const sba=num(v('area_sqft'))||num(areas.sba_sqft);
+    const common=(sba&&built&&sba>built)?(sba-built):null;
+    const walls=(built&&carpet&&balcony&&built>carpet+balcony)?(built-carpet-balcony):null;
+    const SM=wfSheetMoney(res), net=SM.net;
+    const flatCost=(typeof net.flat==='number')?net.flat:(typeof res.unit_price==='number'?res.unit_price:null);
+    const total=(typeof net.total==='number')?net.total
+      :((typeof flatCost==='number')?(flatCost+(net.parking||0)):null);
+    const bhkN=(String(v('bhk')).match(/\d+/)||[''])[0];
+    const BHK_W=['','ONE','TWO','THREE','FOUR','FIVE','SIX'];
+    const nilOr=function(k){ const t=v(k); return t?t:'00.00'; };       // the form's own NIL, as the specimen prints it
+    // The allottee, the way the Dream World City agreements word it.
+    const detail=Array.isArray(res.allottees_detail)?res.allottees_detail:[];
+    const p=detail[0] || (Array.isArray(LT.allottees)&&LT.allottees[0]) || {salutation:null, name:v('customer_name')};
+    const own=function(k,fb){ const t=String((p&&p[k])||'').trim(); return t||fb||''; };
+    const sal=salutation(p&&p.salutation)||'';
+    const name=nameCase(own('name',v('customer_name')))||rule(24);
+    const rel=v('relation_type').toUpperCase().replace(/[^SDWCO/]/g,'');
+    const relTxt=(['S/O','D/O','W/O','C/O'].indexOf(rel)>=0)?rel:'S/O, D/O, W/O, C/O';
+    const father=own('father_name',v('relation_name')||v('father_name'));
+    const pan=own('pan',v('customer_pan'))||rule(12);
+    const aadhaar=String(res.applicant_aadhaar||'').trim()||rule(14);
+    const occ=own('occupation',v('occupation'));
+    const home=((Array.isArray(p&&p.address_lines)&&p.address_lines.length)?p.address_lines
+      :(Array.isArray(LT.address)?LT.address:[])).join(', ').replace(/\s+/g,' ').trim();
+    const appDate=v('booking_date')||String(((res.header||{}).date)||'').trim();
+    const parkAmt=(typeof net.parking==='number')?net.parking:null;
+    return {
+      ALLOTTEE_DWC:(sal?(sal+' '):'')+name+' having Pan No ('+pan+') (Aadhaar no '+aadhaar+'), '
+        +relTxt+' '+(father?nameCase(father):rule(22))+', by faith '+rule(10)
+        +', by Occupation '+(occ?nameCase(occ):rule(12))+', by Nationality Indian, residing at '+(home||rule(40)),
+      application_date:appDate||rule(12),
+      bhk:bhkN?(bhkN+'BHK'):(v('bhk')||rule(6)),
+      bhk_full:bhkN?(bhkN+'('+(BHK_W[+bhkN]||bhkN)+') BHK'):rule(10),
+      rate:(num(v('base_rate'))!==null)?String(num(v('base_rate'))):rule(8),
+      flat_cost:inr(flatCost)||rule(12),
+      sba:sq(sba)||rule(8),
+      common_area:sq(common)||rule(8),
+      wall_area:sq(walls)||rule(8),
+      balcony:sq(balcony)||rule(8),
+      terrace:rule(8),
+      plc:nilOr('plc'), discount:nilOr('discount'),
+      other_charges:rule(10),
+      park_amount:(parkAmt!==null)?wfRs2(parkAmt):rule(10),
+      total_figures:inr(total)||rule(12),
+      total_words:(typeof total==='number')?rupeesInWords(Math.round(total)):rule(30),
+      sign_name:(sal?(sal+' '):'')+name,
+      sign_address:home||rule(40)
+    };
+  }
+  // The DWC payment plan: the cost sheet's own schedule, milestone and amount, as the specimen sets it.
+  function wfAgDwcPlan(res){
+    return (Array.isArray(res.payment_schedule)?res.payment_schedule:[]).filter(Boolean).map(function(r){
+      return [String(r.milestone||'').trim()||'—',
+              (typeof r.amount==='number')?(Math.round(r.amount).toLocaleString('en-IN')+'/-'):'—'];
+    });
+  }
+
   /* The three tables whose figures come from the cost sheet. Everything in them is a figure the
      sheet prints; nothing is a rate applied here, so a change of GST cannot make the agreement
      disagree with what the customer signed. */
@@ -7369,9 +7457,50 @@
     let res=null;
     try{ res=await wfBookingReading(caseId); }
     catch(e){ wfClosePending(tab); toast((e&&e.message)||'The reading is not ready','warn'); return; }
-    try{ await wfAgreementDoc(res,caseId,tab); }
+    const project=String((((res.fields||{}).project_name)||{}).value||'').trim();
+    let tid='gurukul';
+    if(wfIsDwc(project)){
+      tid=wfDwcTemplateFromBlock((((res.fields||{}).block)||{}).value) || await wfAgPickCompany(caseId);
+      if(!tid){ wfClosePending(tab); return; }
+    }
+    try{ await wfAgreementDoc(res,caseId,tab,tid); }
     catch(e){ wfClosePending(tab); toast('Could not build the agreement: '+((e&&e.message)||e),'err'); }
   };
+  /* Dream World City: THE BLOCK SAYS THE PRECINCT (26 Oct 2026, confirmed by Ayush). A block code's
+     first number is its precinct - "1-1", "PARIS 1/1", "1-3 BLOCK-3 LONDON" are Precinct I, sold by
+     Dream Gateway Hotels; "2-2", "2/1", "2-3 LONDON Block-4" are Precinct II, sold by Jain Group
+     Projects. Only a pair like 1-3 or 2/1 counts; a block written without one ("5", "6") gives no
+     answer, and then the person opening the agreement is asked. */
+  function wfDwcTemplateFromBlock(block){
+    const m=String(block==null?'':block).match(/(\d+)\s*[-\/]\s*\d+/);
+    if(!m) return null;
+    return m[1]==='1' ? 'dwc_dghl' : m[1]==='2' ? 'dwc_jgppl' : null;
+  }
+  /* Dream World City: which company is selling this flat. Remembered per booking for this visit, so
+     a rebuild offers the same one first. Resolves to a template id, or null if the question is closed. */
+  window._wfAgCompany=window._wfAgCompany||{};
+  function wfAgPickCompany(caseId){
+    return new Promise(function(resolve){
+      let done=false;
+      const finish=function(v){ if(done) return; done=true; if(v) window._wfAgCompany[caseId]=v; closeModal(); resolve(v); };
+      const last=window._wfAgCompany[caseId];
+      const btn=function(id,label,sub){
+        return '<button class="ac-btn'+(last===id?' primary':'')+'" data-ag="'+id+'" style="display:block;width:100%;height:auto;line-height:1.35;text-align:left;margin:0 0 10px;padding:12px 14px">'
+          +'<b>'+esc2(label)+'</b><div style="font-size:12px;color:var(--slate);font-weight:400;margin-top:2px">'+esc2(sub)+'</div></button>';
+      };
+      openModal('<div class="modal-head"><h3><i class="fa-solid fa-file-contract"></i> Dream World City agreement</h3><span class="x" data-ag="">&times;</span></div>'
+        +'<div class="modal-body" style="min-width:min(92vw,420px)">'
+          +'<p style="margin:0 0 12px;color:var(--slate);font-size:13.5px">Which company is this flat sold by?</p>'
+          +btn('dwc_dghl','DREAM GATEWAY HOTELS LIMITED','Precinct I format')
+          +btn('dwc_jgppl','JAIN GROUP PROJECTS PRIVATE LIMITED','Precinct II format')
+        +'</div>','md');
+      setTimeout(function(){
+        [].slice.call(document.querySelectorAll('[data-ag]')).forEach(function(b){
+          b.onclick=function(){ finish(b.getAttribute('data-ag')||null); };
+        });
+      },30);
+    });
+  }
 
   /* THE AGREEMENT, AS A PAGE RATHER THAN AS A PICTURE OF ONE.
 
@@ -7390,11 +7519,14 @@
      one deliberately was (see the note in wfAgreementPdf).
 
      wfAgreementPdf is kept below, unused, as the record of how the typeset draft read. */
-  async function wfAgreementDoc(res,caseId,tab){
+  async function wfAgreementDoc(res,caseId,tab,tid){
     const f=res.fields||{};
     const project=String(((f.project_name||{}).value)||'').trim();
-    const tmpl=await wfAgTemplate(project);
+    tid=tid||'gurukul';
+    const tmpl=await wfAgTemplate(tid);
+    const isDwc=(tid==='dwc_dghl'||tid==='dwc_jgppl');
     const vals=wfAgValues(res), tables=wfAgTables(res);
+    if(isDwc) Object.assign(vals, wfAgDwcValues(res));
     const E=function(x){ return String(x==null?'':x)
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
     const fill=function(text){
@@ -7410,15 +7542,18 @@
     const CW=595.28-2*64;
     const grid=function(head,rows,widths){
       if(!rows||!rows.length) return '';
+      // The Dream World City tables have no header row; their width comes from the rows.
+      const ncol=head?head.length:rows.reduce(function(a,r){ return Math.max(a,r.length); },0);
       const cols=(widths||[]).slice();
-      while(cols.length<head.length) cols.push(0);
+      if(!head && !cols.length){ for(let i=0;i<ncol;i++) cols.push(i===ncol-1?0:(ncol===2?250:120)); }
+      while(cols.length<ncol) cols.push(0);
       const fixed=cols.reduce(function(a,b){ return a+(Number(b)||0); },0);
       const flexAt=cols.indexOf(0);
       if(flexAt>=0) cols[flexAt]=Math.max(20,CW-fixed);
       const sum=cols.reduce(function(a,b){ return a+b; },0)||1;
       const pct=cols.map(function(c){ return Math.round(c/sum*1000)/10; });
-      let x='<table class="wfd-grid"><tr class="wfd-head">'
-        +head.map(function(c,i){ return '<td data-w="'+pct[i]+'"><b>'+E(c)+'</b></td>'; }).join('')+'</tr>';
+      let x='<table class="wfd-grid">'+(head?('<tr class="wfd-head">'
+        +head.map(function(c,i){ return '<td data-w="'+pct[i]+'"><b>'+E(c)+'</b></td>'; }).join('')+'</tr>'):'');
       rows.forEach(function(r,ri){
         // The last row is bold when it is a total, as the typeset table set it.
         const strong=(ri===rows.length-1) && /total/i.test(String(r[1]||r[0]||''));
@@ -7442,6 +7577,11 @@
         else if(b.id==='price') h+=grid(b.head,tables.price,b.w);
         else if(b.id==='edc')   h+=grid(b.head,tables.edc,b.w);
         else if(b.id==='plan')  h+=grid(b.head,tables.plan,b.w);
+        // Dream World City: the price table's values are tokens, the plan is the cost sheet's own,
+        // and the specification tables are printed as the file has them.
+        else if(b.id==='dwcprice'||b.id==='static')
+          h+=grid(b.head,(b.rows||[]).map(function(r){ return r.map(fill); }),b.w);
+        else if(b.id==='dwcplan') h+=grid(b.head,wfAgDwcPlan(res),b.w);
         return;
       }
       const t=fill(b.x);
@@ -7457,8 +7597,9 @@
       h+='<p>'+E(t)+'</p>';
     });
 
-    // The execution block. Three signatures, each with room to actually sign.
-    [['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED OWNERS','IN THE PRESENCE OF:'],
+    // The execution block. Three signatures, each with room to actually sign. The Dream World City
+    // formats carry their own signing pages in the text, so they get none added.
+    if(!isDwc) [['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED OWNERS','IN THE PRESENCE OF:'],
      ['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED PROMOTER','IN THE PRESENCE OF:'],
      ['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED ALLOTTEE','IN THE PRESENCE OF:']]
       .forEach(function(blk,i){
@@ -7472,7 +7613,11 @@
        saying which template it came from would travel with it to the customer. */
     const onGurukul=(tmpl.project===project);
     const note='The blanks are for the values the documents do not state'
-      +(onGurukul?'' : ('. It is set on the '+tmpl.project+' template, not '
+      +(isDwc ? ('. Dream World City format for '+(AG_TEMPLATES[tid].company||'')
+          +(wfDwcTemplateFromBlock((f.block||{}).value)===tid
+            ? (' (block '+String((f.block||{}).value||'').trim()+' = Precinct '+(tid==='dwc_dghl'?'I':'II')+')') : '')
+          +' \u2014 check the block and RERA registration in recital F')
+       : onGurukul ? '' : ('. It is set on the '+tmpl.project+' template, not '
         +(project||'this booking\u2019s project')+' \u2014 check the recitals before it goes out'));
     await wfOpenDocTab(h,{title:'Agreement for Sale \u2014 '+who,
       base:'Agreement for Sale - '+who, caseId:caseId, kind:'agreement', logoBytes:null,
@@ -7490,7 +7635,7 @@
     if(!L) throw new Error('the PDF library could not be loaded');
     const f=res.fields||{};
     const project=String(((f.project_name||{}).value)||'').trim();
-    const tmpl=await wfAgTemplate(project);
+    const tmpl=await wfAgTemplate('gurukul');
     const vals=wfAgValues(res), tables=wfAgTables(res);
 
     const doc=await L.PDFDocument.create();
