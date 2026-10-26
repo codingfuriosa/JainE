@@ -153,7 +153,7 @@ function bgFetch(input, init){
     /* ...and once the save has settled, get the pages ready again - fresh, so they show the change
        and are instant again rather than waiting for the next page draw to notice. */
     clearTimeout(BG_REFILL_T);
-    BG_REFILL_T=setTimeout(function(){ for(const k in BG_LAST) delete BG_LAST[k]; bgPrefetchOthers(); }, 1500);
+    BG_REFILL_T=setTimeout(function(){ for(const k in BG_LAST) delete BG_LAST[k]; bgPrefetchOthers(); }, 6000);
     return BG_NATIVE_FETCH(input, init);
   }
   const cap=(BG_CAPTURE && Date.now()<BG_CAPTURE.until) ? BG_CAPTURE : null;
@@ -211,7 +211,10 @@ function bgOnRender(){
   BG_ROUTE=bgIsTarget(route)?route:null; BG_ROUTE_AT=Date.now(); BG_REC=[];
   BG_DRAW_AT=Date.now();
   clearTimeout(BG_PREFETCH_T);
-  BG_PREFETCH_T=setTimeout(bgPrefetchOthers, 0);
+  /* THE PAGE ON SCREEN GOES FIRST (26 Oct 2026). This used to start at once, so a page's own reads
+     queued behind a burst of reads for pages nobody had opened yet - on the small database that
+     made the page in front of you the slow one. Now the others are made ready 6 s later. */
+  BG_PREFETCH_T=setTimeout(bgPrefetchOthers, 6000);
 }
 /* The five tabs, plus every workflow page this person has opened before. The timed refresh below
    passes tabsOnly: workflow pages are kept ready when a page is drawn, not every 25 s. */
@@ -232,7 +235,12 @@ async function bgPrefetchOthers(tabsOnly){
       BG_QUEUE_AGAIN=false;
       const here=bgRouteNow();
       const routes=(tabsOnly===true) ? BG_KEEP_WARM.slice() : BG_TARGETS.slice();
-      if(tabsOnly!==true) Object.keys(bgLoadReads()).forEach(function(r){ if(bgIsTarget(r) && routes.indexOf(r)===-1) routes.push(r); });
+      /* Workflow pages: only the 3 opened most recently (26 Oct 2026). The remembered list could
+         hold two dozen of them - every workflow, after the old pre-loading - and each page draw
+         re-read them all, for everyone with JainE open. */
+      if(tabsOnly!==true) Object.keys(bgLoadReads())
+        .filter(function(r){ return bgIsTarget(r) && routes.indexOf(r)===-1; })
+        .slice(-3).forEach(function(r){ routes.push(r); });
       for(const t of routes){
         if(t===here || !bgAllowed(t)) continue;
         try{ await bgPrefetch(t); }catch(_e){}
@@ -268,7 +276,13 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) b
    another module came back to a normal load. Every 25 s - only while JainE is open, visible and
    signed in - Tasks and the Workflow list (whichever is not on screen) are fetched again, so they
    are always ready and never more than about 25 s old. */
+/* SWITCHED OFF (26 Oct 2026). Every open JainE page re-read Tasks and the Workflow list every 25 s,
+   all day, whether anybody looked at them or not - steady load the small database could not carry
+   on a busy afternoon. Pages still read their own data when opened, and Accountability keeps the
+   tabs already opened (acTab). Set BG_KEEP_WARM_ON to true to bring it back. */
+const BG_KEEP_WARM_ON=false;
 setInterval(function(){
+  if(!BG_KEEP_WARM_ON) return;
   if(document.hidden || !state.email || state.isCustomer || state.impersonating) return;
   for(const k in BG_LAST) delete BG_LAST[k];
   bgPrefetchOthers(true);
@@ -19789,24 +19803,46 @@ function compPaint(){
 async function compRender(){
   const host=$('compBody'); if(!host)return;
   let wl=[],ads=[];
-  try{ const {data}=await sb.schema('camp').from('competitor_watchlist').select('*').order('name',{ascending:true}); wl=data||[]; }catch(e){}
+  /* THE LIST AND THE ADS GO OUT TOGETHER (26 Oct 2026). The ads used to wait for the watchlist,
+     because they were asked for by the tab's watchlist ids - three waits one after another, about
+     4 s on a busy afternoon. They are now asked for by the tab's category, joined on the watchlist
+     in the database, so both start at once. Every watchlist row has a category (checked), so this
+     is the same set of ads. Only the open tab's ads, so a handful of our own never get pushed past
+     the row cap by the hundreds a busy competitor runs.
+     The database hands back at most 1,000 rows per request, so the ads are read in pages: the
+     first two at once (every tab is under 2,000 today), then on until a page comes back short. */
+  const cat=compTabDef()[3];
+  const adsPage=function(from){
+    return sb.schema('camp').from('competitor_ads').select('*,competitor_watchlist!inner(category)')
+      .eq('competitor_watchlist.category',cat)
+      .order('ad_delivery_start_time',{ascending:false}).order('id').range(from,from+999);
+  };
+  const got=await Promise.all([
+    sb.schema('camp').from('competitor_watchlist').select('*').order('name',{ascending:true}).then(function(r){ return r; },function(){ return {}; }),
+    adsPage(0).then(function(r){ return r; },function(){ return {}; }),
+    adsPage(1000).then(function(r){ return r; },function(){ return {}; })
+  ]);
+  /* A page that failed (a timeout on a busy afternoon) is asked for again, up to twice. Without
+     this the list quietly showed whichever page did arrive - 331 ads instead of 1,331. */
+  const again=async function(r,from){
+    for(let i=0;i<2 && !(r&&r.data);i++){ try{ r=await (from<0
+      ? sb.schema('camp').from('competitor_watchlist').select('*').order('name',{ascending:true}) : adsPage(from)); }catch(_e){} }
+    return r||{};
+  };
+  got[0]=await again(got[0],-1); got[1]=await again(got[1],0); got[2]=await again(got[2],1000);
+  if(!(got[1]&&got[1].data) || !(got[2]&&got[2].data)) toast('Some ads could not be loaded - refresh to try again','warn');
+  wl=(got[0]&&got[0].data)||[];
   window._compWl=wl;
-  // Only the open tab's ads, so a handful of our own never get pushed past the row cap by the
-  // hundreds a busy competitor runs.
-  const ids=compTabWl().map(function(w){return w.id;});
-  if(ids.length){
-    // The database hands back at most 1,000 rows per request, so .limit(2000) quietly stopped at
-    // 1,000 and competitors past that (about 330 ads) never appeared. Read in pages until done.
-    try{
-      for(let from=0;;from+=1000){
-        const {data,error}=await sb.schema('camp').from('competitor_ads').select('*').in('watchlist_id',ids)
-          .order('ad_delivery_start_time',{ascending:false}).order('id').range(from,from+999);
-        if(error) break;
-        ads=ads.concat(data||[]);
-        if(!data||data.length<1000) break;
-      }
-    }catch(e){}
-  }
+  ads=((got[1]&&got[1].data)||[]).concat((got[2]&&got[2].data)||[]);
+  try{
+    for(let from=2000; got[2]&&got[2].data&&got[2].data.length===1000; from+=1000){
+      const r=await adsPage(from);
+      if(r.error) break;
+      ads=ads.concat(r.data||[]);
+      if(!r.data||r.data.length<1000) break;
+    }
+  }catch(e){}
+  ads.forEach(function(a){ delete a.competitor_watchlist; });
   window._compAdsAll=ads;
   compPaint();
 }
@@ -19967,6 +20003,20 @@ function compThumbFail(el){
     ?'<a href="'+esc(snap)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:12px;text-decoration:none;color:var(--slate)">View on Facebook →</a>'
     :'<div style="font-size:11px;text-align:center;padding:8px">Media unavailable</div>';
 }
+/* MEDIA AT ANY COST (26 Oct 2026, as asked). 1,312 of 1,331 competitor ads have a working picture
+   or video in storage; a tile still fell back to "View on Facebook" whenever ONE attempt failed -
+   a signing call that timed out on a busy afternoon, or a picture that did not arrive. A tile now
+   tries up to four times (after 2, 5 and 10 s), each time with a freshly signed link, and only
+   then points to Facebook - which is then the truth: the file is not there. */
+const COMP_RETRY_MS=[2000,5000,10000];
+function compRetryThumb(el){
+  const n=Number(el.dataset.tries||0);
+  if(n>=COMP_RETRY_MS.length || !el.isConnected){ compThumbFail(el); return; }
+  el.dataset.tries=String(n+1);
+  delete window._compSignCache[el.getAttribute('data-key')];
+  el.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';
+  setTimeout(function(){ if(!el.isConnected) return; el.dataset.done=''; compFillThumb(el); }, COMP_RETRY_MS[n]);
+}
 async function compFillThumb(el){
   if(el.dataset.done==='1') return;
   el.dataset.done='1';
@@ -19974,7 +20024,7 @@ async function compFillThumb(el){
   let url=null;
   try{ url=await compSignedUrl(key); }catch(_e){}
   if(!el.isConnected) return;
-  if(!url){ compThumbFail(el); return; }
+  if(!url){ compRetryThumb(el); return; }
   if(kind==='video'){
     await compVideoSlot();
     if(!el.isConnected){ compVideoDone(); return; }
@@ -19984,10 +20034,16 @@ async function compFillThumb(el){
     el.innerHTML='<video src="'+esc(url)+'#t=0.1" preload="metadata" muted playsinline'
       +' style="width:100%;height:100%;object-fit:cover;background:#000"></video>';
     const v=el.querySelector('video');
-    if(v){ v.onloadeddata=free; v.onerror=function(){ free(); compThumbFail(el); }; }
+    if(v){ v.onloadeddata=free; v.onerror=function(){ free(); compRetryThumb(el); }; }
   } else {
     el.innerHTML='<img src="'+esc(url)+'" style="width:100%;height:100%;object-fit:cover">';
-    const i=el.querySelector('img'); if(i) i.onerror=function(){ compThumbFail(el); };
+    /* A picture that will not open may be a video stored under a .jpg name - an older pull saved
+       every file as a picture (71 competitor ads were corrected on 26 Oct 2026). It is tried as a
+       video once before anything else. */
+    const i=el.querySelector('img'); if(i) i.onerror=function(){
+      if(el.dataset.asvideo!=='1'){ el.dataset.asvideo='1'; el.setAttribute('data-kind','video'); el.setAttribute('data-overlay','1'); el.dataset.done=''; compFillThumb(el); }
+      else compRetryThumb(el);
+    };
   }
   if(el.getAttribute('data-overlay')==='1'){
     el.insertAdjacentHTML('beforeend','<span style="position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.62);'
