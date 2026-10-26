@@ -1223,20 +1223,44 @@
     if(tab==='recurring'){ P3='recurring'; tab='work'; }   // the old Recurring tab is now a pill on Tasks
     ROUTE={tab:tab,taskId:null};
     setCrumb(['Accountability', tab==='work'?'Tasks':(tab.charAt(0).toUpperCase()+tab.slice(1))]);
+    /* A TAB YOU HAVE ALREADY OPENED COMES BACK AT ONCE (26 Oct 2026). Every tab click used to start
+       from a spinner and download everything again, so going Tasks -> Workflow -> Tasks waited
+       twice for the same list. Each tab's finished screen is now kept for 10 minutes. Clicking the
+       tab (acTab) shows the kept screen straight away, with a small "Updating…" note, while the
+       usual load runs underneath and replaces it with fresh data. Anything else that redraws this
+       page - Receive, Forward, Done, a save - does not go through acTab, so it always loads fresh
+       and never shows what was there before the action. */
+    const snapKey=tab+(tab==='work'?':'+P3:'');
+    const snap=(window._acUseSnap && window._acSnap && window._acSnap[snapKey]
+      && window._acSnap[snapKey].who===me() && Date.now()-window._acSnap[snapKey].at<600000) ? window._acSnap[snapKey] : null;
+    window._acUseSnap=false;
     v.innerHTML = `<div class="page-head"><div><h1><i class="fa-solid fa-list-check" style="color:#1d4ed8"></i> Accountability</h1><p>Tasks &amp; delegation</p></div></div>
     <div class="ac-tabs">
-      <div class="ac-tab ${tab==='work'?'active':''}" onclick="navTo('tasks/work')"><i class="fa-solid fa-list-check"></i> Tasks</div>
-      <div class="ac-tab ${tab==='calendar'?'active':''}" onclick="navTo('tasks/calendar')"><i class="fa-solid fa-calendar-days"></i> Calendar</div>
-      <div class="ac-tab ${tab==='meetings'?'active':''}" onclick="navTo('tasks/meetings')"><i class="fa-solid fa-video"></i> Meetings</div>
-      <div class="ac-tab ${tab==='workflow'?'active':''}" onclick="navTo('tasks/workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow</div>
-      <div class="ac-tab ${tab==='archive'?'active':''}" onclick="navTo('tasks/archive')"><i class="fa-solid fa-box-archive"></i> Archive</div>
-    </div><div id="acBody"><div class="loader"><div class="spin"></div></div></div>`;
-    if (tab==='meetings') return meetingsTab();
-    if (tab==='calendar') return calendarTab();
-    if (tab==='archive') return archiveTab();
-    if (tab==='workflow') return workflowTab();
-    return tasksScreen();
+      <div class="ac-tab ${tab==='work'?'active':''}" onclick="acTab('work')"><i class="fa-solid fa-list-check"></i> Tasks</div>
+      <div class="ac-tab ${tab==='calendar'?'active':''}" onclick="acTab('calendar')"><i class="fa-solid fa-calendar-days"></i> Calendar</div>
+      <div class="ac-tab ${tab==='meetings'?'active':''}" onclick="acTab('meetings')"><i class="fa-solid fa-video"></i> Meetings</div>
+      <div class="ac-tab ${tab==='workflow'?'active':''}" onclick="acTab('workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow</div>
+      <div class="ac-tab ${tab==='archive'?'active':''}" onclick="acTab('archive')"><i class="fa-solid fa-box-archive"></i> Archive</div>
+    </div>${snap?'<div id="acSnapNote" style="font-size:11.5px;color:var(--slate);margin:8px 2px 6px"><i class="fa-solid fa-rotate fa-spin"></i> Updating…</div>':''}<div id="acBody">${snap?snap.html:'<div class="loader"><div class="spin"></div></div>'}</div>`;
+    let run;
+    if (tab==='meetings') run=meetingsTab();
+    else if (tab==='calendar') run=calendarTab();
+    else if (tab==='archive') run=archiveTab();
+    else if (tab==='workflow') run=workflowTab();
+    else run=tasksScreen();
+    try{ await run; }
+    finally{
+      const n=document.getElementById('acSnapNote'); if(n) n.remove();
+      // Kept only if this tab is still the one on screen - a slow load finishing after a click
+      // elsewhere must not file its screen under the wrong tab.
+      const b=document.getElementById('acBody');
+      const nowKey=ROUTE.tab+(ROUTE.tab==='work'?':'+P3:'');
+      if(b && ROUTE.taskId==null && nowKey===snapKey && !b.querySelector('.loader')){
+        (window._acSnap=window._acSnap||{})[snapKey]={html:b.innerHTML, at:Date.now(), who:me()};
+      }
+    }
   };
+  window.acTab=function(tab){ window._acUseSnap=true; navTo('tasks/'+tab); };
 
   /* ---------- Recurring view (the "Recurring" pill on Tasks) ----------
      Two ways to read the same recurring tasks, picked from the frequency menu:
@@ -2158,7 +2182,8 @@
 
   async function workflowTab(){
     const b=$('acBody');
-    b.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    // A kept screen (acTab) stays up while this loads, instead of flashing back to a spinner.
+    if(!document.getElementById('acSnapNote')) b.innerHTML='<div class="loader"><div class="spin"></div></div>';
     window._wfDelId=null; wfInjectCss();
     try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=[]; }
     await wfRenderList();
