@@ -410,7 +410,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'1ac1394ba6','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'1b0f42b696','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -19538,7 +19538,7 @@ window.compSetDate=function(which,val){
   }
   compPaint();
 };
-window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) compPaintGrid(); usageQueueDebounced('competitors.overview.search_ad_text_headline_or_page', val); };
+window.compSearch=function(val){ COMP_F.q=val; window._compShow=60; const g=$('compGrid'); if(g) compPaintGrid(); usageQueueDebounced('competitors.overview.search_ad_text_headline_or_page', val); };
 
 /* Draws one watchlist view - key 'competitors', 'brands' or 'partners' (COMP_TABS) - into host,
    below whatever page header and tab bar the calling module has already drawn. The page shells
@@ -19547,28 +19547,78 @@ window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) comp
 async function compMetaView(host,key){
   const tab=COMP_TABS.some(function(t){ return t[0]===key; })?key:'competitors';
   if(tab!==COMP_TAB){ COMP_TAB=tab; COMP_F.wl='all'; }
-  const blurb={
-    competitors:'Public ad creative from Meta\'s Ad Library — the creative itself, when it started and where it ran.',
-    brands:'Our own pages as Meta\'s Ad Library shows them to the public — what is running, since when, and where.',
-    partners:'What our channel partners are advertising on Meta — which projects they push, since when, and where.'
-  }[COMP_TAB];
+  /* Kept bare (26 Oct 2026, as asked: "remove so much text"): no explanatory paragraph and no
+     schedule / credits line. Competitor Data has no Add or Pull button either - competitors are
+     pulled only by the scheduled job. Our Brand and Channel Partners keep Add and Pull all now. */
   host.innerHTML=''
-    +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 12px">'
-      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">'+blurb
-        +' Meta never publishes spend or reach for ordinary commercial ads.</p>'
-      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
+    +(COMP_TAB==='competitors'?'':'<div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin:0 0 12px">'
         +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add '+esc(compTabNoun())+'</button>'
-        // Competitor Data has no pull button (16 Oct 2026, as asked): competitors' pages are pulled
-        // only by the weekly cron (competitor-ads-weekly-enqueue / -queue-worker). Our Brand and
-        // Channel Partners keep it.
-        +(COMP_TAB==='competitors'?'':'<button class="btn btn-primary" id="compSyncBtn" onclick="compManualPull()"><i class="fa-solid fa-rotate"></i> Pull all now</button>')
-      +'</div>'
-    +'</div>'
+        +'<button class="btn btn-primary" id="compSyncBtn" onclick="compManualPull()"><i class="fa-solid fa-rotate"></i> Pull all now</button>'
+      +'</div>')
+    +'<div id="compProxyWarn"></div>'
     +'<div id="compPullStatus"></div>'
     +'<div id="compToolbar"></div>'
     +'<div id="compBody"><div class="loader"><div class="spin"></div></div></div>';
-  await Promise.all([compRender(), compLoadStatus()]);
+  await Promise.all([compRender(), compLoadStatus(), compCheckProxy()]);
 }
+/* WHEN THE PROXY SIGN-IN LAPSES, SAY SO AND OFFER THE FIX (26 Oct 2026). From 22 Oct every pull
+   failed with "Proxy would not renew" and nothing on screen said so - the ads simply stopped
+   getting newer. The newest finished pull decides: if it failed on the sign-in, a red line with a
+   Reconnect button appears on every Meta Ads view. */
+async function compCheckProxy(){
+  const host=$('compProxyWarn'); if(!host) return;
+  let bad=false;
+  try{
+    const {data}=await sb.schema('camp').from('competitor_pull_queue').select('status,error,finished_at')
+      .not('finished_at','is',null).order('finished_at',{ascending:false}).limit(1);
+    const r=data&&data[0];
+    bad=!!(r&&r.status==='failed'&&/would not renew|not connected/i.test(r.error||''));
+  }catch(_e){}
+  host.innerHTML=bad
+    ?'<div class="card card-pad" style="margin:0 0 14px;border-color:#fecaca;background:#fef2f2;color:#b91c1c;display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px">'
+      +'<span style="flex:1;min-width:220px"><i class="fa-solid fa-plug-circle-xmark"></i> <b>Facebook ads are not updating.</b> JainE\'s sign-in to Proxy has expired.</span>'
+      +'<button class="btn btn-primary" onclick="compProxyModal()"><i class="fa-solid fa-plug"></i> Reconnect Proxy</button></div>'
+    :'';
+}
+async function compProxyCall(action,body){
+  const {data:{session}}=await sb.auth.getSession();
+  const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-sync-test-probe?action='+action,{method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+((session&&session.access_token)||''),'apikey':SUPABASE_KEY},
+    body:JSON.stringify(body||{})});
+  const jr=await res.json().catch(function(){ return {}; });
+  if(!res.ok||jr.error) throw new Error(jr.error||('HTTP '+res.status));
+  return jr;
+}
+window.compProxyModal=function(){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-plug"></i> Reconnect Proxy</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="font-size:13.5px;line-height:1.6">'
+      +'<p style="margin:0 0 10px"><b>1.</b> Press the button and sign in to Proxy in the tab that opens.</p>'
+      +'<button class="btn btn-primary" onclick="compProxyBegin()"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open Proxy sign-in</button>'
+      +'<p style="margin:16px 0 6px"><b>2.</b> After signing in, that tab shows <i>"This site can\'t be reached"</i>. That is expected. Copy the whole address from its address bar and paste it here:</p>'
+      +'<input id="compProxyBack" placeholder="http://127.0.0.1:8765/callback?code=…" style="width:100%;height:38px;border:1px solid var(--line);border-radius:9px;padding:0 10px;font-family:inherit">'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="compProxyDone" onclick="compProxyFinish()"><i class="fa-solid fa-check"></i> Connect</button></div>','md');
+};
+window.compProxyBegin=async function(){
+  // The tab is opened before the wait, so the browser does not treat it as an unasked pop-up.
+  const tab=window.open('about:blank','_blank');
+  try{ const r=await compProxyCall('begin'); if(tab) tab.location.href=r.url; else window.open(r.url,'_blank'); }
+  catch(e){ if(tab) tab.close(); toast(e.message||String(e),'err'); }
+};
+window.compProxyFinish=async function(){
+  const v=(($('compProxyBack')&&$('compProxyBack').value)||'').trim();
+  if(!v){ toast('Paste the address from the sign-in tab first','warn'); return; }
+  const b=$('compProxyDone'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Connecting…'; }
+  try{
+    await compProxyCall('finish',{url:v});
+    closeModal(); toast('Proxy reconnected - the waiting pages start pulling now','ok');
+    try{ await compWork(); }catch(_e){}
+    compCheckProxy();
+  }catch(e){
+    toast(e.message||String(e),'err');
+    if(b){ b.disabled=false; b.innerHTML='<i class="fa-solid fa-check"></i> Connect'; }
+  }
+};
 function compSelHtml(id,list,cur,onchange){
   return '<select class="comp-sel" id="'+id+'" onchange="'+onchange+'">'
     +list.map(function(o){ return '<option value="'+o[0]+'"'+(String(cur)===String(o[0])?' selected':'')+'>'+esc(o[1])+'</option>'; }).join('')
@@ -19610,15 +19660,11 @@ function compToolbarHtml(wl){
     +'<div class="comp-search"><i class="fa-solid fa-magnifying-glass"></i>'
       +'<input placeholder="Search ad text, headline, page…" value="'+esc(COMP_F.q)+'" oninput="compSearch(this.value)"></div>'
   +'</div>'
-  // The filters only narrow what is stored; they never change what gets pulled.
-  +'<div class="comp-note"><i class="fa-solid fa-circle-info"></i><span>Showing stored ads for '
-    +'<b>'+esc(cur?cur.name:'all '+wl.length+' '+compWord(2))+'</b>'
-    +(function(){
-        const ts=(cur?[cur]:wl).map(function(w){return w.last_sync_at||'';}).filter(Boolean).sort();
-        return ts.length?' (last pulled '+esc(fmtDate(ts[ts.length-1]))+')':'';
-      })()
-    +'. The date, status and media filters narrow what is shown.'
-    +(cur&&!cur.page_id?' <b>'+esc(cur.name)+'</b> has no Page ID yet, so it cannot be pulled — paste their Ad Library link in Edit.':'')+'</span></div>';
+  // One short line: when this was last pulled.
+  +(function(){
+      const ts=(cur?[cur]:wl).map(function(w){return w.last_sync_at||'';}).filter(Boolean).sort();
+      return ts.length?'<div class="comp-note"><i class="fa-solid fa-clock-rotate-left"></i><span>Last pulled '+esc(fmtDate(ts[ts.length-1]))+'</span></div>':'';
+    })();
 }
 // The Ad Library address for a competitor, rebuilt from its Page ID rather than stored, so the
 // link can never drift out of step with what the sync actually asks Meta for.
@@ -19712,14 +19758,18 @@ function compPaintGrid(){
   const cnt=$('compCount');
   if(cnt) cnt.textContent=rows.length+' ad'+(rows.length===1?'':'s')
     +' · '+rows.filter(function(a){return !a.ad_delivery_stop_time;}).length+' running';
+  // 60 at a time with a Show more button, so the first screen draws at once.
+  window._compShow=window._compShow||60;
   host.innerHTML=rows.length
-    ? rows.slice(0,200).map(compAdCard).join('')
+    ? rows.slice(0,window._compShow).map(compAdCard).join('')
+      +(rows.length>window._compShow?'<div style="grid-column:1/-1;text-align:center;margin:8px 0"><button class="btn" onclick="window._compShow+=60;compPaintGrid()">Show more <span style="color:var(--slate);font-weight:500">('+window._compShow+' of '+rows.length+' shown)</span></button></div>':'')
     : '';
   const empty=$('compEmpty');
   if(empty) empty.style.display=rows.length?'none':'';
   compHydrateThumbs();
 }
 function compPaint(){
+  window._compShow=60;
   const wl=compTabWl();
   const tb=$('compToolbar'); if(tb) tb.innerHTML=compToolbarHtml(wl);
   const host=$('compBody'); if(!host) return;
@@ -19745,7 +19795,17 @@ async function compRender(){
   // hundreds a busy competitor runs.
   const ids=compTabWl().map(function(w){return w.id;});
   if(ids.length){
-    try{ const {data}=await sb.schema('camp').from('competitor_ads').select('*').in('watchlist_id',ids).order('ad_delivery_start_time',{ascending:false}).limit(2000); ads=data||[]; }catch(e){}
+    // The database hands back at most 1,000 rows per request, so .limit(2000) quietly stopped at
+    // 1,000 and competitors past that (about 330 ads) never appeared. Read in pages until done.
+    try{
+      for(let from=0;;from+=1000){
+        const {data,error}=await sb.schema('camp').from('competitor_ads').select('*').in('watchlist_id',ids)
+          .order('ad_delivery_start_time',{ascending:false}).order('id').range(from,from+999);
+        if(error) break;
+        ads=ads.concat(data||[]);
+        if(!data||data.length<1000) break;
+      }
+    }catch(e){}
   }
   window._compAdsAll=ads;
   compPaint();
@@ -19806,7 +19866,7 @@ function compAdCard(a){
   const bodyText=t.text?t.text.slice(0,140):(t.dynamic?'Catalogue ad — wording changes per product':'(no ad text)');
   const th=compThumbFor(a);
   const thumb=th
-    ?'<div class="comp-thumb" data-key="'+esc(th.key)+'" data-kind="'+esc(th.kind)+'" data-overlay="'+(th.overlay?'1':'0')+'" style="position:relative;height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);overflow:hidden"><i class="fa-solid fa-spinner fa-spin"></i></div>'
+    ?'<div class="comp-thumb" data-key="'+esc(th.key)+'" data-kind="'+esc(th.kind)+'" data-snap="'+esc(a.ad_snapshot_url||'')+'" data-overlay="'+(th.overlay?'1':'0')+'" style="position:relative;height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);overflow:hidden"><i class="fa-solid fa-spinner fa-spin"></i></div>'
     :(a.ad_snapshot_url?'<a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);font-size:12px;text-decoration:none">View on Facebook →</a>':'');
   return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px;cursor:pointer" onclick="compOpenDetail(\''+esc(a.id)+'\')">'
     +thumb
@@ -19823,12 +19883,52 @@ function compAdCard(a){
     +'<div style="font-size:10.5px;color:var(--slate);margin-top:4px;opacity:.7">ID '+esc(a.id)+'</div>'
   +'</div>';
 }
-async function compSignedUrl(key){
-  if(window._compSignCache[key])return window._compSignCache[key];
-  const {data,error}=await s3Sign('get',key.slice(3));
-  if(error||!data)return null;
-  window._compSignCache[key]=data.url;
-  return data.url;
+/* ONE SIGNING CALL PER BATCH OF TILES, NOT PER TILE (26 Oct 2026). Each tile used to make its own
+   s3-sign call - up to 200 for one screen, each with its own sign-in and access check - and they
+   queued behind one another until many gave up as "Media unavailable". Tiles that come into view
+   together now wait 40 ms and go as one list (s3-sign's `keys` mode). If that mode is not there
+   (the function is older than this page), the batch falls back to one call per key. Links last
+   15 minutes, so a cached one is reused for 12. */
+const COMP_SIGN_TTL=12*60*1000;
+window._compSignWait=window._compSignWait||{};
+async function compSignBatch(keys){
+  const out={};
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const res=await fetch(SUPABASE_URL+'/functions/v1/s3-sign',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+((session&&session.access_token)||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({action:'get',keys:keys.map(function(k){ return k.slice(3); })})});
+    const jr=await res.json().catch(function(){ return {}; });
+    if(res.ok&&jr.urls){ keys.forEach(function(k){ out[k]=jr.urls[k.slice(3)]||null; }); return out; }
+  }catch(_e){}
+  await Promise.all(keys.map(async function(k){
+    try{ const {data,error}=await s3Sign('get',k.slice(3)); out[k]=(!error&&data)?data.url:null; }catch(_e){ out[k]=null; }
+  }));
+  return out;
+}
+function compSignedUrl(key){
+  const hit=window._compSignCache[key];
+  if(hit&&hit.at>Date.now()-COMP_SIGN_TTL) return Promise.resolve(hit.url);
+  if(window._compSignWait[key]) return window._compSignWait[key];
+  const p=new Promise(function(resolve){
+    (window._compSignQ=window._compSignQ||[]).push({key:key,resolve:resolve});
+    clearTimeout(window._compSignT);
+    window._compSignT=setTimeout(async function(){
+      const q=window._compSignQ.splice(0);
+      for(let i=0;i<q.length;i+=100){
+        const part=q.slice(i,i+100);
+        const urls=await compSignBatch(part.map(function(x){ return x.key; }));
+        part.forEach(function(x){
+          const u=urls[x.key]||null;
+          if(u) window._compSignCache[x.key]={url:u,at:Date.now()};
+          delete window._compSignWait[x.key];
+          x.resolve(u);
+        });
+      }
+    },40);
+  });
+  window._compSignWait[key]=p;
+  return p;
 }
 /* Why the tiles were blank: these ad videos are 5-27 MB each, and the grid was asking the browser
    to pull two dozen of them at once just to show a still. Nothing was broken - they simply never
@@ -19845,6 +19945,28 @@ function compThumbFor(a){
   if(m.media_type==='video') return {key:m.s3_path, kind:'video', overlay:true};
   return {key:m.s3_path, kind:'image', overlay:false};
 }
+/* A video with no still of its own is shown by loading the clip's first frame. Four at a time: a
+   screen of them all starting together is what left tiles spinning, and the pictures behind them
+   waiting too. A slot is given back when the frame shows, on error, or after 10 s regardless. */
+window._compVidBusy=window._compVidBusy||0;
+window._compVidQ=window._compVidQ||[];
+function compVideoSlot(){
+  return new Promise(function(resolve){
+    if(window._compVidBusy<4){ window._compVidBusy++; resolve(); }
+    else window._compVidQ.push(resolve);
+  });
+}
+function compVideoDone(){
+  const next=window._compVidQ.shift();
+  if(next) next(); else window._compVidBusy=Math.max(0,window._compVidBusy-1);
+}
+// When the file cannot be shown, the tile links to the ad on Facebook rather than a dead end.
+function compThumbFail(el){
+  const snap=el.getAttribute('data-snap');
+  el.innerHTML=snap
+    ?'<a href="'+esc(snap)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:12px;text-decoration:none;color:var(--slate)">View on Facebook →</a>'
+    :'<div style="font-size:11px;text-align:center;padding:8px">Media unavailable</div>';
+}
 async function compFillThumb(el){
   if(el.dataset.done==='1') return;
   el.dataset.done='1';
@@ -19852,15 +19974,20 @@ async function compFillThumb(el){
   let url=null;
   try{ url=await compSignedUrl(key); }catch(_e){}
   if(!el.isConnected) return;
-  if(!url){ el.innerHTML='<div style="font-size:11px;text-align:center;padding:8px">Media unavailable</div>'; return; }
-  const fail='<div style="font-size:11px;text-align:center;padding:8px">Media unavailable</div>';
+  if(!url){ compThumbFail(el); return; }
   if(kind==='video'){
+    await compVideoSlot();
+    if(!el.isConnected){ compVideoDone(); return; }
+    let freed=false;
+    const free=function(){ if(!freed){ freed=true; compVideoDone(); } };
+    setTimeout(free,10000);
     el.innerHTML='<video src="'+esc(url)+'#t=0.1" preload="metadata" muted playsinline'
       +' style="width:100%;height:100%;object-fit:cover;background:#000"></video>';
-    const v=el.querySelector('video'); if(v) v.onerror=function(){ el.innerHTML=fail; };
+    const v=el.querySelector('video');
+    if(v){ v.onloadeddata=free; v.onerror=function(){ free(); compThumbFail(el); }; }
   } else {
-    el.innerHTML='<img src="'+esc(url)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover">';
-    const i=el.querySelector('img'); if(i) i.onerror=function(){ el.innerHTML=fail; };
+    el.innerHTML='<img src="'+esc(url)+'" style="width:100%;height:100%;object-fit:cover">';
+    const i=el.querySelector('img'); if(i) i.onerror=function(){ compThumbFail(el); };
   }
   if(el.getAttribute('data-overlay')==='1'){
     el.insertAdjacentHTML('beforeend','<span style="position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.62);'
@@ -20024,16 +20151,10 @@ function compPaintStatus(){
     runLine='<div><i class="fa-solid fa-spinner fa-spin" style="color:#0369a1"></i> Manual pull from '+esc(fmtDate(run.requested_at))
       +': <b>'+Number(run.finished)+' of '+Number(run.pages)+'</b> pages done'
       +(pendingManual?' · about '+days+' more day'+(days===1?'':'s')+' on the free allowance':'')+'</div>';
-  }else if(run && Number(run.pages)){
-    runLine='<div><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Last manual pull ('+esc(fmtDate(run.requested_at))+') finished: '
-      +Number(run.pages)+' pages'+(Number(run.failed)?' · '+Number(run.failed)+' could not be pulled':'')+'</div>';
   }
-  host.innerHTML='<div class="comp-note" style="flex-direction:column;align-items:flex-start;gap:4px;margin:0 0 14px">'
-    +'<div><i class="fa-solid fa-calendar-week" style="color:#0369a1"></i> Every watched page - competitors, our own and channel partners - is pulled once a week ('
-      +tracked+' pages, about '+weeklyPerDay+' a day) on Proxy\'s free allowance · today <b>'+Number(s.used_today)+' of '+budget+'</b> credits used'
-      +(s.exhausted_today?' — Proxy has no credits left today, pulls resume tomorrow':'')+'</div>'
-    +runLine
-  +'</div>';
+  // Only a manual pull still in progress is mentioned, and only where it can be started.
+  host.innerHTML=(runLine&&COMP_TAB!=='competitors')
+    ?'<div class="comp-note" style="margin:0 0 14px">'+runLine+'</div>':'';
 }
 // Asks the worker to pull whatever today's credits still allow. Returns its report.
 async function compWork(){
@@ -33198,10 +33319,12 @@ async function ciStatus(sources,blurb,extra){
   const {data}=await sb.schema('camp').from('pi_runs').select('finished_at').in('source',sources).eq('ok',true).order('finished_at',{ascending:false}).limit(1);
   const last=data&&data[0]&&data[0].finished_at;
   const btn=CI_SCOPE!=='competitor'?sources.filter(function(s){ return s!=='rera_list'&&s!=='gads_detail'; })[0]:null;
-  $('ciRuns').innerHTML='<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 8px">'
+  // Competitor Data shows no paragraph (26 Oct 2026, "remove so much text") - just the one line.
+  if(CI_SCOPE==='competitor') blurb='';
+  $('ciRuns').innerHTML=(blurb||btn?'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 8px">'
       +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px;line-height:1.55">'+blurb+'</p>'
       +(btn?'<button class="btn" id="ciFetchBtn" onclick="ciFetchNow(\''+btn+'\')"><i class="fa-solid fa-rotate"></i> Fetch next now</button>':'')
-    +'</div>'
+    +'</div>':'')
     +'<div class="ci-upd"><i class="fa-solid fa-clock-rotate-left" style="color:#0369a1"></i> Updated automatically'
       +(last?' - last updated <b title="'+esc(ciDateTime(last))+'">'+ciAgo(last)+'</b>':' - nothing collected yet')
       +(extra?' · '+extra:'')+'</div>'
@@ -33731,13 +33854,12 @@ VIEWS.campaigns=async function(v,seg){
 };
 
 /* ---------------------------------------------------------------- Competitor Data ('competitors') */
+/* Facebook and Google only (26 Oct 2026, as asked). YouTube, Google Maps, Search Trends and RERA
+   are switched off here, not deleted - their collectors and data are untouched, and putting a row
+   back into this list brings the tab back. An old link to one of them lands on Meta Ads. */
 const CD_TABS=[
   ['','Meta Ads','fa-brands fa-meta','meta'],
-  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci'],
-  ['youtube','YouTube','fa-brands fa-youtube','dm'],
-  ['maps','Google Maps','fa-solid fa-location-dot','dm'],
-  ['trends','Search Trends','fa-solid fa-arrow-trend-up','ci'],
-  ['rera','RERA Projects','fa-solid fa-landmark','ci']
+  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci']
 ];
 VIEWS.competitors=async function(v,seg){
   const want=(seg&&seg[0])||'';
