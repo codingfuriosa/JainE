@@ -4224,7 +4224,7 @@
     // role in it at all has no reason to see this indicator, even at 0/0.
     const isStepHolder=members.some(function(e){return eq(e,mySelf);});
     const canSeeWaitRecv=eq(mySelf,'ayushruia1@gmail.com') || isStepHolder;
-    // My bills (the bulk screen) is Invoice Processing's. It lists only the viewer's OWN bills, so unlike
+    // Bulk Actions (the bulk screen) is Invoice Processing's. It lists only the viewer's OWN bills, so unlike
     // the Waiting / Received badge above there is nothing in it to keep from anyone: it is on the page
     // for everybody, and says plainly when nothing is waiting on them.
     const showMyBills=(id===26);
@@ -4528,9 +4528,9 @@
          true of any workflow that has steps. Forms stay restricted to the bill flow. */
       +('<div class="wf-tabs">'
           +'<button class="wf-tab on" id="wfTabBtn_main" onclick="wfTabShow(\'main\')"><i class="fa-solid fa-list-check"></i> '+esc2(N.many)+'</button>'
-          /* My bills: Invoice Processing's bulk screen, for the people who hold a step in it. The
+          /* Bulk Actions: Invoice Processing's bulk screen, for the people who hold a step in it. The
              count is the same figure the Waiting / Received badge above already shows. */
-          +(showMyBills?('<button class="wf-tab" id="wfTabBtn_mine" onclick="wfTabShow(\'mine\')"><i class="fa-solid fa-layer-group"></i> My bills'
+          +(showMyBills?('<button class="wf-tab" id="wfTabBtn_mine" onclick="wfTabShow(\'mine\')"><i class="fa-solid fa-layer-group"></i> Bulk Actions'
               +((myWait+myRecv)?(' <span class="cnt">'+(myWait+myRecv)+'</span>'):'')+'</button>'):'')
           // The Tracker reports where every instance has reached, so it is held to the same roster
           // rule as the People row above rather than being open to anyone who can see the page.
@@ -12368,7 +12368,7 @@
     .wf-tl-acts{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:9px;border-top:1px dashed var(--line)}
     .wf-tl-cur .wf-tl-acts{border-top-color:#c7d2fe}
     .wf-tl-acts .ac-btn{white-space:nowrap}
-    /* My bills - Invoice Processing's bulk screen */
+    /* Bulk Actions - Invoice Processing's bulk screen */
     .wf-mb{padding:18px}
     .wf-mb-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
     .wf-mb-title{font-size:17px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:9px}
