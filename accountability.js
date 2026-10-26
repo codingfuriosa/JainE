@@ -1071,16 +1071,29 @@
        code that shipped before any of this - runs. The worst case is the old speed, never a wrong
        list. The filter below is applied in every case, unchanged, so even a function returning
        something unexpected cannot widen what you see. */
-    async function loadAll(){
+    /* OPEN WORK FIRST, HISTORY IN THE BACKGROUND (26 Oct 2026). The Tasks screen draws only open
+       and awaiting tasks plus what was completed in the last 7 days, yet it downloaded everything a
+       person ever touched - 700-870 KB for the busiest. loadAll('recent') asks
+       acc.tasks_overview_recent() for just that slice (about 60% less), and once the screen is up
+       the full list is fetched quietly (accPrefetchFull) so Archive opens without waiting. If the
+       slim call fails, the full one runs and the same slice is cut here, so nothing is lost. */
+    async function loadAll(mode){
       const my=me();
+      const recent=(mode==='recent');
       const [,rpc]=await Promise.all([
         wfActLoad(),                                      // for the filter and rendering below
-        ACC().rpc('tasks_overview').then(function(r){return r;}, function(e){return {error:e};})
+        ACC().rpc(recent?'tasks_overview_recent':'tasks_overview').then(function(r){return r;}, function(e){return {error:e};})
       ]);
       let got=null;
       if(rpc && !rpc.error && rpc.data && Array.isArray(rpc.data.tasks)){
         got={ tasksRaw: rpc.data.tasks||[], asgRaw: rpc.data.assignees||[],
               pR: {data: rpc.data.projects||[]} };
+      }
+      if(!got && recent){
+        const fb=await ACC().rpc('tasks_overview').then(function(r){return r;}, function(e){return {error:e};});
+        if(fb && !fb.error && fb.data && Array.isArray(fb.data.tasks)){
+          got={ tasksRaw: fb.data.tasks||[], asgRaw: fb.data.assignees||[], pR: {data: fb.data.projects||[]} };
+        }
       }
       if(!got){ try{ got=await loadAllNarrow(my); }catch(_e){ got=null; } }
       if(!got) got=await loadAllEverything(my);
@@ -1090,6 +1103,22 @@
       tasks=tasks.filter(t=>(eq(t.delegator,my)||(asg[t.id]||[]).some(e=>eq(e,my))||wfActTask(t)) && (asg[t.id]||[]).length>0);
       tasks.forEach(t=>t._projName=t.project_id?pm[t.project_id]:'');
       return {tasks,asg,pm};
+    }
+    // The full list, fetched after the Tasks screen is drawn and kept for a minute for Archive.
+    window._accFull=window._accFull||null;
+    function accPrefetchFull(){
+      const who=me();
+      // Every Receive/Forward redraws the Tasks screen; one fetch a minute is plenty for Archive.
+      const c=window._accFull;
+      if(c && c.who===who && Date.now()-c.at<60000) return c.p;
+      const p=loadAll().catch(function(){ return null; });
+      window._accFull={who:who, at:Date.now(), p:p};
+      return p;
+    }
+    async function loadAllCached(){
+      const c=window._accFull;
+      if(c && c.who===me() && Date.now()-c.at<60000){ const r=await c.p; if(r) return r; }
+      return loadAll();
     }
   const isOwner = t => eq(t.delegator,me());
   /* A step I am standing in on counts as mine for WHERE IT IS LISTED and WHETHER I GET BUTTONS,
@@ -10940,13 +10969,11 @@
     if(cb) cb.disabled=true;
     wfConfirm({ title:'Forward this step?', body:'This completes your step and passes the workflow to the next person.', okLabel:'Forward', okClass:'primary',
       onOk:async function(){
-        const label=await wfComputeForwardLabel(fcsId);
-        const um=await wfStepUsageMeta(fcsId);
-        const cid=await wfCaseIdOfStep(fcsId);
+        const pre=await Promise.all([wfComputeForwardLabel(fcsId), wfStepUsageMeta(fcsId), wfCaseIdOfStep(fcsId)]);
         try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
         catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); if(cb){cb.disabled=false;cb.checked=false;} return; }
-        await wfLogForward(fcsId, um, cid);
-        toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); renderPage();
+        wfLogForward(fcsId, pre[1], pre[2]);
+        toast(pre[0].replace(/^Forward to/,'Forwarded to'),'ok'); renderPage();
       },
       onCancel:function(){ if(cb){cb.disabled=false;cb.checked=false;} }
     });
@@ -11150,22 +11177,21 @@
     }else{ await run(); }
   };
 
+  // The three look-ups only feed the label and the activity log, so they run side by side, and the
+  // log entry is written after the page has moved on rather than holding it up.
   window.wfForward=async function(fcsId, opts){
-    const label=await wfComputeForwardLabel(fcsId);
-    const um=await wfStepUsageMeta(fcsId);
-    const cid=await wfCaseIdOfStep(fcsId);
+    const pre=await Promise.all([wfComputeForwardLabel(fcsId), wfStepUsageMeta(fcsId), wfCaseIdOfStep(fcsId)]);
     try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
-    await wfLogForward(fcsId, um, cid);
-    toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); wfAfterAct(opts);
+    wfLogForward(fcsId, pre[1], pre[2]);
+    toast(pre[0].replace(/^Forward to/,'Forwarded to'),'ok'); wfAfterAct(opts);
   };
 
   window.wfForwardChequeChoice=async function(fcsId,cheque,opts){
-    const um=await wfStepUsageMeta(fcsId);
-    const cid=await wfCaseIdOfStep(fcsId);
+    const pre=await Promise.all([wfStepUsageMeta(fcsId), wfCaseIdOfStep(fcsId)]);
     try{ const {error}=await ACC().rpc('wf_forward_rtp_cheque_choice',{p_fcs_id:fcsId,p_cheque:cheque}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
-    await wfLogForward(fcsId, Object.assign({route:cheque?'Cheque':'GST Approval only'}, um||{}), cid);
+    wfLogForward(fcsId, Object.assign({route:cheque?'Cheque':'GST Approval only'}, pre[0]||{}), pre[1]);
     toast(cheque?'Forwarded — cheque steps continue as normal':'Forwarded — GST Approval only, cheque steps skipped','ok');
     wfAfterAct(opts);
   };
@@ -11174,12 +11200,11 @@
      the bill's whole route, so it is worth being an explicit act rather than a variant of a
      forward that happens to take an argument. */
   window.wfForwardPaymentChoice=async function(fcsId,payment,opts){
-    const um=await wfStepUsageMeta(fcsId);
-    const cid=await wfCaseIdOfStep(fcsId);
+    const pre=await Promise.all([wfStepUsageMeta(fcsId), wfCaseIdOfStep(fcsId)]);
     try{ const {error}=await ACC().rpc('wf_forward_bill_booking_choice',
       {p_fcs_id:fcsId,p_payment:!!payment}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
-    await wfLogForward(fcsId, Object.assign({route:payment?'Payment':'Direct'}, um||{}), cid);
+    wfLogForward(fcsId, Object.assign({route:payment?'Payment':'Direct'}, pre[0]||{}), pre[1]);
     toast(payment
       ? 'Forwarded on the Payment route — RTP next, then the cheque, then checking'
       : 'Forwarded','ok');
@@ -14901,7 +14926,7 @@
   /* ---------- ARCHIVE (all-time completed tasks; Reopen-only detail view) ---------- */
   async function archiveTab(){
     const b=$('acBody');
-    const [list,{tasks,asg}]=await Promise.all([people(), loadAll()]);
+    const [list,{tasks,asg}]=await Promise.all([people(), loadAllCached()]);
     const candidates=tasks.filter(t=>t.approval_state==='approved'&&(isMemb(t,asg)||isOwner(t)));
     let fullyApprovedIds=new Set();
     if(candidates.length){
@@ -14932,8 +14957,10 @@
   async function tasksScreen(){
     const b=$('acBody');
     if(P3==='recurring') return recurringView();
-    const [list,loaded,myRanks]=await Promise.all([people(), loadAll(), loadMyRanks()]);
+    const [list,loaded,myRanks]=await Promise.all([people(), loadAll('recent'), loadMyRanks()]);
     const {asg,pm}=loaded;
+    // The rest of the history comes down once this screen is drawn, ready for Archive.
+    setTimeout(accPrefetchFull, 2500);
     /* A recurring task is listed from its own day, not from the moment it is made: a Sunday task
        made on a Wednesday turns up on Sunday, and once Sunday's is done the next one waits for the
        following Sunday. Until then it is only in the Recurring view. */
@@ -14942,15 +14969,19 @@
     const delegatedByMeIds=new Set(tasks.filter(t=>t.parent_task_id&&isOwner(t)).map(t=>t.parent_task_id));
     /* When each interview is and whether it has been answered, so a card can decide whether to
        offer Reschedule. Read once for the whole visible list rather than a query per card. */
+    // Started here and collected after the workflow look-ups below: the two need nothing from each
+    // other, so the interview read no longer holds the rest of the page up by a round trip.
     window._ivInfo={};
-    try{
-      const ivIds=Array.from(new Set(tasks.filter(function(t){return t.interview_id!=null;})
-                                          .map(function(t){return t.interview_id;})));
-      if(ivIds.length){
-        const {data:ivs}=await sb.schema('hr').rpc('interviews_info',{p_ids:ivIds});
-        (ivs||[]).forEach(function(v){ window._ivInfo[v.id]=v; });
-      }
-    }catch(_e){ window._ivInfo={}; }
+    const ivWait=(async function(){
+      try{
+        const ivIds=Array.from(new Set(tasks.filter(function(t){return t.interview_id!=null;})
+                                            .map(function(t){return t.interview_id;})));
+        if(ivIds.length){
+          const {data:ivs}=await sb.schema('hr').rpc('interviews_info',{p_ids:ivIds});
+          (ivs||[]).forEach(function(v){ window._ivInfo[v.id]=v; });
+        }
+      }catch(_e){ window._ivInfo={}; }
+    })();
 
     // Workflow step state (per-task) so rows can show Forward vs Receive/Reject correctly
     window._wfStepInfo={};
@@ -15076,6 +15107,7 @@
         });
       }
     }catch(e){ window._wfStepInfo={}; }
+    await ivWait;
 
     /* Combined per-card order: tasks you've already ranked (drag-and-dropped) come after
        tasks you haven't touched yet — untouched ones default to top priority ("A"),
