@@ -2622,6 +2622,10 @@
   // not two. Company Name is new: bills filed before it existed have no value for it and the
   // builders below skip an empty one, so nothing old grows a blank card.
   var WF_SUMMARY_FIELDS=['Bill No.','Bill Date','Vendor','Company Name','Amount'];
+  /* Challan Processing (flow 40) is shown the way a bill is: the id first, then just the values.
+     Its own fields, in the same reading order - number, date, then who from. */
+  var WF_CHALLAN_FIELDS=['Challan No.','Challan Date','Company'];
+  function wfBillStyleFields(flow){ return (flow&&flow.id===40)?WF_CHALLAN_FIELDS:WF_SUMMARY_FIELDS; }
   function wfCaseSummaryHtml(c,flow){
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const by={}; det.forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
@@ -2642,7 +2646,7 @@
       const wideKey=(flow&&flow.card_wide_field||'').trim();
       if(wideKey && by[wideKey]!=null && String(by[wideKey]).trim()) wideField={k:wideKey,v:by[wideKey]};
     } else {
-      WF_SUMMARY_FIELDS.forEach(function(k){ if(by[k]!=null && String(by[k]).trim()) items.push({k:k,v:by[k]}); });
+      wfBillStyleFields(flow).forEach(function(k){ if(by[k]!=null && String(by[k]).trim()) items.push({k:k,v:by[k]}); });
     }
     /* An entry-wise flow (Reimbursement) shows its entries as a TABLE here too, not as detail
        cards — the cards could only ever print "Transport: Auto, Bus, Cab" with no way to tell which
@@ -2658,7 +2662,7 @@
     // Invoice Processing shows just the value, leading with the JainE id — "Bill No.", "Vendor"
     // etc. don't need repeating on screen once the item order itself already reads as: id, then
     // bill no., then date, then vendor, then company name, then amount.
-    const bareValues=flow&&flow.id===26;
+    const bareValues=flow&&(flow.id===26||flow.id===40);
     const gridItems=items.map(function(it){
       return bareValues
         ? '<div class="tp-f"><div class="v">'+esc2(it.v)+'</div></div>'
@@ -2671,10 +2675,10 @@
      above (that one is the case-timeline panel), so fixing one was never going to touch the other.
      Same rule, same field list (WF_SUMMARY_FIELDS, already without Wheredoc Id): just the value,
      leading with the JainE id, no "Vendor"/"Bill No."/"Bill Date" labels repeated on screen. */
-  function wfInvoiceTaskDetailsHtml(details,caseRow){
+  function wfInvoiceTaskDetailsHtml(details,caseRow,fields){
     const by={}; (details||[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
     const lines=[esc2(wfCaseNoText(caseRow))];
-    WF_SUMMARY_FIELDS.forEach(function(k){
+    (fields||WF_SUMMARY_FIELDS).forEach(function(k){
       const v=by[k];
       if(v!=null && String(v).trim()) lines.push(esc2(wfDetailDisp(v)));
     });
@@ -3907,14 +3911,15 @@
     /* Archive is not a pane of its own - it is the main pane showing its other half. Panes and
        buttons are therefore toggled against different keys. */
     const pane=(which==='archive')?'main':which;
-    ['main','tracker','forms','drafts'].forEach(function(k){
+    ['main','tracker','forms','drafts','mine'].forEach(function(k){
       const p=$('wfPane_'+k);
       if(p) p.style.display=(k===pane)?'':'none';
     });
-    ['main','tracker','forms','archive','drafts'].forEach(function(k){
+    ['main','tracker','forms','archive','drafts','mine'].forEach(function(k){
       const b=$('wfTabBtn_'+k);
       if(b) b.classList.toggle('on', k===which);
     });
+    if(which==='mine'){ try{ wfMbOpen(); }catch(_e){} }
     if(window._wfArchOn && (which==='main'||which==='archive')){
       window._wfArchView=(which==='archive')?'archive':'active';
       const ttl=$('wfInstTitle');
@@ -4187,6 +4192,9 @@
     // role in it at all has no reason to see this indicator, even at 0/0.
     const isStepHolder=members.some(function(e){return eq(e,mySelf);});
     const canSeeWaitRecv=eq(mySelf,'ayushruia1@gmail.com') || isStepHolder;
+    // My bills (the bulk screen) is Invoice Processing's, for the same people who see the badge above
+    const showMyBills=(id===26) && canSeeWaitRecv;
+    if(id===26) wfMbReset();           // a fresh visit starts from nothing ticked and nothing loaded
     /* On a workflow ANYONE may raise (Reimbursement), somebody holding no step is simply a claimant
        looking at their own claims. They still see progress - which steps are finished, and anything
        sent back to them to fix - but not the live "Waiting" / "Received" state, because that says
@@ -4486,6 +4494,10 @@
          true of any workflow that has steps. Forms stay restricted to the bill flow. */
       +('<div class="wf-tabs">'
           +'<button class="wf-tab on" id="wfTabBtn_main" onclick="wfTabShow(\'main\')"><i class="fa-solid fa-list-check"></i> '+esc2(N.many)+'</button>'
+          /* My bills: Invoice Processing's bulk screen, for the people who hold a step in it. The
+             count is the same figure the Waiting / Received badge above already shows. */
+          +(showMyBills?('<button class="wf-tab" id="wfTabBtn_mine" onclick="wfTabShow(\'mine\')"><i class="fa-solid fa-layer-group"></i> My bills'
+              +((myWait+myRecv)?(' <span class="cnt">'+(myWait+myRecv)+'</span>'):'')+'</button>'):'')
           // The Tracker reports where every instance has reached, so it is held to the same roster
           // rule as the People row above rather than being open to anyone who can see the page.
           +(maySeeRoster?'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>':'')
@@ -4507,6 +4519,7 @@
         +'<div class="wf-card wf-tlcard"><div id="wfTL">'+window._wfDefTL+'</div></div>'
         +tableHtml
       +'</div>'
+      +(showMyBills?('<div id="wfPane_mine" style="display:none"><div class="wf-card wf-mb"><div id="wfMbBody"></div></div></div>'):'')
       // Gated as well as the tab: a hidden pane still ships its rows to the browser, and "you cannot
       // click to it" is not the same as "you were not sent it".
       +(maySeeRoster?('<div id="wfPane_tracker" style="display:none"><div class="wf-card">'
@@ -10844,6 +10857,245 @@
     }catch(_e){}
   }
 
+  /* ====== MY BILLS - Invoice Processing's bulk screen =========================================
+     Every bill that is at one of YOUR steps right now, in one list, so a stack of them can be
+     received - and, where the step allows it, forwarded - together instead of one task page at a
+     time. A tab on the Workflow page; nothing else on that page, and nothing on the Tasks tab,
+     changes.
+
+     It does not decide anything itself. Each bill goes through the same wf_receive / wf_forward
+     calls its own task page uses, one after another, and the database re-checks on every call that
+     the step is really yours and where the bill goes next - so a bill someone else got to first
+     simply fails with its own message while the rest carry on.
+
+     WHAT IT WILL NOT FORWARD IN BULK, because each needs a decision or a form of its own:
+       - Bill Booking (step 2) - Forward or Payment decides the bill's whole route.
+       - RTP (step 5), unless the bill is already on the Payment route - Cheque or No Cheque.
+       - the last step (Bill Filing) - it files the bill in Wheredoc, which asks for a form.
+     Those can still be RECEIVED here; passing them on is done on the bill. */
+  const WF_MB={flowId:26, rows:[], sel:new Set(), status:'all', step:'all', q:'', loadedAt:0, busy:false};
+  function wfMbReset(){ WF_MB.rows=[]; WF_MB.sel=new Set(); WF_MB.status='all'; WF_MB.step='all'; WF_MB.q=''; WF_MB.loadedAt=0; WF_MB.busy=false; }
+  function wfMbIn(list){ const out=[]; for(let i=0;i<list.length;i+=150) out.push(list.slice(i,i+150)); return out; }   // ids go in a URL: 150 at a time
+
+  async function wfMbFetch(){
+    const flowId=WF_MB.flowId;
+    if(!WF_ACT_AT || Date.now()-WF_ACT_AT>60000) await wfActLoad();
+    // me, plus anyone I stand in for on this workflow - the same people the task page lets me act for
+    const all=[String(me()||'').toLowerCase()].concat((WF_ACT_FOR||[])
+      .filter(function(x){ return x.flow_id==null||Number(x.flow_id)===flowId; })
+      .map(function(x){ return String(x.principal_email||'').toLowerCase(); }));
+    const who=all.filter(function(e,i){ return e && all.indexOf(e)===i && /^[\w.+'-]+@[\w.-]+$/.test(e); });
+    if(!who.length) return [];
+    const orStr=who.map(function(e){ return 'person.eq.'+e+',candidates.cs.{'+e+'}'; }).join(',');
+    const sr=await ACC().from('flow_case_steps')
+      .select('id,case_id,seq,title,person,candidates,received_at,appeared_at,due_at,task_id,status,duration_value,duration_unit')
+      .is('forwarded_at',null).not('appeared_at','is',null).or(orStr);
+    if(sr.error) throw sr.error;
+    const steps=sr.data||[];
+    if(!steps.length) return [];
+    const caseIds=[...new Set(steps.map(function(s){ return s.case_id; }))];
+    let cases=[];
+    for(const part of wfMbIn(caseIds)){
+      const cr=await ACC().from('flow_cases')
+        .select('id,case_no,jaine_id,current_step,status,route,route_seqs,returned_at,returned_reason,trigger_details,flow_id')
+        .in('id',part).eq('flow_id',flowId).eq('status','Pending');
+      if(cr.error) throw cr.error;
+      cases=cases.concat(cr.data||[]);
+    }
+    const byCase={}; cases.forEach(function(c){ byCase[c.id]=c; });
+    const isMine=function(e){ return who.indexOf(String(e||'').toLowerCase())!==-1; };
+    // exactly the question the Waiting / Received counters ask: the bill's CURRENT step, received by
+    // me or still waiting with me among the people it was offered to
+    const mine=steps.filter(function(s){
+      const c=byCase[s.case_id]; if(!c || c.current_step!==s.seq) return false;
+      const cands=(Array.isArray(s.candidates)&&s.candidates.length)?s.candidates:(s.person?[s.person]:[]);
+      return s.received_at ? isMine(s.person) : cands.some(isMine);
+    });
+    if(!mine.length) return [];
+    // every step of those bills, to say where each goes next
+    let allSteps=[];
+    for(const part of wfMbIn([...new Set(mine.map(function(s){ return s.case_id; }))])){
+      const ar=await ACC().from('flow_case_steps').select('case_id,seq,title,person,candidates').in('case_id',part);
+      if(ar.error) throw ar.error;
+      allSteps=allSteps.concat(ar.data||[]);
+    }
+    const stepsOf={}; allSteps.forEach(function(x){ (stepsOf[x.case_id]=stepsOf[x.case_id]||[]).push(x); });
+    const now=Date.now();
+    const rows=mine.map(function(s){
+      const c=byCase[s.case_id], by={};
+      (Array.isArray(c.trigger_details)?c.trigger_details:[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
+      const sibs=stepsOf[c.id]||[];
+      const rn=wfRouteNext(c.route_seqs, s.seq);
+      const nxt=rn.routed ? (rn.seq==null ? null : (sibs.filter(function(y){ return y.seq===rn.seq; })[0]||null))
+        : sibs.filter(function(y){ return y.seq>s.seq; }).reduce(function(a,b){ return (!a||b.seq<a.seq)?b:a; }, null);
+      const dl=wfRouteIsLast(c.route_seqs, s.seq);
+      const last=(dl!==null)?dl:!nxt;
+      const needsChoice=(s.seq===2) || (s.seq===5 && c.route!=='payment');
+      const nextWho=nxt ? ((Array.isArray(nxt.candidates)&&nxt.candidates.length?nxt.candidates:(nxt.person?[nxt.person]:[])).map(wfNm).join(' / ')) : '';
+      const unitMs={hours:36e5, days:864e5, weeks:6048e5}[s.duration_unit||'days']||864e5;
+      const elapsed=s.appeared_at ? Math.max(0,Math.floor((now-new Date(s.appeared_at))/unitMs)) : 0;
+      return { fcsId:s.id, caseId:c.id, seq:s.seq, stepTitle:s.title||('Step '+s.seq),
+        jaine:String(c.jaine_id||c.case_no||''), vendor:String(by['Vendor']||by['Company Name']||''), billNo:String(by['Bill No.']||''),
+        amount:Number(String(by['Amount']==null?'':by['Amount']).replace(/[^0-9.\-]/g,''))||0,
+        received:!!s.received_at, arrived:s.appeared_at, overdue:!!(s.due_at && new Date(s.due_at)<now),
+        allotted:(s.duration_value!=null&&s.duration_value!=='') ? (elapsed+' of '+wfDurText(s.duration_value,s.duration_unit)) : '',
+        sentBack:!!c.returned_at, needsChoice:needsChoice, last:last,
+        canForward:!!nxt && !last && !needsChoice,
+        nextTitle:nxt?(nxt.title||''):'', nextWho:nextWho };
+    });
+    rows.sort(function(a,b){ return Number(b.jaine)-Number(a.jaine); });
+    return rows;
+  }
+
+  const wfMbPill=function(r){
+    return (r.received?'<span class="wf-mb-pill recv"><i class="fa-solid fa-inbox"></i> Received</span>'
+                      :'<span class="wf-mb-pill wait"><i class="fa-solid fa-hourglass-half"></i> Awaiting receipt</span>')
+      +(r.sentBack?' <span class="wf-mb-pill back"><i class="fa-solid fa-rotate-left"></i> Sent back</span>':'')
+      +(r.overdue?' <span class="wf-mb-pill over"><i class="fa-solid fa-triangle-exclamation"></i> Overdue</span>':'');
+  };
+  function wfMbVisible(){
+    const q=WF_MB.q.trim().toLowerCase();
+    return WF_MB.rows.filter(function(r){
+      if(WF_MB.status==='wait' && r.received) return false;
+      if(WF_MB.status==='recv' && !r.received) return false;
+      if(WF_MB.step!=='all' && String(r.seq)!==WF_MB.step) return false;
+      if(q && (r.vendor+' '+r.billNo+' '+r.jaine).toLowerCase().indexOf(q)===-1) return false;
+      return true;
+    });
+  }
+  // What a bulk Receive / Receive & forward would do to the ticked bills - one place, so the bar,
+  // the buttons, the confirmation and the run itself can never disagree.
+  function wfMbPlan(){
+    const ticked=WF_MB.rows.filter(function(r){ return WF_MB.sel.has(r.fcsId); });
+    const wait=ticked.filter(function(r){ return !r.received; });
+    const fwd=ticked.filter(function(r){ return r.canForward; });
+    return { ticked:ticked, wait:wait, fwd:fwd,
+      choice:ticked.filter(function(r){ return r.needsChoice; }),
+      last:ticked.filter(function(r){ return r.last && !r.needsChoice; }),
+      total:ticked.reduce(function(a,r){ return a+r.amount; },0),
+      // Receive & forward: forwards what can be, and still receives an awaiting bill that cannot
+      recvOnlyInFwd:ticked.filter(function(r){ return !r.canForward && !r.received; }) };
+  }
+
+  function wfMbRenderList(){
+    const box=$('wfMbList'); if(!box) return;
+    const vis=wfMbVisible();
+    const allOn=vis.length>0 && vis.every(function(r){ return WF_MB.sel.has(r.fcsId); });
+    const rows=vis.map(function(r){
+      const on=WF_MB.sel.has(r.fcsId);
+      return '<tr class="'+(on?'on':'')+'" onclick="wfMbOpenBill('+r.caseId+')">'
+        +'<td class="wf-mb-chk" onclick="event.stopPropagation()"><input type="checkbox" '+(on?'checked ':'')+'onchange="wfMbTick('+r.fcsId+',this.checked)"></td>'
+        +'<td><b>'+esc2(r.jaine)+'</b></td>'
+        +'<td><div class="wf-mb-v">'+esc2(r.vendor||'—')+'</div>'+(r.billNo?'<div class="wf-mb-sub">Inv. '+esc2(r.billNo)+'</div>':'')+'</td>'
+        +'<td class="wf-mb-amt">'+(r.amount?esc2(wfMoney(r.amount)):'—')+'</td>'
+        +'<td><span class="wf-mb-step">'+esc2(r.seq+'. '+r.stepTitle)+'</span></td>'
+        +'<td>'+esc2(wfDT(r.arrived))+(r.allotted?'<div class="wf-mb-sub">'+esc2(r.allotted)+'</div>':'')+'</td>'
+        +'<td>'+wfMbPill(r)+'</td>'
+        +'<td>'+(r.nextTitle?('<div class="wf-mb-v">'+esc2(r.nextTitle)+'</div>'+(r.nextWho?'<div class="wf-mb-sub">'+esc2(r.nextWho)+'</div>':'')):'<span class="wf-mb-sub">Final step</span>')+'</td>'
+        +'</tr>';
+    }).join('');
+    box.innerHTML=vis.length
+      ? '<div class="wf-tablewrap"><table class="wf-itable wf-mb-table"><thead><tr>'
+          +'<th class="wf-mb-chk"><input type="checkbox" '+(allOn?'checked ':'')+'title="Select all shown" onchange="wfMbTickAll(this.checked)"></th>'
+          +'<th>JainE id</th><th>Vendor</th><th>Amount</th><th>Your step</th><th>Arrived</th><th>Status</th><th>Goes next to</th>'
+          +'</tr></thead><tbody>'+rows+'</tbody></table></div>'
+      : '<div class="ac-empty" style="cursor:default;border:0">'+(WF_MB.rows.length?'No bills match.':'No bill is waiting on you right now.')+'</div>';
+    // the selection bar
+    const bar=$('wfMbBar'); if(!bar) return;
+    const p=wfMbPlan();
+    if(!p.ticked.length){ bar.style.display='none'; bar.innerHTML=''; return; }
+    const bits=[];
+    if(p.wait.length) bits.push(p.wait.length+' awaiting receipt');
+    if(p.ticked.length-p.wait.length) bits.push((p.ticked.length-p.wait.length)+' received');
+    if(p.choice.length) bits.push(p.choice.length+' need a route chosen on the bill');
+    if(p.last.length) bits.push(p.last.length+' at the final step');
+    bar.style.display='flex';
+    bar.innerHTML='<div class="wf-mb-bar-l"><b>'+p.ticked.length+' selected · '+esc2(wfMoney(p.total))+'</b><span>'+esc2(bits.join(' · '))+'</span></div>'
+      +'<div class="wf-mb-bar-r"><button class="ac-btn" onclick="wfMbClear()">Clear</button>'
+      +'<button class="ac-btn" '+(p.wait.length&&!WF_MB.busy?'':'disabled ')+'onclick="wfMbRun(\'receive\')"><i class="fa-solid fa-inbox"></i> Receive '+p.wait.length+'</button>'
+      +'<button class="ac-btn primary" '+(p.fwd.length&&!WF_MB.busy?'':'disabled ')+'onclick="wfMbRun(\'forward\')"><i class="fa-solid fa-paper-plane"></i> Receive &amp; forward '+(p.fwd.length)+'</button></div>';
+  }
+  function wfMbRenderChrome(){
+    const box=$('wfMbHead'); if(!box) return;
+    const all=WF_MB.rows, nWait=all.filter(function(r){ return !r.received; }).length, nOver=all.filter(function(r){ return r.overdue; }).length;
+    const seen={}, stepChips=[];
+    all.forEach(function(r){ if(!seen[r.seq]){ seen[r.seq]=1; stepChips.push({seq:r.seq,title:r.stepTitle}); } });
+    stepChips.sort(function(a,b){ return a.seq-b.seq; });
+    const seg=function(kind,val,label,n){ const on=(WF_MB[kind]===val);
+      return '<button class="wf-mb-seg'+(on?' on':'')+'" onclick="wfMbSet(\''+kind+'\',\''+val+'\')">'+esc2(label)+(n!=null?' <span class="cnt">'+n+'</span>':'')+'</button>'; };
+    box.innerHTML='<div class="wf-mb-top"><div><div class="wf-mb-title"><i class="fa-solid fa-layer-group"></i> Bills at your steps</div>'
+        +'<div class="wf-mb-hint">Select bills to receive or forward them together. Bills at Bill Booking and RTP need their route chosen on the bill, so here they can be received, not forwarded.</div></div>'
+      +'<div class="wf-mb-stats"><div class="wf-mb-stat"><span class="k wait"><i class="fa-solid fa-hourglass-half"></i> Awaiting</span><b>'+nWait+'</b></div>'
+        +'<div class="wf-mb-stat"><span class="k recv"><i class="fa-solid fa-inbox"></i> In hand</span><b>'+(all.length-nWait)+'</b></div>'
+        +'<div class="wf-mb-stat"><span class="k over"><i class="fa-solid fa-triangle-exclamation"></i> Overdue</span><b>'+nOver+'</b></div></div></div>'
+      +'<div class="wf-mb-filters"><div class="wf-mb-segs">'+seg('status','all','All',all.length)+seg('status','wait','Awaiting receipt',nWait)+seg('status','recv','Received',all.length-nWait)+'</div>'
+        +(stepChips.length>1?('<div class="wf-mb-segs">'+seg('step','all','All steps',null)+stepChips.map(function(s){ return seg('step',String(s.seq),s.title,null); }).join('')+'</div>'):'')
+        +'<input class="ac-in wf-mb-search" id="wfMbSearch" placeholder="Search vendor or bill no." value="'+esc2(WF_MB.q)+'" oninput="wfMbSearch(this.value)"></div>';
+    const tabCnt=document.querySelector('#wfTabBtn_mine .cnt'); if(tabCnt) tabCnt.textContent=all.length;
+  }
+  async function wfMbLoad(force){
+    const body=$('wfMbBody'); if(!body) return;
+    if(!force && WF_MB.loadedAt && Date.now()-WF_MB.loadedAt<30000){ return; }
+    if(!WF_MB.loadedAt) body.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    try{ WF_MB.rows=await wfMbFetch(); }
+    catch(e){ body.innerHTML='<div class="ac-empty" style="cursor:default;border:0">Could not load your bills: '+esc2((e&&e.message)||e)
+      +' <button class="ac-btn" onclick="wfMbLoad(true)">Try again</button></div>'; return; }
+    WF_MB.loadedAt=Date.now();
+    const still=new Set(WF_MB.rows.map(function(r){ return r.fcsId; }));
+    WF_MB.sel=new Set([...WF_MB.sel].filter(function(id){ return still.has(id); }));
+    if(!$('wfMbBody')) return;          // they left the page while it loaded
+    body.innerHTML='<div id="wfMbHead"></div><div id="wfMbList"></div><div id="wfMbBar" class="wf-mb-bar" style="display:none"></div>';
+    wfMbRenderChrome(); wfMbRenderList();
+  }
+  window.wfMbLoad=wfMbLoad;
+  window.wfMbOpen=function(){ wfMbLoad(false); };
+  window.wfMbSet=function(kind,val){ WF_MB[kind]=val; wfMbRenderChrome(); wfMbRenderList(); };
+  window.wfMbSearch=function(v){ WF_MB.q=v||''; wfMbRenderList(); };
+  window.wfMbTick=function(fcsId,on){ if(on) WF_MB.sel.add(fcsId); else WF_MB.sel.delete(fcsId); wfMbRenderList(); };
+  window.wfMbTickAll=function(on){ wfMbVisible().forEach(function(r){ if(on) WF_MB.sel.add(r.fcsId); else WF_MB.sel.delete(r.fcsId); }); wfMbRenderList(); };
+  window.wfMbClear=function(){ WF_MB.sel.clear(); wfMbRenderList(); };
+  window.wfMbOpenBill=function(caseId){ navTo('tasks/workflow/case/'+caseId); };
+  window.wfMbRun=async function(kind){
+    if(WF_MB.busy) return;
+    const p=wfMbPlan();
+    // receive: every ticked bill still awaiting. forward: what can be passed on, and receiving any
+    // that is awaiting but cannot be passed on here (so the Receive step is not a second visit)
+    const plan=(kind==='receive')
+      ? p.wait.map(function(r){ return {r:r, fwd:false}; })
+      : p.ticked.filter(function(r){ return r.canForward || !r.received; }).map(function(r){ return {r:r, fwd:r.canForward}; });
+    if(!plan.length) return;
+    const run=async function(){
+      WF_MB.busy=true; wfMbRenderList();
+      let rec=0, fwd=0; const fails=[];
+      for(const it of plan){
+        try{
+          const um=await wfStepUsageMeta(it.r.fcsId);
+          if(!it.r.received){
+            const {error}=await ACC().rpc('wf_receive',{p_fcs_id:it.r.fcsId}); if(error) throw error;
+            try{ usageQueue('tasks.workflow.receive_a_step','update',um); }catch(_e){}
+            rec++;
+          }
+          if(it.fwd){
+            const {error}=await ACC().rpc('wf_forward',{p_fcs_id:it.r.fcsId}); if(error) throw error;
+            await wfLogForward(it.r.fcsId, um, it.r.caseId);
+            fwd++;
+          }
+        }catch(e){ fails.push('#'+it.r.jaine+': '+((e&&e.message)||String(e))); }
+      }
+      WF_MB.busy=false; WF_MB.sel.clear();
+      let msg=[rec?('Received '+rec):'', fwd?('forwarded '+fwd):''].filter(Boolean).join(', ')||'Nothing changed';
+      if(fails.length) msg+=' · '+fails.length+' could not be done — '+fails[0];
+      toast(msg, fails.length?'err':'ok');
+      await wfMbLoad(true);                 // this screen, in place
+      wfRefreshInstanceList();              // and the list and counters behind it
+    };
+    if(kind==='forward'){
+      const recvOnly=plan.filter(function(it){ return !it.fwd; }).length;
+      accConfirm('Receive and forward '+plan.filter(function(it){ return it.fwd; }).length+' bill'+(plan.filter(function(it){ return it.fwd; }).length===1?'':'s')+' to the next step?'
+        +(recvOnly?(' '+recvOnly+' more '+(recvOnly===1?'is':'are')+' at a step that needs its route chosen on the bill - '+(recvOnly===1?'it':'they')+' will only be received.'):''), run);
+    } else { await run(); }
+  };
+
   /* ----- Workflow task detail (rendered from taskPage when a task is a workflow step) ----- */
   async function wfTaskPage(v, t, members, list, ro){
     wfInjectCss(); window._wfDelId=null; window._wfShownCaseId=null; setCrumb(['Accountability','Workflow','Task']);
@@ -10912,7 +11164,7 @@
        "Label: value, value, value" lines, where nothing tells you which amount belongs to which
        date. Everything else keeps the plain list. */
     const wfDayTable=wfIsDaywise(flow,wfDetailsArr)?wfDaywiseHtml(wfDetailsArr,flow):'';
-    const wfDescFmt=wfDayTable?'':(flow&&flow.id===26?wfInvoiceTaskDetailsHtml(wfDetailsArr,caseRow):wfDetailsFmt(wfDetailsArr));
+    const wfDescFmt=wfDayTable?'':(flow&&flow.id===26?wfInvoiceTaskDetailsHtml(wfDetailsArr,caseRow):(flow&&flow.id===40?wfInvoiceTaskDetailsHtml(wfDetailsArr,caseRow,WF_CHALLAN_FIELDS):wfDetailsFmt(wfDetailsArr)));
     // Same on the task itself. The step is still named right below it, in "Step 1 of 2 - HR Review".
     /* Named the same way the list names it, so opening a task does not rename it. */
     const wfTaskFields=(Array.isArray(flow&&flow.task_fields)&&flow.task_fields.length)?flow.task_fields:null;
@@ -11869,6 +12121,44 @@
     .wf-tl-acts{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:9px;border-top:1px dashed var(--line)}
     .wf-tl-cur .wf-tl-acts{border-top-color:#c7d2fe}
     .wf-tl-acts .ac-btn{white-space:nowrap}
+    /* My bills - Invoice Processing's bulk screen */
+    .wf-mb{padding:18px}
+    .wf-mb-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+    .wf-mb-title{font-size:17px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:9px}
+    .wf-mb-title i{color:var(--brand)}
+    .wf-mb-hint{font-size:12.5px;color:var(--slate);margin-top:4px;max-width:520px;line-height:1.5}
+    .wf-mb-stats{display:flex;gap:10px;flex-wrap:wrap}
+    .wf-mb-stat{border:1px solid var(--line);border-radius:12px;padding:9px 16px;min-width:104px;background:var(--bg-card,#fff)}
+    .wf-mb-stat .k{display:block;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+    .wf-mb-stat b{font-size:24px;font-weight:700;color:var(--ink);line-height:1.2}
+    .wf-mb-stat .k.wait{color:#b45309}.wf-mb-stat .k.recv{color:#1d4ed8}.wf-mb-stat .k.over{color:#b91c1c}
+    .wf-mb-filters{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin-bottom:12px}
+    .wf-mb-segs{display:inline-flex;gap:4px;padding:3px;border:1px solid var(--line);border-radius:11px;background:var(--bg,#f8fafc);flex-wrap:wrap}
+    .wf-mb-seg{border:0;background:transparent;color:var(--slate);font-weight:600;font-size:12.5px;padding:6px 12px;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+    .wf-mb-seg:hover{color:var(--ink)}
+    .wf-mb-seg.on{background:var(--ink,#0f172a);color:#fff}
+    .wf-mb-seg .cnt{font-size:10.5px;background:rgba(100,116,139,.18);color:inherit;border-radius:20px;padding:1px 7px}
+    .wf-mb-seg.on .cnt{background:rgba(255,255,255,.22)}
+    .wf-mb-search{margin-left:auto;min-width:220px;max-width:100%}
+    .wf-mb-table td,.wf-mb-table th{vertical-align:middle}
+    .wf-mb-table tbody tr{cursor:pointer}
+    .wf-mb-table tbody tr.on{background:var(--brand-a10,#eef2ff)}
+    .wf-mb-chk{width:36px;text-align:center}
+    .wf-mb-v{font-weight:650;color:var(--ink)}
+    .wf-mb-sub{font-size:11.5px;color:var(--slate);margin-top:2px}
+    .wf-mb-amt{font-weight:650;white-space:nowrap}
+    .wf-mb-step{font-size:12px;background:var(--bg,#f1f5f9);border-radius:8px;padding:3px 9px;white-space:nowrap}
+    .wf-mb-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
+    .wf-mb-pill.wait{background:#fef3c7;color:#92400e}.wf-mb-pill.recv{background:#dbeafe;color:#1e40af}
+    .wf-mb-pill.over{background:#fee2e2;color:#b91c1c}.wf-mb-pill.back{background:#ede9fe;color:#5b21b6}
+    .wf-mb-bar{position:sticky;bottom:14px;z-index:5;margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;
+      background:#0f172a;color:#fff;border-radius:14px;padding:12px 16px;box-shadow:0 10px 30px rgba(15,23,42,.28)}
+    .wf-mb-bar-l{display:flex;flex-direction:column;gap:2px}
+    .wf-mb-bar-l b{font-size:14.5px}.wf-mb-bar-l span{font-size:12px;color:#cbd5e1}
+    .wf-mb-bar-r{display:flex;gap:8px;flex-wrap:wrap}
+    .wf-mb-bar .ac-btn{white-space:nowrap}
+    .wf-mb-bar .ac-btn:disabled{opacity:.45;cursor:not-allowed}
+    @media(max-width:760px){ .wf-mb-search{margin-left:0;width:100%} .wf-mb-stat{flex:1} }
     .wf-tl-track{font-size:11.5px;color:var(--slate);margin-top:7px;padding-top:7px;border-top:1px dashed var(--line)}
     /* form */
     .wf-ro{background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:14px;color:var(--ink)}
