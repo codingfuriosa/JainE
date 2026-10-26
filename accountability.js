@@ -4224,8 +4224,10 @@
     // role in it at all has no reason to see this indicator, even at 0/0.
     const isStepHolder=members.some(function(e){return eq(e,mySelf);});
     const canSeeWaitRecv=eq(mySelf,'ayushruia1@gmail.com') || isStepHolder;
-    // My bills (the bulk screen) is Invoice Processing's, for the same people who see the badge above
-    const showMyBills=(id===26) && canSeeWaitRecv;
+    // My bills (the bulk screen) is Invoice Processing's. It lists only the viewer's OWN bills, so unlike
+    // the Waiting / Received badge above there is nothing in it to keep from anyone: it is on the page
+    // for everybody, and says plainly when nothing is waiting on them.
+    const showMyBills=(id===26);
     if(id===26) wfMbReset();           // a fresh visit starts from nothing ticked and nothing loaded
     /* On a workflow ANYONE may raise (Reimbursement), somebody holding no step is simply a claimant
        looking at their own claims. They still see progress - which steps are finished, and anything
@@ -11031,7 +11033,7 @@
           +'<th class="wf-mb-chk"><input type="checkbox" '+(allOn?'checked ':'')+'title="Select all shown" onchange="wfMbTickAll(this.checked)"></th>'
           +'<th>JainE id</th><th>Vendor</th><th>Amount</th><th>Your step</th><th>Arrived</th><th>Status</th><th>Goes next to</th>'
           +'</tr></thead><tbody>'+rows+'</tbody></table></div>'
-      : '<div class="ac-empty" style="cursor:default;border:0">'+(WF_MB.rows.length?'No bills match.':'No bill is waiting on you right now.')+'</div>';
+      : '<div class="ac-empty" style="cursor:default;border:0">'+(WF_MB.rows.length?'No bills match.':'No bill is waiting on you right now. Bills show here when they reach one of your steps.')+'</div>';
     // the selection bar
     const bar=$('wfMbBar'); if(!bar) return;
     const p=wfMbPlan();
