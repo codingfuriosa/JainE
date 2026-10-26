@@ -528,6 +528,66 @@ Deno.serve(async (req) => {
       return json({ registered: !!r?.client_id, connected: !!r?.refresh_token,
         connected_at: r?.connected_at ?? null, token_fresh_until: r?.expires_at ?? null });
     }
+    /* RECONNECT FROM INSIDE JAINE (26 Oct 2026). The sign-in made on a laptop stopped renewing on
+       22 Oct (Proxy answered invalid_grant) and every pull since failed. Proxy only lets a sign-in
+       return to a localhost address, and nobody runs a program for that, so: "begin" registers a
+       client returning to 127.0.0.1 (nothing listens there - the browser just shows "can't be
+       reached"), and "finish" takes that address, pasted back into JainE, and trades its one-time
+       code for tokens. The code is useless without the code_verifier kept here. Staff only. */
+    if (action === "begin" || action === "finish") {
+      if (req.method !== "POST") return json({ error: "POST only" }, 405);
+      const userTok = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+      const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
+      const who = await fetch(SB + "/auth/v1/user", { headers: { Authorization: "Bearer " + userTok, apikey: anon } });
+      const me: any = who.ok ? await who.json().catch(() => ({})) : null;
+      if (!me?.email) return json({ error: "Sign in to JainE first." }, 401);
+      const staff = await fetch(SB + "/rest/v1/rpc/is_s3_staff", { method: "POST",
+        headers: { Authorization: "Bearer " + userTok, apikey: anon, "Content-Type": "application/json",
+          "Content-Profile": "app", "Accept-Profile": "app" }, body: "{}" });
+      if (!staff.ok || (await staff.json().catch(() => false)) !== true) return json({ error: "Staff only." }, 403);
+      const REDIRECT = "http://127.0.0.1:8765/callback";
+
+      if (action === "begin") {
+        const reg = await fetch(ISSUER + "/register", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ client_name: "JainE Competitor Ads", redirect_uris: [REDIRECT],
+            grant_types: ["authorization_code", "refresh_token"], response_types: ["code"],
+            token_endpoint_auth_method: "client_secret_post" }) });
+        const c: any = await reg.json().catch(() => ({}));
+        if (!reg.ok || !c?.client_id) return json({ error: "Proxy would not register JainE: " + String(c?.error_description || c?.error || reg.status) }, 502);
+        const verifier = rnd(48), state = rnd(16);
+        const challenge = b64(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+        await save({ client_id: c.client_id, client_secret: c.client_secret, code_verifier: verifier, state: "oauth:" + state });
+        const u = new URL(ISSUER + "/authorize");
+        u.search = new URLSearchParams({ response_type: "code", client_id: c.client_id, redirect_uri: REDIRECT,
+          code_challenge: challenge, code_challenge_method: "S256", state, scope: "openid email profile",
+          resource: ISSUER + "/mcp" }).toString();
+        return json({ url: u.toString() });
+      }
+
+      const b = await req.json().catch(() => ({}));
+      let back: URL;
+      try { back = new URL(String(b?.url || "").trim()); } catch (_e) { return json({ error: "That is not the address from the browser bar." }, 400); }
+      const code = back.searchParams.get("code"), st = back.searchParams.get("state");
+      if (back.searchParams.get("error")) return json({ error: "Proxy said: " + (back.searchParams.get("error_description") || back.searchParams.get("error")) }, 400);
+      const r = await row();
+      if (!code || !st || String(r?.state || "") !== "oauth:" + st || !r?.code_verifier) {
+        return json({ error: "This address does not belong to the latest sign-in. Press Reconnect again and use the new one." }, 400);
+      }
+      if (Date.now() - new Date(r.updated_at || 0).getTime() > 15 * 60000) return json({ error: "That took over 15 minutes. Press Reconnect again." }, 400);
+      const t = await fetch(ISSUER + "/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: REDIRECT,
+          client_id: r.client_id, client_secret: r.client_secret, code_verifier: r.code_verifier,
+          resource: ISSUER + "/mcp" }).toString() });
+      const tok: any = await t.json().catch(() => ({}));
+      if (!t.ok || !tok?.access_token || !tok?.refresh_token) {
+        return json({ error: "Proxy did not accept the sign-in: " + String(tok?.error_description || tok?.error || t.status) }, 502);
+      }
+      await save({ access_token: tok.access_token, refresh_token: tok.refresh_token,
+        expires_at: new Date(Date.now() + (Number(tok.expires_in) || 3600) * 1000).toISOString(),
+        connected_at: new Date().toISOString(), connected_by: me.email, state: null, code_verifier: null });
+      return json({ ok: true, connected: true });
+    }
+
     if (action === "prepare") {
       const nonce = rnd(24); await save({ state: "adopt:" + nonce });
       return json({ nonce, expires_in_minutes: 10 });

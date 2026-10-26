@@ -37,12 +37,40 @@ Deno.serve(async (req: Request) => {
     });
     if (!who.ok) return j({ error: "unauthorized" }, 401);
 
-    const { action, key } = await req.json();
+    const { action, key, keys } = await req.json();
     const bucket = Deno.env.get("S3_BUCKET");
     const region = Deno.env.get("S3_REGION");
     const ak = Deno.env.get("AWS_ACCESS_KEY_ID");
     const sk = Deno.env.get("AWS_SECRET_ACCESS_KEY");
     if (!bucket || !region || !ak || !sk) return j({ error: "S3 secrets not configured" }, 500);
+
+    // MANY KEYS, ONE CALL (26 Oct 2026) - view links only. A grid of ad pictures used to make one
+    // call per tile; now it sends the page's keys together and gets back {urls: {key: url}}. The
+    // access rule is the same as below, asked once for the whole list (app.s3_keys_allowed). A key
+    // the caller may not read is simply left out of the answer.
+    if (Array.isArray(keys)) {
+      const asked = keys.slice(0, 200).map((k: unknown) => String(k || "").replace(/^\/+/, ""));
+      const full = asked.map((k) => OWN_ROOT_PREFIXES.some((p) => k.startsWith(p)) ? k : "portal/" + k);
+      const chk = await fetch(`${sbUrl}/rest/v1/rpc/s3_keys_allowed`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`, apikey: anon,
+          "Content-Type": "application/json", "Content-Profile": "app", "Accept-Profile": "app",
+        },
+        body: JSON.stringify({ p_action: "get", p_keys: full }),
+      });
+      const ok: string[] = chk.ok ? await chk.json().catch(() => []) : [];
+      const allowed = new Set(Array.isArray(ok) ? ok : []);
+      const aws = new AwsClient({ accessKeyId: ak, secretAccessKey: sk, region, service: "s3" });
+      const urls: Record<string, string> = {};
+      await Promise.all(asked.map(async (k, i) => {
+        if (!allowed.has(full[i])) return;
+        const u = new URL(`https://${bucket}.s3.${region}.amazonaws.com/${full[i].split("/").map(encodeURIComponent).join("/")}`);
+        u.searchParams.set("X-Amz-Expires", "900");
+        urls[k] = (await aws.sign(u.toString(), { method: "GET", aws: { signQuery: true } })).url;
+      }));
+      return j({ urls });
+    }
 
     let safeKey = String(key || "").replace(/^\/+/, "");
     if (!OWN_ROOT_PREFIXES.some(p => safeKey.startsWith(p))) safeKey = "portal/" + safeKey;

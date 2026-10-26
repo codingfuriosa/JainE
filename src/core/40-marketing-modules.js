@@ -75,13 +75,12 @@ VIEWS.campaigns=async function(v,seg){
 };
 
 /* ---------------------------------------------------------------- Competitor Data ('competitors') */
+/* Facebook and Google only (26 Oct 2026, as asked). YouTube, Google Maps, Search Trends and RERA
+   are switched off here, not deleted - their collectors and data are untouched, and putting a row
+   back into this list brings the tab back. An old link to one of them lands on Meta Ads. */
 const CD_TABS=[
   ['','Meta Ads','fa-brands fa-meta','meta'],
-  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci'],
-  ['youtube','YouTube','fa-brands fa-youtube','dm'],
-  ['maps','Google Maps','fa-solid fa-location-dot','dm'],
-  ['trends','Search Trends','fa-solid fa-arrow-trend-up','ci'],
-  ['rera','RERA Projects','fa-solid fa-landmark','ci']
+  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci']
 ];
 VIEWS.competitors=async function(v,seg){
   const want=(seg&&seg[0])||'';

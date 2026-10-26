@@ -135,10 +135,12 @@ async function ciStatus(sources,blurb,extra){
   const {data}=await sb.schema('camp').from('pi_runs').select('finished_at').in('source',sources).eq('ok',true).order('finished_at',{ascending:false}).limit(1);
   const last=data&&data[0]&&data[0].finished_at;
   const btn=CI_SCOPE!=='competitor'?sources.filter(function(s){ return s!=='rera_list'&&s!=='gads_detail'; })[0]:null;
-  $('ciRuns').innerHTML='<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 8px">'
+  // Competitor Data shows no paragraph (26 Oct 2026, "remove so much text") - just the one line.
+  if(CI_SCOPE==='competitor') blurb='';
+  $('ciRuns').innerHTML=(blurb||btn?'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 8px">'
       +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px;line-height:1.55">'+blurb+'</p>'
       +(btn?'<button class="btn" id="ciFetchBtn" onclick="ciFetchNow(\''+btn+'\')"><i class="fa-solid fa-rotate"></i> Fetch next now</button>':'')
-    +'</div>'
+    +'</div>':'')
     +'<div class="ci-upd"><i class="fa-solid fa-clock-rotate-left" style="color:#0369a1"></i> Updated automatically'
       +(last?' - last updated <b title="'+esc(ciDateTime(last))+'">'+ciAgo(last)+'</b>':' - nothing collected yet')
       +(extra?' · '+extra:'')+'</div>'
