@@ -4101,8 +4101,15 @@
      exactly what that page asks for - and remembered (bgCapture), so from then on opening JainE gets
      them ready too. Not the Tracker: that is every bill against every step, and it is only fetched
      when its tab is opened. Runs at most once every 10 minutes. */
+  /* SWITCHED OFF (26 Oct 2026). Every open Accountability page fetched every workflow every 10
+     minutes, so with the office's pages open it was thousands of extra database requests each
+     cycle - and when an update made everyone reload at once, they all fetched together and the
+     small database slowed for everybody. A workflow now loads when it is opened. Set
+     WF_WARM_ALL to true to bring the pre-loading back. */
+  const WF_WARM_ALL=false;
   let wfWarmBusy=false, wfWarmAt=0;
   async function wfWarmAll(){
+    if(!WF_WARM_ALL) return;
     if(wfWarmBusy || typeof window.bgCapture!=='function' || document.hidden) return;
     if(Date.now()-wfWarmAt < 600000) return;
     wfWarmBusy=true; wfWarmAt=Date.now();
