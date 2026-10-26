@@ -20,7 +20,7 @@
   #fx{position:absolute;left:0;top:0;width:1920px;height:1080px;pointer-events:none}
   .hl{position:absolute;border-radius:10px;opacity:0}
   .ripple{position:absolute;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;border:4px solid #7c3aed;opacity:0}
-  .tag{position:absolute;background:#7c3aed;color:#fff;font-weight:800;font-size:22px;padding:9px 18px;border-radius:999px;box-shadow:0 10px 26px rgba(124,58,237,.35);opacity:0;white-space:nowrap}
+  .tag{position:absolute;background:#7c3aed;color:#fff;font-weight:800;font-size:22px;padding:9px 18px;border-radius:999px;opacity:0;white-space:nowrap}
   #cursor{position:absolute;left:0;top:0;width:34px;height:34px;filter:drop-shadow(0 3px 5px rgba(0,0,0,.35));z-index:5}
   #cap{position:absolute;left:50%;bottom:54px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;
     background:rgba(15,23,42,.92);color:#fff;padding:18px 30px 18px 18px;border-radius:18px;max-width:1500px;opacity:0;z-index:7}
@@ -42,18 +42,18 @@
   #flow .fh i{color:#7c3aed}
   #flow .fh span{margin-left:auto;font-size:17px;font-weight:700;color:#7c3aed;background:#f3e8ff;border-radius:999px;padding:6px 14px}
   #flow .steps{display:flex;align-items:stretch;gap:0}
-  #flow .st{flex:1;border:2px solid #e2e8f0;border-radius:18px;padding:22px 22px 20px;opacity:.35;background:#fff}
-  #flow .st.lit{opacity:1;border-color:#7c3aed;box-shadow:0 0 0 5px #ede9fe}
-  #flow .st.past{opacity:.75}
+  #flow .st{flex:1;border:2px solid #e2e8f0;border-radius:18px;padding:22px 22px 20px;background:#fff}
+  #flow .st.lit{border-color:#7c3aed}
+  
   #flow .arr{flex:none;width:46px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:26px}
   #flow .no{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:50%;background:#7c3aed;color:#fff;font-weight:800;font-size:20px}
   #flow .tl{font-size:24px;font-weight:800;color:#0f172a;margin:12px 0 4px}
   #flow .who{font-size:21px;font-weight:700;color:#7c3aed;margin-bottom:12px}
-  #flow .what{font-size:19px;color:#475569;line-height:1.45}
+  #flow .what{font-size:21px;color:#334155;line-height:1.45}
   #flow .what b{color:#0f172a}
-  #flow .rule{margin-top:24px;display:flex;align-items:center;gap:14px;padding:16px 20px;border-radius:14px;background:#f8fafc;font-size:22px;font-weight:600;color:#0f172a;opacity:.35}
-  #flow .rule.lit{opacity:1;background:#fef3c7;box-shadow:inset 0 0 0 2px #f59e0b}
-  #flow .rule i{color:#b45309;font-size:24px}
+  #flow .rule{margin-top:24px;display:flex;align-items:center;gap:14px;padding:16px 20px;border-radius:14px;border:2px solid #e2e8f0;font-size:22px;font-weight:600;color:#0f172a}
+  #flow .rule.lit{border-color:#7c3aed}
+  #flow .rule i{color:#7c3aed;font-size:24px}
   #done{display:inline-flex;align-items:center;gap:8px;margin-top:12px;padding:8px 16px;border-radius:10px;background:#16a34a;color:#fff;font-weight:700;font-size:19px}
   /* who sees the button - the two headers side by side */
   #who{position:absolute;left:50%;top:50%;width:1180px;transform:translate(-50%,-50%);background:#fff;border-radius:24px;box-shadow:0 30px 90px rgba(15,23,42,.35);padding:34px 40px;opacity:0;z-index:6;box-sizing:border-box}
@@ -68,6 +68,15 @@
   #who .b.blue{background:#2563eb;color:#fff}
   #who .b.wow{background:#f3e8ff;color:#7c3aed;border:2px solid #c4b5fd}
   #who .b.none{border:2px dashed #cbd5e1;color:#94a3b8;background:#fff}
+  /* the roles box beside the claim view */
+  #roles{position:absolute;right:40px;bottom:16px;width:560px;background:#fff;border:1px solid #e2e8f0;border-radius:18px;box-shadow:0 12px 32px rgba(15,23,42,.14);padding:14px 20px;opacity:0;z-index:6;box-sizing:border-box}
+  #roles .rh{font-size:18px;font-weight:800;color:#0f172a;margin-bottom:4px}
+  #roles .rl{display:flex;align-items:center;gap:12px;padding:5px 10px;border-radius:10px;border:2px solid transparent;font-size:18px;color:#0f172a}
+  #roles .rl.lit{border-color:#7c3aed}
+  #roles .rl .n{flex:none;width:26px;height:26px;border-radius:50%;background:#7c3aed;color:#fff;font-weight:800;font-size:16px;display:flex;align-items:center;justify-content:center}
+  #roles .rl b{min-width:170px}
+  #roles .rl.rule{margin-top:2px;color:#334155;font-size:16px}
+  #roles .rl.rule i{color:#7c3aed;width:30px;text-align:center}
   #prog{position:absolute;left:0;bottom:0;height:5px;background:#7c3aed;z-index:9}
 </style></head>
 <body>
@@ -82,20 +91,25 @@
     <div class="wr"><div class="wl">Everyone else<small>The button is not there</small></div>
       <div class="wb"><span class="b blue"><i class="fa-solid fa-plus"></i> New Reimbursement</span><span class="b none"><i class="fa-solid fa-ban"></i> no Wow Moment button</span></div></div>
   </div>
+  <div id="roles"><div class="rh">Who does what</div>
+    <div class="rl"><span class="n">1</span><b>Shafat Mehar</b>Checks it</div>
+    <div class="rl"><span class="n">2</span><b>Accounts</b>Pays it</div>
+    <div class="rl"><span class="n">3</span><b>You</b>Confirm with Done</div>
+    <div class="rl rule"><i class="fa-solid fa-circle-info"></i>One claim open at a time - Wow Moments included</div></div>
   <div id="flowDim"></div>
   <div id="flow">
     <div class="fh"><i class="fa-solid fa-star"></i> How a Wow Moment moves <span>Reimbursement · Wow Moment</span></div>
     <div class="steps">
       <div class="st"><span class="no">1</span><div class="tl">Wow Moment Check</div><div class="who">Shafat Mehar</div>
-        <div class="what"><b>Receives</b> it, then <b>Forwards</b> it to Accounts - or <b>Sends it back</b> with a reason.</div></div>
+        <div class="what">Checks it, then forwards it - or sends it back.</div></div>
       <div class="arr"><i class="fa-solid fa-arrow-right"></i></div>
       <div class="st"><span class="no">2</span><div class="tl">Accounts Review &amp; Payment</div><div class="who">Gyan Prakash Sah / Gyan Prakash Pandey</div>
-        <div class="what">Whoever <b>receives</b> it first checks it, <b>pays</b> it and forwards it.</div></div>
+        <div class="what">Pays it.</div></div>
       <div class="arr"><i class="fa-solid fa-arrow-right"></i></div>
-      <div class="st"><span class="no">3</span><div class="tl">Payment Received</div><div class="who">The Sales Manager who raised it</div>
-        <div class="what">Clicks <b>Done</b> when the money arrives - or <b>Rejects</b> it back to Accounts if it didn't.</div><div id="done"><i class="fa-solid fa-circle-check"></i> Done</div></div>
+      <div class="st"><span class="no">3</span><div class="tl">Payment Received</div><div class="who">You</div>
+        <div class="what">Click Done when the money arrives.</div><div id="done"><i class="fa-solid fa-circle-check"></i> Done</div></div>
     </div>
-    <div class="rule"><i class="fa-solid fa-circle-info"></i> A Wow Moment counts as a Reimbursement - only one claim can be open at a time.</div>
+    <div class="rule"><i class="fa-solid fa-circle-info"></i> One claim open at a time - a Wow Moment counts as a Reimbursement.</div>
   </div>
   <svg id="cursor" viewBox="0 0 24 24"><path d="M4 2 L4 20 L9 15.5 L12.2 22 L15 20.7 L11.9 14.3 L18.5 14.3 Z" fill="#0f172a" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>
   <div id="cap"><div class="n"></div><div><div class="t"></div><div class="s"></div></div></div>
@@ -114,7 +128,7 @@ function track(kf,t){
   for(let i=1;i<kf.length;i++){ if(t<=kf[i][0]){ const a=kf[i-1],b=kf[i]; const x=ease(clamp((t-a[0])/(b[0]-a[0]||1),0,1)); return a.slice(1).map((v,j)=>lerp(v,b[j+1],x)); } }
   return kf[kf.length-1].slice(1);
 }
-const STATES=['w01','w02','w03','w04','w05'];
+const STATES=['w01','w04','w05','w06'];
 const F={};
 function el(id,sel,text){ const d=F[id].contentDocument; let list=[...d.querySelectorAll(sel)];
   if(text) list=list.filter(e=>text.test((e.innerText||e.textContent||'').trim())); return list[0]||null; }
@@ -142,9 +156,16 @@ const LEAD=0.6, VOICE_LEN=59.28;
 const W={ what:4.14, only:11.72, nobody:15.04, click:16.70, fill:18.24, date:18.39, spent:19.46, amount:20.79, receipt:21.80,
   upi:23.22, submit:26.56, purple:29.02, open:31.64, first:35.10, forwards:37.20, sends:39.06, accounts:40.86,
   back:43.10, money:45.48, done:46.62, rule:48.16, normal:51.48, outro:55.28 };
-const v=k=>W[k]+LEAD;   // video time of a word
-let SHOTS=[], CAM=[], CUR=[], CLICKS=[], CAPS=[], HLS=[], TAGS=[], CARDS=[], DUR=0, FLOW=null, WHO=null, FILL=null;
-window.VO_SEGS=[[LEAD,0,VOICE_LEN,0]];
+/* GAPS: silence added to the video at a pause in the recording, so a moment can stay on screen
+   longer than its words take. [recording time (inside a pause), seconds added]. "Nobody else sees it"
+   holds the who-sees-the-button card. */
+const GAPS=[[16.40,3.4]];
+const gapBefore=a=>GAPS.reduce((s,g)=>s+(a>=g[0]?g[1]:0),0), GAP_ALL=GAPS.reduce((s,g)=>s+g[1],0);
+const v=k=>W[k]+LEAD+gapBefore(W[k]);   // video time of a word
+let SHOTS=[], CAM=[], CUR=[], CLICKS=[], CAPS=[], HLS=[], TAGS=[], CARDS=[], DUR=0, FLOW=null, ROLES=null, WHO=null, FILL=null;
+window.VO_SEGS=(function(){ const segs=[]; let a=0, t=LEAD;
+  GAPS.slice().sort((x,y)=>x[0]-y[0]).forEach(g=>{ segs.push([+t.toFixed(3),a,g[0],0]); t+=g[0]-a+g[1]; a=g[0]; });
+  segs.push([+t.toFixed(3),a,VOICE_LEN,0]); return segs; })();
 
 function build(){
   const S=(a,b,id)=>SHOTS.push([a,b,id]);
@@ -162,16 +183,15 @@ function build(){
   const btn=rect('w01','.wf-var-btn'), heads=rect('w01','.wf-head-new',null,6);
   S(v('what')-.4,v('click')+.9,'w01');
   M(v('what'),[1450,620]);
-  T(v('what')+.2,v('only'),'1','Wow Moments - inside Reimbursement','For money a Sales Manager spends to delight a customer');
+  T(v('what')+.2,v('only'),'1','Wow Moments - inside Reimbursement','');
   C(v('what'),1,960,540); C(v('what')+3,1,960,540); C(v('only')-.6,1.7,heads[0]+heads[2]/2-120,heads[1]+180);
 
   // 3 who sees it - the purple button, then somebody else's page without it
   H(v('only')+.2,v('nobody'),[btn[0]-5,btn[1]-5,btn[2]+10,btn[3]+10]);
   TAGS.push([v('only')+.5,v('nobody'),'Sales Managers only',btn[0]+btn[2]/2,btn[1]+btn[3]+34]);
-  T(v('only')+.2,v('nobody'),'2','The New Wow Moment button','Only for our Sales Managers');
+  T(v('only')+.2,v('nobody'),'2','The New Wow Moment button','');
   // nobody else sees it: the two headers side by side
-  WHO={on:v('nobody')-.1, off:v('click')-.05};
-  T(v('nobody'),v('click'),'2','Nobody else sees it','Everyone else gets only New Reimbursement');
+  WHO={on:16.15+LEAD, off:v('click')-.05};
   M(v('only')+.6,[btn[0]+btn[2]/2,btn[1]+btn[3]+80]);
   // away from the buttons while somebody else's page is shown, so nothing looks clicked
   M(v('nobody')+.1,[btn[0]-420,btn[1]+230]); M(v('click')-.6,[btn[0]-420,btn[1]+230]);
@@ -181,7 +201,7 @@ function build(){
   T(v('click'),v('click')+.9,'3','Click New Wow Moment','');
   T(v('click')+.9,v('fill'),'3','Click New Wow Moment','',true);
   // the form fills in as it is said: w04 throughout, its values revealed on their words (drawFill)
-  FILL={desc:[v('spent'),v('amount')-.15], amount:v('amount')+.2, receipt:v('receipt')+.35};
+  FILL={date:v('date')+.35, desc:[v('spent'),v('amount')-.15], amount:v('amount')+.2, receipt:v('receipt')+.35};
   C(v('click')+.6,1.7,heads[0]+heads[2]/2-120,heads[1]+180); C(v('click')+1.2,1,960,540);
 
   // 5 fill it in - date, what it was for, amount, receipt
@@ -189,14 +209,14 @@ function build(){
   const modal=rect('w04','.wf-evt-modal');
   C(v('fill')+.2,1.25,mid(modal)[0],mid(modal)[1]+20);
   S(v('click')+.9,v('submit')+.8,'w04');
-  const fields=[['date','Date','Date',/^Date/],['spent','spent','What you spent on',/^Description/],['amount','amount','Amount',/^Amount/],['receipt','receipt','The receipt',/^Attachment/]];
+  const fields=[['date','date','Date',/^Date/],['spent','spent','What you spent on',/^Description/],['amount','amount','Amount',/^Amount/],['receipt','receipt','The receipt',/^Attachment/]];
   fields.forEach((f,i)=>{ const a=v(f[1]), b=i<3?v(fields[i+1][1]):v('upi'); const r=row('w04',f[3]);
     H(a,b,r); M(a-.3,[r[0]+r[2]-70,r[1]+r[3]/2]); T(a,b,'4','Fill in the claim',f[2],true); });
 
   // 6 the UPI details are remembered
   const upi=row('w04',/^UPI/), ph=row('w04',/^Phone/);
   H(v('upi'),v('submit'),[upi[0],upi[1],upi[2],ph[1]+ph[3]-upi[1]],'#16a34a');
-  T(v('upi'),v('submit'),'5','Your UPI details are remembered','Filled in from your last claim',true);
+  T(v('upi'),v('submit'),'5','Your UPI details are remembered','',true);
   M(v('upi')-.2,[upi[0]+upi[2]-70,upi[1]+upi[3]+10]);
 
   // 7 submit - the claim is outlined in purple
@@ -209,23 +229,27 @@ function build(){
   const wrow=rect('w05','tr.wf-var-row',null,0);
   C(v('purple')-.3,1,960,540); C(v('purple')+.6,1.45,wrow[0]+wrow[2]/2,wrow[1]+40);
   H(v('purple'),v('open')+.6,[wrow[0]-6,wrow[1]-6,wrow[2]+12,wrow[3]+12]);
-  T(v('purple')-.2,v('open'),'6','Outlined in purple','So a Wow Moment is easy to spot in the list');
+  T(v('purple')-.2,v('open'),'6','Outlined in purple','');
   M(v('purple')+.4,[wrow[0]+380,wrow[1]+wrow[3]+40]);
 
   // 8 open it - how it moves
   M(v('open'),[wrow[0]+380,wrow[1]+wrow[3]/2]); K(v('open')+.4);
   C(v('open')+.6,1,960,540);
-  FLOW={on:v('open')+.8, off:v('outro')-.3, lit:[v('first'),v('accounts'),v('back'),v('rule')], done:v('done')};
-  T(v('open')+.8,v('first'),'7','Open it - and see where it goes','');
-  T(v('first'),v('accounts'),'7','Step 1 · Shafat Mehar','Checks it - forwards it to Accounts, or sends it back with a reason');
-  T(v('accounts'),v('back'),'7','Step 2 · Accounts','Gyan Prakash Sah or Gyan Prakash Pandey receives it and pays');
-  T(v('back'),v('rule'),'7','Step 3 · Back to you','When the money reaches you, click Done');
-  T(v('rule'),v('outro')-.3,'8','One claim at a time','A Wow Moment counts as a Reimbursement');
+  /* opening it shows JainE's own claim view (w06) with its step tracker; each step is outlined as
+     the voice reaches it, and the roles box beside it lights the same line */
+  S(v('open')+.6,v('outro')+1,'w06');
+  const tl=[...F.w06.contentDocument.querySelectorAll('.wf-tl-item')].map(e=>{const r=e.getBoundingClientRect();return [r.left,r.top,r.width,r.height];});
+  const lit=[v('first'),v('accounts'),v('back'),v('rule')];
+  tl.forEach((r,i)=>H(lit[i],lit[i+1],[r[0]-2,r[1]-2,r[2]+4,r[3]+4]));
+  ROLES={on:v('open')+1.4, off:v('outro')-.3, lit:lit};
+  T(v('open')+.6,v('first'),'7','Open it to see where it is','');
+  M(v('open')+1.2,[1500,1000]);
 
   // outro, then the logo
-  CARDS.push(['outro',v('outro')-.2,LEAD+VOICE_LEN+1.2]);
-  CARDS.push(['logo',LEAD+VOICE_LEN+1.2,LEAD+VOICE_LEN+5.2]);
-  DUR=LEAD+VOICE_LEN+5.2;
+  // the outro stays fully on until the logo has faded in over it, so the page never shows between them
+  CARDS.push(['outro',v('outro')-.2,LEAD+VOICE_LEN+GAP_ALL+1.2+1.6]);
+  CARDS.push(['logo',LEAD+VOICE_LEN+GAP_ALL+1.2,LEAD+VOICE_LEN+GAP_ALL+5.2]);
+  DUR=LEAD+VOICE_LEN+GAP_ALL+5.2;
   CUR.sort((a,b)=>a[0]-b[0]);
   const holds=CLICKS.map(c=>{ const k=CUR.filter(x=>x[0]<=c).pop()||CUR[0]; return [[c-.05,k[1],k[2]],[c+.4,k[1],k[2]]]; }).flat();
   CUR=CUR.concat(holds).sort((a,b)=>a[0]-b[0]);
@@ -244,10 +268,18 @@ function drawFill(t){
   if(!FILL) return; const d=F.w04.contentDocument;
   const ta=d.querySelector('.wf-evt-form textarea'), am=d.querySelector('.wf-amt-seg'), chip=d.querySelector('.wf-evt-attlist .wf-evt-att-name'), tot=d.querySelector('#wfEvtTotal b');
   if(!FILLSRC) FILLSRC={desc:ta?ta.textContent:''};
+  const dt=d.querySelector('.wf-evt-form input[type=date]'); if(dt){ const s=t>=FILL.date?'2026-10-24':''; if(dt.value!==s) dt.value=s; }
   if(ta){ const k=clamp((t-FILL.desc[0])/(FILL.desc[1]-FILL.desc[0]),0,1); const s=FILLSRC.desc.slice(0,Math.round(FILLSRC.desc.length*k)); if(ta.value!==s){ ta.value=s; ta.textContent=s; } }
   if(am){ const on=t>=FILL.amount; am.value=on?'2,450':''; }
   if(tot) tot.textContent=t>=FILL.amount?'₹2,450':'₹0';
   if(chip) chip.style.visibility=t>=FILL.receipt?'visible':'hidden';
+}
+function drawRoles(t){
+  const b=$('roles');
+  if(!ROLES||t<ROLES.on||t>=ROLES.off){ b.style.opacity=0; return; }
+  b.style.opacity=Math.min(1,(t-ROLES.on)/.4,(ROLES.off-t)/.4);
+  let on=-1; ROLES.lit.forEach((a,i)=>{ if(t>=a) on=i; });
+  [...b.querySelectorAll('.rl')].forEach((e,i)=>e.classList.toggle('lit',i===on));
 }
 function drawFlow(t){
   const f=$('flow'), dim=$('flowDim');
@@ -280,7 +312,7 @@ function seek(t){
   hlEls.forEach(e=>e.style.opacity=0);
   HLS.forEach((h,i)=>{ const e=hlEls[i]||(hlEls[i]=Object.assign(document.createElement('div'),{className:'hl'})); if(!e.parentNode) $('fx').appendChild(e);
     if(t>=h[0]&&t<h[1]){ const [x,y]=P(h[2][0],h[2][1]); e.style.left=x+'px'; e.style.top=y+'px'; e.style.width=h[2][2]*s+'px'; e.style.height=h[2][3]*s+'px';
-      e.style.boxShadow='0 0 0 4px '+h[3]+', 0 0 24px 6px '+h[3]+'55'; e.style.opacity=Math.min(1,(t-h[0])/.25,(h[1]-t)/.25); } });
+      e.style.boxShadow='0 0 0 3px '+h[3]; e.style.opacity=Math.min(1,(t-h[0])/.25,(h[1]-t)/.25); } });
   tagEls.forEach(e=>e.style.opacity=0);
   TAGS.forEach((g,i)=>{ const e=tagEls[i]||(tagEls[i]=Object.assign(document.createElement('div'),{className:'tag'})); if(!e.parentNode) $('fx').appendChild(e);
     if(t>=g[0]&&t<g[1]){ e.textContent=g[2]; const [x,y]=P(g[3],g[4]); e.style.left=(x-e.offsetWidth/2)+'px'; e.style.top=y+'px'; e.style.opacity=Math.min(1,(t-g[0])/.3,(g[1]-t)/.3); } });
@@ -295,7 +327,7 @@ function seek(t){
   const c=CAPS.filter(c=>t>=c[0]&&t<c[1]).pop(); const cap=$('cap');
   if(c&&!cardOn){ cap.querySelector('.n').textContent=c[2]; cap.querySelector('.t').textContent=c[3]; cap.querySelector('.s').textContent=c[4];
     cap.querySelector('.s').style.display=c[4]?'':'none'; cap.classList.toggle('top',!!c[5]); cap.style.opacity=1; } else cap.style.opacity=0;
-  drawFlow(t); drawWho(t); drawFill(t);
+  drawRoles(t); drawWho(t); drawFill(t);
   $('prog').style.width=(t/DUR*100)+'%';
 }
 window.seek=seek;

@@ -137,16 +137,17 @@ function allowedSet(){if(state.super)return null;const m=state.roles&&state.role
    rule inside erp_usability_report(), which is what actually protects the numbers; this only decides
    whether the menu entry is worth drawing. */
 function hasUsability(){ if(state.super)return true; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('usability')!==-1; }
-/* FEEDBACK HUB IS FOR TWO PEOPLE, BY NAME.
+/* FEEDBACK HUB IS FOR THREE PEOPLE, BY NAME.
 
    Not "granted the ordinary way" like every other module, and deliberately not open to every
-   superadmin either: the instruction was the Administrator and Shuchandra Das, and there is a
+   superadmin either: the instruction was the Administrator and Shuchandra Das (and, from 26 Oct
+   2026, Prerna Gupta - businessanalyst@), and there is a
    second superadmin account (system1@) that would otherwise pick it up silently. So the test
    runs BEFORE the state.super shortcut in pageAllowed, and the list is one constant here
    rather than a condition spread across the two places that ask.
 
    To change who can see it, add an address to this list - nothing else needs touching. */
-const FEEDBACK_HUB_PEOPLE=['ayushruia1@gmail.com','mgr.hr@thejaingroup.com'];
+const FEEDBACK_HUB_PEOPLE=['ayushruia1@gmail.com','mgr.hr@thejaingroup.com','businessanalyst@thejaingroup.com'];
 function canFeedbackHub(){
   if(state.isCustomer||state.impersonating) return false;
   const me=String(state.email||'').trim().toLowerCase();
