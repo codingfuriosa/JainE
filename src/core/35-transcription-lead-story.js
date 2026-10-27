@@ -302,12 +302,15 @@ function trcMissedIncomingCallback(rows){
   }
   return misses.length?{count:misses.length,misses:misses}:null;
 }
-/* Not connected, then silence: the lead's LAST logged call (a customer's own missed incoming call does
-   not count - it is not an agent attempt) never got through, and nothing has been logged on the lead
-   for TRC_NOT_CONNECTED_DAYS or more, counted to today. The CRM has no connected flag, so "not
-   connected" is a call with no recording whose remark says nobody picked up. Level 2 is the three
-   senior callers (Rani, Susmita, Piyasa); Level 1 is everyone else except Dipanwita, whose calls are
-   in neither. The level is the owner of that last attempt. rows chronological, oldest-first. */
+/* Not connected, then no follow-up: a call that never got through (a customer's own missed incoming call
+   does not count - it is not an agent attempt) whose next agent call came TRC_NOT_CONNECTED_DAYS or more
+   later, or has not come at all (counted to today). Both halves count: not received on the 1st and only
+   tried again on the 9th is as late as not tried again yet. Only the not-connected calls dated inside
+   the selected range are judged, so a month's report is that month's misses. The CRM has no connected
+   flag, so "not connected" is a call with no recording whose remark says nobody picked up. Level 2 is
+   the three senior callers (Rani, Susmita, Piyasa); Level 1 is everyone else except Dipanwita, whose
+   calls are in neither. The level is the owner of the not-connected call, and one lead can be in both.
+   rows chronological, oldest-first. */
 const TRC_NOT_CONNECTED_DAYS=7;
 const TRC_LEVEL2_EMAILS=['jaingroupcaller9@thejaingroup.com','jaingroupcaller6@thejaingroup.com','jaingroupcaller8@thejaingroup.com'];
 const TRC_LEVEL_EXCLUDED_EMAILS=['mgr.presales@thejaingroup.com'];
@@ -316,21 +319,26 @@ function trcIsNotConnected(r){
   return /not receiv|busy on another|not connected|switched off|not reachable|unreachable|out of service|invalid number|wrong number|no answer|not answering|not picking|facility is not avail|call disconnected/i
     .test(String(r.crm_remarks||''));
 }
-function trcNotConnectedStale(rows){
-  const list=(rows||[]).filter(function(r){return !trcIsMissedIncoming(r);});
-  const last=list[list.length-1];
-  if(!last||!trcIsNotConnected(last))return null;
-  const d=trcRowDate(last);
-  if(!d)return null;
-  const days=trcDaysBetween(d,traToday());
-  if(days<TRC_NOT_CONNECTED_DAYS)return null;
-  const email=String(last.personnel_email||'').trim().toLowerCase();
-  if(TRC_LEVEL_EXCLUDED_EMAILS.indexOf(email)>=0)return null;
-  return {days:days,follow_up_id:last.follow_up_id,level:TRC_LEVEL2_EMAILS.indexOf(email)>=0?2:1};
+function trcNotConnectedLevel(email){
+  email=String(email||'').trim().toLowerCase();
+  if(TRC_LEVEL_EXCLUDED_EMAILS.indexOf(email)>=0)return 0;
+  return TRC_LEVEL2_EMAILS.indexOf(email)>=0?2:1;
+}
+function trcNotConnectedStale(rows,from,to){
+  const all=trcNotConnectedGaps(rows);
+  if(!all)return null;
+  const gaps=all.gaps.filter(function(g){
+    return g.level&&(!from||g.date>=from)&&(!to||g.date<=to);
+  });
+  if(!gaps.length)return null;
+  const worst=gaps.reduce(function(a,b){return b.days>a.days?b:a;});
+  const levels=[];
+  gaps.forEach(function(g){if(levels.indexOf(g.level)<0)levels.push(g.level);});
+  return {days:worst.days,follow_up_id:worst.follow_up_id,levels:levels,count:gaps.length,
+    open:gaps.some(function(g){return !g.nextDate;})};
 }
 /* Every not-connected call on the lead that was not tried again within TRC_NOT_CONNECTED_DAYS - the
-   whole history, not just the latest call (trcNotConnectedStale above answers the list's "is it stuck
-   right now" question; this one is the lead page's "which dates, and how long each silence lasted").
+   whole history (trcNotConnectedStale above narrows these to the list's date range).
    The next call is the next agent call of any kind, connected or not, since a second failed attempt is
    still a follow-up. A gap still open is counted to today. rows chronological, oldest-first. */
 function trcNotConnectedGaps(rows){
@@ -344,7 +352,8 @@ function trcNotConnectedGaps(rows){
     if(next&&!nd)continue;
     const days=trcDaysBetween(d,nd||today);
     if(days<TRC_NOT_CONNECTED_DAYS)continue;
-    gaps.push({follow_up_id:list[i].follow_up_id,date:d,nextDate:nd,days:days,remarks:list[i].crm_remarks,who:list[i].personnel_name});
+    gaps.push({follow_up_id:list[i].follow_up_id,date:d,nextDate:nd,days:days,remarks:list[i].crm_remarks,who:list[i].personnel_name,
+      level:trcNotConnectedLevel(list[i].personnel_email)});
   }
   return gaps.length?{count:gaps.length,gaps:gaps}:null;
 }

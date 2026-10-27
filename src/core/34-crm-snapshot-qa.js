@@ -1297,7 +1297,7 @@ function trcLeads(rows){
     g.cadence=g.historyPending?null:trcCadenceIssues(g.status,historyRows,'late');
     g.promised=g.historyPending?null:trcCadenceIssues(g.status,historyRows,'promised');
     g.missedIn=g.historyPending?null:trcMissedIncomingCallback(historyRows);
-    g.notConn=g.historyPending?null:trcNotConnectedStale(historyRows);
+    g.notConn=g.historyPending?null:trcNotConnectedStale(historyRows,TRC_F.from,TRC_F.to);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -1494,8 +1494,8 @@ function trcKpiHtml(rows,shownRows){
   const missedInLeads=histDone?shownLeads.filter(function(g){return g.missedIn;}).length:null;
   const cadenceLeads=histDone?shownLeads.filter(function(g){return g.cadence;}).length:null;
   const promisedLeads=histDone?shownLeads.filter(function(g){return g.promised;}).length:null;
-  const notConnL1=histDone?shownLeads.filter(function(g){return g.notConn&&g.notConn.level===1;}).length:null;
-  const notConnL2=histDone?shownLeads.filter(function(g){return g.notConn&&g.notConn.level===2;}).length:null;
+  const notConnL1=histDone?shownLeads.filter(function(g){return g.notConn&&g.notConn.levels.indexOf(1)>=0;}).length:null;
+  const notConnL2=histDone?shownLeads.filter(function(g){return g.notConn&&g.notConn.levels.indexOf(2)>=0;}).length:null;
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
       const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
       return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
@@ -1527,7 +1527,7 @@ function trcKpiHtml(rows,shownRows){
       +'<i class="fa-solid fa-hourglass-half"></i> Late follow-ups'+(cadenceLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+cadenceLeads+'</b>')+'</button>'
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<span style="font-size:12.5px;color:var(--slate)">Not connected, no follow-up in 7 days</span>'
-    +'<button class="btn btn-sm'+(TRC_F.notConn==='1'?' btn-primary':'')+'" onclick="trcToggleNotConn(\'1\')" title="The last call on the lead was not connected and nothing has been logged on it for 7 days or more. Level 1: every caller except Level 2 and Dipanwita. Not counted until the fuller lead data has loaded">'
+    +'<button class="btn btn-sm'+(TRC_F.notConn==='1'?' btn-primary':'')+'" onclick="trcToggleNotConn(\'1\')" title="A call in the selected dates was not connected and the next call came 7 or more days later, or has not come yet. Level 1: every caller except Level 2 and Dipanwita. Not counted until the fuller lead data has loaded">'
       +'<i class="fa-solid fa-phone-volume"></i> Level 1'+(notConnL1===null?(haveDetail?' <b>…</b>':''):' <b>'+notConnL1+'</b>')+'</button>'
     +'<button class="btn btn-sm'+(TRC_F.notConn==='2'?' btn-primary':'')+'" onclick="trcToggleNotConn(\'2\')" title="Same check, for the calls made by Rani, Susmita and Piyasa. Not counted until the fuller lead data has loaded">'
       +'<i class="fa-solid fa-phone-volume"></i> Level 2'+(notConnL2===null?(haveDetail?' <b>…</b>':''):' <b>'+notConnL2+'</b>')+'</button>'
@@ -1633,8 +1633,9 @@ window.trcToggleCadence=async function(){
   trcRender(true);
 };
 
-/* Two buttons, one filter: Level 1 and Level 2 are mutually exclusive views of the same check (see
-   trcNotConnectedStale), so picking one closes the other and picking the open one again clears it. */
+/* Two buttons, one filter: Level 1 and Level 2 are two views of the same check (see
+   trcNotConnectedStale; a lead missed by both levels is in both), so picking one closes the other and
+   picking the open one again clears it. */
 window.trcToggleNotConn=async function(v){
   TRC_F.notConn=(TRC_F.notConn===v?'all':v);
   if(TRC_F.notConn!=='all'){
@@ -1906,7 +1907,7 @@ function trcLeadRowHtml(g,sl){
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
           (g.regressions>1?g.regressions+' status regressions':'Status regressed')):'')
       +(g.promised?' '+trcTag('t-amber','fa-calendar-xmark','','Promised call on '+(trcWall(g.promised.gaps[g.promised.gaps.length-1].limitDate)||'')+' - no call since'):'')
-      +(g.notConn?' '+trcTag('t-amber','fa-phone-volume','','Last call not connected - no follow-up for '+g.notConn.days+' days (Level '+g.notConn.level+')'):'')
+      +(g.notConn?' '+trcTag('t-amber','fa-phone-volume','',(g.notConn.open?'Not connected - no follow-up yet, ':'Not connected - called back late, ')+g.notConn.days+' days (Level '+g.notConn.levels.join(' & ')+')'):'')
       +(g.missedIn?' '+trcTag('t-red','fa-phone-slash','',
           'Missed incoming call '+g.missedIn.count+' time'+(g.missedIn.count===1?'':'s')+' - not called back within 24 hours'):''))
     /* g.lastAssessedOutside only ever fires once g.lastAssessed itself is null (see trcLeads) - a
@@ -2025,7 +2026,7 @@ function trcRender(full,keepPage){
   if(!callLevel&&TRC_F.missedIn==='1')items=items.filter(function(g){return g.missedIn;});
   if(!callLevel&&TRC_F.cadence==='1')items=items.filter(function(g){return g.cadence;});
   if(!callLevel&&TRC_F.promised==='1')items=items.filter(function(g){return g.promised;});
-  if(!callLevel&&TRC_F.notConn!=='all')items=items.filter(function(g){return g.notConn&&String(g.notConn.level)===TRC_F.notConn;});
+  if(!callLevel&&TRC_F.notConn!=='all')items=items.filter(function(g){return g.notConn&&g.notConn.levels.indexOf(Number(TRC_F.notConn))>=0;});
   const totalItems=items.length;
   const totalPages=Math.max(1,Math.ceil(totalItems/TRC_PAGE_SIZE));
   if(!keepPage){
