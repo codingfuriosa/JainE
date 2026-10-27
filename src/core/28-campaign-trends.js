@@ -1457,7 +1457,8 @@ window.tpMpApprove=async function(id){if(!recGuard())return;
    flips status Open/Filled and is what hr.public_position (and so career-apply / career-position.html)
    gates on, so this is the real "take the page down" switch, not just a label change here. */
 window.tpMpCloseHiring=async function(id){
-  if(!await confirmDialog('Close hiring for this position? Its Careers Page will stop accepting applications immediately.'))return;
+  if(!await confirmDialog('Close hiring for this position? Its Careers Page will stop accepting applications immediately.',
+      {title:'Close hiring', okLabel:'Close Hiring', icon:'fa-lock'}))return;
   try{
     // rpc() reports a refusal in {error}; it does not throw, so it has to be looked at.
     const {error}=await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:id,p_open:false});
@@ -2359,6 +2360,7 @@ window.tpTrEmailSel=async function(){
   const noEmail=rows.length-withEmail.length;
   await rtShareCheckGmail();
   // Native tests only: a personal, trackable link can only be made for one of ours.
+  await rtLoadQCounts();
   let tests=(RT_RECORDS||[]).filter(t=>t.engine==='native');
   if(!tests.length){
     try{const {data}=await sb.schema('recruit').from('tests').select('*').eq('engine','native').order('sl');
@@ -2397,7 +2399,7 @@ window.tpTrEmailSel=async function(){
     <label style="margin-top:10px">Attach a Test <span style="font-size:11px;color:var(--slate)">(optional)</span></label>
     <select id="tpTrMailTest" class="sel">
       <option value="">\u2014 No test \u2014</option>
-      ${tests.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}
+      ${tests.map(t=>rtTestOpt(t,false)).join('')}
     </select>
     ${tests.length?`<div style="font-size:11.5px;color:var(--slate);margin-top:4px">Each candidate gets their own link, and moves to <b>Tests Sent</b> on the Monthly Update.${noCand?` ${noCand} of them ${noCand>1?'have':'has'} no candidate record, so ${noCand>1?'they':'it'} cannot be given one \u2014 ${noCand>1?'they':'it'} will still receive the message.`:''}${noTest?` ${noTest} ${noTest>1?'have':'has'} already moved past the test stage \u2014 ${noTest>1?'they':'it'} will get the message without a test link.`:''}</div>`
       :`<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No tests exist yet \u2014 create one in the Tests tab to be able to attach it here.</div>`}
@@ -2453,7 +2455,7 @@ window.tpTrEmailSelSend=async function(){
           try{
             const {data,error}=await sb.functions.invoke('recruit-test-generate-link',
               {body:{test_id:testId,candidate_id:r.candidate_id,candidate_email:r.email,origin:location.origin}});
-            if(error||data?.error)throw new Error((data&&data.error)||error.message);
+            if(error||data?.error)throw new Error(await fnErrText(error,data));
             link=data.link||'';
           }catch(e){ failed.push((r.candidate_name||r.email)+' (test link: '+((e&&e.message)||e)+')'); continue; }
         }
@@ -2740,7 +2742,9 @@ window.tpMuOpenMonth=async function(){
 // (see tpTrRender's completedRowIds check).
 window.tpMuCompleteRow=async function(id){
   if(!recGuard())return;
-  if(!await confirmDialog('Mark this position complete? Feedback will be locked for all its candidates in Interview Tracker.'))return;
+  // Its own words and colour: the default dialog says "Delete" in red, which this is not.
+  if(!await confirmDialog('Mark this position complete? Stages will be locked for all its candidates in Interviews.',
+      {title:'Complete position', okLabel:'Complete', icon:'fa-flag-checkered', danger:false}))return;
   const {error}=await sb.schema('hr').from('tracker_rows').update({completed_at:new Date().toISOString()}).eq('id',id);
   if(error){toast(error.message,'err');return;}
   toast('Marked complete');await tpMuLoad();

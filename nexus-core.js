@@ -7947,13 +7947,35 @@ function recCanWrite(){
   const dep=[].concat(p.department||r.department||[]);
   return dep.some(function(d){ return /^\s*(hr|human\s*resources?)\s*$/i.test(String(d||'')); });
 }
+/* THE SERVER'S OWN REASON, NOT "non-2xx". When an edge function refuses (e.g. "This test has no
+   questions yet"), supabase-js hands back a generic FunctionsHttpError and keeps the function's
+   JSON in error.context. Read it, so the person sees the sentence that tells them what to do. */
+async function fnErrText(error,data){
+  if(data&&data.error) return String(data.error);
+  try{ const j=await error.context.json(); if(j&&j.error) return String(j.error); }catch(_e){}
+  return String((error&&error.message)||error||'Unknown error');
+}
+/* HOW MANY QUESTIONS EACH TEST HAS. A test with none cannot be sent (the server refuses), so the
+   pickers show it as "(no questions yet)" and switch it off instead of letting it fail on Send. */
+let RT_QCOUNT={};
+async function rtLoadQCounts(){
+  RT_QCOUNT={};
+  try{ const {data}=await sb.schema('recruit').from('test_questions').select('test_id');
+       (data||[]).forEach(function(q){ RT_QCOUNT[q.test_id]=(RT_QCOUNT[q.test_id]||0)+1; }); }catch(_e){}
+  return RT_QCOUNT;
+}
+function rtTestOpt(t,selected){
+  const n=RT_QCOUNT[t.id]||0;
+  return '<option value="'+t.id+'"'+(selected?' selected':'')+(n?'':' disabled')+'>'+esc(t.name||'Untitled')+(n?'':' (no questions yet)')+'</option>';
+}
 function recGuard(){
   if(recCanWrite()) return true;
   toast('Read-only — only HR, Abhay Mati and Administrators can change Recruitment records','err');
   return false;
 }
 const REC_WRITE_FNS=['rtAdd','rtRename','rtDelete','rtSave','rtUpdate','rtShareSend',
-  'mpFillForm','mpEditSel','mpDeleteSel','mpEdit','mpDeleteOne','mpUpdate','mpSave',
+  // mpEdit/mpUpdate are not here: whoever raised a hiring request may edit it too (tpMpCanChange).
+  'mpFillForm','mpEditSel','mpDeleteSel','mpDeleteOne','mpSave','tpTrEdit','tpTrEditSave',
   'recUploadModal','recDeleteSel','recJdSave','recJdDelete',
   'tpMpApprove','tpMpReject','tpMpRejectConfirm','tpMpDeleteOne','tpMpGenerate',
   'tpRefConnect','tpRefConnectGo','tpRefReject','tpTrAdd','tpTrSave','tpTrEmailSel','tpTrEmailSelSend','tpTrDeleteSel',
@@ -14301,6 +14323,7 @@ window.rtShareCountSel=function(){
 window.rtShare=async function(fromPosition){
   if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
   await rtShareCheckGmail();
+  await rtLoadQCounts();
 
   /* WHICH TEST IS ASKED FOR, NOT ASSUMED.
 
@@ -14393,7 +14416,7 @@ window.rtShare=async function(fromPosition){
 
     ${fromPos?`<label>Test</label>
     <select id="rtShareTest" class="sel" onchange="rtShareTestChanged()">
-      ${(RT_RECORDS||[]).filter(t=>t.engine==='native').map(t=>`<option value="${t.id}"${t.id===rec.id?' selected':''}>${esc(t.name||'Untitled')}</option>`).join('')}
+      ${(RT_RECORDS||[]).filter(t=>t.engine==='native').map(t=>rtTestOpt(t,t.id===rec.id)).join('')}
     </select>`:''}
 
     <label${fromPos?'':' style="margin-top:0"'}>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
@@ -14486,11 +14509,11 @@ window.rtShareSend=async function(id){
            counts. Sending without it delivers the email and leaves every report reading zero. */
         const {data:gen,error:genErr}=await sb.functions.invoke('recruit-test-generate-link',
           {body:{test_id:id,candidate_email:to,candidate_id:who.candidateId,origin:location.origin}});
-        if(genErr||gen?.error) throw new Error((gen&&gen.error)||genErr.message);
+        if(genErr||gen?.error) throw new Error(await fnErrText(genErr,gen));
         const {data:sd,error:se}=await sb.functions.invoke('send-test-email',
           {body:{test_id:id,test_name:rec.name,link:gen.link,subject,body,recipients:[to],
                  sender_name:senderName,sender_email:state.email||''}});
-        if(se||sd?.error) throw new Error((sd&&sd.error)||se.message);
+        if(se||sd?.error) throw new Error(await fnErrText(se,sd));
         sent++; if(who.candidateId) staged++;
       }catch(e){ failed.push(to+' ('+((e&&e.message)||e)+')'); }
     }
@@ -14616,7 +14639,7 @@ window.rtResultsNative=async function(testId,showPreviews){
     };
     const scoreTag=r=>{
       if(r.status!=='submitted')return '<span style="color:var(--slate)">In progress</span>';
-      if(r.final_pct==null)return '<span style="color:#c08000">Grading '+(r.ai_status==='failed'?'failed — click to retry':'pending')+'</span>';
+      if(r.final_pct==null)return '<span style="color:#c08000">'+(r.ai_status==='failed'?'Not fully graded':'Grading pending')+'</span>';
       const col=r.pass_fail?'#16855a':'#c83232';
       return `<b style="color:${col}">${r.final_pct}%</b> <span style="font-size:11px;color:var(--slate)">(${(Number(r.mcq_score||0)+Number(r.ai_score||0))} / ${(Number(r.mcq_max||0)+Number(r.ai_max||0))})</span> — <span style="color:${col};font-weight:600">${r.pass_fail?'Pass':'Fail'}</span>`;
     };
@@ -14648,7 +14671,7 @@ window.rtResultsNative=async function(testId,showPreviews){
 };
 window.rtResultsAttemptDetail=async function(attemptId){
   const rb=$('rtResultsBody');if(!rb)return;
-  rloader(b);
+  rb.innerHTML='<div class="empty" style="padding:36px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
   try{
     // The cached row from the results list doesn't carry test_id, so the full attempt is re-fetched here.
     const{data:full}=await sb.schema('recruit').from('test_attempts').select('*').eq('id',attemptId).single();
@@ -14656,10 +14679,9 @@ window.rtResultsAttemptDetail=async function(attemptId){
     const{data:answers}=await sb.schema('recruit').from('test_answers').select('*').eq('attempt_id',attemptId);
     const byQ={}; (answers||[]).forEach(a=>byQ[a.question_id]=a);
     rb.innerHTML=`<button class="btn btn-sm" onclick="rtResultsNative(${full.test_id},${!!full.is_preview})" style="margin-bottom:12px"><i class="fa-solid fa-arrow-left"></i> Back to ${full.is_preview?'Previews':'Results'}</button>
+      <!-- No Retry / Re-grade button (removed 27 Oct 2026 at HR's request): grading is done once,
+           when the candidate submits. -->
       <div style="font-size:13px;color:var(--slate);margin-bottom:14px">${esc(full.candidate_email||'—')} · ${full.final_pct!=null?full.final_pct+'% — '+(full.pass_fail?'Pass':'Fail'):'Not yet graded'}
-        ${(full.mcq_max==null||Number(full.ai_max||0)>0)?`<button class="btn btn-sm" style="margin-left:8px"
-            title="${full.ai_status==='failed'?'Grading did not finish — run it again':'Mark the written answers again'}"
-            onclick="rtRegradeAttempt('${attemptId}')"><i class="fa-solid fa-rotate"></i> ${full.ai_status==='failed'?'Retry grading':'Re-grade'}</button>`:''}
       </div>
       ${(qs||[]).map((q,i)=>{
         const a=byQ[q.id]||{};
@@ -15135,8 +15157,10 @@ function mpRefreshList(){
   if(PAGE==='recruitment_new'&&typeof tpManpower==='function'){ tpManpower(); return; }
   recManpower();
 }
-window.mpEdit=function(id){if(!recGuard())return;
+// HR, or whoever raised the request (tpMpCanChange) - the database still refuses once anybody is on it.
+window.mpEdit=function(id){
   const rec=(MP_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
+  if(typeof tpMpCanChange==='function'?!tpMpCanChange(rec):!recCanWrite()){toast('Only HR or whoever raised this request can edit it','err');return;}
   mpModal('Edit Hiring Request',rec,`<button class="btn btn-primary" id="mpSaveBtn" onclick="mpUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button>`);
 };
 window.mpUpdate=async function(id){
@@ -16282,12 +16306,7 @@ window.recJdSave=async function(){
   const {error:de}=await sb.schema('recruit').from('job_descriptions').insert({name,storage_path:upData.path,file_name:file.name,file_size:file.size,uploaded_by:state.email});
   if(de){toast(de.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';}return;}
   closeModal();toast(name+' uploaded','ok');recLoadJDs($('view'));
-  /* The three HRs are told, with the file attached. A description sitting in a library nobody has
-     been pointed at is the same as not having one, and this is the moment there is something to
-     point at. Sent from ai@ because nobody decided this - it happened, and they are being told. */
-  const r=await hrNotify({kind:'job_description_created',title:name,
-    created_by:state.email||'',storage_path:upData.path});
-  if(r&&r.ok) toast('The HR team has been emailed the description','ok');
+  /* NO EMAIL ANY MORE (27 Oct 2026) - the approval task in Accountability is the notice. */
 };
 window.recDownloadSel=async function(){
   let jds=[];try{const {data}=await sb.schema('recruit').from('job_descriptions').select('*');jds=data||[];}catch(e){}
@@ -17803,7 +17822,8 @@ window.tpMpApprove=async function(id){if(!recGuard())return;
    flips status Open/Filled and is what hr.public_position (and so career-apply / career-position.html)
    gates on, so this is the real "take the page down" switch, not just a label change here. */
 window.tpMpCloseHiring=async function(id){
-  if(!await confirmDialog('Close hiring for this position? Its Careers Page will stop accepting applications immediately.'))return;
+  if(!await confirmDialog('Close hiring for this position? Its Careers Page will stop accepting applications immediately.',
+      {title:'Close hiring', okLabel:'Close Hiring', icon:'fa-lock'}))return;
   try{
     // rpc() reports a refusal in {error}; it does not throw, so it has to be looked at.
     const {error}=await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:id,p_open:false});
@@ -18705,6 +18725,7 @@ window.tpTrEmailSel=async function(){
   const noEmail=rows.length-withEmail.length;
   await rtShareCheckGmail();
   // Native tests only: a personal, trackable link can only be made for one of ours.
+  await rtLoadQCounts();
   let tests=(RT_RECORDS||[]).filter(t=>t.engine==='native');
   if(!tests.length){
     try{const {data}=await sb.schema('recruit').from('tests').select('*').eq('engine','native').order('sl');
@@ -18743,7 +18764,7 @@ window.tpTrEmailSel=async function(){
     <label style="margin-top:10px">Attach a Test <span style="font-size:11px;color:var(--slate)">(optional)</span></label>
     <select id="tpTrMailTest" class="sel">
       <option value="">\u2014 No test \u2014</option>
-      ${tests.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}
+      ${tests.map(t=>rtTestOpt(t,false)).join('')}
     </select>
     ${tests.length?`<div style="font-size:11.5px;color:var(--slate);margin-top:4px">Each candidate gets their own link, and moves to <b>Tests Sent</b> on the Monthly Update.${noCand?` ${noCand} of them ${noCand>1?'have':'has'} no candidate record, so ${noCand>1?'they':'it'} cannot be given one \u2014 ${noCand>1?'they':'it'} will still receive the message.`:''}${noTest?` ${noTest} ${noTest>1?'have':'has'} already moved past the test stage \u2014 ${noTest>1?'they':'it'} will get the message without a test link.`:''}</div>`
       :`<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No tests exist yet \u2014 create one in the Tests tab to be able to attach it here.</div>`}
@@ -18799,7 +18820,7 @@ window.tpTrEmailSelSend=async function(){
           try{
             const {data,error}=await sb.functions.invoke('recruit-test-generate-link',
               {body:{test_id:testId,candidate_id:r.candidate_id,candidate_email:r.email,origin:location.origin}});
-            if(error||data?.error)throw new Error((data&&data.error)||error.message);
+            if(error||data?.error)throw new Error(await fnErrText(error,data));
             link=data.link||'';
           }catch(e){ failed.push((r.candidate_name||r.email)+' (test link: '+((e&&e.message)||e)+')'); continue; }
         }
@@ -19086,7 +19107,9 @@ window.tpMuOpenMonth=async function(){
 // (see tpTrRender's completedRowIds check).
 window.tpMuCompleteRow=async function(id){
   if(!recGuard())return;
-  if(!await confirmDialog('Mark this position complete? Feedback will be locked for all its candidates in Interview Tracker.'))return;
+  // Its own words and colour: the default dialog says "Delete" in red, which this is not.
+  if(!await confirmDialog('Mark this position complete? Stages will be locked for all its candidates in Interviews.',
+      {title:'Complete position', okLabel:'Complete', icon:'fa-flag-checkered', danger:false}))return;
   const {error}=await sb.schema('hr').from('tracker_rows').update({completed_at:new Date().toISOString()}).eq('id',id);
   if(error){toast(error.message,'err');return;}
   toast('Marked complete');await tpMuLoad();

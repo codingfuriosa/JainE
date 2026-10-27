@@ -1264,6 +1264,7 @@ window.rtShareCountSel=function(){
 window.rtShare=async function(fromPosition){
   if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
   await rtShareCheckGmail();
+  await rtLoadQCounts();
 
   /* WHICH TEST IS ASKED FOR, NOT ASSUMED.
 
@@ -1356,7 +1357,7 @@ window.rtShare=async function(fromPosition){
 
     ${fromPos?`<label>Test</label>
     <select id="rtShareTest" class="sel" onchange="rtShareTestChanged()">
-      ${(RT_RECORDS||[]).filter(t=>t.engine==='native').map(t=>`<option value="${t.id}"${t.id===rec.id?' selected':''}>${esc(t.name||'Untitled')}</option>`).join('')}
+      ${(RT_RECORDS||[]).filter(t=>t.engine==='native').map(t=>rtTestOpt(t,t.id===rec.id)).join('')}
     </select>`:''}
 
     <label${fromPos?'':' style="margin-top:0"'}>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
@@ -1449,11 +1450,11 @@ window.rtShareSend=async function(id){
            counts. Sending without it delivers the email and leaves every report reading zero. */
         const {data:gen,error:genErr}=await sb.functions.invoke('recruit-test-generate-link',
           {body:{test_id:id,candidate_email:to,candidate_id:who.candidateId,origin:location.origin}});
-        if(genErr||gen?.error) throw new Error((gen&&gen.error)||genErr.message);
+        if(genErr||gen?.error) throw new Error(await fnErrText(genErr,gen));
         const {data:sd,error:se}=await sb.functions.invoke('send-test-email',
           {body:{test_id:id,test_name:rec.name,link:gen.link,subject,body,recipients:[to],
                  sender_name:senderName,sender_email:state.email||''}});
-        if(se||sd?.error) throw new Error((sd&&sd.error)||se.message);
+        if(se||sd?.error) throw new Error(await fnErrText(se,sd));
         sent++; if(who.candidateId) staged++;
       }catch(e){ failed.push(to+' ('+((e&&e.message)||e)+')'); }
     }
@@ -1579,7 +1580,7 @@ window.rtResultsNative=async function(testId,showPreviews){
     };
     const scoreTag=r=>{
       if(r.status!=='submitted')return '<span style="color:var(--slate)">In progress</span>';
-      if(r.final_pct==null)return '<span style="color:#c08000">Grading '+(r.ai_status==='failed'?'failed — click to retry':'pending')+'</span>';
+      if(r.final_pct==null)return '<span style="color:#c08000">'+(r.ai_status==='failed'?'Not fully graded':'Grading pending')+'</span>';
       const col=r.pass_fail?'#16855a':'#c83232';
       return `<b style="color:${col}">${r.final_pct}%</b> <span style="font-size:11px;color:var(--slate)">(${(Number(r.mcq_score||0)+Number(r.ai_score||0))} / ${(Number(r.mcq_max||0)+Number(r.ai_max||0))})</span> — <span style="color:${col};font-weight:600">${r.pass_fail?'Pass':'Fail'}</span>`;
     };
@@ -1611,7 +1612,7 @@ window.rtResultsNative=async function(testId,showPreviews){
 };
 window.rtResultsAttemptDetail=async function(attemptId){
   const rb=$('rtResultsBody');if(!rb)return;
-  rloader(b);
+  rb.innerHTML='<div class="empty" style="padding:36px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
   try{
     // The cached row from the results list doesn't carry test_id, so the full attempt is re-fetched here.
     const{data:full}=await sb.schema('recruit').from('test_attempts').select('*').eq('id',attemptId).single();
@@ -1619,10 +1620,9 @@ window.rtResultsAttemptDetail=async function(attemptId){
     const{data:answers}=await sb.schema('recruit').from('test_answers').select('*').eq('attempt_id',attemptId);
     const byQ={}; (answers||[]).forEach(a=>byQ[a.question_id]=a);
     rb.innerHTML=`<button class="btn btn-sm" onclick="rtResultsNative(${full.test_id},${!!full.is_preview})" style="margin-bottom:12px"><i class="fa-solid fa-arrow-left"></i> Back to ${full.is_preview?'Previews':'Results'}</button>
+      <!-- No Retry / Re-grade button (removed 27 Oct 2026 at HR's request): grading is done once,
+           when the candidate submits. -->
       <div style="font-size:13px;color:var(--slate);margin-bottom:14px">${esc(full.candidate_email||'—')} · ${full.final_pct!=null?full.final_pct+'% — '+(full.pass_fail?'Pass':'Fail'):'Not yet graded'}
-        ${(full.mcq_max==null||Number(full.ai_max||0)>0)?`<button class="btn btn-sm" style="margin-left:8px"
-            title="${full.ai_status==='failed'?'Grading did not finish — run it again':'Mark the written answers again'}"
-            onclick="rtRegradeAttempt('${attemptId}')"><i class="fa-solid fa-rotate"></i> ${full.ai_status==='failed'?'Retry grading':'Re-grade'}</button>`:''}
       </div>
       ${(qs||[]).map((q,i)=>{
         const a=byQ[q.id]||{};
@@ -2098,8 +2098,10 @@ function mpRefreshList(){
   if(PAGE==='recruitment_new'&&typeof tpManpower==='function'){ tpManpower(); return; }
   recManpower();
 }
-window.mpEdit=function(id){if(!recGuard())return;
+// HR, or whoever raised the request (tpMpCanChange) - the database still refuses once anybody is on it.
+window.mpEdit=function(id){
   const rec=(MP_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
+  if(typeof tpMpCanChange==='function'?!tpMpCanChange(rec):!recCanWrite()){toast('Only HR or whoever raised this request can edit it','err');return;}
   mpModal('Edit Hiring Request',rec,`<button class="btn btn-primary" id="mpSaveBtn" onclick="mpUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button>`);
 };
 window.mpUpdate=async function(id){
@@ -3245,12 +3247,7 @@ window.recJdSave=async function(){
   const {error:de}=await sb.schema('recruit').from('job_descriptions').insert({name,storage_path:upData.path,file_name:file.name,file_size:file.size,uploaded_by:state.email});
   if(de){toast(de.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';}return;}
   closeModal();toast(name+' uploaded','ok');recLoadJDs($('view'));
-  /* The three HRs are told, with the file attached. A description sitting in a library nobody has
-     been pointed at is the same as not having one, and this is the moment there is something to
-     point at. Sent from ai@ because nobody decided this - it happened, and they are being told. */
-  const r=await hrNotify({kind:'job_description_created',title:name,
-    created_by:state.email||'',storage_path:upData.path});
-  if(r&&r.ok) toast('The HR team has been emailed the description','ok');
+  /* NO EMAIL ANY MORE (27 Oct 2026) - the approval task in Accountability is the notice. */
 };
 window.recDownloadSel=async function(){
   let jds=[];try{const {data}=await sb.schema('recruit').from('job_descriptions').select('*');jds=data||[];}catch(e){}

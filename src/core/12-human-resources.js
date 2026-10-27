@@ -24,13 +24,35 @@ function recCanWrite(){
   const dep=[].concat(p.department||r.department||[]);
   return dep.some(function(d){ return /^\s*(hr|human\s*resources?)\s*$/i.test(String(d||'')); });
 }
+/* THE SERVER'S OWN REASON, NOT "non-2xx". When an edge function refuses (e.g. "This test has no
+   questions yet"), supabase-js hands back a generic FunctionsHttpError and keeps the function's
+   JSON in error.context. Read it, so the person sees the sentence that tells them what to do. */
+async function fnErrText(error,data){
+  if(data&&data.error) return String(data.error);
+  try{ const j=await error.context.json(); if(j&&j.error) return String(j.error); }catch(_e){}
+  return String((error&&error.message)||error||'Unknown error');
+}
+/* HOW MANY QUESTIONS EACH TEST HAS. A test with none cannot be sent (the server refuses), so the
+   pickers show it as "(no questions yet)" and switch it off instead of letting it fail on Send. */
+let RT_QCOUNT={};
+async function rtLoadQCounts(){
+  RT_QCOUNT={};
+  try{ const {data}=await sb.schema('recruit').from('test_questions').select('test_id');
+       (data||[]).forEach(function(q){ RT_QCOUNT[q.test_id]=(RT_QCOUNT[q.test_id]||0)+1; }); }catch(_e){}
+  return RT_QCOUNT;
+}
+function rtTestOpt(t,selected){
+  const n=RT_QCOUNT[t.id]||0;
+  return '<option value="'+t.id+'"'+(selected?' selected':'')+(n?'':' disabled')+'>'+esc(t.name||'Untitled')+(n?'':' (no questions yet)')+'</option>';
+}
 function recGuard(){
   if(recCanWrite()) return true;
   toast('Read-only — only HR, Abhay Mati and Administrators can change Recruitment records','err');
   return false;
 }
 const REC_WRITE_FNS=['rtAdd','rtRename','rtDelete','rtSave','rtUpdate','rtShareSend',
-  'mpFillForm','mpEditSel','mpDeleteSel','mpEdit','mpDeleteOne','mpUpdate','mpSave',
+  // mpEdit/mpUpdate are not here: whoever raised a hiring request may edit it too (tpMpCanChange).
+  'mpFillForm','mpEditSel','mpDeleteSel','mpDeleteOne','mpSave','tpTrEdit','tpTrEditSave',
   'recUploadModal','recDeleteSel','recJdSave','recJdDelete',
   'tpMpApprove','tpMpReject','tpMpRejectConfirm','tpMpDeleteOne','tpMpGenerate',
   'tpRefConnect','tpRefConnectGo','tpRefReject','tpTrAdd','tpTrSave','tpTrEmailSel','tpTrEmailSelSend','tpTrDeleteSel',
