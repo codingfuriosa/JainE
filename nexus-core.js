@@ -424,7 +424,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'15e707e991','insp-items.js':'af05d4a323','postsales.js':'149a60e1a2','scheduling.js':'50da5d7188','accounts.js':'c31ffa60bc','accounts-bank.js':'ea9648a540','accounts-books.js':'ed1ddeecec','purchase.js':'8109127afb','purchase-indent.js':'f6a398b898','purchase-rfq.js':'e6b7d700d5','purchase-po.js':'7239d968b5','purchase-stores.js':'5ff625e1d0','purchase-reports.js':'62c2dbe660'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'8a94a7e34b','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -17463,45 +17463,39 @@ let TP_MP_APPLIED={};
    nothing is deleted by accident. */
 let TP_MP_CAND={};
 function tpMpCandOf(id){ return TP_MP_CAND[id]||{n:0,started:0}; }
+/* Counted by the database (hr.request_candidate_counts), not read from hr.candidates here: the
+   person who raised a request cannot read candidates - that is HR's - but they still have to be
+   told that their request is locked. The same count is what the database itself refuses on. */
 async function tpMpLoadApplied(){
   TP_MP_APPLIED={}; TP_MP_CAND={};
-  const byTitle={};
-  (MP_RECORDS||[]).forEach(function(r){
-    TP_MP_CAND[r.id]={n:0,started:0};
-    const t=String(r.job_title||'').trim().toLowerCase();
-    if(t) byTitle[t]=r.id;
-  });
+  (MP_RECORDS||[]).forEach(function(r){ TP_MP_CAND[r.id]={n:0,started:0}; });
   try{
-    const {data,error}=await sb.schema('hr').from('candidates')
-      .select('manpower_request_id,position,max_stage_seq');
+    const {data,error}=await sb.schema('hr').rpc('request_candidate_counts');
     if(error) throw error;
     (data||[]).forEach(function(c){
-      if(c.manpower_request_id!=null)
-        TP_MP_APPLIED[c.manpower_request_id]=(TP_MP_APPLIED[c.manpower_request_id]||0)+1;
-      let id=c.manpower_request_id;
-      if(id==null||!TP_MP_CAND[id]){
-        const t=String(c.position||'').trim().toLowerCase();
-        id=t?byTitle[t]:undefined;
-      }
-      const slot=(id!=null)?TP_MP_CAND[id]:null;
-      if(!slot) return;
-      slot.n++;
-      if(Number(c.max_stage_seq||0)>0) slot.started++;
+      const slot=TP_MP_CAND[c.manpower_request_id]; if(!slot) return;
+      slot.n=Number(c.n)||0;
+      TP_MP_APPLIED[c.manpower_request_id]=slot.n;
     });
   }catch(_e){ /* leave it empty - see above */ }
 }
+/* WHO MAY EDIT OR DELETE A REQUEST: HR, and whoever raised it - and nobody once a candidate is on
+   it. The person who asked for the hire can still correct or withdraw it until it is under way. */
+function tpMpMine(r){ return !!r && String(r.raised_by||'').trim().toLowerCase()===String(state.email||'').trim().toLowerCase(); }
+function tpMpCanChange(r){ return !!r && (recCanWrite()||tpMpMine(r)); }
 function tpMpRender(){
   const b=$('recBody'); if(!b)return;
   const rows=MP_RECORDS||[];
   const canOpen=recCanWrite();
+  // The tick column and Edit/Delete are for anybody who may change at least one row on the list.
+  const canTick=canOpen||rows.some(tpMpMine);
   /* Ticks that no longer match a visible row are dropped, so deleting a request cannot leave a
      phantom in the count. */
-  TP_MP_SEL=new Set([...TP_MP_SEL].filter(id=>rows.some(r=>r.id===id)));
+  TP_MP_SEL=new Set([...TP_MP_SEL].filter(id=>rows.some(r=>r.id===id&&tpMpCanChange(r))));
   const nSel=TP_MP_SEL.size;
-  /* A POSITION WHOSE CANDIDATES HAVE STARTED THEIR STAGES CANNOT BE DELETED, and the button says
-     so before it is pressed. Deleting it would leave people halfway through interviews for a job
-     that no longer exists anywhere in the portal. */
-  const delBlocked=[...TP_MP_SEL].filter(id=>tpMpCandOf(id).started>0)
+  /* A POSITION WITH ANYBODY ON IT CANNOT BE DELETED, and the button says so before it is pressed.
+     Deleting it would leave people mid-process for a job that no longer exists anywhere. */
+  const delBlocked=[...TP_MP_SEL].filter(id=>tpMpCandOf(id).n>0)
     .map(id=>(rows.find(r=>r.id===id)||{}).job_title||('#'+id));
   const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
   b.innerHTML=TP_NOTE_CSS+`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
@@ -17517,7 +17511,7 @@ function tpMpRender(){
          it cannot be pressed is in the tooltip, and the row does not move when it becomes live.
          Edit takes exactly one, because there is nothing sensible to show for two at once. -->
     <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      ${canOpen?(function(){
+      ${canTick?(function(){
         /* A POSITION WITH APPLICANTS CANNOT BE EDITED, AND THE BUTTON SAYS SO BEFORE IT IS CLICKED.
            People applied to the role as it was written; changing the title or the pay afterwards
            would quietly turn them into candidates for something else. The database refuses it too
@@ -17534,7 +17528,7 @@ function tpMpRender(){
           onclick="tpMpEditSel()">${applied&&nSel===1?'<i class="fa-solid fa-lock"></i>':'<i class="fa-solid fa-pen"></i>'} Edit</button>`;
       })()+`
         <button class="btn" ${nSel&&!delBlocked.length?'style="color:var(--err);border-color:var(--err)"':'disabled style="opacity:.45;cursor:not-allowed"'}
-          title="${delBlocked.length?('Locked \u2014 candidates for '+delBlocked.join(', ')+' have already started their stages')
+          title="${delBlocked.length?('Locked \u2014 '+delBlocked.join(', ')+' already has candidates')
             :(nSel?('Delete the '+nSel+' ticked request'+(nSel===1?'':'s')):'Tick at least one request to delete it')}"
           onclick="tpMpDeleteSel()">${delBlocked.length?'<i class="fa-solid fa-lock"></i>':'<i class="fa-solid fa-trash"></i>'} Delete</button>`:''}
       <button class="btn btn-primary" onclick="tpMpFillForm()"><i class="fa-solid fa-plus"></i> New Request</button>
@@ -17543,7 +17537,7 @@ function tpMpRender(){
   <!-- There used to be no Open button: the row itself was clickable, and the only hint was the
        mouse cursor changing. Nobody discovers that, and nothing on screen said a panel would
        appear, so the request looked like a dead list. The action is now a button that says Open. -->
-  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">${canOpen?'Open a request to read its job description, approve it or reject it.':'Anyone can raise a request here. Opening one is limited to HR, Abhay Mati and Administrators.'}</div>
+  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">${canOpen?'Click a request to open it below. <b>Details</b> shows the candidates on that position.':'Anyone can raise a request here. You can edit or delete your own until a candidate is on it.'}</div>
   <div style="overflow-x:auto">
   <table class="tbl" id="tpMpTbl">
     <!-- COLUMNS CHOSEN FOR WHAT SOMEBODY SCANS THIS LIST TO FIND OUT: which job, for which
@@ -17554,7 +17548,7 @@ function tpMpRender(){
          mostly "Not Urgent", and both columns are gone. Location and Raised By took their place.
          Status went the same way: a description written for a position is published and linked
          straight away, so there is no approval left for a column to report. -->
-    <thead><tr>${canOpen?'<th style="width:34px;text-align:center"><input type="checkbox" onchange="tpMpToggleAll(this)"></th>':''}<th>Job Title</th><th>Department</th><th>Location</th><th>Raised By</th><th>Date</th>${canOpen?'<th style="width:90px"></th>':''}</tr></thead>
+    <thead><tr>${canTick?'<th style="width:34px;text-align:center"><input type="checkbox" onchange="tpMpToggleAll(this)"></th>':''}<th>Job Title</th><th>Department</th><th>Location</th><th>Raised By</th><th>Date</th>${canOpen?'<th style="width:90px"></th>':''}</tr></thead>
     <!-- CLICKING A ROW SHOWS THE PEOPLE ON THAT POSITION, the same way a Monthly Progress row
          does. A hiring request is a position, and the question you usually have of one is "who
          have we got for it" - which meant going to Interviews and filtering by hand. The tick box
@@ -17562,17 +17556,22 @@ function tpMpRender(){
     <!-- A POSITION WITH NOBODY ON IT DOES NOT OPEN. It used to go to an empty filtered list,
          which reads as a broken screen rather than as "no applicants yet" - so the row stays put
          and the tooltip says why. -->
-    <tbody>${rows.length?rows.map(r=>{const cd=tpMpCandOf(r.id);return `<tr class="tp-mp-row${cd.n?' tp-mp-click':''}" data-id="${r.id}"
-      ${cd.n?`onclick="tpMuOpenPeople(${esc(JSON.stringify(r.job_title||''))})"`:''}
-      title="${cd.n?('See the '+cd.n+' candidate'+(cd.n===1?'':'s')+' on '+esc(r.job_title||'this position')):'Nobody has applied for this position yet'}">
-      ${canOpen?`<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="tp-mp-cb" value="${r.id}"${TP_MP_SEL.has(r.id)?' checked':''} onchange="tpMpPick(${r.id},this.checked)"></td>`:''}
+    <!-- THE ROW OPENS THE REQUEST; DETAILS OPENS ITS CANDIDATES. Clicking the row shows the request
+         in the section below the table (HR only). The Details button takes you to Interviews,
+         filtered to this position, and is switched off while nobody is on it. -->
+    <tbody>${rows.length?rows.map(r=>{const cd=tpMpCandOf(r.id);return `<tr class="tp-mp-row${canOpen?' tp-mp-click':''}" data-id="${r.id}"
+      ${canOpen?`onclick="tpMpShowDetail(${r.id})"`:''}
+      title="${canOpen?'Open this request below':''}">
+      ${canTick?`<td style="text-align:center" onclick="event.stopPropagation()">${tpMpCanChange(r)?`<input type="checkbox" class="tp-mp-cb" value="${r.id}"${TP_MP_SEL.has(r.id)?' checked':''} onchange="tpMpPick(${r.id},this.checked)">`:''}</td>`:''}
       <td style="font-weight:600">${esc(r.job_title||'—')}${r.priority==='Urgent'?' <span class="tag t-red" style="font-size:10px">Urgent</span>':''}</td>
       <td>${esc(r.department||'—')}</td>
       <td style="font-size:12px">${esc(r.location||'—')}</td>
       <td style="font-size:12px;color:var(--slate);overflow-wrap:anywhere">${esc(r.raised_by||'—')}</td>
       <td style="color:var(--slate);font-size:12px;white-space:nowrap">${esc(mpFmtDate(r.date_of_request))}</td>
-      ${canOpen?`<td style="text-align:right" onclick="event.stopPropagation()"><button class="btn btn-sm" style="font-size:12px" onclick="tpMpShowDetail(${r.id})"><i class="fa-solid fa-eye"></i> Details</button></td>`:''}
-    </tr>`;}).join(''):`<tr><td colspan="${canOpen?7:5}" style="text-align:center;padding:40px;color:var(--slate)">No hiring requests yet — click <b>New Request</b> to raise one</td></tr>`}
+      ${canOpen?`<td style="text-align:right" onclick="event.stopPropagation()"><button class="btn btn-sm" style="font-size:12px${cd.n?'':';opacity:.45;cursor:not-allowed'}" ${cd.n?'':'disabled'}
+        title="${cd.n?('See the '+cd.n+' candidate'+(cd.n===1?'':'s')+' on '+esc(r.job_title||'this position')):'Nobody is on this position yet'}"
+        onclick="tpMuOpenPeople(${esc(JSON.stringify(r.job_title||''))})"><i class="fa-solid fa-users"></i> Details</button></td>`:''}
+    </tr>`;}).join(''):`<tr><td colspan="${(canTick?1:0)+5+(canOpen?1:0)}" style="text-align:center;padding:40px;color:var(--slate)">No hiring requests yet — click <b>New Request</b> to raise one</td></tr>`}
     </tbody>
   </table>
   </div>
@@ -17581,12 +17580,12 @@ function tpMpRender(){
 let TP_MP_SEL=new Set();
 window.tpMpPick=function(id,on){ if(on)TP_MP_SEL.add(id); else TP_MP_SEL.delete(id); tpMpRender(); };
 window.tpMpToggleAll=function(el){
-  if(el.checked)(MP_RECORDS||[]).forEach(r=>TP_MP_SEL.add(r.id)); else TP_MP_SEL.clear();
+  if(el.checked)(MP_RECORDS||[]).filter(tpMpCanChange).forEach(r=>TP_MP_SEL.add(r.id)); else TP_MP_SEL.clear();
   tpMpRender();
 };
 window.tpMpEditSel=function(){
-  if(!recGuard())return;
   const id=[...TP_MP_SEL][0]; if(id==null){toast('Tick a request first','err');return;}
+  if(!tpMpCanChange((MP_RECORDS||[]).find(r=>r.id===id))){toast('Only HR or whoever raised this request can edit it','err');return;}
   // The button is already disabled for this; the check is here for a screen left open while
   // somebody else's application landed.
   const applied=TP_MP_APPLIED[id]||0;
@@ -17598,15 +17597,15 @@ window.tpMpEditSel=function(){
   mpEdit(id);
 };
 window.tpMpDeleteSel=async function(){
-  if(!recGuard())return;
   const ids=[...TP_MP_SEL]; if(!ids.length){toast('Tick a request first','err');return;}
+  if(ids.some(id=>!tpMpCanChange((MP_RECORDS||[]).find(r=>r.id===id)))){toast('Only HR or whoever raised a request can delete it','err');return;}
   // The button is already switched off for this; the check is here for a screen left open while
-  // somebody else moved a candidate forward.
-  const held=ids.filter(id=>tpMpCandOf(id).started>0)
+  // somebody's application landed. The database refuses it as well.
+  const held=ids.filter(id=>tpMpCandOf(id).n>0)
     .map(id=>((MP_RECORDS||[]).find(r=>r.id===id)||{}).job_title||('#'+id));
   if(held.length){
-    toast('Cannot delete '+held.join(', ')+' \u2014 candidates for '
-          +(held.length===1?'it':'them')+' have already started their stages','err');
+    toast('Cannot delete '+held.join(', ')+' \u2014 '
+          +(held.length===1?'it already has':'they already have')+' candidates','err');
     return;
   }
   /* Says what else goes, because it is not obvious: the approval tasks are about the request and
@@ -17647,18 +17646,9 @@ window.tpMpSave=async function(){
     const rec=(MP_RECORDS||[]).find(r=>r.id===data.id);if(!rec)return;
     if(error||!gen||gen.error){rec.ai_status='failed';return;}
     rec.ai_status='ready';rec.ai_job_description=gen.job_description;rec.ai_job_description_json=gen.job_description_json;rec.ai_platform_post_text=gen.platform_post_text;rec.ai_creative_path=gen.creative_path;
-    /* THE EMAIL WAS ONLY EVER WIRED TO A MANUAL UPLOAD.
-
-       Most job descriptions are not uploaded - they are written from a hiring request, by AI, the
-       moment the request is raised. That path told nobody, so raising a position produced a
-       description that existed and a notification that did not. This is the point at which there
-       is something to tell them about: the text exists and is on the record.
-
-       There is no file to attach here. A description written in JAIN-E is text, and the PDF is
-       built on demand, so the text travels in the body rather than promising an attachment that
-       was never created. */
-    hrNotify({kind:'job_description_created',title:rec.job_title||'Untitled',
-              created_by:state.email||'',content_text:gen.job_description||''});
+    /* NO EMAIL ANY MORE (27 Oct 2026). A new description used to be mailed to HR here; the
+       approval task in Accountability already tells them, so the mail was a second copy of the
+       same news. */
   });
 };
 /* thejaingroup.com does NOT serve this repo (confirmed live: career-position.html there falls back
@@ -17815,14 +17805,17 @@ window.tpMpApprove=async function(id){if(!recGuard())return;
 window.tpMpCloseHiring=async function(id){
   if(!await confirmDialog('Close hiring for this position? Its Careers Page will stop accepting applications immediately.'))return;
   try{
-    await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:id,p_open:false});
+    // rpc() reports a refusal in {error}; it does not throw, so it has to be looked at.
+    const {error}=await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:id,p_open:false});
+    if(error) throw new Error(error.message);
     const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx].status='Filled';
     toast('Hiring closed');tpMpRender();tpMpShowDetail(id);
   }catch(e){toast('Could not close hiring: '+((e&&e.message)||e),'err');}
 };
 window.tpMpReopenHiring=async function(id){
   try{
-    await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:id,p_open:true});
+    const {error}=await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:id,p_open:true});
+    if(error) throw new Error(error.message);
     const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx].status='Open';
     toast('Hiring reopened');tpMpRender();tpMpShowDetail(id);
   }catch(e){toast('Could not reopen hiring: '+((e&&e.message)||e),'err');}
@@ -18239,7 +18232,9 @@ const TP_STAGES=['Tests Sent','Test Passed','Interview Scheduled','Interview Don
    What is left is the three outcomes only HR knows about, because they come from talking to the
    person rather than from anything the system can see: they accepted, they are on hold, they
    walked away. Listed in the order they are most often needed rather than alphabetically. */
-const TP_STAGES_SELECTABLE=['Joined','Hold','Backed Out'];
+// Selected added back on 27 Oct 2026 at HR's request: they sometimes know the outcome before the
+// interviewer records it on the task.
+const TP_STAGES_SELECTABLE=['Selected','Joined','Hold','Backed Out'];
 let TP_TR_RECORDS=null, TP_TR_SEL=new Set(), TP_TR_COMPLETED_ROWS=new Set();
 /* Set by a click on a Monthly Progress row, read once by the Interviews list, and cleared the
    moment it is used - so it filters the visit it was meant for and does not quietly persist into
@@ -18257,7 +18252,7 @@ async function tpTracker(){
     // Two FKs exist between these tables now (candidates.tracker_id -> interview_tracker, and
     // interview_tracker.candidate_id -> candidates), so PostgREST can no longer guess which one an
     // unqualified embed means - named explicitly by the FK that actually points the way we want.
-    const {data,error}=await sb.schema('hr').from('interview_tracker').select('*,candidates!interview_tracker_candidate_id_fkey(tracker_row_id,approval_status)').order('id',{ascending:false});
+    const {data,error}=await sb.schema('hr').from('interview_tracker').select('*,candidates!interview_tracker_candidate_id_fkey(tracker_row_id,approval_status,resume_id)').order('id',{ascending:false});
     if(error)throw error; TP_TR_RECORDS=data||[];
     /* Loaded here, with the list, rather than after the Add window is already open. Fetching them
        afterwards meant the Source dropdown was empty the first time anybody used it and filled in
@@ -18315,6 +18310,7 @@ function tpTrRender(){
     <div class="sec-title" style="margin:0">Interviews <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="tpTrAdd()"><i class="fa-solid fa-plus"></i> Add</button>
+      ${canAct?`<button class="btn" id="tpTrEditBtn" disabled style="opacity:.4" title="Tick one hand-added candidate to edit their details" onclick="tpTrEdit()"><i class="fa-solid fa-pen"></i> Edit</button>`:''}
       ${canMail?`<button class="btn" id="tpTrEmailBtn" disabled style="opacity:.4" onclick="tpTrEmailSel()"><i class="fa-solid fa-envelope"></i> Email</button>`:''}
       ${canAct?`<button class="btn" id="tpTrDelBtn" disabled style="opacity:.4;color:var(--err);border-color:var(--err)" onclick="tpTrDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
     </div>
@@ -18323,7 +18319,7 @@ function tpTrRender(){
     <i class="fa-solid fa-filter"></i> Showing only <b>${esc(posFilter)}</b> — ${rows.length} of ${all.length}
     <button class="btn btn-sm" style="margin-left:auto;padding:2px 10px" onclick="tpTrClearPosFilter()">Show all</button>
   </div>`:''}
-  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Only Hold candidates from before today, plus fresh ones from Approved Referrals or added directly here.</div>
+  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Everyone who applied on the Careers page, was uploaded as a CV, was referred, or was added here by hand.</div>
   <div style="overflow-x:auto"><table class="tbl" style="min-width:1200px">
     <thead><tr>
       ${canAct?'<th style="width:32px"><input type="checkbox" onchange="tpTrToggleAll(this)"></th>':''}
@@ -18431,7 +18427,7 @@ function tpTrRender(){
           </select>`;
         })()}</td>
       <td class="tp-note" title="${esc(r.notes||'')}">${esc(r.notes||'—')}</td>
-    </tr>`).join(''):`<tr><td colspan="${canAct?9:8}" style="text-align:center;padding:40px;color:var(--slate)">No candidates yet — click <b>Add Candidate</b></td></tr>`}
+    </tr>`).join(''):`<tr><td colspan="${canAct?10:9}" style="text-align:center;padding:40px;color:var(--slate)">No candidates yet — click <b>Add</b></td></tr>`}
     </tbody>
   </table></div>`;
 }
@@ -18439,10 +18435,60 @@ window.tpTrToggleAll=function(el){document.querySelectorAll('.tp-tr-cb').forEach
 window.tpTrRowCheck=function(cb){const id=Number(cb.dataset.id);if(cb.checked)TP_TR_SEL.add(id);else TP_TR_SEL.delete(id);tpTrSyncToolbar();};
 function tpTrSyncToolbar(){
   const n=TP_TR_SEL.size;
-  const eb=$('tpTrEmailBtn'),db=$('tpTrDelBtn');
+  const eb=$('tpTrEmailBtn'),db=$('tpTrDelBtn'),xb=$('tpTrEditBtn');
   if(eb){eb.disabled=n===0;eb.style.opacity=n>0?'1':'.4';}
   if(db){db.disabled=n===0;db.style.opacity=n>0?'1':'.4';}
+  if(xb){
+    const one=n===1?(TP_TR_RECORDS||[]).find(r=>r.id===[...TP_TR_SEL][0]):null;
+    const ok=!!one&&tpTrHandAdded(one);
+    xb.disabled=!ok; xb.style.opacity=ok?'1':'.4';
+    xb.title=n!==1?'Tick one hand-added candidate to edit their details'
+      :ok?'Edit this candidate’s details'
+      :'Only candidates added by hand can be edited — this one came from the Careers page, a CV or a referral';
+  }
 }
+/* HAND-ADDED = typed in here, not created from a Careers-page application, an uploaded CV or a
+   referral. Those carry what the person themselves sent, so their details are not retyped here. */
+function tpTrHandAdded(r){
+  if(!r||String(r.source||'')==='Referral') return false;
+  return !(r.candidates&&r.candidates.resume_id);
+}
+/* EDITING A HAND-ADDED CANDIDATE. Name, phone, email and notes - the things that are typed in and
+   so get typed wrong. Position is not offered: it decides which month and which position they are
+   counted under, so moving them is delete-and-add, not an edit. Allowed at any stage. */
+window.tpTrEdit=function(){
+  if(!recGuard())return;
+  const r=(TP_TR_RECORDS||[]).find(x=>x.id===[...TP_TR_SEL][0]);
+  if(!r||!tpTrHandAdded(r)){toast('Tick one hand-added candidate first','err');return;}
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit Candidate</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <div class="two"><div><label>Candidate Name *</label><input id="tpTrEName" class="inp" value="${esc(r.candidate_name||'')}"></div>
+    <div><label>Position</label><input class="inp" value="${esc(r.position||'')}" disabled title="To move someone to another position, delete them and add them again"></div></div>
+    <div class="two"><div><label>Phone</label><input id="tpTrEPhone" class="inp" value="${esc(r.number||'')}"></div><div><label>Email</label><input id="tpTrEEmail" class="inp" value="${esc(r.email||'')}"></div></div>
+    <label>Notes</label><textarea id="tpTrENotes" class="inp" rows="2">${esc(r.notes||'')}</textarea>
+  </div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpTrESaveBtn" onclick="tpTrEditSave(${r.id})"><i class="fa-solid fa-check"></i> Save</button></div>`);
+};
+window.tpTrEditSave=async function(trackerId){
+  if(!recGuard())return;
+  const r=(TP_TR_RECORDS||[]).find(x=>x.id===trackerId); if(!r)return;
+  const name=String(($('tpTrEName')||{}).value||'').trim();
+  if(!name){toast('Name is required','err');return;}
+  const phone=String(($('tpTrEPhone')||{}).value||'').trim()||null;
+  const email=String(($('tpTrEEmail')||{}).value||'').trim()||null;
+  const notes=String(($('tpTrENotes')||{}).value||'').trim()||null;
+  const btn=$('tpTrESaveBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  const {error}=await sb.schema('hr').from('interview_tracker')
+    .update({candidate_name:name,number:phone,email,notes}).eq('id',trackerId);
+  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
+  // The candidate record carries the same details and is what tests and emails are sent from.
+  if(r.candidate_id){
+    const {error:ce}=await sb.schema('hr').from('candidates').update({name,phone,email}).eq('id',r.candidate_id);
+    if(ce){toast('Saved on the row, but not on the candidate record: '+ce.message,'err');}
+  }
+  Object.assign(r,{candidate_name:name,number:phone,email,notes});
+  closeModal(); toast('Candidate updated','ok'); tpTrRender();
+};
 // candidate_set_stage takes a candidates.id, but the Tracker row's own id (interview_tracker.id) is what
 // we render against — resolve via candidate_id when present, otherwise fall back to a direct tracker update
 // (rows with no candidate_id are the pre-reset Hold rows carried over, which never got a hr.candidates row).
@@ -19474,7 +19520,14 @@ function compWord(n){ return compTabDef()[4][n===1?0:1]; }
 function compTabNoun(){ return compTabDef()[5]; }
 // Rows from before the category column fall back to is_own_brand.
 function compCategoryOf(w){ return w.category||(w.is_own_brand?'brand':'competitor'); }
-function compTabWl(){ const c=compTabDef()[3]; return (window._compWl||[]).filter(function(w){ return compCategoryOf(w)===c; }); }
+/* Channel Partners: only the ones that are actually pulled (27 Oct 2026, as asked - "temporarily").
+   A partner without a Facebook Page ID is never pulled, so it only filled the list with empty rows;
+   those 38 stay in the database, hidden here. Set COMP_SHOW_UNPULLED_PARTNERS to true to show them. */
+const COMP_SHOW_UNPULLED_PARTNERS=false;
+function compTabWl(){ const c=compTabDef()[3]; return (window._compWl||[]).filter(function(w){
+  if(compCategoryOf(w)!==c) return false;
+  if(c==='partner' && !COMP_SHOW_UNPULLED_PARTNERS && !String(w.page_id||'').trim()) return false;
+  return true; }); }
 /* Stored ads show straight away. They used to wait for a fetch in this visit, because the old
    scraper fetched exactly the filtered slice; the Proxy pull now runs every night for every page,
    so what is stored is current and the filters simply narrow it. */
@@ -19592,7 +19645,7 @@ async function compCheckProxy(){
     ?'<div class="card card-pad" style="margin:0 0 14px;border-color:#fecaca;background:#fef2f2;color:#b91c1c;display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px">'
       +'<span style="flex:1;min-width:220px"><i class="fa-solid fa-plug-circle-xmark"></i> <b>Facebook ads are not updating.</b> JainE\'s sign-in to Proxy has expired.</span>'
       +'<button class="btn btn-primary" onclick="compProxyModal()"><i class="fa-solid fa-plug"></i> Reconnect Proxy</button></div>'
-    :'';
+    :'<div style="display:flex;justify-content:flex-end;margin:0 0 8px"><button class="btn" style="height:30px;font-size:12.5px" onclick="compProxyModal()" title="The Proxy accounts Facebook ads are pulled with"><i class="fa-solid fa-plug"></i> Proxy accounts</button></div>';
 }
 async function compProxyCall(action,body){
   const {data:{session}}=await sb.auth.getSession();
@@ -19603,20 +19656,55 @@ async function compProxyCall(action,body){
   if(!res.ok||jr.error) throw new Error(jr.error||('HTTP '+res.status));
   return jr;
 }
-window.compProxyModal=function(){
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-plug"></i> Reconnect Proxy</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+/* SEVERAL PROXY ACCOUNTS (27 Oct 2026). Each gives 20 free pages a day; the puller uses them one
+   after another, moving on when one says its credits are spent. This lists them - working, used
+   up for today, or signed out - and adds, reconnects or removes one. */
+window._compProxyFor=null;   // the account being reconnected; null = adding a new one
+window.compProxyModal=async function(){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-plug"></i> Proxy accounts</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" id="compProxyBody" style="font-size:13.5px;line-height:1.6;min-width:min(92vw,460px)"><div class="loader"><div class="spin"></div></div></div>','md');
+  let list=[];
+  try{ list=(await compProxyCall('status')).accounts||[]; }
+  catch(e){ const b=$('compProxyBody'); if(b) b.innerHTML='<p style="color:#b91c1c">'+esc(e.message||String(e))+'</p>'; return; }
+  const b=$('compProxyBody'); if(!b) return;
+  const day=function(x){ return x?new Date(x).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):''; };
+  const rows=list.map(function(a,i){
+    const state=!a.connected?['Signed out','#b91c1c']:a.used_up_today?['Used up today','#b45309']
+      :(a.last_error&&/renew|not connected/i.test(a.last_error))?['Signed out','#b91c1c']:['Working','#15803d'];
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">'
+      +'<div style="flex:1;min-width:0"><b>Account '+(i+1)+'</b>'+(a.email?(' · '+esc(a.email)):'')
+        +' <span style="color:'+state[1]+';font-weight:600;font-size:12.5px">'+state[0]+'</span>'
+        +'<div style="font-size:12px;color:var(--slate)">'+(a.connected_by?('Signed in by '+esc(a.connected_by)+(a.connected_at?(', '+esc(day(a.connected_at))):'')):'')
+        +(a.last_used_at?(' · last used '+esc(day(a.last_used_at))):'')+'</div></div>'
+      +'<button class="btn" style="height:30px;font-size:12.5px" onclick="compProxySignIn('+a.id+')">Reconnect</button>'
+      +'<button class="btn" style="height:30px;font-size:12.5px" onclick="compProxyRemove('+a.id+')" title="Remove this account"><i class="fa-solid fa-trash"></i></button>'
+    +'</div>';
+  }).join('');
+  b.innerHTML=(rows||'<p style="margin:0 0 8px;color:var(--slate)">No Proxy account is connected.</p>')
+    +'<p style="margin:12px 0 0;color:var(--slate);font-size:12.5px">Each account gives 20 pages a day; they are used one after another.</p>'
+    +'<button class="btn btn-primary" style="margin-top:12px" onclick="compProxySignIn(null)"><i class="fa-solid fa-plus"></i> Add another account</button>';
+};
+window.compProxySignIn=function(id){
+  window._compProxyFor=id;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-plug"></i> '+(id?'Reconnect Proxy account':'Add a Proxy account')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body" style="font-size:13.5px;line-height:1.6">'
-      +'<p style="margin:0 0 10px"><b>1.</b> Press the button and sign in to Proxy in the tab that opens.</p>'
+      +'<p style="margin:0 0 10px"><b>1.</b> Press the button and sign in to Proxy in the tab that opens'+(id?'':' - with the account you are adding')+'.</p>'
       +'<button class="btn btn-primary" onclick="compProxyBegin()"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open Proxy sign-in</button>'
       +'<p style="margin:16px 0 6px"><b>2.</b> After signing in, that tab shows <i>"This site can\'t be reached"</i>. That is expected. Copy the whole address from its address bar and paste it here:</p>'
       +'<input id="compProxyBack" placeholder="http://127.0.0.1:8765/callback?code=…" style="width:100%;height:38px;border:1px solid var(--line);border-radius:9px;padding:0 10px;font-family:inherit">'
     +'</div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="compProxyDone" onclick="compProxyFinish()"><i class="fa-solid fa-check"></i> Connect</button></div>','md');
+    +'<div class="modal-foot"><button class="btn" onclick="compProxyModal()">Back</button><button class="btn btn-primary" id="compProxyDone" onclick="compProxyFinish()"><i class="fa-solid fa-check"></i> Connect</button></div>','md');
+};
+window.compProxyRemove=async function(id){
+  if(!confirm('Remove this Proxy account from JainE?')) return;
+  try{ await compProxyCall('remove',{account_id:id}); toast('Proxy account removed','ok'); }
+  catch(e){ toast(e.message||String(e),'err'); }
+  compProxyModal();
 };
 window.compProxyBegin=async function(){
   // The tab is opened before the wait, so the browser does not treat it as an unasked pop-up.
   const tab=window.open('about:blank','_blank');
-  try{ const r=await compProxyCall('begin'); if(tab) tab.location.href=r.url; else window.open(r.url,'_blank'); }
+  try{ const r=await compProxyCall('begin',window._compProxyFor?{account_id:window._compProxyFor}:{}); if(tab) tab.location.href=r.url; else window.open(r.url,'_blank'); }
   catch(e){ if(tab) tab.close(); toast(e.message||String(e),'err'); }
 };
 window.compProxyFinish=async function(){
@@ -19625,7 +19713,7 @@ window.compProxyFinish=async function(){
   const b=$('compProxyDone'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Connecting…'; }
   try{
     await compProxyCall('finish',{url:v});
-    closeModal(); toast('Proxy reconnected - the waiting pages start pulling now','ok');
+    closeModal(); toast((window._compProxyFor?'Proxy reconnected':'Proxy account added')+' - the waiting pages start pulling now','ok');
     try{ await compWork(); }catch(_e){}
     compCheckProxy();
   }catch(e){
@@ -33569,6 +33657,9 @@ function ciSerp(a,big){
 function ciYtThumb(id){ return 'https://i.ytimg.com/vi/'+encodeURIComponent(id)+'/hqdefault.jpg'; }
 // The preview area of a card: the ad's own picture, a rendered text ad, or the video's still.
 function ciAdPreview(a){
+  // A text ad is drawn from its own words when they have been read: Google's picture of a text ad
+  // is sometimes a broken render showing "Collapsed ad on mobile ... more_vert" instead of the ad.
+  if(a.format==='text' && a.ad_headline) return ciSerp(a,false);
   if(a.video_id) return '<img class="cover" src="'+esc(ciYtThumb(a.video_id))+'" loading="lazy" referrerpolicy="no-referrer" alt="">'
     +'<div class="ci-play"><span><i class="fa-solid fa-play"></i></span></div>'+(a.video_duration?'<span class="ci-dur">'+esc(a.video_duration)+'</span>':'');
   if(a.image_url) return '<img src="'+esc(a.image_url)+'" loading="lazy" referrerpolicy="no-referrer" alt="">';
@@ -33647,7 +33738,8 @@ window.ciAdOpen=function(id){
   if(!a) return;
   const W=window._ciWl||{};
   let main;
-  if(a.video_id) main='<div style="position:relative;width:100%;max-width:760px;margin:0 auto;aspect-ratio:16/9;background:#000;border-radius:10px;overflow:hidden">'
+  if(a.format==='text' && a.ad_headline) main=ciSerp(a,true);   // its own words, not Google's picture of it
+  else if(a.video_id) main='<div style="position:relative;width:100%;max-width:760px;margin:0 auto;aspect-ratio:16/9;background:#000;border-radius:10px;overflow:hidden">'
     +'<iframe src="https://www.youtube-nocookie.com/embed/'+encodeURIComponent(a.video_id)+'?rel=0" style="position:absolute;inset:0;width:100%;height:100%;border:0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>';
   else if(a.image_url) main='<div style="text-align:center;background:#f1f5f9;border-radius:10px;padding:14px"><img src="'+esc(a.image_url)+'" referrerpolicy="no-referrer" style="max-width:100%;max-height:70vh" alt=""></div>';
   else if(a.ad_image_url) main='<div style="text-align:center;background:#f1f5f9;border-radius:10px;padding:14px"><img src="'+esc(a.ad_image_url)+'" referrerpolicy="no-referrer" style="max-width:100%;max-height:60vh" alt=""></div>';
