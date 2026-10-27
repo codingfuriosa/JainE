@@ -11710,12 +11710,113 @@
     wfAfterAct(opts);
   };
 
-  window.wfDone=async function(fcsId, opts){
+  async function wfDoneNow(fcsId, opts, linked){
     const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_done',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not complete: '+((e&&e.message)||e),'err'); return; }
     try{ usageQueue('tasks.workflow.mark_final_step_done','update',um); }catch(_e){}
-    toast('Workflow completed','ok'); wfAfterAct(opts);
+    toast('Workflow completed'+(linked?(' — challan attached to '+linked+' bill'+(linked===1?'':'s')):''),'ok'); wfAfterAct(opts);
+  }
+  /* Done, from every place a Done button is offered (task page, task list, instance timeline). On
+     every workflow but one it is exactly what it always was; on Challan Processing's LAST step it
+     first asks which bills the challan came with. */
+  window.wfDone=async function(fcsId, opts){
+    const c=await wfChallanLastStep(fcsId);
+    if(c){ await wfChallanDoneOpen(fcsId, opts, c); return; }
+    return wfDoneNow(fcsId, opts, 0);
+  };
+
+  /* ----- Challan Processing: "Challan received with bill" -----
+     Arun Pandey holds the last step. When he marks it Done he picks the Invoice Processing bills the
+     challan came with - the challan's own company's bills first, every bill one search away, as many
+     as he likes - and the challan's file goes onto each bill and each bill's file onto the challan
+     (acc.wf_challan_link; they show in each one's Updates & Feedback). Choosing none is allowed: the
+     challan may not have a bill yet. Nothing here decides who may act - the database re-checks it on
+     both calls, and wf_done is the same call Done always made. */
+  const WF_CH={fcsId:null, opts:null, rows:[], sel:new Set(), q:'', only:true, company:'', no:'', busy:false};
+  async function wfChallanLastStep(fcsId){
+    try{
+      const {data:s}=await ACC().from('flow_case_steps').select('case_id,seq').eq('id',fcsId).maybeSingle();
+      if(!s) return null;
+      const {data:c}=await ACC().from('flow_cases').select('id,flow_id,trigger_details').eq('id',s.case_id).maybeSingle();
+      if(!c || c.flow_id!==40) return null;
+      const {data:st}=await ACC().from('flow_steps').select('seq').eq('flow_id',40).order('seq',{ascending:false}).limit(1);
+      if(!st || !st.length || st[0].seq!==s.seq) return null;     // an earlier step is simply passed on
+      return c;
+    }catch(_e){ return null; }
+  }
+  const wfChHead='<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Challan received with bill</h3><span class="x" data-wfx>&times;</span></div>';
+  function wfChBind(){
+    setTimeout(function(){
+      [].slice.call(document.querySelectorAll('[data-wfx]')).forEach(function(x){ x.onclick=function(){ closeModal(); }; });
+    },30);
+  }
+  async function wfChallanDoneOpen(fcsId, opts, c){
+    const by={}; (Array.isArray(c.trigger_details)?c.trigger_details:[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
+    Object.assign(WF_CH,{ fcsId:fcsId, opts:opts, rows:[], sel:new Set(), q:'', only:true, busy:false,
+      company:String(by['Company']||''), no:String(by['Challan No.']||'') });
+    openModal(wfChHead+'<div class="modal-body" style="min-width:min(94vw,660px)"><div class="loader"><div class="spin"></div></div></div>','md');
+    wfChBind();
+    let rows;
+    try{ const {data,error}=await ACC().rpc('wf_challan_bills',{p_fcs_id:fcsId}); if(error) throw error; rows=Array.isArray(data)?data:[]; }
+    catch(e){
+      openModal(wfChHead+'<div class="modal-body" style="min-width:min(94vw,520px)"><div style="color:#b91c1c;font-size:13.5px;line-height:1.6"><i class="fa-solid fa-triangle-exclamation"></i> The bills could not be read: '+esc2((e&&e.message)||e)+'</div>'
+        +'<div style="color:var(--slate);font-size:12.5px;margin-top:8px">You can still mark the challan done now and link its bills later.</div></div>'
+        +'<div class="modal-foot"><button class="ac-btn" data-wfx>Cancel</button><button class="ac-btn ok" onclick="wfChFinish(false)"><i class="fa-solid fa-flag-checkered"></i> Mark done without linking</button></div>','md');
+      wfChBind(); return;
+    }
+    WF_CH.rows=rows;
+    const nMatch=rows.filter(function(r){ return r.matched; }).length;
+    WF_CH.only=nMatch>0;                         // start on the challan's company; everything is still a search away
+    openModal(wfChHead+'<div class="modal-body" style="min-width:min(94vw,660px)">'
+      +'<div class="wf-ch-sum"><b>Challan '+esc2(WF_CH.no||'')+'</b>'+(WF_CH.company?' · '+esc2(WF_CH.company):'')+'</div>'
+      +'<div class="wf-ch-hint">Choose the bill or bills this challan came with. The challan&rsquo;s file is attached to each bill, and each bill&rsquo;s file to the challan.</div>'
+      +'<div class="wf-ch-tools"><input class="ac-in" id="wfChQ" placeholder="Search JainE id, vendor or bill no." oninput="wfChSearch(this.value)">'
+        +(nMatch?('<label class="wf-ch-only"><input type="checkbox" id="wfChOnly" checked onchange="wfChOnly(this.checked)"> Only this company&rsquo;s bills <span class="cnt">'+nMatch+'</span></label>'):'')+'</div>'
+      +'<div class="wf-ch-all"><label><input type="checkbox" id="wfChAll" onchange="wfChAll(this.checked)"> Select all shown <span id="wfChShown"></span></label><span id="wfChSelN"></span></div>'
+      +'<div class="wf-ch-list" id="wfChList"></div></div>'
+      +'<div class="modal-foot"><button class="ac-btn" data-wfx>Cancel</button><button class="ac-btn ok" id="wfChOk" onclick="wfChFinish(true)"></button></div>','md');
+    wfChBind(); wfChRender();
+    setTimeout(function(){ const q=$('wfChQ'); if(q) try{ q.focus(); }catch(_e){} },60);
+  }
+  function wfChVisible(){
+    const q=WF_CH.q.trim().toLowerCase().replace(/^j(?=\d)/,'');
+    return WF_CH.rows.filter(function(r){
+      if(WF_CH.only && !r.matched) return false;
+      return !q || (String(r.jaine_id==null?'':r.jaine_id)+' '+(r.vendor||'')+' '+(r.bill_no||'')).toLowerCase().indexOf(q)!==-1;
+    });
+  }
+  function wfChRender(){
+    const box=$('wfChList'); if(!box) return;
+    const vis=wfChVisible(), pick=vis.filter(function(r){ return !r.linked; });
+    box.innerHTML=vis.length ? vis.slice(0,300).map(function(r){
+      const on=r.linked||WF_CH.sel.has(r.case_id);
+      return '<label class="wf-ch-row'+(on?' on':'')+'"><input type="checkbox" '+(on?'checked ':'')+(r.linked?'disabled ':'')+'onchange="wfChTick('+r.case_id+',this.checked)">'
+        +'<b>J'+esc2(r.jaine_id==null?'':r.jaine_id)+'</b><span class="wf-ch-v">'+esc2(r.vendor||'—')+'</span>'
+        +'<span class="wf-ch-s">'+(r.bill_no?'Bill '+esc2(r.bill_no)+' · ':'')+(Number(String(r.amount||'').replace(/[^0-9.\-]/g,''))?esc2(wfMoney(Number(String(r.amount).replace(/[^0-9.\-]/g,''))))+' · ':'')+esc2(r.status||'')
+        +(r.linked?' · already linked':'')+'</span></label>'; }).join('')
+        +(vis.length>300?'<div class="wf-ch-more">Showing the first 300 of '+vis.length+' - search to narrow it down.</div>':'')
+      : '<div class="ac-empty" style="cursor:default;border:0">No bill matches.'+(WF_CH.only?' Untick &ldquo;Only this company&rsquo;s bills&rdquo; to search them all.':'')+'</div>';
+    const all=$('wfChAll'); if(all) all.checked=pick.length>0 && pick.every(function(r){ return WF_CH.sel.has(r.case_id); });
+    const sh=$('wfChShown'); if(sh) sh.textContent='('+pick.length+')';
+    const n=WF_CH.sel.size, sn=$('wfChSelN'); if(sn) sn.textContent=n+' selected';
+    const ok=$('wfChOk'); if(ok){ ok.disabled=WF_CH.busy; ok.innerHTML='<i class="fa-solid fa-flag-checkered"></i> '+(n?('Link '+n+' bill'+(n===1?'':'s')+' &amp; mark done'):'Mark done'); }
+  }
+  window.wfChSearch=function(v){ WF_CH.q=v||''; wfChRender(); };
+  window.wfChOnly=function(on){ WF_CH.only=!!on; wfChRender(); };
+  window.wfChTick=function(id,on){ if(on) WF_CH.sel.add(id); else WF_CH.sel.delete(id); wfChRender(); };
+  window.wfChAll=function(on){ wfChVisible().forEach(function(r){ if(r.linked) return; if(on) WF_CH.sel.add(r.case_id); else WF_CH.sel.delete(r.case_id); }); wfChRender(); };
+  window.wfChFinish=async function(link){
+    if(WF_CH.busy) return;
+    WF_CH.busy=true; const ok=$('wfChOk'); if(ok) ok.disabled=true;
+    const ids=link?[...WF_CH.sel]:[]; let linked=0;
+    if(ids.length){
+      try{ const {data,error}=await ACC().rpc('wf_challan_link',{p_fcs_id:WF_CH.fcsId, p_bill_case_ids:ids}); if(error) throw error; linked=Number(data)||0; }
+      catch(e){ toast('Could not attach the bills: '+((e&&e.message)||e),'err'); WF_CH.busy=false; if(ok) ok.disabled=false; return; }   // nothing completed - try again
+    }
+    const fcsId=WF_CH.fcsId, opts=WF_CH.opts;
+    closeModal(); WF_CH.busy=false;
+    await wfDoneNow(fcsId, opts, linked);
   };
 
   /* ----- Bill Filing -> Wheredoc (Invoice Processing's last step) -----
@@ -12432,6 +12533,24 @@
     .wf-mb-opt i{color:var(--slate)}
     .wf-mb-opt:hover{border-color:#93c5fd}
     .wf-mb-opt.on{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.wf-mb-opt.on i{color:#2563eb}
+    /* Challan received with bill - the bill picker on Challan Processing's last step */
+    .wf-ch-sum{font-size:14px;color:var(--ink);margin-bottom:4px}
+    .wf-ch-hint{font-size:12.5px;color:var(--slate);line-height:1.5;margin-bottom:12px}
+    .wf-ch-tools{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin-bottom:8px}
+    .wf-ch-tools .ac-in{flex:1;min-width:200px;height:36px;border-radius:10px;padding:0 12px;font-size:13px}
+    .wf-ch-only{font-size:12.5px;font-weight:600;color:var(--ink);display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
+    .wf-ch-only .cnt{font-size:10.5px;background:rgba(100,116,139,.18);border-radius:20px;padding:1px 7px}
+    .wf-ch-all{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;font-weight:600;color:var(--slate);padding:6px 4px}
+    .wf-ch-all label{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+    .wf-ch-list{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+    .wf-ch-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px}
+    .wf-ch-row:last-child{border-bottom:0}.wf-ch-row:hover{background:var(--bg,#f8fafc)}
+    .wf-ch-row.on{background:#eff6ff}
+    .wf-ch-row b{min-width:48px;color:var(--ink)}
+    .wf-ch-v{flex:1;min-width:0;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wf-ch-s{font-size:11.5px;color:var(--slate);white-space:nowrap}
+    .wf-ch-more{padding:8px 12px;font-size:12px;color:var(--slate)}
+    .wf-ch-row input,.wf-ch-all input,.wf-ch-only input{accent-color:#2563eb}
     @media(max-width:760px){ .wf-mb-search{margin-left:0;width:100%} .wf-mb-stat{flex:1} }
     .wf-tl-track{font-size:11.5px;color:var(--slate);margin-top:7px;padding-top:7px;border-top:1px dashed var(--line)}
     /* form */
