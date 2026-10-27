@@ -302,6 +302,64 @@ function trcMissedIncomingCallback(rows){
   }
   return misses.length?{count:misses.length,misses:misses}:null;
 }
+/* Not connected, then silence: the lead's LAST logged call (a customer's own missed incoming call does
+   not count - it is not an agent attempt) never got through, and nothing has been logged on the lead
+   for TRC_NOT_CONNECTED_DAYS or more, counted to today. The CRM has no connected flag, so "not
+   connected" is a call with no recording whose remark says nobody picked up. Level 2 is the three
+   senior callers (Rani, Susmita, Piyasa); Level 1 is everyone else except Dipanwita, whose calls are
+   in neither. The level is the owner of that last attempt. rows chronological, oldest-first. */
+const TRC_NOT_CONNECTED_DAYS=7;
+const TRC_LEVEL2_EMAILS=['jaingroupcaller9@thejaingroup.com','jaingroupcaller6@thejaingroup.com','jaingroupcaller8@thejaingroup.com'];
+const TRC_LEVEL_EXCLUDED_EMAILS=['mgr.presales@thejaingroup.com'];
+function trcIsNotConnected(r){
+  if(!r||r.has_recording)return false;
+  return /not receiv|busy on another|not connected|switched off|not reachable|unreachable|out of service|invalid number|wrong number|no answer|not answering|not picking|facility is not avail|call disconnected/i
+    .test(String(r.crm_remarks||''));
+}
+function trcNotConnectedStale(rows){
+  const list=(rows||[]).filter(function(r){return !trcIsMissedIncoming(r);});
+  const last=list[list.length-1];
+  if(!last||!trcIsNotConnected(last))return null;
+  const d=trcRowDate(last);
+  if(!d)return null;
+  const days=trcDaysBetween(d,traToday());
+  if(days<TRC_NOT_CONNECTED_DAYS)return null;
+  const email=String(last.personnel_email||'').trim().toLowerCase();
+  if(TRC_LEVEL_EXCLUDED_EMAILS.indexOf(email)>=0)return null;
+  return {days:days,follow_up_id:last.follow_up_id,level:TRC_LEVEL2_EMAILS.indexOf(email)>=0?2:1};
+}
+/* Every not-connected call on the lead that was not tried again within TRC_NOT_CONNECTED_DAYS - the
+   whole history, not just the latest call (trcNotConnectedStale above answers the list's "is it stuck
+   right now" question; this one is the lead page's "which dates, and how long each silence lasted").
+   The next call is the next agent call of any kind, connected or not, since a second failed attempt is
+   still a follow-up. A gap still open is counted to today. rows chronological, oldest-first. */
+function trcNotConnectedGaps(rows){
+  const list=(rows||[]).filter(function(r){return !trcIsMissedIncoming(r);});
+  const today=traToday(),gaps=[];
+  for(let i=0;i<list.length;i++){
+    if(!trcIsNotConnected(list[i]))continue;
+    const d=trcRowDate(list[i]);
+    if(!d)continue;
+    const next=list[i+1]||null,nd=next?trcRowDate(next):null;
+    if(next&&!nd)continue;
+    const days=trcDaysBetween(d,nd||today);
+    if(days<TRC_NOT_CONNECTED_DAYS)continue;
+    gaps.push({follow_up_id:list[i].follow_up_id,date:d,nextDate:nd,days:days,remarks:list[i].crm_remarks,who:list[i].personnel_name});
+  }
+  return gaps.length?{count:gaps.length,gaps:gaps}:null;
+}
+function trcNotConnectedGapsHtml(o){
+  if(!o)return '';
+  const rows=o.gaps.slice().reverse().map(function(g){
+    return '<div style="margin-top:6px;font-size:12.5px;color:var(--slate)">Not connected on <b>'+esc(trcWall(g.date)||g.date)+'</b>'
+      +(g.remarks?' ("'+esc(String(g.remarks).trim().slice(0,60))+'")':'')+(g.who?' by '+esc(g.who):'')
+      +(g.nextDate?', next call on '+esc(trcWall(g.nextDate)||g.nextDate):', no call logged since')
+      +' - '+g.days+' days without a follow-up (target '+TRC_NOT_CONNECTED_DAYS+').</div>';
+  }).join('');
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #dc2626">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-volume" style="color:#dc2626"></i> Not connected - not called again within '
+    +TRC_NOT_CONNECTED_DAYS+' days - '+o.count+' time'+(o.count===1?'':'s')+'</div>'+rows+'</div>';
+}
 function trcMissedIncomingHtml(o){
   if(!o)return '';
   const fmt=function(t){return esc(trcWall(new Date(t).toISOString().slice(0,10))||'');};
@@ -598,11 +656,13 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
   const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
   const missedIncoming=trcMissedIncomingHtml(trcMissedIncomingCallback(rows));
   const cadenceIssues=trcCadenceIssuesHtml(trcCadenceIssues(lead&&lead.status,rows));
+  const notConnected=trcNotConnectedGapsHtml(trcNotConnectedGaps(rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
     +ovHealth
     +missedIncoming
+    +notConnected
     +cadenceIssues
     +calls;
 
