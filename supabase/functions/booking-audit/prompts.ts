@@ -113,6 +113,11 @@ Rules:
   NOT a cheque written for something else. "value" is a plain number. A booking form writes this in
   figures, in words, or both: when words are printed, copy them into "in_words" exactly as printed;
   when only figures are printed, leave in_words null. "as_printed" keeps the original either way.
+  LOOK ON EVERY PAGE, not just the form's payment section: the Application Payment Details / cheque
+  details, a money receipt, and PHOTOS OR SCREENSHOTS OF PAYMENTS - a phone snap of a UPI, NEFT,
+  IMPS or bank-app transfer to the company. When the booking was paid in several parts (two
+  transfers of 50,000 each, say), value is their TOTAL. Leave value null only when no page shows
+  any money paid for this booking - never 0.
 - BOOKING DATE. A booking file always carries one somewhere, so look properly before giving up, in
   this order: a "Date of Booking" or "Booking Date" field on the booking form; a "Dated" field in
   the CHEQUE DETAILS section of the form - where the cheque number, bank and branch for the token

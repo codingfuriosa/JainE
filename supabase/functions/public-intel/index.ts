@@ -152,8 +152,10 @@ async function gadsTick(trigger: string, force: boolean) {
 
 /* WHAT EACH AD SAYS (gads_detail). Reads the preview script of up to 6 creatives every 10 min, 4 s
    apart, newest first, and stores what gadsDetail() finds in it. Only creatives that need it:
-   videos (for the YouTube id) and ads with no stored picture. Text ads that Google already gives as
-   a picture of the ad (image_url) are shown as that picture and are not read again. Each creative
+   videos (for the YouTube id), ads with no stored picture, and text ads. Text ads used to be
+   skipped when Google gave a picture of them (image_url), but on 27 Oct 2026 many of those pictures
+   turned out to be Google's own broken render - the page's hidden labels ("Collapsed ad on mobile",
+   "more_vert") instead of the ad - so their words are read too and the card draws the ad from them. Each creative
    is read once; a failure is kept in detail_error and not retried, so one odd ad cannot hold the
    queue. A CAPTCHA/429 stops the unit and the source waits 6 hours like every other. */
 const GDET_N = 6;
@@ -161,7 +163,7 @@ async function gadsDetailTick(trigger: string, force: boolean) {
   const wait = await gate('gads_detail', force ? 60e3 : 9 * 60e3);
   if (wait) return { source: 'gads_detail', skipped: wait };
   const { data: pick, error: pe } = await db.from('pi_gads_creatives').select('creative_id,preview_url,format')
-    .is('detail_at', null).not('preview_url', 'is', null).or('image_url.is.null,format.eq.video')
+    .is('detail_at', null).not('preview_url', 'is', null).or('image_url.is.null,format.eq.video,format.eq.text')
     .order('last_shown', { ascending: false, nullsFirst: false }).limit(GDET_N);
   if (pe) return { source: 'gads_detail', ok: false, error: pe.message };
   if (!pick?.length) return { source: 'gads_detail', skipped: 'nothing due' };

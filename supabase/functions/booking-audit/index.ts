@@ -654,6 +654,88 @@ Only then give value. Add "steps": ["...","...","...","..."] to the JSON.`;
 /* PARKING PROBE - for testing only, never stored. Uploads one booking's files and asks the Car Park
    question several ways side by side, so a change to how it is asked can be judged on real
    bookings before it is made to the reading itself. {case_id, parking_probe:true, variants?} */
+/* THE BOOKING AMOUNT IS LOOKED FOR AGAIN, ON EVERY PAGE (27 Oct 2026, as asked). Samarendra
+   Chakraborty's form left its payment section empty, so his Welcome Letter went out with a blank
+   amount - yet the file carries two phone snaps of 50,000 each. Asked only when the first pass
+   found nothing: ONE question, every payment listed separately, and the total added up here
+   rather than taken from the model. A transfer seen twice (same reference) is counted once. */
+async function geminiRecheckToken(fileParts: any[], model: string): Promise<any> {
+  const prompt = `Look ONLY for MONEY PAID FOR THIS BOOKING. Ignore every other field.
+
+Go through EVERY page and every image in these files: the booking form's Application Payment
+Details / cheque details section, any money receipt, and any PHOTO OR SCREENSHOT OF A PAYMENT -
+a phone snap of a UPI, NEFT, IMPS, RTGS or bank-app transfer, a cheque photo, a deposit slip.
+List each payment separately. The booking may have been paid in several parts.
+
+Count only money paid towards this booking / application to the developer company. Do NOT count
+the flat's total price, an instalment that is only scheduled for later, or an amount printed in
+the cost sheet's payment schedule - those are amounts DUE, not money PAID.
+
+Return ONLY JSON:
+{"steps": "which pages you looked at and what payment evidence each one has, if any",
+ "payments": [{"amount": plain number, "how": "UPI / NEFT / cheque / ...", "date": "dd/mm/yyyy or null",
+               "reference": "transaction id / UTR / cheque number, or null", "paid_to": "payee as shown, or null",
+               "found_in": "which page or image"}]}
+An empty list if no page shows any payment. Never invent one.`;
+  const fileOnly = fileParts.filter((p) => p.file_data);
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": GKEY },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, ...fileOnly] }],
+        generationConfig: { temperature: 0, responseMimeType: "application/json", maxOutputTokens: 8000,
+                            mediaResolution: "MEDIA_RESOLUTION_HIGH" } }) });
+  if (!r.ok) return { error: `${r.status} ${(await r.text()).slice(0, 300)}` };
+  const gj = await r.json().catch(() => ({}));
+  const raw = String(gj?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+  let a: any = null;
+  try { a = JSON.parse(raw); } catch (_) { const m = raw.match(/\{[\s\S]*\}/); try { a = m ? JSON.parse(m[0]) : null; } catch (_e) { a = null; } }
+  if (Array.isArray(a)) a = a.find((x: any) => x && typeof x === "object") ?? null;
+  if (!a) return { error: "unreadable answer" };
+  const seen = new Set<string>();
+  const payments = (Array.isArray(a.payments) ? a.payments : []).filter((p: any) => {
+    if (!(typeof p?.amount === "number" && isFinite(p.amount) && p.amount > 0)) return false;
+    const ref = String(p?.reference || "").replace(/\s+/g, "").toUpperCase();
+    if (ref) { if (seen.has(ref)) return false; seen.add(ref); }
+    return true;
+  });
+  const total = payments.reduce((s: number, p: any) => s + p.amount, 0);
+  return { ok: true, total: total > 0 ? total : null, payments, steps: String(a.steps || "").slice(0, 1200) };
+}
+
+/* When no page shows money paid, the cost sheet's own "Booking Amount" row - the amount the
+   booking asks for - stands in, so a letter never goes out blank or at 0. */
+function bookingAmountDue(schedule: unknown): number | null {
+  const rows = Array.isArray(schedule) ? schedule : [];
+  const row = rows.find((r: any) => r && !r.less_booking
+    && /^\s*(booking|application|token)\s*(amount|money)?\s*$|on\s+booking/i.test(String(r.milestone || ""))
+    && typeof r.amount === "number" && r.amount > 0);
+  return row ? row.amount : null;
+}
+
+/* {case_id, token_reread:true} - job only. Runs the recheck above on a stored booking and answers;
+   nothing is saved. */
+async function tokenReread(caseId: number, model: string): Promise<any> {
+  const cr = await fetch(`${SB}/rest/v1/flow_cases?id=eq.${caseId}&select=id,trigger_details`, { headers: HA });
+  const kase = (await cr.json().catch(() => []))?.[0];
+  if (!kase) return { error: "instance not found" };
+  let paths: string[] = [];
+  for (const d of (Array.isArray(kase.trigger_details) ? kase.trigger_details : [])) paths = paths.concat(valuePaths(d?.value));
+  const bucket = Deno.env.get("S3_BUCKET"), region = Deno.env.get("S3_REGION");
+  const aws = new AwsClient({ accessKeyId: Deno.env.get("AWS_ACCESS_KEY_ID")!,
+    secretAccessKey: Deno.env.get("AWS_SECRET_ACCESS_KEY")!, region: region!, service: "s3" });
+  const s3url = (p: string) =>
+    `https://${bucket}.s3.${region}.amazonaws.com/${p.replace(/^s3:/,"").split("/").map(encodeURIComponent).join("/")}`;
+  const parts: any[] = [];
+  for (const p of paths) {
+    const name = fileName(p), mime = mimeOf(name);
+    if (!mime) continue;
+    const r = await aws.fetch(s3url(p)); if (!r.ok) continue;
+    const up = await geminiUpload(new Uint8Array(await r.arrayBuffer()), mime, name);
+    parts.push({ file_data: { mime_type: up.mime, file_uri: up.uri } });
+  }
+  if (!parts.length) return { error: "no readable files" };
+  return await geminiRecheckToken(parts, model);
+}
+
 async function parkingProbe(caseId: number, variants: any[]): Promise<any> {
   const cr = await fetch(`${SB}/rest/v1/flow_cases?id=eq.${caseId}&select=id,trigger_details`, { headers: HA });
   const kase = (await cr.json().catch(() => []))?.[0];
@@ -683,6 +765,66 @@ async function parkingProbe(caseId: number, variants: any[]): Promise<any> {
     } catch (e) { return { variant: v, error: String(e) }; }
   }));
   return { ok: true, case_id: caseId, files: parts.length, results: out };
+}
+
+/* EMAIL RE-READ AFTER A BOUNCE (27 Oct 2026). A Welcome Letter went to samirchak2@gmail.com, which
+   does not exist: the form says SAMIRCHAX2 - a handwritten X read as a K. When Gmail returns a
+   letter as "address not found", customer-invite asks this for the email again, the same way the
+   parking line is re-checked: the booking's own files, ONE question, the bounced reading named so
+   it is not simply repeated, and every character looked at in turn. It only answers; whether to
+   re-send is decided by the caller. {case_id, email_reread:true, bounced:"x@y"} - job only. */
+async function emailReread(caseId: number, bounced: string, model: string): Promise<any> {
+  const cr = await fetch(`${SB}/rest/v1/flow_cases?id=eq.${caseId}&select=id,trigger_details`, { headers: HA });
+  const kase = (await cr.json().catch(() => []))?.[0];
+  if (!kase) return { error: "instance not found" };
+  let paths: string[] = [];
+  for (const d of (Array.isArray(kase.trigger_details) ? kase.trigger_details : [])) paths = paths.concat(valuePaths(d?.value));
+  const bucket = Deno.env.get("S3_BUCKET"), region = Deno.env.get("S3_REGION");
+  const aws = new AwsClient({ accessKeyId: Deno.env.get("AWS_ACCESS_KEY_ID")!,
+    secretAccessKey: Deno.env.get("AWS_SECRET_ACCESS_KEY")!, region: region!, service: "s3" });
+  const s3url = (p: string) =>
+    `https://${bucket}.s3.${region}.amazonaws.com/${p.replace(/^s3:/,"").split("/").map(encodeURIComponent).join("/")}`;
+  const parts: any[] = [];
+  for (const p of paths) {
+    const name = fileName(p), mime = mimeOf(name);
+    if (!mime) continue;
+    const r = await aws.fetch(s3url(p)); if (!r.ok) continue;
+    const up = await geminiUpload(new Uint8Array(await r.arrayBuffer()), mime, name);
+    parts.push({ file_data: { mime_type: up.mime, file_uri: up.uri } });
+  }
+  if (!parts.length) return { error: "no readable files" };
+  const prompt = `Look ONLY at the applicant's EMAIL ADDRESS - the "(Email)" field in the CONTACT DETAILS
+of the booking / application form. Ignore everything else in these files.
+
+An email was sent to "${bounced}" - the address as it was first read from this form - and Gmail
+returned it: that address DOES NOT EXIST. So at least one character was read wrongly. Read the
+handwriting again, one character at a time, as if for the first time. Letters that are easily
+confused in handwriting: K and X, 0 and O, 1 and l and I, 5 and S, 2 and Z, 8 and B, u and v,
+rn and m, g and q, a missing or extra dot or underscore. Note: a K has a straight upright stroke on
+its left; an X is two strokes crossing in the middle with no upright stroke.
+
+Return ONLY JSON:
+{"steps": "what is written, character by character, and any character you are unsure of",
+ "email": "the address as written on the form, lower case",
+ "alternatives": ["other readings that are genuinely possible, most likely first"],
+ "sure": true or false}
+If the form shows exactly "${bounced}" and nothing else is plausible, return that address with
+"sure": true - do not invent a difference that is not on the page.`;
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": GKEY },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, ...parts] }],
+        generationConfig: { temperature: 0, responseMimeType: "application/json", maxOutputTokens: 8000 } }) });
+  if (!r.ok) return { error: `${r.status} ${(await r.text()).slice(0, 300)}` };
+  const gj = await r.json().catch(() => ({}));
+  const raw = String(gj?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+  if (!raw) return { error: "empty answer" };
+  let a: any = null;
+  try { a = JSON.parse(raw); } catch (_) { const m = raw.match(/\{[\s\S]*\}/); a = m ? JSON.parse(m[0]) : null; }
+  if (Array.isArray(a)) a = a.find((x: any) => x && typeof x === "object") ?? null;
+  if (!a) return { error: "unreadable answer" };
+  const clean = (e: unknown) => String(e ?? "").trim().toLowerCase().replace(/\s+/g, "");
+  return { ok: true, email: clean(a.email), alternatives: (Array.isArray(a.alternatives) ? a.alternatives : []).map(clean),
+           sure: a.sure === true, steps: String(a.steps || "").slice(0, 800) };
 }
 
 async function chatgptCheck(evidence: unknown) {
@@ -815,6 +957,29 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
           + `[Car Park recheck] ${recheck.what_you_see}`;
       }
     } catch (_e) { /* keep the first pass's null */ }
+  }
+
+  /* No booking amount on the form: look for payment proof on every page, then fall back to the
+     cost sheet's Booking Amount row. tokenSource says which, for the check list. */
+  let tokenSource: string | null = num(ex?.token_amount?.value) ? "booking form" : null;
+  let tokenPayments: any[] = [];
+  if (!num(ex?.token_amount?.value)) {
+    try {
+      const t = await geminiRecheckToken(parts, model);
+      if (t?.total) {
+        ex.token_amount = { value: t.total, in_words: null,
+          as_printed: t.payments.map((p: any) => `${p.amount} (${p.how || "payment"}${p.date ? ", " + p.date : ""})`).join(" + ") };
+        tokenSource = "payment proof";
+        tokenPayments = t.payments;
+      }
+    } catch (_e) { /* fall through to the cost sheet */ }
+  }
+  if (!num(ex?.token_amount?.value)) {
+    const due = bookingAmountDue(ex?.payment_schedule);
+    if (due) {
+      ex.token_amount = { value: due, in_words: null, as_printed: "Booking Amount on the cost sheet" };
+      tokenSource = "cost sheet (no payment proof found)";
+    }
   }
 
   const field = (k: string) => {
@@ -1289,7 +1454,8 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
       pin: ex?.customer_address?.pin ?? null,
       addressed_to: ex?.addressed_to?.company ?? null,
       token: { value: num(ex?.token_amount?.value), in_words: ex?.token_amount?.in_words ?? null,
-               as_printed: ex?.token_amount?.as_printed ?? null },
+               as_printed: ex?.token_amount?.as_printed ?? null,
+               source: tokenSource, payments: tokenPayments },
       // net and gross for the apartment and its parking, which is what the allotment letter quotes
       price: { flat_net: netFP.flat, flat_gross: grossFP.flat,
                parking_net: netFP.parking, parking_gross: grossFP.parking,
@@ -1410,6 +1576,18 @@ Deno.serve(async (req) => {
 
   const caseId = Number(body?.case_id || 0);
   if (!caseId) return j({ error: "case_id is required" }, 400);
+  if (body?.email_reread) {
+    if (!viaSecret) return j({ error: "the email re-read is only run by the job" }, 403);
+    const bounced = String(body?.bounced || "").trim().toLowerCase();
+    if (!bounced) return j({ error: "bounced is required" }, 400);
+    try { return j(await emailReread(caseId, bounced, model)); }
+    catch (e) { return j({ error: String((e as any)?.message || e) }, 500); }
+  }
+  if (body?.token_reread) {
+    if (!viaSecret) return j({ error: "the booking amount re-read is only run by the job" }, 403);
+    try { return j(await tokenReread(caseId, model)); }
+    catch (e) { return j({ error: String((e as any)?.message || e) }, 500); }
+  }
   if (body?.parking_probe) {
     const variants = Array.isArray(body?.variants) && body.variants.length ? body.variants.slice(0, 6)
       : [{ resolution: null }];

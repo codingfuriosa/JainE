@@ -39,23 +39,50 @@ async function rpc(fn: string, args: unknown) {
   return { ok: r.ok, data, text };
 }
 
-async function row() {
-  const r = await fetch(SB + "/rest/v1/proxy_oauth?id=eq.1&select=*", { headers: H });
+/* SEVERAL PROXY ACCOUNTS (27 Oct 2026). camp.proxy_oauth has one row per Proxy sign-in, each good
+   for 20 free pages a day. Row 1 is the original; "begin" without an account adds a new row. */
+async function rowWhere(q: string) {
+  const r = await fetch(SB + "/rest/v1/proxy_oauth?" + q + "&select=*", { headers: H });
   const rows = await r.json().catch(() => []);
   return Array.isArray(rows) ? rows[0] ?? null : null;
 }
-async function save(p: Record<string, unknown>) {
+async function row(id = 1) { return rowWhere("id=eq." + Number(id)); }
+async function save(p: Record<string, unknown>, id = 1) {
   await fetch(SB + "/rest/v1/proxy_oauth?on_conflict=id", { method: "POST",
     headers: { ...H, Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({ id: 1, ...p, updated_at: new Date().toISOString() }) });
+    body: JSON.stringify({ id, ...p, updated_at: new Date().toISOString() }) });
+}
+async function newAccount(p: Record<string, unknown>) {
+  const r = await fetch(SB + "/rest/v1/proxy_oauth", { method: "POST",
+    headers: { ...H, Prefer: "return=representation" },
+    body: JSON.stringify({ ...p, updated_at: new Date().toISOString() }) });
+  const rows = await r.json().catch(() => []);
+  const id = Array.isArray(rows) ? Number(rows[0]?.id) : 0;
+  if (!id) throw new Error("could not add a Proxy account");
+  return id;
+}
+// The connected, switched-on accounts, oldest first - the order they are used in.
+async function accounts() {
+  const r = await fetch(SB + "/rest/v1/proxy_oauth?refresh_token=not.is.null&active=is.true&order=id&select=*", { headers: H });
+  const rows = await r.json().catch(() => []);
+  return Array.isArray(rows) ? rows : [];
+}
+const utcDay = () => new Date().toISOString().slice(0, 10);
+// The email a sign-in belongs to, read from the id_token Proxy returns with it, when it does.
+function emailOf(tok: any): string | null {
+  try {
+    const part = String(tok?.id_token || "").split(".")[1];
+    if (!part) return null;
+    const j = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof j?.email === "string" ? j.email : null;
+  } catch (_e) { return null; }
 }
 const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b))
   .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const rnd = (n = 32) => b64(crypto.getRandomValues(new Uint8Array(n)));
 
-async function accessToken() {
-  const r = await row();
-  if (!r?.refresh_token) throw new Error("Proxy is not connected - run proxy-signin.js once.");
+async function accessToken(r: any) {
+  if (!r?.refresh_token) throw new Error("Proxy is not connected.");
   if (r.access_token && r.expires_at && new Date(r.expires_at).getTime() > Date.now() + 60000) {
     return r.access_token as string;
   }
@@ -66,7 +93,7 @@ async function accessToken() {
   const tok = await t.json().catch(() => ({}));
   if (!t.ok || !tok?.access_token) throw new Error("Proxy would not renew: " + String(tok?.error || t.status));
   await save({ access_token: tok.access_token, refresh_token: tok.refresh_token || r.refresh_token,
-    expires_at: new Date(Date.now() + (Number(tok.expires_in) || 3600) * 1000).toISOString() });
+    expires_at: new Date(Date.now() + (Number(tok.expires_in) || 3600) * 1000).toISOString() }, r.id);
   return tok.access_token as string;
 }
 
@@ -252,9 +279,46 @@ async function pool<T>(items: T[], n: number, fn: (x: T) => Promise<void>) {
 }
 const uniq = (xs: unknown[]) => Array.from(new Set(xs.filter((t) => typeof t === "string" && t.trim()) as string[]));
 
+/* EACH ACCOUNT IN TURN. An account that says its credits are spent is marked used up for the day
+   and the next one is asked the same question; one that cannot sign in is noted and skipped. The
+   run fails only when every account has been tried. */
 async function pullProxy(ids: string[], country: string, perPage: number, rep: any) {
+  const all = await accounts();
+  const list = all.filter((a: any) => a.exhausted_day !== utcDay());
+  if (!list.length) throw new Error(all.length
+    ? "Proxy: every account has used up today's credits"
+    : "Proxy is not connected - would not renew any account");
+  const said: string[] = [];
+  for (const acct of list) {
+    const before = rep.errors.length;
+    let out: Map<string, NormAd[]>;
+    try { out = await pullProxyAs(acct, ids, country, perPage, rep); }
+    catch (e) {
+      const msg = String((e as Error)?.message || e).slice(0, 200);
+      await save({ last_error: msg }, acct.id);
+      said.push("account " + acct.id + ": " + msg); continue;
+    }
+    const errs = rep.errors.slice(before);
+    if (out.size || !errs.length) {
+      await save({ last_used_at: new Date().toISOString(), last_error: null }, acct.id);
+      rep.proxy_account = acct.id;
+      return out;
+    }
+    rep.errors.splice(before);
+    const msg = errs.join(" | ").slice(0, 300);
+    const spent = /credit|limit|quota|exhaust/i.test(msg);
+    await save(spent ? { exhausted_day: utcDay(), last_error: msg } : { last_error: msg }, acct.id);
+    said.push("account " + acct.id + ": " + msg);
+  }
+  // Every account failed on its sign-in: said the old way, so the screen's Reconnect line shows.
+  if (said.length && said.every((x) => /would not renew|not connected/i.test(x)))
+    throw new Error("Proxy would not renew any account - " + said.join(" | ").slice(0, 200));
+  rep.errors.push(...said);
+  return new Map<string, NormAd[]>();
+}
+async function pullProxyAs(acct: any, ids: string[], country: string, perPage: number, rep: any) {
   const out = new Map<string, NormAd[]>();
-  const token = await accessToken();
+  const token = await accessToken(acct);
   const init = await mcp(token, "initialize", { protocolVersion: "2024-11-05",
     capabilities: {}, clientInfo: { name: "jaine", version: "1" } });
   await mcp(token, "notifications/initialized", {}, init.session, true);
@@ -524,9 +588,12 @@ Deno.serve(async (req) => {
   const action = url.searchParams.get("action") || "";
   try {
     if (action === "status") {
-      const r = await row();
-      return json({ registered: !!r?.client_id, connected: !!r?.refresh_token,
-        connected_at: r?.connected_at ?? null, token_fresh_until: r?.expires_at ?? null });
+      const r = await fetch(SB + "/rest/v1/proxy_oauth?order=id&select=id,refresh_token,active,account_email,connected_at,connected_by,exhausted_day,last_error,last_used_at", { headers: H });
+      const rows: any[] = await r.json().catch(() => []);
+      const list = (Array.isArray(rows) ? rows : []).map((a) => ({ id: a.id, connected: !!a.refresh_token,
+        active: a.active, email: a.account_email, connected_at: a.connected_at, connected_by: a.connected_by,
+        used_up_today: a.exhausted_day === utcDay(), last_error: a.last_error, last_used_at: a.last_used_at }));
+      return json({ connected: list.some((a) => a.connected && a.active), accounts: list });
     }
     /* RECONNECT FROM INSIDE JAINE (26 Oct 2026). The sign-in made on a laptop stopped renewing on
        22 Oct (Proxy answered invalid_grant) and every pull since failed. Proxy only lets a sign-in
@@ -534,7 +601,7 @@ Deno.serve(async (req) => {
        client returning to 127.0.0.1 (nothing listens there - the browser just shows "can't be
        reached"), and "finish" takes that address, pasted back into JainE, and trades its one-time
        code for tokens. The code is useless without the code_verifier kept here. Staff only. */
-    if (action === "begin" || action === "finish") {
+    if (action === "begin" || action === "finish" || action === "remove") {
       if (req.method !== "POST") return json({ error: "POST only" }, 405);
       const userTok = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
       const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -547,7 +614,19 @@ Deno.serve(async (req) => {
       if (!staff.ok || (await staff.json().catch(() => false)) !== true) return json({ error: "Staff only." }, 403);
       const REDIRECT = "http://127.0.0.1:8765/callback";
 
+      // Take an account out of use; its sign-in is forgotten.
+      if (action === "remove") {
+        const b = await req.json().catch(() => ({}));
+        const id = Number(b?.account_id || 0);
+        if (!id) return json({ error: "account_id is required" }, 400);
+        await fetch(SB + "/rest/v1/proxy_oauth?id=eq." + id, { method: "DELETE", headers: { ...H, Prefer: "return=minimal" } });
+        return json({ ok: true, removed: id });
+      }
+
       if (action === "begin") {
+        // With account_id, that account is signed in again; without, a new account is added.
+        const bb = await req.json().catch(() => ({}));
+        const reconnect = Number(bb?.account_id || 0) || null;
         const reg = await fetch(ISSUER + "/register", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ client_name: "JainE Competitor Ads", redirect_uris: [REDIRECT],
             grant_types: ["authorization_code", "refresh_token"], response_types: ["code"],
@@ -556,7 +635,8 @@ Deno.serve(async (req) => {
         if (!reg.ok || !c?.client_id) return json({ error: "Proxy would not register JainE: " + String(c?.error_description || c?.error || reg.status) }, 502);
         const verifier = rnd(48), state = rnd(16);
         const challenge = b64(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-        await save({ client_id: c.client_id, client_secret: c.client_secret, code_verifier: verifier, state: "oauth:" + state });
+        const pending = { client_id: c.client_id, client_secret: c.client_secret, code_verifier: verifier, state: "oauth:" + state };
+        if (reconnect) await save(pending, reconnect); else await newAccount({ ...pending, active: true });
         const u = new URL(ISSUER + "/authorize");
         u.search = new URLSearchParams({ response_type: "code", client_id: c.client_id, redirect_uri: REDIRECT,
           code_challenge: challenge, code_challenge_method: "S256", state, scope: "openid email profile",
@@ -569,8 +649,8 @@ Deno.serve(async (req) => {
       try { back = new URL(String(b?.url || "").trim()); } catch (_e) { return json({ error: "That is not the address from the browser bar." }, 400); }
       const code = back.searchParams.get("code"), st = back.searchParams.get("state");
       if (back.searchParams.get("error")) return json({ error: "Proxy said: " + (back.searchParams.get("error_description") || back.searchParams.get("error")) }, 400);
-      const r = await row();
-      if (!code || !st || String(r?.state || "") !== "oauth:" + st || !r?.code_verifier) {
+      const r = st ? await rowWhere("state=eq." + encodeURIComponent("oauth:" + st)) : null;
+      if (!code || !st || !r || !r?.code_verifier) {
         return json({ error: "This address does not belong to the latest sign-in. Press Reconnect again and use the new one." }, 400);
       }
       if (Date.now() - new Date(r.updated_at || 0).getTime() > 15 * 60000) return json({ error: "That took over 15 minutes. Press Reconnect again." }, 400);
@@ -584,8 +664,12 @@ Deno.serve(async (req) => {
       }
       await save({ access_token: tok.access_token, refresh_token: tok.refresh_token,
         expires_at: new Date(Date.now() + (Number(tok.expires_in) || 3600) * 1000).toISOString(),
-        connected_at: new Date().toISOString(), connected_by: me.email, state: null, code_verifier: null });
-      return json({ ok: true, connected: true });
+        connected_at: new Date().toISOString(), connected_by: me.email, state: null, code_verifier: null,
+        account_email: emailOf(tok) ?? r.account_email ?? null, exhausted_day: null, last_error: null, active: true }, r.id);
+      // A new account adds its 20 pages to today's budget, so a day closed as used up opens again.
+      await fetch(SB + "/rest/v1/proxy_credit_days?day=eq." + utcDay(), { method: "PATCH",
+        headers: { ...H, Prefer: "return=minimal" }, body: JSON.stringify({ exhausted: false }) }).catch(() => {});
+      return json({ ok: true, connected: true, account_id: r.id });
     }
 
     if (action === "prepare") {

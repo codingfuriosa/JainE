@@ -3440,7 +3440,9 @@
   const WF_ROUTE_PILL={
     cheque:   {label:'Cheque',    bg:'#eef2ff', fg:'#4338ca', bd:'#c7d2fe'},
     no_cheque:{label:'No Cheque', bg:'#fef3c7', fg:'#92400e', bd:'#fde68a'},
-    payment:  {label:'Payment',   bg:'#dcfce7', fg:'#166534', bd:'#bbf7d0'}
+    payment:  {label:'Payment',   bg:'#dcfce7', fg:'#166534', bd:'#bbf7d0'},
+    payment_cheque:   {label:'Payment · Cheque',    bg:'#dcfce7', fg:'#166534', bd:'#bbf7d0'},
+    payment_no_cheque:{label:'Payment · No Cheque', bg:'#dcfce7', fg:'#166534', bd:'#bbf7d0'}
   };
   function wfRoutePill(route,tiny){
     const r=WF_ROUTE_PILL[String(route||'')];
@@ -3449,7 +3451,9 @@
       +' title="'+esc2(wfRouteWhat(route))+'">'+r.label+'</span>';
   }
   function wfRouteWhat(route){
-    if(route==='payment')   return 'Payment: RTP, Cheque Preparation, Bill Checking, Audit Work, Bill Filing \u2014 the payment goes first and the checking follows';
+    if(route==='payment')   return 'Payment: RTP next, where Cheque or No Cheque is chosen';
+    if(route==='payment_cheque')    return 'Payment \u00b7 Cheque: RTP, Cheque Preparation, Bill Checking, Audit Checking, Cheque Signing, Bill Filing';
+    if(route==='payment_no_cheque') return 'Payment \u00b7 No Cheque: RTP, Booking Entry, Bill Checking, Audit Checking, Bill Filing';
     if(route==='no_cheque') return 'No Cheque: paid without a cheque \u2014 GST Approval and Bill Filing still happen, the cheque steps do not';
     if(route==='cheque')    return 'Cheque: every step in the normal order';
     return 'The route is chosen at Bill Booking (Payment) or at RTP (Cheque / No Cheque)';
@@ -6310,6 +6314,7 @@
       if(r.rejected) bits.push('Rejected'+(r.rejected_by?(' by '+wfNm(r.rejected_by)):'')
         +(r.rejected_at?(' on '+wfDT(r.rejected_at)):'')+' – cannot be emailed');
       if(r.auto_emailed_at) bits.push('Emailed automatically on '+wfDT(r.auto_emailed_at));
+      if(r.auto_held_at && !r.last_emailed_at) bits.push('Not sent automatically – '+(r.auto_held_reason||'booking amount does not match'));
       /* The automatic send also stamps last_emailed_at, with nobody's name on it; said once, not
          twice. A send by a person always carries who. */
       if(r.last_emailed_at && (r.last_emailed_by || r.last_emailed_at!==r.auto_emailed_at)){
@@ -7140,10 +7145,14 @@
      LIMITED (Precinct II) - made from the Word files supplied (tools/agreement/docx_template.mjs).
      The booking does not say which company a DWC flat is sold by, and its block names are not
      consistent enough to work it out, so the person opening the agreement picks the company. Every
-     other project - Dream Gurukul, Dream Ananta and the rest - uses the Dream Gurukul format, with
-     no company rule. */
+     other project - Dream Gurukul and the rest - uses the Dream Gurukul format, with no company
+     rule; Dream Ananta has had its own since 27 Oct 2026. */
   const AG_TEMPLATES={
     gurukul:  {src:'assets/forms/agreement-gurukul.js',   key:'AGREEMENT_GURUKUL'},
+    // Dream Ananta's own (27 Oct 2026, from Manish Chattopadhyay's agreement). Gurukul-shaped, so
+    // its price, EDC and plan tables fill from the cost sheet the same way; it carries its own
+    // signing blocks, as the Dream World City formats do.
+    ananta:   {src:'assets/forms/agreement-ananta.js',    key:'AGREEMENT_ANANTA', ownSigning:true},
     dwc_dghl: {src:'assets/forms/agreement-dwc-dghl.js',  key:'AGREEMENT_DWC_DGHL',  company:'Dream Gateway Hotels Ltd.'},
     dwc_jgppl:{src:'assets/forms/agreement-dwc-jgppl.js', key:'AGREEMENT_DWC_JGPPL', company:'Jain Group Projects Pvt. Ltd.'}
   };
@@ -7458,7 +7467,7 @@
     try{ res=await wfBookingReading(caseId); }
     catch(e){ wfClosePending(tab); toast((e&&e.message)||'The reading is not ready','warn'); return; }
     const project=String((((res.fields||{}).project_name)||{}).value||'').trim();
-    let tid='gurukul';
+    let tid=/ananta/i.test(project)?'ananta':'gurukul';
     if(wfIsDwc(project)){
       tid=wfDwcTemplateFromBlock((((res.fields||{}).block)||{}).value) || await wfAgPickCompany(caseId);
       if(!tid){ wfClosePending(tab); return; }
@@ -7527,6 +7536,7 @@
     const isDwc=(tid==='dwc_dghl'||tid==='dwc_jgppl');
     const vals=wfAgValues(res), tables=wfAgTables(res);
     if(isDwc) Object.assign(vals, wfAgDwcValues(res));
+    else if(tid==='ananta') vals.application_date=wfAgDwcValues(res).application_date;
     const E=function(x){ return String(x==null?'':x)
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
     const fill=function(text){
@@ -7599,7 +7609,7 @@
 
     // The execution block. Three signatures, each with room to actually sign. The Dream World City
     // formats carry their own signing pages in the text, so they get none added.
-    if(!isDwc) [['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED OWNERS','IN THE PRESENCE OF:'],
+    if(!isDwc && !(AG_TEMPLATES[tid]||{}).ownSigning) [['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED OWNERS','IN THE PRESENCE OF:'],
      ['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED PROMOTER','IN THE PRESENCE OF:'],
      ['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED ALLOTTEE','IN THE PRESENCE OF:']]
       .forEach(function(blk,i){
@@ -7611,7 +7621,7 @@
     const who=(allotteeNames(res)[0]||'agreement').replace(/[^A-Za-z0-9 ]/g,'').trim()||'agreement';
     /* Said as the tab opens rather than printed on the deed: a line on the face of an agreement
        saying which template it came from would travel with it to the customer. */
-    const onGurukul=(tmpl.project===project);
+    const onGurukul=(String(tmpl.project||'').toUpperCase()===project.toUpperCase());
     const note='The blanks are for the values the documents do not state'
       +(isDwc ? ('. Dream World City format for '+(AG_TEMPLATES[tid].company||'')
           +(wfDwcTemplateFromBlock((f.block||{}).value)===tid
@@ -10926,11 +10936,11 @@
         else if(flow&&flow.id===26&&fcs.seq===2){
           const fwd2=wfForwardLabel({nextWho:x.nextStep?wfWhoOfStep(x.nextStep):''});
           A+='<button class="ac-btn primary" title="'+esc2(fwd2)+'" onclick="'+call('wfForward',fcs.id)+'"><i class="fa-solid fa-paper-plane"></i> '+esc2(fwd2)+'</button>'
-           +'<button class="ac-btn primary" title="Payment — RTP, then Cheque Preparation, then Bill Checking and Audit Work, then filing" onclick="'+call('wfForwardPaymentChoice',fcs.id,true)+'"><i class="fa-solid fa-indian-rupee-sign"></i> Payment</button>';
+           +'<button class="ac-btn primary" title="Payment — RTP, where Cheque or No Cheque is chosen" onclick="'+call('wfForwardPaymentChoice',fcs.id,true)+'"><i class="fa-solid fa-indian-rupee-sign"></i> Payment</button>';
         }
-        // The Cheque / No Cheque choice belongs to RTP - but a bill already on the Payment route
-        // reached RTP with its path settled, so there is nothing left to choose and it forwards on.
-        else if(flow&&flow.id===26&&fcs.seq===5&&(caseRow&&caseRow.route)!=='payment'){
+        // The Cheque / No Cheque choice belongs to RTP - on a Payment bill too (27 Oct 2026), where
+        // it picks between the two Payment paths (see wfRouteWhat).
+        else if(flow&&flow.id===26&&fcs.seq===5){
           A+='<button class="ac-btn primary" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="'+call('wfForwardChequeChoice',fcs.id,true)+'"><i class="fa-solid fa-indian-rupee-sign"></i> Cheque</button>'
            +'<button class="ac-btn primary" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="'+call('wfForwardChequeChoice',fcs.id,false)+'"><i class="fa-solid fa-ban"></i> No Cheque</button>';
         }
@@ -11110,7 +11120,7 @@
         : sibs.filter(function(y){ return y.seq>s.seq; }).reduce(function(a,b){ return (!a||b.seq<a.seq)?b:a; }, null);
       const dl=wfRouteIsLast(c.route_seqs, s.seq);
       const last=(dl!==null)?dl:!nxt;
-      const choiceKind=(s.seq===2) ? 'booking' : ((s.seq===5 && c.route!=='payment') ? 'rtp' : '');
+      const choiceKind=(s.seq===2) ? 'booking' : ((s.seq===5) ? 'rtp' : '');
       const needsChoice=!!choiceKind;
       const nextWho=nxt ? ((Array.isArray(nxt.candidates)&&nxt.candidates.length?nxt.candidates:(nxt.person?[nxt.person]:[])).map(wfNm).join(' / ')) : '';
       const unitMs={hours:36e5, days:864e5, weeks:6048e5}[s.duration_unit||'days']||864e5;
@@ -11705,7 +11715,7 @@
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
     wfLogForward(fcsId, Object.assign({route:payment?'Payment':'Direct'}, pre[0]||{}), pre[1]);
     toast(payment
-      ? 'Forwarded on the Payment route — RTP next, then the cheque, then checking'
+      ? 'Forwarded on the Payment route — RTP next'
       : 'Forwarded','ok');
     wfAfterAct(opts);
   };
@@ -13727,15 +13737,15 @@
   };
 
   /* ── THE VERDICT ───────────────────────────────────────────────────────────────────────
-     Only Selected and Rejected, because those are the only two things an interviewer decides.
-     Joined, Hold and Backed Out are HR's, and they are what is left on the Interviews dropdown. */
+     Selected, Hold or Rejected (Hold added 27 Oct 2026). Nothing is emailed to the candidate for
+     any of them - HR tells people themselves. */
   window.ivDecide=async function(interviewId,decision){
     if(!await confirmDialog(
         'Record this interview as '+decision+'?'
-        +(decision==='Rejected'?' The candidate will be emailed to say they were not successful.':'')
+        +(decision==='Rejected'?' The candidate is not emailed — if they should hear, tell them yourself.':'')
         +' The first answer is the one that counts \u2014 once it is in, the other interviewers can '
         +'no longer change it.',
-        {title:decision, okLabel:decision, icon:decision==='Selected'?'fa-check':'fa-xmark',
+        {title:decision, okLabel:decision, icon:decision==='Selected'?'fa-check':decision==='Hold'?'fa-pause':'fa-xmark',
          danger:decision==='Rejected'}))return;
     try{
       const {data,error}=await sb.schema('hr').rpc('interview_decide',
@@ -15786,7 +15796,7 @@
           // wfWhoOfStep/wfStepWhoText need the next step's DEFINITION (owner_emails/owner_from_trigger/...)
           // merged in - nextStep itself only ever carries the instance-row fields (person/candidates).
           const nextDef=nextStep?(stepDefByFlowSeq[c.flow_id+':'+nextStep.seq]||null):null;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,flowId:c.flow_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:wfCaseNoText(c),idLabel:f.id_label||'',flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),fileToWheredoc:(c.flow_id===26),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,flowId:c.flow_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:wfCaseNoText(c),idLabel:f.id_label||'',flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5),paymentChoice:(c.flow_id===26&&s.seq===2),fileToWheredoc:(c.flow_id===26),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -16732,7 +16742,7 @@
          Putting Connect here made the approval queue ask one question and offer the answer to a
          different one - and left the task titled "Approve Referral" with no Approve button on it. */
       :t.referral_id!=null
-      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve this referral" onclick="hrTaskApproveReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject this referral" onclick="hrTaskRejectReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ic" style="height:30px;width:30px" title="Open the referred person's CV" onclick="hrTaskOpenReferralCv(${t.referral_id})"><i class="fa-solid fa-paperclip"></i></button><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve this referral" onclick="hrTaskApproveReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject this referral" onclick="hrTaskRejectReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-xmark"></i></button></div>`
       /* A JOB DESCRIPTION AND A CANDIDATE NEEDED THEIR OWN BRANCHES.
          Without them both fell through to the generic accApprove/accDecline at the end, which does
          the subtree bookkeeping for an ordinary task: the row vanished from the card and nothing
@@ -16752,7 +16762,7 @@
          day after, though, a booking with no verdict is the commonest loose end there is - the
          candidate did not turn up, or it slipped - and the only ways out were to record a
          verdict that never happened or leave the task for ever. */
-      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${ivIsStale(t.interview_id)?`<button class="ac-btn" style="height:30px" title="Move this interview to another day" onclick="ivReschedule(${t.interview_id})"><i class="fa-solid fa-calendar-day"></i> Reschedule</button>`:''}<button class="ac-btn ok ic" style="height:30px;width:30px" title="Selected" onclick="ivDecide(${t.interview_id},'Selected')"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Rejected" onclick="ivDecide(${t.interview_id},'Rejected')"><i class="fa-solid fa-xmark"></i></button></div>`
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${ivIsStale(t.interview_id)?`<button class="ac-btn" style="height:30px" title="Move this interview to another day" onclick="ivReschedule(${t.interview_id})"><i class="fa-solid fa-calendar-day"></i> Reschedule</button>`:''}<button class="ac-btn ok ic" style="height:30px;width:30px" title="Selected" onclick="ivDecide(${t.interview_id},'Selected')"><i class="fa-solid fa-check"></i></button><button class="ac-btn ic" style="height:30px;width:30px;color:#b45309;border-color:#fcd34d" title="Hold" onclick="ivDecide(${t.interview_id},'Hold')"><i class="fa-solid fa-pause"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Rejected" onclick="ivDecide(${t.interview_id},'Rejected')"><i class="fa-solid fa-xmark"></i></button></div>`
       :`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve (A)" onclick="accApprove(${t.id},true)"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Decline (D)" onclick="accDecline(${t.id})"><i class="fa-solid fa-xmark"></i></button></div>`
       ):'';
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
@@ -17385,6 +17395,22 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
   function hrAfterApprovalAction(){ if(location.hash.includes('/task/'))renderPage(); else if(PAGE==='tasks')tasksScreen(); }
   /* Reads the request straight from the database rather than from MP_RECORDS, which is
      Recruitment's in-memory list and is empty on this page. */
+  /* THE CV BEHIND A REFERRAL, ON ITS APPROVAL TASK - the same paperclip the job description task
+     has, so the referral can be judged without leaving Accountability. */
+  window.hrTaskOpenReferralCv=async function(refId){
+    try{
+      const {data:ref,error}=await sb.schema('hr').from('referrals').select('resume_id').eq('id',refId).single();
+      if(error) throw new Error(error.message);
+      if(!ref||!ref.resume_id){ toast('No CV was attached to this referral','err'); return; }
+      const {data:res,error:re}=await sb.schema('hr').from('resumes').select('storage_path').eq('id',ref.resume_id).single();
+      if(re) throw new Error(re.message);
+      if(!res||!res.storage_path){ toast('No CV was attached to this referral','err'); return; }
+      if(isS3Path(res.storage_path)){ await s3OpenSigned(res.storage_path); return; }
+      const {data:su,error:se}=await sb.storage.from('resumes').createSignedUrl(res.storage_path,120);
+      if(se) throw new Error(se.message);
+      window.open(su.signedUrl,'_blank');
+    }catch(e){ toast('Could not open the CV: '+((e&&e.message)||e),'err'); }
+  };
   window.hrTaskOpenJd=async function(mpId){
     const tab=window.open('','_blank');   // opened on the click, before any await, or it is blocked
     if(tab){ try{ tab.document.write('<!doctype html><meta charset="utf-8"><title>Opening\u2026</title>'

@@ -28,6 +28,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { handleBookingMail } from "./booking-mail.ts";
+import { bounceCheck } from "./booking-bounce.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -167,6 +168,12 @@ Deno.serve(async (req: Request) => {
       || action === "booking_read_failed") {
     try { return await handleBookingMail(req, body, db, j, SB, SRV, createClient); }
     catch (e) { return j({ error: "Could not email the document: " + String((e as Error).message || e).slice(0, 300) }, 500); }
+  }
+
+  // ------------------------------------- bounced booking emails (the job, every 15 minutes)
+  if (action === "booking_bounce_check") {
+    try { return await bounceCheck(req, db.schema("acc"), j, SB); }
+    catch (e) { return j({ error: "Bounce check failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
   }
 
   // ------------------------------------------------------ invite (staff)

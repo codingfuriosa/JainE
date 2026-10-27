@@ -236,6 +236,9 @@ function ciSerp(a,big){
 function ciYtThumb(id){ return 'https://i.ytimg.com/vi/'+encodeURIComponent(id)+'/hqdefault.jpg'; }
 // The preview area of a card: the ad's own picture, a rendered text ad, or the video's still.
 function ciAdPreview(a){
+  // A text ad is drawn from its own words when they have been read: Google's picture of a text ad
+  // is sometimes a broken render showing "Collapsed ad on mobile ... more_vert" instead of the ad.
+  if(a.format==='text' && a.ad_headline) return ciSerp(a,false);
   if(a.video_id) return '<img class="cover" src="'+esc(ciYtThumb(a.video_id))+'" loading="lazy" referrerpolicy="no-referrer" alt="">'
     +'<div class="ci-play"><span><i class="fa-solid fa-play"></i></span></div>'+(a.video_duration?'<span class="ci-dur">'+esc(a.video_duration)+'</span>':'');
   if(a.image_url) return '<img src="'+esc(a.image_url)+'" loading="lazy" referrerpolicy="no-referrer" alt="">';
@@ -314,7 +317,8 @@ window.ciAdOpen=function(id){
   if(!a) return;
   const W=window._ciWl||{};
   let main;
-  if(a.video_id) main='<div style="position:relative;width:100%;max-width:760px;margin:0 auto;aspect-ratio:16/9;background:#000;border-radius:10px;overflow:hidden">'
+  if(a.format==='text' && a.ad_headline) main=ciSerp(a,true);   // its own words, not Google's picture of it
+  else if(a.video_id) main='<div style="position:relative;width:100%;max-width:760px;margin:0 auto;aspect-ratio:16/9;background:#000;border-radius:10px;overflow:hidden">'
     +'<iframe src="https://www.youtube-nocookie.com/embed/'+encodeURIComponent(a.video_id)+'?rel=0" style="position:absolute;inset:0;width:100%;height:100%;border:0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>';
   else if(a.image_url) main='<div style="text-align:center;background:#f1f5f9;border-radius:10px;padding:14px"><img src="'+esc(a.image_url)+'" referrerpolicy="no-referrer" style="max-width:100%;max-height:70vh" alt=""></div>';
   else if(a.ad_image_url) main='<div style="text-align:center;background:#f1f5f9;border-radius:10px;padding:14px"><img src="'+esc(a.ad_image_url)+'" referrerpolicy="no-referrer" style="max-width:100%;max-height:60vh" alt=""></div>';

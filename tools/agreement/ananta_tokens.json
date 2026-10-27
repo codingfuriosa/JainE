@@ -1,0 +1,29 @@
+{
+ "ananta": {
+  "title": "DREAM ANANTA GURUKUL PHASE II",
+  "project": "DREAM ANANTA",
+  "company": "DREAM GATEWAY HOTELS LIMITED",
+  "global": "AGREEMENT_ANANTA",
+  "out": "agreement-ananta.js",
+  "replace": [
+   ["executed on this [ ] day of [ ] 2026", "executed on this {{exec_day}} day of {{exec_month}} {{exec_year}}"],
+   ["Mr. Manish Chattopadhyay, S/o Mr. Manik Lal Chattopadhyay, PAN No. AFJPC7416G, Aadhaar No.687173806354, aged about 54 years, residing at 4E Pratima Apartment, Baniniketan School Road, Barasat Nabapally North 24 PGS West Bengal 700126", "{{ALLOTTEES}}"],
+   ["ALL THAT one residential flat together with One Covered Car parking space, ( hereinafter collectively referred to as the “Said Unit”, bearing the name 6E in Block no. E more", "ALL THAT one residential flat together with {{park_words}} {{park_kind}} Car parking space{{park_s}}, ( hereinafter collectively referred to as the “Said Unit”, bearing the name {{flat}} in Block no. {{block}} more"],
+   ["paid a sum of Rs. 2,10,000.00 as booking amount", "paid a sum of Rs. {{token_figures}} ({{token_words}}) as booking amount"],
+   ["All That residential units being No. 6E in 6th Floor, In Block E having carpet area of 842 Square feet, exclusive balcony area measuring 56 square feet and cupboard area of 17 square feet, Total Built up area 989 Square Feet, and Super Built up area / Sellable area 1320 square feet, together with One Covered parking space,", "All That residential units being No. {{flat}} in {{floor_ord}} Floor, In Block {{block}} having carpet area of {{carpet}} Square feet, exclusive balcony area measuring {{balcony}} square feet and cupboard area of {{cupboard}} square feet, Total Built up area {{builtup}} Square Feet, and Super Built up area / Sellable area {{sba}} square feet, together with {{park_words}} {{park_kind}} parking space{{park_s}},"],
+   ["being Unit no. 6E vide application No.", "being Unit no. {{flat}} vide application No. {{application_no}}, dated {{application_date}}"],
+   ["DA1FAPP/00019266-27, dated 03.09.2026", ""],
+   ["Agreement for Sale at[ ] in the presence", "Agreement for Sale at {{exec_place}} in the presence"],
+   ["39600 Rs./-Plus 18%GST", "Rs. ____________/- Plus 18% GST"],
+   ["39600 Rs./-Plus 18% GST", "Rs. ____________/- Plus 18% GST"]
+  ],
+  "tables": [
+   {"first": "^Sl\\.N o$", "id": "specs", "head": true, "absorb_next": true},
+   {"first": "^Sl\\.No\\.$", "id": "price", "head": true, "drop_rows": true, "w": [46, 0, 110]},
+   {"first": "^EDC$", "id": "edc", "head": true, "drop_rows": true, "w": [0, 110]},
+   {"first": "^Sinking Fund Deposit", "id": "static", "w": [0, 170]},
+   {"first": "^Sl No\\.$", "id": "plan", "head": true, "drop_rows": true, "drop_following_tables": 2, "w": [40, 0, 120, 90]}
+  ],
+  "must_not_remain": ["Manish", "Chattopadh", "Manik Lal", "AFJPC7416G", "687173806354", "Pratima", "Barasat", "6E", "842 Square", "1320", "DA1FAPP", "03\\.09\\.2026", "2,10,000", "39600", "77,86,400", "88,68,720", "95,03,395", "740340"]
+ }
+}

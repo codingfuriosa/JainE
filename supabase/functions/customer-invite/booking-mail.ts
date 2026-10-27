@@ -28,6 +28,15 @@ import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 type J = (o: unknown, status?: number) => Response;
 
+/* EACH PROJECT'S FIXED BOOKING AMOUNT (27 Oct 2026, as asked). The automatic Welcome Letter goes
+   only when the amount read from the booking is exactly this; otherwise - or for a project not
+   listed here - it is held and Pallabita Ghosh is emailed instead. */
+const FIXED_BOOKING_AMOUNT: Record<string, number> = {
+  "DREAM WORLD CITY": 100000,
+  "DREAM ANANTA": 210000,
+  "DREAM GURUKUL": 210000,
+};
+
 const KINDS = ["welcome", "welcome2", "allotment", "agreement"];
 const TEXT_KINDS = ["welcome", "welcome2"];   // go as the body of the email, never as a file
 const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
@@ -225,6 +234,19 @@ export function welcomeValues(res: any) {
 
 /* THE WELCOME LETTER AS AN EMAIL. Text, not an attachment, in the wording Post Sales gave:
    bold for the applicants' names (not "Dear"), the project's name, and the flat's particulars. */
+/* Why the Welcome Letter may not go automatically, or null when the booking amount read from
+   the booking is the project's fixed one. Shared with the bounce re-send. */
+export function bookingAmountProblem(res: any): string | null {
+  const project = welcomeValues(res).project;
+  const fixed = FIXED_BOOKING_AMOUNT[String(project || "").trim().toUpperCase()];
+  const got = typeof res?.letter?.token?.value === "number" ? res.letter.token.value : null;
+  if (fixed && got === fixed) return null;
+  if (!fixed) return `there is no fixed Booking Amount set for ${project}`;
+  return got === null
+    ? `no booking amount was found in the booking document (the fixed amount for ${project} is Rs. ${fixed.toLocaleString("en-IN")})`
+    : `the booking document shows Rs. ${got.toLocaleString("en-IN")}, but the fixed Booking Amount for ${project} is Rs. ${fixed.toLocaleString("en-IN")}`;
+}
+
 export function welcomeEmail(res: any) {
   const v = welcomeValues(res);
   const names = v.who.join(" and ") || "Sir / Madam";
@@ -409,10 +431,43 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
   // both send it. A failed send gives the claim back.
   if (action === "booking_welcome_auto") {
     await acc.from("booking_doc_status").upsert({ case_id: caseId, kind: "welcome" }, { onConflict: "case_id,kind", ignoreDuplicates: true });
+
+    // ---- the booking amount must be the project's fixed one, or the letter is held
+    const pv = welcomeValues(res);
+    const why = bookingAmountProblem(res);
+    if (why) {
+      const { data: held } = await acc.from("booking_doc_status").update({ auto_held_at: new Date().toISOString(), auto_held_reason: why })
+        .eq("case_id", caseId).eq("kind", "welcome").is("auto_emailed_at", null).is("auto_held_at", null)
+        .eq("auto_skip", false).eq("rejected", false).select("case_id");
+      if (!held || !held.length) return j({ ok: true, skipped: "already sent, held, skipped or rejected" });
+      const nTo = live ? CU : testTo;
+      const paid = Array.isArray(res?.letter?.token?.payments) ? res.letter.token.payments : [];
+      const nHtml = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111827">`
+        + `<p style="margin:0 0 14px">The Welcome Letter for <b>${esc(pv.who.join(" and ") || w.customer)}</b> - `
+        + `Flat No. ${esc(pv.flat)}, Block-${esc(pv.block)} of ${esc(pv.project)} - <b>has not been sent</b>, because ${esc(why)}.</p>`
+        + (paid.length ? `<p style="margin:0 0 14px">Payments seen in the booking document:<br>`
+            + paid.map((p: any) => `Rs. ${esc(Number(p.amount).toLocaleString("en-IN"))}${p.how ? " by " + esc(p.how) : ""}`
+              + `${p.date ? " on " + esc(p.date) : ""}${p.reference ? " (ref " + esc(p.reference) + ")" : ""}`).join("<br>") + `</p>` : "")
+        + `<p style="margin:0">Please check the booking in JAIN-E and send the Welcome Letter yourself once the amount is right.</p></div>`;
+      const nText = nHtml.replace(/<br>/g, "\n").replace(/<\/p>/g, "\n\n").replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').trim();
+      const nc = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true,
+        auth: { username: CU, password: CP } } });
+      try {
+        await nc.send({ from: `JAIN-E Post Sales <${CU}>`, to: nTo,
+          subject: `${live ? "" : "[TEST] "}Welcome Letter held - booking amount - ${w.customer}`, ...mailBody(nText, nHtml) });
+      } catch (e) {
+        await acc.from("booking_doc_status").update({ auto_held_at: null, auto_held_reason: null }).eq("case_id", caseId).eq("kind", "welcome");
+        return j({ error: "Could not tell Pallabita: " + String((e as Error).message || e).slice(0, 300) }, 502);
+      } finally { try { await nc.close(); } catch { /* ignore */ } }
+      return j({ ok: true, held: why });
+    }
+
     const { data: claimed } = await acc.from("booking_doc_status").update({ auto_emailed_at: new Date().toISOString() })
-      .eq("case_id", caseId).eq("kind", "welcome").is("auto_emailed_at", null).eq("auto_skip", false).eq("rejected", false)
+      .eq("case_id", caseId).eq("kind", "welcome").is("auto_emailed_at", null).is("auto_held_at", null)
+      .eq("auto_skip", false).eq("rejected", false)
       .select("case_id");
-    if (!claimed || !claimed.length) return j({ ok: true, skipped: "already sent, skipped or rejected" });
+    if (!claimed || !claimed.length) return j({ ok: true, skipped: "already sent, held, skipped or rejected" });
   }
 
   const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true,
