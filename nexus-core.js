@@ -424,7 +424,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'6120c1113a','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'15e707e991','insp-items.js':'af05d4a323','postsales.js':'149a60e1a2','scheduling.js':'50da5d7188','accounts.js':'c31ffa60bc','accounts-bank.js':'ea9648a540','accounts-books.js':'ed1ddeecec','purchase.js':'8109127afb','purchase-indent.js':'f6a398b898','purchase-rfq.js':'e6b7d700d5','purchase-po.js':'7239d968b5','purchase-stores.js':'5ff625e1d0','purchase-reports.js':'62c2dbe660'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -28045,7 +28045,7 @@ async function trcEnsureHistories(ids){
 }
 /* Ids of every lead behind the current list, before the history chips narrow it. */
 let TRC_LIST_LEAD_IDS=[];
-function trcHistChipOn(){return TRC_F.missedIn==='1'||TRC_F.cadence==='1'||TRC_F.promised==='1';}
+function trcHistChipOn(){return TRC_F.missedIn==='1'||TRC_F.cadence==='1'||TRC_F.promised==='1'||TRC_F.notConn!=='all';}
 async function trcWarmListHistories(){
   const ids=TRC_LIST_LEAD_IDS.slice();
   if(!ids.length||trcHistoriesReady(ids))return;
@@ -28149,7 +28149,7 @@ function trcSortHistory(rows){
      that transition is visible - which resets TRC_F back to these same defaults and clears this same
      key, so a reload caught right after landing here restores THIS visit, not the one before it. */
 const TRC_F=(function(){
-  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',missedIn:'all',cadence:'all',promised:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
+  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',missedIn:'all',cadence:'all',promised:'all',notConn:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
   try{
     const saved=JSON.parse(sessionStorage.getItem('trc_filters_state')||'null');
     if(saved&&typeof saved==='object')return Object.assign(fallback,saved);
@@ -28169,7 +28169,7 @@ function trcResetFilters(){
   TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
   TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
   TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.missedIn='all';
-  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
+  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.notConn='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_PAGE=0;
   TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -29013,6 +29013,7 @@ function trcLeads(rows){
     g.cadence=g.historyPending?null:trcCadenceIssues(g.status,historyRows,'late');
     g.promised=g.historyPending?null:trcCadenceIssues(g.status,historyRows,'promised');
     g.missedIn=g.historyPending?null:trcMissedIncomingCallback(historyRows);
+    g.notConn=g.historyPending?null:trcNotConnectedStale(historyRows);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -29209,6 +29210,8 @@ function trcKpiHtml(rows,shownRows){
   const missedInLeads=histDone?shownLeads.filter(function(g){return g.missedIn;}).length:null;
   const cadenceLeads=histDone?shownLeads.filter(function(g){return g.cadence;}).length:null;
   const promisedLeads=histDone?shownLeads.filter(function(g){return g.promised;}).length:null;
+  const notConnL1=histDone?shownLeads.filter(function(g){return g.notConn&&g.notConn.level===1;}).length:null;
+  const notConnL2=histDone?shownLeads.filter(function(g){return g.notConn&&g.notConn.level===2;}).length:null;
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
       const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
       return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
@@ -29238,6 +29241,12 @@ function trcKpiHtml(rows,shownRows){
       +'<i class="fa-solid fa-calendar-xmark"></i> Promised call - not called back'+(promisedLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+promisedLeads+'</b>')+'</button>'
     +'<button class="btn btn-sm'+(TRC_F.cadence==='1'?' btn-primary':'')+'" onclick="trcToggleCadence()" title="The agent set a next follow-up date and the next call came after that date (every call is checked against the date set on the call before it). Not counted until the fuller lead data has loaded">'
       +'<i class="fa-solid fa-hourglass-half"></i> Late follow-ups'+(cadenceLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+cadenceLeads+'</b>')+'</button>'
+    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
+    +'<span style="font-size:12.5px;color:var(--slate)">Not connected, no follow-up in 7 days</span>'
+    +'<button class="btn btn-sm'+(TRC_F.notConn==='1'?' btn-primary':'')+'" onclick="trcToggleNotConn(\'1\')" title="The last call on the lead was not connected and nothing has been logged on it for 7 days or more. Level 1: every caller except Level 2 and Dipanwita. Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-volume"></i> Level 1'+(notConnL1===null?(haveDetail?' <b>…</b>':''):' <b>'+notConnL1+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.notConn==='2'?' btn-primary':'')+'" onclick="trcToggleNotConn(\'2\')" title="Same check, for the calls made by Rani, Susmita and Piyasa. Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-volume"></i> Level 2'+(notConnL2===null?(haveDetail?' <b>…</b>':''):' <b>'+notConnL2+'</b>')+'</button>'
     +'</div></div>'
     +(TRC_F.match==='MISMATCH'?trcMismatchPanel(rows,fast):'');
 }
@@ -29333,6 +29342,18 @@ window.trcToggleMissedIn=async function(){
 window.trcToggleCadence=async function(){
   TRC_F.cadence=(TRC_F.cadence==='1'?'all':'1');
   if(TRC_F.cadence==='1'){
+    await trcEnsureFullEnrichment();
+    trcRender(true);
+    await trcEnsureHistories(TRC_LIST_LEAD_IDS);
+  }
+  trcRender(true);
+};
+
+/* Two buttons, one filter: Level 1 and Level 2 are mutually exclusive views of the same check (see
+   trcNotConnectedStale), so picking one closes the other and picking the open one again clears it. */
+window.trcToggleNotConn=async function(v){
+  TRC_F.notConn=(TRC_F.notConn===v?'all':v);
+  if(TRC_F.notConn!=='all'){
     await trcEnsureFullEnrichment();
     trcRender(true);
     await trcEnsureHistories(TRC_LIST_LEAD_IDS);
@@ -29522,7 +29543,7 @@ window.trcSet=async function(k,v){
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
   TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.missedIn='all';
-  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
+  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.notConn='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_F.q='';
   // Not null/null - that was "All time". Clearing the filters resets the date range to the same
   // Previous day default the page opens with, rather than reopening that door.
@@ -29601,6 +29622,7 @@ function trcLeadRowHtml(g,sl){
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
           (g.regressions>1?g.regressions+' status regressions':'Status regressed')):'')
       +(g.promised?' '+trcTag('t-amber','fa-calendar-xmark','','Promised call on '+(trcWall(g.promised.gaps[g.promised.gaps.length-1].limitDate)||'')+' - no call since'):'')
+      +(g.notConn?' '+trcTag('t-amber','fa-phone-volume','','Last call not connected - no follow-up for '+g.notConn.days+' days (Level '+g.notConn.level+')'):'')
       +(g.missedIn?' '+trcTag('t-red','fa-phone-slash','',
           'Missed incoming call '+g.missedIn.count+' time'+(g.missedIn.count===1?'':'s')+' - not called back within 24 hours'):''))
     /* g.lastAssessedOutside only ever fires once g.lastAssessed itself is null (see trcLeads) - a
@@ -29719,6 +29741,7 @@ function trcRender(full,keepPage){
   if(!callLevel&&TRC_F.missedIn==='1')items=items.filter(function(g){return g.missedIn;});
   if(!callLevel&&TRC_F.cadence==='1')items=items.filter(function(g){return g.cadence;});
   if(!callLevel&&TRC_F.promised==='1')items=items.filter(function(g){return g.promised;});
+  if(!callLevel&&TRC_F.notConn!=='all')items=items.filter(function(g){return g.notConn&&String(g.notConn.level)===TRC_F.notConn;});
   const totalItems=items.length;
   const totalPages=Math.max(1,Math.ceil(totalItems/TRC_PAGE_SIZE));
   if(!keepPage){
@@ -30218,6 +30241,64 @@ function trcMissedIncomingCallback(rows){
   }
   return misses.length?{count:misses.length,misses:misses}:null;
 }
+/* Not connected, then silence: the lead's LAST logged call (a customer's own missed incoming call does
+   not count - it is not an agent attempt) never got through, and nothing has been logged on the lead
+   for TRC_NOT_CONNECTED_DAYS or more, counted to today. The CRM has no connected flag, so "not
+   connected" is a call with no recording whose remark says nobody picked up. Level 2 is the three
+   senior callers (Rani, Susmita, Piyasa); Level 1 is everyone else except Dipanwita, whose calls are
+   in neither. The level is the owner of that last attempt. rows chronological, oldest-first. */
+const TRC_NOT_CONNECTED_DAYS=7;
+const TRC_LEVEL2_EMAILS=['jaingroupcaller9@thejaingroup.com','jaingroupcaller6@thejaingroup.com','jaingroupcaller8@thejaingroup.com'];
+const TRC_LEVEL_EXCLUDED_EMAILS=['mgr.presales@thejaingroup.com'];
+function trcIsNotConnected(r){
+  if(!r||r.has_recording)return false;
+  return /not receiv|busy on another|not connected|switched off|not reachable|unreachable|out of service|invalid number|wrong number|no answer|not answering|not picking|facility is not avail|call disconnected/i
+    .test(String(r.crm_remarks||''));
+}
+function trcNotConnectedStale(rows){
+  const list=(rows||[]).filter(function(r){return !trcIsMissedIncoming(r);});
+  const last=list[list.length-1];
+  if(!last||!trcIsNotConnected(last))return null;
+  const d=trcRowDate(last);
+  if(!d)return null;
+  const days=trcDaysBetween(d,traToday());
+  if(days<TRC_NOT_CONNECTED_DAYS)return null;
+  const email=String(last.personnel_email||'').trim().toLowerCase();
+  if(TRC_LEVEL_EXCLUDED_EMAILS.indexOf(email)>=0)return null;
+  return {days:days,follow_up_id:last.follow_up_id,level:TRC_LEVEL2_EMAILS.indexOf(email)>=0?2:1};
+}
+/* Every not-connected call on the lead that was not tried again within TRC_NOT_CONNECTED_DAYS - the
+   whole history, not just the latest call (trcNotConnectedStale above answers the list's "is it stuck
+   right now" question; this one is the lead page's "which dates, and how long each silence lasted").
+   The next call is the next agent call of any kind, connected or not, since a second failed attempt is
+   still a follow-up. A gap still open is counted to today. rows chronological, oldest-first. */
+function trcNotConnectedGaps(rows){
+  const list=(rows||[]).filter(function(r){return !trcIsMissedIncoming(r);});
+  const today=traToday(),gaps=[];
+  for(let i=0;i<list.length;i++){
+    if(!trcIsNotConnected(list[i]))continue;
+    const d=trcRowDate(list[i]);
+    if(!d)continue;
+    const next=list[i+1]||null,nd=next?trcRowDate(next):null;
+    if(next&&!nd)continue;
+    const days=trcDaysBetween(d,nd||today);
+    if(days<TRC_NOT_CONNECTED_DAYS)continue;
+    gaps.push({follow_up_id:list[i].follow_up_id,date:d,nextDate:nd,days:days,remarks:list[i].crm_remarks,who:list[i].personnel_name});
+  }
+  return gaps.length?{count:gaps.length,gaps:gaps}:null;
+}
+function trcNotConnectedGapsHtml(o){
+  if(!o)return '';
+  const rows=o.gaps.slice().reverse().map(function(g){
+    return '<div style="margin-top:6px;font-size:12.5px;color:var(--slate)">Not connected on <b>'+esc(trcWall(g.date)||g.date)+'</b>'
+      +(g.remarks?' ("'+esc(String(g.remarks).trim().slice(0,60))+'")':'')+(g.who?' by '+esc(g.who):'')
+      +(g.nextDate?', next call on '+esc(trcWall(g.nextDate)||g.nextDate):', no call logged since')
+      +' - '+g.days+' days without a follow-up (target '+TRC_NOT_CONNECTED_DAYS+').</div>';
+  }).join('');
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #dc2626">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-volume" style="color:#dc2626"></i> Not connected - not called again within '
+    +TRC_NOT_CONNECTED_DAYS+' days - '+o.count+' time'+(o.count===1?'':'s')+'</div>'+rows+'</div>';
+}
 function trcMissedIncomingHtml(o){
   if(!o)return '';
   const fmt=function(t){return esc(trcWall(new Date(t).toISOString().slice(0,10))||'');};
@@ -30514,11 +30595,13 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
   const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
   const missedIncoming=trcMissedIncomingHtml(trcMissedIncomingCallback(rows));
   const cadenceIssues=trcCadenceIssuesHtml(trcCadenceIssues(lead&&lead.status,rows));
+  const notConnected=trcNotConnectedGapsHtml(trcNotConnectedGaps(rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
     +ovHealth
     +missedIncoming
+    +notConnected
     +cadenceIssues
     +calls;
 
