@@ -21193,8 +21193,16 @@ function cpaParseReceiptRegister(wb){
     unitCode:get('Unit No'),tower:get('Level3'),invoiceNo:get('Invoice No')!=null?String(get('Invoice No')):null,
     schedule:get('Schedule'),revenueHead:get('Revenue Head'),amount:Number(get('Amount')||0),
     mode:get('PaymentMode'),isReversed:get('Is Reversed'),unitStatus:get('Unit Status'),
+    // The instrument block of the printed Money Receipt (27 Oct 2026). These columns were always in
+    // the export but were never read, so every receipt imported since the Gmail queue started showed
+    // "—" for Drawn On / Instn. No. / Instn. Date. Farvision pads some bank names with a no-break
+    // space ("YES BANK\u00a0"), so text is trimmed of it.
+    instrumentNo:xlsxText(get('Instrument No')),instrumentDate:xlsxExcelDate(get('Instrument Date')),
+    drawnOn:xlsxText(get('Drawn On')),drawnOnBranch:xlsxText(get('Drawn On Branch')),
+    depositBank:xlsxText(get('Deposit Bank/Debit Ledger')),narration:xlsxText(get('Narration')),
   }));
 }
+function xlsxText(v){ if(v==null) return null; const s=String(v).replace(/\u00a0/g,' ').trim(); return s||null; }
 function cpaParseReceiptReversal(wb){
   return cpaParseFlatSheet(wb,'Receipt Reversal No',['Receipt Reversal No','Booking No','Business Unit']).map(get=>({
     businessUnit:get('Business Unit'),reversalNo:String(get('Receipt Reversal No')),
