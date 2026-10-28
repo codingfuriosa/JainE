@@ -36,6 +36,12 @@ const FIXED_BOOKING_AMOUNT: Record<string, number> = {
   "DREAM ANANTA": 210000,
   "DREAM GURUKUL": 210000,
 };
+/* DREAM WORLD CITY TAKES EITHER AMOUNT (28 Oct 2026, as asked): a booking is accepted at
+   Rs. 50,000 as well as Rs. 1,00,000, so anything from the lower amount up to the fixed one lets
+   the letter go; below Rs. 50,000 it is held. */
+const MIN_BOOKING_AMOUNT: Record<string, number> = {
+  "DREAM WORLD CITY": 50000,
+};
 
 const KINDS = ["welcome", "welcome2", "allotment", "agreement"];
 const TEXT_KINDS = ["welcome", "welcome2"];   // go as the body of the email, never as a file
@@ -241,6 +247,8 @@ export function bookingAmountProblem(res: any): string | null {
   const fixed = FIXED_BOOKING_AMOUNT[String(project || "").trim().toUpperCase()];
   const got = typeof res?.letter?.token?.value === "number" ? res.letter.token.value : null;
   if (fixed && got === fixed) return null;
+  const least = MIN_BOOKING_AMOUNT[String(project || "").trim().toUpperCase()];
+  if (fixed && least && got !== null && got >= least && got <= fixed) return null;
   if (!fixed) return `there is no fixed Booking Amount set for ${project}`;
   return got === null
     ? `no booking amount was found in the booking document (the fixed amount for ${project} is Rs. ${fixed.toLocaleString("en-IN")})`

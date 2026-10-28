@@ -17,6 +17,8 @@ const VIDEOS=[
   {t:'ChatGPT Hindi',cat:'Training',yt:'Nz1MI8nsFTs',url:'https://youtu.be/Nz1MI8nsFTs'},
   {t:'Conveyance payment',cat:'Training',yt:'5anvF_uEE7w',url:'https://youtu.be/5anvF_uEE7w'},
   {t:'Accountability',cat:'Training',yt:'x8qThRAEO-I',url:'https://youtu.be/x8qThRAEO-I'},
+  {t:'WOW Moments',cat:'Training',yt:'iZ1myWkgac0',url:'https://youtu.be/iZ1myWkgac0'},
+  {t:'Recurring Tasks',cat:'Training',yt:'yckJ8ri5Jas',url:'https://youtu.be/yckJ8ri5Jas'},
   // ── WalkThrough videos ───────────────────────────────────────────────────
   {t:'Dream Gurukul',cat:'WalkThrough',yt:'4bWFJfU5AYg',url:'https://youtu.be/4bWFJfU5AYg?list=PLYy3u2uXULpWE5EzepbEQ5IcBWJaCYUWE'},
   {t:'Dream World City',cat:'WalkThrough',yt:'2hUcUUbF_1k',url:'https://youtu.be/2hUcUUbF_1k?list=PLYy3u2uXULpVxlLWwmLfW36kHn8j2gKcr'},
