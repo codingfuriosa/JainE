@@ -1790,51 +1790,20 @@ window.tpRefConnect=async function(id){if(!rtRefConnectGuard())return;
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpRfConnectBtn" onclick="tpRefConnectGo(${id})"><i class="fa-solid fa-check"></i> Connect</button></div>`);
 };
+/* Approving a referral now connects it in the same step (hr.referral_approve_connect, 28 Oct
+   2026), so this button only appears for referrals approved before that and never connected. It
+   goes through the same function, so both paths make exactly the same candidate. */
 window.tpRefConnectGo=async function(id){
   const reqId=parseInt(($('tpRfConnectPos')||{}).value||'');
   if(!reqId){toast('Pick a position','err');return;}
   const req=(MP_RECORDS||[]).find(r=>r.id===reqId);
   const btn=$('tpRfConnectBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Approved',approved_by:state.email,
-    approved_at:new Date().toISOString(),rejection_reason:null,manpower_request_id:reqId,position:req&&req.job_title||null}).eq('id',id).select().single();
+  const entity=await tpEntityForMe();
+  const {data,error}=await sb.schema('hr').rpc('referral_approve_connect',{p_ref_id:id,p_req_id:reqId,p_entity:entity});
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Connect';}return;}
-  if(String(data.referred_by||'').trim()){
-    const rn=await hrNotify({kind:'referral_decided',approved:true,
-      referrer_email:data.referred_by,referrer_name:'',candidate_name:data.referred_name||''});
-    if(rn&&rn.ok) toast('The person who referred them has been told','ok');
-  }
-  try{
-    const {data:rowId}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
-    /* ENTITY is whoever made the decision - here, whoever pressed Connect. hr.entities is the list
-       of recruiters the Tracker offers, so their name is matched against it and used when it is
-       there; when it is not, their own name is used rather than leaving the column empty, because
-       "who owns this candidate" is the question the column exists to answer. */
-    const entity=await tpEntityForMe();
-    const {data:cand}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:reqId,
-      name:data.referred_name,email:data.referred_email,phone:data.referred_phone,position:(req&&req.job_title)||null,
-      // No stage: hr.candidates starts everyone at 'Applied'. Connecting a referral to a
-      // position is not sending that person a test, and "Tests Sent" on the Monthly Update is
-      // supposed to mean a test was actually sent.
-      source:'Referral',entity:entity,resume_id:data.resume_id||null,
-      created_by:state.email,applied_at:new Date().toISOString()}).select().single();
-    if(cand){
-      /* Date is when the connection was made, not when the referral was submitted - the Tracker is
-         a record of people being worked on, and this person starts being worked on now.
-         Feedback is deliberately left empty: nothing has happened to them yet. */
-      const {data:tr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:data.referred_name,
-        position:(req&&req.job_title)||null,source:'Referral',entity:entity,
-        number:data.referred_phone,email:data.referred_email,created_at:new Date().toISOString(),
-        notes:'Referred by '+(data.referred_by||'someone')+(data.notes?(' — '+data.notes):''),candidate_id:cand.id}).select().single();
-      if(tr){
-        await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
-        await sb.schema('hr').from('referrals').update({candidate_id:cand.id,tracker_id:tr.id}).eq('id',id);
-        data.candidate_id=cand.id; data.tracker_id=tr.id;
-      }
-    }
-  }catch(e){ toast('Connected, but could not create the Interview Tracker row: '+((e&&e.message)||e),'err'); }
   const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
   closeModal();
-  toast('Connected to '+(req&&req.job_title||'position')+' and added to Interview Tracker');tpRefRender();
+  toast('Connected to '+(req&&req.job_title||'position')+' and added to Interviews');tpRefRender();
 };
 window.tpRefReject=async function(id){if(!rtRefConnectGuard())return;
   if(!await confirmDialog('Reject this referral?'))return;

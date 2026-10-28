@@ -16737,10 +16737,8 @@
        hrJdPdfDownload is already here. */
     const approve=opt.approve?(t.manpower_request_id!=null
       ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ic" style="height:30px;width:30px" title="Open the job description" onclick="hrTaskOpenJd(${t.manpower_request_id})"><i class="fa-solid fa-paperclip"></i></button><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve" onclick="hrTaskApproveManpower(${t.id},${t.manpower_request_id})"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="hrTaskRejectManpower(${t.id},${t.manpower_request_id})"><i class="fa-solid fa-xmark"></i></button></div>`
-      /* APPROVE, NOT CONNECT. The task asks whether to accept the referral; connecting it to a
-         position is what HR does afterwards, in the Referrals tab, once it has been accepted.
-         Putting Connect here made the approval queue ask one question and offer the answer to a
-         different one - and left the task titled "Approve Referral" with no Approve button on it. */
+      /* APPROVE CONNECTS. The tick asks which position and then approves and connects in one step
+         (hrTaskApproveReferral), so an approved referral is always already in Interviews. */
       :t.referral_id!=null
       ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ic" style="height:30px;width:30px" title="Open the referred person's CV" onclick="hrTaskOpenReferralCv(${t.referral_id})"><i class="fa-solid fa-paperclip"></i></button><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve this referral" onclick="hrTaskApproveReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject this referral" onclick="hrTaskRejectReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-xmark"></i></button></div>`
       /* A JOB DESCRIPTION AND A CANDIDATE NEEDED THEIR OWN BRANCHES.
@@ -17558,61 +17556,6 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
   };
 
-  window.hrTaskConnectReferral=async function(tid,refId){
-    const {data:rec}=await sb.schema('hr').from('referrals').select('*').eq('id',refId).single();
-    if(!rec){toast('Referral not found','err');return;}
-    const {data:openReqs}=await sb.schema('hr').from('manpower_requests').select('id,job_title,department').eq('approval_status','Approved').eq('status','Open');
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Connect Referral</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-      +'<div class="modal-body frm"><label>'+esc2(rec.referred_name||'')+' — connect to which open position?</label>'
-      +'<select id="hrConnPos" class="sel"><option value="">— Select an open requisition —</option>'
-      +(openReqs||[]).map(function(r){return '<option value="'+r.id+'">'+esc2(r.job_title||'—')+(r.department?' · '+esc2(r.department):'')+'</option>';}).join('')
-      +'</select>'+(!(openReqs||[]).length?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No approved open requisitions yet.</div>':'')
-      +'</div><div class="modal-foot"><button class="btn btn-primary" id="hrConnGoBtn" onclick="hrTaskConnectReferralGo('+tid+','+refId+')"><i class="fa-solid fa-check"></i> Connect</button><button class="btn" onclick="closeModal()">Cancel</button></div>');
-  };
-  window.hrTaskConnectReferralGo=async function(tid,refId){
-    const reqId=parseInt((($('hrConnPos')||{}).value)||'');
-    if(!reqId){toast('Pick a position','err');return;}
-    const btn=$('hrConnGoBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-    try{
-      const {data:req}=await sb.schema('hr').from('manpower_requests').select('job_title').eq('id',reqId).single();
-      const {data:rec}=await sb.schema('hr').from('referrals').update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),
-        rejection_reason:null,manpower_request_id:reqId,position:(req&&req.job_title)||null}).eq('id',refId).select().single();
-      const {data:rowId}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
-      const {data:cand}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:reqId,
-        name:rec.referred_name,email:rec.referred_email,phone:rec.referred_phone,position:(req&&req.job_title)||null,
-        source:'Referral',stage:'Tests Sent',created_by:me(),applied_at:nowISO()}).select().single();
-      if(cand){
-        const {data:tr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:rec.referred_name,
-          position:(req&&req.job_title)||null,source:'Referral',number:rec.referred_phone,email:rec.referred_email,
-          notes:'Referred by '+(rec.referred_by||'someone')+(rec.notes?(' — '+rec.notes):''),candidate_id:cand.id}).select().single();
-        if(tr){
-          await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
-          await sb.schema('hr').from('referrals').update({candidate_id:cand.id,tracker_id:tr.id}).eq('id',refId);
-        }
-      }
-      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()});
-      closeModal();
-      toast('Connected to '+(req&&req.job_title||'position')+' and added to Interviews','ok');
-
-      /* The referrer is told their referral was accepted, from here as well as from the Referrals
-         tab. Both sides of the decision now behave the same wherever it is taken - an acceptance
-         that goes unmentioned is the reason people stop referring anybody. */
-      if(rec&&String(rec.referred_by||'').trim()){
-        try{
-          const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
-            {body:{kind:'referral_decided',approved:true,
-                   referrer_email:rec.referred_by,referrer_name:'',
-                   candidate_name:rec.referred_name||''}});
-          if(se||(sent&&sent.error)) toast('Connected, but the email failed: '+((sent&&sent.error)||se.message),'err');
-          else toast(rec.referred_by+' has been told their referral was accepted','ok');
-        }catch(e){ toast('Connected, but the email failed: '+((e&&e.message)||e),'err'); }
-      }
-      hrAfterApprovalAction();
-    }catch(e){
-      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Connect';}
-      toast('Failed: '+((e&&e.message)||e),'err');
-    }
-  };
   /* REJECTING A REFERRAL TELLS THE PERSON WHO MADE IT, FROM WHEREVER IT IS REJECTED.
 
      The email was wired to the Reject button on the Referrals tab and not to this one, so the same
@@ -17622,44 +17565,62 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
 
      Sent from ai@, not from whoever clicked: this is the company's answer, not one approver's
      opinion, and a name on it invites the referrer to go and argue with a colleague. */
-  /* Accepting a referral. It does NOT create a candidate - that happens when HR connects them to a
-     position, which is a judgment about WHICH role they suit and cannot be made from a queue that
-     does not ask it. Approving says "yes, worth pursuing"; Connect says "for this job". */
+  /* APPROVING A REFERRAL CONNECTS IT, IN THE SAME STEP (28 Oct 2026).
+     Approving used to only mark the referral Approved; HR then had to find it again under
+     Recruitment > Referrals and press Connect to choose the position, and only that made the
+     candidate. Asked for: once approved, connected - no second step. So Approve now asks the one
+     thing the connection needs, which position, and hr.referral_approve_connect does the rest in
+     one transaction: referral Approved, candidate created (already approved), Interviews row made.
+     With a single open position it is picked already, so approving is still two clicks. */
   window.hrTaskApproveReferral=async function(tid,refId){
-    let ref=null;
+    const {data:ref}=await sb.schema('hr').from('referrals')
+      .select('referred_name,referred_by,candidate_id').eq('id',refId).single();
+    if(!ref){toast('Referral not found','err');return;}
+    const {data:openReqs}=await sb.schema('hr').from('manpower_requests').select('id,job_title,department')
+      .eq('approval_status','Approved').eq('status','Open').order('job_title');
+    const reqs=openReqs||[];
+    const tellThem=!!String(ref.referred_by||'').trim();
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-check"></i> Approve Referral</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><label>'+esc2(ref.referred_name||'This referral')+' — for which open position? *</label>'
+      +'<select id="hrConnPos" class="sel">'+(reqs.length===1?'':'<option value="">— Select an open position —</option>')
+      +reqs.map(function(r){return '<option value="'+r.id+'">'+esc2(r.job_title||'—')+(r.department?' · '+esc2(r.department):'')+'</option>';}).join('')
+      +'</select>'
+      +(!reqs.length?'<div style="font-size:11.5px;color:var(--err);margin-top:4px">No approved open positions — approve a Hiring Request first, then come back to this referral.</div>'
+        :'<div style="font-size:11.5px;color:var(--slate);margin-top:6px">They are added to Interviews for this position straight away'
+          +(tellThem?', and '+esc2(ref.referred_by)+' is emailed to say the referral was accepted.':'.')+'</div>')
+      +'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="hrConnGoBtn" onclick="hrTaskApproveReferralGo('+tid+','+refId+')"'+(reqs.length?'':' disabled')+'><i class="fa-solid fa-check"></i> Approve</button></div>');
+  };
+  window.hrTaskApproveReferralGo=async function(tid,refId){
+    const reqId=parseInt((($('hrConnPos')||{}).value)||'');
+    if(!reqId){toast('Pick a position','err');return;}
+    const btn=$('hrConnGoBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
     try{
-      const {data}=await sb.schema('hr').from('referrals')
-        .select('referred_name,referred_by').eq('id',refId).single();
-      ref=data||null;
-    }catch(_e){ /* the name only makes the question clearer */ }
-
-    const who=(ref&&ref.referred_name)||'this referral';
-    const tellThem=!!(ref&&String(ref.referred_by||'').trim());
-    if(!await confirmDialog(
-        'Approve '+who+'?'+(tellThem
-          ? ' '+ref.referred_by+' will be emailed to say the referral was accepted. HR can then connect them to a position.'
-          : ' HR can then connect them to a position.'),
-        {title:'Approve referral', okLabel:'Approve', icon:'fa-check', danger:false}))return;
-
-    try{
-      await sb.schema('hr').from('referrals')
-        .update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null})
-        .eq('id',refId);
+      // The recruiter column is whoever approved; tpEntityForMe (nexus-core) matches them to hr.entities.
+      let entity=null;
+      try{ if(typeof tpEntityForMe==='function') entity=await tpEntityForMe(); }catch(_e){}
+      const {data:rec,error}=await sb.schema('hr').rpc('referral_approve_connect',{p_ref_id:refId,p_req_id:reqId,p_entity:entity});
+      if(error) throw new Error(error.message);
       await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()});
-      toast('Referral approved — connect them to a position from Recruitment › Referrals','ok');
+      closeModal();
+      toast('Approved and added to Interviews for '+((rec&&rec.position)||'the position'),'ok');
 
-      if(tellThem){
+      /* The referrer is told their referral was accepted. Sent from ai@, not from whoever clicked:
+         this is the company's answer, not one approver's opinion. */
+      if(rec&&String(rec.referred_by||'').trim()){
         try{
           const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
             {body:{kind:'referral_decided',approved:true,
-                   referrer_email:ref.referred_by,referrer_name:'',
-                   candidate_name:ref.referred_name||''}});
+                   referrer_email:rec.referred_by,referrer_name:'',
+                   candidate_name:rec.referred_name||''}});
           if(se||(sent&&sent.error)) toast('Approved, but the email failed: '+((sent&&sent.error)||se.message),'err');
-          else toast(ref.referred_by+' has been told','ok');
+          else toast(rec.referred_by+' has been told their referral was accepted','ok');
         }catch(e){ toast('Approved, but the email failed: '+((e&&e.message)||e),'err'); }
       }
       hrAfterApprovalAction();
-    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+    }catch(e){
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Approve';}
+      toast('Failed: '+((e&&e.message)||e),'err');
+    }
   };
 
   window.hrTaskRejectReferral=async function(tid,refId){
