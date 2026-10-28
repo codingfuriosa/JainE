@@ -1,62 +1,235 @@
 /* ===== DAILY CHECKS — its own module =====
 
    The handful of things somebody looks at every morning, lifted out of Usability so that routine
-   is one page rather than a hunt through twenty-five modules. It reads the same two sources the
-   Usability report does, so there is no second definition of any number to drift: the flagged
-   features come from erp_feature_catalog.daily_check, and the workflow backlog from
-   erp_usability_workflow_health.
+   is one page rather than a hunt through twenty-five modules.
+
+   EVERY FIGURE HERE IS TODAY'S, AND THE PAGE KEEPS ITSELF THAT WAY.
+   Two of the three blocks used not to be. The feature rows were a thirty-day total — which reads
+   almost the same every morning for a month, and so could not answer the one question the page
+   exists to answer — and workflow health's Raised / Closed / Reverted were yesterday's, sitting in
+   the same row as three columns counting right now. Both are today's now, with yesterday printed
+   beneath them so there is something to read them against. The thirty-day total and the activity
+   band stay on the feature rows as the longer view they always were, in their own column.
+
+   And because a morning check is the kind of page that gets left open on a second screen, it
+   re-reads itself every minute rather than freezing at whatever the figures were when it was
+   opened. The three queries behind it cost a few tens of milliseconds between them, which is what
+   makes a minute affordable; the loop stops while the tab is in the background and catches up the
+   moment it comes back.
+
+   The one thing that cannot be live is transcription health. The pass that grades calls starts
+   about 00:30 IST and writes nothing during the working day, so making those five figures live
+   would mean grading calls as they finish — a pipeline change, not a reporting one. That block now
+   prints when the pass last wrote, so its age is on the page instead of in somebody's head.
 
    Gated exactly like Usability (hasUsability), because the RPCs behind it are — a page that drew
    an error for everyone else would be worse than no page.
 
    Deliberately NOT given the Usability report's date pickers. This answers "what needs attention
    today"; a range picker invites it to be read as a trend report, which is the other page's job. */
+const DC={feat:null,wf:null,tr:null,err:null,at:null,busy:false,fail:0};
+/* How often the page re-reads itself, and how old what is on screen may be before coming back to
+   the tab forces a read rather than waiting for the next tick. The second one is what makes a tab
+   left open overnight honest: the loop is suspended while it is hidden, so the figures on it can
+   be hours old, and showing those for another whole minute would be the opposite of the point. */
+const DC_EVERY_MS=60000, DC_STALE_MS=30000;
+let DC_TIMER=null, DC_CLOCK=null;
+/* Today in IST, as the plain date string the per-feature drill-downs filter on. usbIstNow() does
+   the timezone move; this is only its date half, spelled the way the RPCs want it. */
+function dcToday(){
+  const n=usbIstNow();
+  return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');
+}
+/* One round trip per block, sent together because they are independent.
+   A block whose query fails keeps whatever it last had rather than blanking. On a refresh, half a
+   page of live figures beside one block that is a minute stale is strictly better than an error
+   message where the page used to be — the reader came here to see numbers. Only the feature query
+   failing on the FIRST load is fatal, because that is the call that tells us whether this reader
+   is allowed to see any of this at all. */
+async function dcLoad(first){
+  if(DC.busy) return;
+  DC.busy=true;
+  /* .catch(), NOT a second argument to .then(). A then's rejection handler only sees the ORIGINAL
+     promise rejecting — it does not catch what the fulfilment handler beside it throws. The
+     Supabase client resolves with {error} instead of rejecting, so `throw r.error` IS that case,
+     and written as .then(f,r) it sailed straight past r and rejected the whole Promise.all. That
+     threw out of dcLoad with DC.busy still true, and every refresh afterwards found the flag set
+     and returned immediately: one failed query and the page stopped updating for the rest of the
+     day, with nothing on screen to say so. */
+  const call=function(name){
+    return sb.rpc(name).then(function(r){ if(r.error) throw r.error; return {ok:true,d:r.data||[]}; })
+                       .catch(function(e){ return {ok:false,e:e}; });
+  };
+  /* And the flag is cleared in a finally for the same reason: this runs on a timer, so anything
+     that can wedge it stays wedged until somebody reloads the page. */
+  try{
+    const res=await Promise.all([
+      call('erp_usability_daily_feature_checks'),
+      call('erp_usability_workflow_health'),
+      call('erp_usability_transcription_health')
+    ]);
+    if(res[0].ok){ DC.feat=res[0].d; DC.err=null; }
+    else if(first){ DC.feat=null; DC.err=(res[0].e&&res[0].e.message)||'Could not load'; }
+    if(res[1].ok) DC.wf=res[1].d;
+    if(res[2].ok) DC.tr=res[2].d;
+    if(res[0].ok||res[1].ok||res[2].ok){ DC.at=Date.now(); DC.fail=0; } else { DC.fail++; }
+    // nameOf() reads the global PEOPLE; getPeople caches it, so later refreshes cost nothing.
+    try{ await getPeople(); }catch(e){}
+    /* Anything the reader has expanded is re-read too. Those lists are "who used this today" and
+       "which step are these sitting on" — leaving them on the copy fetched when they were opened
+       would mean the one part of the page somebody is actually studying is the one part going
+       stale. There are at most a handful open at a time. */
+    if(!first) await dcRefreshOpen();
+  }finally{ DC.busy=false; }
+}
+/* Re-reads only what is currently expanded, in parallel, and leaves a failed one on its last good
+   rows rather than collapsing a list out from under the reader. */
+async function dcRefreshOpen(){
+  const jobs=[];
+  USB_FEAT_OPEN.forEach(function(key){
+    const r=usbDrillRange();
+    jobs.push(sb.rpc('erp_usability_feature_users',{p_feature_key:key,p_from:r.from,p_to:r.to,p_email:null,p_department:null})
+      .then(function(x){ if(!x.error) USB_FEAT_CACHE[key]=x.data||[]; },function(){}));
+  });
+  USB_WF_OPEN.forEach(function(key){
+    const bits=key.split('|');
+    jobs.push(sb.rpc('erp_usability_workflow_stuck_steps',{p_flow_id:Number(bits[0]),p_state:bits[1]})
+      .then(function(x){ if(!x.error) USB_WF_CACHE[key]=x.data||[]; },function(){}));
+  });
+  if(jobs.length) await Promise.all(jobs);
+}
 VIEWS.daily_checks=async function(v){
   setCrumb(['Administration','Daily Checks']);
   loader(v);
-  await usbLoad();
-  const head=mHead('fa-list-check','#b8902f','Daily Checks');
-  if(USB.rows===null){
-    v.innerHTML=head+'<div class="card card-pad empty" style="margin-top:16px;padding:40px">'
-      +'<i class="fa-solid fa-lock"></i><div>'+esc(USB.err||'Could not load')+'</div></div>';
-    return;
+  await dcLoad(true);
+  /* USB_CSS carries every .usb- class this page borrows from Usability — the expand chevrons, the
+     clickable amber cells, and the drill-down rows. The page never emitted it, which nobody saw
+     while clicking a feature row did nothing (see usbRerenderDetail); with that fixed the lists
+     would have opened unstyled, names and counts run together on one line. It sits outside
+     #dcBody so the minute-by-minute repaint cannot take the stylesheet out with the figures.
+     #dcTop is outside it for the same reason: the Refresh button should not vanish from under a
+     cursor on its way to press it. */
+  v.innerHTML=USB_CSS
+    +mHead('fa-list-check','#b8902f','Daily Checks')
+    +'<div id="dcTop">'+dcTopHtml()+'</div>'
+    +'<div id="dcBody">'+dcBodyHtml()+'</div>';
+  dcStart();
+};
+function dcTopHtml(){
+  return '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:6px 2px 2px">'
+    +'<p style="color:var(--slate);font-size:13px;margin:0;max-width:620px">What needs attention today. '
+      +'Every count is today so far, in IST, with yesterday beneath it — except the call figures, which '
+      +'the overnight pass grades and which say below when they last landed.</p>'
+    +'<div style="display:flex;align-items:center;gap:10px;white-space:nowrap">'
+      +'<span id="dcStamp" style="font-size:12px;color:var(--slate)">'+dcStampText()+'</span>'
+      +'<button class="btn btn-sm" id="dcRefresh" onclick="dcRefreshNow()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
+    +'</div></div>';
+}
+/* "Updated 40 seconds ago", not a clock time: in front of a page that refreshes itself the
+   question is how old this is, and a reader should not have to subtract. A refresh that failed
+   says so rather than letting the age climb as though nothing were wrong. */
+function dcStampText(){
+  if(!DC.at) return '';
+  const s=Math.max(0,Math.round((Date.now()-DC.at)/1000));
+  const ago=s<10?'just now':s<60?(s+' seconds ago'):s<120?'a minute ago':(Math.round(s/60)+' minutes ago');
+  const stale=s>=(DC_EVERY_MS/1000)*2;
+  const ink=DC.fail?'#dc2626':stale?'#b45309':'#16a34a';
+  return '<i class="fa-solid fa-circle" style="font-size:7px;margin-right:6px;vertical-align:middle;color:'+ink+'"></i>'
+    +(DC.fail?('Last updated '+ago+' · could not reach the database'):(s<10?'Updated just now':('Updated '+ago)));
+}
+function dcBodyHtml(){
+  if(DC.feat===null){
+    return '<div class="card card-pad empty" style="margin-top:16px;padding:40px">'
+      +'<i class="fa-solid fa-lock"></i><div>'+esc(DC.err||'Could not load')+'</div></div>';
   }
-  const rows=USB.rows||[];
-  const picks=rows.filter(function(r){ return r.daily_check; });
+  const picks=DC.feat||[];
   /* Grouped by module in the catalogue's own order, so the page reads the way the list was
      written rather than alphabetically. */
   const mods=[]; picks.forEach(function(r){ if(mods.indexOf(r.module_label)===-1) mods.push(r.module_label); });
   const feature=mods.map(function(m){
     return usbDailyChecksHtml(picks.filter(function(r){ return r.module_label===m; }), m);
   }).join('');
-  const none=(!picks.length && !(USB.wfHealth||[]).length && !(USB.trHealth||[]).length)
+  const none=(!picks.length && !(DC.wf||[]).length && !(DC.tr||[]).length)
     ? '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-list-check"></i>'
       +'<div>Nothing is flagged as a daily check yet</div></div>' : '';
-  /* The body is kept behind its own id so expanding a workflow breakdown repaints just this,
-     rather than going through renderPage() — which would re-run usbLoad() and fire both RPCs
-     again on every click. */
-  DC_BODY=function(){ return usbWorkflowHealthHtml()+usbTranscriptionHealthHtml()+feature+none; };
-  v.innerHTML=head
-    +'<p style="color:var(--slate);font-size:13px;margin:6px 2px 2px">What needs attention today. '
-      +'Feature counts cover the last 30 days; workflow figures are live and call figures come from '
-      +'the overnight pass, both with movement from yesterday.</p>'
-    +'<div id="dcBody">'+DC_BODY()+'</div>';
+  return usbWorkflowHealthHtml()+usbTranscriptionHealthHtml()+feature+none;
+}
+/* Repaints the figures in place. Expanding a workflow breakdown comes through here too, rather
+   than through renderPage() — which would re-run the whole view and fire every query again on
+   every click. */
+function dcRepaint(){
+  const b=$('dcBody'); if(b) b.innerHTML=dcBodyHtml();
+  const s=$('dcStamp'); if(s) s.innerHTML=dcStampText();
+}
+/* THE REFRESH LOOP.
+   Two timers on purpose. One re-reads the data every minute; the other re-prints the "updated N
+   seconds ago" line every ten, so the age on screen stays honest between fetches without a fetch
+   being what makes it move.
+   Both stop when the tab goes to the background. Browsers throttle a hidden tab's intervals
+   anyway, so the real choice is whether to be explicit about it — and being explicit is also what
+   stops a laptop left open overnight issuing a query a minute into an empty room. */
+function dcStart(){
+  dcStop();
+  DC_TIMER=setInterval(dcTick,DC_EVERY_MS);
+  DC_CLOCK=setInterval(function(){ const s=$('dcStamp'); if(s) s.innerHTML=dcStampText(); },10000);
+}
+function dcStop(){
+  if(DC_TIMER){ clearInterval(DC_TIMER); DC_TIMER=null; }
+  if(DC_CLOCK){ clearInterval(DC_CLOCK); DC_CLOCK=null; }
+}
+async function dcTick(){
+  if(document.hidden) return;
+  if(!$('dcBody')){ dcStop(); return; }   // the view was replaced under us
+  await dcLoad(false);
+  dcRepaint();
+}
+/* Coming back to the tab reads immediately if what is on screen has had time to go stale, instead
+   of serving out the remainder of a minute that elapsed while nobody was looking. Registered once
+   for the whole bundle, so it has to check it is on the right page before touching anything. */
+document.addEventListener('visibilitychange',function(){
+  if(typeof PAGE==='undefined'||PAGE!=='daily_checks') return;
+  if(document.hidden){ dcStop(); return; }
+  if(!$('dcBody')) return;
+  dcStart();
+  if(!DC.at||(Date.now()-DC.at)>DC_STALE_MS) dcTick();
+});
+window.dcRefreshNow=async function(){
+  const b=$('dcRefresh');
+  if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Refreshing…'; }
+  /* finally, so a button pressed during an outage comes back rather than spinning for ever —
+     redrawing #dcTop is what restores it, and that has to happen however the read ended. */
+  try{ await dcLoad(false); }
+  finally{
+    dcRepaint();
+    const t=$('dcTop'); if(t) t.innerHTML=dcTopHtml();
+    dcStart();   // the minute restarts from this read, not from whenever the last tick happened
+  }
 };
-let DC_BODY=null;
-function dcRepaint(){ const b=$('dcBody'); if(b&&DC_BODY) b.innerHTML=DC_BODY(); }
 /* WORKFLOW HEALTH — one row per workflow, on the Daily Checks page.
    Five of these six are not usage at all: they count where instances are actually sitting, which
-   is the question "is anything stuck" really asks. They are a live snapshot plus yesterday, and
-   they ignore the report's date pickers on purpose — the function's comment explains why. */
+   is the question "is anything stuck" really asks. They are a live snapshot, and they ignore the
+   report's date pickers on purpose — the function's comment explains why.
+   The last three used to be yesterday's totals sitting beside three live ones, which meant one row
+   carried two different days with nothing on screen to say which was which. They are today's now,
+   with yesterday printed under each so the day still has something to be read against. */
 function usbWorkflowHealthHtml(){
-  const rows=USB.wfHealth;
+  const rows=DC.wf;
   if(!rows||!rows.length) return '';
   const warn=function(n){ return Number(n)>0?'color:#b45309;font-weight:700':'color:var(--slate)'; };
+  /* Today over yesterday in one cell. Yesterday is a whole day and today is a part of one, so they
+     are never a fair comparison and the smaller type says as much; it is there for scale — two
+     raised by eleven in the morning means something different depending on whether yesterday saw
+     three or thirty. */
+  const ty=function(t,y,amber){
+    const a=Number(t||0), b=Number(y||0);
+    return '<td><b style="'+(amber&&a?'color:#b45309':'')+'">'+a+'</b>'
+      +'<div style="font-size:11px;color:var(--slate);margin-top:2px;font-weight:400">'+b+' yest</div></td>';
+  };
   return '<div class="card" style="margin-bottom:14px">'
     +'<div class="card-pad" style="padding-bottom:10px">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
         +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-heart-pulse" style="color:#b8902f"></i> Workflow health</div>'
-        +'<div style="font-size:12px;color:var(--slate)">Live right now · movement counts are yesterday</div>'
+        +'<div style="font-size:12px;color:var(--slate)">Counted when you look at it</div>'
       +'</div>'
       +'<div style="font-size:12px;color:var(--slate);margin-top:3px">Where each workflow\'s instances are actually sitting. Click any amber figure to see which step.</div>'
     +'</div>'
@@ -66,8 +239,9 @@ function usbWorkflowHealthHtml(){
       +'<th style="width:104px" title="Appeared for someone and not picked up yet">Awaiting receipt</th>'
       +'<th style="width:116px" title="A previous person forwarded it and the next person has not accepted it">Forwarded, not received</th>'
       +'<th style="width:116px" title="Received, and not moved on">Received, not forwarded</th>'
-      +'<th style="width:84px">Raised</th><th style="width:84px">Closed</th>'
-      +'<th style="width:104px" title="Reverts and send-backs — the work going backwards">Reverted</th>'
+      +'<th style="width:84px" title="Started today, with yesterday beneath">Raised</th>'
+      +'<th style="width:84px" title="Finished today, with yesterday beneath">Closed</th>'
+      +'<th style="width:92px" title="Reverts and send-backs — the work going backwards. Today, with yesterday beneath">Reverted</th>'
     +'</tr></thead><tbody>'
     +rows.map(function(r){
         /* The three backlog figures open a step-level breakdown. A count on its own says there is
@@ -87,9 +261,12 @@ function usbWorkflowHealthHtml(){
           +cell(r.awaiting_receipt,'awaiting')
           +cell(r.fwd_not_received,'fwd')
           +cell(r.in_hand_not_forwarded,'inhand')
-          +'<td>'+Number(r.raised_yesterday||0)+'</td>'
-          +'<td>'+Number(r.closed_yesterday||0)+'</td>'
-          +'<td style="'+warn(r.reverted_yesterday)+'">'+Number(r.reverted_yesterday||0)+'</td></tr>';
+          +ty(r.raised_today,r.raised_yesterday,false)
+          +ty(r.closed_today,r.closed_yesterday,false)
+          // Work going backwards is the one of the three worth colouring: raising and closing are
+          // the workflow doing its job, a revert is somebody having to do theirs again.
+          +ty(r.reverted_today,r.reverted_yesterday,true)
+          +'</tr>';
         return row+usbWfStuckRowsHtml(r);
       }).join('')
     +'</tbody></table></div></div>';
@@ -144,9 +321,12 @@ window.usbToggleWfStuck=async function(flowId,state){
 /* TRANSCRIPTION HEALTH — the five call figures, on the Daily Checks page.
    Like workflow health these are measurements, not usage: how many of yesterday's calls the
    nightly pass transcribed, and how well what the rep typed into the CRM matched what was
-   actually said. The RPC's comment carries the definitions. */
+   actually said. The RPC's comment carries the definitions.
+   The one block on this page that cannot be live, so it is the one block that prints its own age:
+   the pass starts about 00:30 IST and writes nothing after it finishes, and until it runs again
+   these five figures are exactly as fresh as the moment it stopped. */
 function usbTranscriptionHealthHtml(){
-  const rows=USB.trHealth;
+  const rows=DC.tr;
   if(!rows||!rows.length) return '';
   const num=function(n){ return Number(n).toLocaleString('en-IN'); };
   /* Rates keep the decimal even when it is .0, so a column reading 95.5 / 80.0 / 100.0 lines up
@@ -173,15 +353,34 @@ function usbTranscriptionHealthHtml(){
     return '<span style="color:'+ink+';font-weight:700;font-size:11.5px">'
       +arrow+' '+Math.abs(d)+(r.is_pct?' pts':'')+'</span>';
   };
+  /* WHEN THE PASS LAST WROTE.
+     last_run is the newest row the pass produced, in either table it writes. If that is today, the
+     run landed and the time is all a reader needs. If it is not today the pass did not run this
+     morning, which IS the check failing — so the line gives the date rather than a bare clock
+     time, which could be read as "a few hours ago", and it is amber rather than grey. */
+  const run=(rows[0]&&rows[0].last_run)?new Date(rows[0].last_run):null;
+  const ist=function(d,opt){ opt=opt||{}; opt.timeZone='Asia/Kolkata'; return d.toLocaleString('en-IN',opt); };
+  let runNote, runInk='var(--slate)';
+  if(!run||isNaN(run.getTime())){
+    runNote='The pass has not written anything yet'; runInk='#b45309';
+  }else{
+    const sameDay=ist(run,{day:'2-digit',month:'2-digit',year:'numeric'})
+                 ===usbIstNow().toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'});
+    runNote=sameDay
+      ? 'Pass last wrote at '+ist(run,{hour:'2-digit',minute:'2-digit'})+' this morning'
+      : 'Pass last wrote on '+ist(run,{day:'numeric',month:'short'})+' — it has not run since';
+    if(!sameDay) runInk='#b45309';
+  }
   return '<div class="card" style="margin-bottom:14px">'
     +'<div class="card-pad" style="padding-bottom:10px">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
         +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-microphone-lines" style="color:#b8902f"></i> Transcription health</div>'
-        +'<div style="font-size:12px;color:var(--slate)">This morning\'s run &middot; against the one before</div>'
+        +'<div style="font-size:12px;color:'+runInk+(runInk==='var(--slate)'?'':';font-weight:700')+'">'
+          +'<i class="fa-regular fa-clock" style="margin-right:5px"></i>'+esc(runNote)+'</div>'
       +'</div>'
       /* Stated plainly because it is the one thing about this table that surprises people: the
          pass runs overnight, so today's column is yesterday's selling. */
-      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">The overnight pass grades the previous day\'s calls, so &ldquo;today&rdquo; is the run that finished this morning. An empty column means it did not run.</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">The only figures here that are not live. The overnight pass grades the previous day\'s calls, so &ldquo;today&rdquo; is the run that finished this morning. An empty column means it did not run.</div>'
     +'</div>'
     +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
       +'<th>Check</th><th style="width:92px">Today</th><th style="width:92px">Yesterday</th>'
@@ -211,53 +410,95 @@ function usbTranscriptionHealthHtml(){
       }).join('')
     +'</tbody></table></div></div>';
 }
-/* THE DAILY CHECKS, ABOVE EVERYTHING ELSE.
+/* THE FLAGGED FEATURES.
    A handful of features are looked at every morning; the rest are read when somebody asks a
-   question. Those few are flagged in erp_feature_catalog.daily_check and lifted out here into
-   their own block at the top of the module, because the page below is grouped by TAB — pinning
-   them in place would scatter the Tasks ones away from the Workflow ones and defeat the point.
-   They still appear in their own tab further down, so nothing is hidden or duplicated away.
-   A module with nothing flagged renders nothing at all, rather than an empty card. */
+   question. Those few are flagged in erp_feature_catalog.daily_check and gathered here, grouped by
+   the module they belong to.
+
+   TODAY FIRST, THIRTY DAYS AS CONTEXT. These rows used to carry the thirty-day total alone, which
+   on a page read every morning said nothing: "Create task — 99 uses" is the same sentence it was
+   yesterday and will be tomorrow, and no amount of staring at it reveals whether a task has been
+   created today. Today's count leads now; the thirty-day figure and the activity band keep their
+   own column, because they are what says whether a quiet day is unusual for this feature at all. */
 function usbDailyChecksHtml(rows,heading){
-  const picks=(rows||[]).filter(function(r){ return r.daily_check; });
+  const picks=rows||[];
   if(!picks.length) return '';
   return '<div class="card usb-daily" style="margin:16px 0 18px">'
     +'<div class="card-pad" style="padding-bottom:10px">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-folder-open" style="color:#b8902f"></i> '+esc(heading||'Daily checks')+'</div>'
     +'</div>'
     +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
-      +'<th>Feature</th><th style="width:90px">Uses</th><th style="width:90px">People</th>'
-      +'<th style="width:130px">Last used</th><th style="width:120px">Activity</th>'
+      +'<th>Feature</th>'
+      +'<th style="width:104px" title="Uses so far today, in IST">Today</th>'
+      +'<th style="width:104px">Yesterday</th>'
+      +'<th style="width:124px" title="The last time anybody used it, however long ago">Last used</th>'
+      +'<th style="width:104px" title="The longer view — uses and people over the past 30 days">Last 30 days</th>'
+      +'<th style="width:116px">Activity</th>'
     +'</tr></thead><tbody>'
     +picks.map(function(r){
         const s=usbBandStyle(r.band);
         const open=USB_FEAT_OPEN.has(r.feature_key);
-        const clickable=Number(r.uses||0)>0;
+        const today=Number(r.today_uses||0), yday=Number(r.yday_uses||0);
+        /* The drill-down is today's list of who used it, so a feature nobody has touched today has
+           nothing to expand into. (The Usability page still opens the same feature over whatever
+           range you choose there — this page only ever answers for today.) */
+        const clickable=today>0;
         const chev=clickable
           ? '<span class="usb-feat-chev'+(open?' open':'')+'"><i class="fa-solid fa-chevron-right"></i></span>'
           : '<span class="usb-feat-chev" style="visibility:hidden"><i class="fa-solid fa-chevron-right"></i></span>';
+        const people=function(n){
+          const v=Number(n||0);
+          return v?('<div style="font-size:11px;color:var(--slate);margin-top:2px;font-weight:400">'+v+' '+(v===1?'person':'people')+'</div>'):'';
+        };
+        /* NOTHING YET TODAY IS ONLY WORTH FLAGGING IF SOMETHING NORMALLY HAPPENS.
+           A plain amber zero on every row would be crying wolf at nine in the morning, and on the
+           features nobody has ever used it would be amber for ever. It is amber only where the
+           same check ran yesterday — that is the row where today's silence is a change rather
+           than the usual state of affairs. */
+        const quiet=!today&&yday>0;
+        const todayCell=today
+          ? '<b>'+today.toLocaleString('en-IN')+'</b>'+people(r.today_users)
+          : '<span style="'+(quiet?'color:#b45309;font-weight:700':'color:var(--slate)')+'">'+(quiet?'none yet':'0')+'</span>';
+        /* Last used carries the clock when it is today. On every other row the date is the whole
+           answer, but "today" beside a count of 3 leaves open whether that was at 9am or a minute
+           ago, which on a page that refreshes itself is exactly the difference being watched. */
+        const lu=r.last_used?new Date(r.last_used):null;
+        let lastTxt='—';
+        if(lu&&!isNaN(lu.getTime())){
+          const sameDay=lu.toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'2-digit',year:'numeric'})
+                       ===usbIstNow().toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'});
+          lastTxt=sameDay
+            ? 'Today '+lu.toLocaleString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'})
+            : fmtDate(r.last_used);
+        }
         const row='<tr class="'+(clickable?'usb-feat-row':'')+'"'
           +(clickable?' onclick="usbToggleFeature(\''+escJs(r.feature_key)+'\')"':'')+'>'
           +'<td>'+chev+esc(r.feature)
             +'<span style="font-size:11px;color:var(--slate);margin-left:8px">'+esc(r.tab)+'</span></td>'
-          +'<td><b>'+Number(r.uses||0).toLocaleString('en-IN')+'</b></td>'
-          +'<td>'+Number(r.users||0)+'</td>'
-          +'<td style="color:var(--slate);font-size:12px">'+(r.last_used?esc(fmtDate(r.last_used)):'—')+'</td>'
+          +'<td>'+todayCell+'</td>'
+          +'<td style="color:var(--slate)">'+(yday?('<b style="font-weight:600">'+yday.toLocaleString('en-IN')+'</b>'+people(r.yday_users)):'0')+'</td>'
+          +'<td style="color:var(--slate);font-size:12px">'+esc(lastTxt)+'</td>'
+          +'<td style="color:var(--slate)">'+Number(r.uses||0).toLocaleString('en-IN')+people(r.users)+'</td>'
           +'<td><span class="badge" style="background:'+s.bg+';color:'+s.ink+';white-space:nowrap">'+esc(r.band)+'</span></td></tr>';
-        return row+(open?usbFeatureUsersRowHtml(r):'');
+        return row+(open?usbFeatureUsersRowHtml(r,6):'');
       }).join('')
     +'</tbody></table></div></div>';
 }
 /* The sub-row a clicked feature expands into: who actually used it, most recent first. Loads once
    per feature per filter set (usbLoad clears the cache on any range/person change) and is cached
-   after that, so re-collapsing and re-expanding the same feature costs nothing more. */
-function usbFeatureUsersRowHtml(r){
+   after that, so re-collapsing and re-expanding the same feature costs nothing more. On Daily
+   Checks the cache is instead refreshed with the rest of the page each minute, because there the
+   range is today and a list fetched twenty minutes ago is missing twenty minutes of it.
+   cols is the width of the table this row has to span — five on Usability, six on Daily Checks,
+   which has today and yesterday where the other has one count. */
+function usbFeatureUsersRowHtml(r,cols){
   const cached=USB_FEAT_CACHE[r.feature_key];
   let inner;
   if(cached===undefined){
     inner='<div class="usb-users-wrap"><span style="color:var(--slate);font-size:12.5px"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</span></div>';
   }else if(!cached.length){
-    inner='<div class="usb-users-wrap"><span style="color:var(--slate);font-size:12.5px">Nobody used this in the selected range.</span></div>';
+    inner='<div class="usb-users-wrap"><span style="color:var(--slate);font-size:12.5px">Nobody used this '
+      +(usbDrillIsToday()?'today':'in the selected range')+'.</span></div>';
   }else{
     inner='<div class="usb-users-wrap">'
       +cached.map(function(u){
@@ -267,7 +508,17 @@ function usbFeatureUsersRowHtml(r){
       }).join('')
     +'</div>';
   }
-  return '<tr class="usb-users-row"><td colspan="5">'+inner+'</td></tr>';
+  return '<tr class="usb-users-row"><td colspan="'+(cols||5)+'">'+inner+'</td></tr>';
+}
+/* WHICH DATES A DRILL-DOWN COVERS.
+   The list a reader gets by clicking a row has to be the people behind the number they clicked.
+   On Usability that number is the chosen date range; on Daily Checks every figure is today's, so
+   handing back thirty days of names there would answer a question nobody asked and quietly
+   contradict the count sitting next to it. */
+function usbDrillIsToday(){ return typeof PAGE!=='undefined'&&PAGE==='daily_checks'; }
+function usbDrillRange(){
+  if(usbDrillIsToday()){ const d=dcToday(); return {from:d,to:d}; }
+  return usbCurrentRange();
 }
 // Bumped on every open and checked after each round trip below, so a slower request for a feature
 // you have since clicked away from can never win a race against a faster one that came after it and
@@ -278,7 +529,7 @@ let USB_EV_TOKEN=0;
    newest first, for exactly this person/feature/range. */
 window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   const myToken=++USB_EV_TOKEN;
-  const r=usbCurrentRange();
+  const r=usbDrillRange();
   openModal(
     '<div class="modal-head"><h3><i class="fa-solid fa-list-check" style="color:#7c3aed"></i> '+esc(nameOf(email))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body"><div id="usbEvWrap"><div class="loader"><div class="spin"></div></div></div></div>'
@@ -781,7 +1032,7 @@ window.usbToggleFeature=async function(key){
   USB_FEAT_OPEN.add(key);
   usbRerenderDetail();
   if(!(key in USB_FEAT_CACHE)){
-    const r=usbCurrentRange();
+    const r=usbDrillRange();
     try{
       const {data,error}=await sb.rpc('erp_usability_feature_users',{p_feature_key:key,p_from:r.from,p_to:r.to,p_email:USB.email||null,p_department:USB.dept||null});
       if(error)throw error;
@@ -790,7 +1041,12 @@ window.usbToggleFeature=async function(key){
     usbRerenderDetail();
   }
 };
+/* Daily Checks has no module detail pane. Its feature rows live in #dcBody, and routing their
+   repaint through the Usability one meant $('usbDetailWrap') came back null and the function
+   returned having drawn nothing — so a clicked row on that page expanded into silence, chevron
+   and all, however long you waited. */
 function usbRerenderDetail(){
+  if(typeof PAGE!=='undefined'&&PAGE==='daily_checks'){ dcRepaint(); return; }
   const box=$('usbDetailWrap'); if(!box||!USB.moduleId)return;
   box.innerHTML=usbModuleDetailHtml(USB.moduleId);
 }

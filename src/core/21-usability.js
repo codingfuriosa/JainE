@@ -44,18 +44,11 @@ async function usbLoad(){
     if(error)throw error;
     USB.rows=data||[];
   }catch(e){ USB.rows=null; USB.err=(e&&e.message)||String(e); }
-  /* Two further queries, both for Daily Checks and neither derivable from the feature report.
-     Workflow health answers "where is the work stuck"; transcription health answers "how did
-     yesterday's calls go, and is the CRM telling the truth about them". Both ignore the date
-     filters above on purpose (see each function's own comment). Fetched here so the render stays
-     synchronous like everything else; either failing leaves its block simply not drawn.
-     Sent together rather than one after the other: they are independent, and the Usability page
-     waits on this call too even though it draws neither. */
-  const health=await Promise.all([
-    sb.rpc('erp_usability_workflow_health').then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; }),
-    sb.rpc('erp_usability_transcription_health').then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; })
-  ]);
-  USB.wfHealth=health[0]; USB.trHealth=health[1];
+  /* Workflow health and transcription health used to be fetched here as well. They belong to Daily
+     Checks and are drawn only there, but that page used to share this loader, so the Usability page
+     was waiting on two round trips for figures it never prints. Daily Checks now loads its own
+     three (it refreshes itself every minute, which this loader is not built for), and this one is
+     back to fetching the one report the page it serves actually draws. */
   if(!USB.people){ try{ USB.people=await getPeople(); }catch(e){ USB.people=[]; } }
   // A per-feature drill-down cached under the old range/person would show stale names against the
   // new filters, so any change here throws it out rather than risk a misleading answer.
