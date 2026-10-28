@@ -5074,11 +5074,26 @@
      closed-without-saving form left behind) and again on the way out of a save. Taken one at a
      time that wait sat between the person and the form they were trying to open. They do not
      depend on each other, so they go a few at a time. */
+  /* FAILING TO ASK IS NOT AN ANSWER OF "NO".
+     This used to read `const {data:used}=...; if(!used) await s3Delete(path)`, taking only `data`
+     and never looking at `error`. A Supabase rpc that fails RESOLVES - it does not throw - with
+     {data:null,error:{...}}, so a dropped connection, an expired token or a 500 left `used`
+     undefined, `!used` true, and the file deleted. The row kept pointing at it, so the instance
+     went on saying it had a receipt that was no longer in the bucket.
+     That is not theoretical: reimbursement 121's seven receipts are gone from S3 (NoSuchKey on
+     every one) while its details still name all seven, and it was never edited and never deleted.
+     This sweeper runs on the way into every workflow form and again after every save, against
+     exactly the files somebody has just uploaded, so one bad moment on the network is enough.
+     Now nothing is deleted unless the database has actually said, in so many words, that nothing
+     references it. Every other outcome keeps the file. An orphan left in the bucket costs pennies;
+     a receipt deleted out from under a claim cannot be got back. */
   async function wfPurgeCaseFiles(paths){
     await wfRunPool(paths||[], 3, async function(path){
       try{
-        const {data:used}=await ACC().rpc('wf_file_referenced',{p_path:path});
-        if(!used) await s3Delete(path);
+        const {data:used,error}=await ACC().rpc('wf_file_referenced',{p_path:path});
+        if(error) return;          // could not ask - keep the file
+        if(used!==false) return;   // referenced, or an answer we do not understand
+        await s3Delete(path);
       }catch(e){}
     });
   }
@@ -10672,7 +10687,12 @@
            p_step_members:Object.keys(editMembers).length?editMembers:null}); if(error)throw error;
         // Independent of one another, so they go together rather than one signing round trip and
         // one delete at a time while the person waits on Save changes.
-        await wfRunPool(replacedAtts, 3, async function(oldPath){ try{ await s3Delete(oldPath); }catch(_e){} });
+        /* Through the sweeper rather than straight to s3Delete, so a replaced file is still asked
+           about before it goes. "No longer on THIS instance" is not the same as "nothing wants
+           it": the same receipt can have been posted into Updates, or carried by another claim.
+           wfPurgeCaseFiles already pools these three at a time, which is what the bare loop here
+           was for. */
+        await wfPurgeCaseFiles(replacedAtts);
         // a file uploaded during this edit and then taken off again before saving
         try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(e){}
@@ -10779,7 +10799,18 @@
       if(url) el.src=url; else wfAttImgFailed(el);   // could not even be signed
     }));
   }
-  window.wfAttOpen=function(path,name){ s3OpenSigned(path,name||''); };
+  /* OPEN MEANS OPEN, NOT DOWNLOAD.
+     Passing a filename puts s3OpenSigned down its DOWNLOAD branch - an <a download> pointed at
+     the signed URL - and browsers ignore `download` on a cross-origin address, which an S3 link
+     always is. So a chip labelled "Open" did not open a tab, it navigated, and when the file was
+     missing or the link had timed out the person was left looking at raw AWS XML where the portal
+     had been. Every other module already distinguishes the two (the Document Library's View
+     passes no name and gets a tab; its Download passes one); workflow attachments only ever got
+     the download route.
+     No name, so s3OpenSigned opens its pending tab on the click itself - which is also what keeps
+     pop-up blockers from eating it. `name` is still accepted because the call sites pass it, and
+     it is still what the chip's tooltip shows; it just no longer forces a download. */
+  window.wfAttOpen=function(path,name){ s3OpenSigned(path); };
   function wfAttachmentHtml(a){
     const name=a.file_name||(a.storage_path||'').split('/').pop();
     /* .jfif is what Windows and WhatsApp hand you when you save a JPEG, and several people's payment
