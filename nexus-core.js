@@ -424,7 +424,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'8a94a7e34b','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'6637831a06','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -10298,6 +10298,8 @@ const VIDEOS=[
   {t:'ChatGPT Hindi',cat:'Training',yt:'Nz1MI8nsFTs',url:'https://youtu.be/Nz1MI8nsFTs'},
   {t:'Conveyance payment',cat:'Training',yt:'5anvF_uEE7w',url:'https://youtu.be/5anvF_uEE7w'},
   {t:'Accountability',cat:'Training',yt:'x8qThRAEO-I',url:'https://youtu.be/x8qThRAEO-I'},
+  {t:'WOW Moments',cat:'Training',yt:'iZ1myWkgac0',url:'https://youtu.be/iZ1myWkgac0'},
+  {t:'Recurring Tasks',cat:'Training',yt:'yckJ8ri5Jas',url:'https://youtu.be/yckJ8ri5Jas'},
   // ── WalkThrough videos ───────────────────────────────────────────────────
   {t:'Dream Gurukul',cat:'WalkThrough',yt:'4bWFJfU5AYg',url:'https://youtu.be/4bWFJfU5AYg?list=PLYy3u2uXULpWE5EzepbEQ5IcBWJaCYUWE'},
   {t:'Dream World City',cat:'WalkThrough',yt:'2hUcUUbF_1k',url:'https://youtu.be/2hUcUUbF_1k?list=PLYy3u2uXULpVxlLWwmLfW36kHn8j2gKcr'},
@@ -18155,51 +18157,20 @@ window.tpRefConnect=async function(id){if(!rtRefConnectGuard())return;
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpRfConnectBtn" onclick="tpRefConnectGo(${id})"><i class="fa-solid fa-check"></i> Connect</button></div>`);
 };
+/* Approving a referral now connects it in the same step (hr.referral_approve_connect, 28 Oct
+   2026), so this button only appears for referrals approved before that and never connected. It
+   goes through the same function, so both paths make exactly the same candidate. */
 window.tpRefConnectGo=async function(id){
   const reqId=parseInt(($('tpRfConnectPos')||{}).value||'');
   if(!reqId){toast('Pick a position','err');return;}
   const req=(MP_RECORDS||[]).find(r=>r.id===reqId);
   const btn=$('tpRfConnectBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Approved',approved_by:state.email,
-    approved_at:new Date().toISOString(),rejection_reason:null,manpower_request_id:reqId,position:req&&req.job_title||null}).eq('id',id).select().single();
+  const entity=await tpEntityForMe();
+  const {data,error}=await sb.schema('hr').rpc('referral_approve_connect',{p_ref_id:id,p_req_id:reqId,p_entity:entity});
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Connect';}return;}
-  if(String(data.referred_by||'').trim()){
-    const rn=await hrNotify({kind:'referral_decided',approved:true,
-      referrer_email:data.referred_by,referrer_name:'',candidate_name:data.referred_name||''});
-    if(rn&&rn.ok) toast('The person who referred them has been told','ok');
-  }
-  try{
-    const {data:rowId}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
-    /* ENTITY is whoever made the decision - here, whoever pressed Connect. hr.entities is the list
-       of recruiters the Tracker offers, so their name is matched against it and used when it is
-       there; when it is not, their own name is used rather than leaving the column empty, because
-       "who owns this candidate" is the question the column exists to answer. */
-    const entity=await tpEntityForMe();
-    const {data:cand}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:reqId,
-      name:data.referred_name,email:data.referred_email,phone:data.referred_phone,position:(req&&req.job_title)||null,
-      // No stage: hr.candidates starts everyone at 'Applied'. Connecting a referral to a
-      // position is not sending that person a test, and "Tests Sent" on the Monthly Update is
-      // supposed to mean a test was actually sent.
-      source:'Referral',entity:entity,resume_id:data.resume_id||null,
-      created_by:state.email,applied_at:new Date().toISOString()}).select().single();
-    if(cand){
-      /* Date is when the connection was made, not when the referral was submitted - the Tracker is
-         a record of people being worked on, and this person starts being worked on now.
-         Feedback is deliberately left empty: nothing has happened to them yet. */
-      const {data:tr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:data.referred_name,
-        position:(req&&req.job_title)||null,source:'Referral',entity:entity,
-        number:data.referred_phone,email:data.referred_email,created_at:new Date().toISOString(),
-        notes:'Referred by '+(data.referred_by||'someone')+(data.notes?(' — '+data.notes):''),candidate_id:cand.id}).select().single();
-      if(tr){
-        await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
-        await sb.schema('hr').from('referrals').update({candidate_id:cand.id,tracker_id:tr.id}).eq('id',id);
-        data.candidate_id=cand.id; data.tracker_id=tr.id;
-      }
-    }
-  }catch(e){ toast('Connected, but could not create the Interview Tracker row: '+((e&&e.message)||e),'err'); }
   const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
   closeModal();
-  toast('Connected to '+(req&&req.job_title||'position')+' and added to Interview Tracker');tpRefRender();
+  toast('Connected to '+(req&&req.job_title||'position')+' and added to Interviews');tpRefRender();
 };
 window.tpRefReject=async function(id){if(!rtRefConnectGuard())return;
   if(!await confirmDialog('Reject this referral?'))return;
