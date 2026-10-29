@@ -24106,6 +24106,41 @@ window.cpaPdLoad=async function(){
   CPA_PD.existing=data||[];
   cpaPdDraw(); cpaPdDrawList();
 };
+/* FOLDERS SHOW AS A TREE (29 Oct 2026). Listed as flat paths, a deep Drive folder read as
+   "LIC HOUSING FINANCE › Doltala_docs › PORCHA" over and over. Now each folder sits inside its
+   parent under its own name only - its files first, then its sub-folders, indented with a guide
+   line - and every level opens and closes by itself, for staff and customers alike. A folder's
+   count includes everything under it. */
+function cpaPdTree(docs,nameOf){
+  const root={name:'',path:'',docs:[],kids:[]};
+  (docs||[]).forEach(d=>{
+    let node=root;
+    (d.folder||'').split('/').filter(Boolean).forEach(seg=>{
+      let k=node.kids.find(c=>c.name===seg);
+      if(!k){ k={name:seg,path:node.path?node.path+'/'+seg:seg,docs:[],kids:[]}; node.kids.push(k); }
+      node=k;
+    });
+    node.docs.push(d);
+  });
+  const fin=n=>{ n.docs.sort((a,b)=>cpaPdSort(nameOf(a),nameOf(b))); n.kids.sort((a,b)=>cpaPdSort(a.name,b.name)); n.kids.forEach(fin);
+    n.total=n.docs.length+n.kids.reduce((s,k)=>s+k.total,0); };
+  fin(root);
+  return root;
+}
+function cpaPdTreePaths(n){ return n.kids.reduce((a,k)=>a.concat([k.path],cpaPdTreePaths(k)),[]); }
+// o.table(docs) -> html for a folder's own files; o.open(node,depth) -> start open?; o.tools(node) -> extra summary html
+function cpaPdTreeHtml(node,o,depth){
+  depth=depth||0;
+  const css=depth?'':'<style>.cpa-pdt>summary{list-style:none}.cpa-pdt>summary::-webkit-details-marker{display:none}'
+    +'.cpa-pdt>summary .cpa-pdt-chev{transition:transform .15s}.cpa-pdt[open]>summary .cpa-pdt-chev{transform:rotate(90deg)}</style>';
+  return css+(node.docs.length?o.table(node.docs):'')+node.kids.map(k=>
+    `<details class="cpa-pdt" ${o.open(k,depth)?'open':''} style="margin:6px 0 0">
+      <summary style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--card);font-size:13.5px;font-weight:600">
+        <i class="fa-solid fa-chevron-right cpa-pdt-chev" style="font-size:11px;color:var(--slate)"></i><i class="fa-solid fa-folder" style="color:#d97706"></i>
+        <span style="min-width:0;overflow-wrap:anywhere">${esc(k.name)}</span>
+        <span style="color:var(--slate);font-weight:500;font-size:12px;white-space:nowrap">· ${k.total} document${k.total===1?'':'s'}</span>${o.tools?o.tools(k):''}</summary>
+      <div style="margin:8px 0 4px 14px;padding-left:12px;border-left:2px solid var(--line)">${cpaPdTreeHtml(k,o,depth+1)}</div></details>`).join('');
+}
 function cpaPdDrawList(){
   const host=$('cpaPdList');if(!host)return;
   const sel=$('cpaPdProject'), proj=sel.options[sel.selectedIndex]?sel.options[sel.selectedIndex].text:'';
@@ -24115,23 +24150,23 @@ function cpaPdDrawList(){
   const focus=`onfocus="this.style.borderColor='var(--line)'" onblur="this.style.borderColor='transparent'"`;
   host.innerHTML=Object.keys(CPA_PROJECT_DOC_TYPES).map(t=>{
     const docs=CPA_PD.existing.filter(d=>d.doc_type===t);
-    const groups=cpaPdGroups(docs,cpaPdName), many=docs.length>30;
+    const root=cpaPdTree(docs,cpaPdName), many=docs.length>30;
     const dl='cpaPdDl_'+t;
+    const table=ds=>cpaTable(['Title (click to rename)','Folder (type to move)','Size','Uploaded','Actions'],ds.map(d=>[
+      `<div style="display:flex;align-items:center;gap:8px;min-width:240px">${fileIcon((d.file_name||'').split('.').pop())}<input value="${esc(cpaPdName(d))}" title="${esc(d.file_name||'')}" onchange="cpaPdRename(${d.id},this)" style="flex:1;${inputCss}" ${focus}></div>`,
+      `<input value="${esc((d.folder||'').split('/').join(' / '))}" list="${dl}" placeholder="No folder" onchange="cpaPdMove(${d.id},this)" style="min-width:150px;${inputCss}" ${focus}>`,
+      fmtBytes(d.file_size),
+      fmtDate(d.created_at)+(d.uploaded_by?'<div style="font-size:11.5px;color:var(--slate)">'+esc(String(d.uploaded_by).split('@')[0])+'</div>':''),
+      `<button class="btn btn-sm" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\'")}')"><i class="fa-solid fa-eye"></i> View</button> <button class="btn btn-sm btn-danger" onclick="cpaPdDelete(${d.id})">Remove</button>`]))
+      +'<div style="margin-bottom:4px"></div>';
     return '<div style="font-size:13px;font-weight:700;color:var(--ink);margin:'+(t==='brochure'?'4px':'16px')+' 0 8px">'+esc(CPA_PROJECT_DOC_TYPES[t])+' <span style="color:var(--slate);font-weight:500">· '+docs.length+'</span></div>'
-      +`<datalist id="${dl}">${groups.filter(g=>g[0]).map(g=>'<option value="'+esc(g[0].split('/').join(' / '))+'">').join('')}</datalist>`
-      +(!docs.length?'<div style="font-size:13px;color:var(--slate);padding:2px 0 4px">None yet.</div>':groups.map(([folder,ds])=>{
-        const gi=CPA_PD.lGroups.push({type:t,folder})-1;
-        const rows=ds.map(d=>[
-          `<div style="display:flex;align-items:center;gap:8px;min-width:240px">${fileIcon((d.file_name||'').split('.').pop())}<input value="${esc(cpaPdName(d))}" title="${esc(d.file_name||'')}" onchange="cpaPdRename(${d.id},this)" style="flex:1;${inputCss}" ${focus}></div>`,
-          `<input value="${esc((d.folder||'').split('/').join(' / '))}" list="${dl}" placeholder="No folder" onchange="cpaPdMove(${d.id},this)" style="min-width:150px;${inputCss}" ${focus}>`,
-          fmtBytes(d.file_size),
-          fmtDate(d.created_at)+(d.uploaded_by?'<div style="font-size:11.5px;color:var(--slate)">'+esc(String(d.uploaded_by).split('@')[0])+'</div>':''),
-          `<button class="btn btn-sm" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-eye"></i> View</button> <button class="btn btn-sm btn-danger" onclick="cpaPdDelete(${d.id})">Remove</button>`]);
-        return `<details ${many&&folder?'':'open'} style="margin-bottom:10px"><summary style="cursor:pointer;font-size:13px;font-weight:600;padding:4px 0;display:flex;align-items:center;gap:8px">
-            <i class="fa-solid ${folder?'fa-folder':'fa-file-lines'}" style="color:${folder?'#d97706':'var(--slate)'}"></i>${esc(cpaPdFolderLabel(folder))} <span style="color:var(--slate);font-weight:500">· ${ds.length}</span>
-            ${folder?`<button class="btn btn-sm" style="margin-left:auto" onclick="event.preventDefault();cpaPdRenameFolder(${gi})"><i class="fa-solid fa-pen"></i> Rename folder</button>`:''}</summary>`
-          +cpaTable(['Title (click to rename)','Folder (type to move)','Size','Uploaded','Actions'],rows)+'</details>';
-      }).join(''));
+      +`<datalist id="${dl}">${cpaPdTreePaths(root).map(p=>'<option value="'+esc(p.split('/').join(' / '))+'">').join('')}</datalist>`
+      +(!docs.length?'<div style="font-size:13px;color:var(--slate);padding:2px 0 4px">None yet.</div>':cpaPdTreeHtml(root,{
+        table,
+        open:(n,depth)=>!many||depth===0,
+        tools:n=>{ const gi=CPA_PD.lGroups.push({type:t,folder:n.path})-1;
+          return `<button class="btn btn-sm" style="margin-left:auto;font-weight:500" onclick="event.preventDefault();cpaPdRenameFolder(${gi})"><i class="fa-solid fa-pen"></i> Rename</button>`; }
+      }));
   }).join('');
 }
 window.cpaPdRename=async function(id,inp){
@@ -26404,18 +26439,17 @@ async function custTabDocuments(unit){
     `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'download').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`];
   const cRows=(cDocs||[]).map(docRow);
   // A project can carry dozens of legal papers in folders of its own (whatever tree the team
-  // uploaded), so they are grouped by type, loose files first, then one folded section per folder.
+  // uploaded), so they are grouped by type and shown as that folder tree - loose files first,
+  // each folder inside its parent, every level closed until tapped (a lone top folder starts open).
   const pGroups=Object.keys(CPA_PROJECT_DOC_TYPES).map(t=>{
     const docs=(pDocs||[]).filter(d=>d.doc_type===t);
     if(!docs.length) return '';
+    const root=cpaPdTree(docs,cpaPdName);
     return '<div style="font-size:13px;font-weight:700;color:var(--slate);margin:0 0 8px">'+esc(CPA_PROJECT_DOC_TYPES[t])+'</div>'
-      +cpaPdGroups(docs,cpaPdName).map(([folder,ds])=>{
-        const table=cpaTable(['Document','Shared on','Download'],ds.map(docRow));
-        return folder?'<details style="margin-bottom:8px"><summary style="cursor:pointer;font-size:14px;font-weight:600;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)">'
-            +'<i class="fa-solid fa-folder" style="color:#d97706;margin-right:8px"></i>'+esc(cpaPdFolderLabel(folder))
-            +' <span style="color:var(--slate);font-weight:500;font-size:12.5px">· '+ds.length+' document'+(ds.length===1?'':'s')+'</span></summary><div style="margin-top:8px">'+table+'</div></details>'
-          :table+'<div style="margin-bottom:8px"></div>';
-      }).join('')+'<div style="margin-bottom:14px"></div>';
+      +cpaPdTreeHtml(root,{
+        table:ds=>cpaTable(['Document','Shared on','Download'],ds.map(docRow))+'<div style="margin-bottom:4px"></div>',
+        open:(n,depth)=>depth===0&&root.kids.length===1&&!root.docs.length
+      })+'<div style="margin-bottom:14px"></div>';
   }).join('');
   return '<div class="sec-title" style="margin:0 0 10px">Project documents</div>'+
     (pGroups||'<div class="card card-pad empty">No project documents shared yet.</div>')+
