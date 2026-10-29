@@ -1754,11 +1754,18 @@ async function custTabDocuments(unit){
     sb.schema('cust').from('project_documents').select('*').eq('project_id',unit.project_id).is('deleted_at',null),
     sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).is('deleted_at',null)
   ]);
-  const docRow=d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Document'),fmtDate(d.created_at),
+  const docRow=d=>[fileIcon(d.file_type||'')+' '+esc(cpaPdName(d)),fmtDate(d.created_at),
     `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'download').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`];
-  const pRows=(pDocs||[]).map(docRow),cRows=(cDocs||[]).map(docRow);
+  const cRows=(cDocs||[]).map(docRow);
+  // A project can carry a dozen legal papers, so they are grouped by type and listed by title.
+  const byName=(a,b)=>cpaPdName(a).localeCompare(cpaPdName(b),undefined,{numeric:true,sensitivity:'base'});
+  const pGroups=Object.keys(CPA_PROJECT_DOC_TYPES).map(t=>{
+    const docs=(pDocs||[]).filter(d=>d.doc_type===t).sort(byName);
+    return docs.length?'<div style="font-size:13px;font-weight:700;color:var(--slate);margin:0 0 8px">'+esc(CPA_PROJECT_DOC_TYPES[t])+'</div>'
+      +cpaTable(['Document','Shared on','Download'],docs.map(docRow))+'<div style="margin-bottom:14px"></div>':'';
+  }).join('');
   return '<div class="sec-title" style="margin:0 0 10px">Project documents</div>'+
-    (pRows.length?cpaTable(['Document','Shared on','Download'],pRows):'<div class="card card-pad empty">No project documents shared yet.</div>')+
+    (pGroups||'<div class="card card-pad empty">No project documents shared yet.</div>')+
     '<div class="sec-title" style="margin:20px 0 10px">My documents</div>'+
     (cRows.length?cpaTable(['Document','Shared on','Download'],cRows):'<div class="card card-pad empty">No personal documents shared yet.</div>');
 }
