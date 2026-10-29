@@ -9864,8 +9864,61 @@
     return t.length>0 && t.every(function(f){ return f && f.type==='attachment'; });
   }
   // `variant` names a flows.variants entry (Reimbursement's 'wow'); omitted for the ordinary kind.
-  window.wfNewInstance=function(flowId, variant){
+  /* ONE OPEN CLAIM AT A TIME — asked BEFORE the form opens, not after it is filled in.
+     acc.wf_create_instance has always refused a second claim while one is open, but it refused on
+     Create: you filled in seven rows of expenses, uploaded the receipts, pressed the button, and
+     only then got a small toast in the corner telling you it was never going to be accepted. The
+     refusal is now asked for on the click, so the answer arrives before the typing does.
+     The database is still the thing that decides - this is the same function
+     (acc.wf_new_instance_block_info) that words the JE001 refusal, so the dialog and the server
+     cannot tell the person two different stories.
+     Fails OPEN on purpose: if the question itself cannot be asked - a dropped connection, a slow
+     moment - the form opens as it always did and the server refuses on save if it must. A network
+     blip should not stop somebody filing an expense. */
+  async function wfBlockInfo(flowId, variant){
+    try{
+      const {data,error}=await ACC().rpc('wf_new_instance_block_info',
+        {p_flow_id:Number(flowId), p_email:me(), p_variant:variant||null});
+      if(error) return null;
+      return (data&&data.message)?data:null;
+    }catch(e){ return null; }
+  }
+  /* Two kinds of block ask for two different things, so the dialog offers two different buttons.
+       'edit'  the claim is still theirs to change - not accepted yet, or sent back to them. A
+               second claim is never the answer, so the only action offered is to open the one
+               they have, straight into its edit form.
+       'wait'  somebody else is holding it. Nothing to edit, so the button opens its timeline
+               instead - which is where "who has it and since when" actually lives - and, where
+               the workflow allows drafts, a quieter second button lets them write the next claim
+               down now and send it when this one closes. Taking that away would mean somebody
+               with a pocket of receipts and a claim stuck at Audit for a week has nowhere to put
+               them. */
+  function wfBlockedDialog(b, flowId, variant){
+    const noun=String(b.noun||'instance'), edit=(b.kind==='edit'), caseId=Number(b.case_id);
+    openModal(
+      '<div class="modal-head"><h3><i class="fa-solid fa-circle-exclamation" style="color:#b45309"></i> '
+        +esc2(edit?('Edit your open '+noun):('One open '+noun+' at a time'))+'</h3>'
+        +'<span class="x" data-wfx>&times;</span></div>'
+      +'<div class="modal-body" style="min-width:min(92vw,460px)">'
+        +'<p style="margin:0;color:var(--ink);font-size:13.5px;line-height:1.6">'+esc2(b.message)+'</p>'
+      +'</div>'
+      +'<div class="modal-foot"><button class="ac-btn" data-wfx>Close</button>'
+        +(b.can_draft?'<button class="ac-btn" id="wfBlkDraft"><i class="fa-regular fa-floppy-disk"></i> Write it as a draft</button>':'')
+        +'<button class="ac-btn primary" id="wfBlkOpen">'+esc2((edit?'Edit #':'Open #')+b.case_no)+'</button>'
+      +'</div>','md');
+    setTimeout(function(){
+      const o=$('wfBlkOpen');
+      if(o) o.onclick=function(){ closeModal();
+        if(edit) wfEventOpen(Number(flowId), caseId); else navTo('tasks/workflow/case/'+caseId); };
+      const d=$('wfBlkDraft');
+      if(d) d.onclick=function(){ closeModal(); wfEventOpen(Number(flowId), null, null, variant||null); };
+      [].slice.call(document.querySelectorAll('[data-wfx]')).forEach(function(x){ x.onclick=function(){ closeModal(); }; });
+    },30);
+  }
+  window.wfNewInstance=async function(flowId, variant){
     if(window._wfAttachOnly && Number(flowId)===Number(window._wfFlowId)) return wfQuickAttach(flowId);
+    const b=await wfBlockInfo(flowId, variant||null);
+    if(b) return wfBlockedDialog(b, flowId, variant||null);
     return wfEventOpen(flowId, null, null, variant||null);
   };
   /* A workflow's other kinds of instance (flows.variants) and whether this person may raise one.
