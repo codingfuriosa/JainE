@@ -23911,18 +23911,23 @@ async function cpaRenderDocuments(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   const unitOpts=units.map(u=>`<option value="${u.id}">${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}</option>`).join('');
-  host.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+  host.innerHTML=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
     <div class="card card-pad frm"><div class="sec-title">Project documents (brochure / legal)</div>
     <label>Project</label><select id="cpaPdProject" onchange="cpaPdLoad()">${projOpts}</select>
     <label>Document type</label><select id="cpaPdType" onchange="cpaPdDraw()">${Object.keys(CPA_PROJECT_DOC_TYPES).map(k=>`<option value="${k}"${k==='legal'?' selected':''}>${CPA_PROJECT_DOC_TYPES[k]}</option>`).join('')}</select>
-    <label>Files</label>
+    <label>Files or folders</label>
     <div class="dropzone" id="cpaPdDrop" onclick="document.getElementById('cpaPdFile').click()"
       ondragover="event.preventDefault();this.style.borderColor='var(--brand)'" ondragleave="this.style.borderColor=''" ondrop="cpaPdDrop(event)">
-      <i class="fa-solid fa-cloud-arrow-up"></i><div>Drag &amp; drop or click to choose files</div>
-      <div style="font-size:12px;margin-top:4px">PDF, Word, images — as many as you like. Give each one the title customers will see.</div></div>
-    <input type="file" id="cpaPdFile" class="hidden" multiple onchange="cpaPdAdd(this.files);this.value=''">
+      <i class="fa-solid fa-cloud-arrow-up"></i><div>Drag &amp; drop files or a whole folder here</div>
+      <div style="font-size:12px;margin-top:4px">Folders inside it are kept as sections, exactly as they are named. Untick anything customers should not see.</div></div>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <button class="btn btn-sm" onclick="document.getElementById('cpaPdFile').click()"><i class="fa-solid fa-file"></i> Choose files</button>
+      <button class="btn btn-sm" onclick="document.getElementById('cpaPdDir').click()"><i class="fa-solid fa-folder-open"></i> Choose folder</button></div>
+    <input type="file" id="cpaPdFile" class="hidden" multiple onchange="cpaPdAdd([...this.files].map(f=>({file:f,path:''})),false);this.value=''">
+    <input type="file" id="cpaPdDir" class="hidden" webkitdirectory multiple onchange="cpaPdAdd([...this.files].map(f=>({file:f,path:f.webkitRelativePath||''})),true);this.value=''">
     <div id="cpaPdQueue" style="margin-top:8px"></div>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaPdBtn" onclick="cpaUploadProjectDocs()" disabled><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary" id="cpaPdBtn" onclick="cpaUploadProjectDocs()" disabled><i class="fa-solid fa-upload"></i> Upload</button>
+      <button class="btn btn-sm hidden" id="cpaPdClear" onclick="cpaPdClear()">Clear list</button></div>
     </div>
     <div class="card card-pad frm"><div class="sec-title">Customer documents (per flat)</div>
     <label>Unit</label><select id="cpaCdUnit">${unitOpts}</select>
@@ -23939,7 +23944,7 @@ async function cpaRenderDocuments(host){
     <div style="margin-top:12px"><button class="btn btn-primary" id="cpaPvBtn" onclick="cpaUploadProcessVideo()"><i class="fa-solid fa-upload"></i> Upload</button></div>
     <div id="cpaPvList" style="margin-top:16px"></div>
     </div>`;
-  CPA_PD.files=[];
+  if(!CPA_PD.busy) CPA_PD.files=[];   // coming back mid-upload keeps the batch it is still sending
   cpaPdLoad();
   cpaRenderProcessVideoList();
 }
@@ -23968,51 +23973,128 @@ window.cpaDeleteProcessVideo=async function(id){
   if(error){toast('Delete failed: '+error.message,'err');return;}
   toast('Video removed','ok');cpaRenderProcessVideoList();
 };
-/* PROJECT DOCUMENTS GO UP SEVERAL AT A TIME (29 Oct 2026). A project's legal set is a folder of
-   papers - board resolution, certificate of incorporation, deeds, declarations, trade licence - and
-   the card took one file per upload with no way to see what was already there. Now any number of
-   files can be picked or dropped; each gets its own title (what the customer reads, prefilled from
-   the file name); a file already on the portal for that project and type is flagged before it goes
-   up twice; and the list below the cards shows exactly what that project's customers see, with
-   rename and remove. Files go up one at a time, so one failure leaves the rest in place to retry.
-   Removing only hides the row (deleted_at) - the file stays on S3. */
-const CPA_PD={files:[],existing:[],busy:false};
+/* PROJECT DOCUMENTS: FILES OR WHOLE FOLDERS, EVERY PROJECT ITS OWN SHAPE (29 Oct 2026). A project's
+   legal set lives in Drive as folders inside folders - board resolutions, deeds, trade licence, land
+   papers - and every project's tree is different, with names nobody knows in advance. So the portal
+   keeps no list of sections: it keeps whatever tree is uploaded. Drop or choose a folder and every
+   file in it, at any depth, is queued with its folder path (project_documents.folder, 'A/B'). The
+   dropped folder's own name is left out, so its sub-folders become the sections and its loose files
+   sit at the top. Before anything goes up, the queue shows each folder with tick boxes - untick what
+   customers should not see. Unticked from the start: a Word file when the same folder has a PDF of
+   the same name, and a file already on the portal in that folder; system files (desktop.ini,
+   .DS_Store, ~$ temp files) are not queued at all. Files go up three at a time and a failure stays
+   queued for a retry. The list below the cards shows exactly what the project's customers see, by
+   folder, with rename (title, or folder - its sub-folders move with it), move and remove (remove
+   hides the row; the file stays on S3). */
+const CPA_PD={files:[],existing:[],busy:false,seq:0,qGroups:[],lGroups:[]};
+const CPA_PD_JUNK=/^(\.|~\$)|^(desktop\.ini|thumbs\.db)$/i;
 function cpaPdName(d){ return d.title||(d.file_name||'Document').replace(/\.[^.]+$/,''); }
 function cpaPdTitleFromFile(name){ return name.replace(/\.[^.]+$/,'').replace(/[_]+/g,' ').replace(/\s+/g,' ').trim(); }
-window.cpaPdAdd=function(files){
+function cpaPdFolderNorm(p){ return String(p||'').split(/[\\/]+/).map(s=>s.replace(/\s+/g,' ').trim()).filter(Boolean).join('/'); }
+function cpaPdFolderLabel(p){ return p?p.split('/').join(' › '):'Not in a folder'; }
+function cpaPdSort(a,b){ return String(a).localeCompare(String(b),undefined,{numeric:true,sensitivity:'base'}); }
+// [[folder, docs]] - loose files first, then folders by name, each folder's documents by title
+function cpaPdGroups(docs,nameOf){
+  const by={};(docs||[]).forEach(d=>{const k=d.folder||'';(by[k]=by[k]||[]).push(d);});
+  return Object.keys(by).sort((a,b)=>a===''?-1:b===''?1:cpaPdSort(a,b)).map(k=>[k,by[k].sort((x,y)=>cpaPdSort(nameOf(x),nameOf(y)))]);
+}
+function cpaPdOnPortal(q,type){
+  const n=q.file.name.toLowerCase();
+  return CPA_PD.existing.some(d=>d.doc_type===type&&(d.folder||'')===q.folder&&(d.file_name||'').toLowerCase()===n);
+}
+function cpaPdWordTwin(q){
+  if(!/\.docx?$/i.test(q.file.name)) return false;
+  const base=q.file.name.replace(/\.[^.]+$/,'').toLowerCase();
+  return CPA_PD.files.some(o=>o!==q&&o.folder===q.folder&&/\.pdf$/i.test(o.file.name)&&o.file.name.replace(/\.[^.]+$/,'').toLowerCase()===base);
+}
+window.cpaPdAdd=function(items,fromFolder){
   if(CPA_PD.busy) return;
-  [...(files||[])].forEach(f=>{
-    if(CPA_PD.files.some(q=>q.file.name===f.name&&q.file.size===f.size)) return;   // picked twice
-    CPA_PD.files.push({file:f,title:cpaPdTitleFromFile(f.name)});
+  const all=[...(items||[])].map(it=>{
+    const segs=cpaPdFolderNorm(it.path).split('/').filter(Boolean);
+    if(segs.length) segs.pop();                       // the file's own name
+    return {file:it.file,segs};
   });
+  const list=all.filter(it=>!CPA_PD_JUNK.test(it.file.name)&&it.file.size>0);
+  // One folder dropped or chosen: its own name is not a section - what is inside it is.
+  if(fromFolder&&list.length&&list.every(it=>it.segs.length&&it.segs[0]===list[0].segs[0])) list.forEach(it=>it.segs.shift());
+  const type=$('cpaPdType').value, fresh=[];
+  list.forEach(it=>{
+    const folder=it.segs.join('/');
+    if(CPA_PD.files.some(q=>q.folder===folder&&q.file.name===it.file.name&&q.file.size===it.file.size)) return;   // picked twice
+    const q={id:++CPA_PD.seq,file:it.file,folder,title:cpaPdTitleFromFile(it.file.name),on:true};
+    CPA_PD.files.push(q);fresh.push(q);
+  });
+  fresh.forEach(q=>{ if(cpaPdOnPortal(q,type)||cpaPdWordTwin(q)) q.on=false; });
+  const junk=all.length-list.length;
+  if(junk) toast(junk+' system or empty file'+(junk===1?' was':'s were')+' left out','info');
   cpaPdDraw();
 };
-window.cpaPdDrop=function(e){
+window.cpaPdDrop=async function(e){
   e.preventDefault(); e.currentTarget.style.borderColor='';
-  cpaPdAdd(e.dataTransfer&&e.dataTransfer.files);
+  const dt=e.dataTransfer;if(!dt||CPA_PD.busy)return;
+  // entries must be taken before the first await - the drop's data is gone after it
+  const entries=[...(dt.items||[])].map(it=>it.webkitGetAsEntry&&it.webkitGetAsEntry()).filter(Boolean);
+  if(!entries.length){ cpaPdAdd([...(dt.files||[])].map(f=>({file:f,path:''})),false); return; }
+  const host=$('cpaPdQueue');if(host)host.innerHTML='<div style="font-size:13px;color:var(--slate);padding:6px 0"><i class="fa-solid fa-spinner fa-spin"></i> Reading the folder…</div>';
+  const out=[];
+  const readAll=dir=>new Promise((res,rej)=>{const r=dir.createReader(),acc=[];const step=()=>r.readEntries(b=>{if(!b.length)res(acc);else{acc.push(...b);step();}},rej);step();});
+  const walk=async ent=>{
+    if(ent.isFile) out.push({file:await new Promise((res,rej)=>ent.file(res,rej)),path:ent.fullPath.replace(/^\//,'')});
+    else if(ent.isDirectory) for(const c of await readAll(ent)) await walk(c);
+  };
+  try{ for(const en of entries) await walk(en); }
+  catch(err){ toast('Could not read the folder: '+(err&&err.message||err),'err'); }
+  cpaPdAdd(out,entries.length===1&&entries[0].isDirectory);
 };
-window.cpaPdTitle=function(i,v){ if(CPA_PD.files[i]) CPA_PD.files[i].title=v; };
-window.cpaPdRemove=function(i){ if(!CPA_PD.busy){ CPA_PD.files.splice(i,1); cpaPdDraw(); } };
+window.cpaPdTitle=function(id,v){ const q=CPA_PD.files.find(x=>x.id===id); if(q) q.title=v; };
+window.cpaPdTick=function(id,on){ const q=CPA_PD.files.find(x=>x.id===id); if(q){ q.on=on; cpaPdDraw(); } };
+window.cpaPdTickFolder=function(gi,on){ const k=CPA_PD.qGroups[gi]; CPA_PD.files.forEach(q=>{ if(q.folder===k) q.on=on; }); cpaPdDraw(); };
+window.cpaPdRenameQueued=function(gi,v){
+  const old=CPA_PD.qGroups[gi], nw=cpaPdFolderNorm(v);
+  CPA_PD.files.forEach(q=>{ if(q.folder===old) q.folder=nw; else if(old&&q.folder.startsWith(old+'/')) q.folder=nw+q.folder.slice(old.length); });
+  cpaPdDraw();
+};
+window.cpaPdClear=function(){ if(!CPA_PD.busy){ CPA_PD.files=[]; cpaPdDraw(); } };
+function cpaPdStatus(q,type){
+  return q.state==='up'?'<span style="color:var(--brand)"><i class="fa-solid fa-spinner fa-spin"></i> Uploading…</span>'
+    :q.state==='ok'?'<span class="tag t-green">Uploaded</span>'
+    :q.state==='err'?'<span class="tag t-red" title="'+esc(q.err||'')+'">Failed — will retry</span>'
+    :cpaPdOnPortal(q,type)?'<span class="tag t-amber">Already on the portal</span>'
+    :cpaPdWordTwin(q)?'<span class="tag t-gray">Word copy of a PDF</span>'
+    :q.file.size>25*1024*1024?'<span class="tag t-amber" title="Customers on mobile data will find this slow to download">Large file</span>':'';
+}
 window.cpaPdDraw=function(){
   const host=$('cpaPdQueue');if(!host)return;
-  const type=$('cpaPdType').value;
-  const have=new Set(CPA_PD.existing.filter(d=>d.doc_type===type).map(d=>(d.file_name||'').toLowerCase()));
-  host.innerHTML=CPA_PD.files.map((q,i)=>{
-    const f=q.file;
-    const st=q.state==='up'?'<span style="color:var(--brand)"><i class="fa-solid fa-spinner fa-spin"></i> Uploading…</span>'
-      :q.state==='err'?'<span class="tag t-red" title="'+esc(q.err||'')+'">Failed — will retry</span>'
-      :have.has(f.name.toLowerCase())?'<span class="tag t-amber">Already on the portal</span>':'';
-    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-2)">${fileIcon(f.name.split('.').pop())}
-      <div style="flex:1;min-width:0"><input value="${esc(q.title)}" oninput="cpaPdTitle(${i},this.value)" ${CPA_PD.busy?'disabled':''} placeholder="Title customers will see"
-        style="width:100%;font-size:13px;font-weight:500;border:1px solid var(--line);border-radius:7px;padding:6px 9px;color:var(--ink);margin:0">
-      <div style="font-size:11.5px;color:var(--slate);margin-top:3px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">${esc(f.name)} · ${fmtBytes(f.size)}</span>${st}</div></div>
-      <button class="btn btn-sm" title="Remove from this upload" onclick="cpaPdRemove(${i})" ${CPA_PD.busy?'disabled':''}><i class="fa-solid fa-xmark"></i></button></div>`;
-  }).join('');
-  const btn=$('cpaPdBtn');
+  const type=$('cpaPdType').value, dis=CPA_PD.busy?'disabled':'';
+  const groups=cpaPdGroups(CPA_PD.files,q=>q.title);
+  CPA_PD.qGroups=groups.map(g=>g[0]);
+  const ticked=CPA_PD.files.filter(q=>q.on).length, nFolders=groups.filter(g=>g[0]).length;
+  const top=host.firstElementChild&&host.querySelector('.cpa-pdq-scroll'), keep=top?top.scrollTop:0;
+  host.innerHTML=!CPA_PD.files.length?'':
+    `<div style="font-size:12.5px;color:var(--slate);margin:2px 0 6px">${CPA_PD.files.length} file${CPA_PD.files.length===1?'':'s'}${nFolders?' in '+nFolders+' folder'+(nFolders===1?'':'s'):''} · <b style="color:var(--ink)">${ticked} ticked</b> to upload</div>
+    <div class="cpa-pdq-scroll" style="max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:9px">`
+    +groups.map(([folder,qs],gi)=>{
+      const allOn=qs.every(q=>q.on), someOn=qs.some(q=>q.on);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--line-2,#f1f5f9);position:sticky;top:0;z-index:1">
+          <input type="checkbox" ${allOn?'checked':''} ${dis} onchange="cpaPdTickFolder(${gi},this.checked)" title="Tick or untick the whole folder" style="width:auto;margin:0" ${!allOn&&someOn?'data-mixed="1"':''}>
+          <i class="fa-solid ${folder?'fa-folder':'fa-file-lines'}" style="color:${folder?'#d97706':'var(--slate)'}"></i>
+          ${folder?`<input value="${esc(folder.split('/').join(' / '))}" ${dis} onchange="cpaPdRenameQueued(${gi},this.value)" title="Folder name customers will see - edit to rename"
+            style="flex:1;min-width:0;font-size:13px;font-weight:700;border:1px solid transparent;border-radius:6px;padding:4px 6px;background:transparent;color:var(--ink);margin:0" onfocus="this.style.borderColor='var(--line)'" onblur="this.style.borderColor='transparent'">`
+            :'<span style="flex:1;font-size:13px;font-weight:700">Not in a folder</span>'}
+          <span style="font-size:12px;color:var(--slate);white-space:nowrap">${qs.filter(q=>q.on).length}/${qs.length}</span></div>`
+        +qs.map(q=>`<div style="display:flex;align-items:center;gap:9px;padding:6px 10px;border-top:1px solid var(--line-2);${q.on?'':'opacity:.55'}">
+          <input type="checkbox" ${q.on?'checked':''} ${dis} onchange="cpaPdTick(${q.id},this.checked)" style="width:auto;margin:0">${fileIcon(q.file.name.split('.').pop())}
+          <div style="flex:1;min-width:0"><input value="${esc(q.title)}" oninput="cpaPdTitle(${q.id},this.value)" ${dis} placeholder="Title customers will see"
+            style="width:100%;font-size:13px;font-weight:500;border:1px solid var(--line);border-radius:7px;padding:5px 8px;color:var(--ink);margin:0">
+          <div style="font-size:11.5px;color:var(--slate);margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">${esc(q.file.name)} · ${fmtBytes(q.file.size)}</span><span id="cpaPdSt${q.id}">${cpaPdStatus(q,type)}</span></div></div></div>`).join('');
+    }).join('')+'</div>';
+  host.querySelectorAll('input[data-mixed]').forEach(c=>{ c.indeterminate=true; });
+  const sc=host.querySelector('.cpa-pdq-scroll'); if(sc) sc.scrollTop=keep;
+  const btn=$('cpaPdBtn'), clr=$('cpaPdClear');
+  if(clr) clr.classList.toggle('hidden',!CPA_PD.files.length||CPA_PD.busy);
   if(btn&&!CPA_PD.busy){
-    const n=CPA_PD.files.length;
-    btn.disabled=!n;
-    btn.innerHTML='<i class="fa-solid fa-upload"></i> '+(n>1?'Upload '+n+' files':'Upload');
+    btn.disabled=!ticked;
+    btn.innerHTML='<i class="fa-solid fa-upload"></i> '+(ticked>1?'Upload '+ticked+' files':'Upload');
   }
 };
 window.cpaPdLoad=async function(){
@@ -24028,19 +24110,29 @@ function cpaPdDrawList(){
   const host=$('cpaPdList');if(!host)return;
   const sel=$('cpaPdProject'), proj=sel.options[sel.selectedIndex]?sel.options[sel.selectedIndex].text:'';
   $('cpaPdListTitle').textContent='What '+proj+' customers see';
-  const byName=(a,b)=>cpaPdName(a).localeCompare(cpaPdName(b),undefined,{numeric:true,sensitivity:'base'});
-  const groups=Object.keys(CPA_PROJECT_DOC_TYPES).map(t=>{
-    const docs=CPA_PD.existing.filter(d=>d.doc_type===t).sort(byName);
-    const rows=docs.map(d=>[
-      `<div style="display:flex;align-items:center;gap:8px;min-width:260px">${fileIcon((d.file_name||'').split('.').pop())}<input value="${esc(cpaPdName(d))}" title="${esc(d.file_name||'')}" onchange="cpaPdRename(${d.id},this)"
-        style="flex:1;font-size:13px;border:1px solid transparent;border-radius:6px;padding:5px 8px;background:transparent;color:var(--ink)" onfocus="this.style.borderColor='var(--line)'" onblur="this.style.borderColor='transparent'"></div>`,
-      fmtBytes(d.file_size),
-      fmtDate(d.created_at)+(d.uploaded_by?'<div style="font-size:11.5px;color:var(--slate)">'+esc(String(d.uploaded_by).split('@')[0])+'</div>':''),
-      `<button class="btn btn-sm" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-eye"></i> View</button> <button class="btn btn-sm btn-danger" onclick="cpaPdDelete(${d.id})">Remove</button>`]);
+  CPA_PD.lGroups=[];
+  const inputCss='font-size:13px;border:1px solid transparent;border-radius:6px;padding:5px 8px;background:transparent;color:var(--ink);margin:0';
+  const focus=`onfocus="this.style.borderColor='var(--line)'" onblur="this.style.borderColor='transparent'"`;
+  host.innerHTML=Object.keys(CPA_PROJECT_DOC_TYPES).map(t=>{
+    const docs=CPA_PD.existing.filter(d=>d.doc_type===t);
+    const groups=cpaPdGroups(docs,cpaPdName), many=docs.length>30;
+    const dl='cpaPdDl_'+t;
     return '<div style="font-size:13px;font-weight:700;color:var(--ink);margin:'+(t==='brochure'?'4px':'16px')+' 0 8px">'+esc(CPA_PROJECT_DOC_TYPES[t])+' <span style="color:var(--slate);font-weight:500">· '+docs.length+'</span></div>'
-      +(rows.length?cpaTable(['Title (click to rename)','Size','Uploaded','Actions'],rows):'<div style="font-size:13px;color:var(--slate);padding:2px 0 4px">None yet.</div>');
-  });
-  host.innerHTML=groups.join('');
+      +`<datalist id="${dl}">${groups.filter(g=>g[0]).map(g=>'<option value="'+esc(g[0].split('/').join(' / '))+'">').join('')}</datalist>`
+      +(!docs.length?'<div style="font-size:13px;color:var(--slate);padding:2px 0 4px">None yet.</div>':groups.map(([folder,ds])=>{
+        const gi=CPA_PD.lGroups.push({type:t,folder})-1;
+        const rows=ds.map(d=>[
+          `<div style="display:flex;align-items:center;gap:8px;min-width:240px">${fileIcon((d.file_name||'').split('.').pop())}<input value="${esc(cpaPdName(d))}" title="${esc(d.file_name||'')}" onchange="cpaPdRename(${d.id},this)" style="flex:1;${inputCss}" ${focus}></div>`,
+          `<input value="${esc((d.folder||'').split('/').join(' / '))}" list="${dl}" placeholder="No folder" onchange="cpaPdMove(${d.id},this)" style="min-width:150px;${inputCss}" ${focus}>`,
+          fmtBytes(d.file_size),
+          fmtDate(d.created_at)+(d.uploaded_by?'<div style="font-size:11.5px;color:var(--slate)">'+esc(String(d.uploaded_by).split('@')[0])+'</div>':''),
+          `<button class="btn btn-sm" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-eye"></i> View</button> <button class="btn btn-sm btn-danger" onclick="cpaPdDelete(${d.id})">Remove</button>`]);
+        return `<details ${many&&folder?'':'open'} style="margin-bottom:10px"><summary style="cursor:pointer;font-size:13px;font-weight:600;padding:4px 0;display:flex;align-items:center;gap:8px">
+            <i class="fa-solid ${folder?'fa-folder':'fa-file-lines'}" style="color:${folder?'#d97706':'var(--slate)'}"></i>${esc(cpaPdFolderLabel(folder))} <span style="color:var(--slate);font-weight:500">· ${ds.length}</span>
+            ${folder?`<button class="btn btn-sm" style="margin-left:auto" onclick="event.preventDefault();cpaPdRenameFolder(${gi})"><i class="fa-solid fa-pen"></i> Rename folder</button>`:''}</summary>`
+          +cpaTable(['Title (click to rename)','Folder (type to move)','Size','Uploaded','Actions'],rows)+'</details>';
+      }).join(''));
+  }).join('');
 }
 window.cpaPdRename=async function(id,inp){
   const d=CPA_PD.existing.find(x=>x.id===id);if(!d)return;
@@ -24049,6 +24141,37 @@ window.cpaPdRename=async function(id,inp){
   const {error}=await sb.schema('cust').from('project_documents').update({title}).eq('id',id);
   if(error){inp.value=cpaPdName(d);toast('Rename failed: '+error.message,'err');return;}
   d.title=title;toast('Title saved','ok');
+};
+window.cpaPdMove=async function(id,inp){
+  const d=CPA_PD.existing.find(x=>x.id===id);if(!d)return;
+  const folder=cpaPdFolderNorm(inp.value)||null;
+  const {error}=await sb.schema('cust').from('project_documents').update({folder}).eq('id',id);
+  if(error){toast('Move failed: '+error.message,'err');cpaPdDrawList();return;}
+  toast(folder?'Moved to '+cpaPdFolderLabel(folder):'Moved out of its folder','ok');cpaPdLoad();
+};
+window.cpaPdRenameFolder=async function(gi){
+  const g=CPA_PD.lGroups[gi];if(!g||!g.folder)return;
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-folder"></i> Rename folder</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Folder name customers see <span style="color:#94a3b8;font-weight:400">(use / for a folder inside a folder)</span></label>
+    <input id="cpaPdFolderName" value="${esc(g.folder.split('/').join(' / '))}"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="cpaPdRenameFolderSave(${gi})">Save</button></div>`);
+  setTimeout(()=>{const i=$('cpaPdFolderName');if(i){i.focus();i.select();}},50);
+};
+window.cpaPdRenameFolderSave=async function(gi){
+  const g=CPA_PD.lGroups[gi];if(!g)return;
+  const old=g.folder, nw=cpaPdFolderNorm($('cpaPdFolderName').value);
+  if(!nw){toast('The folder needs a name','err');return;}
+  closeModal();
+  if(nw===old)return;
+  const pid=Number($('cpaPdProject').value);
+  // the folder and every folder inside it, one update per folder path
+  const paths=[...new Set(CPA_PD.existing.filter(d=>d.doc_type===g.type&&d.folder&&(d.folder===old||d.folder.startsWith(old+'/'))).map(d=>d.folder))];
+  for(const p of paths){
+    const {error}=await sb.schema('cust').from('project_documents').update({folder:nw+p.slice(old.length)})
+      .eq('project_id',pid).eq('doc_type',g.type).eq('folder',p).is('deleted_at',null);
+    if(error){toast('Rename failed: '+error.message,'err');break;}
+  }
+  toast('Folder renamed','ok');cpaPdLoad();
 };
 window.cpaPdDelete=async function(id){
   const d=CPA_PD.existing.find(x=>x.id===id);if(!d)return;
@@ -24060,25 +24183,40 @@ window.cpaPdDelete=async function(id){
 window.cpaUploadProjectDocs=async function(){
   if(CPA_PD.busy)return;
   const projectId=Number($('cpaPdProject').value),docType=$('cpaPdType').value;
-  const todo=CPA_PD.files.slice();
-  if(!todo.length){toast('Choose at least one file','err');return;}
-  if(todo.some(q=>!String(q.title||'').trim())){toast('Every file needs a title','err');return;}
-  CPA_PD.busy=true;
+  const todo=CPA_PD.files.filter(q=>q.on);
+  if(!todo.length){toast('Tick at least one file','err');return;}
+  if(todo.some(q=>!String(q.title||'').trim())){toast('Every ticked file needs a title','err');return;}
+  CPA_PD.busy=true;cpaPdDraw();
+  // a big folder takes minutes - closing the tab or reloading part-way asks first
+  const stay=e=>{ e.preventDefault(); e.returnValue=''; };
+  window.addEventListener('beforeunload',stay);
   const btn=$('cpaPdBtn'), lock=v=>['cpaPdProject','cpaPdType'].forEach(id=>{ if($(id)) $(id).disabled=v; });
   btn.disabled=true;lock(true);
-  let ok=0,n=0;
-  for(const q of todo){
-    n++;btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${n}/${todo.length}…`;
-    q.state='up';q.err=null;cpaPdDraw();
+  const show=q=>{ const s=$('cpaPdSt'+q.id); if(s) s.innerHTML=cpaPdStatus(q,docType); };
+  let next=0,done=0,ok=0;
+  const one=async q=>{
+    q.state='up';q.err=null;show(q);
     const f=q.file;
-    const {data,error}=await uploadFileToS3(s3KeyForProjectDoc(projectId,docType,f.name),f);
-    if(error){q.state='err';q.err=error.message;continue;}
-    const {error:insErr}=await sb.schema('cust').from('project_documents').insert({project_id:projectId,doc_type:docType,title:q.title.trim(),storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){q.state='err';q.err=insErr.message;continue;}
+    // a busy moment (network blip, access check timing out) should not fail a file in a batch of
+    // hundreds: try again after 2s and 5s before calling it failed
+    let up;
+    for(let a=0;a<3;a++){
+      up=await uploadFileToS3(s3KeyForProjectDoc(projectId,docType,f.name),f);
+      if(!up.error||/do not have access/i.test(up.error.message||'')) break;
+      if(a<2) await new Promise(r=>setTimeout(r,a?5000:2000));
+    }
+    const {data,error}=up;
+    if(error){q.state='err';q.err=error.message;return;}
+    const {error:insErr}=await sb.schema('cust').from('project_documents').insert({project_id:projectId,doc_type:docType,folder:q.folder||null,title:q.title.trim(),storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+    if(insErr){q.state='err';q.err=insErr.message;return;}
     q.state='ok';ok++;
-  }
+  };
+  const worker=async()=>{ while(next<todo.length){ const q=todo[next++]; await one(q); done++; show(q); btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${done}/${todo.length}…`; } };
+  btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading 0/${todo.length}…`;
+  await Promise.all([worker(),worker(),worker()]);
   CPA_PD.files=CPA_PD.files.filter(q=>q.state!=='ok');
   CPA_PD.busy=false;lock(false);
+  window.removeEventListener('beforeunload',stay);
   const failed=todo.length-ok;
   if(ok) toast(ok+' document'+(ok===1?'':'s')+' uploaded'+(failed?' · '+failed+' failed — press Upload to retry':''),failed?'warn':'ok');
   else toast('Upload failed: '+(todo[0].err||'unknown error'),'err');
@@ -26265,12 +26403,19 @@ async function custTabDocuments(unit){
   const docRow=d=>[fileIcon(d.file_type||'')+' '+esc(cpaPdName(d)),fmtDate(d.created_at),
     `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'download').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`];
   const cRows=(cDocs||[]).map(docRow);
-  // A project can carry a dozen legal papers, so they are grouped by type and listed by title.
-  const byName=(a,b)=>cpaPdName(a).localeCompare(cpaPdName(b),undefined,{numeric:true,sensitivity:'base'});
+  // A project can carry dozens of legal papers in folders of its own (whatever tree the team
+  // uploaded), so they are grouped by type, loose files first, then one folded section per folder.
   const pGroups=Object.keys(CPA_PROJECT_DOC_TYPES).map(t=>{
-    const docs=(pDocs||[]).filter(d=>d.doc_type===t).sort(byName);
-    return docs.length?'<div style="font-size:13px;font-weight:700;color:var(--slate);margin:0 0 8px">'+esc(CPA_PROJECT_DOC_TYPES[t])+'</div>'
-      +cpaTable(['Document','Shared on','Download'],docs.map(docRow))+'<div style="margin-bottom:14px"></div>':'';
+    const docs=(pDocs||[]).filter(d=>d.doc_type===t);
+    if(!docs.length) return '';
+    return '<div style="font-size:13px;font-weight:700;color:var(--slate);margin:0 0 8px">'+esc(CPA_PROJECT_DOC_TYPES[t])+'</div>'
+      +cpaPdGroups(docs,cpaPdName).map(([folder,ds])=>{
+        const table=cpaTable(['Document','Shared on','Download'],ds.map(docRow));
+        return folder?'<details style="margin-bottom:8px"><summary style="cursor:pointer;font-size:14px;font-weight:600;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)">'
+            +'<i class="fa-solid fa-folder" style="color:#d97706;margin-right:8px"></i>'+esc(cpaPdFolderLabel(folder))
+            +' <span style="color:var(--slate);font-weight:500;font-size:12.5px">· '+ds.length+' document'+(ds.length===1?'':'s')+'</span></summary><div style="margin-top:8px">'+table+'</div></details>'
+          :table+'<div style="margin-bottom:8px"></div>';
+      }).join('')+'<div style="margin-bottom:14px"></div>';
   }).join('');
   return '<div class="sec-title" style="margin:0 0 10px">Project documents</div>'+
     (pGroups||'<div class="card card-pad empty">No project documents shared yet.</div>')+

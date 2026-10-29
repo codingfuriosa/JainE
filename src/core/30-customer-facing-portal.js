@@ -1757,12 +1757,19 @@ async function custTabDocuments(unit){
   const docRow=d=>[fileIcon(d.file_type||'')+' '+esc(cpaPdName(d)),fmtDate(d.created_at),
     `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'download').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`];
   const cRows=(cDocs||[]).map(docRow);
-  // A project can carry a dozen legal papers, so they are grouped by type and listed by title.
-  const byName=(a,b)=>cpaPdName(a).localeCompare(cpaPdName(b),undefined,{numeric:true,sensitivity:'base'});
+  // A project can carry dozens of legal papers in folders of its own (whatever tree the team
+  // uploaded), so they are grouped by type, loose files first, then one folded section per folder.
   const pGroups=Object.keys(CPA_PROJECT_DOC_TYPES).map(t=>{
-    const docs=(pDocs||[]).filter(d=>d.doc_type===t).sort(byName);
-    return docs.length?'<div style="font-size:13px;font-weight:700;color:var(--slate);margin:0 0 8px">'+esc(CPA_PROJECT_DOC_TYPES[t])+'</div>'
-      +cpaTable(['Document','Shared on','Download'],docs.map(docRow))+'<div style="margin-bottom:14px"></div>':'';
+    const docs=(pDocs||[]).filter(d=>d.doc_type===t);
+    if(!docs.length) return '';
+    return '<div style="font-size:13px;font-weight:700;color:var(--slate);margin:0 0 8px">'+esc(CPA_PROJECT_DOC_TYPES[t])+'</div>'
+      +cpaPdGroups(docs,cpaPdName).map(([folder,ds])=>{
+        const table=cpaTable(['Document','Shared on','Download'],ds.map(docRow));
+        return folder?'<details style="margin-bottom:8px"><summary style="cursor:pointer;font-size:14px;font-weight:600;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)">'
+            +'<i class="fa-solid fa-folder" style="color:#d97706;margin-right:8px"></i>'+esc(cpaPdFolderLabel(folder))
+            +' <span style="color:var(--slate);font-weight:500;font-size:12.5px">· '+ds.length+' document'+(ds.length===1?'':'s')+'</span></summary><div style="margin-top:8px">'+table+'</div></details>'
+          :table+'<div style="margin-bottom:8px"></div>';
+      }).join('')+'<div style="margin-bottom:14px"></div>';
   }).join('');
   return '<div class="sec-title" style="margin:0 0 10px">Project documents</div>'+
     (pGroups||'<div class="card card-pad empty">No project documents shared yet.</div>')+
