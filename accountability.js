@@ -1128,6 +1128,14 @@
   const isMemb  = (t,asg)=>(asg[t.id]||[]).some(e=>eq(e,me()))||wfActTask(t);
   const isSelf  = (t,asg)=>isOwner(t)&&isMemb(t,asg);
   const stOf    = t => t.approval_state==='approved'?'approved':(t.approval_state==='awaiting_approval'?'await':'open');
+  /* A CAUSELIST TASK NEEDS NO APPROVAL EITHER - the same reasoning as a notice, set out in full
+     in taskDetail. The Legal MIS causelist popup files one task per "action needed" matter
+     against the Legal person named in it, under the account that ran the export; that account
+     ends up as the delegator, so every one of these came back to it to be rubber-stamped by the
+     same address that wrote it. Whoever is on it finishes it outright instead. source='causelist'
+     and nothing else - acc.ptasks carries a trigger, causelist_self_approve, holding the same
+     rule on the database side for any route that does not come through this file. */
+  const noAppr  = t => !!(t && (t.source==='notice' || t.source==='causelist'));
   const iDeleg  = (t,tasks)=> tasks.some(c=>c.parent_task_id===t.id && eq(c.delegator,me()));
 
   /* ---------- per-viewer priority rank (private per person: your own ranking of tasks
@@ -16857,7 +16865,7 @@
       ? (wfIsRbSelectable(wfInfo)
           ? `<input type="checkbox" class="ac-rowchk wf-rbsel" data-fcs="${t.flow_case_step_id}" data-st="${wfInfo.received_at?'received':'waiting'}" title="Select for Receive / Forward" onclick="event.stopPropagation()" onchange="wfRbSelSync()">`
           : '')
-      : `<input type="checkbox" class="ac-rowchk" title="${(opt.owner||t.source==='notice')?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!(opt.owner||t.source==='notice')},this)">`):'';
+      : `<input type="checkbox" class="ac-rowchk" title="${(opt.owner||noAppr(t))?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!(opt.owner||noAppr(t))},this)">`):'';
     const wfIsFirst=wfInfo&&wfInfo.minSeq!=null&&wfInfo.seq===wfInfo.minSeq;
     const wfIsLastStep=wfInfo&&!wfInfo.nextExists;
     let wfRR='';
@@ -17074,8 +17082,13 @@
        not exist. It sat there, the completion trigger never fired, and both the tracker and the
        scoreboard stayed empty while the work had in fact been done.
        Treating it as a self-assigned task is the whole fix: whoever is on it finishes it outright,
-       which is what a notice is - work handed to Legal, not work delegated by somebody. */
-    const noApproval=!!(t&&t.source==='notice');
+       which is what a notice is - work handed to Legal, not work delegated by somebody.
+
+       A CAUSELIST TASK IS THE SAME SHAPE - see noAppr, up beside stOf. It does carry a real
+       delegator, but only because the causelist popup writes these under whoever ran the export,
+       so the approval was that person signing off their own output: six of the six filed so far
+       were approved by the address that created them. */
+    const noApproval=noAppr(t);
     const selfTask=(amOwner&&amMember)||(noApproval&&amMember);
     const locked=ro&&st==='approved';
     /* AN HR APPROVAL TASK BELONGS TO ALL FOUR APPROVERS, NOT TO ONE OF THEM.
@@ -17239,8 +17252,10 @@
       const u={progress:p}; let selfTaskDone=false;
       if(p===100){
         try{
-          const [{data:tk},{data:asgR}]=await Promise.all([ACC().from('ptasks').select('delegator').eq('id',tid).single(),ACC().from('ptask_assignees').select('email').eq('task_id',tid)]);
-          selfTaskDone=!!(tk&&(asgR||[]).some(a=>eq(a.email,tk.delegator)));
+          const [{data:tk},{data:asgR}]=await Promise.all([ACC().from('ptasks').select('delegator,source').eq('id',tid).single(),ACC().from('ptask_assignees').select('email').eq('task_id',tid)]);
+          // Ticking off the last sub-task is Mark Done by another name, so a causelist task ends
+          // the same way here. Only that one source - notices are a separate question.
+          selfTaskDone=!!(tk&&(tk.source==='causelist'||(asgR||[]).some(a=>eq(a.email,tk.delegator))));
         }catch(e){}
         if(selfTaskDone){ u.status='Completed'; u.approval_state='approved'; u.completed_at=nowISO(); u.approved_at=nowISO(); u.approved_by=me(); }
         else { u.status='Awaiting Approval'; u.approval_state='awaiting_approval'; u.completed_at=nowISO(); }
