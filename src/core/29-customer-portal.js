@@ -3439,7 +3439,8 @@ function cpaPdDrawList(){
         table,
         open:(n,depth)=>!many||depth===0,
         tools:n=>{ const gi=CPA_PD.lGroups.push({type:t,folder:n.path})-1;
-          return `<button class="btn btn-sm" style="margin-left:auto;font-weight:500" onclick="event.preventDefault();cpaPdRenameFolder(${gi})"><i class="fa-solid fa-pen"></i> Rename</button>`; }
+          return `<span style="margin-left:auto;display:flex;gap:6px;flex-shrink:0"><button class="btn btn-sm" style="font-weight:500" onclick="event.preventDefault();cpaPdRenameFolder(${gi})"><i class="fa-solid fa-pen"></i> Rename</button>`
+            +`<button class="btn btn-sm btn-danger" style="font-weight:500" onclick="event.preventDefault();cpaPdDeleteFolder(${gi})"><i class="fa-solid fa-trash"></i> Delete folder</button></span>`; }
       }));
   }).join('');
 }
@@ -3481,6 +3482,26 @@ window.cpaPdRenameFolderSave=async function(gi){
     if(error){toast('Rename failed: '+error.message,'err');break;}
   }
   toast('Folder renamed','ok');cpaPdLoad();
+};
+/* A folder goes with everything under it - its own documents and every sub-folder's, at any depth.
+   Like a single Remove it only hides the rows (deleted_at); the files stay on S3. */
+window.cpaPdDeleteFolder=async function(gi){
+  const g=CPA_PD.lGroups[gi];if(!g||!g.folder)return;
+  const inside=d=>d.doc_type===g.type&&d.folder&&(d.folder===g.folder||d.folder.startsWith(g.folder+'/'));
+  const docs=CPA_PD.existing.filter(inside);
+  if(!docs.length)return;
+  const subs=new Set();
+  docs.forEach(d=>{ const rest=d.folder.slice(g.folder.length+1).split('/').filter(Boolean); rest.forEach((_,i)=>subs.add(rest.slice(0,i+1).join('/'))); });
+  const name=g.folder.split('/').pop();
+  if(!await confirmDialog('Delete the folder "'+name+'"'+(subs.size?' and the '+subs.size+' folder'+(subs.size===1?'':'s')+' inside it':'')+'? '
+      +docs.length+' document'+(docs.length===1?'':'s')+' will be removed from the customer portal, and customers of this project will no longer see them.',
+      {title:'Delete folder',okLabel:'Delete folder'}))return;
+  const ids=docs.map(d=>d.id), when=new Date().toISOString();
+  for(let i=0;i<ids.length;i+=200){
+    const {error}=await sb.schema('cust').from('project_documents').update({deleted_at:when,deleted_by:state.email}).in('id',ids.slice(i,i+200)).is('deleted_at',null);
+    if(error){toast('Delete failed: '+error.message,'err');cpaPdLoad();return;}
+  }
+  toast('Folder "'+name+'" deleted · '+docs.length+' document'+(docs.length===1?'':'s')+' removed','ok');cpaPdLoad();
 };
 window.cpaPdDelete=async function(id){
   const d=CPA_PD.existing.find(x=>x.id===id);if(!d)return;
