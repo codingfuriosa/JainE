@@ -435,10 +435,9 @@ VIEWS.scoreboard=async function(v){
     +'<div class="card" style="padding:0">'
       +'<div style="display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:center;flex-wrap:wrap">'
         +'<button class="btn'+(SB_VIEW==='all'?' btn-primary':'')+'" onclick="sbSetView(\'all\')">All Tasks</button>'
-        +'<button class="btn'+(SB_VIEW==='causelist'?' btn-primary':'')+'" onclick="sbSetView(\'causelist\')">Causelist</button>'
       +'</div><div id="sbBody"><div class="loader"><div class="spin"></div></div></div></div>';
-  if(SB_VIEW==='causelist') await sbRenderCauselistBoard($('sbBody'));
-  else await sbRenderAllTasks($('sbBody'));
+  // The Causelist board went with Causelist Reviews (29 Oct 2026); MIS actions score in Legal > Scoreboard.
+  await sbRenderAllTasks($('sbBody'));
 };
 // Kept so /tasks/scoreboard links and bookmarks from when it was a tab still land somewhere real.
 function taskScoreboard(){ navTo('scoreboard'); }

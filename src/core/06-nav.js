@@ -15,6 +15,8 @@ const NAV=[
     {id:'gtd',label:'GTD',icon:'fa-brain'},
     {id:'crm',label:'CRM & Sales',icon:'fa-handshake'},
     {id:'postsales',label:'Post Sales',icon:'fa-headset'},
+    // Site Visit / Booked customers by PIN code on a map, month by month - src/core/41-lead-map.js
+    {id:'lead_map',label:'Lead Map',icon:'fa-map-location-dot'},
   ]},
   {group:'Operations',items:[
     {id:'projects',label:'Projects',icon:'fa-building'},

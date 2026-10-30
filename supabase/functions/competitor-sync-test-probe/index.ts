@@ -81,9 +81,11 @@ const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b))
   .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const rnd = (n = 32) => b64(crypto.getRandomValues(new Uint8Array(n)));
 
-async function accessToken(r: any) {
+/* aheadMs: renew when the access token runs out within this long. The keep-alive passes a wide
+   window so every account is renewed while its sign-in is still good (see action "keepalive"). */
+async function accessToken(r: any, aheadMs = 60000) {
   if (!r?.refresh_token) throw new Error("Proxy is not connected.");
-  if (r.access_token && r.expires_at && new Date(r.expires_at).getTime() > Date.now() + 60000) {
+  if (r.access_token && r.expires_at && new Date(r.expires_at).getTime() > Date.now() + aheadMs) {
     return r.access_token as string;
   }
   const form = new URLSearchParams({ grant_type: "refresh_token", refresh_token: r.refresh_token,
@@ -91,7 +93,14 @@ async function accessToken(r: any) {
   const t = await fetch(ISSUER + "/token", { method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form.toString() });
   const tok = await t.json().catch(() => ({}));
-  if (!t.ok || !tok?.access_token) throw new Error("Proxy would not renew: " + String(tok?.error || t.status));
+  if (!t.ok || !tok?.access_token) {
+    /* Two runs can renew the same account at once; Proxy accepts the first and refuses the second,
+       whose refresh token has just been replaced. If the row now holds a newer, valid token, use it. */
+    const fresh = await row(r.id);
+    if (fresh?.access_token && fresh.refresh_token !== r.refresh_token && fresh.expires_at
+        && new Date(fresh.expires_at).getTime() > Date.now() + 60000) return fresh.access_token as string;
+    throw new Error("Proxy would not renew: " + String(tok?.error || t.status));
+  }
   await save({ access_token: tok.access_token, refresh_token: tok.refresh_token || r.refresh_token,
     expires_at: new Date(Date.now() + (Number(tok.expires_in) || 3600) * 1000).toISOString() }, r.id);
   return tok.access_token as string;
@@ -587,6 +596,20 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const action = url.searchParams.get("action") || "";
   try {
+    /* KEEP EVERY ACCOUNT SIGNED IN (29 Oct 2026). A Proxy sign-in only lasts while it keeps being
+       renewed: Account 1 sat unused for 17 hours after being reconnected and Proxy dropped it, while
+       the accounts in nightly use stayed signed in for days. The cron calls this every 20 minutes
+       and renews any account whose access runs out within the next 20, used or not. It only renews
+       sign-ins - it never pulls a page, so it costs no credits. */
+    if (action === "keepalive") {
+      const list = await accounts();
+      const out: any[] = [];
+      for (const a of list) {
+        try { await accessToken(a, 20 * 60000); out.push({ id: a.id, ok: true }); if (/renew|not connected/i.test(String(a.last_error || ""))) await save({ last_error: null }, a.id); }
+        catch (e) { const m = String((e as Error)?.message || e).slice(0, 200); await save({ last_error: m }, a.id); out.push({ id: a.id, ok: false, error: m }); }
+      }
+      return json({ ok: true, accounts: out });
+    }
     if (action === "status") {
       const r = await fetch(SB + "/rest/v1/proxy_oauth?order=id&select=id,refresh_token,active,account_email,connected_at,connected_by,exhausted_day,last_error,last_used_at", { headers: H });
       const rows: any[] = await r.json().catch(() => []);

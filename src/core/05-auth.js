@@ -229,7 +229,7 @@ async function boot(){
   // Not tied to the page just rendered - only to whether this user can see Legal MIS at all
   // (clrevCheckPending checks pageAllowed('legal') itself). Fire-and-forget: it puts its own
   // modal up over whatever renderPage() just drew, it doesn't need to be awaited first.
-  try{ clrevCheckPending(); }catch(e){}
+  // Causelist Reviews were retired on 29 Oct 2026: every MIS case now carries its own action and task.
 }
 // The customer portal's sections used to be a horizontally-scrolling tab row above the page body -
 // with 13 of them the active one was often scrolled out of view. They live in the sidebar instead
@@ -397,7 +397,8 @@ function startSessionGuard(){
   document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='visible') kickHard(); });
   window.addEventListener('hashchange', kick);
   // periodic safety check — this is what catches a deleted user within ~45s even if they never touch the tab
-  setInterval(kickHard, 45000);
+  // not while the tab is hidden - it is checked again the moment it is looked at (visibilitychange)
+  setInterval(function(){ if(!document.hidden) kickHard(); }, 45000);
   kickHard();
 }
 sb.auth.onAuthStateChange((ev,session)=>{

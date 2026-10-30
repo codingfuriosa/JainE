@@ -4038,13 +4038,18 @@
     const wfPcAccount = id===39 && (eq(me(),'jaingrouppc2.ankita@gmail.com') || eq(me(),'pc.thejaingroup1@gmail.com'));
     const S0=wfPcAccount ? null : {flowId:id, ticked:new Map(), timer:null, trackerLoaded:false, pageLen:WF_SRV_PAGE};
     const rowsOf=function(q){ return q.then(function(r){ return (r&&r.data)||null; }, function(){ return null; }); };
+    /* The first page waits for the workflow row (30 Oct 2026): one that archives finished instances
+       wants its first page filtered to the running ones, so asking for the unfiltered page alongside
+       was a whole wf_case_page call - the heaviest request JainE makes - thrown away every time. */
+    const flowP=rowsOf(ACC().from('flows').select('*').eq('id',id).maybeSingle());
     const got=await Promise.all([
       people().catch(function(){ return null; }),
-      rowsOf(ACC().from('flows').select('*').eq('id',id).maybeSingle()),
+      flowP,
       rowsOf(ACC().from('flow_steps').select('*').eq('flow_id',id).order('seq',{ascending:true})),
       rowsOf(ACC().from('flow_drafts').select('*').eq('flow_id',id).order('updated_at',{ascending:false})),
       rowsOf(ACC().from('flow_forms').select('*').eq('flow_id',id).order('sl',{ascending:true})),
-      S0 ? wfCasePage({offset:0, limit:S0.pageLen, counts:true}, S0).catch(function(){ return null; }) : null
+      S0 ? flowP.then(function(f){ return (f && f.archive_done) ? 'archive' : wfCasePage({offset:0, limit:S0.pageLen, counts:true}, S0); })
+             .catch(function(){ return null; }) : null
     ]);
     const out={people:got[0], flow:got[1], steps:got[2]||[], drafts:got[3]||[], forms:got[4]||[],
                S0:null, srvFirst:null, cases:[], fcs:[], bk:{}, myOpenClaim:null};
@@ -4056,7 +4061,7 @@
       /* A workflow that archives finished instances lists only the running ones until Archive is
          opened, so its first page is asked for again with that filter, along with how many are in
          the Archive for the tab's own count. */
-      if(flow.archive_done){
+      if(flow.archive_done || srvFirst==='archive'){
         try{
           const both=await Promise.all([
             wfCasePage({offset:0, limit:WF_SRV_PAGE, status:'active', counts:true}, S0),
@@ -13892,6 +13897,11 @@
   // new date = new deadline).
   window.gcalCaseDrop=async function(cid,newDate,field){
     field=(field==='case_next_date')?'case_next_date':'next_date';
+    /* Since 29 Oct 2026 a hearing date carries its stage, person and remarks, and an action date
+       belongs to the action's own task - neither can be moved by a drag that knows none of that. */
+    toast((field==='case_next_date'?'Hearing':'Action')+' dates are changed in Legal → MIS, on the case’s '
+      +(field==='case_next_date'?'Hearing':'Action')+' page','warn');
+    if(cid!==null) return;
     try{
       if(newDate<todayISO()){ toast('Cannot move a case to a date before today','err'); return; }
       const {error}=await sb.from('mis_cases').update({[field]:newDate}).eq('id',cid);
@@ -15651,9 +15661,9 @@
     const b=$('acBody');
     if(P3==='recurring') return recurringView();
     const [list,loaded,myRanks]=await Promise.all([people(), loadAll('recent'), loadMyRanks()]);
+    /* The full list is no longer fetched behind every Tasks draw (30 Oct 2026) - it was ~2,300 heavy
+       calls in 4 days for an Archive most people never open. Archive fetches it when opened (loadAllCached). */
     const {asg,pm}=loaded;
-    // The rest of the history comes down once this screen is drawn, ready for Archive.
-    setTimeout(accPrefetchFull, 2500);
     /* A recurring task is listed from its own day, not from the moment it is made: a Sunday task
        made on a Wednesday turns up on Sunday, and once Sunday's is done the next one waits for the
        following Sunday. Until then it is only in the Recurring view. */
@@ -17706,7 +17716,12 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
   });
 
   function init(){
-    injectCss(); wireBell(); notifLoad(); setInterval(notifLoad,45000); window.addEventListener('focus',function(){ if(Date.now()-NOTIF_LAST_AT>5000) notifLoad(); });
+    /* The bell is checked every 60 s, and not at all while the tab is hidden (30 Oct 2026) - every
+       open JainE tab used to ask every 45 s all day, the most frequent request the database gets.
+       Coming back to the tab checks at once if the last check is more than 20 s old. */
+    injectCss(); wireBell(); notifLoad(); setInterval(function(){ if(!document.hidden) notifLoad(); },60000);
+    window.addEventListener('focus',function(){ if(Date.now()-NOTIF_LAST_AT>5000) notifLoad(); });
+    document.addEventListener('visibilitychange',function(){ if(!document.hidden && Date.now()-NOTIF_LAST_AT>20000) notifLoad(); });
     try{ mtgStartBrowserTranscriber(); }catch(e){}
     try{
       const qs=new URLSearchParams(location.search);

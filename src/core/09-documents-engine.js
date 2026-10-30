@@ -1082,18 +1082,21 @@ VIEWS.legal=async function(v,seg){
       <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('legal')"><i class="fa-solid fa-folder-open"></i> Documents</div>
       <div class="tab ${tab==='mis'?'active':''}" onclick="navTo('legal/mis')"><i class="fa-solid fa-gavel"></i> MIS</div>
       <div class="tab ${tab==='notices'?'active':''}" onclick="navTo('legal/notices')"><i class="fa-solid fa-envelope-open-text"></i> Notices</div>
-      <div class="tab ${tab==='actions'?'active':''}" onclick="navTo('legal/actions')"><i class="fa-solid fa-list-check"></i> Actions</div>
-      <div class="tab ${tab==='causelist'?'active':''}" onclick="navTo('legal/causelist')"><i class="fa-solid fa-clipboard-check"></i> Causelist Reviews</div>
       <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
     <div id="legalBody"><div class="loader"><div class="spin"></div></div></div>`;
-  if(tab==='mis') legalMIS();
+  /* The MIS has pages of its own - a case, its hearings, its actions - each a real address, so
+     the browser's Back returns to the table (29 Oct 2026). */
+  if(tab==='mis'&&seg[1]==='case') misCasePage(seg[2]||'new');
+  else if(tab==='mis'&&seg[1]==='hearing') misHearingPage(Number(seg[2]));
+  else if(tab==='mis'&&seg[1]==='action') misActionPage(Number(seg[2]));
+  else if(tab==='mis') legalMIS();
   else if(tab==='notices') legalNotices();
   // seg[1] picks the Scoreboard's own tab - 'mis' unless the url asks for 'notice'.
   else if(tab==='scoreboard') legalScoreboard(seg[1]==='notice'?'notice':'mis');
-  else if(tab==='actions') legalActions();
-  else if(tab==='causelist') legalCauselistReviews();
+  else if(tab==='actions') navTo('legal/mis');
+  else if(tab==='causelist') navTo('legal/mis');   // Causelist Reviews retired 29 Oct 2026
   else if(tab==='advocates') legalAdvocates();
   else legalDocsView(seg);
 };

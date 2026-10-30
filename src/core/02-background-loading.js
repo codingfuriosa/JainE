@@ -19,7 +19,11 @@
      - Signing out forgets the remembered reads as well. */
 const BG_NATIVE_FETCH=window.fetch.bind(window);
 const BG_TTL_MS=30000;
-const BG_MIN_GAP_MS=3000;                    // a burst of draws does not re-check the same page
+/* A page kept ready is fetched again at most every 90 s (30 Oct 2026; was 3 s). Every page draw in
+   every open tab re-read every other page's reads, and answers are only used for 30 s - so most of
+   it was fetched and thrown away, and it was the largest steady load on the small database. A page
+   opened after its held answers expired simply loads from the database as normal. */
+const BG_MIN_GAP_MS=90000;
 /* Database functions that only read. All but the last two are every function in the app's schemas
    that Postgres itself marks STABLE or IMMUTABLE (taken from pg_proc on 2026-10-13) - Postgres
    refuses any write inside such a function, so answering one from memory can never skip a change.
@@ -146,10 +150,8 @@ function bgFetch(input, init){
     const fn=(r.url.match(/\/rest\/v1\/rpc\/([A-Za-z0-9_]+)/)||[])[1];
     if(fn && BG_HARMLESS_WRITES.has(fn)) return BG_NATIVE_FETCH(input, init);
     BG_CACHE.clear();
-    /* ...and once the save has settled, get the pages ready again - fresh, so they show the change
-       and are instant again rather than waiting for the next page draw to notice. */
-    clearTimeout(BG_REFILL_T);
-    BG_REFILL_T=setTimeout(function(){ for(const k in BG_LAST) delete BG_LAST[k]; bgPrefetchOthers(); }, 6000);
+    /* Nothing is re-fetched after a save any more (30 Oct 2026): every save re-read every page kept
+       ready, a few hundred requests each time. The next page opened reads fresh from the database. */
     return BG_NATIVE_FETCH(input, init);
   }
   const cap=(BG_CAPTURE && Date.now()<BG_CAPTURE.until) ? BG_CAPTURE : null;

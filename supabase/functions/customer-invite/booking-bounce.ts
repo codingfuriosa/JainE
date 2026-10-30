@@ -30,7 +30,7 @@ const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
 /* ---------------- a small IMAP reader: just enough to list and read the returned-mail notices ---- */
-class Imap {
+export class Imap {
   private conn!: Deno.TlsConn;
   private buf = new Uint8Array(0);
   private n = 0;

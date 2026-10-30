@@ -29,6 +29,8 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { handleBookingMail } from "./booking-mail.ts";
 import { bounceCheck } from "./booking-bounce.ts";
+import { postsalesMailSync } from "./postsales-mail.ts";
+import { reminderSend } from "./postsales-reminder.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -174,6 +176,18 @@ Deno.serve(async (req: Request) => {
   if (action === "booking_bounce_check") {
     try { return await bounceCheck(req, db.schema("acc"), j, SB); }
     catch (e) { return j({ error: "Bounce check failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
+  }
+
+  // ------------------------------------- outstanding reminder: test customers only, from Ayush's account
+  if (action === "reminder_send") {
+    try { return await reminderSend(req, body, db, j, SB, createClient); }
+    catch (e) { return j({ error: "Sending failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
+  }
+
+  // ------------------------------------- Post Sales customer tickets from Gmail (the job, every 10 minutes)
+  if (action === "postsales_mail_sync") {
+    try { return await postsalesMailSync(req, db, j); }
+    catch (e) { return j({ error: "Ticket sync failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
   }
 
   // ------------------------------------------------------ invite (staff)

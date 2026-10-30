@@ -1,0 +1,381 @@
+[
+  {
+    "case_id": 431,
+    "project": "Dream Gurukul",
+    "inputs": {
+      "project": "Dream Gurukul",
+      "carpetArea": "771.78",
+      "buildupArea": "926",
+      "superBuildupArea": "1235",
+      "flatNo": "6B",
+      "floor": 6
+    },
+    "stored": 4044625,
+    "fetched": 4044625,
+    "resultLine": "Market Value of Apartment :- Rs. 40,44,625",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 461,
+    "project": "Dream Gurukul",
+    "inputs": {
+      "project": "Dream Gurukul",
+      "carpetArea": "533.79",
+      "buildupArea": "645",
+      "superBuildupArea": "860",
+      "flatNo": "5C",
+      "floor": 5
+    },
+    "stored": 2805750,
+    "fetched": 2805750,
+    "resultLine": "Market Value of Apartment :- Rs. 28,05,750",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 465,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "355.53",
+      "buildupArea": "426.58",
+      "superBuildupArea": "575",
+      "flatNo": "8H",
+      "floor": 8
+    },
+    "stored": 1797162,
+    "fetched": 1797162,
+    "resultLine": "Market Value of Apartment :- Rs. 17,97,162",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 532,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "352.09",
+      "buildupArea": "430.88",
+      "superBuildupArea": "560",
+      "flatNo": "8D.",
+      "floor": 8
+    },
+    "stored": 1750280,
+    "fetched": 1750280,
+    "resultLine": "Market Value of Apartment :- Rs. 17,50,280",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 539,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "446.81",
+      "buildupArea": "572.43",
+      "superBuildupArea": "770",
+      "flatNo": "7F",
+      "floor": 7
+    },
+    "stored": 2388848,
+    "fetched": 2388848,
+    "resultLine": "Market Value of Apartment :- Rs. 23,88,848",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 561,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "455.86",
+      "buildupArea": "568.23",
+      "superBuildupArea": "755",
+      "flatNo": "9I",
+      "floor": 9
+    },
+    "stored": 2377193,
+    "error": "no value on result page: of floor in Building must be greater or equal than the flat located in which floor Service Count: 5,78,126 N"
+  },
+  {
+    "case_id": 563,
+    "project": "Dream Gurukul",
+    "inputs": {
+      "project": "Dream Gurukul",
+      "carpetArea": "534",
+      "buildupArea": "650",
+      "superBuildupArea": "870",
+      "flatNo": "2C",
+      "floor": 2
+    },
+    "stored": 2805750,
+    "fetched": 2805750,
+    "resultLine": "Market Value of Apartment :- Rs. 28,05,750",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 564,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "435.83",
+      "buildupArea": "529.05",
+      "superBuildupArea": "710",
+      "flatNo": "9E",
+      "floor": 9
+    },
+    "stored": 2235506,
+    "error": "no value on result page: of floor in Building must be greater or equal than the flat located in which floor Service Count: 5,78,126 N"
+  },
+  {
+    "case_id": 565,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "455.86",
+      "buildupArea": "568.23",
+      "superBuildupArea": "755",
+      "flatNo": "9I",
+      "floor": 9
+    },
+    "stored": 2377193,
+    "error": "no value on result page: of floor in Building must be greater or equal than the flat located in which floor Service Count: 5,78,126 N"
+  },
+  {
+    "case_id": 578,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "455.86",
+      "buildupArea": "568.23",
+      "superBuildupArea": "755",
+      "flatNo": "5I",
+      "floor": 5
+    },
+    "stored": 2316151,
+    "fetched": 2316151,
+    "resultLine": "Market Value of Apartment :- Rs. 23,16,151",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 590,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "541.54",
+      "buildupArea": "657.57",
+      "superBuildupArea": "870",
+      "flatNo": "9B",
+      "floor": 9
+    },
+    "stored": 2739282,
+    "error": "no value on result page: of floor in Building must be greater or equal than the flat located in which floor Service Count: 5,78,126 N"
+  },
+  {
+    "case_id": 593,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "565.22",
+      "buildupArea": "653.37",
+      "superBuildupArea": "870",
+      "flatNo": "6 B",
+      "floor": 6
+    },
+    "stored": 2678991,
+    "fetched": 2678991,
+    "resultLine": "Market Value of Apartment :- Rs. 26,78,991",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 628,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "355.53",
+      "buildupArea": "426.58",
+      "superBuildupArea": "760",
+      "flatNo": "7H",
+      "floor": 7
+    },
+    "stored": 2357824,
+    "fetched": 2357824,
+    "resultLine": "Market Value of Apartment :- Rs. 23,57,824",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 632,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "355.53",
+      "buildupArea": "426.58",
+      "superBuildupArea": "760",
+      "flatNo": "7H",
+      "floor": 7
+    },
+    "stored": 2357824,
+    "fetched": 2357824,
+    "resultLine": "Market Value of Apartment :- Rs. 23,57,824",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 635,
+    "project": "Dream Gurukul",
+    "inputs": {
+      "project": "Dream Gurukul",
+      "carpetArea": "534",
+      "buildupArea": "656",
+      "superBuildupArea": "875",
+      "flatNo": "7C",
+      "floor": 7
+    },
+    "stored": 2887500,
+    "fetched": 2887500,
+    "resultLine": "Market Value of Apartment :- Rs. 28,87,500",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 643,
+    "project": "Dream Gurukul",
+    "inputs": {
+      "project": "Dream Gurukul",
+      "carpetArea": "533.79",
+      "buildupArea": "645",
+      "superBuildupArea": "860",
+      "flatNo": "C",
+      "floor": 1
+    },
+    "stored": 2762750,
+    "fetched": 2762750,
+    "resultLine": "Market Value of Apartment :- Rs. 27,62,750",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 691,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "480.61",
+      "buildupArea": "576.21",
+      "superBuildupArea": "630",
+      "flatNo": "1G",
+      "floor": 1
+    },
+    "stored": 2175516,
+    "fetched": 2175516,
+    "resultLine": "Market Value of Apartment :- Rs. 21,75,516",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 717,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "530.23",
+      "buildupArea": "642.29",
+      "superBuildupArea": "870",
+      "flatNo": "5B",
+      "floor": 5
+    },
+    "stored": 2668942,
+    "fetched": 2668942,
+    "resultLine": "Market Value of Apartment :- Rs. 26,68,942",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 742,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "431.42",
+      "buildupArea": "523.78",
+      "superBuildupArea": "770",
+      "flatNo": "8F",
+      "floor": 8
+    },
+    "stored": 2406635,
+    "fetched": 2406635,
+    "resultLine": "Market Value of Apartment :- Rs. 24,06,635",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 788,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "431.42",
+      "buildupArea": "573.51",
+      "superBuildupArea": "875",
+      "flatNo": "7F",
+      "floor": 7
+    },
+    "stored": 2714600,
+    "fetched": 2714600,
+    "resultLine": "Market Value of Apartment :- Rs. 27,14,600",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 792,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "431.42",
+      "buildupArea": "573.51",
+      "superBuildupArea": "875",
+      "flatNo": "5F",
+      "floor": 5
+    },
+    "stored": 2684281,
+    "fetched": 2684281,
+    "resultLine": "Market Value of Apartment :- Rs. 26,84,281",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 793,
+    "project": "Dream World City",
+    "inputs": {
+      "project": "Dream World City",
+      "carpetArea": "488.47",
+      "buildupArea": "592.56",
+      "superBuildupArea": "790",
+      "flatNo": "7A",
+      "floor": 7
+    },
+    "stored": 2450896,
+    "fetched": 2450896,
+    "resultLine": "Market Value of Apartment :- Rs. 24,50,896",
+    "match": true,
+    "diff": 0
+  },
+  {
+    "case_id": 854,
+    "project": "Dream Gurukul",
+    "inputs": {
+      "project": "Dream Gurukul",
+      "carpetArea": "534",
+      "buildupArea": "650",
+      "superBuildupArea": "870",
+      "flatNo": "6E",
+      "floor": 6
+    },
+    "stored": 2849250,
+    "fetched": 2849250,
+    "resultLine": "Market Value of Apartment :- Rs. 28,49,250",
+    "match": true,
+    "diff": 0
+  }
+]

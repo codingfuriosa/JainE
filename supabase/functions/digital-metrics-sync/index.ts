@@ -23,7 +23,11 @@
    off because the cron sends no user session; the check is done here instead.
 
    Re-reads overlap the last few days on purpose: YouTube Analytics, GA4 and Search Console all
-   revise the most recent 2-3 days, and an upsert simply replaces the earlier reading. */
+   revise the most recent 2-3 days, and an upsert simply replaces the earlier reading.
+
+   Also hosts the LEAD MAP actions (lead_map_sync / lead_map_geocode / lead_map_key, see
+   lead-map.ts) - a separate module, here only because the project is at its edge-function limit. */
+import { syncFromCrm, geocodeMissing, mapKey } from './lead-map.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -539,7 +543,9 @@ async function findPlace(q: string) {
 // ---------------------------------------------------------------- entry
 const PARTS: Record<string, () => Promise<number>> = { yt_public: ytPublic, yt_own: ytOwn, places, gbp, gsc, ga4 };
 
-async function caller(req: Request): Promise<string | null> {
+/* Lead Map actions are allowed by the Lead Map module (camp.lm_allowed), everything else by Digital
+   Metrics (camp.dm_allowed) - two separate grants for two separate modules. */
+async function caller(req: Request, rpc = 'dm_allowed'): Promise<string | null> {
   const sec = req.headers.get('x-dm-secret');
   if (sec) {
     const r = await dbGet('job_secrets?name=eq.digital_metrics&select=value', 'acc');
@@ -550,7 +556,7 @@ async function caller(req: Request): Promise<string | null> {
   const who = await fetch(`${SB}/auth/v1/user`, { headers: { apikey: ANON, Authorization: auth } });
   if (!who.ok) return null;
   const email = String((await who.json()).email || '').toLowerCase();
-  const can = await fetch(`${SB}/rest/v1/rpc/dm_allowed`, { method: 'POST', body: '{}',
+  const can = await fetch(`${SB}/rest/v1/rpc/${rpc}`, { method: 'POST', body: '{}',
     headers: { apikey: ANON, Authorization: auth, 'Content-Type': 'application/json', 'Content-Profile': 'camp' } });
   return can.ok && (await can.json()) === true ? 'manual:' + email : null;
 }
@@ -560,9 +566,17 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   let body: any = {};
   try { body = await req.json(); } catch (_) { /* empty */ }
-  const who = await caller(req);
+  const lead = String(body.action || '').startsWith('lead_map_');
+  const who = await caller(req, lead ? 'lm_allowed' : 'dm_allowed');
   if (!who) return j({ error: 'not allowed' }, 401);
   try {
+    if (body.action === 'lead_map_key') return j({ key: mapKey() });
+    if (body.action === 'lead_map_geocode') return j({ message: await geocodeMissing(20) });
+    if (body.action === 'lead_map_sync') {
+      const id = await logStart('lead_map', who);
+      try { const r = await syncFromCrm(); await logEnd(id, true, r.rows, r.message); return j(r); }
+      catch (e) { await logEnd(id, false, 0, (e as Error).message); throw e; }
+    }
     if (body.action === 'find_channel') return j({ results: await findChannel(String(body.q || '')) });
     if (body.action === 'find_place') return j({ results: await findPlace(String(body.q || '')) });
     if (body.action === 'discover') {
