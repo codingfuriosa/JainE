@@ -23,7 +23,11 @@ const SUPABASE_KEY='sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n';
      - Signing out forgets the remembered reads as well. */
 const BG_NATIVE_FETCH=window.fetch.bind(window);
 const BG_TTL_MS=30000;
-const BG_MIN_GAP_MS=3000;                    // a burst of draws does not re-check the same page
+/* A page kept ready is fetched again at most every 90 s (30 Oct 2026; was 3 s). Every page draw in
+   every open tab re-read every other page's reads, and answers are only used for 30 s - so most of
+   it was fetched and thrown away, and it was the largest steady load on the small database. A page
+   opened after its held answers expired simply loads from the database as normal. */
+const BG_MIN_GAP_MS=90000;
 /* Database functions that only read. All but the last two are every function in the app's schemas
    that Postgres itself marks STABLE or IMMUTABLE (taken from pg_proc on 2026-10-13) - Postgres
    refuses any write inside such a function, so answering one from memory can never skip a change.
@@ -150,10 +154,8 @@ function bgFetch(input, init){
     const fn=(r.url.match(/\/rest\/v1\/rpc\/([A-Za-z0-9_]+)/)||[])[1];
     if(fn && BG_HARMLESS_WRITES.has(fn)) return BG_NATIVE_FETCH(input, init);
     BG_CACHE.clear();
-    /* ...and once the save has settled, get the pages ready again - fresh, so they show the change
-       and are instant again rather than waiting for the next page draw to notice. */
-    clearTimeout(BG_REFILL_T);
-    BG_REFILL_T=setTimeout(function(){ for(const k in BG_LAST) delete BG_LAST[k]; bgPrefetchOthers(); }, 6000);
+    /* Nothing is re-fetched after a save any more (30 Oct 2026): every save re-read every page kept
+       ready, a few hundred requests each time. The next page opened reads fresh from the database. */
     return BG_NATIVE_FETCH(input, init);
   }
   const cap=(BG_CAPTURE && Date.now()<BG_CAPTURE.until) ? BG_CAPTURE : null;
@@ -424,7 +426,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'7885d790d1','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'5c9db8012a','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -895,7 +897,7 @@ async function boot(){
   // Not tied to the page just rendered - only to whether this user can see Legal MIS at all
   // (clrevCheckPending checks pageAllowed('legal') itself). Fire-and-forget: it puts its own
   // modal up over whatever renderPage() just drew, it doesn't need to be awaited first.
-  try{ clrevCheckPending(); }catch(e){}
+  // Causelist Reviews were retired on 29 Oct 2026: every MIS case now carries its own action and task.
 }
 // The customer portal's sections used to be a horizontally-scrolling tab row above the page body -
 // with 13 of them the active one was often scrolled out of view. They live in the sidebar instead
@@ -1063,7 +1065,8 @@ function startSessionGuard(){
   document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='visible') kickHard(); });
   window.addEventListener('hashchange', kick);
   // periodic safety check — this is what catches a deleted user within ~45s even if they never touch the tab
-  setInterval(kickHard, 45000);
+  // not while the tab is hidden - it is checked again the moment it is looked at (visibilitychange)
+  setInterval(function(){ if(!document.hidden) kickHard(); }, 45000);
   kickHard();
 }
 sb.auth.onAuthStateChange((ev,session)=>{
@@ -1093,6 +1096,8 @@ const NAV=[
     {id:'gtd',label:'GTD',icon:'fa-brain'},
     {id:'crm',label:'CRM & Sales',icon:'fa-handshake'},
     {id:'postsales',label:'Post Sales',icon:'fa-headset'},
+    // Site Visit / Booked customers by PIN code on a map, month by month - src/core/41-lead-map.js
+    {id:'lead_map',label:'Lead Map',icon:'fa-map-location-dot'},
   ]},
   {group:'Operations',items:[
     {id:'projects',label:'Projects',icon:'fa-building'},
@@ -3030,18 +3035,21 @@ VIEWS.legal=async function(v,seg){
       <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('legal')"><i class="fa-solid fa-folder-open"></i> Documents</div>
       <div class="tab ${tab==='mis'?'active':''}" onclick="navTo('legal/mis')"><i class="fa-solid fa-gavel"></i> MIS</div>
       <div class="tab ${tab==='notices'?'active':''}" onclick="navTo('legal/notices')"><i class="fa-solid fa-envelope-open-text"></i> Notices</div>
-      <div class="tab ${tab==='actions'?'active':''}" onclick="navTo('legal/actions')"><i class="fa-solid fa-list-check"></i> Actions</div>
-      <div class="tab ${tab==='causelist'?'active':''}" onclick="navTo('legal/causelist')"><i class="fa-solid fa-clipboard-check"></i> Causelist Reviews</div>
       <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
     <div id="legalBody"><div class="loader"><div class="spin"></div></div></div>`;
-  if(tab==='mis') legalMIS();
+  /* The MIS has pages of its own - a case, its hearings, its actions - each a real address, so
+     the browser's Back returns to the table (29 Oct 2026). */
+  if(tab==='mis'&&seg[1]==='case') misCasePage(seg[2]||'new');
+  else if(tab==='mis'&&seg[1]==='hearing') misHearingPage(Number(seg[2]));
+  else if(tab==='mis'&&seg[1]==='action') misActionPage(Number(seg[2]));
+  else if(tab==='mis') legalMIS();
   else if(tab==='notices') legalNotices();
   // seg[1] picks the Scoreboard's own tab - 'mis' unless the url asks for 'notice'.
   else if(tab==='scoreboard') legalScoreboard(seg[1]==='notice'?'notice':'mis');
-  else if(tab==='actions') legalActions();
-  else if(tab==='causelist') legalCauselistReviews();
+  else if(tab==='actions') navTo('legal/mis');
+  else if(tab==='causelist') navTo('legal/mis');   // Causelist Reviews retired 29 Oct 2026
   else if(tab==='advocates') legalAdvocates();
   else legalDocsView(seg);
 };
@@ -10191,10 +10199,9 @@ VIEWS.scoreboard=async function(v){
     +'<div class="card" style="padding:0">'
       +'<div style="display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:center;flex-wrap:wrap">'
         +'<button class="btn'+(SB_VIEW==='all'?' btn-primary':'')+'" onclick="sbSetView(\'all\')">All Tasks</button>'
-        +'<button class="btn'+(SB_VIEW==='causelist'?' btn-primary':'')+'" onclick="sbSetView(\'causelist\')">Causelist</button>'
       +'</div><div id="sbBody"><div class="loader"><div class="spin"></div></div></div></div>';
-  if(SB_VIEW==='causelist') await sbRenderCauselistBoard($('sbBody'));
-  else await sbRenderAllTasks($('sbBody'));
+  // The Causelist board went with Causelist Reviews (29 Oct 2026); MIS actions score in Legal > Scoreboard.
+  await sbRenderAllTasks($('sbBody'));
 };
 // Kept so /tasks/scoreboard links and bookmarks from when it was a tab still land somewhere real.
 function taskScoreboard(){ navTo('scoreboard'); }
@@ -12693,14 +12700,17 @@ VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
   // The old MIS tab (built by hand from Farvision files) was retired 02-Oct-2026 - the MIS Report now
   // lives under Reports and is built from Post Sales data. An old #/mis link lands on Bookings.
-  const tabs=[['bookings','Bookings'],['invoices','Invoices'],['receipts','Receipts'],['reports','Reports'],['adhoc','Contracted Extra Charges'],['setup','Setup']];
+  const tabs=[['bookings','Bookings'],['tickets','Customer Tickets'],['reminders','Outstanding Reminders'],['invoices','Invoices'],['receipts','Receipts'],['reports','Reports'],['adhoc','Contracted Extra Charges'],['setup','Setup']];
   const tab=tabs.some(function(t){return t[0]===(seg&&seg[0]);})?seg[0]:'bookings';
   // One body div per tab rather than one shared one: they are rendered by different code
   // that each look up their own host by id, and a shared id would have them fighting over it.
-  const bodyId={setup:'pssBody',bookings:'psbBody',receipts:'psrBody',invoices:'psiBody',reports:'psrpBodyHost'}[tab]||'psaBody';
+  const bodyId={setup:'pssBody',bookings:'psbBody',receipts:'psrBody',invoices:'psiBody',reports:'psrpBodyHost',tickets:'pstBody',reminders:'prmBody'}[tab]||'psaBody';
   v.innerHTML=mHead('fa-headset','#7e22ce','Post Sales')
     +'<div class="tabs" style="margin-top:14px">'+tabs.map(function(t){return '<div class="tab '+(tab===t[0]?'active':'')+'" onclick="navTo(\'postsales/'+t[0]+'\')">'+t[1]+'</div>';}).join('')+'</div>'
     +'<div id="'+bodyId+'" style="margin-top:16px"></div>';
+  // Customer Tickets lives in nexus-core (24b-post-sales-tickets.js), not postsales.js.
+  if(tab==='tickets'){ const host=$('pstBody'); if(host) await pstRender(host, seg.slice(1)); return; }
+  if(tab==='reminders'){ const host=$('prmBody'); if(host) await prmRender(host); return; }
   // Bookings and Setup (projects → towers → floors → flats, PLC, FRC, charges, parking, payment
   // plans) live in postsales.js - see PAGE_EXTRA_SCRIPT and docs/post-sales-spec.md.
   if(tab==='setup'||tab==='bookings'||tab==='receipts'||tab==='invoices'||tab==='reports'){
@@ -13156,6 +13166,446 @@ VIEWS.inventory=async function(v,seg){
   }
 };
 
+/* ============================ POST SALES - CUSTOMER TICKETS (30 Oct 2026) ============================
+   What customers have written to Post Sales, as tickets. Fed every 10 minutes from Pallabita Ghosh's
+   mailbox (customercare1@), read-only, by customer-invite's postsales_mail_sync: each Gmail
+   conversation a customer starts is a ticket, her replies in it are recorded, and Gemini gives each
+   a category, a one-line summary and an urgency. The customer is matched from Farvision.
+   Statuses: open (the customer is waiting for us), answered (we replied last), resolved (closed here).
+   Route: postsales/tickets[/<id>]. WhatsApp and calls are meant to join the same list (channel). */
+const PST={rows:[],f:{status:'waiting',cat:'',proj:'',q:'',real:true},state:null};
+const PST_CATS=['Payment & Receipts','Demand / Invoice','Documents & Agreement','Registration','Possession & Handover',
+  'Construction Progress','Maintenance & Repairs','Home Loan & Bank','Cancellation & Refund','Complaint','General Enquiry','Other'];
+const PS_T=()=>sb.schema('postsales');
+function pstAgo(iso){
+  if(!iso) return '—';
+  const m=Math.max(0,Math.round((Date.now()-new Date(iso).getTime())/60000));
+  if(m<60) return m+' min'; const h=Math.round(m/60); if(h<48) return h+' h'; return Math.round(h/24)+' days';
+}
+function pstDT(iso){ return iso?new Date(iso).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'; }
+function pstHours(a,b){ return (new Date(b)-new Date(a))/3600000; }
+function pstFmtH(h){ if(h==null||!isFinite(h)) return '—'; if(h<1) return Math.round(h*60)+' min'; if(h<48) return (Math.round(h*10)/10)+' h'; return (Math.round(h/24*10)/10)+' days'; }
+function pstStatusTag(t){
+  if(t.status==='resolved') return '<span class="tag t-green">Resolved</span>';
+  if(t.status==='answered') return '<span class="tag t-blue">Answered</span>';
+  return '<span class="tag t-amber">Waiting for us</span>';
+}
+function pstUrg(u){ return u==='high'?'<span class="tag t-red">High</span>':(u==='low'?'<span class="tag t-gray">Low</span>':'<span class="tag t-gray">Normal</span>'); }
+function pstUnit(t){ return [t.project,[t.tower,t.unit_code].filter(Boolean).join(' - ')].filter(Boolean).join(' · '); }
+function pstStyles(){
+  if($('pstStyles')) return;
+  const s=document.createElement('style'); s.id='pstStyles';
+  s.textContent=`
+  .pst-sync{font-size:12px;color:var(--slate);margin:2px 0 12px}
+  .pst-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:14px 0}
+  @media(max-width:820px){.pst-grid{grid-template-columns:1fr}}
+  .pst-bars .r{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px;cursor:pointer}
+  .pst-bars .r:hover .l{color:var(--brand)}
+  .pst-bars .l{width:190px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pst-bars .b{flex:1;height:10px;border-radius:6px;background:var(--bg-subtle,#f1f5f9);overflow:hidden}
+  .pst-bars .b i{display:block;height:100%;background:#7e22ce;border-radius:6px}
+  .pst-bars .n{width:34px;text-align:right;font-weight:700}
+  .pst-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0 12px}
+  .pst-chip{height:32px;padding:0 12px;border-radius:20px;border:1px solid var(--line);background:#fff;font:600 12.5px inherit;font-family:inherit;cursor:pointer}
+  .pst-chip.on{background:#7e22ce;border-color:#7e22ce;color:#fff}
+  .pst-q{height:34px;border:1px solid var(--line);border-radius:9px;padding:0 10px;font:13px inherit;font-family:inherit;min-width:220px;margin-left:auto}
+  .pst-sel{height:34px;border:1px solid var(--line);border-radius:9px;padding:0 8px;font:13px inherit;font-family:inherit;background:#fff}
+  #pstTbl td{vertical-align:top}
+  #pstTbl tbody tr{cursor:pointer}
+  .pst-sum{font-size:12.5px;color:var(--slate);margin-top:3px;line-height:1.45}
+  .pst-thread{display:flex;flex-direction:column;gap:12px}
+  .pst-msg{max-width:84%;border:1px solid var(--line);border-radius:14px;padding:11px 14px;background:#fff}
+  .pst-msg.out{align-self:flex-end;background:#f5f3ff;border-color:#e9d5ff}
+  .pst-msg .h{font-size:11.5px;color:var(--slate);margin-bottom:6px}
+  .pst-msg .b{font-size:13.5px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}`;
+  document.head.appendChild(s);
+}
+window.pstRender=async function(host,seg){
+  pstStyles();
+  if(seg&&seg[0]) return pstTicketPage(host,Number(seg[0]));
+  loader(host);
+  const [tk,st]=await Promise.all([
+    PS_T().from('tickets').select('*').order('last_customer_at',{ascending:false,nullsFirst:false}).limit(2000),
+    PS_T().from('mail_sync_state').select('*')
+  ]);
+  if(tk.error){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load tickets: '+esc(tk.error.message)+'</div></div>'; return; }
+  PST.rows=tk.data||[]; PST.state=(st.data||[])[0]||null;
+  pstDraw(host);
+};
+function pstVisible(){
+  const f=PST.f, q=f.q.trim().toLowerCase();
+  return PST.rows.filter(function(t){
+    if(f.real&&t.is_ticket===false) return false;
+    if(f.status==='waiting'&&t.status!=='open') return false;
+    if(f.status==='answered'&&t.status!=='answered') return false;
+    if(f.status==='resolved'&&t.status!=='resolved') return false;
+    if(f.status==='active'&&t.status==='resolved') return false;
+    if(f.cat&&t.category!==f.cat) return false;
+    if(f.proj&&t.project!==f.proj) return false;
+    if(q){ const b=[t.customer_name,t.customer_email,t.subject,t.summary,t.project,t.tower,t.unit_code,t.category].join(' ').toLowerCase(); if(q.split(/\s+/).some(w=>b.indexOf(w)===-1)) return false; }
+    return true;
+  });
+}
+function pstDraw(host){
+  host=host||$('pstBody'); if(!host) return;
+  const real=PST.rows.filter(t=>t.is_ticket!==false);
+  const open=real.filter(t=>t.status==='open'), ans=real.filter(t=>t.status==='answered');
+  const monthStart=new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
+  const weekAgo=Date.now()-7*86400000;
+  const newWeek=real.filter(t=>t.first_received_at&&new Date(t.first_received_at).getTime()>=weekAgo).length;
+  const resolvedMonth=real.filter(t=>t.resolved_at&&new Date(t.resolved_at)>=monthStart).length;
+  const replied=real.filter(t=>t.first_reply_at&&t.first_received_at&&new Date(t.first_received_at).getTime()>=Date.now()-30*86400000);
+  const avgFirst=replied.length?replied.reduce((s,t)=>s+pstHours(t.first_received_at,t.first_reply_at),0)/replied.length:null;
+  const oldest=open.slice().sort((a,b)=>String(a.last_customer_at).localeCompare(String(b.last_customer_at)))[0];
+  const kpis=mKpis([
+    ['Waiting for us',String(open.length),oldest?('oldest '+pstAgo(oldest.last_customer_at)):'none waiting',open.length?'#b45309':'#16a34a'],
+    ['Answered',String(ans.length),'waiting on the customer'],
+    ['New this week',String(newWeek),'customer conversations'],
+    ['Resolved this month',String(resolvedMonth),''],
+    ['First reply',pstFmtH(avgFirst),'average, last 30 days']
+  ]);
+  const active=real.filter(t=>t.status!=='resolved');
+  const count=function(key){ const m={}; active.forEach(t=>{ const k=t[key]||'Not known'; m[k]=(m[k]||0)+1; }); return Object.entries(m).sort((a,b)=>b[1]-a[1]); };
+  const bars=function(title,list,setKey){
+    const max=Math.max(1,...list.map(x=>x[1]));
+    return '<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">'+esc(title)+' <span style="font-weight:500;color:var(--slate);font-size:12px">· not yet resolved</span></div><div class="pst-bars">'
+      +(list.length?list.slice(0,8).map(x=>'<div class="r" onclick="pstSet(\''+setKey+'\',\''+esc(x[0]).replace(/'/g,"\\'")+'\')"><span class="l" title="'+esc(x[0])+'">'+esc(x[0])+'</span><span class="b"><i style="width:'+Math.round(x[1]/max*100)+'%"></i></span><span class="n">'+x[1]+'</span></div>').join('')
+        :'<div style="color:var(--slate);font-size:13px">Nothing open</div>')+'</div></div>';
+  };
+  const st=PST.state;
+  const sync='<div class="pst-sync"><i class="fa-solid fa-envelope"></i> From <b>'+esc((st&&st.mailbox)||'customercare1@thejaingroup.com')+'</b> · '
+    +(st&&st.last_run_at?('last checked '+pstAgo(st.last_run_at)+' ago'):'not checked yet - the first read runs within 10 minutes')
+    +(st&&st.last_error?' · <span style="color:#b91c1c">last error: '+esc(st.last_error)+'</span>':'')+'</div>';
+  const f=PST.f;
+  const chip=(k,l)=>'<button class="pst-chip'+(f.status===k?' on':'')+'" onclick="pstSet(\'status\',\''+k+'\')">'+l+'</button>';
+  const projects=[...new Set(PST.rows.map(t=>t.project).filter(Boolean))].sort();
+  const rows=pstVisible();
+  host.innerHTML=sync+kpis
+    +'<div class="pst-grid">'+bars('By category',count('category'),'cat')+bars('By project',count('project'),'proj')+'</div>'
+    +'<div class="pst-bar">'+chip('waiting','Waiting for us')+chip('answered','Answered')+chip('active','All open')+chip('resolved','Resolved')+chip('all','All')
+      +'<select class="pst-sel" onchange="pstSet(\'cat\',this.value)"><option value="">All categories</option>'+PST_CATS.map(c=>'<option'+(f.cat===c?' selected':'')+'>'+esc(c)+'</option>').join('')+'</select>'
+      +'<select class="pst-sel" onchange="pstSet(\'proj\',this.value)"><option value="">All projects</option>'+projects.map(p=>'<option'+(f.proj===p?' selected':'')+'>'+esc(p)+'</option>').join('')+'</select>'
+      +'<label style="font-size:12.5px;display:flex;align-items:center;gap:6px"><input type="checkbox"'+(f.real?' checked':'')+' onchange="pstSet(\'real\',this.checked)"> Real issues only</label>'
+      +'<input class="pst-q" id="pstQ" placeholder="Search customer, flat, subject…" value="'+esc(f.q)+'" oninput="PST.f.q=this.value;pstDrawList()"></div>'
+    +'<div class="card" style="padding:0"><div style="overflow-x:auto" id="pstList"></div></div>';
+  pstDrawList();
+}
+window.pstDrawList=function(){
+  const host=$('pstList'); if(!host) return;
+  const rows=pstVisible();
+  host.innerHTML='<table class="tbl" id="pstTbl" style="width:100%"><thead><tr><th>Received</th><th>Customer</th><th>What it is about</th><th>Category</th><th>Urgency</th><th>Status</th><th>Waiting</th></tr></thead><tbody>'
+    +(rows.length?rows.map(t=>'<tr onclick="navTo(\'postsales/tickets/'+t.id+'\')">'
+      +'<td style="white-space:nowrap">'+pstDT(t.first_received_at)+'</td>'
+      +'<td><b>'+esc(t.customer_name||t.customer_email||'—')+'</b><div class="pst-sum">'+esc(pstUnit(t)||t.customer_email||'')+'</div></td>'
+      +'<td><div style="font-weight:600">'+esc(t.subject||'(no subject)')+'</div>'+(t.summary?'<div class="pst-sum">'+esc(t.summary)+'</div>':(t.needs_ai?'<div class="pst-sum"><i>being read…</i></div>':''))+'</td>'
+      +'<td>'+esc(t.category||'—')+'</td><td>'+pstUrg(t.urgency)+'</td><td>'+pstStatusTag(t)+'</td>'
+      +'<td style="white-space:nowrap;'+(t.status==='open'?'font-weight:700;color:#b45309':'color:var(--slate)')+'">'+(t.status==='open'?pstAgo(t.last_customer_at):'—')+'</td></tr>').join('')
+      :'<tr><td colspan="7"><div class="empty" style="padding:26px">'+(PST.rows.length?'No tickets match these filters':'No customer emails read yet - the mailbox is read every 10 minutes')+'</div></td></tr>')
+    +'</tbody></table>';
+};
+window.pstSet=function(k,v){ PST.f[k]=(k==='real')?!!v:((PST.f[k]===v&&k!=='status')?'':v); if(k==='cat'||k==='proj') PST.f.status=PST.f.status==='waiting'?'active':PST.f.status; pstDraw(); };
+
+async function pstTicketPage(host,id){
+  loader(host);
+  const [t,m]=await Promise.all([PS_T().from('tickets').select('*').eq('id',id).maybeSingle(),
+    PS_T().from('ticket_messages').select('*').eq('ticket_id',id).order('sent_at',{ascending:true})]);
+  const tk=t.data; if(!tk){ host.innerHTML='<div class="empty">Ticket not found</div>'; return; }
+  let people=[]; try{ people=(await getPeople()).filter(p=>Array.isArray(p.depts)&&p.depts.indexOf('Post Sales')!==-1); }catch(e){}
+  const msgs=m.data||[];
+  host.innerHTML='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">'
+      +'<button class="btn" onclick="history.length>1?history.back():navTo(\'postsales/tickets\')"><i class="fa-solid fa-arrow-left"></i> Back</button>'
+      +'<div style="flex:1;min-width:240px"><div style="font-size:17px;font-weight:750">'+esc(tk.subject||'(no subject)')+'</div>'
+      +'<div style="font-size:12.5px;color:var(--slate)">'+esc(tk.customer_name||'')+' · '+esc(tk.customer_email||'')+(pstUnit(tk)?' · '+esc(pstUnit(tk)):'')+(tk.customer_phone?' · '+esc(tk.customer_phone):'')+'</div></div>'
+      +pstStatusTag(tk)+' '+pstUrg(tk.urgency)
+      +(tk.status==='resolved'?'<button class="btn" onclick="pstResolve('+id+',false)"><i class="fa-solid fa-rotate-left"></i> Reopen</button>'
+        :'<button class="btn btn-primary" onclick="pstResolve('+id+',true)"><i class="fa-solid fa-check"></i> Mark resolved</button>')
+    +'</div>'
+    +'<div class="grid" style="grid-template-columns:minmax(0,1fr) 280px;gap:16px">'
+      +'<div class="card card-pad"><div class="pst-thread">'+msgs.map(x=>'<div class="pst-msg '+x.direction+'"><div class="h"><b>'+esc(x.direction==='in'?(x.from_name||x.from_email):'Post Sales')+'</b> · '+pstDT(x.sent_at)+'</div><div class="b">'+esc(x.body||'(no text)')+'</div></div>').join('')+'</div></div>'
+      +'<div class="card card-pad" style="height:fit-content">'
+        +'<div class="sec-title" style="margin:0 0 8px">Summary</div><div style="font-size:13px;line-height:1.5">'+esc(tk.summary||'—')+'</div>'
+        +'<div class="sec-title" style="margin:14px 0 6px">Category</div><select class="pst-sel" style="width:100%" onchange="pstSetField('+id+',\'category\',this.value)">'+PST_CATS.map(c=>'<option'+(tk.category===c?' selected':'')+'>'+esc(c)+'</option>').join('')+'</select>'
+        +'<div class="sec-title" style="margin:14px 0 6px">Handled by</div><select class="pst-sel" style="width:100%" onchange="pstSetField('+id+',\'assigned_to\',this.value)"><option value="">Nobody yet</option>'+people.map(p=>'<option value="'+esc(p.email)+'"'+(tk.assigned_to===p.email?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select>'
+        +'<div style="font-size:12px;color:var(--slate);margin-top:14px;line-height:1.6">First received '+pstDT(tk.first_received_at)+'<br>First reply '+(tk.first_reply_at?pstDT(tk.first_reply_at)+' ('+pstFmtH(pstHours(tk.first_received_at,tk.first_reply_at))+')':'not yet')
+          +(tk.resolved_at?'<br>Resolved '+pstDT(tk.resolved_at):'')+'<br>'+tk.messages+' message'+(tk.messages===1?'':'s')+'</div>'
+        +'<div style="font-size:11.5px;color:var(--slate);margin-top:12px">Replies are written in Gmail as usual - they appear here within 10 minutes.</div>'
+      +'</div></div>';
+}
+window.pstResolve=async function(id,done){
+  const {error}=await PS_T().from('tickets').update(done?{status:'resolved',resolved_at:new Date().toISOString(),resolved_by:state.email}:{status:'open',resolved_at:null,resolved_by:null}).eq('id',id);
+  if(error){ toast(error.message,'err'); return; }
+  toast(done?'Ticket resolved':'Ticket reopened','ok'); pstTicketPage($('pstBody'),id);
+};
+window.pstSetField=async function(id,k,v){
+  const {error}=await PS_T().from('tickets').update({[k]:v||null}).eq('id',id);
+  if(error) toast(error.message,'err'); else toast('Saved','ok');
+};
+/* ============================ POST SALES - OUTSTANDING REMINDERS (30 Oct 2026) ============================
+   The list of customers to remind about their outstanding amount, rebuilt every morning from
+   Farvision's "Customer Outstanding Summary" that the Customer Portal imports
+   (postsales.outstanding_reminder_list): Dream Gurukul, Dream Ananta, Dream Gateway Pailan Projects and
+   Dream Jain-Pailan, Net Outstanding above zero, each with their email and what changed since the
+   file before. The email itself is fixed (postsales.reminder_settings) - its wording is changed on
+   request, not on this page; here it can only be seen, filled in for any one customer.
+   SENDING IS SWITCHED OFF: nothing on this page emails anybody. Route: postsales/reminders. */
+const PRM={rows:[],settings:null,f:{proj:'',view:'remind',q:''},sel:new Set()};
+const PRM_TEST='TEST CUSTOMERS';
+function prmProj(p){
+  return String(p||'').replace(/\(.*?\)/g,'').replace(/\s+/g,' ').trim().toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
+}
+function prmInr(n){ return Math.round(Number(n)||0).toLocaleString('en-IN'); }
+function prmShort(n){ n=Number(n)||0; return n>=1e7?(Math.round(n/1e5)/100)+' Cr':(n>=1e5?(Math.round(n/1e3)/100)+' L':prmInr(n)); }
+function prmFlat(r){ return [r.unit_code,r.tower].filter(Boolean).join(', '); }
+function prmName(r){ return String(r.customer_name||'').replace(/^(mr|mrs|ms|dr|miss)\.?\s+/i,'').trim(); }
+function prmFill(text,r){
+  const d=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'});
+  return String(text||'').replace(/\{Customer Name\}/g,String(r.customer_name||'').trim()).replace(/\{Project\}/g,prmProj(r.project))
+    .replace(/\{Flat\}/g,prmFlat(r)).replace(/\{Net Outstanding\}/g,prmInr(r.net_outstanding)).replace(/\{Date\}/g,d);
+}
+function prmStyles(){
+  if($('prmStyles')) return;
+  const s=document.createElement('style'); s.id='prmStyles';
+  s.textContent=`
+  .prm-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .prm-src{font-size:12.5px;color:var(--slate)}
+  .prm-src b{color:var(--ink)}
+  .prm-lock{margin-left:auto;display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:20px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:12px;font-weight:650}
+  .prm-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+  @media(max-width:900px){.prm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .prm-stat{background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:14px;padding:14px 16px;cursor:pointer;transition:border-color .12s,box-shadow .12s}
+  .prm-stat:hover{border-color:#c4b5fd}
+  .prm-stat.on{border-color:#7e22ce;box-shadow:0 0 0 3px #f3e8ff}
+  .prm-stat .l{font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate)}
+  .prm-stat .v{font-size:24px;font-weight:800;color:var(--ink);margin-top:6px;line-height:1.1}
+  .prm-stat .s{font-size:12px;color:var(--slate);margin-top:4px}
+  .prm-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .prm-chip{height:32px;padding:0 13px;border-radius:20px;border:1px solid var(--line);background:#fff;font:600 12.5px inherit;font-family:inherit;color:var(--ink);cursor:pointer;white-space:nowrap}
+  .prm-chip.on{background:#7e22ce;border-color:#7e22ce;color:#fff}
+  .prm-chip .n{opacity:.7;font-weight:500;margin-left:4px}
+  .prm-q{position:relative;margin-left:auto;width:260px;max-width:100%}
+  .prm-q i{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--slate);font-size:12px}
+  .prm-q input{width:100%;box-sizing:border-box;height:34px;padding:0 10px 0 30px;border:1px solid var(--line);border-radius:9px;font:13px inherit;font-family:inherit}
+  #prmTbl{width:100%;border-collapse:collapse}
+  #prmTbl th{position:sticky;top:0;background:var(--bg-subtle,#f8fafc);text-align:left;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate);padding:9px 14px;border-bottom:1px solid var(--line);z-index:1}
+  #prmTbl td{padding:11px 14px;border-bottom:1px solid var(--line-2,#eef1f6);vertical-align:middle;font-size:13px}
+  #prmTbl tr.grp td{background:#faf5ff;font-weight:700;color:#581c87;font-size:12.5px;padding:8px 14px}
+  #prmTbl tr.grp td .t{float:right;font-weight:800}
+  #prmTbl tbody tr.row:hover td{background:var(--bg-hover,#f8fafc)}
+  .prm-who{display:flex;align-items:center;gap:10px;min-width:0}
+  .prm-who .avatar-sm{width:32px;height:32px;font-size:11px;flex:none}
+  .prm-nm{font-weight:650;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .prm-sub{font-size:11.5px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .prm-amt{text-align:right;white-space:nowrap;font-weight:800;font-variant-numeric:tabular-nums}
+  .prm-old{display:block;font-size:11.5px;font-weight:500;color:var(--slate);text-decoration:line-through}
+  .prm-badge{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:20px;font-size:11px;font-weight:700;margin-left:6px;vertical-align:middle}
+  .prm-badge.new{background:#dbeafe;color:#1e40af}
+  .prm-badge.changed{background:#fef3c7;color:#92400e}
+  .prm-badge.removed{background:#dcfce7;color:#166534}
+  .prm-badge.held{background:#fee2e2;color:#991b1b}
+  .prm-act{white-space:nowrap;text-align:right}
+  .prm-ibtn{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--slate);cursor:pointer;margin-left:4px}
+  .prm-ibtn:hover{border-color:#7e22ce;color:#7e22ce}
+  .prm-email{font-size:12.5px;color:var(--ink-2,#334155)}
+  .prm-cb{width:16px;height:16px;accent-color:#7e22ce;cursor:pointer;vertical-align:middle}
+  #prmTbl tr.grp.test td{background:#eff6ff;color:#1e40af}
+  #prmTbl tbody tr.row.sel td{background:#faf5ff}
+  .prm-selbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--bg-subtle,#f8fafc);font-size:13px}
+  .prm-selbar b{color:var(--ink)}`;
+  document.head.appendChild(s);
+}
+window.prmRender=async function(host){
+  prmStyles(); loader(host);
+  const [l,s,t]=await Promise.all([sb.schema('postsales').rpc('outstanding_reminder_list'), sb.schema('postsales').from('reminder_settings').select('*').eq('id',1).maybeSingle(),
+    sb.schema('postsales').from('reminder_test_recipients').select('*').order('id')]);
+  if(l.error){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not build the list: '+esc(l.error.message)+'</div></div>'; return; }
+  // Test customers sit in their own group at the top; they never come from Farvision.
+  const tests=((t&&t.data)||[]).map(x=>({booking_no:'TEST-'+x.id,test_id:x.id,test:true,customer_name:x.customer_name,project:PRM_TEST,tower:'',unit_code:x.flat||'Test',
+    net_outstanding:x.net_outstanding,prev_net:x.net_outstanding,change:'test',email:x.email,held:false,hold_reason:null}));
+  PRM.rows=tests.concat(l.data||[]); PRM.settings=s.data||{};
+  const keep=new Set(PRM.rows.map(r=>r.booking_no)); PRM.sel.forEach(k=>{ if(!keep.has(k)) PRM.sel.delete(k); });
+  prmDraw(host);
+};
+// Who belongs in each view.
+function prmIn(r,view){
+  if(view==='removed') return r.change==='removed';
+  if(r.change==='removed') return false;
+  if(view==='remind') return !r.held&&!!r.email;
+  if(view==='changes') return r.change==='new'||r.change==='changed';
+  if(view==='held') return r.held||!r.email;
+  return true;
+}
+function prmDraw(host){
+  host=host||$('prmBody'); if(!host) return;
+  const any=PRM.rows[0]||{};
+  const remind=PRM.rows.filter(r=>!r.test&&prmIn(r,'remind')), changes=PRM.rows.filter(r=>prmIn(r,'changes')),
+        held=PRM.rows.filter(r=>prmIn(r,'held')), removed=PRM.rows.filter(r=>prmIn(r,'removed'));
+  const total=remind.reduce((a,r)=>a+Number(r.net_outstanding||0),0);
+  const stat=(view,l,v,s)=>'<div class="prm-stat'+(PRM.f.view===view?' on':'')+'" onclick="PRM.f.view=\''+view+'\';prmDraw()"><div class="l">'+l+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>';
+  const projects=[...new Set(PRM.rows.filter(r=>r.change!=='removed').map(r=>r.project))].sort();
+  const pc=p=>PRM.rows.filter(r=>prmIn(r,PRM.f.view)&&(!p||r.project===p)).length;
+  host.innerHTML='<div class="prm-head"><div class="prm-src"><i class="fa-solid fa-file-excel" style="color:#16a34a"></i> From Farvision\u2019s <b>Customer Outstanding Summary</b>, '
+      +(any.file_date?pstDT(any.file_date):'—')+(any.prev_file_date?' &middot; compared with '+pstDT(any.prev_file_date):'')+'</div>'
+      +'<button class="btn btn-sm" onclick="prmShowEmail()"><i class="fa-solid fa-envelope"></i> View the email</button>'
+      +'<span class="prm-lock"><i class="fa-solid fa-lock"></i> Sending is off</span></div>'
+    +'<div class="prm-stats">'
+      +stat('remind','To remind',remind.length,'₹'+prmShort(total)+' outstanding')
+      +stat('changes','Changes today',changes.length,changes.filter(r=>r.change==='new').length+' new &middot; '+changes.filter(r=>r.change==='changed').length+' amount changed')
+      +stat('removed','Removed',removed.length,'paid up or no longer due')
+      +stat('held','Held back',held.length,'disputed or no email')
+    +'</div>'
+    +'<div class="card" style="padding:0;overflow:hidden">'
+      +'<div class="prm-tools">'
+        +'<button class="prm-chip'+(!PRM.f.proj?' on':'')+'" onclick="PRM.f.proj=\'\';prmDraw()">All projects<span class="n">'+pc('')+'</span></button>'
+        +projects.map(p=>'<button class="prm-chip'+(PRM.f.proj===p?' on':'')+'" onclick="PRM.f.proj=\''+esc(p).replace(/'/g,"\\'")+'\';prmDraw()">'+esc(prmProj(p))+'<span class="n">'+pc(p)+'</span></button>').join('')
+        +'<div class="prm-q"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Search name, flat, email…" value="'+esc(PRM.f.q)+'" oninput="PRM.f.q=this.value;prmList()"></div>'
+      +'</div>'
+      +'<div class="prm-selbar" id="prmSelBar"></div>'
+      +'<div style="overflow:auto;max-height:calc(100vh - 400px)" id="prmList"></div>'
+    +'</div>';
+  prmList();
+}
+window.prmList=function(){
+  const host=$('prmList'); if(!host) return;
+  const f=PRM.f, q=f.q.trim().toLowerCase();
+  const rows=PRM.rows.filter(function(r){
+    if(!prmIn(r,f.view)) return false;
+    if(f.proj&&r.project!==f.proj) return false;
+    if(q&&[r.customer_name,r.unit_code,r.tower,r.email,r.booking_no].join(' ').toLowerCase().indexOf(q)===-1) return false;
+    return true;
+  });
+  const badge=r=>(r.change==='new'?'<span class="prm-badge new">New</span>':'')+(r.change==='changed'?'<span class="prm-badge changed">Changed</span>':'')
+    +(r.change==='removed'?'<span class="prm-badge removed">Removed</span>':'')+(r.held?'<span class="prm-badge held">Held</span>':'');
+  const groups={}; rows.forEach(r=>{ (groups[r.project]=groups[r.project]||[]).push(r); });
+  const body=Object.keys(groups).sort((a,b)=>(a===PRM_TEST?-1:b===PRM_TEST?1:a.localeCompare(b))).map(function(p){
+    const g=groups[p], t=g.reduce((a,r)=>a+Number(r.net_outstanding||0),0);
+    const can=g.filter(r=>r.change!=='removed'&&r.email&&!r.held), allOn=can.length&&can.every(r=>PRM.sel.has(r.booking_no));
+    PRM._grp=PRM._grp||[]; const gi=PRM._grp.indexOf(p)>=0?PRM._grp.indexOf(p):(PRM._grp.push(p)-1);
+    return '<tr class="grp'+(p===PRM_TEST?' test':'')+'"><td style="width:38px">'+(can.length?'<input type="checkbox" class="prm-cb"'+(allOn?' checked':'')+' title="Select this whole group" onchange="prmSelGroup('+gi+',this.checked)">':'')+'</td><td colspan="4">'+esc(p===PRM_TEST?'Test customers':prmProj(p))+' &middot; '+g.length+' customer'+(g.length===1?'':'s')
+      +(p===PRM_TEST?' <button class="btn btn-sm" style="margin-left:8px" onclick="prmAddTest()"><i class="fa-solid fa-plus"></i> Add</button>':'')+'<span class="t">₹'+prmInr(t)+'</span></td></tr>'
+      +g.map(function(r){ const ix=PRM.rows.indexOf(r);
+        const selectable=r.change!=='removed'&&r.email&&!r.held;
+        return '<tr class="row'+(PRM.sel.has(r.booking_no)?' sel':'')+'"><td style="width:38px">'+(selectable?'<input type="checkbox" class="prm-cb"'+(PRM.sel.has(r.booking_no)?' checked':'')+' onchange="prmSel('+ix+',this.checked)">':'')+'</td><td><div class="prm-who">'+avatar(prmName(r)||'?')+'<div style="min-width:0"><div class="prm-nm">'+esc(String(r.customer_name||'').trim())+badge(r)+'</div>'
+          +'<div class="prm-sub">Flat '+esc(prmFlat(r))+' &middot; '+esc(r.booking_no||'')+'</div>'
+          +(r.held?'<div class="prm-sub" style="color:#b91c1c"><i class="fa-solid fa-hand"></i> '+esc(r.hold_reason||'')+'</div>':'')+'</div></div></td>'
+          +'<td class="prm-email">'+(r.email?esc(r.email):'<span style="color:#b91c1c">No email on record</span>')+'</td>'
+          +'<td class="prm-amt">₹'+prmInr(r.net_outstanding)+(r.change==='changed'||r.change==='removed'?'<span class="prm-old">₹'+prmInr(r.prev_net)+'</span>':'')+'</td>'
+          +'<td class="prm-act">'+(r.test?'<button class="prm-ibtn" title="See the email" onclick="prmPreview('+ix+')"><i class="fa-solid fa-eye"></i></button><button class="prm-ibtn" title="Remove this test customer" onclick="prmDelTest('+r.test_id+')"><i class="fa-solid fa-trash"></i></button>':'')+(!r.test&&r.change!=='removed'
+            ?'<button class="prm-ibtn" title="See the email this customer would get" onclick="prmPreview('+ix+')"><i class="fa-solid fa-eye"></i></button>'
+              +(r.held?'<button class="prm-ibtn" title="Release - remind again" onclick="prmUnhold('+ix+')"><i class="fa-solid fa-rotate-left"></i></button>'
+                :'<button class="prm-ibtn" title="Hold - do not remind" onclick="prmHold('+ix+')"><i class="fa-solid fa-hand"></i></button>'):'')+'</td></tr>'; }).join('');
+  }).join('');
+  const hasTest=PRM.rows.some(r=>r.test);
+  const testAdd=(!hasTest&&(f.view==='remind'))?'<tr class="grp test"><td></td><td colspan="4">Test customers &middot; none yet <button class="btn btn-sm" style="margin-left:8px" onclick="prmAddTest()"><i class="fa-solid fa-plus"></i> Add a test customer</button></td></tr>':'';
+  host.innerHTML='<table id="prmTbl"><thead><tr><th></th><th>Customer</th><th>Email</th><th style="text-align:right">Net Outstanding</th><th></th></tr></thead><tbody>'
+    +testAdd+(body||'<tr><td colspan="5"><div class="empty" style="padding:26px">Nobody here</div></td></tr>')+'</tbody></table>';
+  prmSelBar();
+};
+function prmEmailHtml(subj,body,to){
+  const st=PRM.settings||{};
+  return '<div style="color:var(--slate);font-size:12.5px;line-height:1.75"><b>From</b> Pallabita Ghosh - The Jain Group &lt;customercare1@thejaingroup.com&gt;'
+      +(to!=null?'<br><b>To</b> '+esc(to||'(no email)'):'')+'<br><b>Subject</b> '+esc(subj)
+      +'<br><b>Attachment</b> '+(st.attachment_name?esc(st.attachment_name):'none')+'</div>'
+    +'<div style="margin-top:12px;padding:16px;border:1px solid var(--line);border-radius:12px;white-space:pre-wrap;line-height:1.65;font-size:13.5px">'+esc(body)+'</div>';
+}
+// The fixed email, with its placeholders showing. Changes to it are made on request.
+window.prmShowEmail=function(){
+  const st=PRM.settings||{};
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-envelope"></i> The reminder email</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,660px)">'+prmEmailHtml(st.subject||'',st.body||'',null)
+      +'<div style="font-size:12px;color:var(--slate);margin-top:10px">Words in {curly brackets} are filled in for each customer. To change the wording or add an attachment, ask - it is not edited here.</div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','md');
+};
+window.prmPreview=function(ix){
+  const r=PRM.rows[ix]; if(!r) return;
+  const st=PRM.settings||{};
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-envelope-open-text"></i> '+esc(String(r.customer_name||'').trim())+' - preview, not sent</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,660px)">'+prmEmailHtml(prmFill(st.subject,r),prmFill(st.body,r),r.email)+'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','md');
+};
+window.prmHold=async function(ix){
+  const r=PRM.rows[ix]; if(!r) return;
+  const reason=prompt('Why should '+String(r.customer_name||'this customer').trim()+' not be reminded? (e.g. amount disputed)');
+  if(!reason||!reason.trim()) return;
+  const {error}=await sb.schema('postsales').from('reminder_holds').upsert({booking_no:r.booking_no,customer_name:r.customer_name,reason:reason.trim(),held_by:state.email},{onConflict:'booking_no'});
+  if(error){ toast(error.message,'err'); return; }
+  r.held=true; r.hold_reason=reason.trim(); toast('Held - they will not be reminded','ok'); prmDraw();
+};
+window.prmUnhold=async function(ix){
+  const r=PRM.rows[ix]; if(!r) return;
+  const {error}=await sb.schema('postsales').from('reminder_holds').delete().eq('booking_no',r.booking_no);
+  if(error){ toast(error.message,'err'); return; }
+  r.held=false; r.hold_reason=null; toast('Released','ok'); prmDraw();
+};
+
+/* WHO GETS IT: a tick per customer, a tick per project group, and select-all / unselect-all for
+   whatever is on screen - so it can be everyone but a few, or only a few. Remembered while the page is open. */
+function prmPick(r){ return r.change!=='removed'&&!!r.email&&!r.held; }
+function prmShown(){
+  const f=PRM.f, q=f.q.trim().toLowerCase();
+  return PRM.rows.filter(r=>prmIn(r,f.view)&&(!f.proj||r.project===f.proj)&&prmPick(r)
+    &&(!q||[r.customer_name,r.unit_code,r.tower,r.email,r.booking_no].join(' ').toLowerCase().indexOf(q)!==-1));
+}
+function prmSelBar(){
+  const b=$('prmSelBar'); if(!b) return;
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)), tests=sel.filter(r=>r.test).length;
+  const total=sel.filter(r=>!r.test).reduce((a,r)=>a+Number(r.net_outstanding||0),0);
+  b.innerHTML='<span><b>'+sel.length+'</b> selected'+(sel.length?' &middot; ₹'+prmInr(total)+(tests?' &middot; '+tests+' test':''):'')+'</span>'
+    +'<button class="btn btn-sm" onclick="prmSelShown(true)">Select all shown</button>'
+    +'<button class="btn btn-sm" onclick="prmSelShown(false)">Unselect all shown</button>'
+    +(sel.length?'<button class="btn btn-sm" onclick="PRM.sel.clear();prmList()">Clear selection</button>':'')
+    +(tests?'<button class="btn btn-sm btn-primary" style="margin-left:auto" onclick="prmSendTest()" title="Test customers only - real customers cannot be emailed yet. Goes from your own Gmail (Connect Google)."><i class="fa-solid fa-paper-plane"></i> Send to '+tests+' test customer'+(tests===1?'':'s')+'</button>'
+      :'<button class="btn btn-sm" style="margin-left:auto" disabled title="Only test customers can be emailed for now"><i class="fa-solid fa-paper-plane"></i> Send (test customers only)</button>')
+    +(sel.length>tests?'<span style="font-size:12px;color:var(--slate)">'+(sel.length-tests)+' real customer'+(sel.length-tests===1?'':'s')+' will not be emailed</span>':'');
+}
+/* TEMPORARY TEST SENDING (30 Oct 2026): only the ticked test customers go to the server, from Ayush's own
+   account. The server takes test ids only and refuses anything else, so real customers cannot be emailed. */
+window.prmSendTest=async function(){
+  const tests=PRM.rows.filter(r=>r.test&&PRM.sel.has(r.booking_no));
+  if(!tests.length) return;
+  if(!await confirmDialog('Send the reminder email to '+tests.length+' test customer'+(tests.length===1?'':'s')+'?\n\n'+tests.map(r=>r.email).join('\n'))) return;
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const res=await fetch(SUPABASE_URL+'/functions/v1/customer-invite',{method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},
+      body:JSON.stringify({action:'reminder_send',test_ids:tests.map(r=>r.test_id)})});
+    const out=await res.json().catch(()=>({}));
+    if(out.code==='google_not_connected'){
+      // Sent through the sender's own Google connection (the same one Meetings uses) - offer to connect it.
+      if(await confirmDialog(out.error+'\n\nConnect Google now? You will come back to JAIN-E afterwards.'))
+        location.href=SUPABASE_URL+'/functions/v1/google-oauth-start?email='+encodeURIComponent(state.email);
+      return;
+    }
+    if(!res.ok||out.error) throw new Error(out.error||('HTTP '+res.status));
+    toast('Sent '+out.sent+(out.failed?', '+out.failed+' failed':'')+' (from '+out.from+')',out.failed?'warn':'ok');
+    if(out.failed) console.warn('Reminder send failures',out.results);
+  }catch(e){ toast(e.message,'err'); }
+};
+window.prmSel=function(ix,on){ const r=PRM.rows[ix]; if(!r) return; if(on) PRM.sel.add(r.booking_no); else PRM.sel.delete(r.booking_no); prmList(); };
+window.prmSelGroup=function(gi,on){ const p=(PRM._grp||[])[gi]; PRM.rows.filter(r=>r.project===p&&prmPick(r)).forEach(r=>{ if(on) PRM.sel.add(r.booking_no); else PRM.sel.delete(r.booking_no); }); prmList(); };
+window.prmSelShown=function(on){ prmShown().forEach(r=>{ if(on) PRM.sel.add(r.booking_no); else PRM.sel.delete(r.booking_no); }); prmList(); };
+window.prmAddTest=function(){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-user-plus"></i> Add a test customer</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm" style="width:min(94vw,460px)">'
+      +'<label>Name</label><input id="prmTN" placeholder="e.g. Test - Ayush">'
+      +'<label>Email</label><input id="prmTE" placeholder="name@example.com">'
+      +'<div class="two"><div><label>Flat</label><input id="prmTF" placeholder="e.g. 4G, Block B"></div><div><label>Amount (Rs.)</label><input id="prmTA" value="10000"></div></div>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:8px">Shown in its own Test customers group, never mixed with real customers.</div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="prmSaveTest()"><i class="fa-solid fa-check"></i> Add</button></div>','md');
+};
+window.prmSaveTest=async function(){
+  const nm=String(($('prmTN')||{}).value||'').trim(), em=String(($('prmTE')||{}).value||'').trim().toLowerCase();
+  if(!nm||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)){ toast('A name and a valid email are needed','warn'); return; }
+  const amt=Number(String(($('prmTA')||{}).value||'').replace(/[^0-9.]/g,''))||10000;
+  const {error}=await sb.schema('postsales').from('reminder_test_recipients').insert({customer_name:nm,email:em,flat:String(($('prmTF')||{}).value||'').trim()||null,net_outstanding:amt,added_by:state.email});
+  if(error){ toast(error.message,'err'); return; }
+  closeModal(); toast('Test customer added','ok'); prmRender($('prmBody'));
+};
+window.prmDelTest=async function(id){
+  if(!await confirmDialog('Remove this test customer?')) return;
+  const {error}=await sb.schema('postsales').from('reminder_test_recipients').delete().eq('id',id);
+  if(error){ toast(error.message,'err'); return; }
+  PRM.sel.delete('TEST-'+id); prmRender($('prmBody'));
+};
 /* ===== ACCOUNTS MODULE =====
    Two tabs. Transactions (vouchers, bills & on-account payments, bank reconciliation, cheque printing,
    enterprise / company / business-unit structure) lives in accounts.js + accounts-bank.js; Ledgers &
@@ -34615,11 +35065,11 @@ function ciTrendsPaint(){
      GA4, Setup           dmTabView(host, tab, 'brand' | 'competitor')               38-digital-metrics.js
      Google Ads Transp.,
      Search Trends, RERA  ciTabView(host, tab, 'brand' | 'competitor' | 'partner', route)  39-competitor-intel.js
-   The old Campaign Analytics tabs (numeric routes campaigns/0..6, which USAGE_VIEWS and bookmarks
-   use) are untouched and drawn by the original VIEWS.campaigns; the new tabs have readable named
-   routes (campaigns/meta-ads, competitors/youtube, channel_partners/google-ads, ...).
+     Facebook, Google     obAdsView(host, 'meta' | 'google')                         41-our-brand-ads.js
+   Every tab has a readable named route (campaigns/facebook, competitors/youtube, ...). The old
+   Campaign Analytics routes (campaigns/0..6) now land on Facebook - see Our Brand below.
 
-   Each tab entry: [route segment, title, icon classes, renderer: 'meta' | 'dm' | 'ci']. */
+   Each tab entry: [route segment, title, icon classes, renderer: 'meta' | 'ads' | 'dm' | 'ci']. */
 const MK_SEP='<div style="width:1px;background:var(--line);margin:6px 4px"></div>';
 function mkTab(base,t,active){
   return '<div class="tab '+(active===t[0]?'active':'')+'" onclick="navTo(\''+base+(t[0]?'/'+t[0]:'')+'\')"><i class="'+t[2]+'"></i> '+esc(t[1])+'</div>';
@@ -34627,41 +35077,43 @@ function mkTab(base,t,active){
 // One tab of any of the three pages, into host. scope is the renderers' word for whose rows.
 async function mkDrawTab(host,base,t,scope,metaKey){
   if(t[3]==='meta') return compMetaView(host,metaKey);
+  if(t[3]==='ads') return obAdsView(host,t[0]==='google'?'google':'meta');
   if(t[3]==='dm') return dmTabView(host,t[0],scope);
   return ciTabView(host,t[0],scope,base+'/'+t[0]);
 }
 
-/* ---------------------------------------------------------------- Our Brand ('campaigns') */
+/* ---------------------------------------------------------------- Our Brand ('campaigns')
+   30 Oct 2026, as asked: one tab per source, the paid-ads tabs first.
+     Facebook, Google           our ad accounts' results by day (41-our-brand-ads.js)
+     Meta Ad Library, Google Ads Transparency, YouTube, Google Analytics, Google Maps
+   The old Campaign Analytics views (numeric routes campaigns/0..6 in 28-campaign-trends.js) added
+   up stale period rows and are no longer reachable: those routes, and the tabs taken off this page
+   (Search Console, Search Trends, RERA), land on Facebook. Setup (connecting Google) is no tab any
+   more but a button on Google Analytics; its route stays, because Google's consent screen returns
+   to it. */
 const OB_TABS=[
+  ['facebook','Facebook','fa-brands fa-facebook','ads'],
+  ['google','Google','fa-brands fa-google','ads'],
   ['meta-ads','Meta Ad Library','fa-brands fa-meta','meta'],
-  ['youtube','YouTube','fa-brands fa-youtube','dm'],
-  ['maps','Google Maps','fa-solid fa-location-dot','dm'],
-  ['search-console','Search Console','fa-solid fa-magnifying-glass','dm'],
-  ['analytics','Analytics','fa-solid fa-chart-line','dm'],
   ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci'],
-  ['trends','Search Trends','fa-solid fa-arrow-trend-up','ci'],
-  ['rera','RERA','fa-solid fa-landmark','ci'],
-  ['setup','Setup','fa-solid fa-plug','dm']
+  ['youtube','YouTube','fa-brands fa-youtube','dm'],
+  ['analytics','Google Analytics','fa-solid fa-chart-line','dm'],
+  ['maps','Google Maps','fa-solid fa-location-dot','dm']
 ];
-/* The Our Brand tab bar: the analytics tabs of the chosen source (cmpBaseTabs - Meta / Google /
-   Both), a divider, then the tabs above. ti is the open analytics tab (-1 when one of ours is
-   open); extra is the open named tab. Drawn by the analytics views themselves too, so the bar is
-   the same whichever kind of tab is open. */
-function cmpTabsBar(tabs,ti,extra){
-  return '<div class="tabs">'+tabs.map(function(t,i){
-      return '<div class="tab '+(i===ti?'active':'')+'" onclick="navTo(\'campaigns/'+i+'\')">'+esc(t)+'</div>';
-    }).join('')+MK_SEP+OB_TABS.map(function(t){ return mkTab('campaigns',t,extra); }).join('')+'</div>';
-}
-const _obAnalyticsView=VIEWS.campaigns;
+const OB_HIDDEN=[['setup','Setup','fa-solid fa-plug','dm']];
+// Kept for the old analytics views in 28-campaign-trends.js, which still call it; draws the new bar.
+function cmpTabsBar(tabs,ti,extra){ return obTabsBar(extra); }
+function obTabsBar(active){ return '<div class="tabs">'+OB_TABS.map(function(t){ return mkTab('campaigns',t,active); }).join('')+'</div>'; }
 VIEWS.campaigns=async function(v,seg){
-  dmOauthReturn();                         // back from Google's consent screen (Setup tab)
+  dmOauthReturn();                         // back from Google's consent screen (Setup)
   let want=seg&&seg[0];
   if(want==='connect') want='setup';       // the old Digital Metrics route name
-  if(want==='search') want='search-console';
-  const t=OB_TABS.filter(function(x){ return x[0]===want; })[0];
-  if(!t) return _obAnalyticsView(v,seg);
+  const t=OB_TABS.concat(OB_HIDDEN).filter(function(x){ return x[0]===want; })[0]||OB_TABS[0];
   setCrumb(['Growth & Strategy','Our Brand',t[1]]);
-  v.innerHTML=mHead('fa-bullhorn','#db2777','Our Brand')+cmpTabsBar(cmpBaseTabs(),-1,t[0])
+  v.innerHTML=mHead('fa-bullhorn','#db2777','Our Brand')+obTabsBar(t[0])
+    +(t[0]==='analytics'||t[0]==='setup'?'<div style="display:flex;justify-content:flex-end;margin:10px 0 -4px">'
+      +(t[0]==='setup'?'<button class="btn btn-sm" onclick="navTo(\'campaigns/analytics\')"><i class="fa-solid fa-arrow-left"></i> Back to Google Analytics</button>'
+        :'<button class="btn btn-sm" onclick="navTo(\'campaigns/setup\')" title="Connect the company Google account and choose which sites, properties and channels are read"><i class="fa-solid fa-gear"></i> Google connection</button>')+'</div>':'')
     +'<div id="mkHost" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
   await mkDrawTab($('mkHost'),'campaigns',t,'brand','brands');
 };
@@ -34703,3 +35155,884 @@ VIEWS.channel_partners=async function(v,seg){
     +'<div id="mkHost"><div class="loader"><div class="spin"></div></div></div>';
   await mkDrawTab($('mkHost'),'channel_partners',t,'partner','partners');
 };
+/* ============================ LEAD MAP ============================
+   Where our Site Visit and Booked customers come from, by PIN code, one month at a time (30 Oct 2026).
+   Its own module ('lead_map') under Sales.
+
+   A red pin for every PIN code that had a Site Visit or Booking in the chosen month, for Dream
+   Ananta, Dream Gurukul and Dream World City; the number on the pin is how many. A new month starts
+   with an empty map on the 1st. The months before stay as they were - pick one to see it.
+
+   WHERE THE DATA COMES FROM. The CRM, read every morning and evening by the digital-metrics-sync
+   worker (lead-map.ts) once its API address is saved as a Supabase secret - no change here needed.
+   PIN codes can also be typed in below. Only the PIN code, project, type and date are kept - never a
+   name or phone number. A pin marks the MIDDLE of the PIN code area, not anybody's address.
+
+   THE MAP. Google Maps once GOOGLE_MAPS_BROWSER_KEY is set as a Supabase secret; until then the same
+   red pins on OpenStreetMap, so it works from day one. */
+// LM_MONTH is 'YYYY-MM', or 'all' (every month from January 2026 together - the default).
+let LM_MONTH='all', LM_PROJ='all', LM_KIND='all', LM_MAP=null, LM_KEY;
+const LM_PROJECTS=['Dream Ananta','Dream Gurukul','Dream World City'];
+const LM_KINDS={site_visit:'Site Visit',booked:'Booked',test:'Test'};
+const LM_FN=SUPABASE_URL+'/functions/v1/digital-metrics-sync';
+// The look of both Lead Map pages, kept in one place. Uses the app's own colour variables.
+const LM_CSS='<style>'
+  +'.lm-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px}'
+  +'.lm-head h1{margin:0;font-size:24px;font-weight:700;display:flex;align-items:center;gap:10px}'
+  +'.lm-head p{margin:5px 0 0;color:var(--slate);font-size:13.5px;max-width:760px;line-height:1.5}'
+  +'.lm-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--card,#fff);margin-bottom:16px}'
+  +'.lm-ring{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid;background:transparent;vertical-align:-2px;margin-right:2px}'
+  +'.lm-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}'
+  +'.lm-kpi{background:var(--card,#fff);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:0}'
+  +'.lm-kpi .k-l{font-size:11.5px;color:var(--slate);font-weight:700;text-transform:uppercase;letter-spacing:.5px}'
+  +'.lm-kpi .k-v{font-size:28px;font-weight:700;margin-top:6px;line-height:1.1}'
+  +'.lm-kpi .k-v small{font-size:14px;color:var(--slate);font-weight:600}'
+  +'.lm-kpi .k-s{font-size:12px;color:var(--slate);margin-top:6px;line-height:1.45}'
+  +'.lm-main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px}'
+  +'.lm-mapcard{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card,#fff);display:flex;flex-direction:column;min-width:0}'
+  +'#lmMap{height:620px;background:#e8edf3}'
+  +'.lm-dist-btn{margin-left:auto;display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 16px;border-radius:9px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;font:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:.15s}'
+  +'.lm-dist-btn:hover{background:#dbeafe;border-color:#93c5fd}'
+  +'.lm-dist-btn.on{background:#1d4ed8;border-color:#1d4ed8;color:#fff}'
+  +'.lm-mapwrap{position:relative}'
+  +'.lm-maplegend{position:absolute;left:10px;bottom:22px;z-index:900;background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:10px;padding:8px 11px;font-size:12px;line-height:1.75;color:#334155;box-shadow:0 2px 10px rgba(15,23,42,.12)}'
+  +'.lm-maplegend svg{vertical-align:-2px;margin:0 3px 0 1px}'
+  // map buttons (re-center, full screen) styled like the zoom buttons
+  +'.lm-ctl a{display:flex!important;align-items:center;justify-content:center;width:30px;height:30px;color:#334155;font-size:14px;cursor:pointer;background:#fff}'
+  +'.lm-ctl a:hover{background:#f4f4f4;color:#1d4ed8}'
+  +'.lm-mapcard:fullscreen{border-radius:0;border:0}'
+  +'.lm-mapcard:fullscreen .lm-mapwrap{flex:1;min-height:0}.lm-mapcard:fullscreen #lmMap{height:100%}'
+  // the distance panel floats over the map's top-left corner
+  +'.lm-measure{position:absolute;top:10px;left:56px;z-index:1000;width:320px;max-width:calc(100% - 70px);background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px rgba(15,23,42,.18);padding:12px;font-size:13px}'
+  +'.lm-measure input{width:100%;height:34px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:inherit;font-size:13px}'
+  +'.lm-measure .row{display:flex;gap:6px}'
+  +'.lm-pt{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #f1f5f9}'
+  +'.lm-pt .dot{width:20px;height:20px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}'
+  +'.lm-pt .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lm-pt .leg{font-size:11.5px;color:var(--slate)}'
+  +'.lm-search{position:relative}'
+  +'.lm-search>i{position:absolute;left:11px;top:11px;color:#94a3b8;font-size:13px}'
+  +'.lm-search input{height:38px;padding-left:32px!important;border-radius:9px!important}'
+  +'.lm-search input:focus{outline:none;border-color:#1d4ed8;box-shadow:0 0 0 3px rgba(29,78,216,.12)}'
+  +'.lm-sug-box{position:absolute;left:0;right:0;top:42px;z-index:5;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,.18);padding:4px;max-height:300px;overflow:auto}'
+  +'.lm-sug{display:grid;grid-template-columns:18px minmax(0,1fr);gap:8px;padding:8px 9px;border-radius:7px;cursor:pointer;align-items:start}'
+  +'.lm-sug.on,.lm-sug:hover{background:#eff6ff}.lm-sug i{color:#1d4ed8;margin-top:3px;text-align:center}'
+  +'.lm-sug .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lm-sug .s{font-size:11.5px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.lm-sug-msg{padding:8px 10px;font-size:12px;color:var(--slate)}'
+  +'.lm-pick{display:grid;grid-template-columns:14px minmax(0,1fr);column-gap:6px;padding:6px 8px;border-radius:7px;cursor:pointer;color:var(--ink)}.lm-pick:hover{background:#eff6ff}'
+  +'.lm-pick i{color:#1d4ed8;margin-top:2px}.lm-pick span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lm-pick small{grid-column:2;color:var(--slate);font-size:11px}'
+  +'.lm-tot{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.lm-tot div{background:#f8fafc;border-radius:8px;padding:8px 10px}.lm-tot b{display:block;font-size:17px}'
+  +'.lm-tot span{font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.4px;font-weight:700}'
+  +'.lm-note{font-size:11.5px;color:var(--slate);padding:8px 12px;border-top:1px solid var(--line)}'
+  +'.lm-side{border:1px solid var(--line);border-radius:12px;background:var(--card,#fff);display:flex;flex-direction:column;height:700px;min-width:0}'
+  +'.lm-side-h{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}'
+  +'.lm-side-h input{height:34px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:inherit;font-size:13px}'
+  +'.lm-cols{display:flex;gap:6px;font-size:11px;color:var(--slate);font-weight:700;text-transform:uppercase}.lm-cols span{width:38px;text-align:center}'
+  +'.lm-list{overflow-y:auto;flex:1}'
+  +'.lm-item{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line-2,#eef1f6);cursor:pointer;align-items:center}'
+  +'.lm-item:hover{background:#f8fafc}'
+  +'.lm-rank{font-size:11.5px;color:#94a3b8;font-weight:700;text-align:right}'
+  +'.lm-code{font-weight:700;font-size:13.5px}'
+  +'.lm-area{font-size:12px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.lm-near{font-size:11.5px;margin-top:2px;font-weight:600}'
+  +'.lm-test{font-size:10.5px;font-weight:700;color:#64748b;background:#f1f5f9;border-radius:6px;padding:1px 6px;vertical-align:1px}'
+  +'.lm-counts{display:flex;gap:6px}'
+  +'.lm-c{width:38px;text-align:center;border-radius:8px;padding:4px 0;font-size:12.5px;font-weight:700}'
+  +'.lm-c.sv{background:#fef2f2;color:#dc2626}.lm-c.bk{background:#f0fdf4;color:#16a34a}.lm-c.z{color:#cbd5e1}'
+  +'.lm-empty{text-align:center;color:var(--slate);padding:50px 20px;display:flex;flex-direction:column;align-items:center;gap:12px;font-size:13px}.lm-empty i{font-size:30px;color:#cbd5e1}'
+  +'@media(max-width:1200px){.lm-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.lm-main{grid-template-columns:1fr}.lm-side{height:auto;max-height:520px}.lm-dist-btn{margin-left:0}}'
+  +'@media(max-width:600px){#lmMap{height:440px}}'
+  // the Add PIN codes page
+  +'.lm-form{width:100%}'
+  +'.lm-tip{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:10px;background:#eff6ff;color:#1e3a8a;font-size:13px;line-height:1.5;margin-bottom:16px}'
+  +'.lm-batch{border:1px solid var(--line);border-radius:12px;background:var(--card,#fff);margin-bottom:16px;overflow:hidden}'
+  +'.lm-batch-top{display:grid;grid-template-columns:auto minmax(180px,1.4fr) minmax(150px,1fr) minmax(150px,1fr) auto;gap:14px;padding:14px 16px;background:#f8fafc;border-bottom:1px solid var(--line);align-items:end}'
+  +'.lm-batch-hd{font-weight:700;font-size:13px;color:var(--ink);align-self:center;white-space:nowrap}'
+  +'.lm-batch-top label{display:flex;flex-direction:column;gap:5px;font-size:11.5px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px}'
+  +'.lm-batch-top select,.lm-batch-top input{height:38px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:inherit;font-size:13.5px;text-transform:none;letter-spacing:0;background:#fff;color:var(--ink)}'
+  +'.lm-grid{width:100%;border-collapse:collapse}'
+  +'.lm-grid thead th{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#7b8aa3;text-align:left;padding:10px 8px;background:#fff;border-bottom:1px solid var(--line);position:static}'
+  +'.lm-grid td{padding:6px 8px;border-bottom:1px solid var(--line-2,#eef1f6);vertical-align:middle}'
+  +'.lm-grid td.n{width:40px;color:#94a3b8;font-size:12px;text-align:right;padding-left:16px}'
+  +'.lm-grid input,.lm-grid select{width:100%;height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:inherit;font-size:13.5px;background:#fff;color:var(--ink)}'
+  +'.lm-grid input:focus,.lm-grid select:focus,.lm-batch-top select:focus,.lm-batch-top input:focus{outline:none;border-color:var(--brand,#2563eb);box-shadow:0 0 0 3px rgba(37,99,235,.12)}'
+  +'.lm-grid tr.bad input.lm-pin,.lm-grid tr.bad input.lm-num{border-color:#dc2626;background:#fef2f2}'
+  +'.lm-ccbtn{width:100%;height:36px;display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:0 10px;background:#fff;font:inherit;font-size:13.5px;color:var(--ink);cursor:pointer;text-align:left}'
+  +'.lm-ccbtn span{flex:1}.lm-ccbtn i{font-size:10px;color:#94a3b8}.lm-ccbtn:hover{border-color:#94a3b8}'
+  +'.lm-flag{width:22px;height:15px;object-fit:cover;border-radius:3px;box-shadow:0 0 0 1px rgba(15,23,42,.12);flex:none}'
+  +'.lm-cclist{position:absolute;z-index:3000;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(15,23,42,.18);padding:6px;max-height:300px;overflow:auto}'
+  +'.lm-ccopt{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer;font-size:13.5px}.lm-ccopt:hover{background:#f1f5f9}'
+  +'.lm-st{font-size:12px;line-height:1.35}.lm-st.ok{color:#16a34a;font-weight:600}.lm-st.err{color:#b91c1c}'
+  +'.lm-x{border:0;background:none;color:#94a3b8;cursor:pointer;width:32px;height:32px;border-radius:8px}.lm-x:hover{background:#fef2f2;color:#dc2626}'
+  +'.lm-addrow{display:flex;gap:8px;align-items:center;padding:12px 16px;color:var(--brand,#2563eb);font-weight:600;font-size:13px;cursor:pointer;background:none;border:0;font-family:inherit}'
+  +'.lm-addrow:hover{text-decoration:underline}'
+  +'.lm-foot{position:sticky;bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 16px;background:var(--card,#fff);border:1px solid var(--line);border-radius:12px;box-shadow:0 6px 24px rgba(15,23,42,.10);z-index:5}'
+  +'@media(max-width:800px){.lm-batch-top{grid-template-columns:1fr 1fr}.lm-batch-hd{grid-column:1/-1}}'
+  +'</style>';
+window.lmFilterList=function(q){
+  q=String(q||'').trim().toLowerCase();
+  document.querySelectorAll('#lmList .lm-item').forEach(function(el){ el.style.display=!q||el.dataset.q.indexOf(q)!==-1?'':'none'; });
+};
+function lmIst(){ return new Date(Date.now()+5.5*3600000).toISOString().slice(0,10); }
+function lmMonths(){
+  const out=[], now=lmIst().slice(0,7);
+  for(let y=2026,m=1;(y+'-'+String(m).padStart(2,'0'))<=now;m++){ if(m>12){m=0;y++;continue;} out.push(y+'-'+String(m).padStart(2,'0')); }
+  return out.reverse();
+}
+const lmMonthName=function(ym){ return ym==='all'?'All months':new Date(ym+'-01T00:00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'}); };
+// The date a new entry defaults to: today when looking at this month or at all months, else the 1st.
+function lmDefaultDate(){ return (LM_MONTH==='all'||LM_MONTH===lmIst().slice(0,7))?lmIst():LM_MONTH+'-01'; }
+async function lmCall(body){
+  const {data:{session}}=await sb.auth.getSession();
+  const r=await fetch(LM_FN,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify(body)});
+  const jr=await r.json().catch(function(){return {};});
+  if(!r.ok||jr.error)throw new Error(jr.error||('server said '+r.status));
+  return jr;
+}
+function lmLoadScript(src){ return new Promise(function(res,rej){ if(document.querySelector('script[src="'+src+'"]'))return res(); const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){rej(new Error('could not load '+src));}; document.head.appendChild(s); }); }
+function lmLoadCss(href){ if(document.querySelector('link[href="'+href+'"]'))return; const l=document.createElement('link'); l.rel='stylesheet'; l.href=href; document.head.appendChild(l); }
+// The Google key is asked for once per visit; none set yet = OpenStreetMap.
+async function lmMapKey(){ if(LM_KEY!==undefined)return LM_KEY; try{ LM_KEY=(await lmCall({action:'lead_map_key'})).key||null; }catch(e){ LM_KEY=null; } return LM_KEY; }
+
+VIEWS.lead_map=async function(v,seg){
+  if(seg&&seg[0]==='add')return lmAddPage(v);
+  setCrumb(['Sales','Lead Map']);
+  const sel=function(id,opts,cur,fn){ return '<select class="mu-sel" id="'+id+'" onchange="'+fn+'(this.value)">'+opts.map(function(o){return '<option value="'+esc(o[0])+'"'+(o[0]===cur?' selected':'')+'>'+esc(o[1])+'</option>';}).join('')+'</select>'; };
+  v.innerHTML=LM_CSS
+    +'<div class="lm-head"><div><h1><i class="fa-solid fa-map-location-dot" style="color:#dc2626"></i> Lead Map</h1>'
+      +'<p>Where our Site Visit and Booked customers come from, by PIN code - one map per month.</p></div>'
+      +'<button class="btn btn-primary" onclick="navTo(\'lead_map/add\')"><i class="fa-solid fa-plus"></i> Add PIN codes</button></div>'
+    +'<div class="lm-bar">'
+      +sel('lmMonth',[['all','All months']].concat(lmMonths().map(function(m){return [m,lmMonthName(m)];})),LM_MONTH,'lmSetMonth')
+      +sel('lmProj',[['all','All three projects']].concat(LM_PROJECTS.map(function(p){return [p,p];})),LM_PROJ,'lmSetProj')
+      +sel('lmKind',[['all','Site Visit + Booked'],['site_visit','Site Visit only'],['booked','Booked only']],LM_KIND,'lmSetKind')
+      +'<button class="lm-dist-btn" id="lmMeasureBtn" onclick="lmMeasureToggle()"><i class="fa-solid fa-route"></i> Distance between places</button>'
+    +'</div>'
+    +'<div id="lmBody"><div class="loader"><div class="spin"></div></div></div>';
+  try{ await lmRender(); }catch(e){ $('lmBody').innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load: '+esc(e.message||String(e))+'</div></div>'; }
+};
+window.lmSetMonth=function(m){ LM_MONTH=m; renderPage(); };
+window.lmSetProj=function(p){ LM_PROJ=p; renderPage(); };
+window.lmSetKind=function(k){ LM_KIND=k; renderPage(); };
+
+async function lmRender(){
+  /* "All months" asks for each month and adds them up here: the same counts camp.lm_month gives,
+     month by month, so nothing is counted twice or estimated. */
+  const months=LM_MONTH==='all'?lmMonths():[LM_MONTH];
+  const res=await Promise.all(months.map(function(m){ return sb.schema('camp').rpc('lm_month',{p_month:m+'-01'}); }));
+  const err=res.filter(function(r){return r.error;})[0]; if(err)throw err.error;
+  const merged={};
+  res.forEach(function(r){ (r.data||[]).forEach(function(x){
+    const k=x.pincode+'|'+(x.project||'')+'|'+x.kind;
+    if(merged[k])merged[k].n=Number(merged[k].n)+Number(x.n); else merged[k]=Object.assign({},x,{n:Number(x.n)});
+  }); });
+  const data=Object.keys(merged).map(function(k){return merged[k];});
+  // test pins (typed in to try the map) show only with "All three projects"
+  const rows=(data||[]).filter(function(r){
+    if(LM_PROJ!=='all'&&r.project!==LM_PROJ)return false;
+    if(LM_KIND!=='all'&&r.kind!==LM_KIND&&!(r.kind==='test'&&LM_PROJ==='all'))return false;
+    return true; });
+  const byPin={};
+  rows.forEach(function(r){
+    const p=byPin[r.pincode]=byPin[r.pincode]||{pincode:r.pincode,lat:r.lat,lng:r.lng,place:r.place,district:r.district,state:r.state,err:r.lookup_error,n:0,sv:0,bk:0,test:0,lines:[]};
+    p.n+=Number(r.n); if(r.kind==='site_visit')p.sv+=Number(r.n); else if(r.kind==='booked')p.bk+=Number(r.n); else p.test+=Number(r.n);
+    p.lines.push((r.project||'Test pin')+' · '+LM_KINDS[r.kind]+': '+r.n);
+  });
+  const pins=Object.keys(byPin).map(function(k){return byPin[k];}).sort(function(a,b){return b.n-a.n;});
+  const placed=pins.filter(function(p){return p.lat!=null;}), waiting=pins.filter(function(p){return p.lat==null;});
+  const tot=function(k){ return pins.reduce(function(a,p){return a+p[k];},0); };
+  const people=tot('sv')+tot('bk'), abroad=pins.filter(function(p){return p.lat!=null&&!lmInIndia(p);}).length;
+  const pct=function(n){ return people?Math.round(n*100/people)+'%':'—'; };
+  // people whose PIN code centre is inside a project's 10 km circle (test pins not counted)
+  const groups=lmSiteGroups().map(function(g){ return {g:g,n:placed.reduce(function(a,p){return a+(lmKm(p,g)<=LM_RADIUS_KM?p.sv+p.bk:0);},0)}; });
+  const anyNear=placed.reduce(function(a,p){ return a+(lmSiteGroups().some(function(g){return lmKm(p,g)<=LM_RADIUS_KM;})?p.sv+p.bk:0); },0);
+  const kpi=function(label,val,sub,color){ return '<div class="lm-kpi"><div class="k-l">'+label+'</div><div class="k-v" style="color:'+color+'">'+val+'</div><div class="k-s">'+sub+'</div></div>'; };
+  $('lmBody').innerHTML='<div class="lm-kpis">'
+      +kpi('Site Visits',tot('sv'),esc(lmMonthName(LM_MONTH)),'#dc2626')
+      +kpi('Booked',tot('bk'),people?'1 booking per '+(tot('bk')?(tot('sv')/tot('bk')).toFixed(1):'—')+' site visits':esc(lmMonthName(LM_MONTH)),'#16a34a')
+      +kpi('PIN codes',pins.length,[abroad?abroad+' outside India':'',tot('test')?tot('test')+' test pin'+(tot('test')===1?'':'s'):'',waiting.length?waiting.length+' not on the map yet':''].filter(Boolean).join(' · ')||'all on the map','#0f172a')
+      +kpi('Within 10 km',anyNear+' <small>'+pct(anyNear)+'</small>',groups.map(function(x){return '<span style="color:'+x.g.color+';font-weight:600">'+esc(x.g.label)+'</span> '+x.n;}).join(' · '),'#0f172a')
+    +'</div>'
+    +'<div class="lm-main">'
+      +'<div class="lm-mapcard" id="lmMapCard">'
+        +'<div class="lm-mapwrap"><div id="lmMap"></div><div class="lm-measure" id="lmMeasure" hidden></div>'
+          // the key, in the map's bottom-left corner
+          +'<div class="lm-maplegend"><div><svg width="11" height="15" viewBox="0 0 30 42"><path d="M15 1C7.3 1 1 7.2 1 14.9 1 25.4 15 41 15 41s14-15.6 14-26.1C29 7.2 22.7 1 15 1z" fill="#ea4335"/></svg> Customers</div>'
+            +lmSiteGroups().map(function(g){ return '<div><i class="lm-ring" style="border-color:'+g.color+'"></i> '+esc(lmShortSite(g.label))+' · 10 km</div>'; }).join('')+'</div>'
+        +'</div>'
+        +'<div id="lmMapNote" class="lm-note"></div></div>'
+      +'<div class="lm-side"><div class="lm-side-h"><div style="display:flex;justify-content:space-between;align-items:baseline"><b>PIN codes</b><span class="lm-cols"><span>SV</span><span>Bkd</span></span></div>'
+        +(pins.length>8?'<input placeholder="Find a PIN code or area…" oninput="lmFilterList(this.value)">':'')+'</div>'
+        +'<div class="lm-list" id="lmList">'
+        +(pins.length?pins.map(function(p,i){
+            const near=lmNear(p)[0];
+            return '<div class="lm-item" data-q="'+esc((p.pincode+' '+(p.place||'')+' '+(p.district||'')).toLowerCase())+'" onclick="lmFocus('+JSON.stringify(p.pincode).replace(/"/g,'&quot;')+')">'
+              +'<div class="lm-rank">'+(i+1)+'</div>'
+              +'<div style="min-width:0"><div class="lm-code">'+esc(lmCodeLabel(p.pincode))+(p.test?' <span class="lm-test">test</span>':'')+'</div>'
+                +'<div class="lm-area">'+esc(p.place||[p.district,p.state].filter(Boolean).join(', ')||'')+'</div>'
+                +(p.lat==null?'<div class="lm-near" style="color:#b45309">'+esc(p.err||'finding it on the map…')+'</div>'
+                  :near?'<div class="lm-near" style="color:'+near.color+'">'+near.km.toFixed(1)+' km from '+esc(near.label)+'</div>':'')+'</div>'
+              +'<div class="lm-counts"><span class="lm-c '+(p.sv?'sv':'z')+'">'+(p.sv||'–')+'</span><span class="lm-c '+(p.bk?'bk':'z')+'">'+(p.bk||'–')+'</span></div></div>';
+          }).join('')
+          :'<div class="lm-empty"><i class="fa-solid fa-map-pin"></i><div>No Site Visits or Bookings for '+esc(lmMonthName(LM_MONTH))+' yet.</div>'
+            +'<button class="btn btn-primary btn-sm" onclick="navTo(\'lead_map/add\')"><i class="fa-solid fa-plus"></i> Add PIN codes</button></div>')
+        +'</div></div>'
+    +'</div>';
+  await lmDraw(placed);
+  // anything still unplaced gets looked up now, then the map redraws once
+  if(waiting.some(function(p){return !p.err;})&&!lmRender._busy){
+    lmRender._busy=true;
+    lmCall({action:'lead_map_geocode'}).then(function(){ lmRender._busy=false; if(PAGE==='lead_map')renderPage(); }).catch(function(){ lmRender._busy=false; });
+  }
+}
+function lmNextMonth(ym){ let [y,m]=ym.split('-').map(Number); m++; if(m>12){m=1;y++;} return y+'-'+String(m).padStart(2,'0'); }
+
+// ---------------------------------------------------------------- the map itself
+const LM_CENTER={lat:22.5726,lng:88.3639};   // Kolkata
+/* WHERE EACH PROJECT IS, for its 10 km circle. Taken from the Google Map each project's own website
+   embeds (30 Oct 2026): Dream World City from dreamworldcity.co.in, Dream Gurukul from
+   thejaingroup.com/dream_gurukul.php. Dream Ananta has no page of its own; RERA registers it
+   ("Dream Ananta Gurukul", WBRERA/P/NOR/2026/004487) at the same 154 Old Jessore Road campus as
+   Dream Gurukul, so it shares that point and its circle sits on Gurukul's. */
+const LM_SITES=[
+  {project:'Dream World City',lat:22.425118985258926,lng:88.30052531495693,color:'#2563eb'},
+  {project:'Dream Gurukul',lat:22.67727787645114,lng:88.45681189976243,color:'#9333ea'},
+  {project:'Dream Ananta',lat:22.67727787645114,lng:88.45681189976243,color:'#ea580c'}];
+const LM_RADIUS_KM=10;
+// straight-line distance in km between two points on the earth
+function lmKm(a,b){ const R=6371,r=Math.PI/180,dl=(b.lat-a.lat)*r,dg=(b.lng-a.lng)*r;
+  const h=Math.sin(dl/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dg/2)**2; return 2*R*Math.asin(Math.sqrt(h)); }
+// Short names for the legend: "Dream World City", "Gurukul & Ananta".
+function lmShortSite(label){ return label.indexOf(' + ')!==-1?label.split(' + ').map(function(s){return s.replace(/^Dream /,'');}).join(' & '):label; }
+function lmSitesShown(){ return LM_SITES.filter(function(s){return LM_PROJ==='all'||s.project===LM_PROJ;}); }
+// Projects at the same spot share one circle (Gurukul and Ananta), labelled with both names.
+function lmSiteGroups(){
+  const g={};
+  lmSitesShown().forEach(function(s){ const k=s.lat.toFixed(5)+','+s.lng.toFixed(5);
+    if(g[k]){ g[k].label+=' + '+s.project; g[k].names.push(s.project); } else g[k]={lat:s.lat,lng:s.lng,color:s.color,label:s.project,names:[s.project]}; });
+  return Object.keys(g).map(function(k){return g[k];});
+}
+// Which shown project circles a PIN's centre falls inside, nearest first, with the distance.
+function lmNear(p){
+  if(p.lat==null)return [];
+  return lmSiteGroups().map(function(g){ return {label:g.label,color:g.color,km:lmKm(p,g)}; })
+    .filter(function(x){return x.km<=LM_RADIUS_KM;}).sort(function(a,b){return a.km-b.km;});
+}
+/* Pin size grows with the number of people: 1 person ~ 28px tall, 10 ~ 47px, 50+ ~ 72px. By square
+   root, so the pin's AREA follows the count - a pin for 10 people looks about ten times as heavy as
+   one for 1, not ten times as tall. */
+function lmPinSize(n){ const h=Math.round(Math.min(72,22+6*Math.sqrt(Math.max(1,n)))); return {w:Math.round(h*0.72),h:h}; }
+function lmPinSvg(n){
+  const s=lmPinSize(n), fs=n<10?13:n<100?11:9;   // in the drawing's own units, so it scales with the pin
+  return {s:s,svg:'<svg xmlns="http://www.w3.org/2000/svg" width="'+s.w+'" height="'+s.h+'" viewBox="0 0 30 42">'
+    +'<path d="M15 1C7.3 1 1 7.2 1 14.9 1 25.4 15 41 15 41s14-15.6 14-26.1C29 7.2 22.7 1 15 1z" fill="#ea4335" stroke="#a52714" stroke-width="1.5"/>'
+    +'<text x="15" y="19.5" text-anchor="middle" font-family="system-ui,Arial,sans-serif" font-weight="700" font-size="'+fs+'" fill="#fff">'+n+'</text></svg>'};
+}
+let LM_MARKERS={};
+function lmPopup(p){
+  return '<div style="font:13px/1.45 system-ui,sans-serif;min-width:170px"><b style="font-size:14px">'+esc(lmCodeLabel(p.pincode))+'</b>'
+    +(p.place?'<div>'+esc(p.place)+'</div>':'')+'<div style="color:#64748b">'+esc([p.district,p.state].filter(Boolean).join(', '))+'</div>'
+    +'<div style="margin-top:6px">'+p.lines.map(esc).join('<br>')+'</div>'
+    +'<div style="margin-top:6px;color:#475569">'+lmSiteGroups().map(function(g){ const km=lmKm(p,g);
+      return esc(g.label)+': '+km.toFixed(1)+' km'+(km<=LM_RADIUS_KM?' <b style="color:'+g.color+'">· inside 10 km</b>':''); }).join('<br>')+'</div></div>';
+}
+async function lmDraw(pins){
+  const box=$('lmMap'); if(!box)return;
+  LM_MARKERS={};
+  const key=await lmMapKey();
+  if(key){
+    try{
+      if(!(window.google&&google.maps))await lmLoadScript('https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&v=weekly');
+      const map=new google.maps.Map(box,{center:LM_CENTER,zoom:10,mapTypeControl:false,streetViewControl:false});
+      const bounds=new google.maps.LatLngBounds(), info=new google.maps.InfoWindow();
+      lmSiteGroups().forEach(function(g){
+        const c=new google.maps.Circle({map:map,center:{lat:g.lat,lng:g.lng},radius:LM_RADIUS_KM*1000,strokeColor:g.color,strokeWeight:2,
+          fillOpacity:0,clickable:false});   // outline only
+        new google.maps.Marker({map:map,position:{lat:g.lat,lng:g.lng},title:g.label,zIndex:1,
+          icon:{path:google.maps.SymbolPath.CIRCLE,scale:7,fillColor:g.color,fillOpacity:1,strokeColor:'#fff',strokeWeight:2}});
+        bounds.union(c.getBounds());
+      });
+      pins.slice().sort(function(a,b){return b.n-a.n;}).forEach(function(p,i){
+        // a red pin whose size follows the number of people, the count written on it
+        const ic=lmPinSvg(p.n);
+        const mk=new google.maps.Marker({position:{lat:p.lat,lng:p.lng},map:map,title:p.pincode+' ('+p.n+')',zIndex:10+i,
+          icon:{url:'data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(ic.svg),scaledSize:new google.maps.Size(ic.s.w,ic.s.h),anchor:new google.maps.Point(ic.s.w/2,ic.s.h)}});
+        mk.addListener('click',function(){ info.setContent(lmPopup(p)); info.open({map:map,anchor:mk}); });
+        LM_MARKERS[p.pincode]={focus:function(){ map.setCenter(mk.getPosition()); map.setZoom(13); info.setContent(lmPopup(p)); info.open({map:map,anchor:mk}); }};
+        if(lmKm(p,LM_CENTER)<=LM_NEAR_KM)bounds.extend(mk.getPosition());
+      });
+      map.fitBounds(bounds,30);
+      $('lmMapNote').textContent='Google Maps · pins mark the middle of each PIN code area';
+      // the distance tool is built on the OpenStreetMap map; not offered on Google Maps yet
+      const mb=$('lmMeasureBtn'); if(mb)mb.style.display='none';
+      return;
+    }catch(e){ console.warn('[lead map] Google Maps did not load, using OpenStreetMap',e); }
+  }
+  lmLoadCss('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css');
+  await lmLoadScript('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js');
+  if(LM_MAP){ try{LM_MAP.remove();}catch(e){} }
+  const map=LM_MAP=L.map(box).setView([LM_CENTER.lat,LM_CENTER.lng],10);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+  let bounds=null;
+  lmSiteGroups().forEach(function(g){
+    // outline only - no colour inside the circle, so the map underneath stays readable
+    const c=L.circle([g.lat,g.lng],{radius:LM_RADIUS_KM*1000,color:g.color,weight:2.5,fill:false,interactive:false}).addTo(map);
+    L.circleMarker([g.lat,g.lng],{radius:7,color:'#fff',weight:2,fillColor:g.color,fillOpacity:1}).addTo(map)
+      .bindTooltip(g.label+' · '+LM_RADIUS_KM+' km circle',{direction:'top'});
+    bounds=bounds?bounds.extend(c.getBounds()):c.getBounds();
+  });
+  pins.slice().sort(function(a,b){return b.n-a.n;}).forEach(function(p,i){
+    // a red map pin whose size follows the number of people, the count in its head
+    const ic=lmPinSvg(p.n);
+    const icon=L.divIcon({className:'',iconSize:[ic.s.w,ic.s.h],iconAnchor:[ic.s.w/2,ic.s.h],popupAnchor:[0,-ic.s.h+6],html:ic.svg});
+    const mk=L.marker([p.lat,p.lng],{icon:icon,title:p.pincode,zIndexOffset:i*10}).addTo(map).bindPopup(lmPopup(p));
+    LM_MARKERS[p.pincode]={focus:function(){ map.setView([p.lat,p.lng],13); mk.openPopup(); }};
+    // the map always opens on one common area: Kolkata and its surroundings (both project circles).
+    // Pins further away are still on the map - zoom out to see them.
+    if(lmKm(p,LM_CENTER)<=LM_NEAR_KM)bounds=bounds?bounds.extend([p.lat,p.lng]):L.latLngBounds([[p.lat,p.lng],[p.lat,p.lng]]);
+  });
+  lmMeasureAttach(map);
+  // Re-center (back to the common view) and Full screen, under the zoom buttons
+  const home=function(){ if(bounds)map.fitBounds(bounds,{padding:[30,30],maxZoom:13}); };
+  const Ctl=L.Control.extend({options:{position:'topleft'},onAdd:function(){
+    const d=L.DomUtil.create('div','leaflet-bar lm-ctl');
+    d.innerHTML='<a title="Re-center the map" id="lmHomeBtn"><i class="fa-solid fa-crosshairs"></i></a>'
+      +'<a title="Full screen" id="lmFsBtn"><i class="fa-solid fa-expand"></i></a>';
+    L.DomEvent.disableClickPropagation(d);
+    d.querySelector('#lmHomeBtn').onclick=home;
+    d.querySelector('#lmFsBtn').onclick=function(){ lmFullscreen(); };
+    return d; }});
+  new Ctl().addTo(map);
+  /* THE MAP MUST KNOW ITS REAL SIZE BEFORE IT ZOOMS. Fitted while the page was still being laid out
+     (or while the window was hidden), Leaflet took the box as 0 px wide, zoomed right in and loaded a
+     single strip of tiles. So it is re-measured and re-fitted whenever the box changes size, until it
+     has been fitted once at a real size. */
+  let fitted=false;
+  const fit=function(){
+    if(!box.isConnected)return;
+    map.invalidateSize();
+    if(!fitted&&box.clientWidth>50&&box.clientHeight>50){ fitted=true; if(bounds)map.fitBounds(bounds,{padding:[30,30],maxZoom:13}); }
+  };
+  if(window.ResizeObserver){ const ro=new ResizeObserver(fit); ro.observe(box); map.on('unload',function(){ro.disconnect();}); }
+  requestAnimationFrame(fit); setTimeout(fit,300);
+  const far=pins.filter(function(p){return lmKm(p,LM_CENTER)>LM_NEAR_KM;}).reduce(function(a,p){return a+p.n;},0);
+  $('lmMapNote').innerHTML='Each pin sits in the middle of its PIN code area · click a pin for details'
+    +(far?' · <b>'+far+'</b> '+(far===1?'person is':'people are')+' from further away - zoom out to see them':'');
+}
+const LM_NEAR_KM=80;   // the common view: within 80 km of the city centre - both projects and their circles fit
+
+// ---------------------------------------------------------------- full screen
+/* The browser's real full screen (the whole monitor), not just filling the window. The map card -
+   tools, map and distance panel - goes full screen together; Esc or the button brings it back. */
+window.lmFullscreen=function(){
+  const card=$('lmMapCard'); if(!card)return;
+  if(document.fullscreenElement)document.exitFullscreen();
+  else if(card.requestFullscreen)card.requestFullscreen().catch(function(e){ toast('Full screen is not allowed here: '+e.message,'warn'); });
+};
+document.addEventListener('fullscreenchange',function(){
+  const b=$('lmFsBtn'); const on=!!document.fullscreenElement;
+  if(b){ b.innerHTML=on?'<i class="fa-solid fa-compress"></i>':'<i class="fa-solid fa-expand"></i>'; b.title=on?'Exit full screen':'Full screen'; }
+  if(LM_MAP)setTimeout(function(){ try{LM_MAP.invalidateSize();}catch(e){} },120);
+});
+
+// ---------------------------------------------------------------- measuring distance
+/* Search a place or PIN code, then another, and see how far apart they are; add stops in between by
+   clicking the map ("Add point here"). Two distances are shown:
+     straight line - worked out here from the coordinates (great-circle distance)
+     by road       - the shortest driving route from OpenStreetMap's public router (OSRM); left blank
+                     if the router does not answer, never estimated.
+   A PIN code is placed at the middle of its area, the same way the pins are. Nothing is saved. */
+let LM_PTS=[], LM_MLAYER=null, LM_MEASURING=false, LM_ROUTE_SEQ=0;
+window.lmMeasureToggle=function(){
+  LM_MEASURING=!LM_MEASURING;
+  const p=$('lmMeasure'), b=$('lmMeasureBtn');
+  if(b)b.classList.toggle('on',LM_MEASURING);
+  if(p){ p.hidden=!LM_MEASURING; if(LM_MEASURING){ lmMeasureRender(); const i=$('lmMq'); if(i)i.focus(); } }
+  if(LM_MAP)LM_MAP.getContainer().style.cursor=LM_MEASURING?'crosshair':'';
+  if(!LM_MEASURING)lmMeasureClear(true);
+};
+function lmMeasureAttach(map){
+  LM_PTS=[]; LM_MEASURING=false;
+  LM_MLAYER=L.layerGroup().addTo(map);
+  // clicking the map while measuring offers "Add point here"
+  map.on('click',function(e){
+    if(!LM_MEASURING)return;
+    const ll=e.latlng;
+    L.popup({closeButton:true}).setLatLng(ll).setContent(
+      '<div style="font:13px system-ui,sans-serif"><div style="color:#64748b;margin-bottom:6px">'+ll.lat.toFixed(5)+', '+ll.lng.toFixed(5)+'</div>'
+      +'<button class="btn btn-sm btn-primary" onclick="lmAddPointHere('+ll.lat+','+ll.lng+')"><i class="fa-solid fa-plus"></i> Add point here</button></div>').openOn(map);
+  });
+}
+// A new point goes between the last two (as a stop on the way) once there is a start and an end.
+function lmInsertPoint(pt){ if(LM_PTS.length>=2)LM_PTS.splice(LM_PTS.length-1,0,pt); else LM_PTS.push(pt); lmMeasureRender(); lmRoute(); }
+window.lmAddPointHere=function(lat,lng){ if(LM_MAP)LM_MAP.closePopup(); lmInsertPoint({lat:lat,lng:lng,name:'Point on map ('+lat.toFixed(4)+', '+lng.toFixed(4)+')'}); };
+window.lmMeasureRemove=function(i){ LM_PTS.splice(i,1); lmMeasureRender(); lmRoute(); };
+function lmMeasureClear(keepPanel){ LM_PTS=[]; if(LM_MLAYER)LM_MLAYER.clearLayers(); if(keepPanel!==true)lmMeasureRender(); }
+window.lmMeasureClear=lmMeasureClear;
+/* SEARCH AS YOU TYPE. Places and PIN codes appear in a list while typing (OpenStreetMap's Photon
+   search, India only, nearest to Kolkata first); picking one adds it - there is no separate Add step.
+   Arrow keys move through the list, Enter picks the highlighted one, Esc closes it. */
+let LM_FOUND=[], LM_SUG_SEQ=0, LM_SUG_T=null, LM_SUG_I=0;
+window.lmSuggestInput=function(v){
+  clearTimeout(LM_SUG_T);
+  const q=String(v||'').trim();
+  if(q.length<3){ lmSuggestShow([], q.length?'Keep typing…':''); return; }
+  lmSuggestShow(null,'Searching…');
+  LM_SUG_T=setTimeout(function(){ lmSuggest(q); },280);
+};
+async function lmSuggest(q){
+  const seq=++LM_SUG_SEQ;
+  try{
+    const pin=/^[1-9]\d{5}$/.test(q);
+    const r=await (await fetch('https://photon.komoot.io/api/?limit=15&lat=22.57&lon=88.36&bbox=68,6,98,37.5&q='+encodeURIComponent(pin?q+' India':q))).json();
+    if(seq!==LM_SUG_SEQ)return;                          // the user has typed on since
+    const found=(r.features||[]).filter(function(x){ const p=x.properties||{};
+        return p.countrycode==='IN'&&(!pin||String(p.postcode||(p.osm_value==='postcode'?p.name:''))===q); })
+      .map(function(f){ const p=f.properties, lat=f.geometry.coordinates[1], lng=f.geometry.coordinates[0];
+        const isPin=p.osm_value==='postcode';
+        const title=isPin?(p.postcode||p.name):(p.name||p.street||p.city||'');
+        const sub=[isPin?'PIN code':null,p.locality,p.district||p.city,p.state].filter(Boolean).filter(function(x,i,a){return x!==title&&a.indexOf(x)===i;}).join(', ');
+        return {lat:lat,lng:lng,pin:isPin,title:title,sub:sub,km:lmKm({lat:lat,lng:lng},LM_CENTER),name:title+(sub?', '+sub.replace(/^PIN code, ?/,''):'')}; })
+      .sort(function(a,b){return a.km-b.km;});
+    // the same place can come back twice (a node and an area) - keep one of each
+    const seen={}, list=found.filter(function(x){ const k=x.title+'|'+x.sub; if(seen[k])return false; seen[k]=1; return true; }).slice(0,7);
+    lmSuggestShow(list, list.length?'':'Nothing found in India - try adding the area or city.');
+  }catch(e){ if(seq===LM_SUG_SEQ)lmSuggestShow([], 'Search is not answering right now - try again.'); }
+}
+function lmSuggestShow(list,msg){
+  const box=$('lmSug'); if(!box)return;
+  if(list)LM_FOUND=list; LM_SUG_I=0;
+  const items=list||[];
+  box.innerHTML=(msg?'<div class="lm-sug-msg">'+esc(msg)+'</div>':'')
+    +items.map(function(x,k){
+      return '<div class="lm-sug'+(k===0?' on':'')+'" onmousedown="event.preventDefault();lmPickFound('+k+')">'
+        +'<i class="fa-solid '+(x.pin?'fa-hashtag':'fa-location-dot')+'"></i>'
+        +'<div><div class="t">'+esc(x.title)+'</div><div class="s">'+esc(x.sub)+(x.sub?' · ':'')+x.km.toFixed(0)+' km from Kolkata</div></div></div>'; }).join('');
+  box.hidden=!msg&&!items.length;
+}
+window.lmSuggestKey=function(e){
+  const box=$('lmSug'); const els=box?box.querySelectorAll('.lm-sug'):[];
+  if(e.key==='Escape'){ if(box)box.hidden=true; return; }
+  if(!els.length)return;
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault(); LM_SUG_I=(LM_SUG_I+(e.key==='ArrowDown'?1:-1)+els.length)%els.length;
+    els.forEach(function(x,k){x.classList.toggle('on',k===LM_SUG_I);});
+  } else if(e.key==='Enter'){ e.preventDefault(); lmPickFound(LM_SUG_I); }
+};
+window.lmPickFound=function(k){ const x=LM_FOUND[k]; if(!x)return; lmInsertPoint({lat:x.lat,lng:x.lng,name:x.name}); const i=$('lmMq'); if(i)i.focus(); };
+function lmMeasureRender(){
+  const p=$('lmMeasure'); if(!p)return;
+  let straight=0; for(let i=1;i<LM_PTS.length;i++)straight+=lmKm(LM_PTS[i-1],LM_PTS[i]);
+  p.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b style="font-size:14px"><i class="fa-solid fa-route" style="color:#1d4ed8"></i> Distance between places</b>'
+      +'<button class="lm-x" title="Close" onclick="lmMeasureToggle()"><i class="fa-solid fa-xmark"></i></button></div>'
+    +'<div class="lm-search"><i class="fa-solid fa-magnifying-glass"></i>'
+      +'<input id="lmMq" autocomplete="off" placeholder="'+(LM_PTS.length?(LM_PTS.length>=2?'Add another place or PIN code':'Search the end point…'):'Search a place or PIN code…')+'" oninput="lmSuggestInput(this.value)" onkeydown="lmSuggestKey(event)" onblur="setTimeout(function(){var b=$(\'lmSug\');if(b)b.hidden=true;},150)">'
+      +'<div class="lm-sug-box" id="lmSug" hidden></div></div>'
+    +'<div style="font-size:12px;color:var(--slate);margin:8px 0 2px">'+(LM_PTS.length<2?'Pick a start and an end - or click the map to drop a point.':'Click the map to add a stop in between.')+'</div>'
+    +LM_PTS.map(function(pt,i){
+      const leg=i?lmKm(LM_PTS[i-1],pt):null;
+      return '<div class="lm-pt"><div class="dot">'+(i===0?'A':i===LM_PTS.length-1&&LM_PTS.length>1?'B':i)+'</div>'
+        +'<div style="min-width:0"><div class="nm" title="'+esc(pt.name)+'">'+esc(pt.name)+'</div>'+(leg!=null?'<div class="leg">'+leg.toFixed(1)+' km from the point before (straight line)</div>':'')+'</div>'
+        +'<button class="lm-x" title="Remove" onclick="lmMeasureRemove('+i+')"><i class="fa-solid fa-xmark"></i></button></div>'; }).join('')
+    +(LM_PTS.length>=2?'<div class="lm-tot"><div><span>Straight line</span><b>'+straight.toFixed(1)+' km</b></div><div><span>By road</span><b id="lmRoad">…</b></div></div>'
+      +'<div style="text-align:right;margin-top:8px"><button class="btn btn-sm" onclick="lmMeasureClear()">Clear</button></div>':'');
+}
+async function lmRoute(){
+  if(!LM_MLAYER)return;
+  LM_MLAYER.clearLayers();
+  LM_PTS.forEach(function(pt,i){
+    const lbl=i===0?'A':i===LM_PTS.length-1&&LM_PTS.length>1?'B':String(i);
+    L.marker([pt.lat,pt.lng],{icon:L.divIcon({className:'',iconSize:[24,24],iconAnchor:[12,12],
+      html:'<div style="width:24px;height:24px;border-radius:50%;background:#1d4ed8;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);color:#fff;font:700 11px system-ui;display:flex;align-items:center;justify-content:center">'+lbl+'</div>'}),zIndexOffset:5000})
+      .bindTooltip(pt.name).addTo(LM_MLAYER);
+  });
+  if(LM_PTS.length<2)return;
+  const line=L.polyline(LM_PTS.map(function(p){return [p.lat,p.lng];}),{color:'#1d4ed8',weight:2,dashArray:'6 6'}).addTo(LM_MLAYER);
+  LM_MAP.fitBounds(line.getBounds(),{padding:[60,60],maxZoom:14});
+  const seq=++LM_ROUTE_SEQ;
+  try{
+    const r=await (await fetch('https://router.project-osrm.org/route/v1/driving/'+LM_PTS.map(function(p){return p.lng+','+p.lat;}).join(';')+'?overview=full&geometries=geojson')).json();
+    if(seq!==LM_ROUTE_SEQ)return;                         // a newer request has taken over
+    const rt=r&&r.code==='Ok'&&r.routes&&r.routes[0];
+    const el=$('lmRoad');
+    if(!rt){ if(el)el.textContent='—'; return; }
+    L.geoJSON(rt.geometry,{style:{color:'#1d4ed8',weight:4,opacity:.75}}).addTo(LM_MLAYER);
+    // distance only - a driving time would be a guess about traffic, so it is not shown
+    if(el)el.textContent=(rt.distance/1000).toFixed(1)+' km';
+  }catch(e){ const el=$('lmRoad'); if(el)el.textContent='—'; }
+}
+window.lmFocus=function(pin){ const m=LM_MARKERS[pin]; if(m)m.focus(); else toast('This PIN code is not on the map yet','warn'); };
+
+// ---------------------------------------------------------------- customers from outside India
+/* An Indian PIN code is six digits. Anything else is a foreign postal code, kept as '<country>-<code>'
+   ('US-11004') so it can never be read as an Indian PIN. Its pin goes on the map where it really is;
+   the map still opens on India, and the table lists it with its country. */
+const LM_COUNTRIES=[['IN','India'],['US','USA'],['GB','UK'],['AE','UAE'],['SG','Singapore'],['CA','Canada'],['AU','Australia'],
+  ['SA','Saudi Arabia'],['QA','Qatar'],['OM','Oman'],['KW','Kuwait'],['BH','Bahrain'],['NZ','New Zealand'],['DE','Germany'],['BD','Bangladesh'],['NP','Nepal']];
+function lmCountryName(cc){ const c=LM_COUNTRIES.filter(function(x){return x[0]===cc;})[0]; return c?c[1]:cc; }
+function lmCodeLabel(code){ const m=/^([A-Z]{2})-(.+)$/.exec(code||''); return m?m[2]+' ('+lmCountryName(m[1])+')':code; }
+function lmInIndia(p){ return p.lat>=6&&p.lat<=37.5&&p.lng>=68&&p.lng<=98; }
+// One typed code -> what is stored, or an error. A US ZIP+4 ("11004-0005", or "11004-05") keeps its 5 digits.
+function lmNormCode(raw,cc){
+  const s=String(raw||'').trim().toUpperCase();
+  if(!s)return {err:'empty'};
+  if(cc==='IN'){ const d=s.replace(/\s+/g,''); return /^[1-9]\d{5}$/.test(d)?{code:d}:{err:'not a 6-digit PIN code - if this customer is from abroad, pick their country'}; }
+  if(cc==='US'){ const m=/^(\d{5})(-\d{1,4})?$/.exec(s.replace(/\s+/g,'')); return m?{code:'US-'+m[1]}:{err:'a US ZIP code is 5 digits'}; }
+  const t=s.replace(/[^A-Z0-9 -]/g,'').trim();
+  return /^[A-Z0-9][A-Z0-9 -]{1,9}$/.test(t)?{code:cc+'-'+t}:{err:'not a postal code'};
+}
+
+// ---------------------------------------------------------------- adding PIN codes by hand
+/* Laid out like Reimbursement: a BATCH is one project, one type (Site Visit / Booked) and one date -
+   the "date" container - and holds as many rows as needed ("Add row in same batch"); "Add another
+   batch" starts a new project / type / date. Each row is a PIN code, how many people, and the country.
+
+   PASTE FROM GOOGLE SHEETS. Copy a column of PIN codes and paste it into a PIN code box: it fills that
+   box and the ones below, adding rows as needed. Then copy the column of numbers and paste it into the
+   first Number box the same way. Copying two columns side by side (PIN code, Number) fills both at
+   once. Stored one row per person, so 700124 with 4 becomes four visits. */
+const LM_ENTRY_ROWS=30;
+// One row. Only the very first row of a batch shows example text, so empty rows never look filled in.
+function lmEntryRowHtml(first){
+  return '<tr class="lm-row"><td class="n"></td>'
+    +'<td><input class="lm-pin" placeholder="'+(first?'e.g. 700019':'')+'" onpaste="lmPaste(event,0)" oninput="lmEntryCheck()"></td>'
+    +'<td><input class="lm-num" type="number" min="1" step="1" placeholder="'+(first?'1':'')+'" onpaste="lmPaste(event,1)" oninput="lmEntryCheck()"></td>'
+    +'<td><input type="hidden" class="lm-cc" value="IN">'+lmCcButton('IN')+'</td>'
+    +'<td class="lm-st"></td>'
+    +'<td style="width:44px"><button type="button" class="lm-x" title="Remove this row" onclick="lmRowRemove(this)"><i class="fa-solid fa-xmark"></i></button></td></tr>';
+}
+/* THE COUNTRY PICKER. A plain dropdown cannot show a picture, so this is a small button + list with
+   each country's flag (flagcdn.com). The chosen code sits in the hidden .lm-cc input beside it,
+   which is what lmEntryRead() reads - exactly as the dropdown's value was. */
+function lmFlag(cc){ return '<img src="https://flagcdn.com/w40/'+cc.toLowerCase()+'.png" alt="" class="lm-flag">'; }
+function lmCcButton(cc){
+  return '<button type="button" class="lm-ccbtn" onclick="lmCcOpen(this)">'+lmFlag(cc)+'<span>'+esc(lmCountryName(cc))+'</span><i class="fa-solid fa-chevron-down"></i></button>';
+}
+window.lmCcOpen=function(btn){
+  lmCcClose();
+  const r=btn.getBoundingClientRect();
+  const list=document.createElement('div'); list.className='lm-cclist'; list.id='lmCcList';
+  list.style.top=(r.bottom+window.scrollY+4)+'px'; list.style.left=(r.left+window.scrollX)+'px'; list.style.minWidth=r.width+'px';
+  list.innerHTML=LM_COUNTRIES.map(function(c){ return '<div class="lm-ccopt" data-cc="'+c[0]+'">'+lmFlag(c[0])+'<span>'+esc(c[1])+'</span></div>'; }).join('');
+  list.onclick=function(e){
+    const o=e.target.closest('.lm-ccopt'); if(!o)return;
+    const td=btn.closest('td'); td.querySelector('.lm-cc').value=o.dataset.cc;
+    btn.outerHTML=lmCcButton(o.dataset.cc);
+    lmCcClose(); lmEntryCheck();
+  };
+  document.body.appendChild(list);
+  setTimeout(function(){ document.addEventListener('mousedown',lmCcOutside); },0);
+};
+function lmCcOutside(e){ if(!e.target.closest('#lmCcList'))lmCcClose(); }
+function lmCcClose(){ const l=$('lmCcList'); if(l)l.remove(); document.removeEventListener('mousedown',lmCcOutside); }
+function lmBatchHtml(n){
+  const today=lmDefaultDate();
+  let rows=''; for(let i=0;i<LM_ENTRY_ROWS;i++)rows+=lmEntryRowHtml(i===0);
+  return '<div class="lm-batch">'
+    +'<div class="lm-batch-top"><div class="lm-batch-hd">Batch '+n+'</div>'
+      +'<label>Project<select class="lm-proj" onchange="lmEntryCheck()">'+LM_PROJECTS.map(function(p){return '<option>'+esc(p)+'</option>';}).join('')+'</select></label>'
+      +'<label>Site Visit or Booking<select class="lm-kind" onchange="lmEntryCheck()"><option value="site_visit">Site Visit</option><option value="booked">Booked</option></select></label>'
+      +'<label>Date<input type="date" class="lm-date" value="'+esc(today)+'" onchange="lmEntryCheck()"></label>'
+      +'<button type="button" class="lm-x" title="Remove this batch" onclick="lmBatchRemove(this)"><i class="fa-solid fa-trash"></i></button></div>'
+    +'<div style="overflow-x:auto"><table class="lm-grid"><thead><tr><th></th><th style="width:34%">PIN code</th><th style="width:22%">Number of people</th><th style="width:24%">Country</th><th style="width:20%"></th><th></th></tr></thead>'
+      +'<tbody>'+rows+'</tbody></table></div>'
+    +'<button type="button" class="lm-addrow" onclick="lmAddRow(this)"><i class="fa-solid fa-plus"></i> Add row in same batch</button>'
+  +'</div>';
+}
+// The "Add PIN codes" page (lead_map/add): only the form - Save puts the rows on the map and goes back to it.
+function lmAddPage(v){
+  setCrumb(['Sales',['Lead Map','#/'],'Add PIN codes']);
+  v.innerHTML=LM_CSS+'<div class="lm-form">'
+    +'<div class="lm-head"><div><h1><i class="fa-solid fa-map-pin" style="color:#dc2626"></i> Add PIN codes</h1>'
+      +'<p>Choose the project, Site Visit or Booking, and the date. Then enter each PIN code and how many people came from it.</p></div>'
+      +'<button class="btn" onclick="navTo(\'lead_map\')"><i class="fa-solid fa-arrow-left"></i> Back to map</button></div>'
+    +'<div id="lmBatches">'+lmBatchHtml(1)+'</div>'
+    +'<div class="lm-foot">'
+      +'<button class="btn" onclick="lmAddBatch()"><i class="fa-solid fa-layer-group"></i> Add another batch</button>'
+      +'<span id="lmEntrySum" style="flex:1;min-width:200px;color:var(--slate);font-size:13px"></span>'
+      +'<button class="btn" onclick="navTo(\'lead_map\')">Cancel</button>'
+      +'<button class="btn btn-primary" id="lmSaveBtn" onclick="lmSave()"><i class="fa-solid fa-map-pin"></i> Save and plot</button></div>'
+  +'</div>';
+  lmEntryCheck();
+  const first=v.querySelector('.lm-pin'); if(first)first.focus();
+}
+window.lmAddRow=function(btn){ const tb=btn.closest('.lm-batch').querySelector('tbody'); tb.insertAdjacentHTML('beforeend',lmEntryRowHtml(false)); lmEntryCheck(); tb.lastElementChild.querySelector('.lm-pin').focus(); };
+window.lmRowRemove=function(btn){ const tb=btn.closest('tbody'); btn.closest('tr').remove(); if(!tb.children.length)tb.insertAdjacentHTML('beforeend',lmEntryRowHtml(true)); lmEntryCheck(); };
+window.lmBatchRemove=function(btn){
+  const w=$('lmBatches'); btn.closest('.lm-batch').remove();
+  if(!w.querySelector('.lm-batch'))w.insertAdjacentHTML('beforeend',lmBatchHtml(1));
+  lmRenumberBatches(); lmEntryCheck();
+};
+function lmRenumberBatches(){ [].slice.call(document.querySelectorAll('#lmBatches .lm-batch-hd')).forEach(function(h,i){h.textContent='Batch '+(i+1);}); }
+window.lmAddBatch=function(){
+  const w=$('lmBatches'); w.insertAdjacentHTML('beforeend',lmBatchHtml(w.querySelectorAll('.lm-batch').length+1));
+  lmRenumberBatches(); lmEntryCheck();
+  const b=w.lastElementChild; b.scrollIntoView({behavior:'smooth',block:'start'});
+};
+// Pasting several lines (or two columns) fills downward from the box it was pasted into.
+window.lmPaste=function(ev,col){
+  const txt=(ev.clipboardData||window.clipboardData).getData('text');
+  if(!txt||!/[\n\t]/.test(txt.trim()))return;              // a single value: let the box take it normally
+  ev.preventDefault();
+  const lines=txt.replace(/\r/g,'').split('\n'); while(lines.length&&!lines[lines.length-1].trim())lines.pop();
+  const tb=ev.target.closest('tbody');
+  let tr=ev.target.closest('tr');
+  lines.forEach(function(line,i){
+    if(i>0){ tr=tr.nextElementSibling; if(!tr){ tb.insertAdjacentHTML('beforeend',lmEntryRowHtml(false)); tr=tb.lastElementChild; } }
+    const cells=line.split('\t');
+    const put=function(cls,val){ const el=tr.querySelector(cls); if(el&&val!==undefined)el.value=String(val).trim(); };
+    if(col===0){ put('.lm-pin',cells[0]); if(cells.length>1)put('.lm-num',cells[1]); }
+    else put('.lm-num',cells[0]);
+  });
+  lmEntryCheck();
+};
+// Reads every row, marks the bad ones, and says what will be saved.
+function lmEntryRead(){
+  const out=[], bad=[];
+  [].slice.call(document.querySelectorAll('#lmBatches .lm-batch')).forEach(function(b){
+    const proj=b.querySelector('.lm-proj').value, kind=b.querySelector('.lm-kind').value, date=b.querySelector('.lm-date').value;
+    [].slice.call(b.querySelectorAll('tr.lm-row')).forEach(function(tr,i){
+      tr.querySelector('td.n').textContent=i+1;
+      const raw=tr.querySelector('.lm-pin').value.trim(), nraw=tr.querySelector('.lm-num').value.trim(), cc=tr.querySelector('.lm-cc').value;
+      const st=tr.querySelector('.lm-st'); tr.classList.remove('bad'); st.className='lm-st'; st.textContent='';
+      if(!raw&&!nraw)return;                                  // an empty row is simply skipped
+      const c=lmNormCode(raw,cc), n=nraw===''?1:Number(nraw);
+      let err=c.err||(!(Number.isInteger(n)&&n>=1&&n<=500)?'number must be a whole number from 1':null)||(!date?'pick the date':null);
+      if(err){ tr.classList.add('bad'); st.className='lm-st err'; st.textContent=err; bad.push(raw||'(blank)'); return; }
+      st.className='lm-st ok'; st.innerHTML='<i class="fa-solid fa-check"></i> '+n+' '+(n===1?'person':'people');
+      out.push({project:proj,kind:kind,date:date,code:c.code,n:n});
+    });
+  });
+  return {rows:out,bad:bad};
+}
+window.lmEntryCheck=function(){
+  const r=lmEntryRead(), s=$('lmEntrySum'); if(!s)return r;
+  const people=r.rows.reduce(function(a,x){return a+x.n;},0);
+  s.innerHTML=r.rows.length?'<b>'+r.rows.length+'</b> PIN code row'+(r.rows.length===1?'':'s')+' · <b>'+people+'</b> '+(people===1?'person':'people')
+    +(r.bad.length?' · <span style="color:#b91c1c">'+r.bad.length+' row'+(r.bad.length===1?'':'s')+' to fix</span>':''):'Paste or type PIN codes and numbers.';
+  return r;
+};
+window.lmSave=async function(){
+  const r=lmEntryCheck();
+  if(r.bad.length)return toast('Fix the rows marked in red first','err');
+  if(!r.rows.length)return toast('Nothing to save yet','warn');
+  const ins=[]; r.rows.forEach(function(x){ for(let i=0;i<x.n;i++)ins.push({project:x.project,kind:x.kind,pincode:x.code,event_date:x.date,source:'manual',added_by:state.email||null}); });
+  const b=$('lmSaveBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Saving…';}
+  const {error}=await sb.schema('camp').from('lm_pins').insert(ins);
+  if(error){ if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-map-pin"></i> Save and plot';} return toast(error.message,'err'); }
+  toast('Saved '+ins.length+' '+(ins.length===1?'entry':'entries')+' - placing them on the map','ok');
+  if(LM_MONTH!=='all')LM_MONTH=r.rows[0].date.slice(0,7);   // All months stays on All
+  try{ await lmCall({action:'lead_map_geocode'}); }catch(e){ toast('Saved; finding them on the map failed for now: '+e.message,'warn'); }
+  navTo('lead_map');
+};
+
+/* ============================ OUR BRAND - FACEBOOK and GOOGLE ADS ============================
+   30 Oct 2026. Replaces the old Campaign Analytics views (28-campaign-trends.js) on Our Brand.
+
+   WHY. Those views added up one stored total per campaign per named period ('last_month', 'today'),
+   rows that were never cleared - a stopped campaign's June row still counted in an August
+   'last_month' (Rs 11.0 lakh shown, Rs 6.4 lakh real). They also summed reach across campaigns,
+   divided a month's spend by one day's budget, and left out campaigns not named after their
+   account. Facebook rows came from a PC script that stopped on 12 Oct.
+
+   NOW. Everything is read from camp.ads_daily / ads_ad_daily: one row per campaign (and per ad)
+   per DAY, refreshed on the server every 3 hours by the ads-daily-sync edge function (see its
+   header). A period is the sum of its days - nothing else is ever added in. Only what can honestly
+   be added up is shown: spend, impressions, clicks, leads / conversions, and what follows from
+   them (cost per lead, CTR). Reach and frequency are left out: they count unique people and cannot
+   be added across days or campaigns.
+
+   One renderer, two platforms: obAdsView(host, 'meta' | 'google'). */
+const OB_ADS_WORD={
+  meta:{name:'Facebook',res:'Leads',per:'Cost per lead',one:'lead',src:'Meta Ads Manager',icon:'fa-brands fa-facebook',color:'#1877f2'},
+  google:{name:'Google',res:'Conversions',per:'Cost per conversion',one:'conversion',src:'Google Ads',icon:'fa-brands fa-google',color:'#ea4335'}
+};
+const OB_PERIODS=[['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_30d','Last 30 days'],['this_month','This month'],['last_month','Last month'],['last_90d','Last 90 days'],['custom','Custom']];
+let OB_P={period:'last_30d',from:'',to:'',acct:'all',showAds:12};
+let OB_CHART=null;
+function obIst(){ return new Date(Date.now()+5.5*3600000).toISOString().slice(0,10); }
+function obAdd(d,n){ return new Date(Date.parse(d+'T00:00:00Z')+n*86400000).toISOString().slice(0,10); }
+// The period's first and last day (IST). Presets end yesterday, as Ads Manager's do: today is not
+// over yet. The comparison period is the same number of days just before it.
+function obRange(){
+  const t=obIst(), y=obAdd(t,-1); let s,e;
+  switch(OB_P.period){
+    case 'yesterday': s=y; e=y; break;
+    case 'last_7d': s=obAdd(t,-7); e=y; break;
+    case 'this_month': s=t.slice(0,8)+'01'; e=t; break;
+    case 'last_month': { const f=new Date(Date.UTC(+t.slice(0,4),+t.slice(5,7)-2,1)); s=f.toISOString().slice(0,10); e=obAdd(t.slice(0,8)+'01',-1); break; }
+    case 'last_90d': s=obAdd(t,-90); e=y; break;
+    case 'custom': s=OB_P.from||obAdd(t,-30); e=OB_P.to||y; if(e<s){ const x=s; s=e; e=x; } break;
+    default: s=obAdd(t,-30); e=y;
+  }
+  const n=Math.round((Date.parse(e)-Date.parse(s))/864e5)+1;
+  return {s:s,e:e,n:n,ps:obAdd(s,-n),pe:obAdd(s,-1)};
+}
+function obMoney(x){ return x==null||!isFinite(x)?'—':'₹'+Math.round(x).toLocaleString('en-IN'); }
+function obNum(x,dp){ return x==null||!isFinite(x)?'—':Number(x).toLocaleString('en-IN',{maximumFractionDigits:dp||0}); }
+function obPct(x){ return x==null||!isFinite(x)?'—':x.toFixed(2)+'%'; }
+// Change against the previous period, coloured by whether the move is good (spend is neutral).
+function obChange(now,prev,goodUp){
+  if(prev==null||!isFinite(prev)||prev===0||now==null||!isFinite(now)) return '<div class="ob-chg ob-flat">no earlier figure</div>';
+  const p=(now-prev)/Math.abs(prev)*100;
+  if(Math.abs(p)<0.5) return '<div class="ob-chg ob-flat">same as before</div>';
+  const cls=goodUp==null?'ob-flat':((p>0)===goodUp?'ob-good':'ob-bad');
+  return '<div class="ob-chg '+cls+'">'+(p>0?'▲ ':'▼ ')+Math.abs(p).toFixed(0)+'% vs previous</div>';
+}
+function obSum(rows){ const t={spend:0,impressions:0,clicks:0,results:0}; rows.forEach(function(r){ t.spend+=Number(r.spend)||0; t.impressions+=Number(r.impressions)||0; t.clicks+=Number(r.clicks)||0; t.results+=Number(r.results)||0; }); return t; }
+const OB_CSS='<style>'
+  +'.ob-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 14px}'
+  +'.ob-bar select,.ob-bar input{height:36px;padding:0 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink)}'
+  +'.ob-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px}'
+  +'.ob-kpi{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}'
+  +'.ob-kpi .l{font-size:12px;color:var(--slate);font-weight:600}.ob-kpi .v{font-size:24px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums}'
+  +'.ob-chg{font-size:11.5px;font-weight:600;margin-top:3px}.ob-good{color:#15803d}.ob-bad{color:#b91c1c}.ob-flat{color:var(--slate);font-weight:500}'
+  +'.ob-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}'
+  +'.ob-ads{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}'
+  +'.ob-ad{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--bg-card);display:flex;flex-direction:column}'
+  +'.ob-ad .pic{height:150px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden}.ob-ad .pic img{width:100%;height:100%;object-fit:cover}'
+  +'.ob-ad .txt{padding:12px;font-size:13px;line-height:1.45;color:#1a0dab;background:#fff;height:150px;overflow:hidden;box-sizing:border-box;border-bottom:1px solid var(--line)}'
+  +'.ob-ad .m{padding:10px 12px;font-size:12px;display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}.ob-ad .m b{font-variant-numeric:tabular-nums}'
+  +'.tbl tr.ob-sel td{background:rgba(3,105,161,.08)}'
+  +'</style>';
+
+async function obAdsView(host,platform){
+  const W=OB_ADS_WORD[platform];
+  host.innerHTML=OB_CSS+'<div id="obHead"></div><div id="obBody"><div class="loader"><div class="spin"></div></div></div>';
+  const [acc,ent,log]=await Promise.all([
+    sb.schema('camp').from('ads_accounts').select('*').eq('platform',platform).eq('include',true).order('name'),
+    sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,daily_budget,lifetime_budget,thumbnail,body').eq('platform',platform),
+    sb.schema('camp').from('ads_sync_log').select('ok,message,finished_at').eq('platform',platform).not('finished_at','is',null).order('started_at',{ascending:false}).limit(1)
+  ]);
+  window._obAcc=acc.data||[]; window._obEnt={}; (ent.data||[]).forEach(function(x){ window._obEnt[x.kind+':'+x.id]=x; });
+  window._obPlat=platform; window._obLog=(log.data||[])[0]||null;
+  if(OB_P.acct!=='all'&&!window._obAcc.some(function(a){ return a.account_id===OB_P.acct; })) OB_P.acct='all';
+  await obAdsLoad();
+}
+async function obAdsLoad(){
+  const platform=window._obPlat, W=OB_ADS_WORD[platform], r=obRange();
+  const rpc=function(fn,args){ return sb.schema('camp').rpc(fn,args); };
+  const [cur,prev,days,ads]=await Promise.all([
+    rpc('ads_campaign_totals',{p_platform:platform,p_from:r.s,p_to:r.e}),
+    rpc('ads_campaign_totals',{p_platform:platform,p_from:r.ps,p_to:r.pe}),
+    rpc('ads_by_day',{p_platform:platform,p_from:r.s,p_to:r.e}),
+    rpc('ads_ad_totals',{p_platform:platform,p_from:r.s,p_to:r.e,p_limit:200})
+  ]);
+  const err=cur.error||prev.error||days.error||ads.error;
+  if(err){ $('obBody').innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(err.message)+'</div>'; return; }
+  window._obCur=cur.data||[]; window._obPrev=prev.data||[]; window._obDays=days.data||[]; window._obAds=ads.data||[];
+  obAdsPaint();
+}
+function obAdsPaint(){
+  const platform=window._obPlat, W=OB_ADS_WORD[platform], r=obRange(), E=window._obEnt||{}, accs=window._obAcc||[];
+  const aName={}; accs.forEach(function(a){ aName[a.account_id]=a.project||a.name||a.account_id; });
+  const pick=function(rows){ return OB_P.acct==='all'?rows:rows.filter(function(x){ return x.account_id===OB_P.acct; }); };
+  const cur=pick(window._obCur||[]), prev=pick(window._obPrev||[]);
+  const T=obSum(cur), P=obSum(prev);
+  const cpl=T.results?T.spend/T.results:null, pcpl=P.results?P.spend/P.results:null;
+  const ctr=T.impressions?T.clicks/T.impressions*100:null, pctr=P.impressions?P.clicks/P.impressions*100:null;
+  // ---- header: period picker, account picker, freshness
+  const lg=window._obLog, lastOk=accs.reduce(function(m,a){ return a.last_ok_at&&(!m||a.last_ok_at>m)?a.last_ok_at:m; },null);
+  const errs=accs.filter(function(a){ return a.last_error; });
+  let fresh='<span style="font-size:12.5px;color:var(--slate)"><i class="fa-solid fa-clock-rotate-left"></i> '
+    +(lastOk?'Straight from '+W.src+', updated '+ciAgo(lastOk)+' (every 3 hours)':'Not read from '+W.src+' yet')+'</span>';
+  let warn='';
+  if(!lastOk&&lg&&!lg.ok) warn=obSetupNote(platform,lg.message||'');
+  else if(errs.length) warn='<div class="card card-pad" style="border-color:#fcd34d;background:#fffbeb;color:#92400e;font-size:12.5px;margin-bottom:14px"><i class="fa-solid fa-triangle-exclamation"></i> Could not be read on the last run, so their figures may be behind: '
+    +errs.map(function(a){ return '<b>'+esc(a.name||a.account_id)+'</b> ('+esc(String(a.last_error).slice(0,140))+')'; }).join('; ')+'</div>';
+  $('obHead').innerHTML='<div class="ob-bar">'
+      +compSelHtml('obPer',OB_PERIODS,OB_P.period,"OB_P.period=this.value;OB_P.showAds=12;obAdsLoad()")
+      +(OB_P.period==='custom'?'<input type="date" value="'+esc(r.s)+'" onchange="OB_P.from=this.value;obAdsLoad()"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(r.e)+'" onchange="OB_P.to=this.value;obAdsLoad()">':'')
+      +(accs.length>1?compSelHtml('obAcc',[['all','All '+(platform==='meta'?'projects':'accounts')]].concat(accs.map(function(a){ return [a.account_id,a.project||a.name||a.account_id]; })),OB_P.acct,"OB_P.acct=this.value;OB_P.showAds=12;obAdsPaint()"):'')
+      +'<span style="font-size:12.5px;color:var(--slate)">'+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+' · compared with the '+r.n+' days before</span>'
+      +'<span style="margin-left:auto">'+fresh+'</span>'
+    +'</div>'+warn;
+  if(!lastOk&&!(window._obCur||[]).length){ $('obBody').innerHTML=''; return; }
+  // ---- KPIs
+  const kpi=function(l,v,ch){ return '<div class="ob-kpi"><div class="l">'+l+'</div><div class="v">'+v+'</div>'+ch+'</div>'; };
+  let html='<div class="ob-kpis">'
+    +kpi('Spend',obMoney(T.spend),obChange(T.spend,P.spend,null))
+    +kpi(W.res,obNum(T.results,platform==='google'?1:0),obChange(T.results,P.results,true))
+    +kpi(W.per,obMoney(cpl),obChange(cpl,pcpl,false))
+    +kpi('Clicks',obNum(T.clicks),obChange(T.clicks,P.clicks,true))
+    +kpi('Click rate (CTR)',obPct(ctr),obChange(ctr,pctr,true))
+    +'</div>';
+  // ---- chart
+  html+='<div class="card card-pad" style="margin-bottom:14px"><div style="font-weight:700;font-size:13.5px;margin-bottom:8px">Spend and '+W.res.toLowerCase()+' by day'+(OB_P.acct==='all'?'':' - '+esc(aName[OB_P.acct]||''))+'</div><div style="height:230px"><canvas id="obChart"></canvas></div></div>';
+  // ---- by project / account
+  const byAcc={}; (window._obCur||[]).forEach(function(c){ const a=byAcc[c.account_id]||(byAcc[c.account_id]={spend:0,clicks:0,impressions:0,results:0}); a.spend+=+c.spend||0; a.clicks+=+c.clicks||0; a.impressions+=+c.impressions||0; a.results+=+c.results||0; });
+  const allSpend=Object.keys(byAcc).reduce(function(s,k){ return s+byAcc[k].spend; },0);
+  const accRows=Object.keys(byAcc).filter(function(k){ return byAcc[k].spend>0||byAcc[k].results>0; }).sort(function(a,b){ return byAcc[b].spend-byAcc[a].spend; }).map(function(k){
+    const a=byAcc[k];
+    return '<tr style="cursor:pointer" class="'+(OB_P.acct===k?'ob-sel':'')+'" onclick="OB_P.acct=(OB_P.acct===\''+k+'\'?\'all\':\''+k+'\');OB_P.showAds=12;obAdsPaint()"><td><b>'+esc(aName[k]||k)+'</b></td>'
+      +'<td class="ob-num">'+obMoney(a.spend)+'</td><td class="ob-num" style="color:var(--slate)">'+(allSpend?Math.round(a.spend/allSpend*100):0)+'%</td>'
+      +'<td class="ob-num">'+obNum(a.results,platform==='google'?1:0)+'</td><td class="ob-num">'+obMoney(a.results?a.spend/a.results:null)+'</td>'
+      +'<td class="ob-num">'+obNum(a.clicks)+'</td><td class="ob-num">'+obPct(a.impressions?a.clicks/a.impressions*100:null)+'</td></tr>';
+  }).join('');
+  if(accRows) html+='<div class="card" style="margin-bottom:14px;overflow-x:auto"><div style="padding:12px 15px;font-weight:700;font-size:13.5px">By '+(platform==='meta'?'project':'account')+' <span style="font-weight:500;color:var(--slate);font-size:12px">- click one to see only its campaigns and ads</span></div>'
+    +'<table class="tbl" style="width:100%;font-size:13px"><thead><tr><th>'+(platform==='meta'?'Project':'Account')+'</th><th class="ob-num">Spend</th><th class="ob-num">Share</th><th class="ob-num">'+W.res+'</th><th class="ob-num">'+W.per+'</th><th class="ob-num">Clicks</th><th class="ob-num">CTR</th></tr></thead><tbody>'+accRows+'</tbody></table></div>';
+  // ---- campaigns with spend in the period
+  const camps=cur.filter(function(c){ return (+c.spend||0)>0||(+c.results||0)>0; }).sort(function(a,b){ return b.spend-a.spend; });
+  const st=function(s){ s=String(s||''); const on=s==='ACTIVE'||s==='ENABLED'; return '<span class="tag '+(on?'t-green':'t-gray')+'">'+(on?'Running':s?s.charAt(0)+s.slice(1).toLowerCase().replace(/_/g,' '):'—')+'</span>'; };
+  html+='<div class="card" style="margin-bottom:14px;overflow-x:auto"><div style="padding:12px 15px;font-weight:700;font-size:13.5px">Campaigns <span style="font-weight:500;color:var(--slate);font-size:12px">- '+camps.length+' that spent in this period</span></div>'
+    +(camps.length?'<table class="tbl" style="width:100%;font-size:12.5px"><thead><tr><th>Campaign</th>'+(OB_P.acct==='all'?'<th>'+(platform==='meta'?'Project':'Account')+'</th>':'')+'<th>Status</th><th class="ob-num">Budget</th><th class="ob-num">Spend</th><th class="ob-num">'+W.res+'</th><th class="ob-num">'+W.per+'</th><th class="ob-num">Clicks</th><th class="ob-num">CTR</th></tr></thead><tbody>'
+      +camps.map(function(c){
+        const e=E['campaign:'+c.campaign_id]||{};
+        const bud=e.daily_budget!=null?obMoney(e.daily_budget)+'<span style="color:var(--slate);font-size:11px"> /day</span>':(e.lifetime_budget!=null?obMoney(e.lifetime_budget)+'<span style="color:var(--slate);font-size:11px"> total</span>':'—');
+        return '<tr><td style="max-width:340px">'+esc(e.name||c.campaign_id)+'</td>'+(OB_P.acct==='all'?'<td style="font-size:12px">'+esc(aName[c.account_id]||'')+'</td>':'')
+          +'<td>'+st(e.status)+'</td><td class="ob-num">'+bud+'</td><td class="ob-num"><b>'+obMoney(c.spend)+'</b></td><td class="ob-num">'+obNum(c.results,platform==='google'?1:0)+'</td>'
+          +'<td class="ob-num">'+obMoney(+c.results?c.spend/c.results:null)+'</td><td class="ob-num">'+obNum(c.clicks)+'</td><td class="ob-num">'+obPct(+c.impressions?c.clicks/c.impressions*100:null)+'</td></tr>';
+      }).join('')+'</tbody></table>':'<div class="card-pad" style="color:var(--slate);font-size:13px">No campaign spent in this period.</div>')+'</div>';
+  // ---- ads
+  const ads=pick(window._obAds||[]), shown=ads.slice(0,OB_P.showAds);
+  if(ads.length){
+    html+='<div style="font-weight:700;font-size:13.5px;margin:4px 0 10px">Ads by spend <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' that ran in this period</span></div><div class="ob-ads">'
+      +shown.map(function(a){
+        const e=E['ad:'+a.ad_id]||{};
+        const pic=e.thumbnail?'<div class="pic"><img src="'+esc(e.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" alt=""></div>'
+          :'<div class="txt">'+esc(e.body||e.name||('Ad '+a.ad_id))+'</div>';
+        return '<div class="ob-ad">'+pic+'<div style="padding:9px 12px 0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(e.name||'')+'">'+esc(e.name||('Ad '+a.ad_id))+'</div>'
+          +'<div style="padding:0 12px;font-size:11.5px;color:var(--slate)">'+esc(aName[a.account_id]||'')+' · '+st(e.status)+'</div>'
+          +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+W.res+'</span><b>'+obNum(a.results,platform==='google'?1:0)+'</b><span>'+W.per+'</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b></div></div>';
+      }).join('')+'</div>'
+      +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="OB_P.showAds+=24;obAdsPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
+  }
+  html+='<div style="font-size:11.5px;color:var(--slate);margin:16px 0 4px">'+(platform==='meta'
+      ?'Figures are Meta\'s own, using each account\'s attribution setting - the same as Ads Manager. Leads = Meta\'s "Leads" count. Reach is not shown: it counts unique people, so it cannot be added across days or campaigns.'
+      :'Figures are Google Ads\' own. Conversions = Google\'s "Conversions" column (it can include fractions and every conversion action set as primary). Google keeps adding late conversions to recent days for up to 30 days, so those can still rise.')+'</div>';
+  $('obBody').innerHTML=html;
+  // chart: day-by-day for the chosen account, or all
+  const c=$('obChart'); if(!c||typeof Chart==='undefined') return;
+  let days=window._obDays||[];
+  if(OB_P.acct!=='all') days=null;   // per-account days come from the campaign rows below
+  obDrawChart(c,platform,r,days);
+}
+async function obDrawChart(c,platform,r,days){
+  const W=OB_ADS_WORD[platform];
+  if(!days){
+    const {data}=await sb.schema('camp').from('ads_daily').select('day,spend,results').eq('platform',platform).eq('account_id',OB_P.acct).gte('day',r.s).lte('day',r.e).limit(5000);
+    const m={}; (data||[]).forEach(function(x){ const d=m[x.day]||(m[x.day]={day:x.day,spend:0,results:0}); d.spend+=+x.spend||0; d.results+=+x.results||0; });
+    days=Object.keys(m).sort().map(function(k){ return m[k]; });
+  }
+  const all=[]; for(let d=r.s; d<=r.e; d=obAdd(d,1)) all.push(d);
+  const by={}; days.forEach(function(x){ by[x.day]=x; });
+  if(OB_CHART){ try{ OB_CHART.destroy(); }catch(e){} }
+  if(!c.isConnected) return;
+  OB_CHART=new Chart(c,{data:{labels:all.map(function(d){ return fmtDateShort(d); }),datasets:[
+      {type:'bar',label:'Spend (₹)',data:all.map(function(d){ return by[d]?Math.round(+by[d].spend):0; }),backgroundColor:W.color+'55',borderColor:W.color,borderWidth:1,yAxisID:'y'},
+      {type:'line',label:W.res,data:all.map(function(d){ return by[d]?+by[d].results:0; }),borderColor:'#16a34a',backgroundColor:'#16a34a',pointRadius:all.length>45?0:2,tension:.25,yAxisID:'y2'}]},
+    options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7}}},
+      scales:{x:{ticks:{maxTicksLimit:12}},y:{beginAtZero:true,title:{display:true,text:'Spend'}},y2:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},title:{display:true,text:W.res}}}}});
+}
+// What to do when the platform cannot be read yet (most often: the Facebook key is not added).
+function obSetupNote(platform,msg){
+  if(platform==='meta'&&/access key|META_SYSTEM_USER_TOKEN|token|OAuth|code 190/i.test(msg))
+    return '<div class="card card-pad" style="border-color:#fcd34d;background:#fffbeb;color:#713f12;font-size:13px;line-height:1.6;margin-bottom:14px">'
+      +'<b><i class="fa-solid fa-key"></i> Facebook figures need a permanent Meta access key - one-time setup by a Business Manager admin.</b>'
+      +'<ol style="margin:8px 0 0 18px;padding:0">'
+      +'<li>Meta Business Settings → Users → <b>System users</b> → Add (role: Admin).</li>'
+      +'<li>Assign assets → Ad accounts: tick the 10 accounts (Dream Valley, Gurukul, One, Eco City, Exotica, World City, Ananta, Diamond, Durbaar Banquets, Sarovar Hotel) with <b>View performance</b>.</li>'
+      +'<li>Generate new token → pick the JainE app → permissions <b>ads_read</b> (and read_insights) → expiry <b>Never</b>.</li>'
+      +'<li>Supabase → Project Settings → Edge Functions → Secrets → add <code>META_SYSTEM_USER_TOKEN</code> with that token. Figures appear within 3 hours.</li></ol>'
+      +'<div style="margin-top:6px;font-size:12px">Last attempt said: '+esc(msg.slice(0,200))+'</div></div>';
+  return '<div class="card card-pad" style="color:#b91c1c;margin-bottom:14px;font-size:13px"><i class="fa-solid fa-triangle-exclamation"></i> Could not read '+esc(OB_ADS_WORD[platform].src)+': '+esc(msg.slice(0,300))+'</div>';
+}
