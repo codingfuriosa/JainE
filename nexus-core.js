@@ -35200,6 +35200,15 @@ const LM_CSS='<style>'
   // map buttons (re-center, full screen) styled like the zoom buttons
   +'.lm-ctl a{display:flex!important;align-items:center;justify-content:center;width:30px;height:30px;color:#334155;font-size:14px;cursor:pointer;background:#fff}'
   +'.lm-ctl a:hover{background:#f4f4f4;color:#1d4ed8}'
+  // the map-style switch, as a compact row of choices
+  +'#lmMap .leaflet-control-layers{border:1px solid var(--line);border-radius:10px;box-shadow:0 2px 10px rgba(15,23,42,.12);padding:0}'
+  +'#lmMap .leaflet-control-layers-base{display:flex;gap:2px;padding:4px}'
+  +'#lmMap .leaflet-control-layers-base label{margin:0}'
+  +'#lmMap .leaflet-control-layers-base label>span{display:block;cursor:pointer}'
+  +'#lmMap .leaflet-control-layers-base input{display:none}'
+  +'#lmMap .leaflet-control-layers-base input+span{padding:5px 11px;border-radius:7px;font:600 12px Inter,system-ui,sans-serif;color:#475569}'
+  +'#lmMap .leaflet-control-layers-base input:checked+span{background:#1d4ed8;color:#fff}'
+  +'#lmMap .leaflet-control-layers-separator,#lmMap .leaflet-control-layers-overlays{display:none}'
   +'.lm-mapcard:fullscreen{border-radius:0;border:0}'
   +'.lm-mapcard:fullscreen .lm-mapwrap{flex:1;min-height:0}.lm-mapcard:fullscreen #lmMap{height:100%}'
   // the distance panel floats over the map's top-left corner
@@ -35234,6 +35243,7 @@ const LM_CSS='<style>'
   +'.lm-code{font-weight:700;font-size:13.5px}'
   +'.lm-area{font-size:12px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
   +'.lm-near{font-size:11.5px;margin-top:2px;font-weight:600}'
+  +'.lm-up{font-size:11px;color:#94a3b8;margin-top:2px}.lm-up i{margin-right:3px}'
   +'.lm-test{font-size:10.5px;font-weight:700;color:#64748b;background:#f1f5f9;border-radius:6px;padding:1px 6px;vertical-align:1px}'
   +'.lm-counts{display:flex;gap:6px}'
   +'.lm-c{width:38px;text-align:center;border-radius:8px;padding:4px 0;font-size:12.5px;font-weight:700}'
@@ -35326,6 +35336,7 @@ async function lmRender(){
     if(merged[k])merged[k].n=Number(merged[k].n)+Number(x.n); else merged[k]=Object.assign({},x,{n:Number(x.n)});
   }); });
   const data=Object.keys(merged).map(function(k){return merged[k];});
+  const ups=await lmUploads(months);
   // test pins (typed in to try the map) show only with "All three projects"
   const rows=(data||[]).filter(function(r){
     if(LM_PROJ!=='all'&&r.project!==LM_PROJ)return false;
@@ -35338,6 +35349,7 @@ async function lmRender(){
     p.lines.push((r.project||'Test pin')+' · '+LM_KINDS[r.kind]+': '+r.n);
   });
   const pins=Object.keys(byPin).map(function(k){return byPin[k];}).sort(function(a,b){return b.n-a.n;});
+  pins.forEach(function(p){ p.ups=ups[p.pincode]||[]; });
   const placed=pins.filter(function(p){return p.lat!=null;}), waiting=pins.filter(function(p){return p.lat==null;});
   const tot=function(k){ return pins.reduce(function(a,p){return a+p[k];},0); };
   const people=tot('sv')+tot('bk'), abroad=pins.filter(function(p){return p.lat!=null&&!lmInIndia(p);}).length;
@@ -35370,7 +35382,8 @@ async function lmRender(){
               +'<div style="min-width:0"><div class="lm-code">'+esc(lmCodeLabel(p.pincode))+(p.test?' <span class="lm-test">test</span>':'')+'</div>'
                 +'<div class="lm-area">'+esc(p.place||[p.district,p.state].filter(Boolean).join(', ')||'')+'</div>'
                 +(p.lat==null?'<div class="lm-near" style="color:#b45309">'+esc(p.err||'finding it on the map…')+'</div>'
-                  :near?'<div class="lm-near" style="color:'+near.color+'">'+near.km.toFixed(1)+' km from '+esc(near.label)+'</div>':'')+'</div>'
+                  :near?'<div class="lm-near" style="color:'+near.color+'">'+near.km.toFixed(1)+' km from '+esc(near.label)+'</div>':'')
+                +(p.ups.length?'<div class="lm-up"><i class="fa-regular fa-clock"></i> '+(p.ups.length>1?'Last uploaded ':'Uploaded ')+esc(lmWhen(p.ups[0].at))+'</div>':'')+'</div>'
               +'<div class="lm-counts"><span class="lm-c '+(p.sv?'sv':'z')+'">'+(p.sv||'–')+'</span><span class="lm-c '+(p.bk?'bk':'z')+'">'+(p.bk||'–')+'</span></div></div>';
           }).join('')
           :'<div class="lm-empty"><i class="fa-solid fa-map-pin"></i><div>No Site Visits or Bookings for '+esc(lmMonthName(LM_MONTH))+' yet.</div>'
@@ -35384,6 +35397,34 @@ async function lmRender(){
     lmCall({action:'lead_map_geocode'}).then(function(){ lmRender._busy=false; if(PAGE==='lead_map')renderPage(); }).catch(function(){ lmRender._busy=false; });
   }
 }
+/* WHEN EACH PIN CODE WAS UPLOADED. Every row in camp.lm_pins carries the moment it was saved
+   (created_at), who typed it in, or that it came from the CRM. Rows saved together - one batch on the
+   Add PIN codes page, or one CRM read - share that moment, so they are shown as one upload with a
+   count. Read for the months on screen, 1,000 rows at a time, and narrowed by the same project /
+   type filters as the map. Returns { pincode: [uploads, newest first] }. */
+async function lmUploads(months){
+  const from=months.slice().sort()[0]+'-01', to=lmNextMonth(months.slice().sort().pop())+'-01';
+  const all=[];
+  for(let off=0;off<50000;off+=1000){
+    const {data,error}=await sb.schema('camp').from('lm_pins').select('pincode,project,kind,event_date,source,added_by,created_at')
+      .gte('event_date',from).lt('event_date',to).order('created_at',{ascending:false}).range(off,off+999);
+    if(error){ console.warn('[lead map] upload times',error); break; }
+    all.push.apply(all,data||[]);
+    if(!data||data.length<1000)break;
+  }
+  const out={}, idx={};
+  all.forEach(function(r){
+    if(LM_PROJ!=='all'&&r.project!==LM_PROJ)return;
+    if(LM_KIND!=='all'&&r.kind!==LM_KIND&&!(r.kind==='test'&&LM_PROJ==='all'))return;
+    const k=r.pincode+'|'+r.created_at+'|'+(r.project||'')+'|'+r.kind+'|'+r.event_date+'|'+r.source+'|'+(r.added_by||'');
+    if(idx[k]){ idx[k].n++; return; }
+    idx[k]={at:r.created_at,project:r.project,kind:r.kind,date:r.event_date,source:r.source,by:r.added_by,n:1};
+    (out[r.pincode]=out[r.pincode]||[]).push(idx[k]);
+  });
+  return out;
+}
+// "30 Oct 2026, 4:12 pm" in India time
+function lmWhen(ts){ try{ return new Date(ts).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'}); }catch(e){ return String(ts); } }
 function lmNextMonth(ym){ let [y,m]=ym.split('-').map(Number); m++; if(m>12){m=1;y++;} return y+'-'+String(m).padStart(2,'0'); }
 
 // ---------------------------------------------------------------- the map itself
@@ -35429,9 +35470,17 @@ function lmPinSvg(n){
 }
 let LM_MARKERS={};
 function lmPopup(p){
-  return '<div style="font:13px/1.45 system-ui,sans-serif;min-width:170px"><b style="font-size:14px">'+esc(lmCodeLabel(p.pincode))+'</b>'
+  const ups=p.ups||[];
+  return '<div style="font:13px/1.45 system-ui,sans-serif;min-width:230px;max-width:320px"><b style="font-size:14px">'+esc(lmCodeLabel(p.pincode))+'</b>'
     +(p.place?'<div>'+esc(p.place)+'</div>':'')+'<div style="color:#64748b">'+esc([p.district,p.state].filter(Boolean).join(', '))+'</div>'
     +'<div style="margin-top:6px">'+p.lines.map(esc).join('<br>')+'</div>'
+    // when each lot for this PIN code was put into JAIN-E, and by whom
+    +(ups.length?'<div style="margin-top:8px;border-top:1px solid #e2e8f0;padding-top:6px"><div style="font-weight:700;font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:#64748b;margin-bottom:3px">Uploaded</div>'
+      +ups.slice(0,6).map(function(u){
+        return '<div style="margin-bottom:4px"><b>'+esc(lmWhen(u.at))+'</b><div style="color:#475569;font-size:12px">'
+          +esc((u.project||'Test pin')+' · '+LM_KINDS[u.kind]+(u.n>1?' ×'+u.n:'')+' · '+(LM_KINDS[u.kind]==='Booked'?'booking':'visit')+' date '+fmtDateShort(u.date))
+          +'<br>'+esc(u.source==='crm'?'from the CRM':'added by hand'+(u.by?' by '+u.by:''))+'</div></div>'; }).join('')
+      +(ups.length>6?'<div style="color:#64748b;font-size:12px">+ '+(ups.length-6)+' earlier upload'+(ups.length-6===1?'':'s')+'</div>':'')+'</div>':'')
     +'<div style="margin-top:6px;color:#475569">'+lmSiteGroups().map(function(g){ const km=lmKm(p,g);
       return esc(g.label)+': '+km.toFixed(1)+' km'+(km<=LM_RADIUS_KM?' <b style="color:'+g.color+'">· inside 10 km</b>':''); }).join('<br>')+'</div></div>';
 }
@@ -35471,7 +35520,22 @@ async function lmDraw(pins){
   await lmLoadScript('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js');
   if(LM_MAP){ try{LM_MAP.remove();}catch(e){} }
   const map=LM_MAP=L.map(box).setView([LM_CENTER.lat,LM_CENTER.lng],10);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+  /* MAP STYLES (top-right switch). "Detailed" is the default: Esri's street map names far more towns,
+     neighbourhoods, roads and landmarks at every zoom than OpenStreetMap's standard style did.
+     "Satellite" is Esri's imagery with place names laid over it; "Simple" is the original style.
+     The last choice is remembered on this computer. (Google Maps, with every shop and landmark, takes
+     over by itself once GOOGLE_MAPS_BROWSER_KEY is set - see lmDraw above.) */
+  const ESRI='https://server.arcgisonline.com/ArcGIS/rest/services/';
+  const styles={
+    'Detailed':L.tileLayer(ESRI+'World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles &copy; Esri'}),
+    'Satellite':L.layerGroup([L.tileLayer(ESRI+'World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Imagery &copy; Esri'}),
+      L.tileLayer(ESRI+'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:19}),
+      L.tileLayer(ESRI+'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,opacity:.7})]),
+    'Simple':L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'})};
+  let pick='Detailed'; try{ const s=localStorage.getItem('lmMapStyle'); if(styles[s])pick=s; }catch(e){}
+  styles[pick].addTo(map);
+  L.control.layers(styles,null,{position:'topright',collapsed:false}).addTo(map);
+  map.on('baselayerchange',function(e){ try{ localStorage.setItem('lmMapStyle',e.name); }catch(_){} });
   let bounds=null;
   lmSiteGroups().forEach(function(g){
     // outline only - no colour inside the circle, so the map underneath stays readable
