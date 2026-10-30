@@ -1128,6 +1128,14 @@
   const isMemb  = (t,asg)=>(asg[t.id]||[]).some(e=>eq(e,me()))||wfActTask(t);
   const isSelf  = (t,asg)=>isOwner(t)&&isMemb(t,asg);
   const stOf    = t => t.approval_state==='approved'?'approved':(t.approval_state==='awaiting_approval'?'await':'open');
+  /* A CAUSELIST TASK NEEDS NO APPROVAL EITHER - the same reasoning as a notice, set out in full
+     in taskDetail. The Legal MIS causelist popup files one task per "action needed" matter
+     against the Legal person named in it, under the account that ran the export; that account
+     ends up as the delegator, so every one of these came back to it to be rubber-stamped by the
+     same address that wrote it. Whoever is on it finishes it outright instead. source='causelist'
+     and nothing else - acc.ptasks carries a trigger, causelist_self_approve, holding the same
+     rule on the database side for any route that does not come through this file. */
+  const noAppr  = t => !!(t && (t.source==='notice' || t.source==='causelist'));
   const iDeleg  = (t,tasks)=> tasks.some(c=>c.parent_task_id===t.id && eq(c.delegator,me()));
 
   /* ---------- per-viewer priority rank (private per person: your own ranking of tasks
@@ -5079,11 +5087,26 @@
      closed-without-saving form left behind) and again on the way out of a save. Taken one at a
      time that wait sat between the person and the form they were trying to open. They do not
      depend on each other, so they go a few at a time. */
+  /* FAILING TO ASK IS NOT AN ANSWER OF "NO".
+     This used to read `const {data:used}=...; if(!used) await s3Delete(path)`, taking only `data`
+     and never looking at `error`. A Supabase rpc that fails RESOLVES - it does not throw - with
+     {data:null,error:{...}}, so a dropped connection, an expired token or a 500 left `used`
+     undefined, `!used` true, and the file deleted. The row kept pointing at it, so the instance
+     went on saying it had a receipt that was no longer in the bucket.
+     That is not theoretical: reimbursement 121's seven receipts are gone from S3 (NoSuchKey on
+     every one) while its details still name all seven, and it was never edited and never deleted.
+     This sweeper runs on the way into every workflow form and again after every save, against
+     exactly the files somebody has just uploaded, so one bad moment on the network is enough.
+     Now nothing is deleted unless the database has actually said, in so many words, that nothing
+     references it. Every other outcome keeps the file. An orphan left in the bucket costs pennies;
+     a receipt deleted out from under a claim cannot be got back. */
   async function wfPurgeCaseFiles(paths){
     await wfRunPool(paths||[], 3, async function(path){
       try{
-        const {data:used}=await ACC().rpc('wf_file_referenced',{p_path:path});
-        if(!used) await s3Delete(path);
+        const {data:used,error}=await ACC().rpc('wf_file_referenced',{p_path:path});
+        if(error) return;          // could not ask - keep the file
+        if(used!==false) return;   // referenced, or an answer we do not understand
+        await s3Delete(path);
       }catch(e){}
     });
   }
@@ -9854,8 +9877,61 @@
     return t.length>0 && t.every(function(f){ return f && f.type==='attachment'; });
   }
   // `variant` names a flows.variants entry (Reimbursement's 'wow'); omitted for the ordinary kind.
-  window.wfNewInstance=function(flowId, variant){
+  /* ONE OPEN CLAIM AT A TIME — asked BEFORE the form opens, not after it is filled in.
+     acc.wf_create_instance has always refused a second claim while one is open, but it refused on
+     Create: you filled in seven rows of expenses, uploaded the receipts, pressed the button, and
+     only then got a small toast in the corner telling you it was never going to be accepted. The
+     refusal is now asked for on the click, so the answer arrives before the typing does.
+     The database is still the thing that decides - this is the same function
+     (acc.wf_new_instance_block_info) that words the JE001 refusal, so the dialog and the server
+     cannot tell the person two different stories.
+     Fails OPEN on purpose: if the question itself cannot be asked - a dropped connection, a slow
+     moment - the form opens as it always did and the server refuses on save if it must. A network
+     blip should not stop somebody filing an expense. */
+  async function wfBlockInfo(flowId, variant){
+    try{
+      const {data,error}=await ACC().rpc('wf_new_instance_block_info',
+        {p_flow_id:Number(flowId), p_email:me(), p_variant:variant||null});
+      if(error) return null;
+      return (data&&data.message)?data:null;
+    }catch(e){ return null; }
+  }
+  /* Two kinds of block ask for two different things, so the dialog offers two different buttons.
+       'edit'  the claim is still theirs to change - not accepted yet, or sent back to them. A
+               second claim is never the answer, so the only action offered is to open the one
+               they have, straight into its edit form.
+       'wait'  somebody else is holding it. Nothing to edit, so the button opens its timeline
+               instead - which is where "who has it and since when" actually lives - and, where
+               the workflow allows drafts, a quieter second button lets them write the next claim
+               down now and send it when this one closes. Taking that away would mean somebody
+               with a pocket of receipts and a claim stuck at Audit for a week has nowhere to put
+               them. */
+  function wfBlockedDialog(b, flowId, variant){
+    const noun=String(b.noun||'instance'), edit=(b.kind==='edit'), caseId=Number(b.case_id);
+    openModal(
+      '<div class="modal-head"><h3><i class="fa-solid fa-circle-exclamation" style="color:#b45309"></i> '
+        +esc2(edit?('Edit your open '+noun):('One open '+noun+' at a time'))+'</h3>'
+        +'<span class="x" data-wfx>&times;</span></div>'
+      +'<div class="modal-body" style="min-width:min(92vw,460px)">'
+        +'<p style="margin:0;color:var(--ink);font-size:13.5px;line-height:1.6">'+esc2(b.message)+'</p>'
+      +'</div>'
+      +'<div class="modal-foot"><button class="ac-btn" data-wfx>Close</button>'
+        +(b.can_draft?'<button class="ac-btn" id="wfBlkDraft"><i class="fa-regular fa-floppy-disk"></i> Write it as a draft</button>':'')
+        +'<button class="ac-btn primary" id="wfBlkOpen">'+esc2((edit?'Edit #':'Open #')+b.case_no)+'</button>'
+      +'</div>','md');
+    setTimeout(function(){
+      const o=$('wfBlkOpen');
+      if(o) o.onclick=function(){ closeModal();
+        if(edit) wfEventOpen(Number(flowId), caseId); else navTo('tasks/workflow/case/'+caseId); };
+      const d=$('wfBlkDraft');
+      if(d) d.onclick=function(){ closeModal(); wfEventOpen(Number(flowId), null, null, variant||null); };
+      [].slice.call(document.querySelectorAll('[data-wfx]')).forEach(function(x){ x.onclick=function(){ closeModal(); }; });
+    },30);
+  }
+  window.wfNewInstance=async function(flowId, variant){
     if(window._wfAttachOnly && Number(flowId)===Number(window._wfFlowId)) return wfQuickAttach(flowId);
+    const b=await wfBlockInfo(flowId, variant||null);
+    if(b) return wfBlockedDialog(b, flowId, variant||null);
     return wfEventOpen(flowId, null, null, variant||null);
   };
   /* A workflow's other kinds of instance (flows.variants) and whether this person may raise one.
@@ -10677,7 +10753,12 @@
            p_step_members:Object.keys(editMembers).length?editMembers:null}); if(error)throw error;
         // Independent of one another, so they go together rather than one signing round trip and
         // one delete at a time while the person waits on Save changes.
-        await wfRunPool(replacedAtts, 3, async function(oldPath){ try{ await s3Delete(oldPath); }catch(_e){} });
+        /* Through the sweeper rather than straight to s3Delete, so a replaced file is still asked
+           about before it goes. "No longer on THIS instance" is not the same as "nothing wants
+           it": the same receipt can have been posted into Updates, or carried by another claim.
+           wfPurgeCaseFiles already pools these three at a time, which is what the bare loop here
+           was for. */
+        await wfPurgeCaseFiles(replacedAtts);
         // a file uploaded during this edit and then taken off again before saving
         try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(e){}
@@ -10784,7 +10865,18 @@
       if(url) el.src=url; else wfAttImgFailed(el);   // could not even be signed
     }));
   }
-  window.wfAttOpen=function(path,name){ s3OpenSigned(path,name||''); };
+  /* OPEN MEANS OPEN, NOT DOWNLOAD.
+     Passing a filename puts s3OpenSigned down its DOWNLOAD branch - an <a download> pointed at
+     the signed URL - and browsers ignore `download` on a cross-origin address, which an S3 link
+     always is. So a chip labelled "Open" did not open a tab, it navigated, and when the file was
+     missing or the link had timed out the person was left looking at raw AWS XML where the portal
+     had been. Every other module already distinguishes the two (the Document Library's View
+     passes no name and gets a tab; its Download passes one); workflow attachments only ever got
+     the download route.
+     No name, so s3OpenSigned opens its pending tab on the click itself - which is also what keeps
+     pop-up blockers from eating it. `name` is still accepted because the call sites pass it, and
+     it is still what the chip's tooltip shows; it just no longer forces a download. */
+  window.wfAttOpen=function(path,name){ s3OpenSigned(path); };
   function wfAttachmentHtml(a){
     const name=a.file_name||(a.storage_path||'').split('/').pop();
     /* .jfif is what Windows and WhatsApp hand you when you save a JPEG, and several people's payment
@@ -16783,7 +16875,7 @@
       ? (wfIsRbSelectable(wfInfo)
           ? `<input type="checkbox" class="ac-rowchk wf-rbsel" data-fcs="${t.flow_case_step_id}" data-st="${wfInfo.received_at?'received':'waiting'}" title="Select for Receive / Forward" onclick="event.stopPropagation()" onchange="wfRbSelSync()">`
           : '')
-      : `<input type="checkbox" class="ac-rowchk" title="${(opt.owner||t.source==='notice')?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!(opt.owner||t.source==='notice')},this)">`):'';
+      : `<input type="checkbox" class="ac-rowchk" title="${(opt.owner||noAppr(t))?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!(opt.owner||noAppr(t))},this)">`):'';
     const wfIsFirst=wfInfo&&wfInfo.minSeq!=null&&wfInfo.seq===wfInfo.minSeq;
     const wfIsLastStep=wfInfo&&!wfInfo.nextExists;
     let wfRR='';
@@ -17000,8 +17092,13 @@
        not exist. It sat there, the completion trigger never fired, and both the tracker and the
        scoreboard stayed empty while the work had in fact been done.
        Treating it as a self-assigned task is the whole fix: whoever is on it finishes it outright,
-       which is what a notice is - work handed to Legal, not work delegated by somebody. */
-    const noApproval=!!(t&&t.source==='notice');
+       which is what a notice is - work handed to Legal, not work delegated by somebody.
+
+       A CAUSELIST TASK IS THE SAME SHAPE - see noAppr, up beside stOf. It does carry a real
+       delegator, but only because the causelist popup writes these under whoever ran the export,
+       so the approval was that person signing off their own output: six of the six filed so far
+       were approved by the address that created them. */
+    const noApproval=noAppr(t);
     const selfTask=(amOwner&&amMember)||(noApproval&&amMember);
     const locked=ro&&st==='approved';
     /* AN HR APPROVAL TASK BELONGS TO ALL FOUR APPROVERS, NOT TO ONE OF THEM.
@@ -17165,8 +17262,10 @@
       const u={progress:p}; let selfTaskDone=false;
       if(p===100){
         try{
-          const [{data:tk},{data:asgR}]=await Promise.all([ACC().from('ptasks').select('delegator').eq('id',tid).single(),ACC().from('ptask_assignees').select('email').eq('task_id',tid)]);
-          selfTaskDone=!!(tk&&(asgR||[]).some(a=>eq(a.email,tk.delegator)));
+          const [{data:tk},{data:asgR}]=await Promise.all([ACC().from('ptasks').select('delegator,source').eq('id',tid).single(),ACC().from('ptask_assignees').select('email').eq('task_id',tid)]);
+          // Ticking off the last sub-task is Mark Done by another name, so a causelist task ends
+          // the same way here. Only that one source - notices are a separate question.
+          selfTaskDone=!!(tk&&(tk.source==='causelist'||(asgR||[]).some(a=>eq(a.email,tk.delegator))));
         }catch(e){}
         if(selfTaskDone){ u.status='Completed'; u.approval_state='approved'; u.completed_at=nowISO(); u.approved_at=nowISO(); u.approved_by=me(); }
         else { u.status='Awaiting Approval'; u.approval_state='awaiting_approval'; u.completed_at=nowISO(); }

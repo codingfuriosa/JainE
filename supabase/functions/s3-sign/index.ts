@@ -78,15 +78,44 @@ Deno.serve(async (req: Request) => {
 
     // May THIS caller do THIS to THIS key? Asked as the caller, so RLS applies. Fails closed: any
     // error, or anything but a literal true, is a refusal.
-    const chk = await fetch(`${sbUrl}/rest/v1/rpc/s3_key_allowed`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`, apikey: anon,
-        "Content-Type": "application/json", "Content-Profile": "app", "Accept-Profile": "app",
-      },
-      body: JSON.stringify({ p_action: act, p_key: safeKey }),
-    });
-    const allowed = chk.ok ? await chk.json().catch(() => false) : false;
+    /* A refusal and a failed check are not the same thing. Anything but a literal true is still
+       "no" - it fails closed - but only an ANSWER of false is told to the person as "you do not
+       have access". When the database could not answer (a timeout, a busy moment, an error), the
+       check is tried again, and if it still cannot be answered they are told to try again, not that
+       they are blocked: a staff member whose upload failed in a busy moment was shown "You do not
+       have access to this file" and had no way to know it was not about them. */
+    let allowed: unknown = undefined;
+    let why = "";
+    for (let attempt = 0; attempt < 3 && allowed === undefined; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 400 * attempt));
+      try {
+        const chk = await fetch(`${sbUrl}/rest/v1/rpc/s3_key_allowed`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`, apikey: anon,
+            "Content-Type": "application/json", "Content-Profile": "app", "Accept-Profile": "app",
+          },
+          body: JSON.stringify({ p_action: act, p_key: safeKey }),
+        });
+        if (chk.ok) {
+          const v = await chk.json().catch(() => undefined);
+          if (typeof v === "boolean") allowed = v; else why = "unreadable answer";
+        } else {
+          why = `HTTP ${chk.status} ${(await chk.text().catch(() => "")).slice(0, 200)}`;
+          // a 4xx the database answered with (not a timeout or a throttle) is a real refusal
+          if (chk.status >= 400 && chk.status < 500 && chk.status !== 408 && chk.status !== 429) {
+            console.error(`s3_key_allowed refused ${act} ${safeKey}: ${why}`);
+            allowed = false;
+          }
+        }
+      } catch (e) {
+        why = String(e);
+      }
+    }
+    if (allowed === undefined) {
+      console.error(`s3_key_allowed could not be answered for ${act} ${safeKey}: ${why}`);
+      return j({ error: "Could not check your access to this file just now - please try again in a moment." }, 503);
+    }
     if (allowed !== true) return j({ error: "You do not have access to this file." }, 403);
 
     const aws = new AwsClient({ accessKeyId: ak, secretAccessKey: sk, region, service: "s3" });

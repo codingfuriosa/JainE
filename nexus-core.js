@@ -424,7 +424,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'6637831a06','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'7885d790d1','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -11118,18 +11118,11 @@ async function usbLoad(){
     if(error)throw error;
     USB.rows=data||[];
   }catch(e){ USB.rows=null; USB.err=(e&&e.message)||String(e); }
-  /* Two further queries, both for Daily Checks and neither derivable from the feature report.
-     Workflow health answers "where is the work stuck"; transcription health answers "how did
-     yesterday's calls go, and is the CRM telling the truth about them". Both ignore the date
-     filters above on purpose (see each function's own comment). Fetched here so the render stays
-     synchronous like everything else; either failing leaves its block simply not drawn.
-     Sent together rather than one after the other: they are independent, and the Usability page
-     waits on this call too even though it draws neither. */
-  const health=await Promise.all([
-    sb.rpc('erp_usability_workflow_health').then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; }),
-    sb.rpc('erp_usability_transcription_health').then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; })
-  ]);
-  USB.wfHealth=health[0]; USB.trHealth=health[1];
+  /* Workflow health and transcription health used to be fetched here as well. They belong to Daily
+     Checks and are drawn only there, but that page used to share this loader, so the Usability page
+     was waiting on two round trips for figures it never prints. Daily Checks now loads its own
+     three (it refreshes itself every minute, which this loader is not built for), and this one is
+     back to fetching the one report the page it serves actually draws. */
   if(!USB.people){ try{ USB.people=await getPeople(); }catch(e){ USB.people=[]; } }
   // A per-feature drill-down cached under the old range/person would show stale names against the
   // new filters, so any change here throws it out rather than risk a misleading answer.
@@ -11499,62 +11492,235 @@ function usbModuleDetailHtml(moduleId){
 /* ===== DAILY CHECKS — its own module =====
 
    The handful of things somebody looks at every morning, lifted out of Usability so that routine
-   is one page rather than a hunt through twenty-five modules. It reads the same two sources the
-   Usability report does, so there is no second definition of any number to drift: the flagged
-   features come from erp_feature_catalog.daily_check, and the workflow backlog from
-   erp_usability_workflow_health.
+   is one page rather than a hunt through twenty-five modules.
+
+   EVERY FIGURE HERE IS TODAY'S, AND THE PAGE KEEPS ITSELF THAT WAY.
+   Two of the three blocks used not to be. The feature rows were a thirty-day total — which reads
+   almost the same every morning for a month, and so could not answer the one question the page
+   exists to answer — and workflow health's Raised / Closed / Reverted were yesterday's, sitting in
+   the same row as three columns counting right now. Both are today's now, with yesterday printed
+   beneath them so there is something to read them against. The thirty-day total and the activity
+   band stay on the feature rows as the longer view they always were, in their own column.
+
+   And because a morning check is the kind of page that gets left open on a second screen, it
+   re-reads itself every minute rather than freezing at whatever the figures were when it was
+   opened. The three queries behind it cost a few tens of milliseconds between them, which is what
+   makes a minute affordable; the loop stops while the tab is in the background and catches up the
+   moment it comes back.
+
+   The one thing that cannot be live is transcription health. The pass that grades calls starts
+   about 00:30 IST and writes nothing during the working day, so making those five figures live
+   would mean grading calls as they finish — a pipeline change, not a reporting one. That block now
+   prints when the pass last wrote, so its age is on the page instead of in somebody's head.
 
    Gated exactly like Usability (hasUsability), because the RPCs behind it are — a page that drew
    an error for everyone else would be worse than no page.
 
    Deliberately NOT given the Usability report's date pickers. This answers "what needs attention
    today"; a range picker invites it to be read as a trend report, which is the other page's job. */
+const DC={feat:null,wf:null,tr:null,err:null,at:null,busy:false,fail:0};
+/* How often the page re-reads itself, and how old what is on screen may be before coming back to
+   the tab forces a read rather than waiting for the next tick. The second one is what makes a tab
+   left open overnight honest: the loop is suspended while it is hidden, so the figures on it can
+   be hours old, and showing those for another whole minute would be the opposite of the point. */
+const DC_EVERY_MS=60000, DC_STALE_MS=30000;
+let DC_TIMER=null, DC_CLOCK=null;
+/* Today in IST, as the plain date string the per-feature drill-downs filter on. usbIstNow() does
+   the timezone move; this is only its date half, spelled the way the RPCs want it. */
+function dcToday(){
+  const n=usbIstNow();
+  return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');
+}
+/* One round trip per block, sent together because they are independent.
+   A block whose query fails keeps whatever it last had rather than blanking. On a refresh, half a
+   page of live figures beside one block that is a minute stale is strictly better than an error
+   message where the page used to be — the reader came here to see numbers. Only the feature query
+   failing on the FIRST load is fatal, because that is the call that tells us whether this reader
+   is allowed to see any of this at all. */
+async function dcLoad(first){
+  if(DC.busy) return;
+  DC.busy=true;
+  /* .catch(), NOT a second argument to .then(). A then's rejection handler only sees the ORIGINAL
+     promise rejecting — it does not catch what the fulfilment handler beside it throws. The
+     Supabase client resolves with {error} instead of rejecting, so `throw r.error` IS that case,
+     and written as .then(f,r) it sailed straight past r and rejected the whole Promise.all. That
+     threw out of dcLoad with DC.busy still true, and every refresh afterwards found the flag set
+     and returned immediately: one failed query and the page stopped updating for the rest of the
+     day, with nothing on screen to say so. */
+  const call=function(name){
+    return sb.rpc(name).then(function(r){ if(r.error) throw r.error; return {ok:true,d:r.data||[]}; })
+                       .catch(function(e){ return {ok:false,e:e}; });
+  };
+  /* And the flag is cleared in a finally for the same reason: this runs on a timer, so anything
+     that can wedge it stays wedged until somebody reloads the page. */
+  try{
+    const res=await Promise.all([
+      call('erp_usability_daily_feature_checks'),
+      call('erp_usability_workflow_health'),
+      call('erp_usability_transcription_health')
+    ]);
+    if(res[0].ok){ DC.feat=res[0].d; DC.err=null; }
+    else if(first){ DC.feat=null; DC.err=(res[0].e&&res[0].e.message)||'Could not load'; }
+    if(res[1].ok) DC.wf=res[1].d;
+    if(res[2].ok) DC.tr=res[2].d;
+    if(res[0].ok||res[1].ok||res[2].ok){ DC.at=Date.now(); DC.fail=0; } else { DC.fail++; }
+    // nameOf() reads the global PEOPLE; getPeople caches it, so later refreshes cost nothing.
+    try{ await getPeople(); }catch(e){}
+    /* Anything the reader has expanded is re-read too. Those lists are "who used this today" and
+       "which step are these sitting on" — leaving them on the copy fetched when they were opened
+       would mean the one part of the page somebody is actually studying is the one part going
+       stale. There are at most a handful open at a time. */
+    if(!first) await dcRefreshOpen();
+  }finally{ DC.busy=false; }
+}
+/* Re-reads only what is currently expanded, in parallel, and leaves a failed one on its last good
+   rows rather than collapsing a list out from under the reader. */
+async function dcRefreshOpen(){
+  const jobs=[];
+  USB_FEAT_OPEN.forEach(function(key){
+    const r=usbDrillRange();
+    jobs.push(sb.rpc('erp_usability_feature_users',{p_feature_key:key,p_from:r.from,p_to:r.to,p_email:null,p_department:null})
+      .then(function(x){ if(!x.error) USB_FEAT_CACHE[key]=x.data||[]; },function(){}));
+  });
+  USB_WF_OPEN.forEach(function(key){
+    const bits=key.split('|');
+    jobs.push(sb.rpc('erp_usability_workflow_stuck_steps',{p_flow_id:Number(bits[0]),p_state:bits[1]})
+      .then(function(x){ if(!x.error) USB_WF_CACHE[key]=x.data||[]; },function(){}));
+  });
+  if(jobs.length) await Promise.all(jobs);
+}
 VIEWS.daily_checks=async function(v){
   setCrumb(['Administration','Daily Checks']);
   loader(v);
-  await usbLoad();
-  const head=mHead('fa-list-check','#b8902f','Daily Checks');
-  if(USB.rows===null){
-    v.innerHTML=head+'<div class="card card-pad empty" style="margin-top:16px;padding:40px">'
-      +'<i class="fa-solid fa-lock"></i><div>'+esc(USB.err||'Could not load')+'</div></div>';
-    return;
+  await dcLoad(true);
+  /* USB_CSS carries every .usb- class this page borrows from Usability — the expand chevrons, the
+     clickable amber cells, and the drill-down rows. The page never emitted it, which nobody saw
+     while clicking a feature row did nothing (see usbRerenderDetail); with that fixed the lists
+     would have opened unstyled, names and counts run together on one line. It sits outside
+     #dcBody so the minute-by-minute repaint cannot take the stylesheet out with the figures.
+     #dcTop is outside it for the same reason: the Refresh button should not vanish from under a
+     cursor on its way to press it. */
+  v.innerHTML=USB_CSS
+    +mHead('fa-list-check','#b8902f','Daily Checks')
+    +'<div id="dcTop">'+dcTopHtml()+'</div>'
+    +'<div id="dcBody">'+dcBodyHtml()+'</div>';
+  dcStart();
+};
+function dcTopHtml(){
+  return '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:6px 2px 2px">'
+    +'<p style="color:var(--slate);font-size:13px;margin:0;max-width:620px">What needs attention today. '
+      +'Every count is today so far, in IST, with yesterday beneath it — except the call figures, which '
+      +'the overnight pass grades and which say below when they last landed.</p>'
+    +'<div style="display:flex;align-items:center;gap:10px;white-space:nowrap">'
+      +'<span id="dcStamp" style="font-size:12px;color:var(--slate)">'+dcStampText()+'</span>'
+      +'<button class="btn btn-sm" id="dcRefresh" onclick="dcRefreshNow()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
+    +'</div></div>';
+}
+/* "Updated 40 seconds ago", not a clock time: in front of a page that refreshes itself the
+   question is how old this is, and a reader should not have to subtract. A refresh that failed
+   says so rather than letting the age climb as though nothing were wrong. */
+function dcStampText(){
+  if(!DC.at) return '';
+  const s=Math.max(0,Math.round((Date.now()-DC.at)/1000));
+  const ago=s<10?'just now':s<60?(s+' seconds ago'):s<120?'a minute ago':(Math.round(s/60)+' minutes ago');
+  const stale=s>=(DC_EVERY_MS/1000)*2;
+  const ink=DC.fail?'#dc2626':stale?'#b45309':'#16a34a';
+  return '<i class="fa-solid fa-circle" style="font-size:7px;margin-right:6px;vertical-align:middle;color:'+ink+'"></i>'
+    +(DC.fail?('Last updated '+ago+' · could not reach the database'):(s<10?'Updated just now':('Updated '+ago)));
+}
+function dcBodyHtml(){
+  if(DC.feat===null){
+    return '<div class="card card-pad empty" style="margin-top:16px;padding:40px">'
+      +'<i class="fa-solid fa-lock"></i><div>'+esc(DC.err||'Could not load')+'</div></div>';
   }
-  const rows=USB.rows||[];
-  const picks=rows.filter(function(r){ return r.daily_check; });
+  const picks=DC.feat||[];
   /* Grouped by module in the catalogue's own order, so the page reads the way the list was
      written rather than alphabetically. */
   const mods=[]; picks.forEach(function(r){ if(mods.indexOf(r.module_label)===-1) mods.push(r.module_label); });
   const feature=mods.map(function(m){
     return usbDailyChecksHtml(picks.filter(function(r){ return r.module_label===m; }), m);
   }).join('');
-  const none=(!picks.length && !(USB.wfHealth||[]).length && !(USB.trHealth||[]).length)
+  const none=(!picks.length && !(DC.wf||[]).length && !(DC.tr||[]).length)
     ? '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-list-check"></i>'
       +'<div>Nothing is flagged as a daily check yet</div></div>' : '';
-  /* The body is kept behind its own id so expanding a workflow breakdown repaints just this,
-     rather than going through renderPage() — which would re-run usbLoad() and fire both RPCs
-     again on every click. */
-  DC_BODY=function(){ return usbWorkflowHealthHtml()+usbTranscriptionHealthHtml()+feature+none; };
-  v.innerHTML=head
-    +'<p style="color:var(--slate);font-size:13px;margin:6px 2px 2px">What needs attention today. '
-      +'Feature counts cover the last 30 days; workflow figures are live and call figures come from '
-      +'the overnight pass, both with movement from yesterday.</p>'
-    +'<div id="dcBody">'+DC_BODY()+'</div>';
+  return usbWorkflowHealthHtml()+usbTranscriptionHealthHtml()+feature+none;
+}
+/* Repaints the figures in place. Expanding a workflow breakdown comes through here too, rather
+   than through renderPage() — which would re-run the whole view and fire every query again on
+   every click. */
+function dcRepaint(){
+  const b=$('dcBody'); if(b) b.innerHTML=dcBodyHtml();
+  const s=$('dcStamp'); if(s) s.innerHTML=dcStampText();
+}
+/* THE REFRESH LOOP.
+   Two timers on purpose. One re-reads the data every minute; the other re-prints the "updated N
+   seconds ago" line every ten, so the age on screen stays honest between fetches without a fetch
+   being what makes it move.
+   Both stop when the tab goes to the background. Browsers throttle a hidden tab's intervals
+   anyway, so the real choice is whether to be explicit about it — and being explicit is also what
+   stops a laptop left open overnight issuing a query a minute into an empty room. */
+function dcStart(){
+  dcStop();
+  DC_TIMER=setInterval(dcTick,DC_EVERY_MS);
+  DC_CLOCK=setInterval(function(){ const s=$('dcStamp'); if(s) s.innerHTML=dcStampText(); },10000);
+}
+function dcStop(){
+  if(DC_TIMER){ clearInterval(DC_TIMER); DC_TIMER=null; }
+  if(DC_CLOCK){ clearInterval(DC_CLOCK); DC_CLOCK=null; }
+}
+async function dcTick(){
+  if(document.hidden) return;
+  if(!$('dcBody')){ dcStop(); return; }   // the view was replaced under us
+  await dcLoad(false);
+  dcRepaint();
+}
+/* Coming back to the tab reads immediately if what is on screen has had time to go stale, instead
+   of serving out the remainder of a minute that elapsed while nobody was looking. Registered once
+   for the whole bundle, so it has to check it is on the right page before touching anything. */
+document.addEventListener('visibilitychange',function(){
+  if(typeof PAGE==='undefined'||PAGE!=='daily_checks') return;
+  if(document.hidden){ dcStop(); return; }
+  if(!$('dcBody')) return;
+  dcStart();
+  if(!DC.at||(Date.now()-DC.at)>DC_STALE_MS) dcTick();
+});
+window.dcRefreshNow=async function(){
+  const b=$('dcRefresh');
+  if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Refreshing…'; }
+  /* finally, so a button pressed during an outage comes back rather than spinning for ever —
+     redrawing #dcTop is what restores it, and that has to happen however the read ended. */
+  try{ await dcLoad(false); }
+  finally{
+    dcRepaint();
+    const t=$('dcTop'); if(t) t.innerHTML=dcTopHtml();
+    dcStart();   // the minute restarts from this read, not from whenever the last tick happened
+  }
 };
-let DC_BODY=null;
-function dcRepaint(){ const b=$('dcBody'); if(b&&DC_BODY) b.innerHTML=DC_BODY(); }
 /* WORKFLOW HEALTH — one row per workflow, on the Daily Checks page.
    Five of these six are not usage at all: they count where instances are actually sitting, which
-   is the question "is anything stuck" really asks. They are a live snapshot plus yesterday, and
-   they ignore the report's date pickers on purpose — the function's comment explains why. */
+   is the question "is anything stuck" really asks. They are a live snapshot, and they ignore the
+   report's date pickers on purpose — the function's comment explains why.
+   The last three used to be yesterday's totals sitting beside three live ones, which meant one row
+   carried two different days with nothing on screen to say which was which. They are today's now,
+   with yesterday printed under each so the day still has something to be read against. */
 function usbWorkflowHealthHtml(){
-  const rows=USB.wfHealth;
+  const rows=DC.wf;
   if(!rows||!rows.length) return '';
   const warn=function(n){ return Number(n)>0?'color:#b45309;font-weight:700':'color:var(--slate)'; };
+  /* Today over yesterday in one cell. Yesterday is a whole day and today is a part of one, so they
+     are never a fair comparison and the smaller type says as much; it is there for scale — two
+     raised by eleven in the morning means something different depending on whether yesterday saw
+     three or thirty. */
+  const ty=function(t,y,amber){
+    const a=Number(t||0), b=Number(y||0);
+    return '<td><b style="'+(amber&&a?'color:#b45309':'')+'">'+a+'</b>'
+      +'<div style="font-size:11px;color:var(--slate);margin-top:2px;font-weight:400">'+b+' yest</div></td>';
+  };
   return '<div class="card" style="margin-bottom:14px">'
     +'<div class="card-pad" style="padding-bottom:10px">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
         +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-heart-pulse" style="color:#b8902f"></i> Workflow health</div>'
-        +'<div style="font-size:12px;color:var(--slate)">Live right now · movement counts are yesterday</div>'
+        +'<div style="font-size:12px;color:var(--slate)">Counted when you look at it</div>'
       +'</div>'
       +'<div style="font-size:12px;color:var(--slate);margin-top:3px">Where each workflow\'s instances are actually sitting. Click any amber figure to see which step.</div>'
     +'</div>'
@@ -11564,8 +11730,9 @@ function usbWorkflowHealthHtml(){
       +'<th style="width:104px" title="Appeared for someone and not picked up yet">Awaiting receipt</th>'
       +'<th style="width:116px" title="A previous person forwarded it and the next person has not accepted it">Forwarded, not received</th>'
       +'<th style="width:116px" title="Received, and not moved on">Received, not forwarded</th>'
-      +'<th style="width:84px">Raised</th><th style="width:84px">Closed</th>'
-      +'<th style="width:104px" title="Reverts and send-backs — the work going backwards">Reverted</th>'
+      +'<th style="width:84px" title="Started today, with yesterday beneath">Raised</th>'
+      +'<th style="width:84px" title="Finished today, with yesterday beneath">Closed</th>'
+      +'<th style="width:92px" title="Reverts and send-backs — the work going backwards. Today, with yesterday beneath">Reverted</th>'
     +'</tr></thead><tbody>'
     +rows.map(function(r){
         /* The three backlog figures open a step-level breakdown. A count on its own says there is
@@ -11585,9 +11752,12 @@ function usbWorkflowHealthHtml(){
           +cell(r.awaiting_receipt,'awaiting')
           +cell(r.fwd_not_received,'fwd')
           +cell(r.in_hand_not_forwarded,'inhand')
-          +'<td>'+Number(r.raised_yesterday||0)+'</td>'
-          +'<td>'+Number(r.closed_yesterday||0)+'</td>'
-          +'<td style="'+warn(r.reverted_yesterday)+'">'+Number(r.reverted_yesterday||0)+'</td></tr>';
+          +ty(r.raised_today,r.raised_yesterday,false)
+          +ty(r.closed_today,r.closed_yesterday,false)
+          // Work going backwards is the one of the three worth colouring: raising and closing are
+          // the workflow doing its job, a revert is somebody having to do theirs again.
+          +ty(r.reverted_today,r.reverted_yesterday,true)
+          +'</tr>';
         return row+usbWfStuckRowsHtml(r);
       }).join('')
     +'</tbody></table></div></div>';
@@ -11642,9 +11812,12 @@ window.usbToggleWfStuck=async function(flowId,state){
 /* TRANSCRIPTION HEALTH — the five call figures, on the Daily Checks page.
    Like workflow health these are measurements, not usage: how many of yesterday's calls the
    nightly pass transcribed, and how well what the rep typed into the CRM matched what was
-   actually said. The RPC's comment carries the definitions. */
+   actually said. The RPC's comment carries the definitions.
+   The one block on this page that cannot be live, so it is the one block that prints its own age:
+   the pass starts about 00:30 IST and writes nothing after it finishes, and until it runs again
+   these five figures are exactly as fresh as the moment it stopped. */
 function usbTranscriptionHealthHtml(){
-  const rows=USB.trHealth;
+  const rows=DC.tr;
   if(!rows||!rows.length) return '';
   const num=function(n){ return Number(n).toLocaleString('en-IN'); };
   /* Rates keep the decimal even when it is .0, so a column reading 95.5 / 80.0 / 100.0 lines up
@@ -11671,15 +11844,34 @@ function usbTranscriptionHealthHtml(){
     return '<span style="color:'+ink+';font-weight:700;font-size:11.5px">'
       +arrow+' '+Math.abs(d)+(r.is_pct?' pts':'')+'</span>';
   };
+  /* WHEN THE PASS LAST WROTE.
+     last_run is the newest row the pass produced, in either table it writes. If that is today, the
+     run landed and the time is all a reader needs. If it is not today the pass did not run this
+     morning, which IS the check failing — so the line gives the date rather than a bare clock
+     time, which could be read as "a few hours ago", and it is amber rather than grey. */
+  const run=(rows[0]&&rows[0].last_run)?new Date(rows[0].last_run):null;
+  const ist=function(d,opt){ opt=opt||{}; opt.timeZone='Asia/Kolkata'; return d.toLocaleString('en-IN',opt); };
+  let runNote, runInk='var(--slate)';
+  if(!run||isNaN(run.getTime())){
+    runNote='The pass has not written anything yet'; runInk='#b45309';
+  }else{
+    const sameDay=ist(run,{day:'2-digit',month:'2-digit',year:'numeric'})
+                 ===usbIstNow().toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'});
+    runNote=sameDay
+      ? 'Pass last wrote at '+ist(run,{hour:'2-digit',minute:'2-digit'})+' this morning'
+      : 'Pass last wrote on '+ist(run,{day:'numeric',month:'short'})+' — it has not run since';
+    if(!sameDay) runInk='#b45309';
+  }
   return '<div class="card" style="margin-bottom:14px">'
     +'<div class="card-pad" style="padding-bottom:10px">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
         +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-microphone-lines" style="color:#b8902f"></i> Transcription health</div>'
-        +'<div style="font-size:12px;color:var(--slate)">This morning\'s run &middot; against the one before</div>'
+        +'<div style="font-size:12px;color:'+runInk+(runInk==='var(--slate)'?'':';font-weight:700')+'">'
+          +'<i class="fa-regular fa-clock" style="margin-right:5px"></i>'+esc(runNote)+'</div>'
       +'</div>'
       /* Stated plainly because it is the one thing about this table that surprises people: the
          pass runs overnight, so today's column is yesterday's selling. */
-      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">The overnight pass grades the previous day\'s calls, so &ldquo;today&rdquo; is the run that finished this morning. An empty column means it did not run.</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">The only figures here that are not live. The overnight pass grades the previous day\'s calls, so &ldquo;today&rdquo; is the run that finished this morning. An empty column means it did not run.</div>'
     +'</div>'
     +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
       +'<th>Check</th><th style="width:92px">Today</th><th style="width:92px">Yesterday</th>'
@@ -11709,53 +11901,95 @@ function usbTranscriptionHealthHtml(){
       }).join('')
     +'</tbody></table></div></div>';
 }
-/* THE DAILY CHECKS, ABOVE EVERYTHING ELSE.
+/* THE FLAGGED FEATURES.
    A handful of features are looked at every morning; the rest are read when somebody asks a
-   question. Those few are flagged in erp_feature_catalog.daily_check and lifted out here into
-   their own block at the top of the module, because the page below is grouped by TAB — pinning
-   them in place would scatter the Tasks ones away from the Workflow ones and defeat the point.
-   They still appear in their own tab further down, so nothing is hidden or duplicated away.
-   A module with nothing flagged renders nothing at all, rather than an empty card. */
+   question. Those few are flagged in erp_feature_catalog.daily_check and gathered here, grouped by
+   the module they belong to.
+
+   TODAY FIRST, THIRTY DAYS AS CONTEXT. These rows used to carry the thirty-day total alone, which
+   on a page read every morning said nothing: "Create task — 99 uses" is the same sentence it was
+   yesterday and will be tomorrow, and no amount of staring at it reveals whether a task has been
+   created today. Today's count leads now; the thirty-day figure and the activity band keep their
+   own column, because they are what says whether a quiet day is unusual for this feature at all. */
 function usbDailyChecksHtml(rows,heading){
-  const picks=(rows||[]).filter(function(r){ return r.daily_check; });
+  const picks=rows||[];
   if(!picks.length) return '';
   return '<div class="card usb-daily" style="margin:16px 0 18px">'
     +'<div class="card-pad" style="padding-bottom:10px">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-folder-open" style="color:#b8902f"></i> '+esc(heading||'Daily checks')+'</div>'
     +'</div>'
     +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
-      +'<th>Feature</th><th style="width:90px">Uses</th><th style="width:90px">People</th>'
-      +'<th style="width:130px">Last used</th><th style="width:120px">Activity</th>'
+      +'<th>Feature</th>'
+      +'<th style="width:104px" title="Uses so far today, in IST">Today</th>'
+      +'<th style="width:104px">Yesterday</th>'
+      +'<th style="width:124px" title="The last time anybody used it, however long ago">Last used</th>'
+      +'<th style="width:104px" title="The longer view — uses and people over the past 30 days">Last 30 days</th>'
+      +'<th style="width:116px">Activity</th>'
     +'</tr></thead><tbody>'
     +picks.map(function(r){
         const s=usbBandStyle(r.band);
         const open=USB_FEAT_OPEN.has(r.feature_key);
-        const clickable=Number(r.uses||0)>0;
+        const today=Number(r.today_uses||0), yday=Number(r.yday_uses||0);
+        /* The drill-down is today's list of who used it, so a feature nobody has touched today has
+           nothing to expand into. (The Usability page still opens the same feature over whatever
+           range you choose there — this page only ever answers for today.) */
+        const clickable=today>0;
         const chev=clickable
           ? '<span class="usb-feat-chev'+(open?' open':'')+'"><i class="fa-solid fa-chevron-right"></i></span>'
           : '<span class="usb-feat-chev" style="visibility:hidden"><i class="fa-solid fa-chevron-right"></i></span>';
+        const people=function(n){
+          const v=Number(n||0);
+          return v?('<div style="font-size:11px;color:var(--slate);margin-top:2px;font-weight:400">'+v+' '+(v===1?'person':'people')+'</div>'):'';
+        };
+        /* NOTHING YET TODAY IS ONLY WORTH FLAGGING IF SOMETHING NORMALLY HAPPENS.
+           A plain amber zero on every row would be crying wolf at nine in the morning, and on the
+           features nobody has ever used it would be amber for ever. It is amber only where the
+           same check ran yesterday — that is the row where today's silence is a change rather
+           than the usual state of affairs. */
+        const quiet=!today&&yday>0;
+        const todayCell=today
+          ? '<b>'+today.toLocaleString('en-IN')+'</b>'+people(r.today_users)
+          : '<span style="'+(quiet?'color:#b45309;font-weight:700':'color:var(--slate)')+'">'+(quiet?'none yet':'0')+'</span>';
+        /* Last used carries the clock when it is today. On every other row the date is the whole
+           answer, but "today" beside a count of 3 leaves open whether that was at 9am or a minute
+           ago, which on a page that refreshes itself is exactly the difference being watched. */
+        const lu=r.last_used?new Date(r.last_used):null;
+        let lastTxt='—';
+        if(lu&&!isNaN(lu.getTime())){
+          const sameDay=lu.toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'2-digit',year:'numeric'})
+                       ===usbIstNow().toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'});
+          lastTxt=sameDay
+            ? 'Today '+lu.toLocaleString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'})
+            : fmtDate(r.last_used);
+        }
         const row='<tr class="'+(clickable?'usb-feat-row':'')+'"'
           +(clickable?' onclick="usbToggleFeature(\''+escJs(r.feature_key)+'\')"':'')+'>'
           +'<td>'+chev+esc(r.feature)
             +'<span style="font-size:11px;color:var(--slate);margin-left:8px">'+esc(r.tab)+'</span></td>'
-          +'<td><b>'+Number(r.uses||0).toLocaleString('en-IN')+'</b></td>'
-          +'<td>'+Number(r.users||0)+'</td>'
-          +'<td style="color:var(--slate);font-size:12px">'+(r.last_used?esc(fmtDate(r.last_used)):'—')+'</td>'
+          +'<td>'+todayCell+'</td>'
+          +'<td style="color:var(--slate)">'+(yday?('<b style="font-weight:600">'+yday.toLocaleString('en-IN')+'</b>'+people(r.yday_users)):'0')+'</td>'
+          +'<td style="color:var(--slate);font-size:12px">'+esc(lastTxt)+'</td>'
+          +'<td style="color:var(--slate)">'+Number(r.uses||0).toLocaleString('en-IN')+people(r.users)+'</td>'
           +'<td><span class="badge" style="background:'+s.bg+';color:'+s.ink+';white-space:nowrap">'+esc(r.band)+'</span></td></tr>';
-        return row+(open?usbFeatureUsersRowHtml(r):'');
+        return row+(open?usbFeatureUsersRowHtml(r,6):'');
       }).join('')
     +'</tbody></table></div></div>';
 }
 /* The sub-row a clicked feature expands into: who actually used it, most recent first. Loads once
    per feature per filter set (usbLoad clears the cache on any range/person change) and is cached
-   after that, so re-collapsing and re-expanding the same feature costs nothing more. */
-function usbFeatureUsersRowHtml(r){
+   after that, so re-collapsing and re-expanding the same feature costs nothing more. On Daily
+   Checks the cache is instead refreshed with the rest of the page each minute, because there the
+   range is today and a list fetched twenty minutes ago is missing twenty minutes of it.
+   cols is the width of the table this row has to span — five on Usability, six on Daily Checks,
+   which has today and yesterday where the other has one count. */
+function usbFeatureUsersRowHtml(r,cols){
   const cached=USB_FEAT_CACHE[r.feature_key];
   let inner;
   if(cached===undefined){
     inner='<div class="usb-users-wrap"><span style="color:var(--slate);font-size:12.5px"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</span></div>';
   }else if(!cached.length){
-    inner='<div class="usb-users-wrap"><span style="color:var(--slate);font-size:12.5px">Nobody used this in the selected range.</span></div>';
+    inner='<div class="usb-users-wrap"><span style="color:var(--slate);font-size:12.5px">Nobody used this '
+      +(usbDrillIsToday()?'today':'in the selected range')+'.</span></div>';
   }else{
     inner='<div class="usb-users-wrap">'
       +cached.map(function(u){
@@ -11765,7 +11999,17 @@ function usbFeatureUsersRowHtml(r){
       }).join('')
     +'</div>';
   }
-  return '<tr class="usb-users-row"><td colspan="5">'+inner+'</td></tr>';
+  return '<tr class="usb-users-row"><td colspan="'+(cols||5)+'">'+inner+'</td></tr>';
+}
+/* WHICH DATES A DRILL-DOWN COVERS.
+   The list a reader gets by clicking a row has to be the people behind the number they clicked.
+   On Usability that number is the chosen date range; on Daily Checks every figure is today's, so
+   handing back thirty days of names there would answer a question nobody asked and quietly
+   contradict the count sitting next to it. */
+function usbDrillIsToday(){ return typeof PAGE!=='undefined'&&PAGE==='daily_checks'; }
+function usbDrillRange(){
+  if(usbDrillIsToday()){ const d=dcToday(); return {from:d,to:d}; }
+  return usbCurrentRange();
 }
 // Bumped on every open and checked after each round trip below, so a slower request for a feature
 // you have since clicked away from can never win a race against a faster one that came after it and
@@ -11776,7 +12020,7 @@ let USB_EV_TOKEN=0;
    newest first, for exactly this person/feature/range. */
 window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   const myToken=++USB_EV_TOKEN;
-  const r=usbCurrentRange();
+  const r=usbDrillRange();
   openModal(
     '<div class="modal-head"><h3><i class="fa-solid fa-list-check" style="color:#7c3aed"></i> '+esc(nameOf(email))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body"><div id="usbEvWrap"><div class="loader"><div class="spin"></div></div></div></div>'
@@ -12279,7 +12523,7 @@ window.usbToggleFeature=async function(key){
   USB_FEAT_OPEN.add(key);
   usbRerenderDetail();
   if(!(key in USB_FEAT_CACHE)){
-    const r=usbCurrentRange();
+    const r=usbDrillRange();
     try{
       const {data,error}=await sb.rpc('erp_usability_feature_users',{p_feature_key:key,p_from:r.from,p_to:r.to,p_email:USB.email||null,p_department:USB.dept||null});
       if(error)throw error;
@@ -12288,7 +12532,12 @@ window.usbToggleFeature=async function(key){
     usbRerenderDetail();
   }
 };
+/* Daily Checks has no module detail pane. Its feature rows live in #dcBody, and routing their
+   repaint through the Usability one meant $('usbDetailWrap') came back null and the function
+   returned having drawn nothing — so a clicked row on that page expanded into silence, chevron
+   and all, however long you waited. */
 function usbRerenderDetail(){
+  if(typeof PAGE!=='undefined'&&PAGE==='daily_checks'){ dcRepaint(); return; }
   const box=$('usbDetailWrap'); if(!box||!USB.moduleId)return;
   box.innerHTML=usbModuleDetailHtml(USB.moduleId);
 }
@@ -23662,13 +23911,23 @@ async function cpaRenderDocuments(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   const unitOpts=units.map(u=>`<option value="${u.id}">${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}</option>`).join('');
-  host.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+  host.innerHTML=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
     <div class="card card-pad frm"><div class="sec-title">Project documents (brochure / legal)</div>
-    <label>Project</label><select id="cpaPdProject">${projOpts}</select>
-    <label>Document type</label><select id="cpaPdType">${Object.keys(CPA_PROJECT_DOC_TYPES).map(k=>`<option value="${k}">${CPA_PROJECT_DOC_TYPES[k]}</option>`).join('')}</select>
-    <label>Title (optional)</label><input id="cpaPdTitle">
-    <label>File</label><input type="file" id="cpaPdFile">
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaPdBtn" onclick="cpaUploadProjectDoc()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <label>Project</label><select id="cpaPdProject" onchange="cpaPdLoad()">${projOpts}</select>
+    <label>Document type</label><select id="cpaPdType" onchange="cpaPdDraw()">${Object.keys(CPA_PROJECT_DOC_TYPES).map(k=>`<option value="${k}"${k==='legal'?' selected':''}>${CPA_PROJECT_DOC_TYPES[k]}</option>`).join('')}</select>
+    <label>Files or folders</label>
+    <div class="dropzone" id="cpaPdDrop" onclick="document.getElementById('cpaPdFile').click()"
+      ondragover="event.preventDefault();this.style.borderColor='var(--brand)'" ondragleave="this.style.borderColor=''" ondrop="cpaPdDrop(event)">
+      <i class="fa-solid fa-cloud-arrow-up"></i><div>Drag &amp; drop files or a whole folder here</div>
+      <div style="font-size:12px;margin-top:4px">Folders inside it are kept as sections, exactly as they are named. Untick anything customers should not see.</div></div>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <button class="btn btn-sm" onclick="document.getElementById('cpaPdFile').click()"><i class="fa-solid fa-file"></i> Choose files</button>
+      <button class="btn btn-sm" onclick="document.getElementById('cpaPdDir').click()"><i class="fa-solid fa-folder-open"></i> Choose folder</button></div>
+    <input type="file" id="cpaPdFile" class="hidden" multiple onchange="cpaPdAdd([...this.files].map(f=>({file:f,path:''})),false);this.value=''">
+    <input type="file" id="cpaPdDir" class="hidden" webkitdirectory multiple onchange="cpaPdAdd([...this.files].map(f=>({file:f,path:f.webkitRelativePath||''})),true);this.value=''">
+    <div id="cpaPdQueue" style="margin-top:8px"></div>
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary" id="cpaPdBtn" onclick="cpaUploadProjectDocs()" disabled><i class="fa-solid fa-upload"></i> Upload</button>
+      <button class="btn btn-sm hidden" id="cpaPdClear" onclick="cpaPdClear()">Clear list</button></div>
     </div>
     <div class="card card-pad frm"><div class="sec-title">Customer documents (per flat)</div>
     <label>Unit</label><select id="cpaCdUnit">${unitOpts}</select>
@@ -23677,12 +23936,16 @@ async function cpaRenderDocuments(host){
     <label>File</label><input type="file" id="cpaCdFile">
     <div style="margin-top:12px"><button class="btn btn-primary" id="cpaCdBtn" onclick="cpaUploadCustomerDoc()"><i class="fa-solid fa-upload"></i> Upload</button></div>
     </div></div>
+    <div class="card card-pad" style="margin-top:16px"><div class="sec-title" id="cpaPdListTitle">Project documents on the portal</div>
+    <div id="cpaPdList"><div class="loader"><div class="spin"></div></div></div></div>
     <div class="card card-pad frm" style="margin-top:16px"><div class="sec-title">Process explainer videos (company-wide — every customer sees these, regardless of project)</div>
     <div class="two"><div><label>Process</label><select id="cpaPvCategory">${Object.keys(CPA_VIDEO_CATEGORIES).map(k=>`<option value="${k}">${CPA_VIDEO_CATEGORIES[k]}</option>`).join('')}</select></div><div><label>Title (optional)</label><input id="cpaPvTitle"></div></div>
     <label>Video file</label><input type="file" id="cpaPvFile" accept="video/*">
     <div style="margin-top:12px"><button class="btn btn-primary" id="cpaPvBtn" onclick="cpaUploadProcessVideo()"><i class="fa-solid fa-upload"></i> Upload</button></div>
     <div id="cpaPvList" style="margin-top:16px"></div>
     </div>`;
+  if(!CPA_PD.busy) CPA_PD.files=[];   // coming back mid-upload keeps the batch it is still sending
+  cpaPdLoad();
   cpaRenderProcessVideoList();
 }
 async function cpaRenderProcessVideoList(){
@@ -23710,16 +23973,310 @@ window.cpaDeleteProcessVideo=async function(id){
   if(error){toast('Delete failed: '+error.message,'err');return;}
   toast('Video removed','ok');cpaRenderProcessVideoList();
 };
-window.cpaUploadProjectDoc=async function(){
-  const projectId=Number($('cpaPdProject').value),docType=$('cpaPdType').value,title=$('cpaPdTitle').value.trim()||null;
-  const f=$('cpaPdFile').files[0];if(!f){toast('Choose a file','err');return;}
-  const btn=$('cpaPdBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
-  const {data,error}=await uploadFileToS3(s3KeyForProjectDoc(projectId,docType,f.name),f);
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(error){toast('Upload failed: '+error.message,'err');return;}
-  const {error:insErr}=await sb.schema('cust').from('project_documents').insert({project_id:projectId,doc_type:docType,title,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-  if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');return;}
-  toast('Document uploaded','ok');$('cpaPdFile').value='';
+/* PROJECT DOCUMENTS: FILES OR WHOLE FOLDERS, EVERY PROJECT ITS OWN SHAPE (29 Oct 2026). A project's
+   legal set lives in Drive as folders inside folders - board resolutions, deeds, trade licence, land
+   papers - and every project's tree is different, with names nobody knows in advance. So the portal
+   keeps no list of sections: it keeps whatever tree is uploaded. Drop or choose a folder and every
+   file in it, at any depth, is queued with its folder path (project_documents.folder, 'A/B'). The
+   dropped folder's own name is left out, so its sub-folders become the sections and its loose files
+   sit at the top. Before anything goes up, the queue shows each folder with tick boxes - untick what
+   customers should not see. Unticked from the start: a Word file when the same folder has a PDF of
+   the same name, and a file already on the portal in that folder; system files (desktop.ini,
+   .DS_Store, ~$ temp files) are not queued at all. Files go up three at a time and a failure stays
+   queued for a retry. The list below the cards shows exactly what the project's customers see, by
+   folder, with rename (title, or folder - its sub-folders move with it), move and remove (remove
+   hides the row; the file stays on S3). */
+const CPA_PD={files:[],existing:[],busy:false,seq:0,qGroups:[],lGroups:[]};
+const CPA_PD_JUNK=/^(\.|~\$)|^(desktop\.ini|thumbs\.db)$/i;
+function cpaPdName(d){ return d.title||(d.file_name||'Document').replace(/\.[^.]+$/,''); }
+function cpaPdTitleFromFile(name){ return name.replace(/\.[^.]+$/,'').replace(/[_]+/g,' ').replace(/\s+/g,' ').trim(); }
+function cpaPdFolderNorm(p){ return String(p||'').split(/[\\/]+/).map(s=>s.replace(/\s+/g,' ').trim()).filter(Boolean).join('/'); }
+function cpaPdFolderLabel(p){ return p?p.split('/').join(' › '):'Not in a folder'; }
+function cpaPdSort(a,b){ return String(a).localeCompare(String(b),undefined,{numeric:true,sensitivity:'base'}); }
+// [[folder, docs]] - loose files first, then folders by name, each folder's documents by title
+function cpaPdGroups(docs,nameOf){
+  const by={};(docs||[]).forEach(d=>{const k=d.folder||'';(by[k]=by[k]||[]).push(d);});
+  return Object.keys(by).sort((a,b)=>a===''?-1:b===''?1:cpaPdSort(a,b)).map(k=>[k,by[k].sort((x,y)=>cpaPdSort(nameOf(x),nameOf(y)))]);
+}
+function cpaPdOnPortal(q,type){
+  const n=q.file.name.toLowerCase();
+  return CPA_PD.existing.some(d=>d.doc_type===type&&(d.folder||'')===q.folder&&(d.file_name||'').toLowerCase()===n);
+}
+function cpaPdWordTwin(q){
+  if(!/\.docx?$/i.test(q.file.name)) return false;
+  const base=q.file.name.replace(/\.[^.]+$/,'').toLowerCase();
+  return CPA_PD.files.some(o=>o!==q&&o.folder===q.folder&&/\.pdf$/i.test(o.file.name)&&o.file.name.replace(/\.[^.]+$/,'').toLowerCase()===base);
+}
+window.cpaPdAdd=function(items,fromFolder){
+  if(CPA_PD.busy) return;
+  const all=[...(items||[])].map(it=>{
+    const segs=cpaPdFolderNorm(it.path).split('/').filter(Boolean);
+    if(segs.length) segs.pop();                       // the file's own name
+    return {file:it.file,segs};
+  });
+  const list=all.filter(it=>!CPA_PD_JUNK.test(it.file.name)&&it.file.size>0);
+  // One folder dropped or chosen: its own name is not a section - what is inside it is.
+  if(fromFolder&&list.length&&list.every(it=>it.segs.length&&it.segs[0]===list[0].segs[0])) list.forEach(it=>it.segs.shift());
+  const type=$('cpaPdType').value, fresh=[];
+  list.forEach(it=>{
+    const folder=it.segs.join('/');
+    if(CPA_PD.files.some(q=>q.folder===folder&&q.file.name===it.file.name&&q.file.size===it.file.size)) return;   // picked twice
+    const q={id:++CPA_PD.seq,file:it.file,folder,title:cpaPdTitleFromFile(it.file.name),on:true};
+    CPA_PD.files.push(q);fresh.push(q);
+  });
+  fresh.forEach(q=>{ if(cpaPdOnPortal(q,type)||cpaPdWordTwin(q)) q.on=false; });
+  const junk=all.length-list.length;
+  if(junk) toast(junk+' system or empty file'+(junk===1?' was':'s were')+' left out','info');
+  cpaPdDraw();
+};
+window.cpaPdDrop=async function(e){
+  e.preventDefault(); e.currentTarget.style.borderColor='';
+  const dt=e.dataTransfer;if(!dt||CPA_PD.busy)return;
+  // entries must be taken before the first await - the drop's data is gone after it
+  const entries=[...(dt.items||[])].map(it=>it.webkitGetAsEntry&&it.webkitGetAsEntry()).filter(Boolean);
+  if(!entries.length){ cpaPdAdd([...(dt.files||[])].map(f=>({file:f,path:''})),false); return; }
+  const host=$('cpaPdQueue');if(host)host.innerHTML='<div style="font-size:13px;color:var(--slate);padding:6px 0"><i class="fa-solid fa-spinner fa-spin"></i> Reading the folder…</div>';
+  const out=[];
+  const readAll=dir=>new Promise((res,rej)=>{const r=dir.createReader(),acc=[];const step=()=>r.readEntries(b=>{if(!b.length)res(acc);else{acc.push(...b);step();}},rej);step();});
+  const walk=async ent=>{
+    if(ent.isFile) out.push({file:await new Promise((res,rej)=>ent.file(res,rej)),path:ent.fullPath.replace(/^\//,'')});
+    else if(ent.isDirectory) for(const c of await readAll(ent)) await walk(c);
+  };
+  try{ for(const en of entries) await walk(en); }
+  catch(err){ toast('Could not read the folder: '+(err&&err.message||err),'err'); }
+  cpaPdAdd(out,entries.length===1&&entries[0].isDirectory);
+};
+window.cpaPdTitle=function(id,v){ const q=CPA_PD.files.find(x=>x.id===id); if(q) q.title=v; };
+window.cpaPdTick=function(id,on){ const q=CPA_PD.files.find(x=>x.id===id); if(q){ q.on=on; cpaPdDraw(); } };
+window.cpaPdTickFolder=function(gi,on){ const k=CPA_PD.qGroups[gi]; CPA_PD.files.forEach(q=>{ if(q.folder===k) q.on=on; }); cpaPdDraw(); };
+window.cpaPdRenameQueued=function(gi,v){
+  const old=CPA_PD.qGroups[gi], nw=cpaPdFolderNorm(v);
+  CPA_PD.files.forEach(q=>{ if(q.folder===old) q.folder=nw; else if(old&&q.folder.startsWith(old+'/')) q.folder=nw+q.folder.slice(old.length); });
+  cpaPdDraw();
+};
+window.cpaPdClear=function(){ if(!CPA_PD.busy){ CPA_PD.files=[]; cpaPdDraw(); } };
+function cpaPdStatus(q,type){
+  return q.state==='up'?'<span style="color:var(--brand)"><i class="fa-solid fa-spinner fa-spin"></i> Uploading…</span>'
+    :q.state==='ok'?'<span class="tag t-green">Uploaded</span>'
+    :q.state==='err'?'<span class="tag t-red" title="'+esc(q.err||'')+'">Failed — will retry</span>'
+    :cpaPdOnPortal(q,type)?'<span class="tag t-amber">Already on the portal</span>'
+    :cpaPdWordTwin(q)?'<span class="tag t-gray">Word copy of a PDF</span>'
+    :q.file.size>25*1024*1024?'<span class="tag t-amber" title="Customers on mobile data will find this slow to download">Large file</span>':'';
+}
+window.cpaPdDraw=function(){
+  const host=$('cpaPdQueue');if(!host)return;
+  const type=$('cpaPdType').value, dis=CPA_PD.busy?'disabled':'';
+  const groups=cpaPdGroups(CPA_PD.files,q=>q.title);
+  CPA_PD.qGroups=groups.map(g=>g[0]);
+  const ticked=CPA_PD.files.filter(q=>q.on).length, nFolders=groups.filter(g=>g[0]).length;
+  const top=host.firstElementChild&&host.querySelector('.cpa-pdq-scroll'), keep=top?top.scrollTop:0;
+  host.innerHTML=!CPA_PD.files.length?'':
+    `<div style="font-size:12.5px;color:var(--slate);margin:2px 0 6px">${CPA_PD.files.length} file${CPA_PD.files.length===1?'':'s'}${nFolders?' in '+nFolders+' folder'+(nFolders===1?'':'s'):''} · <b style="color:var(--ink)">${ticked} ticked</b> to upload</div>
+    <div class="cpa-pdq-scroll" style="max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:9px">`
+    +groups.map(([folder,qs],gi)=>{
+      const allOn=qs.every(q=>q.on), someOn=qs.some(q=>q.on);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--line-2,#f1f5f9);position:sticky;top:0;z-index:1">
+          <input type="checkbox" ${allOn?'checked':''} ${dis} onchange="cpaPdTickFolder(${gi},this.checked)" title="Tick or untick the whole folder" style="width:auto;margin:0" ${!allOn&&someOn?'data-mixed="1"':''}>
+          <i class="fa-solid ${folder?'fa-folder':'fa-file-lines'}" style="color:${folder?'#d97706':'var(--slate)'}"></i>
+          ${folder?`<input value="${esc(folder.split('/').join(' / '))}" ${dis} onchange="cpaPdRenameQueued(${gi},this.value)" title="Folder name customers will see - edit to rename"
+            style="flex:1;min-width:0;font-size:13px;font-weight:700;border:1px solid transparent;border-radius:6px;padding:4px 6px;background:transparent;color:var(--ink);margin:0" onfocus="this.style.borderColor='var(--line)'" onblur="this.style.borderColor='transparent'">`
+            :'<span style="flex:1;font-size:13px;font-weight:700">Not in a folder</span>'}
+          <span style="font-size:12px;color:var(--slate);white-space:nowrap">${qs.filter(q=>q.on).length}/${qs.length}</span></div>`
+        +qs.map(q=>`<div style="display:flex;align-items:center;gap:9px;padding:6px 10px;border-top:1px solid var(--line-2);${q.on?'':'opacity:.55'}">
+          <input type="checkbox" ${q.on?'checked':''} ${dis} onchange="cpaPdTick(${q.id},this.checked)" style="width:auto;margin:0">${fileIcon(q.file.name.split('.').pop())}
+          <div style="flex:1;min-width:0"><input value="${esc(q.title)}" oninput="cpaPdTitle(${q.id},this.value)" ${dis} placeholder="Title customers will see"
+            style="width:100%;font-size:13px;font-weight:500;border:1px solid var(--line);border-radius:7px;padding:5px 8px;color:var(--ink);margin:0">
+          <div style="font-size:11.5px;color:var(--slate);margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">${esc(q.file.name)} · ${fmtBytes(q.file.size)}</span><span id="cpaPdSt${q.id}">${cpaPdStatus(q,type)}</span></div></div></div>`).join('');
+    }).join('')+'</div>';
+  host.querySelectorAll('input[data-mixed]').forEach(c=>{ c.indeterminate=true; });
+  const sc=host.querySelector('.cpa-pdq-scroll'); if(sc) sc.scrollTop=keep;
+  const btn=$('cpaPdBtn'), clr=$('cpaPdClear');
+  if(clr) clr.classList.toggle('hidden',!CPA_PD.files.length||CPA_PD.busy);
+  if(btn&&!CPA_PD.busy){
+    btn.disabled=!ticked;
+    btn.innerHTML='<i class="fa-solid fa-upload"></i> '+(ticked>1?'Upload '+ticked+' files':'Upload');
+  }
+};
+window.cpaPdLoad=async function(){
+  const sel=$('cpaPdProject');if(!sel)return;
+  const pid=Number(sel.value);
+  const {data,error}=await sb.schema('cust').from('project_documents').select('*').eq('project_id',pid).is('deleted_at',null);
+  if(!$('cpaPdProject')||Number($('cpaPdProject').value)!==pid) return;   // switched project meanwhile
+  if(error){ $('cpaPdList').innerHTML='<div class="empty">Could not load documents: '+esc(error.message)+'</div>'; return; }
+  CPA_PD.existing=data||[];
+  cpaPdDraw(); cpaPdDrawList();
+};
+/* FOLDERS SHOW AS A TREE (29 Oct 2026). Listed as flat paths, a deep Drive folder read as
+   "LIC HOUSING FINANCE › Doltala_docs › PORCHA" over and over. Now each folder sits inside its
+   parent under its own name only - its files first, then its sub-folders, indented with a guide
+   line - and every level opens and closes by itself, for staff and customers alike. A folder's
+   count includes everything under it. */
+function cpaPdTree(docs,nameOf){
+  const root={name:'',path:'',docs:[],kids:[]};
+  (docs||[]).forEach(d=>{
+    let node=root;
+    (d.folder||'').split('/').filter(Boolean).forEach(seg=>{
+      let k=node.kids.find(c=>c.name===seg);
+      if(!k){ k={name:seg,path:node.path?node.path+'/'+seg:seg,docs:[],kids:[]}; node.kids.push(k); }
+      node=k;
+    });
+    node.docs.push(d);
+  });
+  const fin=n=>{ n.docs.sort((a,b)=>cpaPdSort(nameOf(a),nameOf(b))); n.kids.sort((a,b)=>cpaPdSort(a.name,b.name)); n.kids.forEach(fin);
+    n.total=n.docs.length+n.kids.reduce((s,k)=>s+k.total,0); };
+  fin(root);
+  return root;
+}
+function cpaPdTreePaths(n){ return n.kids.reduce((a,k)=>a.concat([k.path],cpaPdTreePaths(k)),[]); }
+// o.table(docs) -> html for a folder's own files; o.open(node,depth) -> start open?; o.tools(node) -> extra summary html
+function cpaPdTreeHtml(node,o,depth){
+  depth=depth||0;
+  const css=depth?'':'<style>.cpa-pdt>summary{list-style:none}.cpa-pdt>summary::-webkit-details-marker{display:none}'
+    +'.cpa-pdt>summary .cpa-pdt-chev{transition:transform .15s}.cpa-pdt[open]>summary .cpa-pdt-chev{transform:rotate(90deg)}</style>';
+  return css+(node.docs.length?o.table(node.docs):'')+node.kids.map(k=>
+    `<details class="cpa-pdt" ${o.open(k,depth)?'open':''} style="margin:6px 0 0">
+      <summary style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--card);font-size:13.5px;font-weight:600">
+        <i class="fa-solid fa-chevron-right cpa-pdt-chev" style="font-size:11px;color:var(--slate)"></i><i class="fa-solid fa-folder" style="color:#d97706"></i>
+        <span style="min-width:0;overflow-wrap:anywhere">${esc(k.name)}</span>
+        <span style="color:var(--slate);font-weight:500;font-size:12px;white-space:nowrap">· ${k.total} document${k.total===1?'':'s'}</span>${o.tools?o.tools(k):''}</summary>
+      <div style="margin:8px 0 4px 14px;padding-left:12px;border-left:2px solid var(--line)">${cpaPdTreeHtml(k,o,depth+1)}</div></details>`).join('');
+}
+function cpaPdDrawList(){
+  const host=$('cpaPdList');if(!host)return;
+  const sel=$('cpaPdProject'), proj=sel.options[sel.selectedIndex]?sel.options[sel.selectedIndex].text:'';
+  $('cpaPdListTitle').textContent='What '+proj+' customers see';
+  CPA_PD.lGroups=[];
+  const inputCss='font-size:13px;border:1px solid transparent;border-radius:6px;padding:5px 8px;background:transparent;color:var(--ink);margin:0';
+  const focus=`onfocus="this.style.borderColor='var(--line)'" onblur="this.style.borderColor='transparent'"`;
+  host.innerHTML=Object.keys(CPA_PROJECT_DOC_TYPES).map(t=>{
+    const docs=CPA_PD.existing.filter(d=>d.doc_type===t);
+    const root=cpaPdTree(docs,cpaPdName), many=docs.length>30;
+    const dl='cpaPdDl_'+t;
+    const table=ds=>cpaTable(['Title (click to rename)','Folder (type to move)','Size','Uploaded','Actions'],ds.map(d=>[
+      `<div style="display:flex;align-items:center;gap:8px;min-width:240px">${fileIcon((d.file_name||'').split('.').pop())}<input value="${esc(cpaPdName(d))}" title="${esc(d.file_name||'')}" onchange="cpaPdRename(${d.id},this)" style="flex:1;${inputCss}" ${focus}></div>`,
+      `<input value="${esc((d.folder||'').split('/').join(' / '))}" list="${dl}" placeholder="No folder" onchange="cpaPdMove(${d.id},this)" style="min-width:150px;${inputCss}" ${focus}>`,
+      fmtBytes(d.file_size),
+      fmtDate(d.created_at)+(d.uploaded_by?'<div style="font-size:11.5px;color:var(--slate)">'+esc(String(d.uploaded_by).split('@')[0])+'</div>':''),
+      `<button class="btn btn-sm" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\'")}')"><i class="fa-solid fa-eye"></i> View</button> <button class="btn btn-sm btn-danger" onclick="cpaPdDelete(${d.id})">Remove</button>`]))
+      +'<div style="margin-bottom:4px"></div>';
+    return '<div style="font-size:13px;font-weight:700;color:var(--ink);margin:'+(t==='brochure'?'4px':'16px')+' 0 8px">'+esc(CPA_PROJECT_DOC_TYPES[t])+' <span style="color:var(--slate);font-weight:500">· '+docs.length+'</span></div>'
+      +`<datalist id="${dl}">${cpaPdTreePaths(root).map(p=>'<option value="'+esc(p.split('/').join(' / '))+'">').join('')}</datalist>`
+      +(!docs.length?'<div style="font-size:13px;color:var(--slate);padding:2px 0 4px">None yet.</div>':cpaPdTreeHtml(root,{
+        table,
+        open:(n,depth)=>!many||depth===0,
+        tools:n=>{ const gi=CPA_PD.lGroups.push({type:t,folder:n.path})-1;
+          return `<span style="margin-left:auto;display:flex;gap:6px;flex-shrink:0"><button class="btn btn-sm" style="font-weight:500" onclick="event.preventDefault();cpaPdRenameFolder(${gi})"><i class="fa-solid fa-pen"></i> Rename</button>`
+            +`<button class="btn btn-sm btn-danger" style="font-weight:500" onclick="event.preventDefault();cpaPdDeleteFolder(${gi})"><i class="fa-solid fa-trash"></i> Delete folder</button></span>`; }
+      }));
+  }).join('');
+}
+window.cpaPdRename=async function(id,inp){
+  const d=CPA_PD.existing.find(x=>x.id===id);if(!d)return;
+  const title=inp.value.trim();
+  if(!title){inp.value=cpaPdName(d);toast('The title cannot be empty','err');return;}
+  const {error}=await sb.schema('cust').from('project_documents').update({title}).eq('id',id);
+  if(error){inp.value=cpaPdName(d);toast('Rename failed: '+error.message,'err');return;}
+  d.title=title;toast('Title saved','ok');
+};
+window.cpaPdMove=async function(id,inp){
+  const d=CPA_PD.existing.find(x=>x.id===id);if(!d)return;
+  const folder=cpaPdFolderNorm(inp.value)||null;
+  const {error}=await sb.schema('cust').from('project_documents').update({folder}).eq('id',id);
+  if(error){toast('Move failed: '+error.message,'err');cpaPdDrawList();return;}
+  toast(folder?'Moved to '+cpaPdFolderLabel(folder):'Moved out of its folder','ok');cpaPdLoad();
+};
+window.cpaPdRenameFolder=async function(gi){
+  const g=CPA_PD.lGroups[gi];if(!g||!g.folder)return;
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-folder"></i> Rename folder</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Folder name customers see <span style="color:#94a3b8;font-weight:400">(use / for a folder inside a folder)</span></label>
+    <input id="cpaPdFolderName" value="${esc(g.folder.split('/').join(' / '))}"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="cpaPdRenameFolderSave(${gi})">Save</button></div>`);
+  setTimeout(()=>{const i=$('cpaPdFolderName');if(i){i.focus();i.select();}},50);
+};
+window.cpaPdRenameFolderSave=async function(gi){
+  const g=CPA_PD.lGroups[gi];if(!g)return;
+  const old=g.folder, nw=cpaPdFolderNorm($('cpaPdFolderName').value);
+  if(!nw){toast('The folder needs a name','err');return;}
+  closeModal();
+  if(nw===old)return;
+  const pid=Number($('cpaPdProject').value);
+  // the folder and every folder inside it, one update per folder path
+  const paths=[...new Set(CPA_PD.existing.filter(d=>d.doc_type===g.type&&d.folder&&(d.folder===old||d.folder.startsWith(old+'/'))).map(d=>d.folder))];
+  for(const p of paths){
+    const {error}=await sb.schema('cust').from('project_documents').update({folder:nw+p.slice(old.length)})
+      .eq('project_id',pid).eq('doc_type',g.type).eq('folder',p).is('deleted_at',null);
+    if(error){toast('Rename failed: '+error.message,'err');break;}
+  }
+  toast('Folder renamed','ok');cpaPdLoad();
+};
+/* A folder goes with everything under it - its own documents and every sub-folder's, at any depth.
+   Like a single Remove it only hides the rows (deleted_at); the files stay on S3. */
+window.cpaPdDeleteFolder=async function(gi){
+  const g=CPA_PD.lGroups[gi];if(!g||!g.folder)return;
+  const inside=d=>d.doc_type===g.type&&d.folder&&(d.folder===g.folder||d.folder.startsWith(g.folder+'/'));
+  const docs=CPA_PD.existing.filter(inside);
+  if(!docs.length)return;
+  const subs=new Set();
+  docs.forEach(d=>{ const rest=d.folder.slice(g.folder.length+1).split('/').filter(Boolean); rest.forEach((_,i)=>subs.add(rest.slice(0,i+1).join('/'))); });
+  const name=g.folder.split('/').pop();
+  if(!await confirmDialog('Delete the folder "'+name+'"'+(subs.size?' and the '+subs.size+' folder'+(subs.size===1?'':'s')+' inside it':'')+'? '
+      +docs.length+' document'+(docs.length===1?'':'s')+' will be removed from the customer portal, and customers of this project will no longer see them.',
+      {title:'Delete folder',okLabel:'Delete folder'}))return;
+  const ids=docs.map(d=>d.id), when=new Date().toISOString();
+  for(let i=0;i<ids.length;i+=200){
+    const {error}=await sb.schema('cust').from('project_documents').update({deleted_at:when,deleted_by:state.email}).in('id',ids.slice(i,i+200)).is('deleted_at',null);
+    if(error){toast('Delete failed: '+error.message,'err');cpaPdLoad();return;}
+  }
+  toast('Folder "'+name+'" deleted · '+docs.length+' document'+(docs.length===1?'':'s')+' removed','ok');cpaPdLoad();
+};
+window.cpaPdDelete=async function(id){
+  const d=CPA_PD.existing.find(x=>x.id===id);if(!d)return;
+  if(!await confirmDialog('Remove "'+cpaPdName(d)+'" from the customer portal? Customers of this project will no longer see it.',{okLabel:'Remove'}))return;
+  const {error}=await sb.schema('cust').from('project_documents').update({deleted_at:new Date().toISOString(),deleted_by:state.email}).eq('id',id);
+  if(error){toast('Remove failed: '+error.message,'err');return;}
+  toast('Document removed','ok');cpaPdLoad();
+};
+window.cpaUploadProjectDocs=async function(){
+  if(CPA_PD.busy)return;
+  const projectId=Number($('cpaPdProject').value),docType=$('cpaPdType').value;
+  const todo=CPA_PD.files.filter(q=>q.on);
+  if(!todo.length){toast('Tick at least one file','err');return;}
+  if(todo.some(q=>!String(q.title||'').trim())){toast('Every ticked file needs a title','err');return;}
+  CPA_PD.busy=true;cpaPdDraw();
+  // a big folder takes minutes - closing the tab or reloading part-way asks first
+  const stay=e=>{ e.preventDefault(); e.returnValue=''; };
+  window.addEventListener('beforeunload',stay);
+  const btn=$('cpaPdBtn'), lock=v=>['cpaPdProject','cpaPdType'].forEach(id=>{ if($(id)) $(id).disabled=v; });
+  btn.disabled=true;lock(true);
+  const show=q=>{ const s=$('cpaPdSt'+q.id); if(s) s.innerHTML=cpaPdStatus(q,docType); };
+  let next=0,done=0,ok=0;
+  const one=async q=>{
+    q.state='up';q.err=null;show(q);
+    const f=q.file;
+    // a busy moment (network blip, access check timing out) should not fail a file in a batch of
+    // hundreds: try again after 2s and 5s before calling it failed
+    let up;
+    for(let a=0;a<3;a++){
+      up=await uploadFileToS3(s3KeyForProjectDoc(projectId,docType,f.name),f);
+      if(!up.error||/do not have access/i.test(up.error.message||'')) break;
+      if(a<2) await new Promise(r=>setTimeout(r,a?5000:2000));
+    }
+    const {data,error}=up;
+    if(error){q.state='err';q.err=error.message;return;}
+    const {error:insErr}=await sb.schema('cust').from('project_documents').insert({project_id:projectId,doc_type:docType,folder:q.folder||null,title:q.title.trim(),storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+    if(insErr){q.state='err';q.err=insErr.message;return;}
+    q.state='ok';ok++;
+  };
+  const worker=async()=>{ while(next<todo.length){ const q=todo[next++]; await one(q); done++; show(q); btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${done}/${todo.length}…`; } };
+  btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading 0/${todo.length}…`;
+  await Promise.all([worker(),worker(),worker()]);
+  CPA_PD.files=CPA_PD.files.filter(q=>q.state!=='ok');
+  CPA_PD.busy=false;lock(false);
+  window.removeEventListener('beforeunload',stay);
+  const failed=todo.length-ok;
+  if(ok) toast(ok+' document'+(ok===1?'':'s')+' uploaded'+(failed?' · '+failed+' failed — press Upload to retry':''),failed?'warn':'ok');
+  else toast('Upload failed: '+(todo[0].err||'unknown error'),'err');
+  await cpaPdLoad();
 };
 window.cpaUploadCustomerDoc=async function(){
   const unitId=Number($('cpaCdUnit').value),docType=$('cpaCdType').value,title=$('cpaCdTitle').value.trim()||null;
@@ -25899,11 +26456,24 @@ async function custTabDocuments(unit){
     sb.schema('cust').from('project_documents').select('*').eq('project_id',unit.project_id).is('deleted_at',null),
     sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).is('deleted_at',null)
   ]);
-  const docRow=d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Document'),fmtDate(d.created_at),
+  const docRow=d=>[fileIcon(d.file_type||'')+' '+esc(cpaPdName(d)),fmtDate(d.created_at),
     `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'download').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`];
-  const pRows=(pDocs||[]).map(docRow),cRows=(cDocs||[]).map(docRow);
+  const cRows=(cDocs||[]).map(docRow);
+  // A project can carry dozens of legal papers in folders of its own (whatever tree the team
+  // uploaded), so they are grouped by type and shown as that folder tree - loose files first,
+  // each folder inside its parent, every level closed until tapped (a lone top folder starts open).
+  const pGroups=Object.keys(CPA_PROJECT_DOC_TYPES).map(t=>{
+    const docs=(pDocs||[]).filter(d=>d.doc_type===t);
+    if(!docs.length) return '';
+    const root=cpaPdTree(docs,cpaPdName);
+    return '<div style="font-size:13px;font-weight:700;color:var(--slate);margin:0 0 8px">'+esc(CPA_PROJECT_DOC_TYPES[t])+'</div>'
+      +cpaPdTreeHtml(root,{
+        table:ds=>cpaTable(['Document','Shared on','Download'],ds.map(docRow))+'<div style="margin-bottom:4px"></div>',
+        open:(n,depth)=>depth===0&&root.kids.length===1&&!root.docs.length
+      })+'<div style="margin-bottom:14px"></div>';
+  }).join('');
   return '<div class="sec-title" style="margin:0 0 10px">Project documents</div>'+
-    (pRows.length?cpaTable(['Document','Shared on','Download'],pRows):'<div class="card card-pad empty">No project documents shared yet.</div>')+
+    (pGroups||'<div class="card card-pad empty">No project documents shared yet.</div>')+
     '<div class="sec-title" style="margin:20px 0 10px">My documents</div>'+
     (cRows.length?cpaTable(['Document','Shared on','Download'],cRows):'<div class="card card-pad empty">No personal documents shared yet.</div>');
 }
