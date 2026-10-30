@@ -10,7 +10,11 @@
   const L=()=>ENG.L;
   const PAGE_SIZE=100;
   const me=()=>lc(state.email);
-  const canVerify=r=>r.status==='Entered'&&(state.super||lc(r.entered_by)!==me());
+  /* Verification is the step that makes work billable, so it only applies once the work is on an
+     order - there is no contractor to pay until then, and the database refuses it too. */
+  const attached=r=>r.attached!==false;
+  const canVerify=r=>attached(r)&&r.status==='Entered'&&(state.super||lc(r.entered_by)!==me());
+  const canAttach=r=>!attached(r)&&(state.super||lc(r.entered_by)===me());
   const canEditOwn=r=>(r.status==='Entered'||r.status==='Rejected')&&(state.super||lc(r.entered_by)===me());
   const who=e=>e?esc(String(e).split('@')[0]):'—';
   const idx=()=>(L().wdIndex=L().wdIndex||{});
@@ -478,6 +482,101 @@
     });
   };
 
+  /* ======================================================================= WORK DONE — recorded ahead of the order
+     Work that has no work order behind it: departmental and day work, anything started before the
+     order was issued, a measurement taken straight off the BOQ while the paperwork catches up.
+     The BOQ line is what it is measured against, so the BOQ line is what it is recorded against -
+     eng.work_done carries boq_item_id instead of wo_item_id for these, and the database holds them
+     to the BOQ quantity and to a date that is not in the future.
+
+     What it is NOT is a bill. Until it is put on a work order it cannot be verified and cannot
+     reach an RA bill, because both of those are steps in paying a contractor and this row does not
+     have one yet. wdAttach below is the way across, and from that moment it is an ordinary entry. */
+  const WN={rows:[]};
+  ENG.f.wdDirect=async function(){
+    const pid=curProject();
+    if(!pid)return toast('Pick a business unit first — work is recorded against its BOQ','warn');
+    modal('Record work done',LOAD,'','xl');
+    let boq=[];const sums={};
+    try{
+      const [b,w]=await Promise.all([
+        fetchAll(()=>E().from('v_boq').select('*').eq('project_id',pid).order('group_sort').order('activity_name').order('tower_sort').order('floor_no',{nullsFirst:true}).order('flat_code',{nullsFirst:true}).order('id')),
+        // every entry already recorded against these lines, on an order or not - the BOQ quantity
+        // is the ceiling for both kinds together, so the balance has to count both
+        fetchAll(()=>E().from('v_work_done').select('boq_line_id,qty').eq('project_id',pid).neq('status','Rejected'))
+      ]);
+      boq=b||[];(w||[]).forEach(x=>{if(x.boq_line_id!=null)sums[x.boq_line_id]=num(sums[x.boq_line_id])+num(x.qty);});
+    }catch(e){return fail(e);}
+    WN.rows=boq.map(r=>Object.assign({},r,{done:num(sums[r.id]),balance:num(r.qty)-num(sums[r.id])})).filter(r=>r.balance>0.0005);
+    const body=$('modalHost').querySelector('.modal-body');
+    if(!body)return;
+    if(!WN.rows.length){body.innerHTML='<div class="empty" style="padding:30px"><i class="fa-solid fa-circle-check"></i><div style="font-weight:600;color:var(--ink)">Every BOQ line here is already fully recorded</div><p>Nothing is left to measure against this business unit\u2019s BOQ.</p></div>';return;}
+    body.innerHTML=
+      '<div class="eng-note" style="margin-bottom:12px">For work with no work order behind it. Enter the quantity completed against each BOQ line — leave the rest blank. These are measurements: they are not verified and cannot be billed until you put them on a work order.</div>'+
+      '<div class="two"><div><label>Date of work</label><input id="wnDate" type="date" max="'+istToday()+'" value="'+istToday()+'"></div><div><label>Remarks <span style="color:var(--slate);font-weight:400">optional, applies to all</span></label><input id="wnRem"></div></div>'+
+      '<div class="toolbar" style="margin:14px 0 8px"><div class="grow"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Search activity or location…" oninput="ENG.f.wnFilter(this.value)"></div><span id="wnSum" style="font-size:12.5px;color:var(--slate)"></span></div>'+
+      '<div class="eng-tbl" style="border:1px solid var(--line);border-radius:9px;max-height:46vh;overflow:auto"><table class="tbl"><thead><tr><th>Activity</th><th>Location</th><th class="r">BOQ</th><th class="r">Recorded so far</th><th class="r">Balance</th><th class="r" style="width:130px">Done now</th></tr></thead><tbody>'+
+      WN.rows.map(r=>'<tr data-t="'+esc(lc(r.activity_name+' '+r.location_label))+'"><td><b>'+esc(r.activity_name)+'</b></td><td>'+esc(r.location_label)+'</td><td class="r">'+q(r.qty)+' '+esc(r.uom)+'</td><td class="r">'+q(r.done)+'</td><td class="r">'+q(r.balance)+'</td><td><input type="number" class="wnIn" data-id="'+r.id+'" data-max="'+r.balance+'" min="0" step="0.001" style="width:100%;text-align:right" oninput="ENG.f.wnSum()"></td></tr>').join('')+'</tbody></table></div>';
+    $('modalHost').querySelector('.modal').insertAdjacentHTML('beforeend','<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="ENG.f.wnSave(this)"><i class="fa-solid fa-check"></i> Record</button></div>');
+    ENG.f.wnSum();
+  };
+  ENG.f.wnFilter=function(x){x=lc(x).trim();document.querySelectorAll('#modalHost tbody tr').forEach(tr=>tr.style.display=(!x||(tr.getAttribute('data-t')||'').indexOf(x)>=0)?'':'none');};
+  ENG.f.wnSum=function(){
+    let n=0,amt=0;const byId={};WN.rows.forEach(r=>byId[r.id]=r);
+    document.querySelectorAll('.wnIn').forEach(i=>{const x=num(i.value);if(x>0){n++;amt+=x*num((byId[i.getAttribute('data-id')]||{}).rate);}});
+    const el=$('wnSum');if(el)el.innerHTML='<b>'+n+'</b> line'+(n===1?'':'s')+' · at BOQ rates <b>'+inr(amt)+'</b>';
+  };
+  ENG.f.wnSave=function(btn){
+    return run(btn,async()=>{
+      const date=val('wnDate'),rem=val('wnRem').trim()||null;
+      if(!date)return toast('Enter the date of work','warn');
+      const rows=[];let bad=null;
+      document.querySelectorAll('.wnIn').forEach(i=>{
+        const x=num(i.value);if(!(x>0))return;
+        if(x>num(i.getAttribute('data-max'))+1e-9)bad=true;
+        rows.push({boq_item_id:Number(i.getAttribute('data-id')),entry_date:date,qty:x,remarks:rem});
+      });
+      if(bad)return toast('One of the quantities is more than what the BOQ line has left','warn');
+      if(!rows.length)return toast('Enter a quantity for at least one line','warn');
+      for(const c of chunk(rows,200)){const {error}=await E().from('work_done').insert(c);if(error)throw error;}
+      closeModal();toast(rows.length+' entr'+(rows.length===1?'y':'ies')+' recorded — put them on a work order once one is issued','ok');renderPage();
+    });
+  };
+  /* The way across. Only work-order lines for the SAME BOQ line are offered, only on issued
+     orders, and only ones with room left for this quantity — the database checks all three again,
+     so a line that cannot take it is shown greyed with the reason rather than quietly left out. */
+  ENG.f.wdAttach=async function(id){
+    const r=idx()[id];if(!r)return;
+    modal('Put this work on a work order',LOAD);
+    let items=[];
+    try{ items=await fetchAll(()=>E().from('v_wo_items').select('*').eq('boq_item_id',r.boq_item_id).eq('wo_status','Issued').order('wo_no')); }catch(e){return fail(e);}
+    const body=$('modalHost').querySelector('.modal-body');
+    if(!body)return;
+    const fit=(items||[]).map(x=>Object.assign({},x,{balance:num(x.qty)-num(x.verified_qty)-num(x.pending_qty)}));
+    const head2='<div style="font-weight:600">'+esc(r.activity_name)+'</div><div style="color:var(--slate);font-size:13px;margin:2px 0 14px">'+esc(r.location_label)+' · '+q(r.qty)+' '+esc(r.uom)+' on '+dt(r.entry_date)+'</div>';
+    if(!fit.length){
+      body.innerHTML=head2+'<div class="empty" style="padding:26px"><i class="fa-solid fa-helmet-safety"></i><div style="font-weight:600;color:var(--ink)">No issued work order covers this BOQ line</div><p>Raise one and tag this BOQ line on it, then come back — the measurement stays here until you do.</p></div>';
+      return;
+    }
+    body.innerHTML=head2+'<div style="border:1px solid var(--line);border-radius:9px;max-height:300px;overflow:auto">'+
+      fit.map((x,i)=>{
+        const room=x.balance+1e-9>=num(r.qty);
+        return '<label style="display:flex;gap:10px;align-items:flex-start;padding:11px 13px;cursor:'+(room?'pointer':'not-allowed')+';'+(i?'border-top:1px solid var(--line-2);':'')+(room?'':'opacity:.55')+'">'+
+          '<input type="radio" name="waPick" value="'+x.id+'"'+(room?'':' disabled')+' style="margin-top:3px">'+
+          '<span><b>'+esc(x.wo_no)+'</b><div style="color:var(--slate);font-size:12.5px;margin-top:2px">ordered '+q(x.qty)+' '+esc(x.uom)+' · '+q(x.balance)+' still unrecorded'+(room?'':' — not enough room for '+q(r.qty)+' '+esc(r.uom))+'</div></span></label>';
+      }).join('')+'</div>';
+    $('modalHost').querySelector('.modal').insertAdjacentHTML('beforeend','<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="ENG.f.wdAttachSave(this,'+id+')"><i class="fa-solid fa-link"></i> Put it on this order</button></div>');
+  };
+  ENG.f.wdAttachSave=function(btn,id){
+    return run(btn,async()=>{
+      const pick=document.querySelector('input[name="waPick"]:checked');
+      if(!pick)return toast('Pick the work order line this work belongs to','warn');
+      const {error}=await E().from('work_done').update({wo_item_id:Number(pick.value),boq_item_id:null}).eq('id',id);
+      if(error)throw error;
+      closeModal();toast('On the work order — it can be verified now','ok');renderPage();
+    });
+  };
+
   /* ======================================================================= WORK DONE — list & verification */
   function wdTable(rows,selectable,compact){
     if(!rows.length)return '<div class="empty" style="padding:30px"><i class="fa-solid fa-person-digging"></i><div style="font-weight:600;color:var(--ink)">Nothing here</div></div>';
@@ -486,13 +585,15 @@
       rows.map(r=>{
         const acts=[];
         if(canVerify(r))acts.push('<button class="btn btn-sm btn-ok" onclick="ENG.f.wdVerify(['+r.id+'])"><i class="fa-solid fa-check"></i> Verify</button><button class="btn btn-sm btn-danger" onclick="ENG.f.wdReject('+r.id+')">Reject</button>');
+        else if(canAttach(r))acts.push('<button class="btn btn-sm btn-primary" title="Put this work on an issued work order that covers the same BOQ line" onclick="ENG.f.wdAttach('+r.id+')"><i class="fa-solid fa-link"></i> Put on a work order</button>');
+        else if(!attached(r))acts.push('<span style="font-size:11.5px;color:var(--slate)" title="Only the person who recorded it can put it on a work order">'+who(r.entered_by)+' recorded this</span>');
         else if(r.status==='Entered')acts.push('<span style="font-size:11.5px;color:var(--slate)" title="Verification needs a different person">you entered this</span>');
         if(canEditOwn(r))acts.push('<button class="btn btn-sm" title="'+(r.status==='Rejected'?'Correct and re-submit':'Edit')+'" onclick="ENG.f.wdEdit('+r.id+')"><i class="fa-solid '+(r.status==='Rejected'?'fa-rotate-left':'fa-pen')+'"></i></button><button class="btn btn-sm btn-danger" title="Delete" onclick="ENG.f.wdDel('+r.id+')"><i class="fa-solid fa-trash"></i></button>');
         return '<tr class="'+(sel.has(r.id)?'sel':'')+'">'+(selectable?'<td>'+(canVerify(r)?'<input type="checkbox" '+(sel.has(r.id)?'checked':'')+' onchange="ENG.f.wdTick('+r.id+',this.checked)">':'')+'</td>':'')+
-          '<td>'+dt(r.entry_date)+'</td>'+(compact?'':'<td>'+woLink(r.wo_id,r.wo_no)+'</td>')+
+          '<td>'+dt(r.entry_date)+'</td>'+(compact?'':'<td>'+(attached(r)?woLink(r.wo_id,r.wo_no):'<span class="tag t-gray">None yet</span>')+'</td>')+
           '<td><b>'+esc(r.activity_name)+'</b>'+(r.sub_vendor_name?' <span class="tag t-purple">'+esc(r.sub_vendor_name)+'</span>':'')+'<div class="sub" style="font-size:12px;color:var(--slate)">'+esc(r.location_label)+(r.remarks?' · “'+esc(r.remarks)+'”':'')+'</div></td>'+
           '<td class="r">'+q(r.qty)+' '+esc(r.uom)+'</td><td class="r">'+inr(r.value)+'</td>'+
-          '<td>'+stTag(r.status)+(r.status==='Rejected'&&r.verify_remarks?'<div style="font-size:11.5px;color:var(--err);margin-top:3px;max-width:200px">'+esc(r.verify_remarks)+'</div>':'')+(r.verified_by?'<div style="font-size:11.5px;color:var(--slate);margin-top:3px">by '+who(r.verified_by)+'</div>':'')+'</td>'+
+          '<td>'+(attached(r)?stTag(r.status):'<span class="tag t-amber" title="Recorded on site, not yet on a work order — it cannot be verified or billed until it is">Not on a work order</span>')+(r.status==='Rejected'&&r.verify_remarks?'<div style="font-size:11.5px;color:var(--err);margin-top:3px;max-width:200px">'+esc(r.verify_remarks)+'</div>':'')+(r.verified_by?'<div style="font-size:11.5px;color:var(--slate);margin-top:3px">by '+who(r.verified_by)+'</div>':'')+'</td>'+
           '<td>'+who(r.entered_by)+'</td><td>'+(r.bill_no?'<a style="color:var(--brand);cursor:pointer" onclick="navTo(\'engineering/ra/'+r.ra_bill_id+'\')">'+esc(r.bill_no)+'</a> '+(r.bill_status==='Draft'?'<span class="tag t-amber">draft</span>':''):(r.status==='Verified'?'<span class="tag t-blue">ready to bill</span>':'<span style="color:var(--slate)">—</span>'))+'</td>'+
           '<td style="white-space:nowrap;text-align:right">'+acts.join(' ')+'</td></tr>';
       }).join('')+'</tbody></table>';
@@ -500,7 +601,8 @@
 
   ENG.routes.wd=async function(v,a,t){
     const pid=curProject();
-    v.innerHTML=head('wd','Work recorded on site against work order items — verified by someone other than the person who entered it')+projBar(true)+
+    v.innerHTML=head('wd','Work recorded on site — against a work order item, or straight against a BOQ line when the order has not been raised yet. Verified by someone other than the person who entered it.',
+      '<button class="btn btn-primary" onclick="ENG.f.wdDirect()"><i class="fa-solid fa-ruler-combined"></i> Record work done</button>')+projBar(true)+
       '<div class="eng-filter"><div class="eng-chips" id="wdChips"></div><div class="toolbar grow" style="margin:0;flex:1;min-width:200px"><div class="grow"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Search work order, activity or location…" oninput="ENG.f.wdSearch(this.value)"></div></div></div>'+
       '<div class="card eng-tbl"><div id="wdHead" class="card-pad" style="border-bottom:1px solid var(--line)"></div><div id="wdTable">'+LOAD+'</div></div>';
     /* Opens on "Awaiting verification", which is the right first screen for the person who
@@ -519,12 +621,13 @@
   ENG.f.wdLoad=async function(){
     const f=L().wdF,pid=curProject();
     const chips=$('wdChips');if(!chips)return;
-    chips.innerHTML=[['Entered','Awaiting verification'],['Verified','Verified'],['Rejected','Rejected'],['','All']].map(c=>'<span class="chip'+(f.status===c[0]?' active':'')+'" onclick="ENG.f.wdStatus(\''+c[0]+'\')">'+c[1]+'</span>').join('');
+    chips.innerHTML=[['Entered','Awaiting verification'],['Verified','Verified'],['Rejected','Rejected'],['direct','Not on a work order'],['','All']].map(c=>'<span class="chip'+(f.status===c[0]?' active':'')+'" onclick="ENG.f.wdStatus(\''+c[0]+'\')">'+c[1]+'</span>').join('');
     $('wdTable').innerHTML=LOAD;
     try{
       let x=E().from('v_work_done').select('*',{count:'exact'});
       if(pid)x=x.eq('project_id',pid);
-      if(f.status)x=x.eq('status',f.status);
+      if(f.status==='direct')x=x.eq('attached',false);
+      else if(f.status){x=x.eq('status',f.status);if(f.status==='Entered')x=x.eq('attached',true);}
       const qq=f.q.trim().replace(/[%,()]/g,' ');
       if(qq)x=x.or('wo_no.ilike.%'+qq+'%,activity_name.ilike.%'+qq+'%,location_label.ilike.%'+qq+'%');
       const {data,error,count}=await x.order('entry_date',{ascending:false}).order('id',{ascending:false}).range(f.page*PAGE_SIZE,(f.page+1)*PAGE_SIZE-1);
@@ -590,7 +693,7 @@
   };
   ENG.f.wdEdit=function(id){
     const r=idx()[id];if(!r)return;
-    modal('Edit entry','<div style="font-weight:600">'+esc(r.activity_name)+'</div><div style="color:var(--slate);font-size:13px;margin-top:2px">'+esc(r.wo_no)+' · '+esc(r.location_label)+'</div>'+
+    modal('Edit entry','<div style="font-weight:600">'+esc(r.activity_name)+'</div><div style="color:var(--slate);font-size:13px;margin-top:2px">'+(attached(r)?esc(r.wo_no):'Not on a work order')+' · '+esc(r.location_label)+'</div>'+
       '<div class="two"><div><label>Date of work</label><input id="wxDate" type="date" max="'+istToday()+'" value="'+esc(r.entry_date)+'"></div><div><label>Quantity ('+esc(r.uom)+')</label><input id="wxQty" type="number" min="0" step="0.001" value="'+num(r.qty)+'"></div></div>'+
       '<label>Remarks</label><input id="wxRem" value="'+esc(r.remarks)+'">',
       cancelBtn+'<button class="btn btn-primary" onclick="ENG.f.wdEditSave(this,'+id+')"><i class="fa-solid fa-check"></i> Save</button>');
@@ -600,7 +703,7 @@
       const qty=numOrNull(val('wxQty'));
       if(qty==null||isNaN(qty)||qty<=0)return toast('Enter a quantity above zero','warn');
       const {error}=await E().from('work_done').update({status:'Entered',qty:qty,entry_date:val('wxDate'),remarks:val('wxRem').trim()||null}).eq('id',id);if(error)throw error;
-      closeModal();toast('Entry saved — waiting for verification','ok');renderPage();
+      closeModal();toast(attached(idx()[id]||{})?'Entry saved — waiting for verification':'Entry saved','ok');renderPage();
     });
   };
   ENG.f.wdDel=async function(id){
