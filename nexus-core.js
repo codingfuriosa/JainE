@@ -417,7 +417,14 @@ function pageIdFromPath(pathname){
 // second visit in the same tab.
 // A page may list several scripts; they load one after another, in order (purchase-indent.js uses what
 // purchase.js defines).
-const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js'],accounts:['accounts.js','accounts-bank.js','accounts-books.js'],scheduling:'scheduling.js'};
+const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',postsales:'postsales.js',inventory:['purchase.js','purchase-indent.js','purchase-rfq.js','purchase-po.js','purchase-stores.js','purchase-reports.js'],accounts:['accounts.js','accounts-bank.js','accounts-books.js'],scheduling:'scheduling.js',engineering:['engineering.js','engineering-boq.js','engineering-wo.js','engineering-amend.js','engineering-ra.js','engineering-ret.js']};
+/* ENGINEERING WAS MISSING FROM THIS LIST (31 Oct 2026). Opening Engineering from the sidebar of any
+   OTHER module swaps the page in place (navTo -> activateModule) instead of loading engineering.html,
+   so the six Engineering scripts - which engineering.html carries as plain tags - never arrived.
+   VIEWS.engineering did not exist, the router fell back to the generic placeholder and showed
+   "Module not found"; only a hard refresh (which loads engineering.html itself) drew the screen.
+   Any module whose code lives in its own script file must be listed here, in load order, AND have
+   an entry in PAGE_SCRIPT_VERSION below. */
 /* EVERY PAGE SCRIPT NEEDS A VERSION HERE, not just the purchase ones.
    accountability.js, insp-items.js and postsales.js were missing, so loadPageScript fell back
    to the default '20261003a' - and _headers tells the browser a .js URL is immutable for a
@@ -426,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'5c9db8012a','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'5c9db8012a','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'7287c2ff9d','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
