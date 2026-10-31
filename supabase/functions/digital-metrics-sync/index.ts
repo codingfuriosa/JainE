@@ -571,7 +571,7 @@ Deno.serve(async (req) => {
   if (!who) return j({ error: 'not allowed' }, 401);
   try {
     if (body.action === 'lead_map_key') return j({ key: mapKey() });
-    if (body.action === 'lead_map_geocode') return j({ message: await geocodeMissing(20) });
+    if (body.action === 'lead_map_geocode') return j(await geocodeMissing(20));
     if (body.action === 'lead_map_sync') {
       const id = await logStart('lead_map', who);
       try { const r = await syncFromCrm(); await logEnd(id, true, r.rows, r.message); return j(r); }

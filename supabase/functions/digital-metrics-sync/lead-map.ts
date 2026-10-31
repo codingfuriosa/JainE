@@ -30,6 +30,22 @@ async function get(path: string) {
   if (!r.ok) throw new Error(`db read ${path.split('?')[0]}: ${r.status} ${(await r.text()).slice(0, 200)}`);
   return await r.json();
 }
+/* PostgREST answers with at most 1,000 rows, and it does so silently - the 1,001st is simply not
+   there. lm_pins passed that mark on 30 Oct 2026 (1,071 rows) and geocodeMissing() stopped being
+   able to see 15 PIN codes living only in the rows past it. They were never placed, and never
+   stamped with an error either, because the row that would carry the error is only written for a
+   PIN the lookup actually reached. The Lead Map screen asks for a geocode whenever a PIN has
+   neither a position nor an error - so it asked on every single draw, and redrew itself without
+   end. Anything that has to see every row now reads it a page at a time. */
+async function getAll(path: string, page = 1000) {
+  const out: any[] = [];
+  for (let off = 0; off < 200_000; off += page) {
+    const rows = await get(`${path}${path.includes('?') ? '&' : '?'}limit=${page}&offset=${off}`);
+    for (const r of rows) out.push(r);
+    if (rows.length < page) break;
+  }
+  return out;
+}
 async function upsert(table: string, rows: any[], onConflict: string, ignore = false) {
   for (let i = 0; i < rows.length; i += 500) {
     const r = await fetch(`${SB}/rest/v1/${table}?on_conflict=${onConflict}`, { method: 'POST',
@@ -201,10 +217,15 @@ async function foreign(cc: string, code: string) {
   return o ? { ...o, src: 'openstreetmap', place: null, district: null, state: null } : null;
 }
 export async function geocodeMissing(limit = 60) {
-  const pins: string[] = [...new Set((await get('lm_pins?select=pincode')).map((r: any) => r.pincode as string))];
-  const known = new Map((await get('lm_pincodes?select=pincode,lat,looked_up_at')).map((r: any) => [r.pincode, r]));
-  // never looked up, or looked up without success more than a day ago
-  const todo = pins.filter((p) => { const k: any = known.get(p); return !k || (k.lat == null && Date.parse(k.looked_up_at || 0) < Date.now() - 86400_000); }).slice(0, limit);
+  const pins: string[] = [...new Set((await getAll('lm_pins?select=pincode')).map((r: any) => r.pincode as string))];
+  const known = new Map((await getAll('lm_pincodes?select=pincode,lat,looked_up_at')).map((r: any) => [r.pincode, r]));
+  /* A PIN never looked up comes first, always; a retry of one that failed gets whatever budget is
+     left. 39 PIN codes India Post does not know were taking the whole allowance of 20 every run,
+     so a PIN that had never been tried was never reached - and the screen waiting on it never got
+     its answer. Putting the unseen ones first is what guarantees each run makes progress. */
+  const unseen = pins.filter((p) => !known.get(p));
+  const retry = pins.filter((p) => { const k: any = known.get(p); return k && k.lat == null && Date.parse(k.looked_up_at || 0) < Date.now() - 86400_000; });
+  const todo = unseen.concat(retry).slice(0, limit);
   let ok = 0;
   for (const pin of todo) {
     const fm = /^([A-Z]{2})-(.+)$/.exec(pin);
@@ -227,5 +248,8 @@ export async function geocodeMissing(limit = 60) {
       lookup_error: c ? null : (ip ? 'no map position found for this PIN yet' : 'India Post does not know this PIN code') }], 'pincode');
     if (c) ok++;
   }
-  return `placed ${ok} of ${todo.length} new PIN code(s) on the map`;
+  /* placed is what the Lead Map screen watches. It redraws only when a PIN actually reached the
+     map, so a run that achieves nothing ends the wait instead of starting another draw. */
+  return { placed: ok, tried: todo.length, left: Math.max(0, unseen.length + retry.length - todo.length),
+    message: `placed ${ok} of ${todo.length} PIN code(s) on the map` };
 }

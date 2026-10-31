@@ -35172,6 +35172,7 @@ VIEWS.channel_partners=async function(v,seg){
    red pins on OpenStreetMap, so it works from day one. */
 // LM_MONTH is 'YYYY-MM', or 'all' (every month from January 2026 together - the default).
 let LM_MONTH='all', LM_PROJ='all', LM_KIND='all', LM_MAP=null, LM_KEY;
+let LM_GEO_TRIES=0; const LM_GEO_MAX=25;   // a backstop under the progress test in lmRender()
 const LM_PROJECTS=['Dream Ananta','Dream Gurukul','Dream World City'];
 const LM_KINDS={site_visit:'Site Visit',booked:'Booked',test:'Test'};
 const LM_FN=SUPABASE_URL+'/functions/v1/digital-metrics-sync';
@@ -35320,9 +35321,9 @@ VIEWS.lead_map=async function(v,seg){
     +'<div id="lmBody"><div class="loader"><div class="spin"></div></div></div>';
   try{ await lmRender(); }catch(e){ $('lmBody').innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load: '+esc(e.message||String(e))+'</div></div>'; }
 };
-window.lmSetMonth=function(m){ LM_MONTH=m; renderPage(); };
-window.lmSetProj=function(p){ LM_PROJ=p; renderPage(); };
-window.lmSetKind=function(k){ LM_KIND=k; renderPage(); };
+window.lmSetMonth=function(m){ LM_MONTH=m; LM_GEO_TRIES=0; renderPage(); };
+window.lmSetProj=function(p){ LM_PROJ=p; LM_GEO_TRIES=0; renderPage(); };
+window.lmSetKind=function(k){ LM_KIND=k; LM_GEO_TRIES=0; renderPage(); };
 
 async function lmRender(){
   /* "All months" asks for each month and adds them up here: the same counts camp.lm_month gives,
@@ -35391,10 +35392,15 @@ async function lmRender(){
         +'</div></div>'
     +'</div>';
   await lmDraw(placed);
-  // anything still unplaced gets looked up now, then the map redraws once
-  if(waiting.some(function(p){return !p.err;})&&!lmRender._busy){
-    lmRender._busy=true;
-    lmCall({action:'lead_map_geocode'}).then(function(){ lmRender._busy=false; if(PAGE==='lead_map')renderPage(); }).catch(function(){ lmRender._busy=false; });
+  /* ANYTHING STILL UNPLACED GETS LOOKED UP NOW, AND THE MAP REDRAWS ONLY IF THAT PLACED SOMETHING.
+     Redrawing on a bare "the call came back" is what spun it: the worker answers 200 even when it
+     placed nothing, renderPage() re-enters this view and blanks it to its spinner, and a PIN that
+     can never be placed asks again for ever. Requiring placed > 0 can only happen as many times as
+     there are PIN codes left to place, so the sequence has to end; LM_GEO_MAX stops it even if a
+     later change breaks that count. */
+  if(waiting.some(function(p){return !p.err;})&&!lmRender._busy&&LM_GEO_TRIES<LM_GEO_MAX){
+    lmRender._busy=true; LM_GEO_TRIES++;
+    lmCall({action:'lead_map_geocode'}).then(function(r){ lmRender._busy=false; if(r&&r.placed>0&&PAGE==='lead_map')renderPage(); }).catch(function(){ lmRender._busy=false; });
   }
 }
 /* WHEN EACH PIN CODE WAS UPLOADED. Every row in camp.lm_pins carries the moment it was saved
@@ -35885,6 +35891,7 @@ window.lmSave=async function(){
   if(error){ if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-map-pin"></i> Save and plot';} return toast(error.message,'err'); }
   toast('Saved '+ins.length+' '+(ins.length===1?'entry':'entries')+' - placing them on the map','ok');
   if(LM_MONTH!=='all')LM_MONTH=r.rows[0].date.slice(0,7);   // All months stays on All
+  LM_GEO_TRIES=0;   // PIN codes just added deserve a fresh allowance
   try{ await lmCall({action:'lead_map_geocode'}); }catch(e){ toast('Saved; finding them on the map failed for now: '+e.message,'warn'); }
   navTo('lead_map');
 };
