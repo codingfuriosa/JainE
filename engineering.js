@@ -31,7 +31,7 @@
   const numOrNull=s=>{s=moneyStrip(String(s==null?'':s)).trim();if(s==='')return null;const n=Number(s);return isNaN(n)?NaN:n;};
   const TAGC={Draft:'t-amber',Issued:'t-blue',Closed:'t-green',Cancelled:'t-gray',Entered:'t-amber',Verified:'t-green',Rejected:'t-red',Booked:'t-green',Active:'t-green',Inactive:'t-gray'};
   const stTag=s=>'<span class="tag '+(TAGC[s]||'t-gray')+'">'+esc(s==='Entered'?'Awaiting verification':s)+'</span>';
-  const LVC={Project:'t-purple','Business Unit':'t-purple',Block:'t-blue',Floor:'t-blue',Flat:'t-green',Portion:'t-amber','Activity Group':'t-blue',Material:'t-amber'};
+  const LVC={Project:'t-purple',Block:'t-blue',Floor:'t-blue',Flat:'t-green',Portion:'t-amber','Activity Group':'t-blue',Material:'t-amber'};
   const lvTag=s=>'<span class="tag '+(LVC[s]||'t-gray')+'">'+esc(s)+'</span>';
   const LOAD='<div class="loader"><div class="spin"></div></div>';
 
@@ -247,16 +247,12 @@
       '<div class="card eng-tbl"><div class="card-pad" style="border-bottom:1px solid var(--line)"><div class="sec-title" style="margin:0">By contractor</div><div class="sec-sub" style="margin:2px 0 0">Parent contractors with their sub-contractors — issued and closed work orders</div></div>'+
         contractorTable(cs.data||[],!pid)+'</div>';
   };
-  const LVL_ORD={'Business Unit':0,Block:1,Floor:2,Flat:3,'Budget Head':4,'Activity Group':5,Material:6};
-  const areaLabel=b=>[b.tower_name,b.floor_label,b.flat_code].filter(Boolean).join(' · ');
-  /* The scope cell spells out the whole choice: the area first, then what inside it the money
-     covers. Two kinds of line used to fall past every branch of this and come back empty - a
-     whole-business-unit budget and a budget head - so both showed a blank cell. */
+  const LVL_ORD={Project:0,Block:1,'Activity Group':2,Material:3};
   function scopeLabel(b){
-    const what=b.head_id?(b.head_name||'')
-      :b.item_id?((b.item_name||'')+(b.item_code?' ('+b.item_code+')':''))
-      :b.group_id?(b.group_name||''):'';
-    return [areaLabel(b),what].filter(Boolean).join(' · ')||b.project_name;
+    if(b.level==='Project')return b.project_name;
+    if(b.level==='Block')return b.tower_name;
+    if(b.level==='Activity Group')return (b.tower_name?b.tower_name+' · ':'')+b.group_name;
+    return (b.tower_name?b.tower_name+' · ':'')+(b.item_name||'')+(b.item_code?' ('+b.item_code+')':'');
   }
   function contractorTable(rows,showProject){
     if(!rows.length)return '<div class="empty" style="padding:30px"><i class="fa-solid fa-helmet-safety"></i><div style="font-weight:600;color:var(--ink)">No issued work orders yet</div></div>';
@@ -270,7 +266,7 @@
   const rowActions=b=>'<td style="white-space:nowrap"><button class="btn btn-sm" onclick="ENG.f.budgetForm('+b.id+')"><i class="fa-solid fa-pen"></i></button> <button class="btn btn-sm btn-danger" onclick="ENG.f.budgetDel('+b.id+')"><i class="fa-solid fa-trash"></i></button></td>';
   const scopeCell=b=>'<td><b>'+esc(scopeLabel(b))+'</b>'+(b.remarks?'<div class="sub" style="font-size:12px;color:var(--slate)">'+esc(b.remarks)+'</div>':'')+'</td>';
   function outflowTable(rows,manage){
-    if(!rows.length)return '<div class="empty" style="padding:34px"><i class="fa-solid fa-wallet"></i><div style="font-weight:600;color:var(--ink)">No outflow budgets set yet</div><p>Set a cost budget against a business unit, a block, a floor or a single flat — for all of it, or for one activity group, budget head or material inside it.</p></div>';
+    if(!rows.length)return '<div class="empty" style="padding:34px"><i class="fa-solid fa-wallet"></i><div style="font-weight:600;color:var(--ink)">No outflow budgets set yet</div><p>Set a cost budget against a project, block, activity group or material.</p></div>';
     return '<table class="tbl"><thead><tr><th>Business unit</th><th>Level</th><th>Scope</th><th class="r">Budget</th><th class="r">BOQ value</th><th class="r">Committed</th><th class="r">Billed</th><th class="r">Paid</th><th style="min-width:120px">Committed vs budget</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+
       rows.map(b=>{
         const mat=b.level==='Material';
@@ -308,33 +304,19 @@
       '<div class="card eng-tbl"><div class="card-pad" style="border-bottom:1px solid var(--line)"><div class="sec-title" style="margin:0">'+dirTag('Inflow')+' Collection budgets</div><div class="sec-sub" style="margin:4px 0 0">Compared with active receipts in Post Sales, less refunds. Set against a project or a block.</div></div>'+inflowTable(inRows,true)+'</div>'+
       '<div class="eng-note" style="margin-top:12px">Budgets at different levels are independent controls — they are not required to add up to each other. Material budgets come from the Purchase item master and are shown for reference only. <b>Paid</b> is what Accounts has actually paid against posted RA bills, shown as the part of the billed work it settles (GST, TDS and retention left out); retention still held is noted under it and is released from the Retention tab.</div>';
   };
-  /* AREA AND WHAT-IT-COVERS ARE TWO QUESTIONS, NOT ONE LIST.
-     This was a single "Set against" dropdown holding every sensible pairing - block, activity
-     group, activity group within a block, material, material within a block. Adding floors and
-     flats to that list would have turned seven entries into thirteen. The table has always kept
-     the area and the cost dimension in separate columns, so they are now asked separately: WHERE
-     the money is planned for, and WHAT part of the cost it covers. Every combination the old list
-     offered is still reachable, and the ones it could not express now are.
-     'head' sits first among the cost choices: a spend head is the one finance recognises, and its
-     actual comes from its Accounts ledger rather than from the BOQ. */
-  const AREAS=[['project','The whole business unit'],['block','A block / tower'],['floor','A floor in a block'],['flat','One flat']];
-  const WHATS=[['all','Everything in that area'],['head','One budget head (Accounts)'],['group','One activity group'],['material','One material']];
-  /* An inflow budget is compared with receipts, and a receipt only knows which block its booking
-     is in - there is nothing below that for a per-floor collection target to be measured against,
-     so it is not offered here and the database refuses one as well. */
-  const areasFor=d=>d==='Inflow'?AREAS.slice(0,2):AREAS;
-  const whatsFor =d=>d==='Inflow'?WHATS.slice(0,1):WHATS;
+  /* 'head' first among the trade-level choices: a spend head is the one of these that finance
+     recognises, and its actual comes straight from Accounts rather than from the BOQ. */
+  const LEVELS_ALL=[['project','Whole business unit'],['block','A block / tower'],['head','A budget head (Accounts)'],['group','An activity group'],['block_group','Activity group within a block'],['material','A material'],['block_material','Material within a block']];
+  const levelsFor=d=>d==='Inflow'?LEVELS_ALL.slice(0,2):LEVELS_ALL;
   ENG.f.budgetForm=async function(id,dirPreset){
     const cur=id?(ENG.L.budgets||[]).find(x=>x.id===id):null;
     const pid=cur?cur.project_id:(curProject()||'');
     const dir=cur?(cur.direction||'Outflow'):(dirPreset||'Outflow');
-    const area=cur?(cur.flat_id?'flat':cur.floor_id?'floor':cur.tower_id?'block':'project'):'project';
-    const what=cur?(cur.head_id?'head':cur.item_id?'material':cur.group_id?'group':'all'):'all';
+    const lvl=cur?(cur.head_id?'head':cur.item_id?(cur.tower_id?'block_material':'material'):cur.group_id?(cur.tower_id?'block_group':'group'):cur.tower_id?'block':'project'):'project';
     modal((cur?'Edit ':'Set ')+dir.toLowerCase()+' budget',
       '<label>Direction</label><select id="bfDir" '+(cur?'disabled':'onchange="ENG.f.bfDir()"')+'>'+opts([['Outflow','Outflow — a cost budget (work orders and bills)'],['Inflow','Inflow — expected collections (compared with receipts)']],x=>x[0],x=>x[1],dir)+'</select>'+
       '<label>Business unit</label><select id="bfProj" '+(cur?'disabled':'onchange="ENG.f.bfRefresh()"')+'>'+opts(C.projects,p=>p.id,p=>p.name,pid,'Select a business unit…')+'</select>'+
-      '<div class="two"><div><label>Area <span style="color:var(--slate);font-weight:400">where the money is planned for</span></label><select id="bfArea" '+(cur?'disabled':'onchange="ENG.f.bfRefresh()"')+'>'+opts(areasFor(dir),x=>x[0],x=>x[1],area)+'</select></div>'+
-      '<div><label>Covers</label><select id="bfWhat" '+(cur?'disabled':'onchange="ENG.f.bfRefresh()"')+'>'+opts(whatsFor(dir),x=>x[0],x=>x[1],what)+'</select></div></div>'+
+      '<label>Set against</label><select id="bfLevel" '+(cur?'disabled':'onchange="ENG.f.bfRefresh()"')+'>'+opts(levelsFor(dir),x=>x[0],x=>x[1],lvl)+'</select>'+
       '<div id="bfScope"></div>'+
       '<div class="two"><div><label>Budget amount (₹)</label><input id="bfAmt" type="number" min="0" step="0.01" value="'+(cur?num(cur.amount):'')+'"></div><div></div></div>'+
       '<label>Remarks <span style="color:var(--slate);font-weight:400">(optional)</span></label><input id="bfRem" value="'+esc(cur?cur.remarks:'')+'">',
@@ -342,45 +324,26 @@
     await ENG.f.bfRefresh(cur);
   };
   ENG.f.bfDir=function(){
-    const d=val('bfDir');
-    const swap=(id,list,fallback)=>{const sel=$(id);if(!sel)return;
-      const keep=sel.value;sel.innerHTML=opts(list,x=>x[0],x=>x[1],list.some(x=>x[0]===keep)?keep:fallback);};
-    swap('bfArea',areasFor(d),'project');
-    swap('bfWhat',whatsFor(d),'all');
+    const sel=$('bfLevel');if(!sel)return;
+    const keep=sel.value,list=levelsFor(val('bfDir'));
+    sel.innerHTML=opts(list,x=>x[0],x=>x[1],list.some(x=>x[0]===keep)?keep:'project');
     ENG.f.bfRefresh();
   };
-  /* Block, floor and flat cascade: the floor list is the chosen block's floors and the flat list
-     is the chosen floor's flats, so the three can only ever describe a real place. Nothing is
-     picked for the reader - an unchosen block leaves the floor list empty and saying so, rather
-     than quietly defaulting to the first one and budgeting against the wrong part of the site. */
   ENG.f.bfRefresh=async function(cur){
     const host=$('bfScope');if(!host)return;
-    const pid=Number(val('bfProj'))||(cur&&cur.project_id)||null;
-    const area=val('bfArea')||'project',what=val('bfWhat')||'all';
+    const pid=Number(val('bfProj'))||(cur&&cur.project_id)||null;const lvl=val('bfLevel');
+    const needT=/block/.test(lvl),needG=/group/.test(lvl),needM=/material/.test(lvl),needH=lvl==='head';
     if(!pid){host.innerHTML='';return;}
-    const needT=area!=='project',needF=(area==='floor'||area==='flat'),needL=area==='flat';
-    let towers=[],geo=null;
-    try{ if(needF){geo=await loadGeo(pid);towers=geo.towers;} else if(needT){towers=await loadTowers(pid);} }catch(e){fail(e);}
+    let towers=[];if(needT){try{towers=await loadTowers(pid);}catch(e){fail(e);}}
     const keep=k=>{const x=document.getElementById(k);return x?x.value:'';};
-    const tSel=cur?String(cur.tower_id||''):keep('bfTower'),fSel=cur?String(cur.floor_id||''):keep('bfFloor'),
-          lSel=cur?String(cur.flat_id||''):keep('bfFlat'),gSel=cur?String(cur.group_id||''):keep('bfGroup'),
-          mSel=cur?String(cur.item_id||''):keep('bfItem'),hSel=cur?String(cur.head_id||''):keep('bfHead');
-    const tNow=Number(tSel)||0;
-    const floors=geo?geo.floors.filter(f=>f.tower_id===tNow).slice().sort((a,b)=>a.floor_no-b.floor_no):[];
-    const fNow=floors.some(f=>f.id===Number(fSel))?Number(fSel):0;
-    const flats=geo?geo.flats.filter(x=>x.floor_id===fNow).slice().sort((a,b)=>String(a.flat_code||'').localeCompare(String(b.flat_code||''))):[];
-    const flName=f=>String(f.label||'').trim()||('Floor '+f.floor_no);
-    const dis=cur?' disabled':'';
+    const tSel=cur?String(cur.tower_id||''):keep('bfTower'),gSel=cur?String(cur.group_id||''):keep('bfGroup'),mSel=cur?String(cur.item_id||''):keep('bfItem'),hSel=cur?String(cur.head_id||''):keep('bfHead');
     const heads=(C.heads||[]).filter(h=>h.active);
     host.innerHTML=
-      (needT?'<label>Block</label><select id="bfTower"'+dis+' onchange="ENG.f.bfRefresh()">'+opts(towers,x=>x.id,x=>x.name,tSel,'Select a block…')+'</select>':'')+
-      (needF?'<label>Floor</label><select id="bfFloor"'+dis+' onchange="ENG.f.bfRefresh()">'+opts(floors,x=>x.id,flName,String(fNow||''),tNow?(floors.length?'Select a floor…':'This block has no floors set up'):'Pick a block first')+'</select>':'')+
-      (needL?'<label>Flat</label><select id="bfFlat"'+dis+'>'+opts(flats,x=>x.id,x=>x.flat_code,lSel,fNow?(flats.length?'Select a flat…':'This floor has no flats set up'):'Pick a floor first')+'</select>':'')+
-      (what==='head'?'<label>Budget head</label><select id="bfHead"'+dis+'>'+opts(heads,x=>x.id,x=>x.name,hSel,heads.length?'Select a head…':'No budget heads yet — add one under Masters')+'</select>'+
-        '<div class="eng-note" style="margin-top:8px">Spend on a head comes from its Accounts ledger, not from the BOQ — so BOQ value, committed and billed are left blank for it, whichever area you pick.</div>':'')+
-      (what==='group'?'<label>Activity group</label><select id="bfGroup"'+dis+'>'+opts(C.groups,x=>x.id,x=>x.name,gSel,'Select a group…')+'</select>':'')+
-      (what==='material'?'<label>Material</label><select id="bfItem"'+dis+'>'+opts(C.items,x=>x.id,x=>x.name+(x.code?' ('+x.code+')':''),mSel,C.items.length?'Select a material…':'No materials in the Purchase item master yet')+'</select>'+
-        '<div class="eng-note" style="margin-top:8px">Material budgets are not tracked against work orders — they are shown for reference only.</div>':'');
+      (needT?'<label>Block</label><select id="bfTower" '+(cur?'disabled':'')+'>'+opts(towers,x=>x.id,x=>x.name,tSel,'Select a block…')+'</select>':'')+
+      (needH?'<label>Budget head</label><select id="bfHead" '+(cur?'disabled':'')+'>'+opts(heads,x=>x.id,x=>x.name,hSel,heads.length?'Select a head…':'No budget heads yet — add one under Masters')+'</select>'+
+        '<div class="eng-note" style="margin-top:8px">Spend on a head comes from its Accounts ledger, not from the BOQ — so BOQ value, committed and billed are left blank for it.</div>':'')+
+      (needG?'<label>Activity group</label><select id="bfGroup" '+(cur?'disabled':'')+'>'+opts(C.groups,x=>x.id,x=>x.name,gSel,'Select a group…')+'</select>':'')+
+      (needM?'<label>Material</label><select id="bfItem" '+(cur?'disabled':'')+'>'+opts(C.items,x=>x.id,x=>x.name+(x.code?' ('+x.code+')':''),mSel,C.items.length?'Select a material…':'No materials in the Purchase item master yet')+'</select>':'');
   };
   ENG.f.budgetSave=function(btn,id){
     return run(btn,async()=>{
@@ -389,16 +352,13 @@
       const rem=val('bfRem').trim()||null;
       if(id){const {error}=await E().from('budgets').update({amount:amt,remarks:rem}).eq('id',id);if(error)throw error;}
       else{
-        const pid=Number(val('bfProj')),dir=val('bfDir')||'Outflow';
-        const area=val('bfArea')||'project',what=val('bfWhat')||'all';
+        const lvl=val('bfLevel'),pid=Number(val('bfProj')),dir=val('bfDir')||'Outflow';
         if(!pid)return toast('Select a business unit','warn');
         const row={project_id:pid,direction:dir,amount:amt,remarks:rem};
-        if(area!=='project'){row.tower_id=Number(val('bfTower'))||null;if(!row.tower_id)return toast('Select a block','warn');}
-        if(area==='floor'||area==='flat'){row.floor_id=Number(val('bfFloor'))||null;if(!row.floor_id)return toast('Select a floor','warn');}
-        if(area==='flat'){row.flat_id=Number(val('bfFlat'))||null;if(!row.flat_id)return toast('Select a flat','warn');}
-        if(what==='head'){row.head_id=Number(val('bfHead'))||null;if(!row.head_id)return toast('Select a budget head','warn');}
-        if(what==='group'){row.group_id=Number(val('bfGroup'))||null;if(!row.group_id)return toast('Select an activity group','warn');}
-        if(what==='material'){row.item_id=Number(val('bfItem'))||null;if(!row.item_id)return toast('Select a material','warn');}
+        if(/block/.test(lvl)){row.tower_id=Number(val('bfTower'))||null;if(!row.tower_id)return toast('Select a block','warn');}
+        if(lvl==='head'){row.head_id=Number(val('bfHead'))||null;if(!row.head_id)return toast('Select a budget head','warn');}
+        if(/group/.test(lvl)){row.group_id=Number(val('bfGroup'))||null;if(!row.group_id)return toast('Select an activity group','warn');}
+        if(/material/.test(lvl)){row.item_id=Number(val('bfItem'))||null;if(!row.item_id)return toast('Select a material','warn');}
         const {error}=await E().from('budgets').insert(row);if(error)throw error;
       }
       closeModal();toast('Budget saved','ok');renderPage();
