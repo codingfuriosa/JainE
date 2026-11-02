@@ -289,10 +289,11 @@ function stepTerms(){
       +'<details class="t"><summary>Declaration (2)</summary>'+list(DECL)+'</details>'
       +'<details class="t"><summary>Special Conditions (11)</summary>'+list(SPECIAL)+'</details>'
       +'<label class="agree'+(ERR.terms_accepted?' bad':'')+'" id="f-terms_accepted"><input type="checkbox" data-check="terms_accepted"'+(S.terms_accepted?' checked':'')+'><span><b>I/We have read and agree to all the above.</b><br><span style="color:var(--slate);font-size:13px">I/We confirm that everything in this form is true.</span><div class="err">'+esc(ERR.terms_accepted||'')+'</div></span></label>')
-    +card('✍️','#c4161c','Signature',esc(a.full_name||'First applicant')+' signs with a finger (or mouse) inside the box.',
+    +card('✍️','#c4161c','Signature','Signed by '+esc(a.full_name||'the first applicant')+'.',
       wrapF('sig','Signature of the first applicant',{full:1,req:1},
-        '<div class="pad"><canvas id="sigPad"></canvas><div class="line"></div>'+(SIG?'':'<div class="ph">Sign here</div>')
-        +'<button type="button" class="x" data-clearsig="1">Clear</button></div>')
+        '<button type="button" class="sigbox'+(SIG?' has':'')+'" data-opensig="1">'
+          +(SIG?'<img src="'+SIG+'" alt="Signature"><span class="again">✎ Sign again</span>'
+               :'<span class="big">✍️</span><b>Tap here to sign</b><small>A large signing pad opens</small>')+'</button>')
       +'<p style="color:var(--slate);font-size:13px;margin:12px 0 0">Place: '+esc(S.res.city||'—')+' · Date: '+new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+'</p>');
 }
 function rows(pairs){ return '<table class="rv">'+pairs.filter(function(p){ return p[1]!==''&&p[1]!=null; }).map(function(p){ return '<tr><td>'+esc(p[0])+'</td><td>'+esc(p[1])+'</td></tr>'; }).join('')+'</table>'; }
@@ -362,7 +363,7 @@ function check(step){
   if(step===5) S.applicants.forEach(function(a,i){ if(a.nationality!=='India') return; const who=(a.full_name||('Applicant '+(i+1)))+': ';
     if(!FILES[i].pan.length) bad('doc.'+i+'.pan','Please attach the PAN card',who+'PAN card');
     if(!FILES[i].aadhaar.length) bad('doc.'+i+'.aadhaar','Please attach the Aadhaar card',who+'Aadhaar card'); });
-  if(step===6){ if(!S.terms_accepted) bad('terms_accepted','Please tick to accept the terms','Accept the terms'); if(!SIG) bad('sig','Please sign in the box','Signature'); }
+  if(step===6){ if(!S.terms_accepted) bad('terms_accepted','Please tick to accept the terms','Accept the terms'); if(!SIG) bad('sig','Please tap "Tap here to sign" and sign','Signature'); }
   return !MISSING.length;
 }
 
@@ -375,7 +376,6 @@ function render(){
   $('nav').innerHTML='<div class="in">'+(st?'<button type="button" class="btn sec2" data-back="1">Back</button>':'')
     +'<button type="button" class="btn pri" id="nextBtn" data-next="1">'+(st===STEPS.length-1?'Submit booking form':'Continue')+'</button></div>'
     +'<div class="saved">Your answers are saved on this phone as you go.</div>';
-  if(st===6) setupPad();
 }
 function go(n){ S.step=Math.max(0,Math.min(STEPS.length-1,n)); save(); ERR={}; MISSING=[]; render(); window.scrollTo(0,0); }
 function showErrors(){
@@ -383,38 +383,88 @@ function showErrors(){
   toast(MISSING.length===1?'1 thing is still missing':MISSING.length+' things are still missing');
 }
 
-// ---------------------------------------------------------------- signature pad
-/* Smooth: every point the finger passes is used (getCoalescedEvents), and the line is drawn as
-   curves through the midpoints, not straight segments, so it does not look jagged. Nothing is drawn
-   outside the box, and the page does not scroll while signing. */
-function setupPad(){
-  const c=$('sigPad'); if(!c) return;
-  const dpr=Math.max(1,window.devicePixelRatio||1), r=c.getBoundingClientRect();
-  c.width=Math.round(r.width*dpr); c.height=Math.round(r.height*dpr);
-  const g=c.getContext('2d'); g.scale(dpr,dpr); g.lineCap='round'; g.lineJoin='round'; g.strokeStyle='#0f2a6b'; g.fillStyle='#0f2a6b'; g.lineWidth=2.6;
-  if(SIG){ const im=new Image(); im.onload=function(){ g.drawImage(im,0,0,r.width,r.height); }; im.src=SIG; }
-  let pts=null, inked=!!SIG;
-  const pt=function(e){ const b=c.getBoundingClientRect(); return {x:e.clientX-b.left,y:e.clientY-b.top,w:b.width,h:b.height}; };
-  const inside=function(p){ return p.x>=0&&p.y>=0&&p.x<=p.w&&p.y<=p.h; };
-  const add=function(p){
-    if(!inside(p)){ pts=pts&&pts.length?[]:pts; return; }          // left the box: lift the pen
-    pts.push(p);
-    const n=pts.length;
-    if(n===1){ g.beginPath(); g.arc(p.x,p.y,1.2,0,Math.PI*2); g.fill(); return; }
-    if(n===2){ g.beginPath(); g.moveTo(pts[0].x,pts[0].y); g.lineTo((pts[0].x+p.x)/2,(pts[0].y+p.y)/2); g.stroke(); return; }
-    const a=pts[n-3], b=pts[n-2], m1={x:(a.x+b.x)/2,y:(a.y+b.y)/2}, m2={x:(b.x+p.x)/2,y:(b.y+p.y)/2};
-    g.beginPath(); g.moveTo(m1.x,m1.y); g.quadraticCurveTo(b.x,b.y,m2.x,m2.y); g.stroke();
-  };
-  c.addEventListener('pointerdown',function(e){ e.preventDefault(); pts=[]; inked=true;
-    const ph=c.parentNode.querySelector('.ph'); if(ph) ph.remove();
-    try{ c.setPointerCapture(e.pointerId); }catch(_e){} add(pt(e)); });
-  c.addEventListener('pointermove',function(e){ if(!pts) return; e.preventDefault();
-    const list=e.getCoalescedEvents?e.getCoalescedEvents():[e]; (list.length?list:[e]).forEach(function(x){ add(pt(x)); }); });
-  const end=function(){ if(!pts) return;
-    if(pts.length>1){ const l=pts[pts.length-1]; g.beginPath(); g.moveTo((pts[pts.length-2].x+l.x)/2,(pts[pts.length-2].y+l.y)/2); g.lineTo(l.x,l.y); g.stroke(); }
-    pts=null; if(inked){ SIG=c.toDataURL('image/png'); if(ERR.sig){ delete ERR.sig; const f=$('f-sig'); if(f) f.classList.remove('bad'); } } };
+// ---------------------------------------------------------------- signature pad (full screen)
+/* Signing in a small box inside a long page was hard (2 Nov 2026 review), so "Tap here to sign"
+   opens a pad that fills the whole screen: a wide area, a line to sign on, Clear and Done.
+     - smooth: every point the finger passes is used (getCoalescedEvents) and drawn as curves through
+       the midpoints; the pen thins a little when moving fast, like real ink
+     - strokes are kept as fractions of the pad, so rotating the phone or resizing the window simply
+       redraws them in the new size
+     - the page underneath cannot scroll while signing, and nothing is drawn outside the pad
+     - Done trims the empty space around the signature and keeps it as a PNG (SIG) */
+function openSigner(){
+  const a=S.applicants[0];
+  let g;
+  const ov=document.createElement('div'); ov.className='signer';
+  ov.innerHTML='<div class="sg-top"><div><b>Sign here</b><small>'+esc(a.full_name||'First applicant')+' · use your finger or mouse</small></div>'
+    +'<button type="button" class="sg-x" data-sg="cancel" aria-label="Close">×</button></div>'
+    +'<div class="sg-area"><canvas></canvas><div class="sg-line"></div><div class="sg-ph">Sign above the line</div></div>'
+    +'<div class="sg-bot"><button type="button" class="btn sec2" data-sg="clear">Clear</button><button type="button" class="btn pri" data-sg="done">Done</button></div>';
+  document.body.appendChild(ov); document.documentElement.classList.add('noscroll');
+  const area=ov.querySelector('.sg-area'), c=ov.querySelector('canvas'); g=c.getContext('2d');
+  let strokes=[], cur=null, W=0, Hh=0, dpr=1, last=null;
+  const ink='#0f2a6b';
+  function size(){
+    const b=area.getBoundingClientRect(); dpr=Math.max(1,window.devicePixelRatio||1); W=b.width; Hh=b.height;
+    c.width=Math.round(W*dpr); c.height=Math.round(Hh*dpr); g.setTransform(dpr,0,0,dpr,0,0);
+    g.lineCap='round'; g.lineJoin='round'; g.strokeStyle=ink; g.fillStyle=ink; redraw();
+  }
+  const base=function(){ return Math.max(2.4,Math.min(4.2,W/260)); };
+  function seg(p0,p1,p2){            // curve from mid(p0,p1) to mid(p1,p2), through p1
+    const m1={x:(p0.x+p1.x)/2*W,y:(p0.y+p1.y)/2*Hh}, m2={x:(p1.x+p2.x)/2*W,y:(p1.y+p2.y)/2*Hh};
+    g.lineWidth=p1.w*base(); g.beginPath(); g.moveTo(m1.x,m1.y); g.quadraticCurveTo(p1.x*W,p1.y*Hh,m2.x,m2.y); g.stroke();
+  }
+  function drawStroke(s){
+    if(!s.length) return;
+    if(s.length===1){ g.beginPath(); g.arc(s[0].x*W,s[0].y*Hh,base()*0.6,0,Math.PI*2); g.fill(); return; }
+    g.lineWidth=s[0].w*base(); g.beginPath(); g.moveTo(s[0].x*W,s[0].y*Hh); g.lineTo((s[0].x+s[1].x)/2*W,(s[0].y+s[1].y)/2*Hh); g.stroke();
+    for(let i=1;i<s.length-1;i++) seg(s[i-1],s[i],s[i+1]);
+    const l=s[s.length-1], p=s[s.length-2]; g.beginPath(); g.moveTo((p.x+l.x)/2*W,(p.y+l.y)/2*Hh); g.lineTo(l.x*W,l.y*Hh); g.stroke();
+  }
+  function redraw(){ g.clearRect(0,0,W,Hh); strokes.forEach(drawStroke); if(cur) drawStroke(cur); ov.querySelector('.sg-ph').style.display=strokes.length||cur?'none':''; }
+  function at(e){ const b=c.getBoundingClientRect(); return {x:(e.clientX-b.left)/b.width,y:(e.clientY-b.top)/b.height,t:e.timeStamp||Date.now()}; }
+  function add(p){
+    if(p.x<0||p.y<0||p.x>1||p.y>1){ if(cur&&cur.length){ strokes.push(cur); cur=[]; } last=null; return; }  // off the pad: lift the pen
+    // a little thinner when moving fast, like ink
+    let w=1; if(last){ const d=Math.hypot((p.x-last.x)*W,(p.y-last.y)*Hh), dt=Math.max(1,p.t-last.t), v=d/dt; w=Math.max(0.6,Math.min(1.15,1.2-v*0.25)); w=last.w*0.7+w*0.3; }
+    p.w=w; cur.push(p); last=p;
+    const n=cur.length;
+    if(n===1){ g.beginPath(); g.arc(p.x*W,p.y*Hh,base()*0.55,0,Math.PI*2); g.fill(); }
+    else if(n===2){ g.lineWidth=p.w*base(); g.beginPath(); g.moveTo(cur[0].x*W,cur[0].y*Hh); g.lineTo((cur[0].x+p.x)/2*W,(cur[0].y+p.y)/2*Hh); g.stroke(); }
+    else seg(cur[n-3],cur[n-2],cur[n-1]);
+  }
+  c.addEventListener('pointerdown',function(e){ e.preventDefault(); cur=[]; last=null; ov.querySelector('.sg-ph').style.display='none';
+    try{ c.setPointerCapture(e.pointerId); }catch(_e){} add(at(e)); });
+  c.addEventListener('pointermove',function(e){ if(!cur) return; e.preventDefault();
+    const list=(e.getCoalescedEvents&&e.getCoalescedEvents())||[]; (list.length?list:[e]).forEach(function(x){ add(at(x)); }); });
+  const end=function(){ if(!cur) return; if(cur.length){ const l=cur[cur.length-1], p=cur[cur.length-2]; if(p){ g.beginPath(); g.moveTo((p.x+l.x)/2*W,(p.y+l.y)/2*Hh); g.lineTo(l.x*W,l.y*Hh); g.stroke(); } strokes.push(cur); } cur=null; last=null; };
   c.addEventListener('pointerup',end); c.addEventListener('pointercancel',end); c.addEventListener('lostpointercapture',end);
-  c.addEventListener('touchmove',function(e){ e.preventDefault(); },{passive:false});
+  ['touchstart','touchmove'].forEach(function(t){ c.addEventListener(t,function(e){ e.preventDefault(); },{passive:false}); });
+  const onResize=function(){ size(); }; window.addEventListener('resize',onResize);
+  const close=function(){ window.removeEventListener('resize',onResize); ov.remove(); document.documentElement.classList.remove('noscroll'); };
+  ov.addEventListener('click',function(e){
+    const b=e.target.closest('[data-sg]'); if(!b) return; const k=b.getAttribute('data-sg');
+    if(k==='cancel') close();
+    else if(k==='clear'){ strokes=[]; cur=null; redraw(); }
+    else if(k==='done'){
+      const pts=[].concat.apply([],strokes);
+      if(pts.length<6){ toast('Please sign above the line first'); return; }
+      // trim to the signature, with a margin, drawn at a fixed sharp size
+      let x0=1,y0=1,x1=0,y1=0; pts.forEach(function(p){ x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x); y1=Math.max(y1,p.y); });
+      const SW=W*2, SH=Hh*2, pad=24, bw=(x1-x0)*SW+pad*2, bh=(y1-y0)*SH+pad*2;
+      const o=document.createElement('canvas'); o.width=Math.ceil(bw); o.height=Math.ceil(bh);
+      const og=o.getContext('2d'); og.lineCap='round'; og.lineJoin='round'; og.strokeStyle=ink; og.fillStyle=ink;
+      // reuse the same drawing code on the output canvas
+      const old=[W,Hh]; W=SW; Hh=SH;
+      og.translate(pad-x0*SW,pad-y0*SH);
+      const gg=og; const swap=function(fn){ const keep=g; g=gg; try{ fn(); }finally{ g=keep; } };
+      swap(function(){ strokes.forEach(drawStroke); });
+      W=old[0]; Hh=old[1];
+      SIG=o.toDataURL('image/png'); delete ERR.sig; MISSING=MISSING.filter(function(m){ return m[0]!=='sig'; });
+      close(); render(); const f=$('f-sig'); if(f) f.scrollIntoView({block:'center'});
+    }
+  });
+  requestAnimationFrame(size);
 }
 
 // ---------------------------------------------------------------- address suggestions (Photon / OpenStreetMap)
@@ -477,7 +527,7 @@ document.addEventListener('click',function(e){
   if(b.dataset.addwhy){ S.why.push(''); save(); render(); const ins=document.querySelectorAll('[data-k^="why."]'); ins[ins.length-1].focus(); return; }
   if(b.dataset.rmwhy){ S.why.splice(+b.dataset.rmwhy,1); save(); render(); return; }
   if(b.dataset.delfile){ const p=b.dataset.delfile.split('|'); FILES[+p[0]][p[1]].splice(+p[2],1); render(); return; }
-  if(b.dataset.clearsig){ SIG=null; render(); return; }
+  if(b.dataset.opensig){ openSigner(); return; }
   if(b.dataset.go){ go(+b.dataset.go); return; }
   if(b.dataset.back){ go(S.step-1); return; }
   if(b.dataset.next){
@@ -486,9 +536,6 @@ document.addEventListener('click',function(e){
     go(S.step+1);
   }
 });
-// Rotating the phone or resizing the window changes the signature box size: draw it again
-// (keeping what was signed) so the pen still lands where the finger is.
-let rsT=null; window.addEventListener('resize',function(){ if(S.step!==6) return; clearTimeout(rsT); rsT=setTimeout(function(){ const c=$('sigPad'); if(c&&Math.abs(c.getBoundingClientRect().width*Math.max(1,window.devicePixelRatio||1)-c.width)>2) render(); },200); });
 document.addEventListener('click',function(e){ if(!e.target.closest('.ac')) document.querySelectorAll('[id^="ac-"]').forEach(function(b){ b.innerHTML=''; }); },true);
 
 // ---------------------------------------------------------------- submit
