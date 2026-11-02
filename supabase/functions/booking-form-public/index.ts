@@ -3,7 +3,8 @@
 // PUBLIC on purpose (verify_jwt off): one open link per project, filled by customers who have no
 // JainE login. So everything is checked here, never trusted from the page:
 //   - known project only; 1-6 applicants; names, mobile, email, PAN / Aadhaar formats
-//   - every applicant has signed (a PNG drawn on the page) and Indian nationals have attached PAN and
+//   - the first applicant has signed (a PNG drawn on the page), no two applicants share a PAN or
+//     Aadhaar, and Indian nationals have attached PAN and
 //     Aadhaar; files are images or PDFs, at most 10 MB each and 45 MB together
 //   - a hidden field bots fill, and at most 5 submissions an hour from one address
 // Files go to the private S3 bucket under portal/digital-booking/<id>/ - the same s3: paths staff
@@ -51,11 +52,16 @@ Deno.serve(async (req) => {
   const apps = Array.isArray(d.applicants) ? d.applicants.slice(0, MAX_APPLICANTS) : [];
   if (!apps.length) return j({ error: "Please add at least one applicant." }, 400);
   const problems: string[] = [];
+  const seenPan: Record<string, number> = {}, seenAad: Record<string, number> = {};
   apps.forEach((a: any, i: number) => {
     const who = i ? `Applicant ${i + 1}` : "First applicant";
     if (!clean(a.full_name)) problems.push(`${who}: name is missing`);
-    if (a.pan && !PAN.test(clean(a.pan, 10).toUpperCase())) problems.push(`${who}: PAN should look like ABCDE1234F`);
-    if (a.aadhaar && !AADHAAR.test(clean(a.aadhaar, 14).replace(/\s/g, ""))) problems.push(`${who}: Aadhaar number should be 12 digits`);
+    const pan = clean(a.pan, 10).toUpperCase(), aad = clean(a.aadhaar, 14).replace(/\s/g, "");
+    if (pan && !PAN.test(pan)) problems.push(`${who}: PAN should look like ABCDE1234F`);
+    if (aad && !AADHAAR.test(aad)) problems.push(`${who}: Aadhaar number should be 12 digits`);
+    // Each applicant is a different person: the same PAN or Aadhaar twice is a mistake.
+    if (pan && seenPan[pan] != null) problems.push(`${who}: same PAN as applicant ${seenPan[pan] + 1}`); else if (pan) seenPan[pan] = i;
+    if (aad && seenAad[aad] != null) problems.push(`${who}: same Aadhaar as applicant ${seenAad[aad] + 1}`); else if (aad) seenAad[aad] = i;
   });
   const c = d.contact || {};
   if (!/^[0-9+\-\s]{8,18}$/.test(clean(c.mobile, 20))) problems.push("Mobile number is missing or incomplete");
@@ -79,7 +85,8 @@ Deno.serve(async (req) => {
   if (total > MAX_TOTAL) return j({ error: "The attached files are too large together (over 45 MB). Please attach smaller photos." }, 400);
   apps.forEach((a: any, i: number) => {
     const who = i ? `Applicant ${i + 1}` : "First applicant";
-    if (!files.some((f) => f.applicant === i && f.kind === "signature")) problems.push(`${who} has not signed`);
+    // Only the first applicant signs (the user's decision, 2 Nov 2026).
+    if (i === 0 && !files.some((f) => f.applicant === 0 && f.kind === "signature")) problems.push(`${who} has not signed`);
     const indian = !clean(a.nationality) || /^india$/i.test(clean(a.nationality));
     if (indian && !files.some((f) => f.applicant === i && f.kind === "pan")) problems.push(`${who}: please attach the PAN card`);
     if (indian && !files.some((f) => f.applicant === i && f.kind === "aadhaar")) problems.push(`${who}: please attach the Aadhaar card`);
