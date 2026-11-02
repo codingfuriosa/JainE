@@ -56,10 +56,14 @@
   .bad>label{color:var(--err)}
   .pre{display:flex;gap:8px}.pre .pick{width:124px;flex:none}
   /* choice chips */
-  .chips{display:grid;grid-template-columns:repeat(var(--c,2),minmax(0,1fr));gap:8px;border:1.5px solid transparent;border-radius:12px}
-  @media(max-width:560px){.chips{grid-template-columns:repeat(var(--m,2),minmax(0,1fr))}}
-  .chip{border:1.5px solid var(--line);background:#fff;border-radius:12px;padding:10px 8px;font:inherit;font-size:14.5px;font-weight:600;color:#3d424e;cursor:pointer;min-height:48px;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.2;min-width:0;overflow-wrap:normal;word-break:normal;hyphens:manual}
-  .chip.on{border-color:var(--brand);background:var(--soft);color:var(--brand-dark);font-weight:800;box-shadow:inset 0 0 0 1px var(--brand)}
+  /* choice pills: small, natural width, wrapping onto a second line when they do not fit */
+  .chips{display:flex;flex-wrap:wrap;gap:8px;border:1.5px solid transparent;border-radius:12px}
+
+  .chip{border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:8px 14px 8px 11px;font:inherit;font-size:14px;font-weight:600;color:#3d424e;cursor:pointer;min-height:40px;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+  .chip:before{content:'';width:14px;height:14px;border-radius:50%;border:2px solid #c9c4bb;flex:none;box-sizing:border-box}
+  .chip.on{border-color:var(--brand);background:var(--soft);color:var(--brand-dark)}
+  .chip.on:before{border-color:var(--brand);background:radial-gradient(var(--brand) 42%,transparent 48%)}
+  .chips.num .chip{min-width:44px;justify-content:center;padding:8px 12px}.chips.num .chip:before{display:none}
   /* custom dropdown (replaces the plain browser select) */
   .pick{display:flex;align-items:center;gap:10px;width:100%;border:1.5px solid var(--line);border-radius:12px;padding:10px 14px;min-height:50px;background:#fff;font:inherit;font-size:16px;color:var(--ink);cursor:pointer;text-align:left}
   .pick .v{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -70,7 +74,7 @@
   @media(min-width:640px){.sheet-bg{align-items:center}.sheet{border-radius:18px}}
   .sheet .st{padding:16px 18px 8px;font-weight:800;font-size:16px;display:flex;justify-content:space-between;align-items:center}
   .sheet .st button{border:none;background:#f1ede6;border-radius:50%;width:34px;height:34px;font-size:18px;cursor:pointer}
-  .sheet input{margin:0 16px 8px;width:calc(100% - 32px)}
+  .sheet input{margin:0 16px 8px;width:calc(100% - 32px);font-size:14px!important;min-height:42px!important;padding:9px 12px!important}
   .sheet .ls{overflow:auto;padding:4px 8px 12px}
   .sheet .op{display:flex;align-items:center;gap:12px;width:100%;border:none;background:none;padding:13px 12px;border-radius:12px;font:inherit;font-size:16px;text-align:left;cursor:pointer;color:var(--ink)}
   .sheet .op.on{background:var(--soft);font-weight:700;color:var(--brand-dark)}
@@ -85,7 +89,7 @@
   .grp{font-size:11.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--brand-dark);margin:22px 0 12px;display:flex;align-items:center;gap:10px}
   .grp:after{content:'';flex:1;height:1px;background:var(--line)}
   .ah+.grp{margin-top:4px}
-  .chips.sm .chip{min-height:44px;font-size:13px;padding:8px 3px}
+
   .opt-d{margin-top:18px}.opt-d summary{font-size:14px}.opt-d .opt{font-weight:500;color:var(--slate);font-size:12px;margin-left:4px}
   .app .rm{margin-left:auto;background:#fff5f5;border:1.5px solid #f1b9b9;color:var(--err);border-radius:10px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;padding:7px 14px}
   .btn{border:none;border-radius:13px;padding:14px 20px;font:inherit;font-size:16px;font-weight:800;cursor:pointer;min-height:52px}
@@ -164,7 +168,7 @@
   .rvh{display:flex;justify-content:space-between;align-items:center;margin-top:18px}
   .rvh:first-child{margin-top:0}
   .rvh h3{margin:0;font-size:12px;letter-spacing:.07em;text-transform:uppercase;color:var(--slate)}
-  .rvh button{background:none;border:none;color:var(--brand);font:inherit;font-weight:800;font-size:13.5px;cursor:pointer;padding:6px}
+  .rvh button{background:#fff;border:1.5px solid #e9b8b8;color:var(--brand-dark);border-radius:10px;font:inherit;font-weight:700;font-size:13px;cursor:pointer;padding:6px 14px}
   .done{text-align:center;padding:34px 18px}
   .done .ok{width:64px;height:64px;border-radius:50%;background:#e3f3ea;color:var(--ok);display:flex;align-items:center;justify-content:center;font-size:32px;margin:0 auto 14px}
   .done .ref{font-size:24px;font-weight:800;letter-spacing:1px;margin:10px 0;color:var(--brand-dark)}

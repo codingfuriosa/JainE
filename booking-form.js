@@ -84,13 +84,11 @@ function field(path,label,o){
       +(o.mode?' inputmode="'+o.mode+'"':'')+(o.max?' maxlength="'+o.max+'"':'')+' autocomplete="'+(o.auto||'off')+'"'+(o.req&&o.type==='date'?' required':'')+'>';
   return wrapF(path,label,o,(o.before||'')+ctl+(o.after||''));
 }
-/* Choice buttons sit in an even grid: every button in a row is the same width and the row fills
-   the card edge to edge. Columns: as many as there are options (up to 5), else two rows; on a phone
-   at most 4 short ones or 2-3 longer ones per row - each call may say otherwise (cols / mcols). */
+/* Choice pills: small and as wide as their words, wrapping onto a second line when a row is full
+   (the user preferred this to equal-width buttons squeezed into one row, 2 Nov 2026). */
 function chips(path,label,options,o){
-  o=o||{}; const v=get(path), n=options.length;
-  const c=o.cols||(n<=5?n:Math.ceil(n/2)), m=o.mcols||(n<=3?n:n===4?2:Math.ceil(n/2));
-  return wrapF(path,label,Object.assign({full:o.full!==false},o),'<div class="chips'+(o.num?' num':'')+(o.sm?' sm':'')+'" style="--c:'+c+';--m:'+m+'" role="radiogroup">'
+  o=o||{}; const v=get(path);
+  return wrapF(path,label,Object.assign({full:o.full!==false},o),'<div class="chips'+(o.num?' num':'')+'" role="radiogroup">'
     +options.map(function(x){ const val=Array.isArray(x)?x[0]:x, txt=Array.isArray(x)?x[1]:x;
       return '<button type="button" class="chip'+(v===val?' on':'')+'" role="radio" aria-checked="'+(v===val)+'" data-chip="'+path+'" data-v="'+esc(val)+'">'+esc(txt)+'</button>'; }).join('')+'</div>');
 }
@@ -386,58 +384,62 @@ function showErrors(){
 // ---------------------------------------------------------------- signature pad (full screen)
 /* Signing in a small box inside a long page was hard (2 Nov 2026 review), so "Tap here to sign"
    opens a pad that fills the whole screen: a wide area, a line to sign on, Clear and Done.
-     - smooth: every point the finger passes is used (getCoalescedEvents) and drawn as curves through
-       the midpoints; the pen thins a little when moving fast, like real ink
-     - strokes are kept as fractions of the pad, so rotating the phone or resizing the window simply
-       redraws them in the new size
-     - the page underneath cannot scroll while signing, and nothing is drawn outside the pad
-     - Done trims the empty space around the signature and keeps it as a PNG (SIG) */
+   Made to feel like writing with a pen:
+     - every point the finger or mouse passes is taken (getCoalescedEvents; pointerrawupdate where
+       the browser has it), lightly smoothed to take out the jitter of the hand / mouse
+     - each stroke is drawn as ONE continuous curve (quadratic curves through the midpoints) at a
+       steady pen width, redrawn once per screen frame - no visible joins or beads
+     - strokes are kept as fractions of the pad, so rotating the phone or resizing the window just
+       redraws them at the new size; the page behind cannot scroll while signing
+     - Done trims the empty space around the signature and keeps it as a sharp PNG (SIG) */
 function openSigner(){
   const a=S.applicants[0];
-  let g;
   const ov=document.createElement('div'); ov.className='signer';
   ov.innerHTML='<div class="sg-top"><div><b>Sign here</b><small>'+esc(a.full_name||'First applicant')+' · use your finger or mouse</small></div>'
     +'<button type="button" class="sg-x" data-sg="cancel" aria-label="Close">×</button></div>'
     +'<div class="sg-area"><canvas></canvas><div class="sg-line"></div><div class="sg-ph">Sign above the line</div></div>'
     +'<div class="sg-bot"><button type="button" class="btn sec2" data-sg="clear">Clear</button><button type="button" class="btn pri" data-sg="done">Done</button></div>';
   document.body.appendChild(ov); document.documentElement.classList.add('noscroll');
-  const area=ov.querySelector('.sg-area'), c=ov.querySelector('canvas'); g=c.getContext('2d');
-  let strokes=[], cur=null, W=0, Hh=0, dpr=1, last=null;
-  const ink='#0f2a6b';
+  const area=ov.querySelector('.sg-area'), c=ov.querySelector('canvas'), ph=ov.querySelector('.sg-ph');
+  const g=c.getContext('2d');
+  const INK='#0f2a6b';
+  let strokes=[], cur=null, W=0, Hh=0, frame=0, last=null;
+  const penWidth=function(w){ return Math.max(2.2,Math.min(3.6,w/240)); };
   function size(){
-    const b=area.getBoundingClientRect(); dpr=Math.max(1,window.devicePixelRatio||1); W=b.width; Hh=b.height;
-    c.width=Math.round(W*dpr); c.height=Math.round(Hh*dpr); g.setTransform(dpr,0,0,dpr,0,0);
-    g.lineCap='round'; g.lineJoin='round'; g.strokeStyle=ink; g.fillStyle=ink; redraw();
+    const b=area.getBoundingClientRect(), dpr=Math.max(1,window.devicePixelRatio||1); W=b.width; Hh=b.height;
+    c.width=Math.round(W*dpr); c.height=Math.round(Hh*dpr); g.setTransform(dpr,0,0,dpr,0,0); paint();
   }
-  const base=function(){ return Math.max(2.4,Math.min(4.2,W/260)); };
-  function seg(p0,p1,p2){            // curve from mid(p0,p1) to mid(p1,p2), through p1
-    const m1={x:(p0.x+p1.x)/2*W,y:(p0.y+p1.y)/2*Hh}, m2={x:(p1.x+p2.x)/2*W,y:(p1.y+p2.y)/2*Hh};
-    g.lineWidth=p1.w*base(); g.beginPath(); g.moveTo(m1.x,m1.y); g.quadraticCurveTo(p1.x*W,p1.y*Hh,m2.x,m2.y); g.stroke();
+  // One stroke = one path through the midpoints of its points: smooth, with no joins.
+  function path(ctx,s,w,h,lw){
+    ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle=INK; ctx.fillStyle=INK; ctx.lineWidth=lw;
+    if(s.length===1){ ctx.beginPath(); ctx.arc(s[0].x*w,s[0].y*h,lw*0.55,0,Math.PI*2); ctx.fill(); return; }
+    ctx.beginPath(); ctx.moveTo(s[0].x*w,s[0].y*h);
+    for(let i=1;i<s.length-1;i++){ const p=s[i], q=s[i+1]; ctx.quadraticCurveTo(p.x*w,p.y*h,(p.x+q.x)/2*w,(p.y+q.y)/2*h); }
+    const l=s[s.length-1]; ctx.lineTo(l.x*w,l.y*h); ctx.stroke();
   }
-  function drawStroke(s){
-    if(!s.length) return;
-    if(s.length===1){ g.beginPath(); g.arc(s[0].x*W,s[0].y*Hh,base()*0.6,0,Math.PI*2); g.fill(); return; }
-    g.lineWidth=s[0].w*base(); g.beginPath(); g.moveTo(s[0].x*W,s[0].y*Hh); g.lineTo((s[0].x+s[1].x)/2*W,(s[0].y+s[1].y)/2*Hh); g.stroke();
-    for(let i=1;i<s.length-1;i++) seg(s[i-1],s[i],s[i+1]);
-    const l=s[s.length-1], p=s[s.length-2]; g.beginPath(); g.moveTo((p.x+l.x)/2*W,(p.y+l.y)/2*Hh); g.lineTo(l.x*W,l.y*Hh); g.stroke();
-  }
-  function redraw(){ g.clearRect(0,0,W,Hh); strokes.forEach(drawStroke); if(cur) drawStroke(cur); ov.querySelector('.sg-ph').style.display=strokes.length||cur?'none':''; }
-  function at(e){ const b=c.getBoundingClientRect(); return {x:(e.clientX-b.left)/b.width,y:(e.clientY-b.top)/b.height,t:e.timeStamp||Date.now()}; }
+  function paint(){ frame=0; g.clearRect(0,0,W,Hh); const lw=penWidth(W); strokes.forEach(function(s){ path(g,s,W,Hh,lw); }); if(cur&&cur.length) path(g,cur,W,Hh,lw);
+    ph.style.display=strokes.length||(cur&&cur.length)?'none':''; }
+  const later=function(){ if(!frame) frame=requestAnimationFrame(paint); };
+  function at(e){ const b=c.getBoundingClientRect(); return {x:(e.clientX-b.left)/b.width,y:(e.clientY-b.top)/b.height}; }
   function add(p){
-    if(p.x<0||p.y<0||p.x>1||p.y>1){ if(cur&&cur.length){ strokes.push(cur); cur=[]; } last=null; return; }  // off the pad: lift the pen
-    // a little thinner when moving fast, like ink
-    let w=1; if(last){ const d=Math.hypot((p.x-last.x)*W,(p.y-last.y)*Hh), dt=Math.max(1,p.t-last.t), v=d/dt; w=Math.max(0.6,Math.min(1.15,1.2-v*0.25)); w=last.w*0.7+w*0.3; }
-    p.w=w; cur.push(p); last=p;
-    const n=cur.length;
-    if(n===1){ g.beginPath(); g.arc(p.x*W,p.y*Hh,base()*0.55,0,Math.PI*2); g.fill(); }
-    else if(n===2){ g.lineWidth=p.w*base(); g.beginPath(); g.moveTo(cur[0].x*W,cur[0].y*Hh); g.lineTo((cur[0].x+p.x)/2*W,(cur[0].y+p.y)/2*Hh); g.stroke(); }
-    else seg(cur[n-3],cur[n-2],cur[n-1]);
+    if(p.x<0||p.y<0||p.x>1||p.y>1){ if(cur&&cur.length>0){ strokes.push(cur); cur=[]; } last=null; return; }   // off the pad: lift the pen
+    if(last){                       // smooth the hand / mouse jitter a little; skip points that did not move
+      const sx=last.x+(p.x-last.x)*0.6, sy=last.y+(p.y-last.y)*0.6;
+      if(Math.abs((sx-last.x)*W)<0.4&&Math.abs((sy-last.y)*Hh)<0.4) return;
+      p={x:sx,y:sy};
+    }
+    cur.push(p); last=p; later();
   }
-  c.addEventListener('pointerdown',function(e){ e.preventDefault(); cur=[]; last=null; ov.querySelector('.sg-ph').style.display='none';
-    try{ c.setPointerCapture(e.pointerId); }catch(_e){} add(at(e)); });
-  c.addEventListener('pointermove',function(e){ if(!cur) return; e.preventDefault();
-    const list=(e.getCoalescedEvents&&e.getCoalescedEvents())||[]; (list.length?list:[e]).forEach(function(x){ add(at(x)); }); });
-  const end=function(){ if(!cur) return; if(cur.length){ const l=cur[cur.length-1], p=cur[cur.length-2]; if(p){ g.beginPath(); g.moveTo((p.x+l.x)/2*W,(p.y+l.y)/2*Hh); g.lineTo(l.x*W,l.y*Hh); g.stroke(); } strokes.push(cur); } cur=null; last=null; };
+  // The fastest events (pointerrawupdate) where the browser sends them during this stroke, else
+  // ordinary pointermove.
+  let raw=false, pid=null;
+  c.addEventListener('pointerdown',function(e){ e.preventDefault(); cur=[]; last=null; raw=false; pid=e.pointerId; try{ c.setPointerCapture(e.pointerId); }catch(_e){} add(at(e)); });
+  const move=function(e){ if(!cur||e.pointerId!==pid) return; if(e.cancelable) e.preventDefault();
+    const list=(e.getCoalescedEvents&&e.getCoalescedEvents())||[]; (list.length?list:[e]).forEach(function(x){ add(at(x)); }); };
+  c.addEventListener('pointerrawupdate',function(e){ if(!cur||e.pointerId!==pid) return; raw=true; move(e); });
+  c.addEventListener('pointermove',function(e){ if(raw) return; move(e); });
+  const end=function(e){ if(!cur||(e&&e.pointerId!=null&&e.pointerId!==pid)) return; if(e&&e.type==='pointerup'){ const p=at(e); if(p.x>=0&&p.y>=0&&p.x<=1&&p.y<=1&&cur.length) cur.push(p); }
+    if(cur.length) strokes.push(cur); cur=null; last=null; paint(); };
   c.addEventListener('pointerup',end); c.addEventListener('pointercancel',end); c.addEventListener('lostpointercapture',end);
   ['touchstart','touchmove'].forEach(function(t){ c.addEventListener(t,function(e){ e.preventDefault(); },{passive:false}); });
   const onResize=function(){ size(); }; window.addEventListener('resize',onResize);
@@ -445,21 +447,16 @@ function openSigner(){
   ov.addEventListener('click',function(e){
     const b=e.target.closest('[data-sg]'); if(!b) return; const k=b.getAttribute('data-sg');
     if(k==='cancel') close();
-    else if(k==='clear'){ strokes=[]; cur=null; redraw(); }
+    else if(k==='clear'){ strokes=[]; cur=null; paint(); }
     else if(k==='done'){
       const pts=[].concat.apply([],strokes);
       if(pts.length<6){ toast('Please sign above the line first'); return; }
-      // trim to the signature, with a margin, drawn at a fixed sharp size
+      // trimmed to the signature with a margin, drawn twice as large for a sharp image
       let x0=1,y0=1,x1=0,y1=0; pts.forEach(function(p){ x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x); y1=Math.max(y1,p.y); });
-      const SW=W*2, SH=Hh*2, pad=24, bw=(x1-x0)*SW+pad*2, bh=(y1-y0)*SH+pad*2;
-      const o=document.createElement('canvas'); o.width=Math.ceil(bw); o.height=Math.ceil(bh);
-      const og=o.getContext('2d'); og.lineCap='round'; og.lineJoin='round'; og.strokeStyle=ink; og.fillStyle=ink;
-      // reuse the same drawing code on the output canvas
-      const old=[W,Hh]; W=SW; Hh=SH;
-      og.translate(pad-x0*SW,pad-y0*SH);
-      const gg=og; const swap=function(fn){ const keep=g; g=gg; try{ fn(); }finally{ g=keep; } };
-      swap(function(){ strokes.forEach(drawStroke); });
-      W=old[0]; Hh=old[1];
+      const SW=W*2, SH=Hh*2, pad=24, o=document.createElement('canvas');
+      o.width=Math.ceil((x1-x0)*SW+pad*2); o.height=Math.ceil((y1-y0)*SH+pad*2);
+      const og=o.getContext('2d'); og.translate(pad-x0*SW,pad-y0*SH);
+      strokes.forEach(function(s){ path(og,s,SW,SH,penWidth(W)*2); });
       SIG=o.toDataURL('image/png'); delete ERR.sig; MISSING=MISSING.filter(function(m){ return m[0]!=='sig'; });
       close(); render(); const f=$('f-sig'); if(f) f.scrollIntoView({block:'center'});
     }
