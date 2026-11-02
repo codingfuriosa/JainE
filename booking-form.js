@@ -241,7 +241,6 @@ function stepTerms(){
       +'<details class="t"><summary>Terms of application (15)</summary>'+list(TERMS)+'</details>'
       +'<details class="t"><summary>Declaration (2)</summary>'+list(DECL)+'</details>'
       +'<details class="t"><summary>Special Conditions (11)</summary>'+list(SPECIAL.map(function(s){ return esc(s).replace(/&lt;br&gt;&lt;br&gt;/g,'<br><br>'); }),true)+'</details>'
-      +'<div class="note">The Annexure – Supplemental Terms and Conditions will be added here.</div>'
       +'<label class="agree'+(ERR.terms_accepted?' bad':'')+'" id="f-terms_accepted"><input type="checkbox" data-check="terms_accepted"'+(S.terms_accepted?' checked':'')+'><span><b>I/We have read and agree to all the above.</b><br><span style="color:var(--slate);font-size:13px">I/We confirm that everything in this form is true.</span><div class="err">'+esc(ERR.terms_accepted||'')+'</div></span></label>'
     +'</div>'
     +'<div class="sec"><h2>Signatures</h2><p class="hint">Each applicant signs with a finger (or mouse) inside their box.</p>'
