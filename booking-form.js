@@ -84,9 +84,13 @@ function field(path,label,o){
       +(o.mode?' inputmode="'+o.mode+'"':'')+(o.max?' maxlength="'+o.max+'"':'')+' autocomplete="'+(o.auto||'off')+'"'+(o.req&&o.type==='date'?' required':'')+'>';
   return wrapF(path,label,o,(o.before||'')+ctl+(o.after||''));
 }
+/* Choice buttons sit in an even grid: every button in a row is the same width and the row fills
+   the card edge to edge. Columns: as many as there are options (up to 5), else two rows; on a phone
+   at most 4 short ones or 2-3 longer ones per row - each call may say otherwise (cols / mcols). */
 function chips(path,label,options,o){
-  o=o||{}; const v=get(path);
-  return wrapF(path,label,Object.assign({full:o.full!==false},o),'<div class="chips'+(o.num?' num':'')+(o.sm?' sm':'')+'" role="radiogroup">'
+  o=o||{}; const v=get(path), n=options.length;
+  const c=o.cols||(n<=5?n:Math.ceil(n/2)), m=o.mcols||(n<=3?n:n===4?2:Math.ceil(n/2));
+  return wrapF(path,label,Object.assign({full:o.full!==false},o),'<div class="chips'+(o.num?' num':'')+(o.sm?' sm':'')+'" style="--c:'+c+';--m:'+m+'" role="radiogroup">'
     +options.map(function(x){ const val=Array.isArray(x)?x[0]:x, txt=Array.isArray(x)?x[1]:x;
       return '<button type="button" class="chip'+(v===val?' on':'')+'" role="radio" aria-checked="'+(v===val)+'" data-chip="'+path+'" data-v="'+esc(val)+'">'+esc(txt)+'</button>'; }).join('')+'</div>');
 }
@@ -132,9 +136,9 @@ function stepApplicants(){
       return '<div class="app"><div class="ah"><span class="num">'+(i+1)+'</span><b>'+(i?'Joint applicant':'First / sole applicant')+'</b>'
           +(i?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
         +'<div class="grp">Personal details</div><div class="stack">'
-        +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1})
+        +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,mcols:5})
         +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,cls:'up',auto:i?'off':'name'})
-        +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1})
+        +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1,mcols:4})
         +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,cls:'up'})
         +(i===0?field(p+'dob','Date of birth',{type:'date',req:1,full:1}):'')
         +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1})
@@ -145,7 +149,7 @@ function stepApplicants(){
         +field(p+'passport','Passport number',{cls:'up',req:foreign,note:foreign?'':'(only for NRIs & foreigners)',full:1})
         +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,note:foreign?'':'(only for NRIs & foreigners)'})
         +'</div>'
-        +(i===0?'<details class="t opt-d"'+(a.spouse||a.anniversary?' open':'')+'><summary>Spouse & anniversary <span class="opt">(optional)</span></summary><div class="stack" style="padding:0 14px 14px">'
+        +(i===0?'<details class="t opt-d"'+(a.spouse||a.anniversary?' open':'')+'><summary><span>Spouse & anniversary <span class="opt">(optional)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
           +field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></details>':'')
         +'</div>';
     }).join('')
@@ -153,9 +157,9 @@ function stepApplicants(){
 }
 function addrBody(k){
   return '<div class="grid">'
-    +'<div class="full ac">'+field(k+'.line','House, street and area',{type:'area',full:1,req:k==='res'||S.off.on,ph:'Start typing - suggestions will appear'})+'<div id="ac-'+k+'"></div></div>'
-    +field(k+'.city','City / Town',{req:1,auto:k==='res'?'address-level2':'off'})
-    +field(k+'.pin','PIN code',{mode:'numeric',max:6,req:1,auto:k==='res'?'postal-code':'off'})+'</div>';
+    +'<div class="full ac">'+field(k+'.line','House, street and area',{type:'area',full:1,req:k==='res'||S.off.on,ph:'Type your address'})+'<div id="ac-'+k+'"></div></div>'
+    +'<div class="pair">'+field(k+'.city','City / Town',{req:1,auto:k==='res'?'address-level2':'off'})
+    +field(k+'.pin','PIN code',{mode:'numeric',max:6,req:1,auto:k==='res'?'postal-code':'off'})+'</div></div>';
 }
 function stepContact(){
   const a=S.applicants[0];
@@ -173,8 +177,8 @@ function stepContact(){
 }
 function stepAbout(){
   return card('💼','#0d9488','Your work','',
-      '<div class="grid">'+chips('profession.kind','Profession',['Salaried','Self-Employed','Govt. Employee','Others'])
-      +field('profession.company','Company',{optional:1})+field('profession.designation','Designation',{optional:1})+'</div>')
+      '<div class="grid">'+chips('profession.kind','Profession',['Salaried','Self-Employed','Govt. Employee','Others'],{mcols:4,sm:1})
+      +'<div class="pair">'+field('profession.company','Company',{optional:1})+field('profession.designation','Designation',{optional:1})+'</div></div>')
     +card('📣','#ea580c','About this project','',
       '<div class="grid">'
       +chips('heard','How did you come to know about the project?',['Facebook','Instagram','Google','Friend / Relative','Other'])
@@ -191,14 +195,14 @@ function stepFlat(){
   return card('🏢','#c4161c','Flat choice','As discussed with our sales team. Leave the flat number empty if it is not fixed yet.',
       '<div class="grid">'
       +chips('flat.block','Block',CONF.blocks,{req:1})
-      +chips('flat.floor','Floor',floors,{num:1})
+      +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4})
       +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1})
       +chips('flat.bhk','Bedrooms',CONF.bhk)
       +chips('flat.parking','Right to use car park',['Covered','Open'])+'</div>')
     +card('🧾','#2563eb','Price & payment plan','',
       '<div class="grid">'
-      +field('price.total','Total sale price agreed (₹)',{mode:'numeric',optional:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div>'})
-      +field('price.rate','Rate per sq.ft. (₹)',{mode:'numeric',optional:1})
+      +'<div class="pair">'+field('price.total','Total price agreed (₹)',{mode:'numeric',optional:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div>'})
+      +field('price.rate','Rate per sq.ft. (₹)',{mode:'numeric',optional:1})+'</div>'
       +chips('price.plan','Payment plan',['Construction Linked','Down Payment'])
       +chips('price.loan','Home loan required?',['No','Yes'])
       +(S.price.loan==='Yes'?field('price.bank','Preferred bank / institution',{optional:1,full:1}):'')+'</div>');
@@ -207,12 +211,11 @@ function stepPay(){
   const chq=S.pay.mode==='Cheque'||S.pay.mode==='Demand Draft';
   return card('💳','#15803d','Application payment','The booking amount you have paid, in favour of <b>'+esc(CONF.company)+'</b>. We never take cash.',
       '<div class="grid">'
-      +chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Cheque','Demand Draft','Card'])
+      +chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Cheque','Demand Draft','Card'],{mcols:2})
       +field('pay.amount','Amount (₹)',{mode:'numeric',req:1,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})
-      +field('pay.date',chq?'Cheque / DD date':'Date paid',{type:'date',req:1})
-      +field('pay.ref',({'Cheque':'Cheque number','Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{req:1,cls:'up'})
-      +field('pay.bank','Bank (drawn on)',{req:chq,optional:!chq})
-      +(chq?field('pay.branch','Branch',{optional:1}):'')+'</div>')
+      +'<div class="pair">'+field('pay.date',chq?'Cheque / DD date':'Date paid',{type:'date',req:1})
+      +field('pay.ref',({'Cheque':'Cheque number','Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{req:1,cls:'up'})+'</div>'
+      +(chq?'<div class="pair">'+field('pay.bank','Bank (drawn on)',{req:1})+field('pay.branch','Branch',{optional:1})+'</div>':field('pay.bank','Bank',{optional:1}))+'</div>')
     +card('📝','#7c3aed','Booking','',
       '<div class="grid">'
       +chips('purpose','Purpose of booking',['Residential','Investment'])
@@ -241,8 +244,9 @@ function stepDocs(){
     const foreign=a.nationality!=='India';
     const box=function(kind,label){ const k='doc.'+i+'.'+kind;
       return wrapF(k,label,{full:1,req:!foreign,optional:foreign},'<div class="upl">'+fileList(i,kind)
-        +(FILES[i][kind].length<2?'<label class="pk">📷 '+(FILES[i][kind].length?'Add another':'Add photo or PDF')+'<input type="file" accept="image/*,application/pdf" data-file="'+i+'|'+kind+'"></label>':'')+'</div>'); };
-    return card('📄','#c4161c',esc(a.full_name||('Applicant '+(i+1))),(i?'Joint applicant':'First applicant')+'. Take a clear photo or attach a PDF. Aadhaar: front and back are fine as two photos.',
+        +(FILES[i][kind].length<2?'<label class="pk'+(FILES[i][kind].length?' more':'')+'"><span class="pi">📷</span><span><b>'+(FILES[i][kind].length?'Add another photo':'Take a photo or attach a PDF')+'</b>'
+          +(FILES[i][kind].length?'':'<small>'+(kind==='aadhaar'?'Front and back can be two photos':'Make sure the number is readable')+'</small>')+'</span><input type="file" accept="image/*,application/pdf" data-file="'+i+'|'+kind+'"></label>':'')+'</div>'); };
+    return card('📄','#c4161c',esc(a.full_name||('Applicant '+(i+1))),(i?'Joint applicant':'First applicant'),
       '<div class="grid">'+box('pan','PAN card')+box('aadhaar','Aadhaar card')+'</div>');
   }).join('');
 }
@@ -426,7 +430,7 @@ function suggest(k,q){
       const items=(j.features||[]).map(function(f){ const p=f.properties||{};
         const line=[p.housenumber,p.name,p.street,p.district||p.locality].filter(Boolean).filter(function(v,i,a){ return a.indexOf(v)===i; }).join(', ');
         return {line:line||p.name||'',city:p.city||p.county||p.state||'',pin:/^\d{6}$/.test(p.postcode||'')?p.postcode:'',more:[p.city,p.state,p.postcode].filter(Boolean).join(', ')}; })
-        .filter(function(x){ return x.line; });
+        .filter(function(x,i,arr){ return x.line&&arr.findIndex(function(y){ return y.line===x.line&&y.more===x.more; })===i; });
       box.innerHTML=items.length?'<div class="acl">'+items.map(function(x,i){ return '<button type="button" data-acpick="'+k+'|'+i+'">'+esc(x.line)+'<small>'+esc(x.more)+'</small></button>'; }).join('')
         +'<div class="src">Suggestions from OpenStreetMap</div></div>':'';
       box._items=items;
@@ -482,6 +486,9 @@ document.addEventListener('click',function(e){
     go(S.step+1);
   }
 });
+// Rotating the phone or resizing the window changes the signature box size: draw it again
+// (keeping what was signed) so the pen still lands where the finger is.
+let rsT=null; window.addEventListener('resize',function(){ if(S.step!==6) return; clearTimeout(rsT); rsT=setTimeout(function(){ const c=$('sigPad'); if(c&&Math.abs(c.getBoundingClientRect().width*Math.max(1,window.devicePixelRatio||1)-c.width)>2) render(); },200); });
 document.addEventListener('click',function(e){ if(!e.target.closest('.ac')) document.querySelectorAll('[id^="ac-"]').forEach(function(b){ b.innerHTML=''; }); },true);
 
 // ---------------------------------------------------------------- submit
