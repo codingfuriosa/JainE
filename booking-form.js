@@ -86,7 +86,7 @@ function field(path,label,o){
 }
 function chips(path,label,options,o){
   o=o||{}; const v=get(path);
-  return wrapF(path,label,Object.assign({full:o.full!==false},o),'<div class="chips'+(o.num?' num':'')+'" role="radiogroup">'
+  return wrapF(path,label,Object.assign({full:o.full!==false},o),'<div class="chips'+(o.num?' num':'')+(o.sm?' sm':'')+'" role="radiogroup">'
     +options.map(function(x){ const val=Array.isArray(x)?x[0]:x, txt=Array.isArray(x)?x[1]:x;
       return '<button type="button" class="chip'+(v===val?' on':'')+'" role="radio" aria-checked="'+(v===val)+'" data-chip="'+path+'" data-v="'+esc(val)+'">'+esc(txt)+'</button>'; }).join('')+'</div>');
 }
@@ -123,25 +123,31 @@ function openSheet(path,kind){
 
 // ---------------------------------------------------------------- steps
 function stepApplicants(){
-  return card('👥','#c4161c','Who is booking?','Add everyone whose name should be on the flat. The first applicant is the main contact and signs the form.',
+  return card('👥','#c4161c','Who is booking?','Everyone whose name goes on the flat. You can add more people at the bottom.',
     S.applicants.map(function(a,i){
       const p='applicants.'+i+'.', foreign=a.nationality!=='India';
+      /* One column, in small labelled groups, so a person always knows which part they are on:
+         who they are, then their ID documents, then (first applicant only, folded away) family. */
+      const F={full:1};
       return '<div class="app"><div class="ah"><span class="num">'+(i+1)+'</span><b>'+(i?'Joint applicant':'First / sole applicant')+'</b>'
           +(i?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
-        +'<div class="grid">'
-        +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'])
+        +'<div class="grp">Personal details</div><div class="stack">'
+        +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1})
         +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,cls:'up',auto:i?'off':'name'})
-        +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'])
+        +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1})
         +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,cls:'up'})
-        +(i===0?field(p+'dob','Date of birth',{type:'date',req:1}):'')
-        +chips(p+'occupation','Occupation',['Salaried','Business'],{full:i!==0?true:false})
-        +pick(p+'nationality','Nationality / Country','country',{full:1})
-        +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign})
-        +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1})
-        +field(p+'passport','Passport number',{cls:'up',req:foreign,note:foreign?'':'(only for NRIs & foreigners)'})
+        +(i===0?field(p+'dob','Date of birth',{type:'date',req:1,full:1}):'')
+        +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1})
+        +'</div><div class="grp">Identity documents</div><div class="stack">'
+        +pick(p+'nationality','Nationality / Country','country',F)
+        +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1})
+        +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1})
+        +field(p+'passport','Passport number',{cls:'up',req:foreign,note:foreign?'':'(only for NRIs & foreigners)',full:1})
         +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,note:foreign?'':'(only for NRIs & foreigners)'})
-        +(i===0?field(p+'spouse','Spouse name',{optional:1,cls:'up'})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1}):'')
-        +'</div></div>';
+        +'</div>'
+        +(i===0?'<details class="t opt-d"'+(a.spouse||a.anniversary?' open':'')+'><summary>Spouse & anniversary <span class="opt">(optional)</span></summary><div class="stack" style="padding:0 14px 14px">'
+          +field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></details>':'')
+        +'</div>';
     }).join('')
     +(S.applicants.length<MAX_APPS?'<button type="button" class="btn add" data-add="1">＋ Add another applicant</button>':''));
 }

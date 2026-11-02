@@ -18,8 +18,9 @@
   /* header: the two logos on white */
   .hd{background:#fff;padding:16px 18px 14px;border-bottom:3px solid var(--brand)}
   .hd .logos{display:flex;justify-content:space-between;align-items:center;gap:14px}
-  .hd .logos img{display:block;height:44px;width:auto;max-width:46%;object-fit:contain;object-position:left center}
-  .hd .proj{height:48px!important;object-position:right center!important}
+  /* both logos the same height, centred on one line */
+  .hd .logos img{display:block;height:40px;width:auto;max-width:47%;object-fit:contain}
+  @media(max-width:380px){.hd .logos img{height:34px}}
   .hd h1{font-size:18px;margin:14px 0 2px;font-weight:800}
   .hd p{margin:0;color:var(--slate);font-size:12.5px}
   /* progress */
@@ -82,6 +83,12 @@
   .app .ah{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px dashed var(--line)}
   .app .ah b{font-size:15px}
   .app .num{width:30px;height:30px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex:none}
+  .stack{display:flex;flex-direction:column;gap:16px}
+  .grp{font-size:11.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--brand-dark);margin:22px 0 12px;display:flex;align-items:center;gap:10px}
+  .grp:after{content:'';flex:1;height:1px;background:var(--line)}
+  .ah+.grp{margin-top:4px}
+  .chips.sm{gap:6px}.chips.sm .chip{min-height:40px;padding:8px 13px;font-size:14px}
+  .opt-d{margin-top:18px}.opt-d summary{font-size:14px}.opt-d .opt{font-weight:500;color:var(--slate);font-size:12px;margin-left:4px}
   .app .rm{margin-left:auto;background:none;border:none;color:var(--err);font:inherit;font-size:13px;font-weight:700;cursor:pointer;padding:8px}
   .btn{border:none;border-radius:13px;padding:14px 20px;font:inherit;font-size:16px;font-weight:800;cursor:pointer;min-height:52px}
   .btn.pri{background:var(--brand);color:#fff}.btn.pri:active{background:var(--brand-dark)}
