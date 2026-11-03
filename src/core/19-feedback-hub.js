@@ -184,12 +184,19 @@ VIEWS.feedback_hub=async function(v,seg){
   if(seg[0]==='preview')   return fhPreviewPage(v);
   if(seg[0]==='records'&&seg[1]) return fhRecordsPage(v,Number(seg[1]));
   if(seg[0]==='response'&&seg[1]) return fhResponseDetailPage(v,seg[1]);
+  if(seg[0]==='sys'&&seg[1]&&fhIsSystems()) return sfItemPage(v,Number(seg[1]));
   setCrumb(['Feedback','Feedback Hub']);
-  const tabs=['Design','Records'];
-  const ti=mTab(seg,tabs.length);
-  v.innerHTML=FH_CSS+mHead('fa-qrcode','#7c3aed','Feedback Hub')+mTabs('feedback_hub',tabs,ti)+'<div id="fhBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
-  if(ti===0){await fhDesign();return;}
-  await fhRecords();
+  // Each person gets only the tabs that are theirs (see canFeedbackHub in 06-nav.js).
+  const all=[['design','Design',fhCanQrForms],['records','Records',fhCanQrForms],['system','System Feedbacks',fhIsSystems],['give','Give Feedback',fhIsRater]];
+  const mine=all.filter(function(t){ return t[2](); });
+  if(!mine.length){ v.innerHTML='<div class="card"><div class="empty">You do not have access to Feedback Hub.</div></div>'; return; }
+  const ti=mTab(seg,mine.length);
+  v.innerHTML=FH_CSS+SF_CSS+mHead('fa-qrcode','#7c3aed','Feedback Hub')+(mine.length>1?mTabs('feedback_hub',mine.map(function(t){ return t[1]; }),ti):'')+'<div id="fhBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
+  const key=mine[ti][0];
+  if(key==='design'){await fhDesign();return;}
+  if(key==='records'){await fhRecords();return;}
+  if(key==='system'){await sfManage();return;}
+  await sfGive();
 };
 async function fhLoadForms(force){
   if(FH_FORMS&&!force)return FH_FORMS;
