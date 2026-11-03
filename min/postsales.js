@@ -25,6 +25,11 @@
   .ps-stat{margin-left:auto;font-size:12.5px;color:var(--slate);white-space:nowrap;
     display:flex;gap:16px;align-items:baseline}
   .ps-stat b{color:var(--ink);font-weight:650;font-variant-numeric:tabular-nums}
+  /* .ps-filters>* gives every child "flex:1 1 180px; min-width:0", which let the figures shrink to
+     180px while white-space:nowrap kept them on one line - so a crore-sized Consideration ran out
+     of the bar and was cut off at the page edge. The figures take the width they need; the
+     selects and the search box share what is left. */
+  .ps-filters>.ps-stat{flex:0 0 auto;min-width:auto}
   @media (max-width:860px){ .ps-stat{margin-left:0;width:100%;flex-wrap:wrap;gap:10px 14px} }
   /* A row you can click should say so before you click it. */
   .ps-root .tbl tbody tr[onclick]{cursor:pointer}
