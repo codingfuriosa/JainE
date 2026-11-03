@@ -433,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'5c9db8012a','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'1e84210246','accounts-bank.js':'d127977980','accounts-books.js':'6ea3db6030','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'ba1d500c66','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'5c9db8012a','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'bf32ec9c3c','accounts-bank.js':'d127977980','accounts-books.js':'bdca2d19c6','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -13620,17 +13620,18 @@ window.prmDelTest=async function(id){
   PRM.sel.delete('TEST-'+id); prmRender($('prmBody'));
 };
 /* ===== ACCOUNTS MODULE =====
-   Two tabs. Transactions (vouchers, bills & on-account payments, bank reconciliation, cheque printing,
+   Three tabs. Transactions (vouchers, bills & on-account payments, bank reconciliation, cheque printing,
    enterprise / company / business-unit structure) lives in accounts.js + accounts-bank.js; Ledgers &
    postings (automatic GST / TDS / retention / Post Sales postings, chart of accounts, ledger opening,
-   ledgers and trial balance) lives in accounts-books.js. Loaded on demand - see PAGE_EXTRA_SCRIPT.
-   Spec: docs/accounts-spec.md. Tables and functions: supabase/migrations/2026100510*..2026100512*. */
+   ledgers and trial balance) and Audit (the deleted, modification, transfer and document-reversal registers)
+   live in accounts-books.js. Loaded on demand - see PAGE_EXTRA_SCRIPT.
+   Spec: docs/accounts-spec.md. Tables and functions: supabase/migrations/2026100510*..2026100512*, ..20261102150000. */
 VIEWS.accounts=async function(v,seg){
   setCrumb(['Governance','Accounts']);
-  const tabs=['Transactions','Ledgers & postings'];const ti=mTab(seg,tabs.length);
+  const tabs=['Transactions','Ledgers & postings','Audit'];const ti=mTab(seg,tabs.length);
   v.innerHTML=mHead('fa-calculator','#0e7490','Accounts')+mTabs('accounts',tabs,ti)+'<div id="acxBody" style="margin-top:16px"></div>';
   const host=$('acxBody');
-  const fn=ti===0?window.acxRender:window.acxBooksRender;
+  const fn=ti===0?window.acxRender:ti===1?window.acxBooksRender:window.acxAuditRender;
   if(typeof fn!=='function'){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Accounts could not finish loading - refresh the page.</div></div>'; return; }
   await fn(host,seg.slice(1));
 };
@@ -33443,6 +33444,7 @@ const USAGE_VIEWS={
   'dashboard/0':         'dashboard.overview.view_home_dashboard_summary',
   'accounts/0':          'accounts.transactions.view_transactions',
   'accounts/1':          'accounts.ledgers_postings.view_ledgers_postings',
+  'accounts/2':          'accounts.audit.view_audit_registers',
   'gtd/0':               'gtd.inbox.view_capture_inbox_clarify_queue',
   'gtd/1':               'gtd.next_actions.view_next_actions_by_context',
   'gtd/2':               'gtd.projects.view_active_projects_next_steps',

@@ -265,12 +265,13 @@
   }
   const rowActions=b=>'<td style="white-space:nowrap"><button class="btn btn-sm" onclick="ENG.f.budgetForm('+b.id+')"><i class="fa-solid fa-pen"></i></button> <button class="btn btn-sm btn-danger" onclick="ENG.f.budgetDel('+b.id+')"><i class="fa-solid fa-trash"></i></button></td>';
   const scopeCell=b=>'<td><b>'+esc(scopeLabel(b))+'</b>'+(b.remarks?'<div class="sub" style="font-size:12px;color:var(--slate)">'+esc(b.remarks)+'</div>':'')+'</td>';
+  const areaCell=b=>'<td class="r">'+(b.area_sqft==null?'<span style="color:var(--slate)">—</span>':Number(b.area_sqft).toLocaleString('en-IN',{maximumFractionDigits:2}))+'</td>';
   function outflowTable(rows,manage){
     if(!rows.length)return '<div class="empty" style="padding:34px"><i class="fa-solid fa-wallet"></i><div style="font-weight:600;color:var(--ink)">No outflow budgets set yet</div><p>Set a cost budget against a project, block, activity group or material.</p></div>';
-    return '<table class="tbl"><thead><tr><th>Business unit</th><th>Level</th><th>Scope</th><th class="r">Budget</th><th class="r">BOQ value</th><th class="r">Committed</th><th class="r">Billed</th><th class="r">Paid</th><th style="min-width:120px">Committed vs budget</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+
+    return '<table class="tbl"><thead><tr><th>Business unit</th><th>Level</th><th>Scope</th><th class="r">Area (sq ft)</th><th class="r">Budget</th><th class="r">BOQ value</th><th class="r">Committed</th><th class="r">Billed</th><th class="r">Paid</th><th style="min-width:120px">Committed vs budget</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+
       rows.map(b=>{
         const mat=b.level==='Material';
-        return '<tr><td>'+esc(b.project_name)+'</td><td>'+lvTag(b.level)+'</td>'+scopeCell(b)+'<td class="r">'+inr(b.amount)+'</td>'+
+        return '<tr><td>'+esc(b.project_name)+'</td><td>'+lvTag(b.level)+'</td>'+scopeCell(b)+areaCell(b)+'<td class="r">'+inr(b.amount)+'</td>'+
         (mat?'<td class="r sub" colspan="5" style="text-align:center">Material budgets aren’t tracked against work orders</td>':
           '<td class="r">'+inr(b.boq_value)+'</td><td class="r">'+inr(b.committed)+'</td><td class="r">'+inr(b.billed)+'</td>'+paidCell(b)+'<td>'+bar(num(b.committed),num(b.amount))+'<div style="font-size:11px;color:var(--slate);margin-top:3px">'+pct(num(b.committed),num(b.amount))+'% · '+(num(b.committed)>num(b.amount)?'<span style="color:var(--err);font-weight:600">over by '+inr(num(b.committed)-num(b.amount))+'</span>':inr(num(b.amount)-num(b.committed))+' left')+'</div></td>')+
         (manage?rowActions(b):'')+'</tr>';
@@ -278,8 +279,8 @@
   }
   function inflowTable(rows,manage){
     if(!rows.length)return '<div class="empty" style="padding:34px"><i class="fa-solid fa-piggy-bank"></i><div style="font-weight:600;color:var(--ink)">No inflow budgets set yet</div><p>Set an expected-collections budget against a project or a block.</p></div>';
-    return '<table class="tbl"><thead><tr><th>Business unit</th><th>Level</th><th>Scope</th><th class="r">Budget</th><th class="r">Received</th><th style="min-width:140px">Collected vs budget</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+
-      rows.map(b=>'<tr><td>'+esc(b.project_name)+'</td><td>'+lvTag(b.level)+'</td>'+scopeCell(b)+'<td class="r">'+inr(b.amount)+'</td><td class="r">'+inr(b.received)+'</td><td>'+bar(num(b.received),num(b.amount))+'<div style="font-size:11px;color:var(--slate);margin-top:3px">'+pct(num(b.received),num(b.amount))+'% · '+(num(b.received)>=num(b.amount)?'<span style="color:var(--ok);font-weight:600">target met</span>':inr(num(b.amount)-num(b.received))+' to collect')+'</div></td>'+(manage?rowActions(b):'')+'</tr>').join('')+'</tbody></table>';
+    return '<table class="tbl"><thead><tr><th>Business unit</th><th>Level</th><th>Scope</th><th class="r">Area (sq ft)</th><th class="r">Budget</th><th class="r">Received</th><th style="min-width:140px">Collected vs budget</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+
+      rows.map(b=>'<tr><td>'+esc(b.project_name)+'</td><td>'+lvTag(b.level)+'</td>'+scopeCell(b)+areaCell(b)+'<td class="r">'+inr(b.amount)+'</td><td class="r">'+inr(b.received)+'</td><td>'+bar(num(b.received),num(b.amount))+'<div style="font-size:11px;color:var(--slate);margin-top:3px">'+pct(num(b.received),num(b.amount))+'% · '+(num(b.received)>=num(b.amount)?'<span style="color:var(--ok);font-weight:600">target met</span>':inr(num(b.amount)-num(b.received))+' to collect')+'</div></td>'+(manage?rowActions(b):'')+'</tr>').join('')+'</tbody></table>';
   }
 
   /* ======================================================================= BUDGET */
@@ -318,7 +319,8 @@
       '<label>Business unit</label><select id="bfProj" '+(cur?'disabled':'onchange="ENG.f.bfRefresh()"')+'>'+opts(C.projects,p=>p.id,p=>p.name,pid,'Select a business unit…')+'</select>'+
       '<label>Set against</label><select id="bfLevel" '+(cur?'disabled':'onchange="ENG.f.bfRefresh()"')+'>'+opts(levelsFor(dir),x=>x[0],x=>x[1],lvl)+'</select>'+
       '<div id="bfScope"></div>'+
-      '<div class="two"><div><label>Budget amount (₹)</label><input id="bfAmt" type="number" min="0" step="0.01" value="'+(cur?num(cur.amount):'')+'"></div><div></div></div>'+
+      '<div class="two"><div><label>Budget amount (₹)</label><input id="bfAmt" type="number" min="0" step="0.01" value="'+(cur?num(cur.amount):'')+'"></div>'+
+      '<div><label>Area (sq ft) <span style="color:var(--slate);font-weight:400">(optional)</span></label><input id="bfArea" type="number" min="0" step="0.01" placeholder="e.g. 25000" value="'+(cur&&cur.area_sqft!=null?num(cur.area_sqft):'')+'"></div></div>'+
       '<label>Remarks <span style="color:var(--slate);font-weight:400">(optional)</span></label><input id="bfRem" value="'+esc(cur?cur.remarks:'')+'">',
       cancelBtn+'<button class="btn btn-primary" onclick="ENG.f.budgetSave(this,'+(id||0)+')"><i class="fa-solid fa-check"></i> Save</button>');
     await ENG.f.bfRefresh(cur);
@@ -350,11 +352,13 @@
       const amt=numOrNull(val('bfAmt'));
       if(amt==null||isNaN(amt)||amt<0)return toast('Enter the budget amount','warn');
       const rem=val('bfRem').trim()||null;
-      if(id){const {error}=await E().from('budgets').update({amount:amt,remarks:rem}).eq('id',id);if(error)throw error;}
+      const area=numOrNull(val('bfArea'));
+      if(area!=null&&(isNaN(area)||area<=0))return toast('Area must be a number above zero, in square feet - or leave it blank','warn');
+      if(id){const {error}=await E().from('budgets').update({amount:amt,remarks:rem,area_sqft:area}).eq('id',id);if(error)throw error;}
       else{
         const lvl=val('bfLevel'),pid=Number(val('bfProj')),dir=val('bfDir')||'Outflow';
         if(!pid)return toast('Select a business unit','warn');
-        const row={project_id:pid,direction:dir,amount:amt,remarks:rem};
+        const row={project_id:pid,direction:dir,amount:amt,remarks:rem,area_sqft:area};
         if(/block/.test(lvl)){row.tower_id=Number(val('bfTower'))||null;if(!row.tower_id)return toast('Select a block','warn');}
         if(lvl==='head'){row.head_id=Number(val('bfHead'))||null;if(!row.head_id)return toast('Select a budget head','warn');}
         if(/group/.test(lvl)){row.group_id=Number(val('bfGroup'))||null;if(!row.group_id)return toast('Select an activity group','warn');}

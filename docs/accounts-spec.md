@@ -96,6 +96,14 @@ Migration `20261005150000_accounts_retention_budget.sql`; screens `engineering-r
 - Attributed to a budget line by the same scope Engineering uses (project / block / activity group): each bill's work is split by block and activity group and its settled share follows.
 - Only bills posted in Accounts count (an unposted bill shows as billed but unpaid); advances paid on account to a contractor are not attributed (they belong to no bill). If Accounts is unavailable the column shows "—".
 
+## 4a. Page 3 — Audit (added 02-Nov-2026; `supabase/migrations/20261102150000_accounts_audit_registers.sql`)
+Four registers, open to everyone who can read Accounts; each has a date range, a search box and Excel / PDF download, and follows the company (and, where it applies, the business unit) chosen at the top.
+- **Deleted** — every record removed from Accounts (ledger, sub-ledger, account group, opening balance, business unit, company, ledger link, setting, access, cheque book / layout, bank statement balance), with who, when, and everything the record held.
+- **Modification** — every edit to those records (who, when, the columns that changed, before → after), plus the two things that can change on a posted voucher: its cheque / instrument / payee / narration / mode, and a bank-clearance date on a line.
+- **Transfer** — contra, deposit and withdrawal vouchers (money moved between the company's own cash and bank accounts): from account, to account, amount, mode, who entered it, posted or cancelled. Journals are not in it.
+- **Document reversal** — every cancelled voucher (including bills cancelled from Bills & on-account and postings reversed from Ledgers & postings) and every cancelled opening bill: who entered it, who reversed it, when, why. Dates filter on the date of reversal.
+- Deleted and Modification are written by database triggers into the append-only `accounts.audit_log` (nobody can write, change or delete it), so they hold only what happened **from 02-Nov-2026**; Transfer and Document reversal read the vouchers and cover everything ever posted. Not logged: plain inserts, a record edited in the same transaction that created it, edits that touch only `updated_at` / `updated_by`, and a cheque book's next-number counter (it moves by itself). A posted voucher can never be edited or deleted (it is cancelled), so for vouchers the registers are Document reversal and the voucher rows of Modification.
+
 ## 5. Assumptions I made (change if wrong)
 1. **Company = a legal entity in Accounts' own master** (optionally to be linked to Purchase's legal entity later); **business unit = project** (as already chosen for RFQs).
 2. **Vendors, contractors and customers are sub-ledgers under control ledgers** (Sundry creditors, Advance from customers), created automatically — not separate ledgers.

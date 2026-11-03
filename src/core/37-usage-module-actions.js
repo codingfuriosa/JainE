@@ -584,6 +584,7 @@ const USAGE_VIEWS={
   'dashboard/0':         'dashboard.overview.view_home_dashboard_summary',
   'accounts/0':          'accounts.transactions.view_transactions',
   'accounts/1':          'accounts.ledgers_postings.view_ledgers_postings',
+  'accounts/2':          'accounts.audit.view_audit_registers',
   'gtd/0':               'gtd.inbox.view_capture_inbox_clarify_queue',
   'gtd/1':               'gtd.next_actions.view_next_actions_by_context',
   'gtd/2':               'gtd.projects.view_active_projects_next_steps',
