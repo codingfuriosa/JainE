@@ -79,6 +79,17 @@ const SF_CSS=`<style id="sfCss">
 .sf-tbl th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--slate);text-align:left;padding:9px 12px;background:#f8fafc;border-bottom:1px solid var(--line)}
 .sf-tbl td{padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;vertical-align:top}
 .sf-tbl tr:last-child td{border-bottom:none}
+/* list rows: top line / title + one-line summary / footer (people left, rating right) */
+.sf-item{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px 0;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.sf-item:hover{border-color:#cbd5e1;box-shadow:0 2px 10px rgba(15,23,42,.05)}
+.sf-item .sf-top{margin-bottom:10px;gap:10px}
+.sf-item .sf-title{font-size:15px}
+.sf-item .sf-sumline{font-size:13px;color:var(--slate);line-height:1.5;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sf-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:16px;padding:12px 0 14px;border-top:1px solid #eef1f4}
+.sf-foot .sf-by{margin-top:0;gap:8px}
+.sf-rt{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate);white-space:nowrap}
+.sf-rt b{font-size:15px;color:var(--ink)}
+.sf-list{gap:12px}
 @media(max-width:640px){.sf-card{flex-direction:column;gap:10px}.sf-side{text-align:left}.sf-sum{grid-template-columns:1fr 1fr 1fr}.sf-tbl .hide-m{display:none}}
 </style>`;
 
@@ -87,6 +98,8 @@ function sfPerson(email,removable){ const n=nameOf(email); return '<span class="
 function sfPeople(list){ return (list||[]).map(function(e){ return sfPerson(e); }).join(''); }
 function sfStars(n){ let h='<span class="sf-stars" title="'+n+' / 10">'; for(let i=1;i<=10;i++) h+='<i class="fa-solid fa-star'+(i<=n?'':' off')+'"></i>'; return h+'</span>'; }
 function sfDate(t){ try{ return new Date(t).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}); }catch(e){ return ''; } }
+// The list shows only the first line of the description; the whole text is on the item itself.
+function sfFirstLine(t){ return String(t||'').split(/\n/).map(function(s){ return s.trim(); }).filter(Boolean)[0]||''; }
 function sfAvg(rows){ return rows.length?(rows.reduce(function(s,r){ return s+r.rating; },0)/rows.length):0; }
 function sfEmpty(icon,title,sub){ return '<div class="card"><div class="empty"><i class="fa-solid '+icon+'"></i><div>'+esc(title)+'</div>'+(sub?'<div style="font-size:12.5px;margin-top:4px">'+esc(sub)+'</div>':'')+'</div></div>'; }
 
@@ -113,12 +126,11 @@ async function sfManage(){
     +'<div style="margin-bottom:12px"><div class="sf-filter">'+['All'].concat(SF_KINDS).map(function(k){ return '<button class="'+(k===SF_FILTER?'on':'')+'" onclick="sfSetFilter(\''+k+'\')">'+(k==='All'?'All':k==='New Feature'?'New Features':'Bugs Fixed')+'</button>'; }).join('')+'</div></div>'
     +(!shown.length?sfEmpty('fa-comment-dots',items.length?'Nothing of this type yet':'No System Feedbacks yet',items.length?'':'Use New System Feedback to post a new feature or a bug fix for Sales and Pre Sales to rate.')
     :'<div class="sf-list">'+shown.map(function(i){ const rs=by[i.id]||[], avg=sfAvg(rs);
-      return '<div class="sf-card click" onclick="navTo(\'feedback_hub/sys/'+i.id+'\')"><div class="sf-main">'
+      return '<div class="sf-item" onclick="navTo(\'feedback_hub/sys/'+i.id+'\')">'
         +'<div class="sf-top">'+sfKindTag(i.kind)+(i.is_active?'':'<span class="sf-closed">Closed</span>')+'<span class="sf-date">'+esc(sfDate(i.created_at))+' · by '+esc(nameOf(i.created_by))+'</span></div>'
-        +'<div class="sf-title">'+esc(i.title)+'</div><div class="sf-desc clamp">'+esc(i.description)+'</div>'
-        +'<div class="sf-by"><span class="sf-lbl">Executed by</span>'+sfPeople(i.executed_by)+'</div></div>'
-        +'<div class="sf-side">'+(rs.length?'<div class="sf-score">'+avg.toFixed(1)+' <small>/ 10</small></div>':'<div class="sf-score" style="color:var(--slate-2)">—</div>')
-        +'<div class="sf-count">'+rs.length+' rating'+(rs.length===1?'':'s')+'</div></div></div>'; }).join('')+'</div>');
+        +'<div class="sf-title">'+esc(i.title)+'</div><div class="sf-sumline">'+esc(sfFirstLine(i.description))+'</div>'
+        +'<div class="sf-foot"><div class="sf-by"><span class="sf-lbl">Executed by</span>'+sfPeople(i.executed_by)+'</div>'
+        +'<div class="sf-rt">'+(rs.length?sfStars(Math.round(avg))+'<b>'+avg.toFixed(1)+'</b>/ 10 · '+rs.length+' rating'+(rs.length===1?'':'s'):'No ratings yet')+'</div></div></div>'; }).join('')+'</div>');
 }
 window.sfSetFilter=function(k){ SF_FILTER=k; sfManage(); };
 
@@ -231,12 +243,12 @@ async function sfGive(){
   const my={}; mine.forEach(function(r){ my[r.item_id]=r; });
   const todo=items.filter(function(i){ return !my[i.id]; }), done=items.filter(function(i){ return my[i.id]; });
   const card=function(i){ const r=my[i.id];
-    return '<div class="sf-card click" onclick="sfOpenRate('+i.id+')"><div class="sf-main">'
+    return '<div class="sf-item" onclick="sfOpenRate('+i.id+')">'
       +'<div class="sf-top">'+sfKindTag(i.kind)+'<span class="sf-date">'+esc(sfDate(i.created_at))+'</span></div>'
-      +'<div class="sf-title">'+esc(i.title)+'</div><div class="sf-desc clamp">'+esc(i.description)+'</div>'
-      +'<div class="sf-by"><span class="sf-lbl">Executed by</span>'+sfPeople(i.executed_by)+'</div>'
-      +(r?'<div class="sf-mine">Your rating: '+sfStars(r.rating)+' <b>'+r.rating+'/10</b></div>':'')+'</div>'
-      +'<div class="sf-side"><button class="btn '+(r?'':'btn-primary')+'" onclick="event.stopPropagation();sfOpenRate('+i.id+')">'+(r?'<i class="fa-solid fa-pen"></i> Change':'<i class="fa-solid fa-star"></i> Give feedback')+'</button></div></div>'; };
+      +'<div class="sf-title">'+esc(i.title)+'</div><div class="sf-sumline">'+esc(sfFirstLine(i.description))+'</div>'
+      +'<div class="sf-foot"><div class="sf-by"><span class="sf-lbl">Executed by</span>'+sfPeople(i.executed_by)+'</div>'
+      +(r?'<div class="sf-rt">Your rating '+sfStars(r.rating)+'<b>'+r.rating+'</b>/ 10 <button class="btn" style="margin-left:8px" onclick="event.stopPropagation();sfOpenRate('+i.id+')"><i class="fa-solid fa-pen"></i> Change</button></div>'
+         :'<button class="btn btn-primary" onclick="event.stopPropagation();sfOpenRate('+i.id+')"><i class="fa-solid fa-star"></i> Give feedback</button>')+'</div></div>'; };
   window.__sfGive={items:items,my:my};
   b.innerHTML='<div class="sf-bar"><div><h2>Give Feedback</h2><p>New features and bug fixes from the Systems team. Rate each one from 1 to 10. Only the Systems team sees what you write.</p></div></div>'
     +(!items.length?sfEmpty('fa-circle-check','Nothing to rate right now','New features and bug fixes will appear here.')
