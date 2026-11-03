@@ -253,7 +253,7 @@ async function sfGive(){
       +'<div class="sf-top">'+sfKindTag(i.kind)+'<span class="sf-date">'+esc(sfDate(i.created_at))+'</span></div>'
       +'<div class="sf-title">'+esc(i.title)+'</div><div class="sf-sumline">'+esc(sfFirstLine(i.description))+'</div>'
       +'<div class="sf-foot"><div class="sf-by"><span class="sf-lbl">Executed by</span>'+sfPeople(i.executed_by)+'</div>'
-      +(r?'<div class="sf-rt">Your rating '+sfStars(r.rating)+'<b>'+r.rating+'</b>/ 10 <button class="btn" style="margin-left:8px" onclick="event.stopPropagation();sfOpenRate('+i.id+')"><i class="fa-solid fa-pen"></i> Change</button></div>'
+      +(r?'<div class="sf-rt">Your rating '+sfStars(r.rating)+'<b>'+r.rating+'</b>/ 10</div>'
          :'<button class="btn btn-primary" onclick="event.stopPropagation();sfOpenRate('+i.id+')"><i class="fa-solid fa-star"></i> Give feedback</button>')+'</div></div>'; };
   window.__sfGive={items:items,my:my};
   b.innerHTML='<div class="sf-bar"><div><h2>Give Feedback</h2><p>New features and bug fixes from the Systems team. Rate each one from 1 to 10. Only the Systems team sees what you write.</p></div></div>'
@@ -284,14 +284,19 @@ async function sfRatePage(v,id){
     +'<div class="sf-form">'
     +'<div class="sf-view" style="margin-top:14px;background:#fff"><div class="sf-lbl">Description</div><div class="sf-desc" style="margin-top:4px">'+esc(i.description)+'</div>'
     +'<div class="sf-lbl" style="margin-top:14px">Executed by</div><div class="sf-by" style="margin-top:6px">'+sfPeople(i.executed_by)+'</div></div>'
-    +'<div class="sf-view" style="background:#fff">'
+    // Feedback is given once: after submitting, the page only shows it back.
+    +(r?'<div class="sf-view" style="background:#fff"><div class="sf-lbl">Your rating</div><div style="margin-top:6px;display:flex;align-items:center;gap:8px">'+sfStars(r.rating).replace('font-size:12px','')+'<b style="font-size:15px">'+r.rating+'</b><span style="color:var(--slate);font-size:12.5px">/ 10 · '+esc(SF_RATE_WORDS[r.rating])+'</span></div>'
+      +'<div class="sf-lbl" style="margin-top:14px">Remarks</div><div class="sf-desc" style="margin-top:4px">'+(esc(r.remarks||'')||'<span style="color:var(--slate-2)">—</span>')+'</div>'
+      +'<div style="margin-top:14px;font-size:12px;color:var(--slate)"><i class="fa-solid fa-lock" style="margin-right:6px"></i>Submitted on '+esc(sfDate(r.submitted_at))+'. Feedback cannot be changed once submitted.</div></div>'
+      +'<div style="display:flex;justify-content:flex-end"><button class="btn" onclick="goBack(\'feedback_hub/'+sfGiveTab()+'\')"><i class="fa-solid fa-arrow-left"></i> Back</button></div></div></div>'
+    :'<div class="sf-view" style="background:#fff">'
     +'<div class="row" id="sfR-rate"><label class="l">Rating <span class="req">*</span></label><div class="sf-rate" id="sfRate" onmouseleave="sfRatePaint(SF_RATE.rating)">'
       +[1,2,3,4,5,6,7,8,9,10].map(function(n){ return '<button type="button" title="'+n+' / 10" onmouseenter="sfRatePaint('+n+')" onclick="sfRateSet('+n+')"><i class="fa-solid fa-star"></i></button>'; }).join('')
     +'</div><div class="sf-rate-val" id="sfRateVal"></div><div class="err">Please choose a rating from 1 to 10</div></div>'
     +'<div class="row" style="margin-bottom:0"><label class="l" for="sfRemarks">Remarks</label><textarea id="sfRemarks" maxlength="2000" placeholder="What works well, what could be better">'+esc(r?r.remarks||'':'')+'</textarea></div></div>'
-    +'<div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn" onclick="goBack(\'feedback_hub/'+sfGiveTab()+'\')">Cancel</button><button class="btn btn-primary" id="sfRateBtn" onclick="sfRateSave()">'+(r?'Save changes':'Submit feedback')+'</button></div>'
-    +'</div></div>';
-  sfRatePaint(SF_RATE.rating);
+    +'<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:12px;color:var(--slate);margin-right:auto">Once submitted, your feedback cannot be changed.</span><button class="btn" onclick="goBack(\'feedback_hub/'+sfGiveTab()+'\')">Cancel</button><button class="btn btn-primary" id="sfRateBtn" onclick="sfRateSave()">Submit feedback</button></div>'
+    +'</div></div>');
+  if(!r) sfRatePaint(SF_RATE.rating);
 }
 window.sfRatePaint=function(n){
   document.querySelectorAll('#sfRate button').forEach(function(b,i){ b.classList.toggle('on',i<n); });
@@ -301,10 +306,8 @@ window.sfRateSet=function(n){ SF_RATE.rating=n; $('sfR-rate').classList.remove('
 window.sfRateSave=async function(){
   if(!SF_RATE.rating){ $('sfR-rate').classList.add('bad'); return; }
   const btn=$('sfRateBtn'); btn.disabled=true;
-  const had=SF_RATE.had, remarks=$('sfRemarks').value.trim()||null;
-  const q=had?sb.schema('feedback').from('system_responses').update({rating:SF_RATE.rating,remarks:remarks,updated_at:new Date().toISOString()}).eq('id',had.id)
-             :sb.schema('feedback').from('system_responses').insert({item_id:SF_RATE.id,rater_email:fhMe(),rating:SF_RATE.rating,remarks:remarks});
-  const{error}=await q;
-  if(error){ btn.disabled=false; toast('Could not submit: '+error.message,'err'); return; }
-  toast(had?'Your feedback was updated':'Thank you - your feedback was recorded','ok'); navTo('feedback_hub/'+sfGiveTab());
+  const remarks=$('sfRemarks').value.trim()||null;
+  const{error}=await sb.schema('feedback').from('system_responses').insert({item_id:SF_RATE.id,rater_email:fhMe(),rating:SF_RATE.rating,remarks:remarks});
+  if(error){ btn.disabled=false; toast(error.code==='23505'?'You have already given feedback on this.':'Could not submit: '+error.message,'err'); return; }
+  toast('Thank you - your feedback was recorded','ok'); navTo('feedback_hub/'+sfGiveTab());
 };
