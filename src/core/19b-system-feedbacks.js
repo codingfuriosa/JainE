@@ -76,7 +76,6 @@ const SF_CSS=`<style id="sfCss">
 .sf-rate{display:flex;gap:4px;flex-wrap:wrap}
 .sf-rate button{border:none;background:none;padding:2px;cursor:pointer;font-size:24px;color:#e2e8f0;line-height:1}
 .sf-rate button.on{color:#f59e0b}
-.sf-page{max-width:760px}
 .sf-rate-val{font-size:12.5px;color:var(--slate);margin-top:6px;min-height:18px}
 /* item page */
 .sf-sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
