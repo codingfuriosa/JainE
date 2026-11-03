@@ -81,6 +81,12 @@
   .sheet .op:hover{background:#f6f7f9}
   .sheet .op.on{background:var(--soft);font-weight:600;color:var(--brand-dark)}
   .sheet .op small{margin-left:auto;color:var(--slate)}
+  /* rate per sq.ft. as Basic + PLC + FLC = Total, on one line */
+  .rate{display:grid;grid-template-columns:1fr auto 1fr auto 1fr auto 1fr;gap:6px;align-items:end}
+  .rate .f{gap:4px}.rate label.sub{font-size:12px;font-weight:500;color:var(--slate)}
+  .rate .op{padding-bottom:13px;color:var(--slate);font-size:15px}
+  .rate .sum{min-height:46px;display:flex;align-items:center;padding:0 12px;border-radius:8px;background:#f6f7f9;border:1px solid var(--line2);font-weight:600;font-size:15px}
+  @media(max-width:520px){.rate{grid-template-columns:1fr 1fr;gap:10px}.rate .op{display:none}}
   /* applicants */
   .app{border:1px solid var(--line);border-radius:8px;padding:16px}
   .app+.app{margin-top:14px}
@@ -203,6 +209,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261103"></script>
+<script src="booking-form.js?v=20261103b"></script>
 </body>
 </html>

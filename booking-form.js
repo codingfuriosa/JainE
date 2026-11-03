@@ -45,14 +45,14 @@ function newApp(){ return {title:'Mr.',full_name:'',relation:'S/o',relation_name
 function fresh(){ return {project:PROJECT,step:0,applicants:[newApp()],
   contact:{cc:'+91',mobile:'',email:'',contact_person:''},
   res:{line:'',city:'',pin:''},off:{on:false,line:'',city:'',pin:''},
-  mailing:'Residential',permanent:'Residential',
-  profession:{kind:'Salaried',company:'',designation:''},
+  mailing:'Residential',permanent:'Residential',mailing_other:'',permanent_other:'',
+  profession:{kind:'Salaried',company:'',designation:'',income:'',community:'',newspaper:'',magazine:'',tv:'',radio:''},
   heard:'Facebook',heard_other:'',why:[''],
   flat:{block:'',floor:'',flat_no:'',bhk:CONF?CONF.bhkDefault:'',parking:'Covered'},
-  price:{total:'',rate:'',loan:'No',bank:'',plan:'Construction Linked'},
+  price:{sba:'',basic:'',plc:'',flc:'',rate:'',total:'',loan:'No',bank:'',plan:'Construction Linked'},
   pay:{mode:'UPI / NEFT / RTGS',amount:'',ref:'',bank:'',branch:'',date:''},
   purpose:'Residential',sales:'Direct',sales_name:'',lead_id:'',terms_accepted:false}; }
-let S; try{ S=Object.assign(fresh(),JSON.parse(localStorage.getItem(DRAFT_KEY)||'null')||{}); }catch(e){ S=fresh(); }
+let S; try{ const d=JSON.parse(localStorage.getItem(DRAFT_KEY)||'null')||{}, f=fresh(); S=Object.assign(f,d); ['price','profession'].forEach(function(k){ S[k]=Object.assign(fresh()[k],d[k]||{}); }); }catch(e){ S=fresh(); }
 if(!Array.isArray(S.applicants)||!S.applicants.length) S.applicants=[newApp()];
 if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
 // Files and the signature live only in this page (too big for the draft).
@@ -177,13 +177,25 @@ function stepContact(){
     +card('','','Residential address','',addrBody('res'))
     +card('','','Office address','Optional',
       '<label class="switch"><input type="checkbox" data-check="off.on"'+(S.off.on?' checked':'')+'><span><b>I want to add an office address</b></span></label>'
-      +(S.off.on?'<div style="margin-top:16px">'+addrBody('off')+'</div><div class="grid" style="margin-top:16px">'
-        +chips('mailing','Send our letters to',['Residential','Office'])+chips('permanent','Permanent address is my',['Residential','Office'])+'</div>':''));
+      +(S.off.on?'<div style="margin-top:16px">'+addrBody('off')+'</div>':''))
+    +card('','','Mailing & permanent address','Which address to use. Choose Other to give a different one.',
+      '<div class="grid">'
+      +chips('mailing','Send our letters to',S.off.on?['Residential','Office','Other']:['Residential','Other'])
+      +(S.mailing==='Other'?field('mailing_other','Mailing address',{type:'area',full:1,req:1,ph:'House, street, area, city and PIN code'}):'')
+      +chips('permanent','Permanent address',S.off.on?['Residential','Office','Other']:['Residential','Other'])
+      +(S.permanent==='Other'?field('permanent_other','Permanent address',{type:'area',full:1,req:1,ph:'House, street, area, city and PIN code'}):'')
+      +'</div>');
 }
 function stepAbout(){
   return card('','','Occupation','',
       '<div class="grid">'+chips('profession.kind','Profession',['Salaried','Self-Employed','Govt. Employee','Others'],{mcols:4,sm:1})
-      +'<div class="pair">'+field('profession.company','Company',{optional:1})+field('profession.designation','Designation',{optional:1})+'</div></div>')
+      +'<div class="pair">'+field('profession.company','Company',{optional:1})+field('profession.designation','Designation',{optional:1})+'</div></div>'
+      +'<details class="t opt-d"'+(['income','community','newspaper','magazine','tv','radio'].some(function(k){ return S.profession[k]; })?' open':'')+'><summary><span>More about you <span class="opt">(optional)</span></span></summary>'
+        +'<div class="stack" style="padding:0 14px 14px">'
+        +field('profession.income','Gross income',{optional:1})+field('profession.community','Community',{optional:1})
+        +field('profession.newspaper','Favourite newspaper',{optional:1})+field('profession.magazine','Magazine',{optional:1})
+        +field('profession.tv','TV channel',{optional:1})+field('profession.radio','Radio station / frequency',{optional:1})
+        +'</div></details>')
     +card('','','Source','',
       '<div class="grid">'
       +chips('heard','How did you come to know about the project?',['Facebook','Instagram','Google','Friend / Relative','Other'])
@@ -206,8 +218,15 @@ function stepFlat(){
       +chips('flat.parking','Right to use car park',['Covered','Open'])+'</div>')
     +card('','','Price & payment plan','',
       '<div class="grid">'
-      +'<div class="pair">'+field('price.total','Total price agreed (₹)',{mode:'numeric',optional:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div>'})
-      +field('price.rate','Rate per sq.ft. (₹)',{mode:'numeric',optional:1})+'</div>'
+      +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',optional:1,full:1})
+      +'<div class="f full"><label>Rate per sq.ft. (₹) <span class="opt">(optional)</span></label>'
+        +'<div class="rate">'
+          +'<div class="f">'+'<label class="sub">Basic</label><input type="text" inputmode="decimal" data-k="price.basic" value="'+esc(S.price.basic)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
+          +'<div class="f">'+'<label class="sub">PLC</label><input type="text" inputmode="decimal" data-k="price.plc" value="'+esc(S.price.plc)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
+          +'<div class="f">'+'<label class="sub">FLC</label><input type="text" inputmode="decimal" data-k="price.flc" value="'+esc(S.price.flc)+'" placeholder=" " autocomplete="off"></div><span class="op">=</span>'
+          +'<div class="f">'+'<label class="sub">Total</label><div class="sum" id="w-rate">'+esc(rateTotal()?('₹'+fmtN(rateTotal())):'—')+'</div></div>'
+        +'</div><div class="words">PLC: preferential location charge · FLC: floor rise charge</div></div>'
+      +field('price.total','Total sale price (₹)',{mode:'numeric',optional:1,full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})
       +chips('price.plan','Payment plan',['Construction Linked','Down Payment'])
       +chips('price.loan','Home loan required?',['No','Yes'])
       +(S.price.loan==='Yes'?field('price.bank','Preferred bank / institution',{optional:1,full:1}):'')+'</div>');
@@ -228,6 +247,11 @@ function stepPay(){
       +field('sales_name',S.sales==='Direct'?'Name of our sales person':'Name of agent / channel partner',{optional:S.sales==='Direct',req:S.sales!=='Direct'})
       +field('lead_id','Lead ID',{optional:1,ph:'If our team gave you one'})+'</div>');
 }
+// Basic + PLC + FLC, per sq.ft. - only when at least one is given.
+function rateTotal(){ const p=S.price, xs=[p.basic,p.plc,p.flc].filter(function(v){ return String(v||'').trim()!==''; }); return xs.length?xs.reduce(function(s,v){ return s+Number(v||0); },0):0; }
+function fmtN(n){ return Number(n).toLocaleString('en-IN',{maximumFractionDigits:2}); }
+// A help line only, never filled in for the customer: area x rate, to compare with the price they write.
+function calcHint(){ const a=Number(S.price.sba||0), r=rateTotal(); return a&&r?'Area × rate = ₹'+fmtN(Math.round(a*r)):''; }
 function words(n){
   n=Math.floor(Number(n)); if(!n||n<0) return '';
   const a=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
@@ -313,11 +337,14 @@ function stepReview(){
       ['Spouse',i?'':a.spouse],['Anniversary',i?'':fmtD(a.anniversary)],
       ['Documents',(FILES[i].pan.length?'PAN attached':'PAN missing')+' · '+(FILES[i].aadhaar.length?'Aadhaar attached':'Aadhaar missing')]]); }).join('')
     +h('Contact & address',1)+rows([['Mobile',S.contact.cc+' '+S.contact.mobile],['Email',S.contact.email],['Contact person',S.contact.contact_person],
-      ['Residential address',addr(S.res)],['Office address',S.off.on?addr(S.off):''],['Letters to',S.off.on?S.mailing:''],['Permanent address',S.off.on?S.permanent:'']])
+      ['Residential address',addr(S.res)],['Office address',S.off.on?addr(S.off):''],['Letters to',S.mailing==='Other'?'Other: '+S.mailing_other:S.mailing],['Permanent address',S.permanent==='Other'?'Other: '+S.permanent_other:S.permanent]])
     +h('About you',2)+rows([['Profession',S.profession.kind],['Company',S.profession.company],['Designation',S.profession.designation],
+      ['Gross income',S.profession.income],['Community',S.profession.community],['Newspaper',S.profession.newspaper],['Magazine',S.profession.magazine],['TV channel',S.profession.tv],['Radio',S.profession.radio],
       ['Heard about us from',S.heard==='Other'?S.heard_other:S.heard],['Why this project',S.why.filter(Boolean).map(function(w,i){ return (i+1)+'. '+w; }).join('   ')]])
     +h('Your flat',3)+rows([['Block',S.flat.block],['Floor',S.flat.floor],['Flat',S.flat.flat_no.toUpperCase()],['Bedrooms',S.flat.bhk],['Car park',S.flat.parking],
-      ['Total sale price',S.price.total?'₹'+Number(S.price.total).toLocaleString('en-IN'):''],['Rate / sq.ft.',S.price.rate?'₹'+S.price.rate:''],['Payment plan',S.price.plan],
+      ['Super built-up area',S.price.sba?S.price.sba+' sq.ft.':''],
+      ['Rate / sq.ft.',rateTotal()?'₹'+fmtN(rateTotal())+' (Basic '+(S.price.basic||0)+' + PLC '+(S.price.plc||0)+' + FLC '+(S.price.flc||0)+')':''],
+      ['Total sale price',S.price.total?'₹'+Number(S.price.total).toLocaleString('en-IN'):''],['Payment plan',S.price.plan],
       ['Home loan',S.price.loan+(S.price.loan==='Yes'&&S.price.bank?' - '+S.price.bank:'')]])
     +h('Payment',4)+rows([['Amount',S.pay.amount?'₹'+Number(S.pay.amount).toLocaleString('en-IN')+' ('+words(S.pay.amount)+')':''],['Paid by',S.pay.mode],['Reference',S.pay.ref],
       ['Bank / branch',[S.pay.bank,S.pay.branch].filter(Boolean).join(', ')],['Date',fmtD(S.pay.date)],['Purpose',S.purpose],['Booked through',S.sales+(S.sales_name?' - '+S.sales_name:'')],['Lead ID',S.lead_id]])
@@ -349,6 +376,8 @@ function check(step){
     });
   }
   if(step===1){
+    if(S.mailing==='Other') need('mailing_other','Please write the mailing address','Mailing address');
+    if(S.permanent==='Other') need('permanent_other','Please write the permanent address','Permanent address');
     const m=S.contact.mobile.replace(/[^\d]/g,'');
     if(S.contact.cc==='+91'?!/^[6-9]\d{9}$/.test(m):m.length<6) bad('contact.mobile','Please write a complete mobile number','Mobile number');
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(S.contact.email.trim())) bad('contact.email','Please write a complete email address','Email');
@@ -498,19 +527,22 @@ document.addEventListener('input',function(e){
   let v=e.target.value;
   if(/\.(pan|passport)$|flat_no$|pay\.ref$/.test(k)) v=v.toUpperCase();
   if(/aadhaar$/.test(k)){ const d=v.replace(/\D/g,'').slice(0,12); v=d.replace(/(\d{4})(?=\d)/g,'$1 '); }
-  if(/(price\.total|price\.rate|pay\.amount)$/.test(k)) v=v.replace(/[^\d]/g,'');
+  if(/(price\.total|pay\.amount)$/.test(k)) v=v.replace(/[^\d]/g,'');
+  if(/price\.(sba|basic|plc|flc)$/.test(k)) v=v.replace(/[^\d.]/g,'').replace(/(\..*)\./g,'$1');
   if(/\.pin$/.test(k)) v=v.replace(/\D/g,'').slice(0,6);
   if(v!==e.target.value){ e.target.value=v; try{ e.target.setSelectionRange(v.length,v.length); }catch(_e){} }
   set(k,v);
   if(k==='pay.amount'){ const w=$('w-amount'); if(w) w.textContent=words(v); }
   if(k==='price.total'){ const w=$('w-total'); if(w) w.textContent=words(v); }
+  if(/price\.(sba|basic|plc|flc)$/.test(k)){ S.price.rate=rateTotal()?String(rateTotal()):''; save();
+    const w=$('w-rate'); if(w) w.textContent=rateTotal()?'₹'+fmtN(rateTotal()):'—'; const c=$('w-calc'); if(c) c.textContent=calcHint(); }
   if(/^(res|off)\.line$/.test(k)) suggest(k.split('.')[0],v);
   if(ERR[k]){ delete ERR[k]; const f=$(fid(k)); if(f) f.classList.remove('bad'); }
 });
 document.addEventListener('change',function(e){
   const t=e.target;
   const ck=t.getAttribute&&t.getAttribute('data-check');
-  if(ck){ set(ck,t.checked); if(ck==='off.on'){ if(!t.checked){ S.mailing='Residential'; S.permanent='Residential'; } render(); } else if(ERR[ck]){ delete ERR[ck]; const f=$('f-'+ck); if(f) f.classList.remove('bad'); } return; }
+  if(ck){ set(ck,t.checked); if(ck==='off.on'){ if(!t.checked){ if(S.mailing==='Office') S.mailing='Residential'; if(S.permanent==='Office') S.permanent='Residential'; save(); } render(); } else if(ERR[ck]){ delete ERR[ck]; const f=$('f-'+ck); if(f) f.classList.remove('bad'); } return; }
   const fk=t.getAttribute&&t.getAttribute('data-file');
   if(fk&&t.files&&t.files[0]){ const parts=fk.split('|'), f=t.files[0];
     if(f.size>10*1024*1024){ toast('That file is over 10 MB - please take a smaller photo'); return; }
