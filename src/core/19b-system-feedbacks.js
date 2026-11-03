@@ -39,7 +39,13 @@ const SF_CSS=`<style id="sfCss">
 .sf-by{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;font-size:11.5px;color:var(--slate)}
 .sf-lbl{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}
 .sf-person{display:inline-flex;align-items:center;gap:6px;padding:2px 9px 2px 2px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:12px;color:var(--ink);font-weight:500}
-.sf-person .avatar-sm{width:22px;height:22px;font-size:9.5px}
+.sf-person .avatar-sm{width:22px;height:22px;min-width:22px;font-size:9.5px}
+/* Executed By outside the picker: round profile circles only, the name on hover */
+.sf-circles{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sf-circles .avatar-sm{width:30px;height:30px;min-width:30px;font-size:11px;cursor:default;box-shadow:0 0 0 2px #fff,0 0 0 3px #e5e7eb}
+/* the popups keep one width, however many people are picked */
+.modal:has(.sf-form){width:560px;max-width:calc(100vw - 32px)}
+.sf-form .sf-ppl{min-width:0}.sf-form .sf-person{max-width:100%}
 .sf-person .rm{border:none;background:none;color:var(--slate);cursor:pointer;padding:0 0 0 2px;font-size:12px}
 .sf-person .rm:hover{color:var(--err)}
 .sf-side{flex:none;text-align:right;min-width:110px}
@@ -95,7 +101,7 @@ const SF_CSS=`<style id="sfCss">
 
 function sfKindTag(k){ const m=SF_KIND_META[k]||SF_KIND_META['New Feature']; return '<span class="sf-kind '+m.cls+'"><i class="fa-solid '+m.icon+'"></i>'+esc(k)+'</span>'; }
 function sfPerson(email,removable){ const n=nameOf(email); return '<span class="sf-person">'+avatar(n)+esc(n)+(removable?'<button type="button" class="rm" title="Remove" onclick="sfPplRemove(\''+esc(email)+'\')"><i class="fa-solid fa-xmark"></i></button>':'')+'</span>'; }
-function sfPeople(list){ return (list||[]).map(function(e){ return sfPerson(e); }).join(''); }
+function sfPeople(list){ return '<span class="sf-circles">'+(list||[]).map(function(e){ return avatar(nameOf(e)); }).join('')+'</span>'; }
 function sfStars(n){ let h='<span class="sf-stars" title="'+n+' / 10">'; for(let i=1;i<=10;i++) h+='<i class="fa-solid fa-star'+(i<=n?'':' off')+'"></i>'; return h+'</span>'; }
 function sfDate(t){ try{ return new Date(t).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}); }catch(e){ return ''; } }
 // The list shows only the first line of the description; the whole text is on the item itself.
