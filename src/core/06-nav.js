@@ -151,9 +151,7 @@ function hasUsability(){ if(state.super)return true; const m=state.roles&&state.
    To change who can see it, add an address to this list - nothing else needs touching. */
 /* 2026-11-03: Prerna Gupta (businessanalyst@) taken off again - she is in Systems, and Systems people do not get
    the QR forms (only System Feedbacks); the Administrator is the one exception. */
-/* 2026-11-03: Manash Choudhury (digitalmarketing@) added TEMPORARILY, on the Administrator's word - take him
-   off again when asked. Gives the QR forms only; System Feedbacks stay with Systems / Sales / Pre Sales. */
-const FEEDBACK_HUB_PEOPLE=['ayushruia1@gmail.com','mgr.hr@thejaingroup.com','digitalmarketing@thejaingroup.com'];
+const FEEDBACK_HUB_PEOPLE=['ayushruia1@gmail.com','mgr.hr@thejaingroup.com'];
 /* 2026-11-03: SYSTEM FEEDBACKS. A second kind of feedback inside the same page, with its own people:
    the Systems department (department "Systems" in acc.user_profile) posts what it built or fixed, and
    Sales and Pre Sales rate it. The QR forms above stay with FEEDBACK_HUB_PEOPLE; Systems people do not
@@ -161,10 +159,14 @@ const FEEDBACK_HUB_PEOPLE=['ayushruia1@gmail.com','mgr.hr@thejaingroup.com','dig
    System Feedbacks. The Administrator gets both. feedback.is_systems() / feedback.is_system_rater()
    hold the same rule in the database, which is what actually protects the ratings. */
 const FEEDBACK_HUB_ADMIN='ayushruia1@gmail.com';
+/* People outside Systems who get the Systems side of System Feedbacks anyway (and not the QR forms).
+   2026-11-03: Manash Choudhury (digitalmarketing@), TEMPORARILY, on the Administrator's word - take him
+   off again when asked. Keep this list and the one in feedback.is_systems() the same people. */
+const SYSTEM_FEEDBACK_EXTRA=['digitalmarketing@thejaingroup.com'];
 function fhMyDepts(){ const d=state.profile&&state.profile.department; return Array.isArray(d)?d:(d?[d]:[]); }
 function fhMe(){ return String(state.email||'').trim().toLowerCase(); }
 function fhCanQrForms(){ return FEEDBACK_HUB_PEOPLE.indexOf(fhMe())!==-1; }
-function fhIsSystems(){ return fhMe()===FEEDBACK_HUB_ADMIN||fhMyDepts().indexOf('Systems')!==-1; }
+function fhIsSystems(){ return fhMe()===FEEDBACK_HUB_ADMIN||SYSTEM_FEEDBACK_EXTRA.indexOf(fhMe())!==-1||fhMyDepts().indexOf('Systems')!==-1; }
 function fhIsRater(){ return fhMe()===FEEDBACK_HUB_ADMIN||fhMyDepts().some(function(d){ return d==='Sales'||d==='Pre Sales'; }); }
 function canFeedbackHub(){
   if(state.isCustomer||state.impersonating) return false;
