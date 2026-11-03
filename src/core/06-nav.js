@@ -149,7 +149,9 @@ function hasUsability(){ if(state.super)return true; const m=state.roles&&state.
    rather than a condition spread across the two places that ask.
 
    To change who can see it, add an address to this list - nothing else needs touching. */
-const FEEDBACK_HUB_PEOPLE=['ayushruia1@gmail.com','mgr.hr@thejaingroup.com','businessanalyst@thejaingroup.com'];
+/* 2026-11-03: Prerna Gupta (businessanalyst@) taken off again - she is in Systems, and Systems people do not get
+   the QR forms (only System Feedbacks); the Administrator is the one exception. */
+const FEEDBACK_HUB_PEOPLE=['ayushruia1@gmail.com','mgr.hr@thejaingroup.com'];
 /* 2026-11-03: SYSTEM FEEDBACKS. A second kind of feedback inside the same page, with its own people:
    the Systems department (department "Systems" in acc.user_profile) posts what it built or fixed, and
    Sales and Pre Sales rate it. The QR forms above stay with FEEDBACK_HUB_PEOPLE; Systems people do not
