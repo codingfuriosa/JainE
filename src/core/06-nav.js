@@ -168,7 +168,9 @@ function fhMyDepts(){ const d=state.profile&&state.profile.department; return Ar
 function fhMe(){ return String(state.email||'').trim().toLowerCase(); }
 function fhCanQrForms(){ return FEEDBACK_HUB_PEOPLE.indexOf(fhMe())!==-1; }
 function fhIsSystems(){ return fhMe()===FEEDBACK_HUB_ADMIN||fhMyDepts().indexOf('Systems')!==-1; }
-function fhIsRater(){ return fhMe()===FEEDBACK_HUB_ADMIN||SYSTEM_FEEDBACK_EXTRA.indexOf(fhMe())!==-1||fhMyDepts().some(function(d){ return d==='Sales'||d==='Pre Sales'; }); }
+// Systems people (the Administrator included) post and read System Feedbacks; they never rate them -
+// not even system.admin@, who is also listed under Sales and Pre Sales.
+function fhIsRater(){ if(fhIsSystems()) return false; return SYSTEM_FEEDBACK_EXTRA.indexOf(fhMe())!==-1||fhMyDepts().some(function(d){ return d==='Sales'||d==='Pre Sales'; }); }
 function canFeedbackHub(){
   if(state.isCustomer||state.impersonating) return false;
   return fhCanQrForms()||fhIsSystems()||fhIsRater();
