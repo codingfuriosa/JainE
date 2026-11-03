@@ -190,7 +190,7 @@ function stepAbout(){
   return card('','','Occupation','',
       '<div class="grid">'+chips('profession.kind','Profession',['Salaried','Self-Employed','Govt. Employee','Others'],{mcols:4,sm:1})
       +'<div class="pair">'+field('profession.company','Company',{optional:1})+field('profession.designation','Designation',{optional:1})+'</div></div>'
-      +'<details class="t opt-d"'+(['income','community','newspaper','magazine','tv','radio'].some(function(k){ return S.profession[k]; })?' open':'')+'><summary><span>More about you <span class="opt">(optional)</span></span></summary>'
+      +'<details class="t opt-d"><summary><span>More about you <span class="opt">(optional)</span></span></summary>'
         +'<div class="stack" style="padding:0 14px 14px">'
         +field('profession.income','Gross income',{optional:1})+field('profession.community','Community',{optional:1})
         +field('profession.newspaper','Favourite newspaper',{optional:1})+field('profession.magazine','Magazine',{optional:1})
@@ -216,17 +216,21 @@ function stepFlat(){
       +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1})
       +chips('flat.bhk','Bedrooms',CONF.bhk)
       +chips('flat.parking','Right to use car park',['Covered','Open'])+'</div>')
-    +card('','','Price & payment plan','',
+    +card('','','Area & rate','Optional',
       '<div class="grid">'
-      +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',optional:1,full:1})
-      +'<div class="f full"><label>Rate per sq.ft. (₹) <span class="opt">(optional)</span></label>'
+      +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1})
+      +'<div class="f full"><label>Rate per sq.ft. (₹)</label>'
         +'<div class="rate">'
           +'<div class="f">'+'<label class="sub">Basic</label><input type="text" inputmode="decimal" data-k="price.basic" value="'+esc(S.price.basic)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
           +'<div class="f">'+'<label class="sub">PLC</label><input type="text" inputmode="decimal" data-k="price.plc" value="'+esc(S.price.plc)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
           +'<div class="f">'+'<label class="sub">FLC</label><input type="text" inputmode="decimal" data-k="price.flc" value="'+esc(S.price.flc)+'" placeholder=" " autocomplete="off"></div><span class="op">=</span>'
           +'<div class="f">'+'<label class="sub">Total</label><div class="sum" id="w-rate">'+esc(rateTotal()?('₹'+fmtN(rateTotal())):'—')+'</div></div>'
-        +'</div><div class="words">PLC: preferential location charge · FLC: floor rise charge</div></div>'
-      +field('price.total','Total sale price (₹)',{mode:'numeric',optional:1,full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})
+        +'</div><div class="words">PLC: preferential location charge · FLC: floor rise charge</div></div></div>')
+    +card('','','Sale price','Optional',
+      '<div class="grid">'
+      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})+'</div>')
+    +card('','','Payment plan & home loan','',
+      '<div class="grid">'
       +chips('price.plan','Payment plan',['Construction Linked','Down Payment'])
       +chips('price.loan','Home loan required?',['No','Yes'])
       +(S.price.loan==='Yes'?field('price.bank','Preferred bank / institution',{optional:1,full:1}):'')+'</div>');

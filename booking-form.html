@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#ffffff">
 <title>Booking Form · Dream Ananta · The Jain Group</title>
@@ -45,7 +45,7 @@
   .f>label{font-size:13px;font-weight:600;color:var(--ink2)}
   .f>label .opt{font-weight:400;color:var(--slate);font-size:12.5px}
   .f>label .req{color:var(--brand)}
-  input[type=text],input[type=tel],input[type=email],input[type=date],textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:11px 13px;font-family:inherit;font-size:16px;background:#fff;color:var(--ink);min-height:46px;transition:border-color .15s,box-shadow .15s}
+  input[type=text],input[type=tel],input[type=email],input[type=date],textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-family:inherit;font-size:14.5px;background:#fff;color:var(--ink);min-height:44px;transition:border-color .15s,box-shadow .15s}
   input::placeholder,textarea::placeholder{color:#9ca3af}
   textarea{min-height:76px;resize:vertical}
   input:hover,textarea:hover{border-color:#bfc4cc}
@@ -65,7 +65,7 @@
   .chip.on:before{border-color:var(--brand);background:radial-gradient(var(--brand) 40%,transparent 46%)}
   .chips.num .chip{min-width:42px;justify-content:center;padding:8px 12px}.chips.num .chip:before{display:none}
   /* dropdowns */
-  .pick{display:flex;align-items:center;gap:10px;width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 13px;min-height:46px;background:#fff;font:inherit;font-size:15.5px;color:var(--ink);cursor:pointer;text-align:left}
+  .pick{display:flex;align-items:center;gap:10px;width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 12px;min-height:44px;background:#fff;font:inherit;font-size:14.5px;color:var(--ink);cursor:pointer;text-align:left}
   .pick:hover{border-color:#bfc4cc}
   .pick .v{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .pick:after{content:'';width:7px;height:7px;border-right:1.7px solid var(--slate);border-bottom:1.7px solid var(--slate);transform:rotate(45deg);margin:-4px 3px 0 0;flex:none}
@@ -84,8 +84,8 @@
   /* rate per sq.ft. as Basic + PLC + FLC = Total, on one line */
   .rate{display:grid;grid-template-columns:1fr auto 1fr auto 1fr auto 1fr;gap:6px;align-items:end}
   .rate .f{gap:4px}.rate label.sub{font-size:12px;font-weight:500;color:var(--slate)}
-  .rate .op{padding-bottom:13px;color:var(--slate);font-size:15px}
-  .rate .sum{min-height:46px;display:flex;align-items:center;padding:0 12px;border-radius:8px;background:#f6f7f9;border:1px solid var(--line2);font-weight:600;font-size:15px}
+  .rate .op{padding-bottom:12px;color:var(--slate);font-size:15px}
+  .rate .sum{min-height:44px;display:flex;align-items:center;padding:0 12px;border-radius:8px;background:#f6f7f9;border:1px solid var(--line2);font-weight:600;font-size:14.5px}
   @media(max-width:520px){.rate{grid-template-columns:1fr 1fr;gap:10px}.rate .op{display:none}}
   /* applicants */
   .app{border:1px solid var(--line);border-radius:8px;padding:16px}
@@ -209,6 +209,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261103b"></script>
+<script src="booking-form.js?v=20261103c"></script>
 </body>
 </html>
