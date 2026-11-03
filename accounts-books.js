@@ -499,7 +499,10 @@ window.acxEhSave=async function(headId){
    Routes: accounts/2/<deleted|modified|transfers|reversals>. */
 const AUD_SECS=[['deleted','Deleted'],['modified','Modification'],['transfers','Transfer'],['reversals','Document reversal']];
 const AUD={cur:'',from:'',to:'',q:'',rt:'',tt:'',rows:[],draw:null,load:null};
-window.acxAuditRender=function(host,seg){
+window.acxAuditRender=async function(host,seg){
+  if(!(await window.acxIsAdmin())){
+    host.innerHTML='<div class="empty"><i class="fa-solid fa-lock"></i><div style="font-weight:600">The audit registers are for Accounts administrators</div><div class="acx-hint" style="margin-top:4px">Ask an Accounts administrator if you need to see them.</div></div>'; return;
+  }
   return X.shell(host,seg||[],2,AUD_SECS,'deleted',{
     deleted:renderAuditLog.bind(null,'Deleted'),modified:renderAuditLog.bind(null,'Modified'),
     transfers:renderAuditTransfers,reversals:renderAuditReversals});

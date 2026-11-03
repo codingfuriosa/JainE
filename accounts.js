@@ -157,6 +157,13 @@ async function loadLedgers(){
   S.groups=g.data||[]; S.ledgers=l.data||[]; S.subCache={};
 }
 X.loadBase=loadBase; X.loadLedgers=loadLedgers;
+// Is the signed-in person an Accounts administrator? The tab list needs the answer before the first screen has loaded
+// the base data, so until then it is asked once; afterwards the value loadBase keeps fresh is used.
+let _admAsk=null;
+window.acxIsAdmin=function(){
+  if(S.ready) return Promise.resolve(S.isAdmin);
+  return _admAsk||(_admAsk=AC().rpc('is_admin').then(r=>r.data===true,()=>false));
+};
 const curCo=()=>S.co.find(c=>c.id===S.coId)||null;
 const coBus=()=>S.bu.filter(b=>b.company_id===S.coId);
 const buName=id=>{const b=S.bu.find(x=>x.id===id);return b?b.name:'—';};

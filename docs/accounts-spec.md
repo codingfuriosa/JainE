@@ -11,7 +11,7 @@ Migrations (applied to the live DB): `20261005100000_accounts_core.sql`, `202610
 
 ## 1. Who can do what
 - **View:** anyone given the *Accounts* module in the Control Panel (`adm.users.modules` holds `accounts`; the module is registered in `public.erp_modules`, granted per person, never by default). Enforced in RLS (`accounts.can_read()`), not only by hiding the menu.
-- **Post** (accountant) and **administer** (structure, chart groups, access list): rows in `accounts.access`. Seeded administrators: `ayushruia1@gmail.com`, `businessanalyst@thejaingroup.com`, `system3.thejaingroup@gmail.com`. Super admins can do everything.
+- **Post** (accountant) and **administer** (structure, chart groups, access list): rows in `accounts.access`. Seeded administrators: `ayushruia1@gmail.com`, `businessanalyst@thejaingroup.com`, `system3.thejaingroup@gmail.com`. Super admins can do everything. **Audit tab:** administrators only (section 4a).
 - Staff get SELECT only on the tables; masters (companies, ledgers…) are edited directly under role policies; **vouchers cannot be inserted, edited or deleted directly** — only through `voucher_post`, `vendor_payment`, `post_*`, `voucher_cancel`, `reverse_posting` (verified: a stranger sees nothing, an administrator is refused a direct voucher insert).
 
 ## 2. Structure — Enterprise › Company › Business unit (Transactions › Structure)
@@ -97,7 +97,7 @@ Migration `20261005150000_accounts_retention_budget.sql`; screens `engineering-r
 - Only bills posted in Accounts count (an unposted bill shows as billed but unpaid); advances paid on account to a contractor are not attributed (they belong to no bill). If Accounts is unavailable the column shows "—".
 
 ## 4a. Page 3 — Audit (added 02-Nov-2026; `supabase/migrations/20261102150000_accounts_audit_registers.sql`)
-Four registers, open to everyone who can read Accounts; each has a date range, a search box and Excel / PDF download, and follows the company (and, where it applies, the business unit) chosen at the top.
+Four registers, for **Accounts administrators only** (the admin role in `accounts.access`, or a platform super admin - the same test that guards the structure; `20261103090000_accounts_audit_admin_only.sql`). Anyone else does not see the tab, and the database returns them nothing from `audit_log`, `v_audit_log`, `v_audit_reversals` or `v_audit_transfers` even if asked directly; their vouchers are untouched. Each register has a date range, a search box and Excel / PDF download, and follows the company (and, where it applies, the business unit) chosen at the top.
 - **Deleted** — every record removed from Accounts (ledger, sub-ledger, account group, opening balance, business unit, company, ledger link, setting, access, cheque book / layout, bank statement balance), with who, when, and everything the record held.
 - **Modification** — every edit to those records (who, when, the columns that changed, before → after), plus the two things that can change on a posted voucher: its cheque / instrument / payee / narration / mode, and a bank-clearance date on a line.
 - **Transfer** — contra, deposit and withdrawal vouchers (money moved between the company's own cash and bank accounts): from account, to account, amount, mode, who entered it, posted or cancelled. Journals are not in it.
