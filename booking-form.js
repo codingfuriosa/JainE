@@ -26,7 +26,7 @@ const CONF={ananta:{name:'Dream Ananta',company:'Dream Gateway Hotels Ltd.',bloc
   bhk:['2 BHK','3 BHK','4 BHK'],bhkDefault:'3 BHK'}}[PROJECT];
 const DRAFT_KEY='jg-booking-form-'+PROJECT+'-v2';
 const MAX_APPS=6, MAX_REASONS=5;
-const STEPS=[['Applicants','👥'],['Contact & address','🏠'],['About you','💼'],['Your flat','🏢'],['Payment','💳'],['PAN & Aadhaar','📄'],['Terms & signature','✍️'],['Check & submit','✅']];
+const STEPS=[['Applicant details'],['Contact & address'],['Occupation & source'],['Unit details'],['Booking amount'],['KYC documents'],['Terms & signature'],['Review & submit']];
 
 // [name, ISO code for the flag, dialling code]
 const COUNTRIES=[['India','in','+91'],['United Arab Emirates','ae','+971'],['United States','us','+1'],['United Kingdom','gb','+44'],
@@ -68,9 +68,16 @@ function toast(m){ const t=document.createElement('div'); t.className='toast'; t
 const fid=function(path){ return 'f-'+path.replace(/\./g,'-'); };
 
 // ---------------------------------------------------------------- building blocks
+// A section: a plain title (and a short line under it), then its fields. The first two arguments
+// (an icon and a colour) are no longer used.
 function card(icon,color,title,hint,body){
-  return '<div class="sec"><div class="sh"><div class="ic" style="background:'+color+'1f;color:'+color+'">'+icon+'</div><div><h2>'+title+'</h2>'+(hint?'<p>'+hint+'</p>':'')+'</div></div><div class="sb">'+body+'</div></div>';
+  return '<div class="sec"><div class="sh"><h2>'+title+'</h2>'+(hint?'<p>'+hint+'</p>':'')+'</div><div class="sb">'+body+'</div></div>';
 }
+// Line icons (no emoji), drawn in the text colour.
+const ICON={
+  camera:'<svg class="i" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  pen:'<svg class="i" viewBox="0 0 24 24"><path d="M16.5 3.5l4 4L8 20H4v-4z"/><path d="M14 6l4 4"/></svg>',
+  check:'<svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'};
 function wrapF(path,label,o,inner){
   return '<div class="f'+(o.full?' full':'')+(o.req?' need':'')+(ERR[path]?' bad':'')+'" id="'+fid(path)+'"><label>'+esc(label)
     +(o.req?' <span class="req">*</span>':(o.optional?' <span class="opt">(optional)</span>':''))+(o.note?' <span class="opt">'+esc(o.note)+'</span>':'')+'</label>'
@@ -125,7 +132,7 @@ function openSheet(path,kind){
 
 // ---------------------------------------------------------------- steps
 function stepApplicants(){
-  return card('👥','#c4161c','Who is booking?','Everyone whose name goes on the flat. You can add more people at the bottom.',
+  return card('','','Applicant details','Every person in whose name the unit is to be booked. Joint applicants can be added below.',
     S.applicants.map(function(a,i){
       const p='applicants.'+i+'.', foreign=a.nationality!=='India';
       /* One column, in small labelled groups, so a person always knows which part they are on:
@@ -151,7 +158,7 @@ function stepApplicants(){
           +field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></details>':'')
         +'</div>';
     }).join('')
-    +(S.applicants.length<MAX_APPS?'<button type="button" class="btn add" data-add="1">＋ Add another applicant</button>':''));
+    +(S.applicants.length<MAX_APPS?'<button type="button" class="btn add" data-add="1">+ Add another applicant</button>':''));
 }
 function addrBody(k){
   return '<div class="grid">'
@@ -161,23 +168,23 @@ function addrBody(k){
 }
 function stepContact(){
   const a=S.applicants[0];
-  return card('📞','#2563eb','How we reach you','For '+esc(a.full_name||'the first applicant')+'. Every letter and receipt comes here.',
+  return card('','','Contact details','Of the first applicant. All letters and receipts are sent here.',
       '<div class="grid">'
       +field('contact.mobile','Mobile number',{type:'tel',req:1,full:1,mode:'tel',auto:'tel-national',
         before:'<div class="pre">'+pick('contact.cc','','dial',{bare:1}),after:'</div>'})
       +field('contact.email','Email',{type:'email',req:1,full:1,auto:'email',mode:'email'})
       +field('contact.contact_person','Name of contact person',{optional:1,full:1})+'</div>')
-    +card('🏠','#c4161c','Residential address','Where you live now.',addrBody('res'))
-    +card('🏢','#7c3aed','Office address','Optional.',
+    +card('','','Residential address','',addrBody('res'))
+    +card('','','Office address','Optional',
       '<label class="switch"><input type="checkbox" data-check="off.on"'+(S.off.on?' checked':'')+'><span><b>I want to add an office address</b></span></label>'
       +(S.off.on?'<div style="margin-top:16px">'+addrBody('off')+'</div><div class="grid" style="margin-top:16px">'
         +chips('mailing','Send our letters to',['Residential','Office'])+chips('permanent','Permanent address is my',['Residential','Office'])+'</div>':''));
 }
 function stepAbout(){
-  return card('💼','#0d9488','Your work','',
+  return card('','','Occupation','',
       '<div class="grid">'+chips('profession.kind','Profession',['Salaried','Self-Employed','Govt. Employee','Others'],{mcols:4,sm:1})
       +'<div class="pair">'+field('profession.company','Company',{optional:1})+field('profession.designation','Designation',{optional:1})+'</div></div>')
-    +card('📣','#ea580c','About this project','',
+    +card('','','Source','',
       '<div class="grid">'
       +chips('heard','How did you come to know about the project?',['Facebook','Instagram','Google','Friend / Relative','Other'])
       +(S.heard==='Other'?field('heard_other','Where did you hear about it?',{full:1,req:1}):'')
@@ -185,19 +192,19 @@ function stepAbout(){
         +S.why.map(function(w,i){ return '<div style="display:flex;gap:8px;align-items:center"><span class="num" style="width:26px;height:26px;border-radius:50%;background:#f1ede6;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex:none">'+(i+1)+'</span>'
           +'<input type="text" data-k="why.'+i+'" value="'+esc(w)+'" placeholder=" " autocomplete="off">'
           +(i?'<button type="button" class="rm lnk" style="color:var(--err);padding:8px" data-rmwhy="'+i+'" aria-label="Remove">×</button>':'')+'</div>'; }).join('')
-        +(S.why.length<MAX_REASONS?'<button type="button" class="lnk" data-addwhy="1">＋ Add another reason</button>':'')
+        +(S.why.length<MAX_REASONS?'<button type="button" class="lnk" data-addwhy="1">+ Add another reason</button>':'')
       +'</div></div>');
 }
 function stepFlat(){
   const floors=[]; for(let i=1;i<=(CONF.floors||8);i++) floors.push(String(i));
-  return card('🏢','#c4161c','Flat choice','As discussed with our sales team. Leave the flat number empty if it is not fixed yet.',
+  return card('','','Unit selection','As discussed with our sales team. The flat number may be left blank if not yet allotted.',
       '<div class="grid">'
       +chips('flat.block','Block',CONF.blocks,{req:1})
       +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4})
       +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1})
       +chips('flat.bhk','Bedrooms',CONF.bhk)
       +chips('flat.parking','Right to use car park',['Covered','Open'])+'</div>')
-    +card('🧾','#2563eb','Price & payment plan','',
+    +card('','','Price & payment plan','',
       '<div class="grid">'
       +'<div class="pair">'+field('price.total','Total price agreed (₹)',{mode:'numeric',optional:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div>'})
       +field('price.rate','Rate per sq.ft. (₹)',{mode:'numeric',optional:1})+'</div>'
@@ -207,14 +214,14 @@ function stepFlat(){
 }
 function stepPay(){
   const chq=S.pay.mode==='Cheque'||S.pay.mode==='Demand Draft';
-  return card('💳','#15803d','Application payment','The booking amount you have paid, in favour of <b>'+esc(CONF.company)+'</b>. We never take cash.',
+  return card('','','Application payment','Paid in favour of '+esc(CONF.company)+'. Cash is not accepted.',
       '<div class="grid">'
       +chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Cheque','Demand Draft','Card'],{mcols:2})
       +field('pay.amount','Amount (₹)',{mode:'numeric',req:1,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})
       +'<div class="pair">'+field('pay.date',chq?'Cheque / DD date':'Date paid',{type:'date',req:1})
       +field('pay.ref',({'Cheque':'Cheque number','Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{req:1,cls:'up'})+'</div>'
       +(chq?'<div class="pair">'+field('pay.bank','Bank (drawn on)',{req:1})+field('pay.branch','Branch',{optional:1})+'</div>':field('pay.bank','Bank',{optional:1}))+'</div>')
-    +card('📝','#7c3aed','Booking','',
+    +card('','','Booking details','',
       '<div class="grid">'
       +chips('purpose','Purpose of booking',['Residential','Investment'])
       +chips('sales','Booked through',['Direct','Booking agent / Channel partner'])
@@ -242,9 +249,9 @@ function stepDocs(){
     const foreign=a.nationality!=='India';
     const box=function(kind,label){ const k='doc.'+i+'.'+kind;
       return wrapF(k,label,{full:1,req:!foreign,optional:foreign},'<div class="upl">'+fileList(i,kind)
-        +(FILES[i][kind].length<2?'<label class="pk'+(FILES[i][kind].length?' more':'')+'"><span class="pi">📷</span><span><b>'+(FILES[i][kind].length?'Add another photo':'Take a photo or attach a PDF')+'</b>'
+        +(FILES[i][kind].length<2?'<label class="pk'+(FILES[i][kind].length?' more':'')+'"><span class="pi">'+ICON.camera+'</span><span><b>'+(FILES[i][kind].length?'Add another photo':'Take a photo or attach a PDF')+'</b>'
           +(FILES[i][kind].length?'':'<small>'+(kind==='aadhaar'?'Front and back can be two photos':'Make sure the number is readable')+'</small>')+'</span><input type="file" accept="image/*,application/pdf" data-file="'+i+'|'+kind+'"></label>':'')+'</div>'); };
-    return card('📄','#c4161c',esc(a.full_name||('Applicant '+(i+1))),(i?'Joint applicant':'First applicant'),
+    return card('','',esc(a.full_name||('Applicant '+(i+1))),(i?'Joint applicant':'First applicant'),
       '<div class="grid">'+box('pan','PAN card')+box('aadhaar','Aadhaar card')+'</div>');
   }).join('');
 }
@@ -282,16 +289,16 @@ const SPECIAL=[
 function stepTerms(){
   const list=function(arr){ return '<ol>'+arr.map(function(t){ return '<li>'+esc(t).replace(/&lt;br&gt;&lt;br&gt;/g,'<br><br>')+'</li>'; }).join('')+'</ol>'; };
   const a=S.applicants[0];
-  return card('📜','#2563eb','Terms & Conditions','Tap each heading to read it.',
+  return card('','','Terms & conditions','Open each section to read it in full.',
       '<details class="t"><summary>Terms of application (15)</summary>'+list(TERMS)+'</details>'
       +'<details class="t"><summary>Declaration (2)</summary>'+list(DECL)+'</details>'
       +'<details class="t"><summary>Special Conditions (11)</summary>'+list(SPECIAL)+'</details>'
       +'<label class="agree'+(ERR.terms_accepted?' bad':'')+'" id="f-terms_accepted"><input type="checkbox" data-check="terms_accepted"'+(S.terms_accepted?' checked':'')+'><span><b>I/We have read and agree to all the above.</b><br><span style="color:var(--slate);font-size:13px">I/We confirm that everything in this form is true.</span><div class="err">'+esc(ERR.terms_accepted||'')+'</div></span></label>')
-    +card('✍️','#c4161c','Signature','Signed by '+esc(a.full_name||'the first applicant')+'.',
+    +card('','','Signature','To be signed by '+esc(a.full_name||'the first applicant')+'.',
       wrapF('sig','Signature of the first applicant',{full:1,req:1},
         '<button type="button" class="sigbox'+(SIG?' has':'')+'" data-opensig="1">'
-          +(SIG?'<img src="'+SIG+'" alt="Signature"><span class="again">✎ Sign again</span>'
-               :'<span class="big">✍️</span><b>Tap here to sign</b><small>A large signing pad opens</small>')+'</button>')
+          +(SIG?'<img src="'+SIG+'" alt="Signature"><span class="again">Sign again</span>'
+               :ICON.pen+'<b>Tap here to sign</b><small>A large signing pad opens</small>')+'</button>')
       +'<p style="color:var(--slate);font-size:13px;margin:12px 0 0">Place: '+esc(S.res.city||'—')+' · Date: '+new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+'</p>');
 }
 function rows(pairs){ return '<table class="rv">'+pairs.filter(function(p){ return p[1]!==''&&p[1]!=null; }).map(function(p){ return '<tr><td>'+esc(p[0])+'</td><td>'+esc(p[1])+'</td></tr>'; }).join('')+'</table>'; }
@@ -299,12 +306,12 @@ function fmtD(d){ return d?new Date(d+'T00:00:00').toLocaleDateString('en-IN',{d
 function addr(x){ return [x.line,x.city,x.pin].filter(Boolean).join(', '); }
 function stepReview(){
   const h=function(t,step){ return '<div class="rvh"><h3>'+t+'</h3><button type="button" data-go="'+step+'">Edit</button></div>'; };
-  return card('✅','#15803d','Please check everything','Tap Edit to change anything, then press Submit.',
+  return card('','','Review your application','Please check every detail. Use Edit to make a change, then submit.',
     S.applicants.map(function(a,i){ return h((i?'Joint applicant '+(i+1):'First applicant'),0)+rows([
       ['Name',a.title+' '+a.full_name],[a.relation,a.relation_name],['Date of birth',i?'':fmtD(a.dob)],['Occupation',a.occupation],['Nationality',a.nationality],
       ['PAN',a.pan.toUpperCase()],['Aadhaar',a.aadhaar],['Passport',a.passport],['Bank details',a.bank_details],
       ['Spouse',i?'':a.spouse],['Anniversary',i?'':fmtD(a.anniversary)],
-      ['Documents',(FILES[i].pan.length?'PAN ✓':'PAN —')+'  ·  '+(FILES[i].aadhaar.length?'Aadhaar ✓':'Aadhaar —')]]); }).join('')
+      ['Documents',(FILES[i].pan.length?'PAN attached':'PAN missing')+' · '+(FILES[i].aadhaar.length?'Aadhaar attached':'Aadhaar missing')]]); }).join('')
     +h('Contact & address',1)+rows([['Mobile',S.contact.cc+' '+S.contact.mobile],['Email',S.contact.email],['Contact person',S.contact.contact_person],
       ['Residential address',addr(S.res)],['Office address',S.off.on?addr(S.off):''],['Letters to',S.off.on?S.mailing:''],['Permanent address',S.off.on?S.permanent:'']])
     +h('About you',2)+rows([['Profession',S.profession.kind],['Company',S.profession.company],['Designation',S.profession.designation],
@@ -314,7 +321,7 @@ function stepReview(){
       ['Home loan',S.price.loan+(S.price.loan==='Yes'&&S.price.bank?' - '+S.price.bank:'')]])
     +h('Payment',4)+rows([['Amount',S.pay.amount?'₹'+Number(S.pay.amount).toLocaleString('en-IN')+' ('+words(S.pay.amount)+')':''],['Paid by',S.pay.mode],['Reference',S.pay.ref],
       ['Bank / branch',[S.pay.bank,S.pay.branch].filter(Boolean).join(', ')],['Date',fmtD(S.pay.date)],['Purpose',S.purpose],['Booked through',S.sales+(S.sales_name?' - '+S.sales_name:'')],['Lead ID',S.lead_id]])
-    +h('Signature',6)+rows([['Signed by',SIG?(S.applicants[0].full_name+' ✓'):'Not yet']])
+    +h('Signature',6)+rows([['Signed by',SIG?S.applicants[0].full_name:'Not signed yet']])
     +'<div class="hp" aria-hidden="true"><input tabindex="-1" autocomplete="off" id="hpWeb"></div>');
 }
 
@@ -368,7 +375,7 @@ function check(step){
 // ---------------------------------------------------------------- drawing
 function render(){
   const st=S.step;
-  $('steps').innerHTML='<div class="bar"><i style="width:'+Math.round((st+1)/STEPS.length*100)+'%"></i></div><div class="lbl"><span>Step '+(st+1)+' of '+STEPS.length+'</span><b>'+STEPS[st][1]+' '+STEPS[st][0]+'</b></div>';
+  $('steps').innerHTML='<div class="lbl"><b>'+STEPS[st][0]+'</b><span>Step '+(st+1)+' of '+STEPS.length+'</span></div><div class="bar"><i style="width:'+Math.round((st+1)/STEPS.length*100)+'%"></i></div>';
   $('missing').innerHTML=MISSING.length?'<div class="miss"><b>Still missing on this page ('+MISSING.length+'):</b><ul>'+MISSING.map(function(m){ return '<li data-jump="'+fid(m[0])+'">'+esc(m[1])+'</li>'; }).join('')+'</ul></div>':'';
   $('app').innerHTML=[stepApplicants,stepContact,stepAbout,stepFlat,stepPay,stepDocs,stepTerms,stepReview][st]();
   $('nav').innerHTML='<div class="in">'+(st?'<button type="button" class="btn sec2" data-back="1">Back</button>':'')
@@ -555,7 +562,7 @@ async function submit(){
     if(!r.ok||!j.ok) throw new Error(j.error||('Could not send (error '+r.status+')'));
     try{ localStorage.removeItem(DRAFT_KEY); }catch(e){}
     $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
-    $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">✓</div><h2>Thank you! Your booking form has been received.</h2>'
+    $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Thank you! Your booking form has been received.</h2>'
       +'<p style="color:var(--slate);margin-top:8px">Your reference number</p><div class="ref">'+esc(j.ref_no)+'</div>'
       +'<p style="color:var(--slate)">Please keep this number. Our team will call you shortly to confirm your booking.</p></div></div>';
     window.scrollTo(0,0);
