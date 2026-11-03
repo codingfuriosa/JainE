@@ -4,7 +4,7 @@
    the chart of accounts, ledger opening balances (general, cost / custom ledgers and their sub-ledgers),
    ledger statements and the trial balance, and the posting-ledger rules.
    Shares window.ACX with accounts.js. Functions: supabase/migrations/20261005120000_accounts_postings_reports.sql.
-   Routes: accounts/1/<postings|postsales|chart|openings|ledgers|rules>. */
+   Routes: accounts/1/<postings|postsales|chart|openings|ledgers|rules>. The Audit tab (accounts/2) is at the end of this file. */
 (function(){
 if(window.__ACX_BOOKS_LOADED) return;
 window.__ACX_BOOKS_LOADED=true;
@@ -489,5 +489,186 @@ window.acxEhSave=async function(headId){
   const id=val('eh_'+headId)?parseInt(val('eh_'+headId),10):null;
   const r=id?await AC().from('expense_head_ledgers').upsert({company_id:S.coId,expense_head_id:headId,ledger_id:id},{onConflict:'company_id,expense_head_id'}):await AC().from('expense_head_ledgers').delete().eq('company_id',S.coId).eq('expense_head_id',headId);
   if(fail(r.error)) return; RL.headMap[headId]=id; toast('Saved','ok');
+};
+
+/* =================================================================== AUDIT (tab 3)
+   Four registers. Deleted and Modification read accounts.audit_log, which the database fills by itself whenever
+   one of the editable records is changed or removed (20261102150000_accounts_audit_registers.sql) - so they hold
+   only what happened from that day on. Transfer (contra, deposit, withdrawal) and Document reversal (cancelled
+   vouchers and opening bills) read the vouchers themselves, so they cover everything ever posted.
+   Routes: accounts/2/<deleted|modified|transfers|reversals>. */
+const AUD_SECS=[['deleted','Deleted'],['modified','Modification'],['transfers','Transfer'],['reversals','Document reversal']];
+const AUD={cur:'',from:'',to:'',q:'',rt:'',tt:'',rows:[],draw:null,load:null};
+window.acxAuditRender=async function(host,seg){
+  if(!(await window.acxIsAdmin())){
+    host.innerHTML='<div class="empty"><i class="fa-solid fa-lock"></i><div style="font-weight:600">The audit registers are for Accounts administrators</div><div class="acx-hint" style="margin-top:4px">Ask an Accounts administrator if you need to see them.</div></div>'; return;
+  }
+  return X.shell(host,seg||[],2,AUD_SECS,'deleted',{
+    deleted:renderAuditLog.bind(null,'Deleted'),modified:renderAuditLog.bind(null,'Modified'),
+    transfers:renderAuditTransfers,reversals:renderAuditReversals});
+};
+function audEnter(key){
+  if(!AUD.from) AUD.from=X.fyStart(today()); if(!AUD.to) AUD.to=today();
+  if(AUD.cur!==key){ AUD.cur=key; AUD.q=''; AUD.rt=''; AUD.tt=''; AUD.rows=[]; }
+}
+const audStart=iso=>new Date(iso+'T00:00:00').toISOString(), audEnd=iso=>new Date(iso+'T23:59:59.999').toISOString();
+function audTop(extra,dlFn,placeholder){
+  return '<div class="acx-top">'+(extra||'')
+    +'<input type="date" id="audFrom" value="'+AUD.from+'" onchange="acxAudDates()"><span class="acx-hint">to</span><input type="date" id="audTo" value="'+AUD.to+'" onchange="acxAudDates()">'
+    +'<input class="grow" id="audQ" placeholder="'+esc(placeholder)+'" value="'+esc(AUD.q)+'" oninput="acxAudSearch()">'+X.dlBtns(dlFn)+'</div>';
+}
+window.acxAudDates=function(){ AUD.from=val('audFrom')||AUD.from; AUD.to=val('audTo')||AUD.to; if(AUD.load) AUD.load(); };
+window.acxAudSearch=function(){ AUD.q=val('audQ'); if(AUD.draw) AUD.draw(); const e=$('audQ'); if(e){ e.focus(); e.setSelectionRange(e.value.length,e.value.length); } };
+window.acxAudType=function(v){ AUD.rt=v; if(AUD.draw) AUD.draw(); };
+window.acxAudTt=function(v){ AUD.tt=v; if(AUD.draw) AUD.draw(); };
+const audHas=(q,parts)=>!q||parts.join(' ').toLowerCase().includes(q.toLowerCase());
+const audEmpty=(cols,msg)=>'<tr><td colspan="'+cols+'"><div class="empty" style="padding:24px"><div>'+msg+'</div></div></td></tr>';
+const audBy=r=>esc(r||'—');
+
+/* ---- what a column was called, and how a stored value reads ---- */
+const AUD_FIELD={name:'Name',code:'Code',short_code:'Short code',gstin:'GSTIN',pan:'PAN',state_code:'State code',fy_start_month:'Financial year starts in',books_start:'Books start on',
+  books_locked_till:'Books locked up to',active:'Active',is_bank:'Bank account',is_cash:'Cash account',bank_name:'Bank',account_no:'Account no',ifsc:'IFSC',ledger_type:'Ledger type',
+  sub_ledger_type:'Sub-ledger type',system_key:'Posting role',group_id:'Account group',parent_id:'Parent group',business_unit_id:'Business unit',ledger_id:'Ledger',cost_ledger_id:'Cost ledger',
+  nature:'Nature',role:'Role',email:'Email',dr:'Debit',cr:'Credit',cleared_on:'Cleared on',instrument_no:'Cheque / instrument no',instrument_date:'Instrument date',payee:'Payee',
+  narration:'Narration',mode:'Mode',as_on:'As on',closing_balance:'Closing balance',note:'Note',key:'Setting',value:'Value',label:'Label',prefix:'Prefix',from_no:'From no',to_no:'To no',
+  next_no:'Next no',width:'Width',party_type:'Party type',sort_order:'Sort order',is_system:'System record',ps_bank_account_id:'Post Sales bank account',width_mm:'Width (mm)',height_mm:'Height (mm)',
+  layout:'Layout',legal_entity_id:'Legal entity',project_id:'Project'};
+const AUD_SKIP=['id','created_at','created_by','updated_at','updated_by','company_id'];
+const audLabel=k=>AUD_FIELD[k]||(k.charAt(0).toUpperCase()+k.slice(1).replace(/_/g,' '));
+const MONTHS=['','January','February','March','April','May','June','July','August','September','October','November','December'];
+function audVal(k,v){
+  if(v==null||v==='') return '(blank)';
+  if(typeof v==='boolean') return v?'Yes':'No';
+  if(k==='group_id'||k==='parent_id'){ const g=S.groups.find(x=>x.id===v); return g?g.name:'#'+v; }
+  if(k==='ledger_id'||k==='cost_ledger_id'){ const l=X.ledgerById(v); return l?l.name:'#'+v; }
+  if(k==='business_unit_id'){ const b=S.bu.find(x=>x.id===v); return b?b.name:'#'+v; }
+  if(k==='fy_start_month') return MONTHS[v]||String(v);
+  if(k==='mode') return X.MODE_LABEL[v]||String(v);
+  if(['dr','cr','closing_balance'].includes(k)) return money(v);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return dmy(v);
+  if(typeof v==='object') return JSON.stringify(v);
+  return String(v);
+}
+// a column worth showing: not bookkeeping, and not an id nobody can read
+const audShow=(k,v)=>v!=null&&v!==''&&!AUD_SKIP.includes(k)&&(!/_id$/.test(k)||['group_id','parent_id','ledger_id','cost_ledger_id','business_unit_id'].includes(k));
+const audPairs=o=>Object.keys(o||{}).filter(k=>audShow(k,o[k])).map(k=>[audLabel(k),audVal(k,o[k])]);
+
+/* ---- Deleted / Modification ---- */
+async function renderAuditLog(action,host){
+  audEnter(action==='Deleted'?'deleted':'modified'); AUD.action=action;
+  const del=action==='Deleted';
+  host.innerHTML='<div class="toolbar"><div style="flex:1"><div class="sec-title" style="margin:0">'+(del?'Deleted records':'Modification register')+'</div><div class="acx-hint" style="margin:0">'
+    +(del?'Every record taken out of Accounts - a ledger, a sub-ledger, an opening balance, a ledger link, a person’s access and so on - with who removed it and what it held. A posted voucher can never be deleted: it is cancelled, and appears under Document reversal.'
+         :'Every change to an existing record - who changed it, when, and the value before and after. Covers ledgers, sub-ledgers, groups, opening balances, business units, companies, access, cheque books and layouts, and the cheque number or bank clearance on a posted voucher. A posted voucher’s entries cannot be edited: it is cancelled and entered again.')
+    +' Shown for the whole company, whichever business unit is chosen. Kept from 2 Nov 2026 onwards - nothing earlier was recorded.</div></div></div><div id="audBody"></div>';
+  AUD.load=audLogLoad; AUD.draw=audLogDraw; await audLogLoad();
+}
+async function audLogLoad(){
+  const {data,error}=await AC().from('v_audit_log').select('*').eq('action',AUD.action).gte('at',audStart(AUD.from)).lte('at',audEnd(AUD.to))
+    .or('company_id.eq.'+S.coId+',company_id.is.null,company_gone.eq.true').order('at',{ascending:false}).order('id',{ascending:false}).limit(1000);
+  if(error) throw error; AUD.rows=data||[]; audLogDraw();
+}
+function audLogList(){
+  return AUD.rows.filter(r=>(!AUD.rt||r.record_type===AUD.rt)&&audHas(AUD.q,[r.record_label,r.record_type,r.by,r.company_name,audPairs(r.new_data||r.old_data).map(p=>p.join(' ')).join(' ')]));
+}
+function audChanged(r){ return Object.keys(r.old_data||{}).filter(k=>!AUD_SKIP.includes(k)).map(k=>[audLabel(k),audVal(k,r.old_data[k]),audVal(k,(r.new_data||{})[k])]); }
+function audLogDraw(){
+  const body=$('audBody'); if(!body) return;
+  const del=AUD.action==='Deleted', list=audLogList();
+  const types=[...new Set(AUD.rows.map(r=>r.record_type))].sort();
+  const typeSel='<select id="audType" onchange="acxAudType(this.value)" style="max-width:220px">'+opt('','All record types',AUD.rt)+types.map(t=>opt(t,t,AUD.rt)).join('')+'</select>';
+  const rows=list.map(r=>{
+    const what=del?(()=>{ const p=audPairs(r.old_data); return p.slice(0,5).map(x=>'<span class="acx-dim">'+esc(x[0])+':</span> '+esc(x[1])).join(' · ')+(p.length>5?' <span class="acx-link" onclick="acxAudRow('+r.id+')">+ '+(p.length-5)+' more</span>':''); })()
+      :audChanged(r).map(c=>'<div><span class="acx-dim">'+esc(c[0])+':</span> '+esc(c[1])+' <span class="acx-dim">→</span> <b>'+esc(c[2])+'</b></div>').join('');
+    return '<tr><td style="white-space:nowrap">'+dmyTime(r.at)+'</td><td>'+audBy(r.by)+'</td><td><span class="acx-pill">'+esc(r.record_type)+'</span></td>'
+      +'<td><b>'+esc(r.record_label)+'</b>'+(r.company_gone?'<div class="acx-hint">Company "'+esc(r.company_name||'')+'" no longer exists</div>':'')+'</td><td>'+(what||'—')+'</td></tr>';
+  }).join('');
+  body.innerHTML=audTop(typeSel,'acxAudLogDownload','Search by record, person or value')
+    +'<div class="acx-hint" style="margin-bottom:8px">'+list.length+' '+(del?'deletion':'change')+(list.length===1?'':'s')+(AUD.rows.length>=1000?' · showing the latest 1,000 — narrow the dates':'')+'</div>'
+    +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>When</th><th>'+(del?'Deleted':'Changed')+' by</th><th>Record type</th><th>Record</th><th>'+(del?'What it held':'What changed (before → after)')+'</th></tr></thead><tbody>'
+    +(rows||audEmpty(5,'Nothing '+(del?'was deleted':'was changed')+' in this period'))+'</tbody></table></div></div>';
+}
+window.acxAudRow=function(id){
+  const r=AUD.rows.find(x=>x.id===id); if(!r) return;
+  openModal('<div class="modal-head"><h3>'+esc(r.record_type)+' — '+esc(r.record_label)+'</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body">'
+    +'<div class="acx-hint" style="margin-bottom:10px">'+esc(r.action)+' '+dmyTime(r.at)+' by '+esc(r.by||'')+'</div>'
+    +'<div class="card" style="padding:0"><table class="tbl acx-mini"><tbody>'+audPairs(r.old_data).map(p=>'<tr><td style="width:40%"><b>'+esc(p[0])+'</b></td><td>'+esc(p[1])+'</td></tr>').join('')+'</tbody></table></div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>');
+};
+window.acxAudLogDownload=function(fmt,btn){
+  const del=AUD.action==='Deleted', list=audLogList();
+  X.download(fmt,{title:del?'Deleted records':'Modification register',file:del?'Audit_deleted':'Audit_modification',
+    sub:dmy(AUD.from)+' to '+dmy(AUD.to)+(AUD.rt?' · '+AUD.rt:' · All record types')+(AUD.q?' · Search: "'+AUD.q+'"':''),
+    cols:[{h:'When'},{h:(del?'Deleted':'Changed')+' by'},{h:'Record type'},{h:'Record'},{h:del?'What it held':'What changed (before -> after)'}],
+    rows:list.map(r=>[dmyTime(r.at),r.by||'',r.record_type,r.record_label,del?audPairs(r.old_data).map(p=>p[0]+': '+p[1]).join('; '):audChanged(r).map(c=>c[0]+': '+c[1]+' -> '+c[2]).join('; ')]),
+    foot:['Total ('+list.length+')','','','','']},btn);
+};
+
+/* ---- Transfer: money moved between our own cash and bank accounts ---- */
+async function renderAuditTransfers(host){
+  audEnter('transfers');
+  host.innerHTML='<div class="toolbar"><div style="flex:1"><div class="sec-title" style="margin:0">Transfer register</div><div class="acx-hint" style="margin:0">Money moved between the company’s own cash and bank accounts - contra entries, cash deposited in the bank and cash drawn from it - with the account it left, the account it reached, who entered it, and whether it has since been cancelled. Journals are in Transactions › Journal.</div></div></div><div id="audBody"></div>';
+  AUD.load=audTrLoad; AUD.draw=audTrDraw; await audTrLoad();
+}
+async function audTrLoad(){
+  let q=AC().from('v_audit_transfers').select('*').eq('company_id',S.coId).gte('voucher_date',AUD.from).lte('voucher_date',AUD.to).order('voucher_date',{ascending:false}).order('id',{ascending:false}).limit(1000);
+  if(S.buId) q=q.eq('business_unit_id',S.buId);
+  const {data,error}=await q; if(error) throw error; AUD.rows=data||[]; audTrDraw();
+}
+function audTrList(){ return AUD.rows.filter(v=>(!AUD.tt||v.voucher_type===AUD.tt)&&audHas(AUD.q,[v.doc_no,v.from_account,v.to_account,v.narration,v.instrument_no,v.created_by])); }
+function audTrDraw(){
+  const body=$('audBody'); if(!body) return;
+  const list=audTrList(), live=list.filter(v=>v.status==='posted'), total=live.reduce((s,v)=>s+Number(v.amount||0),0), cx=list.length-live.length;
+  const chips='<div class="acx-subs" style="margin:0">'+[['','All'],['contra','Contra'],['deposit','Deposits'],['withdrawal','Withdrawals']].map(s=>'<span class="chip'+(AUD.tt===s[0]?' active':'')+'" onclick="acxAudTt(\''+s[0]+'\')">'+s[1]+'</span>').join('')+'</div>';
+  const rows=list.map(v=>'<tr style="cursor:pointer" onclick="acxVoucherOpen('+v.id+')"><td><span class="acx-code">'+esc(v.doc_no)+'</span></td><td style="white-space:nowrap">'+dmy(v.voucher_date)+'</td><td>'+vtag(v.voucher_type)+'</td>'
+    +'<td>'+esc(v.from_account||'—')+'</td><td>'+esc(v.to_account||'—')+'</td><td class="acx-num"><b>'+money(v.amount)+'</b></td>'
+    +'<td>'+esc(X.MODE_LABEL[v.mode]||'—')+(v.instrument_no?'<div class="acx-hint">'+esc(v.instrument_no)+(v.instrument_date?' · '+dmy(v.instrument_date):'')+'</div>':'')+'</td>'
+    +'<td>'+esc(v.business_unit_id?X.buName(v.business_unit_id):'Company level')+'</td><td>'+audBy(v.created_by)+'<div class="acx-hint">'+dmyTime(v.created_at)+'</div></td>'
+    +'<td>'+(v.status==='posted'?'<span class="tag t-green">Posted</span>':'<span class="tag t-red">Cancelled</span><div class="acx-hint">'+esc(v.cancelled_by||'')+(v.cancel_reason?': '+esc(v.cancel_reason):'')+'</div>')+'</td></tr>').join('');
+  body.innerHTML=audTop(chips,'acxAudTrDownload','Search by number, account, cheque no or person')
+    +'<div class="acx-hint" style="margin-bottom:8px">'+list.length+' transfer'+(list.length===1?'':'s')+' · '+money(total)+' moved'+(cx?' · '+cx+' cancelled (not counted)':'')+(AUD.rows.length>=1000?' · showing the latest 1,000 — narrow the dates':'')+'</div>'
+    +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Voucher no</th><th>Date</th><th>Type</th><th>From</th><th>To</th><th class="acx-num">Amount</th><th>Mode</th><th>Business unit</th><th>Entered by</th><th>Status</th></tr></thead><tbody>'
+    +(rows||audEmpty(10,'No transfers in this period'))+'</tbody></table></div></div>';
+}
+window.acxAudTrDownload=function(fmt,btn){
+  const list=audTrList(), live=list.filter(v=>v.status==='posted'), total=live.reduce((s,v)=>s+Number(v.amount||0),0);
+  X.download(fmt,{title:'Transfer register',file:'Audit_transfers',
+    sub:dmy(AUD.from)+' to '+dmy(AUD.to)+(AUD.tt?' · '+(X.VTYPE[AUD.tt]||[AUD.tt])[0]:' · Contra, deposits and withdrawals')+(S.buId?' · Business unit: '+X.buName(S.buId):' · All business units')+(AUD.q?' · Search: "'+AUD.q+'"':''),
+    cols:[{h:'Voucher no'},{h:'Date',t:'d'},{h:'Type'},{h:'From'},{h:'To'},{h:'Amount',t:'n'},{h:'Mode'},{h:'Instrument no'},{h:'Business unit'},{h:'Entered by'},{h:'Entered on'},{h:'Status'},{h:'Cancelled by'},{h:'Reason'}],
+    rows:list.map(v=>[v.doc_no,v.voucher_date,(X.VTYPE[v.voucher_type]||[v.voucher_type])[0],v.from_account||'',v.to_account||'',v.amount,X.MODE_LABEL[v.mode]||'',v.instrument_no||'',v.business_unit_id?X.buName(v.business_unit_id):'Company level',v.created_by||'',dmyTime(v.created_at),v.status==='posted'?'Posted':'Cancelled',v.cancelled_by||'',v.cancel_reason||'']),
+    foot:['Total ('+live.length+' posted)','','','','',total,'','','','','','','','']},btn);
+};
+
+/* ---- Document reversal: cancelled vouchers and opening bills ---- */
+async function renderAuditReversals(host){
+  audEnter('reversals');
+  host.innerHTML='<div class="toolbar"><div style="flex:1"><div class="sec-title" style="margin:0">Document reversal register</div><div class="acx-hint" style="margin:0">Every document that was cancelled after it was posted - a receipt, payment, journal, bill, or a posting reversed from Ledgers &amp; postings - and every opening bill cancelled: who entered it, who reversed it, when, and why. The dates below are the dates of reversal.</div></div></div><div id="audBody"></div>';
+  AUD.load=audRvLoad; AUD.draw=audRvDraw; await audRvLoad();
+}
+async function audRvLoad(){
+  let q=AC().from('v_audit_reversals').select('*').eq('company_id',S.coId).gte('reversed_at',audStart(AUD.from)).lte('reversed_at',audEnd(AUD.to)).order('reversed_at',{ascending:false}).limit(1000);
+  if(S.buId) q=q.eq('business_unit_id',S.buId);
+  const {data,error}=await q; if(error) throw error; AUD.rows=data||[]; audRvDraw();
+}
+const audRvType=r=>r.kind==='opening_bill'?'<span class="tag t-gray">Opening bill</span>':vtag(r.doc_type);
+function audRvList(){ return AUD.rows.filter(r=>audHas(AUD.q,[r.doc_no,r.particulars,r.reason,r.entered_by,r.reversed_by])); }
+function audRvDraw(){
+  const body=$('audBody'); if(!body) return;
+  const list=audRvList(), total=list.reduce((s,r)=>s+Number(r.amount||0),0);
+  const rows=list.map(r=>'<tr style="cursor:pointer" onclick="'+(r.kind==='opening_bill'?'acxBillHist(':'acxVoucherOpen(')+r.id+')"><td><span class="acx-code">'+esc(r.doc_no)+'</span>'+(r.source_type&&r.source_type!=='opening'?'<div class="acx-hint">Posting reversed · '+esc(SRC_LABEL[r.source_type]||r.source_type)+'</div>':'')+'</td>'
+    +'<td>'+audRvType(r)+'</td><td style="white-space:nowrap">'+dmy(r.doc_date)+'</td><td>'+esc(r.particulars||'—')+'</td><td class="acx-num"><b>'+money(r.amount)+'</b></td>'
+    +'<td>'+audBy(r.entered_by)+'<div class="acx-hint">'+dmyTime(r.entered_at)+'</div></td><td>'+audBy(r.reversed_by)+'<div class="acx-hint">'+dmyTime(r.reversed_at)+'</div></td><td>'+esc(r.reason||'—')+'</td></tr>').join('');
+  body.innerHTML=audTop('','acxAudRvDownload','Search by number, party, reason or person')
+    +'<div class="acx-hint" style="margin-bottom:8px">'+list.length+' reversal'+(list.length===1?'':'s')+' · '+money(total)+' reversed'+(AUD.rows.length>=1000?' · showing the latest 1,000 — narrow the dates':'')+'</div>'
+    +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Document</th><th>Type</th><th>Document date</th><th>Particulars</th><th class="acx-num">Amount</th><th>Entered by</th><th>Reversed by</th><th>Reason</th></tr></thead><tbody>'
+    +(rows||audEmpty(8,'No document was reversed in this period'))+'</tbody></table></div></div>';
+}
+window.acxAudRvDownload=function(fmt,btn){
+  const list=audRvList(), total=list.reduce((s,r)=>s+Number(r.amount||0),0);
+  X.download(fmt,{title:'Document reversal register',file:'Audit_document_reversal',
+    sub:'Reversed '+dmy(AUD.from)+' to '+dmy(AUD.to)+(S.buId?' · Business unit: '+X.buName(S.buId):' · All business units')+(AUD.q?' · Search: "'+AUD.q+'"':''),
+    cols:[{h:'Document'},{h:'Type'},{h:'Document date',t:'d'},{h:'Particulars'},{h:'Amount',t:'n'},{h:'Came from'},{h:'Entered by'},{h:'Entered on'},{h:'Reversed by'},{h:'Reversed on'},{h:'Reason'}],
+    rows:list.map(r=>[r.doc_no,r.kind==='opening_bill'?'Opening bill':(X.VTYPE[r.doc_type]||[r.doc_type])[0],r.doc_date,r.particulars||'',r.amount,r.source_type&&r.source_type!=='opening'?'Posting reversed · '+(SRC_LABEL[r.source_type]||r.source_type):'Entered here',r.entered_by||'',dmyTime(r.entered_at),r.reversed_by||'',dmyTime(r.reversed_at),r.reason||'']),
+    foot:['Total ('+list.length+')','','','',total,'','','','','','']},btn);
 };
 })();

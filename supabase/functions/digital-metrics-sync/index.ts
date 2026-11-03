@@ -27,7 +27,7 @@
 
    Also hosts the LEAD MAP actions (lead_map_sync / lead_map_geocode / lead_map_key, see
    lead-map.ts) - a separate module, here only because the project is at its edge-function limit. */
-import { syncFromCrm, geocodeMissing, mapKey } from './lead-map.ts';
+import { syncFromCrm, geocodeMissing, mapKey, shareToken, publicMap } from './lead-map.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -566,12 +566,18 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   let body: any = {};
   try { body = await req.json(); } catch (_) { /* empty */ }
+  // A shared Lead Map link: anyone with the link, no login - the link's own signature is the check.
+  if (body.action === 'lead_map_public') {
+    try { const r = await publicMap(String(body.t || '')); return j(r, r.error ? 403 : 200); }
+    catch (e) { return j({ error: (e as Error).message }, 500); }
+  }
   const lead = String(body.action || '').startsWith('lead_map_');
   const who = await caller(req, lead ? 'lm_allowed' : 'dm_allowed');
   if (!who) return j({ error: 'not allowed' }, 401);
   try {
     if (body.action === 'lead_map_key') return j({ key: mapKey() });
-    if (body.action === 'lead_map_geocode') return j({ message: await geocodeMissing(20) });
+    if (body.action === 'lead_map_share') return j({ token: await shareToken(String(body.month || ''), String(body.project || ''), String(body.kind || '')) });
+    if (body.action === 'lead_map_geocode') return j(await geocodeMissing(20));
     if (body.action === 'lead_map_sync') {
       const id = await logStart('lead_map', who);
       try { const r = await syncFromCrm(); await logEnd(id, true, r.rows, r.message); return j(r); }

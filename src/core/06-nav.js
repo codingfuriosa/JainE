@@ -178,7 +178,7 @@ function canInventory(){
   const me=String(state.email||'').trim().toLowerCase();
   return INVENTORY_PEOPLE.indexOf(me)!==-1;
 }
-/* ACCOUNTS IS FOR THREE PEOPLE, BY NAME.
+/* ACCOUNTS IS FOR NAMED PEOPLE ONLY, BY NAME.
    Administrator, Prerna and Vicky - the same people who hold the module's own administrator role in
    accounts.access. Same arrangement as Inventory above: the test runs BEFORE the state.super shortcut
    in pageAllowed, so the other super admins do not get the menu entry and cannot open the page.
@@ -188,9 +188,15 @@ function canInventory(){
    tables through the API, and what anybody may post or change is enforced by the database separately
    (accounts.access roles, posted vouchers are immutable).
 
+   2026-11-02: the Systems team (department "Systems" in adm.users) was added as Accountants: system.admin@
+   (Ayush Ruia's other login), system1@, system2.thejaingroup@, system6thejaingroup@. Left out on purpose: ai@
+   (an automation-looking login) and system5thejaingroup@ (department Marketing). Keep this list and the
+   accountant rows in accounts.access the same people.
+
    To add someone for now, add an address here AND a row in accounts.access.
    To open it up later, delete this block and the two checks for 'accounts' below. */
-const ACCOUNTS_PEOPLE=['ayushruia1@gmail.com','businessanalyst@thejaingroup.com','system3.thejaingroup@gmail.com'];
+const ACCOUNTS_PEOPLE=['ayushruia1@gmail.com','businessanalyst@thejaingroup.com','system3.thejaingroup@gmail.com',
+  'system.admin@thejaingroup.com','system1@thejaingroup.com','system2.thejaingroup@gmail.com','system6thejaingroup@gmail.com'];
 function canAccounts(){
   if(state.isCustomer||state.impersonating) return false;
   const me=String(state.email||'').trim().toLowerCase();

@@ -77,6 +77,8 @@ function css(){
   @media(max-width:760px){.acx-grid2,.acx-grid3,.acx-grid4{grid-template-columns:minmax(0,1fr)}}
   .acx-bal{font-size:12px;color:var(--slate);margin-top:4px;min-height:16px}.acx-bal b{color:var(--ink)}
   .acx-field input.acx-ro{background:#f1f5f9;color:#334155}
+  .acx-totbox{min-width:270px;font-size:13.5px}
+  .acx-totrow{display:flex;justify-content:space-between;gap:28px;padding:2px 0}
   .acx-field label{display:block;font-size:12px;font-weight:600;color:var(--slate);margin-bottom:4px}
   .acx-field input,.acx-field select,.acx-field textarea{width:100%;height:38px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font-size:13.5px;font-family:inherit;background:#fff;color:var(--ink);box-sizing:border-box}
   .acx-field textarea{height:auto;padding:8px 10px;resize:vertical}
@@ -155,6 +157,13 @@ async function loadLedgers(){
   S.groups=g.data||[]; S.ledgers=l.data||[]; S.subCache={};
 }
 X.loadBase=loadBase; X.loadLedgers=loadLedgers;
+// Is the signed-in person an Accounts administrator? The tab list needs the answer before the first screen has loaded
+// the base data, so until then it is asked once; afterwards the value loadBase keeps fresh is used.
+let _admAsk=null;
+window.acxIsAdmin=function(){
+  if(S.ready) return Promise.resolve(S.isAdmin);
+  return _admAsk||(_admAsk=AC().rpc('is_admin').then(r=>r.data===true,()=>false));
+};
 const curCo=()=>S.co.find(c=>c.id===S.coId)||null;
 const coBus=()=>S.bu.filter(b=>b.company_id===S.coId);
 const buName=id=>{const b=S.bu.find(x=>x.id===id);return b?b.name:'—';};
@@ -175,6 +184,48 @@ function fyStart(date){
   const y=(d.getMonth()+1)<m?d.getFullYear()-1:d.getFullYear();
   return y+'-'+String(m).padStart(2,'0')+'-01';
 }
+/* ---- Financial year dropdown, in the header of every entry form ----
+   The date decides which year a document belongs to (and its number), so the two move together: choosing a year
+   puts the date inside it, and a date typed in another year switches the dropdown to that year. The ongoing year
+   is the default. A form registers its span: lo = earliest date, hi = latest date, hook = what to refresh after a change. */
+const FYP={};
+const fyMonth=()=>{ const co=curCo(); return co?co.fy_start_month:4; };
+const fyYearOf=iso=>{ const m=fyMonth(), y=+String(iso).slice(0,4), mo=+String(iso).slice(5,7); return mo<m?y-1:y; };
+const fyFrom=y=>y+'-'+String(fyMonth()).padStart(2,'0')+'-01';
+const fyTo=y=>new Date(Date.UTC(y+1,fyMonth()-1,0)).toISOString().slice(0,10);
+const fyName=y=>fyMonth()===1?String(y):y+'-'+String((y+1)%100).padStart(2,'0');
+const fyRange=y=>dmy(fyFrom(y))+' to '+dmy(fyTo(y));
+function fyYears(c){
+  const hi=fyYearOf(c.hi); let lo=c.lo?fyYearOf(c.lo):hi-9; if(lo>hi) lo=hi;
+  const a=[]; for(let y=hi;y>=lo;y--) a.push(y); return a;
+}
+function fyPick(c,date){ const ys=fyYears(c), y=date?fyYearOf(date):fyYearOf(c.hi); return Math.max(ys[ys.length-1],Math.min(ys[0],y)); }
+function fyBounds(p,y){ const c=FYP[p], s=fyFrom(y), e=fyTo(y); return {min:c.lo&&c.lo>s?c.lo:s, max:c.hi<e?c.hi:e}; }
+// the dropdown; p is the form's prefix and its date input must be p+'Date'
+function fyField(p,date,cfg){
+  const c=FYP[p]=Object.assign({lo:curCo()?curCo().books_start:'',hi:today(),hook:null},cfg||{}), y=fyPick(c,date);
+  return field('Financial year','<select id="'+p+'Fy" onchange="acxFySel(\''+p+'\')">'+fyYears(c).map(v=>opt(v,fyName(v),y)).join('')+'</select><div class="h" id="'+p+'FyRange">'+fyRange(y)+'</div>');
+}
+// min / max / onchange for the form's date input: the picker stays inside the chosen year (call after fyField)
+function fyDateAttrs(p,date){ const b=fyBounds(p,fyPick(FYP[p],date)); return ' min="'+b.min+'" max="'+b.max+'" onchange="acxFyDate(\''+p+'\')"'; }
+function fyShow(p,y){
+  const d=$(p+'Date'), s=$(p+'Fy'), r=$(p+'FyRange'), b=fyBounds(p,y);
+  if(!s.querySelector('option[value="'+y+'"]')) s.insertAdjacentHTML('beforeend',opt(y,fyName(y),y));
+  s.value=String(y); d.min=b.min; d.max=b.max; if(r) r.textContent=fyRange(y); return b;
+}
+window.acxFySel=function(p){
+  const c=FYP[p], d=$(p+'Date'), s=$(p+'Fy'); if(!c||!d||!s) return;
+  const y=+s.value, b=fyShow(p,y);
+  d.value=y===fyYearOf(c.hi)?c.hi:b.max;      // the ongoing year: the latest date allowed (today); an earlier year: its last day
+  if(c.hook) c.hook();
+};
+window.acxFyDate=function(p){
+  const c=FYP[p], d=$(p+'Date'), s=$(p+'Fy'); if(!c||!d||!s||!d.value) return;
+  if(d.value>c.hi){ toast('The date cannot be after '+dmy(c.hi),'warn'); d.value=c.hi; }
+  else if(c.lo&&d.value<c.lo){ toast('The date cannot be before '+dmy(c.lo),'warn'); d.value=c.lo; }
+  fyShow(p,fyYearOf(d.value));
+  if(c.hook) c.hook();
+};
 // <option>s of the company's general ledgers, grouped by their chart group
 function ledgerOpts(filter,selected,blank){
   const byG={}; S.ledgers.filter(l=>l.active&&l.ledger_type==='general'&&(!filter||filter(l))).forEach(l=>{(byG[l.group_id]=byG[l.group_id]||[]).push(l);});
@@ -382,7 +433,7 @@ X.shell=async function(host,seg,tab,secs,dflt,renderers){
     const what=S.ent.length?'Add a company to '+esc(S.ent[0].name)+' first.':'Set up an enterprise and a company first.';
     const how=S.ent.length?'Open Structure and use the "+ Company" button on the enterprise.':'Open Structure, add an enterprise, then a company under it.';
     locked='<div class="empty"><i class="fa-solid fa-lock"></i><div style="font-weight:600">'+what+'</div><div class="acx-hint" style="margin-top:4px">Books are kept per company, so this section stays locked until one exists. '+how+'</div><div style="margin-top:10px"><button class="btn btn-primary" onclick="navTo(\x27accounts/0/structure\x27)">Go to Structure</button></div></div>';
-    if(tab===1){ host.innerHTML=locked; return; }
+    if(tab>=1){ host.innerHTML=locked; return; }
     if(S.sec==='structure') locked='';      // Structure is where the company gets added - it always works
   }
   host.innerHTML=(S.co.length?scopeBar():'')+'<div class="acx-subs">'+secs.map(s=>'<span class="chip'+(s[0]===S.sec?' active':'')+'" onclick="navTo(\'accounts/'+tab+'/'+s[0]+'\')">'+esc(s[1])+'</span>').join('')+'</div><div id="acxSec"></div>';
@@ -641,16 +692,16 @@ window.acxVoucherNew=function(type){
 };
 function vfHead(){
   const T=VT[VF.type];
-  if(T.kind==='journal') return '<div class="acx-grid2">'+field('Date','<input type="date" id="vfDate" value="'+esc(VF.date)+'" max="'+today()+'">')
-    +field('Business unit','<select id="vfBu">'+opt('','Company level (no business unit)',VF.bu)+coBus().filter(b=>b.active).map(b=>opt(b.id,b.name,VF.bu)).join('')+'</select>')+'</div>';
-  let h='<div class="acx-grid4">'+field('Date','<input type="date" id="vfDate" value="'+esc(VF.date)+'" max="'+today()+'">')
-    +field('Business unit','<select id="vfBu">'+opt('','Company level (no business unit)',VF.bu)+coBus().filter(b=>b.active).map(b=>opt(b.id,b.name,VF.bu)).join('')+'</select>')
-    +field('Mode','<select id="vfMode" onchange="acxVfMode()">'+opts(MODES.filter(m=>VF.type==='deposit'||VF.type==='withdrawal'?['cash','cheque','dd'].includes(m[0]):true),VF.mode)+'</select>');
-  if(T.kind==='lines') h+=field(T.acct,'<select id="vfBank">'+cashBank().map(l=>opt(l.id,l.name+(l.is_cash?' (cash)':''),VF.bank)).join('')+'</select>');
-  else h+=field('Amount','<input id="vfAmount" class="n" inputmode="decimal" value="'+esc(VF.amount)+'" style="text-align:right">');
-  h+='</div>';
+  const fy=fyField('vf',VF.date,{hook:window.acxVfDate});
+  const dt=field('Date','<input type="date" id="vfDate" value="'+esc(VF.date)+'"'+fyDateAttrs('vf',VF.date)+'>');
+  const bu=field('Business unit','<select id="vfBu">'+opt('','Company level (no business unit)',VF.bu)+coBus().filter(b=>b.active).map(b=>opt(b.id,b.name,VF.bu)).join('')+'</select>');
+  if(T.kind==='journal') return '<div class="acx-grid3">'+fy+dt+bu+'</div>';
+  let h='<div class="acx-grid4">'+fy+dt+bu
+    +field('Mode','<select id="vfMode" onchange="acxVfMode()">'+opts(MODES.filter(m=>VF.type==='deposit'||VF.type==='withdrawal'?['cash','cheque','dd'].includes(m[0]):true),VF.mode)+'</select>')+'</div>';
+  if(T.kind==='lines') h+='<div class="acx-grid3">'+field(T.acct,'<select id="vfBank">'+cashBank().map(l=>opt(l.id,l.name+(l.is_cash?' (cash)':''),VF.bank)).join('')+'</select>')+'</div>';
   if(T.kind==='pair'){
-    h+='<div class="acx-grid2">'+field(T.from,'<select id="vfFrom">'+cashBank().filter(T.fromF).map(l=>opt(l.id,l.name,VF.from)).join('')+'</select>')
+    h+='<div class="acx-grid3">'+field('Amount','<input id="vfAmount" class="n" inputmode="decimal" value="'+esc(VF.amount)+'" style="text-align:right">')
+      +field(T.from,'<select id="vfFrom">'+cashBank().filter(T.fromF).map(l=>opt(l.id,l.name,VF.from)).join('')+'</select>')
       +field(T.to,'<select id="vfTo">'+cashBank().filter(T.toF).map(l=>opt(l.id,l.name,VF.to)).join('')+'</select>')+'</div>';
   }
   h+='<div class="acx-grid3" id="vfInstRow">'+field((VF.type==='payment'?'Cheque no':'Cheque / DD / reference no')+(VF.type==='payment'?' (leave blank to take the next from the cheque book)':''),'<input id="vfInst" value="'+esc(VF.inst)+'">')
@@ -704,12 +755,6 @@ function vfLinesHtml(){
    Cash / Bank with its current balance, Narration. Below: Main Info (Dr / Cr, account head, amount with the
    balance before and after), Other Info (mode, cheque / reference no, payee) and Dimension (cost / custom ledger).
    Not carried over: Document type (the voucher type follows Dr / Cr), Copy template, the two empty search boxes. */
-const fmtDmy=d=>String(d.getDate()).padStart(2,'0')+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+d.getFullYear();
-function fyLabel(date){
-  const co=curCo(); const m=co?co.fy_start_month:4; const d=date?new Date(date+'T00:00:00'):new Date();
-  const y=(d.getMonth()+1)<m?d.getFullYear()-1:d.getFullYear();
-  return fmtDmy(new Date(y,m-1,1))+' to '+fmtDmy(new Date(y+1,m-1,0));
-}
 const balTxt=b=>money(Math.abs(b))+(b>=0.005?' Dr':b<=-0.005?' Cr':'');
 async function vfBal(ledger,sub){
   const key=ledger+'|'+(sub||'')+'|'+VF.date; VF.bal=VF.bal||{};
@@ -746,8 +791,8 @@ function vfHeadRP(){
     +field('Document no','<input id="vfDocNo" class="acx-ro" readonly value="…"><div class="h">The next number; it is final when you post</div>')
     +field('Cash / Bank','<select id="vfBank" onchange="acxVfBank()">'+cashBank().map(l=>opt(l.id,l.name+(l.is_cash?' (cash)':''),VF.bank)).join('')+'</select><div class="acx-bal" id="vfBankBal"></div>')
     +field('Narration','<textarea id="vfNarr" rows="3">'+esc(VF.narr)+'</textarea>');
-  const right=field('Financial year','<input id="vfFy" class="acx-ro" readonly value="'+esc(fyLabel(VF.date))+'">')
-    +field('Document date','<input type="date" id="vfDate" value="'+esc(VF.date)+'" max="'+today()+'" onchange="acxVfDate()">');
+  const right=fyField('vf',VF.date,{hook:window.acxVfDate})
+    +field('Document date','<input type="date" id="vfDate" value="'+esc(VF.date)+'"'+fyDateAttrs('vf',VF.date)+'>');
   return '<div class="acx-grid2"><div>'+left+'</div><div>'+right+'</div></div>';
 }
 function vfRpLower(){
@@ -788,7 +833,7 @@ function vfRpDim(){
 window.acxVfTab=function(t){ vfSyncHead(); VF.tab=t; vfRedrawLines(); };
 window.acxVfBank=function(){ vfSyncHead(); vfPaintBal(); };
 window.acxVfDate=function(){
-  vfSyncHead(); VF.bal={}; const fy=$('vfFy'); if(fy) fy.value=fyLabel(VF.date); vfLoadDocNo(); vfPaintBal();
+  vfSyncHead(); VF.bal={}; vfLoadDocNo(); vfPaintBal();
 };
 function vfDrawRP(){
   const T=VT[VF.type];
@@ -939,8 +984,8 @@ function blDraw(host){
   const orows=BL.onacct.map(x=>'<tr><td><b>'+esc(BL.subs[x.sub_ledger_id]||'Vendor')+'</b></td><td><span class="acx-code">'+esc(x.doc_no)+'</span> '+vtag(x.voucher_type)+'</td><td style="white-space:nowrap">'+dmy(x.voucher_date)+'</td>'
     +'<td>'+esc(x.narration||'')+'</td><td class="acx-num">'+money(x.amount)+'</td><td class="acx-num">'+money(x.used)+'</td><td class="acx-num"><b>'+money(Number(x.amount)-Number(x.used))+'</b></td>'
     +'<td class="acx-act">'+(S.canPost?'<button class="btn btn-sm" onclick="acxAdjOpen('+x.voucher_id+')">Adjust against bills</button>':'')+'</td></tr>').join('');
-  host.innerHTML='<div class="toolbar"><div style="flex:1"><div class="sec-title" style="margin:0">Bills & on-account payments</div><div class="acx-hint" style="margin:0">Bills booked in Purchase and Engineering reach here once posted (Ledgers & postings › Bill postings). Pay them in full or in part, pay on account, and set earlier on-account payments against bills.</div></div>'
-    +(S.canPost?'<button class="btn btn-primary" onclick="acxPayOpen()"><i class="fa-solid fa-truck"></i> Pay a vendor</button><button class="btn" onclick="acxAdjOpen()"><i class="fa-solid fa-link"></i> Adjust on-account</button>':'')+'</div>'
+  host.innerHTML='<div class="toolbar"><div style="flex:1"><div class="sec-title" style="margin:0">Bills & on-account payments</div><div class="acx-hint" style="margin:0">Bills booked in Purchase and Engineering reach here once posted (Ledgers & postings › Bill postings). A bill with no Purchase or Engineering record is entered here with Enter a bill. Pay them in full or in part, pay on account, and set earlier on-account payments against bills.</div></div>'
+    +(S.canPost?'<button class="btn" onclick="acxBillNew()"><i class="fa-solid fa-file-invoice"></i> Enter a bill</button><button class="btn" onclick="acxOpenBillNew()"><i class="fa-solid fa-clock-rotate-left"></i> Opening bill</button><button class="btn btn-primary" onclick="acxPayOpen()"><i class="fa-solid fa-truck"></i> Pay a vendor</button><button class="btn" onclick="acxAdjOpen()"><i class="fa-solid fa-link"></i> Adjust on-account</button>':'')+'</div>'
     +(waiting?'<div class="acx-warn"><b>'+waiting+' booked bill'+(waiting===1?'':'s')+'</b> ('+(BL.pend.bills||0)+' purchase, '+(BL.pend.ra||0)+' RA) waiting to be posted. <span class="acx-link" onclick="navTo(\'accounts/1/postings\')">Open Bill postings →</span></div>':'')
     +'<div class="acx-kpis">'+kpi('Outstanding bills',money(sum(bills)),bills.filter(r=>Number(r.outstanding)>0.004).length+' bills')+kpi('Overdue',money(sum(overdue)),overdue.length+' bills past their due date')+kpi('Retention held',money(sum(ret)),'RA bill retention not yet released')
       +kpi('On account (unadjusted)',money(onTot),BL.onacct.length+' payment'+(BL.onacct.length===1?'':'s')+' not set against bills')+'</div>'
@@ -994,11 +1039,157 @@ window.acxBillHist=async function(id){
     +'<div class="card" style="padding:0"><table class="tbl acx-mini"><thead><tr><th>Entry</th><th>How</th><th>Date</th><th class="acx-num">Amount</th><th>Status</th><th></th></tr></thead><tbody>'
     +((a.data||[]).map(x=>{const v=vm[x.from_voucher_id]||{};return '<tr><td><span class="acx-code acx-link" onclick="acxVoucherOpen('+x.from_voucher_id+')">'+esc(v.doc_no||'')+'</span> '+vtag(v.voucher_type)+(v.instrument_no?'<div class="acx-hint">'+esc(v.instrument_no)+'</div>':'')+'</td><td>'+({payment:'Payment',adjustment:'On-account adjustment',debit_note:'Debit note'}[x.kind]||x.kind)+'</td><td>'+dmy(x.alloc_date)+'</td><td class="acx-num">'+money(x.amount)+'</td><td>'+(x.status==='active'?'<span class="tag t-green">Active</span>':'<span class="tag t-gray">Cancelled</span>')+'</td>'
       +'<td class="acx-act">'+(S.canPost&&x.status==='active'&&x.kind==='adjustment'?'<button class="btn btn-sm btn-ghost" onclick="acxAllocUndo('+x.id+')">Undo</button>':'')+'</td></tr>';}).join('')||'<tr><td colspan="6"><div class="empty" style="padding:18px"><div>Nothing has been paid against this yet</div></div></td></tr>')
-    +'</tbody></table></div></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>');
+    +'</tbody></table></div></div><div class="modal-foot">'+(S.canPost&&r.kind==='bill'&&r.status==='open'&&(!r.source_type||r.source_type==='opening')&&Number(r.settled)<0.005?'<button class="btn btn-danger" style="margin-right:auto" onclick="acxBillCancel('+r.id+')">Cancel this bill</button>':'')+'<button class="btn" onclick="closeModal()">Close</button></div>');
 };
 window.acxAllocUndo=async function(id){
   if(!await confirmDialog('Undo this on-account adjustment? The bill becomes outstanding again.',{okLabel:'Undo'})) return;
   const {error}=await rpc('cancel_allocation',{p_id:id}); if(fail(error,'Could not undo')) return; toast('Adjustment undone','ok'); route();
+};
+
+/* ---------------- enter a bill / opening bill ----------------
+   A vendor bill typed straight into Accounts, for a bill that has no Purchase or Engineering record behind it:
+   expense or asset lines, GST (CGST + SGST, or IGST for another state), TDS, and the vendor's account credited,
+   leaving an amount to pay that "Pay a vendor" settles. The database does the arithmetic again (bill_enter),
+   so the figures shown here are only a preview.
+   An OPENING bill is one that was already unpaid when the books started: it adds to the vendor's opening balance
+   and creates the amount to pay, with no entry date (opening_bill_enter). */
+let BN=null, OB=null;
+const GST_SLABS=[0,5,12,18,28];
+const BN_BLOCK=['vendor_control','retention_payable','tds_payable','input_cgst','input_sgst','input_igst','output_cgst','output_sgst','output_igst','customer_advance'];
+function bnLedgerOk(l){
+  if(!l.active||l.ledger_type!=='general'||l.is_bank||l.is_cash||l.sub_ledger_type||BN_BLOCK.includes(l.system_key)) return false;
+  const g=S.groups.find(x=>x.id===l.group_id); return !!g&&(g.nature==='expense'||g.nature==='asset');
+}
+const bnVendors=()=>S.vendors.filter(v=>v.status==='approved');
+const bnLine=()=>({ledger:'',amt:'',gst:'18',cost:'',csub:''});
+const dayBefore=iso=>{ const t=String(iso).slice(0,10).split('-').map(Number); return new Date(Date.UTC(t[0],t[1]-1,t[2]-1)).toISOString().slice(0,10); };
+function bnVendor(){ return S.vendors.find(x=>String(x.id)===String(BN.vendor))||null; }
+function bnInter(){
+  if(BN.supply==='inter') return true; if(BN.supply==='intra') return false;
+  const co=curCo(), v=bnVendor(), g=(v&&v.gstin)||'';
+  return !!(co&&co.state_code&&/^[0-9]{2}/.test(g)&&g.slice(0,2)!==co.state_code);
+}
+function bnSupplyNote(){
+  if(BN.supply!=='auto') return '';
+  const co=curCo(), v=bnVendor(); if(!v) return 'Choose the vendor first';
+  if(!co||!co.state_code) return 'The company has no GST state code - treated as within the state';
+  if(!/^[0-9]{2}/.test(v.gstin||'')) return 'The vendor has no GSTIN - treated as within the state';
+  return bnInter()?'The vendor is in another state - IGST':'The vendor is in the same state - CGST + SGST';
+}
+function bnCalc(){
+  let taxable=0,gst=0; BN.lines.forEach(l=>{ const a=r2(num(l.amt)); if(a>0){ taxable+=a; gst+=r2(a*num(l.gst)/100); } });
+  taxable=r2(taxable); gst=r2(gst); const tds=r2(taxable*num(BN.tds)/100);
+  return {taxable,gst,tds,net:r2(taxable+gst-tds)};
+}
+function bnTotHtml(){
+  const t=bnCalc(), inter=bnInter(), c=r2(t.gst/2), s=r2(t.gst-c);
+  const row=(k,v,b)=>'<div class="acx-totrow"'+(b?' style="font-weight:700;border-top:1px solid var(--line);padding-top:6px;margin-top:4px"':'')+'><span>'+k+'</span><span>'+v+'</span></div>';
+  return row('Value before GST',money(t.taxable))
+    +(t.gst>0?(inter?row('IGST',money(t.gst)):row('CGST',money(c))+row('SGST',money(s))):'')
+    +(t.tds>0?row('Less: TDS @ '+esc(String(num(BN.tds)))+'%','- '+money(t.tds)):'')
+    +row('Payable to the vendor',money(t.net),true);
+}
+function bnHeadHtml(){
+  return '<div class="acx-grid4">'
+    +field('Vendor','<select id="bnVendor" onchange="acxBnHead()">'+opt('','Choose…',BN.vendor)+bnVendors().map(v=>opt(v.id,(v.trade_name||v.legal_name)+' — '+v.code,BN.vendor)).join('')+'</select>')
+    +field('Vendor’s invoice no','<input id="bnInv" value="'+esc(BN.inv)+'">')
+    +fyField('bn',BN.date)
+    +field('Invoice date','<input type="date" id="bnDate" value="'+esc(BN.date)+'"'+fyDateAttrs('bn',BN.date)+'>')+'</div>'
+    +'<div class="acx-grid4">'
+    +field('Due date (optional)','<input type="date" id="bnDue" value="'+esc(BN.due)+'">')
+    +field('Business unit','<select id="bnBu">'+opt('','Company level (no business unit)',BN.bu)+coBus().filter(b=>b.active).map(b=>opt(b.id,b.name,BN.bu)).join('')+'</select>')
+    +field('Where is the supply made?','<select id="bnSupply" onchange="acxBnHead()">'+opts([['auto','Automatic - from the vendor’s GSTIN'],['intra','Within the state (CGST + SGST)'],['inter','Other state (IGST)']],BN.supply)+'</select><div class="h" id="bnSupplyNote">'+esc(bnSupplyNote())+'</div>')
+    +field('TDS rate %','<input id="bnTds" class="n" list="bnTdsList" inputmode="decimal" value="'+esc(BN.tds)+'" oninput="acxBnHead()"><datalist id="bnTdsList">'+[1,2,5,10].map(x=>'<option value="'+x+'">').join('')+'</datalist><div class="h">On the value before GST. Blank means none.</div>')+'</div>'
+    +field('Narration (optional)','<input id="bnNarr" value="'+esc(BN.narr)+'">');
+}
+function bnLinesHtml(){
+  const rows=BN.lines.map((l,i)=>{
+    const cled=l.cost?ledgerById(parseInt(l.cost,10)):null;
+    const csubs=cled&&cled.sub_ledger_type?(S.subCache[cled.id]||[]):[];
+    return '<tr><td style="min-width:230px"><select onchange="acxBnF('+i+',\'ledger\',this.value)">'+ledgerOpts(bnLedgerOk,l.ledger,'Choose expense / asset ledger…')+'</select></td>'
+      +'<td style="min-width:130px"><input class="n" inputmode="decimal" value="'+esc(l.amt)+'" oninput="acxBnF('+i+',\'amt\',this.value)"></td>'
+      +'<td style="width:90px"><input class="n" list="bnSlabs" inputmode="decimal" value="'+esc(l.gst)+'" oninput="acxBnF('+i+',\'gst\',this.value)"></td>'
+      +'<td style="min-width:200px"><select onchange="acxBnCost('+i+',this.value)">'+costOpts(l.cost,'—')+'</select>'
+        +(cled&&cled.sub_ledger_type?'<select style="margin-top:4px" onchange="acxBnF('+i+',\'csub\',this.value)">'+opt('','Choose sub-ledger…',l.csub)+csubs.map(s=>opt(s.id,s.name,l.csub)).join('')+'</select>':'')+'</td>'
+      +'<td style="width:34px"><button class="btn btn-sm btn-ghost" title="Remove line" onclick="acxBnDel('+i+')"><i class="fa-solid fa-xmark"></i></button></td></tr>';}).join('');
+  return '<div class="acx-sec-title" style="margin-top:0">What the bill is for</div><div class="acx-lines-wrap"><table class="acx-lines" style="min-width:640px"><thead><tr><th>Expense / asset ledger</th><th>Amount before GST</th><th>GST %</th><th>Cost / custom ledger <span class="acx-dim" style="text-transform:none;letter-spacing:0">(optional)</span></th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +'<datalist id="bnSlabs">'+GST_SLABS.map(x=>'<option value="'+x+'">').join('')+'</datalist>'
+    +'<div class="acx-sticky-foot"><button class="btn btn-sm" onclick="acxBnAdd()"><i class="fa-solid fa-plus"></i> Add line</button><span class="acx-right"></span><div class="acx-totbox" id="bnTot">'+bnTotHtml()+'</div></div>';
+}
+function bnSync(){
+  if(!BN) return; const g=(id,f)=>{ if($(id)) f(val(id)); };
+  g('bnVendor',v=>{BN.vendor=v;}); g('bnInv',v=>{BN.inv=v;}); g('bnDate',v=>{BN.date=v;}); g('bnDue',v=>{BN.due=v;});
+  g('bnBu',v=>{BN.bu=v;}); g('bnSupply',v=>{BN.supply=v||'auto';}); g('bnTds',v=>{BN.tds=v;}); g('bnNarr',v=>{BN.narr=v;});
+}
+window.acxBillNew=function(){
+  if(!S.coId){ toast('Choose a company first','err'); return; }
+  if(!bnVendors().length){ toast('There is no approved vendor yet - a vendor is approved in Purchase first','err'); return; }
+  BN={vendor:'',inv:'',date:today(),due:'',bu:S.buId||'',supply:'auto',tds:'',narr:'',lines:[bnLine()]};
+  openModal('<div class="modal-head"><h3>Enter a bill</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body"><div id="bnHead">'+bnHeadHtml()+'</div><div id="bnLines">'+bnLinesHtml()+'</div>'
+    +'<div class="acx-hint">Posting books the bill: the expense (or asset), the GST you can claim, the TDS to deposit and the vendor’s account. It then appears in Bills &amp; on-account, ready to pay. A bill that came from Purchase or Engineering is posted from Ledgers &amp; postings instead.</div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="acxBnSave()">Post bill</button></div>','lg');
+};
+window.acxBnHead=function(){ bnSync(); const n=$('bnSupplyNote'); if(n) n.textContent=bnSupplyNote(); const t=$('bnTot'); if(t) t.innerHTML=bnTotHtml(); };
+window.acxBnF=function(i,k,v){ bnSync(); BN.lines[i][k]=v; const t=$('bnTot'); if(t) t.innerHTML=bnTotHtml(); };
+window.acxBnAdd=function(){ bnSync(); BN.lines.push(bnLine()); $('bnLines').innerHTML=bnLinesHtml(); };
+window.acxBnDel=function(i){ bnSync(); if(BN.lines.length>1) BN.lines.splice(i,1); else BN.lines[i]=bnLine(); $('bnLines').innerHTML=bnLinesHtml(); };
+window.acxBnCost=async function(i,v){
+  bnSync(); const l=BN.lines[i]; l.cost=v; l.csub='';
+  const led=v?ledgerById(parseInt(v,10)):null; if(led&&led.sub_ledger_type) await subsOf(led.id);
+  const e=$('bnLines'); if(e) e.innerHTML=bnLinesHtml();
+};
+window.acxBnSave=async function(){
+  bnSync();
+  if(!BN.vendor){ toast('Choose the vendor','err'); return; }
+  if(!BN.inv.trim()){ toast('Enter the vendor’s invoice number','err'); return; }
+  if(!BN.date){ toast('Enter the invoice date','err'); return; }
+  if(BN.due&&BN.due<BN.date){ toast('The due date cannot be before the invoice date','err'); return; }
+  const used=BN.lines.filter(l=>l.ledger||num(l.amt));
+  if(!used.length){ toast('Add at least one line','err'); return; }
+  for(let i=0;i<used.length;i++){
+    const l=used[i];
+    if(!l.ledger){ toast('Line '+(i+1)+': choose the ledger','err'); return; }
+    if(num(l.amt)<=0){ toast('Line '+(i+1)+': enter the amount before GST','err'); return; }
+    const cl=l.cost?ledgerById(parseInt(l.cost,10)):null; if(cl&&cl.sub_ledger_type&&!l.csub){ toast('Line '+(i+1)+': choose the cost sub-ledger','err'); return; }
+  }
+  const head={company_id:S.coId,business_unit_id:BN.bu||null,vendor_id:parseInt(BN.vendor,10),invoice_no:BN.inv.trim(),invoice_date:BN.date,due_date:BN.due||null,supply:BN.supply,tds_pct:num(BN.tds)||0,narration:BN.narr.trim()||null};
+  const lines=used.map(l=>({ledger_id:parseInt(l.ledger,10),amount:r2(num(l.amt)),gst_pct:num(l.gst),cost_ledger_id:l.cost?parseInt(l.cost,10):null,cost_sub_ledger_id:l.csub?parseInt(l.csub,10):null}));
+  const {data,error}=await rpc('bill_enter',{p_head:head,p_lines:lines}); if(fail(error,'Could not post the bill')) return;
+  closeModal(); toast('Bill posted as '+data.doc_no+' - '+money(data.net)+' to pay','ok'); route();
+};
+/* opening bill */
+window.acxOpenBillNew=function(){
+  const co=curCo(); if(!co){ toast('Choose a company first','err'); return; }
+  if(!bnVendors().length){ toast('There is no approved vendor yet - a vendor is approved in Purchase first','err'); return; }
+  OB={vendor:'',inv:'',date:'',due:'',bu:S.buId||'',amt:''};
+  const last=dayBefore(co.books_start);
+  openModal('<div class="modal-head"><h3>Opening bill</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body">'
+    +'<div class="acx-hint" style="margin-bottom:12px">For a bill that was <b>already unpaid when the books started on '+dmy(co.books_start)+'</b>. It adds to the vendor’s opening balance and creates the amount to pay. Enter only what is <b>still owed</b>. Do not also enter that vendor’s opening balance under Ledger opening - the rest of your opening balances are entered there as usual.</div>'
+    +'<div class="acx-grid3">'
+    +field('Vendor','<select id="obVendor">'+opt('','Choose…','')+bnVendors().map(v=>opt(v.id,(v.trade_name||v.legal_name)+' — '+v.code,'')).join('')+'</select>')
+    +field('Vendor’s invoice no','<input id="obInv">')
+    +field('Amount still owed','<input id="obAmt" class="n" inputmode="decimal" style="text-align:right">')+'</div>'
+    +'<div class="acx-grid4">'
+    +fyField('ob','',{lo:'',hi:last})
+    +field('Invoice date','<input type="date" id="obDate"'+fyDateAttrs('ob','')+'><div class="h">Before '+dmy(co.books_start)+'</div>')
+    +field('Due date (optional)','<input type="date" id="obDue">')
+    +field('Business unit','<select id="obBu">'+opt('','Company level (no business unit)',OB.bu)+coBus().filter(b=>b.active).map(b=>opt(b.id,b.name,OB.bu)).join('')+'</select>')+'</div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="acxObSave()">Add opening bill</button></div>','lg');
+};
+window.acxObSave=async function(){
+  const vendor=val('obVendor'), inv=val('obInv'), date=val('obDate'), due=val('obDue'), amt=r2(num(val('obAmt')));
+  if(!vendor){ toast('Choose the vendor','err'); return; } if(!inv){ toast('Enter the vendor’s invoice number','err'); return; }
+  if(!date){ toast('Enter the invoice date','err'); return; } if(amt<=0){ toast('Enter the amount still owed','err'); return; }
+  if(due&&due<date){ toast('The due date cannot be before the invoice date','err'); return; }
+  const head={company_id:S.coId,business_unit_id:val('obBu')||null,vendor_id:parseInt(vendor,10),invoice_no:inv,invoice_date:date,due_date:due||null,amount:amt};
+  const {error}=await rpc('opening_bill_enter',{p_head:head}); if(fail(error,'Could not add the opening bill')) return;
+  closeModal(); toast('Opening bill added - '+money(amt)+' owed to '+vendorName(parseInt(vendor,10)),'ok'); route();
+};
+/* cancel an entered bill or an opening bill (nothing may be paid against it) */
+window.acxBillCancel=async function(id){
+  const reason=await askReason('Cancel this bill','Why is it being cancelled? (entered twice, wrong amount …)','Cancel bill'); if(!reason) return;
+  const {error}=await rpc('bill_cancel',{p_payable_id:id,p_reason:reason}); if(fail(error,'Could not cancel the bill')) return;
+  closeModal(); toast('Bill cancelled','ok'); route();
 };
 
 /* ---------------- pay a vendor ---------------- */
@@ -1038,9 +1229,9 @@ function pyDraw(){
     +'<div class="acx-grid2">'+field('Vendor / contractor','<select id="pyVendor" onchange="acxPyVendor()">'+opt('','Choose…',PY.vendor)+(withDues.length?'<optgroup label="With outstanding bills">'+withDues.map(v=>opt(v.id,(v.trade_name||v.legal_name)+' — '+money(PY.dues[v.id]),PY.vendor)).join('')+'</optgroup>':'')
       +'<optgroup label="Other approved vendors (pay on account)">'+others.map(v=>opt(v.id,(v.trade_name||v.legal_name),PY.vendor)).join('')+'</optgroup></select>')
       +field('Paid from','<select id="pyBank">'+cashBank().map(l=>opt(l.id,l.name+(l.is_cash?' (cash)':''),PY.bank)).join('')+'</select>')+'</div>'
-    +(PY.vendor?'<div class="acx-grid4">'+field('Date','<input type="date" id="pyDate" value="'+esc(PY.date)+'" max="'+today()+'">')+field('Mode','<select id="pyMode">'+opts(MODES,PY.mode)+'</select>')
-      +field('Cheque / reference no','<input id="pyInst" value="'+esc(PY.inst)+'"><div class="h">Blank = next number from the cheque book</div>')+field('Instrument date','<input type="date" id="pyInstDate" value="'+esc(PY.instDate)+'">')+'</div>'
-      +'<div class="acx-grid3">'+field('Business unit','<select id="pyBu">'+opt('','Company level',PY.bu)+coBus().filter(b=>b.active).map(b=>opt(b.id,b.name,PY.bu)).join('')+'</select>')+field('Payee name (on the cheque)','<input id="pyPayee" value="'+esc(PY.payee)+'">')+field('Narration','<input id="pyNarr" value="'+esc(PY.narr)+'">')+'</div>'
+    +(PY.vendor?'<div class="acx-grid4">'+fyField('py',PY.date)+field('Date','<input type="date" id="pyDate" value="'+esc(PY.date)+'"'+fyDateAttrs('py',PY.date)+'>')+field('Mode','<select id="pyMode">'+opts(MODES,PY.mode)+'</select>')
+      +field('Cheque / reference no','<input id="pyInst" value="'+esc(PY.inst)+'"><div class="h">Blank = next number from the cheque book</div>')+'</div>'
+      +'<div class="acx-grid4">'+field('Instrument date','<input type="date" id="pyInstDate" value="'+esc(PY.instDate)+'">')+field('Business unit','<select id="pyBu">'+opt('','Company level',PY.bu)+coBus().filter(b=>b.active).map(b=>opt(b.id,b.name,PY.bu)).join('')+'</select>')+field('Payee name (on the cheque)','<input id="pyPayee" value="'+esc(PY.payee)+'">')+field('Narration','<input id="pyNarr" value="'+esc(PY.narr)+'">')+'</div>'
       +'<div class="acx-sec-title" style="margin-top:0">Against bills</div><div class="card" style="padding:0;margin-bottom:12px"><div style="overflow-x:auto"><table class="tbl acx-mini"><thead><tr><th>Bill</th><th>Date</th><th>Due</th><th class="acx-num">Outstanding</th><th>Pay now</th><th></th></tr></thead><tbody>'
       +(rows||'<tr><td colspan="6"><div class="empty" style="padding:16px"><div>No outstanding bill for this vendor — you can still pay on account below.</div></div></td></tr>')+'</tbody></table></div></div>'
       +'<div class="acx-grid3">'+field('On account (not against any bill)','<input id="pyOn" class="n" inputmode="decimal" value="'+esc(PY.on)+'" oninput="acxPyOn()" style="text-align:right"><div class="h">'+(PY.onacct>0.004?'Already on account with this vendor: '+money(PY.onacct)+'. Set it against bills with “Adjust on-account”.':'Use this for advances before the bill arrives.')+'</div>')
@@ -1083,9 +1274,9 @@ function prDraw(){
     +'<div class="acx-hint" style="margin:-4px 0 12px">Why: '+esc(r.reason)+'</div>'
     +'<div class="card" style="padding:0;margin-bottom:12px"><table class="tbl acx-mini"><thead><tr><th>RA bill</th><th class="acx-num">Retention released</th></tr></thead><tbody>'
     +(r.lines||[]).map(l=>'<tr><td>'+esc(l.bill_no)+'</td><td class="acx-num">'+money(l.amount)+'</td></tr>').join('')+'<tr><td><b>Total — exactly what was approved</b></td><td class="acx-num"><b>'+money(r.amount)+'</b></td></tr></tbody></table></div>'
-    +'<div class="acx-grid4">'+field('Paid from','<select id="prBank">'+cashBank().map(l=>opt(l.id,l.name+(l.is_cash?' (cash)':''),PR.bank)).join('')+'</select>')+field('Date','<input type="date" id="prDate" value="'+esc(PR.date)+'" max="'+today()+'">')
-      +field('Mode','<select id="prMode">'+opts(MODES,PR.mode)+'</select>')+field('Cheque / reference no','<input id="prInst" value="'+esc(PR.inst)+'"><div class="h">Blank = next number from the cheque book</div>')+'</div>'
-    +'<div class="acx-grid3">'+field('Instrument date','<input type="date" id="prInstDate" value="'+esc(PR.instDate)+'">')+field('Payee name (on the cheque)','<input id="prPayee" value="'+esc(PR.payee)+'">')+field('Narration','<input id="prNarr" value="'+esc(PR.narr)+'" placeholder="Retention release '+esc(r.doc_no)+'">')+'</div>'
+    +'<div class="acx-grid4">'+field('Paid from','<select id="prBank">'+cashBank().map(l=>opt(l.id,l.name+(l.is_cash?' (cash)':''),PR.bank)).join('')+'</select>')+fyField('pr',PR.date)+field('Date','<input type="date" id="prDate" value="'+esc(PR.date)+'"'+fyDateAttrs('pr',PR.date)+'>')
+      +field('Mode','<select id="prMode">'+opts(MODES,PR.mode)+'</select>')+'</div>'
+    +'<div class="acx-grid4">'+field('Cheque / reference no','<input id="prInst" value="'+esc(PR.inst)+'"><div class="h">Blank = next number from the cheque book</div>')+field('Instrument date','<input type="date" id="prInstDate" value="'+esc(PR.instDate)+'">')+field('Payee name (on the cheque)','<input id="prPayee" value="'+esc(PR.payee)+'">')+field('Narration','<input id="prNarr" value="'+esc(PR.narr)+'" placeholder="Retention release '+esc(r.doc_no)+'">')+'</div>'
     +'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="acxPrSave()">Post payment</button></div>','lg');
 }
 window.acxPrSave=async function(){
@@ -1112,6 +1303,7 @@ window.acxAdjOpen=async function(voucherId){
 };
 async function ajLoadBills(){
   const it=AJ.items.find(x=>x.voucher_id===AJ.voucher); AJ.alloc={};
+  if(AJ.date<String(it.voucher_date).slice(0,10)) AJ.date=String(it.voucher_date).slice(0,10);   // an adjustment cannot be dated before the on-account entry
   const {data}=await AC().from('v_payables').select('*').eq('company_id',S.coId).eq('sub_ledger_id',it.sub_ledger_id).eq('kind','bill').eq('status','open').gt('outstanding',0).order('ref_date');
   AJ.bills=data||[]; ajDraw();
 }
@@ -1120,7 +1312,7 @@ function ajDraw(){
   const used=r2(Object.values(AJ.alloc).reduce((s,x)=>s+num(x),0));
   openModal('<div class="modal-head"><h3>Adjust an on-account payment against bills</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body">'
     +field('On-account entry','<select id="ajV" onchange="acxAjVoucher()">'+AJ.items.map(x=>opt(x.voucher_id,(AJ.names[x.sub_ledger_id]||{}).name+' · '+x.doc_no+' · '+dmy(x.voucher_date)+' · available '+money(Number(x.amount)-Number(x.used)),AJ.voucher)).join('')+'</select>')
-    +'<div class="acx-grid3">'+field('Available on account','<b>'+money(avail)+'</b>')+field('Adjustment date','<input type="date" id="ajDate" value="'+esc(AJ.date)+'" min="'+esc(it.voucher_date)+'" max="'+today()+'">')
+    +'<div class="acx-grid4">'+field('Available on account','<b>'+money(avail)+'</b>')+fyField('aj',AJ.date,{lo:String(it.voucher_date).slice(0,10)})+field('Adjustment date','<input type="date" id="ajDate" value="'+esc(AJ.date)+'"'+fyDateAttrs('aj',AJ.date)+'>')
     +'<div class="acx-tot" style="align-self:end;justify-content:flex-end"><span>Adjusting</span><b id="ajTotal">'+money(used)+'</b></div></div>'
     +'<div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl acx-mini"><thead><tr><th>Bill</th><th>Date</th><th>Due</th><th class="acx-num">Outstanding</th><th>Adjust</th><th></th></tr></thead><tbody>'
     +(AJ.bills.map(r=>'<tr><td>'+esc(r.ref_no||'—')+'<div class="acx-hint">'+esc(r.voucher_no)+'</div></td><td>'+dmy(r.ref_date)+'</td><td>'+(r.due_date?dmy(r.due_date):'—')+'</td><td class="acx-num">'+money(r.outstanding)+'</td>'
