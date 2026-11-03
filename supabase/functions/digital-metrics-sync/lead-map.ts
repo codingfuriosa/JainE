@@ -23,7 +23,9 @@ const SB = Deno.env.get('SUPABASE_URL')!;
 const SRV = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const H = { apikey: SRV, Authorization: 'Bearer ' + SRV, 'Content-Type': 'application/json' };
 const START = '2026-01-01';   // the map is kept from the start of the year
-const PROJECTS: [RegExp, string][] = [[/ananta/i, 'Dream Ananta'], [/gurukul/i, 'Dream Gurukul'], [/world\s*city|\bdwc\b/i, 'Dream World City']];
+// The CRM calls Dream Ananta "New Project" (business unit 171) - the user, 2 Nov 2026. Any other
+// project (Dream Eco City and the rest) is ignored.
+const PROJECTS: [RegExp, string][] = [[/ananta|new\s*project/i, 'Dream Ananta'], [/gurukul/i, 'Dream Gurukul'], [/world\s*city|\bdwc\b/i, 'Dream World City']];
 
 async function get(path: string) {
   const r = await fetch(`${SB}/rest/v1/${path}`, { headers: { ...H, 'Accept-Profile': 'camp' } });
@@ -57,6 +59,60 @@ async function upsert(table: string, rows: any[], onConflict: string, ignore = f
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 const addDays = (d: string, n: number) => new Date(Date.parse(d + 'T00:00:00Z') + n * 86400_000).toISOString().slice(0, 10);
+
+// ---------------------------------------------------------------- share links (2 Nov 2026)
+/* A Lead Map link anyone can open - no login - showing ONE month (or all months), ONE project (or all)
+   and Site Visit / Booked / both, as a bare map. Asked for so the map can be sent outside JAIN-E.
+     - The link carries its choice and an HMAC-SHA256 signature made with the job secret, so it
+       cannot be edited to show something else, and other links cannot be guessed.
+     - It never expires (as asked) and always shows the current counts for that choice.
+     - It gives out only PIN codes, their area names, map positions and counts. Never who uploaded,
+       when, or anything about a customer; test pins and PIN codes that could not be placed are
+       left out. */
+const b64u = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = (s: string) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)));
+async function shareSecret() {
+  const r = await fetch(`${SB}/rest/v1/job_secrets?name=eq.digital_metrics&select=value`, { headers: { ...H, 'Accept-Profile': 'acc' } });
+  const x = await r.json();
+  if (!x[0]?.value) throw new Error('share secret missing');
+  return x[0].value as string;
+}
+async function hmac(payload: string) {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode('lead-map-share:' + await shareSecret()),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return b64u(new Uint8Array(await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(payload))));
+}
+const SHARE_PROJECTS = ['all', 'Dream Ananta', 'Dream Gurukul', 'Dream World City'];
+const SHARE_KINDS = ['all', 'site_visit', 'booked'];
+export async function shareToken(month: string, project: string, kind: string) {
+  if (!(month === 'all' || /^20\d\d-(0[1-9]|1[0-2])$/.test(month))) throw new Error('bad month');
+  if (!SHARE_PROJECTS.includes(project) || !SHARE_KINDS.includes(kind)) throw new Error('bad choice');
+  const payload = b64u(new TextEncoder().encode(JSON.stringify({ m: month, p: project, k: kind })));
+  return payload + '.' + await hmac(payload);
+}
+export async function publicMap(token: string) {
+  const [payload, sig] = String(token || '').split('.');
+  if (!payload || !sig || sig !== await hmac(payload)) return { error: 'This link is not valid.' };
+  let c: any; try { c = JSON.parse(unb64u(payload)); } catch (_) { return { error: 'This link is not valid.' }; }
+  // the months: one, or every month from January 2026 to this one
+  const now = istToday().slice(0, 7), months: string[] = [];
+  if (c.m === 'all') { for (let y = 2026, m = 1; `${y}-${String(m).padStart(2, '0')}` <= now; m++) { if (m > 12) { m = 0; y++; continue; } months.push(`${y}-${String(m).padStart(2, '0')}`); } }
+  else months.push(c.m);
+  const byPin: Record<string, any> = {};
+  for (const m of months) {
+    const r = await fetch(`${SB}/rest/v1/rpc/lm_month`, { method: 'POST', headers: { ...H, 'Content-Profile': 'camp' }, body: JSON.stringify({ p_month: m + '-01' }) });
+    if (!r.ok) throw new Error('could not read the map');
+    for (const x of await r.json()) {
+      if (x.kind === 'test' || !x.project) continue;                 // test pins never go out
+      if (c.p !== 'all' && x.project !== c.p) continue;
+      if (c.k !== 'all' && x.kind !== c.k) continue;
+      if (x.lat == null) continue;                                    // not found = never plotted
+      const p = byPin[x.pincode] = byPin[x.pincode] || { pincode: x.pincode, lat: x.lat, lng: x.lng, place: x.place, district: x.district, state: x.state, sv: 0, bk: 0 };
+      if (x.kind === 'site_visit') p.sv += Number(x.n); else p.bk += Number(x.n);
+    }
+  }
+  return { month: c.m, project: c.p, kind: c.k, pins: Object.values(byPin), as_of: new Date().toISOString() };
+}
 
 // ---------------------------------------------------------------- the browser map key
 // A Maps JavaScript key is public by design (it sits in the page); Google protects it by the website
@@ -104,16 +160,60 @@ async function fetchReport(url: string, from: string, to: string) {
   return rows;
 }
 
-export async function syncFromCrm() {
-  const feeds: [string, string | null][] = [];
-  const any = Deno.env.get('CRM_PINCODE_API_URL'), sv = Deno.env.get('CRM_SITEVISIT_API_URL'), bk = Deno.env.get('CRM_BOOKING_API_URL');
-  if (any) feeds.push([any, null]);
-  if (sv) feeds.push([sv, 'site_visit']);
-  if (bk) feeds.push([bk, 'booked']);
-  // typed-in PIN codes still get placed on the map while the CRM feed is not set up
-  if (!feeds.length) return { rows: 0, message: 'CRM API not set yet - add CRM_PINCODE_API_URL (or CRM_SITEVISIT_API_URL / CRM_BOOKING_API_URL) as a Supabase secret; ' + await geocodeMissing() };
+/* THE REALTY BUCKET FEED (2 Nov 2026). The user's CRM answers
+     {from, to, total, items: [{lead_id, pincode, business_unit_id, business_unit_name, activity: ["booked","site_visited"]}]}
+   for the dates in the address (DD-MM-YYYY). Each lead carries NO date of its own, so the feed is asked
+   for ONE DAY - yesterday - and every lead gets that day. Asked once a day only: repeated calls slow
+   the CRM server down (the user's instruction), so a day already read is never asked for again, and a
+   failed call is not retried until the next day's run. Lead Map starts from November 2026; earlier
+   months are added by hand. */
+const CRM_FROM = '2026-11-01';
+const dmyDash = (iso: string) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;
+const ACT_KIND: Record<string, string> = { site_visited: 'site_visit', sitevisited: 'site_visit', site_visit: 'site_visit', booked: 'booked', booking: 'booked' };
+// Turns one feed's items into Lead Map rows. Shared by the daily run and by a one-off load of a saved reply.
+export function crmRows(items: any[], day: string) {
+  const out: any[] = []; const skipped: Record<string, number> = {};
+  const skip = (why: string) => { skipped[why] = (skipped[why] || 0) + 1; };
+  for (const it of items || []) {
+    const proj = (PROJECTS.find(([re]) => re.test(String(it?.business_unit_name || ''))) || [])[1];
+    if (!proj) { skip('another project'); continue; }
+    const pin = PIN_RE.exec(String(it?.pincode ?? ''));
+    if (!pin) { skip('no PIN code'); continue; }
+    const kinds = [...new Set((Array.isArray(it.activity) ? it.activity : [it.activity])
+      .map((a: any) => ACT_KIND[String(a || '').toLowerCase().replace(/\s+/g, '_')]).filter(Boolean))];
+    if (!kinds.length) { skip('neither site visit nor booking'); continue; }
+    // one Site Visit and one Booking per lead at most: a lead read again can never be counted twice
+    for (const kind of kinds) out.push({ project: proj, kind, pincode: pin[1], event_date: day, source: 'crm', crm_ref: `${kind}:${it.lead_id}` });
+  }
+  return { out, skipped };
+}
 
-  // from three days before the newest CRM row (the CRM may add a visit a day late), or from 1 Jan
+export async function syncFromCrm(force = false) {
+  const url = Deno.env.get('CRM_PINCODE_API_URL');
+  // typed-in PIN codes still get placed on the map while the CRM feed is not set up
+  if (!url) return { rows: 0, message: 'CRM API not set yet - add CRM_PINCODE_API_URL as a Supabase secret; ' + (await geocodeMissing()).message };
+  const day = addDays(istToday(), -1);
+  if (day < CRM_FROM) return { rows: 0, message: 'Lead Map reads the CRM from 1 Nov 2026; ' + (await geocodeMissing()).message };
+  // already read that day? then do not touch the CRM again
+  const done = await get(`dm_sync_log?part=eq.lead_map&ok=is.true&message=like.*crm-day%20${day}*&select=id&limit=1`);
+  if (done.length && !force) return { rows: 0, message: `crm-day ${day} was already read - the CRM was not called again; ` + (await geocodeMissing()).message };
+  const u = url.replace(/\{from\}/g, dmyDash(day)).replace(/\{to\}/g, dmyDash(day));
+  const r = await fetch(u, { headers: { Accept: 'application/json' } });
+  const t = await r.text();
+  if (!r.ok) throw new Error(`CRM answered ${r.status} for ${day}: ${t.slice(0, 200)} - not retried until tomorrow`);
+  let body: any; try { body = JSON.parse(t); } catch (_) { throw new Error('CRM did not answer with JSON: ' + t.slice(0, 120)); }
+  const { out, skipped } = crmRows(body.items || findRows(body) || [], day);
+  await upsert('lm_pins', out, 'crm_ref', true);   // ignore a lead already stored
+  const geo = (await geocodeMissing()).message;
+  return { rows: out.length, message: `crm-day ${day}: ${(body.items || []).length} lead(s) from the CRM, ${out.length} added to the map; skipped ${JSON.stringify(skipped)}; ${geo}` };
+}
+
+// The older, column-guessing reader for other feeds - kept for reference, no longer called.
+export async function syncFromCrmGeneric() {
+  const feeds: [string, string | null][] = [];
+  const any = Deno.env.get('CRM_SITEVISIT_API_URL_GENERIC');
+  if (any) feeds.push([any, null]);
+  if (!feeds.length) return { rows: 0, message: 'not set' };
   const last = await get('lm_pins?source=eq.crm&select=event_date&order=event_date.desc&limit=1');
   const from = last.length ? addDays(last[0].event_date, -3) : START, to = istToday();
   const skipped: Record<string, number> = {}; const used: Record<string, string> = {};
@@ -154,7 +254,7 @@ export async function syncFromCrm() {
     }
   }
   await upsert('lm_pins', out, 'crm_ref');
-  const geo = await geocodeMissing();
+  const geo = (await geocodeMissing()).message;
   return { rows: out.length, message: `read ${from} to ${to}; columns used ${JSON.stringify(used)}; skipped ${JSON.stringify(skipped)}; ${geo}` };
 }
 

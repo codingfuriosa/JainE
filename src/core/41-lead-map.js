@@ -37,8 +37,11 @@ const LM_CSS='<style>'
   +'#lmMap{height:620px;background:#e8edf3}'
   +'.lm-dist-btn{margin-left:auto;display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 16px;border-radius:9px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;font:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:.15s}'
   +'.lm-dist-btn:hover{background:#dbeafe;border-color:#93c5fd}'
+  +'.lm-share-btn{margin-left:0;background:#fff;border-color:var(--line);color:#334155}.lm-share-btn:hover{background:#f8fafc;border-color:#94a3b8}'
   +'.lm-dist-btn.on{background:#1d4ed8;border-color:#1d4ed8;color:#fff}'
-  +'.lm-mapwrap{position:relative}'
+  /* isolation keeps the map's own layers (Leaflet uses z-index 400-1000 for tiles, pins and buttons)
+     inside the map card, so JAIN-E's pop-ups (z-index 100) always sit on top of the map */
+  +'.lm-mapwrap{position:relative;isolation:isolate;z-index:0}'
   +'.lm-maplegend{position:absolute;left:10px;bottom:22px;z-index:900;background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:10px;padding:8px 11px;font-size:12px;line-height:1.75;color:#334155;box-shadow:0 2px 10px rgba(15,23,42,.12)}'
   +'.lm-maplegend svg{vertical-align:-2px;margin:0 3px 0 1px}'
   // map buttons (re-center, full screen) styled like the zoom buttons
@@ -46,7 +49,10 @@ const LM_CSS='<style>'
   +'.lm-ctl a:hover{background:#f4f4f4;color:#1d4ed8}'
   // the map-style switch, as a compact row of choices
   +'#lmMap .leaflet-control-layers{border:1px solid var(--line);border-radius:10px;box-shadow:0 2px 10px rgba(15,23,42,.12);padding:0}'
-  +'#lmMap .leaflet-control-layers-base{display:flex;gap:2px;padding:4px}'
+  +'#lmMap .leaflet-control-layers-base{display:flex;flex-wrap:nowrap;gap:2px;padding:4px}'
+  // never squeeze or scroll the three choices - Leaflet otherwise caps the list's height on a small map
+  +'#lmMap .leaflet-control-layers-list,#lmMap .leaflet-control-layers-scrollbar{height:auto!important;max-height:none!important;overflow:visible!important}'
+  +'#lmMap .leaflet-control-layers-base label,#lmMap .leaflet-control-layers-base span{white-space:nowrap;flex:none}'
   +'#lmMap .leaflet-control-layers-base label{margin:0}'
   +'#lmMap .leaflet-control-layers-base label>span{display:block;cursor:pointer}'
   +'#lmMap .leaflet-control-layers-base input{display:none}'
@@ -88,8 +94,14 @@ const LM_CSS='<style>'
   +'.lm-area{font-size:12px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
   +'.lm-near{font-size:11.5px;margin-top:2px;font-weight:600}'
   +'.lm-up{font-size:11px;color:#94a3b8;margin-top:2px}.lm-up i{margin-right:3px}'
+  +'.lm-del{border:0;background:none;color:#94a3b8;cursor:pointer;width:26px;height:26px;border-radius:6px;font-size:12px;flex:none}.lm-del:hover{background:#fef2f2;color:#dc2626}'
+  +'.lm-del-row{opacity:0;transition:opacity .12s}.lm-item:hover .lm-del-row{opacity:1}'
   +'.lm-test{font-size:10.5px;font-weight:700;color:#64748b;background:#f1f5f9;border-radius:6px;padding:1px 6px;vertical-align:1px}'
-  +'.lm-counts{display:flex;gap:6px}'
+  +'.lm-counts{display:flex;gap:6px;align-items:center}'
+  +'.lm-slot{width:26px;flex:none;display:flex}'
+  +'.lm-colhead{position:sticky;top:0;z-index:2;background:#f8fafc;cursor:default;padding-top:7px;padding-bottom:7px;font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px}'
+  +'.lm-colhead:hover{background:#f8fafc}.lm-colhead .lm-c{padding:0;font-size:11px;font-weight:700}'
+  +'.lm-item.lm-nf{opacity:.6}.lm-nfhead{padding:8px 14px;font-size:11px;font-weight:700;color:#b45309;text-transform:uppercase;letter-spacing:.4px;background:#fffbeb;border-bottom:1px solid var(--line-2,#eef1f6)}'
   +'.lm-c{width:38px;text-align:center;border-radius:8px;padding:4px 0;font-size:12.5px;font-weight:700}'
   +'.lm-c.sv{background:#fef2f2;color:#dc2626}.lm-c.bk{background:#f0fdf4;color:#16a34a}.lm-c.z{color:#cbd5e1}'
   +'.lm-empty{text-align:center;color:var(--slate);padding:50px 20px;display:flex;flex-direction:column;align-items:center;gap:12px;font-size:13px}.lm-empty i{font-size:30px;color:#cbd5e1}'
@@ -124,7 +136,7 @@ const LM_CSS='<style>'
   +'</style>';
 window.lmFilterList=function(q){
   q=String(q||'').trim().toLowerCase();
-  document.querySelectorAll('#lmList .lm-item').forEach(function(el){ el.style.display=!q||el.dataset.q.indexOf(q)!==-1?'':'none'; });
+  document.querySelectorAll('#lmList .lm-item[data-q]').forEach(function(el){ el.style.display=!q||el.dataset.q.indexOf(q)!==-1?'':'none'; });
 };
 function lmIst(){ return new Date(Date.now()+5.5*3600000).toISOString().slice(0,10); }
 function lmMonths(){
@@ -160,6 +172,7 @@ VIEWS.lead_map=async function(v,seg){
       +sel('lmProj',[['all','All three projects']].concat(LM_PROJECTS.map(function(p){return [p,p];})),LM_PROJ,'lmSetProj')
       +sel('lmKind',[['all','Site Visit + Booked'],['site_visit','Site Visit only'],['booked','Booked only']],LM_KIND,'lmSetKind')
       +'<button class="lm-dist-btn" id="lmMeasureBtn" onclick="lmMeasureToggle()"><i class="fa-solid fa-route"></i> Distance between places</button>'
+      +'<button class="lm-dist-btn lm-share-btn" onclick="lmShare()"><i class="fa-solid fa-share-nodes"></i> Share link</button>'
     +'</div>'
     +'<div id="lmBody"><div class="loader"><div class="spin"></div></div></div>';
   try{ await lmRender(); }catch(e){ $('lmBody').innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load: '+esc(e.message||String(e))+'</div></div>'; }
@@ -216,19 +229,25 @@ async function lmRender(){
             +lmSiteGroups().map(function(g){ return '<div><i class="lm-ring" style="border-color:'+g.color+'"></i> '+esc(lmShortSite(g.label))+' · 10 km</div>'; }).join('')+'</div>'
         +'</div>'
         +'<div id="lmMapNote" class="lm-note"></div></div>'
-      +'<div class="lm-side"><div class="lm-side-h"><div style="display:flex;justify-content:space-between;align-items:baseline"><b>PIN codes</b><span class="lm-cols"><span>SV</span><span>Bkd</span></span></div>'
+      +'<div class="lm-side"><div class="lm-side-h"><b>PIN codes</b>'
         +(pins.length>8?'<input placeholder="Find a PIN code or area…" oninput="lmFilterList(this.value)">':'')+'</div>'
         +'<div class="lm-list" id="lmList">'
-        +(pins.length?pins.map(function(p,i){
+        // the column headings sit INSIDE the scrolling list, laid out exactly like a row, so SV and Bkd
+        // line up with the numbers under them whatever the scrollbar or delete button take up
+        +(pins.length?'<div class="lm-item lm-colhead"><div></div><div>PIN code</div><div class="lm-counts"><span class="lm-c">SV</span><span class="lm-c">Bkd</span><span class="lm-slot"></span></div></div>':'')
+        +(pins.length?lmListOrder(pins).map(function(p){
+            if(p.nfHead)return '<div class="lm-nfhead"><i class="fa-solid fa-triangle-exclamation"></i> Not found - not on the map ('+p.count+')</div>';
             const near=lmNear(p)[0];
-            return '<div class="lm-item" data-q="'+esc((p.pincode+' '+(p.place||'')+' '+(p.district||'')).toLowerCase())+'" onclick="lmFocus('+JSON.stringify(p.pincode).replace(/"/g,'&quot;')+')">'
-              +'<div class="lm-rank">'+(i+1)+'</div>'
+            return '<div class="lm-item'+(p.lat==null&&p.err?' lm-nf':'')+'" data-q="'+esc((p.pincode+' '+(p.place||'')+' '+(p.district||'')).toLowerCase())+'" onclick="lmFocus('+JSON.stringify(p.pincode).replace(/"/g,'&quot;')+')">'
+              +'<div class="lm-rank">'+p.rank+'</div>'
               +'<div style="min-width:0"><div class="lm-code">'+esc(lmCodeLabel(p.pincode))+(p.test?' <span class="lm-test">test</span>':'')+'</div>'
                 +'<div class="lm-area">'+esc(p.place||[p.district,p.state].filter(Boolean).join(', ')||'')+'</div>'
                 +(p.lat==null?'<div class="lm-near" style="color:#b45309">'+esc(p.err||'finding it on the map…')+'</div>'
                   :near?'<div class="lm-near" style="color:'+near.color+'">'+near.km.toFixed(1)+' km from '+esc(near.label)+'</div>':'')
                 +(p.ups.length?'<div class="lm-up"><i class="fa-regular fa-clock"></i> '+(p.ups.length>1?'Last uploaded ':'Uploaded ')+esc(lmWhen(p.ups[0].at))+'</div>':'')+'</div>'
-              +'<div class="lm-counts"><span class="lm-c '+(p.sv?'sv':'z')+'">'+(p.sv||'–')+'</span><span class="lm-c '+(p.bk?'bk':'z')+'">'+(p.bk||'–')+'</span></div></div>';
+              +'<div class="lm-counts"><span class="lm-c '+(p.sv?'sv':'z')+'">'+(p.sv||'–')+'</span><span class="lm-c '+(p.bk?'bk':'z')+'">'+(p.bk||'–')+'</span>'
+                +'<span class="lm-slot">'+(p.ups.some(function(u){return u.source==='manual';})?'<button class="lm-del lm-del-row" title="Delete this PIN code" onclick="event.stopPropagation();lmDeletePin('+lmArg(p.pincode)+')"><i class="fa-solid fa-trash"></i></button>':'')+'</span>'
+              +'</div></div>';
           }).join('')
           :'<div class="lm-empty"><i class="fa-solid fa-map-pin"></i><div>No Site Visits or Bookings for '+esc(lmMonthName(LM_MONTH))+' yet.</div>'
             +'<button class="btn btn-primary btn-sm" onclick="navTo(\'lead_map/add\')"><i class="fa-solid fa-plus"></i> Add PIN codes</button></div>')
@@ -251,8 +270,19 @@ async function lmRender(){
    Add PIN codes page, or one CRM read - share that moment, so they are shown as one upload with a
    count. Read for the months on screen, 1,000 rows at a time, and narrowed by the same project /
    type filters as the map. Returns { pincode: [uploads, newest first] }. */
+/* NOT-FOUND PIN CODES ARE NEVER PLOTTED. A PIN the lookup could not place (India Post does not know
+   it, or no map position exists) has no coordinates, so it gets no pin - now or later. It is still
+   listed, at the bottom under "Not found", greyed, so it can be checked or deleted. Pins still waiting
+   for their first lookup stay in the main list. */
+function lmListOrder(pins){
+  const ok=pins.filter(function(p){return !(p.lat==null&&p.err);}), nf=pins.filter(function(p){return p.lat==null&&p.err;});
+  ok.forEach(function(p,i){p.rank=i+1;}); nf.forEach(function(p,i){p.rank=ok.length+i+1;});
+  return nf.length?ok.concat([{nfHead:true,count:nf.length}],nf):ok;
+}
+let LM_RANGE=null;   // the event dates on screen, for "Delete this PIN code"
 async function lmUploads(months){
   const from=months.slice().sort()[0]+'-01', to=lmNextMonth(months.slice().sort().pop())+'-01';
+  LM_RANGE={from:from,to:to};
   const all=[];
   for(let off=0;off<50000;off+=1000){
     const {data,error}=await sb.schema('camp').from('lm_pins').select('pincode,project,kind,event_date,source,added_by,created_at')
@@ -326,9 +356,12 @@ function lmPopup(p){
     // when each lot for this PIN code was put into JAIN-E, and by whom
     +(ups.length?'<div style="margin-top:8px;border-top:1px solid #e2e8f0;padding-top:6px"><div style="font-weight:700;font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:#64748b;margin-bottom:3px">Uploaded</div>'
       +ups.slice(0,6).map(function(u){
-        return '<div style="margin-bottom:4px"><b>'+esc(lmWhen(u.at))+'</b><div style="color:#475569;font-size:12px">'
+        return '<div style="margin-bottom:4px;display:flex;gap:8px;align-items:flex-start"><div style="flex:1"><b>'+esc(lmWhen(u.at))+'</b><div style="color:#475569;font-size:12px">'
           +esc((u.project||'Test pin')+' · '+LM_KINDS[u.kind]+(u.n>1?' ×'+u.n:'')+' · '+(LM_KINDS[u.kind]==='Booked'?'booking':'visit')+' date '+fmtDateShort(u.date))
-          +'<br>'+esc(u.source==='crm'?'from the CRM':'added by hand'+(u.by?' by '+u.by:''))+'</div></div>'; }).join('')
+          +'<br>'+esc(u.source==='crm'?'from the CRM':'added by hand'+(u.by?' by '+u.by:''))+'</div></div>'
+          // only uploads typed in by hand can be taken back; CRM rows are the CRM's
+          +(u.source==='manual'?'<button class="lm-del" title="Remove this upload" onclick="lmDeleteUpload('+lmArg(p.pincode)+','+lmArg(u.at)+','+lmArg(u.project||'')+','+lmArg(u.kind)+','+lmArg(u.date)+','+u.n+')"><i class="fa-solid fa-trash"></i></button>':'')
+          +'</div>'; }).join('')
       +(ups.length>6?'<div style="color:#64748b;font-size:12px">+ '+(ups.length-6)+' earlier upload'+(ups.length-6===1?'':'s')+'</div>':'')+'</div>':'')
     +'<div style="margin-top:6px;color:#475569">'+lmSiteGroups().map(function(g){ const km=lmKm(p,g);
       return esc(g.label)+': '+km.toFixed(1)+' km'+(km<=LM_RADIUS_KM?' <b style="color:'+g.color+'">· inside 10 km</b>':''); }).join('<br>')+'</div></div>';
@@ -380,7 +413,11 @@ async function lmDraw(pins){
     'Satellite':L.layerGroup([L.tileLayer(ESRI+'World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Imagery &copy; Esri'}),
       L.tileLayer(ESRI+'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:19}),
       L.tileLayer(ESRI+'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,opacity:.7})]),
-    'Simple':L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'})};
+    /* Simple = Esri's plain light-grey map with place names. Not OpenStreetMap's own tile servers any
+       more (2 Nov 2026): those refuse pages that do not identify themselves - a page opened as a
+       file, or heavy use from one office - and drew "Access blocked" over the whole map. */
+    'Simple':L.layerGroup([L.tileLayer(ESRI+'Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,maxNativeZoom:16,attribution:'Tiles &copy; Esri'}),
+      L.tileLayer(ESRI+'Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,maxNativeZoom:16})])};
   let pick='Detailed'; try{ const s=localStorage.getItem('lmMapStyle'); if(styles[s])pick=s; }catch(e){}
   styles[pick].addTo(map);
   L.control.layers(styles,null,{position:'topright',collapsed:false}).addTo(map);
@@ -573,6 +610,61 @@ async function lmRoute(){
     if(el)el.textContent=(rt.distance/1000).toFixed(1)+' km';
   }catch(e){ const el=$('lmRoad'); if(el)el.textContent='—'; }
 }
+// ---------------------------------------------------------------- share link
+/* A link to the map alone (lead_map_share.html) for the month, project and Site Visit / Booked
+   choice on screen - anyone with it can open it, no login, and it never expires. JAIN-E signs the
+   choice, so the link cannot be changed to show something else; the shared page only ever gets PIN
+   codes, their place and counts. See shareToken / publicMap in lead-map.ts. */
+window.lmShare=async function(){
+  let link='';
+  try{
+    const r=await lmCall({action:'lead_map_share',month:LM_MONTH,project:LM_PROJ,kind:LM_KIND});
+    link=location.origin+location.pathname.replace(/[^/]*$/,'')+'lead_map_share.html?t='+encodeURIComponent(r.token);
+  }catch(e){ return toast('Could not make the link: '+e.message,'err'); }
+  const what=[LM_PROJ==='all'?'All projects':LM_PROJ, lmMonthName(LM_MONTH), LM_KIND==='all'?'Site Visits & Bookings':LM_KINDS[LM_KIND]+'s'].join(' · ');
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-share-nodes"></i> Share this map</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><div style="font-size:13px;color:var(--slate);margin-bottom:10px">Anyone with this link can see the map for <b style="color:var(--ink)">'+esc(what)+'</b> - just the map, no login, and it always shows the latest numbers. It shows PIN codes and counts only, never customer details.</div>'
+      +'<div style="display:flex;gap:8px"><input id="lmShareUrl" readonly value="'+esc(link)+'" style="flex:1;height:38px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:inherit;font-size:12.5px" onclick="this.select()">'
+      +'<button class="btn btn-primary" onclick="lmCopyShare()"><i class="fa-regular fa-copy"></i> Copy</button></div></div>'
+    +'<div class="modal-foot"><a class="btn" href="'+esc(link)+'" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open</a><button class="btn" onclick="closeModal()">Done</button></div>','md');
+};
+window.lmCopyShare=async function(){
+  const i=$('lmShareUrl'); if(!i)return;
+  try{ await navigator.clipboard.writeText(i.value); toast('Link copied','ok'); }
+  catch(e){ i.select(); document.execCommand('copy'); toast('Link copied','ok'); }
+};
+
+// ---------------------------------------------------------------- deleting PIN codes
+/* Two ways, both asking first, both touching ONLY rows typed in by hand (source 'manual') - the
+   database refuses to delete CRM rows anyway (policy lm_del):
+     - a single upload, from the pin's pop-up (that PIN, that save moment, project, type and date);
+     - a whole PIN code, from the list - every hand-typed row for it in the months, project and
+       Site Visit / Booked choice currently on screen. */
+function lmArg(s){ return esc(JSON.stringify(String(s==null?'':s))); }
+window.lmDeleteUpload=async function(pin,at,project,kind,date,n){
+  if(!await confirmDialog('Remove '+n+' '+LM_KINDS[kind]+(n===1?'':'s')+' for '+lmCodeLabel(pin)+' ('+(project||'test pin')+', '+fmtDateShort(date)+') uploaded '+lmWhen(at)+'?',{okLabel:'Remove'}))return;
+  let q=sb.schema('camp').from('lm_pins').delete().eq('source','manual').eq('pincode',pin).eq('created_at',at).eq('kind',kind).eq('event_date',date);
+  q=project?q.eq('project',project):q.is('project',null);
+  const {error}=await q.select('id');
+  if(error)return toast(error.message,'err');
+  toast('Removed','ok'); renderPage();
+};
+window.lmDeletePin=async function(pin){
+  if(!LM_RANGE)return;
+  const base=function(q){
+    q=q.eq('source','manual').eq('pincode',pin).gte('event_date',LM_RANGE.from).lt('event_date',LM_RANGE.to);
+    if(LM_PROJ!=='all')q=q.eq('project',LM_PROJ);
+    if(LM_KIND!=='all')q=q.eq('kind',LM_KIND);
+    return q; };
+  const {count,error:e1}=await base(sb.schema('camp').from('lm_pins').select('id',{count:'exact',head:true}));
+  if(e1)return toast(e1.message,'err');
+  if(!count)return toast('Nothing typed in by hand for this PIN code here','warn');
+  const scope=[lmMonthName(LM_MONTH),LM_PROJ==='all'?'all projects':LM_PROJ,LM_KIND==='all'?'Site Visits and Bookings':LM_KINDS[LM_KIND]+'s'].join(', ');
+  if(!await confirmDialog('Delete '+lmCodeLabel(pin)+' from the map? This removes '+count+' entr'+(count===1?'y':'ies')+' typed in by hand ('+scope+').',{okLabel:'Delete'}))return;
+  const {error}=await base(sb.schema('camp').from('lm_pins').delete()).select('id');
+  if(error)return toast(error.message,'err');
+  toast('Deleted '+lmCodeLabel(pin),'ok'); renderPage();
+};
 window.lmFocus=function(pin){ const m=LM_MARKERS[pin]; if(m)m.focus(); else toast('This PIN code is not on the map yet','warn'); };
 
 // ---------------------------------------------------------------- customers from outside India

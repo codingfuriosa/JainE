@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<!-- LEAD MAP - SHARED VIEW (2 Nov 2026). The page a Lead Map "Share link" opens: the map and nothing
+     else, for anyone with the link - no JAIN-E login. The link (?t=...) names one month or all months,
+     one project or all, and Site Visit / Booked / both, signed by JAIN-E so it cannot be altered; the
+     digital-metrics-sync function checks the signature and returns only PIN codes, their place and
+     counts. It always shows the current figures for that choice. Not part of the app shell (not in
+     src/pages/pages.json) - kept by hand, like login.html. -->
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Lead Map · The Jain Group</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  html,body{margin:0;height:100%;font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;background:#e8edf3}
+  #map{position:fixed;inset:0}
+  .chip{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:1000;background:#fff;border:1px solid #e2e8f0;border-radius:10px;
+    padding:7px 14px;box-shadow:0 2px 12px rgba(15,23,42,.15);font-size:13px;color:#0f172a;white-space:nowrap;max-width:calc(100% - 140px);overflow:hidden;text-overflow:ellipsis}
+  .chip b{color:#dc2626}
+  .key{position:absolute;left:10px;bottom:24px;z-index:1000;background:rgba(255,255,255,.95);border:1px solid #e2e8f0;border-radius:10px;padding:8px 11px;font-size:12px;line-height:1.75;color:#334155;box-shadow:0 2px 10px rgba(15,23,42,.12)}
+  .ring{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid;vertical-align:-2px;margin-right:4px}
+  .msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:2000;background:#f8fafc;color:#475569;font-size:15px;text-align:center;padding:20px}
+  .ctl a{display:flex!important;align-items:center;justify-content:center;width:30px;height:30px;color:#334155;font-size:16px;cursor:pointer;background:#fff;text-decoration:none}
+  .leaflet-control-layers-base{display:flex;flex-wrap:nowrap;gap:2px;padding:4px}
+  .leaflet-control-layers-base label{margin:0}.leaflet-control-layers-base label>span{display:block;cursor:pointer;white-space:nowrap}
+  .leaflet-control-layers-base input{display:none}
+  .leaflet-control-layers-base input+span{padding:5px 11px;border-radius:7px;font:600 12px Inter,system-ui,sans-serif;color:#475569}
+  .leaflet-control-layers-base input:checked+span{background:#1d4ed8;color:#fff}
+  .leaflet-control-layers{border:1px solid #e2e8f0;border-radius:10px}
+  .leaflet-control-layers-separator,.leaflet-control-layers-overlays{display:none}
+  /* never squeeze or scroll the three choices - Leaflet caps the list's height on a small screen,
+     which clipped "Detailed" and added scroll arrows */
+  .leaflet-control-layers-list,.leaflet-control-layers-scrollbar{height:auto!important;max-height:none!important;overflow:visible!important}
+  .leaflet-control-layers-base label,.leaflet-control-layers-base span{flex:none}
+  @media(max-width:720px){.chip{top:auto;bottom:24px;left:auto;right:10px;transform:none;max-width:calc(100% - 200px);white-space:normal}}
+</style></head>
+<body>
+<div id="map"></div>
+<div class="msg" id="msg">Loading the map…</div>
+<script>
+const FN='https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/digital-metrics-sync';
+const KEY='sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n';   // the public (publishable) key - safe in a page
+const CENTER={lat:22.5726,lng:88.3639}, NEAR_KM=80, RADIUS_KM=10;
+// the same project positions and colours as the Lead Map in JAIN-E (src/core/41-lead-map.js)
+const SITES=[{project:'Dream World City',label:'Dream World City',lat:22.425118985258926,lng:88.30052531495693,color:'#2563eb'},
+  {project:'Dream Gurukul',label:'Gurukul & Ananta',lat:22.67727787645114,lng:88.45681189976243,color:'#9333ea',also:'Dream Ananta'}];
+const KINDS={all:'Site Visits & Bookings',site_visit:'Site Visits',booked:'Bookings'};
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function km(a,b){const R=6371,r=Math.PI/180,dl=(b.lat-a.lat)*r,dg=(b.lng-a.lng)*r;const h=Math.sin(dl/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dg/2)**2;return 2*R*Math.asin(Math.sqrt(h));}
+function pinSvg(n){const h=Math.round(Math.min(72,22+6*Math.sqrt(Math.max(1,n)))),w=Math.round(h*0.72),fs=n<10?13:n<100?11:9;
+  return {w,h,svg:'<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'" viewBox="0 0 30 42"><path d="M15 1C7.3 1 1 7.2 1 14.9 1 25.4 15 41 15 41s14-15.6 14-26.1C29 7.2 22.7 1 15 1z" fill="#ea4335" stroke="#a52714" stroke-width="1.5"/><text x="15" y="19.5" text-anchor="middle" font-family="system-ui,Arial,sans-serif" font-weight="700" font-size="'+fs+'" fill="#fff">'+n+'</text></svg>'};}
+function monthName(m){return m==='all'?'All months':new Date(m+'-01T00:00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'});}
+(async function(){
+  const t=new URLSearchParams(location.search).get('t')||'';
+  const msg=document.getElementById('msg');
+  let d;
+  try{
+    const r=await fetch(FN,{method:'POST',headers:{'Content-Type':'application/json',apikey:KEY},body:JSON.stringify({action:'lead_map_public',t:t})});
+    d=await r.json();
+    if(!r.ok||d.error)throw new Error(d.error||'The map could not be loaded.');
+  }catch(e){ msg.textContent=e.message||'The map could not be loaded.'; return; }
+  msg.remove();
+  const ESRI='https://server.arcgisonline.com/ArcGIS/rest/services/';
+  const styles={'Detailed':L.tileLayer(ESRI+'World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles &copy; Esri'}),
+    'Satellite':L.layerGroup([L.tileLayer(ESRI+'World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Imagery &copy; Esri'}),
+      L.tileLayer(ESRI+'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:19})]),
+    // Esri's light-grey map - OpenStreetMap's own servers block pages like this one ("Access blocked")
+    'Simple':L.layerGroup([L.tileLayer(ESRI+'Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,maxNativeZoom:16,attribution:'Tiles &copy; Esri'}),
+      L.tileLayer(ESRI+'Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,maxNativeZoom:16})])};
+  const map=L.map('map').setView([CENTER.lat,CENTER.lng],10);
+  styles.Detailed.addTo(map);
+  L.control.layers(styles,null,{position:'topright',collapsed:false}).addTo(map);
+  // the circles of the projects this map is about
+  const sites=SITES.filter(s=>d.project==='all'||s.project===d.project||s.also===d.project);
+  let bounds=null;
+  sites.forEach(s=>{
+    const c=L.circle([s.lat,s.lng],{radius:RADIUS_KM*1000,color:s.color,weight:2.5,fill:false,interactive:false}).addTo(map);
+    L.circleMarker([s.lat,s.lng],{radius:7,color:'#fff',weight:2,fillColor:s.color,fillOpacity:1}).addTo(map).bindTooltip(s.label+' · 10 km',{direction:'top'});
+    bounds=bounds?bounds.extend(c.getBounds()):c.getBounds();
+  });
+  const pins=d.pins.map(p=>Object.assign(p,{n:p.sv+p.bk})).sort((a,b)=>b.n-a.n);
+  pins.forEach((p,i)=>{
+    const ic=pinSvg(p.n);
+    L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',iconSize:[ic.w,ic.h],iconAnchor:[ic.w/2,ic.h],popupAnchor:[0,-ic.h+6],html:ic.svg}),zIndexOffset:i*10})
+      .addTo(map).bindPopup('<div style="font:13px/1.5 system-ui,sans-serif"><b style="font-size:14px">'+esc(p.pincode.replace(/^([A-Z]{2})-/,''))+'</b>'
+        +(p.place?'<div>'+esc(p.place)+'</div>':'')+'<div style="color:#64748b">'+esc([p.district,p.state].filter(Boolean).join(', '))+'</div>'
+        +'<div style="margin-top:6px">'+(p.sv?'Site Visits: <b>'+p.sv+'</b><br>':'')+(p.bk?'Bookings: <b>'+p.bk+'</b>':'')+'</div></div>');
+    if(km(p,CENTER)<=NEAR_KM)bounds=bounds?bounds.extend([p.lat,p.lng]):L.latLngBounds([[p.lat,p.lng],[p.lat,p.lng]]);
+  });
+  const home=()=>{ if(bounds)map.fitBounds(bounds,{padding:[40,40],maxZoom:13}); };
+  const Ctl=L.Control.extend({options:{position:'topleft'},onAdd:function(){
+    const el=L.DomUtil.create('div','leaflet-bar ctl'); el.innerHTML='<a title="Re-center the map">&#8982;</a>';
+    L.DomEvent.disableClickPropagation(el); el.firstChild.onclick=home; return el; }});
+  new Ctl().addTo(map);
+  home();
+  // what this map shows, and the key
+  const sv=pins.reduce((a,p)=>a+p.sv,0), bk=pins.reduce((a,p)=>a+p.bk,0);
+  const chip=document.createElement('div'); chip.className='chip';
+  chip.innerHTML='<b>Lead Map</b> · '+esc(d.project==='all'?'All projects':d.project)+' · '+esc(monthName(d.month))+' · '+esc(KINDS[d.kind]||'')
+    +' — '+(d.kind!=='booked'?sv+' site visit'+(sv===1?'':'s'):'')+(d.kind==='all'?', ':'')+(d.kind!=='site_visit'?bk+' booking'+(bk===1?'':'s'):'');
+  document.body.appendChild(chip);
+  const key=document.createElement('div'); key.className='key';
+  key.innerHTML='<div><svg width="11" height="15" viewBox="0 0 30 42" style="vertical-align:-2px;margin-right:4px"><path d="M15 1C7.3 1 1 7.2 1 14.9 1 25.4 15 41 15 41s14-15.6 14-26.1C29 7.2 22.7 1 15 1z" fill="#ea4335"/></svg>Customers by PIN code</div>'
+    +sites.map(s=>'<div><i class="ring" style="border-color:'+s.color+'"></i>'+esc(s.label)+' · 10 km</div>').join('');
+  document.body.appendChild(key);
+  document.title='Lead Map · '+(d.project==='all'?'All projects':d.project)+' · '+monthName(d.month);
+})();
+</script>
+</body></html>
