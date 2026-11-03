@@ -76,6 +76,7 @@ const SF_CSS=`<style id="sfCss">
 .sf-rate{display:flex;gap:4px;flex-wrap:wrap}
 .sf-rate button{border:none;background:none;padding:2px;cursor:pointer;font-size:24px;color:#e2e8f0;line-height:1}
 .sf-rate button.on{color:#f59e0b}
+.sf-page{max-width:760px}
 .sf-rate-val{font-size:12.5px;color:var(--slate);margin-top:6px;min-height:18px}
 /* item page */
 .sf-sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
@@ -262,21 +263,37 @@ async function sfGive(){
      +(done.length?'<div class="sf-lbl" style="margin:0 0 8px">Already given · '+done.length+'</div><div class="sf-list">'+done.map(card).join('')+'</div>':''));
 }
 const SF_RATE_WORDS=['','Very poor','Poor','Below average','Fair','Average','Decent','Good','Very good','Excellent','Outstanding'];
-window.sfOpenRate=function(id){
-  const g=window.__sfGive; if(!g) return; const i=g.items.find(function(x){ return x.id===id; }); if(!i) return; const r=g.my[id];
-  SF_RATE={id:id,rating:r?r.rating:0};
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-star"></i> Give feedback</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body sf-form"><div class="sf-view"><div class="sf-top">'+sfKindTag(i.kind)+'</div>'
-    +'<div class="sf-lbl" style="margin-top:8px">Name</div><div class="sf-title" style="margin-top:2px">'+esc(i.title)+'</div>'
-    +'<div class="sf-lbl" style="margin-top:12px">Description</div><div class="sf-desc">'+esc(i.description)+'</div>'
-    +'<div class="sf-lbl" style="margin-top:12px">Executed by</div><div class="sf-by" style="margin-top:6px">'+sfPeople(i.executed_by)+'</div></div>'
+// Give Feedback's place among this person's tabs (Design, Records, System Feedbacks come first when they have them).
+function sfGiveTab(){ return (fhCanQrForms()?2:0)+(fhIsSystems()?1:0); }
+window.sfOpenRate=function(id){ navTo('feedback_hub/give/'+id); };
+/* ---- the rating page: one item, rated on a page of its own (not a popup) ---- */
+async function sfRatePage(v,id){
+  v.innerHTML=FH_CSS+SF_CSS+'<div class="loader"><div class="spin"></div></div>';
+  let i, r;
+  try{
+    await getPeople();
+    const a=await sb.schema('feedback').from('system_items').select('*').eq('id',id).maybeSingle(); if(a.error) throw a.error; i=a.data;
+    const m=await sb.schema('feedback').from('system_responses').select('*').eq('item_id',id).eq('rater_email',fhMe()).maybeSingle(); if(m.error) throw m.error; r=m.data;
+  }catch(e){ v.innerHTML=FH_CSS+SF_CSS+sfEmpty('fa-triangle-exclamation','Could not load',e.message||String(e)); return; }
+  if(!i||!i.is_active){ v.innerHTML=FH_CSS+SF_CSS+sfEmpty('fa-lock','This feedback is no longer open','The Systems team has closed it.'); return; }
+  setCrumb(['Feedback','Feedback Hub','Give Feedback']);
+  SF_RATE={id:id,rating:r?r.rating:0,had:r||null};
+  v.innerHTML=FH_CSS+SF_CSS+'<div class="sf-page">'
+    +'<div class="fh-page-head"><button class="fh-page-back" title="Back" onclick="goBack(\'feedback_hub/'+sfGiveTab()+'\')"><i class="fa-solid fa-arrow-left"></i></button>'
+    +'<div style="flex:1;min-width:0"><div class="sf-top" style="margin:0 0 4px">'+sfKindTag(i.kind)+'<span class="sf-date">'+esc(sfDate(i.created_at))+'</span></div>'
+    +'<h1 style="font-size:19px;margin:0">'+esc(i.title)+'</h1></div></div>'
+    +'<div class="sf-form">'
+    +'<div class="sf-view" style="margin-top:14px;background:#fff"><div class="sf-lbl">Description</div><div class="sf-desc" style="margin-top:4px">'+esc(i.description)+'</div>'
+    +'<div class="sf-lbl" style="margin-top:14px">Executed by</div><div class="sf-by" style="margin-top:6px">'+sfPeople(i.executed_by)+'</div></div>'
+    +'<div class="sf-view" style="background:#fff">'
     +'<div class="row" id="sfR-rate"><label class="l">Rating <span class="req">*</span></label><div class="sf-rate" id="sfRate" onmouseleave="sfRatePaint(SF_RATE.rating)">'
       +[1,2,3,4,5,6,7,8,9,10].map(function(n){ return '<button type="button" title="'+n+' / 10" onmouseenter="sfRatePaint('+n+')" onclick="sfRateSet('+n+')"><i class="fa-solid fa-star"></i></button>'; }).join('')
     +'</div><div class="sf-rate-val" id="sfRateVal"></div><div class="err">Please choose a rating from 1 to 10</div></div>'
-    +'<div class="row" style="margin-bottom:4px"><label class="l" for="sfRemarks">Remarks</label><textarea id="sfRemarks" maxlength="2000" placeholder="What works well, what could be better">'+esc(r?r.remarks||'':'')+'</textarea></div>'
-    +'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="sfRateBtn" onclick="sfRateSave()">'+(r?'Save changes':'Submit')+'</button></div>');
+    +'<div class="row" style="margin-bottom:0"><label class="l" for="sfRemarks">Remarks</label><textarea id="sfRemarks" maxlength="2000" placeholder="What works well, what could be better">'+esc(r?r.remarks||'':'')+'</textarea></div></div>'
+    +'<div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn" onclick="goBack(\'feedback_hub/'+sfGiveTab()+'\')">Cancel</button><button class="btn btn-primary" id="sfRateBtn" onclick="sfRateSave()">'+(r?'Save changes':'Submit feedback')+'</button></div>'
+    +'</div></div>';
   sfRatePaint(SF_RATE.rating);
-};
+}
 window.sfRatePaint=function(n){
   document.querySelectorAll('#sfRate button').forEach(function(b,i){ b.classList.toggle('on',i<n); });
   const v=$('sfRateVal'); if(v) v.textContent=n?n+' / 10 · '+SF_RATE_WORDS[n]:'Tap a star';
@@ -285,10 +302,10 @@ window.sfRateSet=function(n){ SF_RATE.rating=n; $('sfR-rate').classList.remove('
 window.sfRateSave=async function(){
   if(!SF_RATE.rating){ $('sfR-rate').classList.add('bad'); return; }
   const btn=$('sfRateBtn'); btn.disabled=true;
-  const g=window.__sfGive, had=g&&g.my[SF_RATE.id], remarks=$('sfRemarks').value.trim()||null;
+  const had=SF_RATE.had, remarks=$('sfRemarks').value.trim()||null;
   const q=had?sb.schema('feedback').from('system_responses').update({rating:SF_RATE.rating,remarks:remarks,updated_at:new Date().toISOString()}).eq('id',had.id)
              :sb.schema('feedback').from('system_responses').insert({item_id:SF_RATE.id,rater_email:fhMe(),rating:SF_RATE.rating,remarks:remarks});
   const{error}=await q;
   if(error){ btn.disabled=false; toast('Could not submit: '+error.message,'err'); return; }
-  closeModal(); toast(had?'Your feedback was updated':'Thank you - your feedback was recorded','ok'); sfGive();
+  toast(had?'Your feedback was updated':'Thank you - your feedback was recorded','ok'); navTo('feedback_hub/'+sfGiveTab());
 };
