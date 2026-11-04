@@ -157,6 +157,18 @@ async function loadLedgers(){
   S.groups=g.data||[]; S.ledgers=l.data||[]; S.subCache={};
 }
 X.loadBase=loadBase; X.loadLedgers=loadLedgers;
+// The tax codes ("nature of payment") of the TDS return, from the official file format. Loaded once; the Enter-a-bill form and the TDS returns screen both use them.
+let _tdsCodes=null;
+X.tdsCodes=async function(){
+  if(_tdsCodes) return _tdsCodes;
+  const {data,error}=await AC().from('tds_codes').select('code,section,nature,common,flags,sort_order').order('sort_order');
+  if(error){ console.error(error); return []; }
+  return (_tdsCodes=data||[]);
+};
+const TDS_SHORT={'1023':'Contractor - individual / HUF','1024':'Contractor - company, firm, others','1026':'Technical services, call centre, film royalty','1027':'Professional fees','1028':'Director’s fees (not salary)',
+  '1006':'Commission or brokerage (not insurance)','1005':'Insurance commission','1008':'Rent - machinery, equipment','1009':'Rent - other than machinery','1031':'Purchase of goods'};
+X.tdsLabel=c=>c.code+' - '+(TDS_SHORT[c.code]||(String(c.nature).replace(/\s+/g,' ').slice(0,70)+(String(c.nature).length>70?'…':'')));
+X.tdsOptions=(sel,blank)=>opt('',blank||'Choose…',sel)+(_tdsCodes||[]).slice().sort((a,b)=>(b.common-a.common)||(a.sort_order-b.sort_order)).map(c=>opt(c.code,X.tdsLabel(c),sel)).join('');
 // Is the signed-in person an Accounts administrator? The tab list needs the answer before the first screen has loaded
 // the base data, so until then it is asked once; afterwards the value loadBase keeps fresh is used.
 let _admAsk=null;
@@ -1100,6 +1112,7 @@ function bnHeadHtml(){
     +field('Business unit','<select id="bnBu">'+opt('','Company level (no business unit)',BN.bu)+coBus().filter(b=>b.active).map(b=>opt(b.id,b.name,BN.bu)).join('')+'</select>')
     +field('Where is the supply made?','<select id="bnSupply" onchange="acxBnHead()">'+opts([['auto','Automatic - from the vendor’s GSTIN'],['intra','Within the state (CGST + SGST)'],['inter','Other state (IGST)']],BN.supply)+'</select><div class="h" id="bnSupplyNote">'+esc(bnSupplyNote())+'</div>')
     +field('TDS rate %','<input id="bnTds" class="n" list="bnTdsList" inputmode="decimal" value="'+esc(BN.tds)+'" oninput="acxBnHead()"><datalist id="bnTdsList">'+[1,2,5,10].map(x=>'<option value="'+x+'">').join('')+'</datalist><div class="h">On the value before GST. Blank means none.</div>')+'</div>'
+    +field('Nature of payment (for the TDS return)','<select id="bnTdsCode">'+X.tdsOptions(BN.tdsCode,'Choose when TDS is deducted…')+'</select><div class="h">Goes into the quarterly TDS return. Contractors, professional fees, rent and so on each have their own code. It can also be set later under Ledgers &amp; postings &rsaquo; TDS returns.</div>')
     +field('Narration (optional)','<input id="bnNarr" value="'+esc(BN.narr)+'">');
 }
 function bnLinesHtml(){
@@ -1119,12 +1132,13 @@ function bnLinesHtml(){
 function bnSync(){
   if(!BN) return; const g=(id,f)=>{ if($(id)) f(val(id)); };
   g('bnVendor',v=>{BN.vendor=v;}); g('bnInv',v=>{BN.inv=v;}); g('bnDate',v=>{BN.date=v;}); g('bnDue',v=>{BN.due=v;});
-  g('bnBu',v=>{BN.bu=v;}); g('bnSupply',v=>{BN.supply=v||'auto';}); g('bnTds',v=>{BN.tds=v;}); g('bnNarr',v=>{BN.narr=v;});
+  g('bnBu',v=>{BN.bu=v;}); g('bnSupply',v=>{BN.supply=v||'auto';}); g('bnTds',v=>{BN.tds=v;}); g('bnTdsCode',v=>{BN.tdsCode=v;}); g('bnNarr',v=>{BN.narr=v;});
 }
-window.acxBillNew=function(){
+window.acxBillNew=async function(){
   if(!S.coId){ toast('Choose a company first','err'); return; }
   if(!bnVendors().length){ toast('There is no approved vendor yet - a vendor is approved in Purchase first','err'); return; }
-  BN={vendor:'',inv:'',date:today(),due:'',bu:S.buId||'',supply:'auto',tds:'',narr:'',lines:[bnLine()]};
+  await X.tdsCodes();
+  BN={vendor:'',inv:'',date:today(),due:'',bu:S.buId||'',supply:'auto',tds:'',tdsCode:'',narr:'',lines:[bnLine()]};
   openModal('<div class="modal-head"><h3>Enter a bill</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body"><div id="bnHead">'+bnHeadHtml()+'</div><div id="bnLines">'+bnLinesHtml()+'</div>'
     +'<div class="acx-hint">Posting books the bill: the expense (or asset), the GST you can claim, the TDS to deposit and the vendor’s account. It then appears in Bills &amp; on-account, ready to pay. A bill that came from Purchase or Engineering is posted from Ledgers &amp; postings instead.</div></div>'
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="acxBnSave()">Post bill</button></div>','lg');
@@ -1152,7 +1166,7 @@ window.acxBnSave=async function(){
     if(num(l.amt)<=0){ toast('Line '+(i+1)+': enter the amount before GST','err'); return; }
     const cl=l.cost?ledgerById(parseInt(l.cost,10)):null; if(cl&&cl.sub_ledger_type&&!l.csub){ toast('Line '+(i+1)+': choose the cost sub-ledger','err'); return; }
   }
-  const head={company_id:S.coId,business_unit_id:BN.bu||null,vendor_id:parseInt(BN.vendor,10),invoice_no:BN.inv.trim(),invoice_date:BN.date,due_date:BN.due||null,supply:BN.supply,tds_pct:num(BN.tds)||0,narration:BN.narr.trim()||null};
+  const head={company_id:S.coId,business_unit_id:BN.bu||null,vendor_id:parseInt(BN.vendor,10),invoice_no:BN.inv.trim(),invoice_date:BN.date,due_date:BN.due||null,supply:BN.supply,tds_pct:num(BN.tds)||0,tds_code:(num(BN.tds)>0&&BN.tdsCode)?BN.tdsCode:null,narration:BN.narr.trim()||null};
   const lines=used.map(l=>({ledger_id:parseInt(l.ledger,10),amount:r2(num(l.amt)),gst_pct:num(l.gst),cost_ledger_id:l.cost?parseInt(l.cost,10):null,cost_sub_ledger_id:l.csub?parseInt(l.csub,10):null}));
   const {data,error}=await rpc('bill_enter',{p_head:head,p_lines:lines}); if(fail(error,'Could not post the bill')) return;
   closeModal(); toast('Bill posted as '+data.doc_no+' - '+money(data.net)+' to pay','ok'); route();
