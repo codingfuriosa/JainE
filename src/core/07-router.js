@@ -53,7 +53,9 @@ function renderPage(){
   LAST_RENDER_HASH=location.hash;
   try{ bgOnRender(); }catch(_e){}            // background loading - see BG_TARGETS at the top
   let seg=location.hash.replace(/^#\/?/,'').split('/').filter(Boolean);
-  if(seg[0]===PAGE)seg=seg.slice(1);
+  // Legal 2 shares the Legal module's code, which writes its own addresses as #/legal/... (a folder
+  // in the Documents tree, All Documents, a new folder) - read those as Legal 2's own.
+  if(seg[0]===PAGE||(PAGE==='legal2'&&seg[0]==='legal'))seg=seg.slice(1);
   navRecord(PAGE+(seg.length?'/'+seg.join('/'):''));
   setActive(PAGE);
   const v=$('view');
