@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ananta Fill Preview</title>
+<style>
+  :root{--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f8fafc;--card:#fff;--new:#dcfce7;--newInk:#166534;--warn:#fef3c7;--warnInk:#92400e;--old:#f1f5f9}
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#e2e8f0;--muted:#94a3b8;--line:#334155;--bg:#0f172a;--card:#1e293b;--new:#14532d;--newInk:#bbf7d0;--warn:#78350f;--warnInk:#fde68a;--old:#273449}}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 "Segoe UI",system-ui,sans-serif}
+  main{max-width:1400px;margin:0 auto;padding:20px 16px 48px}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:16px;margin:28px 0 8px}
+  p.sub{color:var(--muted);margin:0 0 16px}
+  .key{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;margin-bottom:12px}
+  .key span{padding:2px 8px;border-radius:6px}
+  .wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+  table{border-collapse:collapse;min-width:100%;font-size:12.5px}
+  th,td{border-bottom:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top;white-space:nowrap}
+  th{background:var(--old);position:sticky;top:0;font-weight:600}
+  th small{display:block;color:var(--muted);font-weight:400}
+  td.new{background:var(--new);color:var(--newInk);font-weight:600}
+  td.warn{background:var(--warn);color:var(--warnInk)}
+  td.kept{color:var(--muted)}
+  td.name{font-weight:600;position:sticky;left:0;background:var(--card)}
+  ul{margin:6px 0;padding-left:20px} li{margin:3px 0}
+  .muted{color:var(--muted)}
+</style>
+</head>
+<body><main>
+<h1>Dream Ananta persona sheet: what Booking Form Flow can fill</h1>
+<p class="sub">Preview only. Nothing has been written to the spreadsheet. 8 of the sheet's 29 customers have a Booking Form in JainE, matched by mobile number. Only <b>empty</b> cells are filled; nothing already in the sheet is overwritten.</p>
+<div class="key"><span style="background:var(--new);color:var(--newInk)">Green: would be filled in</span><span style="background:var(--warn);color:var(--warnInk)">Amber: needs a check first</span><span class="muted">Blank: the Booking Form doesn't have it</span></div>
+
+<div class="wrap"><table>
+<thead><tr>
+<th>Sheet row</th><th>Name</th><th>JainE booking</th>
+<th>A<small>Lead id</small></th>
+<th>H<small>age</small></th>
+<th>N / AK<small>Occupation</small></th>
+<th>Z<small>Family Members Name</small></th>
+<th>AA<small>Relation</small></th>
+<th>AF<small>BHK Type</small></th>
+<th>U<small>flat type</small></th>
+<th>AH<small>Car Parking</small></th>
+<th>AI<small>Flat Cost</small></th>
+<th>AM<small>Date of Birth</small></th>
+</tr></thead>
+<tbody>
+<tr><td>24</td><td class="name">Mr. SAPTARSHI PASARI</td><td>#1</td>
+<td class="kept">709145 (kept)</td><td class="new">41</td><td></td>
+<td class="new">Aditi Pasari</td><td class="warn">? (co-applicant)</td>
+<td class="new">3 BHK</td><td class="new">Block D - 3H</td><td></td><td></td><td class="new">21/03/1985</td></tr>
+
+<tr><td>23</td><td class="name">Ms. ANINDITA CHAKRABORTY</td><td>#2</td>
+<td></td><td class="new">31</td><td></td>
+<td class="new">Rajib Upadhyay</td><td class="warn">? (co-applicant)</td>
+<td class="new">3 BHK</td><td class="new">Block D - 5H</td><td></td><td></td><td class="new">19/11/1994</td></tr>
+
+<tr><td>27</td><td class="name">Mr. ARUP BHAWAL</td><td>#3</td>
+<td class="new">709152</td><td class="new">42</td><td class="new">Business</td>
+<td class="new">Anil Bhawal; Kakan Saha</td><td class="new">Father; ? (co-applicant)</td>
+<td class="warn">2 BHK</td><td class="warn">Block D - 8G</td><td class="new">Covered</td><td class="warn">57,95,000</td><td class="new">15/01/1984</td></tr>
+
+<tr><td>25</td><td class="name">Ms. SUPRIYA DAS</td><td>#7</td>
+<td class="kept">705261 (kept)</td><td class="new">41</td><td class="new">Salaried</td>
+<td class="new">Dodul Das</td><td class="new">Husband</td>
+<td class="new">3 BHK</td><td class="new">Block D - 5D</td><td class="new">Covered</td><td class="new">79,35,840</td><td class="new">25/05/1985</td></tr>
+
+<tr><td>26</td><td class="name">Mr. DEBASISH BANERJEE</td><td>#10</td>
+<td class="warn">652536 kept, but the form says 715357</td><td class="new">54</td><td></td>
+<td class="new">Ranjit Banerjee; Mahua Banerjee</td><td class="new">Father; ? (co-applicant)</td>
+<td class="new">4 BHK</td><td class="new">Block E - 4F</td><td class="new">Covered</td><td class="new">1,06,80,250</td><td class="new">28/07/1972</td></tr>
+
+<tr><td>29</td><td class="name">Mr. AMIT GHOSH</td><td>#18</td>
+<td class="kept">716442 (kept)</td><td class="new">50</td><td class="new">Business</td>
+<td class="new">Suvendu Ghosh</td><td class="new">Father</td>
+<td class="new">2 BHK</td><td class="warn">Block D - 8G</td><td class="new">Covered</td><td class="new">57,95,000</td><td class="new">01/01/1976</td></tr>
+
+<tr><td>28</td><td class="name">Mr. TAPODEEP DATTA</td><td>#19</td>
+<td class="kept">716856 (kept)</td><td class="new">35</td><td class="new">Salaried</td>
+<td class="new">Mihir Baran Datta; Sanghita Ghosh</td><td class="new">Father; ? (co-applicant)</td>
+<td class="new">3 BHK</td><td class="new">Block E - 3D</td><td class="new">Covered</td><td class="new">80,53,500</td><td class="new">02/01/1991</td></tr>
+
+<tr><td>30</td><td class="name">Ms. RIYA BOSE</td><td>#31</td>
+<td class="kept">717008 (kept)</td><td class="new">35</td><td class="new">Business</td>
+<td class="new">Rabi Sankar Bose</td><td class="new">Father</td>
+<td class="new">3 BHK</td><td class="new">Block D - 3E</td><td class="new">Covered</td><td class="new">73,45,500</td><td class="new">28/12/1990</td></tr>
+</tbody></table></div>
+
+<h2>What to check first (amber)</h2>
+<ul>
+<li><b>Arup Bhawal (#3) and Amit Ghosh (#18) were both read as flat Block D - 8G</b>, with the same price. Two customers can't hold one flat, so one reading is probably wrong (most likely Arup's). His BHK, flat and cost shouldn't be filled until someone looks at his form.</li>
+<li><b>Debasish Banerjee (#10):</b> the lead id on his Booking Form is 715357, but the sheet has 652536. The sheet's value is kept; someone should confirm which is right.</li>
+<li><b>Co-applicants:</b> the Booking Form gives their names but not how they're related, so "Relation" would be left as "?" for them.</li>
+</ul>
+
+<h2>Other differences found (sheet kept as it is)</h2>
+<ul>
+<li><b>Supriya Das (#7):</b> the form's booking date was read as 18/09/2024; the sheet's 23/09/2026 looks right. That year looks misread.</li>
+<li><b>Anindita Chakraborty (#2):</b> the form's email reads "…moli@gmail.com", the sheet's is "…molia@gmail.com".</li>
+<li><b>Source (column K):</b> the form often says something different (e.g. Riya Bose "Social Media" vs sheet "Agent"). The sheet's value is kept.</li>
+</ul>
+
+<h2>Notes</h2>
+<ul>
+<li><b>Age</b> is worked out from the date of birth, as of 26 Oct 2026.</li>
+<li><b>Flat Cost</b> is the flat's own price before GST and parking. The full price including parking and GST is also available if you'd rather have that.</li>
+<li><b>flat type</b> is shown as the unit (block and flat number). If you meant something else by that column, it can be left blank.</li>
+<li><b>Family Members Name:</b> the father or husband named on the form (S/O, D/O, W/O) plus any co-applicant.</li>
+<li><b>Not available from the Booking Form at all:</b> Religion, Ad Seen Platform, Designation, Company, Office Address, Buyer Purpose, Investment, Budget, Other projects visited, Searching since, Children's ages, Site Visit On, Vehicle, Anniversary, Bank Loan, Bank Holder and UPI App.</li>
+<li><b>The other 21 customers</b> were booked before Booking Form Flow started in JainE (8 Sep), so there's nothing to fill for them. Booking #35 is still being read and may add one more.</li>
+<li>The PAN and Aadhaar numbers on the forms are deliberately <b>not</b> copied, since the sheet has no column for them.</li>
+</ul>
+</main></body></html>

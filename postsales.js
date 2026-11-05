@@ -1050,7 +1050,8 @@ async function psUnlinkedWarn(){
     '<div id="psUnlinked" class="pss-banner" style="border-color:#fecaca;background:#fef2f2;margin-bottom:12px">'
     +'<i class="fa-solid fa-link-slash" style="color:#b91c1c"></i><div class="grow">'
     +'<b>'+rows.length+' flat'+(rows.length===1?' is':'s are')+' being billed in FarVision with no booking here'
-    +' — '+inr(tot)+' is missing from every Post Sales figure, including the MIS.</b><br>'
+    // Not the MIS: since 4 Nov 2026 it reads Farvision's Outstanding file and Receipt Register directly.
+    +' — '+inr(tot)+' is missing from Post Sales bookings, demands and receipts.</b><br>'
     /* THE REASON AND THE FIX, not just the symptom.
 
        import_farvision DOES create bookings from the Booking Register. It finds the Post Sales
@@ -3623,6 +3624,7 @@ async function repRegister(host,stale){
 const MIS_ORDER=[['DREAM GURUKUL','DREAM GURUKUL(DOLTALA MADHYAMGRAM)'],['DREAM WORLD CITY','DREAM JAIN-PAILAN'],['DREAM WORLD CITY','DREAM GATEWAY PAILAN PROJECTS'],['DREAM ONE','DREAM ONE BLK 3 \\ 4'],['DREAM VALLEY','DREAM VALLEY'],['DREAM ECOCITY','DREAM ECOCITY'],['DREAM ONE','DREAM ONE BLK 1 \\ 2'],['DREAM RESIDENCY MANOR','DREAM RESIDENCY MANOR'],['DREAM EXOTICA','DREAM EXOTICA'],['DREAM ECOCITY','DREAM ECOCITY BUNGALOW'],['DREAM ANANTA','DREAM ANANTA'],['DREAM DIAMOND','DREAM DIAMOND.']];
 const misKey=s=>String(s||'').toUpperCase().replace(/[\\\/]/g,' ').replace(/[^A-Z0-9 ]/g,'').replace(/\s+/g,' ').trim();
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MIS_MIN_DUE=5000;   // smaller balances are left out, as in Outstanding Reminders
 async function repMis(host,stale){
   const d=new Date(RP.asOf+'T00:00:00'), y=d.getFullYear(), m=d.getMonth();
   const iso=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
@@ -3632,8 +3634,9 @@ async function repMis(host,stale){
   /* AS PER ERP, FROM THE ERP'S OWN FILES (2 Nov 2026). The figures come from Farvision's two daily
      exports that the Customer Portal imports every morning - nothing typed in, nothing kept by hand:
        Outstanding : the Customer Outstanding Summary imported on or before the as-on date, Net
-                     Outstanding of Active customers, positive balances only (an advance on one booking
-                     never nets off another's dues);
+                     Outstanding of Active customers owing Rs 5,000 or more (5 Nov 2026, Ayush: "Only
+                     Rs 5,000 or more" - the same customers Outstanding Reminders goes to; an advance on
+                     one booking never nets off another's dues);
        Collection  : the Receipt Register - receipts on Active units, not reversed, in each month.
      Checked against the hand-made MIS of 02.11.2026: every project and both totals to the rupee
      (24,79,84,906 and 3,49,31,077). It replaced Post Sales' own ledger as the source, which was short
@@ -3651,7 +3654,7 @@ async function repMis(host,stale){
   const buOf={}; (pj.data||[]).forEach(p=>buOf[p.id]=misKey(p.farvision_project_code||p.name));
   const acc={}; MIS_ORDER.forEach(o=>acc[misKey(o[1])]={o:0,c:0,p:0,n:0});
   ((ob.data&&ob.data.raw_rows)||[]).forEach(r=>{ const a=acc[misKey(r.businessUnit)]; if(!a||r.status!=='Active') return;
-    const net=num(r.netOutstanding); if(net>0){ a.o+=net; a.n++; } });
+    const net=num(r.netOutstanding); if(net>=MIS_MIN_DUE){ a.o+=net; a.n++; } });
   rcs.forEach(r=>{ const a=acc[buOf[r.units&&r.units.project_id]]; if(!a) return;
     if(r.receipt_date>=curFrom) a.c+=num(r.total_amount); else if(r.receipt_date<=prevTo) a.p+=num(r.total_amount); });
   const rows=MIS_ORDER.map(o=>{const a=acc[misKey(o[1])]; return {project:o[0],bu:o[1],o:Math.round(a.o)||null,c:Math.round(a.c)||null,p:Math.round(a.p)||null,n:a.n};});
@@ -3669,7 +3672,7 @@ async function repMis(host,stale){
     +'<div class="card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr style="background:#fef9c3">'+cols.map((c,i)=>'<th style="background:#fef08a;color:#111;white-space:normal;min-width:'+(i<2?140:150)+'px'+(i>1?';text-align:right':'')+'">'+esc(c.h)+'</th>').join('')+'</tr></thead><tbody>'
     +rows.map(r=>'<tr><td><b>'+esc(r.project)+'</b></td><td>'+esc(r.bu)+'</td><td class="pss-num">'+dash(r.o)+'</td><td class="pss-num">'+dash(r.c)+'</td><td class="pss-num">'+dash(r.p)+'</td></tr>').join('')
     +'</tbody><tfoot><tr><td style="font-weight:700">TOTAL</td><td></td><td class="pss-num" style="font-weight:700">'+indN(T('o'))+'</td><td class="pss-num" style="font-weight:700">'+indN(T('c'))+'</td><td class="pss-num" style="font-weight:700">'+indN(T('p'))+'</td></tr></tfoot></table></div></div>'
-    +'<div class="pss-hint" style="margin-top:10px">Outstanding: active customers with net outstanding above zero as on '+dd+'. Collection: receipts on active units, not reversed, dated '+dmy(curFrom)+' to '+dmy(RP.asOf)+' (current) and '+dmy(prevFrom)+' to '+dmy(prevTo)+' (previous). Flat transfers are not counted as collection.</div>';
+    +'<div class="pss-hint" style="margin-top:10px">Outstanding: active customers owing ₹5,000 or more as on '+dd+'. Collection: receipts on active units, not reversed, dated '+dmy(curFrom)+' to '+dmy(RP.asOf)+' (current) and '+dmy(prevFrom)+' to '+dmy(prevTo)+' (previous). Flat transfers are not counted as collection.</div>';
   RP._redraw=null;
 }
 window.RP=RP;
