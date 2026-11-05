@@ -200,7 +200,10 @@ function showHash(h){
 window.showHash=showHash;
 function navTo(path){
   const seg=String(path).split('/');
-  const first=seg[0];
+  let first=seg[0];
+  // On Legal 2, the Legal module's own links (legal/mis/case/..., legal/cat/...) stay on Legal 2.
+  // The sidebar's plain 'legal' still goes to the original Legal page.
+  if(first==='legal'&&seg.length>1&&PAGE==='legal2') first='legal2';
   const hash=seg.length>1?('#/'+seg.slice(1).join('/')):'';
   if(first===PAGE){ showHash(hash||'#/'); return; }
   // Customer sessions (and an admin previewing one) never have a sidebar item for another module

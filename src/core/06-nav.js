@@ -36,6 +36,7 @@ const NAV=[
     {id:'finance',label:'Finance Vault',icon:'fa-indian-rupee-sign'},
     {id:'accounts',label:'Accounts',icon:'fa-calculator'},
     {id:'legal',label:'Legal',icon:'fa-scale-balanced'},
+    {id:'legal2',label:'Legal 2',icon:'fa-scale-balanced'},
     {id:'compliance',label:'Renewals & Compliance',icon:'fa-calendar-check'},
   ]},
   {group:'Growth & Strategy',items:[
@@ -235,14 +236,24 @@ function canWeeklyStatus(){
   const me=String(state.email||'').trim().toLowerCase();
   return WEEKLY_STATUS_PEOPLE.indexOf(me)!==-1;
 }
-function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(it.id==='accounts')?canAccounts():(it.id==='weekly_status')?canWeeklyStatus():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
+/* LEGAL 2 (5 Nov 2026): the reshaped Legal MIS (10b-legal-mis-pages.js) runs on a page of its own,
+   legal2.html, beside the original Legal, for named people only while it is tried out: the
+   Administrator, Dhruti Patel (legal@) and Ankita Bhandari (legal5@). Same arrangement as Inventory:
+   checked before the state.super shortcut, so other super admins do not get it. Both pages read and
+   write the same live cases. To add someone, add an address here. */
+const LEGAL2_PEOPLE=['ayushruia1@gmail.com','legal@thejaingroup.com','legal5@thejaingroup.com'];
+function canLegal2(){
+  if(state.isCustomer||state.impersonating) return false;
+  return LEGAL2_PEOPLE.indexOf(String(state.email||'').trim().toLowerCase())!==-1;
+}
+function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='legal2')?canLegal2():(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(it.id==='accounts')?canAccounts():(it.id==='weekly_status')?canWeeklyStatus():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(hasUsability()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='legal2')return canLegal2();if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';

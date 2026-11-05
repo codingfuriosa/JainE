@@ -1,4 +1,8 @@
 /* ============================ LEGAL MIS ============================ */
+/* LOCAL USES ITS OWN TABLES (29 Oct 2026, as asked). JainE running on a developer's machine reads and
+   writes the *_test copy of every MIS table, so nothing tried there touches the live cases. */
+const MIS_IS_TEST=/^(localhost|127\.0\.0\.1|\[::1\])$|\.localhost$|\.test$/i.test(location.hostname||'');
+function MIST(name){ return MIS_IS_TEST?name+'_test':name; }
 /* Hearing-date window. Filters the table by Next Date and is what the causelist export
    uses — the export refuses to run on "All dates", since a causelist is by definition
    for a period. */
@@ -396,8 +400,8 @@ window.misDocsOpen=async function(caseId){
   let folder=null, files=[];
   await misLoadDocCats();
   try{
-    const {data:fo}=await sb.from('mis_case_folders').select('*').eq('case_id',caseId).maybeSingle(); folder=fo||null;
-    if(folder){ const {data:fi}=await sb.from('mis_case_files').select('*').eq('folder_id',folder.id).order('file_name',{ascending:true}); files=fi||[]; }
+    const {data:fo}=await sb.from(MIST('mis_case_folders')).select('*').eq('case_id',caseId).maybeSingle(); folder=fo||null;
+    if(folder){ const {data:fi}=await sb.from(MIST('mis_case_files')).select('*').eq('folder_id',folder.id).order('file_name',{ascending:true}); files=fi||[]; }
   }catch(e){ toast('Could not load documents: '+((e&&e.message)||e),'err'); }
   const body=document.querySelector('.modal-body'); if(!body)return;
   const title=String(row.cause_title||('Case '+caseId)).replace(/\s+/g,' ').trim();
@@ -467,10 +471,10 @@ window.misDocsPick=async function(input,caseId){
   const prefix='legal/'+seg(cat)+'/'+seg(nm);
   let folderId=null, docFolderId=null;
   try{
-    const {data:ex}=await sb.from('mis_case_folders').select('id,doc_folder_id').eq('case_id',caseId).maybeSingle();
+    const {data:ex}=await sb.from(MIST('mis_case_folders')).select('id,doc_folder_id').eq('case_id',caseId).maybeSingle();
     if(ex){ folderId=ex.id; docFolderId=ex.doc_folder_id||null; }
     else{
-      const {data:ins,error}=await sb.from('mis_case_folders')
+      const {data:ins,error}=await sb.from(MIST('mis_case_folders'))
         .insert({case_id:caseId,sub_category:cat,folder_name:nm,storage_prefix:prefix,created_by:state.email})
         .select('id').single();
       if(error) throw error; folderId=ins.id;
@@ -492,7 +496,7 @@ window.misDocsPick=async function(input,caseId){
       const rootId=await findOrAdd('Litigation',null);
       const catId=await findOrAdd(cat,rootId);
       docFolderId=await findOrAdd(nm,catId);
-      await sb.from('mis_case_folders').update({doc_folder_id:docFolderId}).eq('id',folderId);
+      await sb.from(MIST('mis_case_folders')).update({doc_folder_id:docFolderId}).eq('id',folderId);
     }
     let done=0;
     for(const f of picked){
@@ -501,7 +505,7 @@ window.misDocsPick=async function(input,caseId){
       const {data,error}=await uploadFileToS3(key,f);
       if(error) throw error;
       const storedPath=String(data.path||('s3:'+key));
-      await sb.from('mis_case_files').insert({folder_id:folderId,file_name:f.name,
+      await sb.from(MIST('mis_case_files')).insert({folder_id:folderId,file_name:f.name,
         storage_key:storedPath.replace(/^s3:/,''),store:'s3',
         size_bytes:f.size,content_type:f.type||'application/octet-stream',
         uploaded_at:new Date().toISOString(),created_by:state.email});
@@ -559,20 +563,20 @@ window.misSwipeToggle=async function(id){
       +'". Record its Action Execution Date first, then complete the case.','warn');
     return;
   }
-  const {error}=await sb.from('mis_cases').update({completed_at:nowCompleted?todayStr():null}).eq('id',id);
+  const {error}=await sb.from(MIST('mis_cases')).update({completed_at:nowCompleted?todayStr():null}).eq('id',id);
   if(error){toast('Could not update: '+error.message,'err');return;}
   row.completed_at=nowCompleted?todayStr():null;
   toast(nowCompleted?'Case completed — off the Calendar and Scoreboard':'Case reopened','ok');
   // Completing changes whether the row is pinned and scored, so re-render the list.
   legalMIS();
 };
-async function legalMIS(){
+async function legalMISOld(){
   setCrumb(['Legal','MIS']);
   const hAct=$('legalHeadActions');if(hAct)hAct.innerHTML='';
   const body=$('legalBody');if(!body)return;
   loader(body);
   let rows=[];
-  try{const {data,error}=await sb.from('mis_cases').select('*').order('id',{ascending:true});if(error)throw error;rows=data||[];}catch(e){toast((e&&e.message)||'Could not load MIS cases','err');}
+  try{const {data,error}=await sb.from(MIST('mis_cases')).select('*').order('id',{ascending:true});if(error)throw error;rows=data||[];}catch(e){toast((e&&e.message)||'Could not load MIS cases','err');}
   window._misRows=rows;
   window._misSel=new Set();
   // Anything this account exported and never finished answering nudges right here, not only
@@ -596,8 +600,8 @@ async function legalMIS(){
        folders, byFolder is empty, every lookup misses and the counts stay empty exactly as before,
        so the extra read cannot change what is shown. */
     const [foRes,fiRes]=await Promise.all([
-      sb.from('mis_case_folders').select('id,case_id,doc_folder_id'),
-      sb.from('mis_case_files').select('folder_id')
+      sb.from(MIST('mis_case_folders')).select('id,case_id,doc_folder_id'),
+      sb.from(MIST('mis_case_files')).select('folder_id')
     ]);
     const fo=foRes&&foRes.data;
     const byFolder={}; (fo||[]).forEach(function(f){ byFolder[f.id]=f.case_id; if(f.doc_folder_id) window._misDocFolders[f.case_id]=f.doc_folder_id; });
@@ -980,7 +984,7 @@ async function legalActions(){
     rows=data||[];
   }catch(e){}
   let cases=[];
-  try{ const {data}=await sb.from('mis_cases').select('id,cause_title,case_no,case_type'); cases=data||[]; }catch(e){}
+  try{ const {data}=await sb.from(MIST('mis_cases')).select('id,cause_title,case_no,case_type'); cases=data||[]; }catch(e){}
   const byCase={}; cases.forEach(c=>{byCase[c.id]=c;});
   const nameOfCase=id=>{const c=byCase[id];if(!c)return '—';return (c.cause_title||c.case_no||('Case '+id));};
   window._misActionRows=rows.map(r=>Object.assign({},r,{_case:nameOfCase(r.case_id)}));
@@ -1064,14 +1068,14 @@ async function legalCauselistReviews(){
   try{ await getPeople(); }catch(e){}
   try{ await clrevLoadLegal(); }catch(e){}   // populates window._clrevLegal for the inline person picker below
   let logs=[], cases=[];
-  try{ const {data}=await sb.from('mis_causelist_review_log').select('*').order('created_at',{ascending:true}); logs=data||[]; }catch(e){}
+  try{ const {data}=await sb.from(MIST('mis_causelist_review_log')).select('*').order('created_at',{ascending:true}); logs=data||[]; }catch(e){}
   const ids=Array.from(new Set(logs.map(function(l){return l.case_id;})));
   if(ids.length){
     try{
       // The date fields are needed for misHearingIso() when an inline answer creates a task -
       // the narrower column set used before was fine for display but left the task description's
       // hearing date blank.
-      const {data}=await sb.from('mis_cases').select('id,case_no,case_type,cause_title,court,'
+      const {data}=await sb.from(MIST('mis_cases')).select('id,case_no,case_type,cause_title,court,'
         +'causelist_pending_by,causelist_reviewed_at,causelist_action_needed,causelist_reviewed_by,'
         +'case_next_date_iso,case_next_date,next_date_iso,next_date').in('id',ids);
       cases=data||[];
@@ -1451,7 +1455,7 @@ async function legalScoreboard(which){
   if(sbTab==='notice') legalScoreboardNotice(); else legalScoreboardMIS();
 }
 
-async function legalScoreboardMIS(){
+async function legalScoreboardMISOld(){
   const body=$('legalSbHost');if(!body)return;
   if(!SCOREBOARD_LIVE){
     body.innerHTML='<div class="card card-pad" style="max-width:620px;margin:26px auto;text-align:center">'
@@ -1468,7 +1472,7 @@ async function legalScoreboardMIS(){
   loader(body);
   let cases=[], actions=[];
   try{
-    const {data:cd,error:ce}=await sb.from('mis_cases').select('id,case_type,cause_title,case_no,priority,completed_at'); if(ce)throw ce; cases=cd||[];
+    const {data:cd,error:ce}=await sb.from(MIST('mis_cases')).select('id,case_type,cause_title,case_no,priority,completed_at'); if(ce)throw ce; cases=cd||[];
     const {data:ad}=await sb.from('mis_actions').select('case_id,action_date_iso,executed_date_iso'); actions=ad||[];
   }catch(e){toast((e&&e.message)||'Could not load Scoreboard','err');}
   // Every case with actions is scored (completed cases stay on the Scoreboard, keeping their score);
@@ -1913,16 +1917,18 @@ function misBuildCauselist(){
    +'<th>SL NO.</th><th>CASE TYPE</th><th>CASE DETAILS</th><th>CASE NO.</th><th>DATE</th>'
    +'<th>Advocate incharge</th><th>Court Name</th><th>STATUS</th><th>ACTION NEEDED</th>'
    +'</tr></thead><tbody>'
+   // data-id / data-f name each cell's case and field, so an edit made in the causelist editor can be
+   // written back to the MIS (Legal MIS, 2 Nov 2026); a plain export ignores them.
    +rows.map(function(r,i){
-      return '<tr><td class="sl">'+(i+1)+'</td>'
-        +'<td>'+cell(r.case_type)+'</td>'
-        +'<td>'+cell(r.cause_title)+'</td>'
-        +'<td>'+cell(r.case_no)+'</td>'
-        +'<td class="dt">'+esc(dmy(misHearingIso(r)))+'</td>'
-        +'<td>'+cell(r.advocate_incharge)+'</td>'
-        +'<td>'+cell(r.court)+'</td>'
-        +'<td>'+cell(r.status)+'</td>'
-        +'<td>'+cell(r.action_needed)+'</td></tr>';
+      return '<tr data-id="'+r.id+'"><td class="sl">'+(i+1)+'</td>'
+        +'<td data-f="case_type">'+cell(r.case_type)+'</td>'
+        +'<td data-f="cause_title">'+cell(r.cause_title)+'</td>'
+        +'<td data-f="case_no">'+cell(r.case_no)+'</td>'
+        +'<td class="dt" data-f="date">'+esc(dmy(misHearingIso(r)))+'</td>'
+        +'<td data-f="advocate_incharge">'+cell(r.advocate_incharge)+'</td>'
+        +'<td data-f="court">'+cell(r.court)+'</td>'
+        +'<td data-f="status">'+cell(r.status)+'</td>'
+        +'<td data-f="action">'+cell(r.action_needed)+'</td></tr>';
     }).join('')
    +'</tbody></table>'
    +'</div></body></html>';
@@ -2009,9 +2015,9 @@ async function clrevMaybeOpen(rows){
   // downloaded it, not whoever exported it first.
   const ids=pending.map(function(r){return r.id;});
   try{
-    await sb.from('mis_cases').update({causelist_pending_by:state.email}).in('id',ids);
+    await sb.from(MIST('mis_cases')).update({causelist_pending_by:state.email}).in('id',ids);
     pending.forEach(function(r){ r.causelist_pending_by=state.email; });
-    await sb.from('mis_causelist_review_log').insert(ids.map(function(id){
+    await sb.from(MIST('mis_causelist_review_log')).insert(ids.map(function(id){
       return {case_id:id, event:'exported', actor:state.email};
     }));
   }catch(e){}
@@ -2028,7 +2034,7 @@ async function clrevCheckPending(){
   if(!state.email) return;
   let rows=[];
   try{
-    const {data,error}=await sb.from('mis_cases').select('*').eq('causelist_pending_by',state.email);
+    const {data,error}=await sb.from(MIST('mis_cases')).select('*').eq('causelist_pending_by',state.email);
     if(error) throw error;
     rows=(data||[]).filter(function(r){ return misHearingIso(r) && !clrevAlreadyActioned(r); });
   }catch(e){ return; }
@@ -2140,7 +2146,7 @@ window.clrevClose=function(){
     return !(r.needed===false || (r.needed===true && r.due && r.person));
   });
   if(unanswered.length){
-    sb.from('mis_causelist_review_log').insert(unanswered.map(function(r){
+    sb.from(MIST('mis_causelist_review_log')).insert(unanswered.map(function(r){
       return {case_id:r.id, event:'closed_without_answering', actor:state.email};
     })).then(function(){},function(){});
   }
@@ -2195,14 +2201,14 @@ async function clrevSaveOneRow(r, opts){
     const {error:de2}=await sb.schema('acc').from('ptasks').delete().eq('id',prevTaskId);
     if(de2) throw de2;
   }
-  const {error:ue}=await sb.from('mis_cases').update({
+  const {error:ue}=await sb.from(MIST('mis_cases')).update({
     causelist_reviewed_at:new Date().toISOString(),
     causelist_action_needed:r.needed,
     causelist_reviewed_by:state.email,
     causelist_pending_by:null
   }).eq('id',r.id);
   if(ue) throw ue;
-  try{ await sb.from('mis_causelist_review_log').insert({case_id:r.id, event:opts.isEdit?'edited':'answered', actor:state.email,
+  try{ await sb.from(MIST('mis_causelist_review_log')).insert({case_id:r.id, event:opts.isEdit?'edited':'answered', actor:state.email,
     detail:{needed:r.needed, due:r.needed?(r.due||null):null, person:r.needed?(r.person||null):null, task_id:taskId}}); }catch(_le){}
   // Keep the in-memory MIS table in sync too, so re-exporting an overlapping range later in this
   // same session doesn't ask about this case again without a full reload.
@@ -2595,7 +2601,7 @@ window.misActionSave=async function(id){
     // next_date_recorded_at would mark the case handled and make it look completed.
     if(dIso && String(r.next_date||'')!==misDmy(dIso)) upd.action_recorded_at=misIsoStr(new Date());
   }
-  const {error}=await sb.from('mis_cases').update(upd).eq('id',id);
+  const {error}=await sb.from(MIST('mis_cases')).update(upd).eq('id',id);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
   /* Only when something was actually typed. On the case form the remarks box is saved as part of
      add/edit case and is not a separate act; here it is the reason the modal was opened. */
@@ -2646,7 +2652,7 @@ window.misSave=async function(){
   if(misActionDateMissing(row)) return;
   const btn=$('misSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   row.created_by=state.email;
-  const {error}=await sb.from('mis_cases').insert(row);
+  const {error}=await sb.from(MIST('mis_cases')).insert(row);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
   closeModal();toast('Case added','ok');legalMIS();
 };
@@ -2678,7 +2684,7 @@ window.misUpdate=async function(id){
   const row=misCollect(window._misEditOrig);
   if(misActionDateMissing(row)) return;
   const btn=$('misSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {error}=await sb.from('mis_cases').update(row).eq('id',id);
+  const {error}=await sb.from(MIST('mis_cases')).update(row).eq('id',id);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Update';}return;}
   closeModal();toast('Updated','ok');legalMIS();
 };
@@ -2690,7 +2696,7 @@ window.misDeleteSel=async function(){
   // the rows are gone for good).
   const gone=(window._misRows||[]).filter(function(r){ return sel.indexOf(r.id)!==-1; });
   if(!await confirmDialog('Delete '+sel.length+' case'+(sel.length>1?'s':'')+'?'))return;
-  const {error}=await sb.from('mis_cases').delete().in('id',sel);
+  const {error}=await sb.from(MIST('mis_cases')).delete().in('id',sel);
   if(error){toast(error.message,'err');return;}
   toast(sel.length>1?(sel.length+' cases deleted'):'Case deleted','ok');
   /* Logged here rather than through USAGE_MAP for the reason the causelist is: the wrapper fires
