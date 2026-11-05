@@ -30,7 +30,8 @@ import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { handleBookingMail } from "./booking-mail.ts";
 import { bounceCheck } from "./booking-bounce.ts";
 import { postsalesMailSync } from "./postsales-mail.ts";
-import { reminderSend } from "./postsales-reminder.ts";
+import { reminderSend, reminderSendCustomers } from "./postsales-reminder.ts";
+import { legalHearingOverdue } from "./legal-overdue.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -181,6 +182,16 @@ Deno.serve(async (req: Request) => {
   // ------------------------------------- outstanding reminder: test customers only, from Ayush's account
   if (action === "reminder_send") {
     try { return await reminderSend(req, body, db, j, SB, createClient); }
+    catch (e) { return j({ error: "Sending failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
+  }
+  // ------------------------------------- Legal MIS: hearing dates 7+ days behind, emailed daily (the job only)
+  if (action === "legal_hearing_overdue") {
+    try { return await legalHearingOverdue(req, db, j); }
+    catch (e) { return j({ error: "Legal reminder failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
+  }
+  // ------------------------------------- outstanding reminders to customers (Post Sales module, switched)
+  if (action === "reminder_send_customers") {
+    try { return await reminderSendCustomers(req, body, db, j, SB, createClient); }
     catch (e) { return j({ error: "Sending failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
   }
 

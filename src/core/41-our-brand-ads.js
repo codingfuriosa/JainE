@@ -17,7 +17,7 @@
 
    One renderer, two platforms: obAdsView(host, 'meta' | 'google'). */
 const OB_ADS_WORD={
-  meta:{name:'Facebook',res:'Leads',per:'Cost per lead',one:'lead',src:'Meta Ads Manager',icon:'fa-brands fa-facebook',color:'#1877f2'},
+  meta:{name:'Facebook',res:'Results',per:'Cost per result',one:'result',src:'Meta Ads Manager',icon:'fa-brands fa-facebook',color:'#1877f2'},
   google:{name:'Google',res:'Conversions',per:'Cost per conversion',one:'conversion',src:'Google Ads',icon:'fa-brands fa-google',color:'#ea4335'}
 };
 const OB_PERIODS=[['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_30d','Last 30 days'],['this_month','This month'],['last_month','Last month'],['last_90d','Last 90 days'],['custom','Custom']];
@@ -61,23 +61,41 @@ const OB_CSS='<style>'
   +'.ob-kpi .l{font-size:12px;color:var(--slate);font-weight:600}.ob-kpi .v{font-size:24px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums}'
   +'.ob-chg{font-size:11.5px;font-weight:600;margin-top:3px}.ob-good{color:#15803d}.ob-bad{color:#b91c1c}.ob-flat{color:var(--slate);font-weight:500}'
   +'.ob-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}'
-  +'.ob-ads{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}'
+  // Every column but the name is centred, header and figures alike (the shared .tbl rule left-aligns
+  // headers, which put them out of line with right-aligned figures).
+  +'#obBody .tbl th,#obBody .tbl td{text-align:center;vertical-align:middle}#obBody .tbl th:first-child,#obBody .tbl td:first-child{text-align:left}'
+  // Ads four to a row (two on a phone), so Show more always fills whole rows - see obAdStep.
+  +'.ob-ads{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}@media(max-width:900px){.ob-ads{grid-template-columns:repeat(2,minmax(0,1fr))}}'
   +'.ob-ad{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--bg-card);display:flex;flex-direction:column}'
-  +'.ob-ad .pic{height:150px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden}.ob-ad .pic img{width:100%;height:100%;object-fit:cover}'
-  +'.ob-ad .txt{padding:12px;font-size:13px;line-height:1.45;color:#1a0dab;background:#fff;height:150px;overflow:hidden;box-sizing:border-box;border-bottom:1px solid var(--line)}'
+  +'.ob-ad .pic{height:190px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden}.ob-ad .pic img{width:100%;height:100%;object-fit:cover}'
+  +'.ob-ad .txt{padding:14px;font-size:13px;line-height:1.45;background:#fff;height:190px;overflow:hidden;box-sizing:border-box;border-bottom:1px solid var(--line)}'
+  +'.ob-ad .txt .h{color:#1a0dab;font-size:14.5px;font-weight:600}.ob-ad .txt .d{color:#4d5156;margin-top:6px}.ob-ad .txt .sp{font-size:11px;font-weight:700;color:#202124;margin-bottom:4px}'
   +'.ob-ad .m{padding:10px 12px;font-size:12px;display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}.ob-ad .m b{font-variant-numeric:tabular-nums}'
   +'.tbl tr.ob-sel td{background:rgba(3,105,161,.08)}'
   +'</style>';
 
+// Every campaign and ad name of the platform. The server hands back at most 1000 rows a request
+// and Google alone has over 2,000 ads, so it is read a page at a time - otherwise the names past
+// the first 1000 showed as bare numbers.
+async function obEntities(platform){
+  const out=[];
+  for(let from=0;;from+=1000){
+    const {data,error}=await sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,daily_budget,lifetime_budget,thumbnail,body').eq('platform',platform).order('kind').order('id').range(from,from+999);
+    if(error||!data) break;
+    out.push.apply(out,data);
+    if(data.length<1000) break;
+  }
+  return out;
+}
 async function obAdsView(host,platform){
   const W=OB_ADS_WORD[platform];
   host.innerHTML=OB_CSS+'<div id="obHead"></div><div id="obBody"><div class="loader"><div class="spin"></div></div></div>';
   const [acc,ent,log]=await Promise.all([
     sb.schema('camp').from('ads_accounts').select('*').eq('platform',platform).eq('include',true).order('name'),
-    sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,daily_budget,lifetime_budget,thumbnail,body').eq('platform',platform),
+    obEntities(platform),
     sb.schema('camp').from('ads_sync_log').select('ok,message,finished_at').eq('platform',platform).not('finished_at','is',null).order('started_at',{ascending:false}).limit(1)
   ]);
-  window._obAcc=acc.data||[]; window._obEnt={}; (ent.data||[]).forEach(function(x){ window._obEnt[x.kind+':'+x.id]=x; });
+  window._obAcc=acc.data||[]; window._obEnt={}; ent.forEach(function(x){ window._obEnt[x.kind+':'+x.id]=x; });
   window._obPlat=platform; window._obLog=(log.data||[])[0]||null;
   if(OB_P.acct!=='all'&&!window._obAcc.some(function(a){ return a.account_id===OB_P.acct; })) OB_P.acct='all';
   await obAdsLoad();
@@ -89,7 +107,7 @@ async function obAdsLoad(){
     rpc('ads_campaign_totals',{p_platform:platform,p_from:r.s,p_to:r.e}),
     rpc('ads_campaign_totals',{p_platform:platform,p_from:r.ps,p_to:r.pe}),
     rpc('ads_by_day',{p_platform:platform,p_from:r.s,p_to:r.e}),
-    rpc('ads_ad_totals',{p_platform:platform,p_from:r.s,p_to:r.e,p_limit:200})
+    rpc('ads_ad_totals',{p_platform:platform,p_from:r.s,p_to:r.e,p_limit:1000})
   ]);
   const err=cur.error||prev.error||days.error||ads.error;
   if(err){ $('obBody').innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(err.message)+'</div>'; return; }
@@ -107,18 +125,25 @@ function obAdsPaint(){
   // ---- header: period picker, account picker, freshness
   const lg=window._obLog, lastOk=accs.reduce(function(m,a){ return a.last_ok_at&&(!m||a.last_ok_at>m)?a.last_ok_at:m; },null);
   const errs=accs.filter(function(a){ return a.last_error; });
-  let fresh='<span style="font-size:12.5px;color:var(--slate)"><i class="fa-solid fa-clock-rotate-left"></i> '
-    +(lastOk?'Straight from '+W.src+', updated '+ciAgo(lastOk)+' (every 3 hours)':'Not read from '+W.src+' yet')+'</span>';
   let warn='';
   if(!lastOk&&lg&&!lg.ok) warn=obSetupNote(platform,lg.message||'');
-  else if(errs.length) warn='<div class="card card-pad" style="border-color:#fcd34d;background:#fffbeb;color:#92400e;font-size:12.5px;margin-bottom:14px"><i class="fa-solid fa-triangle-exclamation"></i> Could not be read on the last run, so their figures may be behind: '
-    +errs.map(function(a){ return '<b>'+esc(a.name||a.account_id)+'</b> ('+esc(String(a.last_error).slice(0,140))+')'; }).join('; ')+'</div>';
+  else if(errs.length){
+    // Never read = no figures at all for that account; read before = figures up to that time.
+    const never=errs.filter(function(a){ return !a.last_ok_at; }), behind=errs.filter(function(a){ return a.last_ok_at; });
+    const nm=function(l){ return l.map(function(a){ return '<b>'+esc(a.project||a.name||a.account_id)+'</b>'; }).join(', '); };
+    const noAccess=platform==='meta'&&errs.every(function(a){ return /\(#200\)|ads_read|ads_management/i.test(a.last_error); });
+    warn='<div class="card card-pad" style="border-color:#fcd34d;background:#fffbeb;color:#92400e;font-size:13px;line-height:1.55;margin-bottom:14px"><i class="fa-solid fa-triangle-exclamation"></i> '
+      +(never.length?'<b>Not included below</b> - '+(noAccess?'Facebook has not given JainE access to':'could not be read yet:')+' '+nm(never)+'. Their spend and '+W.res.toLowerCase()+' are missing from every figure on this page.':'')
+      +(behind.length?(never.length?'<br>':'')+'Could not be read on the last run, so their figures stop at the last good read: '+nm(behind)+'.':'')
+      +(noAccess?'<div style="margin-top:6px;font-size:12px">To fix (a Meta Business Manager admin): Business Settings → Users → System users → the JainE system user → Assign assets → Ad accounts → tick these accounts with <b>View performance</b>. They are read within 3 hours after that.</div>'
+        :'<div style="margin-top:6px;font-size:12px">'+errs.map(function(a){ return esc(a.project||a.name)+': '+esc(String(a.last_error).slice(0,140)); }).join('<br>')+'</div>')
+      +'</div>';
+  }
   $('obHead').innerHTML='<div class="ob-bar">'
       +compSelHtml('obPer',OB_PERIODS,OB_P.period,"OB_P.period=this.value;OB_P.showAds=12;obAdsLoad()")
       +(OB_P.period==='custom'?'<input type="date" value="'+esc(r.s)+'" onchange="OB_P.from=this.value;obAdsLoad()"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(r.e)+'" onchange="OB_P.to=this.value;obAdsLoad()">':'')
       +(accs.length>1?compSelHtml('obAcc',[['all','All '+(platform==='meta'?'projects':'accounts')]].concat(accs.map(function(a){ return [a.account_id,a.project||a.name||a.account_id]; })),OB_P.acct,"OB_P.acct=this.value;OB_P.showAds=12;obAdsPaint()"):'')
       +'<span style="font-size:12.5px;color:var(--slate)">'+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+' · compared with the '+r.n+' days before</span>'
-      +'<span style="margin-left:auto">'+fresh+'</span>'
     +'</div>'+warn;
   if(!lastOk&&!(window._obCur||[]).length){ $('obBody').innerHTML=''; return; }
   // ---- KPIs
@@ -162,16 +187,19 @@ function obAdsPaint(){
     html+='<div style="font-weight:700;font-size:13.5px;margin:4px 0 10px">Ads by spend <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' that ran in this period</span></div><div class="ob-ads">'
       +shown.map(function(a){
         const e=E['ad:'+a.ad_id]||{};
+        // A picture when the ad has one; otherwise its words, set out the way the ad itself reads
+        // (Google: headlines, then the description).
+        const words=String(e.body||e.name||('Ad '+a.ad_id)).split('\n');
         const pic=e.thumbnail?'<div class="pic"><img src="'+esc(e.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" alt=""></div>'
-          :'<div class="txt">'+esc(e.body||e.name||('Ad '+a.ad_id))+'</div>';
+          :'<div class="txt">'+(platform==='google'?'<div class="sp">Sponsored</div>':'')+'<div class="h">'+esc(words[0])+'</div>'+(words[1]?'<div class="d">'+esc(words.slice(1).join(' '))+'</div>':'')+'</div>';
         return '<div class="ob-ad">'+pic+'<div style="padding:9px 12px 0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(e.name||'')+'">'+esc(e.name||('Ad '+a.ad_id))+'</div>'
           +'<div style="padding:0 12px;font-size:11.5px;color:var(--slate)">'+esc(aName[a.account_id]||'')+' · '+st(e.status)+'</div>'
           +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+W.res+'</span><b>'+obNum(a.results,platform==='google'?1:0)+'</b><span>'+W.per+'</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b></div></div>';
       }).join('')+'</div>'
-      +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="OB_P.showAds+=24;obAdsPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
+      +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="OB_P.showAds+='+obAdStep(ads.length)+';obAdsPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
   }
   html+='<div style="font-size:11.5px;color:var(--slate);margin:16px 0 4px">'+(platform==='meta'
-      ?'Figures are Meta\'s own, using each account\'s attribution setting - the same as Ads Manager. Leads = Meta\'s "Leads" count. Reach is not shown: it counts unique people, so it cannot be added across days or campaigns.'
+      ?'Figures are Meta\'s own, using each account\'s attribution setting - the same as Ads Manager. Results = Ads Manager\'s "Results" column for each campaign - leads, WhatsApp chats started, ThruPlays or engagements, whatever the campaign is set to get - so totals add different kinds together, as Ads Manager\'s do. Reach is not shown: it counts unique people, so it cannot be added across days or campaigns.'
       :'Figures are Google Ads\' own. Conversions = Google\'s "Conversions" column (it can include fractions and every conversion action set as primary). Google keeps adding late conversions to recent days for up to 30 days, so those can still rise.')+'</div>';
   $('obBody').innerHTML=html;
   // chart: day-by-day for the chosen account, or all
@@ -180,6 +208,9 @@ function obAdsPaint(){
   if(OB_P.acct!=='all') days=null;   // per-account days come from the campaign rows below
   obDrawChart(c,platform,r,days);
 }
+// How many more ads one Show more adds: whatever remains after the first 12, split over three
+// clicks and rounded up to whole rows of four - so every ad is on screen by the third click.
+function obAdStep(total){ return Math.max(4,Math.ceil(Math.ceil(Math.max(0,total-12)/3)/4)*4); }
 async function obDrawChart(c,platform,r,days){
   const W=OB_ADS_WORD[platform];
   if(!days){

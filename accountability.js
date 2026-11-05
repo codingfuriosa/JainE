@@ -4435,6 +4435,12 @@
                +steps.map(function(s){
                    return '<option value="'+s.seq+'">'+esc2(s.seq+' - '+(s.title||('Step '+s.seq))
                           +' ('+wfDefStepWho(s)+')')+'</option>'; }).join('')
+               /* Finished bills too (5 Nov 2026: "the Completed instances are not visible" to
+                  Tanushree Chatterjee). A finished bill is never overdue, so the overdue list alone
+                  never showed one - these two let a coordinator look them up without losing the
+                  overdue list, which stays the first choice. */
+               +'<option value="done">Completed bills</option>'
+               +'<option value="all">All bills</option>'
                +'</select></div>')
             : ('<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i>'
                +'<input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Vendor, Bill No., Wheredoc Id, anyone it is with, or amount…':'Search by No., anyone it is with, amount, description or anything it was raised with…')+'" oninput="wfInstFilter()"></div>'))
@@ -4960,7 +4966,9 @@
       /* A chaser sees only what has slipped, and only at the step they picked. Applied before
          anything else - the rest of the filtering is about finding a particular bill, which is not
          the question being asked here. */
-      if(chase){
+      if(chase && pickSeq==='done'){
+        if(r.getAttribute('data-done')!=='1') ok=false;
+      }else if(chase && pickSeq!=='all'){
         if(r.getAttribute('data-late')!=='1') ok=false;
         if(ok && pickSeq && String(r.getAttribute('data-curstep')||'')!==pickSeq) ok=false;
       }

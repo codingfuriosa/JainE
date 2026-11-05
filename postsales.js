@@ -3629,77 +3629,42 @@ async function repMis(host,stale){
   const curFrom=iso(new Date(y,m,1)), prevFrom=iso(new Date(y,m-1,1)), prevTo=iso(new Date(y,m,0));
   const lbl=(yy,mm)=>MON[mm]+"'"+String(yy).slice(2), curL=lbl(y,m), pd=new Date(y,m-1,1), prevL=lbl(pd.getFullYear(),pd.getMonth());
   const dd=String(d.getDate()).padStart(2,'0')+'.'+String(m+1).padStart(2,'0')+'.'+y;
-  /* THE FIGURE IS JAIN-E'S OWN, AND FARVISION'S COPY IS USED TO CHECK IT.
-
-     Both live in Supabase and they are NOT in conflict: on 28.09.2026, of the 156 units present
-     in both, 152 agreed to the rupee. Post Sales covers 297 active bookings against the
-     snapshot's 158 units, so it is the wider of the two, and it is the ledger JAIN-E actually
-     keeps - invoices raised and receipts recorded here. That is what this report publishes.
-
-     cust.outstanding_snapshot - FarVision's own Customer Outstanding export, imported through
-     Customer Portal - is read alongside it purely as a second opinion, per project.
-
-     WHAT NEITHER OF THEM CAN DO IS INVENT DATA THAT WAS NEVER IMPORTED. For 28.09.2026 the two
-     Supabase sources said 17.17 and 17.27 crore; the sheet built from live FarVision that morning
-     said 24.50. They agree with each other and are both about 7.3 crore short of the ERP. That is
-     an import gap, not an arithmetic one, and no choice of table here closes it - which is why
-     the banner below reports it rather than papering over it. */
-  const [{data:out,error},{data:fv},rcs]=await Promise.all([
-    PS().rpc('report_outstanding',{p_project_id:null,p_as_of:RP.asOf}),
-    PS().rpc('mis_outstanding',{p_as_of:RP.asOf}),
-    allRows(()=>PS().from('receipts').select('project_id,receipt_date,amount,mode,bookings!inner(status)').eq('status','active').neq('mode','transfer').eq('bookings.status','active').gte('receipt_date',prevFrom).lte('receipt_date',RP.asOf))]);
+  /* AS PER ERP, FROM THE ERP'S OWN FILES (2 Nov 2026). The figures come from Farvision's two daily
+     exports that the Customer Portal imports every morning - nothing typed in, nothing kept by hand:
+       Outstanding : the Customer Outstanding Summary imported on or before the as-on date, Net
+                     Outstanding of Active customers, positive balances only (an advance on one booking
+                     never nets off another's dues);
+       Collection  : the Receipt Register - receipts on Active units, not reversed, in each month.
+     Checked against the hand-made MIS of 02.11.2026: every project and both totals to the rupee
+     (24,79,84,906 and 3,49,31,077). It replaced Post Sales' own ledger as the source, which was short
+     of Farvision by crores because bookings, demands and receipts reach Post Sales only partly.
+     Only the twelve business units of the circulated sheet are shown, in its order. */
+  const C=sb.schema('cust');
+  const [ob,pj,rcs]=await Promise.all([
+    C.from('import_batches').select('id,imported_at,raw_rows').eq('import_type','outstanding').eq('status','completed')
+      .lt('imported_at',RP.asOf+'T23:59:59+05:30').order('imported_at',{ascending:false}).limit(1).maybeSingle(),
+    C.from('projects').select('id,name,farvision_project_code').is('deleted_at',null),
+    allRows(()=>C.from('money_receipts').select('receipt_date,total_amount,units!inner(project_id)').eq('is_current',true).is('deleted_at',null)
+      .or('is_reversed.is.null,is_reversed.eq.false').eq('unit_status_at_receipt','Active').gte('receipt_date',prevFrom).lte('receipt_date',RP.asOf))]);
   if(stale()) return;
-  if(error){ host.innerHTML='<div class="empty"><div>'+esc(error.message)+'</div></div>'; return; }
-  const bks=await allRows(()=>PS().from('bookings').select('id,project_id,status'));
-  if(stale()) return;
-  const bk={}; bks.forEach(b=>bk[b.id]=b);
-  const acc={}; S.projects.forEach(p=>acc[p.id]={o:0,c:0,p:0,n:0,fv:null,fvUnits:0,snap:null});
-  (out||[]).forEach(r=>{const b=bk[r.booking_id]; if(!b||b.status!=='active'||!acc[b.project_id]) return;
-    const net=num(r.invoiced)-num(r.received); if(net>0.5){acc[b.project_id].o+=net;acc[b.project_id].n++;}});
-  (fv||[]).forEach(r=>{const a=acc[r.project_id]; if(!a) return;
-    a.fv=num(r.outstanding); a.fvUnits=Number(r.units)||0; a.snap=r.snapshot_date;});
-  rcs.forEach(r=>{const a=acc[r.project_id]; if(!a) return; if(r.receipt_date>=curFrom) a.c+=num(r.amount); else if(r.receipt_date<=prevTo) a.p+=num(r.amount);});
-  const byKey={}; S.projects.forEach(p=>byKey[misKey(p.name)]=p);
-  const seen=new Set();
-  const rows=MIS_ORDER.map(o=>{const p=byKey[misKey(o[1])]; if(p) seen.add(p.id); const a=p?acc[p.id]:null; return {project:o[0],bu:o[1],o:a?Math.round(a.o):null,c:a?Math.round(a.c):null,p:a?Math.round(a.p):null,n:a?a.n:0};})
-    .concat(S.projects.filter(p=>!seen.has(p.id)).map(p=>{const a=acc[p.id];return {project:p.name,bu:p.name,o:Math.round(a.o),c:Math.round(a.c),p:Math.round(a.p),n:a.n};}));
+  if(ob.error||pj.error){ host.innerHTML='<div class="empty"><div>'+esc((ob.error||pj.error).message)+'</div></div>'; return; }
+  const buOf={}; (pj.data||[]).forEach(p=>buOf[p.id]=misKey(p.farvision_project_code||p.name));
+  const acc={}; MIS_ORDER.forEach(o=>acc[misKey(o[1])]={o:0,c:0,p:0,n:0});
+  ((ob.data&&ob.data.raw_rows)||[]).forEach(r=>{ const a=acc[misKey(r.businessUnit)]; if(!a||r.status!=='Active') return;
+    const net=num(r.netOutstanding); if(net>0){ a.o+=net; a.n++; } });
+  rcs.forEach(r=>{ const a=acc[buOf[r.units&&r.units.project_id]]; if(!a) return;
+    if(r.receipt_date>=curFrom) a.c+=num(r.total_amount); else if(r.receipt_date<=prevTo) a.p+=num(r.total_amount); });
+  const rows=MIS_ORDER.map(o=>{const a=acc[misKey(o[1])]; return {project:o[0],bu:o[1],o:Math.round(a.o)||null,c:Math.round(a.c)||null,p:Math.round(a.p)||null,n:a.n};});
+  const fileOn=ob.data?ob.data.imported_at:null;
   const cols=[{h:'Project Name',k:'project'},{h:'Business Unit Name',k:'bu'},{h:'Current Outstanding Amount Till Date '+dd,k:'o',t:'inr',sum:1},{h:'Current Month Collection Amount Upto - '+curL,k:'c',t:'inr',sum:1},{h:'Previous Month Collection Amount Upto - '+prevL,k:'p',t:'inr',sum:1}];
   repSet('Project Wise Outstanding Status VS Collection Status As Per ERP','Weekly Basis MIS Report - Date: '+dd,cols,rows);
   const T=k=>rows.reduce((s,r)=>s+num(r[k]),0);
   const dash=v=>num(v)?indN(v):'<span style="color:#94a3b8">—</span>';
-  /* WHETHER THE IMPORT IS COMPLETE IS PART OF THE REPORT.
-
-     The outstanding figure is only ever as complete as the FarVision import behind it, and a
-     partial import produces a number that looks finished and is simply too small. On 28.09.2026
-     three business units matched the hand-made sheet to the rupee and the rest were short by
-     between five lakh and one crore seventy - every one of them short, never over, because units
-     that were never imported contribute nothing.
-
-     So the report says so, in front of the figure, naming the projects. A number nobody can check
-     is worse than no number. */
-  /* FARVISION'S COPY, SIDE BY SIDE, PER PROJECT.
-     A project where the two disagree by more than a lakh is one where JAIN-E and the ERP are
-     genuinely telling different stories, and that is worth a line on the report rather than a
-     discovery three weeks later. Under a lakh is rounding and timing and is left alone. */
-  const LAKH=100000;
-  const diffs=S.projects.map(p=>({p,a:acc[p.id]}))
-    .filter(x=>x.a&&x.a.fv!=null&&Math.abs(x.a.fv-x.a.o)>LAKH)
-    .sort((x,y)=>Math.abs(y.a.fv-y.a.o)-Math.abs(x.a.fv-x.a.o));
-  const snapDate=(fv||[]).map(r=>r.snapshot_date).filter(Boolean).sort().pop();
-  const sign=v=>(v>0?'+':'')+indN(Math.round(v));
-  const warn=diffs.length
-    ? '<div class="pss-banner" style="border-color:#fde68a;background:#fffbeb;margin-bottom:14px">'
-      +'<i class="fa-solid fa-scale-unbalanced" style="color:#b45309"></i><div class="grow">'
-      +'<b>Check before circulating — JAIN-E and FarVision do not agree on '+diffs.length+' project'
-      +(diffs.length===1?'':'s')+'.</b><br>'
-      +'The figures below are JAIN-E’s own: demands raised here less receipts recorded here. '
-      +'FarVision’s Customer Outstanding import'+(snapDate?' as on '+dmy(snapDate):'')+' says:<br>'
-      +diffs.map(x=>'&bull; '+esc(x.p.name)+' — FarVision ₹'+indN(Math.round(x.a.fv))
-          +' against ₹'+indN(Math.round(x.a.o))+' here ('+sign(x.a.fv-x.a.o)+')').join('<br>')
-      +'<br>Where FarVision is higher, demands it has raised have not reached JAIN-E yet — '
-      +'re-run the FarVision import. Where it is lower, it is usually a unit JAIN-E holds and the '
-      +'import has not covered.</div></div>'
-    : '';
+  // Which morning's Farvision file the outstanding is from - an as-on date before the first import shows none.
+  const warn=fileOn
+    ? '<div class="pss-hint" style="margin-bottom:12px"><i class="fa-solid fa-file-excel" style="color:#16a34a"></i> From Farvision’s Customer Outstanding Summary imported '
+      +dmy(String(fileOn).slice(0,10))+' and its Receipt Register, as imported by Customer Portal.</div>'
+    : '<div class="pss-banner" style="border-color:#fde68a;background:#fffbeb;margin-bottom:14px"><i class="fa-solid fa-triangle-exclamation" style="color:#b45309"></i><div class="grow"><b>No Farvision outstanding file was imported on or before '+dd+'.</b></div></div>';
   host.innerHTML=warn+mKpis([['Outstanding till '+dd,'₹'+indN(T('o')),rows.reduce((s,r)=>s+r.n,0)+' customers with dues'],['Collection '+curL,'₹'+indN(T('c')),'1st to '+dd],['Collection '+prevL,'₹'+indN(T('p')),'whole month']])
     +'<div class="card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr style="background:#fef9c3">'+cols.map((c,i)=>'<th style="background:#fef08a;color:#111;white-space:normal;min-width:'+(i<2?140:150)+'px'+(i>1?';text-align:right':'')+'">'+esc(c.h)+'</th>').join('')+'</tr></thead><tbody>'
     +rows.map(r=>'<tr><td><b>'+esc(r.project)+'</b></td><td>'+esc(r.bu)+'</td><td class="pss-num">'+dash(r.o)+'</td><td class="pss-num">'+dash(r.c)+'</td><td class="pss-num">'+dash(r.p)+'</td></tr>').join('')

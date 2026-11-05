@@ -433,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'5c9db8012a','insp-items.js':'7b022b36bf','postsales.js':'b2ca172c43','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'2745689641','insp-items.js':'7b022b36bf','postsales.js':'943efba987','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -15310,12 +15310,12 @@ window.pstSetField=async function(id,k,v){
    The list of customers to remind about their outstanding amount, rebuilt every morning from
    Farvision's "Customer Outstanding Summary" that the Customer Portal imports
    (postsales.outstanding_reminder_list): Dream Gurukul, Dream Ananta, Dream Gateway Pailan Projects and
-   Dream Jain-Pailan, Net Outstanding above zero, each with their email and what changed since the
+   Dream Jain-Pailan, Net Outstanding of Rs 5,000 or more (PRM_MIN), each with their email and what changed since the
    file before. The email itself is fixed (postsales.reminder_settings) - its wording is changed on
    request, not on this page; here it can only be seen, filled in for any one customer.
-   SENDING IS SWITCHED OFF: nothing on this page emails anybody. Route: postsales/reminders. */
+   Nothing on this page emails anybody: sending to customers is not switched on. Route: postsales/reminders. */
 const PRM={rows:[],settings:null,f:{proj:'',view:'remind',q:''},sel:new Set()};
-const PRM_TEST='TEST CUSTOMERS';
+const PRM_MIN=5000;   // Rs - smallest Net Outstanding that gets a reminder
 function prmProj(p){
   return String(p||'').replace(/\(.*?\)/g,'').replace(/\s+/g,' ').trim().toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
 }
@@ -15335,7 +15335,6 @@ function prmStyles(){
   .prm-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
   .prm-src{font-size:12.5px;color:var(--slate)}
   .prm-src b{color:var(--ink)}
-  .prm-lock{margin-left:auto;display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:20px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:12px;font-weight:650}
   .prm-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
   @media(max-width:900px){.prm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
   .prm-stat{background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:14px;padding:14px 16px;cursor:pointer;transition:border-color .12s,box-shadow .12s}
@@ -15373,7 +15372,6 @@ function prmStyles(){
   .prm-ibtn:hover{border-color:#7e22ce;color:#7e22ce}
   .prm-email{font-size:12.5px;color:var(--ink-2,#334155)}
   .prm-cb{width:16px;height:16px;accent-color:#7e22ce;cursor:pointer;vertical-align:middle}
-  #prmTbl tr.grp.test td{background:#eff6ff;color:#1e40af}
   #prmTbl tbody tr.row.sel td{background:#faf5ff}
   .prm-selbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--bg-subtle,#f8fafc);font-size:13px}
   .prm-selbar b{color:var(--ink)}`;
@@ -15381,13 +15379,14 @@ function prmStyles(){
 }
 window.prmRender=async function(host){
   prmStyles(); loader(host);
-  const [l,s,t]=await Promise.all([sb.schema('postsales').rpc('outstanding_reminder_list'), sb.schema('postsales').from('reminder_settings').select('*').eq('id',1).maybeSingle(),
-    sb.schema('postsales').from('reminder_test_recipients').select('*').order('id')]);
+  const [l,s]=await Promise.all([sb.schema('postsales').rpc('outstanding_reminder_list'), sb.schema('postsales').from('reminder_settings').select('*').eq('id',1).maybeSingle()]);
   if(l.error){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not build the list: '+esc(l.error.message)+'</div></div>'; return; }
-  // Test customers sit in their own group at the top; they never come from Farvision.
-  const tests=((t&&t.data)||[]).map(x=>({booking_no:'TEST-'+x.id,test_id:x.id,test:true,customer_name:x.customer_name,project:PRM_TEST,tower:'',unit_code:x.flat||'Test',
-    net_outstanding:x.net_outstanding,prev_net:x.net_outstanding,change:'test',email:x.email,held:false,hold_reason:null}));
-  PRM.rows=tests.concat(l.data||[]); PRM.settings=s.data||{};
+  // Nobody is reminded about less than PRM_MIN (2 Nov 2026, Ayush) - Farvision leaves rounding pennies of
+  // Rs 1-6 on settled flats, and a reminder for those reads as a mistake. Removed rows keep showing.
+  /* Only Active customers (3 Nov 2026). Since the import keeps cancelled bookings' rows too, the Outstanding
+     file's cancelled bookings came into this list - 29 of them on 3 Nov. Farvision's Customer Status decides. */
+  try{ await prmFvRead(); }catch(_e){ PRM_FVSTATUS={}; }
+  PRM.rows=((l.data||[]).filter(r=>r.change==='removed'||(Number(r.net_outstanding||0)>=PRM_MIN&&PRM_FVSTATUS[r.booking_no]==='Active'))); PRM.settings=s.data||{};
   const keep=new Set(PRM.rows.map(r=>r.booking_no)); PRM.sel.forEach(k=>{ if(!keep.has(k)) PRM.sel.delete(k); });
   prmDraw(host);
 };
@@ -15403,7 +15402,7 @@ function prmIn(r,view){
 function prmDraw(host){
   host=host||$('prmBody'); if(!host) return;
   const any=PRM.rows[0]||{};
-  const remind=PRM.rows.filter(r=>!r.test&&prmIn(r,'remind')), changes=PRM.rows.filter(r=>prmIn(r,'changes')),
+  const remind=PRM.rows.filter(r=>prmIn(r,'remind')), changes=PRM.rows.filter(r=>prmIn(r,'changes')),
         held=PRM.rows.filter(r=>prmIn(r,'held')), removed=PRM.rows.filter(r=>prmIn(r,'removed'));
   const total=remind.reduce((a,r)=>a+Number(r.net_outstanding||0),0);
   const stat=(view,l,v,s)=>'<div class="prm-stat'+(PRM.f.view===view?' on':'')+'" onclick="PRM.f.view=\''+view+'\';prmDraw()"><div class="l">'+l+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>';
@@ -15411,8 +15410,7 @@ function prmDraw(host){
   const pc=p=>PRM.rows.filter(r=>prmIn(r,PRM.f.view)&&(!p||r.project===p)).length;
   host.innerHTML='<div class="prm-head"><div class="prm-src"><i class="fa-solid fa-file-excel" style="color:#16a34a"></i> From Farvision\u2019s <b>Customer Outstanding Summary</b>, '
       +(any.file_date?pstDT(any.file_date):'—')+(any.prev_file_date?' &middot; compared with '+pstDT(any.prev_file_date):'')+'</div>'
-      +'<button class="btn btn-sm" onclick="prmShowEmail()"><i class="fa-solid fa-envelope"></i> View the email</button>'
-      +'<span class="prm-lock"><i class="fa-solid fa-lock"></i> Sending is off</span></div>'
+      +'<div class="prm-q"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Search name, flat, email…" value="'+esc(PRM.f.q)+'" oninput="PRM.f.q=this.value;prmList()"></div></div>'
     +'<div class="prm-stats">'
       +stat('remind','To remind',remind.length,'₹'+prmShort(total)+' outstanding')
       +stat('changes','Changes today',changes.length,changes.filter(r=>r.change==='new').length+' new &middot; '+changes.filter(r=>r.change==='changed').length+' amount changed')
@@ -15423,7 +15421,6 @@ function prmDraw(host){
       +'<div class="prm-tools">'
         +'<button class="prm-chip'+(!PRM.f.proj?' on':'')+'" onclick="PRM.f.proj=\'\';prmDraw()">All projects<span class="n">'+pc('')+'</span></button>'
         +projects.map(p=>'<button class="prm-chip'+(PRM.f.proj===p?' on':'')+'" onclick="PRM.f.proj=\''+esc(p).replace(/'/g,"\\'")+'\';prmDraw()">'+esc(prmProj(p))+'<span class="n">'+pc(p)+'</span></button>').join('')
-        +'<div class="prm-q"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Search name, flat, email…" value="'+esc(PRM.f.q)+'" oninput="PRM.f.q=this.value;prmList()"></div>'
       +'</div>'
       +'<div class="prm-selbar" id="prmSelBar"></div>'
       +'<div style="overflow:auto;max-height:calc(100vh - 400px)" id="prmList"></div>'
@@ -15442,12 +15439,12 @@ window.prmList=function(){
   const badge=r=>(r.change==='new'?'<span class="prm-badge new">New</span>':'')+(r.change==='changed'?'<span class="prm-badge changed">Changed</span>':'')
     +(r.change==='removed'?'<span class="prm-badge removed">Removed</span>':'')+(r.held?'<span class="prm-badge held">Held</span>':'');
   const groups={}; rows.forEach(r=>{ (groups[r.project]=groups[r.project]||[]).push(r); });
-  const body=Object.keys(groups).sort((a,b)=>(a===PRM_TEST?-1:b===PRM_TEST?1:a.localeCompare(b))).map(function(p){
+  const body=Object.keys(groups).sort().map(function(p){
     const g=groups[p], t=g.reduce((a,r)=>a+Number(r.net_outstanding||0),0);
     const can=g.filter(r=>r.change!=='removed'&&r.email&&!r.held), allOn=can.length&&can.every(r=>PRM.sel.has(r.booking_no));
     PRM._grp=PRM._grp||[]; const gi=PRM._grp.indexOf(p)>=0?PRM._grp.indexOf(p):(PRM._grp.push(p)-1);
-    return '<tr class="grp'+(p===PRM_TEST?' test':'')+'"><td style="width:38px">'+(can.length?'<input type="checkbox" class="prm-cb"'+(allOn?' checked':'')+' title="Select this whole group" onchange="prmSelGroup('+gi+',this.checked)">':'')+'</td><td colspan="4">'+esc(p===PRM_TEST?'Test customers':prmProj(p))+' &middot; '+g.length+' customer'+(g.length===1?'':'s')
-      +(p===PRM_TEST?' <button class="btn btn-sm" style="margin-left:8px" onclick="prmAddTest()"><i class="fa-solid fa-plus"></i> Add</button>':'')+'<span class="t">₹'+prmInr(t)+'</span></td></tr>'
+    return '<tr class="grp"><td style="width:38px">'+(can.length?'<input type="checkbox" class="prm-cb"'+(allOn?' checked':'')+' title="Select this whole group" onchange="prmSelGroup('+gi+',this.checked)">':'')+'</td><td colspan="4">'+esc(prmProj(p))+' &middot; '+g.length+' customer'+(g.length===1?'':'s')
+      +'<span class="t">₹'+prmInr(t)+'</span></td></tr>'
       +g.map(function(r){ const ix=PRM.rows.indexOf(r);
         const selectable=r.change!=='removed'&&r.email&&!r.held;
         return '<tr class="row'+(PRM.sel.has(r.booking_no)?' sel':'')+'"><td style="width:38px">'+(selectable?'<input type="checkbox" class="prm-cb"'+(PRM.sel.has(r.booking_no)?' checked':'')+' onchange="prmSel('+ix+',this.checked)">':'')+'</td><td><div class="prm-who">'+avatar(prmName(r)||'?')+'<div style="min-width:0"><div class="prm-nm">'+esc(String(r.customer_name||'').trim())+badge(r)+'</div>'
@@ -15455,32 +15452,23 @@ window.prmList=function(){
           +(r.held?'<div class="prm-sub" style="color:#b91c1c"><i class="fa-solid fa-hand"></i> '+esc(r.hold_reason||'')+'</div>':'')+'</div></div></td>'
           +'<td class="prm-email">'+(r.email?esc(r.email):'<span style="color:#b91c1c">No email on record</span>')+'</td>'
           +'<td class="prm-amt">₹'+prmInr(r.net_outstanding)+(r.change==='changed'||r.change==='removed'?'<span class="prm-old">₹'+prmInr(r.prev_net)+'</span>':'')+'</td>'
-          +'<td class="prm-act">'+(r.test?'<button class="prm-ibtn" title="See the email" onclick="prmPreview('+ix+')"><i class="fa-solid fa-eye"></i></button><button class="prm-ibtn" title="Remove this test customer" onclick="prmDelTest('+r.test_id+')"><i class="fa-solid fa-trash"></i></button>':'')+(!r.test&&r.change!=='removed'
+          +'<td class="prm-act">'+(r.change!=='removed'
             ?'<button class="prm-ibtn" title="See the email this customer would get" onclick="prmPreview('+ix+')"><i class="fa-solid fa-eye"></i></button>'
+              +'<button class="prm-ibtn" title="Open the Reminder Letter that goes with the email" onclick="prmLetter('+ix+')"><i class="fa-solid fa-file-pdf"></i></button>'
               +(r.held?'<button class="prm-ibtn" title="Release - remind again" onclick="prmUnhold('+ix+')"><i class="fa-solid fa-rotate-left"></i></button>'
                 :'<button class="prm-ibtn" title="Hold - do not remind" onclick="prmHold('+ix+')"><i class="fa-solid fa-hand"></i></button>'):'')+'</td></tr>'; }).join('');
   }).join('');
-  const hasTest=PRM.rows.some(r=>r.test);
-  const testAdd=(!hasTest&&(f.view==='remind'))?'<tr class="grp test"><td></td><td colspan="4">Test customers &middot; none yet <button class="btn btn-sm" style="margin-left:8px" onclick="prmAddTest()"><i class="fa-solid fa-plus"></i> Add a test customer</button></td></tr>':'';
   host.innerHTML='<table id="prmTbl"><thead><tr><th></th><th>Customer</th><th>Email</th><th style="text-align:right">Net Outstanding</th><th></th></tr></thead><tbody>'
-    +testAdd+(body||'<tr><td colspan="5"><div class="empty" style="padding:26px">Nobody here</div></td></tr>')+'</tbody></table>';
+    +(body||'<tr><td colspan="5"><div class="empty" style="padding:26px">Nobody here</div></td></tr>')+'</tbody></table>';
   prmSelBar();
 };
 function prmEmailHtml(subj,body,to){
   const st=PRM.settings||{};
   return '<div style="color:var(--slate);font-size:12.5px;line-height:1.75"><b>From</b> Pallabita Ghosh - The Jain Group &lt;customercare1@thejaingroup.com&gt;'
       +(to!=null?'<br><b>To</b> '+esc(to||'(no email)'):'')+'<br><b>Subject</b> '+esc(subj)
-      +'<br><b>Attachment</b> '+(st.attachment_name?esc(st.attachment_name):'none')+'</div>'
+      +'<br><b>Attachment</b> Reminder Letter (PDF)'+(st.attachment_name?', '+esc(st.attachment_name):'')+'</div>'
     +'<div style="margin-top:12px;padding:16px;border:1px solid var(--line);border-radius:12px;white-space:pre-wrap;line-height:1.65;font-size:13.5px">'+esc(body)+'</div>';
 }
-// The fixed email, with its placeholders showing. Changes to it are made on request.
-window.prmShowEmail=function(){
-  const st=PRM.settings||{};
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-envelope"></i> The reminder email</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="width:min(94vw,660px)">'+prmEmailHtml(st.subject||'',st.body||'',null)
-      +'<div style="font-size:12px;color:var(--slate);margin-top:10px">Words in {curly brackets} are filled in for each customer. To change the wording or add an attachment, ask - it is not edited here.</div></div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','md');
-};
 window.prmPreview=function(ix){
   const r=PRM.rows[ix]; if(!r) return;
   const st=PRM.settings||{};
@@ -15513,65 +15501,238 @@ function prmShown(){
 }
 function prmSelBar(){
   const b=$('prmSelBar'); if(!b) return;
-  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)), tests=sel.filter(r=>r.test).length;
-  const total=sel.filter(r=>!r.test).reduce((a,r)=>a+Number(r.net_outstanding||0),0);
-  b.innerHTML='<span><b>'+sel.length+'</b> selected'+(sel.length?' &middot; ₹'+prmInr(total)+(tests?' &middot; '+tests+' test':''):'')+'</span>'
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no));
+  const total=sel.reduce((a,r)=>a+Number(r.net_outstanding||0),0);
+  b.innerHTML='<span><b>'+sel.length+'</b> selected'+(sel.length?' &middot; ₹'+prmInr(total):'')+'</span>'
     +'<button class="btn btn-sm" onclick="prmSelShown(true)">Select all shown</button>'
     +'<button class="btn btn-sm" onclick="prmSelShown(false)">Unselect all shown</button>'
     +(sel.length?'<button class="btn btn-sm" onclick="PRM.sel.clear();prmList()">Clear selection</button>':'')
-    +(tests?'<button class="btn btn-sm btn-primary" style="margin-left:auto" onclick="prmSendTest()" title="Test customers only - real customers cannot be emailed yet. Goes from your own Gmail (Connect Google)."><i class="fa-solid fa-paper-plane"></i> Send to '+tests+' test customer'+(tests===1?'':'s')+'</button>'
-      :'<button class="btn btn-sm" style="margin-left:auto" disabled title="Only test customers can be emailed for now"><i class="fa-solid fa-paper-plane"></i> Send (test customers only)</button>')
-    +(sel.length>tests?'<span style="font-size:12px;color:var(--slate)">'+(sel.length-tests)+' real customer'+(sel.length-tests===1?'':'s')+' will not be emailed</span>':'');
+    +'<button class="btn btn-sm btn-primary" style="margin-left:auto"'+(sel.length?'':' disabled')+' onclick="prmSendAsk()"><i class="fa-solid fa-paper-plane"></i> Send reminder'+(sel.length?' to '+sel.length:'')+'</button>';
 }
-/* TEMPORARY TEST SENDING (30 Oct 2026): only the ticked test customers go to the server, from Ayush's own
-   account. The server takes test ids only and refuses anything else, so real customers cannot be emailed. */
-window.prmSendTest=async function(){
-  const tests=PRM.rows.filter(r=>r.test&&PRM.sel.has(r.booking_no));
-  if(!tests.length) return;
-  if(!await confirmDialog('Send the reminder email to '+tests.length+' test customer'+(tests.length===1?'':'s')+'?\n\n'+tests.map(r=>r.email).join('\n'))) return;
-  try{
-    const {data:{session}}=await sb.auth.getSession();
-    const res=await fetch(SUPABASE_URL+'/functions/v1/customer-invite',{method:'POST',
-      headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},
-      body:JSON.stringify({action:'reminder_send',test_ids:tests.map(r=>r.test_id)})});
-    const out=await res.json().catch(()=>({}));
-    if(out.code==='google_not_connected'){
-      // Sent through the sender's own Google connection (the same one Meetings uses) - offer to connect it.
-      if(await confirmDialog(out.error+'\n\nConnect Google now? You will come back to JAIN-E afterwards.'))
-        location.href=SUPABASE_URL+'/functions/v1/google-oauth-start?email='+encodeURIComponent(state.email);
-      return;
+/* SENDING (2 Nov 2026) - anyone with the Post Sales module, from Pallabita Ghosh's customer-care mailbox.
+   Each ticked customer's Reminder Letter is drawn here and goes with their email; the server decides who
+   actually gets one (on the list, Rs 5,000 or more, email on record, not held, not reminded today). A letter
+   whose total is not the customer's Net Outstanding is not sent. Ten customers to a call. */
+function prmB64(bytes){ let s=''; for(let i=0;i<bytes.length;i+=0x8000) s+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000)); return btoa(s); }
+window.prmSendAsk=function(){
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length) return;
+  const total=sel.reduce((a,r)=>a+Number(r.net_outstanding||0),0);
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-paper-plane"></i> Send outstanding reminders</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,520px)"><div id="prmSendBody" style="font-size:13.5px;line-height:1.7">'
+      +'<b>'+sel.length+'</b> customer'+(sel.length===1?'':'s')+' &middot; ₹'+prmInr(total)+' outstanding<br>'
+      +'From <b>Pallabita Ghosh - The Jain Group</b> &lt;customercare1@thejaingroup.com&gt;<br>'
+      +'Each gets the reminder email with their own <b>Reminder Letter</b> (PDF) attached.'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:8px">Customers already reminded today are skipped.</div></div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="prmGo" onclick="prmSendGo()"><i class="fa-solid fa-paper-plane"></i> Send '+sel.length+'</button></div>','md');
+};
+window.prmSendGo=async function(){
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r));
+  const go=$('prmGo'), box=$('prmSendBody'); if(go) go.disabled=true;
+  const say=t=>{ if(box) box.innerHTML=t; };
+  const res={sent:0,failed:[],skipped:[]};
+  const {data:{session}}=await sb.auth.getSession();
+  for(let i=0;i<sel.length;i+=10){
+    const part=sel.slice(i,i+10), letters={}, nos=[];
+    say('<i class="fa-solid fa-spinner fa-spin"></i> Preparing letters and sending - '+Math.min(i+part.length,sel.length)+' of '+sel.length+'…');
+    for(const r of part){
+      try{
+        const d=await prmLetterData(r.booking_no);
+        if(d.net==null||Math.abs(d.total-Number(r.net_outstanding||0))>1){ res.skipped.push(prmName(r)+' - letter total does not match'); continue; }
+        letters[r.booking_no]={filename:'Reminder Letter - '+String(r.booking_no).replace(/[^\w\-]+/g,'_')+'.pdf',pdf_base64:prmB64(await prmLetterPdf(d))};
+        nos.push(r.booking_no);
+      }catch(e){ res.skipped.push(prmName(r)+' - '+e.message); }
     }
-    if(!res.ok||out.error) throw new Error(out.error||('HTTP '+res.status));
-    toast('Sent '+out.sent+(out.failed?', '+out.failed+' failed':'')+' (from '+out.from+')',out.failed?'warn':'ok');
-    if(out.failed) console.warn('Reminder send failures',out.results);
-  }catch(e){ toast(e.message,'err'); }
+    if(!nos.length) continue;
+    try{
+      const rq=await fetch(SUPABASE_URL+'/functions/v1/customer-invite',{method:'POST',
+        headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},
+        body:JSON.stringify({action:'reminder_send_customers',booking_nos:nos,letters:letters})});
+      const out=await rq.json().catch(()=>({}));
+      if(!rq.ok||out.error){ say('<span style="color:#b91c1c"><i class="fa-solid fa-triangle-exclamation"></i> '+esc(out.error||('HTTP '+rq.status))+'</span>'+(res.sent?'<br>'+res.sent+' sent before this.':'')); if(go){ go.disabled=false; go.textContent='Close'; go.onclick=closeModal; } return; }
+      res.sent+=out.sent||0;
+      (out.results||[]).forEach(x=>{ const r=PRM.rows.find(y=>y.booking_no===x.booking_no); const nm=r?prmName(r):x.booking_no;
+        if(x.skipped) res.skipped.push(nm+' - '+x.error); else if(!x.ok) res.failed.push(nm+' - '+x.error); });
+    }catch(e){ res.failed.push('Batch '+(i/10+1)+' - '+e.message); }
+  }
+  say('<b style="color:#15803d"><i class="fa-solid fa-circle-check"></i> '+res.sent+' reminder'+(res.sent===1?'':'s')+' sent</b>'
+    +(res.failed.length?'<div style="margin-top:8px;color:#b91c1c"><b>Not sent ('+res.failed.length+')</b><br>'+res.failed.map(esc).join('<br>')+'</div>':'')
+    +(res.skipped.length?'<div style="margin-top:8px;color:var(--slate)"><b>Skipped ('+res.skipped.length+')</b><br>'+res.skipped.map(esc).join('<br>')+'</div>':''));
+  if(go){ go.disabled=false; go.innerHTML='Close'; go.onclick=closeModal; }
+  if(res.sent){ PRM.sel.clear(); prmList(); }
+};
+/* THE REMINDER LETTER (2 Nov 2026) - Farvision's "Reminder Letter", built by JAIN-E from its own data so
+   it can go with the email: the company block from Post Sales > Setup, the customer from Farvision's
+   contacts (Customer Portal import), the PAN from the Booking Form flow where the booking went through it,
+   and the outstanding table as each demand line billed minus what receipts were allocated to that same
+   demand and charge (Farvision's own receipt allocation). Lines fully paid drop out, as on Farvision's.
+   Checked against Farvision's letter for Debarun Bhattacharya, Gurukul B/4G: the same three lines,
+   9,474 + 29,001 + 43,859 = 82,334. */
+let PRM_PAN=null;
+function prmMoney(n){ return (Math.round((Number(n)||0)*100)/100).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function prmDmy(d){ if(!d) return ''; const p=String(d).slice(0,10).split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+function prmWords(n){
+  n=Math.round(Number(n)||0); if(!n) return 'Zero';
+  const a=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const b=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  const two=x=>x<20?a[x]:(b[Math.floor(x/10)]+(x%10?' '+a[x%10]:''));
+  const three=x=>(x>=100?a[Math.floor(x/100)]+' Hundred'+(x%100?' ':''):'')+(x%100?two(x%100):'');
+  const cr=Math.floor(n/1e7); n%=1e7; const lk=Math.floor(n/1e5); n%=1e5; const th=Math.floor(n/1e3); n%=1e3;
+  return [cr?(cr>99?prmWords(cr):two(cr))+' Crore':'',lk?two(lk)+' Lakh':'',th?two(th)+' Thousand':'',n?three(n):''].filter(Boolean).join(' ');
+}
+// "VEHICLE PARKING_4" / "ADVANCE MAINTENANCE  at ADJUSTABLE at _2" -> what the charge is called on paper.
+function prmHead(h){ return String(h||'').replace(/\s+at\s+(ADJUSTABLE|DEPOSIT|ACTUAL)\s+at\s*/ig,' ').replace(/[_ ]+\d+\s*$/,'').replace(/\s+/g,' ').trim(); }
+async function prmPans(){
+  if(PRM_PAN) return PRM_PAN;
+  const {data}=await sb.schema('acc').from('booking_audits')
+    .select('pan:result->fields->customer_pan->>value,flat:result->fields->flat->>value,name:result->fields->customer_name->>value');
+  PRM_PAN=(data||[]).filter(x=>x.pan&&/^[A-Z]{5}[0-9]{4}[A-Z]$/i.test(String(x.pan).trim())); return PRM_PAN;
+}
+/* The PAN Farvision prints, from its Customer Outstanding file - masked there ("XXXXX3204H"), as on its own
+   letters. Used where the booking did not go through the Booking Form flow, which has the full PAN. Read once. */
+let PRM_FVPAN=null, PRM_FVSTATUS=null;
+async function prmFvRead(){
+  const {data}=await sb.schema('cust').from('import_batches').select('raw_rows').eq('import_type','outstanding').eq('status','completed')
+    .order('imported_at',{ascending:false}).limit(1).maybeSingle();
+  PRM_FVPAN={}; PRM_FVSTATUS={};
+  ((data&&data.raw_rows)||[]).forEach(r=>{ if(!r.bookingNo) return; if(r.pan) PRM_FVPAN[r.bookingNo]=String(r.pan).trim().toUpperCase(); PRM_FVSTATUS[r.bookingNo]=r.status||''; });
+}
+async function prmFvPans(){ if(!PRM_FVPAN) await prmFvRead(); return PRM_FVPAN; }
+async function prmLetterData(bookingNo){
+  const C=sb.schema('cust');
+  const {data:u,error}=await C.from('units').select('id,project_id,tower,unit_code,application_no').eq('booking_no',bookingNo).is('deleted_at',null).order('id',{ascending:false}).limit(1).maybeSingle();
+  if(error||!u) throw new Error('This booking is not in the Customer Portal data');
+  const [ct,pj,su,inv,rc,os,pans]=await Promise.all([
+    C.from('farvision_contacts').select('contact_name,contact_phone,contact_email,contact_address').eq('unit_id',u.id).eq('is_current',true).is('deleted_at',null).order('id',{ascending:false}).limit(1).maybeSingle(),
+    C.from('projects').select('name').eq('id',u.project_id).maybeSingle(),
+    sb.schema('postsales').from('project_setup').select('company_name,company_address,company_pan,company_gstin').eq('project_id',u.project_id).maybeSingle(),
+    C.from('invoices').select('document_no,document_date,due_date,status,invoice_items(schedule,revenue_head,net_amount,sort_order)').eq('unit_id',u.id).eq('is_current',true).is('deleted_at',null),
+    C.from('money_receipts').select('is_reversed,receipt_items(against_demand_no,schedule,revenue_head,amount)').eq('unit_id',u.id).eq('is_current',true).is('deleted_at',null),
+    C.from('outstanding_snapshot').select('net_outstanding,bill_outstanding,on_account,late_fee_accrued,as_on_date').eq('unit_id',u.id).eq('is_current',true).is('deleted_at',null).maybeSingle(),
+    prmPans()]);
+  /* A line is one demand + one instalment + one charge: Farvision can put a whole payment plan in a single
+     demand, with "Unit Cost" under every instalment, and receipts are allocated to each separately. */
+  const key=(doc,sch,h)=>(doc||'')+'|'+String(sch||'').replace(/\s+/g,' ').trim().toUpperCase()+'|'+prmHead(h).toUpperCase();
+  const got={}; ((rc.data)||[]).filter(r=>!r.is_reversed).forEach(r=>(r.receipt_items||[]).forEach(i=>{
+    const k=key(i.against_demand_no,i.schedule,i.revenue_head); got[k]=(got[k]||0)+Number(i.amount||0); }));
+  const today=new Date(); today.setHours(0,0,0,0);
+  const lines=[], seen={};
+  ((inv.data)||[]).filter(i=>i.status!=='Cancel').sort((a,b)=>String(a.document_date).localeCompare(String(b.document_date))).forEach(i=>{
+    const items=(i.invoice_items||[]).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+    const sched=[...new Set(items.map(x=>String(x.schedule||'').trim()))];   // instalments in the demand's own order
+    items.forEach(it=>{
+      const head=prmHead(it.revenue_head), k=key(i.document_no,it.schedule,it.revenue_head);
+      if(seen[k]){ seen[k].bill+=Number(it.net_amount||0); return; }
+      const due=i.due_date||i.document_date;
+      seen[k]={particulars:String(it.schedule||'').trim()+'.'+head, bill_no:i.document_no, bill_date:i.document_date, due_date:due,
+               days:due?Math.max(0,Math.round((today-new Date(due+'T00:00:00'))/864e5)):'', bill:Number(it.net_amount||0), k:k,
+               ord:sched.indexOf(String(it.schedule||'').trim())};
+      lines.push(seen[k]);
+    });
+  });
+  lines.forEach(l=>{ l.rec=Math.min(l.bill,got[l.k]||0); l.bal=Math.round((l.bill-l.rec)*100)/100; });
+  // Farvision's order: oldest demand first, charges A-Z within it.
+  const byAge=(a,b)=>String(a.bill_date).localeCompare(String(b.bill_date))||a.bill_no.localeCompare(b.bill_no)||(a.ord-b.ord)||a.particulars.localeCompare(b.particulars);
+  /* Receipt lines with no demand number (money received but not set against a demand in the register) go
+     against the oldest unpaid lines first - Debarun-style letters were lakhs too high without this. */
+  let loose=Object.keys(got).filter(k=>k.split('|')[0]==='').reduce((a,k)=>a+got[k],0);
+  lines.slice().sort(byAge).forEach(l=>{ if(loose<=0||l.bal<=0) return; const t=Math.min(loose,l.bal); l.rec+=t; l.bal=Math.round((l.bal-t)*100)/100; loose-=t; });
+  let due=lines.filter(l=>l.bal>0.5).sort(byAge);
+  /* THE AMOUNT IS ALWAYS FARVISION'S. Where the demand-by-demand detail rebuilt from the registers does not
+     come to Farvision's Bill Outstanding (old or re-issued demands, receipts set against other demands), the
+     letter carries one line with Farvision's own figure instead of a breakdown that would state a wrong one. */
+  const snap=os.data||null, billOs=snap&&snap.bill_outstanding!=null?Number(snap.bill_outstanding):null;
+  const summary=billOs!=null&&Math.abs(due.reduce((a,l)=>a+l.bal,0)-billOs)>1;
+  if(summary) due=billOs>0.5?[{particulars:'Total outstanding as per our records as on '+prmDmy(snap.as_on_date),bill_no:'',bill_date:'',due_date:'',days:'',bill:billOs,rec:0,bal:billOs}]:[];
+  const c=ct.data||{}, nm=String(c.contact_name||'').trim();
+  const first=nm.replace(/^(mr|mrs|ms|dr|miss)\.?\s+/i,'').split(/\s+/)[0].toUpperCase();
+  const pan=(pans||[]).find(p=>String(p.flat||'').trim().toUpperCase()===String(u.unit_code||'').toUpperCase()
+                              &&String(p.name||'').toUpperCase().indexOf(first)!==-1);
+  const flr=String(u.unit_code||'').match(/^(\d+)/), cat=String(u.unit_code||'').replace(/^\d+[-\d]*/,'');
+  return {booking_no:bookingNo, unit:u, project:(pj.data||{}).name||'', setup:su.data||{}, contact:c, name:nm,
+          pan:pan?String(pan.pan).toUpperCase():((await prmFvPans())[bookingNo]||''), floor:flr?flr[1]:'', category:cat, lines:due, summary:summary,
+          onacc:snap?Math.max(0,Number(snap.on_account||0)):0,
+          total:due.reduce((a,l)=>a+l.bal,0)-(snap?Math.max(0,Number(snap.on_account||0)):0), net:snap?Number(snap.net_outstanding||0):null,
+          late:os.data?Number(os.data.late_fee_accrued||0):0, ref:'JRM/'+u.id+'/'+new Date().toISOString().slice(0,10).replace(/-/g,'')};
+}
+// Drawn like Farvision's: a 612 x 864 page, company block, the addressee against a reference column,
+// the outstanding table and the late payment fee summary.
+async function prmLetterPdf(d){
+  const L=await loadPdfLib(); if(!L) throw new Error('The PDF library could not be loaded');
+  const doc=await L.PDFDocument.create(); doc.setTitle('Reminder Letter '+d.booking_no);
+  const reg=await doc.embedFont(L.StandardFonts.Helvetica), bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+  const W=612, H=864, M=36, INK=L.rgb(0,0,0), GREY=L.rgb(.93,.93,.93);
+  const clean=t=>String(t==null?'':t).replace(/₹/g,'Rs.').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[–—]/g,'-').replace(/[^ -ÿ]/g,'').trim();
+  const wrap=(t,w,f,s)=>{ const out=[]; let ln=''; clean(t).split(/\s+/).filter(Boolean).forEach(wd=>{ const x=ln?ln+' '+wd:wd; if(f.widthOfTextAtSize(x,s)>w&&ln){ out.push(ln); ln=wd; } else ln=x; }); if(ln) out.push(ln); return out.length?out:['']; };
+  let pg=doc.addPage([W,H]), y=H-M;
+  const txt=(t,x,yy,o)=>{ o=o||{}; const f=o.bold?bold:reg, s=o.size||8, c=clean(t); const tw=f.widthOfTextAtSize(c,s);
+    pg.drawText(c,{x:o.align==='center'?(W-tw)/2:o.align==='right'?x-tw:x,y:yy,size:s,font:f,color:INK}); };
+  const st=d.setup||{};
+  txt(String(st.company_name||'THE JAIN GROUP').toUpperCase(),0,y-12,{bold:true,size:12,align:'center'}); y-=24;
+  wrap(String(st.company_address||'').replace(/\n/g,', '),W-2*M,reg,8).forEach(l=>{ txt(l,0,y-8,{align:'center'}); y-=11; });
+  y-=6; if(st.company_gstin){ txt('GSTIN',M,y-8); txt(': '+st.company_gstin,M+80,y-8); y-=14; }
+  if(st.company_pan){ txt('PAN',M,y-8); txt(': '+st.company_pan,M+80,y-8); y-=14; }
+  y-=6; txt('Reminder Letter',0,y-10,{bold:true,size:10,align:'center'}); txt('Date :  '+prmDmy(new Date().toISOString()),W-M,y-20,{align:'right'}); y-=36;
+  const c=d.contact||{}, half=310;
+  /* Farvision's address field repeats itself ("MIDNAPORE,MIDNAPORE,WEST MIDNAPORE") - the same part twice in
+     a row is printed once, and the PIN gets its label as on Farvision's letter. Nothing else is changed. */
+  const addr=String(c.contact_address||'').split(/\s*,\s*/).reduce((a,p)=>{ const t=p.replace(/\s+/g,' ').trim(); if(t&&(!a.length||a[a.length-1].toUpperCase()!==t.toUpperCase())) a.push(t); return a; },[])
+    .join(', ').replace(/\s*\b(\d{6})\s*$/,' PIN:$1');
+  const left=[[d.name,'',true]].concat(wrap(addr,half-M-20,reg,8).map(l=>[l,'']))
+    .concat([['',''],['Contact No',': '+(c.contact_phone||'')],['Email',': '+String(c.contact_email||'').toUpperCase()],['GSTIN',': UnRegistered'],['PAN',': '+(d.pan||'-')]]);
+  const right=[['Reminder No',': '+d.ref],['Reminder Date',': '+prmDmy(new Date().toISOString())],['Project',': '+d.project],['Floor',': '+d.floor],
+    ['Category',': '+d.category],['Unit No',': '+(d.unit.unit_code||'')],['Tower',': '+(d.unit.tower||'')],['Booking No.',': '+d.booking_no],['Application No.',': '+(d.unit.application_no||'')]];
+  const top=y;
+  left.forEach((r,i)=>{ const yy=top-8-i*12.5; if(r[1]===''||r[2]){ txt(r[0],M,yy,{bold:!!r[2]}); } else { txt(r[0],M,yy); txt(r[1],M+64,yy); } });
+  right.forEach((r,i)=>{ const yy=top-8-i*12.5; txt(r[0],half+37,yy); txt(r[1],half+110,yy); });
+  y=top-12.5*Math.max(left.length,right.length)-14;
+  txt('Dear Sir/Madam,',M,y-8); y-=20;
+  wrap('According to which you had to deposit your due payment against the total value of your Unit. But after repeated Demand / reminder, you have not made payments. Now the company is providing you an opportunity to pay your dues, mentioned as under:',W-2*M,reg,8)
+    .forEach(l=>{ txt(l,M,y-8); y-=11; });
+  y-=10; txt('Outstanding details :',M+4,y-10,{bold:true,size:9.5}); y-=22;
+  const cw=[150,92,52,52,40,60,52,42], ttl=['Particulars','Bill No.','Bill Date','Due Date','Due Days','Bill Amt.','Rec Amt.','Bal Amt.'], rgt=[0,0,0,0,1,1,1,1];
+  const row=(cells,o)=>{ o=o||{}; const f=o.bold?bold:reg, s=7.6, pad=3, lh=s+2.6;
+    const laid=cells.map((t,i)=>rgt[i]?[clean(t)]:wrap(t,cw[i]-2*pad,f,s)); const h=Math.max(...laid.map(x=>x.length))*lh+2*pad;
+    if(y-h<M+30){ pg=doc.addPage([W,H]); y=H-M; if(!o.head) row(ttl,{bold:true,fill:GREY,head:true}); }
+    let x=M; laid.forEach((ls,i)=>{ if(o.fill) pg.drawRectangle({x:x,y:y-h,width:cw[i],height:h,color:o.fill});
+      pg.drawRectangle({x:x,y:y-h,width:cw[i],height:h,borderColor:INK,borderWidth:.5});
+      ls.forEach((ln,j)=>{ const tw=f.widthOfTextAtSize(ln,s); pg.drawText(ln,{x:rgt[i]?x+cw[i]-pad-tw:x+pad,y:y-pad-s-j*lh+1.5,size:s,font:f,color:INK}); });
+      x+=cw[i]; }); y-=h; };
+  row(ttl,{bold:true,fill:GREY,head:true});
+  d.lines.forEach(l=>row([l.particulars,l.bill_no,prmDmy(l.bill_date),prmDmy(l.due_date),String(l.days),prmMoney(l.bill),prmMoney(l.rec),prmMoney(l.bal)]));
+  const sb_=d.lines.reduce((a,l)=>a+l.bill,0), sr=d.lines.reduce((a,l)=>a+l.rec,0);
+  row(['Sub Total :','','','','',prmMoney(sb_),prmMoney(sr),prmMoney(d.lines.reduce((a,l)=>a+l.bal,0))],{bold:true,fill:GREY});
+  // Money received but not yet set against any demand - Farvision's "On Account" - comes off the total.
+  if(d.onacc>0.5) row(['Less : Amount received on account (not yet adjusted)','','','','','','','-'+prmMoney(d.onacc)],{bold:true});
+  y-=12; wrap('Total Payable : Rupees '+prmWords(d.total)+' Only',W-2*M-80,bold,8.5).forEach((l,i,a)=>{ txt(l,M+4,y-9,{bold:true,size:8.5}); if(i===a.length-1) txt(prmMoney(d.total),W-M,y-9,{bold:true,size:8.5,align:'right'}); y-=12; });
+  y-=14; if(y<M+90){ pg=doc.addPage([W,H]); y=H-M; }
+  txt('Late Payment Fees Summary as on '+prmDmy(new Date().toISOString()),M,y-10,{bold:true,size:9}); y-=20;
+  const lw=[120,105,105,105,105], lt=['','Late Payment Fee Accrued','Late Payment Fee Waived','Late Payment Fee Paid','Late Payment Fee Outstanding'];
+  // Each heading wraps inside its own box - "Late Payment Fee Outstanding" ran into the box beside it.
+  const lrow=(cells,b)=>{ const f=b?bold:reg, s=7.4, lines=cells.map((t,i)=>wrap(t,lw[i]-8,f,s)), h=Math.max(...lines.map(l=>l.length))*(s+2.4)+7;
+    let x=M; lines.forEach((ls,i)=>{ pg.drawRectangle({x:x,y:y-h,width:lw[i],height:h,borderColor:INK,borderWidth:.5,color:b?GREY:undefined});
+      ls.forEach((ln,j)=>{ const tw=f.widthOfTextAtSize(ln,s); pg.drawText(ln,{x:i?x+lw[i]-4-tw:x+4,y:y-4-s-j*(s+2.4)+1.5,size:s,font:f,color:INK}); }); x+=lw[i]; }); y-=h; };
+  lrow(lt,true); lrow(['Sub Total :-',prmMoney(d.late),'-','-',prmMoney(d.late)]);
+  y-=22; txt('Please ignore this letter if the payment has already been made.',M,y-8); y-=24;
+  txt('For '+String(st.company_name||'The Jain Group'),M,y-8,{bold:true}); y-=40; txt('Authorised Signatory',M,y-8,{bold:true});
+  const pages=doc.getPages(); pages.forEach((p,i)=>{ const t='Page '+(i+1)+' of '+pages.length; p.drawText(t,{x:(W-reg.widthOfTextAtSize(t,6.5))/2,y:22,size:6.5,font:reg,color:INK});
+    const s='This is a system generated letter. No signature required.'; p.drawText(s,{x:M,y:22,size:6.5,font:reg,color:L.rgb(.4,.4,.4)}); });
+  return await doc.save();
+}
+// Opens a customer's letter in a new tab - nothing is sent.
+window.prmLetter=async function(ix){
+  const r=PRM.rows[ix]; if(!r) return;
+  const w=window.open('','_blank');
+  try{
+    const d=await prmLetterData(r.booking_no);
+    if(d.net!=null&&Math.abs(d.net-d.total)>1) toast('Letter lines total ₹'+prmInr(d.total)+' but Farvision’s outstanding says ₹'+prmInr(d.net)+' - check before sending','warn');
+    const url=URL.createObjectURL(new Blob([await prmLetterPdf(d)],{type:'application/pdf'}));
+    if(w) w.location=url; else location.assign(url);
+  }catch(e){ if(w) w.close(); toast('Could not build the letter: '+e.message,'err'); }
 };
 window.prmSel=function(ix,on){ const r=PRM.rows[ix]; if(!r) return; if(on) PRM.sel.add(r.booking_no); else PRM.sel.delete(r.booking_no); prmList(); };
 window.prmSelGroup=function(gi,on){ const p=(PRM._grp||[])[gi]; PRM.rows.filter(r=>r.project===p&&prmPick(r)).forEach(r=>{ if(on) PRM.sel.add(r.booking_no); else PRM.sel.delete(r.booking_no); }); prmList(); };
 window.prmSelShown=function(on){ prmShown().forEach(r=>{ if(on) PRM.sel.add(r.booking_no); else PRM.sel.delete(r.booking_no); }); prmList(); };
-window.prmAddTest=function(){
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-user-plus"></i> Add a test customer</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm" style="width:min(94vw,460px)">'
-      +'<label>Name</label><input id="prmTN" placeholder="e.g. Test - Ayush">'
-      +'<label>Email</label><input id="prmTE" placeholder="name@example.com">'
-      +'<div class="two"><div><label>Flat</label><input id="prmTF" placeholder="e.g. 4G, Block B"></div><div><label>Amount (Rs.)</label><input id="prmTA" value="10000"></div></div>'
-      +'<div style="font-size:12px;color:var(--slate);margin-top:8px">Shown in its own Test customers group, never mixed with real customers.</div></div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="prmSaveTest()"><i class="fa-solid fa-check"></i> Add</button></div>','md');
-};
-window.prmSaveTest=async function(){
-  const nm=String(($('prmTN')||{}).value||'').trim(), em=String(($('prmTE')||{}).value||'').trim().toLowerCase();
-  if(!nm||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)){ toast('A name and a valid email are needed','warn'); return; }
-  const amt=Number(String(($('prmTA')||{}).value||'').replace(/[^0-9.]/g,''))||10000;
-  const {error}=await sb.schema('postsales').from('reminder_test_recipients').insert({customer_name:nm,email:em,flat:String(($('prmTF')||{}).value||'').trim()||null,net_outstanding:amt,added_by:state.email});
-  if(error){ toast(error.message,'err'); return; }
-  closeModal(); toast('Test customer added','ok'); prmRender($('prmBody'));
-};
-window.prmDelTest=async function(id){
-  if(!await confirmDialog('Remove this test customer?')) return;
-  const {error}=await sb.schema('postsales').from('reminder_test_recipients').delete().eq('id',id);
-  if(error){ toast(error.message,'err'); return; }
-  PRM.sel.delete('TEST-'+id); prmRender($('prmBody'));
-};
+
 /* ===== ACCOUNTS MODULE =====
    Three tabs. Transactions (vouchers, bills & on-account payments, bank reconciliation, cheque printing,
    enterprise / company / business-unit structure) lives in accounts.js + accounts-bank.js; Ledgers &
@@ -22278,9 +22439,10 @@ async function compMetaView(host,key){
   if(tab!==COMP_TAB){ COMP_TAB=tab; COMP_F.wl='all'; }
   /* Kept bare (26 Oct 2026, as asked: "remove so much text"): no explanatory paragraph and no
      schedule / credits line. Competitor Data has no Add or Pull button either - competitors are
-     pulled only by the scheduled job. Our Brand and Channel Partners keep Add and Pull all now. */
+     pulled only by the scheduled job. Channel Partners keeps Add and Pull all now. Our Brand lost
+     them too (2 Nov 2026, as asked: "it looks bad") - our own pages are pulled by the nightly job. */
   host.innerHTML=''
-    +(COMP_TAB==='competitors'?'':'<div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin:0 0 12px">'
+    +(COMP_TAB!=='partners'?'':'<div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin:0 0 12px">'
         +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add '+esc(compTabNoun())+'</button>'
         +'<button class="btn btn-primary" id="compSyncBtn" onclick="compManualPull()"><i class="fa-solid fa-rotate"></i> Pull all now</button>'
       +'</div>')
@@ -22307,6 +22469,7 @@ async function compCheckProxy(){
     ?'<div class="card card-pad" style="margin:0 0 14px;border-color:#fecaca;background:#fef2f2;color:#b91c1c;display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px">'
       +'<span style="flex:1;min-width:220px"><i class="fa-solid fa-plug-circle-xmark"></i> <b>Facebook ads are not updating.</b> JainE\'s sign-in to Proxy has expired.</span>'
       +'<button class="btn btn-primary" onclick="compProxyModal()"><i class="fa-solid fa-plug"></i> Reconnect Proxy</button></div>'
+    :COMP_TAB==='brands'?''   // Our Brand: no Proxy accounts button unless the pull is broken
     :'<div style="display:flex;justify-content:flex-end;margin:0 0 8px"><button class="btn" style="height:30px;font-size:12.5px" onclick="compProxyModal()" title="The Proxy accounts Facebook ads are pulled with"><i class="fa-solid fa-plug"></i> Proxy accounts</button></div>';
 }
 async function compProxyCall(action,body){
@@ -22952,7 +23115,9 @@ function compPaintStatus(){
   if(!host) return;
   const run=s.run;
   let runLine='';
-  if(run && Number(run.finished)<Number(run.pages)){
+  /* Only while pages of it are actually still queued (2 Nov 2026). The 14 Oct pull counted 53 pages; 8 were
+     switched off before their turn, so it ended at 45 and this line said "45 of 53" with a spinner for weeks. */
+  if(run && pendingManual>0 && Number(run.finished)<Number(run.pages)){
     const days=Math.ceil(pendingManual/spare);
     runLine='<div><i class="fa-solid fa-spinner fa-spin" style="color:#0369a1"></i> Manual pull from '+esc(fmtDate(run.requested_at))
       +': <b>'+Number(run.finished)+' of '+Number(run.pages)+'</b> pages done'
@@ -23834,6 +23999,8 @@ function cpaParseOutstanding(wb){
   return cpaParseFlatSheet(wb,'Net Outstanding',['Booking No.','Customer Name','Unit No.','Customer Status','Net Outstanding']).map(get=>({
     businessUnit:get('Business Unit'),bookingNo:get('Booking No.')!=null?String(get('Booking No.')):null,
     customerName:get('Customer Name'),unitCode:get('Unit No.'),tower:get('Level3'),status:get('Customer Status'),
+    // 2 Nov 2026: read so a booking JAIN-E knows only from this file (older customers) has an email to remind.
+    email:xlsxText(get('Email ID')),mobile:xlsxText(get('Mobile No.')),pan:xlsxText(get('PAN')),
     totalConsideration:get('Total Consideration'),billOutstanding:get('Bill Outstanding'),onAccount:get('On Account'),
     netOutstanding:get('Net Outstanding'),lateFee:get('Late Payment Fee Accrued As on Date'),
     noOfBills:get('No. Of Bills')!=null?Number(get('No. Of Bills')):null,
@@ -37976,7 +38143,7 @@ window.lmSave=async function(){
 
    One renderer, two platforms: obAdsView(host, 'meta' | 'google'). */
 const OB_ADS_WORD={
-  meta:{name:'Facebook',res:'Leads',per:'Cost per lead',one:'lead',src:'Meta Ads Manager',icon:'fa-brands fa-facebook',color:'#1877f2'},
+  meta:{name:'Facebook',res:'Results',per:'Cost per result',one:'result',src:'Meta Ads Manager',icon:'fa-brands fa-facebook',color:'#1877f2'},
   google:{name:'Google',res:'Conversions',per:'Cost per conversion',one:'conversion',src:'Google Ads',icon:'fa-brands fa-google',color:'#ea4335'}
 };
 const OB_PERIODS=[['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_30d','Last 30 days'],['this_month','This month'],['last_month','Last month'],['last_90d','Last 90 days'],['custom','Custom']];
@@ -38020,23 +38187,41 @@ const OB_CSS='<style>'
   +'.ob-kpi .l{font-size:12px;color:var(--slate);font-weight:600}.ob-kpi .v{font-size:24px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums}'
   +'.ob-chg{font-size:11.5px;font-weight:600;margin-top:3px}.ob-good{color:#15803d}.ob-bad{color:#b91c1c}.ob-flat{color:var(--slate);font-weight:500}'
   +'.ob-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}'
-  +'.ob-ads{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}'
+  // Every column but the name is centred, header and figures alike (the shared .tbl rule left-aligns
+  // headers, which put them out of line with right-aligned figures).
+  +'#obBody .tbl th,#obBody .tbl td{text-align:center;vertical-align:middle}#obBody .tbl th:first-child,#obBody .tbl td:first-child{text-align:left}'
+  // Ads four to a row (two on a phone), so Show more always fills whole rows - see obAdStep.
+  +'.ob-ads{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}@media(max-width:900px){.ob-ads{grid-template-columns:repeat(2,minmax(0,1fr))}}'
   +'.ob-ad{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--bg-card);display:flex;flex-direction:column}'
-  +'.ob-ad .pic{height:150px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden}.ob-ad .pic img{width:100%;height:100%;object-fit:cover}'
-  +'.ob-ad .txt{padding:12px;font-size:13px;line-height:1.45;color:#1a0dab;background:#fff;height:150px;overflow:hidden;box-sizing:border-box;border-bottom:1px solid var(--line)}'
+  +'.ob-ad .pic{height:190px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden}.ob-ad .pic img{width:100%;height:100%;object-fit:cover}'
+  +'.ob-ad .txt{padding:14px;font-size:13px;line-height:1.45;background:#fff;height:190px;overflow:hidden;box-sizing:border-box;border-bottom:1px solid var(--line)}'
+  +'.ob-ad .txt .h{color:#1a0dab;font-size:14.5px;font-weight:600}.ob-ad .txt .d{color:#4d5156;margin-top:6px}.ob-ad .txt .sp{font-size:11px;font-weight:700;color:#202124;margin-bottom:4px}'
   +'.ob-ad .m{padding:10px 12px;font-size:12px;display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}.ob-ad .m b{font-variant-numeric:tabular-nums}'
   +'.tbl tr.ob-sel td{background:rgba(3,105,161,.08)}'
   +'</style>';
 
+// Every campaign and ad name of the platform. The server hands back at most 1000 rows a request
+// and Google alone has over 2,000 ads, so it is read a page at a time - otherwise the names past
+// the first 1000 showed as bare numbers.
+async function obEntities(platform){
+  const out=[];
+  for(let from=0;;from+=1000){
+    const {data,error}=await sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,daily_budget,lifetime_budget,thumbnail,body').eq('platform',platform).order('kind').order('id').range(from,from+999);
+    if(error||!data) break;
+    out.push.apply(out,data);
+    if(data.length<1000) break;
+  }
+  return out;
+}
 async function obAdsView(host,platform){
   const W=OB_ADS_WORD[platform];
   host.innerHTML=OB_CSS+'<div id="obHead"></div><div id="obBody"><div class="loader"><div class="spin"></div></div></div>';
   const [acc,ent,log]=await Promise.all([
     sb.schema('camp').from('ads_accounts').select('*').eq('platform',platform).eq('include',true).order('name'),
-    sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,daily_budget,lifetime_budget,thumbnail,body').eq('platform',platform),
+    obEntities(platform),
     sb.schema('camp').from('ads_sync_log').select('ok,message,finished_at').eq('platform',platform).not('finished_at','is',null).order('started_at',{ascending:false}).limit(1)
   ]);
-  window._obAcc=acc.data||[]; window._obEnt={}; (ent.data||[]).forEach(function(x){ window._obEnt[x.kind+':'+x.id]=x; });
+  window._obAcc=acc.data||[]; window._obEnt={}; ent.forEach(function(x){ window._obEnt[x.kind+':'+x.id]=x; });
   window._obPlat=platform; window._obLog=(log.data||[])[0]||null;
   if(OB_P.acct!=='all'&&!window._obAcc.some(function(a){ return a.account_id===OB_P.acct; })) OB_P.acct='all';
   await obAdsLoad();
@@ -38048,7 +38233,7 @@ async function obAdsLoad(){
     rpc('ads_campaign_totals',{p_platform:platform,p_from:r.s,p_to:r.e}),
     rpc('ads_campaign_totals',{p_platform:platform,p_from:r.ps,p_to:r.pe}),
     rpc('ads_by_day',{p_platform:platform,p_from:r.s,p_to:r.e}),
-    rpc('ads_ad_totals',{p_platform:platform,p_from:r.s,p_to:r.e,p_limit:200})
+    rpc('ads_ad_totals',{p_platform:platform,p_from:r.s,p_to:r.e,p_limit:1000})
   ]);
   const err=cur.error||prev.error||days.error||ads.error;
   if(err){ $('obBody').innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(err.message)+'</div>'; return; }
@@ -38066,18 +38251,25 @@ function obAdsPaint(){
   // ---- header: period picker, account picker, freshness
   const lg=window._obLog, lastOk=accs.reduce(function(m,a){ return a.last_ok_at&&(!m||a.last_ok_at>m)?a.last_ok_at:m; },null);
   const errs=accs.filter(function(a){ return a.last_error; });
-  let fresh='<span style="font-size:12.5px;color:var(--slate)"><i class="fa-solid fa-clock-rotate-left"></i> '
-    +(lastOk?'Straight from '+W.src+', updated '+ciAgo(lastOk)+' (every 3 hours)':'Not read from '+W.src+' yet')+'</span>';
   let warn='';
   if(!lastOk&&lg&&!lg.ok) warn=obSetupNote(platform,lg.message||'');
-  else if(errs.length) warn='<div class="card card-pad" style="border-color:#fcd34d;background:#fffbeb;color:#92400e;font-size:12.5px;margin-bottom:14px"><i class="fa-solid fa-triangle-exclamation"></i> Could not be read on the last run, so their figures may be behind: '
-    +errs.map(function(a){ return '<b>'+esc(a.name||a.account_id)+'</b> ('+esc(String(a.last_error).slice(0,140))+')'; }).join('; ')+'</div>';
+  else if(errs.length){
+    // Never read = no figures at all for that account; read before = figures up to that time.
+    const never=errs.filter(function(a){ return !a.last_ok_at; }), behind=errs.filter(function(a){ return a.last_ok_at; });
+    const nm=function(l){ return l.map(function(a){ return '<b>'+esc(a.project||a.name||a.account_id)+'</b>'; }).join(', '); };
+    const noAccess=platform==='meta'&&errs.every(function(a){ return /\(#200\)|ads_read|ads_management/i.test(a.last_error); });
+    warn='<div class="card card-pad" style="border-color:#fcd34d;background:#fffbeb;color:#92400e;font-size:13px;line-height:1.55;margin-bottom:14px"><i class="fa-solid fa-triangle-exclamation"></i> '
+      +(never.length?'<b>Not included below</b> - '+(noAccess?'Facebook has not given JainE access to':'could not be read yet:')+' '+nm(never)+'. Their spend and '+W.res.toLowerCase()+' are missing from every figure on this page.':'')
+      +(behind.length?(never.length?'<br>':'')+'Could not be read on the last run, so their figures stop at the last good read: '+nm(behind)+'.':'')
+      +(noAccess?'<div style="margin-top:6px;font-size:12px">To fix (a Meta Business Manager admin): Business Settings → Users → System users → the JainE system user → Assign assets → Ad accounts → tick these accounts with <b>View performance</b>. They are read within 3 hours after that.</div>'
+        :'<div style="margin-top:6px;font-size:12px">'+errs.map(function(a){ return esc(a.project||a.name)+': '+esc(String(a.last_error).slice(0,140)); }).join('<br>')+'</div>')
+      +'</div>';
+  }
   $('obHead').innerHTML='<div class="ob-bar">'
       +compSelHtml('obPer',OB_PERIODS,OB_P.period,"OB_P.period=this.value;OB_P.showAds=12;obAdsLoad()")
       +(OB_P.period==='custom'?'<input type="date" value="'+esc(r.s)+'" onchange="OB_P.from=this.value;obAdsLoad()"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(r.e)+'" onchange="OB_P.to=this.value;obAdsLoad()">':'')
       +(accs.length>1?compSelHtml('obAcc',[['all','All '+(platform==='meta'?'projects':'accounts')]].concat(accs.map(function(a){ return [a.account_id,a.project||a.name||a.account_id]; })),OB_P.acct,"OB_P.acct=this.value;OB_P.showAds=12;obAdsPaint()"):'')
       +'<span style="font-size:12.5px;color:var(--slate)">'+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+' · compared with the '+r.n+' days before</span>'
-      +'<span style="margin-left:auto">'+fresh+'</span>'
     +'</div>'+warn;
   if(!lastOk&&!(window._obCur||[]).length){ $('obBody').innerHTML=''; return; }
   // ---- KPIs
@@ -38121,16 +38313,19 @@ function obAdsPaint(){
     html+='<div style="font-weight:700;font-size:13.5px;margin:4px 0 10px">Ads by spend <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' that ran in this period</span></div><div class="ob-ads">'
       +shown.map(function(a){
         const e=E['ad:'+a.ad_id]||{};
+        // A picture when the ad has one; otherwise its words, set out the way the ad itself reads
+        // (Google: headlines, then the description).
+        const words=String(e.body||e.name||('Ad '+a.ad_id)).split('\n');
         const pic=e.thumbnail?'<div class="pic"><img src="'+esc(e.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" alt=""></div>'
-          :'<div class="txt">'+esc(e.body||e.name||('Ad '+a.ad_id))+'</div>';
+          :'<div class="txt">'+(platform==='google'?'<div class="sp">Sponsored</div>':'')+'<div class="h">'+esc(words[0])+'</div>'+(words[1]?'<div class="d">'+esc(words.slice(1).join(' '))+'</div>':'')+'</div>';
         return '<div class="ob-ad">'+pic+'<div style="padding:9px 12px 0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(e.name||'')+'">'+esc(e.name||('Ad '+a.ad_id))+'</div>'
           +'<div style="padding:0 12px;font-size:11.5px;color:var(--slate)">'+esc(aName[a.account_id]||'')+' · '+st(e.status)+'</div>'
           +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+W.res+'</span><b>'+obNum(a.results,platform==='google'?1:0)+'</b><span>'+W.per+'</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b></div></div>';
       }).join('')+'</div>'
-      +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="OB_P.showAds+=24;obAdsPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
+      +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="OB_P.showAds+='+obAdStep(ads.length)+';obAdsPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
   }
   html+='<div style="font-size:11.5px;color:var(--slate);margin:16px 0 4px">'+(platform==='meta'
-      ?'Figures are Meta\'s own, using each account\'s attribution setting - the same as Ads Manager. Leads = Meta\'s "Leads" count. Reach is not shown: it counts unique people, so it cannot be added across days or campaigns.'
+      ?'Figures are Meta\'s own, using each account\'s attribution setting - the same as Ads Manager. Results = Ads Manager\'s "Results" column for each campaign - leads, WhatsApp chats started, ThruPlays or engagements, whatever the campaign is set to get - so totals add different kinds together, as Ads Manager\'s do. Reach is not shown: it counts unique people, so it cannot be added across days or campaigns.'
       :'Figures are Google Ads\' own. Conversions = Google\'s "Conversions" column (it can include fractions and every conversion action set as primary). Google keeps adding late conversions to recent days for up to 30 days, so those can still rise.')+'</div>';
   $('obBody').innerHTML=html;
   // chart: day-by-day for the chosen account, or all
@@ -38139,6 +38334,9 @@ function obAdsPaint(){
   if(OB_P.acct!=='all') days=null;   // per-account days come from the campaign rows below
   obDrawChart(c,platform,r,days);
 }
+// How many more ads one Show more adds: whatever remains after the first 12, split over three
+// clicks and rounded up to whole rows of four - so every ad is on screen by the third click.
+function obAdStep(total){ return Math.max(4,Math.ceil(Math.ceil(Math.max(0,total-12)/3)/4)*4); }
 async function obDrawChart(c,platform,r,days){
   const W=OB_ADS_WORD[platform];
   if(!days){

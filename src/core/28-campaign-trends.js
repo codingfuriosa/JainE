@@ -3243,9 +3243,10 @@ async function compMetaView(host,key){
   if(tab!==COMP_TAB){ COMP_TAB=tab; COMP_F.wl='all'; }
   /* Kept bare (26 Oct 2026, as asked: "remove so much text"): no explanatory paragraph and no
      schedule / credits line. Competitor Data has no Add or Pull button either - competitors are
-     pulled only by the scheduled job. Our Brand and Channel Partners keep Add and Pull all now. */
+     pulled only by the scheduled job. Channel Partners keeps Add and Pull all now. Our Brand lost
+     them too (2 Nov 2026, as asked: "it looks bad") - our own pages are pulled by the nightly job. */
   host.innerHTML=''
-    +(COMP_TAB==='competitors'?'':'<div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin:0 0 12px">'
+    +(COMP_TAB!=='partners'?'':'<div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin:0 0 12px">'
         +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add '+esc(compTabNoun())+'</button>'
         +'<button class="btn btn-primary" id="compSyncBtn" onclick="compManualPull()"><i class="fa-solid fa-rotate"></i> Pull all now</button>'
       +'</div>')
@@ -3272,6 +3273,7 @@ async function compCheckProxy(){
     ?'<div class="card card-pad" style="margin:0 0 14px;border-color:#fecaca;background:#fef2f2;color:#b91c1c;display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px">'
       +'<span style="flex:1;min-width:220px"><i class="fa-solid fa-plug-circle-xmark"></i> <b>Facebook ads are not updating.</b> JainE\'s sign-in to Proxy has expired.</span>'
       +'<button class="btn btn-primary" onclick="compProxyModal()"><i class="fa-solid fa-plug"></i> Reconnect Proxy</button></div>'
+    :COMP_TAB==='brands'?''   // Our Brand: no Proxy accounts button unless the pull is broken
     :'<div style="display:flex;justify-content:flex-end;margin:0 0 8px"><button class="btn" style="height:30px;font-size:12.5px" onclick="compProxyModal()" title="The Proxy accounts Facebook ads are pulled with"><i class="fa-solid fa-plug"></i> Proxy accounts</button></div>';
 }
 async function compProxyCall(action,body){
@@ -3917,7 +3919,9 @@ function compPaintStatus(){
   if(!host) return;
   const run=s.run;
   let runLine='';
-  if(run && Number(run.finished)<Number(run.pages)){
+  /* Only while pages of it are actually still queued (2 Nov 2026). The 14 Oct pull counted 53 pages; 8 were
+     switched off before their turn, so it ended at 45 and this line said "45 of 53" with a spinner for weeks. */
+  if(run && pendingManual>0 && Number(run.finished)<Number(run.pages)){
     const days=Math.ceil(pendingManual/spare);
     runLine='<div><i class="fa-solid fa-spinner fa-spin" style="color:#0369a1"></i> Manual pull from '+esc(fmtDate(run.requested_at))
       +': <b>'+Number(run.finished)+' of '+Number(run.pages)+'</b> pages done'

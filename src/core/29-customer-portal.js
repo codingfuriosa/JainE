@@ -689,6 +689,8 @@ function cpaParseOutstanding(wb){
   return cpaParseFlatSheet(wb,'Net Outstanding',['Booking No.','Customer Name','Unit No.','Customer Status','Net Outstanding']).map(get=>({
     businessUnit:get('Business Unit'),bookingNo:get('Booking No.')!=null?String(get('Booking No.')):null,
     customerName:get('Customer Name'),unitCode:get('Unit No.'),tower:get('Level3'),status:get('Customer Status'),
+    // 2 Nov 2026: read so a booking JAIN-E knows only from this file (older customers) has an email to remind.
+    email:xlsxText(get('Email ID')),mobile:xlsxText(get('Mobile No.')),pan:xlsxText(get('PAN')),
     totalConsideration:get('Total Consideration'),billOutstanding:get('Bill Outstanding'),onAccount:get('On Account'),
     netOutstanding:get('Net Outstanding'),lateFee:get('Late Payment Fee Accrued As on Date'),
     noOfBills:get('No. Of Bills')!=null?Number(get('No. Of Bills')):null,

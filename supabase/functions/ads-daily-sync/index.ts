@@ -14,8 +14,8 @@
 //   Each read REPLACES the account's rows for exactly those days (delete, then insert), so a day
 //   holds what the platform reports for it now and nothing else. Campaign and ad names, status,
 //   budget, and the ad's picture / text are refreshed alongside.
-//   results = Facebook leads: action 'lead' (Meta's total of leads), else
-//             'onsite_conversion.lead_grouped' (instant-form leads). Never the sum of every
+//   results = Facebook: Ads Manager's "Results" column, whatever its kind (see fbResult - since
+//             3 Nov 2026; before that form leads only). Never the sum of every
 //             lead-like action - those overlap and double count.
 //             Google conversions: metrics.conversions, Google's own "Conversions" column.
 //   Facebook uses the account's own attribution setting (use_unified_attribution_setting), the
@@ -39,7 +39,10 @@ const G_SEC = Deno.env.get('GOOGLE_ADS_CLIENT_SECRET') || '', G_REFRESH = Deno.e
 const G_LOGIN = (Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID') || '').replace(/\D/g, '');
 const G_CUSTS = (Deno.env.get('GOOGLE_ADS_CUSTOMER_IDS') || '').split(/[^0-9]+/).filter((s) => s.length >= 8);
 
-const RECENT = { meta: 7, google: 30 } as Record<string, number>;
+// Meta keeps crediting leads and chats to the day of the ad for up to 28 days (3 Nov 2026: days
+// 8-28 days old were found behind Ads Manager), so the last 28 days are read again - for Facebook
+// every 3 hours, the last 3 days every run (see fbFullDue).
+const RECENT = { meta: 28, google: 30 } as Record<string, number>;
 const CHUNK = { meta: 30, google: 60 } as Record<string, number>, HISTORY = 395;   // history read per run, back to ~13 months
 let T0 = Date.now();
 const left = () => 115_000 - (Date.now() - T0);   // the platform stops a run at 150 s
@@ -78,16 +81,100 @@ function fbLeads(actions: any) {
   const lead = f('lead'); if (lead !== null) return lead;
   const grouped = f('onsite_conversion.lead_grouped'); return grouped !== null ? grouped : 0;
 }
+/* RESULTS AS ADS MANAGER SHOWS THEM (3 Nov 2026, as asked: "the Results is equal to the Leads in
+   JainE"). A WhatsApp lead campaign's Results column in Ads Manager is its WhatsApp chats started
+   (Gurukul, 2 Nov: 14), which a form-lead count showed as 0. Meta's own `results` figure is read and
+   kept whatever its kind - leads, chats started, ThruPlays (Eco City Awareness), post engagement -
+   because Ads Manager's Results column shows them all (3 Nov, as asked: "some Campaign's results are
+   not being taken"). If Meta will not give `results` (older API), it is worked out from the
+   actions: form lead, else instant-form lead, else chats started. */
+let fbHasResults = true;
+function fbResult(r: any) {
+  const res = Array.isArray(r.results) ? r.results : null;
+  if (res) {
+    let n = 0, hit = false;
+    for (const x of res) {
+      if (!x) continue;
+      const v = (x.values || []).find((y: any) => !y.attribution_windows || y.attribution_windows.includes('default')) || (x.values || [])[0];
+      if (v) { n += num(v.value); hit = true; }
+    }
+    if (hit) return n;
+    if (res.length) return 0;          // Meta says "not available" for that day: no results
+  }
+  const l = fbLeads(r.actions); if (l) return l;
+  const a = Array.isArray(r.actions) ? r.actions.find((x: any) => x && x.action_type === 'onsite_conversion.messaging_conversation_started_7d') : null;
+  return a ? num(a.value) : 0;
+}
+async function fbInsights(base: string, fields: string) {
+  if (fbHasResults) {
+    try { return await fbAll(base + '&fields=' + fields + ',results'); }
+    catch (e) { if (!/results|\(#100\)|code 100/i.test(String((e as Error).message))) throw e; fbHasResults = false; console.log('meta: no results field - ' + String((e as Error).message).slice(0, 160)); }
+  }
+  return await fbAll(base + '&fields=' + fields);
+}
+// Whether an account's days 4-28 back are due a fresh read: any of them last read over 3 hours ago.
+async function fbFullDue(acc: string, today: string) {
+  const { data } = await db.from('ads_daily').select('day').eq('platform', 'meta').eq('account_id', acc)
+    .gte('day', addD(today, -(RECENT.meta - 1))).lte('day', addD(today, -3)).lt('synced_at', new Date(Date.now() - 3 * 3600_000).toISOString()).limit(1);
+  return !!(data && data.length);
+}
+// Names, status, budgets and pictures: once an hour per account is plenty.
+async function fbEntitiesDue(acc: string) {
+  const { data } = await db.from('ads_entities').select('updated_at').eq('platform', 'meta').eq('account_id', acc).order('updated_at', { ascending: false }).limit(1);
+  return !(data && data[0] && Date.parse(data[0].updated_at) > Date.now() - 3600_000);
+}
+// The same read in 10-day pieces, newest first - a month of every ad by day is too heavy for Meta
+// on the bigger accounts.
+async function fbReadPieces(acc: string, s: string, e: string) {
+  let n = 0;
+  for (let to = e; to >= s; ) { const from = addD(to, -9) < s ? s : addD(to, -9); n += await fbRead(acc, from, to); to = addD(from, -1); }
+  return n;
+}
+/* CHECK AGAINST META ({platform:'meta', verify:{from,to,account?}}; 3 Nov 2026). Reads every
+   campaign's every day afresh from Meta and compares it with what JainE holds - spend, impressions,
+   clicks and results. Changes nothing; returns each day that differs. */
+async function fbVerify(from: string, to: string, only?: string) {
+  const { data: accs } = await db.from('ads_accounts').select('account_id,project').eq('platform', 'meta').eq('include', true);
+  const out: any[] = []; let checked = 0; const done: string[] = [];
+  for (const a of accs || []) {
+    if (only && a.account_id !== only) continue;
+    if (left() < 25_000) { out.push({ project: a.project, note: 'not checked - out of time' }); continue; }
+    const meta: Record<string, any> = {};
+    for (let e = to; e >= from; ) {
+      const s = addD(e, -9) < from ? from : addD(e, -9);
+      const base = `https://graph.facebook.com/${FBV}/act_${a.account_id}/insights?time_increment=1&use_unified_attribution_setting=true&limit=500`
+        + `&time_range=${encodeURIComponent(JSON.stringify({ since: s, until: e }))}&access_token=${META_TOKEN}&level=campaign`;
+      for (const r of await fbInsights(base, 'campaign_id,spend,impressions,clicks,actions'))
+        meta[r.campaign_id + '|' + r.date_start] = { spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r) };
+      e = addD(s, -1);
+    }
+    const mine: Record<string, any> = {};
+    for (let p = 0; ; p += 1000) {
+      const { data } = await db.from('ads_daily').select('campaign_id,day,spend,impressions,clicks,results').eq('platform', 'meta').eq('account_id', a.account_id).gte('day', from).lte('day', to).range(p, p + 999);
+      for (const r of data || []) mine[r.campaign_id + '|' + r.day] = r;
+      if (!data || data.length < 1000) break;
+    }
+    for (const k of new Set([...Object.keys(meta), ...Object.keys(mine)])) {
+      const m = meta[k] || { spend: 0, impressions: 0, clicks: 0, results: 0 }, j0 = mine[k] || { spend: 0, impressions: 0, clicks: 0, results: 0 };
+      checked++;
+      const d: any = {};
+      for (const f of ['spend', 'impressions', 'clicks', 'results']) if (Math.abs(num(m[f]) - num(j0[f])) > 0.005) d[f] = { meta: num(m[f]), jaine: num(j0[f]) };
+      if (Object.keys(d).length) out.push({ project: a.project, campaign: k.split('|')[0], day: k.split('|')[1], ...d });
+    }
+    done.push(a.project);
+  }
+  return { checked, done, mismatches: out.length, rows: out.slice(0, 300) };
+}
 async function fbRead(acc: string, s: string, e: string) {
   const base = `https://graph.facebook.com/${FBV}/act_${acc}/insights?time_increment=1&use_unified_attribution_setting=true&limit=500`
     + `&time_range=${encodeURIComponent(JSON.stringify({ since: s, until: e }))}&access_token=${META_TOKEN}`;
-  const camp = await fbAll(base + '&level=campaign&fields=campaign_id,spend,impressions,clicks,actions');
-  const ads = await fbAll(base + '&level=ad&fields=ad_id,campaign_id,spend,impressions,clicks,actions');
+  const camp = await fbInsights(base + '&level=campaign', 'campaign_id,spend,impressions,clicks,actions');
+  const ads = await fbInsights(base + '&level=ad', 'ad_id,campaign_id,spend,impressions,clicks,actions');
   const now = new Date().toISOString();
   const cRows = camp.filter((r) => r.campaign_id && r.date_start).map((r) => ({ platform: 'meta', account_id: acc, campaign_id: r.campaign_id, day: r.date_start,
-    spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbLeads(r.actions), synced_at: now }));
+    spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), synced_at: now }));
   const aRows = ads.filter((r) => r.ad_id && r.date_start).map((r) => ({ platform: 'meta', account_id: acc, campaign_id: r.campaign_id || null, ad_id: r.ad_id, day: r.date_start,
-    spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbLeads(r.actions), synced_at: now }));
+    spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), synced_at: now }));
   await replaceDays('ads_daily', 'meta', acc, s, e, cRows, 'platform,campaign_id,day');
   await replaceDays('ads_ad_daily', 'meta', acc, s, e, aRows, 'platform,ad_id,day');
   return cRows.length + aRows.length;
@@ -107,11 +194,14 @@ async function fbEntities(acc: string) {
   const rows: any[] = camps.map((c) => ({ platform: 'meta', kind: 'campaign', id: c.id, account_id: acc, campaign_id: c.id, name: c.name, status: c.effective_status || null, objective: c.objective || null,
     daily_budget: c.daily_budget != null ? num(c.daily_budget) / 100 : (sd[c.id] != null ? sd[c.id] / 100 : null),
     lifetime_budget: c.lifetime_budget != null && num(c.lifetime_budget) > 0 ? num(c.lifetime_budget) / 100 : (sl[c.id] != null ? sl[c.id] / 100 : null), updated_at: now }));
-  const ads = await fbAll(`https://graph.facebook.com/${FBV}/act_${acc}/ads?fields=id,name,campaign_id,effective_status,creative{thumbnail_url,image_url,body,title}&thumbnail_width=320&thumbnail_height=320&limit=200${tok}`);
+  // The picture size has to be asked for on the creative itself (a size on the ads edge is ignored,
+  // and Meta then sends a 64 x 64 thumbnail that looks blurred on the card). image_url is the
+  // full-size picture of an image ad; videos and carousels have none, so their 640 px frame is used.
+  const ads = await fbAll(`https://graph.facebook.com/${FBV}/act_${acc}/ads?fields=id,name,campaign_id,effective_status,creative.thumbnail_width(640).thumbnail_height(640){thumbnail_url,image_url,body,title}&limit=200${tok}`);
   for (const a of ads) {
     const cr = a.creative || {};
     rows.push({ platform: 'meta', kind: 'ad', id: a.id, account_id: acc, campaign_id: a.campaign_id || null, name: a.name, status: a.effective_status || null,
-      thumbnail: cr.thumbnail_url || cr.image_url || null, body: [cr.title, cr.body].filter(Boolean).join(' - ') || null, updated_at: now });
+      thumbnail: cr.image_url || cr.thumbnail_url || null, body: [cr.title, cr.body].filter(Boolean).join(' - ') || null, updated_at: now });
   }
   await upsertEntities(rows);
 }
@@ -169,17 +259,51 @@ async function gEntities(cust: string) {
       daily_budget: daily ? amt : null, lifetime_budget: daily ? null : amt, updated_at: now }; });
   const ads = await gaql(cust, "SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_display_ad.headlines, ad_group_ad.status, campaign.id FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'");
   const seen: Record<string, boolean> = {};
+  let look: Record<string, { pic: string | null, txt: string | null }> = {};
+  try { look = await gCreatives(cust); } catch (e) { console.log('google creatives ' + cust + ': ' + String((e as Error).message || e).slice(0, 200)); }
   for (const x of ads) {
     const ad = (x.adGroupAd && x.adGroupAd.ad) || {}; const id = String(ad.id || ''); if (!id || seen[id]) continue; seen[id] = true;
-    const txt = gAdText(x);
-    rows.push({ platform: 'google', kind: 'ad', id, account_id: cust, campaign_id: String((x.campaign || {}).id || ''), name: ad.name || txt || String(ad.type || 'Ad').replace(/_/g, ' ').toLowerCase(),
-      status: (x.adGroupAd && x.adGroupAd.status) || null, objective: ad.type || null, body: txt, updated_at: now });
+    const lk = look[id] || { pic: null, txt: null };
+    const txt = lk.txt || gAdText(x);
+    rows.push({ platform: 'google', kind: 'ad', id, account_id: cust, campaign_id: String((x.campaign || {}).id || ''), name: ad.name || gAdText(x) || String(ad.type || 'Ad').replace(/_/g, ' ').toLowerCase(),
+      status: (x.adGroupAd && x.adGroupAd.status) || null, objective: ad.type || null, body: txt, thumbnail: lk.pic, updated_at: now });
   }
   await upsertEntities(rows);
 }
+// Each ad's picture and words as Google shows them: headlines, then the first description on a new
+// line; the picture is the ad's first image, or its first YouTube video's frame. Read apart from the
+// names above, so a failure here leaves names, status and budget still refreshed.
+async function gCreatives(cust: string) {
+  const ads = await gaql(cust, "SELECT ad_group_ad.ad.id, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, "
+    + "ad_group_ad.ad.responsive_display_ad.headlines, ad_group_ad.ad.responsive_display_ad.descriptions, ad_group_ad.ad.responsive_display_ad.marketing_images, ad_group_ad.ad.responsive_display_ad.square_marketing_images, "
+    + "ad_group_ad.ad.demand_gen_multi_asset_ad.headlines, ad_group_ad.ad.demand_gen_multi_asset_ad.descriptions, ad_group_ad.ad.demand_gen_multi_asset_ad.marketing_images, ad_group_ad.ad.demand_gen_multi_asset_ad.square_marketing_images, ad_group_ad.ad.demand_gen_multi_asset_ad.portrait_marketing_images, "
+    + "ad_group_ad.ad.demand_gen_video_responsive_ad.headlines, ad_group_ad.ad.demand_gen_video_responsive_ad.descriptions, ad_group_ad.ad.demand_gen_video_responsive_ad.videos "
+    + "FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'");
+  const want: Record<string, { img: string[], vid: string[], txt: string | null }> = {}; const assets: Record<string, boolean> = {};
+  const texts = (l: any) => (l || []).map((y: any) => y && y.text).filter(Boolean);
+  const refs = (l: any) => (l || []).map((y: any) => y && y.asset).filter(Boolean);
+  for (const x of ads) {
+    const ad = (x.adGroupAd && x.adGroupAd.ad) || {}; const id = String(ad.id || ''); if (!id || want[id]) continue;
+    const p = ad.responsiveSearchAd || ad.responsiveDisplayAd || ad.demandGenMultiAssetAd || ad.demandGenVideoResponsiveAd || {};
+    const head = texts(p.headlines).slice(0, 3).join(' | '), desc = texts(p.descriptions)[0] || '';
+    const img = refs(p.marketingImages).concat(refs(p.squareMarketingImages), refs(p.portraitMarketingImages)), vid = refs(p.videos);
+    img.concat(vid).forEach((r: string) => { assets[r] = true; });
+    want[id] = { img, vid, txt: [head, desc].filter(Boolean).join('\n') || null };
+  }
+  const url: Record<string, string> = {};
+  if (Object.keys(assets).length) {
+    const a = await gaql(cust, "SELECT asset.resource_name, asset.image_asset.full_size.url, asset.youtube_video_asset.youtube_video_id FROM asset WHERE asset.type IN ('IMAGE', 'YOUTUBE_VIDEO')");
+    for (const r of a) { const s = r.asset || {}; if (!assets[s.resourceName]) continue;
+      const u = (s.imageAsset && s.imageAsset.fullSize && s.imageAsset.fullSize.url) || (s.youtubeVideoAsset && s.youtubeVideoAsset.youtubeVideoId ? 'https://i.ytimg.com/vi/' + s.youtubeVideoAsset.youtubeVideoId + '/hqdefault.jpg' : '');
+      if (u) url[s.resourceName] = u; }
+  }
+  const out: Record<string, { pic: string | null, txt: string | null }> = {};
+  for (const id in want) { const w = want[id]; const pic = w.img.concat(w.vid).map((r) => url[r]).filter(Boolean)[0] || null; out[id] = { pic, txt: w.txt }; }
+  return out;
+}
 
 // ---------------------------------------------------------------- run
-async function run(platform: string) {
+async function run(platform: string, histOnly = false) {
   if (platform === 'meta' && !META_TOKEN) throw new Error('No Facebook access key yet: add META_SYSTEM_USER_TOKEN as a Supabase secret (see the Facebook tab for the steps)');
   if (platform === 'google' && (!G_DEV || !G_REFRESH || !G_CUSTS.length)) throw new Error('Google Ads secrets are missing');
   if (platform === 'google') {
@@ -187,25 +311,68 @@ async function run(platform: string) {
     if (error) throw new Error('ads_accounts: ' + error.message);
   }
   // Stalest account first, so when a run runs out of time the next run starts with the ones it missed.
-  const { data: accs } = await db.from('ads_accounts').select('*').eq('platform', platform).eq('include', true).order('last_ok_at', { ascending: true, nullsFirst: true });
+  const { data: all } = await db.from('ads_accounts').select('*').eq('platform', platform).eq('include', true).order('last_ok_at', { ascending: true, nullsFirst: true });
+  // Catching up: the accounts whose history is furthest from done first, finished ones left out.
+  const accs = !histOnly ? all : (all || []).filter((a: any) => !a.backfilled_from || a.backfilled_from > addD(ist(), -HISTORY))
+    .sort((x: any, y: any) => String(y.backfilled_from || '9999').localeCompare(String(x.backfilled_from || '9999')));
   const today = ist(), oldest = addD(today, -HISTORY);
   let rows = 0; const notes: string[] = [];
   for (const a of accs || []) {
     if (left() < 50_000) { notes.push('left for the next run: ' + (a.name || a.account_id)); continue; }
     try {
       const s = addD(today, -(RECENT[platform] - 1));
-      rows += platform === 'meta' ? await fbRead(a.account_id, s, today) : await gRead(a.account_id, s, today);
-      if (platform === 'meta') await fbEntities(a.account_id); else await gEntities(a.account_id);
+      // histOnly ({backfill:true}): skip the recent days and names, which the hourly run keeps
+      // fresh, and spend the whole run on older months - used to catch up a re-read of history.
+      if (!histOnly && platform === 'meta') {
+        /* FEWER REQUESTS TO META (5 Nov 2026: "Application request limit reached" twice in a day,
+           with every account read 28 days deep, plus every name and picture, every 15 minutes).
+           Each run: the last 3 days (today, yesterday, the day before - what Meta is still moving).
+           The full 28 days only when that account's older days were last read over 3 hours ago,
+           and names / status / budgets / pictures once an hour. Same figures, a fraction of the calls. */
+        rows += await fbReadPieces(a.account_id, (await fbFullDue(a.account_id, today)) ? s : addD(today, -2), today);
+        if (await fbEntitiesDue(a.account_id)) await fbEntities(a.account_id);
+      } else if (!histOnly) {
+        rows += await gRead(a.account_id, s, today);
+        await gEntities(a.account_id);
+      }
       let from = a.backfilled_from && a.backfilled_from < s ? a.backfilled_from : s;
-      if (from > oldest && left() > 75_000) {
+      // Facebook's older months go 10 days at a time: a month of a big account in one request
+      // fails at Meta, and short pieces let a run stop between them when its time is up.
+      while (platform === 'meta' && from > oldest && left() > 40_000) {
+        const ps = addD(from, -10) < oldest ? oldest : addD(from, -10);
+        rows += await fbRead(a.account_id, ps, addD(from, -1));
+        from = ps;
+      }
+      while (platform !== 'meta' && from > oldest && left() > 75_000) {
         const cs = addD(from, -CHUNK[platform]) < oldest ? oldest : addD(from, -CHUNK[platform]), ce = addD(from, -1);
-        rows += platform === 'meta' ? await fbRead(a.account_id, cs, ce) : await gRead(a.account_id, cs, ce);
-        from = cs;
+        try {
+          rows += platform === 'meta' ? await fbRead(a.account_id, cs, ce) : await gRead(a.account_id, cs, ce);
+          from = cs;
+        } catch (e) {
+          // A month of every ad, day by day, can be too heavy for Meta on a big account (Gurukul,
+          // 3 Nov 2026: "unknown error" / "temporarily unavailable" every time). Read it again in
+          // 10-day pieces, newest first, keeping each piece that arrives; the rest waits for the next run.
+          const msg = String((e as Error).message || e);
+          if (platform !== 'meta' || !/code [12]\)|temporarily|unknown error|reduce the amount/i.test(msg)) throw e;
+          while (from > cs && left() > 40_000) {
+            const ps = addD(from, -10) < cs ? cs : addD(from, -10);
+            rows += await fbRead(a.account_id, ps, addD(from, -1));
+            from = ps;
+          }
+          notes.push((a.name || a.account_id) + ': older days read in 10-day pieces');
+          break;
+        }
       }
       await db.from('ads_accounts').update({ backfilled_from: from, last_ok_at: new Date().toISOString(), last_error: null }).eq('platform', platform).eq('account_id', a.account_id);
     } catch (e) {
       const msg = String((e as Error).message || e).slice(0, 500);
       notes.push((a.name || a.account_id) + ': ' + msg);
+      // Meta's request limit: asking again for the other accounts only keeps it closed for longer.
+      if (platform === 'meta' && /(code (4|17|32|613))|request limit/i.test(msg)) {
+        await db.from('ads_accounts').update({ last_error: msg }).eq('platform', platform).eq('account_id', a.account_id);
+        notes.push('stopped early: Meta request limit - the next run carries on');
+        break;
+      }
       await db.from('ads_accounts').update({ last_error: msg }).eq('platform', platform).eq('account_id', a.account_id);
     }
   }
@@ -231,9 +398,10 @@ Deno.serve(async (req) => {
   if (!(await caller(req))) return j({ error: 'not allowed' }, 401);
   const platform = body.platform === 'google' ? 'google' : body.platform === 'meta' ? 'meta' : '';
   if (!platform) return j({ error: 'platform must be meta or google' }, 400);
+  if (body.verify && platform === 'meta') return j(await fbVerify(String(body.verify.from), String(body.verify.to), body.verify.account || undefined));
   const { data: log } = await db.from('ads_sync_log').insert({ platform }).select('id').single();
   try {
-    const r = await run(platform);
+    const r = await run(platform, !!body.backfill);
     await db.from('ads_sync_log').update({ finished_at: new Date().toISOString(), ok: !r.notes.some((n) => !n.startsWith('left for the next run')), rows: r.rows, message: r.notes.join(' | ') || 'ok' }).eq('id', log?.id);
     return j({ ok: true, ...r });
   } catch (e) {
