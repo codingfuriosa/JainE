@@ -218,13 +218,10 @@ async function sfManage(){
   }catch(e){ b.innerHTML=sfEmpty('fa-triangle-exclamation','System Feedbacks could not load',e.message||String(e)); return; }
   const by={}; resp.forEach(function(r){ (by[r.item_id]=by[r.item_id]||[]).push(r); });
   SF_DATA={items:items,by:by};
-  const nOpen=items.filter(function(i){ return i.is_active; }).length;
   b.innerHTML='<div class="sf-bar"><div><h2>System Feedbacks</h2><p>New features and bug fixes by module, rated by Sales and Pre Sales. Only the Systems department sees the ratings.</p></div>'
     +'<button class="btn btn-primary" onclick="sfOpenNew()"><i class="fa-solid fa-plus"></i> New System Feedback</button></div>'
     +'<div class="sf-tools">'
     +'<div class="sf-filter" id="sfKindF">'+['All'].concat(SF_KINDS).map(function(k){ return '<button data-k="'+k+'" class="'+(k===SF_FILTER?'on':'')+'" onclick="sfSetFilter(\''+k+'\')">'+(k==='All'?'All':k==='New Feature'?'New Features':'Bugs Fixed')+'</button>'; }).join('')+'</div>'
-    +'<div class="sf-filter"><button class="'+(SF_VIEW==='open'?'on':'')+'" onclick="sfSetView(\'open\',sfManageList)">Open <span class="n">'+nOpen+'</span></button>'
-    +'<button class="'+(SF_VIEW==='archive'?'on':'')+'" onclick="sfSetView(\'archive\',sfManageList)"><i class="fa-solid fa-box-archive"></i> Archive <span class="n">'+(items.length-nOpen)+'</span></button></div>'
     +sfSearchBox('sfManageQ')+'</div>'
     +'<div id="sfRes"></div>';
   sfManageList();
@@ -232,25 +229,50 @@ async function sfManage(){
 function sfManageList(){
   const host=$('sfRes'); if(!host||!SF_DATA) return;
   const items=SF_DATA.items, by=SF_DATA.by;
-  const shown=items.filter(function(i){ return (SF_VIEW==='archive'?!i.is_active:i.is_active)&&(SF_FILTER==='All'||i.kind===SF_FILTER)&&sfMatches(i); });
+  const shown=items.filter(function(i){ return (SF_FILTER==='All'||i.kind===SF_FILTER)&&sfMatches(i); });   // makers: open and archived in one list (6 Nov 2026)
   if(!shown.length){
     host.innerHTML=SF_Q?sfEmpty('fa-magnifying-glass','Nothing matches "'+SF_Q+'"','Try a module, a name or a person.')
-      :SF_VIEW==='archive'?sfEmpty('fa-box-archive','The Archive is empty','Archived feedbacks take no new ratings and are kept here.')
       :sfEmpty('fa-comment-dots',items.length?'Nothing of this type yet':'No System Feedbacks yet',items.length?'':'Use New System Feedback to post new features or bug fixes, module by module.');
     return;
   }
-  // One card per module; its feedbacks are rows inside the card, not cards of their own.
+  // One quiet row per module, as raters see it (6 Nov 2026, Ayush: the feedbacks inside every card were
+  // too noisy). Its feedbacks are on the module's own page; a search lists the matches inside the row.
   host.innerHTML=sfByModule(shown).map(function(m){
     const rs=[].concat.apply([],m.items.map(function(i){ return by[i.id]||[]; })), avg=sfAvg(rs);
+    const hits=SF_Q?m.items.filter(sfMatches):[];
     return '<div class="sf-mcard"><div class="sf-mcard-hd">'+sfModTitle(m)+sfKindCounts(m.items)
-        +'<span class="sf-mcard-rt">'+(rs.length?sfStars(Math.round(avg))+'<b>'+avg.toFixed(1)+'</b> / 10 · '+rs.length+' rating'+(rs.length===1?'':'s'):'No ratings yet')+'</span></div>'
-      +'<div class="sf-mrows">'+m.items.map(function(i){ const rs=by[i.id]||[], avg=sfAvg(rs);
-        return '<div class="sf-mrow click" onclick="navTo(\'feedback_hub/sys/'+i.id+'\')">'+sfKindTag(i.kind)
-          +'<div class="t"><div class="nm">'+sfHi(i.title)+'</div><div class="sub">'+sfHi(sfFirstLine(i.description))+'</div></div>'
-          +'<span class="ppl">'+sfPeople(i.executed_by)+'</span>'
-          +'<span class="rt">'+(rs.length?'<b>'+avg.toFixed(1)+'</b> / 10 · '+rs.length:'—')+'</span>'
-          +'<i class="fa-solid fa-chevron-right go"></i></div>'; }).join('')
-      +'</div></div>'; }).join('');
+        +'<span class="sf-mcard-rt">'+(rs.length?sfStars(Math.round(avg))+'<b>'+avg.toFixed(1)+'</b> / 10 · '+rs.length+' rating'+(rs.length===1?'':'s'):'No ratings yet')+'</span>'
+        +'<button class="btn" style="margin-left:0" onclick="navTo(\'feedback_hub/sys/m'+m.id+'\')">View feedbacks <i class="fa-solid fa-arrow-right"></i></button></div>'
+      +(hits.length?'<div class="sf-mrows"><div class="sf-hits-lbl">Matching feedbacks</div>'+hits.map(function(i){ return sfSysRow(i,by); }).join('')+'</div>':'')
+      +'</div>'; }).join('');
+}
+function sfSysRow(i,by){
+  const rs=by[i.id]||[], avg=sfAvg(rs);
+  return '<div class="sf-mrow click" onclick="navTo(\'feedback_hub/sys/'+i.id+'\')">'+sfKindTag(i.kind)
+    // an archived one is marked on its row rather than listed apart
+    +'<div class="t"><div class="nm">'+sfHi(i.title)+(i.is_active?'':' <span class="sf-closed" style="margin-left:6px"><i class="fa-solid fa-box-archive"></i> Archived</span>')+'</div><div class="sub">'+sfHi(sfFirstLine(i.description))+'</div></div>'
+    +'<span class="ppl">'+sfPeople(i.executed_by)+'</span>'
+    +'<span class="rt">'+(rs.length?'<b>'+avg.toFixed(1)+'</b> / 10 · '+rs.length:'No ratings')+'</span>'
+    +'<i class="fa-solid fa-chevron-right go"></i></div>';
+}
+/* ---- Systems: one module - its feedbacks, open first, then archived ---- */
+async function sfModPage(v,modId){
+  v.innerHTML=FH_CSS+SF_CSS+'<div class="loader"><div class="spin"></div></div>';
+  let items, resp=[];
+  try{
+    await getPeople(); await sfLoadMods();
+    const a=await sb.schema('feedback').from('system_items').select('*').eq('module_id',modId).order('created_at',{ascending:false}); if(a.error) throw a.error; items=a.data||[];
+    if(items.length){ const r=await sb.schema('feedback').from('system_responses').select('item_id,rating').in('item_id',items.map(function(i){ return i.id; })); if(r.error) throw r.error; resp=r.data||[]; }
+  }catch(e){ v.innerHTML=FH_CSS+SF_CSS+sfEmpty('fa-triangle-exclamation','Could not load',e.message||String(e)); return; }
+  setCrumb(['Feedback','Feedback Hub','System Feedbacks']);
+  const by={}; resp.forEach(function(r){ (by[r.item_id]=by[r.item_id]||[]).push(r); });
+  const avg=sfAvg(resp), q=SF_Q; SF_Q='';
+  const sect=function(label,list){ return list.length?'<div class="sf-mcard"><div class="sf-hits-lbl" style="padding:11px 16px 2px">'+label+' · '+list.length+'</div><div class="sf-mrows" style="border-top:none">'+list.map(function(i){ return sfSysRow(i,by); }).join('')+'</div></div>':''; };
+  v.innerHTML=FH_CSS+SF_CSS+'<div class="fh-page-head"><button class="fh-page-back" title="Back" onclick="goBack(\'feedback_hub/'+(fhCanQrForms()?2:0)+'\')"><i class="fa-solid fa-arrow-left"></i></button>'
+    +'<div style="flex:1;min-width:0"><div class="sf-top" style="margin:0 0 4px">'+sfKindCounts(items)+'</div><h1 style="font-size:19px;margin:0">'+esc(sfModName(modId))+'</h1></div>'
+    +'<div class="sf-mcard-rt" style="margin:0">'+(resp.length?sfStars(Math.round(avg))+'<b>'+avg.toFixed(1)+'</b> / 10 · '+resp.length+' rating'+(resp.length===1?'':'s'):'No ratings yet')+'</div></div>'
+    +'<div style="margin-top:14px">'+(items.length?sect('Feedbacks',items):sfEmpty('fa-comment-dots','No feedbacks in this module'))+'</div>';
+  SF_Q=q;
 }
 // Module card title, and how many New Features / Bugs Fixed it holds
 function sfModTitle(m){ return '<span class="ic"><i class="fa-solid fa-cube"></i></span><div class="nm"><b>'+sfHi(m.name)+'</b></div>'; }

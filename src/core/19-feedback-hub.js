@@ -184,7 +184,7 @@ VIEWS.feedback_hub=async function(v,seg){
   if(seg[0]==='preview')   return fhPreviewPage(v);
   if(seg[0]==='records'&&seg[1]) return fhRecordsPage(v,Number(seg[1]));
   if(seg[0]==='response'&&seg[1]) return fhResponseDetailPage(v,seg[1]);
-  if(seg[0]==='sys'&&seg[1]&&fhIsSystems()) return sfItemPage(v,Number(seg[1]));
+  if(seg[0]==='sys'&&seg[1]&&fhIsSystems()) return /^m\d+$/.test(seg[1])?sfModPage(v,Number(seg[1].slice(1))):sfItemPage(v,Number(seg[1]));
   if(seg[0]==='give'&&seg[1]&&fhIsRater()) return sfRatePage(v,seg[1]);   // m<module> or <item>
   setCrumb(['Feedback','Feedback Hub']);
   // Each person gets only the tabs that are theirs (see canFeedbackHub in 06-nav.js).
