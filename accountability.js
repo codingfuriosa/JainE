@@ -3461,7 +3461,7 @@
   function wfRouteWhat(route){
     if(route==='payment')   return 'Payment: RTP next, where Cheque or No Cheque is chosen';
     if(route==='payment_cheque')    return 'Payment \u00b7 Cheque: RTP, Cheque Preparation, Bill Checking, Audit Checking, Cheque Signing, Bill Filing';
-    if(route==='payment_no_cheque') return 'Payment \u00b7 No Cheque: RTP, Booking Entry, Bill Checking, Audit Checking, Bill Filing';
+    if(route==='payment_no_cheque') return 'Payment \u00b7 No Cheque: RTP, Cheque Preparation, Bill Checking, Audit Checking, Bill Filing';
     if(route==='no_cheque') return 'No Cheque: paid without a cheque \u2014 GST Approval and Bill Filing still happen, the cheque steps do not';
     if(route==='cheque')    return 'Cheque: every step in the normal order';
     return 'The route is chosen at Bill Booking (Payment) or at RTP (Cheque / No Cheque)';
