@@ -4,13 +4,13 @@
    the chart of accounts, ledger opening balances (general, cost / custom ledgers and their sub-ledgers),
    ledger statements and the trial balance, and the posting-ledger rules.
    Shares window.ACX with accounts.js. Functions: supabase/migrations/20261005120000_accounts_postings_reports.sql.
-   Routes: accounts/1/<postings|postsales|chart|openings|ledgers|rules>. The Audit tab (accounts/2) is at the end of this file. */
+   Routes: accounts/1/<postings|postsales|tds|chart|openings|ledgers|rules>. The Audit tab (accounts/2) and the TDS returns (Form 140 file) are at the end of this file. */
 (function(){
 if(window.__ACX_BOOKS_LOADED) return;
 window.__ACX_BOOKS_LOADED=true;
 const X=window.ACX; if(!X){ console.error('accounts-books.js needs accounts.js first'); return; }
 const {S,AC,PU,num,r2,money,drcr,dmy,dmyTime,today,val,chk,fail,rpc,opt,opts,field,vtag,askReason,SRC_LABEL}=X;
-const SECS=[['postings','Bill postings'],['postsales','Post Sales flow'],['chart','Chart of accounts'],['openings','Ledger opening'],['ledgers','Ledgers & trial balance'],['rules','Posting ledgers']];
+const SECS=[['postings','Bill postings'],['postsales','Post Sales flow'],['tds','TDS returns'],['chart','Chart of accounts'],['openings','Ledger opening'],['ledgers','Ledgers & trial balance'],['rules','Posting ledgers']];
 
 window.acxBooksRender=function(host,seg){
   return X.shell(host,seg||[],1,SECS,'postings',{
@@ -18,7 +18,7 @@ window.acxBooksRender=function(host,seg){
       hint:'A bill booked in Purchase or Engineering waits here. Posting it makes the entries: the expense or work cost, input GST (CGST + SGST, or IGST), TDS payable, retention money on an RA bill, and the vendor’s account. Posted bills appear in Transactions › Bills & on-account.'}),
     postsales:renderPostings.bind(null,{sources:['ps_receipt','ps_invoice'],kind:'ps',title:'Post Sales flow',
       hint:'Money receipts from Post Sales are booked as advance received from customers (one account per booking). For invoices, only the GST is booked — the invoice value itself never enters Accounts.'}),
-    chart:renderChart,openings:renderOpenings,ledgers:renderLedgers,rules:renderRules});
+    tds:renderTds,chart:renderChart,openings:renderOpenings,ledgers:renderLedgers,rules:renderRules});
 };
 
 /* =================================================================== POSTINGS */
@@ -670,5 +670,462 @@ window.acxAudRvDownload=function(fmt,btn){
     cols:[{h:'Document'},{h:'Type'},{h:'Document date',t:'d'},{h:'Particulars'},{h:'Amount',t:'n'},{h:'Came from'},{h:'Entered by'},{h:'Entered on'},{h:'Reversed by'},{h:'Reversed on'},{h:'Reason'}],
     rows:list.map(r=>[r.doc_no,r.kind==='opening_bill'?'Opening bill':(X.VTYPE[r.doc_type]||[r.doc_type])[0],r.doc_date,r.particulars||'',r.amount,r.source_type&&r.source_type!=='opening'?'Posting reversed · '+(SRC_LABEL[r.source_type]||r.source_type):'Entered here',r.entered_by||'',dmyTime(r.entered_at),r.reversed_by||'',dmyTime(r.reversed_at),r.reason||'']),
     foot:['Total ('+list.length+')','','','',total,'','','','','','']},btn);
+};
+/* ============================ TDS RETURNS - the FORM 140 FILE (non-salary payments to residents) ============================
+   Builds the text file the Income Tax Department prescribes for the quarterly statement of tax deducted on payments
+   other than salary to residents (Form 140 - the 26Q of the Income-tax Act 1961 renumbered), for Tax Year 2026-27
+   onwards. The file is the INPUT of the File Validation Utility (FVU): FVU checks it and makes the .fvu / zip that is
+   uploaded on the e-filing portal or TRACES.
+   Layout: "File Format for Non-Salary TDS File - Form Number 140 (26Q) - Q1 to Q4", Protean (NSDL e-Gov), Tax Year
+   2026-27 and onwards, version 1.2 (22 Jul 2026): four records - FH file header (18 fields), BH batch header (72),
+   CD challan detail (30) and DD deductee detail (45); '^' delimited, every field present, CRLF after each line.
+   Order: FH, BH, then for each challan its CD followed by the DD rows paid by it. Pure functions: no screen, no database
+   (tds_statement_data gives them their input), so they are checked line by line against the official sheet.
+   Not covered: salary (Form 138), non-residents (Form 144), TCS (Form 143), correction statements, Form 141. */
+const TDSG=(function(){
+  const NL='\r\n';
+  const STATES=[["01","ANDAMAN AND NICOBAR ISLANDS"],["02","ANDHRA PRADESH"],["03","ARUNACHAL PRADESH"],["04","ASSAM"],["05","BIHAR"],["06","CHANDIGARH"],["07","DADRA & NAGAR HAVELI AND DAMAN & DIU"],["09","DELHI"],["10","GOA"],["11","GUJARAT"],["12","HARYANA"],["13","HIMACHAL PRADESH"],["14","JAMMU & KASHMIR"],["15","KARNATAKA"],["16","KERALA"],["17","LAKSHWADEEP"],["18","MADHYA PRADESH"],["19","MAHARASHTRA"],["20","MANIPUR"],["21","MEGHALAYA"],["22","MIZORAM"],["23","NAGALAND"],["24","ODISHA"],["25","PONDICHERRY"],["26","PUNJAB"],["27","RAJASTHAN"],["28","SIKKIM"],["29","TAMIL NADU"],["30","TRIPURA"],["31","UTTAR PRADESH"],["32","WEST BENGAL"],["33","CHHATTISGARH"],["34","UTTARAKHAND"],["35","JHARKHAND"],["36","TELANGANA"],["37","LADAKH"]];                      // Annexure 1 - [code, name]
+  const DTYPES=[["A","Central Government"],["S","State Government"],["D","Statutory body (Central Govt.)"],["E","Statutory body (State Govt.)"],["G","Autonomous body (Central Govt.)"],["H","Autonomous body (State Govt.)"],["L","Local Authority (Central Govt.)"],["N","Local Authority (State Govt.)"],["K","Company"],["M","Branch / Division of Company"],["P","Association of Person (AOP)"],["T","Association of Person (Trust)"],["J","Artificial Juridical Person"],["B","Body of Individuals"],["Q","Individual/HUF"],["F","Firm"]];                      // Annexure 4 - [code, name]
+  const PAN_RE=/^[A-Z]{5}[0-9]{4}[A-Z]$/, TAN_RE=/^[A-Z]{4}[0-9]{5}[A-Z]$/, PAN_TOKENS=['PANNOTAVBL','PANAPPLIED','PANINVALID'];
+  const EMAIL_RE=/^[^@\s^]+@[^@\s^]+\.[^@\s^]+$/;
+  const P=v=>Math.round(Number(v||0)*100);        // rupees -> paise, so sums are exact
+  const n2=p=>(p/100).toFixed(2);                 // paise -> '1234.50'
+  const d8=iso=>iso?String(iso).slice(8,10)+String(iso).slice(5,7)+String(iso).slice(0,4):'';
+  const money=p=>'Rs '+(p/100).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const isoAdd=(iso,days)=>{ const d=new Date(iso+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+days); return d.toISOString().slice(0,10); };
+  const daysBetween=(a,b)=>Math.round((new Date(b+'T00:00:00Z')-new Date(a+'T00:00:00Z'))/86400000);
+  // only plain printable ASCII goes into the file; '^' would break the delimiting
+  function clean(s,max){
+    let t=String(s==null?'':s);
+    try{ t=t.normalize('NFKD').replace(/[̀-ͯ]/g,''); }catch(e){}
+    t=t.replace(/[\r\n\t^]+/g,' ').replace(/[^\x20-\x7E]/g,' ').replace(/\s+/g,' ').trim();
+    return max?t.slice(0,max).trim():t;
+  }
+  const hasAlnum=s=>/[A-Za-z0-9]/.test(s||'');
+  const taxYearCode=y=>String(y)+String(y+1).slice(2);            // 2026 -> 202627
+  const ayCode=y=>String(y+1)+String(y+2).slice(2);               // 2026 -> 202728 (assessment year of the format)
+  const taxYearLabel=y=>y+'-'+String(y+1).slice(2);
+  const qMonths={1:'Apr - Jun',2:'Jul - Sep',3:'Oct - Dec',4:'Jan - Mar'};
+  const dueDate=(y,q)=>({1:y+'-07-31',2:y+'-10-31',3:(y+1)+'-01-31',4:(y+1)+'-05-31'})[q];
+  // tax deducted in a month is due with the government by the 7th of the next month (30 April for March)
+  function depositDue(iso){
+    const y=+iso.slice(0,4), m=+iso.slice(5,7);
+    if(m===3) return y+'-04-30';
+    const ny=m===12?y+1:y, nm=m===12?1:m+1;
+    return ny+'-'+String(nm).padStart(2,'0')+'-07';
+  }
+  const stateName=c=>(STATES.find(s=>s[0]===c)||[])[1]||'';
+
+  /* ---------- checks: everything the file format (and FVU) will reject, plus what TRACES will ask about later ---------- */
+  function validate(data,o){
+    o=o||{}; const errors=[], warnings=[]; const E=(scope,id,msg,fix)=>errors.push({scope,id,msg,fix:fix||scope}); const W=(scope,id,msg,fix)=>warnings.push({scope,id,msg,fix:fix||scope});
+    const qd=data.quarter, co=data.company||{}, d=data.deductor||{}, today=o.today||new Date().toISOString().slice(0,10);
+    const codes=o.codes||{};                                                   // code -> {flags:[..]}
+    const ents=data.entries||[], chs=data.challans||[];
+    // ---- deductor and responsible person
+    const need=(v,msg)=>{ if(!String(v==null?'':v).trim()) E('deductor',0,msg); };
+    if(!d.tan) E('deductor',0,'Enter the TAN of the company'); else if(!TAN_RE.test(d.tan)) E('deductor',0,'The TAN must be 4 letters, 5 digits and a letter, like CALA12345B');
+    if(!co.pan) E('deductor',0,'The company has no PAN - add it under Transactions > Structure'); else if(!PAN_RE.test(String(co.pan).toUpperCase())) E('deductor',0,'The PAN of the company is not valid (10 characters, like ABCDE1234F)');
+    if(!d.name||!hasAlnum(d.name)) E('deductor',0,'Enter the name of the deductor exactly as registered with the TAN'); else if(d.name.length>75) E('deductor',0,'The deductor name is longer than 75 characters');
+    need(d.addr1,'Enter the first line of the deductor address');
+    if(!STATES.some(s=>s[0]===d.state_code)) E('deductor',0,'Choose the state of the deductor address');
+    if(!/^[0-9]{6}$/.test(d.pin||'')) E('deductor',0,'Enter the 6-digit PIN code of the deductor address');
+    if(!EMAIL_RE.test(d.email||'')) E('deductor',0,'Enter a valid e-mail for the deductor');
+    if(!/^[0-9]{1,5}$/.test(d.phone_cc||'')) E('deductor',0,'Enter the country code of the deductor phone (91 for India)');
+    if(!/^[0-9]{6,10}$/.test(d.phone||'')) E('deductor',0,'Enter the deductor phone number: digits only, up to 10, without the country code');
+    if(!DTYPES.some(t=>t[0]===d.deductor_type)) E('deductor',0,'Choose the deductor type');
+    need(d.country,'Enter the country in the deductor address');
+    if(!d.resp_name||!hasAlnum(d.resp_name)) E('deductor',0,'Enter the name of the person responsible for deduction'); else if(d.resp_name.length>75) E('deductor',0,'The responsible person name is longer than 75 characters');
+    if(!d.resp_designation||!hasAlnum(d.resp_designation)) E('deductor',0,'Enter the designation of the person responsible'); else if(d.resp_designation.length>20) E('deductor',0,'The designation can be 20 characters at most');
+    if(!PAN_RE.test(String(d.resp_pan||'').toUpperCase())) E('deductor',0,'Enter the PAN of the person responsible (10 characters, like ABCDE1234F)');
+    need(d.resp_addr1,'Enter the first line of the responsible person\'s address');
+    if(!STATES.some(s=>s[0]===d.resp_state_code)) E('deductor',0,'Choose the state of the responsible person\'s address');
+    if(!/^[0-9]{6}$/.test(d.resp_pin||'')) E('deductor',0,'Enter the 6-digit PIN code of the responsible person');
+    if(!EMAIL_RE.test(d.resp_email||'')) E('deductor',0,'Enter a valid e-mail for the responsible person');
+    need(d.resp_country,'Enter the country of the responsible person');
+    if(!/^[0-9]{1,5}$/.test(d.resp_phone_cc||'')) E('deductor',0,'Enter the country code of the responsible person\'s phone');
+    if(!/^[6-9][0-9]{9}$/.test(d.resp_phone||'')) E('deductor',0,'The responsible person\'s mobile number must be a 10-digit Indian mobile number');
+    if(o.prevFiled==='Y'&&!/^[0-9]{15}$/.test(o.prevToken||'')) E('statement',0,'You said an earlier statement of this form was filed - enter its 15-digit token number');
+    // ---- deductions
+    if(!ents.length) E('statement',0,'There is no TDS deducted in this quarter - nothing to file');
+    const chById={}; chs.forEach(c=>{ chById[c.id]=c; });
+    for(const e of ents){
+      const ref=(e.voucher_no||('#'+e.id))+' - '+e.deductee_name;
+      const code=codes[e.tds_code];
+      if(!e.tds_code) E('entry',e.id,ref+': choose the nature of payment (section code)');
+      else if(code&&e.reason_flag&&!(code.flags||[]).includes(e.reason_flag)) E('entry',e.id,ref+': reason '+e.reason_flag+' is not allowed with code '+e.tds_code);
+      if(!e.deductee_pan) E('entry',e.id,ref+': the PAN of the deductee is missing');
+      else if(!PAN_RE.test(e.deductee_pan)&&!PAN_TOKENS.includes(e.deductee_pan)) E('entry',e.id,ref+': the PAN is not valid');
+      if(PAN_TOKENS.includes(e.deductee_pan)&&e.deductee_pan!=='PANAPPLIED') W('entry',e.id,ref+': no valid PAN - tax has to be deducted at the higher rate (20%); this was deducted at '+Number(e.rate)+'%');
+      if(!(P(e.amount_credited)>0)) E('entry',e.id,ref+': the amount paid or credited must be more than zero');
+      if(P(e.tds_amount)<=0) E('entry',e.id,ref+': no tax deducted');
+      if(P(e.tds_amount)>P(e.amount_credited)) E('entry',e.id,ref+': tax deducted is more than the amount credited');
+      if(e.deduction_date<qd.start||e.deduction_date>qd.end) E('entry',e.id,ref+': deduction date '+e.deduction_date+' is outside the quarter');
+      if(e.credit_date<qd.start||e.credit_date>qd.end) E('entry',e.id,ref+': credit date is outside the quarter');
+      if(e.deduction_date>today) E('entry',e.id,ref+': the deduction date is in the future');
+      if(e.reason_flag==='A'&&!/^[A-Za-z0-9]{10,15}$/.test(e.certificate_no||'')) E('entry',e.id,ref+': reason A (lower deduction certificate) needs the certificate number');
+      if(e.certificate_no&&e.reason_flag!=='A') W('entry',e.id,ref+': a certificate number is only used with reason A');
+      if(!e.challan_id) E('entry',e.id,ref+': not mapped to a challan yet','map');
+      else if(!chById[e.challan_id]) E('entry',e.id,ref+': its challan is not available','map');
+      else if(chById[e.challan_id].deposit_date<e.deduction_date) W('entry',e.id,ref+': the challan is dated before the deduction');
+      const exp=Math.round(P(e.amount_credited)*Number(e.rate)/100);
+      if(Number(e.rate)>0&&Math.abs(exp-P(e.tds_amount))>100) W('entry',e.id,ref+': tax deducted ('+money(P(e.tds_amount))+') is not '+Number(e.rate)+'% of the amount ('+money(P(e.amount_credited))+')');
+    }
+    // ---- challans used by this statement
+    const used={}; for(const e of ents) if(e.challan_id&&chById[e.challan_id]) (used[e.challan_id]=used[e.challan_id]||[]).push(e);
+    for(const id of Object.keys(used)){
+      const c=chById[id], rows=used[id], sum=rows.reduce((s,e)=>s+P(e.tds_amount),0), total=P(c.tax)+P(c.interest)+P(c.fee)+P(c.other);
+      const ref='Challan '+c.bsr_code+' / '+c.serial_no+' / '+c.deposit_date;
+      if(!/^[0-9]{7}$/.test(c.bsr_code||'')) E('challan',c.id,ref+': the BSR code must be 7 digits');
+      if(!/^[0-9]{1,5}$/.test(c.serial_no||'')) E('challan',c.id,ref+': the challan serial number must be up to 5 digits');
+      if(c.deposit_date>today) E('challan',c.id,ref+': the date is in the future');
+      if(total<sum+P(c.interest)+P(c.other)+P(c.fee)) E('challan',c.id,ref+': the challan ('+money(total)+') is less than the tax mapped to it ('+money(sum)+') plus its interest and fee');
+      if(P(c.tax)-sum>=100) W('challan',c.id,ref+': carries '+money(P(c.tax)-sum)+' of tax that is not mapped to a deduction of this quarter - TRACES will show it as a difference','map');
+      if(P(c.tax)<sum) E('challan',c.id,ref+': tax on the challan is less than what is mapped to it');
+      for(const e of rows){ const due=depositDue(e.deduction_date); if(c.deposit_date>due) W('challan',c.id,ref+': paid '+daysBetween(due,c.deposit_date)+' day(s) after the due date ('+due+') of the deduction of '+e.deductee_name+' - interest for the delay is payable; it goes in the Interest column of the challan'); }
+    }
+    const tdsTotal=ents.reduce((s,e)=>s+P(e.tds_amount),0), due=dueDate(qd.year,qd.q);
+    if(today>due){ const late=daysBetween(due,today); W('statement',0,'The due date of this statement was '+due+'. It is '+late+' day(s) late: a late filing fee of Rs 200 a day, up to the tax of the statement ('+money(Math.min(late*20000,tdsTotal))+' so far), is to be paid before the statement is accepted.'); }
+    return {errors,warnings,summary:{rows:ents.length,challans:Object.keys(used).length,tds:tdsTotal,due}};
+  }
+
+  /* ---------- the file ---------- */
+  function build(data,o){
+    const v=validate(data,o); if(v.errors.length) return {ok:false,errors:v.errors,warnings:v.warnings};
+    const qd=data.quarter, co=data.company, d=data.deductor, ents=data.entries.slice(), chs=data.challans;
+    const today=o.today||new Date().toISOString().slice(0,10);
+    const used=chs.filter(c=>ents.some(e=>e.challan_id===c.id)).sort((a,b)=>a.deposit_date<b.deposit_date?-1:a.deposit_date>b.deposit_date?1:a.id-b.id);
+    const blank=n=>new Array(n).fill('');
+    const lines=[]; let ln=0; const add=f=>{ ln++; f[0]=ln; lines.push(f); };
+    const C=(s,m)=>clean(s,m);
+
+    // FH - 18 fields
+    let f=blank(18); f[1]='FH'; f[2]='NS1'; f[3]='R'; f[4]=d8(today); f[5]=String(o.fileSeq); f[6]='D'; f[7]=d.tan; f[8]='1'; f[9]=C(o.rpuName||'JainE Accounts',75);
+    add(f);
+
+    // BH - 72 fields
+    const batchDeposit=used.reduce((s,c)=>s+P(c.tax)+P(c.interest)+P(c.fee)+P(c.other),0);
+    f=blank(72);
+    f[1]='BH'; f[2]='1'; f[3]=String(used.length); f[4]='140'; f[8]=o.prevFiled==='Y'?o.prevToken:'';
+    f[12]=d.tan; f[14]=String(co.pan).toUpperCase(); f[15]=ayCode(qd.year); f[16]=taxYearCode(qd.year); f[17]='Q'+qd.q;
+    f[18]=C(d.name,75); f[19]=C(d.country||'INDIA',25); f[20]=C(d.addr1,25); f[21]=C(d.addr2,25); f[22]=C(d.addr3,25); f[23]=C(d.addr4,25); f[24]=C(d.addr5,25);
+    f[25]=d.state_code; f[26]=d.pin; f[27]=C(d.email,75).replace(/ /g,''); f[28]=d.phone_cc; f[29]=d.phone; f[31]=d.deductor_type;
+    f[32]=C(d.resp_name,75); f[33]=C(d.resp_designation,20); f[34]=C(d.resp_addr1,25); f[35]=C(d.resp_addr2,25); f[36]=C(d.resp_addr3,25); f[37]=C(d.resp_addr4,25); f[38]=C(d.resp_addr5,25);
+    f[39]=d.resp_state_code; f[40]=d.resp_pin; f[41]=C(d.resp_email,75).replace(/ /g,''); f[42]=C(d.resp_country||'INDIA',25); f[43]=d.resp_phone_cc; f[44]=d.resp_phone;
+    f[46]=n2(batchDeposit); f[51]=o.prevFiled==='Y'?'Y':'N'; f[58]=String(d.resp_pan).toUpperCase(); f[68]=co.gstin?String(co.gstin).toUpperCase():'';
+    add(f);
+
+    // CD + DD
+    let ddNo=0;
+    used.forEach((c,ci)=>{
+      const rows=ents.filter(e=>e.challan_id===c.id).sort((a,b)=>a.deduction_date<b.deduction_date?-1:a.deduction_date>b.deduction_date?1:a.id-b.id);
+      const sumDed=rows.reduce((s,e)=>s+P(e.tds_amount),0), total=P(c.tax)+P(c.interest)+P(c.fee)+P(c.other);
+      let g=blank(30);
+      g[1]='CD'; g[2]='1'; g[3]=String(ci+1); g[4]=String(rows.length); g[5]='N';
+      g[7]=n2(P(c.tax)); g[8]=n2(P(c.interest)); g[9]=n2(P(c.fee)); g[10]=n2(P(c.other)); g[11]=n2(total); g[12]='C';
+      g[14]=c.bsr_code; g[16]=String(c.serial_no); g[18]=d8(c.deposit_date); g[20]=n2(sumDed); g[21]=n2(sumDed); g[22]=c.minor_head||'200';
+      g[23]=n2(P(c.interest)); g[24]=n2(P(c.other));
+      add(g);
+      for(const e of rows){
+        ddNo++; let r=blank(45);
+        r[1]='DD'; r[2]='1'; r[3]=String(ddNo); r[4]=String(ci+1); r[5]='O';
+        r[7]=e.deductee_pan; r[8]=C(e.deductee_name,75); r[14]=e.tds_code; r[17]='Y'; r[18]=d8(e.credit_date); r[19]=n2(P(e.amount_credited));
+        r[23]=n2(P(e.tds_amount)); r[24]=n2(P(e.tds_amount)); r[26]=d8(e.deduction_date); r[27]=Number(e.rate).toFixed(4);
+        r[31]=e.reason_flag||''; r[32]=e.reason_flag==='A'?String(e.certificate_no).toUpperCase():'';
+        add(r);
+      }
+    });
+    const text=lines.map(l=>l.join('^')).join(NL)+NL;
+    const name='F140_'+d.tan+'_'+taxYearCode(qd.year)+'_Q'+qd.q+'.txt';
+    return {ok:true,text,name,lines,warnings:v.warnings,rows:ddNo,challans:used.length,tds:v.summary.tds};
+  }
+
+  return {STATES,DTYPES,PAN_RE,TAN_RE,EMAIL_RE,clean,validate,build,dueDate,depositDue,taxYearCode,ayCode,taxYearLabel,qMonths,stateName,n2,P,money,isoAdd,daysBetween};
+})();
+window.acxTdsGen=TDSG;
+
+/* ============================ TDS RETURNS - the screen (Ledgers & postings > TDS returns, route accounts/1/tds) ============================
+   One page, top to bottom, for one quarter: 1 deductor details (once), 2 the deductions (filled by posting bills; only the nature of
+   payment / PAN may need a touch), 3 the challans and which deductions each paid, 4 the checks and the Form 140 file, 5 the files made.
+   Data: supabase/migrations/20261104100000_accounts_tds_returns.sql (tds_statement_data and friends). The file itself: TDSG above. */
+const TD={year:0,q:0,data:null,codes:[],cmap:{},sel:new Set(),prevFiled:'N',prevToken:'',host:null};
+const tdYear=iso=>+iso.slice(0,4)-(+iso.slice(5,7)<4?1:0);
+const tdQuarter=iso=>{ const m=+iso.slice(5,7); return m>=4&&m<=6?1:m>=7&&m<=9?2:m>=10?3:4; };
+// the quarter that has just ended is the one that is being filed; before the first quarter of Tax Year 2026-27 has ended, show that quarter itself
+function tdDefault(){ let y=tdYear(today()), q=tdQuarter(today())-1; if(q<1){ y--; q=4; } if(y<2026){ y=2026; q=1; } TD.year=y; TD.q=q; }
+const tdQLabel=(y,q)=>'Q'+q+' ('+TDSG.qMonths[q]+' '+(q===4?y+1:y)+')';
+const tdOpts=()=>({today:today(),codes:TD.cmap,prevFiled:TD.prevFiled,prevToken:TD.prevToken});
+const tdMoney=n=>money(Number(n||0));
+const tdCodeText=c=>{ const r=TD.cmap[c]; return r?X.tdsLabel(r).slice(7):''; };
+
+async function renderTds(host){
+  const co=X.curCo();
+  if(!co){ host.innerHTML='<div class="empty"><div>Choose a company first</div></div>'; return; }
+  if(!TD.year) tdDefault();
+  host.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  const [codes,res]=await Promise.all([X.tdsCodes(),rpc('tds_statement_data',{p_company:co.id,p_year:TD.year,p_quarter:TD.q})]);
+  if(res.error){ host.innerHTML=''; fail(res.error,'Could not load the TDS return'); return; }
+  TD.codes=codes; TD.cmap={}; codes.forEach(c=>{ TD.cmap[c.code]=c; });
+  TD.data=res.data; TD.sel=new Set(); TD.host=host;
+  const pf=(TD.data.statements||[]).filter(s=>s.status==='filed'&&s.quarter<TD.q).sort((a,b)=>b.quarter-a.quarter)[0];
+  if(pf){ TD.prevFiled='Y'; TD.prevToken=pf.token_no||''; }
+  tdDraw();
+}
+
+function tdDraw(){
+  const host=TD.host; if(!host||!TD.data) return;
+  const D=TD.data, qd=D.quarter, ents=D.entries||[], chs=D.challans||[], v=TDSG.validate(D,tdOpts());
+  const stmts=(D.statements||[]).filter(s=>s.quarter===qd.q), filed=stmts.find(s=>s.status==='filed'), canEdit=S.canPost&&!filed;
+  const errBy={}; v.errors.forEach(e=>{ if(e.scope==='entry') (errBy[e.id]=errBy[e.id]||[]).push(e.msg); });
+  const dedErr=v.errors.filter(e=>e.scope==='deductor'), other=v.errors.filter(e=>e.scope!=='deductor');
+  const tds=ents.reduce((s,e)=>s+TDSG.P(e.tds_amount),0), attention=Object.keys(errBy).length;
+  const yearOpts=(()=>{ const last=Math.max(2026,tdYear(today())), out=[]; for(let y=2026;y<=last;y++) out.push([y,TDSG.taxYearLabel(y)]); return out; })();
+  const kpi=(k,val,s,red)=>'<div class="acx-kpi"><div class="k">'+k+'</div><div class="v"'+(red?' style="color:#b91c1c"':'')+'>'+val+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
+  const due=TDSG.dueDate(qd.year,qd.q), late=today()>due&&!filed;
+
+  // ---- top: which return
+  let h='<div class="acx-top"><b style="font-size:15px">Form 140</b><span class="acx-hint" style="margin:0">non-salary payments to residents &middot; the old 26Q</span>'
+    +'<select id="tdYear" onchange="acxTdsPick()">'+opts(yearOpts,TD.year)+'</select>'
+    +'<select id="tdQ" onchange="acxTdsPick()">'+opts([1,2,3,4].map(q=>[q,tdQLabel(TD.year,q)]),TD.q)+'</select>'
+    +'<span class="tag '+(filed?'t-green':late?'t-red':'t-amber')+'">'+(filed?'Filed':'Due '+dmy(due))+'</span></div>';
+  h+='<div class="acx-hint" style="margin-bottom:12px">From Tax Year 2026-27 the quarterly statement of tax deducted on payments other than salary is <b>Form 140</b> (Income-tax Act, 2025). Bills you post here put their TDS into this return by themselves; this page collects what the file still needs and makes it in the Income Tax Department&rsquo;s prescribed format.</div>';
+  if(filed) h+='<div class="acx-warn" style="background:#ecfdf5;border-color:#a7f3d0;color:#065f46"><b>Filed.</b> Token '+esc(filed.token_no)+' on '+dmy(filed.filed_on)+'. This quarter is closed: its deductions, PANs, codes and challan mapping stay as filed.</div>';
+
+  // ---- 1 deductor
+  const d=D.deductor;
+  h+='<div class="acx-sec-title">1 &middot; Deductor details <span class="acx-hint" style="font-weight:400">entered once, used every quarter</span></div><div class="card" style="padding:14px 16px;margin-bottom:16px">';
+  if(dedErr.length){
+    h+='<div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:240px"><span class="tag t-red">Needs details</span><ul style="margin:8px 0 0 18px;padding:0;font-size:13px">'+dedErr.slice(0,6).map(e=>'<li>'+esc(e.msg)+'</li>').join('')+(dedErr.length>6?'<li>and '+(dedErr.length-6)+' more</li>':'')+'</ul></div>'
+      +(canEdit?'<button class="btn btn-primary" onclick="acxTdsDeductorForm()">'+(d?'Complete the details':'Enter the details')+'</button>':'')+'</div>';
+  } else {
+    h+='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:240px"><span class="tag t-green">Complete</span> <b>'+esc(d.name)+'</b> &middot; TAN '+esc(d.tan)+' &middot; PAN '+esc(String(D.company.pan).toUpperCase())
+      +'<div class="acx-hint" style="margin:2px 0 0">Responsible person: '+esc(d.resp_name)+', '+esc(d.resp_designation)+' &middot; '+esc(TDSG.stateName(d.state_code))+'</div></div>'+(canEdit?'<button class="btn" onclick="acxTdsDeductorForm()">Edit</button>':'')+'</div>';
+  }
+  h+='</div>';
+
+  // ---- 2 deductions
+  h+='<div class="acx-sec-title">2 &middot; Deductions in '+esc(tdQLabel(qd.year,qd.q))+'</div>';
+  h+='<div class="acx-kpis">'+kpi('Deductions',ents.length,'tax deducted on bills booked in the quarter')+kpi('Tax deducted',tdMoney(tds/100))+kpi('Need a touch',attention,attention?'nature of payment, PAN or challan':'all complete',attention>0)+'</div>';
+  const bulk=canEdit&&ents.length?'<div class="acx-top"><button class="btn" onclick="acxTdsBulk()" title="Choose the rows first">Set nature of payment for the ticked rows</button><span class="acx-hint" style="margin:0">Tick the rows, then set the code once. &ldquo;Remember for the vendor&rdquo; fills it by itself on that vendor&rsquo;s next bills.</span><span style="flex:1"></span>'+X.dlBtns('acxTdsDownload')+'</div>':(ents.length?'<div class="acx-top"><span style="flex:1"></span>'+X.dlBtns('acxTdsDownload')+'</div>':'');
+  h+=bulk;
+  h+='<div class="card" style="padding:0;margin-bottom:16px"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+(canEdit?'<th style="width:28px"><input type="checkbox" class="acx-chk" onchange="acxTdsSelAll(this.checked)"></th>':'')
+    +'<th>Date</th><th>Bill</th><th>Deductee</th><th>Nature of payment</th><th class="acx-num">Amount</th><th class="acx-num">Rate</th><th class="acx-num">TDS</th><th>Challan</th><th></th></tr></thead><tbody>'
+    +(ents.map(e=>{
+      const ch=chs.find(c=>c.id===e.challan_id), bad=errBy[e.id];
+      return '<tr'+(bad?' style="background:#fff7ed"':'')+'>'+(canEdit?'<td><input type="checkbox" class="acx-chk" '+(TD.sel.has(e.id)?'checked':'')+' onchange="acxTdsSel('+e.id+',this.checked)"></td>':'')
+        +'<td>'+dmy(e.deduction_date)+'</td><td><span class="acx-code">'+esc(e.voucher_no||'')+'</span></td>'
+        +'<td><b>'+esc(e.deductee_name)+'</b><div class="acx-hint" style="margin:0">'+(e.deductee_pan?(TDSG.PAN_RE.test(e.deductee_pan)?esc(e.deductee_pan):'<span class="tag t-amber">'+esc(e.deductee_pan)+'</span>'):'<span class="tag t-red">PAN missing</span>')+(e.reason_flag?' &middot; reason '+e.reason_flag:'')+'</div></td>'
+        +'<td>'+(e.tds_code?'<b>'+esc(e.tds_code)+'</b><div class="acx-hint" style="margin:0">'+esc(tdCodeText(e.tds_code))+(e.code_source==='auto'?' &middot; set from the PAN':'')+'</div>':'<span class="tag t-red">Choose</span>')+'</td>'
+        +'<td class="acx-num">'+tdMoney(e.amount_credited)+'</td><td class="acx-num">'+Number(e.rate)+'%</td><td class="acx-num"><b>'+tdMoney(e.tds_amount)+'</b></td>'
+        +'<td>'+(ch?'<span class="tag t-green">'+esc(ch.bsr_code)+' / '+esc(ch.serial_no)+'</span>':'<span class="tag t-amber">Not mapped</span>')+'</td>'
+        +'<td class="acx-act">'+(canEdit?'<button class="btn btn-sm btn-ghost" onclick="acxTdsEntryForm('+e.id+')">Edit</button>':'')+'</td></tr>';
+    }).join('')||'<tr><td colspan="10"><div class="empty" style="padding:24px"><div>No tax was deducted on a bill booked in this quarter</div><div class="acx-hint">Bills posted under Ledgers &amp; postings (or entered here) with TDS appear automatically.</div></div></td></tr>')
+    +'</tbody></table></div></div>';
+
+  // ---- 3 challans
+  h+='<div class="acx-sec-title">3 &middot; Challans <span class="acx-hint" style="font-weight:400">the tax deposited with the government, and which deductions it paid</span></div>';
+  h+=(canEdit?'<div class="acx-top"><button class="btn btn-primary" onclick="acxTdsChallanForm(0)"><i class="fa-solid fa-plus"></i> Add a challan</button><button class="btn" onclick="acxTdsAuto()" title="Oldest deductions into the earliest challan that has room">Suggest the mapping</button><span class="acx-hint" style="margin:0">Take the BSR code, serial number and date from the challan receipt (or the TIN challan status).</span></div>':'');
+  h+='<div class="card" style="padding:0;margin-bottom:16px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Paid on</th><th>BSR code / serial</th><th class="acx-num">Tax</th><th class="acx-num">Interest, fee, other</th><th class="acx-num">Mapped</th><th class="acx-num">Difference</th><th></th></tr></thead><tbody>'
+    +(chs.map(c=>{
+      const diff=TDSG.P(c.tax)-TDSG.P(c.mapped_total);
+      return '<tr><td>'+dmy(c.deposit_date)+'</td><td><b>'+esc(c.bsr_code)+' / '+esc(c.serial_no)+'</b>'+(c.minor_head!=='200'?'<div class="acx-hint" style="margin:0">minor head '+esc(c.minor_head)+'</div>':'')+'</td>'
+        +'<td class="acx-num"><b>'+tdMoney(c.tax)+'</b></td><td class="acx-num">'+tdMoney(Number(c.interest)+Number(c.fee)+Number(c.other))+'</td>'
+        +'<td class="acx-num">'+tdMoney(c.mapped_total)+'<div class="acx-hint" style="margin:0">'+c.mapped_count+' deduction'+(c.mapped_count===1?'':'s')+'</div></td>'
+        +'<td class="acx-num">'+(Math.abs(diff)<100?'<span class="tag t-green"'+(diff?' title="Less than a rupee: the challan is in whole rupees, the tax on a bill can have paise"':'')+'>matched</span>':'<span class="tag t-amber">'+tdMoney(diff/100)+'</span>')+'</td>'
+        +'<td class="acx-act">'+(canEdit?'<button class="btn btn-sm btn-ghost" onclick="acxTdsMapForm('+c.id+')">Map deductions</button><button class="btn btn-sm btn-ghost" onclick="acxTdsChallanForm('+c.id+')">Edit</button><button class="btn btn-sm btn-ghost" onclick="acxTdsChallanDel('+c.id+')">Remove</button>':'')+'</td></tr>';
+    }).join('')||'<tr><td colspan="7"><div class="empty" style="padding:24px"><div>No challan entered for this quarter yet</div></div></td></tr>')
+    +'</tbody></table></div></div>';
+
+  // ---- 4 check and file
+  h+='<div class="acx-sec-title">4 &middot; Check and make the file</div><div class="card" style="padding:14px 16px;margin-bottom:16px">';
+  if(other.length) h+='<div><span class="tag t-red">'+other.length+' to fix before the file can be made</span><ul style="margin:8px 0 12px 18px;padding:0;font-size:13px">'+other.slice(0,40).map(e=>'<li>'+esc(e.msg)+(e.scope==='entry'&&canEdit?' <a href="javascript:void(0)" onclick="acxTdsEntryForm('+e.id+')">fix</a>':e.scope==='challan'&&canEdit?' <a href="javascript:void(0)" onclick="acxTdsChallanForm('+e.id+')">fix</a>':'')+'</li>').join('')+(other.length>40?'<li>and '+(other.length-40)+' more</li>':'')+'</ul></div>';
+  else if(!dedErr.length) h+='<div style="margin-bottom:10px"><span class="tag t-green">Ready</span> '+v.summary.rows+' deduction'+(v.summary.rows===1?'':'s')+', '+v.summary.challans+' challan'+(v.summary.challans===1?'':'s')+', tax '+tdMoney(v.summary.tds/100)+'.</div>';
+  if(v.warnings.length) h+='<div style="margin-bottom:12px"><span class="tag t-amber">Look at these</span><ul style="margin:8px 0 0 18px;padding:0;font-size:13px">'+v.warnings.slice(0,20).map(e=>'<li>'+esc(e.msg)+'</li>').join('')+(v.warnings.length>20?'<li>and '+(v.warnings.length-20)+' more</li>':'')+'</ul></div>';
+  h+='<div class="acx-grid3"><div class="acx-field"><label>Was a regular Form 140 already filed for an earlier quarter of this tax year?</label><select id="tdPrevFiled" onchange="acxTdsPrev()">'+opts([['N','No'],['Y','Yes']],TD.prevFiled)+'</select></div>'
+    +'<div class="acx-field"><label>Token number of that statement (15 digits)</label><input id="tdPrevToken" value="'+esc(TD.prevToken)+'" maxlength="15" inputmode="numeric" '+(TD.prevFiled==='Y'?'':'disabled')+' onchange="acxTdsPrev()"><div class="h">If several were filed, the latest one. Filled in by itself from statements marked filed here.</div></div>'
+    +'<div class="acx-field"><label>&nbsp;</label>'+(S.canPost&&!filed?'<button class="btn btn-primary" '+(v.errors.length?'disabled title="Fix the points above first"':'')+' onclick="acxTdsGenerate(this)"><i class="fa-solid fa-file-arrow-down"></i> Download the Form 140 file</button>':'')+'</div></div>';
+  h+='<div style="margin-top:10px;font-size:13px"><b>After you download it</b><ol style="margin:6px 0 0 18px;padding:0;line-height:1.55">'
+    +'<li>Open the file in Protean&rsquo;s free <b>File Validation Utility</b> (FVU 1.2 for Tax Year 2026-27, from the TIN site &rsaquo; Downloads &rsaquo; e-TDS/TCS) and press Validate. It asks for the challan file (.csi) of your TAN, which the TIN site&rsquo;s Challan Status Inquiry gives you. It makes the <b>.fvu</b> file; if it lists errors, correct them here and download again.</li>'
+    +'<li>Upload the FVU file on the Income Tax e-filing portal or TRACES (File TDS/TCS Forms &amp; Statements &rsaquo; Form 140 &rsaquo; this tax year and quarter &rsaquo; Regular) and e-verify it with Aadhaar OTP or your digital signature.</li>'
+    +'<li>Come back, press <b>Mark as filed</b> below and enter the token number. That closes the quarter and fills &ldquo;previous token&rdquo; for the next one.</li></ol>'
+    +'<div class="acx-hint" style="margin-top:6px">Menu names on the portal can differ slightly.</div></div></div>';
+
+  // ---- 5 history
+  h+='<div class="acx-sec-title">5 &middot; Files made for this tax year</div><div class="card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>File no.</th><th>Quarter</th><th>Made</th><th class="acx-num">Deductions</th><th class="acx-num">Tax</th><th>Status</th><th></th></tr></thead><tbody>'
+    +((D.statements||[]).filter(s=>s.status!=='draft').map(s=>'<tr><td><b>'+s.id+'</b><div class="acx-hint" style="margin:0">'+esc(s.file_name||'')+'</div></td><td>Q'+s.quarter+'</td><td>'+dmyTime(s.created_at)+'<div class="acx-hint" style="margin:0">'+esc(String(s.created_by||'').split('@')[0])+'</div></td>'
+      +'<td class="acx-num">'+(s.deductee_rows||0)+'</td><td class="acx-num">'+tdMoney(s.tds_total)+'</td>'
+      +'<td>'+(s.status==='filed'?'<span class="tag t-green">Filed</span><div class="acx-hint" style="margin:0">token '+esc(s.token_no)+' &middot; '+dmy(s.filed_on)+'</div>':'<span class="tag t-blue">Made, not marked filed</span>')+'</td>'
+      +'<td class="acx-act"><button class="btn btn-sm btn-ghost" onclick="acxTdsRedownload('+s.id+')">Download again</button>'
+      +(S.canPost&&s.status==='generated'?'<button class="btn btn-sm btn-ghost" onclick="acxTdsFiledForm('+s.id+')">Mark as filed</button>':'')+(S.isAdmin&&s.status==='filed'?'<button class="btn btn-sm btn-ghost" onclick="acxTdsReopen('+s.id+')">Reopen</button>':'')+'</td></tr>').join('')
+      ||'<tr><td colspan="7"><div class="empty" style="padding:24px"><div>No file made yet</div></div></td></tr>')+'</tbody></table></div></div>';
+  host.innerHTML=h;
+}
+
+/* ---- which quarter ---- */
+window.acxTdsPick=function(){ TD.year=parseInt(val('tdYear'),10)||TD.year; TD.q=parseInt(val('tdQ'),10)||TD.q; TD.prevFiled='N'; TD.prevToken=''; renderTds(TD.host); };
+window.acxTdsPrev=function(){ TD.prevFiled=val('tdPrevFiled')||'N'; TD.prevToken=TD.prevFiled==='Y'?val('tdPrevToken').replace(/\D/g,''):''; tdDraw(); };
+window.acxTdsSel=function(id,on){ if(on) TD.sel.add(id); else TD.sel.delete(id); };
+window.acxTdsSelAll=function(on){ TD.sel=new Set(on?TD.data.entries.map(e=>e.id):[]); tdDraw(); };
+
+/* ---- deductor ---- */
+const stateOpts=sel=>opt('','Choose the state…',sel)+TDSG.STATES.map(s=>opt(s[0],s[1],sel)).join('');
+window.acxTdsDeductorForm=function(){
+  const co=X.curCo(), d=TD.data.deductor||{};
+  const v=(k,def)=>esc(d[k]!=null&&d[k]!==''?d[k]:(def||''));
+  const L=(label,id,key,max,ph,def)=>field(label,'<input id="'+id+'" value="'+v(key,def)+'" maxlength="'+max+'"'+(ph?' placeholder="'+ph+'"':'')+'>');
+  X.formModal('Deductor and responsible person',
+    '<div class="acx-hint" style="margin-bottom:10px">As registered with the Income Tax Department for the TAN. The name and TAN must match the challans (the TIN challan status file), or the statement will be rejected.</div>'
+    +'<div class="acx-grid3">'+field('PAN of the company','<div style="height:38px;display:flex;align-items:center"><b>'+esc(String(co.pan||'').toUpperCase()||'not set')+'</b>'+(co.pan?'':' <span class="acx-hint" style="margin-left:8px">add it under Transactions &rsaquo; Structure</span>')+'</div>')
+      +L('TAN','dTan','tan',10,'e.g. CALA12345B')+field('Deductor type','<select id="dType">'+TDSG.DTYPES.map(t=>opt(t[0],t[1],d.deductor_type||'K')).join('')+'</select>')+'</div>'
+    +L('Name of the deductor','dName','name',75,'',String(co.name||'').toUpperCase())
+    +'<div class="acx-grid3">'+L('Address line 1 (flat, door, block)','dA1','addr1',25)+L('Line 2 (post office)','dA2','addr2',25)+L('Line 3 (road, street)','dA3','addr3',25)+L('Line 4 (area, locality)','dA4','addr4',25)+L('Line 5 (district)','dA5','addr5',25)+L('Country','dCountry','country',25,'','INDIA')+'</div>'
+    +'<div class="acx-grid3">'+field('State','<select id="dState">'+stateOpts(d.state_code||'')+'</select>')+L('PIN code','dPin','pin',6)+L('E-mail','dEmail','email',75)+'</div>'
+    +'<div class="acx-grid3">'+L('Phone country code','dCc','phone_cc',5,'','91')+L('Phone number (no code, up to 10 digits)','dPhone','phone',10)+'<div></div></div>'
+    +'<div class="acx-sec-title" style="margin-top:6px">Person responsible for deducting the tax</div>'
+    +'<div class="acx-grid3">'+L('Name','rName','resp_name',75)+L('Designation (20 characters)','rDes','resp_designation',20,'e.g. Director')+L('PAN','rPan','resp_pan',10)+'</div>'
+    +'<div class="acx-grid3">'+L('Address line 1','rA1','resp_addr1',25)+L('Line 2','rA2','resp_addr2',25)+L('Line 3','rA3','resp_addr3',25)+L('Line 4','rA4','resp_addr4',25)+L('Line 5','rA5','resp_addr5',25)+L('Country','rCountry','resp_country',25,'','INDIA')+'</div>'
+    +'<div class="acx-grid3">'+field('State','<select id="rState">'+stateOpts(d.resp_state_code||'')+'</select>')+L('PIN code','rPin','resp_pin',6)+L('E-mail','rEmail','resp_email',75)+'</div>'
+    +'<div class="acx-grid3">'+L('Mobile country code','rCc','resp_phone_cc',5,'','91')+L('Mobile number (10 digits, Indian)','rPhone','resp_phone',10)+'<div></div></div>'
+    +'<div class="acx-hint"><a href="javascript:void(0)" onclick="acxTdsCopyAddr()">Use the deductor address and e-mail for the responsible person</a></div>','acxTdsDeductorSave()','lg');
+};
+window.acxTdsCopyAddr=function(){ ['A1','A2','A3','A4','A5'].forEach(k=>{ $('r'+k).value=val('d'+k); }); $('rCountry').value=val('dCountry'); $('rState').value=val('dState'); $('rPin').value=val('dPin'); $('rEmail').value=val('dEmail'); };
+window.acxTdsDeductorSave=async function(){
+  const p={tan:val('dTan').toUpperCase(),deductor_type:val('dType'),name:val('dName'),addr1:val('dA1'),addr2:val('dA2'),addr3:val('dA3'),addr4:val('dA4'),addr5:val('dA5'),country:val('dCountry'),state_code:val('dState'),pin:val('dPin'),email:val('dEmail'),phone_cc:val('dCc'),phone:val('dPhone'),
+    resp_name:val('rName'),resp_designation:val('rDes'),resp_pan:val('rPan').toUpperCase(),resp_addr1:val('rA1'),resp_addr2:val('rA2'),resp_addr3:val('rA3'),resp_addr4:val('rA4'),resp_addr5:val('rA5'),resp_country:val('rCountry'),resp_state_code:val('rState'),resp_pin:val('rPin'),resp_email:val('rEmail'),resp_phone_cc:val('rCc'),resp_phone:val('rPhone')};
+  const bad=(c,m)=>{ if(c){ toast(m,'err'); } return c; };
+  if(bad(p.tan&&!TDSG.TAN_RE.test(p.tan),'The TAN is 4 letters, 5 digits and a letter, like CALA12345B')) return;
+  if(bad(p.resp_pan&&!TDSG.PAN_RE.test(p.resp_pan),'The PAN is 10 characters like ABCDE1234F')) return;
+  if(bad(p.pin&&!/^\d{6}$/.test(p.pin),'The PIN code is 6 digits')||bad(p.resp_pin&&!/^\d{6}$/.test(p.resp_pin),'The PIN code is 6 digits')) return;
+  if(bad(p.email&&!TDSG.EMAIL_RE.test(p.email),'That e-mail address is not valid')||bad(p.resp_email&&!TDSG.EMAIL_RE.test(p.resp_email),'That e-mail address is not valid')) return;
+  if(bad(p.phone&&!/^\d{6,10}$/.test(p.phone),'The phone number is digits only, up to 10, without the country code')) return;
+  if(bad(p.resp_phone&&!/^[6-9]\d{9}$/.test(p.resp_phone),'The mobile number must be a 10-digit Indian mobile number')) return;
+  if(bad(p.name&&p.name.length>75,'The name can be 75 characters at most')||bad(p.resp_designation&&p.resp_designation.length>20,'The designation can be 20 characters at most')) return;
+  const {error}=await rpc('tds_deductor_save',{p_company:X.curCo().id,p:p}); if(fail(error,'Could not save')) return;
+  closeModal(); toast('Saved','ok'); renderTds(TD.host);
+};
+
+/* ---- a deduction: nature of payment, PAN, reason ---- */
+window.acxTdsEntryForm=function(id){
+  const e=TD.data.entries.find(x=>x.id===id); if(!e) return;
+  const tok=t=>'<button type="button" class="btn btn-sm btn-ghost" onclick="$(\'tePan\').value=\''+t+'\'">'+t+'</button>';
+  X.formModal('Deduction - '+(e.voucher_no||'bill'),
+    '<div class="acx-hint" style="margin-bottom:10px"><b>'+esc(e.deductee_name)+'</b> &middot; '+dmy(e.deduction_date)+' &middot; amount '+tdMoney(e.amount_credited)+' @ '+Number(e.rate)+'% = tax <b>'+tdMoney(e.tds_amount)+'</b></div>'
+    +field('Nature of payment','<select id="teCode">'+X.tdsOptions(e.tds_code||'')+'</select><div class="h">Decides the section the tax is reported under. Contract work is split by who the contractor is: an individual or HUF, or anyone else.</div>')
+    +'<div class="acx-field"><label><input type="checkbox" id="teRemember" checked> Remember this for the vendor&rsquo;s next bills</label></div>'
+    +field('PAN of the deductee','<input id="tePan" value="'+esc(e.deductee_pan||'')+'" maxlength="10" style="text-transform:uppercase"><div class="h">If the vendor has no PAN: '+tok('PANNOTAVBL')+' (tax is then deducted at the higher rate), '+tok('PANAPPLIED')+' or '+tok('PANINVALID')+'. A real PAN is better - add it to the vendor in Purchase.</div>')
+    +'<div class="acx-grid2">'+field('Reason, if the rate is not the usual one','<select id="teReason" onchange="$(\'teCertBox\').style.display=this.value===\'A\'?\'block\':\'none\'">'+opt('','None - a normal deduction',e.reason_flag||'')+opt('A','A - lower deduction under a certificate',e.reason_flag||'')+opt('C','C - higher rate because the PAN was not given',e.reason_flag||'')+'</select>')
+      +'<div id="teCertBox" style="display:'+(e.reason_flag==='A'?'block':'none')+'">'+field('Certificate number','<input id="teCert" value="'+esc(e.certificate_no||'')+'" maxlength="15"><div class="h">10 to 15 letters and digits, from the certificate</div>')+'</div></div>',
+    'acxTdsEntrySave('+id+')');
+};
+window.acxTdsEntrySave=async function(id){
+  const e=TD.data.entries.find(x=>x.id===id); const code=val('teCode'), pan=val('tePan').toUpperCase(), flag=val('teReason'), cert=val('teCert');
+  if(flag&&code&&TD.cmap[code]&&!(TD.cmap[code].flags||[]).includes(flag)){ toast('Reason '+flag+' is not allowed with code '+code,'err'); return; }
+  if(flag==='A'&&!/^[A-Za-z0-9]{10,15}$/.test(cert)){ toast('Reason A needs the certificate number (10 to 15 letters and digits)','err'); return; }
+  if(pan&&!TDSG.PAN_RE.test(pan)&&!['PANNOTAVBL','PANAPPLIED','PANINVALID'].includes(pan)){ toast('The PAN must be 10 characters like ABCDE1234F','err'); return; }
+  const p={deductee_pan:pan,reason_flag:flag,certificate_no:flag==='A'?cert:''}; if(code){ p.tds_code=code; p.remember=chk('teRemember'); }
+  const {error}=await rpc('tds_entry_update',{p_ids:[id],p:p}); if(fail(error,'Could not save')) return;
+  closeModal(); toast('Saved','ok'); renderTds(TD.host);
+};
+window.acxTdsBulk=function(){
+  if(!TD.sel.size){ toast('Tick the rows first','err'); return; }
+  X.formModal('Nature of payment for '+TD.sel.size+' deduction'+(TD.sel.size===1?'':'s'),field('Nature of payment','<select id="tbCode">'+X.tdsOptions('')+'</select>')
+    +'<div class="acx-field"><label><input type="checkbox" id="tbRemember" checked> Remember this for each vendor&rsquo;s next bills</label></div>','acxTdsBulkSave()');
+};
+window.acxTdsBulkSave=async function(){
+  const code=val('tbCode'); if(!code){ toast('Choose the nature of payment','err'); return; }
+  const {error}=await rpc('tds_entry_update',{p_ids:[...TD.sel],p:{tds_code:code,remember:chk('tbRemember')}}); if(fail(error,'Could not save')) return;
+  closeModal(); toast('Saved','ok'); renderTds(TD.host);
+};
+
+/* ---- challans ---- */
+window.acxTdsChallanForm=function(id){
+  const c=id?TD.data.challans.find(x=>x.id===id):{deposit_date:'',bsr_code:'',serial_no:'',minor_head:'200',tax:'',interest:'0',fee:'0',other:'0',remark:''};
+  if(!c) return;
+  const I=(l,i,k,ph,h)=>field(l,'<input id="'+i+'" class="n" inputmode="numeric" value="'+esc(String(c[k]??''))+'"'+(ph?' placeholder="'+ph+'"':'')+'>'+(h?'<div class="h">'+h+'</div>':''));
+  X.formModal(id?'Edit challan':'Add a challan',
+    '<div class="acx-hint" style="margin-bottom:10px">From the challan receipt (ITNS 281) or the TIN site&rsquo;s Challan Status Inquiry. Amounts are whole rupees.</div>'
+    +'<div class="acx-grid3">'+field('Date paid','<input type="date" id="chDate" value="'+esc(c.deposit_date)+'" max="'+today()+'">')+I('BSR code (7 digits)','chBsr','bsr_code','e.g. 0510308')+I('Challan serial no.','chSer','serial_no','up to 5 digits')+'</div>'
+    +'<div class="acx-grid4">'+I('Tax (TDS)','chTax','tax')+I('Interest','chInt','interest')+I('Fee','chFee','fee')+I('Penalty / other','chOth','other')+'</div>'
+    +'<div class="acx-grid2">'+field('Minor head','<select id="chMh">'+opts([['200','200 - TDS paid by the deductor'],['400','400 - TDS on regular assessment']],c.minor_head||'200')+'</select>')+field('Note (optional)','<input id="chRemark" value="'+esc(c.remark||'')+'">')+'</div>',
+    'acxTdsChallanSave('+(id||0)+')','lg');
+};
+window.acxTdsChallanSave=async function(id){
+  const g=i=>val(i).replace(/[,\s]/g,''), p={id:id||null,company_id:X.curCo().id,deposit_date:val('chDate'),bsr_code:g('chBsr'),serial_no:g('chSer'),minor_head:val('chMh'),tax:g('chTax')||'0',interest:g('chInt')||'0',fee:g('chFee')||'0',other:g('chOth')||'0',remark:val('chRemark')};
+  if(!p.deposit_date){ toast('Enter the date the challan was paid','err'); return; }
+  if(!/^\d{7}$/.test(p.bsr_code)){ toast('The BSR code is 7 digits','err'); return; }
+  if(!/^\d{1,5}$/.test(p.serial_no)){ toast('The challan serial number is up to 5 digits','err'); return; }
+  if(['tax','interest','fee','other'].some(k=>!/^\d+$/.test(p[k]))){ toast('Amounts are whole rupees','err'); return; }
+  const {error}=await rpc('tds_challan_save',{p:p}); if(fail(error,'Could not save the challan')) return;
+  closeModal(); toast('Saved','ok'); renderTds(TD.host);
+};
+window.acxTdsChallanDel=async function(id){
+  const c=TD.data.challans.find(x=>x.id===id); if(!c) return;
+  if(!(await askReason('Remove this challan','Its '+c.mapped_count+' mapped deduction'+(c.mapped_count===1?'':'s')+' go back to unmapped. Why is it being removed?','Remove'))) return;
+  const {error}=await rpc('tds_challan_cancel',{p_id:id}); if(fail(error,'Could not remove')) return; toast('Removed','ok'); renderTds(TD.host);
+};
+window.acxTdsAuto=async function(){
+  const {data,error}=await rpc('tds_auto_map',{p_company:X.curCo().id,p_year:TD.year,p_quarter:TD.q}); if(fail(error,'Could not suggest')) return;
+  toast(data?data+' deduction'+(data===1?'':'s')+' mapped - check them below':'Nothing more could be mapped - a deduction needs a challan paid on or after its date, with room left','ok'); renderTds(TD.host);
+};
+window.acxTdsMapForm=function(cid){
+  const c=TD.data.challans.find(x=>x.id===cid); if(!c) return;
+  const rows=TD.data.entries.filter(e=>!e.challan_id||e.challan_id===cid);
+  X.formModal('Which deductions did this challan pay?',
+    '<div class="acx-hint" style="margin-bottom:8px">Challan '+esc(c.bsr_code)+' / '+esc(c.serial_no)+' of '+dmy(c.deposit_date)+' &middot; tax <b>'+tdMoney(c.tax)+'</b>. Tick what it paid; the difference should come to nil.</div>'
+    +'<div class="card" style="padding:0;max-height:46vh;overflow:auto"><table class="tbl acx-mini"><thead><tr><th></th><th>Date</th><th>Deductee</th><th class="acx-num">TDS</th></tr></thead><tbody>'
+    +(rows.map(e=>'<tr><td><input type="checkbox" class="acx-chk tmChk" data-id="'+e.id+'" data-amt="'+TDSG.P(e.tds_amount)+'" '+(e.challan_id===cid?'checked':'')+' onchange="acxTdsMapTot('+TDSG.P(c.tax)+')"></td><td>'+dmy(e.deduction_date)+'</td><td>'+esc(e.deductee_name)+'</td><td class="acx-num">'+tdMoney(e.tds_amount)+'</td></tr>').join('')||'<tr><td colspan="4"><div class="empty" style="padding:16px"><div>No unmapped deduction in this quarter</div></div></td></tr>')+'</tbody></table></div>'
+    +'<div id="tmTot" style="margin-top:10px;font-weight:600"></div>','acxTdsMapSave('+cid+')','lg');
+  window.acxTdsMapTot(TDSG.P(c.tax));
+};
+window.acxTdsMapTot=function(tax){
+  let s=0; document.querySelectorAll('.tmChk').forEach(x=>{ if(x.checked) s+=Number(x.dataset.amt); });
+  const el=$('tmTot'); if(!el) return; const diff=tax-s;
+  el.innerHTML='Chosen '+tdMoney(s/100)+' of '+tdMoney(tax/100)+' &middot; '+(diff<0?'<span style="color:#b91c1c">over by '+tdMoney(-diff/100)+' - untick something</span>':diff<100?'<span style="color:#15803d">matched'+(diff?' (rounding of '+tdMoney(diff/100)+')':'')+'</span>':'difference '+tdMoney(diff/100));
+};
+window.acxTdsMapSave=async function(cid){
+  const ids=[...document.querySelectorAll('.tmChk')].filter(x=>x.checked).map(x=>parseInt(x.dataset.id,10));
+  const {error}=await rpc('tds_challan_map',{p_challan:cid,p_entry_ids:ids}); if(fail(error,'Could not map')) return;
+  closeModal(); toast('Saved','ok'); renderTds(TD.host);
+};
+
+/* ---- the file ---- */
+window.acxTdsGenerate=async function(btn){
+  if(btn) btn.disabled=true;
+  try{
+    const co=X.curCo();
+    const fresh=await rpc('tds_statement_data',{p_company:co.id,p_year:TD.year,p_quarter:TD.q}); if(fail(fresh.error,'Could not load the data')) return;
+    TD.data=fresh.data; const o=tdOpts();
+    if(TDSG.validate(TD.data,o).errors.length){ tdDraw(); toast('Fix the points listed first','err'); return; }
+    const sn=await rpc('tds_statement_new',{p_company:co.id,p_year:TD.year,p_quarter:TD.q,p_prev_token:TD.prevFiled==='Y'?TD.prevToken:null}); if(fail(sn.error,'Could not start the statement')) return;
+    const out=TDSG.build(TD.data,Object.assign({},o,{fileSeq:sn.data}));
+    if(!out.ok){ tdDraw(); toast('The file could not be made - see the list','err'); return; }
+    const fin=await rpc('tds_statement_finish',{p_id:sn.data,p_file_name:out.name,p_text:out.text,p_rows:out.rows,p_challans:out.challans,p_tds:out.tds/100}); if(fail(fin.error,'Could not save the statement')) return;
+    usbSaveBlob(new Blob([out.text],{type:'text/plain'}),out.name);
+    toast('File made: '+out.name,'ok'); await renderTds(TD.host);
+  } finally { if(btn) btn.disabled=false; }
+};
+window.acxTdsRedownload=async function(id){
+  const {data,error}=await AC().from('tds_statements').select('file_name,file_text').eq('id',id).single(); if(fail(error,'Could not load the file')) return;
+  usbSaveBlob(new Blob([data.file_text||''],{type:'text/plain'}),data.file_name||('Form140_'+id+'.txt'));
+};
+window.acxTdsFiledForm=function(id){
+  X.formModal('Mark as filed',field('Token number (15 digits)','<input id="tfToken" maxlength="15" inputmode="numeric"><div class="h">From the acknowledgement after the upload. A filed quarter is closed to changes.</div>')+field('Date filed','<input type="date" id="tfDate" value="'+today()+'" max="'+today()+'">'),'acxTdsFiledSave('+id+')');
+};
+window.acxTdsFiledSave=async function(id){
+  const t=val('tfToken').replace(/\D/g,''); if(!/^\d{15}$/.test(t)){ toast('The token number is 15 digits','err'); return; }
+  const {error}=await rpc('tds_statement_filed',{p_id:id,p_token:t,p_date:val('tfDate')||today()}); if(fail(error,'Could not save')) return;
+  closeModal(); toast('Marked as filed','ok'); renderTds(TD.host);
+};
+window.acxTdsReopen=async function(id){
+  if(!(await askReason('Reopen the filed statement','Reopening lets its deductions and challans be changed again. Why?','Reopen'))) return;
+  const {error}=await rpc('tds_statement_reopen',{p_id:id}); if(fail(error,'Could not reopen')) return; toast('Reopened','ok'); renderTds(TD.host);
+};
+window.acxTdsDownload=function(fmt,btn){
+  const D=TD.data, ents=D.entries, chs=D.challans, qd=D.quarter, tot=ents.reduce((s,e)=>s+TDSG.P(e.tds_amount),0)/100;
+  X.download(fmt,{title:'TDS deductions - Form 140 - '+tdQLabel(qd.year,qd.q),file:'TDS_Form140_'+TDSG.taxYearCode(qd.year)+'_Q'+qd.q,
+    sub:D.company.name+' · Tax Year '+TDSG.taxYearLabel(qd.year),
+    cols:[{h:'Date',t:'d'},{h:'Bill'},{h:'Deductee'},{h:'PAN'},{h:'Code'},{h:'Nature of payment'},{h:'Amount',t:'n'},{h:'Rate %',t:'n'},{h:'TDS',t:'n'},{h:'Challan (BSR / serial / date)'},{h:'Reason'}],
+    rows:ents.map(e=>{ const c=chs.find(x=>x.id===e.challan_id); return [e.deduction_date,e.voucher_no||'',e.deductee_name,e.deductee_pan||'',e.tds_code||'',tdCodeText(e.tds_code),Number(e.amount_credited),Number(e.rate),Number(e.tds_amount),c?c.bsr_code+' / '+c.serial_no+' / '+dmy(c.deposit_date):'not mapped',e.reason_flag||'']; }),
+    foot:['Total ('+ents.length+')','','','','','','','',tot,'','']},btn);
 };
 })();

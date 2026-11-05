@@ -433,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'5c9db8012a','insp-items.js':'7b022b36bf','postsales.js':'915f1d3ec1','scheduling.js':'724e365b36','accounts.js':'8aa27a8712','accounts-bank.js':'d127977980','accounts-books.js':'b469da26ab','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'5c9db8012a','insp-items.js':'7b022b36bf','postsales.js':'b2ca172c43','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -9776,449 +9776,760 @@ async function sbRenderCauselistBoard(host){
 }
 
 /* ============================== WEEKLY STATUS ==============================
-   The OPS meeting: who was there, what was decided, who it landed on, and whether it ever got
-   done.
+   The meetings page: run the meeting, write down what was decided, give each decision to a person,
+   and see - across every meeting ever held - what is still open.
 
-   WHY THIS PAGE EXISTS. The minutes have been kept in one Google Sheet since February 2025 - 29
-   meetings, 495 action items - and the sheet answers exactly one question well: "what did we
-   decide on the 21st". It cannot answer the questions actually asked in the room: what is still
-   open, how long it has been open, who is carrying the most, and whether we close things faster
-   than we open them. Same data, read the other way round.
+   WHAT IT IS READ FROM. Meetings and their lines live in ops.meetings / ops.items. The 29 OPS
+   meetings and 495 lines imported from the Google Sheet (Feb 2025 onwards) are shown exactly as
+   they were kept: the owner as the sheet named them, the four sheet states (open, in progress,
+   not done, done). Anything typed here from now on and given a person becomes a real
+   Accountability task (acc.ptasks, delegated by whoever typed it) and the ops.items row only points
+   at it (ptask_id) - so its status is the task's own, and finishing or approving it in
+   Accountability shows here too. Nothing about a task is kept twice.
 
-   WHAT IS SHOWN, AND WHAT IT IS READ FROM. Every figure comes from ops.items and ops.meetings via
-   two RPCs; nothing is computed twice or kept in two places. The sheet's own words are carried on
-   every row - the Deadline cell exactly as typed, the Assigned To cell exactly as typed - so a
-   status this derived can always be checked against what somebody actually wrote. A dashboard that
-   cannot be checked gets quietly distrusted and then ignored.
+   THE RULES ARE ACCOUNTABILITY'S, NOT THIS PAGE'S. A task needs a title and at least one member
+   who is not you; the due date is optional and may repeat weekly or monthly; status is never
+   picked - Pending, then the member marks it done (Awaiting Approval), then you approve it. The
+   inserts, approvals, send-backs and reopenings below are the same writes accountability.js makes,
+   because this page cannot load that file.
 
-   FOUR TABS, BECAUSE THEY ARE FOUR DIFFERENT QUESTIONS.
-     Dashboard    - how are we doing, and what has been open longest.
-     Meetings     - the minutes, as minutes: date, who attended, what came out of it.
-     Action items - the list, filterable, where work is actually ticked off.
-     People       - who owes what. The one that makes a Monday meeting shorter.
-   Filters are shared across the last three and applied in the browser: 495 rows is nothing to
-   filter locally, and a round trip per keystroke would make it feel slow for no benefit. */
+   A line typed with nobody named is saved as a draft (ops.items.is_draft) and shown under
+   "Unassigned" - JainE will not create a task without a member, so until someone is given it, it
+   is only a note on the meeting.
 
-const WS={items:null,meetings:null,err:'',tab:0,q:'',owner:'',project:'',status:'',onlyOpen:false,openMtg:new Set()};
+   A KIND IS A SERIES. "OPS", "OPS & Purchase" ... are what the sheet called each meeting; every
+   meeting of one kind shares one Pending / All tasks / Finished history, because the open work of
+   the last OPS meeting is the agenda of the next one. */
 
-const WS_STATUS=[
-  ['done',       'Done',        '#15803d','#dcfce7'],
-  ['in_progress','In progress', '#b45309','#fef3c7'],
-  ['not_done',   'Not done',    '#b91c1c','#fee2e2'],
-  ['open',       'Open',        '#475569','#f1f5f9']
-];
-function wsStat(s){ return WS_STATUS.find(function(x){return x[0]===s;})||WS_STATUS[3]; }
-function wsChip(s){
-  const f=wsStat(s);
-  return '<span class="badge" style="background:'+f[3]+';color:'+f[2]+';white-space:nowrap">'+f[1]+'</span>';
-}
+const WM={items:null,meetings:null,people:[],err:'',cur:null,view:'meeting',tab:'pending',q:'',who:'',
+  allF:'pending',allG:'meeting',allMtg:'',allWho:'',showPpl:false,showOlder:false,
+  picked:{mem:[],due:null,recur:'none'},parsed:null,sugIdx:0,lastNew:null,lastDraft:null,
+  sel:new Set(),draftMem:{},draftRecur:{},timer:null,busy:false};
 
-const WS_CSS='<style id="wsCss">'
-  +'.ws-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:16px 0 4px}'
-  +'.ws-kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px}'
-  +'.ws-kpi b{display:block;font-size:26px;line-height:1.1;font-weight:800;letter-spacing:-.02em}'
-  +'.ws-kpi span{display:block;margin-top:5px;font-size:11.5px;color:var(--slate);line-height:1.35}'
-  +'.ws-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0 0}'
-  +'.ws-tab{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 15px;font-size:13px;'
-    +'font-weight:600;color:var(--slate);cursor:pointer;font-family:inherit;transition:all .15s}'
-  +'.ws-tab:hover{border-color:#c4b5fd;color:#6b21a8}'
-  +'.ws-tab.on{background:#f5f3ff;border-color:#c4b5fd;color:#6b21a8}'
-  +'.ws-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin:14px 0 0}'
-  +'.ws-f{display:flex;flex-direction:column;gap:5px;min-width:0}'
-  +'.ws-f>label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}'
-  +'.ws-f .sel,.ws-f input{height:36px;border:1px solid var(--line);border-radius:9px;padding:0 11px;font-size:13px;'
-    +'font-family:inherit;background:#fff;color:#334155}'
-  +'.ws-f .sel:focus,.ws-f input:focus{outline:none;border-color:#a78bfa;box-shadow:0 0 0 3px rgba(124,58,237,.13)}'
-  +'.ws-f input{min-width:230px}'
-  /* The split bar: one row per project or per person, the four states side by side to scale. It is
-     a bar rather than a pie because the eye compares lengths far better than angles, and because
-     every row has to be comparable with every other row. */
-  +'.ws-split{display:flex;height:9px;border-radius:999px;overflow:hidden;background:#f1f5f9;min-width:90px}'
-  +'.ws-split i{display:block;height:100%}'
-  +'.ws-mtg{border:1px solid var(--line);border-radius:14px;background:#fff;margin-bottom:10px;overflow:hidden}'
-  +'.ws-mtg-hd{display:flex;gap:14px;align-items:center;padding:13px 16px;cursor:pointer;flex-wrap:wrap}'
-  +'.ws-mtg-hd:hover{background:#faf5ff}'
-  +'.ws-mtg-d{font-weight:800;font-size:15px;letter-spacing:-.01em;white-space:nowrap}'
-  +'.ws-mtg-k{font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#6b21a8;'
-    +'background:#f5f3ff;border:1px solid #e9d5ff;border-radius:999px;padding:3px 9px;white-space:nowrap}'
-  +'.ws-mtg-b{padding:0 16px 14px;border-top:1px solid var(--line)}'
-  +'.ws-att{display:flex;flex-wrap:wrap;gap:5px;margin:12px 0 4px}'
-  +'.ws-att span{font-size:11.5px;background:#f8fafc;border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:#334155}'
-  +'.ws-proj{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);'
-    +'margin:14px 0 6px;padding-top:10px;border-top:1px dashed var(--line)}'
-  +'.ws-it{display:flex;gap:11px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #f6f7f9}'
-  +'.ws-it:last-child{border-bottom:0}'
-  +'.ws-it-x{flex:1 1 auto;min-width:0;font-size:13.5px;line-height:1.5}'
-  +'.ws-it-m{font-size:11.5px;color:var(--slate);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap}'
-  /* The status control is a <select> rather than a tick, because there are four states and a tick
-     can only say two of them. */
-  +'.ws-sel{height:28px;border:1px solid var(--line);border-radius:7px;font-size:11.5px;font-family:inherit;'
-    +'background:#fff;color:#334155;padding:0 6px;cursor:pointer;flex:none}'
-  +'.ws-sel:focus{outline:none;border-color:#a78bfa}'
-  +'.ws-late{color:#b91c1c;font-weight:700}'
-  +'.ws-row{cursor:pointer}.ws-row:hover{background:#faf5ff}'
-  +'@media(max-width:1000px){.ws-kpis{grid-template-columns:repeat(2,1fr)}}'
-  +'@media(max-width:620px){.ws-kpis{grid-template-columns:1fr}.ws-f input{min-width:0;width:100%}.ws-f{flex:1 1 100%}}'
-+'</style>';
+const WM_RECUR={none:'Does not repeat',weekly:'Weekly',monthly:'Monthly'};
+const WM_LEGACY={open:'Open',in_progress:'In progress',not_done:'Not done',done:'Done'};
 
-VIEWS.weekly_status=async function(v){
-  setCrumb(['Overview','Weekly Status']);
-  loader(v);
-  await wsLoad();
-  if(WS.items===null){
-    v.innerHTML=mHead('fa-people-group','#7c3aed','Weekly Status')
-      +'<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-lock"></i>'
-      +'<div>'+esc(WS.err||'Could not load')+'</div></div>';
-    return;
-  }
-  v.innerHTML=WS_CSS+mHead('fa-people-group','#7c3aed','Weekly Status')
-    +'<p style="color:var(--slate);font-size:13px;margin:6px 2px 0">Every OPS meeting, what came out of it, '
-      +'and whether it was ever closed. Ticking something off here is a real change with your name on it.</p>'
-    +'<div id="wsBody"></div>';
-  wsPaint();
-};
-
-async function wsLoad(){
-  try{
-    const r=await Promise.all([sb.rpc('ops_weekly_meetings'), sb.rpc('ops_weekly_items')]);
-    if(r[0].error) throw r[0].error;
-    if(r[1].error) throw r[1].error;
-    WS.meetings=r[0].data||[]; WS.items=r[1].data||[];
-  }catch(e){ WS.items=null; WS.meetings=null; WS.err=(e&&e.message)||String(e); }
-}
-
-/* Repaints only the body, so changing a filter or ticking an item off does not re-run the two
-   RPCs. The page head and the stylesheet are written once by the view. */
-function wsPaint(){
-  const b=$('wsBody'); if(!b) return;
-  b.innerHTML=wsKpisHtml()+wsTabsHtml()
-    +(WS.tab===0?wsDashHtml():WS.tab===1?wsMeetingsHtml():WS.tab===2?wsItemsHtml():wsPeopleHtml());
-}
-window.wsGo=function(t){ WS.tab=t; wsPaint(); };
-window.wsSetFilter=function(k,val){ WS[k]=val; wsPaint(); };
-window.wsToggleMtg=function(id){
-  if(WS.openMtg.has(id)) WS.openMtg.delete(id); else WS.openMtg.add(id);
-  wsPaint();
-};
-
-function wsToday(){
+function wmToday(){
   try{ const d=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
        return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
   catch(e){ return new Date().toISOString().slice(0,10); }
 }
-function wsDaysSince(iso){
-  if(!iso) return 0;
-  return Math.max(0, Math.round((new Date(wsToday())-new Date(iso))/86400000));
+function wmIso(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function wmAdd(s,n){ const d=new Date(s+'T00:00'); d.setDate(d.getDate()+n); return wmIso(d); }
+function wmDays(a,b){ return Math.round((new Date(b+'T00:00')-new Date(a+'T00:00'))/864e5); }
+function wmFmt(s){ return s?new Date(String(s).slice(0,10)+'T00:00').toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'}):''; }
+function wmFmtS(s){ return s?new Date(String(s).slice(0,10)+'T00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}):''; }
+function wmQ(sel){ return document.querySelector(sel); }
+
+/* ---------- people ---------- */
+function wmPerson(email){ return WM.people.find(p=>p.email&&email&&p.email.toLowerCase()===String(email).toLowerCase()); }
+function wmName(email){ const p=wmPerson(email); return p?p.name:String(email||'').split('@')[0]; }
+function wmFirst(email){ return wmName(email).split(' ')[0]; }
+function wmDept(email){ const p=wmPerson(email); return p&&p.dept?p.dept:''; }
+function wmIsMe(email){ return !!email&&!!state.email&&String(email).toLowerCase()===state.email.toLowerCase(); }
+// The @name a person is typed as: the full name without spaces, so two people who share a first
+// name can never be confused.
+function wmTag(p){ return p.name.replace(/\s+/g,''); }
+
+/* ---------- one item, the same shape whether it came from the sheet or from a task ---------- */
+function wmItem(r){
+  const linked=r.ptask_id!=null;
+  const st=linked ? (r.task_status==='Completed'?'done':r.task_status==='Awaiting Approval'?'awaiting':'pending')
+                  : (r.status||'open');
+  return {id:r.id, meeting:r.meeting_id, date:r.meeting_date, kind:r.kind||'Meeting', t:r.item||'', linked, draft:!!r.is_draft,
+    ptask:r.ptask_id, st, due:linked?r.task_due:r.due_date, dueRaw:r.due_raw,
+    mem:linked?(r.task_assignees||[]):[], owner:r.owner||r.owner_raw||'',
+    doneOn:linked?(r.task_approved_at||r.task_completed_at):r.done_at, recur:r.task_recur, delegator:r.task_delegator};
 }
-/* Overdue means a due date that has passed on something still open. An item with no due date is
-   never called overdue - 473 of the 495 have none, and inventing a deadline for them would turn
-   the whole board red and tell nobody anything. */
-function wsOverdue(r){
-  return r.status!=='done' && !!r.due_date && r.due_date < wsToday();
+const wmOpen=it=>it.st!=='done';
+const wmOverdue=it=>wmOpen(it)&&it.due&&String(it.due).slice(0,10)<wmToday();
+// Who an item is with, as one key per person: the JainE account for a task, the sheet's name for an
+// imported line.
+function wmWhoKeys(it){
+  if(it.linked) return it.mem.map(e=>'e:'+e.toLowerCase());
+  // A sheet name that is exactly someone's JainE name is that person, so their old lines and their
+  // new tasks sit under one heading.
+  const n=(it.owner||'').trim().toLowerCase(), p=n&&WM.people.find(x=>x.name.toLowerCase()===n);
+  return [p?'e:'+p.email.toLowerCase():'o:'+(it.owner||'No owner')];
+}
+function wmKeyName(k){ return k.startsWith('e:')?wmName(k.slice(2)):k.slice(2); }
+function wmKeyDept(k){ return k.startsWith('e:')?wmDept(k.slice(2)):''; }
+function wmNames(it){ return it.linked?(it.mem.length===1?wmFirst(it.mem[0]):it.mem.length?wmFirst(it.mem[0])+' +'+(it.mem.length-1):'—'):(it.owner||'No owner'); }
+
+/* ---------- load ---------- */
+async function wmLoad(){
+  try{
+    const r=await Promise.all([sb.rpc('ops_weekly_meetings'), sb.rpc('ops_weekly_items'), sb.schema('acc').rpc('people')]);
+    if(r[0].error) throw r[0].error;
+    if(r[1].error) throw r[1].error;
+    WM.meetings=(r[0].data||[]).slice().sort((a,b)=>a.meeting_date<b.meeting_date?1:a.meeting_date>b.meeting_date?-1:b.id-a.id);
+    WM.items=(r[1].data||[]).map(wmItem);
+    WM.people=((r[2]&&r[2].data)||[]).filter(p=>p&&p.email).map(p=>({email:p.email,name:p.full_name||String(p.email).split('@')[0],
+      dept:Array.isArray(p.department)?(p.department[0]||''):(p.department||'')})).sort((a,b)=>a.name<b.name?-1:1);
+  }catch(e){ WM.items=null; WM.err=(e&&e.message)||String(e); }
+}
+async function wmReload(){
+  const {data,error}=await sb.rpc('ops_weekly_items');
+  if(error) throw error;
+  WM.items=(data||[]).map(wmItem);
+}
+async function wmReloadMeetings(){
+  const {data,error}=await sb.rpc('ops_weekly_meetings');
+  if(error) throw error;
+  WM.meetings=(data||[]).slice().sort((a,b)=>a.meeting_date<b.meeting_date?1:a.meeting_date>b.meeting_date?-1:b.id-a.id);
+}
+const wmMeeting=id=>(WM.meetings||[]).find(m=>m.id===id);
+const wmSeries=kind=>(WM.meetings||[]).filter(m=>m.kind===kind);
+
+VIEWS.weekly_status=async function(v){
+  setCrumb(['Overview','Weekly Status']);
+  document.body.classList.add('wm-dark');
+  loader(v);
+  await wmLoad();
+  if(WM.items===null){
+    v.innerHTML=WM_CSS+'<div class="wm"><div class="wm-top"><h1>Weekly Status</h1></div><div class="wm-empty"><b>Could not load.</b>'+esc(WM.err||'')+'</div></div>';
+    return;
+  }
+  const today=wmToday();
+  WM.cur=((WM.meetings||[]).find(m=>m.meeting_date===today)||(WM.meetings||[])[0]||{}).id||null;
+  v.innerHTML=WM_CSS+'<div class="wm" id="wmRoot"></div>';
+  wmRender();
+};
+
+function wmRender(){
+  const root=$('wmRoot'); if(!root) return;
+  const hour=new Date().getHours(), hi=hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
+  const open=WM.items.filter(it=>!it.draft&&wmOpen(it));
+  root.innerHTML=`
+  <div class="wm-top wm-in">
+    <div class="wm-date">${esc(new Date(wmToday()+'T00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'}))}</div>
+    <h1>${hi}.</h1>
+    <div class="wm-lead"><button class="wm-lnk ${WM.view==='all'?'on':''}" onclick="wmOpenAll('pending')"><b id="wmPend">${open.length}</b> tasks pending</button></div>
+  </div>
+  <div class="wm-grid"><div id="wmMain"></div><aside class="wm-rail"><div class="wm-box" id="wmNav"></div></aside></div>`;
+  wmPaintNav();
+  if(WM.view==='all') wmPaintAll(); else wmPaintMeeting();
+}
+function wmCounts(){ const n=WM.items.filter(it=>!it.draft&&wmOpen(it)).length; const e=$('wmPend'); if(e) e.textContent=n; }
+
+/* ---------- right rail: every meeting, newest first, by month ---------- */
+function wmPaintNav(){
+  const nav=$('wmNav'); if(!nav) return;
+  const ms=WM.meetings||[], today=wmToday();
+  const months=[...new Set(ms.map(m=>String(m.meeting_date).slice(0,7)))];
+  const shown=WM.showOlder?months:months.slice(0,3);
+  const openOf=id=>WM.items.filter(it=>it.meeting===id&&!it.draft&&wmOpen(it)).length;
+  nav.innerHTML=`<div class="wm-navh"><span>Meetings</span><button class="wm-btn wm-sm wm-light" onclick="wmStartMeeting()"><i class="fa-solid fa-plus"></i> Start a meeting</button></div>`+
+    (ms.length?shown.map(mo=>`<div class="wm-dl">${esc(new Date(mo+'-01T00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'}))}</div>`+
+      ms.filter(m=>String(m.meeting_date).slice(0,7)===mo).map(m=>`<div class="wm-mi ${WM.view==='meeting'&&WM.cur===m.id?'on':''} ${m.meeting_date>today?'up':''}" onclick="wmOpenMeeting(${m.id})">
+        <span class="t">${m.meeting_date===today?'Today':esc(wmFmtS(m.meeting_date))}</span><span class="n">${esc(m.kind||'Meeting')}</span>
+        ${m.meeting_date===today?'<span class="live"></span>':openOf(m.id)?`<span class="c">${openOf(m.id)}</span>`:''}</div>`).join('')).join('')
+      +(months.length>3?`<button class="wm-quiet" style="margin-top:12px" onclick="WM.showOlder=!WM.showOlder;wmPaintNav()"><i class="fa-solid fa-chevron-${WM.showOlder?'up':'down'}"></i> ${WM.showOlder?'Show fewer':'Older meetings'}</button>`:'')
+    :'<div class="wm-mute" style="font-size:13px">No meetings yet.</div>');
 }
 
-function wsFiltered(){
-  const q=WS.q.trim().toLowerCase();
-  return (WS.items||[]).filter(function(r){
-    if(WS.onlyOpen && r.status==='done') return false;
-    if(WS.status && r.status!==WS.status) return false;
-    if(WS.owner  && (r.owner||'—')!==WS.owner) return false;
-    if(WS.project&& r.project!==WS.project) return false;
-    if(q){
-      const hay=(r.item+' '+(r.owner||'')+' '+(r.project||'')+' '+(r.comments||'')+' '+(r.due_raw||'')).toLowerCase();
-      if(hay.indexOf(q)===-1) return false;
-    }
-    return true;
-  });
+/* ---------- a meeting ---------- */
+window.wmOpenMeeting=function(id){ WM.view='meeting'; WM.cur=id; WM.tab='pending'; WM.q=''; WM.who=''; WM.showPpl=false; WM.picked={mem:[],due:null,recur:'none'}; wmRender(); window.scrollTo({top:0,behavior:'smooth'}); };
+function wmPaintMeeting(){
+  clearInterval(WM.timer);
+  const main=$('wmMain'); if(!main) return;
+  const m=wmMeeting(WM.cur);
+  if(!m){ main.innerHTML=`<div class="wm-card"><div class="wm-card-top"><h2>No meeting yet</h2><div class="wm-mute" style="margin-top:8px">Start one from the list on the right.</div></div></div>`; return; }
+  const today=wmToday(), series=wmSeries(m.kind), first=series.length?series[series.length-1].meeting_date:m.meeting_date;
+  const isToday=m.meeting_date===today, att=m.attendees||[];
+  const started=(function(){ try{ return Number(localStorage.getItem('wm_start_'+m.id))||0; }catch(e){ return 0; } })();
+  main.innerHTML=`<div class="wm-card wm-in"><div class="wm-card-top">
+    <div class="wm-mh">
+      <div>
+        <div class="wm-eyebrow">${isToday?`<span class="wm-live">Today</span>${started?`<span class="wm-tm" id="wmTimer"></span>`:''}`:m.meeting_date>today?'Coming up · '+esc(wmFmt(m.meeting_date)):'Held on '+esc(wmFmt(m.meeting_date))}</div>
+        <h2>${esc(m.kind||'Meeting')}<span class="wm-info"><i class="fa-solid fa-circle-info"></i><span class="tip">${series.length} meeting${series.length===1?'':'s'} of this kind since ${esc(wmFmtS(first))}${m.note?'<br>'+esc(m.note):''}</span></span></h2>
+      </div>
+      ${isToday?`<button class="wm-btn wm-red" onclick="wmEndMeeting()">End meeting</button>`:''}
+    </div>
+    <div class="wm-mh2">
+      <button class="wm-quiet" onclick="WM.showPpl=!WM.showPpl;wmPaintMeeting()">${att.length?att.length+' present':'No attendance yet'} <i class="fa-solid fa-chevron-${WM.showPpl?'up':'down'}"></i></button>
+      ${WM.showPpl?`<div class="wm-ppl">${att.map(n=>avatar(n)).join('')}<button class="wm-quiet" onclick="wmEditAttendance()"><i class="fa-solid fa-pen"></i> ${att.length?'Edit':'Who was there?'}</button></div>`:''}
+      ${series.length>1?`<select class="wm-hsel" onchange="wmOpenMeeting(Number(this.value))" title="Earlier meetings">${series.map(x=>`<option value="${x.id}" ${x.id===m.id?'selected':''}>${x.id===m.id?'Earlier meetings':(x.meeting_date===today?'Today':esc(wmFmt(x.meeting_date)))}</option>`).join('')}</select>`:''}
+    </div>
+    </div><div class="wm-card-body">
+    <div class="wm-cap">
+      <div class="wm-cap-in"><input id="wmSmart" autocomplete="off" placeholder="Write a task and press Enter…" oninput="wmParse()" onkeydown="wmKey(event)"><span class="kbd">Enter ↵</span></div>
+      <div class="wm-parsed" id="wmParsed"></div>
+      <div class="wm-sugg" id="wmSugg" style="display:none"></div>
+    </div>
+    <div id="wmDrafts"></div>
+    <div class="wm-v6" id="wmTasks"></div>
+  </div></div>`;
+  wmParse(); wmPaintDrafts(); wmPaintTabs();
+  if(isToday&&started){
+    const tick=()=>{ const t=$('wmTimer'); if(!t) return; const x=Math.max(0,Math.floor((Date.now()-started)/1000)); t.textContent=String(Math.floor(x/60)).padStart(2,'0')+':'+String(x%60).padStart(2,'0'); };
+    tick(); WM.timer=setInterval(tick,1000);
+  }
 }
 
-function wsKpisHtml(){
-  const all=WS.items||[];
-  const done=all.filter(function(r){return r.status==='done';}).length;
-  const openish=all.length-done;
-  const late=all.filter(wsOverdue).length;
-  const pct=all.length?Math.round(100*done/all.length):0;
-  const last=(WS.meetings||[])[0];
-  const kpi=function(big,label,ink){
-    return '<div class="ws-kpi"><b'+(ink?' style="color:'+ink+'"':'')+'>'+big+'</b><span>'+label+'</span></div>';
-  };
-  return '<div class="ws-kpis">'
-    +kpi((WS.meetings||[]).length,'meetings recorded<br>since '+(((WS.meetings||[]).slice(-1)[0]||{}).meeting_date?fmtDate(WS.meetings[WS.meetings.length-1].meeting_date):'—'))
-    +kpi(all.length,'action items minuted')
-    +kpi(pct+'%','closed &middot; '+done+' of '+all.length, pct>=70?'#15803d':pct>=50?'#b45309':'#b91c1c')
-    +kpi(openish,'still not done', openish?'#b45309':'#15803d')
-    +kpi(late,'past a stated deadline', late?'#b91c1c':'#15803d')
-    +'</div>'
-    +(last?'<p style="color:var(--slate);font-size:12px;margin:8px 2px 0">Last meeting '
-       +esc(fmtDate(last.meeting_date))+' &middot; '+esc(last.kind)+(last.note?' &middot; '+esc(last.note):'')
-       +' &middot; '+last.item_count+' item'+(last.item_count===1?'':'s')+' raised, '+last.done_count+' since closed.</p>':'');
+/* Start a meeting: which kind, which day. The kinds are the ones already in use, or a new one. */
+window.wmStartMeeting=function(){
+  const kinds=[...new Set((WM.meetings||[]).map(m=>m.kind).filter(Boolean))];
+  openModal(`<div class="modal-head"><h3>Start a meeting</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <label>Which meeting</label><select id="wmKind" onchange="$('wmKindNew').style.display=this.value==='__new'?'':'none'">${kinds.map(k=>`<option>${esc(k)}</option>`).join('')}<option value="__new">A new kind of meeting…</option></select>
+    <input id="wmKindNew" placeholder="e.g. Sales Review" style="display:${kinds.length?'none':''};margin-top:8px">
+    <label>Date</label><input type="date" id="wmDate" value="${wmToday()}">
+  </div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="wmStartBtn" onclick="wmStartSave()"><i class="fa-solid fa-play"></i> Start</button></div>`);
+  if(!kinds.length) $('wmKind').value='__new';
+};
+window.wmStartSave=async function(){
+  const sel=$('wmKind').value, kind=sel==='__new'?($('wmKindNew').value||'').trim():sel, date=$('wmDate').value||wmToday();
+  if(!kind){ toast('Choose which meeting this is','err'); return; }
+  const b=$('wmStartBtn'); b.disabled=true;
+  try{
+    const {data,error}=await sb.rpc('ops_meeting_create',{p_kind:kind,p_date:date}); if(error) throw error;
+    if(date===wmToday()){ try{ localStorage.setItem('wm_start_'+data,String(Date.now())); }catch(e){} }
+    await wmReloadMeetings(); closeModal(); toast('Meeting started','ok'); wmOpenMeeting(Number(data));
+  }catch(e){ b.disabled=false; toast('Could not start the meeting: '+((e&&e.message)||e),'err'); }
+};
+
+/* Attendance, by name - the way the imported meetings record it. */
+window.wmEditAttendance=function(){
+  const m=wmMeeting(WM.cur); if(!m) return;
+  const have=new Set(m.attendees||[]), names=[...new Set(WM.people.map(p=>p.name).concat(m.attendees||[]))].sort();
+  window._wmAtt=have;
+  openModal(`<div class="modal-head"><h3>Who was there?</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body wm-pk"><input type="text" placeholder="Search people" oninput="document.querySelectorAll('.wm-pk label').forEach(l=>l.style.display=l.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')">
+    <div style="max-height:380px;overflow-y:auto;margin-top:6px">${names.map(n=>`<label><input type="checkbox" ${have.has(n)?'checked':''} onchange="this.checked?_wmAtt.add(this.value):_wmAtt.delete(this.value)" value="${esc(n)}">${avatar(n)} ${esc(n)}</label>`).join('')}</div></div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="wmSaveAttendance()">Save</button></div>`);
+};
+window.wmSaveAttendance=async function(){
+  try{
+    const {error}=await sb.rpc('ops_meeting_set_attendees',{p_meeting:WM.cur,p_people:[..._wmAtt]}); if(error) throw error;
+    await wmReloadMeetings(); closeModal(); WM.showPpl=true; wmPaintMeeting();
+  }catch(e){ toast('Could not save attendance: '+((e&&e.message)||e),'err'); }
+};
+
+/* ---------- Pending / All tasks / Finished: every meeting of this kind, all its dates ---------- */
+function wmPaintTabs(){
+  if(WM.view!=='meeting') return wmPaintAllList();
+  const host=$('wmTasks'), m=wmMeeting(WM.cur); if(!host||!m) return;
+  const all=WM.items.filter(it=>it.kind===m.kind&&!it.draft);
+  const match=it=>(!WM.who||wmWhoKeys(it).includes(WM.who))&&(!WM.q||it.t.toLowerCase().includes(WM.q.toLowerCase()));
+  const pend=all.filter(wmOpen), fin=all.filter(it=>!wmOpen(it));
+  const people=[...new Set(all.flatMap(wmWhoKeys))].sort((x,y)=>wmKeyName(x)<wmKeyName(y)?-1:1);
+  const body=WM.tab==='pending'?wmPendingHtml(pend.filter(match)):WM.tab==='all'?wmAllHtml(all.filter(match),all):wmFinishedHtml(fin.filter(match));
+  host.innerHTML=`<div class="ttabs">
+    <button class="ttab pend ${WM.tab==='pending'?'on':''}" onclick="WM.tab='pending';wmPaintTabs()">Pending <span class="n">${pend.length}</span></button>
+    <button class="ttab ${WM.tab==='all'?'on':''}" onclick="WM.tab='all';wmPaintTabs()">All tasks <span class="n">${all.length}</span></button>
+    <button class="ttab fin ${WM.tab==='finished'?'on':''}" onclick="WM.tab='finished';wmPaintTabs()">Finished <span class="n">${fin.length}</span></button>
+    <div class="tfilter"><input placeholder="Search tasks" value="${esc(WM.q)}" oninput="WM.q=this.value;clearTimeout(window._wmQt);window._wmQt=setTimeout(()=>{wmPaintTabs();const i=wmQ('.wm-v6 .tfilter input');i.focus();i.setSelectionRange(i.value.length,i.value.length)},250)">
+      <select onchange="WM.who=this.value;wmPaintTabs()"><option value="">Everyone</option>${people.map(k=>`<option value="${esc(k)}" ${WM.who===k?'selected':''}>${esc(wmKeyName(k))}</option>`).join('')}</select></div>
+  </div>${body}`;
+  WM.lastNew=null;
+}
+// Pending: everything not finished, from every meeting of this kind, grouped by person, oldest first.
+function wmPendingHtml(list){
+  if(!list.length) return `<div class="empty3"><div style="font-size:28px">🎉</div><div style="margin-top:6px">Nothing pending from this meeting${WM.who||WM.q?' for this filter':''}.</div></div>`;
+  const keys=[...new Set(list.flatMap(wmWhoKeys))], cnt=k=>list.filter(it=>wmWhoKeys(it).includes(k)).length;
+  const hasNew=k=>list.some(it=>it.id===WM.lastNew&&wmWhoKeys(it).includes(k));
+  keys.sort((x,y)=>(hasNew(y)-hasNew(x))||(cnt(y)-cnt(x)));
+  return `<div style="font-size:12.5px;color:var(--slate);margin-top:10px">Oldest first. Includes everything still open from earlier meetings.</div>`+
+  keys.map((k,i)=>{ const mine=list.filter(it=>wmWhoKeys(it).includes(k)).sort((x,y)=>((y.id===WM.lastNew)-(x.id===WM.lastNew))||(x.date<y.date?-1:x.date>y.date?1:x.id-y.id)), od=mine.filter(wmOverdue).length;
+    return `<div class="person" style="animation-delay:${Math.min(i,12)*.03}s"><div class="who">${wmAvatar(wmKeyName(k),36)}<div><b>${esc(wmKeyName(k))}</b><span>${esc(wmKeyDept(k)||(k.startsWith('o:')?'From the minutes sheet':''))}</span><br><span class="cnt">${mine.length} pending</span>${od?` <span class="cnt red">${od} overdue</span>`:''}</div></div>
+      <div>${mine.map(it=>wmRow(it,k)).join('')}</div></div>`; }).join('');
+}
+// All tasks: the cumulative record, one group per meeting date, newest first.
+function wmAllHtml(list,all){
+  const fin=all.filter(it=>!wmOpen(it)&&it.doneOn), withDue=fin.filter(it=>it.due), ontime=withDue.filter(it=>String(it.doneOn).slice(0,10)<=String(it.due).slice(0,10)).length;
+  const avg=fin.length?Math.round(fin.reduce((t,it)=>t+Math.max(0,wmDays(it.date,String(it.doneOn).slice(0,10))),0)/fin.length):0;
+  const dates=[...new Set(list.map(it=>it.date))].sort().reverse();
+  return `<div class="sumrow"><div><b>${all.length}</b><span>tasks assigned in total</span></div><div><b>${all.filter(it=>!wmOpen(it)).length}</b><span>finished</span></div><div><b>${withDue.length?Math.round(ontime/withDue.length*100)+'%':'—'}</b><span>finished on time</span></div><div><b>${fin.length?avg+' days':'—'}</b><span>average time to finish</span></div></div>`+
+  (dates.length?dates.map(d=>{ const g=list.filter(it=>it.date===d);
+    return `<div class="grp">${esc(wmFmt(d))} ${d===wmToday()?'<span class="tw">Today</span>':''}<small>${g.length} assigned · ${g.filter(it=>!wmOpen(it)).length} finished</small></div>${g.map(it=>wmRow(it,null,true)).join('')}`; }).join('')
+  :'<div class="empty3">No tasks match this filter.</div>');
+}
+// Finished: most recent first, grouped by the month it was closed.
+function wmFinishedHtml(list){
+  if(!list.length) return `<div class="empty3">Nothing finished yet${WM.who||WM.q?' for this filter':''}.</div>`;
+  const mo=it=>String(it.doneOn||it.date).slice(0,7), months=[...new Set(list.map(mo))].sort().reverse();
+  return months.map(x=>{ const g=list.filter(it=>mo(it)===x).sort((a,b)=>String(a.doneOn||a.date)<String(b.doneOn||b.date)?1:-1);
+    return `<div class="grp">${esc(new Date(x+'-01T00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'}))}<small>${g.length} finished</small></div>${g.map(it=>wmRow(it,null,true)).join('')}`; }).join('');
+}
+// The core avatar() at a given size: same colour for the same name everywhere in JainE.
+function wmAvatar(name,sz){ return '<span class="avatar-sm" style="background:'+colorFor(name)+';width:'+sz+'px;height:'+sz+'px;min-width:'+sz+'px;font-size:'+Math.round(sz*.36)+'px" title="'+esc(name)+'">'+esc(initials(name).toUpperCase())+'</span>'; }
+
+function wmRow(it,forKey,showPeople,showMeeting){
+  const bits=[], today=wmToday();
+  const from=(showMeeting?esc(it.kind)+', ':'')+(it.date===today?(showMeeting?'today':'Today\'s meeting'):(showMeeting?'':'From ')+esc(wmFmtS(it.date)));
+  bits.push(it.meeting!==WM.cur||WM.view!=='meeting'?`<span class="from" onclick="wmOpenMeeting(${it.meeting})">${from}</span>`:`<span>${from}</span>`);
+  if(showPeople) bits.push(`<span>${it.linked?it.mem.map(e=>wmAvatar(wmName(e),18)).join('')+' '+esc(it.mem.map(wmFirst).join(', ')):esc(it.owner||'No owner')}</span>`);
+  else if(it.linked&&it.mem.length>1) bits.push(`<span>with ${esc(it.mem.filter(e=>'e:'+e.toLowerCase()!==forKey).map(wmFirst).join(', '))}</span>`);
+  const due=it.due?String(it.due).slice(0,10):null, done=it.doneOn?String(it.doneOn).slice(0,10):null;
+  if(it.st==='done'){
+    bits.push(`<span class="ok">Finished${done?' '+esc(wmFmtS(done)):''}</span>`);
+    if(due&&done){ const late=wmDays(due,done); bits.push(late>0?`<span class="od">${late} day${late>1?'s':''} late</span>`:`<span>${late<0?(-late)+' day'+(late<-1?'s':'')+' early':'on the day'}</span>`); }
+  } else if(it.st==='awaiting') bits.push('<span class="aw">Marked done — waiting for your approval</span>');
+  else if(it.st==='in_progress') bits.push('<span class="aw">In progress</span>');
+  else if(it.st==='not_done') bits.push('<span class="od">Not done</span>');
+  if(wmOpen(it)&&due){ const d=wmDays(due,today); bits.push(wmOverdue(it)?`<span class="od">Overdue ${d} day${d>1?'s':''} · was due ${esc(wmFmtS(due))}</span>`:`<span>Due ${esc(wmFmt(due))}</span>`); }
+  else if(wmOpen(it)&&!due&&it.dueRaw) bits.push(`<span>Due: ${esc(it.dueRaw)}</span>`);
+  if(it.recur&&it.recur.freq&&it.recur.freq!=='none') bits.push(`<span><i class="fa-solid fa-repeat"></i> ${esc(it.recur.freq==='weekly'?'Weekly':it.recur.freq==='monthly'?'Monthly':it.recur.freq)}</span>`);
+  // Imported lines keep the sheet's four states, so they get the sheet's control; tasks follow Accountability.
+  const legacyCtl=!it.linked?`<select class="wm-st-sel" onchange="wmSetLegacy(${it.id},this.value,this)">${Object.entries(WM_LEGACY).map(([k,l])=>`<option value="${k}" ${it.st===k?'selected':''}>${l}</option>`).join('')}</select>`:'';
+  const pill=it.st==='done'?['f','Finished']:it.st==='awaiting'?['a','Awaiting approval']:wmOverdue(it)?['o','Overdue']:['p',it.linked?'Pending':WM_LEGACY[it.st]||'Open'];
+  return `<div class="task ${it.st==='done'?'done':''} ${it.id===WM.lastNew?'new':''}">
+    <div class="bx" onclick="wmToggle(${it.id})" title="${it.st==='done'?'Reopen':'Mark finished'}">${it.st==='done'?'<i class="fa-solid fa-check"></i>':''}</div>
+    <div style="flex:1;min-width:0"><div class="tt">${esc(it.t)}</div><div class="mt">${bits.join('')}</div>
+      ${it.st==='awaiting'?`<div style="display:flex;gap:6px;margin-top:6px"><button class="b ok sm" onclick="wmApprove(${it.id},true)"><i class="fa-solid fa-check"></i> Approve</button><button class="b sb sm" onclick="wmApprove(${it.id},false)">Send back</button></div>`:''}</div>
+    ${showPeople?`<span class="st ${pill[0]}">${pill[1]}</span>`:legacyCtl}
+  </div>`;
 }
 
-function wsTabsHtml(){
-  const tabs=['Dashboard','Meetings','Action items','People'];
-  return '<div class="ws-tabs">'+tabs.map(function(t,i){
-      return '<button class="ws-tab'+(WS.tab===i?' on':'')+'" onclick="wsGo('+i+')">'+t+'</button>';
-    }).join('')+'</div>';
-}
-
-/* The four states as one bar. Widths are percentages of the row's own total, so a project with 8
-   items and one with 135 are still comparable at a glance. */
-function wsSplitHtml(c){
-  const t=c.done+c.in_progress+c.not_done+c.open; if(!t) return '';
-  const seg=function(n,col){ return n?'<i style="width:'+(100*n/t)+'%;background:'+col+'" title="'+n+'"></i>':''; };
-  return '<div class="ws-split">'+seg(c.done,'#22c55e')+seg(c.in_progress,'#f59e0b')
-    +seg(c.not_done,'#ef4444')+seg(c.open,'#cbd5e1')+'</div>';
-}
-function wsGroup(rows,keyFn){
-  const m={};
-  rows.forEach(function(r){
-    const k=keyFn(r)||'—';
-    const c=m[k]||(m[k]={k:k,done:0,in_progress:0,not_done:0,open:0,total:0,late:0});
-    c[r.status]=(c[r.status]||0)+1; c.total++; if(wsOverdue(r)) c.late++;
-  });
-  return Object.keys(m).map(function(k){return m[k];}).sort(function(a,b){return b.total-a.total;});
-}
-
-function wsDashHtml(){
-  const all=WS.items||[];
-  const byProj=wsGroup(all,function(r){return r.project;}).slice(0,12);
-  const byPers=wsGroup(all.filter(function(r){return r.owner;}),function(r){return r.owner;}).slice(0,10);
-  /* Longest open, measured from the meeting that raised it. This is the list that changes
-     behaviour: an item agreed 19 months ago and never closed is a different conversation from one
-     raised last week. */
-  const oldest=all.filter(function(r){return r.status!=='done';})
-    .sort(function(a,b){ return a.meeting_date<b.meeting_date?-1:a.meeting_date>b.meeting_date?1:0; })
-    .slice(0,10);
-  const barRows=function(list,title,sub){
-    return '<div class="card" style="margin-top:14px"><div class="card-pad" style="padding-bottom:6px">'
-      +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-chart-simple" style="color:#7c3aed"></i> '+title+'</div>'
-      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">'+sub+'</div></div>'
-      +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
-        +'<th>'+(title.indexOf('project')>-1?'Project':'Person')+'</th><th style="width:150px">Split</th>'
-        +'<th style="width:70px">Items</th><th style="width:70px">Done</th><th style="width:80px">Closed</th>'
-      +'</tr></thead><tbody>'
-      +list.map(function(c){
-          const pct=c.total?Math.round(100*c.done/c.total):0;
-          return '<tr><td><b>'+esc(c.k)+'</b></td>'
-            +'<td>'+wsSplitHtml(c)+'</td>'
-            +'<td>'+c.total+'</td><td>'+c.done+'</td>'
-            +'<td style="font-weight:700;color:'+(pct>=70?'#15803d':pct>=40?'#b45309':'#b91c1c')+'">'+pct+'%</td></tr>';
-        }).join('')
-      +'</tbody></table></div></div>';
-  };
-  return '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">'
-      +WS_STATUS.map(function(s){
-          const n=all.filter(function(r){return r.status===s[0];}).length;
-          return '<div style="flex:1 1 150px;background:'+s[3]+';border-radius:12px;padding:12px 14px">'
-            +'<b style="display:block;font-size:22px;font-weight:800;color:'+s[2]+'">'+n+'</b>'
-            +'<span style="font-size:12px;color:'+s[2]+';opacity:.85">'+s[1]+'</span></div>';
-        }).join('')
-    +'</div>'
-    +barRows(byProj,'Where the work sits, by project','Green is closed, amber in progress, red not done, grey never picked up.')
-    +barRows(byPers,'Where the work sits, by person','Only people carrying at least one item. Names are resolved from the sheet’s initials.')
-    +'<div class="card" style="margin-top:14px"><div class="card-pad" style="padding-bottom:6px">'
-      +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-hourglass-half" style="color:#b45309"></i> Open the longest</div>'
-      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">Still not done, counted from the meeting that raised it.</div></div>'
-    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
-      +'<th style="width:96px">Raised</th><th style="width:72px">Age</th><th>Item</th>'
-      +'<th style="width:130px">Owner</th><th style="width:110px">Status</th>'
-    +'</tr></thead><tbody>'
-    +(oldest.length?oldest.map(function(r){
-        const d=wsDaysSince(r.meeting_date);
-        return '<tr><td style="color:var(--slate);white-space:nowrap">'+esc(fmtDate(r.meeting_date))+'</td>'
-          +'<td style="font-weight:700;color:'+(d>365?'#b91c1c':d>120?'#b45309':'var(--slate)')+'">'+d+'d</td>'
-          +'<td>'+esc(r.item)+'<div style="font-size:11.5px;color:var(--slate);margin-top:2px">'+esc(r.project)+'</div></td>'
-          +'<td>'+esc(r.owner||'—')+'</td><td>'+wsChip(r.status)+'</td></tr>';
-      }).join('')
-      :'<tr><td colspan="5" style="color:var(--slate);padding:18px">Nothing is open. That would be a first.</td></tr>')
-    +'</tbody></table></div></div>';
-}
-
-function wsFilterBarHtml(withOwner){
-  const opts=function(list,cur){
-    return '<option value="">All</option>'+list.map(function(x){
-      return '<option value="'+esc(x)+'"'+(cur===x?' selected':'')+'>'+esc(x)+'</option>';
-    }).join('');
-  };
-  const projects=Array.from(new Set((WS.items||[]).map(function(r){return r.project;}))).sort();
-  const owners=Array.from(new Set((WS.items||[]).map(function(r){return r.owner;}).filter(Boolean))).sort();
-  return '<div class="ws-bar">'
-    +'<div class="ws-f"><label>Search</label><input id="wsQ" placeholder="Anything in the item, owner or comment…" '
-      +'value="'+esc(WS.q)+'" oninput="wsSetFilter(\'q\',this.value)"></div>'
-    +'<div class="ws-f"><label>Project</label><select class="sel" onchange="wsSetFilter(\'project\',this.value)">'+opts(projects,WS.project)+'</select></div>'
-    +(withOwner?'<div class="ws-f"><label>Owner</label><select class="sel" onchange="wsSetFilter(\'owner\',this.value)">'+opts(owners,WS.owner)+'</select></div>':'')
-    +'<div class="ws-f"><label>Status</label><select class="sel" onchange="wsSetFilter(\'status\',this.value)">'
-      +'<option value="">All</option>'
-      +WS_STATUS.map(function(s){return '<option value="'+s[0]+'"'+(WS.status===s[0]?' selected':'')+'>'+s[1]+'</option>';}).join('')
-    +'</select></div>'
-    +'<div class="ws-f"><label>&nbsp;</label><button class="ws-tab'+(WS.onlyOpen?' on':'')+'" style="height:36px" '
-      +'onclick="wsSetFilter(\'onlyOpen\','+(!WS.onlyOpen)+')">Hide finished</button></div>'
-    +'</div>';
-}
-
-/* The status control. Every change goes through the RPC and is reflected locally only once the
-   database has accepted it - an optimistic tick that silently failed would be worse than no tick,
-   because the whole point of this page is that it can be trusted over the sheet. */
-function wsStatusSelHtml(r){
-  return '<select class="ws-sel" onchange="wsSetStatus('+r.id+',this.value,this)">'
-    +WS_STATUS.map(function(s){
-        return '<option value="'+s[0]+'"'+(r.status===s[0]?' selected':'')+'>'+s[1]+'</option>';
-      }).join('')
-    +'</select>';
-}
-window.wsSetStatus=async function(id,status,el){
-  const row=(WS.items||[]).find(function(r){return r.id===id;});
-  const was=row?row.status:null;
+/* ---------- ticking, approving: the same writes Accountability makes ---------- */
+const ACCX=()=>sb.schema('acc');
+function wmFind(id){ return WM.items.find(it=>it.id===id); }
+async function wmAfterWrite(){ await wmReload(); wmCounts(); wmPaintTabs(); wmPaintNav(); }
+window.wmSetLegacy=async function(id,status,el){
   if(el) el.disabled=true;
   try{
-    const {error}=await sb.rpc('ops_item_set_status',{p_id:id,p_status:status});
-    if(error) throw error;
-    if(row){ row.status=status; row.updated_by=state.email; }
+    const {error}=await sb.rpc('ops_item_set_status',{p_id:id,p_status:status}); if(error) throw error;
     usageQueue('weekly_status.tick_an_action_item','update',{status:status});
-    toast(status==='done'?'Closed — with your name on it':'Marked '+wsStat(status)[1].toLowerCase(),'ok');
-    wsPaint();
-  }catch(e){
-    if(el){ el.disabled=false; if(was) el.value=was; }
-    toast('Could not update: '+((e&&e.message)||e),'err');
-  }
+    toast(status==='done'?'Closed — with your name on it':'Marked '+WM_LEGACY[status].toLowerCase(),'ok');
+    await wmAfterWrite();
+  }catch(e){ if(el) el.disabled=false; toast('Could not update: '+((e&&e.message)||e),'err'); }
+};
+window.wmToggle=async function(id){
+  const it=wmFind(id); if(!it) return;
+  if(!it.linked) return wmSetLegacy(id,it.st==='done'?'open':'done');
+  if(!wmIsMe(it.delegator)){ toast('Only '+wmName(it.delegator)+', who assigned it, can close or reopen this task','warn'); return; }
+  const tid=it.ptask;
+  try{
+    if(it.st==='done'){
+      await ACCX().from('ptasks').update({approval_state:'open',status:'Pending'}).eq('id',tid);
+      await ACCX().from('ptask_activity').insert({task_id:tid,action:'reopened',detail:'Task reopened'});
+      try{ await ACCX().from('ptask_comments').insert({task_id:tid,body:'reopened the task',system:true}); }catch(e){}
+      toast('Reopened','ok');
+    } else {
+      // You assigned it, so ticking it completes it outright - Accountability's owner path.
+      try{ const r=await ACCX().rpc('complete_subtree',{tid}); if(r&&r.error) throw r.error; }
+      catch(e){ await ACCX().from('ptasks').update({status:'Completed',approval_state:'approved',progress:100,approved_at:new Date().toISOString()}).eq('id',tid); }
+      try{ await ACCX().rpc('bubble_after_approve',{tid}); }catch(e){}
+      await ACCX().from('ptask_activity').insert({task_id:tid,action:'completed',detail:'Completed by owner'});
+      usageQueue('weekly_status.tick_an_action_item','update',{status:'done'});
+      toast('Completed','ok');
+    }
+    await wmAfterWrite();
+  }catch(e){ toast('Could not update the task: '+((e&&e.message)||e),'err'); }
+};
+window.wmApprove=async function(id,yes){
+  const it=wmFind(id); if(!it||!it.linked) return; const tid=it.ptask;
+  try{
+    if(yes){
+      await ACCX().from('ptasks').update({approval_state:'approved',status:'Completed',approved_by:state.email,approved_at:new Date().toISOString()}).eq('id',tid);
+      await ACCX().from('ptask_activity').insert({task_id:tid,action:'approved',detail:'Approved'});
+      try{ await ACCX().rpc('complete_subtree',{tid}); }catch(e){}
+      try{ await ACCX().rpc('bubble_after_approve',{tid}); }catch(e){}
+    } else {
+      try{ const r=await ACCX().rpc('reset_subtree',{tid}); if(r&&r.error) throw r.error; }
+      catch(e){ await ACCX().from('ptasks').update({approval_state:'declined',status:'Pending'}).eq('id',tid); }
+      await ACCX().from('ptask_activity').insert({task_id:tid,action:'declined',detail:'Declined — task restored'});
+      try{ await ACCX().from('ptask_comments').insert({task_id:tid,body:'declined the task — restored to the assignee',system:true}); }catch(e){}
+    }
+    try{ await ACCX().from('notifications').update({read:true}).eq('task_id',tid).eq('kind','approval').eq('recipient',state.email); }catch(e){}
+    toast(yes?'Approved':'Sent back','ok');
+    await wmAfterWrite();
+  }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
 };
 
-function wsMeetingsHtml(){
-  const rows=wsFiltered();
-  const byMtg={};
-  rows.forEach(function(r){ (byMtg[r.meeting_id]=byMtg[r.meeting_id]||[]).push(r); });
-  const list=(WS.meetings||[]).filter(function(m){ return byMtg[m.id]&&byMtg[m.id].length; });
-  if(!list.length){
-    return wsFilterBarHtml(true)+'<div class="card card-pad empty" style="margin-top:14px;padding:36px">'
-      +'<i class="fa-solid fa-people-group"></i><div>No meeting matches those filters</div></div>';
+/* ---------- every pending task, across all meetings ---------- */
+window.wmOpenAll=function(f){ if(WM.view==='all'&&WM.allF===f){ WM.view='meeting'; wmRender(); return; } WM.view='all'; WM.allF=f; wmRender(); window.scrollTo({top:0,behavior:'smooth'}); };
+function wmPaintAll(){
+  clearInterval(WM.timer);
+  const main=$('wmMain'); if(!main) return;
+  const live=WM.items.filter(it=>!it.draft), n=k=>live.filter(it=>k==='pending'?wmOpen(it):k==='awaiting'?it.st==='awaiting':wmOverdue(it)).length;
+  const kinds=[...new Set((WM.meetings||[]).map(m=>m.kind).filter(Boolean))];
+  const keys=[...new Set(live.filter(wmOpen).flatMap(wmWhoKeys))].sort((x,y)=>wmKeyName(x)<wmKeyName(y)?-1:1);
+  const cm=wmMeeting(WM.cur);
+  main.innerHTML=`<div class="wm-card wm-in"><div class="wm-card-top">
+    <div class="wm-mh"><div><div class="wm-eyebrow">Across all meetings</div><h2>${{pending:'Pending',awaiting:'Waiting for your approval',overdue:'Overdue'}[WM.allF]}</h2>
+      <div class="wm-mute" style="margin-top:8px;font-size:14px">Tick a task to finish it. Click a meeting's name to open it.</div></div>
+      ${cm?`<button class="wm-btn wm-line" onclick="WM.view='meeting';wmRender()"><i class="fa-solid fa-arrow-left" style="font-size:11px"></i> ${esc(cm.kind)}</button>`:''}</div>
+    </div><div class="wm-card-body"><div class="wm-v6" style="margin-top:26px">
+    <div class="ttabs">${['pending','awaiting','overdue'].map(k=>`<button class="ttab ${k==='pending'?'pend':''} ${WM.allF===k?'on':''}" onclick="WM.allF='${k}';wmRender()">${{pending:'Pending',awaiting:'To approve',overdue:'Overdue'}[k]} <span class="n">${n(k)}</span></button>`).join('')}
+      <div class="tfilter"><select onchange="WM.allG=this.value;wmPaintAllList()"><option value="meeting" ${WM.allG==='meeting'?'selected':''}>By meeting</option><option value="person" ${WM.allG==='person'?'selected':''}>By person</option></select>
+        <select onchange="WM.allMtg=this.value;wmPaintAllList()"><option value="">All meetings</option>${kinds.map(k=>`<option ${WM.allMtg===k?'selected':''}>${esc(k)}</option>`).join('')}</select>
+        <select onchange="WM.allWho=this.value;wmPaintAllList()"><option value="">Everyone</option>${keys.map(k=>`<option value="${esc(k)}" ${WM.allWho===k?'selected':''}>${esc(wmKeyName(k))}</option>`).join('')}</select></div></div>
+    <div id="wmAllList"></div></div></div></div>`;
+  wmPaintAllList();
+}
+function wmPaintAllList(){
+  const host=$('wmAllList'); if(!host) return;
+  const list=WM.items.filter(it=>!it.draft&&(WM.allF==='pending'?wmOpen(it):WM.allF==='awaiting'?it.st==='awaiting':wmOverdue(it))&&(!WM.allMtg||it.kind===WM.allMtg)&&(!WM.allWho||wmWhoKeys(it).includes(WM.allWho)))
+    .sort((a,b)=>((b.st==='awaiting')-(a.st==='awaiting'))||(String(a.due||'9')<String(b.due||'9')?-1:1));
+  if(!list.length){ host.innerHTML='<div class="empty3"><div style="font-size:28px">🎉</div><div style="margin-top:6px">Nothing here for this filter.</div></div>'; return; }
+  const latest=kind=>{ const s=wmSeries(kind).filter(m=>m.meeting_date<=wmToday()); return (s[0]||wmSeries(kind)[0]||{}).id; };
+  if(WM.allG==='meeting'){
+    host.innerHTML=[...new Set(list.map(it=>it.kind))].map(kind=>{ const g=list.filter(it=>it.kind===kind);
+      return `<div class="grp" style="cursor:pointer" onclick="wmOpenMeeting(${latest(kind)})">${esc(kind)}<small>${g.length} · ${g.filter(wmOverdue).length} overdue</small></div>${g.map(it=>wmRow(it,null,true)).join('')}`; }).join('');
+  } else {
+    const keys=[...new Set(list.flatMap(wmWhoKeys))].map(k=>({k,g:list.filter(it=>wmWhoKeys(it).includes(k))})).sort((x,y)=>y.g.length-x.g.length);
+    host.innerHTML=keys.map(({k,g})=>`<div class="grp">${wmAvatar(wmKeyName(k),22)} ${esc(wmKeyName(k))}<small>${esc(wmKeyDept(k))}${wmKeyDept(k)?' · ':''}${g.length} pending · ${g.filter(wmOverdue).length} overdue</small></div>${g.map(it=>wmRow(it,k,false,true)).join('')}`).join('');
   }
-  return wsFilterBarHtml(true)+'<div style="margin-top:14px">'
-    +list.map(function(m){
-        const items=byMtg[m.id];
-        const open=WS.openMtg.has(m.id);
-        const done=items.filter(function(r){return r.status==='done';}).length;
-        const pct=items.length?Math.round(100*done/items.length):0;
-        let body='';
-        if(open){
-          const projs=[]; items.forEach(function(r){ if(projs.indexOf(r.project)===-1) projs.push(r.project); });
-          body='<div class="ws-mtg-b">'
-            +'<div class="ws-att">'+((m.attendees||[]).length
-                ? m.attendees.map(function(a){return '<span>'+esc(a)+'</span>';}).join('')
-                : '<span style="color:var(--slate)">Attendance was not recorded for this meeting</span>')+'</div>'
-            +projs.map(function(p){
-                return '<div class="ws-proj">'+esc(p)+'</div>'
-                  +items.filter(function(r){return r.project===p;}).map(wsItemRowHtml).join('');
-              }).join('')
-            +'</div>';
-        }
-        return '<div class="ws-mtg">'
-          +'<div class="ws-mtg-hd" onclick="wsToggleMtg('+m.id+')">'
-            +'<i class="fa-solid fa-chevron-'+(open?'down':'right')+'" style="color:#c4b5fd;font-size:11px"></i>'
-            +'<span class="ws-mtg-d">'+esc(fmtDate(m.meeting_date))+'</span>'
-            +'<span class="ws-mtg-k">'+esc(m.kind)+'</span>'
-            +(m.note?'<span style="font-size:12px;color:var(--slate)">'+esc(m.note)+'</span>':'')
-            +'<span style="margin-left:auto;display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
-              +'<span style="font-size:12px;color:var(--slate)"><i class="fa-solid fa-users" style="opacity:.5"></i> '
-                +((m.attendees||[]).length||'—')+'</span>'
-              +'<span style="font-size:12px;color:var(--slate)">'+items.length+' item'+(items.length===1?'':'s')+'</span>'
-              +'<span style="font-size:12px;font-weight:700;color:'+(pct>=70?'#15803d':pct>=40?'#b45309':'#b91c1c')+'">'+pct+'% closed</span>'
-            +'</span>'
-          +'</div>'+body
-        +'</div>';
-      }).join('')
-    +'</div>';
 }
 
-function wsItemRowHtml(r){
-  const late=wsOverdue(r);
-  const meta=[];
-  if(r.owner) meta.push('<span><i class="fa-solid fa-user" style="opacity:.45"></i> '+esc(r.owner)+'</span>');
-  if(r.due_date) meta.push('<span'+(late?' class="ws-late"':'')+'><i class="fa-regular fa-calendar" style="opacity:.45"></i> '
-    +esc(fmtDate(r.due_date))+(late?' · overdue':'')+'</span>');
-  /* The sheet's own Deadline cell, shown whenever it is not a date - it is where "wip", "90%
-     Completed" and "approval need from VC sir" live, and those are the real status for most rows. */
-  if(!r.due_date && r.due_raw) meta.push('<span style="opacity:.8">“'+esc(r.due_raw)+'”</span>');
-  if(r.comments) meta.push('<span style="opacity:.8">'+esc(r.comments)+'</span>');
-  if(r.updated_by) meta.push('<span style="color:#6b21a8"><i class="fa-solid fa-pen" style="opacity:.6"></i> set here</span>');
-  return '<div class="ws-it">'
-    +wsStatusSelHtml(r)
-    +'<div class="ws-it-x">'+esc(r.item)
-      +(meta.length?'<div class="ws-it-m">'+meta.join('')+'</div>':'')
-    +'</div></div>';
+/* ---------- writing a task: type, Enter ---------- */
+const WM_WD={sunday:0,sun:0,monday:1,mon:1,tuesday:2,tue:2,tues:2,wednesday:3,wed:3,thursday:4,thu:4,thurs:4,friday:5,fri:5,saturday:6,sat:6};
+const WM_MON={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,sept:8,oct:9,nov:10,dec:11};
+function wmParseText(raw){
+  let txt=' '+raw+' ', mem=[], due=null, recur='none';
+  const others=WM.people.filter(p=>!wmIsMe(p.email));
+  txt=txt.replace(/@([A-Za-z.]+)/g,(m,n)=>{
+    const k=n.toLowerCase();
+    let p=others.find(x=>wmTag(x).toLowerCase()===k);
+    if(!p){ const f=others.filter(x=>x.name.split(' ')[0].toLowerCase()===k); if(f.length===1) p=f[0]; }
+    if(p){ if(!mem.includes(p.email)) mem.push(p.email); return ' '; } return m; });
+  const today=wmToday(), base=new Date(today+'T00:00'), add=n=>wmAdd(today,n);
+  // Dates first, then repeats; "weekly"/"monthly" only count at the very end, so "send weekly MIS"
+  // keeps its title while "every week" anywhere, or a trailing "weekly", sets the repeat.
+  const rules=[
+    [/\b(?:by |on |due )?today\b/i,()=>{due=add(0);}],
+    [/\b(?:by |on |due )?tomorrow\b/i,()=>{due=add(1);}],
+    [/\b(?:by |on |due )?(?:end of (?:the )?week|eow)\b/i,()=>{due=add(Math.max(0,6-base.getDay()));}],
+    [/\b(?:by |on |due )?next week\b/i,()=>{due=add(((8-base.getDay())%7)||7);}],
+    [/\b(?:by |due )?in (\d+) days?\b/i,m=>{due=add(+m[1]);}],
+    [/\b(?:by |on |due )?(\d{1,2})(?:st|nd|rd|th)? (jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\b/i,m=>{ const d=new Date(base.getFullYear(),WM_MON[m[2].toLowerCase()],+m[1]); if(wmIso(d)<today) d.setFullYear(d.getFullYear()+1); due=wmIso(d); }],
+    [/\b(?:by |on |due |this |next )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tues?|wed|thurs?|fri|sat)\b/i,m=>{ const t=WM_WD[m[1].toLowerCase()]; let n=(t-base.getDay()+7)%7; if(n===0) n=7; due=add(n); }],
+    [/\bevery ?week\b|\bweekly\s*$/i,()=>{recur='weekly';}],
+    [/\bevery ?month\b|\bmonthly\s*$/i,()=>{recur='monthly';}]
+  ];
+  rules.forEach(([re,fn])=>{ const m=txt.match(re); if(m){ fn(m); txt=txt.replace(re,' '); } });
+  const title=txt.replace(/\s+/g,' ').replace(/^[\s,:\-–]+|[\s,:\-–]+$/g,'').replace(/\s+(by|on|due|for|to)$/i,'');
+  return {title:title.charAt(0).toUpperCase()+title.slice(1),mem,due,recur};
 }
-
-function wsItemsHtml(){
-  const rows=wsFiltered();
-  return wsFilterBarHtml(true)
-    +'<p style="color:var(--slate);font-size:12px;margin:10px 2px 0">'+rows.length+' of '+(WS.items||[]).length+' items shown.</p>'
-    +'<div class="card" style="margin-top:8px"><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
-      +'<th style="width:112px">Status</th><th style="width:96px">Raised</th><th>Item</th>'
-      +'<th style="width:140px">Owner</th><th style="width:150px">Project</th><th style="width:120px">Deadline</th>'
-    +'</tr></thead><tbody>'
-    +(rows.length?rows.map(function(r){
-        const late=wsOverdue(r);
-        return '<tr><td>'+wsStatusSelHtml(r)+'</td>'
-          +'<td style="color:var(--slate);white-space:nowrap;font-size:12px">'+esc(fmtDate(r.meeting_date))+'</td>'
-          +'<td>'+esc(r.item)
-            +(r.comments?'<div style="font-size:11.5px;color:var(--slate);margin-top:2px">'+esc(r.comments)+'</div>':'')
-          +'</td>'
-          +'<td>'+(r.owner?esc(r.owner):'<span style="color:var(--slate)">—</span>')
-            /* The sheet's spelling, where it differs from the name this resolved to. Keeps the
-               resolution honest and checkable rather than something to be taken on trust. */
-            +(r.owner_raw&&r.owner_raw!==r.owner?'<div style="font-size:11px;color:var(--slate)">sheet: '+esc(r.owner_raw)+'</div>':'')
-          +'</td>'
-          +'<td style="font-size:12.5px;color:var(--slate)">'+esc(r.project)
-            /* Same honesty as the owner column: where "Dream One Block 4" was grouped under Dream
-               One, the sheet's own label is still on the row. */
-            +(r.project_raw&&r.project_raw!==r.project?'<div style="font-size:11px;opacity:.75">sheet: '+esc(r.project_raw)+'</div>':'')
-          +'</td>'
-          +'<td style="font-size:12px"'+(late?' class="ws-late"':'')+'>'
-            +(r.due_date?esc(fmtDate(r.due_date)):(r.due_raw?'<span style="color:var(--slate)">“'+esc(r.due_raw)+'”</span>':'<span style="color:var(--slate)">—</span>'))
-          +'</td></tr>';
-      }).join('')
-      :'<tr><td colspan="6" style="padding:20px;color:var(--slate)">Nothing matches those filters.</td></tr>')
-    +'</tbody></table></div></div>';
-}
-
-function wsPeopleHtml(){
-  const rows=wsFiltered().filter(function(r){return r.owner;});
-  const people=wsGroup(rows,function(r){return r.owner;});
-  return wsFilterBarHtml(false)
-    +'<div class="card" style="margin-top:14px"><div class="card-pad" style="padding-bottom:6px">'
-      +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-user-check" style="color:#7c3aed"></i> Who is carrying what</div>'
-      +'<div style="font-size:12px;color:var(--slate);margin-top:3px">Click a name to see only their items.</div></div>'
-    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
-      +'<th>Person</th><th style="width:160px">Split</th><th style="width:66px">Items</th>'
-      +'<th style="width:66px">Done</th><th style="width:86px">Still open</th>'
-      +'<th style="width:78px">Overdue</th><th style="width:76px">Closed</th>'
-    +'</tr></thead><tbody>'
-    +(people.length?people.map(function(c){
-        const openish=c.total-c.done, pct=c.total?Math.round(100*c.done/c.total):0;
-        return '<tr class="ws-row" onclick="wsSetFilter(\'owner\',\''+escJs(c.k)+'\');wsGo(2)">'
-          +'<td><b>'+esc(c.k)+'</b></td>'
-          +'<td>'+wsSplitHtml(c)+'</td>'
-          +'<td>'+c.total+'</td><td>'+c.done+'</td>'
-          +'<td style="'+(openish?'color:#b45309;font-weight:700':'color:var(--slate)')+'">'+openish+'</td>'
-          +'<td style="'+(c.late?'color:#b91c1c;font-weight:700':'color:var(--slate)')+'">'+c.late+'</td>'
-          +'<td style="font-weight:700;color:'+(pct>=70?'#15803d':pct>=40?'#b45309':'#b91c1c')+'">'+pct+'%</td></tr>';
-      }).join('')
-      :'<tr><td colspan="7" style="padding:20px;color:var(--slate)">Nothing matches those filters.</td></tr>')
-    +'</tbody></table></div></div>';
-}
-
-VIEWS.scoreboard=async function(v){
-  setCrumb(['Scoreboard']);
-  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-ranking-star" style="color:#b8902f"></i> Scoreboard</h1><p>Who is delivering assigned work, and on time</p></div></div>'
-    +'<div class="card" style="padding:0">'
-      +'<div style="display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:center;flex-wrap:wrap">'
-        +'<button class="btn'+(SB_VIEW==='all'?' btn-primary':'')+'" onclick="sbSetView(\'all\')">All Tasks</button>'
-      +'</div><div id="sbBody"><div class="loader"><div class="spin"></div></div></div></div>';
-  // The Causelist board went with Causelist Reviews (29 Oct 2026); MIS actions score in Legal > Scoreboard.
-  await sbRenderAllTasks($('sbBody'));
+window.wmParse=function(){
+  const inp=$('wmSmart'); if(!inp) return;
+  const r=wmParseText(inp.value), P=WM.picked;
+  const mem=[...new Set([...r.mem,...P.mem])], due=r.due||P.due, recur=r.recur!=='none'?r.recur:P.recur;
+  WM.parsed={title:r.title,mem,due,recur:due?recur:'none'};
+  const box=$('wmParsed');
+  if(!inp.value.trim()&&!P.mem.length) box.innerHTML=`<span class="hint">Add people and dates now or later — <code>@Name</code>, <code>by Friday</code>, <code>in 3 days</code>, <code>every week</code>.</span>`;
+  else box.innerHTML=mem.map(e=>`<span class="tok">${wmAvatar(wmName(e),20)} ${esc(wmName(e))} <i class="fa-solid fa-xmark x" onclick="wmDropMem('${esc(e)}')"></i></span>`).join('')+
+    `<button class="ctl" onclick="wmPickPeople(WM.parsed.mem,'Assign to',m=>{WM.picked.mem=m;wmParse()})"><i class="fa-solid fa-plus" style="font-size:10px"></i> ${mem.length?'Person':'Assign to'}</button>`+
+    `<span class="tok"><i class="fa-regular fa-calendar"></i><input type="date" min="${wmToday()}" value="${due||''}" onchange="WM.picked.due=this.value||null;wmParse()"></span>`+
+    (due?`<span class="tok"><i class="fa-solid fa-repeat"></i><select onchange="WM.picked.recur=this.value;wmParse()">${Object.entries(WM_RECUR).map(([k,v])=>`<option value="${k}" ${recur===k?'selected':''}>${v}</option>`).join('')}</select></span>`:'')+
+    `<span style="margin-left:auto">${mem.length?'Enter creates the task':'Enter saves it — assign later'}</span>`;
+  wmSuggest();
 };
-// Kept so /tasks/scoreboard links and bookmarks from when it was a tab still land somewhere real.
-function taskScoreboard(){ navTo('scoreboard'); }
+window.wmDropMem=function(e){ WM.picked.mem=WM.picked.mem.filter(x=>x!==e); const p=wmPerson(e), i=$('wmSmart'); if(p) i.value=i.value.replace(new RegExp('@('+wmTag(p)+'|'+p.name.split(' ')[0]+')\\b','i'),'').replace(/\s+/g,' '); wmParse(); };
+function wmSuggest(){
+  const inp=$('wmSmart'), box=$('wmSugg'); if(!inp||!box) return;
+  const m=inp.value.slice(0,inp.selectionStart).match(/@([A-Za-z.]*)$/);
+  if(!m){ box.style.display='none'; return; }
+  const q=m[1].toLowerCase(), list=WM.people.filter(p=>!wmIsMe(p.email)&&p.name.toLowerCase().replace(/\s+/g,'').includes(q)).slice(0,7);
+  if(!list.length){ box.style.display='none'; return; }
+  WM.sugIdx=Math.min(WM.sugIdx,list.length-1);
+  box.innerHTML=list.map((p,i)=>`<div class="${i===WM.sugIdx?'on':''}" onmousedown="event.preventDefault();wmChoose('${esc(p.email)}')">${wmAvatar(p.name,24)} ${esc(p.name)}<span>${esc(p.dept||'')}</span></div>`).join('');
+  box.style.display='block'; box._list=list;
+}
+window.wmChoose=function(email){
+  const p=wmPerson(email), inp=$('wmSmart'); if(!p||!inp) return;
+  const pos=inp.selectionStart, before=inp.value.slice(0,pos).replace(/@([A-Za-z.]*)$/,'@'+wmTag(p)+' ');
+  inp.value=before+inp.value.slice(pos); inp.setSelectionRange(before.length,before.length); WM.sugIdx=0; wmParse(); inp.focus();
+};
+window.wmKey=function(e){
+  const box=$('wmSugg');
+  if(box&&box.style.display==='block'){
+    if(e.key==='ArrowDown'){ WM.sugIdx++; wmSuggest(); e.preventDefault(); return; }
+    if(e.key==='ArrowUp'){ WM.sugIdx=Math.max(0,WM.sugIdx-1); wmSuggest(); e.preventDefault(); return; }
+    if(e.key==='Enter'||e.key==='Tab'){ wmChoose(box._list[WM.sugIdx].email); e.preventDefault(); return; }
+    if(e.key==='Escape'){ box.style.display='none'; return; }
+  }
+  if(e.key==='Enter'){ e.preventDefault(); wmAdd1(); }
+};
 
+// The repeat rule in Accountability's own shape: weekly on the due date's weekday, monthly on its date.
+function wmRule(recur,due){
+  if(!due||!recur||recur==='none') return null;
+  const d=new Date(due+'T00:00');
+  return recur==='weekly'?{freq:'weekly',weekdays:[d.getDay()]}:recur==='monthly'?{freq:'monthly',monthdays:[d.getDate()]}:null;
+}
+/* Create the Accountability task exactly as "Delegated by me" does: the task, its members, its
+   place at the end of your list, and the usage record with the full names. */
+async function wmCreateTask(title,mem,due,recur){
+  const {data:t,error}=await ACCX().from('ptasks').insert({title,delegator:state.email,due_date:due||null,project_id:null,order_index:0,recur:wmRule(recur,due)}).select().single();
+  if(error) throw error;
+  const a=await ACCX().from('ptask_assignees').insert(mem.map(e=>({task_id:t.id,email:e})));
+  if(a.error) throw a.error;
+  try{ await ACCX().rpc('task_rank_append',{p_task_id:t.id}); }catch(e){}
+  try{ usageQueue('tasks.tasks.create_task','create',{title:title,assignee:mem.map(wmName).join(', ')}); }catch(e){}
+  return t.id;
+}
+async function wmAdd1(){
+  if(WM.busy) return;
+  const c=WM.parsed||{}; const m=wmMeeting(WM.cur); if(!m) return;
+  // Same checks, order and wording as Accountability's accInsCreate.
+  if(!c.title){ toast('Type a title','err'); return; }
+  WM.busy=true;
+  try{
+    if(c.mem.length){
+      const tid=await wmCreateTask(c.title,c.mem,c.due,c.recur);
+      const {data,error}=await sb.rpc('ops_item_add',{p_meeting:m.id,p_item:c.title,p_ptask:tid,p_owner:c.mem.map(wmName).join(', '),p_due:c.due||null}); if(error) throw error;
+      WM.lastNew=data; WM.tab='pending';
+      toast('Task created for '+c.mem.map(wmName).join(', '),'ok');
+    } else {
+      const {data,error}=await sb.rpc('ops_item_add',{p_meeting:m.id,p_item:c.title,p_ptask:null,p_owner:null,p_due:c.due||null}); if(error) throw error;
+      WM.lastDraft=data; if(c.recur&&c.recur!=='none') WM.draftRecur[data]=c.recur;
+    }
+    $('wmSmart').value=''; WM.picked={mem:[],due:null,recur:'none'};
+    await wmReload(); wmCounts(); wmParse(); wmPaintDrafts(); wmPaintTabs(); wmPaintNav();
+    $('wmSmart').focus();
+  }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  finally{ WM.busy=false; }
+}
+
+/* ---------- Unassigned: one at a time, or tick several and give them all the same person ---------- */
+function wmDrafts(){ return WM.items.filter(it=>it.draft&&it.meeting===WM.cur); }
+function wmPaintDrafts(){
+  const host=$('wmDrafts'); if(!host) return;
+  const list=wmDrafts();
+  [...WM.sel].forEach(id=>{ if(!list.some(d=>d.id===id)) WM.sel.delete(id); });
+  if(!list.length){ host.innerHTML=''; return; }
+  const memOf=d=>WM.draftMem[d.id]||[], ready=list.filter(d=>memOf(d).length).length, allOn=list.every(d=>WM.sel.has(d.id));
+  host.innerHTML=`<div class="wm-un">
+    <div class="wm-sec"><input type="checkbox" class="wm-ck" title="Select all" ${allOn?'checked':''} onchange="wmSelAll(this.checked)"> Unassigned <em>${list.length}</em>
+      <span class="r">${ready?`<button class="wm-btn wm-sm wm-light" onclick="wmPromote(wmDrafts().filter(d=>(WM.draftMem[d.id]||[]).length).map(d=>d.id))">Create ${ready} ready</button>`:'<span class="wm-mute" style="font-size:12.5px;letter-spacing:0;text-transform:none">Give each a person to send it to Accountability</span>'}</span></div>
+    ${WM.sel.size?`<div class="wm-bulk"><b>${WM.sel.size} selected</b>
+      <button class="ctl" onclick="wmBulkPeople()"><i class="fa-regular fa-user"></i> Assign to…</button>
+      <label class="ctl"><i class="fa-regular fa-calendar"></i><input type="date" min="${wmToday()}" onchange="wmBulkDue(this.value)"></label>
+      <span style="margin-left:auto;display:flex;gap:14px;align-items:center"><button class="ctl" onclick="WM.sel.clear();wmPaintDrafts()">Clear</button><button class="wm-btn wm-sm wm-red" onclick="wmPromote([...WM.sel])">Create ${WM.sel.size}</button></span></div>`:''}
+    ${list.map(d=>{ const mem=memOf(d), due=d.due?String(d.due).slice(0,10):'';
+      return `<div class="wm-dr ${d.id===WM.lastDraft?'new':''}">
+      <input type="checkbox" class="wm-ck" ${WM.sel.has(d.id)?'checked':''} onchange="this.checked?WM.sel.add(${d.id}):WM.sel.delete(${d.id});wmPaintDrafts()">
+      <input class="ti" value="${esc(d.t)}" onchange="wmDraftText(${d.id},this.value)" title="Click to edit">
+      <button class="ctl ${mem.length?'set':''}" onclick="wmPickPeople(WM.draftMem[${d.id}]||[],'Assign to',m=>{WM.draftMem[${d.id}]=m;wmPaintDrafts()})">${mem.length?mem.map(e=>wmAvatar(wmName(e),20)).join('')+' '+esc(mem.map(wmFirst).join(', ')):'<i class="fa-regular fa-user"></i> Assign to'}</button>
+      <input type="date" class="${due?'set':''}" min="${wmToday()}" value="${due}" onchange="wmDraftDue(${d.id},this.value)">
+      <button class="go ${mem.length?'ready':''}" onclick="wmPromote([${d.id}])">Create →</button>
+      <button class="rm" title="Remove" onclick="wmDraftDelete(${d.id})"><i class="fa-solid fa-xmark"></i></button>
+    </div>`; }).join('')}
+  </div>`;
+  WM.lastDraft=null;
+}
+window.wmSelAll=function(on){ wmDrafts().forEach(d=>on?WM.sel.add(d.id):WM.sel.delete(d.id)); wmPaintDrafts(); };
+window.wmBulkPeople=function(){ wmPickPeople([],`Assign ${WM.sel.size} task${WM.sel.size>1?'s':''} to`,m=>{ WM.sel.forEach(id=>WM.draftMem[id]=m.slice()); wmPaintDrafts(); }); };
+window.wmBulkDue=async function(v){
+  try{ for(const id of WM.sel){ const {error}=await sb.rpc('ops_item_set_due',{p_id:id,p_due:v||null}); if(error) throw error; }
+       await wmReload(); wmPaintDrafts(); }catch(e){ toast('Could not set the date: '+((e&&e.message)||e),'err'); }
+};
+window.wmDraftDue=async function(id,v){
+  try{ const {error}=await sb.rpc('ops_item_set_due',{p_id:id,p_due:v||null}); if(error) throw error; await wmReload(); wmPaintDrafts(); }
+  catch(e){ toast('Could not set the date: '+((e&&e.message)||e),'err'); }
+};
+window.wmDraftText=async function(id,v){
+  if(!String(v||'').trim()){ toast('Type a title','err'); wmPaintDrafts(); return; }
+  try{ const {error}=await sb.rpc('ops_item_set_text',{p_id:id,p_item:v}); if(error) throw error; await wmReload(); }
+  catch(e){ toast('Could not save: '+((e&&e.message)||e),'err'); }
+};
+window.wmDraftDelete=async function(id){
+  try{ const {error}=await sb.rpc('ops_item_delete_draft',{p_id:id}); if(error) throw error; WM.sel.delete(id); delete WM.draftMem[id]; await wmReload(); wmPaintDrafts(); }
+  catch(e){ toast('Could not remove: '+((e&&e.message)||e),'err'); }
+};
+window.wmPromote=async function(ids){
+  const ds=ids.map(id=>wmFind(id)).filter(Boolean);
+  if(!ds.length) return;
+  if(ds.some(d=>!(WM.draftMem[d.id]||[]).length)){ toast('Pick at least one member','err'); return; }
+  if(WM.busy) return; WM.busy=true;
+  let made=0, lastNames='';
+  try{
+    for(const d of ds){
+      const mem=WM.draftMem[d.id], due=d.due?String(d.due).slice(0,10):null;
+      lastNames=mem.map(wmName).join(', ');
+      const tid=await wmCreateTask(d.t,mem,due,WM.draftRecur[d.id]||'none');
+      const {error}=await sb.rpc('ops_item_link_task',{p_id:d.id,p_ptask:tid,p_owner:mem.map(wmName).join(', '),p_due:due}); if(error) throw error;
+      delete WM.draftMem[d.id]; delete WM.draftRecur[d.id]; WM.sel.delete(d.id); WM.lastNew=d.id; made++;
+    }
+    toast(made>1?made+' tasks created':'Task created for '+lastNames,'ok');
+  }catch(e){ toast((made?made+' created, then: ':'')+'Failed: '+((e&&e.message)||e),'err'); }
+  finally{ WM.busy=false; WM.tab='pending'; await wmReload(); wmCounts(); wmPaintDrafts(); wmPaintTabs(); wmPaintNav(); }
+};
+
+// One people picker for the typing line, one draft, or several drafts at once. Never yourself: in
+// JainE you cannot be a member of a task you delegate.
+window.wmPickPeople=function(initial,title,onDone){
+  const draft=new Set(initial||[]); window._wmPick=draft; window._wmPickDone=onDone;
+  const m=wmMeeting(WM.cur), here=new Set(m&&m.attendees||[]);
+  const others=WM.people.filter(p=>!wmIsMe(p.email)), inRoom=others.filter(p=>here.has(p.name)), rest=others.filter(p=>!here.has(p.name));
+  const row=p=>`<label><input type="checkbox" ${draft.has(p.email)?'checked':''} onchange="this.checked?_wmPick.add('${esc(p.email)}'):_wmPick.delete('${esc(p.email)}')">${wmAvatar(p.name,26)} ${esc(p.name)}<span>${esc(p.dept||'')}</span></label>`;
+  openModal(`<div class="modal-head"><h3>${esc(title)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body wm-pk"><input type="text" placeholder="Search people" oninput="document.querySelectorAll('.wm-pk label').forEach(l=>l.style.display=l.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')">
+    <div style="max-height:380px;overflow-y:auto;margin-top:6px">${inRoom.length?`<div class="g">In this meeting</div>${inRoom.map(row).join('')}<div class="g">Everyone else</div>`:''}${rest.map(row).join('')}</div></div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="closeModal();_wmPickDone([..._wmPick])">Done</button></div>`);
+};
+
+/* ---------- end of meeting ---------- */
+window.wmEndMeeting=function(force){
+  const m=wmMeeting(WM.cur); if(!m) return;
+  const left=wmDrafts().length;
+  if(left&&!force){
+    openModal(`<div class="modal-head"><h3>${left} task${left>1?'s have':' has'} no one assigned</h3><span class="x" onclick="closeModal()">&times;</span></div>
+      <div class="modal-body" style="font-size:14px;color:var(--slate);line-height:1.6">They stay saved on this meeting, but only become Accountability tasks once each has a person.</div>
+      <div class="modal-foot"><button class="btn" onclick="closeModal();wmEndMeeting(true)">End anyway</button><button class="btn btn-primary" onclick="closeModal();$('wmDrafts').scrollIntoView({behavior:'smooth',block:'center'})">Assign them now</button></div>`);
+    return;
+  }
+  let mins=0; try{ const s=Number(localStorage.getItem('wm_start_'+m.id))||0; if(s){ mins=Math.max(1,Math.round((Date.now()-s)/60000)); localStorage.removeItem('wm_start_'+m.id); } }catch(e){}
+  const mine=WM.items.filter(it=>it.meeting===m.id&&!it.draft), keys=[...new Set(mine.flatMap(wmWhoKeys))];
+  const open=WM.items.filter(it=>it.kind===m.kind&&!it.draft&&wmOpen(it)).length;
+  openModal(`<div class="modal-head"><h3>Meeting ended</h3><span class="x" onclick="closeModal();wmPaintMeeting()">&times;</span></div>
+    <div class="modal-body"><div style="color:var(--slate);font-size:13.5px">${esc(m.kind)}${mins?' · '+mins+' min':''} · ${(m.attendees||[]).length} present · ${mine.length} task${mine.length===1?'':'s'} written · ${open} still pending for this meeting</div>
+      <div style="margin-top:14px">${keys.map(k=>`<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line-2)">${wmAvatar(wmKeyName(k),30)}<div><b>${esc(wmKeyName(k))}</b>${mine.filter(it=>wmWhoKeys(it).includes(k)).map(it=>`<div style="font-size:13px;color:#334155">${esc(it.t)}${it.due?` <span style="color:var(--slate)">· ${esc(wmFmtS(it.due))}</span>`:''}</div>`).join('')}</div></div>`).join('')||'<div style="color:var(--slate)">No tasks were written in this meeting.</div>'}</div></div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="closeModal();wmPaintMeeting()">Done</button></div>`);
+};
+
+const WM_CSS='<style id="wmCss">'
+  /* The page is dark; the rest of JainE is not, so the shell is only darkened while it is open. */
+  +'body.wm-dark .main,body.wm-dark .view{background:#0b0c10}'
+  +'body.wm-dark .view{background:radial-gradient(900px 420px at 80% -12%,rgba(224,18,28,.16),transparent 60%),#0b0c10;color-scheme:dark}'
+  +'body.wm-dark .topbar{background:rgba(11,12,16,.88);border-bottom-color:rgba(255,255,255,.06)}'
+  +'body.wm-dark .crumb,body.wm-dark .crumb .cur{color:#e5e7eb}'
+  +'body.wm-dark .search-box input{background:#15171e;border-color:rgba(255,255,255,.08);color:#fff}'
+  +'body.wm-dark .ic-btn{background:#15171e;border-color:rgba(255,255,255,.08);color:#c3c8d2}'
+  +'.wm{--ink:#f3f4f7;--ink2:#c3c8d2;--mute:#8a909c;--mute2:#5c6270;--hair:rgba(255,255,255,.09);--hair2:rgba(255,255,255,.055);--red:#e0121c;--green:#16a34a;color:var(--ink);padding:12px 18px 60px}'
+  +'@keyframes wmIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}'
+  +'@keyframes wmFlash{0%{background:rgba(224,18,28,.16)}100%{background:transparent}}'
+  +'@keyframes wmPulse{0%{box-shadow:0 0 0 0 rgba(224,18,28,.45)}100%{box-shadow:0 0 0 8px rgba(224,18,28,0)}}'
+  +'.wm-in{animation:wmIn .4s cubic-bezier(.2,.8,.2,1) both}'
+  +'.wm button{font:inherit}'
+  +'.wm-mute{color:var(--mute)}'
+  +'.wm-top{max-width:1320px;margin:0 auto 32px}'
+  +'.wm-date{font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-weight:600}'
+  +'.wm-top h1{font-size:40px;font-weight:700;letter-spacing:-1.4px;color:var(--ink);margin-top:6px;line-height:1.1}'
+  +'.wm-lead{margin-top:14px}'
+  +'.wm-lnk{border:0;background:none;padding:0;color:var(--ink2);font-size:15px;cursor:pointer;border-bottom:1px solid transparent}'
+  +'.wm-lnk b{color:var(--ink);font-weight:700}.wm-lnk:hover,.wm-lnk.on{border-bottom-color:var(--ink)}'
+  +'.wm-empty{padding:60px 0;color:var(--mute)}.wm-empty b{display:block;color:var(--ink);font-size:17px;margin-bottom:6px}'
+  +'.wm-grid{max-width:1320px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start}'
+  +'.wm-rail{position:sticky;top:84px}'
+  +'.wm-box{background:#121419;border:1px solid var(--hair2);border-radius:20px;padding:20px 20px 16px}'
+  +'.wm-navh{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);font-weight:600}'
+  +'.wm-dl{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute2);font-weight:600;margin:16px 0 6px}'
+  +'.wm-mi{display:flex;align-items:baseline;gap:12px;padding:6px 0 6px 12px;margin-left:-12px;border-left:2px solid transparent;cursor:pointer;color:var(--ink2);font-size:13.5px}'
+  +'.wm-mi:hover{color:var(--ink)}.wm-mi.up{color:var(--mute)}'
+  +'.wm-mi .t{font-size:12px;color:var(--mute2);width:48px;flex:none}'
+  +'.wm-mi .n{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.wm-mi .c{font-size:11px;color:var(--mute)}'
+  +'.wm-mi.on{border-left-color:var(--red);color:var(--ink);font-weight:600}'
+  +'.wm-mi .live{width:6px;height:6px;border-radius:50%;background:var(--red);flex:none;align-self:center;animation:wmPulse 1.6s infinite}'
+  +'.wm-btn{height:40px;border:0;border-radius:20px;padding:0 20px;font-size:13.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:9px;white-space:nowrap}'
+  +'.wm-btn.wm-sm{height:30px;padding:0 13px;font-size:12.5px;letter-spacing:0;text-transform:none}'
+  +'.wm-red{background:var(--red);color:#fff}.wm-red:hover{background:#c10f18}'
+  +'.wm-light{background:#fff;color:#0b0c10}.wm-light:hover{background:#e8ebf0}'
+  +'.wm-line{background:transparent;color:#fff;box-shadow:inset 0 0 0 1px var(--hair)}.wm-line:hover{box-shadow:inset 0 0 0 1px #fff}'
+  +'.wm-quiet{border:0;background:none;padding:0;color:var(--mute);font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}'
+  +'.wm-quiet:hover{color:var(--ink)}.wm-quiet i{font-size:10px}'
+  +'.wm-card{background:#121419;border:1px solid var(--hair2);border-radius:24px;overflow:hidden}'
+  +'.wm-card-top{padding:28px 32px 24px;background:radial-gradient(700px 280px at 100% -40%,rgba(224,18,28,.42),transparent 65%),radial-gradient(500px 240px at -10% 150%,rgba(129,140,248,.14),transparent 60%),linear-gradient(135deg,#0d0e13,#1a1d25)}'
+  +'.wm-card-top h2{font-size:34px;font-weight:700;letter-spacing:-1.1px;color:var(--ink);margin-top:8px;line-height:1.15}'
+  +'.wm-card-body{padding:4px 32px 34px}'
+  +'.wm-mh{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap}'
+  +'.wm-eyebrow{font-size:12.5px;color:var(--mute);display:flex;align-items:center;gap:8px;font-weight:500}'
+  +'.wm-live{color:var(--red);font-weight:600;display:inline-flex;align-items:center;gap:7px}'
+  +'.wm-live:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--red);animation:wmPulse 1.6s infinite}'
+  +'.wm-tm{font-variant-numeric:tabular-nums;color:var(--ink2)}'
+  +'.wm-info{position:relative;display:inline-flex;vertical-align:middle;margin-left:10px;color:var(--mute2);font-size:15px;cursor:default}'
+  +'.wm-info:hover{color:var(--ink2)}'
+  +'.wm-info .tip{display:none;position:absolute;left:50%;top:calc(100% + 10px);transform:translateX(-50%);background:#1d2029;color:var(--ink2);font-size:13px;font-weight:400;letter-spacing:0;line-height:1.6;white-space:nowrap;padding:10px 14px;border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.5);z-index:10}'
+  +'.wm-info:hover .tip{display:block}'
+  +'.wm-mh2{display:flex;align-items:center;gap:22px;margin-top:22px;flex-wrap:wrap;font-size:13px;color:var(--mute)}'
+  +'.wm-ppl{display:flex;align-items:center;gap:6px;flex-wrap:wrap}'
+  +'.wm-hsel{border:0;background:none;color:var(--mute);font:inherit;font-size:13px;cursor:pointer;outline:none;padding:0}'
+  +'.wm-hsel:hover{color:var(--ink)}.wm-hsel option{background:#171a21;color:#f3f4f7}'
+  +'.wm-cap{margin-top:30px;position:relative}'
+  +'.wm-cap-in{display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--hair);padding-bottom:12px}'
+  +'.wm-cap-in:focus-within{border-bottom-color:var(--ink)}'
+  +'.wm-cap-in input{flex:1;min-width:0;border:0;outline:none;background:transparent;font:inherit;font-size:21px;font-weight:500;color:var(--ink);height:40px}'
+  +'.wm-cap-in input::placeholder{color:var(--mute2);font-weight:400}'
+  +'.wm-cap-in .kbd{font-size:11.5px;color:var(--mute);border:1px solid var(--hair);border-radius:6px;padding:2px 7px;white-space:nowrap}'
+  +'.wm-parsed{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:12px;font-size:13px;color:var(--mute)}'
+  +'.wm-cap:not(:focus-within) .wm-parsed .hint{display:none}'
+  +'.wm-parsed .tok{display:inline-flex;align-items:center;gap:7px;color:var(--ink2)}'
+  +'.wm-parsed .tok i{color:var(--mute2);font-size:11px}.wm-parsed .tok .x{cursor:pointer}'
+  +'.wm-parsed .ctl{border:0;background:none;color:var(--mute);cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:0;font-size:13px}'
+  +'.wm-parsed .ctl:hover{color:var(--ink)}'
+  +'.wm-parsed input[type=date],.wm-parsed select{border:0;background:none;font:inherit;font-size:13px;color:var(--ink2);outline:none;cursor:pointer;padding:0;color-scheme:dark}'
+  +'.wm-parsed select option{background:#171a21}'
+  +'.wm-parsed code{font-family:inherit;color:var(--ink2)}'
+  +'.wm-sugg{position:absolute;left:0;top:58px;background:#1b1e26;border-radius:14px;padding:6px;min-width:300px;z-index:6;box-shadow:0 20px 50px rgba(0,0,0,.5)}'
+  +'.wm-sugg div{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;cursor:pointer;font-size:13.5px;color:var(--ink)}'
+  +'.wm-sugg div span{margin-left:auto;font-size:12px;color:var(--mute)}'
+  +'.wm-sugg div.on,.wm-sugg div:hover{background:rgba(255,255,255,.07)}'
+  +'.wm-un{margin-top:30px}'
+  +'.wm-sec{display:flex;align-items:center;gap:12px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);font-weight:600;margin-bottom:6px;min-height:30px}'
+  +'.wm-sec em{font-style:normal;color:var(--ink)}.wm-sec .r{margin-left:auto}'
+  +'.wm-ck{width:15px;height:15px;accent-color:var(--red);cursor:pointer;flex:none;margin:0}'
+  +'.wm-bulk{display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:#fff;color:#0b0c10;border-radius:14px;padding:10px 12px 10px 16px;margin:4px 0 8px;font-size:13px}'
+  +'.wm-bulk .ctl{border:0;background:none;color:#0b0c10;cursor:pointer;display:inline-flex;align-items:center;gap:7px;font-size:13px;padding:0}'
+  +'.wm-bulk input[type=date]{border:0;background:none;font:inherit;font-size:13px;color:#0b0c10;outline:none}'
+  +'.wm-dr{display:flex;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--hair2)}'
+  +'.wm-dr.new{animation:wmFlash 1.6s both}'
+  +'.wm-dr .ti{flex:1;min-width:0;border:0;outline:none;background:none;font:inherit;font-size:15px;color:var(--ink);padding:2px 0}'
+  +'.wm-dr .ctl{border:0;background:none;color:var(--mute);cursor:pointer;display:inline-flex;align-items:center;gap:7px;font-size:13px;white-space:nowrap;padding:0}'
+  +'.wm-dr .ctl:hover,.wm-dr .ctl.set{color:var(--ink)}'
+  +'.wm-dr input[type=date]{border:0;background:none;font:inherit;font-size:13px;color:var(--mute);outline:none;cursor:pointer;width:112px;color-scheme:dark}'
+  +'.wm-dr input[type=date].set{color:var(--ink)}'
+  +'.wm-dr .go{border:0;background:none;font-size:13px;font-weight:600;cursor:pointer;color:var(--mute2);padding:0}'
+  +'.wm-dr .go.ready{color:var(--red)}'
+  +'.wm-dr .rm{border:0;background:none;color:var(--mute2);cursor:pointer;opacity:0}'
+  +'.wm-dr:hover .rm{opacity:1}.wm-dr .rm:hover{color:var(--red)}'
+  /* The task section: grouped by person, every detail on show - kept exactly as designed. */
+  +'.wm-v6{--ink2:#f3f4f7;--line3:rgba(255,255,255,.08);--soft:rgba(255,255,255,.06);--slate:#8a909c;background:#08090c;color:#f3f4f7;color-scheme:dark;border:1px solid rgba(255,255,255,.06);border-radius:18px;padding:2px 22px 18px;margin-top:34px}'
+  +'.wm-v6 .ttabs{display:flex;align-items:center;gap:6px;margin:8px 0 6px;border-bottom:1px solid var(--line3);flex-wrap:wrap}'
+  +'.wm-v6 .ttab{border:0;background:none;font:inherit;font-size:14px;font-weight:700;color:var(--slate);padding:10px 4px 12px;margin-right:16px;cursor:pointer;position:relative;display:inline-flex;align-items:center;gap:8px}'
+  +'.wm-v6 .ttab .n{font-size:11.5px;font-weight:800;background:var(--soft);color:var(--slate);border-radius:9px;padding:1px 8px}'
+  +'.wm-v6 .ttab.on{color:var(--ink2)}'
+  +'.wm-v6 .ttab.on:after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:3px;border-radius:3px 3px 0 0;background:#e0121c}'
+  +'.wm-v6 .ttab.on .n{background:#fff;color:#08090c}.wm-v6 .ttab.on.pend .n{background:#e0121c;color:#fff}.wm-v6 .ttab.on.fin .n{background:#16a34a;color:#fff}'
+  +'.wm-v6 .tfilter{margin-left:auto;display:flex;gap:8px;align-items:center;padding-bottom:6px;flex-wrap:wrap}'
+  +'.wm-v6 .tfilter select,.wm-v6 .tfilter input{height:32px;border:1px solid var(--line3);border-radius:9px;padding:0 10px;font:inherit;font-size:12.5px;background:#14161c;color:var(--ink2);outline:none}'
+  +'.wm-v6 .tfilter select option{background:#14161c;color:var(--ink2)}.wm-v6 .tfilter input{width:170px}'
+  +'.wm-v6 .sumrow{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0 6px}'
+  +'.wm-v6 .sumrow div{background:var(--soft);border-radius:14px;padding:12px 14px}'
+  +'.wm-v6 .sumrow b{font-size:22px;font-weight:800;color:var(--ink2);display:block;letter-spacing:-.5px}'
+  +'.wm-v6 .sumrow span{font-size:11.5px;color:var(--slate)}'
+  +'.wm-v6 .grp{display:flex;align-items:center;gap:10px;margin:18px 0 6px;font-size:12px;font-weight:800;color:var(--ink2)}'
+  +'.wm-v6 .grp:after{content:"";flex:1;height:1px;background:var(--line3)}'
+  +'.wm-v6 .grp small{font-weight:600;color:var(--slate)}'
+  +'.wm-v6 .grp .tw{background:#e0121c;color:#fff;font-size:10px;border-radius:6px;padding:1px 6px}'
+  +'.wm-v6 .person{display:grid;grid-template-columns:200px 1fr;gap:16px;padding:14px 0;border-top:1px solid var(--line3);animation:wmIn .4s both}'
+  +'.wm-v6 .person:first-of-type{border-top:0}'
+  +'.wm-v6 .who{display:flex;gap:10px;align-items:flex-start}'
+  +'.wm-v6 .who b{font-size:13.5px;color:var(--ink2);display:block}'
+  +'.wm-v6 .who span{font-size:11.5px;color:var(--slate)}'
+  +'.wm-v6 .who .cnt{display:inline-block;margin-top:5px;font-size:11px;font-weight:800;color:var(--ink2);background:var(--soft);border-radius:7px;padding:1px 7px}'
+  +'.wm-v6 .who .cnt.red{background:rgba(224,18,28,.16);color:#ff6b72}'
+  +'.wm-v6 .task{display:flex;gap:10px;align-items:flex-start;padding:7px 10px;border-radius:11px}'
+  +'.wm-v6 .task:hover{background:rgba(255,255,255,.04)}'
+  +'.wm-v6 .task.new{animation:wmFlash 1.6s both;background:rgba(224,18,28,.1)}'
+  +'.wm-v6 .task .bx{width:18px;height:18px;border-radius:50%;border:1.5px solid #4b5160;flex:none;margin-top:1px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff}'
+  +'.wm-v6 .task .bx:hover{border-color:#22c55e}'
+  +'.wm-v6 .task.done .bx{background:#22c55e;border-color:#22c55e}'
+  +'.wm-v6 .task.done .tt{color:#6b7280}'
+  +'.wm-v6 .task .tt{font-size:13.5px;color:var(--ink2);line-height:1.4}'
+  +'.wm-v6 .task .mt{font-size:11.5px;color:var(--slate);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}'
+  +'.wm-v6 .task .od{color:#ff5a62;font-weight:700}.wm-v6 .task .aw{color:#f59e0b;font-weight:700}'
+  +'.wm-v6 .task span.ok{color:#4ade80;font-weight:700}'
+  +'.wm-v6 .task .from{color:#a5b4fc;font-weight:600;cursor:pointer}.wm-v6 .task .from:hover{text-decoration:underline}'
+  +'.wm-v6 .st{flex:none;font-size:11px;font-weight:800;border-radius:7px;padding:2px 8px;margin-top:1px}'
+  +'.wm-v6 .st.p{background:rgba(255,255,255,.07);color:#c3c8d2}.wm-v6 .st.a{background:rgba(245,158,11,.15);color:#fbbf24}.wm-v6 .st.f{background:rgba(34,197,94,.15);color:#4ade80}.wm-v6 .st.o{background:rgba(224,18,28,.16);color:#ff6b72}'
+  +'.wm-v6 .wm-st-sel{flex:none;height:26px;border:1px solid var(--line3);border-radius:7px;background:#14161c;color:var(--ink2);font:inherit;font-size:11.5px;padding:0 6px;cursor:pointer}'
+  +'.wm-v6 .b{height:28px;border:0;border-radius:8px;font:inherit;font-weight:700;font-size:12px;padding:0 10px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}'
+  +'.wm-v6 .b.ok{background:#16a34a;color:#fff}.wm-v6 .b.ok:hover{background:#15803d}'
+  +'.wm-v6 .b.sb{background:rgba(255,255,255,.08);color:#f3f4f7}.wm-v6 .b.sb:hover{background:rgba(255,255,255,.14)}'
+  +'.wm-v6 .empty3{border:1.5px dashed var(--line3);border-radius:16px;padding:34px;text-align:center;color:var(--slate);margin-top:14px}'
+  +'.wm-pk input[type=text]{width:100%;height:40px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;outline:none;padding:0 12px}'
+  +'.wm-pk label{display:flex;align-items:center;gap:12px;padding:8px 4px;cursor:pointer;font-size:14px;border-radius:8px}'
+  +'.wm-pk label:hover{background:#f8fafc}.wm-pk label span{margin-left:auto;font-size:12px;color:var(--slate)}'
+  +'.wm-pk .g{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);font-weight:700;padding:14px 4px 4px}'
+  +'@media(max-width:1100px){.wm-grid{grid-template-columns:1fr}.wm-rail{position:static}}'
+  +'@media(max-width:700px){.wm{padding:6px 0 40px}.wm-top h1{font-size:30px}.wm-card-top,.wm-card-body{padding-left:18px;padding-right:18px}.wm-card-top h2{font-size:26px}'
+    +'.wm-v6{padding:2px 14px 14px}.wm-v6 .person{grid-template-columns:1fr;gap:6px}.wm-v6 .sumrow{grid-template-columns:repeat(2,1fr)}.wm-v6 .tfilter{margin-left:0;width:100%}.wm-v6 .tfilter input{flex:1}.wm-dr{flex-wrap:wrap}.wm-dr .ti{flex-basis:100%}}'
++'</style>';
 /* ===== Global first-login onboarding (full screen, no sidebar) ===== */
 async function renderOnboarding(){
   const people=await getPeople();
