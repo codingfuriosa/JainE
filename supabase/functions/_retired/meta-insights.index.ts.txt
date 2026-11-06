@@ -1,0 +1,139 @@
+// RETIRED 6 Nov 2026 - source of the deployed edge function `meta-insights` (v45, verify_jwt was OFF).
+// It served the old Campaign Analytics page with exact Meta numbers. Nothing in the app, no cron job and
+// nothing in the last 24 h of edge logs called it; the Our Brand Facebook tab reads camp.ads_daily now.
+// It answered ANYONE on the internet with spend, reach and cost-per-lead for seven ad accounts, and
+// ?nocache=1 forced a live Meta call every time, spending the Meta request limit the sync shares.
+// Kept here because deleting or replacing a function destroys it. To put it back: deploy this file
+// under the slug `meta-insights` - and this time with verify_jwt ON.
+
+// meta-insights — exact Meta Ads numbers for the JAIN-E Campaign Analytics page
+const V = 'v21.0';
+const TTL = 600; // seconds; on-load cache so repeat loads are instant
+const ACCOUNTS = [
+  { id:'25220702737632870', name:'Dream Exotica' },
+  { id:'1177378160937176', name:'Dream Eco City' },
+  { id:'1164450552383087', name:'Dream World City' },
+  { id:'3312884722211162', name:'Dream Valley' },
+  { id:'946576625203189',  name:'Dream One' },
+  { id:'1372203843979040', name:'Dream Gurukul' },
+  { id:'1137571264616646', name:'Durbaar Banquets' },
+];
+const PRESETS = ['today','yesterday','last_7d','last_14d','last_30d','last_90d','this_month','last_month','this_year','maximum'];
+
+const cors = { 'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization, x-client-info, apikey, content-type','Access-Control-Allow-Methods':'POST, GET, OPTIONS' };
+const j = (o,s=200)=> new Response(JSON.stringify(o),{status:s,headers:{...cors,'Content-Type':'application/json'}});
+const num = (x)=> { const n=Number(x); return isFinite(n)?n:0; };
+
+function leadsFrom(actions){
+  if(!Array.isArray(actions)) return 0;
+  const pick = (t)=>{ const a=actions.find(x=>x.action_type===t); return a?num(a.value):0; };
+  let v = pick('lead');
+  if(!v) v = pick('onsite_conversion.lead_grouped') + pick('leadgen_grouped');
+  if(!v) v = pick('offsite_conversion.fb_pixel_lead');
+  return v;
+}
+
+async function fetchInsights(token, actId, level, preset, since, until){
+  const p = new URLSearchParams();
+  p.set('fields','spend,impressions,reach,clicks,ctr,cpc,cpm,frequency,actions'+(level==='campaign'?',campaign_name':''));
+  if(since && until) p.set('time_range', JSON.stringify({since, until})); else p.set('date_preset', preset);
+  p.set('level', level);
+  p.set('use_unified_attribution_setting','true'); // match Ads Manager's configured attribution exactly
+  p.set('limit','500');
+  p.set('access_token', token);
+  const url = `https://graph.facebook.com/${V}/act_${actId}/insights?`+p.toString();
+  const r = await fetch(url);
+  const body = await r.json();
+  if(body.error) return { error: body.error.message||'Graph error', rows:[] };
+  return { rows: body.data||[], date_start:(body.data&&body.data[0]&&body.data[0].date_start)||null, date_stop:(body.data&&body.data[0]&&body.data[0].date_stop)||null };
+}
+
+function rowMetrics(row){
+  const spend=num(row.spend), impr=num(row.impressions), reach=num(row.reach), clicks=num(row.clicks), leads=leadsFrom(row.actions);
+  return {
+    spend, impressions:impr, reach, clicks, leads,
+    ctr: impr? (clicks/impr*100):0,
+    cpc: clicks? (spend/clicks):0,
+    cpm: impr? (spend/impr*1000):0,
+    frequency: reach? (impr/reach):0,
+    cost_per_lead: leads? (spend/leads):0,
+  };
+}
+function aggregate(rowsMetrics){
+  const t={spend:0,impressions:0,reach:0,clicks:0,leads:0};
+  rowsMetrics.forEach(m=>{ t.spend+=m.spend; t.impressions+=m.impressions; t.reach+=m.reach; t.clicks+=m.clicks; t.leads+=m.leads; });
+  return {
+    spend:t.spend, impressions:t.impressions, reach:t.reach, clicks:t.clicks, leads:t.leads,
+    ctr: t.impressions? (t.clicks/t.impressions*100):0,
+    cpc: t.clicks? (t.spend/t.clicks):0,
+    cpm: t.impressions? (t.spend/t.impressions*1000):0,
+    frequency: t.reach? (t.impressions/t.reach):0,
+    cost_per_lead: t.leads? (t.spend/t.leads):0,
+  };
+}
+
+Deno.serve(async (req)=>{
+  if(req.method==='OPTIONS') return new Response('ok',{headers:cors});
+  const TOKEN = Deno.env.get('META_ACCESS_TOKEN');
+  const SB = Deno.env.get('SUPABASE_URL'), SRV = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const H = { apikey:SRV, Authorization:'Bearer '+SRV, 'Content-Type':'application/json' };
+
+  let bodyIn = {};
+  try{ if(req.method==='POST') bodyIn = await req.json(); }catch(_){}
+  const u = new URL(req.url);
+  const account = bodyIn.account || u.searchParams.get('account') || 'all';
+  let preset = bodyIn.preset || u.searchParams.get('preset') || 'last_30d';
+  if(!PRESETS.includes(preset)) preset='last_30d';
+  const level = (bodyIn.level || u.searchParams.get('level') || 'account')==='campaign'?'campaign':'account';
+  const nocache = bodyIn.nocache || u.searchParams.get('nocache');
+
+  // account list = accounts we expose
+  if(u.searchParams.get('accounts')==='1') return j({ accounts: ACCOUNTS });
+  if(!TOKEN) return j({ error:'META_ACCESS_TOKEN is not set in Supabase Edge Function secrets.' },500);
+
+  const cacheKey = `meta|${account}|${preset}|${level}`;
+  // 1) serve fresh cache
+  if(!nocache){
+    try{
+      const cr = await fetch(`${SB}/rest/v1/meta_cache?key=eq.${encodeURIComponent(cacheKey)}&select=data,fetched_at`,{headers:H});
+      const arr = await cr.json();
+      if(Array.isArray(arr) && arr[0] && (Date.now()-new Date(arr[0].fetched_at).getTime())/1000 < TTL){
+        return j(Object.assign({cached:true}, arr[0].data));
+      }
+    }catch(_){}
+  }
+
+  const targets = account==='all' ? ACCOUNTS : ACCOUNTS.filter(a=>a.id===String(account));
+  if(!targets.length) return j({ error:'Unknown account.' },400);
+
+  // 2) account-level totals per target account (parallel)
+  const results = await Promise.all(targets.map(async a=>{
+    const r = await fetchInsights(TOKEN, a.id, 'account', preset);
+    const row = r.rows && r.rows[0];
+    const m = row? rowMetrics(row) : {spend:0,impressions:0,reach:0,clicks:0,leads:0,ctr:0,cpc:0,cpm:0,frequency:0,cost_per_lead:0};
+    return { id:a.id, name:a.name, date_start:r.date_start, date_stop:r.date_stop, error:r.error||null, ...m };
+  }));
+  const totals = aggregate(results);
+  const anyDate = results.find(x=>x.date_start) || {};
+
+  const out = {
+    ok:true, account, preset, level, currency:'INR',
+    date_start: anyDate.date_start||null, date_stop: anyDate.date_stop||null,
+    totals,
+    accounts: results.map(({date_start,date_stop,...rest})=>rest),
+  };
+
+  // 3) campaign rows when a single account is selected
+  if(account!=='all'){
+    const cr = await fetchInsights(TOKEN, account, 'campaign', preset);
+    out.campaigns = (cr.rows||[]).map(row=>{ const m=rowMetrics(row); return { name: row.campaign_name||'(unnamed)', ...m }; })
+      .sort((x,y)=> y.spend - x.spend);
+  }
+
+  // 4) write cache
+  try{
+    await fetch(`${SB}/rest/v1/meta_cache`,{method:'POST',headers:{...H, Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({key:cacheKey, data:out, fetched_at:new Date().toISOString()})});
+  }catch(_){}
+
+  return j(out);
+});

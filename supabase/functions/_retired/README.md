@@ -100,3 +100,19 @@ probes, several `s3-*` probes, `whisper-probe`, `gemini-mime-probe`, `tr-parse-d
 `gads-budget-test`, `debug-meet-check`, `mis-bulk-sync`, `legal-import-temp`, `tr-bulk-retry`,
 `mcp-refresh` and others. They were left alone rather than swept up unasked. The next time this
 limit bites, they are where the room is.
+
+---
+
+## meta-metric-probe  (retired 6 Nov 2026 - replaced by a locked stub, source: `meta-metric-probe.index.ts.txt`)
+
+A finished one-off diagnostic that tried Graph API metric names one at a time. It was deployed with the
+login check OFF, so anyone on the internet could make it use the Meta page token (about ten Graph calls per hit).
+Nothing in the app, no cron job and nothing in 24 h of edge logs called it.
+
+## meta-insights  (source: `meta-insights.index.ts.txt`; stub NOT deployed yet)
+
+Served the old Campaign Analytics page. Deployed with the login check OFF: it answers anyone with spend, reach and
+cost per lead for seven ad accounts, and `?nocache=1` forces a live Meta call each time. Nothing calls it any more
+(Our Brand reads `camp.ads_daily`). The stub that replaces it was refused by the auto-mode classifier on 6 Nov 2026,
+so the open version is still live - deploy `Deno.serve(() => new Response('disabled', { status: 410 }));` under the
+slug `meta-insights` with verify_jwt ON.

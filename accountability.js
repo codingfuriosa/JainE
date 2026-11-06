@@ -15271,12 +15271,12 @@
         +'</div>';
       return factsHtml+sumHtml+toggle+'<div id="mtgTrBody">'+mtgTrBody(l,lang)+'</div>';
     }
-    if(l.transcript_status==='processing') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing the recording&hellip; this appears here automatically once ready.</p>';
+    if(l.transcript_status==='processing'||l.transcript_status==='transcribing') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing the recording&hellip; this appears here automatically once ready.</p>';
     if(l.transcript_status==='pending') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Transcript queued&hellip;</p>';
     if(l.transcript_status==='failed') return '<p style="color:#b45309;font-size:13px;margin:6px 0 0">Transcription failed for this recording.</p>';
     // 'unavailable' was set on online meetings back when a transcript could only come from Google's
     // own recording. It can now come from a recording made here, so say what to do about it.
-    if(l.transcript_status==='unavailable'||!l.transcript_status){
+    if(l.transcript_status==='unavailable'||l.transcript_status==='none'||!l.transcript_status){
       return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No transcript — this meeting wasn\'t recorded'
         +(l.mode==='online'?' in the portal. Record the next one with the <b>Record</b> button and it will be transcribed automatically.':'.')+'</p>';
     }
@@ -15415,7 +15415,12 @@
     // existing poller shows the transcript the moment this lands. If they close the tab first the
     // recording is already in S3, so the catch-up worker finishes the job instead — the work is
     // never lost, only moved.
-    if(blob.size && resp.log_id){
+    // 6 Nov 2026: OFF. The server (Gemini, transcribe-pending) takes every 'processing' row within two minutes, and
+    // log_offline_recording has already set this one to 'processing'. Running Whisper here as well made the two race:
+    // whichever finished last won, and the browser's plain text wiped the server's summary, English version and
+    // speaker count. The comment on mtgStartBrowserTranscriber says the browser worker must stay off for this reason.
+    const MTG_BROWSER_TRANSCRIBE=false;
+    if(MTG_BROWSER_TRANSCRIBE && blob.size && resp.log_id){
       const logId=resp.log_id;
       (async function(){
         try{
@@ -15459,7 +15464,7 @@
     const recRange=(l.actual_start&&l.actual_end)?(mtgClockIST(l.actual_start)+' – '+mtgClockIST(l.actual_end)):'';
     const durTxt=(l.actual_start&&l.actual_end)?mtgSecFmt(Math.round((new Date(l.actual_end)-new Date(l.actual_start))/1000)):'';
     v.innerHTML='<div class="tp-head">'
-      +'<div><div class="tp-title"><i class="fa-solid fa-clipboard-check" style="color:#16a34a"></i> Wrap up — '+esc2(l.title)+'</div><div class="tp-sub">'+esc2(dateIST)+' · Offline</div></div>'
+      +'<div><div class="tp-title"><i class="fa-solid fa-clipboard-check" style="color:#16a34a"></i> Wrap up — '+esc2(l.title)+'</div><div class="tp-sub">'+esc2(dateIST)+' · '+(l.mode==='online'?'Online':'Offline')+'</div></div>'
       +'</div>'
       +'<div class="tp-card">'
         +'<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> Date (IST): <b>'+esc2(dateIST)+'</b></div>'

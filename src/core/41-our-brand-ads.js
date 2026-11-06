@@ -32,7 +32,7 @@ function obRange(){
   switch(OB_P.period){
     case 'yesterday': s=y; e=y; break;
     case 'last_7d': s=obAdd(t,-7); e=y; break;
-    case 'this_month': s=t.slice(0,8)+'01'; e=t; break;
+    case 'this_month': s=t.slice(0,8)+'01'; e=(t.slice(8)==='01')?t:y; break;
     case 'last_month': { const f=new Date(Date.UTC(+t.slice(0,4),+t.slice(5,7)-2,1)); s=f.toISOString().slice(0,10); e=obAdd(t.slice(0,8)+'01',-1); break; }
     case 'last_90d': s=obAdd(t,-90); e=y; break;
     case 'custom': s=OB_P.from||obAdd(t,-30); e=OB_P.to||y; if(e<s){ const x=s; s=e; e=x; } break;
@@ -52,6 +52,14 @@ function obChange(now,prev,goodUp){
   const cls=goodUp==null?'ob-flat':((p>0)===goodUp?'ob-good':'ob-bad');
   return '<div class="ob-chg '+cls+'">'+(p>0?'▲ ':'▼ ')+Math.abs(p).toFixed(0)+'% vs previous</div>';
 }
+/* 6 Nov 2026 - FACEBOOK RESULTS ARE OF DIFFERENT KINDS. Each campaign's Result is whatever it is set to get:
+   leads and WhatsApp chats for a lead campaign, ThruPlays or reach for an awareness one, interactions for an
+   engagement one. Added together they gave 2.76 million "results" at about Re 0.38 each. The headline now counts
+   lead campaigns only (objective on camp.ads_entities); the rest is shown beside it, never added in. Each campaign
+   row still shows exactly Ads Manager's own Result. */
+const OB_LEAD_OBJ={OUTCOME_LEADS:1,LEAD_GENERATION:1,OUTCOME_SALES:1,CONVERSIONS:1,MESSAGES:1};
+const OB_OBJ_NAME={OUTCOME_AWARENESS:'Awareness',OUTCOME_ENGAGEMENT:'Engagement',OUTCOME_TRAFFIC:'Traffic',LINK_CLICKS:'Traffic'};
+function obIsLead(E,c){ const e=E['campaign:'+c.campaign_id]; return !!(e&&OB_LEAD_OBJ[e.objective]); }
 function obSum(rows){ const t={spend:0,impressions:0,clicks:0,results:0}; rows.forEach(function(r){ t.spend+=Number(r.spend)||0; t.impressions+=Number(r.impressions)||0; t.clicks+=Number(r.clicks)||0; t.results+=Number(r.results)||0; }); return t; }
 const OB_CSS='<style>'
   +'.ob-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 14px}'
@@ -120,7 +128,12 @@ function obAdsPaint(){
   const pick=function(rows){ return OB_P.acct==='all'?rows:rows.filter(function(x){ return x.account_id===OB_P.acct; }); };
   const cur=pick(window._obCur||[]), prev=pick(window._obPrev||[]);
   const T=obSum(cur), P=obSum(prev);
-  const cpl=T.results?T.spend/T.results:null, pcpl=P.results?P.spend/P.results:null;
+  let TL=null, PL=null, TO=null;
+  if(platform==='meta'){ const isL=function(c){ return obIsLead(E,c); }; TL=obSum(cur.filter(isL)); PL=obSum(prev.filter(isL)); TO=obSum(cur.filter(function(c){ return !isL(c); })); }
+  const rT=TL?TL.results:T.results, rP=PL?PL.results:P.results;
+  const cpl=TL?(TL.results?TL.spend/TL.results:null):(T.results?T.spend/T.results:null);
+  const pcpl=PL?(PL.results?PL.spend/PL.results:null):(P.results?P.spend/P.results:null);
+  const otherNote=(TO&&(TO.spend>0||TO.results>0))?'<div style="font-size:12px;color:var(--slate);margin:-4px 0 14px;line-height:1.5"><b>Not in the lead figures above:</b> awareness, engagement and traffic campaigns spent '+obMoney(TO.spend)+' and got '+obNum(TO.results)+' results of other kinds (video views, reach, interactions) - those cannot be added to leads. Each campaign\'s own Result is in the table below.</div>':'';
   const ctr=T.impressions?T.clicks/T.impressions*100:null, pctr=P.impressions?P.clicks/P.impressions*100:null;
   // ---- header: period picker, account picker, freshness
   const lg=window._obLog, lastOk=accs.reduce(function(m,a){ return a.last_ok_at&&(!m||a.last_ok_at>m)?a.last_ok_at:m; },null);
@@ -150,25 +163,25 @@ function obAdsPaint(){
   const kpi=function(l,v,ch){ return '<div class="ob-kpi"><div class="l">'+l+'</div><div class="v">'+v+'</div>'+ch+'</div>'; };
   let html='<div class="ob-kpis">'
     +kpi('Spend',obMoney(T.spend),obChange(T.spend,P.spend,null))
-    +kpi(W.res,obNum(T.results,platform==='google'?1:0),obChange(T.results,P.results,true))
-    +kpi(W.per,obMoney(cpl),obChange(cpl,pcpl,false))
+    +kpi(platform==='meta'?'Leads &amp; chats':W.res,obNum(rT,platform==='google'?1:0),obChange(rT,rP,true))
+    +kpi(platform==='meta'?'Cost per lead':W.per,obMoney(cpl),obChange(cpl,pcpl,false))
     +kpi('Clicks',obNum(T.clicks),obChange(T.clicks,P.clicks,true))
     +kpi('Click rate (CTR)',obPct(ctr),obChange(ctr,pctr,true))
-    +'</div>';
+    +'</div>'+otherNote;
   // ---- chart
-  html+='<div class="card card-pad" style="margin-bottom:14px"><div style="font-weight:700;font-size:13.5px;margin-bottom:8px">Spend and '+W.res.toLowerCase()+' by day'+(OB_P.acct==='all'?'':' - '+esc(aName[OB_P.acct]||''))+'</div><div style="height:230px"><canvas id="obChart"></canvas></div></div>';
+  html+='<div class="card card-pad" style="margin-bottom:14px"><div style="font-weight:700;font-size:13.5px;margin-bottom:8px">Spend and '+(platform==='meta'?'leads &amp; chats':W.res.toLowerCase())+' by day'+(OB_P.acct==='all'?'':' - '+esc(aName[OB_P.acct]||''))+'</div><div style="height:230px"><canvas id="obChart"></canvas></div></div>';
   // ---- by project / account
-  const byAcc={}; (window._obCur||[]).forEach(function(c){ const a=byAcc[c.account_id]||(byAcc[c.account_id]={spend:0,clicks:0,impressions:0,results:0}); a.spend+=+c.spend||0; a.clicks+=+c.clicks||0; a.impressions+=+c.impressions||0; a.results+=+c.results||0; });
+  const byAcc={}; (window._obCur||[]).forEach(function(c){ const a=byAcc[c.account_id]||(byAcc[c.account_id]={spend:0,clicks:0,impressions:0,results:0,lspend:0,lres:0}); a.spend+=+c.spend||0; a.clicks+=+c.clicks||0; a.impressions+=+c.impressions||0; a.results+=+c.results||0; if(platform==='meta'&&obIsLead(E,c)){ a.lspend+=+c.spend||0; a.lres+=+c.results||0; } });
   const allSpend=Object.keys(byAcc).reduce(function(s,k){ return s+byAcc[k].spend; },0);
   const accRows=Object.keys(byAcc).filter(function(k){ return byAcc[k].spend>0||byAcc[k].results>0; }).sort(function(a,b){ return byAcc[b].spend-byAcc[a].spend; }).map(function(k){
     const a=byAcc[k];
     return '<tr style="cursor:pointer" class="'+(OB_P.acct===k?'ob-sel':'')+'" onclick="OB_P.acct=(OB_P.acct===\''+k+'\'?\'all\':\''+k+'\');OB_P.showAds=12;obAdsPaint()"><td><b>'+esc(aName[k]||k)+'</b></td>'
       +'<td class="ob-num">'+obMoney(a.spend)+'</td><td class="ob-num" style="color:var(--slate)">'+(allSpend?Math.round(a.spend/allSpend*100):0)+'%</td>'
-      +'<td class="ob-num">'+obNum(a.results,platform==='google'?1:0)+'</td><td class="ob-num">'+obMoney(a.results?a.spend/a.results:null)+'</td>'
+      +'<td class="ob-num">'+(platform==='meta'?obNum(a.lres):obNum(a.results,1))+'</td><td class="ob-num">'+(platform==='meta'?obMoney(a.lres?a.lspend/a.lres:null):obMoney(a.results?a.spend/a.results:null))+'</td>'
       +'<td class="ob-num">'+obNum(a.clicks)+'</td><td class="ob-num">'+obPct(a.impressions?a.clicks/a.impressions*100:null)+'</td></tr>';
   }).join('');
   if(accRows) html+='<div class="card" style="margin-bottom:14px;overflow-x:auto"><div style="padding:12px 15px;font-weight:700;font-size:13.5px">By '+(platform==='meta'?'project':'account')+' <span style="font-weight:500;color:var(--slate);font-size:12px">- click one to see only its campaigns and ads</span></div>'
-    +'<table class="tbl" style="width:100%;font-size:13px"><thead><tr><th>'+(platform==='meta'?'Project':'Account')+'</th><th class="ob-num">Spend</th><th class="ob-num">Share</th><th class="ob-num">'+W.res+'</th><th class="ob-num">'+W.per+'</th><th class="ob-num">Clicks</th><th class="ob-num">CTR</th></tr></thead><tbody>'+accRows+'</tbody></table></div>';
+    +'<table class="tbl" style="width:100%;font-size:13px"><thead><tr><th>'+(platform==='meta'?'Project':'Account')+'</th><th class="ob-num">Spend</th><th class="ob-num">Share</th><th class="ob-num">'+(platform==='meta'?'Leads &amp; chats':W.res)+'</th><th class="ob-num">'+(platform==='meta'?'Cost per lead':W.per)+'</th><th class="ob-num">Clicks</th><th class="ob-num">CTR</th></tr></thead><tbody>'+accRows+'</tbody></table></div>';
   // ---- campaigns with spend in the period
   const camps=cur.filter(function(c){ return (+c.spend||0)>0||(+c.results||0)>0; }).sort(function(a,b){ return b.spend-a.spend; });
   const st=function(s){ s=String(s||''); const on=s==='ACTIVE'||s==='ENABLED'; return '<span class="tag '+(on?'t-green':'t-gray')+'">'+(on?'Running':s?s.charAt(0)+s.slice(1).toLowerCase().replace(/_/g,' '):'—')+'</span>'; };
@@ -178,7 +191,7 @@ function obAdsPaint(){
         const e=E['campaign:'+c.campaign_id]||{};
         const bud=e.daily_budget!=null?obMoney(e.daily_budget)+'<span style="color:var(--slate);font-size:11px"> /day</span>':(e.lifetime_budget!=null?obMoney(e.lifetime_budget)+'<span style="color:var(--slate);font-size:11px"> total</span>':'—');
         return '<tr><td style="max-width:340px">'+esc(e.name||c.campaign_id)+'</td>'+(OB_P.acct==='all'?'<td style="font-size:12px">'+esc(aName[c.account_id]||'')+'</td>':'')
-          +'<td>'+st(e.status)+'</td><td class="ob-num">'+bud+'</td><td class="ob-num"><b>'+obMoney(c.spend)+'</b></td><td class="ob-num">'+obNum(c.results,platform==='google'?1:0)+'</td>'
+          +'<td>'+st(e.status)+'</td><td class="ob-num">'+bud+'</td><td class="ob-num"><b>'+obMoney(c.spend)+'</b></td><td class="ob-num">'+obNum(c.results,platform==='google'?1:0)+(platform==='meta'&&!obIsLead(E,c)?' <span class="tag t-gray" style="font-size:10px" title="This campaign\'s Result is not a lead: it is whatever the campaign is set to get (views, reach or interactions)">'+(OB_OBJ_NAME[e.objective]||'Other')+'</span>':'')+'</td>'
           +'<td class="ob-num">'+obMoney(+c.results?c.spend/c.results:null)+'</td><td class="ob-num">'+obNum(c.clicks)+'</td><td class="ob-num">'+obPct(+c.impressions?c.clicks/c.impressions*100:null)+'</td></tr>';
       }).join('')+'</tbody></table>':'<div class="card-pad" style="color:var(--slate);font-size:13px">No campaign spent in this period.</div>')+'</div>';
   // ---- ads
@@ -199,7 +212,7 @@ function obAdsPaint(){
       +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="OB_P.showAds+='+obAdStep(ads.length)+';obAdsPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
   }
   html+='<div style="font-size:11.5px;color:var(--slate);margin:16px 0 4px">'+(platform==='meta'
-      ?'Figures are Meta\'s own, using each account\'s attribution setting - the same as Ads Manager. Results = Ads Manager\'s "Results" column for each campaign - leads, WhatsApp chats started, ThruPlays or engagements, whatever the campaign is set to get - so totals add different kinds together, as Ads Manager\'s do. Reach is not shown: it counts unique people, so it cannot be added across days or campaigns.'
+      ?'Figures are Meta\'s own, using each account\'s attribution setting - the same as Ads Manager. Results = Ads Manager\'s "Results" column for each campaign - leads, WhatsApp chats started, ThruPlays or engagements, whatever the campaign is set to get - so the headline above counts lead campaigns only and never adds views or reach to leads. Reach counts unique people, so a campaign whose Result is reach cannot be added across days: its total here is the sum of each day, which is higher than the unique reach Ads Manager shows for the whole period. The latest day can move by a few rupees until Meta finishes counting it; JAIN-E re-reads the last 3 days every 15 minutes.'
       :'Figures are Google Ads\' own. Conversions = Google\'s "Conversions" column (it can include fractions and every conversion action set as primary). Google keeps adding late conversions to recent days for up to 30 days, so those can still rise.')+'</div>';
   $('obBody').innerHTML=html;
   // chart: day-by-day for the chosen account, or all
@@ -213,7 +226,17 @@ function obAdsPaint(){
 function obAdStep(total){ return Math.max(4,Math.ceil(Math.ceil(Math.max(0,total-12)/3)/4)*4); }
 async function obDrawChart(c,platform,r,days){
   const W=OB_ADS_WORD[platform];
-  if(!days){
+  if(platform==='meta'){
+    const E=window._obEnt||{}, m={};
+    for(let p=0;;p+=1000){
+      let q=sb.schema('camp').from('ads_daily').select('day,spend,results,campaign_id').eq('platform',platform).gte('day',r.s).lte('day',r.e).order('day',{ascending:true}).order('campaign_id',{ascending:true}).range(p,p+999);
+      if(OB_P.acct!=='all') q=q.eq('account_id',OB_P.acct);
+      const {data}=await q;
+      (data||[]).forEach(function(x){ const d=m[x.day]||(m[x.day]={day:x.day,spend:0,results:0}); d.spend+=+x.spend||0; if(obIsLead(E,x)) d.results+=+x.results||0; });
+      if(!data||data.length<1000) break;
+    }
+    days=Object.keys(m).sort().map(function(k){ return m[k]; });
+  } else if(!days){
     const {data}=await sb.schema('camp').from('ads_daily').select('day,spend,results').eq('platform',platform).eq('account_id',OB_P.acct).gte('day',r.s).lte('day',r.e).limit(5000);
     const m={}; (data||[]).forEach(function(x){ const d=m[x.day]||(m[x.day]={day:x.day,spend:0,results:0}); d.spend+=+x.spend||0; d.results+=+x.results||0; });
     days=Object.keys(m).sort().map(function(k){ return m[k]; });
@@ -224,9 +247,9 @@ async function obDrawChart(c,platform,r,days){
   if(!c.isConnected) return;
   OB_CHART=new Chart(c,{data:{labels:all.map(function(d){ return fmtDateShort(d); }),datasets:[
       {type:'bar',label:'Spend (₹)',data:all.map(function(d){ return by[d]?Math.round(+by[d].spend):0; }),backgroundColor:W.color+'55',borderColor:W.color,borderWidth:1,yAxisID:'y'},
-      {type:'line',label:W.res,data:all.map(function(d){ return by[d]?+by[d].results:0; }),borderColor:'#16a34a',backgroundColor:'#16a34a',pointRadius:all.length>45?0:2,tension:.25,yAxisID:'y2'}]},
+      {type:'line',label:platform==='meta'?'Leads & chats':W.res,data:all.map(function(d){ return by[d]?+by[d].results:0; }),borderColor:'#16a34a',backgroundColor:'#16a34a',pointRadius:all.length>45?0:2,tension:.25,yAxisID:'y2'}]},
     options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7}}},
-      scales:{x:{ticks:{maxTicksLimit:12}},y:{beginAtZero:true,title:{display:true,text:'Spend'}},y2:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},title:{display:true,text:W.res}}}}});
+      scales:{x:{ticks:{maxTicksLimit:12}},y:{beginAtZero:true,title:{display:true,text:'Spend'}},y2:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},title:{display:true,text:platform==='meta'?'Leads & chats':W.res}}}}});
 }
 // What to do when the platform cannot be read yet (most often: the Facebook key is not added).
 function obSetupNote(platform,msg){

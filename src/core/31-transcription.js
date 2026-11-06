@@ -76,8 +76,10 @@ function trQualTag(r){
    new calls arrived: an older Qualified call dropped off the bottom for each new one at the top,
    so Qualified went DOWN while qualified calls were being added. Not Qualified read low for the
    same reason, and the three cards never summed to the total. */
+let TR_FETCH_FAILED=false;   // the last load failed with nothing to show: never serve that empty list from memory
 async function trFetch(force){
-  if(TR_ROWS&&!force)return TR_ROWS;
+  if(TR_ROWS&&!force&&!TR_FETCH_FAILED)return TR_ROWS;
+  TR_FETCH_FAILED=false;
   if(!force){
     const cached=trCacheRead('tr_fetch_cache','all');
     if(cached){TR_ROWS=cached;return TR_ROWS;}
@@ -96,12 +98,24 @@ async function trFetch(force){
     }
     TR_ROWS=out;
     trCacheWrite('tr_fetch_cache','all',out);
-  }catch(e){ TR_ROWS=out.length?out:[]; }
+  }catch(e){
+    TR_ROWS=out.length?out:[];
+    // A failed load is not "no calls": say so, and ask again next time instead of caching the empty list.
+    if(!out.length){ TR_FETCH_FAILED=true; try{ toast('Could not load the calls: '+((e&&e.message)||e)+'. Reload to try again.','err'); }catch(_e){} }
+  }
   return TR_ROWS;
 }
 async function trFetchDeleted(force){
   if(TR_DELETED_ROWS&&!force)return TR_DELETED_ROWS;
-  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').not('deleted_at','is',null).order('deleted_at',{ascending:false}).limit(200);TR_DELETED_ROWS=data||[];}catch(e){TR_DELETED_ROWS=[];}
+  try{
+    const {data,error}=await sb.schema('acc').from('transcriptions').select('*').not('deleted_at','is',null).order('deleted_at',{ascending:false}).limit(200);
+    if(error)throw error;
+    TR_DELETED_ROWS=data||[];
+  }catch(e){
+    // not cached: the next visit asks again
+    TR_DELETED_ROWS=null; try{ toast('Could not load the deleted calls: '+((e&&e.message)||e),'err'); }catch(_e){}
+    return [];
+  }
   return TR_DELETED_ROWS;
 }
 // Date-range filter — applies to every call-log listing (All Calls + inside any folder).

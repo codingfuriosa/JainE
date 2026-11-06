@@ -1,0 +1,56 @@
+// RETIRED 6 Nov 2026 - source of the deployed edge function `meta-metric-probe` (v22, verify_jwt was OFF).
+// A one-off diagnostic that tried Graph API metric names one at a time. Nothing in the app, no cron job and
+// nothing in the last 24 h of edge logs called it. It used the Meta page token and made about ten Graph
+// calls per hit for ANYONE on the internet. To put it back: deploy this file under the slug
+// `meta-metric-probe` with verify_jwt ON.
+
+// READ-ONLY diagnostic: tests candidate Graph API metric names one at a time against a REAL
+// post/page, so an invalid name can't poison a batch (that's what broke things before per
+// social-organic-live's own comments). Never writes anything. GET /meta-metric-probe?post_id=...
+const G='https://graph.facebook.com/v20.0';
+const j=(o:any,s=200)=>new Response(JSON.stringify(o,null,2),{status:s,headers:{'Content-Type':'application/json'}});
+
+async function gget(url:string){
+  const r=await fetch(url); const b=await r.json().catch(()=>({}));
+  return {status:r.status, body:b};
+}
+
+Deno.serve(async (req:Request)=>{
+  const url=new URL(req.url);
+  const T=Deno.env.get('META_PAGES_TOKEN')||Deno.env.get('META_SYSTEM_TOKEN')||Deno.env.get('META_ACCESS_TOKEN');
+  if(!T) return j({error:'no meta token secret set'},500);
+  const t=encodeURIComponent(T);
+
+  const pg=await gget(G+'/me/accounts?fields=id,name,access_token&limit=50&access_token='+t);
+  if(pg.status!==200) return j({step:'list pages',...pg},400);
+  const pages=(pg.body as any).data||[];
+  if(!pages.length) return j({error:'token sees 0 pages'},400);
+  const P=pages[0];
+  const pt=encodeURIComponent(P.access_token);
+
+  const postId=url.searchParams.get('post_id');
+  const results:any={page:{id:P.id,name:P.name}};
+
+  // ---- PAGE-LEVEL candidates ----
+  const pageMetrics=['page_impressions','page_impressions_unique','page_views_total','page_video_views','page_media_view','page_viewer','page_viewers','page_fan_views','page_post_engagements'];
+  results.page_level={};
+  for(const m of pageMetrics){
+    const r=await gget(G+'/'+P.id+'/insights?metric='+m+'&period=day&access_token='+pt);
+    results.page_level[m]= r.status===200 ? {ok:true, sample:(r.body as any).data?.[0]?.values?.slice(-1)} : {ok:false, error:(r.body as any)?.error?.message||r.status};
+  }
+
+  // ---- POST-LEVEL candidates (need a real, non-video PHOTO post id to be meaningful) ----
+  if(postId){
+    const postMetrics=['post_impressions','post_impressions_unique','post_reach','post_engaged_users','post_follows',
+      'post_media_view','post_media_viewers','post_video_followers','post_viewers','post_video_views_unique','post_clicks'];
+    results.post_level={postId};
+    for(const m of postMetrics){
+      const r=await gget(G+'/'+postId+'/insights?metric='+m+'&access_token='+pt);
+      results.post_level[m]= r.status===200 ? {ok:true, value:(r.body as any).data?.[0]?.values?.[0]?.value} : {ok:false, error:(r.body as any)?.error?.message||r.status};
+    }
+  } else {
+    results.post_level='pass ?post_id=<a real facebook post id, e.g. a photo post not a reel> to test';
+  }
+
+  return j(results);
+});

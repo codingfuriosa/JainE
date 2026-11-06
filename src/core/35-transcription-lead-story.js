@@ -805,7 +805,7 @@ VIEWS.transcription=async function(v,seg){
       const cs=Array.isArray(r.discrepancy)?r.discrepancy:[];
       return cs.some(function(c){ return c&&c.status==='fail'; });
     });
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)+await trOldPipelineNote()
       +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>What disagrees</th></tr></thead>'
       +'<tbody>'+(rows.length?rows.map(trDiscrepancyRowHtml).join(''):'<tr><td colspan="5"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>No discrepancies right now</div></div></td></tr>')+'</tbody></table></div></div>';
     return;
@@ -825,7 +825,7 @@ VIEWS.transcription=async function(v,seg){
       return new Date(lb.report_date||lb.created_at) - new Date(la.report_date||la.created_at);
     });
     const leadParam=seg[1]?decodeURIComponent(seg[1]):null;
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)+await trOldPipelineNote()
       +'<div id="trCompArea">'+(leadParam?trCompDetailHtml(leads,leadParam):trCompGridHtml(leads))+'</div>';
     // trCompDetailHtml always renders the combined qualification checklist card - USAGE_VIEWS'
     // 'transcription/5' key already covers "view a lead's combined call history" for this same
@@ -1268,9 +1268,12 @@ window.trRemoveFromFolder=async function(id){
   const ok=await confirmDialog('Remove this call from the folder? The call itself won\'t be deleted.');
   if(!ok)return;
   const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
+  const was=r?r.folder:null;
   if(r)r.folder=null;
   trRenderFolderRows();
-  try{await sb.schema('acc').from('transcriptions').update({folder:null}).eq('id',id);}catch(e){}
+  let fErr=null;
+  try{ const res=await sb.schema('acc').from('transcriptions').update({folder:null}).eq('id',id); fErr=res&&res.error; }catch(e){ fErr=e; }
+  if(fErr){ if(r)r.folder=was; trRenderFolderRows(); toast('Could not remove it from the folder: '+((fErr&&fErr.message)||fErr),'err'); return; }
   toast('Removed from folder','ok');
 };
 window.trFolderRenameModal=function(idx){
@@ -1409,7 +1412,12 @@ function trStartPolling(id){
 // Permanent record of every delete/restore — independent of deleted_at, so the history survives
 // even after something is restored (deleted_at just says "currently deleted or not").
 function trLogActivity(id,fname,action){
-  try{sb.schema('acc').from('transcription_activity').insert({transcription_id:id,file_name:fname||null,actor:(state&&state.email)||null,action:action});}catch(e){}
+  /* 6 Nov 2026: a supabase-js request is only sent when something .then()s it. This used to build the insert
+     and drop it, so acc.transcription_activity never got a row (it was empty while 19 calls had been deleted). */
+  try{
+    return sb.schema('acc').from('transcription_activity').insert({transcription_id:id,file_name:fname||null,actor:(state&&state.email)||null,action:action})
+      .then(function(res){ if(res&&res.error) console.warn('transcription activity not logged: '+res.error.message); },function(){});
+  }catch(e){}
 }
 window.trDelete=async function(id){
   const ok=await confirmDialog('Delete this recording? It moves to the Deleted tab, where you can restore it any time — the recording file is kept.');
@@ -1421,7 +1429,14 @@ window.trDelete=async function(id){
   if(r){r.deleted_at=now;r.deleted_by=who;TR_DELETED_ROWS=[r].concat(TR_DELETED_ROWS||[]);}
   trCacheWrite('tr_fetch_cache','all',TR_ROWS);
   trRenderList();trRenderFolderRows();
-  try{await sb.schema('acc').from('transcriptions').update({deleted_at:now,deleted_by:who}).eq('id',id);}catch(e){}
+  let dErr=null;
+  try{ const res=await sb.schema('acc').from('transcriptions').update({deleted_at:now,deleted_by:who}).eq('id',id); dErr=res&&res.error; }catch(e){ dErr=e; }
+  if(dErr){
+    // The database refused: the call is NOT deleted, so put it back instead of saying it is.
+    if(r){ r.deleted_at=null; r.deleted_by=null; TR_DELETED_ROWS=(TR_DELETED_ROWS||[]).filter(function(x){return x.id!==id;}); TR_ROWS=[r].concat(TR_ROWS||[]).sort(function(a,b){return new Date(b.created_at)-new Date(a.created_at);}); }
+    trCacheClear('tr_fetch_cache'); trRenderList(); trRenderFolderRows();
+    toast('Could not delete this recording: '+((dErr&&dErr.message)||dErr),'err'); return;
+  }
   trLogActivity(id,r&&r.file_name,'deleted');
   toast('Recording deleted','ok');
 };
@@ -1446,8 +1461,13 @@ window.trRestore=async function(id){
   if(host)host.innerHTML=trDeletedTableBody();
   TR_ROWS=null; // so All Calls / Folders refetch and pick this call back up next time they're viewed
   trCacheClear('tr_fetch_cache');
+  let rErr=null;
+  try{ const res=await sb.schema('acc').from('transcriptions').update({deleted_at:null,deleted_by:null}).eq('id',id); rErr=res&&res.error; }catch(e){ rErr=e; }
+  if(rErr){
+    if(r){ TR_DELETED_ROWS=[r].concat(TR_DELETED_ROWS||[]); const h2=$('trDeletedRows'); if(h2)h2.innerHTML=trDeletedTableBody(); }
+    toast('Could not restore it: '+((rErr&&rErr.message)||rErr),'err'); return;
+  }
   toast('Restored','ok');
-  try{await sb.schema('acc').from('transcriptions').update({deleted_at:null,deleted_by:null}).eq('id',id);}catch(e){toast('Restored locally, but failed to sync: '+((e&&e.message)||e),'err');}
   trLogActivity(id,r&&r.file_name,'restored');
 };
 window.trRestoreAll=async function(){
@@ -1461,8 +1481,13 @@ window.trRestoreAll=async function(){
   if(host)host.innerHTML=trDeletedTableBody();
   TR_ROWS=null;
   trCacheClear('tr_fetch_cache');
+  let raErr=null;
+  try{ const res=await sb.schema('acc').from('transcriptions').update({deleted_at:null,deleted_by:null}).in('id',ids); raErr=res&&res.error; }catch(e){ raErr=e; }
+  if(raErr){
+    TR_DELETED_ROWS=rows; const h3=$('trDeletedRows'); if(h3)h3.innerHTML=trDeletedTableBody();
+    toast('Could not restore them: '+((raErr&&raErr.message)||raErr),'err'); return;
+  }
   toast('Restored '+ids.length+' call'+(ids.length===1?'':'s'),'ok');
-  try{await sb.schema('acc').from('transcriptions').update({deleted_at:null,deleted_by:null}).in('id',ids);}catch(e){toast('Restored locally, but failed to sync: '+((e&&e.message)||e),'err');}
   rows.forEach(function(r){trLogActivity(r.id,r.file_name,'restored');});
 };
 // Every delete/restore ever, regardless of current state — this is the durable record the
@@ -1561,17 +1586,26 @@ async function trUploadOne(f,token){
   }
   return path;
 }
+/* Discrepancies and Compilation read the older call-check pipeline (source lost_call_sync), which stopped
+   adding calls on 30 Aug 2026. Newer calls are in the first tab. Say so, with the date of the newest call here,
+   instead of showing "No discrepancies right now" as if it were current. */
+async function trOldPipelineNote(){
+  const rows=(await trFetch()).filter(function(r){return r.source==='lost_call_sync';});
+  let newest=''; rows.forEach(function(r){ const d=String(r.report_date||r.created_at||'').slice(0,10); if(d>newest)newest=d; });
+  return '<div class="card card-pad" style="margin-top:14px;border-color:#fcd34d;background:#fffbeb;color:#92400e;font-size:13px;line-height:1.55"><i class="fa-solid fa-triangle-exclamation"></i> This tab shows calls from the older call-check pipeline. '
+    +(newest?'The newest call here is dated <b>'+esc(fmtDate(newest))+'</b>. ':'')+'Calls since then are in the first tab (Leads), not here.</div>';
+}
 window.trUploadStart=async function(){
   let files=Array.prototype.slice.call(($('trFile').files)||[]);
   if(!files.length){toast('Select at least one recording','err');return;}
-  if(files.length>50)files=files.slice(0,50);
+  if(files.length>50){ toast('Only the first 50 recordings are sent in one go - choose the other '+(files.length-50)+' again afterwards.','warn'); files=files.slice(0,50); }
   // Phone field removed — the caller's name/number is picked up from the call itself.
   const phones=files.map(function(){return null;});
   const btn=$('trUpBtn');if(btn)btn.disabled=true;
   const msg=$('trUpMsg');
   const {data:{session}}=await sb.auth.getSession();
   const token=session&&session.access_token;
-  const total=files.length;let done=0,failed=0,idx=0;
+  const total=files.length;let done=0,failed=0,idx=0;const failedNames=[];
   const paint=function(){const pct=Math.round((done+failed)/total*100);if(msg)msg.innerHTML='<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" style="width:'+pct+'%"></div></div><div class="psa-progress-label">Processed '+(done+failed)+' of '+total+' · '+done+' ok'+(failed?', '+failed+' failed':'')+'</div></div>';};
   paint();
   const worker=async function(){
@@ -1588,13 +1622,13 @@ window.trUploadStart=async function(){
         trCacheClear('tr_fetch_cache'); // a call still processing has no business in the 5h cache - trStartPolling re-freezes it once it's actually done
         trStartPolling(out.row.id);
         done++;
-      }catch(e){ failed++; }
+      }catch(e){ failed++; failedNames.push(f.name+' ('+((e&&e.message)||'failed')+')'); }
       paint();
     }
   };
   const K=Math.min(4,files.length);
   await Promise.all(Array.from({length:K},function(){return worker();}));
-  toast(done+' call'+(done===1?'':'s')+' submitted'+(failed?(', '+failed+' failed'):''), failed?'warn':'ok');
+  toast(done+' call'+(done===1?'':'s')+' submitted'+(failed?(', '+failed+' failed: '+failedNames.slice(0,3).join('; ')+(failed>3?' ...':'')):''), failed?'warn':'ok');
   closeModal();
   if(PAGE==='transcription')renderPage();
 };
