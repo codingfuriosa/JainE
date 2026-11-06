@@ -133,7 +133,7 @@ function openSheet(path,kind){
 
 // ---------------------------------------------------------------- steps
 function stepApplicants(){
-  return card('','','Applicant details','Every person in whose name the unit is to be booked. Joint applicants can be added below.',
+  return card('','','Applicant details','Everyone in whose name the flat is booked. Fields marked * must be filled; the others are optional.',
     S.applicants.map(function(a,i){
       const p='applicants.'+i+'.', foreign=a.nationality!=='India', first=i===0;
       const nri=foreign||a.passport||a.bank_details;
@@ -141,16 +141,17 @@ function stepApplicants(){
          relation + that person's name, nationality + PAN + Aadhaar); on a phone they run in one column in this order. */
       return '<div class="app"><div class="ah"><span class="num">'+(i+1)+'</span><b>'+(i?'Joint applicant':'First / sole applicant')+'</b>'
           +(i?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
-        +'<div class="stack">'
-        +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,s:4,ord:1})
-        +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,s:4,ord:3,cls:'up',auto:i?'off':'name',hint:'Exactly as written on your PAN card'})
-        +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1,s:2,ord:2})
-        +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,s:4,ord:5,cls:'up'})
-        +(first?field(p+'dob','Date of birth',{type:'date',req:1,full:1,s:2,ord:4}):'')
-        +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1,s:2,ord:first?6:4})
-        +pick(p+'nationality','Nationality / Country','country',{full:1,s:2,ord:first?7:6})
-        +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1,s:2,ord:first?8:7,hint:'5 letters, 4 digits, 1 letter'})
-        +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1,s:2,ord:first?9:8})
+        +'<div class="stack"><div class="grp s6">Personal details</div>'
+        +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,s:6})
+        +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,s:3,cls:'up',auto:i?'off':'name',hint:'Exactly as written on your PAN card'})
+        +field(p+'dob','Date of birth',{type:'date',req:first,optional:!first,full:1,s:3})
+        +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1,s:3})
+        +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,s:3,cls:'up'})
+        +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1,s:3})
+        +pick(p+'nationality','Nationality / Country','country',{full:1,s:3})
+        +'<div class="grp s6">Identity documents</div>'
+        +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1,s:3,hint:'5 letters, 4 digits, 1 letter'})
+        +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1,s:3})
         +'</div>'
         +'<details class="t opt-d"'+(nri?' open':'')+'><summary><span>Passport & bank details <span class="opt">(only for NRIs and foreign nationals)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
           +field(p+'passport','Passport number',{cls:'up',req:foreign,optional:!foreign,full:1})
@@ -333,7 +334,7 @@ function stepReview(){
   const h=function(t,step){ return '<div class="rs"><div class="rvh"><h3>'+t+'</h3><button type="button" data-go="'+step+'">Edit</button></div>'; };
   return card('','','Review your application','Please check every detail. Use Edit to make a change, then submit.',
     S.applicants.map(function(a,i){ return h((i?'Joint applicant '+(i+1):'First applicant'),0)+rows([
-      ['Name',a.title+' '+a.full_name],[a.relation,a.relation_name],['Date of birth',i?'':fmtD(a.dob)],['Occupation',a.occupation],['Nationality',a.nationality],
+      ['Name',a.title+' '+a.full_name],[a.relation,a.relation_name],['Date of birth',fmtD(a.dob)],['Occupation',a.occupation],['Nationality',a.nationality],
       ['PAN',a.pan.toUpperCase()],['Aadhaar',a.aadhaar],['Passport',a.passport],['Bank details',a.bank_details],
       ['Spouse',i?'':a.spouse],['Anniversary',i?'':fmtD(a.anniversary)],
       ['Documents',(FILES[i].pan.length?'PAN attached':'PAN missing')+' · '+(FILES[i].aadhaar.length?'Aadhaar attached':'Aadhaar missing')]]); }).join('')
