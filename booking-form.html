@@ -191,26 +191,51 @@
   .toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;font-size:13.5px;z-index:70;max-width:90%;text-align:center}
   /* on a phone: less frame, more room for the fields */
   @media(max-width:520px){.sec{margin:12px 10px 0}.sb{padding:14px}.sh{padding:14px 14px 12px}.app{padding:12px}.steps{padding:10px 14px}.hd{padding:16px 14px 14px}}
-  /* DESKTOP (6 Nov 2026): one row = one question. The question is on the left, the answer on the right, every answer the
-     same width, strictly top to bottom - so a first-time customer never has to work out what goes where. This saves about a
-     third of the height (no label line above every box) without putting unrelated things side by side. Phones are untouched. */
+  /* DESKTOP (6 Nov 2026): the whole width is used for something, not stretched. Each section has its name and what it is
+     for on the left; its questions are rows - the question, then the answer at one comfortable width, and on a big screen
+     the small help text beside the answer instead of under it. Every answer is the same width. Phones are untouched. */
   @media(min-width:1000px){
     body{font-size:15.5px}
-    .wrap{max-width:860px}
-    .nav .in{max-width:832px}
-    .sh{padding:16px 24px 13px}.sh h2{font-size:17px}.sh p{font-size:13.5px}
-    .sb{padding:22px 24px}
+    .wrap{max-width:1280px}
+    .nav .in{max-width:1252px}
+    /* header in one line: logo, the form's name and addressee, project logo */
+    .hd{display:grid;grid-template-columns:auto 1fr auto;align-items:center;column-gap:24px;padding:12px 28px}
+    .hd .logos{display:contents}
+    .hd .logos img{height:40px;max-width:none;grid-row:1/3}
+    .hd .logos img:first-child{grid-column:1}
+    .hd .logos img.proj{grid-column:3}
+    .hd h1{grid-column:2;grid-row:1;margin:0;text-align:center;font-size:20px}
+    .hd p{grid-column:2;grid-row:2;text-align:center;font-size:13.5px}
+    .steps{padding:10px 28px 11px}
+    /* a section: its name and purpose on the left, its questions on the right */
+    .sec{display:grid;grid-template-columns:240px minmax(0,1fr)}
+    .sh{padding:22px 20px;border-bottom:0;border-right:1px solid var(--line2)}
+    .sh h2{font-size:17px}.sh p{font-size:13.5px;margin-top:6px;line-height:1.5}
+    .sb{padding:22px 26px}
     .grid,.stack{gap:16px}
     .pair{display:flex;flex-direction:column;align-items:stretch;gap:16px}
-    .grid>.f,.stack>.f,.pair>.f,.ac>.f,.sb>.f{display:grid;grid-template-columns:208px minmax(0,1fr);column-gap:22px;row-gap:5px;align-items:start}
+    /* a question: label | answer | help */
+    .grid>.f,.stack>.f,.pair>.f,.ac>.f,.sb>.f{display:grid;grid-template-columns:210px minmax(0,566px) minmax(0,1fr);column-gap:22px;row-gap:5px;align-items:start}
     .grid>.f>label,.stack>.f>label,.pair>.f>label,.ac>.f>label,.sb>.f>label{grid-column:1;grid-row:1;padding-top:13px;font-size:14px;line-height:1.35}
     .grid>.f>:not(label),.stack>.f>:not(label),.pair>.f>:not(label),.ac>.f>:not(label),.sb>.f>:not(label){grid-column:2;min-width:0}
     input[type=text],input[type=tel],input[type=email],input[type=date],textarea{font-size:15.5px;min-height:46px}
     textarea{min-height:68px}
     .pick{font-size:15.5px;min-height:46px}
     .pre .pick{width:116px}
-    .chip{font-size:15px;min-height:46px}
+    .chip{font-size:14.5px;min-height:46px;padding:8px 11px 8px 10px;gap:7px}
     .grp{margin:22px 0 14px}
+    /* the applicant is not a card inside a card: separate several with a line */
+    .app{border:0;padding:0}
+    .app .ah{margin-bottom:6px}
+    .app+.app{margin-top:26px;padding-top:26px;border-top:1px solid var(--line)}
+    /* things that are not a question keep a readable width instead of stretching */
+    .sb>details.t,.sb>.agree,.sb>.switch,.sb>.btn.add,.app>details.t,.app>.btn,.sb>.miss{max-width:798px}
+    .sb:has(>.rs){column-count:2;column-gap:44px}
+    .rs{break-inside:avoid}
+  }
+  /* on a big screen the help text sits beside the answer, using the space that is there */
+  @media(min-width:1200px){
+    .grid>.f>.hint,.stack>.f>.hint,.pair>.f>.hint,.ac>.f>.hint{grid-column:3;grid-row:1;padding-top:14px}
   }
   .hint{font-size:12.5px;color:var(--slate);line-height:1.4}
   @media print{.steps,.nav,.btn,.rvh button{display:none!important}.sec{border:1px solid #ddd}}
@@ -231,6 +256,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261106t"></script>
+<script src="booking-form.js?v=20261106w"></script>
 </body>
 </html>

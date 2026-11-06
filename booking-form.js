@@ -175,7 +175,7 @@ function stepContact(){
         before:'<div class="pre">'+pick('contact.cc','','dial',{bare:1}),after:'</div>'})
       +field('contact.email','Email',{type:'email',req:1,full:1,auto:'email',mode:'email'})
       +field('contact.contact_person','Name of contact person',{optional:1,full:1})+'</div>')
-    +card('','','Residential address','',addrBody('res'))
+    +card('','','Residential address','Where you live now.',addrBody('res'))
     +card('','','Office address','Optional',
       '<label class="switch"><input type="checkbox" data-check="off.on"'+(S.off.on?' checked':'')+'><span><b>I want to add an office address</b></span></label>'
       +(S.off.on?'<div style="margin-top:16px">'+addrBody('off')+'</div>':''))
@@ -188,7 +188,7 @@ function stepContact(){
       +'</div>');
 }
 function stepAbout(){
-  return card('','','Occupation','',
+  return card('','','Occupation','What you do. Everything here is optional.',
       '<div class="grid">'+chips('profession.kind','Profession',['Salaried','Self-Employed','Govt. Employee','Others'],{mcols:4,sm:1})
       +'<div class="pair">'+field('profession.company','Company',{optional:1})+field('profession.designation','Designation',{optional:1})+'</div></div>'
       +'<details class="t opt-d"><summary><span>More about you <span class="opt">(optional)</span></span></summary>'
@@ -197,7 +197,7 @@ function stepAbout(){
         +field('profession.newspaper','Favourite newspaper',{optional:1})+field('profession.magazine','Magazine',{optional:1})
         +field('profession.tv','TV channel',{optional:1})+field('profession.radio','Radio station / frequency',{optional:1})
         +'</div></details>')
-    +card('','','Source','',
+    +card('','','Source','How you came to hear about this project.',
       '<div class="grid">'
       +chips('heard','How did you come to know about the project?',['Facebook','Instagram','Google','Friend / Relative','Other'])
       +(S.heard==='Other'?field('heard_other','Where did you hear about it?',{full:1,req:1}):'')
@@ -230,7 +230,7 @@ function stepFlat(){
     +card('','','Sale price','Optional',
       '<div class="grid">'
       +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})+'</div>')
-    +card('','','Payment plan & home loan','',
+    +card('','','Payment plan & home loan','How you plan to pay for the flat.',
       '<div class="grid">'
       +chips('price.plan','Payment plan',['Construction Linked','Down Payment'])
       +chips('price.loan','Home loan required?',['No','Yes'])
@@ -245,7 +245,7 @@ function stepPay(){
       +'<div class="pair">'+field('pay.date',chq?'Cheque / DD date':'Date paid',{type:'date',req:1})
       +field('pay.ref',({'Cheque':'Cheque number','Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{req:1,cls:'up'})+'</div>'
       +(chq?'<div class="pair">'+field('pay.bank','Bank (drawn on)',{req:1})+field('pay.branch','Branch',{optional:1})+'</div>':field('pay.bank','Bank',{optional:1}))+'</div>')
-    +card('','','Booking details','',
+    +card('','','Booking details','What the flat is for and who helped you book it.',
       '<div class="grid">'
       +chips('purpose','Purpose of booking',['Residential','Investment'])
       +chips('sales','Booked through',['Direct','Booking agent / Channel partner'])
