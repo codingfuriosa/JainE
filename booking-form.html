@@ -191,6 +191,28 @@
   .toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;font-size:13.5px;z-index:70;max-width:90%;text-align:center}
   /* on a phone: less frame, more room for the fields */
   @media(max-width:520px){.sec{margin:12px 10px 0}.sb{padding:14px}.sh{padding:14px 14px 12px}.app{padding:12px}.steps{padding:10px 14px}.hd{padding:16px 14px 14px}}
+  /* DESKTOP (6 Nov 2026): one row = one question. The question is on the left, the answer on the right, every answer the
+     same width, strictly top to bottom - so a first-time customer never has to work out what goes where. This saves about a
+     third of the height (no label line above every box) without putting unrelated things side by side. Phones are untouched. */
+  @media(min-width:1000px){
+    body{font-size:15.5px}
+    .wrap{max-width:860px}
+    .nav .in{max-width:832px}
+    .sh{padding:16px 24px 13px}.sh h2{font-size:17px}.sh p{font-size:13.5px}
+    .sb{padding:22px 24px}
+    .grid,.stack{gap:16px}
+    .pair{display:flex;flex-direction:column;align-items:stretch;gap:16px}
+    .grid>.f,.stack>.f,.pair>.f,.ac>.f,.sb>.f{display:grid;grid-template-columns:208px minmax(0,1fr);column-gap:22px;row-gap:5px;align-items:start}
+    .grid>.f>label,.stack>.f>label,.pair>.f>label,.ac>.f>label,.sb>.f>label{grid-column:1;grid-row:1;padding-top:13px;font-size:14px;line-height:1.35}
+    .grid>.f>:not(label),.stack>.f>:not(label),.pair>.f>:not(label),.ac>.f>:not(label),.sb>.f>:not(label){grid-column:2;min-width:0}
+    input[type=text],input[type=tel],input[type=email],input[type=date],textarea{font-size:15.5px;min-height:46px}
+    textarea{min-height:68px}
+    .pick{font-size:15.5px;min-height:46px}
+    .pre .pick{width:116px}
+    .chip{font-size:15px;min-height:46px}
+    .grp{margin:22px 0 14px}
+  }
+  .hint{font-size:12.5px;color:var(--slate);line-height:1.4}
   @media print{.steps,.nav,.btn,.rvh button{display:none!important}.sec{border:1px solid #ddd}}
 </style>
 </head>
@@ -209,6 +231,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261103c"></script>
+<script src="booking-form.js?v=20261106t"></script>
 </body>
 </html>

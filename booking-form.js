@@ -89,7 +89,7 @@ function field(path,label,o){
   const ctl=o.type==='area'?'<textarea data-k="'+path+'"'+ph+'>'+esc(v)+'</textarea>'
     :'<input type="'+(o.type||'text')+'" data-k="'+path+'" value="'+esc(v)+'"'+ph+(o.cls?' class="'+o.cls+'"':'')
       +(o.mode?' inputmode="'+o.mode+'"':'')+(o.max?' maxlength="'+o.max+'"':'')+' autocomplete="'+(o.auto||'off')+'"'+(o.req&&o.type==='date'?' required':'')+'>';
-  return wrapF(path,label,o,(o.before||'')+ctl+(o.after||''));
+  return wrapF(path,label,o,(o.before||'')+ctl+(o.hint?'<div class="hint">'+esc(o.hint)+'</div>':'')+(o.after||''));
 }
 /* Choice pills: small and as wide as their words, wrapping onto a second line when a row is full
    (the user preferred this to equal-width buttons squeezed into one row, 2 Nov 2026). */
@@ -132,7 +132,7 @@ function openSheet(path,kind){
 
 // ---------------------------------------------------------------- steps
 function stepApplicants(){
-  return card('','','Applicant details','Every person in whose name the unit is to be booked. Joint applicants can be added below.',
+  return card('','','Applicant details','Everyone in whose name the flat is booked. Fields marked * must be filled; the others are optional.',
     S.applicants.map(function(a,i){
       const p='applicants.'+i+'.', foreign=a.nationality!=='India';
       /* One column, in small labelled groups, so a person always knows which part they are on:
@@ -142,7 +142,7 @@ function stepApplicants(){
           +(i?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
         +'<div class="grp">Personal details</div><div class="stack">'
         +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,mcols:5})
-        +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,cls:'up',auto:i?'off':'name'})
+        +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,cls:'up',auto:i?'off':'name',hint:'Exactly as written on your PAN card'})
         +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1,mcols:4})
         +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,cls:'up'})
         +(i===0?field(p+'dob','Date of birth',{type:'date',req:1,full:1}):'')
@@ -151,9 +151,10 @@ function stepApplicants(){
         +pick(p+'nationality','Nationality / Country','country',F)
         +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1})
         +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1})
-        +field(p+'passport','Passport number',{cls:'up',req:foreign,note:foreign?'':'(only for NRIs & foreigners)',full:1})
-        +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,note:foreign?'':'(only for NRIs & foreigners)'})
         +'</div>'
+        +'<details class="t opt-d"'+(foreign||a.passport||a.bank_details?' open':'')+'><summary><span>Passport & bank details <span class="opt">(only for NRIs and foreign nationals - others skip this)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
+          +field(p+'passport','Passport number',{cls:'up',req:foreign,optional:!foreign,full:1})
+          +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,optional:!foreign})+'</div></details>'
         +(i===0?'<details class="t opt-d"'+(a.spouse||a.anniversary?' open':'')+'><summary><span>Spouse & anniversary <span class="opt">(optional)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
           +field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></details>':'')
         +'</div>';
@@ -237,7 +238,7 @@ function stepFlat(){
 }
 function stepPay(){
   const chq=S.pay.mode==='Cheque'||S.pay.mode==='Demand Draft';
-  return card('','','Application payment','Paid in favour of '+esc(CONF.company)+'. Cash is not accepted.',
+  return card('','','Application payment','Paid in favour of '+esc(String(CONF.company||'').replace(/\.+$/,''))+'. Cash is not accepted.',
       '<div class="grid">'
       +chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Cheque','Demand Draft','Card'],{mcols:2})
       +field('pay.amount','Amount (₹)',{mode:'numeric',req:1,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})
@@ -413,7 +414,7 @@ function render(){
   $('app').innerHTML=[stepApplicants,stepContact,stepAbout,stepFlat,stepPay,stepDocs,stepTerms,stepReview][st]();
   $('nav').innerHTML='<div class="in">'+(st?'<button type="button" class="btn sec2" data-back="1">Back</button>':'')
     +'<button type="button" class="btn pri" id="nextBtn" data-next="1">'+(st===STEPS.length-1?'Submit booking form':'Continue')+'</button></div>'
-    +'<div class="saved">Your answers are saved on this phone as you go.</div>';
+    +'<div class="saved">Your answers are saved on this device as you go.</div>';
 }
 function go(n){ S.step=Math.max(0,Math.min(STEPS.length-1,n)); save(); ERR={}; MISSING=[]; render(); window.scrollTo(0,0); }
 function showErrors(){
