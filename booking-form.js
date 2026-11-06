@@ -80,7 +80,7 @@ const ICON={
   pen:'<svg class="i" viewBox="0 0 24 24"><path d="M16.5 3.5l4 4L8 20H4v-4z"/><path d="M14 6l4 4"/></svg>',
   check:'<svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'};
 function wrapF(path,label,o,inner){
-  return '<div class="f'+(o.full?' full':'')+(o.span2?' span2':'')+(o.half?' half':'')+(o.req?' need':'')+(ERR[path]?' bad':'')+'" id="'+fid(path)+'"><label>'+esc(label)
+  return '<div class="f'+(o.full?' full':'')+(o.span2?' span2':'')+(o.half?' half':'')+(o.s?' s'+o.s:'')+(o.ord?' o'+o.ord:'')+(o.req?' need':'')+(ERR[path]?' bad':'')+'" id="'+fid(path)+'"><label>'+esc(label)
     +(o.req?' <span class="req">*</span>':(o.optional?' <span class="opt">(optional)</span>':''))+(o.note?' <span class="opt">'+esc(o.note)+'</span>':'')+'</label>'
     +inner+'<div class="err">'+esc(ERR[path]||'')+'</div></div>';
 }
@@ -135,61 +135,61 @@ function openSheet(path,kind){
 function stepApplicants(){
   return card('','','Applicant details','Every person in whose name the unit is to be booked. Joint applicants can be added below.',
     S.applicants.map(function(a,i){
-      const p='applicants.'+i+'.', foreign=a.nationality!=='India';
-      /* One column, in small labelled groups, so a person always knows which part they are on:
-         who they are, then their ID documents, then (first applicant only, folded away) family. */
-      const F={full:1};
+      const p='applicants.'+i+'.', foreign=a.nationality!=='India', first=i===0;
+      const nri=foreign||a.passport||a.bank_details;
+      /* One block per person. On a wide screen the fields sit in rows (title + occupation, name + date of birth,
+         relation + that person's name, nationality + PAN + Aadhaar); on a phone they run in one column in this order. */
       return '<div class="app"><div class="ah"><span class="num">'+(i+1)+'</span><b>'+(i?'Joint applicant':'First / sole applicant')+'</b>'
           +(i?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
-        +'<div class="grp">Personal details</div><div class="stack">'
-        +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,mcols:5})
-        +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,span2:1,cls:'up',auto:i?'off':'name',hint:'Exactly as written on your PAN card'})
-        +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1,mcols:4})
-        +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,span2:i>0,cls:'up'})
-        +(i===0?field(p+'dob','Date of birth',{type:'date',req:1,full:1}):'')
-        +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1})
-        +'</div><div class="grp">Identity documents</div><div class="stack">'
-        +pick(p+'nationality','Nationality / Country','country',F)
-        +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1,hint:'10 characters: 5 letters, 4 digits, 1 letter'})
-        +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1,hint:'12 digits - the spaces are added for you'})
-        +field(p+'passport','Passport number',{cls:'up',req:foreign,note:foreign?'':'(only for NRIs & foreigners)',full:1})
-        +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,note:foreign?'':'(only for NRIs & foreigners)'})
+        +'<div class="stack">'
+        +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,s:4,ord:1})
+        +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,s:4,ord:3,cls:'up',auto:i?'off':'name',hint:'Exactly as written on your PAN card'})
+        +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1,s:3,ord:5})
+        +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,s:3,ord:6,cls:'up'})
+        +(first?field(p+'dob','Date of birth',{type:'date',req:1,full:1,s:2,ord:4}):'')
+        +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1,s:2,ord:2})
+        +pick(p+'nationality','Nationality / Country','country',{full:1,s:2,ord:first?7:4})
+        +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1,s:first?2:3,ord:first?8:7,hint:'5 letters, 4 digits, 1 letter'})
+        +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1,s:first?2:3,ord:first?9:8})
         +'</div>'
-        +(i===0?'<details class="t opt-d"'+(a.spouse||a.anniversary?' open':'')+'><summary><span>Spouse & anniversary <span class="opt">(optional)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
+        +'<details class="t opt-d"'+(nri?' open':'')+'><summary><span>Passport & bank details <span class="opt">(only for NRIs and foreign nationals)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
+          +field(p+'passport','Passport number',{cls:'up',req:foreign,optional:!foreign,full:1})
+          +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,optional:!foreign})+'</div></details>'
+        +(first?'<details class="t opt-d"'+(a.spouse||a.anniversary?' open':'')+'><summary><span>Spouse & anniversary <span class="opt">(optional)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
           +field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></details>':'')
         +'</div>';
     }).join('')
-    +(S.applicants.length<MAX_APPS?'<button type="button" class="btn add" data-add="1">+ Add another applicant</button>':''),'wide');
+    +(S.applicants.length<MAX_APPS?'<button type="button" class="btn add" data-add="1">+ Add another applicant</button>':''));
 }
 function addrBody(k){
   return '<div class="grid">'
-    +'<div class="full ac">'+field(k+'.line','House, street and area',{type:'area',full:1,req:k==='res'||S.off.on,ph:'Type your address'})+'<div id="ac-'+k+'"></div></div>'
-    +'<div class="pair">'+field(k+'.city','City / Town',{req:1,auto:k==='res'?'address-level2':'off'})
-    +field(k+'.pin','PIN code',{mode:'numeric',max:6,req:1,auto:k==='res'?'postal-code':'off'})+'</div></div>';
+    +'<div class="full ac s6">'+field(k+'.line','House, street and area',{type:'area',full:1,req:k==='res'||S.off.on,ph:'Type your address'})+'<div id="ac-'+k+'"></div></div>'
+    +'<div class="pair">'+field(k+'.city','City / Town',{req:1,s:4,auto:k==='res'?'address-level2':'off'})
+    +field(k+'.pin','PIN code',{mode:'numeric',max:6,req:1,s:2,auto:k==='res'?'postal-code':'off'})+'</div></div>';
 }
 function stepContact(){
   const a=S.applicants[0];
   return card('','','Contact details','Of the first applicant. All letters and receipts are sent here.',
       '<div class="grid">'
-      +field('contact.mobile','Mobile number',{type:'tel',req:1,full:1,mode:'tel',auto:'tel-national',
+      +field('contact.mobile','Mobile number',{type:'tel',req:1,full:1,s:2,mode:'tel',auto:'tel-national',
         before:'<div class="pre">'+pick('contact.cc','','dial',{bare:1}),after:'</div>'})
-      +field('contact.email','Email',{type:'email',req:1,full:1,auto:'email',mode:'email',hint:'Our team will write to this address'})
-      +field('contact.contact_person','Name of contact person',{optional:1,full:1,span2:1})+'</div>')
+      +field('contact.email','Email',{type:'email',req:1,full:1,s:2,auto:'email',mode:'email'})
+      +field('contact.contact_person','Name of contact person',{optional:1,full:1,s:2})+'</div>')
     +card('','','Residential address','',addrBody('res'))
     +card('','','Office address','Optional',
       '<label class="switch"><input type="checkbox" data-check="off.on"'+(S.off.on?' checked':'')+'><span><b>I want to add an office address</b></span></label>'
       +(S.off.on?'<div style="margin-top:16px">'+addrBody('off')+'</div>':''))
     +card('','','Mailing & permanent address','Which address to use. Choose Other to give a different one.',
       '<div class="grid">'
-      +chips('mailing','Send our letters to',S.off.on?['Residential','Office','Other']:['Residential','Other'])
-      +(S.mailing==='Other'?field('mailing_other','Mailing address',{type:'area',full:1,req:1,ph:'House, street, area, city and PIN code'}):'')
-      +chips('permanent','Permanent address',S.off.on?['Residential','Office','Other']:['Residential','Other'])
-      +(S.permanent==='Other'?field('permanent_other','Permanent address',{type:'area',full:1,req:1,ph:'House, street, area, city and PIN code'}):'')
+      +chips('mailing','Send our letters to',S.off.on?['Residential','Office','Other']:['Residential','Other'],{s:3,ord:1})
+      +(S.mailing==='Other'?field('mailing_other','Mailing address',{type:'area',full:1,req:1,s:6,ord:3,ph:'House, street, area, city and PIN code'}):'')
+      +chips('permanent','Permanent address',S.off.on?['Residential','Office','Other']:['Residential','Other'],{s:3,ord:2})
+      +(S.permanent==='Other'?field('permanent_other','Permanent address',{type:'area',full:1,req:1,s:6,ord:4,ph:'House, street, area, city and PIN code'}):'')
       +'</div>');
 }
 function stepAbout(){
   return card('','','Occupation','',
-      '<div class="grid">'+chips('profession.kind','Profession',['Salaried','Self-Employed','Govt. Employee','Others'],{mcols:4,sm:1})
+      '<div class="grid">'+chips('profession.kind','Profession',['Salaried','Self-Employed','Govt. Employee','Others'],{mcols:4,sm:1,s:6})
       +'<div class="pair">'+field('profession.company','Company',{optional:1})+field('profession.designation','Designation',{optional:1})+'</div></div>'
       +'<details class="t opt-d"><summary><span>More about you <span class="opt">(optional)</span></span></summary>'
         +'<div class="stack" style="padding:0 14px 14px">'
@@ -199,9 +199,9 @@ function stepAbout(){
         +'</div></details>')
     +card('','','Source','',
       '<div class="grid">'
-      +chips('heard','How did you come to know about the project?',['Facebook','Instagram','Google','Friend / Relative','Other'])
-      +(S.heard==='Other'?field('heard_other','Where did you hear about it?',{full:1,req:1}):'')
-      +'<div class="f full span2"><label>Why did you choose this project? <span class="opt">(optional)</span></label>'
+      +chips('heard','How did you come to know about the project?',['Facebook','Instagram','Google','Friend / Relative','Other'],{s:6})
+      +(S.heard==='Other'?field('heard_other','Where did you hear about it?',{full:1,req:1,s:3}):'')
+      +'<div class="f full span2 s6"><label>Why did you choose this project? <span class="opt">(optional)</span></label>'
         +S.why.map(function(w,i){ return '<div style="display:flex;gap:8px;align-items:center"><span class="num" style="width:26px;height:26px;border-radius:50%;background:#f1ede6;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex:none">'+(i+1)+'</span>'
           +'<input type="text" data-k="why.'+i+'" value="'+esc(w)+'" placeholder=" " autocomplete="off">'
           +(i?'<button type="button" class="rm lnk" style="color:var(--err);padding:8px" data-rmwhy="'+i+'" aria-label="Remove">×</button>':'')+'</div>'; }).join('')
@@ -212,41 +212,39 @@ function stepFlat(){
   const floors=[]; for(let i=1;i<=(CONF.floors||8);i++) floors.push(String(i));
   return card('','','Unit selection','As discussed with our sales team. The flat number may be left blank if not yet allotted.',
       '<div class="grid">'
-      +chips('flat.block','Block',CONF.blocks,{req:1,half:1})
-      +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1})
-      +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4})
-      +chips('flat.bhk','Bedrooms',CONF.bhk,{half:1})
-      +chips('flat.parking','Right to use car park',['Covered','Open'],{half:1})+'</div>')
-    +card('','','Area, rate & price','Optional',
+      +chips('flat.block','Block',CONF.blocks,{req:1,half:1,s:2,ord:1})
+      +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1,s:2,ord:2})
+      +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4,s:3,ord:4})
+      +chips('flat.bhk','Bedrooms',CONF.bhk,{half:1,s:3,ord:5})
+      +chips('flat.parking','Right to use car park',['Covered','Open'],{half:1,s:2,ord:3})+'</div>')
+    +card('','','Area, price & payment plan','Optional - the figures agreed with our sales team.',
       '<div class="grid">'
-      +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1})
-      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})
-      +'<div class="f full"><label>Rate per sq.ft. (₹)</label>'
+      +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1,s:2,ord:1})
+      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,s:3,ord:3,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})
+      +'<div class="f full s4 o2"><label>Rate per sq.ft. (₹)</label>'
         +'<div class="rate">'
           +'<div class="f">'+'<label class="sub">Basic</label><input type="text" inputmode="decimal" data-k="price.basic" value="'+esc(S.price.basic)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
           +'<div class="f">'+'<label class="sub">PLC</label><input type="text" inputmode="decimal" data-k="price.plc" value="'+esc(S.price.plc)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
           +'<div class="f">'+'<label class="sub">FLC</label><input type="text" inputmode="decimal" data-k="price.flc" value="'+esc(S.price.flc)+'" placeholder=" " autocomplete="off"></div><span class="op">=</span>'
           +'<div class="f">'+'<label class="sub">Total</label><div class="sum" id="w-rate">'+esc(rateTotal()?('₹'+fmtN(rateTotal())):'—')+'</div></div>'
-        +'</div><div class="words">PLC: preferential location charge · FLC: floor rise charge</div></div></div>')
-    +card('','','Payment plan & home loan','',
-      '<div class="grid">'
-      +chips('price.plan','Payment plan',['Construction Linked','Down Payment'])
-      +chips('price.loan','Home loan required?',['No','Yes'])
-      +(S.price.loan==='Yes'?field('price.bank','Preferred bank / institution',{optional:1,full:1}):'')+'</div>');
+        +'</div><div class="words">PLC: preferential location charge · FLC: floor rise charge</div></div>'
+      +chips('price.plan','Payment plan',['Construction Linked','Down Payment'],{s:3,ord:4})
+      +chips('price.loan','Home loan required?',['No','Yes'],{s:3,ord:5})
+      +(S.price.loan==='Yes'?field('price.bank','Preferred bank / institution',{optional:1,full:1,s:3,ord:6}):'')+'</div>');
 }
 function stepPay(){
   const chq=S.pay.mode==='Cheque'||S.pay.mode==='Demand Draft';
   return card('','','Application payment','Paid in favour of '+esc(CONF.company)+'. Cash is not accepted.',
       '<div class="grid">'
-      +chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Cheque','Demand Draft','Card'],{mcols:2})
-      +field('pay.amount','Amount (₹)',{mode:'numeric',req:1,span2:1,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})
-      +'<div class="pair">'+field('pay.date',chq?'Cheque / DD date':'Date paid',{type:'date',req:1})
-      +field('pay.ref',({'Cheque':'Cheque number','Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{req:1,cls:'up'})+'</div>'
-      +(chq?'<div class="pair">'+field('pay.bank','Bank (drawn on)',{req:1})+field('pay.branch','Branch',{optional:1})+'</div>':field('pay.bank','Bank',{optional:1,span2:1}))+'</div>')
+      +chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Cheque','Demand Draft','Card'],{mcols:2,s:6})
+      +field('pay.amount','Amount (₹)',{mode:'numeric',req:1,s:2,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})
+      +'<div class="pair">'+field('pay.date',chq?'Cheque / DD date':'Date paid',{type:'date',req:1,s:2})
+      +field('pay.ref',({'Cheque':'Cheque number','Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{req:1,cls:'up',s:2})+'</div>'
+      +(chq?'<div class="pair">'+field('pay.bank','Bank (drawn on)',{req:1})+field('pay.branch','Branch',{optional:1})+'</div>':field('pay.bank','Bank',{optional:1,s:3}))+'</div>')
     +card('','','Booking details','',
       '<div class="grid">'
-      +chips('purpose','Purpose of booking',['Residential','Investment'])
-      +chips('sales','Booked through',['Direct','Booking agent / Channel partner'])
+      +chips('purpose','Purpose of booking',['Residential','Investment'],{s:3})
+      +chips('sales','Booked through',['Direct','Booking agent / Channel partner'],{s:3})
       +field('sales_name',S.sales==='Direct'?'Name of our sales person':'Name of agent / channel partner',{optional:S.sales==='Direct',req:S.sales!=='Direct'})
       +field('lead_id','Lead ID',{optional:1,ph:'If our team gave you one'})+'</div>');
 }
