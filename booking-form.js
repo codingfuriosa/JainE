@@ -27,6 +27,7 @@ const CONF={ananta:{name:'Dream Ananta',company:'Dream Gateway Hotels Ltd.',bloc
 const DRAFT_KEY='jg-booking-form-'+PROJECT+'-v2';
 const MAX_APPS=6, MAX_REASONS=5;
 const STEPS=[['Applicant details'],['Contact & address'],['Occupation & source'],['Unit details'],['Booking amount'],['KYC documents'],['Terms & signature'],['Review & submit']];
+const STEP_HELP=['Who is booking. Add everyone whose name goes on the flat.','How we reach you, and where letters should go.','A little about you. Most of this is optional.','Which flat you want, and the price agreed with our sales team.','Details of the application money you have paid.','A photo or PDF of each applicant\'s PAN and Aadhaar card.','Read the terms, then sign on screen.','Check everything, then submit.'];
 
 // [name, ISO code for the flag, dialling code]
 const COUNTRIES=[['India','in','+91'],['United Arab Emirates','ae','+971'],['United States','us','+1'],['United Kingdom','gb','+44'],
@@ -70,8 +71,8 @@ const fid=function(path){ return 'f-'+path.replace(/\./g,'-'); };
 // ---------------------------------------------------------------- building blocks
 // A section: a plain title (and a short line under it), then its fields. The first two arguments
 // (an icon and a colour) are no longer used.
-function card(icon,color,title,hint,body){
-  return '<div class="sec"><div class="sh"><h2>'+title+'</h2>'+(hint?'<p>'+hint+'</p>':'')+'</div><div class="sb">'+body+'</div></div>';
+function card(icon,color,title,hint,body,cls){
+  return '<div class="sec'+(cls?' '+cls:'')+'"><div class="sh"><h2>'+title+'</h2>'+(hint?'<p>'+hint+'</p>':'')+'</div><div class="sb">'+body+'</div></div>';
 }
 // Line icons (no emoji), drawn in the text colour.
 const ICON={
@@ -89,7 +90,7 @@ function field(path,label,o){
   const ctl=o.type==='area'?'<textarea data-k="'+path+'"'+ph+'>'+esc(v)+'</textarea>'
     :'<input type="'+(o.type||'text')+'" data-k="'+path+'" value="'+esc(v)+'"'+ph+(o.cls?' class="'+o.cls+'"':'')
       +(o.mode?' inputmode="'+o.mode+'"':'')+(o.max?' maxlength="'+o.max+'"':'')+' autocomplete="'+(o.auto||'off')+'"'+(o.req&&o.type==='date'?' required':'')+'>';
-  return wrapF(path,label,o,(o.before||'')+ctl+(o.after||''));
+  return wrapF(path,label,o,(o.before||'')+ctl+(o.hint?'<div class="hint">'+esc(o.hint)+'</div>':'')+(o.after||''));
 }
 /* Choice pills: small and as wide as their words, wrapping onto a second line when a row is full
    (the user preferred this to equal-width buttons squeezed into one row, 2 Nov 2026). */
@@ -142,15 +143,15 @@ function stepApplicants(){
           +(i?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
         +'<div class="grp">Personal details</div><div class="stack">'
         +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,mcols:5})
-        +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,span2:1,cls:'up',auto:i?'off':'name'})
+        +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,span2:1,cls:'up',auto:i?'off':'name',hint:'Exactly as written on your PAN card'})
         +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1,mcols:4})
         +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,span2:i>0,cls:'up'})
         +(i===0?field(p+'dob','Date of birth',{type:'date',req:1,full:1}):'')
         +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1})
         +'</div><div class="grp">Identity documents</div><div class="stack">'
         +pick(p+'nationality','Nationality / Country','country',F)
-        +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1})
-        +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1})
+        +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1,hint:'10 characters: 5 letters, 4 digits, 1 letter'})
+        +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1,hint:'12 digits - the spaces are added for you'})
         +field(p+'passport','Passport number',{cls:'up',req:foreign,note:foreign?'':'(only for NRIs & foreigners)',full:1})
         +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,note:foreign?'':'(only for NRIs & foreigners)'})
         +'</div>'
@@ -158,7 +159,7 @@ function stepApplicants(){
           +field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></details>':'')
         +'</div>';
     }).join('')
-    +(S.applicants.length<MAX_APPS?'<button type="button" class="btn add" data-add="1">+ Add another applicant</button>':''));
+    +(S.applicants.length<MAX_APPS?'<button type="button" class="btn add" data-add="1">+ Add another applicant</button>':''),'wide');
 }
 function addrBody(k){
   return '<div class="grid">'
@@ -172,7 +173,7 @@ function stepContact(){
       '<div class="grid">'
       +field('contact.mobile','Mobile number',{type:'tel',req:1,full:1,mode:'tel',auto:'tel-national',
         before:'<div class="pre">'+pick('contact.cc','','dial',{bare:1}),after:'</div>'})
-      +field('contact.email','Email',{type:'email',req:1,full:1,auto:'email',mode:'email'})
+      +field('contact.email','Email',{type:'email',req:1,full:1,auto:'email',mode:'email',hint:'Our team will write to this address'})
       +field('contact.contact_person','Name of contact person',{optional:1,full:1,span2:1})+'</div>')
     +card('','','Residential address','',addrBody('res'))
     +card('','','Office address','Optional',
@@ -353,7 +354,7 @@ function stepReview(){
     +h('Payment',4)+rows([['Amount',S.pay.amount?'₹'+Number(S.pay.amount).toLocaleString('en-IN')+' ('+words(S.pay.amount)+')':''],['Paid by',S.pay.mode],['Reference',S.pay.ref],
       ['Bank / branch',[S.pay.bank,S.pay.branch].filter(Boolean).join(', ')],['Date',fmtD(S.pay.date)],['Purpose',S.purpose],['Booked through',S.sales+(S.sales_name?' - '+S.sales_name:'')],['Lead ID',S.lead_id]])
     +h('Signature',6)+rows([['Signed by',SIG?S.applicants[0].full_name:'Not signed yet']])
-    +'<div class="hp" aria-hidden="true"><input tabindex="-1" autocomplete="off" id="hpWeb"></div>');
+    +'<div class="hp" aria-hidden="true"><input tabindex="-1" autocomplete="off" id="hpWeb"></div>','wide');
 }
 
 // ---------------------------------------------------------------- checks per step (the server checks again)
@@ -408,7 +409,7 @@ function check(step){
 // ---------------------------------------------------------------- drawing
 function render(){
   const st=S.step;
-  $('steps').innerHTML='<div class="lbl"><b>'+STEPS[st][0]+'</b><span>Step '+(st+1)+' of '+STEPS.length+'</span></div><div class="bar"><i style="width:'+Math.round((st+1)/STEPS.length*100)+'%"></i></div>';
+  $('steps').innerHTML='<div class="lbl"><b>'+STEPS[st][0]+'</b><span>Step '+(st+1)+' of '+STEPS.length+'</span></div><div class="sd">'+STEP_HELP[st]+'</div><div class="bar"><i style="width:'+Math.round((st+1)/STEPS.length*100)+'%"></i></div>';
   $('missing').innerHTML=MISSING.length?'<div class="miss"><b>Still missing on this page ('+MISSING.length+'):</b><ul>'+MISSING.map(function(m){ return '<li data-jump="'+fid(m[0])+'">'+esc(m[1])+'</li>'; }).join('')+'</ul></div>':'';
   $('app').innerHTML=[stepApplicants,stepContact,stepAbout,stepFlat,stepPay,stepDocs,stepTerms,stepReview][st]();
   $('nav').innerHTML='<div class="in">'+(st?'<button type="button" class="btn sec2" data-back="1">Back</button>':'')

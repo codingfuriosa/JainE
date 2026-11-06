@@ -192,24 +192,45 @@
   .toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;font-size:13.5px;z-index:70;max-width:90%;text-align:center}
   /* on a phone: less frame, more room for the fields */
   @media(max-width:520px){.sec{margin:12px 10px 0}.sb{padding:14px}.sh{padding:14px 14px 12px}.app{padding:12px}.steps{padding:10px 14px}.hd{padding:16px 14px 14px}}
-  /* DESKTOP (6 Nov 2026): on a wide screen the form is one calm column, a little wider than on a phone, with two fields
-     to a row where two belong together (father's name and date of birth, nationality and PAN ...) so it scrolls less.
-     Nothing is added to fill the space: no side panel. Phones are untouched. */
-  @media(min-width:900px){
-    .wrap{max-width:880px}
-    .stack,.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px 16px}
-    .stack>*,.grid>*{grid-column:span 1;min-width:0}
-    .stack>.pair,.grid>.pair,.stack>.f:has(>.chips),.grid>.f:has(>.chips),.stack>.f:has(>textarea),.grid>.f:has(>textarea),
-    .stack>.f:has(>.upl),.grid>.f:has(>.upl),.grid>.f:has(>.sigbox),.grid>.f:has(>.rate),.stack>.f.span2,.grid>.f.span2,.stack>.agree,.grid>.agree{grid-column:1/-1}
-    .stack>.f.half,.grid>.f.half{grid-column:span 1}   /* short choice groups sit two to a row
-       */
-    /* the review reads in two columns, each section kept whole */
-    .sb:has(>.rs){column-count:2;column-gap:36px}
-    .rs{break-inside:avoid}
+  .hint{font-size:12.5px;color:var(--slate);line-height:1.4}
+  .steps .sd{display:none}
+  /* DESKTOP (6 Nov 2026): the width is used by laying a step's cards side by side, so most steps fit on one screen
+     instead of one long column. Larger type and fields so everything is easy to read. Nothing is added just to fill
+     the space. Phones are untouched. */
+  @media(min-width:1000px){
+    body{font-size:16px}
+    .wrap{max-width:1120px}
+    .steps .lbl b{font-size:17px}
+    .steps .sd{display:block;margin:-2px 0 9px;font-size:14px;color:var(--slate)}
+    /* two columns that fill from the top, so a short card never leaves a hole beside a tall one */
+    #app{display:block;column-count:2;column-gap:20px;padding:0 14px;margin-top:16px}
+    #app>.sec{margin:0 0 20px;break-inside:avoid}
+    #app>.sec.wide{column-span:all}
+    #missing .miss{margin:16px 14px 0}
+    .sh{padding:18px 22px 15px}.sh h2{font-size:19px}.sh p{font-size:14px;margin-top:4px}
+    .sb{padding:22px}
+    .f>label{font-size:14px}
+    input[type=text],input[type=tel],input[type=email],input[type=date],textarea{font-size:16px;min-height:50px}
+    .pick{font-size:16px;min-height:50px}
+    .chip{font-size:15px;min-height:44px}
+    .hint{font-size:13px}
+    .rv{font-size:15px}
+    /* the wide cards (applicants, review) put fields two to a row where two belong together */
+    .sec.wide .stack,.sec.wide .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px 20px}
+    .sec.wide .stack>*,.sec.wide .grid>*{grid-column:span 1;min-width:0}
+    .sec.wide .stack>.pair,.sec.wide .stack>.f:has(>.chips),.sec.wide .stack>.f:has(>textarea),.sec.wide .stack>.f:has(>.upl),.sec.wide .stack>.f.span2{grid-column:1/-1}
     /* the applicant is not a card inside a card: separate several with a line */
     .app{border:0;padding:0}
-    .app+.app{margin-top:24px;padding-top:24px;border-top:1px solid var(--line)}
-    .nav .in{max-width:852px}
+    .app+.app{margin-top:26px;padding-top:26px;border-top:1px solid var(--line)}
+    /* two or more applicants stand side by side instead of one under the other */
+    .sec.wide>.sb:has(.app+.app){display:grid;grid-template-columns:1fr 1fr;gap:26px 44px;align-items:start}
+    .sec.wide>.sb:has(.app+.app) .app+.app{margin:0;padding:0 0 0 44px;border:0;border-left:1px solid var(--line)}
+    .sec.wide>.sb:has(.app+.app) .stack{display:flex;flex-direction:column;gap:18px}
+    .sec.wide>.sb:has(.app+.app)>.btn.add{grid-column:1/-1;margin-top:0}
+    /* the review reads in columns, each section kept whole */
+    .sb:has(>.rs){column-count:2;column-gap:44px}
+    .rs{break-inside:avoid}
+    .nav .in{max-width:1092px}
   }
   @media print{.steps,.nav,.btn,.rvh button{display:none!important}.sec{border:1px solid #ddd}}
 </style>
@@ -229,6 +250,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261106c"></script>
+<script src="booking-form.js?v=20261106f"></script>
 </body>
 </html>
