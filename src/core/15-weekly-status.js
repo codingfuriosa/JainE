@@ -25,7 +25,7 @@
    the last OPS meeting is the agenda of the next one. */
 
 const WM={items:null,meetings:null,people:[],err:'',cur:null,view:'meeting',tab:'pending',q:'',who:'',
-  allF:'pending',allG:'meeting',allMtg:'',allWho:'',showPpl:false,showOlder:false,
+  allF:'pending',allG:'meeting',allMtg:'',allWho:'',showPpl:false,wk:null,showPast:false,
   picked:{mem:[],due:null,recur:'none'},parsed:null,sugIdx:0,lastNew:null,lastDraft:null,
   sel:new Set(),draftMem:{},draftRecur:{},timer:null,busy:false};
 
@@ -114,7 +114,8 @@ VIEWS.weekly_status=async function(v){
     return;
   }
   const today=wmToday();
-  WM.cur=((WM.meetings||[]).find(m=>m.meeting_date===today)||(WM.meetings||[])[0]||{}).id||null;
+  WM.cur=((WM.meetings||[]).find(m=>m.meeting_date===today)||(WM.meetings||[]).find(m=>m.meeting_date<=today)||(WM.meetings||[])[0]||{}).id||null;
+  WM.wk=wmMonday(today);
   v.innerHTML=WM_CSS+'<div class="wm" id="wmRoot"></div>';
   wmRender();
 };
@@ -129,30 +130,39 @@ function wmRender(){
     <h1>${hi}.</h1>
     <div class="wm-lead"><button class="wm-lnk ${WM.view==='all'?'on':''}" onclick="wmOpenAll('pending')"><b id="wmPend">${open.length}</b> tasks pending</button></div>
   </div>
-  <div class="wm-grid"><div id="wmMain"></div><aside class="wm-rail"><div class="wm-box" id="wmNav"></div></aside></div>`;
+  <div class="wm-grid"><div id="wmMain"></div><aside class="wm-rail"><div class="wm-railbtns"><button class="wm-btn wm-sm wm-light" onclick="wmStartMeeting()"><i class="fa-solid fa-play"></i> Start a meeting</button><button class="wm-btn wm-sm wm-line" onclick="wmScheduleMeeting()"><i class="fa-regular fa-calendar-plus"></i> Schedule a meeting</button></div><div class="wm-box" id="wmNav"></div></aside></div>`;
   wmPaintNav();
   if(WM.view==='all') wmPaintAll(); else wmPaintMeeting();
 }
 function wmCounts(){ const n=WM.items.filter(it=>!it.draft&&wmOpen(it)).length; const e=$('wmPend'); if(e) e.textContent=n; }
 
-/* ---------- right rail: every meeting, newest first, by month ---------- */
+/* ---------- right rail: the week, Monday to Saturday ---------- */
+function wmMonday(iso){ const d=new Date(iso+'T00:00'); d.setDate(d.getDate()-((d.getDay()+6)%7)); return wmIso(d); }
+const WM_DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const wmTime=t=>t?String(t).slice(0,5):'';
+// The arrows step to the next week that has a meeting in it: meetings are every two or three
+// weeks, and walking through the empty weeks between them one click at a time would be tedious.
+function wmWeeks(){ const s=new Set((WM.meetings||[]).map(m=>wmMonday(m.meeting_date))); s.add(wmMonday(wmToday())); return [...s].sort(); }
+window.wmWeekStep=function(dir){
+  const ws=wmWeeks(), i=ws.indexOf(WM.wk), j=i<0?ws.findIndex(w=>w>WM.wk)-(dir<0?1:0):i+dir;
+  if(j>=0&&j<ws.length){ WM.wk=ws[j]; WM.showPast=false; wmPaintNav(); }
+};
 function wmPaintNav(){
   const nav=$('wmNav'); if(!nav) return;
-  const ms=WM.meetings||[], today=wmToday();
-  const months=[...new Set(ms.map(m=>String(m.meeting_date).slice(0,7)))];
-  const shown=WM.showOlder?months:months.slice(0,3);
-  const openOf=id=>WM.items.filter(it=>it.meeting===id&&!it.draft&&wmOpen(it)).length;
-  nav.innerHTML=`<div class="wm-navh"><span>Meetings</span><button class="wm-btn wm-sm wm-light" onclick="wmStartMeeting()"><i class="fa-solid fa-plus"></i> Start a meeting</button></div>`+
-    (ms.length?shown.map(mo=>`<div class="wm-dl">${esc(new Date(mo+'-01T00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'}))}</div>`+
-      ms.filter(m=>String(m.meeting_date).slice(0,7)===mo).map(m=>`<div class="wm-mi ${WM.view==='meeting'&&WM.cur===m.id?'on':''} ${m.meeting_date>today?'up':''}" onclick="wmOpenMeeting(${m.id})">
-        <span class="t">${m.meeting_date===today?'Today':esc(wmFmtS(m.meeting_date))}</span><span class="n">${esc(m.kind||'Meeting')}</span>
-        ${m.meeting_date===today?'<span class="live"></span>':openOf(m.id)?`<span class="c">${openOf(m.id)}</span>`:''}</div>`).join('')).join('')
-      +(months.length>3?`<button class="wm-quiet" style="margin-top:12px" onclick="WM.showOlder=!WM.showOlder;wmPaintNav()"><i class="fa-solid fa-chevron-${WM.showOlder?'up':'down'}"></i> ${WM.showOlder?'Show fewer':'Older meetings'}</button>`:'')
-    :'<div class="wm-mute" style="font-size:13px">No meetings yet.</div>');
+  const today=wmToday(), mon=WM.wk||wmMonday(today), thisWeek=mon===wmMonday(today), ws=wmWeeks(), i=ws.indexOf(mon);
+  const sat=wmAdd(mon,5), fmtD=s=>new Date(s+'T00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+  nav.innerHTML=`<div class="wm-wk"><button onclick="wmWeekStep(-1)" ${i<=0?'disabled':''} title="Earlier meetings"><i class="fa-solid fa-chevron-left"></i></button>
+      <span>${thisWeek?'This week':esc(fmtD(mon)+' – '+fmtD(sat))}</span>
+      <button onclick="wmWeekStep(1)" ${i<0||i>=ws.length-1?'disabled':''} title="Later meetings"><i class="fa-solid fa-chevron-right"></i></button></div>
+    ${thisWeek?`<button class="wm-quiet" style="margin:0 0 6px" onclick="WM.showPast=!WM.showPast;wmPaintNav()"><i class="fa-solid fa-chevron-${WM.showPast?'down':'up'}"></i> ${WM.showPast?'Hide earlier days':'Earlier this week'}</button>`:''}
+    ${WM_DAYS.map((d,k)=>{ const date=wmAdd(mon,k), ms=(WM.meetings||[]).filter(m=>m.meeting_date===date).sort((a,b)=>String(a.start_time||'')<String(b.start_time||'')?-1:1);
+      if(thisWeek&&!WM.showPast&&date<today&&!ms.some(m=>m.id===WM.cur&&WM.view==='meeting')) return '';
+      return `<div class="wm-dl ${date===today?'today':''}">${date===today?'Today':d.slice(0,3)+' '+new Date(date+'T00:00').getDate()}</div>`+
+        ms.map(m=>`<div class="wm-mi ${WM.view==='meeting'&&WM.cur===m.id?'on':''} ${date>today?'up':''}" onclick="wmOpenMeeting(${m.id})"><span class="t">${esc(wmTime(m.start_time))}</span><span class="n">${esc(m.kind||'Meeting')}</span>${date===today?'<span class="live"></span>':''}</div>`).join(''); }).join('')}`;
 }
 
 /* ---------- a meeting ---------- */
-window.wmOpenMeeting=function(id){ WM.view='meeting'; WM.cur=id; WM.tab='pending'; WM.q=''; WM.who=''; WM.showPpl=false; WM.picked={mem:[],due:null,recur:'none'}; wmRender(); window.scrollTo({top:0,behavior:'smooth'}); };
+window.wmOpenMeeting=function(id){ const m=wmMeeting(id); WM.view='meeting'; WM.cur=id; if(m) WM.wk=wmMonday(m.meeting_date); WM.tab='pending'; WM.q=''; WM.who=''; WM.showPpl=false; WM.picked={mem:[],due:null,recur:'none'}; wmRender(); window.scrollTo({top:0,behavior:'smooth'}); };
 function wmPaintMeeting(){
   clearInterval(WM.timer);
   const main=$('wmMain'); if(!main) return;
@@ -164,14 +174,13 @@ function wmPaintMeeting(){
   main.innerHTML=`<div class="wm-card wm-in"><div class="wm-card-top">
     <div class="wm-mh">
       <div>
-        <div class="wm-eyebrow">${isToday?`<span class="wm-live">Today</span>${started?`<span class="wm-tm" id="wmTimer"></span>`:''}`:m.meeting_date>today?'Coming up · '+esc(wmFmt(m.meeting_date)):'Held on '+esc(wmFmt(m.meeting_date))}</div>
+        <div class="wm-eyebrow">${isToday?`<span class="wm-live">Today${m.start_time?' · '+esc(wmTime(m.start_time)):''}</span>${started?`<span class="wm-tm" id="wmTimer"></span>`:''}`:m.meeting_date>today?'Coming up · '+esc(wmFmt(m.meeting_date))+(m.start_time?', '+esc(wmTime(m.start_time)):''):'Held on '+esc(wmFmt(m.meeting_date))}</div>
         <h2>${esc(m.kind||'Meeting')}<span class="wm-info"><i class="fa-solid fa-circle-info"></i><span class="tip">${series.length} meeting${series.length===1?'':'s'} of this kind since ${esc(wmFmtS(first))}${m.note?'<br>'+esc(m.note):''}</span></span></h2>
       </div>
       ${isToday?`<button class="wm-btn wm-red" onclick="wmEndMeeting()">End meeting</button>`:''}
     </div>
     <div class="wm-mh2">
-      <button class="wm-quiet" onclick="WM.showPpl=!WM.showPpl;wmPaintMeeting()">${att.length?att.length+' present':'No attendance yet'} <i class="fa-solid fa-chevron-${WM.showPpl?'up':'down'}"></i></button>
-      ${WM.showPpl?`<div class="wm-ppl">${att.map(n=>avatar(n)).join('')}<button class="wm-quiet" onclick="wmEditAttendance()"><i class="fa-solid fa-pen"></i> ${att.length?'Edit':'Who was there?'}</button></div>`:''}
+      <div class="wm-dd" id="wmPpl">${wmPplHtml(att)}</div>
       ${series.length>1?`<select class="wm-hsel" onchange="wmOpenMeeting(Number(this.value))" title="Earlier meetings">${series.map(x=>`<option value="${x.id}" ${x.id===m.id?'selected':''}>${x.id===m.id?'Earlier meetings':(x.meeting_date===today?'Today':esc(wmFmt(x.meeting_date)))}</option>`).join('')}</select>`:''}
     </div>
     </div><div class="wm-card-body">
@@ -190,27 +199,52 @@ function wmPaintMeeting(){
   }
 }
 
-/* Start a meeting: which kind, which day. The kinds are the ones already in use, or a new one. */
-window.wmStartMeeting=function(){
-  const kinds=[...new Set((WM.meetings||[]).map(m=>m.kind).filter(Boolean))];
-  openModal(`<div class="modal-head"><h3>Start a meeting</h3><span class="x" onclick="closeModal()">&times;</span></div>
+/* Who was there, as a dropdown of JainE's people chips. It redraws only itself, so a task half typed
+   in the line below is never lost by opening or closing it. */
+function wmPplHtml(att){
+  return `<button class="wm-quiet" onclick="wmTogglePpl()">${att.length?att.length+' present':'No attendance yet'} <i class="fa-solid fa-chevron-${WM.showPpl?'up':'down'}"></i></button>`+
+    (WM.showPpl?`<div class="wm-dd-panel">${att.map(n=>{ const p=WM.people.find(x=>x.name.toLowerCase()===String(n).toLowerCase());
+        return `<span class="people-chip">${avatar(n)} <span>${esc(n)}</span>${p&&p.dept?`<em>${esc(p.dept)}</em>`:''}</span>`; }).join('')||'<div class="wm-mute" style="font-size:13px;padding:4px 2px">Nobody marked yet.</div>'}
+      <button class="wm-quiet wm-dd-edit" onclick="wmEditAttendance()"><i class="fa-solid fa-pen"></i> ${att.length?'Edit attendance':'Who was there?'}</button></div>`:'');
+}
+window.wmTogglePpl=function(open){
+  WM.showPpl=open===undefined?!WM.showPpl:open;
+  const host=$('wmPpl'), m=wmMeeting(WM.cur); if(host&&m) host.innerHTML=wmPplHtml(m.attendees||[]);
+};
+document.addEventListener('click',function(e){ if(WM.showPpl&&!e.target.closest('#wmPpl')&&!e.target.closest('#modalHost')) wmTogglePpl(false); });
+
+/* Start a meeting now, or schedule one for later. Same form and the same write: Start is today at
+   the current time and begins the clock; Schedule asks for the day and the time. The kinds offered
+   are the ones already in use, or a new one. */
+function wmNowTime(){ try{ return new Date().toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } }
+window.wmMeetingForm=function(mode){
+  const later=mode==='schedule', kinds=[...new Set((WM.meetings||[]).map(m=>m.kind).filter(Boolean))];
+  openModal(`<div class="modal-head"><h3>${later?'Schedule a meeting':'Start a meeting'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>Which meeting</label><select id="wmKind" onchange="$('wmKindNew').style.display=this.value==='__new'?'':'none'">${kinds.map(k=>`<option>${esc(k)}</option>`).join('')}<option value="__new">A new kind of meeting…</option></select>
     <input id="wmKindNew" placeholder="e.g. Sales Review" style="display:${kinds.length?'none':''};margin-top:8px">
-    <label>Date</label><input type="date" id="wmDate" value="${wmToday()}">
+    ${later?`<div class="two"><div><label>Date</label><input type="date" id="wmDate" min="${wmToday()}" value="${wmAdd(wmToday(),1)}"></div>
+      <div><label>Time</label><input type="time" id="wmTime" value="10:30"></div></div>`:''}
   </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="wmStartBtn" onclick="wmStartSave()"><i class="fa-solid fa-play"></i> Start</button></div>`);
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="wmStartBtn" onclick="wmMeetingSave('${later?'schedule':'start'}')"><i class="fa-solid fa-${later?'calendar-plus':'play'}"></i> ${later?'Schedule':'Start'}</button></div>`);
   if(!kinds.length) $('wmKind').value='__new';
 };
-window.wmStartSave=async function(){
-  const sel=$('wmKind').value, kind=sel==='__new'?($('wmKindNew').value||'').trim():sel, date=$('wmDate').value||wmToday();
+window.wmStartMeeting=function(){ wmMeetingForm('start'); };
+window.wmScheduleMeeting=function(){ wmMeetingForm('schedule'); };
+window.wmMeetingSave=async function(mode){
+  const later=mode==='schedule', sel=$('wmKind').value, kind=sel==='__new'?($('wmKindNew').value||'').trim():sel;
+  const date=later?($('wmDate').value||''):wmToday(), time=later?($('wmTime').value||null):(wmNowTime()||null);
   if(!kind){ toast('Choose which meeting this is','err'); return; }
+  if(!date){ toast('Choose a date','err'); return; }
+  if(later&&date<wmToday()){ toast('Choose today or a later day','err'); return; }
   const b=$('wmStartBtn'); b.disabled=true;
   try{
-    const {data,error}=await sb.rpc('ops_meeting_create',{p_kind:kind,p_date:date}); if(error) throw error;
-    if(date===wmToday()){ try{ localStorage.setItem('wm_start_'+data,String(Date.now())); }catch(e){} }
-    await wmReloadMeetings(); closeModal(); toast('Meeting started','ok'); wmOpenMeeting(Number(data));
-  }catch(e){ b.disabled=false; toast('Could not start the meeting: '+((e&&e.message)||e),'err'); }
+    const {data,error}=await sb.rpc('ops_meeting_create',{p_kind:kind,p_date:date,p_time:time}); if(error) throw error;
+    if(!later){ try{ localStorage.setItem('wm_start_'+data,String(Date.now())); }catch(e){} }
+    await wmReloadMeetings(); closeModal();
+    toast(later?'Scheduled for '+wmFmt(date)+(time?', '+wmTime(time):''):'Meeting started','ok');
+    wmOpenMeeting(Number(data));
+  }catch(e){ b.disabled=false; toast('Could not '+(later?'schedule':'start')+' the meeting: '+((e&&e.message)||e),'err'); }
 };
 
 /* Attendance, by name - the way the imported meetings record it. */
@@ -606,13 +640,16 @@ window.wmEndMeeting=function(force){
 };
 
 const WM_CSS='<style id="wmCss">'
-  /* The page is dark; the rest of JainE is not, so the shell is only darkened while it is open. */
-  +'body.wm-dark .main,body.wm-dark .view{background:#0b0c10}'
-  +'body.wm-dark .view{background:radial-gradient(900px 420px at 80% -12%,rgba(224,18,28,.16),transparent 60%),#0b0c10;color-scheme:dark}'
-  +'body.wm-dark .topbar{background:rgba(11,12,16,.88);border-bottom-color:rgba(255,255,255,.06)}'
-  +'body.wm-dark .crumb,body.wm-dark .crumb .cur{color:#e5e7eb}'
-  +'body.wm-dark .search-box input{background:#15171e;border-color:rgba(255,255,255,.08);color:#fff}'
-  +'body.wm-dark .ic-btn{background:#15171e;border-color:rgba(255,255,255,.08);color:#c3c8d2}'
+  /* The page background is white with a soft red glow from the top right and bottom left; the
+     meeting card, the week panel and the task list stay dark on top of it. */
+  +'body.wm-dark .main,body.wm-dark .view{background:#fff}'
+  +'body.wm-dark .view{background:radial-gradient(1000px 560px at 88% -10%,rgba(224,18,28,.10),transparent 62%),'
+    +'radial-gradient(820px 520px at -6% 108%,rgba(224,18,28,.07),transparent 60%),#fff;background-attachment:fixed}'
+  /* What sits straight on the white page (the greeting, the two meeting buttons) is dark text. */
+  +'.wm .wm-top,.wm>.wm-empty{--ink:#0b0c10;--ink2:#374151;--mute:#6b7280;--mute2:#9ca3af}'
+  +'.wm-railbtns .wm-light{background:#0b0c10;color:#fff}.wm-railbtns .wm-light:hover{background:#262a33}'
+  +'.wm-railbtns .wm-line{color:#0b0c10;background:#fff;box-shadow:inset 0 0 0 1px #d1d5db}.wm-railbtns .wm-line:hover{box-shadow:inset 0 0 0 1px #0b0c10}'
+  +'.wm-card,.wm-box{box-shadow:0 18px 44px rgba(11,12,16,.16)}'
   +'.wm{--ink:#f3f4f7;--ink2:#c3c8d2;--mute:#8a909c;--mute2:#5c6270;--hair:rgba(255,255,255,.09);--hair2:rgba(255,255,255,.055);--red:#e0121c;--green:#16a34a;color:var(--ink);padding:12px 18px 60px}'
   +'@keyframes wmIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}'
   +'@keyframes wmFlash{0%{background:rgba(224,18,28,.16)}100%{background:transparent}}'
@@ -630,11 +667,16 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-grid{max-width:1320px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start}'
   +'.wm-rail{position:sticky;top:84px}'
   +'.wm-box{background:#121419;border:1px solid var(--hair2);border-radius:20px;padding:20px 20px 16px}'
-  +'.wm-navh{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);font-weight:600}'
+  +'.wm-railbtns{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}.wm-railbtns .wm-btn{flex:1;justify-content:center}'
+  +'.wm-wk{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}'
+  +'.wm-wk span{font-size:13px;font-weight:600;color:var(--ink)}'
+  +'.wm-wk button{width:28px;height:28px;border:0;border-radius:50%;background:none;color:var(--mute);cursor:pointer}'
+  +'.wm-wk button:hover:not(:disabled){background:var(--hair2);color:var(--ink)}.wm-wk button:disabled{opacity:.3;cursor:default}'
+  +'.wm-dl.today{color:var(--red)}'
   +'.wm-dl{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute2);font-weight:600;margin:16px 0 6px}'
   +'.wm-mi{display:flex;align-items:baseline;gap:12px;padding:6px 0 6px 12px;margin-left:-12px;border-left:2px solid transparent;cursor:pointer;color:var(--ink2);font-size:13.5px}'
   +'.wm-mi:hover{color:var(--ink)}.wm-mi.up{color:var(--mute)}'
-  +'.wm-mi .t{font-size:12px;color:var(--mute2);width:48px;flex:none}'
+  +'.wm-mi .t{font-size:12px;color:var(--mute2);width:38px;flex:none;font-variant-numeric:tabular-nums}'
   +'.wm-mi .n{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
   +'.wm-mi .c{font-size:11px;color:var(--mute)}'
   +'.wm-mi.on{border-left-color:var(--red);color:var(--ink);font-weight:600}'
@@ -660,7 +702,12 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-info .tip{display:none;position:absolute;left:50%;top:calc(100% + 10px);transform:translateX(-50%);background:#1d2029;color:var(--ink2);font-size:13px;font-weight:400;letter-spacing:0;line-height:1.6;white-space:nowrap;padding:10px 14px;border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.5);z-index:10}'
   +'.wm-info:hover .tip{display:block}'
   +'.wm-mh2{display:flex;align-items:center;gap:22px;margin-top:22px;flex-wrap:wrap;font-size:13px;color:var(--mute)}'
-  +'.wm-ppl{display:flex;align-items:center;gap:6px;flex-wrap:wrap}'
+  /* Who was there: JainE's own people chips (initials + full name), in a dropdown under the count. */
+  +'.wm-dd{position:relative}'
+  +'.wm-dd-panel{position:absolute;left:0;top:calc(100% + 10px);z-index:20;min-width:280px;max-height:340px;overflow-y:auto;background:#1b1e26;border:1px solid var(--hair);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:6px;box-shadow:0 20px 50px rgba(0,0,0,.5);animation:wmIn .18s both}'
+  +'.wm-dd-panel .people-chip{border-color:rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--ink);font-size:13px}'
+  +'.wm-dd-panel .people-chip em{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--mute);padding-left:12px}'
+  +'.wm-dd-edit{margin:6px 2px 2px}'
   +'.wm-hsel{border:0;background:none;color:var(--mute);font:inherit;font-size:13px;cursor:pointer;outline:none;padding:0}'
   +'.wm-hsel:hover{color:var(--ink)}.wm-hsel option{background:#171a21;color:#f3f4f7}'
   +'.wm-cap{margin-top:30px;position:relative}'
