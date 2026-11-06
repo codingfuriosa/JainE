@@ -224,11 +224,6 @@
     /* the applicant is not a card inside a card: separate several with a line */
     .app{border:0;padding:0}
     .app+.app{margin-top:26px;padding-top:26px;border-top:1px solid var(--line)}
-    /* two or more applicants stand side by side instead of one under the other */
-    .sec.wide>.sb:has(.app+.app){display:grid;grid-template-columns:1fr 1fr;gap:26px 44px;align-items:start}
-    .sec.wide>.sb:has(.app+.app) .app+.app{margin:0;padding:0 0 0 44px;border:0;border-left:1px solid var(--line)}
-    .sec.wide>.sb:has(.app+.app) .stack{display:flex;flex-direction:column;gap:18px}
-    .sec.wide>.sb:has(.app+.app)>.btn.add{grid-column:1/-1;margin-top:0}
     /* the review reads in columns, each section kept whole */
     .sb:has(>.rs){column-count:2;column-gap:44px}
     .rs{break-inside:avoid}
