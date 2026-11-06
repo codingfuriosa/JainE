@@ -433,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'99a1f0e23b','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'277cb02925','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -1135,9 +1135,10 @@ const NAV=[
        and 'competitors' keep their ids (were Campaign Analytics and Competitor Ads) so the access
        people already hold in adm.users.modules carries over; only the labels changed. Digital
        Metrics no longer has a page: its tabs live in Our Brand and Competitor Data. */
-    {id:'campaigns',label:'Our Brand',icon:'fa-bullhorn'},
+    {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},   // named Our Brand 16 Oct - 6 Nov 2026
     {id:'competitors',label:'Competitor Data',icon:'fa-magnifying-glass-chart'},
     {id:'channel_partners',label:'Channel Partners',icon:'fa-people-arrows'},
+    {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},   // back 6 Nov 2026 - 43-posts-and-reels.js
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
     {id:'scaling',label:'Scaling Up',icon:'fa-arrow-trend-up'},
     {id:'playbook',label:'Playbook',icon:'fa-book-open'},
@@ -11096,6 +11097,22 @@ async function sbRenderCauselistBoard(host){
     +'</tbody></table></div>';
 }
 
+
+/* The page itself (restored 6 Nov 2026). It lived at the end of 15-weekly-status.js until the Weekly
+   Status rewrite of 5 Nov (b597c594) replaced that file and took it along, which left Overview > Scoreboard
+   on the generic "Module not found" placeholder. It sits here now, with the code it draws. */
+VIEWS.scoreboard=async function(v){
+  setCrumb(['Scoreboard']);
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-ranking-star" style="color:#b8902f"></i> Scoreboard</h1><p>Who is delivering assigned work, and on time</p></div></div>'
+    +'<div class="card" style="padding:0">'
+      +'<div style="display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:center;flex-wrap:wrap">'
+        +'<button class="btn'+(SB_VIEW==='all'?' btn-primary':'')+'" onclick="sbSetView(\'all\')">All Tasks</button>'
+      +'</div><div id="sbBody"><div class="loader"><div class="spin"></div></div></div></div>';
+  // The Causelist board went with Causelist Reviews (29 Oct 2026); MIS actions score in Legal > Scoreboard.
+  await sbRenderAllTasks($('sbBody'));
+};
+// Kept so /tasks/scoreboard links and bookmarks from when it was a tab still land somewhere real.
+function taskScoreboard(){ navTo('scoreboard'); }
 /* ============================== WEEKLY STATUS ==============================
    The meetings page: run the meeting, write down what was decided, give each decision to a person,
    and see - across every meeting ever held - what is still open.
@@ -12885,6 +12902,32 @@ const SF_CSS=`<style id="sfCss">
 .sf-rblk .sf-title{font-size:15px}
 .sf-rblk .info{background:#fafbfc;border:1px solid #eef1f4;border-radius:8px;padding:10px 12px;margin:0 0 14px}
 .sf-rblk .sf-form .row:last-child{margin-bottom:0}
+/* THE RATING PAGE (6 Nov 2026, Ayush: on first sight it was a wall of text and what to DO did not stand
+   out). Every feedback is its own card. Left: what it is, quietly. Right: the action - a tinted
+   panel with big stars, amber until rated, green once rated. The remark box sits under the stars. The Submit bar stays in view and counts. */
+.sf-lns{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.sf-ln{background:#fff;border:1px solid var(--line);border-radius:12px;transition:border-color .15s}
+.sf-ln.done{border-color:#86efac}
+.sf-ln-row{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:24px;padding:14px 16px 14px 20px;align-items:center}
+.sf-ln-row .meta{font-size:11px;font-weight:600;letter-spacing:.3px;color:#94a3b8;text-transform:uppercase;margin-bottom:3px}
+.sf-ln-row .meta .new{color:#3b5bdb}.sf-ln-row .meta .bug{color:#2f9e44}
+.sf-ln-row .ttl{font-size:15px;font-weight:700;color:var(--ink);line-height:1.35}
+.sf-ln-row .dsc{font-size:13px;color:#64748b;line-height:1.5;margin-top:4px;white-space:pre-wrap}
+.sf-ln-row .give{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px 14px 11px;display:flex;flex-direction:column;gap:14px}
+.sf-ln.done .give{background:#f0fdf4;border-color:#bbf7d0}
+.sf-ln-row .stars{display:flex;align-items:center;gap:10px}
+.sf-ln-row .sf-rate{gap:1px;flex-wrap:nowrap}
+.sf-ln-row .sf-rate button{font-size:21px;padding:1px;color:#e7d9b0}
+.sf-ln.done .sf-rate button:not(.on){color:#d1e7d6}
+.sf-ln-row .sf-rate button.on{color:#f59e0b}
+.sf-ln-row .sf-rate-val{font-size:12px;color:var(--slate);margin:0;min-height:0;white-space:nowrap}
+.sf-ln-row .sf-rate-val b{color:var(--ink);font-size:13px}
+.sf-ln-row .rm{display:block;width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;line-height:1.45;background:#fff;min-height:64px;resize:vertical}
+.sf-submitbar{position:sticky;bottom:0;z-index:5;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;padding:10px 14px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 -6px 18px rgba(15,23,42,.06)}
+.sf-submitbar .prog{font-size:13px;color:var(--slate)}.sf-submitbar .prog b{color:var(--ink)}
+.sf-submitbar .note{font-size:12px;color:var(--slate);margin-right:auto;margin-left:10px}
+.sf-ln-row .rm:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(29,78,216,.12)}
+@media(max-width:860px){.sf-ln-row{grid-template-columns:1fr;gap:12px;padding:14px 16px}}
 .sf-left{font-size:12px;color:var(--slate);text-align:center;margin-top:6px}
 /* item page */
 .sf-sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
@@ -13263,8 +13306,7 @@ async function sfGive(){
   const my={}; mine.forEach(function(r){ my[r.item_id]=r; });
   SF_DATA={items:items,my:my};
   const nTodo=items.filter(function(i){ return i.is_active&&!my[i.id]; }).length, nDone=items.filter(function(i){ return my[i.id]; }).length;
-  b.innerHTML='<div class="sf-bar"><div><h2>Give Feedback</h2><p>New features and bug fixes from the Systems team, module by module. Rate each one from 1 to 10. Only the Systems team sees what you write.</p></div></div>'
-    +'<div class="sf-tools">'
+  b.innerHTML='<div class="sf-tools">'   // no heading block: the tab already says Give Feedback (6 Nov 2026)
     +'<div class="sf-filter"><button class="'+(SF_VIEW==='open'?'on':'')+'" onclick="sfSetView(\'open\',sfGiveList)">To give <span class="n">'+nTodo+'</span></button>'
     +'<button class="'+(SF_VIEW==='archive'?'on':'')+'" onclick="sfSetView(\'archive\',sfGiveList)"><i class="fa-solid fa-box-archive"></i> Archive <span class="n">'+nDone+'</span></button></div>'
     +sfSearchBox('sfGiveQ')+'</div>'
@@ -13289,7 +13331,7 @@ function sfGiveList(){
   host.innerHTML=mods.map(function(x){ const m=x.m;
     const head='<div class="sf-mcard-hd">'+sfModTitle(m)+sfKindCounts(m.items)
       +(arch?'<span class="sf-mcard-rt">'+m.items.length+' given</span>'
-            :'<button class="btn btn-primary" onclick="navTo(\'feedback_hub/give/m'+m.id+'\')"><i class="fa-solid fa-star"></i> Give Feedback</button>')+'</div>';
+            :'<span class="sf-mcard-rt">'+m.items.length+' waiting for you</span><button class="btn btn-primary" style="margin-left:0" onclick="navTo(\'feedback_hub/give/m'+m.id+'\')"><i class="fa-solid fa-star"></i> Give Feedback</button>')+'</div>';
     // the Archive lists what was given, with the rating; elsewhere only search results are listed
     const list=arch?m.items:x.hits;
     const rows=list.length?'<div class="sf-mrows">'+(arch?'':'<div class="sf-hits-lbl">Matching feedbacks</div>')
@@ -13344,9 +13386,10 @@ async function sfRatePage(v,arg){
   const byId={}; todo.forEach(function(x){ byId[x.id]=x; });
   SF_RATE={byId:byId, blocks:todo.map(function(x){ return x.id; }), r:{}};
   v.innerHTML=FH_CSS+SF_CSS+'<div class="sf-page">'+head(id,sfModName(id))
-    +'<div style="font-size:12.5px;color:var(--slate);margin:10px 0 0">'+todo.length+' feedback'+(todo.length===1?'':'s')+' waiting. Rate the ones you want - only those are recorded; the rest stay here for later.</div>'
-    +'<div style="margin-top:12px" id="sfBlocks"></div>'
-    +'<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px"><span style="font-size:12px;color:var(--slate);margin-right:auto">Once submitted, a feedback cannot be changed.</span>'
+    /* (6 Nov 2026, Ayush) No instructions strip: each feedback has its own "Rate this" panel, and the bar
+       at the bottom stays on screen counting how many are rated, so the way to finish is always in sight. */
+    +'<div class="sf-lns" id="sfBlocks"></div>'
+    +'<div class="sf-submitbar"><span id="sfRateProg" class="prog"></span><span class="note">Once submitted, a rating cannot be changed.</span>'
     +'<button class="btn" onclick="'+back+'">Cancel</button><button class="btn btn-primary" id="sfRateBtn" onclick="sfRateSave()" disabled>Submit feedback</button></div></div>';
   sfRateRender();
 }
@@ -13354,14 +13397,16 @@ function sfRateSync(){ if(!SF_RATE) return; SF_RATE.blocks.forEach(function(id){
 function sfRateRender(){
   const box=$('sfBlocks'); if(!box) return;
   box.innerHTML=SF_RATE.blocks.map(function(id,n){ const i=SF_RATE.byId[id], st=SF_RATE.r[id]||{};
-    return '<div class="sf-rblk sf-form" id="sfB-'+id+'">'
-      +'<div class="sf-rblk-hd"><span class="n">'+(n+1)+'</span><div style="flex:1;min-width:0"><div class="sf-top" style="margin-bottom:3px">'+sfKindTag(i.kind)+'<span class="sf-date">'+esc(sfDate(i.created_at))+'</span></div><div class="sf-title">'+esc(i.title)+'</div></div></div>'
-      +'<div class="info"><div class="sf-desc" style="margin-top:0">'+esc(i.description)+'</div><div class="sf-by"><span class="sf-lbl">Executed by</span>'+sfPeople(i.executed_by)+'</div></div>'
-      +'<div class="row"><label class="l">Rating</label><div class="sf-rate" onmouseleave="sfRatePaint('+id+',(SF_RATE.r['+id+']||{}).rating||0)">'
-        +[1,2,3,4,5,6,7,8,9,10].map(function(k){ return '<button type="button" title="'+k+' / 10" onmouseenter="sfRatePaint('+id+','+k+')" onclick="sfRateSet('+id+','+k+')"><i class="fa-solid fa-star"></i></button>'; }).join('')
-      +'</div><div class="sf-rate-val" id="sfRV-'+id+'"></div></div>'
-      +'<div class="row"><label class="l" for="sfRm-'+id+'">Remarks</label><textarea id="sfRm-'+id+'" maxlength="2000" placeholder="What works well, what could be better">'+esc(st.remarks||'')+'</textarea></div>'
-    +'</div>'; }).join('');
+    /* (6 Nov 2026, Ayush) What it is on the left - kind and who executed it on one quiet line, the name,
+       the full description; the stars and a remark on the right. Nothing hidden, nothing repeated. */
+    return '<div class="sf-ln'+(st.rating?' done':'')+'" id="sfB-'+id+'"><div class="sf-ln-row">'
+      +'<div class="what"><div class="meta"><span class="'+(i.kind==='Bug Fixed'?'bug':'new')+'">'+esc(i.kind)+'</span> · '+esc((i.executed_by||[]).map(nameOf).join(', '))+'</div>'
+        +'<div class="ttl">'+esc(i.title)+'</div><div class="dsc">'+esc(i.description)+'</div></div>'
+      +'<div class="give"><div class="stars"><div class="sf-rate" onmouseleave="sfRatePaint('+id+',(SF_RATE.r['+id+']||{}).rating||0)">'
+          +[1,2,3,4,5,6,7,8,9,10].map(function(k){ return '<button type="button" title="'+k+' / 10 · '+SF_RATE_WORDS[k]+'" onmouseenter="sfRatePaint('+id+','+k+')" onclick="sfRateSet('+id+','+k+')"><i class="fa-solid fa-star"></i></button>'; }).join('')
+        +'</div><span class="sf-rate-val" id="sfRV-'+id+'"></span></div>'
+        +'<textarea class="rm" id="sfRm-'+id+'" rows="2" maxlength="2000" placeholder="Add a remark (optional)">'+esc(st.remarks||'')+'</textarea></div>'
+    +'</div></div>'; }).join('');   // .sf-ln-row, then .sf-ln - each card closed, so cards never nest
   SF_RATE.blocks.forEach(function(id){ sfRatePaint(id,(SF_RATE.r[id]||{}).rating||0); });
   sfRateCount();
 }
@@ -13369,12 +13414,17 @@ function sfRateRender(){
 function sfRateCount(){
   const n=SF_RATE.blocks.filter(function(id){ return SF_RATE.r[id]&&SF_RATE.r[id].rating; }).length, btn=$('sfRateBtn');
   if(btn){ btn.disabled=!n; btn.textContent=n>1?'Submit '+n+' feedbacks':'Submit feedback'; }
+  const p=$('sfRateProg'), t=SF_RATE.blocks.length;
+  if(p) p.innerHTML=n?'<b>'+n+' of '+t+'</b> rated':'Rate at least one to submit · <b>0 of '+t+'</b> rated';
 }
 window.sfRatePaint=function(id,n){
   document.querySelectorAll('#sfB-'+id+' .sf-rate button').forEach(function(b,i){ b.classList.toggle('on',i<n); });
-  const v=$('sfRV-'+id); if(v) v.textContent=n?n+' / 10 · '+SF_RATE_WORDS[n]:'Not rated - tap a star to rate it';
+  const v=$('sfRV-'+id); if(v){ v.innerHTML=n?'<b>'+n+'</b>/10':''; }   // the number only - the words ran out of the panel
 };
-window.sfRateSet=function(id,n){ (SF_RATE.r[id]=SF_RATE.r[id]||{}).rating=n; sfRatePaint(id,n); sfRateCount(); };
+window.sfRateSet=function(id,n){
+  (SF_RATE.r[id]=SF_RATE.r[id]||{}).rating=n; sfRatePaint(id,n); sfRateCount();
+  const c=$('sfB-'+id); if(c) c.classList.add('done');
+};
 window.sfRateSave=async function(){
   sfRateSync();
   const rows=SF_RATE.blocks.filter(function(id){ return SF_RATE.r[id]&&SF_RATE.r[id].rating; })
@@ -15022,17 +15072,21 @@ VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
   // The old MIS tab (built by hand from Farvision files) was retired 02-Oct-2026 - the MIS Report now
   // lives under Reports and is built from Post Sales data. An old #/mis link lands on Bookings.
-  const tabs=[['bookings','Bookings'],['tickets','Customer Tickets'],['reminders','Outstanding Reminders'],['invoices','Invoices'],['receipts','Receipts'],['reports','Reports'],['adhoc','Contracted Extra Charges'],['setup','Setup']];
+  const tabs=[['bookings','Bookings'],['forms','Digital Forms'],['reminders','Outstanding Reminders'],['invoices','Invoices'],['receipts','Receipts'],['reports','Reports'],['adhoc','Contracted Extra Charges'],['setup','Setup']];
   const tab=tabs.some(function(t){return t[0]===(seg&&seg[0]);})?seg[0]:'bookings';
   // One body div per tab rather than one shared one: they are rendered by different code
   // that each look up their own host by id, and a shared id would have them fighting over it.
-  const bodyId={setup:'pssBody',bookings:'psbBody',receipts:'psrBody',invoices:'psiBody',reports:'psrpBodyHost',tickets:'pstBody',reminders:'prmBody'}[tab]||'psaBody';
+  const bodyId={setup:'pssBody',bookings:'psbBody',receipts:'psrBody',invoices:'psiBody',reports:'psrpBodyHost',reminders:'prmBody',forms:'pdfBody'}[tab]||'psaBody';
   v.innerHTML=mHead('fa-headset','#7e22ce','Post Sales')
     +'<div class="tabs" style="margin-top:14px">'+tabs.map(function(t){return '<div class="tab '+(tab===t[0]?'active':'')+'" onclick="navTo(\'postsales/'+t[0]+'\')">'+t[1]+'</div>';}).join('')+'</div>'
     +'<div id="'+bodyId+'" style="margin-top:16px"></div>';
-  // Customer Tickets lives in nexus-core (24b-post-sales-tickets.js), not postsales.js.
-  if(tab==='tickets'){ const host=$('pstBody'); if(host) await pstRender(host, seg.slice(1)); return; }
+  // CUSTOMER TICKETS TAB REMOVED 6 Nov 2026, as asked. Its code is still in 24b-post-sales-tickets.js and the tickets
+  // already received are still in postsales.tickets - to bring the tab back, add ['tickets','Customer Tickets'] to the
+  // tabs above, tickets:'pstBody' to bodyId, and the line: if(tab==='tickets'){ const host=$('pstBody'); if(host) await pstRender(host, seg.slice(1)); return; }
+  // An old #/tickets link now lands on Bookings, like the retired #/mis one.
   if(tab==='reminders'){ const host=$('prmBody'); if(host) await prmRender(host); return; }
+  // Digital Booking Form submissions (24d-post-sales-digital-forms.js)
+  if(tab==='forms'){ const host=$('pdfBody'); if(host) await pdfRender(host); return; }
   // Bookings and Setup (projects → towers → floors → flats, PLC, FRC, charges, parking, payment
   // plans) live in postsales.js - see PAGE_EXTRA_SCRIPT and docs/post-sales-spec.md.
   if(tab==='setup'||tab==='bookings'||tab==='receipts'||tab==='invoices'||tab==='reports'){
@@ -16089,6 +16143,97 @@ window.prmSel=function(ix,on){ const r=PRM.rows[ix]; if(!r) return; if(on) PRM.s
 window.prmSelGroup=function(gi,on){ const p=(PRM._grp||[])[gi]; PRM.rows.filter(r=>r.project===p&&prmPick(r)).forEach(r=>{ if(on) PRM.sel.add(r.booking_no); else PRM.sel.delete(r.booking_no); }); prmList(); };
 window.prmSelShown=function(on){ prmShown().forEach(r=>{ if(on) PRM.sel.add(r.booking_no); else PRM.sel.delete(r.booking_no); }); prmList(); };
 
+/* Post Sales > Digital Forms (6 Nov 2026): the Digital Booking Form (booking-form.html) that customers fill from
+   anywhere lands in acc.digital_booking_forms through the booking-form-public edge function. This tab is where staff
+   see those forms: a list (newest first), and for each one every answer, the PAN / Aadhaar photos and the signature.
+   Nothing here creates a booking - a form only lands in the table (the user's choice, 2 Nov 2026). */
+const PDF={rows:[],f:{q:'',st:'all'}};
+const PDF_ST={new:['New','#b3171d'],seen:['Seen','#6b7280'],used:['Used','#15803d'],rejected:['Rejected','#92400e']};
+async function pdfRender(host){
+  loader(host);
+  const {data,error}=await sb.schema('acc').from('digital_booking_forms')
+    .select('id,ref_no,project,status,applicants,first_name,mobile,email,submitted_at,seen_by,seen_at,note')
+    .order('submitted_at',{ascending:false}).limit(500);
+  if(error){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load the forms: '+esc(error.message)+'</div></div>'; return; }
+  PDF.rows=data||[];
+  pdfDraw(host);
+}
+function pdfWhen(t){ return t?new Date(t).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—'; }
+function pdfChip(s){ const c=PDF_ST[s]||[s,'#6b7280']; return '<span style="font-size:11.5px;font-weight:600;color:'+c[1]+';border:1px solid '+c[1]+'33;background:'+c[1]+'12;border-radius:999px;padding:2px 9px">'+esc(c[0])+'</span>'; }
+function pdfDraw(host){
+  host=host||$('pdfBody'); if(!host) return;
+  const rows=PDF.rows, n=s=>rows.filter(r=>r.status===s).length;
+  const q=PDF.f.q.trim().toLowerCase();
+  const list=rows.filter(r=>(PDF.f.st==='all'||r.status===PDF.f.st)&&(!q||[r.ref_no,r.first_name,r.mobile,r.email].join(' ').toLowerCase().indexOf(q)>=0));
+  const tab=(k,l,c)=>'<button class="btn'+(PDF.f.st===k?' btn-primary':'')+'" style="padding:6px 12px" onclick="PDF.f.st=\''+k+'\';pdfDraw()">'+l+' <b>'+c+'</b></button>';
+  host.innerHTML='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
+      +tab('all','All',rows.length)+tab('new','New',n('new'))+tab('seen','Seen',n('seen'))+tab('used','Used',n('used'))+tab('rejected','Rejected',n('rejected'))
+      +'<input class="inp" style="margin-left:auto;max-width:260px" placeholder="Search name, mobile, email, ref" value="'+esc(PDF.f.q)+'" oninput="PDF.f.q=this.value;pdfDraw();var i=document.querySelector(\'#pdfBody input\');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}">'
+    +'</div>'
+    +'<div class="card" style="padding:0;overflow:auto">'
+    +(list.length?'<table style="width:100%;border-collapse:collapse;font-size:13.5px"><thead><tr style="text-align:left;color:var(--slate);font-size:12px;border-bottom:1px solid var(--line)">'
+      +'<th style="padding:10px 14px">Reference</th><th style="padding:10px 8px">Received</th><th style="padding:10px 8px">First applicant</th><th style="padding:10px 8px">Mobile</th><th style="padding:10px 8px">Email</th><th style="padding:10px 8px">Status</th><th></th></tr></thead><tbody>'
+      +list.map(r=>'<tr style="border-bottom:1px solid var(--line);cursor:pointer" onclick="pdfOpen(\''+r.id+'\')">'
+        +'<td style="padding:10px 14px;font-weight:600">'+esc(r.ref_no||'—')+'</td><td style="padding:10px 8px;white-space:nowrap">'+esc(pdfWhen(r.submitted_at))+'</td>'
+        +'<td style="padding:10px 8px">'+esc(r.first_name||'—')+(r.applicants>1?' <span style="color:var(--slate)">+ '+(r.applicants-1)+' more</span>':'')+'</td>'
+        +'<td style="padding:10px 8px;white-space:nowrap">'+esc(r.mobile||'—')+'</td><td style="padding:10px 8px">'+esc(r.email||'—')+'</td>'
+        +'<td style="padding:10px 8px">'+pdfChip(r.status)+'</td><td style="padding:10px 14px;text-align:right;color:var(--slate)"><i class="fa-solid fa-chevron-right"></i></td></tr>').join('')
+      +'</tbody></table>'
+     :'<div class="empty" style="padding:38px 20px"><i class="fa-regular fa-file-lines"></i><div>'+(rows.length?'No form matches.':'No digital booking form has been submitted yet. When a customer submits one, it appears here.')+'</div></div>')
+    +'</div>';
+}
+function pdfRow(k,v){ return (v===''||v==null)?'':'<tr><td style="padding:6px 0;color:var(--slate);width:38%;vertical-align:top">'+esc(k)+'</td><td style="padding:6px 0">'+esc(v)+'</td></tr>'; }
+function pdfD(d){ return d?new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):''; }
+function pdfAddr(x){ return x?[x.line,x.city,x.pin].filter(Boolean).join(', '):''; }
+function pdfSec(t,rows){ const b=rows.join(''); return b?'<div style="margin-top:16px"><div style="font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);margin-bottom:4px">'+esc(t)+'</div><table style="width:100%;border-collapse:collapse;font-size:13.5px">'+b+'</table></div>':''; }
+window.pdfOpen=async function(id){
+  openModal('<div class="modal-head"><h3><i class="fa-regular fa-file-lines"></i> Digital Booking Form</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body"><div id="pdfDetail"></div></div>','lg');
+  loader($('pdfDetail'));
+  const {data,error}=await sb.schema('acc').from('digital_booking_forms').select('*').eq('id',id).maybeSingle();
+  if(error||!data){ $('pdfDetail').innerHTML='<div class="empty"><div>Could not load this form'+(error?': '+esc(error.message):'')+'.</div></div>'; return; }
+  const d=data.data||{}, apps=d.applicants||[], c=d.contact||{}, fl=d.flat||{}, pr=d.price||{}, py=d.pay||{}, pf=d.profession||{};
+  const files=data.files||[];
+  const fileBtns=(i)=>files.filter(f=>f.applicant===i+1&&f.kind!=='signature').map(f=>'<button class="btn" style="padding:4px 10px;margin:2px 6px 2px 0" onclick="s3OpenSigned(\''+esc(f.path)+'\')"><i class="fa-solid fa-paperclip"></i> '+(f.kind==='pan'?'PAN':'Aadhaar')+' &middot; '+esc(f.name)+'</button>').join('');
+  const sig=files.filter(f=>f.kind==='signature')[0];
+  const html='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="font-size:16px">'+esc(data.ref_no||'')+'</b>'+pdfChip(data.status)
+      +'<span style="color:var(--slate);font-size:13px">Received '+esc(pdfWhen(data.submitted_at))+(data.seen_by?' &middot; first opened by '+esc(data.seen_by)+', '+esc(pdfWhen(data.seen_at)):'')+'</span></div>'
+    +apps.map((a,i)=>pdfSec(i?'Joint applicant '+(i+1):'First applicant',[
+        pdfRow('Name',[a.title,a.full_name].filter(Boolean).join(' ')),pdfRow(a.relation||'S/o',a.relation_name),pdfRow('Date of birth',pdfD(a.dob)),pdfRow('Occupation',a.occupation),
+        pdfRow('Nationality',a.nationality),pdfRow('PAN',(a.pan||'').toUpperCase()),pdfRow('Aadhaar',a.aadhaar),pdfRow('Passport',a.passport),pdfRow('Bank details',a.bank_details),
+        pdfRow('Spouse',a.spouse),pdfRow('Anniversary',pdfD(a.anniversary)),
+        '<tr><td style="padding:6px 0;color:var(--slate);vertical-align:top">Documents</td><td style="padding:6px 0">'+(fileBtns(i)||'<span style="color:var(--slate)">None attached</span>')+'</td></tr>'])).join('')
+    +pdfSec('Contact & address',[pdfRow('Mobile',((c.cc||'')+' '+(c.mobile||'')).trim()),pdfRow('Email',c.email),pdfRow('Contact person',c.contact_person),pdfRow('Residential address',pdfAddr(d.res)),
+        pdfRow('Office address',d.off&&d.off.on?pdfAddr(d.off):''),pdfRow('Letters to',d.mailing==='Other'?'Other: '+(d.mailing_other||''):d.mailing),pdfRow('Permanent address',d.permanent==='Other'?'Other: '+(d.permanent_other||''):d.permanent)])
+    +pdfSec('About',[pdfRow('Profession',pf.kind),pdfRow('Company',pf.company),pdfRow('Designation',pf.designation),pdfRow('Gross income',pf.income),pdfRow('Community',pf.community),
+        pdfRow('Heard about us from',d.heard==='Other'?d.heard_other:d.heard),pdfRow('Why this project',(d.why||[]).filter(Boolean).map((w,i)=>(i+1)+'. '+w).join('   '))])
+    +pdfSec('Flat',[pdfRow('Block',fl.block),pdfRow('Floor',fl.floor),pdfRow('Flat',(fl.flat_no||'').toUpperCase()),pdfRow('Bedrooms',fl.bhk),pdfRow('Car park',fl.parking),
+        pdfRow('Super built-up area',pr.sba?pr.sba+' sq.ft.':''),pdfRow('Rate per sq.ft.',[pr.basic&&'Basic '+pr.basic,pr.plc&&'PLC '+pr.plc,pr.flc&&'FLC '+pr.flc].filter(Boolean).join(' + ')),
+        pdfRow('Total sale price',pr.total?'₹'+Number(pr.total).toLocaleString('en-IN'):''),pdfRow('Payment plan',pr.plan),pdfRow('Home loan',pr.loan==='Yes'?'Yes'+(pr.bank?' - '+pr.bank:''):pr.loan)])
+    +pdfSec('Application payment',[pdfRow('Amount',py.amount?'₹'+Number(py.amount).toLocaleString('en-IN'):''),pdfRow('Paid by',py.mode),pdfRow('Reference',py.ref),pdfRow('Bank / branch',[py.bank,py.branch].filter(Boolean).join(', ')),
+        pdfRow('Date',pdfD(py.date)),pdfRow('Purpose',d.purpose),pdfRow('Booked through',(d.sales||'')+(d.sales_name?' - '+d.sales_name:'')),pdfRow('Lead ID',d.lead_id)])
+    +'<div style="margin-top:16px"><div style="font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);margin-bottom:6px">Signature</div>'
+      +(sig?'<button class="btn" style="padding:4px 10px" onclick="s3OpenSigned(\''+esc(sig.path)+'\')"><i class="fa-solid fa-signature"></i> Open signature</button>':'<span style="color:var(--slate)">Not found</span>')
+      +'<span style="color:var(--slate);font-size:12.5px;margin-left:10px">Terms accepted: '+esc(data.terms_version||'')+'</span></div>'
+    +'<div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px"><label style="font-size:12.5px;font-weight:600;color:var(--slate)">Note (staff only)</label>'
+      +'<textarea class="inp" id="pdfNote" rows="2" style="width:100%;margin-top:4px">'+esc(data.note||'')+'</textarea></div>';
+  $('pdfDetail').innerHTML=html
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">'
+    +['seen','used','rejected'].map(s=>'<button class="btn'+(data.status===s?' btn-primary':'')+'" onclick="pdfSetStatus(\''+id+'\',\''+s+'\')">Mark as '+PDF_ST[s][0]+'</button>').join('')
+    +'<button class="btn" style="margin-left:auto" onclick="closeModal()">Close</button></div>';
+  // Opening a new form marks it Seen, once, and keeps who and when.
+  if(data.status==='new'){
+    const me=(typeof state!=='undefined'&&state.email)||'';
+    const {error:e2}=await sb.schema('acc').from('digital_booking_forms').update({status:'seen',seen_by:me,seen_at:new Date().toISOString()}).eq('id',id).eq('status','new');
+    if(!e2){ const r=PDF.rows.find(x=>x.id===id); if(r){ r.status='seen'; r.seen_by=me; r.seen_at=new Date().toISOString(); } pdfDraw(); }
+  }
+};
+window.pdfSetStatus=async function(id,s){
+  const note=($('pdfNote')||{}).value||null;
+  const {error}=await sb.schema('acc').from('digital_booking_forms').update({status:s,note:note}).eq('id',id);
+  if(error){ toast('Could not save: '+error.message,'err'); return; }
+  const r=PDF.rows.find(x=>x.id===id); if(r){ r.status=s; r.note=note; }
+  toast('Marked as '+PDF_ST[s][0],'ok'); closeModal(); pdfDraw();
+};
 /* ===== ACCOUNTS MODULE =====
    Three tabs. Transactions (vouchers, bills & on-account payments, bank reconciliation, cheque printing,
    enterprise / company / business-unit structure) lives in accounts.js + accounts-bank.js; Ledgers &
@@ -20071,7 +20216,7 @@ async function cmpBothView(v,seg){
     body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Meta + Google · campaign level');
   }
   const showKpis=(ti!==2&&ti!==3);
-  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Our Brand')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+legend+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const opt={responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}}}};
@@ -20273,7 +20418,7 @@ async function cmpGoogleView(v,seg){
     body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Google · CTR trend (Google publishes no per-person frequency)',true);
   }
   const showKpis=(ti!==4&&ti!==5);
-  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Our Brand')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+cap+legend+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+cap+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=rows.map(function(r){return r.a.name;});
@@ -21658,9 +21803,19 @@ window.tpTrEditSave=async function(trackerId){
     .update({candidate_name:name,number:phone,email,notes}).eq('id',trackerId);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
   // The candidate record carries the same details and is what tests and emails are sent from.
+  /* BOTH OR NEITHER (6 Nov 2026). The row was saved and a refused candidate update only warned, so
+     the list showed the new phone/email while tests and emails still went to the old one. Now the row
+     is put back to what it was and the edit is reported as not saved, so the two never disagree. */
   if(r.candidate_id){
-    const {error:ce}=await sb.schema('hr').from('candidates').update({name,phone,email}).eq('id',r.candidate_id);
-    if(ce){toast('Saved on the row, but not on the candidate record: '+ce.message,'err');}
+    const {data:cd,error:ce}=await sb.schema('hr').from('candidates').update({name,phone,email}).eq('id',r.candidate_id).select('id');
+    if(ce||!cd||!cd.length){
+      const {error:back}=await sb.schema('hr').from('interview_tracker')
+        .update({candidate_name:r.candidate_name,number:r.number,email:r.email,notes:r.notes}).eq('id',trackerId);
+      toast('Not saved: the candidate record refused the change ('+((ce&&ce.message)||'no permission or it was removed')+')'
+        +(back?' - and the Interviews row could not be put back, so it may show the new details: '+back.message:''),'err');
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}
+      return;
+    }
   }
   Object.assign(r,{candidate_name:name,number:phone,email,notes});
   closeModal(); toast('Candidate updated','ok'); tpTrRender();
@@ -21846,10 +22001,25 @@ window.tpTrSave=async function(){
     position:req&&req.job_title,source,entity,created_by:state.email,applied_at:new Date().toISOString()}).select().single();
   if(cErr){toast(cErr.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}return;}
   const notes=($('tpTrNotes')||{}).value?.trim()||null;
+  /* NO HALF-ADDED CANDIDATES (6 Nov 2026). Adding writes two rows - the candidate, then their
+     Interviews row. If the second is refused the first used to stay behind: a candidate nobody could
+     see in Interviews, and the button left spinning. Now the candidate is taken back out, and if even
+     that fails the message says exactly what was left, so it can be cleared. */
   const {data:tr,error:tErr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:name,position:req&&req.job_title,source,entity,number:phone,email,notes,candidate_id:cand.id}).select().single();
-  if(tErr){toast(tErr.message,'err');return;}
-  await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
-  TP_TR_RECORDS=[tr,...(TP_TR_RECORDS||[])];closeModal();toast('Candidate added');tpTrRender();
+  if(tErr){
+    const {data:gone,error:dErr}=await sb.schema('hr').from('candidates').delete().eq('id',cand.id).select('id');
+    if(dErr||!gone||!gone.length) toast('Could not add '+name+': '+tErr.message+'. A part-saved candidate record (no. '+cand.id+') was left behind - ask an Administrator to remove it.','err');
+    else toast('Could not add '+name+': '+tErr.message+'. Nothing was saved.','err');
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}
+    return;
+  }
+  const {error:lErr}=await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
+  TP_TR_RECORDS=[tr,...(TP_TR_RECORDS||[])];closeModal();
+  // The Interviews row carries candidate_id, so the candidate is still reachable; the missing back-link
+  // only matters to the few places that look the other way, so it is a warning, not a failure.
+  if(lErr) toast('Candidate added, but one link could not be saved ('+lErr.message+') - tell an Administrator','warn');
+  else toast('Candidate added');
+  tpTrRender();
 };
 /* EMAIL SELECTED - one window for writing to candidates, which can also carry a test.
 
@@ -22278,7 +22448,7 @@ window.tpMuUncompleteRow=async function(id){
 };
 
 VIEWS.campaigns=async function(v,seg){
-  setCrumb(['Growth & Strategy','Our Brand']);
+  setCrumb(['Growth & Strategy','Campaign Analytics']);
   if(CMP_SOURCE==='google'){ return cmpGoogleView(v,seg); }
   if(CMP_SOURCE==='both'){ return cmpBothView(v,seg); }
   const tabs=cmpBaseTabs();const ti=mTab(seg,tabs.length);
@@ -22612,7 +22782,7 @@ VIEWS.campaigns=async function(v,seg){
     +(CMP_PERIOD==='custom'?'<div class="cmp-cap" style="color:#c2410c"><i class="fa-solid fa-triangle-exclamation"></i> Custom ranges aren\'t fetched by the MCP refresh task — pick one of the preset periods above, or ask for this range to be pulled directly.</div>':'');
   const legend='<div class="cmp-legend"><span>Trend compares with '+esc(cmpPrevLabel())+'</span><span>Fatigue = times each person saw the ad + whether CTR is falling</span></div>';
   const showKpis=(ti!==4&&ti!==5&&ti!==6);
-  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Our Brand')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+syncCap+legend+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+syncCap+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=projRows.map(r=>r.acc.name);
@@ -30495,8 +30665,10 @@ function trQualTag(r){
    new calls arrived: an older Qualified call dropped off the bottom for each new one at the top,
    so Qualified went DOWN while qualified calls were being added. Not Qualified read low for the
    same reason, and the three cards never summed to the total. */
+let TR_FETCH_FAILED=false;   // the last load failed with nothing to show: never serve that empty list from memory
 async function trFetch(force){
-  if(TR_ROWS&&!force)return TR_ROWS;
+  if(TR_ROWS&&!force&&!TR_FETCH_FAILED)return TR_ROWS;
+  TR_FETCH_FAILED=false;
   if(!force){
     const cached=trCacheRead('tr_fetch_cache','all');
     if(cached){TR_ROWS=cached;return TR_ROWS;}
@@ -30515,12 +30687,24 @@ async function trFetch(force){
     }
     TR_ROWS=out;
     trCacheWrite('tr_fetch_cache','all',out);
-  }catch(e){ TR_ROWS=out.length?out:[]; }
+  }catch(e){
+    TR_ROWS=out.length?out:[];
+    // A failed load is not "no calls": say so, and ask again next time instead of caching the empty list.
+    if(!out.length){ TR_FETCH_FAILED=true; try{ toast('Could not load the calls: '+((e&&e.message)||e)+'. Reload to try again.','err'); }catch(_e){} }
+  }
   return TR_ROWS;
 }
 async function trFetchDeleted(force){
   if(TR_DELETED_ROWS&&!force)return TR_DELETED_ROWS;
-  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').not('deleted_at','is',null).order('deleted_at',{ascending:false}).limit(200);TR_DELETED_ROWS=data||[];}catch(e){TR_DELETED_ROWS=[];}
+  try{
+    const {data,error}=await sb.schema('acc').from('transcriptions').select('*').not('deleted_at','is',null).order('deleted_at',{ascending:false}).limit(200);
+    if(error)throw error;
+    TR_DELETED_ROWS=data||[];
+  }catch(e){
+    // not cached: the next visit asks again
+    TR_DELETED_ROWS=null; try{ toast('Could not load the deleted calls: '+((e&&e.message)||e),'err'); }catch(_e){}
+    return [];
+  }
   return TR_DELETED_ROWS;
 }
 // Date-range filter — applies to every call-log listing (All Calls + inside any folder).
@@ -34347,7 +34531,7 @@ VIEWS.transcription=async function(v,seg){
       const cs=Array.isArray(r.discrepancy)?r.discrepancy:[];
       return cs.some(function(c){ return c&&c.status==='fail'; });
     });
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)+await trOldPipelineNote()
       +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>What disagrees</th></tr></thead>'
       +'<tbody>'+(rows.length?rows.map(trDiscrepancyRowHtml).join(''):'<tr><td colspan="5"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>No discrepancies right now</div></div></td></tr>')+'</tbody></table></div></div>';
     return;
@@ -34367,7 +34551,7 @@ VIEWS.transcription=async function(v,seg){
       return new Date(lb.report_date||lb.created_at) - new Date(la.report_date||la.created_at);
     });
     const leadParam=seg[1]?decodeURIComponent(seg[1]):null;
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)+await trOldPipelineNote()
       +'<div id="trCompArea">'+(leadParam?trCompDetailHtml(leads,leadParam):trCompGridHtml(leads))+'</div>';
     // trCompDetailHtml always renders the combined qualification checklist card - USAGE_VIEWS'
     // 'transcription/5' key already covers "view a lead's combined call history" for this same
@@ -34810,9 +34994,12 @@ window.trRemoveFromFolder=async function(id){
   const ok=await confirmDialog('Remove this call from the folder? The call itself won\'t be deleted.');
   if(!ok)return;
   const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
+  const was=r?r.folder:null;
   if(r)r.folder=null;
   trRenderFolderRows();
-  try{await sb.schema('acc').from('transcriptions').update({folder:null}).eq('id',id);}catch(e){}
+  let fErr=null;
+  try{ const res=await sb.schema('acc').from('transcriptions').update({folder:null}).eq('id',id); fErr=res&&res.error; }catch(e){ fErr=e; }
+  if(fErr){ if(r)r.folder=was; trRenderFolderRows(); toast('Could not remove it from the folder: '+((fErr&&fErr.message)||fErr),'err'); return; }
   toast('Removed from folder','ok');
 };
 window.trFolderRenameModal=function(idx){
@@ -34951,7 +35138,12 @@ function trStartPolling(id){
 // Permanent record of every delete/restore — independent of deleted_at, so the history survives
 // even after something is restored (deleted_at just says "currently deleted or not").
 function trLogActivity(id,fname,action){
-  try{sb.schema('acc').from('transcription_activity').insert({transcription_id:id,file_name:fname||null,actor:(state&&state.email)||null,action:action});}catch(e){}
+  /* 6 Nov 2026: a supabase-js request is only sent when something .then()s it. This used to build the insert
+     and drop it, so acc.transcription_activity never got a row (it was empty while 19 calls had been deleted). */
+  try{
+    return sb.schema('acc').from('transcription_activity').insert({transcription_id:id,file_name:fname||null,actor:(state&&state.email)||null,action:action})
+      .then(function(res){ if(res&&res.error) console.warn('transcription activity not logged: '+res.error.message); },function(){});
+  }catch(e){}
 }
 window.trDelete=async function(id){
   const ok=await confirmDialog('Delete this recording? It moves to the Deleted tab, where you can restore it any time — the recording file is kept.');
@@ -34963,7 +35155,14 @@ window.trDelete=async function(id){
   if(r){r.deleted_at=now;r.deleted_by=who;TR_DELETED_ROWS=[r].concat(TR_DELETED_ROWS||[]);}
   trCacheWrite('tr_fetch_cache','all',TR_ROWS);
   trRenderList();trRenderFolderRows();
-  try{await sb.schema('acc').from('transcriptions').update({deleted_at:now,deleted_by:who}).eq('id',id);}catch(e){}
+  let dErr=null;
+  try{ const res=await sb.schema('acc').from('transcriptions').update({deleted_at:now,deleted_by:who}).eq('id',id); dErr=res&&res.error; }catch(e){ dErr=e; }
+  if(dErr){
+    // The database refused: the call is NOT deleted, so put it back instead of saying it is.
+    if(r){ r.deleted_at=null; r.deleted_by=null; TR_DELETED_ROWS=(TR_DELETED_ROWS||[]).filter(function(x){return x.id!==id;}); TR_ROWS=[r].concat(TR_ROWS||[]).sort(function(a,b){return new Date(b.created_at)-new Date(a.created_at);}); }
+    trCacheClear('tr_fetch_cache'); trRenderList(); trRenderFolderRows();
+    toast('Could not delete this recording: '+((dErr&&dErr.message)||dErr),'err'); return;
+  }
   trLogActivity(id,r&&r.file_name,'deleted');
   toast('Recording deleted','ok');
 };
@@ -34988,8 +35187,13 @@ window.trRestore=async function(id){
   if(host)host.innerHTML=trDeletedTableBody();
   TR_ROWS=null; // so All Calls / Folders refetch and pick this call back up next time they're viewed
   trCacheClear('tr_fetch_cache');
+  let rErr=null;
+  try{ const res=await sb.schema('acc').from('transcriptions').update({deleted_at:null,deleted_by:null}).eq('id',id); rErr=res&&res.error; }catch(e){ rErr=e; }
+  if(rErr){
+    if(r){ TR_DELETED_ROWS=[r].concat(TR_DELETED_ROWS||[]); const h2=$('trDeletedRows'); if(h2)h2.innerHTML=trDeletedTableBody(); }
+    toast('Could not restore it: '+((rErr&&rErr.message)||rErr),'err'); return;
+  }
   toast('Restored','ok');
-  try{await sb.schema('acc').from('transcriptions').update({deleted_at:null,deleted_by:null}).eq('id',id);}catch(e){toast('Restored locally, but failed to sync: '+((e&&e.message)||e),'err');}
   trLogActivity(id,r&&r.file_name,'restored');
 };
 window.trRestoreAll=async function(){
@@ -35003,8 +35207,13 @@ window.trRestoreAll=async function(){
   if(host)host.innerHTML=trDeletedTableBody();
   TR_ROWS=null;
   trCacheClear('tr_fetch_cache');
+  let raErr=null;
+  try{ const res=await sb.schema('acc').from('transcriptions').update({deleted_at:null,deleted_by:null}).in('id',ids); raErr=res&&res.error; }catch(e){ raErr=e; }
+  if(raErr){
+    TR_DELETED_ROWS=rows; const h3=$('trDeletedRows'); if(h3)h3.innerHTML=trDeletedTableBody();
+    toast('Could not restore them: '+((raErr&&raErr.message)||raErr),'err'); return;
+  }
   toast('Restored '+ids.length+' call'+(ids.length===1?'':'s'),'ok');
-  try{await sb.schema('acc').from('transcriptions').update({deleted_at:null,deleted_by:null}).in('id',ids);}catch(e){toast('Restored locally, but failed to sync: '+((e&&e.message)||e),'err');}
   rows.forEach(function(r){trLogActivity(r.id,r.file_name,'restored');});
 };
 // Every delete/restore ever, regardless of current state — this is the durable record the
@@ -35103,17 +35312,26 @@ async function trUploadOne(f,token){
   }
   return path;
 }
+/* Discrepancies and Compilation read the older call-check pipeline (source lost_call_sync), which stopped
+   adding calls on 30 Aug 2026. Newer calls are in the first tab. Say so, with the date of the newest call here,
+   instead of showing "No discrepancies right now" as if it were current. */
+async function trOldPipelineNote(){
+  const rows=(await trFetch()).filter(function(r){return r.source==='lost_call_sync';});
+  let newest=''; rows.forEach(function(r){ const d=String(r.report_date||r.created_at||'').slice(0,10); if(d>newest)newest=d; });
+  return '<div class="card card-pad" style="margin-top:14px;border-color:#fcd34d;background:#fffbeb;color:#92400e;font-size:13px;line-height:1.55"><i class="fa-solid fa-triangle-exclamation"></i> This tab shows calls from the older call-check pipeline. '
+    +(newest?'The newest call here is dated <b>'+esc(fmtDate(newest))+'</b>. ':'')+'Calls since then are in the first tab (Leads), not here.</div>';
+}
 window.trUploadStart=async function(){
   let files=Array.prototype.slice.call(($('trFile').files)||[]);
   if(!files.length){toast('Select at least one recording','err');return;}
-  if(files.length>50)files=files.slice(0,50);
+  if(files.length>50){ toast('Only the first 50 recordings are sent in one go - choose the other '+(files.length-50)+' again afterwards.','warn'); files=files.slice(0,50); }
   // Phone field removed — the caller's name/number is picked up from the call itself.
   const phones=files.map(function(){return null;});
   const btn=$('trUpBtn');if(btn)btn.disabled=true;
   const msg=$('trUpMsg');
   const {data:{session}}=await sb.auth.getSession();
   const token=session&&session.access_token;
-  const total=files.length;let done=0,failed=0,idx=0;
+  const total=files.length;let done=0,failed=0,idx=0;const failedNames=[];
   const paint=function(){const pct=Math.round((done+failed)/total*100);if(msg)msg.innerHTML='<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" style="width:'+pct+'%"></div></div><div class="psa-progress-label">Processed '+(done+failed)+' of '+total+' · '+done+' ok'+(failed?', '+failed+' failed':'')+'</div></div>';};
   paint();
   const worker=async function(){
@@ -35130,13 +35348,13 @@ window.trUploadStart=async function(){
         trCacheClear('tr_fetch_cache'); // a call still processing has no business in the 5h cache - trStartPolling re-freezes it once it's actually done
         trStartPolling(out.row.id);
         done++;
-      }catch(e){ failed++; }
+      }catch(e){ failed++; failedNames.push(f.name+' ('+((e&&e.message)||'failed')+')'); }
       paint();
     }
   };
   const K=Math.min(4,files.length);
   await Promise.all(Array.from({length:K},function(){return worker();}));
-  toast(done+' call'+(done===1?'':'s')+' submitted'+(failed?(', '+failed+' failed'):''), failed?'warn':'ok');
+  toast(done+' call'+(done===1?'':'s')+' submitted'+(failed?(', '+failed+' failed: '+failedNames.slice(0,3).join('; ')+(failed>3?' ...':'')):''), failed?'warn':'ok');
   closeModal();
   if(PAGE==='transcription')renderPage();
 };
@@ -36392,7 +36610,7 @@ function dmOauthReturn(){
   try{
     const q=new URLSearchParams(location.search);
     if(!q.get('google'))return;
-    if(q.get('google')==='ok')toast('Google connected for Our Brand. Finding your sites and channels…','ok');
+    if(q.get('google')==='ok')toast('Google connected for Campaign Analytics. Finding your sites and channels…','ok');
     else toast('Google connection failed: '+(q.get('msg')||'unknown reason'),'err');
     history.replaceState(history.state,'',location.pathname+location.hash);
     if(q.get('google')==='ok')dmCall({action:'discover'}).then(function(){ if(PAGE==='campaigns')renderPage(); }).catch(function(e){toast('Discover: '+e.message,'err');});
@@ -36433,7 +36651,7 @@ function dmSelect(which,list,cur){
     +list.map(function(s){return '<option value="'+esc(s.source_id)+'"'+(s.source_id===cur?' selected':'')+'>'+esc(s.label||s.source_id)+'</option>';}).join('')+'</select>';
 }
 function dmNeedConnect(what){
-  return dmNote('fa-plug',esc(what)+' needs the marketing Google connection. Open <a href="#" onclick="navTo(DM_SETUP_ROUTE);return false">Setup</a> on Our Brand, connect the company Google account that owns it, and the next nightly pull fills this in.');
+  return dmNote('fa-plug',esc(what)+' needs the marketing Google connection. Open <a href="#" onclick="navTo(DM_SETUP_ROUTE);return false">Setup</a> on Campaign Analytics, connect the company Google account that owns it, and the next nightly pull fills this in.');
 }
 
 /* Why a tab is empty, in one line at its top. The nightly pull writes each part's result to
@@ -36444,7 +36662,7 @@ async function dmPartStatus(part,what){
   const x=data&&data[0];
   if(!x) return dmNote('fa-hourglass-half',esc(what)+' has not been read yet - the first pull runs tonight.');
   if(x.ok) return '';
-  return '<div style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid #fcd34d;background:#fffbeb;border-radius:10px;color:#92400e;font-size:13px;margin:0 0 14px"><i class="fa-solid fa-triangle-exclamation" style="margin-top:2px"></i><div><b>No '+esc(what)+' figures yet.</b> The last pull ('+esc(fmtDateShort(x.started_at))+') stopped: '+esc(x.message||'unknown error')+'. Nothing below is filled in until that is fixed - the steps are in Our Brand → Setup.</div></div>';
+  return '<div style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid #fcd34d;background:#fffbeb;border-radius:10px;color:#92400e;font-size:13px;margin:0 0 14px"><i class="fa-solid fa-triangle-exclamation" style="margin-top:2px"></i><div><b>No '+esc(what)+' figures yet.</b> The last pull ('+esc(fmtDateShort(x.started_at))+') stopped: '+esc(x.message||'unknown error')+'. Nothing below is filled in until that is fixed - the steps are in Campaign Analytics → Setup.</div></div>';
 }
 
 /* ---------------------------------------------------------------- YouTube */
@@ -36622,7 +36840,7 @@ async function dmTrackedChannels(){
 }
 window.dmYtConfirm=async function(id,on){
   const {error}=await dmCamp().from('dm_yt_channels').update({confirmed:on,updated_at:new Date().toISOString()}).eq('channel_id',id);
-  if(error)return toast(error.message,'err'); toast(on?'Confirmed - read from tonight (or press Pull now in Our Brand → Setup)':'Paused','ok'); renderPage();
+  if(error)return toast(error.message,'err'); toast(on?'Confirmed - read from tonight (or press Pull now in Campaign Analytics → Setup)':'Paused','ok'); renderPage();
 };
 window.dmYtRemove=async function(id){
   if(!await confirmDialog('Stop tracking this channel and delete its stored readings?'))return;
@@ -36752,7 +36970,7 @@ async function dmTrackedPlaces(){
 }
 window.dmPlConfirm=async function(id,on){
   const {error}=await dmCamp().from('dm_places').update({confirmed:on,updated_at:new Date().toISOString()}).eq('place_id',id);
-  if(error)return toast(error.message,'err'); toast(on?'Confirmed - read from tonight (or press Pull now in Our Brand → Setup)':'Paused','ok'); renderPage();
+  if(error)return toast(error.message,'err'); toast(on?'Confirmed - read from tonight (or press Pull now in Campaign Analytics → Setup)':'Paused','ok'); renderPage();
 };
 window.dmPlRemove=async function(id){
   if(!await confirmDialog('Stop tracking this place and delete its stored readings?'))return;
@@ -37570,6 +37788,7 @@ function mkTab(base,t,active){
 // One tab of any of the three pages, into host. scope is the renderers' word for whose rows.
 async function mkDrawTab(host,base,t,scope,metaKey){
   if(t[3]==='meta') return compMetaView(host,metaKey);
+  if(t[3]==='ca') return caView(host);
   if(t[3]==='ads') return obAdsView(host,t[0]==='google'?'google':'meta');
   if(t[3]==='dm') return dmTabView(host,t[0],scope);
   return ciTabView(host,t[0],scope,base+'/'+t[0]);
@@ -37584,16 +37803,17 @@ async function mkDrawTab(host,base,t,scope,metaKey){
    (Search Console, Search Trends, RERA), land on Facebook. Setup (connecting Google) is no tab any
    more but a button on Google Analytics; its route stays, because Google's consent screen returns
    to it. */
+/* 5 Nov 2026, as asked: Google Ads Transparency, YouTube, Google Analytics and Google Maps taken off
+   this page, and the nightly Google pull behind the last three stopped and its data deleted
+   (migration 20261105190000). An old link to any of them lands on Facebook, like any route not in
+   this list. */
+/* 6 Nov 2026, as asked: Facebook and Google are no longer two tabs but one view by project
+   (42-campaign-analytics.js). The old campaigns/facebook and campaigns/google links land on it. */
 const OB_TABS=[
-  ['facebook','Facebook','fa-brands fa-facebook','ads'],
-  ['google','Google','fa-brands fa-google','ads'],
-  ['meta-ads','Meta Ad Library','fa-brands fa-meta','meta'],
-  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci'],
-  ['youtube','YouTube','fa-brands fa-youtube','dm'],
-  ['analytics','Google Analytics','fa-solid fa-chart-line','dm'],
-  ['maps','Google Maps','fa-solid fa-location-dot','dm']
+  ['ads','Google & Facebook','fa-solid fa-chart-line','ca'],
+  ['meta-ads','Meta Ad Library','fa-brands fa-meta','meta']
 ];
-const OB_HIDDEN=[['setup','Setup','fa-solid fa-plug','dm']];
+const OB_HIDDEN=[];
 // Kept for the old analytics views in 28-campaign-trends.js, which still call it; draws the new bar.
 function cmpTabsBar(tabs,ti,extra){ return obTabsBar(extra); }
 function obTabsBar(active){ return '<div class="tabs">'+OB_TABS.map(function(t){ return mkTab('campaigns',t,active); }).join('')+'</div>'; }
@@ -37602,11 +37822,8 @@ VIEWS.campaigns=async function(v,seg){
   let want=seg&&seg[0];
   if(want==='connect') want='setup';       // the old Digital Metrics route name
   const t=OB_TABS.concat(OB_HIDDEN).filter(function(x){ return x[0]===want; })[0]||OB_TABS[0];
-  setCrumb(['Growth & Strategy','Our Brand',t[1]]);
-  v.innerHTML=mHead('fa-bullhorn','#db2777','Our Brand')+obTabsBar(t[0])
-    +(t[0]==='analytics'||t[0]==='setup'?'<div style="display:flex;justify-content:flex-end;margin:10px 0 -4px">'
-      +(t[0]==='setup'?'<button class="btn btn-sm" onclick="navTo(\'campaigns/analytics\')"><i class="fa-solid fa-arrow-left"></i> Back to Google Analytics</button>'
-        :'<button class="btn btn-sm" onclick="navTo(\'campaigns/setup\')" title="Connect the company Google account and choose which sites, properties and channels are read"><i class="fa-solid fa-gear"></i> Google connection</button>')+'</div>':'')
+  setCrumb(['Growth & Strategy','Campaign Analytics',t[1]]);
+  v.innerHTML=mHead('fa-bullhorn','#db2777','Campaign Analytics')+obTabsBar(t[0])
     +'<div id="mkHost" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
   await mkDrawTab($('mkHost'),'campaigns',t,'brand','brands');
 };
@@ -38514,7 +38731,7 @@ function obRange(){
   switch(OB_P.period){
     case 'yesterday': s=y; e=y; break;
     case 'last_7d': s=obAdd(t,-7); e=y; break;
-    case 'this_month': s=t.slice(0,8)+'01'; e=t; break;
+    case 'this_month': s=t.slice(0,8)+'01'; e=(t.slice(8)==='01')?t:y; break;
     case 'last_month': { const f=new Date(Date.UTC(+t.slice(0,4),+t.slice(5,7)-2,1)); s=f.toISOString().slice(0,10); e=obAdd(t.slice(0,8)+'01',-1); break; }
     case 'last_90d': s=obAdd(t,-90); e=y; break;
     case 'custom': s=OB_P.from||obAdd(t,-30); e=OB_P.to||y; if(e<s){ const x=s; s=e; e=x; } break;
@@ -38534,6 +38751,14 @@ function obChange(now,prev,goodUp){
   const cls=goodUp==null?'ob-flat':((p>0)===goodUp?'ob-good':'ob-bad');
   return '<div class="ob-chg '+cls+'">'+(p>0?'▲ ':'▼ ')+Math.abs(p).toFixed(0)+'% vs previous</div>';
 }
+/* 6 Nov 2026 - FACEBOOK RESULTS ARE OF DIFFERENT KINDS. Each campaign's Result is whatever it is set to get:
+   leads and WhatsApp chats for a lead campaign, ThruPlays or reach for an awareness one, interactions for an
+   engagement one. Added together they gave 2.76 million "results" at about Re 0.38 each. The headline now counts
+   lead campaigns only (objective on camp.ads_entities); the rest is shown beside it, never added in. Each campaign
+   row still shows exactly Ads Manager's own Result. */
+const OB_LEAD_OBJ={OUTCOME_LEADS:1,LEAD_GENERATION:1,OUTCOME_SALES:1,CONVERSIONS:1,MESSAGES:1};
+const OB_OBJ_NAME={OUTCOME_AWARENESS:'Awareness',OUTCOME_ENGAGEMENT:'Engagement',OUTCOME_TRAFFIC:'Traffic',LINK_CLICKS:'Traffic'};
+function obIsLead(E,c){ const e=E['campaign:'+c.campaign_id]; return !!(e&&OB_LEAD_OBJ[e.objective]); }
 function obSum(rows){ const t={spend:0,impressions:0,clicks:0,results:0}; rows.forEach(function(r){ t.spend+=Number(r.spend)||0; t.impressions+=Number(r.impressions)||0; t.clicks+=Number(r.clicks)||0; t.results+=Number(r.results)||0; }); return t; }
 const OB_CSS='<style>'
   +'.ob-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 14px}'
@@ -38602,7 +38827,12 @@ function obAdsPaint(){
   const pick=function(rows){ return OB_P.acct==='all'?rows:rows.filter(function(x){ return x.account_id===OB_P.acct; }); };
   const cur=pick(window._obCur||[]), prev=pick(window._obPrev||[]);
   const T=obSum(cur), P=obSum(prev);
-  const cpl=T.results?T.spend/T.results:null, pcpl=P.results?P.spend/P.results:null;
+  let TL=null, PL=null, TO=null;
+  if(platform==='meta'){ const isL=function(c){ return obIsLead(E,c); }; TL=obSum(cur.filter(isL)); PL=obSum(prev.filter(isL)); TO=obSum(cur.filter(function(c){ return !isL(c); })); }
+  const rT=TL?TL.results:T.results, rP=PL?PL.results:P.results;
+  const cpl=TL?(TL.results?TL.spend/TL.results:null):(T.results?T.spend/T.results:null);
+  const pcpl=PL?(PL.results?PL.spend/PL.results:null):(P.results?P.spend/P.results:null);
+  const otherNote=(TO&&(TO.spend>0||TO.results>0))?'<div style="font-size:12px;color:var(--slate);margin:-4px 0 14px;line-height:1.5"><b>Not in the lead figures above:</b> awareness, engagement and traffic campaigns spent '+obMoney(TO.spend)+' and got '+obNum(TO.results)+' results of other kinds (video views, reach, interactions) - those cannot be added to leads. Each campaign\'s own Result is in the table below.</div>':'';
   const ctr=T.impressions?T.clicks/T.impressions*100:null, pctr=P.impressions?P.clicks/P.impressions*100:null;
   // ---- header: period picker, account picker, freshness
   const lg=window._obLog, lastOk=accs.reduce(function(m,a){ return a.last_ok_at&&(!m||a.last_ok_at>m)?a.last_ok_at:m; },null);
@@ -38632,25 +38862,25 @@ function obAdsPaint(){
   const kpi=function(l,v,ch){ return '<div class="ob-kpi"><div class="l">'+l+'</div><div class="v">'+v+'</div>'+ch+'</div>'; };
   let html='<div class="ob-kpis">'
     +kpi('Spend',obMoney(T.spend),obChange(T.spend,P.spend,null))
-    +kpi(W.res,obNum(T.results,platform==='google'?1:0),obChange(T.results,P.results,true))
-    +kpi(W.per,obMoney(cpl),obChange(cpl,pcpl,false))
+    +kpi(platform==='meta'?'Leads &amp; chats':W.res,obNum(rT,platform==='google'?1:0),obChange(rT,rP,true))
+    +kpi(platform==='meta'?'Cost per lead':W.per,obMoney(cpl),obChange(cpl,pcpl,false))
     +kpi('Clicks',obNum(T.clicks),obChange(T.clicks,P.clicks,true))
     +kpi('Click rate (CTR)',obPct(ctr),obChange(ctr,pctr,true))
-    +'</div>';
+    +'</div>'+otherNote;
   // ---- chart
-  html+='<div class="card card-pad" style="margin-bottom:14px"><div style="font-weight:700;font-size:13.5px;margin-bottom:8px">Spend and '+W.res.toLowerCase()+' by day'+(OB_P.acct==='all'?'':' - '+esc(aName[OB_P.acct]||''))+'</div><div style="height:230px"><canvas id="obChart"></canvas></div></div>';
+  html+='<div class="card card-pad" style="margin-bottom:14px"><div style="font-weight:700;font-size:13.5px;margin-bottom:8px">Spend and '+(platform==='meta'?'leads &amp; chats':W.res.toLowerCase())+' by day'+(OB_P.acct==='all'?'':' - '+esc(aName[OB_P.acct]||''))+'</div><div style="height:230px"><canvas id="obChart"></canvas></div></div>';
   // ---- by project / account
-  const byAcc={}; (window._obCur||[]).forEach(function(c){ const a=byAcc[c.account_id]||(byAcc[c.account_id]={spend:0,clicks:0,impressions:0,results:0}); a.spend+=+c.spend||0; a.clicks+=+c.clicks||0; a.impressions+=+c.impressions||0; a.results+=+c.results||0; });
+  const byAcc={}; (window._obCur||[]).forEach(function(c){ const a=byAcc[c.account_id]||(byAcc[c.account_id]={spend:0,clicks:0,impressions:0,results:0,lspend:0,lres:0}); a.spend+=+c.spend||0; a.clicks+=+c.clicks||0; a.impressions+=+c.impressions||0; a.results+=+c.results||0; if(platform==='meta'&&obIsLead(E,c)){ a.lspend+=+c.spend||0; a.lres+=+c.results||0; } });
   const allSpend=Object.keys(byAcc).reduce(function(s,k){ return s+byAcc[k].spend; },0);
   const accRows=Object.keys(byAcc).filter(function(k){ return byAcc[k].spend>0||byAcc[k].results>0; }).sort(function(a,b){ return byAcc[b].spend-byAcc[a].spend; }).map(function(k){
     const a=byAcc[k];
     return '<tr style="cursor:pointer" class="'+(OB_P.acct===k?'ob-sel':'')+'" onclick="OB_P.acct=(OB_P.acct===\''+k+'\'?\'all\':\''+k+'\');OB_P.showAds=12;obAdsPaint()"><td><b>'+esc(aName[k]||k)+'</b></td>'
       +'<td class="ob-num">'+obMoney(a.spend)+'</td><td class="ob-num" style="color:var(--slate)">'+(allSpend?Math.round(a.spend/allSpend*100):0)+'%</td>'
-      +'<td class="ob-num">'+obNum(a.results,platform==='google'?1:0)+'</td><td class="ob-num">'+obMoney(a.results?a.spend/a.results:null)+'</td>'
+      +'<td class="ob-num">'+(platform==='meta'?obNum(a.lres):obNum(a.results,1))+'</td><td class="ob-num">'+(platform==='meta'?obMoney(a.lres?a.lspend/a.lres:null):obMoney(a.results?a.spend/a.results:null))+'</td>'
       +'<td class="ob-num">'+obNum(a.clicks)+'</td><td class="ob-num">'+obPct(a.impressions?a.clicks/a.impressions*100:null)+'</td></tr>';
   }).join('');
   if(accRows) html+='<div class="card" style="margin-bottom:14px;overflow-x:auto"><div style="padding:12px 15px;font-weight:700;font-size:13.5px">By '+(platform==='meta'?'project':'account')+' <span style="font-weight:500;color:var(--slate);font-size:12px">- click one to see only its campaigns and ads</span></div>'
-    +'<table class="tbl" style="width:100%;font-size:13px"><thead><tr><th>'+(platform==='meta'?'Project':'Account')+'</th><th class="ob-num">Spend</th><th class="ob-num">Share</th><th class="ob-num">'+W.res+'</th><th class="ob-num">'+W.per+'</th><th class="ob-num">Clicks</th><th class="ob-num">CTR</th></tr></thead><tbody>'+accRows+'</tbody></table></div>';
+    +'<table class="tbl" style="width:100%;font-size:13px"><thead><tr><th>'+(platform==='meta'?'Project':'Account')+'</th><th class="ob-num">Spend</th><th class="ob-num">Share</th><th class="ob-num">'+(platform==='meta'?'Leads &amp; chats':W.res)+'</th><th class="ob-num">'+(platform==='meta'?'Cost per lead':W.per)+'</th><th class="ob-num">Clicks</th><th class="ob-num">CTR</th></tr></thead><tbody>'+accRows+'</tbody></table></div>';
   // ---- campaigns with spend in the period
   const camps=cur.filter(function(c){ return (+c.spend||0)>0||(+c.results||0)>0; }).sort(function(a,b){ return b.spend-a.spend; });
   const st=function(s){ s=String(s||''); const on=s==='ACTIVE'||s==='ENABLED'; return '<span class="tag '+(on?'t-green':'t-gray')+'">'+(on?'Running':s?s.charAt(0)+s.slice(1).toLowerCase().replace(/_/g,' '):'—')+'</span>'; };
@@ -38660,7 +38890,7 @@ function obAdsPaint(){
         const e=E['campaign:'+c.campaign_id]||{};
         const bud=e.daily_budget!=null?obMoney(e.daily_budget)+'<span style="color:var(--slate);font-size:11px"> /day</span>':(e.lifetime_budget!=null?obMoney(e.lifetime_budget)+'<span style="color:var(--slate);font-size:11px"> total</span>':'—');
         return '<tr><td style="max-width:340px">'+esc(e.name||c.campaign_id)+'</td>'+(OB_P.acct==='all'?'<td style="font-size:12px">'+esc(aName[c.account_id]||'')+'</td>':'')
-          +'<td>'+st(e.status)+'</td><td class="ob-num">'+bud+'</td><td class="ob-num"><b>'+obMoney(c.spend)+'</b></td><td class="ob-num">'+obNum(c.results,platform==='google'?1:0)+'</td>'
+          +'<td>'+st(e.status)+'</td><td class="ob-num">'+bud+'</td><td class="ob-num"><b>'+obMoney(c.spend)+'</b></td><td class="ob-num">'+obNum(c.results,platform==='google'?1:0)+(platform==='meta'&&!obIsLead(E,c)?' <span class="tag t-gray" style="font-size:10px" title="This campaign\'s Result is not a lead: it is whatever the campaign is set to get (views, reach or interactions)">'+(OB_OBJ_NAME[e.objective]||'Other')+'</span>':'')+'</td>'
           +'<td class="ob-num">'+obMoney(+c.results?c.spend/c.results:null)+'</td><td class="ob-num">'+obNum(c.clicks)+'</td><td class="ob-num">'+obPct(+c.impressions?c.clicks/c.impressions*100:null)+'</td></tr>';
       }).join('')+'</tbody></table>':'<div class="card-pad" style="color:var(--slate);font-size:13px">No campaign spent in this period.</div>')+'</div>';
   // ---- ads
@@ -38681,7 +38911,7 @@ function obAdsPaint(){
       +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="OB_P.showAds+='+obAdStep(ads.length)+';obAdsPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
   }
   html+='<div style="font-size:11.5px;color:var(--slate);margin:16px 0 4px">'+(platform==='meta'
-      ?'Figures are Meta\'s own, using each account\'s attribution setting - the same as Ads Manager. Results = Ads Manager\'s "Results" column for each campaign - leads, WhatsApp chats started, ThruPlays or engagements, whatever the campaign is set to get - so totals add different kinds together, as Ads Manager\'s do. Reach is not shown: it counts unique people, so it cannot be added across days or campaigns.'
+      ?'Figures are Meta\'s own, using each account\'s attribution setting - the same as Ads Manager. Results = Ads Manager\'s "Results" column for each campaign - leads, WhatsApp chats started, ThruPlays or engagements, whatever the campaign is set to get - so the headline above counts lead campaigns only and never adds views or reach to leads. Reach counts unique people, so a campaign whose Result is reach cannot be added across days: its total here is the sum of each day, which is higher than the unique reach Ads Manager shows for the whole period. The latest day can move by a few rupees until Meta finishes counting it; JAIN-E re-reads the last 3 days every 15 minutes.'
       :'Figures are Google Ads\' own. Conversions = Google\'s "Conversions" column (it can include fractions and every conversion action set as primary). Google keeps adding late conversions to recent days for up to 30 days, so those can still rise.')+'</div>';
   $('obBody').innerHTML=html;
   // chart: day-by-day for the chosen account, or all
@@ -38695,7 +38925,17 @@ function obAdsPaint(){
 function obAdStep(total){ return Math.max(4,Math.ceil(Math.ceil(Math.max(0,total-12)/3)/4)*4); }
 async function obDrawChart(c,platform,r,days){
   const W=OB_ADS_WORD[platform];
-  if(!days){
+  if(platform==='meta'){
+    const E=window._obEnt||{}, m={};
+    for(let p=0;;p+=1000){
+      let q=sb.schema('camp').from('ads_daily').select('day,spend,results,campaign_id').eq('platform',platform).gte('day',r.s).lte('day',r.e).order('day',{ascending:true}).order('campaign_id',{ascending:true}).range(p,p+999);
+      if(OB_P.acct!=='all') q=q.eq('account_id',OB_P.acct);
+      const {data}=await q;
+      (data||[]).forEach(function(x){ const d=m[x.day]||(m[x.day]={day:x.day,spend:0,results:0}); d.spend+=+x.spend||0; if(obIsLead(E,x)) d.results+=+x.results||0; });
+      if(!data||data.length<1000) break;
+    }
+    days=Object.keys(m).sort().map(function(k){ return m[k]; });
+  } else if(!days){
     const {data}=await sb.schema('camp').from('ads_daily').select('day,spend,results').eq('platform',platform).eq('account_id',OB_P.acct).gte('day',r.s).lte('day',r.e).limit(5000);
     const m={}; (data||[]).forEach(function(x){ const d=m[x.day]||(m[x.day]={day:x.day,spend:0,results:0}); d.spend+=+x.spend||0; d.results+=+x.results||0; });
     days=Object.keys(m).sort().map(function(k){ return m[k]; });
@@ -38706,9 +38946,9 @@ async function obDrawChart(c,platform,r,days){
   if(!c.isConnected) return;
   OB_CHART=new Chart(c,{data:{labels:all.map(function(d){ return fmtDateShort(d); }),datasets:[
       {type:'bar',label:'Spend (₹)',data:all.map(function(d){ return by[d]?Math.round(+by[d].spend):0; }),backgroundColor:W.color+'55',borderColor:W.color,borderWidth:1,yAxisID:'y'},
-      {type:'line',label:W.res,data:all.map(function(d){ return by[d]?+by[d].results:0; }),borderColor:'#16a34a',backgroundColor:'#16a34a',pointRadius:all.length>45?0:2,tension:.25,yAxisID:'y2'}]},
+      {type:'line',label:platform==='meta'?'Leads & chats':W.res,data:all.map(function(d){ return by[d]?+by[d].results:0; }),borderColor:'#16a34a',backgroundColor:'#16a34a',pointRadius:all.length>45?0:2,tension:.25,yAxisID:'y2'}]},
     options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7}}},
-      scales:{x:{ticks:{maxTicksLimit:12}},y:{beginAtZero:true,title:{display:true,text:'Spend'}},y2:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},title:{display:true,text:W.res}}}}});
+      scales:{x:{ticks:{maxTicksLimit:12}},y:{beginAtZero:true,title:{display:true,text:'Spend'}},y2:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},title:{display:true,text:platform==='meta'?'Leads & chats':W.res}}}}});
 }
 // What to do when the platform cannot be read yet (most often: the Facebook key is not added).
 function obSetupNote(platform,msg){
@@ -38722,4 +38962,686 @@ function obSetupNote(platform,msg){
       +'<li>Supabase → Project Settings → Edge Functions → Secrets → add <code>META_SYSTEM_USER_TOKEN</code> with that token. Figures appear within 3 hours.</li></ol>'
       +'<div style="margin-top:6px;font-size:12px">Last attempt said: '+esc(msg.slice(0,200))+'</div></div>';
   return '<div class="card card-pad" style="color:#b91c1c;margin-bottom:14px;font-size:13px"><i class="fa-solid fa-triangle-exclamation"></i> Could not read '+esc(OB_ADS_WORD[platform].src)+': '+esc(msg.slice(0,300))+'</div>';
+}
+
+/* ============================ CAMPAIGN ANALYTICS - BY PROJECT, GOOGLE AND FACEBOOK TOGETHER ============================
+   6 Nov 2026, as Ayush asked: not a Facebook tab and a Google tab, but one page.
+     Period (or a date range) and, if wanted, a project at the top.
+     A row per project: Google and Facebook added together.
+     Click a project (or choose it) - its combined figures open under it, with a Google and a Facebook tile.
+     Click Google or Facebook - that platform's campaigns for the project, and every ad of all of them.
+     Click a campaign - its ad sets (Facebook) / ad groups (Google), the lowest level, and only its ads.
+     Click an ad set - only its ads.
+   Each step down filters the figures and the ads; the trail at the top of the platform section goes back up.
+   Data: camp.ads_daily / ads_ad_daily via the RPCs and helpers of 41-our-brand-ads.js (obRange, obIsLead ...).
+   Ad sets come from ads_ad_daily.adset_id, recorded from 6 Nov 2026 (migration 20261106200000). */
+let CA={proj:'all',open:null,plat:null,camp:null,adset:null,showAds:12};
+let CA_D=null;   // the period's data: {acc, ent, cur, prev, ads, hasSets}
+const CA_PLAT={google:{name:'Google',icon:'fa-brands fa-google',color:'#ea4335',res:'Conversions',per:'Cost per conversion',set:'Ad group',sets:'Ad groups'},
+               meta:{name:'Facebook',icon:'fa-brands fa-facebook',color:'#1877f2',res:'Leads & chats',per:'Cost per lead',set:'Ad set',sets:'Ad sets'}};
+const CA_CSS='<style>'
+  +'.ca-tbl{width:100%;border-collapse:collapse;font-size:13px}.ca-tbl th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--slate);background:#f8fafc;padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}'
+  +'.ca-tbl th:first-child,.ca-tbl td:first-child{text-align:left}.ca-tbl td{padding:11px 12px;border-bottom:1px solid #eef1f4;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}'
+  +'.ca-tbl tr.ca-row{cursor:pointer}.ca-tbl tr.ca-row:hover td{background:#f8fafc}.ca-tbl tr.ca-on>td{background:#eef4ff}'
+  +'.ca-tbl tr.ca-row td:first-child{font-weight:700}.ca-tbl .ca-caret{color:#94a3b8;font-size:11px;margin-right:8px;width:10px;display:inline-block}'
+  // thin rows under a project, each level indented a step further and a shade lighter in weight
+  +'.ca-tbl tr.ca-l1 td,.ca-tbl tr.ca-l2 td,.ca-tbl tr.ca-l3 td{padding-top:7px;padding-bottom:7px;font-size:12.5px}'
+  +'.ca-tbl tr.ca-l1 td:first-child{padding-left:34px;font-weight:650}'
+  +'.ca-tbl tr.ca-l2 td:first-child{padding-left:58px;font-weight:500;white-space:normal;max-width:460px}'
+  +'.ca-tbl tr.ca-l3 td:first-child{padding-left:82px;font-weight:400;white-space:normal;max-width:460px;color:#334155}'
+  +'.ca-tbl tr.ca-l1 td{background:#fcfcfd}.ca-tbl tr.ca-l2 td{background:#fafbfc}.ca-tbl tr.ca-l3 td{background:#f8f9fb}'
+  +'.ca-tbl tr.ca-none td{color:var(--slate);font-size:12px;text-align:left}.ca-tbl tr.ca-row.ca-on>td{background:#eef4ff}'
+  +'.ca-tbl tr.ca-l2.ca-none td:first-child{padding-left:58px}.ca-tbl tr.ca-l3.ca-none td:first-child{padding-left:82px}'
+  // the platform section sits in the table, right under its Google / Facebook row
+  +'.ca-below{margin-top:14px;scroll-margin-top:80px}'
+  +'.ca-sec .ca-tbl tr.ca-l0 td{font-size:13px;padding-top:9px;padding-bottom:9px}.ca-sec .ca-tbl tr.ca-l0 td:first-child{font-weight:600;min-width:280px}.ca-sec .ca-tbl tr.ca-l1 td:first-child{min-width:280px}'
+  +'.ca-sec{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}.ca-sec .ob-ads{padding:0 12px 12px}.ca-sec>div:last-child{padding-bottom:4px}'
+  +'</style>';
+
+// Leads that can honestly be added up: Google conversions, and Facebook results of lead / chat campaigns only.
+function caAgg(rows){
+  const E=CA_D.ent, t={spend:0,leads:0,lspend:0,clicks:0,impr:0};
+  rows.forEach(function(c){ const s=+c.spend||0; t.spend+=s; t.clicks+=+c.clicks||0; t.impr+=+c.impressions||0;
+    if(c.platform==='google'||obIsLead(E,c)){ t.leads+=+c.results||0; t.lspend+=s; } });
+  t.cpl=t.leads?t.lspend/t.leads:null; t.ctr=t.impr?t.clicks/t.impr*100:null; return t;
+}
+// Running now (Facebook ACTIVE, Google ENABLED) - only these are listed below a platform (6 Nov 2026).
+function caLive(s){ s=String(s||''); return s==='ACTIVE'||s==='ENABLED'; }
+function caLeads(x,plat){ return obNum(x,plat==='google'||(plat==null&&x%1)?1:0); }
+
+async function caView(host){
+  host.innerHTML=OB_CSS+CA_CSS+'<div id="caHead"></div><div id="caBody"><div class="loader"><div class="spin"></div></div></div>';
+  await caLoad();
+}
+async function caLoad(){
+  const r=obRange(), rpc=function(fn,a){ return sb.schema('camp').rpc(fn,a); };
+  const plats=['meta','google'];
+  const ads=async function(p){ const v=await rpc('ads_ad_totals_v2',{p_platform:p,p_from:r.s,p_to:r.e,p_limit:5000});
+    if(!v.error) return {rows:v.data||[],sets:true};
+    const o=await rpc('ads_ad_totals',{p_platform:p,p_from:r.s,p_to:r.e,p_limit:5000}); return {rows:o.data||[],sets:false,error:o.error}; };
+  const res=await Promise.all([
+    sb.schema('camp').from('ads_accounts').select('platform,account_id,name,project').eq('include',true),
+    obEntities('meta'), obEntities('google'),
+    rpc('ads_campaign_totals',{p_platform:'meta',p_from:r.s,p_to:r.e}), rpc('ads_campaign_totals',{p_platform:'google',p_from:r.s,p_to:r.e}),
+    rpc('ads_campaign_totals',{p_platform:'meta',p_from:r.ps,p_to:r.pe}), rpc('ads_campaign_totals',{p_platform:'google',p_from:r.ps,p_to:r.pe}),
+    ads('meta'), ads('google')]);
+  const bad=[res[0],res[3],res[4],res[5],res[6]].filter(function(x){ return x.error; })[0];
+  if(bad){ $('caBody').innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(bad.error.message)+'</div>'; return; }
+  const acc={}; (res[0].data||[]).forEach(function(a){ acc[a.platform+':'+a.account_id]={project:a.project||a.name||a.account_id,name:a.name}; });
+  const ent={}; res[1].concat(res[2]).forEach(function(x){ ent[x.kind+':'+x.id]=x; });
+  const tag=function(p,rows){ return (rows||[]).filter(function(c){ return acc[p+':'+c.account_id]; }).map(function(c){ return Object.assign({platform:p,project:acc[p+':'+c.account_id].project},c); }); };
+  CA_D={acc:acc,ent:ent,cur:tag('meta',res[3].data).concat(tag('google',res[4].data)),prev:tag('meta',res[5].data).concat(tag('google',res[6].data)),
+        ads:tag('meta',res[7].rows).concat(tag('google',res[8].rows)),hasSets:res[7].sets&&res[8].sets};
+  caPaint();
+}
+// every project with an account on either platform, the biggest spender first
+function caProjects(){
+  const all={}; Object.keys(CA_D.acc).forEach(function(k){ all[CA_D.acc[k].project]=1; });
+  const sp={}; CA_D.cur.forEach(function(c){ sp[c.project]=(sp[c.project]||0)+(+c.spend||0); });
+  return Object.keys(all).sort(function(a,b){ return (sp[b]||0)-(sp[a]||0)||a.localeCompare(b); });
+}
+/* ONE THIN TABLE, OPENED LIKE A TREE (6 Nov 2026, Ayush: no thick panel - a project opens into a thin
+   Google row and a thin Facebook row, a platform into its campaign rows, a campaign into its ad set rows).
+   Every row has the same columns; only the indent and the caret say how deep it is. The ads of whatever
+   is open sit under the table and narrow as you go down. */
+function caPaint(){
+  const r=obRange(), P=caProjects(), E=CA_D.ent; window._caP=P;
+  if(CA.proj!=='all'&&P.indexOf(CA.proj)===-1) CA.proj='all';
+  $('caHead').innerHTML='<div class="ob-bar">'
+    +compSelHtml('caPer',OB_PERIODS,OB_P.period,"OB_P.period=this.value;caReset();caLoad()")
+    +(OB_P.period==='custom'?'<input type="date" value="'+esc(r.s)+'" onchange="OB_P.from=this.value;caLoad()"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(r.e)+'" onchange="OB_P.to=this.value;caLoad()">':'')
+    +compSelHtml('caProj',[['all','All projects']].concat(P.map(function(p){ return [p,p]; })),CA.proj,"caPickProject(this.value)")
+    +'<span style="font-size:12.5px;color:var(--slate)">'+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+' · Google and Facebook together</span></div>';
+  if(CA.proj!=='all') CA.open=CA.proj;
+  const caret=function(on){ return '<span class="ca-caret"><i class="fa-solid fa-chevron-'+(on?'down':'right')+'"></i></span>'; };
+  const stat=function(s){ s=String(s||''); if(!s) return ''; const on=s==='ACTIVE'||s==='ENABLED'; return ' <span class="tag '+(on?'t-green':'t-gray')+'" style="font-size:10px;margin-left:6px">'+(on?'Running':s.charAt(0)+s.slice(1).toLowerCase().replace(/_/g,' '))+'</span>'; };
+  // spend, leads (or results), cost per lead, clicks, CTR - the same five columns at every level
+  const cols=function(t){ return '<td><b>'+obMoney(t.spend)+'</b></td><td>'+t.lead+'</td><td>'+obMoney(t.cpl)+'</td><td>'+obNum(t.clicks)+'</td><td>'+obPct(t.ctr)+'</td>'; };
+  const sum=function(rows,pl){ const a=caAgg(rows); return {spend:a.spend,lead:caLeads(a.leads,pl),cpl:a.cpl,clicks:a.clicks,ctr:a.ctr}; };
+  const raw=function(x,pl,lead){ const s=+x.spend||0, rr=+x.results||0;
+    return {spend:s,lead:obNum(rr,pl==='google'?1:0)+(lead===false?' <span class="tag t-gray" style="font-size:10px">not leads</span>':''),cpl:rr?s/rr:null,clicks:+x.clicks||0,ctr:+x.impressions?x.clicks/x.impressions*100:null}; };
+  /* A PLATFORM'S SECTION (6 Nov 2026, Ayush): its running campaigns in a section of their own, under the whole
+     projects table - the page scrolls to it on the click, as at the foot of the page it otherwise sat unseen; a campaign opens its running ad sets inside it, and the ads
+     follow whatever is open. Paused, ended and deleted ones are left out here - their spend still counts above. */
+  const section=function(){
+    const p=CA.open, pl=CA.plat, W=CA_PLAT[pl];
+    const camps=CA_D.cur.filter(function(c){ return c.project===p&&c.platform===pl&&caLive((E['campaign:'+c.campaign_id]||{}).status)&&((+c.spend||0)>0||(+c.results||0)>0); }).sort(function(a,b){ return b.spend-a.spend; });
+    let sec='';
+    camps.forEach(function(c){
+      const e=E['campaign:'+c.campaign_id]||{}, con=CA.camp===c.campaign_id;
+      sec+='<tr class="ca-row ca-l0'+(con?' ca-on':'')+'" onclick="caCamp(\''+c.campaign_id+'\')"><td style="white-space:normal">'+caret(con)+esc(e.name||c.campaign_id)+'</td>'+cols(raw(c,pl,pl==='meta'?obIsLead(E,c):null))+'</tr>';
+      if(!con) return;
+      const ads=CA_D.ads.filter(function(a){ return a.platform===pl&&a.campaign_id===c.campaign_id; });
+      if(!CA_D.hasSets||!ads.some(function(a){ return a.adset_id; })){
+        sec+='<tr class="ca-l1 ca-none"><td colspan="6"><i class="fa-solid fa-circle-info"></i> '+W.sets+' are recorded from tonight (6 Nov 2026) and show here from tomorrow.</td></tr>'; return; }
+      const g={}; ads.forEach(function(a){ if(!a.adset_id||!caLive((E['adset:'+a.adset_id]||{}).status)) return; const x=g[a.adset_id]||(g[a.adset_id]={adset_id:a.adset_id,spend:0,results:0,clicks:0,impressions:0}); x.spend+=+a.spend||0; x.results+=+a.results||0; x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; });
+      const sets=Object.keys(g).map(function(k){ return g[k]; }).sort(function(a,b){ return b.spend-a.spend; });
+      if(!sets.length) sec+='<tr class="ca-l1 ca-none"><td colspan="6">No running '+W.set.toLowerCase()+' in this campaign</td></tr>';
+      sets.forEach(function(s){
+        const son=CA.adset===s.adset_id;
+        sec+='<tr class="ca-row ca-l1'+(son?' ca-on':'')+'" onclick="caSet(\''+s.adset_id+'\')"><td style="white-space:normal">'+esc((E['adset:'+s.adset_id]||{}).name||s.adset_id)+'</td>'+cols(raw(s,pl,null))+'</tr>';
+      });
+    });
+    return '<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p)
+      +' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+camps.length+' running campaign'+(camps.length===1?'':'s')+'; click one for its '+W.sets.toLowerCase()+'</span></div>'
+      +'<table class="ca-tbl"><thead><tr><th>Campaign</th><th>Spend</th><th>'+(pl==='meta'?'Results':W.res)+'</th><th>Cost per result</th><th>Clicks</th><th>CTR</th></tr></thead><tbody>'
+      +(sec||'<tr><td colspan="6" style="text-align:center;color:var(--slate);padding:18px">No running campaign spent in this period</td></tr>')+'</tbody></table></div>'
+      +caAds(p,pl);
+  };
+  const shown=CA.proj==='all'?P:[CA.proj];
+  let rows='';
+  shown.forEach(function(p){
+    const cur=CA_D.cur.filter(function(c){ return c.project===p; }), on=CA.open===p;
+    rows+='<tr class="ca-row ca-l0'+(on?' ca-on':'')+'" onclick="caToggle('+P.indexOf(p)+')"><td>'+caret(on)+esc(p)+'</td>'+cols(sum(cur))+'</tr>';
+    if(!on) return;
+    ['google','meta'].forEach(function(pl){
+      const W=CA_PLAT[pl], pc=cur.filter(function(c){ return c.platform===pl; }), pon=CA.plat===pl;
+      const has=Object.keys(CA_D.acc).some(function(k){ return k.indexOf(pl+':')===0&&CA_D.acc[k].project===p; });
+      if(!has){ rows+='<tr class="ca-l1 ca-none"><td><span class="ca-caret"></span><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+'</td><td colspan="5">No '+W.name+' account for this project</td></tr>'; return; }
+      // no caret: Google / Facebook do not open in the table, a click shows their section below (6 Nov 2026)
+      rows+='<tr class="ca-row ca-l1'+(pon?' ca-on':'')+'" onclick="caPlat(\''+pl+'\')"><td><span class="ca-caret"></span><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+'</td>'+cols(sum(pc,pl))+'</tr>';
+      if(!pon) return;
+    });
+  });
+  let html='<div class="card" style="overflow-x:auto"><table class="ca-tbl"><thead><tr><th>Project</th><th>Spend</th><th>Leads</th><th>Cost per lead</th><th>Clicks</th><th>CTR</th></tr></thead><tbody>'
+    +(rows||'<tr><td colspan="6" style="text-align:center;color:var(--slate);padding:24px">No ad accounts</td></tr>')+'</tbody></table></div>';
+  // the open platform's campaigns, ad sets and ads come under the whole projects table, and the page
+  // scrolls down to them (caPlat) so they are seen
+  if(CA.open&&CA.plat) html+='<div class="ca-below" id="caBelow">'+section()+'</div>';
+  html+='<div style="font-size:11.5px;color:var(--slate);margin:12px 2px 4px;line-height:1.5">Leads = Google conversions + Facebook leads and WhatsApp chats from lead campaigns. Below a project, each row shows its own Results (Facebook awareness or engagement campaigns are marked "not leads"). Figures are Google Ads\' and Meta\'s own, refreshed through the day.</div>';
+  $('caBody').innerHTML=html;
+}
+// The ads of what is open: every campaign of the platform, one campaign, or one ad set.
+function caAds(p,pl){
+  const W=CA_PLAT[pl], E=CA_D.ent;
+  let ads=CA_D.ads.filter(function(a){ return a.project===p&&a.platform===pl&&caLive((E['ad:'+a.ad_id]||{}).status)&&caLive((E['campaign:'+a.campaign_id]||{}).status)&&(!a.adset_id||caLive((E['adset:'+a.adset_id]||{}).status)); });
+  if(CA.camp) ads=ads.filter(function(a){ return a.campaign_id===CA.camp; });
+  if(CA.adset) ads=ads.filter(function(a){ return a.adset_id===CA.adset; });
+  const where=CA.adset?(E['adset:'+CA.adset]||{}).name||W.set:CA.camp?(E['campaign:'+CA.camp]||{}).name||'this campaign':'all '+W.name+' campaigns';
+  const stat=function(s){ s=String(s||''); const on=s==='ACTIVE'||s==='ENABLED'; return '<span class="tag '+(on?'t-green':'t-gray')+'" style="font-size:10.5px">'+(on?'Running':s?s.charAt(0)+s.slice(1).toLowerCase().replace(/_/g,' '):'—')+'</span>'; };
+  const shown=ads.slice(0,CA.showAds);
+  let h='<div style="font-weight:700;font-size:13.5px;margin:16px 2px 10px"><i class="'+W.icon+'" style="color:'+W.color+'"></i> Ads <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' that ran in this period · '+esc(p)+' · '+esc(where)+'</span></div>';
+  if(!ads.length) return h+'<div style="font-size:12.5px;color:var(--slate);margin:0 2px">No ad ran here in this period.</div>';
+  return h+'<div class="ob-ads">'+shown.map(function(a){
+      const e=E['ad:'+a.ad_id]||{}, words=String(e.body||e.name||('Ad '+a.ad_id)).split('\n');
+      const pic=e.thumbnail?'<div class="pic"><img src="'+esc(e.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" alt=""></div>'
+        :'<div class="txt">'+(pl==='google'?'<div class="sp">Sponsored</div>':'')+'<div class="h">'+esc(words[0])+'</div>'+(words[1]?'<div class="d">'+esc(words.slice(1).join(' '))+'</div>':'')+'</div>';
+      return '<div class="ob-ad">'+pic+'<div style="padding:9px 12px 0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(e.name||'')+'">'+esc(e.name||('Ad '+a.ad_id))+'</div>'
+        +'<div style="padding:0 12px;font-size:11.5px;color:var(--slate)">'+stat(e.status)+'</div>'
+        +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+(pl==='meta'?'Results':W.res)+'</span><b>'+obNum(a.results,pl==='google'?1:0)+'</b><span>Cost per result</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b></div></div>';
+    }).join('')+'</div>'
+    +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="CA.showAds+='+obAdStep(ads.length)+';caPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
+}
+function caReset(){ CA.open=CA.proj==='all'?null:CA.proj; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; }
+window.caPickProject=function(v){ CA.proj=v; CA.open=v==='all'?null:v; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
+window.caToggle=function(i){ const p=window._caP[i]; CA.open=CA.open===p?null:p; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
+window.caPlat=function(p){ CA.plat=CA.plat===p?null:p; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint();
+  requestAnimationFrame(function(){ const s=$('caBelow'); if(s) s.scrollIntoView({block:'start'}); }); };
+window.caCamp=function(id){ CA.camp=CA.camp===id?null:id; CA.adset=null; CA.showAds=12; caPaint(); };
+window.caSet=function(id){ CA.adset=CA.adset===id?null:id; CA.showAds=12; caPaint(); };
+window.caUp=function(level){ if(level<=0){ CA.plat=null; } if(level<=1) CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
+
+/* ==========================================================================================
+   POSTS & REELS (module id 'organic') - organic Facebook, and Instagram once it is linked
+   ==========================================================================================
+   Rebuilt 6 Nov 2026, as asked ("I want everything automatic"). The first version lived in
+   31-transcription.js and was removed on 16 Oct; this file is the whole module now.
+
+   ORGANIC ONLY - paid ads are Campaign Analytics.
+
+   WHERE THE NUMBERS COME FROM. The edge function social-organic-live reads Meta with the saved
+   server key every morning at 06:00 IST (cron 'social-organic-daily') and when someone presses
+   Refresh now. It writes camp.social_posts (each post / reel / carousel), camp.social_page_daily
+   (the Page's own totals per day) and camp.social_sync_state (when it last ran). This page only
+   reads those tables - it never calls Meta itself, so opening it costs nothing.
+
+   BE HONEST ABOUT REACH. Meta gives reach for the PAGE (Viewers, per day) but not per Facebook
+   post or reel - it accepts the request and returns 0 for every post (probed 6 Nov 2026). So the
+   Page's reach is on Overview, Facebook rows are measured by Views and interactions, and a reach
+   column appears only where Meta really reports it (Instagram). A dot with a tooltip marks a
+   number Meta does not report for that kind of content; a muted 0 is a real zero. */
+let ORG_PERIOD='last_28d', ORG_SINCE='', ORG_UNTIL='', ORG_NET='all', ORG_KIND='all',
+    ORG_PAGE='all', ORG_SORT='date', ORG_DIR=-1, ORG_Q='', ORG_PG=0, ORG_OPEN=false,
+    ORG_ROWS=null, ORG_PAGES=null, ORG_DAILY=null, ORG_STATE=undefined, ORG_LAST_TI=-1;
+const ORG_PER=25;
+const ORG_TABS=['Overview','Facebook','Instagram','Reels','Top performers'];
+const ORG_PRESETS=[
+  ['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_28d','Last 28 days'],['last_90d','Last 90 days'],
+  ['this_week','This week'],['this_month','This month'],['this_year','This year'],
+  ['last_week','Last week'],['last_month','Last month'],['lifetime','Lifetime'],['custom','Custom']
+];
+function orgDay(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function orgAdd(d,n){const x=new Date(d.getTime());x.setDate(x.getDate()+n);return x;}
+// Monday-start weeks, to match how Business Suite reports.
+function orgMonday(d){const x=new Date(d.getTime());const off=(x.getDay()+6)%7;x.setDate(x.getDate()-off);return x;}
+function orgRange(){
+  const today=new Date(); today.setHours(12,0,0,0);
+  const P=ORG_PERIOD;
+  if(P==='lifetime')   return {since:'',until:''};
+  if(P==='custom')     return {since:ORG_SINCE,until:ORG_UNTIL};
+  if(P==='yesterday'){ const d=orgAdd(today,-1); return {since:orgDay(d),until:orgDay(d)}; }
+  if(P==='last_7d')    return {since:orgDay(orgAdd(today,-7)),  until:orgDay(orgAdd(today,-1))};
+  if(P==='last_28d')   return {since:orgDay(orgAdd(today,-28)), until:orgDay(orgAdd(today,-1))};
+  if(P==='last_90d')   return {since:orgDay(orgAdd(today,-90)), until:orgDay(orgAdd(today,-1))};
+  if(P==='this_week')  return {since:orgDay(orgMonday(today)), until:orgDay(today)};
+  if(P==='this_month') return {since:orgDay(new Date(today.getFullYear(),today.getMonth(),1)), until:orgDay(today)};
+  if(P==='this_year')  return {since:orgDay(new Date(today.getFullYear(),0,1)), until:orgDay(today)};
+  if(P==='last_week'){ const m=orgMonday(today); return {since:orgDay(orgAdd(m,-7)), until:orgDay(orgAdd(m,-1))}; }
+  if(P==='last_month'){ const f=new Date(today.getFullYear(),today.getMonth()-1,1), l=new Date(today.getFullYear(),today.getMonth(),0);
+                        return {since:orgDay(f),until:orgDay(l)}; }
+  return {since:'',until:''};
+}
+function orgRangeLabel(){
+  if(ORG_PERIOD==='lifetime') return 'All time';
+  const r=orgRange(); if(!r.since||!r.until) return 'Pick two dates';
+  const f=function(s){const d=new Date(s+'T00:00:00');return d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});};
+  return r.since===r.until ? f(r.since) : (f(r.since)+' – '+f(r.until));
+}
+function orgPresetLabel(){ return ((ORG_PRESETS.find(function(p){return p[0]===ORG_PERIOD;})||[])[1])||'Custom'; }
+function orgInRange(d){ const R=orgRange(); d=String(d||'').slice(0,10); if(!d) return true;
+  return !(R.since&&d<R.since) && !(R.until&&d>R.until); }
+
+const ORG_CSS='<style id="orgCss">'
++'.org-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}'
++'.org-dp{position:relative}'
++'.org-dp-btn{display:flex;align-items:center;gap:10px;height:42px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg-card);cursor:pointer;transition:.15s;min-width:0}'
++'.org-dp-btn:hover{border-color:var(--brand)}'
++'.org-dp.open .org-dp-btn{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10,#eef2ff)}'
++'.org-dp-btn i.cal{color:var(--brand);font-size:14px}'
++'.org-dp-lab{display:flex;flex-direction:column;align-items:flex-start;line-height:1.25;min-width:0}'
++'.org-dp-lab b{font-size:13px;font-weight:700;color:var(--ink);white-space:nowrap}'
++'.org-dp-lab span{font-size:11px;color:var(--slate);white-space:nowrap}'
++'.org-dp-btn i.cv{margin-left:6px;color:var(--slate);font-size:11px;transition:transform .15s}'
++'.org-dp.open .org-dp-btn i.cv{transform:rotate(180deg)}'
++'.org-dp-pan{position:absolute;top:calc(100% + 6px);left:0;z-index:80;background:var(--bg-card);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 38px rgba(15,23,42,.18);padding:9px;display:none;width:352px;max-width:92vw;box-sizing:border-box}'
++'.org-dp.open .org-dp-pan{display:block}'
++'.org-dp-list{display:grid;grid-template-columns:1fr 1fr;gap:3px}'
++'.org-dp-opt{padding:8px 11px;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer;white-space:nowrap;border:1px solid transparent}'
++'.org-dp-opt:hover{background:var(--bg,#f8fafc)}'
++'.org-dp-opt.on{background:var(--brand-a10,#eef2ff);color:var(--brand);border-color:var(--brand)}'
++'.org-dp-cus{border-top:1px solid var(--line);margin-top:8px;padding-top:10px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}'
++'.org-dp-cus label{display:flex;flex-direction:column;gap:4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);flex:1 1 130px;min-width:0}'
++'.org-dp-cus input{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font-size:13px;font-family:inherit;color:var(--ink);background:var(--bg-card);width:100%;box-sizing:border-box}'
++'.org-dp-cus button{height:36px;padding:0 16px;border-radius:8px;border:0;background:var(--brand);color:#fff;font-size:13px;font-weight:700;cursor:pointer}'
++'.org-fbtn{height:34px;padding:0 13px;border:1px solid var(--line);border-radius:20px;background:var(--bg-card);font-size:12.5px;font-weight:600;color:var(--slate);cursor:pointer;transition:.14s;display:inline-flex;align-items:center;gap:6px}'
++'.org-fbtn:hover{border-color:var(--brand);color:var(--brand)}'
++'.org-fbtn.on{background:var(--brand);border-color:var(--brand);color:#fff}'
++'.org-fbtn .n{font-size:11px;opacity:.75;font-weight:700}'
++'.org-search{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 12px;font-size:13px;font-family:inherit;min-width:190px;flex:1 1 190px;max-width:300px;background:var(--bg-card);color:var(--ink);box-sizing:border-box}'
++'.org-sel{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 11px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer}'
++'.org-st{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:11px 15px;margin-bottom:14px;font-size:12.5px;color:var(--slate)}'
++'.org-st b{color:var(--ink)}'
++'.org-st .grow{flex:1 1 300px;min-width:0;line-height:1.6}'
++'.org-st .err{color:#b45309}'
++'.org-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}'
++'.org-kpi{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:13px 15px}'
++'.org-kpi .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);display:flex;align-items:center;gap:6px}'
++'.org-kpi .v{font-size:22px;font-weight:800;color:var(--ink);margin-top:5px;letter-spacing:-.02em}'
++'.org-kpi .s{font-size:11.5px;color:var(--slate);margin-top:2px}'
++'.org-h2{font-size:13px;font-weight:700;color:var(--ink);margin:4px 0 8px;display:flex;align-items:center;gap:7px}'
++'.org-h2 i{color:var(--slate)}'
++'.org-card{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}'
++'.org-chart{width:100%;height:150px;display:block}'
++'.org-chart rect{fill:var(--brand);opacity:.8}'
++'.org-chart rect:hover{opacity:1}'
++'.org-chart text{font-size:10px;fill:var(--slate)}'
++'.org-grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;margin-bottom:6px}'
++'.org-tblwrap{border:1px solid var(--line);border-radius:12px;overflow-x:auto;background:var(--bg-card)}'
++'.org-tbl{width:100%;border-collapse:collapse;font-size:13px;min-width:860px}'
++'.org-tbl th{text-align:left;padding:11px 13px;background:var(--bg,#f8fafc);color:var(--slate);font-weight:700;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--line)}'
++'.org-tbl th.sort{cursor:pointer;user-select:none}'
++'.org-tbl th.sort:hover,.org-tbl th.on{color:var(--brand)}'
++'.org-tbl th .ar{font-size:9px;margin-left:4px}'
++'.org-tbl th.n,.org-tbl td.n{text-align:right}'
++'.org-tbl td{padding:11px 13px;border-bottom:1px solid var(--line);color:var(--ink);vertical-align:middle}'
++'.org-tbl tbody tr{cursor:pointer;transition:background .12s}'
++'.org-tbl tbody tr:hover{background:var(--bg,#f8fafc)}'
++'.org-tbl tbody tr:last-child td{border-bottom:0}'
++'.org-tbl.plain tbody tr{cursor:default}'
++'.org-post{display:flex;align-items:center;gap:11px;min-width:0;max-width:390px}'
++'.org-thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none;background:var(--bg,#f1f5f9);border:1px solid var(--line)}'
++'.org-thumb-ph{width:44px;height:44px;border-radius:8px;flex:none;background:var(--bg,#f1f5f9);border:1px solid var(--line);display:grid;place-items:center;color:#cbd5e1;font-size:15px}'
++'.org-ptxt{min-width:0}'
++'.org-ptxt b{font-size:13px;font-weight:600;color:var(--ink);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}'
++'.org-tag{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}'
++'.org-tag.reel{background:#fae8ff;color:#a21caf}.org-tag.video{background:#e0e7ff;color:#3730a3}.org-tag.carousel{background:#fef3c7;color:#92400e}.org-tag.post{background:#f1f5f9;color:#475569}'
++'.org-rank{font-weight:800;color:var(--slate);width:28px}'
++'.org-er{font-weight:700}'
++'.org-na{color:#cbd5e1;cursor:help}'
++'.org-zero{color:#94a3b8}'
++'.org-date{white-space:nowrap;font-size:12.5px;color:var(--slate)}'
++'.org-netic{margin-left:auto;flex:none;font-size:13px;opacity:.55}'
++'.org-netic.fa-facebook{color:#1877f2}.org-netic.fa-instagram{color:#e1306c}'
++'.org-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap}'
++'.org-pager .info{font-size:12.5px;color:var(--slate)}'
++'.org-pager button{height:34px;padding:0 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg-card);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}'
++'.org-pager button:disabled{opacity:.45;cursor:not-allowed}'
++'.org-note{display:flex;align-items:flex-start;gap:9px;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:10px 13px;font-size:12px;color:var(--slate);line-height:1.55;margin:0 0 14px}'
++'.org-note i{color:#94a3b8;margin-top:2px;flex:none}'
++'.org-empty{border:1px dashed var(--line);border-radius:12px;padding:34px 20px;text-align:center;color:var(--slate);font-size:13.5px;line-height:1.6}'
++'.org-empty>i{font-size:26px;color:#cbd5e1;display:block;margin-bottom:10px}'
++'.org-dtl-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;margin-top:4px}'
++'.org-dtl-f .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)}'
++'.org-dtl-f .v{font-size:14px;font-weight:700;color:var(--ink);margin-top:2px;overflow-wrap:anywhere}'
+/* the whole picture, letterboxed - never cropped, never wider than the dialog */
++'.org-dtl-img{width:100%;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden;display:flex;align-items:center;justify-content:center}'
++'.org-dtl-img img{max-width:100%;max-height:340px;object-fit:contain;display:block}'
++'.org-dtl-msg{font-size:13.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere;max-height:170px;overflow-y:auto}'
++'.org-dtl *{max-width:100%;box-sizing:border-box}'
++'@media(max-width:1100px){.org-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.org-grid2{grid-template-columns:minmax(0,1fr)}}'
++'@media(max-width:760px){.org-dp-list{grid-template-columns:1fr}.org-kpi .v{font-size:19px}.org-post{max-width:220px}}'
++'@media(max-width:480px){.org-kpis{grid-template-columns:1fr}}'
++'</style>';
+
+function orgN(v){const n=Number(v)||0; if(n>=1e7)return (n/1e7).toFixed(2).replace(/\.00$/,'')+' Cr'; if(n>=1e5)return (n/1e5).toFixed(2).replace(/\.00$/,'')+' L'; if(n>=1000)return (n/1000).toFixed(1).replace(/\.0$/,'')+'k'; return String(n);}
+function orgDT(s){ if(!s)return '—'; try{return new Date(s).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return String(s);} }
+function orgAgo(s){ if(!s)return 'never'; const m=Math.round((Date.now()-new Date(s).getTime())/60000);
+  if(m<1)return 'just now'; if(m<60)return m+' min ago'; const h=Math.round(m/60); if(h<36)return h+' h ago'; return Math.round(h/24)+' days ago'; }
+function orgEng(r){ return (Number(r.likes)||0)+(Number(r.comments)||0)+(Number(r.shares)||0)+(Number(r.saves)||0); }
+// An engagement RATE needs reach, and only Instagram reports reach per post.
+function orgHasReach(r){ return (Number(r.reach)||0)>0; }
+function orgER(r){ const reach=Number(r.reach)||0; return reach? (orgEng(r)/reach*100) : null; }
+function orgKindLabel(k){ return k==='reel'?'Reel':(k==='carousel'?'Carousel':(k==='video'?'Video':'Post')); }
+function orgViews(r){ return Number(r.views)||Number(r.plays)||Number(r.video_views)||0; }
+// Meta reports watch time in milliseconds.
+function orgSecs(ms){ const s=(Number(ms)||0)/1000; return s>=60?(Math.floor(s/60)+'m '+Math.round(s%60)+'s'):(s<10?s.toFixed(1)+'s':Math.round(s)+'s'); }
+function orgWatch(ms){ const s=(Number(ms)||0)/1000;
+  if(s>=3600){ const h=Math.floor(s/3600); return orgN(h)+'h '+Math.round((s%3600)/60)+'m'; }
+  if(s>=60) return Math.floor(s/60)+'m '+Math.round(s%60)+'s';
+  return Math.round(s)+'s'; }
+// Some thumbnails 404 or are blocked; swap in a placeholder rather than a broken image.
+window.orgThumbFail=function(img){
+  const ph=document.createElement('div'); ph.className=img.className.replace('org-thumb','org-thumb-ph');
+  ph.innerHTML='<i class="fa-regular fa-image"></i>';
+  if(img.parentNode) img.parentNode.replaceChild(ph,img);
+};
+
+/* ---------------- filters (names kept: USAGE_MAP in 37-usage-module-actions.js logs them) ---------------- */
+window.orgToggleDp=function(e){ if(e)e.stopPropagation(); ORG_OPEN=!ORG_OPEN; renderPage(); };
+window.orgSetPeriod=function(p){
+  ORG_PERIOD=p; ORG_PG=0;
+  if(p==='custom'){ if(!ORG_SINCE||!ORG_UNTIL){ const t=new Date(); ORG_UNTIL=orgDay(t); ORG_SINCE=orgDay(orgAdd(t,-27)); } renderPage(); return; }
+  ORG_OPEN=false; renderPage();
+};
+// Logged directly, not through USAGE_MAP: it has real validation that can stop it without applying.
+window.orgApplyCustom=function(){
+  const a=document.getElementById('orgFrom'), b=document.getElementById('orgTo');
+  if(!a||!b||!a.value||!b.value){ toast('Pick both dates','warn'); try{usageQueue('organic.all_content.filter_by_date_range','error');}catch(_e){} return; }
+  if(a.value>b.value){ toast('The From date must come before the To date','warn'); try{usageQueue('organic.all_content.filter_by_date_range','error');}catch(_e){} return; }
+  ORG_SINCE=a.value; ORG_UNTIL=b.value; ORG_PERIOD='custom'; ORG_OPEN=false; ORG_PG=0; renderPage();
+  try{usageQueue('organic.all_content.filter_by_date_range','update');}catch(_e){}
+};
+// ORG_NET follows the tab (Facebook / Instagram); kept as a variable because usbOrgMeta() reads it.
+window.orgSetNet=function(n){ORG_NET=n;ORG_PG=0;renderPage();};
+window.orgSetKind=function(k){ORG_KIND=k;ORG_PG=0;renderPage();};
+window.orgSetPageId=function(v){ORG_PAGE=v;ORG_PG=0;renderPage();};
+// Column-header sort: click once for highest first, again for lowest first.
+window.orgSetSort=function(k){ if(ORG_SORT===k) ORG_DIR=-ORG_DIR; else { ORG_SORT=k; ORG_DIR=-1; } ORG_PG=0; renderPage(); };
+window.orgSearch=function(v){ORG_Q=v;ORG_PG=0;
+  clearTimeout(window._orgQT); window._orgQT=setTimeout(function(){renderPage(); const el=document.getElementById('orgQ'); if(el){el.focus(); el.setSelectionRange(el.value.length,el.value.length);} },320);
+  try{usageQueueDebounced('organic.all_content.search_caption_or_page', v);}catch(_e){}
+};
+window.orgGo=function(d){ORG_PG=Math.max(0,ORG_PG+d);renderPage();};
+
+/* ---------------- loading & refreshing ---------------- */
+async function orgLoad(){
+  const C=sb.schema('camp');
+  const since=orgDay(orgAdd(new Date(),-800));
+  const got=await Promise.all([
+    C.from('social_sync_state').select('*').eq('id',1).maybeSingle().then(function(r){return r.error?null:(r.data||{});},function(){return null;}),
+    C.from('social_pages').select('*').order('name').then(function(r){return r.data||[];},function(){return [];}),
+    C.from('social_posts').select('*').order('created_time',{ascending:false}).limit(5000).then(function(r){return r.data||[];},function(){return [];}),
+    C.from('social_page_daily').select('*').gte('day',since).order('day').limit(5000).then(function(r){return r.data||[];},function(){return [];})
+  ]);
+  ORG_STATE=got[0]; ORG_PAGES=got[1]; ORG_ROWS=got[2]; ORG_DAILY=got[3];
+}
+// Asks the server to pull from Meta now. Rows on screen stay while it runs.
+window.orgRefresh=async function(){
+  if(window._orgSyncing) return;
+  window._orgSyncing=true; renderPage();
+  let jr={};
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const res=await fetch(SUPABASE_URL+'/functions/v1/social-organic-live',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+((session&&session.access_token)||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({mode:'daily'})});
+    jr=await res.json().catch(function(){return {};});
+    if(!res.ok && !jr.error) jr.error='The sync answered '+res.status;
+  }catch(e){ jr={error:(e&&e.message)||String(e)}; }
+  window._orgSyncing=false;
+  if(jr.error) toast(jr.error,'err');
+  else toast('Updated '+(jr.posts||0)+' posts, '+(jr.reels||0)+' reels'+(jr.ig?', '+jr.ig+' Instagram':''),'ok');
+  ORG_ROWS=null;
+  if(PAGE==='organic') renderPage();
+};
+
+/* ---------------- detail dialog ---------------- */
+window.orgOpen=function(id){
+  const r=(ORG_ROWS||[]).find(function(x){return String(x.id)===String(id);}); if(!r)return;
+  const rx=r.reactions||{};
+  const f=function(k,v){return '<div class="org-dtl-f"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';};
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-photo-film"></i> '+esc(orgKindLabel(r.kind))+' details</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body org-dtl" style="width:min(94vw,640px);max-width:100%;box-sizing:border-box;overflow-x:hidden">'
+      +(r.thumbnail?'<div class="org-dtl-img"><img src="'+esc(r.thumbnail)+'" referrerpolicy="no-referrer" onerror="orgThumbFail(this)"></div>':'')
+      +'<div class="org-dtl-msg">'+esc(r.message||'(no caption)')+'</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin:10px 0 4px">'+esc(r.page_name||'')+' · '+orgDT(r.created_time)+'</div>'
+      +'<div class="org-dtl-grid">'
+        +f('Views',orgN(orgViews(r)))
+        +f('Interactions',orgN(orgEng(r)))
+        +f(r.network==='instagram'?'Likes':'Reactions',orgN(r.likes))+f('Comments',orgN(r.comments))+f('Shares',orgN(r.shares))
+        +(Number(r.reach)?f('Reach',orgN(r.reach)):'')
+        +(Number(r.saves)?f('Saves',orgN(r.saves)):'')
+        +(Number(r.clicks)?f('Clicks',orgN(r.clicks)):'')
+        +(Number(r.replays)?f('Replays',orgN(r.replays)):'')
+        +(Number(r.viewers)?f('Unique video viewers',orgN(r.viewers)):'')
+        +(Number(r.follows)?f('Follows gained',orgN(r.follows)):'')
+        +(Number(r.video_total_time_ms)?f('Total watch time',orgWatch(r.video_total_time_ms)):'')
+        +(Number(r.video_avg_watch_ms)?f('Average watch',orgSecs(r.video_avg_watch_ms)):'')
+        +(Number(r.video_length_s)?f('Length',orgSecs(Number(r.video_length_s)*1000)):'')
+        +(orgHasReach(r)?f('Engagement rate',(orgER(r)||0).toFixed(2)+'%'):'')
+        +((rx.like||rx.love||rx.wow||rx.haha||rx.sad||rx.angry||rx.care)
+           ?f('Reactions by type','👍 '+orgN(rx.like)+'  ❤️ '+orgN(rx.love)+'  😮 '+orgN(rx.wow)+'  😂 '+orgN(rx.haha)+'  😢 '+orgN(rx.sad)+'  😠 '+orgN(rx.angry)+'  🤗 '+orgN(rx.care)):'')
+      +'</div>'
+      +(r.network==='facebook'?'<div style="font-size:11.5px;color:var(--slate);margin-top:12px">No reach here: Meta gives reach for the Page as a whole (see Overview), not for each Facebook post.</div>':'')
+    +'</div>'
+    +'<div class="modal-foot">'+(r.permalink?'<a class="btn" target="_blank" rel="noopener" href="'+esc(r.permalink)+'"><i class="fa-solid fa-arrow-up-right-from-square"></i> View on '+(r.network==='instagram'?'Instagram':'Facebook')+'</a>':'')
+      +'<button class="btn primary" onclick="closeModal()">Close</button></div>','md');
+};
+
+function orgDatePicker(){
+  const opts=ORG_PRESETS.map(function(p){
+    return '<div class="org-dp-opt'+(ORG_PERIOD===p[0]?' on':'')+'" onclick="event.stopPropagation();orgSetPeriod(\''+p[0]+'\')">'+esc(p[1])+'</div>';
+  }).join('');
+  const cus=ORG_PERIOD==='custom'
+    ? '<div class="org-dp-cus" onclick="event.stopPropagation()">'
+      +'<label>From<input type="date" id="orgFrom" value="'+esc(ORG_SINCE||'')+'"></label>'
+      +'<label>To<input type="date" id="orgTo" value="'+esc(ORG_UNTIL||'')+'"></label>'
+      +'<button onclick="orgApplyCustom()">Apply</button></div>'
+    : '';
+  return '<div class="org-dp'+(ORG_OPEN?' open':'')+'" id="orgDp">'
+    +'<div class="org-dp-btn" onclick="orgToggleDp(event)">'
+      +'<i class="fa-regular fa-calendar cal"></i>'
+      +'<span class="org-dp-lab"><b>'+esc(orgPresetLabel())+'</b><span>'+esc(orgRangeLabel())+'</span></span>'
+      +'<i class="fa-solid fa-chevron-down cv"></i></div>'
+    +'<div class="org-dp-pan"><div class="org-dp-list">'+opts+'</div>'+cus+'</div></div>';
+}
+
+function orgStatusBar(){
+  const S=ORG_STATE||{};
+  const btn='<button class="btn" onclick="orgRefresh()"'+(window._orgSyncing?' disabled':'')+'>'
+    +(window._orgSyncing?'<i class="fa-solid fa-rotate fa-spin"></i> Updating…':'<i class="fa-solid fa-rotate"></i> Refresh now')+'</button>';
+  const who={cron:'the 6 am refresh',button:'Refresh now',backfill:'the first full pull'}[S.last_trigger]||'';
+  return '<div class="org-st"><i class="fa-brands fa-meta" style="font-size:18px;color:#1877f2"></i><div class="grow">'
+    +'Updates itself every morning at <b>6:00</b> from Meta. Last updated <b>'+esc(orgAgo(S.last_sync_at))+'</b>'+(who?' by '+esc(who):'')+'.'
+    +(S.last_error?'<br><span class="err"><i class="fa-solid fa-triangle-exclamation"></i> '+esc(String(S.last_error).slice(0,220))+'</span>':'')
+    +'</div>'+btn+'</div>';
+}
+
+/* ---------------- columns ---------------- */
+// One definition per number. `has` says whether Meta reports it for that row at all, so a real 0
+// (muted) is told apart from "not reported" (a dot with the reason as a tooltip).
+function orgFbVideo(r){ return r.network==='facebook' && (r.kind==='reel'||r.kind==='video'||Number(r.video_views)>0||Number(r.video_length_s)>0); }
+const ORG_COLS={
+  views:{k:'Views', get:orgViews, fmt:orgN, has:function(){return true;}},
+  reach:{k:'Reach', get:function(r){return Number(r.reach)||0;}, fmt:orgN,
+    has:function(r){return r.network==='instagram';}, why:'Meta gives reach for the Facebook Page as a whole, not per post - see Overview'},
+  likes:{k:'Reactions', get:function(r){return Number(r.likes)||0;}, fmt:orgN, has:function(){return true;}},
+  comments:{k:'Comments', get:function(r){return Number(r.comments)||0;}, fmt:orgN, has:function(){return true;}},
+  shares:{k:'Shares', get:function(r){return Number(r.shares)||0;}, fmt:orgN, has:function(){return true;}},
+  saves:{k:'Saves', get:function(r){return Number(r.saves)||0;}, fmt:orgN,
+    has:function(r){return r.network==='instagram';}, why:'saves are an Instagram number'},
+  clicks:{k:'Clicks', get:function(r){return Number(r.clicks)||0;}, fmt:orgN,
+    has:function(r){return r.network==='facebook'&&r.kind!=='reel';}, why:'Meta reports clicks for Facebook posts only'},
+  inter:{k:'Interactions', get:orgEng, fmt:orgN, strong:true, has:function(){return true;}},
+  er:{k:'Eng. rate', get:function(r){return orgER(r)||0;}, fmt:function(v){return v.toFixed(2)+'%';},
+    has:orgHasReach, why:'needs reach, which Meta gives per post on Instagram only'},
+  replays:{k:'Replays', get:function(r){return Number(r.replays)||0;}, fmt:orgN,
+    has:function(r){return r.network==='facebook'&&r.kind==='reel';}, why:'Facebook reels only'},
+  follows:{k:'Follows', get:function(r){return Number(r.follows)||0;}, fmt:orgN, has:orgFbVideo, why:'follows gained are reported for Facebook video only'},
+  dur:{k:'Length', get:function(r){return (Number(r.video_length_s)||0)*1000;}, fmt:orgSecs, has:orgFbVideo, why:'Facebook video only'},
+  avgw:{k:'Avg watch', get:function(r){return Number(r.video_avg_watch_ms)||0;}, fmt:orgSecs, has:orgFbVideo, why:'Facebook video only'},
+  totw:{k:'Total watch', get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch, has:orgFbVideo, why:'Facebook video only'}
+};
+function orgColsFor(ti,rows){
+  const vid=rows.some(orgFbVideo)?['follows','avgw','totw','dur']:[];
+  if(ti===1) return ['views','likes','comments','shares','clicks','inter'].concat(vid);
+  if(ti===2) return ['reach','views','likes','comments','shares','saves','inter','er'];
+  if(ti===3) return ['views','replays','likes','comments','shares','inter','reach'].concat(vid);
+  return ['views','inter','shares','reach'];
+}
+function orgSortRows(rows){
+  const c=ORG_COLS[ORG_SORT], d=ORG_DIR;
+  return rows.slice().sort(function(a,b){
+    if(!c) return d*String(a.created_time||'').localeCompare(String(b.created_time||''));
+    return d*(c.get(a)-c.get(b)) || String(b.created_time||'').localeCompare(String(a.created_time||''));
+  });
+}
+function orgTable(list,cols,opts){
+  opts=opts||{};
+  const th=function(key,label,num){
+    // ranked lists are ordered by interactions until a heading is clicked, so Date is not marked
+    const on=ORG_SORT===key && !(opts.rank && key==='date' && ORG_DIR<0);
+    return '<th class="sort'+(num?' n':'')+(on?' on':'')+'" onclick="orgSetSort(\''+key+'\')">'+esc(label)
+      +(on?'<i class="fa-solid fa-arrow-'+(ORG_DIR<0?'down':'up')+' ar"></i>':'')+'</th>';
+  };
+  return '<div class="org-tblwrap"><table class="org-tbl"><thead><tr>'
+    +(opts.rank?'<th>#</th>':'')+th('date','Date',false)+'<th>Post</th><th>Format</th>'
+    +cols.map(function(k){return th(k,ORG_COLS[k].k,true);}).join('')
+    +'</tr></thead><tbody>'
+    +list.map(function(r,i){
+      const thumb=r.thumbnail?'<img class="org-thumb" src="'+esc(r.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" onerror="orgThumbFail(this)">'
+                             :'<div class="org-thumb-ph"><i class="fa-regular fa-image"></i></div>';
+      const txt=String(r.message||'').replace(/\s+/g,' ').trim()||'(no caption)';
+      return '<tr onclick="orgOpen(\''+esc(String(r.id))+'\')">'
+        +(opts.rank?'<td class="org-rank">'+(i+1)+'</td>':'')
+        +'<td class="org-date">'+orgDT(r.created_time)+'</td>'
+        +'<td><div class="org-post">'+thumb+'<div class="org-ptxt"><b>'+esc(txt.slice(0,120))+'</b></div>'
+          +'<i class="fa-brands '+(r.network==='instagram'?'fa-instagram':'fa-facebook')+' org-netic" title="'+esc(r.page_name||'')+'"></i></div></td>'
+        +'<td><span class="org-tag '+esc(r.kind||'post')+'">'+esc(orgKindLabel(r.kind))+'</span></td>'
+        +cols.map(function(k){ const c=ORG_COLS[k], v=c.get(r), na=!c.has(r);
+          const tip=c.why||('Meta does not report this for a '+orgKindLabel(r.kind));
+          return '<td class="n'+(c.strong?' org-er':'')+'">'
+            +(na?'<span class="org-na" title="'+esc(tip)+'">·</span>'
+                :(v?c.fmt(v):'<span class="org-zero">0</span>'))+'</td>'; }).join('')
+      +'</tr>';
+    }).join('')+'</tbody></table></div>';
+}
+
+/* ---------------- the page ---------------- */
+VIEWS.organic=async function(v,seg){
+  setCrumb(['Growth & Strategy','Posts & Reels']);
+  const ti=mTab(seg,ORG_TABS.length);
+  if(ti!==ORG_LAST_TI){ ORG_LAST_TI=ti; ORG_PG=0; ORG_KIND='all'; }
+  ORG_NET=ti===1?'facebook':(ti===2?'instagram':'all');
+  if(!window._orgDocWired){ window._orgDocWired=true;
+    document.addEventListener('click',function(e){ if(ORG_OPEN && !(e.target&&e.target.closest&&e.target.closest('.org-dp'))){ ORG_OPEN=false; renderPage(); } });
+  }
+  const head=ORG_CSS+mHead('fa-photo-film','#7c3aed','Posts & Reels');
+  if(!ORG_ROWS){ v.innerHTML=head+'<div class="loader"><div class="spin"></div></div>'; await orgLoad(); if(PAGE!=='organic') return; }
+
+  const base=(ORG_ROWS||[]).filter(function(r){
+    if(!orgInRange(r.created_time)) return false;
+    if(ORG_PAGE!=='all' && String(r.page_id)!==String(ORG_PAGE)) return false;
+    if(ORG_Q){ const q=ORG_Q.toLowerCase(); if(!String(r.message||'').toLowerCase().includes(q) && !String(r.page_name||'').toLowerCase().includes(q)) return false; }
+    return true;
+  });
+  const scoped=base.filter(function(r){
+    if(ti===1) return r.network==='facebook';
+    if(ti===2) return r.network==='instagram';
+    if(ti===3) return r.kind==='reel';
+    return true;
+  });
+  const kc={}; scoped.forEach(function(r){kc[r.kind]=(kc[r.kind]||0)+1;});
+  const rows=(ti===1||ti===2)&&ORG_KIND!=='all'?scoped.filter(function(r){return r.kind===ORG_KIND;}):scoped;
+
+  const pageSel='<select class="org-sel" onchange="orgSetPageId(this.value)"><option value="all"'+(ORG_PAGE==='all'?' selected':'')+'>All pages & accounts</option>'
+    +(ORG_PAGES||[]).map(function(p){return '<option value="'+esc(p.id)+'"'+(String(ORG_PAGE)===String(p.id)?' selected':'')+'>'+(p.network==='instagram'?'Instagram ':'Facebook ')+esc(p.name||p.id)+'</option>';}).join('')+'</select>';
+  let chips='';
+  if(ti===1||ti===2){
+    chips='<div class="org-bar">'+['all','post','video','reel','carousel'].map(function(k){
+      const n=k==='all'?scoped.length:(kc[k]||0);
+      if(k!=='all'&&!n&&ORG_KIND!==k) return '';
+      const lbl={all:'All formats',post:'Posts',video:'Videos',reel:'Reels',carousel:'Carousels'}[k];
+      return '<button class="org-fbtn'+(ORG_KIND===k?' on':'')+'" onclick="orgSetKind(\''+k+'\')">'+esc(lbl)+'<span class="n">'+n+'</span></button>';
+    }).join('')+'</div>';
+  }
+  const bar='<div class="org-bar">'+orgDatePicker()
+    +'<input class="org-search" id="orgQ" placeholder="Search caption or page…" value="'+esc(ORG_Q)+'" oninput="orgSearch(this.value)">'
+    +pageSel+'</div>';
+
+  let body='';
+  const igLinked=(ORG_PAGES||[]).some(function(p){return p.network==='instagram';});
+  if(ti===0){
+    body=orgOverview(rows);
+  } else if(!rows.length){
+    let msg;
+    if(ti===2&&!igLinked) msg='<i class="fa-brands fa-instagram"></i>Instagram is not linked to the Jain Group Facebook Page yet, so Meta sends nothing for it.<br>'
+      +'Link it in Meta Business Suite (Settings → Accounts → Instagram accounts), and it fills in at the next morning refresh.';
+    else if((ORG_ROWS||[]).length) msg='<i class="fa-regular fa-folder-open"></i>Nothing in this date range or filter.<br>Try widening the dates, or choose <b>Lifetime</b>.';
+    else msg='<i class="fa-regular fa-folder-open"></i>Nothing saved yet. Click <b>Refresh now</b>, or wait for the 6 am refresh.';
+    body='<div class="org-empty">'+msg+'</div>';
+  } else if(ti===4){
+    const top=rows.slice().sort(function(a,b){return orgEng(b)-orgEng(a);}).slice(0,20);
+    const sorted=ORG_SORT==='date'&&ORG_DIR===-1?top:orgSortRows(top);
+    body='<div class="org-note"><i class="fa-solid fa-trophy"></i><span>The 20 posts and reels with the most interactions (reactions + comments + shares + saves) in the period. Click a heading to re-order them.</span></div>'
+      +orgTable(sorted,orgColsFor(4,sorted),{rank:true});
+  } else {
+    const list=orgSortRows(rows);
+    const pages=Math.max(1,Math.ceil(list.length/ORG_PER));
+    if(ORG_PG>=pages)ORG_PG=pages-1;
+    const slice=list.slice(ORG_PG*ORG_PER,(ORG_PG+1)*ORG_PER);
+    const note=ti===1?'Facebook posts are measured by <b>Views</b> and interactions. Meta gives <b>reach</b> for the Page as a whole (see Overview), not for each post.'
+      :(ti===2?'Instagram reports true <b>reach</b> per post, so engagement rate is shown here.'
+      :'Facebook reels carry plays, replays, watch time, shares and follows gained. Reach per reel is not given by Meta.');
+    body='<div class="org-note"><i class="fa-solid fa-circle-info"></i><span>'+note+' Click a column heading to sort.</span></div>'
+      +chips+orgTable(slice,orgColsFor(ti,slice))
+      +'<div class="org-pager"><span class="info">Showing '+(ORG_PG*ORG_PER+1)+'–'+Math.min((ORG_PG+1)*ORG_PER,list.length)+' of '+list.length+'</span>'
+      +'<span><button onclick="orgGo(-1)"'+(ORG_PG<=0?' disabled':'')+'><i class="fa-solid fa-chevron-left"></i> Previous</button> '
+      +'<button onclick="orgGo(1)"'+(ORG_PG>=pages-1?' disabled':'')+'>Next <i class="fa-solid fa-chevron-right"></i></button></span></div>';
+  }
+  v.innerHTML=head+orgStatusBar()+bar+mTabs('organic',ORG_TABS,ti)+'<div style="margin-top:14px">'+body+'</div>';
+};
+
+// Daily Page reach as bars - one per day in the range (Meta's own Viewers figure).
+function orgDailyChart(days){
+  if(!days.length) return '';
+  const W=900,H=150,pad=22, max=Math.max.apply(null,days.map(function(d){return Number(d.viewers)||0;}))||1;
+  const bw=(W-pad)/days.length;
+  const bars=days.map(function(d,i){ const h=Math.round((Number(d.viewers)||0)/max*(H-pad-8));
+    return '<rect x="'+(pad+i*bw+1).toFixed(1)+'" y="'+(H-pad-h)+'" width="'+Math.max(1,bw-2).toFixed(1)+'" height="'+h+'"><title>'
+      +esc(new Date(d.day+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}))+': '+orgN(d.viewers)+' viewers</title></rect>'; }).join('');
+  const lab=function(i){ const d=days[i]; return '<text x="'+(pad+i*bw).toFixed(1)+'" y="'+(H-6)+'">'
+    +esc(new Date(d.day+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}))+'</text>'; };
+  return '<svg class="org-chart" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
+    +'<text x="0" y="12">'+orgN(max)+'</text>'+bars+lab(0)+(days.length>1?lab(days.length-1):'')+'</svg>';
+}
+
+function orgOverview(rows){
+  const days=(ORG_DAILY||[]).filter(function(d){ return orgInRange(d.day) && (ORG_PAGE==='all'||String(d.page_id)===String(ORG_PAGE)); });
+  const sum=function(k){ return days.reduce(function(a,d){return a+(Number(d[k])||0);},0); };
+  const fb=(ORG_PAGES||[]).filter(function(p){return p.network==='facebook';});
+  const ig=(ORG_PAGES||[]).filter(function(p){return p.network==='instagram';});
+  const fbFollowers=fb.reduce(function(a,p){return a+(Number(p.followers)||Number(p.fan_count)||0);},0);
+  const igFollowers=ig.reduce(function(a,p){return a+(Number(p.followers)||0);},0);
+  const tot=rows.reduce(function(a,r){
+    a.eng+=orgEng(r); a.shares+=Number(r.shares)||0;
+    if(r.kind==='reel'){ a.reels++; a.plays+=orgViews(r); a.watch+=Number(r.video_total_time_ms)||0; a.follows+=Number(r.follows)||0; }
+    return a; },{eng:0,shares:0,reels:0,plays:0,watch:0,follows:0});
+  const kpi=function(icon,k,val,sub){return '<div class="org-kpi"><div class="k"><i class="fa-solid '+icon+'"></i> '+k+'</div><div class="v">'+val+'</div>'+(sub?'<div class="s">'+sub+'</div>':'')+'</div>';};
+  const dash='—';
+  const kpis='<div class="org-h2"><i class="fa-brands fa-facebook"></i> The Page</div><div class="org-kpis">'
+    +kpi('fa-users','Followers',orgN(fbFollowers+igFollowers),'Facebook '+orgN(fbFollowers)+' · Instagram '+(ig.length?orgN(igFollowers):'not linked'))
+    +kpi('fa-eye','Reach (viewers)',days.length?orgN(sum('viewers')):dash,'added up day by day')
+    +kpi('fa-play','Views',days.length?orgN(sum('views')):dash,'times content was seen')
+    +kpi('fa-user-plus','New follows',days.length?orgN(sum('new_follows')):dash,days.length?orgN(sum('unfollows'))+' unfollowed':'')
+    +kpi('fa-hand-pointer','Engagements',days.length?orgN(sum('engagements')):dash,'on the Page\'s posts')
+    +kpi('fa-door-open','Page visits',days.length?orgN(sum('page_visits')):dash,'')
+    +kpi('fa-video','Video views',days.length?orgN(sum('video_views')):dash,'')
+    +kpi('fa-layer-group','Published',String(rows.length),tot.reels+' reels · '+(rows.length-tot.reels)+' posts')
+    +'</div>'
+    +'<div class="org-h2"><i class="fa-solid fa-film"></i> Reels</div><div class="org-kpis">'
+    +kpi('fa-play','Plays',orgN(tot.plays),'')
+    +kpi('fa-clock','Watch time',tot.watch?orgWatch(tot.watch):dash,'all viewers together')
+    +kpi('fa-share','Shares (all content)',orgN(tot.shares),'')
+    +kpi('fa-user-plus','Follows from reels',orgN(tot.follows),'')
+    +'</div>';
+  const chart=days.length>1?'<div class="org-card"><div class="org-h2" style="margin-top:0"><i class="fa-solid fa-chart-column"></i> Page reach by day</div>'+orgDailyChart(days)+'</div>':'';
+  const agg=function(keyFn){
+    const o={}; rows.forEach(function(r){ const k=keyFn(r)||'—';
+      (o[k]=o[k]||{n:0,views:0,eng:0}); o[k].n++; o[k].views+=orgViews(r); o[k].eng+=orgEng(r); });
+    return o; };
+  const tbl=function(obj,lbl){
+    const keys=Object.keys(obj).sort(function(a,b){return obj[b].eng-obj[a].eng;});
+    if(!keys.length) return '<div class="org-empty" style="padding:18px">Nothing published in this period.</div>';
+    return '<div class="org-tblwrap"><table class="org-tbl plain" style="min-width:420px"><thead><tr><th>'+lbl+'</th><th class="n">Posts</th><th class="n">Views</th><th class="n">Interactions</th><th class="n">Avg / post</th></tr></thead><tbody>'
+      +keys.map(function(k){const o=obj[k];return '<tr><td><b>'+esc(k)+'</b></td><td class="n">'+o.n+'</td>'
+        +'<td class="n">'+(o.views?orgN(o.views):dash)+'</td><td class="n">'+orgN(o.eng)+'</td><td class="n org-er">'+orgN(Math.round(o.eng/o.n))+'</td></tr>';}).join('')
+      +'</tbody></table></div>';
+  };
+  const top=rows.slice().sort(function(a,b){return orgEng(b)-orgEng(a);}).slice(0,5);
+  return kpis+chart
+    +'<div class="org-grid2"><div><div class="org-h2"><i class="fa-solid fa-share-nodes"></i> By network</div>'+tbl(agg(function(r){return r.network==='instagram'?'Instagram':'Facebook';}),'Network')+'</div>'
+    +'<div><div class="org-h2"><i class="fa-solid fa-shapes"></i> By format</div>'+tbl(agg(function(r){return orgKindLabel(r.kind)+'s';}),'Format')+'</div></div>'
+    +(top.length?'<div class="org-h2" style="margin-top:14px"><i class="fa-solid fa-trophy"></i> Top 5 this period</div>'+orgTable(top,['views','inter','shares'],{rank:true}):'')
+    +'<div class="org-note" style="margin-top:14px"><i class="fa-solid fa-circle-info"></i><span><b>Reach</b> here is Meta\'s daily Viewers for the Page, added up day by day - someone who saw the Page on two days counts twice, as Meta gives no de-duplicated total. Meta does not give reach for each Facebook post.</span></div>';
 }
