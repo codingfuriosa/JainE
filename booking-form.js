@@ -79,7 +79,7 @@ const ICON={
   pen:'<svg class="i" viewBox="0 0 24 24"><path d="M16.5 3.5l4 4L8 20H4v-4z"/><path d="M14 6l4 4"/></svg>',
   check:'<svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'};
 function wrapF(path,label,o,inner){
-  return '<div class="f'+(o.full?' full':'')+(o.span2?' span2':'')+(o.req?' need':'')+(ERR[path]?' bad':'')+'" id="'+fid(path)+'"><label>'+esc(label)
+  return '<div class="f'+(o.full?' full':'')+(o.span2?' span2':'')+(o.half?' half':'')+(o.req?' need':'')+(ERR[path]?' bad':'')+'" id="'+fid(path)+'"><label>'+esc(label)
     +(o.req?' <span class="req">*</span>':(o.optional?' <span class="opt">(optional)</span>':''))+(o.note?' <span class="opt">'+esc(o.note)+'</span>':'')+'</label>'
     +inner+'<div class="err">'+esc(ERR[path]||'')+'</div></div>';
 }
@@ -211,11 +211,11 @@ function stepFlat(){
   const floors=[]; for(let i=1;i<=(CONF.floors||8);i++) floors.push(String(i));
   return card('','','Unit selection','As discussed with our sales team. The flat number may be left blank if not yet allotted.',
       '<div class="grid">'
-      +chips('flat.block','Block',CONF.blocks,{req:1})
+      +chips('flat.block','Block',CONF.blocks,{req:1,half:1})
+      +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1})
       +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4})
-      +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1,span2:1})
-      +chips('flat.bhk','Bedrooms',CONF.bhk)
-      +chips('flat.parking','Right to use car park',['Covered','Open'])+'</div>')
+      +chips('flat.bhk','Bedrooms',CONF.bhk,{half:1})
+      +chips('flat.parking','Right to use car park',['Covered','Open'],{half:1})+'</div>')
     +card('','','Area & rate','Optional',
       '<div class="grid">'
       +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1,span2:1})
@@ -411,27 +411,9 @@ function render(){
   $('steps').innerHTML='<div class="lbl"><b>'+STEPS[st][0]+'</b><span>Step '+(st+1)+' of '+STEPS.length+'</span></div><div class="bar"><i style="width:'+Math.round((st+1)/STEPS.length*100)+'%"></i></div>';
   $('missing').innerHTML=MISSING.length?'<div class="miss"><b>Still missing on this page ('+MISSING.length+'):</b><ul>'+MISSING.map(function(m){ return '<li data-jump="'+fid(m[0])+'">'+esc(m[1])+'</li>'; }).join('')+'</ul></div>':'';
   $('app').innerHTML=[stepApplicants,stepContact,stepAbout,stepFlat,stepPay,stepDocs,stepTerms,stepReview][st]();
-  const sd=$('side'); if(sd) sd.innerHTML=sidePanel();
   $('nav').innerHTML='<div class="in">'+(st?'<button type="button" class="btn sec2" data-back="1">Back</button>':'')
     +'<button type="button" class="btn pri" id="nextBtn" data-next="1">'+(st===STEPS.length-1?'Submit booking form':'Continue')+'</button></div>'
-    +'<div class="saved">Your answers are saved on this phone as you go.</div>';
-}
-/* The side panel on a wide screen: where the customer is, what to have ready, who to ask. A finished step can be
-   opened again from here. (Hidden by CSS on phones.) */
-function sidePanel(){
-  const st=S.step;
-  const steps='<ol class="stp">'+STEPS.map(function(s,i){
-    const n=i<st?ICON.check:String(i+1);
-    if(i<st) return '<li><button type="button" data-go="'+i+'"><span class="n">'+n+'</span><span>'+esc(s[0])+'</span></button></li>';
-    return '<li><div class="'+(i===st?'cur':'todo')+'"><span class="n">'+n+'</span><span>'+esc(s[0])+'</span></div></li>';
-  }).join('')+'</ol><div class="est">About 10 minutes with your documents to hand. Your answers are saved on this device as you go.</div>';
-  const ppl=S.applicants.length>1?'each applicant':'you';
-  return '<div class="sc"><h3>Your progress</h3>'+steps+'</div>'
-    +'<div class="sc"><h3>Keep these ready</h3><ul class="rdy">'
-      +'<li>PAN card and Aadhaar card of '+ppl+' - a photo from your phone or a PDF</li>'
-      +'<li>Your payment details: UTR / transaction number, or cheque / DD number and date</li>'
-      +'<li>NRI or foreign national: passport number and bank account details</li></ul></div>'
-    +'<div class="sc"><h3>Need help?</h3><p>Call the Jain Group sales contact who sent you this link. Nothing is final until our team confirms your booking.</p></div>';
+    +'<div class="saved">Your answers are saved on this device as you go.</div>';
 }
 function go(n){ S.step=Math.max(0,Math.min(STEPS.length-1,n)); save(); ERR={}; MISSING=[]; render(); window.scrollTo(0,0); }
 function showErrors(){
@@ -615,7 +597,7 @@ async function submit(){
     const j=await r.json().catch(function(){ return {}; });
     if(!r.ok||!j.ok) throw new Error(j.error||('Could not send (error '+r.status+')'));
     try{ localStorage.removeItem(DRAFT_KEY); }catch(e){}
-    $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML=''; if($('side')) $('side').innerHTML=''; try{ document.querySelector('.cols').classList.add('single'); }catch(_e){}
+    $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
     $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Thank you! Your booking form has been received.</h2>'
       +'<p style="color:var(--slate);margin-top:8px">Your reference number</p><div class="ref">'+esc(j.ref_no)+'</div>'
       +'<p style="color:var(--slate)">Please keep this number. Our team will call you shortly to confirm your booking.</p></div></div>';
