@@ -101,7 +101,7 @@ function dmOauthReturn(){
   try{
     const q=new URLSearchParams(location.search);
     if(!q.get('google'))return;
-    if(q.get('google')==='ok')toast('Google connected for Our Brand. Finding your sites and channels…','ok');
+    if(q.get('google')==='ok')toast('Google connected for Campaign Analytics. Finding your sites and channels…','ok');
     else toast('Google connection failed: '+(q.get('msg')||'unknown reason'),'err');
     history.replaceState(history.state,'',location.pathname+location.hash);
     if(q.get('google')==='ok')dmCall({action:'discover'}).then(function(){ if(PAGE==='campaigns')renderPage(); }).catch(function(e){toast('Discover: '+e.message,'err');});
@@ -142,7 +142,7 @@ function dmSelect(which,list,cur){
     +list.map(function(s){return '<option value="'+esc(s.source_id)+'"'+(s.source_id===cur?' selected':'')+'>'+esc(s.label||s.source_id)+'</option>';}).join('')+'</select>';
 }
 function dmNeedConnect(what){
-  return dmNote('fa-plug',esc(what)+' needs the marketing Google connection. Open <a href="#" onclick="navTo(DM_SETUP_ROUTE);return false">Setup</a> on Our Brand, connect the company Google account that owns it, and the next nightly pull fills this in.');
+  return dmNote('fa-plug',esc(what)+' needs the marketing Google connection. Open <a href="#" onclick="navTo(DM_SETUP_ROUTE);return false">Setup</a> on Campaign Analytics, connect the company Google account that owns it, and the next nightly pull fills this in.');
 }
 
 /* Why a tab is empty, in one line at its top. The nightly pull writes each part's result to
@@ -153,7 +153,7 @@ async function dmPartStatus(part,what){
   const x=data&&data[0];
   if(!x) return dmNote('fa-hourglass-half',esc(what)+' has not been read yet - the first pull runs tonight.');
   if(x.ok) return '';
-  return '<div style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid #fcd34d;background:#fffbeb;border-radius:10px;color:#92400e;font-size:13px;margin:0 0 14px"><i class="fa-solid fa-triangle-exclamation" style="margin-top:2px"></i><div><b>No '+esc(what)+' figures yet.</b> The last pull ('+esc(fmtDateShort(x.started_at))+') stopped: '+esc(x.message||'unknown error')+'. Nothing below is filled in until that is fixed - the steps are in Our Brand → Setup.</div></div>';
+  return '<div style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid #fcd34d;background:#fffbeb;border-radius:10px;color:#92400e;font-size:13px;margin:0 0 14px"><i class="fa-solid fa-triangle-exclamation" style="margin-top:2px"></i><div><b>No '+esc(what)+' figures yet.</b> The last pull ('+esc(fmtDateShort(x.started_at))+') stopped: '+esc(x.message||'unknown error')+'. Nothing below is filled in until that is fixed - the steps are in Campaign Analytics → Setup.</div></div>';
 }
 
 /* ---------------------------------------------------------------- YouTube */
@@ -331,7 +331,7 @@ async function dmTrackedChannels(){
 }
 window.dmYtConfirm=async function(id,on){
   const {error}=await dmCamp().from('dm_yt_channels').update({confirmed:on,updated_at:new Date().toISOString()}).eq('channel_id',id);
-  if(error)return toast(error.message,'err'); toast(on?'Confirmed - read from tonight (or press Pull now in Our Brand → Setup)':'Paused','ok'); renderPage();
+  if(error)return toast(error.message,'err'); toast(on?'Confirmed - read from tonight (or press Pull now in Campaign Analytics → Setup)':'Paused','ok'); renderPage();
 };
 window.dmYtRemove=async function(id){
   if(!await confirmDialog('Stop tracking this channel and delete its stored readings?'))return;
@@ -461,7 +461,7 @@ async function dmTrackedPlaces(){
 }
 window.dmPlConfirm=async function(id,on){
   const {error}=await dmCamp().from('dm_places').update({confirmed:on,updated_at:new Date().toISOString()}).eq('place_id',id);
-  if(error)return toast(error.message,'err'); toast(on?'Confirmed - read from tonight (or press Pull now in Our Brand → Setup)':'Paused','ok'); renderPage();
+  if(error)return toast(error.message,'err'); toast(on?'Confirmed - read from tonight (or press Pull now in Campaign Analytics → Setup)':'Paused','ok'); renderPage();
 };
 window.dmPlRemove=async function(id){
   if(!await confirmDialog('Stop tracking this place and delete its stored readings?'))return;

@@ -58,6 +58,15 @@ async function replaceDays(table: string, platform: string, account: string, s: 
     if (error) throw new Error(table + ' write: ' + error.message);
   }
 }
+/* AD SETS / AD GROUPS (6 Nov 2026, for Campaign Analytics' project > platform > campaign > ad set
+   drill-down). Each ad's row carries its ad set (Facebook) or ad group (Google), and their names are
+   kept as entities of kind 'adset'. Both need the adset_id column and the 'adset' kind (migration
+   20261106200000); until that is in, they are simply not sent, so this can never stop a run. */
+let HAS_ADSET: boolean | null = null;
+async function hasAdset() {
+  if (HAS_ADSET === null) { const { error } = await db.from('ads_ad_daily').select('adset_id').limit(1); HAS_ADSET = !error; }
+  return HAS_ADSET;
+}
 async function upsertEntities(rows: any[]) {
   for (let i = 0; i < rows.length; i += 500) {
     const { error } = await db.from('ads_entities').upsert(rows.slice(i, i + 500), { onConflict: 'platform,kind,id' });
@@ -169,11 +178,13 @@ async function fbRead(acc: string, s: string, e: string) {
   const base = `https://graph.facebook.com/${FBV}/act_${acc}/insights?time_increment=1&use_unified_attribution_setting=true&limit=500`
     + `&time_range=${encodeURIComponent(JSON.stringify({ since: s, until: e }))}&access_token=${META_TOKEN}`;
   const camp = await fbInsights(base + '&level=campaign', 'campaign_id,spend,impressions,clicks,actions');
-  const ads = await fbInsights(base + '&level=ad', 'ad_id,campaign_id,spend,impressions,clicks,actions');
+  const ads = await fbInsights(base + '&level=ad', 'ad_id,adset_id,campaign_id,spend,impressions,clicks,actions');
+  const withSet = await hasAdset();
   const now = new Date().toISOString();
   const cRows = camp.filter((r) => r.campaign_id && r.date_start).map((r) => ({ platform: 'meta', account_id: acc, campaign_id: r.campaign_id, day: r.date_start,
     spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), synced_at: now }));
   const aRows = ads.filter((r) => r.ad_id && r.date_start).map((r) => ({ platform: 'meta', account_id: acc, campaign_id: r.campaign_id || null, ad_id: r.ad_id, day: r.date_start,
+    ...(withSet ? { adset_id: r.adset_id || null } : {}),
     spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), synced_at: now }));
   await replaceDays('ads_daily', 'meta', acc, s, e, cRows, 'platform,campaign_id,day');
   await replaceDays('ads_ad_daily', 'meta', acc, s, e, aRows, 'platform,ad_id,day');
@@ -184,7 +195,7 @@ async function fbEntities(acc: string) {
   const now = new Date().toISOString();
   const camps = await fbAll(`https://graph.facebook.com/${FBV}/act_${acc}/campaigns?fields=id,name,effective_status,objective,daily_budget,lifetime_budget&limit=500${tok}`);
   // A campaign without its own budget spends its ad sets' budgets: add up the running ones.
-  const sets = await fbAll(`https://graph.facebook.com/${FBV}/act_${acc}/adsets?fields=campaign_id,daily_budget,lifetime_budget,effective_status&limit=500${tok}`);
+  const sets = await fbAll(`https://graph.facebook.com/${FBV}/act_${acc}/adsets?fields=id,name,campaign_id,daily_budget,lifetime_budget,effective_status&limit=500${tok}`);
   const sd: Record<string, number> = {}, sl: Record<string, number> = {};
   for (const a of sets) {
     if (String(a.effective_status || '') !== 'ACTIVE') continue;
@@ -194,6 +205,9 @@ async function fbEntities(acc: string) {
   const rows: any[] = camps.map((c) => ({ platform: 'meta', kind: 'campaign', id: c.id, account_id: acc, campaign_id: c.id, name: c.name, status: c.effective_status || null, objective: c.objective || null,
     daily_budget: c.daily_budget != null ? num(c.daily_budget) / 100 : (sd[c.id] != null ? sd[c.id] / 100 : null),
     lifetime_budget: c.lifetime_budget != null && num(c.lifetime_budget) > 0 ? num(c.lifetime_budget) / 100 : (sl[c.id] != null ? sl[c.id] / 100 : null), updated_at: now }));
+  if (await hasAdset()) for (const a of sets) rows.push({ platform: 'meta', kind: 'adset', id: a.id, account_id: acc, campaign_id: a.campaign_id || null, name: a.name || null,
+    status: a.effective_status || null, daily_budget: a.daily_budget != null ? num(a.daily_budget) / 100 : null,
+    lifetime_budget: a.lifetime_budget != null && num(a.lifetime_budget) > 0 ? num(a.lifetime_budget) / 100 : null, updated_at: now });
   // The picture size has to be asked for on the creative itself (a size on the ads edge is ignored,
   // and Meta then sends a 64 x 64 thumbnail that looks blurred on the card). image_url is the
   // full-size picture of an image ad; videos and carousels have none, so their 640 px frame is used.
@@ -235,10 +249,12 @@ async function gRead(cust: string, s: string, e: string) {
   const clause = `segments.date BETWEEN '${s}' AND '${e}'`;
   const now = new Date().toISOString();
   const camp = await gaql(cust, `SELECT segments.date, campaign.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE ${clause}`);
-  const ads = await gaql(cust, `SELECT segments.date, ad_group_ad.ad.id, campaign.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM ad_group_ad WHERE ${clause}`);
+  const ads = await gaql(cust, `SELECT segments.date, ad_group_ad.ad.id, ad_group.id, campaign.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM ad_group_ad WHERE ${clause}`);
+  const withSet = await hasAdset();
   const cRows = camp.map((x) => ({ platform: 'google', account_id: cust, campaign_id: String(x.campaign.id), day: x.segments.date,
     spend: num(x.metrics.costMicros) / 1e6, impressions: num(x.metrics.impressions), clicks: num(x.metrics.clicks), results: num(x.metrics.conversions), synced_at: now }));
   const aRows = ads.map((x) => ({ platform: 'google', account_id: cust, campaign_id: String(x.campaign.id), ad_id: String(x.adGroupAd.ad.id), day: x.segments.date,
+    ...(withSet ? { adset_id: x.adGroup && x.adGroup.id != null ? String(x.adGroup.id) : null } : {}),
     spend: num(x.metrics.costMicros) / 1e6, impressions: num(x.metrics.impressions), clicks: num(x.metrics.clicks), results: num(x.metrics.conversions), synced_at: now }));
   // An ad can sit in more than one ad group; one row per ad and day, added together.
   const merged: Record<string, any> = {};
@@ -257,6 +273,11 @@ async function gEntities(cust: string) {
     const daily = String(b.period || 'DAILY') === 'DAILY';
     return { platform: 'google', kind: 'campaign', id: String(c.id), account_id: cust, campaign_id: String(c.id), name: c.name, status: c.status || null, objective: c.advertisingChannelType || null,
       daily_budget: daily ? amt : null, lifetime_budget: daily ? null : amt, updated_at: now }; });
+  if (await hasAdset()) {
+    const groups = await gaql(cust, "SELECT ad_group.id, ad_group.name, ad_group.status, campaign.id FROM ad_group WHERE ad_group.status != 'REMOVED'");
+    for (const x of groups) { const g = x.adGroup || {}; if (g.id == null) continue;
+      rows.push({ platform: 'google', kind: 'adset', id: String(g.id), account_id: cust, campaign_id: String((x.campaign || {}).id || ''), name: g.name || null, status: g.status || null, updated_at: now }); }
+  }
   const ads = await gaql(cust, "SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_display_ad.headlines, ad_group_ad.status, campaign.id FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'");
   const seen: Record<string, boolean> = {};
   let look: Record<string, { pic: string | null, txt: string | null }> = {};

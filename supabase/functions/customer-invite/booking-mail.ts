@@ -440,9 +440,21 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
   if (action === "booking_welcome_auto") {
     await acc.from("booking_doc_status").upsert({ case_id: caseId, kind: "welcome" }, { onConflict: "case_id,kind", ignoreDuplicates: true });
 
-    // ---- the booking amount must be the project's fixed one, or the letter is held
+    /* ---- a file the quality gate called Bad is held too (6 Nov 2026), and so is one whose booking
+       amount is not the project's fixed one. A quality hold lifts by itself once clearer scans are
+       uploaded and read Good or Needs check - the booking's re-read calls this again - so Pallabita
+       is not left to send the letter by hand for a file that has since been fixed. */
+    const QHOLD = "the booking file's scans are not clear enough";
+    const qBad = res?.quality_gate?.verdict === "Bad";
+    if (!qBad && String(st?.auto_held_reason || "").startsWith(QHOLD) && !st?.auto_emailed_at) {
+      await acc.from("booking_doc_status").update({ auto_held_at: null, auto_held_reason: null })
+        .eq("case_id", caseId).eq("kind", "welcome").is("auto_emailed_at", null);
+    }
     const pv = welcomeValues(res);
-    const why = bookingAmountProblem(res);
+    const why = qBad
+      ? `${QHOLD} to read reliably, so it has been sent back to the salesperson for clearer scans `
+        + `(${(Array.isArray(res.quality_gate.bad) && res.quality_gate.bad.length ? res.quality_gate.bad : res.quality_gate.reasons || []).join(" ")})`
+      : bookingAmountProblem(res);
     if (why) {
       const { data: held } = await acc.from("booking_doc_status").update({ auto_held_at: new Date().toISOString(), auto_held_reason: why })
         .eq("case_id", caseId).eq("kind", "welcome").is("auto_emailed_at", null).is("auto_held_at", null)
@@ -456,14 +468,15 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
         + (paid.length ? `<p style="margin:0 0 14px">Payments seen in the booking document:<br>`
             + paid.map((p: any) => `Rs. ${esc(Number(p.amount).toLocaleString("en-IN"))}${p.how ? " by " + esc(p.how) : ""}`
               + `${p.date ? " on " + esc(p.date) : ""}${p.reference ? " (ref " + esc(p.reference) + ")" : ""}`).join("<br>") + `</p>` : "")
-        + `<p style="margin:0">Please check the booking in JAIN-E and send the Welcome Letter yourself once the amount is right.</p></div>`;
+        + (qBad ? `<p style="margin:0">Nothing to do yet - once the salesperson uploads clearer scans, JAIN-E reads the booking again and sends the Welcome Letter by itself.</p></div>`
+                : `<p style="margin:0">Please check the booking in JAIN-E and send the Welcome Letter yourself once the amount is right.</p></div>`);
       const nText = nHtml.replace(/<br>/g, "\n").replace(/<\/p>/g, "\n\n").replace(/<[^>]+>/g, "")
         .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').trim();
       const nc = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true,
         auth: { username: CU, password: CP } } });
       try {
         await nc.send({ from: `JAIN-E Post Sales <${CU}>`, to: nTo,
-          subject: `${live ? "" : "[TEST] "}Welcome Letter held - booking amount - ${w.customer}`, ...mailBody(nText, nHtml) });
+          subject: `${live ? "" : "[TEST] "}Welcome Letter held - ${qBad ? "unclear scans" : "booking amount"} - ${w.customer}`, ...mailBody(nText, nHtml) });
       } catch (e) {
         await acc.from("booking_doc_status").update({ auto_held_at: null, auto_held_reason: null }).eq("case_id", caseId).eq("kind", "welcome");
         return j({ error: "Could not tell Pallabita: " + String((e as Error).message || e).slice(0, 300) }, 502);

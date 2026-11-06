@@ -17554,10 +17554,21 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
     }
   };
 
+  /* A SAVE THAT DID NOT HAPPEN MUST NOT LOOK LIKE ONE (6 Nov 2026).
+     Supabase calls do not throw: a refused update comes back as {error}, and one the row rules
+     (RLS) quietly skip comes back with no error and no rows. Both used to fall through to "Approved"
+     while nothing had changed, and the approval task was closed on top. hrMustSave turns either into
+     a real failure, so the toast says so and the task stays open. Updates pass .select('id') so the
+     changed rows come back and can be counted. */
+  function hrMustSave(res,what){
+    if(res&&res.error) throw new Error(what+': '+res.error.message);
+    if(res&&Array.isArray(res.data)&&!res.data.length) throw new Error(what+' did not save - it may have been removed, or you may not have permission');
+    return res&&res.data;
+  }
   window.hrTaskApproveManpower=async function(tid,mpId){
     try{
-      await sb.schema('hr').from('manpower_requests').update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null}).eq('id',mpId);
-      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'manpower',p_ref_id:mpId,p_by:me()});
+      hrMustSave(await sb.schema('hr').from('manpower_requests').update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null}).eq('id',mpId).select('id'),'The approval');
+      hrMustSave(await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'manpower',p_ref_id:mpId,p_by:me()}),'Closing the approval task');
       /* Approving the description is what publishes it. Leaving it in Recruitment would make the
          approval decorative - the point of approving is that the rest of the company can find it,
          so the same click copies it into the Document Library under Job Descriptions. */
@@ -17586,8 +17597,8 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
     const reason=(($('hrRejReason')||{}).value||'').trim();
     const btn=$('hrRejGoBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
     try{
-      await sb.schema('hr').from('manpower_requests').update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO(),rejection_reason:reason||null}).eq('id',mpId);
-      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'manpower',p_ref_id:mpId,p_by:me()});
+      hrMustSave(await sb.schema('hr').from('manpower_requests').update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO(),rejection_reason:reason||null}).eq('id',mpId).select('id'),'The rejection');
+      hrMustSave(await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'manpower',p_ref_id:mpId,p_by:me()}),'Closing the approval task');
       if(reason) sb.functions.invoke('manpower-ai-generate',{body:{request_id:mpId,requested_by:me(),rejection_reason:reason}});
       closeModal();
       toast(reason?'Rejected — regenerating the description with your reason':'Rejected','ok');
@@ -17605,10 +17616,10 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
      updates the published copy instead of leaving two. */
   window.hrTaskApproveJd=async function(tid,jdId){
     try{
-      await sb.schema('recruit').from('job_descriptions')
-        .update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null}).eq('id',jdId);
+      hrMustSave(await sb.schema('recruit').from('job_descriptions')
+        .update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null}).eq('id',jdId).select('id'),'The approval');
       const {error:pubErr}=await sb.schema('recruit').rpc('job_description_publish',{p_id:jdId});
-      await ACC().rpc('hr_approval_task_resolve_jd',{p_ref_id:jdId,p_by:me()});
+      hrMustSave(await ACC().rpc('hr_approval_task_resolve_jd',{p_ref_id:jdId,p_by:me()}),'Closing the approval task');
       if(pubErr) toast('Approved, but it could not be copied to the Document Library: '+pubErr.message,'err');
       else toast('Approved \u2014 it is now in the Document Library under Job Descriptions','ok');
       hrAfterApprovalAction();
@@ -17625,9 +17636,9 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
     const reason=(($('hrJdRejReason')||{}).value||'').trim();
     const btn=$('hrJdRejGo'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
     try{
-      await sb.schema('recruit').from('job_descriptions')
-        .update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO(),rejection_reason:reason||null}).eq('id',jdId);
-      await ACC().rpc('hr_approval_task_resolve_jd',{p_ref_id:jdId,p_by:me()});
+      hrMustSave(await sb.schema('recruit').from('job_descriptions')
+        .update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO(),rejection_reason:reason||null}).eq('id',jdId).select('id'),'The rejection');
+      hrMustSave(await ACC().rpc('hr_approval_task_resolve_jd',{p_ref_id:jdId,p_by:me()}),'Closing the approval task');
       closeModal(); toast('Job description rejected','ok'); hrAfterApprovalAction();
     }catch(e){
       if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-xmark"></i> Reject';}
@@ -17647,7 +17658,7 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
     try{
       const {error}=await sb.schema('hr').rpc('candidate_decide',{p_id:candId,p_approved:true});
       if(error) throw new Error(error.message);
-      await ACC().rpc('hr_approval_task_resolve_candidate',{p_ref_id:candId,p_by:me()});
+      hrMustSave(await ACC().rpc('hr_approval_task_resolve_candidate',{p_ref_id:candId,p_by:me()}),'Closing the approval task');
       toast('Candidate approved — they can now be sent a test and moved on','ok');
       hrAfterApprovalAction();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
@@ -17672,7 +17683,7 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
 
       const {error}=await sb.schema('hr').rpc('candidate_decide',{p_id:candId,p_approved:false});
       if(error) throw new Error(error.message);
-      await ACC().rpc('hr_approval_task_resolve_candidate',{p_ref_id:candId,p_by:me()});
+      hrMustSave(await ACC().rpc('hr_approval_task_resolve_candidate',{p_ref_id:candId,p_by:me()}),'Closing the approval task');
       toast('Candidate rejected','ok');
       hrAfterApprovalAction();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
@@ -17722,7 +17733,7 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
       try{ if(typeof tpEntityForMe==='function') entity=await tpEntityForMe(); }catch(_e){}
       const {data:rec,error}=await sb.schema('hr').rpc('referral_approve_connect',{p_ref_id:refId,p_req_id:reqId,p_entity:entity});
       if(error) throw new Error(error.message);
-      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()});
+      hrMustSave(await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()}),'Closing the approval task');
       closeModal();
       toast('Approved and added to Interviews for '+((rec&&rec.position)||'the position'),'ok');
 
@@ -17762,8 +17773,8 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
         {title:'Reject referral', okLabel:'Reject', icon:'fa-xmark', danger:true}))return;
 
     try{
-      await sb.schema('hr').from('referrals').update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO()}).eq('id',refId);
-      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()});
+      hrMustSave(await sb.schema('hr').from('referrals').update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO()}).eq('id',refId).select('id'),'The rejection');
+      hrMustSave(await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()}),'Closing the approval task');
 
       /* After the rejection is recorded, so a mail failure cannot leave the referrer told about a
          decision the record does not show. Errors are surfaced, not swallowed - a silent catch is

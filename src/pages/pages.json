@@ -19,7 +19,7 @@
   },
   {
     "file": "campaigns.html",
-    "title": "Our Brand · JAIN-E · Jain Group",
+    "title": "Campaign Analytics · JAIN-E · Jain Group",
     "page": "campaigns"
   },
   {
@@ -152,6 +152,11 @@
     "file": "maintenance.html",
     "title": "Maintenance · Nexus-RE · Jain Group",
     "page": "maintenance"
+  },
+  {
+    "file": "organic.html",
+    "title": "Posts &amp; Reels · JAIN-E · Jain Group",
+    "page": "organic"
   },
   {
     "file": "network.html",

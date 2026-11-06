@@ -35,6 +35,7 @@ function mkTab(base,t,active){
 // One tab of any of the three pages, into host. scope is the renderers' word for whose rows.
 async function mkDrawTab(host,base,t,scope,metaKey){
   if(t[3]==='meta') return compMetaView(host,metaKey);
+  if(t[3]==='ca') return caView(host);
   if(t[3]==='ads') return obAdsView(host,t[0]==='google'?'google':'meta');
   if(t[3]==='dm') return dmTabView(host,t[0],scope);
   return ciTabView(host,t[0],scope,base+'/'+t[0]);
@@ -49,16 +50,17 @@ async function mkDrawTab(host,base,t,scope,metaKey){
    (Search Console, Search Trends, RERA), land on Facebook. Setup (connecting Google) is no tab any
    more but a button on Google Analytics; its route stays, because Google's consent screen returns
    to it. */
+/* 5 Nov 2026, as asked: Google Ads Transparency, YouTube, Google Analytics and Google Maps taken off
+   this page, and the nightly Google pull behind the last three stopped and its data deleted
+   (migration 20261105190000). An old link to any of them lands on Facebook, like any route not in
+   this list. */
+/* 6 Nov 2026, as asked: Facebook and Google are no longer two tabs but one view by project
+   (42-campaign-analytics.js). The old campaigns/facebook and campaigns/google links land on it. */
 const OB_TABS=[
-  ['facebook','Facebook','fa-brands fa-facebook','ads'],
-  ['google','Google','fa-brands fa-google','ads'],
-  ['meta-ads','Meta Ad Library','fa-brands fa-meta','meta'],
-  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci'],
-  ['youtube','YouTube','fa-brands fa-youtube','dm'],
-  ['analytics','Google Analytics','fa-solid fa-chart-line','dm'],
-  ['maps','Google Maps','fa-solid fa-location-dot','dm']
+  ['ads','Google & Facebook','fa-solid fa-chart-line','ca'],
+  ['meta-ads','Meta Ad Library','fa-brands fa-meta','meta']
 ];
-const OB_HIDDEN=[['setup','Setup','fa-solid fa-plug','dm']];
+const OB_HIDDEN=[];
 // Kept for the old analytics views in 28-campaign-trends.js, which still call it; draws the new bar.
 function cmpTabsBar(tabs,ti,extra){ return obTabsBar(extra); }
 function obTabsBar(active){ return '<div class="tabs">'+OB_TABS.map(function(t){ return mkTab('campaigns',t,active); }).join('')+'</div>'; }
@@ -67,11 +69,8 @@ VIEWS.campaigns=async function(v,seg){
   let want=seg&&seg[0];
   if(want==='connect') want='setup';       // the old Digital Metrics route name
   const t=OB_TABS.concat(OB_HIDDEN).filter(function(x){ return x[0]===want; })[0]||OB_TABS[0];
-  setCrumb(['Growth & Strategy','Our Brand',t[1]]);
-  v.innerHTML=mHead('fa-bullhorn','#db2777','Our Brand')+obTabsBar(t[0])
-    +(t[0]==='analytics'||t[0]==='setup'?'<div style="display:flex;justify-content:flex-end;margin:10px 0 -4px">'
-      +(t[0]==='setup'?'<button class="btn btn-sm" onclick="navTo(\'campaigns/analytics\')"><i class="fa-solid fa-arrow-left"></i> Back to Google Analytics</button>'
-        :'<button class="btn btn-sm" onclick="navTo(\'campaigns/setup\')" title="Connect the company Google account and choose which sites, properties and channels are read"><i class="fa-solid fa-gear"></i> Google connection</button>')+'</div>':'')
+  setCrumb(['Growth & Strategy','Campaign Analytics',t[1]]);
+  v.innerHTML=mHead('fa-bullhorn','#db2777','Campaign Analytics')+obTabsBar(t[0])
     +'<div id="mkHost" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
   await mkDrawTab($('mkHost'),'campaigns',t,'brand','brands');
 };

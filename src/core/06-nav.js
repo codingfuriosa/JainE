@@ -44,9 +44,10 @@ const NAV=[
        and 'competitors' keep their ids (were Campaign Analytics and Competitor Ads) so the access
        people already hold in adm.users.modules carries over; only the labels changed. Digital
        Metrics no longer has a page: its tabs live in Our Brand and Competitor Data. */
-    {id:'campaigns',label:'Our Brand',icon:'fa-bullhorn'},
+    {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},   // named Our Brand 16 Oct - 6 Nov 2026
     {id:'competitors',label:'Competitor Data',icon:'fa-magnifying-glass-chart'},
     {id:'channel_partners',label:'Channel Partners',icon:'fa-people-arrows'},
+    {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},   // back 6 Nov 2026 - 43-posts-and-reels.js
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
     {id:'scaling',label:'Scaling Up',icon:'fa-arrow-trend-up'},
     {id:'playbook',label:'Playbook',icon:'fa-book-open'},

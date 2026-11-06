@@ -118,6 +118,32 @@ const SF_CSS=`<style id="sfCss">
 .sf-rblk .sf-title{font-size:15px}
 .sf-rblk .info{background:#fafbfc;border:1px solid #eef1f4;border-radius:8px;padding:10px 12px;margin:0 0 14px}
 .sf-rblk .sf-form .row:last-child{margin-bottom:0}
+/* THE RATING PAGE (6 Nov 2026, Ayush: on first sight it was a wall of text and what to DO did not stand
+   out). Every feedback is its own card. Left: what it is, quietly. Right: the action - a tinted
+   panel with big stars, amber until rated, green once rated. The remark box sits under the stars. The Submit bar stays in view and counts. */
+.sf-lns{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.sf-ln{background:#fff;border:1px solid var(--line);border-radius:12px;transition:border-color .15s}
+.sf-ln.done{border-color:#86efac}
+.sf-ln-row{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:24px;padding:14px 16px 14px 20px;align-items:center}
+.sf-ln-row .meta{font-size:11px;font-weight:600;letter-spacing:.3px;color:#94a3b8;text-transform:uppercase;margin-bottom:3px}
+.sf-ln-row .meta .new{color:#3b5bdb}.sf-ln-row .meta .bug{color:#2f9e44}
+.sf-ln-row .ttl{font-size:15px;font-weight:700;color:var(--ink);line-height:1.35}
+.sf-ln-row .dsc{font-size:13px;color:#64748b;line-height:1.5;margin-top:4px;white-space:pre-wrap}
+.sf-ln-row .give{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px 14px 11px;display:flex;flex-direction:column;gap:14px}
+.sf-ln.done .give{background:#f0fdf4;border-color:#bbf7d0}
+.sf-ln-row .stars{display:flex;align-items:center;gap:10px}
+.sf-ln-row .sf-rate{gap:1px;flex-wrap:nowrap}
+.sf-ln-row .sf-rate button{font-size:21px;padding:1px;color:#e7d9b0}
+.sf-ln.done .sf-rate button:not(.on){color:#d1e7d6}
+.sf-ln-row .sf-rate button.on{color:#f59e0b}
+.sf-ln-row .sf-rate-val{font-size:12px;color:var(--slate);margin:0;min-height:0;white-space:nowrap}
+.sf-ln-row .sf-rate-val b{color:var(--ink);font-size:13px}
+.sf-ln-row .rm{display:block;width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;line-height:1.45;background:#fff;min-height:64px;resize:vertical}
+.sf-submitbar{position:sticky;bottom:0;z-index:5;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;padding:10px 14px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 -6px 18px rgba(15,23,42,.06)}
+.sf-submitbar .prog{font-size:13px;color:var(--slate)}.sf-submitbar .prog b{color:var(--ink)}
+.sf-submitbar .note{font-size:12px;color:var(--slate);margin-right:auto;margin-left:10px}
+.sf-ln-row .rm:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(29,78,216,.12)}
+@media(max-width:860px){.sf-ln-row{grid-template-columns:1fr;gap:12px;padding:14px 16px}}
 .sf-left{font-size:12px;color:var(--slate);text-align:center;margin-top:6px}
 /* item page */
 .sf-sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
@@ -496,8 +522,7 @@ async function sfGive(){
   const my={}; mine.forEach(function(r){ my[r.item_id]=r; });
   SF_DATA={items:items,my:my};
   const nTodo=items.filter(function(i){ return i.is_active&&!my[i.id]; }).length, nDone=items.filter(function(i){ return my[i.id]; }).length;
-  b.innerHTML='<div class="sf-bar"><div><h2>Give Feedback</h2><p>New features and bug fixes from the Systems team, module by module. Rate each one from 1 to 10. Only the Systems team sees what you write.</p></div></div>'
-    +'<div class="sf-tools">'
+  b.innerHTML='<div class="sf-tools">'   // no heading block: the tab already says Give Feedback (6 Nov 2026)
     +'<div class="sf-filter"><button class="'+(SF_VIEW==='open'?'on':'')+'" onclick="sfSetView(\'open\',sfGiveList)">To give <span class="n">'+nTodo+'</span></button>'
     +'<button class="'+(SF_VIEW==='archive'?'on':'')+'" onclick="sfSetView(\'archive\',sfGiveList)"><i class="fa-solid fa-box-archive"></i> Archive <span class="n">'+nDone+'</span></button></div>'
     +sfSearchBox('sfGiveQ')+'</div>'
@@ -522,7 +547,7 @@ function sfGiveList(){
   host.innerHTML=mods.map(function(x){ const m=x.m;
     const head='<div class="sf-mcard-hd">'+sfModTitle(m)+sfKindCounts(m.items)
       +(arch?'<span class="sf-mcard-rt">'+m.items.length+' given</span>'
-            :'<button class="btn btn-primary" onclick="navTo(\'feedback_hub/give/m'+m.id+'\')"><i class="fa-solid fa-star"></i> Give Feedback</button>')+'</div>';
+            :'<span class="sf-mcard-rt">'+m.items.length+' waiting for you</span><button class="btn btn-primary" style="margin-left:0" onclick="navTo(\'feedback_hub/give/m'+m.id+'\')"><i class="fa-solid fa-star"></i> Give Feedback</button>')+'</div>';
     // the Archive lists what was given, with the rating; elsewhere only search results are listed
     const list=arch?m.items:x.hits;
     const rows=list.length?'<div class="sf-mrows">'+(arch?'':'<div class="sf-hits-lbl">Matching feedbacks</div>')
@@ -577,9 +602,10 @@ async function sfRatePage(v,arg){
   const byId={}; todo.forEach(function(x){ byId[x.id]=x; });
   SF_RATE={byId:byId, blocks:todo.map(function(x){ return x.id; }), r:{}};
   v.innerHTML=FH_CSS+SF_CSS+'<div class="sf-page">'+head(id,sfModName(id))
-    +'<div style="font-size:12.5px;color:var(--slate);margin:10px 0 0">'+todo.length+' feedback'+(todo.length===1?'':'s')+' waiting. Rate the ones you want - only those are recorded; the rest stay here for later.</div>'
-    +'<div style="margin-top:12px" id="sfBlocks"></div>'
-    +'<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px"><span style="font-size:12px;color:var(--slate);margin-right:auto">Once submitted, a feedback cannot be changed.</span>'
+    /* (6 Nov 2026, Ayush) No instructions strip: each feedback has its own "Rate this" panel, and the bar
+       at the bottom stays on screen counting how many are rated, so the way to finish is always in sight. */
+    +'<div class="sf-lns" id="sfBlocks"></div>'
+    +'<div class="sf-submitbar"><span id="sfRateProg" class="prog"></span><span class="note">Once submitted, a rating cannot be changed.</span>'
     +'<button class="btn" onclick="'+back+'">Cancel</button><button class="btn btn-primary" id="sfRateBtn" onclick="sfRateSave()" disabled>Submit feedback</button></div></div>';
   sfRateRender();
 }
@@ -587,14 +613,16 @@ function sfRateSync(){ if(!SF_RATE) return; SF_RATE.blocks.forEach(function(id){
 function sfRateRender(){
   const box=$('sfBlocks'); if(!box) return;
   box.innerHTML=SF_RATE.blocks.map(function(id,n){ const i=SF_RATE.byId[id], st=SF_RATE.r[id]||{};
-    return '<div class="sf-rblk sf-form" id="sfB-'+id+'">'
-      +'<div class="sf-rblk-hd"><span class="n">'+(n+1)+'</span><div style="flex:1;min-width:0"><div class="sf-top" style="margin-bottom:3px">'+sfKindTag(i.kind)+'<span class="sf-date">'+esc(sfDate(i.created_at))+'</span></div><div class="sf-title">'+esc(i.title)+'</div></div></div>'
-      +'<div class="info"><div class="sf-desc" style="margin-top:0">'+esc(i.description)+'</div><div class="sf-by"><span class="sf-lbl">Executed by</span>'+sfPeople(i.executed_by)+'</div></div>'
-      +'<div class="row"><label class="l">Rating</label><div class="sf-rate" onmouseleave="sfRatePaint('+id+',(SF_RATE.r['+id+']||{}).rating||0)">'
-        +[1,2,3,4,5,6,7,8,9,10].map(function(k){ return '<button type="button" title="'+k+' / 10" onmouseenter="sfRatePaint('+id+','+k+')" onclick="sfRateSet('+id+','+k+')"><i class="fa-solid fa-star"></i></button>'; }).join('')
-      +'</div><div class="sf-rate-val" id="sfRV-'+id+'"></div></div>'
-      +'<div class="row"><label class="l" for="sfRm-'+id+'">Remarks</label><textarea id="sfRm-'+id+'" maxlength="2000" placeholder="What works well, what could be better">'+esc(st.remarks||'')+'</textarea></div>'
-    +'</div>'; }).join('');
+    /* (6 Nov 2026, Ayush) What it is on the left - kind and who executed it on one quiet line, the name,
+       the full description; the stars and a remark on the right. Nothing hidden, nothing repeated. */
+    return '<div class="sf-ln'+(st.rating?' done':'')+'" id="sfB-'+id+'"><div class="sf-ln-row">'
+      +'<div class="what"><div class="meta"><span class="'+(i.kind==='Bug Fixed'?'bug':'new')+'">'+esc(i.kind)+'</span> · '+esc((i.executed_by||[]).map(nameOf).join(', '))+'</div>'
+        +'<div class="ttl">'+esc(i.title)+'</div><div class="dsc">'+esc(i.description)+'</div></div>'
+      +'<div class="give"><div class="stars"><div class="sf-rate" onmouseleave="sfRatePaint('+id+',(SF_RATE.r['+id+']||{}).rating||0)">'
+          +[1,2,3,4,5,6,7,8,9,10].map(function(k){ return '<button type="button" title="'+k+' / 10 · '+SF_RATE_WORDS[k]+'" onmouseenter="sfRatePaint('+id+','+k+')" onclick="sfRateSet('+id+','+k+')"><i class="fa-solid fa-star"></i></button>'; }).join('')
+        +'</div><span class="sf-rate-val" id="sfRV-'+id+'"></span></div>'
+        +'<textarea class="rm" id="sfRm-'+id+'" rows="2" maxlength="2000" placeholder="Add a remark (optional)">'+esc(st.remarks||'')+'</textarea></div>'
+    +'</div></div>'; }).join('');   // .sf-ln-row, then .sf-ln - each card closed, so cards never nest
   SF_RATE.blocks.forEach(function(id){ sfRatePaint(id,(SF_RATE.r[id]||{}).rating||0); });
   sfRateCount();
 }
@@ -602,12 +630,17 @@ function sfRateRender(){
 function sfRateCount(){
   const n=SF_RATE.blocks.filter(function(id){ return SF_RATE.r[id]&&SF_RATE.r[id].rating; }).length, btn=$('sfRateBtn');
   if(btn){ btn.disabled=!n; btn.textContent=n>1?'Submit '+n+' feedbacks':'Submit feedback'; }
+  const p=$('sfRateProg'), t=SF_RATE.blocks.length;
+  if(p) p.innerHTML=n?'<b>'+n+' of '+t+'</b> rated':'Rate at least one to submit · <b>0 of '+t+'</b> rated';
 }
 window.sfRatePaint=function(id,n){
   document.querySelectorAll('#sfB-'+id+' .sf-rate button').forEach(function(b,i){ b.classList.toggle('on',i<n); });
-  const v=$('sfRV-'+id); if(v) v.textContent=n?n+' / 10 · '+SF_RATE_WORDS[n]:'Not rated - tap a star to rate it';
+  const v=$('sfRV-'+id); if(v){ v.innerHTML=n?'<b>'+n+'</b>/10':''; }   // the number only - the words ran out of the panel
 };
-window.sfRateSet=function(id,n){ (SF_RATE.r[id]=SF_RATE.r[id]||{}).rating=n; sfRatePaint(id,n); sfRateCount(); };
+window.sfRateSet=function(id,n){
+  (SF_RATE.r[id]=SF_RATE.r[id]||{}).rating=n; sfRatePaint(id,n); sfRateCount();
+  const c=$('sfB-'+id); if(c) c.classList.add('done');
+};
 window.sfRateSave=async function(){
   sfRateSync();
   const rows=SF_RATE.blocks.filter(function(id){ return SF_RATE.r[id]&&SF_RATE.r[id].rating; })

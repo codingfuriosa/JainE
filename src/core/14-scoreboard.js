@@ -44,3 +44,19 @@ async function sbRenderCauselistBoard(host){
     +'</tbody></table></div>';
 }
 
+
+/* The page itself (restored 6 Nov 2026). It lived at the end of 15-weekly-status.js until the Weekly
+   Status rewrite of 5 Nov (b597c594) replaced that file and took it along, which left Overview > Scoreboard
+   on the generic "Module not found" placeholder. It sits here now, with the code it draws. */
+VIEWS.scoreboard=async function(v){
+  setCrumb(['Scoreboard']);
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-ranking-star" style="color:#b8902f"></i> Scoreboard</h1><p>Who is delivering assigned work, and on time</p></div></div>'
+    +'<div class="card" style="padding:0">'
+      +'<div style="display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:center;flex-wrap:wrap">'
+        +'<button class="btn'+(SB_VIEW==='all'?' btn-primary':'')+'" onclick="sbSetView(\'all\')">All Tasks</button>'
+      +'</div><div id="sbBody"><div class="loader"><div class="spin"></div></div></div></div>';
+  // The Causelist board went with Causelist Reviews (29 Oct 2026); MIS actions score in Legal > Scoreboard.
+  await sbRenderAllTasks($('sbBody'));
+};
+// Kept so /tasks/scoreboard links and bookmarks from when it was a tab still land somewhere real.
+function taskScoreboard(){ navTo('scoreboard'); }

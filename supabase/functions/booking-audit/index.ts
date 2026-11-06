@@ -76,6 +76,10 @@ function mimeOf(name: string) {
 }
 const normLabel = (s: unknown) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 const num = (x: unknown) => (typeof x === "number" && isFinite(x) ? x : null);
+// The same for an area the reader returns as text ("650.0", "650 sq ft") - num() alone dropped those
+// and booking 39's built-up area was stored blank (6 Nov 2026).
+const numText = (x: unknown) => { const v0 = num(x); if (v0 !== null) return v0;
+  const v = Number(String(x ?? "").replace(/[^0-9.]/g, "")); return String(x ?? "").trim() && isFinite(v) && v > 0 ? v : null; };
 const money = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 // Commercial rounding, half UP. Math.round does this for positives; do not "fix" it to banker's.
 const r0 = (n: number) => Math.round(n);
@@ -827,6 +831,256 @@ If the form shows exactly "${bounced}" and nothing else is plausible, return tha
            sure: a.sure === true, steps: String(a.steps || "").slice(0, 800) };
 }
 
+/* THE QUALITY GATE (6 Nov 2026, as asked: "we have to prevent bad quality, not moderate quality").
+
+   WHY A SECOND LOOK. The reader grades its own legibility (uncertain_figures) and had passed every
+   one of the 39 files read so far: a reader that cannot see a digit usually does not know it could
+   not see it - it writes a confident, wrong number. So the gate does not ask the reader how it did.
+   It asks Gemini again, separately and at high resolution, two things the reader was never asked:
+   how legible each page is, and what the key figures are - and then CODE compares the two readings.
+   Two independent reads that agree are trustworthy; two that disagree mean one of them guessed.
+
+   ONLY CLEARLY BAD IS STOPPED. "Bad" holds the booking and sends it back to the salesperson:
+     - a page that carries the booking - form, cost sheet, an ID card, payment proof - is unreadable;
+     - a key figure the second look cannot see at all, though the first reading gave it a value
+       (the first reading guessed);
+     - the two readings disagree on a number - flat, area, rate, booking amount, PAN.
+   Anything less - a page that is only usable, a figure partly visible, a name spelt differently -
+   is "Needs check": the booking goes on, with the reasons on the check list.
+   If the second look itself fails, that is "Needs check" with that reason - never a silent pass,
+   and never a hold the salesperson could do nothing about. */
+/* EVERY FIELD, NOT NINE (6 Nov 2026, as asked: "it should be error free"). Booking 39 was read with a
+   readable scan and still stored three things wrong - Occupation "SALARIED" with neither box ticked,
+   Payment Plan blank with Construction Linked ticked, Built-up area blank though the cost sheet
+   prints 650 - none of them among the nine figures checked then. So the second look now reads every
+   field the check list fills, tick boxes included, and each is compared by what kind of thing it is.
+   [key, plain name, kind, Bad when it disagrees, what to look for]. A tick box is asked as a fixed
+   choice so the two readings can be compared word for word. */
+type QgKind = "name" | "id" | "num" | "date" | "floor" | "choice" | "text";
+const QG_FIGURES: [string, string, QgKind, boolean, string][] = [
+  ["customer_name", "first applicant's name", "name", true, "as printed"],
+  ["relation_type", "S/O, D/O, W/O or C/O", "choice", false, 'which one is ticked: "S/O", "D/O", "W/O", "C/O" or "NONE_TICKED"'],
+  ["relation_name", "father's / husband's name", "name", false, "the name written against it"],
+  ["customer_dob", "first applicant's date of birth", "date", false, "dd/mm/yyyy"],
+  ["customer_pan", "first applicant's PAN (on the form)", "id", true, "as written on the application form"],
+  ["occupation", "Occupation box", "choice", false, 'the box ticked next to "Occupation": "SALARIED", "BUSINESS" or "NONE_TICKED" (the separate Profession line does not count)'],
+  ["mobile", "first applicant's phone number", "id", false, "as written on the form"],
+  ["booking_date", "booking date", "date", false, "the date of the application / payment details, dd/mm/yyyy"],
+  ["booking_agent", "booking agent", "name", false, "as written against Booking Agent"],
+  ["lead_id_on_form", "lead id written on the form", "id", false, "digits only"],
+  ["block", "block / tower", "id", true, "on the booking form"],
+  ["flat", "flat number", "id", true, "on the booking form"],
+  ["floor", "floor", "floor", false, "on the booking form"],
+  ["bhk", "bedrooms (BHK)", "text", false, 'like "2BHK"'],
+  ["parking_choice", "car park tick", "choice", false, 'which is ticked against Right to use Car Park: "COVERED", "OPEN" or "NONE_TICKED"'],
+  ["payment_plan", "payment plan tick", "choice", false, 'which is ticked: "DOWN PAYMENT", "CONSTRUCTION LINKED" or "NONE_TICKED"'],
+  ["sba_sqft", "super built-up area (sq ft)", "num", true, "number"],
+  ["carpet_sqft", "carpet area (sq ft)", "num", false, "number, from the cost sheet or form"],
+  ["builtup_sqft", "built-up area (sq ft)", "num", false, "number, from the cost sheet"],
+  ["base_rate", "basic rate per sq ft", "num", true, "number, the Unit Price rate on the cost sheet"],
+  ["plc", "PLC rate", "num", false, "number, or null if none"],
+  ["flc", "floor escalation / FLC rate", "num", false, "number, or null if none"],
+  ["booking_amount", "booking amount paid (total of all payments)", "num", true, "number"],
+];
+/* THE SECOND LOOK RUNS BESIDE THE MAIN READ, NOT AFTER IT (6 Nov 2026). Run after it, the two together
+   passed the 150 seconds a request is allowed - booking 39's re-read was cut off with a 504 and
+   nothing was saved, and a new booking would have failed the same way. So the look is started the
+   moment the files are uploaded, the main read runs at the same time, and only the comparison waits
+   for both. The look is also cut off at QG_LIMIT_MS: an unfinished look is "Needs check" with that
+   reason, never a failed booking. */
+const QG_LIMIT_MS = 110_000;
+function qualityLook(parts: any[], model: string): Promise<{ a: any; err: string }> {
+  const prompt = `You are checking the QUALITY of the scans in a property booking file, not its content.
+
+1. pages: go through EVERY page of EVERY file. For each page give
+   file, page (number), kind ("booking form", "cost sheet", "aadhaar", "pan", "other id card",
+   "payment proof", "other"), and legibility:
+     "GOOD"   every word and digit on it can be read with certainty
+     "USABLE" readable, but some part is faint, small, skewed or partly covered
+     "BAD"    important parts cannot be read - blurred, out of focus, cut off at the edge, too dark,
+              glare over the text, photographed at a steep angle, or a page of a document that is missing
+   and for USABLE or BAD, why: say exactly what and where ("the right half of the cost sheet is cut off").
+   Then judge the page against THE SCAN STANDARD - what a customer and the office should be able to
+   receive as a proper document copy. A page meets it only if ALL of these hold:
+     WHOLE_PAGE   the entire page or card is inside the image - no edge, corner or line of text cut off
+     FLAT         the page lies flat - not curled, bent, folded or bowed
+     STRAIGHT     the page is upright and square to the image, not photographed at an angle
+     NO_BACKGROUND no table, floor, hand, fingers or other paper around or over the page
+     EVEN_LIGHT   no shadow, glare or dark patch across it
+     CLEAR_INK    the print and handwriting are dark and sharp - not faded, washed out, pale or blurred
+   A screenshot of a payment app is judged as it is - a clean screenshot meets the standard.
+   Give meets_standard (true or false) and fails: the list of the codes above it fails, each with
+   where on the page ("CUT_OFF" is not a code - use the names above: "WHOLE_PAGE: top-left corner cut off").
+   Be strict but fair: a slight tilt or a faint watermark that does not spoil the page is not a failure.
+2. figures: read these yourself, from the page where each is printed - do not assume, do not calculate:
+${QG_FIGURES.map(([k, n, , , how]) => `   ${k}: ${n} - ${how}`).join("\n")}
+   For each give value (exactly as printed, or null), visible ("CLEAR", "PARTLY" or "NOT_VISIBLE")
+   and found_in (file and page). "NOT_VISIBLE" means the place where it should be printed exists but
+   cannot be read; if the file simply never states it, value null and visible "NOT_VISIBLE" too.
+   Never fill a value you cannot actually see.
+
+Return ONLY JSON: {"pages":[{"file":"","page":1,"kind":"","legibility":"","why":null,"meets_standard":true,"fails":[]}],
+ "figures":{"customer_name":{"value":null,"visible":"","found_in":null}, ...}}`;
+  const fileOnly = parts.filter((p) => p.file_data || (typeof p.text === "string" && p.text.startsWith("--- file:")));
+  return (async () => {
+    let a: any = null, err = "";
+    try {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": GKEY },
+          signal: AbortSignal.timeout(QG_LIMIT_MS),
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, ...fileOnly] }],
+            generationConfig: { temperature: 0, responseMimeType: "application/json", maxOutputTokens: 16000,
+                                mediaResolution: "MEDIA_RESOLUTION_HIGH" } }) });
+      if (!r.ok) err = `${r.status} ${(await r.text()).slice(0, 200)}`;
+      else {
+        const gj = await r.json().catch(() => ({}));
+        const raw = String(gj?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+        try { a = JSON.parse(raw); } catch (_) { const m = raw.match(/\{[\s\S]*\}/); try { a = m ? JSON.parse(m[0]) : null; } catch (_e) { a = null; } }
+        if (!a || typeof a !== "object") { a = null; err = "the quality check's answer could not be read"; }
+      }
+    } catch (e) {
+      const m = String((e as any)?.message || e);
+      err = /abort|timeout/i.test(m) ? `it did not finish within ${QG_LIMIT_MS / 1000} seconds` : m;
+    }
+    return { a, err };
+  })();
+}
+function qualityGate(look: { a: any; err: string }, fields: Record<string, any>, ex: any, enforceStandard = false): any {
+  const a = look.a, err = look.err;
+  if (!a) return { verdict: "Needs check", reasons: [`The quality check could not run (${err}) - check the scans by eye.`],
+                   bad: [], pages: [], figures: {}, disagreements: [] };
+
+  const pages: any[] = Array.isArray(a.pages) ? a.pages : [];
+  const figs: any = a.figures && typeof a.figures === "object" ? a.figures : {};
+  const bad: string[] = [], check: string[] = [];
+  const where = (p: any) => `${p?.file || "a file"}${p?.page ? ", page " + p.page : ""}`;
+  /* THE SCAN STANDARD (6 Nov 2026, as asked: "a standard of quality should at least be there" - booking
+     39 could be read, but its pages were curled, cut at the corners, washed out and photographed on a
+     table, and that is what the office and the customer receive). Every page of the file, extra pages
+     included, has to meet it; one that does not sends the booking back for a proper scan, with each
+     page and what is wrong with it. Unreadable is checked as before; this is the step above it. */
+  const below: string[] = [];
+  for (const p of pages) {
+    const leg = String(p?.legibility || "").toUpperCase(), kind = String(p?.kind || "").toLowerCase();
+    if (leg === "BAD" && kind !== "other") bad.push(`${where(p)} (${kind}) cannot be read: ${p?.why || "unreadable"}.`);
+    else if (leg === "BAD" || leg === "USABLE") check.push(`${where(p)} (${kind || "page"}) is ${leg === "BAD" ? "unreadable" : "only partly clear"}: ${p?.why || ""}`.trim());
+    const fails = Array.isArray(p?.fails) ? p.fails.filter((x: unknown) => String(x || "").trim()) : [];
+    if (p?.meets_standard === false || (p?.meets_standard !== true && fails.length))
+      below.push(`${where(p)} (${kind || "page"}): ${fails.length ? fails.join("; ") : (p?.why || "below the scan standard")}`);
+  }
+  /* acc.job_secrets booking_scan_standard: "enforce" sends such a booking back; anything else only reports
+     it on the check list - the setting it started in, so its first verdicts on real files are seen
+     before any booking is sent back on them. */
+  if (below.length) (enforceStandard ? bad : check).push(`Below the scan standard - please rescan ${below.length === 1 ? "this page" : "these pages"} `
+    + `flat, whole, straight, in even light (a scanner, or a scanning app such as Google Drive Scan or Adobe Scan): ${below.join(" | ")}.`);
+
+  // What the first reading said for each field.
+  const fv = (k: string) => fields[k]?.found ? fields[k].value : null;
+  const first: Record<string, unknown> = {
+    customer_name: fv("customer_name"), relation_type: fv("relation_type"), relation_name: fv("relation_name"),
+    customer_dob: fv("customer_dob"), customer_pan: fv("customer_pan"), occupation: fv("occupation"),
+    mobile: Array.isArray(ex?.mobile_numbers) && ex.mobile_numbers.length ? ex.mobile_numbers[0] : null,
+    booking_date: fv("booking_date"), booking_agent: fv("booking_agent"), lead_id_on_form: fv("lead_id_on_form"),
+    block: fv("block"), flat: fv("flat"), floor: fv("floor"), bhk: fv("bhk"),
+    parking_choice: ex?.parking_choice?.value ?? null, payment_plan: fv("payment_plan"),
+    sba_sqft: fv("area_sqft"), carpet_sqft: ex?.carpet_area?.value ?? null, builtup_sqft: ex?.unit_in_cost_sheet?.builtup_sqft ?? null,
+    base_rate: fv("base_rate"), plc: fv("plc"), flc: fv("flc"), booking_amount: num(ex?.token_amount?.value),
+  };
+  const n = (v: unknown) => { const x = Number(String(v ?? "").replace(/[^0-9.]/g, "")); return isFinite(x) && x > 0 ? x : null; };
+  const norm = (v: unknown) => String(v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const blank = (v: unknown) => v === null || v === undefined || String(v).trim() === ""
+    || /^(NIL|NULL|NONE|NONE_TICKED|-+)$/i.test(String(v).trim());
+  const day = (v: unknown) => {
+    const m = String(v ?? "").match(/(\d{1,2})\D+(\d{1,2})\D+(\d{2,4})/);
+    return m ? `${+m[1]}/${+m[2]}/${m[3].length === 2 ? "20" + m[3] : m[3]}` : norm(v);
+  };
+  const flr = (v: unknown) => {
+    const t = String(v ?? "").toUpperCase(), d = t.match(/\d+/);
+    if (d) return d[0];
+    const w = ["GROUND","FIRST","SECOND","THIRD","FOURTH","FIFTH","SIXTH","SEVENTH","EIGHTH","NINTH","TENTH"].findIndex((x) => t.includes(x));
+    return w >= 0 ? String(w) : norm(v);
+  };
+  // A tick-box answer, by its key word, so "Construction Linked Payment" and "CONSTRUCTION LINKED" agree.
+  const pick = (v: unknown) => {
+    const t = norm(v);
+    const words: [RegExp, string][] = [[/CONSTRUCTION|CLP/, "CLP"], [/DOWN/, "DOWN"], [/SALAR/, "SALARIED"], [/BUSINESS/, "BUSINESS"],
+      [/COVER/, "COVERED"], [/OPEN/, "OPEN"], [/^SO$|^SONOF/, "S/O"], [/^DO$|^DAUGHTER/, "D/O"], [/^WO$|^WIFE/, "W/O"], [/^CO$|^CAREOF/, "C/O"]];
+    for (const [re, k] of words) if (re.test(t)) return k;
+    return t;
+  };
+  const disagreements: any[] = [];
+  for (const [k, label, kind, isBad] of QG_FIGURES) {
+    const f = figs?.[k] || {}, vis = String(f?.visible || "").toUpperCase();
+    const had = !blank(first[k]), sees = !blank(f?.value);
+    if (vis === "NOT_VISIBLE" && had && kind !== "choice") {
+      (isBad ? bad : check).push(`${label}: the reading gave "${first[k]}", but on a second look it cannot be seen on ${f?.found_in || "the page"} - that value was guessed.`);
+      continue;
+    }
+    // Only partly visible: on an important field the value cannot be trusted, so it goes back (6 Nov 2026,
+    // as asked: send it back "only if Gemini can't confidently read something important").
+    if (vis === "PARTLY" && had) (isBad ? bad : check).push(`${label} is only partly visible (${f?.found_in || "page unknown"}) - read as "${first[k]}".`);
+    // Booking amount: the first reading may have fallen back to the cost sheet's due amount - only
+    // a disagreement between two readings of money actually PAID counts.
+    if (k === "booking_amount" && /cost sheet/i.test(String(ex?.token_amount?.as_printed ?? ""))) continue;
+    if (!had && !sees) continue;
+    let same: boolean;
+    if (!had || !sees) same = false;
+    else if (kind === "num") { const p = n(first[k]), q = n(f.value); same = p === null || q === null || Math.abs(p - q) < 0.5; }
+    else if (kind === "name") same = sameName(first[k], f.value) || nearName(first[k], f.value);
+    else if (kind === "date") same = day(first[k]) === day(f.value);
+    else if (kind === "floor") same = flr(first[k]) === flr(f.value);
+    else if (kind === "choice") same = pick(first[k]) === pick(f.value);
+    else if (kind === "id") { const p = norm(first[k]), q = norm(f.value); same = p === q || (p.length > 3 && q.length > 3 && (p.endsWith(q) || q.endsWith(p))); }
+    else same = norm(first[k]) === norm(f.value);
+    if (same) continue;
+    disagreements.push({ field: label, first_reading: had ? first[k] : null, second_look: sees ? f.value : null, found_in: f?.found_in ?? null });
+    const msg = !had ? `${label}: left blank by the reading, but ${f?.found_in || "the file"} shows "${f.value}".`
+      : !sees ? `${label}: read as "${first[k]}", but a second look finds ${kind === "choice" ? "nothing ticked" : "no such value"} (${f?.found_in || "page unknown"}).`
+      : `${label}: read as "${first[k]}" the first time and "${f.value}" on a second look (${f?.found_in || "page unknown"}).`;
+    // Bad only for the unit, the money and the PAN when two real readings clash; a blank one way or
+    // the other is a field to fill in, not a reason to send the booking back.
+    (isBad && had && sees ? bad : check).push(msg);
+  }
+  const verdict = bad.length ? "Bad" : check.length ? "Needs check" : "Good";
+  return { verdict, reasons: bad.concat(check), bad, pages, figures: figs, disagreements };
+}
+
+/* A BAD FILE GOES BACK TO WHOEVER RAISED IT - the same move as a person pressing Send back on the
+   first step (acc.wf_reject, the raiser branch), done here because the gate has no user session.
+   Only while the first step is still open: once MIS has forwarded it, a person has already taken
+   the file on, and the gate's reasons stay on the check list for them instead. Re-uploading the
+   scans updates trigger_details, which re-reads the booking (trg_booking_audit_requeue) and runs the
+   gate again; correcting hands step 1 back to its owner (wf_update_instance). */
+async function sendBackForQuality(caseId: number, reasons: string[]): Promise<string> {
+  const HH = { ...HC, Prefer: "return=minimal" };
+  const kase = (await (await fetch(`${SB}/rest/v1/flow_cases?id=eq.${caseId}&select=id,status,created_by,returned_at`, { headers: HA })).json().catch(() => []))?.[0];
+  if (!kase || kase.status !== "Pending") return "not sent back: the booking is not pending";
+  const raiser = String(kase.created_by || "").trim().toLowerCase();
+  if (!raiser) return "not sent back: nobody is recorded as having raised it";
+  const steps: any[] = await (await fetch(`${SB}/rest/v1/flow_case_steps?case_id=eq.${caseId}&select=id,seq,title,person,candidates,forwarded_at,task_id,held_for_correction_from&order=seq.asc&limit=1`, { headers: HA })).json().catch(() => []);
+  const s = steps?.[0];
+  if (!s) return "not sent back: the booking has no steps yet";
+  if (s.forwarded_at) return "not sent back: the first step was already completed";
+  const why = "The scans are not clear enough to read reliably. Please upload clearer scans or photos: " + reasons.join(" ");
+  const held = s.held_for_correction_from ?? ((s.candidates && s.candidates.length) ? s.candidates : (s.person ? [s.person] : null));
+  const now = new Date().toISOString();
+  await fetch(`${SB}/rest/v1/flow_case_steps?id=eq.${s.id}`, { method: "PATCH", headers: HH,
+    body: JSON.stringify({ held_for_correction_from: held, person: raiser, candidates: [raiser], status: "pending",
+                           appeared_at: now, received_at: null, claimed_by: null }) });
+  if (s.task_id) {
+    await fetch(`${SB}/rest/v1/ptask_assignees?task_id=eq.${s.task_id}`, { method: "DELETE", headers: HH });
+    await fetch(`${SB}/rest/v1/ptask_assignees`, { method: "POST", headers: { ...HH, Prefer: "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify({ task_id: s.task_id, email: raiser }) });
+  }
+  await fetch(`${SB}/rest/v1/flow_cases?id=eq.${caseId}`, { method: "PATCH", headers: HH,
+    body: JSON.stringify({ current_step: s.seq, status: "Pending", returned_at: now, returned_reason: why.slice(0, 2000),
+                           returned_by: "JainE quality check", returned_step: s.title || "a step", returned_to: raiser, updated_at: now }) });
+  await fetch(`${SB}/rest/v1/flow_updates`, { method: "POST", headers: HH,
+    body: JSON.stringify({ case_id: caseId, author: "JainE quality check", system: true,
+      body: `sent "${s.title || "the first step"}" back to ${raiser} to correct - reason: ${why}`.slice(0, 4000) }) });
+  return "sent back to " + raiser;
+}
+
 async function chatgptCheck(evidence: unknown) {
   if (!OKEY) throw new Error("CHATGPT_API_KEY is not set");
   const reasoning = /^(o\d|gpt-5)/i.test(OMODEL);
@@ -901,6 +1155,8 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
   }
   if (parts.length === 1) return { error: "none of the attachments could be read", fetched };
 
+  // The quality check's second look starts now and runs beside the main read (see qualityLook).
+  const lookP = qualityLook(parts, model);
   const t0 = Date.now();
   let raw = "";
   try {
@@ -1303,12 +1559,24 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
      doubt on this sheet is: NOT OK, never a silent pass, so a person re-checks the original instead
      of trusting a number the reader itself was not sure of. */
   const uncertainFigures: any[] = Array.isArray(ex?.uncertain_figures) ? ex.uncertain_figures : [];
-  const qualityVerdict = uncertainFigures.length ? "Not Ok" : "Ok";
-  const qualityReason = uncertainFigures.length
-    ? uncertainFigures.map((u: any) =>
-        `${u?.field ?? "a figure"} (read as ${u?.value ?? "?"}, ${u?.found_in ?? "unknown page"}): ${u?.why ?? "the scan made it unclear"}`)
-      .join(" ")
-    : "Every figure the reader transcribed was clearly legible.";
+  // The independent second look - see qualityGate. Its verdict overrides the reader's own.
+  const stdMode = await fetch(`${SB}/rest/v1/job_secrets?name=eq.booking_scan_standard&select=value`, { headers: HA })
+    .then((r) => r.json()).then((r: any) => String(r?.[0]?.value || "report")).catch(() => "report");
+  const gate = qualityGate(await lookP, fields, ex, stdMode === "enforce");
+  /* The reader's own doubts count too: a figure it transcribed but was unsure of, when it is one of the
+     important ones - name, unit, area, rate, money, PAN - sends the booking back like the second look's. */
+  const IMPORTANT = /name|flat|block|tower|area|sba|carpet|built|rate|amount|total|price|consideration|pan/i;
+  for (const u of uncertainFigures) if (IMPORTANT.test(String(u?.field || ""))) {
+    const why = `${u?.field} could not be read with confidence (${u?.found_in || "page unknown"}): ${u?.why || "scan unclear"} - read as "${u?.value ?? "?"}".`;
+    gate.bad.push(why); gate.reasons.unshift(why); gate.verdict = "Bad";
+  }
+  const qualityVerdict = (uncertainFigures.length || gate.verdict !== "Good") ? "Not Ok" : "Ok";
+  const qualityReason = [
+    gate.verdict === "Bad" ? "BAD QUALITY - the booking is held and sent back for clearer scans." : "",
+    ...gate.reasons,
+    ...uncertainFigures.map((u: any) =>
+      `${u?.field ?? "a figure"} (read as ${u?.value ?? "?"}, ${u?.found_in ?? "unknown page"}): ${u?.why ?? "the scan made it unclear"}`),
+  ].filter(Boolean).join(" ") || "Every page and every key figure was checked a second time and read clearly.";
 
   const concerns = Array.isArray(gpt?.concerns) ? gpt.concerns.slice() : [];
   if (!fields.booking_date.found)
@@ -1317,6 +1585,7 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
   for (const u of uncertainFigures) concerns.unshift(
     `Document quality: ${u?.field ?? "a figure"} was hard to read (${u?.why ?? "scan quality"}) - `
     + `verify ${u?.value ?? "the transcribed value"} against the original before relying on it.`);
+  for (const r of [...gate.reasons].reverse()) concerns.unshift(`Quality check: ${r}`);
 
   /* THE PARKING VALUE on the check list says which kind as well as how much, because the form's own
      label is now just "PARKING" - it no longer presumes covered.
@@ -1470,8 +1739,8 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
        essentially never state either figure, dwcArea (see above) fills whichever gap is open from
        the sanctioned-plan lookup instead. Purely informational either way: never checked against
        anything, just carried through to the agreement when it is there. */
-    unit_areas: { builtup_sqft: num(ex?.unit_in_cost_sheet?.builtup_sqft) ?? dwcArea.builtup_sqft,
-                  carpet_sqft: num(ex?.carpet_area?.value) ?? dwcArea.carpet_sqft },
+    unit_areas: { builtup_sqft: numText(ex?.unit_in_cost_sheet?.builtup_sqft) ?? dwcArea.builtup_sqft,
+                  carpet_sqft: numText(ex?.carpet_area?.value) ?? dwcArea.carpet_sqft },
     // The cost sheet's own Unit Price row - area x base rate, on its own, before PLC/FLC/parking.
     // Kept as a plain number, not a money string, because the Market Valuation Sheet check reads
     // this back at print time - long after this reading was stored - to judge a figure Cowork
@@ -1504,6 +1773,9 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
     concerns,
     uncertain_figures: uncertainFigures,
     document_quality: { verdict: qualityVerdict, reason: qualityReason },
+    // Good / Needs check / Bad - "Bad" holds the booking (see qualityGate, sendBackForQuality).
+    quality_gate: { verdict: gate.verdict, reasons: gate.reasons, bad: gate.bad, disagreements: gate.disagreements,
+                    pages: gate.pages, checked_at: new Date().toISOString() },
     kyc: {
       people: kycPeople, mobile_numbers: mobiles, emails,
       documents: ids.map((d: any) => ({ doc_type: d?.doc_type ?? null, name_on_card: d?.name_on_card ?? null,
@@ -1563,15 +1835,27 @@ Deno.serve(async (req) => {
     try { id = await rpc("booking_audit_claim", {}); }
     catch (e) { return j({ error: "could not claim a booking", detail: String(e) }, 500); }
     if (!id) return j({ ok: true, idle: true, message: "nothing waiting to be read" });
-    let res: any;
-    try { res = await audit(Number(id), model); }
-    catch (e) { res = { error: `the reader threw: ${String((e as any)?.message || e)}` }; }
-    try {
-      await rpc("booking_audit_finish", { p_case_id: Number(id),
-        p_result: res?.ok ? res : null, p_model: model, p_error: res?.ok ? null : String(res?.error || "failed") });
-    } catch (e) { return j({ ok: false, case_id: id, stored: false, detail: String(e) }, 500); }
-    return j({ ok: true, case_id: id, stored: true, status: res?.ok ? "done" : "failed",
-               error: res?.ok ? null : res?.error ?? null });
+    /* IN THE BACKGROUND (6 Nov 2026). A big file's reading with its second look takes 80-150 seconds -
+       right at the 150 a request may stay open, and three test reads were cut off there with a 504.
+       So the job answers at once and the reading, the save and any send-back carry on behind it
+       (EdgeRuntime.waitUntil), as legal-ocr-batch already does. */
+    const job = async () => {
+      let res: any;
+      try { res = await audit(Number(id), model); }
+      catch (e) { res = { error: `the reader threw: ${String((e as any)?.message || e)}` }; }
+      try {
+        await rpc("booking_audit_finish", { p_case_id: Number(id),
+          p_result: res?.ok ? res : null, p_model: model, p_error: res?.ok ? null : String(res?.error || "failed") });
+      } catch (e) { console.error("[booking-audit] could not store " + id + ": " + String(e)); return; }
+      if (res?.ok && res?.quality_gate?.verdict === "Bad") {
+        try { console.log("[booking-audit] " + id + ": " + await sendBackForQuality(Number(id), res.quality_gate.bad ?? res.quality_gate.reasons ?? [])); }
+        catch (e) { console.error("[booking-audit] send-back failed for " + id + ": " + String((e as any)?.message || e)); }
+      }
+    };
+    const wu = (globalThis as any).EdgeRuntime?.waitUntil;
+    if (wu) { (globalThis as any).EdgeRuntime.waitUntil(job()); return j({ ok: true, case_id: id, background: true }); }
+    await job();
+    return j({ ok: true, case_id: id, stored: true });
   }
 
   const caseId = Number(body?.case_id || 0);
@@ -1592,6 +1876,18 @@ Deno.serve(async (req) => {
     const variants = Array.isArray(body?.variants) && body.variants.length ? body.variants.slice(0, 6)
       : [{ resolution: null }];
     return j(await parkingProbe(caseId, variants));
+  }
+
+  // A re-read that is stored runs in the background too - see the job above.
+  if (body?.store && body?.probe !== true && (globalThis as any).EdgeRuntime?.waitUntil) {
+    (globalThis as any).EdgeRuntime.waitUntil((async () => {
+      let r: any;
+      try { r = await audit(caseId, model); } catch (e) { r = { error: `the reader threw: ${String((e as any)?.message || e)}` }; }
+      try { await rpc("booking_audit_finish", { p_case_id: caseId, p_result: r?.ok ? r : null, p_model: model,
+                                                p_error: r?.ok ? null : String(r?.error || "failed") }); }
+      catch (e) { console.error("[booking-audit] could not store " + caseId + ": " + String(e)); }
+    })());
+    return j({ ok: true, case_id: caseId, background: true });
   }
 
   let res: any;

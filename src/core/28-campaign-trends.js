@@ -519,7 +519,7 @@ async function cmpBothView(v,seg){
     body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Meta + Google · campaign level');
   }
   const showKpis=(ti!==2&&ti!==3);
-  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Our Brand')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+legend+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const opt={responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}}}};
@@ -721,7 +721,7 @@ async function cmpGoogleView(v,seg){
     body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Google · CTR trend (Google publishes no per-person frequency)',true);
   }
   const showKpis=(ti!==4&&ti!==5);
-  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Our Brand')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+cap+legend+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+cap+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=rows.map(function(r){return r.a.name;});
@@ -2106,9 +2106,19 @@ window.tpTrEditSave=async function(trackerId){
     .update({candidate_name:name,number:phone,email,notes}).eq('id',trackerId);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
   // The candidate record carries the same details and is what tests and emails are sent from.
+  /* BOTH OR NEITHER (6 Nov 2026). The row was saved and a refused candidate update only warned, so
+     the list showed the new phone/email while tests and emails still went to the old one. Now the row
+     is put back to what it was and the edit is reported as not saved, so the two never disagree. */
   if(r.candidate_id){
-    const {error:ce}=await sb.schema('hr').from('candidates').update({name,phone,email}).eq('id',r.candidate_id);
-    if(ce){toast('Saved on the row, but not on the candidate record: '+ce.message,'err');}
+    const {data:cd,error:ce}=await sb.schema('hr').from('candidates').update({name,phone,email}).eq('id',r.candidate_id).select('id');
+    if(ce||!cd||!cd.length){
+      const {error:back}=await sb.schema('hr').from('interview_tracker')
+        .update({candidate_name:r.candidate_name,number:r.number,email:r.email,notes:r.notes}).eq('id',trackerId);
+      toast('Not saved: the candidate record refused the change ('+((ce&&ce.message)||'no permission or it was removed')+')'
+        +(back?' - and the Interviews row could not be put back, so it may show the new details: '+back.message:''),'err');
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}
+      return;
+    }
   }
   Object.assign(r,{candidate_name:name,number:phone,email,notes});
   closeModal(); toast('Candidate updated','ok'); tpTrRender();
@@ -2294,10 +2304,25 @@ window.tpTrSave=async function(){
     position:req&&req.job_title,source,entity,created_by:state.email,applied_at:new Date().toISOString()}).select().single();
   if(cErr){toast(cErr.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}return;}
   const notes=($('tpTrNotes')||{}).value?.trim()||null;
+  /* NO HALF-ADDED CANDIDATES (6 Nov 2026). Adding writes two rows - the candidate, then their
+     Interviews row. If the second is refused the first used to stay behind: a candidate nobody could
+     see in Interviews, and the button left spinning. Now the candidate is taken back out, and if even
+     that fails the message says exactly what was left, so it can be cleared. */
   const {data:tr,error:tErr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:name,position:req&&req.job_title,source,entity,number:phone,email,notes,candidate_id:cand.id}).select().single();
-  if(tErr){toast(tErr.message,'err');return;}
-  await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
-  TP_TR_RECORDS=[tr,...(TP_TR_RECORDS||[])];closeModal();toast('Candidate added');tpTrRender();
+  if(tErr){
+    const {data:gone,error:dErr}=await sb.schema('hr').from('candidates').delete().eq('id',cand.id).select('id');
+    if(dErr||!gone||!gone.length) toast('Could not add '+name+': '+tErr.message+'. A part-saved candidate record (no. '+cand.id+') was left behind - ask an Administrator to remove it.','err');
+    else toast('Could not add '+name+': '+tErr.message+'. Nothing was saved.','err');
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}
+    return;
+  }
+  const {error:lErr}=await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
+  TP_TR_RECORDS=[tr,...(TP_TR_RECORDS||[])];closeModal();
+  // The Interviews row carries candidate_id, so the candidate is still reachable; the missing back-link
+  // only matters to the few places that look the other way, so it is a warning, not a failure.
+  if(lErr) toast('Candidate added, but one link could not be saved ('+lErr.message+') - tell an Administrator','warn');
+  else toast('Candidate added');
+  tpTrRender();
 };
 /* EMAIL SELECTED - one window for writing to candidates, which can also carry a test.
 
@@ -2726,7 +2751,7 @@ window.tpMuUncompleteRow=async function(id){
 };
 
 VIEWS.campaigns=async function(v,seg){
-  setCrumb(['Growth & Strategy','Our Brand']);
+  setCrumb(['Growth & Strategy','Campaign Analytics']);
   if(CMP_SOURCE==='google'){ return cmpGoogleView(v,seg); }
   if(CMP_SOURCE==='both'){ return cmpBothView(v,seg); }
   const tabs=cmpBaseTabs();const ti=mTab(seg,tabs.length);
@@ -3060,7 +3085,7 @@ VIEWS.campaigns=async function(v,seg){
     +(CMP_PERIOD==='custom'?'<div class="cmp-cap" style="color:#c2410c"><i class="fa-solid fa-triangle-exclamation"></i> Custom ranges aren\'t fetched by the MCP refresh task — pick one of the preset periods above, or ask for this range to be pulled directly.</div>':'');
   const legend='<div class="cmp-legend"><span>Trend compares with '+esc(cmpPrevLabel())+'</span><span>Fatigue = times each person saw the ad + whether CTR is falling</span></div>';
   const showKpis=(ti!==4&&ti!==5&&ti!==6);
-  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Our Brand')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+syncCap+legend+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+cmpTabsBar(tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+syncCap+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=projRows.map(r=>r.acc.name);

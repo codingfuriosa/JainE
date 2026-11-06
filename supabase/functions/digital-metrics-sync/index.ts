@@ -355,7 +355,7 @@ async function places() {
   if (!PLACES_KEY) throw new Error('GOOGLE_PLACES_API_KEY is not set as a Supabase secret yet');
   const list = await dbGet('dm_places?confirmed=is.true&active=is.true&select=place_id');
   const today = istToday();
-  let n = 0;
+  let n = 0, got = 0;
   for (const p of list) {
     if (timeLeft() < 10_000) break;
     const x = await gfetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(p.place_id)}`, { headers: {
@@ -365,10 +365,16 @@ async function places() {
     await dbPatch('dm_places', `place_id=eq.${encodeURIComponent(p.place_id)}`, { address: x.formattedAddress || null, maps_uri: x.googleMapsUri || null, updated_at: new Date().toISOString() });
     const revs = (x.reviews || []).map((r: any) => ({ place_id: p.place_id, review_name: r.name, author: r.authorAttribution?.displayName || null,
       rating: r.rating ?? null, text: r.originalText?.text || r.text?.text || null, publish_time: r.publishTime || null }));
-    // existing reviews keep their first_seen: ignore-duplicates, not merge
-    if (revs.length) await fetch(`${SB}/rest/v1/dm_place_reviews?on_conflict=place_id,review_name`, { method: 'POST',
-      headers: { ...H, 'Content-Profile': 'camp', Prefer: 'resolution=ignore-duplicates,return=minimal' }, body: JSON.stringify(revs) });
+    got += revs.length;
+    // existing reviews keep their first_seen: ignore-duplicates, not merge. A failed write is an
+    // error, not a quiet zero (5 Nov 2026: three places read, no review stored, nothing said why).
+    if (revs.length) {
+      const w = await fetch(`${SB}/rest/v1/dm_place_reviews?on_conflict=place_id,review_name`, { method: 'POST',
+        headers: { ...H, 'Content-Profile': 'camp', Prefer: 'resolution=ignore-duplicates,return=minimal' }, body: JSON.stringify(revs) });
+      if (!w.ok) throw new Error('dm_place_reviews write: ' + w.status + ' ' + (await w.text()).slice(0, 300));
+    }
   }
+  partNote = `${list.length} place(s) read, ${got} review(s) returned by Google`;
   return n;
 }
 
@@ -585,6 +591,15 @@ Deno.serve(async (req) => {
     }
     if (body.action === 'find_channel') return j({ results: await findChannel(String(body.q || '')) });
     if (body.action === 'find_place') return j({ results: await findPlace(String(body.q || '')) });
+    // Read-only look at what Google returns for one place - which fields came back and how many reviews.
+    if (body.action === 'place_probe') {
+      const id = encodeURIComponent(String(body.place_id || ''));
+      const lang = body.lang ? `?languageCode=${encodeURIComponent(String(body.lang))}` : '';
+      const x = await gfetch(`https://places.googleapis.com/v1/places/${id}${lang}`, { headers: { 'X-Goog-Api-Key': PLACES_KEY,
+        'X-Goog-FieldMask': String(body.mask || 'id,rating,userRatingCount,reviews,reviewSummary') } });
+      return j({ fields: Object.keys(x || {}), reviews: Array.isArray(x?.reviews) ? x.reviews.length : null,
+        first: x?.reviews?.[0] ? { rating: x.reviews[0].rating, when: x.reviews[0].publishTime, lang: x.reviews[0].originalText?.languageCode } : null });
+    }
     if (body.action === 'discover') {
       const id = await logStart('discover', who);
       try { const r = await discover(); await logEnd(id, !r.errors.length, 0, JSON.stringify(r)); return j(r); }
