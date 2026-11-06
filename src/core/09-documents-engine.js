@@ -159,6 +159,24 @@ function openPendingTab(){
   }
   return tab;
 }
+/* IS THE FILE ACTUALLY STILL THERE?
+   S3 answers a key that is not in the bucket with a 404 whose body is an XML <Error> document,
+   and a browser pointed straight at that address simply DISPLAYS it. That is how a receipt which
+   had gone missing from the bucket reached people - not as "this file is no longer here" but as a
+   page of XML they could make nothing of, on a claim that still listed the file as attached.
+   A HEAD carries no body and no custom header, so it is a plain cross-origin request needing
+   nothing of the bucket that opening the file does not already need. A check that CANNOT be made
+   - the site's origin is not on the bucket's allowed list, the network blinks - is not an answer
+   either way, so in that case the file is opened exactly as it was before. */
+async function s3HttpStatus(url){
+  try{ const r=await fetch(url,{method:'HEAD'}); return r.status; }
+  catch(e){ return 0; }   // could not ask - do not stand in the way
+}
+function s3GoneMessage(status){
+  return status===404
+    ? 'That file is no longer in storage, so there is nothing to open. It will have to be attached again.'
+    : 'That file could not be opened just now - the link was refused. Please try again in a moment.';
+}
 /* preTab: a tab the caller already opened on the click (openPendingTab), for callers that have to
    look something up before they know the file - by then the click is too old to open one here. */
 async function s3OpenSigned(storagePath,downloadName,preTab){
@@ -168,6 +186,12 @@ async function s3OpenSigned(storagePath,downloadName,preTab){
   if(error){
     if(tab) try{ tab.close(); }catch(_e){}
     toast('Could not open file: '+error.message,'err');
+    return;
+  }
+  const st=await s3HttpStatus(data.url);
+  if(st===404||st===403){
+    if(tab) try{ tab.close(); }catch(_e){}
+    toast(s3GoneMessage(st),'err');
     return;
   }
   if(downloadName){

@@ -10722,6 +10722,13 @@
             window._wfDraftId=data&&data.id;
           }
         }catch(e){ toast('Could not save the draft: '+((e&&e.message)||e),'err'); return; }
+        /* THE DRAFT NOW NAMES THESE FILES, so they are not abandoned uploads and the tidy-up list
+           must be told. Without this the list still held every file picked this session, and the
+           next workflow form opened swept them out of the bucket from under the draft - the draft
+           went on naming receipts that were no longer there, and submitted a claim whose
+           attachments opened as an S3 error page. Files attached and then taken off again before
+           saving are not in `details`, so those still go, which is the point of sweeping. */
+        try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(_e){}
         toast('Draft saved','ok');
         renderPage();
@@ -17245,12 +17252,19 @@
         }
         // Delete the underlying S3 object only once NOTHING else points at it — delegated copies share
         // the same storage_path, and a comment could too.
-        const {data:othersF}=await ACC().from('ptask_files').select('id').eq('storage_path',path).limit(1);
-        const {data:othersC}=await ACC().from('ptask_comments').select('id').eq('attach_path',path).limit(1);
+        /* FAILING TO ASK IS NOT AN ANSWER OF "NO" - the rule the workflow sweeper already learned
+           (see wfPurgeCaseFiles). These two took only `data` and never looked at `error`. A
+           Supabase query that fails RESOLVES with {data:null,error:{...}}, so a dropped connection
+           or an expired token left both undefined, which read as "nothing else points at this
+           file" and deleted it while the rows still named it. Now only an actual answer counts. */
+        const {data:othersF,error:othersFErr}=await ACC().from('ptask_files').select('id').eq('storage_path',path).limit(1);
+        const {data:othersC,error:othersCErr}=await ACC().from('ptask_comments').select('id').eq('attach_path',path).limit(1);
         // A legal notice task's attachment is also filed in Legal > Legal Notice Answers on the same
         // file (acc.legal_notice_answer_file) - the document there keeps it.
         let docUses=true; try{ const r=await ACC().rpc('storage_path_in_use',{p_path:path,p_except_doc:null,p_except_ptask_file:fid}); docUses=r.error?true:(r.data!==false); }catch(_e){ docUses=true; }
-        if((!othersF||!othersF.length)&&(!othersC||!othersC.length)&&!docUses) await s3Delete(path);
+        const nothingElseSaysSo = !othersFErr && !othersCErr
+          && !(othersF&&othersF.length) && !(othersC&&othersC.length);
+        if(nothingElseSaysSo && !docUses) await s3Delete(path);
         await ACC().from('ptask_activity').insert({task_id:tid,action:'deleted attachment',detail:'Deleted '+(fname||'an attachment')});
         await sysMsg(tid,'deleted the attachment "'+(fname||'file')+'"');
         toast('Attachment "'+(fname||'')+'" deleted','ok');
