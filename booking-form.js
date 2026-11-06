@@ -164,7 +164,7 @@ function stepApplicants(){
 }
 function addrBody(k){
   return '<div class="grid">'
-    +'<div class="full ac s6">'+field(k+'.line','House, street and area',{type:'area',full:1,req:k==='res'||S.off.on,ph:'Type your address'})+'<div id="ac-'+k+'"></div></div>'
+    +'<div class="full ac s3">'+field(k+'.line','House, street and area',{type:'area',full:1,req:k==='res'||S.off.on,ph:'Type your address'})+'<div id="ac-'+k+'"></div></div>'
     +'<div class="pair">'+field(k+'.city','City / Town',{req:1,s:4,auto:k==='res'?'address-level2':'off'})
     +field(k+'.pin','PIN code',{mode:'numeric',max:6,req:1,s:2,auto:k==='res'?'postal-code':'off'})+'</div></div>';
 }
@@ -183,9 +183,9 @@ function stepContact(){
     +card('','','Mailing & permanent address','Which address to use. Choose Other to give a different one.',
       '<div class="grid">'
       +chips('mailing','Send our letters to',S.off.on?['Residential','Office','Other']:['Residential','Other'],{s:3,ord:1})
-      +(S.mailing==='Other'?field('mailing_other','Mailing address',{type:'area',full:1,req:1,s:6,ord:3,ph:'House, street, area, city and PIN code'}):'')
+      +(S.mailing==='Other'?field('mailing_other','Mailing address',{type:'area',full:1,req:1,s:3,ord:3,ph:'House, street, area, city and PIN code'}):'')
       +chips('permanent','Permanent address',S.off.on?['Residential','Office','Other']:['Residential','Other'],{s:3,ord:2})
-      +(S.permanent==='Other'?field('permanent_other','Permanent address',{type:'area',full:1,req:1,s:6,ord:4,ph:'House, street, area, city and PIN code'}):'')
+      +(S.permanent==='Other'?field('permanent_other','Permanent address',{type:'area',full:1,req:1,s:3,ord:4,ph:'House, street, area, city and PIN code'}):'')
       +'</div>');
 }
 function stepAbout(){
@@ -202,7 +202,7 @@ function stepAbout(){
       '<div class="grid">'
       +chips('heard','How did you come to know about the project?',['Facebook','Instagram','Google','Friend / Relative','Other'],{s:6})
       +(S.heard==='Other'?field('heard_other','Where did you hear about it?',{full:1,req:1,s:3}):'')
-      +'<div class="f full span2 s6"><label>Why did you choose this project? <span class="opt">(optional)</span></label>'
+      +'<div class="f full span2 s3"><label>Why did you choose this project? <span class="opt">(optional)</span></label>'
         +S.why.map(function(w,i){ return '<div style="display:flex;gap:8px;align-items:center"><span class="num" style="width:26px;height:26px;border-radius:50%;background:#f1ede6;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex:none">'+(i+1)+'</span>'
           +'<input type="text" data-k="why.'+i+'" value="'+esc(w)+'" placeholder=" " autocomplete="off">'
           +(i?'<button type="button" class="rm lnk" style="color:var(--err);padding:8px" data-rmwhy="'+i+'" aria-label="Remove">×</button>':'')+'</div>'; }).join('')
@@ -215,9 +215,9 @@ function stepFlat(){
       '<div class="grid">'
       +chips('flat.block','Block',CONF.blocks,{req:1,half:1,s:2,ord:1})
       +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1,s:2,ord:2})
-      +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4,s:3,ord:4})
-      +chips('flat.bhk','Bedrooms',CONF.bhk,{half:1,s:3,ord:5})
-      +chips('flat.parking','Right to use car park',['Covered','Open'],{half:1,s:2,ord:3})+'</div>')
+      +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4,s:3,ord:3})
+      +chips('flat.bhk','Bedrooms',CONF.bhk,{half:1,s:3,ord:4})
+      +chips('flat.parking','Right to use car park',['Covered','Open'],{half:1,s:3,ord:5})+'</div>')
     +card('','','Area, rate & price','Optional - the figures agreed with our sales team.',
       '<div class="grid">'
       +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1,s:3,ord:1})

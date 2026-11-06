@@ -223,10 +223,10 @@
     .sb{padding:16px 22px 20px}
     .f>label{font-size:14px}
     input[type=text],input[type=tel],input[type=email],input[type=date],textarea{font-size:16px;min-height:46px}
-    textarea{min-height:62px}
+    textarea{min-height:46px;max-height:150px;field-sizing:content}
     .pick{font-size:16px;min-height:46px}
     .pre .pick{width:112px;padding-left:10px;padding-right:8px;gap:8px}
-    .chip{font-size:15px;min-height:42px}
+    .chip{font-size:15px;min-height:46px}
     .chips.num .chip{min-width:38px;padding:8px 6px}
     .hint{font-size:13px}
     .rv{font-size:15px}
@@ -234,13 +234,16 @@
     .sb .stack,.sb .grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:16px 16px;align-items:start}
     .sb .stack>*,.sb .grid>*,.sb .pair>*{grid-column:span 3;min-width:0}
     .pair{display:contents}
-    .sb .s2{grid-column:span 2}.sb .s3{grid-column:span 3}.sb .s4{grid-column:span 4}.sb .s6{grid-column:1/-1}
+    /* every text field is the same width (half the card); only a row of choices may take the whole row */
+    .sb .s2,.sb .s3,.sb .s4{grid-column:span 3}.sb .s6{grid-column:1/-1}
     .sb .o1{order:1}.sb .o2{order:2}.sb .o3{order:3}.sb .o4{order:4}.sb .o5{order:5}.sb .o6{order:6}.sb .o7{order:7}.sb .o8{order:8}.sb .o9{order:9}
     /* applicants: one under the other, a thin line between */
     .app{border:0;padding:0}
     .app .ah{margin-bottom:12px}
     .app+.app{margin-top:20px;padding-top:20px;border-top:1px solid var(--line)}
     .opt-d{margin-top:12px}
+    /* a folded "more" box is the same width as a field; opened, it takes the card */
+    .sb>details.opt-d:not([open]){width:calc(50% - 8px)}
     /* the two folded extras sit on the same two-thirds / one-third split as the fields above them */
     .app{display:grid;grid-template-columns:1fr 1fr;column-gap:16px;align-items:start}
     .sb .grp{margin:6px 0 -4px}.sb .grp:first-child{margin-top:0}
@@ -270,6 +273,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261106n"></script>
+<script src="booking-form.js?v=20261106p"></script>
 </body>
 </html>
