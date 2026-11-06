@@ -217,9 +217,10 @@ function stepFlat(){
       +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4})
       +chips('flat.bhk','Bedrooms',CONF.bhk,{half:1})
       +chips('flat.parking','Right to use car park',['Covered','Open'],{half:1})+'</div>')
-    +card('','','Area & rate','Optional',
+    +card('','','Area, rate & price','Optional',
       '<div class="grid">'
-      +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1,span2:1})
+      +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1})
+      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})
       +'<div class="f full"><label>Rate per sq.ft. (₹)</label>'
         +'<div class="rate">'
           +'<div class="f">'+'<label class="sub">Basic</label><input type="text" inputmode="decimal" data-k="price.basic" value="'+esc(S.price.basic)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
@@ -227,9 +228,6 @@ function stepFlat(){
           +'<div class="f">'+'<label class="sub">FLC</label><input type="text" inputmode="decimal" data-k="price.flc" value="'+esc(S.price.flc)+'" placeholder=" " autocomplete="off"></div><span class="op">=</span>'
           +'<div class="f">'+'<label class="sub">Total</label><div class="sum" id="w-rate">'+esc(rateTotal()?('₹'+fmtN(rateTotal())):'—')+'</div></div>'
         +'</div><div class="words">PLC: preferential location charge · FLC: floor rise charge</div></div></div>')
-    +card('','','Sale price','Optional',
-      '<div class="grid">'
-      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,span2:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})+'</div>')
     +card('','','Payment plan & home loan','',
       '<div class="grid">'
       +chips('price.plan','Payment plan',['Construction Linked','Down Payment'])
