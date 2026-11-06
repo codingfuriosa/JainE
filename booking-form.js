@@ -144,13 +144,13 @@ function stepApplicants(){
         +'<div class="stack">'
         +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,s:4,ord:1})
         +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,s:4,ord:3,cls:'up',auto:i?'off':'name',hint:'Exactly as written on your PAN card'})
-        +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1,s:3,ord:5})
-        +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,s:3,ord:6,cls:'up'})
+        +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1,s:2,ord:2})
+        +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,s:4,ord:5,cls:'up'})
         +(first?field(p+'dob','Date of birth',{type:'date',req:1,full:1,s:2,ord:4}):'')
-        +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1,s:2,ord:2})
-        +pick(p+'nationality','Nationality / Country','country',{full:1,s:2,ord:first?7:4})
-        +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1,s:first?2:3,ord:first?8:7,hint:'5 letters, 4 digits, 1 letter'})
-        +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1,s:first?2:3,ord:first?9:8})
+        +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1,s:2,ord:first?6:4})
+        +pick(p+'nationality','Nationality / Country','country',{full:1,s:2,ord:first?7:6})
+        +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1,s:2,ord:first?8:7,hint:'5 letters, 4 digits, 1 letter'})
+        +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1,s:2,ord:first?9:8})
         +'</div>'
         +'<details class="t opt-d"'+(nri?' open':'')+'><summary><span>Passport & bank details <span class="opt">(only for NRIs and foreign nationals)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
           +field(p+'passport','Passport number',{cls:'up',req:foreign,optional:!foreign,full:1})

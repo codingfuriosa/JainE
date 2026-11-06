@@ -241,8 +241,8 @@
     .app .ah{margin-bottom:12px}
     .app+.app{margin-top:20px;padding-top:20px;border-top:1px solid var(--line)}
     .opt-d{margin-top:12px}
-    /* the two folded extras (passport & bank, spouse) share one row */
-    .app{display:grid;grid-template-columns:1fr 1fr;column-gap:16px;align-items:start}
+    /* the two folded extras sit on the same two-thirds / one-third split as the fields above them */
+    .app{display:grid;grid-template-columns:calc((200% - 16px)/3) 1fr;column-gap:16px;align-items:start}
     .app>*{grid-column:1/-1}
     .app>details.t{grid-column:span 1}
     .sb>.f#f-sig{max-width:460px}.sigbox{min-height:110px}
@@ -269,6 +269,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261106j"></script>
+<script src="booking-form.js?v=20261106k"></script>
 </body>
 </html>
