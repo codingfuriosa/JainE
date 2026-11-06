@@ -79,7 +79,7 @@ const ICON={
   pen:'<svg class="i" viewBox="0 0 24 24"><path d="M16.5 3.5l4 4L8 20H4v-4z"/><path d="M14 6l4 4"/></svg>',
   check:'<svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'};
 function wrapF(path,label,o,inner){
-  return '<div class="f'+(o.full?' full':'')+(o.req?' need':'')+(ERR[path]?' bad':'')+'" id="'+fid(path)+'"><label>'+esc(label)
+  return '<div class="f'+(o.full?' full':'')+(o.span2?' span2':'')+(o.req?' need':'')+(ERR[path]?' bad':'')+'" id="'+fid(path)+'"><label>'+esc(label)
     +(o.req?' <span class="req">*</span>':(o.optional?' <span class="opt">(optional)</span>':''))+(o.note?' <span class="opt">'+esc(o.note)+'</span>':'')+'</label>'
     +inner+'<div class="err">'+esc(ERR[path]||'')+'</div></div>';
 }
@@ -142,9 +142,9 @@ function stepApplicants(){
           +(i?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
         +'<div class="grp">Personal details</div><div class="stack">'
         +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,mcols:5})
-        +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,cls:'up',auto:i?'off':'name'})
+        +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,span2:1,cls:'up',auto:i?'off':'name'})
         +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1,mcols:4})
-        +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,cls:'up'})
+        +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,span2:i>0,cls:'up'})
         +(i===0?field(p+'dob','Date of birth',{type:'date',req:1,full:1}):'')
         +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1})
         +'</div><div class="grp">Identity documents</div><div class="stack">'
@@ -173,7 +173,7 @@ function stepContact(){
       +field('contact.mobile','Mobile number',{type:'tel',req:1,full:1,mode:'tel',auto:'tel-national',
         before:'<div class="pre">'+pick('contact.cc','','dial',{bare:1}),after:'</div>'})
       +field('contact.email','Email',{type:'email',req:1,full:1,auto:'email',mode:'email'})
-      +field('contact.contact_person','Name of contact person',{optional:1,full:1})+'</div>')
+      +field('contact.contact_person','Name of contact person',{optional:1,full:1,span2:1})+'</div>')
     +card('','','Residential address','',addrBody('res'))
     +card('','','Office address','Optional',
       '<label class="switch"><input type="checkbox" data-check="off.on"'+(S.off.on?' checked':'')+'><span><b>I want to add an office address</b></span></label>'
@@ -200,7 +200,7 @@ function stepAbout(){
       '<div class="grid">'
       +chips('heard','How did you come to know about the project?',['Facebook','Instagram','Google','Friend / Relative','Other'])
       +(S.heard==='Other'?field('heard_other','Where did you hear about it?',{full:1,req:1}):'')
-      +'<div class="f full"><label>Why did you choose this project? <span class="opt">(optional)</span></label>'
+      +'<div class="f full span2"><label>Why did you choose this project? <span class="opt">(optional)</span></label>'
         +S.why.map(function(w,i){ return '<div style="display:flex;gap:8px;align-items:center"><span class="num" style="width:26px;height:26px;border-radius:50%;background:#f1ede6;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex:none">'+(i+1)+'</span>'
           +'<input type="text" data-k="why.'+i+'" value="'+esc(w)+'" placeholder=" " autocomplete="off">'
           +(i?'<button type="button" class="rm lnk" style="color:var(--err);padding:8px" data-rmwhy="'+i+'" aria-label="Remove">×</button>':'')+'</div>'; }).join('')
@@ -213,12 +213,12 @@ function stepFlat(){
       '<div class="grid">'
       +chips('flat.block','Block',CONF.blocks,{req:1})
       +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4})
-      +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1})
+      +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1,span2:1})
       +chips('flat.bhk','Bedrooms',CONF.bhk)
       +chips('flat.parking','Right to use car park',['Covered','Open'])+'</div>')
     +card('','','Area & rate','Optional',
       '<div class="grid">'
-      +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1})
+      +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1,span2:1})
       +'<div class="f full"><label>Rate per sq.ft. (₹)</label>'
         +'<div class="rate">'
           +'<div class="f">'+'<label class="sub">Basic</label><input type="text" inputmode="decimal" data-k="price.basic" value="'+esc(S.price.basic)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
@@ -228,7 +228,7 @@ function stepFlat(){
         +'</div><div class="words">PLC: preferential location charge · FLC: floor rise charge</div></div></div>')
     +card('','','Sale price','Optional',
       '<div class="grid">'
-      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})+'</div>')
+      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,span2:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})+'</div>')
     +card('','','Payment plan & home loan','',
       '<div class="grid">'
       +chips('price.plan','Payment plan',['Construction Linked','Down Payment'])
@@ -240,10 +240,10 @@ function stepPay(){
   return card('','','Application payment','Paid in favour of '+esc(CONF.company)+'. Cash is not accepted.',
       '<div class="grid">'
       +chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Cheque','Demand Draft','Card'],{mcols:2})
-      +field('pay.amount','Amount (₹)',{mode:'numeric',req:1,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})
+      +field('pay.amount','Amount (₹)',{mode:'numeric',req:1,span2:1,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})
       +'<div class="pair">'+field('pay.date',chq?'Cheque / DD date':'Date paid',{type:'date',req:1})
       +field('pay.ref',({'Cheque':'Cheque number','Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{req:1,cls:'up'})+'</div>'
-      +(chq?'<div class="pair">'+field('pay.bank','Bank (drawn on)',{req:1})+field('pay.branch','Branch',{optional:1})+'</div>':field('pay.bank','Bank',{optional:1}))+'</div>')
+      +(chq?'<div class="pair">'+field('pay.bank','Bank (drawn on)',{req:1})+field('pay.branch','Branch',{optional:1})+'</div>':field('pay.bank','Bank',{optional:1,span2:1}))+'</div>')
     +card('','','Booking details','',
       '<div class="grid">'
       +chips('purpose','Purpose of booking',['Residential','Investment'])
@@ -329,11 +329,11 @@ function stepTerms(){
                :ICON.pen+'<b>Tap here to sign</b><small>A large signing pad opens</small>')+'</button>')
       +'<p style="color:var(--slate);font-size:13px;margin:12px 0 0">Place: '+esc(S.res.city||'—')+' · Date: '+new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+'</p>');
 }
-function rows(pairs){ return '<table class="rv">'+pairs.filter(function(p){ return p[1]!==''&&p[1]!=null; }).map(function(p){ return '<tr><td>'+esc(p[0])+'</td><td>'+esc(p[1])+'</td></tr>'; }).join('')+'</table>'; }
+function rows(pairs){ return '<table class="rv">'+pairs.filter(function(p){ return p[1]!==''&&p[1]!=null; }).map(function(p){ return '<tr><td>'+esc(p[0])+'</td><td>'+esc(p[1])+'</td></tr>'; }).join('')+'</table></div>'; }   // closes the review section opened by h()
 function fmtD(d){ return d?new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):''; }
 function addr(x){ return [x.line,x.city,x.pin].filter(Boolean).join(', '); }
 function stepReview(){
-  const h=function(t,step){ return '<div class="rvh"><h3>'+t+'</h3><button type="button" data-go="'+step+'">Edit</button></div>'; };
+  const h=function(t,step){ return '<div class="rs"><div class="rvh"><h3>'+t+'</h3><button type="button" data-go="'+step+'">Edit</button></div>'; };
   return card('','','Review your application','Please check every detail. Use Edit to make a change, then submit.',
     S.applicants.map(function(a,i){ return h((i?'Joint applicant '+(i+1):'First applicant'),0)+rows([
       ['Name',a.title+' '+a.full_name],[a.relation,a.relation_name],['Date of birth',i?'':fmtD(a.dob)],['Occupation',a.occupation],['Nationality',a.nationality],
@@ -411,9 +411,27 @@ function render(){
   $('steps').innerHTML='<div class="lbl"><b>'+STEPS[st][0]+'</b><span>Step '+(st+1)+' of '+STEPS.length+'</span></div><div class="bar"><i style="width:'+Math.round((st+1)/STEPS.length*100)+'%"></i></div>';
   $('missing').innerHTML=MISSING.length?'<div class="miss"><b>Still missing on this page ('+MISSING.length+'):</b><ul>'+MISSING.map(function(m){ return '<li data-jump="'+fid(m[0])+'">'+esc(m[1])+'</li>'; }).join('')+'</ul></div>':'';
   $('app').innerHTML=[stepApplicants,stepContact,stepAbout,stepFlat,stepPay,stepDocs,stepTerms,stepReview][st]();
+  const sd=$('side'); if(sd) sd.innerHTML=sidePanel();
   $('nav').innerHTML='<div class="in">'+(st?'<button type="button" class="btn sec2" data-back="1">Back</button>':'')
     +'<button type="button" class="btn pri" id="nextBtn" data-next="1">'+(st===STEPS.length-1?'Submit booking form':'Continue')+'</button></div>'
     +'<div class="saved">Your answers are saved on this phone as you go.</div>';
+}
+/* The side panel on a wide screen: where the customer is, what to have ready, who to ask. A finished step can be
+   opened again from here. (Hidden by CSS on phones.) */
+function sidePanel(){
+  const st=S.step;
+  const steps='<ol class="stp">'+STEPS.map(function(s,i){
+    const n=i<st?ICON.check:String(i+1);
+    if(i<st) return '<li><button type="button" data-go="'+i+'"><span class="n">'+n+'</span><span>'+esc(s[0])+'</span></button></li>';
+    return '<li><div class="'+(i===st?'cur':'todo')+'"><span class="n">'+n+'</span><span>'+esc(s[0])+'</span></div></li>';
+  }).join('')+'</ol><div class="est">About 10 minutes with your documents to hand. Your answers are saved on this device as you go.</div>';
+  const ppl=S.applicants.length>1?'each applicant':'you';
+  return '<div class="sc"><h3>Your progress</h3>'+steps+'</div>'
+    +'<div class="sc"><h3>Keep these ready</h3><ul class="rdy">'
+      +'<li>PAN card and Aadhaar card of '+ppl+' - a photo from your phone or a PDF</li>'
+      +'<li>Your payment details: UTR / transaction number, or cheque / DD number and date</li>'
+      +'<li>NRI or foreign national: passport number and bank account details</li></ul></div>'
+    +'<div class="sc"><h3>Need help?</h3><p>Call the Jain Group sales contact who sent you this link. Nothing is final until our team confirms your booking.</p></div>';
 }
 function go(n){ S.step=Math.max(0,Math.min(STEPS.length-1,n)); save(); ERR={}; MISSING=[]; render(); window.scrollTo(0,0); }
 function showErrors(){
@@ -597,7 +615,7 @@ async function submit(){
     const j=await r.json().catch(function(){ return {}; });
     if(!r.ok||!j.ok) throw new Error(j.error||('Could not send (error '+r.status+')'));
     try{ localStorage.removeItem(DRAFT_KEY); }catch(e){}
-    $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
+    $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML=''; if($('side')) $('side').innerHTML=''; try{ document.querySelector('.cols').classList.add('single'); }catch(_e){}
     $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Thank you! Your booking form has been received.</h2>'
       +'<p style="color:var(--slate);margin-top:8px">Your reference number</p><div class="ref">'+esc(j.ref_no)+'</div>'
       +'<p style="color:var(--slate)">Please keep this number. Our team will call you shortly to confirm your booking.</p></div></div>';

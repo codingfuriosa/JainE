@@ -178,6 +178,7 @@
   .rv td:first-child{color:var(--slate);width:42%;padding-right:12px}
   .rvh{display:flex;justify-content:space-between;align-items:center;margin-top:22px;margin-bottom:2px}
   .rvh:first-child{margin-top:0}
+  .rs{margin-top:22px}.rs:first-child{margin-top:0}.rs .rvh{margin-top:0}
   .rvh h3{margin:0;font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--slate)}
   .rvh button{background:#fff;border:1px solid var(--line);color:var(--ink2);border-radius:6px;font:inherit;font-weight:500;font-size:13px;cursor:pointer;padding:5px 14px}
   .rvh button:hover{border-color:var(--brand);color:var(--brand-dark)}
@@ -191,6 +192,45 @@
   .toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;font-size:13.5px;z-index:70;max-width:90%;text-align:center}
   /* on a phone: less frame, more room for the fields */
   @media(max-width:520px){.sec{margin:12px 10px 0}.sb{padding:14px}.sh{padding:14px 14px 12px}.app{padding:12px}.steps{padding:10px 14px}.hd{padding:16px 14px 14px}}
+  /* DESKTOP (6 Nov 2026): the form used to stay a 720 px column in the middle of a wide screen, so the customer
+     scrolled a long way with empty space either side. From 1000 px the page widens to a form column plus a side
+     panel (steps, what to keep ready, help) and the fields sit two to a row. Phones are untouched. */
+  .side{display:none}
+  @media(min-width:1000px){
+    .wrap{max-width:1120px;padding:0 24px 120px}
+    .hd{border:1px solid var(--line);border-top:0;border-radius:0 0 10px 10px}
+    .steps{display:none}
+    .cols{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}
+    .cols.single{grid-template-columns:minmax(0,720px);justify-content:center}
+    .main .sec{margin:16px 0 0}
+    .main .miss{margin:16px 0 0}
+    .side{display:block;position:sticky;top:16px;margin-top:16px}
+    .side .sc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:12px}
+    .side h3{margin:0 0 10px;font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--slate)}
+    .side .stp{list-style:none;margin:0;padding:0}
+    .side .stp li{margin:0}
+    .side .stp button,.side .stp .cur,.side .stp .todo{display:flex;align-items:center;gap:10px;width:100%;padding:7px 0;border:0;background:none;font:inherit;font-size:14px;text-align:left;color:var(--slate)}
+    .side .stp .n{width:22px;height:22px;border-radius:50%;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:600;flex:none;background:#fff}
+    .side .stp .n svg{width:13px;height:13px;stroke-width:2.6}
+    .side .stp .cur{color:var(--ink);font-weight:600}.side .stp .cur .n{background:var(--brand);border-color:var(--brand);color:#fff}
+    .side .stp button{cursor:pointer;color:var(--ink2)}.side .stp button .n{background:var(--ok);border-color:var(--ok);color:#fff}
+    .side .stp button:hover span:last-child{text-decoration:underline}
+    .side .est{margin-top:10px;padding-top:10px;border-top:1px solid var(--line2);font-size:12.5px;color:var(--slate)}
+    .side ul.rdy{margin:0;padding:0 0 0 18px;font-size:13.5px;color:var(--ink2)}.side ul.rdy li{margin:5px 0}
+    .side p{margin:0;font-size:13.5px;color:var(--ink2)}
+    /* two fields to a row; things that need the full width keep it */
+    .main .grid,.main .stack{display:grid;grid-template-columns:1fr 1fr;gap:18px 16px}
+    .main .grid>*,.main .stack>*{grid-column:span 1;min-width:0}
+    .main .grid>.pair,.main .stack>.pair,.main .grid>.f:has(>.chips),.main .stack>.f:has(>.chips),.main .grid>.f:has(>textarea),.main .stack>.f:has(>textarea),
+    .main .grid>.f:has(>.upl),.main .stack>.f:has(>.upl),.main .grid>.f:has(>.sigbox),.main .grid>.f:has(>.rate),.main .grid>.f.span2,.main .stack>.f.span2,.main .grid>.agree,.main .stack>.agree{grid-column:1/-1}
+    .main .grid .pair,.main .stack .pair{grid-template-columns:1fr 1fr}
+    /* the review reads in two columns, each section kept whole */
+    .main .sb:has(>.rs){column-count:2;column-gap:36px}
+    .main .rs{break-inside:avoid;margin-bottom:6px}
+    .nav .in{width:min(1072px,100vw - 48px);max-width:none;padding-right:324px}
+    .nav .saved{width:min(1072px,100vw - 48px);margin-left:auto;margin-right:auto;padding-right:324px}
+  }
+  @media(min-width:1000px) and (min-height:900px){.side{top:24px}}
   @media print{.steps,.nav,.btn,.rvh button{display:none!important}.sec{border:1px solid #ddd}}
 </style>
 </head>
@@ -205,10 +245,15 @@
     <p>To Dream Gateway Hotels Ltd., 44/2A Hazra Road, Kolkata – 700 019</p>
   </div>
   <div class="steps" id="steps"></div>
-  <div id="missing"></div>
-  <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
+  <div class="cols">
+    <div class="main">
+      <div id="missing"></div>
+      <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
+    </div>
+    <aside class="side" id="side" aria-label="Your progress"></aside>
+  </div>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261103c"></script>
+<script src="booking-form.js?v=20261106b"></script>
 </body>
 </html>
