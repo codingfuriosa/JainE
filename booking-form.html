@@ -199,7 +199,7 @@
      are one line. Phones are untouched (the s2/s3/s4/s6 and o1.. classes do nothing there). */
   @media(min-width:1000px){
     body{font-size:16px}
-    .wrap{max-width:1120px}
+    .wrap{max-width:900px}
     /* header in one line: logo, the form's name and addressee, project logo */
     .hd{display:grid;grid-template-columns:auto 1fr auto;align-items:center;column-gap:24px;padding:12px 28px}
     .hd .logos{display:contents}
@@ -246,11 +246,11 @@
     .sb .grp{margin:6px 0 -4px}.sb .grp:first-child{margin-top:0}
     .app>*{grid-column:1/-1}
     .app>details.t{grid-column:span 1}
-    .sb>.f#f-sig{max-width:460px}.sigbox{min-height:110px}
+    .sigbox{min-height:110px}
     /* the review reads in two columns, each section kept whole */
     .sb:has(>.rs){column-count:2;column-gap:44px}
     .rs{break-inside:avoid}
-    .nav .in{max-width:1092px}
+    .nav .in{max-width:872px}
   }
   @media print{.steps,.nav,.btn,.rvh button{display:none!important}.sec{border:1px solid #ddd}}
 </style>
@@ -270,6 +270,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261106l"></script>
+<script src="booking-form.js?v=20261106n"></script>
 </body>
 </html>

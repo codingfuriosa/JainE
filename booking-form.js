@@ -153,7 +153,7 @@ function stepApplicants(){
         +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1,s:3,hint:'5 letters, 4 digits, 1 letter'})
         +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1,s:3})
         +'</div>'
-        +'<details class="t opt-d"'+(nri?' open':'')+'><summary><span>Passport & bank details <span class="opt">(only for NRIs and foreign nationals)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
+        +'<details class="t opt-d"'+(nri?' open':'')+'><summary><span>Passport & bank details <span class="opt">(NRI / foreign only)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
           +field(p+'passport','Passport number',{cls:'up',req:foreign,optional:!foreign,full:1})
           +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,optional:!foreign})+'</div></details>'
         +(first?'<details class="t opt-d"'+(a.spouse||a.anniversary?' open':'')+'><summary><span>Spouse & anniversary <span class="opt">(optional)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
@@ -218,24 +218,26 @@ function stepFlat(){
       +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4,s:3,ord:4})
       +chips('flat.bhk','Bedrooms',CONF.bhk,{half:1,s:3,ord:5})
       +chips('flat.parking','Right to use car park',['Covered','Open'],{half:1,s:2,ord:3})+'</div>')
-    +card('','','Area, price & payment plan','Optional - the figures agreed with our sales team.',
+    +card('','','Area, rate & price','Optional - the figures agreed with our sales team.',
       '<div class="grid">'
-      +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1,s:2,ord:1})
-      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,s:3,ord:3,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})
-      +'<div class="f full s4 o2"><label>Rate per sq.ft. (₹)</label>'
+      +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1,s:3,ord:1})
+      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,s:3,ord:2,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})
+      +'<div class="f full s6 o3"><label>Rate per sq.ft. (₹)</label>'
         +'<div class="rate">'
           +'<div class="f">'+'<label class="sub">Basic</label><input type="text" inputmode="decimal" data-k="price.basic" value="'+esc(S.price.basic)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
           +'<div class="f">'+'<label class="sub">PLC</label><input type="text" inputmode="decimal" data-k="price.plc" value="'+esc(S.price.plc)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
           +'<div class="f">'+'<label class="sub">FLC</label><input type="text" inputmode="decimal" data-k="price.flc" value="'+esc(S.price.flc)+'" placeholder=" " autocomplete="off"></div><span class="op">=</span>'
           +'<div class="f">'+'<label class="sub">Total</label><div class="sum" id="w-rate">'+esc(rateTotal()?('₹'+fmtN(rateTotal())):'—')+'</div></div>'
-        +'</div><div class="words">PLC: preferential location charge · FLC: floor rise charge</div></div>'
-      +chips('price.plan','Payment plan',['Construction Linked','Down Payment'],{s:3,ord:4})
-      +chips('price.loan','Home loan required?',['No','Yes'],{s:3,ord:5})
-      +(S.price.loan==='Yes'?field('price.bank','Preferred bank / institution',{optional:1,full:1,s:3,ord:6}):'')+'</div>');
+        +'</div><div class="words">PLC: preferential location charge · FLC: floor rise charge</div></div></div>')
+    +card('','','Payment plan & home loan','',
+      '<div class="grid">'
+      +chips('price.plan','Payment plan',['Construction Linked','Down Payment'],{s:3})
+      +chips('price.loan','Home loan required?',['No','Yes'],{s:3})
+      +(S.price.loan==='Yes'?field('price.bank','Preferred bank / institution',{optional:1,full:1,s:6}):'')+'</div>');
 }
 function stepPay(){
   const chq=S.pay.mode==='Cheque'||S.pay.mode==='Demand Draft';
-  return card('','','Application payment','Paid in favour of '+esc(CONF.company)+'. Cash is not accepted.',
+  return card('','','Application payment','Paid in favour of '+esc(String(CONF.company||'').replace(/\.+$/,''))+'. Cash is not accepted.',
       '<div class="grid">'
       +chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Cheque','Demand Draft','Card'],{mcols:2,s:6})
       +field('pay.amount','Amount (₹)',{mode:'numeric',req:1,s:2,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})
