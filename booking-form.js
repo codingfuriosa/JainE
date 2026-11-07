@@ -139,7 +139,7 @@ function stepApplicants(){
          who they are, then their ID documents, then (first applicant only, folded away) family. */
       const F={full:1};
       return '<div class="app"><div class="ah"><span class="num">'+(i+1)+'</span><b>'+(i?'Joint applicant':'First / sole applicant')+'</b>'
-          +(i?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
+          +(S.applicants.length>1?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
         +'<div class="grp">Personal details</div><div class="stack">'
         +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,mcols:5})
         +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,cls:'up',auto:i?'off':'name'})
@@ -204,13 +204,13 @@ function stepAbout(){
         +S.why.map(function(w,i){ return '<div style="display:flex;gap:8px;align-items:center"><span class="num" style="width:26px;height:26px;border-radius:50%;background:#f1ede6;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex:none">'+(i+1)+'</span>'
           +'<input type="text" data-k="why.'+i+'" value="'+esc(w)+'" placeholder=" " autocomplete="off">'
           +(i?'<button type="button" class="rm lnk" style="color:var(--err);padding:8px" data-rmwhy="'+i+'" aria-label="Remove">×</button>':'')+'</div>'; }).join('')
-        +(S.why.length<MAX_REASONS?'<button type="button" class="lnk" data-addwhy="1">+ Add another reason</button>':'')
+        +(S.why.length<MAX_REASONS?'<button type="button" class="btn add2" data-addwhy="1">+ Add another reason</button>':'')
       +'</div></div>');
 }
 function stepFlat(){
   const floors=[]; for(let i=1;i<=(CONF.floors||8);i++) floors.push(String(i));
   return card('','','Unit selection','As discussed with our sales team. The flat number may be left blank if not yet allotted.',
-      '<div class="grid">'
+      '<div class="grid two">'
       +chips('flat.block','Block',CONF.blocks,{req:1})
       +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4})
       +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1})
@@ -235,9 +235,12 @@ function stepFlat(){
       +chips('price.loan','Home loan required?',['No','Yes'])
       +(S.price.loan==='Yes'?field('price.bank','Preferred bank / institution',{optional:1,full:1}):'')+'</div>');
 }
+/* 7 Nov 2026: "Name of our sales person" and "Lead ID" are hidden for now (not usually something the customer knows) -
+   the user asked to keep reminding about it. To bring them back, set this to true. */
+const SHOW_SALES_FIELDS=false;
 function stepPay(){
   const chq=S.pay.mode==='Cheque'||S.pay.mode==='Demand Draft';
-  return card('','','Application payment','Paid in favour of '+esc(String(CONF.company||'').replace(/.+$/,''))+'. Cash is not accepted.',
+  return card('','','Application payment','Paid in favour of '+esc(String(CONF.company||'').replace(/[.]+$/,''))+'. Cash is not accepted.',
       '<div class="grid">'
       +chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Cheque','Demand Draft','Card'],{mcols:2})
       +field('pay.amount','Amount (₹)',{mode:'numeric',req:1,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})
@@ -248,8 +251,8 @@ function stepPay(){
       '<div class="grid">'
       +chips('purpose','Purpose of booking',['Residential','Investment'])
       +chips('sales','Booked through',['Direct','Booking agent / Channel partner'])
-      +field('sales_name',S.sales==='Direct'?'Name of our sales person':'Name of agent / channel partner',{optional:S.sales==='Direct',req:S.sales!=='Direct'})
-      +field('lead_id','Lead ID',{optional:1,ph:'If our team gave you one'})+'</div>');
+      +(SHOW_SALES_FIELDS?field('sales_name',S.sales==='Direct'?'Name of our sales person':'Name of agent / channel partner',{optional:S.sales==='Direct',req:S.sales!=='Direct'})
+      +field('lead_id','Lead ID',{optional:1,ph:'If our team gave you one'}):'')+'</div>');
 }
 // Basic + PLC + FLC, per sq.ft. - only when at least one is given.
 function rateTotal(){ const p=S.price, xs=[p.basic,p.plc,p.flc].filter(function(v){ return String(v||'').trim()!==''; }); return xs.length?xs.reduce(function(s,v){ return s+Number(v||0); },0):0; }
@@ -396,7 +399,7 @@ function check(step){
     if(!(Number(S.pay.amount)>0)) bad('pay.amount','Please write the amount paid','Amount paid');
     need('pay.date','Please choose the date','Payment date'); need('pay.ref',null,'Payment reference');
     if(S.pay.mode==='Cheque'||S.pay.mode==='Demand Draft') need('pay.bank',null,'Bank');
-    if(S.sales!=='Direct') need('sales_name',null,'Agent / channel partner name');
+    if(SHOW_SALES_FIELDS&&S.sales!=='Direct') need('sales_name',null,'Agent / channel partner name');
   }
   if(step===5) S.applicants.forEach(function(a,i){ if(a.nationality!=='India') return; const who=(a.full_name||('Applicant '+(i+1)))+': ';
     if(!FILES[i].pan.length) bad('doc.'+i+'.pan','Please attach the PAN card',who+'PAN card');
@@ -563,7 +566,7 @@ document.addEventListener('click',function(e){
     set(p[0]+'.line',x.line); if(x.city) set(p[0]+'.city',x.city); if(x.pin) set(p[0]+'.pin',x.pin); render(); return; }
   if(b.dataset.add){ S.applicants.push(newApp()); FILES.push({pan:[],aadhaar:[]}); save(); render();
     const cards=document.querySelectorAll('.app'); cards[cards.length-1].scrollIntoView({behavior:'smooth',block:'start'}); return; }
-  if(b.dataset.rm){ const i=+b.dataset.rm; if(!confirm('Remove applicant '+(i+1)+'?')) return; S.applicants.splice(i,1); FILES.splice(i,1); save(); render(); return; }
+  if(b.dataset.rm){ const i=+b.dataset.rm; if(!confirm('Remove '+(i?'applicant '+(i+1):'the first applicant')+'?'+(i?'':' The next person becomes the first applicant.'))) return; S.applicants.splice(i,1); FILES.splice(i,1); save(); render(); return; }
   if(b.dataset.addwhy){ S.why.push(''); save(); render(); const ins=document.querySelectorAll('[data-k^="why."]'); ins[ins.length-1].focus(); return; }
   if(b.dataset.rmwhy){ S.why.splice(+b.dataset.rmwhy,1); save(); render(); return; }
   if(b.dataset.delfile){ const p=b.dataset.delfile.split('|'); FILES[+p[0]][p[1]].splice(+p[2],1); render(); return; }

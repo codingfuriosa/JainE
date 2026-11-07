@@ -93,8 +93,8 @@
   .app .ah{display:flex;align-items:center;gap:10px;margin-bottom:4px}
   .app .ah b{font-size:15px;font-weight:600}
   .app .num{min-width:24px;height:24px;border-radius:6px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:12.5px;flex:none}
-  .app .rm{margin-left:auto;background:#fff;border:1px solid var(--line);color:var(--brand-dark);border-radius:6px;font:inherit;font-size:13px;font-weight:500;cursor:pointer;padding:6px 12px}
-  .app .rm:hover{border-color:var(--brand)}
+  .app .rm{margin-left:auto;background:#fff;border:1.5px solid var(--err);color:var(--err);border-radius:8px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;padding:7px 14px;box-shadow:0 1px 2px rgba(17,24,39,.08)}
+  .app .rm:hover{background:var(--soft)}
   .stack{display:flex;flex-direction:column;gap:18px}
   .grp{font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);margin:20px 0 12px;display:flex;align-items:center;gap:10px}
   .grp:after{content:'';flex:1;height:1px;background:var(--line2)}
@@ -103,8 +103,11 @@
   .btn{border:none;border-radius:8px;padding:12px 20px;font:inherit;font-size:15.5px;font-weight:600;cursor:pointer;min-height:48px}
   .btn.pri{background:var(--brand);color:#fff}.btn.pri:hover{background:var(--brand-dark)}
   .btn.sec2{background:#fff;color:var(--ink);border:1px solid var(--line)}
-  .btn.add{width:100%;margin-top:14px;background:#fff;border:1px dashed #b6bcc5;color:var(--ink2);font-size:14.5px;font-weight:500}
-  .btn.add:hover{border-color:var(--brand);color:var(--brand-dark)}
+  .btn.add,.btn.add2{width:100%;margin-top:14px;background:#fff;border:1.5px solid var(--brand);color:var(--brand-dark);font-size:14.5px;font-weight:600;box-shadow:0 1px 2px rgba(17,24,39,.08)}
+  .btn.add:hover,.btn.add2:hover{background:var(--soft)}
+  .btn.add2{width:auto;min-height:42px;padding:9px 18px;margin-top:10px;align-self:flex-start}
+  button.rm.lnk{border:1.5px solid var(--err);border-radius:8px;background:#fff;color:var(--err)!important;padding:8px 14px!important;font-weight:600;box-shadow:0 1px 2px rgba(17,24,39,.08)}
+  button.rm.lnk:hover{background:var(--soft)}
   .lnk{background:none;border:none;color:var(--brand-dark);font:inherit;font-weight:500;font-size:14px;cursor:pointer;padding:6px 0;text-align:left}
   .btn:disabled{opacity:.55}
   .nav{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid var(--line);padding:10px 14px calc(10px + env(safe-area-inset-bottom))}
@@ -119,7 +122,7 @@
   .miss li{margin:3px 0;cursor:pointer;text-decoration:underline;text-decoration-color:#d3a0a2;text-underline-offset:2px}
   /* uploads */
   .upl{display:flex;flex-direction:column;gap:8px}
-  .upl label.pk{display:flex;align-items:center;gap:12px;width:100%;border:1px dashed #b6bcc5;border-radius:8px;padding:13px 14px;cursor:pointer;background:#fafbfc;min-height:60px;color:var(--ink2)}
+  .upl label.pk{display:flex;align-items:center;gap:12px;width:100%;border:1.5px solid #b9bec7;border-radius:8px;padding:13px 14px;cursor:pointer;background:#fff;min-height:60px;color:var(--ink2);box-shadow:0 1px 2px rgba(17,24,39,.08)}
   .upl label.pk:hover{border-color:var(--brand);background:#fff}
   .upl label.pk .pi{width:36px;height:36px;border-radius:8px;border:1px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:center;flex:none;color:var(--slate)}
   .upl label.pk b{display:block;font-size:14px;font-weight:600;color:var(--ink)}.upl label.pk small{display:block;color:var(--slate);font-size:12.5px;margin-top:1px}
@@ -140,7 +143,7 @@
   .acl button small{display:block;color:var(--slate);font-size:12px;margin-top:1px}
   .acl .src{font-size:10.5px;color:#9ca3af;padding:5px 14px;text-align:right}
   /* signature: a tap target on the page, the signing pad full screen */
-  .sigbox{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:100%;min-height:140px;border:1px dashed #b6bcc5;border-radius:8px;background:#fafbfc;cursor:pointer;font:inherit;color:var(--ink2);padding:14px}
+  .sigbox{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:100%;min-height:140px;border:1.5px solid #b9bec7;border-radius:8px;background:#fff;box-shadow:0 1px 2px rgba(17,24,39,.08);cursor:pointer;font:inherit;color:var(--ink2);padding:14px}
   .sigbox:hover{border-color:var(--brand);background:#fff}
   .sigbox svg.i{width:26px;height:26px;color:var(--slate)}
   .sigbox b{font-size:15px;font-weight:600;color:var(--ink)}.sigbox small{color:var(--slate);font-size:12.5px}
@@ -159,12 +162,23 @@
   .sg-bot{display:flex;gap:10px;padding:0 14px calc(14px + env(safe-area-inset-bottom))}
   .sg-bot .btn{flex:1}
   /* terms */
-  details.t{border:1px solid var(--line);border-radius:8px;margin-top:10px;background:#fff}
-  details.t summary{padding:13px 14px;font-weight:500;font-size:14.5px;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px}
+  details.t{margin-top:10px}
+  details.t summary{padding:10px 16px;border:1.5px solid #b9bec7;border-radius:8px;background:#fff;box-shadow:0 1px 2px rgba(17,24,39,.08);font-weight:600;font-size:14.5px;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px}
+  details.t summary{border-color:var(--brand);color:var(--brand-dark)}
+  details.t summary:hover{background:var(--soft)}
+  /* the "more" toggles are buttons: a plus (a minus when open), not a box that looks like a field */
+  details.opt-d>summary{display:inline-flex;width:auto;justify-content:flex-start;gap:10px}
+  details.opt-d>summary:before{content:'+';font-weight:700;font-size:19px;line-height:1}
+  details.opt-d[open]>summary:before{content:'−'}
+  details.opt-d>summary:after{display:none}
+  details.opt-d>summary .opt{color:var(--slate)}
+  .btn.add2{justify-self:start}
+  details.t[open]>ol,details.t[open]>.stack{margin-top:8px;border:1px solid var(--line);border-radius:8px;background:#fff}
+  details.opt-d[open]>.stack{padding:14px!important}
   details.t summary::-webkit-details-marker{display:none}
   details.t summary:after{content:'';width:7px;height:7px;border-right:1.7px solid var(--slate);border-bottom:1.7px solid var(--slate);transform:rotate(45deg);margin:-4px 4px 0 0;transition:transform .15s;flex:none}
   details.t[open] summary:after{transform:rotate(225deg);margin-top:2px}
-  details.t ol{margin:0;padding:2px 18px 14px 36px;font-size:13.5px;color:var(--ink2);border-top:1px solid var(--line2);padding-top:12px}
+  details.t ol{margin:0;padding:14px 18px 6px 36px;font-size:13.5px;color:var(--ink2)}
   details.t li{margin-bottom:9px}
   .agree{display:flex;gap:12px;align-items:flex-start;margin-top:16px;padding:14px;border:1px solid var(--line);border-radius:8px;background:#fafbfc;cursor:pointer}
   .agree input{width:20px;height:20px;flex:none;accent-color:var(--brand);margin:1px 0 0}
@@ -232,6 +246,29 @@
     .sb>details.t,.sb>.agree,.sb>.switch,.sb>.btn.add,.app>details.t,.app>.btn,.sb>.miss{max-width:798px}
     .sb:has(>.rs){column-count:2;column-gap:44px}
     .rs{break-inside:avoid}
+    /* FIRST PAGE: no left column (the step bar already says "Applicant details"); each person is two groups side by side -
+       Personal details | Identity documents - so one person fits one screen. */
+    .sec:has(.app){display:block}
+    .sec:has(.app)>.sh{display:none}
+    .app{display:grid;grid-template-columns:1fr 1fr;column-gap:44px;align-items:start}
+    .app>.ah{grid-column:1/-1;margin-bottom:0}
+    .app>.grp{margin:14px 0 12px!important}
+    .app>.ah+.grp{grid-column:1;grid-row:2}
+    .app>.ah+.grp+.stack{grid-column:1;grid-row:3}
+    .app>.ah+.grp+.stack+.grp{grid-column:2;grid-row:2}
+    .app>.ah+.grp+.stack+.grp+.stack{grid-column:2;grid-row:3}
+    .app>details.t{grid-column:2;grid-row:4;max-width:none}
+    .app .stack>.f{display:flex;flex-direction:column;gap:6px}
+    .app .stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
+    .app .stack>.f>:not(label){grid-column:auto}
+    .sb>.btn.add{width:auto;min-width:260px;max-width:none}
+    /* UNIT SELECTION: two columns - Block | Flat number, Floor | Bedrooms, Car park */
+    .grid.two{display:grid;grid-template-columns:1fr 1fr;gap:18px 40px;align-items:start}
+    .grid.two>.f{display:flex;flex-direction:column;gap:6px}
+    .grid.two>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
+    .grid.two>.f>:not(label){grid-column:auto}
+    .grid.two>#f-flat-block{order:1}.grid.two>#f-flat-flat_no{order:2}.grid.two>#f-flat-floor{order:3}.grid.two>#f-flat-bhk{order:4}.grid.two>#f-flat-parking{order:5}
+    .chips.num .chip{min-width:38px;padding:8px 6px}
   }
   @media print{.steps,.nav,.btn,.rvh button{display:none!important}.sec{border:1px solid #ddd}}
 </style>
@@ -251,6 +288,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107b"></script>
+<script src="booking-form.js?v=20261107f"></script>
 </body>
 </html>
