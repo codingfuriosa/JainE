@@ -27,7 +27,7 @@
 const WM={items:null,meetings:null,people:[],err:'',cur:null,view:'meeting',tab:'pending',q:'',who:'',
   allF:'pending',allG:'meeting',allMtg:'',allWho:'',showPpl:false,wk:null,showPast:false,
   picked:{mem:[],due:null,recur:'none'},parsed:null,sugIdx:0,lastNew:null,lastDraft:null,
-  sel:new Set(),draftMem:{},draftRecur:{},timer:null,busy:false,formPpl:new Set(),kpiT:null,railOff:undefined};
+  sel:new Set(),draftMem:{},draftRecur:{},timer:null,busy:false,formPpl:new Set(),kpiT:null,noteT:{},formAg:[],agTimer:null,agView:null,agFollow:true,railOff:undefined};
 
 const WM_RECUR={none:'Does not repeat',weekly:'Weekly',monthly:'Monthly'};
 const WM_LEGACY={open:'Open',in_progress:'In progress',not_done:'Not done',done:'Done'};
@@ -199,9 +199,12 @@ function wmPaintMeeting(){
       ${series.length>1?`<select class="wm-hsel" onchange="wmOpenMeeting(Number(this.value))" title="Earlier meetings">${series.map(x=>`<option value="${x.id}" ${x.id===m.id?'selected':''}>${x.id===m.id?'Earlier meetings':(x.meeting_date===today?'Today':esc(wmFmt(x.meeting_date)))}</option>`).join('')}</select>`:''}
     </div>
     </div><div class="wm-card-body">
-    ${m.has_kpi?`<div class="wm-kpi"><div class="wm-sec"><span><i class="fa-solid fa-chart-line" style="margin-right:6px"></i>KPI notes</span><span class="r wm-mute" id="wmKpiSt" style="letter-spacing:0;text-transform:none;font-weight:400"></span></div>
-      <textarea id="wmKpiTxt" placeholder="Numbers, targets and how they moved since last time…" oninput="wmKpiInput(this)" onblur="wmKpiSave(this)">${esc(m.kpi_notes||'')}</textarea></div>`
-      :`<button class="wm-quiet" style="margin-top:18px" onclick="wmKpiAdd()"><i class="fa-solid fa-plus"></i> Add a KPI section</button>`}
+    ${m.agenda?'<div class="wm-ag" id="wmAg"></div>':`${m.has_kpi?`<div class="wm-kpi"><div class="wm-sec"><span><i class="fa-solid fa-chart-line" style="margin-right:6px"></i>KPI notes</span><span class="r wm-mute" id="wmKpiSt" style="letter-spacing:0;text-transform:none;font-weight:400"></span></div>
+      <textarea id="wmKpiTxt" placeholder="Numbers, targets and how they moved since last time…" oninput="wmKpiInput(this)" onblur="wmKpiSave(this)">${esc(m.kpi_notes||'')}</textarea></div>`:''}
+    ${m.has_oo?`<div class="wm-oo">${[['obstacles','Obstacles','fa-triangle-exclamation','What is in the way…'],['opportunities','Opportunities','fa-lightbulb','What we could do more of…']].map(([f,l,i,ph])=>`<div class="wm-oo-box ${f}"><div class="wm-sec"><span><i class="fa-solid ${i}" style="margin-right:6px"></i>${l}</span><span class="r wm-mute wm-nst" id="wmSt_${f}"></span></div>
+      <textarea id="wmNote_${f}" placeholder="${ph}" oninput="wmNoteInput('${f}',this)" onblur="wmNoteSave('${f}',this)">${esc(m[f]||'')}</textarea></div>`).join('')}</div>`:''}
+    ${!m.has_kpi||!m.has_oo?`<div class="wm-addsec">${!m.has_kpi?`<button class="wm-quiet" onclick="wmKpiAdd()"><i class="fa-solid fa-plus"></i> Add a KPI section</button>`:''}${!m.has_oo?`<button class="wm-quiet" onclick="wmOoAdd()"><i class="fa-solid fa-plus"></i> Add Obstacles &amp; Opportunities</button>`:''}</div>`:''}
+    <div class="wm-addsec" style="margin-top:10px"><button class="wm-quiet" onclick="wmAgAdd()"><i class="fa-solid fa-stopwatch"></i> Run this meeting on the timed agenda</button></div>`}
     <div class="wm-cap">
       <div class="wm-cap-in"><input id="wmSmart" autocomplete="off" placeholder="Write a task and press Enter…" oninput="wmParse()" onkeydown="wmKey(event)"><span class="kbd">Enter ↵</span></div>
       <div class="wm-parsed" id="wmParsed"></div>
@@ -211,6 +214,7 @@ function wmPaintMeeting(){
     <div class="wm-v6" id="wmTasks"></div>
   </div></div>`;
   wmParse(); wmPaintDrafts(); wmPaintTabs();
+  if(m.agenda) wmPaintAgenda(true);
   if(isToday&&started){
     const tick=()=>{ const t=$('wmTimer'); if(!t) return; const x=Math.max(0,Math.floor((Date.now()-started)/1000)); t.textContent=String(Math.floor(x/60)).padStart(2,'0')+':'+String(x%60).padStart(2,'0'); };
     tick(); WM.timer=setInterval(tick,1000);
@@ -261,7 +265,18 @@ window.wmFormPeopleList=function(){
 window.wmFormKind=function(){
   const sel=$('wmKind').value; $('wmKindNew').style.display=sel==='__new'?'':'none';
   WM.formPpl=new Set(sel==='__new'?[]:wmLastPeople(sel)); wmFormPeople();
+  // The agenda starts as the last meeting of this kind ran it, else the standard one.
+  const last=sel==='__new'?null:(WM.meetings||[]).find(m=>m.kind===sel&&m.agenda&&m.agenda.items);
+  WM.formAg=wmAgMerge(last?last.agenda:null).map(x=>({k:x.k,mins:x.mins,on:x.on})); wmFormAgenda();
 };
+function wmFormAgenda(){
+  const host=$('wmAgForm'); if(!host) return;
+  const tot=WM.formAg.filter(x=>x.on).reduce((s,x)=>s+(Number(x.mins)||0),0);
+  host.innerHTML=WM.formAg.map((x,i)=>{ const d=WM_AGENDA.find(a=>a.k===x.k);
+    return `<label class="wm-agf-row ${x.on?'':'off'}"><input type="checkbox" ${x.on?'checked':''} onchange="WM.formAg[${i}].on=this.checked;wmFormAgenda()"><i class="fa-solid ${d.i}"></i><span>${esc(d.l)}${d.n?' <em>notes</em>':''}</span>
+      <input type="number" min="1" max="180" value="${x.mins}" onclick="event.preventDefault()" onchange="WM.formAg[${i}].mins=Math.max(1,Math.min(180,Number(this.value)||1));wmFormAgenda()"> min</label>`; }).join('')
+    +`<div class="wm-agf-tot">${WM.formAg.some(x=>x.on)?'Total '+tot+' min':'No agenda — the meeting runs without the timer'}</div>`;
+}
 window.wmMeetingForm=function(mode){
   const later=mode==='schedule', kinds=[...new Set((WM.meetings||[]).map(m=>m.kind).filter(Boolean))];
   openModal(`<div class="modal-head"><h3>${later?'Schedule a meeting':'Start a meeting'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -272,7 +287,8 @@ window.wmMeetingForm=function(mode){
       <div><label>Time</label><input type="time" id="wmTime" value="10:30"></div></div>`:''}
     <label>People in this meeting <span style="font-weight:400;color:var(--slate)">— it goes into their JainE calendar and yours</span></label>
     <div class="wm-fp" id="wmFormPpl"></div>
-    <label class="wm-kpi-opt"><input type="checkbox" id="wmKpi"> <span><b>Add a KPI section</b><br><small>A separate place on the meeting for KPI notes.</small></span></label>
+    <label>Timed agenda <span style="font-weight:400;color:var(--slate)">— untick what this meeting skips; the minutes can be changed</span></label>
+    <div class="wm-agf" id="wmAgForm"></div>
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="wmStartBtn" onclick="wmMeetingSave('${later?'schedule':'start'}')"><i class="fa-solid fa-${later?'calendar-plus':'play'}"></i> ${later?'Schedule':'Start'}</button></div>`);
   if(!kinds.length) $('wmKind').value='__new';
@@ -283,14 +299,17 @@ window.wmScheduleMeeting=function(){ wmMeetingForm('schedule'); };
 window.wmMeetingSave=async function(mode){
   const later=mode==='schedule', sel=$('wmKind').value, kind=sel==='__new'?($('wmKindNew').value||'').trim():sel;
   const date=later?($('wmDate').value||''):wmToday(), time=later?($('wmTime').value||null):(wmNowTime()||null);
-  const emails=[...(WM.formPpl||[])], kpi=!!($('wmKpi')&&$('wmKpi').checked);
+  const emails=[...(WM.formPpl||[])], ag=(WM.formAg||[]).some(x=>x.on)?{items:WM.formAg.map(x=>({k:x.k,mins:x.mins,on:x.on}))}:null;
+  const on=k=>!!ag&&ag.items.some(x=>x.k===k&&x.on), kpi=on('kpi'), oo=on('oo');
+  // Started now: the timer starts with it, on the first step.
+  const run=ag&&!later?{k:ag.items.find(x=>x.on).k,at:Date.now(),paused:false}:null;
   if(!kind){ toast('Choose which meeting this is','err'); return; }
   if(!date){ toast('Choose a date','err'); return; }
   if(later&&date<wmToday()){ toast('Choose today or a later day','err'); return; }
   if(!emails.length){ toast('Add at least one person to this meeting','err'); return; }
   const b=$('wmStartBtn'); b.disabled=true;
   try{
-    const {data,error}=await sb.rpc('ops_meeting_create',{p_kind:kind,p_date:date,p_time:time,p_people:emails,p_names:emails.map(wmName),p_kpi:kpi}); if(error) throw error;
+    const {data,error}=await sb.rpc('ops_meeting_create',{p_kind:kind,p_date:date,p_time:time,p_people:emails,p_names:emails.map(wmName),p_kpi:kpi,p_oo:oo,p_agenda:ag,p_run:run}); if(error) throw error;
     if(!later){ try{ localStorage.setItem('wm_start_'+data,String(Date.now())); }catch(e){} }
     try{ usageQueue('tasks.meetings.schedule_a_meeting_one_time_or_recurring','create',{title:kind,attendees:emails.length+(emails.length===1?' person':' people')}); }catch(_e){}
     await wmReloadMeetings(); closeModal();
@@ -309,6 +328,194 @@ window.wmKpiSave=async function(el){
   try{ const {error}=await sb.rpc('ops_meeting_set_kpi',{p_meeting:m.id,p_on:true,p_notes:v}); if(error) throw error; m.kpi_notes=v; if(st) st.textContent='Saved'; }
   catch(e){ if(st) st.textContent=''; toast('Could not save the KPI notes: '+((e&&e.message)||e),'err'); }
 };
+/* Obstacles & Opportunities: two notes boxes, each saved on its own as you pause and when you leave it. */
+window.wmNoteInput=function(f,el){ WM.noteT=WM.noteT||{}; clearTimeout(WM.noteT[f]); WM.noteT[f]=setTimeout(()=>wmNoteSave(f,el),900); };
+window.wmNoteSave=async function(f,el){
+  if(WM.noteT) clearTimeout(WM.noteT[f]);
+  const m=wmMeeting(WM.cur); if(!m||!el) return;
+  const v=el.value; if((m[f]||'')===v) return;
+  const st=$('wmSt_'+f); if(st) st.textContent='Saving…';
+  try{ const {error}=await sb.rpc('ops_meeting_set_note',{p_meeting:m.id,p_field:f,p_value:v}); if(error) throw error; m[f]=v; if(st) st.textContent='Saved'; }
+  catch(e){ if(st) st.textContent=''; toast('Could not save the '+f+': '+((e&&e.message)||e),'err'); }
+};
+window.wmOoAdd=async function(){
+  const m=wmMeeting(WM.cur); if(!m) return;
+  try{ const {error}=await sb.rpc('ops_meeting_set_oo',{p_meeting:m.id,p_on:true}); if(error) throw error; m.has_oo=true; wmPaintMeeting(); const t=$('wmNote_obstacles'); if(t) t.focus(); }
+  catch(e){ toast('Could not add the section: '+((e&&e.message)||e),'err'); }
+};
+/* ---------- the timed agenda ----------
+   Eight steps in a fixed order, each with its own minutes. The timer starts on the first step and
+   moves to the next one by itself when a step's time is up (a short chime marks it); it can be
+   paused, or moved back and forward by hand. Where it stands is saved on the meeting (agenda_run:
+   which step, when that step began, or how much was left when paused), so a reload - or another
+   screen - picks it up where it is. */
+const WM_AGENDA=[
+  {k:'wins',  l:'Personal & professional wins', mins:5, i:'fa-trophy'},
+  {k:'core',  l:'Core values & purpose',        mins:5, i:'fa-compass'},
+  {k:'goal',  l:'Quarterly #1 goal',            mins:1, i:'fa-bullseye'},
+  {k:'prio',  l:'Quarterly priorities',         mins:5, i:'fa-list-ol'},
+  {k:'kpi',   l:'KPIs',                         mins:5, i:'fa-chart-line', n:'kpi'},
+  {k:'events',l:'Upcoming important events',    mins:5, i:'fa-calendar-day', n:'notes', ph:'Launches, site visits, deadlines, holidays coming up…'},
+  {k:'todos', l:'To-dos',                       mins:5, i:'fa-list-check', n:'notes', ph:'What needs doing, by whom…'},
+  {k:'oo',    l:'Opportunities & obstacles',    mins:30,i:'fa-scale-balanced', n:'oo'}];
+function wmAgMerge(agenda){
+  const saved=(agenda&&agenda.items)||[];
+  return WM_AGENDA.map(d=>{ const s=saved.find(x=>x.k===d.k); return Object.assign({},d,s?{mins:Number(s.mins)||d.mins,on:s.on!==false}:{on:!agenda}); });
+}
+const wmAgOn=m=>wmAgMerge(m.agenda).filter(x=>x.on);
+// Where the timer is now. Steps whose time ran out while nobody was looking are stepped past here.
+function wmAgState(m){
+  const items=wmAgOn(m), run=m.agenda_run;
+  if(!run||!items.length) return {items,run:null};
+  if(run.done) return {items,run,done:true};
+  let i=items.findIndex(x=>x.k===run.k); if(i<0) i=0;
+  if(run.paused) return {items,run,i,left:Math.max(0,Number(run.left)||0)};
+  let at=Number(run.at)||Date.now(), moved=false;
+  while(Date.now()-at>=items[i].mins*60000){ at+=items[i].mins*60000; moved=true; if(i===items.length-1) return {items,run,i,moved,finished:true}; i++; }
+  return {items,run,i,at,moved,left:Math.ceil((items[i].mins*60000-(Date.now()-at))/1000)};
+}
+const wmMMSS=s=>{ s=Math.max(0,Math.round(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
+async function wmAgSaveRun(m,run){
+  m.agenda_run=run;
+  try{ const {error}=await sb.rpc('ops_meeting_set_run',{p_meeting:m.id,p_run:run}); if(error) throw error; }
+  catch(e){ toast('Could not save the timer: '+((e&&e.message)||e),'err'); }
+}
+function wmChime(){ try{ const c=new (window.AudioContext||window.webkitAudioContext)(), o=c.createOscillator(), g=c.createGain(); o.frequency.value=880; o.connect(g); g.connect(c.destination); g.gain.setValueAtTime(.15,c.currentTime); g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.6); o.start(); o.stop(c.currentTime+.6); }catch(e){} }
+
+function wmPaintAgenda(fresh){
+  clearInterval(WM.agTimer);
+  const host=$('wmAg'), m=wmMeeting(WM.cur); if(!host||!m||!m.agenda) return;
+  const s=wmAgState(m), tot=s.items.reduce((a,x)=>a+x.mins,0);
+  if(fresh||!WM.agView||!s.items.some(x=>x.k===WM.agView)) { WM.agView=s.run&&!s.done&&s.i!=null?s.items[s.i].k:(s.items[0]||{}).k; WM.agFollow=true; }
+  const curK=s.run&&!s.done&&!s.finished?s.items[s.i].k:null;
+  const ctl=!s.run?`<button class="wm-btn wm-sm wm-red" onclick="wmAgStart()"><i class="fa-solid fa-play"></i> Start the timer</button>`
+    :s.done||s.finished?`<span class="wm-mute" style="font-size:13px"><i class="fa-solid fa-flag-checkered"></i> Agenda finished</span><button class="wm-ib" title="Back to the last step" onclick="wmAgStep(-1)"><i class="fa-solid fa-backward-step"></i></button>`
+    :`<button class="wm-ib" title="Back a step" onclick="wmAgStep(-1)"><i class="fa-solid fa-backward-step"></i></button>
+      <button class="wm-btn wm-sm wm-light" onclick="wmAgPause()"><i class="fa-solid fa-${s.run.paused?'play':'pause'}"></i> ${s.run.paused?'Resume':'Pause'}</button>
+      <button class="wm-ib" title="Next step" onclick="wmAgStep(1)"><i class="fa-solid fa-forward-step"></i></button>`;
+  host.innerHTML=`<div class="wm-ag-head"><div><b>Agenda</b> <span class="wm-mute">· ${tot} min</span></div><div class="wm-ag-ctl">${ctl}</div></div>
+    <div class="wm-ag-grid"><div class="wm-ag-steps">${s.items.map((x,j)=>{ const past=s.run&&(s.done||s.finished||j<s.i), now=x.k===curK;
+      return `<div class="wm-ag-step ${now?'now':''} ${past?'past':''} ${WM.agView===x.k?'view':''}" onclick="wmAgView('${x.k}')">
+        <span class="ic">${past?'<i class="fa-solid fa-check"></i>':`<i class="fa-solid ${x.i}"></i>`}</span><span class="l">${esc(x.l)}</span>
+        ${now?`<span class="cd" id="wmAgCd">${wmMMSS(s.left)}</span>`:`<input class="mn" type="number" min="1" max="180" value="${x.mins}" title="Minutes" onclick="event.stopPropagation()" onchange="wmAgMins('${x.k}',this.value)"><span class="mu">m</span>`}
+        ${now?`<span class="bar"><span id="wmAgBar" style="width:${Math.min(100,100-(s.left/(x.mins*60))*100)}%"></span></span>`:''}</div>`; }).join('')}</div>
+      <div class="wm-ag-panel" id="wmAgPanel"></div></div>`;
+  wmPaintAgPanel(s);
+  if(s.moved||s.finished) wmAgAdvanced(m,s);
+  if(s.run&&!s.run.paused&&!s.done&&!s.finished) WM.agTimer=setInterval(wmAgTick,1000);
+}
+// Every second: the countdown and its bar only, so nothing being typed is disturbed. A step that
+// runs out moves the agenda on; the open notes follow it unless someone is typing in them.
+function wmAgTick(){
+  const m=wmMeeting(WM.cur); if(!m||!$('wmAg')){ clearInterval(WM.agTimer); return; }
+  const s=wmAgState(m);
+  if(s.moved||s.finished){ wmAgAdvanced(m,s); return; }
+  const cd=$('wmAgCd'), bar=$('wmAgBar'), it=s.items[s.i];
+  if(cd) cd.textContent=wmMMSS(s.left); if(bar) bar.style.width=Math.min(100,100-(s.left/(it.mins*60))*100)+'%';
+  const big=$('wmAgBig'); if(big) big.textContent=wmMMSS(s.left);
+}
+function wmAgAdvanced(m,s){
+  wmChime();
+  const run=s.finished?{k:s.items[s.items.length-1].k,done:true}:{k:s.items[s.i].k,at:s.at,paused:false};
+  if(!s.finished) toast('Next: '+s.items[s.i].l+' · '+s.items[s.i].mins+' min','ok'); else toast('Agenda finished','ok');
+  wmAgSaveRun(m,run);
+  const typing=document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#wmAgPanel');
+  if(WM.agFollow&&!typing&&!s.finished) WM.agView=run.k;
+  wmPaintAgenda(false);
+}
+function wmPaintAgPanel(s){
+  const p=$('wmAgPanel'), m=wmMeeting(WM.cur); if(!p||!m) return;
+  const x=s.items.find(i=>i.k===WM.agView); if(!x){ p.innerHTML=''; return; }
+  const running=s.run&&!s.done&&!s.finished&&s.items[s.i].k===x.k;
+  const head=`<div class="wm-ag-ph"><div><div class="wm-eyebrow">${running?'<span class="wm-live">Now</span>':s.run&&!s.done&&!s.finished&&s.items.findIndex(i=>i.k===x.k)<s.i||s.done||s.finished?'Done':'Coming up'} · ${x.mins} min</div><h3><i class="fa-solid ${x.i}"></i> ${esc(x.l)}</h3></div>
+    ${running?`<div class="wm-ag-big" id="wmAgBig">${wmMMSS(s.left)}</div>`:''}</div>
+    ${!running&&s.run&&!s.done&&!s.finished?`<button class="wm-quiet" style="margin:-4px 0 10px" onclick="wmAgView('${esc(s.items[s.i].k)}')"><i class="fa-solid fa-arrow-left"></i> Back to the step the timer is on</button>`:''}`;
+  let body='';
+  if(x.n==='kpi') body=wmKpiTableHtml(m)+`<div class="wm-sec" style="margin-top:16px"><span>KPI notes</span><span class="r wm-mute wm-nst" id="wmKpiSt"></span></div>
+      <textarea class="wm-ag-ta" id="wmKpiTxt" placeholder="Anything behind the numbers…" oninput="wmKpiInput(this)" onblur="wmKpiSave(this)">${esc(m.kpi_notes||'')}</textarea>`;
+  else if(x.n==='notes') body=`<div class="wm-sec"><span>Notes</span><span class="r wm-mute wm-nst" id="wmSt_${x.k}"></span></div>
+      <textarea class="wm-ag-ta" id="wmAgNote_${x.k}" placeholder="${esc(x.ph||'')}" oninput="wmAgNoteInput('${x.k}',this)" onblur="wmAgNoteSave('${x.k}',this)">${esc((m.agenda_notes||{})[x.k]||'')}</textarea>`;
+  else if(x.n==='oo') body=`<div class="wm-oo" style="margin-top:0">${[['opportunities','Opportunities','fa-lightbulb','What we could do more of…'],['obstacles','Obstacles','fa-triangle-exclamation','What is in the way…']].map(([f,l,i,ph])=>`<div class="wm-oo-box ${f}"><div class="wm-sec"><span><i class="fa-solid ${i}" style="margin-right:6px"></i>${l}</span><span class="r wm-mute wm-nst" id="wmSt_${f}"></span></div>
+      <textarea id="wmNote_${f}" placeholder="${ph}" oninput="wmNoteInput('${f}',this)" onblur="wmNoteSave('${f}',this)">${esc(m[f]||'')}</textarea></div>`).join('')}</div>`;
+  else body=`<div class="wm-mute" style="font-size:13.5px;padding:8px 0 4px">Go round the room. No notes are kept for this step.</div>`;
+  p.innerHTML=head+body;
+}
+window.wmAgView=function(k){ const m=wmMeeting(WM.cur); WM.agView=k; const s=wmAgState(m); WM.agFollow=!!(s.run&&!s.done&&!s.finished&&s.items[s.i].k===k); wmPaintAgenda(false); };
+window.wmAgStart=async function(){
+  const m=wmMeeting(WM.cur); if(!m) return; const items=wmAgOn(m); if(!items.length) return;
+  try{ if(!localStorage.getItem('wm_start_'+m.id)) localStorage.setItem('wm_start_'+m.id,String(Date.now())); }catch(e){}
+  await wmAgSaveRun(m,{k:items[0].k,at:Date.now(),paused:false}); WM.agView=items[0].k; WM.agFollow=true; wmPaintMeeting();
+};
+window.wmAgPause=async function(){
+  const m=wmMeeting(WM.cur), s=wmAgState(m); if(!s.run||s.done) return;
+  const it=s.items[s.i];
+  const run=s.run.paused?{k:it.k,at:Date.now()-(it.mins*60-s.left)*1000,paused:false}:{k:it.k,paused:true,left:s.left};
+  await wmAgSaveRun(m,run); wmPaintAgenda(false);
+};
+window.wmAgStep=async function(dir){
+  const m=wmMeeting(WM.cur), s=wmAgState(m); if(!s.run) return;
+  const cur=s.done||s.finished?s.items.length:s.i, j=cur+dir;
+  if(j<0) return;
+  const run=j>=s.items.length?{k:s.items[s.items.length-1].k,done:true}:{k:s.items[j].k,at:Date.now(),paused:false};
+  await wmAgSaveRun(m,run); WM.agView=run.k; WM.agFollow=true; wmPaintAgenda(false);
+};
+// Changing a step's minutes. On the running step the time already spent still counts.
+window.wmAgMins=async function(k,v){
+  const m=wmMeeting(WM.cur); if(!m) return;
+  const items=wmAgMerge(m.agenda).map(x=>({k:x.k,mins:x.k===k?Math.max(1,Math.min(180,Number(v)||1)):x.mins,on:x.on}));
+  try{ const {error}=await sb.rpc('ops_meeting_set_agenda',{p_meeting:m.id,p_agenda:{items}}); if(error) throw error; m.agenda={items}; }
+  catch(e){ toast('Could not change the minutes: '+((e&&e.message)||e),'err'); }
+  wmPaintAgenda(false);
+};
+// A meeting set up without the agenda can take it on later: the standard steps, keeping any KPI or
+// O&O section it already had.
+window.wmAgAdd=async function(){
+  const m=wmMeeting(WM.cur); if(!m) return;
+  const items=WM_AGENDA.map(d=>({k:d.k,mins:d.mins,on:true}));
+  try{ const {error}=await sb.rpc('ops_meeting_set_agenda',{p_meeting:m.id,p_agenda:{items}}); if(error) throw error; m.agenda={items}; m.has_kpi=true; m.has_oo=true; wmPaintMeeting(); }
+  catch(e){ toast('Could not add the agenda: '+((e&&e.message)||e),'err'); }
+};
+window.wmAgNoteInput=function(k,el){ WM.noteT=WM.noteT||{}; clearTimeout(WM.noteT[k]); WM.noteT[k]=setTimeout(()=>wmAgNoteSave(k,el),900); };
+window.wmAgNoteSave=async function(k,el){
+  if(WM.noteT) clearTimeout(WM.noteT[k]);
+  const m=wmMeeting(WM.cur); if(!m||!el) return;
+  const v=el.value, have=(m.agenda_notes||{})[k]||''; if(have===v) return;
+  const st=$('wmSt_'+k); if(st) st.textContent='Saving…';
+  try{ const {error}=await sb.rpc('ops_meeting_set_agenda_note',{p_meeting:m.id,p_key:k,p_value:v}); if(error) throw error; m.agenda_notes=Object.assign({},m.agenda_notes,{[k]:v}); if(st) st.textContent='Saved'; }
+  catch(e){ if(st) st.textContent=''; toast('Could not save the notes: '+((e&&e.message)||e),'err'); }
+};
+
+/* ---------- the KPI table: one row per person in the meeting, columns you add ---------- */
+function wmKpiTableHtml(m){
+  const ppl=m.attendees||[], cols=Array.isArray(m.kpi_cols)?m.kpi_cols:[], vals=m.kpi_vals||{};
+  if(!ppl.length) return `<div class="wm-mute" style="font-size:13.5px;padding:6px 0">Add the people in this meeting first; each one gets a row here.</div>`;
+  return `<div class="wm-kt-wrap"><table class="wm-kt"><thead><tr><th>Person</th>${cols.map(c=>`<th><input class="h" value="${esc(c.name)}" placeholder="Column name" onchange="wmKpiColName('${esc(c.id)}',this.value)"><button class="x" title="Remove this column" onclick="wmKpiColDel('${esc(c.id)}')"><i class="fa-solid fa-xmark"></i></button></th>`).join('')}
+      <th class="add"><button class="wm-quiet" onclick="wmKpiColAdd()"><i class="fa-solid fa-plus"></i> Add column</button></th></tr></thead>
+    <tbody>${ppl.map(n=>`<tr><td class="p">${wmAvatar(n,22)} ${esc(n)}</td>${cols.map(c=>`<td><input value="${esc(((vals[n]||{})[c.id])||'')}" onchange="wmKpiCell(${JSON.stringify(n).replace(/"/g,'&quot;')},'${esc(c.id)}',this.value)"></td>`).join('')}<td></td></tr>`).join('')}</tbody></table></div>
+    ${cols.length?'':'<div class="wm-mute" style="font-size:12.5px;margin-top:8px">Add a column for each number you track (bookings, collections, site visits…). The columns carry over to the next meeting of this kind.</div>'}`;
+}
+async function wmKpiSaveCols(m,cols){
+  try{ const {error}=await sb.rpc('ops_meeting_set_kpi_cols',{p_meeting:m.id,p_cols:cols}); if(error) throw error; m.kpi_cols=cols; }
+  catch(e){ toast('Could not save the columns: '+((e&&e.message)||e),'err'); }
+}
+window.wmKpiColAdd=async function(){
+  const m=wmMeeting(WM.cur); if(!m) return; const id='c'+Date.now().toString(36);
+  await wmKpiSaveCols(m,(m.kpi_cols||[]).concat([{id,name:''}])); wmPaintAgPanel(wmAgState(m));
+  const hs=document.querySelectorAll('.wm-kt th input.h'); if(hs.length) hs[hs.length-1].focus();
+};
+window.wmKpiColName=async function(id,v){ const m=wmMeeting(WM.cur); if(!m) return; await wmKpiSaveCols(m,(m.kpi_cols||[]).map(c=>c.id===id?{id,name:v.trim()}:c)); };
+window.wmKpiColDel=async function(id){
+  const m=wmMeeting(WM.cur); if(!m) return; const c=(m.kpi_cols||[]).find(x=>x.id===id);
+  if(!confirm('Remove the column "'+((c&&c.name)||'untitled')+'" from this meeting\'s table?')) return;
+  await wmKpiSaveCols(m,(m.kpi_cols||[]).filter(x=>x.id!==id)); wmPaintAgPanel(wmAgState(m));
+};
+window.wmKpiCell=async function(person,col,v){
+  const m=wmMeeting(WM.cur); if(!m) return;
+  try{ const {error}=await sb.rpc('ops_meeting_set_kpi_cell',{p_meeting:m.id,p_person:person,p_col:col,p_value:v}); if(error) throw error;
+    m.kpi_vals=Object.assign({},m.kpi_vals); m.kpi_vals[person]=Object.assign({},m.kpi_vals[person],{[col]:v}); }
+  catch(e){ toast('Could not save that value: '+((e&&e.message)||e),'err'); }
+};
+
 window.wmKpiAdd=async function(){
   const m=wmMeeting(WM.cur); if(!m) return;
   try{ const {error}=await sb.rpc('ops_meeting_set_kpi',{p_meeting:m.id,p_on:true,p_notes:m.kpi_notes||''}); if(error) throw error; m.has_kpi=true; wmPaintMeeting(); const t=$('wmKpiTxt'); if(t) t.focus(); }
@@ -701,6 +908,7 @@ window.wmEndMeeting=function(force){
       <div class="modal-foot"><button class="btn" onclick="closeModal();wmEndMeeting(true)">End anyway</button><button class="btn btn-primary" onclick="closeModal();$('wmDrafts').scrollIntoView({behavior:'smooth',block:'center'})">Assign them now</button></div>`);
     return;
   }
+  if(m.agenda_run&&!m.agenda_run.done){ clearInterval(WM.agTimer); wmAgSaveRun(m,{k:m.agenda_run.k,done:true}); }
   let mins=0; try{ const s=Number(localStorage.getItem('wm_start_'+m.id))||0; if(s){ mins=Math.max(1,Math.round((Date.now()-s)/60000)); localStorage.removeItem('wm_start_'+m.id); } }catch(e){}
   const mine=WM.items.filter(it=>it.meeting===m.id&&!it.draft), keys=[...new Set(mine.flatMap(wmWhoKeys))];
   const open=WM.items.filter(it=>it.kind===m.kind&&!it.draft&&wmOpen(it)).length;
@@ -737,6 +945,39 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-kpi{margin-top:22px;border:1px solid var(--hair);border-left:3px solid var(--red);border-radius:14px;padding:12px 16px 14px;background:#fffafa}'
   +'.wm-kpi textarea{width:100%;min-height:96px;border:0;outline:none;resize:vertical;background:transparent;font:inherit;font-size:14.5px;line-height:1.6;color:var(--ink)}'
   +'.wm-kpi textarea::placeholder{color:var(--mute2)}'
+  +'.wm-oo{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px}'
+  +'.wm-oo-box{border:1px solid var(--hair);border-radius:14px;padding:12px 16px 14px}.wm-oo-box.obstacles{border-left:3px solid #d97706;background:#fffcf5}.wm-oo-box.opportunities{border-left:3px solid #16a34a;background:#f7fdf9}'
+  +'.wm-oo-box textarea{width:100%;min-height:96px;border:0;outline:none;resize:vertical;background:transparent;font:inherit;font-size:14.5px;line-height:1.6;color:var(--ink)}.wm-oo-box textarea::placeholder{color:var(--mute2)}'
+  +'.wm-nst{letter-spacing:0;text-transform:none;font-weight:400}'
+  /* The timed agenda: steps on the left, the open step on the right. */
+  +'.wm-ag{margin-top:22px;border:1px solid var(--hair);border-radius:16px;padding:14px 16px 16px}'
+  +'.wm-ag-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;font-size:14px}.wm-ag-ctl{display:flex;align-items:center;gap:8px}'
+  +'.wm-ag-grid{display:grid;grid-template-columns:270px minmax(0,1fr);gap:18px;align-items:start}'
+  +'.wm-ag-steps{display:flex;flex-direction:column;gap:2px}'
+  +'.wm-ag-step{position:relative;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;cursor:pointer;font-size:13px;color:var(--ink2);overflow:hidden}'
+  +'.wm-ag-step:hover{background:#f6f8fb}.wm-ag-step.view{background:#f1f4f9;color:var(--ink);font-weight:600}'
+  +'.wm-ag-step .ic{width:18px;text-align:center;color:var(--mute2);font-size:12px;flex:none}.wm-ag-step .l{flex:1;min-width:0}'
+  +'.wm-ag-step.past{color:var(--mute)}.wm-ag-step.past .ic{color:#16a34a}'
+  +'.wm-ag-step.now{background:#fef2f2;color:var(--ink);font-weight:700}.wm-ag-step.now .ic{color:var(--red)}'
+  +'.wm-ag-step .cd{font-variant-numeric:tabular-nums;color:var(--red);font-weight:800}'
+  +'.wm-ag-step .bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:#fde2e2}.wm-ag-step .bar span{display:block;height:100%;background:var(--red);transition:width 1s linear}'
+  +'.wm-ag-step .mn{width:42px;height:24px;border:1px solid transparent;border-radius:6px;text-align:right;font:inherit;font-size:12.5px;color:var(--mute);background:transparent;padding:0 4px}'
+  +'.wm-ag-step .mn:hover,.wm-ag-step .mn:focus{border-color:var(--hair);background:#fff;outline:none;color:var(--ink)}.wm-ag-step .mu{font-size:11.5px;color:var(--mute2);margin-left:-6px}'
+  +'.wm-ag-panel{min-width:0;border-left:1px solid var(--hair2);padding-left:18px}'
+  +'.wm-ag-ph{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}.wm-ag-ph h3{font-size:19px;font-weight:700;color:var(--ink);margin-top:4px}.wm-ag-ph h3 i{color:var(--mute2);font-size:15px;margin-right:6px}'
+  +'.wm-ag-big{font-size:34px;font-weight:800;letter-spacing:-1px;color:var(--red);font-variant-numeric:tabular-nums;line-height:1}'
+  +'.wm-ag-ta{width:100%;min-height:120px;border:1px solid var(--hair);border-radius:12px;padding:10px 12px;outline:none;resize:vertical;font:inherit;font-size:14.5px;line-height:1.6;color:var(--ink)}.wm-ag-ta:focus{border-color:#cbd5e1}'
+  +'.wm-kt-wrap{overflow-x:auto;border:1px solid var(--hair);border-radius:12px}'
+  +'.wm-kt{border-collapse:collapse;width:100%;font-size:13px}.wm-kt th,.wm-kt td{border-bottom:1px solid var(--hair2);padding:0;text-align:left;white-space:nowrap}.wm-kt tr:last-child td{border-bottom:0}'
+  +'.wm-kt th{background:#f8fafc;font-weight:700;color:var(--ink2);position:relative}.wm-kt th:first-child,.wm-kt td.p{padding:8px 12px}.wm-kt td.p{display:flex;align-items:center;gap:8px;color:var(--ink)}'
+  +'.wm-kt th input.h{width:120px;border:0;background:transparent;font:inherit;font-weight:700;color:var(--ink2);padding:8px 26px 8px 10px;outline:none}.wm-kt th input.h:focus{background:#fff}'
+  +'.wm-kt th .x{position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--mute2);cursor:pointer;font-size:11px;opacity:0}.wm-kt th:hover .x{opacity:1}.wm-kt th .x:hover{color:var(--red)}'
+  +'.wm-kt th.add{padding:0 12px;width:1%}.wm-kt td input{width:120px;border:0;border-left:1px solid var(--hair2);font:inherit;font-size:13px;padding:8px 10px;outline:none;color:var(--ink);background:transparent}.wm-kt td input:focus{background:#fffbea}'
+  +'.wm-agf{border:1px solid var(--line);border-radius:10px;padding:6px 8px}'
+  +'.wm-agf-row{display:flex!important;align-items:center;gap:10px;padding:5px 2px;font-weight:400!important;font-size:13px;cursor:pointer;margin:0!important}.wm-agf-row i{width:16px;text-align:center;color:#94a3b8}.wm-agf-row span{flex:1}.wm-agf-row em{font-style:normal;font-size:11px;color:#16a34a;margin-left:4px}'
+  +'.wm-agf-row input[type=checkbox]{accent-color:#e0121c;margin:0}.wm-agf-row input[type=number]{width:56px;height:28px;border:1px solid var(--line);border-radius:7px;padding:0 6px;font:inherit;font-size:13px;text-align:right}.wm-agf-row.off span,.wm-agf-row.off i{opacity:.45}'
+  +'.wm-agf-tot{font-size:12px;color:var(--slate);padding:6px 2px 2px;border-top:1px solid var(--line-2);margin-top:4px}'
+  +'.wm-addsec{display:flex;gap:22px;flex-wrap:wrap;margin-top:18px}'
   +'.wm-fp{border:1px solid var(--line);border-radius:10px;padding:8px}.wm-fp-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}.wm-fp-chips .people-chip{font-size:12.5px}'
   +'.wm-fp-none{font-size:12.5px;color:var(--slate);padding:4px 2px}'
   +'.wm-fp input[type=text]{width:100%;height:34px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:inherit;font-size:13px;outline:none}'
@@ -874,5 +1115,5 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-pk .g{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);font-weight:700;padding:14px 4px 4px}'
   +'@media(max-width:1100px){.wm-grid,.wm-grid.off{grid-template-columns:1fr}.wm-rail{position:static}.wm-railfold{flex-direction:row}}'
   +'@media(max-width:700px){.wm{padding:6px 0 40px}.wm-top h1{font-size:30px}.wm-card-top,.wm-card-body{padding-left:18px;padding-right:18px}.wm-card-top h2{font-size:26px}'
-    +'.wm-v6{padding:2px 14px 14px}.wm-v6 .person{grid-template-columns:1fr;gap:6px}.wm-v6 .sumrow{grid-template-columns:repeat(2,1fr)}.wm-v6 .tfilter{margin-left:0;width:100%}.wm-v6 .tfilter input{flex:1}.wm-dr{flex-wrap:wrap}.wm-dr .ti{flex-basis:100%}}'
+    +'.wm-v6{padding:2px 14px 14px}.wm-v6 .person{grid-template-columns:1fr;gap:6px}.wm-v6 .sumrow{grid-template-columns:repeat(2,1fr)}.wm-v6 .tfilter{margin-left:0;width:100%}.wm-v6 .tfilter input{flex:1}.wm-dr{flex-wrap:wrap}.wm-oo{grid-template-columns:1fr}.wm-ag-grid{grid-template-columns:1fr}.wm-ag-panel{border-left:0;padding-left:0}.wm-dr .ti{flex-basis:100%}}'
 +'</style>';
