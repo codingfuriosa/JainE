@@ -226,7 +226,7 @@
   /* DESKTOP (6 Nov 2026): the whole width is used for something, not stretched. Each section has its name and what it is
      for on the left; its questions are rows - the question, then the answer at one comfortable width, and on a big screen
      the small help text beside the answer instead of under it. Every answer is the same width. Phones are untouched. */
-  @media(min-width:1000px){
+  @media(min-width:1000px),(orientation:landscape) and (min-width:700px) and (min-height:480px){
     body{font-size:15.5px}
     .wrap{max-width:1120px}
     .nav .in{max-width:1092px}
@@ -324,6 +324,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107zi"></script>
+<script src="booking-form.js?v=20261107zj"></script>
 </body>
 </html>

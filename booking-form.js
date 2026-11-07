@@ -550,7 +550,7 @@ function openSigner(){
 }
 // The inline box (laptop / desktop with a mouse): sign straight on the page, saved as the pen lifts, no pop-up and no Done.
 let INLINE_PAD=null;
-function sigInline(){ return !!(window.matchMedia&&window.matchMedia('(min-width:1000px) and (pointer:fine)').matches); }
+function sigInline(){ return !!(window.matchMedia&&window.matchMedia('(min-width:1000px) and (pointer:fine), (orientation:landscape) and (min-width:700px) and (min-height:480px) and (pointer:fine)').matches); }
 function mountInlineSigner(){
   if(INLINE_PAD){ INLINE_PAD.destroy(); INLINE_PAD=null; }
   const box=document.getElementById('sigpad'); if(!box) return;
