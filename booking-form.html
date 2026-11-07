@@ -196,8 +196,8 @@
      the small help text beside the answer instead of under it. Every answer is the same width. Phones are untouched. */
   @media(min-width:1000px){
     body{font-size:15.5px}
-    .wrap{max-width:1280px}
-    .nav .in{max-width:1252px}
+    .wrap{max-width:1120px}
+    .nav .in{max-width:1092px}
     /* header in one line: logo, the form's name and addressee, project logo */
     .hd{display:grid;grid-template-columns:auto 1fr auto;align-items:center;column-gap:24px;padding:12px 28px}
     .hd .logos{display:contents}
@@ -208,14 +208,14 @@
     .hd p{grid-column:2;grid-row:2;text-align:center;font-size:13.5px}
     .steps{padding:10px 28px 11px}
     /* a section: its name and purpose on the left, its questions on the right */
-    .sec{display:grid;grid-template-columns:240px minmax(0,1fr)}
+    .sec{display:grid;grid-template-columns:230px minmax(0,1fr)}
     .sh{padding:22px 20px;border-bottom:0;border-right:1px solid var(--line2)}
     .sh h2{font-size:17px}.sh p{font-size:13.5px;margin-top:6px;line-height:1.5}
     .sb{padding:22px 26px}
     .grid,.stack{gap:16px}
     .pair{display:flex;flex-direction:column;align-items:stretch;gap:16px}
-    /* a question: label | answer | help */
-    .grid>.f,.stack>.f,.pair>.f,.ac>.f,.sb>.f{display:grid;grid-template-columns:210px minmax(0,566px) minmax(0,1fr);column-gap:22px;row-gap:5px;align-items:start}
+    /* a question: label | answer */
+    .grid>.f,.stack>.f,.pair>.f,.ac>.f,.sb>.f{display:grid;grid-template-columns:210px minmax(0,566px);column-gap:22px;row-gap:5px;align-items:start}
     .grid>.f>label,.stack>.f>label,.pair>.f>label,.ac>.f>label,.sb>.f>label{grid-column:1;grid-row:1;padding-top:13px;font-size:14px;line-height:1.35}
     .grid>.f>:not(label),.stack>.f>:not(label),.pair>.f>:not(label),.ac>.f>:not(label),.sb>.f>:not(label){grid-column:2;min-width:0}
     input[type=text],input[type=tel],input[type=email],input[type=date],textarea{font-size:15.5px;min-height:46px}
@@ -233,11 +233,6 @@
     .sb:has(>.rs){column-count:2;column-gap:44px}
     .rs{break-inside:avoid}
   }
-  /* on a big screen the help text sits beside the answer, using the space that is there */
-  @media(min-width:1200px){
-    .grid>.f>.hint,.stack>.f>.hint,.pair>.f>.hint,.ac>.f>.hint{grid-column:3;grid-row:1;padding-top:14px}
-  }
-  .hint{font-size:12.5px;color:var(--slate);line-height:1.4}
   @media print{.steps,.nav,.btn,.rvh button{display:none!important}.sec{border:1px solid #ddd}}
 </style>
 </head>
@@ -256,6 +251,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261106w"></script>
+<script src="booking-form.js?v=20261107b"></script>
 </body>
 </html>
