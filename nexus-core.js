@@ -6126,7 +6126,7 @@ function lmStyles(){
   .lm-search input{width:100%;height:36px;padding:0 10px 0 32px;border:1px solid var(--line);border-radius:9px;font:13px inherit;font-family:inherit;background:var(--bg-card,#fff)}
   .lm-count{font-size:12.5px;color:var(--slate);padding:0 4px}
   .lm-test{font-size:11px;font-weight:700;letter-spacing:.04em;padding:4px 9px;border-radius:20px;background:#fef3c7;color:#92400e;border:1px solid #fde68a}
-  .lm-wrap{background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:calc(100vh - 250px);min-height:300px}
+  .lm-wrap{background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:calc(100vh - 250px)}
   #lmTbl{border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:13px;width:max-content;min-width:100%}
   #lmTbl th{position:sticky;background:var(--bg-subtle,#f8fafc);z-index:5;text-align:left;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate);padding:9px 11px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #lmTbl tr.lm-colrow th{top:0;position:sticky}
@@ -6901,6 +6901,68 @@ window.lmDeleteFile=async function(fileId,caseId){
   toast('File deleted','ok');
   lmDrawFiles(caseId);
 };
+/* UNLINKING A CASE'S FOLDER (6-7 Nov 2026).
+   A case keeps the folder its first files went into, and "Add files" goes straight back there, so a
+   folder picked by mistake - or one whose files were all deleted - could never be let go of. Unlink
+   lets it go, and it is offered whether or not files are still in it: asked for on 7 Nov, unlinking
+   a folder that still holds files DELETES those files (from the case, from Documents and from the
+   file store), after a confirmation that says how many. The matching Documents folder in the Legal
+   vault is deleted too once it is empty (no other documents, no folders inside, no other case using
+   it); otherwise it is left in place and the message says why. Next time files are added, the case
+   asks where they should go again. */
+window.lmRemoveFolder=async function(caseId){
+  const {folders,files}=await lmLoadDocs(caseId);
+  const fo=folders[0]; if(!fo) return;
+  const where=[fo.sub_category,fo.folder_name].filter(Boolean).join(' › ');
+  const n=files.length;
+  if(!await confirmDialog(n
+      ? 'Unlink the folder "'+where+'" from this case? The '+n+' file'+(n===1?'':'s')+' in it will be DELETED - from this case, from Documents and from storage. This cannot be undone.'
+      : 'Unlink the folder "'+where+'" from this case? It has no files. Next time you add files, you will be asked where they should go.',
+      {title:'Unlink folder',icon:'fa-link-slash',okLabel:n?'Unlink and delete '+n+' file'+(n===1?'':'s'):'Unlink',danger:true})) return;
+
+  // 1) The files, one by one, so a refusal is counted rather than hidden.
+  let deleted=0; const failed=[];
+  for(const f of files){
+    const {data:g,error:fe}=await sb.from(MIST('mis_case_files')).delete().eq('id',f.id).select('id');
+    if(fe||!g||!g.length){ failed.push(f.file_name); continue; }
+    deleted++;
+    if(!MIS_IS_TEST){
+      try{ await sb.schema('doc').from('documents').delete().eq('storage_path','s3:'+f.storage_key); }catch(_e){}
+      try{ if(f.store==='s3'||!f.store) await s3Delete('s3:'+f.storage_key); }catch(_e){}
+    }
+  }
+  if(failed.length){
+    toast('Not unlinked: '+failed.length+' file'+(failed.length===1?'':'s')+' could not be deleted ('+failed.slice(0,3).join(', ')+(failed.length>3?'…':'')+')'+(deleted?'. '+deleted+' were deleted.':''),'err');
+    lmDrawFiles(caseId); return;
+  }
+
+  // 2) The Documents folder, only if nothing else is in it.
+  let vault=null, vaultNote='';
+  if(!MIS_IS_TEST&&fo.doc_folder_id){
+    const [{count:docs},{count:kids},{count:others}]=await Promise.all([
+      sb.schema('doc').from('documents').select('id',{count:'exact',head:true}).eq('folder_id',fo.doc_folder_id),
+      sb.schema('doc').from('folders').select('id',{count:'exact',head:true}).eq('parent_id',fo.doc_folder_id),
+      sb.from(MIST('mis_case_folders')).select('id',{count:'exact',head:true}).eq('doc_folder_id',fo.doc_folder_id).neq('id',fo.id)]);
+    if(!docs&&!kids&&!others) vault=fo.doc_folder_id;
+    else vaultNote=' The folder in Documents still holds '+[docs?docs+' other document(s)':'',kids?kids+' folder(s)':'',others?'another case':''].filter(Boolean).join(', ')+', so it stays there.';
+  }
+
+  // 3) The link itself.
+  const {data:gone,error}=await sb.from(MIST('mis_case_folders')).delete().eq('id',fo.id).select('id');
+  if(error||!gone||!gone.length){ toast((deleted?deleted+' file(s) deleted, but ':'')+'the folder could not be unlinked: '+((error&&error.message)||'you may not have permission'),'err'); lmDrawFiles(caseId); return; }
+  let msg='Folder unlinked'+(deleted?' and '+deleted+' file'+(deleted===1?'':'s')+' deleted':'');
+  let warn=false;
+  if(vault){
+    const {data:vg,error:ve}=await sb.schema('doc').from('folders').delete().eq('id',vault).select('id');
+    if(ve||!vg||!vg.length){ msg+=' - the empty folder in Documents could not be deleted ('+((ve&&ve.message)||'no permission')+')'; warn=true; }
+    else msg+='; the empty folder was removed from Documents';
+  }else msg+='.'+vaultNote;
+  if(LM.docFolders) delete LM.docFolders[caseId];
+  if(LM.docVault) delete LM.docVault[caseId];
+  toast(msg,warn?'warn':'ok');
+  try{ usageQueue('legal.mis.case_folder_removed','delete',{case_id:String(caseId),files_deleted:String(deleted)}); }catch(_e){}
+  lmDrawFiles(caseId);
+};
 function lmBytes(n){ n=Number(n)||0; return n>1048576?((n/1048576).toFixed(1)+' MB'):(n>1024?Math.round(n/1024)+' KB':n+' B'); }
 async function lmDrawFiles(caseId){
   const host=$('lmFilesHost'); if(!host) return;
@@ -6913,7 +6975,8 @@ async function lmDrawFiles(caseId){
   host.innerHTML='<div class="loader"><div class="spin"></div></div>';
   const {folders,files}=await lmLoadDocs(caseId);
   const fo=folders[0];
-  host.innerHTML=(fo?'<div class="lm-path"><i class="fa-solid fa-folder-open"></i> In <b>'+esc([fo.sub_category,fo.folder_name].filter(Boolean).join(' › '))+'</b></div>':'')
+  host.innerHTML=(fo?'<div class="lm-path" style="display:flex;align-items:center;gap:10px"><span style="flex:1;min-width:0"><i class="fa-solid fa-folder-open"></i> In <b>'+esc([fo.sub_category,fo.folder_name].filter(Boolean).join(' › '))+'</b></span>'
+      +'<button class="btn btn-sm" style="flex:none" title="Unlink this folder from the case'+(files.length?' - its files will be deleted':'')+'" onclick="lmRemoveFolder('+caseId+')"><i class="fa-solid fa-link-slash"></i> Unlink folder</button></div>':'')
     +(files.length?'<div class="lm-files">'+files.map(f=>'<div class="lm-file"><i class="fa-solid fa-file'+(/\.pdf$/i.test(f.file_name)?'-pdf':'')+'" style="color:#dc2626"></i>'
         +'<span class="nm" onclick="s3OpenSigned(\'s3:'+esc(f.storage_key)+'\',\''+esc(String(f.file_name).replace(/'/g,''))+'\')">'+esc(f.file_name)+'</span>'
         +'<span class="sz">'+lmBytes(f.size_bytes)+'</span><button class="x" title="Delete this file" onclick="lmDeleteFile('+f.id+','+caseId+')"><i class="fa-solid fa-trash"></i></button></div>').join('')+'</div>'
@@ -38782,7 +38845,16 @@ function obChange(now,prev,goodUp){
    row still shows exactly Ads Manager's own Result. */
 const OB_LEAD_OBJ={OUTCOME_LEADS:1,LEAD_GENERATION:1,OUTCOME_SALES:1,CONVERSIONS:1,MESSAGES:1};
 const OB_OBJ_NAME={OUTCOME_AWARENESS:'Awareness',OUTCOME_ENGAGEMENT:'Engagement',OUTCOME_TRAFFIC:'Traffic',LINK_CLICKS:'Traffic'};
-function obIsLead(E,c){ const e=E['campaign:'+c.campaign_id]; return !!(e&&OB_LEAD_OBJ[e.objective]); }
+/* 7 Nov 2026: the objective was never read into the page (the select above lacked it), so no Facebook campaign
+   counted as a lead one and every lead total showed 0. Also, a WhatsApp campaign is often set up with the
+   Engagement objective but its ad sets are optimised for conversations - those count as leads too. An ad set's
+   optimisation goal is kept in its row's objective column (ads-daily-sync, kind 'adset'). */
+const OB_LEAD_GOAL={CONVERSATIONS:1,LEAD_GENERATION:1,QUALITY_LEAD:1,OFFSITE_CONVERSIONS:1,MESSAGING_PURCHASE_CONVERSION:1,MESSAGING_APPOINTMENT_CONVERSION:1};
+function obIsLead(E,c){
+  const e=E['campaign:'+c.campaign_id]; if(e&&OB_LEAD_OBJ[e.objective]) return true;
+  if(!E.__leadSets){ const m={}; Object.keys(E).forEach(function(k){ const x=E[k]; if(k.indexOf('adset:')===0&&x&&OB_LEAD_GOAL[x.objective]) m[x.campaign_id]=1; }); E.__leadSets=m; }
+  return !!E.__leadSets[c.campaign_id];
+}
 function obSum(rows){ const t={spend:0,impressions:0,clicks:0,results:0}; rows.forEach(function(r){ t.spend+=Number(r.spend)||0; t.impressions+=Number(r.impressions)||0; t.clicks+=Number(r.clicks)||0; t.results+=Number(r.results)||0; }); return t; }
 const OB_CSS='<style>'
   +'.ob-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 14px}'
@@ -38811,7 +38883,7 @@ const OB_CSS='<style>'
 async function obEntities(platform){
   const out=[];
   for(let from=0;;from+=1000){
-    const {data,error}=await sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,daily_budget,lifetime_budget,thumbnail,body').eq('platform',platform).order('kind').order('id').range(from,from+999);
+    const {data,error}=await sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,objective,daily_budget,lifetime_budget,thumbnail,body').eq('platform',platform).order('kind').order('id').range(from,from+999);
     if(error||!data) break;
     out.push.apply(out,data);
     if(data.length<1000) break;
@@ -38999,7 +39071,7 @@ function obSetupNote(platform,msg){
    Each step down filters the figures and the ads; the trail at the top of the platform section goes back up.
    Data: camp.ads_daily / ads_ad_daily via the RPCs and helpers of 41-our-brand-ads.js (obRange, obIsLead ...).
    Ad sets come from ads_ad_daily.adset_id, recorded from 6 Nov 2026 (migration 20261106200000). */
-let CA={proj:'all',open:null,plat:null,camp:null,adset:null,showAds:12};
+let CA={proj:'all',open:null,plat:null,camp:null,adset:null,showAds:12,cmp:{on:false,period:'prev',from:'',to:''}};
 let CA_D=null;   // the period's data: {acc, ent, cur, prev, ads, hasSets}
 const CA_PLAT={google:{name:'Google',icon:'fa-brands fa-google',color:'#ea4335',res:'Conversions',per:'Cost per conversion',set:'Ad group',sets:'Ad groups'},
                meta:{name:'Facebook',icon:'fa-brands fa-facebook',color:'#1877f2',res:'Leads & chats',per:'Cost per lead',set:'Ad set',sets:'Ad sets'}};
@@ -39020,6 +39092,10 @@ const CA_CSS='<style>'
   +'.ca-below{margin-top:14px;scroll-margin-top:80px}'
   +'.ca-sec .ca-tbl tr.ca-l0 td{font-size:13px;padding-top:9px;padding-bottom:9px}.ca-sec .ca-tbl tr.ca-l0 td:first-child{font-weight:600;min-width:280px}.ca-sec .ca-tbl tr.ca-l1 td:first-child{min-width:280px}'
   +'.ca-sec{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}.ca-sec .ob-ads{padding:0 12px 12px}.ca-sec>div:last-child{padding-bottom:4px}'
+  +'.ca-cmp{font-size:11px;font-weight:500;color:#94a3b8;margin-top:2px;white-space:nowrap}.ca-cmp .good{color:#15803d;font-weight:700}.ca-cmp .bad{color:#b91c1c;font-weight:700}.ca-cmp .flat{color:#64748b;font-weight:600}'
+  +'.ca-tbl tr.ca-tot td{font-weight:700;background:#f1f5f9;border-top:2px solid #cbd5e1;border-bottom:0}.ca-tbl tr.ca-tot td b{font-weight:800}'
+  +'.ca-sw{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:#334155;cursor:pointer;user-select:none;padding:0 4px}.ca-sw input{display:none}.ca-sw .k{width:32px;height:18px;border-radius:10px;background:#cbd5e1;position:relative;transition:background .15s}.ca-sw .k:after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .15s}.ca-sw.on .k{background:#2563eb}.ca-sw.on .k:after{left:16px}'
+  +'.ca-warn{margin:-4px 0 12px;padding:9px 12px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:12.5px}'
   +'</style>';
 
 // Leads that can honestly be added up: Google conversions, and Facebook results of lead / chat campaigns only.
@@ -39037,25 +39113,42 @@ async function caView(host){
   host.innerHTML=OB_CSS+CA_CSS+'<div id="caHead"></div><div id="caBody"><div class="loader"><div class="spin"></div></div></div>';
   await caLoad();
 }
+/* COMPARE MODE (7 Nov 2026, Ayush): off by default; switched on, every figure in the tables shows the other
+   period's figure and the change under it. The other period is "Previous period" (the same number of days just
+   before) or any option of the normal dropdown, or a custom range - never the same dates as the main period. */
+const CA_CMP_OPTS=[['prev','Previous period']].concat(OB_PERIODS);
+function caRangeOf(period,from,to){ const keep=OB_P; OB_P=Object.assign({},OB_P,{period:period,from:from||'',to:to||''}); try{ return obRange(); } finally{ OB_P=keep; } }
+function caCmpRange(){ const r=obRange(); if(CA.cmp.period==='prev') return {s:r.ps,e:r.pe}; return caRangeOf(CA.cmp.period,CA.cmp.from,CA.cmp.to); }
+function caCmpSame(){ if(!CA.cmp.on) return false; const r=obRange(), c=caCmpRange(); return r.s===c.s&&r.e===c.e; }
 async function caLoad(){
   const r=obRange(), rpc=function(fn,a){ return sb.schema('camp').rpc(fn,a); };
-  const plats=['meta','google'];
-  const ads=async function(p){ const v=await rpc('ads_ad_totals_v2',{p_platform:p,p_from:r.s,p_to:r.e,p_limit:5000});
+  const cmp=CA.cmp.on&&!caCmpSame(), c=cmp?caCmpRange():{s:r.ps,e:r.pe};
+  if(CA_D) $('caBody').style.opacity='.55';
+  const ads=async function(p,s,e){ const v=await rpc('ads_ad_totals_v2',{p_platform:p,p_from:s,p_to:e,p_limit:5000});
     if(!v.error) return {rows:v.data||[],sets:true};
-    const o=await rpc('ads_ad_totals',{p_platform:p,p_from:r.s,p_to:r.e,p_limit:5000}); return {rows:o.data||[],sets:false,error:o.error}; };
+    const o=await rpc('ads_ad_totals',{p_platform:p,p_from:s,p_to:e,p_limit:5000}); return {rows:o.data||[],sets:false,error:o.error}; };
+  const none=Promise.resolve({rows:[],sets:true});
   const res=await Promise.all([
     sb.schema('camp').from('ads_accounts').select('platform,account_id,name,project').eq('include',true),
     obEntities('meta'), obEntities('google'),
     rpc('ads_campaign_totals',{p_platform:'meta',p_from:r.s,p_to:r.e}), rpc('ads_campaign_totals',{p_platform:'google',p_from:r.s,p_to:r.e}),
-    rpc('ads_campaign_totals',{p_platform:'meta',p_from:r.ps,p_to:r.pe}), rpc('ads_campaign_totals',{p_platform:'google',p_from:r.ps,p_to:r.pe}),
-    ads('meta'), ads('google')]);
+    rpc('ads_campaign_totals',{p_platform:'meta',p_from:c.s,p_to:c.e}), rpc('ads_campaign_totals',{p_platform:'google',p_from:c.s,p_to:c.e}),
+    ads('meta',r.s,r.e), ads('google',r.s,r.e), cmp?ads('meta',c.s,c.e):none, cmp?ads('google',c.s,c.e):none]);
+  $('caBody').style.opacity='';
   const bad=[res[0],res[3],res[4],res[5],res[6]].filter(function(x){ return x.error; })[0];
   if(bad){ $('caBody').innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(bad.error.message)+'</div>'; return; }
   const acc={}; (res[0].data||[]).forEach(function(a){ acc[a.platform+':'+a.account_id]={project:a.project||a.name||a.account_id,name:a.name}; });
   const ent={}; res[1].concat(res[2]).forEach(function(x){ ent[x.kind+':'+x.id]=x; });
   const tag=function(p,rows){ return (rows||[]).filter(function(c){ return acc[p+':'+c.account_id]; }).map(function(c){ return Object.assign({platform:p,project:acc[p+':'+c.account_id].project},c); }); };
-  CA_D={acc:acc,ent:ent,cur:tag('meta',res[3].data).concat(tag('google',res[4].data)),prev:tag('meta',res[5].data).concat(tag('google',res[6].data)),
-        ads:tag('meta',res[7].rows).concat(tag('google',res[8].rows)),hasSets:res[7].sets&&res[8].sets};
+  // Daily budget set today (7 Nov 2026, Ayush): the daily budgets of the running campaigns, per project and platform.
+  // A Facebook campaign without its own budget carries its running ad sets' budgets (ads-daily-sync).
+  const bud={};
+  [['meta',res[1]],['google',res[2]]].forEach(function(x){ x[1].forEach(function(e){
+    const a=acc[x[0]+':'+e.account_id]; if(e.kind!=='campaign'||!a||!caLive(e.status)||e.daily_budget==null) return;
+    const k=a.project+'|'+x[0]; bud[k]=(bud[k]||0)+(+e.daily_budget||0); }); });
+  CA_D={acc:acc,ent:ent,bud:bud,cur:tag('meta',res[3].data).concat(tag('google',res[4].data)),prev:tag('meta',res[5].data).concat(tag('google',res[6].data)),
+        ads:tag('meta',res[7].rows).concat(tag('google',res[8].rows)),hasSets:res[7].sets&&res[8].sets,
+        cmp:cmp?{s:c.s,e:c.e,ads:tag('meta',res[9].rows).concat(tag('google',res[10].rows))}:null};
   caPaint();
 }
 // every project with an account on either platform, the biggest spender first
@@ -39071,70 +39164,111 @@ function caProjects(){
 function caPaint(){
   const r=obRange(), P=caProjects(), E=CA_D.ent; window._caP=P;
   if(CA.proj!=='all'&&P.indexOf(CA.proj)===-1) CA.proj='all';
+  const C=CA.cmp, same=caCmpSame(), cmpOn=C.on&&!same&&!!CA_D.cmp, cr=C.on?caCmpRange():null;
+  // a select whose one option (the other side's choice) cannot be picked - "Custom" stays open on both, its dates are checked
+  const sel=function(id,list,cur,onch,off){ return '<select class="comp-sel" id="'+id+'" onchange="'+onch+'">'+list.map(function(o){
+    const dis=off&&off!=='custom'&&o[0]===off; return '<option value="'+o[0]+'"'+(String(cur)===String(o[0])?' selected':'')+(dis?' disabled':'')+'>'+esc(o[1])+(dis?' (chosen on the other side)':'')+'</option>'; }).join('')+'</select>'; };
   $('caHead').innerHTML='<div class="ob-bar">'
-    +compSelHtml('caPer',OB_PERIODS,OB_P.period,"OB_P.period=this.value;caReset();caLoad()")
+    +sel('caPer',OB_PERIODS,OB_P.period,"OB_P.period=this.value;caReset();caLoad()",C.on?C.period:null)
     +(OB_P.period==='custom'?'<input type="date" value="'+esc(r.s)+'" onchange="OB_P.from=this.value;caLoad()"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(r.e)+'" onchange="OB_P.to=this.value;caLoad()">':'')
     +compSelHtml('caProj',[['all','All projects']].concat(P.map(function(p){ return [p,p]; })),CA.proj,"caPickProject(this.value)")
-    +'<span style="font-size:12.5px;color:var(--slate)">'+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+' · Google and Facebook together</span></div>';
+    +'<label class="ca-sw'+(C.on?' on':'')+'" title="Compare with another period"><input type="checkbox"'+(C.on?' checked':'')+' onchange="caCmpToggle(this.checked)"><span class="k"></span>Compare</label>'
+    +(C.on?'<span style="color:var(--slate);font-size:12.5px">with</span>'+sel('caCmpPer',CA_CMP_OPTS,C.period,"caCmpPick(this.value)",OB_P.period)
+      +(C.period==='custom'?'<input type="date" value="'+esc(cr.s)+'" onchange="CA.cmp.from=this.value;caLoad()"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(cr.e)+'" onchange="CA.cmp.to=this.value;caLoad()">':''):'')
+    +'<span style="font-size:12.5px;color:var(--slate)">'+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))
+      +(C.on?' <b style="color:#334155">vs</b> '+esc(fmtDate(cr.s))+' – '+esc(fmtDate(cr.e)):' · Google and Facebook together')+'</span></div>'
+    +(C.on&&same?'<div class="ca-warn"><i class="fa-solid fa-triangle-exclamation"></i> Both sides are the same dates ('+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+'). Pick a different period to compare with.</div>':'');
   if(CA.proj!=='all') CA.open=CA.proj;
   const caret=function(on){ return '<span class="ca-caret"><i class="fa-solid fa-chevron-'+(on?'down':'right')+'"></i></span>'; };
-  const stat=function(s){ s=String(s||''); if(!s) return ''; const on=s==='ACTIVE'||s==='ENABLED'; return ' <span class="tag '+(on?'t-green':'t-gray')+'" style="font-size:10px;margin-left:6px">'+(on?'Running':s.charAt(0)+s.slice(1).toLowerCase().replace(/_/g,' '))+'</span>'; };
-  // spend, leads (or results), cost per lead, clicks, CTR - the same five columns at every level
-  const cols=function(t){ return '<td><b>'+obMoney(t.spend)+'</b></td><td>'+t.lead+'</td><td>'+obMoney(t.cpl)+'</td><td>'+obNum(t.clicks)+'</td><td>'+obPct(t.ctr)+'</td>'; };
-  const sum=function(rows,pl){ const a=caAgg(rows); return {spend:a.spend,lead:caLeads(a.leads,pl),cpl:a.cpl,clicks:a.clicks,ctr:a.ctr}; };
-  const raw=function(x,pl,lead){ const s=+x.spend||0, rr=+x.results||0;
-    return {spend:s,lead:obNum(rr,pl==='google'?1:0)+(lead===false?' <span class="tag t-gray" style="font-size:10px">not leads</span>':''),cpl:rr?s/rr:null,clicks:+x.clicks||0,ctr:+x.impressions?x.clicks/x.impressions*100:null}; };
+  /* Every figure cell. In Compare mode the other period's figure and the change sit under it - green when the move is good,
+     red when bad (more leads, clicks, CTR good; a higher cost per lead bad; spend neither). */
+  const cell=function(now,was,fmt,goodUp,bold){
+    const top=bold?'<b>'+fmt(now)+'</b>':fmt(now);
+    if(!cmpOn) return '<td>'+top+'</td>';
+    let chg='';
+    if(now!=null&&was!=null&&isFinite(now)&&isFinite(was)&&was!==0){ const p=(now-was)/Math.abs(was)*100;
+      chg=Math.abs(p)<0.5?'<span class="flat">=</span>':'<span class="'+(goodUp==null?'flat':((p>0)===goodUp?'good':'bad'))+'">'+(p>0?'▲':'▼')+Math.abs(p).toFixed(0)+'%</span>'; }
+    else if(was===0&&now>0) chg='<span class="'+(goodUp==null?'flat':goodUp?'good':'bad')+'">new</span>';
+    return '<td>'+top+'<div class="ca-cmp">'+fmt(was)+' '+chg+'</div></td>'; };
+  // spend, leads (or results), cost per lead, clicks, CTR - the same five columns at every level; t = this period, w = the other
+  const cols=function(t,w){ w=w||{};
+    return cell(t.spend,w.spend,obMoney,null,true)
+      +(cmpOn?cell(t.ln,w.ln,function(x){ return caLeads(x,t.pl); },true).replace('</td>',(t.tag||'')+'</td>'):'<td>'+t.lead+'</td>')
+      +cell(t.cpl,w.cpl,obMoney,false)+cell(t.clicks,w.clicks,obNum,true)+cell(t.ctr,w.ctr,obPct,true); };
+  const sum=function(rows,pl){ const a=caAgg(rows); return {spend:a.spend,ln:a.leads,pl:pl,lead:caLeads(a.leads,pl),cpl:a.cpl,clicks:a.clicks,ctr:a.ctr}; };
+  const raw=function(x,pl,lead){ x=x||{}; const s=+x.spend||0, rr=+x.results||0, tag=lead===false?' <span class="tag t-gray" style="font-size:10px">not leads</span>':'';
+    return {spend:s,ln:rr,pl:pl==='google'?'google':'meta',tag:tag,lead:obNum(rr,pl==='google'?1:0)+tag,cpl:rr?s/rr:null,clicks:+x.clicks||0,ctr:+x.impressions?x.clicks/x.impressions*100:null}; };
+  const prev=CA_D.prev||[];
   /* A PLATFORM'S SECTION (6 Nov 2026, Ayush): its running campaigns in a section of their own, under the whole
      projects table - the page scrolls to it on the click, as at the foot of the page it otherwise sat unseen; a campaign opens its running ad sets inside it, and the ads
-     follow whatever is open. Paused, ended and deleted ones are left out here - their spend still counts above. */
+     follow whatever is open. Paused, ended and deleted ones are left out here - their spend still counts above.
+     7 Nov 2026: a Total row under the campaigns - all the listed campaigns together. */
   const section=function(){
     const p=CA.open, pl=CA.plat, W=CA_PLAT[pl];
     const camps=CA_D.cur.filter(function(c){ return c.project===p&&c.platform===pl&&caLive((E['campaign:'+c.campaign_id]||{}).status)&&((+c.spend||0)>0||(+c.results||0)>0); }).sort(function(a,b){ return b.spend-a.spend; });
+    const was=function(id){ return prev.filter(function(x){ return x.platform===pl&&x.campaign_id===id; }); };
+    const setsOf=function(list,cid){ const g={}; list.forEach(function(a){ if(a.platform!==pl||a.campaign_id!==cid||!a.adset_id) return; const x=g[a.adset_id]||(g[a.adset_id]={adset_id:a.adset_id,spend:0,results:0,clicks:0,impressions:0}); x.spend+=+a.spend||0; x.results+=+a.results||0; x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; }); return g; };
     let sec='';
     camps.forEach(function(c){
-      const e=E['campaign:'+c.campaign_id]||{}, con=CA.camp===c.campaign_id;
-      sec+='<tr class="ca-row ca-l0'+(con?' ca-on':'')+'" onclick="caCamp(\''+c.campaign_id+'\')"><td style="white-space:normal">'+caret(con)+esc(e.name||c.campaign_id)+'</td>'+cols(raw(c,pl,pl==='meta'?obIsLead(E,c):null))+'</tr>';
+      const e=E['campaign:'+c.campaign_id]||{}, con=CA.camp===c.campaign_id, lead=pl==='meta'?obIsLead(E,c):null;
+      sec+='<tr class="ca-row ca-l0'+(con?' ca-on':'')+'" onclick="caCamp(\''+c.campaign_id+'\')"><td style="white-space:normal">'+caret(con)+esc(e.name||c.campaign_id)+'</td>'+cols(raw(c,pl,lead),raw(was(c.campaign_id)[0],pl,lead))+'</tr>';
       if(!con) return;
       const ads=CA_D.ads.filter(function(a){ return a.platform===pl&&a.campaign_id===c.campaign_id; });
       if(!CA_D.hasSets||!ads.some(function(a){ return a.adset_id; })){
         sec+='<tr class="ca-l1 ca-none"><td colspan="6"><i class="fa-solid fa-circle-info"></i> '+W.sets+' are recorded from tonight (6 Nov 2026) and show here from tomorrow.</td></tr>'; return; }
-      const g={}; ads.forEach(function(a){ if(!a.adset_id||!caLive((E['adset:'+a.adset_id]||{}).status)) return; const x=g[a.adset_id]||(g[a.adset_id]={adset_id:a.adset_id,spend:0,results:0,clicks:0,impressions:0}); x.spend+=+a.spend||0; x.results+=+a.results||0; x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; });
-      const sets=Object.keys(g).map(function(k){ return g[k]; }).sort(function(a,b){ return b.spend-a.spend; });
+      const g=setsOf(ads,c.campaign_id), gw=cmpOn?setsOf(CA_D.cmp.ads,c.campaign_id):{};
+      const sets=Object.keys(g).filter(function(k){ return caLive((E['adset:'+k]||{}).status); }).map(function(k){ return g[k]; }).sort(function(a,b){ return b.spend-a.spend; });
       if(!sets.length) sec+='<tr class="ca-l1 ca-none"><td colspan="6">No running '+W.set.toLowerCase()+' in this campaign</td></tr>';
       sets.forEach(function(s){
         const son=CA.adset===s.adset_id;
-        sec+='<tr class="ca-row ca-l1'+(son?' ca-on':'')+'" onclick="caSet(\''+s.adset_id+'\')"><td style="white-space:normal">'+esc((E['adset:'+s.adset_id]||{}).name||s.adset_id)+'</td>'+cols(raw(s,pl,null))+'</tr>';
+        sec+='<tr class="ca-row ca-l1'+(son?' ca-on':'')+'" onclick="caSet(\''+s.adset_id+'\')"><td style="white-space:normal">'+esc((E['adset:'+s.adset_id]||{}).name||s.adset_id)+'</td>'+cols(raw(s,pl,null),raw(gw[s.adset_id],pl,null))+'</tr>';
       });
     });
+    // the total counts leads only (Google conversions, Facebook lead / chat campaigns), as reach or engagement results cannot be added to them
+    const ids={}; camps.forEach(function(c){ ids[c.campaign_id]=1; });
+    const tot=camps.length?'<tfoot><tr class="ca-tot"><td>Total · '+camps.length+' campaign'+(camps.length===1?'':'s')+(pl==='meta'?' <span style="font-weight:500;color:var(--slate);font-size:11px">(leads only)</span>':'')+'</td>'
+      +cols(sum(camps,pl),sum(prev.filter(function(x){ return x.platform===pl&&ids[x.campaign_id]; }),pl))+'</tr></tfoot>':'';
     return '<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p)
       +' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+camps.length+' running campaign'+(camps.length===1?'':'s')+'; click one for its '+W.sets.toLowerCase()+'</span></div>'
-      +'<table class="ca-tbl"><thead><tr><th>Campaign</th><th>Spend</th><th>'+(pl==='meta'?'Results':W.res)+'</th><th>Cost per result</th><th>Clicks</th><th>CTR</th></tr></thead><tbody>'
-      +(sec||'<tr><td colspan="6" style="text-align:center;color:var(--slate);padding:18px">No running campaign spent in this period</td></tr>')+'</tbody></table></div>'
+      +'<div style="overflow-x:auto"><table class="ca-tbl"><thead><tr><th>Campaign</th><th>Spend</th><th>'+(pl==='meta'?'Results':W.res)+'</th><th>Cost per result</th><th>Clicks</th><th>CTR</th></tr></thead><tbody>'
+      +(sec||'<tr><td colspan="6" style="text-align:center;color:var(--slate);padding:18px">No running campaign spent in this period</td></tr>')+'</tbody>'+tot+'</table></div></div>'
       +caAds(p,pl);
   };
   const shown=CA.proj==='all'?P:[CA.proj];
+  const B=CA_D.bud||{};
+  const budV=function(p,pl){ return pl?B[p+'|'+pl]:(B[p+'|google']==null&&B[p+'|meta']==null?null:(B[p+'|google']||0)+(B[p+'|meta']||0)); };
+  const bud=function(v){ return '<td>'+(v==null?'<span style="color:#94a3b8">—</span>':obMoney(v))+'</td>'; };
   let rows='';
   shown.forEach(function(p){
-    const cur=CA_D.cur.filter(function(c){ return c.project===p; }), on=CA.open===p;
-    rows+='<tr class="ca-row ca-l0'+(on?' ca-on':'')+'" onclick="caToggle('+P.indexOf(p)+')"><td>'+caret(on)+esc(p)+'</td>'+cols(sum(cur))+'</tr>';
+    const cur=CA_D.cur.filter(function(c){ return c.project===p; }), pw=prev.filter(function(c){ return c.project===p; }), on=CA.open===p;
+    rows+='<tr class="ca-row ca-l0'+(on?' ca-on':'')+'" onclick="caToggle('+P.indexOf(p)+')"><td>'+caret(on)+esc(p)+'</td>'+bud(budV(p))+cols(sum(cur),sum(pw))+'</tr>';
     if(!on) return;
     ['google','meta'].forEach(function(pl){
       const W=CA_PLAT[pl], pc=cur.filter(function(c){ return c.platform===pl; }), pon=CA.plat===pl;
       const has=Object.keys(CA_D.acc).some(function(k){ return k.indexOf(pl+':')===0&&CA_D.acc[k].project===p; });
-      if(!has){ rows+='<tr class="ca-l1 ca-none"><td><span class="ca-caret"></span><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+'</td><td colspan="5">No '+W.name+' account for this project</td></tr>'; return; }
+      if(!has){ rows+='<tr class="ca-l1 ca-none"><td><span class="ca-caret"></span><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+'</td><td colspan="6">No '+W.name+' account for this project</td></tr>'; return; }
       // no caret: Google / Facebook do not open in the table, a click shows their section below (6 Nov 2026)
-      rows+='<tr class="ca-row ca-l1'+(pon?' ca-on':'')+'" onclick="caPlat(\''+pl+'\')"><td><span class="ca-caret"></span><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+'</td>'+cols(sum(pc,pl))+'</tr>';
-      if(!pon) return;
+      rows+='<tr class="ca-row ca-l1'+(pon?' ca-on':'')+'" onclick="caPlat(\''+pl+'\')"><td><span class="ca-caret"></span><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+'</td>'+bud(budV(p,pl))+cols(sum(pc,pl),sum(pw.filter(function(c){ return c.platform===pl; }),pl))+'</tr>';
     });
   });
-  let html='<div class="card" style="overflow-x:auto"><table class="ca-tbl"><thead><tr><th>Project</th><th>Spend</th><th>Leads</th><th>Cost per lead</th><th>Clicks</th><th>CTR</th></tr></thead><tbody>'
-    +(rows||'<tr><td colspan="6" style="text-align:center;color:var(--slate);padding:24px">No ad accounts</td></tr>')+'</tbody></table></div>';
+  // 7 Nov 2026: the overall Total under the projects - every project shown, Google and Facebook together
+  const inP={}; shown.forEach(function(p){ inP[p]=1; });
+  const tb=shown.reduce(function(s,p){ const v=budV(p); return v==null?s:(s||0)+v; },null);
+  const foot=shown.length>1||CA.proj==='all'?'<tfoot><tr class="ca-tot"><td>Total</td>'+bud(tb)
+    +cols(sum(CA_D.cur.filter(function(c){ return inP[c.project]; })),sum(prev.filter(function(c){ return inP[c.project]; })))+'</tr></tfoot>':'';
+  let html='<div class="card" style="overflow-x:auto"><table class="ca-tbl"><thead><tr><th>Project</th><th title="Daily budgets of the running campaigns, as set today">Daily budget</th><th>Spend</th><th>Leads</th><th>Cost per lead</th><th>Clicks</th><th>CTR</th></tr></thead><tbody>'
+    +(rows||'<tr><td colspan="7" style="text-align:center;color:var(--slate);padding:24px">No ad accounts</td></tr>')+'</tbody>'+foot+'</table></div>';
   // the open platform's campaigns, ad sets and ads come under the whole projects table, and the page
   // scrolls down to them (caPlat) so they are seen
   if(CA.open&&CA.plat) html+='<div class="ca-below" id="caBelow">'+section()+'</div>';
-  html+='<div style="font-size:11.5px;color:var(--slate);margin:12px 2px 4px;line-height:1.5">Leads = Google conversions + Facebook leads and WhatsApp chats from lead campaigns. Below a project, each row shows its own Results (Facebook awareness or engagement campaigns are marked "not leads"). Figures are Google Ads\' and Meta\'s own, refreshed through the day.</div>';
+  html+='<div style="font-size:11.5px;color:var(--slate);margin:12px 2px 4px;line-height:1.5">Leads = Google conversions + Facebook leads and WhatsApp chats from lead campaigns. Below a project, each row shows its own Results (Facebook awareness or engagement campaigns are marked "not leads"). Daily budget is as set today'+(cmpOn?'; in Compare mode it is not compared':'')+'. Figures are Google Ads\' and Meta\'s own, refreshed through the day.</div>';
   $('caBody').innerHTML=html;
 }
+window.caCmpToggle=function(on){ CA.cmp.on=!!on;
+  // the default other side: the previous period, unless that is what the main side already is
+  if(on&&CA.cmp.period!=='custom'&&CA.cmp.period===OB_P.period) CA.cmp.period='prev';
+  caLoad(); };
+window.caCmpPick=function(v){ CA.cmp.period=v; if(v==='custom'&&!CA.cmp.from){ const r=obRange(); CA.cmp.from=r.ps; CA.cmp.to=r.pe; } caLoad(); };
 // The ads of what is open: every campaign of the platform, one campaign, or one ad set.
 function caAds(p,pl){
   const W=CA_PLAT[pl], E=CA_D.ent;
@@ -39146,16 +39280,47 @@ function caAds(p,pl){
   const shown=ads.slice(0,CA.showAds);
   let h='<div style="font-weight:700;font-size:13.5px;margin:16px 2px 10px"><i class="'+W.icon+'" style="color:'+W.color+'"></i> Ads <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' that ran in this period · '+esc(p)+' · '+esc(where)+'</span></div>';
   if(!ads.length) return h+'<div style="font-size:12.5px;color:var(--slate);margin:0 2px">No ad ran here in this period.</div>';
-  return h+'<div class="ob-ads">'+shown.map(function(a){
+  window._caAds=shown;
+  return h+'<div class="ob-ads">'+shown.map(function(a,i){
       const e=E['ad:'+a.ad_id]||{}, words=String(e.body||e.name||('Ad '+a.ad_id)).split('\n');
       const pic=e.thumbnail?'<div class="pic"><img src="'+esc(e.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" alt=""></div>'
         :'<div class="txt">'+(pl==='google'?'<div class="sp">Sponsored</div>':'')+'<div class="h">'+esc(words[0])+'</div>'+(words[1]?'<div class="d">'+esc(words.slice(1).join(' '))+'</div>':'')+'</div>';
-      return '<div class="ob-ad">'+pic+'<div style="padding:9px 12px 0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(e.name||'')+'">'+esc(e.name||('Ad '+a.ad_id))+'</div>'
+      return '<div class="ob-ad" style="cursor:pointer" title="Open this ad" onclick="caAdOpen('+i+')">'+pic+'<div style="padding:9px 12px 0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(e.name||'')+'">'+esc(e.name||('Ad '+a.ad_id))+'</div>'
         +'<div style="padding:0 12px;font-size:11.5px;color:var(--slate)">'+stat(e.status)+'</div>'
         +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+(pl==='meta'?'Results':W.res)+'</span><b>'+obNum(a.results,pl==='google'?1:0)+'</b><span>Cost per result</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b></div></div>';
     }).join('')+'</div>'
     +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="CA.showAds+='+obAdStep(ads.length)+';caPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
 }
+/* AN AD, OPENED (7 Nov 2026, Ayush: "the Ads which show if clicked should open nicely in a popup").
+   The picture full size on the left (or the text ad as Google shows it), on the right where it runs
+   and its figures for the period. */
+window.caAdOpen=function(i){
+  const a=(window._caAds||[])[i]; if(!a) return;
+  const pl=a.platform, W=CA_PLAT[pl], E=CA_D.ent, e=E['ad:'+a.ad_id]||{};
+  const camp=(E['campaign:'+a.campaign_id]||{}).name||a.campaign_id, set=a.adset_id?((E['adset:'+a.adset_id]||{}).name||a.adset_id):null;
+  const words=String(e.body||'').split('\n').filter(Boolean);
+  const s=+a.spend||0, rr=+a.results||0, im=+a.impressions||0, cl=+a.clicks||0;
+  const on=caLive(e.status);
+  const pic=e.thumbnail
+    ?'<div style="background:#0f172a;border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:260px"><img src="'+esc(e.thumbnail)+'" referrerpolicy="no-referrer" alt="" style="max-width:100%;max-height:70vh;display:block"></div>'
+    :'<div style="border:1px solid var(--line);border-radius:10px;padding:16px 18px;background:#fff">'+(pl==='google'?'<div style="font-size:11px;font-weight:700;color:#202124;margin-bottom:4px">Sponsored</div>':'')
+      +'<div style="font-size:17px;color:#1a0dab;line-height:1.35;margin-bottom:6px">'+esc(words[0]||e.name||('Ad '+a.ad_id))+'</div>'
+      +(words.length>1?'<div style="font-size:13px;color:#4d5156;line-height:1.5">'+esc(words.slice(1).join(' '))+'</div>':'')+'</div>';
+  const row=function(k,v){ return '<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #eef1f4;font-size:13px"><span style="color:var(--slate)">'+k+'</span><b style="font-variant-numeric:tabular-nums">'+v+'</b></div>'; };
+  const r=obRange();
+  openModal('<div class="modal-head"><h3 style="display:flex;align-items:center;gap:8px;min-width:0"><i class="'+W.icon+'" style="color:'+W.color+'"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(e.name||('Ad '+a.ad_id))+'</span></h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><div style="display:grid;grid-template-columns:minmax(0,1.25fr) minmax(240px,1fr);gap:20px;align-items:start" class="ca-adpop">'
+    +'<div>'+pic+(e.thumbnail&&words.length?'<div style="font-size:13px;line-height:1.55;color:#334155;margin-top:12px;white-space:pre-wrap">'+esc(words.join('\n'))+'</div>':'')+'</div>'
+    +'<div><div style="margin-bottom:12px"><span class="tag '+(on?'t-green':'t-gray')+'" style="font-size:11px">'+(on?'Running':esc(String(e.status||'—').charAt(0)+String(e.status||'').slice(1).toLowerCase().replace(/_/g,' ')))+'</span></div>'
+    +'<div style="font-size:12px;color:var(--slate);margin-bottom:2px">Project</div><div style="font-size:13px;font-weight:600;margin-bottom:10px">'+esc(a.project)+'</div>'
+    +'<div style="font-size:12px;color:var(--slate);margin-bottom:2px">Campaign</div><div style="font-size:13px;font-weight:600;margin-bottom:10px">'+esc(camp)+'</div>'
+    +(set?'<div style="font-size:12px;color:var(--slate);margin-bottom:2px">'+W.set+'</div><div style="font-size:13px;font-weight:600;margin-bottom:14px">'+esc(set)+'</div>':'')
+    +'<div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--slate);margin:6px 0 2px">'+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+'</div>'
+    +row('Spend',obMoney(s))+row(pl==='meta'?'Results':W.res,obNum(rr,pl==='google'?1:0))+row('Cost per result',obMoney(rr?s/rr:null))
+    +row('Impressions',obNum(im))+row('Clicks',obNum(cl))+row('CTR',obPct(im?cl/im*100:null))
+    +'</div></div></div>'
+    +'<style>@media(max-width:760px){.ca-adpop{grid-template-columns:1fr!important}}</style>','lg');
+};
 function caReset(){ CA.open=CA.proj==='all'?null:CA.proj; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; }
 window.caPickProject=function(v){ CA.proj=v; CA.open=v==='all'?null:v; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
 window.caToggle=function(i){ const p=window._caP[i]; CA.open=CA.open===p?null:p; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
@@ -39182,13 +39347,15 @@ window.caUp=function(level){ if(level<=0){ CA.plat=null; } if(level<=1) CA.camp=
    BE HONEST ABOUT REACH. Meta gives reach for the PAGE (Viewers, per day) but not per Facebook
    post or reel - it accepts the request and returns 0 for every post (probed 6 Nov 2026). So the
    Page's reach is on Overview, Facebook rows are measured by Views and interactions, and a reach
-   column appears only where Meta really reports it (Instagram). A dot with a tooltip marks a
+   column appears only where Meta really reports it (Instagram). "NA" with a tooltip marks a
    number Meta does not report for that kind of content; a muted 0 is a real zero. */
 let ORG_PERIOD='last_28d', ORG_SINCE='', ORG_UNTIL='', ORG_NET='all', ORG_KIND='all',
     ORG_PAGE='all', ORG_SORT='date', ORG_DIR=-1, ORG_Q='', ORG_PG=0, ORG_OPEN=false,
     ORG_ROWS=null, ORG_PAGES=null, ORG_DAILY=null, ORG_STATE=undefined, ORG_LAST_TI=-1;
 const ORG_PER=25;
-const ORG_TABS=['Overview','Facebook','Instagram','Reels','Top performers'];
+// 7 Nov 2026, as asked: no separate Reels tab - reels are Facebook (or Instagram) content and sit in
+// those tabs, with the Reels chip to narrow to them.
+const ORG_TABS=['Overview','Facebook','Instagram','Top performers'];
 const ORG_PRESETS=[
   ['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_28d','Last 28 days'],['last_90d','Last 90 days'],
   ['this_week','This week'],['this_month','This month'],['this_year','This year'],
@@ -39227,6 +39394,12 @@ function orgInRange(d){ const R=orgRange(); d=String(d||'').slice(0,10); if(!d) 
 
 const ORG_CSS='<style id="orgCss">'
 +'.org-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}'
+/* date, search and page filter share the whole row - no empty strip on the right */
++'.org-top{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(200px,300px);gap:10px;align-items:center;margin-bottom:14px}'
++'.org-top .org-search{max-width:none;width:100%;min-width:0}'
++'.org-top .org-sel{width:100%;height:42px}'
++'.org-top .org-search{height:42px}'
++'@media(max-width:760px){.org-top{grid-template-columns:minmax(0,1fr)}}'
 +'.org-dp{position:relative}'
 +'.org-dp-btn{display:flex;align-items:center;gap:10px;height:42px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg-card);cursor:pointer;transition:.15s;min-width:0}'
 +'.org-dp-btn:hover{border-color:var(--brand)}'
@@ -39289,9 +39462,14 @@ const ORG_CSS='<style id="orgCss">'
 +'.org-ptxt b{font-size:13px;font-weight:600;color:var(--ink);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}'
 +'.org-tag{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}'
 +'.org-tag.reel{background:#fae8ff;color:#a21caf}.org-tag.video{background:#e0e7ff;color:#3730a3}.org-tag.carousel{background:#fef3c7;color:#92400e}.org-tag.post{background:#f1f5f9;color:#475569}'
++'.org-ct{white-space:nowrap;font-size:12.5px;font-weight:600}'
++'.org-dtl-lab{display:grid;grid-template-columns:minmax(0,1fr) 190px auto;gap:8px;align-items:end;margin-bottom:12px}'
++'.org-dtl-lab label{display:flex;flex-direction:column;gap:4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)}'
++'.org-dtl-lab input,.org-dtl-lab select{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font-size:13px;font-family:inherit;color:var(--ink);background:var(--bg-card);text-transform:none;letter-spacing:0;font-weight:500}'
++'@media(max-width:560px){.org-dtl-lab{grid-template-columns:minmax(0,1fr)}}'
 +'.org-rank{font-weight:800;color:var(--slate);width:28px}'
 +'.org-er{font-weight:700}'
-+'.org-na{color:#cbd5e1;cursor:help}'
++'.org-na{color:#94a3b8;cursor:help;font-size:11.5px;font-weight:600}'
 +'.org-zero{color:#94a3b8}'
 +'.org-date{white-space:nowrap;font-size:12.5px;color:var(--slate)}'
 +'.org-netic{margin-left:auto;flex:none;font-size:13px;opacity:.55}'
@@ -39304,6 +39482,31 @@ const ORG_CSS='<style id="orgCss">'
 +'.org-note i{color:#94a3b8;margin-top:2px;flex:none}'
 +'.org-empty{border:1px dashed var(--line);border-radius:12px;padding:34px 20px;text-align:center;color:var(--slate);font-size:13.5px;line-height:1.6}'
 +'.org-empty>i{font-size:26px;color:#cbd5e1;display:block;margin-bottom:10px}'
+/* the post box: picture left, everything else right */
++'.org-pop{display:grid;grid-template-columns:240px minmax(0,1fr);gap:22px;align-items:start}'
++'.org-pop-pic{display:flex;flex-direction:column;gap:10px;position:sticky;top:0}'
++'.org-pop-pic img{width:100%;max-height:380px;object-fit:contain;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:12px;display:block}'
++'.org-pop-pic .org-thumb-ph{width:100%;height:180px}'
++'.org-pop-pic .btn{justify-content:center}'
++'.org-pop-main{min-width:0;display:flex;flex-direction:column;gap:14px}'
++'.org-pop-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--slate)}'
++'.org-pop-ct{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;background:var(--brand-a10,#eef2ff);color:var(--brand)}'
++'.org-pop-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}'
++'.org-pt{border:1px solid var(--line);border-radius:10px;padding:9px 11px;min-width:0}'
++'.org-pt .k{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);line-height:1.3;min-height:26px}'
++'.org-pt .v{font-size:17px;font-weight:800;color:var(--ink);margin-top:3px}'
++'.org-pt.na .v{color:#94a3b8;font-size:14px;cursor:help}'
++'.org-pop-chips{display:flex;flex-wrap:wrap;gap:6px}'
++'.org-pc{font-size:12px;color:var(--slate);background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:20px;padding:3px 10px}'
++'.org-pc b{color:var(--ink)}'
++'.org-pop-cap{font-size:13.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}'
++'.org-pop-cap.open{display:block;-webkit-line-clamp:unset}'
++'.org-pop-more{align-self:flex-start;border:0;background:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;padding:0;margin-top:-8px}'
++'.org-pop-edit{display:grid;grid-template-columns:minmax(0,1fr) 200px auto;gap:8px;align-items:end;border-top:1px solid var(--line);padding-top:14px}'
++'.org-pop-edit label{display:flex;flex-direction:column;gap:4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)}'
++'.org-pop-edit input,.org-pop-edit select{height:38px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font-size:13px;font-family:inherit;color:var(--ink);background:var(--bg-card);text-transform:none;letter-spacing:0;font-weight:500}'
++'.org-pop-edit .btn{height:38px}'
++'@media(max-width:760px){.org-pop{grid-template-columns:minmax(0,1fr)}.org-pop-pic{position:static}.org-pop-pic img{max-height:300px}.org-pop-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.org-pop-edit{grid-template-columns:minmax(0,1fr)}}'
 +'.org-dtl-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;margin-top:4px}'
 +'.org-dtl-f .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)}'
 +'.org-dtl-f .v{font-size:14px;font-weight:700;color:var(--ink);margin-top:2px;overflow-wrap:anywhere}'
@@ -39321,11 +39524,22 @@ function orgN(v){const n=Number(v)||0; if(n>=1e7)return (n/1e7).toFixed(2).repla
 function orgDT(s){ if(!s)return '—'; try{return new Date(s).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return String(s);} }
 function orgAgo(s){ if(!s)return 'never'; const m=Math.round((Date.now()-new Date(s).getTime())/60000);
   if(m<1)return 'just now'; if(m<60)return m+' min ago'; const h=Math.round(m/60); if(h<36)return h+' h ago'; return Math.round(h/24)+' days ago'; }
-function orgEng(r){ return (Number(r.likes)||0)+(Number(r.comments)||0)+(Number(r.shares)||0)+(Number(r.saves)||0); }
+// Interactions exactly as Meta counts them (7 Nov, as asked - nothing added or taken away by JainE):
+// Instagram sends its own total_interactions; for Facebook, Meta's Interactions is reactions + comments +
+// shares (no single API figure exists - probed 7 Nov), stored that way by social-organic-live.
+function orgEng(r){ return Number(r.interactions)||0; }
 // An engagement RATE needs reach, and only Instagram reports reach per post.
 function orgHasReach(r){ return (Number(r.reach)||0)>0; }
 function orgER(r){ const reach=Number(r.reach)||0; return reach? (orgEng(r)/reach*100) : null; }
-function orgKindLabel(k){ return k==='reel'?'Reel':(k==='carousel'?'Carousel':(k==='video'?'Video':'Post')); }
+function orgKindLabel(k){ return k==='reel'?'Reel':(k==='carousel'?'Carousel Post':(k==='video'?'Video':'Static Post')); }
+// Post Name: the name someone gave it (or the one written from the caption), else the caption's
+// first line, cut short - the way the team names posts ("Avishek Das - Work Anniversary").
+function orgPostName(r){ if(r.post_name) return String(r.post_name);
+  const t=String(r.message||'').split(/\n/).map(function(x){return x.trim();}).filter(Boolean)[0]||'(no caption)';
+  return t.length>70?t.slice(0,67).replace(/\s+\S*$/,'')+'…':t; }
+// Engagement Rate as the team defines it: the Reactions column ÷ Views × 100. Since 7 Nov that column
+// carries Meta's Interactions (reactions + comments + shares, + saves on Instagram), as asked.
+function orgRate(r){ const v=orgViews(r); return v? orgEng(r)/v*100 : null; }
 function orgViews(r){ return Number(r.views)||Number(r.plays)||Number(r.video_views)||0; }
 // Meta reports watch time in milliseconds.
 function orgSecs(ms){ const s=(Number(ms)||0)/1000; return s>=60?(Math.floor(s/60)+'m '+Math.round(s%60)+'s'):(s<10?s.toFixed(1)+'s':Math.round(s)+'s'); }
@@ -39379,57 +39593,62 @@ async function orgLoad(){
   ]);
   ORG_STATE=got[0]; ORG_PAGES=got[1]; ORG_ROWS=got[2]; ORG_DAILY=got[3];
 }
-// Asks the server to pull from Meta now. Rows on screen stay while it runs.
-window.orgRefresh=async function(){
-  if(window._orgSyncing) return;
-  window._orgSyncing=true; renderPage();
-  let jr={};
-  try{
-    const {data:{session}}=await sb.auth.getSession();
-    const res=await fetch(SUPABASE_URL+'/functions/v1/social-organic-live',{method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+((session&&session.access_token)||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify({mode:'daily'})});
-    jr=await res.json().catch(function(){return {};});
-    if(!res.ok && !jr.error) jr.error='The sync answered '+res.status;
-  }catch(e){ jr={error:(e&&e.message)||String(e)}; }
-  window._orgSyncing=false;
-  if(jr.error) toast(jr.error,'err');
-  else toast('Updated '+(jr.posts||0)+' posts, '+(jr.reels||0)+' reels'+(jr.ig?', '+jr.ig+' Instagram':''),'ok');
-  ORG_ROWS=null;
-  if(PAGE==='organic') renderPage();
-};
-
 /* ---------------- detail dialog ---------------- */
+// The team's own content types (7 Nov 2026). Same list as social-organic-live and the
+// camp.social_post_set_label check - change all three together.
+const ORG_CONTENT_TYPES=['Employee Post','Birthday Post','Wish Post','Contest Post','Quiz Post','CP Testimonial',
+  'Client Testimonial','Channel Partner Post','CP Post','Event Post','CARE Post','Creative Post','Project Post',
+  'HR Activity','EGC','Web Blog','PR Post','Trending Post','Moment Marketing'];
+// A correction is saved as 'manual', so the overnight naming never changes it back.
+window.orgSaveLabel=async function(id){
+  const name=(($('orgLblName')||{}).value||'').trim(), type=(($('orgLblType')||{}).value||'')||null;
+  const {error}=await sb.schema('camp').rpc('social_post_set_label',{p_id:id,p_name:name,p_type:type});
+  if(error){ toast('Could not save: '+error.message,'err'); return; }
+  const r=(ORG_ROWS||[]).find(function(x){return String(x.id)===String(id);});
+  if(r){ r.post_name=name||null; r.content_type=type; r.label_source='manual'; }
+  toast('Saved','ok'); closeModal(); renderPage();
+};
+/* THE POST BOX (redesigned 7 Nov 2026, as asked - "looks bad"). Two columns: the picture on the left
+   at a fixed width, so a tall reel no longer pushes everything below the fold; on the right the name,
+   type and date, the same eight numbers as the table (same NA rules, so the box and the row always
+   agree), the smaller counts, the caption (four lines, "Show more" for the rest - no box scrolling
+   inside the box) and, last, the Post Name / Content Type correction. Phones stack it. */
 window.orgOpen=function(id){
   const r=(ORG_ROWS||[]).find(function(x){return String(x.id)===String(id);}); if(!r)return;
   const rx=r.reactions||{};
-  const f=function(k,v){return '<div class="org-dtl-f"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';};
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-photo-film"></i> '+esc(orgKindLabel(r.kind))+' details</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body org-dtl" style="width:min(94vw,640px);max-width:100%;box-sizing:border-box;overflow-x:hidden">'
-      +(r.thumbnail?'<div class="org-dtl-img"><img src="'+esc(r.thumbnail)+'" referrerpolicy="no-referrer" onerror="orgThumbFail(this)"></div>':'')
-      +'<div class="org-dtl-msg">'+esc(r.message||'(no caption)')+'</div>'
-      +'<div style="font-size:12px;color:var(--slate);margin:10px 0 4px">'+esc(r.page_name||'')+' · '+orgDT(r.created_time)+'</div>'
-      +'<div class="org-dtl-grid">'
-        +f('Views',orgN(orgViews(r)))
-        +f('Interactions',orgN(orgEng(r)))
-        +f(r.network==='instagram'?'Likes':'Reactions',orgN(r.likes))+f('Comments',orgN(r.comments))+f('Shares',orgN(r.shares))
-        +(Number(r.reach)?f('Reach',orgN(r.reach)):'')
-        +(Number(r.saves)?f('Saves',orgN(r.saves)):'')
-        +(Number(r.clicks)?f('Clicks',orgN(r.clicks)):'')
-        +(Number(r.replays)?f('Replays',orgN(r.replays)):'')
-        +(Number(r.viewers)?f('Unique video viewers',orgN(r.viewers)):'')
-        +(Number(r.follows)?f('Follows gained',orgN(r.follows)):'')
-        +(Number(r.video_total_time_ms)?f('Total watch time',orgWatch(r.video_total_time_ms)):'')
-        +(Number(r.video_avg_watch_ms)?f('Average watch',orgSecs(r.video_avg_watch_ms)):'')
-        +(Number(r.video_length_s)?f('Length',orgSecs(Number(r.video_length_s)*1000)):'')
-        +(orgHasReach(r)?f('Engagement rate',(orgER(r)||0).toFixed(2)+'%'):'')
-        +((rx.like||rx.love||rx.wow||rx.haha||rx.sad||rx.angry||rx.care)
-           ?f('Reactions by type','👍 '+orgN(rx.like)+'  ❤️ '+orgN(rx.love)+'  😮 '+orgN(rx.wow)+'  😂 '+orgN(rx.haha)+'  😢 '+orgN(rx.sad)+'  😠 '+orgN(rx.angry)+'  🤗 '+orgN(rx.care)):'')
+  const tile=function(k){ const c=ORG_COLS[k], na=!c.has(r), v=c.get(r);
+    return '<div class="org-pt'+(na?' na':'')+'"><div class="k">'+esc(c.k)+'</div><div class="v"'+(na?' title="'+esc(c.why||'')+'"':'')+'>'
+      +(na?'NA':(v?c.fmt(v):'0'))+'</div></div>'; };
+  const small=function(k,v){ return '<span class="org-pc"><b>'+v+'</b> '+esc(k)+'</span>'; };
+  const net=r.network==='instagram'?'Instagram':'Facebook';
+  const rxs=[['👍',rx.like],['❤️',rx.love],['🤗',rx.care],['😂',rx.haha],['😮',rx.wow],['😢',rx.sad],['😠',rx.angry]]
+    .filter(function(p){return Number(p[1])>0;}).map(function(p){return '<span class="org-pc">'+p[0]+' <b>'+orgN(p[1])+'</b></span>';}).join('');
+  const msg=String(r.message||'').trim();
+  openModal('<div class="modal-head"><h3><i class="fa-brands fa-'+(r.network==='instagram'?'instagram':'facebook')+'"></i> '+esc(orgPostName(r))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body org-pop">'
+      +'<div class="org-pop-pic">'
+        +(r.thumbnail?'<img src="'+esc(r.thumbnail)+'" referrerpolicy="no-referrer" onerror="orgThumbFail(this)">':'<div class="org-thumb-ph"><i class="fa-regular fa-image"></i></div>')
+        +(r.permalink?'<a class="btn" target="_blank" rel="noopener" href="'+esc(r.permalink)+'"><i class="fa-solid fa-arrow-up-right-from-square"></i> View on '+net+'</a>':'')
       +'</div>'
-      +(r.network==='facebook'?'<div style="font-size:11.5px;color:var(--slate);margin-top:12px">No reach here: Meta gives reach for the Page as a whole (see Overview), not for each Facebook post.</div>':'')
-    +'</div>'
-    +'<div class="modal-foot">'+(r.permalink?'<a class="btn" target="_blank" rel="noopener" href="'+esc(r.permalink)+'"><i class="fa-solid fa-arrow-up-right-from-square"></i> View on '+(r.network==='instagram'?'Instagram':'Facebook')+'</a>':'')
-      +'<button class="btn primary" onclick="closeModal()">Close</button></div>','md');
+      +'<div class="org-pop-main">'
+        +'<div class="org-pop-meta"><span class="org-tag '+esc(r.kind||'post')+'">'+esc(orgKindLabel(r.kind))+'</span>'
+          +(r.content_type?'<span class="org-pop-ct">'+esc(r.content_type)+'</span>':'')
+          +'<span>'+esc(r.page_name||'')+' · '+orgDT(r.created_time)+'</span></div>'
+        +'<div class="org-pop-tiles">'+orgColsFor().map(tile).join('')+'</div>'
+        +'<div class="org-pop-chips">'+small('Comments',orgN(r.comments))+small('Shares',orgN(r.shares))
+          +(r.network==='facebook'&&r.kind!=='reel'?small('Clicks',orgN(r.clicks)):'')
+          +(r.network==='instagram'?small('Saves',orgN(r.saves)):'')
+          +(Number(r.replays)?small('Replays',orgN(r.replays)):'')+rxs+'</div>'
+        +(msg?'<div class="org-pop-cap" id="orgCap">'+esc(msg)+'</div>'
+            +(msg.length>260||msg.split('\n').length>4?'<button class="org-pop-more" onclick="var c=document.getElementById(\'orgCap\');c.classList.toggle(\'open\');this.textContent=c.classList.contains(\'open\')?\'Show less\':\'Show more\'">Show more</button>':'')
+          :'<div class="org-pop-cap" style="color:var(--slate)">(no caption)</div>')
+        // Post Name and Content Type: written from the caption by the AI, corrected here by anyone
+        +'<div class="org-pop-edit"><label>Post Name<input id="orgLblName" value="'+esc(orgPostName(r))+'"></label>'
+          +'<label>Content Type<select id="orgLblType"><option value="">—</option>'
+          +ORG_CONTENT_TYPES.map(function(t){return '<option'+(r.content_type===t?' selected':'')+'>'+esc(t)+'</option>';}).join('')+'</select></label>'
+          +'<button class="btn primary" onclick="orgSaveLabel(\''+esc(String(r.id))+'\')">Save</button></div>'
+      +'</div>'
+    +'</div>','lg');
 };
 
 function orgDatePicker(){
@@ -39452,47 +39671,39 @@ function orgDatePicker(){
 
 function orgStatusBar(){
   const S=ORG_STATE||{};
-  const btn='<button class="btn" onclick="orgRefresh()"'+(window._orgSyncing?' disabled':'')+'>'
-    +(window._orgSyncing?'<i class="fa-solid fa-rotate fa-spin"></i> Updating…':'<i class="fa-solid fa-rotate"></i> Refresh now')+'</button>';
-  const who={cron:'the 6 am refresh',button:'Refresh now',backfill:'the first full pull'}[S.last_trigger]||'';
+  // 7 Nov 2026, as asked: no Refresh button - one refresh every night (cron 'social-organic-daily').
+  const who={cron:'the nightly refresh',backfill:'the first full pull'}[S.last_trigger]||'';
   return '<div class="org-st"><i class="fa-brands fa-meta" style="font-size:18px;color:#1877f2"></i><div class="grow">'
-    +'Updates itself every morning at <b>6:00</b> from Meta. Last updated <b>'+esc(orgAgo(S.last_sync_at))+'</b>'+(who?' by '+esc(who):'')+'.'
+    +'Updates itself <b>every night</b> from Meta. Last updated <b>'+esc(orgAgo(S.last_sync_at))+'</b>'+(who?' by '+esc(who):'')+'.'
     +(S.last_error?'<br><span class="err"><i class="fa-solid fa-triangle-exclamation"></i> '+esc(String(S.last_error).slice(0,220))+'</span>':'')
-    +'</div>'+btn+'</div>';
+    +'</div></div>';
 }
 
 /* ---------------- columns ---------------- */
 // One definition per number. `has` says whether Meta reports it for that row at all, so a real 0
-// (muted) is told apart from "not reported" (a dot with the reason as a tooltip).
+// (muted) is told apart from "not reported" - shown as NA, with the reason as a tooltip (7 Nov, as asked).
 function orgFbVideo(r){ return r.network==='facebook' && (r.kind==='reel'||r.kind==='video'||Number(r.video_views)>0||Number(r.video_length_s)>0); }
+/* The columns asked for (6-7 Nov 2026), in that order:
+   Views · Viewers · Reactions · Engagement Rate · Net Follows · Duration (sec) · Watch Time · Average Seconds Viewed.
+   VIEWERS: Meta's per-post Viewers (post_total_media_view_unique, the post's reach), pulled automatically
+   every night since 7 Nov 2026 - Instagram reach for Instagram. Posts older than ~2 years have none (NA).
+   FOLLOWS: Meta reports follows gained per post only for videos and reels; there is no follow or unfollow
+   figure for photo posts, and no unfollows per post at all, so it is "Follows", not net. */
+function orgVideo(r){ return r.kind==='reel'||r.kind==='video'||Number(r.video_length_s)>0; }
 const ORG_COLS={
   views:{k:'Views', get:orgViews, fmt:orgN, has:function(){return true;}},
-  reach:{k:'Reach', get:function(r){return Number(r.reach)||0;}, fmt:orgN,
-    has:function(r){return r.network==='instagram';}, why:'Meta gives reach for the Facebook Page as a whole, not per post - see Overview'},
-  likes:{k:'Reactions', get:function(r){return Number(r.likes)||0;}, fmt:orgN, has:function(){return true;}},
-  comments:{k:'Comments', get:function(r){return Number(r.comments)||0;}, fmt:orgN, has:function(){return true;}},
-  shares:{k:'Shares', get:function(r){return Number(r.shares)||0;}, fmt:orgN, has:function(){return true;}},
-  saves:{k:'Saves', get:function(r){return Number(r.saves)||0;}, fmt:orgN,
-    has:function(r){return r.network==='instagram';}, why:'saves are an Instagram number'},
-  clicks:{k:'Clicks', get:function(r){return Number(r.clicks)||0;}, fmt:orgN,
-    has:function(r){return r.network==='facebook'&&r.kind!=='reel';}, why:'Meta reports clicks for Facebook posts only'},
-  inter:{k:'Interactions', get:orgEng, fmt:orgN, strong:true, has:function(){return true;}},
-  er:{k:'Eng. rate', get:function(r){return orgER(r)||0;}, fmt:function(v){return v.toFixed(2)+'%';},
-    has:orgHasReach, why:'needs reach, which Meta gives per post on Instagram only'},
-  replays:{k:'Replays', get:function(r){return Number(r.replays)||0;}, fmt:orgN,
-    has:function(r){return r.network==='facebook'&&r.kind==='reel';}, why:'Facebook reels only'},
-  follows:{k:'Follows', get:function(r){return Number(r.follows)||0;}, fmt:orgN, has:orgFbVideo, why:'follows gained are reported for Facebook video only'},
-  dur:{k:'Length', get:function(r){return (Number(r.video_length_s)||0)*1000;}, fmt:orgSecs, has:orgFbVideo, why:'Facebook video only'},
-  avgw:{k:'Avg watch', get:function(r){return Number(r.video_avg_watch_ms)||0;}, fmt:orgSecs, has:orgFbVideo, why:'Facebook video only'},
-  totw:{k:'Total watch', get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch, has:orgFbVideo, why:'Facebook video only'}
+  viewers:{k:'Viewers', get:function(r){return Number(r.reach)||0;}, fmt:orgN,
+    has:function(r){return Number(r.reach)>0;}, why:'Meta has no Viewers figure for this post (it keeps them about two years)'},
+  likes:{k:'Interactions', get:orgEng, fmt:orgN, has:function(){return true;}},   // Meta's Interactions (7 Nov, as asked)
+  rate:{k:'Engagement Rate', get:function(r){return orgRate(r)||0;}, fmt:function(v){return v.toFixed(2)+'%';}, strong:true,
+    has:function(r){return orgViews(r)>0;}, why:'no views recorded yet'},
+  netf:{k:'Follows', get:function(r){return Number(r.follows)||0;}, fmt:orgN,
+    has:orgVideo, why:'Meta reports follows per post only for videos and reels'},
+  dur:{k:'Duration (sec)', get:function(r){return Number(r.video_length_s)||0;}, fmt:function(v){return String(Math.round(v));}, has:orgVideo, why:'videos and reels only'},
+  totw:{k:'Watch Time', get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch, has:orgVideo, why:'videos and reels only'},
+  avgw:{k:'Average Seconds Viewed', get:function(r){return (Number(r.video_avg_watch_ms)||0)/1000;}, fmt:function(v){return v.toFixed(1);}, has:orgVideo, why:'videos and reels only'}
 };
-function orgColsFor(ti,rows){
-  const vid=rows.some(orgFbVideo)?['follows','avgw','totw','dur']:[];
-  if(ti===1) return ['views','likes','comments','shares','clicks','inter'].concat(vid);
-  if(ti===2) return ['reach','views','likes','comments','shares','saves','inter','er'];
-  if(ti===3) return ['views','replays','likes','comments','shares','inter','reach'].concat(vid);
-  return ['views','inter','shares','reach'];
-}
+function orgColsFor(){ return ['views','viewers','likes','rate','netf','dur','totw','avgw']; }
 function orgSortRows(rows){
   const c=ORG_COLS[ORG_SORT], d=ORG_DIR;
   return rows.slice().sort(function(a,b){
@@ -39509,23 +39720,23 @@ function orgTable(list,cols,opts){
       +(on?'<i class="fa-solid fa-arrow-'+(ORG_DIR<0?'down':'up')+' ar"></i>':'')+'</th>';
   };
   return '<div class="org-tblwrap"><table class="org-tbl"><thead><tr>'
-    +(opts.rank?'<th>#</th>':'')+th('date','Date',false)+'<th>Post</th><th>Format</th>'
+    +(opts.rank?'<th>#</th>':'')+th('date','Post Date',false)+'<th>Post Name</th><th>Post Type</th><th>Content Type</th>'
     +cols.map(function(k){return th(k,ORG_COLS[k].k,true);}).join('')
     +'</tr></thead><tbody>'
     +list.map(function(r,i){
       const thumb=r.thumbnail?'<img class="org-thumb" src="'+esc(r.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" onerror="orgThumbFail(this)">'
                              :'<div class="org-thumb-ph"><i class="fa-regular fa-image"></i></div>';
-      const txt=String(r.message||'').replace(/\s+/g,' ').trim()||'(no caption)';
       return '<tr onclick="orgOpen(\''+esc(String(r.id))+'\')">'
         +(opts.rank?'<td class="org-rank">'+(i+1)+'</td>':'')
         +'<td class="org-date">'+orgDT(r.created_time)+'</td>'
-        +'<td><div class="org-post">'+thumb+'<div class="org-ptxt"><b>'+esc(txt.slice(0,120))+'</b></div>'
+        +'<td><div class="org-post">'+thumb+'<div class="org-ptxt"><b title="'+esc(String(r.message||'').slice(0,400))+'">'+esc(orgPostName(r))+'</b></div>'
           +'<i class="fa-brands '+(r.network==='instagram'?'fa-instagram':'fa-facebook')+' org-netic" title="'+esc(r.page_name||'')+'"></i></div></td>'
         +'<td><span class="org-tag '+esc(r.kind||'post')+'">'+esc(orgKindLabel(r.kind))+'</span></td>'
+        +'<td class="org-ct">'+(r.content_type?esc(r.content_type):'<span class="org-na" title="named and typed from the caption at the next nightly refresh">Pending</span>')+'</td>'
         +cols.map(function(k){ const c=ORG_COLS[k], v=c.get(r), na=!c.has(r);
           const tip=c.why||('Meta does not report this for a '+orgKindLabel(r.kind));
           return '<td class="n'+(c.strong?' org-er':'')+'">'
-            +(na?'<span class="org-na" title="'+esc(tip)+'">·</span>'
+            +(na?'<span class="org-na" title="'+esc(tip)+'">NA</span>'
                 :(v?c.fmt(v):'<span class="org-zero">0</span>'))+'</td>'; }).join('')
       +'</tr>';
     }).join('')+'</tbody></table></div>';
@@ -39552,7 +39763,6 @@ VIEWS.organic=async function(v,seg){
   const scoped=base.filter(function(r){
     if(ti===1) return r.network==='facebook';
     if(ti===2) return r.network==='instagram';
-    if(ti===3) return r.kind==='reel';
     return true;
   });
   const kc={}; scoped.forEach(function(r){kc[r.kind]=(kc[r.kind]||0)+1;});
@@ -39565,11 +39775,11 @@ VIEWS.organic=async function(v,seg){
     chips='<div class="org-bar">'+['all','post','video','reel','carousel'].map(function(k){
       const n=k==='all'?scoped.length:(kc[k]||0);
       if(k!=='all'&&!n&&ORG_KIND!==k) return '';
-      const lbl={all:'All formats',post:'Posts',video:'Videos',reel:'Reels',carousel:'Carousels'}[k];
+      const lbl={all:'All types',post:'Static Posts',video:'Videos',reel:'Reels',carousel:'Carousel Posts'}[k];
       return '<button class="org-fbtn'+(ORG_KIND===k?' on':'')+'" onclick="orgSetKind(\''+k+'\')">'+esc(lbl)+'<span class="n">'+n+'</span></button>';
     }).join('')+'</div>';
   }
-  const bar='<div class="org-bar">'+orgDatePicker()
+  const bar='<div class="org-top">'+orgDatePicker()
     +'<input class="org-search" id="orgQ" placeholder="Search caption or page…" value="'+esc(ORG_Q)+'" oninput="orgSearch(this.value)">'
     +pageSel+'</div>';
 
@@ -39580,23 +39790,22 @@ VIEWS.organic=async function(v,seg){
   } else if(!rows.length){
     let msg;
     if(ti===2&&!igLinked) msg='<i class="fa-brands fa-instagram"></i>Instagram is not linked to the Jain Group Facebook Page yet, so Meta sends nothing for it.<br>'
-      +'Link it in Meta Business Suite (Settings → Accounts → Instagram accounts), and it fills in at the next morning refresh.';
+      +'Link it in Meta Business Suite (Settings → Accounts → Instagram accounts), and it fills in at the next nightly refresh.';
     else if((ORG_ROWS||[]).length) msg='<i class="fa-regular fa-folder-open"></i>Nothing in this date range or filter.<br>Try widening the dates, or choose <b>Lifetime</b>.';
-    else msg='<i class="fa-regular fa-folder-open"></i>Nothing saved yet. Click <b>Refresh now</b>, or wait for the 6 am refresh.';
+    else msg='<i class="fa-regular fa-folder-open"></i>Nothing saved yet - it fills in at the nightly refresh.';
     body='<div class="org-empty">'+msg+'</div>';
-  } else if(ti===4){
+  } else if(ti===3){
     const top=rows.slice().sort(function(a,b){return orgEng(b)-orgEng(a);}).slice(0,20);
     const sorted=ORG_SORT==='date'&&ORG_DIR===-1?top:orgSortRows(top);
     body='<div class="org-note"><i class="fa-solid fa-trophy"></i><span>The 20 posts and reels with the most interactions (reactions + comments + shares + saves) in the period. Click a heading to re-order them.</span></div>'
-      +orgTable(sorted,orgColsFor(4,sorted),{rank:true});
+      +orgTable(sorted,orgColsFor(3,sorted),{rank:true});
   } else {
     const list=orgSortRows(rows);
     const pages=Math.max(1,Math.ceil(list.length/ORG_PER));
     if(ORG_PG>=pages)ORG_PG=pages-1;
     const slice=list.slice(ORG_PG*ORG_PER,(ORG_PG+1)*ORG_PER);
-    const note=ti===1?'Facebook posts are measured by <b>Views</b> and interactions. Meta gives <b>reach</b> for the Page as a whole (see Overview), not for each post.'
-      :(ti===2?'Instagram reports true <b>reach</b> per post, so engagement rate is shown here.'
-      :'Facebook reels carry plays, replays, watch time, shares and follows gained. Reach per reel is not given by Meta.');
+    const note=ti===1?'<b>Viewers</b> = unique people who saw the post (Meta keeps them about two years). <b>Follows</b> = follows gained, reported by Meta for videos and reels only. Engagement Rate = Interactions ÷ Views × 100.'
+      :'Instagram'+"'"+'s per-post reach is shown as <b>Viewers</b>. Engagement Rate = Interactions ÷ Views × 100.';
     body='<div class="org-note"><i class="fa-solid fa-circle-info"></i><span>'+note+' Click a column heading to sort.</span></div>'
       +chips+orgTable(slice,orgColsFor(ti,slice))
       +'<div class="org-pager"><span class="info">Showing '+(ORG_PG*ORG_PER+1)+'–'+Math.min((ORG_PG+1)*ORG_PER,list.length)+' of '+list.length+'</span>'
@@ -39664,8 +39873,7 @@ function orgOverview(rows){
   };
   const top=rows.slice().sort(function(a,b){return orgEng(b)-orgEng(a);}).slice(0,5);
   return kpis+chart
-    +'<div class="org-grid2"><div><div class="org-h2"><i class="fa-solid fa-share-nodes"></i> By network</div>'+tbl(agg(function(r){return r.network==='instagram'?'Instagram':'Facebook';}),'Network')+'</div>'
-    +'<div><div class="org-h2"><i class="fa-solid fa-shapes"></i> By format</div>'+tbl(agg(function(r){return orgKindLabel(r.kind)+'s';}),'Format')+'</div></div>'
-    +(top.length?'<div class="org-h2" style="margin-top:14px"><i class="fa-solid fa-trophy"></i> Top 5 this period</div>'+orgTable(top,['views','inter','shares'],{rank:true}):'')
+    +'<div class="org-h2"><i class="fa-solid fa-shapes"></i> By post type</div>'+tbl(agg(function(r){return orgKindLabel(r.kind)+'s';}),'Post type')
+    +(top.length?'<div class="org-h2" style="margin-top:14px"><i class="fa-solid fa-trophy"></i> Top 5 this period</div>'+orgTable(top,['views','likes','rate'],{rank:true}):'')
     +'<div class="org-note" style="margin-top:14px"><i class="fa-solid fa-circle-info"></i><span><b>Reach</b> here is Meta\'s daily Viewers for the Page, added up day by day - someone who saw the Page on two days counts twice, as Meta gives no de-duplicated total. Meta does not give reach for each Facebook post.</span></div>';
 }
