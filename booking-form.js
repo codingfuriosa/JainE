@@ -140,10 +140,7 @@ function stepApplicants(){
          who they are, then their ID documents, then (first applicant only, folded away) family. */
       const F={full:1};
       return '<div class="app"><div class="ah"><span class="num">'+(i+1)+'</span><b>'+(i?'Joint applicant':'First / sole applicant')+'</b>'
-          +(i===0?'<button type="button" class="tg" data-sp="1">'+(SPOUSE_OPEN?'−':'+')+' Spouse & anniversary</button>':'')
           +(S.applicants.length>1?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
-        +(i===0&&SPOUSE_OPEN?'<div class="spx"><div class="grp">Spouse & anniversary <span class="opt">(optional)</span></div><div class="stack">'
-          +field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></div>':'')
         +'<div class="grp g1">Personal details</div><div class="stack s1">'
         +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,mcols:5})
         +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,cls:'up',auto:i?'off':'name'})
@@ -158,6 +155,8 @@ function stepApplicants(){
         +field(p+'passport','Passport number',{cls:'up',req:foreign,note:foreign?'':'(only for NRIs & foreigners)',full:1})
         +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,note:foreign?'':'(only for NRIs & foreigners)'})
         +'</div>'
+        +(i===0?'<button type="button" class="tg tgw'+(SPOUSE_OPEN?' on':'')+'" data-sp="1">'+(SPOUSE_OPEN?'−':'+')+' Spouse & anniversary <span class="opt">(optional)</span></button>'
+          +(SPOUSE_OPEN?'<div class="spx"><div class="stack">'+field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></div>':''):'')
         +'</div>';
     }).join('')
     +(S.applicants.length<MAX_APPS?'<button type="button" class="btn add" data-add="1">+ Add another applicant</button>':''));
