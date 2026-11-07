@@ -228,8 +228,10 @@
      the small help text beside the answer instead of under it. Every answer is the same width. Phones are untouched. */
   @media(min-width:1000px),(orientation:landscape) and (min-width:700px) and (min-height:480px){
     body{font-size:15.5px}
-    .wrap{max-width:1120px}
-    .nav .in{max-width:1092px}
+    .wrap{max-width:none}
+    .nav{padding-left:28px;padding-right:28px}
+    .nav .in{max-width:none}
+    .sec{margin:16px 28px 0}
     /* header in one line: logo, the form's name and addressee, project logo */
     .hd{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;column-gap:24px;padding:14px 28px}
     .hd .logos{display:contents}
@@ -244,9 +246,11 @@
     .sh{display:none}
     .sb{padding:22px 26px}
     .grid,.stack{gap:16px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(600px,1fr));column-gap:44px;align-items:start}
+    .grid>:not(.f):not(.pair){grid-column:1/-1}
     .pair{display:flex;flex-direction:column;align-items:stretch;gap:16px}
     /* a question: label | answer */
-    .grid>.f,.stack>.f,.pair>.f,.ac>.f,.sb>.f{display:grid;grid-template-columns:210px minmax(0,720px);column-gap:22px;row-gap:5px;align-items:start}
+    .grid>.f,.stack>.f,.pair>.f,.ac>.f,.sb>.f{display:grid;grid-template-columns:210px minmax(0,1fr);max-width:952px;column-gap:22px;row-gap:5px;align-items:start}
     .grid>.f>label,.stack>.f>label,.pair>.f>label,.ac>.f>label,.sb>.f>label{grid-column:1;grid-row:1;padding-top:13px;font-size:14px;line-height:1.35}
     .grid>.f>:not(label),.stack>.f>:not(label),.pair>.f>:not(label),.ac>.f>:not(label),.sb>.f>:not(label){grid-column:2;min-width:0}
     input[type=text],input[type=tel],input[type=email],input[type=date],textarea{font-size:15.5px;min-height:46px}
@@ -324,6 +328,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107zj"></script>
+<script src="booking-form.js?v=20261107zk"></script>
 </body>
 </html>
