@@ -142,22 +142,22 @@ function stepApplicants(){
       return '<div class="app"><div class="ah"><span class="num">'+(i+1)+'</span><b>'+(i?'Joint applicant':'First / sole applicant')+'</b>'
           +(i===0?'<button type="button" class="tg" data-sp="1">'+(SPOUSE_OPEN?'−':'+')+' Spouse & anniversary</button>':'')
           +(S.applicants.length>1?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
-        +'<div class="grp">Personal details</div><div class="stack">'
+        +(i===0&&SPOUSE_OPEN?'<div class="spx"><div class="grp">Spouse & anniversary <span class="opt">(optional)</span></div><div class="stack">'
+          +field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></div>':'')
+        +'<div class="grp g1">Personal details</div><div class="stack s1">'
         +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,mcols:5})
         +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,cls:'up',auto:i?'off':'name'})
         +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1,mcols:4})
         +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,cls:'up'})
         +(i===0?field(p+'dob','Date of birth',{type:'date',req:1,full:1}):'')
         +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1})
-        +'</div><div class="grp">Identity documents</div><div class="stack">'
+        +'</div><div class="grp g2">Identity documents</div><div class="stack s2">'
         +pick(p+'nationality','Nationality / Country','country',F)
         +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1})
         +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1})
         +field(p+'passport','Passport number',{cls:'up',req:foreign,note:foreign?'':'(only for NRIs & foreigners)',full:1})
         +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,note:foreign?'':'(only for NRIs & foreigners)'})
         +'</div>'
-        +(i===0&&SPOUSE_OPEN?'<div class="spx"><div class="grp">Spouse & anniversary <span class="opt">(optional)</span></div><div class="stack">'
-          +field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></div>':'')
         +'</div>';
     }).join('')
     +(S.applicants.length<MAX_APPS?'<button type="button" class="btn add" data-add="1">+ Add another applicant</button>':''));
@@ -571,7 +571,9 @@ document.addEventListener('click',function(e){
   /* Remove asks inside the page (a browser pop-up can be blocked or hidden, and then the button seems dead). */
   if(b.dataset.rm){ const i=+b.dataset.rm;
     b.outerHTML='<span class="rmask">'+(i?'':'The next person becomes the first applicant. ')+'Remove? <button type="button" class="rm" data-rmyes="'+i+'">Yes, remove</button> <button type="button" class="rm keep" data-rmno="1">Keep</button></span>'; return; }
-  if(b.dataset.sp){ SPOUSE_OPEN=!SPOUSE_OPEN; render(); return; }
+  if(b.dataset.sp){ SPOUSE_OPEN=!SPOUSE_OPEN; render();
+    if(SPOUSE_OPEN){ const sp=document.querySelector('[data-k="applicants.0.spouse"]'); if(sp){ const box=sp.closest('.spx'); if(box) box.scrollIntoView({behavior:'smooth',block:'center'}); sp.focus({preventScroll:true}); } }
+    return; }
   if(b.dataset.rmyes){ const i=+b.dataset.rmyes; S.applicants.splice(i,1); FILES.splice(i,1); save(); render(); return; }
   if(b.dataset.rmno){ render(); return; }
   if(b.dataset.addwhy){ S.why.push(''); save(); render(); const ins=document.querySelectorAll('[data-k^="why."]'); ins[ins.length-1].focus(); return; }
