@@ -58,6 +58,7 @@ if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
 // Files and the signature live only in this page (too big for the draft).
 let FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
 let SIG=null;
+let FROM_REVIEW=false;   // true while one section is being edited from the last (review) page: Continue / Back return straight there
 let PASS_OPEN=new Set();   // applicants whose Passport & bank panel was opened by hand (it is always open for a non-Indian applicant)
 let SPOUSE_OPEN=!!(S.applicants[0]&&(S.applicants[0].spouse||S.applicants[0].anniversary));   // Spouse & anniversary: hidden until asked for
 let ERR={}, MISSING=[];
@@ -637,11 +638,12 @@ document.addEventListener('click',function(e){
   if(b.dataset.rmwhy){ S.why.splice(+b.dataset.rmwhy,1); save(); render(); return; }
   if(b.dataset.delfile){ const p=b.dataset.delfile.split('|'); FILES[+p[0]][p[1]].splice(+p[2],1); render(); return; }
   if(b.dataset.opensig){ openSigner(); return; }
-  if(b.dataset.go){ go(+b.dataset.go); return; }
-  if(b.dataset.back){ go(S.step-1); return; }
+  if(b.dataset.go){ if(S.step===STEPS.length-1) FROM_REVIEW=true; go(+b.dataset.go); return; }
+  if(b.dataset.back){ if(FROM_REVIEW){ FROM_REVIEW=false; go(STEPS.length-1); return; } go(S.step-1); return; }
   if(b.dataset.next){
     if(S.step===STEPS.length-1){ submit(); return; }
     if(!check(S.step)){ showErrors(); return; }
+    if(FROM_REVIEW){ FROM_REVIEW=false; go(STEPS.length-1); return; }
     go(S.step+1);
   }
 });
