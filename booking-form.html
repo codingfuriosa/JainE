@@ -96,17 +96,16 @@
   .app .rm{margin-left:auto;background:#fff;border:1.5px solid var(--err);color:var(--err);border-radius:8px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;padding:7px 14px;box-shadow:0 1px 2px rgba(17,24,39,.08)}
   .app .rm:hover{background:var(--soft)}
   .app .ah{flex-wrap:wrap}
-  .app .tg{margin-left:auto;background:#fff;border:1.5px solid var(--brand);color:var(--brand-dark);border-radius:8px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;padding:7px 14px;box-shadow:0 1px 2px rgba(17,24,39,.08)}
-  .app .tg:hover{background:var(--soft)}
-  .app .tg+.rm{margin-left:8px}
-  .app .tgw{display:block;width:100%;margin:14px 0 0;text-align:left;padding:11px 16px;font-size:14px}
-  .app .tgw .opt{font-weight:400;color:var(--slate)}
-  .app .tgp{margin-top:6px}
-  .app .tg.static{cursor:default;background:var(--soft)}
-  .app .tg.static:hover{background:var(--soft)}
-  .xt-body{display:flex;flex-direction:column;gap:12px;border:1.5px solid var(--brand);border-top:0;border-radius:0 0 8px 8px;padding:14px}
-  .app .tgw.on{border-bottom-left-radius:0;border-bottom-right-radius:0;background:var(--soft)}
-  .app>.spx>.stack{border:1.5px solid var(--brand);border-top:0;border-radius:0 0 8px 8px;padding:14px}
+  .app .xts{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+  .app .tg{display:block;width:100%;text-align:left;background:#fff;border:1.5px solid #b9bec7;color:var(--ink);border-radius:8px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;padding:10px 16px;box-shadow:0 1px 2px rgba(17,24,39,.08)}
+  .app .tg:hover{background:#f6f7f9;border-color:#9aa1ab}
+  .app .tg.on{background:#f1f2f5;border-color:#9aa1ab}
+  .app .tg.static{cursor:default}
+  .app .tg .opt{font-weight:400;color:var(--slate)}
+  .app .xp{border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:12px;overflow:hidden}
+  .app .xp-h{padding:9px 14px;background:#f7f8fa;border-bottom:1px solid var(--line);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2)}
+  .app .xp-h .opt{text-transform:none;letter-spacing:0;font-weight:400;color:var(--slate)}
+  .app .xp-b{padding:14px;display:flex;flex-direction:column;gap:12px}
   .rmask{margin-left:auto;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;font-size:13.5px;color:var(--ink2)}
   .rmask .rm{margin-left:0}
   .app .rm.keep{border-color:#b9bec7;color:var(--ink2)}
@@ -118,8 +117,8 @@
   .btn{border:none;border-radius:8px;padding:12px 20px;font:inherit;font-size:15.5px;font-weight:600;cursor:pointer;min-height:48px}
   .btn.pri{background:var(--brand);color:#fff}.btn.pri:hover{background:var(--brand-dark)}
   .btn.sec2{background:#fff;color:var(--ink);border:1px solid var(--line)}
-  .btn.add,.btn.add2{width:100%;margin-top:14px;background:#fff;border:1.5px solid var(--brand);color:var(--brand-dark);font-size:14.5px;font-weight:600;box-shadow:0 1px 2px rgba(17,24,39,.08)}
-  .btn.add:hover,.btn.add2:hover{background:var(--soft)}
+  .btn.add,.btn.add2{width:100%;margin-top:14px;background:#fff;border:1.5px solid #b9bec7;color:var(--ink);font-size:14.5px;font-weight:600;box-shadow:0 1px 2px rgba(17,24,39,.08)}
+  .btn.add:hover,.btn.add2:hover{background:#f6f7f9;border-color:#9aa1ab}
   .btn.add2{width:auto;min-height:42px;padding:9px 18px;margin-top:10px;align-self:flex-start}
   button.rm.lnk{border:1.5px solid var(--err);border-radius:8px;background:#fff;color:var(--err)!important;padding:8px 14px!important;font-weight:600;box-shadow:0 1px 2px rgba(17,24,39,.08)}
   button.rm.lnk:hover{background:var(--soft)}
@@ -183,8 +182,8 @@
   /* terms */
   details.t{margin-top:10px}
   details.t summary{padding:10px 16px;border:1.5px solid #b9bec7;border-radius:8px;background:#fff;box-shadow:0 1px 2px rgba(17,24,39,.08);font-weight:600;font-size:14.5px;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px}
-  details.t summary{border-color:var(--brand);color:var(--brand-dark)}
-  details.t summary:hover{background:var(--soft)}
+  details.t summary{color:var(--ink)}
+  details.t summary:hover{background:#f6f7f9;border-color:#9aa1ab}
   /* the "more" toggles are buttons: a plus (a minus when open), not a box that looks like a field */
   details.opt-d>summary{display:inline-flex;width:auto;justify-content:flex-start;gap:10px}
   details.opt-d>summary:before{content:'+';font-weight:700;font-size:19px;line-height:1}
@@ -281,9 +280,11 @@
     .app>.grp:after{display:none}
     .app>.stack{display:flex;flex-direction:column;align-items:stretch;padding:14px 14px 16px;border:1px solid var(--line);border-radius:0 0 8px 8px;gap:12px}
     /* Spouse & anniversary: hidden until its full-width button at the bottom of the card is pressed; its two fields open right under it, side by side */
-    .app>.tgw{grid-column:1/-1;grid-row:5}
-    .app>.spx{grid-column:1/-1;grid-row:6}
-    .app>.spx>.stack{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .app>.xts{grid-column:1/-1;grid-row:5;flex-direction:row}
+    .app>.xts>.tg{flex:1}
+    .app>.xp.sp{grid-column:1/-1;grid-row:6}
+    .app>.xp.pp{grid-column:1/-1;grid-row:7}
+    .app>.xp>.xp-b{display:grid;grid-template-columns:1fr 1fr;gap:16px}
     .app .stack>.f{display:flex;flex-direction:column;gap:6px}
     .app .stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
     .app .stack>.f>:not(label){grid-column:auto}
@@ -316,6 +317,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107y"></script>
+<script src="booking-form.js?v=20261107z"></script>
 </body>
 </html>

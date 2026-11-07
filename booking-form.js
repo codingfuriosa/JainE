@@ -153,18 +153,20 @@ function stepApplicants(){
         +pick(p+'nationality','Nationality / Country','country',F)
         +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1})
         +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1})
-        +(function(){
-          const forced=foreign||!!a.passport||!!a.bank_details;   // needed, or already filled: shown as a plain title, no toggle
-          const open=forced||PASS_OPEN.has(i);
-          const lbl='Passport & bank details <span class="opt">(NRIs &amp; foreign nationals only)</span>';
-          return (forced?'<div class="tg tgw tgp on static">\u2212 '+lbl+'</div>'
-                         :'<button type="button" class="tg tgw tgp'+(open?' on':'')+'" data-pp="'+i+'">'+(open?'\u2212':'+')+' '+lbl+'</button>')
-            +(open?'<div class="xt-body">'+field(p+'passport','Passport number',{cls:'up',req:foreign,optional:!foreign,full:1})
-              +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,optional:!foreign})+'</div>':'');
-        })()
         +'</div>'
-        +(i===0?'<button type="button" class="tg tgw'+(SPOUSE_OPEN?' on':'')+'" data-sp="1">'+(SPOUSE_OPEN?'−':'+')+' Spouse & anniversary <span class="opt">(optional)</span></button>'
-          +(SPOUSE_OPEN?'<div class="spx"><div class="stack">'+field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></div>':''):'')
+        +(function(){
+          const forced=foreign||!!a.passport||!!a.bank_details;   // needed, or already filled: its panel stays open and the bar is a plain title
+          const ppOpen=forced||PASS_OPEN.has(i), spOpen=i===0&&SPOUSE_OPEN;
+          const bar=function(on,plain,attr,label){ return (plain?'<div class="tg on static">':'<button type="button" class="tg'+(on?' on':'')+'" '+attr+'>')+(on?'−':'+')+' '+label+(plain?'</div>':'</button>'); };
+          return '<div class="xts">'
+            +(i===0?bar(spOpen,false,'data-sp="1"','Spouse &amp; anniversary <span class="opt">(optional)</span>'):'')
+            +bar(ppOpen,forced,'data-pp="'+i+'"','Passport &amp; bank details <span class="opt">(NRIs &amp; foreign nationals)</span>')
+            +'</div>'
+            +(spOpen?'<div class="xp sp"><div class="xp-h">Spouse &amp; anniversary <span class="opt">(optional)</span></div><div class="xp-b">'+field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></div>':'')
+            +(ppOpen?'<div class="xp pp"><div class="xp-h">Passport &amp; bank details <span class="opt">'+(foreign?'(needed for a foreign national)':'(NRIs &amp; foreign nationals only)')+'</span></div><div class="xp-b">'
+              +field(p+'passport','Passport number',{cls:'up',req:foreign,optional:!foreign,full:1})
+              +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,optional:!foreign})+'</div></div>':'');
+        })()
         +'</div>';
     }).join('')
     +(S.applicants.length<MAX_APPS?'<button type="button" class="btn add" data-add="1">+ Add another applicant</button>':''));
@@ -622,11 +624,11 @@ document.addEventListener('click',function(e){
   if(b.dataset.rm){ const i=+b.dataset.rm;
     b.outerHTML='<span class="rmask">'+(i?'':'The next person becomes the first applicant. ')+'Remove? <button type="button" class="rm" data-rmyes="'+i+'">Yes, remove</button> <button type="button" class="rm keep" data-rmno="1">Keep</button></span>'; return; }
   if(b.dataset.pp!==undefined){ const i=+b.dataset.pp; if(PASS_OPEN.has(i)) PASS_OPEN.delete(i); else PASS_OPEN.add(i); render();
-    if(PASS_OPEN.has(i)){ const pp=document.querySelector('[data-k="applicants.'+i+'.passport"]'); if(pp){ const box=pp.closest('.xt-body'); if(box) box.scrollIntoView({behavior:'smooth',block:'center'}); pp.focus({preventScroll:true}); } }
+    if(PASS_OPEN.has(i)){ const pp=document.querySelector('[data-k="applicants.'+i+'.passport"]'); if(pp){ const box=pp.closest('.xp'); if(box) box.scrollIntoView({behavior:'smooth',block:'center'}); pp.focus({preventScroll:true}); } }
     return; }
   if(b.dataset.sgclear){ if(INLINE_PAD&&!SIG) INLINE_PAD.clear(); else { SIG=null; render(); } return; }
   if(b.dataset.sp){ SPOUSE_OPEN=!SPOUSE_OPEN; render();
-    if(SPOUSE_OPEN){ const sp=document.querySelector('[data-k="applicants.0.spouse"]'); if(sp){ const box=sp.closest('.spx'); if(box) box.scrollIntoView({behavior:'smooth',block:'center'}); sp.focus({preventScroll:true}); } }
+    if(SPOUSE_OPEN){ const sp=document.querySelector('[data-k="applicants.0.spouse"]'); if(sp){ const box=sp.closest('.xp'); if(box) box.scrollIntoView({behavior:'smooth',block:'center'}); sp.focus({preventScroll:true}); } }
     return; }
   if(b.dataset.rmyes){ const i=+b.dataset.rmyes; S.applicants.splice(i,1); FILES.splice(i,1);
     PASS_OPEN=new Set([...PASS_OPEN].filter(function(x){ return x!==i; }).map(function(x){ return x>i?x-1:x; })); save(); render(); return; }
