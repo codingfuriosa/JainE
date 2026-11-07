@@ -11364,7 +11364,7 @@ function wmPaintNav(){
       if(thisWeek&&!WM.showPast&&date<today&&!ms.some(m=>m.id===WM.cur&&WM.view==='meeting')) return '';
       if(!ms.length&&date!==today) return '';
       return `<div class="wm-dl ${date===today?'today':''}">${date===today?'Today':d.slice(0,3)+' '+new Date(date+'T00:00').getDate()}</div>`+
-        (ms.map(m=>`<div class="wm-mi ${WM.view==='meeting'&&WM.cur===m.id?'on':''} ${date>today?'up':''}" onclick="wmOpenMeeting(${m.id})"><span class="t">${esc(wmTime(m.start_time))}</span><span class="n">${esc(m.kind||'Meeting')}${m.series_id&&m.series_active?' <i class="fa-solid fa-repeat wm-mi-rep" title="Repeats '+esc(m.recur||'')+'"></i>':''}</span>${date===today?'<span class="live"></span>':''}</div>`).join('')||'<div class="wm-mi up" style="cursor:default">No meeting</div>'); }).join('');
+        (ms.map(m=>`<div class="wm-mi ${WM.view==='meeting'&&WM.cur===m.id?'on':''} ${date>today?'up':''}" onclick="wmOpenMeeting(${m.id})"><span class="t">${esc(wmTime(m.start_time))}</span><span class="n">${esc(m.kind||'Meeting')}${m.series_id&&m.series_active?' <i class="fa-solid fa-repeat wm-mi-rep" title="Repeats '+esc(m.recur||'')+'"></i>':''}</span>${date===today&&!m.ended_at?'<span class="live"></span>':''}</div>`).join('')||'<div class="wm-mi up" style="cursor:default">No meeting</div>'); }).join('');
     const lb=label(w), range=fmtD(w)+' – '+fmtD(wmAdd(w,6));
     return `<div class="wm-wkh">${esc(lb)}${lb===range?'':`<small>${esc(range)}</small>`}</div>
       ${thisWeek?`<button class="wm-quiet" style="margin:2px 0 4px" onclick="WM.showPast=!WM.showPast;wmPaintNav()"><i class="fa-solid fa-chevron-${WM.showPast?'down':'up'}"></i> ${WM.showPast?'Hide earlier days':'Earlier this week'}</button>`:''}
@@ -11391,15 +11391,16 @@ function wmPaintMeeting(){
   const m=wmMeeting(WM.cur);
   if(!m){ main.innerHTML=`<div class="wm-card"><div class="wm-card-top"><h2>No meeting yet</h2><div class="wm-mute" style="margin-top:8px">Start one from the list on the right.</div></div></div>`; return; }
   const today=wmToday(), series=wmSeries(m.kind), first=series.length?series[series.length-1].meeting_date:m.meeting_date;
-  const isToday=m.meeting_date===today, att=m.attendees||[];
+  const isToday=m.meeting_date===today, att=m.attendees||[], ended=!!m.ended_at;
   const started=(function(){ try{ return Number(localStorage.getItem('wm_start_'+m.id))||0; }catch(e){ return 0; } })();
   main.innerHTML=`<div class="wm-card wm-in"><div class="wm-card-top">
     <div class="wm-mh">
       <div>
-        <div class="wm-eyebrow">${isToday?`<span class="wm-live">Today${m.start_time?' · '+esc(wmTime(m.start_time)):''}</span>${started?`<span class="wm-tm" id="wmTimer"></span>`:''}`:m.meeting_date>today?'Coming up · '+esc(wmFmt(m.meeting_date))+(m.start_time?', '+esc(wmTime(m.start_time)):''):'Held on '+esc(wmFmt(m.meeting_date))}</div>
+        <div class="wm-eyebrow">${ended?`<span class="wm-ended"><i class="fa-solid fa-circle-check"></i> ${isToday?'Today':esc(wmFmt(m.meeting_date))} · ended at ${esc(wmClock(m.ended_at))}${m.ran_minutes?' · ran '+m.ran_minutes+' min':''}</span><button class="wm-quiet" onclick="wmReopen()">Reopen</button>`
+          :isToday?`<span class="wm-live">Today${m.start_time?' · '+esc(wmTime(m.start_time)):''}</span>${started?`<span class="wm-tm" id="wmTimer"></span>`:''}`:m.meeting_date>today?'Coming up · '+esc(wmFmt(m.meeting_date))+(m.start_time?', '+esc(wmTime(m.start_time)):''):'Held on '+esc(wmFmt(m.meeting_date))}</div>
         <h2>${esc(m.kind||'Meeting')}<span class="wm-info"><i class="fa-solid fa-circle-info"></i><span class="tip">${series.length} meeting${series.length===1?'':'s'} of this kind since ${esc(wmFmtS(first))}${m.note?'<br>'+esc(m.note):''}</span></span></h2>
       </div>
-      ${isToday?`<button class="wm-btn wm-red" onclick="wmEndMeeting()">End meeting</button>`:''}
+      ${isToday&&!ended?`<button class="wm-btn wm-red" onclick="wmEndMeeting()">End meeting</button>`:''}
     </div>
     <div class="wm-mh2">
       <div class="wm-dd" id="wmPpl">${wmPplHtml(att)}</div>
@@ -11423,7 +11424,7 @@ function wmPaintMeeting(){
   </div></div>`;
   wmParse(); wmPaintDrafts(); wmPaintTabs();
   if(m.agenda) wmPaintAgenda(true);
-  if(isToday&&started){
+  if(isToday&&started&&!ended){
     const tick=()=>{ const t=$('wmTimer'); if(!t) return; const x=Math.max(0,Math.floor((Date.now()-started)/1000)); t.textContent=String(Math.floor(x/60)).padStart(2,'0')+':'+String(x%60).padStart(2,'0'); };
     tick(); WM.timer=setInterval(tick,1000);
   }
@@ -11502,7 +11503,7 @@ window.wmMeetingForm=function(mode){
     <input id="wmKindNew" placeholder="e.g. Sales Review" style="display:${kinds.length?'none':''};margin-top:8px">
     ${later?`<div class="wm-three"><div><label id="wmDateLbl">Date</label><input type="date" id="wmDate" min="${wmToday()}" value="${wmAdd(wmToday(),1)}" onchange="wmFormRecur()"></div>
       <div><label>Time</label><input type="time" id="wmTime" value="10:30" onchange="wmFormRecur()"></div>
-      <div><label>Repeats</label><select id="wmRecur" onchange="wmFormRecur()"><option value="none">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div></div>
+      <div><label>Repeats</label><select id="wmRecur" onchange="wmFormRecur()"><option value="none">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select></div></div>
       <div class="wm-recur-hint" id="wmRecurHint"></div>`:''}
     <label>People in this meeting <span style="font-weight:400;color:var(--slate)">— it goes into their JainE calendar and yours</span></label>
     <div class="wm-fp" id="wmFormPpl"></div>
@@ -11520,13 +11521,16 @@ function wmRecurWords(recur,date,time){
   if(recur==='daily') return 'Every day'+t;
   if(recur==='weekly') return 'Every '+d.toLocaleDateString('en-IN',{weekday:'long'})+t;
   if(recur==='monthly') return 'Every month on the '+wmOrd(d.getDate())+t+(d.getDate()>28?' (months without that day are skipped)':'');
+  if(recur==='quarterly'){ const ms=[0,3,6,9].map(k=>new Date(2000,(d.getMonth()+k)%12,1).toLocaleDateString('en-IN',{month:'short'}));
+    return 'Every 3 months on the '+wmOrd(d.getDate())+' ('+ms.join(', ')+')'+t; }
+  if(recur==='yearly') return 'Every year on '+d.getDate()+' '+d.toLocaleDateString('en-IN',{month:'long'})+t+(d.getMonth()===1&&d.getDate()===29?' (leap years only)':'');
   return '';
 }
 window.wmFormRecur=function(){
   const r=$('wmRecur'), h=$('wmRecurHint'); if(!r||!h) return;
   const date=$('wmDate').value, rep=r.value!=='none';
   $('wmDateLbl').textContent=rep?'First meeting':'Date';
-  h.innerHTML=rep&&date?`<i class="fa-solid fa-repeat"></i> ${esc(wmRecurWords(r.value,date,$('wmTime').value))}, starting ${esc(wmFmt(date))} — in everyone's calendar on each date`:'';
+  h.innerHTML=rep&&date?`<i class="fa-solid fa-repeat"></i> ${esc(wmRecurWords(r.value,date,$('wmTime').value))}, starting ${esc(wmFmt(date))} — ${/quarterly|yearly/.test(r.value)?"each date goes into everyone's calendar, with an invite, two weeks before":"in everyone's calendar on each date"}`:'';
 };
 window.wmStartMeeting=function(){ wmMeetingForm('start'); };
 window.wmScheduleMeeting=function(){ wmMeetingForm('schedule'); };
@@ -12154,7 +12158,7 @@ window.wmPickPeople=function(initial,title,onDone){
 };
 
 /* ---------- end of meeting ---------- */
-window.wmEndMeeting=function(force){
+window.wmEndMeeting=async function(force){
   const m=wmMeeting(WM.cur); if(!m) return;
   const left=wmDrafts().length;
   if(left&&!force){
@@ -12163,15 +12167,31 @@ window.wmEndMeeting=function(force){
       <div class="modal-foot"><button class="btn" onclick="closeModal();wmEndMeeting(true)">End anyway</button><button class="btn btn-primary" onclick="closeModal();$('wmDrafts').scrollIntoView({behavior:'smooth',block:'center'})">Assign them now</button></div>`);
     return;
   }
-  if(m.agenda_run&&!m.agenda_run.done){ clearInterval(WM.agTimer); wmAgSaveRun(m,{k:m.agenda_run.k,done:true}); }
-  let mins=0; try{ const s=Number(localStorage.getItem('wm_start_'+m.id))||0; if(s){ mins=Math.max(1,Math.round((Date.now()-s)/60000)); localStorage.removeItem('wm_start_'+m.id); } }catch(e){}
+  // Ending is saved on the meeting (and stops the agenda timer there), so it stays ended after a
+  // reload: no End meeting button, no live dot, "ended at …" on the card.
+  clearInterval(WM.agTimer); clearInterval(WM.timer);
+  let mins=0, s=0; try{ s=Number(localStorage.getItem('wm_start_'+m.id))||0; if(s) mins=Math.max(1,Math.round((Date.now()-s)/60000)); }catch(e){}
+  const btn=document.querySelector('.wm-btn.wm-red'); if(btn) btn.disabled=true;
+  try{
+    const {error}=await sb.rpc('ops_meeting_end',{p_meeting:m.id,p_minutes:mins||null}); if(error) throw error;
+    m.ended_at=new Date().toISOString(); m.ran_minutes=mins||null; if(m.agenda_run&&!m.agenda_run.done) m.agenda_run={k:m.agenda_run.k,done:true};
+    try{ localStorage.removeItem('wm_start_'+m.id); }catch(e){}
+  }catch(e){ if(btn) btn.disabled=false; toast('Could not end the meeting: '+((e&&e.message)||e),'err'); return; }
   const mine=WM.items.filter(it=>it.meeting===m.id&&!it.draft), keys=[...new Set(mine.flatMap(wmWhoKeys))];
   const open=WM.items.filter(it=>it.kind===m.kind&&!it.draft&&wmOpen(it)).length;
-  openModal(`<div class="modal-head"><h3>Meeting ended</h3><span class="x" onclick="closeModal();wmPaintMeeting()">&times;</span></div>
+  openModal(`<div class="modal-head"><h3>Meeting ended</h3><span class="x" onclick="closeModal();wmRender()">&times;</span></div>
     <div class="modal-body"><div style="color:var(--slate);font-size:13.5px">${esc(m.kind)}${mins?' · '+mins+' min':''} · ${(m.attendees||[]).length} present · ${mine.length} task${mine.length===1?'':'s'} written · ${open} still pending for this meeting</div>
       <div style="margin-top:14px">${keys.map(k=>`<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line-2)">${wmAvatar(wmKeyName(k),30)}<div><b>${esc(wmKeyName(k))}</b>${mine.filter(it=>wmWhoKeys(it).includes(k)).map(it=>`<div style="font-size:13px;color:#334155">${esc(it.t)}${it.due?` <span style="color:var(--slate)">· ${esc(wmFmtS(it.due))}</span>`:''}</div>`).join('')}</div></div>`).join('')||'<div style="color:var(--slate)">No tasks were written in this meeting.</div>'}</div></div>
-    <div class="modal-foot"><button class="btn btn-primary" onclick="closeModal();wmPaintMeeting()">Done</button></div>`);
+    <div class="modal-foot"><button class="btn btn-primary" onclick="closeModal();wmRender()">Done</button></div>`);
+  wmRender();
 };
+window.wmReopen=async function(){
+  const m=wmMeeting(WM.cur); if(!m) return;
+  try{ const {error}=await sb.rpc('ops_meeting_reopen',{p_meeting:m.id}); if(error) throw error; m.ended_at=null; m.ran_minutes=null; wmRender(); toast('Meeting reopened','ok'); }
+  catch(e){ toast('Could not reopen it: '+((e&&e.message)||e),'err'); }
+};
+// "12:40" in India time, for when a meeting ended.
+function wmClock(ts){ try{ return new Date(ts).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } }
 
 const WM_CSS='<style id="wmCss">'
   /* Light, like the rest of JainE: white cards on the normal page background. */
@@ -12229,6 +12249,7 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-kt th .x{position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--mute2);cursor:pointer;font-size:11px;opacity:0}.wm-kt th:hover .x{opacity:1}.wm-kt th .x:hover{color:var(--red)}'
   +'.wm-kt th.add{padding:0 12px;width:1%}.wm-kt td input{width:120px;border:0;border-left:1px solid var(--hair2);font:inherit;font-size:13px;padding:8px 10px;outline:none;color:var(--ink);background:transparent}.wm-kt td input:focus{background:#fffbea}'
   +'.wm-three{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:12px}'
+  +'.wm-ended{color:#15803d;font-weight:600;display:inline-flex;align-items:center;gap:6px}'
   +'.wm-recur-hint{margin-top:8px;font-size:12.5px;color:#15803d;background:#f0fdf4;border-radius:8px;padding:7px 10px}.wm-recur-hint:empty{display:none}.wm-recur-hint i{margin-right:6px}'
   +'.wm-rep{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--mute)}.wm-rep i{font-size:11px}.wm-rep.off{color:var(--mute2)}.wm-rep .wm-quiet{font-size:12.5px;text-decoration:underline;text-underline-offset:2px}'
   +'.wm-mi-rep{font-size:9.5px;color:var(--mute2);margin-left:4px}'
