@@ -58,6 +58,7 @@ if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
 // Files and the signature live only in this page (too big for the draft).
 let FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
 let SIG=null;
+let SPOUSE_OPEN=!!(S.applicants[0]&&(S.applicants[0].spouse||S.applicants[0].anniversary));   // Spouse & anniversary: hidden until asked for
 let ERR={}, MISSING=[];
 const $=function(id){ return document.getElementById(id); };
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -132,7 +133,6 @@ function openSheet(path,kind){
 
 // ---------------------------------------------------------------- steps
 function stepApplicants(){
-  const wideScreen=!!(window.matchMedia&&window.matchMedia('(min-width:1000px)').matches);
   return card('','','Applicant details','Every person in whose name the unit is to be booked. Joint applicants can be added below.',
     S.applicants.map(function(a,i){
       const p='applicants.'+i+'.', foreign=a.nationality!=='India';
@@ -140,6 +140,7 @@ function stepApplicants(){
          who they are, then their ID documents, then (first applicant only, folded away) family. */
       const F={full:1};
       return '<div class="app"><div class="ah"><span class="num">'+(i+1)+'</span><b>'+(i?'Joint applicant':'First / sole applicant')+'</b>'
+          +(i===0?'<button type="button" class="tg" data-sp="1">'+(SPOUSE_OPEN?'−':'+')+' Spouse & anniversary</button>':'')
           +(S.applicants.length>1?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
         +'<div class="grp">Personal details</div><div class="stack">'
         +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,mcols:5})
@@ -155,8 +156,8 @@ function stepApplicants(){
         +field(p+'passport','Passport number',{cls:'up',req:foreign,note:foreign?'':'(only for NRIs & foreigners)',full:1})
         +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,note:foreign?'':'(only for NRIs & foreigners)'})
         +'</div>'
-        +(i===0?'<details class="t opt-d"'+(wideScreen||a.spouse||a.anniversary?' open':'')+'><summary><span>Spouse & anniversary <span class="opt">(optional)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
-          +field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></details>':'')
+        +(i===0&&SPOUSE_OPEN?'<div class="spx"><div class="grp">Spouse & anniversary <span class="opt">(optional)</span></div><div class="stack">'
+          +field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></div>':'')
         +'</div>';
     }).join('')
     +(S.applicants.length<MAX_APPS?'<button type="button" class="btn add" data-add="1">+ Add another applicant</button>':''));
@@ -188,11 +189,10 @@ function stepContact(){
       +'</div>');
 }
 function stepAbout(){
-  const wideScreen=!!(window.matchMedia&&window.matchMedia('(min-width:1000px)').matches);
   return card('','','Occupation','',
       '<div class="grid">'+chips('profession.kind','Profession',['Salaried','Self-Employed','Govt. Employee','Others'],{mcols:4,sm:1})
       +'<div class="pair">'+field('profession.company','Company',{optional:1})+field('profession.designation','Designation',{optional:1})+'</div></div>'
-      +'<details class="t opt-d"'+(wideScreen?' open':'')+'><summary><span>More about you <span class="opt">(optional)</span></span></summary>'
+      +'<details class="t opt-d"><summary><span>More about you <span class="opt">(optional)</span></span></summary>'
         +'<div class="stack" style="padding:0 14px 14px">'
         +field('profession.income','Gross income',{optional:1})+field('profession.community','Community',{optional:1})
         +field('profession.newspaper','Favourite newspaper',{optional:1})+field('profession.magazine','Magazine',{optional:1})
@@ -571,6 +571,7 @@ document.addEventListener('click',function(e){
   /* Remove asks inside the page (a browser pop-up can be blocked or hidden, and then the button seems dead). */
   if(b.dataset.rm){ const i=+b.dataset.rm;
     b.outerHTML='<span class="rmask">'+(i?'':'The next person becomes the first applicant. ')+'Remove? <button type="button" class="rm" data-rmyes="'+i+'">Yes, remove</button> <button type="button" class="rm keep" data-rmno="1">Keep</button></span>'; return; }
+  if(b.dataset.sp){ SPOUSE_OPEN=!SPOUSE_OPEN; render(); return; }
   if(b.dataset.rmyes){ const i=+b.dataset.rmyes; S.applicants.splice(i,1); FILES.splice(i,1); save(); render(); return; }
   if(b.dataset.rmno){ render(); return; }
   if(b.dataset.addwhy){ S.why.push(''); save(); render(); const ins=document.querySelectorAll('[data-k^="why."]'); ins[ins.length-1].focus(); return; }

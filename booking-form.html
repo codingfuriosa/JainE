@@ -95,6 +95,10 @@
   .app .num{min-width:24px;height:24px;border-radius:6px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:12.5px;flex:none}
   .app .rm{margin-left:auto;background:#fff;border:1.5px solid var(--err);color:var(--err);border-radius:8px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;padding:7px 14px;box-shadow:0 1px 2px rgba(17,24,39,.08)}
   .app .rm:hover{background:var(--soft)}
+  .app .ah{flex-wrap:wrap}
+  .app .tg{margin-left:auto;background:#fff;border:1.5px solid var(--brand);color:var(--brand-dark);border-radius:8px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;padding:7px 14px;box-shadow:0 1px 2px rgba(17,24,39,.08)}
+  .app .tg:hover{background:var(--soft)}
+  .app .tg+.rm{margin-left:8px}
   .rmask{margin-left:auto;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;font-size:13.5px;color:var(--ink2)}
   .rmask .rm{margin-left:0}
   .app .rm.keep{border-color:#b9bec7;color:var(--ink2)}
@@ -265,21 +269,11 @@
     .app>.grp{margin:0!important;padding:9px 14px;background:#f7f8fa;border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;color:var(--ink2)}
     .app>.grp:after{display:none}
     .app>.stack{padding:14px 14px 16px;border:1px solid var(--line);border-radius:0 0 8px 8px;gap:12px}
-    /* Spouse & anniversary is a third panel across the card, always open on a wide screen: its two fields sit side by side */
-    .app>details.t{grid-column:1/-1;grid-row:4;max-width:none;margin-top:14px;padding-top:0;border-top:0}
-    .app>details.t>summary{pointer-events:none;cursor:default;display:block;padding:9px 14px;background:#f7f8fa;border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;box-shadow:none;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2)}
-    .app>details.t>summary:before,.app>details.t>summary:after{display:none!important}
-    .app>details.t>summary .opt{text-transform:none;letter-spacing:0;font-weight:400;color:var(--slate)}
-    .app>details.t>.stack{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:0!important;border:1px solid var(--line)!important;border-top:0!important;border-radius:0 0 8px 8px!important;padding:14px!important}
-    /* "More about you" is a panel on a wide screen too: its six optional fields in two columns, no lone button */
-    .sb>details.t.opt-d{max-width:none;margin-top:18px}
-    .sb>details.t.opt-d>summary{pointer-events:none;cursor:default;display:block;padding:9px 14px;background:#f7f8fa;border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;box-shadow:none;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);width:auto}
-    .sb>details.t.opt-d>summary:before,.sb>details.t.opt-d>summary:after{display:none!important}
-    .sb>details.t.opt-d>summary .opt{text-transform:none;letter-spacing:0;font-weight:400;color:var(--slate)}
-    .sb>details.t.opt-d>.stack{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:0!important;border:1px solid var(--line)!important;border-top:0!important;border-radius:0 0 8px 8px!important;padding:14px!important}
-    .sb>details.t.opt-d>.stack>.f{display:flex;flex-direction:column;gap:6px}
-    .sb>details.t.opt-d>.stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
-    .sb>details.t.opt-d>.stack>.f>:not(label){grid-column:auto}
+    /* Spouse & anniversary: hidden until its button (in the card's header bar) is pressed; then a third panel across the card */
+    .app>.spx{grid-column:1/-1;grid-row:4;margin-top:14px}
+    .app>.spx>.grp{margin:0!important;padding:9px 14px;background:#f7f8fa;border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;color:var(--ink2)}
+    .app>.spx>.grp:after{display:none}
+    .app>.spx>.stack{display:grid;grid-template-columns:1fr 1fr;gap:16px;border:1px solid var(--line);border-radius:0 0 8px 8px;padding:14px}
     .app .stack>.f{display:flex;flex-direction:column;gap:6px}
     .app .stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
     .app .stack>.f>:not(label){grid-column:auto}
@@ -310,6 +304,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107k"></script>
+<script src="booking-form.js?v=20261107l"></script>
 </body>
 </html>
