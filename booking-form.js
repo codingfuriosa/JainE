@@ -148,11 +148,11 @@ function stepApplicants(){
         +chips(p+'relation','Son / Daughter / Wife / Care of',['S/o','D/o','W/o','C/o'],{sm:1,mcols:4})
         +field(p+'relation_name',({'S/o':"Father's",'D/o':"Father's",'W/o':"Husband's",'C/o':"Guardian's"}[a.relation]||"Father's")+' name',{req:1,full:1,cls:'up'})
         +(i===0?field(p+'dob','Date of birth',{type:'date',req:1,full:1}):'')
-        +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1})
-        +'</div><div class="grp g2">Identity documents</div><div class="stack s2">'
+        +'</div><div class="grp g2">Identity &amp; occupation</div><div class="stack s2">'
         +pick(p+'nationality','Nationality / Country','country',F)
         +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1})
         +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1})
+        +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1})
         +'</div>'
         +(function(){
           const forced=foreign||!!a.passport||!!a.bank_details;   // needed, or already filled: its panel stays open and the bar is a plain title
