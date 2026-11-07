@@ -195,7 +195,7 @@ async function fbEntities(acc: string) {
   const now = new Date().toISOString();
   const camps = await fbAll(`https://graph.facebook.com/${FBV}/act_${acc}/campaigns?fields=id,name,effective_status,objective,daily_budget,lifetime_budget&limit=500${tok}`);
   // A campaign without its own budget spends its ad sets' budgets: add up the running ones.
-  const sets = await fbAll(`https://graph.facebook.com/${FBV}/act_${acc}/adsets?fields=id,name,campaign_id,daily_budget,lifetime_budget,effective_status&limit=500${tok}`);
+  const sets = await fbAll(`https://graph.facebook.com/${FBV}/act_${acc}/adsets?fields=id,name,campaign_id,optimization_goal,daily_budget,lifetime_budget,effective_status&limit=500${tok}`);
   const sd: Record<string, number> = {}, sl: Record<string, number> = {};
   for (const a of sets) {
     if (String(a.effective_status || '') !== 'ACTIVE') continue;
@@ -205,8 +205,10 @@ async function fbEntities(acc: string) {
   const rows: any[] = camps.map((c) => ({ platform: 'meta', kind: 'campaign', id: c.id, account_id: acc, campaign_id: c.id, name: c.name, status: c.effective_status || null, objective: c.objective || null,
     daily_budget: c.daily_budget != null ? num(c.daily_budget) / 100 : (sd[c.id] != null ? sd[c.id] / 100 : null),
     lifetime_budget: c.lifetime_budget != null && num(c.lifetime_budget) > 0 ? num(c.lifetime_budget) / 100 : (sl[c.id] != null ? sl[c.id] / 100 : null), updated_at: now }));
+  // an ad set's optimisation goal (CONVERSATIONS, LEAD_GENERATION ...) is kept in objective: a WhatsApp campaign set up as
+  // Engagement whose ad sets go for conversations is a lead campaign (Campaign Analytics, obIsLead)
   if (await hasAdset()) for (const a of sets) rows.push({ platform: 'meta', kind: 'adset', id: a.id, account_id: acc, campaign_id: a.campaign_id || null, name: a.name || null,
-    status: a.effective_status || null, daily_budget: a.daily_budget != null ? num(a.daily_budget) / 100 : null,
+    status: a.effective_status || null, objective: a.optimization_goal || null, daily_budget: a.daily_budget != null ? num(a.daily_budget) / 100 : null,
     lifetime_budget: a.lifetime_budget != null && num(a.lifetime_budget) > 0 ? num(a.lifetime_budget) / 100 : null, updated_at: now });
   // The picture size has to be asked for on the creative itself (a size on the ads edge is ignored,
   // and Meta then sends a 64 x 64 thumbnail that looks blurred on the card). image_url is the

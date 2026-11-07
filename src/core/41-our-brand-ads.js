@@ -59,7 +59,16 @@ function obChange(now,prev,goodUp){
    row still shows exactly Ads Manager's own Result. */
 const OB_LEAD_OBJ={OUTCOME_LEADS:1,LEAD_GENERATION:1,OUTCOME_SALES:1,CONVERSIONS:1,MESSAGES:1};
 const OB_OBJ_NAME={OUTCOME_AWARENESS:'Awareness',OUTCOME_ENGAGEMENT:'Engagement',OUTCOME_TRAFFIC:'Traffic',LINK_CLICKS:'Traffic'};
-function obIsLead(E,c){ const e=E['campaign:'+c.campaign_id]; return !!(e&&OB_LEAD_OBJ[e.objective]); }
+/* 7 Nov 2026: the objective was never read into the page (the select above lacked it), so no Facebook campaign
+   counted as a lead one and every lead total showed 0. Also, a WhatsApp campaign is often set up with the
+   Engagement objective but its ad sets are optimised for conversations - those count as leads too. An ad set's
+   optimisation goal is kept in its row's objective column (ads-daily-sync, kind 'adset'). */
+const OB_LEAD_GOAL={CONVERSATIONS:1,LEAD_GENERATION:1,QUALITY_LEAD:1,OFFSITE_CONVERSIONS:1,MESSAGING_PURCHASE_CONVERSION:1,MESSAGING_APPOINTMENT_CONVERSION:1};
+function obIsLead(E,c){
+  const e=E['campaign:'+c.campaign_id]; if(e&&OB_LEAD_OBJ[e.objective]) return true;
+  if(!E.__leadSets){ const m={}; Object.keys(E).forEach(function(k){ const x=E[k]; if(k.indexOf('adset:')===0&&x&&OB_LEAD_GOAL[x.objective]) m[x.campaign_id]=1; }); E.__leadSets=m; }
+  return !!E.__leadSets[c.campaign_id];
+}
 function obSum(rows){ const t={spend:0,impressions:0,clicks:0,results:0}; rows.forEach(function(r){ t.spend+=Number(r.spend)||0; t.impressions+=Number(r.impressions)||0; t.clicks+=Number(r.clicks)||0; t.results+=Number(r.results)||0; }); return t; }
 const OB_CSS='<style>'
   +'.ob-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 14px}'
@@ -88,7 +97,7 @@ const OB_CSS='<style>'
 async function obEntities(platform){
   const out=[];
   for(let from=0;;from+=1000){
-    const {data,error}=await sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,daily_budget,lifetime_budget,thumbnail,body').eq('platform',platform).order('kind').order('id').range(from,from+999);
+    const {data,error}=await sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,objective,daily_budget,lifetime_budget,thumbnail,body').eq('platform',platform).order('kind').order('id').range(from,from+999);
     if(error||!data) break;
     out.push.apply(out,data);
     if(data.length<1000) break;

@@ -166,7 +166,7 @@ function lmStyles(){
   .lm-search input{width:100%;height:36px;padding:0 10px 0 32px;border:1px solid var(--line);border-radius:9px;font:13px inherit;font-family:inherit;background:var(--bg-card,#fff)}
   .lm-count{font-size:12.5px;color:var(--slate);padding:0 4px}
   .lm-test{font-size:11px;font-weight:700;letter-spacing:.04em;padding:4px 9px;border-radius:20px;background:#fef3c7;color:#92400e;border:1px solid #fde68a}
-  .lm-wrap{background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:calc(100vh - 250px);min-height:300px}
+  .lm-wrap{background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:calc(100vh - 250px)}
   #lmTbl{border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:13px;width:max-content;min-width:100%}
   #lmTbl th{position:sticky;background:var(--bg-subtle,#f8fafc);z-index:5;text-align:left;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate);padding:9px 11px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #lmTbl tr.lm-colrow th{top:0;position:sticky}
@@ -941,6 +941,68 @@ window.lmDeleteFile=async function(fileId,caseId){
   toast('File deleted','ok');
   lmDrawFiles(caseId);
 };
+/* UNLINKING A CASE'S FOLDER (6-7 Nov 2026).
+   A case keeps the folder its first files went into, and "Add files" goes straight back there, so a
+   folder picked by mistake - or one whose files were all deleted - could never be let go of. Unlink
+   lets it go, and it is offered whether or not files are still in it: asked for on 7 Nov, unlinking
+   a folder that still holds files DELETES those files (from the case, from Documents and from the
+   file store), after a confirmation that says how many. The matching Documents folder in the Legal
+   vault is deleted too once it is empty (no other documents, no folders inside, no other case using
+   it); otherwise it is left in place and the message says why. Next time files are added, the case
+   asks where they should go again. */
+window.lmRemoveFolder=async function(caseId){
+  const {folders,files}=await lmLoadDocs(caseId);
+  const fo=folders[0]; if(!fo) return;
+  const where=[fo.sub_category,fo.folder_name].filter(Boolean).join(' › ');
+  const n=files.length;
+  if(!await confirmDialog(n
+      ? 'Unlink the folder "'+where+'" from this case? The '+n+' file'+(n===1?'':'s')+' in it will be DELETED - from this case, from Documents and from storage. This cannot be undone.'
+      : 'Unlink the folder "'+where+'" from this case? It has no files. Next time you add files, you will be asked where they should go.',
+      {title:'Unlink folder',icon:'fa-link-slash',okLabel:n?'Unlink and delete '+n+' file'+(n===1?'':'s'):'Unlink',danger:true})) return;
+
+  // 1) The files, one by one, so a refusal is counted rather than hidden.
+  let deleted=0; const failed=[];
+  for(const f of files){
+    const {data:g,error:fe}=await sb.from(MIST('mis_case_files')).delete().eq('id',f.id).select('id');
+    if(fe||!g||!g.length){ failed.push(f.file_name); continue; }
+    deleted++;
+    if(!MIS_IS_TEST){
+      try{ await sb.schema('doc').from('documents').delete().eq('storage_path','s3:'+f.storage_key); }catch(_e){}
+      try{ if(f.store==='s3'||!f.store) await s3Delete('s3:'+f.storage_key); }catch(_e){}
+    }
+  }
+  if(failed.length){
+    toast('Not unlinked: '+failed.length+' file'+(failed.length===1?'':'s')+' could not be deleted ('+failed.slice(0,3).join(', ')+(failed.length>3?'…':'')+')'+(deleted?'. '+deleted+' were deleted.':''),'err');
+    lmDrawFiles(caseId); return;
+  }
+
+  // 2) The Documents folder, only if nothing else is in it.
+  let vault=null, vaultNote='';
+  if(!MIS_IS_TEST&&fo.doc_folder_id){
+    const [{count:docs},{count:kids},{count:others}]=await Promise.all([
+      sb.schema('doc').from('documents').select('id',{count:'exact',head:true}).eq('folder_id',fo.doc_folder_id),
+      sb.schema('doc').from('folders').select('id',{count:'exact',head:true}).eq('parent_id',fo.doc_folder_id),
+      sb.from(MIST('mis_case_folders')).select('id',{count:'exact',head:true}).eq('doc_folder_id',fo.doc_folder_id).neq('id',fo.id)]);
+    if(!docs&&!kids&&!others) vault=fo.doc_folder_id;
+    else vaultNote=' The folder in Documents still holds '+[docs?docs+' other document(s)':'',kids?kids+' folder(s)':'',others?'another case':''].filter(Boolean).join(', ')+', so it stays there.';
+  }
+
+  // 3) The link itself.
+  const {data:gone,error}=await sb.from(MIST('mis_case_folders')).delete().eq('id',fo.id).select('id');
+  if(error||!gone||!gone.length){ toast((deleted?deleted+' file(s) deleted, but ':'')+'the folder could not be unlinked: '+((error&&error.message)||'you may not have permission'),'err'); lmDrawFiles(caseId); return; }
+  let msg='Folder unlinked'+(deleted?' and '+deleted+' file'+(deleted===1?'':'s')+' deleted':'');
+  let warn=false;
+  if(vault){
+    const {data:vg,error:ve}=await sb.schema('doc').from('folders').delete().eq('id',vault).select('id');
+    if(ve||!vg||!vg.length){ msg+=' - the empty folder in Documents could not be deleted ('+((ve&&ve.message)||'no permission')+')'; warn=true; }
+    else msg+='; the empty folder was removed from Documents';
+  }else msg+='.'+vaultNote;
+  if(LM.docFolders) delete LM.docFolders[caseId];
+  if(LM.docVault) delete LM.docVault[caseId];
+  toast(msg,warn?'warn':'ok');
+  try{ usageQueue('legal.mis.case_folder_removed','delete',{case_id:String(caseId),files_deleted:String(deleted)}); }catch(_e){}
+  lmDrawFiles(caseId);
+};
 function lmBytes(n){ n=Number(n)||0; return n>1048576?((n/1048576).toFixed(1)+' MB'):(n>1024?Math.round(n/1024)+' KB':n+' B'); }
 async function lmDrawFiles(caseId){
   const host=$('lmFilesHost'); if(!host) return;
@@ -953,7 +1015,8 @@ async function lmDrawFiles(caseId){
   host.innerHTML='<div class="loader"><div class="spin"></div></div>';
   const {folders,files}=await lmLoadDocs(caseId);
   const fo=folders[0];
-  host.innerHTML=(fo?'<div class="lm-path"><i class="fa-solid fa-folder-open"></i> In <b>'+esc([fo.sub_category,fo.folder_name].filter(Boolean).join(' › '))+'</b></div>':'')
+  host.innerHTML=(fo?'<div class="lm-path" style="display:flex;align-items:center;gap:10px"><span style="flex:1;min-width:0"><i class="fa-solid fa-folder-open"></i> In <b>'+esc([fo.sub_category,fo.folder_name].filter(Boolean).join(' › '))+'</b></span>'
+      +'<button class="btn btn-sm" style="flex:none" title="Unlink this folder from the case'+(files.length?' - its files will be deleted':'')+'" onclick="lmRemoveFolder('+caseId+')"><i class="fa-solid fa-link-slash"></i> Unlink folder</button></div>':'')
     +(files.length?'<div class="lm-files">'+files.map(f=>'<div class="lm-file"><i class="fa-solid fa-file'+(/\.pdf$/i.test(f.file_name)?'-pdf':'')+'" style="color:#dc2626"></i>'
         +'<span class="nm" onclick="s3OpenSigned(\'s3:'+esc(f.storage_key)+'\',\''+esc(String(f.file_name).replace(/'/g,''))+'\')">'+esc(f.file_name)+'</span>'
         +'<span class="sz">'+lmBytes(f.size_bytes)+'</span><button class="x" title="Delete this file" onclick="lmDeleteFile('+f.id+','+caseId+')"><i class="fa-solid fa-trash"></i></button></div>').join('')+'</div>'
