@@ -372,6 +372,7 @@ function stepReview(){
 // ---------------------------------------------------------------- checks per step (the server checks again)
 const PAN_RE=/^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const LABEL={};
+const todayISO=function(){ return new Date().toLocaleDateString('en-CA'); };   // yyyy-mm-dd, the customer's own day
 function check(step){
   ERR={}; MISSING=[];
   const need=function(k,msg,lbl){ if(!String(get(k)||'').trim()){ ERR[k]=msg||'Please fill this in'; MISSING.push([k,lbl||msg]); } };
@@ -381,6 +382,8 @@ function check(step){
     S.applicants.forEach(function(a,i){ const p='applicants.'+i+'.', who=i?'Applicant '+(i+1)+': ':'';
       need(p+'full_name','Please write the full name',who+'Full name'); need(p+'relation_name',null,who+(a.relation==='W/o'?"Husband's":"Father's")+' name');
       if(i===0) need(p+'dob','Please choose the date of birth','Date of birth');
+      if(a.dob&&a.dob>todayISO()) bad(p+'dob','The date of birth cannot be in the future',who+'Date of birth');
+      if(a.anniversary&&a.anniversary>todayISO()) bad(p+'anniversary','The anniversary cannot be in the future',who+'Marriage anniversary');
       const pan=a.pan.toUpperCase(), aad=a.aadhaar.replace(/\s/g,'');
       if(a.nationality==='India'&&!pan) bad(p+'pan','Please write the PAN number',who+'PAN number');
       else if(pan&&!PAN_RE.test(pan)) bad(p+'pan','PAN should look like ABCDE1234F',who+'PAN number');
@@ -407,7 +410,8 @@ function check(step){
   if(step===3) need('flat.block','Please choose the block','Block');
   if(step===4){
     if(!(Number(S.pay.amount)>0)) bad('pay.amount','Please write the amount paid','Amount paid');
-    need('pay.date','Please choose the date','Payment date'); need('pay.ref',null,'Payment reference');
+    need('pay.date','Please choose the date','Payment date');
+    if(S.pay.date&&S.pay.date>todayISO()) bad('pay.date','The payment date cannot be in the future','Payment date'); need('pay.ref',null,'Payment reference');
     if(S.pay.mode==='Cheque'||S.pay.mode==='Demand Draft') need('pay.bank',null,'Bank');
     if(SHOW_SALES_FIELDS&&S.sales!=='Direct') need('sales_name',null,'Agent / channel partner name');
   }
@@ -425,6 +429,7 @@ function render(){
   $('missing').innerHTML=MISSING.length?'<div class="miss"><b>Still missing on this page ('+MISSING.length+'):</b><ul>'+MISSING.map(function(m){ return '<li data-jump="'+fid(m[0])+'">'+esc(m[1])+'</li>'; }).join('')+'</ul></div>':'';
   $('app').innerHTML=[stepApplicants,stepContact,stepAbout,stepFlat,stepPay,stepDocs,stepTerms,stepReview][st]();
   if(st===6) mountInlineSigner();
+  document.querySelectorAll('input[type=date]').forEach(function(i){ i.max=todayISO(); });
   $('nav').innerHTML='<div class="in">'+(st?'<button type="button" class="btn sec2" data-back="1">Back</button>':'')
     +'<button type="button" class="btn pri" id="nextBtn" data-next="1">'+(st===STEPS.length-1?'Submit booking form':'Continue')+'</button></div>'
     +'<div class="saved">Your answers are saved on this device as you go.</div>';
@@ -571,12 +576,12 @@ function suggest(k,q){
 document.addEventListener('input',function(e){
   const k=e.target.getAttribute&&e.target.getAttribute('data-k'); if(!k) return;
   let v=e.target.value;
-  if(/\.(pan|passport)$|flat_no$|pay\.ref$/.test(k)) v=v.toUpperCase();
+  if(/\.(pan|passport|full_name|relation_name|spouse)$|flat_no$|pay\.ref$/.test(k)) v=v.toUpperCase();
   if(/aadhaar$/.test(k)){ const d=v.replace(/\D/g,'').slice(0,12); v=d.replace(/(\d{4})(?=\d)/g,'$1 '); }
   if(/(price\.total|pay\.amount)$/.test(k)) v=v.replace(/[^\d]/g,'');
   if(/price\.(sba|basic|plc|flc)$/.test(k)) v=v.replace(/[^\d.]/g,'').replace(/(\..*)\./g,'$1');
   if(/\.pin$/.test(k)) v=v.replace(/\D/g,'').slice(0,6);
-  if(v!==e.target.value){ e.target.value=v; try{ e.target.setSelectionRange(v.length,v.length); }catch(_e){} }
+  if(v!==e.target.value){ const same=v.length===e.target.value.length, pos=same?e.target.selectionStart:v.length; e.target.value=v; try{ e.target.setSelectionRange(pos,pos); }catch(_e){} }
   set(k,v);
   if(k==='pay.amount'){ const w=$('w-amount'); if(w) w.textContent=words(v); }
   if(k==='price.total'){ const w=$('w-total'); if(w) w.textContent=words(v); }
@@ -654,7 +659,9 @@ async function submit(){
     window.scrollTo(0,0);
   }catch(e){
     btn.disabled=false; btn.textContent='Submit booking form';
-    alert(e.message||'Could not send. Please check your internet and try again.');
+    const msg=e.message||'Could not send. Please check your internet and try again.';
+    $('missing').innerHTML='<div class="miss"><b>The form could not be sent</b><ul><li style="cursor:default;text-decoration:none">'+esc(msg)+'</li><li style="cursor:default;text-decoration:none">Your answers are still saved on this device - press Submit again.</li></ul></div>';
+    window.scrollTo({top:0,behavior:'smooth'}); toast('The form could not be sent','err');
   }
 }
 
