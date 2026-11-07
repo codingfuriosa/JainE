@@ -333,9 +333,13 @@ function stepTerms(){
       +'<label class="agree'+(ERR.terms_accepted?' bad':'')+'" id="f-terms_accepted"><input type="checkbox" data-check="terms_accepted"'+(S.terms_accepted?' checked':'')+'><span><b>I/We have read and agree to all the above.</b><br><span style="color:var(--slate);font-size:13px">I/We confirm that everything in this form is true.</span><div class="err">'+esc(ERR.terms_accepted||'')+'</div></span></label>')
     +card('','','Signature','To be signed by '+esc(a.full_name||'the first applicant')+'.',
       wrapF('sig','Signature of the first applicant',{full:1,req:1},
-        '<button type="button" class="sigbox'+(SIG?' has':'')+'" data-opensig="1">'
-          +(SIG?'<img src="'+SIG+'" alt="Signature"><span class="again">Sign again</span>'
-               :ICON.pen+'<b>Tap here to sign</b><small>A large signing pad opens</small>')+'</button>')
+        (sigInline()
+          ?(SIG?'<div class="sigdone"><img src="'+SIG+'" alt="Signature"><button type="button" class="btn sec2" data-sgclear="1">Sign again</button></div>'
+               :'<div class="sigpad" id="sigpad"><div class="sg-area"><canvas></canvas><div class="sg-line"></div><div class="sg-ph">Sign here with your mouse</div></div>'
+                 +'<div class="sgbar"><span class="sgstat" id="sgstat">Draw your signature in the box</span><button type="button" class="btn sec2" data-sgclear="1">Clear</button></div></div>')
+          :'<button type="button" class="sigbox'+(SIG?' has':'')+'" data-opensig="1">'
+            +(SIG?'<img src="'+SIG+'" alt="Signature"><span class="again">Sign again</span>'
+                 :ICON.pen+'<b>Tap here to sign</b><small>A large signing pad opens</small>')+'</button>'))
       +'<p style="color:var(--slate);font-size:13px;margin:12px 0 0">Place: '+esc(S.res.city||'—')+' · Date: '+new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+'</p>');
 }
 function rows(pairs){ return '<table class="rv">'+pairs.filter(function(p){ return p[1]!==''&&p[1]!=null; }).map(function(p){ return '<tr><td>'+esc(p[0])+'</td><td>'+esc(p[1])+'</td></tr>'; }).join('')+'</table>'; }
@@ -410,7 +414,7 @@ function check(step){
   if(step===5) S.applicants.forEach(function(a,i){ if(a.nationality!=='India') return; const who=(a.full_name||('Applicant '+(i+1)))+': ';
     if(!FILES[i].pan.length) bad('doc.'+i+'.pan','Please attach the PAN card',who+'PAN card');
     if(!FILES[i].aadhaar.length) bad('doc.'+i+'.aadhaar','Please attach the Aadhaar card',who+'Aadhaar card'); });
-  if(step===6){ if(!S.terms_accepted) bad('terms_accepted','Please tick to accept the terms','Accept the terms'); if(!SIG) bad('sig','Please tap "Tap here to sign" and sign','Signature'); }
+  if(step===6){ if(!S.terms_accepted) bad('terms_accepted','Please tick to accept the terms','Accept the terms'); if(!SIG) bad('sig',sigInline()?'Please sign in the signature box':'Please tap "Tap here to sign" and sign','Signature'); }
   return !MISSING.length;
 }
 
@@ -420,6 +424,7 @@ function render(){
   $('steps').innerHTML='<div class="lbl"><b>'+STEPS[st][0]+'</b><span>Step '+(st+1)+' of '+STEPS.length+'</span></div><div class="bar"><i style="width:'+Math.round((st+1)/STEPS.length*100)+'%"></i></div>';
   $('missing').innerHTML=MISSING.length?'<div class="miss"><b>Still missing on this page ('+MISSING.length+'):</b><ul>'+MISSING.map(function(m){ return '<li data-jump="'+fid(m[0])+'">'+esc(m[1])+'</li>'; }).join('')+'</ul></div>':'';
   $('app').innerHTML=[stepApplicants,stepContact,stepAbout,stepFlat,stepPay,stepDocs,stepTerms,stepReview][st]();
+  if(st===6) mountInlineSigner();
   $('nav').innerHTML='<div class="in">'+(st?'<button type="button" class="btn sec2" data-back="1">Back</button>':'')
     +'<button type="button" class="btn pri" id="nextBtn" data-next="1">'+(st===STEPS.length-1?'Submit booking form':'Continue')+'</button></div>'
     +'<div class="saved">Your answers are saved on this device as you go.</div>';
@@ -441,15 +446,10 @@ function showErrors(){
      - strokes are kept as fractions of the pad, so rotating the phone or resizing the window just
        redraws them at the new size; the page behind cannot scroll while signing
      - Done trims the empty space around the signature and keeps it as a sharp PNG (SIG) */
-function openSigner(){
-  const a=S.applicants[0];
-  const ov=document.createElement('div'); ov.className='signer';
-  ov.innerHTML='<div class="sg-top"><div><b>Sign here</b><small>'+esc(a.full_name||'First applicant')+' · use your finger or mouse</small></div>'
-    +'<button type="button" class="sg-x" data-sg="cancel" aria-label="Close">×</button></div>'
-    +'<div class="sg-area"><canvas></canvas><div class="sg-line"></div><div class="sg-ph">Sign above the line</div></div>'
-    +'<div class="sg-bot"><button type="button" class="btn sec2" data-sg="clear">Clear</button><button type="button" class="btn pri" data-sg="done">Done</button></div>';
-  document.body.appendChild(ov); document.documentElement.classList.add('noscroll');
-  const area=ov.querySelector('.sg-area'), c=ov.querySelector('canvas'), ph=ov.querySelector('.sg-ph');
+/* The pen: draws on a canvas inside the area, keeps the strokes, and can give back the trimmed signature as a PNG.
+   onChange (optional) is called whenever a stroke ends or the pad is cleared. Used by the full-screen pad (phones, touch)
+   and by the inline box on the Terms page (laptop with a mouse). */
+function penPad(area,c,ph,onChange){
   const g=c.getContext('2d');
   const INK='#0f2a6b';
   let strokes=[], cur=null, W=0, Hh=0, frame=0, last=null;
@@ -467,7 +467,7 @@ function openSigner(){
     const l=s[s.length-1]; ctx.lineTo(l.x*w,l.y*h); ctx.stroke();
   }
   function paint(){ frame=0; g.clearRect(0,0,W,Hh); const lw=penWidth(W); strokes.forEach(function(s){ path(g,s,W,Hh,lw); }); if(cur&&cur.length) path(g,cur,W,Hh,lw);
-    ph.style.display=strokes.length||(cur&&cur.length)?'none':''; }
+    if(ph) ph.style.display=strokes.length||(cur&&cur.length)?'none':''; }
   const later=function(){ if(!frame) frame=requestAnimationFrame(paint); };
   function at(e){ const b=c.getBoundingClientRect(); return {x:(e.clientX-b.left)/b.width,y:(e.clientY-b.top)/b.height}; }
   function add(p){
@@ -488,29 +488,62 @@ function openSigner(){
   c.addEventListener('pointerrawupdate',function(e){ if(!cur||e.pointerId!==pid) return; raw=true; move(e); });
   c.addEventListener('pointermove',function(e){ if(raw) return; move(e); });
   const end=function(e){ if(!cur||(e&&e.pointerId!=null&&e.pointerId!==pid)) return; if(e&&e.type==='pointerup'){ const p=at(e); if(p.x>=0&&p.y>=0&&p.x<=1&&p.y<=1&&cur.length) cur.push(p); }
-    if(cur.length) strokes.push(cur); cur=null; last=null; paint(); };
+    if(cur.length) strokes.push(cur); cur=null; last=null; paint(); if(onChange) onChange(); };
   c.addEventListener('pointerup',end); c.addEventListener('pointercancel',end); c.addEventListener('lostpointercapture',end);
   ['touchstart','touchmove'].forEach(function(t){ c.addEventListener(t,function(e){ e.preventDefault(); },{passive:false}); });
   const onResize=function(){ size(); }; window.addEventListener('resize',onResize);
-  const close=function(){ window.removeEventListener('resize',onResize); ov.remove(); document.documentElement.classList.remove('noscroll'); };
-  ov.addEventListener('click',function(e){
-    const b=e.target.closest('[data-sg]'); if(!b) return; const k=b.getAttribute('data-sg');
-    if(k==='cancel') close();
-    else if(k==='clear'){ strokes=[]; cur=null; paint(); }
-    else if(k==='done'){
+  requestAnimationFrame(size);
+  return {
+    clear:function(){ strokes=[]; cur=null; paint(); if(onChange) onChange(); },
+    destroy:function(){ window.removeEventListener('resize',onResize); },
+    // trimmed to the signature with a margin, drawn twice as large for a sharp image; null if nothing (much) is drawn yet
+    toPNG:function(){
       const pts=[].concat.apply([],strokes);
-      if(pts.length<6){ toast('Please sign above the line first'); return; }
-      // trimmed to the signature with a margin, drawn twice as large for a sharp image
+      if(pts.length<6) return null;
       let x0=1,y0=1,x1=0,y1=0; pts.forEach(function(p){ x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x); y1=Math.max(y1,p.y); });
       const SW=W*2, SH=Hh*2, pad=24, o=document.createElement('canvas');
       o.width=Math.ceil((x1-x0)*SW+pad*2); o.height=Math.ceil((y1-y0)*SH+pad*2);
       const og=o.getContext('2d'); og.translate(pad-x0*SW,pad-y0*SH);
       strokes.forEach(function(s){ path(og,s,SW,SH,penWidth(W)*2); });
-      SIG=o.toDataURL('image/png'); delete ERR.sig; MISSING=MISSING.filter(function(m){ return m[0]!=='sig'; });
+      return o.toDataURL('image/png');
+    }
+  };
+}
+// The full-screen pad (phones, touch screens)
+function openSigner(){
+  const a=S.applicants[0];
+  const ov=document.createElement('div'); ov.className='signer';
+  ov.innerHTML='<div class="sg-top"><div><b>Sign here</b><small>'+esc(a.full_name||'First applicant')+' · use your finger or mouse</small></div>'
+    +'<button type="button" class="sg-x" data-sg="cancel" aria-label="Close">×</button></div>'
+    +'<div class="sg-area"><canvas></canvas><div class="sg-line"></div><div class="sg-ph">Sign above the line</div></div>'
+    +'<div class="sg-bot"><button type="button" class="btn sec2" data-sg="clear">Clear</button><button type="button" class="btn pri" data-sg="done">Done</button></div>';
+  document.body.appendChild(ov); document.documentElement.classList.add('noscroll');
+  const pad=penPad(ov.querySelector('.sg-area'),ov.querySelector('canvas'),ov.querySelector('.sg-ph'),null);
+  const close=function(){ pad.destroy(); ov.remove(); document.documentElement.classList.remove('noscroll'); };
+  ov.addEventListener('click',function(e){
+    const b=e.target.closest('[data-sg]'); if(!b) return; const k=b.getAttribute('data-sg');
+    if(k==='cancel') close();
+    else if(k==='clear') pad.clear();
+    else if(k==='done'){
+      const png=pad.toPNG();
+      if(!png){ toast('Please sign above the line first'); return; }
+      SIG=png; delete ERR.sig; MISSING=MISSING.filter(function(m){ return m[0]!=='sig'; });
       close(); render(); const f=$('f-sig'); if(f) f.scrollIntoView({block:'center'});
     }
   });
-  requestAnimationFrame(size);
+}
+// The inline box (laptop / desktop with a mouse): sign straight on the page, saved as the pen lifts, no pop-up and no Done.
+let INLINE_PAD=null;
+function sigInline(){ return !!(window.matchMedia&&window.matchMedia('(min-width:1000px) and (pointer:fine)').matches); }
+function mountInlineSigner(){
+  if(INLINE_PAD){ INLINE_PAD.destroy(); INLINE_PAD=null; }
+  const box=document.getElementById('sigpad'); if(!box) return;
+  const st=document.getElementById('sgstat');
+  INLINE_PAD=penPad(box.querySelector('.sg-area'),box.querySelector('canvas'),box.querySelector('.sg-ph'),function(){
+    const png=INLINE_PAD.toPNG(); SIG=png||null;
+    if(png){ delete ERR.sig; MISSING=MISSING.filter(function(m){ return m[0]!=='sig'; }); const f=$('f-sig'); if(f) f.classList.remove('bad'); }
+    if(st) st.textContent=png?'Signature saved':'Draw your signature in the box';
+  });
 }
 
 // ---------------------------------------------------------------- address suggestions (Photon / OpenStreetMap)
@@ -575,6 +608,7 @@ document.addEventListener('click',function(e){
   /* Remove asks inside the page (a browser pop-up can be blocked or hidden, and then the button seems dead). */
   if(b.dataset.rm){ const i=+b.dataset.rm;
     b.outerHTML='<span class="rmask">'+(i?'':'The next person becomes the first applicant. ')+'Remove? <button type="button" class="rm" data-rmyes="'+i+'">Yes, remove</button> <button type="button" class="rm keep" data-rmno="1">Keep</button></span>'; return; }
+  if(b.dataset.sgclear){ if(INLINE_PAD&&!SIG) INLINE_PAD.clear(); else { SIG=null; render(); } return; }
   if(b.dataset.sp){ SPOUSE_OPEN=!SPOUSE_OPEN; render();
     if(SPOUSE_OPEN){ const sp=document.querySelector('[data-k="applicants.0.spouse"]'); if(sp){ const box=sp.closest('.spx'); if(box) box.scrollIntoView({behavior:'smooth',block:'center'}); sp.focus({preventScroll:true}); } }
     return; }

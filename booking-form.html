@@ -160,6 +160,10 @@
   .sigbox b{font-size:15px;font-weight:600;color:var(--ink)}.sigbox small{color:var(--slate);font-size:12.5px}
   .sigbox.has{border-style:solid;border-color:var(--line);background:#fff}
   .sigbox.has img{max-width:100%;max-height:120px;object-fit:contain}
+  .sigpad .sg-area{position:relative;flex:none;margin:0;height:200px;border:1.5px solid #b9bec7;border-radius:8px;background:#fff;overflow:hidden;touch-action:none}
+  .bad .sigpad .sg-area{border-color:var(--err)}
+  .sgbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:8px}.sgstat{font-size:13px;color:var(--slate)}
+  .sigdone{display:flex;align-items:center;justify-content:space-between;gap:14px;border:1.5px solid #b9bec7;border-radius:8px;padding:10px 14px;background:#fff}.sigdone img{max-height:90px;max-width:60%;object-fit:contain}
   .sigbox .again{font-size:13px;font-weight:500;color:var(--brand-dark);margin-top:4px}
   html.noscroll,html.noscroll body{overflow:hidden;height:100%;overscroll-behavior:none}
   .signer{position:fixed;inset:0;z-index:100;background:#fff;display:flex;flex-direction:column;touch-action:none}
@@ -308,6 +312,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107u"></script>
+<script src="booking-form.js?v=20261107v"></script>
 </body>
 </html>
