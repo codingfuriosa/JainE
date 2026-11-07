@@ -23,7 +23,14 @@
 const FN='https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/booking-form-public';
 const PROJECT=(new URLSearchParams(location.search).get('p')||'ananta').toLowerCase();
 const CONF={ananta:{name:'Dream Ananta',company:'Dream Gateway Hotels Ltd.',blocks:['Block D','Block E'],floors:8,
-  bhk:['2 BHK','3 BHK','4 BHK'],bhkDefault:'3 BHK'}}[PROJECT];
+  bhk:['2 BHK','3 BHK','4 BHK'],bhkDefault:'3 BHK',showRate:false}}[PROJECT];
+/* A GENERATED LINK (booking-form.html?t=<token>, made by Sales with "Generate Form", 7 Nov 2026): the same page for everybody.
+   The server holds what Sales filled in (LOCK = those answers: shown, never editable) and the customer's draft, which is saved
+   on the server as they go - so closing the tab and opening the link again lands on the same step with everything filled.
+   LINK is set once the server has opened it. The open link (?p=ananta) works as before, with answers kept on the phone. */
+const TOKEN=(new URLSearchParams(location.search).get('t')||'').trim().toLowerCase();
+let LINK=null;
+const LOCK=new Set();
 const DRAFT_KEY='jg-booking-form-'+PROJECT+'-v2';
 const MAX_APPS=6, MAX_REASONS=5;
 const STEPS=[['Applicant details'],['Contact & address'],['Occupation & source'],['Unit details'],['Booking amount'],['KYC documents'],['Terms & signature'],['Review & submit']];
@@ -52,7 +59,7 @@ function fresh(){ return {project:PROJECT,step:0,applicants:[newApp()],
   price:{sba:'',basic:'',plc:'',flc:'',rate:'',total:'',loan:'No',bank:'',plan:'Construction Linked'},
   pay:{mode:'UPI / NEFT / RTGS',amount:'',ref:'',bank:'',branch:'',date:''},
   purpose:'Residential',sales:'Direct',sales_name:'',lead_id:'',terms_accepted:false}; }
-let S; try{ const d=JSON.parse(localStorage.getItem(DRAFT_KEY)||'null')||{}, f=fresh(); S=Object.assign(f,d); ['price','profession'].forEach(function(k){ S[k]=Object.assign(fresh()[k],d[k]||{}); }); }catch(e){ S=fresh(); }
+let S; if(TOKEN) S=fresh(); else try{ const d=JSON.parse(localStorage.getItem(DRAFT_KEY)||'null')||{}, f=fresh(); S=Object.assign(f,d); ['price','profession'].forEach(function(k){ S[k]=Object.assign(fresh()[k],d[k]||{}); }); }catch(e){ S=fresh(); }
 if(!Array.isArray(S.applicants)||!S.applicants.length) S.applicants=[newApp()];
 if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
 // Files and the signature live only in this page (too big for the draft).
@@ -64,7 +71,7 @@ let SPOUSE_OPEN=!!(S.applicants[0]&&(S.applicants[0].spouse||S.applicants[0].ann
 let ERR={}, MISSING=[];
 const $=function(id){ return document.getElementById(id); };
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
-function save(){ try{ localStorage.setItem(DRAFT_KEY,JSON.stringify(S)); }catch(e){} }
+function save(){ if(LINK){ scheduleSync(); return; } try{ localStorage.setItem(DRAFT_KEY,JSON.stringify(S)); }catch(e){} }
 function get(path){ return path.split('.').reduce(function(o,k){ return o==null?o:o[k]; },S); }
 function set(path,v){ const ks=path.split('.'); let o=S; for(let i=0;i<ks.length-1;i++) o=o[ks[i]]; o[ks[ks.length-1]]=v; save(); }
 function toast(m){ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(function(){ t.remove(); },2600); }
@@ -80,15 +87,17 @@ function card(icon,color,title,hint,body){
 const ICON={
   camera:'<svg class="i" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg>',
   pen:'<svg class="i" viewBox="0 0 24 24"><path d="M16.5 3.5l4 4L8 20H4v-4z"/><path d="M14 6l4 4"/></svg>',
-  check:'<svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'};
+  check:'<svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  lock:'<svg class="lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>'};
 function wrapF(path,label,o,inner){
-  return '<div class="f'+(o.full?' full':'')+(o.req?' need':'')+(ERR[path]?' bad':'')+'" id="'+fid(path)+'"><label>'+esc(label)
+  return '<div class="f'+(o.full?' full':'')+(o.wide?' wide':'')+(LOCK.has(path)?' locked':'')+(o.req?' need':'')+(ERR[path]?' bad':'')+'" id="'+fid(path)+'"><label>'+esc(label)+(LOCK.has(path)?ICON.lock:'')
     +(o.req?' <span class="req">*</span>':(o.optional?' <span class="opt">(optional)</span>':''))+(o.note?' <span class="opt">'+esc(o.note)+'</span>':'')+'</label>'
     +inner+'<div class="err">'+esc(ERR[path]||'')+'</div></div>';
 }
 function field(path,label,o){
   o=o||{}; const v=get(path);
-  const ph=' placeholder="'+esc(o.ph||' ')+'"';
+  const ro=LOCK.has(path)?' readonly tabindex="-1"':'';
+  const ph=' placeholder="'+esc(LOCK.has(path)&&!v?'Set by our team':(o.ph||' '))+'"'+ro;
   const ctl=o.type==='area'?'<textarea data-k="'+path+'"'+ph+'>'+esc(v)+'</textarea>'
     :'<input type="'+(o.type||'text')+'" data-k="'+path+'" value="'+esc(v)+'"'+ph+(o.cls?' class="'+o.cls+'"':'')
       +(o.mode?' inputmode="'+o.mode+'"':'')+(o.max?' maxlength="'+o.max+'"':'')+' autocomplete="'+(o.auto||'off')+'"'+(o.req&&o.type==='date'?' required':'')+'>';
@@ -100,7 +109,7 @@ function chips(path,label,options,o){
   o=o||{}; const v=get(path);
   return wrapF(path,label,Object.assign({full:o.full!==false},o),'<div class="chips'+(o.num?' num':'')+'" role="radiogroup">'
     +options.map(function(x){ const val=Array.isArray(x)?x[0]:x, txt=Array.isArray(x)?x[1]:x;
-      return '<button type="button" class="chip'+(v===val?' on':'')+'" role="radio" aria-checked="'+(v===val)+'" data-chip="'+path+'" data-v="'+esc(val)+'">'+esc(txt)+'</button>'; }).join('')+'</div>');
+      return '<button type="button" class="chip'+(v===val?' on':'')+'" role="radio" aria-checked="'+(v===val)+'" data-chip="'+path+'" data-v="'+esc(val)+'"'+(LOCK.has(path)?' disabled':'')+'>'+esc(txt)+'</button>'; }).join('')+'</div>');
 }
 // A dropdown that looks like the rest of the form: a button that opens a list (a sheet on phones).
 function pick(path,label,kind,o){
@@ -109,7 +118,7 @@ function pick(path,label,kind,o){
   if(kind==='country'){ const c=byName(v); shown=(c?'<img class="flag" src="'+flagUrl(c[1])+'" alt="">':'')+'<span class="v">'+esc(v)+'</span>'; }
   else if(kind==='dial'){ const c=byDial(v); shown=(c?'<img class="flag" src="'+flagUrl(c[1])+'" alt="">':'')+'<span class="v">'+esc(v)+'</span>'; }
   else shown='<span class="v">'+shown+'</span>';
-  const btn='<button type="button" class="pick" data-pick="'+path+'" data-kind="'+kind+'">'+shown+'</button>';
+  const btn='<button type="button" class="pick" data-pick="'+path+'" data-kind="'+kind+'"'+(LOCK.has(path)?' disabled':'')+'>'+shown+'</button>';
   return o.bare?btn:wrapF(path,label,o,btn);
 }
 function openSheet(path,kind){
@@ -142,7 +151,7 @@ function stepApplicants(){
          who they are, then their ID documents, then (first applicant only, folded away) family. */
       const F={full:1};
       return '<div class="app"><div class="ah"><span class="num">'+(i+1)+'</span><b>'+(i?'Joint applicant':'First / sole applicant')+'</b>'
-          +(S.applicants.length>1?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
+          +(S.applicants.length>1&&!(LINK&&i===0)?'<button type="button" class="rm" data-rm="'+i+'">Remove</button>':'')+'</div>'
         +'<div class="grp g1">Personal details</div><div class="stack s1">'
         +chips(p+'title','Title',['Mr.','Ms.','Mrs.','Mast.','M/s.'],{sm:1,mcols:5})
         +field(p+'full_name','Full name (as on PAN card)',{req:1,full:1,cls:'up',auto:i?'off':'name'})
@@ -221,7 +230,15 @@ function stepAbout(){
 }
 function stepFlat(){
   const floors=[]; for(let i=1;i<=(CONF.floors||8);i++) floors.push(String(i));
-  return card('','','Unit selection','As discussed with our sales team. The flat number may be left blank if not yet allotted.',
+  const agreed=LINK?'As agreed with our sales team.':null;
+  const rate=CONF.showRate?'<div class="f full"><label>Rate per sq.ft. (₹)</label>'
+        +'<div class="rate">'
+          +'<div class="f">'+'<label class="sub">Basic</label><input type="text" inputmode="decimal" data-k="price.basic" value="'+esc(S.price.basic)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
+          +'<div class="f">'+'<label class="sub">PLC</label><input type="text" inputmode="decimal" data-k="price.plc" value="'+esc(S.price.plc)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
+          +'<div class="f">'+'<label class="sub">FLC</label><input type="text" inputmode="decimal" data-k="price.flc" value="'+esc(S.price.flc)+'" placeholder=" " autocomplete="off"></div><span class="op">=</span>'
+          +'<div class="f">'+'<label class="sub">Total</label><div class="sum" id="w-rate">'+esc(rateTotal()?('₹'+fmtN(rateTotal())):'—')+'</div></div>'
+        +'</div><div class="words">PLC: preferential location charge · FLC: floor rise charge</div></div>':'';
+  return card('','','Unit selection',agreed||'As discussed with our sales team. The flat number may be left blank if not yet allotted.',
       '<div class="pn2">'
       +'<div class="pnl"><div class="grp">Location</div><div class="stack">'
       +chips('flat.block','Block',CONF.blocks,{req:1})
@@ -233,24 +250,16 @@ function stepFlat(){
       +chips('flat.parking','Right to use car park',['Covered','Open'])
       +'</div></div>'
       +'</div>')
-    +card('','','Area & rate','Optional',
+    +card('','','Area & price',agreed||'Optional',
       '<div class="grid">'
       +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1})
-      +'<div class="f full"><label>Rate per sq.ft. (₹)</label>'
-        +'<div class="rate">'
-          +'<div class="f">'+'<label class="sub">Basic</label><input type="text" inputmode="decimal" data-k="price.basic" value="'+esc(S.price.basic)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
-          +'<div class="f">'+'<label class="sub">PLC</label><input type="text" inputmode="decimal" data-k="price.plc" value="'+esc(S.price.plc)+'" placeholder=" " autocomplete="off"></div><span class="op">+</span>'
-          +'<div class="f">'+'<label class="sub">FLC</label><input type="text" inputmode="decimal" data-k="price.flc" value="'+esc(S.price.flc)+'" placeholder=" " autocomplete="off"></div><span class="op">=</span>'
-          +'<div class="f">'+'<label class="sub">Total</label><div class="sum" id="w-rate">'+esc(rateTotal()?('₹'+fmtN(rateTotal())):'—')+'</div></div>'
-        +'</div><div class="words">PLC: preferential location charge · FLC: floor rise charge</div></div></div>')
-    +card('','','Sale price','Optional',
-      '<div class="grid">'
-      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div><div class="words" id="w-calc">'+esc(calcHint())+'</div>'})+'</div>')
+      +rate
+      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div>'+(CONF.showRate?'<div class="words" id="w-calc">'+esc(calcHint())+'</div>':'')})+'</div>')
     +card('','','Payment plan & home loan','',
       '<div class="grid">'
       +chips('price.plan','Payment plan',['Construction Linked','Down Payment'])
       +chips('price.loan','Home loan required?',['No','Yes'])
-      +(S.price.loan==='Yes'?field('price.bank','Preferred bank / institution',{optional:1,full:1}):'')+'</div>');
+      +(S.price.loan==='Yes'?field('price.bank','Preferred bank / institution',{optional:1,full:1,wide:1}):'')+'</div>');
 }
 /* 7 Nov 2026: "Name of our sales person" and "Lead ID" are hidden for now (not usually something the customer knows) -
    the user asked to keep reminding about it. To bring them back, set this to true. */
@@ -288,7 +297,7 @@ function words(n){
 }
 function fileList(i,kind){
   return FILES[i][kind].map(function(f,n){
-    const img=/^image\//.test(f.type)?'<img src="'+URL.createObjectURL(f)+'" alt="">':'<div class="pdf">PDF</div>';
+    const img=f.saved?'<div class="pdf">'+(f.ext==='pdf'?'PDF':'IMG')+'</div>':/^image\//.test(f.type)?'<img src="'+URL.createObjectURL(f)+'" alt="">':'<div class="pdf">PDF</div>';
     return '<div class="file">'+img+'<span>'+esc(f.name)+'</span><button type="button" data-delfile="'+i+'|'+kind+'|'+n+'" aria-label="Remove">×</button></div>';
   }).join('');
 }
@@ -443,7 +452,7 @@ function render(){
   document.querySelectorAll('input[type=date]').forEach(function(i){ i.max=todayISO(); });
   $('nav').innerHTML='<div class="in">'+(st?'<button type="button" class="btn sec2" data-back="1">Back</button>':'')
     +'<button type="button" class="btn pri" id="nextBtn" data-next="1">'+(st===STEPS.length-1?'Submit booking form':'Continue')+'</button></div>'
-    +'<div class="saved">Your answers are saved on this device as you go.</div>';
+    +'<div class="saved">'+(LINK?'Your answers are saved as you go - you can close this page and open the same link later to carry on.':'Your answers are saved on this device as you go.')+'</div>';
 }
 function go(n){ S.step=Math.max(0,Math.min(STEPS.length-1,n)); save(); ERR={}; MISSING=[]; render(); window.scrollTo(0,0); }
 function showErrors(){
@@ -543,7 +552,7 @@ function openSigner(){
     else if(k==='done'){
       const png=pad.toPNG();
       if(!png){ toast('Please sign above the line first'); return; }
-      SIG=png; delete ERR.sig; MISSING=MISSING.filter(function(m){ return m[0]!=='sig'; });
+      SIG=png; sigChanged(); delete ERR.sig; MISSING=MISSING.filter(function(m){ return m[0]!=='sig'; });
       close(); render(); const f=$('f-sig'); if(f) f.scrollIntoView({block:'center'});
     }
   });
@@ -556,7 +565,7 @@ function mountInlineSigner(){
   const box=document.getElementById('sigpad'); if(!box) return;
   const st=document.getElementById('sgstat');
   INLINE_PAD=penPad(box.querySelector('.sg-area'),box.querySelector('canvas'),box.querySelector('.sg-ph'),function(){
-    const png=INLINE_PAD.toPNG(); SIG=png||null;
+    const png=INLINE_PAD.toPNG(); SIG=png||null; sigChanged();
     if(png){ delete ERR.sig; MISSING=MISSING.filter(function(m){ return m[0]!=='sig'; }); const f=$('f-sig'); if(f) f.classList.remove('bad'); }
     if(st) st.textContent=png?'Signature saved':'Draw your signature in the box';
   });
@@ -583,9 +592,85 @@ function suggest(k,q){
   },350);
 }
 
+// ---------------------------------------------------------------- generated link: saved on our server as the customer goes
+let SYNC_T=null, SYNC_BUSY=false, SYNC_AGAIN=false, SIG_SENT=null, SYNC_FAIL=0;
+function setSaved(txt,bad){ const e=document.querySelector('#nav .saved'); if(e){ e.textContent=txt; e.style.color=bad?'var(--err)':''; } }
+function sigChanged(){ if(LINK) scheduleSync(); }
+function scheduleSync(){ if(!LINK) return; clearTimeout(SYNC_T); SYNC_T=setTimeout(function(){ doSync(false); },900); setSaved('Saving…'); }
+// The files kept on the server, as the customer has them now (which applicant, which document).
+function fileMeta(){ const out=[]; FILES.forEach(function(f,i){ ['pan','aadhaar'].forEach(function(k){ f[k].forEach(function(x){ if(x.saved) out.push({id:x.id,applicant:i,kind:k}); }); }); }); return out; }
+async function doSync(keep){
+  if(!LINK) return;
+  if(SYNC_BUSY){ SYNC_AGAIN=true; return; }
+  clearTimeout(SYNC_T); SYNC_BUSY=true;
+  const body={action:'save',token:TOKEN,data:S,step:S.step,files:fileMeta()};
+  if(SIG!==SIG_SENT) body.sig=SIG;
+  const txt=JSON.stringify(body);
+  try{
+    const r=await fetch(FN,{method:'POST',headers:{'Content-Type':'application/json'},body:txt,keepalive:!!keep&&txt.length<60000});
+    const jj=await r.json().catch(function(){ return {}; });
+    if(r.status===404||r.status===409){ LINK=null; setSaved(jj.error||'This form is closed.',true); SYNC_BUSY=false; return; }
+    if(!r.ok||!jj.ok) throw new Error(jj.error||('error '+r.status));
+    SIG_SENT=body.sig!==undefined?body.sig:SIG_SENT; SYNC_FAIL=0;
+    setSaved('Saved '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}));
+  }catch(e){ SYNC_FAIL++; setSaved('Could not save just now - trying again',true); SYNC_T=setTimeout(function(){ doSync(false); },Math.min(15000,3000*SYNC_FAIL)); }
+  SYNC_BUSY=false; if(SYNC_AGAIN){ SYNC_AGAIN=false; scheduleSync(); }
+}
+document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden') doSync(true); });
+window.addEventListener('pagehide',function(){ doSync(true); });
+async function uploadKyc(ai,kind,file){
+  toast('Uploading '+file.name+'…');
+  const fd=new FormData(); fd.append('action','upload'); fd.append('token',TOKEN); fd.append('applicant',String(ai)); fd.append('kind',kind); fd.append('file',file,file.name);
+  try{
+    const r=await fetch(FN,{method:'POST',body:fd}); const jj=await r.json().catch(function(){ return {}; });
+    if(!r.ok||!jj.ok) throw new Error(jj.error||'The file did not upload - please try again');
+    if(FILES[ai]) FILES[ai][kind].push({saved:true,id:jj.file.id,name:jj.file.name,ext:jj.file.ext});
+    delete ERR['doc.'+ai+'.'+kind]; render(); scheduleSync();
+  }catch(e){ toast(e.message||'The file did not upload - please try again'); }
+}
+function getIn(o,path){ return path.split('.').reduce(function(x,k){ return x==null?x:x[k]; },o); }
+function setIn(o,path,v){ const ks=path.split('.'); let c=o; for(let i=0;i<ks.length-1;i++){ if(c[ks[i]]==null||typeof c[ks[i]]!=='object') c[ks[i]]=/^\d+$/.test(ks[i+1])?[]:{}; c=c[ks[i]]; } c[ks[ks.length-1]]=v; }
+function showDone(ref){
+  $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
+  $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Thank you! Your booking form has been received.</h2>'
+    +'<p style="color:var(--slate);margin-top:8px">Your reference number</p><div class="ref">'+esc(ref)+'</div>'
+    +'<p style="color:var(--slate)">Please keep this number. Our team will call you shortly to confirm your booking.</p></div></div>';
+  window.scrollTo(0,0);
+}
+function linkMessage(msg){
+  $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
+  $('app').innerHTML='<div class="sec"><div class="sb"><h2>'+esc(msg)+'</h2></div></div>';
+}
+async function bootLink(){
+  $('app').innerHTML='<div class="sec"><div class="sb"><p style="color:var(--slate)">Opening your form…</p></div></div>';
+  let r, jj;
+  try{ r=await fetch(FN,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'load',token:TOKEN})}); jj=await r.json().catch(function(){ return {}; }); }
+  catch(e){ return linkMessage('We could not reach our server. Please check your internet and open the link again.'); }
+  if(!r.ok||jj.error) return linkMessage(jj.error||'This booking link is not valid. Please use the exact link our team sent you.');
+  if(jj.status==='cancelled') return linkMessage('This booking link is no longer active. Please contact our team.');
+  if(jj.status==='completed') return showDone(jj.ref_no||'');
+  const pf=jj.prefill||{values:{},locked:[]}, d=jj.draft&&typeof jj.draft==='object'?jj.draft:{};
+  (pf.locked||[]).forEach(function(p){ LOCK.add(p); });
+  S=Object.assign(fresh(),d); ['price','profession'].forEach(function(k){ S[k]=Object.assign(fresh()[k],d[k]||{}); });
+  if(!Array.isArray(S.applicants)||!S.applicants.length) S.applicants=[newApp()];
+  S.applicants=S.applicants.map(function(a){ return Object.assign(newApp(),a); });
+  if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
+  // Sales' answers always win, over a draft and over anything typed.
+  LOCK.forEach(function(p){ const v=getIn(pf.values||{},p); setIn(S,p,v==null?'':v); });
+  S.project=PROJECT;
+  FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
+  (jj.files||[]).forEach(function(f){ if(FILES[f.applicant]&&FILES[f.applicant][f.kind]) FILES[f.applicant][f.kind].push({saved:true,id:f.id,name:f.name,ext:f.ext}); });
+  SIG=typeof jj.sig==='string'?jj.sig:null; SIG_SENT=SIG;
+  SPOUSE_OPEN=!!(S.applicants[0]&&(S.applicants[0].spouse||S.applicants[0].anniversary));
+  S.step=Math.max(0,Math.min(STEPS.length-1,parseInt(jj.step,10)||0));
+  LINK={token:TOKEN};
+  render();
+}
+
 // ---------------------------------------------------------------- events
 document.addEventListener('input',function(e){
   const k=e.target.getAttribute&&e.target.getAttribute('data-k'); if(!k) return;
+  if(LOCK.has(k)) return;
   let v=e.target.value;
   if(/\.(pan|passport|full_name|relation_name|spouse)$|flat_no$|pay\.ref$/.test(k)) v=v.toUpperCase();
   if(/aadhaar$/.test(k)){ const d=v.replace(/\D/g,'').slice(0,12); v=d.replace(/(\d{4})(?=\d)/g,'$1 '); }
@@ -609,6 +694,7 @@ document.addEventListener('change',function(e){
   if(fk&&t.files&&t.files[0]){ const parts=fk.split('|'), f=t.files[0];
     if(f.size>10*1024*1024){ toast('That file is over 10 MB - please take a smaller photo'); return; }
     if(!/^image\//.test(f.type)&&f.type!=='application/pdf'){ toast('Please attach a photo or a PDF'); return; }
+    if(LINK){ uploadKyc(+parts[0],parts[1],f); t.value=''; return; }
     FILES[+parts[0]][parts[1]].push(f); delete ERR['doc.'+parts[0]+'.'+parts[1]]; render(); }
 });
 document.addEventListener('click',function(e){
@@ -627,16 +713,16 @@ document.addEventListener('click',function(e){
   if(b.dataset.pp!==undefined){ const i=+b.dataset.pp; if(PASS_OPEN.has(i)) PASS_OPEN.delete(i); else PASS_OPEN.add(i); render();
     if(PASS_OPEN.has(i)){ const pp=document.querySelector('[data-k="applicants.'+i+'.passport"]'); if(pp){ const box=pp.closest('.xp'); if(box) box.scrollIntoView({behavior:'smooth',block:'center'}); pp.focus({preventScroll:true}); } }
     return; }
-  if(b.dataset.sgclear){ if(INLINE_PAD&&!SIG) INLINE_PAD.clear(); else { SIG=null; render(); } return; }
+  if(b.dataset.sgclear){ if(INLINE_PAD&&!SIG) INLINE_PAD.clear(); else { SIG=null; sigChanged(); render(); } return; }
   if(b.dataset.sp){ SPOUSE_OPEN=!SPOUSE_OPEN; render();
     if(SPOUSE_OPEN){ const sp=document.querySelector('[data-k="applicants.0.spouse"]'); if(sp){ const box=sp.closest('.xp'); if(box) box.scrollIntoView({behavior:'smooth',block:'center'}); sp.focus({preventScroll:true}); } }
     return; }
-  if(b.dataset.rmyes){ const i=+b.dataset.rmyes; S.applicants.splice(i,1); FILES.splice(i,1);
+  if(b.dataset.rmyes){ const i=+b.dataset.rmyes; if(LINK&&i===0) return; S.applicants.splice(i,1); FILES.splice(i,1);
     PASS_OPEN=new Set([...PASS_OPEN].filter(function(x){ return x!==i; }).map(function(x){ return x>i?x-1:x; })); save(); render(); return; }
   if(b.dataset.rmno){ render(); return; }
   if(b.dataset.addwhy){ S.why.push(''); save(); render(); const ins=document.querySelectorAll('[data-k^="why."]'); ins[ins.length-1].focus(); return; }
   if(b.dataset.rmwhy){ S.why.splice(+b.dataset.rmwhy,1); save(); render(); return; }
-  if(b.dataset.delfile){ const p=b.dataset.delfile.split('|'); FILES[+p[0]][p[1]].splice(+p[2],1); render(); return; }
+  if(b.dataset.delfile){ const p=b.dataset.delfile.split('|'); FILES[+p[0]][p[1]].splice(+p[2],1); save(); render(); return; }
   if(b.dataset.opensig){ openSigner(); return; }
   if(b.dataset.go){ if(S.step===STEPS.length-1) FROM_REVIEW=true; go(+b.dataset.go); return; }
   if(b.dataset.back){ if(FROM_REVIEW){ FROM_REVIEW=false; go(STEPS.length-1); return; } go(S.step-1); return; }
@@ -661,27 +747,26 @@ async function submit(){
   data.submitted_on_device=new Date().toString();
   const fd=new FormData();
   fd.append('data',JSON.stringify(data));
-  FILES.forEach(function(f,i){ ['pan','aadhaar'].forEach(function(kind){ f[kind].forEach(function(file,n){ fd.append('f_'+i+'_'+kind+'_'+n,file,file.name); }); }); });
+  if(LINK){ fd.append('token',TOKEN); fd.append('files',JSON.stringify(fileMeta())); }
+  FILES.forEach(function(f,i){ ['pan','aadhaar'].forEach(function(kind){ f[kind].forEach(function(file,n){ if(file instanceof Blob) fd.append('f_'+i+'_'+kind+'_'+n,file,file.name); }); }); });
   if(SIG) fd.append('sig_0',dataURLtoBlob(SIG),'signature.png');
   try{
     const r=await fetch(FN,{method:'POST',body:fd});
     const j=await r.json().catch(function(){ return {}; });
     if(!r.ok||!j.ok) throw new Error(j.error||('Could not send (error '+r.status+')'));
     try{ localStorage.removeItem(DRAFT_KEY); }catch(e){}
-    $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
-    $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Thank you! Your booking form has been received.</h2>'
-      +'<p style="color:var(--slate);margin-top:8px">Your reference number</p><div class="ref">'+esc(j.ref_no)+'</div>'
-      +'<p style="color:var(--slate)">Please keep this number. Our team will call you shortly to confirm your booking.</p></div></div>';
-    window.scrollTo(0,0);
+    LINK=null; clearTimeout(SYNC_T);
+    showDone(j.ref_no);
   }catch(e){
     btn.disabled=false; btn.textContent='Submit booking form';
     const msg=e.message||'Could not send. Please check your internet and try again.';
-    $('missing').innerHTML='<div class="miss"><b>The form could not be sent</b><ul><li style="cursor:default;text-decoration:none">'+esc(msg)+'</li><li style="cursor:default;text-decoration:none">Your answers are still saved on this device - press Submit again.</li></ul></div>';
+    $('missing').innerHTML='<div class="miss"><b>The form could not be sent</b><ul><li style="cursor:default;text-decoration:none">'+esc(msg)+'</li><li style="cursor:default;text-decoration:none">'+(LINK?'Your answers are saved':'Your answers are still saved on this device')+' - press Submit again.</li></ul></div>';
     window.scrollTo({top:0,behavior:'smooth'}); toast('The form could not be sent','err');
   }
 }
 
 if(!CONF){ $('app').innerHTML='<div class="sec"><div class="sb"><h2>This booking link is not valid.</h2><p>Please use the exact link our team sent you.</p></div></div>'; return; }
+if(TOKEN){ bootLink(); return; }
 // Coming back to a saved draft: files and the signature were not kept, so it opens no later than
 // the PAN & Aadhaar step.
 if(S.step>5) S.step=5;
