@@ -38,6 +38,23 @@ Deno.serve(async (req) => {
   const T = Deno.env.get("META_PAGES_TOKEN") || Deno.env.get("META_SYSTEM_TOKEN") || Deno.env.get("META_ACCESS_TOKEN");
   if (!T) return json({ error: "no Meta token secret" }, 500);
   const G0 = "https://graph.facebook.com/v25.0";
+  // 7 Nov: "check I have given access to that system user" - which Instagram account the saved key can
+  // reach through the Page, and which permissions the key itself carries. Returns no tokens.
+  if (body.check === "instagram") {
+    const tk = encodeURIComponent(T);
+    const me: any = await gget(G0 + "/me?fields=id,name&access_token=" + tk);
+    const perms: any = await gget(G0 + "/me/permissions?access_token=" + tk);
+    const acc: any = await gget(G0 + "/me/accounts?fields=id,name,instagram_business_account{id,username,followers_count,media_count},connected_instagram_account{id,username}&limit=10&access_token=" + tk);
+    const igs: any = await gget(G0 + "/me/instagram_accounts?fields=id,username&access_token=" + tk);
+    const out: any = { user: me.err ? me.err : { id: me.id, name: me.name },
+      permissions: perms.err ? perms.err : (perms.data || []).map((p: any) => p.permission + ":" + p.status),
+      pages: acc.err ? acc.err : (acc.data || []).map((p: any) => ({ page: p.name, instagram_business_account: p.instagram_business_account || null, connected_instagram_account: p.connected_instagram_account || null })),
+      instagram_accounts_edge: igs.err ? igs.err : (igs.data || []) };
+    const ig = (acc.data || []).map((p: any) => p.instagram_business_account).find(Boolean);
+    if (ig) { const m: any = await gget(G0 + "/" + ig.id + "/media?limit=1&fields=id,timestamp,insights.metric(reach)&access_token=" + tk);
+      out.instagram_media_test = m.err ? "ERR: " + m.err : ((m.data || [])[0] ? { id: m.data[0].id, timestamp: m.data[0].timestamp, reach: m.data[0].insights?.data?.[0]?.values?.[0]?.value } : "no posts"); }
+    return json(out);
+  }
   const pg: any = await gget(G0 + "/me/accounts?fields=id,name,access_token&limit=5&access_token=" + encodeURIComponent(T));
   if (pg.err) return json({ error: pg.err });
   const P = (pg.data || [])[0]; const pt = encodeURIComponent(P.access_token);
