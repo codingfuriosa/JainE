@@ -566,7 +566,11 @@ document.addEventListener('click',function(e){
     set(p[0]+'.line',x.line); if(x.city) set(p[0]+'.city',x.city); if(x.pin) set(p[0]+'.pin',x.pin); render(); return; }
   if(b.dataset.add){ S.applicants.push(newApp()); FILES.push({pan:[],aadhaar:[]}); save(); render();
     const cards=document.querySelectorAll('.app'); cards[cards.length-1].scrollIntoView({behavior:'smooth',block:'start'}); return; }
-  if(b.dataset.rm){ const i=+b.dataset.rm; if(!confirm('Remove '+(i?'applicant '+(i+1):'the first applicant')+'?'+(i?'':' The next person becomes the first applicant.'))) return; S.applicants.splice(i,1); FILES.splice(i,1); save(); render(); return; }
+  /* Remove asks inside the page (a browser pop-up can be blocked or hidden, and then the button seems dead). */
+  if(b.dataset.rm){ const i=+b.dataset.rm;
+    b.outerHTML='<span class="rmask">'+(i?'':'The next person becomes the first applicant. ')+'Remove? <button type="button" class="rm" data-rmyes="'+i+'">Yes, remove</button> <button type="button" class="rm keep" data-rmno="1">Keep</button></span>'; return; }
+  if(b.dataset.rmyes){ const i=+b.dataset.rmyes; S.applicants.splice(i,1); FILES.splice(i,1); save(); render(); return; }
+  if(b.dataset.rmno){ render(); return; }
   if(b.dataset.addwhy){ S.why.push(''); save(); render(); const ins=document.querySelectorAll('[data-k^="why."]'); ins[ins.length-1].focus(); return; }
   if(b.dataset.rmwhy){ S.why.splice(+b.dataset.rmwhy,1); save(); render(); return; }
   if(b.dataset.delfile){ const p=b.dataset.delfile.split('|'); FILES[+p[0]][p[1]].splice(+p[2],1); render(); return; }
