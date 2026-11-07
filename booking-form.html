@@ -232,29 +232,34 @@
     .hd h1{grid-column:2;grid-row:1;margin:0;text-align:center;font-size:20px}
     .hd p{grid-column:2;grid-row:2;text-align:center;font-size:13.5px}
     .steps{padding:10px 28px 11px}
-    /* a section: its name and purpose on the left, its questions on the right */
-    .sec{display:grid;grid-template-columns:230px minmax(0,1fr)}
-    .sh{padding:22px 20px;border-bottom:0;border-right:1px solid var(--line2)}
-    .sh h2{font-size:17px}.sh p{font-size:13.5px;margin-top:6px;line-height:1.5}
-    .sb{padding:22px 26px}
-    .grid,.stack{gap:16px}
-    .pair{display:flex;flex-direction:column;align-items:stretch;gap:16px}
-    /* a question: label | answer */
-    .grid>.f,.stack>.f,.pair>.f,.ac>.f,.sb>.f{display:grid;grid-template-columns:210px minmax(0,566px);column-gap:22px;row-gap:5px;align-items:start}
-    .grid>.f>label,.stack>.f>label,.pair>.f>label,.ac>.f>label,.sb>.f>label{grid-column:1;grid-row:1;padding-top:13px;font-size:14px;line-height:1.35}
-    .grid>.f>:not(label),.stack>.f>:not(label),.pair>.f>:not(label),.ac>.f>:not(label),.sb>.f>:not(label){grid-column:2;min-width:0}
+    /* a section: a slim title strip on top (its name and the original one-line help), then its questions in three equal columns -
+       there is no left column, the width goes to the fields */
+    .sec{display:block}
+    .sh{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 14px;padding:11px 18px;background:#f4f5f7;border-bottom:1px solid var(--line);border-radius:10px 10px 0 0}
+    .sh h2{font-size:15.5px}.sh p{margin:0;font-size:13px}
+    .sb{padding:18px}
+    .grid,.stack{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px 20px;align-items:start}
+    .pair{display:contents}
+    .grid>.f,.stack>.f,.pair>.f,.ac>.f{display:flex;flex-direction:column;gap:6px;min-width:0}
+    .f>label{font-size:13.5px}
+    /* every field is one column wide; a row of 4 or more choices, the rate line and the reasons list take two or three */
+    .grid>.f:has(.chip:nth-child(4)),.stack>.f:has(.chip:nth-child(4)){grid-column:span 2}
+    .grid>.f:has(>.rate),.grid>#f-sales{grid-column:span 2}
+    .grid>#f-profession-kind{grid-column:1/-1}
+    .grid>#f-price-plan{grid-column:span 2}
+    .grid:has(>.f .upl){grid-template-columns:1fr 1fr}
+    .grid>.full.ac,.grid>.f:has(textarea),.grid>.f:has([data-addwhy]){grid-column:1/-1}
     input[type=text],input[type=tel],input[type=email],input[type=date],textarea{font-size:15.5px;min-height:46px}
     textarea{min-height:68px}
     .pick{font-size:15.5px;min-height:46px}
     .pre .pick{width:116px}
     .chip{font-size:14.5px;min-height:46px;padding:8px 11px 8px 10px;gap:7px}
-    .grp{margin:22px 0 14px}
-    /* the applicant is not a card inside a card: separate several with a line */
-    .app{border:0;padding:0}
-    .app .ah{margin-bottom:6px}
-    .app+.app{margin-top:26px;padding-top:26px;border-top:1px solid var(--line)}
-    /* things that are not a question keep a readable width instead of stretching */
-    .sb>details.t,.sb>.agree,.sb>.switch,.sb>.btn.add,.app>details.t,.app>.btn,.sb>.miss{max-width:798px}
+    .chips.num .chip{min-width:38px;padding:8px 6px}
+    .sb>.f{max-width:520px}
+    /* "More about you": a full-width button bar; opened, its six fields sit under it in three columns */
+    .sb>details.t.opt-d>summary{display:flex;width:100%;justify-content:flex-start;padding:11px 16px}
+    .sb>details.t.opt-d[open]>summary{border-bottom-left-radius:0;border-bottom-right-radius:0;background:var(--soft)}
+    .sb>details.t.opt-d>.stack{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px 20px;margin-top:0!important;border:1.5px solid var(--brand)!important;border-top:0!important;border-radius:0 0 8px 8px!important;padding:14px!important}
     .sb:has(>.rs){column-count:2;column-gap:44px}
     .rs{break-inside:avoid}
     /* FIRST PAGE: no left column and no outer frame. Each person is ONE card: a header bar (number, who, Remove), then two
@@ -272,7 +277,7 @@
     .app>.s2{grid-column:2;grid-row:4}
     .app>.grp{margin:0!important;padding:9px 14px;background:#f7f8fa;border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;color:var(--ink2)}
     .app>.grp:after{display:none}
-    .app>.stack{padding:14px 14px 16px;border:1px solid var(--line);border-radius:0 0 8px 8px;gap:12px}
+    .app>.stack{display:flex;flex-direction:column;align-items:stretch;padding:14px 14px 16px;border:1px solid var(--line);border-radius:0 0 8px 8px;gap:12px}
     /* Spouse & anniversary: hidden until its full-width button at the bottom of the card is pressed; its two fields open right under it, side by side */
     .app>.tgw{grid-column:1/-1;grid-row:5}
     .app>.spx{grid-column:1/-1;grid-row:6}
@@ -281,13 +286,6 @@
     .app .stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
     .app .stack>.f>:not(label){grid-column:auto}
     .sb>.btn.add{width:auto;min-width:260px;max-width:none;margin-top:0}
-    /* UNIT SELECTION: two columns - Block | Flat number, Floor | Bedrooms, Car park */
-    .grid.two{display:grid;grid-template-columns:1fr 1fr;gap:18px 40px;align-items:start}
-    .grid.two>.f{display:flex;flex-direction:column;gap:6px}
-    .grid.two>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
-    .grid.two>.f>:not(label){grid-column:auto}
-    .grid.two>#f-flat-block{order:1}.grid.two>#f-flat-flat_no{order:2}.grid.two>#f-flat-floor{order:3}.grid.two>#f-flat-bhk{order:4}.grid.two>#f-flat-parking{order:5}
-    .chips.num .chip{min-width:38px;padding:8px 6px}
   }
   @media print{.steps,.nav,.btn,.rvh button{display:none!important}.sec{border:1px solid #ddd}}
 </style>
@@ -307,6 +305,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107n"></script>
+<script src="booking-form.js?v=20261107s"></script>
 </body>
 </html>
