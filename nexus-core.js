@@ -11475,9 +11475,18 @@ function wmFormAgenda(){
   const host=$('wmAgForm'); if(!host) return;
   const tot=WM.formAg.filter(x=>x.on).reduce((s,x)=>s+(Number(x.mins)||0),0);
   host.innerHTML=WM.formAg.map((x,i)=>{ const d=WM_AGENDA.find(a=>a.k===x.k);
-    return `<label class="wm-agf-row ${x.on?'':'off'}"><input type="checkbox" ${x.on?'checked':''} onchange="WM.formAg[${i}].on=this.checked;wmFormAgenda()"><i class="fa-solid ${d.i}"></i><span>${esc(d.l)}${d.n?' <em>notes</em>':''}</span>
-      <input type="number" min="1" max="180" value="${x.mins}" onclick="event.preventDefault()" onchange="WM.formAg[${i}].mins=Math.max(1,Math.min(180,Number(this.value)||1));wmFormAgenda()"> min</label>`; }).join('')
-    +`<div class="wm-agf-tot">${WM.formAg.some(x=>x.on)?'Total '+tot+' min':'No agenda — the meeting runs without the timer'}</div>`;
+    // Plain rows rather than form fields: JainE's form styles stretch every input to full width.
+    return `<div class="wm-agf-row ${x.on?'on':'off'}" role="checkbox" aria-checked="${x.on}" tabindex="0" onclick="WM.formAg[${i}].on=!WM.formAg[${i}].on;wmFormAgenda()" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();this.click()}">
+      <span class="ck"><i class="fa-solid fa-check"></i></span>
+      <span class="ic"><i class="fa-solid ${d.i}"></i></span>
+      <span class="nm">${esc(d.l)}${d.n?'<em>Notes</em>':''}</span>
+      <span class="mn" onclick="event.stopPropagation()"><button type="button" tabindex="-1" onclick="wmFormAgMins(${i},-1)" ${x.on?'':'disabled'}>−</button><input type="number" min="1" max="180" value="${x.mins}" ${x.on?'':'disabled'} onchange="wmFormAgMins(${i},0,this.value)"><button type="button" tabindex="-1" onclick="wmFormAgMins(${i},1)" ${x.on?'':'disabled'}>+</button><small>min</small></span>
+    </div>`; }).join('')
+    +`<div class="wm-agf-tot">${WM.formAg.some(x=>x.on)?`<span>${WM.formAg.filter(x=>x.on).length} of ${WM.formAg.length} steps</span><b>${tot} min</b>`:'<span>No agenda — the meeting runs without the timer</span>'}</div>`;
+}
+window.wmFormAgMins=function(i,step,v){
+  const x=WM.formAg[i]; if(!x) return;
+  x.mins=Math.max(1,Math.min(180,step?x.mins+step:(Number(v)||1))); wmFormAgenda();
 }
 window.wmMeetingForm=function(mode){
   const later=mode==='schedule', kinds=[...new Set((WM.meetings||[]).map(m=>m.kind).filter(Boolean))];
@@ -12175,10 +12184,23 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-kt th input.h{width:120px;border:0;background:transparent;font:inherit;font-weight:700;color:var(--ink2);padding:8px 26px 8px 10px;outline:none}.wm-kt th input.h:focus{background:#fff}'
   +'.wm-kt th .x{position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--mute2);cursor:pointer;font-size:11px;opacity:0}.wm-kt th:hover .x{opacity:1}.wm-kt th .x:hover{color:var(--red)}'
   +'.wm-kt th.add{padding:0 12px;width:1%}.wm-kt td input{width:120px;border:0;border-left:1px solid var(--hair2);font:inherit;font-size:13px;padding:8px 10px;outline:none;color:var(--ink);background:transparent}.wm-kt td input:focus{background:#fffbea}'
-  +'.wm-agf{border:1px solid var(--line);border-radius:10px;padding:6px 8px}'
-  +'.wm-agf-row{display:flex!important;align-items:center;gap:10px;padding:5px 2px;font-weight:400!important;font-size:13px;cursor:pointer;margin:0!important}.wm-agf-row i{width:16px;text-align:center;color:#94a3b8}.wm-agf-row span{flex:1}.wm-agf-row em{font-style:normal;font-size:11px;color:#16a34a;margin-left:4px}'
-  +'.wm-agf-row input[type=checkbox]{accent-color:#e0121c;margin:0}.wm-agf-row input[type=number]{width:56px;height:28px;border:1px solid var(--line);border-radius:7px;padding:0 6px;font:inherit;font-size:13px;text-align:right}.wm-agf-row.off span,.wm-agf-row.off i{opacity:.45}'
-  +'.wm-agf-tot{font-size:12px;color:var(--slate);padding:6px 2px 2px;border-top:1px solid var(--line-2);margin-top:4px}'
+  /* The agenda in the start/schedule form: one tidy row per step - tick, icon, name, minutes. */
+  +'.wm-agf{border:1px solid var(--line);border-radius:12px;overflow:hidden}'
+  +'.wm-agf-row{display:grid;grid-template-columns:20px 18px minmax(0,1fr) auto;align-items:center;gap:12px;padding:9px 12px;border-bottom:1px solid var(--line-2);cursor:pointer;user-select:none;outline:none}'
+  +'.wm-agf-row:hover,.wm-agf-row:focus-visible{background:#f8fafc}'
+  +'.wm-agf-row .ck{width:18px;height:18px;border-radius:5px;border:1.5px solid #cbd5e1;display:flex;align-items:center;justify-content:center;font-size:10px;color:transparent;background:#fff}'
+  +'.wm-agf-row.on .ck{background:#e0121c;border-color:#e0121c;color:#fff}'
+  +'.wm-agf-row .ic{color:#94a3b8;font-size:13px;text-align:center}.wm-agf-row.on .ic{color:#64748b}'
+  +'.wm-agf-row .nm{font-size:13.5px;font-weight:500;color:#0b1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.wm-agf-row .nm em{font-style:normal;font-size:10.5px;font-weight:600;color:#15803d;background:#f0fdf4;border-radius:5px;padding:1px 6px;margin-left:8px;vertical-align:1px}'
+  +'.wm-agf-row.off .nm,.wm-agf-row.off .ic{opacity:.45}.wm-agf-row.off .nm{text-decoration:line-through}'
+  +'.wm-agf-row .mn{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:8px;background:#fff;height:30px;cursor:default}'
+  +'.wm-agf-row .mn button{width:26px;height:28px;border:0;background:none;color:#64748b;font-size:15px;cursor:pointer;padding:0}.wm-agf-row .mn button:hover:not(:disabled){color:#0b1220}'
+  +'.frm .wm-agf-row .mn input{width:34px;height:28px;border:0;border-radius:0;padding:0;margin:0;text-align:center;font-size:13.5px;font-weight:600;color:#0b1220;background:transparent;box-shadow:none;-moz-appearance:textfield}'
+  +'.wm-agf-row .mn input::-webkit-outer-spin-button,.wm-agf-row .mn input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}'
+  +'.wm-agf-row .mn small{font-size:11.5px;color:#94a3b8;padding:0 9px 0 2px;border-left:1px solid var(--line-2);margin-left:2px;padding-left:8px}'
+  +'.wm-agf-row.off .mn{opacity:.4}'
+  +'.wm-agf-tot{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--slate);padding:9px 12px;background:#f8fafc}.wm-agf-tot b{color:#0b1220;font-size:13.5px}'
   +'.wm-addsec{display:flex;gap:22px;flex-wrap:wrap;margin-top:18px}'
   +'.wm-fp{border:1px solid var(--line);border-radius:10px;padding:8px}.wm-fp-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}.wm-fp-chips .people-chip{font-size:12.5px}'
   +'.wm-fp-none{font-size:12.5px;color:var(--slate);padding:4px 2px}'
