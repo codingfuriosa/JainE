@@ -158,14 +158,14 @@ function stepApplicants(){
           const forced=foreign||!!a.passport||!!a.bank_details;   // needed, or already filled: its panel stays open and the bar is a plain title
           const ppOpen=forced||PASS_OPEN.has(i), spOpen=i===0&&SPOUSE_OPEN;
           const bar=function(on,plain,attr,label){ return (plain?'<div class="tg on static">':'<button type="button" class="tg'+(on?' on':'')+'" '+attr+'>')+(on?'−':'+')+' '+label+(plain?'</div>':'</button>'); };
-          return '<div class="xts">'
-            +(i===0?bar(spOpen,false,'data-sp="1"','Spouse &amp; anniversary <span class="opt">(optional)</span>'):'')
-            +bar(ppOpen,forced,'data-pp="'+i+'"','Passport &amp; bank details <span class="opt">(NRIs &amp; foreign nationals)</span>')
-            +'</div>'
-            +(spOpen?'<div class="xp sp"><div class="xp-h">Spouse &amp; anniversary <span class="opt">(optional)</span></div><div class="xp-b">'+field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></div>':'')
+          return (spOpen?'<div class="xp sp"><div class="xp-h">Spouse &amp; anniversary <span class="opt">(optional)</span></div><div class="xp-b">'+field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></div>':'')
             +(ppOpen?'<div class="xp pp"><div class="xp-h">Passport &amp; bank details <span class="opt">'+(foreign?'(needed for a foreign national)':'(NRIs &amp; foreign nationals only)')+'</span></div><div class="xp-b">'
               +field(p+'passport','Passport number',{cls:'up',req:foreign,optional:!foreign,full:1})
-              +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,optional:!foreign})+'</div></div>':'');
+              +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,optional:!foreign})+'</div></div>':'')
+            +'<div class="xts">'
+            +(i===0?bar(spOpen,false,'data-sp="1"','Spouse &amp; anniversary <span class="opt">(optional)</span>'):'')
+            +bar(ppOpen,forced,'data-pp="'+i+'"','Passport &amp; bank details <span class="opt">(NRIs &amp; foreign nationals)</span>')
+            +'</div>';
         })()
         +'</div>';
     }).join('')

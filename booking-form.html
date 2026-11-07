@@ -280,10 +280,10 @@
     .app>.grp:after{display:none}
     .app>.stack{display:flex;flex-direction:column;align-items:stretch;padding:14px 14px 16px;border:1px solid var(--line);border-radius:0 0 8px 8px;gap:12px}
     /* Spouse & anniversary: hidden until its full-width button at the bottom of the card is pressed; its two fields open right under it, side by side */
-    .app>.xts{grid-column:1/-1;grid-row:5;flex-direction:row}
+    .app>.xp.sp{grid-column:1/-1;grid-row:5}
+    .app>.xp.pp{grid-column:1/-1;grid-row:6}
+    .app>.xts{grid-column:1/-1;grid-row:7;flex-direction:row}
     .app>.xts>.tg{flex:1}
-    .app>.xp.sp{grid-column:1/-1;grid-row:6}
-    .app>.xp.pp{grid-column:1/-1;grid-row:7}
     .app>.xp>.xp-b{display:grid;grid-template-columns:1fr 1fr;gap:16px}
     .app .stack>.f{display:flex;flex-direction:column;gap:6px}
     .app .stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
@@ -317,6 +317,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107z"></script>
+<script src="booking-form.js?v=20261107za"></script>
 </body>
 </html>
