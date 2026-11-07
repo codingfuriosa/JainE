@@ -246,22 +246,27 @@
     .sb>details.t,.sb>.agree,.sb>.switch,.sb>.btn.add,.app>details.t,.app>.btn,.sb>.miss{max-width:798px}
     .sb:has(>.rs){column-count:2;column-gap:44px}
     .rs{break-inside:avoid}
-    /* FIRST PAGE: no left column (the step bar already says "Applicant details"); each person is two groups side by side -
-       Personal details | Identity documents - so one person fits one screen. */
-    .sec:has(.app){display:block}
+    /* FIRST PAGE: no left column and no outer frame. Each person is ONE card: a header bar (number, who, Remove), then two
+       panels side by side - Personal details | Identity documents - each with its own title strip. */
+    .sec:has(.app){display:block;border:0;background:none;box-shadow:none;border-radius:0}
     .sec:has(.app)>.sh{display:none}
-    .app{display:grid;grid-template-columns:1fr 1fr;column-gap:44px;align-items:start}
-    .app>.ah{grid-column:1/-1;margin-bottom:0}
-    .app>.grp{margin:14px 0 12px!important}
+    .sec:has(.app)>.sb{padding:0}
+    .app{display:grid;grid-template-columns:1fr 1fr;column-gap:20px;align-items:stretch;background:#fff;border:1px solid var(--line);border-radius:12px;padding:0 18px 18px;margin:0 0 16px;overflow:hidden}
+    .app+.app{margin-top:0;padding-top:0}
+    .app>.ah{grid-column:1/-1;margin:0 -18px 16px;padding:12px 18px;background:#f4f5f7;border-bottom:1px solid var(--line)}
+    .app>.ah b{font-size:15.5px}
     .app>.ah+.grp{grid-column:1;grid-row:2}
     .app>.ah+.grp+.stack{grid-column:1;grid-row:3}
     .app>.ah+.grp+.stack+.grp{grid-column:2;grid-row:2}
     .app>.ah+.grp+.stack+.grp+.stack{grid-column:2;grid-row:3}
-    .app>details.t{grid-column:2;grid-row:4;max-width:none}
+    .app>.grp{margin:0!important;padding:9px 14px;background:#f7f8fa;border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;color:var(--ink2)}
+    .app>.grp:after{display:none}
+    .app>.stack{padding:16px 14px 18px;border:1px solid var(--line);border-radius:0 0 8px 8px;gap:14px}
+    .app>details.t{grid-column:2;grid-row:4;max-width:none;margin-top:14px}
     .app .stack>.f{display:flex;flex-direction:column;gap:6px}
     .app .stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
     .app .stack>.f>:not(label){grid-column:auto}
-    .sb>.btn.add{width:auto;min-width:260px;max-width:none}
+    .sb>.btn.add{width:auto;min-width:260px;max-width:none;margin-top:0}
     /* UNIT SELECTION: two columns - Block | Flat number, Floor | Bedrooms, Car park */
     .grid.two{display:grid;grid-template-columns:1fr 1fr;gap:18px 40px;align-items:start}
     .grid.two>.f{display:flex;flex-direction:column;gap:6px}
@@ -288,6 +293,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107f"></script>
+<script src="booking-form.js?v=20261107g"></script>
 </body>
 </html>
