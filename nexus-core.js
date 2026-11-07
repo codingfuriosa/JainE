@@ -11283,6 +11283,8 @@ function wmNames(it){ return it.linked?(it.mem.length===1?wmFirst(it.mem[0]):it.
 
 /* ---------- load ---------- */
 async function wmLoad(){
+  // Repeating meetings: make sure this week's and next week's dates exist before reading.
+  try{ await sb.rpc('ops_meeting_series_fill'); }catch(e){}
   try{
     const r=await Promise.all([sb.rpc('ops_weekly_meetings'), sb.rpc('ops_weekly_items'), sb.schema('acc').rpc('people')]);
     if(r[0].error) throw r[0].error;
@@ -11362,8 +11364,9 @@ function wmPaintNav(){
       if(thisWeek&&!WM.showPast&&date<today&&!ms.some(m=>m.id===WM.cur&&WM.view==='meeting')) return '';
       if(!ms.length&&date!==today) return '';
       return `<div class="wm-dl ${date===today?'today':''}">${date===today?'Today':d.slice(0,3)+' '+new Date(date+'T00:00').getDate()}</div>`+
-        (ms.map(m=>`<div class="wm-mi ${WM.view==='meeting'&&WM.cur===m.id?'on':''} ${date>today?'up':''}" onclick="wmOpenMeeting(${m.id})"><span class="t">${esc(wmTime(m.start_time))}</span><span class="n">${esc(m.kind||'Meeting')}</span>${date===today?'<span class="live"></span>':''}</div>`).join('')||'<div class="wm-mi up" style="cursor:default">No meeting</div>'); }).join('');
-    return `<div class="wm-wkh">${esc(label(w))}<small>${esc(fmtD(w)+' – '+fmtD(wmAdd(w,6)))}</small></div>
+        (ms.map(m=>`<div class="wm-mi ${WM.view==='meeting'&&WM.cur===m.id?'on':''} ${date>today?'up':''}" onclick="wmOpenMeeting(${m.id})"><span class="t">${esc(wmTime(m.start_time))}</span><span class="n">${esc(m.kind||'Meeting')}${m.series_id&&m.series_active?' <i class="fa-solid fa-repeat wm-mi-rep" title="Repeats '+esc(m.recur||'')+'"></i>':''}</span>${date===today?'<span class="live"></span>':''}</div>`).join('')||'<div class="wm-mi up" style="cursor:default">No meeting</div>'); }).join('');
+    const lb=label(w), range=fmtD(w)+' – '+fmtD(wmAdd(w,6));
+    return `<div class="wm-wkh">${esc(lb)}${lb===range?'':`<small>${esc(range)}</small>`}</div>
       ${thisWeek?`<button class="wm-quiet" style="margin:2px 0 4px" onclick="WM.showPast=!WM.showPast;wmPaintNav()"><i class="fa-solid fa-chevron-${WM.showPast?'down':'up'}"></i> ${WM.showPast?'Hide earlier days':'Earlier this week'}</button>`:''}
       ${days||'<div class="wm-mi up" style="cursor:default;margin-top:6px">No meetings</div>'}`; };
   nav.innerHTML=`<div class="wm-wk"><button onclick="wmWeekStep(-1)" ${i===0||(i<0&&!ws.some(w=>w<mon))?'disabled':''} title="Earlier meetings"><i class="fa-solid fa-chevron-left"></i></button>
@@ -11379,7 +11382,9 @@ window.wmRailToggle=function(){
 };
 
 /* ---------- a meeting ---------- */
-window.wmOpenMeeting=function(id){ const m=wmMeeting(id); WM.view='meeting'; WM.cur=id; if(m) WM.wk=wmMonday(m.meeting_date); WM.tab='pending'; WM.q=''; WM.who=''; WM.showPpl=false; WM.picked={mem:[],due:null,recur:'none'}; wmRender(); window.scrollTo({top:0,behavior:'smooth'}); };
+window.wmOpenMeeting=function(id){ const m=wmMeeting(id); WM.view='meeting'; WM.cur=id;
+  // A meeting next week is already in view beside this week, so the panel stays on this week.
+  if(m){ const mw=wmMonday(m.meeting_date), cw=wmMonday(wmToday()); WM.wk=mw===wmAdd(cw,7)?cw:mw; } WM.tab='pending'; WM.q=''; WM.who=''; WM.showPpl=false; WM.picked={mem:[],due:null,recur:'none'}; wmRender(); window.scrollTo({top:0,behavior:'smooth'}); };
 function wmPaintMeeting(){
   clearInterval(WM.timer);
   const main=$('wmMain'); if(!main) return;
@@ -11398,6 +11403,7 @@ function wmPaintMeeting(){
     </div>
     <div class="wm-mh2">
       <div class="wm-dd" id="wmPpl">${wmPplHtml(att)}</div>
+      ${m.series_id&&m.recur?`<span class="wm-rep ${m.series_active?'':'off'}" title="${m.series_active?'A repeating meeting':'This meeting no longer repeats'}"><i class="fa-solid fa-repeat"></i> ${esc(m.series_active?wmRecurWords(m.recur,(wmSeries(m.kind).filter(x=>x.series_id===m.series_id).pop()||m).meeting_date,m.start_time):'Stopped repeating')}${m.series_active?` · <button class="wm-quiet" onclick="wmSeriesStop(${m.series_id})">Stop repeating</button>`:''}</span>`:''}
       ${series.length>1?`<select class="wm-hsel" onchange="wmOpenMeeting(Number(this.value))" title="Earlier meetings">${series.map(x=>`<option value="${x.id}" ${x.id===m.id?'selected':''}>${x.id===m.id?'Earlier meetings':(x.meeting_date===today?'Today':esc(wmFmt(x.meeting_date)))}</option>`).join('')}</select>`:''}
     </div>
     </div><div class="wm-card-body">
@@ -11494,8 +11500,10 @@ window.wmMeetingForm=function(mode){
   <div class="modal-body frm">
     <label>Which meeting</label><select id="wmKind" onchange="wmFormKind()">${kinds.map(k=>`<option>${esc(k)}</option>`).join('')}<option value="__new">A new kind of meeting…</option></select>
     <input id="wmKindNew" placeholder="e.g. Sales Review" style="display:${kinds.length?'none':''};margin-top:8px">
-    ${later?`<div class="two"><div><label>Date</label><input type="date" id="wmDate" min="${wmToday()}" value="${wmAdd(wmToday(),1)}"></div>
-      <div><label>Time</label><input type="time" id="wmTime" value="10:30"></div></div>`:''}
+    ${later?`<div class="wm-three"><div><label id="wmDateLbl">Date</label><input type="date" id="wmDate" min="${wmToday()}" value="${wmAdd(wmToday(),1)}" onchange="wmFormRecur()"></div>
+      <div><label>Time</label><input type="time" id="wmTime" value="10:30" onchange="wmFormRecur()"></div>
+      <div><label>Repeats</label><select id="wmRecur" onchange="wmFormRecur()"><option value="none">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div></div>
+      <div class="wm-recur-hint" id="wmRecurHint"></div>`:''}
     <label>People in this meeting <span style="font-weight:400;color:var(--slate)">— it goes into their JainE calendar and yours</span></label>
     <div class="wm-fp" id="wmFormPpl"></div>
     <label>Timed agenda <span style="font-weight:400;color:var(--slate)">— untick what this meeting skips; the minutes can be changed</span></label>
@@ -11503,7 +11511,22 @@ window.wmMeetingForm=function(mode){
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="wmStartBtn" onclick="wmMeetingSave('${later?'schedule':'start'}')"><i class="fa-solid fa-${later?'calendar-plus':'play'}"></i> ${later?'Schedule':'Start'}</button></div>`);
   if(!kinds.length) $('wmKind').value='__new';
-  wmFormKind();
+  wmFormKind(); wmFormRecur();
+};
+// How often, said in words under the three fields: "Every Monday at 10:30, starting 9 Nov".
+const wmOrd=n=>n+(n%10===1&&n!==11?'st':n%10===2&&n!==12?'nd':n%10===3&&n!==13?'rd':'th');
+function wmRecurWords(recur,date,time){
+  const d=new Date(date+'T00:00'), t=time?' at '+wmTime(time):'';
+  if(recur==='daily') return 'Every day'+t;
+  if(recur==='weekly') return 'Every '+d.toLocaleDateString('en-IN',{weekday:'long'})+t;
+  if(recur==='monthly') return 'Every month on the '+wmOrd(d.getDate())+t+(d.getDate()>28?' (months without that day are skipped)':'');
+  return '';
+}
+window.wmFormRecur=function(){
+  const r=$('wmRecur'), h=$('wmRecurHint'); if(!r||!h) return;
+  const date=$('wmDate').value, rep=r.value!=='none';
+  $('wmDateLbl').textContent=rep?'First meeting':'Date';
+  h.innerHTML=rep&&date?`<i class="fa-solid fa-repeat"></i> ${esc(wmRecurWords(r.value,date,$('wmTime').value))}, starting ${esc(wmFmt(date))} — in everyone's calendar on each date`:'';
 };
 window.wmStartMeeting=function(){ wmMeetingForm('start'); };
 window.wmScheduleMeeting=function(){ wmMeetingForm('schedule'); };
@@ -11514,19 +11537,40 @@ window.wmMeetingSave=async function(mode){
   const on=k=>!!ag&&ag.items.some(x=>x.k===k&&x.on), kpi=on('kpi'), oo=on('oo');
   // Started now: the timer starts with it, on the first step.
   const run=ag&&!later?{k:ag.items.find(x=>x.on).k,at:Date.now(),paused:false}:null;
+  const recur=later&&$('wmRecur')?$('wmRecur').value:'none';
   if(!kind){ toast('Choose which meeting this is','err'); return; }
   if(!date){ toast('Choose a date','err'); return; }
   if(later&&date<wmToday()){ toast('Choose today or a later day','err'); return; }
   if(!emails.length){ toast('Add at least one person to this meeting','err'); return; }
   const b=$('wmStartBtn'); b.disabled=true;
   try{
-    const {data,error}=await sb.rpc('ops_meeting_create',{p_kind:kind,p_date:date,p_time:time,p_people:emails,p_names:emails.map(wmName),p_kpi:kpi,p_oo:oo,p_agenda:ag,p_run:run}); if(error) throw error;
+    const {data,error}=await sb.rpc('ops_meeting_create',{p_kind:kind,p_date:date,p_time:time,p_people:emails,p_names:emails.map(wmName),p_kpi:kpi,p_oo:oo,p_agenda:ag,p_run:run,p_recur:recur}); if(error) throw error;
     if(!later){ try{ localStorage.setItem('wm_start_'+data,String(Date.now())); }catch(e){} }
     try{ usageQueue('tasks.meetings.schedule_a_meeting_one_time_or_recurring','create',{title:kind,attendees:emails.length+(emails.length===1?' person':' people')}); }catch(_e){}
     await wmReloadMeetings(); closeModal();
-    toast((later?'Scheduled for '+wmFmt(date)+(time?', '+wmTime(time):''):'Meeting started')+' · in '+(emails.length+1)+' calendars','ok');
+    toast((recur!=='none'?'Scheduled: '+wmRecurWords(recur,date,time):later?'Scheduled for '+wmFmt(date)+(time?', '+wmTime(time):''):'Meeting started')+' · in '+(emails.length+1)+' calendars','ok');
     wmOpenMeeting(Number(data));
   }catch(e){ b.disabled=false; toast('Could not '+(later?'schedule':'start')+' the meeting: '+((e&&e.message)||e),'err'); }
+};
+
+/* Stop a repeating meeting: no more dates are made, future dates nobody has written on are removed,
+   and the repeating entry leaves everyone's calendar. Dates already held keep everything. */
+window.wmSeriesStop=function(sid,go){
+  const m=wmMeeting(WM.cur); if(!m) return;
+  if(!go){
+    openModal(`<div class="modal-head"><h3>Stop repeating ${esc(m.kind)}?</h3><span class="x" onclick="closeModal()">&times;</span></div>
+      <div class="modal-body" style="font-size:14px;color:var(--slate);line-height:1.6">No more dates will be added. Coming dates that nothing has been written on are removed, and the repeating meeting is taken out of everyone's JainE calendar. Meetings already held keep their tasks and notes.</div>
+      <div class="modal-foot"><button class="btn" onclick="closeModal()">Keep it</button><button class="btn btn-primary" style="background:#dc2626;border-color:#dc2626" onclick="wmSeriesStop(${sid},true)">Stop repeating</button></div>`);
+    return;
+  }
+  (async()=>{
+    try{
+      const {data,error}=await sb.rpc('ops_meeting_series_stop',{p_series:sid}); if(error) throw error;
+      closeModal(); await wmReloadMeetings();
+      if(!wmMeeting(WM.cur)) WM.cur=((WM.meetings||[]).find(x=>x.meeting_date<=wmToday())||{}).id||null;
+      toast('Stopped repeating'+(data?' · '+data+' coming date'+(data===1?'':'s')+' removed':''),'ok'); wmRender();
+    }catch(e){ toast('Could not stop it: '+((e&&e.message)||e),'err'); }
+  })();
 };
 
 /* The KPI section: one notes box, saved as you pause typing and when you leave it. */
@@ -12184,6 +12228,10 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-kt th input.h{width:120px;border:0;background:transparent;font:inherit;font-weight:700;color:var(--ink2);padding:8px 26px 8px 10px;outline:none}.wm-kt th input.h:focus{background:#fff}'
   +'.wm-kt th .x{position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--mute2);cursor:pointer;font-size:11px;opacity:0}.wm-kt th:hover .x{opacity:1}.wm-kt th .x:hover{color:var(--red)}'
   +'.wm-kt th.add{padding:0 12px;width:1%}.wm-kt td input{width:120px;border:0;border-left:1px solid var(--hair2);font:inherit;font-size:13px;padding:8px 10px;outline:none;color:var(--ink);background:transparent}.wm-kt td input:focus{background:#fffbea}'
+  +'.wm-three{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:12px}'
+  +'.wm-recur-hint{margin-top:8px;font-size:12.5px;color:#15803d;background:#f0fdf4;border-radius:8px;padding:7px 10px}.wm-recur-hint:empty{display:none}.wm-recur-hint i{margin-right:6px}'
+  +'.wm-rep{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--mute)}.wm-rep i{font-size:11px}.wm-rep.off{color:var(--mute2)}.wm-rep .wm-quiet{font-size:12.5px;text-decoration:underline;text-underline-offset:2px}'
+  +'.wm-mi-rep{font-size:9.5px;color:var(--mute2);margin-left:4px}'
   /* The agenda in the start/schedule form: one tidy row per step - tick, icon, name, minutes. */
   +'.wm-agf{border:1px solid var(--line);border-radius:12px;overflow:hidden}'
   +'.wm-agf-row{display:grid;grid-template-columns:20px 18px minmax(0,1fr) auto;align-items:center;gap:12px;padding:9px 12px;border-bottom:1px solid var(--line-2);cursor:pointer;user-select:none;outline:none}'
