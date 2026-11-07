@@ -280,11 +280,13 @@
     .app>.grp:after{display:none}
     .app>.stack{display:flex;flex-direction:column;align-items:stretch;padding:14px 14px 16px;border:1px solid var(--line);border-radius:0 0 8px 8px;gap:12px}
     /* Spouse & anniversary: hidden until its full-width button at the bottom of the card is pressed; its two fields open right under it, side by side */
-    .app>.xp.sp{grid-column:1/-1;grid-row:5}
-    .app>.xp.pp{grid-column:1/-1;grid-row:6}
-    .app>.xts{grid-column:1/-1;grid-row:7;flex-direction:row}
+    .app>.xpw{grid-column:1/-1;grid-row:5;display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;margin-top:12px}
+    .app>.xpw>.xp{margin-top:0}
+    .app>.xpw>.xp.sp{grid-column:1}
+    .app>.xpw>.xp.pp{grid-column:2}
+    .app>.xpw.one>.xp.pp{grid-column:1/-1}
+    .app>.xts{grid-column:1/-1;grid-row:6;flex-direction:row;gap:12px}
     .app>.xts>.tg{flex:1}
-    .app>.xp>.xp-b{display:grid;grid-template-columns:1fr 1fr;gap:16px}
     .app .stack>.f{display:flex;flex-direction:column;gap:6px}
     .app .stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
     .app .stack>.f>:not(label){grid-column:auto}
@@ -317,6 +319,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107za"></script>
+<script src="booking-form.js?v=20261107zb"></script>
 </body>
 </html>
