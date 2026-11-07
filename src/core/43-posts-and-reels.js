@@ -15,13 +15,15 @@
    BE HONEST ABOUT REACH. Meta gives reach for the PAGE (Viewers, per day) but not per Facebook
    post or reel - it accepts the request and returns 0 for every post (probed 6 Nov 2026). So the
    Page's reach is on Overview, Facebook rows are measured by Views and interactions, and a reach
-   column appears only where Meta really reports it (Instagram). A dot with a tooltip marks a
+   column appears only where Meta really reports it (Instagram). "NA" with a tooltip marks a
    number Meta does not report for that kind of content; a muted 0 is a real zero. */
 let ORG_PERIOD='last_28d', ORG_SINCE='', ORG_UNTIL='', ORG_NET='all', ORG_KIND='all',
     ORG_PAGE='all', ORG_SORT='date', ORG_DIR=-1, ORG_Q='', ORG_PG=0, ORG_OPEN=false,
     ORG_ROWS=null, ORG_PAGES=null, ORG_DAILY=null, ORG_STATE=undefined, ORG_LAST_TI=-1;
 const ORG_PER=25;
-const ORG_TABS=['Overview','Facebook','Instagram','Reels','Top performers'];
+// 7 Nov 2026, as asked: no separate Reels tab - reels are Facebook (or Instagram) content and sit in
+// those tabs, with the Reels chip to narrow to them.
+const ORG_TABS=['Overview','Facebook','Instagram','Top performers'];
 const ORG_PRESETS=[
   ['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_28d','Last 28 days'],['last_90d','Last 90 days'],
   ['this_week','This week'],['this_month','This month'],['this_year','This year'],
@@ -60,6 +62,12 @@ function orgInRange(d){ const R=orgRange(); d=String(d||'').slice(0,10); if(!d) 
 
 const ORG_CSS='<style id="orgCss">'
 +'.org-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}'
+/* date, search and page filter share the whole row - no empty strip on the right */
++'.org-top{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(200px,300px);gap:10px;align-items:center;margin-bottom:14px}'
++'.org-top .org-search{max-width:none;width:100%;min-width:0}'
++'.org-top .org-sel{width:100%;height:42px}'
++'.org-top .org-search{height:42px}'
++'@media(max-width:760px){.org-top{grid-template-columns:minmax(0,1fr)}}'
 +'.org-dp{position:relative}'
 +'.org-dp-btn{display:flex;align-items:center;gap:10px;height:42px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg-card);cursor:pointer;transition:.15s;min-width:0}'
 +'.org-dp-btn:hover{border-color:var(--brand)}'
@@ -122,9 +130,14 @@ const ORG_CSS='<style id="orgCss">'
 +'.org-ptxt b{font-size:13px;font-weight:600;color:var(--ink);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}'
 +'.org-tag{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}'
 +'.org-tag.reel{background:#fae8ff;color:#a21caf}.org-tag.video{background:#e0e7ff;color:#3730a3}.org-tag.carousel{background:#fef3c7;color:#92400e}.org-tag.post{background:#f1f5f9;color:#475569}'
++'.org-ct{white-space:nowrap;font-size:12.5px;font-weight:600}'
++'.org-dtl-lab{display:grid;grid-template-columns:minmax(0,1fr) 190px auto;gap:8px;align-items:end;margin-bottom:12px}'
++'.org-dtl-lab label{display:flex;flex-direction:column;gap:4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)}'
++'.org-dtl-lab input,.org-dtl-lab select{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font-size:13px;font-family:inherit;color:var(--ink);background:var(--bg-card);text-transform:none;letter-spacing:0;font-weight:500}'
++'@media(max-width:560px){.org-dtl-lab{grid-template-columns:minmax(0,1fr)}}'
 +'.org-rank{font-weight:800;color:var(--slate);width:28px}'
 +'.org-er{font-weight:700}'
-+'.org-na{color:#cbd5e1;cursor:help}'
++'.org-na{color:#94a3b8;cursor:help;font-size:11.5px;font-weight:600}'
 +'.org-zero{color:#94a3b8}'
 +'.org-date{white-space:nowrap;font-size:12.5px;color:var(--slate)}'
 +'.org-netic{margin-left:auto;flex:none;font-size:13px;opacity:.55}'
@@ -137,6 +150,31 @@ const ORG_CSS='<style id="orgCss">'
 +'.org-note i{color:#94a3b8;margin-top:2px;flex:none}'
 +'.org-empty{border:1px dashed var(--line);border-radius:12px;padding:34px 20px;text-align:center;color:var(--slate);font-size:13.5px;line-height:1.6}'
 +'.org-empty>i{font-size:26px;color:#cbd5e1;display:block;margin-bottom:10px}'
+/* the post box: picture left, everything else right */
++'.org-pop{display:grid;grid-template-columns:240px minmax(0,1fr);gap:22px;align-items:start}'
++'.org-pop-pic{display:flex;flex-direction:column;gap:10px;position:sticky;top:0}'
++'.org-pop-pic img{width:100%;max-height:380px;object-fit:contain;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:12px;display:block}'
++'.org-pop-pic .org-thumb-ph{width:100%;height:180px}'
++'.org-pop-pic .btn{justify-content:center}'
++'.org-pop-main{min-width:0;display:flex;flex-direction:column;gap:14px}'
++'.org-pop-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--slate)}'
++'.org-pop-ct{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;background:var(--brand-a10,#eef2ff);color:var(--brand)}'
++'.org-pop-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}'
++'.org-pt{border:1px solid var(--line);border-radius:10px;padding:9px 11px;min-width:0}'
++'.org-pt .k{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);line-height:1.3;min-height:26px}'
++'.org-pt .v{font-size:17px;font-weight:800;color:var(--ink);margin-top:3px}'
++'.org-pt.na .v{color:#94a3b8;font-size:14px;cursor:help}'
++'.org-pop-chips{display:flex;flex-wrap:wrap;gap:6px}'
++'.org-pc{font-size:12px;color:var(--slate);background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:20px;padding:3px 10px}'
++'.org-pc b{color:var(--ink)}'
++'.org-pop-cap{font-size:13.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}'
++'.org-pop-cap.open{display:block;-webkit-line-clamp:unset}'
++'.org-pop-more{align-self:flex-start;border:0;background:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;padding:0;margin-top:-8px}'
++'.org-pop-edit{display:grid;grid-template-columns:minmax(0,1fr) 200px auto;gap:8px;align-items:end;border-top:1px solid var(--line);padding-top:14px}'
++'.org-pop-edit label{display:flex;flex-direction:column;gap:4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)}'
++'.org-pop-edit input,.org-pop-edit select{height:38px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font-size:13px;font-family:inherit;color:var(--ink);background:var(--bg-card);text-transform:none;letter-spacing:0;font-weight:500}'
++'.org-pop-edit .btn{height:38px}'
++'@media(max-width:760px){.org-pop{grid-template-columns:minmax(0,1fr)}.org-pop-pic{position:static}.org-pop-pic img{max-height:300px}.org-pop-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.org-pop-edit{grid-template-columns:minmax(0,1fr)}}'
 +'.org-dtl-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;margin-top:4px}'
 +'.org-dtl-f .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)}'
 +'.org-dtl-f .v{font-size:14px;font-weight:700;color:var(--ink);margin-top:2px;overflow-wrap:anywhere}'
@@ -154,11 +192,22 @@ function orgN(v){const n=Number(v)||0; if(n>=1e7)return (n/1e7).toFixed(2).repla
 function orgDT(s){ if(!s)return '—'; try{return new Date(s).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return String(s);} }
 function orgAgo(s){ if(!s)return 'never'; const m=Math.round((Date.now()-new Date(s).getTime())/60000);
   if(m<1)return 'just now'; if(m<60)return m+' min ago'; const h=Math.round(m/60); if(h<36)return h+' h ago'; return Math.round(h/24)+' days ago'; }
-function orgEng(r){ return (Number(r.likes)||0)+(Number(r.comments)||0)+(Number(r.shares)||0)+(Number(r.saves)||0); }
+// Interactions exactly as Meta counts them (7 Nov, as asked - nothing added or taken away by JainE):
+// Instagram sends its own total_interactions; for Facebook, Meta's Interactions is reactions + comments +
+// shares (no single API figure exists - probed 7 Nov), stored that way by social-organic-live.
+function orgEng(r){ return Number(r.interactions)||0; }
 // An engagement RATE needs reach, and only Instagram reports reach per post.
 function orgHasReach(r){ return (Number(r.reach)||0)>0; }
 function orgER(r){ const reach=Number(r.reach)||0; return reach? (orgEng(r)/reach*100) : null; }
-function orgKindLabel(k){ return k==='reel'?'Reel':(k==='carousel'?'Carousel':(k==='video'?'Video':'Post')); }
+function orgKindLabel(k){ return k==='reel'?'Reel':(k==='carousel'?'Carousel Post':(k==='video'?'Video':'Static Post')); }
+// Post Name: the name someone gave it (or the one written from the caption), else the caption's
+// first line, cut short - the way the team names posts ("Avishek Das - Work Anniversary").
+function orgPostName(r){ if(r.post_name) return String(r.post_name);
+  const t=String(r.message||'').split(/\n/).map(function(x){return x.trim();}).filter(Boolean)[0]||'(no caption)';
+  return t.length>70?t.slice(0,67).replace(/\s+\S*$/,'')+'…':t; }
+// Engagement Rate as the team defines it: the Reactions column ÷ Views × 100. Since 7 Nov that column
+// carries Meta's Interactions (reactions + comments + shares, + saves on Instagram), as asked.
+function orgRate(r){ const v=orgViews(r); return v? orgEng(r)/v*100 : null; }
 function orgViews(r){ return Number(r.views)||Number(r.plays)||Number(r.video_views)||0; }
 // Meta reports watch time in milliseconds.
 function orgSecs(ms){ const s=(Number(ms)||0)/1000; return s>=60?(Math.floor(s/60)+'m '+Math.round(s%60)+'s'):(s<10?s.toFixed(1)+'s':Math.round(s)+'s'); }
@@ -212,57 +261,62 @@ async function orgLoad(){
   ]);
   ORG_STATE=got[0]; ORG_PAGES=got[1]; ORG_ROWS=got[2]; ORG_DAILY=got[3];
 }
-// Asks the server to pull from Meta now. Rows on screen stay while it runs.
-window.orgRefresh=async function(){
-  if(window._orgSyncing) return;
-  window._orgSyncing=true; renderPage();
-  let jr={};
-  try{
-    const {data:{session}}=await sb.auth.getSession();
-    const res=await fetch(SUPABASE_URL+'/functions/v1/social-organic-live',{method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+((session&&session.access_token)||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify({mode:'daily'})});
-    jr=await res.json().catch(function(){return {};});
-    if(!res.ok && !jr.error) jr.error='The sync answered '+res.status;
-  }catch(e){ jr={error:(e&&e.message)||String(e)}; }
-  window._orgSyncing=false;
-  if(jr.error) toast(jr.error,'err');
-  else toast('Updated '+(jr.posts||0)+' posts, '+(jr.reels||0)+' reels'+(jr.ig?', '+jr.ig+' Instagram':''),'ok');
-  ORG_ROWS=null;
-  if(PAGE==='organic') renderPage();
-};
-
 /* ---------------- detail dialog ---------------- */
+// The team's own content types (7 Nov 2026). Same list as social-organic-live and the
+// camp.social_post_set_label check - change all three together.
+const ORG_CONTENT_TYPES=['Employee Post','Birthday Post','Wish Post','Contest Post','Quiz Post','CP Testimonial',
+  'Client Testimonial','Channel Partner Post','CP Post','Event Post','CARE Post','Creative Post','Project Post',
+  'HR Activity','EGC','Web Blog','PR Post','Trending Post','Moment Marketing'];
+// A correction is saved as 'manual', so the overnight naming never changes it back.
+window.orgSaveLabel=async function(id){
+  const name=(($('orgLblName')||{}).value||'').trim(), type=(($('orgLblType')||{}).value||'')||null;
+  const {error}=await sb.schema('camp').rpc('social_post_set_label',{p_id:id,p_name:name,p_type:type});
+  if(error){ toast('Could not save: '+error.message,'err'); return; }
+  const r=(ORG_ROWS||[]).find(function(x){return String(x.id)===String(id);});
+  if(r){ r.post_name=name||null; r.content_type=type; r.label_source='manual'; }
+  toast('Saved','ok'); closeModal(); renderPage();
+};
+/* THE POST BOX (redesigned 7 Nov 2026, as asked - "looks bad"). Two columns: the picture on the left
+   at a fixed width, so a tall reel no longer pushes everything below the fold; on the right the name,
+   type and date, the same eight numbers as the table (same NA rules, so the box and the row always
+   agree), the smaller counts, the caption (four lines, "Show more" for the rest - no box scrolling
+   inside the box) and, last, the Post Name / Content Type correction. Phones stack it. */
 window.orgOpen=function(id){
   const r=(ORG_ROWS||[]).find(function(x){return String(x.id)===String(id);}); if(!r)return;
   const rx=r.reactions||{};
-  const f=function(k,v){return '<div class="org-dtl-f"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';};
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-photo-film"></i> '+esc(orgKindLabel(r.kind))+' details</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body org-dtl" style="width:min(94vw,640px);max-width:100%;box-sizing:border-box;overflow-x:hidden">'
-      +(r.thumbnail?'<div class="org-dtl-img"><img src="'+esc(r.thumbnail)+'" referrerpolicy="no-referrer" onerror="orgThumbFail(this)"></div>':'')
-      +'<div class="org-dtl-msg">'+esc(r.message||'(no caption)')+'</div>'
-      +'<div style="font-size:12px;color:var(--slate);margin:10px 0 4px">'+esc(r.page_name||'')+' · '+orgDT(r.created_time)+'</div>'
-      +'<div class="org-dtl-grid">'
-        +f('Views',orgN(orgViews(r)))
-        +f('Interactions',orgN(orgEng(r)))
-        +f(r.network==='instagram'?'Likes':'Reactions',orgN(r.likes))+f('Comments',orgN(r.comments))+f('Shares',orgN(r.shares))
-        +(Number(r.reach)?f('Reach',orgN(r.reach)):'')
-        +(Number(r.saves)?f('Saves',orgN(r.saves)):'')
-        +(Number(r.clicks)?f('Clicks',orgN(r.clicks)):'')
-        +(Number(r.replays)?f('Replays',orgN(r.replays)):'')
-        +(Number(r.viewers)?f('Unique video viewers',orgN(r.viewers)):'')
-        +(Number(r.follows)?f('Follows gained',orgN(r.follows)):'')
-        +(Number(r.video_total_time_ms)?f('Total watch time',orgWatch(r.video_total_time_ms)):'')
-        +(Number(r.video_avg_watch_ms)?f('Average watch',orgSecs(r.video_avg_watch_ms)):'')
-        +(Number(r.video_length_s)?f('Length',orgSecs(Number(r.video_length_s)*1000)):'')
-        +(orgHasReach(r)?f('Engagement rate',(orgER(r)||0).toFixed(2)+'%'):'')
-        +((rx.like||rx.love||rx.wow||rx.haha||rx.sad||rx.angry||rx.care)
-           ?f('Reactions by type','👍 '+orgN(rx.like)+'  ❤️ '+orgN(rx.love)+'  😮 '+orgN(rx.wow)+'  😂 '+orgN(rx.haha)+'  😢 '+orgN(rx.sad)+'  😠 '+orgN(rx.angry)+'  🤗 '+orgN(rx.care)):'')
+  const tile=function(k){ const c=ORG_COLS[k], na=!c.has(r), v=c.get(r);
+    return '<div class="org-pt'+(na?' na':'')+'"><div class="k">'+esc(c.k)+'</div><div class="v"'+(na?' title="'+esc(c.why||'')+'"':'')+'>'
+      +(na?'NA':(v?c.fmt(v):'0'))+'</div></div>'; };
+  const small=function(k,v){ return '<span class="org-pc"><b>'+v+'</b> '+esc(k)+'</span>'; };
+  const net=r.network==='instagram'?'Instagram':'Facebook';
+  const rxs=[['👍',rx.like],['❤️',rx.love],['🤗',rx.care],['😂',rx.haha],['😮',rx.wow],['😢',rx.sad],['😠',rx.angry]]
+    .filter(function(p){return Number(p[1])>0;}).map(function(p){return '<span class="org-pc">'+p[0]+' <b>'+orgN(p[1])+'</b></span>';}).join('');
+  const msg=String(r.message||'').trim();
+  openModal('<div class="modal-head"><h3><i class="fa-brands fa-'+(r.network==='instagram'?'instagram':'facebook')+'"></i> '+esc(orgPostName(r))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body org-pop">'
+      +'<div class="org-pop-pic">'
+        +(r.thumbnail?'<img src="'+esc(r.thumbnail)+'" referrerpolicy="no-referrer" onerror="orgThumbFail(this)">':'<div class="org-thumb-ph"><i class="fa-regular fa-image"></i></div>')
+        +(r.permalink?'<a class="btn" target="_blank" rel="noopener" href="'+esc(r.permalink)+'"><i class="fa-solid fa-arrow-up-right-from-square"></i> View on '+net+'</a>':'')
       +'</div>'
-      +(r.network==='facebook'?'<div style="font-size:11.5px;color:var(--slate);margin-top:12px">No reach here: Meta gives reach for the Page as a whole (see Overview), not for each Facebook post.</div>':'')
-    +'</div>'
-    +'<div class="modal-foot">'+(r.permalink?'<a class="btn" target="_blank" rel="noopener" href="'+esc(r.permalink)+'"><i class="fa-solid fa-arrow-up-right-from-square"></i> View on '+(r.network==='instagram'?'Instagram':'Facebook')+'</a>':'')
-      +'<button class="btn primary" onclick="closeModal()">Close</button></div>','md');
+      +'<div class="org-pop-main">'
+        +'<div class="org-pop-meta"><span class="org-tag '+esc(r.kind||'post')+'">'+esc(orgKindLabel(r.kind))+'</span>'
+          +(r.content_type?'<span class="org-pop-ct">'+esc(r.content_type)+'</span>':'')
+          +'<span>'+esc(r.page_name||'')+' · '+orgDT(r.created_time)+'</span></div>'
+        +'<div class="org-pop-tiles">'+orgColsFor().map(tile).join('')+'</div>'
+        +'<div class="org-pop-chips">'+small('Comments',orgN(r.comments))+small('Shares',orgN(r.shares))
+          +(r.network==='facebook'&&r.kind!=='reel'?small('Clicks',orgN(r.clicks)):'')
+          +(r.network==='instagram'?small('Saves',orgN(r.saves)):'')
+          +(Number(r.replays)?small('Replays',orgN(r.replays)):'')+rxs+'</div>'
+        +(msg?'<div class="org-pop-cap" id="orgCap">'+esc(msg)+'</div>'
+            +(msg.length>260||msg.split('\n').length>4?'<button class="org-pop-more" onclick="var c=document.getElementById(\'orgCap\');c.classList.toggle(\'open\');this.textContent=c.classList.contains(\'open\')?\'Show less\':\'Show more\'">Show more</button>':'')
+          :'<div class="org-pop-cap" style="color:var(--slate)">(no caption)</div>')
+        // Post Name and Content Type: written from the caption by the AI, corrected here by anyone
+        +'<div class="org-pop-edit"><label>Post Name<input id="orgLblName" value="'+esc(orgPostName(r))+'"></label>'
+          +'<label>Content Type<select id="orgLblType"><option value="">—</option>'
+          +ORG_CONTENT_TYPES.map(function(t){return '<option'+(r.content_type===t?' selected':'')+'>'+esc(t)+'</option>';}).join('')+'</select></label>'
+          +'<button class="btn primary" onclick="orgSaveLabel(\''+esc(String(r.id))+'\')">Save</button></div>'
+      +'</div>'
+    +'</div>','lg');
 };
 
 function orgDatePicker(){
@@ -285,47 +339,39 @@ function orgDatePicker(){
 
 function orgStatusBar(){
   const S=ORG_STATE||{};
-  const btn='<button class="btn" onclick="orgRefresh()"'+(window._orgSyncing?' disabled':'')+'>'
-    +(window._orgSyncing?'<i class="fa-solid fa-rotate fa-spin"></i> Updating…':'<i class="fa-solid fa-rotate"></i> Refresh now')+'</button>';
-  const who={cron:'the 6 am refresh',button:'Refresh now',backfill:'the first full pull'}[S.last_trigger]||'';
+  // 7 Nov 2026, as asked: no Refresh button - one refresh every night (cron 'social-organic-daily').
+  const who={cron:'the nightly refresh',backfill:'the first full pull'}[S.last_trigger]||'';
   return '<div class="org-st"><i class="fa-brands fa-meta" style="font-size:18px;color:#1877f2"></i><div class="grow">'
-    +'Updates itself every morning at <b>6:00</b> from Meta. Last updated <b>'+esc(orgAgo(S.last_sync_at))+'</b>'+(who?' by '+esc(who):'')+'.'
+    +'Updates itself <b>every night</b> from Meta. Last updated <b>'+esc(orgAgo(S.last_sync_at))+'</b>'+(who?' by '+esc(who):'')+'.'
     +(S.last_error?'<br><span class="err"><i class="fa-solid fa-triangle-exclamation"></i> '+esc(String(S.last_error).slice(0,220))+'</span>':'')
-    +'</div>'+btn+'</div>';
+    +'</div></div>';
 }
 
 /* ---------------- columns ---------------- */
 // One definition per number. `has` says whether Meta reports it for that row at all, so a real 0
-// (muted) is told apart from "not reported" (a dot with the reason as a tooltip).
+// (muted) is told apart from "not reported" - shown as NA, with the reason as a tooltip (7 Nov, as asked).
 function orgFbVideo(r){ return r.network==='facebook' && (r.kind==='reel'||r.kind==='video'||Number(r.video_views)>0||Number(r.video_length_s)>0); }
+/* The columns asked for (6-7 Nov 2026), in that order:
+   Views · Viewers · Reactions · Engagement Rate · Net Follows · Duration (sec) · Watch Time · Average Seconds Viewed.
+   VIEWERS: Meta's per-post Viewers (post_total_media_view_unique, the post's reach), pulled automatically
+   every night since 7 Nov 2026 - Instagram reach for Instagram. Posts older than ~2 years have none (NA).
+   FOLLOWS: Meta reports follows gained per post only for videos and reels; there is no follow or unfollow
+   figure for photo posts, and no unfollows per post at all, so it is "Follows", not net. */
+function orgVideo(r){ return r.kind==='reel'||r.kind==='video'||Number(r.video_length_s)>0; }
 const ORG_COLS={
   views:{k:'Views', get:orgViews, fmt:orgN, has:function(){return true;}},
-  reach:{k:'Reach', get:function(r){return Number(r.reach)||0;}, fmt:orgN,
-    has:function(r){return r.network==='instagram';}, why:'Meta gives reach for the Facebook Page as a whole, not per post - see Overview'},
-  likes:{k:'Reactions', get:function(r){return Number(r.likes)||0;}, fmt:orgN, has:function(){return true;}},
-  comments:{k:'Comments', get:function(r){return Number(r.comments)||0;}, fmt:orgN, has:function(){return true;}},
-  shares:{k:'Shares', get:function(r){return Number(r.shares)||0;}, fmt:orgN, has:function(){return true;}},
-  saves:{k:'Saves', get:function(r){return Number(r.saves)||0;}, fmt:orgN,
-    has:function(r){return r.network==='instagram';}, why:'saves are an Instagram number'},
-  clicks:{k:'Clicks', get:function(r){return Number(r.clicks)||0;}, fmt:orgN,
-    has:function(r){return r.network==='facebook'&&r.kind!=='reel';}, why:'Meta reports clicks for Facebook posts only'},
-  inter:{k:'Interactions', get:orgEng, fmt:orgN, strong:true, has:function(){return true;}},
-  er:{k:'Eng. rate', get:function(r){return orgER(r)||0;}, fmt:function(v){return v.toFixed(2)+'%';},
-    has:orgHasReach, why:'needs reach, which Meta gives per post on Instagram only'},
-  replays:{k:'Replays', get:function(r){return Number(r.replays)||0;}, fmt:orgN,
-    has:function(r){return r.network==='facebook'&&r.kind==='reel';}, why:'Facebook reels only'},
-  follows:{k:'Follows', get:function(r){return Number(r.follows)||0;}, fmt:orgN, has:orgFbVideo, why:'follows gained are reported for Facebook video only'},
-  dur:{k:'Length', get:function(r){return (Number(r.video_length_s)||0)*1000;}, fmt:orgSecs, has:orgFbVideo, why:'Facebook video only'},
-  avgw:{k:'Avg watch', get:function(r){return Number(r.video_avg_watch_ms)||0;}, fmt:orgSecs, has:orgFbVideo, why:'Facebook video only'},
-  totw:{k:'Total watch', get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch, has:orgFbVideo, why:'Facebook video only'}
+  viewers:{k:'Viewers', get:function(r){return Number(r.reach)||0;}, fmt:orgN,
+    has:function(r){return Number(r.reach)>0;}, why:'Meta has no Viewers figure for this post (it keeps them about two years)'},
+  likes:{k:'Interactions', get:orgEng, fmt:orgN, has:function(){return true;}},   // Meta's Interactions (7 Nov, as asked)
+  rate:{k:'Engagement Rate', get:function(r){return orgRate(r)||0;}, fmt:function(v){return v.toFixed(2)+'%';}, strong:true,
+    has:function(r){return orgViews(r)>0;}, why:'no views recorded yet'},
+  netf:{k:'Follows', get:function(r){return Number(r.follows)||0;}, fmt:orgN,
+    has:orgVideo, why:'Meta reports follows per post only for videos and reels'},
+  dur:{k:'Duration (sec)', get:function(r){return Number(r.video_length_s)||0;}, fmt:function(v){return String(Math.round(v));}, has:orgVideo, why:'videos and reels only'},
+  totw:{k:'Watch Time', get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch, has:orgVideo, why:'videos and reels only'},
+  avgw:{k:'Average Seconds Viewed', get:function(r){return (Number(r.video_avg_watch_ms)||0)/1000;}, fmt:function(v){return v.toFixed(1);}, has:orgVideo, why:'videos and reels only'}
 };
-function orgColsFor(ti,rows){
-  const vid=rows.some(orgFbVideo)?['follows','avgw','totw','dur']:[];
-  if(ti===1) return ['views','likes','comments','shares','clicks','inter'].concat(vid);
-  if(ti===2) return ['reach','views','likes','comments','shares','saves','inter','er'];
-  if(ti===3) return ['views','replays','likes','comments','shares','inter','reach'].concat(vid);
-  return ['views','inter','shares','reach'];
-}
+function orgColsFor(){ return ['views','viewers','likes','rate','netf','dur','totw','avgw']; }
 function orgSortRows(rows){
   const c=ORG_COLS[ORG_SORT], d=ORG_DIR;
   return rows.slice().sort(function(a,b){
@@ -342,23 +388,23 @@ function orgTable(list,cols,opts){
       +(on?'<i class="fa-solid fa-arrow-'+(ORG_DIR<0?'down':'up')+' ar"></i>':'')+'</th>';
   };
   return '<div class="org-tblwrap"><table class="org-tbl"><thead><tr>'
-    +(opts.rank?'<th>#</th>':'')+th('date','Date',false)+'<th>Post</th><th>Format</th>'
+    +(opts.rank?'<th>#</th>':'')+th('date','Post Date',false)+'<th>Post Name</th><th>Post Type</th><th>Content Type</th>'
     +cols.map(function(k){return th(k,ORG_COLS[k].k,true);}).join('')
     +'</tr></thead><tbody>'
     +list.map(function(r,i){
       const thumb=r.thumbnail?'<img class="org-thumb" src="'+esc(r.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" onerror="orgThumbFail(this)">'
                              :'<div class="org-thumb-ph"><i class="fa-regular fa-image"></i></div>';
-      const txt=String(r.message||'').replace(/\s+/g,' ').trim()||'(no caption)';
       return '<tr onclick="orgOpen(\''+esc(String(r.id))+'\')">'
         +(opts.rank?'<td class="org-rank">'+(i+1)+'</td>':'')
         +'<td class="org-date">'+orgDT(r.created_time)+'</td>'
-        +'<td><div class="org-post">'+thumb+'<div class="org-ptxt"><b>'+esc(txt.slice(0,120))+'</b></div>'
+        +'<td><div class="org-post">'+thumb+'<div class="org-ptxt"><b title="'+esc(String(r.message||'').slice(0,400))+'">'+esc(orgPostName(r))+'</b></div>'
           +'<i class="fa-brands '+(r.network==='instagram'?'fa-instagram':'fa-facebook')+' org-netic" title="'+esc(r.page_name||'')+'"></i></div></td>'
         +'<td><span class="org-tag '+esc(r.kind||'post')+'">'+esc(orgKindLabel(r.kind))+'</span></td>'
+        +'<td class="org-ct">'+(r.content_type?esc(r.content_type):'<span class="org-na" title="named and typed from the caption at the next nightly refresh">Pending</span>')+'</td>'
         +cols.map(function(k){ const c=ORG_COLS[k], v=c.get(r), na=!c.has(r);
           const tip=c.why||('Meta does not report this for a '+orgKindLabel(r.kind));
           return '<td class="n'+(c.strong?' org-er':'')+'">'
-            +(na?'<span class="org-na" title="'+esc(tip)+'">·</span>'
+            +(na?'<span class="org-na" title="'+esc(tip)+'">NA</span>'
                 :(v?c.fmt(v):'<span class="org-zero">0</span>'))+'</td>'; }).join('')
       +'</tr>';
     }).join('')+'</tbody></table></div>';
@@ -385,7 +431,6 @@ VIEWS.organic=async function(v,seg){
   const scoped=base.filter(function(r){
     if(ti===1) return r.network==='facebook';
     if(ti===2) return r.network==='instagram';
-    if(ti===3) return r.kind==='reel';
     return true;
   });
   const kc={}; scoped.forEach(function(r){kc[r.kind]=(kc[r.kind]||0)+1;});
@@ -398,11 +443,11 @@ VIEWS.organic=async function(v,seg){
     chips='<div class="org-bar">'+['all','post','video','reel','carousel'].map(function(k){
       const n=k==='all'?scoped.length:(kc[k]||0);
       if(k!=='all'&&!n&&ORG_KIND!==k) return '';
-      const lbl={all:'All formats',post:'Posts',video:'Videos',reel:'Reels',carousel:'Carousels'}[k];
+      const lbl={all:'All types',post:'Static Posts',video:'Videos',reel:'Reels',carousel:'Carousel Posts'}[k];
       return '<button class="org-fbtn'+(ORG_KIND===k?' on':'')+'" onclick="orgSetKind(\''+k+'\')">'+esc(lbl)+'<span class="n">'+n+'</span></button>';
     }).join('')+'</div>';
   }
-  const bar='<div class="org-bar">'+orgDatePicker()
+  const bar='<div class="org-top">'+orgDatePicker()
     +'<input class="org-search" id="orgQ" placeholder="Search caption or page…" value="'+esc(ORG_Q)+'" oninput="orgSearch(this.value)">'
     +pageSel+'</div>';
 
@@ -413,23 +458,22 @@ VIEWS.organic=async function(v,seg){
   } else if(!rows.length){
     let msg;
     if(ti===2&&!igLinked) msg='<i class="fa-brands fa-instagram"></i>Instagram is not linked to the Jain Group Facebook Page yet, so Meta sends nothing for it.<br>'
-      +'Link it in Meta Business Suite (Settings → Accounts → Instagram accounts), and it fills in at the next morning refresh.';
+      +'Link it in Meta Business Suite (Settings → Accounts → Instagram accounts), and it fills in at the next nightly refresh.';
     else if((ORG_ROWS||[]).length) msg='<i class="fa-regular fa-folder-open"></i>Nothing in this date range or filter.<br>Try widening the dates, or choose <b>Lifetime</b>.';
-    else msg='<i class="fa-regular fa-folder-open"></i>Nothing saved yet. Click <b>Refresh now</b>, or wait for the 6 am refresh.';
+    else msg='<i class="fa-regular fa-folder-open"></i>Nothing saved yet - it fills in at the nightly refresh.';
     body='<div class="org-empty">'+msg+'</div>';
-  } else if(ti===4){
+  } else if(ti===3){
     const top=rows.slice().sort(function(a,b){return orgEng(b)-orgEng(a);}).slice(0,20);
     const sorted=ORG_SORT==='date'&&ORG_DIR===-1?top:orgSortRows(top);
     body='<div class="org-note"><i class="fa-solid fa-trophy"></i><span>The 20 posts and reels with the most interactions (reactions + comments + shares + saves) in the period. Click a heading to re-order them.</span></div>'
-      +orgTable(sorted,orgColsFor(4,sorted),{rank:true});
+      +orgTable(sorted,orgColsFor(3,sorted),{rank:true});
   } else {
     const list=orgSortRows(rows);
     const pages=Math.max(1,Math.ceil(list.length/ORG_PER));
     if(ORG_PG>=pages)ORG_PG=pages-1;
     const slice=list.slice(ORG_PG*ORG_PER,(ORG_PG+1)*ORG_PER);
-    const note=ti===1?'Facebook posts are measured by <b>Views</b> and interactions. Meta gives <b>reach</b> for the Page as a whole (see Overview), not for each post.'
-      :(ti===2?'Instagram reports true <b>reach</b> per post, so engagement rate is shown here.'
-      :'Facebook reels carry plays, replays, watch time, shares and follows gained. Reach per reel is not given by Meta.');
+    const note=ti===1?'<b>Viewers</b> = unique people who saw the post (Meta keeps them about two years). <b>Follows</b> = follows gained, reported by Meta for videos and reels only. Engagement Rate = Interactions ÷ Views × 100.'
+      :'Instagram'+"'"+'s per-post reach is shown as <b>Viewers</b>. Engagement Rate = Interactions ÷ Views × 100.';
     body='<div class="org-note"><i class="fa-solid fa-circle-info"></i><span>'+note+' Click a column heading to sort.</span></div>'
       +chips+orgTable(slice,orgColsFor(ti,slice))
       +'<div class="org-pager"><span class="info">Showing '+(ORG_PG*ORG_PER+1)+'–'+Math.min((ORG_PG+1)*ORG_PER,list.length)+' of '+list.length+'</span>'
@@ -497,8 +541,7 @@ function orgOverview(rows){
   };
   const top=rows.slice().sort(function(a,b){return orgEng(b)-orgEng(a);}).slice(0,5);
   return kpis+chart
-    +'<div class="org-grid2"><div><div class="org-h2"><i class="fa-solid fa-share-nodes"></i> By network</div>'+tbl(agg(function(r){return r.network==='instagram'?'Instagram':'Facebook';}),'Network')+'</div>'
-    +'<div><div class="org-h2"><i class="fa-solid fa-shapes"></i> By format</div>'+tbl(agg(function(r){return orgKindLabel(r.kind)+'s';}),'Format')+'</div></div>'
-    +(top.length?'<div class="org-h2" style="margin-top:14px"><i class="fa-solid fa-trophy"></i> Top 5 this period</div>'+orgTable(top,['views','inter','shares'],{rank:true}):'')
+    +'<div class="org-h2"><i class="fa-solid fa-shapes"></i> By post type</div>'+tbl(agg(function(r){return orgKindLabel(r.kind)+'s';}),'Post type')
+    +(top.length?'<div class="org-h2" style="margin-top:14px"><i class="fa-solid fa-trophy"></i> Top 5 this period</div>'+orgTable(top,['views','likes','rate'],{rank:true}):'')
     +'<div class="org-note" style="margin-top:14px"><i class="fa-solid fa-circle-info"></i><span><b>Reach</b> here is Meta\'s daily Viewers for the Page, added up day by day - someone who saw the Page on two days counts twice, as Meta gives no de-duplicated total. Meta does not give reach for each Facebook post.</span></div>';
 }
