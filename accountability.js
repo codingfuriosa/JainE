@@ -10537,6 +10537,48 @@
 
   /* Save draft and Create are the same gathering with a different destination, so they share one
      path rather than two that could drift. */
+  /* ONE BILL, ENTERED TWICE. Nothing stopped it. Bill "S.S.F.M.S/26-27/164" and bill "164" from
+     the same vendor are the same piece of paper, and both went in - seven hours apart, by two
+     different people, for amounts sixty rupees apart (143177 and 143117, one of them a typo).
+     Comparing the text as typed would never have caught that, so vendor and bill number are
+     compared with their punctuation taken out, and a bill number ending in the same run of three
+     or more digits counts as a match too. Three, not two: plenty of vendors here number bills
+     05/26, 06/26 by financial year, and those are not the same bill.
+     A WARNING, NOT A REFUSAL. A vendor who numbers every month's bill 09 is entitled to, and only
+     the person holding the paper can tell. Run over all 528 bills on file this flags six pairs,
+     every one worth a human glance. A check that cannot be made never blocks a bill. */
+  async function wfBillDuplicateOk(flowId, details, exceptCaseId){
+    const field=function(lbl){
+      const d=(details||[]).find(function(x){ return x && x.label===lbl; });
+      return d?String(d.value==null?'':d.value).trim():'';
+    };
+    const vendor=field('Vendor'), billNo=field('Bill No.');
+    if(!vendor||!billNo) return true;
+    let rows=null;
+    try{
+      const {data,error}=await ACC().rpc('wf_duplicate_bills',
+        {p_flow_id:flowId, p_vendor:vendor, p_bill_no:billNo, p_except_case_id:exceptCaseId||null});
+      if(error) return true;
+      rows=data;
+    }catch(e){ return true; }
+    if(!rows||!rows.length) return true;
+    const said=rows.map(function(r){
+      return 'JainE id '+r.jaine_id+' ('+(r.bill_no||'no number')
+        +(r.bill_date?', '+r.bill_date:'')+(r.amount?', Rs '+r.amount:'')
+        +', '+r.why+', raised by '+(wfNm(r.raised_by)||r.raised_by||'someone')+')';
+    }).join('; also ');
+    return await new Promise(function(resolve){
+      wfConfirm({
+        title:'This bill may already be in',
+        body:vendor+' bill '+billNo+' looks like '+(rows.length===1?'one already on file':'bills already on file')
+            +': '+said+'. If it is genuinely a different bill, carry on.',
+        okLabel:'Enter it anyway', okClass:'danger',
+        onOk:function(){ resolve(true); },
+        onCancel:function(){ resolve(false); }
+      });
+    });
+  }
+
   window.wfEventSaveDraft=async function(flowId){
     window._wfEvtDraftMode=true;
     try{ await wfEventSaveInner(flowId, null); }
@@ -10722,12 +10764,21 @@
             window._wfDraftId=data&&data.id;
           }
         }catch(e){ toast('Could not save the draft: '+((e&&e.message)||e),'err'); return; }
+        /* THE DRAFT NOW NAMES THESE FILES, so they are not abandoned uploads and the tidy-up list
+           must be told. Without this the list still held every file picked this session, and the
+           next workflow form opened swept them out of the bucket from under the draft - the draft
+           went on naming receipts that were no longer there, and submitted a claim whose
+           attachments opened as an S3 error page. Files attached and then taken off again before
+           saving are not in `details`, so those still go, which is the point of sweeping. */
+        try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(_e){}
         toast('Draft saved','ok');
         renderPage();
         return;
       }
     const N=wfN();
+    // Drafts have already returned above - a draft is not a submission, so it is not checked.
+    if(!(await wfBillDuplicateOk(flowId, details, caseId))) return;
     try{
       if(caseId){
         // An edited Attachment field carries its old S3 path in data-orig (set when the row was
@@ -17245,12 +17296,19 @@
         }
         // Delete the underlying S3 object only once NOTHING else points at it — delegated copies share
         // the same storage_path, and a comment could too.
-        const {data:othersF}=await ACC().from('ptask_files').select('id').eq('storage_path',path).limit(1);
-        const {data:othersC}=await ACC().from('ptask_comments').select('id').eq('attach_path',path).limit(1);
+        /* FAILING TO ASK IS NOT AN ANSWER OF "NO" - the rule the workflow sweeper already learned
+           (see wfPurgeCaseFiles). These two took only `data` and never looked at `error`. A
+           Supabase query that fails RESOLVES with {data:null,error:{...}}, so a dropped connection
+           or an expired token left both undefined, which read as "nothing else points at this
+           file" and deleted it while the rows still named it. Now only an actual answer counts. */
+        const {data:othersF,error:othersFErr}=await ACC().from('ptask_files').select('id').eq('storage_path',path).limit(1);
+        const {data:othersC,error:othersCErr}=await ACC().from('ptask_comments').select('id').eq('attach_path',path).limit(1);
         // A legal notice task's attachment is also filed in Legal > Legal Notice Answers on the same
         // file (acc.legal_notice_answer_file) - the document there keeps it.
         let docUses=true; try{ const r=await ACC().rpc('storage_path_in_use',{p_path:path,p_except_doc:null,p_except_ptask_file:fid}); docUses=r.error?true:(r.data!==false); }catch(_e){ docUses=true; }
-        if((!othersF||!othersF.length)&&(!othersC||!othersC.length)&&!docUses) await s3Delete(path);
+        const nothingElseSaysSo = !othersFErr && !othersCErr
+          && !(othersF&&othersF.length) && !(othersC&&othersC.length);
+        if(nothingElseSaysSo && !docUses) await s3Delete(path);
         await ACC().from('ptask_activity').insert({task_id:tid,action:'deleted attachment',detail:'Deleted '+(fname||'an attachment')});
         await sysMsg(tid,'deleted the attachment "'+(fname||'file')+'"');
         toast('Attachment "'+(fname||'')+'" deleted','ok');

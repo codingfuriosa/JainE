@@ -433,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'277cb02925','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'2914b41d37','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -2162,6 +2162,24 @@ function openPendingTab(){
   }
   return tab;
 }
+/* IS THE FILE ACTUALLY STILL THERE?
+   S3 answers a key that is not in the bucket with a 404 whose body is an XML <Error> document,
+   and a browser pointed straight at that address simply DISPLAYS it. That is how a receipt which
+   had gone missing from the bucket reached people - not as "this file is no longer here" but as a
+   page of XML they could make nothing of, on a claim that still listed the file as attached.
+   A HEAD carries no body and no custom header, so it is a plain cross-origin request needing
+   nothing of the bucket that opening the file does not already need. A check that CANNOT be made
+   - the site's origin is not on the bucket's allowed list, the network blinks - is not an answer
+   either way, so in that case the file is opened exactly as it was before. */
+async function s3HttpStatus(url){
+  try{ const r=await fetch(url,{method:'HEAD'}); return r.status; }
+  catch(e){ return 0; }   // could not ask - do not stand in the way
+}
+function s3GoneMessage(status){
+  return status===404
+    ? 'That file is no longer in storage, so there is nothing to open. It will have to be attached again.'
+    : 'That file could not be opened just now - the link was refused. Please try again in a moment.';
+}
 /* preTab: a tab the caller already opened on the click (openPendingTab), for callers that have to
    look something up before they know the file - by then the click is too old to open one here. */
 async function s3OpenSigned(storagePath,downloadName,preTab){
@@ -2171,6 +2189,12 @@ async function s3OpenSigned(storagePath,downloadName,preTab){
   if(error){
     if(tab) try{ tab.close(); }catch(_e){}
     toast('Could not open file: '+error.message,'err');
+    return;
+  }
+  const st=await s3HttpStatus(data.url);
+  if(st===404||st===403){
+    if(tab) try{ tab.close(); }catch(_e){}
+    toast(s3GoneMessage(st),'err');
     return;
   }
   if(downloadName){
