@@ -254,9 +254,9 @@
     .sec:has(.app){display:block;border:0;background:none;box-shadow:none;border-radius:0}
     .sec:has(.app)>.sh{display:none}
     .sec:has(.app)>.sb{padding:0}
-    .app{display:grid;grid-template-columns:1fr 1fr;column-gap:20px;align-items:stretch;background:#fff;border:1px solid var(--line);border-radius:12px;padding:0 18px 18px;margin:0 0 16px;overflow:hidden}
+    .app{display:grid;grid-template-columns:1fr 1fr;column-gap:20px;align-items:stretch;background:#fff;border:1px solid var(--line);border-radius:12px;padding:0 16px 16px;margin:0 0 14px;overflow:hidden}
     .app+.app{margin-top:0;padding-top:0}
-    .app>.ah{grid-column:1/-1;margin:0 -18px 16px;padding:12px 18px;background:#f4f5f7;border-bottom:1px solid var(--line)}
+    .app>.ah{grid-column:1/-1;margin:0 -16px 14px;padding:11px 16px;background:#f4f5f7;border-bottom:1px solid var(--line)}
     .app>.ah b{font-size:15.5px}
     .app>.ah+.grp{grid-column:1;grid-row:2}
     .app>.ah+.grp+.stack{grid-column:1;grid-row:3}
@@ -264,10 +264,22 @@
     .app>.ah+.grp+.stack+.grp+.stack{grid-column:2;grid-row:3}
     .app>.grp{margin:0!important;padding:9px 14px;background:#f7f8fa;border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;color:var(--ink2)}
     .app>.grp:after{display:none}
-    .app>.stack{padding:16px 14px 18px;border:1px solid var(--line);border-radius:0 0 8px 8px;gap:14px}
-    /* Spouse & anniversary is the card's footer strip; opened, its two fields sit side by side in one row */
-    .app>details.t{grid-column:1/-1;grid-row:4;max-width:none;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
-    .app>details.t[open]>.stack{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;padding:14px!important;border-radius:8px}
+    .app>.stack{padding:14px 14px 16px;border:1px solid var(--line);border-radius:0 0 8px 8px;gap:12px}
+    /* Spouse & anniversary is a third panel across the card, always open on a wide screen: its two fields sit side by side */
+    .app>details.t{grid-column:1/-1;grid-row:4;max-width:none;margin-top:14px;padding-top:0;border-top:0}
+    .app>details.t>summary{pointer-events:none;cursor:default;display:block;padding:9px 14px;background:#f7f8fa;border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;box-shadow:none;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2)}
+    .app>details.t>summary:before,.app>details.t>summary:after{display:none!important}
+    .app>details.t>summary .opt{text-transform:none;letter-spacing:0;font-weight:400;color:var(--slate)}
+    .app>details.t>.stack{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:0!important;border:1px solid var(--line)!important;border-top:0!important;border-radius:0 0 8px 8px!important;padding:14px!important}
+    /* "More about you" is a panel on a wide screen too: its six optional fields in two columns, no lone button */
+    .sb>details.t.opt-d{max-width:none;margin-top:18px}
+    .sb>details.t.opt-d>summary{pointer-events:none;cursor:default;display:block;padding:9px 14px;background:#f7f8fa;border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;box-shadow:none;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);width:auto}
+    .sb>details.t.opt-d>summary:before,.sb>details.t.opt-d>summary:after{display:none!important}
+    .sb>details.t.opt-d>summary .opt{text-transform:none;letter-spacing:0;font-weight:400;color:var(--slate)}
+    .sb>details.t.opt-d>.stack{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:0!important;border:1px solid var(--line)!important;border-top:0!important;border-radius:0 0 8px 8px!important;padding:14px!important}
+    .sb>details.t.opt-d>.stack>.f{display:flex;flex-direction:column;gap:6px}
+    .sb>details.t.opt-d>.stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
+    .sb>details.t.opt-d>.stack>.f>:not(label){grid-column:auto}
     .app .stack>.f{display:flex;flex-direction:column;gap:6px}
     .app .stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
     .app .stack>.f>:not(label){grid-column:auto}
@@ -298,6 +310,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107i"></script>
+<script src="booking-form.js?v=20261107k"></script>
 </body>
 </html>

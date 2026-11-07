@@ -132,6 +132,7 @@ function openSheet(path,kind){
 
 // ---------------------------------------------------------------- steps
 function stepApplicants(){
+  const wideScreen=!!(window.matchMedia&&window.matchMedia('(min-width:1000px)').matches);
   return card('','','Applicant details','Every person in whose name the unit is to be booked. Joint applicants can be added below.',
     S.applicants.map(function(a,i){
       const p='applicants.'+i+'.', foreign=a.nationality!=='India';
@@ -154,7 +155,7 @@ function stepApplicants(){
         +field(p+'passport','Passport number',{cls:'up',req:foreign,note:foreign?'':'(only for NRIs & foreigners)',full:1})
         +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,note:foreign?'':'(only for NRIs & foreigners)'})
         +'</div>'
-        +(i===0?'<details class="t opt-d"'+(a.spouse||a.anniversary?' open':'')+'><summary><span>Spouse & anniversary <span class="opt">(optional)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
+        +(i===0?'<details class="t opt-d"'+(wideScreen||a.spouse||a.anniversary?' open':'')+'><summary><span>Spouse & anniversary <span class="opt">(optional)</span></span></summary><div class="stack" style="padding:0 14px 14px">'
           +field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></details>':'')
         +'</div>';
     }).join('')
@@ -187,10 +188,11 @@ function stepContact(){
       +'</div>');
 }
 function stepAbout(){
+  const wideScreen=!!(window.matchMedia&&window.matchMedia('(min-width:1000px)').matches);
   return card('','','Occupation','',
       '<div class="grid">'+chips('profession.kind','Profession',['Salaried','Self-Employed','Govt. Employee','Others'],{mcols:4,sm:1})
       +'<div class="pair">'+field('profession.company','Company',{optional:1})+field('profession.designation','Designation',{optional:1})+'</div></div>'
-      +'<details class="t opt-d"><summary><span>More about you <span class="opt">(optional)</span></span></summary>'
+      +'<details class="t opt-d"'+(wideScreen?' open':'')+'><summary><span>More about you <span class="opt">(optional)</span></span></summary>'
         +'<div class="stack" style="padding:0 14px 14px">'
         +field('profession.income','Gross income',{optional:1})+field('profession.community','Community',{optional:1})
         +field('profession.newspaper','Favourite newspaper',{optional:1})+field('profession.magazine','Magazine',{optional:1})
