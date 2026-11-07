@@ -11229,7 +11229,7 @@ function taskScoreboard(){ navTo('scoreboard'); }
 const WM={items:null,meetings:null,people:[],err:'',cur:null,view:'meeting',tab:'pending',q:'',who:'',
   allF:'pending',allG:'meeting',allMtg:'',allWho:'',showPpl:false,wk:null,showPast:false,
   picked:{mem:[],due:null,recur:'none'},parsed:null,sugIdx:0,lastNew:null,lastDraft:null,
-  sel:new Set(),draftMem:{},draftRecur:{},timer:null,busy:false};
+  sel:new Set(),draftMem:{},draftRecur:{},timer:null,busy:false,formPpl:new Set(),kpiT:null,railOff:undefined};
 
 const WM_RECUR={none:'Does not repeat',weekly:'Weekly',monthly:'Monthly'};
 const WM_LEGACY={open:'Open',in_progress:'In progress',not_done:'Not done',done:'Done'};
@@ -11308,7 +11308,6 @@ const wmSeries=kind=>(WM.meetings||[]).filter(m=>m.kind===kind);
 
 VIEWS.weekly_status=async function(v){
   setCrumb(['Overview','Weekly Status']);
-  document.body.classList.add('wm-dark');
   loader(v);
   await wmLoad();
   if(WM.items===null){
@@ -11332,7 +11331,9 @@ function wmRender(){
     <h1>${hi}.</h1>
     <div class="wm-lead"><button class="wm-lnk ${WM.view==='all'?'on':''}" onclick="wmOpenAll('pending')"><b id="wmPend">${open.length}</b> tasks pending</button></div>
   </div>
-  <div class="wm-grid"><div id="wmMain"></div><aside class="wm-rail"><div class="wm-railbtns"><button class="wm-btn wm-sm wm-light" onclick="wmStartMeeting()"><i class="fa-solid fa-play"></i> Start a meeting</button><button class="wm-btn wm-sm wm-line" onclick="wmScheduleMeeting()"><i class="fa-regular fa-calendar-plus"></i> Schedule a meeting</button></div><div class="wm-box" id="wmNav"></div></aside></div>`;
+  <div class="wm-grid ${wmRailOff()?'off':''}" id="wmGrid"><div id="wmMain"></div><aside class="wm-rail">
+    <div class="wm-railfold"><button class="wm-ib" onclick="wmRailToggle()" title="Show meetings"><i class="fa-solid fa-angles-left"></i></button><button class="wm-ib" onclick="wmStartMeeting()" title="Start a meeting"><i class="fa-solid fa-play"></i></button><button class="wm-ib" onclick="wmScheduleMeeting()" title="Schedule a meeting"><i class="fa-regular fa-calendar-plus"></i></button></div>
+    <div class="wm-railopen"><div class="wm-railbtns"><button class="wm-btn wm-sm wm-light" onclick="wmStartMeeting()"><i class="fa-solid fa-play"></i> Start a meeting</button><button class="wm-btn wm-sm wm-line" onclick="wmScheduleMeeting()"><i class="fa-regular fa-calendar-plus"></i> Schedule a meeting</button><button class="wm-ib" onclick="wmRailToggle()" title="Hide this panel"><i class="fa-solid fa-angles-right"></i></button></div><div class="wm-box" id="wmNav"></div></div></aside></div>`;
   wmPaintNav();
   if(WM.view==='all') wmPaintAll(); else wmPaintMeeting();
 }
@@ -11340,28 +11341,42 @@ function wmCounts(){ const n=WM.items.filter(it=>!it.draft&&wmOpen(it)).length; 
 
 /* ---------- right rail: the week, Monday to Saturday ---------- */
 function wmMonday(iso){ const d=new Date(iso+'T00:00'); d.setDate(d.getDate()-((d.getDay()+6)%7)); return wmIso(d); }
-const WM_DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const WM_DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 const wmTime=t=>t?String(t).slice(0,5):'';
 // The arrows step to the next week that has a meeting in it: meetings are every two or three
 // weeks, and walking through the empty weeks between them one click at a time would be tedious.
 function wmWeeks(){ const s=new Set((WM.meetings||[]).map(m=>wmMonday(m.meeting_date))); s.add(wmMonday(wmToday())); return [...s].sort(); }
 window.wmWeekStep=function(dir){
-  const ws=wmWeeks(), i=ws.indexOf(WM.wk), j=i<0?ws.findIndex(w=>w>WM.wk)-(dir<0?1:0):i+dir;
-  if(j>=0&&j<ws.length){ WM.wk=ws[j]; WM.showPast=false; wmPaintNav(); }
+  const ws=wmWeeks(), w=dir>0?ws.find(x=>x>WM.wk):ws.filter(x=>x<WM.wk).pop();
+  if(w){ WM.wk=w; WM.showPast=false; wmPaintNav(); }
 };
+// Two weeks at a time: the week the arrows are on and the one after it, so this week and next
+// week show together. The arrows still jump to the nearest week that has meetings.
 function wmPaintNav(){
   const nav=$('wmNav'); if(!nav) return;
-  const today=wmToday(), mon=WM.wk||wmMonday(today), thisWeek=mon===wmMonday(today), ws=wmWeeks(), i=ws.indexOf(mon);
-  const sat=wmAdd(mon,5), fmtD=s=>new Date(s+'T00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'});
-  nav.innerHTML=`<div class="wm-wk"><button onclick="wmWeekStep(-1)" ${i<=0?'disabled':''} title="Earlier meetings"><i class="fa-solid fa-chevron-left"></i></button>
-      <span>${thisWeek?'This week':esc(fmtD(mon)+' – '+fmtD(sat))}</span>
-      <button onclick="wmWeekStep(1)" ${i<0||i>=ws.length-1?'disabled':''} title="Later meetings"><i class="fa-solid fa-chevron-right"></i></button></div>
-    ${thisWeek?`<button class="wm-quiet" style="margin:0 0 6px" onclick="WM.showPast=!WM.showPast;wmPaintNav()"><i class="fa-solid fa-chevron-${WM.showPast?'down':'up'}"></i> ${WM.showPast?'Hide earlier days':'Earlier this week'}</button>`:''}
-    ${WM_DAYS.map((d,k)=>{ const date=wmAdd(mon,k), ms=(WM.meetings||[]).filter(m=>m.meeting_date===date).sort((a,b)=>String(a.start_time||'')<String(b.start_time||'')?-1:1);
+  const today=wmToday(), cur=wmMonday(today), mon=WM.wk||cur, ws=wmWeeks(), i=ws.indexOf(mon), next=wmAdd(mon,7);
+  const fmtD=s=>new Date(s+'T00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+  const label=w=>w===cur?'This week':w===wmAdd(cur,7)?'Next week':w===wmAdd(cur,-7)?'Last week':fmtD(w)+' – '+fmtD(wmAdd(w,6));
+  const week=w=>{ const thisWeek=w===cur;
+    const days=WM_DAYS.map((d,k)=>{ const date=wmAdd(w,k), ms=(WM.meetings||[]).filter(m=>m.meeting_date===date).sort((a,b)=>String(a.start_time||'')<String(b.start_time||'')?-1:1);
       if(thisWeek&&!WM.showPast&&date<today&&!ms.some(m=>m.id===WM.cur&&WM.view==='meeting')) return '';
+      if(!ms.length&&date!==today) return '';
       return `<div class="wm-dl ${date===today?'today':''}">${date===today?'Today':d.slice(0,3)+' '+new Date(date+'T00:00').getDate()}</div>`+
-        ms.map(m=>`<div class="wm-mi ${WM.view==='meeting'&&WM.cur===m.id?'on':''} ${date>today?'up':''}" onclick="wmOpenMeeting(${m.id})"><span class="t">${esc(wmTime(m.start_time))}</span><span class="n">${esc(m.kind||'Meeting')}</span>${date===today?'<span class="live"></span>':''}</div>`).join(''); }).join('')}`;
+        (ms.map(m=>`<div class="wm-mi ${WM.view==='meeting'&&WM.cur===m.id?'on':''} ${date>today?'up':''}" onclick="wmOpenMeeting(${m.id})"><span class="t">${esc(wmTime(m.start_time))}</span><span class="n">${esc(m.kind||'Meeting')}</span>${date===today?'<span class="live"></span>':''}</div>`).join('')||'<div class="wm-mi up" style="cursor:default">No meeting</div>'); }).join('');
+    return `<div class="wm-wkh">${esc(label(w))}<small>${esc(fmtD(w)+' – '+fmtD(wmAdd(w,6)))}</small></div>
+      ${thisWeek?`<button class="wm-quiet" style="margin:2px 0 4px" onclick="WM.showPast=!WM.showPast;wmPaintNav()"><i class="fa-solid fa-chevron-${WM.showPast?'down':'up'}"></i> ${WM.showPast?'Hide earlier days':'Earlier this week'}</button>`:''}
+      ${days||'<div class="wm-mi up" style="cursor:default;margin-top:6px">No meetings</div>'}`; };
+  nav.innerHTML=`<div class="wm-wk"><button onclick="wmWeekStep(-1)" ${i===0||(i<0&&!ws.some(w=>w<mon))?'disabled':''} title="Earlier meetings"><i class="fa-solid fa-chevron-left"></i></button>
+      <span>${mon===cur?'Coming up':esc(fmtD(mon)+' – '+fmtD(wmAdd(next,6)))}</span>
+      <button onclick="wmWeekStep(1)" ${!ws.some(w=>w>mon)?'disabled':''} title="Later meetings"><i class="fa-solid fa-chevron-right"></i></button></div>
+    ${week(mon)}<div class="wm-wksep"></div>${week(next)}`;
 }
+// Hidden or shown, remembered on this computer.
+function wmRailOff(){ if(WM.railOff===undefined){ try{ WM.railOff=localStorage.getItem('wm_rail_off')==='1'; }catch(e){ WM.railOff=false; } } return WM.railOff; }
+window.wmRailToggle=function(){
+  const off=WM.railOff=!wmRailOff(); try{ localStorage.setItem('wm_rail_off',off?'1':'0'); }catch(e){}
+  const g=$('wmGrid'); if(g) g.classList.toggle('off',off);
+};
 
 /* ---------- a meeting ---------- */
 window.wmOpenMeeting=function(id){ const m=wmMeeting(id); WM.view='meeting'; WM.cur=id; if(m) WM.wk=wmMonday(m.meeting_date); WM.tab='pending'; WM.q=''; WM.who=''; WM.showPpl=false; WM.picked={mem:[],due:null,recur:'none'}; wmRender(); window.scrollTo({top:0,behavior:'smooth'}); };
@@ -11386,6 +11401,9 @@ function wmPaintMeeting(){
       ${series.length>1?`<select class="wm-hsel" onchange="wmOpenMeeting(Number(this.value))" title="Earlier meetings">${series.map(x=>`<option value="${x.id}" ${x.id===m.id?'selected':''}>${x.id===m.id?'Earlier meetings':(x.meeting_date===today?'Today':esc(wmFmt(x.meeting_date)))}</option>`).join('')}</select>`:''}
     </div>
     </div><div class="wm-card-body">
+    ${m.has_kpi?`<div class="wm-kpi"><div class="wm-sec"><span><i class="fa-solid fa-chart-line" style="margin-right:6px"></i>KPI notes</span><span class="r wm-mute" id="wmKpiSt" style="letter-spacing:0;text-transform:none;font-weight:400"></span></div>
+      <textarea id="wmKpiTxt" placeholder="Numbers, targets and how they moved since last time…" oninput="wmKpiInput(this)" onblur="wmKpiSave(this)">${esc(m.kpi_notes||'')}</textarea></div>`
+      :`<button class="wm-quiet" style="margin-top:18px" onclick="wmKpiAdd()"><i class="fa-solid fa-plus"></i> Add a KPI section</button>`}
     <div class="wm-cap">
       <div class="wm-cap-in"><input id="wmSmart" autocomplete="off" placeholder="Write a task and press Enter…" oninput="wmParse()" onkeydown="wmKey(event)"><span class="kbd">Enter ↵</span></div>
       <div class="wm-parsed" id="wmParsed"></div>
@@ -11404,10 +11422,11 @@ function wmPaintMeeting(){
 /* Who was there, as a dropdown of JainE's people chips. It redraws only itself, so a task half typed
    in the line below is never lost by opening or closing it. */
 function wmPplHtml(att){
-  return `<button class="wm-quiet" onclick="wmTogglePpl()">${att.length?att.length+' present':'No attendance yet'} <i class="fa-solid fa-chevron-${WM.showPpl?'up':'down'}"></i></button>`+
+  const m=wmMeeting(WM.cur), ahead=!!m&&m.meeting_date>wmToday();
+  return `<button class="wm-quiet" onclick="wmTogglePpl()">${att.length?att.length+(ahead?' invited':' present'):(ahead?'Nobody invited yet':'No attendance yet')} <i class="fa-solid fa-chevron-${WM.showPpl?'up':'down'}"></i></button>`+
     (WM.showPpl?`<div class="wm-dd-panel">${att.map(n=>{ const p=WM.people.find(x=>x.name.toLowerCase()===String(n).toLowerCase());
         return `<span class="people-chip">${avatar(n)} <span>${esc(n)}</span>${p&&p.dept?`<em>${esc(p.dept)}</em>`:''}</span>`; }).join('')||'<div class="wm-mute" style="font-size:13px;padding:4px 2px">Nobody marked yet.</div>'}
-      <button class="wm-quiet wm-dd-edit" onclick="wmEditAttendance()"><i class="fa-solid fa-pen"></i> ${att.length?'Edit attendance':'Who was there?'}</button></div>`:'');
+      <button class="wm-quiet wm-dd-edit" onclick="wmEditAttendance()"><i class="fa-solid fa-pen"></i> ${ahead?'Edit who is invited':att.length?'Edit attendance':'Who was there?'}</button></div>`:'');
 }
 window.wmTogglePpl=function(open){
   WM.showPpl=open===undefined?!WM.showPpl:open;
@@ -11419,34 +11438,83 @@ document.addEventListener('click',function(e){ if(WM.showPpl&&!e.target.closest(
    the current time and begins the clock; Schedule asks for the day and the time. The kinds offered
    are the ones already in use, or a new one. */
 function wmNowTime(){ try{ return new Date().toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } }
+/* The people picked here get the meeting in their JainE calendar (and JainE's usual invite); the
+   person setting it up gets it as the organiser. The list starts with whoever was at the last
+   meeting of the same kind, so a regular meeting is one click. */
+function wmLastPeople(kind){
+  const last=(WM.meetings||[]).find(m=>m.kind===kind&&((m.invitees||[]).length||(m.attendees||[]).length));
+  if(!last) return [];
+  const byName=(last.attendees||[]).map(n=>WM.people.find(p=>p.name.toLowerCase()===String(n).toLowerCase())).filter(Boolean).map(p=>p.email);
+  return [...new Set((last.invitees||[]).concat(byName))].filter(e=>!wmIsMe(e));
+}
+function wmFormPeople(){
+  const host=$('wmFormPpl'); if(!host) return;
+  const picked=WM.formPpl, others=WM.people.filter(p=>!wmIsMe(p.email));
+  host.innerHTML=`<div class="wm-fp-chips">${[...picked].map(e=>`<span class="people-chip">${wmAvatar(wmName(e),20)} <span>${esc(wmName(e))}</span><i class="fa-solid fa-xmark" style="cursor:pointer;margin-left:4px;color:#94a3b8" onclick="WM.formPpl.delete('${esc(e)}');wmFormPeople()"></i></span>`).join('')||'<span class="wm-fp-none">Nobody picked yet</span>'}</div>
+    <input type="text" id="wmFpQ" placeholder="Search people to add" oninput="wmFormPeopleList()" autocomplete="off">
+    <div class="wm-fp-list" id="wmFpList"></div>`;
+  wmFormPeopleList();
+}
+window.wmFormPeopleList=function(){
+  const q=(($('wmFpQ')||{}).value||'').toLowerCase().trim(), list=$('wmFpList'); if(!list) return;
+  const rows=WM.people.filter(p=>!wmIsMe(p.email)&&!WM.formPpl.has(p.email)&&(!q||(p.name+' '+(p.dept||'')).toLowerCase().includes(q))).slice(0,q?30:8);
+  list.innerHTML=rows.map(p=>`<div onclick="WM.formPpl.add('${esc(p.email)}');wmFormPeople();$('wmFpQ').focus()">${wmAvatar(p.name,22)} <span>${esc(p.name)}</span><em>${esc(p.dept||'')}</em></div>`).join('')||'<div class="wm-fp-none" style="cursor:default">No one else matches</div>';
+};
+window.wmFormKind=function(){
+  const sel=$('wmKind').value; $('wmKindNew').style.display=sel==='__new'?'':'none';
+  WM.formPpl=new Set(sel==='__new'?[]:wmLastPeople(sel)); wmFormPeople();
+};
 window.wmMeetingForm=function(mode){
   const later=mode==='schedule', kinds=[...new Set((WM.meetings||[]).map(m=>m.kind).filter(Boolean))];
   openModal(`<div class="modal-head"><h3>${later?'Schedule a meeting':'Start a meeting'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
-    <label>Which meeting</label><select id="wmKind" onchange="$('wmKindNew').style.display=this.value==='__new'?'':'none'">${kinds.map(k=>`<option>${esc(k)}</option>`).join('')}<option value="__new">A new kind of meeting…</option></select>
+    <label>Which meeting</label><select id="wmKind" onchange="wmFormKind()">${kinds.map(k=>`<option>${esc(k)}</option>`).join('')}<option value="__new">A new kind of meeting…</option></select>
     <input id="wmKindNew" placeholder="e.g. Sales Review" style="display:${kinds.length?'none':''};margin-top:8px">
     ${later?`<div class="two"><div><label>Date</label><input type="date" id="wmDate" min="${wmToday()}" value="${wmAdd(wmToday(),1)}"></div>
       <div><label>Time</label><input type="time" id="wmTime" value="10:30"></div></div>`:''}
+    <label>People in this meeting <span style="font-weight:400;color:var(--slate)">— it goes into their JainE calendar and yours</span></label>
+    <div class="wm-fp" id="wmFormPpl"></div>
+    <label class="wm-kpi-opt"><input type="checkbox" id="wmKpi"> <span><b>Add a KPI section</b><br><small>A separate place on the meeting for KPI notes.</small></span></label>
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="wmStartBtn" onclick="wmMeetingSave('${later?'schedule':'start'}')"><i class="fa-solid fa-${later?'calendar-plus':'play'}"></i> ${later?'Schedule':'Start'}</button></div>`);
   if(!kinds.length) $('wmKind').value='__new';
+  wmFormKind();
 };
 window.wmStartMeeting=function(){ wmMeetingForm('start'); };
 window.wmScheduleMeeting=function(){ wmMeetingForm('schedule'); };
 window.wmMeetingSave=async function(mode){
   const later=mode==='schedule', sel=$('wmKind').value, kind=sel==='__new'?($('wmKindNew').value||'').trim():sel;
   const date=later?($('wmDate').value||''):wmToday(), time=later?($('wmTime').value||null):(wmNowTime()||null);
+  const emails=[...(WM.formPpl||[])], kpi=!!($('wmKpi')&&$('wmKpi').checked);
   if(!kind){ toast('Choose which meeting this is','err'); return; }
   if(!date){ toast('Choose a date','err'); return; }
   if(later&&date<wmToday()){ toast('Choose today or a later day','err'); return; }
+  if(!emails.length){ toast('Add at least one person to this meeting','err'); return; }
   const b=$('wmStartBtn'); b.disabled=true;
   try{
-    const {data,error}=await sb.rpc('ops_meeting_create',{p_kind:kind,p_date:date,p_time:time}); if(error) throw error;
+    const {data,error}=await sb.rpc('ops_meeting_create',{p_kind:kind,p_date:date,p_time:time,p_people:emails,p_names:emails.map(wmName),p_kpi:kpi}); if(error) throw error;
     if(!later){ try{ localStorage.setItem('wm_start_'+data,String(Date.now())); }catch(e){} }
+    try{ usageQueue('tasks.meetings.schedule_a_meeting_one_time_or_recurring','create',{title:kind,attendees:emails.length+(emails.length===1?' person':' people')}); }catch(_e){}
     await wmReloadMeetings(); closeModal();
-    toast(later?'Scheduled for '+wmFmt(date)+(time?', '+wmTime(time):''):'Meeting started','ok');
+    toast((later?'Scheduled for '+wmFmt(date)+(time?', '+wmTime(time):''):'Meeting started')+' · in '+(emails.length+1)+' calendars','ok');
     wmOpenMeeting(Number(data));
   }catch(e){ b.disabled=false; toast('Could not '+(later?'schedule':'start')+' the meeting: '+((e&&e.message)||e),'err'); }
+};
+
+/* The KPI section: one notes box, saved as you pause typing and when you leave it. */
+window.wmKpiInput=function(el){ clearTimeout(WM.kpiT); WM.kpiT=setTimeout(()=>wmKpiSave(el),900); };
+window.wmKpiSave=async function(el){
+  clearTimeout(WM.kpiT);
+  const m=wmMeeting(WM.cur); if(!m||!el) return;
+  const v=el.value; if((m.kpi_notes||'')===v) return;
+  const st=$('wmKpiSt'); if(st) st.textContent='Saving…';
+  try{ const {error}=await sb.rpc('ops_meeting_set_kpi',{p_meeting:m.id,p_on:true,p_notes:v}); if(error) throw error; m.kpi_notes=v; if(st) st.textContent='Saved'; }
+  catch(e){ if(st) st.textContent=''; toast('Could not save the KPI notes: '+((e&&e.message)||e),'err'); }
+};
+window.wmKpiAdd=async function(){
+  const m=wmMeeting(WM.cur); if(!m) return;
+  try{ const {error}=await sb.rpc('ops_meeting_set_kpi',{p_meeting:m.id,p_on:true,p_notes:m.kpi_notes||''}); if(error) throw error; m.has_kpi=true; wmPaintMeeting(); const t=$('wmKpiTxt'); if(t) t.focus(); }
+  catch(e){ toast('Could not add the KPI section: '+((e&&e.message)||e),'err'); }
 };
 
 /* Attendance, by name - the way the imported meetings record it. */
@@ -11461,7 +11529,10 @@ window.wmEditAttendance=function(){
 };
 window.wmSaveAttendance=async function(){
   try{
-    const {error}=await sb.rpc('ops_meeting_set_attendees',{p_meeting:WM.cur,p_people:[..._wmAtt]}); if(error) throw error;
+    // A meeting with a calendar entry keeps its invitees in step with who is ticked here.
+    const m=wmMeeting(WM.cur), args={p_meeting:WM.cur,p_people:[..._wmAtt]};
+    if(m&&m.acc_meeting_id) args.p_emails=[..._wmAtt].map(n=>WM.people.find(p=>p.name.toLowerCase()===String(n).toLowerCase())).filter(Boolean).map(p=>p.email);
+    const {error}=await sb.rpc('ops_meeting_set_attendees',args); if(error) throw error;
     await wmReloadMeetings(); closeModal(); WM.showPpl=true; wmPaintMeeting();
   }catch(e){ toast('Could not save attendance: '+((e&&e.message)||e),'err'); }
 };
@@ -11842,17 +11913,8 @@ window.wmEndMeeting=function(force){
 };
 
 const WM_CSS='<style id="wmCss">'
-  /* The page background is white with a soft red glow from the top right and bottom left; the
-     meeting card, the week panel and the task list stay dark on top of it. */
-  +'body.wm-dark .main,body.wm-dark .view{background:#fff}'
-  +'body.wm-dark .view{background:radial-gradient(1000px 560px at 88% -10%,rgba(224,18,28,.10),transparent 62%),'
-    +'radial-gradient(820px 520px at -6% 108%,rgba(224,18,28,.07),transparent 60%),#fff;background-attachment:fixed}'
-  /* What sits straight on the white page (the greeting, the two meeting buttons) is dark text. */
-  +'.wm .wm-top,.wm>.wm-empty{--ink:#0b0c10;--ink2:#374151;--mute:#6b7280;--mute2:#9ca3af}'
-  +'.wm-railbtns .wm-light{background:#0b0c10;color:#fff}.wm-railbtns .wm-light:hover{background:#262a33}'
-  +'.wm-railbtns .wm-line{color:#0b0c10;background:#fff;box-shadow:inset 0 0 0 1px #d1d5db}.wm-railbtns .wm-line:hover{box-shadow:inset 0 0 0 1px #0b0c10}'
-  +'.wm-card,.wm-box{box-shadow:0 18px 44px rgba(11,12,16,.16)}'
-  +'.wm{--ink:#f3f4f7;--ink2:#c3c8d2;--mute:#8a909c;--mute2:#5c6270;--hair:rgba(255,255,255,.09);--hair2:rgba(255,255,255,.055);--red:#e0121c;--green:#16a34a;color:var(--ink);padding:12px 18px 60px}'
+  /* Light, like the rest of JainE: white cards on the normal page background. */
+  +'.wm{--ink:#0b1220;--ink2:#334155;--mute:#64748b;--mute2:#94a3b8;--hair:#e6eaf1;--hair2:#eef1f6;--red:#e0121c;--green:#16a34a;color:var(--ink);padding:12px 18px 60px}'
   +'@keyframes wmIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}'
   +'@keyframes wmFlash{0%{background:rgba(224,18,28,.16)}100%{background:transparent}}'
   +'@keyframes wmPulse{0%{box-shadow:0 0 0 0 rgba(224,18,28,.45)}100%{box-shadow:0 0 0 8px rgba(224,18,28,0)}}'
@@ -11868,8 +11930,22 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-empty{padding:60px 0;color:var(--mute)}.wm-empty b{display:block;color:var(--ink);font-size:17px;margin-bottom:6px}'
   +'.wm-grid{max-width:1320px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start}'
   +'.wm-rail{position:sticky;top:84px}'
-  +'.wm-box{background:#121419;border:1px solid var(--hair2);border-radius:20px;padding:20px 20px 16px}'
-  +'.wm-railbtns{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}.wm-railbtns .wm-btn{flex:1;justify-content:center}'
+  /* The panel folds to a thin strip of three buttons; the meeting card takes the room. */
+  +'.wm-grid.off{grid-template-columns:minmax(0,1fr) 44px}.wm-railfold{display:none;flex-direction:column;gap:8px}.wm-grid.off .wm-railfold{display:flex}.wm-grid.off .wm-railopen{display:none}'
+  +'.wm-ib{width:36px;height:30px;flex:none;border:1px solid var(--hair);border-radius:10px;background:#fff;color:var(--mute);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:12px}.wm-ib:hover{color:var(--ink);border-color:#cbd5e1}'
+  +'.wm-railfold .wm-ib{width:44px;height:40px}'
+  +'.wm-wkh{display:flex;align-items:baseline;justify-content:space-between;font-size:13px;font-weight:700;color:var(--ink);margin-top:4px}.wm-wkh small{font-size:11.5px;font-weight:500;color:var(--mute2)}'
+  +'.wm-wksep{height:1px;background:var(--hair2);margin:14px 0 12px}'
+  +'.wm-kpi{margin-top:22px;border:1px solid var(--hair);border-left:3px solid var(--red);border-radius:14px;padding:12px 16px 14px;background:#fffafa}'
+  +'.wm-kpi textarea{width:100%;min-height:96px;border:0;outline:none;resize:vertical;background:transparent;font:inherit;font-size:14.5px;line-height:1.6;color:var(--ink)}'
+  +'.wm-kpi textarea::placeholder{color:var(--mute2)}'
+  +'.wm-fp{border:1px solid var(--line);border-radius:10px;padding:8px}.wm-fp-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}.wm-fp-chips .people-chip{font-size:12.5px}'
+  +'.wm-fp-none{font-size:12.5px;color:var(--slate);padding:4px 2px}'
+  +'.wm-fp input[type=text]{width:100%;height:34px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:inherit;font-size:13px;outline:none}'
+  +'.wm-fp-list{max-height:180px;overflow-y:auto;margin-top:6px}.wm-fp-list div{display:flex;align-items:center;gap:9px;padding:6px 6px;border-radius:8px;cursor:pointer;font-size:13px}.wm-fp-list div:hover{background:#f1f4f9}.wm-fp-list em{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--slate)}'
+  +'.wm-kpi-opt{display:flex!important;align-items:flex-start;gap:10px;margin-top:14px;cursor:pointer;font-weight:400!important}.wm-kpi-opt input{margin-top:3px;accent-color:#e0121c}.wm-kpi-opt small{color:var(--slate);font-size:12px}'
+  +'.wm-box{background:#fff;border:1px solid var(--hair);box-shadow:var(--shadow);border-radius:20px;padding:20px 20px 16px}'
+  +'.wm-railbtns{display:flex;gap:8px;margin-bottom:12px;align-items:center}.wm-railbtns .wm-ib{width:30px}.wm-railbtns .wm-btn{flex:1;justify-content:center}'
   +'.wm-wk{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}'
   +'.wm-wk span{font-size:13px;font-weight:600;color:var(--ink)}'
   +'.wm-wk button{width:28px;height:28px;border:0;border-radius:50%;background:none;color:var(--mute);cursor:pointer}'
@@ -11886,12 +11962,12 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-btn{height:40px;border:0;border-radius:20px;padding:0 20px;font-size:13.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:9px;white-space:nowrap}'
   +'.wm-btn.wm-sm{height:30px;padding:0 13px;font-size:12.5px;letter-spacing:0;text-transform:none}'
   +'.wm-red{background:var(--red);color:#fff}.wm-red:hover{background:#c10f18}'
-  +'.wm-light{background:#fff;color:#0b0c10}.wm-light:hover{background:#e8ebf0}'
-  +'.wm-line{background:transparent;color:#fff;box-shadow:inset 0 0 0 1px var(--hair)}.wm-line:hover{box-shadow:inset 0 0 0 1px #fff}'
+  +'.wm-light{background:#0b1220;color:#fff}.wm-light:hover{background:#1f2937}'
+  +'.wm-line{background:#fff;color:var(--ink);box-shadow:inset 0 0 0 1px #d5dbe5}.wm-line:hover{box-shadow:inset 0 0 0 1px var(--ink)}'
   +'.wm-quiet{border:0;background:none;padding:0;color:var(--mute);font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}'
   +'.wm-quiet:hover{color:var(--ink)}.wm-quiet i{font-size:10px}'
-  +'.wm-card{background:#121419;border:1px solid var(--hair2);border-radius:24px;overflow:hidden}'
-  +'.wm-card-top{padding:28px 32px 24px;background:radial-gradient(700px 280px at 100% -40%,rgba(224,18,28,.42),transparent 65%),radial-gradient(500px 240px at -10% 150%,rgba(129,140,248,.14),transparent 60%),linear-gradient(135deg,#0d0e13,#1a1d25)}'
+  +'.wm-card{background:#fff;border:1px solid var(--hair);box-shadow:var(--shadow);border-radius:24px;overflow:hidden}'
+  +'.wm-card-top{padding:28px 32px 24px;border-bottom:1px solid var(--hair2)}'
   +'.wm-card-top h2{font-size:34px;font-weight:700;letter-spacing:-1.1px;color:var(--ink);margin-top:8px;line-height:1.15}'
   +'.wm-card-body{padding:4px 32px 34px}'
   +'.wm-mh{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap}'
@@ -11901,17 +11977,17 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-tm{font-variant-numeric:tabular-nums;color:var(--ink2)}'
   +'.wm-info{position:relative;display:inline-flex;vertical-align:middle;margin-left:10px;color:var(--mute2);font-size:15px;cursor:default}'
   +'.wm-info:hover{color:var(--ink2)}'
-  +'.wm-info .tip{display:none;position:absolute;left:50%;top:calc(100% + 10px);transform:translateX(-50%);background:#1d2029;color:var(--ink2);font-size:13px;font-weight:400;letter-spacing:0;line-height:1.6;white-space:nowrap;padding:10px 14px;border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.5);z-index:10}'
+  +'.wm-info .tip{display:none;position:absolute;left:50%;top:calc(100% + 10px);transform:translateX(-50%);background:#0b1220;color:#fff;font-size:13px;font-weight:400;letter-spacing:0;line-height:1.6;white-space:nowrap;padding:10px 14px;border-radius:12px;box-shadow:var(--shadow-lg);z-index:10}'
   +'.wm-info:hover .tip{display:block}'
   +'.wm-mh2{display:flex;align-items:center;gap:22px;margin-top:22px;flex-wrap:wrap;font-size:13px;color:var(--mute)}'
   /* Who was there: JainE's own people chips (initials + full name), in a dropdown under the count. */
   +'.wm-dd{position:relative}'
-  +'.wm-dd-panel{position:absolute;left:0;top:calc(100% + 10px);z-index:20;min-width:280px;max-height:340px;overflow-y:auto;background:#1b1e26;border:1px solid var(--hair);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:6px;box-shadow:0 20px 50px rgba(0,0,0,.5);animation:wmIn .18s both}'
-  +'.wm-dd-panel .people-chip{border-color:rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--ink);font-size:13px}'
+  +'.wm-dd-panel{position:absolute;left:0;top:calc(100% + 10px);z-index:20;min-width:280px;max-height:340px;overflow-y:auto;background:#fff;border:1px solid var(--hair);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:6px;box-shadow:var(--shadow-lg);animation:wmIn .18s both}'
+  +'.wm-dd-panel .people-chip{color:var(--ink);font-size:13px}'
   +'.wm-dd-panel .people-chip em{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--mute);padding-left:12px}'
   +'.wm-dd-edit{margin:6px 2px 2px}'
   +'.wm-hsel{border:0;background:none;color:var(--mute);font:inherit;font-size:13px;cursor:pointer;outline:none;padding:0}'
-  +'.wm-hsel:hover{color:var(--ink)}.wm-hsel option{background:#171a21;color:#f3f4f7}'
+  +'.wm-hsel:hover{color:var(--ink)}.wm-hsel option{background:#fff;color:var(--ink)}'
   +'.wm-cap{margin-top:30px;position:relative}'
   +'.wm-cap-in{display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--hair);padding-bottom:12px}'
   +'.wm-cap-in:focus-within{border-bottom-color:var(--ink)}'
@@ -11924,42 +12000,42 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-parsed .tok i{color:var(--mute2);font-size:11px}.wm-parsed .tok .x{cursor:pointer}'
   +'.wm-parsed .ctl{border:0;background:none;color:var(--mute);cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:0;font-size:13px}'
   +'.wm-parsed .ctl:hover{color:var(--ink)}'
-  +'.wm-parsed input[type=date],.wm-parsed select{border:0;background:none;font:inherit;font-size:13px;color:var(--ink2);outline:none;cursor:pointer;padding:0;color-scheme:dark}'
-  +'.wm-parsed select option{background:#171a21}'
+  +'.wm-parsed input[type=date],.wm-parsed select{border:0;background:none;font:inherit;font-size:13px;color:var(--ink2);outline:none;cursor:pointer;padding:0}'
+  +'.wm-parsed select option{background:#fff}'
   +'.wm-parsed code{font-family:inherit;color:var(--ink2)}'
-  +'.wm-sugg{position:absolute;left:0;top:58px;background:#1b1e26;border-radius:14px;padding:6px;min-width:300px;z-index:6;box-shadow:0 20px 50px rgba(0,0,0,.5)}'
+  +'.wm-sugg{position:absolute;left:0;top:58px;background:#fff;border:1px solid var(--hair);border-radius:14px;padding:6px;min-width:300px;z-index:6;box-shadow:var(--shadow-lg)}'
   +'.wm-sugg div{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;cursor:pointer;font-size:13.5px;color:var(--ink)}'
   +'.wm-sugg div span{margin-left:auto;font-size:12px;color:var(--mute)}'
-  +'.wm-sugg div.on,.wm-sugg div:hover{background:rgba(255,255,255,.07)}'
+  +'.wm-sugg div.on,.wm-sugg div:hover{background:#f1f4f9}'
   +'.wm-un{margin-top:30px}'
   +'.wm-sec{display:flex;align-items:center;gap:12px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);font-weight:600;margin-bottom:6px;min-height:30px}'
   +'.wm-sec em{font-style:normal;color:var(--ink)}.wm-sec .r{margin-left:auto}'
   +'.wm-ck{width:15px;height:15px;accent-color:var(--red);cursor:pointer;flex:none;margin:0}'
-  +'.wm-bulk{display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:#fff;color:#0b0c10;border-radius:14px;padding:10px 12px 10px 16px;margin:4px 0 8px;font-size:13px}'
-  +'.wm-bulk .ctl{border:0;background:none;color:#0b0c10;cursor:pointer;display:inline-flex;align-items:center;gap:7px;font-size:13px;padding:0}'
-  +'.wm-bulk input[type=date]{border:0;background:none;font:inherit;font-size:13px;color:#0b0c10;outline:none}'
+  +'.wm-bulk{display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:#f1f4f9;color:var(--ink);border-radius:14px;padding:10px 12px 10px 16px;margin:4px 0 8px;font-size:13px}'
+  +'.wm-bulk .ctl{border:0;background:none;color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:7px;font-size:13px;padding:0}'
+  +'.wm-bulk input[type=date]{border:0;background:none;font:inherit;font-size:13px;color:var(--ink);outline:none}'
   +'.wm-dr{display:flex;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--hair2)}'
   +'.wm-dr.new{animation:wmFlash 1.6s both}'
   +'.wm-dr .ti{flex:1;min-width:0;border:0;outline:none;background:none;font:inherit;font-size:15px;color:var(--ink);padding:2px 0}'
   +'.wm-dr .ctl{border:0;background:none;color:var(--mute);cursor:pointer;display:inline-flex;align-items:center;gap:7px;font-size:13px;white-space:nowrap;padding:0}'
   +'.wm-dr .ctl:hover,.wm-dr .ctl.set{color:var(--ink)}'
-  +'.wm-dr input[type=date]{border:0;background:none;font:inherit;font-size:13px;color:var(--mute);outline:none;cursor:pointer;width:112px;color-scheme:dark}'
+  +'.wm-dr input[type=date]{border:0;background:none;font:inherit;font-size:13px;color:var(--mute);outline:none;cursor:pointer;width:112px}'
   +'.wm-dr input[type=date].set{color:var(--ink)}'
   +'.wm-dr .go{border:0;background:none;font-size:13px;font-weight:600;cursor:pointer;color:var(--mute2);padding:0}'
   +'.wm-dr .go.ready{color:var(--red)}'
   +'.wm-dr .rm{border:0;background:none;color:var(--mute2);cursor:pointer;opacity:0}'
   +'.wm-dr:hover .rm{opacity:1}.wm-dr .rm:hover{color:var(--red)}'
   /* The task section: grouped by person, every detail on show - kept exactly as designed. */
-  +'.wm-v6{--ink2:#f3f4f7;--line3:rgba(255,255,255,.08);--soft:rgba(255,255,255,.06);--slate:#8a909c;background:#08090c;color:#f3f4f7;color-scheme:dark;border:1px solid rgba(255,255,255,.06);border-radius:18px;padding:2px 22px 18px;margin-top:34px}'
+  +'.wm-v6{--ink2:#0b1220;--line3:#e6eaf1;--soft:#f1f4f9;--slate:#64748b;background:#fff;color:#0b1220;border:1px solid #e6eaf1;border-radius:18px;padding:2px 22px 18px;margin-top:34px}'
   +'.wm-v6 .ttabs{display:flex;align-items:center;gap:6px;margin:8px 0 6px;border-bottom:1px solid var(--line3);flex-wrap:wrap}'
   +'.wm-v6 .ttab{border:0;background:none;font:inherit;font-size:14px;font-weight:700;color:var(--slate);padding:10px 4px 12px;margin-right:16px;cursor:pointer;position:relative;display:inline-flex;align-items:center;gap:8px}'
   +'.wm-v6 .ttab .n{font-size:11.5px;font-weight:800;background:var(--soft);color:var(--slate);border-radius:9px;padding:1px 8px}'
   +'.wm-v6 .ttab.on{color:var(--ink2)}'
   +'.wm-v6 .ttab.on:after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:3px;border-radius:3px 3px 0 0;background:#e0121c}'
-  +'.wm-v6 .ttab.on .n{background:#fff;color:#08090c}.wm-v6 .ttab.on.pend .n{background:#e0121c;color:#fff}.wm-v6 .ttab.on.fin .n{background:#16a34a;color:#fff}'
+  +'.wm-v6 .ttab.on .n{background:#0b1220;color:#fff}.wm-v6 .ttab.on.pend .n{background:#e0121c;color:#fff}.wm-v6 .ttab.on.fin .n{background:#16a34a;color:#fff}'
   +'.wm-v6 .tfilter{margin-left:auto;display:flex;gap:8px;align-items:center;padding-bottom:6px;flex-wrap:wrap}'
-  +'.wm-v6 .tfilter select,.wm-v6 .tfilter input{height:32px;border:1px solid var(--line3);border-radius:9px;padding:0 10px;font:inherit;font-size:12.5px;background:#14161c;color:var(--ink2);outline:none}'
-  +'.wm-v6 .tfilter select option{background:#14161c;color:var(--ink2)}.wm-v6 .tfilter input{width:170px}'
+  +'.wm-v6 .tfilter select,.wm-v6 .tfilter input{height:32px;border:1px solid var(--line3);border-radius:9px;padding:0 10px;font:inherit;font-size:12.5px;background:#fff;color:var(--ink2);outline:none}'
+  +'.wm-v6 .tfilter select option{background:#fff;color:var(--ink2)}.wm-v6 .tfilter input{width:170px}'
   +'.wm-v6 .sumrow{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0 6px}'
   +'.wm-v6 .sumrow div{background:var(--soft);border-radius:14px;padding:12px 14px}'
   +'.wm-v6 .sumrow b{font-size:22px;font-weight:800;color:var(--ink2);display:block;letter-spacing:-.5px}'
@@ -11974,31 +12050,31 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-v6 .who b{font-size:13.5px;color:var(--ink2);display:block}'
   +'.wm-v6 .who span{font-size:11.5px;color:var(--slate)}'
   +'.wm-v6 .who .cnt{display:inline-block;margin-top:5px;font-size:11px;font-weight:800;color:var(--ink2);background:var(--soft);border-radius:7px;padding:1px 7px}'
-  +'.wm-v6 .who .cnt.red{background:rgba(224,18,28,.16);color:#ff6b72}'
+  +'.wm-v6 .who .cnt.red{background:#fef2f2;color:#dc2626}'
   +'.wm-v6 .task{display:flex;gap:10px;align-items:flex-start;padding:7px 10px;border-radius:11px}'
-  +'.wm-v6 .task:hover{background:rgba(255,255,255,.04)}'
-  +'.wm-v6 .task.new{animation:wmFlash 1.6s both;background:rgba(224,18,28,.1)}'
-  +'.wm-v6 .task .bx{width:18px;height:18px;border-radius:50%;border:1.5px solid #4b5160;flex:none;margin-top:1px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff}'
+  +'.wm-v6 .task:hover{background:#f8fafc}'
+  +'.wm-v6 .task.new{animation:wmFlash 1.6s both;background:#fef2f2}'
+  +'.wm-v6 .task .bx{width:18px;height:18px;border-radius:50%;border:1.5px solid #cbd5e1;flex:none;margin-top:1px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff}'
   +'.wm-v6 .task .bx:hover{border-color:#22c55e}'
   +'.wm-v6 .task.done .bx{background:#22c55e;border-color:#22c55e}'
-  +'.wm-v6 .task.done .tt{color:#6b7280}'
+  +'.wm-v6 .task.done .tt{color:#94a3b8}'
   +'.wm-v6 .task .tt{font-size:13.5px;color:var(--ink2);line-height:1.4}'
   +'.wm-v6 .task .mt{font-size:11.5px;color:var(--slate);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}'
-  +'.wm-v6 .task .od{color:#ff5a62;font-weight:700}.wm-v6 .task .aw{color:#f59e0b;font-weight:700}'
-  +'.wm-v6 .task span.ok{color:#4ade80;font-weight:700}'
-  +'.wm-v6 .task .from{color:#a5b4fc;font-weight:600;cursor:pointer}.wm-v6 .task .from:hover{text-decoration:underline}'
+  +'.wm-v6 .task .od{color:#dc2626;font-weight:700}.wm-v6 .task .aw{color:#d97706;font-weight:700}'
+  +'.wm-v6 .task span.ok{color:#16a34a;font-weight:700}'
+  +'.wm-v6 .task .from{color:#1d4ed8;font-weight:600;cursor:pointer}.wm-v6 .task .from:hover{text-decoration:underline}'
   +'.wm-v6 .st{flex:none;font-size:11px;font-weight:800;border-radius:7px;padding:2px 8px;margin-top:1px}'
-  +'.wm-v6 .st.p{background:rgba(255,255,255,.07);color:#c3c8d2}.wm-v6 .st.a{background:rgba(245,158,11,.15);color:#fbbf24}.wm-v6 .st.f{background:rgba(34,197,94,.15);color:#4ade80}.wm-v6 .st.o{background:rgba(224,18,28,.16);color:#ff6b72}'
-  +'.wm-v6 .wm-st-sel{flex:none;height:26px;border:1px solid var(--line3);border-radius:7px;background:#14161c;color:var(--ink2);font:inherit;font-size:11.5px;padding:0 6px;cursor:pointer}'
+  +'.wm-v6 .st.p{background:#f1f4f9;color:#475569}.wm-v6 .st.a{background:#fffbeb;color:#b45309}.wm-v6 .st.f{background:#f0fdf4;color:#15803d}.wm-v6 .st.o{background:#fef2f2;color:#dc2626}'
+  +'.wm-v6 .wm-st-sel{flex:none;height:26px;border:1px solid var(--line3);border-radius:7px;background:#fff;color:var(--ink2);font:inherit;font-size:11.5px;padding:0 6px;cursor:pointer}'
   +'.wm-v6 .b{height:28px;border:0;border-radius:8px;font:inherit;font-weight:700;font-size:12px;padding:0 10px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}'
   +'.wm-v6 .b.ok{background:#16a34a;color:#fff}.wm-v6 .b.ok:hover{background:#15803d}'
-  +'.wm-v6 .b.sb{background:rgba(255,255,255,.08);color:#f3f4f7}.wm-v6 .b.sb:hover{background:rgba(255,255,255,.14)}'
+  +'.wm-v6 .b.sb{background:#f1f4f9;color:#0b1220}.wm-v6 .b.sb:hover{background:#e6eaf1}'
   +'.wm-v6 .empty3{border:1.5px dashed var(--line3);border-radius:16px;padding:34px;text-align:center;color:var(--slate);margin-top:14px}'
   +'.wm-pk input[type=text]{width:100%;height:40px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;outline:none;padding:0 12px}'
   +'.wm-pk label{display:flex;align-items:center;gap:12px;padding:8px 4px;cursor:pointer;font-size:14px;border-radius:8px}'
   +'.wm-pk label:hover{background:#f8fafc}.wm-pk label span{margin-left:auto;font-size:12px;color:var(--slate)}'
   +'.wm-pk .g{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);font-weight:700;padding:14px 4px 4px}'
-  +'@media(max-width:1100px){.wm-grid{grid-template-columns:1fr}.wm-rail{position:static}}'
+  +'@media(max-width:1100px){.wm-grid,.wm-grid.off{grid-template-columns:1fr}.wm-rail{position:static}.wm-railfold{flex-direction:row}}'
   +'@media(max-width:700px){.wm{padding:6px 0 40px}.wm-top h1{font-size:30px}.wm-card-top,.wm-card-body{padding-left:18px;padding-right:18px}.wm-card-top h2{font-size:26px}'
     +'.wm-v6{padding:2px 14px 14px}.wm-v6 .person{grid-template-columns:1fr;gap:6px}.wm-v6 .sumrow{grid-template-columns:repeat(2,1fr)}.wm-v6 .tfilter{margin-left:0;width:100%}.wm-v6 .tfilter input{flex:1}.wm-dr{flex-wrap:wrap}.wm-dr .ti{flex-basis:100%}}'
 +'</style>';
