@@ -211,12 +211,17 @@ function stepAbout(){
 function stepFlat(){
   const floors=[]; for(let i=1;i<=(CONF.floors||8);i++) floors.push(String(i));
   return card('','','Unit selection','As discussed with our sales team. The flat number may be left blank if not yet allotted.',
-      '<div class="grid two">'
+      '<div class="pn2">'
+      +'<div class="pnl"><div class="grp">Location</div><div class="stack">'
       +chips('flat.block','Block',CONF.blocks,{req:1})
       +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4})
       +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1})
+      +'</div></div>'
+      +'<div class="pnl"><div class="grp">Configuration</div><div class="stack">'
       +chips('flat.bhk','Bedrooms',CONF.bhk)
-      +chips('flat.parking','Right to use car park',['Covered','Open'])+'</div>')
+      +chips('flat.parking','Right to use car park',['Covered','Open'])
+      +'</div></div>'
+      +'</div>')
     +card('','','Area & rate','Optional',
       '<div class="grid">'
       +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1})

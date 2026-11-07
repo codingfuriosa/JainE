@@ -280,12 +280,15 @@
     .app .stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
     .app .stack>.f>:not(label){grid-column:auto}
     .sb>.btn.add{width:auto;min-width:260px;max-width:none;margin-top:0}
-    /* UNIT SELECTION: two columns - Block | Flat number, Floor | Bedrooms, Car park */
-    .grid.two{display:grid;grid-template-columns:1fr 1fr;gap:18px 40px;align-items:start}
-    .grid.two>.f{display:flex;flex-direction:column;gap:6px}
-    .grid.two>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
-    .grid.two>.f>:not(label){grid-column:auto}
-    .grid.two>#f-flat-block{order:1}.grid.two>#f-flat-flat_no{order:2}.grid.two>#f-flat-floor{order:3}.grid.two>#f-flat-bhk{order:4}.grid.two>#f-flat-parking{order:5}
+    /* UNIT SELECTION: two matching panels - Location (block, floor, flat) | Configuration (bedrooms, car park) */
+    .pn2{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:stretch}
+    .pn2>.pnl{display:flex;flex-direction:column}
+    .pn2>.pnl>.grp{margin:0!important;padding:9px 14px;background:#f7f8fa;border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;color:var(--ink2)}
+    .pn2>.pnl>.grp:after{display:none}
+    .pn2>.pnl>.stack{flex:1;display:flex;flex-direction:column;align-items:stretch;gap:14px;padding:14px;border:1px solid var(--line);border-radius:0 0 8px 8px}
+    .pn2 .stack>.f{display:flex;flex-direction:column;gap:6px}
+    .pn2 .stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
+    .pn2 .stack>.f>:not(label){grid-column:auto}
   }
   @media print{.steps,.nav,.btn,.rvh button{display:none!important}.sec{border:1px solid #ddd}}
 </style>
@@ -305,6 +308,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107t"></script>
+<script src="booking-form.js?v=20261107u"></script>
 </body>
 </html>
