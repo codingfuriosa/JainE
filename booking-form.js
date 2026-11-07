@@ -58,6 +58,7 @@ if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
 // Files and the signature live only in this page (too big for the draft).
 let FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
 let SIG=null;
+let PASS_OPEN=new Set();   // applicants whose Passport & bank panel was opened by hand (it is always open for a non-Indian applicant)
 let SPOUSE_OPEN=!!(S.applicants[0]&&(S.applicants[0].spouse||S.applicants[0].anniversary));   // Spouse & anniversary: hidden until asked for
 let ERR={}, MISSING=[];
 const $=function(id){ return document.getElementById(id); };
@@ -152,8 +153,15 @@ function stepApplicants(){
         +pick(p+'nationality','Nationality / Country','country',F)
         +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1})
         +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1})
-        +field(p+'passport','Passport number',{cls:'up',req:foreign,note:foreign?'':'(only for NRIs & foreigners)',full:1})
-        +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,note:foreign?'':'(only for NRIs & foreigners)'})
+        +(function(){
+          const forced=foreign||!!a.passport||!!a.bank_details;   // needed, or already filled: shown as a plain title, no toggle
+          const open=forced||PASS_OPEN.has(i);
+          const lbl='Passport & bank details <span class="opt">(NRIs &amp; foreign nationals only)</span>';
+          return (forced?'<div class="tg tgw tgp on static">\u2212 '+lbl+'</div>'
+                         :'<button type="button" class="tg tgw tgp'+(open?' on':'')+'" data-pp="'+i+'">'+(open?'\u2212':'+')+' '+lbl+'</button>')
+            +(open?'<div class="xt-body">'+field(p+'passport','Passport number',{cls:'up',req:foreign,optional:!foreign,full:1})
+              +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,optional:!foreign})+'</div>':'');
+        })()
         +'</div>'
         +(i===0?'<button type="button" class="tg tgw'+(SPOUSE_OPEN?' on':'')+'" data-sp="1">'+(SPOUSE_OPEN?'−':'+')+' Spouse & anniversary <span class="opt">(optional)</span></button>'
           +(SPOUSE_OPEN?'<div class="spx"><div class="stack">'+field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></div>':''):'')
@@ -613,11 +621,15 @@ document.addEventListener('click',function(e){
   /* Remove asks inside the page (a browser pop-up can be blocked or hidden, and then the button seems dead). */
   if(b.dataset.rm){ const i=+b.dataset.rm;
     b.outerHTML='<span class="rmask">'+(i?'':'The next person becomes the first applicant. ')+'Remove? <button type="button" class="rm" data-rmyes="'+i+'">Yes, remove</button> <button type="button" class="rm keep" data-rmno="1">Keep</button></span>'; return; }
+  if(b.dataset.pp!==undefined){ const i=+b.dataset.pp; if(PASS_OPEN.has(i)) PASS_OPEN.delete(i); else PASS_OPEN.add(i); render();
+    if(PASS_OPEN.has(i)){ const pp=document.querySelector('[data-k="applicants.'+i+'.passport"]'); if(pp){ const box=pp.closest('.xt-body'); if(box) box.scrollIntoView({behavior:'smooth',block:'center'}); pp.focus({preventScroll:true}); } }
+    return; }
   if(b.dataset.sgclear){ if(INLINE_PAD&&!SIG) INLINE_PAD.clear(); else { SIG=null; render(); } return; }
   if(b.dataset.sp){ SPOUSE_OPEN=!SPOUSE_OPEN; render();
     if(SPOUSE_OPEN){ const sp=document.querySelector('[data-k="applicants.0.spouse"]'); if(sp){ const box=sp.closest('.spx'); if(box) box.scrollIntoView({behavior:'smooth',block:'center'}); sp.focus({preventScroll:true}); } }
     return; }
-  if(b.dataset.rmyes){ const i=+b.dataset.rmyes; S.applicants.splice(i,1); FILES.splice(i,1); save(); render(); return; }
+  if(b.dataset.rmyes){ const i=+b.dataset.rmyes; S.applicants.splice(i,1); FILES.splice(i,1);
+    PASS_OPEN=new Set([...PASS_OPEN].filter(function(x){ return x!==i; }).map(function(x){ return x>i?x-1:x; })); save(); render(); return; }
   if(b.dataset.rmno){ render(); return; }
   if(b.dataset.addwhy){ S.why.push(''); save(); render(); const ins=document.querySelectorAll('[data-k^="why."]'); ins[ins.length-1].focus(); return; }
   if(b.dataset.rmwhy){ S.why.splice(+b.dataset.rmwhy,1); save(); render(); return; }
