@@ -158,7 +158,7 @@ function stepApplicants(){
           const forced=foreign||!!a.passport||!!a.bank_details;   // needed, or already filled: its panel stays open and the bar is a plain title
           const ppOpen=forced||PASS_OPEN.has(i), spOpen=i===0&&SPOUSE_OPEN;
           const bar=function(on,plain,attr,label){ return (plain?'<div class="tg on static">':'<button type="button" class="tg'+(on?' on':'')+'" '+attr+'>')+(on?'−':'+')+' '+label+(plain?'</div>':'</button>'); };
-          return '<div class="xts'+(i===0?'':' one')+'">'
+          return '<div class="xts'+(i===0?'':' one')+(spOpen&&ppOpen?' both':'')+'">'
             +(i===0?bar(spOpen,false,'data-sp="1"','Spouse &amp; anniversary <span class="opt">(optional)</span>').replace('class="tg','class="tg bsp'):'')
             +(spOpen?'<div class="xp sp"><div class="xp-h">Spouse &amp; anniversary <span class="opt">(optional)</span></div><div class="xp-b">'+field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></div>':'')
             +bar(ppOpen,forced,'data-pp="'+i+'"','Passport &amp; bank details <span class="opt">(NRIs &amp; foreign nationals)</span>').replace('class="tg','class="tg bpp')
