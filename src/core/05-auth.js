@@ -208,6 +208,17 @@ async function boot(){
     }
   }
 
+  // Weekly Status for people who are on a meeting (see canWeeklyStatus in 06-nav.js). Someone who can
+  // edit it needs no question. Otherwise a fresh remembered answer is used as is; with none, the Weekly
+  // Status page itself waits for the answer, and every other page asks in the background and draws the
+  // menu again if the answer is yes.
+  if(!canEditWeeklyStatus()){
+    wsPeekParticipant();
+    if(state.wsParticipant===undefined){
+      if(PAGE==='weekly_status') await wsCheckParticipant();
+      else wsCheckParticipant().then(function(ok){ if(ok) wsRefreshNav(); });
+    }
+  }
   renderShell();
   $('authLoad').style.display='none';
   if(!state.super && !(state.profile&&state.profile.onboarded)){

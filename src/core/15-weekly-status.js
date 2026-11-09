@@ -82,7 +82,7 @@ function wmNames(it){ return it.linked?(it.mem.length===1?wmFirst(it.mem[0]):it.
 /* ---------- load ---------- */
 async function wmLoad(){
   // Repeating meetings: make sure this week's and next week's dates exist before reading.
-  try{ await sb.rpc('ops_meeting_series_fill'); }catch(e){}
+  if(!WM.ro){ try{ await sb.rpc('ops_meeting_series_fill'); }catch(e){} }
   try{
     const r=await Promise.all([sb.rpc('ops_weekly_meetings'), sb.rpc('ops_weekly_items'), sb.schema('acc').rpc('people'), sb.rpc('ops_weekly_notes')]);
     WM.notes=(r[3]&&!r[3].error&&r[3].data)||[];
@@ -109,6 +109,7 @@ const wmSeries=kind=>(WM.meetings||[]).filter(m=>m.kind===kind);
 
 VIEWS.weekly_status=async function(v){
   setCrumb(['Overview','Weekly Status']);
+  WM.ro=!canEditWeeklyStatus();   // a person on the meeting reads it; the starter edits
   loader(v);
   await wmLoad();
   if(WM.items===null){
@@ -122,8 +123,35 @@ VIEWS.weekly_status=async function(v){
   WM.cur=(ms.find(m=>m.meeting_date===today)||ms.find(m=>m.meeting_date<=today&&regular(m))||ms.find(m=>m.meeting_date<=today)||ms[0]||{}).id||null;
   WM.wk=wmMonday(today);
   v.innerHTML=WM_CSS+'<div class="wm" id="wmRoot"></div>';
+  wmWatchReadOnly();
   wmRender();
 };
+
+/* READ-ONLY VIEW. Everything that changes something is drawn by the same code as the rest of the page,
+   so rather than a second copy of it, whatever is drawn is switched off afterwards: buttons and fields
+   whose handler writes are hidden or locked. The database refuses the writes in any case (every ops_*
+   write function still asks has_module); this is so a reader is not offered buttons that would only
+   come back with an error. Moving between meetings, weeks and tabs is not a write and stays. */
+const WM_WRITE=/\bwm(?:StartMeeting|ScheduleMeeting|MeetingSave|SeriesStop|EndMeeting|Reopen|AgStart|AgStep|AgPause|AgAdd|AgMins|AgNoteInput|AgNoteSave|KpiAdd|KpiInput|KpiSave|KpiColAdd|KpiColDel|KpiColName|KpiCell|OoAdd|NoteAdd|NoteInput|NoteSave|NoteSolve|NoteTask|NoteTaskSave|NoteDel|EditAttendance|SaveAttendance|SetLegacy|Toggle|Approve|Parse|Key|DropMem|PickPeople|SelAll|Promote|BulkPeople|BulkDue|DraftText|DraftDue|DraftDelete|Choose|Add1|Form[A-Za-z]*)\b/;
+const WM_ROW_CTRL=/\bwm(?:Toggle|Approve|SetLegacy|SelAll|DraftText|DraftDue|KpiColName|KpiCell|AgMins)\b/;   // part of a row: stay in place, switched off
+function wmLockView(){
+  const root=$('wmRoot'); if(!root||!WM.ro) return;
+  root.querySelectorAll('[onclick],[onchange],[oninput],[onkeydown],[onblur]').forEach(function(el){
+    const hit=['onclick','onchange','oninput','onkeydown','onblur'].some(function(a){ const v=el.getAttribute(a); return v&&WM_WRITE.test(v); });
+    if(!hit) return;
+    const keep=['onclick','onchange'].some(function(a){ const v=el.getAttribute(a); return v&&WM_ROW_CTRL.test(v); });
+    if(/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)||keep){ if('readOnly' in el) el.readOnly=true; el.disabled=true; el.style.pointerEvents='none'; el.style.opacity='.7'; }
+    else el.style.display='none';
+  });
+  root.querySelectorAll('.wm-cap').forEach(function(el){ el.style.display='none'; });
+}
+function wmWatchReadOnly(){
+  if(WM.lockObs){ WM.lockObs.disconnect(); WM.lockObs=null; }
+  const root=$('wmRoot'); if(!root||!WM.ro) return;
+  WM.lockObs=new MutationObserver(wmLockView);
+  WM.lockObs.observe(root,{childList:true,subtree:true});
+}
+
 
 function wmRender(){
   const root=$('wmRoot'); if(!root) return;
@@ -133,6 +161,7 @@ function wmRender(){
   <div class="wm-top wm-in">
     <div class="wm-date">${esc(new Date(wmToday()+'T00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'}))}</div>
     <h1>${hi}.</h1>
+    ${WM.ro?'<div class="wm-lead wm-mute" style="font-size:13px"><i class="fa-solid fa-eye"></i> You can see the meetings you are on. Only the person who starts a meeting can change it.</div>':''}
     <div class="wm-lead"><button class="wm-lnk ${WM.view==='all'?'on':''}" onclick="wmOpenAll('pending')"><b id="wmPend">${open.length}</b> tasks pending</button></div>
   </div>
   <div class="wm-grid ${wmRailOff()?'off':''}" id="wmGrid"><div id="wmMain"></div><aside class="wm-rail">
@@ -440,6 +469,7 @@ function wmAgState(m){
 const wmMMSS=s=>{ s=Math.max(0,Math.round(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
 async function wmAgSaveRun(m,run){
   m.agenda_run=run;
+  if(WM.ro) return;
   try{ const {error}=await sb.rpc('ops_meeting_set_run',{p_meeting:m.id,p_run:run}); if(error) throw error; }
   catch(e){ toast('Could not save the timer: '+((e&&e.message)||e),'err'); }
 }

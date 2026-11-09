@@ -886,6 +886,17 @@ async function boot(){
     }
   }
 
+  // Weekly Status for people who are on a meeting (see canWeeklyStatus in 06-nav.js). Someone who can
+  // edit it needs no question. Otherwise a fresh remembered answer is used as is; with none, the Weekly
+  // Status page itself waits for the answer, and every other page asks in the background and draws the
+  // menu again if the answer is yes.
+  if(!canEditWeeklyStatus()){
+    wsPeekParticipant();
+    if(state.wsParticipant===undefined){
+      if(PAGE==='weekly_status') await wsCheckParticipant();
+      else wsCheckParticipant().then(function(ok){ if(ok) wsRefreshNav(); });
+    }
+  }
   renderShell();
   $('authLoad').style.display='none';
   if(!state.super && !(state.profile&&state.profile.onboarded)){
@@ -1243,8 +1254,9 @@ function hasUsability(){ if(state.super)return true; const m=state.roles&&state.
 
    To change who can see it, add an address to this list - nothing else needs touching. */
 /* 2026-11-03: Prerna Gupta (businessanalyst@) taken off again - she is in Systems, and Systems people do not get
-   the QR forms (only System Feedbacks); the Administrator is the one exception. */
-const FEEDBACK_HUB_PEOPLE=['ayushruia1@gmail.com','mgr.hr@thejaingroup.com'];
+   the QR forms (only System Feedbacks); the Administrator is the one exception.
+   2026-11-06: put back on the user's own request, so Design and Records show again beside System Feedbacks. */
+const FEEDBACK_HUB_PEOPLE=['ayushruia1@gmail.com','mgr.hr@thejaingroup.com','businessanalyst@thejaingroup.com'];
 /* 2026-11-03: SYSTEM FEEDBACKS. A second kind of feedback inside the same page, with its own people:
    the Systems department (department "Systems" in acc.user_profile) posts what it built or fixed, and
    Sales and Pre Sales rate it. The QR forms above stay with FEEDBACK_HUB_PEOPLE; Systems people do not
@@ -1322,11 +1334,44 @@ function canAccounts(){
    the superadmin bypass and needs the id in the person's own adm.users.modules - so the ops.*
    tables and RPCs refuse anyone else even if they reach the page some other way.
    To add someone: add the address here AND put 'weekly_status' in their adm.users.modules. */
-const WEEKLY_STATUS_PEOPLE=['businessanalyst@thejaingroup.com'];
-function canWeeklyStatus(){
+/* 2026-11-09: coordinator.vc@ (Shafat) given the whole tab, on the user's word - start, schedule and edit
+   like the first address. His adm.users.modules carries 'weekly_status' as well, which is the database half. */
+const WEEKLY_STATUS_PEOPLE=['businessanalyst@thejaingroup.com','coordinator.vc@thejaingroup.com'];
+/* 2026-11-09: PEOPLE ON A MEETING CAN READ IT. The list above is who can start, schedule and edit
+   (canEditWeeklyStatus); anyone with a login who is on a meeting - picked when it was started or
+   scheduled, so people added later are covered - also sees the tab, with only the meetings they are
+   on and no way to change anything. The database decides that (ops_ws_is_participant, app.ws_participant);
+   this only asks it once and remembers the answer for ten minutes. The write functions still ask
+   has_module('weekly_status'), so a participant cannot change anything even by calling them directly. */
+function canEditWeeklyStatus(){
   if(state.isCustomer||state.impersonating) return false;
   const me=String(state.email||'').trim().toLowerCase();
   return WEEKLY_STATUS_PEOPLE.indexOf(me)!==-1;
+}
+function canWeeklyStatus(){
+  if(state.isCustomer||state.impersonating) return false;
+  return canEditWeeklyStatus()||state.wsParticipant===true;
+}
+function wsPartKey(){ return 'ws_part_'+String(state.email||'').trim().toLowerCase(); }
+function wsPeekParticipant(){
+  try{ const c=JSON.parse(localStorage.getItem(wsPartKey())||'null'); if(c&&Date.now()-c.t<600000) state.wsParticipant=!!c.v; }catch(e){}
+}
+async function wsCheckParticipant(){
+  if(state.wsParticipant!==undefined) return state.wsParticipant;
+  try{
+    const r=await sb.rpc('ops_ws_is_participant');
+    if(r.error) return false;
+    state.wsParticipant=r.data===true;
+    try{ localStorage.setItem(wsPartKey(),JSON.stringify({t:Date.now(),v:state.wsParticipant})); }catch(e){}
+  }catch(e){ return false; }
+  return state.wsParticipant;
+}
+// The sidebar was drawn before the answer came back: draw it again, keeping what the first draw set up.
+function wsRefreshNav(){
+  if(!$('sbNav')) return;
+  buildSidebarNav(); setActive(PAGE);
+  document.querySelectorAll('.sb-item').forEach(function(a){ a.addEventListener('click',function(){ document.body.classList.remove('nav-open'); }); });
+  if(state.super) secPendingBadge();
 }
 /* LEGAL 2 (5 Nov 2026): the reshaped Legal MIS (10b-legal-mis-pages.js) runs on a page of its own,
    legal2.html, beside the original Legal, for named people only while it is tried out: the
@@ -1347,7 +1392,7 @@ function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g
   return groups;}
 function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='legal2')return canLegal2();if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
-function renderShell(){
+function buildSidebarNav(){
   const nav=$('sbNav');nav.innerHTML='';
   effectiveNav().forEach(g=>{
     nav.appendChild(el('div','sb-group',g.group));
@@ -1365,6 +1410,9 @@ function renderShell(){
       nav.appendChild(a);
     });
   });
+}
+function renderShell(){
+  buildSidebarNav();
   // The logo/"back to home" link is static markup in each .html shell (not built by effectiveNav()
   // above), but it's the exact same kind of cross-module link, so it gets the exact same treatment.
   const brand=document.querySelector('.sb-brand');
@@ -11284,7 +11332,7 @@ function wmNames(it){ return it.linked?(it.mem.length===1?wmFirst(it.mem[0]):it.
 /* ---------- load ---------- */
 async function wmLoad(){
   // Repeating meetings: make sure this week's and next week's dates exist before reading.
-  try{ await sb.rpc('ops_meeting_series_fill'); }catch(e){}
+  if(!WM.ro){ try{ await sb.rpc('ops_meeting_series_fill'); }catch(e){} }
   try{
     const r=await Promise.all([sb.rpc('ops_weekly_meetings'), sb.rpc('ops_weekly_items'), sb.schema('acc').rpc('people'), sb.rpc('ops_weekly_notes')]);
     WM.notes=(r[3]&&!r[3].error&&r[3].data)||[];
@@ -11311,6 +11359,7 @@ const wmSeries=kind=>(WM.meetings||[]).filter(m=>m.kind===kind);
 
 VIEWS.weekly_status=async function(v){
   setCrumb(['Overview','Weekly Status']);
+  WM.ro=!canEditWeeklyStatus();   // a person on the meeting reads it; the starter edits
   loader(v);
   await wmLoad();
   if(WM.items===null){
@@ -11324,8 +11373,35 @@ VIEWS.weekly_status=async function(v){
   WM.cur=(ms.find(m=>m.meeting_date===today)||ms.find(m=>m.meeting_date<=today&&regular(m))||ms.find(m=>m.meeting_date<=today)||ms[0]||{}).id||null;
   WM.wk=wmMonday(today);
   v.innerHTML=WM_CSS+'<div class="wm" id="wmRoot"></div>';
+  wmWatchReadOnly();
   wmRender();
 };
+
+/* READ-ONLY VIEW. Everything that changes something is drawn by the same code as the rest of the page,
+   so rather than a second copy of it, whatever is drawn is switched off afterwards: buttons and fields
+   whose handler writes are hidden or locked. The database refuses the writes in any case (every ops_*
+   write function still asks has_module); this is so a reader is not offered buttons that would only
+   come back with an error. Moving between meetings, weeks and tabs is not a write and stays. */
+const WM_WRITE=/\bwm(?:StartMeeting|ScheduleMeeting|MeetingSave|SeriesStop|EndMeeting|Reopen|AgStart|AgStep|AgPause|AgAdd|AgMins|AgNoteInput|AgNoteSave|KpiAdd|KpiInput|KpiSave|KpiColAdd|KpiColDel|KpiColName|KpiCell|OoAdd|NoteAdd|NoteInput|NoteSave|NoteSolve|NoteTask|NoteTaskSave|NoteDel|EditAttendance|SaveAttendance|SetLegacy|Toggle|Approve|Parse|Key|DropMem|PickPeople|SelAll|Promote|BulkPeople|BulkDue|DraftText|DraftDue|DraftDelete|Choose|Add1|Form[A-Za-z]*)\b/;
+const WM_ROW_CTRL=/\bwm(?:Toggle|Approve|SetLegacy|SelAll|DraftText|DraftDue|KpiColName|KpiCell|AgMins)\b/;   // part of a row: stay in place, switched off
+function wmLockView(){
+  const root=$('wmRoot'); if(!root||!WM.ro) return;
+  root.querySelectorAll('[onclick],[onchange],[oninput],[onkeydown],[onblur]').forEach(function(el){
+    const hit=['onclick','onchange','oninput','onkeydown','onblur'].some(function(a){ const v=el.getAttribute(a); return v&&WM_WRITE.test(v); });
+    if(!hit) return;
+    const keep=['onclick','onchange'].some(function(a){ const v=el.getAttribute(a); return v&&WM_ROW_CTRL.test(v); });
+    if(/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)||keep){ if('readOnly' in el) el.readOnly=true; el.disabled=true; el.style.pointerEvents='none'; el.style.opacity='.7'; }
+    else el.style.display='none';
+  });
+  root.querySelectorAll('.wm-cap').forEach(function(el){ el.style.display='none'; });
+}
+function wmWatchReadOnly(){
+  if(WM.lockObs){ WM.lockObs.disconnect(); WM.lockObs=null; }
+  const root=$('wmRoot'); if(!root||!WM.ro) return;
+  WM.lockObs=new MutationObserver(wmLockView);
+  WM.lockObs.observe(root,{childList:true,subtree:true});
+}
+
 
 function wmRender(){
   const root=$('wmRoot'); if(!root) return;
@@ -11335,6 +11411,7 @@ function wmRender(){
   <div class="wm-top wm-in">
     <div class="wm-date">${esc(new Date(wmToday()+'T00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'}))}</div>
     <h1>${hi}.</h1>
+    ${WM.ro?'<div class="wm-lead wm-mute" style="font-size:13px"><i class="fa-solid fa-eye"></i> You can see the meetings you are on. Only the person who starts a meeting can change it.</div>':''}
     <div class="wm-lead"><button class="wm-lnk ${WM.view==='all'?'on':''}" onclick="wmOpenAll('pending')"><b id="wmPend">${open.length}</b> tasks pending</button></div>
   </div>
   <div class="wm-grid ${wmRailOff()?'off':''}" id="wmGrid"><div id="wmMain"></div><aside class="wm-rail">
@@ -11642,6 +11719,7 @@ function wmAgState(m){
 const wmMMSS=s=>{ s=Math.max(0,Math.round(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
 async function wmAgSaveRun(m,run){
   m.agenda_run=run;
+  if(WM.ro) return;
   try{ const {error}=await sb.rpc('ops_meeting_set_run',{p_meeting:m.id,p_run:run}); if(error) throw error; }
   catch(e){ toast('Could not save the timer: '+((e&&e.message)||e),'err'); }
 }
