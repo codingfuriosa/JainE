@@ -15,8 +15,13 @@ const FH_QTYPE_INFO={
   short_text:{icon:'fa-i-cursor',label:'Short Text',desc:'A single line of text',color:'#7c3aed'},
   long_text:{icon:'fa-align-left',label:'Long Text',desc:'A paragraph of text',color:'#0f766e'},
   multi:{icon:'fa-square-check',label:'Multi Select',desc:'Pick any number of options',color:'#b45309'},
-  nps:{icon:'fa-gauge-high',label:'Score 0–10',desc:'The 0 to 10 "would you recommend us" scale',color:'#9c1420'}
+  nps:{icon:'fa-gauge-high',label:'Score 0–10',desc:'The 0 to 10 "would you recommend us" scale',color:'#9c1420'},
+  scale:{icon:'fa-list-ol',label:'Numbered Scale',desc:'Plain numbers, e.g. 1 to 5, with the ends labelled',color:'#1d4ed8'}
 };
+// A Rating and a Numbered Scale ask the same thing and store the same answer; they differ only in
+// whether it is shown as stars or as numbers. Stars look warmer, numbers say outright which end is
+// which - three stars tells nobody whether that is fine or poor. Both carry a points count.
+const FH_SCALE_TYPES=['rating','scale'];
 // Multi Select and Score 0-10 answer the two things a star row and a single-pick list could not:
 // a question whose honest answer is "these three", and a scale whose bottom end is 0, not 1.
 const FH_OPTION_TYPES=['mcq','multi'];
@@ -170,7 +175,7 @@ function fhQuestionsStructurallyChanged(orig,cur){
   for(const q of cur){
     const o=byId[q.id];if(!o)return true;
     if(o.type!==q.type)return true;
-    if(q.type==='rating'&&(o.rating_max||5)!==(q.rating_max||5))return true;
+    if(FH_SCALE_TYPES.includes(q.type)&&(o.rating_max||5)!==(q.rating_max||5))return true;
     if(FH_OPTION_TYPES.includes(q.type)){
       const oo=(o.options||[]).filter(x=>x&&x.trim());
       const co=(q.options||[]).filter(x=>x&&x.trim());
@@ -410,10 +415,10 @@ function fhQRowHtml(q,i){
       </div>
     </div>
     <input class="inp fh-q-prompt" value="${esc(q.prompt)}" placeholder="Type your question…" oninput="fhQSet(${i},'prompt',this.value)">
-    ${q.type==='rating'?`<div class="fh-rating-config">
-        <label>Number of stars</label>
+    ${FH_SCALE_TYPES.includes(q.type)?`<div class="fh-rating-config">
+        <label>${q.type==='scale'?'Highest number':'Number of stars'}</label>
         <input type="number" class="inp" style="width:70px" min="3" max="10" value="${q.rating_max||5}" oninput="fhQSet(${i},'rating_max',parseInt(this.value)||5);fhRatingPreview(${i})">
-        <div class="fh-star-preview" id="fhStarPrev_${i}">${'<i class="fa-solid fa-star"></i>'.repeat(q.rating_max||5)}</div>
+        <div class="fh-star-preview" id="fhStarPrev_${i}">${q.type==='scale'?Array.from({length:(q.rating_max||5)},(_,n)=>n+1).join('  '):'<i class="fa-solid fa-star"></i>'.repeat(q.rating_max||5)}</div>
       </div>`:''}
     ${FH_OPTION_TYPES.includes(q.type)?`<div class="fh-opts" id="fhOpts_${i}">
         ${opts.map((o,oi)=>`<div class="fh-opt-row"><span class="fh-opt-letter">${String.fromCharCode(65+oi)}</span><input class="inp" value="${esc(o)}" placeholder="Option text" oninput="fhOptSet(${i},${oi},this.value)"><button type="button" class="fh-icon-btn fh-danger" title="Remove option" onclick="fhOptRemove(${i},${oi})"><i class="fa-solid fa-xmark"></i></button></div>`).join('')}
@@ -560,7 +565,7 @@ window.fhSaveForm=async function(){
       const q=ed.questions[i];
       const row={seq:i+1,type:q.type,prompt:q.prompt.trim(),required:!!q.required,
         options:FH_OPTION_TYPES.includes(q.type)?q.options.filter(o=>o&&o.trim()):null,
-        rating_max:q.type==='rating'?(q.rating_max||5):null};
+        rating_max:FH_SCALE_TYPES.includes(q.type)?(q.rating_max||5):null};
       if(q.id){
         const{error}=await sb.schema('feedback').from('form_questions').update(row).eq('id',q.id);
         if(error)throw new Error(error.message);
@@ -598,6 +603,8 @@ async function fhPreviewPage(v){
       body=`<div class="fh-preview-stars">${'<i class="fa-solid fa-star"></i>'.repeat(q.rating_max||5)}</div>`;
     }else if(q.type==='nps'){
       body='<div class="fh-preview-stars" style="letter-spacing:2px;font-size:13px;font-weight:700">0 1 2 3 4 5 6 7 8 9 10</div>';
+    }else if(q.type==='scale'){
+      body=`<div class="fh-preview-stars" style="letter-spacing:2px;font-size:13px;font-weight:700">${Array.from({length:(q.rating_max||5)},(_,n)=>n+1).join(' ')}</div>`;
     }else if(FH_OPTION_TYPES.includes(q.type)){
       const mark=q.type==='multi'?'fa-regular fa-square':'fa-regular fa-circle';
       body=(q.options||[]).filter(o=>o&&o.trim()).map(o=>`<span class="fh-preview-opt"><i class="${mark}" style="margin-right:7px"></i>${esc(o)}</span>`).join('')||'<span class="fh-preview-opt" style="font-style:italic">No options added yet</span>';
@@ -659,7 +666,7 @@ async function fhRecordsPage(v,formId){
   </div>`;
   if(error){ v.innerHTML=FH_CSS+head+`<div class="err">${esc(error.message)}</div>`; return; }
   FH_REC_FORM=f;FH_REC_ROWS=responses||[];
-  const ratingQs=(questions||[]).filter(q=>q.type==='rating'||q.type==='nps');
+  const ratingQs=(questions||[]).filter(q=>q.type==='rating'||q.type==='nps'||q.type==='scale');
   const mcqQs=(questions||[]).filter(q=>q.type==='mcq'||q.type==='multi');
   const textQs=(questions||[]).filter(q=>q.type==='short_text'||q.type==='long_text');
   let answers=[];
@@ -674,7 +681,7 @@ async function fhRecordsPage(v,formId){
   const allQs=(questions||[]);
   function fhCellFor(q,val){
     if(val==null||val==='')return '<span style="color:var(--slate)">—</span>';
-    if(q.type==='rating')return esc(val)+'<span style="color:var(--slate)">/'+(q.rating_max||5)+'</span>';
+    if(q.type==='rating'||q.type==='scale')return esc(val)+'<span style="color:var(--slate)">/'+(q.rating_max||5)+'</span>';
     if(q.type==='nps')return esc(val)+'<span style="color:var(--slate)">/10</span>';
     // Several picks arrive as one piece of text; one per line reads far better in a narrow cell.
     if(q.type==='multi')return String(val).split(' | ').map(x=>esc(x)).join('<br>');

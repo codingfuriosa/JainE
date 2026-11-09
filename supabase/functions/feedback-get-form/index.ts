@@ -10,7 +10,8 @@
 
    Hardening (this is a public, login-free form -- honest about what it can and can't stop):
    - Every answer is validated server-side against the question it claims to answer: a rating must be
-     a whole number within [1, rating_max], a score out of 10 a whole number within [0, 10], an MCQ
+     a whole number within [1, rating_max] (a numbered scale the same), a score out of 10 a whole
+     number within [0, 10], an MCQ
      answer must be exactly one of that question's own options, and every pick of a multi-select must
      be one of them too. A client that skips the UI and posts straight to this function cannot inject
      a rating of 9999 or an MCQ answer that was never offered.
@@ -86,7 +87,10 @@ Deno.serve(async (req)=>{
       const val=answerByQ[String(q.id)]||'';
       if(q.required && !val) return j({error:'Please answer every required question.'},400);
       if(!val) continue;
-      if(q.type==='rating'){
+      /* 'scale' is a rating drawn as numbers rather than stars - same answer, same rating_max, so
+         the same range check serves both and a form can move between them without touching a single
+         answer already collected. */
+      if(q.type==='rating'||q.type==='scale'){
         const n=Number(val);
         const max=Number(q.rating_max)||5;
         if(!Number.isInteger(n) || n<1 || n>max) return j({error:'That rating is out of range.'},400);

@@ -35,17 +35,22 @@
     return html;
   }
 
-  /* NOUGHT TO TEN, INCLUSIVE. This is the Net Promoter question, and 0 is a real answer on it -
-     "would not recommend at all" - so it cannot be a star row, which has no nought to click. Only
-     the chosen number lights up rather than everything below it: on a star rating four stars means
-     "four out of five", but on this an 8 means 8, not "1 through 8". */
-  function npsRow(qid){
-    let html='<div class="nps" data-qid="'+qid+'" role="radiogroup" aria-label="Score out of 10">';
-    for(let i=0;i<=10;i++){
-      html+='<span class="npsb" data-val="'+i+'" role="radio" aria-checked="false" aria-label="'+i+' out of 10" tabindex="'+(i===0?'0':'-1')+'">'+i+'</span>';
+  /* A ROW OF NUMBERS, WHICH IS WHAT BOTH OF THESE ARE. The Net Promoter question runs nought to
+     ten, and nought is a real answer on it - "would not recommend at all" - so it could never be a
+     star row, which has no nought to click. A 1-to-5 scale is the same row with different ends, and
+     is asked for in plain numbers because a star tells nobody whether three of them is fine or
+     poor, whereas a row reading 1 at one end and 5 at the other says so outright.
+     Only the chosen number lights up, never everything below it: four stars means "four out of
+     five", but here an 8 means 8, not "1 through 8".
+     The ends are carried on the element rather than assumed, so the one wiring block below drives
+     either without knowing which it is looking at. */
+  function numberRow(qid,from,to,lowEnd,highEnd,ariaLabel){
+    let html='<div class="nps" data-qid="'+qid+'" data-min="'+from+'" data-max="'+to+'" role="radiogroup" aria-label="'+esc(ariaLabel)+'">';
+    for(let i=from;i<=to;i++){
+      html+='<span class="npsb" data-val="'+i+'" role="radio" aria-checked="false" aria-label="'+i+' out of '+to+'" tabindex="'+(i===from?'0':'-1')+'">'+i+'</span>';
     }
-    html+='</div><div class="nps-ends"><span>0 — not at all likely</span><span>10 — extremely likely</span></div>'
-       +'<div class="star-readout" id="starReadout_'+qid+'" aria-live="polite">No score selected</div>';
+    html+='</div><div class="nps-ends"><span>'+esc(lowEnd)+'</span><span>'+esc(highEnd)+'</span></div>'
+       +'<div class="star-readout" id="starReadout_'+qid+'" aria-live="polite">Nothing selected yet</div>';
     return html;
   }
 
@@ -67,7 +72,13 @@
       return '<div class="q" data-qid="'+q.id+'" data-type="mcq" data-required="'+req+'">'+promptHtml+opts+errMsg()+'</div>';
     }
     if(q.type==='nps'){
-      return '<div class="q" data-qid="'+q.id+'" data-type="nps" data-required="'+req+'">'+promptHtml+npsRow(q.id)+errMsg()+'</div>';
+      return '<div class="q" data-qid="'+q.id+'" data-type="nps" data-required="'+req+'">'+promptHtml
+        +numberRow(q.id,0,10,'0 — not at all likely','10 — extremely likely','Score out of 10')+errMsg()+'</div>';
+    }
+    if(q.type==='scale'){
+      const max=q.rating_max||5;
+      return '<div class="q" data-qid="'+q.id+'" data-type="scale" data-required="'+req+'">'+promptHtml
+        +numberRow(q.id,1,max,'1 — poor',max+' — excellent','Rating out of '+max)+errMsg()+'</div>';
     }
     /* SEVERAL ANSWERS TO ONE QUESTION. Checkboxes, and the picks travel as one piece of text joined
        by " | " - the same separator the workflow forms use, and for the same reason: an option here
@@ -111,8 +122,9 @@
 
     app.querySelectorAll('.nps').forEach(function(box){
       const qid=box.getAttribute('data-qid');
+      const lo=Number(box.getAttribute('data-min')), hi=Number(box.getAttribute('data-max'));
       function selectVal(val,opts){
-        val=Math.max(0,Math.min(10,val));
+        val=Math.max(lo,Math.min(hi,val));
         box.setAttribute('data-value',val);
         box.querySelectorAll('.npsb').forEach(function(b){
           const v=Number(b.getAttribute('data-val'));
@@ -121,7 +133,7 @@
           b.setAttribute('tabindex',v===val?'0':'-1');
         });
         const ro=document.getElementById('starReadout_'+qid);
-        if(ro)ro.textContent=val+' / 10';
+        if(ro)ro.textContent=val+' / '+hi;
         if(opts&&opts.focus){ const el=box.querySelector('[data-val="'+val+'"]'); if(el)el.focus(); }
         clearErr(box.closest('.q'));
       }
@@ -131,11 +143,11 @@
       });
       box.addEventListener('keydown',function(e){
         // data-value is absent until something is picked, and "" reads as 0 - which is a real score
-        // here, so an unanswered question must not pretend to already be sitting on it.
+        // on the nought-to-ten row, so an unanswered question must not pretend to be sitting on it.
         const picked=box.hasAttribute('data-value');
-        const cur=picked?Number(box.getAttribute('data-value')):-1;
-        if(e.key==='ArrowRight'||e.key==='ArrowUp'){ e.preventDefault(); selectVal(picked?cur+1:0,{focus:true}); }
-        else if(e.key==='ArrowLeft'||e.key==='ArrowDown'){ e.preventDefault(); selectVal(picked?cur-1:10,{focus:true}); }
+        const cur=picked?Number(box.getAttribute('data-value')):lo-1;
+        if(e.key==='ArrowRight'||e.key==='ArrowUp'){ e.preventDefault(); selectVal(picked?cur+1:lo,{focus:true}); }
+        else if(e.key==='ArrowLeft'||e.key==='ArrowDown'){ e.preventDefault(); selectVal(picked?cur-1:hi,{focus:true}); }
         else if(e.key===' '||e.key==='Enter'){ const b=e.target.closest('[data-val]'); if(b){ e.preventDefault(); selectVal(Number(b.getAttribute('data-val'))); } }
       });
     });
@@ -203,7 +215,7 @@
       }else if(type==='mcq'){
         const checked=qEl.querySelector('input[type="radio"]:checked');
         val=checked?checked.value:'';
-      }else if(type==='nps'){
+      }else if(type==='nps'||type==='scale'){
         const box=qEl.querySelector('.nps');
         val=box.hasAttribute('data-value')?box.getAttribute('data-value'):'';
       }else if(type==='multi'){
