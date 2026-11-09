@@ -12533,8 +12533,13 @@ const FH_QTYPE_INFO={
   rating:{icon:'fa-star',label:'Rating',desc:'A star scale, e.g. 1 to 5',color:'#f59e0b'},
   mcq:{icon:'fa-list-check',label:'Multiple Choice',desc:'Pick one option',color:'#0369a1'},
   short_text:{icon:'fa-i-cursor',label:'Short Text',desc:'A single line of text',color:'#7c3aed'},
-  long_text:{icon:'fa-align-left',label:'Long Text',desc:'A paragraph of text',color:'#0f766e'}
+  long_text:{icon:'fa-align-left',label:'Long Text',desc:'A paragraph of text',color:'#0f766e'},
+  multi:{icon:'fa-square-check',label:'Multi Select',desc:'Pick any number of options',color:'#b45309'},
+  nps:{icon:'fa-gauge-high',label:'Score 0–10',desc:'The 0 to 10 "would you recommend us" scale',color:'#9c1420'}
 };
+// Multi Select and Score 0-10 answer the two things a star row and a single-pick list could not:
+// a question whose honest answer is "these three", and a scale whose bottom end is 0, not 1.
+const FH_OPTION_TYPES=['mcq','multi'];
 const FH_CSS=`<style id="fhCss">
 .fh-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:18px;flex-wrap:wrap}
 .fh-danger{color:var(--err)!important;border-color:var(--err)!important}
@@ -12686,7 +12691,7 @@ function fhQuestionsStructurallyChanged(orig,cur){
     const o=byId[q.id];if(!o)return true;
     if(o.type!==q.type)return true;
     if(q.type==='rating'&&(o.rating_max||5)!==(q.rating_max||5))return true;
-    if(q.type==='mcq'){
+    if(FH_OPTION_TYPES.includes(q.type)){
       const oo=(o.options||[]).filter(x=>x&&x.trim());
       const co=(q.options||[]).filter(x=>x&&x.trim());
       if(oo.length!==co.length||oo.some((x,i)=>x!==co[i]))return true;
@@ -12930,7 +12935,7 @@ function fhQRowHtml(q,i){
         <input type="number" class="inp" style="width:70px" min="3" max="10" value="${q.rating_max||5}" oninput="fhQSet(${i},'rating_max',parseInt(this.value)||5);fhRatingPreview(${i})">
         <div class="fh-star-preview" id="fhStarPrev_${i}">${'<i class="fa-solid fa-star"></i>'.repeat(q.rating_max||5)}</div>
       </div>`:''}
-    ${q.type==='mcq'?`<div class="fh-opts" id="fhOpts_${i}">
+    ${FH_OPTION_TYPES.includes(q.type)?`<div class="fh-opts" id="fhOpts_${i}">
         ${opts.map((o,oi)=>`<div class="fh-opt-row"><span class="fh-opt-letter">${String.fromCharCode(65+oi)}</span><input class="inp" value="${esc(o)}" placeholder="Option text" oninput="fhOptSet(${i},${oi},this.value)"><button type="button" class="fh-icon-btn fh-danger" title="Remove option" onclick="fhOptRemove(${i},${oi})"><i class="fa-solid fa-xmark"></i></button></div>`).join('')}
         <button type="button" class="btn btn-sm" onclick="fhOptAdd(${i})"><i class="fa-solid fa-plus"></i> Add Option</button>
       </div>`:''}
@@ -12963,7 +12968,7 @@ window.fhOptRemove=function(qi,oi){
 };
 window.fhQAdd=function(type){
   fhSyncEditFields();
-  FH_EDIT.questions.push({id:null,type,prompt:'',options:type==='mcq'?['',''] :[],rating_max:5,required:true});
+  FH_EDIT.questions.push({id:null,type,prompt:'',options:FH_OPTION_TYPES.includes(type)?['',''] :[],rating_max:5,required:true});
   fhFormPageRender();
   setTimeout(()=>{const l=$('fhQList');if(l)l.lastElementChild&&l.lastElementChild.scrollIntoView({behavior:'smooth',block:'center'});},50);
 };
@@ -13036,7 +13041,12 @@ window.fhSaveForm=async function(){
   if(!ed.questions.length){toast('Add at least one question','err');return;}
   for(const q of ed.questions){
     if(!q.prompt||!q.prompt.trim()){toast('Every question needs its text filled in','err');return;}
-    if(q.type==='mcq'&&(q.options||[]).filter(o=>o&&o.trim()).length<2){toast('Multiple choice questions need at least 2 options','err');return;}
+    if(FH_OPTION_TYPES.includes(q.type)&&(q.options||[]).filter(o=>o&&o.trim()).length<2){toast((q.type==='multi'?'Multi select':'Multiple choice')+' questions need at least 2 options','err');return;}
+    /* A multi-select answer travels as its picks joined by " | ", so an option carrying a pipe of
+       its own would come back as two answers that were never offered - and be rejected on submit,
+       by which time the person filling it in has no idea why. Caught here instead, while it is
+       still somebody's own form to fix. */
+    if(q.type==='multi'&&(q.options||[]).some(o=>String(o||'').indexOf('|')!==-1)){toast('A multi select option cannot contain the | character','err');return;}
   }
   if(ed.id){
     const{count}=await sb.schema('feedback').from('responses').select('id',{count:'exact',head:true}).eq('form_id',ed.id);
@@ -13069,7 +13079,7 @@ window.fhSaveForm=async function(){
     for(let i=0;i<ed.questions.length;i++){
       const q=ed.questions[i];
       const row={seq:i+1,type:q.type,prompt:q.prompt.trim(),required:!!q.required,
-        options:q.type==='mcq'?q.options.filter(o=>o&&o.trim()):null,
+        options:FH_OPTION_TYPES.includes(q.type)?q.options.filter(o=>o&&o.trim()):null,
         rating_max:q.type==='rating'?(q.rating_max||5):null};
       if(q.id){
         const{error}=await sb.schema('feedback').from('form_questions').update(row).eq('id',q.id);
@@ -13102,12 +13112,15 @@ async function fhPreviewPage(v){
   }
   fhSyncEditFields();
   const qHtml=(ed.questions||[]).map(q=>{
-    const label=(q.required?'':'(Optional) ')+(q.type==='rating'?'Rating':q.type==='mcq'?'Multiple choice':'Question');
+    const label=(q.required?'':'(Optional) ')+((FH_QTYPE_INFO[q.type]||{}).label||'Question');
     let body='';
     if(q.type==='rating'){
       body=`<div class="fh-preview-stars">${'<i class="fa-solid fa-star"></i>'.repeat(q.rating_max||5)}</div>`;
-    }else if(q.type==='mcq'){
-      body=(q.options||[]).filter(o=>o&&o.trim()).map(o=>`<span class="fh-preview-opt"><i class="fa-regular fa-circle" style="margin-right:7px"></i>${esc(o)}</span>`).join('')||'<span class="fh-preview-opt" style="font-style:italic">No options added yet</span>';
+    }else if(q.type==='nps'){
+      body='<div class="fh-preview-stars" style="letter-spacing:2px;font-size:13px;font-weight:700">0 1 2 3 4 5 6 7 8 9 10</div>';
+    }else if(FH_OPTION_TYPES.includes(q.type)){
+      const mark=q.type==='multi'?'fa-regular fa-square':'fa-regular fa-circle';
+      body=(q.options||[]).filter(o=>o&&o.trim()).map(o=>`<span class="fh-preview-opt"><i class="${mark}" style="margin-right:7px"></i>${esc(o)}</span>`).join('')||'<span class="fh-preview-opt" style="font-style:italic">No options added yet</span>';
     }else if(q.type==='short_text'){
       body='<span class="fh-preview-opt">Your answer</span>';
     }else{
@@ -13166,8 +13179,8 @@ async function fhRecordsPage(v,formId){
   </div>`;
   if(error){ v.innerHTML=FH_CSS+head+`<div class="err">${esc(error.message)}</div>`; return; }
   FH_REC_FORM=f;FH_REC_ROWS=responses||[];
-  const ratingQs=(questions||[]).filter(q=>q.type==='rating');
-  const mcqQs=(questions||[]).filter(q=>q.type==='mcq');
+  const ratingQs=(questions||[]).filter(q=>q.type==='rating'||q.type==='nps');
+  const mcqQs=(questions||[]).filter(q=>q.type==='mcq'||q.type==='multi');
   const textQs=(questions||[]).filter(q=>q.type==='short_text'||q.type==='long_text');
   let answers=[];
   if(FH_REC_ROWS.length&&(ratingQs.length||mcqQs.length||textQs.length)){
@@ -13182,6 +13195,9 @@ async function fhRecordsPage(v,formId){
   function fhCellFor(q,val){
     if(val==null||val==='')return '<span style="color:var(--slate)">—</span>';
     if(q.type==='rating')return esc(val)+'<span style="color:var(--slate)">/'+(q.rating_max||5)+'</span>';
+    if(q.type==='nps')return esc(val)+'<span style="color:var(--slate)">/10</span>';
+    // Several picks arrive as one piece of text; one per line reads far better in a narrow cell.
+    if(q.type==='multi')return String(val).split(' | ').map(x=>esc(x)).join('<br>');
     if(q.type==='mcq')return esc(val);
     const s=String(val);
     return s.length>40?'<span title="'+esc(s)+'">'+esc(s.slice(0,40))+'…</span>':esc(s);
