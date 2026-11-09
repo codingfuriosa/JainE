@@ -35,6 +35,20 @@
     return html;
   }
 
+  /* NOUGHT TO TEN, INCLUSIVE. This is the Net Promoter question, and 0 is a real answer on it -
+     "would not recommend at all" - so it cannot be a star row, which has no nought to click. Only
+     the chosen number lights up rather than everything below it: on a star rating four stars means
+     "four out of five", but on this an 8 means 8, not "1 through 8". */
+  function npsRow(qid){
+    let html='<div class="nps" data-qid="'+qid+'" role="radiogroup" aria-label="Score out of 10">';
+    for(let i=0;i<=10;i++){
+      html+='<span class="npsb" data-val="'+i+'" role="radio" aria-checked="false" aria-label="'+i+' out of 10" tabindex="'+(i===0?'0':'-1')+'">'+i+'</span>';
+    }
+    html+='</div><div class="nps-ends"><span>0 — not at all likely</span><span>10 — extremely likely</span></div>'
+       +'<div class="star-readout" id="starReadout_'+qid+'" aria-live="polite">No score selected</div>';
+    return html;
+  }
+
   function errMsg(){
     return '<div class="q-err-msg">This question needs an answer.</div>';
   }
@@ -51,6 +65,19 @@
         '<label class="opt"><input type="radio" name="q'+q.id+'" value="'+esc(o)+'"> '+esc(o)+'</label>'
       ).join('');
       return '<div class="q" data-qid="'+q.id+'" data-type="mcq" data-required="'+req+'">'+promptHtml+opts+errMsg()+'</div>';
+    }
+    if(q.type==='nps'){
+      return '<div class="q" data-qid="'+q.id+'" data-type="nps" data-required="'+req+'">'+promptHtml+npsRow(q.id)+errMsg()+'</div>';
+    }
+    /* SEVERAL ANSWERS TO ONE QUESTION. Checkboxes, and the picks travel as one piece of text joined
+       by " | " - the same separator the workflow forms use, and for the same reason: an option here
+       can legitimately contain a comma ("Payments, demand letters or receipts"), so a comma cannot
+       be what separates them. The builder refuses an option containing a pipe. */
+    if(q.type==='multi'){
+      const opts=(q.options||[]).map(o=>
+        '<label class="opt"><input type="checkbox" name="q'+q.id+'" value="'+esc(o)+'"> '+esc(o)+'</label>'
+      ).join('');
+      return '<div class="q" data-qid="'+q.id+'" data-type="multi" data-required="'+req+'">'+promptHtml+opts+errMsg()+'</div>';
     }
     if(q.type==='short_text'){
       return '<div class="q" data-qid="'+q.id+'" data-type="short_text" data-required="'+req+'">'+promptHtml+'<input type="text" data-qid="'+q.id+'" placeholder="Your answer">'+errMsg()+'</div>';
@@ -82,6 +109,36 @@
       +'<div id="submitArea" style="margin-top:6px"><button class="btn" id="submitBtn">Submit</button></div>'
       +'<p class="err" id="formErr" style="display:none;margin-top:10px"></p>';
 
+    app.querySelectorAll('.nps').forEach(function(box){
+      const qid=box.getAttribute('data-qid');
+      function selectVal(val,opts){
+        val=Math.max(0,Math.min(10,val));
+        box.setAttribute('data-value',val);
+        box.querySelectorAll('.npsb').forEach(function(b){
+          const v=Number(b.getAttribute('data-val'));
+          b.classList.toggle('on',v===val);
+          b.setAttribute('aria-checked',v===val?'true':'false');
+          b.setAttribute('tabindex',v===val?'0':'-1');
+        });
+        const ro=document.getElementById('starReadout_'+qid);
+        if(ro)ro.textContent=val+' / 10';
+        if(opts&&opts.focus){ const el=box.querySelector('[data-val="'+val+'"]'); if(el)el.focus(); }
+        clearErr(box.closest('.q'));
+      }
+      box.addEventListener('click',function(e){
+        const b=e.target.closest('[data-val]'); if(!b)return;
+        selectVal(Number(b.getAttribute('data-val')));
+      });
+      box.addEventListener('keydown',function(e){
+        // data-value is absent until something is picked, and "" reads as 0 - which is a real score
+        // here, so an unanswered question must not pretend to already be sitting on it.
+        const picked=box.hasAttribute('data-value');
+        const cur=picked?Number(box.getAttribute('data-value')):-1;
+        if(e.key==='ArrowRight'||e.key==='ArrowUp'){ e.preventDefault(); selectVal(picked?cur+1:0,{focus:true}); }
+        else if(e.key==='ArrowLeft'||e.key==='ArrowDown'){ e.preventDefault(); selectVal(picked?cur-1:10,{focus:true}); }
+        else if(e.key===' '||e.key==='Enter'){ const b=e.target.closest('[data-val]'); if(b){ e.preventDefault(); selectVal(Number(b.getAttribute('data-val'))); } }
+      });
+    });
     app.querySelectorAll('.stars').forEach(function(box){
       const max=box.querySelectorAll('[data-val]').length;
       const qid=box.getAttribute('data-qid');
@@ -146,6 +203,12 @@
       }else if(type==='mcq'){
         const checked=qEl.querySelector('input[type="radio"]:checked');
         val=checked?checked.value:'';
+      }else if(type==='nps'){
+        const box=qEl.querySelector('.nps');
+        val=box.hasAttribute('data-value')?box.getAttribute('data-value'):'';
+      }else if(type==='multi'){
+        val=[].slice.call(qEl.querySelectorAll('input[type="checkbox"]:checked'))
+              .map(function(c){ return c.value; }).join(' | ');
       }else if(type==='short_text'){
         val=(qEl.querySelector('input')||{}).value||'';
       }else{

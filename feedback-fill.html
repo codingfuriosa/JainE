@@ -33,6 +33,14 @@
   .stars .star:hover{background:#faf9f6}
   .stars .star:focus-visible{outline:2px solid var(--brand);outline-offset:-2px;background:#faf9f6}
   .stars .star.on{color:var(--gold)}
+  /* 0 to 10, and 0 has to be reachable - a star row starts at 1, so a score of 0 cannot be given
+     on one at all, which is the whole bottom end of the scale missing. Numbers, not stars. */
+  .nps{display:flex;flex-wrap:wrap;gap:6px}
+  .nps .npsb{display:inline-flex;align-items:center;justify-content:center;min-width:44px;height:44px;font-size:15px;font-weight:700;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:9px;cursor:pointer;user-select:none;transition:background .12s,border-color .12s,color .12s}
+  .nps .npsb:hover{background:#faf9f6;border-color:#d8d4cb}
+  .nps .npsb:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+  .nps .npsb.on{background:var(--brand);border-color:var(--brand);color:#fff}
+  .nps-ends{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--slate);margin-top:8px}
   .star-readout{font-size:12.5px;color:var(--slate);margin-top:4px}
   textarea,input[type=text],input[type=tel],input[type=email]{width:100%;min-height:auto;border:1px solid var(--line);border-radius:9px;padding:11px 13px;font-family:inherit;font-size:14px;resize:vertical;background:#fff}
   textarea:focus,input[type=text]:focus,input[type=tel]:focus,input[type=email]:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(156,20,32,.08)}
@@ -56,6 +64,6 @@
   <div class="head"><b>THE JAIN GROUP</b><div>Feedback</div></div>
   <div class="card" id="app"><div class="center"><div class="spin"></div></div></div>
 </div>
-<script src="feedback-fill.js?v=9ff14017b4"></script>
+<script src="feedback-fill.js?v=8d6653020f"></script>
 </body>
 </html>
