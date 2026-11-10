@@ -63,13 +63,18 @@ async function dcLoad(first){
   /* And the flag is cleared in a finally for the same reason: this runs on a timer, so anything
      that can wedge it stays wedged until somebody reloads the page. */
   try{
+    /* A narrow reader is entitled to the workflow health and to nothing else on this page, so the
+       other two are never asked for rather than asked for and refused - the refusals would land in
+       DC.err and put an error across a page that is working exactly as intended. */
+    const narrow=(typeof wfHealthOnly==='function')&&wfHealthOnly();
+    const skipped={ok:false,skipped:true};
     const res=await Promise.all([
-      call('erp_usability_daily_feature_checks'),
+      narrow?Promise.resolve(skipped):call('erp_usability_daily_feature_checks'),
       call('erp_usability_workflow_health'),
-      call('erp_usability_transcription_health')
+      narrow?Promise.resolve(skipped):call('erp_usability_transcription_health')
     ]);
     if(res[0].ok){ DC.feat=res[0].d; DC.err=null; }
-    else if(first){ DC.feat=null; DC.err=(res[0].e&&res[0].e.message)||'Could not load'; }
+    else if(first&&!res[0].skipped){ DC.feat=null; DC.err=(res[0].e&&res[0].e.message)||'Could not load'; }
     if(res[1].ok) DC.wf=res[1].d;
     if(res[2].ok) DC.tr=res[2].d;
     if(res[0].ok||res[1].ok||res[2].ok){ DC.at=Date.now(); DC.fail=0; } else { DC.fail++; }
@@ -152,6 +157,8 @@ function dcBodyHtml(){
   const none=(!picks.length && !(DC.wf||[]).length && !(DC.tr||[]).length)
     ? '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-list-check"></i>'
       +'<div>Nothing is flagged as a daily check yet</div></div>' : '';
+  // The narrow reader gets the workflow health table and stops there.
+  if((typeof wfHealthOnly==='function')&&wfHealthOnly()) return usbWorkflowHealthHtml();
   return usbWorkflowHealthHtml()+usbTranscriptionHealthHtml()+feature+none;
 }
 /* Repaints the figures in place. Expanding a workflow breakdown comes through here too, rather

@@ -141,6 +141,16 @@ function allowedSet(){if(state.super)return null;const m=state.roles&&state.role
    rule inside erp_usability_report(), which is what actually protects the numbers; this only decides
    whether the menu entry is worth drawing. */
 function hasUsability(){ if(state.super)return true; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('usability')!==-1; }
+/* WORKFLOW HEALTH, AND NOTHING ELSE ON THAT PAGE.
+   Daily Checks arrives with the 'usability' module, and that same module opens the Usability page,
+   the daily feature checks and transcription health along with it - so there was no way to hand
+   somebody the health of two workflows and none of the rest. This names who gets that narrow view;
+   the workflows themselves are not listed here, because the page draws whichever rows the database
+   hands back and adm.workflow_health_scope decides what those are. Same arrangement as
+   FEEDBACK_HUB_PEOPLE below: this only decides whether the page is offered at all, and the table is
+   what actually keeps the other workflows' figures out of reach. Keep the two in step. */
+const WORKFLOW_HEALTH_ONLY=['mgr.hr@thejaingroup.com'];
+function wfHealthOnly(){ return !hasUsability() && WORKFLOW_HEALTH_ONLY.indexOf(String(state.email||'').trim().toLowerCase())!==-1; }
 /* FEEDBACK HUB IS FOR THREE PEOPLE, BY NAME.
 
    Not "granted the ordinary way" like every other module, and deliberately not open to every
@@ -285,10 +295,10 @@ function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
-  if(hasUsability()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
+  if(hasUsability()||wfHealthOnly()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='legal2')return canLegal2();if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='legal2')return canLegal2();if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='daily_checks')return hasUsability()||wfHealthOnly();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function buildSidebarNav(){
   const nav=$('sbNav');nav.innerHTML='';
