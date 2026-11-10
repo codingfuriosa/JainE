@@ -14747,6 +14747,13 @@ function dcStampText(){
     +(DC.fail?('Last updated '+ago+' · could not reach the database'):(s<10?'Updated just now':('Updated '+ago)));
 }
 function dcBodyHtml(){
+  /* A NARROW READER'S PAGE IS DECIDED FIRST. They are entitled to the workflow health alone, so the
+     daily feature checks are never asked for on their behalf, and DC.feat stays at the null it
+     started as - which is exactly what the branch below tests for. Deciding their page after that
+     test put the one block they had been given behind a padlock reading "Could not load", on a page
+     that had in fact loaded perfectly. The emptiness is the arrangement working, not a failure, so
+     it has to be read that way before anything tests for it. */
+  if((typeof wfHealthOnly==='function')&&wfHealthOnly()) return usbWorkflowHealthHtml();
   if(DC.feat===null){
     return '<div class="card card-pad empty" style="margin-top:16px;padding:40px">'
       +'<i class="fa-solid fa-lock"></i><div>'+esc(DC.err||'Could not load')+'</div></div>';
@@ -14761,8 +14768,6 @@ function dcBodyHtml(){
   const none=(!picks.length && !(DC.wf||[]).length && !(DC.tr||[]).length)
     ? '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-list-check"></i>'
       +'<div>Nothing is flagged as a daily check yet</div></div>' : '';
-  // The narrow reader gets the workflow health table and stops there.
-  if((typeof wfHealthOnly==='function')&&wfHealthOnly()) return usbWorkflowHealthHtml();
   return usbWorkflowHealthHtml()+usbTranscriptionHealthHtml()+feature+none;
 }
 /* Repaints the figures in place. Expanding a workflow breakdown comes through here too, rather
