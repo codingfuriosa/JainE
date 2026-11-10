@@ -1243,6 +1243,16 @@ function allowedSet(){if(state.super)return null;const m=state.roles&&state.role
    rule inside erp_usability_report(), which is what actually protects the numbers; this only decides
    whether the menu entry is worth drawing. */
 function hasUsability(){ if(state.super)return true; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('usability')!==-1; }
+/* WORKFLOW HEALTH, AND NOTHING ELSE ON THAT PAGE.
+   Daily Checks arrives with the 'usability' module, and that same module opens the Usability page,
+   the daily feature checks and transcription health along with it - so there was no way to hand
+   somebody the health of two workflows and none of the rest. This names who gets that narrow view;
+   the workflows themselves are not listed here, because the page draws whichever rows the database
+   hands back and adm.workflow_health_scope decides what those are. Same arrangement as
+   FEEDBACK_HUB_PEOPLE below: this only decides whether the page is offered at all, and the table is
+   what actually keeps the other workflows' figures out of reach. Keep the two in step. */
+const WORKFLOW_HEALTH_ONLY=['mgr.hr@thejaingroup.com'];
+function wfHealthOnly(){ return !hasUsability() && WORKFLOW_HEALTH_ONLY.indexOf(String(state.email||'').trim().toLowerCase())!==-1; }
 /* FEEDBACK HUB IS FOR THREE PEOPLE, BY NAME.
 
    Not "granted the ordinary way" like every other module, and deliberately not open to every
@@ -1387,10 +1397,10 @@ function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
-  if(hasUsability()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
+  if(hasUsability()||wfHealthOnly()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='legal2')return canLegal2();if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='legal2')return canLegal2();if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='daily_checks')return hasUsability()||wfHealthOnly();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function buildSidebarNav(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -14657,13 +14667,18 @@ async function dcLoad(first){
   /* And the flag is cleared in a finally for the same reason: this runs on a timer, so anything
      that can wedge it stays wedged until somebody reloads the page. */
   try{
+    /* A narrow reader is entitled to the workflow health and to nothing else on this page, so the
+       other two are never asked for rather than asked for and refused - the refusals would land in
+       DC.err and put an error across a page that is working exactly as intended. */
+    const narrow=(typeof wfHealthOnly==='function')&&wfHealthOnly();
+    const skipped={ok:false,skipped:true};
     const res=await Promise.all([
-      call('erp_usability_daily_feature_checks'),
+      narrow?Promise.resolve(skipped):call('erp_usability_daily_feature_checks'),
       call('erp_usability_workflow_health'),
-      call('erp_usability_transcription_health')
+      narrow?Promise.resolve(skipped):call('erp_usability_transcription_health')
     ]);
     if(res[0].ok){ DC.feat=res[0].d; DC.err=null; }
-    else if(first){ DC.feat=null; DC.err=(res[0].e&&res[0].e.message)||'Could not load'; }
+    else if(first&&!res[0].skipped){ DC.feat=null; DC.err=(res[0].e&&res[0].e.message)||'Could not load'; }
     if(res[1].ok) DC.wf=res[1].d;
     if(res[2].ok) DC.tr=res[2].d;
     if(res[0].ok||res[1].ok||res[2].ok){ DC.at=Date.now(); DC.fail=0; } else { DC.fail++; }
@@ -14746,6 +14761,8 @@ function dcBodyHtml(){
   const none=(!picks.length && !(DC.wf||[]).length && !(DC.tr||[]).length)
     ? '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-list-check"></i>'
       +'<div>Nothing is flagged as a daily check yet</div></div>' : '';
+  // The narrow reader gets the workflow health table and stops there.
+  if((typeof wfHealthOnly==='function')&&wfHealthOnly()) return usbWorkflowHealthHtml();
   return usbWorkflowHealthHtml()+usbTranscriptionHealthHtml()+feature+none;
 }
 /* Repaints the figures in place. Expanding a workflow breakdown comes through here too, rather
