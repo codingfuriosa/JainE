@@ -101,6 +101,8 @@ window.pdfSetStatus=async function(id,s){
 };
 
 
+/* 11 Nov 2026: the Digital Forms tab of Post Sales was removed. Generate Form is now a button on the Booking Form workflow page
+   (Accountability, flow 41, next to New Booking Form) for the Administrator and the Sales department; its window also lists the links made. */
 /* GENERATE FORM (7 Nov 2026). Sales and the Administrator make a link for one customer: they fill in what the customer must
    not change (name, title, nationality, date of birth, mobile, email, contact person, block, floor, flat, flat number, car park,
    bedrooms, built-up area, total sale price) and give the customer the link. It is the same booking-form.html for everybody
@@ -163,7 +165,7 @@ window.pdfGenOpen=function(){
   const sel=(id,opts,def)=>'<select class="inp" id="'+id+'" style="width:100%">'+opts.map(o=>{ const v=Array.isArray(o)?o[0]:o, t=Array.isArray(o)?o[1]:o; return '<option value="'+esc(v)+'"'+(v===def?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+'</select>';
   const floors=[1,2,3,4,5,6,7,8].map(String);
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Generate Form - Dream Ananta</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" id="pgBody"><div class="pss-hint" style="margin:0 0 12px">What you fill in here is shown to the customer but they cannot change it. The customer fills in the rest.</div>'
+    +'<div class="modal-body"><div id="pgBody"><div class="pss-hint" style="margin:0 0 12px">What you fill in here is shown to the customer but they cannot change it. The customer fills in the rest.</div>'
     +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 14px">'
     +lab('Title',sel('pgTitle',['Mr.','Ms.','Mrs.','Mast.','M/s.'],'Mr.'))
     +lab('Customer name *','<input class="inp" id="pgName" style="width:100%;text-transform:uppercase" autocomplete="off" oninput="pgNameSync()">')
@@ -184,8 +186,11 @@ window.pdfGenOpen=function(){
     +lab('Super built-up area (sq.ft.) *','<input class="inp" id="pgSba" inputmode="decimal" style="width:100%" autocomplete="off">')
     +lab('Total sale price (₹) *','<input class="inp" id="pgTotal" inputmode="numeric" style="width:100%" autocomplete="off">')
     +'</div><div id="pgErr" style="color:#b3171d;font-size:13px;margin-top:12px;min-height:18px"></div>'
-    +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div></div>','lg');
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div></div><div id="pgList"></div></div>','lg');
+  pdfGenList();
 };
+// The links made so far (copy one again, see how far the customer got, open a submitted form), under the generate form.
+window.pdfGenList=async function(){ await pdfLoadLinks(); const h=$('pgList'); if(h) h.innerHTML=pdfLinksHtml(); };
 // Contact person follows the customer's name until someone changes it by hand.
 window.pgNameSync=function(){ const c=$('pgContact'); if(c&&!c.dataset.touched) c.value=($('pgName').value||''); };
 window.pgNatSync=function(){ const n=PDF_COUNTRIES.filter(c=>c[0]===$('pgNat').value)[0]; if(n&&$('pgCc')) $('pgCc').value=n[1]; };
@@ -214,5 +219,7 @@ window.pdfGenerate=async function(){
     +'<div class="pss-hint" style="margin:4px 0 12px">Give it only to this customer. Anyone who has the link can open the form.</div>'
     +'<input class="inp" id="pgUrl" readonly style="width:100%;font-size:13px" value="'+esc(url)+'" onclick="this.select()">'
     +'<div style="display:flex;gap:8px;justify-content:center;margin-top:12px"><button class="btn btn-primary" onclick="pdfCopyLink(\''+data+'\',this)"><i class="fa-regular fa-copy"></i> Copy link</button><button class="btn" onclick="closeModal()">Close</button></div></div>';
-  await pdfLoadLinks(); pdfDraw();
+  await pdfGenList();
 };
+
+window.pdfCanGenerate=pdfCanGenerate;

@@ -26,7 +26,7 @@ VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
   // The old MIS tab (built by hand from Farvision files) was retired 02-Oct-2026 - the MIS Report now
   // lives under Reports and is built from Post Sales data. An old #/mis link lands on Bookings.
-  const tabs=[['bookings','Bookings'],['forms','Digital Forms'],['reminders','Outstanding Reminders'],['invoices','Invoices'],['receipts','Receipts'],['reports','Reports'],['adhoc','Contracted Extra Charges'],['setup','Setup']];
+  const tabs=[['bookings','Bookings'],['reminders','Outstanding Reminders'],['invoices','Invoices'],['receipts','Receipts'],['reports','Reports'],['adhoc','Contracted Extra Charges'],['setup','Setup']];
   const tab=tabs.some(function(t){return t[0]===(seg&&seg[0]);})?seg[0]:'bookings';
   // One body div per tab rather than one shared one: they are rendered by different code
   // that each look up their own host by id, and a shared id would have them fighting over it.

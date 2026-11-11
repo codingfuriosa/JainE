@@ -4472,6 +4472,11 @@
       /* The "New" buttons travel together as one group: side by side on a computer, and an equal
          pair filling the width on a phone, rather than each wrapping wherever it happens to fit. */
       +'<div class="wf-head-new'+(myVariants.length?' wf-head-new-n':'')+'">'
+      /* GENERATE FORM (11 Nov 2026), Booking Form workflow only: a link for one customer to fill the digital booking form, with the
+         details Sales sets already filled in and locked. The Administrator and the Sales department only (pdfCanGenerate, in
+         24d-post-sales-digital-forms.js; the database says the same). */
+      +(Number(id)===41&&typeof window.pdfCanGenerate==='function'&&window.pdfCanGenerate()
+        ?'<button class="ac-btn" title="Make a link for a customer to fill in the digital booking form" onclick="pdfGenOpen()"><i class="fa-solid fa-link"></i><span class="wf-btxt">Generate Form</span></button>':'')
       /* THE BUTTON IS NEVER DISABLED, even for somebody who cannot submit yet. Disabling it opened
          no form, and the form is the only way to reach Save draft - so the one person told to
          "write the next one down and send it later" was the one person who could not. It opens,
