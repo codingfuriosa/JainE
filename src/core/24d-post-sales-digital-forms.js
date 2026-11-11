@@ -158,41 +158,45 @@ window.pdfCopyLink=async function(token,btn){
   try{ await navigator.clipboard.writeText(url); if(btn){ const t=btn.innerHTML; btn.innerHTML='<i class="fa-solid fa-check"></i> Copied'; setTimeout(function(){ btn.innerHTML=t; },1600); } toast('Link copied','ok'); }
   catch(e){ window.prompt('Copy this link',url); }
 };
-/* The Generate Form window (rebuilt 11 Nov 2026 - "looks so bad and is not user friendly"): two tabs, New form and Generated forms; the
-   new form is four short cards (Customer, Contact, Unit, Area & price), choices are tap buttons, the price shows commas and words,
-   every mistake is shown under its own box, and when the link is ready it can be copied, opened as the customer, or another made. */
+/* GENERATE FORM AS A PAGE (11 Nov 2026: "not a popup, a page would be better ... very easy for Sales ... optimize space"). It fills the screen
+   over the Booking Form workflow (Back returns to it): on a computer the form is on the left in a two-column layout, and the links made so far are
+   on the right - copy one again, see how far the customer got, or EDIT it (an open link's details can be changed; the customer sees the new ones
+   the next time the form loads, what they already typed stays). On a phone the list sits under the form. Four short cards, tap buttons for choices,
+   a price with commas and words, every mistake under its own box, and a link-ready screen with Copy / Open as the customer / Generate another. */
 const PG_CSS='<style>'
-  +'.pg{padding:0!important}'
-  +'.pg-tabs{display:flex;gap:4px;padding:10px 22px 0;border-bottom:1px solid var(--line)}'
-  +'.pg-tabs button{background:none;border:0;border-bottom:3px solid transparent;padding:10px 14px;font:inherit;font-size:14px;font-weight:600;color:var(--slate);cursor:pointer;margin-bottom:-1px}'
-  +'.pg-tabs button.on{color:var(--ink,#111827);border-bottom-color:#1d4ed8}'
-  +'.pg-tabs .pg-n{display:inline-block;min-width:20px;padding:0 6px;margin-left:6px;border-radius:999px;background:#eef0f4;color:var(--slate);font-size:12px;text-align:center}'
-  +'.pg-pane{padding:18px 22px 20px;max-height:calc(100vh - 230px);overflow:auto}'
-  +'.pg-intro{margin:0 0 14px;color:var(--slate);font-size:13.5px;line-height:1.5}'
-  +'.pg-card{border:1px solid var(--line);border-radius:10px;padding:14px 16px 16px;margin-bottom:14px;background:#fff}'
+  +'#pgPage{position:fixed;inset:0;z-index:2000;background:#f4f5f7;display:flex;flex-direction:column;font-family:inherit}'
+  +'#pgPage .pg-top{display:flex;align-items:center;gap:14px;padding:12px 22px;background:#fff;border-bottom:1px solid var(--line)}'
+  +'#pgPage .pg-top h2{margin:0;font-size:18px}#pgPage .pg-top h2 span{font-weight:400;color:var(--slate)}'
+  +'#pgPage .pg-main{flex:1;overflow:auto;padding:18px 22px 24px;display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:20px;align-items:start}'
+  +'@media(max-width:1000px){#pgPage .pg-main{grid-template-columns:1fr;padding:14px}}'
+  +'.pg-intro{margin:0 0 12px;color:var(--slate);font-size:13.5px;line-height:1.5}'
+  +'.pg-edit{margin:0 0 12px;padding:10px 14px;border-radius:8px;background:#fff7e6;border:1px solid #f0d9a8;color:#92400e;font-size:13.5px}'
+  +'.pg-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}@media(max-width:1000px){.pg-cards{grid-template-columns:1fr}}'
+  +'.pg-card{border:1px solid var(--line);border-radius:10px;padding:14px 16px 16px;background:#fff}'
   +'.pg-card>h4{margin:0 0 12px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);font-weight:700}'
-  +'.pg-g{display:grid;gap:14px 16px}.pg-g.c2{grid-template-columns:repeat(2,minmax(0,1fr))}.pg-g.c3{grid-template-columns:repeat(3,minmax(0,1fr))}'
-  +'@media(max-width:700px){.pg-g.c2,.pg-g.c3{grid-template-columns:1fr}}'
-  +'.pg-f label{display:block;font-size:13px;font-weight:600;color:var(--ink,#111827);margin-bottom:6px}'
+  +'.pg-g{display:grid;gap:12px 14px}.pg-g.c2{grid-template-columns:repeat(2,minmax(0,1fr))}.pg-g.c3{grid-template-columns:repeat(3,minmax(0,1fr))}'
+  +'@media(max-width:560px){.pg-g.c2,.pg-g.c3{grid-template-columns:1fr}}'
+  +'.pg-f label{display:block;font-size:13px;font-weight:600;color:var(--ink,#111827);margin-bottom:5px}'
   +'.pg-f label .o{font-weight:400;color:var(--slate)}.pg-f label .r{color:#b3171d}'
-  +'.pg-in{width:100%;box-sizing:border-box;height:42px;padding:0 12px;border:1px solid #cfd4dc;border-radius:8px;background:#fff;font:inherit;font-size:15px;color:var(--ink,#111827)}'
-  +'select.pg-in{padding-right:8px}.pg-in:focus{outline:none;border-color:#1d4ed8;box-shadow:0 0 0 3px rgba(29,78,216,.15)}'
-  +'.pg-f.bad .pg-in,.pg-f.bad .pg-seg{border-color:#b3171d}'
-  +'.pg-help{margin-top:5px;font-size:12.5px;color:var(--slate);min-height:0}'
-  +'.pg-e{margin-top:5px;font-size:12.5px;color:#b3171d;font-weight:600}'
-  +'.pg-row{display:flex;gap:8px}.pg-row .cc{width:112px;flex:none}'
-  +'.pg-pre{display:flex;align-items:stretch}.pg-pre>span{display:flex;align-items:center;padding:0 12px;border:1px solid #cfd4dc;border-right:0;border-radius:8px 0 0 8px;background:#f3f4f6;color:var(--slate);font-size:15px}'
-  +'.pg-pre>.pg-in{border-radius:0 8px 8px 0}.pg-suf{display:flex;align-items:stretch}.pg-suf>.pg-in{border-radius:8px 0 0 8px}'
-  +'.pg-suf>span{display:flex;align-items:center;padding:0 12px;border:1px solid #cfd4dc;border-left:0;border-radius:0 8px 8px 0;background:#f3f4f6;color:var(--slate);font-size:13.5px}'
-  +'.pg-seg{display:flex;flex-wrap:wrap;gap:8px;padding:0;border:0}'
-  +'.pg-seg button{min-width:44px;height:42px;padding:0 14px;border:1px solid #cfd4dc;border-radius:8px;background:#fff;font:inherit;font-size:14.5px;color:var(--ink,#111827);cursor:pointer}'
+  +'.pg-in{width:100%;box-sizing:border-box;height:40px;padding:0 11px;border:1px solid #cfd4dc;border-radius:8px;background:#fff;font:inherit;font-size:14.5px;color:var(--ink,#111827)}'
+  +'select.pg-in{padding-right:6px}.pg-in:focus{outline:none;border-color:#1d4ed8;box-shadow:0 0 0 3px rgba(29,78,216,.15)}'
+  +'.pg-f.bad .pg-in,.pg-f.bad .pg-seg button{border-color:#b3171d}'
+  +'.pg-help{margin-top:4px;font-size:12.5px;color:var(--slate)}.pg-e{margin-top:4px;font-size:12.5px;color:#b3171d;font-weight:600}'
+  +'.pg-row{display:flex;gap:8px}.pg-row .cc{width:104px;flex:none}'
+  +'.pg-pre{display:flex}.pg-pre>span{display:flex;align-items:center;padding:0 11px;border:1px solid #cfd4dc;border-right:0;border-radius:8px 0 0 8px;background:#f3f4f6;color:var(--slate)}.pg-pre>.pg-in{border-radius:0 8px 8px 0}'
+  +'.pg-suf{display:flex}.pg-suf>.pg-in{border-radius:8px 0 0 8px}.pg-suf>span{display:flex;align-items:center;padding:0 11px;border:1px solid #cfd4dc;border-left:0;border-radius:0 8px 8px 0;background:#f3f4f6;color:var(--slate);font-size:13px}'
+  +'.pg-seg{display:flex;flex-wrap:wrap;gap:7px}'
+  +'.pg-seg button{min-width:40px;height:40px;padding:0 13px;border:1px solid #cfd4dc;border-radius:8px;background:#fff;font:inherit;font-size:14px;color:var(--ink,#111827);cursor:pointer}'
   +'.pg-seg button:hover{border-color:#9aa1ab}.pg-seg button.on{background:#e8efff;border-color:#1d4ed8;color:#1d4ed8;font-weight:700}'
-  +'.pg-foot{display:flex;gap:10px;justify-content:flex-end;align-items:center;padding-top:4px}'
-  +'.pg-foot .msg{margin-right:auto;color:#b3171d;font-size:13.5px;font-weight:600}'
-  +'.pg-done{text-align:center;padding:8px 4px 4px}.pg-done .ok{width:54px;height:54px;border-radius:50%;background:#e7f6ec;color:#15803d;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:24px}'
-  +'.pg-done h3{margin:0 0 4px;font-size:18px}.pg-done p{margin:0 0 14px;color:var(--slate);font-size:13.5px}'
-  +'.pg-link{display:flex;gap:8px;margin:0 auto 14px;max-width:680px}.pg-link .pg-in{font-size:13px}'
+  +'.pg-bar{position:sticky;bottom:0;display:flex;gap:10px;justify-content:flex-end;align-items:center;margin-top:14px;padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:10px}'
+  +'.pg-bar .msg{margin-right:auto;color:#b3171d;font-size:13.5px;font-weight:600}'
+  +'.pg-done{background:#fff;border:1px solid var(--line);border-radius:10px;text-align:center;padding:26px 18px}.pg-done .ok{width:54px;height:54px;border-radius:50%;background:#e7f6ec;color:#15803d;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:24px}'
+  +'.pg-done h3{margin:0 0 4px;font-size:18px}.pg-done p{margin:0 0 14px;color:var(--slate);font-size:13.5px}.pg-link{max-width:680px;margin:0 auto 14px}'
   +'.pg-acts{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}'
+  +'.pg-side{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 14px 6px;position:sticky;top:0;max-height:calc(100vh - 110px);overflow:auto}@media(max-width:1000px){.pg-side{position:static;max-height:none}}'
+  +'.pg-side h4{margin:0 0 2px;font-size:14px}.pg-side .sub{margin:0 0 10px;color:var(--slate);font-size:12.5px}'
+  +'.pg-l{border-top:1px solid var(--line);padding:10px 0}.pg-l:first-of-type{border-top:0}.pg-l b{font-size:14px}.pg-l .m{color:var(--slate);font-size:12.5px;margin:2px 0 7px}'
+  +'.pg-l .a{display:flex;gap:6px;flex-wrap:wrap}.pg-l .a .btn{padding:4px 10px}'
   +'</style>';
 function pdfWords(n){
   n=Math.floor(Number(n)); if(!n||n<0) return '';
@@ -204,53 +208,71 @@ function pdfWords(n){
   if(cr) out.push(three(cr)+' Crore'); if(lk) out.push(two(lk)+' Lakh'); if(th) out.push(two(th)+' Thousand'); if(n) out.push(three(n));
   return 'Rupees '+out.join(' ')+' only';
 }
-window.pdfGenOpen=function(){
+const PG={editId:null,editToken:null};
+window.pdfGenOpen=function(editRow){
   if(!pdfCanGenerate()) return;
+  PG.editId=editRow&&editRow.id||null; PG.editToken=editRow&&editRow.token||null;
+  const old=document.getElementById('pgPage'); if(old) old.remove();
   const f=(id,label,ctl,o)=>{ o=o||{}; return '<div class="pg-f" id="pgF_'+id+'"><label for="'+id+'">'+label+(o.req?' <span class="r">*</span>':'')+(o.opt?' <span class="o">(optional)</span>':'')+'</label>'+ctl
     +(o.help?'<div class="pg-help" id="pgH_'+id+'">'+o.help+'</div>':'')+'<div class="pg-e" id="pgE_'+id+'"></div></div>'; };
   const sel=(id,opts,def,cls)=>'<select class="pg-in'+(cls?' '+cls:'')+'" id="'+id+'">'+opts.map(o=>{ const v=Array.isArray(o)?o[0]:o, t=Array.isArray(o)?o[1]:o; return '<option value="'+esc(v)+'"'+(v===def?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+'</select>';
   const seg=(id,opts,def)=>'<input type="hidden" id="'+id+'" value="'+esc(def)+'"><div class="pg-seg" role="radiogroup">'+opts.map(o=>'<button type="button" class="'+(o===def?'on':'')+'" onclick="pgSeg(this,\''+id+'\')">'+esc(o)+'</button>').join('')+'</div>';
-  const floors=['1','2','3','4','5','6','7','8'];
-  const codes=PDF_COUNTRIES.map(c=>c[1]).filter((x,i,a)=>a.indexOf(x)===i);
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Generate Form <span style="font-weight:400;color:var(--slate)">&middot; Dream Ananta</span></h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body pg">'+PG_CSS
-    +'<div class="pg-tabs"><button class="on" id="pgT_new" onclick="pgTab(\'new\')">New form</button><button id="pgT_list" onclick="pgTab(\'list\')">Generated forms <span class="pg-n" id="pgCount">…</span></button></div>'
-    +'<div class="pg-pane" id="pgNew"><div id="pgBody"><p class="pg-intro">Fill in what the customer must not change - it is shown to them but locked. They fill in the rest (PAN, Aadhaar, address, payment) themselves.</p>'
-    +'<div class="pg-card"><h4>Customer</h4><div class="pg-g c3">'
-      +f('pgTitle','Title',sel('pgTitle',['Mr.','Ms.','Mrs.','Mast.','M/s.'],'Mr.'))
-      +'<div style="grid-column:span 2">'+f('pgName','Customer name',"<input class=\"pg-in\" id=\"pgName\" style=\"text-transform:uppercase\" autocomplete=\"off\" placeholder=\"As on the PAN card\" oninput=\"pgNameSync()\">",{req:1})+'</div>'
-      +f('pgNat','Nationality',sel('pgNat',PDF_COUNTRIES.map(c=>c[0]),'India').replace('<select ','<select onchange="pgNatSync()" '))
-      +f('pgDob','Date of birth','<input class="pg-in" type="date" id="pgDob">',{req:1})
+  const floors=['1','2','3','4','5','6','7','8'], codes=PDF_COUNTRIES.map(c=>c[1]).filter((x,i,a)=>a.indexOf(x)===i);
+  const page=document.createElement('div'); page.id='pgPage';
+  page.innerHTML=PG_CSS
+    +'<div class="pg-top"><button class="btn" onclick="pgClose()"><i class="fa-solid fa-arrow-left"></i> Back</button><h2><i class="fa-solid fa-link"></i> Generate Form <span>&middot; Dream Ananta</span></h2></div>'
+    +'<div class="pg-main"><div id="pgLeft"><div id="pgBody">'
+    +'<p class="pg-intro">Fill in what the customer must not change - it is shown to them but locked. They fill in the rest (PAN, Aadhaar, address, payment) themselves.</p>'
+    +'<div id="pgEditNote"></div>'
+    +'<div class="pg-cards">'
+      +'<div class="pg-card"><h4>Customer</h4><div class="pg-g c2">'
+        +f('pgTitle','Title',sel('pgTitle',['Mr.','Ms.','Mrs.','Mast.','M/s.'],'Mr.'))
+        +f('pgNat','Nationality',sel('pgNat',PDF_COUNTRIES.map(c=>c[0]),'India').replace('<select ','<select onchange="pgNatSync()" '))
+        +'<div style="grid-column:1/-1">'+f('pgName','Customer name','<input class="pg-in" id="pgName" style="text-transform:uppercase" autocomplete="off" placeholder="As on the PAN card" oninput="pgNameSync()">',{req:1})+'</div>'
+        +f('pgDob','Date of birth','<input class="pg-in" type="date" id="pgDob">',{req:1})
+      +'</div></div>'
+      +'<div class="pg-card"><h4>Contact</h4><div class="pg-g">'
+        +f('pgMobile','Mobile number','<div class="pg-row">'+sel('pgCc',codes,'+91','cc')+'<input class="pg-in" id="pgMobile" inputmode="tel" autocomplete="off" placeholder="98300 12345"></div>',{req:1})
+        +f('pgEmail','Email','<input class="pg-in" type="email" id="pgEmail" autocomplete="off" placeholder="name@example.com">',{req:1})
+        +f('pgContact','Contact person','<input class="pg-in" id="pgContact" style="text-transform:uppercase" autocomplete="off" oninput="this.dataset.touched=1">',{opt:1,help:'Same as the customer name unless you change it.'})
+      +'</div></div>'
+      +'<div class="pg-card"><h4>Unit</h4><div class="pg-g c2">'
+        +f('pgBlock','Block',seg('pgBlock',['Block D','Block E'],'Block D'))
+        +f('pgBhk','Bedrooms',seg('pgBhk',['2 BHK','3 BHK','4 BHK'],'3 BHK'))
+        +'<div style="grid-column:1/-1">'+f('pgFloor','Floor',seg('pgFloor',floors,'1'))+'</div>'
+        +f('pgPark','Right to use car park',seg('pgPark',['Covered','Open'],'Covered'))
+        +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{opt:1,help:'Leave blank if not allotted yet.'})
+      +'</div></div>'
+      +'<div class="pg-card"><h4>Area &amp; price</h4><div class="pg-g">'
+        +f('pgSba','Super built-up area','<div class="pg-suf"><input class="pg-in" id="pgSba" inputmode="decimal" autocomplete="off" placeholder="1325"><span>sq.ft.</span></div>',{req:1})
+        +f('pgTotal','Total sale price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
+      +'</div></div>'
+    +'</div>'
+    +'<div class="pg-bar"><span class="msg" id="pgErr"></span><button class="btn" onclick="pgClose()">Cancel</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div>'
     +'</div></div>'
-    +'<div class="pg-card"><h4>Contact</h4><div class="pg-g c2">'
-      +f('pgMobile','Mobile number','<div class="pg-row">'+sel('pgCc',codes,'+91','cc')+'<input class="pg-in" id="pgMobile" inputmode="tel" autocomplete="off" placeholder="98300 12345"></div>',{req:1})
-      +f('pgEmail','Email','<input class="pg-in" type="email" id="pgEmail" autocomplete="off" placeholder="name@example.com">',{req:1})
-      +f('pgContact','Contact person','<input class="pg-in" id="pgContact" style="text-transform:uppercase" autocomplete="off" oninput="this.dataset.touched=1">',{opt:1,help:'Same as the customer name unless you change it.'})
-    +'</div></div>'
-    +'<div class="pg-card"><h4>Unit</h4><div class="pg-g c2">'
-      +f('pgBlock','Block',seg('pgBlock',['Block D','Block E'],'Block D'))
-      +f('pgBhk','Bedrooms',seg('pgBhk',['2 BHK','3 BHK','4 BHK'],'3 BHK'))
-      +'<div style="grid-column:1/-1">'+f('pgFloor','Floor',seg('pgFloor',floors,'1'))+'</div>'
-      +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{opt:1,help:'Leave blank if not allotted yet - the customer will see it locked as empty.'})
-      +f('pgPark','Right to use car park',seg('pgPark',['Covered','Open'],'Covered'))
-    +'</div></div>'
-    +'<div class="pg-card"><h4>Area &amp; price</h4><div class="pg-g c2">'
-      +f('pgSba','Super built-up area','<div class="pg-suf"><input class="pg-in" id="pgSba" inputmode="decimal" autocomplete="off" placeholder="1325"><span>sq.ft.</span></div>',{req:1})
-      +f('pgTotal','Total sale price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
-    +'</div></div>'
-    +'<div class="pg-foot"><span class="msg" id="pgErr"></span><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div>'
-    +'</div></div>'
-    +'<div class="pg-pane" id="pgListWrap" style="display:none"><div id="pgList"></div></div>'
-    +'</div>','lg');
+    +'<div class="pg-side"><h4>Generated forms <span id="pgCount" style="color:var(--slate);font-weight:400"></span></h4><div class="sub">Copy a link again, see how far the customer got, or edit it.</div><div id="pgList"></div></div>'
+    +'</div>';
+  document.body.appendChild(page); document.body.style.overflow='hidden';
+  if(editRow) pgFill(editRow);
   pdfGenList();
 };
-window.pgTab=function(t){ const n=t==='new'; $('pgNew').style.display=n?'':'none'; $('pgListWrap').style.display=n?'none':''; $('pgT_new').className=n?'on':''; $('pgT_list').className=n?'':'on'; };
+window.pgClose=function(){ const p=document.getElementById('pgPage'); if(p) p.remove(); document.body.style.overflow=''; };
 window.pgSeg=function(btn,id){ btn.parentNode.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); }); btn.classList.add('on'); $(id).value=btn.textContent.trim(); };
-// Contact person follows the customer's name until someone changes it by hand.
 window.pgNameSync=function(){ const c=$('pgContact'); if(c&&!c.dataset.touched) c.value=($('pgName').value||''); };
 window.pgNatSync=function(){ const n=PDF_COUNTRIES.filter(c=>c[0]===$('pgNat').value)[0]; if(n&&$('pgCc')) $('pgCc').value=n[1]; };
-// The price as it is typed: Indian commas, and the words under it.
-window.pgMoney=function(inp){ const d=inp.value.replace(/[^\d]/g,''); inp.value=d?Number(d).toLocaleString('en-IN'):''; const h=$('pgH_pgTotal'); if(h) h.textContent=pdfWords(d); else { const e=$('pgF_pgTotal'); if(e){ const x=document.createElement('div'); x.className='pg-help'; x.id='pgH_pgTotal'; x.textContent=pdfWords(d); e.insertBefore(x,$('pgE_pgTotal')); } } };
+window.pgMoney=function(inp){ const d=inp.value.replace(/[^\d]/g,''); inp.value=d?Number(d).toLocaleString('en-IN'):''; const h=$('pgH_pgTotal'); if(h) h.textContent=pdfWords(d); };
+// Editing a link: its details go back into the boxes.
+function pgFill(row){
+  const v=(row.prefill&&row.prefill.values)||{}, a=(v.applicants&&v.applicants[0])||{}, c=v.contact||{}, fl=v.flat||{}, pr=v.price||{};
+  const set=(id,val)=>{ const e=$(id); if(e&&val!=null) e.value=val; };
+  const seg=(id,val)=>{ const e=$(id); if(!e||val==null) return; e.value=val; e.parentNode.querySelectorAll('.pg-seg button').forEach(function(b){ b.classList.toggle('on',b.textContent.trim()===String(val)); }); };
+  set('pgTitle',a.title); set('pgNat',a.nationality); set('pgName',a.full_name); set('pgDob',a.dob); set('pgCc',c.cc); set('pgMobile',c.mobile); set('pgEmail',c.email);
+  set('pgContact',c.contact_person); if(c.contact_person&&c.contact_person!==a.full_name&&$('pgContact')) $('pgContact').dataset.touched=1;
+  seg('pgBlock',fl.block); seg('pgFloor',fl.floor); seg('pgBhk',fl.bhk); seg('pgPark',fl.parking); set('pgFlat',fl.flat_no);
+  set('pgSba',pr.sba); if(pr.total){ set('pgTotal',Number(pr.total).toLocaleString('en-IN')); const h=$('pgH_pgTotal'); if(h) h.textContent=pdfWords(pr.total); }
+  const n=$('pgEditNote'); if(n) n.innerHTML='<div class="pg-edit"><b>Editing the link for '+esc(a.full_name||'this customer')+'.</b> The link stays the same. The customer sees the new details the next time they open or refresh the form; what they have already typed stays.</div>';
+  const g=$('pgGo'); if(g) g.innerHTML='<i class="fa-solid fa-floppy-disk"></i> Save changes';
+}
 window.pdfGenerate=async function(){
   const g=id=>($(id)||{}).value||'';
   const fails=[]; const bad=(id,m)=>fails.push([id,m]);
@@ -276,17 +298,33 @@ window.pdfGenerate=async function(){
     price:{sba:sba,total:total}};
   const locked=['applicants.0.title','applicants.0.full_name','applicants.0.nationality','applicants.0.dob','contact.cc','contact.mobile','contact.email','contact.contact_person',
     'flat.block','flat.floor','flat.flat_no','flat.bhk','flat.parking','price.sba','price.total'];
-  const btn=$('pgGo'); btn.disabled=true; btn.textContent='Generating…';
-  const {data,error}=await sb.schema('acc').rpc('generate_booking_link',{p_project:'ananta',p_prefill:{values:values,locked:locked}});
-  if(error||!data){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-link"></i> Generate link'; const m=$('pgErr'); if(m) m.textContent='Could not generate the link: '+((error&&error.message)||'no link returned'); return; }
-  const url=pdfLinkUrl(data);
-  $('pgBody').innerHTML='<div class="pg-done"><div class="ok"><i class="fa-solid fa-check"></i></div><h3>The link for '+esc(name)+' is ready</h3>'
-    +'<p>Give it only to this customer - anyone who has the link can open the form. Their answers are saved as they type.</p>'
+  const btn=$('pgGo'); btn.disabled=true; btn.textContent=PG.editId?'Saving…':'Generating…';
+  const prefill={values:values,locked:locked};
+  const editing=!!PG.editId;
+  const res=editing?await sb.schema('acc').rpc('update_booking_link',{p_id:PG.editId,p_prefill:prefill})
+                   :await sb.schema('acc').rpc('generate_booking_link',{p_project:'ananta',p_prefill:prefill});
+  if(res.error||!res.data){ btn.disabled=false; btn.innerHTML=editing?'<i class="fa-solid fa-floppy-disk"></i> Save changes':'<i class="fa-solid fa-link"></i> Generate link'; const m=$('pgErr'); if(m) m.textContent=(editing?'Could not save the changes: ':'Could not generate the link: ')+((res.error&&res.error.message)||'nothing came back'); return; }
+  const token=editing?PG.editToken:res.data, url=pdfLinkUrl(token);
+  $('pgBody').innerHTML='<div class="pg-done"><div class="ok"><i class="fa-solid fa-check"></i></div><h3>'+(editing?'Changes saved for ':'The link for ')+esc(name)+(editing?'':' is ready')+'</h3>'
+    +'<p>'+(editing?'The link is the same as before.':'Give it only to this customer - anyone who has the link can open the form. Their answers are saved as they type.')+'</p>'
     +'<div class="pg-link"><input class="pg-in" id="pgUrl" readonly value="'+esc(url)+'" onclick="this.select()"></div>'
-    +'<div class="pg-acts"><button class="btn btn-primary" onclick="pdfCopyLink(\''+data+'\',this)"><i class="fa-regular fa-copy"></i> Copy link</button>'
+    +'<div class="pg-acts"><button class="btn btn-primary" onclick="pdfCopyLink(\''+token+'\',this)"><i class="fa-regular fa-copy"></i> Copy link</button>'
     +'<a class="btn" href="'+esc(url)+'" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open as the customer</a>'
     +'<button class="btn" onclick="pdfGenOpen()"><i class="fa-solid fa-plus"></i> Generate another</button></div></div>';
   await pdfGenList();
 };
-window.pdfGenList=async function(){ await pdfLoadLinks(); const h=$('pgList'); if(h) h.innerHTML=pdfLinksHtml(); const c=$('pgCount'); if(c) c.textContent=PDF_LINKS.ok?PDF_LINKS.rows.length:'-'; };
+window.pdfEditLink=function(id){ const r=PDF_LINKS.rows.filter(x=>x.id===id)[0]; if(r) pdfGenOpen(r); };
+// The links made so far, compact, beside the form.
+function pdfGenListHtml(){
+  const rows=PDF_LINKS.rows;
+  if(!PDF_LINKS.ok) return '<div class="pg-help" style="padding-bottom:10px">Generated forms are not available yet.</div>';
+  if(!rows.length) return '<div class="pg-help" style="padding-bottom:10px">Nothing generated yet. Your first link will appear here.</div>';
+  return rows.map(function(r){ const v=(r.prefill&&r.prefill.values)||{}, f=v.flat||{};
+    return '<div class="pg-l"><b>'+esc(r.customer_name||'—')+'</b>'
+      +'<div class="m">'+esc([f.block,f.floor?'Floor '+f.floor:'',f.flat_no].filter(Boolean).join(' · ')||'—')+' &middot; '+esc(pdfWhen(r.created_at))+(r.created_by?' &middot; '+esc(String(r.created_by).split('@')[0]):'')+'</div>'
+      +'<div class="m" style="margin-top:-3px">'+pdfLinkStatus(r)+'</div>'
+      +'<div class="a">'+(r.status==='open'?'<button class="btn" onclick="pdfCopyLink(\''+r.token+'\',this)"><i class="fa-regular fa-copy"></i> Copy link</button><button class="btn" onclick="pdfEditLink(\''+r.id+'\')"><i class="fa-solid fa-pen"></i> Edit</button>'
+        :(r.form_id?'<button class="btn" onclick="pgClose();pdfOpen(\''+r.form_id+'\')">Open form</button>':''))+'</div></div>'; }).join('');
+}
+window.pdfGenList=async function(){ await pdfLoadLinks(); const h=$('pgList'); if(h) h.innerHTML=pdfGenListHtml(); const c=$('pgCount'); if(c) c.textContent=PDF_LINKS.ok?'('+PDF_LINKS.rows.length+')':''; };
 window.pdfCanGenerate=pdfCanGenerate;
