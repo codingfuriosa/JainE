@@ -889,6 +889,12 @@ const QG_FIGURES: [string, string, QgKind, boolean, string][] = [
    for both. The look is also cut off at QG_LIMIT_MS: an unfinished look is "Needs check" with that
    reason, never a failed booking. */
 const QG_LIMIT_MS = 110_000;
+/* SWITCHED OFF 10 Nov 2026, on the Administrator's word ("remove the Quality Checker, it is not correctly making decisions" -
+   case 1043 was sent back to Sales and its Welcome Letter held after two reads of a figure differed). With this false there is no
+   second look, no Good / Needs check / Bad verdict, nothing is held and nothing is sent back; a reading just finishes. The code
+   below is kept only so it can be switched back on (true) - nothing else calls it. The reader's own doubts (uncertain_figures)
+   still appear on the check list as notes; they no longer hold a booking. */
+const QUALITY_GATE_ON = false;
 function qualityLook(parts: any[], model: string): Promise<{ a: any; err: string }> {
   const prompt = `You are checking the QUALITY of the scans in a property booking file, not its content.
 
@@ -1156,7 +1162,7 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
   if (parts.length === 1) return { error: "none of the attachments could be read", fetched };
 
   // The quality check's second look starts now and runs beside the main read (see qualityLook).
-  const lookP = qualityLook(parts, model);
+  const lookP = QUALITY_GATE_ON ? qualityLook(parts, model) : Promise.resolve({ a: null, err: "switched off" });
   const t0 = Date.now();
   let raw = "";
   try {
@@ -1562,11 +1568,12 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
   // The independent second look - see qualityGate. Its verdict overrides the reader's own.
   const stdMode = await fetch(`${SB}/rest/v1/job_secrets?name=eq.booking_scan_standard&select=value`, { headers: HA })
     .then((r) => r.json()).then((r: any) => String(r?.[0]?.value || "report")).catch(() => "report");
-  const gate = qualityGate(await lookP, fields, ex, stdMode === "enforce");
+  const gate = QUALITY_GATE_ON ? qualityGate(await lookP, fields, ex, stdMode === "enforce")
+    : { verdict: "Good", reasons: [] as string[], bad: [] as string[], pages: [] as any[], figures: null, disagreements: [] as any[], off: true };
   /* The reader's own doubts count too: a figure it transcribed but was unsure of, when it is one of the
      important ones - name, unit, area, rate, money, PAN - sends the booking back like the second look's. */
   const IMPORTANT = /name|flat|block|tower|area|sba|carpet|built|rate|amount|total|price|consideration|pan/i;
-  for (const u of uncertainFigures) if (IMPORTANT.test(String(u?.field || ""))) {
+  if (QUALITY_GATE_ON) for (const u of uncertainFigures) if (IMPORTANT.test(String(u?.field || ""))) {
     const why = `${u?.field} could not be read with confidence (${u?.found_in || "page unknown"}): ${u?.why || "scan unclear"} - read as "${u?.value ?? "?"}".`;
     gate.bad.push(why); gate.reasons.unshift(why); gate.verdict = "Bad";
   }
@@ -1576,7 +1583,7 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
     ...gate.reasons,
     ...uncertainFigures.map((u: any) =>
       `${u?.field ?? "a figure"} (read as ${u?.value ?? "?"}, ${u?.found_in ?? "unknown page"}): ${u?.why ?? "the scan made it unclear"}`),
-  ].filter(Boolean).join(" ") || "Every page and every key figure was checked a second time and read clearly.";
+  ].filter(Boolean).join(" ") || (QUALITY_GATE_ON ? "Every page and every key figure was checked a second time and read clearly." : "The reader found no figure it was unsure of.");
 
   const concerns = Array.isArray(gpt?.concerns) ? gpt.concerns.slice() : [];
   if (!fields.booking_date.found)
@@ -1775,7 +1782,7 @@ async function audit(caseId: number, model: string, probe = false): Promise<any>
     document_quality: { verdict: qualityVerdict, reason: qualityReason },
     // Good / Needs check / Bad - "Bad" holds the booking (see qualityGate, sendBackForQuality).
     quality_gate: { verdict: gate.verdict, reasons: gate.reasons, bad: gate.bad, disagreements: gate.disagreements,
-                    pages: gate.pages, checked_at: new Date().toISOString() },
+                    pages: gate.pages, checked_at: new Date().toISOString(), off: !QUALITY_GATE_ON },
     kyc: {
       people: kycPeople, mobile_numbers: mobiles, emails,
       documents: ids.map((d: any) => ({ doc_type: d?.doc_type ?? null, name_on_card: d?.name_on_card ?? null,
