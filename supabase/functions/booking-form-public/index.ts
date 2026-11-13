@@ -299,7 +299,7 @@ async function otpSend(link: any) {
     await db(`digital_booking_links?id=eq.${link.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ otp: { ...otp, hash: "", sent } }) }).catch(() => {});
     return j({ error: `We could not send the code to ${email}. Please check that the address is right (Contact page) and try again.`, code: "mail_failed" }, 502);
   }
-  return j({ ok: true, to: maskEmail(email), email, resend_after: OTP_GAP / 1000, expires_in: OTP_TTL / 1000 });
+  return j({ ok: true, to: email, email, resend_after: OTP_GAP / 1000, expires_in: OTP_TTL / 1000 });
 }
 // null = the code is right; otherwise the response to give back.
 async function otpCheck(link: any, email: string, code: string): Promise<Response | null> {
@@ -544,7 +544,7 @@ async function handleSubmit(form: FormData, ip: string, req: Request) {
       catch (e) { console.error("confirmation mail", e); mail = { sent: false, error: String((e as Error)?.message || e).slice(0, 200), at: new Date().toISOString() }; }
       try { await db("digital_booking_forms?id=eq." + id, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ confirm_mail: mail }) }); } catch (_) { /* column may not exist yet */ }
     }
-    return j({ ok: true, ref_no: ref, email: mail && mail.sent ? maskEmail(clean(c.email, 200).toLowerCase()) : "" });
+    return j({ ok: true, ref_no: ref, email: mail && mail.sent ? clean(c.email, 200).toLowerCase() : "" });
   } catch (e) {
     console.error(e);
     return j({ error: "We could not save your form just now. Nothing was lost on your phone - please press Submit again in a minute." }, 500);

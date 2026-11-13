@@ -492,8 +492,7 @@ function costInner(){
   if(COST.state!=='ready') return '<div class="costwait">Opening the cost sheet…</div>';
   const n=COST.pages.length, i=Math.max(0,Math.min(n-1,COST.cur||0));
   /* One page at a time in a frame of a sensible height (not a very long scroll): the whole page is tappable to enlarge, arrows / swipe change the page, the page number sits small at the bottom right, Download (the PDF) is on the right. */
-  return '<div class="costbar"><button type="button" class="btn sec2" data-costdl="pdf">Download</button></div>'
-    +'<div class="costview"><button type="button" class="costpg" data-zoom="'+i+'" aria-label="Cost sheet page '+(i+1)+' of '+n+' - tap to enlarge"><img src="'+COST.pages[i]+'" alt="Cost sheet page '+(i+1)+'"></button>'
+  return '<div class="costview"><button type="button" class="cdl" data-costdl="pdf" aria-label="Download the cost sheet (PDF)" title="Download"><svg class="i" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7.5 11 12 15.5 16.5 11"/><path d="M5 19h14"/></svg></button><button type="button" class="costpg" data-zoom="'+i+'" aria-label="Cost sheet page '+(i+1)+' of '+n+' - tap to enlarge"><img src="'+COST.pages[i]+'" alt="Cost sheet page '+(i+1)+'"></button>'
     +(n>1?'<button type="button" class="cnav prev" data-cnav="-1" aria-label="Previous page"'+(i===0?' disabled':'')+'>&#8249;</button><button type="button" class="cnav next" data-cnav="1" aria-label="Next page"'+(i===n-1?' disabled':'')+'>&#8250;</button>':'')
     +'<span class="pgn">'+(i+1)+' / '+n+'</span></div>';
 }
@@ -504,7 +503,7 @@ function downloadPdf(){ if(!COST.bytes) return; const u=URL.createObjectURL(new 
 function openZoom(i){
   closeZoom(); let z=1;
   const d=document.createElement('div'); d.className='zoomov'; d.id='zoomov';
-  d.innerHTML='<div class="zbar"><b>Cost sheet · page '+(i+1)+' of '+COST.pages.length+'</b><div class="zbtns"><button type="button" data-z="out" aria-label="Zoom out">−</button><button type="button" data-z="in" aria-label="Zoom in">+</button><button type="button" data-z="fit">Fit</button><button type="button" data-z="dl">Download picture</button><button type="button" data-z="x" aria-label="Close">×</button></div></div>'
+  d.innerHTML='<div class="zbar"><b>Cost sheet · page '+(i+1)+' of '+COST.pages.length+'</b><div class="zbtns"><button type="button" data-z="out" aria-label="Zoom out">−</button><button type="button" data-z="in" aria-label="Zoom in">+</button><button type="button" data-z="fit">Fit</button><button type="button" data-z="dl" aria-label="Download this page" title="Download this page"><svg class="i" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7.5 11 12 15.5 16.5 11"/><path d="M5 19h14"/></svg></button><button type="button" data-z="x" aria-label="Close">×</button></div></div>'
     +'<div class="zarea" id="zarea"><img alt="Cost sheet page '+(i+1)+'" src="'+COST.pages[i]+'"></div>';
   document.body.appendChild(d); document.documentElement.classList.add('noscroll');
   const img=d.querySelector('img');
@@ -594,9 +593,9 @@ function setProject(info){
 function showDone(ref,email){
   $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
   $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Thank you! Your booking form has been received.</h2>'
-    +'<p style="color:var(--slate);margin-top:8px">Your reference number</p><div class="ref">'+esc(ref)+'</div>'
+    +''
     +(email?'<p style="color:var(--slate)">A confirmation email, with your cost sheet, has been sent to <b style="color:var(--ink)">'+esc(email)+'</b>.</p>':'')
-    +'<p style="color:var(--slate)">Please keep this number. Our team will call you shortly to confirm your booking.</p>'
+    +'<p style="color:var(--slate)">Our team will call you shortly to confirm your booking.</p>'
     +(TOKEN?'<p style="margin-top:14px"><button type="button" class="btn pri" data-viewsub="1" style="max-width:320px">View your submitted form</button></p>':'')+'</div></div>';
   window.scrollTo(0,0);
 }
@@ -667,8 +666,7 @@ function showSubmitted(jj){
   setProject(sub.project); COST.meta=sub.cost||null; if(COST.meta) loadCost();
   $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
   $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Your booking form has been received.</h2>'
-    +'<p style="color:var(--slate);margin-top:8px">Your reference number</p><div class="ref">'+esc(jj.ref_no||'')+'</div>'
-    +'<p style="color:var(--slate)">'+(sub.submitted_at?'Submitted on '+esc(new Date(sub.submitted_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}))+'. ':'')+'Our team will call you shortly to confirm your booking.</p></div></div>'
+    +'<p style="color:var(--slate);margin-top:8px">'+(sub.submitted_at?'Submitted on '+esc(new Date(sub.submitted_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}))+'. ':'')+'Our team will call you shortly to confirm your booking.</p></div></div>'
     +stepReview()
     +(COST.meta?card('','','Cost sheet','',costBody()):'');
   window.scrollTo(0,0);
