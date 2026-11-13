@@ -1,5 +1,5 @@
 -- 13 Nov 2026 - the Digital Booking Form for every project, with a compulsory cost sheet and an emailed code (OTP).
--- Applied outside office hours as a one-off pg_cron job (booking-form-v7-ddl-once, 20:10 IST) that unschedules itself.
+-- Applied 13 Nov 2026 ~16:25 IST on the Administrator's word ("run it now"); the project check was then loosened to a plain key pattern (second step, queued as booking-form-v9-ddl-once at 20:11 IST).
 --  * links.otp: the emailed code is kept only as a hash, with its expiry, tries and send times (never readable by the page)
 --  * forms.confirm_mail: whether the confirmation email went out (and any error)
 --  * generate_booking_link / update_booking_link: any project the form knows (list below = PROJECTS in booking-form-public), and the cost sheet PDF is compulsory
@@ -11,7 +11,7 @@ returns text language plpgsql security definer set search_path to '' as $fn$
 declare v_tok text;
 begin
   if not acc.can_generate_booking_form() then raise exception 'Not allowed to generate booking forms'; end if;
-  if p_project is null or p_project <> all (array['ananta','dreamgurukul','dreamone12','dreamone34','dreamexotica','dreamvalley','dreamecocity','dreamecocitybungalow','dreamjainpailan','dreamgatewaypailan','dreamresidencymanor']) then raise exception 'Unknown project'; end if;
+  if p_project is null or p_project !~ '^[a-z0-9]{3,40}$' then raise exception 'Unknown project'; end if;   -- the edge function holds the project list (PROJECTS), so a new project needs no database change
   if p_prefill is null or jsonb_typeof(p_prefill) <> 'object' or jsonb_typeof(p_prefill->'values') <> 'object'
      or jsonb_typeof(p_prefill->'locked') <> 'array' or length(p_prefill::text) > 20000 then
     raise exception 'Invalid prefill';

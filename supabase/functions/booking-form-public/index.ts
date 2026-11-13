@@ -45,16 +45,12 @@ const SALES_HEAD = "agm.sales@thejaingroup.com", SALES_MANAGER = "sm.sales2@thej
 const mkProj = (code: string, name: string, blocks: string[], extra: Partial<Proj> = {}): Proj => ({ code, name, ...GATEWAY, terms: "generic-2026-11-13", blocks, floors: 20, bhk: BHK_ALL, bhkDefault: "3 BHK", logo: "", team: [SALES_MANAGER], ...extra });
 const PROJECTS: Record<string, Proj> = {
   ananta: mkProj("ANA", "Dream Ananta", ["Block D", "Block E"], { terms: "ananta-2026-11-02", floors: 8, bhk: ["2 BHK", "3 BHK", "4 BHK"], logo: "assets/brand/dream-ananta-logo.png" }),
-  dreamgurukul: mkProj("DG", "Dream Gurukul", ["Block A1", "Block A2", "Block B", "Block C1", "Block C2"], { team: [SALES_MANAGER, "sales.dreamgurukul2@thejaingroup.com", "sales.dreamgurukul4@thejaingroup.com", "sales.dreamgurukul5@thejaingroup.com"] }),
-  dreamone12: mkProj("DO12", "Dream One (Blocks 1 & 2)", ["Block-1", "Block-2"], { team: [SALES_MANAGER, "sales.dreamone1@thejaingroup.com"] }),
-  dreamone34: mkProj("DO34", "Dream One (Blocks 3 & 4)", ["Block-3", "Block-4"], { team: [SALES_MANAGER, "sales.dreamone1@thejaingroup.com"] }),
+  dreamgurukul: mkProj("DG", "Dream Gurukul", ["Block A1", "Block A2", "Block B", "Block C1", "Block C2"], { logo: "assets/brand/dream-gurukul-logo.png", team: [SALES_MANAGER, "sales.dreamgurukul2@thejaingroup.com", "sales.dreamgurukul4@thejaingroup.com", "sales.dreamgurukul5@thejaingroup.com"] }),
+  dreamworldcity: mkProj("DWC", "Dream World City", ["Block A", "Block B", "Block C", "Block D"], { logo: "assets/brand/dream-world-city-logo.png", team: [SALES_MANAGER, "sales.dwc2@thejaingroup.com", "sales.dwc3@thejaingroup.com", "sales.dwc5@thejaingroup.com"] }),
+  dreamvalley: mkProj("DV", "Dream Valley", ["Western [I]", "Starwood [II]", "Grand [III]", "Ritz [IV]"], { logo: "assets/brand/dream-valley-logo.png" }),
+  dreamone: mkProj("DO", "Dream One", ["Block-1", "Block-2", "Block-3", "Block-4"], { logo: "assets/brand/dream-one-logo.png", team: [SALES_MANAGER, "sales.dreamone1@thejaingroup.com"] }),
+  dreamecocity: mkProj("DEC", "Dream Eco City", ["Block-I", "Block-II", "Block-IX", "Durgapur Bungalow"], { logo: "assets/brand/dream-eco-city-logo.png", team: [SALES_MANAGER, "sales.dreamecocity2@thejaingroup.com"] }),
   dreamexotica: mkProj("DEX", "Dream Exotica", ["Block-I", "Block-II", "Block-III", "Block-IV", "Block-V", "Block-VI", "Block-VII"], { team: [SALES_MANAGER, "sales.exotica1@thejaingroup.com"] }),
-  dreamvalley: mkProj("DV", "Dream Valley", ["Western [I]", "Starwood [II]", "Grand [III]", "Ritz [IV]"]),
-  dreamecocity: mkProj("DEC", "Dream Ecocity", ["Block-I", "Block-II", "Block-IX"], { team: [SALES_MANAGER, "sales.dreamecocity2@thejaingroup.com"] }),
-  dreamecocitybungalow: mkProj("DEB", "Dream Ecocity Bungalow", ["Durgapur Bungalow"], { floors: 3, team: [SALES_MANAGER, "sales.dreamecocity2@thejaingroup.com"] }),
-  dreamjainpailan: mkProj("DJP", "Dream Jain-Pailan", ["Block-1", "Block-2", "Block-3"]),
-  dreamgatewaypailan: mkProj("DGP", "Dream Gateway Pailan Projects", ["Block-1", "Block-2", "Block-3"]),
-  dreamresidencymanor: mkProj("DRM", "Dream Residency Manor", ["Ivory [I]", "Starwood [II]", "Lavender [IV]", "Scarlet [V]", "Coral [VI]", "Jade [VII]", "Olive [VIII]"]),
 };
 // What the page may know about a project (never the team's email addresses).
 const projectInfo = (key: string) => { const p = PROJECTS[key]; return p ? { key, name: p.name, code: p.code, company: p.company, address: p.address, blocks: p.blocks, floors: p.floors, bhk: p.bhk, bhkDefault: p.bhkDefault, logo: p.logo } : null; };
@@ -235,16 +231,20 @@ async function sendMail(o: { to: string[]; cc?: string[]; subject: string; html:
   } finally { try { await client.close(); } catch (_) { /* ignore */ } }
   return { live: conf.live };
 }
-const shell = (inner: string) => `<div style="background:#f3f4f6;padding:24px 0;font-family:Arial,Helvetica,sans-serif"><div style="max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb">`
-  + `<div style="padding:18px 28px;border-bottom:3px solid #b3171d;font-size:13px;letter-spacing:.14em;color:#111827"><b>THE JAIN GROUP</b> <span style="color:#6b7280;letter-spacing:.04em">&nbsp;Caring for your dreams</span></div>`
-  + `<div style="padding:26px 28px 8px;font-size:14.5px;line-height:1.65;color:#111827">${inner}</div>`
-  + `<div style="padding:14px 28px 22px;font-size:12px;color:#6b7280;border-top:1px solid #f0f1f3">The Jain Group &middot; 44/2A Hazra Road, Kolkata &ndash; 700 019</div></div></div>`;
+const logoUrl = (rel: string) => `${SITE}/${rel.split("/").filter(Boolean).join("/")}`;
+const shell = (inner: string, proj?: Proj) => {
+  const right = proj ? (proj.logo ? `<img src="${hE(logoUrl(proj.logo))}" alt="${hE(proj.name)}" height="46" style="display:block;height:46px;width:auto;border:0">` : `<span style="font-size:15px;font-weight:700;letter-spacing:.06em;color:#111827;text-transform:uppercase">${hE(proj.name)}</span>`) : "";
+  return `<div style="background:#f3f4f6;padding:24px 0;font-family:Arial,Helvetica,sans-serif"><div style="max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb">`
+    + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-bottom:3px solid #b3171d"><tr><td style="padding:16px 28px"><img src="${hE(logoUrl("assets/brand/jaingroup-logo.png"))}" alt="The Jain Group" height="46" style="display:block;height:46px;width:auto;border:0"></td><td align="right" style="padding:16px 28px">${right}</td></tr></table>`
+    + `<div style="padding:26px 28px 8px;font-size:15px;line-height:1.7;color:#111827">${inner}</div>`
+    + `<div style="padding:14px 28px 22px;font-size:12px;color:#6b7280;border-top:1px solid #f0f1f3">The Jain Group &middot; 44/2A Hazra Road, Kolkata &ndash; 700 019</div></div></div>`;
+};
 async function sendOtpMail(proj: Proj, email: string, code: string) {
   const html = shell(`<p style="margin:0 0 14px">Your verification code for the <b>${hE(proj.name)}</b> booking form is</p>`
     + `<p style="margin:0 0 16px;font-size:34px;letter-spacing:.32em;font-weight:700;color:#b3171d">${hE(code)}</p>`
-    + `<p style="margin:0 0 14px;color:#4b5563">It is valid for 10 minutes. Please do not share it with anyone. If you did not ask for this, you can ignore this email.</p>`);
+    + `<p style="margin:0 0 14px;color:#4b5563">It is valid for 10 minutes. Please do not share it with anyone. If you did not ask for this, you can ignore this email.</p>`, proj);
   const text = `Your verification code for the ${proj.name} booking form is ${code}\n\nIt is valid for 10 minutes. Please do not share it with anyone. If you did not ask for this, you can ignore this email.`;
-  return await sendMail({ to: [email], subject: `${code} is your verification code - ${proj.name}`, html, text, kind: "verification code" });
+  return await sendMail({ to: [email], subject: `${code} is your verification code`, html, text, kind: "verification code" });
 }
 const rupee = (v: unknown) => { const n = Number(String(v ?? "").replace(/[^\d.]/g, "")); return n ? "₹" + n.toLocaleString("en-IN") : ""; };
 async function sendConfirmation(proj: Proj, link: any, d: any, ref: string) {
@@ -260,22 +260,17 @@ async function sendConfirmation(proj: Proj, link: any, d: any, ref: string) {
   const sign = conf.live
     ? { html: `<p style="margin:0"><b>Pallabita Ghosh</b></p><p style="margin:0;color:#4b5563">Manager &ndash; Post Sales &middot; Customer Relations Team</p><p style="margin:0 0 14px;color:#4b5563">Reach me @ 8420541541</p>`, text: "Pallabita Ghosh\nManager - Post Sales | Customer Relations Team\nReach me @ 8420541541" }
     : { html: `<p style="margin:0"><b>Ayush Ruia</b></p><p style="margin:0 0 14px;color:#4b5563">The Jain Group &middot; ayushruia1@gmail.com</p>`, text: "Ayush Ruia\nThe Jain Group | ayushruia1@gmail.com" };
-  const html = shell(`<p style="margin:0 0 4px;font-size:22px;font-weight:700;color:#111827">Thank you for choosing ${hE(proj.name)}</p>`
-    + `<p style="margin:0 0 18px;color:#6b7280">Booking reference <b style="color:#b3171d">${hE(ref)}</b></p>`
-    + `<p style="margin:0 0 14px">Dear <b>${hE(who)}</b>,</p>`
-    + `<p style="margin:0 0 14px">We are truly grateful that you have chosen <b>${hE(proj.name)}</b> as your new home. Your trust means a great deal to us, and everyone at The Jain Group looks forward to welcoming you to the ${hE(proj.name)} family.</p>`
-    + `<p style="margin:0 0 14px">We have received your booking application and verified your email address. Here is a summary:</p>`
-    + `<table style="width:100%;border-collapse:collapse;margin:0 0 18px;font-size:14px">${rowsHtml}</table>`
-    + `<p style="margin:0 0 18px"><a href="${hE(viewUrl)}" style="display:inline-block;background:#b3171d;color:#fff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:8px">View your submitted form</a></p>`
-    + `<p style="margin:0 0 14px">Your <b>Cost Sheet</b> is attached to this email for your records. Our Customer Relations team will be in touch with you shortly to take you through the next steps.</p>`
-    + `<p style="margin:0 0 14px">Thank you once again for your confidence in us.</p><p style="margin:0 0 4px">Warm regards,</p>` + sign.html);
-  const text = `Dear ${who},\n\nThank you for choosing ${proj.name}.\n\nWe are truly grateful that you have chosen ${proj.name} as your new home. Your trust means a great deal to us, and everyone at The Jain Group looks forward to welcoming you to the ${proj.name} family.\n\n`
-    + `We have received your booking application and verified your email address.\n\nReference number: ${ref}\nProject: ${proj.name}\n${unit ? "Unit: " + unit + "\n" : ""}\nView your submitted form: ${viewUrl}\n\nYour Cost Sheet is attached to this email for your records. Our Customer Relations team will be in touch with you shortly to take you through the next steps.\n\nThank you once again for your confidence in us.\n\nWarm regards,\n${sign.text}`;
+  const html = shell(`<p style="margin:0 0 14px">Dear <b>${hE(who)}</b>,</p>`
+    + `<p style="margin:0 0 14px">Thank you for choosing <b>${hE(proj.name)}</b>. We are truly grateful that you have made ${hE(proj.name)} your new home. Your trust means a great deal to us, and everyone at The Jain Group looks forward to welcoming you to the ${hE(proj.name)} family.</p>`
+    + `<p style="margin:0 0 14px">We have received your booking application${unit ? ` for <b>${hE(unit)}</b>` : ""} and verified your email address. You can see exactly what you submitted at any time here: <a href="${hE(viewUrl)}" style="color:#b3171d;font-weight:700">View your submitted form</a></p>`
+    + `<p style="margin:0 0 14px">Thank you once again for your confidence in us.</p><p style="margin:0 0 4px">Warm regards,</p>` + sign.html, proj);
+  const text = `Dear ${who},\n\nThank you for choosing ${proj.name}. We are truly grateful that you have made ${proj.name} your new home. Your trust means a great deal to us, and everyone at The Jain Group looks forward to welcoming you to the ${proj.name} family.\n\n`
+    + `We have received your booking application${unit ? " for " + unit : ""} and verified your email address. You can see exactly what you submitted at any time here:\n${viewUrl}\n\nThank you once again for your confidence in us.\n\nWarm regards,\n${sign.text}`;
   const attachments: any[] = [];
   const pdf = await costBytes(link);
   if (pdf) { let bin = ""; for (let i = 0; i < pdf.length; i += 0x8000) bin += String.fromCharCode(...pdf.subarray(i, i + 0x8000)); attachments.push({ filename: String(link.prefill?.cost_sheet?.name || "Cost Sheet.pdf"), content: btoa(bin), encoding: "base64", contentType: "application/pdf" }); }
   const cc = [...new Set([SALES_HEAD, ...proj.team].map((x) => x.toLowerCase()))];
-  return await sendMail({ to: [email], cc, subject: `Thank you for choosing ${proj.name} - ${ref}`, html, text, attachments, kind: "confirmation" });
+  return await sendMail({ to: [email], cc, subject: `Thank you for choosing ${proj.name}`, html, text, attachments, kind: "confirmation" });
 }
 
 // ---- OTP (13 Nov 2026): before a generated link is submitted, the customer proves the email address with a 6-digit code. The code is kept only as a hash (acc.digital_booking_links.otp).

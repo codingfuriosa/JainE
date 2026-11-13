@@ -343,12 +343,13 @@
   .lb .lbx:hover{background:rgba(255,255,255,.3)}
   /* the project's name when it has no logo file; the cost sheet as pictures; the zoom screen; the email code box (13 Nov 2026) */
   .pname{font-weight:800;letter-spacing:.05em;font-size:17px;color:var(--ink);text-transform:uppercase;text-align:right;max-width:46vw;line-height:1.2}
-  .costbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:0 0 12px}.costbar small{color:var(--slate);font-size:13.5px}
-  .costbar .btn{padding:9px 14px;font-size:14px;width:auto}
-  .costpg{display:block;width:100%;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;margin:0 0 14px;cursor:zoom-in;box-shadow:0 1px 2px rgba(17,24,39,.05);position:relative}
-  .costpg:last-child{margin-bottom:0}.costpg img{display:block;width:100%;height:auto}
-  .costpg .pgn{position:absolute;left:10px;top:10px;background:rgba(17,24,39,.78);color:#fff;font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px}
-  .costpg .zm{position:absolute;right:10px;top:10px;background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:999px;font-size:12px;font-weight:600;padding:3px 10px;color:var(--ink)}
+  .costbar{display:flex;justify-content:flex-end;margin:0 0 10px}.costbar .btn{padding:9px 18px;font-size:14px;width:auto}
+  .costview{position:relative;background:#f3f4f6;border:1px solid var(--line);border-radius:12px;height:min(68vh,620px);overflow:hidden}
+  .costview .costpg{display:flex;align-items:center;justify-content:center;width:100%;height:100%;padding:12px;margin:0;border:0;background:none;box-shadow:none;border-radius:0;cursor:zoom-in}
+  .costview .costpg img{max-width:100%;max-height:100%;width:auto;height:auto;background:#fff;box-shadow:0 2px 10px rgba(17,24,39,.18)}
+  .cnav{position:absolute;top:50%;transform:translateY(-50%);width:42px;height:42px;border-radius:50%;border:1px solid var(--line);background:rgba(255,255,255,.95);font-size:26px;line-height:1;color:var(--ink);cursor:pointer;box-shadow:0 2px 8px rgba(17,24,39,.15);padding:0}
+  .cnav.prev{left:10px}.cnav.next{right:10px}.cnav[disabled]{opacity:.3;cursor:default}
+  .costview .pgn{position:absolute;right:12px;bottom:10px;background:rgba(17,24,39,.62);color:#fff;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;pointer-events:none}
   .costwait{padding:28px 10px;text-align:center;color:var(--slate)}
   .zoomov{position:fixed;inset:0;z-index:210;background:rgba(15,23,42,.93);display:flex;flex-direction:column}
   .zoomov .zbar{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 14px;color:#fff;flex:none}
@@ -385,6 +386,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261113f"></script>
+<script src="booking-form.js?v=20261113g"></script>
 </body>
 </html>

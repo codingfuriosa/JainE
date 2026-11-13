@@ -456,7 +456,7 @@ function showErrors(){
 // ---------------------------------------------------------------- cost sheet (13 Nov 2026)
 /* Sales attaches the cost sheet as a PDF when they make the link. The customer sees it after the terms as PICTURES (each page drawn from the PDF here in the
    browser with pdf.js, vendor/pdfjs): tap a page to zoom, download a page picture or the PDF itself. The server hands the PDF over only with the link's token. */
-const COST={meta:null,state:'idle',pages:[],bytes:null,err:''};
+const COST={meta:null,state:'idle',pages:[],bytes:null,err:'',cur:0};
 function pdfjsReady(){
   return new Promise(function(res,rej){
     if(window.pdfjsLib){ res(); return; }
@@ -490,8 +490,12 @@ function costInner(){
   if(!COST.meta) return '';
   if(COST.state==='error') return '<div class="costwait" style="color:var(--err)">'+esc(COST.err)+'<br><button type="button" class="btn sec2" style="margin-top:10px" data-costretry="1">Try again</button></div>';
   if(COST.state!=='ready') return '<div class="costwait">Opening the cost sheet…</div>';
-  return '<div class="costbar"><small><b style="color:var(--ink)">Cost sheet</b> · '+esc(COST.meta.name)+' · '+COST.pages.length+' page'+(COST.pages.length>1?'s':'')+'</small><button type="button" class="btn sec2" data-costdl="pdf">Download PDF</button></div>'
-    +COST.pages.map(function(u,i){ return '<button type="button" class="costpg" data-zoom="'+i+'" aria-label="Cost sheet page '+(i+1)+' - tap to zoom"><span class="pgn">Page '+(i+1)+' of '+COST.pages.length+'</span><span class="zm">Tap to zoom</span><img src="'+u+'" alt="Cost sheet page '+(i+1)+'"></button>'; }).join('');
+  const n=COST.pages.length, i=Math.max(0,Math.min(n-1,COST.cur||0));
+  /* One page at a time in a frame of a sensible height (not a very long scroll): the whole page is tappable to enlarge, arrows / swipe change the page, the page number sits small at the bottom right, Download (the PDF) is on the right. */
+  return '<div class="costbar"><button type="button" class="btn sec2" data-costdl="pdf">Download</button></div>'
+    +'<div class="costview"><button type="button" class="costpg" data-zoom="'+i+'" aria-label="Cost sheet page '+(i+1)+' of '+n+' - tap to enlarge"><img src="'+COST.pages[i]+'" alt="Cost sheet page '+(i+1)+'"></button>'
+    +(n>1?'<button type="button" class="cnav prev" data-cnav="-1" aria-label="Previous page"'+(i===0?' disabled':'')+'>&#8249;</button><button type="button" class="cnav next" data-cnav="1" aria-label="Next page"'+(i===n-1?' disabled':'')+'>&#8250;</button>':'')
+    +'<span class="pgn">'+(i+1)+' / '+n+'</span></div>';
 }
 function costBody(){ if(COST.state==='idle') loadCost(); return '<div id="costv">'+costInner()+'</div>'; }
 function dl(url,name){ const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); }
@@ -516,6 +520,9 @@ function openZoom(i){
   d.addEventListener('dblclick',function(e){ if(e.target.tagName==='IMG'){ z=z>1?1:2.5; apply(); } });
   d.addEventListener('wheel',function(e){ if(!e.ctrlKey) return; e.preventDefault(); z=Math.max(1,Math.min(5,z*(e.deltaY<0?1.15:1/1.15))); apply(); },{passive:false});
 }
+(function(){ let x0=null; document.addEventListener('touchstart',function(e){ x0=e.target.closest&&e.target.closest('.costview')?e.touches[0].clientX:null; },{passive:true});
+  document.addEventListener('touchend',function(e){ if(x0===null) return; const dx=e.changedTouches[0].clientX-x0; x0=null; if(Math.abs(dx)<60||COST.state!=='ready') return;
+    COST.cur=Math.max(0,Math.min(COST.pages.length-1,(COST.cur||0)+(dx<0?1:-1))); const h=$('costv'); if(h) h.innerHTML=costInner(); },{passive:true}); })();
 function closeZoom(){ const d=document.getElementById('zoomov'); if(d){ d.remove(); document.documentElement.classList.remove('noscroll'); } }
 
 // ---------------------------------------------------------------- address suggestions (Photon / OpenStreetMap)
@@ -738,6 +745,7 @@ document.addEventListener('click',function(e){
   if(b.dataset.lbx){ closeLightbox(); return; }
   if(b.dataset.zoom!==undefined){ openZoom(+b.dataset.zoom); return; }
   if(b.dataset.costdl){ downloadPdf(); return; }
+  if(b.dataset.cnav){ COST.cur=Math.max(0,Math.min(COST.pages.length-1,(COST.cur||0)+Number(b.dataset.cnav))); const h=$('costv'); if(h) h.innerHTML=costInner(); return; }
   if(b.dataset.costretry){ COST.state='idle'; const h=$('costv'); if(h) h.innerHTML=costInner(); loadCost(); return; }
   if(b.dataset.viewsub){ location.reload(); return; }
   if(b.dataset.pick){ openSheet(b.dataset.pick,b.dataset.kind); return; }
