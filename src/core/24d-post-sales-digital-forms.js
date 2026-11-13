@@ -66,7 +66,7 @@ window.pdfOpen=async function(id){
   const page=document.createElement('div'); page.id='pdPage';
   page.innerHTML=PD_CSS+'<div class="pd-top"><button class="btn" onclick="pdClose()"><i class="fa-solid fa-arrow-left"></i> Back</button><h2><i class="fa-regular fa-file-lines"></i> Digital Booking Form</h2></div>'
     +'<div class="pd-main"><div class="pd-in"><div id="pdfDetail"></div></div></div>';
-  document.body.appendChild(page);
+  document.body.appendChild(page); pgFit(page);
   loader($('pdfDetail'));
   const {data,error}=await sb.schema('acc').from('digital_booking_forms').select('*').eq('id',id).maybeSingle();
   if(error||!data){ $('pdfDetail').innerHTML='<div class="empty"><div>Could not load this form'+(error?': '+esc(error.message):'')+'.</div></div>'; return; }
@@ -178,7 +178,7 @@ window.pdfCopyLink=async function(token,btn){
    the next time the form loads, what they already typed stays). On a phone the list sits under the form. Four short cards, tap buttons for choices,
    a price with commas and words, every mistake under its own box, and a link-ready screen with Copy / Open as the customer / Generate another. */
 const PG_CSS='<style>'
-  +'#pgPage{--pg-h:clamp(36px,5.8vh,56px);--pg-gap:clamp(12px,2.7vh,30px);position:fixed;inset:0;z-index:2000;background:#f4f5f7;display:flex;flex-direction:column;font-family:inherit}'
+  +'#pgPage{--pg-h:clamp(34px,5.2vh,54px);--pg-gap:clamp(8px,1.9vh,26px);position:fixed;inset:0;z-index:2000;background:#f4f5f7;display:flex;flex-direction:column;font-family:inherit}'
   +'#pgPage .pg-top{display:flex;align-items:center;gap:14px;padding:10px 22px;background:#fff}'
   +'#pgPage .pg-top h2{margin:0;font-size:18px}#pgPage .pg-top h2 span{font-weight:400;color:var(--slate)}'
   +'#pgPage .pg-tabs{display:flex;gap:4px;padding:0 22px;background:#fff;border-bottom:1px solid var(--line)}'
@@ -188,11 +188,11 @@ const PG_CSS='<style>'
   +'#pgPage .pg-main{flex:1;overflow:auto;padding:14px 22px 16px}'
   +'#pgNew{display:flex;flex-direction:column}#pgBody{flex:1;display:flex;flex-direction:column;min-height:0}'
   +'.pg-edit{margin:0 0 10px;padding:8px 12px;border-radius:8px;background:#fff7e6;border:1px solid #f0d9a8;color:#92400e;font-size:13px}'
-  +'.pg-cards{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.55fr) minmax(0,1fr);gap:12px;align-items:stretch;flex:1;min-height:0}'
-  +'@media(max-width:1250px),(min-height:860px) and (min-width:1000px){.pg-cards{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:1fr}}'
-  +'@media(max-width:1250px) and (max-height:859px){.pg-cards{grid-auto-rows:auto}}@media(max-width:700px){.pg-cards{grid-template-columns:1fr}}'
-  +'.pg-card{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;padding:clamp(12px,2vh,22px) 16px clamp(14px,2.4vh,26px);background:#fff}'
-  +'.pg-card>h4{margin:0 0 10px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);font-weight:700}'
+  +'.pg-cards{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.4fr);gap:12px;align-items:stretch;flex:1;min-height:0}'
+  +'.pg-stack{display:flex;flex-direction:column;gap:12px;min-height:0}.pg-stack .pg-card:last-child{flex:1}'
+  +'@media(max-width:1100px){.pg-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:700px){.pg-cards{grid-template-columns:1fr}}'
+  +'.pg-card{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;padding:clamp(10px,1.7vh,20px) 16px clamp(12px,2vh,22px);background:#fff}'
+  +'.pg-card>h4{margin:0 0 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);font-weight:700}'
   +'.pg-g{display:grid;gap:var(--pg-gap) 10px;align-content:start}.pg-g.c2{grid-template-columns:repeat(2,minmax(0,1fr))}'
   +'.pg-f label{display:block;font-size:clamp(12.5px,1.9vh,14.5px);font-weight:600;color:var(--ink,#111827);margin-bottom:4px}'
   +'.pg-f label .o{font-weight:400;color:var(--slate)}.pg-f label .r{color:#b3171d}'
@@ -229,6 +229,12 @@ function pdfWords(n){
   if(cr) out.push(three(cr)+' Crore'); if(lk) out.push(two(lk)+' Lakh'); if(th) out.push(two(th)+' Thousand'); if(n) out.push(three(n));
   return 'Rupees '+out.join(' ')+' only';
 }
+/* The Generate Form page fills the content area only - the menu on the left and the top bar of JainE stay where they are. It follows the window size,
+   and goes away when another menu item is chosen. */
+function pgFit(el){ const v=document.getElementById('view'); if(!v||!el||!el.style) return; const r=v.getBoundingClientRect(), t=document.querySelector('.topbar'), tb=t?t.getBoundingClientRect().bottom:Math.max(0,r.top);
+  el.style.top=Math.max(0,tb)+'px'; el.style.left=Math.max(0,r.left)+'px'; el.style.right='0px'; el.style.bottom='0px'; el.style.zIndex=50; }
+window.addEventListener('resize',function(){ pgFit(document.getElementById('pgPage')); pgFit(document.getElementById('pdPage')); });
+window.addEventListener('hashchange',function(){ if(typeof pgClose==='function') pgClose(); if(typeof pdClose==='function') pdClose(); });
 const PG={editId:null,editToken:null,draftId:null};
 const PG_DRAFTS={rows:[],ok:false};
 window.pdfGenOpen=function(editRow){
@@ -246,12 +252,17 @@ window.pdfGenOpen=function(editRow){
     +'<div class="pg-tabs"><button class="on" id="pgT_new" onclick="pgTab(\'new\')">NEW</button><button id="pgT_drafts" onclick="pgTab(\'drafts\')">DRAFTS <span class="pg-n" id="pgDCount">…</span></button><button id="pgT_list" onclick="pgTab(\'list\')">Generated forms <span class="pg-n" id="pgCount">…</span></button></div>'
     +'<div class="pg-main" id="pgNew"><div id="pgBody"><div id="pgEditNote"></div>'
     +'<div class="pg-cards">'
+      +'<div class="pg-stack">'
       +'<div class="pg-card"><h4>Customer</h4><div class="pg-g c2">'
         +f('pgTitle','Title',sel('pgTitle',['Mr.','Ms.','Mrs.','Mast.','M/s.'],'Mr.'))
         +f('pgNat','Nationality',sel('pgNat',PDF_COUNTRIES.map(c=>c[0]),'India').replace('<select ','<select onchange="pgNatSync()" '))
         +'<div style="grid-column:1/-1">'+f('pgName','Customer name','<input class="pg-in" id="pgName" style="text-transform:uppercase" autocomplete="off" placeholder="As on the PAN card" oninput="pgNameSync()">',{req:1})+'</div>'
         +'<div style="grid-column:1/-1">'+f('pgDob','Date of birth','<input class="pg-in" type="date" id="pgDob">',{req:1})+'</div>'
       +'</div></div>'
+      +'<div class="pg-card"><h4>Area &amp; price</h4><div class="pg-g">'
+        +f('pgSba','Super built-up area','<div class="pg-suf"><input class="pg-in" id="pgSba" inputmode="decimal" autocomplete="off" placeholder="1325"><span>sq.ft.</span></div>',{req:1})
+        +f('pgTotal','Total sale price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
+      +'</div></div>'      +'</div>'
       +'<div class="pg-card"><h4>Contact</h4><div class="pg-g">'
         +f('pgMobile','Mobile number','<div class="pg-row">'+sel('pgCc',codes,'+91','cc')+'<input class="pg-in" id="pgMobile" inputmode="tel" autocomplete="off" placeholder="98300 12345"></div>',{req:1})
         +f('pgEmail','Email','<input class="pg-in" type="email" id="pgEmail" autocomplete="off" placeholder="name@example.com">',{req:1})
@@ -264,21 +275,18 @@ window.pdfGenOpen=function(editRow){
         +f('pgBhk','Bedrooms',seg('pgBhk',['2 BHK','3 BHK','4 BHK'],'3 BHK'))
         +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{opt:1})
       +'</div></div>'
-      +'<div class="pg-card"><h4>Area &amp; price</h4><div class="pg-g">'
-        +f('pgSba','Super built-up area','<div class="pg-suf"><input class="pg-in" id="pgSba" inputmode="decimal" autocomplete="off" placeholder="1325"><span>sq.ft.</span></div>',{req:1})
-        +f('pgTotal','Total sale price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
-      +'</div></div>'
+
     +'</div>'
     +'<div class="pg-bar"><span class="msg" id="pgErr" style="color:var(--slate);font-weight:400">What you fill in is shown to the customer but locked. They fill in the rest (PAN, Aadhaar, address, payment).</span><button class="btn" onclick="pgClose()">Cancel</button><button class="btn" id="pgDraftBtn" onclick="pgSaveDraft()"><i class="fa-regular fa-floppy-disk"></i> Save draft</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div>'
     +'</div></div>'
     +'<div class="pg-main" id="pgDraftsWrap" style="display:none"><div id="pgDrafts"></div></div>'
     +'<div class="pg-main" id="pgListWrap" style="display:none"><div id="pgList"></div></div>';
-  document.body.appendChild(page); document.body.style.overflow='hidden';
+  document.body.appendChild(page); pgFit(page);
   if(editRow) pgFill(editRow);
   pdfGenList();
 };
 window.pgTab=function(t){ [['new','pgNew','pgT_new'],['drafts','pgDraftsWrap','pgT_drafts'],['list','pgListWrap','pgT_list']].forEach(function(x){ const on=x[0]===t; $(x[1]).style.display=on?'':'none'; $(x[2]).className=on?'on':''; }); };
-window.pgClose=function(){ const p=document.getElementById('pgPage'); if(p) p.remove(); document.body.style.overflow=''; };
+window.pgClose=function(){ const p=document.getElementById('pgPage'); if(p) p.remove(); };
 window.pgSeg=function(btn,id){ btn.parentNode.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); }); btn.classList.add('on'); $(id).value=btn.textContent.trim(); };
 window.pgNameSync=function(){ const c=$('pgContact'); if(c&&!c.dataset.touched) c.value=($('pgName').value||''); };
 window.pgNatSync=function(){ const n=PDF_COUNTRIES.filter(c=>c[0]===$('pgNat').value)[0]; if(n&&$('pgCc')) $('pgCc').value=n[1]; };
