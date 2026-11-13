@@ -51,8 +51,22 @@ function pdfRow(k,v){ return (v===''||v==null)?'':'<tr><td style="padding:6px 0;
 function pdfD(d){ return d?new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):''; }
 function pdfAddr(x){ return x?[x.line,x.city,x.pin].filter(Boolean).join(', '):''; }
 function pdfSec(t,rows){ const b=rows.join(''); return b?'<div style="margin-top:16px"><div style="font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);margin-bottom:4px">'+esc(t)+'</div><table style="width:100%;border-collapse:collapse;font-size:13.5px">'+b+'</table></div>':''; }
+const PD_CSS='<style>'
+  +'#pdPage{position:fixed;inset:0;z-index:2100;background:#f4f5f7;display:flex;flex-direction:column}'
+  +'#pdPage .pd-top{display:flex;align-items:center;gap:14px;padding:10px 22px;background:#fff;border-bottom:1px solid var(--line)}'
+  +'#pdPage .pd-top h2{margin:0;font-size:18px}'
+  +'#pdPage .pd-main{flex:1;overflow:auto;padding:16px 22px 24px}'
+  +'#pdPage .pd-in{max-width:1180px;margin:0 auto;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 20px 20px}'
+  +'#pdPage .pd-cols{column-count:2;column-gap:40px}@media(max-width:1000px){#pdPage .pd-cols{column-count:1}}'
+  +'#pdPage .pd-cols>div{break-inside:avoid}'
+  +'</style>';
+window.pdClose=function(){ const p=document.getElementById('pdPage'); if(p) p.remove(); };
 window.pdfOpen=async function(id){
-  openModal('<div class="modal-head"><h3><i class="fa-regular fa-file-lines"></i> Digital Booking Form</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body"><div id="pdfDetail"></div></div>','lg');
+  const old=document.getElementById('pdPage'); if(old) old.remove();
+  const page=document.createElement('div'); page.id='pdPage';
+  page.innerHTML=PD_CSS+'<div class="pd-top"><button class="btn" onclick="pdClose()"><i class="fa-solid fa-arrow-left"></i> Back</button><h2><i class="fa-regular fa-file-lines"></i> Digital Booking Form</h2></div>'
+    +'<div class="pd-main"><div class="pd-in"><div id="pdfDetail"></div></div></div>';
+  document.body.appendChild(page);
   loader($('pdfDetail'));
   const {data,error}=await sb.schema('acc').from('digital_booking_forms').select('*').eq('id',id).maybeSingle();
   if(error||!data){ $('pdfDetail').innerHTML='<div class="empty"><div>Could not load this form'+(error?': '+esc(error.message):'')+'.</div></div>'; return; }
@@ -81,10 +95,10 @@ window.pdfOpen=async function(id){
       +'<span style="color:var(--slate);font-size:12.5px;margin-left:10px">Terms accepted: '+esc(data.terms_version||'')+'</span></div>'
     +'<div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px"><label style="font-size:12.5px;font-weight:600;color:var(--slate)">Note (staff only)</label>'
       +'<textarea class="inp" id="pdfNote" rows="2" style="width:100%;margin-top:4px">'+esc(data.note||'')+'</textarea></div>';
-  $('pdfDetail').innerHTML=html
+  $('pdfDetail').innerHTML='<div class="pd-cols">'+html+'</div>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">'
     +['seen','used','rejected'].map(s=>'<button class="btn'+(data.status===s?' btn-primary':'')+'" onclick="pdfSetStatus(\''+id+'\',\''+s+'\')">Mark as '+PDF_ST[s][0]+'</button>').join('')
-    +'<button class="btn" style="margin-left:auto" onclick="closeModal()">Close</button></div>';
+    +'<button class="btn" style="margin-left:auto" onclick="pdClose()">Back</button></div>';
   // Opening a new form marks it Seen, once, and keeps who and when.
   if(data.status==='new'){
     const me=(typeof state!=='undefined'&&state.email)||'';
@@ -97,7 +111,7 @@ window.pdfSetStatus=async function(id,s){
   const {error}=await sb.schema('acc').from('digital_booking_forms').update({status:s,note:note}).eq('id',id);
   if(error){ toast('Could not save: '+error.message,'err'); return; }
   const r=PDF.rows.find(x=>x.id===id); if(r){ r.status=s; r.note=note; }
-  toast('Marked as '+PDF_ST[s][0],'ok'); closeModal(); pdfDraw();
+  toast('Marked as '+PDF_ST[s][0],'ok'); pdClose(); pdfDraw(); if(typeof pdfGenList==='function'&&document.getElementById('pgList')) pdfGenList();
 };
 
 
@@ -345,7 +359,7 @@ function pdfGenListHtml(){
       +'<td>'+esc(pdfWhen(r.created_at))+'<div class="sub">'+esc(String(r.created_by||'').split('@')[0])+'</div></td>'
       +'<td>'+pdfLinkStatus(r)+'</td>'
       +'<td class="a">'+(r.status==='open'?'<button class="btn" onclick="pdfCopyLink(\''+r.token+'\',this)"><i class="fa-regular fa-copy"></i> Copy link</button><button class="btn" onclick="pdfEditLink(\''+r.id+'\')"><i class="fa-solid fa-pen"></i> Edit</button>'
-        :(r.form_id?'<button class="btn" onclick="pgClose();pdfOpen(\''+r.form_id+'\')">Open form</button>':''))+'</td></tr>'; }).join('')+'</tbody></table>';
+        :(r.form_id?'<button class="btn" onclick="pdfOpen(\''+r.form_id+'\')">Open form</button>':''))+'</td></tr>'; }).join('')+'</tbody></table>';
 }
 window.pdfGenList=async function(){ await pdfLoadLinks(); const h=$('pgList'); if(h) h.innerHTML=pdfGenListHtml(); const c=$('pgCount'); if(c) c.textContent=PDF_LINKS.ok?PDF_LINKS.rows.length:'-'; await pgLoadDrafts(); };
 
@@ -377,13 +391,11 @@ window.pgSaveDraft=async function(){
   if(b) b.disabled=false;
   if(res.error||!res.data||!res.data.length){ toast('Could not save the draft: '+((res.error&&res.error.message)||'not saved'),'err'); return; }
   PG.draftId=res.data[0].id;
-  const n=$('pgEditNote'); if(n) n.innerHTML='<div class="pg-edit"><b>Draft saved.</b> You are editing the draft - Save draft again to keep new changes, or Generate link when it is complete.</div>';
   toast('Draft saved','ok'); await pgLoadDrafts();
 };
 window.pgOpenDraft=function(id){
   const r=PG_DRAFTS.rows.filter(x=>x.id===id)[0]; if(!r) return;
   pgFillRaw(r.values||{}); PG.draftId=id; pgTab('new');
-  const n=$('pgEditNote'); if(n) n.innerHTML='<div class="pg-edit"><b>Editing your draft.</b> Save draft keeps your changes; Generate link makes the link and uses the draft up.</div>';
 };
 window.pgDeleteDraft=async function(id){
   if(typeof confirmDialog==='function'&&!(await confirmDialog('Delete this draft? It cannot be brought back.'))) return;
