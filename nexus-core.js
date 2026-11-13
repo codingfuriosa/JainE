@@ -6066,12 +6066,13 @@ const LM_COLS=[
   {k:'cnr',     l:'CNR No.',       sec:'hearing', w:170},
   {k:'incharge',l:'Incharge',      sec:'hearing', w:140},
   {k:'advocate',l:'Advocate',      sec:'hearing', w:160},
-  {k:'action',  l:'Action',        sec:'action',  w:280}
+  {k:'action',  l:'Action',        sec:'action',  w:280},
+  {k:'remarks', l:'Remarks',       sec:'remarks', w:240}
 ];
 // Each column can be dragged wider or narrower at its own header edge, within these limits (px).
 const LM_COL_MIN=80, LM_COL_MAX=520;
 const LM={rows:[],hearings:{},actions:{},tasks:{},comments:{},types:[],courts:[],advocates:[],people:[],
-  sel:new Set(),typeFilter:'',docCounts:{},docFolders:{},docVault:{}};
+  sel:new Set(),stages:[],typeFilter:'',docCounts:{},docFolders:{},docVault:{}};
 
 /* ---------------------------------------------------------------- small helpers */
 function lmIso(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -6116,6 +6117,13 @@ async function lmLoadLists(){
   ]);
   LM.types=((ty&&ty.data)||[]).map(x=>x.name);
   LM.courts=((co&&co.data)||[]).map(x=>x.name);
+  /* Hearing stages (11 Nov 2026, Ayush: "either I choose or type and next time it gets saved"): the fixed
+     list plus every stage already typed on a hearing, so a new one is offered from then on. */
+  try{
+    const {data:st}=await sb.from(MIST('mis_hearings')).select('stage').not('stage','is',null).limit(10000);
+    const seenS=new Set(LM_STAGES.map(x=>x.toLowerCase())); LM.stages=LM_STAGES.slice();
+    (st||[]).forEach(x=>{ const v=String(x.stage||'').trim(); if(v&&v!=='NA'&&!seenS.has(v.toLowerCase())){ seenS.add(v.toLowerCase()); LM.stages.push(v); } });
+  }catch(e){ LM.stages=LM_STAGES.slice(); }
   const seen=new Set(); LM.advocates=[];
   ((ad&&ad.data)||[]).forEach(a=>{ const n=String(a.advocate_name||'').trim(); if(n&&a.active!==false&&!seen.has(n.toLowerCase())){ seen.add(n.toLowerCase()); LM.advocates.push(n); } });
   try{ LM.people=await getPeople(); }catch(e){ LM.people=[]; }
@@ -6213,6 +6221,13 @@ function lmStyles(){
   .lm-cb{width:16px;height:16px;accent-color:var(--brand,#1d4ed8);cursor:pointer;vertical-align:middle}
   .lm-t1{font-weight:650;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
   .lm-t2{font-size:11.5px;color:var(--slate);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lm-tbrief{margin-top:6px;padding:5px 8px;border-radius:7px;background:#f5f3ff;color:#4c1d95;font-size:12px;line-height:1.45;cursor:pointer;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+  .lm-tbrief i{color:#7c3aed;margin-right:3px;font-size:11px}
+  .lm-tbrief:hover{background:#ede9fe}
+  .lm-rcell{cursor:pointer;border-radius:8px;padding:4px 6px;margin:-4px -6px}
+  .lm-rcell:hover{background:#f1f5f9}
+  .lm-rtxt{font-size:12.5px;line-height:1.45;color:var(--ink-2,#334155);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+  .lm-radd{font-size:12px;font-weight:600;color:var(--brand)}
   .lm-cell{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;color:var(--ink-2,#334155)}
   .lm-mute{color:var(--slate-2,#94a3b8)}
   .lm-datebtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:#fff;font:600 12.5px inherit;font-family:inherit;color:var(--ink);cursor:pointer;white-space:nowrap}
@@ -6517,8 +6532,16 @@ function lmSaveWidth(k,w){
 function lmCellHtml(c,r,s){
   const mute='<span class="lm-mute">—</span>';
   switch(c.k){
-    case 'title': return '<div class="lm-t1" title="'+esc(String(r.cause_title||'')+(r.case_brief?'\n\n'+r.case_brief:''))+'">'+esc(String(r.cause_title||'').replace(/\s+/g,' ').trim()||'Untitled case')+'</div>'
-      +(r.case_no?'<div class="lm-t2" title="'+esc(r.case_no)+'">'+esc(r.case_no)+'</div>':'');
+    /* The Case Brief sits under the title (11 Nov 2026, Ayush: "very easy to see it without much effort"),
+       and a click on it shows the whole brief. */
+    case 'title': return '<div class="lm-t1" title="'+esc(String(r.cause_title||''))+'">'+esc(String(r.cause_title||'').replace(/\s+/g,' ').trim()||'Untitled case')+'</div>'
+      +(r.case_no?'<div class="lm-t2" title="'+esc(r.case_no)+'">'+esc(r.case_no)+'</div>':'')
+      +(r.case_brief&&String(r.case_brief).trim()?'<div class="lm-tbrief" onclick="event.stopPropagation();lmShowBrief('+r.id+')" title="Show the whole Case Brief"><i class="fa-solid fa-book-open"></i> '+esc(String(r.case_brief).replace(/\s+/g,' ').trim())+'</div>':'');
+    /* One Remarks field for the whole case (11 Nov 2026) - the same remarks the old MIS kept - besides the
+       remarks on each hearing and action. Added or changed straight from the table. */
+    case 'remarks': { const t=String(r.remarks||'').trim(); const has=t&&t!=='NA';
+      return '<div class="lm-rcell" onclick="event.stopPropagation();lmEditRemarks('+r.id+')" title="'+(has?'Change the remarks':'Add remarks')+'">'
+        +(has?'<div class="lm-rtxt">'+esc(t)+'</div>':'<span class="lm-radd"><i class="fa-solid fa-plus"></i> Add remarks</span>')+'</div>'; }
     case 'type': return r.case_type?'<div class="lm-cell" style="font-weight:600">'+esc(r.case_type)+'</div>':'<span class="lm-mute">Not set</span>';
     case 'court': return r.court?'<div class="lm-cell" title="'+esc(r.court)+'">'+esc(r.court)+'</div>':mute;
     case 'hearing': return '<button class="lm-datebtn '+(s.hearing?'h':'none')+'" onclick="event.stopPropagation();navTo(\'legal/mis/hearing/'+r.id+'\')" title="Hearing history">'
@@ -6690,7 +6713,7 @@ window.misFilter=function(){
     if(LM.typeFilter==='__none') ok=!r.case_type; else if(LM.typeFilter) ok=r.case_type===LM.typeFilter;
     if(ok&&w){ const d=[s.hearing,s.adate].filter(Boolean); ok=d.some(x=>x>=w.from&&x<=w.to); }
     if(ok&&q.length){
-      const blob=[r.cause_title,r.case_no,r.case_type,r.court,lmFileNo(r.file_no),r.cnr_no,r.pc_in_charge,r.advocate_incharge,r.case_brief,
+      const blob=[r.cause_title,r.case_no,r.case_type,r.court,lmFileNo(r.file_no),r.cnr_no,r.pc_in_charge,r.advocate_incharge,r.case_brief,r.remarks,
         s.cur&&s.cur.action,s.cur&&lmName(s.cur.person),lmDmy(s.hearing),lmDmy(s.adate)].join(' ').toLowerCase();
       ok=q.every(t=>blob.indexOf(t)!==-1);
     }
@@ -7080,6 +7103,7 @@ async function misCasePage(idArg){
       +lmField('Case No.','<input id="lmCaseNo" class="lm-in" value="'+esc(r.case_no||'')+'">',{req:true})
       +lmField('Court Name',lmCombo('lmCourt',r.court||'',LM.courts,'Choose or type a new one'),{req:true,full:true})
       +lmField('Case Brief','<textarea id="lmBrief" class="lm-in" rows="3" placeholder="A few lines on what the case is about">'+esc(r.case_brief||'')+'</textarea>',{optional:true,full:true})
+      +lmField('Remarks','<textarea id="lmCaseRem" class="lm-in" rows="3" placeholder="Remarks on the case as a whole">'+esc(r.remarks&&r.remarks!=='NA'?r.remarks:'')+'</textarea>',{optional:true,full:true})
     +'</div>');
   const legal=lmLegalPeople();
   // Date of Filing, beside the Hearing Date, kept as DD/MM/YYYY like the live MIS's own entries (2 Nov 2026)
@@ -7190,7 +7214,7 @@ window.lmSaveCase=async function(id){
   if(isNew&&lmVal('lmHearDate')<today){ toast('The Hearing Date cannot be in the past','warn'); return; }
   const btn=$('lmSaveBtn'); if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
   const restore=function(){ if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Save'; } };
-  const row={cause_title:lmVal('lmCaseTitle'),case_type:lmVal('lmCaseType'),case_no:lmVal('lmCaseNo'),court:lmVal('lmCourt'),case_brief:lmVal('lmBrief')||null,
+  const row={cause_title:lmVal('lmCaseTitle'),case_type:lmVal('lmCaseType'),case_no:lmVal('lmCaseNo'),court:lmVal('lmCourt'),case_brief:lmVal('lmBrief')||null,remarks:lmVal('lmCaseRem')||null,
     file_no:lmVal('lmLocation')||null,cnr_no:lmVal('lmCnr')||null,pc_in_charge:lmVal('lmIncharge')||null,advocate_incharge:lmVal('lmAdvocate')||null};
   // a filing date picked here is saved; a left-blank one keeps whatever the case had ("NA" included)
   if(lmVal('lmFiling')) row.date_of_filing=lmDofText(lmVal('lmFiling'));
@@ -7232,6 +7256,34 @@ window.lmSaveCase=async function(id){
   }catch(e){ restore(); toast((e&&e.message)||String(e),'err'); }
 };
 
+window.lmShowBrief=function(id){
+  const r=LM.rows.find(x=>x.id===id); if(!r) return;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-book-open" style="color:#7c3aed"></i> Case Brief</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><div style="font-weight:700;color:var(--ink);margin-bottom:4px">'+esc(String(r.cause_title||'').replace(/\s+/g,' '))+'</div>'
+      +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:12px">'+esc([r.case_no,r.court].filter(Boolean).join(' · '))+'</div>'
+      +'<div style="font-size:14px;line-height:1.65;color:var(--ink);white-space:pre-wrap">'+esc(r.case_brief||'')+'</div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal();navTo(\'legal/mis/case/'+id+'\')">Open case</button><button class="btn primary" onclick="closeModal()">Close</button></div>','md');
+};
+window.lmEditRemarks=function(id){
+  const r=LM.rows.find(x=>x.id===id); if(!r) return;
+  const cur=r.remarks&&r.remarks!=='NA'?r.remarks:'';
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-comment-dots" style="color:var(--brand)"></i> Remarks</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><div style="font-weight:700;color:var(--ink);margin-bottom:12px">'+esc(String(r.cause_title||'').replace(/\s+/g,' '))+(r.case_no?' <span style="font-weight:500;color:var(--slate)">· '+esc(r.case_no)+'</span>':'')+'</div>'
+      +'<textarea id="lmRemBox" class="lm-in" rows="7" style="width:100%;box-sizing:border-box" placeholder="Remarks on the case as a whole">'+esc(cur)+'</textarea></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="lmRemSave" onclick="lmSaveRemarks('+id+')"><i class="fa-solid fa-check"></i> Save</button></div>','md');
+  setTimeout(()=>{ const t=$('lmRemBox'); if(t){ t.focus(); t.setSelectionRange(t.value.length,t.value.length); } },50);
+};
+window.lmSaveRemarks=async function(id){
+  const btn=$('lmRemSave'); if(btn) btn.disabled=true;
+  const v=String(($('lmRemBox')||{}).value||'').trim()||null;
+  const {error}=await sb.from(MIST('mis_cases')).update({remarks:v,updated_at:new Date().toISOString()}).eq('id',id);
+  if(error){ toast(error.message,'err'); if(btn) btn.disabled=false; return; }
+  const r=LM.rows.find(x=>x.id===id); if(r) r.remarks=v;
+  closeModal(); toast('Remarks saved','ok');
+  const tr=document.querySelector('#lmBody tr[data-id="'+id+'"]');
+  if(tr&&r){ const ix=LM_COLS.findIndex(c=>c.k==='remarks'); const td=tr.children[ix+1]; if(td) td.innerHTML=lmCellHtml(LM_COLS[ix],r,r._s||lmCaseState(r)); }
+};
+
 /* ---------------------------------------------------------------- THE HEARING PAGE */
 async function misHearingPage(id){
   lmStyles();
@@ -7251,7 +7303,7 @@ async function misHearingPage(id){
       +'<div class="lm-grid">'
         +lmField('Hearing Date',lmDateInput('lmHDate','',{min:today}),{req:true})
         +lmField('Person',lmPeopleSelect('lmHPerson','',legal,true),{req:true})
-        +lmField('Stage',lmListSelect('lmHStage','',LM_STAGES),{req:true,full:true})
+        +lmField('Stage',lmCombo('lmHStage','',LM.stages,'Choose a stage or type a new one'),{req:true,full:true})
         +lmField('Remarks','<textarea id="lmHRem" class="lm-in" rows="2" placeholder="What happened, or what is expected, at this hearing"></textarea>',{req:true,full:true})
       +'</div><div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="lm-btn primary" onclick="lmAddHearing('+id+',this)"><i class="fa-solid fa-plus"></i> Add hearing</button></div></div>'
     +(hs.length?hs.map((h,i)=>lmHearingCard(h,id,i===0)).join(''):'<div class="lm-empty">No hearings recorded yet</div>')
@@ -7290,7 +7342,7 @@ window.lmEditHearing=function(hid,caseId){
   box.innerHTML='<div style="font-weight:700;margin-bottom:12px"><i class="fa-solid fa-pen" style="color:var(--brand)"></i> Edit this hearing</div>'+'<div class="lm-grid">'
       +lmField('Hearing Date',lmDateInput('lmE'+hid+'D',h.hearing_date),{req:true})
       +lmField('Person',lmPeopleSelect('lmE'+hid+'P',h.person||'',lmLegalPeople(),true),{req:true})
-      +lmField('Stage',lmListSelect('lmE'+hid+'S',h.stage&&h.stage!=='NA'?h.stage:'',LM_STAGES),{req:true,full:true})
+      +lmField('Stage',lmCombo('lmE'+hid+'S',h.stage&&h.stage!=='NA'?h.stage:'',LM.stages,'Choose a stage or type a new one'),{req:true,full:true})
       /* Remarks stay required once a hearing has them. A hearing brought in from the old MIS with blank
          remarks (2 Nov 2026) may be saved blank - the new rule is for hearings added from now on. */
       +lmField('Remarks','<textarea id="lmE'+hid+'R" class="lm-in" rows="2">'+esc(h.remarks||'')+'</textarea>',(h.remarks&&String(h.remarks).trim())?{req:true,full:true}:{optional:true,full:true})
