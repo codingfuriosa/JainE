@@ -205,10 +205,40 @@ function b64Part(mimeType: string, s: string) {
 const maskEmail = (e: string) => { const [u, d] = e.split("@"); return (u.length <= 2 ? u[0] + "*" : u.slice(0, 2) + "*".repeat(Math.min(6, Math.max(2, u.length - 2)))) + "@" + d; };
 async function mailConf() {
   let rows: any[] = [];
-  try { rows = (await db("job_secrets?select=name,value&name=in.(digital_form_mail_mode,digital_form_mail_test_to)")) || []; } catch (_) { /* default: test */ }
+  try { rows = (await db("job_secrets?select=name,value&name=in.(digital_form_mail_mode,digital_form_mail_test_to,digital_form_mail_from)")) || []; } catch (_) { /* default: test */ }
   const v: Record<string, string> = {}; for (const r of rows) v[r.name] = String(r.value || "");
   const test = (v.digital_form_mail_test_to || "").trim();
-  return { live: v.digital_form_mail_mode === "live", testTo: MAIL_RE.test(test) ? test : "ayushruia1@gmail.com" };
+  // fromUser: in test mode the email is sent AS this person through their own connected Gmail (the same "Connect Google" tokens the recruitment Share uses); 'smtp' switches that off.
+  const from = (v.digital_form_mail_from || "ayushruia1@gmail.com").trim().toLowerCase();
+  return { live: v.digital_form_mail_mode === "live", testTo: MAIL_RE.test(test) ? test : "ayushruia1@gmail.com", fromUser: MAIL_RE.test(from) ? from : "" };
+}
+const wrap76 = (b: string) => b.replace(/.{76}(?=.)/g, "$&\r\n");
+const b64Text = (t: string) => { const by = new TextEncoder().encode(t); let bin = ""; for (let i = 0; i < by.length; i += 0x8000) bin += String.fromCharCode(...by.subarray(i, i + 0x8000)); return btoa(bin); };
+// Sends AS a JainE user through the Gmail API with their own stored Google token (acc.google_tokens, scope gmail.send). Returns false if they have not connected Google.
+async function sendViaGmail(user: string, name: string, m: { to: string[]; cc: string[]; subject: string; html: string; text: string; attachments?: any[] }): Promise<boolean> {
+  const CID = Deno.env.get("GOOGLE_CLIENT_ID"), CSEC = Deno.env.get("GOOGLE_CLIENT_SECRET");
+  if (!CID || !CSEC) return false;
+  const rows = await db("google_tokens?select=refresh_token,scope&email=eq." + encodeURIComponent(user) + "&limit=1");
+  const tok = rows && rows[0];
+  if (!tok || !tok.refresh_token || String(tok.scope || "").indexOf("gmail.send") === -1) return false;
+  const rt = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: CID, client_secret: CSEC, refresh_token: tok.refresh_token, grant_type: "refresh_token" }) });
+  const access = String((await rt.json().catch(() => ({}))).access_token || "");
+  if (!access) return false;
+  const B1 = "jg_mixed_" + crypto.randomUUID().split("-").join(""), B2 = "jg_alt_" + crypto.randomUUID().split("-").join("");
+  const L: string[] = ["From: " + name.replace(/[\r\n"]/g, " ") + " <" + user + ">", "To: " + m.to.join(", "), ...(m.cc.length ? ["Cc: " + m.cc.join(", ")] : []),
+    "Subject: =?UTF-8?B?" + b64Text(m.subject) + "?=", "MIME-Version: 1.0", 'Content-Type: multipart/mixed; boundary="' + B1 + '"', "",
+    "--" + B1, 'Content-Type: multipart/alternative; boundary="' + B2 + '"', "",
+    "--" + B2, "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64", "", wrap76(b64Text(m.text)),
+    "--" + B2, "Content-Type: text/html; charset=UTF-8", "Content-Transfer-Encoding: base64", "", wrap76(b64Text(m.html)), "--" + B2 + "--"];
+  for (const a of (m.attachments || [])) {
+    const fn = String(a.filename || "file").replace(/[\r\n"]/g, " ");
+    L.push("--" + B1, "Content-Type: " + (a.contentType || "application/octet-stream") + '; name="' + fn + '"', "Content-Transfer-Encoding: base64", 'Content-Disposition: attachment; filename="' + fn + '"', "", wrap76(String(a.content || "")));
+  }
+  L.push("--" + B1 + "--", "");
+  const raw = btoa(L.join("\r\n")).split("+").join("-").split("/").join("_").split("=").join("");
+  const gr = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", { method: "POST", headers: { Authorization: "Bearer " + access, "Content-Type": "application/json" }, body: JSON.stringify({ raw }) });
+  if (!gr.ok) throw new Error("Gmail " + gr.status + " " + (await gr.text()).slice(0, 160));
+  return true;
 }
 // Sends one email. to / cc are the REAL recipients; in test mode they are replaced by the test inbox and named in a banner.
 async function sendMail(o: { to: string[]; cc?: string[]; subject: string; html: string; text: string; attachments?: any[]; kind: string }) {
@@ -223,13 +253,18 @@ async function sendMail(o: { to: string[]; cc?: string[]; subject: string; html:
     text = `[TEST MODE - in live mode this ${o.kind} would have gone to: ${would}]\n\n` + text;
     to = [conf.testTo]; cc = [];
   }
+  // Test mode: send AS the Administrator through their own Gmail when they have connected Google; otherwise fall through to the shared mailbox below.
+  if (!conf.live && conf.fromUser) {
+    try { if (await sendViaGmail(conf.fromUser, "Ayush Ruia - The Jain Group", { to, cc, subject, html, text, attachments: o.attachments })) return { live: false, via: "gmail:" + conf.fromUser }; }
+    catch (e) { console.error("gmail send failed, using the shared mailbox", e); }
+  }
   const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: CU, password: CP } } });
   try {
     // The mailbox that logs in to send is always customercare1@ (Gmail will not let it send "as" another account); in test mode the name shown and the reply-to are the Administrator's.
     await client.send({ from: `${conf.live ? "Pallabita Ghosh" : "Ayush Ruia"} - The Jain Group <${CU}>`, ...(conf.live ? {} : { replyTo: conf.testTo }), to, ...(cc.length ? { cc } : {}), subject,
       mimeContent: [b64Part("text/plain", text), b64Part("text/html", html)], ...(o.attachments && o.attachments.length ? { attachments: o.attachments } : {}) });
   } finally { try { await client.close(); } catch (_) { /* ignore */ } }
-  return { live: conf.live };
+  return { live: conf.live, via: "smtp" };
 }
 const logoUrl = (rel: string) => `${SITE}/${rel.split("/").filter(Boolean).join("/")}`;
 const shell = (inner: string, proj?: Proj) => {
