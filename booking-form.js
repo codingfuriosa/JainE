@@ -638,6 +638,62 @@ function showDone(ref){
     +'<p style="color:var(--slate)">Please keep this number. Our team will call you shortly to confirm your booking.</p></div></div>';
   window.scrollTo(0,0);
 }
+/* STAFF VIEW (13 Nov 2026): the same page the customer sees, for a JainE user who is signed in on this same site (their own session is read from the browser; the
+   server checks it again and only lets the Administrator and the Sales department through). Everything the customer gave, in full - PAN and Aadhaar unmasked, the
+   uploaded KYC photos and the signature - and the status / note staff used to keep in the old pop-up. Nothing in the answers can be changed. */
+function staffToken(){
+  try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i);
+    if(/^sb-.+-auth-token$/.test(k)){ const v=JSON.parse(localStorage.getItem(k)||'null'); const t=v&&(v.access_token||(v.currentSession&&v.currentSession.access_token)); if(typeof t==='string'&&t) return t; } } }catch(e){}
+  return null;
+}
+let STAFF=null;
+const ST_LABEL={new:'New',seen:'Seen',used:'Used',rejected:'Rejected'};
+function staffPanelBody(){
+  const f=STAFF.form;
+  return '<div class="chips" role="group">'+['new','seen','used','rejected'].map(function(k){ return '<button type="button" class="chip'+(f.status===k?' on':'')+'" data-st="'+k+'">'+ST_LABEL[k]+'</button>'; }).join('')+'</div>'
+    +'<div class="f full" style="margin-top:12px"><label for="stNote">Note (staff only)</label><textarea id="stNote" placeholder=" ">'+esc(f.note||'')+'</textarea></div>'
+    +'<div style="margin-top:10px"><button type="button" class="btn sec2" data-stnote="1">Save note</button>'
+    +(f.seen_by?'<span style="color:var(--slate);font-size:13px;margin-left:12px">First opened by '+esc(f.seen_by)+'</span>':'')+'</div>';
+}
+async function staffSet(p){
+  try{
+    const r=await fetch(FN,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(staffToken()||'')},body:JSON.stringify(Object.assign({action:'staff_set',token:TOKEN},p))});
+    const jj=await r.json().catch(function(){ return {}; });
+    if(!r.ok||!jj.ok) throw new Error(jj.error||('error '+r.status));
+    if(p.status) STAFF.form.status=p.status; if(typeof p.note==='string') STAFF.form.note=p.note;
+    toast('Saved'); const el=$('stPanel'); if(el) el.innerHTML=staffPanelBody();
+  }catch(e){ toast('Could not save: '+(e.message||'try again')); }
+}
+function staffDocs(){
+  const fl=STAFF.form.files||[];
+  const one=function(f){ const img=/\.(jpe?g|png|webp|gif|heic|heif)$/i.test(f.name||'')||f.kind==='signature';
+    if(!f.url) return '<span style="color:var(--slate)">'+esc(f.name||f.kind)+' (link not available)</span>';
+    return img?'<a href="'+esc(f.url)+'" target="_blank" rel="noopener" style="display:inline-block;margin:4px 10px 4px 0"><img src="'+esc(f.url)+'" alt="'+esc(f.name||f.kind)+'" style="max-height:150px;max-width:260px;border:1px solid #e3e5ea;border-radius:6px;display:block;background:#fff"><small style="color:var(--slate)">'+esc(f.kind==='signature'?'Signature':(f.kind==='pan'?'PAN card':'Aadhaar card'))+'</small></a>'
+      :'<a class="btn sec2" href="'+esc(f.url)+'" target="_blank" rel="noopener" style="margin:4px 10px 4px 0">'+esc(f.kind==='pan'?'PAN card':'Aadhaar card')+' (PDF)</a>'; };
+  return S.applicants.map(function(a,i){ const mine=fl.filter(function(f){ return f.applicant===i&&f.kind!=='signature'; });
+    return '<div style="margin-bottom:10px"><b>'+esc((i?'Joint applicant '+(i+1):'First applicant')+' - '+(a.full_name||''))+'</b><div>'+(mine.length?mine.map(one).join(''):'<span style="color:var(--slate)">No documents attached</span>')+'</div></div>'; }).join('')
+    +'<div><b>Signature</b><div>'+(fl.filter(function(f){ return f.kind==='signature'; }).map(one).join('')||'<span style="color:var(--slate)">Not found</span>')+'</div></div>';
+}
+function showStaff(jj){
+  const f=jj.form, d=f.data;
+  RO=true; STAFF=jj;
+  S=Object.assign(fresh(),d); ['price','profession'].forEach(function(k){ S[k]=Object.assign(fresh()[k],d[k]||{}); });
+  if(!Array.isArray(S.applicants)||!S.applicants.length) S.applicants=[newApp()];
+  S.applicants=S.applicants.map(function(a){ return Object.assign(newApp(),a); });
+  if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
+  FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
+  (f.files||[]).forEach(function(x){ if(x.kind!=='signature'&&FILES[x.applicant]&&FILES[x.applicant][x.kind]) FILES[x.applicant][x.kind].push({saved:true,name:x.name}); });
+  SIG=(f.files||[]).some(function(x){ return x.kind==='signature'; })?'signed':null;
+  $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
+  $('app').innerHTML='<div class="sec"><div class="sb"><div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">'
+      +'<div><span style="font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--slate)">Staff view - everything the customer gave, in full</span>'
+      +'<div style="font-size:20px;font-weight:800;margin-top:2px">'+esc(jj.ref_no||'')+' <span style="font-size:13px;font-weight:600;color:var(--slate)">'+esc(ST_LABEL[f.status]||'')+'</span></div></div>'
+      +'<div style="color:var(--slate);font-size:13px;max-width:520px">Submitted '+esc(f.submitted_at?new Date(f.submitted_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'')+'. Only signed-in staff see this; the customer sees a masked copy. Nothing here can be changed.</div></div></div></div>'
+    +stepReview()
+    +card('','','KYC documents & signature','Click a photo to open it full size.','<div>'+staffDocs()+'</div>')
+    +card('','','Status & note','Staff only.','<div id="stPanel">'+staffPanelBody()+'</div>');
+  window.scrollTo(0,0);
+}
 function showSubmitted(jj){
   const sub=jj.submitted, d=sub&&sub.data;
   if(!d) return showDone(jj.ref_no||'');
@@ -667,7 +723,11 @@ async function bootLink(){
   catch(e){ return linkMessage('We could not reach our server. Please check your internet and open the link again.'); }
   if(!r.ok||jj.error) return linkMessage(jj.error||'This booking link is not valid. Please use the exact link our team sent you.');
   if(jj.status==='cancelled') return linkMessage('This booking link is no longer active. Please contact our team.');
-  if(jj.status==='completed') return showSubmitted(jj);
+  if(jj.status==='completed'){
+    const tk=staffToken();
+    if(tk){ try{ const r2=await fetch(FN,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tk},body:JSON.stringify({action:'staff_load',token:TOKEN})}); const j2=await r2.json().catch(function(){ return {}; }); if(r2.ok&&j2.ok&&j2.form) return showStaff(j2); }catch(e){} }
+    return showSubmitted(jj);
+  }
   const pf=jj.prefill||{values:{},locked:[]}, d=jj.draft&&typeof jj.draft==='object'?jj.draft:{};
   (pf.locked||[]).forEach(function(p){ LOCK.add(p); });
   S=Object.assign(fresh(),d); ['price','profession'].forEach(function(k){ S[k]=Object.assign(fresh()[k],d[k]||{}); });
@@ -720,6 +780,8 @@ document.addEventListener('click',function(e){
   const li=e.target.closest&&e.target.closest('[data-jump]');
   if(li){ const f=$(li.getAttribute('data-jump')); if(f){ f.scrollIntoView({behavior:'smooth',block:'center'}); const i=f.querySelector('input,textarea,button'); if(i) setTimeout(function(){ i.focus({preventScroll:true}); },400); } return; }
   const b=e.target.closest&&e.target.closest('button'); if(!b) return;
+  if(b.dataset.st){ staffSet({status:b.dataset.st}); return; }
+  if(b.dataset.stnote){ staffSet({note:($('stNote')||{}).value||''}); return; }
   if(b.dataset.pick){ openSheet(b.dataset.pick,b.dataset.kind); return; }
   if(b.dataset.chip){ set(b.dataset.chip,b.dataset.v); if(ERR[b.dataset.chip]){ delete ERR[b.dataset.chip]; MISSING=MISSING.filter(function(m){ return m[0]!==b.dataset.chip; }); } render(); return; }
   if(b.dataset.acpick){ const p=b.dataset.acpick.split('|'), box=$('ac-'+p[0]), x=box&&box._items&&box._items[+p[1]]; if(!x) return;

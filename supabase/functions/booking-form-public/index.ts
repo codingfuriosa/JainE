@@ -123,6 +123,27 @@ async function submittedView(link: any) {
            docs: files.filter((f) => f.kind !== "signature").map((f) => ({ applicant: Number(f.applicant) - 1, kind: f.kind })) };
 }
 
+// STAFF VIEW of a submitted form (the same page the customer gets, with everything they gave): only for a signed-in JainE user who may generate
+// forms (the Administrator and the Sales department). The page sends the user's own session token; it is checked here with Supabase Auth.
+async function staffUser(req: Request): Promise<string | null> {
+  const m = /^Bearer\s+(.+)$/i.exec(req.headers.get("authorization") || "");
+  if (!m) return null;
+  const r = await fetch(SB + "/auth/v1/user", { headers: { apikey: SRV, Authorization: "Bearer " + m[1] } });
+  if (!r.ok) return null;
+  const u: any = await r.json().catch(() => null);
+  const email = String(u?.email || "").toLowerCase();
+  if (!u?.id || !email) return null;
+  if (email === "ayushruia1@gmail.com") return email;
+  const rows = await db("user_profile?select=department&email=eq." + encodeURIComponent(email) + "&limit=1");
+  const dep = rows && rows[0] && rows[0].department;
+  return Array.isArray(dep) && dep.includes("Sales") ? email : null;
+}
+async function signedGet(c: { bucket: string; region: string; aws: any }, key: string) {
+  const u = new URL(s3url(c, key)); u.searchParams.set("X-Amz-Expires", "600");
+  const signed = await c.aws.sign(u.toString(), { method: "GET", aws: { signQuery: true } });
+  return signed.url as string;
+}
+
 async function handleJson(req: Request) {
   let b: any;
   try { b = await req.json(); } catch (_) { return j({ error: "The request did not arrive complete." }, 400); }
@@ -130,6 +151,35 @@ async function handleJson(req: Request) {
   if (!link) return j({ error: NOT_VALID }, 404);
   const proj = PROJECTS[link.project];
   if (!proj) return j({ error: NOT_VALID }, 404);
+
+  if (b.action === "staff_load" || b.action === "staff_set") {
+    const who = await staffUser(req);
+    if (!who) return j({ error: "Not allowed." }, 403);
+    if (link.status !== "completed" || !link.form_id) return j({ error: "This form has not been submitted yet." }, 409);
+    const rows = await db("digital_booking_forms?select=id,data,files,submitted_at,status,note,seen_by,seen_at&id=eq." + link.form_id + "&limit=1");
+    const f = rows && rows[0]; if (!f) return j({ error: "Form not found." }, 404);
+    if (b.action === "staff_set") {
+      const patch: any = {};
+      if (typeof b.status === "string" && ["new", "seen", "used", "rejected"].includes(b.status)) patch.status = b.status;
+      if (typeof b.note === "string") patch.note = b.note.slice(0, 2000);
+      if (Object.keys(patch).length) await db("digital_booking_forms?id=eq." + f.id, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch) });
+      return j({ ok: true });
+    }
+    if (f.status === "new") {
+      const at = new Date().toISOString();
+      await db("digital_booking_forms?id=eq." + f.id + "&status=eq.new", { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "seen", seen_by: who, seen_at: at }) });
+      f.status = "seen"; f.seen_by = who; f.seen_at = at;
+    }
+    const c = awsClient();
+    const files: any[] = [];
+    for (const x of (Array.isArray(f.files) ? f.files : [])) {
+      let url = "";
+      try { if (c && typeof x.path === "string") url = await signedGet(c, x.path.replace(/^s3:/, "")); } catch (_) { /* leave empty */ }
+      files.push({ applicant: Number(x.applicant) - 1, kind: x.kind, name: x.name, url });
+    }
+    const data = JSON.parse(JSON.stringify(f.data || {})); delete data.website;
+    return j({ ok: true, staff: true, status: "completed", ref_no: link.ref_no || "", form: { data, files, submitted_at: f.submitted_at, status: f.status, note: f.note || "", seen_by: f.seen_by || "", seen_at: f.seen_at || null } });
+  }
 
   if (b.action === "load") {
     if (link.status === "cancelled") return j({ ok: true, status: "cancelled" });
