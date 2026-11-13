@@ -178,37 +178,36 @@ window.pdfCopyLink=async function(token,btn){
    the next time the form loads, what they already typed stays). On a phone the list sits under the form. Four short cards, tap buttons for choices,
    a price with commas and words, every mistake under its own box, and a link-ready screen with Copy / Open as the customer / Generate another. */
 const PG_CSS='<style>'
-  +'#pgPage{--pg-h:clamp(34px,5.2vh,54px);--pg-gap:clamp(8px,1.9vh,26px);position:fixed;inset:0;z-index:2000;background:#f4f5f7;display:flex;flex-direction:column;font-family:inherit}'
+  +'#pgPage{position:fixed;inset:0;z-index:2000;background:#f4f5f7;display:flex;flex-direction:column;font-family:inherit}'
   +'#pgPage .pg-top{display:flex;align-items:center;gap:14px;padding:10px 22px;background:#fff}'
   +'#pgPage .pg-top h2{margin:0;font-size:18px}#pgPage .pg-top h2 span{font-weight:400;color:var(--slate)}'
   +'#pgPage .pg-tabs{display:flex;gap:4px;padding:0 22px;background:#fff;border-bottom:1px solid var(--line)}'
   +'#pgPage .pg-tabs button{background:none;border:0;border-bottom:3px solid transparent;padding:10px 16px;font:inherit;font-size:14px;font-weight:700;letter-spacing:.03em;color:var(--slate);cursor:pointer;margin-bottom:-1px}'
   +'#pgPage .pg-tabs button.on{color:#1d4ed8;border-bottom-color:#1d4ed8}'
   +'#pgPage .pg-tabs .pg-n{display:inline-block;min-width:20px;padding:0 6px;margin-left:6px;border-radius:999px;background:#eef0f4;color:var(--slate);font-size:12px;font-weight:600;text-align:center}'
-  +'#pgPage .pg-main{flex:1;overflow:auto;padding:14px 22px 16px}'
-  +'#pgNew{display:flex;flex-direction:column}#pgBody{flex:1;display:flex;flex-direction:column;min-height:0}'
+  +'#pgPage .pg-main{flex:1;overflow:auto;padding:14px 22px 18px}'
   +'.pg-edit{margin:0 0 10px;padding:8px 12px;border-radius:8px;background:#fff7e6;border:1px solid #f0d9a8;color:#92400e;font-size:13px}'
-  +'.pg-cards{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.4fr);gap:12px;align-items:stretch;flex:1;min-height:0}'
-  +'.pg-stack{display:flex;flex-direction:column;gap:12px;min-height:0}.pg-stack .pg-card:last-child{flex:1}'
-  +'@media(max-width:1100px){.pg-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:700px){.pg-cards{grid-template-columns:1fr}}'
-  +'.pg-card{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;padding:clamp(10px,1.7vh,20px) 16px clamp(12px,2vh,22px);background:#fff}'
-  +'.pg-card>h4{margin:0 0 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);font-weight:700}'
-  +'.pg-g{display:grid;gap:var(--pg-gap) 10px;align-content:start}.pg-g.c2{grid-template-columns:repeat(2,minmax(0,1fr))}'
-  +'.pg-f label{display:block;font-size:clamp(12.5px,1.9vh,14.5px);font-weight:600;color:var(--ink,#111827);margin-bottom:4px}'
+  +'.pg-wrap{max-width:1500px}'
+  +'.pg-band{display:grid;grid-template-columns:104px minmax(0,1fr);gap:0 16px;align-items:start;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 16px 14px;margin-bottom:10px}'
+  +'.pg-band>h4{margin:24px 0 0;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);font-weight:700}'
+  +'.pg-bf{display:grid;gap:10px 14px;grid-template-columns:var(--c)}'
+  +'@media(max-width:1000px){.pg-bf{grid-template-columns:repeat(2,minmax(0,1fr))}.pg-bf>.w2{grid-column:1/-1}}'
+  +'@media(max-width:640px){.pg-band{grid-template-columns:1fr}.pg-band>h4{margin:0 0 8px}.pg-bf{grid-template-columns:1fr}}'
+  +'.pg-f label{display:block;font-size:12.5px;font-weight:600;color:var(--ink,#111827);margin-bottom:4px}'
   +'.pg-f label .o{font-weight:400;color:var(--slate)}.pg-f label .r{color:#b3171d}'
-  +'.pg-in{width:100%;box-sizing:border-box;height:var(--pg-h);padding:0 11px;border:1px solid #cfd4dc;border-radius:8px;background:#fff;font:inherit;font-size:clamp(14px,2.1vh,16px);color:var(--ink,#111827)}'
+  +'.pg-in{width:100%;box-sizing:border-box;height:38px;padding:0 10px;border:1px solid #cfd4dc;border-radius:8px;background:#fff;font:inherit;font-size:14px;color:var(--ink,#111827)}'
   +'select.pg-in{padding-right:4px}.pg-in:focus{outline:none;border-color:#1d4ed8;box-shadow:0 0 0 3px rgba(29,78,216,.15)}'
   +'.pg-f.bad .pg-in,.pg-f.bad .pg-seg button{border-color:#b3171d}'
   +'.pg-help{margin-top:3px;font-size:12px;color:var(--slate)}.pg-e{margin-top:3px;font-size:12px;color:#b3171d;font-weight:600}.pg-e:empty{display:none}'
   +'.pg-row{display:flex;gap:6px}.pg-row .cc{width:92px;flex:none}'
   +'.pg-pre{display:flex}.pg-pre>span{display:flex;align-items:center;padding:0 10px;border:1px solid #cfd4dc;border-right:0;border-radius:8px 0 0 8px;background:#f3f4f6;color:var(--slate)}.pg-pre>.pg-in{border-radius:0 8px 8px 0}'
   +'.pg-suf{display:flex}.pg-suf>.pg-in{border-radius:8px 0 0 8px}.pg-suf>span{display:flex;align-items:center;padding:0 10px;border:1px solid #cfd4dc;border-left:0;border-radius:0 8px 8px 0;background:#f3f4f6;color:var(--slate);font-size:12.5px}'
-  +'.pg-seg{display:flex;flex-wrap:wrap;gap:6px}'
-  +'.pg-seg button{min-width:var(--pg-h);height:var(--pg-h);padding:0 12px;border:1px solid #cfd4dc;border-radius:8px;background:#fff;font:inherit;font-size:13.5px;color:var(--ink,#111827);cursor:pointer}'
+  +'.pg-seg{display:flex;flex-wrap:wrap;gap:5px}'
+  +'.pg-seg button{min-width:36px;height:38px;padding:0 11px;border:1px solid #cfd4dc;border-radius:8px;background:#fff;font:inherit;font-size:13.5px;color:var(--ink,#111827);cursor:pointer}'
   +'.pg-seg button:hover{border-color:#9aa1ab}.pg-seg button.on{background:#e8efff;border-color:#1d4ed8;color:#1d4ed8;font-weight:700}'
   +'.pg-bar{display:flex;gap:10px;justify-content:flex-end;align-items:center;margin-top:12px;padding:10px 14px;background:#fff;border:1px solid var(--line);border-radius:10px}'
   +'.pg-bar .msg{margin-right:auto;color:#b3171d;font-size:13.5px;font-weight:600}'
-  +'.pg-done{margin:auto;background:#fff;border:1px solid var(--line);border-radius:10px;text-align:center;padding:22px 18px;max-width:760px;margin:0 auto}.pg-done .ok{width:50px;height:50px;border-radius:50%;background:#e7f6ec;color:#15803d;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:22px}'
+  +'.pg-done{margin:auto;background:#fff;border:1px solid var(--line);border-radius:10px;text-align:center;padding:22px 18px;max-width:760px}.pg-done .ok{width:50px;height:50px;border-radius:50%;background:#e7f6ec;color:#15803d;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:22px}'
   +'.pg-done h3{margin:0 0 4px;font-size:18px}.pg-done p{margin:0 0 12px;color:var(--slate);font-size:13.5px}.pg-link{max-width:680px;margin:0 auto 12px}'
   +'.pg-acts{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}'
   +'.pg-t{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:14px}'
@@ -216,8 +215,7 @@ const PG_CSS='<style>'
   +'.pg-t td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}.pg-t tr:last-child td{border-bottom:0}.pg-t tbody tr:hover{background:#fafbfc}'
   +'.pg-t td.a{text-align:right;white-space:nowrap}.pg-t td.a .btn{padding:4px 10px;margin-left:6px}.pg-t .sub{color:var(--slate);font-size:12.5px}'
   +'.pg-empty{padding:34px 16px;text-align:center;color:var(--slate);background:#fff;border:1px solid var(--line);border-radius:10px}'
-  +'.pg-l{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px}.pg-l b{font-size:14.5px}.pg-l .m{color:var(--slate);font-size:12.5px;margin:3px 0 6px}'
-  +'.pg-l .a{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.pg-l .a .btn{padding:4px 10px}'
+  +'@media(min-height:900px){.pg-in,.pg-seg button{height:44px}.pg-in{font-size:15px}.pg-band{padding:18px 22px 20px;margin-bottom:14px}.pg-band>h4{margin-top:30px}.pg-f label{font-size:13.5px;margin-bottom:6px}.pg-bf{gap:14px 18px}.pg-bar{margin-top:16px;padding:14px 18px}}'
   +'</style>';
 function pdfWords(n){
   n=Math.floor(Number(n)); if(!n||n<0) return '';
@@ -251,33 +249,31 @@ window.pdfGenOpen=function(editRow){
     +'<div class="pg-top"><button class="btn" onclick="pgClose()"><i class="fa-solid fa-arrow-left"></i> Back</button><h2><i class="fa-solid fa-link"></i> Generate Form <span>&middot; Dream Ananta</span></h2></div>'
     +'<div class="pg-tabs"><button class="on" id="pgT_new" onclick="pgTab(\'new\')">NEW</button><button id="pgT_drafts" onclick="pgTab(\'drafts\')">DRAFTS <span class="pg-n" id="pgDCount">…</span></button><button id="pgT_list" onclick="pgTab(\'list\')">Generated forms <span class="pg-n" id="pgCount">…</span></button></div>'
     +'<div class="pg-main" id="pgNew"><div id="pgBody"><div id="pgEditNote"></div>'
-    +'<div class="pg-cards">'
-      +'<div class="pg-stack">'
-      +'<div class="pg-card"><h4>Customer</h4><div class="pg-g c2">'
-        +f('pgTitle','Title',sel('pgTitle',['Mr.','Ms.','Mrs.','Mast.','M/s.'],'Mr.'))
-        +f('pgNat','Nationality',sel('pgNat',PDF_COUNTRIES.map(c=>c[0]),'India').replace('<select ','<select onchange="pgNatSync()" '))
-        +'<div style="grid-column:1/-1">'+f('pgName','Customer name','<input class="pg-in" id="pgName" style="text-transform:uppercase" autocomplete="off" placeholder="As on the PAN card" oninput="pgNameSync()">',{req:1})+'</div>'
-        +'<div style="grid-column:1/-1">'+f('pgDob','Date of birth','<input class="pg-in" type="date" id="pgDob">',{req:1})+'</div>'
-      +'</div></div>'
-      +'<div class="pg-card"><h4>Area &amp; price</h4><div class="pg-g">'
-        +f('pgSba','Super built-up area','<div class="pg-suf"><input class="pg-in" id="pgSba" inputmode="decimal" autocomplete="off" placeholder="1325"><span>sq.ft.</span></div>',{req:1})
-        +f('pgTotal','Total sale price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
-      +'</div></div>'      +'</div>'
-      +'<div class="pg-card"><h4>Contact</h4><div class="pg-g">'
-        +f('pgMobile','Mobile number','<div class="pg-row">'+sel('pgCc',codes,'+91','cc')+'<input class="pg-in" id="pgMobile" inputmode="tel" autocomplete="off" placeholder="98300 12345"></div>',{req:1})
-        +f('pgEmail','Email','<input class="pg-in" type="email" id="pgEmail" autocomplete="off" placeholder="name@example.com">',{req:1})
-        +f('pgContact','Contact person','<input class="pg-in" id="pgContact" style="text-transform:uppercase" autocomplete="off" placeholder="Same as the customer name" oninput="this.dataset.touched=1">',{opt:1})
-      +'</div></div>'
-      +'<div class="pg-card"><h4>Unit</h4><div class="pg-g c2">'
-        +f('pgBlock','Block',seg('pgBlock',['Block D','Block E'],'Block D'))
-        +f('pgPark','Car park',seg('pgPark',['Covered','Open'],'Covered'))
-        +'<div style="grid-column:1/-1">'+f('pgFloor','Floor',seg('pgFloor',floors,'1'))+'</div>'
-        +f('pgBhk','Bedrooms',seg('pgBhk',['2 BHK','3 BHK','4 BHK'],'3 BHK'))
-        +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{opt:1})
-      +'</div></div>'
-
+    +'<div class="pg-wrap">'
+    +'<div class="pg-band"><h4>Customer</h4><div class="pg-bf" style="--c:.7fr 1.2fr 2.2fr 1.2fr">'
+      +f('pgTitle','Title',sel('pgTitle',['Mr.','Ms.','Mrs.','Mast.','M/s.'],'Mr.'))
+      +f('pgNat','Nationality',sel('pgNat',PDF_COUNTRIES.map(c=>c[0]),'India').replace('<select ','<select onchange="pgNatSync()" '))
+      +'<div class="w2">'+f('pgName','Customer name','<input class="pg-in" id="pgName" style="text-transform:uppercase" autocomplete="off" placeholder="As on the PAN card" oninput="pgNameSync()">',{req:1})+'</div>'
+      +f('pgDob','Date of birth','<input class="pg-in" type="date" id="pgDob">',{req:1})
+    +'</div></div>'
+    +'<div class="pg-band"><h4>Contact</h4><div class="pg-bf" style="--c:1.2fr 1.5fr 1.2fr">'
+      +f('pgMobile','Mobile number','<div class="pg-row">'+sel('pgCc',codes,'+91','cc')+'<input class="pg-in" id="pgMobile" inputmode="tel" autocomplete="off" placeholder="98300 12345"></div>',{req:1})
+      +f('pgEmail','Email','<input class="pg-in" type="email" id="pgEmail" autocomplete="off" placeholder="name@example.com">',{req:1})
+      +f('pgContact','Contact person','<input class="pg-in" id="pgContact" style="text-transform:uppercase" autocomplete="off" placeholder="Same as the customer name" oninput="this.dataset.touched=1">',{opt:1})
+    +'</div></div>'
+    +'<div class="pg-band"><h4>Unit</h4><div class="pg-bf" style="--c:auto auto auto auto minmax(110px,1fr)">'
+      +f('pgBlock','Block',seg('pgBlock',['Block D','Block E'],'Block D'))
+      +f('pgFloor','Floor',seg('pgFloor',floors,'1'))
+      +f('pgBhk','Bedrooms',seg('pgBhk',['2 BHK','3 BHK','4 BHK'],'3 BHK'))
+      +f('pgPark','Car park',seg('pgPark',['Covered','Open'],'Covered'))
+      +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{opt:1})
+    +'</div></div>'
+    +'<div class="pg-band"><h4>Area &amp; price</h4><div class="pg-bf" style="--c:1fr 1.4fr 1fr">'
+      +f('pgSba','Super built-up area','<div class="pg-suf"><input class="pg-in" id="pgSba" inputmode="decimal" autocomplete="off" placeholder="1325"><span>sq.ft.</span></div>',{req:1})
+      +f('pgTotal','Total sale price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
+    +'</div></div>'
     +'</div>'
-    +'<div class="pg-bar"><span class="msg" id="pgErr" style="color:var(--slate);font-weight:400">What you fill in is shown to the customer but locked. They fill in the rest (PAN, Aadhaar, address, payment).</span><button class="btn" onclick="pgClose()">Cancel</button><button class="btn" id="pgDraftBtn" onclick="pgSaveDraft()"><i class="fa-regular fa-floppy-disk"></i> Save draft</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div>'
+    +'<div class="pg-wrap"><div class="pg-bar"><span class="msg" id="pgErr" style="color:var(--slate);font-weight:400">What you fill in is shown to the customer but locked. They fill in the rest (PAN, Aadhaar, address, payment).</span><button class="btn" onclick="pgClose()">Cancel</button><button class="btn" id="pgDraftBtn" onclick="pgSaveDraft()"><i class="fa-regular fa-floppy-disk"></i> Save draft</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div></div>'
     +'</div></div>'
     +'<div class="pg-main" id="pgDraftsWrap" style="display:none"><div id="pgDrafts"></div></div>'
     +'<div class="pg-main" id="pgListWrap" style="display:none"><div id="pgList"></div></div>';
