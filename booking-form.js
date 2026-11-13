@@ -30,6 +30,7 @@ const CONF={ananta:{name:'Dream Ananta',company:'Dream Gateway Hotels Ltd.',bloc
    LINK is set once the server has opened it. The open link (?p=ananta) works as before, with answers kept on the phone. */
 const TOKEN=(new URLSearchParams(location.search).get('t')||'').trim().toLowerCase();
 let LINK=null;
+let RO=false;   // a submitted form opened again through its link: shown as it was saved, nothing can be changed
 const LOCK=new Set();
 const DRAFT_KEY='jg-booking-form-'+PROJECT+'-v2';
 const MAX_APPS=6, MAX_REASONS=5;
@@ -366,8 +367,8 @@ function rows(pairs){ return '<table class="rv">'+pairs.filter(function(p){ retu
 function fmtD(d){ return d?new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):''; }
 function addr(x){ return [x.line,x.city,x.pin].filter(Boolean).join(', '); }
 function stepReview(){
-  const h=function(t,step){ return '<div class="rvh"><h3>'+t+'</h3><button type="button" data-go="'+step+'">Edit</button></div>'; };
-  return card('','','Review your application','Please check every detail. Use Edit to make a change, then submit.',
+  const h=function(t,step){ return '<div class="rvh"><h3>'+t+'</h3>'+(RO?'':'<button type="button" data-go="'+step+'">Edit</button>')+'</div>'; };
+  return card('','',RO?'Your submitted application':'Review your application',RO?'Saved exactly as you submitted it. It cannot be changed here - please contact our team if something needs correcting.':'Please check every detail. Use Edit to make a change, then submit.',
     S.applicants.map(function(a,i){ return h((i?'Joint applicant '+(i+1):'First applicant'),0)+rows([
       ['Name',a.title+' '+a.full_name],[a.relation,a.relation_name],['Date of birth',i?'':fmtD(a.dob)],['Occupation',a.occupation],['Nationality',a.nationality],
       ['PAN',a.pan.toUpperCase()],['Aadhaar',a.aadhaar],['Passport',a.passport],['Bank details',a.bank_details],
@@ -637,6 +638,24 @@ function showDone(ref){
     +'<p style="color:var(--slate)">Please keep this number. Our team will call you shortly to confirm your booking.</p></div></div>';
   window.scrollTo(0,0);
 }
+function showSubmitted(jj){
+  const sub=jj.submitted, d=sub&&sub.data;
+  if(!d) return showDone(jj.ref_no||'');
+  RO=true;
+  S=Object.assign(fresh(),d); ['price','profession'].forEach(function(k){ S[k]=Object.assign(fresh()[k],d[k]||{}); });
+  if(!Array.isArray(S.applicants)||!S.applicants.length) S.applicants=[newApp()];
+  S.applicants=S.applicants.map(function(a){ return Object.assign(newApp(),a); });
+  if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
+  FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
+  (sub.docs||[]).forEach(function(x){ if(FILES[x.applicant]&&FILES[x.applicant][x.kind]) FILES[x.applicant][x.kind].push({saved:true,name:x.kind}); });
+  SIG=sub.signed?'signed':null;
+  $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
+  $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Your booking form has been received.</h2>'
+    +'<p style="color:var(--slate);margin-top:8px">Your reference number</p><div class="ref">'+esc(jj.ref_no||'')+'</div>'
+    +'<p style="color:var(--slate)">'+(sub.submitted_at?'Submitted on '+esc(new Date(sub.submitted_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}))+'. ':'')+'Our team will call you shortly to confirm your booking.</p></div></div>'
+    +stepReview();
+  window.scrollTo(0,0);
+}
 function linkMessage(msg){
   $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
   $('app').innerHTML='<div class="sec"><div class="sb"><h2>'+esc(msg)+'</h2></div></div>';
@@ -648,7 +667,7 @@ async function bootLink(){
   catch(e){ return linkMessage('We could not reach our server. Please check your internet and open the link again.'); }
   if(!r.ok||jj.error) return linkMessage(jj.error||'This booking link is not valid. Please use the exact link our team sent you.');
   if(jj.status==='cancelled') return linkMessage('This booking link is no longer active. Please contact our team.');
-  if(jj.status==='completed') return showDone(jj.ref_no||'');
+  if(jj.status==='completed') return showSubmitted(jj);
   const pf=jj.prefill||{values:{},locked:[]}, d=jj.draft&&typeof jj.draft==='object'?jj.draft:{};
   (pf.locked||[]).forEach(function(p){ LOCK.add(p); });
   S=Object.assign(fresh(),d); ['price','profession'].forEach(function(k){ S[k]=Object.assign(fresh()[k],d[k]||{}); });

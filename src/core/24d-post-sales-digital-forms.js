@@ -197,7 +197,11 @@ const PG_CSS='<style>'
   +'.pg-done{margin:auto;background:#fff;border:1px solid var(--line);border-radius:10px;text-align:center;padding:22px 18px;max-width:760px;margin:0 auto}.pg-done .ok{width:50px;height:50px;border-radius:50%;background:#e7f6ec;color:#15803d;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:22px}'
   +'.pg-done h3{margin:0 0 4px;font-size:18px}.pg-done p{margin:0 0 12px;color:var(--slate);font-size:13.5px}.pg-link{max-width:680px;margin:0 auto 12px}'
   +'.pg-acts{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}'
-  +'.pg-lgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}'
+  +'.pg-t{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:14px}'
+  +'.pg-t th{text-align:left;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--slate);font-weight:700;padding:10px 14px;background:#f7f8fa;border-bottom:1px solid var(--line)}'
+  +'.pg-t td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}.pg-t tr:last-child td{border-bottom:0}.pg-t tbody tr:hover{background:#fafbfc}'
+  +'.pg-t td.a{text-align:right;white-space:nowrap}.pg-t td.a .btn{padding:4px 10px;margin-left:6px}.pg-t .sub{color:var(--slate);font-size:12.5px}'
+  +'.pg-empty{padding:34px 16px;text-align:center;color:var(--slate);background:#fff;border:1px solid var(--line);border-radius:10px}'
   +'.pg-l{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px}.pg-l b{font-size:14.5px}.pg-l .m{color:var(--slate);font-size:12.5px;margin:3px 0 6px}'
   +'.pg-l .a{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.pg-l .a .btn{padding:4px 10px}'
   +'</style>';
@@ -211,10 +215,11 @@ function pdfWords(n){
   if(cr) out.push(three(cr)+' Crore'); if(lk) out.push(two(lk)+' Lakh'); if(th) out.push(two(th)+' Thousand'); if(n) out.push(three(n));
   return 'Rupees '+out.join(' ')+' only';
 }
-const PG={editId:null,editToken:null};
+const PG={editId:null,editToken:null,draftId:null};
+const PG_DRAFTS={rows:[],ok:false};
 window.pdfGenOpen=function(editRow){
   if(!pdfCanGenerate()) return;
-  PG.editId=editRow&&editRow.id||null; PG.editToken=editRow&&editRow.token||null;
+  PG.editId=editRow&&editRow.id||null; PG.editToken=editRow&&editRow.token||null; PG.draftId=null;
   const old=document.getElementById('pgPage'); if(old) old.remove();
   const f=(id,label,ctl,o)=>{ o=o||{}; return '<div class="pg-f" id="pgF_'+id+'"><label for="'+id+'">'+label+(o.req?' <span class="r">*</span>':'')+(o.opt?' <span class="o">(optional)</span>':'')+'</label>'+ctl
     +(o.help?'<div class="pg-help" id="pgH_'+id+'">'+o.help+'</div>':'')+'<div class="pg-e" id="pgE_'+id+'"></div></div>'; };
@@ -224,7 +229,7 @@ window.pdfGenOpen=function(editRow){
   const page=document.createElement('div'); page.id='pgPage';
   page.innerHTML=PG_CSS
     +'<div class="pg-top"><button class="btn" onclick="pgClose()"><i class="fa-solid fa-arrow-left"></i> Back</button><h2><i class="fa-solid fa-link"></i> Generate Form <span>&middot; Dream Ananta</span></h2></div>'
-    +'<div class="pg-tabs"><button class="on" id="pgT_new" onclick="pgTab(\'new\')">NEW</button><button id="pgT_list" onclick="pgTab(\'list\')">Generated forms <span class="pg-n" id="pgCount">…</span></button></div>'
+    +'<div class="pg-tabs"><button class="on" id="pgT_new" onclick="pgTab(\'new\')">NEW</button><button id="pgT_drafts" onclick="pgTab(\'drafts\')">DRAFTS <span class="pg-n" id="pgDCount">…</span></button><button id="pgT_list" onclick="pgTab(\'list\')">Generated forms <span class="pg-n" id="pgCount">…</span></button></div>'
     +'<div class="pg-main" id="pgNew"><div id="pgBody"><div id="pgEditNote"></div>'
     +'<div class="pg-cards">'
       +'<div class="pg-card"><h4>Customer</h4><div class="pg-g c2">'
@@ -250,30 +255,41 @@ window.pdfGenOpen=function(editRow){
         +f('pgTotal','Total sale price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
       +'</div></div>'
     +'</div>'
-    +'<div class="pg-bar"><span class="msg" id="pgErr" style="color:var(--slate);font-weight:400">What you fill in is shown to the customer but locked. They fill in the rest (PAN, Aadhaar, address, payment).</span><button class="btn" onclick="pgClose()">Cancel</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div>'
+    +'<div class="pg-bar"><span class="msg" id="pgErr" style="color:var(--slate);font-weight:400">What you fill in is shown to the customer but locked. They fill in the rest (PAN, Aadhaar, address, payment).</span><button class="btn" onclick="pgClose()">Cancel</button><button class="btn" id="pgDraftBtn" onclick="pgSaveDraft()"><i class="fa-regular fa-floppy-disk"></i> Save draft</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div>'
     +'</div></div>'
+    +'<div class="pg-main" id="pgDraftsWrap" style="display:none"><div id="pgDrafts"></div></div>'
     +'<div class="pg-main" id="pgListWrap" style="display:none"><div id="pgList"></div></div>';
   document.body.appendChild(page); document.body.style.overflow='hidden';
   if(editRow) pgFill(editRow);
   pdfGenList();
 };
-window.pgTab=function(t){ const n=t==='new'; $('pgNew').style.display=n?'':'none'; $('pgListWrap').style.display=n?'none':''; $('pgT_new').className=n?'on':''; $('pgT_list').className=n?'':'on'; };
+window.pgTab=function(t){ [['new','pgNew','pgT_new'],['drafts','pgDraftsWrap','pgT_drafts'],['list','pgListWrap','pgT_list']].forEach(function(x){ const on=x[0]===t; $(x[1]).style.display=on?'':'none'; $(x[2]).className=on?'on':''; }); };
 window.pgClose=function(){ const p=document.getElementById('pgPage'); if(p) p.remove(); document.body.style.overflow=''; };
 window.pgSeg=function(btn,id){ btn.parentNode.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); }); btn.classList.add('on'); $(id).value=btn.textContent.trim(); };
 window.pgNameSync=function(){ const c=$('pgContact'); if(c&&!c.dataset.touched) c.value=($('pgName').value||''); };
 window.pgNatSync=function(){ const n=PDF_COUNTRIES.filter(c=>c[0]===$('pgNat').value)[0]; if(n&&$('pgCc')) $('pgCc').value=n[1]; };
 window.pgMoney=function(inp){ const d=inp.value.replace(/[^\d]/g,''); inp.value=d?Number(d).toLocaleString('en-IN'):''; const h=$('pgH_pgTotal'); if(h) h.textContent=pdfWords(d); };
 // Editing a link: its details go back into the boxes.
+// The boxes as they are now (a draft keeps them exactly like this, even half empty).
+function pgRaw(){ const g=id=>($(id)||{}).value||''; const c=$('pgContact');
+  return {title:g('pgTitle'),nat:g('pgNat'),name:g('pgName'),dob:g('pgDob'),cc:g('pgCc'),mobile:g('pgMobile'),email:g('pgEmail'),contact:g('pgContact'),contactTouched:!!(c&&c.dataset&&c.dataset.touched),
+    block:g('pgBlock'),floor:g('pgFloor'),bhk:g('pgBhk'),park:g('pgPark'),flat:g('pgFlat'),sba:g('pgSba'),total:g('pgTotal')}; }
+function pgFillRaw(r){
+  const set=(id,val)=>{ const e=$(id); if(e&&val!=null) e.value=val; };
+  const seg=(id,val)=>{ const e=$(id); if(!e||val==null||val==='') return; e.value=val; e.parentNode.querySelectorAll('.pg-seg button').forEach(function(b){ b.classList.toggle('on',b.textContent.trim()===String(val)); }); };
+  set('pgTitle',r.title); set('pgNat',r.nat); set('pgName',r.name); set('pgDob',r.dob); set('pgCc',r.cc); set('pgMobile',r.mobile); set('pgEmail',r.email); set('pgContact',r.contact);
+  if(r.contactTouched&&$('pgContact')) $('pgContact').dataset.touched=1;
+  seg('pgBlock',r.block); seg('pgFloor',r.floor); seg('pgBhk',r.bhk); seg('pgPark',r.park); set('pgFlat',r.flat); set('pgSba',r.sba); set('pgTotal',r.total);
+  const h=$('pgH_pgTotal'); if(h) h.textContent=pdfWords(String(r.total||'').replace(/[^\d]/g,''));
+}
+// Editing a link: its details go back into the boxes.
 function pgFill(row){
   const v=(row.prefill&&row.prefill.values)||{}, a=(v.applicants&&v.applicants[0])||{}, c=v.contact||{}, fl=v.flat||{}, pr=v.price||{};
-  const set=(id,val)=>{ const e=$(id); if(e&&val!=null) e.value=val; };
-  const seg=(id,val)=>{ const e=$(id); if(!e||val==null) return; e.value=val; e.parentNode.querySelectorAll('.pg-seg button').forEach(function(b){ b.classList.toggle('on',b.textContent.trim()===String(val)); }); };
-  set('pgTitle',a.title); set('pgNat',a.nationality); set('pgName',a.full_name); set('pgDob',a.dob); set('pgCc',c.cc); set('pgMobile',c.mobile); set('pgEmail',c.email);
-  set('pgContact',c.contact_person); if(c.contact_person&&c.contact_person!==a.full_name&&$('pgContact')) $('pgContact').dataset.touched=1;
-  seg('pgBlock',fl.block); seg('pgFloor',fl.floor); seg('pgBhk',fl.bhk); seg('pgPark',fl.parking); set('pgFlat',fl.flat_no);
-  set('pgSba',pr.sba); if(pr.total){ set('pgTotal',Number(pr.total).toLocaleString('en-IN')); const h=$('pgH_pgTotal'); if(h) h.textContent=pdfWords(pr.total); }
+  pgFillRaw({title:a.title,nat:a.nationality,name:a.full_name,dob:a.dob,cc:c.cc,mobile:c.mobile,email:c.email,contact:c.contact_person,contactTouched:!!(c.contact_person&&c.contact_person!==a.full_name),
+    block:fl.block,floor:fl.floor,bhk:fl.bhk,park:fl.parking,flat:fl.flat_no,sba:pr.sba,total:pr.total?Number(pr.total).toLocaleString('en-IN'):''});
   const n=$('pgEditNote'); if(n) n.innerHTML='<div class="pg-edit"><b>Editing the link for '+esc(a.full_name||'this customer')+'.</b> The link stays the same. The customer sees the new details the next time they open or refresh the form; what they have already typed stays.</div>';
   const g=$('pgGo'); if(g) g.innerHTML='<i class="fa-solid fa-floppy-disk"></i> Save changes';
+  const d=$('pgDraftBtn'); if(d) d.style.display='none';
 }
 window.pdfGenerate=async function(){
   const g=id=>($(id)||{}).value||'';
@@ -307,6 +323,7 @@ window.pdfGenerate=async function(){
                    :await sb.schema('acc').rpc('generate_booking_link',{p_project:'ananta',p_prefill:prefill});
   if(res.error||!res.data){ btn.disabled=false; btn.innerHTML=editing?'<i class="fa-solid fa-floppy-disk"></i> Save changes':'<i class="fa-solid fa-link"></i> Generate link'; const m=$('pgErr'); if(m) m.textContent=(editing?'Could not save the changes: ':'Could not generate the link: ')+((res.error&&res.error.message)||'nothing came back'); return; }
   const token=editing?PG.editToken:res.data, url=pdfLinkUrl(token);
+  if(!editing&&PG.draftId){ try{ await sb.schema('acc').from('digital_booking_drafts').delete().eq('id',PG.draftId); }catch(e){} PG.draftId=null; }
   $('pgBody').innerHTML='<div class="pg-done"><div class="ok"><i class="fa-solid fa-check"></i></div><h3>'+(editing?'Changes saved for ':'The link for ')+esc(name)+(editing?'':' is ready')+'</h3>'
     +'<p>'+(editing?'The link is the same as before.':'Give it only to this customer - anyone who has the link can open the form. Their answers are saved as they type.')+'</p>'
     +'<div class="pg-link"><input class="pg-in" id="pgUrl" readonly value="'+esc(url)+'" onclick="this.select()"></div>'
@@ -316,17 +333,63 @@ window.pdfGenerate=async function(){
   await pdfGenList();
 };
 window.pdfEditLink=function(id){ const r=PDF_LINKS.rows.filter(x=>x.id===id)[0]; if(r) pdfGenOpen(r); };
-// The links made so far, compact, beside the form.
+// The links made so far, as rows.
 function pdfGenListHtml(){
   const rows=PDF_LINKS.rows;
-  if(!PDF_LINKS.ok) return '<div class="pg-help" style="padding-bottom:10px">Generated forms are not available yet.</div>';
-  if(!rows.length) return '<div class="pg-help" style="padding-bottom:10px">Nothing generated yet. Your first link will appear here.</div>';
-  return '<div class="pg-lgrid">'+rows.map(function(r){ const v=(r.prefill&&r.prefill.values)||{}, f=v.flat||{};
-    return '<div class="pg-l"><b>'+esc(r.customer_name||'—')+'</b>'
-      +'<div class="m">'+esc([f.block,f.floor?'Floor '+f.floor:'',f.flat_no].filter(Boolean).join(' · ')||'—')+' &middot; '+esc(pdfWhen(r.created_at))+(r.created_by?' &middot; '+esc(String(r.created_by).split('@')[0]):'')+'</div>'
-      +'<div class="m" style="margin-top:-3px">'+pdfLinkStatus(r)+'</div>'
-      +'<div class="a">'+(r.status==='open'?'<button class="btn" onclick="pdfCopyLink(\''+r.token+'\',this)"><i class="fa-regular fa-copy"></i> Copy link</button><button class="btn" onclick="pdfEditLink(\''+r.id+'\')"><i class="fa-solid fa-pen"></i> Edit</button>'
-        :(r.form_id?'<button class="btn" onclick="pgClose();pdfOpen(\''+r.form_id+'\')">Open form</button>':''))+'</div></div>'; }).join('')+'</div>';
+  if(!PDF_LINKS.ok) return '<div class="pg-empty">Generated forms are not available yet.</div>';
+  if(!rows.length) return '<div class="pg-empty">Nothing generated yet. Your first link will appear here.</div>';
+  return '<table class="pg-t"><thead><tr><th>Customer</th><th>Flat</th><th>Made</th><th>Progress</th><th></th></tr></thead><tbody>'+rows.map(function(r){
+    const v=(r.prefill&&r.prefill.values)||{}, f=v.flat||{};
+    return '<tr><td><b>'+esc(r.customer_name||'—')+'</b></td>'
+      +'<td>'+esc([f.block,f.floor?'Floor '+f.floor:'',f.flat_no].filter(Boolean).join(' · ')||'—')+'</td>'
+      +'<td>'+esc(pdfWhen(r.created_at))+'<div class="sub">'+esc(String(r.created_by||'').split('@')[0])+'</div></td>'
+      +'<td>'+pdfLinkStatus(r)+'</td>'
+      +'<td class="a">'+(r.status==='open'?'<button class="btn" onclick="pdfCopyLink(\''+r.token+'\',this)"><i class="fa-regular fa-copy"></i> Copy link</button><button class="btn" onclick="pdfEditLink(\''+r.id+'\')"><i class="fa-solid fa-pen"></i> Edit</button>'
+        :(r.form_id?'<button class="btn" onclick="pgClose();pdfOpen(\''+r.form_id+'\')">Open form</button>':''))+'</td></tr>'; }).join('')+'</tbody></table>';
 }
-window.pdfGenList=async function(){ await pdfLoadLinks(); const h=$('pgList'); if(h) h.innerHTML=pdfGenListHtml(); const c=$('pgCount'); if(c) c.textContent=PDF_LINKS.ok?PDF_LINKS.rows.length:'-'; };
+window.pdfGenList=async function(){ await pdfLoadLinks(); const h=$('pgList'); if(h) h.innerHTML=pdfGenListHtml(); const c=$('pgCount'); if(c) c.textContent=PDF_LINKS.ok?PDF_LINKS.rows.length:'-'; await pgLoadDrafts(); };
+
+/* DRAFTS (11 Nov 2026): half-filled forms kept for the person who started them. Each person sees only their own (the database says the same: acc.digital_booking_drafts
+   is readable and writable by its owner only). A draft is edited and saved again as often as needed; making the link from it uses it up. */
+async function pgLoadDrafts(){
+  const me=String((typeof state!=='undefined'&&state.email)||'').trim().toLowerCase();
+  const {data,error}=await sb.schema('acc').from('digital_booking_drafts').select('id,name,values,updated_at').eq('owner',me).order('updated_at',{ascending:false}).limit(200);
+  PG_DRAFTS.ok=!error; PG_DRAFTS.rows=error?[]:(data||[]);
+  const h=$('pgDrafts'); if(h) h.innerHTML=pgDraftsHtml(); const c=$('pgDCount'); if(c) c.textContent=PG_DRAFTS.ok?PG_DRAFTS.rows.length:'-';
+}
+function pgDraftsHtml(){
+  if(!PG_DRAFTS.ok) return '<div class="pg-empty">Drafts are not available yet.</div>';
+  if(!PG_DRAFTS.rows.length) return '<div class="pg-empty">No drafts. Fill in part of a form in NEW and press Save draft - it is kept here, only for you.</div>';
+  return '<table class="pg-t"><thead><tr><th>Draft</th><th>Flat</th><th>Last saved</th><th></th></tr></thead><tbody>'+PG_DRAFTS.rows.map(function(r){
+    const v=r.values||{};
+    return '<tr><td><b>'+esc(r.name||'Untitled draft')+'</b></td>'
+      +'<td>'+esc([v.block,v.floor?'Floor '+v.floor:'',v.flat].filter(Boolean).join(' · ')||'—')+'</td>'
+      +'<td>'+esc(pdfWhen(r.updated_at))+'</td>'
+      +'<td class="a"><button class="btn" onclick="pgOpenDraft(\''+r.id+'\')"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn" onclick="pgDeleteDraft(\''+r.id+'\')"><i class="fa-regular fa-trash-can"></i> Delete</button></td></tr>'; }).join('')+'</tbody></table>';
+}
+window.pgSaveDraft=async function(){
+  const me=String((typeof state!=='undefined'&&state.email)||'').trim().toLowerCase(), raw=pgRaw();
+  const name=(raw.name||'').trim().toUpperCase()||'Untitled draft';
+  const b=$('pgDraftBtn'); if(b) b.disabled=true;
+  let res;
+  if(PG.draftId) res=await sb.schema('acc').from('digital_booking_drafts').update({name:name,values:raw,updated_at:new Date().toISOString()}).eq('id',PG.draftId).select('id');
+  else res=await sb.schema('acc').from('digital_booking_drafts').insert({owner:me,name:name,values:raw}).select('id');
+  if(b) b.disabled=false;
+  if(res.error||!res.data||!res.data.length){ toast('Could not save the draft: '+((res.error&&res.error.message)||'not saved'),'err'); return; }
+  PG.draftId=res.data[0].id;
+  const n=$('pgEditNote'); if(n) n.innerHTML='<div class="pg-edit"><b>Draft saved.</b> You are editing the draft - Save draft again to keep new changes, or Generate link when it is complete.</div>';
+  toast('Draft saved','ok'); await pgLoadDrafts();
+};
+window.pgOpenDraft=function(id){
+  const r=PG_DRAFTS.rows.filter(x=>x.id===id)[0]; if(!r) return;
+  pgFillRaw(r.values||{}); PG.draftId=id; pgTab('new');
+  const n=$('pgEditNote'); if(n) n.innerHTML='<div class="pg-edit"><b>Editing your draft.</b> Save draft keeps your changes; Generate link makes the link and uses the draft up.</div>';
+};
+window.pgDeleteDraft=async function(id){
+  if(typeof confirmDialog==='function'&&!(await confirmDialog('Delete this draft? It cannot be brought back.'))) return;
+  const {error}=await sb.schema('acc').from('digital_booking_drafts').delete().eq('id',id);
+  if(error){ toast('Could not delete: '+error.message,'err'); return; }
+  if(PG.draftId===id) PG.draftId=null;
+  await pgLoadDrafts();
+};
 window.pdfCanGenerate=pdfCanGenerate;

@@ -105,6 +105,24 @@ async function reconcileFiles(link: any, listed: any) {
   return out;
 }
 
+// A submitted form opened again through its link is shown read-only. The link is the only credential, so identity numbers are masked
+// (PAN and Aadhaar show their last four characters only, passport and bank details just say they were given) and no file is returned.
+const maskTail = (v: unknown, keep = 4, ch = "X") => { const t = String(v ?? "").replace(/\s/g, ""); return t ? ch.repeat(Math.max(0, t.length - keep)) + t.slice(-keep) : ""; };
+async function submittedView(link: any) {
+  if (!link.form_id) return null;
+  const rows = await db(`digital_booking_forms?select=data,files,submitted_at&id=eq.${link.form_id}&limit=1`);
+  const r = rows && rows[0]; if (!r || !r.data) return null;
+  const d = JSON.parse(JSON.stringify(r.data));
+  delete d.website; delete d.submitted_on_device;
+  (Array.isArray(d.applicants) ? d.applicants : []).forEach((a: any) => {
+    a.pan = maskTail(a.pan); a.aadhaar = maskTail(a.aadhaar);
+    a.passport = a.passport ? "Provided" : ""; a.bank_details = a.bank_details ? "Provided" : "";
+  });
+  const files: any[] = Array.isArray(r.files) ? r.files : [];
+  return { data: d, submitted_at: r.submitted_at, signed: files.some((f) => f.kind === "signature"),
+           docs: files.filter((f) => f.kind !== "signature").map((f) => ({ applicant: Number(f.applicant) - 1, kind: f.kind })) };
+}
+
 async function handleJson(req: Request) {
   let b: any;
   try { b = await req.json(); } catch (_) { return j({ error: "The request did not arrive complete." }, 400); }
@@ -115,7 +133,7 @@ async function handleJson(req: Request) {
 
   if (b.action === "load") {
     if (link.status === "cancelled") return j({ ok: true, status: "cancelled" });
-    if (link.status === "completed") return j({ ok: true, status: "completed", ref_no: link.ref_no || "" });
+    if (link.status === "completed") return j({ ok: true, status: "completed", ref_no: link.ref_no || "", submitted: await submittedView(link).catch(() => null) });
     if (!link.opened_at) await db(`digital_booking_links?id=eq.${link.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ opened_at: new Date().toISOString() }) });
     return j({
       ok: true, status: "open", project: link.project, prefill: link.prefill || {},
