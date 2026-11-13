@@ -60,12 +60,10 @@ function setPath(o: any, path: string, v: unknown) {
   }
   c[ks[ks.length - 1]] = v;
 }
-// Sales' answers are put back over whatever the page sent: a customer cannot change them, whatever they do.
-function applyLocked(d: any, pf: any) {
-  for (const p of (Array.isArray(pf?.locked) ? pf.locked : [])) {
-    const v = getPath(pf.values || {}, p);
-    setPath(d, p, v == null ? "" : v);
-  }
+// 13 Nov 2026, on the Administrator's word: what Sales fills in is only pre-filled - the customer CAN change it. Nothing is put back any more
+// (links made earlier carry a `locked` list; it is ignored). To lock answers again, restore the loop below:
+//   for (const p of (Array.isArray(pf?.locked) ? pf.locked : [])) { const v = getPath(pf.values || {}, p); setPath(d, p, v == null ? "" : v); }
+function applyLocked(d: any, _pf: any) {
   return d;
 }
 async function getLink(token: string) {

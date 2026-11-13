@@ -726,14 +726,14 @@ async function bootLink(){
     if(tk){ try{ const r2=await fetch(FN,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tk},body:JSON.stringify({action:'staff_load',token:TOKEN})}); const j2=await r2.json().catch(function(){ return {}; }); if(r2.ok&&j2.ok&&j2.form) return showStaff(j2); }catch(e){} }
     return showSubmitted(jj);
   }
-  const pf=jj.prefill||{values:{},locked:[]}, d=jj.draft&&typeof jj.draft==='object'?jj.draft:{};
-  (pf.locked||[]).forEach(function(p){ LOCK.add(p); });
+  const pf=jj.prefill||{values:{}}, d=jj.draft&&typeof jj.draft==='object'?jj.draft:{};
   S=Object.assign(fresh(),d); ['price','profession'].forEach(function(k){ S[k]=Object.assign(fresh()[k],d[k]||{}); });
   if(!Array.isArray(S.applicants)||!S.applicants.length) S.applicants=[newApp()];
   S.applicants=S.applicants.map(function(a){ return Object.assign(newApp(),a); });
   if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
-  // Sales' answers always win, over a draft and over anything typed.
-  LOCK.forEach(function(p){ const v=getIn(pf.values||{},p); setIn(S,p,v==null?'':v); });
+  /* 13 Nov 2026: what Sales filled in is only a starting point - the customer can change any of it. It is put in when the form is opened
+     for the first time; once the customer has a saved draft, the draft (their own answers) is what is shown. */
+  if(!jj.draft) (pf.fields||pf.locked||[]).forEach(function(p){ const v=getIn(pf.values||{},p); if(v!=null&&v!=='') setIn(S,p,v); });
   S.project=PROJECT;
   FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
   (jj.files||[]).forEach(function(f){ if(FILES[f.applicant]&&FILES[f.applicant][f.kind]) FILES[f.applicant][f.kind].push({saved:true,id:f.id,name:f.name,ext:f.ext}); });

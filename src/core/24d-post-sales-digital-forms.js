@@ -117,8 +117,8 @@ window.pdfSetStatus=async function(id,s){
 
 /* 11 Nov 2026: the Digital Forms tab of Post Sales was removed. Generate Form is now a button on the Booking Form workflow page
    (Accountability, flow 41, next to New Booking Form) for the Administrator and the Sales department; its window also lists the links made. */
-/* GENERATE FORM (7 Nov 2026). Sales and the Administrator make a link for one customer: they fill in what the customer must
-   not change (name, title, nationality, date of birth, mobile, email, contact person, block, floor, flat, flat number, car park,
+/* GENERATE FORM (7 Nov 2026). Sales and the Administrator make a link for one customer: they fill in what is pre-filled for the customer (since 13 Nov 2026 the customer can change it:
+   name, title, nationality, date of birth, mobile, email, contact person, block, floor, flat, flat number, car park,
    bedrooms, built-up area, total sale price) and give the customer the link. It is the same booking-form.html for everybody
    (booking-form.html?t=<token>); the customer's answers are saved on our server as they type, so reopening the link carries on
    at the same step; when they submit, the answers land in the list above like any other digital form. No booking is started.
@@ -152,7 +152,7 @@ function pdfLinkStatus(r){
 function pdfLinksHtml(){
   const rows=PDF_LINKS.rows;
   if(!PDF_LINKS.ok) return '<div class="card" style="margin-top:18px;padding:14px 16px;color:var(--slate);font-size:13px">Generated forms are not available yet.</div>';
-  return '<div class="pss-hint" style="margin:0 0 10px">Each link opens the same form for one customer, with the details you set already filled in and locked. Their answers are saved as they type.</div>'
+  return '<div class="pss-hint" style="margin:0 0 10px">Each link opens the same form for one customer, with the details you set already filled in (the customer can change them). Their answers are saved as they type.</div>'
     +'<div class="card" style="padding:0;overflow:auto">'
     +(rows.length?'<table style="width:100%;border-collapse:collapse;font-size:13.5px"><thead><tr style="text-align:left;color:var(--slate);font-size:12px;border-bottom:1px solid var(--line)">'
       +'<th style="padding:10px 14px">Customer</th><th style="padding:10px 8px">Flat</th><th style="padding:10px 8px">Made</th><th style="padding:10px 8px">Progress</th><th style="padding:10px 14px"></th></tr></thead><tbody>'
@@ -284,7 +284,7 @@ window.pdfGenOpen=function(editRow){
       +f('pgTotal','Total sale price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
     +'</div></div>'
     +'</div></div>'
-    +'<div class="pg-wrap"><div class="pg-bar"><span class="msg" id="pgErr" style="color:var(--slate);font-weight:400">What you fill in is shown to the customer but locked. They fill in the rest (PAN, Aadhaar, address, payment).</span><button class="btn" onclick="pgClose()">Cancel</button><button class="btn" id="pgDraftBtn" onclick="pgSaveDraft()"><i class="fa-regular fa-floppy-disk"></i> Save draft</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div></div>'
+    +'<div class="pg-wrap"><div class="pg-bar"><span class="msg" id="pgErr" style="color:var(--slate);font-weight:400">What you fill in is pre-filled for the customer - they can still change it. They fill in the rest (PAN, Aadhaar, address, payment).</span><button class="btn" onclick="pgClose()">Cancel</button><button class="btn" id="pgDraftBtn" onclick="pgSaveDraft()"><i class="fa-regular fa-floppy-disk"></i> Save draft</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div></div>'
     +'</div></div>'
     +'<div class="pg-main" id="pgDraftsWrap" style="display:none"><div id="pgDrafts"></div></div>'
     +'<div class="pg-main" id="pgListWrap" style="display:none"><div id="pgList"></div></div>';
@@ -343,10 +343,10 @@ window.pdfGenerate=async function(){
     contact:{cc:cc,mobile:mobile,email:email,contact_person:(g('pgContact').trim()||name).toUpperCase()},
     flat:{block:g('pgBlock'),floor:g('pgFloor'),flat_no:g('pgFlat').trim().toUpperCase(),bhk:g('pgBhk'),parking:g('pgPark')},
     price:{sba:sba,total:total}};
-  const locked=['applicants.0.title','applicants.0.full_name','applicants.0.nationality','applicants.0.dob','contact.cc','contact.mobile','contact.email','contact.contact_person',
+  const fields=['applicants.0.title','applicants.0.full_name','applicants.0.nationality','applicants.0.dob','contact.cc','contact.mobile','contact.email','contact.contact_person',
     'flat.block','flat.floor','flat.flat_no','flat.bhk','flat.parking','price.sba','price.total'];
   const btn=$('pgGo'); btn.disabled=true; btn.textContent=PG.editId?'Saving…':'Generating…';
-  const prefill={values:values,locked:locked};
+  const prefill={values:values,locked:[],fields:fields};   // locked: [] - nothing is locked since 13 Nov 2026; fields = what was pre-filled
   const editing=!!PG.editId;
   const res=editing?await sb.schema('acc').rpc('update_booking_link',{p_id:PG.editId,p_prefill:prefill})
                    :await sb.schema('acc').rpc('generate_booking_link',{p_project:'ananta',p_prefill:prefill});
