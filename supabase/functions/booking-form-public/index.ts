@@ -229,7 +229,8 @@ async function sendMail(o: { to: string[]; cc?: string[]; subject: string; html:
   }
   const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: CU, password: CP } } });
   try {
-    await client.send({ from: `Pallabita Ghosh - The Jain Group <${CU}>`, to, ...(cc.length ? { cc } : {}), subject,
+    // The mailbox that logs in to send is always customercare1@ (Gmail will not let it send "as" another account); in test mode the name shown and the reply-to are the Administrator's.
+    await client.send({ from: `${conf.live ? "Pallabita Ghosh" : "Ayush Ruia"} - The Jain Group <${CU}>`, ...(conf.live ? {} : { replyTo: conf.testTo }), to, ...(cc.length ? { cc } : {}), subject,
       mimeContent: [b64Part("text/plain", text), b64Part("text/html", html)], ...(o.attachments && o.attachments.length ? { attachments: o.attachments } : {}) });
   } finally { try { await client.close(); } catch (_) { /* ignore */ } }
   return { live: conf.live };
@@ -253,19 +254,28 @@ async function sendConfirmation(proj: Proj, link: any, d: any, ref: string) {
   const viewUrl = `${SITE}/booking-form.html?t=${link.token}`;
   const rowsHtml = [["Reference number", ref], ["Project", proj.name], ["Unit", unit], ["Applicant" + (names.length > 1 ? "s" : ""), names.join(", ")], ["Booking amount", rupee(d.pay?.amount)]]
     .filter((r) => r[1]).map((r) => `<tr><td style="padding:8px 0;color:#6b7280;width:38%;border-bottom:1px solid #f0f1f3">${hE(r[0])}</td><td style="padding:8px 0;font-weight:600;border-bottom:1px solid #f0f1f3">${hE(r[1])}</td></tr>`).join("");
-  const html = shell(`<p style="margin:0 0 14px">Dear <b>${hE([first.title, clean(first.full_name)].filter(Boolean).join(" ") || "Sir / Madam")}</b>,</p>`
-    + `<p style="margin:0 0 14px">Thank you for choosing <b>${hE(proj.name)}</b>. We have received your booking application and your email has been verified.</p>`
+  const conf = await mailConf();
+  const who = [first.title, clean(first.full_name)].filter(Boolean).join(" ") || "Sir / Madam";
+  // Until the Administrator says live, the sign-off is the Administrator's; live it is Pallabita Ghosh's.
+  const sign = conf.live
+    ? { html: `<p style="margin:0"><b>Pallabita Ghosh</b></p><p style="margin:0;color:#4b5563">Manager &ndash; Post Sales &middot; Customer Relations Team</p><p style="margin:0 0 14px;color:#4b5563">Reach me @ 8420541541</p>`, text: "Pallabita Ghosh\nManager - Post Sales | Customer Relations Team\nReach me @ 8420541541" }
+    : { html: `<p style="margin:0"><b>Ayush Ruia</b></p><p style="margin:0 0 14px;color:#4b5563">The Jain Group &middot; ayushruia1@gmail.com</p>`, text: "Ayush Ruia\nThe Jain Group | ayushruia1@gmail.com" };
+  const html = shell(`<p style="margin:0 0 4px;font-size:22px;font-weight:700;color:#111827">Thank you for choosing ${hE(proj.name)}</p>`
+    + `<p style="margin:0 0 18px;color:#6b7280">Booking reference <b style="color:#b3171d">${hE(ref)}</b></p>`
+    + `<p style="margin:0 0 14px">Dear <b>${hE(who)}</b>,</p>`
+    + `<p style="margin:0 0 14px">We are truly grateful that you have chosen <b>${hE(proj.name)}</b> as your new home. Your trust means a great deal to us, and everyone at The Jain Group looks forward to welcoming you to the ${hE(proj.name)} family.</p>`
+    + `<p style="margin:0 0 14px">We have received your booking application and verified your email address. Here is a summary:</p>`
     + `<table style="width:100%;border-collapse:collapse;margin:0 0 18px;font-size:14px">${rowsHtml}</table>`
     + `<p style="margin:0 0 18px"><a href="${hE(viewUrl)}" style="display:inline-block;background:#b3171d;color:#fff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:8px">View your submitted form</a></p>`
-    + `<p style="margin:0 0 14px">Your <b>Cost Sheet</b> is attached to this email for your records. Our Customer Relations team will contact you shortly to confirm your booking.</p>`
-    + `<p style="margin:0 0 4px">Warm regards,</p><p style="margin:0"><b>Pallabita Ghosh</b></p><p style="margin:0;color:#4b5563">Manager &ndash; Post Sales &middot; Customer Relations Team</p><p style="margin:0 0 14px;color:#4b5563">Reach me @ 8420541541</p>`);
-  const text = `Dear ${[first.title, clean(first.full_name)].filter(Boolean).join(" ") || "Sir / Madam"},\n\nThank you for choosing ${proj.name}. We have received your booking application and your email has been verified.\n\n`
-    + `Reference number: ${ref}\nProject: ${proj.name}\n${unit ? "Unit: " + unit + "\n" : ""}\nView your submitted form: ${viewUrl}\n\nYour Cost Sheet is attached to this email for your records. Our Customer Relations team will contact you shortly to confirm your booking.\n\nWarm regards,\nPallabita Ghosh\nManager - Post Sales | Customer Relations Team\nReach me @ 8420541541`;
+    + `<p style="margin:0 0 14px">Your <b>Cost Sheet</b> is attached to this email for your records. Our Customer Relations team will be in touch with you shortly to take you through the next steps.</p>`
+    + `<p style="margin:0 0 14px">Thank you once again for your confidence in us.</p><p style="margin:0 0 4px">Warm regards,</p>` + sign.html);
+  const text = `Dear ${who},\n\nThank you for choosing ${proj.name}.\n\nWe are truly grateful that you have chosen ${proj.name} as your new home. Your trust means a great deal to us, and everyone at The Jain Group looks forward to welcoming you to the ${proj.name} family.\n\n`
+    + `We have received your booking application and verified your email address.\n\nReference number: ${ref}\nProject: ${proj.name}\n${unit ? "Unit: " + unit + "\n" : ""}\nView your submitted form: ${viewUrl}\n\nYour Cost Sheet is attached to this email for your records. Our Customer Relations team will be in touch with you shortly to take you through the next steps.\n\nThank you once again for your confidence in us.\n\nWarm regards,\n${sign.text}`;
   const attachments: any[] = [];
   const pdf = await costBytes(link);
   if (pdf) { let bin = ""; for (let i = 0; i < pdf.length; i += 0x8000) bin += String.fromCharCode(...pdf.subarray(i, i + 0x8000)); attachments.push({ filename: String(link.prefill?.cost_sheet?.name || "Cost Sheet.pdf"), content: btoa(bin), encoding: "base64", contentType: "application/pdf" }); }
   const cc = [...new Set([SALES_HEAD, ...proj.team].map((x) => x.toLowerCase()))];
-  return await sendMail({ to: [email], cc, subject: `Booking received - ${proj.name} - ${ref}`, html, text, attachments, kind: "confirmation" });
+  return await sendMail({ to: [email], cc, subject: `Thank you for choosing ${proj.name} - ${ref}`, html, text, attachments, kind: "confirmation" });
 }
 
 // ---- OTP (13 Nov 2026): before a generated link is submitted, the customer proves the email address with a 6-digit code. The code is kept only as a hash (acc.digital_booking_links.otp).
