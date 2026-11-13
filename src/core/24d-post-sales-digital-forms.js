@@ -359,7 +359,8 @@ function pdfGenListHtml(){
       +'<td>'+esc(pdfWhen(r.created_at))+'<div class="sub">'+esc(String(r.created_by||'').split('@')[0])+'</div></td>'
       +'<td>'+pdfLinkStatus(r)+'</td>'
       +'<td class="a">'+(r.status==='open'?'<button class="btn" onclick="pdfCopyLink(\''+r.token+'\',this)"><i class="fa-regular fa-copy"></i> Copy link</button><button class="btn" onclick="pdfEditLink(\''+r.id+'\')"><i class="fa-solid fa-pen"></i> Edit</button>'
-        :(r.form_id?'<button class="btn" onclick="pdfOpen(\''+r.form_id+'\')">Open form</button>':''))+'</td></tr>'; }).join('')+'</tbody></table>';
+        :('<a class="btn" href="'+esc(pdfLinkUrl(r.token))+'" target="_blank" rel="noopener" title="Opens the form in a new page, exactly as the customer sees it - nothing in it can be changed"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open form</a>'
+          +(r.form_id?'<button class="btn" title="The uploaded KYC photos, the signature, the status and a staff note" onclick="pdfOpen(\''+r.form_id+'\')">KYC &amp; status</button>':'')))+'</td></tr>'; }).join('')+'</tbody></table>';
 }
 window.pdfGenList=async function(){ await pdfLoadLinks(); const h=$('pgList'); if(h) h.innerHTML=pdfGenListHtml(); const c=$('pgCount'); if(c) c.textContent=PDF_LINKS.ok?PDF_LINKS.rows.length:'-'; await pgLoadDrafts(); };
 
