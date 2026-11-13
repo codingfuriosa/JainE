@@ -190,12 +190,12 @@ const PG_CSS='<style>'
   +'#pgPage .pg-main{flex:1;overflow:auto;padding:18px 24px 22px}'
   +'.pg-edit{margin:0 0 12px;padding:9px 14px;border-radius:8px;background:#fff8e8;border:1px solid #f3e1b5;color:#8a5a0b;font-size:13px}'
   +'.pg-wrap{max-width:1180px}'
-  +'.pg-one{background:#fff;border:1px solid var(--pgl);border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,.04)}'
-  +'.pg-sec{padding:16px 22px 18px;border-top:1px solid var(--pgl)}.pg-sec:first-child{border-top:0}'
-  +'.pg-sec>h4{margin:0 0 12px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:#9aa1ad;font-weight:700}'
-  +'.pg-bf{display:grid;gap:12px 22px;grid-template-columns:var(--c);align-items:start}.pg-bf+.pg-bf{margin-top:14px}'
-  +'@media(max-width:1000px){.pg-bf{grid-template-columns:repeat(2,minmax(0,1fr))}.pg-bf>.w2{grid-column:1/-1}}'
-  +'@media(max-width:640px){.pg-bf{grid-template-columns:1fr}.pg-sec{padding:14px 16px}}'
+  +'.pg-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch}'
+  +'@media(max-width:1100px){.pg-cards{grid-template-columns:minmax(0,1fr)}}'
+  +'.pg-card{background:#fff;border:1px solid var(--pgl);border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,.04);padding:16px 20px 20px}'
+  +'.pg-card>h4{margin:0 0 12px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:#9aa1ad;font-weight:700}'
+  +'.pg-bf{display:grid;gap:12px 18px;grid-template-columns:var(--c);align-items:start}.pg-bf+.pg-bf{margin-top:14px}'
+  +'@media(max-width:640px){.pg-bf{grid-template-columns:1fr}.pg-card{padding:14px 16px 16px}}'
   +'.pg-f label{display:block;font-size:12.5px;font-weight:500;color:#4b5563;margin-bottom:5px}'
   +'.pg-f label .o{font-weight:400;color:#9aa1ad}.pg-f label .r{color:#d9534f;font-weight:600}'
   +'.pg-in{width:100%;box-sizing:border-box;height:40px;padding:0 12px;border:1px solid #d7dbe2;border-radius:8px;background:#fff;font:inherit;font-size:14px;color:var(--pgi);transition:border-color .12s,box-shadow .12s}'
@@ -220,9 +220,9 @@ const PG_CSS='<style>'
   +'.pg-t td{padding:12px 16px;border-bottom:1px solid var(--pgl);vertical-align:middle}.pg-t tr:last-child td{border-bottom:0}.pg-t tbody tr:hover{background:#fafbfc}'
   +'.pg-t td.a{text-align:right;white-space:nowrap}.pg-t td.a .btn{padding:4px 10px;margin-left:6px}.pg-t .sub{color:var(--pgm);font-size:12.5px}'
   +'.pg-empty{padding:36px 16px;text-align:center;color:var(--pgm);background:#fff;border:1px solid var(--pgl);border-radius:12px}'
-  +'.pg-unit{gap:12px 16px}.pg-unit .pg-seg button{min-width:34px;padding:0 10px}'
-  +'@media(max-height:820px){.pg-sec{padding:11px 22px 13px}.pg-sec>h4{margin-bottom:8px}.pg-in{height:38px}.pg-seg button{height:32px}.pg-bar{margin-top:12px}.pg-main{padding-top:12px!important}}'
-  +'@media(min-height:880px){.pg-in{height:44px;font-size:15px}.pg-seg button{height:38px}.pg-sec{padding:20px 26px 22px}.pg-f label{font-size:13px}.pg-bf{gap:14px 26px}}'
+  +'.pg-card .pg-seg button{min-width:34px;padding:0 11px}'
+  +'@media(max-height:820px){.pg-cards{gap:12px}.pg-card{padding:12px 18px 15px}.pg-card>h4{margin-bottom:8px}.pg-in{height:38px}.pg-seg button{height:32px}.pg-bar{margin-top:12px}.pg-main{padding-top:12px!important}}'
+  +'@media(min-height:880px){.pg-in{height:44px;font-size:15px}.pg-seg button{height:38px}.pg-card{padding:20px 24px 24px}.pg-f label{font-size:13px}.pg-bf{gap:14px 20px}.pg-cards{gap:20px}}'
   +'</style>';
 function pdfWords(n){
   n=Math.floor(Number(n)); if(!n||n<0) return '';
@@ -256,26 +256,30 @@ window.pdfGenOpen=function(editRow){
     +'<div class="pg-top"><button class="btn" onclick="pgClose()"><i class="fa-solid fa-arrow-left"></i> Back</button><h2><i class="fa-solid fa-link"></i> Generate Form <span>&middot; Dream Ananta</span></h2></div>'
     +'<div class="pg-tabs"><button class="on" id="pgT_new" onclick="pgTab(\'new\')">NEW</button><button id="pgT_drafts" onclick="pgTab(\'drafts\')">DRAFTS <span class="pg-n" id="pgDCount">…</span></button><button id="pgT_list" onclick="pgTab(\'list\')">Generated forms <span class="pg-n" id="pgCount">…</span></button></div>'
     +'<div class="pg-main" id="pgNew"><div id="pgBody"><div id="pgEditNote"></div>'
-    +'<div class="pg-wrap"><div class="pg-one">'
-    +'<div class="pg-sec"><h4>Customer</h4><div class="pg-bf" style="--c:104px 220px minmax(0,1fr) 176px">'
+    +'<div class="pg-wrap"><div class="pg-cards">'
+    +'<div class="pg-card"><h4>Customer</h4><div class="pg-bf" style="--c:100px minmax(0,1fr)">'
       +f('pgTitle','Title',sel('pgTitle',['Mr.','Ms.','Mrs.','Mast.','M/s.'],'Mr.'))
+      +f('pgName','Customer name','<input class="pg-in" id="pgName" style="text-transform:uppercase" autocomplete="off" placeholder="As on the PAN card" oninput="pgNameSync()">',{req:1})
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
       +f('pgNat','Nationality',sel('pgNat',PDF_COUNTRIES.map(c=>c[0]),'India').replace('<select ','<select onchange="pgNatSync()" '))
-      +'<div class="w2">'+f('pgName','Customer name','<input class="pg-in" id="pgName" style="text-transform:uppercase" autocomplete="off" placeholder="As on the PAN card" oninput="pgNameSync()">',{req:1})+'</div>'
       +f('pgDob','Date of birth','<input class="pg-in" type="date" id="pgDob">',{req:1})
     +'</div></div>'
-    +'<div class="pg-sec"><h4>Contact</h4><div class="pg-bf" style="--c:minmax(0,1.1fr) minmax(0,1.3fr) minmax(0,1.1fr)">'
+    +'<div class="pg-card"><h4>Contact</h4><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
       +f('pgMobile','Mobile number','<div class="pg-row">'+sel('pgCc',codes,'+91','cc')+'<input class="pg-in" id="pgMobile" inputmode="tel" autocomplete="off" placeholder="98300 12345"></div>',{req:1})
       +f('pgEmail','Email','<input class="pg-in" type="email" id="pgEmail" autocomplete="off" placeholder="name@example.com">',{req:1})
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
       +f('pgContact','Contact person','<input class="pg-in" id="pgContact" style="text-transform:uppercase" autocomplete="off" placeholder="Same as the customer name" oninput="this.dataset.touched=1">',{opt:1})
     +'</div></div>'
-    +'<div class="pg-sec"><h4>Unit</h4><div class="pg-bf pg-unit" style="--c:auto auto auto auto minmax(96px,1fr)">'
+    +'<div class="pg-card"><h4>Flat</h4><div class="pg-bf" style="--c:auto minmax(0,1fr)">'
       +f('pgBlock','Block',seg('pgBlock',['Block D','Block E'],'Block D'))
+      +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{opt:1})
+    +'</div><div class="pg-bf" style="--c:auto">'
       +f('pgFloor','Floor',seg('pgFloor',floors,'1'))
+    +'</div></div>'
+    +'<div class="pg-card"><h4>Size &amp; price</h4><div class="pg-bf" style="--c:auto auto">'
       +f('pgBhk','Bedrooms',seg('pgBhk',['2 BHK','3 BHK','4 BHK'],'3 BHK'))
       +f('pgPark','Car park',seg('pgPark',['Covered','Open'],'Covered'))
-      +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{opt:1})
-    +'</div></div>'
-    +'<div class="pg-sec"><h4>Area &amp; price</h4><div class="pg-bf" style="--c:230px 330px">'
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
       +f('pgSba','Super built-up area','<div class="pg-suf"><input class="pg-in" id="pgSba" inputmode="decimal" autocomplete="off" placeholder="1325"><span>sq.ft.</span></div>',{req:1})
       +f('pgTotal','Total sale price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
     +'</div></div>'
