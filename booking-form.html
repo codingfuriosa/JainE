@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
@@ -22,8 +24,8 @@
   /* header: the two logos, the form's name, the addressee */
   .hd{background:#fff;padding:18px 20px 16px;border-bottom:1px solid var(--line)}
   .hd .logos{display:flex;justify-content:space-between;align-items:center;gap:14px;padding-bottom:14px;border-bottom:1px solid var(--line2)}
-  .hd .logos img{display:block;height:38px;width:auto;max-width:47%;object-fit:contain}
-  @media(max-width:380px){.hd .logos img{height:32px}}
+  .hd .logos img{--lh:40px;display:block;height:var(--lh);width:auto;max-width:none}   /* both logos the same height, top and bottom level */
+  @media(max-width:380px){.hd .logos img{--lh:34px}}
   .hd h1{font-size:19px;margin:14px 0 2px;font-weight:700;letter-spacing:-.01em}
   .hd p{margin:0;color:var(--slate);font-size:13px}
   /* progress */
@@ -102,7 +104,7 @@
   .app .tg.on{background:#f1f2f5;border-color:#9aa1ab}
   .app .tg.static{cursor:default}
   .app .tg .opt{font-weight:400;color:var(--slate)}
-  .app .xp{border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:12px;overflow:hidden}
+  .app .xp{border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden}
   .app .xp-h{padding:9px 14px;background:#f7f8fa;border-bottom:1px solid var(--line);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2)}
   .app .xp-h .opt{text-transform:none;letter-spacing:0;font-weight:400;color:var(--slate)}
   .app .xp-b{padding:14px;display:flex;flex-direction:column;gap:12px}
@@ -226,16 +228,18 @@
   /* DESKTOP (6 Nov 2026): the whole width is used for something, not stretched. Each section has its name and what it is
      for on the left; its questions are rows - the question, then the answer at one comfortable width, and on a big screen
      the small help text beside the answer instead of under it. Every answer is the same width. Phones are untouched. */
-  @media(min-width:1000px){
+  @media(min-width:1000px),(orientation:landscape) and (min-width:700px) and (min-height:480px){
     body{font-size:15.5px}
-    .wrap{max-width:1120px}
-    .nav .in{max-width:1092px}
+    .wrap{max-width:none}
+    .nav{padding-left:28px;padding-right:28px}
+    .nav .in{max-width:none}
+    .sec{margin:16px 28px 0}
     /* header in one line: logo, the form's name and addressee, project logo */
-    .hd{display:grid;grid-template-columns:auto 1fr auto;align-items:center;column-gap:24px;padding:12px 28px}
+    .hd{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;column-gap:24px;padding:14px 28px}
     .hd .logos{display:contents}
-    .hd .logos img{height:40px;max-width:none;grid-row:1/3}
-    .hd .logos img:first-child{grid-column:1}
-    .hd .logos img.proj{grid-column:3}
+    .hd .logos img{--lh:56px;grid-row:1/3;align-self:center}
+    .hd .logos img:first-child{grid-column:1;justify-self:start}
+    .hd .logos img.proj{grid-column:3;justify-self:end}
     .hd h1{grid-column:2;grid-row:1;margin:0;text-align:center;font-size:20px}
     .hd p{grid-column:2;grid-row:2;text-align:center;font-size:13.5px}
     .steps{padding:10px 28px 11px}
@@ -244,9 +248,12 @@
     .sh{display:none}
     .sb{padding:22px 26px}
     .grid,.stack{gap:16px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(520px,1fr));column-gap:44px;align-items:start}
+    .grid>:not(.f):not(.pair){grid-column:1/-1}
+    .grid>.f.wide{grid-column:1/-1;max-width:none}
     .pair{display:flex;flex-direction:column;align-items:stretch;gap:16px}
     /* a question: label | answer */
-    .grid>.f,.stack>.f,.pair>.f,.ac>.f,.sb>.f{display:grid;grid-template-columns:210px minmax(0,720px);column-gap:22px;row-gap:5px;align-items:start}
+    .grid>.f,.stack>.f,.pair>.f,.ac>.f,.sb>.f{display:grid;grid-template-columns:210px minmax(0,1fr);max-width:952px;column-gap:22px;row-gap:5px;align-items:start}
     .grid>.f>label,.stack>.f>label,.pair>.f>label,.ac>.f>label,.sb>.f>label{grid-column:1;grid-row:1;padding-top:13px;font-size:14px;line-height:1.35}
     .grid>.f>:not(label),.stack>.f>:not(label),.pair>.f>:not(label),.ac>.f>:not(label),.sb>.f>:not(label){grid-column:2;min-width:0}
     input[type=text],input[type=tel],input[type=email],input[type=date],textarea{font-size:15.5px;min-height:46px}
@@ -260,11 +267,12 @@
     .app .ah{margin-bottom:6px}
     .app+.app{margin-top:26px;padding-top:26px;border-top:1px solid var(--line)}
     /* things that are not a question keep a readable width instead of stretching */
-    .sb>details.t,.sb>.agree,.sb>.switch,.sb>.btn.add,.app>details.t,.app>.btn,.sb>.miss{max-width:952px}
+    .sb>details.t,.sb>.agree,.sb>.switch,.app>details.t,.app>.btn,.sb>.miss{max-width:none}
+    .sb>.f,.ac>.f{max-width:none}
     .sb:has(>.rs){column-count:2;column-gap:44px}
     .rs{break-inside:avoid}
     /* FIRST PAGE: no left column and no outer frame. Each person is ONE card: a header bar (number, who, Remove), then two
-       panels side by side - Personal details | Identity documents - each with its own title strip. */
+       panels side by side - Personal details | Identity & occupation - each with its own title strip. */
     .sec:has(.app){display:block;border:0;background:none;box-shadow:none;border-radius:0}
     .sec:has(.app)>.sh{display:none}
     .sec:has(.app)>.sb{padding:0}
@@ -280,13 +288,18 @@
     .app>.grp:after{display:none}
     .app>.stack{display:flex;flex-direction:column;align-items:stretch;padding:14px 14px 16px;border:1px solid var(--line);border-radius:0 0 8px 8px;gap:12px}
     /* Spouse & anniversary: hidden until its full-width button at the bottom of the card is pressed; its two fields open right under it, side by side */
-    .app>.xpw{grid-column:1/-1;grid-row:5;display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;margin-top:12px}
-    .app>.xpw>.xp{margin-top:0}
-    .app>.xpw>.xp.sp{grid-column:1}
-    .app>.xpw>.xp.pp{grid-column:2}
-    .app>.xpw.one>.xp.pp{grid-column:1/-1}
-    .app>.xts{grid-column:1/-1;grid-row:6;flex-direction:row;gap:12px}
-    .app>.xts>.tg{flex:1}
+    /* the two bars side by side, each panel opening straight below its own bar */
+    .app>.xts{grid-column:1/-1;grid-row:5;display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:stretch}
+    .app .xp textarea{min-height:46px;height:46px}
+    .app>.xts>.xp{margin-top:0}
+    .app>.xts>.bsp{grid-column:1;grid-row:1}
+    .app>.xts>.bpp{grid-column:2;grid-row:1}
+    /* one panel open: it takes the full width; both open: they split the width, each under its own bar */
+    .app>.xts>.xp{grid-column:1/-1;grid-row:2}
+    .app>.xts.both>.xp.sp{grid-column:1}
+    .app>.xts.both>.xp.pp{grid-column:2}
+    .app>.xts:not(.both)>.xp>.xp-b{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .app>.xts.one>.bpp{grid-column:1/-1}
     .app .stack>.f{display:flex;flex-direction:column;gap:6px}
     .app .stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
     .app .stack>.f>:not(label){grid-column:auto}
@@ -301,6 +314,32 @@
     .pn2 .stack>.f>label{grid-column:auto;padding-top:0;font-size:13.5px}
     .pn2 .stack>.f>:not(label){grid-column:auto}
   }
+  /* answers set by our team (generated link): shown, not editable */
+  .f.locked input,.f.locked textarea{background:#f3f4f6;color:#374151;border-color:#e5e7eb;cursor:default}
+  .f.locked input:focus,.f.locked textarea:focus{box-shadow:none;border-color:#e5e7eb!important}
+  .f.locked .pick{background:#f3f4f6;color:#374151;cursor:default;opacity:1}
+  .f.locked .chip{cursor:default}.f.locked .chip:not(.on){opacity:.45}
+  .f>label .lock{display:inline-block;width:12px;height:12px;vertical-align:-1px;margin-left:6px;stroke:#6b7280;fill:none;stroke-width:2}
+  /* the uploaded pictures on the staff view: a small preview each, opening large */
+  .dgrp{margin:0 0 18px}.dgrp:last-child{margin-bottom:0}
+  .dgrp h4{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:14px;color:var(--slate);font-weight:600}.dgrp h4 b{color:var(--ink);font-size:15px}
+  .dgrp h4 .dn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--ink);color:#fff;font-size:13px;font-weight:700}
+  .docg{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+  .dcard{display:block;padding:0;text-align:left;font:inherit;color:inherit;text-decoration:none;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:zoom-in;box-shadow:0 1px 2px rgba(17,24,39,.05);transition:box-shadow .15s,border-color .15s}
+  .dcard:hover{border-color:#b9bec7;box-shadow:0 4px 14px rgba(17,24,39,.12)}
+  .dcard .im{height:150px;display:flex;align-items:center;justify-content:center;background:#f3f4f6;padding:8px}
+  .dcard.sig .im{background:#fff}
+  .dcard .im img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+  .dcard .im.pdf{font-size:22px;font-weight:800;color:#b3171d;letter-spacing:.08em}
+  .dcard .cap{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;border-top:1px solid var(--line);font-size:13.5px;font-weight:600}
+  .dcard .cap span{font-weight:500;font-size:12px;color:var(--slate)}
+  .dcard .cap b{display:block;font-size:14px}.dcard .cap small{display:block;margin-top:1px;font-size:12.5px;font-weight:500;color:var(--slate)}
+  .dcard.none{cursor:default}.nodoc{color:var(--slate);font-size:14px}
+  .lb{position:fixed;inset:0;z-index:200;background:rgba(15,23,42,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;cursor:zoom-out}
+  .lb img{max-width:min(94vw,1200px);max-height:84vh;object-fit:contain;background:#fff;border-radius:8px;cursor:default}
+  .lb .lbc{margin-top:12px;color:#fff;font-weight:600}
+  .lb .lbx{position:absolute;top:14px;right:18px;width:42px;height:42px;border-radius:50%;border:0;background:rgba(255,255,255,.16);color:#fff;font-size:28px;line-height:1;cursor:pointer}
+  .lb .lbx:hover{background:rgba(255,255,255,.3)}
   @media print{.steps,.nav,.btn,.rvh button{display:none!important}.sec{border:1px solid #ddd}}
 </style>
 </head>
@@ -319,6 +358,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261107zb"></script>
+<script src="booking-form.js?v=20261113d"></script>
 </body>
 </html>
