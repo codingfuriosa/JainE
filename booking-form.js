@@ -649,21 +649,22 @@ function staffToken(){
 }
 let STAFF=null;
 // A picture with a small preview; pressing it opens it large (a PDF opens in its own tab).
-function docCard(f,label){
-  if(!f.url) return '<div class="dcard none"><div class="im">Not available</div><div class="cap">'+esc(label)+'</div></div>';
+function docCard(f,label,who){
+  if(!f.url) return '<div class="dcard none"><div class="im">Not available</div><div class="cap"><div><b>'+esc(label)+'</b>'+(who?'<small>'+esc(who)+'</small>':'')+'</div></div></div>';
   const img=/\.(jpe?g|png|webp|gif|heic|heif)$/i.test(f.name||'')||f.kind==='signature';
   return img
-    ?'<button type="button" class="dcard'+(f.kind==='signature'?' sig':'')+'" data-lb="'+esc(f.url)+'" data-cap="'+esc(label)+'" title="Click to enlarge"><div class="im"><img src="'+esc(f.url)+'" alt="'+esc(label)+'"></div><div class="cap">'+esc(label)+'<span>Enlarge</span></div></button>'
-    :'<a class="dcard" href="'+esc(f.url)+'" target="_blank" rel="noopener"><div class="im pdf">PDF</div><div class="cap">'+esc(label)+'<span>Open</span></div></a>';
+    ?'<button type="button" class="dcard'+(f.kind==='signature'?' sig':'')+'" data-lb="'+esc(f.url)+'" data-cap="'+esc(label+(who?' - '+who:''))+'" title="Click to enlarge"><div class="im"><img src="'+esc(f.url)+'" alt="'+esc(label)+'"></div><div class="cap"><div><b>'+esc(label)+'</b>'+(who?'<small>'+esc(who)+'</small>':'')+'</div><span>Enlarge</span></div></button>'
+    :'<a class="dcard" href="'+esc(f.url)+'" target="_blank" rel="noopener"><div class="im pdf">PDF</div><div class="cap"><div><b>'+esc(label)+'</b>'+(who?'<small>'+esc(who)+'</small>':'')+'</div><span>Open</span></div></a>';
 }
 function staffDocs(){
   const fl=STAFF.form.files||[];
   const nm={pan:'PAN card',aadhaar:'Aadhaar card'};
   const people=S.applicants.map(function(a,i){ const mine=fl.filter(function(f){ return f.applicant===i&&f.kind!=='signature'; });
-    return '<div class="dgrp"><h4>'+esc((i?'Joint applicant '+(i+1):'First applicant')+(a.full_name?' - '+a.full_name:''))+'</h4><div class="docg">'
-      +(mine.length?mine.map(function(f){ return docCard(f,nm[f.kind]||f.kind); }).join(''):'<div class="nodoc">No documents attached</div>')+'</div></div>'; }).join('');
+    const who=[a.title,a.full_name].filter(Boolean).join(' ')||('Applicant '+(i+1));
+    return '<div class="dgrp"><h4><span class="dn">'+(i+1)+'</span>'+esc(i?'Joint applicant':'First applicant')+' <b>'+esc(who)+'</b></h4><div class="docg">'
+      +(mine.length?mine.map(function(f){ return docCard(f,nm[f.kind]||f.kind,who); }).join(''):'<div class="nodoc">No documents attached</div>')+'</div></div>'; }).join('');
   const sig=fl.filter(function(f){ return f.kind==='signature'; });
-  return people+'<div class="dgrp"><h4>Signature</h4><div class="docg">'+(sig.length?sig.map(function(f){ return docCard(f,'Signature'); }).join(''):'<div class="nodoc">Not found</div>')+'</div></div>';
+  return people+'<div class="dgrp"><h4>Signature <span style="font-weight:400;color:var(--slate);text-transform:none;letter-spacing:0">of the first applicant</span></h4><div class="docg">'+(sig.length?sig.map(function(f){ return docCard(f,'Signature',[S.applicants[0].title,S.applicants[0].full_name].filter(Boolean).join(' ')); }).join(''):'<div class="nodoc">Not found</div>')+'</div></div>';
 }
 function openLightbox(url,cap){
   closeLightbox();
