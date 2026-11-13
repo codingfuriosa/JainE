@@ -17,22 +17,47 @@
 //     When submitted, the full answers go to acc.digital_booking_forms exactly like the open link does and the link is
 //     closed. Nothing here starts a Booking Form Flow case.
 //
+// 13 Nov 2026: ONE form for every project (PROJECTS below; the project comes from the link). Sales attaches a cost sheet PDF (compulsory) when making the link; after the terms the
+// customer sees it as pictures and agrees. There is no signature. Submitting a link that has a cost sheet needs a 6-digit code emailed to the customer (otp_send), and then the
+// customer gets a confirmation email (with the cost sheet) from Pallabita Ghosh's mailbox, copied to agm.sales@ and the project's Sales team - TEST MODE (everything to the
+// Administrator's inbox only) until acc.job_secrets digital_form_mail_mode = 'live'.
 // Checks on submit: known project; 1-6 applicants; names, mobile, email, PAN / Aadhaar formats; the first applicant has
 // signed; no two applicants share a PAN or Aadhaar; Indian nationals have attached PAN and Aadhaar; files are images or
 // PDFs, at most 10 MB each and 45 MB together; a hidden field bots fill, and at most 5 submissions an hour per address.
 // Files go to the private S3 bucket under portal/digital-booking/<id>/ - the same s3: paths staff open everywhere else
 // in JainE. The page gets back only a reference number.
 import { AwsClient } from "https://esm.sh/aws4fetch@1.0.20";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const SB = Deno.env.get("SUPABASE_URL")!, SRV = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, x-client-info, apikey, authorization", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const j = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" } });
 const H = { apikey: SRV, Authorization: "Bearer " + SRV, "Content-Type": "application/json" };
 
-// Projects that have a digital form. code = the reference-number prefix.
-const PROJECTS: Record<string, { code: string; name: string; terms: string }> = {
-  ananta: { code: "ANA", name: "Dream Ananta", terms: "ananta-2026-11-02" },
+// ---- Projects (13 Nov 2026: ONE form for every project). code = the reference-number prefix; blocks / floors / bhk fill the Unit page; company + address
+// are the addressee on the form and in the cheques line; logo is a file in assets/brand (a missing file simply shows the project's name in its place).
+// team = the Sales Manager / executives of the project who are copied on every booking (together with SALES_HEAD, always). Edit here, then redeploy.
+// NOT YET CONFIRMED BY THE USER (13 Nov 2026): floors and bedroom lists of every project except Ananta, the company / address of the others, and the team lists.
+type Proj = { code: string; name: string; company: string; address: string; terms: string; blocks: string[]; floors: number; bhk: string[]; bhkDefault: string; logo: string; team: string[] };
+const GATEWAY = { company: "Dream Gateway Hotels Ltd.", address: "44/2A Hazra Road, Kolkata – 700 019" };
+const BHK_ALL = ["1 BHK", "2 BHK", "3 BHK", "4 BHK"];
+const SALES_HEAD = "agm.sales@thejaingroup.com", SALES_MANAGER = "sm.sales2@thejaingroup.com";
+const mkProj = (code: string, name: string, blocks: string[], extra: Partial<Proj> = {}): Proj => ({ code, name, ...GATEWAY, terms: "generic-2026-11-13", blocks, floors: 20, bhk: BHK_ALL, bhkDefault: "3 BHK", logo: "", team: [SALES_MANAGER], ...extra });
+const PROJECTS: Record<string, Proj> = {
+  ananta: mkProj("ANA", "Dream Ananta", ["Block D", "Block E"], { terms: "ananta-2026-11-02", floors: 8, bhk: ["2 BHK", "3 BHK", "4 BHK"], logo: "assets/brand/dream-ananta-logo.png" }),
+  dreamgurukul: mkProj("DG", "Dream Gurukul", ["Block A1", "Block A2", "Block B", "Block C1", "Block C2"], { team: [SALES_MANAGER, "sales.dreamgurukul2@thejaingroup.com", "sales.dreamgurukul4@thejaingroup.com", "sales.dreamgurukul5@thejaingroup.com"] }),
+  dreamone12: mkProj("DO12", "Dream One (Blocks 1 & 2)", ["Block-1", "Block-2"], { team: [SALES_MANAGER, "sales.dreamone1@thejaingroup.com"] }),
+  dreamone34: mkProj("DO34", "Dream One (Blocks 3 & 4)", ["Block-3", "Block-4"], { team: [SALES_MANAGER, "sales.dreamone1@thejaingroup.com"] }),
+  dreamexotica: mkProj("DEX", "Dream Exotica", ["Block-I", "Block-II", "Block-III", "Block-IV", "Block-V", "Block-VI", "Block-VII"], { team: [SALES_MANAGER, "sales.exotica1@thejaingroup.com"] }),
+  dreamvalley: mkProj("DV", "Dream Valley", ["Western [I]", "Starwood [II]", "Grand [III]", "Ritz [IV]"]),
+  dreamecocity: mkProj("DEC", "Dream Ecocity", ["Block-I", "Block-II", "Block-IX"], { team: [SALES_MANAGER, "sales.dreamecocity2@thejaingroup.com"] }),
+  dreamecocitybungalow: mkProj("DEB", "Dream Ecocity Bungalow", ["Durgapur Bungalow"], { floors: 3, team: [SALES_MANAGER, "sales.dreamecocity2@thejaingroup.com"] }),
+  dreamjainpailan: mkProj("DJP", "Dream Jain-Pailan", ["Block-1", "Block-2", "Block-3"]),
+  dreamgatewaypailan: mkProj("DGP", "Dream Gateway Pailan Projects", ["Block-1", "Block-2", "Block-3"]),
+  dreamresidencymanor: mkProj("DRM", "Dream Residency Manor", ["Ivory [I]", "Starwood [II]", "Lavender [IV]", "Scarlet [V]", "Coral [VI]", "Jade [VII]", "Olive [VIII]"]),
 };
+// What the page may know about a project (never the team's email addresses).
+const projectInfo = (key: string) => { const p = PROJECTS[key]; return p ? { key, name: p.name, code: p.code, company: p.company, address: p.address, blocks: p.blocks, floors: p.floors, bhk: p.bhk, bhkDefault: p.bhkDefault, logo: p.logo } : null; };
 const MAX_APPLICANTS = 6, MAX_FILE = 10 * 1024 * 1024, MAX_TOTAL = 45 * 1024 * 1024, MAX_DRAFT_FILES = 24, MAX_DRAFT_JSON = 150_000, MAX_SIG = 400_000;
 const OK_TYPES = /^(image\/(jpeg|png|webp|heic|heif)|application\/pdf)$/;
 const PAN = /^[A-Z]{5}[0-9]{4}[A-Z]$/, AADHAAR = /^[0-9]{12}$/, EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -117,7 +142,7 @@ async function submittedView(link: any) {
     a.passport = a.passport ? "Provided" : ""; a.bank_details = a.bank_details ? "Provided" : "";
   });
   const files: any[] = Array.isArray(r.files) ? r.files : [];
-  return { data: d, submitted_at: r.submitted_at, signed: files.some((f) => f.kind === "signature"),
+  return { data: d, submitted_at: r.submitted_at, project: projectInfo(link.project), cost: costMeta(link),
            docs: files.filter((f) => f.kind !== "signature").map((f) => ({ applicant: Number(f.applicant) - 1, kind: f.kind })) };
 }
 
@@ -143,9 +168,154 @@ async function signedGet(c: { bucket: string; region: string; aws: any }, key: s
   return signed.url as string;
 }
 
+// ---- Cost sheet (13 Nov 2026): Sales attaches a PDF when making the link (compulsory); the customer sees it after the terms as pictures.
+// It is kept in the private S3 bucket; the page never gets its path - it asks for the bytes with the link's token (cost_pdf).
+const costMeta = (link: any) => { const c = link?.prefill?.cost_sheet; return c && c.path ? { name: String(c.name || "Cost sheet.pdf"), size: Number(c.size) || 0 } : null; };
+// The prefill as the customer's page may see it: the cost sheet is shown by name and size only.
+const publicPrefill = (link: any) => { const p = JSON.parse(JSON.stringify(link?.prefill || {})); if (p.cost_sheet) p.cost_sheet = { name: p.cost_sheet.name, size: p.cost_sheet.size }; return p; };
+async function handleCostUpload(form: FormData, req: Request) {
+  const who = await staffUser(req);
+  if (!who) return j({ error: "Not allowed." }, 403);
+  const file = form.get("file");
+  if (!(file instanceof File)) return j({ error: "Please choose the cost sheet PDF." }, 400);
+  if (file.size > MAX_FILE) return j({ error: "The cost sheet is over 10 MB. Please attach a smaller PDF." }, 400);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const head = new TextDecoder().decode(bytes.subarray(0, 5));
+  if (head !== "%PDF-") return j({ error: "The cost sheet must be a PDF file." }, 400);
+  const c = awsClient();
+  if (!c) return j({ error: "The file store is not connected." }, 500);
+  const key = `portal/digital-booking/cost-sheets/${crypto.randomUUID()}.pdf`;
+  const put = await c.aws.fetch(s3url(c, key), { method: "PUT", body: bytes, headers: { "Content-Type": "application/pdf" } });
+  if (!put.ok) return j({ error: "The cost sheet did not upload. Please try again." }, 502);
+  return j({ ok: true, cost: { path: "s3:" + key, name: safeName(file.name || "Cost sheet.pdf").slice(-100), size: file.size } });
+}
+async function costBytes(link: any): Promise<Uint8Array | null> {
+  const p = link?.prefill?.cost_sheet?.path; if (!p) return null;
+  const c = awsClient(); if (!c) return null;
+  const r = await c.aws.fetch(s3url(c, String(p).replace(/^s3:/, "")), { method: "GET" });
+  return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+}
+
+// ---- Email (13 Nov 2026): the OTP and the confirmation go from Pallabita Ghosh's mailbox (customercare1@, the same one as the booking letters).
+// Until the Administrator says "live" (acc.job_secrets digital_form_mail_mode = 'live') everything goes ONLY to the test inbox, with a banner saying who it would have gone to.
+const MAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+const SITE = (Deno.env.get("PORTAL_URL") || "https://jaingroupe.netlify.app").replace(/\/$/, "");
+const hE = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+function b64Part(mimeType: string, s: string) {
+  const bytes = new TextEncoder().encode(s); let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return { mimeType: `${mimeType}; charset="utf-8"`, content: btoa(bin).replace(/.{76}(?=.)/g, "$&\r\n"), transferEncoding: "base64" };
+}
+const maskEmail = (e: string) => { const [u, d] = e.split("@"); return (u.length <= 2 ? u[0] + "*" : u.slice(0, 2) + "*".repeat(Math.min(6, Math.max(2, u.length - 2)))) + "@" + d; };
+async function mailConf() {
+  let rows: any[] = [];
+  try { rows = (await db("job_secrets?select=name,value&name=in.(digital_form_mail_mode,digital_form_mail_test_to)")) || []; } catch (_) { /* default: test */ }
+  const v: Record<string, string> = {}; for (const r of rows) v[r.name] = String(r.value || "");
+  const test = (v.digital_form_mail_test_to || "").trim();
+  return { live: v.digital_form_mail_mode === "live", testTo: MAIL_RE.test(test) ? test : "ayushruia1@gmail.com" };
+}
+// Sends one email. to / cc are the REAL recipients; in test mode they are replaced by the test inbox and named in a banner.
+async function sendMail(o: { to: string[]; cc?: string[]; subject: string; html: string; text: string; attachments?: any[]; kind: string }) {
+  const CU = Deno.env.get("CUSTOMER_MAIL_USER"), CP = Deno.env.get("CUSTOMER_MAIL_APP_PASSWORD");
+  if (!CU || !CP) throw new Error("Pallabita Ghosh's mailbox is not connected");
+  const conf = await mailConf();
+  let { subject, html, text } = o, to = o.to, cc = (o.cc || []).filter((x) => !to.includes(x));
+  if (!conf.live) {
+    const would = `To: ${o.to.join(", ")}${cc.length ? " | CC: " + cc.join(", ") : ""}`;
+    subject = "[TEST] " + subject;
+    html = `<div style="font-family:Arial,sans-serif;font-size:13px;background:#fef3c7;border:1px solid #f59e0b;padding:10px 14px;margin:0 0 18px;border-radius:6px"><b>TEST MODE</b> - in live mode this ${hE(o.kind)} would have gone to: ${hE(would)}</div>` + html;
+    text = `[TEST MODE - in live mode this ${o.kind} would have gone to: ${would}]\n\n` + text;
+    to = [conf.testTo]; cc = [];
+  }
+  const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: CU, password: CP } } });
+  try {
+    await client.send({ from: `Pallabita Ghosh - The Jain Group <${CU}>`, to, ...(cc.length ? { cc } : {}), subject,
+      mimeContent: [b64Part("text/plain", text), b64Part("text/html", html)], ...(o.attachments && o.attachments.length ? { attachments: o.attachments } : {}) });
+  } finally { try { await client.close(); } catch (_) { /* ignore */ } }
+  return { live: conf.live };
+}
+const shell = (inner: string) => `<div style="background:#f3f4f6;padding:24px 0;font-family:Arial,Helvetica,sans-serif"><div style="max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb">`
+  + `<div style="padding:18px 28px;border-bottom:3px solid #b3171d;font-size:13px;letter-spacing:.14em;color:#111827"><b>THE JAIN GROUP</b> <span style="color:#6b7280;letter-spacing:.04em">&nbsp;Caring for your dreams</span></div>`
+  + `<div style="padding:26px 28px 8px;font-size:14.5px;line-height:1.65;color:#111827">${inner}</div>`
+  + `<div style="padding:14px 28px 22px;font-size:12px;color:#6b7280;border-top:1px solid #f0f1f3">The Jain Group &middot; 44/2A Hazra Road, Kolkata &ndash; 700 019</div></div></div>`;
+async function sendOtpMail(proj: Proj, email: string, code: string) {
+  const html = shell(`<p style="margin:0 0 14px">Your verification code for the <b>${hE(proj.name)}</b> booking form is</p>`
+    + `<p style="margin:0 0 16px;font-size:34px;letter-spacing:.32em;font-weight:700;color:#b3171d">${hE(code)}</p>`
+    + `<p style="margin:0 0 14px;color:#4b5563">It is valid for 10 minutes. Please do not share it with anyone. If you did not ask for this, you can ignore this email.</p>`);
+  const text = `Your verification code for the ${proj.name} booking form is ${code}\n\nIt is valid for 10 minutes. Please do not share it with anyone. If you did not ask for this, you can ignore this email.`;
+  return await sendMail({ to: [email], subject: `${code} is your verification code - ${proj.name}`, html, text, kind: "verification code" });
+}
+const rupee = (v: unknown) => { const n = Number(String(v ?? "").replace(/[^\d.]/g, "")); return n ? "₹" + n.toLocaleString("en-IN") : ""; };
+async function sendConfirmation(proj: Proj, link: any, d: any, ref: string) {
+  const first = d.applicants?.[0] || {}, email = clean(d.contact?.email, 200).toLowerCase();
+  const names = (d.applicants || []).map((a: any) => [a.title, clean(a.full_name)].filter(Boolean).join(" ")).filter(Boolean);
+  const unit = [d.flat?.block, d.flat?.floor ? "Floor " + d.flat.floor : "", d.flat?.flat_no ? "Flat " + String(d.flat.flat_no).toUpperCase() : ""].filter(Boolean).join(", ");
+  const viewUrl = `${SITE}/booking-form.html?t=${link.token}`;
+  const rowsHtml = [["Reference number", ref], ["Project", proj.name], ["Unit", unit], ["Applicant" + (names.length > 1 ? "s" : ""), names.join(", ")], ["Booking amount", rupee(d.pay?.amount)]]
+    .filter((r) => r[1]).map((r) => `<tr><td style="padding:8px 0;color:#6b7280;width:38%;border-bottom:1px solid #f0f1f3">${hE(r[0])}</td><td style="padding:8px 0;font-weight:600;border-bottom:1px solid #f0f1f3">${hE(r[1])}</td></tr>`).join("");
+  const html = shell(`<p style="margin:0 0 14px">Dear <b>${hE([first.title, clean(first.full_name)].filter(Boolean).join(" ") || "Sir / Madam")}</b>,</p>`
+    + `<p style="margin:0 0 14px">Thank you for choosing <b>${hE(proj.name)}</b>. We have received your booking application and your email has been verified.</p>`
+    + `<table style="width:100%;border-collapse:collapse;margin:0 0 18px;font-size:14px">${rowsHtml}</table>`
+    + `<p style="margin:0 0 18px"><a href="${hE(viewUrl)}" style="display:inline-block;background:#b3171d;color:#fff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:8px">View your submitted form</a></p>`
+    + `<p style="margin:0 0 14px">Your <b>Cost Sheet</b> is attached to this email for your records. Our Customer Relations team will contact you shortly to confirm your booking.</p>`
+    + `<p style="margin:0 0 4px">Warm regards,</p><p style="margin:0"><b>Pallabita Ghosh</b></p><p style="margin:0;color:#4b5563">Manager &ndash; Post Sales &middot; Customer Relations Team</p><p style="margin:0 0 14px;color:#4b5563">Reach me @ 8420541541</p>`);
+  const text = `Dear ${[first.title, clean(first.full_name)].filter(Boolean).join(" ") || "Sir / Madam"},\n\nThank you for choosing ${proj.name}. We have received your booking application and your email has been verified.\n\n`
+    + `Reference number: ${ref}\nProject: ${proj.name}\n${unit ? "Unit: " + unit + "\n" : ""}\nView your submitted form: ${viewUrl}\n\nYour Cost Sheet is attached to this email for your records. Our Customer Relations team will contact you shortly to confirm your booking.\n\nWarm regards,\nPallabita Ghosh\nManager - Post Sales | Customer Relations Team\nReach me @ 8420541541`;
+  const attachments: any[] = [];
+  const pdf = await costBytes(link);
+  if (pdf) { let bin = ""; for (let i = 0; i < pdf.length; i += 0x8000) bin += String.fromCharCode(...pdf.subarray(i, i + 0x8000)); attachments.push({ filename: String(link.prefill?.cost_sheet?.name || "Cost Sheet.pdf"), content: btoa(bin), encoding: "base64", contentType: "application/pdf" }); }
+  const cc = [...new Set([SALES_HEAD, ...proj.team].map((x) => x.toLowerCase()))];
+  return await sendMail({ to: [email], cc, subject: `Booking received - ${proj.name} - ${ref}`, html, text, attachments, kind: "confirmation" });
+}
+
+// ---- OTP (13 Nov 2026): before a generated link is submitted, the customer proves the email address with a 6-digit code. The code is kept only as a hash (acc.digital_booking_links.otp).
+const sha256hex = async (s: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))).map((x) => x.toString(16).padStart(2, "0")).join("");
+const otpHash = (code: string, link: any, email: string) => sha256hex(`${code}:${link.id}:${email}:${SRV.slice(0, 24)}`);
+const OTP_TTL = 10 * 60_000, OTP_GAP = 30_000, OTP_PER_HOUR = 5, OTP_TRIES = 5;
+const needsOtp = (link: any) => !!(link && link.prefill && link.prefill.cost_sheet && link.prefill.cost_sheet.path);
+async function otpSend(link: any) {
+  const d = link.draft && typeof link.draft === "object" ? link.draft : {};
+  const email = clean(d.contact?.email, 200).toLowerCase();
+  if (!MAIL_RE.test(email)) return j({ error: "Please check your email address on the Contact page.", code: "bad_email" }, 422);
+  // an address whose domain cannot receive email (a typo such as gmial.con) is turned back at once
+  const domain = email.split("@")[1];
+  try { const mx = await (Deno as any).resolveDns(domain, "MX"); if (!mx || !mx.length) throw new Error("nomx"); }
+  catch (e) { const m = String((e as Error)?.name || "") + String((e as Error)?.message || ""); if (/NotFound|NoData|nomx|NXDOMAIN|no records/i.test(m)) return j({ error: `We could not find a mailbox for ${email} - the part after @ (${domain}) cannot receive email. Please check the address.`, code: "bad_domain" }, 422); }
+  const now = Date.now(), prev = link.otp && typeof link.otp === "object" ? link.otp : {};
+  const sent: number[] = (Array.isArray(prev.sent) ? prev.sent : []).filter((t: number) => now - t < 3600_000);
+  if (sent.length && now - sent[sent.length - 1] < OTP_GAP) return j({ error: "Please wait a few seconds before asking for another code.", code: "too_soon", wait: Math.ceil((OTP_GAP - (now - sent[sent.length - 1])) / 1000) }, 429);
+  if (sent.length >= OTP_PER_HOUR) return j({ error: "Too many codes were asked for in the last hour. Please try again later or call us.", code: "too_many" }, 429);
+  const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, "0");
+  const otp = { hash: await otpHash(code, link, email), email, exp: now + OTP_TTL, sent: [...sent, now], tries: 0 };
+  await db(`digital_booking_links?id=eq.${link.id}&status=eq.open`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ otp }) });
+  try { await sendOtpMail(PROJECTS[link.project], email, code); }
+  catch (e) {
+    console.error("otp mail", e);
+    await db(`digital_booking_links?id=eq.${link.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ otp: { ...otp, hash: "", sent } }) }).catch(() => {});
+    return j({ error: `We could not send the code to ${email}. Please check that the address is right (Contact page) and try again.`, code: "mail_failed" }, 502);
+  }
+  return j({ ok: true, to: maskEmail(email), email, resend_after: OTP_GAP / 1000, expires_in: OTP_TTL / 1000 });
+}
+// null = the code is right; otherwise the response to give back.
+async function otpCheck(link: any, email: string, code: string): Promise<Response | null> {
+  const o = link.otp && typeof link.otp === "object" ? link.otp : null;
+  if (!code) return j({ error: "Please enter the 6-digit code we emailed you.", code: "otp_required" }, 400);
+  if (!o || !o.hash) return j({ error: "Please ask for a new code.", code: "otp_required" }, 400);
+  if (Date.now() > Number(o.exp || 0)) return j({ error: "That code has expired. Please ask for a new one.", code: "otp_expired" }, 400);
+  if (Number(o.tries || 0) >= OTP_TRIES) return j({ error: "Too many wrong codes. Please ask for a new code.", code: "otp_locked" }, 400);
+  if (o.email !== email) return j({ error: "The email address was changed after the code was sent. Please ask for a new code.", code: "otp_email_changed" }, 400);
+  if ((await otpHash(String(code).replace(/\s/g, ""), link, email)) !== o.hash) {
+    const tries = Number(o.tries || 0) + 1;
+    await db(`digital_booking_links?id=eq.${link.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ otp: { ...o, tries } }) }).catch(() => {});
+    return j({ error: `That code is not correct.${tries < OTP_TRIES ? ` ${OTP_TRIES - tries} tries left.` : " Please ask for a new code."}`, code: "otp_wrong", left: Math.max(0, OTP_TRIES - tries) }, 400);
+  }
+  return null;
+}
+
 async function handleJson(req: Request) {
   let b: any;
   try { b = await req.json(); } catch (_) { return j({ error: "The request did not arrive complete." }, 400); }
+  if (b.action === "projects") return j({ ok: true, projects: Object.keys(PROJECTS).map(projectInfo) });
   const link = await getLink(String(b.token || ""));
   if (!link) return j({ error: NOT_VALID }, 404);
   const proj = PROJECTS[link.project];
@@ -177,16 +347,27 @@ async function handleJson(req: Request) {
       files.push({ applicant: Number(x.applicant) - 1, kind: x.kind, name: x.name, url });
     }
     const data = JSON.parse(JSON.stringify(f.data || {})); delete data.website;
-    return j({ ok: true, staff: true, status: "completed", ref_no: link.ref_no || "", form: { data, files, submitted_at: f.submitted_at, status: f.status, note: f.note || "", seen_by: f.seen_by || "", seen_at: f.seen_at || null } });
+    return j({ ok: true, staff: true, status: "completed", ref_no: link.ref_no || "", project: projectInfo(link.project), cost: costMeta(link), form: { data, files, submitted_at: f.submitted_at, status: f.status, note: f.note || "", seen_by: f.seen_by || "", seen_at: f.seen_at || null } });
   }
 
+  if (b.action === "cost_pdf") {
+    if (link.status === "cancelled") return j({ error: NOT_VALID }, 404);
+    const bytes = await costBytes(link);
+    if (!bytes) return j({ error: "There is no cost sheet on this link." }, 404);
+    return new Response(bytes, { status: 200, headers: { ...cors, "Content-Type": "application/pdf", "Cache-Control": "no-store" } });
+  }
+  if (b.action === "otp_send") {
+    if (link.status !== "open") return j({ error: link.status === "completed" ? "This form has already been submitted." : NOT_VALID }, 409);
+    if (!needsOtp(link)) return j({ error: "This link does not use a code." }, 400);
+    return await otpSend(link);
+  }
   if (b.action === "load") {
     if (link.status === "cancelled") return j({ ok: true, status: "cancelled" });
     if (link.status === "completed") return j({ ok: true, status: "completed", ref_no: link.ref_no || "", submitted: await submittedView(link).catch(() => null) });
     if (!link.opened_at) await db(`digital_booking_links?id=eq.${link.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ opened_at: new Date().toISOString() }) });
     return j({
-      ok: true, status: "open", project: link.project, prefill: link.prefill || {},
-      draft: link.draft || null, step: link.draft_step || 0, sig: link.draft_sig || null,
+      ok: true, status: "open", project: link.project, projectInfo: projectInfo(link.project), prefill: publicPrefill(link), cost: costMeta(link), otp_required: needsOtp(link),
+      draft: link.draft || null, step: link.draft_step || 0,
       files: (Array.isArray(link.draft_files) ? link.draft_files : []).map(draftFileView),
     });
   }
@@ -296,28 +477,25 @@ async function handleSubmit(form: FormData, ip: string, req: Request) {
     const m = /^f_(\d)_(pan|aadhaar)_\d$/.exec(k) || /^sig_(\d)$/.exec(k);
     if (!m) continue;
     const ai = Number(m[1]); if (ai >= apps.length) continue;
-    const kind = k.startsWith("sig_") ? "signature" : m[2];
+    if (k.startsWith("sig_")) continue;   // a signature is no longer kept
+    const kind = m[2];
     if (v.size > MAX_FILE) return j({ error: `A file for applicant ${ai + 1} is larger than 10 MB. Please attach a smaller photo or PDF.` }, 400);
     if (kind !== "signature" && !OK_TYPES.test(v.type || "")) return j({ error: `Please attach PAN / Aadhaar as a photo (JPG, PNG) or PDF.` }, 400);
     if (kind === "signature" && v.type !== "image/png") continue;
     total += v.size; files.push({ applicant: ai, kind, file: v });
   }
-  // The signature drawn earlier on a generated link was kept as a data URL.
-  if (link && !files.some((f) => f.kind === "signature") && typeof link.draft_sig === "string" && link.draft_sig.startsWith("data:image/png;base64,")) {
-    const bin = Uint8Array.from(atob(link.draft_sig.split(",")[1]), (ch) => ch.charCodeAt(0));
-    files.push({ applicant: 0, kind: "signature", file: new File([bin], "signature.png", { type: "image/png" }) });
-  }
   if (total > MAX_TOTAL) return j({ error: "The attached files are too large together (over 45 MB). Please attach smaller photos." }, 400);
   const has = (ai: number, kind: string) => files.some((f) => f.applicant === ai && f.kind === kind) || kept.some((f) => f.applicant === ai && f.kind === kind);
   apps.forEach((a: any, i: number) => {
     const who = i ? `Applicant ${i + 1}` : "First applicant";
-    // Only the first applicant signs (the user's decision, 2 Nov 2026).
-    if (i === 0 && !files.some((f) => f.applicant === 0 && f.kind === "signature")) problems.push(`${who} has not signed`);
+    // 13 Nov 2026: no signature is asked for or kept any more.
     const indian = !clean(a.nationality) || /^india$/i.test(clean(a.nationality));
     if (indian && !has(i, "pan")) problems.push(`${who}: please attach the PAN card`);
     if (indian && !has(i, "aadhaar")) problems.push(`${who}: please attach the Aadhaar card`);
   });
   if (problems.length) return j({ error: "Please check: " + problems.join("; ") + ".", problems }, 400);
+  // A link made with a cost sheet is submitted only with the 6-digit code emailed to the customer (13 Nov 2026).
+  if (link && needsOtp(link)) { const bad = await otpCheck(link, clean(c.email, 200).toLowerCase(), clean(form.get("otp"), 12)); if (bad) return bad; }
 
   try {
     // ---- at most 5 an hour from one address
@@ -355,7 +533,13 @@ async function handleSubmit(form: FormData, ip: string, req: Request) {
         status: "completed", completed_at: new Date().toISOString(), form_id: id, ref_no: ref, draft: null, draft_sig: null, draft_files: [],
       }) });
     }
-    return j({ ok: true, ref_no: ref });
+    let mail: any = null;
+    if (link && needsOtp(link)) {
+      try { const r = await sendConfirmation(proj, link, d, ref); mail = { sent: true, live: r.live, at: new Date().toISOString() }; }
+      catch (e) { console.error("confirmation mail", e); mail = { sent: false, error: String((e as Error)?.message || e).slice(0, 200), at: new Date().toISOString() }; }
+      try { await db("digital_booking_forms?id=eq." + id, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ confirm_mail: mail }) }); } catch (_) { /* column may not exist yet */ }
+    }
+    return j({ ok: true, ref_no: ref, email: mail && mail.sent ? maskEmail(clean(c.email, 200).toLowerCase()) : "" });
   } catch (e) {
     console.error(e);
     return j({ error: "We could not save your form just now. Nothing was lost on your phone - please press Submit again in a minute." }, 500);
@@ -371,6 +555,7 @@ Deno.serve(async (req) => {
     if ((req.headers.get("content-type") || "").includes("application/json")) return await handleJson(req);
     let form: FormData;
     try { form = await req.formData(); } catch (_) { return j({ error: "The form did not arrive complete. Please try again." }, 400); }
+    if (clean(form.get("action"), 20) === "staff_cost_upload") return await handleCostUpload(form, req);
     if (clean(form.get("action"), 20) === "upload") return await handleUpload(form);
     return await handleSubmit(form, ip, req);
   } catch (e) {

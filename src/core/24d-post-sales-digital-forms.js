@@ -139,7 +139,7 @@ const PDF_COUNTRIES=[['India','+91'],['United Arab Emirates','+971'],['United St
 function pdfLinkUrl(token){ return location.origin+'/booking-form.html?t='+token; }
 async function pdfLoadLinks(){
   const {data,error}=await sb.schema('acc').from('digital_booking_links')
-    .select('id,token,status,prefill,customer_name,created_by,created_at,opened_at,draft_step,draft_saved_at,completed_at,form_id,ref_no')
+    .select('id,token,status,project,prefill,customer_name,created_by,created_at,opened_at,draft_step,draft_saved_at,completed_at,form_id,ref_no')
     .order('created_at',{ascending:false}).limit(300);
   PDF_LINKS.ok=!error; PDF_LINKS.rows=error?[]:(data||[]);
 }
@@ -223,6 +223,15 @@ const PG_CSS='<style>'
   +'.pg-card .pg-seg button{min-width:34px;padding:0 11px}'
   +'@media(max-height:820px){.pg-cards{gap:12px}.pg-card{padding:12px 18px 15px}.pg-card>h4{margin-bottom:8px}.pg-in{height:38px}.pg-seg button{height:32px}.pg-bar{margin-top:12px}.pg-main{padding-top:12px!important}}'
   +'@media(min-height:880px){.pg-in{height:44px;font-size:15px}.pg-seg button{height:38px}.pg-card{padding:20px 24px 24px}.pg-f label{font-size:13px}.pg-bf{gap:14px 20px}.pg-cards{gap:20px}}'
+  +'.pg-seg{flex-wrap:wrap;max-width:100%}'
+  +'.pg-card.pg-slim{display:flex;align-items:center;gap:16px;padding:8px 20px}'
+  +'.pg-card.pg-slim>label{display:block;margin:0;white-space:nowrap;width:130px;flex:none;font-size:12.5px;font-weight:500;color:#4b5563}'
+  +'.pg-slim .ctl{flex:0 1 420px;min-width:0}.pg-slim .ctl.w{flex:0 1 700px}.pg-slim .pg-e{margin:0;flex:1 1 auto}'
+  +'.pg-wrap>.pg-slim:first-child{margin-bottom:16px}.pg-cards+.pg-slim{margin-top:16px}'
+  +'.pg-cost{display:flex;align-items:center;gap:10px;min-height:40px;min-width:0}.pg-cost .nm{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}'
+  +'.pg-cost .sz{color:var(--pgm);font-size:13px;white-space:nowrap}.pg-cost .btn{flex:none}.pg-cost .pdf{color:#d9534f}.pg-cost .up{color:var(--pgm);font-size:13.5px}'
+  +'@media(max-width:640px){.pg-card.pg-slim{flex-wrap:wrap;gap:6px}.pg-card.pg-slim>label{width:auto}.pg-slim .ctl,.pg-slim .ctl.w{flex:1 1 100%}}'
+  +'@media(max-height:820px){.pg-wrap>.pg-slim:first-child{margin-bottom:12px}.pg-cards+.pg-slim{margin-top:12px}.pg-card.pg-slim{padding:6px 18px}.pg-cost{min-height:38px}}'
   +'</style>';
 function pdfWords(n){
   n=Math.floor(Number(n)); if(!n||n<0) return '';
@@ -240,23 +249,119 @@ function pgFit(el){ const v=document.getElementById('view'); if(!v||!el||!el.sty
   el.style.top=Math.max(0,tb)+'px'; el.style.left=Math.max(0,r.left)+'px'; el.style.right='0px'; el.style.bottom='0px'; el.style.zIndex=50; }
 window.addEventListener('resize',function(){ pgFit(document.getElementById('pgPage')); pgFit(document.getElementById('pdPage')); });
 window.addEventListener('hashchange',function(){ if(typeof pgClose==='function') pgClose(); if(typeof pdClose==='function') pdClose(); });
-const PG={editId:null,editToken:null,draftId:null};
+const PG={editId:null,editToken:null,draftId:null,project:null,projReady:false,cost:null,uploading:false,openSeq:0};
 const PG_DRAFTS={rows:[],ok:false};
+/* PROJECTS and COST SHEET (13 Nov 2026). Sales picks the project (the list comes from the public edge function, fetched once and kept) and attaches the
+   cost sheet PDF (compulsory; uploaded at once through the same function, the answer {path,name,size} is kept in PG.cost and travels in the prefill as cost_sheet). */
+const PG_FN='https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/booking-form-public';
+const PG_PROJ={list:null};
+function pgProjName(key){ const p=(PG_PROJ.list||[]).filter(x=>x.key===key)[0]; return p?p.name:(key||'—'); }
+function pgSegH(id,opts,def){ return '<input type="hidden" id="'+id+'" value="'+esc(def)+'"><div class="pg-seg" role="radiogroup">'+opts.map(o=>'<button type="button" class="'+(o===def?'on':'')+'" onclick="pgSeg(this,\''+id+'\')">'+esc(o)+'</button>').join('')+'</div>'; }
+function pgSize(n){ n=Number(n)||0; return n<1024?n+' B':(n<1048576?Math.round(n/1024)+' KB':(n/1048576).toFixed(1)+' MB'); }
+async function pgFetchProjects(){
+  const r=await fetch(PG_FN,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'projects'})});
+  const j=await r.json().catch(function(){ return null; });
+  if(!r.ok||!j||!j.ok||!Array.isArray(j.projects)||!j.projects.length) throw new Error((j&&j.error)||'no projects came back');
+  return j.projects;
+}
+// The Generate button waits while the project list loads or a cost sheet is uploading.
+function pgSyncGo(){ const b=$('pgGo'); if(b) b.disabled=!PG.projReady||PG.uploading; }
+// A project was chosen: its blocks, floors and bedroom choices replace the old ones, and the choices go back to the first / default.
+function pgProjApply(p){
+  PG.project=p; if(!p) return;
+  const nm=$('pgProjName'); if(nm) nm.textContent='· '+p.name;
+  const blocks=Array.isArray(p.blocks)?p.blocks.map(String):[], bhk=Array.isArray(p.bhk)?p.bhk.map(String):[];
+  const nf=Math.max(1,Math.floor(Number(p.floors))||8), bd=bhk.indexOf(p.bhkDefault)>=0?p.bhkDefault:(bhk[0]||'');
+  const b=$('pgC_pgBlock'); if(b) b.innerHTML=pgSegH('pgBlock',blocks,blocks[0]||'');
+  const h=$('pgC_pgBhk'); if(h) h.innerHTML=pgSegH('pgBhk',bhk,bd);
+  const fl=$('pgC_pgFloor');
+  if(fl){
+    const fs=[]; for(let i=1;i<=nf;i++) fs.push(String(i));
+    fl.innerHTML=nf>12?'<select class="pg-in" id="pgFloor" style="min-width:96px">'+fs.map(x=>'<option value="'+x+'">'+x+'</option>').join('')+'</select>':pgSegH('pgFloor',fs,'1');
+  }
+}
+window.pgProjChange=function(){ const k=($('pgProject')||{}).value, p=(PG_PROJ.list||[]).filter(x=>x.key===k)[0]; if(p) pgProjApply(p); };
+async function pgProjInit(editRow){
+  const seq=PG.openSeq, sel=$('pgProject');
+  if(!sel) return;
+  if(!PG_PROJ.list){
+    try{ PG_PROJ.list=await pgFetchProjects(); }
+    catch(e){
+      if(seq!==PG.openSeq||!$('pgProject')) return;
+      sel.innerHTML='<option value="">Projects not available</option>'; sel.disabled=true;
+      const er=$('pgE_pgProject'); if(er) er.textContent='Could not load the projects ('+((e&&e.message)||'error')+'). Close this page and open it again.';
+      const fb=$('pgF_pgProject'); if(fb) fb.classList.add('bad');
+      return;
+    }
+  }
+  if(seq!==PG.openSeq||!$('pgProject')) return;
+  const list=PG_PROJ.list;
+  let key=editRow?(editRow.project||'ananta'):(list.some(x=>x.key==='ananta')?'ananta':list[0].key);
+  let p=list.filter(x=>x.key===key)[0];
+  let opts=list.map(x=>'<option value="'+esc(x.key)+'">'+esc(x.name)+'</option>').join('');
+  if(!p){   // an old link whose project is no longer in the list: its own flat details keep the page usable
+    const fl=(editRow&&editRow.prefill&&editRow.prefill.values&&editRow.prefill.values.flat)||{};
+    p={key:key,name:key,blocks:[fl.block].filter(Boolean),floors:Math.max(8,Number(fl.floor)||0),bhk:[fl.bhk].filter(Boolean),bhkDefault:fl.bhk};
+    opts+='<option value="'+esc(key)+'">'+esc(key)+'</option>';
+  }
+  sel.innerHTML=opts; sel.value=key; sel.disabled=!!editRow;   // editing: the project is fixed
+  const fb=$('pgF_pgProject'); if(fb) fb.classList.remove('bad'); const er=$('pgE_pgProject'); if(er) er.textContent='';
+  pgProjApply(p);
+  PG.projReady=true; pgSyncGo();
+  const l=$('pgList'); if(l&&PDF_LINKS.ok) l.innerHTML=pdfGenListHtml();
+  if(editRow) pgFill(editRow);
+}
+// The cost sheet row: Choose PDF, or the file name and size with Replace, or Uploading.
+function pgCostDraw(){
+  const h=$('pgCostBox'); if(!h) return;
+  if(PG.uploading){ h.innerHTML='<span class="up"><i class="fa-solid fa-spinner fa-spin"></i> Uploading...</span>'; return; }
+  const c=PG.cost;
+  h.innerHTML=(c&&c.path)?'<i class="fa-regular fa-file-pdf pdf"></i><span class="nm" title="'+esc(c.name||'')+'">'+esc(c.name||'Cost sheet.pdf')+'</span><span class="sz">&middot; '+esc(pgSize(c.size))+'</span><button type="button" class="btn" style="padding:4px 12px" onclick="pgCostChoose()">Replace</button>'
+    :'<button type="button" class="btn" onclick="pgCostChoose()"><i class="fa-solid fa-file-arrow-up"></i> Choose PDF</button><span class="sz">PDF only, up to 10 MB</span>';
+}
+function pgCostMsg(m){ const e=$('pgE_pgCost'), fb=$('pgF_pgCost'); if(e) e.textContent=m||''; if(fb&&fb.classList) fb.classList.toggle('bad',!!m); }
+window.pgCostChoose=function(){ const i=$('pgCostFile'); if(i&&!PG.uploading) i.click(); };
+window.pgCostPick=async function(inp){
+  const file=inp.files&&inp.files[0]; inp.value='';
+  if(!file) return;
+  pgCostMsg('');
+  if(!(file.type==='application/pdf'||/\.pdf$/i.test(file.name))){ pgCostMsg('The cost sheet must be a PDF file. Please choose a .pdf file.'); return; }
+  if(file.size>10*1048576){ pgCostMsg('This PDF is '+pgSize(file.size)+'. The cost sheet can be 10 MB at most.'); return; }
+  if(!file.size){ pgCostMsg('This file is empty. Please choose the cost sheet PDF.'); return; }
+  const seq=PG.openSeq;
+  PG.uploading=true; pgCostDraw(); pgSyncGo();
+  let cost=null, msg='';
+  try{
+    const ss=await sb.auth.getSession(), tok=ss&&ss.data&&ss.data.session&&ss.data.session.access_token;
+    if(!tok) throw new Error('please sign in again');
+    const fd=new FormData(); fd.append('action','staff_cost_upload'); fd.append('file',file,file.name);
+    const r=await fetch(PG_FN,{method:'POST',headers:{Authorization:'Bearer '+tok},body:fd});
+    const j=await r.json().catch(function(){ return null; });
+    if(!r.ok||!j||!j.ok||!j.cost||!j.cost.path) throw new Error((j&&j.error)||'the upload did not go through');
+    cost=j.cost;
+  }catch(e){ msg='Could not upload the cost sheet: '+((e&&e.message)||'error'); }
+  if(seq!==PG.openSeq) return;   // the page was reopened meanwhile
+  PG.uploading=false; if(cost) PG.cost=cost;
+  pgCostDraw(); pgSyncGo(); pgCostMsg(msg);
+};
 window.pdfGenOpen=function(editRow){
   if(!pdfCanGenerate()) return;
   PG.editId=editRow&&editRow.id||null; PG.editToken=editRow&&editRow.token||null; PG.draftId=null;
+  PG.project=null; PG.projReady=false; PG.cost=null; PG.uploading=false; PG.openSeq++;
   const old=document.getElementById('pgPage'); if(old) old.remove();
   const f=(id,label,ctl,o)=>{ o=o||{}; return '<div class="pg-f" id="pgF_'+id+'"><label for="'+id+'">'+label+(o.req?' <span class="r">*</span>':'')+(o.opt?' <span class="o">(optional)</span>':'')+'</label>'+ctl
     +(o.help?'<div class="pg-help" id="pgH_'+id+'">'+o.help+'</div>':'')+'<div class="pg-e" id="pgE_'+id+'"></div></div>'; };
   const sel=(id,opts,def,cls)=>'<select class="pg-in'+(cls?' '+cls:'')+'" id="'+id+'">'+opts.map(o=>{ const v=Array.isArray(o)?o[0]:o, t=Array.isArray(o)?o[1]:o; return '<option value="'+esc(v)+'"'+(v===def?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+'</select>';
-  const seg=(id,opts,def)=>'<input type="hidden" id="'+id+'" value="'+esc(def)+'"><div class="pg-seg" role="radiogroup">'+opts.map(o=>'<button type="button" class="'+(o===def?'on':'')+'" onclick="pgSeg(this,\''+id+'\')">'+esc(o)+'</button>').join('')+'</div>';
-  const floors=['1','2','3','4','5','6','7','8'], codes=PDF_COUNTRIES.map(c=>c[1]).filter((x,i,a)=>a.indexOf(x)===i);
+  const seg=pgSegH;   // Block, Floor and Bedrooms are put in by pgProjApply once the project list is here
+  const codes=PDF_COUNTRIES.map(c=>c[1]).filter((x,i,a)=>a.indexOf(x)===i);
   const page=document.createElement('div'); page.id='pgPage';
   page.innerHTML=PG_CSS
-    +'<div class="pg-top"><button class="btn" onclick="pgClose()"><i class="fa-solid fa-arrow-left"></i> Back</button><h2><i class="fa-solid fa-link"></i> Generate Form <span>&middot; Dream Ananta</span></h2></div>'
+    +'<div class="pg-top"><button class="btn" onclick="pgClose()"><i class="fa-solid fa-arrow-left"></i> Back</button><h2><i class="fa-solid fa-link"></i> Generate Form <span id="pgProjName"></span></h2></div>'
     +'<div class="pg-tabs"><button class="on" id="pgT_new" onclick="pgTab(\'new\')">NEW</button><button id="pgT_drafts" onclick="pgTab(\'drafts\')">DRAFTS <span class="pg-n" id="pgDCount">…</span></button><button id="pgT_list" onclick="pgTab(\'list\')">Generated forms <span class="pg-n" id="pgCount">…</span></button></div>'
     +'<div class="pg-main" id="pgNew"><div id="pgBody"><div id="pgEditNote"></div>'
-    +'<div class="pg-wrap"><div class="pg-cards">'
+    +'<div class="pg-wrap">'
+    +'<div class="pg-card pg-slim pg-f" id="pgF_pgProject"><label for="pgProject">Project <span class="r">*</span></label><div class="ctl"><select class="pg-in" id="pgProject" onchange="pgProjChange()" disabled><option value="">Loading projects...</option></select></div><div class="pg-e" id="pgE_pgProject"></div></div>'
+    +'<div class="pg-cards">'
     +'<div class="pg-card"><h4>Customer</h4><div class="pg-bf" style="--c:100px minmax(0,1fr)">'
       +f('pgTitle','Title',sel('pgTitle',['Mr.','Ms.','Mrs.','Mast.','M/s.'],'Mr.'))
       +f('pgName','Customer name','<input class="pg-in" id="pgName" style="text-transform:uppercase" autocomplete="off" placeholder="As on the PAN card" oninput="pgNameSync()">',{req:1})
@@ -270,26 +375,29 @@ window.pdfGenOpen=function(editRow){
     +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
       +f('pgContact','Contact person','<input class="pg-in" id="pgContact" style="text-transform:uppercase" autocomplete="off" placeholder="Same as the customer name" oninput="this.dataset.touched=1">',{opt:1})
     +'</div></div>'
-    +'<div class="pg-card"><h4>Flat</h4><div class="pg-bf" style="--c:auto minmax(0,1fr)">'
-      +f('pgBlock','Block',seg('pgBlock',['Block D','Block E'],'Block D'))
+    +'<div class="pg-card"><h4>Flat</h4><div class="pg-bf" style="--c:minmax(0,1fr)">'
+      +f('pgBlock','Block','<div id="pgC_pgBlock">'+seg('pgBlock',[],'')+'</div>')
+    +'</div><div class="pg-bf" style="--c:auto minmax(0,1fr)">'
+      +f('pgFloor','Floor','<div id="pgC_pgFloor">'+seg('pgFloor',[],'')+'</div>')
       +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{opt:1})
-    +'</div><div class="pg-bf" style="--c:auto">'
-      +f('pgFloor','Floor',seg('pgFloor',floors,'1'))
     +'</div></div>'
     +'<div class="pg-card"><h4>Size &amp; price</h4><div class="pg-bf" style="--c:auto auto">'
-      +f('pgBhk','Bedrooms',seg('pgBhk',['2 BHK','3 BHK','4 BHK'],'3 BHK'))
+      +f('pgBhk','Bedrooms','<div id="pgC_pgBhk">'+seg('pgBhk',[],'')+'</div>')
       +f('pgPark','Car park',seg('pgPark',['Covered','Open'],'Covered'))
     +'</div><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
       +f('pgSba','Super built-up area','<div class="pg-suf"><input class="pg-in" id="pgSba" inputmode="decimal" autocomplete="off" placeholder="1325"><span>sq.ft.</span></div>',{req:1})
       +f('pgTotal','Total sale price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
     +'</div></div>'
-    +'</div></div>'
+    +'</div>'
+    +'<div class="pg-card pg-slim pg-f" id="pgF_pgCost"><label>Cost sheet (PDF) <span class="r">*</span></label><div class="ctl w"><div class="pg-cost" id="pgCostBox"></div><input type="file" id="pgCostFile" accept="application/pdf,.pdf" style="display:none" onchange="pgCostPick(this)"></div><div class="pg-e" id="pgE_pgCost"></div></div>'
+    +'</div>'
     +'<div class="pg-wrap"><div class="pg-bar"><span class="msg" id="pgErr" style="color:var(--slate);font-weight:400">What you fill in is pre-filled for the customer - they can still change it. They fill in the rest (PAN, Aadhaar, address, payment).</span><button class="btn" onclick="pgClose()">Cancel</button><button class="btn" id="pgDraftBtn" onclick="pgSaveDraft()"><i class="fa-regular fa-floppy-disk"></i> Save draft</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div></div>'
     +'</div></div>'
     +'<div class="pg-main" id="pgDraftsWrap" style="display:none"><div id="pgDrafts"></div></div>'
     +'<div class="pg-main" id="pgListWrap" style="display:none"><div id="pgList"></div></div>';
   document.body.appendChild(page); pgFit(page);
-  if(editRow) pgFill(editRow);
+  pgCostDraw(); pgSyncGo();
+  pgProjInit(editRow||null);   // fills the project list, then (when editing) the boxes
   pdfGenList();
 };
 window.pgTab=function(t){ [['new','pgNew','pgT_new'],['drafts','pgDraftsWrap','pgT_drafts'],['list','pgListWrap','pgT_list']].forEach(function(x){ const on=x[0]===t; $(x[1]).style.display=on?'':'none'; $(x[2]).className=on?'on':''; }); };
@@ -302,10 +410,19 @@ window.pgMoney=function(inp){ const d=inp.value.replace(/[^\d]/g,''); inp.value=
 // The boxes as they are now (a draft keeps them exactly like this, even half empty).
 function pgRaw(){ const g=id=>($(id)||{}).value||''; const c=$('pgContact');
   return {title:g('pgTitle'),nat:g('pgNat'),name:g('pgName'),dob:g('pgDob'),cc:g('pgCc'),mobile:g('pgMobile'),email:g('pgEmail'),contact:g('pgContact'),contactTouched:!!(c&&c.dataset&&c.dataset.touched),
-    block:g('pgBlock'),floor:g('pgFloor'),bhk:g('pgBhk'),park:g('pgPark'),flat:g('pgFlat'),sba:g('pgSba'),total:g('pgTotal')}; }
+    block:g('pgBlock'),floor:g('pgFloor'),bhk:g('pgBhk'),park:g('pgPark'),flat:g('pgFlat'),sba:g('pgSba'),total:g('pgTotal'),
+    project:g('pgProject'),cost:PG.cost||null}; }
 function pgFillRaw(r){
   const set=(id,val)=>{ const e=$(id); if(e&&val!=null) e.value=val; };
-  const seg=(id,val)=>{ const e=$(id); if(!e||val==null||val==='') return; e.value=val; e.parentNode.querySelectorAll('.pg-seg button').forEach(function(b){ b.classList.toggle('on',b.textContent.trim()===String(val)); }); };
+  // a draft of another project: the project is chosen first so its blocks / floors / bedrooms are the ones on the page (not while editing a link - its project is fixed)
+  const ps=$('pgProject');
+  if(r.project&&ps&&!ps.disabled&&ps.value!==r.project){ const p=(PG_PROJ.list||[]).filter(x=>x.key===r.project)[0]; if(p){ ps.value=r.project; pgProjApply(p); } }
+  // only a choice that exists on the page is taken (the buttons, or the options of the floor list)
+  const seg=(id,val)=>{ const e=$(id); if(!e||val==null||val==='') return; const v=String(val);
+    if(e.tagName==='SELECT'){ if([].some.call(e.options,function(o){ return o.value===v; })) e.value=v; return; }
+    const bs=[].slice.call(e.parentNode.querySelectorAll('.pg-seg button')); if(!bs.some(function(b){ return b.textContent.trim()===v; })) return;
+    e.value=v; bs.forEach(function(b){ b.classList.toggle('on',b.textContent.trim()===v); }); };
+  if('cost' in r){ PG.cost=(r.cost&&r.cost.path)?r.cost:null; pgCostDraw(); pgCostMsg(''); }
   set('pgTitle',r.title); set('pgNat',r.nat); set('pgName',r.name); set('pgDob',r.dob); set('pgCc',r.cc); set('pgMobile',r.mobile); set('pgEmail',r.email); set('pgContact',r.contact);
   if(r.contactTouched&&$('pgContact')) $('pgContact').dataset.touched=1;
   seg('pgBlock',r.block); seg('pgFloor',r.floor); seg('pgBhk',r.bhk); seg('pgPark',r.park); set('pgFlat',r.flat); set('pgSba',r.sba); set('pgTotal',r.total);
@@ -315,7 +432,8 @@ function pgFillRaw(r){
 function pgFill(row){
   const v=(row.prefill&&row.prefill.values)||{}, a=(v.applicants&&v.applicants[0])||{}, c=v.contact||{}, fl=v.flat||{}, pr=v.price||{};
   pgFillRaw({title:a.title,nat:a.nationality,name:a.full_name,dob:a.dob,cc:c.cc,mobile:c.mobile,email:c.email,contact:c.contact_person,contactTouched:!!(c.contact_person&&c.contact_person!==a.full_name),
-    block:fl.block,floor:fl.floor,bhk:fl.bhk,park:fl.parking,flat:fl.flat_no,sba:pr.sba,total:pr.total?Number(pr.total).toLocaleString('en-IN'):''});
+    block:fl.block,floor:fl.floor,bhk:fl.bhk,park:fl.parking,flat:fl.flat_no,sba:pr.sba,total:pr.total?Number(pr.total).toLocaleString('en-IN'):'',
+    cost:row.prefill&&row.prefill.cost_sheet});
   const n=$('pgEditNote'); if(n) n.innerHTML='<div class="pg-edit"><b>Editing the link for '+esc(a.full_name||'this customer')+'.</b> The link stays the same. The customer sees the new details the next time they open or refresh the form; what they have already typed stays.</div>';
   const g=$('pgGo'); if(g) g.innerHTML='<i class="fa-solid fa-floppy-disk"></i> Save changes';
   const d=$('pgDraftBtn'); if(d) d.style.display='none';
@@ -331,7 +449,9 @@ window.pdfGenerate=async function(){
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) bad('pgEmail','Please write a complete email address.');
   if(!(Number(sba)>0)) bad('pgSba','Please write the super built-up area.');
   if(!(Number(total)>0)) bad('pgTotal','Please write the total sale price.');
-  ['pgName','pgDob','pgMobile','pgEmail','pgSba','pgTotal'].forEach(function(id){ const e=$('pgE_'+id), fb=$('pgF_'+id); if(e) e.textContent=''; if(fb&&fb.classList) fb.classList.remove('bad'); });
+  if(!PG.project) bad('pgProject','Please choose the project.');
+  if(!PG.cost||!PG.cost.path) bad('pgCost','Please attach the cost sheet (PDF).');
+  ['pgName','pgDob','pgMobile','pgEmail','pgSba','pgTotal','pgProject','pgCost'].forEach(function(id){ const e=$('pgE_'+id), fb=$('pgF_'+id); if(e) e.textContent=''; if(fb&&fb.classList) fb.classList.remove('bad'); });
   if(fails.length){
     fails.forEach(function(x){ const e=$('pgE_'+x[0]), fb=$('pgF_'+x[0]); if(e) e.textContent=x[1]; if(fb&&fb.classList) fb.classList.add('bad'); });
     const m=$('pgErr'); if(m){ m.textContent=fails.length===1?'One thing to fix':fails.length+' things to fix'; m.style.color='#b3171d'; m.style.fontWeight='600'; }
@@ -346,11 +466,11 @@ window.pdfGenerate=async function(){
   const fields=['applicants.0.title','applicants.0.full_name','applicants.0.nationality','applicants.0.dob','contact.cc','contact.mobile','contact.email','contact.contact_person',
     'flat.block','flat.floor','flat.flat_no','flat.bhk','flat.parking','price.sba','price.total'];
   const btn=$('pgGo'); btn.disabled=true; btn.textContent=PG.editId?'Saving…':'Generating…';
-  const prefill={values:values,locked:[],fields:fields};   // locked: [] - nothing is locked since 13 Nov 2026; fields = what was pre-filled
+  const prefill={values:values,locked:[],fields:fields,cost_sheet:PG.cost};   // locked: [] - nothing is locked since 13 Nov 2026; fields = what was pre-filled; cost_sheet = {path,name,size}
   const editing=!!PG.editId;
   const res=editing?await sb.schema('acc').rpc('update_booking_link',{p_id:PG.editId,p_prefill:prefill})
-                   :await sb.schema('acc').rpc('generate_booking_link',{p_project:'ananta',p_prefill:prefill});
-  if(res.error||!res.data){ btn.disabled=false; btn.innerHTML=editing?'<i class="fa-solid fa-floppy-disk"></i> Save changes':'<i class="fa-solid fa-link"></i> Generate link'; const m=$('pgErr'); if(m) m.textContent=(editing?'Could not save the changes: ':'Could not generate the link: ')+((res.error&&res.error.message)||'nothing came back'); return; }
+                   :await sb.schema('acc').rpc('generate_booking_link',{p_project:PG.project.key,p_prefill:prefill});
+  if(res.error||!res.data){ pgSyncGo(); btn.innerHTML=editing?'<i class="fa-solid fa-floppy-disk"></i> Save changes':'<i class="fa-solid fa-link"></i> Generate link'; const m=$('pgErr'); if(m) m.textContent=(editing?'Could not save the changes: ':'Could not generate the link: ')+((res.error&&res.error.message)||'nothing came back'); return; }
   const token=editing?PG.editToken:res.data, url=pdfLinkUrl(token);
   if(!editing&&PG.draftId){ try{ await sb.schema('acc').from('digital_booking_drafts').delete().eq('id',PG.draftId); }catch(e){} PG.draftId=null; }
   $('pgBody').innerHTML='<div class="pg-done"><div class="ok"><i class="fa-solid fa-check"></i></div><h3>'+(editing?'Changes saved for ':'The link for ')+esc(name)+(editing?'':' is ready')+'</h3>'
@@ -367,9 +487,10 @@ function pdfGenListHtml(){
   const rows=PDF_LINKS.rows;
   if(!PDF_LINKS.ok) return '<div class="pg-empty">Generated forms are not available yet.</div>';
   if(!rows.length) return '<div class="pg-empty">Nothing generated yet. Your first link will appear here.</div>';
-  return '<table class="pg-t"><thead><tr><th>Customer</th><th>Flat</th><th>Made</th><th>Progress</th><th></th></tr></thead><tbody>'+rows.map(function(r){
+  return '<table class="pg-t"><thead><tr><th>Customer</th><th>Project</th><th>Flat</th><th>Made</th><th>Progress</th><th></th></tr></thead><tbody>'+rows.map(function(r){
     const v=(r.prefill&&r.prefill.values)||{}, f=v.flat||{};
     return '<tr><td><b>'+esc(r.customer_name||'—')+'</b></td>'
+      +'<td>'+esc(pgProjName(r.project))+'</td>'
       +'<td>'+esc([f.block,f.floor?'Floor '+f.floor:'',f.flat_no].filter(Boolean).join(' · ')||'—')+'</td>'
       +'<td>'+esc(pdfWhen(r.created_at))+'<div class="sub">'+esc(String(r.created_by||'').split('@')[0])+'</div></td>'
       +'<td>'+pdfLinkStatus(r)+'</td>'
@@ -410,6 +531,7 @@ window.pgSaveDraft=async function(){
 };
 window.pgOpenDraft=function(id){
   const r=PG_DRAFTS.rows.filter(x=>x.id===id)[0]; if(!r) return;
+  if(!PG.projReady){ toast('The projects are still loading - try again in a moment','err'); return; }
   pgFillRaw(r.values||{}); PG.draftId=id; pgTab('new');
 };
 window.pgDeleteDraft=async function(id){

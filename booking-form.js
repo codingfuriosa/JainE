@@ -22,8 +22,8 @@
 'use strict';
 const FN='https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/booking-form-public';
 const PROJECT=(new URLSearchParams(location.search).get('p')||'ananta').toLowerCase();
-const CONF={ananta:{name:'Dream Ananta',company:'Dream Gateway Hotels Ltd.',blocks:['Block D','Block E'],floors:8,
-  bhk:['2 BHK','3 BHK','4 BHK'],bhkDefault:'3 BHK',showRate:false}}[PROJECT];
+let CONF=({ananta:{name:'Dream Ananta',company:'Dream Gateway Hotels Ltd.',address:'44/2A Hazra Road, Kolkata – 700 019',blocks:['Block D','Block E'],floors:8,
+  bhk:['2 BHK','3 BHK','4 BHK'],bhkDefault:'3 BHK',showRate:false,logo:'assets/brand/dream-ananta-logo.png'}})[PROJECT];   // generated links replace this with their own project (setProject)
 /* A GENERATED LINK (booking-form.html?t=<token>, made by Sales with "Generate Form", 7 Nov 2026): the same page for everybody.
    The server holds what Sales filled in (LOCK = those answers: shown, never editable) and the customer's draft, which is saved
    on the server as they go - so closing the tab and opening the link again lands on the same step with everything filled.
@@ -34,7 +34,7 @@ let RO=false;   // a submitted form opened again through its link: shown as it w
 const LOCK=new Set();
 const DRAFT_KEY='jg-booking-form-'+PROJECT+'-v2';
 const MAX_APPS=6, MAX_REASONS=5;
-const STEPS=[['Applicant details'],['Contact & address'],['Occupation & source'],['Unit details'],['Booking amount'],['KYC documents'],['Terms & signature'],['Review & submit']];
+const STEPS=[['Applicant details'],['Contact & address'],['Occupation & source'],['Unit details'],['Booking amount'],['KYC documents'],['Terms & cost sheet'],['Review & submit']];
 
 // [name, ISO code for the flag, dialling code]
 const COUNTRIES=[['India','in','+91'],['United Arab Emirates','ae','+971'],['United States','us','+1'],['United Kingdom','gb','+44'],
@@ -65,7 +65,7 @@ if(!Array.isArray(S.applicants)||!S.applicants.length) S.applicants=[newApp()];
 if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
 // Files and the signature live only in this page (too big for the draft).
 let FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
-let SIG=null;
+let OTP_REQUIRED=false;   // a generated link made with a cost sheet is submitted with an emailed code
 let FROM_REVIEW=false;   // true while one section is being edited from the last (review) page: Continue / Back return straight there
 let PASS_OPEN=new Set();   // applicants whose Passport & bank panel was opened by hand (it is always open for a non-Indian applicant)
 let SPOUSE_OPEN=!!(S.applicants[0]&&(S.applicants[0].spouse||S.applicants[0].anniversary));   // Spouse & anniversary: hidden until asked for
@@ -345,23 +345,16 @@ const SPECIAL=[
  'In addition to the Applicant(s)/Allottee(s) liability to pay interest as mentioned herein above, the Applicant(s)/Allottee(s) shall be liable to pay and reimburse to Developer, all the cost, charges expenses and penalty/interest due to thereon, whatsoever, which are borne, paid and/or incurred by Developer for the purpose of enforcing payment of and recovering from the Applicant(s)/Allottee(s) any amount/s or duels whatsoever payable by the Applicant(s)/Allottee(s) under this Application Form or the Allotment Letter (when issued) or the Agreement Sale Deed (when executed).',
  'All correspondence will be made with first Applicants at the address for correspondence on Developer\'s record initially indicated in the Application Form. Any change of address will have to be notified in writing to Developer\'s at its registered office and acknowledgement obtained for such change. In case there is a joint Allottee, all communication shall be sent by to the first Allottee and which shall for all purposes be considered as served on both Allottees. It is the responsibility of the Allottee to provide postal and email address as well as contact numbers. Inability to contact the customer and the resultant consequences are the sole responsibility/liability of the customer. The communication shall be deemed delivered and accepted by the customer unless otherwise objected.'];
 function stepTerms(){
-  const list=function(arr){ return '<ol>'+arr.map(function(t){ return '<li>'+esc(t).replace(/&lt;br&gt;&lt;br&gt;/g,'<br><br>')+'</li>'; }).join('')+'</ol>'; };
-  const a=S.applicants[0];
+  const co=CONF.company||'';
+  const list=function(arr){ return '<ol>'+arr.map(function(t){ return '<li>'+esc(t.split('Dream Gateway Hotels Ltd.').join(co)).replace(/&lt;br&gt;&lt;br&gt;/g,'<br><br>')+'</li>'; }).join('')+'</ol>'; };
+  /* 13 Nov 2026: terms first, then the cost sheet (as pictures), and the tick to agree comes last. There is no signature any more. */
   return card('','','Terms & conditions','Open each section to read it in full.',
       '<details class="t"><summary>Terms of application (15)</summary>'+list(TERMS)+'</details>'
       +'<details class="t"><summary>Declaration (2)</summary>'+list(DECL)+'</details>'
-      +'<details class="t"><summary>Special Conditions (11)</summary>'+list(SPECIAL)+'</details>'
-      +'<label class="agree'+(ERR.terms_accepted?' bad':'')+'" id="f-terms_accepted"><input type="checkbox" data-check="terms_accepted"'+(S.terms_accepted?' checked':'')+'><span><b>I/We have read and agree to all the above.</b><br><span style="color:var(--slate);font-size:13px">I/We confirm that everything in this form is true.</span><div class="err">'+esc(ERR.terms_accepted||'')+'</div></span></label>')
-    +card('','','Signature','To be signed by '+esc(a.full_name||'the first applicant')+'.',
-      wrapF('sig','Signature of the first applicant',{full:1,req:1},
-        (sigInline()
-          ?(SIG?'<div class="sigdone"><img src="'+SIG+'" alt="Signature"><button type="button" class="btn sec2" data-sgclear="1">Sign again</button></div>'
-               :'<div class="sigpad" id="sigpad"><div class="sg-area"><canvas></canvas><div class="sg-line"></div><div class="sg-ph">Sign here with your mouse</div></div>'
-                 +'<div class="sgbar"><span class="sgstat" id="sgstat">Draw your signature in the box</span><button type="button" class="btn sec2" data-sgclear="1">Clear</button></div></div>')
-          :'<button type="button" class="sigbox'+(SIG?' has':'')+'" data-opensig="1">'
-            +(SIG?'<img src="'+SIG+'" alt="Signature"><span class="again">Sign again</span>'
-                 :ICON.pen+'<b>Tap here to sign</b><small>A large signing pad opens</small>')+'</button>'))
-      +'<p style="color:var(--slate);font-size:13px;margin:12px 0 0">Place: '+esc(S.res.city||'—')+' · Date: '+new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+'</p>');
+      +'<details class="t"><summary>Special Conditions (11)</summary>'+list(SPECIAL)+'</details>')
+    +(COST.meta?card('','','Cost sheet','Prepared for you by our Sales team. Tap a page to zoom in; you can download it too.',costBody()):'')
+    +card('','','Agreement','',
+      '<label class="agree'+(ERR.terms_accepted?' bad':'')+'" id="f-terms_accepted"><input type="checkbox" data-check="terms_accepted"'+(S.terms_accepted?' checked':'')+'><span><b>I/We have read and agree to all the above'+(COST.meta?' and to the cost sheet':'')+'.</b><br><span style="color:var(--slate);font-size:13px">I/We confirm that everything in this form is true.</span><div class="err">'+esc(ERR.terms_accepted||'')+'</div></span></label>');
 }
 function rows(pairs){ return '<table class="rv">'+pairs.filter(function(p){ return p[1]!==''&&p[1]!=null; }).map(function(p){ return '<tr><td>'+esc(p[0])+'</td><td>'+esc(p[1])+'</td></tr>'; }).join('')+'</table>'; }
 function fmtD(d){ return d?new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):''; }
@@ -386,7 +379,7 @@ function stepReview(){
       ['Home loan',S.price.loan+(S.price.loan==='Yes'&&S.price.bank?' - '+S.price.bank:'')]])
     +h('Payment',4)+rows([['Amount',S.pay.amount?'₹'+Number(S.pay.amount).toLocaleString('en-IN')+' ('+words(S.pay.amount)+')':''],['Paid by',S.pay.mode],['Reference',S.pay.ref],
       ['Bank / branch',[S.pay.bank,S.pay.branch].filter(Boolean).join(', ')],['Date',fmtD(S.pay.date)],['Purpose',S.purpose],['Booked through',S.sales+(S.sales_name?' - '+S.sales_name:'')],['Lead ID',S.lead_id]])
-    +h('Signature',6)+rows([['Signed by',SIG?S.applicants[0].full_name:'Not signed yet']])
+    +h('Terms & cost sheet',6)+rows([['Cost sheet',COST.meta?COST.meta.name:''],['Terms',S.terms_accepted?'Accepted':'']])
     +'<div class="hp" aria-hidden="true"><input tabindex="-1" autocomplete="off" id="hpWeb"></div>');
 }
 
@@ -439,7 +432,7 @@ function check(step){
   if(step===5) S.applicants.forEach(function(a,i){ if(a.nationality!=='India') return; const who=(a.full_name||('Applicant '+(i+1)))+': ';
     if(!FILES[i].pan.length) bad('doc.'+i+'.pan','Please attach the PAN card',who+'PAN card');
     if(!FILES[i].aadhaar.length) bad('doc.'+i+'.aadhaar','Please attach the Aadhaar card',who+'Aadhaar card'); });
-  if(step===6){ if(!S.terms_accepted) bad('terms_accepted','Please tick to accept the terms','Accept the terms'); if(!SIG) bad('sig',sigInline()?'Please sign in the signature box':'Please tap "Tap here to sign" and sign','Signature'); }
+  if(step===6){ if(!S.terms_accepted) bad('terms_accepted','Please tick to accept the terms','Accept the terms'); }
   return !MISSING.length;
 }
 
@@ -449,7 +442,6 @@ function render(){
   $('steps').innerHTML='<div class="lbl"><b>'+STEPS[st][0]+'</b><span>Step '+(st+1)+' of '+STEPS.length+'</span></div><div class="bar"><i style="width:'+Math.round((st+1)/STEPS.length*100)+'%"></i></div>';
   $('missing').innerHTML=MISSING.length?'<div class="miss"><b>Still missing on this page ('+MISSING.length+'):</b><ul>'+MISSING.map(function(m){ return '<li data-jump="'+fid(m[0])+'">'+esc(m[1])+'</li>'; }).join('')+'</ul></div>':'';
   $('app').innerHTML=[stepApplicants,stepContact,stepAbout,stepFlat,stepPay,stepDocs,stepTerms,stepReview][st]();
-  if(st===6) mountInlineSigner();
   document.querySelectorAll('input[type=date]').forEach(function(i){ i.max=todayISO(); });
   $('nav').innerHTML='<div class="in">'+(st?'<button type="button" class="btn sec2" data-back="1">Back</button>':'')
     +'<button type="button" class="btn pri" id="nextBtn" data-next="1">'+(st===STEPS.length-1?'Submit booking form':'Continue')+'</button></div>'
@@ -461,116 +453,70 @@ function showErrors(){
   toast(MISSING.length===1?'1 thing is still missing':MISSING.length+' things are still missing');
 }
 
-// ---------------------------------------------------------------- signature pad (full screen)
-/* Signing in a small box inside a long page was hard (2 Nov 2026 review), so "Tap here to sign"
-   opens a pad that fills the whole screen: a wide area, a line to sign on, Clear and Done.
-   Made to feel like writing with a pen:
-     - every point the finger or mouse passes is taken (getCoalescedEvents; pointerrawupdate where
-       the browser has it), lightly smoothed to take out the jitter of the hand / mouse
-     - each stroke is drawn as ONE continuous curve (quadratic curves through the midpoints) at a
-       steady pen width, redrawn once per screen frame - no visible joins or beads
-     - strokes are kept as fractions of the pad, so rotating the phone or resizing the window just
-       redraws them at the new size; the page behind cannot scroll while signing
-     - Done trims the empty space around the signature and keeps it as a sharp PNG (SIG) */
-/* The pen: draws on a canvas inside the area, keeps the strokes, and can give back the trimmed signature as a PNG.
-   onChange (optional) is called whenever a stroke ends or the pad is cleared. Used by the full-screen pad (phones, touch)
-   and by the inline box on the Terms page (laptop with a mouse). */
-function penPad(area,c,ph,onChange){
-  const g=c.getContext('2d');
-  const INK='#0f2a6b';
-  let strokes=[], cur=null, W=0, Hh=0, frame=0, last=null;
-  const penWidth=function(w){ return Math.max(2.2,Math.min(3.6,w/240)); };
-  function size(){
-    const b=area.getBoundingClientRect(), dpr=Math.max(1,window.devicePixelRatio||1); W=b.width; Hh=b.height;
-    c.width=Math.round(W*dpr); c.height=Math.round(Hh*dpr); g.setTransform(dpr,0,0,dpr,0,0); paint();
-  }
-  // One stroke = one path through the midpoints of its points: smooth, with no joins.
-  function path(ctx,s,w,h,lw){
-    ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle=INK; ctx.fillStyle=INK; ctx.lineWidth=lw;
-    if(s.length===1){ ctx.beginPath(); ctx.arc(s[0].x*w,s[0].y*h,lw*0.55,0,Math.PI*2); ctx.fill(); return; }
-    ctx.beginPath(); ctx.moveTo(s[0].x*w,s[0].y*h);
-    for(let i=1;i<s.length-1;i++){ const p=s[i], q=s[i+1]; ctx.quadraticCurveTo(p.x*w,p.y*h,(p.x+q.x)/2*w,(p.y+q.y)/2*h); }
-    const l=s[s.length-1]; ctx.lineTo(l.x*w,l.y*h); ctx.stroke();
-  }
-  function paint(){ frame=0; g.clearRect(0,0,W,Hh); const lw=penWidth(W); strokes.forEach(function(s){ path(g,s,W,Hh,lw); }); if(cur&&cur.length) path(g,cur,W,Hh,lw);
-    if(ph) ph.style.display=strokes.length||(cur&&cur.length)?'none':''; }
-  const later=function(){ if(!frame) frame=requestAnimationFrame(paint); };
-  function at(e){ const b=c.getBoundingClientRect(); return {x:(e.clientX-b.left)/b.width,y:(e.clientY-b.top)/b.height}; }
-  function add(p){
-    if(p.x<0||p.y<0||p.x>1||p.y>1){ if(cur&&cur.length>0){ strokes.push(cur); cur=[]; } last=null; return; }   // off the pad: lift the pen
-    if(last){                       // smooth the hand / mouse jitter a little; skip points that did not move
-      const sx=last.x+(p.x-last.x)*0.6, sy=last.y+(p.y-last.y)*0.6;
-      if(Math.abs((sx-last.x)*W)<0.4&&Math.abs((sy-last.y)*Hh)<0.4) return;
-      p={x:sx,y:sy};
-    }
-    cur.push(p); last=p; later();
-  }
-  // The fastest events (pointerrawupdate) where the browser sends them during this stroke, else
-  // ordinary pointermove.
-  let raw=false, pid=null;
-  c.addEventListener('pointerdown',function(e){ e.preventDefault(); cur=[]; last=null; raw=false; pid=e.pointerId; try{ c.setPointerCapture(e.pointerId); }catch(_e){} add(at(e)); });
-  const move=function(e){ if(!cur||e.pointerId!==pid) return; if(e.cancelable) e.preventDefault();
-    const list=(e.getCoalescedEvents&&e.getCoalescedEvents())||[]; (list.length?list:[e]).forEach(function(x){ add(at(x)); }); };
-  c.addEventListener('pointerrawupdate',function(e){ if(!cur||e.pointerId!==pid) return; raw=true; move(e); });
-  c.addEventListener('pointermove',function(e){ if(raw) return; move(e); });
-  const end=function(e){ if(!cur||(e&&e.pointerId!=null&&e.pointerId!==pid)) return; if(e&&e.type==='pointerup'){ const p=at(e); if(p.x>=0&&p.y>=0&&p.x<=1&&p.y<=1&&cur.length) cur.push(p); }
-    if(cur.length) strokes.push(cur); cur=null; last=null; paint(); if(onChange) onChange(); };
-  c.addEventListener('pointerup',end); c.addEventListener('pointercancel',end); c.addEventListener('lostpointercapture',end);
-  ['touchstart','touchmove'].forEach(function(t){ c.addEventListener(t,function(e){ e.preventDefault(); },{passive:false}); });
-  const onResize=function(){ size(); }; window.addEventListener('resize',onResize);
-  requestAnimationFrame(size);
-  return {
-    clear:function(){ strokes=[]; cur=null; paint(); if(onChange) onChange(); },
-    destroy:function(){ window.removeEventListener('resize',onResize); },
-    // trimmed to the signature with a margin, drawn twice as large for a sharp image; null if nothing (much) is drawn yet
-    toPNG:function(){
-      const pts=[].concat.apply([],strokes);
-      if(pts.length<6) return null;
-      let x0=1,y0=1,x1=0,y1=0; pts.forEach(function(p){ x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x); y1=Math.max(y1,p.y); });
-      const SW=W*2, SH=Hh*2, pad=24, o=document.createElement('canvas');
-      o.width=Math.ceil((x1-x0)*SW+pad*2); o.height=Math.ceil((y1-y0)*SH+pad*2);
-      const og=o.getContext('2d'); og.translate(pad-x0*SW,pad-y0*SH);
-      strokes.forEach(function(s){ path(og,s,SW,SH,penWidth(W)*2); });
-      return o.toDataURL('image/png');
-    }
-  };
-}
-// The full-screen pad (phones, touch screens)
-function openSigner(){
-  const a=S.applicants[0];
-  const ov=document.createElement('div'); ov.className='signer';
-  ov.innerHTML='<div class="sg-top"><div><b>Sign here</b><small>'+esc(a.full_name||'First applicant')+' · use your finger or mouse</small></div>'
-    +'<button type="button" class="sg-x" data-sg="cancel" aria-label="Close">×</button></div>'
-    +'<div class="sg-area"><canvas></canvas><div class="sg-line"></div><div class="sg-ph">Sign above the line</div></div>'
-    +'<div class="sg-bot"><button type="button" class="btn sec2" data-sg="clear">Clear</button><button type="button" class="btn pri" data-sg="done">Done</button></div>';
-  document.body.appendChild(ov); document.documentElement.classList.add('noscroll');
-  const pad=penPad(ov.querySelector('.sg-area'),ov.querySelector('canvas'),ov.querySelector('.sg-ph'),null);
-  const close=function(){ pad.destroy(); ov.remove(); document.documentElement.classList.remove('noscroll'); };
-  ov.addEventListener('click',function(e){
-    const b=e.target.closest('[data-sg]'); if(!b) return; const k=b.getAttribute('data-sg');
-    if(k==='cancel') close();
-    else if(k==='clear') pad.clear();
-    else if(k==='done'){
-      const png=pad.toPNG();
-      if(!png){ toast('Please sign above the line first'); return; }
-      SIG=png; sigChanged(); delete ERR.sig; MISSING=MISSING.filter(function(m){ return m[0]!=='sig'; });
-      close(); render(); const f=$('f-sig'); if(f) f.scrollIntoView({block:'center'});
-    }
+// ---------------------------------------------------------------- cost sheet (13 Nov 2026)
+/* Sales attaches the cost sheet as a PDF when they make the link. The customer sees it after the terms as PICTURES (each page drawn from the PDF here in the
+   browser with pdf.js, vendor/pdfjs): tap a page to zoom, download a page picture or the PDF itself. The server hands the PDF over only with the link's token. */
+const COST={meta:null,state:'idle',pages:[],bytes:null,err:''};
+function pdfjsReady(){
+  return new Promise(function(res,rej){
+    if(window.pdfjsLib){ res(); return; }
+    const s=document.createElement('script'); s.src='vendor/pdfjs/pdf.min.js';
+    s.onload=function(){ try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc='vendor/pdfjs/pdf.worker.min.js'; res(); }catch(e){ rej(e); } };
+    s.onerror=function(){ rej(new Error('The cost sheet viewer could not be loaded')); };
+    document.head.appendChild(s);
   });
 }
-// The inline box (laptop / desktop with a mouse): sign straight on the page, saved as the pen lifts, no pop-up and no Done.
-let INLINE_PAD=null;
-function sigInline(){ return !!(window.matchMedia&&window.matchMedia('(min-width:1000px) and (pointer:fine), (orientation:landscape) and (min-width:700px) and (min-height:480px) and (pointer:fine)').matches); }
-function mountInlineSigner(){
-  if(INLINE_PAD){ INLINE_PAD.destroy(); INLINE_PAD=null; }
-  const box=document.getElementById('sigpad'); if(!box) return;
-  const st=document.getElementById('sgstat');
-  INLINE_PAD=penPad(box.querySelector('.sg-area'),box.querySelector('canvas'),box.querySelector('.sg-ph'),function(){
-    const png=INLINE_PAD.toPNG(); SIG=png||null; sigChanged();
-    if(png){ delete ERR.sig; MISSING=MISSING.filter(function(m){ return m[0]!=='sig'; }); const f=$('f-sig'); if(f) f.classList.remove('bad'); }
-    if(st) st.textContent=png?'Signature saved':'Draw your signature in the box';
-  });
+async function loadCost(){
+  if(!COST.meta||COST.state==='loading'||COST.state==='ready') return;
+  COST.state='loading'; COST.pages=[]; COST.err='';
+  try{
+    const r=await fetch(FN,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'cost_pdf',token:TOKEN})});
+    if(!r.ok) throw new Error('The cost sheet could not be opened');
+    COST.bytes=await r.arrayBuffer();
+    await pdfjsReady();
+    const doc=await window.pdfjsLib.getDocument({data:COST.bytes.slice(0)}).promise;
+    for(let n=1;n<=doc.numPages;n++){
+      const pg=await doc.getPage(n), v0=pg.getViewport({scale:1}), sc=Math.min(2.5,1700/v0.width), v=pg.getViewport({scale:sc});
+      const cv=document.createElement('canvas'); cv.width=Math.ceil(v.width); cv.height=Math.ceil(v.height);
+      const g=cv.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,cv.width,cv.height);
+      await pg.render({canvasContext:g,viewport:v}).promise;
+      COST.pages.push(cv.toDataURL('image/jpeg',0.92));
+    }
+    COST.state='ready';
+  }catch(e){ COST.state='error'; COST.err=(e&&e.message)||'The cost sheet could not be shown'; }
+  const host=$('costv'); if(host) host.innerHTML=costInner();
 }
+function costInner(){
+  if(!COST.meta) return '';
+  if(COST.state==='error') return '<div class="costwait" style="color:var(--err)">'+esc(COST.err)+'<br><button type="button" class="btn sec2" style="margin-top:10px" data-costretry="1">Try again</button></div>';
+  if(COST.state!=='ready') return '<div class="costwait">Opening the cost sheet…</div>';
+  return '<div class="costbar"><small><b style="color:var(--ink)">Cost sheet</b> · '+esc(COST.meta.name)+' · '+COST.pages.length+' page'+(COST.pages.length>1?'s':'')+'</small><button type="button" class="btn sec2" data-costdl="pdf">Download PDF</button></div>'
+    +COST.pages.map(function(u,i){ return '<button type="button" class="costpg" data-zoom="'+i+'" aria-label="Cost sheet page '+(i+1)+' - tap to zoom"><span class="pgn">Page '+(i+1)+' of '+COST.pages.length+'</span><span class="zm">Tap to zoom</span><img src="'+u+'" alt="Cost sheet page '+(i+1)+'"></button>'; }).join('');
+}
+function costBody(){ if(COST.state==='idle') loadCost(); return '<div id="costv">'+costInner()+'</div>'; }
+function dl(url,name){ const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); }
+function downloadPdf(){ if(!COST.bytes) return; const u=URL.createObjectURL(new Blob([COST.bytes],{type:'application/pdf'})); dl(u,COST.meta.name); setTimeout(function(){ URL.revokeObjectURL(u); },4000); }
+// A page full screen: zoom in / out / fit (also double-tap and ctrl + wheel), scroll to move around, download the picture.
+function openZoom(i){
+  closeZoom(); let z=1;
+  const d=document.createElement('div'); d.className='zoomov'; d.id='zoomov';
+  d.innerHTML='<div class="zbar"><b>Cost sheet · page '+(i+1)+' of '+COST.pages.length+'</b><div class="zbtns"><button type="button" data-z="out" aria-label="Zoom out">−</button><button type="button" data-z="in" aria-label="Zoom in">+</button><button type="button" data-z="fit">Fit</button><button type="button" data-z="dl">Download picture</button><button type="button" data-z="x" aria-label="Close">×</button></div></div>'
+    +'<div class="zarea" id="zarea"><img alt="Cost sheet page '+(i+1)+'" src="'+COST.pages[i]+'"></div>';
+  document.body.appendChild(d); document.documentElement.classList.add('noscroll');
+  const img=d.querySelector('img');
+  const apply=function(){ img.style.width=Math.round(Math.min(window.innerWidth-28,1100)*z)+'px'; };
+  apply();
+  d.addEventListener('click',function(e){
+    const b=e.target.closest('[data-z]'); if(!b) return; const k=b.getAttribute('data-z');
+    if(k==='in') z=Math.min(5,z*1.4); else if(k==='out') z=Math.max(1,z/1.4); else if(k==='fit') z=1;
+    else if(k==='dl'){ dl(COST.pages[i],'Cost sheet - page '+(i+1)+'.jpg'); return; }
+    else if(k==='x'){ closeZoom(); return; }
+    apply();
+  });
+  d.addEventListener('dblclick',function(e){ if(e.target.tagName==='IMG'){ z=z>1?1:2.5; apply(); } });
+  d.addEventListener('wheel',function(e){ if(!e.ctrlKey) return; e.preventDefault(); z=Math.max(1,Math.min(5,z*(e.deltaY<0?1.15:1/1.15))); apply(); },{passive:false});
+}
+function closeZoom(){ const d=document.getElementById('zoomov'); if(d){ d.remove(); document.documentElement.classList.remove('noscroll'); } }
 
 // ---------------------------------------------------------------- address suggestions (Photon / OpenStreetMap)
 let acTimer=null, acSeq=0;
@@ -594,9 +540,8 @@ function suggest(k,q){
 }
 
 // ---------------------------------------------------------------- generated link: saved on our server as the customer goes
-let SYNC_T=null, SYNC_BUSY=false, SYNC_AGAIN=false, SIG_SENT=null, SYNC_FAIL=0;
+let SYNC_T=null, SYNC_BUSY=false, SYNC_AGAIN=false, SYNC_FAIL=0;
 function setSaved(txt,bad){ const e=document.querySelector('#nav .saved'); if(e){ e.textContent=txt; e.style.color=bad?'var(--err)':''; } }
-function sigChanged(){ if(LINK) scheduleSync(); }
 function scheduleSync(){ if(!LINK) return; clearTimeout(SYNC_T); SYNC_T=setTimeout(function(){ doSync(false); },900); setSaved('Saving…'); }
 // The files kept on the server, as the customer has them now (which applicant, which document).
 function fileMeta(){ const out=[]; FILES.forEach(function(f,i){ ['pan','aadhaar'].forEach(function(k){ f[k].forEach(function(x){ if(x.saved) out.push({id:x.id,applicant:i,kind:k}); }); }); }); return out; }
@@ -605,14 +550,13 @@ async function doSync(keep){
   if(SYNC_BUSY){ SYNC_AGAIN=true; return; }
   clearTimeout(SYNC_T); SYNC_BUSY=true;
   const body={action:'save',token:TOKEN,data:S,step:S.step,files:fileMeta()};
-  if(SIG!==SIG_SENT) body.sig=SIG;
   const txt=JSON.stringify(body);
   try{
     const r=await fetch(FN,{method:'POST',headers:{'Content-Type':'application/json'},body:txt,keepalive:!!keep&&txt.length<60000});
     const jj=await r.json().catch(function(){ return {}; });
     if(r.status===404||r.status===409){ LINK=null; setSaved(jj.error||'This form is closed.',true); SYNC_BUSY=false; return; }
     if(!r.ok||!jj.ok) throw new Error(jj.error||('error '+r.status));
-    SIG_SENT=body.sig!==undefined?body.sig:SIG_SENT; SYNC_FAIL=0;
+    SYNC_FAIL=0;
     setSaved('Saved '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}));
   }catch(e){ SYNC_FAIL++; setSaved('Could not save just now - trying again',true); SYNC_T=setTimeout(function(){ doSync(false); },Math.min(15000,3000*SYNC_FAIL)); }
   SYNC_BUSY=false; if(SYNC_AGAIN){ SYNC_AGAIN=false; scheduleSync(); }
@@ -631,11 +575,22 @@ async function uploadKyc(ai,kind,file){
 }
 function getIn(o,path){ return path.split('.').reduce(function(x,k){ return x==null?x:x[k]; },o); }
 function setIn(o,path,v){ const ks=path.split('.'); let c=o; for(let i=0;i<ks.length-1;i++){ if(c[ks[i]]==null||typeof c[ks[i]]!=='object') c[ks[i]]=/^\d+$/.test(ks[i+1])?[]:{}; c=c[ks[i]]; } c[ks[ks.length-1]]=v; }
-function showDone(ref){
+function setProject(info){
+  if(!info) return;
+  CONF=Object.assign({},CONF,{name:info.name,company:info.company,address:info.address,blocks:info.blocks,floors:info.floors,bhk:info.bhk,bhkDefault:info.bhkDefault,logo:info.logo||''});
+  document.title='Booking application form - '+info.name;
+  const img=$('projLogo'), nm=$('projName'), to=$('hdTo');
+  if(to) to.textContent='To '+info.company+', '+info.address;
+  const text=function(){ if(img) img.style.display='none'; if(nm){ nm.textContent=info.name; nm.hidden=false; } };
+  if(info.logo&&img){ if(nm) nm.hidden=true; img.style.display=''; img.style.visibility=''; img.alt=info.name; img.onerror=text; img.src=info.logo; } else text();
+}
+function showDone(ref,email){
   $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
   $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Thank you! Your booking form has been received.</h2>'
     +'<p style="color:var(--slate);margin-top:8px">Your reference number</p><div class="ref">'+esc(ref)+'</div>'
-    +'<p style="color:var(--slate)">Please keep this number. Our team will call you shortly to confirm your booking.</p></div></div>';
+    +(email?'<p style="color:var(--slate)">A confirmation email, with your cost sheet, has been sent to <b style="color:var(--ink)">'+esc(email)+'</b>.</p>':'')
+    +'<p style="color:var(--slate)">Please keep this number. Our team will call you shortly to confirm your booking.</p>'
+    +(TOKEN?'<p style="margin-top:14px"><button type="button" class="btn pri" data-viewsub="1" style="max-width:320px">View your submitted form</button></p>':'')+'</div></div>';
   window.scrollTo(0,0);
 }
 /* STAFF VIEW (13 Nov 2026): the same page the customer sees, for a JainE user who is signed in on this same site (their own session is read from the browser; the
@@ -663,8 +618,7 @@ function staffDocs(){
     const who=[a.title,a.full_name].filter(Boolean).join(' ')||('Applicant '+(i+1));
     return '<div class="dgrp"><h4><span class="dn">'+(i+1)+'</span>'+esc(i?'Joint applicant':'First applicant')+' <b>'+esc(who)+'</b></h4><div class="docg">'
       +(mine.length?mine.map(function(f){ return docCard(f,nm[f.kind]||f.kind,who); }).join(''):'<div class="nodoc">No documents attached</div>')+'</div></div>'; }).join('');
-  const sig=fl.filter(function(f){ return f.kind==='signature'; });
-  return people+'<div class="dgrp"><h4>Signature <span style="font-weight:400;color:var(--slate);text-transform:none;letter-spacing:0">of the first applicant</span></h4><div class="docg">'+(sig.length?sig.map(function(f){ return docCard(f,'Signature',[S.applicants[0].title,S.applicants[0].full_name].filter(Boolean).join(' ')); }).join(''):'<div class="nodoc">Not found</div>')+'</div></div>';
+  return people;
 }
 function openLightbox(url,cap){
   closeLightbox();
@@ -674,7 +628,7 @@ function openLightbox(url,cap){
   document.body.appendChild(d);
 }
 function closeLightbox(){ const d=document.getElementById('lb'); if(d) d.remove(); }
-document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeLightbox(); });
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ closeLightbox(); closeZoom(); } });
 function showStaff(jj){
   const f=jj.form, d=f.data;
   RO=true; STAFF=jj;
@@ -684,12 +638,13 @@ function showStaff(jj){
   if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
   FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
   (f.files||[]).forEach(function(x){ if(x.kind!=='signature'&&FILES[x.applicant]&&FILES[x.applicant][x.kind]) FILES[x.applicant][x.kind].push({saved:true,name:x.name}); });
-  SIG=(f.files||[]).some(function(x){ return x.kind==='signature'; })?'signed':null;
+  setProject(jj.project); COST.meta=jj.cost||null; if(COST.meta) loadCost();
   $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
   $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Submitted booking form</h2><div class="ref">'+esc(jj.ref_no||'')+'</div>'
       +'<p style="color:var(--slate);margin:4px 0 0">'+(f.submitted_at?'Submitted on '+esc(new Date(f.submitted_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})):'')+'</p></div></div>'
     +stepReview()
-    +card('','','Documents & signature','Click a picture to enlarge it.',staffDocs());
+    +(COST.meta?card('','','Cost sheet','Prepared by our Sales team.',costBody()):'')
+    +card('','','Documents','Click a picture to enlarge it.',staffDocs());
   window.scrollTo(0,0);
 }
 function showSubmitted(jj){
@@ -702,12 +657,13 @@ function showSubmitted(jj){
   if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
   FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
   (sub.docs||[]).forEach(function(x){ if(FILES[x.applicant]&&FILES[x.applicant][x.kind]) FILES[x.applicant][x.kind].push({saved:true,name:x.kind}); });
-  SIG=sub.signed?'signed':null;
+  setProject(sub.project); COST.meta=sub.cost||null; if(COST.meta) loadCost();
   $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
   $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Your booking form has been received.</h2>'
     +'<p style="color:var(--slate);margin-top:8px">Your reference number</p><div class="ref">'+esc(jj.ref_no||'')+'</div>'
     +'<p style="color:var(--slate)">'+(sub.submitted_at?'Submitted on '+esc(new Date(sub.submitted_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}))+'. ':'')+'Our team will call you shortly to confirm your booking.</p></div></div>'
-    +stepReview();
+    +stepReview()
+    +(COST.meta?card('','','Cost sheet','',costBody()):'');
   window.scrollTo(0,0);
 }
 function linkMessage(msg){
@@ -726,6 +682,7 @@ async function bootLink(){
     if(tk){ try{ const r2=await fetch(FN,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tk},body:JSON.stringify({action:'staff_load',token:TOKEN})}); const j2=await r2.json().catch(function(){ return {}; }); if(r2.ok&&j2.ok&&j2.form) return showStaff(j2); }catch(e){} }
     return showSubmitted(jj);
   }
+  setProject(jj.projectInfo); OTP_REQUIRED=!!jj.otp_required; COST.meta=jj.cost||null; if(COST.meta) loadCost();
   const pf=jj.prefill||{values:{}}, d=jj.draft&&typeof jj.draft==='object'?jj.draft:{};
   S=Object.assign(fresh(),d); ['price','profession'].forEach(function(k){ S[k]=Object.assign(fresh()[k],d[k]||{}); });
   if(!Array.isArray(S.applicants)||!S.applicants.length) S.applicants=[newApp()];
@@ -737,7 +694,6 @@ async function bootLink(){
   S.project=PROJECT;
   FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
   (jj.files||[]).forEach(function(f){ if(FILES[f.applicant]&&FILES[f.applicant][f.kind]) FILES[f.applicant][f.kind].push({saved:true,id:f.id,name:f.name,ext:f.ext}); });
-  SIG=typeof jj.sig==='string'?jj.sig:null; SIG_SENT=SIG;
   SPOUSE_OPEN=!!(S.applicants[0]&&(S.applicants[0].spouse||S.applicants[0].anniversary));
   S.step=Math.max(0,Math.min(STEPS.length-1,parseInt(jj.step,10)||0));
   LINK={token:TOKEN};
@@ -780,6 +736,10 @@ document.addEventListener('click',function(e){
   const b=e.target.closest&&e.target.closest('button'); if(!b) return;
   if(b.dataset.lb){ openLightbox(b.dataset.lb,b.dataset.cap); return; }
   if(b.dataset.lbx){ closeLightbox(); return; }
+  if(b.dataset.zoom!==undefined){ openZoom(+b.dataset.zoom); return; }
+  if(b.dataset.costdl){ downloadPdf(); return; }
+  if(b.dataset.costretry){ COST.state='idle'; const h=$('costv'); if(h) h.innerHTML=costInner(); loadCost(); return; }
+  if(b.dataset.viewsub){ location.reload(); return; }
   if(b.dataset.pick){ openSheet(b.dataset.pick,b.dataset.kind); return; }
   if(b.dataset.chip){ set(b.dataset.chip,b.dataset.v); if(ERR[b.dataset.chip]){ delete ERR[b.dataset.chip]; MISSING=MISSING.filter(function(m){ return m[0]!==b.dataset.chip; }); } render(); return; }
   if(b.dataset.acpick){ const p=b.dataset.acpick.split('|'), box=$('ac-'+p[0]), x=box&&box._items&&box._items[+p[1]]; if(!x) return;
@@ -792,7 +752,6 @@ document.addEventListener('click',function(e){
   if(b.dataset.pp!==undefined){ const i=+b.dataset.pp; if(PASS_OPEN.has(i)) PASS_OPEN.delete(i); else PASS_OPEN.add(i); render();
     if(PASS_OPEN.has(i)){ const pp=document.querySelector('[data-k="applicants.'+i+'.passport"]'); if(pp){ const box=pp.closest('.xp'); if(box) box.scrollIntoView({behavior:'smooth',block:'center'}); pp.focus({preventScroll:true}); } }
     return; }
-  if(b.dataset.sgclear){ if(INLINE_PAD&&!SIG) INLINE_PAD.clear(); else { SIG=null; sigChanged(); render(); } return; }
   if(b.dataset.sp){ SPOUSE_OPEN=!SPOUSE_OPEN; render();
     if(SPOUSE_OPEN){ const sp=document.querySelector('[data-k="applicants.0.spouse"]'); if(sp){ const box=sp.closest('.xp'); if(box) box.scrollIntoView({behavior:'smooth',block:'center'}); sp.focus({preventScroll:true}); } }
     return; }
@@ -802,7 +761,6 @@ document.addEventListener('click',function(e){
   if(b.dataset.addwhy){ S.why.push(''); save(); render(); const ins=document.querySelectorAll('[data-k^="why."]'); ins[ins.length-1].focus(); return; }
   if(b.dataset.rmwhy){ S.why.splice(+b.dataset.rmwhy,1); save(); render(); return; }
   if(b.dataset.delfile){ const p=b.dataset.delfile.split('|'); FILES[+p[0]][p[1]].splice(+p[2],1); save(); render(); return; }
-  if(b.dataset.opensig){ openSigner(); return; }
   if(b.dataset.go){ if(S.step===STEPS.length-1) FROM_REVIEW=true; go(+b.dataset.go); return; }
   if(b.dataset.back){ if(FROM_REVIEW){ FROM_REVIEW=false; go(STEPS.length-1); return; } go(S.step-1); return; }
   if(b.dataset.next){
@@ -815,10 +773,69 @@ document.addEventListener('click',function(e){
 document.addEventListener('click',function(e){ if(!e.target.closest('.ac')) document.querySelectorAll('[id^="ac-"]').forEach(function(b){ b.innerHTML=''; }); },true);
 
 // ---------------------------------------------------------------- submit
-function dataURLtoBlob(u){ const p=u.split(','), bin=atob(p[1]), a=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i); return new Blob([a],{type:'image/png'}); }
+// ---------------------------------------------------------------- submit
+/* A generated link with a cost sheet (13 Nov 2026) is submitted in two steps: Submit asks our server to email a 6-digit code to the customer's email address;
+   the customer types it in, and only then is the form sent. An address that cannot receive email is turned back here, with a way to change it. */
+let OTP_BUSY=false, OTP_TIMER=null;
 async function submit(){
   for(let s=0;s<STEPS.length-1;s++){ if(!check(s)){ S.step=s; save(); showErrors(); return; } }
-  const btn=$('nextBtn'); btn.disabled=true; btn.textContent='Sending… please keep this page open';
+  if(LINK&&OTP_REQUIRED){ await startOtp(false); return; }
+  await sendForm('');
+}
+function otpClose(){ clearInterval(OTP_TIMER); const e=document.getElementById('otpbg'); if(e) e.remove(); document.documentElement.classList.remove('noscroll'); }
+async function startOtp(isResend){
+  const btn=$('nextBtn');
+  if(btn&&!isResend){ btn.disabled=true; btn.textContent='Sending the code…'; }
+  await doSync(false);
+  let r, jj;
+  try{ r=await fetch(FN,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'otp_send',token:TOKEN})}); jj=await r.json().catch(function(){ return {}; }); }
+  catch(e){ if(btn){ btn.disabled=false; btn.textContent='Submit booking form'; } toast('Could not reach our server - please try again'); return; }
+  if(btn){ btn.disabled=false; btn.textContent='Submit booking form'; }
+  if(!r.ok||!jj.ok){ otpSheet({error:jj.error||'We could not send the code. Please try again.',fatal:jj.code==='bad_email'||jj.code==='bad_domain'||jj.code==='mail_failed',wait:jj.wait}); return; }
+  otpSheet({to:jj.to,wait:jj.resend_after||30});
+}
+function otpSheet(o){
+  otpClose();
+  const d=document.createElement('div'); d.className='otpbg'; d.id='otpbg';
+  d.innerHTML='<div class="otp" role="dialog" aria-modal="true"><h2>'+(o.fatal?'Please check your email address':'Verify your email')+'</h2>'
+    +(o.fatal?'<p>'+esc(o.error)+'</p><div class="orow"><button type="button" class="btn pri" data-otp="change">Change email address</button></div><div class="olinks"><button type="button" data-otp="close">Close</button><span></span></div>'
+      :'<p>We have sent a 6-digit code to <span class="em">'+esc(o.to||'')+'</span>. Please enter it below to submit your booking.</p>'
+        +'<input class="code" id="otpCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="······" aria-label="6-digit code">'
+        +'<div class="oerr" id="otpErr">'+esc(o.error||'')+'</div>'
+        +'<div class="orow"><button type="button" class="btn pri" id="otpGo" data-otp="go">Verify &amp; submit</button></div>'
+        +'<div class="olinks"><button type="button" id="otpResend" data-otp="resend" disabled>Resend code</button><button type="button" data-otp="change">Change email address</button></div>')
+    +'</div>';
+  document.body.appendChild(d); document.documentElement.classList.add('noscroll');
+  d.addEventListener('click',function(e){
+    const b=e.target.closest('[data-otp]'); if(!b) return; const k=b.getAttribute('data-otp');
+    if(k==='close'){ otpClose(); return; }
+    if(k==='change'){ otpClose(); FROM_REVIEW=true; go(1); setTimeout(function(){ const i=document.querySelector('[data-k="contact.email"]'); if(i){ i.focus(); i.scrollIntoView({block:'center'}); } },150); return; }
+    if(k==='resend'){ startOtp(true); return; }
+    if(k==='go') verifyOtp();
+  });
+  const inp=d.querySelector('#otpCode');
+  if(inp){ inp.addEventListener('input',function(){ inp.value=inp.value.replace(/\D/g,'').slice(0,6); if(inp.value.length===6) verifyOtp(); }); inp.focus(); }
+  if(!o.fatal){
+    let left=Math.max(0,Number(o.wait)||30); const rs=d.querySelector('#otpResend');
+    const tick=function(){ if(!rs) return; if(left>0){ rs.disabled=true; rs.textContent='Resend code in '+left+'s'; left--; } else { rs.disabled=false; rs.textContent='Resend code'; clearInterval(OTP_TIMER); } };
+    clearInterval(OTP_TIMER); tick(); OTP_TIMER=setInterval(tick,1000);
+  }
+}
+async function verifyOtp(){
+  const inp=$('otpCode'), err=$('otpErr'), go=$('otpGo'); if(!inp||OTP_BUSY) return;
+  const code=inp.value.trim(); if(code.length!==6){ err.textContent='Please enter all 6 digits.'; return; }
+  OTP_BUSY=true; go.disabled=true; go.textContent='Checking…'; err.textContent='';
+  const res=await sendForm(code);
+  OTP_BUSY=false;
+  if(res&&res.ok) return;
+  const go2=$('otpGo'), err2=$('otpErr'), inp2=$('otpCode');
+  if(go2){ go2.disabled=false; go2.innerHTML='Verify &amp; submit'; }
+  if(err2&&res) err2.textContent=res.error||'Could not send. Please try again.';
+  if(inp2&&res&&res.code==='otp_wrong'){ inp2.value=''; inp2.focus(); }
+}
+async function sendForm(otp){
+  const btn=$('nextBtn');
+  if(btn&&!otp){ btn.disabled=true; btn.textContent='Sending… please keep this page open'; }
   const data=JSON.parse(JSON.stringify(S)); delete data.step;
   data.website=($('hpWeb')||{}).value||'';
   data.applicants.forEach(function(a){ a.pan=a.pan.toUpperCase(); a.aadhaar=a.aadhaar.replace(/\s/g,''); });
@@ -827,20 +844,23 @@ async function submit(){
   const fd=new FormData();
   fd.append('data',JSON.stringify(data));
   if(LINK){ fd.append('token',TOKEN); fd.append('files',JSON.stringify(fileMeta())); }
+  if(otp) fd.append('otp',otp);
   FILES.forEach(function(f,i){ ['pan','aadhaar'].forEach(function(kind){ f[kind].forEach(function(file,n){ if(file instanceof Blob) fd.append('f_'+i+'_'+kind+'_'+n,file,file.name); }); }); });
-  if(SIG) fd.append('sig_0',dataURLtoBlob(SIG),'signature.png');
   try{
     const r=await fetch(FN,{method:'POST',body:fd});
     const j=await r.json().catch(function(){ return {}; });
-    if(!r.ok||!j.ok) throw new Error(j.error||('Could not send (error '+r.status+')'));
+    if(!r.ok||!j.ok){ const er=new Error(j.error||('Could not send (error '+r.status+')')); er.code=j.code; throw er; }
     try{ localStorage.removeItem(DRAFT_KEY); }catch(e){}
-    LINK=null; clearTimeout(SYNC_T);
-    showDone(j.ref_no);
+    LINK=null; clearTimeout(SYNC_T); otpClose();
+    showDone(j.ref_no,j.email);
+    return {ok:true};
   }catch(e){
-    btn.disabled=false; btn.textContent='Submit booking form';
     const msg=e.message||'Could not send. Please check your internet and try again.';
+    if(otp) return {ok:false,error:msg,code:e.code};
+    if(btn){ btn.disabled=false; btn.textContent='Submit booking form'; }
     $('missing').innerHTML='<div class="miss"><b>The form could not be sent</b><ul><li style="cursor:default;text-decoration:none">'+esc(msg)+'</li><li style="cursor:default;text-decoration:none">'+(LINK?'Your answers are saved':'Your answers are still saved on this device')+' - press Submit again.</li></ul></div>';
     window.scrollTo({top:0,behavior:'smooth'}); toast('The form could not be sent','err');
+    return {ok:false,error:msg};
   }
 }
 
