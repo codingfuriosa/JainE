@@ -24598,20 +24598,35 @@ async function cpaProjects(force){
   const {data}=await sb.schema('cust').from('projects').select('*').is('deleted_at',null).order('name');
   CPA.projects=data||[];return CPA.projects;
 }
+/* EVERY ROW, NOT THE FIRST 1,000 (13 Nov 2026). The API hands back at most 1,000 rows a request.
+   cust.units passed that on 2 Nov when the import began keeping every Farvision row (1,526 flats), and
+   newest-first the first 1,000 held one flat with a customer - so the Customers tab listed one customer
+   out of 304 and every flat dropdown lost the older flats. Lists read here page with .range() until a
+   short page comes back; build() must give a stable order (the id is the tie-breaker). */
+async function cpaAllRows(build){
+  const out=[],PAGE=1000;
+  for(let from=0;;from+=PAGE){
+    const {data,error}=await build().range(from,from+PAGE-1);
+    // a failed read used to leave the list empty without a word; now it says so, and keeps what it has
+    if(error){ console.error('[cpaAllRows]',error); toast('Could not load the full list: '+error.message,'err'); return out; }
+    out.push(...(data||[]));
+    if(!data||data.length<PAGE)return out;
+  }
+}
 async function cpaUnits(force){
   if(CPA.units&&!force)return CPA.units;
   if(cpaPhotosOnly()){
     // cust.units itself is closed to a photos-only account (agreement values, customer links).
-    const {data}=await sb.schema('cust').rpc('media_unit_list');
-    CPA.units=(data||[]).map(u=>({...u,projects:{id:u.project_id,name:u.project_name}}));return CPA.units;
+    const data=await cpaAllRows(()=>sb.schema('cust').rpc('media_unit_list'));
+    CPA.units=data.map(u=>({...u,projects:{id:u.project_id,name:u.project_name}}));return CPA.units;
   }
-  const {data}=await sb.schema('cust').from('units').select('*, projects(id,name)').is('deleted_at',null).order('id',{ascending:false});
-  CPA.units=data||[];return CPA.units;
+  CPA.units=await cpaAllRows(()=>sb.schema('cust').from('units').select('*, projects(id,name)').is('deleted_at',null).order('id',{ascending:false}));
+  return CPA.units;
 }
 async function cpaCustomers(force){
   if(CPA.customers&&!force)return CPA.customers;
-  const {data}=await sb.schema('cust').from('customers').select('*').is('deleted_at',null).order('full_name');
-  CPA.customers=data||[];return CPA.customers;
+  CPA.customers=await cpaAllRows(()=>sb.schema('cust').from('customers').select('*').is('deleted_at',null).order('full_name').order('id'));
+  return CPA.customers;
 }
 async function cpaAmenities(force){
   if(CPA.amenities&&!force)return CPA.amenities;
