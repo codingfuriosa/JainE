@@ -122,12 +122,14 @@ window.pdfSetStatus=async function(id,s){
    bedrooms, built-up area, total sale price) and give the customer the link. It is the same booking-form.html for everybody
    (booking-form.html?t=<token>); the customer's answers are saved on our server as they type, so reopening the link carries on
    at the same step; when they submit, the answers land in the list above like any other digital form. No booking is started.
-   TEMPORARY, on the Administrator's word: only the Administrator and the Sales department see the button and the links (the
+   TEMPORARY, on the Administrator's word (since 13 Nov 2026 ONLY the Administrator - Sales is switched off for now; before that the Sales department too): only the Administrator sees the button and the links (the
    database says the same - acc.can_generate_booking_form()). Widen it when asked. */
 function pdfCanGenerate(){
   if(typeof state==='undefined'||!state||state.isCustomer||state.impersonating) return false;
   const me=String(state.email||'').trim().toLowerCase(), d=state.profile&&state.profile.department, depts=Array.isArray(d)?d:(d?[d]:[]);
-  return me==='ayushruia1@gmail.com'||depts.indexOf('Sales')!==-1;
+  // 13 Nov 2026, on the Administrator's word: Sales is switched off for now. To give Sales back, change this line to
+  //   return me==='ayushruia1@gmail.com'||depts.indexOf('Sales')!==-1;   (and see supabase/functions/booking-form-public staffUser + acc.can_generate_booking_form)
+  return me==='ayushruia1@gmail.com';
 }
 const PDF_LINKS={rows:[],ok:false};
 const PDF_COUNTRIES=[['India','+91'],['United Arab Emirates','+971'],['United States','+1'],['United Kingdom','+44'],['Canada','+1'],['Australia','+61'],['Singapore','+65'],

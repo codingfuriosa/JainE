@@ -134,9 +134,10 @@ async function staffUser(req: Request): Promise<string | null> {
   const email = String(u?.email || "").toLowerCase();
   if (!u?.id || !email) return null;
   if (email === "ayushruia1@gmail.com") return email;
-  const rows = await db("user_profile?select=department&email=eq." + encodeURIComponent(email) + "&limit=1");
-  const dep = rows && rows[0] && rows[0].department;
-  return Array.isArray(dep) && dep.includes("Sales") ? email : null;
+  // (Sales lookup, kept for when it is given back: const rows = await db("user_profile?select=department&email=eq." + encodeURIComponent(email) + "&limit=1"); const dep = rows && rows[0] && rows[0].department;)
+  // 13 Nov 2026, on the Administrator's word: Sales is switched off for now (only the Administrator). To give Sales back, restore:
+  //   return Array.isArray(dep) && dep.includes("Sales") ? email : null;
+  return null;
 }
 async function signedGet(c: { bucket: string; region: string; aws: any }, key: string) {
   const u = new URL(s3url(c, key)); u.searchParams.set("X-Amz-Expires", "600");
