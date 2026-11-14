@@ -202,6 +202,12 @@ function b64Part(mimeType: string, s: string) {
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return { mimeType: `${mimeType}; charset="utf-8"`, content: btoa(bin).replace(/.{76}(?=.)/g, "$&\r\n"), transferEncoding: "base64" };
 }
+// 14 Nov 2026: denomailer 1.6.0 writes a non-ASCII subject as =?utf-8?Q?...?= WITHOUT escaping spaces or "?" and folds it with "=" line breaks. That is an invalid header, so some
+// mail apps then show the WHOLE message as raw source (headers, boundaries, base64). A subject that is plain ASCII is passed through untouched, so make every subject ASCII first.
+function asciiSubject(s: string) {
+  const M: Record<string, string> = { "—": "-", "–": "-", "‒": "-", "−": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "…": "...", "₹": "Rs.", " ": " ", "•": "-", "·": "-", "×": "x" };
+  return String(s ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\x00-\x7f]/g, (c) => M[c] ?? "").replace(/[\r\n]+/g, " ").replace(/\s{2,}/g, " ").trim().replace(/^=\?/, "= ?");
+}
 const maskEmail = (e: string) => { const [u, d] = e.split("@"); return (u.length <= 2 ? u[0] + "*" : u.slice(0, 2) + "*".repeat(Math.min(6, Math.max(2, u.length - 2)))) + "@" + d; };
 async function mailConf() {
   let rows: any[] = [];
@@ -261,7 +267,7 @@ async function sendMail(o: { to: string[]; cc?: string[]; subject: string; html:
   const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: CU, password: CP } } });
   try {
     // The mailbox that logs in to send is always customercare1@ (Gmail will not let it send "as" another account); in test mode the name shown and the reply-to are the Administrator's.
-    await client.send({ from: `${conf.live ? "Pallabita Ghosh" : "Ayush Ruia"} - The Jain Group <${CU}>`, ...(conf.live ? {} : { replyTo: conf.testTo }), to, ...(cc.length ? { cc } : {}), subject,
+    await client.send({ from: `${conf.live ? "Pallabita Ghosh" : "Ayush Ruia"} - The Jain Group <${CU}>`, ...(conf.live ? {} : { replyTo: conf.testTo }), to, ...(cc.length ? { cc } : {}), subject: asciiSubject(subject),
       mimeContent: [b64Part("text/plain", text), b64Part("text/html", html)], ...(o.attachments && o.attachments.length ? { attachments: o.attachments } : {}) });
   } finally { try { await client.close(); } catch (_) { /* ignore */ } }
   return { live: conf.live, via: "smtp" };
