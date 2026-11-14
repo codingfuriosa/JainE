@@ -275,7 +275,7 @@ function trcAsOf(rows){
 function trcIsMissedIncoming(r){
   return /^\s*incoming call missed/i.test(String(r&&r.crm_remarks||''));
 }
-const TRC_MISSED_CALLBACK_HOURS=24;
+const TRC_MISSED_CALLBACK_HOURS=1;
 /* Was every missed incoming call followed by a callback? Each missed call needs some later logged call
    (anything that is not itself another missed incoming) within TRC_MISSED_CALLBACK_HOURS of the miss.
    rows chronological, oldest-first. Not skipped for Lost leads: the customer rang in, a callback is owed
@@ -375,7 +375,7 @@ function trcMissedIncomingHtml(o){
   const rows=o.misses.slice().reverse().map(function(m){
     return '<div style="margin-top:6px;font-size:12.5px;color:var(--slate)">Lead called in on '+fmt(m.missedAt)+' and was missed - '
       +(m.calledBackAt===null?'no callback logged since.'
-        :'first callback on '+fmt(m.calledBackAt)+', '+Math.round((m.calledBackAt-m.missedAt)/3600000)+' hours later (target '+TRC_MISSED_CALLBACK_HOURS+').')
+        :'first callback on '+fmt(m.calledBackAt)+', '+(function(ms){const mins=Math.round(ms/60000);return mins<60?mins+' minute'+(mins===1?'':'s'):(Math.round(ms/360000)/10)+' hours';})(m.calledBackAt-m.missedAt)+' later (target within '+TRC_MISSED_CALLBACK_HOURS+' hour).')
       +'</div>';
   }).join('');
   return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #dc2626">'

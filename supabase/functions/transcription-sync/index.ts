@@ -161,7 +161,8 @@ function degenerateRepeat(text: string): { word: string; count: number; total: n
 const CATALOGUE = `Jain Group projects, for reference when READING the conversation (never to fill in
 anything the audio does not contain):
 - Dream Gurukul: 3BHK from 80 lakh, 2BHK from 57 lakh. UNDER CONSTRUCTION. Doltala, Madhyamgram / near Airport. Possession 2027/2028.
-- Dream World City: 2BHK 29 lakh, 3BHK 36 lakh. READY TO MOVE. Near Joka Metro / Pailan More.
+- Dream Ananta: Phase 2 of Dream Gurukul ("the new project near the Airport"). 2BHK from 64 lakh, 3BHK from 72 lakh, 4BHK from 1.20 crore. UNDER CONSTRUCTION. Doltala crossing, Old Jessore Rd. Handover from Dec 2030 (RERA Dec 2032).
+- Dream World City: 2BHK 29 lakh, 3BHK 36 lakh, rate 10,000/sqft. READY TO MOVE. Near Joka Metro / Pailan More.
 - Dream Valley: 3BHK 73 lakh (no 2BHK). READY TO MOVE. Siliguri, Hill Cart Road, Dagapur.
 - Dream Eco City: 2BHK 34 lakh, 2.5BHK 39 lakh. READY TO MOVE. Durgapur, Muchipara, NH-2.
 - Dream Exotica: 2BHK 36 lakh, 3BHK 44 lakh. READY TO MOVE. Madhyamgram, Badu Road.

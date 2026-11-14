@@ -34161,7 +34161,7 @@ function trcKpiHtml(rows,shownRows){
     +'<div class="card card-pad" style="margin-top:12px;padding-top:10px;padding-bottom:10px">'
     +'<div style="font-size:12px;font-weight:600;color:var(--slate);margin-bottom:8px">Lead follow-up checks (whole call history)</div>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
-    +'<button class="btn btn-sm'+(TRC_F.missedIn==='1'?' btn-primary':'')+'" onclick="trcToggleMissedIn()" title="The lead called in and the call was missed (logged as incoming call missed), and no callback was logged within 24 hours. Not counted until the fuller lead data has loaded">'
+    +'<button class="btn btn-sm'+(TRC_F.missedIn==='1'?' btn-primary':'')+'" onclick="trcToggleMissedIn()" title="The lead called in and the call was missed (logged as incoming call missed), and no callback was logged within 1 hour. Not counted until the fuller lead data has loaded">'
       +'<i class="fa-solid fa-phone-slash"></i> Missed callback'+(missedInLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+missedInLeads+'</b>')+'</button>'
     +'<button class="btn btn-sm'+(TRC_F.promised==='1'?' btn-primary':'')+'" onclick="trcTogglePromised()" title="The agent promised a call back on a set date, that date has passed, and no call has been logged since. Not counted until the fuller lead data has loaded">'
       +'<i class="fa-solid fa-calendar-xmark"></i> Promised call - not called back'+(promisedLeads===null?(haveDetail?' <b>…</b>':''):' <b>'+promisedLeads+'</b>')+'</button>'
@@ -34551,7 +34551,7 @@ function trcLeadRowHtml(g,sl){
       +(g.promised?' '+trcTag('t-amber','fa-calendar-xmark','','Promised call on '+(trcWall(g.promised.gaps[g.promised.gaps.length-1].limitDate)||'')+' - no call since'):'')
       +(g.notConn?' '+trcTag('t-amber','fa-phone-volume','',(g.notConn.open?'Not connected - no follow-up yet, ':'Not connected - called back late, ')+g.notConn.days+' days (Level '+g.notConn.levels.join(' & ')+')'):'')
       +(g.missedIn?' '+trcTag('t-red','fa-phone-slash','',
-          'Missed incoming call '+g.missedIn.count+' time'+(g.missedIn.count===1?'':'s')+' - not called back within 24 hours'):''))
+          'Missed incoming call '+g.missedIn.count+' time'+(g.missedIn.count===1?'':'s')+' - not called back within 1 hour'):''))
     /* g.lastAssessedOutside only ever fires once g.lastAssessed itself is null (see trcLeads) - a
        carried-over verdict from another date, not this range's own, so it is labelled with exactly
        that date (trcBackfillLastJudgement) rather than left indistinguishable from a same-range one.
@@ -35141,7 +35141,7 @@ function trcAsOf(rows){
 function trcIsMissedIncoming(r){
   return /^\s*incoming call missed/i.test(String(r&&r.crm_remarks||''));
 }
-const TRC_MISSED_CALLBACK_HOURS=24;
+const TRC_MISSED_CALLBACK_HOURS=1;
 /* Was every missed incoming call followed by a callback? Each missed call needs some later logged call
    (anything that is not itself another missed incoming) within TRC_MISSED_CALLBACK_HOURS of the miss.
    rows chronological, oldest-first. Not skipped for Lost leads: the customer rang in, a callback is owed
@@ -35241,7 +35241,7 @@ function trcMissedIncomingHtml(o){
   const rows=o.misses.slice().reverse().map(function(m){
     return '<div style="margin-top:6px;font-size:12.5px;color:var(--slate)">Lead called in on '+fmt(m.missedAt)+' and was missed - '
       +(m.calledBackAt===null?'no callback logged since.'
-        :'first callback on '+fmt(m.calledBackAt)+', '+Math.round((m.calledBackAt-m.missedAt)/3600000)+' hours later (target '+TRC_MISSED_CALLBACK_HOURS+').')
+        :'first callback on '+fmt(m.calledBackAt)+', '+(function(ms){const mins=Math.round(ms/60000);return mins<60?mins+' minute'+(mins===1?'':'s'):(Math.round(ms/360000)/10)+' hours';})(m.calledBackAt-m.missedAt)+' later (target within '+TRC_MISSED_CALLBACK_HOURS+' hour).')
       +'</div>';
   }).join('');
   return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #dc2626">'

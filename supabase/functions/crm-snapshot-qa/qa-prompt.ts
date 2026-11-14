@@ -27,21 +27,35 @@ false - treat it as unverifiable. Synced against the sales team's own Reckoner s
 Every price is the "onwards" figure and excludes GST, registration and parking unless stated.
 Carpet area runs roughly 25-30% below the super built-up areas given here.
 
-- Dream Ananta - the project customers hear pitched as "the new project near the Airport".
-  UNDER CONSTRUCTION (soft launch, 2026), Doltala, Old Jessore Rd, Madhyamgram / near the Airport,
-  on a road-facing plot; landmark Fortune City / Julien Day School. 
-  2BHK 62 lakh (940-1015 sqft) - 3BHK 68 lakh (1075-1405 sqft) - 4BHK 1.14 crore (1780-1805 sqft).
-  Each price is inclusive of GST and EDC, excluding car parking. Parking: covered/basement 5 lakh,
-  open 4 lakh. About 5.5 acres, 296 flats, G+8; room sizes run roughly 12x13 ft.
-  the sheet references a soft-launch discount - treat a specific discount
+- Dream Ananta - PHASE 2 of Dream Gurukul, and the project customers hear pitched as "the new project
+  near the Airport". UNDER CONSTRUCTION (soft launch, 2026), Doltala crossing, Old Jessore Rd,
+  Madhyamgram - within 300 m of Julien Day School, about 10 minutes from the Airport.
+  5.12 acres, 6 blocks/towers, B+G+8, 436 flats (the sheet's "436 [open space > 70%]"), over 70% open
+  space. Booking amount 2,10,000. 2BHK, 3BHK and 4BHK; available on all floors.
+  Sizes: 2BHK 940-1015 sqft - 3BHK 1075-1405 sqft - 4BHK 1790-1805 sqft.
+  Unit prices (onwards, all including EDC and GST, excluding car parking):
+  2BHK 940 sqft 64 lakh - 3BHK 1075 sqft 72 lakh - 3BHK 1200 sqft 78 lakh -
+  3BHK 1405 sqft (the largest 3BHK) 94 lakh - 4BHK 1790 sqft 1.20 crore.
+  Parking: covered 5 lakh, open 4 lakh.
+  Balconies/toilets: 4BHK 4 toilets, 2 balconies - 3BHK 3 balconies (one a utility balcony with the
+  kitchen), with 3T or 2T available - 2BHK 1 balcony, 2 toilets. Block E has 18 units and Block D
+  3 units on each floor.
+  Amenities: clubhouse building, 24x7 security, children's park, senior citizen park, joggers' park,
+  club library, AC spa, swimming pool, gym, indoor games, rooftop garden, banquet, home theatre,
+  Miyawaki garden.
+  Bank approvals: SBI, PNB, Canara, ICICI, HDFC, LIC Housing, Bandhan, Bank of India, Bajaj.
+  Dream Gurukul & Ananta have collaborated with academies to mentor children: Music Academy
+  (Malhar) - Pandit Ajoy Chakraborty; Dance Academy (Muktadhara) - Mrs Mamata Shankar; Painting
+  Academy (Studio Chitrakalpa) - Subhaprashanna; Football Academy (Krirangan) - Bhaichung Bhutia.
+  Possession: under RERA the date is December 2032, but as the work is ahead of schedule the Group
+  is giving handover from December 2030. Saying handover from Dec 2030 (RERA Dec 2032) is correct;
+  any other specific date is not.
+  The sheet references a soft-launch discount - treat a specific discount
   figure an agent quotes as unverifiable unless the CRM record for that date confirms it.
-  Possession: an estimated ~5 years from launch is the correct rough answer. No fixed possession
-  date or RERA number is announced yet - a specific date beyond that rough estimate is not correct
-  to quote, regardless of any internal estimate a caller may have heard.
-- Dream Gurukul - a SEPARATE project from Dream Ananta, on the same Doltala / Madhyamgram side near
+- Dream Gurukul - Dream Ananta is its PHASE 2, on the same Doltala / Madhyamgram side near
   the Airport (Jessore Road, Doltala Crossing, near Julien Day School, about 10 minutes from the
-  Airport). Do not treat the two as one - but see the PROJECT-SPECIFIC RULE on redirecting a lead
-  from one to the other. UNDER CONSTRUCTION, possession 2028 (October). 5 acres,  G+7 total towers,
+  Airport). Prices and specifications differ, so each is checked against its own entry - but see the
+  PROJECT-SPECIFIC RULE on pitching one for the other. UNDER CONSTRUCTION, possession 2028 (October). 5 acres,  G+7 total towers,
   450+ flats. 
   2BHK 58 lakh onwards (860-975 sqft), including  car parking.
   3BHK 82-85 lakh onwards (1225-1290 sqft, price depends on optional features), including 
@@ -61,6 +75,7 @@ Carpet area runs roughly 25-30% below the super built-up areas given here.
   Metro, near Pailan World School. 
   1BHK 25 lakh onwards (560-575 sqft) - 2BHK 29 lakh onwards (630-800 sqft) - 3BHK 36 lakh onwards
   (795-1390 sqft, price scales up with size within that range).
+  Rate: 10,000 per sqft is the approved per-sqft rate for this project.
   Parking: open 2.75 lakh, covered 3.50 lakh.  20 acres, 450 flats, 6 towers,
   G+9, over 70% open space.
   The sheet also references a free open-parking / spot-booking promotion (not for 1BHK) - this is a
@@ -147,6 +162,8 @@ lead belongs to, and only where the subject actually came up on the call.
   project does not include one. On any other project this is unverifiable either way.
 - Pick-up and drop: Dream World City DOES offer it. Dream Ananta, Dream Eco City, Dream Exotica and
   Dream Valley do NOT. On any other project this is unverifiable either way.
+- Dream World City rate per square foot: the approved answer is 10,000/sft. A per-sqft figure
+  reached by dividing a flat's total price by its area is an error, as with Dream One below.
 - Dream One rate per square foot: the approved answer is the 11,000/sft base rate. A per-sqft figure
   reached by dividing a flat's total price by its area is an error even when the arithmetic is
   correct, because it is not the rate the company quotes.
@@ -159,6 +176,9 @@ lead belongs to, and only where the subject actually came up on the call.
   which single unit remains in each). Offering the configuration each has SOLD OUT - 4BHK at
   Residency Manor, 2BHK at Palazzo - is wrong product information, exactly as with Dream Valley's
   2BHK above. Offering the one unit that does remain is not an error even though stock is scarce.
+- Dream Ananta is Phase 2 of Dream Gurukul. An agent who pitches Dream Gurukul (or says "Gurukul")
+  while describing Ananta's details is COMPLETELY FINE - never a Project mismatch and never marked
+  down for the name used. Likewise a lead belonging to either one may be pitched the other.
 - Dream Gurukul redirected to Dream Ananta ("the new project near the Airport"): both are
   under-construction projects in the same Doltala/Madhyamgram corridor near the Airport, and it is
   standard, encouraged practice for an agent to pitch Ananta instead once a Gurukul lead makes clear

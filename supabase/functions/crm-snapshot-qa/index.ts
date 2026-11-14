@@ -130,6 +130,9 @@ const SPELLINGS: [RegExp, string][] = [
   [/\bdream\s+gurukoo?l\b/gi, "Dream Gurukul"],
   [/\bdream\s+exotika\b/gi, "Dream Exotica"],
   [/\bdream\s+[ao]n[oa]nt[oa]\b/gi, "Dream Ananta"],
+  /* "the new project near the airport" IS Dream Ananta (Phase 2 of Gurukul); write the name. */
+  [/\b(?:the\s+)?new\s+project\s+(?:which\s+is\s+)?(?:near|nearby|beside|next\s+to|close\s+to)\s+(?:the\s+)?air\s?port\b/gi, "Dream Ananta"],
+  [/\bnaya\s+project\s+(?:near|nearby)\s+(?:the\s+)?air\s?port\b/gi, "Dream Ananta"],
   [/\bdream\s+diamon[dt]\b/gi, "Dream Diamond"],
   [/\bdurba+r\s+banquets?\b/gi, "Durbaar Banquets"],
 ];
