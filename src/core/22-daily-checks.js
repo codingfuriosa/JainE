@@ -63,13 +63,18 @@ async function dcLoad(first){
   /* And the flag is cleared in a finally for the same reason: this runs on a timer, so anything
      that can wedge it stays wedged until somebody reloads the page. */
   try{
+    /* A narrow reader is entitled to the workflow health and to nothing else on this page, so the
+       other two are never asked for rather than asked for and refused - the refusals would land in
+       DC.err and put an error across a page that is working exactly as intended. */
+    const narrow=(typeof wfHealthOnly==='function')&&wfHealthOnly();
+    const skipped={ok:false,skipped:true};
     const res=await Promise.all([
-      call('erp_usability_daily_feature_checks'),
+      narrow?Promise.resolve(skipped):call('erp_usability_daily_feature_checks'),
       call('erp_usability_workflow_health'),
-      call('erp_usability_transcription_health')
+      narrow?Promise.resolve(skipped):call('erp_usability_transcription_health')
     ]);
     if(res[0].ok){ DC.feat=res[0].d; DC.err=null; }
-    else if(first){ DC.feat=null; DC.err=(res[0].e&&res[0].e.message)||'Could not load'; }
+    else if(first&&!res[0].skipped){ DC.feat=null; DC.err=(res[0].e&&res[0].e.message)||'Could not load'; }
     if(res[1].ok) DC.wf=res[1].d;
     if(res[2].ok) DC.tr=res[2].d;
     if(res[0].ok||res[1].ok||res[2].ok){ DC.at=Date.now(); DC.fail=0; } else { DC.fail++; }
@@ -138,6 +143,13 @@ function dcStampText(){
     +(DC.fail?('Last updated '+ago+' · could not reach the database'):(s<10?'Updated just now':('Updated '+ago)));
 }
 function dcBodyHtml(){
+  /* A NARROW READER'S PAGE IS DECIDED FIRST. They are entitled to the workflow health alone, so the
+     daily feature checks are never asked for on their behalf, and DC.feat stays at the null it
+     started as - which is exactly what the branch below tests for. Deciding their page after that
+     test put the one block they had been given behind a padlock reading "Could not load", on a page
+     that had in fact loaded perfectly. The emptiness is the arrangement working, not a failure, so
+     it has to be read that way before anything tests for it. */
+  if((typeof wfHealthOnly==='function')&&wfHealthOnly()) return usbWorkflowHealthHtml();
   if(DC.feat===null){
     return '<div class="card card-pad empty" style="margin-top:16px;padding:40px">'
       +'<i class="fa-solid fa-lock"></i><div>'+esc(DC.err||'Could not load')+'</div></div>';

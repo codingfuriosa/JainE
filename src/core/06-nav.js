@@ -142,6 +142,16 @@ function allowedSet(){if(state.super)return null;const m=state.roles&&state.role
    rule inside erp_usability_report(), which is what actually protects the numbers; this only decides
    whether the menu entry is worth drawing. */
 function hasUsability(){ if(state.super)return true; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('usability')!==-1; }
+/* WORKFLOW HEALTH, AND NOTHING ELSE ON THAT PAGE.
+   Daily Checks arrives with the 'usability' module, and that same module opens the Usability page,
+   the daily feature checks and transcription health along with it - so there was no way to hand
+   somebody the health of two workflows and none of the rest. This names who gets that narrow view;
+   the workflows themselves are not listed here, because the page draws whichever rows the database
+   hands back and adm.workflow_health_scope decides what those are. Same arrangement as
+   FEEDBACK_HUB_PEOPLE below: this only decides whether the page is offered at all, and the table is
+   what actually keeps the other workflows' figures out of reach. Keep the two in step. */
+const WORKFLOW_HEALTH_ONLY=['mgr.hr@thejaingroup.com'];
+function wfHealthOnly(){ return !hasUsability() && WORKFLOW_HEALTH_ONLY.indexOf(String(state.email||'').trim().toLowerCase())!==-1; }
 /* FEEDBACK HUB IS FOR THREE PEOPLE, BY NAME.
 
    Not "granted the ordinary way" like every other module, and deliberately not open to every
@@ -153,8 +163,9 @@ function hasUsability(){ if(state.super)return true; const m=state.roles&&state.
 
    To change who can see it, add an address to this list - nothing else needs touching. */
 /* 2026-11-03: Prerna Gupta (businessanalyst@) taken off again - she is in Systems, and Systems people do not get
-   the QR forms (only System Feedbacks); the Administrator is the one exception. */
-const FEEDBACK_HUB_PEOPLE=['ayushruia1@gmail.com','mgr.hr@thejaingroup.com'];
+   the QR forms (only System Feedbacks); the Administrator is the one exception.
+   2026-11-06: put back on the user's own request, so Design and Records show again beside System Feedbacks. */
+const FEEDBACK_HUB_PEOPLE=['ayushruia1@gmail.com','mgr.hr@thejaingroup.com','businessanalyst@thejaingroup.com'];
 /* 2026-11-03: SYSTEM FEEDBACKS. A second kind of feedback inside the same page, with its own people:
    the Systems department (department "Systems" in acc.user_profile) posts what it built or fixed, and
    Sales and Pre Sales rate it. The QR forms above stay with FEEDBACK_HUB_PEOPLE; Systems people do not
@@ -232,11 +243,50 @@ function canAccounts(){
    the superadmin bypass and needs the id in the person's own adm.users.modules - so the ops.*
    tables and RPCs refuse anyone else even if they reach the page some other way.
    To add someone: add the address here AND put 'weekly_status' in their adm.users.modules. */
-const WEEKLY_STATUS_PEOPLE=['businessanalyst@thejaingroup.com'];
-function canWeeklyStatus(){
+/* 2026-11-09: coordinator.vc@ (Shafat) given the whole tab, on the user's word - start, schedule and edit
+   like the first address. His adm.users.modules carries 'weekly_status' as well, which is the database half. */
+const WEEKLY_STATUS_PEOPLE=['businessanalyst@thejaingroup.com','coordinator.vc@thejaingroup.com'];
+/* 2026-11-09: PEOPLE ON A MEETING CAN READ IT. The list above is who can start, schedule and edit
+   (canEditWeeklyStatus); anyone with a login who is on a meeting - picked when it was started or
+   scheduled, so people added later are covered - also sees the tab, with only the meetings they are
+   on and no way to change anything. The database decides that (ops_ws_is_participant, app.ws_participant);
+   this only asks it once and remembers the answer for ten minutes. The write functions still ask
+   has_module('weekly_status'), so a participant cannot change anything even by calling them directly. */
+/* 2026-11-16: giving someone Weekly Status in the Control Panel (adm.users.modules) now makes them an
+   editor straight away - they can start and schedule meetings - with no address to add here. The list
+   above stays as well. Which meetings each person sees and may change is decided by the database
+   (app.ws_can_see / app.ws_can_edit): the owner all of them; everyone else sees the meetings they were
+   in and changes only the ones they started or were made an editor of. */
+function canEditWeeklyStatus(){
   if(state.isCustomer||state.impersonating) return false;
   const me=String(state.email||'').trim().toLowerCase();
-  return WEEKLY_STATUS_PEOPLE.indexOf(me)!==-1;
+  const mods=state.roles&&state.roles.modules;
+  return WEEKLY_STATUS_PEOPLE.indexOf(me)!==-1||(Array.isArray(mods)&&mods.indexOf('weekly_status')!==-1);
+}
+function canWeeklyStatus(){
+  if(state.isCustomer||state.impersonating) return false;
+  return canEditWeeklyStatus()||state.wsParticipant===true;
+}
+function wsPartKey(){ return 'ws_part_'+String(state.email||'').trim().toLowerCase(); }
+function wsPeekParticipant(){
+  try{ const c=JSON.parse(localStorage.getItem(wsPartKey())||'null'); if(c&&Date.now()-c.t<600000) state.wsParticipant=!!c.v; }catch(e){}
+}
+async function wsCheckParticipant(){
+  if(state.wsParticipant!==undefined) return state.wsParticipant;
+  try{
+    const r=await sb.rpc('ops_ws_is_participant');
+    if(r.error) return false;
+    state.wsParticipant=r.data===true;
+    try{ localStorage.setItem(wsPartKey(),JSON.stringify({t:Date.now(),v:state.wsParticipant})); }catch(e){}
+  }catch(e){ return false; }
+  return state.wsParticipant;
+}
+// The sidebar was drawn before the answer came back: draw it again, keeping what the first draw set up.
+function wsRefreshNav(){
+  if(!$('sbNav')) return;
+  buildSidebarNav(); setActive(PAGE);
+  document.querySelectorAll('.sb-item').forEach(function(a){ a.addEventListener('click',function(){ document.body.classList.remove('nav-open'); }); });
+  if(state.super) secPendingBadge();
 }
 /* LEGAL 2 (5 Nov 2026): the reshaped Legal MIS (10b-legal-mis-pages.js) runs on a page of its own,
    legal2.html, beside the original Legal, for named people only while it is tried out: the
@@ -252,12 +302,12 @@ function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
-  if(hasUsability()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
+  if(hasUsability()||wfHealthOnly()) admItems.push({id:'daily_checks',label:'Daily Checks',icon:'fa-list-check'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='legal2')return canLegal2();if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability'||id==='daily_checks')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='legal2')return canLegal2();if(id==='feedback_hub')return canFeedbackHub();if(id==='inventory')return canInventory();if(id==='accounts')return canAccounts();if(id==='weekly_status')return canWeeklyStatus();if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='daily_checks')return hasUsability()||wfHealthOnly();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
-function renderShell(){
+function buildSidebarNav(){
   const nav=$('sbNav');nav.innerHTML='';
   effectiveNav().forEach(g=>{
     nav.appendChild(el('div','sb-group',g.group));
@@ -275,6 +325,9 @@ function renderShell(){
       nav.appendChild(a);
     });
   });
+}
+function renderShell(){
+  buildSidebarNav();
   // The logo/"back to home" link is static markup in each .html shell (not built by effectiveNav()
   // above), but it's the exact same kind of cross-module link, so it gets the exact same treatment.
   const brand=document.querySelector('.sb-brand');
