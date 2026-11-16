@@ -27,7 +27,7 @@
 const WM={items:null,meetings:null,people:[],err:'',cur:null,view:'meeting',tab:'pending',q:'',who:'',
   allF:'pending',allG:'meeting',allMtg:'',allWho:'',showPpl:false,wk:null,showPast:false,
   picked:{mem:[],due:null,recur:'none'},parsed:null,sugIdx:0,lastNew:null,lastDraft:null,
-  sel:new Set(),draftMem:{},draftRecur:{},timer:null,busy:false,formPpl:new Set(),kpiT:null,noteT:{},formAg:[],agTimer:null,agView:null,agFollow:true,railOff:undefined};
+  sel:new Set(),draftMem:{},draftRecur:{},timer:null,busy:false,formPpl:new Set(),formEd:new Set(),kpiT:null,noteT:{},formAg:[],agTimer:null,agView:null,agFollow:true,railOff:undefined};
 
 const WM_RECUR={none:'Does not repeat',weekly:'Weekly',monthly:'Monthly'};
 const WM_LEGACY={open:'Open',in_progress:'In progress',not_done:'Not done',done:'Done'};
@@ -50,6 +50,10 @@ function wmName(email){ const p=wmPerson(email); return p?p.name:String(email||'
 function wmFirst(email){ return wmName(email).split(' ')[0]; }
 function wmDept(email){ const p=wmPerson(email); return p&&p.dept?p.dept:''; }
 function wmIsMe(email){ return !!email&&!!state.email&&String(email).toLowerCase()===state.email.toLowerCase(); }
+// Who a task in this meeting can be given to. Everyone but yourself - except that whoever started the
+// meeting may give its tasks to themselves as well.
+function wmSelfOK(){ const m=wmMeeting(WM.cur); return !!(m&&m.created_by&&wmIsMe(m.created_by)); }
+function wmAssignable(p){ return !wmIsMe(p.email)||wmSelfOK(); }
 // The @name a person is typed as: the full name without spaces, so two people who share a first
 // name can never be confused.
 function wmTag(p){ return p.name.replace(/\s+/g,''); }
@@ -104,6 +108,8 @@ async function wmReloadMeetings(){
   if(error) throw error;
   WM.meetings=(data||[]).slice().sort((a,b)=>a.meeting_date<b.meeting_date?1:a.meeting_date>b.meeting_date?-1:b.id-a.id);
 }
+// Sees every meeting (the database says the same in app.ws_sees_all).
+const WS_OWNERS=['businessanalyst@thejaingroup.com'];
 const wmMeeting=id=>(WM.meetings||[]).find(m=>m.id===id);
 const wmSeries=kind=>(WM.meetings||[]).filter(m=>m.kind===kind);
 
@@ -117,9 +123,10 @@ VIEWS.weekly_status=async function(v){
     return;
   }
   const today=wmToday();
-  // Opens on today's meeting; otherwise on the latest regular meeting (a kind held more than once,
-  // such as OPS), so a one-off - a test or a sample - never becomes the page you land on.
-  const ms=WM.meetings||[], regular=m=>ms.filter(x=>x.kind===m.kind).length>1;
+  // Opens on today's meeting; otherwise on the latest regular meeting - a kind held at least three
+  // times, such as OPS or OPS & Purchase - so a test or a sample meeting (even one tried twice) never
+  // becomes the page you land on.
+  const ms=WM.meetings||[], regular=m=>ms.filter(x=>x.kind===m.kind).length>=3;
   WM.cur=(ms.find(m=>m.meeting_date===today)||ms.find(m=>m.meeting_date<=today&&regular(m))||ms.find(m=>m.meeting_date<=today)||ms[0]||{}).id||null;
   WM.wk=wmMonday(today);
   v.innerHTML=WM_CSS+'<div class="wm" id="wmRoot"></div>';
@@ -127,27 +134,36 @@ VIEWS.weekly_status=async function(v){
   wmRender();
 };
 
-/* READ-ONLY VIEW. Everything that changes something is drawn by the same code as the rest of the page,
-   so rather than a second copy of it, whatever is drawn is switched off afterwards: buttons and fields
-   whose handler writes are hidden or locked. The database refuses the writes in any case (every ops_*
-   write function still asks has_module); this is so a reader is not offered buttons that would only
-   come back with an error. Moving between meetings, weeks and tabs is not a write and stays. */
-const WM_WRITE=/\bwm(?:StartMeeting|ScheduleMeeting|MeetingSave|SeriesStop|EndMeeting|Reopen|AgStart|AgStep|AgPause|AgAdd|AgMins|AgNoteInput|AgNoteSave|KpiAdd|KpiInput|KpiSave|KpiColAdd|KpiColDel|KpiColName|KpiCell|OoAdd|NoteAdd|NoteInput|NoteSave|NoteSolve|NoteTask|NoteTaskSave|NoteDel|EditAttendance|SaveAttendance|SetLegacy|Toggle|Approve|Parse|Key|DropMem|PickPeople|SelAll|Promote|BulkPeople|BulkDue|DraftText|DraftDue|DraftDelete|Choose|Add1|Form[A-Za-z]*)\b/;
-const WM_ROW_CTRL=/\bwm(?:Toggle|Approve|SetLegacy|SelAll|DraftText|DraftDue|KpiColName|KpiCell|AgMins)\b/;   // part of a row: stay in place, switched off
-function wmLockView(){
-  const root=$('wmRoot'); if(!root||!WM.ro) return;
-  root.querySelectorAll('[onclick],[onchange],[oninput],[onkeydown],[onblur]').forEach(function(el){
-    const hit=['onclick','onchange','oninput','onkeydown','onblur'].some(function(a){ const v=el.getAttribute(a); return v&&WM_WRITE.test(v); });
+/* WHO CAN DO WHAT (16 Nov 2026).
+   * Seeing a meeting: you were in it, you started it, you were made its editor - or you are the owner.
+   * Changing a meeting: only whoever started it, the editors they chose, and the owner (m.can_edit, from
+     app.ws_can_edit). Everyone else reads it: whatever would change it is hidden or switched off here,
+     and the database refuses it in any case.
+   * Starting or scheduling a new meeting needs Weekly Status itself (WM.ro is true without it).
+   Ticking or approving a task follows Accountability's own rule (only who assigned it), so those stay. */
+const WM_NEW=/\bwm(?:StartMeeting|ScheduleMeeting|MeetingSave)\b/;
+const WM_EDIT=/\bwm(?:SeriesStop|EndMeeting|Reopen|AgStart|AgStep|AgPause|AgAdd|AgMins|AgNoteInput|AgNoteSave|KpiAdd|KpiInput|KpiSave|KpiColAdd|KpiColDel|KpiColName|KpiCell|OoAdd|NoteAdd|NoteInput|NoteSave|NoteSolve|NoteTask|NoteTaskSave|NoteDel|EditAttendance|SaveAttendance|Parse|Key|DropMem|PickPeople|SelAll|Promote|BulkPeople|BulkDue|DraftText|DraftDue|DraftDelete|Choose|Add1)\b/;
+function wmCanEdit(id){ const m=wmMeeting(id); return !m||m.can_edit!==false; }
+function wmLockIn(scope,re){
+  if(!scope) return;
+  scope.querySelectorAll('[onclick],[onchange],[oninput],[onkeydown],[onblur]').forEach(function(el){
+    const hit=['onclick','onchange','oninput','onkeydown','onblur'].some(function(a){ const v=el.getAttribute(a); return v&&re.test(v); });
     if(!hit) return;
-    const keep=['onclick','onchange'].some(function(a){ const v=el.getAttribute(a); return v&&WM_ROW_CTRL.test(v); });
-    if(/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)||keep){ if('readOnly' in el) el.readOnly=true; el.disabled=true; el.style.pointerEvents='none'; el.style.opacity='.7'; }
+    if(/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)){ if('readOnly' in el) el.readOnly=true; el.disabled=true; el.style.pointerEvents='none'; el.style.opacity='.7'; }
     else el.style.display='none';
   });
-  root.querySelectorAll('.wm-cap').forEach(function(el){ el.style.display='none'; });
+}
+function wmLockView(){
+  const root=$('wmRoot'); if(!root) return;
+  if(WM.ro) wmLockIn(root,WM_NEW);
+  if(WM.view==='meeting'&&WM.cur&&!wmCanEdit(WM.cur)){
+    const main=$('wmMain'); wmLockIn(main,WM_EDIT);
+    if(main) main.querySelectorAll('.wm-cap,#wmDrafts').forEach(function(el){ el.style.display='none'; });
+  }
 }
 function wmWatchReadOnly(){
   if(WM.lockObs){ WM.lockObs.disconnect(); WM.lockObs=null; }
-  const root=$('wmRoot'); if(!root||!WM.ro) return;
+  const root=$('wmRoot'); if(!root) return;
   WM.lockObs=new MutationObserver(wmLockView);
   WM.lockObs.observe(root,{childList:true,subtree:true});
 }
@@ -161,7 +177,7 @@ function wmRender(){
   <div class="wm-top wm-in">
     <div class="wm-date">${esc(new Date(wmToday()+'T00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'}))}</div>
     <h1>${hi}.</h1>
-    ${WM.ro?'<div class="wm-lead wm-mute" style="font-size:13px"><i class="fa-solid fa-eye"></i> You can see the meetings you are on. Only the person who starts a meeting can change it.</div>':''}
+    ${WM.ro?'<div class="wm-lead wm-mute" style="font-size:13px"><i class="fa-solid fa-eye"></i> You can see the meetings you are in. Only the person who started a meeting (or someone they made an editor) can change it.</div>':''}
     <div class="wm-lead"><button class="wm-lnk ${WM.view==='all'?'on':''}" onclick="wmOpenAll('pending')"><b id="wmPend">${open.length}</b> tasks pending</button></div>
   </div>
   <div class="wm-grid ${wmRailOff()?'off':''}" id="wmGrid"><div id="wmMain"></div><aside class="wm-rail">
@@ -229,13 +245,14 @@ function wmPaintMeeting(){
       <div>
         <div class="wm-eyebrow">${ended?`<span class="wm-ended"><i class="fa-solid fa-circle-check"></i> ${isToday?'Today':esc(wmFmt(m.meeting_date))} · ended at ${esc(wmClock(m.ended_at))}${m.ran_minutes?' · ran '+m.ran_minutes+' min':''}</span><button class="wm-quiet" onclick="wmReopen()">Reopen</button>`
           :isToday?`<span class="wm-live">Today${m.start_time?' · '+esc(wmTime(m.start_time)):''}</span>`:m.meeting_date>today?'Coming up · '+esc(wmFmt(m.meeting_date))+(m.start_time?', '+esc(wmTime(m.start_time)):''):'Held on '+esc(wmFmt(m.meeting_date))}</div>
+        ${wmCanEdit(m.id)?'':`<div class="wm-viewonly"><i class="fa-solid fa-eye"></i> View only · ${m.created_by?esc(wmName(m.created_by))+' started this meeting and can change it':'only the owner can change this meeting'}${(m.editors||[]).length?', with '+esc((m.editors||[]).map(wmName).join(', ')):''}</div>`}
         <h2>${esc(m.kind||'Meeting')}<span class="wm-info"><i class="fa-solid fa-circle-info"></i><span class="tip">${series.length} meeting${series.length===1?'':'s'} of this kind since ${esc(wmFmtS(first))}${m.note?'<br>'+esc(m.note):''}</span></span></h2>
       </div>
       ${isToday&&!ended?`<div class="wm-mh-r">${started?`<div class="wm-clock" title="How long this meeting has been running"><span>Meeting running</span><b id="wmTimer">0m 00s</b><small>Started ${esc(wmClock(started))} · now <em id="wmNow">${esc(wmClock(Date.now()))}</em></small></div>`:''}<button class="wm-btn wm-red" onclick="wmEndMeeting()">End meeting</button></div>`:''}
     </div>
     <div class="wm-mh2">
       <div class="wm-dd" id="wmPpl">${wmPplHtml(att)}</div>
-      ${m.series_id&&m.recur?`<span class="wm-rep ${m.series_active?'':'off'}" title="${m.series_active?'A repeating meeting':'This meeting no longer repeats'}"><i class="fa-solid fa-repeat"></i> ${esc(m.series_active?wmRecurWords(m.recur,(wmSeries(m.kind).filter(x=>x.series_id===m.series_id).pop()||m).meeting_date,m.start_time):'Stopped repeating')}${m.series_active?` · <button class="wm-quiet" onclick="wmSeriesStop(${m.series_id})">Stop repeating</button>`:''}</span>`:''}
+      ${m.series_id&&m.recur?`<span class="wm-rep ${m.series_active?'':'off'}" title="${m.series_active?'A repeating meeting':'This meeting no longer repeats'}"><i class="fa-solid fa-repeat"></i> ${esc(m.series_active?wmRecurWords(m.recur,(wmSeries(m.kind).filter(x=>x.series_id===m.series_id).pop()||m).meeting_date,m.start_time):'Stopped repeating')}${m.series_active&&(wmIsMe(m.created_by)||WS_OWNERS.includes(String(state.email||'').toLowerCase()))?` · <button class="wm-quiet" onclick="wmSeriesStop(${m.series_id})">Stop repeating</button>`:''}</span>`:''}
       ${series.length>1?`<select class="wm-hsel" onchange="wmOpenMeeting(Number(this.value))" title="Earlier meetings">${series.map(x=>`<option value="${x.id}" ${x.id===m.id?'selected':''}>${x.id===m.id?'Earlier meetings':(x.meeting_date===today?'Today':esc(wmFmt(x.meeting_date)))}</option>`).join('')}</select>`:''}
     </div>
     </div><div class="wm-card-body">
@@ -294,7 +311,8 @@ function wmLastPeople(kind){
 function wmFormPeople(){
   const host=$('wmFormPpl'); if(!host) return;
   const picked=WM.formPpl, others=WM.people.filter(p=>!wmIsMe(p.email));
-  host.innerHTML=`<div class="wm-fp-chips">${[...picked].map(e=>`<span class="people-chip">${wmAvatar(wmName(e),20)} <span>${esc(wmName(e))}</span><i class="fa-solid fa-xmark" style="cursor:pointer;margin-left:4px;color:#94a3b8" onclick="WM.formPpl.delete('${esc(e)}');wmFormPeople()"></i></span>`).join('')||'<span class="wm-fp-none">Nobody picked yet</span>'}</div>
+  host.innerHTML=`<div class="wm-fp-chips">${[...picked].map(e=>{ const ed=WM.formEd.has(e);
+      return `<span class="people-chip wm-fp-chip ${ed?'ed':''}">${wmAvatar(wmName(e),20)} <span>${esc(wmName(e))}</span><button type="button" class="wm-fp-ed" title="${ed?'Can change this meeting - click to make view only':'Can only view - click to let them change this meeting too'}" onclick="WM.formEd.${ed?'delete':'add'}('${esc(e)}');wmFormPeople()"><i class="fa-solid fa-${ed?'pen':'eye'}"></i> ${ed?'Can edit':'View only'}</button><i class="fa-solid fa-xmark" style="cursor:pointer;margin-left:2px;color:#94a3b8" onclick="WM.formPpl.delete('${esc(e)}');WM.formEd.delete('${esc(e)}');wmFormPeople()"></i></span>`; }).join('')||'<span class="wm-fp-none">Nobody picked yet</span>'}</div>
     <input type="text" id="wmFpQ" placeholder="Search people to add" oninput="wmFormPeopleList()" autocomplete="off">
     <div class="wm-fp-list" id="wmFpList"></div>`;
   wmFormPeopleList();
@@ -306,7 +324,10 @@ window.wmFormPeopleList=function(){
 };
 window.wmFormKind=function(){
   const sel=$('wmKind').value; $('wmKindNew').style.display=sel==='__new'?'':'none';
-  WM.formPpl=new Set(sel==='__new'?[]:wmLastPeople(sel)); wmFormPeople();
+  WM.formPpl=new Set(sel==='__new'?[]:wmLastPeople(sel));
+  // Editors carry over from the last meeting of this kind, for the people still picked.
+  const lastEd=sel==='__new'?null:(WM.meetings||[]).find(m=>m.kind===sel&&(m.editors||[]).length);
+  WM.formEd=new Set(((lastEd&&lastEd.editors)||[]).filter(e=>WM.formPpl.has(e))); wmFormPeople();
   // The agenda starts as the last meeting of this kind ran it, else the standard one.
   const last=sel==='__new'?null:(WM.meetings||[]).find(m=>m.kind===sel&&m.agenda&&m.agenda.items);
   WM.formAg=wmAgMerge(last?last.agenda:null).map(x=>({k:x.k,mins:x.mins,on:x.on})); wmFormAgenda();
@@ -337,9 +358,13 @@ window.wmMeetingForm=function(mode){
     ${later?`<div class="wm-three"><div><label id="wmDateLbl">Date</label><input type="date" id="wmDate" min="${wmToday()}" value="${wmAdd(wmToday(),1)}" onchange="wmFormRecur()"></div>
       <div><label>Time</label><input type="time" id="wmTime" value="10:30" onchange="wmFormRecur()"></div>
       <div><label>Repeats</label><select id="wmRecur" onchange="wmFormRecur()"><option value="none">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select></div></div>
-      <div class="wm-recur-hint" id="wmRecurHint"></div>`:''}
+      <div class="wm-recur-hint" id="wmRecurHint"></div>`
+    // Started now: today, at the current time - only how often it repeats is asked.
+    :`<label>Repeats</label><select id="wmRecur" onchange="wmFormRecur()"><option value="none">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select>
+      <div class="wm-recur-hint" id="wmRecurHint"></div>`}
     <label>People in this meeting <span style="font-weight:400;color:var(--slate)">— it goes into their JainE calendar and yours</span></label>
     <div class="wm-fp" id="wmFormPpl"></div>
+    <div class="wm-fp-help">Everyone picked can see this meeting. Click <b>View only</b> on a person to let them change it too; only you can otherwise.</div>
     <label>Timed agenda <span style="font-weight:400;color:var(--slate)">— untick what this meeting skips; the minutes can be changed</span></label>
     <div class="wm-agf" id="wmAgForm"></div>
   </div>
@@ -361,9 +386,9 @@ function wmRecurWords(recur,date,time){
 }
 window.wmFormRecur=function(){
   const r=$('wmRecur'), h=$('wmRecurHint'); if(!r||!h) return;
-  const date=$('wmDate').value, rep=r.value!=='none';
-  $('wmDateLbl').textContent=rep?'First meeting':'Date';
-  h.innerHTML=rep&&date?`<i class="fa-solid fa-repeat"></i> ${esc(wmRecurWords(r.value,date,$('wmTime').value))}, starting ${esc(wmFmt(date))} — ${/quarterly|yearly/.test(r.value)?"each date goes into everyone's calendar, with an invite, two weeks before":"in everyone's calendar on each date"}`:'';
+  const date=$('wmDate')?$('wmDate').value:wmToday(), rep=r.value!=='none';
+  if($('wmDateLbl')) $('wmDateLbl').textContent=rep?'First meeting':'Date';
+  h.innerHTML=rep&&date?`<i class="fa-solid fa-repeat"></i> ${esc(wmRecurWords(r.value,date,$('wmTime')?$('wmTime').value:wmNowTime()))}, starting ${esc(wmFmt(date))} — ${/quarterly|yearly/.test(r.value)?"each date goes into everyone's calendar, with an invite, two weeks before":"in everyone's calendar on each date"}`:'';
 };
 window.wmStartMeeting=function(){ wmMeetingForm('start'); };
 window.wmScheduleMeeting=function(){ wmMeetingForm('schedule'); };
@@ -374,7 +399,7 @@ window.wmMeetingSave=async function(mode){
   const on=k=>!!ag&&ag.items.some(x=>x.k===k&&x.on), kpi=on('kpi'), oo=on('oo');
   // Started now: the timer starts with it, on the first step.
   const run=ag&&!later?{k:ag.items.find(x=>x.on).k,at:Date.now(),paused:false}:null;
-  const recur=later&&$('wmRecur')?$('wmRecur').value:'none';
+  const recur=$('wmRecur')?$('wmRecur').value:'none';
   if(!kind){ toast('Choose which meeting this is','err'); return; }
   if(!date){ toast('Choose a date','err'); return; }
   if(later&&date<wmToday()){ toast('Choose today or a later day','err'); return; }
@@ -383,6 +408,9 @@ window.wmMeetingSave=async function(mode){
   try{
     const {data,error}=await sb.rpc('ops_meeting_create',{p_kind:kind,p_date:date,p_time:time,p_people:emails,p_names:emails.map(wmName),p_kpi:kpi,p_oo:oo,p_agenda:ag,p_run:run,p_recur:recur}); if(error) throw error;
     if(!later){ try{ localStorage.setItem('wm_start_'+data,String(Date.now())); }catch(e){} }
+    // The people marked Can edit may change this meeting as well as its starter.
+    const eds=[...(WM.formEd||[])].filter(e=>WM.formPpl.has(e));
+    if(eds.length){ const r=await sb.rpc('ops_meeting_set_editors',{p_meeting:data,p_editors:eds}); if(r.error) toast('Meeting saved, but the editors were not: '+r.error.message,'warn'); }
     try{ usageQueue('tasks.meetings.schedule_a_meeting_one_time_or_recurring','create',{title:kind,attendees:emails.length+(emails.length===1?' person':' people')}); }catch(_e){}
     await wmReloadMeetings(); closeModal();
     toast((recur!=='none'?'Scheduled: '+wmRecurWords(recur,date,time):later?'Scheduled for '+wmFmt(date)+(time?', '+wmTime(time):''):'Meeting started')+' · in '+(emails.length+1)+' calendars','ok');
@@ -469,6 +497,7 @@ function wmAgState(m){
 const wmMMSS=s=>{ s=Math.max(0,Math.round(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
 async function wmAgSaveRun(m,run){
   m.agenda_run=run;
+  if(!wmCanEdit(m.id)) return;   // someone reading the meeting follows the timer; only an editor moves it
   if(WM.ro) return;
   try{ const {error}=await sb.rpc('ops_meeting_set_run',{p_meeting:m.id,p_run:run}); if(error) throw error; }
   catch(e){ toast('Could not save the timer: '+((e&&e.message)||e),'err'); }
@@ -636,8 +665,8 @@ window.wmNoteDel=async function(id){
 window.wmNoteTask=function(id){
   const n=(WM.notes||[]).find(x=>x.id===id), m=wmMeeting(WM.cur); if(!n||!m) return;
   window._wmNtPick=new Set();
-  const here=new Set(m.attendees||[]), others=WM.people.filter(p=>!wmIsMe(p.email)), inRoom=others.filter(p=>here.has(p.name)), rest=others.filter(p=>!here.has(p.name));
-  const row=p=>`<label class="pp"><input type="checkbox" onchange="this.checked?_wmNtPick.add('${esc(p.email)}'):_wmNtPick.delete('${esc(p.email)}')">${wmAvatar(p.name,26)} ${esc(p.name)}<span>${esc(p.dept||'')}</span></label>`;
+  const here=new Set(m.attendees||[]), others=WM.people.filter(wmAssignable).sort((a,b)=>wmIsMe(a.email)?-1:wmIsMe(b.email)?1:0), inRoom=others.filter(p=>here.has(p.name)), rest=others.filter(p=>!here.has(p.name));
+  const row=p=>`<label class="pp"><input type="checkbox" onchange="this.checked?_wmNtPick.add('${esc(p.email)}'):_wmNtPick.delete('${esc(p.email)}')">${wmAvatar(p.name,26)} ${esc(p.name)}${wmIsMe(p.email)?' <b style="font-weight:600;color:#e0121c">(you)</b>':''}<span>${esc(p.dept||'')}</span></label>`;
   openModal(`<div class="modal-head"><h3>Make a task from this ${n.section}</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm wm-ntm">
     <label>Task</label><input type="text" id="wmNtTitle" value="${esc(n.body)}">
@@ -797,10 +826,11 @@ function wmRow(it,forKey,showPeople,showMeeting){
   else if(wmOpen(it)&&!due&&it.dueRaw) bits.push(`<span>Due: ${esc(it.dueRaw)}</span>`);
   if(it.recur&&it.recur.freq&&it.recur.freq!=='none') bits.push(`<span><i class="fa-solid fa-repeat"></i> ${esc(it.recur.freq==='weekly'?'Weekly':it.recur.freq==='monthly'?'Monthly':it.recur.freq)}</span>`);
   // Imported lines keep the sheet's four states, so they get the sheet's control; tasks follow Accountability.
-  const legacyCtl=!it.linked?`<select class="wm-st-sel" onchange="wmSetLegacy(${it.id},this.value,this)">${Object.entries(WM_LEGACY).map(([k,l])=>`<option value="${k}" ${it.st===k?'selected':''}>${l}</option>`).join('')}</select>`:'';
+  const ed=wmCanEdit(it.meeting);
+  const legacyCtl=!it.linked?`<select class="wm-st-sel" ${ed?'':'disabled title="Only the person who started that meeting can change this"'} onchange="wmSetLegacy(${it.id},this.value,this)">${Object.entries(WM_LEGACY).map(([k,l])=>`<option value="${k}" ${it.st===k?'selected':''}>${l}</option>`).join('')}</select>`:'';
   const pill=it.st==='done'?['f','Finished']:it.st==='awaiting'?['a','Awaiting approval']:wmOverdue(it)?['o','Overdue']:['p',it.linked?'Pending':WM_LEGACY[it.st]||'Open'];
   return `<div class="task ${it.st==='done'?'done':''} ${it.id===WM.lastNew?'new':''}">
-    <div class="bx" onclick="wmToggle(${it.id})" title="${it.st==='done'?'Reopen':'Mark finished'}">${it.st==='done'?'<i class="fa-solid fa-check"></i>':''}</div>
+    <div class="bx" ${ed||it.linked?`onclick="wmToggle(${it.id})"`:'style="cursor:default;opacity:.5"'} title="${it.st==='done'?'Reopen':'Mark finished'}">${it.st==='done'?'<i class="fa-solid fa-check"></i>':''}</div>
     <div style="flex:1;min-width:0"><div class="tt">${esc(it.t)}</div><div class="mt">${bits.join('')}</div>
       ${it.st==='awaiting'?`<div style="display:flex;gap:6px;margin-top:6px"><button class="b ok sm" onclick="wmApprove(${it.id},true)"><i class="fa-solid fa-check"></i> Approve</button><button class="b sb sm" onclick="wmApprove(${it.id},false)">Send back</button></div>`:''}</div>
     ${showPeople?`<span class="st ${pill[0]}">${pill[1]}</span>`:legacyCtl}
@@ -904,7 +934,7 @@ const WM_WD={sunday:0,sun:0,monday:1,mon:1,tuesday:2,tue:2,tues:2,wednesday:3,we
 const WM_MON={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,sept:8,oct:9,nov:10,dec:11};
 function wmParseText(raw){
   let txt=' '+raw+' ', mem=[], due=null, recur='none';
-  const others=WM.people.filter(p=>!wmIsMe(p.email));
+  const others=WM.people.filter(wmAssignable);
   txt=txt.replace(/@([A-Za-z.]+)/g,(m,n)=>{
     const k=n.toLowerCase();
     let p=others.find(x=>wmTag(x).toLowerCase()===k);
@@ -947,7 +977,7 @@ function wmSuggest(){
   const inp=$('wmSmart'), box=$('wmSugg'); if(!inp||!box) return;
   const m=inp.value.slice(0,inp.selectionStart).match(/@([A-Za-z.]*)$/);
   if(!m){ box.style.display='none'; return; }
-  const q=m[1].toLowerCase(), list=WM.people.filter(p=>!wmIsMe(p.email)&&p.name.toLowerCase().replace(/\s+/g,'').includes(q)).slice(0,7);
+  const q=m[1].toLowerCase(), list=WM.people.filter(p=>wmAssignable(p)&&p.name.toLowerCase().replace(/\s+/g,'').includes(q)).slice(0,7);
   if(!list.length){ box.style.display='none'; return; }
   WM.sugIdx=Math.min(WM.sugIdx,list.length-1);
   box.innerHTML=list.map((p,i)=>`<div class="${i===WM.sugIdx?'on':''}" onmousedown="event.preventDefault();wmChoose('${esc(p.email)}')">${wmAvatar(p.name,24)} ${esc(p.name)}<span>${esc(p.dept||'')}</span></div>`).join('');
@@ -1074,13 +1104,13 @@ window.wmPromote=async function(ids){
   finally{ WM.busy=false; WM.tab='pending'; await wmReload(); wmCounts(); wmPaintDrafts(); wmPaintTabs(); wmPaintNav(); }
 };
 
-// One people picker for the typing line, one draft, or several drafts at once. Never yourself: in
-// JainE you cannot be a member of a task you delegate.
+// One people picker for the typing line, one draft, or several drafts at once. Not yourself, unless you
+// started this meeting (wmAssignable).
 window.wmPickPeople=function(initial,title,onDone){
   const draft=new Set(initial||[]); window._wmPick=draft; window._wmPickDone=onDone;
   const m=wmMeeting(WM.cur), here=new Set(m&&m.attendees||[]);
-  const others=WM.people.filter(p=>!wmIsMe(p.email)), inRoom=others.filter(p=>here.has(p.name)), rest=others.filter(p=>!here.has(p.name));
-  const row=p=>`<label><input type="checkbox" ${draft.has(p.email)?'checked':''} onchange="this.checked?_wmPick.add('${esc(p.email)}'):_wmPick.delete('${esc(p.email)}')">${wmAvatar(p.name,26)} ${esc(p.name)}<span>${esc(p.dept||'')}</span></label>`;
+  const others=WM.people.filter(wmAssignable).sort((a,b)=>wmIsMe(a.email)?-1:wmIsMe(b.email)?1:0), inRoom=others.filter(p=>here.has(p.name)), rest=others.filter(p=>!here.has(p.name));
+  const row=p=>`<label><input type="checkbox" ${draft.has(p.email)?'checked':''} onchange="this.checked?_wmPick.add('${esc(p.email)}'):_wmPick.delete('${esc(p.email)}')">${wmAvatar(p.name,26)} ${esc(p.name)}${wmIsMe(p.email)?' <b style="font-weight:600;color:#e0121c">(you)</b>':''}<span>${esc(p.dept||'')}</span></label>`;
   openModal(`<div class="modal-head"><h3>${esc(title)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body wm-pk"><input type="text" placeholder="Search people" oninput="document.querySelectorAll('.wm-pk label').forEach(l=>l.style.display=l.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')">
     <div style="max-height:380px;overflow-y:auto;margin-top:6px">${inRoom.length?`<div class="g">In this meeting</div>${inRoom.map(row).join('')}<div class="g">Everyone else</div>`:''}${rest.map(row).join('')}</div></div>
@@ -1228,6 +1258,9 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-ag-step .cd{font-size:15px}'
   +'.wm-addsec{display:flex;gap:22px;flex-wrap:wrap;margin-top:18px}'
   +'.wm-fp{border:1px solid var(--line);border-radius:10px;padding:8px}.wm-fp-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}.wm-fp-chips .people-chip{font-size:12.5px}'
+  +'.wm-fp-chip{gap:6px}.wm-fp-ed{border:1px solid var(--line);background:#fff;border-radius:6px;font:inherit;font-size:11px;font-weight:600;color:#64748b;padding:1px 6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px}'
+  +'.wm-fp-ed i{font-size:9px}.wm-fp-chip.ed .wm-fp-ed{background:#0b1220;border-color:#0b1220;color:#fff}.wm-fp-help{font-size:12px;color:var(--slate);margin-top:6px}'
+  +'.wm-viewonly{display:inline-flex;align-items:center;gap:7px;margin-top:8px;font-size:12.5px;font-weight:600;color:#475569;background:#f1f4f9;border-radius:8px;padding:4px 10px}'
   +'.wm-fp-none{font-size:12.5px;color:var(--slate);padding:4px 2px}'
   +'.wm-fp input[type=text]{width:100%;height:34px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:inherit;font-size:13px;outline:none}'
   +'.wm-fp-list{max-height:180px;overflow-y:auto;margin-top:6px}.wm-fp-list div{display:flex;align-items:center;gap:9px;padding:6px 6px;border-radius:8px;cursor:pointer;font-size:13px}.wm-fp-list div:hover{background:#f1f4f9}.wm-fp-list em{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--slate)}'

@@ -251,10 +251,16 @@ const WEEKLY_STATUS_PEOPLE=['businessanalyst@thejaingroup.com','coordinator.vc@t
    on and no way to change anything. The database decides that (ops_ws_is_participant, app.ws_participant);
    this only asks it once and remembers the answer for ten minutes. The write functions still ask
    has_module('weekly_status'), so a participant cannot change anything even by calling them directly. */
+/* 2026-11-16: giving someone Weekly Status in the Control Panel (adm.users.modules) now makes them an
+   editor straight away - they can start and schedule meetings - with no address to add here. The list
+   above stays as well. Which meetings each person sees and may change is decided by the database
+   (app.ws_can_see / app.ws_can_edit): the owner all of them; everyone else sees the meetings they were
+   in and changes only the ones they started or were made an editor of. */
 function canEditWeeklyStatus(){
   if(state.isCustomer||state.impersonating) return false;
   const me=String(state.email||'').trim().toLowerCase();
-  return WEEKLY_STATUS_PEOPLE.indexOf(me)!==-1;
+  const mods=state.roles&&state.roles.modules;
+  return WEEKLY_STATUS_PEOPLE.indexOf(me)!==-1||(Array.isArray(mods)&&mods.indexOf('weekly_status')!==-1);
 }
 function canWeeklyStatus(){
   if(state.isCustomer||state.impersonating) return false;
