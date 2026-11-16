@@ -39,6 +39,7 @@ const CA_CSS='<style>'
   +'.ca-tbl th.ca-crm{color:#6d28d9;background:#f5f3ff}'
   +'.ca-sec .ca-tbl td.ca-nm,.ca-sec .ca-tbl th.ca-nm{width:340px;min-width:340px;max-width:340px}.ca-nmx{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
   +'.ca-sub{font-size:10.5px;color:#94a3b8;margin-top:1px;white-space:nowrap}'
+  +'.ca-stg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}.ca-st{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;font-size:12.5px;font-weight:600;color:#334155;cursor:pointer;border-right:1px solid var(--line)}.ca-st:last-child{border-right:0}.ca-st input{margin:0;accent-color:#2563eb}.ca-st.on{background:#eef4ff;color:#1d4ed8}'
   +'.ca-warn{margin:-4px 0 12px;padding:9px 12px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:12.5px}'
   +'</style>';
 
@@ -52,6 +53,44 @@ function caAgg(rows){
 }
 // Running now (Facebook ACTIVE, Google ENABLED) - only these are listed below a platform (6 Nov 2026).
 function caLive(s){ s=String(s||''); return s==='ACTIVE'||s==='ENABLED'; }
+/* ACTIVE / INACTIVE / BOTH (16 Nov 2026, Ayush: "while viewing, at the top there will be an option to tick Active, Inactive,
+   Both"). Active = campaigns switched on now (Facebook ACTIVE, Google ENABLED); Inactive = paused, ended or removed ones;
+   Both = all. The choice filters everything on the page together - the project and platform totals, the campaign and
+   ad set lists, the ads and the CRM figures - so the numbers always add up to what is listed. CRM leads the CRM cannot tie
+   to one campaign are left out of Active / Inactive (a WhatsApp line goes with its project's WhatsApp campaigns). */
+let CA_ST='both';
+function caStOk(live){ return CA_ST==='both'||(CA_ST==='active')===!!live; }
+function caStatusApply(){
+  const R=CA_D.raw, E=CA_D.ent;
+  const okC=function(cid){ const e=E['campaign:'+cid]; return caStOk(!!e&&caLive(e.status)); };
+  const f=function(rows){ return (rows||[]).filter(function(c){ return okC(c.campaign_id); }); };
+  CA_D.cur=f(R.cur); CA_D.prev=f(R.prev); CA_D.ads=f(R.ads); if(CA_D.cmp) CA_D.cmp.ads=f(R.cmpAds);
+  /* BUDGETS (16 Nov 2026, Ayush: "for paused ones BUDGET is still there"). Every listed campaign shows the daily budget set
+     on it, paused ones too. A totals row adds up the budgets of the campaigns listed under the choice, except a switched-on
+     campaign with no activity (no spend, impression or click) in the last 3 days - shown greyed as "not spending". */
+  const bud={}, seen={};
+  CA_D.cur.forEach(function(c){ if(!caAct(c)||seen[c.campaign_id]) return; seen[c.campaign_id]=1; const b=caCampBud(c.campaign_id); if(b==null) return; const k=c.project+'|'+c.platform; bud[k]=(bud[k]||0)+(+b); });
+  CA_D.bud=bud;
+  const waLive={}; Object.keys(E).forEach(function(k){ const x=E[k]; if(k.indexOf('adset:')!==0||!x||!/CONVERSATIONS|MESSAGING/.test(String(x.objective||''))) return;
+    const c=E['campaign:'+x.campaign_id]; const a=c&&CA_D.acc['meta:'+c.account_id]; if(a&&caLive(c.status)) waLive[a.project]=1; });
+  const okR=function(x){ if(CA_ST==='both') return true; if(x.wa) return caStOk(!!waLive[x.project]); return !!E['campaign:'+x.campaign_id]&&okC(x.campaign_id); };
+  CA_D.crm=R.crm?{cur:R.crm.cur.filter(okR),prev:R.crm.prev.filter(okR)}:null;
+  CA_D.crmSet=R.crmSet?{cur:R.crmSet.cur.filter(okR),prev:R.crmSet.prev.filter(okR)}:null;
+}
+// some activity in the period: spend, impressions or clicks (a paused remarketing campaign can show ads without spend)
+// green = switched on (Facebook ACTIVE, Google ENABLED), red = paused / ended / removed (16 Nov 2026, Ayush)
+function caDot(st){ const on=caLive(st); return '<span title="'+(on?'Enabled':esc(String(st||'Stopped').charAt(0)+String(st||'stopped').slice(1).toLowerCase()))+'" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:1px;background:'+(on?'#16a34a':'#dc2626')+'"></span>'; }
+function caAct(c){ return (+c.spend||0)>0||(+c.impressions||0)>0||(+c.clicks||0)>0||(+c.results||0)>0; }
+// a campaign's daily budget: its own, or (Facebook ABO) its ad sets' - running ones, else all of them;
+// null for a switched-on campaign with no activity in the last 3 days (it is not spending)
+function caCampBud(id,raw){ const E=CA_D.ent, e=E['campaign:'+id]||{};
+  let b=e.daily_budget!=null?+e.daily_budget:null;
+  if(b==null){ const sets=Object.keys(E).filter(function(k){ return k.indexOf('adset:')===0&&E[k]&&E[k].campaign_id===id&&E[k].daily_budget!=null; }).map(function(k){ return E[k]; });
+    const run=sets.filter(function(x){ return caLive(x.status); }), use=run.length?run:sets;
+    if(use.length) b=use.reduce(function(t,x){ return t+(+x.daily_budget||0); },0); }
+  if(raw) return b;
+  return b!=null&&caLive(e.status)&&CA_D.sp3&&!CA_D.sp3[id]?null:b; }
+window.caSt=function(v){ if(v===CA_ST||!CA_D) return; CA_ST=v; CA.camp=null; CA.adset=null; caStatusApply(); caPaint(); };
 function caLeads(x){ return obNum(x,0); } // whole numbers everywhere (14 Nov 2026, Ayush): Google splits a lead's credit across campaigns, so its counts arrive as 30.6 etc.
 
 /* TWO TABS (16 Nov 2026, Ayush: "make a new Tab named Analytics"): Overview (this page as it was) and Analytics
@@ -95,13 +134,19 @@ async function caLoad(){
   const crmRows=async function(s,e){ const out=[]; for(let f=0;;f+=1000){
       const q=await sb.schema('camp').from('crm_google_daily').select('business_unit,campaign_type,campaign_id,leads,qualified,site_visited,booked,lost').gte('day',s).lte('day',e).range(f,f+999);
       if(q.error) return null; out.push.apply(out,q.data||[]); if(!q.data||q.data.length<1000) break; } return out; };
+  // CRM figures per ad set / ad group and per ad (camp.crm_adset_daily, 16 Nov 2026: the CRM API now breaks campaigns down)
+  const crmSets=async function(s,e){ const out=[]; for(let f=0;;f+=1000){
+      const q=await sb.schema('camp').from('crm_adset_daily').select('src,level,campaign_id,adset_id,ad_id,leads,qualified,site_visited,booked,lost').gte('day',s).lte('day',e).range(f,f+999);
+      if(q.error) return null; out.push.apply(out,q.data||[]); if(!q.data||q.data.length<1000) break; } return out; };
   const res=await Promise.all([
     sb.schema('camp').from('ads_accounts').select('platform,account_id,name,project').eq('include',true),
     obEntities('meta'), obEntities('google'),
     rpc('ads_campaign_totals',{p_platform:'meta',p_from:r.s,p_to:r.e}), gTot(r.s,r.e),
     rpc('ads_campaign_totals',{p_platform:'meta',p_from:c.s,p_to:c.e}), gTot(c.s,c.e),
     ads('meta',r.s,r.e), ads('google',r.s,r.e), cmp?ads('meta',c.s,c.e):none, cmp?ads('google',c.s,c.e):none,
-    crmRows(r.s,r.e), crmRows(c.s,c.e)]);
+    crmRows(r.s,r.e), crmRows(c.s,c.e), crmSets(r.s,r.e), crmSets(c.s,c.e),
+    // campaigns that spent in the last 3 days (today, yesterday, the day before) - only their budgets count (see caSpending)
+    sb.schema('camp').from('ads_daily').select('campaign_id').gte('day',new Date(Date.now()+5.5*3600e3-2*86400e3).toISOString().slice(0,10)).or('spend.gt.0,impressions.gt.0,clicks.gt.0').limit(20000)]);
   $('caBody').style.opacity='';
   const bad=[res[0],res[3],res[4],res[5],res[6]].filter(function(x){ return x.error; })[0];
   if(bad){ $('caBody').innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(bad.error.message)+'</div>'; return; }
@@ -114,11 +159,15 @@ async function caLoad(){
     if(p==='google'){ o.conversions=o.results; o.results=o.form_leads!=null?+o.form_leads:null; } return o; }); };
   // Daily budget set today (7 Nov 2026, Ayush): the daily budgets of the running campaigns, per project and platform.
   // A Facebook campaign without its own budget carries its running ad sets' budgets (ads-daily-sync).
+  /* ONLY CAMPAIGNS THAT ARE SPENDING (16 Nov 2026, Ayush, on Dream Gurukul's ₹18,500: "Yes, only spending"). Google showed
+     five Gurukul campaigns switched on, but four had not spent for weeks or ever - their ₹11,500 counted as budget though
+     nothing ran. A campaign's budget now counts only when it spent something in the last 3 days. */
+  const sp3={}; ((res[15]&&res[15].data)||[]).forEach(function(x){ sp3[x.campaign_id]=1; });
   const bud={};
   [['meta',res[1]],['google',res[2]]].forEach(function(x){ x[1].forEach(function(e){
-    const a=acc[x[0]+':'+e.account_id]; if(e.kind!=='campaign'||!a||!caLive(e.status)||e.daily_budget==null) return;
+    const a=acc[x[0]+':'+e.account_id]; if(e.kind!=='campaign'||!a||!caLive(e.status)||e.daily_budget==null||(res[15]&&!res[15].error&&!sp3[e.id])) return;
     const k=a.project+'|'+x[0]; bud[k]=(bud[k]||0)+(+e.daily_budget||0); }); });
-  CA_D={acc:acc,ent:ent,bud:bud,cur:tag('meta',res[3].data).concat(tag('google',res[4].data)),prev:tag('meta',res[5].data).concat(tag('google',res[6].data)),
+  CA_D={acc:acc,ent:ent,bud:bud,sp3:(res[15]&&!res[15].error)?sp3:null,cur:tag('meta',res[3].data).concat(tag('google',res[4].data)),prev:tag('meta',res[5].data).concat(tag('google',res[6].data)),
         ads:tag('meta',res[7].rows).concat(tag('google',res[8].rows)),hasSets:res[7].sets&&res[8].sets,
         cmp:cmp?{s:c.s,e:c.e,ads:tag('meta',res[9].rows).concat(tag('google',res[10].rows))}:null};
   // the CRM names its projects a little differently (Durbaar Banquets, Ananta): matched without "Dream" / "Banquets"
@@ -140,6 +189,9 @@ async function caLoad(){
       const o=Object.assign({},x,{src:fb?'facebook':'google',wa:wa});
       o.project=own&&own!==1?own:(projN[pn(x.business_unit)]||x.business_unit); return o; }).filter(Boolean); };
   CA_D.crm=res[11]==null?null:{cur:crmTag(res[11]),prev:crmTag(res[12])};
+  CA_D.crmSet=res[13]==null?null:{cur:res[13],prev:res[14]||[]};
+  CA_D.raw={cur:CA_D.cur,prev:CA_D.prev,ads:CA_D.ads,cmpAds:CA_D.cmp?CA_D.cmp.ads:null,bud:CA_D.bud,crm:CA_D.crm,crmSet:CA_D.crmSet};
+  caStatusApply();
   caPaint();
 }
 // every project with an account on either platform, the biggest spender first
@@ -162,6 +214,7 @@ function caPaint(){
   $('caHead').innerHTML='<div class="ob-bar">'
     +sel('caPer',OB_PERIODS,OB_P.period,"OB_P.period=this.value;caReset();caLoad()",C.on?C.period:null)
     +(OB_P.period==='custom'?'<input type="date" value="'+esc(r.s)+'" onchange="OB_P.from=this.value;caLoad()"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(r.e)+'" onchange="OB_P.to=this.value;caLoad()">':'')
+    +'<span class="ca-stg">'+[['active','Active'],['inactive','Inactive'],['both','Both']].map(function(o){ return '<label class="ca-st'+(CA_ST===o[0]?' on':'')+'"><input type="radio" name="caSt"'+(CA_ST===o[0]?' checked':'')+' onchange="caSt(\''+o[0]+'\')">'+o[1]+'</label>'; }).join('')+'</span>'
     +compSelHtml('caProj',[['all','All projects']].concat(P.map(function(p){ return [p,p]; })),CA.proj,"caPickProject(this.value)")
     +'<label class="ca-sw'+(C.on?' on':'')+'" title="Compare with another period"><input type="checkbox"'+(C.on?' checked':'')+' onchange="caCmpToggle(this.checked)"><span class="k"></span>Compare</label>'
     +(C.on?'<span style="color:var(--slate);font-size:12.5px">with</span>'+sel('caCmpPer',CA_CMP_OPTS,C.period,"caCmpPick(this.value)",OB_P.period)
@@ -217,6 +270,10 @@ function caPaint(){
   // a Facebook campaign whose ad sets go for WhatsApp chats: the CRM only counts those all together, on the Facebook row
   const isWa=function(cid){ return Object.keys(E).some(function(k){ const x=E[k]; return k.indexOf('adset:')===0&&x&&x.campaign_id===cid&&/CONVERSATIONS|MESSAGING/.test(String(x.objective||'')); }); };
   const crmNo=function(why){ return {why:why}; };
+  // an ad set / ad group's own CRM figures (16 Nov 2026: the CRM API now gives them); leads without ad set tracking stay on the campaign row only
+  const CS=CA_D.crmSet;
+  const crmSetX=function(sid,sp,spw){ if(!CS) return crmNo('CRM figures by ad set are read at night - they show from the next morning'); const p=function(x){ return x.level==='adset'&&x.adset_id===String(sid); };
+    if(!CS.cur.some(p)) return crmNo('The CRM has no leads tied to this ad set for these dates'); return {t:crmT(crmAgg(CS.cur,p),+sp||0),w:crmT(crmAgg(CS.prev,p),+spw||0)}; };
   const ct=function(t,title){ return '<th class="ca-crm" title="'+esc(title)+'">'+t+'</th>'; };
   const head=function(name,res,cpl,crm){ return '<tr><th class="ca-nm">'+name+'</th><th title="Daily budget as set today">Daily budget</th><th>Spend</th><th>'+res+'</th>'
     +(crm?ct('CRM leads','Google and Facebook leads in the CRM after its filtering')+ct('QL','Qualified leads (CRM)')+ct('SV','Site visits (CRM)')+ct('Booked','Booked (CRM)')+ct('Lost','Lost (CRM)'):'')
@@ -225,13 +282,15 @@ function caPaint(){
   // a name never wraps: it stops at the column's width with "...", the whole name on hover
   const nm=function(lead,text){ return '<td class="ca-nm"><span class="ca-nmx" title="'+esc(text)+'">'+lead+esc(text)+'</span></td>'; };
   const money=function(v){ return '<td>'+(v==null?'<span style="color:#94a3b8">—</span>':obMoney(v))+'</td>'; };
+  const cBud=function(id){ return caCampBud(id); };
+  const idle=function(id){ const b=caCampBud(id,true); return '<td title="Switched on with '+obMoney(b)+' a day, but nothing spent in the last 3 days - not counted"><span style="color:#94a3b8">—</span><div class="ca-sub">not spending</div></td>'; };
   /* A PLATFORM'S SECTION (6 Nov 2026, Ayush): its running campaigns in a section of their own, under the whole
      projects table - the page scrolls to it on the click, as at the foot of the page it otherwise sat unseen; a campaign opens its running ad sets inside it, and the ads
      follow whatever is open. Paused, ended and deleted ones are left out here - their spend still counts above.
      7 Nov 2026: a Total row under the campaigns - all the listed campaigns together. */
   const section=function(){
     const p=CA.open, pl=CA.plat, W=CA_PLAT[pl];
-    const camps=CA_D.cur.filter(function(c){ return c.project===p&&c.platform===pl&&caLive((E['campaign:'+c.campaign_id]||{}).status)&&((+c.spend||0)>0||(+c.results||0)>0); }).sort(function(a,b){ return b.spend-a.spend; });
+    const camps=CA_D.cur.filter(function(c){ return c.project===p&&c.platform===pl&&caAct(c); }).sort(function(a,b){ return b.spend-a.spend; });
     const was=function(id){ return prev.filter(function(x){ return x.platform===pl&&x.campaign_id===id; }); };
     const setsOf=function(list,cid){ const g={}; list.forEach(function(a){ if(a.platform!==pl||a.campaign_id!==cid||!a.adset_id) return; const x=g[a.adset_id]||(g[a.adset_id]={adset_id:a.adset_id,spend:0,results:null,clicks:0,impressions:0}); x.spend+=+a.spend||0; if(a.results!=null) x.results=(x.results||0)+(+a.results); x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; }); return g; };
     const nc=7+NCRM;
@@ -242,32 +301,32 @@ function caPaint(){
       const src=pl==='google'?'google':'facebook';
       // one WhatsApp campaign in the project: the CRM's WhatsApp count is all its own (14 Nov 2026)
       const cx=pl==='meta'&&isWa(c.campaign_id)&&waOne?crmX(function(x){ return x.wa&&x.project===p; },'facebook',function(x){ return x.campaign_id===c.campaign_id; }):pl==='meta'&&isWa(c.campaign_id)?crmNo('A WhatsApp campaign: the CRM counts all WhatsApp campaigns of a project together - they are in the Facebook row above'):crmX(function(x){ return x.campaign_id===c.campaign_id; },src);
-      sec+='<tr class="ca-row ca-l0'+(con?' ca-on':'')+'" onclick="caCamp(\''+c.campaign_id+'\')">'+nm(caret(con),e.name||c.campaign_id)+money(e.daily_budget)+cols(raw(c,pl,lead),raw(was(c.campaign_id)[0],pl,lead),cx)+'</tr>';
+      sec+='<tr class="ca-row ca-l0'+(con?' ca-on':'')+'" onclick="caCamp(\''+c.campaign_id+'\')">'+nm(caret(con)+caDot(e.status),e.name||c.campaign_id)+(cBud(c.campaign_id)==null&&caCampBud(c.campaign_id,true)!=null&&caLive(e.status)?idle(c.campaign_id):!caLive(e.status)?'<td>'+(cBud(c.campaign_id)==null?'<span style="color:#94a3b8">—</span>':obMoney(cBud(c.campaign_id)))+'<div class="ca-sub">'+esc(String(e.status||'stopped').toLowerCase())+'</div></td>':money(cBud(c.campaign_id)))+cols(raw(c,pl,lead),raw(was(c.campaign_id)[0],pl,lead),cx)+'</tr>';
       if(!con) return;
       const ads=CA_D.ads.filter(function(a){ return a.platform===pl&&a.campaign_id===c.campaign_id; });
       if(!CA_D.hasSets||!ads.some(function(a){ return a.adset_id; })){
         sec+='<tr class="ca-l1 ca-none"><td colspan="'+nc+'"><i class="fa-solid fa-circle-info"></i> '+W.sets+' are recorded from tonight (6 Nov 2026) and show here from tomorrow.</td></tr>'; return; }
       const g=setsOf(ads,c.campaign_id), gw=cmpOn?setsOf(CA_D.cmp.ads,c.campaign_id):{};
-      const sets=Object.keys(g).filter(function(k){ return caLive((E['adset:'+k]||{}).status); }).map(function(k){ return g[k]; }).sort(function(a,b){ return b.spend-a.spend; });
+      const cOn=caLive(e.status), sets=Object.keys(g).filter(function(k){ const on=caLive((E['adset:'+k]||{}).status); return CA_ST==='both'||(CA_ST==='active'?on:(!cOn||!on)); }).map(function(k){ return g[k]; }).sort(function(a,b){ return b.spend-a.spend; });
       if(!sets.length) sec+='<tr class="ca-l1 ca-none"><td colspan="'+nc+'">No running '+W.set.toLowerCase()+' in this campaign</td></tr>';
       sets.forEach(function(s){
         const son=CA.adset===s.adset_id;
         sec+='<tr class="ca-row ca-l1'+(son?' ca-on':'')+'" onclick="caSet(\''+s.adset_id+'\')">'+nm('',(E['adset:'+s.adset_id]||{}).name||s.adset_id)+(function(){
           // its own budget; or, when the budget is set on the campaign (Facebook CBO, every Google ad group), the campaign's, marked shared
-          const b=(E['adset:'+s.adset_id]||{}).daily_budget; if(b!=null) return money(b);
+          const b=(E['adset:'+s.adset_id]||{}).daily_budget; if(cBud(c.campaign_id)==null&&CA_D.sp3&&!CA_D.sp3[c.campaign_id]) return money(null); if(b!=null) return money(b);
           return e.daily_budget!=null?'<td title="The budget is set on the campaign and shared by its '+W.sets.toLowerCase()+'"><span style="color:#64748b">'+obMoney(e.daily_budget)+'</span><div class="ca-sub">shared</div></td>':money(null); })()
-          +cols(raw(s,pl,null),raw(gw[s.adset_id],pl,null),crmNo('The CRM counts leads per campaign, not per '+W.set.toLowerCase()))+'</tr>';
+          +cols(raw(s,pl,null),raw(gw[s.adset_id],pl,null),crmSetX(s.adset_id,s.spend,(gw[s.adset_id]||{}).spend))+'</tr>';
       });
     });
     // the total counts leads only (Google conversions, Facebook lead / chat campaigns), as reach or engagement results cannot be added to them
     const ids={}; camps.forEach(function(c){ ids[c.campaign_id]=1; });
     const tot=camps.length?'<tfoot><tr class="ca-tot"><td>Total · '+camps.length+' campaign'+(camps.length===1?'':'s')+(pl==='meta'?' <span style="font-weight:500;color:var(--slate);font-size:11px">(leads only)</span>':'')+'</td>'
-      +money(camps.reduce(function(t,c){ const b=(E['campaign:'+c.campaign_id]||{}).daily_budget; return b==null?t:(t||0)+(+b); },null))
+      +money(camps.reduce(function(t,c){ const b=cBud(c.campaign_id); return b==null?t:(t||0)+(+b); },null))
       +cols(sum(camps,pl),sum(prev.filter(function(x){ return x.platform===pl&&ids[x.campaign_id]; }),pl),crmX(function(x){ return ids[x.campaign_id]||(pl==='meta'&&waOne&&x.wa&&x.project===p); },pl==='google'?'google':'facebook'))+'</tr></tfoot>':'';
     return '<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p)
-      +' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+camps.length+' running campaign'+(camps.length===1?'':'s')+'; click one for its '+W.sets.toLowerCase()+'</span></div>'
+      +' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+camps.length+' '+(CA_ST==='active'?'active':CA_ST==='inactive'?'inactive':'')+(CA_ST==='both'?'':' ')+'campaign'+(camps.length===1?'':'s')+'; click one for its '+W.sets.toLowerCase()+'</span></div>'
       +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Campaign',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
-      +(sec||'<tr><td colspan="'+nc+'" style="text-align:center;color:var(--slate);padding:18px">No running campaign spent in this period</td></tr>')+'</tbody>'+tot+'</table></div></div>'
+      +(sec||'<tr><td colspan="'+nc+'" style="text-align:center;color:var(--slate);padding:18px">No '+(CA_ST==='both'?'':CA_ST+' ')+'campaign spent in this period</td></tr>')+'</tbody>'+tot+'</table></div></div>'
       +caAds(p,pl);
   };
   const shown=CA.proj==='all'?P:[CA.proj];
@@ -307,6 +366,9 @@ window.caCmpToggle=function(on){ CA.cmp.on=!!on;
   caLoad(); };
 window.caCmpPick=function(v){ CA.cmp.period=v; if(v==='custom'&&!CA.cmp.from){ const r=obRange(); CA.cmp.from=r.ps; CA.cmp.to=r.pe; } caLoad(); };
 // The ads of what is open: every campaign of the platform, one campaign, or one ad set.
+// an ad's own CRM leads and qualified leads (camp.crm_adset_daily level 'ad', 16 Nov 2026); nothing shown when the CRM has none for it
+function caAdCrm(id){ const C=CA_D&&CA_D.crmSet; if(!C) return ''; let l=0,q=0,n=0; C.cur.forEach(function(x){ if(x.level==='ad'&&x.ad_id===String(id)){ n++; l+=+x.leads||0; q+=+x.qualified||0; } });
+  return n?'<span>CRM leads</span><b>'+obNum(l)+'</b><span>QL</span><b>'+obNum(q)+(l?' <span style="font-weight:500;color:#64748b">('+Math.round(q/l*100)+'%)</span>':'')+'</b>':''; }
 function caAds(p,pl){
   const W=CA_PLAT[pl], E=CA_D.ent;
   let ads=CA_D.ads.filter(function(a){ return a.project===p&&a.platform===pl&&caLive((E['ad:'+a.ad_id]||{}).status)&&caLive((E['campaign:'+a.campaign_id]||{}).status)&&(!a.adset_id||caLive((E['adset:'+a.adset_id]||{}).status)); });
@@ -329,7 +391,7 @@ function caAds(p,pl){
         :'<div class="txt">'+(pl==='google'?'<div class="sp">Sponsored</div>':'')+'<div class="h">'+esc(words[0])+'</div>'+(words[1]?'<div class="d">'+esc(words.slice(1).join(' '))+'</div>':'')+'</div>';
       return '<div class="ob-ad" style="cursor:pointer" title="Open this ad" onclick="caAdOpen('+i+')">'+pic+'<div style="padding:9px 12px 0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(e.name||'')+'">'+esc(e.name||('Ad '+a.ad_id))+'</div>'
         +'<div style="padding:0 12px;font-size:11.5px;color:var(--slate)">'+stat(e.status)+'</div>'
-        +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+(pl==='meta'?'Results':W.res)+'</span><b>'+obNum(a.results,0)+'</b><span>Cost per result</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b></div></div>';
+        +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+(pl==='meta'?'Results':W.res)+'</span><b>'+obNum(a.results,0)+'</b><span>Cost per result</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b>'+caAdCrm(a.ad_id)+'</div></div>';
     }).join('')+'</div>'
     +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="CA.showAds+='+obAdStep(ads.length)+';caPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
 }

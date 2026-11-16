@@ -1,0 +1,218 @@
+[
+ {
+  "id": "intro",
+  "min": 8,
+  "text": "Introducing Recurring Tasks in JainE Accountability. Set a task once, and JainE repeats it for you."
+ },
+ {
+  "id": "add",
+  "min": 5.2,
+  "text": "Start the usual way. Point between two tasks, and click \"Add task here\"."
+ },
+ {
+  "id": "type",
+  "min": 4.2,
+  "text": "Type the task's name. Here, \"Weekly site progress report\"."
+ },
+ {
+  "id": "cal",
+  "min": 2.4,
+  "text": "Then open the due date."
+ },
+ {
+  "id": "opts",
+  "min": 8,
+  "text": "Does not repeat. Weekly. Fortnightly. Monthly. Quarterly. And Annually.",
+  "cues": {
+   "none": "Does",
+   "weekly": "Weekly",
+   "fortnightly": "Fortnightly",
+   "monthly": "Monthly",
+   "quarterly": "Quarterly",
+   "yearly": "Annually"
+  },
+  "split": {
+   "keys": [
+    "weekly",
+    "fortnightly",
+    "monthly",
+    "quarterly",
+    "yearly"
+   ],
+   "min": 2
+  }
+ },
+ {
+  "id": "weekly",
+  "min": 6,
+  "text": "Weekly: pick one day. Here, every Friday.",
+  "cues": {
+   "pick": "Friday"
+  }
+ },
+ {
+  "id": "fortnightly",
+  "min": 6,
+  "text": "Fortnightly: one day, every other week."
+ },
+ {
+  "id": "monthly",
+  "min": 6,
+  "text": "Monthly: one date every month, or the last day."
+ },
+ {
+  "id": "quarterly",
+  "min": 6,
+  "text": "Quarterly: one date, every third month."
+ },
+ {
+  "id": "yearly",
+  "min": 6.8,
+  "text": "Annually: pick the month, then the date. Here, the fifteenth of April.",
+  "cues": {
+   "pick": "month",
+   "date": "date",
+   "says": "Here"
+  }
+ },
+ {
+  "id": "done",
+  "min": 5.2,
+  "text": "Our task will repeat every Friday. Click Done, and save it.",
+  "cues": {
+   "done": "Click"
+  }
+ },
+ {
+  "id": "purple",
+  "min": 7,
+  "text": "A recurring task gets a purple border, so you can spot it in any list.",
+  "cues": {
+   "purple": "purple"
+  }
+ },
+ {
+  "id": "pill",
+  "min": 2.4,
+  "text": "Now open the Recurring pill."
+ },
+ {
+  "id": "soon",
+  "min": 9,
+  "text": "Due soon shows what needs doing next: anything overdue, then today, tomorrow, and the day after, with the deadline on each.",
+  "cues": {
+   "overdue": "overdue",
+   "today": "today",
+   "tomorrow": "tomorrow",
+   "after": "day",
+   "each": "With"
+  },
+  "split": {
+   "keys": [
+    "overdue",
+    "today",
+    "tomorrow",
+    "after",
+    "each"
+   ],
+   "min": 2.3
+  }
+ },
+ {
+  "id": "menu",
+  "min": 4.6,
+  "text": "Change the view from this menu. Choose All frequencies.",
+  "cues": {
+   "choose": "Choose"
+  }
+ },
+ {
+  "id": "year",
+  "min": 15,
+  "text": "Here is the whole financial year, April to March, week by week. Scroll sideways to see when every task is due.",
+  "cues": {
+   "scroll": "Scroll"
+  }
+ },
+ {
+  "id": "key",
+  "min": 10,
+  "text": "The colours show where each one stands. Black: yet to come. Green: done on time. Red: done late. Bold red: not done, and overdue.",
+  "cues": {
+   "black": "Black",
+   "green": "Green",
+   "red": "Red",
+   "bold": "Bold"
+  },
+  "split": {
+   "keys": [
+    "black",
+    "green",
+    "red",
+    "bold"
+   ],
+   "min": 2.2
+  }
+ },
+ {
+  "id": "logic",
+  "min": 16,
+  "text": "The number shows how many days early or late. For example... A plain Friday, with no number, is yet to come. Minus two, in green: done two days early. Plus two, in red: done two days late. Plus three, in bold red: not done, three days overdue.",
+  "cues": {
+   "plain": "plain",
+   "minus": "Minus",
+   "plus": "Plus",
+   "plus3": "Plus#2",
+   "goes": "overdue"
+  },
+  "split": {
+   "keys": [
+    "plain",
+    "minus",
+    "plus",
+    "plus3"
+   ],
+   "min": 3
+  }
+ },
+ {
+  "id": "bars",
+  "min": 4.2,
+  "text": "The coloured bar on the left shows how often the task repeats."
+ },
+ {
+  "id": "filters",
+  "min": 2.6,
+  "text": "Or look at one frequency at a time."
+ },
+ {
+  "id": "f-weekly",
+  "min": 3.6,
+  "text": "Weekly."
+ },
+ {
+  "id": "f-fortnightly",
+  "min": 3.6,
+  "text": "Fortnightly."
+ },
+ {
+  "id": "f-monthly",
+  "min": 3.6,
+  "text": "Monthly."
+ },
+ {
+  "id": "f-quarterly",
+  "min": 3.6,
+  "text": "Quarterly."
+ },
+ {
+  "id": "f-yearly",
+  "min": 7,
+  "text": "And annually."
+ },
+ {
+  "id": "outro",
+  "min": 7.5,
+  "text": "Set it once, and JainE remembers. Recurring Tasks, now in Accountability."
+ }
+]

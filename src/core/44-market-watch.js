@@ -80,11 +80,13 @@ VIEWS.market_watch=async function(v,seg){
   const tab=function(id,icon,label){ return '<button class="mw-tab'+(MW_TAB===id?' on':'')+'" onclick="navTo(\'market_watch/'+id+'\')"><i class="fa-solid '+icon+'"></i> '+label+'</button>'; };
   v.innerHTML=MW_CSS
     +'<div class="mw-head"><div><h1><i class="fa-solid fa-binoculars" style="color:var(--brand)"></i> Market Watch</h1>'
-      +'<p>Trending videos, new project launches around Kolkata, and short videos with hooks that hold people.</p></div></div>'
+      +'<p>What people are talking about right now, luxury and premium launches across India, and hooks that stop the scroll.</p></div></div>'
     +'<div class="mw-tabs">'+tab('trends','fa-fire','Trends')+tab('launches','fa-building-flag','Launches')+tab('hooks','fa-bolt','Hook Library')+'</div>'
     +'<div id="mwBody"><div class="loader"><div class="spin"></div></div></div>';
   try{
-    if(MW_TAB==='launches') await mwLaunches(); else await mwVideos(MW_TAB==='hooks'?'hook':'trend');
+    // 16 Nov 2026 (Ayush): Trends, Hook Library and Launches are the AI versions (50-market-watch-ai.js); the YouTube
+    // video grid and the RERA table below are no longer opened from here
+    if(MW_TAB==='launches') await mwAiLaunches(); else if(MW_TAB==='hooks') await mwAiHooks(); else await mwAiTrends();
   }catch(e){ const b=$('mwBody'); if(b) b.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load: '+esc((e&&e.message)||String(e))+'</div></div>'; }
 };
 
@@ -126,7 +128,7 @@ async function mwVideos(kind){
     +' <button class="btn" style="height:30px;font-size:12px" onclick="mwRefresh(this)"><i class="fa-solid fa-rotate"></i> Refresh</button></span>';
   const note=kind==='trend'
     ? '<div class="mw-sub" style="margin:-6px 0 12px">YouTube\u2019s own Trending list'+(MW_REGION==='WORLD'?' - United States, United Kingdom, UAE, Singapore and Australia together, most viewed first':' - in YouTube\u2019s order')+'.</div>'
-    : '<div class="mw-sub" style="margin:-6px 0 12px">The most-watched professionally made Shorts of the 30 days before each read - only channels with 1 lakh+ subscribers, no comedy skits, vlogs or gaming. Every video found stays in the library.</div>';
+    : '<div class="mw-sub" style="margin:-6px 0 12px">The most-watched professionally made Shorts of the 30 days before each read - only brands and studios with 10 lakh+ subscribers, no DIY, comedy, vlogs, gaming or clickbait. Every video found stays in the library.</div>';
   $('mwBody').innerHTML='<div class="mw-bar">'+chips+meta+'</div>'+note
     +(list.length?'<div class="mw-grid">'+list.map(x=>mwCard(x,kind)).join('')+'</div>'
       :'<div class="card card-pad empty"><i class="fa-solid fa-film"></i><div>No videos yet - press Refresh.</div></div>');

@@ -40372,6 +40372,7 @@ const CA_CSS='<style>'
   +'.ca-tbl th.ca-crm{color:#6d28d9;background:#f5f3ff}'
   +'.ca-sec .ca-tbl td.ca-nm,.ca-sec .ca-tbl th.ca-nm{width:340px;min-width:340px;max-width:340px}.ca-nmx{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
   +'.ca-sub{font-size:10.5px;color:#94a3b8;margin-top:1px;white-space:nowrap}'
+  +'.ca-stg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}.ca-st{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;font-size:12.5px;font-weight:600;color:#334155;cursor:pointer;border-right:1px solid var(--line)}.ca-st:last-child{border-right:0}.ca-st input{margin:0;accent-color:#2563eb}.ca-st.on{background:#eef4ff;color:#1d4ed8}'
   +'.ca-warn{margin:-4px 0 12px;padding:9px 12px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:12.5px}'
   +'</style>';
 
@@ -40385,6 +40386,44 @@ function caAgg(rows){
 }
 // Running now (Facebook ACTIVE, Google ENABLED) - only these are listed below a platform (6 Nov 2026).
 function caLive(s){ s=String(s||''); return s==='ACTIVE'||s==='ENABLED'; }
+/* ACTIVE / INACTIVE / BOTH (16 Nov 2026, Ayush: "while viewing, at the top there will be an option to tick Active, Inactive,
+   Both"). Active = campaigns switched on now (Facebook ACTIVE, Google ENABLED); Inactive = paused, ended or removed ones;
+   Both = all. The choice filters everything on the page together - the project and platform totals, the campaign and
+   ad set lists, the ads and the CRM figures - so the numbers always add up to what is listed. CRM leads the CRM cannot tie
+   to one campaign are left out of Active / Inactive (a WhatsApp line goes with its project's WhatsApp campaigns). */
+let CA_ST='both';
+function caStOk(live){ return CA_ST==='both'||(CA_ST==='active')===!!live; }
+function caStatusApply(){
+  const R=CA_D.raw, E=CA_D.ent;
+  const okC=function(cid){ const e=E['campaign:'+cid]; return caStOk(!!e&&caLive(e.status)); };
+  const f=function(rows){ return (rows||[]).filter(function(c){ return okC(c.campaign_id); }); };
+  CA_D.cur=f(R.cur); CA_D.prev=f(R.prev); CA_D.ads=f(R.ads); if(CA_D.cmp) CA_D.cmp.ads=f(R.cmpAds);
+  /* BUDGETS (16 Nov 2026, Ayush: "for paused ones BUDGET is still there"). Every listed campaign shows the daily budget set
+     on it, paused ones too. A totals row adds up the budgets of the campaigns listed under the choice, except a switched-on
+     campaign with no activity (no spend, impression or click) in the last 3 days - shown greyed as "not spending". */
+  const bud={}, seen={};
+  CA_D.cur.forEach(function(c){ if(!caAct(c)||seen[c.campaign_id]) return; seen[c.campaign_id]=1; const b=caCampBud(c.campaign_id); if(b==null) return; const k=c.project+'|'+c.platform; bud[k]=(bud[k]||0)+(+b); });
+  CA_D.bud=bud;
+  const waLive={}; Object.keys(E).forEach(function(k){ const x=E[k]; if(k.indexOf('adset:')!==0||!x||!/CONVERSATIONS|MESSAGING/.test(String(x.objective||''))) return;
+    const c=E['campaign:'+x.campaign_id]; const a=c&&CA_D.acc['meta:'+c.account_id]; if(a&&caLive(c.status)) waLive[a.project]=1; });
+  const okR=function(x){ if(CA_ST==='both') return true; if(x.wa) return caStOk(!!waLive[x.project]); return !!E['campaign:'+x.campaign_id]&&okC(x.campaign_id); };
+  CA_D.crm=R.crm?{cur:R.crm.cur.filter(okR),prev:R.crm.prev.filter(okR)}:null;
+  CA_D.crmSet=R.crmSet?{cur:R.crmSet.cur.filter(okR),prev:R.crmSet.prev.filter(okR)}:null;
+}
+// some activity in the period: spend, impressions or clicks (a paused remarketing campaign can show ads without spend)
+// green = switched on (Facebook ACTIVE, Google ENABLED), red = paused / ended / removed (16 Nov 2026, Ayush)
+function caDot(st){ const on=caLive(st); return '<span title="'+(on?'Enabled':esc(String(st||'Stopped').charAt(0)+String(st||'stopped').slice(1).toLowerCase()))+'" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:1px;background:'+(on?'#16a34a':'#dc2626')+'"></span>'; }
+function caAct(c){ return (+c.spend||0)>0||(+c.impressions||0)>0||(+c.clicks||0)>0||(+c.results||0)>0; }
+// a campaign's daily budget: its own, or (Facebook ABO) its ad sets' - running ones, else all of them;
+// null for a switched-on campaign with no activity in the last 3 days (it is not spending)
+function caCampBud(id,raw){ const E=CA_D.ent, e=E['campaign:'+id]||{};
+  let b=e.daily_budget!=null?+e.daily_budget:null;
+  if(b==null){ const sets=Object.keys(E).filter(function(k){ return k.indexOf('adset:')===0&&E[k]&&E[k].campaign_id===id&&E[k].daily_budget!=null; }).map(function(k){ return E[k]; });
+    const run=sets.filter(function(x){ return caLive(x.status); }), use=run.length?run:sets;
+    if(use.length) b=use.reduce(function(t,x){ return t+(+x.daily_budget||0); },0); }
+  if(raw) return b;
+  return b!=null&&caLive(e.status)&&CA_D.sp3&&!CA_D.sp3[id]?null:b; }
+window.caSt=function(v){ if(v===CA_ST||!CA_D) return; CA_ST=v; CA.camp=null; CA.adset=null; caStatusApply(); caPaint(); };
 function caLeads(x){ return obNum(x,0); } // whole numbers everywhere (14 Nov 2026, Ayush): Google splits a lead's credit across campaigns, so its counts arrive as 30.6 etc.
 
 /* TWO TABS (16 Nov 2026, Ayush: "make a new Tab named Analytics"): Overview (this page as it was) and Analytics
@@ -40428,13 +40467,19 @@ async function caLoad(){
   const crmRows=async function(s,e){ const out=[]; for(let f=0;;f+=1000){
       const q=await sb.schema('camp').from('crm_google_daily').select('business_unit,campaign_type,campaign_id,leads,qualified,site_visited,booked,lost').gte('day',s).lte('day',e).range(f,f+999);
       if(q.error) return null; out.push.apply(out,q.data||[]); if(!q.data||q.data.length<1000) break; } return out; };
+  // CRM figures per ad set / ad group and per ad (camp.crm_adset_daily, 16 Nov 2026: the CRM API now breaks campaigns down)
+  const crmSets=async function(s,e){ const out=[]; for(let f=0;;f+=1000){
+      const q=await sb.schema('camp').from('crm_adset_daily').select('src,level,campaign_id,adset_id,ad_id,leads,qualified,site_visited,booked,lost').gte('day',s).lte('day',e).range(f,f+999);
+      if(q.error) return null; out.push.apply(out,q.data||[]); if(!q.data||q.data.length<1000) break; } return out; };
   const res=await Promise.all([
     sb.schema('camp').from('ads_accounts').select('platform,account_id,name,project').eq('include',true),
     obEntities('meta'), obEntities('google'),
     rpc('ads_campaign_totals',{p_platform:'meta',p_from:r.s,p_to:r.e}), gTot(r.s,r.e),
     rpc('ads_campaign_totals',{p_platform:'meta',p_from:c.s,p_to:c.e}), gTot(c.s,c.e),
     ads('meta',r.s,r.e), ads('google',r.s,r.e), cmp?ads('meta',c.s,c.e):none, cmp?ads('google',c.s,c.e):none,
-    crmRows(r.s,r.e), crmRows(c.s,c.e)]);
+    crmRows(r.s,r.e), crmRows(c.s,c.e), crmSets(r.s,r.e), crmSets(c.s,c.e),
+    // campaigns that spent in the last 3 days (today, yesterday, the day before) - only their budgets count (see caSpending)
+    sb.schema('camp').from('ads_daily').select('campaign_id').gte('day',new Date(Date.now()+5.5*3600e3-2*86400e3).toISOString().slice(0,10)).or('spend.gt.0,impressions.gt.0,clicks.gt.0').limit(20000)]);
   $('caBody').style.opacity='';
   const bad=[res[0],res[3],res[4],res[5],res[6]].filter(function(x){ return x.error; })[0];
   if(bad){ $('caBody').innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(bad.error.message)+'</div>'; return; }
@@ -40447,11 +40492,15 @@ async function caLoad(){
     if(p==='google'){ o.conversions=o.results; o.results=o.form_leads!=null?+o.form_leads:null; } return o; }); };
   // Daily budget set today (7 Nov 2026, Ayush): the daily budgets of the running campaigns, per project and platform.
   // A Facebook campaign without its own budget carries its running ad sets' budgets (ads-daily-sync).
+  /* ONLY CAMPAIGNS THAT ARE SPENDING (16 Nov 2026, Ayush, on Dream Gurukul's ₹18,500: "Yes, only spending"). Google showed
+     five Gurukul campaigns switched on, but four had not spent for weeks or ever - their ₹11,500 counted as budget though
+     nothing ran. A campaign's budget now counts only when it spent something in the last 3 days. */
+  const sp3={}; ((res[15]&&res[15].data)||[]).forEach(function(x){ sp3[x.campaign_id]=1; });
   const bud={};
   [['meta',res[1]],['google',res[2]]].forEach(function(x){ x[1].forEach(function(e){
-    const a=acc[x[0]+':'+e.account_id]; if(e.kind!=='campaign'||!a||!caLive(e.status)||e.daily_budget==null) return;
+    const a=acc[x[0]+':'+e.account_id]; if(e.kind!=='campaign'||!a||!caLive(e.status)||e.daily_budget==null||(res[15]&&!res[15].error&&!sp3[e.id])) return;
     const k=a.project+'|'+x[0]; bud[k]=(bud[k]||0)+(+e.daily_budget||0); }); });
-  CA_D={acc:acc,ent:ent,bud:bud,cur:tag('meta',res[3].data).concat(tag('google',res[4].data)),prev:tag('meta',res[5].data).concat(tag('google',res[6].data)),
+  CA_D={acc:acc,ent:ent,bud:bud,sp3:(res[15]&&!res[15].error)?sp3:null,cur:tag('meta',res[3].data).concat(tag('google',res[4].data)),prev:tag('meta',res[5].data).concat(tag('google',res[6].data)),
         ads:tag('meta',res[7].rows).concat(tag('google',res[8].rows)),hasSets:res[7].sets&&res[8].sets,
         cmp:cmp?{s:c.s,e:c.e,ads:tag('meta',res[9].rows).concat(tag('google',res[10].rows))}:null};
   // the CRM names its projects a little differently (Durbaar Banquets, Ananta): matched without "Dream" / "Banquets"
@@ -40473,6 +40522,9 @@ async function caLoad(){
       const o=Object.assign({},x,{src:fb?'facebook':'google',wa:wa});
       o.project=own&&own!==1?own:(projN[pn(x.business_unit)]||x.business_unit); return o; }).filter(Boolean); };
   CA_D.crm=res[11]==null?null:{cur:crmTag(res[11]),prev:crmTag(res[12])};
+  CA_D.crmSet=res[13]==null?null:{cur:res[13],prev:res[14]||[]};
+  CA_D.raw={cur:CA_D.cur,prev:CA_D.prev,ads:CA_D.ads,cmpAds:CA_D.cmp?CA_D.cmp.ads:null,bud:CA_D.bud,crm:CA_D.crm,crmSet:CA_D.crmSet};
+  caStatusApply();
   caPaint();
 }
 // every project with an account on either platform, the biggest spender first
@@ -40495,6 +40547,7 @@ function caPaint(){
   $('caHead').innerHTML='<div class="ob-bar">'
     +sel('caPer',OB_PERIODS,OB_P.period,"OB_P.period=this.value;caReset();caLoad()",C.on?C.period:null)
     +(OB_P.period==='custom'?'<input type="date" value="'+esc(r.s)+'" onchange="OB_P.from=this.value;caLoad()"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(r.e)+'" onchange="OB_P.to=this.value;caLoad()">':'')
+    +'<span class="ca-stg">'+[['active','Active'],['inactive','Inactive'],['both','Both']].map(function(o){ return '<label class="ca-st'+(CA_ST===o[0]?' on':'')+'"><input type="radio" name="caSt"'+(CA_ST===o[0]?' checked':'')+' onchange="caSt(\''+o[0]+'\')">'+o[1]+'</label>'; }).join('')+'</span>'
     +compSelHtml('caProj',[['all','All projects']].concat(P.map(function(p){ return [p,p]; })),CA.proj,"caPickProject(this.value)")
     +'<label class="ca-sw'+(C.on?' on':'')+'" title="Compare with another period"><input type="checkbox"'+(C.on?' checked':'')+' onchange="caCmpToggle(this.checked)"><span class="k"></span>Compare</label>'
     +(C.on?'<span style="color:var(--slate);font-size:12.5px">with</span>'+sel('caCmpPer',CA_CMP_OPTS,C.period,"caCmpPick(this.value)",OB_P.period)
@@ -40550,6 +40603,10 @@ function caPaint(){
   // a Facebook campaign whose ad sets go for WhatsApp chats: the CRM only counts those all together, on the Facebook row
   const isWa=function(cid){ return Object.keys(E).some(function(k){ const x=E[k]; return k.indexOf('adset:')===0&&x&&x.campaign_id===cid&&/CONVERSATIONS|MESSAGING/.test(String(x.objective||'')); }); };
   const crmNo=function(why){ return {why:why}; };
+  // an ad set / ad group's own CRM figures (16 Nov 2026: the CRM API now gives them); leads without ad set tracking stay on the campaign row only
+  const CS=CA_D.crmSet;
+  const crmSetX=function(sid,sp,spw){ if(!CS) return crmNo('CRM figures by ad set are read at night - they show from the next morning'); const p=function(x){ return x.level==='adset'&&x.adset_id===String(sid); };
+    if(!CS.cur.some(p)) return crmNo('The CRM has no leads tied to this ad set for these dates'); return {t:crmT(crmAgg(CS.cur,p),+sp||0),w:crmT(crmAgg(CS.prev,p),+spw||0)}; };
   const ct=function(t,title){ return '<th class="ca-crm" title="'+esc(title)+'">'+t+'</th>'; };
   const head=function(name,res,cpl,crm){ return '<tr><th class="ca-nm">'+name+'</th><th title="Daily budget as set today">Daily budget</th><th>Spend</th><th>'+res+'</th>'
     +(crm?ct('CRM leads','Google and Facebook leads in the CRM after its filtering')+ct('QL','Qualified leads (CRM)')+ct('SV','Site visits (CRM)')+ct('Booked','Booked (CRM)')+ct('Lost','Lost (CRM)'):'')
@@ -40558,13 +40615,15 @@ function caPaint(){
   // a name never wraps: it stops at the column's width with "...", the whole name on hover
   const nm=function(lead,text){ return '<td class="ca-nm"><span class="ca-nmx" title="'+esc(text)+'">'+lead+esc(text)+'</span></td>'; };
   const money=function(v){ return '<td>'+(v==null?'<span style="color:#94a3b8">—</span>':obMoney(v))+'</td>'; };
+  const cBud=function(id){ return caCampBud(id); };
+  const idle=function(id){ const b=caCampBud(id,true); return '<td title="Switched on with '+obMoney(b)+' a day, but nothing spent in the last 3 days - not counted"><span style="color:#94a3b8">—</span><div class="ca-sub">not spending</div></td>'; };
   /* A PLATFORM'S SECTION (6 Nov 2026, Ayush): its running campaigns in a section of their own, under the whole
      projects table - the page scrolls to it on the click, as at the foot of the page it otherwise sat unseen; a campaign opens its running ad sets inside it, and the ads
      follow whatever is open. Paused, ended and deleted ones are left out here - their spend still counts above.
      7 Nov 2026: a Total row under the campaigns - all the listed campaigns together. */
   const section=function(){
     const p=CA.open, pl=CA.plat, W=CA_PLAT[pl];
-    const camps=CA_D.cur.filter(function(c){ return c.project===p&&c.platform===pl&&caLive((E['campaign:'+c.campaign_id]||{}).status)&&((+c.spend||0)>0||(+c.results||0)>0); }).sort(function(a,b){ return b.spend-a.spend; });
+    const camps=CA_D.cur.filter(function(c){ return c.project===p&&c.platform===pl&&caAct(c); }).sort(function(a,b){ return b.spend-a.spend; });
     const was=function(id){ return prev.filter(function(x){ return x.platform===pl&&x.campaign_id===id; }); };
     const setsOf=function(list,cid){ const g={}; list.forEach(function(a){ if(a.platform!==pl||a.campaign_id!==cid||!a.adset_id) return; const x=g[a.adset_id]||(g[a.adset_id]={adset_id:a.adset_id,spend:0,results:null,clicks:0,impressions:0}); x.spend+=+a.spend||0; if(a.results!=null) x.results=(x.results||0)+(+a.results); x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; }); return g; };
     const nc=7+NCRM;
@@ -40575,32 +40634,32 @@ function caPaint(){
       const src=pl==='google'?'google':'facebook';
       // one WhatsApp campaign in the project: the CRM's WhatsApp count is all its own (14 Nov 2026)
       const cx=pl==='meta'&&isWa(c.campaign_id)&&waOne?crmX(function(x){ return x.wa&&x.project===p; },'facebook',function(x){ return x.campaign_id===c.campaign_id; }):pl==='meta'&&isWa(c.campaign_id)?crmNo('A WhatsApp campaign: the CRM counts all WhatsApp campaigns of a project together - they are in the Facebook row above'):crmX(function(x){ return x.campaign_id===c.campaign_id; },src);
-      sec+='<tr class="ca-row ca-l0'+(con?' ca-on':'')+'" onclick="caCamp(\''+c.campaign_id+'\')">'+nm(caret(con),e.name||c.campaign_id)+money(e.daily_budget)+cols(raw(c,pl,lead),raw(was(c.campaign_id)[0],pl,lead),cx)+'</tr>';
+      sec+='<tr class="ca-row ca-l0'+(con?' ca-on':'')+'" onclick="caCamp(\''+c.campaign_id+'\')">'+nm(caret(con)+caDot(e.status),e.name||c.campaign_id)+(cBud(c.campaign_id)==null&&caCampBud(c.campaign_id,true)!=null&&caLive(e.status)?idle(c.campaign_id):!caLive(e.status)?'<td>'+(cBud(c.campaign_id)==null?'<span style="color:#94a3b8">—</span>':obMoney(cBud(c.campaign_id)))+'<div class="ca-sub">'+esc(String(e.status||'stopped').toLowerCase())+'</div></td>':money(cBud(c.campaign_id)))+cols(raw(c,pl,lead),raw(was(c.campaign_id)[0],pl,lead),cx)+'</tr>';
       if(!con) return;
       const ads=CA_D.ads.filter(function(a){ return a.platform===pl&&a.campaign_id===c.campaign_id; });
       if(!CA_D.hasSets||!ads.some(function(a){ return a.adset_id; })){
         sec+='<tr class="ca-l1 ca-none"><td colspan="'+nc+'"><i class="fa-solid fa-circle-info"></i> '+W.sets+' are recorded from tonight (6 Nov 2026) and show here from tomorrow.</td></tr>'; return; }
       const g=setsOf(ads,c.campaign_id), gw=cmpOn?setsOf(CA_D.cmp.ads,c.campaign_id):{};
-      const sets=Object.keys(g).filter(function(k){ return caLive((E['adset:'+k]||{}).status); }).map(function(k){ return g[k]; }).sort(function(a,b){ return b.spend-a.spend; });
+      const cOn=caLive(e.status), sets=Object.keys(g).filter(function(k){ const on=caLive((E['adset:'+k]||{}).status); return CA_ST==='both'||(CA_ST==='active'?on:(!cOn||!on)); }).map(function(k){ return g[k]; }).sort(function(a,b){ return b.spend-a.spend; });
       if(!sets.length) sec+='<tr class="ca-l1 ca-none"><td colspan="'+nc+'">No running '+W.set.toLowerCase()+' in this campaign</td></tr>';
       sets.forEach(function(s){
         const son=CA.adset===s.adset_id;
         sec+='<tr class="ca-row ca-l1'+(son?' ca-on':'')+'" onclick="caSet(\''+s.adset_id+'\')">'+nm('',(E['adset:'+s.adset_id]||{}).name||s.adset_id)+(function(){
           // its own budget; or, when the budget is set on the campaign (Facebook CBO, every Google ad group), the campaign's, marked shared
-          const b=(E['adset:'+s.adset_id]||{}).daily_budget; if(b!=null) return money(b);
+          const b=(E['adset:'+s.adset_id]||{}).daily_budget; if(cBud(c.campaign_id)==null&&CA_D.sp3&&!CA_D.sp3[c.campaign_id]) return money(null); if(b!=null) return money(b);
           return e.daily_budget!=null?'<td title="The budget is set on the campaign and shared by its '+W.sets.toLowerCase()+'"><span style="color:#64748b">'+obMoney(e.daily_budget)+'</span><div class="ca-sub">shared</div></td>':money(null); })()
-          +cols(raw(s,pl,null),raw(gw[s.adset_id],pl,null),crmNo('The CRM counts leads per campaign, not per '+W.set.toLowerCase()))+'</tr>';
+          +cols(raw(s,pl,null),raw(gw[s.adset_id],pl,null),crmSetX(s.adset_id,s.spend,(gw[s.adset_id]||{}).spend))+'</tr>';
       });
     });
     // the total counts leads only (Google conversions, Facebook lead / chat campaigns), as reach or engagement results cannot be added to them
     const ids={}; camps.forEach(function(c){ ids[c.campaign_id]=1; });
     const tot=camps.length?'<tfoot><tr class="ca-tot"><td>Total · '+camps.length+' campaign'+(camps.length===1?'':'s')+(pl==='meta'?' <span style="font-weight:500;color:var(--slate);font-size:11px">(leads only)</span>':'')+'</td>'
-      +money(camps.reduce(function(t,c){ const b=(E['campaign:'+c.campaign_id]||{}).daily_budget; return b==null?t:(t||0)+(+b); },null))
+      +money(camps.reduce(function(t,c){ const b=cBud(c.campaign_id); return b==null?t:(t||0)+(+b); },null))
       +cols(sum(camps,pl),sum(prev.filter(function(x){ return x.platform===pl&&ids[x.campaign_id]; }),pl),crmX(function(x){ return ids[x.campaign_id]||(pl==='meta'&&waOne&&x.wa&&x.project===p); },pl==='google'?'google':'facebook'))+'</tr></tfoot>':'';
     return '<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p)
-      +' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+camps.length+' running campaign'+(camps.length===1?'':'s')+'; click one for its '+W.sets.toLowerCase()+'</span></div>'
+      +' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+camps.length+' '+(CA_ST==='active'?'active':CA_ST==='inactive'?'inactive':'')+(CA_ST==='both'?'':' ')+'campaign'+(camps.length===1?'':'s')+'; click one for its '+W.sets.toLowerCase()+'</span></div>'
       +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Campaign',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
-      +(sec||'<tr><td colspan="'+nc+'" style="text-align:center;color:var(--slate);padding:18px">No running campaign spent in this period</td></tr>')+'</tbody>'+tot+'</table></div></div>'
+      +(sec||'<tr><td colspan="'+nc+'" style="text-align:center;color:var(--slate);padding:18px">No '+(CA_ST==='both'?'':CA_ST+' ')+'campaign spent in this period</td></tr>')+'</tbody>'+tot+'</table></div></div>'
       +caAds(p,pl);
   };
   const shown=CA.proj==='all'?P:[CA.proj];
@@ -40640,6 +40699,9 @@ window.caCmpToggle=function(on){ CA.cmp.on=!!on;
   caLoad(); };
 window.caCmpPick=function(v){ CA.cmp.period=v; if(v==='custom'&&!CA.cmp.from){ const r=obRange(); CA.cmp.from=r.ps; CA.cmp.to=r.pe; } caLoad(); };
 // The ads of what is open: every campaign of the platform, one campaign, or one ad set.
+// an ad's own CRM leads and qualified leads (camp.crm_adset_daily level 'ad', 16 Nov 2026); nothing shown when the CRM has none for it
+function caAdCrm(id){ const C=CA_D&&CA_D.crmSet; if(!C) return ''; let l=0,q=0,n=0; C.cur.forEach(function(x){ if(x.level==='ad'&&x.ad_id===String(id)){ n++; l+=+x.leads||0; q+=+x.qualified||0; } });
+  return n?'<span>CRM leads</span><b>'+obNum(l)+'</b><span>QL</span><b>'+obNum(q)+(l?' <span style="font-weight:500;color:#64748b">('+Math.round(q/l*100)+'%)</span>':'')+'</b>':''; }
 function caAds(p,pl){
   const W=CA_PLAT[pl], E=CA_D.ent;
   let ads=CA_D.ads.filter(function(a){ return a.project===p&&a.platform===pl&&caLive((E['ad:'+a.ad_id]||{}).status)&&caLive((E['campaign:'+a.campaign_id]||{}).status)&&(!a.adset_id||caLive((E['adset:'+a.adset_id]||{}).status)); });
@@ -40662,7 +40724,7 @@ function caAds(p,pl){
         :'<div class="txt">'+(pl==='google'?'<div class="sp">Sponsored</div>':'')+'<div class="h">'+esc(words[0])+'</div>'+(words[1]?'<div class="d">'+esc(words.slice(1).join(' '))+'</div>':'')+'</div>';
       return '<div class="ob-ad" style="cursor:pointer" title="Open this ad" onclick="caAdOpen('+i+')">'+pic+'<div style="padding:9px 12px 0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(e.name||'')+'">'+esc(e.name||('Ad '+a.ad_id))+'</div>'
         +'<div style="padding:0 12px;font-size:11.5px;color:var(--slate)">'+stat(e.status)+'</div>'
-        +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+(pl==='meta'?'Results':W.res)+'</span><b>'+obNum(a.results,0)+'</b><span>Cost per result</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b></div></div>';
+        +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+(pl==='meta'?'Results':W.res)+'</span><b>'+obNum(a.results,0)+'</b><span>Cost per result</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b>'+caAdCrm(a.ad_id)+'</div></div>';
     }).join('')+'</div>'
     +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="CA.showAds+='+obAdStep(ads.length)+';caPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
 }
@@ -41349,11 +41411,13 @@ VIEWS.market_watch=async function(v,seg){
   const tab=function(id,icon,label){ return '<button class="mw-tab'+(MW_TAB===id?' on':'')+'" onclick="navTo(\'market_watch/'+id+'\')"><i class="fa-solid '+icon+'"></i> '+label+'</button>'; };
   v.innerHTML=MW_CSS
     +'<div class="mw-head"><div><h1><i class="fa-solid fa-binoculars" style="color:var(--brand)"></i> Market Watch</h1>'
-      +'<p>Trending videos, new project launches around Kolkata, and short videos with hooks that hold people.</p></div></div>'
+      +'<p>What people are talking about right now, luxury and premium launches across India, and hooks that stop the scroll.</p></div></div>'
     +'<div class="mw-tabs">'+tab('trends','fa-fire','Trends')+tab('launches','fa-building-flag','Launches')+tab('hooks','fa-bolt','Hook Library')+'</div>'
     +'<div id="mwBody"><div class="loader"><div class="spin"></div></div></div>';
   try{
-    if(MW_TAB==='launches') await mwLaunches(); else await mwVideos(MW_TAB==='hooks'?'hook':'trend');
+    // 16 Nov 2026 (Ayush): Trends, Hook Library and Launches are the AI versions (50-market-watch-ai.js); the YouTube
+    // video grid and the RERA table below are no longer opened from here
+    if(MW_TAB==='launches') await mwAiLaunches(); else if(MW_TAB==='hooks') await mwAiHooks(); else await mwAiTrends();
   }catch(e){ const b=$('mwBody'); if(b) b.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load: '+esc((e&&e.message)||String(e))+'</div></div>'; }
 };
 
@@ -41395,7 +41459,7 @@ async function mwVideos(kind){
     +' <button class="btn" style="height:30px;font-size:12px" onclick="mwRefresh(this)"><i class="fa-solid fa-rotate"></i> Refresh</button></span>';
   const note=kind==='trend'
     ? '<div class="mw-sub" style="margin:-6px 0 12px">YouTube\u2019s own Trending list'+(MW_REGION==='WORLD'?' - United States, United Kingdom, UAE, Singapore and Australia together, most viewed first':' - in YouTube\u2019s order')+'.</div>'
-    : '<div class="mw-sub" style="margin:-6px 0 12px">The most-watched professionally made Shorts of the 30 days before each read - only channels with 1 lakh+ subscribers, no comedy skits, vlogs or gaming. Every video found stays in the library.</div>';
+    : '<div class="mw-sub" style="margin:-6px 0 12px">The most-watched professionally made Shorts of the 30 days before each read - only brands and studios with 10 lakh+ subscribers, no DIY, comedy, vlogs, gaming or clickbait. Every video found stays in the library.</div>';
   $('mwBody').innerHTML='<div class="mw-bar">'+chips+meta+'</div>'+note
     +(list.length?'<div class="mw-grid">'+list.map(x=>mwCard(x,kind)).join('')+'</div>'
       :'<div class="card card-pad empty"><i class="fa-solid fa-film"></i><div>No videos yet - press Refresh.</div></div>');
@@ -42625,3 +42689,273 @@ maReg({id:'hours',title:'Best hours',icon:'fa-solid fa-clock',data:maHourData,re
     return maHead('fa-solid fa-clock','','Best hours',
         'Last 28 days, lead campaigns: leads each 4-hour block brought for its share of spend. +30% = 30% more leads than its spend predicts at the average rate. A real pattern needs the chi-square test (p < 0.01) and some block 15%+ off average. Use it to schedule ads or shift bids by time of day.')
       +(rows.length?maTable(['Platform'].concat(d.blocks.map(function(b){ return b[0]+':00–'+b[1]+':00'; })),rows):'<div class="ma-card">Not enough leads in the hourly figures yet.</div>'); }});
+/* MARKET WATCH - OUR ADS' HOOK AND HOLD RATES (16 Nov 2026, Ayush: "Build all three"): our own Facebook video ads ranked by
+   hook rate (3-second views / impressions) and hold rate (ThruPlays / 3-second views), joined to the CRM's leads and
+   qualified leads per ad. Shown as Hook Library > Our ads (50-market-watch-ai.js). The Kolkata-buyers and the word-rule
+   launch list that were here were replaced the same evening by the AI Trends and Launches (Ayush: "Remove Kolkata Buyers",
+   "the data of Launches is wrong, it's not based on Ads"). */
+
+const MWP_CSS='<style>'
+  +'.mwp-stats{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px}'
+  +'.mwp-st{background:var(--card,#fff);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:150px}'
+  +'.mwp-st b{display:block;font-size:20px;font-weight:700;color:var(--ink)}.mwp-st span{font-size:11.5px;color:var(--slate)}'
+  +'.mwp-card{background:var(--card,#fff);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}'
+  +'.mwp-th{aspect-ratio:1/1;background:#0f172a center/contain no-repeat}'
+  +'.mwp-cb{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}'
+  +'.mwp-row{display:flex;gap:6px;flex-wrap:wrap}'
+  +'.mwp-pill{font-size:11.5px;font-weight:650;padding:3px 8px;border-radius:999px;background:#f1f5f9;color:#334155}'
+  +'.mwp-pill.good{background:#dcfce7;color:#166534}.mwp-pill.low{background:#fef3c7;color:#92400e}'
+  +'.mwp-h{font-size:15px;font-weight:700;margin:4px 0 4px;color:var(--ink)}'
+  +'.mwp-up{color:#16a34a;font-weight:700}.mwp-dn{color:#dc2626;font-weight:700}'
+  +'.mwp-sec{margin:0 0 18px}'
+  +'</style>';
+const mwpDay=function(n){ const d=new Date(Date.now()+5.5*3600e3); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); };
+const mwpPct=function(x,dp){ return isFinite(x)?(x*100).toFixed(dp==null?1:dp)+'%':'—'; };
+const mwpRs=function(x){ return isFinite(x)&&x>0?'₹'+inrGroup(String(Math.round(x))):'—'; };
+function mwpMed(a){ const s=a.filter(isFinite).slice().sort((x,y)=>x-y); if(!s.length) return NaN; const m=s.length>>1; return s.length%2?s[m]:(s[m-1]+s[m])/2; }
+function mwpSpark(vals,w,h){
+  w=w||110; h=h||26; const v=vals.map(Number).filter(isFinite); if(v.length<2) return '';
+  const mx=Math.max.apply(null,v), mn=Math.min.apply(null,v), r=mx-mn||1;
+  const pts=v.map((y,i)=>(i*(w-2)/(v.length-1)+1).toFixed(1)+','+(h-2-(y-mn)/r*(h-4)).toFixed(1)).join(' ');
+  return '<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'" style="display:block"><polyline points="'+pts+'" fill="none" stroke="var(--brand)" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+}
+
+/* ---------------------------------------------------------------- 1. Hook Library > Our ads */
+let MWP_HOOKS=null, MWP_HSORT='ql';
+async function mwOurHooks(){
+  const x=$('mwX'); if(!x) return;
+  if(!MWP_HOOKS){
+    const from=mwpDay(-90);
+    let rows;
+    try{
+      rows=await ciAll(()=>sb.schema('camp').from('ads_ad_daily').select('ad_id,campaign_id,spend,impressions,video_3s,video_p25,video_p50,video_p100,video_thruplay').eq('platform','meta').gte('day',from).gt('impressions',0));
+    }catch(e){
+      if(/video_3s/.test((e&&e.message)||'')){ x.innerHTML=MWP_CSS+'<div class="card card-pad empty"><i class="fa-solid fa-clock"></i><div>Our ads\u2019 video plays are read from Facebook tonight (from 20:20). Hook and hold rates show here from tomorrow morning.</div></div>'; return; }
+      throw e;
+    }
+    const by={};
+    rows.forEach(r=>{ const o=by[r.ad_id]=by[r.ad_id]||{ad_id:r.ad_id,campaign_id:r.campaign_id,spend:0,imp:0,v3:0,p25:0,p50:0,p100:0,thru:0};
+      o.spend+=+r.spend||0; o.imp+=+r.impressions||0; o.v3+=+r.video_3s||0; o.p25+=+r.video_p25||0; o.p50+=+r.video_p50||0; o.p100+=+r.video_p100||0; o.thru+=+r.video_thruplay||0; });
+    const ads=Object.values(by).filter(o=>o.v3>0&&o.imp>=3000);
+    const ids=ads.map(o=>o.ad_id);
+    const [crm,ents]=await Promise.all([
+      ids.length?ciAll(()=>sb.schema('camp').from('crm_adset_daily').select('ad_id,leads,qualified').eq('src','facebook').eq('level','ad').gte('day',from)):[],
+      ids.length?ciAll(()=>sb.schema('camp').from('ads_entities').select('id,kind,name,thumbnail,body,status').eq('platform','meta').in('kind',['ad','campaign'])):[]
+    ]);
+    const cr={}; crm.forEach(r=>{ const o=cr[r.ad_id]=cr[r.ad_id]||{l:0,q:0}; o.l+=+r.leads||0; o.q+=+r.qualified||0; });
+    const en={}; ents.forEach(e=>{ en[e.kind+'|'+e.id]=e; });
+    // Shrunk rates (Beta prior from all our video ads): an ad with few impressions is pulled toward the average, so a
+    // lucky 2,000-impression ad does not top a steady 2-lakh one.
+    const H=ads.reduce((s,o)=>s+o.v3,0)/ads.reduce((s,o)=>s+o.imp,0)||0;
+    const T=ads.reduce((s,o)=>s+o.thru,0)/ads.reduce((s,o)=>s+o.v3,0)||0;
+    const KH=2000, KT=300;
+    ads.forEach(o=>{ const c=cr[o.ad_id]||{l:0,q:0}; o.leads=c.l; o.ql=c.q;
+      o.hook=(o.v3+KH*H)/(o.imp+KH); o.hold=(o.thru+KT*T)/(o.v3+KT); o.rawHook=o.v3/o.imp; o.rawHold=o.v3?o.thru/o.v3:0;
+      const a=en['ad|'+o.ad_id]||{}, c2=en['campaign|'+o.campaign_id]||{};
+      o.name=a.name||o.ad_id; o.thumb=a.thumbnail||''; o.body=a.body||''; o.status=a.status||''; o.camp=c2.name||''; });
+    MWP_HOOKS={ads,H,T,medH:mwpMed(ads.map(o=>o.hook)),medT:mwpMed(ads.map(o=>o.hold))};
+  }
+  mwDrawOurHooks();
+}
+window.mwHSort=function(v){ MWP_HSORT=v; mwDrawOurHooks(); };
+function mwDrawOurHooks(){
+  const x=$('mwX'); if(!x||!MWP_HOOKS) return;
+  const d=MWP_HOOKS, list=d.ads.slice();
+  if(!list.length){ x.innerHTML=MWP_CSS+'<div class="card card-pad empty"><i class="fa-solid fa-film"></i><div>No video ads with 3,000+ impressions in the last 90 days yet.</div></div>'; return; }
+  if(MWP_HSORT==='hook') list.sort((a,b)=>b.hook-a.hook);
+  else if(MWP_HSORT==='hold') list.sort((a,b)=>b.hold-a.hold);
+  else list.sort((a,b)=>(b.ql-a.ql)||(b.hook-a.hook));
+  const chip=(v,l)=>'<button class="mw-chip'+(MWP_HSORT===v?' on':'')+'" onclick="mwHSort(\''+v+'\')">'+l+'</button>';
+  const pill=(lab,v,med)=>'<span class="mwp-pill '+(v>=med*1.15?'good':v<=med*0.85?'low':'')+'">'+lab+' '+mwpPct(v)+'</span>';
+  x.innerHTML=MWP_CSS
+    +'<div class="mwp-stats">'
+      +'<div class="mwp-st"><b>'+list.length+'</b><span>video ads, last 90 days</span></div>'
+      +'<div class="mwp-st"><b>'+mwpPct(d.H)+'</b><span>hook rate overall (3-sec views / impressions)</span></div>'
+      +'<div class="mwp-st"><b>'+mwpPct(d.T)+'</b><span>hold rate overall (ThruPlays / 3-sec views)</span></div>'
+    +'</div>'
+    +'<div class="mw-bar">'+chip('ql','Most qualified leads')+chip('hook','Best hook')+chip('hold','Best hold')+'</div>'
+    +'<div class="mw-sub" style="margin:-6px 0 12px">Green = 15%+ above our median, amber = 15%+ below. Rates are adjusted for how many people saw the ad, so a small lucky ad does not top a proven one. Leads and QL are the CRM\u2019s count for that ad.</div>'
+    +'<div class="mw-grid">'+list.slice(0,24).map(o=>{
+      const cpq=o.ql?o.spend/o.ql:NaN;
+      return '<div class="mwp-card" title="'+esc('Of 3-second viewers: '+mwpPct(o.p25/o.v3,0)+' reached 25%, '+mwpPct(o.p50/o.v3,0)+' 50%, '+mwpPct(o.p100/o.v3,0)+' the end')+'">'
+        +'<div class="mwp-th" style="background-image:url(\''+esc(o.thumb)+'\')"></div>'
+        +'<div class="mwp-cb"><div class="mw-ct" title="'+esc(o.name)+'">'+esc(o.name)+'</div>'
+          +'<div class="mw-cc">'+esc(o.camp)+(o.status&&o.status!=='ACTIVE'?' · '+esc(o.status.toLowerCase())+'':'')+'</div>'
+          +'<div class="mwp-row">'+pill('Hook',o.hook,d.medH)+pill('Hold',o.hold,d.medT)+'</div>'
+          +'<div class="mw-cs"><span>'+inrGroup(String(o.leads))+' leads</span><span><b>'+inrGroup(String(o.ql))+'</b> QL</span><span>'+(o.ql?mwpRs(cpq)+' / QL':mwpRs(o.spend)+' spent')+'</span></div>'
+        +'</div></div>';
+    }).join('')+'</div>';
+}
+
+/* MARKET WATCH - AI TABS (16 Nov 2026, Ayush: "Can we put AI somewhere if free ... Trending means it's going on lately,
+   people are discussing it, it's blowing up - not necessarily a video ... videos, photos, movies, a phrase, a song ...
+   everything positive ... the Hooks are not hooks, they are proper videos - I want hook ideas where the user's thumb stops
+   ... attracting hooks on photos as well ... Launch data from its data").
+   The work is done by the market-watch edge function (ai.ts): Trends every 3 hours, Hook ideas and Launches every
+   morning; this page reads what it saved (action ai_get). Gemini / Groq free tiers. */
+
+let MWA={trends:null,hooks:null,launches:null}, MWA_REG='all', MWA_KIND='all', MWA_HTAB='ideas', MWA_HFMT='all';
+const MWA_CSS='<style>'
+  +'.mwa-card{background:var(--card,#fff);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}'
+  +'.mwa-pic{aspect-ratio:16/9;background:#e2e8f0 center/cover no-repeat;position:relative}'
+  +'.mwa-pic.none{display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:26px;background:linear-gradient(135deg,#eef2ff,#f8fafc)}'
+  +'.mwa-badge{position:absolute;left:8px;top:8px;background:#16a34a;color:#fff;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px}'
+  +'.mwa-kind{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--brand)}'
+  +'.mwa-b{padding:11px 13px 13px;display:flex;flex-direction:column;gap:6px;flex:1}'
+  +'.mwa-t{font-weight:700;font-size:15px;line-height:1.3;color:var(--ink)}'
+  +'.mwa-why{font-size:12.5px;color:var(--ink-2,#334155);line-height:1.45}'
+  +'.mwa-sig{display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--slate)}'
+  +'.mwa-sig a{color:var(--slate);text-decoration:none}.mwa-sig a:hover{color:var(--brand)}'
+  +'.mwa-idea{margin-top:auto;background:#f8fafc;border-radius:8px;padding:7px 9px;font-size:12px;color:#334155;line-height:1.4}'
+  +'.mwa-idea b{color:var(--brand)}'
+  +'.mwa-hook{font-size:17px;font-weight:750;line-height:1.3;color:var(--ink)}'
+  +'.mwa-row{font-size:12px;color:#334155;line-height:1.45}.mwa-row span{color:var(--slate);font-weight:600}'
+  +'.mwa-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;margin-right:4px}'
+  +'.mwa-tag.v{background:#fee2e2;color:#991b1b}.mwa-tag.p{background:#e0f2fe;color:#075985}.mwa-tag.t{background:#dcfce7;color:#166534}'
+  +'.mwa-copy{border:1px solid var(--line);background:#fff;border-radius:8px;height:28px;padding:0 10px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;align-self:flex-start}'
+  +'.mwa-media{aspect-ratio:1/1;background:#0f172a center/contain no-repeat;position:relative}'
+  +'.mwa-media video{width:100%;height:100%;object-fit:contain;display:block}'
+  +'.mwa-wait{display:flex;align-items:center;gap:10px}'
+  +'</style>';
+
+async function mwaGet(what){
+  if(MWA[what]) return MWA[what];
+  const r=await mwCall({action:'ai_get',what:what}); MWA[what]=r.data||null; return MWA[what];
+}
+window.mwaRefresh=async function(what,btn){
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Asking AI…'; }
+  try{ const r=await mwCall({action:'ai_refresh',what:what}); MWA[what]=r.data; }
+  catch(e){ toast(e.message,'err'); }
+  if(what==='trends') mwaDrawTrends(); else if(what==='hooks') mwaDrawHooks(); else mwaDrawLaunches();
+};
+function mwaMeta(d,what){
+  return '<span class="mw-meta">'+(d&&d.at?'AI read '+mwAgo(d.at):'')
+    +' <button class="btn" style="height:30px;font-size:12px" onclick="mwaRefresh(\''+what+'\',this)"><i class="fa-solid fa-rotate"></i> Refresh</button></span>';
+}
+function mwaEmpty(what,txt){
+  return '<div class="card card-pad empty"><i class="fa-solid fa-wand-magic-sparkles"></i><div>'+txt+'</div>'
+    +'<button class="btn primary" style="margin-top:10px" onclick="mwaRefresh(\''+what+'\',this)">Read now</button></div>';
+}
+
+/* ---------------------------------------------------------------- Trends */
+const MWA_KINDS=[['all','All'],['screen','Movies & shows'],['song','Music'],['person','People'],['sport','Sport'],['techbiz','Tech & business'],['moment','Moments & phrases']];
+const MWA_KMAP={movie:'screen',show:'screen',song:'song',person:'person',sport:'sport',tech:'techbiz',business:'techbiz',phrase:'moment',event:'moment',festival:'moment',other:'moment'};
+const MWA_KICON={movie:'fa-film',show:'fa-tv',song:'fa-music',person:'fa-user',sport:'fa-futbol',tech:'fa-microchip',business:'fa-briefcase',phrase:'fa-quote-left',event:'fa-calendar-days',festival:'fa-star',other:'fa-bolt'};
+async function mwAiTrends(){ await mwaGet('trends'); mwaDrawTrends(); }
+window.mwaSet=function(k,v){ if(k==='reg') MWA_REG=v; else if(k==='kind') MWA_KIND=v; else if(k==='htab') MWA_HTAB=v; else if(k==='hfmt') MWA_HFMT=v;
+  if(MW_TAB==='hooks') mwaDrawHooks(); else if(MW_TAB==='launches') mwaDrawLaunches(); else mwaDrawTrends(); };
+function mwaChip(k,v,l,cur){ return '<button class="mw-chip'+(cur===v?' on':'')+'" onclick="mwaSet(\''+k+'\',\''+v+'\')">'+l+'</button>'; }
+function mwaDrawTrends(){
+  const b=$('mwBody'); if(!b) return;
+  const d=MWA.trends;
+  const bar='<div class="mw-bar">'+[['all','India + World'],['IN','India'],['WORLD','World']].map(o=>mwaChip('reg',o[0],o[1],MWA_REG)).join('')+mwaMeta(d,'trends')+'</div>'
+    +'<div class="mw-bar">'+MWA_KINDS.map(o=>mwaChip('kind',o[0],o[1],MWA_KIND)).join('')+'</div>';
+  if(!d||!(d.topics||[]).length){ b.innerHTML=MWA_CSS+bar+mwaEmpty('trends','Trends are read every 3 hours.'); return; }
+  const list=d.topics.filter(t=>(MWA_REG==='all'||t.region===MWA_REG)&&(MWA_KIND==='all'||MWA_KMAP[t.kind]===MWA_KIND));
+  const day=Date.now()-24*3600e3;
+  b.innerHTML=MWA_CSS+bar
+    +'<div class="mw-sub" style="margin:-6px 0 12px">What is rising right now - searches that jumped on Google, Wikipedia pages read far more than usual, YouTube’s trending chart - merged into topics by AI. Only positive topics; anything sad, negative or divisive is left out.</div>'
+    +(list.length?'<div class="mw-grid">'+list.map(t=>{
+      const sig=[];
+      if(t.searches) sig.push('<span><i class="fa-brands fa-google"></i> '+mwNum(t.searches)+'+ searches</span>');
+      if(t.spike) sig.push('<span><i class="fa-brands fa-wikipedia-w"></i> read '+(t.spike>=50?'50+':t.spike)+'× usual</span>');
+      if(t.yt_views) sig.push('<span><i class="fa-brands fa-youtube"></i> '+mwNum(t.yt_views)+' views</span>');
+      const links=(t.links||[]).filter(l=>l.url).slice(0,3).map(l=>'<a href="'+esc(l.url)+'" target="_blank" rel="noopener" title="'+esc(l.title)+'"><i class="fa-solid fa-arrow-up-right-from-square"></i> '+esc(l.src==='google'?'News':l.src==='wikipedia'?'Wikipedia':'YouTube')+'</a>').join('');
+      return '<div class="mwa-card">'
+        +(t.picture?'<div class="mwa-pic" style="background-image:url(\''+esc(t.picture)+'\')">':'<div class="mwa-pic none"><i class="fa-solid '+(MWA_KICON[t.kind]||'fa-bolt')+'"></i>')
+          +(Date.parse(t.first_seen)>day?'<span class="mwa-badge">New today</span>':'')+'</div>'
+        +'<div class="mwa-b"><div class="mwa-kind"><i class="fa-solid '+(MWA_KICON[t.kind]||'fa-bolt')+'"></i> '+esc(t.kind)+' · '+(t.region==='IN'?'India':'World')+'</div>'
+          +'<div class="mwa-t">'+esc(t.topic)+'</div><div class="mwa-why">'+esc(t.why)+'</div>'
+          +'<div class="mwa-sig">'+sig.join('')+'</div><div class="mwa-sig">'+links+'</div>'
+          +(t.hook?'<div class="mwa-idea"><b>Idea:</b> '+esc(t.hook)+'</div>':'')+'</div></div>';
+    }).join('')+'</div>':'<div class="card card-pad empty"><i class="fa-solid fa-filter"></i><div>Nothing in this choice right now.</div></div>');
+}
+
+/* ---------------------------------------------------------------- Hook Library */
+async function mwAiHooks(){ if(MWA_HTAB!=='ours') await mwaGet('hooks'); mwaDrawHooks(); }
+window.mwaCopy=function(i){ const x=(MWA.hooks&&MWA.hooks.ideas||[])[i]; if(!x) return;
+  const txt=x.hook+(x.on_screen?'\nOn screen: '+x.on_screen:'')+(x.visual?'\nShot: '+x.visual:'');
+  try{ navigator.clipboard.writeText(txt).then(()=>toast('Hook copied','ok')); }catch(e){ toast('Could not copy','err'); } };
+function mwaDrawHooks(){
+  const b=$('mwBody'); if(!b) return;
+  const d=MWA.hooks;
+  const tabs='<div class="mw-bar">'+mwaChip('htab','ideas','Hook ideas',MWA_HTAB)+mwaChip('htab','proven','Proven in ads',MWA_HTAB)+mwaChip('htab','ours','Our ads',MWA_HTAB)
+    +(MWA_HTAB==='ours'?'':mwaMeta(d,'hooks'))+'</div>';
+  if(MWA_HTAB==='ours'){ b.innerHTML=MWA_CSS+tabs+'<div id="mwX"><div class="loader"><div class="spin"></div></div></div>'; mwOurHooks().catch(e=>{ const x=$('mwX'); if(x) x.innerHTML='<div class="card card-pad empty"><div>Could not load: '+esc(e.message)+'</div></div>'; }); return; }
+  if(!d){ if(!MWA.hooks){ mwaGet('hooks').then(()=>{ if(MWA.hooks) mwaDrawHooks(); }); } b.innerHTML=MWA_CSS+tabs+mwaEmpty('hooks','Hook ideas are written every morning.'); return; }
+  if(MWA_HTAB==='ideas'){
+    const list=(d.ideas||[]).map((x,i)=>Object.assign({_i:i},x)).filter(x=>MWA_HFMT==='all'||x.format===MWA_HFMT);
+    b.innerHTML=MWA_CSS+tabs
+      +'<div class="mw-bar">'+[['all','Video + photo'],['video','Video openers'],['photo','Photo headlines']].map(o=>mwaChip('hfmt',o[0],o[1],MWA_HFMT)).join('')+'</div>'
+      +'<div class="mw-sub" style="margin:-6px 0 12px">Openings written by AI for our projects - what the first 2 seconds of a video or the headline on a photo should be to stop the thumb. They ride today’s positive trends and the patterns of competitor ads that kept running 30+ days. Facts are kept to what we told it: check any detail before using.</div>'
+      +(list.length?'<div class="mw-grid">'+list.map(x=>'<div class="mwa-card"><div class="mwa-b">'
+        +'<div><span class="mwa-tag '+(x.format==='video'?'v':'p')+'"><i class="fa-solid '+(x.format==='video'?'fa-video':'fa-image')+'"></i> '+(x.format==='video'?'Video':'Photo')+'</span><span class="mwa-tag">'+esc(x.pattern||'')+'</span>'+(x.trend?'<span class="mwa-tag t">'+esc(x.trend)+'</span>':'')+'</div>'
+        +'<div class="mwa-hook">“'+esc(x.hook)+'”</div>'
+        +(x.on_screen?'<div class="mwa-row"><span>On screen:</span> '+esc(x.on_screen)+'</div>':'')
+        +(x.visual?'<div class="mwa-row"><span>'+(x.format==='video'?'First 2 seconds:':'The photo:')+'</span> '+esc(x.visual)+'</div>':'')
+        +(x.why?'<div class="mwa-row"><span>Why it stops the scroll:</span> '+esc(x.why)+'</div>':'')
+        +'<div class="mwa-row"><span>For:</span> '+esc(x.project||'')+'</div>'
+        +'<button class="mwa-copy" onclick="mwaCopy('+x._i+')"><i class="fa-regular fa-copy"></i> Copy</button>'
+        +'</div></div>').join('')+'</div>':'<div class="card card-pad empty"><div>No ideas in this choice.</div></div>');
+    return;
+  }
+  // proven: competitor ads still running after 30+ days - the opening line and the creative
+  const list=(d.proven||[]);
+  b.innerHTML=MWA_CSS+tabs
+    +'<div class="mw-sub" style="margin:-6px 0 12px">Competitor ads that are still running after 30+ days - a brand keeps paying only for an ad that works. Their opening line is the hook; AI names the pattern and why it works.</div>'
+    +(list.length?'<div class="mw-grid">'+list.map((x,i)=>'<div class="mwa-card" style="cursor:pointer" onclick="'+(x.snapshot?'window.open(\''+esc(x.snapshot)+'\',\'_blank\')':'')+'">'
+      +'<div class="mwa-media" id="mwaM'+i+'"></div>'
+      +'<div class="mwa-b"><div><span class="mwa-tag '+(x.media_type==='video'?'v':'p')+'">'+(x.media_type==='video'?'Video':'Photo')+'</span>'+(x.pattern?'<span class="mwa-tag">'+esc(x.pattern)+'</span>':'')+'<span class="mwa-tag t">Running '+x.days+' days</span></div>'
+        +'<div class="mwa-hook" style="font-size:15px">“'+esc(x.first)+'”</div>'
+        +(x.why?'<div class="mwa-row"><span>Why it works:</span> '+esc(x.why)+'</div>':'')
+        +'<div class="mw-cc">'+esc(x.brand||'')+'</div></div></div>').join('')+'</div>'
+      :'<div class="card card-pad empty"><div>No long-running competitor ads found.</div></div>');
+  mwaMedia(list,'mwaM');
+}
+// the ad's picture / first video frame, through the same signed links as Competitor Ads
+function mwaMedia(list,prefix){
+  if(typeof compThumbFor!=='function'||typeof compSignedUrl!=='function') return;
+  list.forEach((x,i)=>{ const el=$(prefix+i); if(!el) return; const m=compThumbFor(x); if(!m) return;
+    compSignedUrl(m.key).then(u=>{ if(!u||!$(prefix+i)) return;
+      if(m.kind==='video') el.innerHTML='<video src="'+esc(u)+'#t=0.1" muted playsinline preload="metadata"></video>'; else el.style.backgroundImage='url(\''+u+'\')'; }); });
+}
+
+/* ---------------------------------------------------------------- Launches */
+/* Premium and luxury residential launches across India, from launch news read by AI (16 Nov 2026, Ayush: "Premium and
+   Luxury Launches but all over India ... not through Ads ... don't consider CPs"; later the same evening: "limited to these
+   companies or brands" - the 18 developers in MWA_DEVS, matched in the edge function). Filters: developer and city. */
+const MWA_DEVS=['DTC Group','Siddha Group','Srijan Realty','Diamond Group','Merlin Group','Eden Group','Ambuja Neotia','Alcove Realty','Godrej Properties',
+  'Mani Group','Vinayak Group','Unimark Group','Emami Realty','Sugam Homes','Primarc Group','Orbit Group','Gems Group'];
+const MWA_CITY=[['all','All India'],['mum','Mumbai region'],['ncr','Delhi NCR'],['blr','Bengaluru'],['pune','Pune'],['hyd','Hyderabad'],['chn','Chennai'],['kol','Kolkata'],['other','Other cities']];
+function mwaCityOf(c){ c=String(c||'').toLowerCase();
+  if(/mumbai|thane|navi mumbai|panvel|worli|bandra|andheri|powai|borivali|mira|vasai|kalyan|dombivli|lonavala|alibaug/.test(c)) return 'mum';
+  if(/gurugram|gurgaon|noida|delhi|ghaziabad|faridabad|greater noida|sonipat|ncr/.test(c)) return 'ncr';
+  if(/bengaluru|bangalore/.test(c)) return 'blr'; if(/pune|pimpri|hinjewadi|kharadi/.test(c)) return 'pune';
+  if(/hyderabad|secunderabad|gachibowli|kokapet/.test(c)) return 'hyd'; if(/chennai/.test(c)) return 'chn';
+  if(/kolkata|howrah|rajarhat|new town|newtown|salt lake/.test(c)) return 'kol'; return 'other'; }
+let MWA_LCITY='all', MWA_LDEV='all';
+async function mwAiLaunches(){ await mwaGet('launches'); mwaDrawLaunches(); }
+window.mwaLSet=function(k,v){ if(k==='city') MWA_LCITY=v; else MWA_LDEV=v; mwaDrawLaunches(); };
+function mwaDrawLaunches(){
+  const b=$('mwBody'); if(!b) return;
+  const d=MWA.launches;
+  const ch=(k,v,l,cur)=>'<button class="mw-chip'+(cur===v?' on':'')+'" onclick="mwaLSet(\''+k+'\',\''+v+'\')">'+l+'</button>';
+  const bar='<div class="mw-bar"><select class="mw-sel" onchange="mwaLSet(\'dev\',this.value)"><option value="all">All 17 developers</option>'
+      +MWA_DEVS.map(x=>'<option'+(MWA_LDEV===x?' selected':'')+'>'+esc(x)+'</option>').join('')+'</select>'+mwaMeta(d,'launches')+'</div>'
+    +'<div class="mw-bar">'+MWA_CITY.map(o=>ch('city',o[0],o[1],MWA_LCITY)).join('')+'</div>';
+  if(!d||!(d.projects||[]).length||!('launched' in (d.projects[0]||{}))){ b.innerHTML=MWA_CSS+bar+mwaEmpty('launches','Launch news is read by AI every morning.'); return; }
+  const list=d.projects.filter(p=>(MWA_LDEV==='all'||p.brand===MWA_LDEV)&&(MWA_LCITY==='all'||mwaCityOf(p.city+' '+p.locality)===MWA_LCITY));
+  b.innerHTML=MWA_CSS+bar
+    +'<div class="mw-sub" style="margin:0 0 12px">New residential projects by DTC, Siddha, Srijan, Diamond, Merlin, Eden, Ambuja Neotia, Alcove, Godrej, Mani, Vinayak, Unimark, Emami, Sugam, Primarc, Orbit and Gems - anywhere in India, launched in the last 60 days. Every morning AI reads the launch news and searches the web for each developer; a new building is added to this list and drops off 60 days after its launch. Brokers and channel partners are left out.</div>'
+    +(list.length?'<div class="mw-tw" style="max-height:calc(100vh - 320px)"><table class="mw-t"><thead><tr><th>Launched</th><th>Project</th><th>Developer</th><th>Location</th><th>Segment</th><th>Price from · Size</th><th>News</th></tr></thead><tbody>'
+      +list.map(p=>{ const dd=mwDaysSince(p.launched);
+        return '<tr><td><div class="mw-days'+(dd!=null&&dd<=14?' new':'')+'">'+(dd==null?'—':dd===0?'Today':dd+' day'+(dd===1?'':'s')+' ago')+'</div><div class="mw-sub">'+mwDmy(p.launched)+'</div></td>'
+          +'<td><div class="mw-pn">'+esc(p.project)+'</div>'+(p.first_seen&&Date.now()-Date.parse(p.first_seen)<36*3600e3&&d.projects.some(x=>x.first_seen&&x.first_seen<p.first_seen)?'<span class="mw-tag own">New - added today</span>':'')+(p.reports>1?'<div class="mw-sub">'+p.reports+' reports</div>':'')+'</td>'
+          +'<td>'+esc(p.developer||'—')+'</td>'
+          +'<td>'+esc([p.locality,p.city].filter(Boolean).join(', ')||'—')+'</td>'
+          +'<td>'+(p.segment?'<span class="mw-tag '+(p.segment==='luxury'?'comp':'rep')+'">'+esc(p.segment.charAt(0).toUpperCase()+p.segment.slice(1))+'</span>':'—')+'</td>'
+          +'<td>'+esc([p.price,p.size].filter(Boolean).join(' · ')||'—')+'</td>'
+          +'<td>'+(p.news||[]).map(n=>'<div><a href="'+esc(n.link)+'" target="_blank" rel="noopener" title="'+esc(n.title)+'">'+esc(n.source||'News')+' <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i></a></div>').join('')+'</td></tr>'; }).join('')
+      +'</tbody></table></div>':'<div class="card card-pad empty"><div>No launches for this choice in the last 60 days.</div></div>');
+}
+

@@ -17,6 +17,7 @@
    (any valid JainE sign-in): "refresh" re-reads what is due; "preview" returns what YouTube says now
    without saving (used before the table exists). */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { getJson, pulse, hookIdeas, launches, startClock } from "./ai.ts";   // AI trends / hook ideas / launches (16 Nov 2026)
 
 const SB = Deno.env.get('SUPABASE_URL')!;
 const SRV = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -53,6 +54,16 @@ export const HOOK_SEARCHES: [string, string, string][] = [
   ['cars', 'car launch film', 'IN'],
   ['tech', 'product launch film', ''],
   ['tech', 'introducing the new', ''],
+  // 16 Nov 2026 ("what's up with Market Watch" - the library had 14 videos, Design and Luxury empty): more professional
+  // searches, incl. real-estate and hospitality brand work worldwide and in India; the same quality filters apply
+  ['design', 'real estate brand film', ''],
+  ['design', 'luxury residences film', ''],
+  ['design', 'property launch film', 'IN'],
+  ['luxury', 'luxury hotel brand film', ''],
+  ['luxury', 'luxury watch commercial', ''],
+  ['ads', 'tvc', 'IN'],
+  ['cinematic', 'brand campaign film', 'IN'],
+  ['travel', 'tourism board film', ''],
 ];
 const HOOK_DAYS = 30, SHORT_MAX_S = 180;   // a Short is at most 3 minutes
 const MIN_SUBS = 1000000;
@@ -226,7 +237,20 @@ Deno.serve(async (req) => {
   if (!who) return j({ error: 'not allowed' }, 401);
   if (!YT_KEY) return j({ error: 'YOUTUBE_API_KEY is not set' }, 500);
   const now = new Date().toISOString();
+  startClock();
   try {
+    // AI: ai_get reads the saved result, ai_refresh makes it afresh (what: trends | hooks | launches)
+    if (body.action === 'ai_get') {
+      const w = String(body.what || ''); if (!['trends', 'hooks', 'launches'].includes(w)) return j({ error: 'what?' }, 400);
+      return j({ ok: true, data: await getJson(w + '.json') });
+    }
+    if (body.action === 'ai_refresh') {
+      const w = String(body.what || ''), save = body.save !== false;
+      if (w === 'trends') return j({ ok: true, data: await pulse(save) });
+      if (w === 'hooks') return j({ ok: true, data: await hookIdeas(save) });
+      if (w === 'launches') return j({ ok: true, data: await launches(save, Math.min(20, +body.batches || 12)) });
+      return j({ error: 'what?' }, 400);
+    }
     if (body.action === 'preview') {
       const kinds = body.kind === 'hook' ? ['hook'] : body.kind === 'trend' ? ['trend'] : ['trend', 'hook'];
       const out: any = {};
