@@ -13,6 +13,13 @@
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { mailBody } from "./booking-mail.ts";
 
+// 14 Nov 2026: denomailer 1.6.0 writes a non-ASCII subject as =?utf-8?Q?...?= WITHOUT escaping spaces or "?" and folds it with "=" line breaks. That is an invalid header, so some
+// mail apps then show the WHOLE message as raw source (headers, boundaries, base64). A subject that is plain ASCII is passed through untouched, so make every subject ASCII first.
+function asciiSubject(s: string) {
+  const M: Record<string, string> = { "—": "-", "–": "-", "‒": "-", "−": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "…": "...", "₹": "Rs.", " ": " ", "•": "-", "·": "-", "×": "x" };
+  return String(s ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\x00-\x7f]/g, (c) => M[c] ?? "").replace(/[\r\n]+/g, " ").replace(/\s{2,}/g, " ").trim().replace(/^=\?/, "= ?");
+}
+
 type J = (o: unknown, status?: number) => Response;
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 const DAYS = 7;
@@ -64,7 +71,7 @@ export async function legalHearingOverdue(req: Request, db: any, j: J): Promise<
         + `<p>These open cases in <b>Legal MIS</b> still show a hearing date that passed <b>${DAYS} or more days ago</b>. Please open each one in JAIN-E (Legal &gt; MIS &gt; the case &gt; Hearings) and put in its next hearing date.</p>`
         + `<table style="border-collapse:collapse;font-size:13px"><tr style="background:#f3f4f6"><th style="text-align:left;padding:6px 10px">Case</th><th style="text-align:left;padding:6px 10px">Last hearing</th><th style="text-align:left;padding:6px 10px">Overdue</th></tr>${rows}</table>`
         + `<p style="color:#6b7280;font-size:12px">This reminder goes out every day until each case has its next hearing date.</p><p>JAIN-E</p></div>`;
-      try { await client.send({ from: `JAIN-E Legal <${GU}>`, to: p.email, subject, ...mailBody(text, html) }); out.push({ to: p.email, ok: true }); }
+      try { await client.send({ from: `JAIN-E Legal <${GU}>`, to: p.email, subject: asciiSubject(subject), ...mailBody(text, html) }); out.push({ to: p.email, ok: true }); }
       catch (e) { out.push({ to: p.email, ok: false, error: String((e as Error)?.message || e).slice(0, 200) }); }
     }
   } finally { try { await client.close(); } catch { /* ignore */ } }

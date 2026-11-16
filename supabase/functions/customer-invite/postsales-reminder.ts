@@ -15,6 +15,13 @@ import { AwsClient } from "https://esm.sh/aws4fetch@1.0.20";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { mailBody } from "./booking-mail.ts";
 
+// 14 Nov 2026: denomailer 1.6.0 writes a non-ASCII subject as =?utf-8?Q?...?= WITHOUT escaping spaces or "?" and folds it with "=" line breaks. That is an invalid header, so some
+// mail apps then show the WHOLE message as raw source (headers, boundaries, base64). A subject that is plain ASCII is passed through untouched, so make every subject ASCII first.
+function asciiSubject(s: string) {
+  const M: Record<string, string> = { "—": "-", "–": "-", "‒": "-", "−": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "…": "...", "₹": "Rs.", " ": " ", "•": "-", "·": "-", "×": "x" };
+  return String(s ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\x00-\x7f]/g, (c) => M[c] ?? "").replace(/[\r\n]+/g, " ").replace(/\s{2,}/g, " ").trim().replace(/^=\?/, "= ?");
+}
+
 type J = (o: unknown, status?: number) => Response;
 const SENDERS = ["ayushruia1@gmail.com", "system.admin@thejaingroup.com"];
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
@@ -203,7 +210,7 @@ export async function reminderSendCustomers(req: Request, body: any, db: any, j:
       const fname = String(lt.filename || ("Reminder Letter - " + bno + ".pdf")).replace(/[^\w\-. ]+/g, "_").slice(0, 120);
       let ok = true, err: string | null = null;
       try {
-        await client.send({ from: `Pallabita Ghosh - The Jain Group <${CU}>`, to: String(r.email).trim(), subject, ...mailBody(text, html),
+        await client.send({ from: `Pallabita Ghosh - The Jain Group <${CU}>`, to: String(r.email).trim(), subject: asciiSubject(subject), ...mailBody(text, html),
           attachments: [{ filename: fname.endsWith(".pdf") ? fname : fname + ".pdf", content: lt.pdf_base64, encoding: "base64", contentType: "application/pdf" }] });
       } catch (e) { ok = false; err = String((e as Error)?.message || e).slice(0, 300); }
       await PS.from("reminder_send_log").insert({ sent_by: me, from_email: CU, recipient_email: String(r.email).trim(), customer_name: row.customer_name,

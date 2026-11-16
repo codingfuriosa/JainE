@@ -20,6 +20,13 @@
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { welcomeEmail, welcome2Email, mailBody, bookingAmountProblem } from "./booking-mail.ts";
 
+// 14 Nov 2026: denomailer 1.6.0 writes a non-ASCII subject as =?utf-8?Q?...?= WITHOUT escaping spaces or "?" and folds it with "=" line breaks. That is an invalid header, so some
+// mail apps then show the WHOLE message as raw source (headers, boundaries, base64). A subject that is plain ASCII is passed through untouched, so make every subject ASCII first.
+function asciiSubject(s: string) {
+  const M: Record<string, string> = { "—": "-", "–": "-", "‒": "-", "−": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "…": "...", "₹": "Rs.", " ": " ", "•": "-", "·": "-", "×": "x" };
+  return String(s ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\x00-\x7f]/g, (c) => M[c] ?? "").replace(/[\r\n]+/g, " ").replace(/\s{2,}/g, " ").trim().replace(/^=\?/, "= ?");
+}
+
 type J = (o: unknown, status?: number) => Response;
 const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 const DOC_NAME: Record<string, string> = {
@@ -102,7 +109,7 @@ function parseNotice(raw: string) {
 
 async function sendMail(CU: string, CP: string, to: string[], subject: string, html: string, text: string) {
   const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: CU, password: CP } } });
-  try { await client.send({ from: `Pallabita Ghosh - The Jain Group <${CU}>`, to, subject, ...mailBody(text, html) }); }
+  try { await client.send({ from: `Pallabita Ghosh - The Jain Group <${CU}>`, to, subject: asciiSubject(subject), ...mailBody(text, html) }); }
   finally { try { await client.close(); } catch { /* ignore */ } }
 }
 

@@ -1,0 +1,146 @@
+[
+ {
+  "group": "Customer form (desktop)",
+  "file": "01-step1-as-opened.png",
+  "title": "Step 1 - Applicant details, as the customer first opens the link",
+  "text": "Title, name, nationality and date of birth are already filled by Sales (the customer can change them). Only one applicant is shown; Spouse and Passport / bank panels are folded away."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "02-step1-missing-list.png",
+  "title": "Step 1 - what happens if something required is empty",
+  "text": "A list \"Still missing on this page\" appears at the top, each item jumps to its box, and the box turns red. Nothing is lost."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "03-step1-filled-spouse-and-passport-panels.png",
+  "title": "Step 1 - filled, with the two folded panels opened",
+  "text": "Spouse & anniversary and Passport & bank details are hidden until the customer taps them (passport & bank open by themselves for a foreign applicant)."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "04-step1-joint-applicant-added.png",
+  "title": "Step 1 - a joint applicant added",
+  "text": "\"+ Add another applicant\" adds a full block (up to 6). Joint applicants do not ask for date of birth or spouse. Each has a Remove button."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "05-step1-foreign-applicant.png",
+  "title": "Step 1 - a foreign / NRI applicant (third applicant)",
+  "text": "Choosing another nationality makes PAN optional, flags the country with its flag, and opens the Passport & bank details panel as required."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "06-step2-contact-prefilled.png",
+  "title": "Step 2 - Contact & address, as opened",
+  "text": "Mobile, email and contact person are pre-filled by Sales. The residential address is for the customer. The Office address is a switch that stays folded."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "07-step2-office-and-other-address.png",
+  "title": "Step 2 - with an office address and a different permanent address",
+  "text": "Switching on \"I want to add an office address\" opens its fields and adds Office as a choice for letters. Choosing Other for mailing / permanent address opens a box for it."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "08-step3-occupation-source.png",
+  "title": "Step 3 - Occupation & source, as opened",
+  "text": "Everything here is optional except \"Other\" (if chosen). \"More about you\" is folded away."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "09-step3-more-about-you-opened.png",
+  "title": "Step 3 - \"More about you\" opened, \"Other\" source, several reasons",
+  "text": "Choosing Other for \"how did you hear\" opens a required box. \"Why did you choose this project?\" takes up to 5 reasons, each can be removed."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "10-step4-unit-prefilled.png",
+  "title": "Step 4 - Unit details, as opened",
+  "text": "Block, floor, flat number, bedrooms, car park, built-up area and total price are pre-filled by Sales (\"As agreed with our sales team\") - the customer can still change them. Home loan is No."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "11-step4-home-loan-yes.png",
+  "title": "Step 4 - Home loan \"Yes\" opens the bank box",
+  "text": "The preferred bank box appears only when a loan is wanted."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "12-step5-booking-amount-upi.png",
+  "title": "Step 5 - Booking amount, paid by UPI / NEFT / RTGS",
+  "text": "Amount in figures and in words, date paid, UTR reference, bank. Purpose and \"Booked through\" below. (Sales person name and Lead ID are hidden for now.)"
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "13-step5-booking-amount-cheque.png",
+  "title": "Step 5 - paid by cheque",
+  "text": "The labels change (Cheque number, Cheque date) and Bank (drawn on) becomes required with a Branch box."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "14-step6-kyc-empty.png",
+  "title": "Step 6 - KYC documents, nothing attached yet",
+  "text": "One card per applicant (named), a PAN box and an Aadhaar box. A foreign applicant's boxes are optional."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "15-step6-kyc-attached.png",
+  "title": "Step 6 - photos attached (two photos for one Aadhaar)",
+  "text": "Each box takes up to 2 files (photo or PDF) - e.g. Aadhaar front and back. Thumbnails show, with a × to remove. Files are saved the moment they are attached."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "16-step7-terms-and-signature-empty.png",
+  "title": "Step 7 - Terms & signature, before reading",
+  "text": "The three term lists are folded (\"Open each section to read it in full\"). The tick box and the signature box are both required."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "17-step7-terms-opened.png",
+  "title": "Step 7 - a term list opened",
+  "text": "Tapping a heading opens the numbered clauses."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "18-step7-ticked-and-signed.png",
+  "title": "Step 7 - ticked and signed",
+  "text": "The first applicant signs in the box (mouse or finger). \"Sign again\" clears it. Only the first applicant signs."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "19-step8-review.png",
+  "title": "Step 8 - Review & submit",
+  "text": "Everything the customer gave, section by section, with an Edit button for each (it returns straight to this page after the change). Empty items are hidden."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "20-reopened-link-resumes-on-review.png",
+  "title": "Closing the page and opening the link again",
+  "text": "The customer lands on the same step with every answer, attached file and signature still there (saved on our server as they typed)."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "21-submitted-thank-you.png",
+  "title": "After Submit - thank-you screen",
+  "text": "The customer gets a reference number. The form is sent to Sales (\"Generated forms\")."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "22-link-reopened-after-submit-read-only.png",
+  "title": "The link opened again after submitting",
+  "text": "Shown read-only, exactly as submitted. PAN and Aadhaar show only their last four characters; passport and bank say \"Provided\"; no document is shown."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "23-sales-preview-of-submitted-form.png",
+  "title": "Sales / Administrator preview of a submitted form (signed in)",
+  "text": "The same page, but for staff: every answer including full PAN / Aadhaar numbers, the documents as picture cards under each applicant's name, and the signature. Only what the customer gave - nothing else."
+ },
+ {
+  "group": "Customer form (desktop)",
+  "file": "24-sales-preview-picture-opened.png",
+  "title": "Sales preview - a document opened large",
+  "text": "Tap a card to see the picture large; the applicant's name is shown with it."
+ }
+]

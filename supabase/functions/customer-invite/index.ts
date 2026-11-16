@@ -29,9 +29,32 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { handleBookingMail } from "./booking-mail.ts";
 import { bounceCheck } from "./booking-bounce.ts";
-import { postsalesMailSync } from "./postsales-mail.ts";
+import { postsalesMailSync, postsalesMailHistory } from "./postsales-mail.ts";
 import { reminderSend, reminderSendCustomers } from "./postsales-reminder.ts";
 import { legalHearingOverdue } from "./legal-overdue.ts";
+
+// 13 Nov 2026: denomailer 1.6.0 packs html/text as quoted-printable itself and gets it wrong (lower-case =3d, broken wrapping), so some mail apps show raw code.
+// Hand it base64 parts instead; every mail app reads them.
+function b64Part(mimeType: string, s: string) {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const b64 = btoa(bin).replace(/.{76}(?=.)/g, "$&\r\n");
+  return { mimeType: `${mimeType}; charset="utf-8"`, content: b64, transferEncoding: "base64" };
+}
+function htmlToText(html: string) {
+  return html.replace(/<(br|\/p|\/div|\/tr|\/li|\/h[1-6])\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/\n{3,}/g, "\n\n").trim();
+}
+function mailBody(text: string | undefined, html?: string) {
+  const t = text && text.trim() ? text : html ? htmlToText(html) : "";
+  return { mimeContent: html ? [b64Part("text/plain", t), b64Part("text/html", html)] : [b64Part("text/plain", t)] };
+}
+// 14 Nov 2026: denomailer 1.6.0 writes a non-ASCII subject as =?utf-8?Q?...?= WITHOUT escaping spaces or "?" and folds it with "=" line breaks. That is an invalid header, so some
+// mail apps then show the WHOLE message as raw source (headers, boundaries, base64). A subject that is plain ASCII is passed through untouched, so make every subject ASCII first.
+function asciiSubject(s: string) {
+  const M: Record<string, string> = { "—": "-", "–": "-", "‒": "-", "−": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "…": "...", "₹": "Rs.", " ": " ", "•": "-", "·": "-", "×": "x" };
+  return String(s ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\x00-\x7f]/g, (c) => M[c] ?? "").replace(/[\r\n]+/g, " ").replace(/\s{2,}/g, " ").trim().replace(/^=\?/, "= ?");
+}
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -196,6 +219,11 @@ Deno.serve(async (req: Request) => {
   }
 
   // ------------------------------------- Post Sales customer tickets from Gmail (the job, every 10 minutes)
+  // older customer emails, before the live feed began (13 Nov 2026) - mode "count" (read-only) or "run"
+  if (action === "postsales_mail_history") {
+    try { return await postsalesMailHistory(req, db, j, body); }
+    catch (e) { return j({ error: "Ticket history failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
+  }
   if (action === "postsales_mail_sync") {
     try { return await postsalesMailSync(req, db, j); }
     catch (e) { return j({ error: "Ticket sync failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
@@ -223,7 +251,7 @@ Deno.serve(async (req: Request) => {
     try {
       if (action === "invite_test") {
         const m = inviteEmail("Homeowner", staffEmail, helpLine);
-        await open().send({ from, to: staffEmail, subject: "[TEST] " + m.subject, content: m.text, html: m.html });
+        await open().send({ from, to: staffEmail, subject: asciiSubject("[TEST] " + m.subject), ...mailBody(m.text, m.html) });
         return j({ ok: true, to: staffEmail });
       }
       const ids = [...new Set((Array.isArray(body.customerIds) ? body.customerIds : []).map(Number).filter(Boolean))].slice(0, 25);
@@ -240,7 +268,7 @@ Deno.serve(async (req: Request) => {
         if (invited.has(p.id) && !body.resend) { results.push({ id: p.id, status: "skipped", reason: "already invited" }); continue; }
         const m = inviteEmail(niceName(p.full_name), email, helpLine);
         try {
-          await open().send({ from, to: email, subject: m.subject, content: m.text, html: m.html });
+          await open().send({ from, to: email, subject: asciiSubject(m.subject), ...mailBody(m.text, m.html) });
           await cust.from("portal_invites").insert({ customer_id: p.id, email, status: "sent", sent_by: staffEmail });
           results.push({ id: p.id, status: "sent" });
         } catch (e) {
@@ -296,7 +324,7 @@ Deno.serve(async (req: Request) => {
     try {
       client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: GU, password: GP } } });
       await client.send({ from: `Jain Group Customer Portal <${GU}>`, to: email,
-        subject: `${code} is your Jain Group sign-in code`, content: text, html });
+        subject: asciiSubject(`${code} is your Jain Group sign-in code`), ...mailBody(text, html) });
     } catch (_e) {
       return j({ error: "We could not send the email just now. Please try again in a minute." }, 502);
     } finally { try { if (client) await client.close(); } catch { /* ignore */ } }

@@ -433,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'2914b41d37','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'c9834de731','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -1137,6 +1137,7 @@ const NAV=[
        Metrics no longer has a page: its tabs live in Our Brand and Competitor Data. */
     {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},   // named Our Brand 16 Oct - 6 Nov 2026
     {id:'competitors',label:'Competitor Data',icon:'fa-magnifying-glass-chart'},
+    {id:'market_watch',label:'Market Watch',icon:'fa-binoculars'},   // 14 Nov 2026 - 44-market-watch.js
     {id:'channel_partners',label:'Channel Partners',icon:'fa-people-arrows'},
     {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},   // back 6 Nov 2026 - 43-posts-and-reels.js
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
@@ -6008,12 +6009,13 @@ const LM_COLS=[
   {k:'cnr',     l:'CNR No.',       sec:'hearing', w:170},
   {k:'incharge',l:'Incharge',      sec:'hearing', w:140},
   {k:'advocate',l:'Advocate',      sec:'hearing', w:160},
-  {k:'action',  l:'Action',        sec:'action',  w:280}
+  {k:'action',  l:'Action',        sec:'action',  w:280},
+  {k:'remarks', l:'Remarks',       sec:'remarks', w:240}
 ];
 // Each column can be dragged wider or narrower at its own header edge, within these limits (px).
 const LM_COL_MIN=80, LM_COL_MAX=520;
 const LM={rows:[],hearings:{},actions:{},tasks:{},comments:{},types:[],courts:[],advocates:[],people:[],
-  sel:new Set(),typeFilter:'',docCounts:{},docFolders:{},docVault:{}};
+  sel:new Set(),stages:[],typeFilter:'',docCounts:{},docFolders:{},docVault:{}};
 
 /* ---------------------------------------------------------------- small helpers */
 function lmIso(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -6058,6 +6060,13 @@ async function lmLoadLists(){
   ]);
   LM.types=((ty&&ty.data)||[]).map(x=>x.name);
   LM.courts=((co&&co.data)||[]).map(x=>x.name);
+  /* Hearing stages (11 Nov 2026, Ayush: "either I choose or type and next time it gets saved"): the fixed
+     list plus every stage already typed on a hearing, so a new one is offered from then on. */
+  try{
+    const {data:st}=await sb.from(MIST('mis_hearings')).select('stage').not('stage','is',null).limit(10000);
+    const seenS=new Set(LM_STAGES.map(x=>x.toLowerCase())); LM.stages=LM_STAGES.slice();
+    (st||[]).forEach(x=>{ const v=String(x.stage||'').trim(); if(v&&v!=='NA'&&!seenS.has(v.toLowerCase())){ seenS.add(v.toLowerCase()); LM.stages.push(v); } });
+  }catch(e){ LM.stages=LM_STAGES.slice(); }
   const seen=new Set(); LM.advocates=[];
   ((ad&&ad.data)||[]).forEach(a=>{ const n=String(a.advocate_name||'').trim(); if(n&&a.active!==false&&!seen.has(n.toLowerCase())){ seen.add(n.toLowerCase()); LM.advocates.push(n); } });
   try{ LM.people=await getPeople(); }catch(e){ LM.people=[]; }
@@ -6155,6 +6164,13 @@ function lmStyles(){
   .lm-cb{width:16px;height:16px;accent-color:var(--brand,#1d4ed8);cursor:pointer;vertical-align:middle}
   .lm-t1{font-weight:650;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
   .lm-t2{font-size:11.5px;color:var(--slate);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lm-tbrief{margin-top:6px;padding:5px 8px;border-radius:7px;background:#f5f3ff;color:#4c1d95;font-size:12px;line-height:1.45;cursor:pointer;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+  .lm-tbrief i{color:#7c3aed;margin-right:3px;font-size:11px}
+  .lm-tbrief:hover{background:#ede9fe}
+  .lm-rcell{cursor:pointer;border-radius:8px;padding:4px 6px;margin:-4px -6px}
+  .lm-rcell:hover{background:#f1f5f9}
+  .lm-rtxt{font-size:12.5px;line-height:1.45;color:var(--ink-2,#334155);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+  .lm-radd{font-size:12px;font-weight:600;color:var(--brand)}
   .lm-cell{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;color:var(--ink-2,#334155)}
   .lm-mute{color:var(--slate-2,#94a3b8)}
   .lm-datebtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:#fff;font:600 12.5px inherit;font-family:inherit;color:var(--ink);cursor:pointer;white-space:nowrap}
@@ -6459,8 +6475,16 @@ function lmSaveWidth(k,w){
 function lmCellHtml(c,r,s){
   const mute='<span class="lm-mute">—</span>';
   switch(c.k){
-    case 'title': return '<div class="lm-t1" title="'+esc(String(r.cause_title||'')+(r.case_brief?'\n\n'+r.case_brief:''))+'">'+esc(String(r.cause_title||'').replace(/\s+/g,' ').trim()||'Untitled case')+'</div>'
-      +(r.case_no?'<div class="lm-t2" title="'+esc(r.case_no)+'">'+esc(r.case_no)+'</div>':'');
+    /* The Case Brief sits under the title (11 Nov 2026, Ayush: "very easy to see it without much effort"),
+       and a click on it shows the whole brief. */
+    case 'title': return '<div class="lm-t1" title="'+esc(String(r.cause_title||''))+'">'+esc(String(r.cause_title||'').replace(/\s+/g,' ').trim()||'Untitled case')+'</div>'
+      +(r.case_no?'<div class="lm-t2" title="'+esc(r.case_no)+'">'+esc(r.case_no)+'</div>':'')
+      +(r.case_brief&&String(r.case_brief).trim()?'<div class="lm-tbrief" onclick="event.stopPropagation();lmShowBrief('+r.id+')" title="Show the whole Case Brief"><i class="fa-solid fa-book-open"></i> '+esc(String(r.case_brief).replace(/\s+/g,' ').trim())+'</div>':'');
+    /* One Remarks field for the whole case (11 Nov 2026) - the same remarks the old MIS kept - besides the
+       remarks on each hearing and action. Added or changed straight from the table. */
+    case 'remarks': { const t=String(r.remarks||'').trim(); const has=t&&t!=='NA';
+      return '<div class="lm-rcell" onclick="event.stopPropagation();lmEditRemarks('+r.id+')" title="'+(has?'Change the remarks':'Add remarks')+'">'
+        +(has?'<div class="lm-rtxt">'+esc(t)+'</div>':'<span class="lm-radd"><i class="fa-solid fa-plus"></i> Add remarks</span>')+'</div>'; }
     case 'type': return r.case_type?'<div class="lm-cell" style="font-weight:600">'+esc(r.case_type)+'</div>':'<span class="lm-mute">Not set</span>';
     case 'court': return r.court?'<div class="lm-cell" title="'+esc(r.court)+'">'+esc(r.court)+'</div>':mute;
     case 'hearing': return '<button class="lm-datebtn '+(s.hearing?'h':'none')+'" onclick="event.stopPropagation();navTo(\'legal/mis/hearing/'+r.id+'\')" title="Hearing history">'
@@ -6632,7 +6656,7 @@ window.misFilter=function(){
     if(LM.typeFilter==='__none') ok=!r.case_type; else if(LM.typeFilter) ok=r.case_type===LM.typeFilter;
     if(ok&&w){ const d=[s.hearing,s.adate].filter(Boolean); ok=d.some(x=>x>=w.from&&x<=w.to); }
     if(ok&&q.length){
-      const blob=[r.cause_title,r.case_no,r.case_type,r.court,lmFileNo(r.file_no),r.cnr_no,r.pc_in_charge,r.advocate_incharge,r.case_brief,
+      const blob=[r.cause_title,r.case_no,r.case_type,r.court,lmFileNo(r.file_no),r.cnr_no,r.pc_in_charge,r.advocate_incharge,r.case_brief,r.remarks,
         s.cur&&s.cur.action,s.cur&&lmName(s.cur.person),lmDmy(s.hearing),lmDmy(s.adate)].join(' ').toLowerCase();
       ok=q.every(t=>blob.indexOf(t)!==-1);
     }
@@ -7022,6 +7046,7 @@ async function misCasePage(idArg){
       +lmField('Case No.','<input id="lmCaseNo" class="lm-in" value="'+esc(r.case_no||'')+'">',{req:true})
       +lmField('Court Name',lmCombo('lmCourt',r.court||'',LM.courts,'Choose or type a new one'),{req:true,full:true})
       +lmField('Case Brief','<textarea id="lmBrief" class="lm-in" rows="3" placeholder="A few lines on what the case is about">'+esc(r.case_brief||'')+'</textarea>',{optional:true,full:true})
+      +lmField('Remarks','<textarea id="lmCaseRem" class="lm-in" rows="3" placeholder="Remarks on the case as a whole">'+esc(r.remarks&&r.remarks!=='NA'?r.remarks:'')+'</textarea>',{optional:true,full:true})
     +'</div>');
   const legal=lmLegalPeople();
   // Date of Filing, beside the Hearing Date, kept as DD/MM/YYYY like the live MIS's own entries (2 Nov 2026)
@@ -7132,7 +7157,7 @@ window.lmSaveCase=async function(id){
   if(isNew&&lmVal('lmHearDate')<today){ toast('The Hearing Date cannot be in the past','warn'); return; }
   const btn=$('lmSaveBtn'); if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
   const restore=function(){ if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Save'; } };
-  const row={cause_title:lmVal('lmCaseTitle'),case_type:lmVal('lmCaseType'),case_no:lmVal('lmCaseNo'),court:lmVal('lmCourt'),case_brief:lmVal('lmBrief')||null,
+  const row={cause_title:lmVal('lmCaseTitle'),case_type:lmVal('lmCaseType'),case_no:lmVal('lmCaseNo'),court:lmVal('lmCourt'),case_brief:lmVal('lmBrief')||null,remarks:lmVal('lmCaseRem')||null,
     file_no:lmVal('lmLocation')||null,cnr_no:lmVal('lmCnr')||null,pc_in_charge:lmVal('lmIncharge')||null,advocate_incharge:lmVal('lmAdvocate')||null};
   // a filing date picked here is saved; a left-blank one keeps whatever the case had ("NA" included)
   if(lmVal('lmFiling')) row.date_of_filing=lmDofText(lmVal('lmFiling'));
@@ -7174,6 +7199,34 @@ window.lmSaveCase=async function(id){
   }catch(e){ restore(); toast((e&&e.message)||String(e),'err'); }
 };
 
+window.lmShowBrief=function(id){
+  const r=LM.rows.find(x=>x.id===id); if(!r) return;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-book-open" style="color:#7c3aed"></i> Case Brief</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><div style="font-weight:700;color:var(--ink);margin-bottom:4px">'+esc(String(r.cause_title||'').replace(/\s+/g,' '))+'</div>'
+      +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:12px">'+esc([r.case_no,r.court].filter(Boolean).join(' · '))+'</div>'
+      +'<div style="font-size:14px;line-height:1.65;color:var(--ink);white-space:pre-wrap">'+esc(r.case_brief||'')+'</div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal();navTo(\'legal/mis/case/'+id+'\')">Open case</button><button class="btn primary" onclick="closeModal()">Close</button></div>','md');
+};
+window.lmEditRemarks=function(id){
+  const r=LM.rows.find(x=>x.id===id); if(!r) return;
+  const cur=r.remarks&&r.remarks!=='NA'?r.remarks:'';
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-comment-dots" style="color:var(--brand)"></i> Remarks</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><div style="font-weight:700;color:var(--ink);margin-bottom:12px">'+esc(String(r.cause_title||'').replace(/\s+/g,' '))+(r.case_no?' <span style="font-weight:500;color:var(--slate)">· '+esc(r.case_no)+'</span>':'')+'</div>'
+      +'<textarea id="lmRemBox" class="lm-in" rows="7" style="width:100%;box-sizing:border-box" placeholder="Remarks on the case as a whole">'+esc(cur)+'</textarea></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="lmRemSave" onclick="lmSaveRemarks('+id+')"><i class="fa-solid fa-check"></i> Save</button></div>','md');
+  setTimeout(()=>{ const t=$('lmRemBox'); if(t){ t.focus(); t.setSelectionRange(t.value.length,t.value.length); } },50);
+};
+window.lmSaveRemarks=async function(id){
+  const btn=$('lmRemSave'); if(btn) btn.disabled=true;
+  const v=String(($('lmRemBox')||{}).value||'').trim()||null;
+  const {error}=await sb.from(MIST('mis_cases')).update({remarks:v,updated_at:new Date().toISOString()}).eq('id',id);
+  if(error){ toast(error.message,'err'); if(btn) btn.disabled=false; return; }
+  const r=LM.rows.find(x=>x.id===id); if(r) r.remarks=v;
+  closeModal(); toast('Remarks saved','ok');
+  const tr=document.querySelector('#lmBody tr[data-id="'+id+'"]');
+  if(tr&&r){ const ix=LM_COLS.findIndex(c=>c.k==='remarks'); const td=tr.children[ix+1]; if(td) td.innerHTML=lmCellHtml(LM_COLS[ix],r,r._s||lmCaseState(r)); }
+};
+
 /* ---------------------------------------------------------------- THE HEARING PAGE */
 async function misHearingPage(id){
   lmStyles();
@@ -7193,7 +7246,7 @@ async function misHearingPage(id){
       +'<div class="lm-grid">'
         +lmField('Hearing Date',lmDateInput('lmHDate','',{min:today}),{req:true})
         +lmField('Person',lmPeopleSelect('lmHPerson','',legal,true),{req:true})
-        +lmField('Stage',lmListSelect('lmHStage','',LM_STAGES),{req:true,full:true})
+        +lmField('Stage',lmCombo('lmHStage','',LM.stages,'Choose a stage or type a new one'),{req:true,full:true})
         +lmField('Remarks','<textarea id="lmHRem" class="lm-in" rows="2" placeholder="What happened, or what is expected, at this hearing"></textarea>',{req:true,full:true})
       +'</div><div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="lm-btn primary" onclick="lmAddHearing('+id+',this)"><i class="fa-solid fa-plus"></i> Add hearing</button></div></div>'
     +(hs.length?hs.map((h,i)=>lmHearingCard(h,id,i===0)).join(''):'<div class="lm-empty">No hearings recorded yet</div>')
@@ -7232,7 +7285,7 @@ window.lmEditHearing=function(hid,caseId){
   box.innerHTML='<div style="font-weight:700;margin-bottom:12px"><i class="fa-solid fa-pen" style="color:var(--brand)"></i> Edit this hearing</div>'+'<div class="lm-grid">'
       +lmField('Hearing Date',lmDateInput('lmE'+hid+'D',h.hearing_date),{req:true})
       +lmField('Person',lmPeopleSelect('lmE'+hid+'P',h.person||'',lmLegalPeople(),true),{req:true})
-      +lmField('Stage',lmListSelect('lmE'+hid+'S',h.stage&&h.stage!=='NA'?h.stage:'',LM_STAGES),{req:true,full:true})
+      +lmField('Stage',lmCombo('lmE'+hid+'S',h.stage&&h.stage!=='NA'?h.stage:'',LM.stages,'Choose a stage or type a new one'),{req:true,full:true})
       /* Remarks stay required once a hearing has them. A hearing brought in from the old MIS with blank
          remarks (2 Nov 2026) may be saved blank - the new rule is for hearings added from now on. */
       +lmField('Remarks','<textarea id="lmE'+hid+'R" class="lm-in" rows="2">'+esc(h.remarks||'')+'</textarea>',(h.remarks&&String(h.remarks).trim())?{req:true,full:true}:{optional:true,full:true})
@@ -15159,11 +15212,11 @@ VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
   // The old MIS tab (built by hand from Farvision files) was retired 02-Oct-2026 - the MIS Report now
   // lives under Reports and is built from Post Sales data. An old #/mis link lands on Bookings.
-  const tabs=[['bookings','Bookings'],['forms','Digital Forms'],['reminders','Outstanding Reminders'],['invoices','Invoices'],['receipts','Receipts'],['reports','Reports'],['adhoc','Contracted Extra Charges'],['setup','Setup']];
+  const tabs=[['bookings','Bookings'],['tickets','Customer Tickets'],['reminders','Outstanding Reminders'],['invoices','Invoices'],['receipts','Receipts'],['reports','Reports'],['adhoc','Contracted Extra Charges'],['setup','Setup']];
   const tab=tabs.some(function(t){return t[0]===(seg&&seg[0]);})?seg[0]:'bookings';
   // One body div per tab rather than one shared one: they are rendered by different code
   // that each look up their own host by id, and a shared id would have them fighting over it.
-  const bodyId={setup:'pssBody',bookings:'psbBody',receipts:'psrBody',invoices:'psiBody',reports:'psrpBodyHost',reminders:'prmBody',forms:'pdfBody'}[tab]||'psaBody';
+  const bodyId={setup:'pssBody',bookings:'psbBody',receipts:'psrBody',invoices:'psiBody',reports:'psrpBodyHost',reminders:'prmBody',forms:'pdfBody',tickets:'pstBody'}[tab]||'psaBody';
   v.innerHTML=mHead('fa-headset','#7e22ce','Post Sales')
     +'<div class="tabs" style="margin-top:14px">'+tabs.map(function(t){return '<div class="tab '+(tab===t[0]?'active':'')+'" onclick="navTo(\'postsales/'+t[0]+'\')">'+t[1]+'</div>';}).join('')+'</div>'
     +'<div id="'+bodyId+'" style="margin-top:16px"></div>';
@@ -15171,6 +15224,8 @@ VIEWS.postsales=async function(v,seg){
   // already received are still in postsales.tickets - to bring the tab back, add ['tickets','Customer Tickets'] to the
   // tabs above, tickets:'pstBody' to bodyId, and the line: if(tab==='tickets'){ const host=$('pstBody'); if(host) await pstRender(host, seg.slice(1)); return; }
   // An old #/tickets link now lands on Bookings, like the retired #/mis one.
+  // 13 Nov 2026: BROUGHT BACK, as asked (Ayush: "bring the Tab where Pallabita Ghosh's Email Customer Data").
+  if(tab==='tickets'){ const host=$('pstBody'); if(host) await pstRender(host, seg.slice(1)); return; }
   if(tab==='reminders'){ const host=$('prmBody'); if(host) await prmRender(host); return; }
   // Digital Booking Form submissions (24d-post-sales-digital-forms.js)
   if(tab==='forms'){ const host=$('pdfBody'); if(host) await pdfRender(host); return; }
@@ -15636,7 +15691,9 @@ VIEWS.inventory=async function(v,seg){
    a category, a one-line summary and an urgency. The customer is matched from Farvision.
    Statuses: open (the customer is waiting for us), answered (we replied last), resolved (closed here).
    Route: postsales/tickets[/<id>]. WhatsApp and calls are meant to join the same list (channel). */
-const PST={rows:[],f:{status:'waiting',cat:'',proj:'',q:'',real:true},state:null};
+const PST={rows:[],f:{status:'waiting',cat:'',proj:'',q:'',real:true,ch:''},state:null};
+// the channel a ticket came in on (13 Nov 2026: WhatsApp joins email)
+function pstCh(t,big){ const wa=t&&t.channel==='whatsapp'; return '<i class="fa-'+(wa?'brands fa-whatsapp':'solid fa-envelope')+'" title="'+(wa?'WhatsApp':'Email')+'" style="color:'+(wa?'#16a34a':'#64748b')+(big?';font-size:15px':'')+'"></i>'; }
 const PST_CATS=['Payment & Receipts','Demand / Invoice','Documents & Agreement','Registration','Possession & Handover',
   'Construction Progress','Maintenance & Repairs','Home Loan & Bank','Cancellation & Refund','Complaint','General Enquiry','Other'];
 const PS_T=()=>sb.schema('postsales');
@@ -15676,11 +15733,28 @@ function pstStyles(){
   #pstTbl td{vertical-align:top}
   #pstTbl tbody tr{cursor:pointer}
   .pst-sum{font-size:12.5px;color:var(--slate);margin-top:3px;line-height:1.45}
-  .pst-thread{display:flex;flex-direction:column;gap:12px}
-  .pst-msg{max-width:84%;border:1px solid var(--line);border-radius:14px;padding:11px 14px;background:#fff}
-  .pst-msg.out{align-self:flex-end;background:#f5f3ff;border-color:#e9d5ff}
-  .pst-msg .h{font-size:11.5px;color:var(--slate);margin-bottom:6px}
-  .pst-msg .b{font-size:13.5px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}`;
+  /* the conversation (13 Nov 2026): the customer on the left in blue, Post Sales on the right in purple */
+  .pst-legend{display:flex;gap:14px;font-size:12px;color:var(--slate);margin:0 0 14px;flex-wrap:wrap}
+  .pst-legend span{display:inline-flex;align-items:center;gap:6px}.pst-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .pst-thread{display:flex;flex-direction:column;gap:14px}
+  .pst-day{align-self:center;font-size:11px;font-weight:700;color:var(--slate);background:var(--bg-subtle,#f1f5f9);border-radius:12px;padding:3px 10px;text-transform:uppercase;letter-spacing:.4px}
+  .pst-row{display:flex;gap:10px;align-items:flex-start;width:100%}
+  .pst-row.out{align-self:flex-end;flex-direction:row-reverse}
+  .pst-av{width:34px;height:34px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff}
+  .pst-row.in .pst-av{background:#2563eb}.pst-row.out .pst-av{background:#7e22ce}
+  .pst-msg{border-radius:14px;padding:11px 14px;min-width:0;border:1px solid;flex:1}
+  .pst-row.in .pst-msg{background:#eff6ff;border-color:#bfdbfe;border-top-left-radius:4px}
+  .pst-row.out .pst-msg{background:#faf5ff;border-color:#e9d5ff;border-top-right-radius:4px}
+  .pst-msg .h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--slate);margin-bottom:7px}
+  .pst-msg .who{font-weight:800;font-size:12.5px}.pst-row.in .who{color:#1d4ed8}.pst-row.out .who{color:#6b21a8}
+  .pst-msg .re{font-size:11.5px;color:#6b21a8;background:#f3e8ff;border-radius:8px;padding:4px 8px;margin:-2px 0 8px;display:inline-block}
+  .pst-msg .b{font-size:13.5px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;color:#0f172a}
+  .pst-info{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:14px}@media(max-width:860px){.pst-info{grid-template-columns:1fr}}
+  .pst-side .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:4px 16px;margin-top:6px}
+  .pst-side .lbl{font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px;margin:8px 0 3px}
+  .pst-side .v{font-size:13px;line-height:1.5}
+  .pst-pane-h{display:flex;align-items:center;gap:8px;font-weight:800;font-size:13px;margin-bottom:2px}
+  .pst-pane-h i{width:24px;height:24px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:11px}`;
   document.head.appendChild(s);
 }
 window.pstRender=async function(host,seg){
@@ -15692,7 +15766,8 @@ window.pstRender=async function(host,seg){
     PS_T().from('mail_sync_state').select('*')
   ]);
   if(tk.error){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load tickets: '+esc(tk.error.message)+'</div></div>'; return; }
-  PST.rows=tk.data||[]; PST.state=(st.data||[])[0]||null;
+  // a solved ticket is never shown - not in the list, the counts or the charts (13 Nov 2026, as asked)
+  PST.rows=(tk.data||[]).filter(t=>t.status!=='resolved'); PST.state=((st.data||[]).filter(x=>!/#history$/.test(x.mailbox))[0])||null;
   pstDraw(host);
 };
 function pstVisible(){
@@ -15701,8 +15776,7 @@ function pstVisible(){
     if(f.real&&t.is_ticket===false) return false;
     if(f.status==='waiting'&&t.status!=='open') return false;
     if(f.status==='answered'&&t.status!=='answered') return false;
-    if(f.status==='resolved'&&t.status!=='resolved') return false;
-    if(f.status==='active'&&t.status==='resolved') return false;
+    if(f.ch&&(t.channel||'email')!==f.ch) return false;
     if(f.cat&&t.category!==f.cat) return false;
     if(f.proj&&t.project!==f.proj) return false;
     if(q){ const b=[t.customer_name,t.customer_email,t.subject,t.summary,t.project,t.tower,t.unit_code,t.category].join(' ').toLowerCase(); if(q.split(/\s+/).some(w=>b.indexOf(w)===-1)) return false; }
@@ -15716,7 +15790,6 @@ function pstDraw(host){
   const monthStart=new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
   const weekAgo=Date.now()-7*86400000;
   const newWeek=real.filter(t=>t.first_received_at&&new Date(t.first_received_at).getTime()>=weekAgo).length;
-  const resolvedMonth=real.filter(t=>t.resolved_at&&new Date(t.resolved_at)>=monthStart).length;
   const replied=real.filter(t=>t.first_reply_at&&t.first_received_at&&new Date(t.first_received_at).getTime()>=Date.now()-30*86400000);
   const avgFirst=replied.length?replied.reduce((s,t)=>s+pstHours(t.first_received_at,t.first_reply_at),0)/replied.length:null;
   const oldest=open.slice().sort((a,b)=>String(a.last_customer_at).localeCompare(String(b.last_customer_at)))[0];
@@ -15724,14 +15797,13 @@ function pstDraw(host){
     ['Waiting for us',String(open.length),oldest?('oldest '+pstAgo(oldest.last_customer_at)):'none waiting',open.length?'#b45309':'#16a34a'],
     ['Answered',String(ans.length),'waiting on the customer'],
     ['New this week',String(newWeek),'customer conversations'],
-    ['Resolved this month',String(resolvedMonth),''],
     ['First reply',pstFmtH(avgFirst),'average, last 30 days']
   ]);
   const active=real.filter(t=>t.status!=='resolved');
   const count=function(key){ const m={}; active.forEach(t=>{ const k=t[key]||'Not known'; m[k]=(m[k]||0)+1; }); return Object.entries(m).sort((a,b)=>b[1]-a[1]); };
   const bars=function(title,list,setKey){
     const max=Math.max(1,...list.map(x=>x[1]));
-    return '<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">'+esc(title)+' <span style="font-weight:500;color:var(--slate);font-size:12px">· not yet resolved</span></div><div class="pst-bars">'
+    return '<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">'+esc(title)+' <span style="font-weight:500;color:var(--slate);font-size:12px">· open</span></div><div class="pst-bars">'
       +(list.length?list.slice(0,8).map(x=>'<div class="r" onclick="pstSet(\''+setKey+'\',\''+esc(x[0]).replace(/'/g,"\\'")+'\')"><span class="l" title="'+esc(x[0])+'">'+esc(x[0])+'</span><span class="b"><i style="width:'+Math.round(x[1]/max*100)+'%"></i></span><span class="n">'+x[1]+'</span></div>').join('')
         :'<div style="color:var(--slate);font-size:13px">Nothing open</div>')+'</div></div>';
   };
@@ -15745,7 +15817,8 @@ function pstDraw(host){
   const rows=pstVisible();
   host.innerHTML=sync+kpis
     +'<div class="pst-grid">'+bars('By category',count('category'),'cat')+bars('By project',count('project'),'proj')+'</div>'
-    +'<div class="pst-bar">'+chip('waiting','Waiting for us')+chip('answered','Answered')+chip('active','All open')+chip('resolved','Resolved')+chip('all','All')
+    +'<div class="pst-bar">'+chip('waiting','Waiting for us')+chip('answered','Answered')+chip('active','All open')
+      +'<select class="pst-sel" onchange="pstSet(\'ch\',this.value)"><option value="">Email & WhatsApp</option><option value="email"'+(f.ch==='email'?' selected':'')+'>Email</option><option value="whatsapp"'+(f.ch==='whatsapp'?' selected':'')+'>WhatsApp</option></select>'
       +'<select class="pst-sel" onchange="pstSet(\'cat\',this.value)"><option value="">All categories</option>'+PST_CATS.map(c=>'<option'+(f.cat===c?' selected':'')+'>'+esc(c)+'</option>').join('')+'</select>'
       +'<select class="pst-sel" onchange="pstSet(\'proj\',this.value)"><option value="">All projects</option>'+projects.map(p=>'<option'+(f.proj===p?' selected':'')+'>'+esc(p)+'</option>').join('')+'</select>'
       +'<label style="font-size:12.5px;display:flex;align-items:center;gap:6px"><input type="checkbox"'+(f.real?' checked':'')+' onchange="pstSet(\'real\',this.checked)"> Real issues only</label>'
@@ -15756,48 +15829,78 @@ function pstDraw(host){
 window.pstDrawList=function(){
   const host=$('pstList'); if(!host) return;
   const rows=pstVisible();
-  host.innerHTML='<table class="tbl" id="pstTbl" style="width:100%"><thead><tr><th>Received</th><th>Customer</th><th>What it is about</th><th>Category</th><th>Urgency</th><th>Status</th><th>Waiting</th></tr></thead><tbody>'
+  host.innerHTML='<table class="tbl" id="pstTbl" style="width:100%"><thead><tr><th>Received</th><th>Customer</th><th>What it is about</th><th>Category</th><th>Urgency</th><th>Status</th><th>Last message</th><th>Waiting</th></tr></thead><tbody>'
     +(rows.length?rows.map(t=>'<tr onclick="navTo(\'postsales/tickets/'+t.id+'\')">'
       +'<td style="white-space:nowrap">'+pstDT(t.first_received_at)+'</td>'
-      +'<td><b>'+esc(t.customer_name||t.customer_email||'—')+'</b><div class="pst-sum">'+esc(pstUnit(t)||t.customer_email||'')+'</div></td>'
+      +'<td>'+pstCh(t)+' <b>'+esc(t.customer_name||t.customer_email||t.customer_phone||'—')+'</b><div class="pst-sum">'+esc(pstUnit(t)||t.customer_email||'')+'</div></td>'
       +'<td><div style="font-weight:600">'+esc(t.subject||'(no subject)')+'</div>'+(t.summary?'<div class="pst-sum">'+esc(t.summary)+'</div>':(t.needs_ai?'<div class="pst-sum"><i>being read…</i></div>':''))+'</td>'
       +'<td>'+esc(t.category||'—')+'</td><td>'+pstUrg(t.urgency)+'</td><td>'+pstStatusTag(t)+'</td>'
+      +'<td style="white-space:nowrap">'+((t.last_reply_at&&(!t.last_customer_at||t.last_reply_at>=t.last_customer_at))?'<span style="color:#6b21a8;font-weight:700"><i class="fa-solid fa-headset"></i> Post Sales</span>':'<span style="color:#1d4ed8;font-weight:700"><i class="fa-solid fa-user"></i> Customer</span>')+'</td>'
       +'<td style="white-space:nowrap;'+(t.status==='open'?'font-weight:700;color:#b45309':'color:var(--slate)')+'">'+(t.status==='open'?pstAgo(t.last_customer_at):'—')+'</td></tr>').join('')
-      :'<tr><td colspan="7"><div class="empty" style="padding:26px">'+(PST.rows.length?'No tickets match these filters':'No customer emails read yet - the mailbox is read every 10 minutes')+'</div></td></tr>')
+      :'<tr><td colspan="8"><div class="empty" style="padding:26px">'+(PST.rows.length?'No tickets match these filters':'No customer emails read yet - the mailbox is read every 10 minutes')+'</div></td></tr>')
     +'</tbody></table>';
 };
-window.pstSet=function(k,v){ PST.f[k]=(k==='real')?!!v:((PST.f[k]===v&&k!=='status')?'':v); if(k==='cat'||k==='proj') PST.f.status=PST.f.status==='waiting'?'active':PST.f.status; pstDraw(); };
+window.pstSet=function(k,v){ if(k==='ch'){ PST.f.ch=v; pstDraw(); return; } PST.f[k]=(k==='real')?!!v:((PST.f[k]===v&&k!=='status')?'':v); if(k==='cat'||k==='proj') PST.f.status=PST.f.status==='waiting'?'active':PST.f.status; pstDraw(); };
 
+/* ONE TICKET (13 Nov 2026, Ayush: "when I open a row the Post Sales and customers should be differentiated ... and replies
+   to emails as well"). The conversation reads like a chat: the customer on the left in blue, Post Sales on the right in
+   purple, a day line between days, and each Post Sales mail says which customer mail it answers. Beside it two panels:
+   the Customer (who, flat, contact) and Post Sales (handled by, category, times). */
+function pstInitials(n){ const w=String(n||'').replace(/[^A-Za-z ]/g,' ').trim().split(/\s+/).filter(Boolean); return ((w[0]||'?')[0]+((w[1]||'')[0]||'')).toUpperCase(); }
 async function pstTicketPage(host,id){
   loader(host);
   const [t,m]=await Promise.all([PS_T().from('tickets').select('*').eq('id',id).maybeSingle(),
     PS_T().from('ticket_messages').select('*').eq('ticket_id',id).order('sent_at',{ascending:true})]);
-  const tk=t.data; if(!tk){ host.innerHTML='<div class="empty">Ticket not found</div>'; return; }
+  const tk=t.data; if(!tk||tk.status==='resolved'){ host.innerHTML='<div class="empty">'+(tk?'This ticket is solved.':'Ticket not found')+'</div>'; return; }
   let people=[]; try{ people=(await getPeople()).filter(p=>Array.isArray(p.depts)&&p.depts.indexOf('Post Sales')!==-1); }catch(e){}
   const msgs=m.data||[];
+  const custName=tk.customer_name||tk.customer_email||tk.customer_phone||'Customer';
+  const day=d=>new Date(d).toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short',year:'numeric'});
+  const time=d=>new Date(d).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  let lastDay='', lastIn=null, th='';
+  msgs.forEach(function(x){
+    const dd=day(x.sent_at); if(dd!==lastDay){ th+='<div class="pst-day">'+esc(dd)+'</div>'; lastDay=dd; }
+    const out=x.direction==='out';
+    const wa=/^whatsapp/.test(x.mailbox||'');
+    const via=wa?'on WhatsApp':(/zohodesk/i.test(x.from_email||'')?'via Zoho Desk':(x.from_name||'Pallabita Ghosh'));
+    const who=out?'Post Sales':(x.from_name||custName);
+    th+='<div class="pst-row '+(out?'out':'in')+'"><div class="pst-av">'+(out?'<i class="fa-solid fa-headset"></i>':esc(pstInitials(who)))+'</div>'
+      +'<div class="pst-msg"><div class="h"><span class="who">'+esc(who)+'</span>'+(out?'<span>'+esc(via)+'</span>':'<span>'+esc(x.from_email||'')+'</span>')+'<span>· '+time(x.sent_at)+'</span></div>'
+      +(out&&lastIn?'<div class="re"><i class="fa-solid fa-reply"></i> Reply to the customer\'s mail of '+esc(pstDT(lastIn.sent_at))+'</div>':'')
+      +'<div class="b">'+esc(x.body||'(no text)')+'</div></div></div>';
+    if(!out) lastIn=x;
+  });
+  const nIn=msgs.filter(x=>x.direction!=='out').length, nOut=msgs.length-nIn;
   host.innerHTML='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">'
       +'<button class="btn" onclick="history.length>1?history.back():navTo(\'postsales/tickets\')"><i class="fa-solid fa-arrow-left"></i> Back</button>'
-      +'<div style="flex:1;min-width:240px"><div style="font-size:17px;font-weight:750">'+esc(tk.subject||'(no subject)')+'</div>'
-      +'<div style="font-size:12.5px;color:var(--slate)">'+esc(tk.customer_name||'')+' · '+esc(tk.customer_email||'')+(pstUnit(tk)?' · '+esc(pstUnit(tk)):'')+(tk.customer_phone?' · '+esc(tk.customer_phone):'')+'</div></div>'
+      +'<div style="flex:1;min-width:240px"><div style="font-size:17px;font-weight:750">'+pstCh(tk,true)+' '+esc(tk.subject||'(no subject)')+'</div>'
+      +(tk.summary?'<div style="font-size:12.5px;color:var(--slate);margin-top:2px">'+esc(tk.summary)+'</div>':'')+'</div>'
       +pstStatusTag(tk)+' '+pstUrg(tk.urgency)
-      +(tk.status==='resolved'?'<button class="btn" onclick="pstResolve('+id+',false)"><i class="fa-solid fa-rotate-left"></i> Reopen</button>'
-        :'<button class="btn btn-primary" onclick="pstResolve('+id+',true)"><i class="fa-solid fa-check"></i> Mark resolved</button>')
+      +'<button class="btn btn-primary" onclick="pstResolve('+id+',true)"><i class="fa-solid fa-check"></i> Mark solved</button>'
     +'</div>'
-    +'<div class="grid" style="grid-template-columns:minmax(0,1fr) 280px;gap:16px">'
-      +'<div class="card card-pad"><div class="pst-thread">'+msgs.map(x=>'<div class="pst-msg '+x.direction+'"><div class="h"><b>'+esc(x.direction==='in'?(x.from_name||x.from_email):'Post Sales')+'</b> · '+pstDT(x.sent_at)+'</div><div class="b">'+esc(x.body||'(no text)')+'</div></div>').join('')+'</div></div>'
-      +'<div class="card card-pad" style="height:fit-content">'
-        +'<div class="sec-title" style="margin:0 0 8px">Summary</div><div style="font-size:13px;line-height:1.5">'+esc(tk.summary||'—')+'</div>'
-        +'<div class="sec-title" style="margin:14px 0 6px">Category</div><select class="pst-sel" style="width:100%" onchange="pstSetField('+id+',\'category\',this.value)">'+PST_CATS.map(c=>'<option'+(tk.category===c?' selected':'')+'>'+esc(c)+'</option>').join('')+'</select>'
-        +'<div class="sec-title" style="margin:14px 0 6px">Handled by</div><select class="pst-sel" style="width:100%" onchange="pstSetField('+id+',\'assigned_to\',this.value)"><option value="">Nobody yet</option>'+people.map(p=>'<option value="'+esc(p.email)+'"'+(tk.assigned_to===p.email?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select>'
-        +'<div style="font-size:12px;color:var(--slate);margin-top:14px;line-height:1.6">First received '+pstDT(tk.first_received_at)+'<br>First reply '+(tk.first_reply_at?pstDT(tk.first_reply_at)+' ('+pstFmtH(pstHours(tk.first_received_at,tk.first_reply_at))+')':'not yet')
-          +(tk.resolved_at?'<br>Resolved '+pstDT(tk.resolved_at):'')+'<br>'+tk.messages+' message'+(tk.messages===1?'':'s')+'</div>'
-        +'<div style="font-size:11.5px;color:var(--slate);margin-top:12px">Replies are written in Gmail as usual - they appear here within 10 minutes.</div>'
-      +'</div></div>';
+    // details above, the conversation below at full width (13 Nov 2026, Ayush: a narrow column at the right wasted the space)
+    +'<div class="pst-info">'
+      +'<div class="card card-pad pst-side"><div class="pst-pane-h"><i class="fa-solid fa-user" style="background:#2563eb"></i> Customer</div><div class="kv">'
+        +'<div><div class="lbl">Name</div><div class="v">'+'<b>'+esc(custName)+'</b>'+'</div></div>'
+        +(pstUnit(tk)?'<div><div class="lbl">Flat</div><div class="v">'+esc(pstUnit(tk))+'</div></div>':'')
+        +'<div><div class="lbl">Came in by</div><div class="v">'+pstCh(tk)+' '+(tk.channel==='whatsapp'?'WhatsApp':'Email')+'</div></div>'
+        +'<div><div class="lbl">Email</div><div class="v">'+esc(tk.customer_email||'—')+'</div></div>'
+        +(tk.customer_phone?'<div><div class="lbl">Phone</div><div class="v">'+esc(tk.customer_phone)+'</div></div>':'')
+        +'<div><div class="lbl">First wrote</div><div class="v">'+pstDT(tk.first_received_at)+'</div></div>'
+        +'<div><div class="lbl">Last wrote</div><div class="v">'+pstDT(tk.last_customer_at)+'</div></div>'+'</div></div>'
+      +'<div class="card card-pad pst-side"><div class="pst-pane-h"><i class="fa-solid fa-headset" style="background:#7e22ce"></i> Post Sales</div><div class="kv">'
+        +'<div><div class="lbl">Handled by</div><select class="pst-sel" style="width:100%" onchange="pstSetField('+id+',\x27assigned_to\x27,this.value)"><option value="">Nobody yet</option>'+people.map(p=>'<option value="'+esc(p.email)+'"'+(tk.assigned_to===p.email?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select></div>'
+        +'<div><div class="lbl">Category</div><select class="pst-sel" style="width:100%" onchange="pstSetField('+id+',\x27category\x27,this.value)">'+PST_CATS.map(c=>'<option'+(tk.category===c?' selected':'')+'>'+esc(c)+'</option>').join('')+'</select></div>'
+        +'<div><div class="lbl">First reply</div><div class="v">'+(tk.first_reply_at?pstDT(tk.first_reply_at)+' <span style="color:var(--slate)">('+pstFmtH(pstHours(tk.first_received_at,tk.first_reply_at))+' after)</span>':'not yet')+'</div></div>'
+        +'<div><div class="lbl">Last reply</div><div class="v">'+pstDT(tk.last_reply_at)+'</div></div>'+'</div></div>'
+    +'</div>'
+    +'<div class="card card-pad"><div class="pst-legend"><span><i style="background:#2563eb"></i> Customer · '+nIn+' message'+(nIn===1?'':'s')+'</span><span><i style="background:#7e22ce"></i> Post Sales · '+nOut+' repl'+(nOut===1?'y':'ies')+'</span><span style="margin-left:auto">Replies are written in Gmail, Zoho Desk or WhatsApp as usual - email shows here within 10 minutes, WhatsApp at once</span></div>'
+      +'<div class="pst-thread">'+(th||'<div class="empty">No messages</div>')+'</div></div>';
 }
 window.pstResolve=async function(id,done){
   const {error}=await PS_T().from('tickets').update(done?{status:'resolved',resolved_at:new Date().toISOString(),resolved_by:state.email}:{status:'open',resolved_at:null,resolved_by:null}).eq('id',id);
   if(error){ toast(error.message,'err'); return; }
-  toast(done?'Ticket resolved':'Ticket reopened','ok'); pstTicketPage($('pstBody'),id);
+  toast(done?'Ticket solved - it no longer shows':'Ticket reopened','ok'); navTo('postsales/tickets');
 };
 window.pstSetField=async function(id,k,v){
   const {error}=await PS_T().from('tickets').update({[k]:v||null}).eq('id',id);
@@ -16243,12 +16346,22 @@ async function pdfRender(host){
     .order('submitted_at',{ascending:false}).limit(500);
   if(error){ host.innerHTML='<div class="empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load the forms: '+esc(error.message)+'</div></div>'; return; }
   PDF.rows=data||[];
+  if(pdfCanGenerate()) await pdfLoadLinks();
   pdfDraw(host);
 }
 function pdfWhen(t){ return t?new Date(t).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—'; }
 function pdfChip(s){ const c=PDF_ST[s]||[s,'#6b7280']; return '<span style="font-size:11.5px;font-weight:600;color:'+c[1]+';border:1px solid '+c[1]+'33;background:'+c[1]+'12;border-radius:999px;padding:2px 9px">'+esc(c[0])+'</span>'; }
 function pdfDraw(host){
   host=host||$('pdfBody'); if(!host) return;
+  pdfDraw0(host);
+  // Generate Form + the links made so far (Sales / the Administrator only)
+  if(pdfCanGenerate()){
+    const bar=host.firstElementChild;
+    if(bar) bar.insertAdjacentHTML('afterbegin','<button class="btn btn-primary" onclick="pdfGenOpen()"><i class="fa-solid fa-link"></i> Generate Form</button>');
+    host.insertAdjacentHTML('beforeend',pdfLinksHtml());
+  }
+}
+function pdfDraw0(host){
   const rows=PDF.rows, n=s=>rows.filter(r=>r.status===s).length;
   const q=PDF.f.q.trim().toLowerCase();
   const list=rows.filter(r=>(PDF.f.st==='all'||r.status===PDF.f.st)&&(!q||[r.ref_no,r.first_name,r.mobile,r.email].join(' ').toLowerCase().indexOf(q)>=0));
@@ -16273,8 +16386,22 @@ function pdfRow(k,v){ return (v===''||v==null)?'':'<tr><td style="padding:6px 0;
 function pdfD(d){ return d?new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):''; }
 function pdfAddr(x){ return x?[x.line,x.city,x.pin].filter(Boolean).join(', '):''; }
 function pdfSec(t,rows){ const b=rows.join(''); return b?'<div style="margin-top:16px"><div style="font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);margin-bottom:4px">'+esc(t)+'</div><table style="width:100%;border-collapse:collapse;font-size:13.5px">'+b+'</table></div>':''; }
+const PD_CSS='<style>'
+  +'#pdPage{position:fixed;inset:0;z-index:2100;background:#f4f5f7;display:flex;flex-direction:column}'
+  +'#pdPage .pd-top{display:flex;align-items:center;gap:14px;padding:10px 22px;background:#fff;border-bottom:1px solid var(--line)}'
+  +'#pdPage .pd-top h2{margin:0;font-size:18px}'
+  +'#pdPage .pd-main{flex:1;overflow:auto;padding:16px 22px 24px}'
+  +'#pdPage .pd-in{max-width:1180px;margin:0 auto;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 20px 20px}'
+  +'#pdPage .pd-cols{column-count:2;column-gap:40px}@media(max-width:1000px){#pdPage .pd-cols{column-count:1}}'
+  +'#pdPage .pd-cols>div{break-inside:avoid}'
+  +'</style>';
+window.pdClose=function(){ const p=document.getElementById('pdPage'); if(p) p.remove(); };
 window.pdfOpen=async function(id){
-  openModal('<div class="modal-head"><h3><i class="fa-regular fa-file-lines"></i> Digital Booking Form</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body"><div id="pdfDetail"></div></div>','lg');
+  const old=document.getElementById('pdPage'); if(old) old.remove();
+  const page=document.createElement('div'); page.id='pdPage';
+  page.innerHTML=PD_CSS+'<div class="pd-top"><button class="btn" onclick="pdClose()"><i class="fa-solid fa-arrow-left"></i> Back</button><h2><i class="fa-regular fa-file-lines"></i> Digital Booking Form</h2></div>'
+    +'<div class="pd-main"><div class="pd-in"><div id="pdfDetail"></div></div></div>';
+  document.body.appendChild(page); pgFit(page);
   loader($('pdfDetail'));
   const {data,error}=await sb.schema('acc').from('digital_booking_forms').select('*').eq('id',id).maybeSingle();
   if(error||!data){ $('pdfDetail').innerHTML='<div class="empty"><div>Could not load this form'+(error?': '+esc(error.message):'')+'.</div></div>'; return; }
@@ -16303,10 +16430,10 @@ window.pdfOpen=async function(id){
       +'<span style="color:var(--slate);font-size:12.5px;margin-left:10px">Terms accepted: '+esc(data.terms_version||'')+'</span></div>'
     +'<div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px"><label style="font-size:12.5px;font-weight:600;color:var(--slate)">Note (staff only)</label>'
       +'<textarea class="inp" id="pdfNote" rows="2" style="width:100%;margin-top:4px">'+esc(data.note||'')+'</textarea></div>';
-  $('pdfDetail').innerHTML=html
+  $('pdfDetail').innerHTML='<div class="pd-cols">'+html+'</div>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">'
     +['seen','used','rejected'].map(s=>'<button class="btn'+(data.status===s?' btn-primary':'')+'" onclick="pdfSetStatus(\''+id+'\',\''+s+'\')">Mark as '+PDF_ST[s][0]+'</button>').join('')
-    +'<button class="btn" style="margin-left:auto" onclick="closeModal()">Close</button></div>';
+    +'<button class="btn" style="margin-left:auto" onclick="pdClose()">Back</button></div>';
   // Opening a new form marks it Seen, once, and keeps who and when.
   if(data.status==='new'){
     const me=(typeof state!=='undefined'&&state.email)||'';
@@ -16319,8 +16446,437 @@ window.pdfSetStatus=async function(id,s){
   const {error}=await sb.schema('acc').from('digital_booking_forms').update({status:s,note:note}).eq('id',id);
   if(error){ toast('Could not save: '+error.message,'err'); return; }
   const r=PDF.rows.find(x=>x.id===id); if(r){ r.status=s; r.note=note; }
-  toast('Marked as '+PDF_ST[s][0],'ok'); closeModal(); pdfDraw();
+  toast('Marked as '+PDF_ST[s][0],'ok'); pdClose(); pdfDraw(); if(typeof pdfGenList==='function'&&document.getElementById('pgList')) pdfGenList();
 };
+
+
+/* 11 Nov 2026: the Digital Forms tab of Post Sales was removed. Generate Form is now a button on the Booking Form workflow page
+   (Accountability, flow 41, next to New Booking Form) for the Administrator and the Sales department; its window also lists the links made. */
+/* GENERATE FORM (7 Nov 2026). Sales and the Administrator make a link for one customer: they fill in what is pre-filled for the customer (since 13 Nov 2026 the customer can change it:
+   name, title, nationality, date of birth, mobile, email, contact person, block, floor, flat, flat number, car park,
+   bedrooms, built-up area, total sale price) and give the customer the link. It is the same booking-form.html for everybody
+   (booking-form.html?t=<token>); the customer's answers are saved on our server as they type, so reopening the link carries on
+   at the same step; when they submit, the answers land in the list above like any other digital form. No booking is started.
+   TEMPORARY, on the Administrator's word (since 13 Nov 2026 ONLY the Administrator - Sales is switched off for now; before that the Sales department too): only the Administrator sees the button and the links (the
+   database says the same - acc.can_generate_booking_form()). Widen it when asked. */
+function pdfCanGenerate(){
+  if(typeof state==='undefined'||!state||state.isCustomer||state.impersonating) return false;
+  const me=String(state.email||'').trim().toLowerCase(), d=state.profile&&state.profile.department, depts=Array.isArray(d)?d:(d?[d]:[]);
+  // 13 Nov 2026, on the Administrator's word: Sales is switched off for now. To give Sales back, change this line to
+  //   return me==='ayushruia1@gmail.com'||depts.indexOf('Sales')!==-1;   (and see supabase/functions/booking-form-public staffUser + acc.can_generate_booking_form)
+  return me==='ayushruia1@gmail.com';
+}
+const PDF_LINKS={rows:[],ok:false};
+const PDF_COUNTRIES=[['India','+91'],['United Arab Emirates','+971'],['United States','+1'],['United Kingdom','+44'],['Canada','+1'],['Australia','+61'],['Singapore','+65'],
+  ['Saudi Arabia','+966'],['Qatar','+974'],['Kuwait','+965'],['Oman','+968'],['Bahrain','+973'],['Bangladesh','+880'],['Nepal','+977'],['Bhutan','+975'],['Germany','+49'],
+  ['France','+33'],['Netherlands','+31'],['Ireland','+353'],['New Zealand','+64'],['Malaysia','+60'],['Japan','+81'],['Hong Kong','+852'],['South Africa','+27'],['Kenya','+254'],
+  ['Nigeria','+234'],['Sri Lanka','+94'],['Thailand','+66'],['Italy','+39'],['Switzerland','+41']];
+function pdfLinkUrl(token){ return location.origin+'/booking-form.html?t='+token; }
+async function pdfLoadLinks(){
+  const {data,error}=await sb.schema('acc').from('digital_booking_links')
+    .select('id,token,status,project,prefill,customer_name,created_by,created_at,opened_at,draft_step,draft_saved_at,completed_at,form_id,ref_no')
+    .order('created_at',{ascending:false}).limit(300);
+  PDF_LINKS.ok=!error; PDF_LINKS.rows=error?[]:(data||[]);
+}
+function pdfLinkStatus(r){
+  if(r.status==='completed') return '<span style="color:#15803d;font-weight:600">Submitted</span>'+(r.ref_no?' <span style="color:var(--slate)">'+esc(r.ref_no)+'</span>':'');
+  if(r.status==='cancelled') return '<span style="color:var(--slate)">Cancelled</span>';
+  if(!r.opened_at) return '<span style="color:var(--slate)">Not opened yet</span>';
+  return '<span style="color:#92400e;font-weight:600">Filling in</span> <span style="color:var(--slate)">step '+((r.draft_step||0)+1)+' of 8'+(r.draft_saved_at?', saved '+esc(pdfWhen(r.draft_saved_at)):'')+'</span>';
+}
+function pdfLinksHtml(){
+  const rows=PDF_LINKS.rows;
+  if(!PDF_LINKS.ok) return '<div class="card" style="margin-top:18px;padding:14px 16px;color:var(--slate);font-size:13px">Generated forms are not available yet.</div>';
+  return '<div class="pss-hint" style="margin:0 0 10px">Each link opens the same form for one customer, with the details you set already filled in (the customer can change them). Their answers are saved as they type.</div>'
+    +'<div class="card" style="padding:0;overflow:auto">'
+    +(rows.length?'<table style="width:100%;border-collapse:collapse;font-size:13.5px"><thead><tr style="text-align:left;color:var(--slate);font-size:12px;border-bottom:1px solid var(--line)">'
+      +'<th style="padding:10px 14px">Customer</th><th style="padding:10px 8px">Flat</th><th style="padding:10px 8px">Made</th><th style="padding:10px 8px">Progress</th><th style="padding:10px 14px"></th></tr></thead><tbody>'
+      +rows.map(r=>{ const v=(r.prefill&&r.prefill.values)||{}, f=v.flat||{};
+        return '<tr style="border-bottom:1px solid var(--line)"><td style="padding:10px 14px;font-weight:600">'+esc(r.customer_name||'—')+'</td>'
+          +'<td style="padding:10px 8px;white-space:nowrap">'+esc([f.block,f.floor?'Floor '+f.floor:'',f.flat_no].filter(Boolean).join(' · ')||'—')+'</td>'
+          +'<td style="padding:10px 8px;white-space:nowrap">'+esc(pdfWhen(r.created_at))+'<div style="color:var(--slate);font-size:12px">'+esc(r.created_by||'')+'</div></td>'
+          +'<td style="padding:10px 8px">'+pdfLinkStatus(r)+'</td>'
+          +'<td style="padding:10px 14px;text-align:right;white-space:nowrap">'
+          +(r.status==='open'?'<button class="btn" style="padding:4px 10px" onclick="pdfCopyLink(\''+r.token+'\',this)"><i class="fa-regular fa-copy"></i> Copy link</button>'
+            :(r.form_id?'<button class="btn" style="padding:4px 10px" onclick="pdfOpen(\''+r.form_id+'\')">Open form</button>':''))
+          +'</td></tr>'; }).join('')
+      +'</tbody></table>'
+     :'<div class="empty" style="padding:28px 20px"><i class="fa-solid fa-link"></i><div>No form has been generated yet. Press Generate Form to make the first one.</div></div>')
+    +'</div>';
+}
+window.pdfCopyLink=async function(token,btn){
+  const url=pdfLinkUrl(token);
+  try{ await navigator.clipboard.writeText(url); if(btn){ const t=btn.innerHTML; btn.innerHTML='<i class="fa-solid fa-check"></i> Copied'; setTimeout(function(){ btn.innerHTML=t; },1600); } toast('Link copied','ok'); }
+  catch(e){ window.prompt('Copy this link',url); }
+};
+/* GENERATE FORM AS A PAGE (11 Nov 2026: "not a popup, a page would be better ... very easy for Sales ... optimize space"). It fills the screen
+   over the Booking Form workflow (Back returns to it): on a computer the form is on the left in a two-column layout, and the links made so far are
+   on the right - copy one again, see how far the customer got, or EDIT it (an open link's details can be changed; the customer sees the new ones
+   the next time the form loads, what they already typed stays). On a phone the list sits under the form. Four short cards, tap buttons for choices,
+   a price with commas and words, every mistake under its own box, and a link-ready screen with Copy / Open as the customer / Generate another. */
+const PG_CSS='<style>'
+  +'#pgPage{--pgl:#e7e9ee;--pgm:#6b7280;--pgi:#1f2937;position:fixed;inset:0;z-index:2000;background:#f6f7f9;display:flex;flex-direction:column;font-family:inherit;color:var(--pgi)}'
+  +'#pgPage .pg-top{display:flex;align-items:center;gap:14px;padding:10px 24px;background:#fff}'
+  +'#pgPage .pg-top h2{margin:0;font-size:18px;font-weight:700}#pgPage .pg-top h2 span{font-weight:400;color:var(--pgm)}'
+  +'#pgPage .pg-tabs{display:flex;gap:2px;padding:0 24px;background:#fff;border-bottom:1px solid var(--pgl)}'
+  +'#pgPage .pg-tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:10px 16px;font:inherit;font-size:13.5px;font-weight:600;color:var(--pgm);cursor:pointer;margin-bottom:-1px}'
+  +'#pgPage .pg-tabs button:hover{color:var(--pgi)}#pgPage .pg-tabs button.on{color:#1d4ed8;border-bottom-color:#1d4ed8}'
+  +'#pgPage .pg-tabs .pg-n{display:inline-block;min-width:20px;padding:0 6px;margin-left:6px;border-radius:999px;background:#eef0f4;color:var(--pgm);font-size:12px;font-weight:600;text-align:center}'
+  +'#pgPage .pg-main{flex:1;overflow:auto;padding:18px 24px 22px}'
+  +'.pg-edit{margin:0 0 12px;padding:9px 14px;border-radius:8px;background:#fff8e8;border:1px solid #f3e1b5;color:#8a5a0b;font-size:13px}'
+  +'.pg-wrap{max-width:1180px}'
+  +'.pg-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch}'
+  +'@media(max-width:1100px){.pg-cards{grid-template-columns:minmax(0,1fr)}}'
+  +'.pg-card{background:#fff;border:1px solid var(--pgl);border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,.04);padding:16px 20px 20px}'
+  +'.pg-card>h4{margin:0 0 12px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:#9aa1ad;font-weight:700}'
+  +'.pg-bf{display:grid;gap:12px 18px;grid-template-columns:var(--c);align-items:start}.pg-bf+.pg-bf{margin-top:14px}'
+  +'@media(max-width:640px){.pg-bf{grid-template-columns:1fr}.pg-card{padding:14px 16px 16px}}'
+  +'.pg-f label{display:block;font-size:12.5px;font-weight:500;color:#4b5563;margin-bottom:5px}'
+  +'.pg-f label .o{font-weight:400;color:#9aa1ad}.pg-f label .r{color:#d9534f;font-weight:600}'
+  +'.pg-in{width:100%;box-sizing:border-box;height:40px;padding:0 12px;border:1px solid #d7dbe2;border-radius:8px;background:#fff;font:inherit;font-size:14px;color:var(--pgi);transition:border-color .12s,box-shadow .12s}'
+  +'.pg-in:hover{border-color:#bfc5ce}select.pg-in{padding-right:6px}.pg-in::placeholder{color:#a3a9b5}'
+  +'.pg-in:focus{outline:none;border-color:#3b6fe0;box-shadow:0 0 0 3px rgba(59,111,224,.14)}'
+  +'.pg-f.bad .pg-in,.pg-f.bad .pg-seg{border-color:#d9534f}'
+  +'.pg-help{margin-top:4px;font-size:12px;color:var(--pgm)}.pg-e{margin-top:4px;font-size:12px;color:#d9534f;font-weight:600}.pg-e:empty{display:none}'
+  +'.pg-row{display:flex;gap:8px}.pg-row .cc{width:96px;flex:none}'
+  +'.pg-pre{display:flex}.pg-pre>span{display:flex;align-items:center;padding:0 12px;border:1px solid #d7dbe2;border-right:0;border-radius:8px 0 0 8px;background:#f6f7f9;color:var(--pgm)}.pg-pre>.pg-in{border-radius:0 8px 8px 0}'
+  +'.pg-suf{display:flex}.pg-suf>.pg-in{border-radius:8px 0 0 8px}.pg-suf>span{display:flex;align-items:center;padding:0 12px;border:1px solid #d7dbe2;border-left:0;border-radius:0 8px 8px 0;background:#f6f7f9;color:var(--pgm);font-size:12.5px}'
+  +'.pg-seg{display:inline-flex;gap:2px;padding:3px;border:1px solid transparent;border-radius:10px;background:#eff1f4}'
+  +'.pg-seg button{min-width:38px;height:34px;padding:0 13px;border:0;border-radius:8px;background:transparent;font:inherit;font-size:13.5px;color:#4b5563;cursor:pointer;white-space:nowrap}'
+  +'.pg-seg button:hover{color:var(--pgi);background:rgba(255,255,255,.6)}'
+  +'.pg-seg button.on{background:#fff;color:#1d4ed8;font-weight:700;box-shadow:0 1px 3px rgba(16,24,40,.14)}'
+  +'.pg-bar{display:flex;gap:10px;justify-content:flex-end;align-items:center;margin-top:16px}'
+  +'.pg-bar .msg{margin-right:auto;font-size:13px}'
+  +'.pg-done{margin:auto;background:#fff;border:1px solid var(--pgl);border-radius:12px;text-align:center;padding:26px 20px;max-width:760px}.pg-done .ok{width:50px;height:50px;border-radius:50%;background:#e7f6ec;color:#15803d;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:22px}'
+  +'.pg-done h3{margin:0 0 4px;font-size:18px}.pg-done p{margin:0 0 12px;color:var(--pgm);font-size:13.5px}.pg-link{max-width:680px;margin:0 auto 12px}'
+  +'.pg-acts{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}'
+  +'.pg-t{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--pgl);border-radius:12px;overflow:hidden;font-size:14px}'
+  +'.pg-t th{text-align:left;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:#9aa1ad;font-weight:700;padding:11px 16px;background:#fafbfc;border-bottom:1px solid var(--pgl)}'
+  +'.pg-t td{padding:12px 16px;border-bottom:1px solid var(--pgl);vertical-align:middle}.pg-t tr:last-child td{border-bottom:0}.pg-t tbody tr:hover{background:#fafbfc}'
+  +'.pg-t td.a{text-align:right;white-space:nowrap}.pg-t td.a .btn{padding:4px 10px;margin-left:6px}.pg-t .sub{color:var(--pgm);font-size:12.5px}'
+  +'.pg-empty{padding:36px 16px;text-align:center;color:var(--pgm);background:#fff;border:1px solid var(--pgl);border-radius:12px}'
+  +'.pg-card .pg-seg button{min-width:34px;padding:0 11px}'
+  +'@media(max-height:820px){.pg-cards{gap:12px}.pg-card{padding:12px 18px 15px}.pg-card>h4{margin-bottom:8px}.pg-in{height:38px}.pg-seg button{height:32px}.pg-bar{margin-top:12px}.pg-main{padding-top:12px!important}}'
+  +'@media(min-height:880px){.pg-in{height:44px;font-size:15px}.pg-seg button{height:38px}.pg-card{padding:20px 24px 24px}.pg-f label{font-size:13px}.pg-bf{gap:14px 20px}.pg-cards{gap:20px}}'
+  +'.pg-seg{flex-wrap:wrap;max-width:100%}'
+  +'.pg-card.pg-slim{display:flex;align-items:center;gap:16px;padding:8px 20px}'
+  +'.pg-card.pg-slim>label{display:block;margin:0;white-space:nowrap;width:130px;flex:none;font-size:12.5px;font-weight:500;color:#4b5563}'
+  +'.pg-slim .ctl{flex:0 1 420px;min-width:0}.pg-slim .ctl.w{flex:0 1 700px}.pg-slim .pg-e{margin:0;flex:1 1 auto}'
+  +'.pg-wrap>.pg-slim:first-child{margin-bottom:16px}.pg-cards+.pg-slim{margin-top:16px}'
+  +'.pg-cost{display:flex;align-items:center;gap:10px;min-height:40px;min-width:0}.pg-cost .nm{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}'
+  +'.pg-cost .sz{color:var(--pgm);font-size:13px;white-space:nowrap}.pg-cost .btn{flex:none}.pg-cost .pdf{color:#d9534f}.pg-cost .up{color:var(--pgm);font-size:13.5px}'
+  +'@media(max-width:640px){.pg-card.pg-slim{flex-wrap:wrap;gap:6px}.pg-card.pg-slim>label{width:auto}.pg-slim .ctl,.pg-slim .ctl.w{flex:1 1 100%}}'
+  +'@media(max-height:820px){.pg-wrap>.pg-slim:first-child{margin-bottom:12px}.pg-cards+.pg-slim{margin-top:12px}.pg-card.pg-slim{padding:6px 18px}.pg-cost{min-height:38px}}'
+  +'</style>';
+function pdfWords(n){
+  n=Math.floor(Number(n)); if(!n||n<0) return '';
+  const a=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const b=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  const two=function(x){ return x<20?a[x]:b[Math.floor(x/10)]+(x%10?' '+a[x%10]:''); };
+  const three=function(x){ return (x>=100?a[Math.floor(x/100)]+' Hundred'+(x%100?' ':''):'')+(x%100?two(x%100):''); };
+  const out=[]; const cr=Math.floor(n/1e7); n%=1e7; const lk=Math.floor(n/1e5); n%=1e5; const th=Math.floor(n/1e3); n%=1e3;
+  if(cr) out.push(three(cr)+' Crore'); if(lk) out.push(two(lk)+' Lakh'); if(th) out.push(two(th)+' Thousand'); if(n) out.push(three(n));
+  return 'Rupees '+out.join(' ')+' only';
+}
+/* The Generate Form page fills the content area only - the menu on the left and the top bar of JainE stay where they are. It follows the window size,
+   and goes away when another menu item is chosen. */
+function pgFit(el){ const v=document.getElementById('view'); if(!v||!el||!el.style) return; const r=v.getBoundingClientRect(), t=document.querySelector('.topbar'), tb=t?t.getBoundingClientRect().bottom:Math.max(0,r.top);
+  el.style.top=Math.max(0,tb)+'px'; el.style.left=Math.max(0,r.left)+'px'; el.style.right='0px'; el.style.bottom='0px'; el.style.zIndex=50; }
+window.addEventListener('resize',function(){ pgFit(document.getElementById('pgPage')); pgFit(document.getElementById('pdPage')); });
+window.addEventListener('hashchange',function(){ if(typeof pgClose==='function') pgClose(); if(typeof pdClose==='function') pdClose(); });
+const PG={editId:null,editToken:null,draftId:null,project:null,projReady:false,cost:null,uploading:false,openSeq:0};
+const PG_DRAFTS={rows:[],ok:false};
+/* PROJECTS and COST SHEET (13 Nov 2026). Sales picks the project (the list comes from the public edge function, fetched once and kept) and attaches the
+   cost sheet PDF (compulsory; uploaded at once through the same function, the answer {path,name,size} is kept in PG.cost and travels in the prefill as cost_sheet). */
+const PG_FN='https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/booking-form-public';
+const PG_PROJ={list:null};
+function pgProjName(key){ const p=(PG_PROJ.list||[]).filter(x=>x.key===key)[0]; return p?p.name:(key||'—'); }
+function pgSegH(id,opts,def){ return '<input type="hidden" id="'+id+'" value="'+esc(def)+'"><div class="pg-seg" role="radiogroup">'+opts.map(o=>'<button type="button" class="'+(o===def?'on':'')+'" onclick="pgSeg(this,\''+id+'\')">'+esc(o)+'</button>').join('')+'</div>'; }
+function pgSize(n){ n=Number(n)||0; return n<1024?n+' B':(n<1048576?Math.round(n/1024)+' KB':(n/1048576).toFixed(1)+' MB'); }
+async function pgFetchProjects(){
+  const r=await fetch(PG_FN,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'projects'})});
+  const j=await r.json().catch(function(){ return null; });
+  if(!r.ok||!j||!j.ok||!Array.isArray(j.projects)||!j.projects.length) throw new Error((j&&j.error)||'no projects came back');
+  return j.projects;
+}
+// The Generate button waits while the project list loads or a cost sheet is uploading.
+function pgSyncGo(){ const b=$('pgGo'); if(b) b.disabled=!PG.projReady||PG.uploading; }
+// A project was chosen: its blocks, floors and bedroom choices replace the old ones, and the choices go back to the first / default.
+function pgProjApply(p){
+  PG.project=p; if(!p) return;
+  const nm=$('pgProjName'); if(nm) nm.textContent='· '+p.name;
+  const blocks=Array.isArray(p.blocks)?p.blocks.map(String):[], bhk=Array.isArray(p.bhk)?p.bhk.map(String):[];
+  const nf=Math.max(1,Math.floor(Number(p.floors))||8), bd=bhk.indexOf(p.bhkDefault)>=0?p.bhkDefault:(bhk[0]||'');
+  const b=$('pgC_pgBlock'); if(b) b.innerHTML=pgSegH('pgBlock',blocks,blocks[0]||'');
+  const h=$('pgC_pgBhk'); if(h) h.innerHTML=pgSegH('pgBhk',bhk,bd);
+  const fl=$('pgC_pgFloor');
+  if(fl){
+    const fs=[]; for(let i=1;i<=nf;i++) fs.push(String(i));
+    fl.innerHTML=nf>12?'<select class="pg-in" id="pgFloor" style="min-width:96px">'+fs.map(x=>'<option value="'+x+'">'+x+'</option>').join('')+'</select>':pgSegH('pgFloor',fs,'1');
+  }
+}
+window.pgProjChange=function(){ const k=($('pgProject')||{}).value, p=(PG_PROJ.list||[]).filter(x=>x.key===k)[0]; if(p) pgProjApply(p); };
+async function pgProjInit(editRow){
+  const seq=PG.openSeq, sel=$('pgProject');
+  if(!sel) return;
+  if(!PG_PROJ.list){
+    try{ PG_PROJ.list=await pgFetchProjects(); }
+    catch(e){
+      if(seq!==PG.openSeq||!$('pgProject')) return;
+      sel.innerHTML='<option value="">Projects not available</option>'; sel.disabled=true;
+      const er=$('pgE_pgProject'); if(er) er.textContent='Could not load the projects ('+((e&&e.message)||'error')+'). Close this page and open it again.';
+      const fb=$('pgF_pgProject'); if(fb) fb.classList.add('bad');
+      return;
+    }
+  }
+  if(seq!==PG.openSeq||!$('pgProject')) return;
+  const list=PG_PROJ.list;
+  let key=editRow?(editRow.project||'ananta'):(list.some(x=>x.key==='ananta')?'ananta':list[0].key);
+  let p=list.filter(x=>x.key===key)[0];
+  let opts=list.map(x=>'<option value="'+esc(x.key)+'">'+esc(x.name)+'</option>').join('');
+  if(!p){   // an old link whose project is no longer in the list: its own flat details keep the page usable
+    const fl=(editRow&&editRow.prefill&&editRow.prefill.values&&editRow.prefill.values.flat)||{};
+    p={key:key,name:key,blocks:[fl.block].filter(Boolean),floors:Math.max(8,Number(fl.floor)||0),bhk:[fl.bhk].filter(Boolean),bhkDefault:fl.bhk};
+    opts+='<option value="'+esc(key)+'">'+esc(key)+'</option>';
+  }
+  sel.innerHTML=opts; sel.value=key; sel.disabled=!!editRow;   // editing: the project is fixed
+  const fb=$('pgF_pgProject'); if(fb) fb.classList.remove('bad'); const er=$('pgE_pgProject'); if(er) er.textContent='';
+  pgProjApply(p);
+  PG.projReady=true; pgSyncGo();
+  const l=$('pgList'); if(l&&PDF_LINKS.ok) l.innerHTML=pdfGenListHtml();
+  if(editRow) pgFill(editRow);
+}
+// The cost sheet row: Choose PDF, or the file name and size with Replace, or Uploading.
+function pgCostDraw(){
+  const h=$('pgCostBox'); if(!h) return;
+  if(PG.uploading){ h.innerHTML='<span class="up"><i class="fa-solid fa-spinner fa-spin"></i> Uploading...</span>'; return; }
+  const c=PG.cost;
+  h.innerHTML=(c&&c.path)?'<i class="fa-regular fa-file-pdf pdf"></i><span class="nm" title="'+esc(c.name||'')+'">'+esc(c.name||'Cost sheet.pdf')+'</span><span class="sz">&middot; '+esc(pgSize(c.size))+'</span><button type="button" class="btn" style="padding:4px 12px" onclick="pgCostChoose()">Replace</button>'
+    :'<button type="button" class="btn" onclick="pgCostChoose()"><i class="fa-solid fa-file-arrow-up"></i> Choose PDF</button><span class="sz">PDF only, up to 10 MB</span>';
+}
+function pgCostMsg(m){ const e=$('pgE_pgCost'), fb=$('pgF_pgCost'); if(e) e.textContent=m||''; if(fb&&fb.classList) fb.classList.toggle('bad',!!m); }
+window.pgCostChoose=function(){ const i=$('pgCostFile'); if(i&&!PG.uploading) i.click(); };
+window.pgCostPick=async function(inp){
+  const file=inp.files&&inp.files[0]; inp.value='';
+  if(!file) return;
+  pgCostMsg('');
+  if(!(file.type==='application/pdf'||/\.pdf$/i.test(file.name))){ pgCostMsg('The cost sheet must be a PDF file. Please choose a .pdf file.'); return; }
+  if(file.size>10*1048576){ pgCostMsg('This PDF is '+pgSize(file.size)+'. The cost sheet can be 10 MB at most.'); return; }
+  if(!file.size){ pgCostMsg('This file is empty. Please choose the cost sheet PDF.'); return; }
+  const seq=PG.openSeq;
+  PG.uploading=true; pgCostDraw(); pgSyncGo();
+  let cost=null, msg='';
+  try{
+    const ss=await sb.auth.getSession(), tok=ss&&ss.data&&ss.data.session&&ss.data.session.access_token;
+    if(!tok) throw new Error('please sign in again');
+    const fd=new FormData(); fd.append('action','staff_cost_upload'); fd.append('file',file,file.name);
+    const r=await fetch(PG_FN,{method:'POST',headers:{Authorization:'Bearer '+tok},body:fd});
+    const j=await r.json().catch(function(){ return null; });
+    if(!r.ok||!j||!j.ok||!j.cost||!j.cost.path) throw new Error((j&&j.error)||'the upload did not go through');
+    cost=j.cost;
+  }catch(e){ msg='Could not upload the cost sheet: '+((e&&e.message)||'error'); }
+  if(seq!==PG.openSeq) return;   // the page was reopened meanwhile
+  PG.uploading=false; if(cost) PG.cost=cost;
+  pgCostDraw(); pgSyncGo(); pgCostMsg(msg);
+};
+window.pdfGenOpen=function(editRow){
+  if(!pdfCanGenerate()) return;
+  PG.editId=editRow&&editRow.id||null; PG.editToken=editRow&&editRow.token||null; PG.draftId=null;
+  PG.project=null; PG.projReady=false; PG.cost=null; PG.uploading=false; PG.openSeq++;
+  const old=document.getElementById('pgPage'); if(old) old.remove();
+  const f=(id,label,ctl,o)=>{ o=o||{}; return '<div class="pg-f" id="pgF_'+id+'"><label for="'+id+'">'+label+(o.req?' <span class="r">*</span>':'')+(o.opt?' <span class="o">(optional)</span>':'')+'</label>'+ctl
+    +(o.help?'<div class="pg-help" id="pgH_'+id+'">'+o.help+'</div>':'')+'<div class="pg-e" id="pgE_'+id+'"></div></div>'; };
+  const sel=(id,opts,def,cls)=>'<select class="pg-in'+(cls?' '+cls:'')+'" id="'+id+'">'+opts.map(o=>{ const v=Array.isArray(o)?o[0]:o, t=Array.isArray(o)?o[1]:o; return '<option value="'+esc(v)+'"'+(v===def?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+'</select>';
+  const seg=pgSegH;   // Block, Floor and Bedrooms are put in by pgProjApply once the project list is here
+  const codes=PDF_COUNTRIES.map(c=>c[1]).filter((x,i,a)=>a.indexOf(x)===i);
+  const page=document.createElement('div'); page.id='pgPage';
+  page.innerHTML=PG_CSS
+    +'<div class="pg-top"><button class="btn" onclick="pgClose()"><i class="fa-solid fa-arrow-left"></i> Back</button><h2><i class="fa-solid fa-link"></i> Generate Form <span id="pgProjName"></span></h2></div>'
+    +'<div class="pg-tabs"><button class="on" id="pgT_new" onclick="pgTab(\'new\')">NEW</button><button id="pgT_drafts" onclick="pgTab(\'drafts\')">DRAFTS <span class="pg-n" id="pgDCount">…</span></button><button id="pgT_list" onclick="pgTab(\'list\')">Generated forms <span class="pg-n" id="pgCount">…</span></button></div>'
+    +'<div class="pg-main" id="pgNew"><div id="pgBody"><div id="pgEditNote"></div>'
+    +'<div class="pg-wrap">'
+    +'<div class="pg-card pg-slim pg-f" id="pgF_pgProject"><label for="pgProject">Project <span class="r">*</span></label><div class="ctl"><select class="pg-in" id="pgProject" onchange="pgProjChange()" disabled><option value="">Loading projects...</option></select></div><div class="pg-e" id="pgE_pgProject"></div></div>'
+    +'<div class="pg-cards">'
+    +'<div class="pg-card"><h4>Customer</h4><div class="pg-bf" style="--c:100px minmax(0,1fr)">'
+      +f('pgTitle','Title',sel('pgTitle',['Mr.','Ms.','Mrs.','Mast.','M/s.'],'Mr.'))
+      +f('pgName','Customer name','<input class="pg-in" id="pgName" style="text-transform:uppercase" autocomplete="off" placeholder="As on the PAN card" oninput="pgNameSync()">',{req:1})
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
+      +f('pgNat','Nationality',sel('pgNat',PDF_COUNTRIES.map(c=>c[0]),'India').replace('<select ','<select onchange="pgNatSync()" '))
+      +f('pgDob','Date of birth','<input class="pg-in" type="date" id="pgDob">',{req:1})
+    +'</div></div>'
+    +'<div class="pg-card"><h4>Contact</h4><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
+      +f('pgMobile','Mobile number','<div class="pg-row">'+sel('pgCc',codes,'+91','cc')+'<input class="pg-in" id="pgMobile" inputmode="tel" autocomplete="off" placeholder="98300 12345"></div>',{req:1})
+      +f('pgEmail','Email','<input class="pg-in" type="email" id="pgEmail" autocomplete="off" placeholder="name@example.com">',{req:1})
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
+      +f('pgContact','Contact person','<input class="pg-in" id="pgContact" style="text-transform:uppercase" autocomplete="off" placeholder="Same as the customer name" oninput="this.dataset.touched=1">',{opt:1})
+    +'</div></div>'
+    +'<div class="pg-card"><h4>Flat</h4><div class="pg-bf" style="--c:minmax(0,1fr)">'
+      +f('pgBlock','Block','<div id="pgC_pgBlock">'+seg('pgBlock',[],'')+'</div>')
+    +'</div><div class="pg-bf" style="--c:auto minmax(0,1fr)">'
+      +f('pgFloor','Floor','<div id="pgC_pgFloor">'+seg('pgFloor',[],'')+'</div>')
+      +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{opt:1})
+    +'</div></div>'
+    +'<div class="pg-card"><h4>Size &amp; price</h4><div class="pg-bf" style="--c:auto auto">'
+      +f('pgBhk','Bedrooms','<div id="pgC_pgBhk">'+seg('pgBhk',[],'')+'</div>')
+      +f('pgPark','Car park',seg('pgPark',['Covered','Open'],'Covered'))
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
+      +f('pgSba','Super built-up area','<div class="pg-suf"><input class="pg-in" id="pgSba" inputmode="decimal" autocomplete="off" placeholder="1325"><span>sq.ft.</span></div>',{req:1})
+      +f('pgTotal','Total sale price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
+    +'</div></div>'
+    +'</div>'
+    +'<div class="pg-card pg-slim pg-f" id="pgF_pgCost"><label>Cost sheet (PDF) <span class="r">*</span></label><div class="ctl w"><div class="pg-cost" id="pgCostBox"></div><input type="file" id="pgCostFile" accept="application/pdf,.pdf" style="display:none" onchange="pgCostPick(this)"></div><div class="pg-e" id="pgE_pgCost"></div></div>'
+    +'</div>'
+    +'<div class="pg-wrap"><div class="pg-bar"><span class="msg" id="pgErr" style="color:var(--slate);font-weight:400">What you fill in is pre-filled for the customer - they can still change it. They fill in the rest (PAN, Aadhaar, address, payment).</span><button class="btn" onclick="pgClose()">Cancel</button><button class="btn" id="pgDraftBtn" onclick="pgSaveDraft()"><i class="fa-regular fa-floppy-disk"></i> Save draft</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div></div>'
+    +'</div></div>'
+    +'<div class="pg-main" id="pgDraftsWrap" style="display:none"><div id="pgDrafts"></div></div>'
+    +'<div class="pg-main" id="pgListWrap" style="display:none"><div id="pgList"></div></div>';
+  document.body.appendChild(page); pgFit(page);
+  pgCostDraw(); pgSyncGo();
+  pgProjInit(editRow||null);   // fills the project list, then (when editing) the boxes
+  pdfGenList();
+};
+window.pgTab=function(t){ [['new','pgNew','pgT_new'],['drafts','pgDraftsWrap','pgT_drafts'],['list','pgListWrap','pgT_list']].forEach(function(x){ const on=x[0]===t; $(x[1]).style.display=on?'':'none'; $(x[2]).className=on?'on':''; }); };
+window.pgClose=function(){ const p=document.getElementById('pgPage'); if(p) p.remove(); };
+window.pgSeg=function(btn,id){ btn.parentNode.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); }); btn.classList.add('on'); $(id).value=btn.textContent.trim(); };
+window.pgNameSync=function(){ const c=$('pgContact'); if(c&&!c.dataset.touched) c.value=($('pgName').value||''); };
+window.pgNatSync=function(){ const n=PDF_COUNTRIES.filter(c=>c[0]===$('pgNat').value)[0]; if(n&&$('pgCc')) $('pgCc').value=n[1]; };
+window.pgMoney=function(inp){ const d=inp.value.replace(/[^\d]/g,''); inp.value=d?Number(d).toLocaleString('en-IN'):''; const h=$('pgH_pgTotal'); if(h) h.textContent=pdfWords(d); };
+// Editing a link: its details go back into the boxes.
+// The boxes as they are now (a draft keeps them exactly like this, even half empty).
+function pgRaw(){ const g=id=>($(id)||{}).value||''; const c=$('pgContact');
+  return {title:g('pgTitle'),nat:g('pgNat'),name:g('pgName'),dob:g('pgDob'),cc:g('pgCc'),mobile:g('pgMobile'),email:g('pgEmail'),contact:g('pgContact'),contactTouched:!!(c&&c.dataset&&c.dataset.touched),
+    block:g('pgBlock'),floor:g('pgFloor'),bhk:g('pgBhk'),park:g('pgPark'),flat:g('pgFlat'),sba:g('pgSba'),total:g('pgTotal'),
+    project:g('pgProject'),cost:PG.cost||null}; }
+function pgFillRaw(r){
+  const set=(id,val)=>{ const e=$(id); if(e&&val!=null) e.value=val; };
+  // a draft of another project: the project is chosen first so its blocks / floors / bedrooms are the ones on the page (not while editing a link - its project is fixed)
+  const ps=$('pgProject');
+  if(r.project&&ps&&!ps.disabled&&ps.value!==r.project){ const p=(PG_PROJ.list||[]).filter(x=>x.key===r.project)[0]; if(p){ ps.value=r.project; pgProjApply(p); } }
+  // only a choice that exists on the page is taken (the buttons, or the options of the floor list)
+  const seg=(id,val)=>{ const e=$(id); if(!e||val==null||val==='') return; const v=String(val);
+    if(e.tagName==='SELECT'){ if([].some.call(e.options,function(o){ return o.value===v; })) e.value=v; return; }
+    const bs=[].slice.call(e.parentNode.querySelectorAll('.pg-seg button')); if(!bs.some(function(b){ return b.textContent.trim()===v; })) return;
+    e.value=v; bs.forEach(function(b){ b.classList.toggle('on',b.textContent.trim()===v); }); };
+  if('cost' in r){ PG.cost=(r.cost&&r.cost.path)?r.cost:null; pgCostDraw(); pgCostMsg(''); }
+  set('pgTitle',r.title); set('pgNat',r.nat); set('pgName',r.name); set('pgDob',r.dob); set('pgCc',r.cc); set('pgMobile',r.mobile); set('pgEmail',r.email); set('pgContact',r.contact);
+  if(r.contactTouched&&$('pgContact')) $('pgContact').dataset.touched=1;
+  seg('pgBlock',r.block); seg('pgFloor',r.floor); seg('pgBhk',r.bhk); seg('pgPark',r.park); set('pgFlat',r.flat); set('pgSba',r.sba); set('pgTotal',r.total);
+  const h=$('pgH_pgTotal'); if(h) h.textContent=pdfWords(String(r.total||'').replace(/[^\d]/g,''));
+}
+// Editing a link: its details go back into the boxes.
+function pgFill(row){
+  const v=(row.prefill&&row.prefill.values)||{}, a=(v.applicants&&v.applicants[0])||{}, c=v.contact||{}, fl=v.flat||{}, pr=v.price||{};
+  pgFillRaw({title:a.title,nat:a.nationality,name:a.full_name,dob:a.dob,cc:c.cc,mobile:c.mobile,email:c.email,contact:c.contact_person,contactTouched:!!(c.contact_person&&c.contact_person!==a.full_name),
+    block:fl.block,floor:fl.floor,bhk:fl.bhk,park:fl.parking,flat:fl.flat_no,sba:pr.sba,total:pr.total?Number(pr.total).toLocaleString('en-IN'):'',
+    cost:row.prefill&&row.prefill.cost_sheet});
+  const n=$('pgEditNote'); if(n) n.innerHTML='<div class="pg-edit"><b>Editing the link for '+esc(a.full_name||'this customer')+'.</b> The link stays the same. The customer sees the new details the next time they open or refresh the form; what they have already typed stays.</div>';
+  const g=$('pgGo'); if(g) g.innerHTML='<i class="fa-solid fa-floppy-disk"></i> Save changes';
+  const d=$('pgDraftBtn'); if(d) d.style.display='none';
+}
+window.pdfGenerate=async function(){
+  const g=id=>($(id)||{}).value||'';
+  const fails=[]; const bad=(id,m)=>fails.push([id,m]);
+  const name=g('pgName').trim().toUpperCase(), mobile=g('pgMobile').replace(/[^\d]/g,''), email=g('pgEmail').trim().toLowerCase(), cc=g('pgCc');
+  const sba=g('pgSba').replace(/[^\d.]/g,''), total=g('pgTotal').replace(/[^\d]/g,'');
+  if(!name) bad('pgName','Please write the customer name.');
+  if(!g('pgDob')) bad('pgDob','Please choose the date of birth.');
+  if(cc==='+91'?!/^[6-9]\d{9}$/.test(mobile):mobile.length<6) bad('pgMobile','Please write a complete mobile number'+(cc==='+91'?' (10 digits).':'.'));
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) bad('pgEmail','Please write a complete email address.');
+  if(!(Number(sba)>0)) bad('pgSba','Please write the super built-up area.');
+  if(!(Number(total)>0)) bad('pgTotal','Please write the total sale price.');
+  if(!PG.project) bad('pgProject','Please choose the project.');
+  if(!PG.cost||!PG.cost.path) bad('pgCost','Please attach the cost sheet (PDF).');
+  ['pgName','pgDob','pgMobile','pgEmail','pgSba','pgTotal','pgProject','pgCost'].forEach(function(id){ const e=$('pgE_'+id), fb=$('pgF_'+id); if(e) e.textContent=''; if(fb&&fb.classList) fb.classList.remove('bad'); });
+  if(fails.length){
+    fails.forEach(function(x){ const e=$('pgE_'+x[0]), fb=$('pgF_'+x[0]); if(e) e.textContent=x[1]; if(fb&&fb.classList) fb.classList.add('bad'); });
+    const m=$('pgErr'); if(m){ m.textContent=fails.length===1?'One thing to fix':fails.length+' things to fix'; m.style.color='#b3171d'; m.style.fontWeight='600'; }
+    const first=$('pgF_'+fails[0][0]); if(first&&first.scrollIntoView) first.scrollIntoView({block:'center',behavior:'smooth'});
+    return;
+  }
+  const m0=$('pgErr'); if(m0) m0.textContent='';
+  const values={applicants:[{title:g('pgTitle'),full_name:name,nationality:g('pgNat'),dob:g('pgDob')}],
+    contact:{cc:cc,mobile:mobile,email:email,contact_person:(g('pgContact').trim()||name).toUpperCase()},
+    flat:{block:g('pgBlock'),floor:g('pgFloor'),flat_no:g('pgFlat').trim().toUpperCase(),bhk:g('pgBhk'),parking:g('pgPark')},
+    price:{sba:sba,total:total}};
+  const fields=['applicants.0.title','applicants.0.full_name','applicants.0.nationality','applicants.0.dob','contact.cc','contact.mobile','contact.email','contact.contact_person',
+    'flat.block','flat.floor','flat.flat_no','flat.bhk','flat.parking','price.sba','price.total'];
+  const btn=$('pgGo'); btn.disabled=true; btn.textContent=PG.editId?'Saving…':'Generating…';
+  const prefill={values:values,locked:[],fields:fields,cost_sheet:PG.cost};   // locked: [] - nothing is locked since 13 Nov 2026; fields = what was pre-filled; cost_sheet = {path,name,size}
+  const editing=!!PG.editId;
+  const res=editing?await sb.schema('acc').rpc('update_booking_link',{p_id:PG.editId,p_prefill:prefill})
+                   :await sb.schema('acc').rpc('generate_booking_link',{p_project:PG.project.key,p_prefill:prefill});
+  if(res.error||!res.data){ pgSyncGo(); btn.innerHTML=editing?'<i class="fa-solid fa-floppy-disk"></i> Save changes':'<i class="fa-solid fa-link"></i> Generate link'; const m=$('pgErr'); if(m) m.textContent=(editing?'Could not save the changes: ':'Could not generate the link: ')+((res.error&&res.error.message)||'nothing came back'); return; }
+  const token=editing?PG.editToken:res.data, url=pdfLinkUrl(token);
+  if(!editing&&PG.draftId){ try{ await sb.schema('acc').from('digital_booking_drafts').delete().eq('id',PG.draftId); }catch(e){} PG.draftId=null; }
+  $('pgBody').innerHTML='<div class="pg-done"><div class="ok"><i class="fa-solid fa-check"></i></div><h3>'+(editing?'Changes saved for ':'The link for ')+esc(name)+(editing?'':' is ready')+'</h3>'
+    +'<p>'+(editing?'The link is the same as before.':'Give it only to this customer - anyone who has the link can open the form. Their answers are saved as they type.')+'</p>'
+    +'<div class="pg-link"><input class="pg-in" id="pgUrl" readonly value="'+esc(url)+'" onclick="this.select()"></div>'
+    +'<div class="pg-acts"><button class="btn btn-primary" onclick="pdfCopyLink(\''+token+'\',this)"><i class="fa-regular fa-copy"></i> Copy link</button>'
+    +'<a class="btn" href="'+esc(url)+'" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open as the customer</a>'
+    +'<button class="btn" onclick="pdfGenOpen()"><i class="fa-solid fa-plus"></i> Generate another</button></div></div>';
+  await pdfGenList();
+};
+window.pdfEditLink=function(id){ const r=PDF_LINKS.rows.filter(x=>x.id===id)[0]; if(r) pdfGenOpen(r); };
+// The links made so far, as rows.
+function pdfGenListHtml(){
+  const rows=PDF_LINKS.rows;
+  if(!PDF_LINKS.ok) return '<div class="pg-empty">Generated forms are not available yet.</div>';
+  if(!rows.length) return '<div class="pg-empty">Nothing generated yet. Your first link will appear here.</div>';
+  return '<table class="pg-t"><thead><tr><th>Customer</th><th>Project</th><th>Flat</th><th>Made</th><th>Progress</th><th></th></tr></thead><tbody>'+rows.map(function(r){
+    const v=(r.prefill&&r.prefill.values)||{}, f=v.flat||{};
+    return '<tr><td><b>'+esc(r.customer_name||'—')+'</b></td>'
+      +'<td>'+esc(pgProjName(r.project))+'</td>'
+      +'<td>'+esc([f.block,f.floor?'Floor '+f.floor:'',f.flat_no].filter(Boolean).join(' · ')||'—')+'</td>'
+      +'<td>'+esc(pdfWhen(r.created_at))+'<div class="sub">'+esc(String(r.created_by||'').split('@')[0])+'</div></td>'
+      +'<td>'+pdfLinkStatus(r)+'</td>'
+      +'<td class="a">'+(r.status==='open'?'<button class="btn" onclick="pdfCopyLink(\''+r.token+'\',this)"><i class="fa-regular fa-copy"></i> Copy link</button><button class="btn" onclick="pdfEditLink(\''+r.id+'\')"><i class="fa-solid fa-pen"></i> Edit</button>'
+        :('<a class="btn" href="'+esc(pdfLinkUrl(r.token))+'" target="_blank" rel="noopener" title="Opens the form in a new page, exactly as the customer sees it - nothing in it can be changed"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open form</a>'))+'</td></tr>'; }).join('')+'</tbody></table>';
+}
+window.pdfGenList=async function(){ await pdfLoadLinks(); const h=$('pgList'); if(h) h.innerHTML=pdfGenListHtml(); const c=$('pgCount'); if(c) c.textContent=PDF_LINKS.ok?PDF_LINKS.rows.length:'-'; await pgLoadDrafts(); };
+
+/* DRAFTS (11 Nov 2026): half-filled forms kept for the person who started them. Each person sees only their own (the database says the same: acc.digital_booking_drafts
+   is readable and writable by its owner only). A draft is edited and saved again as often as needed; making the link from it uses it up. */
+async function pgLoadDrafts(){
+  const me=String((typeof state!=='undefined'&&state.email)||'').trim().toLowerCase();
+  const {data,error}=await sb.schema('acc').from('digital_booking_drafts').select('id,name,values,updated_at').eq('owner',me).order('updated_at',{ascending:false}).limit(200);
+  PG_DRAFTS.ok=!error; PG_DRAFTS.rows=error?[]:(data||[]);
+  const h=$('pgDrafts'); if(h) h.innerHTML=pgDraftsHtml(); const c=$('pgDCount'); if(c) c.textContent=PG_DRAFTS.ok?PG_DRAFTS.rows.length:'-';
+}
+function pgDraftsHtml(){
+  if(!PG_DRAFTS.ok) return '<div class="pg-empty">Drafts are not available yet.</div>';
+  if(!PG_DRAFTS.rows.length) return '<div class="pg-empty">No drafts. Fill in part of a form in NEW and press Save draft - it is kept here, only for you.</div>';
+  return '<table class="pg-t"><thead><tr><th>Draft</th><th>Flat</th><th>Last saved</th><th></th></tr></thead><tbody>'+PG_DRAFTS.rows.map(function(r){
+    const v=r.values||{};
+    return '<tr><td><b>'+esc(r.name||'Untitled draft')+'</b></td>'
+      +'<td>'+esc([v.block,v.floor?'Floor '+v.floor:'',v.flat].filter(Boolean).join(' · ')||'—')+'</td>'
+      +'<td>'+esc(pdfWhen(r.updated_at))+'</td>'
+      +'<td class="a"><button class="btn" onclick="pgOpenDraft(\''+r.id+'\')"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn" onclick="pgDeleteDraft(\''+r.id+'\')"><i class="fa-regular fa-trash-can"></i> Delete</button></td></tr>'; }).join('')+'</tbody></table>';
+}
+window.pgSaveDraft=async function(){
+  const me=String((typeof state!=='undefined'&&state.email)||'').trim().toLowerCase(), raw=pgRaw();
+  const name=(raw.name||'').trim().toUpperCase()||'Untitled draft';
+  const b=$('pgDraftBtn'); if(b) b.disabled=true;
+  let res;
+  if(PG.draftId) res=await sb.schema('acc').from('digital_booking_drafts').update({name:name,values:raw,updated_at:new Date().toISOString()}).eq('id',PG.draftId).select('id');
+  else res=await sb.schema('acc').from('digital_booking_drafts').insert({owner:me,name:name,values:raw}).select('id');
+  if(b) b.disabled=false;
+  if(res.error||!res.data||!res.data.length){ toast('Could not save the draft: '+((res.error&&res.error.message)||'not saved'),'err'); return; }
+  PG.draftId=res.data[0].id;
+  toast('Draft saved','ok'); await pgLoadDrafts();
+};
+window.pgOpenDraft=function(id){
+  const r=PG_DRAFTS.rows.filter(x=>x.id===id)[0]; if(!r) return;
+  if(!PG.projReady){ toast('The projects are still loading - try again in a moment','err'); return; }
+  pgFillRaw(r.values||{}); PG.draftId=id; pgTab('new');
+};
+window.pgDeleteDraft=async function(id){
+  if(typeof confirmDialog==='function'&&!(await confirmDialog('Delete this draft? It cannot be brought back.'))) return;
+  const {error}=await sb.schema('acc').from('digital_booking_drafts').delete().eq('id',id);
+  if(error){ toast('Could not delete: '+error.message,'err'); return; }
+  if(PG.draftId===id) PG.draftId=null;
+  await pgLoadDrafts();
+};
+window.pdfCanGenerate=pdfCanGenerate;
 /* ===== ACCOUNTS MODULE =====
    Three tabs. Transactions (vouchers, bills & on-account payments, bank reconciliation, cheque printing,
    enterprise / company / business-unit structure) lives in accounts.js + accounts-bank.js; Ledgers &
@@ -37896,22 +38452,24 @@ async function mkDrawTab(host,base,t,scope,metaKey){
    this list. */
 /* 6 Nov 2026, as asked: Facebook and Google are no longer two tabs but one view by project
    (42-campaign-analytics.js). The old campaigns/facebook and campaigns/google links land on it. */
+/* 7 Nov 2026, as asked: Meta Ad Library (our pages' ads in the Library) moved to Competitor Data, and with one
+   view left this page has no tab bar. An old campaigns/meta-ads link follows it to competitors/brands. */
 const OB_TABS=[
-  ['ads','Google & Facebook','fa-solid fa-chart-line','ca'],
-  ['meta-ads','Meta Ad Library','fa-brands fa-meta','meta']
+  ['ads','Google & Facebook','fa-solid fa-chart-line','ca']
 ];
 const OB_HIDDEN=[];
 // Kept for the old analytics views in 28-campaign-trends.js, which still call it; draws the new bar.
 function cmpTabsBar(tabs,ti,extra){ return obTabsBar(extra); }
-function obTabsBar(active){ return '<div class="tabs">'+OB_TABS.map(function(t){ return mkTab('campaigns',t,active); }).join('')+'</div>'; }
+function obTabsBar(active){ if(OB_TABS.length<2) return ''; return '<div class="tabs">'+OB_TABS.map(function(t){ return mkTab('campaigns',t,active); }).join('')+'</div>'; }
 VIEWS.campaigns=async function(v,seg){
   dmOauthReturn();                         // back from Google's consent screen (Setup)
   let want=seg&&seg[0];
+  if(want==='meta-ads'){ navTo('competitors/brands'); return; }
   if(want==='connect') want='setup';       // the old Digital Metrics route name
   const t=OB_TABS.concat(OB_HIDDEN).filter(function(x){ return x[0]===want; })[0]||OB_TABS[0];
-  setCrumb(['Growth & Strategy','Campaign Analytics',t[1]]);
+  setCrumb(['Growth & Strategy','Campaign Analytics']);
   v.innerHTML=mHead('fa-bullhorn','#db2777','Campaign Analytics')+obTabsBar(t[0])
-    +'<div id="mkHost" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
+    +'<div id="mkHost" style="margin-top:'+(OB_TABS.length<2?0:14)+'px"><div class="loader"><div class="spin"></div></div></div>';
   await mkDrawTab($('mkHost'),'campaigns',t,'brand','brands');
 };
 
@@ -37921,20 +38479,21 @@ VIEWS.campaigns=async function(v,seg){
    back into this list brings the tab back. An old link to one of them lands on Meta Ads. */
 const CD_TABS=[
   ['','Meta Ads','fa-brands fa-meta','meta'],
-  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci']
+  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci'],
+  // our own pages' ads in the Meta Ad Library, moved here from Campaign Analytics (7 Nov 2026); 5th = whose ads
+  ['brands','Meta Ad Library','fa-brands fa-meta','meta','brands']
 ];
 VIEWS.competitors=async function(v,seg){
   const want=(seg&&seg[0])||'';
   // The two tabs that moved out of this page. An old bookmark follows them rather than landing on
   // the competitors' ads and leaving the person wondering where ours went.
-  if(want==='brands'){ navTo('campaigns/meta-ads'); return; }
   if(want==='partners'){ navTo('channel_partners'); return; }
   const t=CD_TABS.filter(function(x){ return x[0]===want; })[0]||CD_TABS[0];
   setCrumb(['Growth & Strategy','Competitor Data',t[1]]);
   v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Data')
     +'<div class="tabs" style="margin-top:-6px">'+CD_TABS.map(function(x){ return mkTab('competitors',x,t[0]); }).join('')+'</div>'
     +'<div id="mkHost"><div class="loader"><div class="spin"></div></div></div>';
-  await mkDrawTab($('mkHost'),'competitors',t,'competitor','competitors');
+  await mkDrawTab($('mkHost'),'competitors',t,'competitor',t[4]||'competitors');
 };
 
 /* ---------------------------------------------------------------- Channel Partners ('channel_partners')
@@ -39073,7 +39632,7 @@ function obSetupNote(platform,msg){
    Ad sets come from ads_ad_daily.adset_id, recorded from 6 Nov 2026 (migration 20261106200000). */
 let CA={proj:'all',open:null,plat:null,camp:null,adset:null,showAds:12,cmp:{on:false,period:'prev',from:'',to:''}};
 let CA_D=null;   // the period's data: {acc, ent, cur, prev, ads, hasSets}
-const CA_PLAT={google:{name:'Google',icon:'fa-brands fa-google',color:'#ea4335',res:'Conversions',per:'Cost per conversion',set:'Ad group',sets:'Ad groups'},
+const CA_PLAT={google:{name:'Google',icon:'fa-brands fa-google',color:'#ea4335',res:'Leads',per:'Cost per lead',set:'Ad group',sets:'Ad groups'},
                meta:{name:'Facebook',icon:'fa-brands fa-facebook',color:'#1877f2',res:'Leads & chats',per:'Cost per lead',set:'Ad set',sets:'Ad sets'}};
 const CA_CSS='<style>'
   +'.ca-tbl{width:100%;border-collapse:collapse;font-size:13px}.ca-tbl th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--slate);background:#f8fafc;padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}'
@@ -39095,23 +39654,41 @@ const CA_CSS='<style>'
   +'.ca-cmp{font-size:11px;font-weight:500;color:#94a3b8;margin-top:2px;white-space:nowrap}.ca-cmp .good{color:#15803d;font-weight:700}.ca-cmp .bad{color:#b91c1c;font-weight:700}.ca-cmp .flat{color:#64748b;font-weight:600}'
   +'.ca-tbl tr.ca-tot td{font-weight:700;background:#f1f5f9;border-top:2px solid #cbd5e1;border-bottom:0}.ca-tbl tr.ca-tot td b{font-weight:800}'
   +'.ca-sw{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:#334155;cursor:pointer;user-select:none;padding:0 4px}.ca-sw input{display:none}.ca-sw .k{width:32px;height:18px;border-radius:10px;background:#cbd5e1;position:relative;transition:background .15s}.ca-sw .k:after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .15s}.ca-sw.on .k{background:#2563eb}.ca-sw.on .k:after{left:16px}'
+  // the CRM's columns: a violet rule down their left edge and a violet group heading over them
+  // the CRM's columns have violet headings; a name column has one width and never wraps
+  +'.ca-tbl th.ca-crm{color:#6d28d9;background:#f5f3ff}'
+  +'.ca-sec .ca-tbl td.ca-nm,.ca-sec .ca-tbl th.ca-nm{width:340px;min-width:340px;max-width:340px}.ca-nmx{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.ca-sub{font-size:10.5px;color:#94a3b8;margin-top:1px;white-space:nowrap}'
   +'.ca-warn{margin:-4px 0 12px;padding:9px 12px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:12.5px}'
   +'</style>';
 
 // Leads that can honestly be added up: Google conversions, and Facebook results of lead / chat campaigns only.
 function caAgg(rows){
-  const E=CA_D.ent, t={spend:0,leads:0,lspend:0,clicks:0,impr:0};
+  const E=CA_D.ent, t={spend:0,leads:0,lspend:0,clicks:0,impr:0,form:0,hasForm:false};
   rows.forEach(function(c){ const s=+c.spend||0; t.spend+=s; t.clicks+=+c.clicks||0; t.impr+=+c.impressions||0;
-    if(c.platform==='google'||obIsLead(E,c)){ t.leads+=+c.results||0; t.lspend+=s; } });
+    if(c.platform==='google'||obIsLead(E,c)){ t.leads+=+c.results||0; t.lspend+=s; }
+    if(c.platform==='google'&&c.form_leads!=null){ t.form+=+c.form_leads||0; t.hasForm=true; } });
   t.cpl=t.leads?t.lspend/t.leads:null; t.ctr=t.impr?t.clicks/t.impr*100:null; return t;
 }
 // Running now (Facebook ACTIVE, Google ENABLED) - only these are listed below a platform (6 Nov 2026).
 function caLive(s){ s=String(s||''); return s==='ACTIVE'||s==='ENABLED'; }
-function caLeads(x,plat){ return obNum(x,plat==='google'||(plat==null&&x%1)?1:0); }
+function caLeads(x){ return obNum(x,0); } // whole numbers everywhere (14 Nov 2026, Ayush): Google splits a lead's credit across campaigns, so its counts arrive as 30.6 etc.
 
+/* TWO TABS (16 Nov 2026, Ayush: "make a new Tab named Analytics"): Overview (this page as it was) and Analytics
+   (45-marketing-analytics.js - the models). */
+let CA_TAB='overview';
 async function caView(host){
-  host.innerHTML=OB_CSS+CA_CSS+'<div id="caHead"></div><div id="caBody"><div class="loader"><div class="spin"></div></div></div>';
-  await caLoad();
+  host.innerHTML=OB_CSS+CA_CSS+MA_CSS+'<div class="ca-tabs" id="caTabs"></div><div id="caMain"></div>';
+  caTabsPaint(); await caShowTab();
+}
+function caTabsPaint(){ const t=$('caTabs'); if(!t) return;
+  t.innerHTML=[['overview','Overview'],['analytics','Analytics']].map(function(x){ return '<button class="ca-tab'+(CA_TAB===x[0]?' on':'')+'" onclick="caTab(\''+x[0]+'\')">'+x[1]+'</button>'; }).join(''); }
+window.caTab=function(t){ if(t===CA_TAB) return; CA_TAB=t; caTabsPaint(); caShowTab(); };
+async function caShowTab(){
+  const m=$('caMain'); if(!m) return;
+  if(CA_TAB==='analytics') return maView(m);
+  m.innerHTML='<div id="caHead"></div><div id="caBody"><div class="loader"><div class="spin"></div></div></div>';
+  CA_D=null; await caLoad();
 }
 /* COMPARE MODE (7 Nov 2026, Ayush): off by default; switched on, every figure in the tables shows the other
    period's figure and the change under it. The other period is "Previous period" (the same number of days just
@@ -39124,22 +39701,37 @@ async function caLoad(){
   const r=obRange(), rpc=function(fn,a){ return sb.schema('camp').rpc(fn,a); };
   const cmp=CA.cmp.on&&!caCmpSame(), c=cmp?caCmpRange():{s:r.ps,e:r.pe};
   if(CA_D) $('caBody').style.opacity='.55';
-  const ads=async function(p,s,e){ const v=await rpc('ads_ad_totals_v2',{p_platform:p,p_from:s,p_to:e,p_limit:5000});
+  // v4 (16 Nov 2026): an ad's figures per campaign and ad group, so an ad copied into another campaign counts in each
+  const ads=async function(p,s,e){ const v4=await rpc('ads_ad_totals_v4',{p_platform:p,p_from:s,p_to:e,p_limit:5000}); if(!v4.error) return {rows:v4.data||[],sets:true};
+    const v3=await rpc('ads_ad_totals_v3',{p_platform:p,p_from:s,p_to:e,p_limit:5000}); if(!v3.error) return {rows:v3.data||[],sets:true};
+    const v=await rpc('ads_ad_totals_v2',{p_platform:p,p_from:s,p_to:e,p_limit:5000});
     if(!v.error) return {rows:v.data||[],sets:true};
     const o=await rpc('ads_ad_totals',{p_platform:p,p_from:s,p_to:e,p_limit:5000}); return {rows:o.data||[],sets:false,error:o.error}; };
   const none=Promise.resolve({rows:[],sets:true});
+  // Google with its form leads (ads_campaign_totals_v2, from 11 Nov 2026 night); before that the old totals, no form leads
+  const gTot=async function(s,e){ const v=await rpc('ads_campaign_totals_v2',{p_platform:'google',p_from:s,p_to:e}); return v.error?rpc('ads_campaign_totals',{p_platform:'google',p_from:s,p_to:e}):v; };
+  // CRM (RealtyBucket) Google leads after its filtering, by day (camp.crm_google_daily, filled at night by
+  // ads-daily-sync {crm}). null = not there (yet): the CRM columns then say so instead of showing 0.
+  const crmRows=async function(s,e){ const out=[]; for(let f=0;;f+=1000){
+      const q=await sb.schema('camp').from('crm_google_daily').select('business_unit,campaign_type,campaign_id,leads,qualified,site_visited,booked,lost').gte('day',s).lte('day',e).range(f,f+999);
+      if(q.error) return null; out.push.apply(out,q.data||[]); if(!q.data||q.data.length<1000) break; } return out; };
   const res=await Promise.all([
     sb.schema('camp').from('ads_accounts').select('platform,account_id,name,project').eq('include',true),
     obEntities('meta'), obEntities('google'),
-    rpc('ads_campaign_totals',{p_platform:'meta',p_from:r.s,p_to:r.e}), rpc('ads_campaign_totals',{p_platform:'google',p_from:r.s,p_to:r.e}),
-    rpc('ads_campaign_totals',{p_platform:'meta',p_from:c.s,p_to:c.e}), rpc('ads_campaign_totals',{p_platform:'google',p_from:c.s,p_to:c.e}),
-    ads('meta',r.s,r.e), ads('google',r.s,r.e), cmp?ads('meta',c.s,c.e):none, cmp?ads('google',c.s,c.e):none]);
+    rpc('ads_campaign_totals',{p_platform:'meta',p_from:r.s,p_to:r.e}), gTot(r.s,r.e),
+    rpc('ads_campaign_totals',{p_platform:'meta',p_from:c.s,p_to:c.e}), gTot(c.s,c.e),
+    ads('meta',r.s,r.e), ads('google',r.s,r.e), cmp?ads('meta',c.s,c.e):none, cmp?ads('google',c.s,c.e):none,
+    crmRows(r.s,r.e), crmRows(c.s,c.e)]);
   $('caBody').style.opacity='';
   const bad=[res[0],res[3],res[4],res[5],res[6]].filter(function(x){ return x.error; })[0];
   if(bad){ $('caBody').innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(bad.error.message)+'</div>'; return; }
   const acc={}; (res[0].data||[]).forEach(function(a){ acc[a.platform+':'+a.account_id]={project:a.project||a.name||a.account_id,name:a.name}; });
   const ent={}; res[1].concat(res[2]).forEach(function(x){ ent[x.kind+':'+x.id]=x; });
-  const tag=function(p,rows){ return (rows||[]).filter(function(c){ return acc[p+':'+c.account_id]; }).map(function(c){ return Object.assign({platform:p,project:acc[p+':'+c.account_id].project},c); }); };
+  /* GOOGLE LEADS = FORM LEADS (13 Nov 2026, Ayush: "Keep FORM LEADS remove the other one and rename it LEADS"). Google's
+     Conversions follow each campaign's goal (Demand Gen counts qualified leads), so a Google row's results become its
+     lead-form submissions. Where those are not read yet (ads, until 13 Nov 2026 night) the figure is empty, not Conversions. */
+  const tag=function(p,rows){ return (rows||[]).filter(function(c){ return acc[p+':'+c.account_id]; }).map(function(c){ const o=Object.assign({platform:p,project:acc[p+':'+c.account_id].project},c);
+    if(p==='google'){ o.conversions=o.results; o.results=o.form_leads!=null?+o.form_leads:null; } return o; }); };
   // Daily budget set today (7 Nov 2026, Ayush): the daily budgets of the running campaigns, per project and platform.
   // A Facebook campaign without its own budget carries its running ad sets' budgets (ads-daily-sync).
   const bud={};
@@ -39149,6 +39741,25 @@ async function caLoad(){
   CA_D={acc:acc,ent:ent,bud:bud,cur:tag('meta',res[3].data).concat(tag('google',res[4].data)),prev:tag('meta',res[5].data).concat(tag('google',res[6].data)),
         ads:tag('meta',res[7].rows).concat(tag('google',res[8].rows)),hasSets:res[7].sets&&res[8].sets,
         cmp:cmp?{s:c.s,e:c.e,ads:tag('meta',res[9].rows).concat(tag('google',res[10].rows))}:null};
+  // the CRM names its projects a little differently (Durbaar Banquets, Ananta): matched without "Dream" / "Banquets"
+  const pn=function(x){ return String(x||'').toLowerCase().replace(/dream|banquets?/g,'').replace(/[^a-z0-9]/g,''); };
+  const projN={}; Object.keys(acc).forEach(function(k){ projN[pn(acc[k].project)]=acc[k].project; });
+  /* Only leads the CRM ties to one of our Google campaigns (11 Nov 2026, Ayush: no "Call" numbers and no other
+     unnecessary things). The CRM's Google figure also holds phone calls (campaign "Call"), leads with no campaign ('')
+     and odd ids (YNOC, kvywjtjh...) - none of them are in Google's own count, so they are left out here. */
+  /* A lead counts under the project of the Google campaign it came from (11 Nov 2026): the CRM had put one lead from
+     Dream World City's Demand Gen under Dream Gurukul, so Gurukul showed another project's campaign. */
+  const gCamp={}; res[2].forEach(function(e){ const a=acc['google:'+e.account_id]; if(e.kind==='campaign') gCamp[String(e.id)]=a?a.project:1; });
+  /* FACEBOOK TOO (14 Nov 2026): the CRM's Facebook rows (campaign_type 'facebook') count when they are one of our Facebook
+     campaigns, under that campaign's project, or the CRM's "WhatsApp" line - all of a project's WhatsApp campaigns counted
+     together, which can only go on the project and its Facebook row. "Others" (no campaign) is left out, as for Google. */
+  const mCamp={}; res[1].forEach(function(e){ const a=acc['meta:'+e.account_id]; if(e.kind==='campaign') mCamp[String(e.id)]=a?a.project:1; });
+  const crmTag=function(rows){ return (rows||[]).map(function(x){
+      const fb=x.campaign_type==='facebook', id=String(x.campaign_id), own=fb?mCamp[id]:gCamp[id], wa=fb&&/^whatsapp/i.test(id);
+      if(!own&&!wa) return null;
+      const o=Object.assign({},x,{src:fb?'facebook':'google',wa:wa});
+      o.project=own&&own!==1?own:(projN[pn(x.business_unit)]||x.business_unit); return o; }).filter(Boolean); };
+  CA_D.crm=res[11]==null?null:{cur:crmTag(res[11]),prev:crmTag(res[12])};
   caPaint();
 }
 // every project with an account on either platform, the biggest spender first
@@ -39190,15 +39801,50 @@ function caPaint(){
       chg=Math.abs(p)<0.5?'<span class="flat">=</span>':'<span class="'+(goodUp==null?'flat':((p>0)===goodUp?'good':'bad'))+'">'+(p>0?'▲':'▼')+Math.abs(p).toFixed(0)+'%</span>'; }
     else if(was===0&&now>0) chg='<span class="'+(goodUp==null?'flat':goodUp?'good':'bad')+'">new</span>';
     return '<td>'+top+'<div class="ca-cmp">'+fmt(was)+' '+chg+'</div></td>'; };
-  // spend, leads (or results), cost per lead, clicks, CTR - the same five columns at every level; t = this period, w = the other
-  const cols=function(t,w){ w=w||{};
+  /* THE COLUMNS, IN THE ORDER ASKED (10 Nov 2026): Spend | Leads | CRM leads, QL, SV, Booked, Lost | Cost per lead | CPQL |
+     Clicks | CTR | QL%, QL to SV %. t = this period, w = the other (Compare), x = the CRM's figures for the row:
+     undefined = no CRM columns at all (Facebook section), {why} = dashes with the reason, {t,w} = the figures. */
+  const cols=function(t,w,x){ w=w||{};
     return cell(t.spend,w.spend,obMoney,null,true)
-      +(cmpOn?cell(t.ln,w.ln,function(x){ return caLeads(x,t.pl); },true).replace('</td>',(t.tag||'')+'</td>'):'<td>'+t.lead+'</td>')
-      +cell(t.cpl,w.cpl,obMoney,false)+cell(t.clicks,w.clicks,obNum,true)+cell(t.ctr,w.ctr,obPct,true); };
-  const sum=function(rows,pl){ const a=caAgg(rows); return {spend:a.spend,ln:a.leads,pl:pl,lead:caLeads(a.leads,pl),cpl:a.cpl,clicks:a.clicks,ctr:a.ctr}; };
-  const raw=function(x,pl,lead){ x=x||{}; const s=+x.spend||0, rr=+x.results||0, tag=lead===false?' <span class="tag t-gray" style="font-size:10px">not leads</span>':'';
-    return {spend:s,ln:rr,pl:pl==='google'?'google':'meta',tag:tag,lead:obNum(rr,pl==='google'?1:0)+tag,cpl:rr?s/rr:null,clicks:+x.clicks||0,ctr:+x.impressions?x.clicks/x.impressions*100:null}; };
+      +(cmpOn?cell(t.ln,w.ln,function(v){ return caLeads(v,t.pl); },true).replace('</td>',(t.tag||'')+'</td>'):'<td>'+t.lead+'</td>')
+      +crmPart(x,'a')+cell(t.cpl,w.cpl,obMoney,false)+crmPart(x,'b')+cell(t.clicks,w.clicks,obNum,true)+cell(t.ctr,w.ctr,obPct,true)+crmPart(x,'c'); };
+  const sum=function(rows,pl){ const a=caAgg(rows); return {spend:a.spend,ln:a.leads,pl:pl,lead:caLeads(a.leads,pl),cpl:a.cpl,clicks:a.clicks,ctr:a.ctr,fl:a.hasForm?a.form:null}; };
+  const raw=function(x,pl,lead){ x=x||{}; const s=+x.spend||0, rr=x.results==null&&x.spend!=null?null:+x.results||0, tag=lead===false?' <span class="tag t-gray" style="font-size:10px">not leads</span>':'';
+    return {spend:s,ln:rr,pl:pl==='google'?'google':'meta',tag:tag,lead:(rr==null?'<span style="color:#94a3b8" title="Google leads per ad group are read from 13 Nov 2026 night">—</span>':obNum(rr,0))+tag,cpl:rr?s/rr:null,clicks:+x.clicks||0,ctr:+x.impressions?x.clicks/x.impressions*100:null,fl:x.form_leads!=null?+x.form_leads:null}; };
   const prev=CA_D.prev||[];
+  /* CRM COLUMNS (10 Nov 2026, Ayush): beside the platforms' own leads, the CRM's count of the Google leads left after
+     its filtering, so the two can be compared - and how far they got: QL% (qualified of CRM leads), CPQL (Google spend
+     per qualified lead), SV (site visits), QL to SV %, Booked, Lost. Google only: the CRM has no Facebook figure yet. */
+  const CR=CA_D.crm, NCRM=8;
+  const crmAgg=function(list,pred){ const t={leads:0,ql:0,sv:0,bk:0,lost:0}; (list||[]).forEach(function(x){ if(!pred(x)) return;
+    t.leads+=+x.leads||0; t.ql+=+x.qualified||0; t.sv+=+x.site_visited||0; t.bk+=+x.booked||0; t.lost+=+x.lost||0; }); return t; };
+  const crmT=function(a,spend){ return {leads:a.leads,ql:a.ql,qlp:a.leads?a.ql/a.leads*100:null,cpql:a.ql&&spend>0?spend/a.ql:null,sv:a.sv,svp:a.ql?a.sv/a.ql*100:null,bk:a.bk,lost:a.lost}; };
+  // the spend the CRM's leads are set against: Google's, Facebook's, or both (src empty)
+  const gSpend=function(list,pred,src){ const plat=src==='facebook'?'meta':src; return (list||[]).reduce(function(t,c){ return (!plat||c.platform===plat)&&pred(c)?t+(+c.spend||0):t; },0); };
+  const pc0=function(x){ return x==null||!isFinite(x)?'—':x.toFixed(0)+'%'; };
+  const crmPart=function(x,which){
+    if(!x) return '';
+    const n={a:5,b:1,c:2}[which];
+    if(!CR||x.why){ const why=!CR?'CRM figures are read at night - they show from the next morning':x.why; let h='';
+      for(let i=0;i<n;i++) h+='<td class="ca-crm" title="'+esc(why)+'"><span style="color:#94a3b8">—</span></td>'; return h; }
+    const t=x.t, w=x.w||{};
+    const h=which==='a'?cell(t.leads,w.leads,obNum,true,true)+cell(t.ql,w.ql,obNum,true)+cell(t.sv,w.sv,obNum,true)+cell(t.bk,w.bk,obNum,true)+cell(t.lost,w.lost,obNum,false)
+      :which==='b'?cell(t.cpql,w.cpql,obMoney,false):cell(t.qlp,w.qlp,pc0,true)+cell(t.svp,w.svp,pc0,true);
+    return h.replace(/<td>/g,'<td class="ca-crm">'); };
+  // sp: which ad rows' spend goes against these leads, when it is not the same test (a WhatsApp campaign)
+  const crmX=function(pred,src,sp){ if(!CR) return {}; if(src==='facebook'&&!CR.cur.some(function(x){ return x.src==='facebook'; })) return {why:'No Facebook figures from the CRM yet for these dates - they are read at night and show from the next morning'}; const p2=function(x){ return (!src||x.src===src)&&pred(x); }, ps=sp||pred;
+    return {t:crmT(crmAgg(CR.cur,p2),gSpend(CA_D.cur,ps,src)),w:crmT(crmAgg(CR.prev,p2),gSpend(prev,ps,src))}; };
+  // a Facebook campaign whose ad sets go for WhatsApp chats: the CRM only counts those all together, on the Facebook row
+  const isWa=function(cid){ return Object.keys(E).some(function(k){ const x=E[k]; return k.indexOf('adset:')===0&&x&&x.campaign_id===cid&&/CONVERSATIONS|MESSAGING/.test(String(x.objective||'')); }); };
+  const crmNo=function(why){ return {why:why}; };
+  const ct=function(t,title){ return '<th class="ca-crm" title="'+esc(title)+'">'+t+'</th>'; };
+  const head=function(name,res,cpl,crm){ return '<tr><th class="ca-nm">'+name+'</th><th title="Daily budget as set today">Daily budget</th><th>Spend</th><th>'+res+'</th>'
+    +(crm?ct('CRM leads','Google and Facebook leads in the CRM after its filtering')+ct('QL','Qualified leads (CRM)')+ct('SV','Site visits (CRM)')+ct('Booked','Booked (CRM)')+ct('Lost','Lost (CRM)'):'')
+    +'<th>'+cpl+'</th>'+(crm?ct('CPQL','Spend per qualified lead (CRM)'):'')+'<th>Clicks</th><th>CTR</th>'
+    +(crm?ct('QL%','Qualified leads as a share of CRM leads')+ct('QL to SV %','Site visits as a share of qualified leads'):'')+'</tr>'; };
+  // a name never wraps: it stops at the column's width with "...", the whole name on hover
+  const nm=function(lead,text){ return '<td class="ca-nm"><span class="ca-nmx" title="'+esc(text)+'">'+lead+esc(text)+'</span></td>'; };
+  const money=function(v){ return '<td>'+(v==null?'<span style="color:#94a3b8">—</span>':obMoney(v))+'</td>'; };
   /* A PLATFORM'S SECTION (6 Nov 2026, Ayush): its running campaigns in a section of their own, under the whole
      projects table - the page scrolls to it on the click, as at the foot of the page it otherwise sat unseen; a campaign opens its running ad sets inside it, and the ads
      follow whatever is open. Paused, ended and deleted ones are left out here - their spend still counts above.
@@ -39207,31 +39853,41 @@ function caPaint(){
     const p=CA.open, pl=CA.plat, W=CA_PLAT[pl];
     const camps=CA_D.cur.filter(function(c){ return c.project===p&&c.platform===pl&&caLive((E['campaign:'+c.campaign_id]||{}).status)&&((+c.spend||0)>0||(+c.results||0)>0); }).sort(function(a,b){ return b.spend-a.spend; });
     const was=function(id){ return prev.filter(function(x){ return x.platform===pl&&x.campaign_id===id; }); };
-    const setsOf=function(list,cid){ const g={}; list.forEach(function(a){ if(a.platform!==pl||a.campaign_id!==cid||!a.adset_id) return; const x=g[a.adset_id]||(g[a.adset_id]={adset_id:a.adset_id,spend:0,results:0,clicks:0,impressions:0}); x.spend+=+a.spend||0; x.results+=+a.results||0; x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; }); return g; };
+    const setsOf=function(list,cid){ const g={}; list.forEach(function(a){ if(a.platform!==pl||a.campaign_id!==cid||!a.adset_id) return; const x=g[a.adset_id]||(g[a.adset_id]={adset_id:a.adset_id,spend:0,results:null,clicks:0,impressions:0}); x.spend+=+a.spend||0; if(a.results!=null) x.results=(x.results||0)+(+a.results); x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; }); return g; };
+    const nc=7+NCRM;
+    const waOne=pl==='meta'&&camps.filter(function(c){ return isWa(c.campaign_id); }).length===1;
     let sec='';
     camps.forEach(function(c){
       const e=E['campaign:'+c.campaign_id]||{}, con=CA.camp===c.campaign_id, lead=pl==='meta'?obIsLead(E,c):null;
-      sec+='<tr class="ca-row ca-l0'+(con?' ca-on':'')+'" onclick="caCamp(\''+c.campaign_id+'\')"><td style="white-space:normal">'+caret(con)+esc(e.name||c.campaign_id)+'</td>'+cols(raw(c,pl,lead),raw(was(c.campaign_id)[0],pl,lead))+'</tr>';
+      const src=pl==='google'?'google':'facebook';
+      // one WhatsApp campaign in the project: the CRM's WhatsApp count is all its own (14 Nov 2026)
+      const cx=pl==='meta'&&isWa(c.campaign_id)&&waOne?crmX(function(x){ return x.wa&&x.project===p; },'facebook',function(x){ return x.campaign_id===c.campaign_id; }):pl==='meta'&&isWa(c.campaign_id)?crmNo('A WhatsApp campaign: the CRM counts all WhatsApp campaigns of a project together - they are in the Facebook row above'):crmX(function(x){ return x.campaign_id===c.campaign_id; },src);
+      sec+='<tr class="ca-row ca-l0'+(con?' ca-on':'')+'" onclick="caCamp(\''+c.campaign_id+'\')">'+nm(caret(con),e.name||c.campaign_id)+money(e.daily_budget)+cols(raw(c,pl,lead),raw(was(c.campaign_id)[0],pl,lead),cx)+'</tr>';
       if(!con) return;
       const ads=CA_D.ads.filter(function(a){ return a.platform===pl&&a.campaign_id===c.campaign_id; });
       if(!CA_D.hasSets||!ads.some(function(a){ return a.adset_id; })){
-        sec+='<tr class="ca-l1 ca-none"><td colspan="6"><i class="fa-solid fa-circle-info"></i> '+W.sets+' are recorded from tonight (6 Nov 2026) and show here from tomorrow.</td></tr>'; return; }
+        sec+='<tr class="ca-l1 ca-none"><td colspan="'+nc+'"><i class="fa-solid fa-circle-info"></i> '+W.sets+' are recorded from tonight (6 Nov 2026) and show here from tomorrow.</td></tr>'; return; }
       const g=setsOf(ads,c.campaign_id), gw=cmpOn?setsOf(CA_D.cmp.ads,c.campaign_id):{};
       const sets=Object.keys(g).filter(function(k){ return caLive((E['adset:'+k]||{}).status); }).map(function(k){ return g[k]; }).sort(function(a,b){ return b.spend-a.spend; });
-      if(!sets.length) sec+='<tr class="ca-l1 ca-none"><td colspan="6">No running '+W.set.toLowerCase()+' in this campaign</td></tr>';
+      if(!sets.length) sec+='<tr class="ca-l1 ca-none"><td colspan="'+nc+'">No running '+W.set.toLowerCase()+' in this campaign</td></tr>';
       sets.forEach(function(s){
         const son=CA.adset===s.adset_id;
-        sec+='<tr class="ca-row ca-l1'+(son?' ca-on':'')+'" onclick="caSet(\''+s.adset_id+'\')"><td style="white-space:normal">'+esc((E['adset:'+s.adset_id]||{}).name||s.adset_id)+'</td>'+cols(raw(s,pl,null),raw(gw[s.adset_id],pl,null))+'</tr>';
+        sec+='<tr class="ca-row ca-l1'+(son?' ca-on':'')+'" onclick="caSet(\''+s.adset_id+'\')">'+nm('',(E['adset:'+s.adset_id]||{}).name||s.adset_id)+(function(){
+          // its own budget; or, when the budget is set on the campaign (Facebook CBO, every Google ad group), the campaign's, marked shared
+          const b=(E['adset:'+s.adset_id]||{}).daily_budget; if(b!=null) return money(b);
+          return e.daily_budget!=null?'<td title="The budget is set on the campaign and shared by its '+W.sets.toLowerCase()+'"><span style="color:#64748b">'+obMoney(e.daily_budget)+'</span><div class="ca-sub">shared</div></td>':money(null); })()
+          +cols(raw(s,pl,null),raw(gw[s.adset_id],pl,null),crmNo('The CRM counts leads per campaign, not per '+W.set.toLowerCase()))+'</tr>';
       });
     });
     // the total counts leads only (Google conversions, Facebook lead / chat campaigns), as reach or engagement results cannot be added to them
     const ids={}; camps.forEach(function(c){ ids[c.campaign_id]=1; });
     const tot=camps.length?'<tfoot><tr class="ca-tot"><td>Total · '+camps.length+' campaign'+(camps.length===1?'':'s')+(pl==='meta'?' <span style="font-weight:500;color:var(--slate);font-size:11px">(leads only)</span>':'')+'</td>'
-      +cols(sum(camps,pl),sum(prev.filter(function(x){ return x.platform===pl&&ids[x.campaign_id]; }),pl))+'</tr></tfoot>':'';
+      +money(camps.reduce(function(t,c){ const b=(E['campaign:'+c.campaign_id]||{}).daily_budget; return b==null?t:(t||0)+(+b); },null))
+      +cols(sum(camps,pl),sum(prev.filter(function(x){ return x.platform===pl&&ids[x.campaign_id]; }),pl),crmX(function(x){ return ids[x.campaign_id]||(pl==='meta'&&waOne&&x.wa&&x.project===p); },pl==='google'?'google':'facebook'))+'</tr></tfoot>':'';
     return '<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p)
       +' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+camps.length+' running campaign'+(camps.length===1?'':'s')+'; click one for its '+W.sets.toLowerCase()+'</span></div>'
-      +'<div style="overflow-x:auto"><table class="ca-tbl"><thead><tr><th>Campaign</th><th>Spend</th><th>'+(pl==='meta'?'Results':W.res)+'</th><th>Cost per result</th><th>Clicks</th><th>CTR</th></tr></thead><tbody>'
-      +(sec||'<tr><td colspan="6" style="text-align:center;color:var(--slate);padding:18px">No running campaign spent in this period</td></tr>')+'</tbody>'+tot+'</table></div></div>'
+      +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Campaign',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
+      +(sec||'<tr><td colspan="'+nc+'" style="text-align:center;color:var(--slate);padding:18px">No running campaign spent in this period</td></tr>')+'</tbody>'+tot+'</table></div></div>'
       +caAds(p,pl);
   };
   const shown=CA.proj==='all'?P:[CA.proj];
@@ -39241,27 +39897,28 @@ function caPaint(){
   let rows='';
   shown.forEach(function(p){
     const cur=CA_D.cur.filter(function(c){ return c.project===p; }), pw=prev.filter(function(c){ return c.project===p; }), on=CA.open===p;
-    rows+='<tr class="ca-row ca-l0'+(on?' ca-on':'')+'" onclick="caToggle('+P.indexOf(p)+')"><td>'+caret(on)+esc(p)+'</td>'+bud(budV(p))+cols(sum(cur),sum(pw))+'</tr>';
+    rows+='<tr class="ca-row ca-l0'+(on?' ca-on':'')+'" onclick="caToggle('+P.indexOf(p)+')"><td>'+caret(on)+esc(p)+'</td>'+bud(budV(p))+cols(sum(cur),sum(pw),crmX(function(x){ return x.project===p; }))+'</tr>';
     if(!on) return;
     ['google','meta'].forEach(function(pl){
       const W=CA_PLAT[pl], pc=cur.filter(function(c){ return c.platform===pl; }), pon=CA.plat===pl;
       const has=Object.keys(CA_D.acc).some(function(k){ return k.indexOf(pl+':')===0&&CA_D.acc[k].project===p; });
-      if(!has){ rows+='<tr class="ca-l1 ca-none"><td><span class="ca-caret"></span><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+'</td><td colspan="6">No '+W.name+' account for this project</td></tr>'; return; }
+      // a platform the project has no account on is not listed at all (11 Nov 2026, Ayush: Sarovar Hotel's "Google" row removed)
+      if(!has) return;
       // no caret: Google / Facebook do not open in the table, a click shows their section below (6 Nov 2026)
-      rows+='<tr class="ca-row ca-l1'+(pon?' ca-on':'')+'" onclick="caPlat(\''+pl+'\')"><td><span class="ca-caret"></span><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+'</td>'+bud(budV(p,pl))+cols(sum(pc,pl),sum(pw.filter(function(c){ return c.platform===pl; }),pl))+'</tr>';
+      rows+='<tr class="ca-row ca-l1'+(pon?' ca-on':'')+'" onclick="caPlat(\''+pl+'\')"><td><span class="ca-caret"></span><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+'</td>'+bud(budV(p,pl))+cols(sum(pc,pl),sum(pw.filter(function(c){ return c.platform===pl; }),pl),crmX(function(x){ return x.project===p; },pl==='google'?'google':'facebook'))+'</tr>';
     });
   });
   // 7 Nov 2026: the overall Total under the projects - every project shown, Google and Facebook together
   const inP={}; shown.forEach(function(p){ inP[p]=1; });
   const tb=shown.reduce(function(s,p){ const v=budV(p); return v==null?s:(s||0)+v; },null);
   const foot=shown.length>1||CA.proj==='all'?'<tfoot><tr class="ca-tot"><td>Total</td>'+bud(tb)
-    +cols(sum(CA_D.cur.filter(function(c){ return inP[c.project]; })),sum(prev.filter(function(c){ return inP[c.project]; })))+'</tr></tfoot>':'';
-  let html='<div class="card" style="overflow-x:auto"><table class="ca-tbl"><thead><tr><th>Project</th><th title="Daily budgets of the running campaigns, as set today">Daily budget</th><th>Spend</th><th>Leads</th><th>Cost per lead</th><th>Clicks</th><th>CTR</th></tr></thead><tbody>'
-    +(rows||'<tr><td colspan="7" style="text-align:center;color:var(--slate);padding:24px">No ad accounts</td></tr>')+'</tbody>'+foot+'</table></div>';
+    +cols(sum(CA_D.cur.filter(function(c){ return inP[c.project]; })),sum(prev.filter(function(c){ return inP[c.project]; })),crmX(function(x){ return inP[x.project]; }))+'</tr></tfoot>':'';
+  let html='<div class="card" style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Project','Leads','Cost per lead',true)+'</thead><tbody>'
+    +(rows||'<tr><td colspan="'+(7+NCRM)+'" style="text-align:center;color:var(--slate);padding:24px">No ad accounts</td></tr>')+'</tbody>'+foot+'</table></div>';
   // the open platform's campaigns, ad sets and ads come under the whole projects table, and the page
   // scrolls down to them (caPlat) so they are seen
   if(CA.open&&CA.plat) html+='<div class="ca-below" id="caBelow">'+section()+'</div>';
-  html+='<div style="font-size:11.5px;color:var(--slate);margin:12px 2px 4px;line-height:1.5">Leads = Google conversions + Facebook leads and WhatsApp chats from lead campaigns. Below a project, each row shows its own Results (Facebook awareness or engagement campaigns are marked "not leads"). Daily budget is as set today'+(cmpOn?'; in Compare mode it is not compared':'')+'. Figures are Google Ads\' and Meta\'s own, refreshed through the day.</div>';
+  // (16 Nov 2026, Ayush: the explanation paragraph under the table removed)
   $('caBody').innerHTML=html;
 }
 window.caCmpToggle=function(on){ CA.cmp.on=!!on;
@@ -39275,6 +39932,11 @@ function caAds(p,pl){
   let ads=CA_D.ads.filter(function(a){ return a.project===p&&a.platform===pl&&caLive((E['ad:'+a.ad_id]||{}).status)&&caLive((E['campaign:'+a.campaign_id]||{}).status)&&(!a.adset_id||caLive((E['adset:'+a.adset_id]||{}).status)); });
   if(CA.camp) ads=ads.filter(function(a){ return a.campaign_id===CA.camp; });
   if(CA.adset) ads=ads.filter(function(a){ return a.adset_id===CA.adset; });
+  else { // rows come per ad group (v4): one card per ad, its ad groups added together
+    const by={}, out=[]; ads.forEach(function(a){ const m=by[a.ad_id]; if(!m){ by[a.ad_id]=Object.assign({},a); out.push(by[a.ad_id]); return; }
+      ['spend','impressions','clicks'].forEach(function(f){ m[f]=(+m[f]||0)+(+a[f]||0); });
+      if(a.results!=null) m.results=(m.results==null?0:+m.results)+(+a.results); });
+    ads=out.sort(function(x,y){ return (+y.spend||0)-(+x.spend||0); }); }
   const where=CA.adset?(E['adset:'+CA.adset]||{}).name||W.set:CA.camp?(E['campaign:'+CA.camp]||{}).name||'this campaign':'all '+W.name+' campaigns';
   const stat=function(s){ s=String(s||''); const on=s==='ACTIVE'||s==='ENABLED'; return '<span class="tag '+(on?'t-green':'t-gray')+'" style="font-size:10.5px">'+(on?'Running':s?s.charAt(0)+s.slice(1).toLowerCase().replace(/_/g,' '):'—')+'</span>'; };
   const shown=ads.slice(0,CA.showAds);
@@ -39287,39 +39949,54 @@ function caAds(p,pl){
         :'<div class="txt">'+(pl==='google'?'<div class="sp">Sponsored</div>':'')+'<div class="h">'+esc(words[0])+'</div>'+(words[1]?'<div class="d">'+esc(words.slice(1).join(' '))+'</div>':'')+'</div>';
       return '<div class="ob-ad" style="cursor:pointer" title="Open this ad" onclick="caAdOpen('+i+')">'+pic+'<div style="padding:9px 12px 0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(e.name||'')+'">'+esc(e.name||('Ad '+a.ad_id))+'</div>'
         +'<div style="padding:0 12px;font-size:11.5px;color:var(--slate)">'+stat(e.status)+'</div>'
-        +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+(pl==='meta'?'Results':W.res)+'</span><b>'+obNum(a.results,pl==='google'?1:0)+'</b><span>Cost per result</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b></div></div>';
+        +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+(pl==='meta'?'Results':W.res)+'</span><b>'+obNum(a.results,0)+'</b><span>Cost per result</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b></div></div>';
     }).join('')+'</div>'
     +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="CA.showAds+='+obAdStep(ads.length)+';caPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
 }
-/* AN AD, OPENED (7 Nov 2026, Ayush: "the Ads which show if clicked should open nicely in a popup").
-   The picture full size on the left (or the text ad as Google shows it), on the right where it runs
-   and its figures for the period. */
+/* AN AD, OPENED (7 Nov 2026, Ayush: "the Ads which show if clicked should open nicely in a popup", then "open like
+   it opens in Meta Ad Library Tab"). The same popup as the Meta Ad Library: the ad in a fixed frame on the left,
+   shown whole (never cropped), on the right the details table, the figures for the period, the ad's words, and
+   the status at the foot. A Google video ad plays its YouTube video in the frame ("In Google the Video does not
+   play"). A Facebook ad shows its full picture (video ads their cover frame - Meta gives the video itself only
+   through a separate call). */
+function caYtId(u){ const m=String(u||'').match(/ytimg\.com\/vi\/([A-Za-z0-9_-]{6,})\//); return m?m[1]:null; }
 window.caAdOpen=function(i){
   const a=(window._caAds||[])[i]; if(!a) return;
   const pl=a.platform, W=CA_PLAT[pl], E=CA_D.ent, e=E['ad:'+a.ad_id]||{};
   const camp=(E['campaign:'+a.campaign_id]||{}).name||a.campaign_id, set=a.adset_id?((E['adset:'+a.adset_id]||{}).name||a.adset_id):null;
   const words=String(e.body||'').split('\n').filter(Boolean);
-  const s=+a.spend||0, rr=+a.results||0, im=+a.impressions||0, cl=+a.clicks||0;
-  const on=caLive(e.status);
-  const pic=e.thumbnail
-    ?'<div style="background:#0f172a;border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:260px"><img src="'+esc(e.thumbnail)+'" referrerpolicy="no-referrer" alt="" style="max-width:100%;max-height:70vh;display:block"></div>'
-    :'<div style="border:1px solid var(--line);border-radius:10px;padding:16px 18px;background:#fff">'+(pl==='google'?'<div style="font-size:11px;font-weight:700;color:#202124;margin-bottom:4px">Sponsored</div>':'')
-      +'<div style="font-size:17px;color:#1a0dab;line-height:1.35;margin-bottom:6px">'+esc(words[0]||e.name||('Ad '+a.ad_id))+'</div>'
-      +(words.length>1?'<div style="font-size:13px;color:#4d5156;line-height:1.5">'+esc(words.slice(1).join(' '))+'</div>':'')+'</div>';
-  const row=function(k,v){ return '<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #eef1f4;font-size:13px"><span style="color:var(--slate)">'+k+'</span><b style="font-variant-numeric:tabular-nums">'+v+'</b></div>'; };
-  const r=obRange();
-  openModal('<div class="modal-head"><h3 style="display:flex;align-items:center;gap:8px;min-width:0"><i class="'+W.icon+'" style="color:'+W.color+'"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(e.name||('Ad '+a.ad_id))+'</span></h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body"><div style="display:grid;grid-template-columns:minmax(0,1.25fr) minmax(240px,1fr);gap:20px;align-items:start" class="ca-adpop">'
-    +'<div>'+pic+(e.thumbnail&&words.length?'<div style="font-size:13px;line-height:1.55;color:#334155;margin-top:12px;white-space:pre-wrap">'+esc(words.join('\n'))+'</div>':'')+'</div>'
-    +'<div><div style="margin-bottom:12px"><span class="tag '+(on?'t-green':'t-gray')+'" style="font-size:11px">'+(on?'Running':esc(String(e.status||'—').charAt(0)+String(e.status||'').slice(1).toLowerCase().replace(/_/g,' ')))+'</span></div>'
-    +'<div style="font-size:12px;color:var(--slate);margin-bottom:2px">Project</div><div style="font-size:13px;font-weight:600;margin-bottom:10px">'+esc(a.project)+'</div>'
-    +'<div style="font-size:12px;color:var(--slate);margin-bottom:2px">Campaign</div><div style="font-size:13px;font-weight:600;margin-bottom:10px">'+esc(camp)+'</div>'
-    +(set?'<div style="font-size:12px;color:var(--slate);margin-bottom:2px">'+W.set+'</div><div style="font-size:13px;font-weight:600;margin-bottom:14px">'+esc(set)+'</div>':'')
-    +'<div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--slate);margin:6px 0 2px">'+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+'</div>'
-    +row('Spend',obMoney(s))+row(pl==='meta'?'Results':W.res,obNum(rr,pl==='google'?1:0))+row('Cost per result',obMoney(rr?s/rr:null))
-    +row('Impressions',obNum(im))+row('Clicks',obNum(cl))+row('CTR',obPct(im?cl/im*100:null))
-    +'</div></div></div>'
-    +'<style>@media(max-width:760px){.ca-adpop{grid-template-columns:1fr!important}}</style>','lg');
+  const s=+a.spend||0, rr=a.results==null?null:+a.results, im=+a.impressions||0, cl=+a.clicks||0;
+  const on=caLive(e.status), yt=pl==='google'?caYtId(e.thumbnail):null, r=obRange();
+  const frame='height:360px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--slate)';
+  const media=yt
+    ?'<div style="'+frame+';background:#000"><iframe src="https://www.youtube.com/embed/'+esc(yt)+'?autoplay=1&mute=1&rel=0&playsinline=1" style="width:100%;height:100%;border:0" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>'
+    :e.thumbnail
+      ?'<div style="'+frame+'"><img src="'+esc(e.thumbnail)+'" referrerpolicy="no-referrer" alt="" style="max-width:100%;max-height:100%;object-fit:contain;display:block"></div>'
+      :'<div style="'+frame+';align-items:flex-start;justify-content:flex-start;background:#fff;padding:18px 20px;overflow:auto"><div>'+(pl==='google'?'<div style="font-size:11px;font-weight:700;color:#202124;margin-bottom:4px">Sponsored</div>':'')
+        +'<div style="font-size:18px;color:#1a0dab;line-height:1.35;margin-bottom:6px">'+esc(words[0]||e.name||('Ad '+a.ad_id))+'</div>'
+        +(words.length>1?'<div style="font-size:13px;color:#4d5156;line-height:1.5">'+esc(words.slice(1).join(' '))+'</div>':'')+'</div></div>';
+  const lbl=function(t){ return '<div style="font-size:11.5px;color:var(--slate);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin:14px 0 5px">'+t+'</div>'; };
+  const n=function(v){ return '<span style="font-variant-numeric:tabular-nums">'+v+'</span>'; };
+  openModal('<div class="modal-head"><h3><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+esc(e.name||('Ad '+a.ad_id))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="display:flex;gap:18px;flex-wrap:wrap">'
+      +'<div style="flex:1 1 320px;min-width:280px">'+media+'</div>'
+      +'<div style="flex:1 1 300px;min-width:270px">'
+        +'<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+          +compDetailRow('Project',esc(a.project))+compDetailRow('Campaign',esc(camp))+(set?compDetailRow(W.set,esc(set)):'')
+        +'</table>'
+        +lbl(esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e)))
+        +'<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+          +compDetailRow('Spend',n(obMoney(s)))+compDetailRow(pl==='meta'?'Results':W.res,n(obNum(rr,0)))+compDetailRow('Cost per result',n(obMoney(rr?s/rr:null)))
+          +compDetailRow('Impressions',n(obNum(im)))+compDetailRow('Clicks',n(obNum(cl)))+compDetailRow('CTR',n(obPct(im?cl/im*100:null)))
+        +'</table>'
+        +((e.thumbnail||yt)&&words.length?lbl('Description')+'<div style="font-size:13px;line-height:1.55;white-space:pre-wrap;max-height:160px;overflow-y:auto;padding-right:4px">'+esc(words.join('\n'))+'</div>':'')
+        +'<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;align-items:center;gap:9px;flex-wrap:wrap">'
+          +'<span class="tag '+(on?'t-green':'t-gray')+'">'+(on?'Active':'Inactive')+'</span>'
+          +'<span style="font-size:12px;color:var(--slate)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+'</span>'
+          +(yt?'<a href="https://www.youtube.com/watch?v='+esc(yt)+'" target="_blank" rel="noopener" class="btn btn-sm" style="margin-left:auto"><i class="fa-brands fa-youtube"></i> Watch on YouTube</a>':'')
+        +'</div>'
+      +'</div>'
+    +'</div>','lg');
 };
 function caReset(){ CA.open=CA.proj==='all'?null:CA.proj; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; }
 window.caPickProject=function(v){ CA.proj=v; CA.open=v==='all'?null:v; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
@@ -39877,3 +40554,1361 @@ function orgOverview(rows){
     +(top.length?'<div class="org-h2" style="margin-top:14px"><i class="fa-solid fa-trophy"></i> Top 5 this period</div>'+orgTable(top,['views','likes','rate'],{rank:true}):'')
     +'<div class="org-note" style="margin-top:14px"><i class="fa-solid fa-circle-info"></i><span><b>Reach</b> here is Meta\'s daily Viewers for the Page, added up day by day - someone who saw the Page on two days counts twice, as Meta gives no de-duplicated total. Meta does not give reach for each Facebook post.</span></div>';
 }
+/* ============================ MARKET WATCH ============================
+   One Marketing page, three tabs (14 Nov 2026, Ayush: "One page with three tabs, Kolkata plus nearby.
+   I just want the Trend Video, Project Names and data, and Hook Video - no Gemini required.")
+
+   TRENDS     YouTube's own Trending chart - India, and World (US, UK, UAE, Singapore and Australia read
+              and shown together as one list; Ayush 14 Nov: "only India and World, not other countries").
+   LAUNCHES   Projects registered on West Bengal RERA in Kolkata, North 24-Parganas, South 24-Parganas
+              and Howrah by WELL-KNOWN DEVELOPERS ONLY, last 3 months (Ayush 14 Nov, later the same day:
+              "premium projects ... from well renowned companies" - see MW_REPUTED) - name, developer,
+              place, size, completion date and RERA number, with how many days since it was registered.
+              Marked Our Brand / Competitor by developer. From camp.pi_rera_projects (public-intel, daily).
+   HOOK LIBRARY  The most-watched professionally made Shorts of the last 30 days - ad films, cinematic
+              shots, cars, tech launches, design, luxury, travel - from channels with 10 lakh+ subscribers,
+              never comedy / vlog / gaming (Ayush 14 Nov: "professional, not low quality"). Kept as they
+              are found, with YouTube's real view / like counts. Filters: market-watch HOOK_SEARCHES.
+
+   The videos come from the market-watch edge function into camp.mkt_videos. Nothing is written or
+   judged by AI; every figure is the source's own. */
+let MW_TAB='trends', MW_REGION='IN', MW_HOOKTAG='all', MW_HOOKSORT='views', MW_LDAYS='90', MW_LWHO='all', MW_LDIST='all', MW_LQ='';
+const MW_FN=SUPABASE_URL+'/functions/v1/market-watch';
+const MW_DISTRICTS=['Kolkata','North 24-Parganas','South 24-Parganas','Howrah'];
+const MW_REGIONS=[['IN','India'],['WORLD','World']];
+const MW_HOOKTAGS=[['all','All'],['ads','Ad films'],['cinematic','Cinematic'],['cars','Cars'],['tech','Tech launches'],['design','Design'],['luxury','Luxury'],['travel','Travel']];
+let MW_VID=null, MW_RERA=null, MW_WL=null;
+
+const MW_CSS='<style>'
+  +'.mw-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:14px}'
+  +'.mw-head h1{margin:0;font-size:24px;font-weight:700;display:flex;align-items:center;gap:10px}'
+  +'.mw-head p{margin:5px 0 0;color:var(--slate);font-size:13.5px;max-width:760px;line-height:1.5}'
+  +'.mw-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px}'
+  +'.mw-tab{border:0;background:none;padding:10px 16px;font:inherit;font-weight:600;font-size:14px;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;align-items:center;gap:8px}'
+  +'.mw-tab.on{color:var(--brand);border-bottom-color:var(--brand)}'
+  +'.mw-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}'
+  +'.mw-chip{border:1px solid var(--line);background:var(--card,#fff);border-radius:999px;padding:6px 13px;font:inherit;font-size:12.5px;font-weight:600;color:var(--ink-2,#334155);cursor:pointer}'
+  +'.mw-chip.on{background:var(--brand);border-color:var(--brand);color:#fff}'
+  +'.mw-meta{margin-left:auto;font-size:12px;color:var(--slate);display:flex;align-items:center;gap:10px}'
+  +'.mw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}'
+  +'.mw-card{background:var(--card,#fff);border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;transition:box-shadow .15s}'
+  +'.mw-card:hover{box-shadow:0 8px 24px rgba(15,23,42,.12)}'
+  +'.mw-thumb{position:relative;aspect-ratio:16/9;background:#0f172a center/cover no-repeat}'
+  +'.mw-thumb.v{aspect-ratio:9/12}'
+  +'.mw-dur{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.78);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:5px}'
+  +'.mw-rank{position:absolute;left:6px;top:6px;background:rgba(0,0,0,.72);color:#fff;font-size:11px;font-weight:700;padding:2px 7px;border-radius:5px}'
+  +'.mw-cb{padding:10px 12px 12px;display:flex;flex-direction:column;gap:5px;min-width:0}'
+  +'.mw-ct{font-weight:650;font-size:13.5px;line-height:1.35;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}'
+  +'.mw-cc{font-size:12px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.mw-cs{font-size:12px;color:var(--ink-2,#334155);display:flex;gap:10px;flex-wrap:wrap}'
+  +'.mw-cs i{color:#94a3b8;margin-right:3px}'
+  +'.mw-tw{border:1px solid var(--line);border-radius:12px;overflow:auto;background:var(--card,#fff)}'
+  +'.mw-t{width:100%;border-collapse:collapse;font-size:13px}'
+  +'.mw-t th{position:sticky;top:0;background:#f8fafc;text-align:left;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}'
+  +'.mw-t td{padding:10px 12px;border-bottom:1px solid var(--line-2,#eef1f6);vertical-align:top}'
+  +'.mw-t tr:hover td{background:#f8fafc}'
+  +'.mw-pn{font-weight:650;color:var(--ink)}'
+  +'.mw-sub{font-size:11.5px;color:var(--slate);margin-top:2px}'
+  +'.mw-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;margin-top:4px}'
+  +'.mw-tag.own{background:#dcfce7;color:#166534}.mw-tag.comp{background:#fee2e2;color:#991b1b}.mw-tag.rep{background:#e0e7ff;color:#3730a3}'
+  +'.mw-days{font-weight:700;white-space:nowrap}.mw-days.new{color:#16a34a}'
+  +'.mw-in{height:34px;border:1px solid var(--line);border-radius:9px;padding:0 10px;font:inherit;font-size:13px;min-width:220px}'
+  +'.mw-sel{height:34px;border:1px solid var(--line);border-radius:9px;padding:0 8px;font:inherit;font-size:13px;background:#fff}'
+  +'@media(max-width:700px){.mw-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}.mw-meta{margin-left:0}}'
+  +'</style>';
+
+async function mwCall(body){
+  const {data:{session}}=await sb.auth.getSession();
+  const r=await fetch(MW_FN,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify(body)});
+  const jr=await r.json().catch(function(){return {};});
+  if(!r.ok||jr.error) throw new Error(jr.error||('server said '+r.status));
+  return jr;
+}
+function mwNum(n){ n=Number(n); if(!isFinite(n)) return '—'; if(n>=1e7) return (n/1e7).toFixed(1).replace(/\.0$/,'')+' Cr'; if(n>=1e5) return (n/1e5).toFixed(1).replace(/\.0$/,'')+' L'; if(n>=1e3) return (n/1e3).toFixed(1).replace(/\.0$/,'')+'K'; return String(n); }
+function mwDur(s){ s=Number(s); if(!isFinite(s)||s<=0) return ''; const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); }
+function mwAgo(iso){ if(!iso) return ''; const d=(Date.now()-Date.parse(iso))/1000; if(d<3600) return Math.max(1,Math.round(d/60))+' min ago'; if(d<86400) return Math.round(d/3600)+' h ago'; const n=Math.round(d/86400); return n+' day'+(n===1?'':'s')+' ago'; }
+function mwDmy(iso){ if(!iso) return '—'; const s=String(iso).slice(0,10).split('-'); return s.length===3?s[2]+'/'+s[1]+'/'+s[0]:String(iso); }
+function mwDaysSince(iso){ if(!iso) return null; const t=new Date(); t.setHours(12,0,0,0); return Math.round((t-new Date(String(iso).slice(0,10)+'T12:00:00'))/86400000); }
+
+VIEWS.market_watch=async function(v,seg){
+  if(seg&&['trends','launches','hooks'].indexOf(seg[0])!==-1) MW_TAB=seg[0];
+  setCrumb(['Growth & Strategy','Market Watch']);
+  const tab=function(id,icon,label){ return '<button class="mw-tab'+(MW_TAB===id?' on':'')+'" onclick="navTo(\'market_watch/'+id+'\')"><i class="fa-solid '+icon+'"></i> '+label+'</button>'; };
+  v.innerHTML=MW_CSS
+    +'<div class="mw-head"><div><h1><i class="fa-solid fa-binoculars" style="color:var(--brand)"></i> Market Watch</h1>'
+      +'<p>Trending videos, new project launches around Kolkata, and short videos with hooks that hold people.</p></div></div>'
+    +'<div class="mw-tabs">'+tab('trends','fa-fire','Trends')+tab('launches','fa-building-flag','Launches')+tab('hooks','fa-bolt','Hook Library')+'</div>'
+    +'<div id="mwBody"><div class="loader"><div class="spin"></div></div></div>';
+  try{
+    if(MW_TAB==='launches') await mwLaunches(); else await mwVideos(MW_TAB==='hooks'?'hook':'trend');
+  }catch(e){ const b=$('mwBody'); if(b) b.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load: '+esc((e&&e.message)||String(e))+'</div></div>'; }
+};
+
+/* ---------------------------------------------------------------- videos (Trends + Hook Library) */
+async function mwLoadVideos(){
+  if(MW_VID) return MW_VID;
+  const {data,error}=await sb.schema('camp').from('mkt_videos').select('*').order('last_seen',{ascending:false}).limit(5000);
+  if(!error){ MW_VID={rows:data||[],live:false}; return MW_VID; }
+  // Before the table is made (it is made after office hours), the same videos straight from YouTube.
+  const r=await mwCall({action:'preview'});
+  MW_VID={rows:(r.trend||[]).concat(r.hook||[]),live:true}; return MW_VID;
+}
+async function mwVideos(kind){
+  const d=await mwLoadVideos(); if(!$('mwBody')) return;
+  const all=d.rows.filter(x=>x.kind===kind);
+  const latest=all.reduce((m,x)=>x.last_seen>m?x.last_seen:m,'');
+  let list;
+  if(kind==='trend'){
+    // only what YouTube lists on its chart right now (the latest read), in its own order
+    const cur=all.filter(x=>Date.parse(latest)-Date.parse(x.last_seen)<30*60000);
+    if(MW_REGION==='WORLD'){
+      const by={}; cur.filter(x=>x.tag!=='IN').forEach(x=>{ if(!by[x.video_id]||Number(x.views)>Number(by[x.video_id].views)) by[x.video_id]=x; });
+      list=Object.values(by).sort((a,b)=>Number(b.views||0)-Number(a.views||0));
+    } else list=cur.filter(x=>x.tag===MW_REGION).sort((a,b)=>(a.rank||999)-(b.rank||999));
+  } else {
+    const by={}; all.filter(x=>MW_HOOKTAG==='all'||x.tag===MW_HOOKTAG).forEach(x=>{ if(!by[x.video_id]||x.last_seen>by[x.video_id].last_seen) by[x.video_id]=x; });
+    list=Object.values(by);
+    const eng=x=>Number(x.views)>0?(Number(x.likes||0)+Number(x.comments||0))/Number(x.views):0;
+    if(MW_HOOKSORT==='views') list.sort((a,b)=>Number(b.views||0)-Number(a.views||0));
+    else if(MW_HOOKSORT==='newest') list.sort((a,b)=>String(b.published_at).localeCompare(String(a.published_at)));
+    else list.sort((a,b)=>eng(b)-eng(a));
+  }
+  const chips=kind==='trend'
+    ? MW_REGIONS.map(r=>'<button class="mw-chip'+(MW_REGION===r[0]?' on':'')+'" onclick="mwSet(\'MW_REGION\',\''+r[0]+'\')">'+esc(r[1])+'</button>').join('')
+    : MW_HOOKTAGS.map(r=>'<button class="mw-chip'+(MW_HOOKTAG===r[0]?' on':'')+'" onclick="mwSet(\'MW_HOOKTAG\',\''+r[0]+'\')">'+esc(r[1])+'</button>').join('')
+      +'<select class="mw-sel" onchange="mwSet(\'MW_HOOKSORT\',this.value)">'+[['views','Most viewed'],['engaging','Most liked / commented per view'],['newest','Newest']].map(o=>'<option value="'+o[0]+'"'+(MW_HOOKSORT===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select>';
+  const meta='<span class="mw-meta">'+list.length+' video'+(list.length===1?'':'s')+(latest?' · YouTube read '+mwAgo(latest):'')
+    +(d.live?' · live from YouTube (not saved yet)':'')
+    +' <button class="btn" style="height:30px;font-size:12px" onclick="mwRefresh(this)"><i class="fa-solid fa-rotate"></i> Refresh</button></span>';
+  const note=kind==='trend'
+    ? '<div class="mw-sub" style="margin:-6px 0 12px">YouTube\u2019s own Trending list'+(MW_REGION==='WORLD'?' - United States, United Kingdom, UAE, Singapore and Australia together, most viewed first':' - in YouTube\u2019s order')+'.</div>'
+    : '<div class="mw-sub" style="margin:-6px 0 12px">The most-watched professionally made Shorts of the 30 days before each read - only channels with 1 lakh+ subscribers, no comedy skits, vlogs or gaming. Every video found stays in the library.</div>';
+  $('mwBody').innerHTML='<div class="mw-bar">'+chips+meta+'</div>'+note
+    +(list.length?'<div class="mw-grid">'+list.map(x=>mwCard(x,kind)).join('')+'</div>'
+      :'<div class="card card-pad empty"><i class="fa-solid fa-film"></i><div>No videos yet - press Refresh.</div></div>');
+}
+function mwCard(x,kind){
+  const short=kind==='hook'&&Number(x.duration_s)<=180;
+  return '<div class="mw-card" onclick="mwPlay(\''+esc(x.video_id)+'\','+(short?1:0)+')">'
+    +'<div class="mw-thumb'+(short?' v':'')+'" style="background-image:url(\''+esc(x.thumb||'')+'\')">'
+      +(kind==='trend'&&MW_REGION!=='WORLD'&&x.rank?'<span class="mw-rank">#'+x.rank+'</span>':'')
+      +(x.duration_s?'<span class="mw-dur">'+mwDur(x.duration_s)+'</span>':'')+'</div>'
+    +'<div class="mw-cb"><div class="mw-ct" title="'+esc(x.title)+'">'+esc(x.title)+'</div>'
+      +'<div class="mw-cc">'+esc(x.channel||'')+'</div>'
+      +'<div class="mw-cs"><span><i class="fa-solid fa-eye"></i>'+mwNum(x.views)+'</span>'
+        +(x.likes!=null?'<span><i class="fa-solid fa-thumbs-up"></i>'+mwNum(x.likes)+'</span>':'')
+        +(x.comments!=null?'<span><i class="fa-solid fa-comment"></i>'+mwNum(x.comments)+'</span>':'')
+        +'<span><i class="fa-regular fa-clock"></i>'+mwAgo(x.published_at)+'</span></div></div></div>';
+}
+window.mwPlay=function(id,vertical){
+  openModal('<div class="modal-head"><h3><i class="fa-brands fa-youtube" style="color:#dc2626"></i> Video</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="display:flex;justify-content:center;background:#000;padding:0">'
+      +'<iframe src="https://www.youtube.com/embed/'+encodeURIComponent(id)+'?autoplay=1&rel=0" style="border:0;width:'+(vertical?'min(380px,100%)':'100%')+';aspect-ratio:'+(vertical?'9/16':'16/9')+';max-height:78vh" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>'
+    +'<div class="modal-foot"><a class="btn" href="https://www.youtube.com/watch?v='+encodeURIComponent(id)+'" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open on YouTube</a><button class="btn primary" onclick="closeModal()">Close</button></div>',vertical?'md':'lg');
+};
+window.mwSet=function(k,v){ if(k==='MW_REGION') MW_REGION=v; else if(k==='MW_HOOKTAG') MW_HOOKTAG=v; else if(k==='MW_HOOKSORT') MW_HOOKSORT=v;
+  else if(k==='MW_LDAYS') MW_LDAYS=v; else if(k==='MW_LWHO') MW_LWHO=v; else if(k==='MW_LDIST') MW_LDIST=v;
+  if(MW_TAB==='launches') mwDrawLaunches(); else mwVideos(MW_TAB==='hooks'?'hook':'trend'); };
+window.mwRefresh=async function(btn){
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading YouTube…'; }
+  try{ const r=await mwCall({action:'refresh',force:true}); MW_VID=null; toast('Read from YouTube: '+Object.keys(r.saved||{}).map(k=>(r.saved[k])+' '+(k==='trend'?'trend':'hook')+' rows').join(', '),'ok'); }
+  catch(e){ if(/mkt_videos/.test(e.message)) MW_VID=null; else toast(e.message,'err'); MW_VID=null; }
+  renderPage();
+};
+
+/* ---------------------------------------------------------------- Launches (WB RERA) */
+// A developer is marked Competitor when its RERA name holds the distinctive word(s) of a name on the
+// Competitor watch list (e.g. "MERLIN" for Merlin Group); Our Brand for Dream Gateway Hotels Ltd and
+// any RERA developer the watch list ties to our own brand. The words matched are shown on hover.
+const MW_GENERIC=/\b(group|realty|realtors|limited|ltd|pvt|private|kolkata|projects?|by|the|and|properties|developers?|infra(structure)?|homes?|estates?)\b/gi;
+function mwKeyOf(name){ const k=String(name||'').replace(MW_GENERIC,' ').replace(/[^a-z0-9 ]/gi,' ').replace(/\s+/g,' ').trim().toUpperCase(); return k.length>=3?k:String(name||'').toUpperCase().trim(); }
+async function mwLaunches(){
+  if(!MW_RERA){
+    const cols='procode,name,reg_no,reg_date,promoter_name,promoter_type,district,block,police_station,pincode,address,project_type,project_status,apartments,land_area_sqm,built_area_sqm,carpet_area_sqm,completion_date,source_url,list_seen_at';
+    const [rows,wl,tg]=await Promise.all([
+      ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).in('district',MW_DISTRICTS).eq('list_status','approved').order('reg_date',{ascending:false}); }),
+      sb.schema('camp').from('competitor_watchlist').select('id,name,category,is_own_brand'),
+      sb.schema('camp').from('pi_targets').select('value,watchlist_id').eq('source','rera').eq('kind','promoter')
+    ]);
+    MW_RERA=rows;
+    const w=(wl&&wl.data)||[];
+    const own=new Set(w.filter(x=>x.is_own_brand).map(x=>x.id));
+    MW_WL={ownPromoters:((tg&&tg.data)||[]).filter(t=>own.has(t.watchlist_id)).map(t=>String(t.value).toUpperCase()),
+      comps:w.filter(x=>x.category==='competitor').map(x=>({name:x.name,key:mwKeyOf(x.name)}))};
+    if(!MW_WL.ownPromoters.length) MW_WL.ownPromoters=['DREAM GATEWAY HOTELS'];
+  }
+  mwDrawLaunches();
+}
+function mwWho(r){
+  const p=String(r.promoter_name||'').toUpperCase();
+  if(MW_WL.ownPromoters.some(x=>p.indexOf(x.replace(/\s+LTD\.?$|\s+LIMITED$/,''))!==-1)) return {k:'own',label:'Our Brand'};
+  const c=MW_WL.comps.find(c=>c.key&&new RegExp('\\b'+c.key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b').test(p));
+  if(c) return {k:'comp',label:c.name};
+  const n=MW_REPUTED.find(x=>x[1].test(p));
+  return n?{k:'rep',label:n[0]}:null;
+}
+/* PREMIUM ONLY (14 Nov 2026, Ayush: "LAUNCHES too should be premium projects ... apartments from well renowned
+   companies", chose "Named developers only"). A launch shows only when its RERA developer is Our Brand, on the
+   Competitor watch list, or one of these well-known developers (matched in the RERA developer name). A project a big
+   developer registers under a differently named company (an SPV) does not match; add its name here to show it. */
+const MW_REPUTED=[
+  ['Ambuja Neotia',/\bAMBUJA\b|\bNEOTIA\b/],['PS Group',/\bPS GROUP\b/],['Merlin',/\bMERLIN\b/],['Siddha',/\bSIDDHA\b/],
+  ['Eden',/\bEDEN\b/],['Godrej',/\bGODREJ\b/],['Srijan',/\bSRIJAN\b/],['DTC',/\bDTC\b/],['Shapoorji Pallonji',/\bSHAPOORJI\b/],
+  ['Tata Housing',/\bTATA (HOUSING|REALTY)\b/],['DLF',/\bDLF\b/],['Sugam',/\bSUGAM\b/],['Shrachi',/\bSHRACHI\b/],['Atri',/\bATRI\b/],
+  ['Primarc',/\bPRIMARC\b/],['Mani Group',/\bMANI GROUP\b/],['Orbit',/\bORBIT\b/],['Salarpuria Sattva',/\bSALARPURIA\b|\bSATTVA\b/],
+  ['Bengal Peerless',/\bBENGAL PEERLESS\b/],['Purti',/\bPURTI\b/],['Unimark',/\bUNIMARK\b/],['Rajwada',/\bRAJWADA\b/],
+  ['Alcove',/\bALCOVE\b/],['Lodha',/\bLODHA\b|\bMACROTECH\b/],['Prestige',/\bPRESTIGE ESTATES?\b/],['Sobha',/\bSOBHA\b/],
+  ['Puravankara',/\bPURAVANKARA\b|\bPROVIDENT HOUSING\b/],['Mahindra Lifespaces',/\bMAHINDRA LIFESPACE/],['South City',/\bSOUTH CITY PROJECTS\b/]
+];
+function mwLaunchList(){
+  const days=MW_LDAYS==='all'?null:Number(MW_LDAYS);
+  const q=MW_LQ.trim().toLowerCase();
+  return MW_RERA.map(r=>Object.assign({},r,{_who:mwWho(r),_d:mwDaysSince(r.reg_date)})).filter(r=>{
+    if(!r._who) return false;   // named developers only (MW_REPUTED)
+    if(days!=null&&(r._d==null||r._d>days)) return false;
+    if(MW_LDIST!=='all'&&r.district!==MW_LDIST) return false;
+    if(MW_LWHO==='own'&&!(r._who&&r._who.k==='own')) return false;
+    if(MW_LWHO==='comp'&&!(r._who&&r._who.k==='comp')) return false;
+    if(q&&[r.name,r.promoter_name,r.address,r.police_station,r.pincode,r.block,r.reg_no].join(' ').toLowerCase().indexOf(q)===-1) return false;
+    return true;
+  });
+}
+function mwDrawLaunches(){
+  const b=$('mwBody'); if(!b) return;
+  const chip=(k,v,l,cur)=>'<button class="mw-chip'+(cur===v?' on':'')+'" onclick="mwSet(\''+k+'\',\''+v+'\')">'+l+'</button>';
+  b.innerHTML='<div class="mw-bar">'
+      +[['all','All named developers'],['own','Our Brand'],['comp','Competitors']].map(o=>chip('MW_LWHO',o[0],o[1],MW_LWHO)).join('')
+      +'<select class="mw-sel" onchange="mwSet(\'MW_LDIST\',this.value)"><option value="all">Kolkata + nearby</option>'+MW_DISTRICTS.map(d=>'<option'+(MW_LDIST===d?' selected':'')+'>'+esc(d)+'</option>').join('')+'</select>'
+      +'<input class="mw-in" placeholder="Search project, developer, area, PIN" value="'+esc(MW_LQ)+'" oninput="MW_LQ=this.value;clearTimeout(window._mwT);window._mwT=setTimeout(mwLaunchTable,250)">'
+      +'<span class="mw-meta" id="mwLCount"></span>'
+    +'</div>'
+    +'<div class="mw-sub" style="margin:-6px 0 12px">Projects by well-known developers (Our Brand, the Competitor list, and names such as Ambuja Neotia, PS Group, Merlin, Siddha, Godrej, Shapoorji Pallonji) registered in the last 3 months on West Bengal RERA in Kolkata, North 24-Parganas, South 24-Parganas and Howrah. "Launched" is the RERA registration date. Areas are RERA\u2019s square metres shown in sq ft.</div>'
+    +'<div id="mwLT"></div>';
+  mwLaunchTable();
+}
+function mwLaunchTable(){
+  const host=$('mwLT'); if(!host) return;
+  const list=mwLaunchList();
+  const seen=MW_RERA.reduce((m,x)=>x.list_seen_at>m?x.list_seen_at:m,'');
+  const c=$('mwLCount'); if(c) c.textContent=list.length+' project'+(list.length===1?'':'s')+(seen?' · RERA read '+mwAgo(seen):'');
+  const sqft=v=>v==null||v===''?'—':inrGroup(String(Math.round(Number(v)*10.7639)));
+  host.innerHTML=list.length?'<div class="mw-tw" style="max-height:calc(100vh - 300px)"><table class="mw-t"><thead><tr>'
+        +'<th>Launched</th><th>Project</th><th>Developer</th><th>Location</th><th>Type</th><th style="text-align:right">Flats</th><th style="text-align:right">Built-up (sq ft)</th><th style="text-align:right">Land (sq ft)</th><th>Completion</th><th>RERA No.</th></tr></thead><tbody>'
+        +list.map(r=>'<tr>'
+          +'<td><div class="mw-days'+(r._d!=null&&r._d<=30?' new':'')+'">'+(r._d==null?'—':r._d===0?'Today':r._d+' day'+(r._d===1?'':'s')+' ago')+'</div><div class="mw-sub">'+mwDmy(r.reg_date)+'</div></td>'
+          +'<td><div class="mw-pn">'+esc(String(r.name||'').replace(/^"+|"+$/g,''))+'</div><div class="mw-sub">'+esc(r.project_status||'')+'</div></td>'
+          +'<td><div>'+esc(r.promoter_name||'—')+'</div><div class="mw-sub">'+esc(r.promoter_type||'')+'</div>'
+            +(r._who?'<span class="mw-tag '+r._who.k+'">'+esc(r._who.k==='own'?'Our Brand':r._who.k==='comp'?'Competitor · '+r._who.label:r._who.label)+'</span>':'')+'</td>'
+          +'<td><div>'+esc(r.address||'—')+'</div><div class="mw-sub">'+esc([r.police_station,r.block,r.district,r.pincode].filter(Boolean).join(' · '))+'</div></td>'
+          +'<td>'+esc(r.project_type||'—')+'</td>'
+          +'<td style="text-align:right">'+(r.apartments==null?'—':esc(String(r.apartments)))+'</td>'
+          +'<td style="text-align:right">'+sqft(r.built_area_sqm)+'</td>'
+          +'<td style="text-align:right">'+sqft(r.land_area_sqm)+'</td>'
+          +'<td style="white-space:nowrap">'+mwDmy(r.completion_date)+'</td>'
+          +'<td><a href="'+esc(r.source_url||('https://rera.wb.gov.in/project_details.php?procode='+r.procode))+'" target="_blank" rel="noopener" style="white-space:nowrap">'+esc(r.reg_no||'View')+' <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i></a></td>'
+        +'</tr>').join('')+'</tbody></table></div>'
+      :'<div class="card card-pad empty"><i class="fa-solid fa-building"></i><div>No projects for this choice.</div></div>';
+}
+/* ============================ MARKETING ANALYTICS ============================
+   The "Analytics" tab of Campaign Analytics (16 Nov 2026, Ayush: "make a new Tab named Analytics and start with these
+   Mathematical Models"). Decision support only - it reads, calculates and explains; it changes nothing on Google or
+   Meta. Four models, all from data JainE already stores (camp.ads_daily, camp.crm_google_daily, camp.ads_entities):
+
+   1. QUALITY OF SPEND - cost per qualified lead (QL), per site visit and per booking from the CRM, per project, platform
+      and campaign. A campaign that brings cheap leads nobody qualifies is worse than a dearer one that brings QLs.
+      The CRM marks a lead qualified days or weeks later, so this reads a window that ENDS 21 DAYS AGO (MA_SETTLE).
+   2. WHY DID COST PER LEAD CHANGE - the last 7 days against the 28 before. Cost per lead = cost per 1,000 impressions /
+      (1,000 x click rate x lead rate), so its change splits exactly (in logs) into: ads dearer to show (auction),
+      fewer people clicking (creative), fewer clickers becoming leads (form / landing page). A Poisson test says whether
+      the change in leads is more than normal day-to-day noise.
+   3. MONEY-WASTING ALERTS - (a) a lead campaign spending for 7 days with no lead when its own past rate says leads were
+      due; (b) a campaign whose CRM leads, over the settled window, produced no QL when its project's QL rate says some
+      were due. Both flagged only when the chance of it being bad luck is under 5%.
+   4. MONTH-END FORECAST - spend, platform leads and CRM leads by month-end from the pace of the last 7 complete days,
+      as a range (spend: day-to-day variation; leads: Poisson), beside last month and today's budgets.
+
+   Leads: Google = lead-form submissions (form_leads, as on the Overview); Facebook = Results of lead / WhatsApp
+   campaigns only (obIsLead) - awareness and engagement results are never counted as leads. CRM figures only where the
+   CRM ties the lead to one of our campaigns (same rules as the Overview); its WhatsApp line goes on the project only. */
+const MA_SETTLE=21, MA_DAYS_BACK=200;
+let MA={win:90}, MA_D=null;
+const MA_CSS='<style>'
+  /* calm styling (16 Nov 2026, Ayush: "the styling hurts the eyes"): dark figures, one neutral icon style, status shown
+     by a small dot or a soft pill, light tables */
+  +'.ma-sec{margin:0 0 22px}.ma-h{font-weight:700;font-size:16px;color:#0f172a;margin:0 0 12px;display:flex;align-items:center;gap:8px}'
+  +'.ma-h>i:first-child{width:28px;height:28px;border-radius:8px;background:#f1f5f9;color:#475569!important;display:inline-flex;align-items:center;justify-content:center;font-size:13px}'
+  +'.ma-why{font-size:12px;color:#64748b;margin:0 0 10px;line-height:1.5;max-width:980px}'
+  +'.ma-tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;color:#1e293b;background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden}'
+  +'.ma-tbl th{font-size:11.5px;font-weight:600;color:#64748b;text-align:right;padding:10px 12px;border-bottom:1px solid #e2e8f0;white-space:nowrap;background:#f8fafc}'
+  +'.ma-tbl th:first-child,.ma-tbl td:first-child{text-align:left}'
+  +'.ma-tbl td{padding:10px 12px;border-bottom:1px solid #f1f5f9;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}'
+  +'.ma-tbl tr:last-child td{border-bottom:0}.ma-tbl tbody tr:hover td{background:#fafbfc}'
+  +'.ma-tbl tr.ma-p td{font-weight:600;background:#f8fafc;color:#0f172a}.ma-tbl td.ma-n{white-space:normal;min-width:220px}'
+  +'.ma-b{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap;border:1px solid transparent}'
+  +'.ma-b.bad{background:#fef2f2;color:#b91c1c;border-color:#fde2e2}.ma-b.good{background:#f0fdf4;color:#15803d;border-color:#dcfce7}.ma-b.mid{background:#f8fafc;color:#64748b;border-color:#e2e8f0}.ma-b.warn{background:#fffbeb;color:#a16207;border-color:#fef3c7}'
+  +'.ma-card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;margin:0 0 10px;font-size:13px;line-height:1.55;color:#334155}'
+  +'.ma-card b{font-weight:700}.ma-sub{font-size:11px;color:var(--slate)}'
+  +'.ma-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px}'
+  +'.ma-bar select{height:34px;padding:0 10px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-weight:600;background:var(--bg-card);color:var(--ink)}'
+  +'.ca-tabs{display:flex;gap:6px;margin:0 0 14px;border-bottom:1px solid var(--line)}'
+  +'.ca-tab{border:0;background:none;padding:9px 14px;font-size:13.5px;font-weight:700;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}'
+  +'.ca-tab.on{color:var(--ink);border-bottom-color:#b3171d}'
+  +'</style>';
+
+// ---------------------------------------------------------------- maths
+function maPoisCdf(k,l){ // P(X <= k), X ~ Poisson(l)
+  if(l<=0) return 1; if(k<0) return 0;
+  if(l>200){ const z=(k+0.5-l)/Math.sqrt(l); return maNorm(z); }
+  let t=Math.exp(-l), s=t; for(let i=1;i<=k;i++){ t*=l/i; s+=t; } return Math.min(1,s); }
+function maNorm(z){ const t=1/(1+0.2316419*Math.abs(z)), d=0.3989423*Math.exp(-z*z/2);
+  const p=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274)))); return z>0?1-p:p; }
+// two-sided chance that a count this far from what was expected is just noise
+function maPoisP(k,l){ if(l<=0) return k>0?0:1; const lo=maPoisCdf(k,l), hi=1-maPoisCdf(k-1,l); return Math.min(1,2*Math.min(lo,hi)); }
+function maSd(a){ if(a.length<2) return 0; const m=a.reduce((s,x)=>s+x,0)/a.length; return Math.sqrt(a.reduce((s,x)=>s+(x-m)*(x-m),0)/(a.length-1)); }
+function maPct(x){ return x==null||!isFinite(x)?'—':(x>0?'+':'')+Math.round(x*100)+'%'; }
+function maRate(n,d){ return d>0?n/d:null; }
+
+// ---------------------------------------------------------------- data
+async function maAll(q){ const out=[]; for(let f=0;;f+=1000){ const r=await q().range(f,f+999); if(r.error) throw r.error; out.push.apply(out,r.data||[]); if(!r.data||r.data.length<1000) break; } return out; }
+async function maLoad(){
+  const today=obIst(), from=obAdd(today,-MA_DAYS_BACK);
+  // the CRM a full 12 months back (16 Nov 2026: quality trend over the whole year)
+  const crmFrom=new Date(Date.UTC(+today.slice(0,4),+today.slice(5,7)-12,1)).toISOString().slice(0,10);
+  const [acc,em,eg,days,crm]=await Promise.all([
+    sb.schema('camp').from('ads_accounts').select('platform,account_id,name,project').eq('include',true),
+    obEntities('meta'), obEntities('google'),
+    maAll(function(){ return sb.schema('camp').from('ads_daily').select('platform,account_id,campaign_id,day,spend,impressions,clicks,results,form_leads').gte('day',from).order('day'); }),
+    maAll(function(){ return sb.schema('camp').from('crm_google_daily').select('day,business_unit,campaign_type,campaign_id,leads,qualified,site_visited,booked').gte('day',crmFrom).order('day'); })
+  ]);
+  if(acc.error) throw acc.error;
+  const A={}; (acc.data||[]).forEach(function(a){ A[a.platform+':'+a.account_id]=a.project||a.name||a.account_id; });
+  const E={}; em.concat(eg).forEach(function(x){ E[x.kind+':'+x.id]=x; });
+  const camp={}; // campaign_id -> {platform, project, name, lead}
+  const rows=[]; days.forEach(function(d){ const p=A[d.platform+':'+d.account_id]; if(!p) return;
+    let c=camp[d.campaign_id]; if(!c){ const e=E['campaign:'+d.campaign_id]||{};
+      c=camp[d.campaign_id]={id:d.campaign_id,platform:d.platform,project:p,name:e.name||d.campaign_id,status:e.status,budget:e.daily_budget,lead:d.platform==='google'?true:obIsLead(E,{campaign_id:d.campaign_id})}; }
+    const leads=d.platform==='google'?(d.form_leads!=null?+d.form_leads:null):(c.lead?+d.results||0:null);
+    rows.push({c:c,day:d.day,spend:+d.spend||0,impr:+d.impressions||0,clicks:+d.clicks||0,leads:leads}); });
+  // CRM rows tied to our campaigns (or a project's WhatsApp line), as on the Overview
+  const pn=function(x){ return String(x||'').toLowerCase().replace(/dream|banquets?/g,'').replace(/[^a-z0-9]/g,''); };
+  const projN={}; Object.keys(A).forEach(function(k){ projN[pn(A[k])]=A[k]; });
+  // (the entity rows carry no platform field: which list they came from says it)
+  const own={}; [['meta',em],['google',eg]].forEach(function(x){ x[1].forEach(function(e){ if(e.kind!=='campaign') return; const p=A[x[0]+':'+e.account_id]; if(p) own[x[0]+':'+e.id]=p; }); });
+  const crmRows=[]; crm.forEach(function(x){ const fb=x.campaign_type==='facebook', id=String(x.campaign_id), o=own[(fb?'meta':'google')+':'+id], wa=fb&&/^whatsapp/i.test(id);
+    if(!o&&!wa) return; crmRows.push({day:x.day,platform:fb?'meta':'google',cid:o?id:null,project:o||projN[pn(x.business_unit)]||x.business_unit,
+      leads:+x.leads||0,ql:+x.qualified||0,sv:+x.site_visited||0,bk:+x.booked||0}); });
+  MA_D={today:today,rows:rows,camp:camp,crm:crmRows,E:E,A:A};
+}
+
+// ---------------------------------------------------------------- view
+/* COMPACT (16 Nov 2026, Ayush: "too long ... too much text"). Four summary cards on top, one per model; a click opens
+   that model's detail under them, one at a time. Explanations sit behind an (i) tooltip; the full maths is in the
+   document "JainE Marketing Analytics: Models and Calculations". Long lists open on demand. */
+const MA_CSS2='<style>'
+  +'.ma-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 22px}'
+  +'@media(max-width:1000px){.ma-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:560px){.ma-cards{grid-template-columns:1fr}}'
+  +'.ma-k{position:relative;background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:14px 16px;min-height:118px;cursor:pointer;text-align:left;font-family:inherit;color:#0f172a;transition:box-shadow .15s,border-color .15s;box-shadow:0 1px 2px rgba(15,23,42,.04)}'
+  +'.ma-k:hover{border-color:#cbd5e1;box-shadow:0 4px 14px rgba(15,23,42,.07)}'
+  +'.ma-kt{display:flex;align-items:center;gap:9px;margin:0 0 10px;padding-right:14px}'
+  +'.ma-ic{flex:none;width:28px;height:28px;border-radius:8px;background:#f1f5f9;color:#475569;display:inline-flex;align-items:center;justify-content:center;font-size:12.5px}'
+  +'.ma-kn{font-size:13px;font-weight:600;color:#334155;line-height:1.25}'
+  +'.ma-dot{position:absolute;top:16px;right:16px;width:8px;height:8px;border-radius:50%;background:#cbd5e1}'
+  +'.ma-dot.bad{background:#ef4444}.ma-dot.warn{background:#f59e0b}.ma-dot.good{background:#22c55e}'
+  +'.ma-kv{font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-.01em;margin:0 0 3px;font-variant-numeric:tabular-nums}'
+  +'.ma-ks{font-size:12px;color:#64748b;line-height:1.4}'
+  +'.ma-grp{font-size:12.5px;font-weight:600;color:#64748b;margin:2px 2px 10px}'
+  +'.ma-kl{font-size:12.5px;font-weight:600;color:#64748b}'
+  +'.ma-i{color:#cbd5e1;cursor:help;font-size:13px;margin-left:2px}.ma-i:hover{color:#64748b}'
+  +'.ma-row{cursor:pointer}'
+  +'.ma-more{border:0;background:none;color:#475569;font-weight:600;font-size:13px;cursor:pointer;padding:10px 2px}.ma-more:hover{color:#0f172a}'
+  +'.ma-up{color:#15803d}.ma-dn{color:#b91c1c}'
+  // four big cards, proper buttons, stat tiles, the watch feed
+  +'.ma-big{display:flex;flex-wrap:wrap;gap:12px}.ma-big>.ma-k{flex:1 1 calc(25% - 12px);min-width:200px}'   // every row filled edge to edge: 4 + 3 stretch, no empty space
+  +'.ma-big .ma-k{min-height:150px;padding:18px 20px}.ma-big .ma-kv{font-size:24px;margin-top:6px}.ma-big .ma-ks{font-size:12.5px;max-width:92%}'
+  +'.ma-open{display:inline-flex;gap:6px;align-items:center;margin-top:12px;font-size:12.5px;font-weight:600;color:#334155;border:1px solid #e2e8f0;border-radius:8px;padding:5px 10px;background:#f8fafc}'
+  +'.ma-k:hover .ma-open{background:#0f172a;color:#fff;border-color:#0f172a}'
+  +'.ma-btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border:1px solid #e2e8f0;border-radius:9px;background:#fff;color:#334155;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,.04)}'
+  +'.ma-btn:hover{background:#f8fafc;border-color:#cbd5e1;color:#0f172a}'
+  +'.ma-seg{display:inline-flex;border:1px solid #e2e8f0;border-radius:10px;padding:3px;background:#f8fafc;gap:2px}'
+  +'.ma-seg button{border:0;background:none;height:28px;padding:0 12px;border-radius:7px;font-family:inherit;font-size:12.5px;font-weight:600;color:#64748b;cursor:pointer}'
+  +'.ma-seg button:hover{color:#0f172a}.ma-seg button.on{background:#fff;color:#0f172a;box-shadow:0 1px 3px rgba(15,23,42,.12)}'
+  +'.ma-h .ma-seg{margin-left:auto}'
+  +'.ma-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:0 0 14px}'
+  +'.ma-st{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px}.ma-stl{font-size:12px;font-weight:600;color:#64748b}'
+  +'.ma-stv{font-size:22px;font-weight:700;color:#0f172a;margin:4px 0 2px;font-variant-numeric:tabular-nums}'
+  +'.ma-note{font-size:12.5px;color:#64748b;margin:0 0 14px}'
+  +'.ma-feed{background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden}'
+  +'.ma-fi{display:grid;grid-template-columns:14px 1fr minmax(180px,30%);gap:12px;padding:12px 16px;border-bottom:1px solid #f1f5f9;align-items:start}.ma-fi:last-child{border-bottom:0}'
+  +'@media(max-width:760px){.ma-fi{grid-template-columns:14px 1fr}.ma-fa{grid-column:2}}'
+  +'.ma-dot2{width:8px;height:8px;border-radius:50%;background:#cbd5e1;margin-top:6px}.ma-dot2.bad{background:#ef4444}.ma-dot2.warn{background:#f59e0b}.ma-dot2.good{background:#22c55e}'
+  +'.ma-ft{font-size:13.5px;font-weight:600;color:#0f172a}.ma-fc{font-size:12px;color:#64748b;margin-top:2px}.ma-fw{font-size:12.5px;color:#334155;margin-top:4px}'
+  +'.ma-fa{font-size:12.5px;color:#475569;background:#f8fafc;border-radius:8px;padding:7px 10px}'
+  +'</style>';
+let MA_VIEW=null, MA_OPEN=null, MA_ALL=false;
+async function maView(host){
+  host.innerHTML=MA_CSS+MA_CSS2+'<div id="maBody"><div class="loader"><div class="spin"></div></div></div>';
+  try{ if(!MA_D||MA_D.today!==obIst()) await maLoad(); }
+  catch(e){ $('maBody').innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(e.message||String(e))+'</div>'; return; }
+  maPaint();
+  // models that need more data (ad level, impression share) load it after the first paint (46-marketing-intel-more.js)
+  if(typeof maLoadExtra==='function') maLoadExtra().then(maPaint,function(){ maPaint(); });
+}
+window.maSetWin=function(v){ MA.win=+v; MA_OPEN=null; maPaint(); };
+window.maGo=function(v){ MA_VIEW=v; MA_ALL=false; maPaint(); };
+window.maOpen=function(p){ MA_OPEN=MA_OPEN===p?null:p; maPaint(); };
+window.maAllToggle=function(){ MA_ALL=!MA_ALL; maPaint(); };
+function maSum(list,f){ return list.reduce(function(s,x){ return s+(+x[f]||0); },0); }
+function maIn(d,s,e){ return d>=s&&d<=e; }
+function maInfo(t){ return '<i class="fa-solid fa-circle-info ma-i" title="'+esc(t)+'"></i>'; }
+function maVs(a,b){ if(!(b>0)) return ''; const c=a/b-1; return '<span class="'+(c>=0?'ma-up':'ma-dn')+'">'+maPct(c)+'</span>'; }
+function obDmyS(d){ const s=String(d).split('-'); return s[2]+'/'+s[1]; }
+function maPlat(pl){ return pl==='google'?'<i class="fa-brands fa-google" style="color:#ea4335"></i>':'<i class="fa-brands fa-facebook" style="color:#1877f2"></i>'; }
+
+/* CARDS THAT OPEN PAGES (16 Nov 2026, Ayush: "I just want Cards when one is clicked a different page showcasing it").
+   Every model registers itself in MA_REG: {id, group, title, icon, color, data(), card(d) -> {val, sub, tone}, view(d),
+   ready()? (false while its extra data is still loading)}. The grid shows one card per model, grouped; a click opens
+   that model alone with a back link. Each model's data() runs once per paint and is shared by its card and page. */
+const MA_REG=[];
+function maReg(m){ MA_REG.push(m); }
+function maPaint(){
+  const b=$('maBody'); if(!b) return;
+  const cache={}; const dataOf=function(m){ if(!(m.id in cache)){ try{ cache[m.id]=m.data(); }catch(e){ cache[m.id]={__err:e.message||String(e)}; } } return cache[m.id]; };
+  const page=MA_VIEW&&MA_REG.find(function(m){ return m.id===MA_VIEW; });
+  if(page){
+    const d=dataOf(page);
+    b.innerHTML='<div style="margin:0 0 14px"><button class="ma-btn" onclick="maGo(null)"><i class="fa-solid fa-arrow-left"></i> All insights</button></div>'
+      +(page.ready&&!page.ready()?'<div class="loader"><div class="spin"></div></div>':d&&d.__err?'<div class="ma-card" style="color:#b91c1c">Could not work this out: '+esc(d.__err)+'</div>':page.view(d));
+    return;
+  }
+  // four cards, 2 x 2 (16 Nov 2026: the twelve earlier cards merged into four - 46-marketing-intel-more.js)
+  b.innerHTML='<div class="ma-cards ma-big">'+MA_REG.map(function(m){
+      let c; if(m.ready&&!m.ready()) c={val:'…',sub:'Working it out'}; else { const d=dataOf(m); c=d&&d.__err?{val:'—',sub:'Could not work this out'}:m.card(d); }
+      return '<button class="ma-k" onclick="maGo(\''+m.id+'\')"><span class="ma-dot'+(c.tone?' '+c.tone:'')+'"></span>'
+        +'<div class="ma-kt"><span class="ma-ic"><i class="'+m.icon+'"></i></span><span class="ma-kn">'+m.title+'</span></div>'
+        +'<div class="ma-kv">'+c.val+'</div><div class="ma-ks">'+c.sub+'</div><span class="ma-open">Open <i class="fa-solid fa-arrow-right"></i></span></button>'; }).join('')+'</div>';
+}
+function maHead(icon,color,title,info,extra){ return '<div class="ma-h"><i class="'+icon+'"></i> '+title+maInfo(info)+(extra||'')+'</div>'; }
+
+// 4. MONTH-END FORECAST ---------------------------------------------------------
+function maForecastData(){
+  const D=MA_D, today=D.today, y=obAdd(today,-1), m0=today.slice(0,8)+'01';
+  const dim=new Date(Date.UTC(+today.slice(0,4),+today.slice(5,7),0)).getUTCDate(), done=+today.slice(8,10)-1, left=dim-done;
+  const lm0=obAdd(m0,-1).slice(0,8)+'01', lm1=obAdd(m0,-1), r0=obAdd(today,-7);
+  const projects={}; D.rows.forEach(function(r){ projects[r.c.project]=1; });
+  const bud={}; Object.keys(D.camp).forEach(function(k){ const c=D.camp[k]; if(caLive(c.status)&&c.budget!=null) bud[c.project]=(bud[c.project]||0)+(+c.budget||0); });
+  const line=function(p){
+    const rs=D.rows.filter(function(r){ return !p||r.c.project===p; }), cr=D.crm.filter(function(r){ return !p||r.project===p; });
+    const mtd=rs.filter(function(r){ return maIn(r.day,m0,y); }), rec=rs.filter(function(r){ return maIn(r.day,r0,y); }), lm=rs.filter(function(r){ return maIn(r.day,lm0,lm1); });
+    const daily={}; rec.forEach(function(r){ daily[r.day]=(daily[r.day]||0)+r.spend; }); const dv=[]; for(let d=r0;d<=y;d=obAdd(d,1)) dv.push(daily[d]||0);
+    const sRate=maSum(rec,'spend')/7, lRate=maSum(rec.filter(function(r){ return r.leads!=null; }),'leads')/7;
+    const cMtd=maSum(cr.filter(function(r){ return maIn(r.day,m0,y); }),'leads'), cRate=maSum(cr.filter(function(r){ return maIn(r.day,r0,y); }),'leads')/7;
+    const sMtd=maSum(mtd,'spend'), sF=sMtd+sRate*left, sE=1.96*maSd(dv)*Math.sqrt(left);
+    const lMtd=maSum(mtd.filter(function(r){ return r.leads!=null; }),'leads'), lam=lRate*left, lF=lMtd+lam, lE=1.96*Math.sqrt(lam);
+    const cl=cRate*left, cF=cMtd+cl, cE=1.96*Math.sqrt(cl);
+    const bTot=p?bud[p]:Object.keys(bud).reduce(function(s,k){ return s+bud[k]; },0);
+    return {p:p,spend:sF,spendLo:Math.max(sMtd,sF-sE),spendHi:sF+sE,leads:lF,leadsLo:Math.max(lMtd,lF-lE),leadsHi:lF+lE,crm:cF,crmLo:Math.max(cMtd,cF-cE),crmHi:cF+cE,
+      lmSpend:maSum(lm,'spend'),lmLeads:maSum(lm.filter(function(r){ return r.leads!=null; }),'leads'),atBudget:bTot!=null?sMtd+bTot*left:null};
+  };
+  return {done:done,left:left,today:today,rows:Object.keys(projects).map(line).filter(function(x){ return x.spend>0||x.lmSpend>0; }).sort(function(a,b){ return b.spend-a.spend; }),tot:line(null)};
+}
+function maForecastView(F){
+  const mName=new Date(Date.UTC(+F.today.slice(0,4),+F.today.slice(5,7)-1,1)).toLocaleString('en-IN',{month:'long',timeZone:'UTC'});
+  const head=maHead('fa-solid fa-flag-checkered','#2563eb','Month-end forecast · '+esc(mName),
+    'If the last 7 days\u2019 pace holds for the remaining days. Small figures = likely range (95%). Hover a spend figure for what today\u2019s budgets would spend. No monthly targets in JainE yet, so the comparison is last month.',
+    '<span class="ma-sub" style="font-weight:500;margin-left:6px">'+F.done+' days done · '+F.left+' to go</span>');
+  if(F.done<1) return head+'<div class="ma-card">The month started today: the forecast begins tomorrow.</div>';
+  const n0=function(x){ return obNum(Math.round(x)); };
+  const tr=function(x,cls){ return '<tr'+(cls?' class="'+cls+'"':'')+'><td>'+esc(x.p||'All projects')+'</td>'
+    +'<td title="At today\u2019s budgets: '+esc(obMoney(x.atBudget))+'"><b>'+obMoney(x.spend)+'</b><div class="ma-sub">'+obMoney(x.spendLo)+' – '+obMoney(x.spendHi)+'</div></td><td>'+maVs(x.spend,x.lmSpend)+'</td>'
+    +'<td><b>'+n0(x.leads)+'</b><div class="ma-sub">'+n0(x.leadsLo)+' – '+n0(x.leadsHi)+'</div></td><td>'+maVs(x.leads,x.lmLeads)+'</td>'
+    +'<td>'+n0(x.crm)+'</td><td>'+obMoney(x.leads>0?x.spend/x.leads:null)+'</td></tr>'; };
+  return head+'<div style="overflow-x:auto"><table class="ma-tbl"><thead><tr><th>Project</th><th>Spend</th><th>vs last month</th><th>Leads</th><th>vs last month</th><th>CRM leads</th><th>Cost per lead</th></tr></thead><tbody>'
+    +F.rows.map(function(x){ return tr(x); }).join('')+tr(F.tot,'ma-p')+'</tbody></table></div>';
+}
+
+// 2. WHY DID COST PER LEAD CHANGE ------------------------------------------------
+function maParts(rs){ const s=maSum(rs,'spend'), i=maSum(rs,'impr'), c=maSum(rs,'clicks'), l=maSum(rs,'leads');
+  return {spend:s,impr:i,clicks:c,leads:l,cpm:i?s/i*1000:null,ctr:i?c/i:null,cvr:c?l/c:null,cpl:l?s/l:null}; }
+function maChangesData(){
+  const D=MA_D, y=obAdd(D.today,-1), r0=obAdd(D.today,-7), b1=obAdd(D.today,-8), b0=obAdd(D.today,-35);
+  const groups={};
+  D.rows.forEach(function(r){ if(r.leads==null) return; const k=r.c.id; (groups[k]=groups[k]||{c:r.c,rec:[],base:[]});
+    if(maIn(r.day,r0,y)) groups[k].rec.push(r); else if(maIn(r.day,b0,b1)) groups[k].base.push(r); });
+  const out=[];
+  Object.keys(groups).forEach(function(k){ const g=groups[k], R=maParts(g.rec), B=maParts(g.base);
+    if(!(R.spend>0)||!(B.leads>=10)||!(B.spend>0)||!caLive(g.c.status)) return;
+    const lam=R.spend*B.leads/B.spend, p=maPoisP(Math.round(R.leads),lam);
+    const ch={cpl:R.cpl&&B.cpl?R.cpl/B.cpl-1:null,cpm:R.cpm&&B.cpm?R.cpm/B.cpm-1:null,ctr:R.ctr&&B.ctr?R.ctr/B.ctr-1:null,cvr:R.cvr!=null&&B.cvr?R.cvr/B.cvr-1:null};
+    let why='';
+    if(R.leads>0&&R.impr>0&&R.clicks>0&&B.impr>0&&B.clicks>0){
+      const a=Math.log(R.cpm/B.cpm), c=-Math.log(R.ctr/B.ctr), v=-Math.log(R.cvr/B.cvr), t=a+c+v;
+      const parts=[[a,'auction cost',ch.cpm],[c,'click rate',ch.ctr],[v,'clicks to leads',ch.cvr]]
+        .filter(function(x){ return Math.abs(x[0])>0.02; }).sort(function(x,y2){ return Math.abs(y2[0])-Math.abs(x[0]); });
+      if(parts.length&&Math.abs(t)>0.02) why=parts.slice(0,2).map(function(x){ return x[1]+' '+maPct(x[2]); }).join(', ');
+    } else if(R.leads===0) why='no lead in 7 days';
+    out.push({c:g.c,R:R,B:B,lam:lam,p:p,ch:ch,why:why}); });
+  return out.sort(function(a,b){ return a.p-b.p||b.R.spend-a.R.spend; });
+}
+function maChangesView(F,C){
+  const real=C.filter(function(x){ return x.p<0.05; }), list=MA_ALL?C:real;
+  const head=maHead('fa-solid fa-magnifying-glass-chart','#7c3aed','Why did cost per lead change?',
+    'Last 7 complete days vs the 28 before, for running lead campaigns with 10+ earlier leads. Cost per lead = auction cost \u00f7 (click rate \u00d7 clicks-to-leads), so "Main cause" names the lever that moved it most. "Real" = leads too far from what the earlier rate predicted to be chance (under 5%).');
+  const verdict=function(x){ return x.p>=0.05?'<span class="ma-b mid">Normal</span>':x.R.leads<x.lam?'<span class="ma-b bad">Real: fewer leads</span>':'<span class="ma-b good">Real: more leads</span>'; };
+  const body=list.length?'<div style="overflow-x:auto"><table class="ma-tbl"><thead><tr><th>Campaign</th><th>Verdict</th><th>Leads (expected)</th><th>Cost per lead</th><th>Main cause</th></tr></thead><tbody>'
+    +list.map(function(x){ return '<tr><td class="ma-n">'+maPlat(x.c.platform)+' '+esc(x.c.name)+'<div class="ma-sub">'+esc(x.c.project)+'</div></td><td>'+verdict(x)+'</td>'
+      +'<td>'+obNum(Math.round(x.R.leads))+' <span class="ma-sub">('+obNum(Math.round(x.lam))+')</span></td><td>'+obMoney(x.R.cpl)+' <span class="'+((x.ch.cpl||0)>0?'ma-dn':'ma-up')+'">'+maPct(x.ch.cpl)+'</span></td><td class="ma-n">'+esc(x.why||'—')+'</td></tr>'; }).join('')+'</tbody></table></div>'
+    :'<div class="ma-card"><span class="ma-b good">All normal</span> No lead campaign changed beyond normal variation in the last 7 days.</div>';
+  const more=C.length>real.length?'<button class="ma-more" onclick="maAllToggle()">'+(MA_ALL?'Show only real changes':'Show all '+C.length+' campaigns')+'</button>':'';
+  return head+body+more;
+}
+
+// 3. MONEY-WASTING ALERTS --------------------------------------------------------
+function maAlertsData(){
+  const D=MA_D, y=obAdd(D.today,-1), r0=obAdd(D.today,-7), b1=obAdd(D.today,-8), b0=obAdd(D.today,-35);
+  const wEnd=obAdd(D.today,-MA_SETTLE), wStart=obAdd(wEnd,-(MA.win-1));
+  const out=[];
+  const by={}; D.rows.forEach(function(r){ if(r.leads==null||!caLive(r.c.status)) return; const g=by[r.c.id]=by[r.c.id]||{c:r.c,rs:0,rl:0,bs:0,bl:0};
+    if(maIn(r.day,r0,y)){ g.rs+=r.spend; g.rl+=r.leads; } else if(maIn(r.day,b0,b1)){ g.bs+=r.spend; g.bl+=r.leads; } });
+  Object.keys(by).forEach(function(k){ const g=by[k]; if(g.rs<3000||g.rl>0||g.bs<=0) return; const lam=g.rs*g.bl/g.bs, p=Math.exp(-lam);
+    if(p<0.05) out.push({w:g.rs,c:g.c,kind:'No leads in 7 days',cls:'bad',what:'Spent '+obMoney(g.rs)+', 0 leads; ~'+obNum(Math.round(lam))+' were due',check:'form / landing page, tracking, recent ad changes'}); });
+  const cw=D.crm.filter(function(r){ return maIn(r.day,wStart,wEnd); });
+  const pr={}; cw.forEach(function(r){ const k=r.project+'|'+r.platform; const x=pr[k]=pr[k]||{l:0,q:0}; x.l+=r.leads; x.q+=r.ql; });
+  const cc={}; cw.forEach(function(r){ if(!r.cid) return; const x=cc[r.cid]=cc[r.cid]||{l:0,q:0}; x.l+=r.leads; x.q+=r.ql; });
+  const sp={}; D.rows.forEach(function(r){ if(maIn(r.day,wStart,wEnd)) sp[r.c.id]=(sp[r.c.id]||0)+r.spend; });
+  Object.keys(cc).forEach(function(id){ const x=cc[id], c=D.camp[id]; if(!c||x.l<15||x.q>0) return; const base=pr[c.project+'|'+c.platform]; if(!base||!base.l) return;
+    const exp=x.l*base.q/base.l; if(Math.exp(-exp)>=0.05) return;
+    out.push({w:sp[id]||0,c:c,kind:'Leads, no qualified leads',cls:'warn',what:obNum(x.l)+' CRM leads, 0 QL; ~'+obNum(Math.round(exp))+' were due',check:'targeting, the ad\u2019s promise, the form\u2019s questions'}); });
+  return out.sort(function(a,b){ return b.w-a.w; });
+}
+function maAlertsView(F,C,A){
+  const head=maHead('fa-solid fa-triangle-exclamation','#dc2626','Money-wasting alerts',
+    'Flagged only when zero results would happen by chance less than 5% of the time. "No leads": last 7 days vs the campaign\u2019s own 28 days before. "No qualified leads": the settled window (ends 21 days ago) vs the project\u2019s QL rate.');
+  if(!A.length) return head+'<div class="ma-card"><span class="ma-b good">Nothing to flag</span> No campaign is spending without results beyond what chance explains.</div>';
+  return head+'<div style="overflow-x:auto"><table class="ma-tbl"><thead><tr><th>Campaign</th><th>Alert</th><th>What happened</th><th>Check</th></tr></thead><tbody>'
+    +A.map(function(a){ return '<tr><td class="ma-n">'+maPlat(a.c.platform)+' '+esc(a.c.name)+'<div class="ma-sub">'+esc(a.c.project)+(caLive(a.c.status)?'':' · paused')+'</div></td><td><span class="ma-b '+a.cls+'">'+a.kind+'</span></td><td class="ma-n">'+esc(a.what)+'</td><td class="ma-n ma-sub">'+esc(a.check)+'</td></tr>'; }).join('')
+    +'</tbody></table></div>';
+}
+
+// 1. QUALITY OF SPEND --------------------------------------------------------------
+function maQAgg(rows,crm){ const s=maSum(rows,'spend'), l=maSum(rows.filter(function(r){ return r.leads!=null; }),'leads');
+  const cl=maSum(crm,'leads'), q=maSum(crm,'ql'), v=maSum(crm,'sv'), b=maSum(crm,'bk');
+  return {s:s,l:l,cl:cl,q:q,v:v,b:b,cpl:maRate(s,l),cpq:q?s/q:null,cpv:v?s/v:null,qr:maRate(q,cl)}; }
+function maQualityData(){
+  const D=MA_D, wEnd=obAdd(D.today,-MA_SETTLE), wStart=obAdd(wEnd,-(MA.win-1));
+  const rs=D.rows.filter(function(r){ return maIn(r.day,wStart,wEnd); }), cr=D.crm.filter(function(r){ return maIn(r.day,wStart,wEnd); });
+  const P={}; rs.forEach(function(r){ P[r.c.project]=1; });
+  const projects=Object.keys(P).map(function(p){ return {p:p,x:maQAgg(rs.filter(function(r){ return r.c.project===p; }),cr.filter(function(r){ return r.project===p; }))}; })
+    .filter(function(o){ return o.x.s>0; }).sort(function(a,b){ return b.x.s-a.x.s; });
+  const ids={}; rs.forEach(function(r){ ids[r.c.id]=1; });
+  const camps=Object.keys(ids).map(function(id){ return {c:D.camp[id],x:maQAgg(rs.filter(function(r){ return r.c.id===id; }),cr.filter(function(r){ return r.cid===id; }))}; })
+    .filter(function(z){ return z.x.s>=5000; });
+  return {wStart:wStart,wEnd:wEnd,rs:rs,cr:cr,projects:projects,camps:camps};
+}
+function maQualityView(F,C,A,Q){
+  const sure=function(x){ return x.cl>=40?'':x.cl>=15?' <span class="ma-b mid">rough</span>':' <span class="ma-b warn">few</span>'; };
+  const cells=function(x){ return '<td>'+obMoney(x.s)+'</td><td>'+obNum(x.cl)+'</td><td>'+(x.qr==null?'—':Math.round(x.qr*100)+'%')+sure(x)+'</td><td>'+obMoney(x.cpl)+'</td><td><b>'+obMoney(x.cpq)+'</b></td><td>'+obMoney(x.cpv)+'</td><td>'+obNum(x.b)+'</td>'; };
+  let body='';
+  Q.projects.forEach(function(o){
+    const open=MA_OPEN===o.p;
+    body+='<tr class="ma-p ma-row" onclick="maOpen(\''+esc(o.p).replace(/'/g,"\\'")+'\')"><td><i class="fa-solid fa-chevron-'+(open?'down':'right')+'" style="font-size:10px;color:#94a3b8;margin-right:6px"></i>'+esc(o.p)+'</td>'+cells(o.x)+'</tr>';
+    if(!open) return;
+    ['google','meta'].forEach(function(pl){
+      const prs=Q.rs.filter(function(r){ return r.c.project===o.p&&r.c.platform===pl; }); if(!maSum(prs,'spend')) return;
+      body+='<tr><td style="padding-left:24px">'+maPlat(pl)+' '+(pl==='google'?'Google':'Facebook')+'</td>'+cells(maQAgg(prs,Q.cr.filter(function(r){ return r.project===o.p&&r.platform===pl; })))+'</tr>';
+      Q.camps.filter(function(z){ return z.c.project===o.p&&z.c.platform===pl; }).sort(function(a,b){ return (a.x.cpq||9e15)-(b.x.cpq||9e15)||b.x.s-a.x.s; }).forEach(function(z){
+        const note=pl==='meta'&&!z.x.cl?(z.c.lead?' <span class="ma-sub">· WhatsApp, on project line</span>':' <span class="ma-sub">· not a lead campaign</span>'):'';
+        body+='<tr><td class="ma-n" style="padding-left:44px">'+esc(z.c.name)+(caLive(z.c.status)?'':' <span class="ma-b mid">paused</span>')+note+'</td>'+cells(z.x)+'</tr>'; });
+    }); });
+  return maHead('fa-solid fa-ranking-star','#059669','Cost per qualified lead',
+      'Spend \u00f7 CRM qualified leads (and site visits), over a window ending 21 days ago because the CRM qualifies leads late. Click a project for its platforms and campaigns (\u20b95,000+ spend), cheapest per QL first. "rough" = 15-39 CRM leads, "few" = under 15.',
+      '<select class="ma-sel" style="margin-left:auto;height:30px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;font-weight:600;background:var(--bg-card);color:var(--ink)" onchange="maSetWin(this.value)">'+[[30,'30 days'],[60,'60 days'],[90,'90 days']].map(function(o){ return '<option value="'+o[0]+'"'+(MA.win===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select><span class="ma-sub" style="font-weight:500;margin-left:8px">'+esc(obDmyS(Q.wStart))+' – '+esc(obDmyS(Q.wEnd))+'</span>')
+    +'<div style="overflow-x:auto"><table class="ma-tbl"><thead><tr><th>Project</th><th>Spend</th><th>CRM leads</th><th>QL rate</th><th>Cost per lead</th><th>Cost per QL</th><th>Cost per SV</th><th>Booked</th></tr></thead><tbody>'
+    +(body||'<tr><td colspan="8">No spend in this window.</td></tr>')+'</tbody></table></div>';
+}
+/* ============================ MARKETING INTELLIGENCE: THE FOUR MODELS ============================
+   16 Nov 2026, Ayush: "a very complex Marketing Intelligence - every Statistics, Probability applied ... I know how many
+   leads or money is going to be spent tomorrow ... important, relevant and useful things only ... not noisy at all".
+   Four cards, each a page (registered with maReg, 45-marketing-analytics.js). Decision support only.
+
+   1. TOMORROW & THIS MONTH   per campaign: spend = recency-weighted average x weekday effect; leads = spend x recency-
+      weighted lead rate (shrunk to its project) x weekday effect, as a negative binomial (counts that vary more than
+      Poisson). Ranges calibrated on a 30-day backtest of the same forecast; month-end by Monte Carlo (2,000 runs).
+   2. WATCH LIST              one feed ranked by spend involved: Bayesian change-point on each campaign's lead rate
+      (Gamma-Poisson), zero-result tests, yesterday's robust z-scores, creative fatigue (two-proportion z) - all the
+      frequentist tests pass Benjamini-Hochberg false-discovery control at 5%.
+   3. BUDGET OPTIMISER        per campaign leads = e^a x Adstock(spend)^b (carry-over chosen by fit), quasi-Poisson;
+      greedy equal-marginal allocation of extra money to qualified leads, with a simulated range; Search lost-to-budget.
+   4. LEAD QUALITY            Beta-Binomial shrinkage of each campaign's QL rate toward its project, credible ranges
+      for cost per QL, Monte Carlo chance of being the cheapest per QL, Google vs Facebook, monthly QL-rate trend.
+   Maths: the document "JainE Marketing Analytics: Models and Calculations". */
+let MA_X=null, MA_XLOADING=null, MA_FC=null;
+MA.extra=100000; MA.qtab='camp'; MA.wall=false;
+
+// ---------------------------------------------------------------- extra data (after the first paint)
+async function maLoadExtra(){
+  if(MA_X&&MA_X.today===MA_D.today) return;
+  if(MA_XLOADING) return MA_XLOADING;
+  MA_XLOADING=(async function(){
+    const today=MA_D.today, from=obAdd(today,-60);
+    const ads=await maAll(function(){ return sb.schema('camp').from('ads_ad_daily').select('platform,account_id,campaign_id,ad_id,adset_id,day,spend,impressions,clicks,results,form_leads').gte('day',from).order('day'); }).catch(function(){ return null; });
+    let is=null, rf=null;
+    const q=await sb.schema('camp').from('ads_daily').select('campaign_id,day,imp_share,budget_lost_is,rank_lost_is').eq('platform','google').gte('day',obAdd(today,-15)).not('imp_share','is',null);
+    if(!q.error) is=q.data||[];
+    // Facebook reach / frequency per campaign and day (collected from 16 Nov 2026) - for audience saturation
+    const f=await sb.schema('camp').from('ads_daily').select('campaign_id,day,impressions,clicks,reach,frequency').eq('platform','meta').gte('day',obAdd(today,-28)).not('frequency','is',null);
+    if(!f.error) rf=f.data||[];
+    MA_X={today:today,ads:ads,is:is,rf:rf};
+  })();
+  try{ await MA_XLOADING; } finally{ MA_XLOADING=null; }
+}
+function maXReady(){ return !!MA_X; }
+
+// ---------------------------------------------------------------- maths
+function maLnG(z){ const g=[76.18009172947146,-86.50532032941677,24.01409824083091,-1.231739572450155,0.1208650973866179e-2,-0.5395239384953e-5];
+  let y=z, t=z+5.5; t-=(z+0.5)*Math.log(t); let s=1.000000000190015; for(let j=0;j<6;j++) s+=g[j]/++y; return -t+Math.log(2.5066282746310005*s/z); }
+function maMed(a){ if(!a.length) return null; const s=a.slice().sort(function(x,y){ return x-y; }), m=s.length>>1; return s.length%2?s[m]:(s[m-1]+s[m])/2; }
+function maMad(a){ const m=maMed(a); return maMed(a.map(function(x){ return Math.abs(x-m); })); }
+function maZ2(x1,n1,x2,n2){ const p=(x1+x2)/(n1+n2), se=Math.sqrt(p*(1-p)*(1/n1+1/n2)); return se>0?(x2/n2-x1/n1)/se:0; }
+function maP2(z){ return 2*(1-maNorm(Math.abs(z))); }
+// Benjamini-Hochberg: keeps the items whose p-values pass false-discovery control at level q
+function maBH(items,q){ const s=items.slice().sort(function(a,b){ return a.p-b.p; }), m=s.length; let k=0; s.forEach(function(x,i){ if(x.p<=(i+1)/m*q) k=i+1; }); return s.slice(0,k); }
+// random draws
+let MA_SEED=20261116; function maRnd(){ MA_SEED=(MA_SEED*1664525+1013904223)%4294967296; return (MA_SEED+0.5)/4294967296; }
+function maRn(){ let u=0,v=0; while(u===0) u=maRnd(); v=maRnd(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+function maRGamma(k){ if(k<1){ return maRGamma(k+1)*Math.pow(maRnd(),1/k); } const d=k-1/3, c=1/Math.sqrt(9*d);
+  for(;;){ let x,v; do{ x=maRn(); v=1+c*x; }while(v<=0); v=v*v*v; const u=maRnd(); if(u<1-0.0331*x*x*x*x||Math.log(u)<0.5*x*x+d*(1-v+Math.log(v))) return d*v; } }
+function maRPois(l){ if(l<=0) return 0; if(l>40) return Math.max(0,Math.round(l+Math.sqrt(l)*maRn())); const L=Math.exp(-l); let k=0,p=1; do{ k++; p*=maRnd(); }while(p>L); return k-1; }
+function maRNB(mu,k){ return mu<=0?0:maRPois(maRGamma(k)*mu/k); }
+function maRBeta(a,b){ const x=maRGamma(a), y=maRGamma(b); return x/(x+y); }
+// negative binomial quantile (mean mu, size k)
+function maNBq(mu,k,pr){ if(mu<=0) return 0; if(mu>400){ const sd=Math.sqrt(mu+mu*mu/k); return Math.max(0,Math.round(mu+sd*maNormInv(pr))); }
+  const p=k/(k+mu); let f=Math.exp(k*Math.log(p)), c=f, y=0; while(c<pr&&y<5000){ y++; f*=(y+k-1)/y*(1-p); c+=f; } return y; }
+function maNormInv(p){ // Acklam
+  const a=[-39.6968302866538,220.946098424521,-275.928510446969,138.357751867269,-30.6647980661472,2.50662827745924], b=[-54.4760987982241,161.585836858041,-155.698979859887,66.8013118877197,-13.2806815528857],
+    c=[-0.00778489400243029,-0.322396458041136,-2.40075827716184,-2.54973253934373,4.37466414146497,2.93816398269878], d=[0.00778469570904146,0.32246712907004,2.445134137143,3.75440866190742];
+  const q=p<0.02425?Math.sqrt(-2*Math.log(p)):p>0.97575?Math.sqrt(-2*Math.log(1-p)):0;
+  if(p<0.02425) return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+  if(p>0.97575) return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+  const r=p-0.5, s=r*r; return (((((a[0]*s+a[1])*s+a[2])*s+a[3])*s+a[4])*s+a[5])*r/(((((b[0]*s+b[1])*s+b[2])*s+b[3])*s+b[4])*s+1); }
+function maTable(heads,rows){ return '<div style="overflow-x:auto"><table class="ma-tbl"><thead><tr>'+heads.map(function(h){ return '<th>'+h+'</th>'; }).join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>'; }
+function maPctl(a,p){ const s=a.slice().sort(function(x,y){ return x-y; }); return s[Math.min(s.length-1,Math.max(0,Math.floor(p*(s.length-1))))]; }
+// leads = exp(a + b ln x): quasi-Poisson by Newton's method
+function maFitPow(pts){
+  const n=pts.length; if(n<5) return null;
+  const xs=pts.map(function(p){ return Math.log(p.s); }), ys=pts.map(function(p){ return p.l; });
+  let a=Math.log(Math.max(1e-6,ys.reduce(function(s,v){ return s+v; },0)/n)), b=0;
+  for(let it=0;it<60;it++){ let u0=0,u1=0,i00=0,i01=0,i11=0;
+    for(let i=0;i<n;i++){ const mu=Math.exp(a+b*xs[i]); u0+=ys[i]-mu; u1+=(ys[i]-mu)*xs[i]; i00+=mu; i01+=mu*xs[i]; i11+=mu*xs[i]*xs[i]; }
+    const det=i00*i11-i01*i01; if(!(det>0)) return null; const da=(i11*u0-i01*u1)/det, db=(i00*u1-i01*u0)/det; a+=da; b+=db; if(Math.abs(da)+Math.abs(db)<1e-9) break; }
+  let i00=0,i01=0,i11=0,phi=0,dev=0;
+  for(let i=0;i<n;i++){ const mu=Math.exp(a+b*xs[i]); i00+=mu; i01+=mu*xs[i]; i11+=mu*xs[i]*xs[i]; phi+=(ys[i]-mu)*(ys[i]-mu)/Math.max(mu,1e-9); dev+=2*((ys[i]>0?ys[i]*Math.log(ys[i]/mu):0)-(ys[i]-mu)); }
+  phi=Math.max(1,phi/(n-2)); const det=i00*i11-i01*i01; if(!(det>0)||!isFinite(b)) return null;
+  return {a:a,b:b,seB:Math.sqrt(phi*i00/det),n:n,dev:dev}; }
+
+// ---------------------------------------------------------------- shared: campaign day series
+function maSeries(){
+  if(MA_D.__ser) return MA_D.__ser;
+  const D=MA_D, y=obAdd(D.today,-1), start=obAdd(D.today,-MA_DAYS_BACK), days=[], ix={};
+  for(let d=start;d<=y;d=obAdd(d,1)){ ix[d]=days.length; days.push(d); }
+  const S={};
+  D.rows.forEach(function(r){ const i=ix[r.day]; if(i==null) return; let o=S[r.c.id];
+    if(!o){ const n=days.length; o=S[r.c.id]={c:r.c,s:new Float64Array(n),l:new Float64Array(n),im:new Float64Array(n),k:new Float64Array(n),lead:r.leads!=null}; }
+    o.s[i]+=r.spend; o.im[i]+=r.impr; o.k[i]+=r.clicks; if(r.leads!=null) o.l[i]+=r.leads; });
+  const dow=days.map(function(d){ return new Date(d+'T00:00:00Z').getUTCDay(); });
+  // weekday effects per platform, last 12 weeks: spend level and leads per rupee, each shrunk halfway to 1
+  const eff={};
+  ['google','meta'].forEach(function(pl){ const sp=[0,0,0,0,0,0,0], ls=[0,0,0,0,0,0,0], cnt=[0,0,0,0,0,0,0]; const i0=Math.max(0,days.length-84);
+    for(let i=i0;i<days.length;i++) cnt[dow[i]]++;
+    Object.keys(S).forEach(function(id){ const o=S[id]; if(o.c.platform!==pl) return; for(let i=i0;i<days.length;i++){ sp[dow[i]]+=o.s[i]; if(o.lead) ls[dow[i]]+=o.l[i]; } });
+    const totS=sp.reduce(function(a,b){ return a+b; },0), totL=ls.reduce(function(a,b){ return a+b; },0), totC=cnt.reduce(function(a,b){ return a+b; },0);
+    eff[pl]={s:sp.map(function(v,w){ return totS&&cnt[w]?Math.sqrt((v/cnt[w])/(totS/totC)):1; }),r:ls.map(function(v,w){ return totS&&totL&&sp[w]?Math.sqrt((v/sp[w])/(totL/totS)):1; })}; });
+  // project + platform lead rate (last 56 days): the prior each campaign's rate is pulled toward
+  const pr={}; Object.keys(S).forEach(function(id){ const o=S[id]; if(!o.lead) return; const k=o.c.project+'|'+o.c.platform, x=pr[k]=pr[k]||{s:0,l:0};
+    for(let i=Math.max(0,days.length-56);i<days.length;i++){ x.s+=o.s[i]; x.l+=o.l[i]; } });
+  MA_D.__ser={days:days,ix:ix,dow:dow,S:S,eff:eff,pr:pr};
+  return MA_D.__ser;
+}
+// forecast one campaign for day index t (t may be days.length = today/tomorrow), from data before t only
+function maPredict(o,t,ser,dowT,live){
+  const s=o.s; if(t<4) return {s:0,l:0};
+  if(live===false) return {s:0,l:0};
+  if(s[t-1]===0&&s[t-2]===0&&s[t-3]===0) return {s:0,l:0};
+  let ws=0,w=0; for(let a=1;a<=14&&t-a>=0;a++){ const k=Math.pow(0.5,(a-1)/3); ws+=k*s[t-a]; w+=k; }
+  const e=ser.eff[o.c.platform]||{s:[1,1,1,1,1,1,1],r:[1,1,1,1,1,1,1]}, sp=w?ws/w*e.s[dowT]:0;
+  if(!o.lead) return {s:sp,l:0};
+  let wl=0,wsp=0; for(let a=1;a<=28&&t-a>=0;a++){ const k=Math.pow(0.5,(a-1)/7); wl+=k*o.l[t-a]; wsp+=k*s[t-a]; }
+  const p=ser.pr[o.c.project+'|'+o.c.platform], pRate=p&&p.s?p.l/p.s:0, rate=pRate>0?(wl+5)/(wsp+5/pRate):(wsp?wl/wsp:0);
+  return {s:sp,l:sp*rate*e.r[dowT]};
+}
+
+// ================================================================ 1. TOMORROW & THIS MONTH
+function maFcData(){
+  const D=MA_D, ser=maSeries(), n=ser.days.length, ids=Object.keys(ser.S);
+  const proj={}; ids.forEach(function(id){ proj[ser.S[id].c.project]=1; });
+  // backtest: the same forecast for each of the last 30 days, from data before that day
+  const bt={}; Object.keys(proj).forEach(function(p){ bt[p]=[]; }); bt.__all=[];
+  for(let t=n-30;t<n;t++){ const acc={}; ids.forEach(function(id){ const o=ser.S[id], f=maPredict(o,t,ser,ser.dow[t]); const a=acc[o.c.project]=acc[o.c.project]||{ps:0,pl:0,as:0,al:0};
+      a.ps+=f.s; a.pl+=f.l; a.as+=o.s[t]; if(o.lead) a.al+=o.l[t]; });
+    let T={ps:0,pl:0,as:0,al:0}; Object.keys(acc).forEach(function(p){ bt[p].push(acc[p]); ['ps','pl','as','al'].forEach(function(k){ T[k]+=acc[p][k]; }); }); bt.__all.push(T); }
+  const calib=function(arr){ const ls=arr.filter(function(x){ return x.ps>0&&x.as>0; }).map(function(x){ return Math.log(x.as/x.ps); });
+    const sig=ls.length>4?Math.sqrt(ls.reduce(function(s,v){ return s+v*v; },0)/ls.length):0.35;
+    let num=0,den=0; arr.forEach(function(x){ if(x.pl>0){ num+=x.pl*x.pl; den+=(x.al-x.pl)*(x.al-x.pl)-x.pl; } });
+    const k=den>0?Math.min(1000,Math.max(2,num/den)):1000;
+    const mapeS=arr.filter(function(x){ return x.as>0; }).reduce(function(s,x,_,A){ return s+Math.abs(x.ps-x.as)/x.as/A.length; },0);
+    const mapeL=arr.filter(function(x){ return x.al>0; }).reduce(function(s,x,_,A){ return s+Math.abs(x.pl-x.al)/x.al/A.length; },0);
+    const inS=arr.filter(function(x){ return x.as>0&&x.ps>0; }).filter(function(x){ return Math.abs(Math.log(x.as/x.ps))<=1.2816*sig; }).length;
+    return {sig:Math.min(1,Math.max(0.03,sig)),k:k,mapeS:mapeS,mapeL:mapeL,inS:inS,nS:arr.filter(function(x){ return x.as>0&&x.ps>0; }).length}; };
+  const cal={}; Object.keys(bt).forEach(function(p){ cal[p]=calib(bt[p]); });
+  // tomorrow (and each remaining day of the month) from today's state: paused campaigns spend nothing
+  const today=D.today, tom=obAdd(today,1), dim=new Date(Date.UTC(+today.slice(0,4),+today.slice(5,7),0)).getUTCDate(), endM=today.slice(0,8)+String(dim).padStart(2,'0');
+  const future=[]; for(let d=today;d<=endM;d=obAdd(d,1)) future.push(d);
+  const per={}; // project -> per future day {s,l}
+  ids.forEach(function(id){ const o=ser.S[id], live=caLive(o.c.status); future.forEach(function(d,j){ const f=maPredict(o,n,ser,new Date(d+'T00:00:00Z').getUTCDay(),live);
+      const x=(per[o.c.project]=per[o.c.project]||future.map(function(){ return {s:0,l:0}; }))[j]; x.s+=f.s; x.l+=f.l; }); });
+  const jT=future.indexOf(tom);
+  const tomorrow=Object.keys(per).map(function(p){ const x=per[p][jT]||{s:0,l:0}, c=cal[p]||cal.__all;
+    return {p:p,s:x.s,sLo:x.s*Math.exp(-1.2816*c.sig),sHi:x.s*Math.exp(1.2816*c.sig),l:x.l,lLo:maNBq(x.l,c.k,0.1),lHi:maNBq(x.l,c.k,0.9)}; })
+    .filter(function(r){ return r.s>0||r.l>0; }).sort(function(a,b){ return b.s-a.s; });
+  const TT=tomorrow.reduce(function(a,r){ return {s:a.s+r.s,l:a.l+r.l}; },{s:0,l:0}), cA=cal.__all;
+  // month to date (through yesterday) and last month
+  const m0=today.slice(0,8)+'01', y=obAdd(today,-1), lm0=obAdd(m0,-1).slice(0,8)+'01', lm1=obAdd(m0,-1);
+  const sumP=function(p,a,b){ let s=0,l=0; ids.forEach(function(id){ const o=ser.S[id]; if(p&&o.c.project!==p) return; for(let i=0;i<n;i++){ const d=ser.days[i]; if(d<a||d>b) continue; s+=o.s[i]; if(o.lead) l+=o.l[i]; } }); return {s:s,l:l}; };
+  // Monte Carlo month-end: a shared spend shock per run (budgets persist) + daily noise; leads negative binomial
+  const P=Object.keys(per), R=2000, simS={}, simL={}, allS=new Float64Array(R), allL=new Float64Array(R);
+  P.forEach(function(p){ simS[p]=new Float64Array(R); simL[p]=new Float64Array(R); });
+  MA_SEED=20261116;
+  for(let r=0;r<R;r++){ P.forEach(function(p){ const c=cal[p]||cA, zc=maRn(); let ss=0, ll=0;
+      per[p].forEach(function(x){ const m=Math.exp(c.sig*(0.7071*zc+0.7071*maRn())-c.sig*c.sig/2); ss+=x.s*m; ll+=maRNB(x.l*m,c.k); });
+      simS[p][r]=ss; simL[p][r]=ll; allS[r]+=ss; allL[r]+=ll; }); }
+  const month=P.map(function(p){ const mt=sumP(p,m0,y), lm=sumP(p,lm0,lm1), S2=Array.from(simS[p]).map(function(v){ return v+mt.s; }), L2=Array.from(simL[p]).map(function(v){ return v+mt.l; });
+    return {p:p,s50:maPctl(S2,0.5),s10:maPctl(S2,0.1),s90:maPctl(S2,0.9),l50:maPctl(L2,0.5),l10:maPctl(L2,0.1),l90:maPctl(L2,0.9),lm:lm,pBeat:lm.l>0?L2.filter(function(v){ return v>lm.l; }).length/R:null}; })
+    .filter(function(r){ return r.s50>0; }).sort(function(a,b){ return b.s50-a.s50; });
+  const mtA=sumP(null,m0,y), lmA=sumP(null,lm0,lm1), S3=Array.from(allS).map(function(v){ return v+mtA.s; }), L3=Array.from(allL).map(function(v){ return v+mtA.l; });
+  const mAll={s50:maPctl(S3,0.5),s10:maPctl(S3,0.1),s90:maPctl(S3,0.9),l50:maPctl(L3,0.5),l10:maPctl(L3,0.1),l90:maPctl(L3,0.9),lm:lmA,pBeat:lmA.l>0?L3.filter(function(v){ return v>lmA.l; }).length/R:null};
+  // budget pacing: last 7 days' spend against each running campaign's daily budget (delivery ratio)
+  let budTot=0, delTot=0; const pace=[];
+  ids.forEach(function(id){ const o=ser.S[id], B=+o.c.budget||0; if(!caLive(o.c.status)||!(B>0)) return;
+    // average from its first day of spend in the window, so a campaign launched mid-week is not read as under-delivering
+    let first=n-7; while(first<n&&o.s[first]===0) first++; const days=n-first; if(days<2&&B<500) return; let s7=0; for(let i=first;i<n;i++) s7+=o.s[i]; const avg=days?s7/days:0, r=avg/B;
+    budTot+=B; delTot+=avg; if((r<0.7&&B>=500)||r>1.15) pace.push({c:o.c,B:B,avg:avg,r:r}); });
+  pace.sort(function(a,b){ return Math.abs(b.avg-b.B)-Math.abs(a.avg-a.B); });
+  return {pace:pace,budTot:budTot,delTot:delTot,tom:tom,tomorrow:tomorrow,TT:TT,tLo:TT.s*Math.exp(-1.2816*cA.sig),tHi:TT.s*Math.exp(1.2816*cA.sig),tlLo:maNBq(TT.l,cA.k,0.1),tlHi:maNBq(TT.l,cA.k,0.9),cal:cA,month:month,mAll:mAll,left:future.length};
+}
+function maRange(lo,hi,f){ return '<div class="ma-sub">'+f(lo)+' – '+f(hi)+'</div>'; }
+function maStat(label,val,sub){ return '<div class="ma-st"><div class="ma-stl">'+label+'</div><div class="ma-stv">'+val+'</div><div class="ma-sub">'+sub+'</div></div>'; }
+maReg({id:'fc',title:'Tomorrow & this month',icon:'fa-solid fa-chart-line',data:maFcData,
+  card:function(d){ return {val:obMoney(d.TT.s)+' · '+obNum(Math.round(d.TT.l))+' leads',sub:'tomorrow ('+obDmyS(d.tom)+') · month-end '+obMoney(d.mAll.s50)+', '+obNum(Math.round(d.mAll.l50))+' leads'}; },
+  view:function(d){ const n0=function(x){ return obNum(Math.round(x)); }, c=d.cal;
+    return maHead('fa-solid fa-chart-line','','Tomorrow & this month',
+        'Per campaign: spend = recency-weighted average of the last 14 days (half-life 3 days) × the platform’s weekday effect; leads = that spend × its recency-weighted lead rate (half-life 7 days, pulled toward its project) × weekday effect. Paused campaigns spend nothing. Leads are modelled as a negative binomial and every range is calibrated on how this same forecast did over the last 30 days. Month-end = 2,000 simulated runs of the remaining days. Ranges are 80%.')
+      +'<div class="ma-stats">'+maStat('Tomorrow · spend',obMoney(d.TT.s),obMoney(d.tLo)+' – '+obMoney(d.tHi))+maStat('Tomorrow · leads',n0(d.TT.l),n0(d.tlLo)+' – '+n0(d.tlHi))
+        +maStat('Month-end · spend',obMoney(d.mAll.s50),obMoney(d.mAll.s10)+' – '+obMoney(d.mAll.s90))
+        +maStat('Month-end · leads',n0(d.mAll.l50),n0(d.mAll.l10)+' – '+n0(d.mAll.l90)+(d.mAll.pBeat!=null?' · '+Math.round(d.mAll.pBeat*100)+'% chance to beat last month':''))+'</div>'
+      +'<div class="ma-note">Track record (last 30 days, same method): spend off by '+Math.round(c.mapeS*100)+'% on a typical day, leads by '+Math.round(c.mapeL*100)+'%; the spend range held on '+c.inS+' of '+c.nS+' days.</div>'
+      +maTable(['Project','Tomorrow spend','Tomorrow leads','Month-end spend','Month-end leads','Last month leads','Chance to beat it'],
+        d.month.map(function(m){ const t=d.tomorrow.find(function(x){ return x.p===m.p; })||{s:0,sLo:0,sHi:0,l:0,lLo:0,lHi:0};
+          return '<tr><td>'+esc(m.p)+'</td><td><b>'+obMoney(t.s)+'</b>'+maRange(t.sLo,t.sHi,obMoney)+'</td><td><b>'+n0(t.l)+'</b>'+maRange(t.lLo,t.lHi,n0)+'</td>'
+            +'<td><b>'+obMoney(m.s50)+'</b>'+maRange(m.s10,m.s90,obMoney)+'</td><td><b>'+n0(m.l50)+'</b>'+maRange(m.l10,m.l90,n0)+'</td><td>'+n0(m.lm.l)+'</td><td>'+(m.pBeat==null?'—':Math.round(m.pBeat*100)+'%')+'</td></tr>'; }))
+      +'<div class="ma-h" style="margin-top:22px"><i class="fa-solid fa-gauge-high"></i> Budget pacing'+maInfo('Last 7 days’ average daily spend against each running campaign’s daily budget as set today. Under 70% = the campaign cannot spend its budget (audience too small, bid or cost cap, low quality, limited approvals); over 115% = it spends more than set (Google may spend up to 2× on a day; Facebook budgets changed mid-week). Only those are listed.')+'</div>'
+      +'<div class="ma-note">Running campaigns’ budgets add up to '+obMoney(d.budTot)+' a day; they actually spent '+obMoney(d.delTot)+' a day over the last 7 days ('+(d.budTot?Math.round(d.delTot/d.budTot*100):0)+'%).</div>'
+      +(d.pace.length?maTable(['Campaign','Daily budget','Spent / day (last 7)','Delivery','Read'],d.pace.map(function(x){ return '<tr><td class="ma-n">'+maPlat(x.c.platform)+' '+esc(x.c.name)+'<div class="ma-sub">'+esc(x.c.project)+'</div></td><td>'+obMoney(x.B)+'</td><td>'+obMoney(x.avg)+'</td><td class="'+(x.r<0.7?'ma-dn':'')+'"><b>'+Math.round(x.r*100)+'%</b></td><td class="ma-n">'+(x.r<0.7?'Not spending its budget':'Spending above budget')+'</td></tr>'; }))
+        :'<div class="ma-card">Every running campaign is spending close to its budget.</div>'); }});
+
+// ================================================================ 2. WATCH LIST
+function maChangepoint(o,ser){ // Bayesian single change-point on the lead rate, last 56 days
+  const n=ser.days.length, W=56, i0=n-W; if(i0<0) return null;
+  let Y=0,Sp=0; for(let i=i0;i<n;i++){ Y+=o.l[i]; Sp+=o.s[i]; } if(Y<20||Sp<=0) return null;
+  const rbar=Y/Sp, al=2, be=al/rbar;
+  const ml=function(y,s){ return maLnG(al+y)-maLnG(al)+al*Math.log(be)-(al+y)*Math.log(be+s); };
+  const m0=ml(Y,Sp); const cands=[]; let yb=0,sb=0;
+  const cy=[],cs=[]; for(let i=i0;i<n;i++){ cy.push(yb); cs.push(sb); yb+=o.l[i]; sb+=o.s[i]; }
+  for(let j=14;j<=W-5;j++){ const yB=cy[j], sB=cs[j]; if(sB<=0||Sp-sB<=0) continue; cands.push({j:j,lm:ml(yB,sB)+ml(Y-yB,Sp-sB),yB:yB,sB:sB}); }
+  if(!cands.length) return null;
+  const mx=Math.max(m0,Math.max.apply(null,cands.map(function(c){ return c.lm; })));
+  const w0=0.5*Math.exp(m0-mx); let wc=0, best=cands[0]; cands.forEach(function(c){ c.w=0.5/cands.length*Math.exp(c.lm-mx); wc+=c.w; if(c.w>best.w) best=c; });
+  const post=wc/(w0+wc), rB=best.yB/best.sB, rA=(Y-best.yB)/(Sp-best.sB);
+  return {post:post,day:ser.days[i0+best.j],j:i0+best.j,rB:rB,rA:rA,ch:rB>0?rA/rB-1:null,i0:i0};
+}
+function maParts2(o,a,b){ let s=0,im=0,k=0,l=0; for(let i=a;i<b;i++){ s+=o.s[i]; im+=o.im[i]; k+=o.k[i]; l+=o.l[i]; } return {s:s,im:im,k:k,l:l,cpm:im?s/im*1000:null,ctr:im?k/im:null,cvr:k?l/k:null}; }
+function maCause(B,A){ if(!(B.im&&A.im&&B.k&&A.k&&B.l&&A.l)) return '';
+  const parts=[[Math.log(A.cpm/B.cpm),'auction cost',A.cpm/B.cpm-1],[-Math.log(A.ctr/B.ctr),'click rate',A.ctr/B.ctr-1],[-Math.log(A.cvr/B.cvr),'clicks to leads',A.cvr/B.cvr-1]]
+    .filter(function(x){ return Math.abs(x[0])>0.03; }).sort(function(x,y){ return Math.abs(y[0])-Math.abs(x[0]); });
+  return parts.slice(0,2).map(function(x){ return x[1]+' '+maPct(x[2]); }).join(', '); }
+function maWatchData(){
+  const D=MA_D, ser=maSeries(), n=ser.days.length, items=[], tests=[];
+  const monthly=function(o){ let s=0; for(let i=n-14;i<n;i++) s+=o.s[i]; return s/14*30; };
+  Object.keys(ser.S).forEach(function(id){ const o=ser.S[id]; if(!caLive(o.c.status)) return; const mon=monthly(o); if(mon<3000) return;
+    // (a) Bayesian change-point in the lead rate
+    if(o.lead){ const cp=maChangepoint(o,ser);
+      if(cp&&cp.post>=0.95&&cp.ch!=null&&Math.abs(cp.ch)>=0.25&&cp.j>=n-28){ const B=maParts2(o,cp.i0,cp.j), A=maParts2(o,cp.j,n), worse=cp.ch<0;
+        items.push({sev:worse?2:0,tone:worse?'bad':'good',c:o.c,mon:mon,title:'Lead rate '+(worse?'down ':'up ')+Math.round(Math.abs(cp.ch)*100)+'% since '+obDmyS(cp.day),
+          why:(maCause(B,A)?'Mostly '+maCause(B,A)+'. ':'')+Math.round(cp.post*100)+'% certain it is a real shift, not chance.',act:worse?'Check what changed around '+obDmyS(cp.day)+': form, landing page, creative, audience.':'Find what changed on '+obDmyS(cp.day)+' and repeat it.'}); } }
+    // (b) no leads for 7 days although its rate says some were due
+    if(o.lead){ let rs=0,rl=0,bs=0,bl=0; for(let i=n-7;i<n;i++){ rs+=o.s[i]; rl+=o.l[i]; } for(let i=n-35;i<n-7;i++){ bs+=o.s[i]; bl+=o.l[i]; }
+      if(rs>=3000&&rl===0&&bs>0&&bl>0){ const lam=rs*bl/bs; tests.push({p:Math.exp(-lam),it:{sev:3,tone:'bad',c:o.c,mon:mon,title:'No leads in 7 days',why:'Spent '+obMoney(rs)+'; about '+obNum(Math.round(lam))+' leads were due at its usual rate.',act:'Check the lead form, tracking and recent ad changes.'}}); } }
+    // (c) yesterday's spend / auction cost / click rate vs its own last 28 days (robust z)
+    const t=n-1; const yS=o.s[t], yI=o.im[t], yK=o.k[t]; const base=[]; for(let i=n-29;i<n-1;i++) if(o.s[i]>0) base.push(i);
+    if(base.length>=14){ const avg=base.reduce(function(s,i){ return s+o.s[i]; },0)/base.length;
+      if(yS===0&&avg>=500) items.push({sev:3,tone:'bad',c:o.c,mon:mon,title:'Delivery stopped yesterday',why:'Nothing spent; it usually spends '+obMoney(avg)+' a day.',act:'Check billing, approvals and whether it was paused by mistake.'});
+      const z=function(label,val,arr,ok,badUp){ if(!ok||arr.length<10) return; const m=maMed(arr), md=maMad(arr); if(!(m>0)||!(md>0)) return; const zz=(val-m)/(1.4826*md), rel=val/m-1; if(Math.abs(rel)<0.3||Math.abs(zz)<3) return;
+        tests.push({p:maP2(zz),it:{sev:1,tone:(rel>0)===badUp?'warn':'mid',c:o.c,mon:mon,title:label+(rel>0?' up ':' down ')+Math.round(Math.abs(rel)*100)+'% yesterday',why:'Far outside its usual day-to-day range (robust z = '+zz.toFixed(1)+').',act:label==='Spend'?'Confirm the budget change was intended.':label==='Auction cost'?'Check competition and audience size; watch cost per lead.':'Check the creative and placements.'}}); };
+      if(yS>0){ z('Spend',yS,base.map(function(i){ return o.s[i]; }),true,true);
+        z('Auction cost',yI?yS/yI*1000:0,base.filter(function(i){ return o.im[i]>=500; }).map(function(i){ return o.s[i]/o.im[i]*1000; }),yI>=500,true);
+        z('Click rate',yI?yK/yI:0,base.filter(function(i){ return o.im[i]>=1000; }).map(function(i){ return o.k[i]/o.im[i]; }),yI>=1000,false); } }
+  });
+  // (d) leads that never qualify (settled window), from the waste model
+  maAlertsData().filter(function(a){ return a.kind&&a.kind.indexOf('qualified')>=0; }).forEach(function(a){ items.push({sev:2,tone:'warn',c:a.c,mon:0,title:'Leads, but none qualify',why:a.what+'.',act:'Check targeting, the ad’s promise and the form’s questions.'}); });
+  // (e) creative fatigue, ad level
+  if(MA_X&&MA_X.ads){ const by={}; MA_X.ads.forEach(function(r){ if(r.day>obAdd(D.today,-1)) return; const c=D.camp[r.campaign_id]; if(!c||!caLive(c.status)) return; const e=D.E['ad:'+r.ad_id]; if(!e||!caLive(e.status)) return;
+      const g=by[r.ad_id]=by[r.ad_id]||{c:c,name:e.name||r.ad_id,d:[]}; if(+r.impressions>0) g.d.push({d:r.day,i:+r.impressions,k:+r.clicks||0,s:+r.spend||0}); });
+    Object.keys(by).forEach(function(id){ const g=by[id]; g.d.sort(function(a,b){ return a.d<b.d?-1:1; }); if(g.d.length<14) return;
+      const f=g.d.slice(0,7), l=g.d.slice(-7), su=function(a,k){ return a.reduce(function(s,x){ return s+x[k]; },0); }, fi=su(f,'i'), li=su(l,'i'), fk=su(f,'k'), lk=su(l,'k');
+      if(fi<3000||li<3000||fk<10) return; const drop=(lk/li)/(fk/fi)-1, zz=maZ2(fk,fi,lk,li); if(drop>-0.25) return;
+      tests.push({p:maP2(zz),it:{sev:1,tone:'warn',c:g.c,mon:su(l,'s')/7*30,title:'Ad wearing out: '+g.name,why:'Click rate '+obPct(fk/fi*100)+' → '+obPct(lk/li*100)+' ('+maPct(drop)+') since its early days.',act:'Refresh or replace this creative.'}}); }); }
+  // (f) audience saturation (Facebook): the same people seeing the ads more often while fewer click - daily frequency
+  // last 7 days vs the 14 before up 30%+, click rate down 20%+ (two-proportion z-test). Needs reach / frequency (16 Nov 2026 on).
+  if(MA_X&&MA_X.rf&&MA_X.rf.length){ const y=obAdd(D.today,-1), a0=obAdd(D.today,-7), b0=obAdd(D.today,-21), g={};
+    MA_X.rf.forEach(function(r){ if(r.day>y) return; const c=D.camp[r.campaign_id]; if(!c||!caLive(c.status)) return; const o=g[r.campaign_id]=g[r.campaign_id]||{c:c,a:{f:[],i:0,k:0},b:{f:[],i:0,k:0}};
+      const s=r.day>=a0?o.a:r.day>=b0?o.b:null; if(!s) return; s.f.push(+r.frequency||0); s.i+=+r.impressions||0; s.k+=+r.clicks||0; });
+    Object.keys(g).forEach(function(id){ const o=g[id]; if(o.a.f.length<5||o.b.f.length<7||o.a.i<5000||o.b.i<5000) return;
+      const fa=o.a.f.reduce(function(s,v){ return s+v; },0)/o.a.f.length, fb=o.b.f.reduce(function(s,v){ return s+v; },0)/o.b.f.length, ctrCh=(o.a.k/o.a.i)/(o.b.k/o.b.i)-1, zz=maZ2(o.b.k,o.b.i,o.a.k,o.a.i);
+      if(fb>0&&fa/fb-1>=0.3&&ctrCh<=-0.2) tests.push({p:maP2(zz),it:{sev:2,tone:'warn',c:o.c,mon:monthly(ser.S[id]||{s:new Float64Array(n)}),title:'Audience saturating',why:'Daily frequency '+fb.toFixed(2)+' → '+fa.toFixed(2)+' while click rate fell '+Math.round(-ctrCh*100)+'%: the same people are seeing the ads too often.',act:'Widen the audience or add fresh creatives; consider a frequency cap.'}}); }); }
+  // false-discovery control over every frequentist test at 5%
+  maBH(tests,0.05).forEach(function(t){ items.push(t.it); });
+  // quiet by design: one row per campaign for yesterday's unusual moves, nothing under Rs 10,000 a month (except a stop)
+  const out=[], day={};
+  items.forEach(function(x){ if(x.mon<10000&&x.sev<3&&x.mon) return;
+    if(/yesterday$/.test(x.title)&&x.sev===1){ const g=day[x.c.id]; if(g){ g.parts.push(x.title.replace(/ yesterday$/,'')); if(x.tone==='warn') g.tone='warn'; return; }
+      day[x.c.id]={sev:1,tone:x.tone,c:x.c,mon:x.mon,parts:[x.title.replace(/ yesterday$/,'')],title:'',why:'Far outside its usual day-to-day range.',act:'Check what changed yesterday: budget, audience, creative or competition.'}; out.push(day[x.c.id]); return; }
+    out.push(x); });
+  out.forEach(function(x){ if(x.parts) x.title='Unusual day yesterday: '+x.parts.join(', ').toLowerCase().replace(/^./,function(c){ return c.toUpperCase(); }); });
+  out.sort(function(a,b){ return b.sev-a.sev||b.mon-a.mon; });
+  return {items:out,tested:Object.keys(ser.S).length};
+}
+maReg({id:'watch',title:'Watch list',icon:'fa-solid fa-binoculars',data:maWatchData,ready:maXReady,
+  card:function(d){ const bad=d.items.filter(function(x){ return x.tone==='bad'; }).length; return d.items.length?{val:d.items.length+' to look at',sub:bad?bad+' need action now':'nothing urgent',tone:bad?'bad':'warn'}:{val:'All clear',sub:'nothing beyond normal variation',tone:'good'}; },
+  view:function(d){ const list=MA.wall?d.items:d.items.slice(0,8);
+    return maHead('fa-solid fa-binoculars','','Watch list',
+        'One list of what needs attention, most urgent and biggest spend first. Lead-rate shifts: a Bayesian change-point model (Gamma-Poisson) on each campaign’s last 56 days, shown when 95%+ certain and 25%+ in size. Zero-lead, unusual-day and creative-fatigue tests all pass Benjamini-Hochberg false-discovery control at 5%, so checking many campaigns does not produce chance alarms.')
+      +(d.items.length?'<div class="ma-feed">'+list.map(function(x){ return '<div class="ma-fi"><span class="ma-dot2 '+(x.tone||'mid')+'"></span><div class="ma-fb"><div class="ma-ft">'+esc(x.title)+'</div>'
+          +'<div class="ma-fc">'+maPlat(x.c.platform)+' '+esc(x.c.name)+' · '+esc(x.c.project)+(x.mon?' · '+obMoney(x.mon)+'/month':'')+'</div><div class="ma-fw">'+esc(x.why)+'</div></div><div class="ma-fa">'+esc(x.act)+'</div></div>'; }).join('')+'</div>'
+        +(d.items.length>8?'<div style="margin-top:10px"><button class="ma-btn" onclick="MA.wall=!MA.wall;maPaint()">'+(MA.wall?'Show top 8':'Show all '+d.items.length)+'</button></div>':'')
+      :'<div class="ma-card">All clear: no campaign moved beyond normal variation.</div>'); }});
+
+// ================================================================ 3. BUDGET OPTIMISER
+function maCurves(){
+  if(MA_D.__cur) return MA_D.__cur;
+  const ser=maSeries(), n=ser.days.length, out=[];
+  Object.keys(ser.S).forEach(function(id){ const o=ser.S[id]; if(!o.lead||!caLive(o.c.status)) return;
+    let S0=0; for(let i=n-14;i<n;i++) S0+=o.s[i]; S0/=14; const r={o:o,c:o.c,S0:S0,fit:null,why:''};
+    const idx=[]; for(let i=n-90;i<n;i++) if(i>=0&&o.s[i]>0) idx.push(i);
+    const L=idx.reduce(function(s,i){ return s+o.l[i]; },0), ss=idx.map(function(i){ return o.s[i]; }), m=ss.reduce(function(s,v){ return s+v; },0)/(ss.length||1), cv=ss.length>1?maSd(ss)/m:0;
+    if(idx.length<30) r.why='under 30 days of spend'; else if(L<30) r.why='under 30 leads'; else if(cv<0.25) r.why='spend barely varied'; else if(!(S0>0)) r.why='no recent spend';
+    else { let best=null; [0,0.3,0.5,0.7].forEach(function(th){ const A=new Float64Array(n); for(let i=0;i<n;i++) A[i]=o.s[i]+(i?th*A[i-1]:0);
+        const f=maFitPow(idx.map(function(i){ return {s:A[i]*(1-th),l:o.l[i]}; }).filter(function(p){ return p.s>0; })); if(f&&(!best||f.dev<best.f.dev)) best={f:f,th:th}; });
+      if(best){ r.fit=best.f; r.th=best.th; const f=best.f; r.lo=f.b-1.96*f.seB; r.hi=f.b+1.96*f.seB; r.mu0=Math.exp(f.a+f.b*Math.log(S0)); r.mcpl=f.b>0?S0/(f.b*r.mu0):null; r.acpl=S0/r.mu0; r.cls=r.hi<1?'dim':r.lo>1?'inc':'flat'; }
+      else r.why='the fit did not settle'; }
+    out.push(r); });
+  MA_D.__cur=out; return out;
+}
+function maOptData(){
+  const D=MA_D, cur=maCurves(), wEnd=obAdd(D.today,-MA_SETTLE), wStart=obAdd(wEnd,-89);
+  const pl={}, cq={}, pq={};
+  D.rows.forEach(function(r){ if(r.leads==null||!maIn(r.day,wStart,wEnd)) return; pl[r.c.id]=(pl[r.c.id]||0)+r.leads; const k=r.c.project+'|'+r.c.platform; (pq[k]=pq[k]||{l:0,q:0}).l+=r.leads; });
+  D.crm.forEach(function(r){ if(!maIn(r.day,wStart,wEnd)) return; if(r.cid) cq[r.cid]=(cq[r.cid]||0)+r.ql; const k=r.project+'|'+r.platform; (pq[k]=pq[k]||{l:0,q:0}).q+=r.ql; });
+  let ts=0,tq=0; D.rows.forEach(function(r){ if(maIn(r.day,wStart,wEnd)) ts+=r.spend; }); D.crm.forEach(function(r){ if(maIn(r.day,wStart,wEnd)) tq+=r.ql; });
+  const avgCpq=tq?ts/tq:null, limit=avgCpq?1.5*avgCpq:Infinity;
+  cur.forEach(function(r){ const k=r.c.project+'|'+r.c.platform, base=pq[k]&&pq[k].l?pq[k].q/pq[k].l:0, L=pl[r.c.id]||0, Q=cq[r.c.id]; r.q=Q==null?base:(Q+30*base)/(L+30);
+    r.mcpq=r.fit&&r.q>0&&r.mcpl?r.mcpl/r.q:null; });
+  // Search impression share lost to budget
+  const isB={}; if(MA_X&&MA_X.is){ const g={}; MA_X.is.forEach(function(x){ const o=g[x.campaign_id]=g[x.campaign_id]||{n:0,b:0,r:0}; o.n++; o.b+=+x.budget_lost_is||0; o.r+=+x.rank_lost_is||0; }); Object.keys(g).forEach(function(k){ isB[k]={b:g[k].b/g[k].n,r:g[k].r/g[k].n}; }); }
+  const cands=cur.filter(function(r){ return r.fit&&r.hi-r.lo<=1&&r.fit.b>0&&r.q>0; }).map(function(r){ return {r:r,x:0,cap:r.S0*0.3}; });
+  const mq=function(c,s){ const f=c.r.fit; return c.r.q*f.b*Math.exp(f.a)*Math.pow(s,f.b-1); };
+  const step=100; let left=MA.extra/30;
+  while(left>=step){ let best=null,bv=0; cands.forEach(function(c){ if(c.x+step>c.cap) return; const v=mq(c,c.r.S0+c.x+step/2); if(v>bv){ bv=v; best=c; } }); if(!best||1/bv>limit) break; best.x+=step; left-=step; }
+  const mu=function(f,s){ return Math.exp(f.a+f.b*Math.log(s)); };
+  // range of the extra qualified leads: draws of each elasticity b from its estimate
+  MA_SEED=7; const sims=[]; for(let k=0;k<1000;k++){ let q=0; cands.forEach(function(c){ if(!c.x) return; const f=c.r.fit, b=f.b+f.seB*maRn(), a=Math.log(c.r.mu0)-b*Math.log(c.r.S0); q+=30*c.r.q*(Math.exp(a+b*Math.log(c.r.S0+c.x))-c.r.mu0); }); sims.push(q); }
+  const got=cands.filter(function(c){ return c.x>0; }), dq=got.reduce(function(s,c){ return s+30*c.r.q*(mu(c.r.fit,c.r.S0+c.x)-mu(c.r.fit,c.r.S0)); },0);
+  return {cur:cur,got:got,dq:dq,dqLo:maPctl(sims,0.1),dqHi:maPctl(sims,0.9),left:left*30,limit:limit,avgCpq:avgCpq,isB:isB};
+}
+window.maSetExtra=function(v){ MA.extra=+v; maPaint(); };
+maReg({id:'opt',title:'Budget optimiser',icon:'fa-solid fa-scale-balanced',data:maOptData,ready:maXReady,
+  card:function(d){ return d.got.length?{val:'+'+obNum(Math.round(d.dq))+' qualified leads',sub:'a month from '+obMoney(MA.extra)+' more, placed where it works'}:{val:'Hold',sub:'no campaign can take more money well'}; },
+  /* PLAIN FIRST (16 Nov 2026, Ayush: "the Budget optimiser looks weird - what is it?"): the answer in one sentence, then only
+     the recommended moves; the full curve table sits behind a button. Same maths as before. */
+  view:function(d){ const seg='<div class="ma-seg">'+[[50000,'₹50k'],[100000,'₹1 lakh'],[200000,'₹2 lakh']].map(function(o){ return '<button class="'+(MA.extra===o[0]?'on':'')+'" onclick="maSetExtra('+o[0]+')">'+o[1]+'</button>'; }).join('')+'</div>';
+    const mu=function(r,s){ return Math.exp(r.fit.a+r.fit.b*Math.log(s)); };
+    const read={dim:'Each extra rupee brings fewer leads',flat:'Still brings leads at about the same cost',inc:'Brings leads cheaper as it grows'};
+    const moves=d.got.slice().sort(function(a,b){ return b.x-a.x; }).map(function(c){ const r=c.r, dl=30*(mu(r,r.S0+c.x)-mu(r,r.S0));
+      return '<tr><td class="ma-n">'+maPlat(r.c.platform)+' '+esc(r.c.name)+'<div class="ma-sub">'+esc(r.c.project)+'</div></td><td>'+obMoney(r.S0)+'/day</td><td><b class="ma-up">+'+obMoney(c.x)+'/day</b><div class="ma-sub">+'+obMoney(c.x*30)+' a month</div></td>'
+        +'<td>+'+obNum(Math.round(dl))+'</td><td><b>+'+obNum(Math.round(dl*r.q))+'</b></td><td>'+obMoney(r.mcpq)+'</td></tr>'; });
+    const all=d.cur.filter(function(r){ return r.fit; }).sort(function(a,b){ return (a.mcpq||9e15)-(b.mcpq||9e15); }).map(function(r){ const ib=d.isB[r.c.id];
+      return '<tr><td class="ma-n">'+maPlat(r.c.platform)+' '+esc(r.c.name)+'<div class="ma-sub">'+esc(r.c.project)+'</div></td><td class="ma-n">'+read[r.cls]+'</td><td>'+obMoney(r.S0)+'</td><td>'+obMoney(r.acpl)+'</td><td>'+obMoney(r.mcpl)+'</td><td><b>'+obMoney(r.mcpq)+'</b></td><td>'+(ib?Math.round(ib.b*100)+'%':'—')+'</td></tr>'; });
+    const answer=d.got.length?'If you spend <b>'+obMoney(MA.extra)+' more a month</b>, put <b>'+obMoney(MA.extra-d.left)+'</b> into the '+d.got.length+' campaign'+(d.got.length===1?'':'s')+' below for about <b>'+obNum(Math.round(d.dq))+' more qualified leads</b> a month (likely '+obNum(Math.round(Math.max(0,d.dqLo)))+'–'+obNum(Math.round(d.dqHi))+').'+(d.left>=100?' Keep the other <b>'+obMoney(d.left)+'</b>: every other place would pay over '+obMoney(d.limit)+' for each extra qualified lead.':'')
+      :'Hold the extra money: no running campaign can turn it into qualified leads for under '+obMoney(d.limit)+' each.';
+    return maHead('fa-solid fa-scale-balanced','','Budget optimiser',
+        'What it does: for each running campaign it learns, from its last 90 days, how many more leads each extra rupee brings (that number falls as spend rises - diminishing returns), and how many of its leads qualify. It then places the extra money a little at a time wherever the next rupee brings the most qualified leads, never pushing a campaign more than 30% above its recent spend (beyond that is untested) and never where a qualified lead would cost over 1.5× the average. Maths: quasi-Poisson power curve with adstock (carry-over), Beta-shrunk QL rates, 1,000 simulations for the range.',seg)
+      +'<div class="ma-card" style="font-size:14px">'+answer+'</div>'
+      +(moves.length?maTable(['Put more into','Spends now','Add','More leads / month','More QL / month','Each extra QL costs'],moves):'')
+      +(all.length?'<div style="margin-top:12px"><button class="ma-btn" onclick="MA.optAll=!MA.optAll;maPaint()">'+(MA.optAll?'Hide':'Show')+' every measured campaign ('+all.length+')</button></div>'
+        +(MA.optAll?'<div style="margin-top:12px">'+maTable(['Campaign','What more money does','Spend / day','Avg cost / lead','Next lead costs','Next QL costs','Search lost to budget'],all)+'</div>':''):''); }});
+
+// ================================================================ 4. LEAD QUALITY
+function maLQData(){
+  const D=MA_D, wEnd=obAdd(D.today,-MA_SETTLE), wStart=obAdd(wEnd,-(MA.win-1));
+  const sp={}, cl={}, ql={}, sv={}, bk={}, pr={};
+  D.rows.forEach(function(r){ if(!maIn(r.day,wStart,wEnd)) return; sp[r.c.id]=(sp[r.c.id]||0)+r.spend; });
+  D.crm.forEach(function(r){ if(!maIn(r.day,wStart,wEnd)) return; const k=r.project+'|'+r.platform, x=pr[k]=pr[k]||{s:0,l:0,q:0,v:0,b:0}; x.l+=r.leads; x.q+=r.ql; x.v+=r.sv; x.b+=r.bk;
+    if(r.cid){ cl[r.cid]=(cl[r.cid]||0)+r.leads; ql[r.cid]=(ql[r.cid]||0)+r.ql; sv[r.cid]=(sv[r.cid]||0)+r.sv; bk[r.cid]=(bk[r.cid]||0)+r.bk; } });
+  D.rows.forEach(function(r){ if(!maIn(r.day,wStart,wEnd)) return; const x=pr[r.c.project+'|'+r.c.platform]; if(x) x.s+=r.spend; });
+  const K=30, camps=[];
+  Object.keys(cl).forEach(function(id){ const c=D.camp[id]; if(!c||!caLive(c.status)||!(sp[id]>=5000)||cl[id]<5) return; /* running campaigns only (16 Nov 2026) */ const p=pr[c.project+'|'+c.platform], p0=p&&p.l?Math.max(0.005,p.q/p.l):0.05;
+    const a=ql[id]+K*p0, b=cl[id]-ql[id]+K*(1-p0); camps.push({c:c,s:sp[id],l:cl[id],q:ql[id],v:sv[id],bk:bk[id],a:a,b:b,rate:a/(a+b)}); });
+  // credible ranges and chance of being the cheapest per QL WITHIN ITS PROJECT (projects sell different things:
+  // banquets vs flats), by Monte Carlo over the Beta posteriors
+  MA_SEED=99; const R=3000, wins=new Float64Array(camps.length), draws=camps.map(function(){ return []; });
+  for(let r=0;r<R;r++){ const best={}; camps.forEach(function(x,i){ const th=maRBeta(x.a,x.b), cpq=x.s/(x.l*th); draws[i].push(cpq); const p=x.c.project; if(!best[p]||cpq<best[p].v) best[p]={v:cpq,i:i}; });
+    Object.keys(best).forEach(function(p){ wins[best[p].i]++; }); }
+  const nIn={}; camps.forEach(function(x){ nIn[x.c.project]=(nIn[x.c.project]||0)+1; });
+  camps.forEach(function(x,i){ x.cpq=x.s/(x.l*x.rate); x.lo=maPctl(draws[i],0.1); x.hi=maPctl(draws[i],0.9); x.pBest=nIn[x.c.project]>1?wins[i]/R:null; x.cpv=x.v?x.s/x.v:null; });
+  camps.sort(function(a,b){ return a.c.project<b.c.project?-1:a.c.project>b.c.project?1:a.cpq-b.cpq; });
+  // Google vs Facebook per project: chance Facebook is cheaper per QL
+  const P={}; Object.keys(pr).forEach(function(k){ const pp=k.split('|'); (P[pp[0]]=P[pp[0]]||{})[pp[1]]=pr[k]; });
+  const plat=Object.keys(P).filter(function(p){ return P[p].google&&P[p].meta&&P[p].google.s>0&&P[p].meta.s>0&&P[p].google.l>0&&P[p].meta.l>0; }).map(function(p){ const g=P[p].google, m=P[p].meta; let fb=0;
+    for(let r=0;r<2000;r++){ const tg=maRBeta(g.q+1,g.l-g.q+1), tm=maRBeta(m.q+1,m.l-m.q+1); if(m.s/(m.l*tm)<g.s/(g.l*tg)) fb++; }
+    return {p:p,g:g,m:m,pFb:fb/2000}; }).sort(function(a,b){ return (b.g.s+b.m.s)-(a.g.s+a.m.s); });
+  return {camps:camps,plat:plat,trend:maTrendData(),wStart:wStart,wEnd:wEnd};
+}
+function maTrendData(){
+  const D=MA_D, settled=obAdd(D.today,-MA_SETTLE), M={};
+  D.crm.forEach(function(r){ const m=r.day.slice(0,7), pm=M[r.project]=M[r.project]||{}, o=pm[m]=pm[m]||{l:0,q:0}; o.l+=r.leads; o.q+=r.ql; });
+  const months=[]; for(let i=11;i>=0;i--) months.push(new Date(Date.UTC(+D.today.slice(0,4),+D.today.slice(5,7)-1-i,1)).toISOString().slice(0,7));
+  for(let i=months.length-1;i>=0;i--) if(!Object.keys(M).some(function(p){ return M[p][months[i]]&&M[p][months[i]].l>0; })) months.splice(i,1);   // only months the CRM has data for
+  const isSet=function(m){ return new Date(Date.UTC(+m.slice(0,4),+m.slice(5,7),0)).toISOString().slice(0,10)<=settled; };
+  return {months:months,list:Object.keys(M).map(function(p){ const mm=months.map(function(m){ const o=M[p][m]||{l:0,q:0}; return {m:m,l:o.l,q:o.q,set:isSet(m)}; });
+    const st=mm.filter(function(x){ return x.set&&x.l>0; }); let v=null;
+    if(st.length>=4){ const last=st[st.length-1], prev=st.slice(-4,-1), pl=prev.reduce(function(s,x){ return s+x.l; },0), pq=prev.reduce(function(s,x){ return s+x.q; },0);
+      if(last.l>=30&&pl>=60){ const z=maZ2(pq,pl,last.q,last.l); v={z:z,real:Math.abs(z)>=1.96}; } }
+    return {p:p,mm:mm,v:v,tot:mm.reduce(function(s,x){ return s+x.l; },0)}; }).filter(function(x){ return x.tot>=30; }).sort(function(a,b){ return b.tot-a.tot; })};
+}
+window.maQTab=function(t){ MA.qtab=t; maPaint(); };
+window.maSetWin2=function(v){ MA.win=+v; maPaint(); };
+maReg({id:'lq',title:'Lead quality',icon:'fa-solid fa-ranking-star',data:maLQData,
+  card:function(d){ const clear=d.camps.filter(function(x){ return x.pBest!=null&&x.pBest>=0.8; }), b=d.camps.slice().sort(function(a,c){ return a.cpq-c.cpq; })[0];
+    return b?{val:clear.length?clear.length+' clear winner'+(clear.length===1?'':'s'):'No clear winner',sub:clear.length?clear.slice(0,2).map(function(x){ return esc(x.c.project)+': '+esc(x.c.name)+' ('+Math.round(x.pBest*100)+'%)'; }).join(' · '):'campaigns within each project cost about the same per QL'}:{val:'—',sub:'not enough CRM leads'}; },
+  view:function(d){ const tabs='<div class="ma-seg">'+[['camp','Campaigns'],['plat','Google vs Facebook'],['trend','Quality trend']].map(function(t){ return '<button class="'+(MA.qtab===t[0]?'on':'')+'" onclick="maQTab(\''+t[0]+'\')">'+t[1]+'</button>'; }).join('')+'</div>';
+    const win='<div class="ma-seg">'+[[30,'30 days'],[60,'60 days'],[90,'90 days']].map(function(o){ return '<button class="'+(MA.win===o[0]?'on':'')+'" onclick="maSetWin2('+o[0]+')">'+o[1]+'</button>'; }).join('')+'</div>';
+    let body='';
+    if(MA.qtab==='camp'){ let last=null; body=maTable(['Campaign','Spend','CRM leads','QL rate','Cost per QL (80% range)','Chance cheapest in project','Cost per SV','Booked'],d.camps.reduce(function(rows,x){
+        if(x.c.project!==last){ last=x.c.project; rows.push('<tr class="ma-p"><td colspan="8">'+esc(x.c.project)+'</td></tr>'); }
+        rows.push('<tr><td class="ma-n" style="padding-left:22px">'+maPlat(x.c.platform)+' '+esc(x.c.name)+(caLive(x.c.status)?'':' <span class="ma-b mid">paused</span>')+'</td><td>'+obMoney(x.s)+'</td><td>'+obNum(x.l)+'</td><td>'+Math.round(x.rate*100)+'%</td>'
+          +'<td><b>'+obMoney(x.cpq)+'</b>'+maRange(x.lo,x.hi,obMoney)+'</td><td>'+(x.pBest==null?'<span class="ma-sub">only one</span>':x.pBest>=0.8?'<b class="ma-up">'+Math.round(x.pBest*100)+'%</b>':x.pBest>=0.005?Math.round(x.pBest*100)+'%':'<1%')+'</td><td>'+obMoney(x.cpv)+'</td><td>'+obNum(x.bk)+'</td></tr>'); return rows; },[])); }
+    else if(MA.qtab==='plat') body=maTable(['Project','Google cost per QL','Facebook cost per QL','Chance Facebook is cheaper','Google QL rate','Facebook QL rate'],d.plat.map(function(x){
+        return '<tr><td>'+esc(x.p)+'</td><td>'+obMoney(x.g.q?x.g.s/x.g.q:null)+'</td><td>'+obMoney(x.m.q?x.m.s/x.m.q:null)+'</td><td><b>'+Math.round(x.pFb*100)+'%</b></td><td>'+Math.round(x.g.q/x.g.l*100)+'%</td><td>'+Math.round(x.m.q/x.m.l*100)+'%</td></tr>'; }));
+    else { const mn=function(m){ return new Date(m+'-01T00:00:00Z').toLocaleString('en-IN',{month:'short',timeZone:'UTC'}); };
+      body=maTable(['Project'].concat(d.trend.months.map(mn)),d.trend.list.map(function(x){ return '<tr><td>'+esc(x.p)+(x.v&&x.v.real?' <span class="ma-b '+(x.v.z<0?'bad':'good')+'">'+(x.v.z<0?'falling':'rising')+'</span>':'')+'</td>'
+        +x.mm.map(function(c){ return '<td'+(c.set?'':' style="color:#94a3b8" title="still settling"')+'>'+(c.l?Math.round(c.q/c.l*100)+'%':'—')+'<div class="ma-sub">'+obNum(c.l)+'</div></td>'; }).join('')+'</tr>'; })); }
+    return maHead('fa-solid fa-ranking-star','','Lead quality',
+        'What a qualified lead, site visit or booking costs, from the CRM, over a window that ends 21 days ago (the CRM qualifies leads late). Each campaign’s QL rate is a Beta posterior pulled toward its project’s rate (worth 30 leads), so a few lucky leads cannot top the list; ranges are 80% credible intervals. "Chance cheapest in project" = share of 3,000 simulated draws in which the campaign had its project2019s lowest cost per QL (projects sell different things, so they are not ranked against each other). Quality trend: latest settled month vs the 3 before (two-proportion z-test, 95%).',
+        '<span style="margin-left:auto"></span>'+(MA.qtab==='trend'?'':win))
+      +'<div style="margin:0 0 12px">'+tabs+'</div>'+body; }});
+
+// ================================================================ 5. CREATIVE PERFORMANCE
+/* Which ad in each running campaign really brings leads cheapest (16 Nov 2026, "consider all - don't exclude any").
+   Per ad, last 30 days: leads ~ Poisson(rate x spend), rate ~ Gamma(2 + leads, 2/campaign-rate + spend) - a Gamma-
+   Poisson posterior pulled toward its campaign's own rate, so an ad with little spend cannot look like a winner by luck.
+   3,000 draws per campaign give each ad's chance of being the cheapest per lead; 80% ranges for its cost per lead. */
+function maCreativeData(){
+  const D=MA_D, X=MA_X; if(!X||!X.ads) return {na:true,list:[]};
+  const y=obAdd(D.today,-1), a0=obAdd(D.today,-30), by={};
+  X.ads.forEach(function(r){ if(r.day<a0||r.day>y) return; const c=D.camp[r.campaign_id]; if(!c||!caLive(c.status)) return; const e=D.E['ad:'+r.ad_id]; if(!e||!caLive(e.status)) return;
+    const lead=c.platform==='google'?(r.form_leads!=null?+r.form_leads:null):(c.lead?+r.results||0:null); if(lead==null) return;
+    const g=by[c.id]=by[c.id]||{c:c,ads:{}}, a=g.ads[r.ad_id]=g.ads[r.ad_id]||{id:r.ad_id,name:e.name||r.ad_id,s:0,l:0,i:0,k:0};
+    a.s+=+r.spend||0; a.l+=lead; a.i+=+r.impressions||0; a.k+=+r.clicks||0; });
+  MA_SEED=31; const list=[];
+  Object.keys(by).forEach(function(cid){ const g=by[cid], ads=Object.keys(g.ads).map(function(k){ return g.ads[k]; }).filter(function(a){ return a.s>=1000; });
+    if(ads.length<2) return; const S=ads.reduce(function(s,a){ return s+a.s; },0), L=ads.reduce(function(s,a){ return s+a.l; },0); if(L<10) return;
+    const r0=L/S, wins=ads.map(function(){ return 0; }), dr=ads.map(function(){ return []; });
+    for(let t=0;t<3000;t++){ let bi=0,bv=Infinity; ads.forEach(function(a,i){ const rate=maRGamma(2+a.l)/(2/r0+a.s), cpl=1/rate; dr[i].push(cpl); if(cpl<bv){ bv=cpl; bi=i; } }); wins[bi]++; }
+    ads.forEach(function(a,i){ a.pBest=wins[i]/3000; a.cpl=maPctl(dr[i],0.5); a.lo=maPctl(dr[i],0.1); a.hi=maPctl(dr[i],0.9); a.raw=a.l?a.s/a.l:null; a.ctr=a.i?a.k/a.i:null; });
+    ads.sort(function(a,b){ return a.cpl-b.cpl; });
+    const best=ads[0], weak=ads.filter(function(a){ return a!==best&&a.pBest<0.05&&a.cpl>1.5*best.cpl&&a.s>=3000; });
+    list.push({c:g.c,ads:ads,best:best,clear:best.pBest>=0.8,weak:weak,s:S}); });
+  list.sort(function(a,b){ return (b.clear?1:0)-(a.clear?1:0)||b.s-a.s; });
+  return {list:list};
+}
+maReg({id:'creative',title:'Creative performance',icon:'fa-solid fa-photo-film',data:maCreativeData,ready:maXReady,
+  card:function(d){ if(d.na) return {val:'—',sub:'ad-level data not available'}; const clear=d.list.filter(function(x){ return x.clear; }), weak=d.list.reduce(function(s,x){ return s+x.weak.length; },0);
+    return clear.length?{val:clear.length+' clear winner'+(clear.length===1?'':'s'),sub:weak?weak+' ad'+(weak===1?'':'s')+' costing 1.5×+ the winner in the same campaign':'among '+d.list.length+' campaigns with several ads',tone:weak?'warn':null}:{val:'No clear winner',sub:'ads within each campaign perform about the same'}; },
+  /* ONLY WHAT TO ACT ON (16 Nov 2026, Ayush: "too noisy ... I just want the Clear Winners and those whose Budgets need to
+     move"): one row per campaign that has a clear winner or an ad to move money out of; nothing else. */
+  view:function(d){ const act=d.list.filter(function(x){ return x.clear||x.weak.length; });
+    let gain=0; const rows=act.map(function(x){ const w=x.best, g=x.weak.reduce(function(s,a){ return s+a.s*(1/w.cpl-1/a.cpl); },0); gain+=g;
+      return '<tr><td class="ma-n">'+maPlat(x.c.platform)+' '+esc(x.c.name)+'<div class="ma-sub">'+esc(x.c.project)+'</div></td>'
+        +'<td class="ma-n"><b>'+esc(w.name)+'</b><div class="ma-sub">'+obMoney(w.cpl)+' per lead · '+Math.round(w.pBest*100)+'% sure it is the best</div></td>'
+        +'<td class="ma-n">'+(x.weak.length?x.weak.map(function(a){ return esc(a.name)+'<div class="ma-sub">'+obMoney(a.cpl)+' per lead · '+obMoney(a.s)+' spent in 30 days</div>'; }).join('<div style="height:6px"></div>'):'<span class="ma-sub">—</span>')+'</td>'
+        +'<td>'+(g>0.5?'<b class="ma-up">+'+obNum(Math.round(g))+'</b>':'—')+'</td></tr>'; });
+    return maHead('fa-solid fa-photo-film','','Creative performance',
+        'Only campaigns where one ad is clearly the cheapest per lead (80%+ sure) or where an ad should give its budget to that winner (under 5% chance of being best, 1.5×+ the winner’s cost per lead, ₹3,000+ spent). Ads compared within their own campaign over the last 30 days; each ad’s lead rate is a Gamma-Poisson posterior pulled toward its campaign, so a little-spent ad cannot look best by luck. "More leads" = the moved ads’ 30-day spend at the winner’s cost per lead instead of theirs - an upper estimate, as the winner may get dearer with more money.')
+      +(act.length?'<div class="ma-card" style="font-size:14px">'+act.filter(function(x){ return x.clear; }).length+' campaigns have a clear winning ad. Moving the weaker ads’ money to their campaign’s winner would bring about <b>'+obNum(Math.round(gain))+' more leads a month</b> for the same spend.</div>'
+        +maTable(['Campaign','Winning ad - give it more','Move budget away from','More leads / month'],rows)
+        :'<div class="ma-card">No campaign has a clear winning ad or an ad worth moving money out of right now.</div>'); }});
+/* ============================ MARKETING INTELLIGENCE: GEOGRAPHY + COMPETITORS ============================
+   16 Nov 2026, Ayush: "Ok make all". Two more cards for the Analytics tab (maReg, 45-marketing-analytics.js).
+   GEOGRAPHY   from the Lead Map's site visits and bookings by PIN code (camp.lm_pins + lm_pincodes): how fast visits and
+               bookings fall off with distance from the project (catchment), whether booking conversion falls with distance
+               (Cochran-Armitage trend test), PIN-code hotspots (Getis-Ord Gi*, Benjamini-Hochberg), areas that convert visits
+               into bookings best (Beta shrinkage); Google cost per site visit by PIN code once camp.ads_geo_monthly fills.
+               Project location = its RERA PIN code (Gurukul and Ananta, one site: 700132; Dream World City, Joka: 700104).
+               Visit density mostly shows where we advertised, not pure demand - read as "where our marketing lands".
+   COMPETITORS from their Meta Ad Library ads, Google Ads Transparency creatives and WB RERA: weekly ad activity and surges
+               (Poisson test), how long their ads run (Kaplan-Meier median lifetime) and which have proven themselves, the
+               messages and offers they push (transparent keyword rules, no AI), whether our auction cost / cost per lead
+               moves with their activity (Spearman correlation, permutation test), new launches near our projects.
+               Never their spend - India's Ad Library does not publish it. */
+let MA_GC=null, MA_GCLOADING=null;
+const MA_PROJ_PIN={'Dream Gurukul':'700132','Dream Ananta':'700132','Dream World City':'700104'};
+const _maLoadExtraAds=maLoadExtra;
+maLoadExtra=async function(){ await Promise.all([_maLoadExtraAds(),maLoadGC()]); };
+function maGCReady(){ return !!MA_GC; }
+async function maLoadGC(){
+  if(MA_GC&&MA_GC.today===MA_D.today) return;
+  if(MA_GCLOADING) return MA_GCLOADING;
+  MA_GCLOADING=(async function(){
+    const today=MA_D.today, safe=function(p){ return p.catch(function(){ return null; }); };
+    const camp=sb.schema('camp');
+    const [pins,pc,wl,fb,gg,rera,geo]=await Promise.all([
+      safe(maAll(function(){ return camp.from('lm_pins').select('project,kind,pincode,event_date').neq('kind','test'); })),
+      safe(maAll(function(){ return camp.from('lm_pincodes').select('pincode,lat,lng,place,district').not('lat','is',null); })),
+      camp.from('competitor_watchlist').select('id,name,category,is_own_brand'),
+      safe(maAll(function(){ return camp.from('competitor_ads').select('id,watchlist_id,ad_creative_bodies,ad_creative_link_titles,headline,ad_delivery_start_time,ad_delivery_stop_time,last_seen_at').gte('last_seen_at',obAdd(today,-200)); })),
+      safe(maAll(function(){ return camp.from('pi_gads_creatives').select('creative_id,watchlist_id,advertiser_name,first_shown,last_shown,ad_headline,ad_description').gte('last_shown',obAdd(today,-200)); })),
+      safe(maAll(function(){ return camp.from('pi_rera_projects').select('name,promoter_name,reg_date,pincode,district,apartments').eq('list_status','approved').gte('reg_date',obAdd(today,-365)); })),
+      safe(maAll(function(){ return camp.from('ads_geo_monthly').select('account_id,campaign_id,month,postal_code,spend,clicks').gte('month',obAdd(today.slice(0,8)+'01',-62).slice(0,8)+'01'); }))
+    ]);
+    MA_GC={today:today,pins:pins||[],pc:pc||[],wl:(wl&&wl.data)||[],fb:fb||[],gg:gg||[],rera:rera||[],geo:geo};
+  })();
+  try{ await MA_GCLOADING; } finally{ MA_GCLOADING=null; }
+}
+function maKm(a,b){ const R=6371, r=Math.PI/180, dl=(b.lat-a.lat)*r, dn=(b.lng-a.lng)*r, x=Math.sin(dl/2)*Math.sin(dl/2)+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dn/2)*Math.sin(dn/2); return 2*R*Math.asin(Math.sqrt(x)); }
+
+// ================================================================ GEOGRAPHY
+function maGeoData(){
+  const G=MA_GC, pcm={}; G.pc.forEach(function(p){ pcm[p.pincode]={lat:+p.lat,lng:+p.lng,place:p.place||p.pincode,district:p.district}; });
+  const out=[];
+  Object.keys(MA_PROJ_PIN).forEach(function(proj){ const home=pcm[MA_PROJ_PIN[proj]]; if(!home) return;
+    const pv={}, pb={}; let nv=0,nb=0,nox=0;
+    G.pins.forEach(function(p){ if(p.project!==proj) return; if(!pcm[p.pincode]){ nox++; return; } if(p.kind==='site_visit'){ pv[p.pincode]=(pv[p.pincode]||0)+1; nv++; } else if(p.kind==='booked'){ pb[p.pincode]=(pb[p.pincode]||0)+1; nb++; } });
+    if(nv<30) return;
+    const dist=function(pin){ return maKm(home,pcm[pin]); };
+    const vd=[], bd=[]; Object.keys(pv).forEach(function(k){ for(let i=0;i<pv[k];i++) vd.push(dist(k)); }); Object.keys(pb).forEach(function(k){ for(let i=0;i<pb[k];i++) bd.push(dist(k)); });
+    // distance bands: visits, bookings, conversion with a Beta range
+    const bands=[[0,5],[5,10],[10,20],[20,40],[40,1e9]].map(function(b,i){ let v=0,bk=0; Object.keys(pv).forEach(function(k){ const d=dist(k); if(d>=b[0]&&d<b[1]) v+=pv[k]; }); Object.keys(pb).forEach(function(k){ const d=dist(k); if(d>=b[0]&&d<b[1]) bk+=pb[k]; });
+      const dr=[]; MA_SEED=50+i; for(let t=0;t<2000;t++) dr.push(maRBeta(1+bk,1+Math.max(0,v-bk)));
+      return {lab:b[1]>1e8?b[0]+'+ km':b[0]+'–'+b[1]+' km',v:v,b:bk,x:i,conv:v?bk/v:null,lo:maPctl(dr,0.1),hi:maPctl(dr,0.9)}; });
+    // Cochran-Armitage trend test: does visit-to-booking conversion change with distance band?
+    const N=bands.reduce(function(s,b){ return s+b.v; },0), B=bands.reduce(function(s,b){ return s+Math.min(b.b,b.v); },0), pbar=N?B/N:0;
+    let T=0,s1=0,s2=0; bands.forEach(function(b){ T+=b.x*(Math.min(b.b,b.v)-b.v*pbar); s1+=b.v*b.x*b.x; s2+=b.v*b.x; });
+    const vT=pbar*(1-pbar)*(s1-s2*s2/(N||1)), zT=vT>0?T/Math.sqrt(vT):0;
+    // Getis-Ord Gi* hotspots of visits over every mapped PIN code within 40 km, neighbours within 5 km
+    const area=Object.keys(pcm).filter(function(k){ return dist(k)<=40; }), xs=area.map(function(k){ return pv[k]||0; }), n=area.length;
+    const xbar=xs.reduce(function(s,v){ return s+v; },0)/n, S=Math.sqrt(xs.reduce(function(s,v){ return s+v*v; },0)/n-xbar*xbar);
+    const hs=[]; area.forEach(function(k,i){ let sw=0,swx=0; area.forEach(function(k2,j){ if(maKm(pcm[k],pcm[k2])<=5){ sw++; swx+=xs[j]; } });
+      const den=S*Math.sqrt((n*sw-sw*sw)/(n-1)); if(!(den>0)) return; const z=(swx-xbar*sw)/den; hs.push({pin:k,place:pcm[k].place,z:z,p:1-maNorm(z),v:pv[k]||0,b:pb[k]||0,d:dist(k)}); });
+    const hot=maBH(hs,0.05).filter(function(h){ return h.z>0; }).sort(function(a,b){ return b.z-a.z; });
+    // areas converting visits into bookings best: Beta shrinkage to the project rate (worth 20 visits)
+    const pr=N?B/N:0, areas=Object.keys(pv).filter(function(k){ return pv[k]>=5; }).map(function(k){ const v=pv[k], b=Math.min(pb[k]||0,v), a=b+20*pr, bb=v-b+20*(1-pr); let above=0; MA_SEED=k.length+v; for(let t=0;t<2000;t++) if(maRBeta(a,bb)>pr) above++;
+      return {pin:k,place:pcm[k].place,v:v,b:b,rate:a/(a+bb),pAbove:above/2000,d:dist(k)}; }).sort(function(a,b){ return b.rate-a.rate; });
+    // Google cost per site visit by PIN code (camp.ads_geo_monthly, this month and the 2 before, from 17 Nov 2026)
+    let gcost=null; if(G.geo&&G.geo.length){ const accs={}; Object.keys(MA_D.camp).forEach(function(id){ const c=MA_D.camp[id]; if(c.project===proj&&c.platform==='google') accs[id]=1; });
+      const sp={}; G.geo.forEach(function(r){ if(accs[r.campaign_id]) sp[r.postal_code]=(sp[r.postal_code]||0)+(+r.spend||0); });
+      gcost=Object.keys(sp).filter(function(k){ return pv[k]>=3&&sp[k]>0; }).map(function(k){ return {pin:k,place:(pcm[k]||{}).place||k,s:sp[k],v:pv[k],cpv:sp[k]/pv[k]}; }).sort(function(a,b){ return a.cpv-b.cpv; }); }
+    out.push({proj:proj,home:MA_PROJ_PIN[proj],nv:nv,nb:nb,nox:nox,v50:maPctl(vd,0.5),v80:maPctl(vd,0.8),b50:bd.length?maPctl(bd,0.5):null,b80:bd.length?maPctl(bd,0.8):null,
+      bands:bands,zT:zT,pT:maP2(zT),hot:hot,areas:areas,gcost:gcost}); });
+  return {list:out};
+}
+window.maGeoProj=function(p){ MA.geo=p; maPaint(); };
+maReg({id:'geo',title:'Geography',icon:'fa-solid fa-map-location-dot',data:maGeoData,ready:maGCReady,
+  card:function(d){ const g=d.list[0]; return g?{val:'Half within '+Math.round(g.v50)+' km',sub:esc(g.proj)+' site visits · '+g.hot.length+' hotspot'+(g.hot.length===1?'':'s')+' · bookings: half within '+(g.b50!=null?Math.round(g.b50)+' km':'—')}:{val:'—',sub:'not enough mapped site visits yet'}; },
+  view:function(d){ if(!d.list.length) return maHead('fa-solid fa-map-location-dot','','Geography','')+'<div class="ma-card">Not enough mapped site visits yet.</div>';
+    const cur=d.list.find(function(g){ return g.proj===MA.geo; })||d.list[0];
+    const seg='<div class="ma-seg">'+d.list.map(function(g){ return '<button class="'+(g===cur?'on':'')+'" onclick="maGeoProj(\''+esc(g.proj)+'\')">'+esc(g.proj)+'</button>'; }).join('')+'</div>';
+    const pc=function(x){ return x==null?'—':Math.round(x*100)+'%'; }, km=function(x){ return x==null?'—':(x<10?x.toFixed(1):Math.round(x))+' km'; };
+    return maHead('fa-solid fa-map-location-dot','','Geography',
+        'From the Lead Map’s site visits and bookings by PIN code, measured from the project’s RERA PIN code. Catchment = distance within which half / 80% of visits or bookings come. Conversion = bookings ÷ visits per distance band with 80% Beta ranges; the trend test (Cochran-Armitage) says whether conversion really changes with distance. Hotspots = PIN-code clusters (5 km) with far more visits than the area’s average (Getis-Ord Gi*, false-discovery controlled). Visits show where our marketing lands, not pure demand. PIN codes without map coordinates are left out.',seg)
+      +'<div class="ma-stats">'+maStat('Half of site visits within',km(cur.v50),'80% within '+km(cur.v80)+' · '+obNum(cur.nv)+' visits')+maStat('Half of bookings within',km(cur.b50),'80% within '+km(cur.b80)+' · '+obNum(cur.nb)+' bookings')
+        +maStat('Conversion vs distance',Math.abs(cur.zT)>=1.96?(cur.zT<0?'Falls with distance':'Rises with distance'):'No real change','trend test p = '+cur.pT.toFixed(3))+maStat('Hotspots',String(cur.hot.length),'PIN-code clusters beyond chance')+'</div>'
+      +maTable(['Distance from project','Site visits','Bookings','Visit → booking (80% range)'],cur.bands.map(function(b){ return '<tr><td>'+b.lab+'</td><td>'+obNum(b.v)+'</td><td>'+obNum(b.b)+'</td><td><b>'+pc(b.conv)+'</b>'+(b.v?maRange(b.lo,b.hi,pc):'')+'</td></tr>'; }))
+      +'<div class="ma-h" style="margin-top:20px"><i class="fa-solid fa-fire"></i> Hotspots and best-converting areas</div>'
+      +maTable(['Area (PIN)','Distance','Site visits','Bookings','Read'],cur.hot.slice(0,8).map(function(h){ return '<tr><td>'+esc(h.place)+' <span class="ma-sub">'+h.pin+'</span></td><td>'+km(h.d)+'</td><td>'+obNum(h.v)+'</td><td>'+obNum(h.b)+'</td><td><span class="ma-b good">hotspot</span> <span class="ma-sub">z = '+h.z.toFixed(1)+'</span></td></tr>'; })
+        .concat(cur.areas.filter(function(a){ return a.pAbove>=0.8; }).slice(0,8).map(function(a){ return '<tr><td>'+esc(a.place)+' <span class="ma-sub">'+a.pin+'</span></td><td>'+km(a.d)+'</td><td>'+obNum(a.v)+'</td><td>'+obNum(a.b)+'</td><td><span class="ma-b good">converts well</span> <span class="ma-sub">'+Math.round(a.rate*100)+'% · '+Math.round(a.pAbove*100)+'% sure above average</span></td></tr>'; })))
+      // Google cost per site visit by PIN code: shown only once Google's spend by PIN code is in (16 Nov 2026, Ayush: no empty block)
+      +(cur.gcost&&cur.gcost.length?'<div class="ma-h" style="margin-top:20px"><i class="fa-brands fa-google"></i> Google cost per site visit by PIN code</div>'
+        +maTable(['Area (PIN)','Google spend (3 months)','Site visits','Cost per visit'],cur.gcost.slice(0,10).map(function(g){ return '<tr><td>'+esc(g.place)+' <span class="ma-sub">'+g.pin+'</span></td><td>'+obMoney(g.s)+'</td><td>'+obNum(g.v)+'</td><td><b>'+obMoney(g.cpv)+'</b></td></tr>'; })):''); }});
+
+// ================================================================ COMPETITORS
+const MA_MSG=[['Price / EMI',/(₹|rs\.?\s?\d|lakh|lac\b|\bcr\b|crore|emi|price|starting|onwards|all.?inclusive)/i],['Offer',/(offer|discount|free|waiver|cashback|gift|limited|book now|zero|no pre-?emi|subvention)/i],
+  ['Location',/(metro|airport|highway|near|minutes?|mins?\b|connect|location|road|station|school|hospital)/i],['Amenities',/(amenit|club|pool|gym|garden|green|lifestyle|luxur|premium|landscap)/i],
+  ['Ready / possession',/(ready to move|ready-to-move|possession|handover|move in|oc received|completion)/i],['Trust / brand',/(trusted|legacy|years|award|rera|delivered|families|brand)/i]];
+function maCompData(){
+  const G=MA_GC, D=MA_D, today=D.today, wl={}; G.wl.forEach(function(w){ wl[w.id]=w; });
+  const keyOf=function(w){ const k=(typeof mwKeyOf==='function'?mwKeyOf(w.name):String(w.name).toUpperCase()).split(' ')[0]; return k; };
+  const nameOf={}; G.wl.forEach(function(w){ if(w.category==='competitor'){ const k=keyOf(w); if(!nameOf[k]||w.name.length<nameOf[k].length) nameOf[k]=w.name.replace(/\s*(group|realty|private limited|pvt\.? ltd\.?|limited|kolkata)\b.*$/i,'')||w.name; } });
+  const ads=[];
+  G.fb.forEach(function(a){ const w=wl[a.watchlist_id]; if(!w) return; const st=(a.ad_delivery_start_time||'').slice(0,10), en=(a.ad_delivery_stop_time||a.last_seen_at||'').slice(0,10); if(!st) return;
+    const txt=[].concat(a.ad_creative_bodies||[],a.ad_creative_link_titles||[],a.headline||[]).join(' '); ads.push({src:'Facebook',w:w,k:w.category==='competitor'?keyOf(w):null,own:!!w.is_own_brand,st:st,en:en,running:!a.ad_delivery_stop_time,txt:txt}); });
+  G.gg.forEach(function(a){ const w=wl[a.watchlist_id]; if(!w) return; const st=(a.first_shown||'').slice(0,10), en=(a.last_shown||'').slice(0,10); if(!st) return;
+    ads.push({src:'Google',w:w,k:w.category==='competitor'?keyOf(w):null,own:!!w.is_own_brand,st:st,en:en,running:en>=obAdd(today,-3),txt:[a.ad_headline,a.ad_description].filter(Boolean).join(' ')}); });
+  const comp=ads.filter(function(a){ return a.k; });
+  // weekly active ads per competitor, last 26 weeks
+  const weeks=[]; for(let i=25;i>=0;i--) weeks.push(obAdd(today,-7*i-6));
+  const act=function(list,ws){ const we=obAdd(ws,6); return list.filter(function(a){ return a.st<=we&&a.en>=ws; }).length; };
+  const keys=Object.keys(nameOf), per=keys.map(function(k){ const L=comp.filter(function(a){ return a.k===k; }), series=weeks.map(function(w){ return act(L,w); });
+    const now=series[25], base=series.slice(17,25), mean=base.reduce(function(s,v){ return s+v; },0)/8, p=mean>0?1-maPoisCdf(now-1,mean):1, fresh=L.filter(function(a){ return a.st>=obAdd(today,-7); }).length;
+    // Kaplan-Meier median lifetime of its ads started in the last 180 days (still-running ads are censored)
+    const life=L.filter(function(a){ return a.st>=obAdd(today,-180); }).map(function(a){ return {t:Math.max(1,(Date.parse(a.en)-Date.parse(a.st))/864e5+1),e:!a.running}; }).sort(function(a,b){ return a.t-b.t; });
+    let S=1, med=null, atRisk=life.length; for(let i=0;i<life.length;i++){ if(life[i].e){ S*=1-1/atRisk; if(S<=0.5&&med==null) med=life[i].t; } atRisk--; }
+    return {k:k,name:nameOf[k],series:series,now:now,mean:mean,p:p,fresh:fresh,med:med,n:L.length,ads:L}; }).filter(function(x){ return x.n>0; });
+  const surge=maBH(per.filter(function(x){ return x.now>=1.5*x.mean&&x.now>=5; }),0.05);
+  // proven ads: still running and older than twice their brand's median lifetime (and 30+ days)
+  const proven=[]; per.forEach(function(x){ x.ads.forEach(function(a){ const age=(Date.parse(today)-Date.parse(a.st))/864e5; if(a.running&&age>=Math.max(30,2*(x.med||15))&&a.txt) proven.push({name:x.name,src:a.src,age:age,txt:a.txt}); }); });
+  proven.sort(function(a,b){ return b.age-a.age; });
+  const seenTxt={}; for(let i=0;i<proven.length;i++){ const k=proven[i].name+'|'+String(proven[i].txt).slice(0,60); if(seenTxt[k]){ proven.splice(i,1); i--; } else seenTxt[k]=1; }   // keep the oldest of repeated texts
+  // message mix, ads started in the last 90 days: competitors (top 6 by ads) and us
+  const cls=function(t){ return MA_MSG.map(function(m){ return m[1].test(t||''); }); };
+  const mix=function(list){ const n=list.filter(function(a){ return a.txt; }).length, c=MA_MSG.map(function(){ return 0; }); list.forEach(function(a){ if(!a.txt) return; cls(a.txt).forEach(function(v,i){ if(v) c[i]++; }); }); return {n:n,share:c.map(function(v){ return n?v/n:null; })}; };
+  const recent=function(l){ return l.filter(function(a){ return a.st>=obAdd(today,-90); }); };
+  const mixRows=per.slice().sort(function(a,b){ return recent(b.ads).length-recent(a.ads).length; }).slice(0,6).map(function(x){ return {name:x.name,m:mix(recent(x.ads))}; }).filter(function(r){ return r.m.n>=3; });
+  const ours=mix(recent(ads.filter(function(a){ return a.own; })));
+  // does our auction cost / cost per lead move with their activity? weekly Spearman correlation, permutation test
+  const ser=maSeries(), wk=weeks.map(function(ws){ const we=obAdd(ws,6); let s=0,im=0,l=0; Object.keys(ser.S).forEach(function(id){ const o=ser.S[id]; if(o.c.platform!=='meta') return; ser.days.forEach(function(d,i){ if(d<ws||d>we) return; s+=o.s[i]; im+=o.im[i]; if(o.lead) l+=o.l[i]; }); }); return {cpm:im?s/im*1000:null,cpl:l?s/l:null}; });
+  const tot=weeks.map(function(_,i){ return per.reduce(function(s,x){ return s+x.series[i]; },0); });
+  const rank=function(a){ const ix=a.map(function(v,i){ return [v,i]; }).sort(function(x,y){ return x[0]-y[0]; }), r=new Array(a.length); ix.forEach(function(p,j){ r[p[1]]=j; }); return r; };
+  const rho=function(x,y){ const rx=rank(x), ry=rank(y), n=x.length, mx=(n-1)/2; let num=0,dx=0,dy=0; for(let i=0;i<n;i++){ num+=(rx[i]-mx)*(ry[i]-mx); dx+=(rx[i]-mx)*(rx[i]-mx); dy+=(ry[i]-mx)*(ry[i]-mx); } return num/Math.sqrt(dx*dy); };
+  const test=function(f){ const idx=[]; wk.forEach(function(w,i){ if(w[f]!=null&&i<25) idx.push(i); }); if(idx.length<12) return null; const x=idx.map(function(i){ return tot[i]; }), y=idx.map(function(i){ return wk[i][f]; }), r=rho(x,y);
+    MA_SEED=77; let ext=0; for(let t=0;t<2000;t++){ const yy=y.slice(); for(let i=yy.length-1;i>0;i--){ const j=Math.floor(maRnd()*(i+1)); const tmp=yy[i]; yy[i]=yy[j]; yy[j]=tmp; } if(Math.abs(rho(x,yy))>=Math.abs(r)) ext++; } return {r:r,p:(ext+1)/2001,n:idx.length}; };
+  const link={cpm:test('cpm'),cpl:test('cpl')};
+  // launches near our projects: last 12 months, within 8 km of a project PIN code
+  const pcm={}; G.pc.forEach(function(p){ pcm[p.pincode]={lat:+p.lat,lng:+p.lng}; });
+  const near=[]; Object.keys(MA_PROJ_PIN).forEach(function(proj){ const h=pcm[MA_PROJ_PIN[proj]]; if(!h) return; G.rera.forEach(function(r){ const q=pcm[r.pincode]; if(!q||/dream gateway/i.test(r.promoter_name||'')) return; const d=maKm(h,q);
+      if(d<=8&&((+r.apartments||0)>=50||(typeof MW_REPUTED!=='undefined'&&MW_REPUTED.some(function(x){ return x[1].test(String(r.promoter_name||'').toUpperCase()); })))) near.push({proj:proj,name:r.name,dev:r.promoter_name,reg:r.reg_date,flats:r.apartments,d:d}); }); });
+  near.sort(function(a,b){ return a.reg<b.reg?1:-1; });
+  return {per:per.sort(function(a,b){ return b.now-a.now; }),surge:surge,proven:proven,mixRows:mixRows,ours:ours,link:link,near:near,weeks:weeks};
+}
+maReg({id:'comp',title:'Competitors',icon:'fa-solid fa-chess',data:maCompData,ready:maGCReady,
+  card:function(d){ const top=d.per[0]; return d.surge.length?{val:d.surge.length+' surging',sub:d.surge.map(function(x){ return esc(x.name); }).join(', ')+' running far more ads than usual',tone:'warn'}:{val:'Activity normal',sub:top?'most active: '+esc(top.name)+' ('+top.now+' ads live)'+(d.near.length?' · '+d.near.length+' launches near us':''):'no competitor data'}; },
+  view:function(d){ const lk=function(t,lab){ if(!t) return '<b>not enough weeks yet</b>'; return Math.abs(t.r)>=0.3&&t.p<0.05?'<b>'+(t.r>0?'rises':'falls')+' when they run more ads</b> (Spearman ρ = '+t.r.toFixed(2)+', p = '+t.p.toFixed(3)+')':'<b>no real link</b> (ρ = '+t.r.toFixed(2)+', p = '+t.p.toFixed(2)+')'; };
+    const pc=function(x){ return x==null?'—':Math.round(x*100)+'%'; };
+    return maHead('fa-solid fa-chess','','Competitors',
+        'From competitors’ Facebook Ad Library ads, Google Ads Transparency creatives and WB RERA - never their spend, which India’s Ad Library does not publish. Live ads per week; a surge = this week 1.5×+ its 8-week average and beyond chance (Poisson test, false-discovery controlled). Median ad life by Kaplan-Meier (ads still running counted as still alive). A "proven" ad is still running after twice its brand’s median life - advertisers keep what works. Messages are tagged by transparent keyword rules. The link test correlates their weekly live ads with our Facebook auction cost and cost per lead (Spearman, 2,000-shuffle permutation test) - a link is not proof of cause.')
+      +'<div class="ma-stats">'+maStat('Surging this week',String(d.surge.length),d.surge.length?d.surge.map(function(x){ return esc(x.name); }).join(', '):'no unusual jump')+maStat('Live competitor ads',obNum(d.per.reduce(function(s,x){ return s+x.now; },0)),'across '+d.per.filter(function(x){ return x.now; }).length+' competitors')
+        +maStat('Launches near our projects',String(d.near.length),'last 12 months, within 8 km')+'</div>'
+      +'<div class="ma-card">Our Facebook auction cost '+lk(d.link.cpm)+'. Our Facebook cost per lead '+lk(d.link.cpl)+'.</div>'
+      +maTable(['Competitor','Live ads now','8-week average','New this week','Median ad life','Read'],d.per.slice(0,10).map(function(x){ const s=d.surge.indexOf(x)>=0;
+        return '<tr><td>'+esc(x.name)+'</td><td><b>'+x.now+'</b></td><td>'+x.mean.toFixed(1)+'</td><td>'+x.fresh+'</td><td>'+(x.med?Math.round(x.med)+' days':'—')+'</td><td>'+(s?'<span class="ma-b warn">surging</span>':'<span class="ma-sub">normal</span>')+'</td></tr>'; }))
+      +'<div class="ma-h" style="margin-top:20px"><i class="fa-solid fa-comment-dots"></i> What they say vs us <span class="ma-sub" style="font-weight:500">· ads started in the last 90 days, share mentioning each theme</span></div>'
+      +maTable(['Advertiser'].concat(MA_MSG.map(function(m){ return m[0]; })),[{name:'Jain Group (us)',m:d.ours,us:true}].concat(d.mixRows).filter(function(r){ return r.m.n; }).map(function(r){ return '<tr'+(r.us?' class="ma-p"':'')+'><td>'+esc(r.name)+' <span class="ma-sub">'+r.m.n+' ads</span></td>'+r.m.share.map(function(v){ return '<td>'+pc(v)+'</td>'; }).join('')+'</tr>'; }))
+      +(d.proven.length?'<div class="ma-h" style="margin-top:20px"><i class="fa-solid fa-medal"></i> Their proven ads <span class="ma-sub" style="font-weight:500">· still running long after their usual life</span></div>'
+        +maTable(['Competitor','Running for','Message'],d.proven.slice(0,8).map(function(a){ return '<tr><td>'+esc(a.name)+' <span class="ma-sub">'+a.src+'</span></td><td>'+Math.round(a.age)+' days</td><td class="ma-n">'+esc(String(a.txt).slice(0,180))+'</td></tr>'; })):'')
+      +(d.near.length?'<div class="ma-h" style="margin-top:20px"><i class="fa-solid fa-building"></i> New launches near our projects</div>'
+        +maTable(['Near','Project','Developer','Registered','Flats','Distance'],d.near.slice(0,10).map(function(r){ return '<tr><td>'+esc(r.proj)+'</td><td>'+esc(r.name)+'</td><td class="ma-n">'+esc(r.dev)+'</td><td>'+obDmyS(r.reg)+'</td><td>'+(r.flats||'—')+'</td><td>'+r.d.toFixed(1)+' km</td></tr>'; })):''); }});
+/* ============================ MARKETING INTELLIGENCE: PROVE ACTIONS ============================
+   16 Nov 2026, Ayush: "Build all four" - intelligence whose actions prove themselves. Four more cards (maReg):
+   ACTION IMPACT     every budget raise / cut, launch and pause of the last 75 days, measured against comparable campaigns
+                     that were not changed (difference-in-differences with a bootstrap over the comparison campaigns and
+                     Gamma-Poisson noise on the counts): did it bring leads, at what cost per extra lead, how sure.
+                     Events: exact budget changes from camp.ads_budget_daily (16 Nov 2026 on) + sustained spend-level
+                     shifts found in the daily spend (median of the 7 days after vs the 7 before, 40%+), launches, pauses.
+   EARLY QUALITY     QL nowcasting: from how a cohort's QL count grows with lead age (maturity curve, pooled per platform,
+                     each project's mature rate as reference), each new campaign's FINAL qualified-lead rate is estimated
+                     from its first days (Beta posterior) - a weak campaign is visible in a week, not after 21 days.
+   BOOKINGS AHEAD    the same maturity method on bookings: bookings still to come from leads already in the CRM, and how
+                     many land in the next 30 days; return on ad spend = bookings x the project's median flat value
+                     (Post Sales, last 12 months) / spend, for lead cohorts old enough to have booked.
+   BEST HOURS        leads per rupee by 4-hour block of the day (camp.ads_hourly, last 28 days, from 17 Nov 2026), chi-
+                     square test + a 15% practical threshold, for ad scheduling.
+   Decision support only. Maths: the document "JainE Marketing Analytics: Models and Calculations". */
+let MA_PA=null, MA_PALOADING=null;
+const _maLoadExtraGC=maLoadExtra;
+maLoadExtra=async function(){ await Promise.all([_maLoadExtraGC(),maLoadPA()]); };
+function maPAReady(){ return !!MA_PA; }
+async function maLoadPA(){
+  if(MA_PA&&MA_PA.today===MA_D.today) return;
+  if(MA_PALOADING) return MA_PALOADING;
+  MA_PALOADING=(async function(){
+    const today=MA_D.today, safe=function(p){ return p.catch(function(){ return null; }); };
+    const [bud,bk,pj,hr]=await Promise.all([
+      safe(maAll(function(){ return sb.schema('camp').from('ads_budget_daily').select('day,platform,kind,id,campaign_id,status,daily_budget').gte('day',obAdd(today,-80)).order('day'); })),
+      safe(maAll(function(){ return sb.schema('postsales').from('bookings').select('project_id,booking_date,status,total_consideration').gte('booking_date',obAdd(today,-365)); })),
+      sb.schema('cust').from('projects').select('id,name'),
+      safe(maAll(function(){ return sb.schema('camp').from('ads_hourly').select('platform,campaign_id,hour,spend,leads'); }))
+    ]);
+    MA_PA={today:today,bud:bud,bk:bk||[],pj:(pj&&pj.data)||[],hr:hr};
+  })();
+  try{ await MA_PALOADING; } finally{ MA_PALOADING=null; }
+}
+
+// ================================================================ ACTION IMPACT
+function maImpactData(){
+  const D=MA_D, ser=maSeries(), n=ser.days.length, ids=Object.keys(ser.S).filter(function(id){ return ser.S[id].lead; }), ev=[];
+  const sum=function(a,i0,i1){ let s=0; for(let i=Math.max(0,i0);i<Math.min(n,i1);i++) s+=a[i]; return s; };
+  const med=function(a,i0,i1){ const v=[]; for(let i=Math.max(0,i0);i<Math.min(n,i1);i++) v.push(a[i]); return maMed(v); };
+  const lo=n-75;
+  // exact budget changes (daily record, 16 Nov 2026 on)
+  const exact={}; if(MA_PA&&MA_PA.bud){ const last={}; MA_PA.bud.forEach(function(r){ const cid=r.kind==='campaign'?r.id:r.campaign_id, k=r.kind+':'+r.id, prev=last[k]; last[k]=r;
+      if(!prev||!cid||!ser.S[cid]||prev.daily_budget==null||r.daily_budget==null||!(+prev.daily_budget>0)) return; const ch=+r.daily_budget/+prev.daily_budget-1;
+      if(Math.abs(ch)>=0.2&&ser.ix[r.day]!=null){ exact[cid+'|'+r.day]=1; ev.push({cid:cid,t:ser.ix[r.day],kind:ch>0?'raise':'cut',label:'Budget '+(ch>0?'raised ':'cut ')+Math.round(Math.abs(ch)*100)+'%',exact:true}); } }); }
+  ids.forEach(function(id){ const o=ser.S[id], s=o.s;
+    // launch / pause
+    let first=-1; for(let i=0;i<n;i++) if(s[i]>0){ first=i; break; }
+    if(first>=lo&&first>=14&&first<=n-7&&sum(s,first-14,first)===0) ev.push({cid:id,t:first,kind:'launch',label:'Campaign launched',proj:true});
+    let lastS=-1; for(let i=n-1;i>=0;i--) if(s[i]>0){ lastS=i; break; }
+    if(lastS>=lo&&lastS<=n-8&&sum(s,lastS-13,lastS+1)>=7*300) ev.push({cid:id,t:lastS+1,kind:'pause',label:'Campaign paused',proj:true});
+    // sustained spend-level shifts (budget changes before the daily record existed)
+    let lastT=-99; const cands=[];
+    for(let t=Math.max(lo,7);t<=n-7;t++){ const b=med(s,t-7,t), a=med(s,t,t+7); if(!(b>0)||!(a>0)) continue; const r=Math.log(a/b); if(Math.abs(r)>=Math.log(1.4)) cands.push({t:t,r:r}); }
+    cands.sort(function(x,y){ return Math.abs(y.r)-Math.abs(x.r); }).forEach(function(c){ if(ev.some(function(e){ return e.cid===id&&Math.abs(e.t-c.t)<14; })) return; if(Math.abs(c.t-lastT)<14) return; lastT=c.t;
+      ev.push({cid:id,t:c.t,kind:c.r>0?'raise':'cut',label:'Spend '+(c.r>0?'raised ':'cut ')+Math.round(Math.abs(Math.exp(c.r)-1)*100)+'%',exact:false}); }); });
+  // evaluation: difference-in-differences against comparable unchanged campaigns, bootstrap + Gamma-Poisson noise
+  const busy=function(cid,t){ return ev.some(function(e){ return e.cid===cid&&Math.abs(e.t-t)<14; }); };
+  MA_SEED=2026; const out=[];
+  ev.forEach(function(e){ const o=ser.S[e.cid]; if(!o) return; const pre0=e.t-14, post1=Math.min(n,e.t+14), pd=post1-e.t; if(pd<7||pre0<0) return;
+    const plat=o.c.platform;
+    // treated: the campaign itself, or for launch / pause its whole project + platform
+    const group=e.proj?ids.filter(function(id){ const x=ser.S[id]; return x.c.project===o.c.project&&x.c.platform===plat; }):[e.cid];
+    const T=function(a){ return group.reduce(function(s,id){ return s+sum(ser.S[id][a],pre0,e.t); },0); }, Tp=function(a){ return group.reduce(function(s,id){ return s+sum(ser.S[id][a],e.t,post1); },0); };
+    const Lb=T('l'), La=Tp('l'), Sb=T('s'), Sa=Tp('s'); if(Lb+La<10) return;
+    const ctrl=ids.filter(function(id){ const x=ser.S[id]; if(group.indexOf(id)>=0||x.c.platform!==plat) return false; if(e.proj&&x.c.project===o.c.project) return false;
+      return sum(x.s,pre0,e.t)>0&&sum(x.s,e.t,post1)>0&&sum(x.l,pre0,e.t)>=5&&!busy(id,e.t); });
+    if(ctrl.length<3) return;
+    const cs=ctrl.map(function(id){ const x=ser.S[id]; return {b:sum(x.l,pre0,e.t),a:sum(x.l,e.t,post1)}; });
+    const draws=[];
+    for(let k=0;k<1500;k++){ let cb=0,ca=0; for(let j=0;j<cs.length;j++){ const c=cs[Math.floor(maRnd()*cs.length)]; cb+=c.b; ca+=c.a; } if(!(cb>0)) continue;
+      const rb=maRGamma(1+Lb)/14, ra=maRGamma(1+La)/pd, cr=(ca/pd)/(cb/14); draws.push(ra-rb*cr); }
+    if(draws.length<200) return;
+    const eff=maPctl(draws,0.5), effLo=maPctl(draws,0.1), effHi=maPctl(draws,0.9), pUp=draws.filter(function(v){ return v>0; }).length/draws.length;
+    const dS=Sa/pd-Sb/14, preCpl=Lb?Sb/Lb:null, mcpl=eff>0&&dS>0?dS/eff:null;
+    let verdict, tone;
+    if(e.kind==='raise'||e.kind==='launch'){ if(pUp>=0.9&&(mcpl==null||!preCpl||mcpl<=1.5*preCpl)){ verdict='Worked'; tone='good'; } else if(pUp>=0.9){ verdict='Worked, but expensive'; tone='warn'; } else { verdict='No real gain'; tone='bad'; } }
+    else { if(pUp<=0.1){ verdict='Lost leads'; tone='bad'; } else { verdict='Saved money, kept leads'; tone='good'; } }
+    out.push({e:e,c:o.c,day:ser.days[e.t],pd:pd,eff:eff,effLo:effLo,effHi:effHi,pUp:pUp,dS:dS,mcpl:mcpl,preCpl:preCpl,verdict:verdict,tone:tone,n:ctrl.length}); });
+  out.sort(function(a,b){ return a.day<b.day?1:-1; });
+  return {list:out};
+}
+maReg({id:'impact',title:'Action impact',icon:'fa-solid fa-flask',data:maImpactData,ready:maPAReady,
+  card:function(d){ const w=d.list.filter(function(x){ return x.tone==='good'; }).length, b=d.list.filter(function(x){ return x.tone==='bad'; }).length;
+    return d.list.length?{val:w+' worked · '+b+' did not',sub:d.list.length+' changes in the last 75 days measured against unchanged campaigns',tone:b>w?'warn':null}:{val:'—',sub:'no measurable change yet'}; },
+  view:function(d){ const n1=function(x){ return (x>=0?'+':'')+x.toFixed(1); };
+    return maHead('fa-solid fa-flask','','Action impact',
+        'Each budget raise or cut, launch and pause in the last 75 days, measured over up to 14 days after it against the same platform’s campaigns that were NOT changed (difference-in-differences): if those moved too, it was the market, not the action. Range from 1,500 simulations (re-drawing the comparison campaigns and the lead counts). Launch / pause are measured on the whole project + platform, so leads that just moved between campaigns do not count. Budget changes are exact from 16 Nov 2026; before that they are read from sustained 40%+ shifts in daily spend.')
+      +(d.list.length?maTable(['Date','Campaign','Action','Verdict','Leads / day change (80% range)','Cost of each extra lead'],d.list.map(function(x){
+          return '<tr><td>'+obDmyS(x.day)+'</td><td class="ma-n">'+maPlat(x.c.platform)+' '+esc(x.e.proj?x.c.project+' (all '+(x.c.platform==='google'?'Google':'Facebook')+')':x.c.name)+'<div class="ma-sub">'+esc(x.e.proj?x.c.name:x.c.project)+'</div></td><td>'+esc(x.e.label)+(x.e.exact?'':' <span class="ma-sub">(from spend)</span>')+'</td>'
+            +'<td><span class="ma-b '+x.tone+'">'+x.verdict+'</span><div class="ma-sub">'+Math.round(Math.max(x.pUp,1-x.pUp)*100)+'% sure of the direction</div></td><td><b>'+n1(x.eff)+'</b><div class="ma-sub">'+n1(x.effLo)+' to '+n1(x.effHi)+' · '+x.pd+' days after</div></td><td>'+(x.mcpl?obMoney(x.mcpl)+'<div class="ma-sub">was '+obMoney(x.preCpl)+' per lead</div>':'—')+'</td></tr>'; }))
+        :'<div class="ma-card">No budget change, launch or pause in the last 75 days has enough leads and comparison campaigns to measure yet.</div>'); }});
+
+// ================================================================ EARLY QUALITY (QL NOWCAST)
+function maMaturity(field,buckets,refLo,refHi){
+  const D=MA_D, today=D.today, age=function(d){ return Math.round((Date.parse(today)-Date.parse(d))/864e5); };
+  const ref={}; D.crm.forEach(function(r){ const a=age(r.day); if(a<refLo||a>refHi) return; const k=r.project+'|'+r.platform, x=ref[k]=ref[k]||{l:0,q:0}; x.l+=r.leads; x.q+=r[field]; });
+  const F=buckets.map(function(){ return {num:0,den:0}; });
+  D.crm.forEach(function(r){ const a=age(r.day), b=buckets.findIndex(function(x){ return a>=x[0]&&a<=x[1]; }); if(b<0) return; const R=ref[r.project+'|'+r.platform]; if(!R||!(R.l>=50)||!(R.q>0)) return;
+    F[b].num+=r[field]; F[b].den+=r.leads*R.q/R.l; });
+  const f=F.map(function(x){ return x.den>0?Math.min(1,Math.max(0.03,x.num/x.den)):null; });
+  for(let i=1;i<f.length;i++) if(f[i]!=null&&f[i-1]!=null&&f[i]<f[i-1]) f[i]=f[i-1];   // completeness never falls with age
+  return {f:f,ref:ref,age:age};
+}
+function maEarlyData(){
+  const D=MA_D, B=[[0,3],[4,7],[8,14],[15,21],[22,30],[31,45],[46,59]], M=maMaturity('ql',B,60,200);
+  const Fof=function(a){ if(a>=60) return 1; const i=B.findIndex(function(x){ return a>=x[0]&&a<=x[1]; }); return i>=0&&M.f[i]!=null?M.f[i]:null; };
+  const by={}; D.crm.forEach(function(r){ if(!r.cid) return; const a=M.age(r.day); if(a>21) return; const F=Fof(a); if(F==null) return; const c=D.camp[r.cid]; if(!c||!caLive(c.status)) return;
+    const g=by[r.cid]=by[r.cid]||{c:c,l:0,q:0,e:0}; g.l+=r.leads; g.q+=r.ql; g.e+=r.leads*F; });
+  MA_SEED=404; const list=[];
+  Object.keys(by).forEach(function(id){ const g=by[id]; if(g.l<10||g.e<1) return; const R=M.ref[g.c.project+'|'+g.c.platform]; if(!R||!(R.l>=50)) return; const p=R.q/R.l;
+    const a=g.q+10*p, b=Math.max(0.5,g.e-g.q)+10*(1-p); let below=0, above=0; const dr=[];
+    for(let k=0;k<2000;k++){ const t=maRBeta(a,b); dr.push(t); if(t<0.7*p) below++; if(t>1.3*p) above++; }
+    const est=a/(a+b), v=below/2000>=0.8?'weak':above/2000>=0.8?'strong':'normal';
+    list.push({c:g.c,l:g.l,q:g.q,est:est,lo:maPctl(dr,0.1),hi:maPctl(dr,0.9),p:p,v:v,pBelow:below/2000,pAbove:above/2000}); });
+  list.sort(function(a,b){ return ({weak:0,strong:1,normal:2}[a.v])-({weak:0,strong:1,normal:2}[b.v])||b.l-a.l; });
+  return {list:list,f:M.f,B:B};
+}
+maReg({id:'early',title:'Early quality',icon:'fa-solid fa-seedling',data:maEarlyData,
+  card:function(d){ const w=d.list.filter(function(x){ return x.v==='weak'; }).length, s=d.list.filter(function(x){ return x.v==='strong'; }).length;
+    return d.list.length?{val:w?w+' look weak early':'None weak',sub:(s?s+' look strong · ':'')+d.list.length+' campaigns judged on leads from the last 21 days',tone:w?'warn':'good'}:{val:'—',sub:'no campaign has enough new CRM leads'}; },
+  view:function(d){ const pc=function(x){ return Math.round(x*100)+'%'; }, i7=d.f[1], i14=d.f[2];
+    return maHead('fa-solid fa-seedling','','Early quality',
+        'The CRM marks a lead qualified days or weeks after it arrives, so a new campaign’s QL rate looks low at first. From past months we learn how complete the QL count is at each lead age (maturity curve, per platform, each project’s settled rate as the reference), then estimate each running campaign’s FINAL QL rate from its leads of the last 21 days (Beta posterior, pulled toward its project’s rate). Weak / strong = 80%+ sure it ends 30% below / above its project’s usual rate.')
+      +'<div class="ma-note">How the CRM fills in: by day 7 about '+(i7?pc(i7):'—')+' of a lead batch’s eventual QLs are marked, by day 14 about '+(i14?pc(i14):'—')+'.</div>'
+      +(d.list.length?maTable(['Campaign','Leads (21 days)','QL so far','Expected final QL rate (80% range)','Project usual','Read'],d.list.map(function(x){
+          return '<tr><td class="ma-n">'+maPlat(x.c.platform)+' '+esc(x.c.name)+'<div class="ma-sub">'+esc(x.c.project)+'</div></td><td>'+obNum(x.l)+'</td><td>'+obNum(x.q)+'</td><td><b>'+pc(x.est)+'</b>'+maRange(x.lo,x.hi,pc)+'</td><td>'+pc(x.p)+'</td><td>'
+            +(x.v==='weak'?'<span class="ma-b bad">Weak - '+Math.round(x.pBelow*100)+'% sure</span>':x.v==='strong'?'<span class="ma-b good">Strong - '+Math.round(x.pAbove*100)+'% sure</span>':'<span class="ma-sub">in line</span>')+'</td></tr>'; }))
+        :'<div class="ma-card">No running campaign has 10+ CRM leads in the last 21 days.</div>'); }});
+
+// ================================================================ BOOKINGS AHEAD + RETURN ON SPEND
+function maProjValue(){ const P=MA_PA, nm={}; P.pj.forEach(function(p){ nm[p.id]=String(p.name||'').toUpperCase(); });
+  const map=function(s){ return /GURUKUL/.test(s)?'Dream Gurukul':/ANANTA/.test(s)?'Dream Ananta':/EXOTICA/.test(s)?'Dream Exotica':/VALLEY/.test(s)?'Dream Valley':/ECO ?CITY/.test(s)?'Dream Eco City':/DREAM ONE/.test(s)?'Dream One':/PAILAN/.test(s)?'Dream World City':null; };
+  const v={}; P.bk.forEach(function(b){ if(/cancel/i.test(b.status||'')||!(+b.total_consideration>0)) return; const p=map(nm[b.project_id]||''); if(p) (v[p]=v[p]||[]).push(+b.total_consideration); });
+  const out={}; Object.keys(v).forEach(function(p){ out[p]={med:maMed(v[p]),n:v[p].length}; }); return out; }
+function maBookData(){
+  const D=MA_D;
+  /* NEXT 30 DAYS FROM POST SALES (16 Nov 2026): the CRM ties only a fraction of bookings to ad leads (about 35 of Post
+     Sales' 160 in a year), so the forecast uses Post Sales' own bookings - all channels - per project: last 90 days' rate,
+     negative binomial range (k from the month-to-month spread of the last 12 months). The CRM's share shows how many of
+     those bookings the CRM credits to ads. */
+  const P=MA_PA, nm={}; P.pj.forEach(function(p){ nm[p.id]=String(p.name||'').toUpperCase(); });
+  const mapP=function(s){ return /GURUKUL/.test(s)?'Dream Gurukul':/ANANTA/.test(s)?'Dream Ananta':/EXOTICA/.test(s)?'Dream Exotica':/VALLEY/.test(s)?'Dream Valley':/ECO ?CITY/.test(s)?'Dream Eco City':/DREAM ONE/.test(s)?'Dream One':/PAILAN/.test(s)?'Dream World City':null; };
+  const t90=obAdd(D.today,-90), pr={};
+  P.bk.forEach(function(b){ if(/cancel/i.test(b.status||'')||!b.booking_date||!(+b.total_consideration>0)) return;   /* real bookings only: the 5 Nov 2026 bulk import (292, no value, dated November) is left out */ const p=mapP(nm[b.project_id]||''); if(!p) return; const x=pr[p]=pr[p]||{n90:0,mon:{}}; if(b.booking_date>=t90) x.n90++; const m=b.booking_date.slice(0,7); x.mon[m]=(x.mon[m]||0)+1; });
+  const crm90={}; D.crm.forEach(function(r){ if(r.day>=t90) crm90[r.project]=(crm90[r.project]||0)+r.bk; });
+  Object.keys(pr).forEach(function(p){ const x=pr[p], ms=Object.keys(x.mon).map(function(m){ return x.mon[m]; }), m=ms.reduce(function(s,v){ return s+v; },0)/Math.max(1,ms.length), v=ms.length>1?maSd(ms)*maSd(ms):m;
+    x.k=v>m?Math.max(1,m*m/(v-m)):1000; x.next=x.n90/3; x.lo=maNBq(x.next,x.k,0.1); x.hi=maNBq(x.next,x.k,0.9); x.crm=crm90[p]||0; });
+  const vals=maProjValue();
+  // return on ad spend: lead cohorts 90-270 days old (old enough to have booked), bookings x median flat value / spend
+  const a0=obAdd(D.today,-270), a1=obAdd(D.today,-90), roas={};
+  D.rows.forEach(function(r){ if(!maIn(r.day,a0,a1)) return; const k=r.c.project+'|'+r.c.platform, x=roas[k]=roas[k]||{p:r.c.project,pl:r.c.platform,s:0,b:0}; x.s+=r.spend; });
+  D.crm.forEach(function(r){ if(!maIn(r.day,a0,a1)) return; const x=roas[r.project+'|'+r.platform]; if(x) x.b+=r.bk; });
+  MA_SEED=88; const rl=Object.keys(roas).map(function(k){ const x=roas[k], v=vals[x.p]; if(!v||!(x.s>0)) return null; const dr=[]; for(let i=0;i<2000;i++) dr.push(maRGamma(x.b+0.5)*v.med/x.s);
+    return {p:x.p,pl:x.pl,s:x.s,b:x.b,v:v.med,r:x.b*v.med/x.s,lo:maPctl(dr,0.1),hi:maPctl(dr,0.9),cpb:x.b?x.s/x.b:null}; }).filter(Boolean).sort(function(a,b){ return b.r-a.r; });
+  const rows=Object.keys(pr).map(function(p){ const x=pr[p]; return {p:p,next:x.next,lo:x.lo,hi:x.hi,n90:x.n90,crm:x.crm,v:vals[p]?vals[p].med:null}; }).filter(function(x){ return x.n90>0; }).sort(function(a,b){ return b.next-a.next; });
+  const T=rows.reduce(function(s,x){ return s+x.next; },0), N90=rows.reduce(function(s,x){ return s+x.n90; },0), C90=rows.reduce(function(s,x){ return s+x.crm; },0);
+  return {rows:rows,next:T,nextLo:maNBq(T,8,0.1),nextHi:maNBq(T,8,0.9),n90:N90,crm90:C90,roas:rl};
+}
+maReg({id:'book',title:'Bookings ahead',icon:'fa-solid fa-house-circle-check',data:maBookData,ready:maPAReady,
+  card:function(d){ const b=d.roas.filter(function(x){ return x.b>=2; })[0]; return {val:'≈'+obNum(Math.round(d.next))+' bookings in 30 days',sub:'all channels, from Post Sales'+(b?' · best ad return: '+esc(b.p)+' '+(b.pl==='google'?'Google':'Facebook')+' ₹'+b.r.toFixed(0)+' sales per ₹1':'')}; },
+  view:function(d){ const n0=function(x){ return obNum(Math.round(x)); };
+    return maHead('fa-solid fa-house-circle-check','','Bookings ahead',
+        'Next 30 days: each project’s bookings in Post Sales over the last 90 days (all channels - ads, channel partners, walk-ins), projected forward; the 80% range is a negative binomial whose spread comes from how much monthly bookings varied over the last year. The CRM column shows how many of those bookings the CRM credits to ad leads. Return on ad spend = bookings the CRM credits to a project + platform × the project’s median flat value in Post Sales (last 12 months) ÷ its ad spend, for leads 90-270 days old (old enough to have booked); range from a Gamma-Poisson posterior. Post Sales’ Pailan projects are counted as Dream World City.')
+      +'<div class="ma-stats">'+maStat('Bookings in the next 30 days',n0(d.next),n0(d.nextLo)+' – '+n0(d.nextHi)+' (80%), all channels')+maStat('Bookings in the last 90 days',obNum(d.n90),'the CRM credits '+obNum(d.crm90)+' of them to ad leads')+'</div>'
+      +maTable(['Project','Next 30 days (80% range)','Last 90 days','Credited to ads by the CRM','Median flat value'],d.rows.map(function(x){ return '<tr><td>'+esc(x.p)+'</td><td><b>'+n0(x.next)+'</b>'+maRange(x.lo,x.hi,n0)+'</td><td>'+obNum(x.n90)+'</td><td>'+obNum(x.crm)+'</td><td>'+obMoney(x.v)+'</td></tr>'; }))
+      +'<div class="ma-h" style="margin-top:20px"><i class="fa-solid fa-sack-dollar"></i> Return on ad spend <span class="ma-sub" style="font-weight:500">· leads from '+obDmyS(obAdd(MA_D.today,-270))+' to '+obDmyS(obAdd(MA_D.today,-90))+'</span></div>'
+      +maTable(['Project / platform','Ad spend','Bookings','Cost per booking','Sales per ₹1 of ads (80% range)'],d.roas.map(function(x){ return '<tr><td>'+maPlat(x.pl)+' '+esc(x.p)+'</td><td>'+obMoney(x.s)+'</td><td>'+obNum(x.b)+'</td><td>'+obMoney(x.cpb)+'</td><td><b>₹'+x.r.toFixed(0)+'</b><div class="ma-sub">₹'+x.lo.toFixed(0)+' – ₹'+x.hi.toFixed(0)+'</div></td></tr>'; })); }});
+
+// ================================================================ BEST HOURS
+function maHourData(){
+  const P=MA_PA; if(!P||!P.hr||!P.hr.length) return {na:true};
+  const res={}, blocks=[[0,4],[4,8],[8,12],[12,16],[16,20],[20,24]];
+  ['google','meta'].forEach(function(pl){ const S=blocks.map(function(){ return 0; }), L=blocks.map(function(){ return 0; });
+    P.hr.forEach(function(r){ if(r.platform!==pl) return; const c=MA_D.camp[r.campaign_id]; if(pl==='meta'&&c&&!c.lead) return; const b=blocks.findIndex(function(x){ return r.hour>=x[0]&&r.hour<x[1]; }); S[b]+=+r.spend||0; L[b]+=+r.leads||0; });
+    const st=S.reduce(function(a,b){ return a+b; },0), lt=L.reduce(function(a,b){ return a+b; },0); if(!(st>0)||lt<50){ res[pl]=null; return; }
+    let chi=0; const idx=S.map(function(s,i){ const e=lt*s/st; if(e>0) chi+=(L[i]-e)*(L[i]-e)/e; return e>0?L[i]/e:null; });
+    const p=maGammaQ2(2.5,chi/2), spread=Math.max.apply(null,idx.map(function(v){ return v==null?0:Math.abs(v-1); }));
+    res[pl]={idx:idx,cpl:S.map(function(s,i){ return L[i]?s/L[i]:null; }),share:S.map(function(s){ return s/st; }),p:p,real:p<0.01&&spread>=0.15,lt:lt}; });
+  return {res:res,blocks:blocks};
+}
+// upper regularised incomplete gamma (chi-square p-value with 5 degrees of freedom: a = 2.5)
+function maGammaQ2(a,x){ if(x<=0) return 1;
+  if(x<a+1){ let ap=a, sum=1/a, del=sum; for(let n=0;n<200;n++){ ap++; del*=x/ap; sum+=del; if(Math.abs(del)<Math.abs(sum)*1e-10) break; } return 1-sum*Math.exp(-x+a*Math.log(x)-maLnG(a)); }
+  let b=x+1-a, c=1e300, dd=1/b, h=dd; for(let i=1;i<200;i++){ const an=-i*(i-a); b+=2; dd=an*dd+b; if(Math.abs(dd)<1e-300) dd=1e-300; c=b+an/c; if(Math.abs(c)<1e-300) c=1e-300; dd=1/dd; const del=dd*c; h*=del; if(Math.abs(del-1)<1e-10) break; }
+  return Math.exp(-x+a*Math.log(x)-maLnG(a))*h; }
+maReg({id:'hours',title:'Best hours',icon:'fa-solid fa-clock',data:maHourData,ready:maPAReady,
+  card:function(d){ if(d.na) return {val:'From 17 Nov',sub:'hourly figures are collected from tonight'};
+    const parts=[]; ['google','meta'].forEach(function(pl){ const r=d.res[pl]; if(!r||!r.real) return; let bi=0; r.idx.forEach(function(v,i){ if(v>r.idx[bi]) bi=i; }); parts.push((pl==='google'?'Google':'Facebook')+': '+d.blocks[bi][0]+':00–'+d.blocks[bi][1]+':00'); });
+    return parts.length?{val:parts[0].split(': ')[1],sub:parts.join(' · ')+' brings the most leads per rupee'}:{val:'No pattern',sub:'every time of day performs about the same'}; },
+  view:function(d){ if(d.na) return maHead('fa-solid fa-clock','','Best hours','')+'<div class="ma-card">Hourly figures are collected from tonight (16 Nov 2026); this fills in tomorrow.</div>';
+    const cell=function(v){ if(v==null) return '<td>—</td>'; const c=v-1; return '<td class="'+(c>=0.15?'ma-up':c<=-0.15?'ma-dn':'')+'"><b>'+(c>=0?'+':'')+Math.round(c*100)+'%</b></td>'; };
+    const rows=[]; ['google','meta'].forEach(function(pl){ const r=d.res[pl]; if(!r) return;
+      rows.push('<tr><td>'+maPlat(pl)+' '+(pl==='google'?'Google':'Facebook')+'<div class="ma-sub">'+(r.real?'real pattern (p '+(r.p<0.001?'< 0.001':'= '+r.p.toFixed(3))+')':'no pattern worth acting on')+'</div></td>'+r.idx.map(cell).join('')+'</tr>');
+      rows.push('<tr><td class="ma-sub" style="padding-left:24px">share of spend</td>'+r.share.map(function(s){ return '<td class="ma-sub">'+Math.round(s*100)+'%</td>'; }).join('')+'</tr>'); });
+    return maHead('fa-solid fa-clock','','Best hours',
+        'Last 28 days, lead campaigns: leads each 4-hour block brought for its share of spend. +30% = 30% more leads than its spend predicts at the average rate. A real pattern needs the chi-square test (p < 0.01) and some block 15%+ off average. Use it to schedule ads or shift bids by time of day.')
+      +(rows.length?maTable(['Platform'].concat(d.blocks.map(function(b){ return b[0]+':00–'+b[1]+':00'; })),rows):'<div class="ma-card">Not enough leads in the hourly figures yet.</div>'); }});

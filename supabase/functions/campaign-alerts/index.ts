@@ -23,6 +23,30 @@
 // needed a live Meta call per account and had never fired.
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+
+// 13 Nov 2026: denomailer 1.6.0 packs html/text as quoted-printable itself and gets it wrong (lower-case =3d, broken wrapping), so some mail apps show raw code.
+// Hand it base64 parts instead; every mail app reads them.
+function b64Part(mimeType: string, s: string) {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const b64 = btoa(bin).replace(/.{76}(?=.)/g, "$&\r\n");
+  return { mimeType: `${mimeType}; charset="utf-8"`, content: b64, transferEncoding: "base64" };
+}
+function htmlToText(html: string) {
+  return html.replace(/<(br|\/p|\/div|\/tr|\/li|\/h[1-6])\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/\n{3,}/g, "\n\n").trim();
+}
+function mailBody(text: string | undefined, html?: string) {
+  const t = text && text.trim() ? text : html ? htmlToText(html) : "";
+  return { mimeContent: html ? [b64Part("text/plain", t), b64Part("text/html", html)] : [b64Part("text/plain", t)] };
+}
+// 14 Nov 2026: denomailer 1.6.0 writes a non-ASCII subject as =?utf-8?Q?...?= WITHOUT escaping spaces or "?" and folds it with "=" line breaks. That is an invalid header, so some
+// mail apps then show the WHOLE message as raw source (headers, boundaries, base64). A subject that is plain ASCII is passed through untouched, so make every subject ASCII first.
+function asciiSubject(s: string) {
+  const M: Record<string, string> = { "—": "-", "–": "-", "‒": "-", "−": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "…": "...", "₹": "Rs.", " ": " ", "•": "-", "·": "-", "×": "x" };
+  return String(s ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\x00-\x7f]/g, (c) => M[c] ?? "").replace(/[\r\n]+/g, " ").replace(/\s{2,}/g, " ").trim().replace(/^=\?/, "= ?");
+}
+
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS' };
 const j = (o: any, s = 200) => new Response(JSON.stringify(o, null, 2), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } });
 const esc = (s: any) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -155,7 +179,7 @@ Deno.serve(async (req) => {
     let client: any = null;
     try {
       client = new SMTPClient({ connection: { hostname: 'smtp.gmail.com', port: 465, tls: true, auth: { username: GU, password: GP } } });
-      await client.send({ from: GU, to, subject: '⚠ Campaign alert: ' + fresh.length + ' issue' + (fresh.length === 1 ? '' : 's') + ' (' + Y + ')', content: text, html });
+      await client.send({ from: GU, to, subject: asciiSubject('⚠ Campaign alert: ' + fresh.length + ' issue' + (fresh.length === 1 ? '' : 's') + ' (' + Y + ')'), ...mailBody(text, html) });
       await camp.from('alert_log').update({ emailed: true }).in('alert_key', fresh.map((a) => a.key));
       dbg.emailed = to;
     } catch (e) { dbg.email_err = String(e).slice(0, 160); } finally { try { if (client) await client.close(); } catch (_) { /* ignore */ } }

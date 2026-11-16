@@ -154,6 +154,12 @@ function b64Part(mimeType: string, s: string) {
 export function mailBody(text: string, html: string) {
   return { mimeContent: [b64Part("text/plain", text), b64Part("text/html", html)] };
 }
+// 14 Nov 2026: denomailer 1.6.0 writes a non-ASCII subject as =?utf-8?Q?...?= WITHOUT escaping spaces or "?" and folds it with "=" line breaks. That is an invalid header, so some
+// mail apps then show the WHOLE message as raw source (headers, boundaries, base64). A subject that is plain ASCII is passed through untouched, so make every subject ASCII first.
+function asciiSubject(s: string) {
+  const M: Record<string, string> = { "—": "-", "–": "-", "‒": "-", "−": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "…": "...", "₹": "Rs.", " ": " ", "•": "-", "·": "-", "×": "x" };
+  return String(s ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\x00-\x7f]/g, (c) => M[c] ?? "").replace(/[\r\n]+/g, " ").replace(/\s{2,}/g, " ").trim().replace(/^=\?/, "= ?");
+}
 
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
@@ -476,7 +482,7 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
         auth: { username: CU, password: CP } } });
       try {
         await nc.send({ from: `JAIN-E Post Sales <${CU}>`, to: nTo,
-          subject: `${live ? "" : "[TEST] "}Welcome Letter held - ${qBad ? "unclear scans" : "booking amount"} - ${w.customer}`, ...mailBody(nText, nHtml) });
+          subject: asciiSubject(`${live ? "" : "[TEST] "}Welcome Letter held - ${qBad ? "unclear scans" : "booking amount"} - ${w.customer}`), ...mailBody(nText, nHtml) });
       } catch (e) {
         await acc.from("booking_doc_status").update({ auto_held_at: null, auto_held_reason: null }).eq("case_id", caseId).eq("kind", "welcome");
         return j({ error: "Could not tell Pallabita: " + String((e as Error).message || e).slice(0, 300) }, 502);
@@ -494,7 +500,7 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
   const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true,
     auth: { username: CU, password: CP } } });
   try {
-    await client.send({ from: `Pallabita Ghosh - The Jain Group <${CU}>`, to, subject, ...mailBody(text, html),
+    await client.send({ from: `Pallabita Ghosh - The Jain Group <${CU}>`, to, subject: asciiSubject(subject), ...mailBody(text, html),
       ...(attachments.length ? { attachments } : {}) });
   } catch (e) {
     if (action === "booking_welcome_auto") {
@@ -564,7 +570,7 @@ async function readFailedNotice(req: Request, acc: any, j: J, caseId: number): P
   const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true,
     auth: { username: CU, password: CP } } });
   try {
-    await client.send({ from: `JAIN-E Post Sales <${CU}>`, to, subject, ...mailBody(text, html) });
+    await client.send({ from: `JAIN-E Post Sales <${CU}>`, to, subject: asciiSubject(subject), ...mailBody(text, html) });
   } catch (e) {
     return j({ error: "Could not send: " + String((e as Error).message || e).slice(0, 300) }, 502);
   } finally { try { await client.close(); } catch { /* ignore */ } }
@@ -617,7 +623,7 @@ async function welcome2Reminders(req: Request, acc: any, j: J): Promise<Response
         + `<p style="margin:0">Please open the booking in JAIN-E and email the 2nd Welcome Letter.</p></div>`;
       const text = html.replace(/<br>/g, "\n").replace(/<\/p>/g, "\n\n").replace(/<[^>]+>/g, "").trim();
       try {
-        await client.send({ from: `JAIN-E Post Sales <${CU}>`, to, subject: subj, ...mailBody(text, html) });
+        await client.send({ from: `JAIN-E Post Sales <${CU}>`, to, subject: asciiSubject(subj), ...mailBody(text, html) });
         sent.push(id);
         await acc.from("booking_doc_status").upsert({ case_id: id, kind: "welcome2", reminder_sent_at: new Date().toISOString() },
           { onConflict: "case_id,kind" });

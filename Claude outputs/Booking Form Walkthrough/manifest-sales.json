@@ -1,0 +1,56 @@
+[
+ {
+  "group": "Sales view (Generate Form)",
+  "file": "S01-where-the-button-is.png",
+  "title": "Where Sales starts",
+  "text": "On the Booking Form Flow page (Accountability, flow 41) the \"Generate Form\" button sits next to \"New Booking Form\". Only people allowed to generate forms see it (Administrator only for now)."
+ },
+ {
+  "group": "Sales view (Generate Form)",
+  "file": "S02-new-empty.png",
+  "title": "NEW tab - an empty form",
+  "text": "The page opens inside the ERP (menu and top bar stay). Four cards: Customer, Contact, Flat, Size & price. Everything Sales types here is pre-filled for the customer, who can still change it."
+ },
+ {
+  "group": "Sales view (Generate Form)",
+  "file": "S03-new-what-is-missing.png",
+  "title": "NEW tab - Generate link with something missing",
+  "text": "Each missing box turns red with its own message; the bar says how many things to fix. Nothing is created until it is right."
+ },
+ {
+  "group": "Sales view (Generate Form)",
+  "file": "S04-new-filled.png",
+  "title": "NEW tab - filled in",
+  "text": "Contact person follows the customer name unless typed over; the price shows commas and is written in words underneath. Three buttons: Cancel, Save draft, Generate link."
+ },
+ {
+  "group": "Sales view (Generate Form)",
+  "file": "S05-save-draft.png",
+  "title": "Save draft",
+  "text": "Not ready to send? Save draft keeps it privately for this Sales person (nobody else sees it) - it is listed under the DRAFTS tab and can be continued later."
+ },
+ {
+  "group": "Sales view (Generate Form)",
+  "file": "S06-link-ready.png",
+  "title": "The link is ready",
+  "text": "One link for this customer. Copy link, Open as the customer (to preview), or Generate another. The draft is removed once the link exists."
+ },
+ {
+  "group": "Sales view (Generate Form)",
+  "file": "S07-drafts-tab.png",
+  "title": "DRAFTS tab",
+  "text": "Saved drafts, newest first, with the date saved. Open continues it in the NEW tab; Delete removes it."
+ },
+ {
+  "group": "Sales view (Generate Form)",
+  "file": "S08-generated-forms.png",
+  "title": "Generated forms tab",
+  "text": "Every link made, with its status: Not opened yet, Filling in (step n of 8, when saved), or Submitted with its reference number. Open links have Copy link and Edit; a Submitted one has Open form."
+ },
+ {
+  "group": "Sales view (Generate Form)",
+  "file": "S09-edit-link.png",
+  "title": "Edit an open link",
+  "text": "Edit reopens the details of a link that is not submitted yet - correct a name or price and save; the link stays the same. (If the customer has already started, their own saved answers are what they see.)"
+ }
+]

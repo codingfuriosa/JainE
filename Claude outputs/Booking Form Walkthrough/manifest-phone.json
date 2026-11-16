@@ -1,0 +1,50 @@
+[
+ {
+  "group": "Customer form (phone)",
+  "file": "P01-step1-as-opened.png",
+  "title": "Phone - Step 1 as opened",
+  "text": "Same form, one column. Sales' details are already in; the customer can change them."
+ },
+ {
+  "group": "Customer form (phone)",
+  "file": "P02-step1-joint-applicants.png",
+  "title": "Phone - Step 1 with a joint applicant",
+  "text": "Each applicant is a numbered block with its own Remove button; \"+ Add another applicant\" is at the bottom."
+ },
+ {
+  "group": "Customer form (phone)",
+  "file": "P03-step2-contact-address.png",
+  "title": "Phone - Step 2 Contact & address",
+  "text": "Mobile and email pre-filled by Sales; address typed by the customer; Office address is a switch that opens its own fields."
+ },
+ {
+  "group": "Customer form (phone)",
+  "file": "P04-step4-unit.png",
+  "title": "Phone - Step 4 Unit details",
+  "text": "Block, floor, flat, bedrooms, car park, area and price as agreed with Sales - changeable."
+ },
+ {
+  "group": "Customer form (phone)",
+  "file": "P05-step5-booking-amount.png",
+  "title": "Phone - Step 5 Booking amount",
+  "text": "Amount, date, reference and bank; the amount is also written in words."
+ },
+ {
+  "group": "Customer form (phone)",
+  "file": "P06-step6-kyc.png",
+  "title": "Phone - Step 6 KYC documents",
+  "text": "On a phone \"Take a photo or attach a PDF\" opens the camera. Up to 2 files per document."
+ },
+ {
+  "group": "Customer form (phone)",
+  "file": "P07-step7-terms-signature.png",
+  "title": "Phone - Step 7 Terms & signature",
+  "text": "On a phone, tapping the signature box opens a large signing pad."
+ },
+ {
+  "group": "Customer form (phone)",
+  "file": "P08-step7-signing-pad.png",
+  "title": "Phone - the signing pad",
+  "text": "A full-screen pad to sign with a finger. Done saves it into the signature box."
+ }
+]

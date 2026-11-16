@@ -1,4 +1,26 @@
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+// 13 Nov 2026: denomailer 1.6.0 packs html/text as quoted-printable itself and gets it wrong (lower-case =3d, broken wrapping), so some mail apps show raw code.
+// Hand it base64 parts instead; every mail app reads them.
+function b64Part(mimeType: string, s: string) {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const b64 = btoa(bin).replace(/.{76}(?=.)/g, "$&\r\n");
+  return { mimeType: `${mimeType}; charset="utf-8"`, content: b64, transferEncoding: "base64" };
+}
+function htmlToText(html: string) {
+  return html.replace(/<(br|\/p|\/div|\/tr|\/li|\/h[1-6])\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/\n{3,}/g, "\n\n").trim();
+}
+function mailBody(text: string | undefined, html?: string) {
+  const t = text && text.trim() ? text : html ? htmlToText(html) : "";
+  return { mimeContent: html ? [b64Part("text/plain", t), b64Part("text/html", html)] : [b64Part("text/plain", t)] };
+}
+// 14 Nov 2026: denomailer 1.6.0 writes a non-ASCII subject as =?utf-8?Q?...?= WITHOUT escaping spaces or "?" and folds it with "=" line breaks. That is an invalid header, so some
+// mail apps then show the WHOLE message as raw source (headers, boundaries, base64). A subject that is plain ASCII is passed through untouched, so make every subject ASCII first.
+function asciiSubject(s: string) {
+  const M: Record<string, string> = { "—": "-", "–": "-", "‒": "-", "−": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "…": "...", "₹": "Rs.", " ": " ", "•": "-", "·": "-", "×": "x" };
+  return String(s ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\x00-\x7f]/g, (c) => M[c] ?? "").replace(/[\r\n]+/g, " ").replace(/\s{2,}/g, " ").trim().replace(/^=\?/, "= ?");
+}
 const cors = { 'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization, x-client-info, apikey, content-type','Access-Control-Allow-Methods':'POST, GET, OPTIONS' };
 const j = (o:any,s=200)=> new Response(JSON.stringify(o),{status:s,headers:{...cors,'Content-Type':'application/json'}});
 const esc = (s:any)=> String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -114,7 +136,7 @@ Deno.serve(async (req)=>{
     try{
       client = new SMTPClient({connection:{hostname:'smtp.gmail.com',port:465,tls:true,auth:{username:GU,password:GP}}});
       for(const to of recipients){
-        try{ await client.send({from:GU,to,subject,content:text,html}); sent++; }
+        try{ await client.send({from:GU,to,subject:asciiSubject(subject),...mailBody(text,html)}); sent++; }
         catch(e){ failed.push({to,error:String(e)}); }
       }
     }catch(e){ return j({error:'send failed',detail:String(e)},500); } finally { try{ if(client) await client.close(); }catch(_){} }
@@ -163,7 +185,7 @@ Deno.serve(async (req)=>{
     let client:any=null;
     try{
       client = new SMTPClient({connection:{hostname:'smtp.gmail.com',port:465,tls:true,auth:{username:GU,password:GP}}});
-      await client.send({from:GU,to:mTo,subject:mSubject,content:mText,html:mHtml});
+      await client.send({from:GU,to:mTo,subject:asciiSubject(mSubject),...mailBody(mText,mHtml)});
       await fetch(SB+'/rest/v1/media_email_log?notification_id=eq.'+id,{method:'PATCH',headers:CP,body:JSON.stringify({status:'sent'})});
     }catch(e){
       await fetch(SB+'/rest/v1/media_email_log?notification_id=eq.'+id,{method:'PATCH',headers:CP,body:JSON.stringify({status:'failed',error:String(e).slice(0,300)})}).catch(()=>{});
@@ -205,7 +227,7 @@ Deno.serve(async (req)=>{
     try{
       client = new SMTPClient({connection:{hostname:'smtp.gmail.com',port:465,tls:true,auth:{username:GU,password:GP}}});
       for(const r of recips){
-        try{ await client.send({from:GU,to:r,subject:n.subject,content:nText,html:nHtml}); sent++; }
+        try{ await client.send({from:GU,to:r,subject:asciiSubject(n.subject),...mailBody(nText,nHtml)}); sent++; }
         catch(e){ errs.push(r+': '+String(e).slice(0,150)); }
       }
     }catch(e){ errs.push(String(e).slice(0,300)); }
@@ -326,7 +348,7 @@ Deno.serve(async (req)=>{
   let client:any=null;
   try{
     client = new SMTPClient({connection:{hostname:'smtp.gmail.com',port:465,tls:true,auth:{username:GU,password:GP}}});
-    await client.send({from:GU,to,subject,content:text,html});
+    await client.send({from:GU,to,subject:asciiSubject(subject),...mailBody(text,html)});
   }catch(e){ return j({error:'send failed',detail:String(e)},500); } finally { try{ if(client) await client.close(); }catch(_){} }
   return j({ok:true});
 });

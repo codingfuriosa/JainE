@@ -63,6 +63,68 @@ async function replaceDays(table: string, platform: string, account: string, s: 
    kept as entities of kind 'adset'. Both need the adset_id column and the 'adset' kind (migration
    20261106200000); until that is in, they are simply not sent, so this can never stop a run. */
 let HAS_ADSET: boolean | null = null;
+/* GOOGLE FORM LEADS (11 Nov 2026, Ayush: "show both"). Google's Conversions column counts whatever each campaign is set
+   to optimise for - Dream World City's Demand Gen goes for "Offline Google Sheet QL Leads", so its Conversions (22.5 in
+   12 Oct-10 Nov) are qualified leads, not leads, while Google saw 118 website form submits. form_leads is the campaign's
+   lead-form submissions as Google counts them (All conversions of the account's SUBMIT_LEAD_FORM actions that Google
+   tracks itself - uploaded copies of the same leads are left out, they would count each lead twice). */
+let HAS_FORM: boolean | null = null;
+async function hasFormLeads() {
+  if (HAS_FORM === null) { const { error } = await db.from('ads_daily').select('form_leads').limit(1); HAS_FORM = !error; }
+  return HAS_FORM;
+}
+// level 'campaign': keys campaignId|date; level 'ad' (13 Nov 2026; per ad group from 16 Nov 2026): keys adId|adGroupId|date
+async function gFormLeads(cust: string, clause: string, level: 'campaign' | 'ad' = 'campaign') {
+  const acts = await gaql(cust, "SELECT conversion_action.resource_name, conversion_action.type, conversion_action.category FROM conversion_action WHERE conversion_action.category = 'SUBMIT_LEAD_FORM'");
+  const keep: Record<string, boolean> = {};
+  for (const a of acts) { const c = a.conversionAction || {}; if (!/^UPLOAD/.test(String(c.type || ''))) keep[c.resourceName] = true; }
+  const out: Record<string, number> = {};
+  if (!Object.keys(keep).length) return out;
+  const q = level === 'ad'
+    ? `SELECT segments.date, ad_group_ad.ad.id, ad_group.id, segments.conversion_action, segments.conversion_action_category, metrics.all_conversions FROM ad_group_ad WHERE ${clause} AND segments.conversion_action_category = 'SUBMIT_LEAD_FORM'`
+    : `SELECT segments.date, campaign.id, segments.conversion_action, segments.conversion_action_category, metrics.all_conversions FROM campaign WHERE ${clause} AND segments.conversion_action_category = 'SUBMIT_LEAD_FORM'`;
+  const rows = await gaql(cust, q);
+  for (const r of rows) {
+    if (!keep[r.segments.conversionAction]) continue;
+    const id = level === 'ad' ? String(r.adGroupAd && r.adGroupAd.ad && r.adGroupAd.ad.id) + '|' + String((r.adGroup && r.adGroup.id) ?? '') : String(r.campaign.id);
+    const k = id + '|' + r.segments.date; out[k] = (out[k] || 0) + num(r.metrics.allConversions);
+  }
+  return out;
+}
+let HAS_AD_FORM: boolean | null = null;
+async function hasAdFormLeads() {
+  if (HAS_AD_FORM === null) { const { error } = await db.from('ads_ad_daily').select('form_leads').limit(1); HAS_AD_FORM = !error; }
+  return HAS_AD_FORM;
+}
+/* ONE ROW PER AD PER AD SET / AD GROUP (16 Nov 2026, Ayush: Google ad groups missing). Rows were one per ad and day, so an
+   ad copied into a second campaign (Gurukul "Madhyamgram Search" -> "Madhyamgram Search Max Click") had both campaigns'
+   spend added onto one row filed under the first: the copy showed no ad groups and the first showed too much. Once the
+   key is (platform, ad_id, adset_id, day) (migration 20261116200500, adset_id '' when none) each ad group keeps its own
+   row; until then the old one-row-per-ad write goes on, so a run never stops over it. */
+let AD_GROUP_KEY: boolean | null = null;
+async function writeAdDays(platform: string, account: string, s: string, e: string, perGroup: any[], perAd: any[]) {
+  const ways: [boolean, any[], string][] = [[true, perGroup, 'platform,ad_id,adset_id,day'], [false, perAd, 'platform,ad_id,day']];
+  if (AD_GROUP_KEY === false) ways.reverse();
+  for (let i = 0; i < 2; i++) {
+    try { await replaceDays('ads_ad_daily', platform, account, s, e, ways[i][1], ways[i][2]); AD_GROUP_KEY = ways[i][0]; return; }
+    // the table's key is the other one (before / after the migration): write that way instead
+    catch (err) { if (i === 1 || !/unique or exclusion constraint/i.test(String((err as Error).message || err))) throw err; }
+  }
+}
+/* FOR MARKETING ANALYTICS (16 Nov 2026, Ayush: "can we pull the data we are missing"). Facebook reach and frequency per
+   campaign / ad and day (creative fatigue needs how often the same people saw an ad, not just impressions), and Google
+   Search impression share - how much of the search traffic a campaign could have shown on it lost to its budget or to
+   ad rank (which campaigns could take more money). Daily reach is people reached that day; it does not add up across
+   days. Written only once the columns exist (migration 20261116200700); until then left out, so a run never stops. */
+let HAS_REACH: boolean | null = null, HAS_IS: boolean | null = null;
+async function hasReach() {
+  if (HAS_REACH === null) { const { error } = await db.from('ads_ad_daily').select('reach').limit(1); HAS_REACH = !error; }
+  return HAS_REACH;
+}
+async function hasImpShare() {
+  if (HAS_IS === null) { const { error } = await db.from('ads_daily').select('budget_lost_is').limit(1); HAS_IS = !error; }
+  return HAS_IS;
+}
 async function hasAdset() {
   if (HAS_ADSET === null) { const { error } = await db.from('ads_ad_daily').select('adset_id').limit(1); HAS_ADSET = !error; }
   return HAS_ADSET;
@@ -177,17 +239,19 @@ async function fbVerify(from: string, to: string, only?: string) {
 async function fbRead(acc: string, s: string, e: string) {
   const base = `https://graph.facebook.com/${FBV}/act_${acc}/insights?time_increment=1&use_unified_attribution_setting=true&limit=500`
     + `&time_range=${encodeURIComponent(JSON.stringify({ since: s, until: e }))}&access_token=${META_TOKEN}`;
-  const camp = await fbInsights(base + '&level=campaign', 'campaign_id,spend,impressions,clicks,actions');
-  const ads = await fbInsights(base + '&level=ad', 'ad_id,adset_id,campaign_id,spend,impressions,clicks,actions');
+  const withReach = await hasReach(), rf = withReach ? ',reach,frequency' : '';
+  const camp = await fbInsights(base + '&level=campaign', 'campaign_id,spend,impressions,clicks,actions' + rf);
+  const ads = await fbInsights(base + '&level=ad', 'ad_id,adset_id,campaign_id,spend,impressions,clicks,actions' + rf);
   const withSet = await hasAdset();
   const now = new Date().toISOString();
+  const rfOf = (r: any) => (withReach ? { reach: r.reach != null ? num(r.reach) : null, frequency: r.frequency != null ? num(r.frequency) : null } : {});
   const cRows = camp.filter((r) => r.campaign_id && r.date_start).map((r) => ({ platform: 'meta', account_id: acc, campaign_id: r.campaign_id, day: r.date_start,
-    spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), synced_at: now }));
+    spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), ...rfOf(r), synced_at: now }));
   const aRows = ads.filter((r) => r.ad_id && r.date_start).map((r) => ({ platform: 'meta', account_id: acc, campaign_id: r.campaign_id || null, ad_id: r.ad_id, day: r.date_start,
     ...(withSet ? { adset_id: r.adset_id || null } : {}),
-    spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), synced_at: now }));
+    spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), ...rfOf(r), synced_at: now }));
   await replaceDays('ads_daily', 'meta', acc, s, e, cRows, 'platform,campaign_id,day');
-  await replaceDays('ads_ad_daily', 'meta', acc, s, e, aRows, 'platform,ad_id,day');
+  await writeAdDays('meta', acc, s, e, aRows.map((r: any) => ({ ...r, adset_id: r.adset_id || '' })), aRows);
   return cRows.length + aRows.length;
 }
 async function fbEntities(acc: string) {
@@ -213,11 +277,64 @@ async function fbEntities(acc: string) {
   // The picture size has to be asked for on the creative itself (a size on the ads edge is ignored,
   // and Meta then sends a 64 x 64 thumbnail that looks blurred on the card). image_url is the
   // full-size picture of an image ad; videos and carousels have none, so their 640 px frame is used.
-  const ads = await fbAll(`https://graph.facebook.com/${FBV}/act_${acc}/ads?fields=id,name,campaign_id,effective_status,creative.thumbnail_width(640).thumbnail_height(640){thumbnail_url,image_url,body,title}&limit=200${tok}`);
+  /* THE WHOLE PICTURE, NOT A SQUARE CROP (10 Nov 2026, Ayush: "show the full image not zoomed in or cropped").
+     A creative's thumbnail_url, whatever size is asked, is Meta's centre-cropped square (stp=c0.5000x0.5000f..p640x640) -
+     165 of 175 running ads were stored that way. In order: the image ad's own picture (image_url), the cover picture
+     uploaded with a video (object_story_spec.video_data.image_url), a link ad's picture, the first image of a dynamic
+     (asset feed) ad, and for a video with none of these the video's own preferred frame at its own shape. The square
+     thumbnail is the last resort. */
+  const ads = await fbAll(`https://graph.facebook.com/${FBV}/act_${acc}/ads?fields=id,name,campaign_id,effective_status,creative.thumbnail_width(640).thumbnail_height(640){thumbnail_url,image_url,image_hash,body,title,video_id,object_story_spec{video_data{image_url,video_id},link_data{picture,image_hash}},asset_feed_spec{images{url,hash},videos{video_id,thumbnail_url}},effective_object_story_id}&limit=200${tok}`);
+  const full: Record<string, string> = {}, needVid: Record<string, string[]> = {}, needHash: Record<string, string[]> = {};
+  for (const a of ads) {
+    const cr = a.creative || {}, os = cr.object_story_spec || {}, af = cr.asset_feed_spec || {};
+    // a dynamic (asset feed) ad: its videos carry their full cover picture (thumbnail_url, facebook.com/ads/image/?d=...),
+    // its images only a hash - looked up below in the account's image library
+    const afVid = Array.isArray(af.videos) ? af.videos.find((v: any) => v && v.thumbnail_url) : null;
+    const pic = cr.image_url || (os.video_data && os.video_data.image_url) || (os.link_data && os.link_data.picture)
+      || (Array.isArray(af.images) && af.images[0] && af.images[0].url) || (afVid && afVid.thumbnail_url) || '';
+    if (pic) { full[a.id] = pic; continue; }
+    const hash = (Array.isArray(af.images) && af.images[0] && af.images[0].hash) || (os.link_data && os.link_data.image_hash) || cr.image_hash;
+    if (hash) { (needHash[String(hash)] = needHash[String(hash)] || []).push(a.id); continue; }
+    const vid = cr.video_id || (os.video_data && os.video_data.video_id) || (Array.isArray(af.videos) && af.videos[0] && af.videos[0].video_id);
+    if (vid) (needVid[String(vid)] = needVid[String(vid)] || []).push(a.id);
+  }
+  const hashes = Object.keys(needHash);
+  for (let i = 0; i < hashes.length; i += 50) {
+    try {
+      const r = await fetch(`https://graph.facebook.com/${FBV}/act_${acc}/adimages?hashes=${encodeURIComponent(JSON.stringify(hashes.slice(i, i + 50)))}&fields=hash,url,permalink_url${tok}`);
+      const t = await r.json().catch(() => ({}));
+      for (const im of ((t && t.data) || []) as any[]) { const u = im.permalink_url || im.url; if (u) for (const id of needHash[im.hash] || []) full[id] = u; }
+    } catch (_) { /* the square thumbnail stays */ }
+  }
+  const vids = Object.keys(needVid);
+  for (let i = 0; i < vids.length; i += 50) {
+    try {
+      const r = await fetch(`https://graph.facebook.com/${FBV}/?ids=${vids.slice(i, i + 50).join(',')}&fields=thumbnails{uri,is_preferred,width}${tok}`);
+      const t = await r.json().catch(() => ({}));
+      if (!r.ok || t.error) continue;
+      for (const v of Object.keys(t)) {
+        const th = ((t[v] && t[v].thumbnails && t[v].thumbnails.data) || []) as any[];
+        const best = th.find((x) => x.is_preferred) || th.sort((x, y) => (y.width || 0) - (x.width || 0))[0];
+        if (best && best.uri) for (const id of needVid[v] || []) full[id] = best.uri;
+      }
+    } catch (_) { /* the square thumbnail stays */ }
+  }
+  // a boosted post: the post's own full picture
+  const posts: Record<string, string[]> = {};
+  for (const a of ads) { const p = a.creative && a.creative.effective_object_story_id; if (!full[a.id] && p) (posts[p] = posts[p] || []).push(a.id); }
+  const pids = Object.keys(posts);
+  for (let i = 0; i < pids.length; i += 50) {
+    try {
+      const r = await fetch(`https://graph.facebook.com/${FBV}/?ids=${pids.slice(i, i + 50).join(',')}&fields=full_picture${tok}`);
+      const t = await r.json().catch(() => ({}));
+      if (!r.ok || t.error) continue;
+      for (const k of Object.keys(t)) if (t[k] && t[k].full_picture) for (const id of posts[k] || []) full[id] = t[k].full_picture;
+    } catch (_) { /* the square thumbnail stays */ }
+  }
   for (const a of ads) {
     const cr = a.creative || {};
     rows.push({ platform: 'meta', kind: 'ad', id: a.id, account_id: acc, campaign_id: a.campaign_id || null, name: a.name, status: a.effective_status || null,
-      thumbnail: cr.image_url || cr.thumbnail_url || null, body: [cr.title, cr.body].filter(Boolean).join(' - ') || null, updated_at: now });
+      thumbnail: full[a.id] || cr.thumbnail_url || null, body: [cr.title, cr.body].filter(Boolean).join(' - ') || null, updated_at: now });
   }
   await upsertEntities(rows);
 }
@@ -252,17 +369,42 @@ async function gRead(cust: string, s: string, e: string) {
   const now = new Date().toISOString();
   const camp = await gaql(cust, `SELECT segments.date, campaign.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE ${clause}`);
   const ads = await gaql(cust, `SELECT segments.date, ad_group_ad.ad.id, ad_group.id, campaign.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM ad_group_ad WHERE ${clause}`);
-  const withSet = await hasAdset();
+  const withSet = await hasAdset(), withForm = await hasFormLeads();
+  // a failure reading form leads leaves the field out (no false zeros) and the rest of the read goes on
+  let fl: Record<string, number> | null = null;
+  if (withForm) { try { fl = await gFormLeads(cust, clause); } catch (_) { fl = null; } }
+  // Search impression share (16 Nov 2026), read on its own so a failure only leaves these fields empty
+  let isMap: Record<string, any> | null = null;
+  if (await hasImpShare()) {
+    try {
+      isMap = {};
+      for (const x of await gaql(cust, `SELECT segments.date, campaign.id, metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share FROM campaign WHERE ${clause} AND campaign.advertising_channel_type = 'SEARCH'`)) {
+        const m = x.metrics || {}, f = (v: any) => (v == null || v === '' ? null : num(v));
+        isMap[String(x.campaign.id) + '|' + x.segments.date] = { imp_share: f(m.searchImpressionShare), budget_lost_is: f(m.searchBudgetLostImpressionShare), rank_lost_is: f(m.searchRankLostImpressionShare) };
+      }
+    } catch (_) { isMap = null; }
+  }
   const cRows = camp.map((x) => ({ platform: 'google', account_id: cust, campaign_id: String(x.campaign.id), day: x.segments.date,
-    spend: num(x.metrics.costMicros) / 1e6, impressions: num(x.metrics.impressions), clicks: num(x.metrics.clicks), results: num(x.metrics.conversions), synced_at: now }));
+    spend: num(x.metrics.costMicros) / 1e6, impressions: num(x.metrics.impressions), clicks: num(x.metrics.clicks), results: num(x.metrics.conversions),
+    ...(fl ? { form_leads: fl[String(x.campaign.id) + '|' + x.segments.date] || 0 } : {}),
+    ...(isMap ? (isMap[String(x.campaign.id) + '|' + x.segments.date] || { imp_share: null, budget_lost_is: null, rank_lost_is: null }) : {}), synced_at: now }));
   const aRows = ads.map((x) => ({ platform: 'google', account_id: cust, campaign_id: String(x.campaign.id), ad_id: String(x.adGroupAd.ad.id), day: x.segments.date,
     ...(withSet ? { adset_id: x.adGroup && x.adGroup.id != null ? String(x.adGroup.id) : null } : {}),
     spend: num(x.metrics.costMicros) / 1e6, impressions: num(x.metrics.impressions), clicks: num(x.metrics.clicks), results: num(x.metrics.conversions), synced_at: now }));
-  // An ad can sit in more than one ad group; one row per ad and day, added together.
+  // one row per ad, ad group and day (see writeAdDays); the old one-row-per-ad form adds an ad's ad groups together
+  const perGroup: Record<string, any> = {};
+  for (const r of aRows) { const g = { ...r, adset_id: (r as any).adset_id || '' }; const k = g.ad_id + '|' + g.adset_id + '|' + g.day; const m = perGroup[k];
+    if (!m) perGroup[k] = g; else { m.spend += g.spend; m.impressions += g.impressions; m.clicks += g.clicks; m.results += g.results; } }
+  // each ad's form leads in each ad group (13 Nov 2026; per ad group from 16 Nov 2026)
+  let afl: Record<string, number> | null = null;
+  if (await hasAdFormLeads()) { try { afl = await gFormLeads(cust, clause, 'ad'); } catch (_) { afl = null; } }
+  if (afl) for (const k of Object.keys(perGroup)) perGroup[k].form_leads = afl[k] || 0;
   const merged: Record<string, any> = {};
-  for (const r of aRows) { const k = r.ad_id + '|' + r.day; const m = merged[k]; if (!m) merged[k] = r; else { m.spend += r.spend; m.impressions += r.impressions; m.clicks += r.clicks; m.results += r.results; } }
+  for (const g of Object.values(perGroup)) { const k = g.ad_id + '|' + g.day, m = merged[k];
+    if (!m) merged[k] = { ...g, adset_id: g.adset_id || null };
+    else { m.spend += g.spend; m.impressions += g.impressions; m.clicks += g.clicks; m.results += g.results; if (afl) m.form_leads = (m.form_leads || 0) + (g.form_leads || 0); } }
   await replaceDays('ads_daily', 'google', cust, s, e, cRows, 'platform,campaign_id,day');
-  await replaceDays('ads_ad_daily', 'google', cust, s, e, Object.values(merged), 'platform,ad_id,day');
+  await writeAdDays('google', cust, s, e, Object.values(perGroup), Object.values(merged));
   return cRows.length + aRows.length;
 }
 async function gEntities(cust: string) {
@@ -402,6 +544,45 @@ async function run(platform: string, histOnly = false) {
   return { rows, notes };
 }
 
+/* CRM (RealtyBucket) GOOGLE LEADS, FILTERED ({crm:{days:N}} or {crm:{from,to}}; 10 Nov 2026, Ayush).
+   Campaign Analytics shows Google's own conversions; the CRM counts the leads left after its filtering, and
+   how far they got - qualified, site visited, booked, lost. The CRM's google_inorganic_count_api gives this per
+   project (business unit) and per Google campaign id for any date range, days inclusive and adding up exactly
+   (1-30 Oct + 31 Oct = October). So it is read ONE DAY AT A TIME into camp.crm_google_daily and the page adds up
+   whatever period it shows. A lead's status moves on after the day it came in, so the nightly run re-reads the
+   last 45 days. Run only at night: the CRM API slows the CRM server in office hours. */
+/* 14 Nov 2026, Ayush: the CRM's Facebook figures too - facebook_inorganic_count_api, the same figures per project and per
+   Facebook campaign (no campaign types; "-1"/Others = no campaign; whatsapp_leadgen_group / whatsapp_group = all of a
+   project's WhatsApp campaigns counted together). They go into the same table with campaign_type 'facebook', so no new
+   table: {crm:{..., src:'facebook'}}. src 'google' (the default) keeps reading Google as before. */
+const CRM_URL = 'https://www.realtybucket.com/report/google_inorganic_count_api';
+const CRM_FB_URL = 'https://www.realtybucket.com/report/facebook_inorganic_count_api';
+async function crmSync(o: any) {
+  const today = ist(), fb = o.src === 'facebook';
+  let to = String(o.to || today), from = String(o.from || addD(to, -(Math.max(1, Math.min(400, Number(o.days) || 45)) - 1)));
+  if (from > to) { const x = from; from = to; to = x; }
+  let days = 0; const notes: string[] = [];
+  for (let d = to; d >= from; d = addD(d, -1)) {          // newest first: a run cut short keeps the days that matter most
+    if (left() < 15_000) { notes.push('stopped at ' + d + ' (time)'); break; }
+    const url = fb ? `${CRM_FB_URL}?from=${d}&to=${d}` : `${CRM_URL}?from=${d}T00:00:00%2B00:00&to=${d}T00:00:00%2B00:00`;
+    const r = await fetch(url); const t = await r.json().catch(() => null);
+    if (!r.ok || !t || !Array.isArray(t.projects)) { notes.push(d + ': HTTP ' + r.status); continue; }
+    const rows: any[] = [], now = new Date().toISOString();
+    const row = (p: any, type: string, c: any) => ({ day: d, bu_id: Number(p.business_unit_id) || 0, business_unit: p.business_unit || '', campaign_type: type,
+      campaign_id: String(c.campaign_id || ''), campaign: c.campaign || null, cost: num(c.cost), leads: num(c.leads), qualified: num(c.qualified),
+      site_visited: num(c.site_visited), booked: num(c.booked), lost: num(c.lost), fetched_at: now });
+    if (fb) { for (const p of t.projects) for (const c of (p.campaigns || [])) rows.push(row(p, 'facebook', c)); }
+    else for (const p of t.projects) for (const ct of (p.campaign_types || [])) for (const c of (ct.campaigns || [])) rows.push(row(p, ct.campaign_type || '', c));
+    // the day is replaced whole (for this source only), so a campaign that drops out of the CRM's answer does not linger
+    let del = db.from('crm_google_daily').delete().eq('day', d);
+    del = fb ? del.eq('campaign_type', 'facebook') : del.neq('campaign_type', 'facebook');
+    const dr = await del; if (dr.error) throw new Error('crm_google_daily: ' + dr.error.message);
+    if (rows.length) { const ins = await db.from('crm_google_daily').insert(rows); if (ins.error) throw new Error('crm_google_daily: ' + ins.error.message); }
+    days++;
+  }
+  return { ok: true, crm: true, src: fb ? 'facebook' : 'google', from, to, days, notes };
+}
+
 async function caller(req: Request) {
   const sec = req.headers.get('x-ads-secret');
   if (sec) {
@@ -414,14 +595,89 @@ async function caller(req: Request) {
   return can.ok && (await can.json()) === true ? 'manual' : null;
 }
 
+/* GOOGLE SPEND BY PIN CODE ({platform:'google', geo:{months:N}}; 16 Nov 2026, Ayush: "make all" - the Geography card
+   matches Google spend to Lead Map site visits by PIN code). Google's geographic_view by postal code, as MONTHLY totals per
+   campaign and PIN code (daily rows would run to hundreds of thousands), this month and the N-1 before it, each month
+   replaced whole. Postal-code resource names are turned into the 6-digit PIN through geo_target_constant. Needs the table
+   camp.ads_geo_monthly (migration 20261116200900). Facebook reports location only by state, so it is not split this way. */
+async function gGeo(months: number) {
+  const { data: accs } = await db.from('ads_accounts').select('account_id').eq('platform', 'google').eq('include', true);
+  const today = ist(), out: string[] = [], names: Record<string, string> = {};
+  for (const a of accs || []) {
+    for (let m = 0; m < months; m++) {
+      if (left() < 30_000) { out.push('out of time at ' + a.account_id); return { ok: true, notes: out }; }
+      const d0 = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7) - 1 - m, 1)), s = d0.toISOString().slice(0, 10);
+      const eM = new Date(Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth() + 1, 0)).toISOString().slice(0, 10), e = eM < today ? eM : today;
+      try {
+        const rows = await gaql(a.account_id, `SELECT campaign.id, segments.geo_target_postal_code, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM geographic_view WHERE segments.date BETWEEN '${s}' AND '${e}'`);
+        const agg: Record<string, any> = {};
+        for (const x of rows) { const geo = x.segments && x.segments.geoTargetPostalCode; if (!geo) continue; const k = x.campaign.id + '|' + geo;
+          const o = agg[k] = agg[k] || { account_id: a.account_id, campaign_id: String(x.campaign.id), month: s, geo_id: geo, spend: 0, impressions: 0, clicks: 0, conversions: 0 };
+          o.spend += num(x.metrics.costMicros) / 1e6; o.impressions += num(x.metrics.impressions); o.clicks += num(x.metrics.clicks); o.conversions += num(x.metrics.conversions); }
+        const need = [...new Set(Object.values(agg).map((o: any) => o.geo_id))].filter((g) => !names[g]);
+        for (let i = 0; i < need.length; i += 200) {
+          const list = need.slice(i, i + 200).map((g) => `'${g}'`).join(',');
+          for (const g of await gaql(a.account_id, `SELECT geo_target_constant.resource_name, geo_target_constant.name FROM geo_target_constant WHERE geo_target_constant.resource_name IN (${list})`))
+            names[g.geoTargetConstant.resourceName] = g.geoTargetConstant.name;
+        }
+        const recs = Object.values(agg).map((o: any) => ({ ...o, postal_code: names[o.geo_id] || null }));
+        const { error: de } = await db.from('ads_geo_monthly').delete().eq('account_id', a.account_id).eq('month', s);
+        if (de) throw new Error('ads_geo_monthly delete: ' + de.message);
+        for (let i = 0; i < recs.length; i += 500) { const { error } = await db.from('ads_geo_monthly').insert(recs.slice(i, i + 500)); if (error) throw new Error('ads_geo_monthly write: ' + error.message); }
+        out.push(a.account_id + ' ' + s.slice(0, 7) + ': ' + recs.length);
+      } catch (err) { out.push(a.account_id + ' ' + s.slice(0, 7) + ': ' + String((err as Error).message || err).slice(0, 200)); }
+    }
+  }
+  return { ok: true, notes: out };
+}
+
+/* LEADS BY HOUR OF DAY ({platform, hourly:{days:N}}; 16 Nov 2026, Ayush: "Build all four" - Best hours). Totals per
+   campaign and hour of day over the last N days, replaced whole each run (camp.ads_hourly, migration 20261116201100).
+   Google: cost / impressions / clicks by segments.hour + lead-form submissions (non-upload SUBMIT_LEAD_FORM, as the
+   daily read). Facebook: hourly_stats_aggregated_by_advertiser_time_zone, Results of lead / chat campaigns (fbResult). */
+async function hourly(platform: string, days: number) {
+  const { data: accs } = await db.from('ads_accounts').select('account_id').eq('platform', platform).eq('include', true);
+  const e = addD(ist(), -1), s = addD(e, -(days - 1)), out: string[] = [];
+  for (const a of accs || []) {
+    if (left() < 30_000) { out.push('out of time at ' + a.account_id); break; }
+    try {
+      const agg: Record<string, any> = {};
+      const put = (cid: string, h: number) => (agg[cid + '|' + h] = agg[cid + '|' + h] || { platform, account_id: a.account_id, campaign_id: cid, hour: h, period_end: e, days, spend: 0, impressions: 0, clicks: 0, leads: 0 });
+      if (platform === 'google') {
+        const clause = `segments.date BETWEEN '${s}' AND '${e}'`;
+        for (const x of await gaql(a.account_id, `SELECT campaign.id, segments.hour, metrics.cost_micros, metrics.impressions, metrics.clicks FROM campaign WHERE ${clause}`)) {
+          const o = put(String(x.campaign.id), +x.segments.hour); o.spend += num(x.metrics.costMicros) / 1e6; o.impressions += num(x.metrics.impressions); o.clicks += num(x.metrics.clicks); }
+        const acts = await gaql(a.account_id, "SELECT conversion_action.resource_name, conversion_action.type FROM conversion_action WHERE conversion_action.category = 'SUBMIT_LEAD_FORM'");
+        const keep: Record<string, boolean> = {}; for (const c of acts) { const ca = c.conversionAction || {}; if (!/^UPLOAD/.test(String(ca.type || ''))) keep[ca.resourceName] = true; }
+        if (Object.keys(keep).length) for (const x of await gaql(a.account_id, `SELECT campaign.id, segments.hour, segments.conversion_action, metrics.all_conversions FROM campaign WHERE ${clause} AND segments.conversion_action_category = 'SUBMIT_LEAD_FORM'`))
+          if (keep[x.segments.conversionAction]) put(String(x.campaign.id), +x.segments.hour).leads += num(x.metrics.allConversions);
+      } else {
+        const url = `https://graph.facebook.com/${FBV}/act_${a.account_id}/insights?level=campaign&breakdowns=hourly_stats_aggregated_by_advertiser_time_zone&limit=500`
+          + `&time_range=${encodeURIComponent(JSON.stringify({ since: s, until: e }))}&fields=campaign_id,spend,impressions,clicks,actions&access_token=${META_TOKEN}`;
+        for (const r of await fbAll(url)) { const h = parseInt(String(r.hourly_stats_aggregated_by_advertiser_time_zone || '').slice(0, 2), 10); if (!r.campaign_id || isNaN(h)) continue;
+          const o = put(String(r.campaign_id), h); o.spend += num(r.spend); o.impressions += num(r.impressions); o.clicks += num(r.clicks); o.leads += fbResult(r); }
+      }
+      const recs = Object.values(agg);
+      const { error: de } = await db.from('ads_hourly').delete().eq('platform', platform).eq('account_id', a.account_id);
+      if (de) throw new Error('ads_hourly delete: ' + de.message);
+      for (let i = 0; i < recs.length; i += 500) { const { error } = await db.from('ads_hourly').insert(recs.slice(i, i + 500)); if (error) throw new Error('ads_hourly write: ' + error.message); }
+      out.push(a.account_id + ': ' + recs.length);
+    } catch (err) { out.push(a.account_id + ': ' + String((err as Error).message || err).slice(0, 200)); }
+  }
+  return { ok: true, notes: out };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   T0 = Date.now(); gTok = '';
   let body: any = {}; try { body = await req.json(); } catch (_) { /* empty */ }
   if (!(await caller(req))) return j({ error: 'not allowed' }, 401);
+  if (body.crm) return j(await crmSync(body.crm));
   const platform = body.platform === 'google' ? 'google' : body.platform === 'meta' ? 'meta' : '';
   if (!platform) return j({ error: 'platform must be meta or google' }, 400);
   if (body.verify && platform === 'meta') return j(await fbVerify(String(body.verify.from), String(body.verify.to), body.verify.account || undefined));
+  if (body.geo && platform === 'google') return j(await gGeo(Math.min(6, Math.max(1, +body.geo.months || 2))));
+  if (body.hourly) return j(await hourly(platform, Math.min(60, Math.max(7, +body.hourly.days || 28))));
   const { data: log } = await db.from('ads_sync_log').insert({ platform }).select('id').single();
   try {
     const r = await run(platform, !!body.backfill);

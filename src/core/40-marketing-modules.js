@@ -56,22 +56,24 @@ async function mkDrawTab(host,base,t,scope,metaKey){
    this list. */
 /* 6 Nov 2026, as asked: Facebook and Google are no longer two tabs but one view by project
    (42-campaign-analytics.js). The old campaigns/facebook and campaigns/google links land on it. */
+/* 7 Nov 2026, as asked: Meta Ad Library (our pages' ads in the Library) moved to Competitor Data, and with one
+   view left this page has no tab bar. An old campaigns/meta-ads link follows it to competitors/brands. */
 const OB_TABS=[
-  ['ads','Google & Facebook','fa-solid fa-chart-line','ca'],
-  ['meta-ads','Meta Ad Library','fa-brands fa-meta','meta']
+  ['ads','Google & Facebook','fa-solid fa-chart-line','ca']
 ];
 const OB_HIDDEN=[];
 // Kept for the old analytics views in 28-campaign-trends.js, which still call it; draws the new bar.
 function cmpTabsBar(tabs,ti,extra){ return obTabsBar(extra); }
-function obTabsBar(active){ return '<div class="tabs">'+OB_TABS.map(function(t){ return mkTab('campaigns',t,active); }).join('')+'</div>'; }
+function obTabsBar(active){ if(OB_TABS.length<2) return ''; return '<div class="tabs">'+OB_TABS.map(function(t){ return mkTab('campaigns',t,active); }).join('')+'</div>'; }
 VIEWS.campaigns=async function(v,seg){
   dmOauthReturn();                         // back from Google's consent screen (Setup)
   let want=seg&&seg[0];
+  if(want==='meta-ads'){ navTo('competitors/brands'); return; }
   if(want==='connect') want='setup';       // the old Digital Metrics route name
   const t=OB_TABS.concat(OB_HIDDEN).filter(function(x){ return x[0]===want; })[0]||OB_TABS[0];
-  setCrumb(['Growth & Strategy','Campaign Analytics',t[1]]);
+  setCrumb(['Growth & Strategy','Campaign Analytics']);
   v.innerHTML=mHead('fa-bullhorn','#db2777','Campaign Analytics')+obTabsBar(t[0])
-    +'<div id="mkHost" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
+    +'<div id="mkHost" style="margin-top:'+(OB_TABS.length<2?0:14)+'px"><div class="loader"><div class="spin"></div></div></div>';
   await mkDrawTab($('mkHost'),'campaigns',t,'brand','brands');
 };
 
@@ -81,20 +83,21 @@ VIEWS.campaigns=async function(v,seg){
    back into this list brings the tab back. An old link to one of them lands on Meta Ads. */
 const CD_TABS=[
   ['','Meta Ads','fa-brands fa-meta','meta'],
-  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci']
+  ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci'],
+  // our own pages' ads in the Meta Ad Library, moved here from Campaign Analytics (7 Nov 2026); 5th = whose ads
+  ['brands','Meta Ad Library','fa-brands fa-meta','meta','brands']
 ];
 VIEWS.competitors=async function(v,seg){
   const want=(seg&&seg[0])||'';
   // The two tabs that moved out of this page. An old bookmark follows them rather than landing on
   // the competitors' ads and leaving the person wondering where ours went.
-  if(want==='brands'){ navTo('campaigns/meta-ads'); return; }
   if(want==='partners'){ navTo('channel_partners'); return; }
   const t=CD_TABS.filter(function(x){ return x[0]===want; })[0]||CD_TABS[0];
   setCrumb(['Growth & Strategy','Competitor Data',t[1]]);
   v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Data')
     +'<div class="tabs" style="margin-top:-6px">'+CD_TABS.map(function(x){ return mkTab('competitors',x,t[0]); }).join('')+'</div>'
     +'<div id="mkHost"><div class="loader"><div class="spin"></div></div></div>';
-  await mkDrawTab($('mkHost'),'competitors',t,'competitor','competitors');
+  await mkDrawTab($('mkHost'),'competitors',t,'competitor',t[4]||'competitors');
 };
 
 /* ---------------------------------------------------------------- Channel Partners ('channel_partners')
