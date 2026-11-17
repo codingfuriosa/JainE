@@ -99,6 +99,23 @@ async function wikiTop(region: string, days: string[]): Promise<Map<string, { vi
   }
   return out;
 }
+/* TRENDING NOW, NOT ALWAYS READ (17 Nov 2026, Ayush: "Dhurandhar was a massive trend, but before, not now"). A page counts
+   only when its last 7 days were read at least WIKI_SPIKE times more than its average week in the 4 weeks before (Wikipedia's
+   own daily figures, en.wikipedia, people only). Measured: Jailer 2 0.5x, Bigg Boss 20 0.7x, Dhurandhar: The Revenge 2.2x
+   (left out); Ramayana: Part 1 4.2x, Pochettino 67x (kept). A page with no history is new, so it counts. */
+const WIKI_SPIKE = 3;
+async function wikiGrowth(title: string, to: string): Promise<number> {
+  const d = (s: string) => s.replace(/-/g, '') + '00';
+  const end = new Date(Date.parse(to) - 86400e3).toISOString().slice(0, 10), start = new Date(Date.parse(to) - 35 * 86400e3).toISOString().slice(0, 10);
+  try {
+    const j = JSON.parse(await get(`https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/user/${encodeURIComponent(title)}/daily/${d(start)}/${d(end)}`, 12000, { 'User-Agent': 'JainE-MarketWatch/1.0 (internal research)' }));
+    const v: number[] = (j.items || []).map((x: any) => +x.views || 0);
+    if (v.length < 10) return 99;                                   // a new page
+    const last = v.slice(-7).reduce((a, b) => a + b, 0), before = v.slice(0, -7);
+    const perWeek = before.reduce((a, b) => a + b, 0) / Math.max(1, before.length / 7);
+    return perWeek > 0 ? last / perWeek : 99;
+  } catch { return 0; }                                            // cannot tell -> not counted
+}
 async function wikiSummary(title: string): Promise<{ extract: string; image: string | null; url: string }> {
   try {
     const j = JSON.parse(await get('https://en.wikipedia.org/api/rest_v1/page/summary/' + encodeURIComponent(title), 12000, { 'User-Agent': 'JainE-MarketWatch/1.0 (internal research)' }));
@@ -151,8 +168,10 @@ async function candidates(ctx: Ctx, region: string, from: string, to: string, da
   }
   const pick = (src: string, n: number, by: (a: any, b: any) => number) => [...agg.values()].filter((r) => r.source === src).sort(by).slice(0, n);
   const google = pick('google', 90, (a, b) => b._c.length - a._c.length || b.metric_value - a.metric_value);
-  const yt = pick('youtube', 45, (a, b) => b.metric_value - a.metric_value);
-  const ap = pick('apple', 25, (a, b) => a.metric_value - b.metric_value);
+  // trending NOW: videos posted in the last 14 days, songs released in the last 60 (a song charting for months is not new)
+  const vidFrom = new Date(Date.parse(to) - 14 * 86400e3).toISOString().slice(0, 10), songFrom = new Date(Date.parse(to) - 60 * 86400e3).toISOString().slice(0, 10);
+  const yt = pick('youtube', 45, (a, b) => b.metric_value - a.metric_value).filter((r) => String(r.extra?.published || '').slice(0, 10) >= vidFrom);
+  const ap = pick('apple', 25, (a, b) => a.metric_value - b.metric_value).filter((r) => !r.extra?.release || String(r.extra.release).slice(0, 10) >= songFrom);
   const out: Cand[] = []; let n = 0;
   for (const r of google) out.push({ id: 'c' + n++, source: 'Google Trends', title: r.title, text: r.summary || '', metric: r.metric_value,
     metricText: `${r.extra?.traffic || short(r.metric_value) + '+'} searches${r._c.length > 1 ? ' in ' + r._c.length + ' countries' : ''}`, date: r._first, url: r.url,
@@ -164,10 +183,12 @@ async function candidates(ctx: Ctx, region: string, from: string, to: string, da
   for (const r of ap) out.push({ id: 'c' + n++, source: 'Apple Music chart', title: r.title, text: r.summary || '', metric: r.metric_value,
     metricText: `#${r.metric_value} on Apple Music ${region === 'IN' ? 'India' : 'US'}`, date: r._first, url: r.url,
     media_url: r.media_url, media_type: 'image', video_id: null, links: [{ label: 'Apple Music', title: r.title, url: r.url }] });
-  const wiki = [...(await wikiTop(region, days)).entries()].sort((a, b) => b[1].views - a[1].views).slice(0, 35);
-  const sums = await Promise.all(wiki.map(([t]) => wikiSummary(t)));
-  wiki.forEach(([t, w], i) => out.push({ id: 'c' + n++, source: 'Wikipedia most-read', title: t.replace(/_/g, ' '), text: sums[i].extract, metric: w.views,
-    metricText: `${short(w.views)} Wikipedia reads${region === 'IN' ? ' from India' : ''} this week`, date: w.first, url: sums[i].url,
+  const top = [...(await wikiTop(region, days)).entries()].sort((a, b) => b[1].views - a[1].views).slice(0, 45);
+  const growth = await Promise.all(top.map(([t]) => wikiGrowth(t, to)));
+  const wiki = top.map((w, i) => ({ t: w[0], w: w[1], g: growth[i] })).filter((x) => x.g >= WIKI_SPIKE).slice(0, 30);
+  const sums = await Promise.all(wiki.map((x) => wikiSummary(x.t)));
+  wiki.forEach(({ t, w, g }, i) => out.push({ id: 'c' + n++, source: 'Wikipedia most-read', title: t.replace(/_/g, ' '), text: sums[i].extract, metric: w.views,
+    metricText: `${short(w.views)} Wikipedia reads${region === 'IN' ? ' from India' : ''} this week (${g >= 99 ? 'new page' : g.toFixed(1).replace(/\.0$/, '') + 'x the weeks before'})`, date: w.first, url: sums[i].url,
     media_url: sums[i].image, media_type: sums[i].image ? 'image' : null, video_id: null, links: [{ label: 'Wikipedia', title: t.replace(/_/g, ' '), url: sums[i].url }] }));
   return out;
 }
@@ -186,6 +207,8 @@ export async function trendsCompile(ctx: Ctx, opts: { region?: string } = {}) {
 Group them into TRENDS: specific things that happened or caught people's attention in this period, which a real-estate brand's marketing team could reference in a short video or post to make people stop scrolling.
 RULES
 - Use ONLY these items. Never add a trend, fact, name, number or date that is not in the items' own text.
+- Only what is trending NOW, in this period: something that happened or jumped in attention these days. Leave out steady,
+  ongoing interest in an older film, show, song or person (a film that was big months ago is not a trend now).
 - One trend = one specific thing (a match or result, a film / show release, a song, a viral clip or meme, an announcement or launch, a celebrity moment). Items about the same thing go together.
 - type: sports, movie_show, song, viral_moment, news_moment, local (Kolkata / West Bengal; India only), celebrity, brand_campaign (an ad or campaign by a brand), search_spike (only when the items say nothing beyond the search itself).
 - LEAVE OUT: deaths, tragedies, accidents, disasters, crime, violence, war, terrorism, politics, elections, politicians, courts and legal cases, religious disputes, controversies, scandals, adult content; routine searches (exam results, admit cards, lottery, government schemes, share prices, weather, holidays lists); a festival or holiday by itself (keep only a specific moment around it that went viral); evergreen pages that are always read.
