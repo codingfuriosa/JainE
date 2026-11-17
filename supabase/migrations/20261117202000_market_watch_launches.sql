@@ -133,15 +133,15 @@ alter table camp.mw_developers add column if not exists link_filter text;   -- o
 -- until it does).
 insert into camp.mw_developers (sort, name, website, projects_urls, sitemap, link_filter, news_query) values
  ( 1,'DTC Group','https://dtcgroup.in/','{https://dtcgroup.in/projects/,https://dtcgroup.in/}',null,null,'"DTC Group" Kolkata'),
- ( 2,'Siddha Group','https://www.siddhagroup.com/','{https://www.siddhagroup.com/our-project.php?city=kolkata,https://www.siddhagroup.com/}',null,null,'"Siddha Group" Kolkata'),
+ ( 2,'Siddha Group','https://www.siddhagroup.com/','{https://www.siddhagroup.com/our-project.php?city=kolkata,https://www.siddhagroup.com/}',null,null,'"Siddha Group"'),
  ( 3,'Srijan Realty','https://www.srijanrealty.com/','{https://www.srijanrealty.com/status/under-construction/,https://www.srijanrealty.com/projects/,https://www.srijanrealty.com/}',null,null,'"Srijan Realty"'),
  ( 4,'Diamond Group','https://www.diamondgroupweb.com/','{https://www.diamondgroupweb.com/projects,https://www.diamondgroupweb.com/}',null,null,'"Diamond Group" Kolkata real estate'),
- ( 5,'Merlin Group','https://merlinprojects.com/','{https://merlinprojects.com/,https://merlinprojects.com/projects/}',null,null,'"Merlin Group" Kolkata'),
+ ( 5,'Merlin Group','https://merlinprojects.com/','{https://merlinprojects.com/,https://merlinprojects.com/projects/}',null,null,'"Merlin Group" real estate'),
  ( 6,'Eden Group','https://edengroup.in/','{https://edengroup.in/projects,https://edengroup.in/}',null,null,'"Eden Group" Kolkata'),
  ( 7,'Eden Realty','https://www.edenrealtygroup.com/','{https://www.edenrealtygroup.com/}','https://www.edenrealtygroup.com/sitemap.xml',null,'"Eden Realty" Kolkata'),
  ( 8,'Ambuja Neotia','https://www.ambujaneotia.com/','{https://www.ambujaneotia.com/our-business/real-estate,https://www.ambujaneotia.com/}',null,'/our-business/real-estate/','"Ambuja Neotia"'),
  ( 9,'Alcove Realty','https://alcoverealty.in/','{https://alcoverealty.in/residential-commercial-projects,https://alcoverealty.in/}',null,null,'"Alcove Realty"'),
- (10,'Godrej Properties','https://www.godrejproperties.com/','{https://www.godrejproperties.com/under-construction-projects-in-kolkata}','https://www.godrejproperties.com/property-sitemap.xml','/kolkata/','"Godrej Properties" Kolkata'),
+ (10,'Godrej Properties','https://www.godrejproperties.com/','{https://www.godrejproperties.com/under-construction-projects-in-kolkata}','https://www.godrejproperties.com/property-sitemap.xml','/residential/','"Godrej Properties" launch'),
  (11,'Mani Group','https://mani-group.com/','{https://mani-group.com/residential,https://mani-group.com/}',null,null,'"Mani Group" Kolkata'),
  (12,'Vinayak Group','https://vinayakgroup.org/','{https://vinayakgroup.org/ongoing-projects,https://vinayakgroup.org/}',null,null,'"Vinayak Group" Kolkata'),
  (13,'Unimark Group','https://unimarkgroup.com/','{https://unimarkgroup.com/projects.html,https://unimarkgroup.com/}',null,null,'"Unimark Group"'),

@@ -104,7 +104,8 @@ schools (17 Nov 2026, Ayush). A mixed project counts only if it sells homes.
 NOT launched: "coming soon", "upcoming" or a teaser with no way for buyers to come in; land purchase, joint venture or
 "plans to launch"; RERA registration alone; a project that was already selling earlier (ready to move, handover,
 possession, sold out, sales milestones of an old project); a generic "Enquire now" / "Contact us" form alone.
-Only projects in Kolkata / West Bengal count (in_west_bengal); projects in other states are left out.`;
+A project in ANY city counts (17 Nov 2026, Ayush: "not necessarily Kolkata / West Bengal, but the developers should be from
+my list") - but only when it is by this developer itself, not a similarly named company.`;
 const STAGE_RULE = `stage: one of eoi, site_visits, sales_office, launch_event, bookings - the strongest one the text shows.`;
 
 // ---------------------------------------------------------------- evidence -> launch
@@ -186,11 +187,11 @@ async function readProjectPage(dev: any, url: string, date: string, kind: 'websi
   const r = await ask(`You are reading one page of the website of ${dev.name}, a real-estate developer in Kolkata, India. URL: ${url}
 ${LAUNCH_RULES}
 Answer from THIS PAGE'S TEXT ONLY - never from what you know. Reply JSON:
-{"is_project_page":true|false,"project":"the project's own marketed name","residential":true|false,"locality":"area/city or empty","in_west_bengal":true|false,"already_selling_long":true|false (ready to move, completed, possession, sold out),"open_to_customers":true|false,"stage":"...","quote":"the exact sentence copied character for character from the page that shows customers are being invited in now, or empty"}
+{"is_project_page":true|false,"project":"the project's own marketed name","residential":true|false,"locality":"area/city or empty","already_selling_long":true|false (ready to move, completed, possession, sold out),"open_to_customers":true|false,"stage":"...","quote":"the exact sentence copied character for character from the page that shows customers are being invited in now, or empty"}
 ${STAGE_RULE}
 PAGE TEXT:
 ${text}`);
-  if (!r || !r.is_project_page || r.residential !== true || r.in_west_bengal === false || r.already_selling_long || !r.open_to_customers || !r.project) return 0;
+  if (!r || !r.is_project_page || r.residential !== true || r.already_selling_long || !r.open_to_customers || !r.project) return 0;
   if (!quoteIn(String(r.quote || ''), text)) return 0;          // the sentence must really be on the page
   return await addEvidence(dev, String(r.project), String(r.locality || ''), { kind, url, source: new URL(url).hostname.replace(/^www\./, ''), published: date, quote: String(r.quote), stage: String(r.stage || '') });
 }
@@ -310,7 +311,7 @@ async function newsStep(dev: any, days: number): Promise<{ found: number; items:
   const r = await ask(`News items found for "${dev.name}" (a real-estate developer in Kolkata, India). For each item decide, from ITS OWN TEXT ONLY, whether it reports that ${dev.name} has launched a new project.
 Be careful with similar names: only "${dev.name}" counts${dev.name.startsWith('Eden') ? ' (Eden Group and Eden Realty are DIFFERENT companies)' : ''}.
 ${LAUNCH_RULES}
-Reply JSON {"items":[{"i":index,"about_developer":true|false,"is_new_launch":true|false,"project":"marketed name or empty","residential":true|false,"locality":"area or empty","in_west_bengal":true|false,"stage":"...","opened_on":"YYYY-MM-DD only if the text gives the exact day customers were first invited in, else empty","quote":"the exact sentence copied character for character from the item's title or text that shows the launch, or empty"}]}
+Reply JSON {"items":[{"i":index,"about_developer":true|false,"is_new_launch":true|false,"project":"marketed name or empty","residential":true|false,"locality":"area and city, or empty","stage":"...","opened_on":"YYYY-MM-DD only if the text gives the exact day customers were first invited in, else empty","quote":"the exact sentence copied character for character from the item's title or text that shows the launch, or empty"}]}
 ${STAGE_RULE}
 ${items.map((x, i) => `--- ITEM ${i} | ${x.date} | ${x.source}\nTITLE: ${x.title}\nTEXT: ${x.text.slice(0, 3000)}`).join('\n')}`);
   const verdicts: any[] = (r && Array.isArray(r.items)) ? r.items : [];
@@ -319,7 +320,7 @@ ${items.map((x, i) => `--- ITEM ${i} | ${x.date} | ${x.source}\nTITLE: ${x.title
     const x = items[i]; const v = verdicts.find((y) => +y.i === i) || null;
     if (DRY) DRY_OUT.push({ news: x.title.slice(0, 120), source: x.source, date: x.date, verdict: v });
     else await db.from('mw_news_seen').upsert({ key: x.key, developer_id: dev.id, url: x.url, title: x.title.slice(0, 300), source: x.source, published: x.date, verdict: v }, { onConflict: 'key', ignoreDuplicates: true });
-    if (!v || !v.about_developer || !v.is_new_launch || v.residential !== true || v.in_west_bengal === false || !v.project) continue;
+    if (!v || !v.about_developer || !v.is_new_launch || v.residential !== true || !v.project) continue;
     const body = x.title + '\n' + x.text;
     if (!quoteIn(String(v.quote || ''), body)) continue;      // the sentence must really be in the item
     const devWord = flat(dev.name).split(' ')[0];
