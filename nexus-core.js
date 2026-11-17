@@ -1148,6 +1148,7 @@ const NAV=[
     {id:'competitors',label:'Competitor Data',icon:'fa-magnifying-glass-chart'},
     {id:'channel_partners',label:'Channel Partners',icon:'fa-people-arrows'},
     {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},   // back 6 Nov 2026 - 43-posts-and-reels.js
+    {id:'wa_templates',label:'WhatsApp Templates',icon:'fa-comments'},   // 17 Nov 2026 - 53-whatsapp-templates.js
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
     {id:'scaling',label:'Scaling Up',icon:'fa-arrow-trend-up'},
     {id:'playbook',label:'Playbook',icon:'fa-book-open'},
@@ -1217,6 +1218,7 @@ function expandModules(ss){
     if(ss.has(oldId)) ss.add(MODULE_RENAMES[oldId]);
   });
   if(ss.has('custportal_photos')||ss.has('custportal_photo_approver')||ss.has('custportal_photo_backup')) ss.add('custportal_admin');
+  if(ss.has('campaigns')) ss.add('wa_templates');   // WhatsApp Templates: everyone with Campaign Analytics (17 Nov 2026)
   ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
@@ -40381,6 +40383,28 @@ const CA_CSS='<style>'
   +'.ca-sec .ob-ad .m{grid-template-columns:auto 1fr auto 1fr;gap:3px 8px;font-size:11.5px;margin-top:auto}.ca-sec .ob-ad .m span{color:var(--slate)}.ca-sec .ob-ad .m b{text-align:right;white-space:nowrap}'
   +'.ob-ad .pic{position:relative}.ob-ad .pic .ca-play{display:none;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;align-items:center;justify-content:center;font-size:17px;padding-left:3px;pointer-events:none}.ob-ad .pic.ca-isvid .ca-play{display:flex}'
   +'.ca-warn{margin:-4px 0 12px;padding:9px 12px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:12.5px}'
+  /* PHONE (17 Nov 2026, Ayush: "in phone nothing is responsive"). The controls wrap onto lines of their own; in the
+     tables the name column stays pinned on the left while the figures scroll sideways under it, with a narrower
+     name, smaller indents and tighter cells; ad cards go one or two to a line; the ad popup fits the screen. */
+  +'@media(max-width:760px){'
+  +'.ob-bar{gap:8px}.ob-bar>select,.ob-bar>.comp-sel{flex:1 1 140px;min-width:0}.ob-bar input[type=date]{flex:1 1 120px;min-width:0}'
+  +'.ob-bar>span[style*="margin-left:auto"]{margin-left:0!important;width:100%;justify-content:space-between}'
+  +'.ca-stg{flex:1 1 100%}.ca-st{flex:1;justify-content:center}'
+  +'.ca-tbl{font-size:12px}.ca-tbl th{padding:8px 8px;font-size:10px}.ca-tbl td{padding:9px 8px}'
+  +'.ca-tbl th:first-child,.ca-tbl td:first-child{position:sticky;left:0;z-index:1;background:#fff;box-shadow:1px 0 0 #e2e8f0}'
+  +'.ca-tbl th:first-child{background:#f8fafc}.ca-tbl tr.ca-l1 td:first-child{background:#fcfcfd}.ca-tbl tr.ca-l2 td:first-child{background:#fafbfc}'
+  +'.ca-tbl tr.ca-l3 td:first-child{background:#f8f9fb}.ca-tbl tr.ca-on>td:first-child{background:#eef4ff}.ca-tbl tr.ca-tot td:first-child{background:#f1f5f9}'
+  +'.ca-tbl td:first-child{white-space:normal;min-width:130px;max-width:170px}'
+  +'.ca-tbl tr.ca-l1 td:first-child{padding-left:16px}.ca-tbl tr.ca-l2 td:first-child,.ca-tbl tr.ca-l2.ca-none td:first-child{padding-left:26px;max-width:170px}'
+  +'.ca-tbl tr.ca-l3 td:first-child,.ca-tbl tr.ca-l3.ca-none td:first-child{padding-left:36px;max-width:170px}'
+  +'.ca-sec .ca-tbl td.ca-nm,.ca-sec .ca-tbl th.ca-nm{width:170px;min-width:150px;max-width:170px}'
+  +'.ca-sec .ca-tbl tr.ca-l0 td:first-child,.ca-sec .ca-tbl tr.ca-l1 td:first-child{min-width:150px}'
+  +'.ca-nmx{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}'
+  +'.ca-tbl .ca-caret{margin-right:4px}'
+  +'.ca-sec .ob-ads{padding:0 8px 8px}'
+  +'.modal-body div[style*="height:360px"]{height:240px!important}'
+  +'}'
+  +'@media(max-width:520px){.ob-ads{grid-template-columns:1fr!important}}'
   +'</style>';
 
 // Leads that can honestly be added up: Google conversions, and Facebook results of lead / chat campaigns only.
@@ -40413,7 +40437,7 @@ function caStatusApply(){
   CA_D.bud=bud;
   const waLive={}; Object.keys(E).forEach(function(k){ const x=E[k]; if(k.indexOf('adset:')!==0||!x||!/CONVERSATIONS|MESSAGING/.test(String(x.objective||''))) return;
     const c=E['campaign:'+x.campaign_id]; const a=c&&CA_D.acc['meta:'+c.account_id]; if(a&&caLive(c.status)) waLive[a.project]=1; });
-  const okR=function(x){ if(CA_ST==='both') return true; if(x.wa) return caStOk(!!waLive[x.project]); return !!E['campaign:'+x.campaign_id]&&okC(x.campaign_id); };
+  const okR=function(x){ if(CA_ST==='both') return true; if(x.untied) return false; if(x.wa) return caStOk(!!waLive[x.project]); return !!E['campaign:'+x.campaign_id]&&okC(x.campaign_id); };
   CA_D.crm=R.crm?{cur:R.crm.cur.filter(okR),prev:R.crm.prev.filter(okR)}:null;
   CA_D.crmSet=R.crmSet?{cur:R.crmSet.cur.filter(okR),prev:R.crmSet.prev.filter(okR)}:null;
 }
@@ -40472,8 +40496,12 @@ async function caView(host){
   caTabsPaint(); await caShowTab();
 }
 function caTabsPaint(){ const t=$('caTabs'); if(!t) return;
-  t.innerHTML=[['overview','Overview'],['analytics','Analytics']].map(function(x){ return '<button class="ca-tab'+(CA_TAB===x[0]?' on':'')+'" onclick="caTab(\''+x[0]+'\')">'+x[1]+'</button>'; }).join(''); }
-window.caTab=function(t){ if(t===CA_TAB) return; CA_TAB=t; caTabsPaint(); caShowTab(); };
+  // 17 Nov 2026 (Ayush): Overview renamed Campaigns; a new Ads tab - the same page, read from the ad upwards
+  t.innerHTML=[['overview','Campaigns'],['ads','Ads'],['analytics','Analytics']].map(function(x){ return '<button class="ca-tab'+(CA_TAB===x[0]?' on':'')+'" onclick="caTab(\''+x[0]+'\')">'+x[1]+'</button>'; }).join(''); }
+window.caTab=function(t){ if(t===CA_TAB) return;
+  // Campaigns <-> Ads share the loaded data: only the table is drawn again
+  if(t!=='analytics'&&CA_TAB!=='analytics'&&CA_D&&$('caBody')){ CA_TAB=t; caTabsPaint(); caPaint(); return; }
+  CA_TAB=t; caTabsPaint(); caShowTab(); };
 async function caShowTab(){
   const m=$('caMain'); if(!m) return;
   if(CA_TAB==='analytics') return maView(m);
@@ -40581,8 +40609,13 @@ async function caLoad(){
      together, which can only go on the project and its Facebook row. "Others" (no campaign) is left out, as for Google. */
   const mCamp={}; res[1].forEach(function(e){ const a=acc['meta:'+e.account_id]; if(e.kind==='campaign') mCamp[String(e.id)]=a?a.project:1; });
   const crmTag=function(rows){ return (rows||[]).map(function(x){
-      const fb=x.campaign_type==='facebook', id=String(x.campaign_id), own=fb?mCamp[id]:gCamp[id], wa=fb&&/^whatsapp/i.test(id);
-      if(!own&&!wa) return null;
+      const fb=x.campaign_type==='facebook', id=String(x.campaign_id==null?'':x.campaign_id).trim(), own=fb?mCamp[id]:gCamp[id], wa=fb&&/^whatsapp/i.test(id);
+      /* NOT TIED TO A CAMPAIGN (17 Nov 2026, Ayush: "the CRM leads are not matching the CRM"). Until now a CRM lead counted only
+         when the CRM had tagged it to one of our ad campaigns - for 1-16 Nov that dropped 150 of 293 Google leads (blank, "Call",
+         "1", junk ids) and 165 of 2,508 Facebook ones ("Others"). They now count on the project and Google / Facebook rows (so
+         those match the CRM) and sit in a row of their own in the platform section; campaign, ad set and ad rows are unchanged. */
+      if(!own&&!wa) return Object.assign({},x,{src:fb?'facebook':'google',wa:false,untied:true,
+        utype:id===''?'No campaign':/^call$/i.test(id)?'Call':id==='-1'?'Others':'Other tags',project:projN[pn(x.business_unit)]||x.business_unit});
       const o=Object.assign({},x,{src:fb?'facebook':'google',wa:wa});
       o.project=own&&own!==1?own:(projN[pn(x.business_unit)]||x.business_unit); return o; }).filter(Boolean); };
   CA_D.crm=res[11]==null?null:{cur:crmTag(res[11]),prev:crmTag(res[12])};
@@ -40653,21 +40686,21 @@ function caPaint(){
   /* CRM COLUMNS (10 Nov 2026, Ayush): beside the platforms' own leads, the CRM's count of the Google leads left after
      its filtering, so the two can be compared - and how far they got: QL% (qualified of CRM leads), CPQL (Google spend
      per qualified lead), SV (site visits), QL to SV %, Booked, Lost. Google only: the CRM has no Facebook figure yet. */
-  const CR=CA_D.crm, NCRM=8;
+  const CR=CA_D.crm, NCRM=9;   // 17 Nov 2026: + CRM CPL (spend per CRM lead), beside the platform's own CPL
   const crmAgg=function(list,pred){ const t={leads:0,ql:0,sv:0,bk:0,lost:0}; (list||[]).forEach(function(x){ if(!pred(x)) return;
     t.leads+=+x.leads||0; t.ql+=+x.qualified||0; t.sv+=+x.site_visited||0; t.bk+=+x.booked||0; t.lost+=+x.lost||0; }); return t; };
-  const crmT=function(a,spend){ return {leads:a.leads,ql:a.ql,qlp:a.leads?a.ql/a.leads*100:null,cpql:a.ql&&spend>0?spend/a.ql:null,sv:a.sv,svp:a.ql?a.sv/a.ql*100:null,bk:a.bk,lost:a.lost}; };
+  const crmT=function(a,spend){ return {leads:a.leads,cplc:a.leads&&spend>0?spend/a.leads:null,ql:a.ql,qlp:a.leads?a.ql/a.leads*100:null,cpql:a.ql&&spend>0?spend/a.ql:null,sv:a.sv,svp:a.ql?a.sv/a.ql*100:null,bk:a.bk,lost:a.lost}; };
   // the spend the CRM's leads are set against: Google's, Facebook's, or both (src empty)
   const gSpend=function(list,pred,src){ const plat=src==='facebook'?'meta':src; return (list||[]).reduce(function(t,c){ return (!plat||c.platform===plat)&&pred(c)?t+(+c.spend||0):t; },0); };
   const pc0=function(x){ return x==null||!isFinite(x)?'—':x.toFixed(0)+'%'; };
   const crmPart=function(x,which){
     if(!x) return '';
-    const n={a:5,b:1,c:2}[which];
+    const n={a:5,b:2,c:2}[which];
     if(!CR||x.why){ const why=!CR?'CRM figures are read at night - they show from the next morning':x.why; let h='';
       for(let i=0;i<n;i++) h+='<td class="ca-crm" title="'+esc(why)+'"><span style="color:#94a3b8">—</span></td>'; return h; }
     const t=x.t, w=x.w||{};
     const h=which==='a'?cell(t.leads,w.leads,obNum,true,true)+cell(t.ql,w.ql,obNum,true)+cell(t.sv,w.sv,obNum,true)+cell(t.bk,w.bk,obNum,true)+cell(t.lost,w.lost,obNum,false)
-      :which==='b'?cell(t.cpql,w.cpql,obMoney,false):cell(t.qlp,w.qlp,pc0,true)+cell(t.svp,w.svp,pc0,true);
+      :which==='b'?cell(t.cplc,w.cplc,obMoney,false)+cell(t.cpql,w.cpql,obMoney,false):cell(t.qlp,w.qlp,pc0,true)+cell(t.svp,w.svp,pc0,true);
     return h.replace(/<td>/g,'<td class="ca-crm">'); };
   // sp: which ad rows' spend goes against these leads, when it is not the same test (a WhatsApp campaign)
   const crmX=function(pred,src,sp){ if(!CR) return {}; if(src==='facebook'&&!CR.cur.some(function(x){ return x.src==='facebook'; })) return {why:'No Facebook figures from the CRM yet for these dates - they are read at night and show from the next morning'}; const p2=function(x){ return (!src||x.src===src)&&pred(x); }, ps=sp||pred;
@@ -40685,7 +40718,7 @@ function caPaint(){
   const ct=function(t,title){ return '<th class="ca-crm" title="'+esc(title)+'">'+t+'</th>'; };
   const head=function(name,res,cpl,crm){ return '<tr><th class="ca-nm">'+name+'</th><th title="Daily budget as set today">Daily budget</th><th>Spend</th><th>'+res+'</th>'
     +(crm?ct('CRM leads','Google and Facebook leads in the CRM after its filtering')+ct('QL','Qualified leads (CRM)')+ct('SV','Site visits (CRM)')+ct('Booked','Booked (CRM)')+ct('Lost','Lost (CRM)'):'')
-    +'<th>'+cpl+'</th>'+(crm?ct('CPQL','Spend per qualified lead (CRM)'):'')+'<th>Clicks</th><th>CTR</th>'
+    +'<th>'+cpl+'</th>'+(crm?ct('CRM CPL','Spend per CRM lead - the cost per lead counted on the CRM\x27s leads, not the platform\x27s')+ct('CPQL','Spend per qualified lead (CRM)'):'')+'<th>Clicks</th><th>CTR</th>'
     +(crm?ct('QL%','Qualified leads as a share of CRM leads')+ct('QL to SV %','Site visits as a share of qualified leads'):'')+'</tr>'; };
   // a name never wraps: it stops at the column's width with "...", the whole name on hover
   const nm=function(lead,text){ return '<td class="ca-nm"><span class="ca-nmx" title="'+esc(text)+'">'+lead+esc(text)+'</span></td>'; };
@@ -40738,6 +40771,13 @@ function caPaint(){
         });
       });
     });
+    // CRM leads of this project and platform that the CRM did not tie to any of our campaigns (see crmTag) - their own row
+    { const srcU=pl==='google'?'google':'facebook', ut=((CA_D.crm&&CA_D.crm.cur)||[]).filter(function(x){ return x.untied&&x.project===p&&x.src===srcU; });
+      if(ut.length){ const by={}; ut.forEach(function(x){ by[x.utype]=(by[x.utype]||0)+(+x.leads||0); });
+        const dash='<span style="color:#94a3b8">—</span>';
+        sec+='<tr class="ca-l0" title="Leads the CRM has for '+esc(p)+' from '+W.name+' without one of our ad campaigns on them - counted in the project and '+W.name+' rows, not under any campaign"><td class="ca-nm"><span class="ca-nmx" style="font-style:italic"><i class="fa-solid fa-link-slash" style="color:#94a3b8;margin-right:6px"></i>Not tied to a campaign</span><div class="ca-sub">'
+          +esc(Object.keys(by).sort(function(a,b){ return by[b]-by[a]; }).map(function(k){ return k+' '+by[k]; }).join(' · '))+'</div></td>'+money(null)
+          +cols({spend:null,ln:null,pl:pl,lead:dash,cpl:null,clicks:null,ctr:null},{},crmX(function(x){ return x.untied&&x.project===p; },srcU,function(){ return false; }))+'</tr>'; } }
     // the total counts leads only (Google conversions, Facebook lead / chat campaigns), as reach or engagement results cannot be added to them
     const ids={}; camps.forEach(function(c){ ids[c.campaign_id]=1; });
     const tot=camps.length?'<tfoot><tr class="ca-tot"><td>Total · '+camps.length+' campaign'+(camps.length===1?'':'s')+(pl==='meta'?' <span style="font-weight:500;color:var(--slate);font-size:11px">(leads only)</span>':'')+'</td>'
@@ -40752,6 +40792,68 @@ function caPaint(){
   const shown=CA.proj==='all'?P:[CA.proj];
   const B=CA_D.bud||{};
   const budV=function(p,pl){ return pl?B[p+'|'+pl]:(B[p+'|google']==null&&B[p+'|meta']==null?null:(B[p+'|google']||0)+(B[p+'|meta']||0)); };
+  /* THE ADS TAB (17 Nov 2026, Ayush: "the same thing as Overview ... I want ascending hierarchy in Ads", "project wise like in
+     Campaigns - Projects, Google or Facebook, then in the table below Ads, Ad Sets, Campaigns", then "more than one ad is
+     repeated - the one ad will show the campaigns it's in and, going further, the ad sets it's in"). The projects table is
+     the same as on Campaigns; Google / Facebook opens the section below. There every ad is ONE row - copies of it (an ad
+     copied into another campaign or ad set gets a new id but keeps its name) are counted together - and its arrow opens
+     the campaigns it runs in, each campaign the ad sets / ad groups it runs in there. Every row shows that row's own
+     figures, with the same columns, budgets, CRM and Active / Inactive / Both. The picture opens the ad. */
+  const adsTree=function(p,pl){
+    const W=CA_PLAT[pl];
+    const top='<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p);
+    if(CA_D.adsLoading) return top+'</div><div style="padding:16px;color:var(--slate)"><i class="fa-solid fa-spinner fa-spin"></i> Loading ads…</div></div>';
+    const AX=CA.ax=CA.ax||{ad:null,camp:null}, ashow=CA.adShow||50;
+    const keyOf=function(a){ return a.platform+':'+String((E['ad:'+a.ad_id]||{}).name||a.ad_id).trim().toLowerCase().replace(/\s+/g,' '); };
+    const live=CA_D.ads.filter(function(a){ return a.project===p&&a.platform===pl&&caAdOk(a)&&((+a.spend||0)>0||(+a.impressions||0)>0||(+a.clicks||0)>0||(+a.results||0)>0); });
+    const grp=function(list){ const by={}, out=[]; list.forEach(function(a){ const k=keyOf(a); let m=by[k];
+      if(!m){ m=by[k]={k:k,platform:a.platform,ad_id:a.ad_id,project:a.project,campaign_id:a.campaign_id,adset_id:null,spend:0,results:null,clicks:0,impressions:0,rows:[],ids:{},top:0}; out.push(m); }
+      m.spend+=+a.spend||0; m.clicks+=+a.clicks||0; m.impressions+=+a.impressions||0; if(a.results!=null) m.results=(m.results==null?0:m.results)+(+a.results);
+      m.rows.push(a); m.ids[String(a.ad_id)]=1; if((+a.spend||0)>m.top){ m.top=+a.spend||0; m.ad_id=a.ad_id; m.campaign_id=a.campaign_id; } }); return {by:by,out:out}; };
+    const G=grp(live), ads=G.out.sort(function(x,y){ return y.spend-x.spend; }), W2=cmpOn?grp((CA_D.cmp&&CA_D.cmp.ads)||[]).by:{};
+    // the CRM's figures of every copy of the ad together
+    const crmIds=function(ids,sp,spw){ if(!CS) return crmNo('CRM figures by ad are read at night - they show from the next morning'); const pp=function(x){ return x.level==='ad'&&ids[x.ad_id]; };
+      if(!CS.cur.some(pp)) return crmNo('The CRM has no leads tied to this ad for these dates'); return {t:crmT(crmAgg(CS.cur,pp),+sp||0),w:crmT(crmAgg(CS.prev,pp),+spw||0)}; };
+    const setAgg=function(list,sid){ const x={spend:0,results:null,clicks:0,impressions:0}; list.forEach(function(a){ if(a.adset_id!==sid) return; x.spend+=+a.spend||0; x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; if(a.results!=null) x.results=(x.results||0)+(+a.results); }); return x; };
+    window._caAdsTab=[]; window._caAxK=[]; let rows='';
+    ads.slice(0,ashow).forEach(function(a){
+      const ae=E['ad:'+a.ad_id]||{}, aon=AX.ad===a.k, i=window._caAdsTab.push(a)-1, copies=Object.keys(a.ids).length;
+      const anyLive=a.rows.some(function(r){ return caLive((E['ad:'+r.ad_id]||{}).status); });
+      const thumb=ae.thumbnail?'<img src="'+esc(ae.thumbnail)+'" referrerpolicy="no-referrer" alt="" onclick="event.stopPropagation();caAdTabOpen('+i+')" title="Open this ad" style="width:26px;height:26px;object-fit:cover;border-radius:5px;vertical-align:middle;margin-right:8px;cursor:zoom-in">'
+        :'<i class="fa-regular fa-rectangle-list" onclick="event.stopPropagation();caAdTabOpen('+i+')" title="Open this ad" style="color:#94a3b8;margin-right:8px;cursor:zoom-in"></i>';
+      const nCamps=[...new Set(a.rows.map(function(r){ return r.campaign_id; }))].length;
+      rows+='<tr class="ca-row ca-l0'+(aon?' ca-on':'')+'" onclick="caAx(\'ad\',_caAxK['+(window._caAxK.push(a.k)-1)+'])" title="'+(nCamps>1?'In '+nCamps+' campaigns':'')+(copies>1?(nCamps>1?' · ':'')+copies+' copies counted together':'')+'">'
+        +nm(caret(aon)+caDot(anyLive?'ACTIVE':ae.status)+thumb,(ae.name||('Ad '+a.ad_id))+(nCamps>1?'  ·  '+nCamps+' campaigns':''))+money(null)
+        +cols(raw(a,pl,null),raw(W2[a.k],pl,null),crmIds(a.ids,a.spend,(W2[a.k]||{}).spend))+'</tr>';
+      if(!aon) return;
+      // up one: every campaign the ad runs in - the campaign's own figures
+      const cids=[...new Set(a.rows.map(function(r){ return r.campaign_id; }))].sort(function(x,y){ const cx=CA_D.cur.filter(function(c){ return c.campaign_id===x; })[0]||{}, cy=CA_D.cur.filter(function(c){ return c.campaign_id===y; })[0]||{}; return (+cy.spend||0)-(+cx.spend||0); });
+      cids.forEach(function(cid){
+        const c=CA_D.cur.filter(function(x){ return x.platform===pl&&x.campaign_id===cid; })[0]||{campaign_id:cid,platform:pl,project:p,spend:0,clicks:0,impressions:0,results:0};
+        const ce=E['campaign:'+cid]||{}, ck=a.k+'|'+cid, con=AX.camp===ck, lead=pl==='meta'?obIsLead(E,c):null, was=prev.filter(function(x){ return x.platform===pl&&x.campaign_id===cid; })[0];
+        rows+='<tr class="ca-row ca-l1'+(con?' ca-on':'')+'" onclick="caAx(\'camp\',_caAxK['+(window._caAxK.push(ck)-1)+'])">'+nm(caret(con)+caDot(ce.status),ce.name||cid)
+          +(cBud(cid)==null&&caCampBud(cid,true)!=null&&caLive(ce.status)?idle(cid):!caLive(ce.status)?'<td>'+(cBud(cid)==null?'<span style="color:#94a3b8">—</span>':obMoney(cBud(cid)))+'<div class="ca-sub">'+esc(String(ce.status||'stopped').toLowerCase())+'</div></td>':money(cBud(cid)))
+          +cols(raw(c,pl,lead),raw(was,pl,lead),crmX(function(x){ return x.campaign_id===cid; },pl==='google'?'google':'facebook'))+'</tr>';
+        if(!con) return;
+        // up again: the ad sets / ad groups of that campaign the ad runs in - the ad set's own figures
+        const sids=[...new Set(a.rows.filter(function(r){ return r.campaign_id===cid&&r.adset_id; }).map(function(r){ return r.adset_id; }))];
+        if(!sids.length){ rows+='<tr class="ca-l2 ca-none"><td colspan="'+(7+NCRM)+'">No '+W.set.toLowerCase()+' recorded for this ad here</td></tr>'; return; }
+        sids.forEach(function(sid){
+          const se=E['adset:'+sid]||{}, sa=setAgg(CA_D.ads,sid), sw=cmpOn?setAgg((CA_D.cmp&&CA_D.cmp.ads)||[],sid):null;
+          const sb=se.daily_budget!=null?money(se.daily_budget):ce.daily_budget!=null?'<td title="The budget is set on the campaign and shared by its '+W.sets.toLowerCase()+'"><span style="color:#64748b">'+obMoney(ce.daily_budget)+'</span><div class="ca-sub">shared</div></td>':money(null);
+          rows+='<tr class="ca-l2"><td class="ca-nm"><span class="ca-nmx" title="'+esc(se.name||sid)+'">'+caDot(se.status||ce.status)+esc(se.name||sid)+'</span></td>'+sb+cols(raw(sa,pl,null),raw(sw,pl,null),crmSetX(sid,sa.spend,sw&&sw.spend))+'</tr>';
+        });
+      });
+    });
+    const tot=G.out.reduce(function(t,a){ t.spend+=a.spend; t.clicks+=a.clicks; t.impressions+=a.impressions; if(a.results!=null) t.results=(t.results||0)+a.results; return t; },{spend:0,clicks:0,impressions:0,results:null});
+    const allIds={}; G.out.forEach(function(a){ Object.keys(a.ids).forEach(function(k){ allIds[k]=1; }); });
+    return top+' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' ad'+(ads.length===1?'':'s')+'; click one for the campaigns it runs in, then its '+W.sets.toLowerCase()+'</span></div>'
+      +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Ad',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
+      +(rows||'<tr><td colspan="'+(7+NCRM)+'" style="text-align:center;color:var(--slate);padding:18px">No ad ran here in this period for this choice</td></tr>')+'</tbody>'
+      +(ads.length?'<tfoot><tr class="ca-tot"><td>Total · '+ads.length+' ad'+(ads.length===1?'':'s')+'</td>'+money(null)+cols(raw(tot,pl,null),{},crmIds(allIds,tot.spend,0))+'</tr></tfoot>':'')+'</table></div>'
+      +(ads.length>ashow?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="CA.adShow=(CA.adShow||50)+50;caPaint()">Show more ('+ashow+' of '+ads.length+')</button></div>':'')
+      +'</div>';
+  };
   const bud=function(v){ return '<td>'+(v==null?'<span style="color:#94a3b8">—</span>':obMoney(v))+'</td>'; };
   let rows='';
   shown.forEach(function(p){
@@ -40776,10 +40878,16 @@ function caPaint(){
     +(rows||'<tr><td colspan="'+(7+NCRM)+'" style="text-align:center;color:var(--slate);padding:24px">No ad accounts</td></tr>')+'</tbody>'+foot+'</table></div>';
   // the open platform's campaigns, ad sets and ads come under the whole projects table, and the page
   // scrolls down to them (caPlat) so they are seen
-  if(CA.open&&CA.plat) html+='<div class="ca-below" id="caBelow">'+section()+'</div>';
+  // the Ads tab shows the open platform's ads, ad sets and campaigns from the ad upwards (adsTree)
+  if(CA.open&&CA.plat) html+='<div class="ca-below" id="caBelow">'+(CA_TAB==='ads'?adsTree(CA.open,CA.plat):section())+'</div>';
   // (16 Nov 2026, Ayush: the explanation paragraph under the table removed)
   $('caBody').innerHTML=caNA(html);
 }
+// the Ads tab: open / close a level (ad, ad set) and an ad's popup
+window.caAx=function(level,k){ const AX=CA.ax=CA.ax||{ad:null,set:null,camp:null};
+  if(level==='ad'){ AX.ad=AX.ad===k?null:k; AX.set=null; AX.camp=null; } else if(level==='set'){ AX.set=AX.set===k?null:k; AX.camp=null; } else AX.camp=AX.camp===k?null:k;
+  caPaint(); };
+window.caAdTabOpen=function(i){ const a=(window._caAdsTab||[])[i]; if(a) caAdShow(a); };
 window.caCmpToggle=function(on){ CA.cmp.on=!!on;
   // the default other side: the previous period, unless that is what the main side already is
   if(on&&CA.cmp.period!=='custom'&&CA.cmp.period===OB_P.period) CA.cmp.period='prev';
@@ -40903,8 +41011,8 @@ function caAdShow(a){
 }
 function caReset(){ CA.open=CA.proj==='all'?null:CA.proj; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; }
 window.caPickProject=function(v){ CA.proj=v; CA.open=v==='all'?null:v; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
-window.caToggle=function(i){ const p=window._caP[i]; CA.open=CA.open===p?null:p; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
-window.caPlat=function(p){ CA.plat=CA.plat===p?null:p; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint();
+window.caToggle=function(i){ const p=window._caP[i]; CA.open=CA.open===p?null:p; CA.ax=null; CA.adShow=50; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
+window.caPlat=function(p){ CA.plat=CA.plat===p?null:p; CA.ax=null; CA.adShow=50; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint();
   requestAnimationFrame(function(){ const s=$('caBelow'); if(s) s.scrollIntoView({block:'start'}); }); };
 window.caCamp=function(id){ CA.camp=CA.camp===id?null:id; CA.adset=null; CA.showAds=12; caPaint(); };
 window.caSet=function(id){ CA.adset=CA.adset===id?null:id; CA.showAds=12; caPaint(); };
@@ -42560,3 +42668,480 @@ maReg({id:'hours',title:'Best hours',icon:'fa-solid fa-clock',data:maHourData,re
     return maHead('fa-solid fa-clock','','Best hours',
         'Last 28 days, lead campaigns: leads each 4-hour block brought for its share of spend. +30% = 30% more leads than its spend predicts at the average rate. A real pattern needs the chi-square test (p < 0.01) and some block 15%+ off average. Use it to schedule ads or shift bids by time of day.')
       +(rows.length?maTable(['Platform'].concat(d.blocks.map(function(b){ return b[0]+':00–'+b[1]+':00'; })),rows):'<div class="ma-card">Not enough leads in the hourly figures yet.</div>'); }});
+/* =============================================================================================
+   WHATSAPP TEMPLATES (module id 'wa_templates', 17 Nov 2026 - Ayush).
+   Tab 1 TEMPLATES: the WhatsApp drip flow of each project, from the team's sheet "Lead Nurturing 2026
+   (Drip Marketing) - All Projects" (sheets Gurukul, Dream World City, Dream Ananta - After Launch).
+   One project at a time, little noise, little scrolling (layout notes at WAT_CSS). A click on a template
+   shows the message the way WhatsApp draws it, with its template ID.
+   The sheet is read once into assets/wa-templates/flows.json (+ img/) - to change a flow, change the
+   sheet and re-read it (scratch genflows.js).
+   Tab 2 DELIVERIES: camp.wa_* filled nightly by the edge function wa-deliveries-sync.
+   Who sees it: everyone with Campaign Analytics ('campaigns'), plus a direct 'wa_templates' grant.
+   ============================================================================================= */
+const WAT_TABS=['Templates','Deliveries','Knocking'];   // Knocking: 17 Nov 2026
+let WAT_DATA=null, WAT_PROJ=null, WAT_STAGE=0;
+const WAT_STAGE_COL={'enquiry':'#2563eb','qualified':'#7c3aed','ov':'#d97706','site visit':'#059669','miss ov':'#dc2626'};
+/* LAYOUT (17 Nov 2026, third version - Ayush: "clumsy ... much less noisy, easier to explore ... remove extra text",
+   then "the Template Id is important, visible without clicking the row", "rows full width, on click just the Look
+   opens along with the Id", "how it will look in WhatsApp, the Look container enlarges - no scroll inside it", and
+   "in phone nothing is responsive"). Project = segmented switch; the lead's journey = one row of big stage boxes;
+   the stage = full-width rows (day, kind, headline, template id); a click opens the WhatsApp look under the row. */
+const WAT_CSS='<style>'
++'.wat-top{display:flex;align-items:center;gap:12px;margin:0 0 16px}'
++'.wat-seg{display:inline-flex;background:#f1f5f9;border-radius:12px;padding:4px;gap:2px;max-width:100%;overflow-x:auto;scrollbar-width:none}'
++'.wat-seg::-webkit-scrollbar{display:none}'
++'.wat-seg button{border:0;background:transparent;border-radius:9px;padding:9px 18px;font-size:14px;font-weight:600;color:#475569;cursor:pointer;font-family:inherit;white-space:nowrap}'
++'.wat-seg button.on{background:#fff;color:#0f172a;box-shadow:0 1px 3px rgba(15,23,42,.12)}'
++'.wat-links{margin-left:auto;display:flex;gap:6px;flex-shrink:0}'
++'.wat-links a{width:36px;height:36px;border-radius:9px;border:1px solid var(--line);display:inline-flex;align-items:center;justify-content:center;color:#475569;background:#fff}'
++'.wat-journey{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:0 0 16px}'
++'.wat-step{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;cursor:pointer;text-align:left;font-family:inherit}'
++'.wat-step:hover{border-color:#94a3b8}'
++'.wat-step .nm{font-size:14px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:8px}'
++'.wat-step .nm i{width:10px;height:10px;border-radius:50%;display:inline-block}'
++'.wat-step .ct{font-size:26px;font-weight:700;color:#0f172a;margin-top:6px;line-height:1}'
++'.wat-step .ct small{font-size:12.5px;font-weight:500;color:var(--slate);margin-left:6px}'
++'.wat-step.on{border-width:2px;padding:13px 15px;box-shadow:0 4px 14px rgba(15,23,42,.08)}'
++'.wat-list{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}'
++'.wat-row{display:grid;grid-template-columns:62px 30px minmax(0,1fr) auto 18px;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid #f1f5f9;cursor:pointer}'
++'.wat-list>.wat-row:first-child{border-top:0}'
++'.wat-row:hover{background:#f8fafc}.wat-row.on{background:#f0fdf4}'
++'.wat-row .d{font-size:12px;color:var(--slate);font-weight:600;white-space:nowrap}.wat-row .d b{font-size:16px;color:#0f172a;margin-left:3px}'
++'.wat-row .k{width:30px;height:30px;border-radius:8px;background:#f1f5f9;color:#475569;display:flex;align-items:center;justify-content:center;font-size:13px}'
++'.wat-row .t{font-size:13.5px;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
++'.wat-row .id{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:#334155;background:#f1f5f9;border-radius:6px;padding:3px 8px;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis}'
++'.wat-row .id.none{background:transparent;color:#94a3b8;font-family:inherit}'
++'.wat-row .cv{color:#94a3b8;font-size:12px;transition:transform .15s}.wat-row.on .cv{transform:rotate(180deg)}'
++'.wat-row.skip .t{color:#94a3b8;text-decoration:line-through}'
++'.wat-open{border-top:1px solid #dcfce7;background:#f6fef9;padding:18px 16px;display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}'
++'.wat-look{background:#efeae2;border-radius:16px;padding:16px 14px;width:380px;max-width:100%;box-sizing:border-box}'
++'.wat-bub{background:#fff;border-radius:0 10px 10px 10px;box-shadow:0 1px 1px rgba(0,0,0,.1);overflow:hidden}'
++'.wat-bub .mm{padding:4px 4px 0}'
++'.wat-bub img,.wat-bub video{display:block;width:100%;height:auto;border-radius:7px;background:#000}'
++'.wat-pdf{display:flex;align-items:center;gap:10px;padding:12px;margin:4px;border-radius:7px;background:#f5f6f6;color:#0f172a;text-decoration:none;font-size:13px;font-weight:600;word-break:break-all}'
++'.wat-pdf i{font-size:24px;color:#dc2626;flex-shrink:0}'
++'.wat-txt{padding:9px 11px 4px;white-space:pre-wrap;font-size:14px;line-height:1.45;color:#111b21;word-break:break-word}'
++'.wat-tm{text-align:right;font-size:11px;color:#667781;padding:0 10px 6px}'
++'.wat-btn{border-top:1px solid #f0f2f5;padding:10px;text-align:center;color:#027eb5;font-size:14px;font-weight:500}'
++'.wat-btn i{margin-right:6px;font-size:12px}'
++'.wat-det{flex:1;min-width:220px;font-size:13px}'
++'.wat-det .lbl{font-size:11px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.04em;margin:0 0 4px}'
++'.wat-det .big{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:15px;font-weight:600;color:#0f172a;display:flex;align-items:center;gap:8px;word-break:break-all;margin-bottom:16px}'
++'.wat-det .big button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 8px;cursor:pointer;color:#475569;flex-shrink:0}'
++'.wat-det .kv{display:grid;grid-template-columns:90px 1fr;gap:7px 10px}.wat-det .kv>div:nth-child(odd){color:var(--slate)}'
++'.wat-todo{padding:12px 16px;border-top:1px dashed var(--line);background:#fafafa;font-size:12.5px;color:var(--slate)}'
++'.wat-todo div{padding:3px 0}'
++'.wat-wel{margin-bottom:12px}'
++'@media(max-width:720px){'
++'.wat-top{flex-wrap:wrap}.wat-links{margin-left:0}'
++'.wat-journey{display:flex;overflow-x:auto;scrollbar-width:none;gap:8px}.wat-journey::-webkit-scrollbar{display:none}'
++'.wat-step{flex:0 0 auto;min-width:118px;padding:10px 12px}.wat-step.on{padding:9px 11px}.wat-step .ct{font-size:21px}'
++'.wat-row{grid-template-columns:50px minmax(0,1fr) 16px;grid-template-areas:"d t cv" "d id cv";gap:3px 10px;padding:11px 12px}'
++'.wat-row .d{grid-area:d}.wat-row .k{display:none}.wat-row .t{grid-area:t;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}'
++'.wat-row .id{grid-area:id;justify-self:start;max-width:100%;font-size:11px}.wat-row .cv{grid-area:cv}'
++'.wat-open{padding:14px 10px}.wat-look{width:100%}'
++'}'
++'</style>';
+
+async function watLoad(){
+  try{ const r=await fetch('assets/wa-templates/flows.json?v=1',{cache:'no-cache'}); WAT_DATA=await r.json(); }
+  catch(_e){ WAT_DATA={projects:[]}; }
+  if(!WAT_PROJ && WAT_DATA.projects[0]) WAT_PROJ=WAT_DATA.projects[0].key;
+}
+function watKind(t){ t=String(t||'').toLowerCase();
+  if(/video/.test(t)) return ['fa-solid fa-video','Video'];
+  if(/pdf/.test(t)) return ['fa-regular fa-file-pdf','PDF'];
+  if(/image/.test(t)) return ['fa-regular fa-image','Image'];
+  if(/text/.test(t)) return ['fa-regular fa-message','Text'];
+  return ['fa-regular fa-circle','']; }
+// A short title for the card: the message's first real line (not "Dear {{Customer Name}},"), else the template name
+function watTitle(s){
+  const lines=String(s.text||'').split('\n').map(function(l){ return l.trim().replace(/^[^A-Za-z{]*watch\s+(the\s+)?video[^A-Za-z]*(to\s+see\s+)?/i,'').replace(/^https?:\/\/\S+\s*/,'').trim(); }).filter(function(l){ const w=l.replace(/[^A-Za-z ]/g,'').trim();
+    return w&&!/^(dear|hi|hello|hey)\b/i.test(w)&&!/^\{\{?[^}]*\}?\}?,?$/.test(l)&&!(w===w.toUpperCase()&&w.length<30)&&!/^CTA\b/i.test(w); });   // not the greeting, not a "WATCH VIDEO 👆" banner
+  let t=(lines[0]||'').replace(/\*+/g,'').replace(/\s+/g,' ');
+  if(!t&&s.name) t=s.name.replace(/_/g,' ');
+  if(!t&&s.note) t=s.note.replace(/[{}]/g,'').replace(/\b(creative|video|image)?\s*to\s+(make|create)\s*:?/ig,'$1').replace(/\s+/g,' ').replace(/^[\s:]+/,'').trim();
+  t=t||'(no text yet)';
+  return t.charAt(0).toUpperCase()+t.slice(1); }
+function watButtons(s){ const m=String(s.text||'').match(/CTA\s*[-–—:]+\s*(.+)$/im); return m?m[1].trim():''; }
+function watIsPlan(s){ return !s.name&&!s.text; }
+function watIsSkip(s){ return /^skip$/i.test(String(s.status||'')); }
+
+function watProj(){ const P=WAT_DATA.projects; return P.filter(function(x){ return x.key===WAT_PROJ; })[0]||P[0]; }
+// the message without its "CTA - ..." line (those become the buttons under the bubble)
+function watBody(s){ return String(s.text||'').replace(/\n?\s*CTA\s*[-–—:]+.*$/im,'').trim(); }
+function watBtnList(s){ const b=watButtons(s); if(!b) return []; return b.replace(/[👇👆.\s]+$/u,'').split(/\s*(?:&|,|\band\b)\s*/i).map(function(x){ return x.trim(); }).filter(Boolean); }
+// the picture / video / PDF exactly where WhatsApp puts it: inside the bubble, above the text
+function watMedia(s){
+  const u=[s.attach].concat((s.preview||[]).filter(function(x){ return !/^assets\//.test(x); })).filter(Boolean)[0];
+  if(!u) return '';
+  if(/\.(mp4|mov|webm)(\?|$)/i.test(u)) return '<div class="mm"><video src="'+esc(u)+'#t=0.5" controls preload="metadata" playsinline></video></div>';
+  if(/\.pdf(\?|$)/i.test(u)) return '<a class="wat-pdf" href="'+esc(u)+'" target="_blank" rel="noopener"><i class="fa-solid fa-file-pdf"></i>'+esc(decodeURIComponent(u.split('/').pop().replace(/\+/g,' ')))+'</a>';
+  return '<div class="mm"><img src="'+esc(u)+'" alt="" loading="lazy"></div>'; }
+function watLook(s){
+  return '<div class="wat-look"><div class="wat-bub">'+watMedia(s)
+    +'<div class="wat-txt">'+(watBody(s)?esc(watBody(s)):'<i style="color:#8696a0">No message written yet</i>')+'</div><div class="wat-tm">10:30</div>'
+    +watBtnList(s).map(function(b){ return '<div class="wat-btn"><i class="fa-solid fa-reply"></i>'+esc(b)+'</div>'; }).join('')+'</div></div>'; }
+function watDetail(st,s){
+  const k=watKind(s.type);
+  return '<div class="wat-det"><div class="lbl">Template ID</div><div class="big">'+(s.name?esc(s.name)+'<button title="Copy" onclick="event.stopPropagation();watCopy(\''+esc(s.name)+'\')"><i class="fa-regular fa-copy"></i></button>':'<span style="color:#94a3b8;font-family:inherit;font-weight:500">Not given in the sheet</span>')+'</div>'
+    +'<div class="kv"><div>Stage</div><div>'+esc(st.name)+'</div><div>Sent on</div><div>'+(s.day==null?'-':'Day '+s.day)+'</div>'
+    +'<div>Kind</div><div>'+esc(k[1]||'-')+'</div>'+(s.status?'<div>Status</div><div>'+esc(s.status)+'</div>':'')+'</div></div>'; }
+window.watCopy=function(t){ try{ navigator.clipboard.writeText(t); toast('Copied','ok'); }catch(_e){} };
+
+function watTemplates(){
+  const P=WAT_DATA.projects, p=watProj();
+  if(!p) return '<div class="card card-pad" style="color:var(--slate)">The template sheet could not be read.</div>';
+  if(WAT_STAGE>=p.stages.length) WAT_STAGE=0;
+  const real=function(st){ return st.steps.filter(function(t){ return !watIsPlan(t); }); };
+  let h='<div class="wat-top"><div class="wat-seg">'+P.map(function(x){ return '<button class="'+(x.key===p.key?'on':'')+'" onclick="watPick(\''+x.key+'\')">'+esc(x.label)+'</button>'; }).join('')+'</div>'
+    +'<div class="wat-links">'+(p.links||[]).filter(function(l){ return /^https:\/\//.test(l[1]); }).map(function(l){ return '<a href="'+esc(l[1])+'" target="_blank" rel="noopener" title="'+esc(l[0])+'"><i class="fa-solid '+(/flow/i.test(l[0])?'fa-diagram-project':'fa-table')+'"></i></a>'; }).join('')+'</div></div>';
+  h+='<div class="wat-journey">'+p.stages.map(function(st,i){
+    const c=WAT_STAGE_COL[st.name.toLowerCase()]||'#64748b', on=i===WAT_STAGE;
+    return '<button class="wat-step'+(on?' on':'')+'" style="'+(on?'border-color:'+c:'')+'" onclick="watStage('+i+')"><div class="nm"><i style="background:'+c+'"></i>'+esc(st.name)+'</div>'
+      +'<div class="ct">'+real(st).length+'<small>templates</small></div></button>'; }).join('')+'</div>';
+  const st=p.stages[WAT_STAGE];
+  window._watRows=[];
+  const row=function(key,s,title){ const k=watKind(s.type), i=window._watRows.push({p:p,st:st,s:s,title:title})-1;
+    return '<div class="wat-row'+(watIsSkip(s)?' skip':'')+'" onclick="watPop('+i+')">'
+      +'<div class="d">'+(s.day==null?'':'Day<b>'+s.day+'</b>')+'</div><div class="k" title="'+esc(k[1])+'"><i class="'+k[0]+'"></i></div>'
+      +'<div class="t">'+esc(title||watTitle(s))+'</div>'
+      +(s.name?'<div class="id">'+esc(s.name)+'</div>':'<div class="id none">'+(watIsSkip(s)?'Skipped':'No ID')+'</div>')
+      +'<i class="fa-solid fa-chevron-right cv"></i></div>'; };
+  let rows='';
+  if(p.welcome&&WAT_STAGE===0) p.welcome.options.forEach(function(o,i){ rows+=row('w'+i,{text:o.text,day:null,type:'text',name:''},p.welcome.title+' · '+o.name.replace(/^Option\s*\d+\s*:\s*/i,'')); });
+  st.steps.forEach(function(s,i){ if(!watIsPlan(s)) rows+=row('s'+i,s); });
+  const todo=st.steps.filter(watIsPlan);
+  if(todo.length) rows+='<div class="wat-todo"><b style="color:#475569">Still to make</b>'+todo.map(function(s){ return '<div>· '+esc(watTitle(s))+'</div>'; }).join('')+'</div>';
+  return h+'<div class="wat-list">'+(rows||'<div style="padding:16px;color:var(--slate)">No templates in this stage.</div>')+'</div>';
+}
+window.watPick=function(k){ WAT_PROJ=k; WAT_STAGE=0; WAD_STAGE=-1; renderPage(); };
+window.watStage=function(i){ WAT_STAGE=i; renderPage(); };
+
+VIEWS.wa_templates=async function(v,seg){
+  setCrumb(['Growth & Strategy','WhatsApp Templates']);
+  const ti=mTab(seg,WAT_TABS.length);
+  const head=WAT_CSS+mHead('fa-comments','#16a34a','WhatsApp Templates');
+  if(!WAT_DATA){ v.innerHTML=head+'<div class="loader"><div class="spin"></div></div>'; await watLoad(); if(PAGE!=='wa_templates') return; }
+  if(ti===2&&!KN){ v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+'<div class="loader"><div class="spin"></div></div>'; await knLoad(); if(PAGE!=='wa_templates') return; }
+  if(ti===1&&!WAD){ v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+'<div class="loader"><div class="spin"></div></div>'; await wadLoad(); if(PAGE!=='wa_templates') return; }
+  const body=ti===0?watTemplates():ti===1?watDeliveries():watKnocking();
+  v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+body;
+};
+
+/* THE POPUP (17 Nov 2026, Ayush, second version: "like the one before when it was on the right - the green top with
+   the project name, status and then its level, then the look, and in the bottom left the Id - the bigger the better").
+   A WhatsApp chat as large as the screen allows: green bar (project, status, number / stage and day), the message in its
+   bubble with its picture, video or PDF and its reply buttons, and the template ID under it on the left. The whole popup
+   grows with the message - nothing scrolls inside it. On Deliveries its figures follow under the chat. */
+window.watPop=function(i){
+  const o=(window._watRows||[])[i]; if(!o) return;
+  const p=o.p, st=o.st, s=o.s, mt=(o.meta&&o.meta[0])||null;
+  // the WhatsApp number of the account this template lives in (Meta's copy of it)
+  const accs=(((typeof WAD!=='undefined'&&WAD&&WAD.acc)||(typeof KN!=='undefined'&&KN&&KN.acc))||[]).filter(function(a){ return mt?a.id===mt.waba_id:false; });
+  const nums=[]; accs.forEach(function(a){ (a.phones||[]).forEach(function(ph){ if(ph.display_phone_number) nums.push(ph.display_phone_number); }); });
+  const cap=function(x){ x=String(x||''); return x.charAt(0).toUpperCase()+x.slice(1).toLowerCase(); };
+  const status=[s.status?cap(s.status):'', mt&&mt.status?'Meta '+cap(mt.status):''].filter(Boolean).join(' · ');
+  const col=WAT_STAGE_COL[String(st.name||'').toLowerCase()]||'#25d366';
+  let stats='';
+  if(o.m){ const m=o.m, c=function(l,v,pc,cl){ return '<div class="wpp-s"><div style="color:'+cl+'">'+l+'</div><b>'+v+'</b><small>'+(pc||'&nbsp;')+'</small></div>'; };
+    stats='<div class="wpp-foot"><div class="wpp-lbl">'+esc(fmtDate(o.range.s))+(o.range.s!==o.range.e?' – '+esc(fmtDate(o.range.e)):'')+'</div><div class="wpp-stats">'
+      +c('Sent',wadN(m.sent),'','#64748b')+c('Delivered',wadN(m.delivered),wadPct(m.delivered,m.sent),'#2563eb')+c('Read',wadN(m.read),wadPct(m.read,m.delivered),'#16a34a')
+      +c('Clicked',wadN(m.clicked),wadPct(m.clicked,m.read),'#7c3aed')+c(o.failLabel||'Failed',o.tracksFail?wadN(m.failed):'NA',o.failLabel?wadPct(m.failed,m.sent):'','#dc2626')+'</div>'
+      +(o.btns&&o.btns.length?'<div class="wpp-lbl" style="margin-top:14px">Button clicks</div><div class="kn-b" style="display:flex;flex-wrap:wrap;gap:6px">'+o.btns.map(function(b){ return /PHONE/i.test(b.type)?'<span style="border:1px solid var(--line);background:#f8fafc;color:#94a3b8;border-radius:999px;padding:4px 11px;font-size:12.5px">'+esc(b.text)+' · not counted by Meta</span>':'<span style="border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:999px;padding:4px 11px;font-size:12.5px;font-weight:600">'+esc(b.text)+' · '+wadN((o.btnCount||{})[b.text]||0)+'</span>'; }).join('')+'</div>':'')
+      +(Object.keys(m.reasons).length?'<div class="wpp-lbl" style="margin-top:14px">Why it failed</div>'+Object.keys(m.reasons).sort(function(a,b){ return m.reasons[b]-m.reasons[a]; }).map(function(w){ return '<div class="wpp-r"><span>'+esc(w)+'</span><b>'+m.reasons[w]+'</b></div>'; }).join(''):'')+'</div>'; }
+  openModal('<style>'
+    +'.overlay:has(.wpp-m){overflow:hidden;align-items:center;padding:12px}'
+    +'.modal.wpp-m{max-width:min(720px,96vw)!important;width:min(720px,96vw)!important;max-height:none;overflow:hidden;border-radius:20px;margin:auto}'
+    +'.wpph{background:#075e54;color:#fff;padding:16px 18px;display:flex;align-items:center;gap:13px}'
+    +'.wpph .av{width:46px;height:46px;border-radius:50%;background:#25d366;display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0}'
+    +'.wpph .nm{font-size:18px;font-weight:700;line-height:1.2}.wpph .su{font-size:13px;opacity:.85;margin-top:3px}'
+    +'.wpph .lv{margin-left:auto;text-align:right;flex-shrink:0}.wpph .lv b{display:inline-block;background:rgba(255,255,255,.16);border-left:4px solid '+col+';border-radius:8px;padding:6px 11px;font-size:14px;font-weight:700;white-space:nowrap}'
+    +'.wpph .x{font-size:28px;line-height:1;cursor:pointer;opacity:.85;margin-left:4px;flex-shrink:0}.wpph .x:hover{opacity:1}'
+    +'.wppc{background:#efeae2;padding:24px 22px 16px}'
+    +'.wppc .wat-look{background:transparent;padding:0;width:100%;border-radius:0}'
+    +'.wppc .wat-bub{border-radius:0 14px 14px 14px;box-shadow:0 1px 2px rgba(0,0,0,.13)}'
+    +'.wppc .wat-bub .mm{padding:5px 5px 0}.wppc .wat-bub img,.wppc .wat-bub video{border-radius:10px}'
+    +'.wppc .wat-txt{font-size:16px;line-height:1.5;padding:12px 14px 4px}.wppc .wat-tm{font-size:12px}.wppc .wat-btn{font-size:16px;padding:13px}'
+    +'.wppid{display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap}'
+    +'.wppid code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:15px;font-weight:700;color:#111b21;background:rgba(255,255,255,.75);border-radius:8px;padding:6px 10px;word-break:break-all}'
+    +'.wppid button{border:0;background:rgba(255,255,255,.75);border-radius:8px;padding:7px 10px;cursor:pointer;color:#54656f}'
+    +'.wppid .no{color:#667781;font-size:13px}'
+    +'.wpp-foot{padding:16px 20px 20px;background:#fff}'
+    +'.wpp-lbl{font-size:11px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.05em;margin:0 0 8px}'
+    +'.wpp-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}'
+    +'.wpp-s{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:9px 10px;font-size:11.5px;font-weight:600}.wpp-s b{display:block;font-size:18px;color:#0f172a;margin-top:2px}.wpp-s small{color:var(--slate);font-weight:500}'
+    +'.wpp-r{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid #f1f5f9;font-size:13.5px}'
+    +'@media(max-width:600px){.wpph{padding:13px 14px;gap:10px}.wpph .av{width:38px;height:38px;font-size:21px}.wpph .nm{font-size:16px}.wpph .lv b{font-size:12.5px;padding:5px 8px}'
+    +'.wppc{padding:16px 12px 12px}.wpp-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}'
+    +'</style>'
+    +'<div class="wpph"><div class="av"><i class="fa-brands fa-whatsapp"></i></div>'
+    +'<div style="min-width:0"><div class="nm">'+esc(p.label)+'</div><div class="su">'+esc([status,nums.join(', ')].filter(Boolean).join(' · ')||'Template')+'</div></div>'
+    +'<div class="lv"><b>'+esc(st.name)+(s.day!=null?' · Day '+s.day:'')+'</b></div><span class="x" onclick="closeModal()" title="Close">&times;</span></div>'
+    +'<div class="wppc">'+watLook(s)
+    +'<div class="wppid">'+(s.name?'<code>'+esc(s.name)+'</code><button title="Copy the template ID" onclick="watCopy(\''+esc(s.name)+'\')"><i class="fa-regular fa-copy"></i></button>':'<span class="no">No template ID in the sheet</span>')+'</div></div>'
+    +stats,'wpp-m');
+  watFit();
+  const med=document.querySelectorAll('.modal.wpp-m .wat-bub img,.modal.wpp-m .wat-bub video');
+  med.forEach(function(x){ x.addEventListener(x.tagName==='IMG'?'load':'loadedmetadata',watFit); });
+};
+/* NO SCROLL, AS BIG AS IT FITS (17 Nov 2026, Ayush: "the WhatsApp popup should not have scroll at all - the biggest it can get,
+   not so big it becomes scrollable"). The popup is drawn at its full size (up to 720 px wide); if it is taller than the
+   window, the picture / video is made shorter first (never below 200 px, shown whole), and if it still does not fit, the
+   whole popup is scaled down to the window. Done again when the picture arrives and when the window changes size. */
+function watFit(){
+  const m=document.querySelector('.modal.wpp-m'); if(!m) return;
+  m.style.zoom='';
+  const med=m.querySelectorAll('.wat-bub img,.wat-bub video');
+  med.forEach(function(x){ x.style.maxHeight=''; });
+  const avail=window.innerHeight-24;
+  let over=m.scrollHeight-avail;
+  if(over>0&&med.length){ const h=med[0].getBoundingClientRect().height;
+    med.forEach(function(x){ x.style.maxHeight=Math.max(200,h-over)+'px'; x.style.objectFit='contain'; x.style.background='#f0f2f5'; }); }
+  over=m.scrollHeight-avail;
+  if(over>0) m.style.zoom=String(Math.max(0.4,avail/m.scrollHeight));
+}
+if(!window._watFitWired){ window._watFitWired=true; window.addEventListener('resize',function(){ watFit(); }); }
+
+/* ---------------- DELIVERIES (17 Nov 2026, list approved by Ayush) ----------------
+   One project at a time; a date range (quick picks + from / to, this year only) or one day (click a bar);
+   cards Sent / Delivered / Read / Clicked / Failed; the daily bars; the stage as sub-tabs; every template of
+   the sheet as a full-width row with its figures - a click opens its WhatsApp look, Meta's status and the
+   failure reasons. Figures: camp.wa_template_daily (Meta template analytics) and camp.wa_msg_status (failed
+   + reason, only from numbers whose webhooks reach JainE), filled nightly by wa-deliveries-sync. */
+let WAD=null, WAD_STAGE=-1;
+const WAD_Y0=new Date().getFullYear()+'-01-01';
+const WAD_R={q:'30',from:null,to:null,day:null};
+const WAD_CSS='<style>'
++'.wad-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 14px}'
++'.wad-q{display:inline-flex;background:#f1f5f9;border-radius:10px;padding:3px;gap:2px;max-width:100%;overflow-x:auto;scrollbar-width:none}.wad-q::-webkit-scrollbar{display:none}'
++'.wad-q button{border:0;background:transparent;border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;color:#475569;cursor:pointer;font-family:inherit;white-space:nowrap}'
++'.wad-q button.on{background:#fff;color:#0f172a;box-shadow:0 1px 3px rgba(15,23,42,.12)}'
++'.wad-bar input[type=date]{height:34px;border:1px solid var(--line);border-radius:8px;padding:0 8px;font-family:inherit;font-size:12.5px;background:#fff}'
++'.wad-day{display:inline-flex;align-items:center;gap:8px;background:#ecfdf5;color:#065f46;border-radius:8px;padding:6px 10px;font-size:12.5px;font-weight:600}'
++'.wad-day button{border:0;background:transparent;color:#065f46;cursor:pointer}'
++'.wad-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:0 0 14px}'
++'.wad-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px 15px}'
++'.wad-card .l{font-size:12px;color:var(--slate);font-weight:600;display:flex;align-items:center;gap:6px}.wad-card .l i{width:8px;height:8px;border-radius:50%}'
++'.wad-card .v{font-size:24px;font-weight:700;color:#0f172a;margin-top:5px;line-height:1.1}'
++'.wad-card .p{font-size:12px;color:var(--slate);margin-top:2px}'
++'.wad-chart{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 14px 8px;margin:0 0 14px}'
++'.wad-cols{display:flex;align-items:flex-end;gap:2px;height:150px}'
++'.wad-col{flex:1;display:flex;align-items:flex-end;justify-content:center;gap:1px;height:100%;cursor:pointer;border-radius:4px;min-width:0}'
++'.wad-col:hover{background:#f1f5f9}.wad-col.on{background:#ecfdf5}'
++'.wad-col i{display:block;width:30%;max-width:9px;border-radius:2px 2px 0 0;min-height:0}'
++'.wad-ax{display:flex;justify-content:space-between;font-size:10.5px;color:#94a3b8;margin-top:5px}'
++'.wad-leg{display:flex;gap:14px;font-size:11.5px;color:var(--slate);margin:0 0 8px}.wad-leg span{display:inline-flex;align-items:center;gap:5px}.wad-leg i{width:9px;height:9px;border-radius:2px}'
++'.wad-stg{display:flex;gap:6px;overflow-x:auto;margin:0 0 10px;scrollbar-width:none}.wad-stg::-webkit-scrollbar{display:none}'
++'.wad-stg button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:600;color:#475569;cursor:pointer;white-space:nowrap;font-family:inherit}'
++'.wad-stg button.on{background:#0f172a;border-color:#0f172a;color:#fff}'
++'.wad-row{display:grid;grid-template-columns:54px 40px minmax(0,1fr) repeat(5,minmax(62px,auto)) 16px;gap:12px;align-items:center;padding:10px 16px;border-top:1px solid #f1f5f9;cursor:pointer}'
++'.wad-row:hover{background:#f8fafc}.wad-row.on{background:#f0fdf4}'
++'.wad-row.h{cursor:default;background:#f8fafc;font-size:11px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;padding:9px 16px;border-top:0}'
++'.wad-row .th{width:40px;height:40px;border-radius:8px;object-fit:cover;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;overflow:hidden}'
++'.wad-row .th img{width:100%;height:100%;object-fit:cover}'
++'.wad-row .n{text-align:right;font-variant-numeric:tabular-nums;font-size:13px;color:#0f172a}.wad-row .n small{display:block;font-size:10.5px;color:var(--slate)}'
++'.wad-row .n.bad{color:#b91c1c}'
++'.wad-row .t{font-size:13.5px;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
++'.wad-row .id{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;color:#475569;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
++'.wad-row .cv{color:#94a3b8;font-size:12px}.wad-row.on .cv{transform:rotate(180deg)}'
++'.wad-fail{margin-top:14px}.wad-fail .r{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid #f1f5f9;font-size:13px}'
++'.wad-empty{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px;color:#475569;font-size:13.5px;display:flex;gap:12px;align-items:flex-start}'
++'@media(max-width:900px){.wad-cards{grid-template-columns:repeat(3,minmax(0,1fr))}}'
++'@media(max-width:720px){'
++'.wad-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.wad-card .v{font-size:20px}'
++'.wad-row{grid-template-columns:40px minmax(0,1fr) 16px;grid-template-areas:"th t cv" "th nums cv";gap:4px 10px;padding:10px 12px}'
++'.wad-row .th{grid-area:th}.wad-row .d{display:none}.wad-row>div:nth-child(3){grid-area:t;min-width:0}.wad-row .cv{grid-area:cv}'
++'.wad-row .n::before{content:attr(data-l) " ";color:var(--slate)}.wad-row .n small{display:inline;margin-left:3px}'
++'.wad-row .nums{grid-area:nums;display:flex;gap:12px;flex-wrap:wrap}.wad-row .n{text-align:left;font-size:12px}.wad-row.h{display:none}'
++'}'
++'@media(min-width:721px){.wad-row .nums{display:contents}}'
++'</style>';
+
+async function wadLoad(){
+  const C=sb.schema('camp');
+  const all=async function(q){ const out=[]; for(let i=0;i<60;i++){ const r=await q().range(i*1000,i*1000+999); if(r.error) break; out.push.apply(out,r.data||[]); if(!r.data||r.data.length<1000) break; } return out; };
+  const got=await Promise.all([
+    C.from('wa_sync_state').select('*').eq('id',1).maybeSingle().then(function(r){ return r.error?{missing:true}:(r.data||{}); },function(){ return {missing:true}; }),
+    C.from('wa_accounts').select('*').then(function(r){ return r.data||[]; },function(){ return []; }),
+    all(function(){ return C.from('wa_templates').select('id,waba_id,name,language,status,category,quality,rejected_reason').order('id'); }),
+    all(function(){ return C.from('wa_template_daily').select('template_id,day,sent,delivered,read,clicked').gte('day',WAD_Y0).order('day'); }),
+    all(function(){ return C.from('wa_msg_status').select('message_id,ts,template_name,error_code,error_title,error_detail').eq('status','failed').gte('ts',WAD_Y0).order('ts'); })
+  ]);
+  WAD={state:got[0],acc:got[1],tpl:got[2],daily:got[3],fail:got[4]};
+}
+function wadIso(d){ return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10); }
+function wadRange(){
+  const t=new Date(), today=wadIso(t);
+  if(WAD_R.day) return {s:WAD_R.day,e:WAD_R.day};
+  if(WAD_R.q==='custom') return {s:WAD_R.from||WAD_Y0,e:WAD_R.to||today};
+  if(WAD_R.q==='month') return {s:today.slice(0,8)+'01',e:today};
+  if(WAD_R.q==='year') return {s:WAD_Y0,e:today};
+  const s=new Date(t.getTime()-(+WAD_R.q-1)*864e5); return {s:wadIso(s)<WAD_Y0?WAD_Y0:wadIso(s),e:today};
+}
+function wadN(n){ return n==null?'NA':Number(n).toLocaleString('en-IN'); }
+function wadPct(a,b){ return b?Math.round(a/b*1000)/10+'%':''; }
+
+function watDeliveries(){
+  const P=WAT_DATA.projects, p=watProj();
+  if(!WAD) return '<div class="loader"><div class="spin"></div></div>';
+  let h=WAD_CSS+'<div class="wat-top"><div class="wat-seg">'+P.map(function(x){ return '<button class="'+(x.key===p.key?'on':'')+'" onclick="watPick(\''+x.key+'\')">'+esc(x.label)+'</button>'; }).join('')+'</div></div>';
+  if(WAD.state.missing||!WAD.acc.length){
+    return h+'<div class="wad-empty"><i class="fa-brands fa-whatsapp" style="font-size:22px;color:#16a34a"></i><div><b style="color:#0f172a">No WhatsApp account is connected yet.</b><br>'
+      +'Meta shows no WhatsApp Business Account on the JAIN-E Sync system user. Once the drip number&rsquo;s account is assigned to it, the figures fill in here from the next morning.</div></div>';
+  }
+  const r=wadRange(), today=wadIso(new Date());
+  // the sheet's templates of this project, by stage, matched to Meta's templates by name
+  const byName={}; WAD.tpl.forEach(function(t){ (byName[t.name]=byName[t.name]||[]).push(t); });
+  const stages=p.stages.map(function(st){ return {name:st.name,steps:st.steps.filter(function(s){ return s.name; })}; }).filter(function(st){ return st.steps.length; });
+  if(WAD_STAGE>=stages.length) WAD_STAGE=-1;
+  const shown=WAD_STAGE===-1?stages:[stages[WAD_STAGE]];
+  const ids={}; shown.forEach(function(st){ st.steps.forEach(function(s){ (byName[s.name]||[]).forEach(function(t){ ids[t.id]=s.name; }); }); });
+  const names={}; Object.keys(ids).forEach(function(k){ names[ids[k]]=1; });
+  const inR=function(d){ return d>=r.s&&d<=r.e; };
+  const per={}, perDay={}, tot={sent:0,delivered:0,read:0,clicked:0};
+  WAD.daily.forEach(function(x){ const nm=ids[x.template_id]; if(!nm) return;
+    const allR=WAD_R.day?{s:wadRange0().s,e:wadRange0().e}:r;
+    if(x.day>=allR.s&&x.day<=allR.e){ const dd=perDay[x.day]=perDay[x.day]||{sent:0,delivered:0,read:0}; dd.sent+=x.sent; dd.delivered+=x.delivered; dd.read+=x.read; }
+    if(!inR(x.day)) return;
+    const m=per[nm]=per[nm]||{sent:0,delivered:0,read:0,clicked:0,failed:0,reasons:{}};
+    ['sent','delivered','read','clicked'].forEach(function(k){ m[k]+=+x[k]||0; tot[k]+=+x[k]||0; }); });
+  let failed=0; const reasons={};
+  WAD.fail.forEach(function(f){ const d=String(f.ts).slice(0,10); if(!inR(d)||!names[f.template_name]) return; failed++;
+    const why=f.error_title||('Error '+(f.error_code||'?')); reasons[why]=(reasons[why]||0)+1;
+    const m=per[f.template_name]=per[f.template_name]||{sent:0,delivered:0,read:0,clicked:0,failed:0,reasons:{}}; m.failed++; m.reasons[why]=(m.reasons[why]||0)+1; });
+  const tracksFail=WAD.fail.length>0;
+  // range bar
+  h+='<div class="wad-bar"><div class="wad-q">'+[['7','7 days'],['30','30 days'],['month','This month'],['year','This year'],['custom','Custom']].map(function(o){ return '<button class="'+(!WAD_R.day&&WAD_R.q===o[0]?'on':'')+'" onclick="wadQ(\''+o[0]+'\')">'+o[1]+'</button>'; }).join('')+'</div>'
+    +(WAD_R.q==='custom'&&!WAD_R.day?'<input type="date" min="'+WAD_Y0+'" max="'+today+'" value="'+(WAD_R.from||WAD_Y0)+'" onchange="WAD_R.from=this.value;renderPage()"><span style="color:var(--slate)">to</span><input type="date" min="'+WAD_Y0+'" max="'+today+'" value="'+(WAD_R.to||today)+'" onchange="WAD_R.to=this.value;renderPage()">':'')
+    +(WAD_R.day?'<span class="wad-day"><i class="fa-regular fa-calendar"></i>'+esc(fmtDate(WAD_R.day))+'<button onclick="WAD_R.day=null;renderPage()" title="Back to the range"><i class="fa-solid fa-xmark"></i></button></span>':'')
+    +'<input type="date" min="'+WAD_Y0+'" max="'+today+'" value="'+(WAD_R.day||'')+'" title="One day" onchange="WAD_R.day=this.value||null;renderPage()" style="margin-left:auto"></div>';
+  // cards
+  const card=function(col,l,v,pc){ return '<div class="wad-card"><div class="l"><i style="background:'+col+'"></i>'+l+'</div><div class="v">'+v+'</div><div class="p">'+(pc||'&nbsp;')+'</div></div>'; };
+  h+='<div class="wad-cards">'+card('#64748b','Sent',wadN(tot.sent))+card('#2563eb','Delivered',wadN(tot.delivered),wadPct(tot.delivered,tot.sent)+(tot.sent?' of sent':''))
+    +card('#16a34a','Read',wadN(tot.read),wadPct(tot.read,tot.delivered)+(tot.delivered?' of delivered':''))+card('#7c3aed','Clicked',wadN(tot.clicked),wadPct(tot.clicked,tot.read)+(tot.read?' of read':''))
+    +card('#dc2626','Failed',tracksFail?wadN(failed):'NA',tracksFail?wadPct(failed,tot.sent):'Not reported to JainE')+'</div>';
+  // daily bars (by week when the range is long)
+  const R0=wadRange0(), days=[]; for(let d=new Date(R0.s+'T00:00:00');wadIso(d)<=R0.e;d=new Date(d.getTime()+864e5)) days.push(wadIso(d));
+  const wk=days.length>62, buckets=[];
+  days.forEach(function(d,i){ if(!wk||i%7===0) buckets.push({k:d,days:[]}); buckets[buckets.length-1].days.push(d); });
+  buckets.forEach(function(b){ b.sent=0; b.delivered=0; b.read=0; b.days.forEach(function(d){ const x=perDay[d]; if(x){ b.sent+=x.sent; b.delivered+=x.delivered; b.read+=x.read; } }); });
+  const mx=Math.max.apply(null,buckets.map(function(b){ return b.sent; }).concat([1]));
+  h+='<div class="wad-chart"><div class="wad-leg"><span><i style="background:#94a3b8"></i>Sent</span><span><i style="background:#2563eb"></i>Delivered</span><span><i style="background:#16a34a"></i>Read</span><span style="margin-left:auto">'+(wk?'By week':'By day')+' · click a bar for that day</span></div><div class="wad-cols">'
+    +buckets.map(function(b){ const on=WAD_R.day&&b.days.indexOf(WAD_R.day)>-1;
+      return '<div class="wad-col'+(on?' on':'')+'" title="'+esc(fmtDate(b.k))+(wk?' (week)':'')+' - Sent '+b.sent+', Delivered '+b.delivered+', Read '+b.read+'" onclick="wadDay(\''+b.k+'\')">'
+        +[['sent','#94a3b8'],['delivered','#2563eb'],['read','#16a34a']].map(function(m){ return '<i style="height:'+(b[m[0]]/mx*100)+'%;background:'+m[1]+'"></i>'; }).join('')+'</div>'; }).join('')
+    +'</div><div class="wad-ax"><span>'+esc(fmtDate(R0.s))+'</span><span>'+esc(fmtDate(R0.e))+'</span></div></div>';
+  // stage sub-tabs + template rows
+  h+='<div class="wad-stg"><button class="'+(WAD_STAGE===-1?'on':'')+'" onclick="wadStage(-1)">All stages</button>'+stages.map(function(st,i){ return '<button class="'+(WAD_STAGE===i?'on':'')+'" onclick="wadStage('+i+')">'+esc(st.name)+'</button>'; }).join('')+'</div>';
+  window._watRows=[];
+  let rows='<div class="wad-row h"><div>Day</div><div></div><div>Template</div><div style="text-align:right">Sent</div><div style="text-align:right">Delivered</div><div style="text-align:right">Read</div><div style="text-align:right">Clicked</div><div style="text-align:right">Failed</div><div></div></div>';
+  shown.forEach(function(st){
+    if(WAD_STAGE===-1) rows+='<div class="wad-row h" style="display:block;background:#fff;color:#0f172a;font-size:12px;border-top:1px solid var(--line)">'+esc(st.name)+'</div>';
+    st.steps.forEach(function(s){ const m=per[s.name]||{sent:0,delivered:0,read:0,clicked:0,failed:0,reasons:{}}, meta=byName[s.name]||[];
+      const pic=[s.attach].concat(s.preview||[]).filter(function(u){ return u&&/\.(jpe?g|png|webp|gif)(\?|$)/i.test(u); })[0], k=watKind(s.type);
+      const pi=window._watRows.push({p:p,st:st,s:s,m:m,meta:meta,tracksFail:tracksFail,range:r})-1;
+      rows+='<div class="wad-row" onclick="watPop('+pi+')"><div class="d" style="font-size:12px;color:var(--slate);font-weight:600">'+(s.day==null?'':'Day <b style="color:#0f172a;font-size:15px">'+s.day+'</b>')+'</div>'
+        +'<div class="th">'+(pic?'<img src="'+esc(pic)+'" alt="" loading="lazy">':'<i class="'+k[0]+'"></i>')+'</div>'
+        +'<div><div class="t">'+esc(watTitle(s))+'</div><div class="id">'+esc(s.name)+(meta.length?'':' · not found at Meta')+'</div></div>'
+        +'<div class="nums"><div class="n" data-l="Sent">'+wadN(m.sent)+'</div><div class="n" data-l="Delivered">'+wadN(m.delivered)+'<small>'+wadPct(m.delivered,m.sent)+'</small></div><div class="n" data-l="Read">'+wadN(m.read)+'<small>'+wadPct(m.read,m.delivered)+'</small></div>'
+        +'<div class="n" data-l="Clicked">'+wadN(m.clicked)+'<small>'+wadPct(m.clicked,m.read)+'</small></div><div class="n'+(m.failed?' bad':'')+'" data-l="Failed">'+(tracksFail?wadN(m.failed):'NA')+'</div></div>'
+        +'<i class="fa-solid fa-chevron-right cv"></i></div>';
+    });
+  });
+  h+='<div class="wat-list">'+rows+'</div>';
+  if(Object.keys(reasons).length) h+='<div class="card card-pad wad-fail" style="margin-top:14px"><div class="lbl" style="font-weight:700;margin-bottom:6px">Why messages failed</div>'+Object.keys(reasons).sort(function(a,b){ return reasons[b]-reasons[a]; }).map(function(w){ return '<div class="r"><span>'+esc(w)+'</span><b>'+reasons[w]+'</b></div>'; }).join('')+'</div>';
+  return h;
+}
+// the range the bars cover - the chosen range even while one day is picked
+function wadRange0(){ const d=WAD_R.day; WAD_R.day=null; const r=wadRange(); WAD_R.day=d; return r; }
+window.wadQ=function(q){ WAD_R.q=q; WAD_R.day=null; renderPage(); };
+window.wadDay=function(d){ WAD_R.day=WAD_R.day===d?null:d; renderPage(); };
+window.wadStage=function(i){ WAD_STAGE=i; renderPage(); };
+
+
+/* ---------------- KNOCKING (17 Nov 2026, Ayush: "these are Knocking Messages - I want them in a different tab, they will
+   not be included in the Deliveries tab; for these 8 messages I want the Sent, Delivered, Failed, Read and how many
+   clicked the different buttons offered as CTAs"). The ask_question* templates of a project's WhatsApp account, laid out
+   the way they run: the first knock, then what goes to people who said Yes, who said No, and who did not reply. Each shows
+   Sent, Delivered, Not delivered, Read and every button with its clicks. Figures: camp.wa_template_daily (Meta's template
+   analytics, kept by Meta for ~90 days; read nightly). Meta does not report failed sends: "Not delivered" = sent minus
+   delivered (failed, or not delivered yet). Phone-call buttons are not counted by Meta - they say so. */
+let KN=null, KN_ACC=null;
+const KN_RE=/^ask_question/i;
+async function knLoad(){
+  const C=sb.schema('camp');
+  const all=async function(q){ const out=[]; for(let i=0;i<60;i++){ const r=await q().range(i*1000,i*1000+999); if(r.error) break; out.push.apply(out,r.data||[]); if(!r.data||r.data.length<1000) break; } return out; };
+  const got=await Promise.all([
+    C.from('wa_accounts').select('id,name,phones').then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; }),
+    all(function(){ return C.from('wa_templates').select('id,waba_id,name,status,category,components').ilike('name','ask_question%').order('id'); })
+  ]);
+  const tpl=got[1]||[], ids=tpl.map(function(t){ return t.id; });
+  let daily=[];
+  for(let i=0;i<ids.length;i+=100){ const part=ids.slice(i,i+100);
+    daily=daily.concat(await all(function(){ return C.from('wa_template_daily').select('template_id,day,sent,delivered,read,clicked,clicks').in('template_id',part).gte('day',WAD_Y0).order('day'); })); }
+  KN={acc:got[0],tpl:tpl,daily:daily};
+}
+function knBranch(n){ n=String(n).toLowerCase(); return /_yes_/.test(n)?1:/_no_/.test(n)?2:/_silent_/.test(n)?3:0; }
+function knStep(n){ const m=String(n).match(/q(\d+)/i); return m?+m[1]:0; }
+function knLabel(n){ const b=['First knock','Said Yes','Said No','No reply'][knBranch(n)], q=knStep(n); return knBranch(n)===0?'First knock':b+(q?' · Q'+q:''); }
+function knBody(t){ const c=(t.components||[]).filter(function(x){ return x.type==='BODY'; })[0]; return String((c&&c.text)||''); }
+function knButtons(t){ const c=(t.components||[]).filter(function(x){ return x.type==='BUTTONS'; })[0]; return ((c&&c.buttons)||[]).map(function(b){ return {text:b.text,type:b.type}; }); }
+function watKnocking(){
+  if(!KN) return '<div class="loader"><div class="spin"></div></div>';
+  let h=WAD_CSS+'<style>'
+    +'.wad-cards.kn-cards{grid-template-columns:repeat(4,minmax(0,1fr))}@media(max-width:720px){.wad-cards.kn-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+    +'.kn-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:start}'
+    +'@media(max-width:1100px){.kn-board{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:620px){.kn-board{grid-template-columns:1fr}}'
+    +'.kn-col h4{margin:0 0 8px;font-size:13px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:7px}.kn-col h4 i{width:9px;height:9px;border-radius:50%}'
+    +'.kn-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px 14px;margin:0 0 10px;cursor:pointer}.kn-card:hover{border-color:#94a3b8}'
+    +'.kn-card .nm{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;color:#475569;background:#f1f5f9;border-radius:6px;padding:2px 7px;display:inline-block;margin-bottom:6px}'
+    +'.kn-card .tx{font-size:13px;color:#0f172a;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:10px}'
+    +'.kn-n{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-bottom:10px}'
+    +'.kn-n div{background:#f8fafc;border-radius:8px;padding:6px 7px;font-size:10.5px;color:var(--slate);font-weight:600}.kn-n b{display:block;font-size:16px;color:#0f172a}'
+    +'.kn-b{display:flex;flex-wrap:wrap;gap:6px}.kn-b span{border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600}'
+    +'.kn-b span.off{border-color:var(--line);background:#f8fafc;color:#94a3b8;font-weight:500}'
+    +'.kn-none{color:#94a3b8;font-size:12.5px;padding:6px 2px}'
+    +'</style>';
+  if(KN.acc===null||!KN.tpl.length) return h+'<div class="wad-empty"><i class="fa-brands fa-whatsapp" style="font-size:22px;color:#16a34a"></i><div><b style="color:#0f172a">The knocking figures are not read yet.</b><br>They show here after the next read from Meta.</div></div>';
+  // ANANTA ONLY (17 Nov 2026, Ayush: "there is only for Ananta") - knocking runs on the Ananta number alone; other accounts
+  // carry templates of the same names but they are not shown here
+  const accName=function(id){ return ((KN.acc||[]).filter(function(a){ return a.id===id; })[0]||{}).name||id; };
+  const accIds=[...new Set(KN.tpl.map(function(t){ return t.waba_id; }))].filter(function(id){ return /ananta/i.test(accName(id)); });
+  KN_ACC=accIds[0]||null;
+  if(!KN_ACC) return h+'<div class="wad-empty"><div>No knocking templates found on the Ananta number.</div></div>';
+  h+='<div class="wat-top"><div style="font-size:15px;font-weight:700;color:#0f172a"><i class="fa-brands fa-whatsapp" style="color:#16a34a"></i> '+esc(accName(KN_ACC))+' <span style="font-weight:500;color:var(--slate);font-size:13px">· knocking messages</span></div></div>';
+  const r=wadRange(), today=wadIso(new Date());
+  h+='<div class="wad-bar"><div class="wad-q">'+[['7','7 days'],['30','30 days'],['month','This month'],['year','This year'],['custom','Custom']].map(function(o){ return '<button class="'+(!WAD_R.day&&WAD_R.q===o[0]?'on':'')+'" onclick="wadQ(\''+o[0]+'\')">'+o[1]+'</button>'; }).join('')+'</div>'
+    +(WAD_R.q==='custom'&&!WAD_R.day?'<input type="date" min="'+WAD_Y0+'" max="'+today+'" value="'+(WAD_R.from||WAD_Y0)+'" onchange="WAD_R.from=this.value;renderPage()"><span style="color:var(--slate)">to</span><input type="date" min="'+WAD_Y0+'" max="'+today+'" value="'+(WAD_R.to||today)+'" onchange="WAD_R.to=this.value;renderPage()">':'')
+    +(WAD_R.day?'<span class="wad-day"><i class="fa-regular fa-calendar"></i>'+esc(fmtDate(WAD_R.day))+'<button onclick="WAD_R.day=null;renderPage()"><i class="fa-solid fa-xmark"></i></button></span>':'')
+    +'<input type="date" min="'+WAD_Y0+'" max="'+today+'" value="'+(WAD_R.day||'')+'" title="One day" onchange="WAD_R.day=this.value||null;renderPage()" style="margin-left:auto"></div>';
+  const tpl=KN.tpl.filter(function(t){ return t.waba_id===KN_ACC; });
+  const per={}, tot={sent:0,delivered:0,read:0,clicked:0};
+  KN.daily.forEach(function(x){ if(x.day<r.s||x.day>r.e) return; const t=tpl.filter(function(z){ return z.id===x.template_id; })[0]; if(!t) return;
+    const m=per[t.id]=per[t.id]||{sent:0,delivered:0,read:0,clicked:0,btn:{}};
+    ['sent','delivered','read','clicked'].forEach(function(k){ m[k]+=+x[k]||0; tot[k]+=+x[k]||0; });
+    (x.clicks||[]).forEach(function(c){ const b=c.button_content||c.type||'Button'; m.btn[b]=(m.btn[b]||0)+(+c.count||0); }); });
+  const card=function(col,l,v,pc,ttl){ return '<div class="wad-card"'+(ttl?' title="'+esc(ttl)+'"':'')+'><div class="l"><i style="background:'+col+'"></i>'+l+'</div><div class="v">'+v+'</div><div class="p">'+(pc||'&nbsp;')+'</div></div>'; };
+  const nd=Math.max(0,tot.sent-tot.delivered);
+  // 17 Nov 2026 (Ayush: "remove button clicks"): no total-clicks card - the clicks stay per button on each template
+  h+='<div class="wad-cards kn-cards">'+card('#64748b','Sent',wadN(tot.sent))+card('#2563eb','Delivered',wadN(tot.delivered),wadPct(tot.delivered,tot.sent)+(tot.sent?' of sent':''))
+    +card('#dc2626','Not delivered',wadN(nd),wadPct(nd,tot.sent)+(tot.sent?' of sent':''),'Meta does not report failed messages - this is sent minus delivered (failed, or not delivered yet)')
+    +card('#16a34a','Read',wadN(tot.read),wadPct(tot.read,tot.delivered)+(tot.delivered?' of delivered':''))+'</div>';
+  window._watRows=[];
+  const cols=[['First knock','#0f172a'],['Said Yes','#16a34a'],['Said No','#dc2626'],['No reply','#d97706']];
+  h+='<div class="kn-board">'+cols.map(function(c,bi){
+    const list=tpl.filter(function(t){ return knBranch(t.name)===bi; }).sort(function(a,b){ return knStep(a.name)-knStep(b.name)||a.name.localeCompare(b.name); });
+    return '<div class="kn-col"><h4><i style="background:'+c[1]+'"></i>'+c[0]+'</h4>'+(list.length?list.map(function(t){
+      const m=per[t.id]||{sent:0,delivered:0,read:0,clicked:0,btn:{}}, btns=knButtons(t), body=knBody(t);
+      const s={text:body+(btns.length?'\nCTA - '+btns.map(function(b){ return b.text; }).join(' & '):''),name:t.name,day:null,status:'',type:'text'};
+      const pi=window._watRows.push({p:{label:accName(KN_ACC)},st:{name:knLabel(t.name)},s:s,meta:[t],m:{sent:m.sent,delivered:m.delivered,read:m.read,clicked:m.clicked,failed:Math.max(0,m.sent-m.delivered),reasons:{}},tracksFail:true,failLabel:'Not delivered',btns:btns,btnCount:m.btn,range:r})-1;
+      return '<div class="kn-card" onclick="watPop('+pi+')"><span class="nm">'+esc(t.name)+'</span><div class="tx">'+esc(watTitle({text:body}))+'</div>'
+        +'<div class="kn-n"><div>Sent<b>'+wadN(m.sent)+'</b></div><div>Delivered<b>'+wadN(m.delivered)+'</b></div><div title="Sent minus delivered">Not deliv.<b>'+wadN(Math.max(0,m.sent-m.delivered))+'</b></div><div>Read<b>'+wadN(m.read)+'</b></div></div>'
+        +'<div class="kn-b">'+(btns.length?btns.map(function(b){ const ph=/PHONE/i.test(b.type); return ph?'<span class="off" title="Meta does not count clicks on call buttons">'+esc(b.text)+' · not counted</span>':'<span>'+esc(b.text)+' · '+wadN(m.btn[b.text]||0)+'</span>'; }).join(''):'<span class="off">No buttons</span>')+'</div></div>';
+    }).join(''):'<div class="kn-none">None in this account</div>')+'</div>';
+  }).join('')+'</div>';
+  return h;
+}
+window.knPick=function(id){ KN_ACC=id; renderPage(); };

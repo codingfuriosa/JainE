@@ -8,7 +8,7 @@
 //   'backfill' (up to 2,000 posts, Page totals back two years, reels 150 a run - pass back
 //   body.reels_after = the reels_next it returns until it comes back empty).
 //
-// THE KEY. The saved system-user token (META_PAGES_TOKEN, else META_SYSTEM_TOKEN / META_ACCESS_TOKEN).
+// THE KEY. META_WHATSAPP_TOKEN (17 Nov 2026 - has instagram_basic / instagram_manage_insights), else META_PAGES_TOKEN, else META_SYSTEM_TOKEN / META_ACCESS_TOKEN).
 // Page tokens come from /me/accounts on every run.
 //
 // WHAT META GIVES - probed name by name on the live Jain Group Page on 6 Nov 2026 (meta-metric-probe):
@@ -233,15 +233,17 @@ Deno.serve(async (req) => {
     return j({ ok: true, ...rep0 });
   }
   const doPage = !only || only === "page", doReels = !only || only === "reels", doPosts = !only || only === "posts";
+  const doIg = doPosts || only === "instagram";   // only:"instagram" = Instagram on its own (first full read, 17 Nov)
   const postPages = backfill ? 10 : 2, reelCap = backfill ? 150 : 50;
   const rep: any = { mode: backfill ? "backfill" : "daily", pages: 0, posts: 0, reels: 0, ig: 0, page_days: 0,
     skipped_reel_copies: 0, reels_kept_from_before: 0, reels_next: null, posts_next: null, errors: [] as string[] };
   const setState = (o: any) => camp.from("social_sync_state").update({ ...o, updated_at: new Date().toISOString() }).eq("id", 1);
 
-  const T = Deno.env.get("META_PAGES_TOKEN") || Deno.env.get("META_SYSTEM_TOKEN") || Deno.env.get("META_ACCESS_TOKEN");
+  const T = Deno.env.get("META_WHATSAPP_TOKEN") || Deno.env.get("META_PAGES_TOKEN") || Deno.env.get("META_SYSTEM_TOKEN") || Deno.env.get("META_ACCESS_TOKEN");
   if (!T) { await setState({ last_error: "No Meta key saved on the server", last_error_at: new Date().toISOString() }); return j({ error: "No Meta key saved on the server" }, 500); }
   const pg: any = await gget(G + "/me/accounts?fields=id,name,username,access_token,followers_count,fan_count,picture{url},"
-    + "instagram_business_account{id,username,followers_count,follows_count,media_count,profile_picture_url}&limit=50&access_token=" + encodeURIComponent(T));
+    + "instagram_business_account{id,username,followers_count,follows_count,media_count,profile_picture_url},"
+    + "connected_instagram_account{id,username,followers_count,follows_count,media_count,profile_picture_url}&limit=50&access_token=" + encodeURIComponent(T));
   if (pg.err || !(pg.data || []).length) {
     const msg = pg.err ? "Meta refused the saved key: " + pg.err : "The saved Meta key sees no Pages";
     await setState({ last_error: msg, last_error_at: new Date().toISOString(), last_trigger: trigger });
@@ -255,7 +257,7 @@ Deno.serve(async (req) => {
   for (const P of pg.data) {
     if (!P.access_token) { rep.errors.push(P.name + ": no Page token"); continue; }
     const pt = encodeURIComponent(P.access_token);
-    const ig = P.instagram_business_account;
+    const ig = P.instagram_business_account || P.connected_instagram_account;   // 17 Nov: Meta shows the link only as connected_instagram_account
     await camp.from("social_pages").upsert({ id: P.id, network: "facebook", name: P.name, username: P.username || null,
       picture: P.picture?.data?.url || null, followers: num(P.followers_count), fan_count: num(P.fan_count),
       ig_id: ig?.id || null, ig_username: ig?.username || null, updated_at: new Date().toISOString() }, { onConflict: "id" });
@@ -402,13 +404,13 @@ Deno.serve(async (req) => {
     }
 
     // ---- Instagram (only once it is linked to this Page) ----
-    if (ig?.id && doPosts && !body.reels_after && !body.posts_after) {
+    if (ig?.id && doIg && !body.reels_after && !body.posts_after) {
       await camp.from("social_pages").upsert({ id: ig.id, network: "instagram", name: "@" + (ig.username || ""), username: ig.username || null,
         picture: ig.profile_picture_url || null, followers: num(ig.followers_count), updated_at: new Date().toISOString() }, { onConflict: "id" });
       const iurl = (m: string) => G + "/" + ig.id + "/media?limit=50&fields=id,caption,media_type,media_product_type,media_url,thumbnail_url,"
-        + "permalink,timestamp,like_count,comments_count,insights.metric(" + m + ")&access_token=" + pt;
-      let im: any = await gall(iurl(IG_METRICS_EXT), backfill ? 20 : 2);
-      if (im.err) { rep.errors.push("instagram (retried with the base metrics): " + im.err); im = await gall(iurl(IG_METRICS_BASE), backfill ? 20 : 2); }
+        + "permalink,timestamp,like_count,comments_count,insights.metric(" + m + ")&access_token=" + encodeURIComponent(T);   // NOT the Page token: with it Meta answers reach and total_interactions as 0 for every post (probed 17 Nov)
+      let im: any = await gall(iurl(IG_METRICS_EXT), backfill ? 40 : 2);
+      if (im.err) { rep.errors.push("instagram (retried with the base metrics): " + im.err); im = await gall(iurl(IG_METRICS_BASE), backfill ? 40 : 2); }
       if (im.err) rep.errors.push("instagram: " + im.err);
       const irows = (im.data || []).map((m: any) => {
         const M = nested(m);
@@ -430,7 +432,7 @@ Deno.serve(async (req) => {
   }
 
   // new posts get their name and content type in the same run
-  if (!only || only === "posts") await labelPosts(camp, backfill ? 0 : 120, rep);
+  if (!only || only === "posts" || only === "instagram") await labelPosts(camp, backfill ? 0 : 120, rep);
 
   await setState({ last_sync_at: new Date().toISOString(), last_trigger: trigger, last_result: rep,
     last_error: rep.errors.length ? rep.errors.slice(0, 3).join(" | ") : null,

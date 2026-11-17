@@ -46,6 +46,28 @@ const CA_CSS='<style>'
   +'.ca-sec .ob-ad .m{grid-template-columns:auto 1fr auto 1fr;gap:3px 8px;font-size:11.5px;margin-top:auto}.ca-sec .ob-ad .m span{color:var(--slate)}.ca-sec .ob-ad .m b{text-align:right;white-space:nowrap}'
   +'.ob-ad .pic{position:relative}.ob-ad .pic .ca-play{display:none;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;align-items:center;justify-content:center;font-size:17px;padding-left:3px;pointer-events:none}.ob-ad .pic.ca-isvid .ca-play{display:flex}'
   +'.ca-warn{margin:-4px 0 12px;padding:9px 12px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:12.5px}'
+  /* PHONE (17 Nov 2026, Ayush: "in phone nothing is responsive"). The controls wrap onto lines of their own; in the
+     tables the name column stays pinned on the left while the figures scroll sideways under it, with a narrower
+     name, smaller indents and tighter cells; ad cards go one or two to a line; the ad popup fits the screen. */
+  +'@media(max-width:760px){'
+  +'.ob-bar{gap:8px}.ob-bar>select,.ob-bar>.comp-sel{flex:1 1 140px;min-width:0}.ob-bar input[type=date]{flex:1 1 120px;min-width:0}'
+  +'.ob-bar>span[style*="margin-left:auto"]{margin-left:0!important;width:100%;justify-content:space-between}'
+  +'.ca-stg{flex:1 1 100%}.ca-st{flex:1;justify-content:center}'
+  +'.ca-tbl{font-size:12px}.ca-tbl th{padding:8px 8px;font-size:10px}.ca-tbl td{padding:9px 8px}'
+  +'.ca-tbl th:first-child,.ca-tbl td:first-child{position:sticky;left:0;z-index:1;background:#fff;box-shadow:1px 0 0 #e2e8f0}'
+  +'.ca-tbl th:first-child{background:#f8fafc}.ca-tbl tr.ca-l1 td:first-child{background:#fcfcfd}.ca-tbl tr.ca-l2 td:first-child{background:#fafbfc}'
+  +'.ca-tbl tr.ca-l3 td:first-child{background:#f8f9fb}.ca-tbl tr.ca-on>td:first-child{background:#eef4ff}.ca-tbl tr.ca-tot td:first-child{background:#f1f5f9}'
+  +'.ca-tbl td:first-child{white-space:normal;min-width:130px;max-width:170px}'
+  +'.ca-tbl tr.ca-l1 td:first-child{padding-left:16px}.ca-tbl tr.ca-l2 td:first-child,.ca-tbl tr.ca-l2.ca-none td:first-child{padding-left:26px;max-width:170px}'
+  +'.ca-tbl tr.ca-l3 td:first-child,.ca-tbl tr.ca-l3.ca-none td:first-child{padding-left:36px;max-width:170px}'
+  +'.ca-sec .ca-tbl td.ca-nm,.ca-sec .ca-tbl th.ca-nm{width:170px;min-width:150px;max-width:170px}'
+  +'.ca-sec .ca-tbl tr.ca-l0 td:first-child,.ca-sec .ca-tbl tr.ca-l1 td:first-child{min-width:150px}'
+  +'.ca-nmx{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}'
+  +'.ca-tbl .ca-caret{margin-right:4px}'
+  +'.ca-sec .ob-ads{padding:0 8px 8px}'
+  +'.modal-body div[style*="height:360px"]{height:240px!important}'
+  +'}'
+  +'@media(max-width:520px){.ob-ads{grid-template-columns:1fr!important}}'
   +'</style>';
 
 // Leads that can honestly be added up: Google conversions, and Facebook results of lead / chat campaigns only.
@@ -78,7 +100,7 @@ function caStatusApply(){
   CA_D.bud=bud;
   const waLive={}; Object.keys(E).forEach(function(k){ const x=E[k]; if(k.indexOf('adset:')!==0||!x||!/CONVERSATIONS|MESSAGING/.test(String(x.objective||''))) return;
     const c=E['campaign:'+x.campaign_id]; const a=c&&CA_D.acc['meta:'+c.account_id]; if(a&&caLive(c.status)) waLive[a.project]=1; });
-  const okR=function(x){ if(CA_ST==='both') return true; if(x.wa) return caStOk(!!waLive[x.project]); return !!E['campaign:'+x.campaign_id]&&okC(x.campaign_id); };
+  const okR=function(x){ if(CA_ST==='both') return true; if(x.untied) return false; if(x.wa) return caStOk(!!waLive[x.project]); return !!E['campaign:'+x.campaign_id]&&okC(x.campaign_id); };
   CA_D.crm=R.crm?{cur:R.crm.cur.filter(okR),prev:R.crm.prev.filter(okR)}:null;
   CA_D.crmSet=R.crmSet?{cur:R.crmSet.cur.filter(okR),prev:R.crmSet.prev.filter(okR)}:null;
 }
@@ -137,8 +159,12 @@ async function caView(host){
   caTabsPaint(); await caShowTab();
 }
 function caTabsPaint(){ const t=$('caTabs'); if(!t) return;
-  t.innerHTML=[['overview','Overview'],['analytics','Analytics']].map(function(x){ return '<button class="ca-tab'+(CA_TAB===x[0]?' on':'')+'" onclick="caTab(\''+x[0]+'\')">'+x[1]+'</button>'; }).join(''); }
-window.caTab=function(t){ if(t===CA_TAB) return; CA_TAB=t; caTabsPaint(); caShowTab(); };
+  // 17 Nov 2026 (Ayush): Overview renamed Campaigns; a new Ads tab - the same page, read from the ad upwards
+  t.innerHTML=[['overview','Campaigns'],['ads','Ads'],['analytics','Analytics']].map(function(x){ return '<button class="ca-tab'+(CA_TAB===x[0]?' on':'')+'" onclick="caTab(\''+x[0]+'\')">'+x[1]+'</button>'; }).join(''); }
+window.caTab=function(t){ if(t===CA_TAB) return;
+  // Campaigns <-> Ads share the loaded data: only the table is drawn again
+  if(t!=='analytics'&&CA_TAB!=='analytics'&&CA_D&&$('caBody')){ CA_TAB=t; caTabsPaint(); caPaint(); return; }
+  CA_TAB=t; caTabsPaint(); caShowTab(); };
 async function caShowTab(){
   const m=$('caMain'); if(!m) return;
   if(CA_TAB==='analytics') return maView(m);
@@ -246,8 +272,13 @@ async function caLoad(){
      together, which can only go on the project and its Facebook row. "Others" (no campaign) is left out, as for Google. */
   const mCamp={}; res[1].forEach(function(e){ const a=acc['meta:'+e.account_id]; if(e.kind==='campaign') mCamp[String(e.id)]=a?a.project:1; });
   const crmTag=function(rows){ return (rows||[]).map(function(x){
-      const fb=x.campaign_type==='facebook', id=String(x.campaign_id), own=fb?mCamp[id]:gCamp[id], wa=fb&&/^whatsapp/i.test(id);
-      if(!own&&!wa) return null;
+      const fb=x.campaign_type==='facebook', id=String(x.campaign_id==null?'':x.campaign_id).trim(), own=fb?mCamp[id]:gCamp[id], wa=fb&&/^whatsapp/i.test(id);
+      /* NOT TIED TO A CAMPAIGN (17 Nov 2026, Ayush: "the CRM leads are not matching the CRM"). Until now a CRM lead counted only
+         when the CRM had tagged it to one of our ad campaigns - for 1-16 Nov that dropped 150 of 293 Google leads (blank, "Call",
+         "1", junk ids) and 165 of 2,508 Facebook ones ("Others"). They now count on the project and Google / Facebook rows (so
+         those match the CRM) and sit in a row of their own in the platform section; campaign, ad set and ad rows are unchanged. */
+      if(!own&&!wa) return Object.assign({},x,{src:fb?'facebook':'google',wa:false,untied:true,
+        utype:id===''?'No campaign':/^call$/i.test(id)?'Call':id==='-1'?'Others':'Other tags',project:projN[pn(x.business_unit)]||x.business_unit});
       const o=Object.assign({},x,{src:fb?'facebook':'google',wa:wa});
       o.project=own&&own!==1?own:(projN[pn(x.business_unit)]||x.business_unit); return o; }).filter(Boolean); };
   CA_D.crm=res[11]==null?null:{cur:crmTag(res[11]),prev:crmTag(res[12])};
@@ -318,21 +349,21 @@ function caPaint(){
   /* CRM COLUMNS (10 Nov 2026, Ayush): beside the platforms' own leads, the CRM's count of the Google leads left after
      its filtering, so the two can be compared - and how far they got: QL% (qualified of CRM leads), CPQL (Google spend
      per qualified lead), SV (site visits), QL to SV %, Booked, Lost. Google only: the CRM has no Facebook figure yet. */
-  const CR=CA_D.crm, NCRM=8;
+  const CR=CA_D.crm, NCRM=9;   // 17 Nov 2026: + CRM CPL (spend per CRM lead), beside the platform's own CPL
   const crmAgg=function(list,pred){ const t={leads:0,ql:0,sv:0,bk:0,lost:0}; (list||[]).forEach(function(x){ if(!pred(x)) return;
     t.leads+=+x.leads||0; t.ql+=+x.qualified||0; t.sv+=+x.site_visited||0; t.bk+=+x.booked||0; t.lost+=+x.lost||0; }); return t; };
-  const crmT=function(a,spend){ return {leads:a.leads,ql:a.ql,qlp:a.leads?a.ql/a.leads*100:null,cpql:a.ql&&spend>0?spend/a.ql:null,sv:a.sv,svp:a.ql?a.sv/a.ql*100:null,bk:a.bk,lost:a.lost}; };
+  const crmT=function(a,spend){ return {leads:a.leads,cplc:a.leads&&spend>0?spend/a.leads:null,ql:a.ql,qlp:a.leads?a.ql/a.leads*100:null,cpql:a.ql&&spend>0?spend/a.ql:null,sv:a.sv,svp:a.ql?a.sv/a.ql*100:null,bk:a.bk,lost:a.lost}; };
   // the spend the CRM's leads are set against: Google's, Facebook's, or both (src empty)
   const gSpend=function(list,pred,src){ const plat=src==='facebook'?'meta':src; return (list||[]).reduce(function(t,c){ return (!plat||c.platform===plat)&&pred(c)?t+(+c.spend||0):t; },0); };
   const pc0=function(x){ return x==null||!isFinite(x)?'—':x.toFixed(0)+'%'; };
   const crmPart=function(x,which){
     if(!x) return '';
-    const n={a:5,b:1,c:2}[which];
+    const n={a:5,b:2,c:2}[which];
     if(!CR||x.why){ const why=!CR?'CRM figures are read at night - they show from the next morning':x.why; let h='';
       for(let i=0;i<n;i++) h+='<td class="ca-crm" title="'+esc(why)+'"><span style="color:#94a3b8">—</span></td>'; return h; }
     const t=x.t, w=x.w||{};
     const h=which==='a'?cell(t.leads,w.leads,obNum,true,true)+cell(t.ql,w.ql,obNum,true)+cell(t.sv,w.sv,obNum,true)+cell(t.bk,w.bk,obNum,true)+cell(t.lost,w.lost,obNum,false)
-      :which==='b'?cell(t.cpql,w.cpql,obMoney,false):cell(t.qlp,w.qlp,pc0,true)+cell(t.svp,w.svp,pc0,true);
+      :which==='b'?cell(t.cplc,w.cplc,obMoney,false)+cell(t.cpql,w.cpql,obMoney,false):cell(t.qlp,w.qlp,pc0,true)+cell(t.svp,w.svp,pc0,true);
     return h.replace(/<td>/g,'<td class="ca-crm">'); };
   // sp: which ad rows' spend goes against these leads, when it is not the same test (a WhatsApp campaign)
   const crmX=function(pred,src,sp){ if(!CR) return {}; if(src==='facebook'&&!CR.cur.some(function(x){ return x.src==='facebook'; })) return {why:'No Facebook figures from the CRM yet for these dates - they are read at night and show from the next morning'}; const p2=function(x){ return (!src||x.src===src)&&pred(x); }, ps=sp||pred;
@@ -350,7 +381,7 @@ function caPaint(){
   const ct=function(t,title){ return '<th class="ca-crm" title="'+esc(title)+'">'+t+'</th>'; };
   const head=function(name,res,cpl,crm){ return '<tr><th class="ca-nm">'+name+'</th><th title="Daily budget as set today">Daily budget</th><th>Spend</th><th>'+res+'</th>'
     +(crm?ct('CRM leads','Google and Facebook leads in the CRM after its filtering')+ct('QL','Qualified leads (CRM)')+ct('SV','Site visits (CRM)')+ct('Booked','Booked (CRM)')+ct('Lost','Lost (CRM)'):'')
-    +'<th>'+cpl+'</th>'+(crm?ct('CPQL','Spend per qualified lead (CRM)'):'')+'<th>Clicks</th><th>CTR</th>'
+    +'<th>'+cpl+'</th>'+(crm?ct('CRM CPL','Spend per CRM lead - the cost per lead counted on the CRM\x27s leads, not the platform\x27s')+ct('CPQL','Spend per qualified lead (CRM)'):'')+'<th>Clicks</th><th>CTR</th>'
     +(crm?ct('QL%','Qualified leads as a share of CRM leads')+ct('QL to SV %','Site visits as a share of qualified leads'):'')+'</tr>'; };
   // a name never wraps: it stops at the column's width with "...", the whole name on hover
   const nm=function(lead,text){ return '<td class="ca-nm"><span class="ca-nmx" title="'+esc(text)+'">'+lead+esc(text)+'</span></td>'; };
@@ -403,6 +434,13 @@ function caPaint(){
         });
       });
     });
+    // CRM leads of this project and platform that the CRM did not tie to any of our campaigns (see crmTag) - their own row
+    { const srcU=pl==='google'?'google':'facebook', ut=((CA_D.crm&&CA_D.crm.cur)||[]).filter(function(x){ return x.untied&&x.project===p&&x.src===srcU; });
+      if(ut.length){ const by={}; ut.forEach(function(x){ by[x.utype]=(by[x.utype]||0)+(+x.leads||0); });
+        const dash='<span style="color:#94a3b8">—</span>';
+        sec+='<tr class="ca-l0" title="Leads the CRM has for '+esc(p)+' from '+W.name+' without one of our ad campaigns on them - counted in the project and '+W.name+' rows, not under any campaign"><td class="ca-nm"><span class="ca-nmx" style="font-style:italic"><i class="fa-solid fa-link-slash" style="color:#94a3b8;margin-right:6px"></i>Not tied to a campaign</span><div class="ca-sub">'
+          +esc(Object.keys(by).sort(function(a,b){ return by[b]-by[a]; }).map(function(k){ return k+' '+by[k]; }).join(' · '))+'</div></td>'+money(null)
+          +cols({spend:null,ln:null,pl:pl,lead:dash,cpl:null,clicks:null,ctr:null},{},crmX(function(x){ return x.untied&&x.project===p; },srcU,function(){ return false; }))+'</tr>'; } }
     // the total counts leads only (Google conversions, Facebook lead / chat campaigns), as reach or engagement results cannot be added to them
     const ids={}; camps.forEach(function(c){ ids[c.campaign_id]=1; });
     const tot=camps.length?'<tfoot><tr class="ca-tot"><td>Total · '+camps.length+' campaign'+(camps.length===1?'':'s')+(pl==='meta'?' <span style="font-weight:500;color:var(--slate);font-size:11px">(leads only)</span>':'')+'</td>'
@@ -417,6 +455,68 @@ function caPaint(){
   const shown=CA.proj==='all'?P:[CA.proj];
   const B=CA_D.bud||{};
   const budV=function(p,pl){ return pl?B[p+'|'+pl]:(B[p+'|google']==null&&B[p+'|meta']==null?null:(B[p+'|google']||0)+(B[p+'|meta']||0)); };
+  /* THE ADS TAB (17 Nov 2026, Ayush: "the same thing as Overview ... I want ascending hierarchy in Ads", "project wise like in
+     Campaigns - Projects, Google or Facebook, then in the table below Ads, Ad Sets, Campaigns", then "more than one ad is
+     repeated - the one ad will show the campaigns it's in and, going further, the ad sets it's in"). The projects table is
+     the same as on Campaigns; Google / Facebook opens the section below. There every ad is ONE row - copies of it (an ad
+     copied into another campaign or ad set gets a new id but keeps its name) are counted together - and its arrow opens
+     the campaigns it runs in, each campaign the ad sets / ad groups it runs in there. Every row shows that row's own
+     figures, with the same columns, budgets, CRM and Active / Inactive / Both. The picture opens the ad. */
+  const adsTree=function(p,pl){
+    const W=CA_PLAT[pl];
+    const top='<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p);
+    if(CA_D.adsLoading) return top+'</div><div style="padding:16px;color:var(--slate)"><i class="fa-solid fa-spinner fa-spin"></i> Loading ads…</div></div>';
+    const AX=CA.ax=CA.ax||{ad:null,camp:null}, ashow=CA.adShow||50;
+    const keyOf=function(a){ return a.platform+':'+String((E['ad:'+a.ad_id]||{}).name||a.ad_id).trim().toLowerCase().replace(/\s+/g,' '); };
+    const live=CA_D.ads.filter(function(a){ return a.project===p&&a.platform===pl&&caAdOk(a)&&((+a.spend||0)>0||(+a.impressions||0)>0||(+a.clicks||0)>0||(+a.results||0)>0); });
+    const grp=function(list){ const by={}, out=[]; list.forEach(function(a){ const k=keyOf(a); let m=by[k];
+      if(!m){ m=by[k]={k:k,platform:a.platform,ad_id:a.ad_id,project:a.project,campaign_id:a.campaign_id,adset_id:null,spend:0,results:null,clicks:0,impressions:0,rows:[],ids:{},top:0}; out.push(m); }
+      m.spend+=+a.spend||0; m.clicks+=+a.clicks||0; m.impressions+=+a.impressions||0; if(a.results!=null) m.results=(m.results==null?0:m.results)+(+a.results);
+      m.rows.push(a); m.ids[String(a.ad_id)]=1; if((+a.spend||0)>m.top){ m.top=+a.spend||0; m.ad_id=a.ad_id; m.campaign_id=a.campaign_id; } }); return {by:by,out:out}; };
+    const G=grp(live), ads=G.out.sort(function(x,y){ return y.spend-x.spend; }), W2=cmpOn?grp((CA_D.cmp&&CA_D.cmp.ads)||[]).by:{};
+    // the CRM's figures of every copy of the ad together
+    const crmIds=function(ids,sp,spw){ if(!CS) return crmNo('CRM figures by ad are read at night - they show from the next morning'); const pp=function(x){ return x.level==='ad'&&ids[x.ad_id]; };
+      if(!CS.cur.some(pp)) return crmNo('The CRM has no leads tied to this ad for these dates'); return {t:crmT(crmAgg(CS.cur,pp),+sp||0),w:crmT(crmAgg(CS.prev,pp),+spw||0)}; };
+    const setAgg=function(list,sid){ const x={spend:0,results:null,clicks:0,impressions:0}; list.forEach(function(a){ if(a.adset_id!==sid) return; x.spend+=+a.spend||0; x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; if(a.results!=null) x.results=(x.results||0)+(+a.results); }); return x; };
+    window._caAdsTab=[]; window._caAxK=[]; let rows='';
+    ads.slice(0,ashow).forEach(function(a){
+      const ae=E['ad:'+a.ad_id]||{}, aon=AX.ad===a.k, i=window._caAdsTab.push(a)-1, copies=Object.keys(a.ids).length;
+      const anyLive=a.rows.some(function(r){ return caLive((E['ad:'+r.ad_id]||{}).status); });
+      const thumb=ae.thumbnail?'<img src="'+esc(ae.thumbnail)+'" referrerpolicy="no-referrer" alt="" onclick="event.stopPropagation();caAdTabOpen('+i+')" title="Open this ad" style="width:26px;height:26px;object-fit:cover;border-radius:5px;vertical-align:middle;margin-right:8px;cursor:zoom-in">'
+        :'<i class="fa-regular fa-rectangle-list" onclick="event.stopPropagation();caAdTabOpen('+i+')" title="Open this ad" style="color:#94a3b8;margin-right:8px;cursor:zoom-in"></i>';
+      const nCamps=[...new Set(a.rows.map(function(r){ return r.campaign_id; }))].length;
+      rows+='<tr class="ca-row ca-l0'+(aon?' ca-on':'')+'" onclick="caAx(\'ad\',_caAxK['+(window._caAxK.push(a.k)-1)+'])" title="'+(nCamps>1?'In '+nCamps+' campaigns':'')+(copies>1?(nCamps>1?' · ':'')+copies+' copies counted together':'')+'">'
+        +nm(caret(aon)+caDot(anyLive?'ACTIVE':ae.status)+thumb,(ae.name||('Ad '+a.ad_id))+(nCamps>1?'  ·  '+nCamps+' campaigns':''))+money(null)
+        +cols(raw(a,pl,null),raw(W2[a.k],pl,null),crmIds(a.ids,a.spend,(W2[a.k]||{}).spend))+'</tr>';
+      if(!aon) return;
+      // up one: every campaign the ad runs in - the campaign's own figures
+      const cids=[...new Set(a.rows.map(function(r){ return r.campaign_id; }))].sort(function(x,y){ const cx=CA_D.cur.filter(function(c){ return c.campaign_id===x; })[0]||{}, cy=CA_D.cur.filter(function(c){ return c.campaign_id===y; })[0]||{}; return (+cy.spend||0)-(+cx.spend||0); });
+      cids.forEach(function(cid){
+        const c=CA_D.cur.filter(function(x){ return x.platform===pl&&x.campaign_id===cid; })[0]||{campaign_id:cid,platform:pl,project:p,spend:0,clicks:0,impressions:0,results:0};
+        const ce=E['campaign:'+cid]||{}, ck=a.k+'|'+cid, con=AX.camp===ck, lead=pl==='meta'?obIsLead(E,c):null, was=prev.filter(function(x){ return x.platform===pl&&x.campaign_id===cid; })[0];
+        rows+='<tr class="ca-row ca-l1'+(con?' ca-on':'')+'" onclick="caAx(\'camp\',_caAxK['+(window._caAxK.push(ck)-1)+'])">'+nm(caret(con)+caDot(ce.status),ce.name||cid)
+          +(cBud(cid)==null&&caCampBud(cid,true)!=null&&caLive(ce.status)?idle(cid):!caLive(ce.status)?'<td>'+(cBud(cid)==null?'<span style="color:#94a3b8">—</span>':obMoney(cBud(cid)))+'<div class="ca-sub">'+esc(String(ce.status||'stopped').toLowerCase())+'</div></td>':money(cBud(cid)))
+          +cols(raw(c,pl,lead),raw(was,pl,lead),crmX(function(x){ return x.campaign_id===cid; },pl==='google'?'google':'facebook'))+'</tr>';
+        if(!con) return;
+        // up again: the ad sets / ad groups of that campaign the ad runs in - the ad set's own figures
+        const sids=[...new Set(a.rows.filter(function(r){ return r.campaign_id===cid&&r.adset_id; }).map(function(r){ return r.adset_id; }))];
+        if(!sids.length){ rows+='<tr class="ca-l2 ca-none"><td colspan="'+(7+NCRM)+'">No '+W.set.toLowerCase()+' recorded for this ad here</td></tr>'; return; }
+        sids.forEach(function(sid){
+          const se=E['adset:'+sid]||{}, sa=setAgg(CA_D.ads,sid), sw=cmpOn?setAgg((CA_D.cmp&&CA_D.cmp.ads)||[],sid):null;
+          const sb=se.daily_budget!=null?money(se.daily_budget):ce.daily_budget!=null?'<td title="The budget is set on the campaign and shared by its '+W.sets.toLowerCase()+'"><span style="color:#64748b">'+obMoney(ce.daily_budget)+'</span><div class="ca-sub">shared</div></td>':money(null);
+          rows+='<tr class="ca-l2"><td class="ca-nm"><span class="ca-nmx" title="'+esc(se.name||sid)+'">'+caDot(se.status||ce.status)+esc(se.name||sid)+'</span></td>'+sb+cols(raw(sa,pl,null),raw(sw,pl,null),crmSetX(sid,sa.spend,sw&&sw.spend))+'</tr>';
+        });
+      });
+    });
+    const tot=G.out.reduce(function(t,a){ t.spend+=a.spend; t.clicks+=a.clicks; t.impressions+=a.impressions; if(a.results!=null) t.results=(t.results||0)+a.results; return t; },{spend:0,clicks:0,impressions:0,results:null});
+    const allIds={}; G.out.forEach(function(a){ Object.keys(a.ids).forEach(function(k){ allIds[k]=1; }); });
+    return top+' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' ad'+(ads.length===1?'':'s')+'; click one for the campaigns it runs in, then its '+W.sets.toLowerCase()+'</span></div>'
+      +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Ad',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
+      +(rows||'<tr><td colspan="'+(7+NCRM)+'" style="text-align:center;color:var(--slate);padding:18px">No ad ran here in this period for this choice</td></tr>')+'</tbody>'
+      +(ads.length?'<tfoot><tr class="ca-tot"><td>Total · '+ads.length+' ad'+(ads.length===1?'':'s')+'</td>'+money(null)+cols(raw(tot,pl,null),{},crmIds(allIds,tot.spend,0))+'</tr></tfoot>':'')+'</table></div>'
+      +(ads.length>ashow?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="CA.adShow=(CA.adShow||50)+50;caPaint()">Show more ('+ashow+' of '+ads.length+')</button></div>':'')
+      +'</div>';
+  };
   const bud=function(v){ return '<td>'+(v==null?'<span style="color:#94a3b8">—</span>':obMoney(v))+'</td>'; };
   let rows='';
   shown.forEach(function(p){
@@ -441,10 +541,16 @@ function caPaint(){
     +(rows||'<tr><td colspan="'+(7+NCRM)+'" style="text-align:center;color:var(--slate);padding:24px">No ad accounts</td></tr>')+'</tbody>'+foot+'</table></div>';
   // the open platform's campaigns, ad sets and ads come under the whole projects table, and the page
   // scrolls down to them (caPlat) so they are seen
-  if(CA.open&&CA.plat) html+='<div class="ca-below" id="caBelow">'+section()+'</div>';
+  // the Ads tab shows the open platform's ads, ad sets and campaigns from the ad upwards (adsTree)
+  if(CA.open&&CA.plat) html+='<div class="ca-below" id="caBelow">'+(CA_TAB==='ads'?adsTree(CA.open,CA.plat):section())+'</div>';
   // (16 Nov 2026, Ayush: the explanation paragraph under the table removed)
   $('caBody').innerHTML=caNA(html);
 }
+// the Ads tab: open / close a level (ad, ad set) and an ad's popup
+window.caAx=function(level,k){ const AX=CA.ax=CA.ax||{ad:null,set:null,camp:null};
+  if(level==='ad'){ AX.ad=AX.ad===k?null:k; AX.set=null; AX.camp=null; } else if(level==='set'){ AX.set=AX.set===k?null:k; AX.camp=null; } else AX.camp=AX.camp===k?null:k;
+  caPaint(); };
+window.caAdTabOpen=function(i){ const a=(window._caAdsTab||[])[i]; if(a) caAdShow(a); };
 window.caCmpToggle=function(on){ CA.cmp.on=!!on;
   // the default other side: the previous period, unless that is what the main side already is
   if(on&&CA.cmp.period!=='custom'&&CA.cmp.period===OB_P.period) CA.cmp.period='prev';
@@ -568,8 +674,8 @@ function caAdShow(a){
 }
 function caReset(){ CA.open=CA.proj==='all'?null:CA.proj; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; }
 window.caPickProject=function(v){ CA.proj=v; CA.open=v==='all'?null:v; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
-window.caToggle=function(i){ const p=window._caP[i]; CA.open=CA.open===p?null:p; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
-window.caPlat=function(p){ CA.plat=CA.plat===p?null:p; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint();
+window.caToggle=function(i){ const p=window._caP[i]; CA.open=CA.open===p?null:p; CA.ax=null; CA.adShow=50; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
+window.caPlat=function(p){ CA.plat=CA.plat===p?null:p; CA.ax=null; CA.adShow=50; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint();
   requestAnimationFrame(function(){ const s=$('caBelow'); if(s) s.scrollIntoView({block:'start'}); }); };
 window.caCamp=function(id){ CA.camp=CA.camp===id?null:id; CA.adset=null; CA.showAds=12; caPaint(); };
 window.caSet=function(id){ CA.adset=CA.adset===id?null:id; CA.showAds=12; caPaint(); };

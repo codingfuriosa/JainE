@@ -124,6 +124,10 @@ async function summary(period: string) {
     const e = E[pl + ':campaign:' + id];
     if (e && proj[pl + ':' + e.account_id]) add(crmC, pl + ':' + id, x, { pl, cid: id, project: proj[pl + ':' + e.account_id] });
     else if (fb && /^whatsapp/i.test(id)) { const pr = byPn[pn(x.business_unit)]; if (pr) add(crmC, 'wa:' + pr, x, { pl: 'meta', wa: true, project: pr }); }
+    // 17 Nov 2026: leads the CRM did not tie to one of our campaigns (blank, "Call", "Others" ...) count on the project and
+    // platform rows, as in JainE, and show as "Not tied to a campaign" in the platform section
+    else { const pr = byPn[pn(x.business_unit)]; const ut = id.trim() === '' ? 'No campaign' : /^call$/i.test(id) ? 'Call' : id === '-1' ? 'Others' : 'Other tags';
+      if (pr) add(crmC, 'ut:' + pl + ':' + pr + ':' + ut, x, { pl, untied: true, utype: ut, project: pr }); }
   }
   const crmSet: Record<string, any> = {}, crmAd: Record<string, any> = {};
   for (const x of crmS) { if (x.level === 'adset') add(crmSet, String(x.adset_id), x, {}); else if (x.level === 'ad' && x.ad_id) add(crmAd, String(x.ad_id), x, {}); }

@@ -47,6 +47,7 @@ const NAV=[
     {id:'competitors',label:'Competitor Data',icon:'fa-magnifying-glass-chart'},
     {id:'channel_partners',label:'Channel Partners',icon:'fa-people-arrows'},
     {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},   // back 6 Nov 2026 - 43-posts-and-reels.js
+    {id:'wa_templates',label:'WhatsApp Templates',icon:'fa-comments'},   // 17 Nov 2026 - 53-whatsapp-templates.js
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
     {id:'scaling',label:'Scaling Up',icon:'fa-arrow-trend-up'},
     {id:'playbook',label:'Playbook',icon:'fa-book-open'},
@@ -116,6 +117,7 @@ function expandModules(ss){
     if(ss.has(oldId)) ss.add(MODULE_RENAMES[oldId]);
   });
   if(ss.has('custportal_photos')||ss.has('custportal_photo_approver')||ss.has('custportal_photo_backup')) ss.add('custportal_admin');
+  if(ss.has('campaigns')) ss.add('wa_templates');   // WhatsApp Templates: everyone with Campaign Analytics (17 Nov 2026)
   ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
