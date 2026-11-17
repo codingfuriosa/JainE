@@ -93,7 +93,10 @@ async function ask(prompt: string): Promise<any> {
   throw new Error('Gemini: ' + errs.join(' | '));
 }
 
-const LAUNCH_RULES = `"Launched" means CUSTOMERS ARE BEING INVITED IN NOW for a NEW project (or a new phase / tower with its own name):
+const LAUNCH_RULES = `ONLY RESIDENTIAL PROJECTS COUNT (homes: flats / apartments, villas, row houses, residential plots). Commercial projects do NOT
+count: offices, business hubs / chambers, shops, malls, retail, logistics / warehouses, industrial parks, hotels, hospitals,
+schools (17 Nov 2026, Ayush). A mixed project counts only if it sells homes.
+"Launched" means CUSTOMERS ARE BEING INVITED IN NOW for a NEW residential project (or a new phase / tower with its own name):
 - EOI or pre-launch registration open (often with an amount to pay), or
 - bookings / sales open, or
 - site visits offered for it, or a sales office / experience centre / sample flat opened, or
@@ -183,11 +186,11 @@ async function readProjectPage(dev: any, url: string, date: string, kind: 'websi
   const r = await ask(`You are reading one page of the website of ${dev.name}, a real-estate developer in Kolkata, India. URL: ${url}
 ${LAUNCH_RULES}
 Answer from THIS PAGE'S TEXT ONLY - never from what you know. Reply JSON:
-{"is_project_page":true|false,"project":"the project's own marketed name","locality":"area/city or empty","in_west_bengal":true|false,"already_selling_long":true|false (ready to move, completed, possession, sold out),"open_to_customers":true|false,"stage":"...","quote":"the exact sentence copied character for character from the page that shows customers are being invited in now, or empty"}
+{"is_project_page":true|false,"project":"the project's own marketed name","residential":true|false,"locality":"area/city or empty","in_west_bengal":true|false,"already_selling_long":true|false (ready to move, completed, possession, sold out),"open_to_customers":true|false,"stage":"...","quote":"the exact sentence copied character for character from the page that shows customers are being invited in now, or empty"}
 ${STAGE_RULE}
 PAGE TEXT:
 ${text}`);
-  if (!r || !r.is_project_page || r.in_west_bengal === false || r.already_selling_long || !r.open_to_customers || !r.project) return 0;
+  if (!r || !r.is_project_page || r.residential !== true || r.in_west_bengal === false || r.already_selling_long || !r.open_to_customers || !r.project) return 0;
   if (!quoteIn(String(r.quote || ''), text)) return 0;          // the sentence must really be on the page
   return await addEvidence(dev, String(r.project), String(r.locality || ''), { kind, url, source: new URL(url).hostname.replace(/^www\./, ''), published: date, quote: String(r.quote), stage: String(r.stage || '') });
 }
@@ -220,7 +223,7 @@ async function websiteStep(dev: any, baseline: boolean, note: string[]): Promise
     return { found: 0, links: fresh.length };
   }
   // which of the new links are project pages
-  const pick = await ask(`These links are from the website of ${dev.name}, a real-estate developer. Which ones are pages of ONE real-estate project (a residential or commercial project, phase or tower)? Leave out lists, blogs, news, offers, amenities, gallery, floor-plan sub-pages, contact and general pages.
+  const pick = await ask(`These links are from the website of ${dev.name}, a real-estate developer. Which ones are pages of ONE RESIDENTIAL real-estate project (homes - flats, villas, residential plots; one project, phase or tower)? Leave out commercial projects (offices, shops, malls, logistics, hotels). Leave out lists, blogs, news, offers, amenities, gallery, floor-plan sub-pages, contact and general pages.
 Reply JSON {"projects":[index numbers]}.
 ${fresh.slice(0, 200).map(([u, l], i) => `${i} | ${u} | ${l}`).join('\n')}`);
   const idx = new Set<number>((pick && Array.isArray(pick.projects) ? pick.projects : []).map((n: any) => +n).filter((n: number) => Number.isInteger(n)));
@@ -307,7 +310,7 @@ async function newsStep(dev: any, days: number): Promise<{ found: number; items:
   const r = await ask(`News items found for "${dev.name}" (a real-estate developer in Kolkata, India). For each item decide, from ITS OWN TEXT ONLY, whether it reports that ${dev.name} has launched a new project.
 Be careful with similar names: only "${dev.name}" counts${dev.name.startsWith('Eden') ? ' (Eden Group and Eden Realty are DIFFERENT companies)' : ''}.
 ${LAUNCH_RULES}
-Reply JSON {"items":[{"i":index,"about_developer":true|false,"is_new_launch":true|false,"project":"marketed name or empty","locality":"area or empty","in_west_bengal":true|false,"stage":"...","opened_on":"YYYY-MM-DD only if the text gives the exact day customers were first invited in, else empty","quote":"the exact sentence copied character for character from the item's title or text that shows the launch, or empty"}]}
+Reply JSON {"items":[{"i":index,"about_developer":true|false,"is_new_launch":true|false,"project":"marketed name or empty","residential":true|false,"locality":"area or empty","in_west_bengal":true|false,"stage":"...","opened_on":"YYYY-MM-DD only if the text gives the exact day customers were first invited in, else empty","quote":"the exact sentence copied character for character from the item's title or text that shows the launch, or empty"}]}
 ${STAGE_RULE}
 ${items.map((x, i) => `--- ITEM ${i} | ${x.date} | ${x.source}\nTITLE: ${x.title}\nTEXT: ${x.text.slice(0, 3000)}`).join('\n')}`);
   const verdicts: any[] = (r && Array.isArray(r.items)) ? r.items : [];
@@ -316,7 +319,7 @@ ${items.map((x, i) => `--- ITEM ${i} | ${x.date} | ${x.source}\nTITLE: ${x.title
     const x = items[i]; const v = verdicts.find((y) => +y.i === i) || null;
     if (DRY) DRY_OUT.push({ news: x.title.slice(0, 120), source: x.source, date: x.date, verdict: v });
     else await db.from('mw_news_seen').upsert({ key: x.key, developer_id: dev.id, url: x.url, title: x.title.slice(0, 300), source: x.source, published: x.date, verdict: v }, { onConflict: 'key', ignoreDuplicates: true });
-    if (!v || !v.about_developer || !v.is_new_launch || v.in_west_bengal === false || !v.project) continue;
+    if (!v || !v.about_developer || !v.is_new_launch || v.residential !== true || v.in_west_bengal === false || !v.project) continue;
     const body = x.title + '\n' + x.text;
     if (!quoteIn(String(v.quote || ''), body)) continue;      // the sentence must really be in the item
     const devWord = flat(dev.name).split(' ')[0];

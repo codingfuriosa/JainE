@@ -60,7 +60,7 @@ VIEWS.market_watch=async function(v,seg){
     +'<div class="mw-head"><div><h1><i class="fa-solid fa-binoculars" style="color:var(--brand)"></i> Market Watch</h1>'
       +(tab==='trends'
         ?'<p>What caught people\'s attention this week, for thumb-stop ideas in our videos and posts - India and Worldwide. Collected from Google Trends, the YouTube trending chart, the Apple Music chart and Wikipedia\'s most-read pages; every number and link is the source\'s own. Sad news, politics and controversies are left out.</p>'
-        :'<p>New projects our competitors have opened to customers in the last '+MW_DAYS+' days - only when a source shows customers being invited in (EOI, bookings, site visits, sales office or launch event). RERA registration and ads are not used. Every project shows its proof.</p>')
+        :'<p>New residential projects our competitors have opened to customers in the last '+MW_DAYS+' days - only when a source shows customers being invited in (EOI, bookings, site visits, sales office or launch event). RERA registration and ads are not used. Every project shows its proof.</p>')
       +'</div></div>'
     +'<div class="mw-tabs">'+tb('launches','fa-building-flag','Competitor Launches')+tb('trends','fa-fire','Trends')+'</div>'
     +'<div id="mwBody"><div class="loader"><div class="spin"></div></div></div>';
