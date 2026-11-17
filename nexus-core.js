@@ -1148,7 +1148,7 @@ const NAV=[
        Metrics no longer has a page: its tabs live in Our Brand and Competitor Data. */
     {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},   // named Our Brand 16 Oct - 6 Nov 2026
     {id:'competitors',label:'Competitor Data',icon:'fa-magnifying-glass-chart'},
-    {id:'market_watch',label:'Market Watch',icon:'fa-binoculars'},   // 14 Nov 2026 - 44-market-watch.js
+    {id:'market_watch',label:'Market Watch',icon:'fa-binoculars'},   // new empty module 17 Nov 2026 - 44-market-watch.js
     {id:'channel_partners',label:'Channel Partners',icon:'fa-people-arrows'},
     {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},   // back 6 Nov 2026 - 43-posts-and-reels.js
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
@@ -41330,261 +41330,134 @@ function orgOverview(rows){
     +'<div class="org-note" style="margin-top:14px"><i class="fa-solid fa-circle-info"></i><span><b>Reach</b> here is Meta\'s daily Viewers for the Page, added up day by day - someone who saw the Page on two days counts twice, as Meta gives no de-duplicated total. Meta does not give reach for each Facebook post.</span></div>';
 }
 /* ============================ MARKET WATCH ============================
-   One Marketing page, three tabs (14 Nov 2026, Ayush: "One page with three tabs, Kolkata plus nearby.
-   I just want the Trend Video, Project Names and data, and Hook Video - no Gemini required.")
+   New module (17 Nov 2026, Ayush). COMPETITOR LAUNCHES: which of the 18 listed competitors opened a new project to
+   customers in the last 60 days. "Launched" = customers have started coming (Ayush): EOI / pre-launch registration,
+   bookings open, site visits offered, a sales office / experience centre / sample flat open, or a launch event with
+   buyer offers. Never judged by RERA registration or the first ad.
 
-   TRENDS     YouTube's own Trending chart - India, and World (US, UK, UAE, Singapore and Australia read
-              and shown together as one list; Ayush 14 Nov: "only India and World, not other countries").
-   LAUNCHES   Projects registered on West Bengal RERA in Kolkata, North 24-Parganas, South 24-Parganas
-              and Howrah by WELL-KNOWN DEVELOPERS ONLY, last 3 months (Ayush 14 Nov, later the same day:
-              "premium projects ... from well renowned companies" - see MW_REPUTED) - name, developer,
-              place, size, completion date and RERA number, with how many days since it was registered.
-              Marked Our Brand / Competitor by developer. From camp.pi_rera_projects (public-intel, daily).
-   HOOK LIBRARY  The most-watched professionally made Shorts of the last 30 days - ad films, cinematic
-              shots, cars, tech launches, design, luxury, travel - from channels with 10 lakh+ subscribers,
-              never comedy / vlog / gaming (Ayush 14 Nov: "professional, not low quality"). Kept as they
-              are found, with YouTube's real view / like counts. Filters: market-watch HOOK_SEARCHES.
-
-   The videos come from the market-watch edge function into camp.mkt_videos. Nothing is written or
-   judged by AI; every figure is the source's own. */
-let MW_TAB='trends', MW_REGION='IN', MW_HOOKTAG='all', MW_HOOKSORT='views', MW_LDAYS='90', MW_LWHO='all', MW_LDIST='all', MW_LQ='';
-const MW_FN=SUPABASE_URL+'/functions/v1/market-watch';
-const MW_DISTRICTS=['Kolkata','North 24-Parganas','South 24-Parganas','Howrah'];
-const MW_REGIONS=[['IN','India'],['WORLD','World']];
-const MW_HOOKTAGS=[['all','All'],['ads','Ad films'],['cinematic','Cinematic'],['cars','Cars'],['tech','Tech launches'],['design','Design'],['luxury','Luxury'],['travel','Travel']];
-let MW_VID=null, MW_RERA=null, MW_WL=null;
-
+   The market-watch edge function checks every developer each morning (their own website + news) and records a launch
+   only with its proof: the link and the exact sentence. Confirmed = the developer's own website says it, or two
+   different news sources do; otherwise Needs check until someone confirms or rejects it here (camp.mw_decide).
+   Tables: camp.mw_launches, mw_evidence, mw_developers, mw_runs. A day with nothing new adds nothing. */
+let MW_FILTER='all', MW_DATA=null, MW_OPEN={};
+const MW_DAYS=60;
+const MW_STAGE={eoi:'EOI / pre-launch',site_visits:'Site visits',sales_office:'Sales office / sample flat',launch_event:'Launch event',bookings:'Bookings open'};
+const MW_KIND={website:'Developer website',archive:'Developer website (first saved by web.archive.org)',news:'News'};
 const MW_CSS='<style>'
   +'.mw-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:14px}'
   +'.mw-head h1{margin:0;font-size:24px;font-weight:700;display:flex;align-items:center;gap:10px}'
-  +'.mw-head p{margin:5px 0 0;color:var(--slate);font-size:13.5px;max-width:760px;line-height:1.5}'
-  +'.mw-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px}'
-  +'.mw-tab{border:0;background:none;padding:10px 16px;font:inherit;font-weight:600;font-size:14px;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;align-items:center;gap:8px}'
-  +'.mw-tab.on{color:var(--brand);border-bottom-color:var(--brand)}'
-  +'.mw-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}'
+  +'.mw-head p{margin:5px 0 0;color:var(--slate);font-size:13.5px;max-width:780px;line-height:1.5}'
+  +'.mw-status{font-size:12.5px;color:var(--slate);display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}'
+  +'.mw-status b{color:var(--ink)}.mw-status .warn{color:#b45309}'
+  +'.mw-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}'
   +'.mw-chip{border:1px solid var(--line);background:var(--card,#fff);border-radius:999px;padding:6px 13px;font:inherit;font-size:12.5px;font-weight:600;color:var(--ink-2,#334155);cursor:pointer}'
   +'.mw-chip.on{background:var(--brand);border-color:var(--brand);color:#fff}'
-  +'.mw-meta{margin-left:auto;font-size:12px;color:var(--slate);display:flex;align-items:center;gap:10px}'
-  +'.mw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}'
-  +'.mw-card{background:var(--card,#fff);border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;transition:box-shadow .15s}'
-  +'.mw-card:hover{box-shadow:0 8px 24px rgba(15,23,42,.12)}'
-  +'.mw-thumb{position:relative;aspect-ratio:16/9;background:#0f172a center/cover no-repeat}'
-  +'.mw-thumb.v{aspect-ratio:9/12}'
-  +'.mw-dur{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.78);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:5px}'
-  +'.mw-rank{position:absolute;left:6px;top:6px;background:rgba(0,0,0,.72);color:#fff;font-size:11px;font-weight:700;padding:2px 7px;border-radius:5px}'
-  +'.mw-cb{padding:10px 12px 12px;display:flex;flex-direction:column;gap:5px;min-width:0}'
-  +'.mw-ct{font-weight:650;font-size:13.5px;line-height:1.35;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}'
-  +'.mw-cc{font-size:12px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
-  +'.mw-cs{font-size:12px;color:var(--ink-2,#334155);display:flex;gap:10px;flex-wrap:wrap}'
-  +'.mw-cs i{color:#94a3b8;margin-right:3px}'
   +'.mw-tw{border:1px solid var(--line);border-radius:12px;overflow:auto;background:var(--card,#fff)}'
   +'.mw-t{width:100%;border-collapse:collapse;font-size:13px}'
-  +'.mw-t th{position:sticky;top:0;background:#f8fafc;text-align:left;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}'
+  +'.mw-t th{background:#f8fafc;text-align:left;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}'
   +'.mw-t td{padding:10px 12px;border-bottom:1px solid var(--line-2,#eef1f6);vertical-align:top}'
-  +'.mw-t tr:hover td{background:#f8fafc}'
-  +'.mw-pn{font-weight:650;color:var(--ink)}'
-  +'.mw-sub{font-size:11.5px;color:var(--slate);margin-top:2px}'
-  +'.mw-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;margin-top:4px}'
-  +'.mw-tag.own{background:#dcfce7;color:#166534}.mw-tag.comp{background:#fee2e2;color:#991b1b}.mw-tag.rep{background:#e0e7ff;color:#3730a3}'
-  +'.mw-days{font-weight:700;white-space:nowrap}.mw-days.new{color:#16a34a}'
-  +'.mw-in{height:34px;border:1px solid var(--line);border-radius:9px;padding:0 10px;font:inherit;font-size:13px;min-width:220px}'
-  +'.mw-sel{height:34px;border:1px solid var(--line);border-radius:9px;padding:0 8px;font:inherit;font-size:13px;background:#fff}'
-  +'@media(max-width:700px){.mw-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}.mw-meta{margin-left:0}}'
+  +'.mw-row{cursor:pointer}.mw-row:hover td{background:#f8fafc}'
+  +'.mw-pn{font-weight:650;color:var(--ink)}.mw-sub{font-size:11.5px;color:var(--slate);margin-top:2px}'
+  +'.mw-badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;white-space:nowrap}'
+  +'.mw-badge.confirmed{background:#dcfce7;color:#166534}.mw-badge.needs_check{background:#fef3c7;color:#92400e}.mw-badge.rejected{background:#f1f5f9;color:#64748b}'
+  +'.mw-ev{background:#f8fafc}.mw-ev td{padding:4px 12px 14px 12px}'
+  +'.mw-src{border:1px solid var(--line);border-radius:10px;background:#fff;padding:10px 12px;margin-top:8px}'
+  +'.mw-src .k{font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.04em}'
+  +'.mw-src q{display:block;margin:6px 0;font-size:13px;color:var(--ink);quotes:"\\201C" "\\201D"}'
+  +'.mw-src a{font-size:12px;word-break:break-all}'
+  +'.mw-acts{display:flex;gap:6px;flex-wrap:wrap}'
+  +'.mw-devs{margin-top:18px}.mw-devs summary{cursor:pointer;font-weight:600;font-size:13px;color:var(--slate)}'
+  +'.mw-devs table td,.mw-devs table th{font-size:12px}'
   +'</style>';
 
-async function mwCall(body){
-  const {data:{session}}=await sb.auth.getSession();
-  const r=await fetch(MW_FN,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify(body)});
-  const jr=await r.json().catch(function(){return {};});
-  if(!r.ok||jr.error) throw new Error(jr.error||('server said '+r.status));
-  return jr;
+async function mwLoad(){
+  const c=sb.schema('camp');
+  const since=new Date(Date.now()-MW_DAYS*86400e3).toISOString().slice(0,10);
+  const [l,d,r]=await Promise.all([
+    c.from('mw_launches').select('id,project,locality,stage,launch_date,status,auto_status,decided_by,decided_at,developer_id,mw_evidence(kind,url,source,title,published,quote,stage)').gte('launch_date',since).order('launch_date',{ascending:false}),
+    c.from('mw_developers').select('id,name,website,active,baseline_at,last_checked_at,last_error').order('sort'),
+    c.from('mw_runs').select('run_at,found').order('run_at',{ascending:false}).limit(60)
+  ]);
+  const err=l.error||d.error||r.error; if(err) throw err;
+  return {launches:l.data||[],devs:d.data||[],runs:r.data||[]};
 }
-function mwNum(n){ n=Number(n); if(!isFinite(n)) return '—'; if(n>=1e7) return (n/1e7).toFixed(1).replace(/\.0$/,'')+' Cr'; if(n>=1e5) return (n/1e5).toFixed(1).replace(/\.0$/,'')+' L'; if(n>=1e3) return (n/1e3).toFixed(1).replace(/\.0$/,'')+'K'; return String(n); }
-function mwDur(s){ s=Number(s); if(!isFinite(s)||s<=0) return ''; const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); }
-function mwAgo(iso){ if(!iso) return ''; const d=(Date.now()-Date.parse(iso))/1000; if(d<3600) return Math.max(1,Math.round(d/60))+' min ago'; if(d<86400) return Math.round(d/3600)+' h ago'; const n=Math.round(d/86400); return n+' day'+(n===1?'':'s')+' ago'; }
-function mwDmy(iso){ if(!iso) return '—'; const s=String(iso).slice(0,10).split('-'); return s.length===3?s[2]+'/'+s[1]+'/'+s[0]:String(iso); }
-function mwDaysSince(iso){ if(!iso) return null; const t=new Date(); t.setHours(12,0,0,0); return Math.round((t-new Date(String(iso).slice(0,10)+'T12:00:00'))/86400000); }
+function mwAgo(day){ const n=Math.round((Date.parse(new Date().toISOString().slice(0,10))-Date.parse(day))/86400e3); return n<=0?'today':n===1?'yesterday':n+' days ago'; }
 
 VIEWS.market_watch=async function(v,seg){
-  if(seg&&['trends','launches','hooks'].indexOf(seg[0])!==-1) MW_TAB=seg[0];
   setCrumb(['Growth & Strategy','Market Watch']);
-  const tab=function(id,icon,label){ return '<button class="mw-tab'+(MW_TAB===id?' on':'')+'" onclick="navTo(\'market_watch/'+id+'\')"><i class="fa-solid '+icon+'"></i> '+label+'</button>'; };
   v.innerHTML=MW_CSS
     +'<div class="mw-head"><div><h1><i class="fa-solid fa-binoculars" style="color:var(--brand)"></i> Market Watch</h1>'
-      +'<p>What people are talking about right now, luxury and premium launches across India, and hooks that stop the scroll.</p></div></div>'
-    +'<div class="mw-tabs">'+tab('trends','fa-fire','Trends')+tab('launches','fa-building-flag','Launches')+tab('hooks','fa-bolt','Hook Library')+'</div>'
+      +'<p>New projects our competitors have opened to customers in the last '+MW_DAYS+' days - only when a source shows customers being invited in (EOI, bookings, site visits, sales office or launch event). RERA registration and ads are not used. Every project shows its proof.</p></div></div>'
     +'<div id="mwBody"><div class="loader"><div class="spin"></div></div></div>';
-  try{
-    // 16 Nov 2026 (Ayush): Trends, Hook Library and Launches are the AI versions (50-market-watch-ai.js); the YouTube
-    // video grid and the RERA table below are no longer opened from here
-    if(MW_TAB==='launches') await mwAiLaunches(); else if(MW_TAB==='hooks') await mwAiHooks(); else await mwAiTrends();
-  }catch(e){ const b=$('mwBody'); if(b) b.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load: '+esc((e&&e.message)||String(e))+'</div></div>'; }
+  try{ MW_DATA=await mwLoad(); mwRender(); }
+  catch(e){
+    const b=$('mwBody'); if(!b) return;
+    const missing=e&&(e.code==='42P01'||e.code==='PGRST205'||/does not exist|schema cache/i.test(e.message||''));
+    b.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-'+(missing?'hourglass-half':'triangle-exclamation')+'"></i><div>'
+      +(missing?'Market Watch is being set up. The first check of the 18 developers runs tonight, and the list appears here after it.':'Could not load: '+esc((e&&e.message)||String(e)))+'</div></div>';
+  }
 };
 
-/* ---------------------------------------------------------------- videos (Trends + Hook Library) */
-async function mwLoadVideos(){
-  if(MW_VID) return MW_VID;
-  const {data,error}=await sb.schema('camp').from('mkt_videos').select('*').order('last_seen',{ascending:false}).limit(5000);
-  if(!error){ MW_VID={rows:data||[],live:false}; return MW_VID; }
-  // Before the table is made (it is made after office hours), the same videos straight from YouTube.
-  const r=await mwCall({action:'preview'});
-  MW_VID={rows:(r.trend||[]).concat(r.hook||[]),live:true}; return MW_VID;
-}
-async function mwVideos(kind){
-  const d=await mwLoadVideos(); if(!$('mwBody')) return;
-  const all=d.rows.filter(x=>x.kind===kind);
-  const latest=all.reduce((m,x)=>x.last_seen>m?x.last_seen:m,'');
-  let list;
-  if(kind==='trend'){
-    // only what YouTube lists on its chart right now (the latest read), in its own order
-    const cur=all.filter(x=>Date.parse(latest)-Date.parse(x.last_seen)<30*60000);
-    if(MW_REGION==='WORLD'){
-      const by={}; cur.filter(x=>x.tag!=='IN').forEach(x=>{ if(!by[x.video_id]||Number(x.views)>Number(by[x.video_id].views)) by[x.video_id]=x; });
-      list=Object.values(by).sort((a,b)=>Number(b.views||0)-Number(a.views||0));
-    } else list=cur.filter(x=>x.tag===MW_REGION).sort((a,b)=>(a.rank||999)-(b.rank||999));
+function mwRender(){
+  const b=$('mwBody'); if(!b||!MW_DATA) return;
+  const {launches,devs,runs}=MW_DATA;
+  const active=devs.filter(d=>d.active);
+  const today=new Date(Date.now()+5.5*3600e3).toISOString().slice(0,10);
+  const checkedToday=active.filter(d=>d.last_checked_at&&new Date(Date.parse(d.last_checked_at)+5.5*3600e3).toISOString().slice(0,10)===today);
+  const last=active.map(d=>d.last_checked_at).filter(Boolean).sort().pop();
+  const failed=active.filter(d=>d.last_error);
+  const cnt={all:0,confirmed:0,needs_check:0,rejected:0};
+  launches.forEach(x=>{ cnt[x.status]=(cnt[x.status]||0)+1; if(x.status!=='rejected') cnt.all++; });
+  const rows=launches.filter(x=>MW_FILTER==='all'?x.status!=='rejected':x.status===MW_FILTER);
+  const chip=(id,label)=>'<button class="mw-chip'+(MW_FILTER===id?' on':'')+'" onclick="MW_FILTER=\''+id+'\';mwRender()">'+label+' ('+(cnt[id]||0)+')</button>';
+  let h='<div class="mw-status"><i class="fa-regular fa-clock"></i>'
+    +(last?'Last checked <b>'+esc(new Date(last).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}))+'</b> · '+checkedToday.length+' of '+active.length+' developers checked today':'Not checked yet - the first check runs tonight')
+    +(failed.length?' · <span class="warn" title="'+esc(failed.map(d=>d.name+': '+d.last_error).join('\n'))+'"><i class="fa-solid fa-triangle-exclamation"></i> '+failed.length+' developer(s) partly unreadable - see the list at the bottom</span>':'')
+    +'</div>';
+  h+='<div class="mw-bar">'+chip('all','All')+chip('confirmed','Confirmed')+chip('needs_check','Needs check')+chip('rejected','Rejected')+'</div>';
+  if(!rows.length){
+    h+='<div class="card card-pad empty"><i class="fa-solid fa-binoculars"></i><div>'
+      +(MW_FILTER==='all'?'No competitor has opened a new project to customers in the last '+MW_DAYS+' days'+(last?' (as far as their websites and the news show).':'.'):'Nothing here.')+'</div></div>';
   } else {
-    const by={}; all.filter(x=>MW_HOOKTAG==='all'||x.tag===MW_HOOKTAG).forEach(x=>{ if(!by[x.video_id]||x.last_seen>by[x.video_id].last_seen) by[x.video_id]=x; });
-    list=Object.values(by);
-    const eng=x=>Number(x.views)>0?(Number(x.likes||0)+Number(x.comments||0))/Number(x.views):0;
-    if(MW_HOOKSORT==='views') list.sort((a,b)=>Number(b.views||0)-Number(a.views||0));
-    else if(MW_HOOKSORT==='newest') list.sort((a,b)=>String(b.published_at).localeCompare(String(a.published_at)));
-    else list.sort((a,b)=>eng(b)-eng(a));
+    const devName={}; devs.forEach(d=>devName[d.id]=d.name);
+    h+='<div class="mw-tw"><table class="mw-t"><thead><tr><th>Launched</th><th>Project</th><th>Developer</th><th>Stage</th><th>Status</th><th>Proof</th><th></th></tr></thead><tbody>';
+    rows.forEach(x=>{
+      const ev=(x.mw_evidence||[]).slice().sort((a,b)=>String(a.published).localeCompare(String(b.published)));
+      const st=x.status==='confirmed'?'Confirmed':x.status==='rejected'?'Rejected':'Needs check';
+      const acts=x.decided_by
+        ?'<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();mwDecide('+x.id+',\'auto\')" title="'+esc(st+' by '+x.decided_by)+'">Undo</button>'
+        :(x.status!=='confirmed'?'<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();mwDecide('+x.id+',\'confirmed\')">Confirm</button>':'')
+          +'<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();mwDecide('+x.id+',\'rejected\')">Reject</button>';
+      h+='<tr class="mw-row" onclick="MW_OPEN['+x.id+']=!MW_OPEN['+x.id+'];mwRender()">'
+        +'<td style="white-space:nowrap"><b>'+esc(fmtDate(x.launch_date))+'</b><div class="mw-sub">'+mwAgo(x.launch_date)+'</div></td>'
+        +'<td><div class="mw-pn">'+esc(x.project)+'</div>'+(x.locality?'<div class="mw-sub">'+esc(x.locality)+'</div>':'')+'</td>'
+        +'<td>'+esc(devName[x.developer_id]||'')+'</td>'
+        +'<td>'+esc(MW_STAGE[x.stage]||'—')+'</td>'
+        +'<td><span class="mw-badge '+x.status+'">'+st+'</span>'+(x.decided_by?'<div class="mw-sub">by '+esc(String(x.decided_by).split('@')[0])+'</div>':'')+'</td>'
+        +'<td style="white-space:nowrap"><i class="fa-solid fa-chevron-'+(MW_OPEN[x.id]?'up':'down')+'" style="color:#94a3b8;margin-right:5px"></i>'+ev.length+' source'+(ev.length===1?'':'s')+'</td>'
+        +'<td><div class="mw-acts">'+acts+'</div></td></tr>';
+      if(MW_OPEN[x.id]) h+='<tr class="mw-ev"><td colspan="7">'+ev.map(e=>'<div class="mw-src"><div class="k">'+esc(MW_KIND[e.kind]||e.kind)+' · '+esc(e.source||'')+' · '+esc(fmtDate(e.published))+(e.stage&&MW_STAGE[e.stage]?' · '+esc(MW_STAGE[e.stage]):'')+'</div>'
+        +(e.title?'<div style="font-weight:600;margin-top:4px">'+esc(e.title)+'</div>':'')
+        +'<q>'+esc(e.quote)+'</q><a href="'+esc(e.url)+'" target="_blank" rel="noopener">'+esc(e.url)+'</a></div>').join('')+'</td></tr>';
+    });
+    h+='</tbody></table></div>';
   }
-  const chips=kind==='trend'
-    ? MW_REGIONS.map(r=>'<button class="mw-chip'+(MW_REGION===r[0]?' on':'')+'" onclick="mwSet(\'MW_REGION\',\''+r[0]+'\')">'+esc(r[1])+'</button>').join('')
-    : MW_HOOKTAGS.map(r=>'<button class="mw-chip'+(MW_HOOKTAG===r[0]?' on':'')+'" onclick="mwSet(\'MW_HOOKTAG\',\''+r[0]+'\')">'+esc(r[1])+'</button>').join('')
-      +'<select class="mw-sel" onchange="mwSet(\'MW_HOOKSORT\',this.value)">'+[['views','Most viewed'],['engaging','Most liked / commented per view'],['newest','Newest']].map(o=>'<option value="'+o[0]+'"'+(MW_HOOKSORT===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select>';
-  const meta='<span class="mw-meta">'+list.length+' video'+(list.length===1?'':'s')+(latest?' · YouTube read '+mwAgo(latest):'')
-    +(d.live?' · live from YouTube (not saved yet)':'')
-    +' <button class="btn" style="height:30px;font-size:12px" onclick="mwRefresh(this)"><i class="fa-solid fa-rotate"></i> Refresh</button></span>';
-  const note=kind==='trend'
-    ? '<div class="mw-sub" style="margin:-6px 0 12px">YouTube\u2019s own Trending list'+(MW_REGION==='WORLD'?' - United States, United Kingdom, UAE, Singapore and Australia together, most viewed first':' - in YouTube\u2019s order')+'.</div>'
-    : '<div class="mw-sub" style="margin:-6px 0 12px">The most-watched professionally made Shorts of the 30 days before each read - only brands and studios with 10 lakh+ subscribers, no DIY, comedy, vlogs, gaming or clickbait. Every video found stays in the library.</div>';
-  $('mwBody').innerHTML='<div class="mw-bar">'+chips+meta+'</div>'+note
-    +(list.length?'<div class="mw-grid">'+list.map(x=>mwCard(x,kind)).join('')+'</div>'
-      :'<div class="card card-pad empty"><i class="fa-solid fa-film"></i><div>No videos yet - press Refresh.</div></div>');
+  // the developers watched, and whether each could be read
+  h+='<details class="mw-devs"><summary>The '+active.length+' developers watched</summary><div class="mw-tw" style="margin-top:8px"><table class="mw-t"><thead><tr><th>Developer</th><th>Website</th><th>Last checked</th><th>Problem</th></tr></thead><tbody>'
+    +active.map(d=>'<tr><td>'+esc(d.name)+'</td><td>'+(d.website?'<a href="'+esc(d.website)+'" target="_blank" rel="noopener">'+esc(d.website.replace(/^https?:\/\/(www\.)?/,'').replace(/\/$/,''))+'</a>':'—')+'</td>'
+      +'<td>'+(d.last_checked_at?esc(new Date(d.last_checked_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})):'—')+'</td>'
+      +'<td class="mw-sub">'+esc(d.last_error||'')+'</td></tr>').join('')
+    +'</tbody></table></div></details>';
+  b.innerHTML=h;
 }
-function mwCard(x,kind){
-  const short=kind==='hook'&&Number(x.duration_s)<=180;
-  return '<div class="mw-card" onclick="mwPlay(\''+esc(x.video_id)+'\','+(short?1:0)+')">'
-    +'<div class="mw-thumb'+(short?' v':'')+'" style="background-image:url(\''+esc(x.thumb||'')+'\')">'
-      +(kind==='trend'&&MW_REGION!=='WORLD'&&x.rank?'<span class="mw-rank">#'+x.rank+'</span>':'')
-      +(x.duration_s?'<span class="mw-dur">'+mwDur(x.duration_s)+'</span>':'')+'</div>'
-    +'<div class="mw-cb"><div class="mw-ct" title="'+esc(x.title)+'">'+esc(x.title)+'</div>'
-      +'<div class="mw-cc">'+esc(x.channel||'')+'</div>'
-      +'<div class="mw-cs"><span><i class="fa-solid fa-eye"></i>'+mwNum(x.views)+'</span>'
-        +(x.likes!=null?'<span><i class="fa-solid fa-thumbs-up"></i>'+mwNum(x.likes)+'</span>':'')
-        +(x.comments!=null?'<span><i class="fa-solid fa-comment"></i>'+mwNum(x.comments)+'</span>':'')
-        +'<span><i class="fa-regular fa-clock"></i>'+mwAgo(x.published_at)+'</span></div></div></div>';
-}
-window.mwPlay=function(id,vertical){
-  openModal('<div class="modal-head"><h3><i class="fa-brands fa-youtube" style="color:#dc2626"></i> Video</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="display:flex;justify-content:center;background:#000;padding:0">'
-      +'<iframe src="https://www.youtube.com/embed/'+encodeURIComponent(id)+'?autoplay=1&rel=0" style="border:0;width:'+(vertical?'min(380px,100%)':'100%')+';aspect-ratio:'+(vertical?'9/16':'16/9')+';max-height:78vh" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>'
-    +'<div class="modal-foot"><a class="btn" href="https://www.youtube.com/watch?v='+encodeURIComponent(id)+'" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open on YouTube</a><button class="btn primary" onclick="closeModal()">Close</button></div>',vertical?'md':'lg');
-};
-window.mwSet=function(k,v){ if(k==='MW_REGION') MW_REGION=v; else if(k==='MW_HOOKTAG') MW_HOOKTAG=v; else if(k==='MW_HOOKSORT') MW_HOOKSORT=v;
-  else if(k==='MW_LDAYS') MW_LDAYS=v; else if(k==='MW_LWHO') MW_LWHO=v; else if(k==='MW_LDIST') MW_LDIST=v;
-  if(MW_TAB==='launches') mwDrawLaunches(); else mwVideos(MW_TAB==='hooks'?'hook':'trend'); };
-window.mwRefresh=async function(btn){
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading YouTube…'; }
-  try{ const r=await mwCall({action:'refresh',force:true}); MW_VID=null; toast('Read from YouTube: '+Object.keys(r.saved||{}).map(k=>(r.saved[k])+' '+(k==='trend'?'trend':'hook')+' rows').join(', '),'ok'); }
-  catch(e){ if(/mkt_videos/.test(e.message)) MW_VID=null; else toast(e.message,'err'); MW_VID=null; }
-  renderPage();
-};
 
-/* ---------------------------------------------------------------- Launches (WB RERA) */
-// A developer is marked Competitor when its RERA name holds the distinctive word(s) of a name on the
-// Competitor watch list (e.g. "MERLIN" for Merlin Group); Our Brand for Dream Gateway Hotels Ltd and
-// any RERA developer the watch list ties to our own brand. The words matched are shown on hover.
-const MW_GENERIC=/\b(group|realty|realtors|limited|ltd|pvt|private|kolkata|projects?|by|the|and|properties|developers?|infra(structure)?|homes?|estates?)\b/gi;
-function mwKeyOf(name){ const k=String(name||'').replace(MW_GENERIC,' ').replace(/[^a-z0-9 ]/gi,' ').replace(/\s+/g,' ').trim().toUpperCase(); return k.length>=3?k:String(name||'').toUpperCase().trim(); }
-async function mwLaunches(){
-  if(!MW_RERA){
-    const cols='procode,name,reg_no,reg_date,promoter_name,promoter_type,district,block,police_station,pincode,address,project_type,project_status,apartments,land_area_sqm,built_area_sqm,carpet_area_sqm,completion_date,source_url,list_seen_at';
-    const [rows,wl,tg]=await Promise.all([
-      ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).in('district',MW_DISTRICTS).eq('list_status','approved').order('reg_date',{ascending:false}); }),
-      sb.schema('camp').from('competitor_watchlist').select('id,name,category,is_own_brand'),
-      sb.schema('camp').from('pi_targets').select('value,watchlist_id').eq('source','rera').eq('kind','promoter')
-    ]);
-    MW_RERA=rows;
-    const w=(wl&&wl.data)||[];
-    const own=new Set(w.filter(x=>x.is_own_brand).map(x=>x.id));
-    MW_WL={ownPromoters:((tg&&tg.data)||[]).filter(t=>own.has(t.watchlist_id)).map(t=>String(t.value).toUpperCase()),
-      comps:w.filter(x=>x.category==='competitor').map(x=>({name:x.name,key:mwKeyOf(x.name)}))};
-    if(!MW_WL.ownPromoters.length) MW_WL.ownPromoters=['DREAM GATEWAY HOTELS'];
-  }
-  mwDrawLaunches();
-}
-function mwWho(r){
-  const p=String(r.promoter_name||'').toUpperCase();
-  if(MW_WL.ownPromoters.some(x=>p.indexOf(x.replace(/\s+LTD\.?$|\s+LIMITED$/,''))!==-1)) return {k:'own',label:'Our Brand'};
-  const c=MW_WL.comps.find(c=>c.key&&new RegExp('\\b'+c.key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b').test(p));
-  if(c) return {k:'comp',label:c.name};
-  const n=MW_REPUTED.find(x=>x[1].test(p));
-  return n?{k:'rep',label:n[0]}:null;
-}
-/* PREMIUM ONLY (14 Nov 2026, Ayush: "LAUNCHES too should be premium projects ... apartments from well renowned
-   companies", chose "Named developers only"). A launch shows only when its RERA developer is Our Brand, on the
-   Competitor watch list, or one of these well-known developers (matched in the RERA developer name). A project a big
-   developer registers under a differently named company (an SPV) does not match; add its name here to show it. */
-const MW_REPUTED=[
-  ['Ambuja Neotia',/\bAMBUJA\b|\bNEOTIA\b/],['PS Group',/\bPS GROUP\b/],['Merlin',/\bMERLIN\b/],['Siddha',/\bSIDDHA\b/],
-  ['Eden',/\bEDEN\b/],['Godrej',/\bGODREJ\b/],['Srijan',/\bSRIJAN\b/],['DTC',/\bDTC\b/],['Shapoorji Pallonji',/\bSHAPOORJI\b/],
-  ['Tata Housing',/\bTATA (HOUSING|REALTY)\b/],['DLF',/\bDLF\b/],['Sugam',/\bSUGAM\b/],['Shrachi',/\bSHRACHI\b/],['Atri',/\bATRI\b/],
-  ['Primarc',/\bPRIMARC\b/],['Mani Group',/\bMANI GROUP\b/],['Orbit',/\bORBIT\b/],['Salarpuria Sattva',/\bSALARPURIA\b|\bSATTVA\b/],
-  ['Bengal Peerless',/\bBENGAL PEERLESS\b/],['Purti',/\bPURTI\b/],['Unimark',/\bUNIMARK\b/],['Rajwada',/\bRAJWADA\b/],
-  ['Alcove',/\bALCOVE\b/],['Lodha',/\bLODHA\b|\bMACROTECH\b/],['Prestige',/\bPRESTIGE ESTATES?\b/],['Sobha',/\bSOBHA\b/],
-  ['Puravankara',/\bPURAVANKARA\b|\bPROVIDENT HOUSING\b/],['Mahindra Lifespaces',/\bMAHINDRA LIFESPACE/],['South City',/\bSOUTH CITY PROJECTS\b/]
-];
-function mwLaunchList(){
-  const days=MW_LDAYS==='all'?null:Number(MW_LDAYS);
-  const q=MW_LQ.trim().toLowerCase();
-  return MW_RERA.map(r=>Object.assign({},r,{_who:mwWho(r),_d:mwDaysSince(r.reg_date)})).filter(r=>{
-    if(!r._who) return false;   // named developers only (MW_REPUTED)
-    if(days!=null&&(r._d==null||r._d>days)) return false;
-    if(MW_LDIST!=='all'&&r.district!==MW_LDIST) return false;
-    if(MW_LWHO==='own'&&!(r._who&&r._who.k==='own')) return false;
-    if(MW_LWHO==='comp'&&!(r._who&&r._who.k==='comp')) return false;
-    if(q&&[r.name,r.promoter_name,r.address,r.police_station,r.pincode,r.block,r.reg_no].join(' ').toLowerCase().indexOf(q)===-1) return false;
-    return true;
-  });
-}
-function mwDrawLaunches(){
-  const b=$('mwBody'); if(!b) return;
-  const chip=(k,v,l,cur)=>'<button class="mw-chip'+(cur===v?' on':'')+'" onclick="mwSet(\''+k+'\',\''+v+'\')">'+l+'</button>';
-  b.innerHTML='<div class="mw-bar">'
-      +[['all','All named developers'],['own','Our Brand'],['comp','Competitors']].map(o=>chip('MW_LWHO',o[0],o[1],MW_LWHO)).join('')
-      +'<select class="mw-sel" onchange="mwSet(\'MW_LDIST\',this.value)"><option value="all">Kolkata + nearby</option>'+MW_DISTRICTS.map(d=>'<option'+(MW_LDIST===d?' selected':'')+'>'+esc(d)+'</option>').join('')+'</select>'
-      +'<input class="mw-in" placeholder="Search project, developer, area, PIN" value="'+esc(MW_LQ)+'" oninput="MW_LQ=this.value;clearTimeout(window._mwT);window._mwT=setTimeout(mwLaunchTable,250)">'
-      +'<span class="mw-meta" id="mwLCount"></span>'
-    +'</div>'
-    +'<div class="mw-sub" style="margin:-6px 0 12px">Projects by well-known developers (Our Brand, the Competitor list, and names such as Ambuja Neotia, PS Group, Merlin, Siddha, Godrej, Shapoorji Pallonji) registered in the last 3 months on West Bengal RERA in Kolkata, North 24-Parganas, South 24-Parganas and Howrah. "Launched" is the RERA registration date. Areas are RERA\u2019s square metres shown in sq ft.</div>'
-    +'<div id="mwLT"></div>';
-  mwLaunchTable();
-}
-function mwLaunchTable(){
-  const host=$('mwLT'); if(!host) return;
-  const list=mwLaunchList();
-  const seen=MW_RERA.reduce((m,x)=>x.list_seen_at>m?x.list_seen_at:m,'');
-  const c=$('mwLCount'); if(c) c.textContent=list.length+' project'+(list.length===1?'':'s')+(seen?' · RERA read '+mwAgo(seen):'');
-  const sqft=v=>v==null||v===''?'—':inrGroup(String(Math.round(Number(v)*10.7639)));
-  host.innerHTML=list.length?'<div class="mw-tw" style="max-height:calc(100vh - 300px)"><table class="mw-t"><thead><tr>'
-        +'<th>Launched</th><th>Project</th><th>Developer</th><th>Location</th><th>Type</th><th style="text-align:right">Flats</th><th style="text-align:right">Built-up (sq ft)</th><th style="text-align:right">Land (sq ft)</th><th>Completion</th><th>RERA No.</th></tr></thead><tbody>'
-        +list.map(r=>'<tr>'
-          +'<td><div class="mw-days'+(r._d!=null&&r._d<=30?' new':'')+'">'+(r._d==null?'—':r._d===0?'Today':r._d+' day'+(r._d===1?'':'s')+' ago')+'</div><div class="mw-sub">'+mwDmy(r.reg_date)+'</div></td>'
-          +'<td><div class="mw-pn">'+esc(String(r.name||'').replace(/^"+|"+$/g,''))+'</div><div class="mw-sub">'+esc(r.project_status||'')+'</div></td>'
-          +'<td><div>'+esc(r.promoter_name||'—')+'</div><div class="mw-sub">'+esc(r.promoter_type||'')+'</div>'
-            +(r._who?'<span class="mw-tag '+r._who.k+'">'+esc(r._who.k==='own'?'Our Brand':r._who.k==='comp'?'Competitor · '+r._who.label:r._who.label)+'</span>':'')+'</td>'
-          +'<td><div>'+esc(r.address||'—')+'</div><div class="mw-sub">'+esc([r.police_station,r.block,r.district,r.pincode].filter(Boolean).join(' · '))+'</div></td>'
-          +'<td>'+esc(r.project_type||'—')+'</td>'
-          +'<td style="text-align:right">'+(r.apartments==null?'—':esc(String(r.apartments)))+'</td>'
-          +'<td style="text-align:right">'+sqft(r.built_area_sqm)+'</td>'
-          +'<td style="text-align:right">'+sqft(r.land_area_sqm)+'</td>'
-          +'<td style="white-space:nowrap">'+mwDmy(r.completion_date)+'</td>'
-          +'<td><a href="'+esc(r.source_url||('https://rera.wb.gov.in/project_details.php?procode='+r.procode))+'" target="_blank" rel="noopener" style="white-space:nowrap">'+esc(r.reg_no||'View')+' <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i></a></td>'
-        +'</tr>').join('')+'</tbody></table></div>'
-      :'<div class="card card-pad empty"><i class="fa-solid fa-building"></i><div>No projects for this choice.</div></div>';
+async function mwDecide(id,status){
+  try{
+    const {error}=await sb.schema('camp').rpc('mw_decide',{p_id:id,p_status:status});
+    if(error) throw error;
+    MW_DATA=await mwLoad(); mwRender();
+    toast(status==='confirmed'?'Confirmed':status==='rejected'?'Rejected':'Back to automatic','ok');
+  }catch(e){ toast('Could not save: '+((e&&e.message)||e),'err'); }
 }
 /* ============================ MARKETING ANALYTICS ============================
    The "Analytics" tab of Campaign Analytics (16 Nov 2026, Ayush: "make a new Tab named Analytics and start with these
@@ -42689,273 +42562,3 @@ maReg({id:'hours',title:'Best hours',icon:'fa-solid fa-clock',data:maHourData,re
     return maHead('fa-solid fa-clock','','Best hours',
         'Last 28 days, lead campaigns: leads each 4-hour block brought for its share of spend. +30% = 30% more leads than its spend predicts at the average rate. A real pattern needs the chi-square test (p < 0.01) and some block 15%+ off average. Use it to schedule ads or shift bids by time of day.')
       +(rows.length?maTable(['Platform'].concat(d.blocks.map(function(b){ return b[0]+':00–'+b[1]+':00'; })),rows):'<div class="ma-card">Not enough leads in the hourly figures yet.</div>'); }});
-/* MARKET WATCH - OUR ADS' HOOK AND HOLD RATES (16 Nov 2026, Ayush: "Build all three"): our own Facebook video ads ranked by
-   hook rate (3-second views / impressions) and hold rate (ThruPlays / 3-second views), joined to the CRM's leads and
-   qualified leads per ad. Shown as Hook Library > Our ads (50-market-watch-ai.js). The Kolkata-buyers and the word-rule
-   launch list that were here were replaced the same evening by the AI Trends and Launches (Ayush: "Remove Kolkata Buyers",
-   "the data of Launches is wrong, it's not based on Ads"). */
-
-const MWP_CSS='<style>'
-  +'.mwp-stats{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px}'
-  +'.mwp-st{background:var(--card,#fff);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:150px}'
-  +'.mwp-st b{display:block;font-size:20px;font-weight:700;color:var(--ink)}.mwp-st span{font-size:11.5px;color:var(--slate)}'
-  +'.mwp-card{background:var(--card,#fff);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}'
-  +'.mwp-th{aspect-ratio:1/1;background:#0f172a center/contain no-repeat}'
-  +'.mwp-cb{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}'
-  +'.mwp-row{display:flex;gap:6px;flex-wrap:wrap}'
-  +'.mwp-pill{font-size:11.5px;font-weight:650;padding:3px 8px;border-radius:999px;background:#f1f5f9;color:#334155}'
-  +'.mwp-pill.good{background:#dcfce7;color:#166534}.mwp-pill.low{background:#fef3c7;color:#92400e}'
-  +'.mwp-h{font-size:15px;font-weight:700;margin:4px 0 4px;color:var(--ink)}'
-  +'.mwp-up{color:#16a34a;font-weight:700}.mwp-dn{color:#dc2626;font-weight:700}'
-  +'.mwp-sec{margin:0 0 18px}'
-  +'</style>';
-const mwpDay=function(n){ const d=new Date(Date.now()+5.5*3600e3); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); };
-const mwpPct=function(x,dp){ return isFinite(x)?(x*100).toFixed(dp==null?1:dp)+'%':'—'; };
-const mwpRs=function(x){ return isFinite(x)&&x>0?'₹'+inrGroup(String(Math.round(x))):'—'; };
-function mwpMed(a){ const s=a.filter(isFinite).slice().sort((x,y)=>x-y); if(!s.length) return NaN; const m=s.length>>1; return s.length%2?s[m]:(s[m-1]+s[m])/2; }
-function mwpSpark(vals,w,h){
-  w=w||110; h=h||26; const v=vals.map(Number).filter(isFinite); if(v.length<2) return '';
-  const mx=Math.max.apply(null,v), mn=Math.min.apply(null,v), r=mx-mn||1;
-  const pts=v.map((y,i)=>(i*(w-2)/(v.length-1)+1).toFixed(1)+','+(h-2-(y-mn)/r*(h-4)).toFixed(1)).join(' ');
-  return '<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'" style="display:block"><polyline points="'+pts+'" fill="none" stroke="var(--brand)" stroke-width="1.6" stroke-linejoin="round"/></svg>';
-}
-
-/* ---------------------------------------------------------------- 1. Hook Library > Our ads */
-let MWP_HOOKS=null, MWP_HSORT='ql';
-async function mwOurHooks(){
-  const x=$('mwX'); if(!x) return;
-  if(!MWP_HOOKS){
-    const from=mwpDay(-90);
-    let rows;
-    try{
-      rows=await ciAll(()=>sb.schema('camp').from('ads_ad_daily').select('ad_id,campaign_id,spend,impressions,video_3s,video_p25,video_p50,video_p100,video_thruplay').eq('platform','meta').gte('day',from).gt('impressions',0));
-    }catch(e){
-      if(/video_3s/.test((e&&e.message)||'')){ x.innerHTML=MWP_CSS+'<div class="card card-pad empty"><i class="fa-solid fa-clock"></i><div>Our ads\u2019 video plays are read from Facebook tonight (from 20:20). Hook and hold rates show here from tomorrow morning.</div></div>'; return; }
-      throw e;
-    }
-    const by={};
-    rows.forEach(r=>{ const o=by[r.ad_id]=by[r.ad_id]||{ad_id:r.ad_id,campaign_id:r.campaign_id,spend:0,imp:0,v3:0,p25:0,p50:0,p100:0,thru:0};
-      o.spend+=+r.spend||0; o.imp+=+r.impressions||0; o.v3+=+r.video_3s||0; o.p25+=+r.video_p25||0; o.p50+=+r.video_p50||0; o.p100+=+r.video_p100||0; o.thru+=+r.video_thruplay||0; });
-    const ads=Object.values(by).filter(o=>o.v3>0&&o.imp>=3000);
-    const ids=ads.map(o=>o.ad_id);
-    const [crm,ents]=await Promise.all([
-      ids.length?ciAll(()=>sb.schema('camp').from('crm_adset_daily').select('ad_id,leads,qualified').eq('src','facebook').eq('level','ad').gte('day',from)):[],
-      ids.length?ciAll(()=>sb.schema('camp').from('ads_entities').select('id,kind,name,thumbnail,body,status').eq('platform','meta').in('kind',['ad','campaign'])):[]
-    ]);
-    const cr={}; crm.forEach(r=>{ const o=cr[r.ad_id]=cr[r.ad_id]||{l:0,q:0}; o.l+=+r.leads||0; o.q+=+r.qualified||0; });
-    const en={}; ents.forEach(e=>{ en[e.kind+'|'+e.id]=e; });
-    // Shrunk rates (Beta prior from all our video ads): an ad with few impressions is pulled toward the average, so a
-    // lucky 2,000-impression ad does not top a steady 2-lakh one.
-    const H=ads.reduce((s,o)=>s+o.v3,0)/ads.reduce((s,o)=>s+o.imp,0)||0;
-    const T=ads.reduce((s,o)=>s+o.thru,0)/ads.reduce((s,o)=>s+o.v3,0)||0;
-    const KH=2000, KT=300;
-    ads.forEach(o=>{ const c=cr[o.ad_id]||{l:0,q:0}; o.leads=c.l; o.ql=c.q;
-      o.hook=(o.v3+KH*H)/(o.imp+KH); o.hold=(o.thru+KT*T)/(o.v3+KT); o.rawHook=o.v3/o.imp; o.rawHold=o.v3?o.thru/o.v3:0;
-      const a=en['ad|'+o.ad_id]||{}, c2=en['campaign|'+o.campaign_id]||{};
-      o.name=a.name||o.ad_id; o.thumb=a.thumbnail||''; o.body=a.body||''; o.status=a.status||''; o.camp=c2.name||''; });
-    MWP_HOOKS={ads,H,T,medH:mwpMed(ads.map(o=>o.hook)),medT:mwpMed(ads.map(o=>o.hold))};
-  }
-  mwDrawOurHooks();
-}
-window.mwHSort=function(v){ MWP_HSORT=v; mwDrawOurHooks(); };
-function mwDrawOurHooks(){
-  const x=$('mwX'); if(!x||!MWP_HOOKS) return;
-  const d=MWP_HOOKS, list=d.ads.slice();
-  if(!list.length){ x.innerHTML=MWP_CSS+'<div class="card card-pad empty"><i class="fa-solid fa-film"></i><div>No video ads with 3,000+ impressions in the last 90 days yet.</div></div>'; return; }
-  if(MWP_HSORT==='hook') list.sort((a,b)=>b.hook-a.hook);
-  else if(MWP_HSORT==='hold') list.sort((a,b)=>b.hold-a.hold);
-  else list.sort((a,b)=>(b.ql-a.ql)||(b.hook-a.hook));
-  const chip=(v,l)=>'<button class="mw-chip'+(MWP_HSORT===v?' on':'')+'" onclick="mwHSort(\''+v+'\')">'+l+'</button>';
-  const pill=(lab,v,med)=>'<span class="mwp-pill '+(v>=med*1.15?'good':v<=med*0.85?'low':'')+'">'+lab+' '+mwpPct(v)+'</span>';
-  x.innerHTML=MWP_CSS
-    +'<div class="mwp-stats">'
-      +'<div class="mwp-st"><b>'+list.length+'</b><span>video ads, last 90 days</span></div>'
-      +'<div class="mwp-st"><b>'+mwpPct(d.H)+'</b><span>hook rate overall (3-sec views / impressions)</span></div>'
-      +'<div class="mwp-st"><b>'+mwpPct(d.T)+'</b><span>hold rate overall (ThruPlays / 3-sec views)</span></div>'
-    +'</div>'
-    +'<div class="mw-bar">'+chip('ql','Most qualified leads')+chip('hook','Best hook')+chip('hold','Best hold')+'</div>'
-    +'<div class="mw-sub" style="margin:-6px 0 12px">Green = 15%+ above our median, amber = 15%+ below. Rates are adjusted for how many people saw the ad, so a small lucky ad does not top a proven one. Leads and QL are the CRM\u2019s count for that ad.</div>'
-    +'<div class="mw-grid">'+list.slice(0,24).map(o=>{
-      const cpq=o.ql?o.spend/o.ql:NaN;
-      return '<div class="mwp-card" title="'+esc('Of 3-second viewers: '+mwpPct(o.p25/o.v3,0)+' reached 25%, '+mwpPct(o.p50/o.v3,0)+' 50%, '+mwpPct(o.p100/o.v3,0)+' the end')+'">'
-        +'<div class="mwp-th" style="background-image:url(\''+esc(o.thumb)+'\')"></div>'
-        +'<div class="mwp-cb"><div class="mw-ct" title="'+esc(o.name)+'">'+esc(o.name)+'</div>'
-          +'<div class="mw-cc">'+esc(o.camp)+(o.status&&o.status!=='ACTIVE'?' · '+esc(o.status.toLowerCase())+'':'')+'</div>'
-          +'<div class="mwp-row">'+pill('Hook',o.hook,d.medH)+pill('Hold',o.hold,d.medT)+'</div>'
-          +'<div class="mw-cs"><span>'+inrGroup(String(o.leads))+' leads</span><span><b>'+inrGroup(String(o.ql))+'</b> QL</span><span>'+(o.ql?mwpRs(cpq)+' / QL':mwpRs(o.spend)+' spent')+'</span></div>'
-        +'</div></div>';
-    }).join('')+'</div>';
-}
-
-/* MARKET WATCH - AI TABS (16 Nov 2026, Ayush: "Can we put AI somewhere if free ... Trending means it's going on lately,
-   people are discussing it, it's blowing up - not necessarily a video ... videos, photos, movies, a phrase, a song ...
-   everything positive ... the Hooks are not hooks, they are proper videos - I want hook ideas where the user's thumb stops
-   ... attracting hooks on photos as well ... Launch data from its data").
-   The work is done by the market-watch edge function (ai.ts): Trends every 3 hours, Hook ideas and Launches every
-   morning; this page reads what it saved (action ai_get). Gemini / Groq free tiers. */
-
-let MWA={trends:null,hooks:null,launches:null}, MWA_REG='all', MWA_KIND='all', MWA_HTAB='ideas', MWA_HFMT='all';
-const MWA_CSS='<style>'
-  +'.mwa-card{background:var(--card,#fff);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}'
-  +'.mwa-pic{aspect-ratio:16/9;background:#e2e8f0 center/cover no-repeat;position:relative}'
-  +'.mwa-pic.none{display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:26px;background:linear-gradient(135deg,#eef2ff,#f8fafc)}'
-  +'.mwa-badge{position:absolute;left:8px;top:8px;background:#16a34a;color:#fff;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px}'
-  +'.mwa-kind{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--brand)}'
-  +'.mwa-b{padding:11px 13px 13px;display:flex;flex-direction:column;gap:6px;flex:1}'
-  +'.mwa-t{font-weight:700;font-size:15px;line-height:1.3;color:var(--ink)}'
-  +'.mwa-why{font-size:12.5px;color:var(--ink-2,#334155);line-height:1.45}'
-  +'.mwa-sig{display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--slate)}'
-  +'.mwa-sig a{color:var(--slate);text-decoration:none}.mwa-sig a:hover{color:var(--brand)}'
-  +'.mwa-idea{margin-top:auto;background:#f8fafc;border-radius:8px;padding:7px 9px;font-size:12px;color:#334155;line-height:1.4}'
-  +'.mwa-idea b{color:var(--brand)}'
-  +'.mwa-hook{font-size:17px;font-weight:750;line-height:1.3;color:var(--ink)}'
-  +'.mwa-row{font-size:12px;color:#334155;line-height:1.45}.mwa-row span{color:var(--slate);font-weight:600}'
-  +'.mwa-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;margin-right:4px}'
-  +'.mwa-tag.v{background:#fee2e2;color:#991b1b}.mwa-tag.p{background:#e0f2fe;color:#075985}.mwa-tag.t{background:#dcfce7;color:#166534}'
-  +'.mwa-copy{border:1px solid var(--line);background:#fff;border-radius:8px;height:28px;padding:0 10px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;align-self:flex-start}'
-  +'.mwa-media{aspect-ratio:1/1;background:#0f172a center/contain no-repeat;position:relative}'
-  +'.mwa-media video{width:100%;height:100%;object-fit:contain;display:block}'
-  +'.mwa-wait{display:flex;align-items:center;gap:10px}'
-  +'</style>';
-
-async function mwaGet(what){
-  if(MWA[what]) return MWA[what];
-  const r=await mwCall({action:'ai_get',what:what}); MWA[what]=r.data||null; return MWA[what];
-}
-window.mwaRefresh=async function(what,btn){
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Asking AI…'; }
-  try{ const r=await mwCall({action:'ai_refresh',what:what}); MWA[what]=r.data; }
-  catch(e){ toast(e.message,'err'); }
-  if(what==='trends') mwaDrawTrends(); else if(what==='hooks') mwaDrawHooks(); else mwaDrawLaunches();
-};
-function mwaMeta(d,what){
-  return '<span class="mw-meta">'+(d&&d.at?'AI read '+mwAgo(d.at):'')
-    +' <button class="btn" style="height:30px;font-size:12px" onclick="mwaRefresh(\''+what+'\',this)"><i class="fa-solid fa-rotate"></i> Refresh</button></span>';
-}
-function mwaEmpty(what,txt){
-  return '<div class="card card-pad empty"><i class="fa-solid fa-wand-magic-sparkles"></i><div>'+txt+'</div>'
-    +'<button class="btn primary" style="margin-top:10px" onclick="mwaRefresh(\''+what+'\',this)">Read now</button></div>';
-}
-
-/* ---------------------------------------------------------------- Trends */
-const MWA_KINDS=[['all','All'],['screen','Movies & shows'],['song','Music'],['person','People'],['sport','Sport'],['techbiz','Tech & business'],['moment','Moments & phrases']];
-const MWA_KMAP={movie:'screen',show:'screen',song:'song',person:'person',sport:'sport',tech:'techbiz',business:'techbiz',phrase:'moment',event:'moment',festival:'moment',other:'moment'};
-const MWA_KICON={movie:'fa-film',show:'fa-tv',song:'fa-music',person:'fa-user',sport:'fa-futbol',tech:'fa-microchip',business:'fa-briefcase',phrase:'fa-quote-left',event:'fa-calendar-days',festival:'fa-star',other:'fa-bolt'};
-async function mwAiTrends(){ await mwaGet('trends'); mwaDrawTrends(); }
-window.mwaSet=function(k,v){ if(k==='reg') MWA_REG=v; else if(k==='kind') MWA_KIND=v; else if(k==='htab') MWA_HTAB=v; else if(k==='hfmt') MWA_HFMT=v;
-  if(MW_TAB==='hooks') mwaDrawHooks(); else if(MW_TAB==='launches') mwaDrawLaunches(); else mwaDrawTrends(); };
-function mwaChip(k,v,l,cur){ return '<button class="mw-chip'+(cur===v?' on':'')+'" onclick="mwaSet(\''+k+'\',\''+v+'\')">'+l+'</button>'; }
-function mwaDrawTrends(){
-  const b=$('mwBody'); if(!b) return;
-  const d=MWA.trends;
-  const bar='<div class="mw-bar">'+[['all','India + World'],['IN','India'],['WORLD','World']].map(o=>mwaChip('reg',o[0],o[1],MWA_REG)).join('')+mwaMeta(d,'trends')+'</div>'
-    +'<div class="mw-bar">'+MWA_KINDS.map(o=>mwaChip('kind',o[0],o[1],MWA_KIND)).join('')+'</div>';
-  if(!d||!(d.topics||[]).length){ b.innerHTML=MWA_CSS+bar+mwaEmpty('trends','Trends are read every 3 hours.'); return; }
-  const list=d.topics.filter(t=>(MWA_REG==='all'||t.region===MWA_REG)&&(MWA_KIND==='all'||MWA_KMAP[t.kind]===MWA_KIND));
-  const day=Date.now()-24*3600e3;
-  b.innerHTML=MWA_CSS+bar
-    +'<div class="mw-sub" style="margin:-6px 0 12px">What is rising right now - searches that jumped on Google, Wikipedia pages read far more than usual, YouTube’s trending chart - merged into topics by AI. Only positive topics; anything sad, negative or divisive is left out.</div>'
-    +(list.length?'<div class="mw-grid">'+list.map(t=>{
-      const sig=[];
-      if(t.searches) sig.push('<span><i class="fa-brands fa-google"></i> '+mwNum(t.searches)+'+ searches</span>');
-      if(t.spike) sig.push('<span><i class="fa-brands fa-wikipedia-w"></i> read '+(t.spike>=50?'50+':t.spike)+'× usual</span>');
-      if(t.yt_views) sig.push('<span><i class="fa-brands fa-youtube"></i> '+mwNum(t.yt_views)+' views</span>');
-      const links=(t.links||[]).filter(l=>l.url).slice(0,3).map(l=>'<a href="'+esc(l.url)+'" target="_blank" rel="noopener" title="'+esc(l.title)+'"><i class="fa-solid fa-arrow-up-right-from-square"></i> '+esc(l.src==='google'?'News':l.src==='wikipedia'?'Wikipedia':'YouTube')+'</a>').join('');
-      return '<div class="mwa-card">'
-        +(t.picture?'<div class="mwa-pic" style="background-image:url(\''+esc(t.picture)+'\')">':'<div class="mwa-pic none"><i class="fa-solid '+(MWA_KICON[t.kind]||'fa-bolt')+'"></i>')
-          +(Date.parse(t.first_seen)>day?'<span class="mwa-badge">New today</span>':'')+'</div>'
-        +'<div class="mwa-b"><div class="mwa-kind"><i class="fa-solid '+(MWA_KICON[t.kind]||'fa-bolt')+'"></i> '+esc(t.kind)+' · '+(t.region==='IN'?'India':'World')+'</div>'
-          +'<div class="mwa-t">'+esc(t.topic)+'</div><div class="mwa-why">'+esc(t.why)+'</div>'
-          +'<div class="mwa-sig">'+sig.join('')+'</div><div class="mwa-sig">'+links+'</div>'
-          +(t.hook?'<div class="mwa-idea"><b>Idea:</b> '+esc(t.hook)+'</div>':'')+'</div></div>';
-    }).join('')+'</div>':'<div class="card card-pad empty"><i class="fa-solid fa-filter"></i><div>Nothing in this choice right now.</div></div>');
-}
-
-/* ---------------------------------------------------------------- Hook Library */
-async function mwAiHooks(){ if(MWA_HTAB!=='ours') await mwaGet('hooks'); mwaDrawHooks(); }
-window.mwaCopy=function(i){ const x=(MWA.hooks&&MWA.hooks.ideas||[])[i]; if(!x) return;
-  const txt=x.hook+(x.on_screen?'\nOn screen: '+x.on_screen:'')+(x.visual?'\nShot: '+x.visual:'');
-  try{ navigator.clipboard.writeText(txt).then(()=>toast('Hook copied','ok')); }catch(e){ toast('Could not copy','err'); } };
-function mwaDrawHooks(){
-  const b=$('mwBody'); if(!b) return;
-  const d=MWA.hooks;
-  const tabs='<div class="mw-bar">'+mwaChip('htab','ideas','Hook ideas',MWA_HTAB)+mwaChip('htab','proven','Proven in ads',MWA_HTAB)+mwaChip('htab','ours','Our ads',MWA_HTAB)
-    +(MWA_HTAB==='ours'?'':mwaMeta(d,'hooks'))+'</div>';
-  if(MWA_HTAB==='ours'){ b.innerHTML=MWA_CSS+tabs+'<div id="mwX"><div class="loader"><div class="spin"></div></div></div>'; mwOurHooks().catch(e=>{ const x=$('mwX'); if(x) x.innerHTML='<div class="card card-pad empty"><div>Could not load: '+esc(e.message)+'</div></div>'; }); return; }
-  if(!d){ if(!MWA.hooks){ mwaGet('hooks').then(()=>{ if(MWA.hooks) mwaDrawHooks(); }); } b.innerHTML=MWA_CSS+tabs+mwaEmpty('hooks','Hook ideas are written every morning.'); return; }
-  if(MWA_HTAB==='ideas'){
-    const list=(d.ideas||[]).map((x,i)=>Object.assign({_i:i},x)).filter(x=>MWA_HFMT==='all'||x.format===MWA_HFMT);
-    b.innerHTML=MWA_CSS+tabs
-      +'<div class="mw-bar">'+[['all','Video + photo'],['video','Video openers'],['photo','Photo headlines']].map(o=>mwaChip('hfmt',o[0],o[1],MWA_HFMT)).join('')+'</div>'
-      +'<div class="mw-sub" style="margin:-6px 0 12px">Openings written by AI for our projects - what the first 2 seconds of a video or the headline on a photo should be to stop the thumb. They ride today’s positive trends and the patterns of competitor ads that kept running 30+ days. Facts are kept to what we told it: check any detail before using.</div>'
-      +(list.length?'<div class="mw-grid">'+list.map(x=>'<div class="mwa-card"><div class="mwa-b">'
-        +'<div><span class="mwa-tag '+(x.format==='video'?'v':'p')+'"><i class="fa-solid '+(x.format==='video'?'fa-video':'fa-image')+'"></i> '+(x.format==='video'?'Video':'Photo')+'</span><span class="mwa-tag">'+esc(x.pattern||'')+'</span>'+(x.trend?'<span class="mwa-tag t">'+esc(x.trend)+'</span>':'')+'</div>'
-        +'<div class="mwa-hook">“'+esc(x.hook)+'”</div>'
-        +(x.on_screen?'<div class="mwa-row"><span>On screen:</span> '+esc(x.on_screen)+'</div>':'')
-        +(x.visual?'<div class="mwa-row"><span>'+(x.format==='video'?'First 2 seconds:':'The photo:')+'</span> '+esc(x.visual)+'</div>':'')
-        +(x.why?'<div class="mwa-row"><span>Why it stops the scroll:</span> '+esc(x.why)+'</div>':'')
-        +'<div class="mwa-row"><span>For:</span> '+esc(x.project||'')+'</div>'
-        +'<button class="mwa-copy" onclick="mwaCopy('+x._i+')"><i class="fa-regular fa-copy"></i> Copy</button>'
-        +'</div></div>').join('')+'</div>':'<div class="card card-pad empty"><div>No ideas in this choice.</div></div>');
-    return;
-  }
-  // proven: competitor ads still running after 30+ days - the opening line and the creative
-  const list=(d.proven||[]);
-  b.innerHTML=MWA_CSS+tabs
-    +'<div class="mw-sub" style="margin:-6px 0 12px">Competitor ads that are still running after 30+ days - a brand keeps paying only for an ad that works. Their opening line is the hook; AI names the pattern and why it works.</div>'
-    +(list.length?'<div class="mw-grid">'+list.map((x,i)=>'<div class="mwa-card" style="cursor:pointer" onclick="'+(x.snapshot?'window.open(\''+esc(x.snapshot)+'\',\'_blank\')':'')+'">'
-      +'<div class="mwa-media" id="mwaM'+i+'"></div>'
-      +'<div class="mwa-b"><div><span class="mwa-tag '+(x.media_type==='video'?'v':'p')+'">'+(x.media_type==='video'?'Video':'Photo')+'</span>'+(x.pattern?'<span class="mwa-tag">'+esc(x.pattern)+'</span>':'')+'<span class="mwa-tag t">Running '+x.days+' days</span></div>'
-        +'<div class="mwa-hook" style="font-size:15px">“'+esc(x.first)+'”</div>'
-        +(x.why?'<div class="mwa-row"><span>Why it works:</span> '+esc(x.why)+'</div>':'')
-        +'<div class="mw-cc">'+esc(x.brand||'')+'</div></div></div>').join('')+'</div>'
-      :'<div class="card card-pad empty"><div>No long-running competitor ads found.</div></div>');
-  mwaMedia(list,'mwaM');
-}
-// the ad's picture / first video frame, through the same signed links as Competitor Ads
-function mwaMedia(list,prefix){
-  if(typeof compThumbFor!=='function'||typeof compSignedUrl!=='function') return;
-  list.forEach((x,i)=>{ const el=$(prefix+i); if(!el) return; const m=compThumbFor(x); if(!m) return;
-    compSignedUrl(m.key).then(u=>{ if(!u||!$(prefix+i)) return;
-      if(m.kind==='video') el.innerHTML='<video src="'+esc(u)+'#t=0.1" muted playsinline preload="metadata"></video>'; else el.style.backgroundImage='url(\''+u+'\')'; }); });
-}
-
-/* ---------------------------------------------------------------- Launches */
-/* Premium and luxury residential launches across India, from launch news read by AI (16 Nov 2026, Ayush: "Premium and
-   Luxury Launches but all over India ... not through Ads ... don't consider CPs"; later the same evening: "limited to these
-   companies or brands" - the 18 developers in MWA_DEVS, matched in the edge function). Filters: developer and city. */
-const MWA_DEVS=['DTC Group','Siddha Group','Srijan Realty','Diamond Group','Merlin Group','Eden Group','Ambuja Neotia','Alcove Realty','Godrej Properties',
-  'Mani Group','Vinayak Group','Unimark Group','Emami Realty','Sugam Homes','Primarc Group','Orbit Group','Gems Group'];
-const MWA_CITY=[['all','All India'],['mum','Mumbai region'],['ncr','Delhi NCR'],['blr','Bengaluru'],['pune','Pune'],['hyd','Hyderabad'],['chn','Chennai'],['kol','Kolkata'],['other','Other cities']];
-function mwaCityOf(c){ c=String(c||'').toLowerCase();
-  if(/mumbai|thane|navi mumbai|panvel|worli|bandra|andheri|powai|borivali|mira|vasai|kalyan|dombivli|lonavala|alibaug/.test(c)) return 'mum';
-  if(/gurugram|gurgaon|noida|delhi|ghaziabad|faridabad|greater noida|sonipat|ncr/.test(c)) return 'ncr';
-  if(/bengaluru|bangalore/.test(c)) return 'blr'; if(/pune|pimpri|hinjewadi|kharadi/.test(c)) return 'pune';
-  if(/hyderabad|secunderabad|gachibowli|kokapet/.test(c)) return 'hyd'; if(/chennai/.test(c)) return 'chn';
-  if(/kolkata|howrah|rajarhat|new town|newtown|salt lake/.test(c)) return 'kol'; return 'other'; }
-let MWA_LCITY='all', MWA_LDEV='all';
-async function mwAiLaunches(){ await mwaGet('launches'); mwaDrawLaunches(); }
-window.mwaLSet=function(k,v){ if(k==='city') MWA_LCITY=v; else MWA_LDEV=v; mwaDrawLaunches(); };
-function mwaDrawLaunches(){
-  const b=$('mwBody'); if(!b) return;
-  const d=MWA.launches;
-  const ch=(k,v,l,cur)=>'<button class="mw-chip'+(cur===v?' on':'')+'" onclick="mwaLSet(\''+k+'\',\''+v+'\')">'+l+'</button>';
-  const bar='<div class="mw-bar"><select class="mw-sel" onchange="mwaLSet(\'dev\',this.value)"><option value="all">All 17 developers</option>'
-      +MWA_DEVS.map(x=>'<option'+(MWA_LDEV===x?' selected':'')+'>'+esc(x)+'</option>').join('')+'</select>'+mwaMeta(d,'launches')+'</div>'
-    +'<div class="mw-bar">'+MWA_CITY.map(o=>ch('city',o[0],o[1],MWA_LCITY)).join('')+'</div>';
-  if(!d||!(d.projects||[]).length||!('launched' in (d.projects[0]||{}))){ b.innerHTML=MWA_CSS+bar+mwaEmpty('launches','Launch news is read by AI every morning.'); return; }
-  const list=d.projects.filter(p=>(MWA_LDEV==='all'||p.brand===MWA_LDEV)&&(MWA_LCITY==='all'||mwaCityOf(p.city+' '+p.locality)===MWA_LCITY));
-  b.innerHTML=MWA_CSS+bar
-    +'<div class="mw-sub" style="margin:0 0 12px">New residential projects by DTC, Siddha, Srijan, Diamond, Merlin, Eden, Ambuja Neotia, Alcove, Godrej, Mani, Vinayak, Unimark, Emami, Sugam, Primarc, Orbit and Gems - anywhere in India, launched in the last 60 days. Every morning AI reads the launch news and searches the web for each developer; a new building is added to this list and drops off 60 days after its launch. Brokers and channel partners are left out.</div>'
-    +(list.length?'<div class="mw-tw" style="max-height:calc(100vh - 320px)"><table class="mw-t"><thead><tr><th>Launched</th><th>Project</th><th>Developer</th><th>Location</th><th>Segment</th><th>Price from · Size</th><th>News</th></tr></thead><tbody>'
-      +list.map(p=>{ const dd=mwDaysSince(p.launched);
-        return '<tr><td><div class="mw-days'+(dd!=null&&dd<=14?' new':'')+'">'+(dd==null?'—':dd===0?'Today':dd+' day'+(dd===1?'':'s')+' ago')+'</div><div class="mw-sub">'+mwDmy(p.launched)+'</div></td>'
-          +'<td><div class="mw-pn">'+esc(p.project)+'</div>'+(p.first_seen&&Date.now()-Date.parse(p.first_seen)<36*3600e3&&d.projects.some(x=>x.first_seen&&x.first_seen<p.first_seen)?'<span class="mw-tag own">New - added today</span>':'')+(p.reports>1?'<div class="mw-sub">'+p.reports+' reports</div>':'')+'</td>'
-          +'<td>'+esc(p.developer||'—')+'</td>'
-          +'<td>'+esc([p.locality,p.city].filter(Boolean).join(', ')||'—')+'</td>'
-          +'<td>'+(p.segment?'<span class="mw-tag '+(p.segment==='luxury'?'comp':'rep')+'">'+esc(p.segment.charAt(0).toUpperCase()+p.segment.slice(1))+'</span>':'—')+'</td>'
-          +'<td>'+esc([p.price,p.size].filter(Boolean).join(' · ')||'—')+'</td>'
-          +'<td>'+(p.news||[]).map(n=>'<div><a href="'+esc(n.link)+'" target="_blank" rel="noopener" title="'+esc(n.title)+'">'+esc(n.source||'News')+' <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i></a></div>').join('')+'</td></tr>'; }).join('')
-      +'</tbody></table></div>':'<div class="card card-pad empty"><div>No launches for this choice in the last 60 days.</div></div>');
-}
-
