@@ -7418,10 +7418,17 @@
       sign_address:home||rule(40)
     };
   }
+  /* COMPLETION -> COMMENCEMENT (17 Nov 2026, Ayush): the payment plan's milestone column never says
+     "Completion" in a document we give the customer; every one reads "Commencement" instead, in the
+     same case as printed ("Completion" / "COMPLETION" / "completion"). The cost sheet itself is unchanged. */
+  function wfMilestone(s){
+    return String(s||'').trim().replace(/completion/gi,function(m){
+      return m===m.toUpperCase()?'COMMENCEMENT':(m[0]===m[0].toUpperCase()?'Commencement':'commencement'); });
+  }
   // The DWC payment plan: the cost sheet's own schedule, milestone and amount, as the specimen sets it.
   function wfAgDwcPlan(res){
     return (Array.isArray(res.payment_schedule)?res.payment_schedule:[]).filter(Boolean).map(function(r){
-      return [String(r.milestone||'').trim()||'—',
+      return [wfMilestone(r.milestone)||'—',
               (typeof r.amount==='number')?(Math.round(r.amount).toLocaleString('en-IN')+'/-'):'—'];
     });
   }
@@ -7488,7 +7495,7 @@
         : (String(r.percent).replace(/%$/,'')+'%');
       const note=[pct, (r.plus_gst===false?'':'Plus GST'), (r.less_booking?'(Less Booking Amount)':'')]
         .filter(Boolean).join(' ');
-      plan.push([String.fromCharCode(65+i), String(r.milestone||'').trim(), note,
+      plan.push([String.fromCharCode(65+i), wfMilestone(r.milestone), note,
                  (typeof r.amount==='number')?wfRs2(r.amount):'—']);
     });
     if(plan.length){
