@@ -40427,8 +40427,11 @@ async function caShareCall(body){
   const r=await fetch(SUPABASE_URL+'/functions/v1/campaign-share',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify(body)});
   const t=await r.json().catch(function(){ return {}; }); if(!r.ok||t.error) throw new Error(t.error||('server said '+r.status)); return t;
 }
+// besides super admins, the people who may switch the link and copy it - the same list as the campaign-share function
+// (17 Nov 2026, Ayush: "Yes, give Manash")
+const CA_SHARE_PEOPLE=['digitalmarketing@thejaingroup.com'];
 function caShareBar(){
-  if(!state.super) return '';
+  if(!state.super&&CA_SHARE_PEOPLE.indexOf(String(state.email||'').trim().toLowerCase())===-1) return '';
   if(!CA_SHARE.loaded&&!CA_SHARE.busy){ CA_SHARE.busy=true; caShareCall({action:'status'}).then(function(t){ CA_SHARE.on=!!t.on; CA_SHARE.token=t.token||null; }).catch(function(){}).then(function(){ CA_SHARE.loaded=true; CA_SHARE.busy=false; if(CA_D) caPaint(); }); }
   return '<span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">'
     +'<label class="ca-sw'+(CA_SHARE.on?' on':'')+'" title="Anyone with the link can see the campaign report while this is on"><input type="checkbox"'+(CA_SHARE.on?' checked':'')+(CA_SHARE.loaded?'':' disabled')+' onchange="caShareSet(this.checked)"><span class="k"></span>Public link</label>'

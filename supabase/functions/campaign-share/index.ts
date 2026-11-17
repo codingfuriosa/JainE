@@ -11,7 +11,8 @@
      no people, no customers, nothing else from the database, and only while sharing is ON and the link's key matches.
    - The key is a random 32-character code made when sharing is first switched on. Switching off makes the link show
      nothing at once; "new link" makes a new key, so the old link stops working for good.
-   - Only a super admin (signed in to JainE) can switch it on / off or read the key.
+   - Only a super admin, or someone in SHARE_PEOPLE (Manash, digital marketing), signed in to JainE can switch it on / off
+     or read the key.
    The on/off switch and key live in the private storage bucket 'campaign-share' (settings.json) - no table needed. */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
@@ -39,12 +40,15 @@ async function putSettings(s: any) {
   if (error) throw new Error('settings: ' + error.message);
 }
 function newToken() { const a = new Uint8Array(24); crypto.getRandomValues(a); return Array.from(a, (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 32); }
+// besides super admins, these people may switch the link on / off and copy it (17 Nov 2026, Ayush: "Yes, give Manash")
+const SHARE_PEOPLE = ['digitalmarketing@thejaingroup.com'];
 async function superAdmin(req: Request): Promise<string | null> {
   const auth = req.headers.get('Authorization') || '';
   if (!/^Bearer\s+\S+/.test(auth) || !ANON) return null;
   const who = await fetch(`${SB}/auth/v1/user`, { headers: { apikey: ANON, Authorization: auth } });
   if (!who.ok) return null;
   const email = String((await who.json()).email || '');
+  if (SHARE_PEOPLE.includes(email.trim().toLowerCase())) return email;
   const r = await fetch(`${SB}/rest/v1/rpc/is_superadmin`, { method: 'POST', body: '{}', headers: { apikey: ANON, Authorization: auth, 'Content-Type': 'application/json', 'Content-Profile': 'app' } });
   return r.ok && (await r.json()) === true ? (email || 'admin') : null;
 }
