@@ -45,6 +45,7 @@ const NAV=[
        Metrics no longer has a page: its tabs live in Our Brand and Competitor Data. */
     {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},   // named Our Brand 16 Oct - 6 Nov 2026
     {id:'competitors',label:'Competitor Data',icon:'fa-magnifying-glass-chart'},
+    {id:'market_watch',label:'Market Watch',icon:'fa-binoculars'},   // rebuilt 17 Nov 2026 (Competitor Launches + Trends) - 44-market-watch.js
     {id:'channel_partners',label:'Channel Partners',icon:'fa-people-arrows'},
     {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},   // back 6 Nov 2026 - 43-posts-and-reels.js
     {id:'wa_templates',label:'WhatsApp Templates',icon:'fa-comments'},   // 17 Nov 2026 - 53-whatsapp-templates.js

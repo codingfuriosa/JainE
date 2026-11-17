@@ -147,15 +147,10 @@
   status = 404
   force = true
 
-# Removed pages (17 Nov 2026, Ayush): the original Legal page now opens Legal 2; Market Watch is gone (opens Home).
+# Removed pages (17 Nov 2026, Ayush): the original Legal page now opens Legal 2. (Market Watch was removed the same morning
+# and then rebuilt as Competitor Launches + Trends, so its page is served normally - no redirect.)
 [[redirects]]
   from = "/legal.html"
   to = "/legal2.html"
-  status = 301
-  force = true
-
-[[redirects]]
-  from = "/market_watch.html"
-  to = "/index.html"
   status = 301
   force = true
