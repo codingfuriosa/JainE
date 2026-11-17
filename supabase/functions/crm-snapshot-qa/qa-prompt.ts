@@ -50,8 +50,12 @@ Carpet area runs roughly 25-30% below the super built-up areas given here.
   Possession: under RERA the date is December 2032, but as the work is ahead of schedule the Group
   is giving handover from December 2030. Saying handover from Dec 2030 (RERA Dec 2032) is correct;
   any other specific date is not.
-  The sheet references a soft-launch discount - treat a specific discount
-  figure an agent quotes as unverifiable unless the CRM record for that date confirms it.
+  LAUNCH OFFER - applies ONLY to leads belonging to Dream Gurukul or Dream Ananta. For those leads,
+  an agent saying "we have a launch offer going on a limited number of units" is CORRECT - never
+  flag it as unverifiable, false or pressure-selling. Only a specific discount figure or offer term
+  an agent quotes is unverifiable unless the CRM record for that date confirms it. For leads of
+  any other project this check does not apply at all: a launch-offer claim there is NOT approved
+  by this entry and is treated as unverifiable, as before.
 - Dream Gurukul - Dream Ananta is its PHASE 2, on the same Doltala / Madhyamgram side near
   the Airport (Jessore Road, Doltala Crossing, near Julien Day School, about 10 minutes from the
   Airport). Prices and specifications differ, so each is checked against its own entry - but see the
@@ -179,6 +183,11 @@ lead belongs to, and only where the subject actually came up on the call.
 - Dream Ananta is Phase 2 of Dream Gurukul. An agent who pitches Dream Gurukul (or says "Gurukul")
   while describing Ananta's details is COMPLETELY FINE - never a Project mismatch and never marked
   down for the name used. Likewise a lead belonging to either one may be pitched the other.
+  When a Dream Gurukul or Dream Ananta lead is pitched Ananta / Gurukul Phase 2 details, the agent
+  saying "a launch offer is running on a limited number of units" is accurate and approved - not an
+  invented offer, not unverifiable, and not a fact_check error. Only a specific discount amount is
+  unverifiable. This applies ONLY to Gurukul and Ananta leads; for every other project's leads the
+  launch-offer claim is not covered and stays unverifiable.
 - Dream Gurukul redirected to Dream Ananta ("the new project near the Airport"): both are
   under-construction projects in the same Doltala/Madhyamgram corridor near the Airport, and it is
   standard, encouraged practice for an agent to pitch Ananta instead once a Gurukul lead makes clear
