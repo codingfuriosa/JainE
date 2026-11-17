@@ -509,9 +509,8 @@ window.showHash=showHash;
 function navTo(path){
   const seg=String(path).split('/');
   let first=seg[0];
-  // On Legal 2, the Legal module's own links (legal/mis/case/..., legal/cat/...) stay on Legal 2.
-  // The sidebar's plain 'legal' still goes to the original Legal page.
-  if(first==='legal'&&seg.length>1&&PAGE==='legal2') first='legal2';
+  // The original Legal page was removed on 17 Nov 2026: every Legal link (legal, legal/mis/case/..., legal/cat/...) opens Legal 2.
+  if(first==='legal') first='legal2';
   const hash=seg.length>1?('#/'+seg.slice(1).join('/')):'';
   if(first===PAGE){ showHash(hash||'#/'); return; }
   // Customer sessions (and an admin previewing one) never have a sidebar item for another module
@@ -1137,7 +1136,6 @@ const NAV=[
   {group:'Governance',items:[
     {id:'finance',label:'Finance Vault',icon:'fa-indian-rupee-sign'},
     {id:'accounts',label:'Accounts',icon:'fa-calculator'},
-    {id:'legal',label:'Legal',icon:'fa-scale-balanced'},
     {id:'legal2',label:'Legal 2',icon:'fa-scale-balanced'},
     {id:'compliance',label:'Renewals & Compliance',icon:'fa-calendar-check'},
   ]},
@@ -1148,7 +1146,6 @@ const NAV=[
        Metrics no longer has a page: its tabs live in Our Brand and Competitor Data. */
     {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},   // named Our Brand 16 Oct - 6 Nov 2026
     {id:'competitors',label:'Competitor Data',icon:'fa-magnifying-glass-chart'},
-    {id:'market_watch',label:'Market Watch',icon:'fa-binoculars'},   // 14 Nov 2026 - 44-market-watch.js
     {id:'channel_partners',label:'Channel Partners',icon:'fa-people-arrows'},
     {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},   // back 6 Nov 2026 - 43-posts-and-reels.js
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
@@ -1395,10 +1392,15 @@ function wsRefreshNav(){
    Administrator, Dhruti Patel (legal@) and Ankita Bhandari (legal5@). Same arrangement as Inventory:
    checked before the state.super shortcut, so other super admins do not get it. Both pages read and
    write the same live cases. To add someone, add an address here. */
+/* LEGAL REMOVED, LEGAL 2 FOR EVERYONE WHO HAD LEGAL (17 Nov 2026, Ayush: "remove Legal Module, though Legal 2 will still be
+   there" - and Legal 2 for "everyone who has Legal"). The original Legal page is gone; anyone allowed into Legal (their
+   'legal' module, or a super admin) now opens Legal 2, plus the three named people above. Every Legal link opens Legal 2. */
 const LEGAL2_PEOPLE=['ayushruia1@gmail.com','legal@thejaingroup.com','legal5@thejaingroup.com'];
 function canLegal2(){
   if(state.isCustomer||state.impersonating) return false;
-  return LEGAL2_PEOPLE.indexOf(String(state.email||'').trim().toLowerCase())!==-1;
+  if(LEGAL2_PEOPLE.indexOf(String(state.email||'').trim().toLowerCase())!==-1||pageAllowed('legal')) return true;
+  // or granted "Legal 2" in Control Panel (the module list there now shows Legal 2 only)
+  const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.length>0&&expandModules(new Set(m)).has('legal2');
 }
 function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='legal2')?canLegal2():(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(it.id==='accounts')?canAccounts():(it.id==='weekly_status')?canWeeklyStatus():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
   const admItems=[];
@@ -40373,6 +40375,11 @@ const CA_CSS='<style>'
   +'.ca-sec .ca-tbl td.ca-nm,.ca-sec .ca-tbl th.ca-nm{width:340px;min-width:340px;max-width:340px}.ca-nmx{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
   +'.ca-sub{font-size:10.5px;color:#94a3b8;margin-top:1px;white-space:nowrap}'
   +'.ca-stg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}.ca-st{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;font-size:12.5px;font-weight:600;color:#334155;cursor:pointer;border-right:1px solid var(--line)}.ca-st:last-child{border-right:0}.ca-st input{margin:0;accent-color:#2563eb}.ca-st.on{background:#eef4ff;color:#1d4ed8}'
+  // a video ad's card: a play mark over its picture (17 Nov 2026)
+  // the card's figures two pairs to a line, so every card is short and the same height (17 Nov 2026, Ayush); the picture
+  // stays the fixed 190 px, cropped to fill (41-our-brand-ads.js)
+  +'.ca-sec .ob-ad .m{grid-template-columns:auto 1fr auto 1fr;gap:3px 8px;font-size:11.5px;margin-top:auto}.ca-sec .ob-ad .m span{color:var(--slate)}.ca-sec .ob-ad .m b{text-align:right;white-space:nowrap}'
+  +'.ob-ad .pic{position:relative}.ob-ad .pic .ca-play{display:none;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;align-items:center;justify-content:center;font-size:17px;padding-left:3px;pointer-events:none}.ob-ad .pic.ca-isvid .ca-play{display:flex}'
   +'.ca-warn{margin:-4px 0 12px;padding:9px 12px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:12.5px}'
   +'</style>';
 
@@ -40410,6 +40417,34 @@ function caStatusApply(){
   CA_D.crm=R.crm?{cur:R.crm.cur.filter(okR),prev:R.crm.prev.filter(okR)}:null;
   CA_D.crmSet=R.crmSet?{cur:R.crmSet.cur.filter(okR),prev:R.crmSet.prev.filter(okR)}:null;
 }
+/* PUBLIC LINK (17 Nov 2026, Ayush: "one public link which can be shared to people ... a toggle switch to allow or disallow
+   viewing, or copy the link; if disallowed nothing will be visible in the link"). The switch and Copy link sit at the right
+   of the bar, for super admins. The link opens ads-report.html - a page with no JainE code that gets only a summary from
+   the campaign-share function, and only while the switch is on. */
+let CA_SHARE={loaded:false,on:false,token:null,busy:false};
+async function caShareCall(body){
+  const {data:{session}}=await sb.auth.getSession();
+  const r=await fetch(SUPABASE_URL+'/functions/v1/campaign-share',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify(body)});
+  const t=await r.json().catch(function(){ return {}; }); if(!r.ok||t.error) throw new Error(t.error||('server said '+r.status)); return t;
+}
+function caShareBar(){
+  if(!state.super) return '';
+  if(!CA_SHARE.loaded&&!CA_SHARE.busy){ CA_SHARE.busy=true; caShareCall({action:'status'}).then(function(t){ CA_SHARE.on=!!t.on; CA_SHARE.token=t.token||null; }).catch(function(){}).then(function(){ CA_SHARE.loaded=true; CA_SHARE.busy=false; if(CA_D) caPaint(); }); }
+  return '<span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">'
+    +'<label class="ca-sw'+(CA_SHARE.on?' on':'')+'" title="Anyone with the link can see the campaign report while this is on"><input type="checkbox"'+(CA_SHARE.on?' checked':'')+(CA_SHARE.loaded?'':' disabled')+' onchange="caShareSet(this.checked)"><span class="k"></span>Public link</label>'
+    +'<button class="btn btn-sm" style="height:32px" onclick="caShareCopy()"'+(CA_SHARE.token?'':' disabled title="Switch the public link on first"')+'><i class="fa-regular fa-copy"></i> Copy link</button></span>';
+}
+window.caShareSet=async function(on){
+  try{ const t=await caShareCall({action:'set',on:!!on}); CA_SHARE.on=!!t.on; CA_SHARE.token=t.token||null; toast(t.on?'Public link is on - anyone with the link can see the report':'Public link is off - the link now shows nothing','ok'); }
+  catch(e){ toast('Could not change the public link: '+e.message,'err'); }
+  caPaint();
+};
+window.caShareCopy=function(){
+  if(!CA_SHARE.token){ toast('Switch the public link on first','err'); return; }
+  const link=location.origin+'/ads-report.html#k='+CA_SHARE.token;
+  const done=function(){ toast(CA_SHARE.on?'Link copied':'Link copied - it shows nothing until the public link is switched on','ok'); };
+  try{ navigator.clipboard.writeText(link).then(done,function(){ prompt('Copy this link',link); }); }catch(e){ prompt('Copy this link',link); }
+};
 // some activity in the period: spend, impressions or clicks (a paused remarketing campaign can show ads without spend)
 // green = switched on (Facebook ACTIVE, Google ENABLED), red = paused / ended / removed (16 Nov 2026, Ayush)
 function caDot(st){ const on=caLive(st); return '<span title="'+(on?'Enabled':esc(String(st||'Stopped').charAt(0)+String(st||'stopped').slice(1).toLowerCase()))+'" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:1px;background:'+(on?'#16a34a':'#dc2626')+'"></span>'; }
@@ -40449,6 +40484,28 @@ const CA_CMP_OPTS=[['prev','Previous period']].concat(OB_PERIODS);
 function caRangeOf(period,from,to){ const keep=OB_P; OB_P=Object.assign({},OB_P,{period:period,from:from||'',to:to||''}); try{ return obRange(); } finally{ OB_P=keep; } }
 function caCmpRange(){ const r=obRange(); if(CA.cmp.period==='prev') return {s:r.ps,e:r.pe}; return caRangeOf(CA.cmp.period,CA.cmp.from,CA.cmp.to); }
 function caCmpSame(){ if(!CA.cmp.on) return false; const r=obRange(), c=caCmpRange(); return r.s===c.s&&r.e===c.e; }
+// every row of a query, all pages read at once (the row count first); null when the table cannot be read
+// qf() builds the query afresh. The first page, then the next four pages at once, and so on until a page comes back short
+// (counting the rows first cost ~0.8 s on its own).
+async function caAllPages(qf){
+  const c=await qf().range(0,999); if(c.error) return null;
+  let out=c.data||[], f=1000;
+  if(out.length<1000) return out;
+  for(;;){
+    const batch=[0,1,2,3].map(function(i){ return qf().range(f+i*1000,f+i*1000+999); });
+    const got=await Promise.all(batch); let short=false;
+    for(const p of got){ if(p.error) return null; out=out.concat(p.data||[]); if((p.data||[]).length<1000){ short=true; break; } }
+    if(short) return out; f+=4000;
+  }
+}
+// names, status, budgets and pictures of every campaign / ad set / ad, kept for 10 minutes
+window._caEnt=window._caEnt||{};
+async function caEntities(platform){
+  const hit=window._caEnt[platform]; if(hit&&hit.at>Date.now()-600000) return hit.rows;
+  const rows=await caAllPages(function(){ return sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,objective,daily_budget,lifetime_budget,thumbnail,body').eq('platform',platform).order('kind').order('id'); });
+  if(!rows) return obEntities(platform);
+  window._caEnt[platform]={at:Date.now(),rows:rows}; return rows;
+}
 async function caLoad(){
   const r=obRange(), rpc=function(fn,a){ return sb.schema('camp').rpc(fn,a); };
   const cmp=CA.cmp.on&&!caCmpSame(), c=cmp?caCmpRange():{s:r.ps,e:r.pe};
@@ -40464,20 +40521,24 @@ async function caLoad(){
   const gTot=async function(s,e){ const v=await rpc('ads_campaign_totals_v2',{p_platform:'google',p_from:s,p_to:e}); return v.error?rpc('ads_campaign_totals',{p_platform:'google',p_from:s,p_to:e}):v; };
   // CRM (RealtyBucket) Google leads after its filtering, by day (camp.crm_google_daily, filled at night by
   // ads-daily-sync {crm}). null = not there (yet): the CRM columns then say so instead of showing 0.
-  const crmRows=async function(s,e){ const out=[]; for(let f=0;;f+=1000){
-      const q=await sb.schema('camp').from('crm_google_daily').select('business_unit,campaign_type,campaign_id,leads,qualified,site_visited,booked,lost').gte('day',s).lte('day',e).range(f,f+999);
-      if(q.error) return null; out.push.apply(out,q.data||[]); if(!q.data||q.data.length<1000) break; } return out; };
+  /* FASTER (17 Nov 2026, Ayush: "the Campaign Analytics data is loading too slow"). The big reads came 1,000 rows at a time,
+     one page after another (~2.5 s each); now the row count is asked first and every page is read at once. Names and
+     pictures are kept for 10 minutes, so changing the period does not read them again, and the other period's CRM figures
+     are read only when Compare is on (they show nowhere else). */
+  const crmRows=function(s,e){ return caAllPages(function(){ return sb.schema('camp').from('crm_google_daily').select('business_unit,campaign_type,campaign_id,leads,qualified,site_visited,booked,lost').gte('day',s).lte('day',e).order('day').order('campaign_id').order('business_unit'); }); };
   // CRM figures per ad set / ad group and per ad (camp.crm_adset_daily, 16 Nov 2026: the CRM API now breaks campaigns down)
-  const crmSets=async function(s,e){ const out=[]; for(let f=0;;f+=1000){
-      const q=await sb.schema('camp').from('crm_adset_daily').select('src,level,campaign_id,adset_id,ad_id,leads,qualified,site_visited,booked,lost').gte('day',s).lte('day',e).range(f,f+999);
-      if(q.error) return null; out.push.apply(out,q.data||[]); if(!q.data||q.data.length<1000) break; } return out; };
+  const crmSets=function(s,e){ return caAllPages(function(){ return sb.schema('camp').from('crm_adset_daily').select('src,level,campaign_id,adset_id,ad_id,leads,qualified,site_visited,booked,lost').gte('day',s).lte('day',e).order('day').order('src').order('level').order('adset_id').order('ad_id'); }); };
+  const noRows=Promise.resolve([]);
+  // the ad-level figures (ads, ad sets, the CRM by ad set / ad) are only seen once a platform is opened: they are read
+  // alongside but the table is drawn without waiting for them, and filled in when they arrive
+  const laterP=Promise.all([ads('meta',r.s,r.e), ads('google',r.s,r.e), cmp?ads('meta',c.s,c.e):none, cmp?ads('google',c.s,c.e):none, crmSets(r.s,r.e), cmp?crmSets(c.s,c.e):noRows]);
   const res=await Promise.all([
     sb.schema('camp').from('ads_accounts').select('platform,account_id,name,project').eq('include',true),
-    obEntities('meta'), obEntities('google'),
+    caEntities('meta'), caEntities('google'),
     rpc('ads_campaign_totals',{p_platform:'meta',p_from:r.s,p_to:r.e}), gTot(r.s,r.e),
     rpc('ads_campaign_totals',{p_platform:'meta',p_from:c.s,p_to:c.e}), gTot(c.s,c.e),
-    ads('meta',r.s,r.e), ads('google',r.s,r.e), cmp?ads('meta',c.s,c.e):none, cmp?ads('google',c.s,c.e):none,
-    crmRows(r.s,r.e), crmRows(c.s,c.e), crmSets(r.s,r.e), crmSets(c.s,c.e),
+    none, none, none, none,
+    crmRows(r.s,r.e), cmp?crmRows(c.s,c.e):noRows, Promise.resolve(null), noRows,
     // campaigns that spent in the last 3 days (today, yesterday, the day before) - only their budgets count (see caSpending)
     sb.schema('camp').from('ads_daily').select('campaign_id').gte('day',new Date(Date.now()+5.5*3600e3-2*86400e3).toISOString().slice(0,10)).or('spend.gt.0,impressions.gt.0,clicks.gt.0').limit(20000)]);
   $('caBody').style.opacity='';
@@ -40524,8 +40585,15 @@ async function caLoad(){
   CA_D.crm=res[11]==null?null:{cur:crmTag(res[11]),prev:crmTag(res[12])};
   CA_D.crmSet=res[13]==null?null:{cur:res[13],prev:res[14]||[]};
   CA_D.raw={cur:CA_D.cur,prev:CA_D.prev,ads:CA_D.ads,cmpAds:CA_D.cmp?CA_D.cmp.ads:null,bud:CA_D.bud,crm:CA_D.crm,crmSet:CA_D.crmSet};
+  CA_D.adsLoading=true;
   caStatusApply();
   caPaint();
+  const D0=CA_D;
+  laterP.then(function(L){ if(CA_D!==D0) return;   // a newer load has started
+    D0.raw.ads=tag('meta',L[0].rows).concat(tag('google',L[1].rows)); D0.hasSets=L[0].sets&&L[1].sets;
+    if(D0.cmp) D0.raw.cmpAds=tag('meta',L[2].rows).concat(tag('google',L[3].rows));
+    D0.raw.crmSet=L[4]==null?null:{cur:L[4],prev:L[5]||[]};
+    D0.adsLoading=false; caStatusApply(); caPaint(); });
 }
 // every project with an account on either platform, the biggest spender first
 function caProjects(){
@@ -40548,14 +40616,15 @@ function caPaint(){
     +sel('caPer',OB_PERIODS,OB_P.period,"OB_P.period=this.value;caReset();caLoad()",C.on?C.period:null)
     +(OB_P.period==='custom'?'<input type="date" value="'+esc(r.s)+'" onchange="OB_P.from=this.value;caLoad()"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(r.e)+'" onchange="OB_P.to=this.value;caLoad()">':'')
     +'<span class="ca-stg">'+[['active','Active'],['inactive','Inactive'],['both','Both']].map(function(o){ return '<label class="ca-st'+(CA_ST===o[0]?' on':'')+'"><input type="radio" name="caSt"'+(CA_ST===o[0]?' checked':'')+' onchange="caSt(\''+o[0]+'\')">'+o[1]+'</label>'; }).join('')+'</span>'
-    +compSelHtml('caProj',[['all','All projects']].concat(P.map(function(p){ return [p,p]; })),CA.proj,"caPickProject(this.value)")
+    // 17 Nov 2026 (Ayush): the projects dropdown and the dates line under the bar removed to save space - the dates show on
+    // hover over the period, and in Compare mode beside "with"
     +'<label class="ca-sw'+(C.on?' on':'')+'" title="Compare with another period"><input type="checkbox"'+(C.on?' checked':'')+' onchange="caCmpToggle(this.checked)"><span class="k"></span>Compare</label>'
-    +(C.on?'<span style="color:var(--slate);font-size:12.5px">with</span>'+sel('caCmpPer',CA_CMP_OPTS,C.period,"caCmpPick(this.value)",OB_P.period)
+    +(C.on?'<span style="color:var(--slate);font-size:12.5px" title="'+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+' vs '+esc(fmtDate(cr.s))+' – '+esc(fmtDate(cr.e))+'">with</span>'+sel('caCmpPer',CA_CMP_OPTS,C.period,"caCmpPick(this.value)",OB_P.period)
       +(C.period==='custom'?'<input type="date" value="'+esc(cr.s)+'" onchange="CA.cmp.from=this.value;caLoad()"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(cr.e)+'" onchange="CA.cmp.to=this.value;caLoad()">':''):'')
-    +'<span style="font-size:12.5px;color:var(--slate)">'+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))
-      +(C.on?' <b style="color:#334155">vs</b> '+esc(fmtDate(cr.s))+' – '+esc(fmtDate(cr.e)):' · Google and Facebook together')+'</span></div>'
+    +caShareBar()+'</div>'
     +(C.on&&same?'<div class="ca-warn"><i class="fa-solid fa-triangle-exclamation"></i> Both sides are the same dates ('+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+'). Pick a different period to compare with.</div>':'');
-  if(CA.proj!=='all') CA.open=CA.proj;
+  CA.proj='all';
+  const ps=$('caPer'); if(ps) ps.title=fmtDate(r.s)+' – '+fmtDate(r.e);
   const caret=function(on){ return '<span class="ca-caret"><i class="fa-solid fa-chevron-'+(on?'down':'right')+'"></i></span>'; };
   /* Every figure cell. In Compare mode the other period's figure and the change sit under it - green when the move is good,
      red when bad (more leads, clicks, CTR good; a higher cost per lead bad; spend neither). */
@@ -40607,6 +40676,9 @@ function caPaint(){
   const CS=CA_D.crmSet;
   const crmSetX=function(sid,sp,spw){ if(!CS) return crmNo('CRM figures by ad set are read at night - they show from the next morning'); const p=function(x){ return x.level==='adset'&&x.adset_id===String(sid); };
     if(!CS.cur.some(p)) return crmNo('The CRM has no leads tied to this ad set for these dates'); return {t:crmT(crmAgg(CS.cur,p),+sp||0),w:crmT(crmAgg(CS.prev,p),+spw||0)}; };
+  // an ad's own CRM figures (camp.crm_adset_daily level 'ad': Facebook ad / Google creative)
+  const crmAdX=function(aid,sp,spw){ if(!CS) return crmNo('CRM figures by ad are read at night - they show from the next morning'); const p=function(x){ return x.level==='ad'&&x.ad_id===String(aid); };
+    if(!CS.cur.some(p)) return crmNo('The CRM has no leads tied to this ad for these dates'); return {t:crmT(crmAgg(CS.cur,p),+sp||0),w:crmT(crmAgg(CS.prev,p),+spw||0)}; };
   const ct=function(t,title){ return '<th class="ca-crm" title="'+esc(title)+'">'+t+'</th>'; };
   const head=function(name,res,cpl,crm){ return '<tr><th class="ca-nm">'+name+'</th><th title="Daily budget as set today">Daily budget</th><th>Spend</th><th>'+res+'</th>'
     +(crm?ct('CRM leads','Google and Facebook leads in the CRM after its filtering')+ct('QL','Qualified leads (CRM)')+ct('SV','Site visits (CRM)')+ct('Booked','Booked (CRM)')+ct('Lost','Lost (CRM)'):'')
@@ -40622,7 +40694,7 @@ function caPaint(){
      follow whatever is open. Paused, ended and deleted ones are left out here - their spend still counts above.
      7 Nov 2026: a Total row under the campaigns - all the listed campaigns together. */
   const section=function(){
-    const p=CA.open, pl=CA.plat, W=CA_PLAT[pl];
+    const p=CA.open, pl=CA.plat, W=CA_PLAT[pl]; window._caRowAds=[];
     const camps=CA_D.cur.filter(function(c){ return c.project===p&&c.platform===pl&&caAct(c); }).sort(function(a,b){ return b.spend-a.spend; });
     const was=function(id){ return prev.filter(function(x){ return x.platform===pl&&x.campaign_id===id; }); };
     const setsOf=function(list,cid){ const g={}; list.forEach(function(a){ if(a.platform!==pl||a.campaign_id!==cid||!a.adset_id) return; const x=g[a.adset_id]||(g[a.adset_id]={adset_id:a.adset_id,spend:0,results:null,clicks:0,impressions:0}); x.spend+=+a.spend||0; if(a.results!=null) x.results=(x.results||0)+(+a.results); x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; }); return g; };
@@ -40637,6 +40709,7 @@ function caPaint(){
       sec+='<tr class="ca-row ca-l0'+(con?' ca-on':'')+'" onclick="caCamp(\''+c.campaign_id+'\')">'+nm(caret(con)+caDot(e.status),e.name||c.campaign_id)+(cBud(c.campaign_id)==null&&caCampBud(c.campaign_id,true)!=null&&caLive(e.status)?idle(c.campaign_id):!caLive(e.status)?'<td>'+(cBud(c.campaign_id)==null?'<span style="color:#94a3b8">—</span>':obMoney(cBud(c.campaign_id)))+'<div class="ca-sub">'+esc(String(e.status||'stopped').toLowerCase())+'</div></td>':money(cBud(c.campaign_id)))+cols(raw(c,pl,lead),raw(was(c.campaign_id)[0],pl,lead),cx)+'</tr>';
       if(!con) return;
       const ads=CA_D.ads.filter(function(a){ return a.platform===pl&&a.campaign_id===c.campaign_id; });
+      if(CA_D.adsLoading){ sec+='<tr class="ca-l1 ca-none"><td colspan="'+nc+'"><i class="fa-solid fa-spinner fa-spin"></i> Loading '+W.sets.toLowerCase()+'…</td></tr>'; return; }
       if(!CA_D.hasSets||!ads.some(function(a){ return a.adset_id; })){
         sec+='<tr class="ca-l1 ca-none"><td colspan="'+nc+'"><i class="fa-solid fa-circle-info"></i> '+W.sets+' are recorded from tonight (6 Nov 2026) and show here from tomorrow.</td></tr>'; return; }
       const g=setsOf(ads,c.campaign_id), gw=cmpOn?setsOf(CA_D.cmp.ads,c.campaign_id):{};
@@ -40644,11 +40717,22 @@ function caPaint(){
       if(!sets.length) sec+='<tr class="ca-l1 ca-none"><td colspan="'+nc+'">No running '+W.set.toLowerCase()+' in this campaign</td></tr>';
       sets.forEach(function(s){
         const son=CA.adset===s.adset_id;
-        sec+='<tr class="ca-row ca-l1'+(son?' ca-on':'')+'" onclick="caSet(\''+s.adset_id+'\')">'+nm('',(E['adset:'+s.adset_id]||{}).name||s.adset_id)+(function(){
+        sec+='<tr class="ca-row ca-l1'+(son?' ca-on':'')+'" onclick="caSet(\''+s.adset_id+'\')">'+nm(caret(son)+caDot((E['adset:'+s.adset_id]||{}).status||e.status),(E['adset:'+s.adset_id]||{}).name||s.adset_id)+(function(){
           // its own budget; or, when the budget is set on the campaign (Facebook CBO, every Google ad group), the campaign's, marked shared
           const b=(E['adset:'+s.adset_id]||{}).daily_budget; if(cBud(c.campaign_id)==null&&CA_D.sp3&&!CA_D.sp3[c.campaign_id]) return money(null); if(b!=null) return money(b);
           return e.daily_budget!=null?'<td title="The budget is set on the campaign and shared by its '+W.sets.toLowerCase()+'"><span style="color:#64748b">'+obMoney(e.daily_budget)+'</span><div class="ca-sub">shared</div></td>':money(null); })()
           +cols(raw(s,pl,null),raw(gw[s.adset_id],pl,null),crmSetX(s.adset_id,s.spend,(gw[s.adset_id]||{}).spend))+'</tr>';
+        if(!son) return;
+        /* AD ROWS (17 Nov 2026, Ayush: "in Facebook and Google I want to see ad-wise data as well, so even ad sets will have a
+           dropdown"). An open ad set lists its ads, the same columns, following Active / Inactive / Both; a row opens the ad. */
+        const adRows=ads.filter(function(a){ return a.adset_id===s.adset_id&&caAdOk(a)&&((+a.spend||0)>0||(+a.impressions||0)>0||(+a.clicks||0)>0||(+a.results||0)>0); }).sort(function(x,y){ return (+y.spend||0)-(+x.spend||0); });
+        if(!adRows.length){ sec+='<tr class="ca-l2 ca-none"><td colspan="'+nc+'">No ad here for this choice</td></tr>'; return; }
+        adRows.forEach(function(a){
+          const ae=E['ad:'+a.ad_id]||{}, aw=cmpOn?(CA_D.cmp.ads||[]).filter(function(x){ return x.ad_id===a.ad_id&&x.adset_id===a.adset_id; })[0]:null;
+          const ri=(window._caRowAds=window._caRowAds||[]).push(a)-1;
+          sec+='<tr class="ca-row ca-l2" onclick="event.stopPropagation();caAdOpenRow('+ri+')" title="Open this ad">'+nm(caDot(ae.status),ae.name||('Ad '+a.ad_id))+money(null)
+            +cols(raw(a,pl,null),raw(aw,pl,null),crmAdX(a.ad_id,a.spend,aw&&aw.spend))+'</tr>';
+        });
       });
     });
     // the total counts leads only (Google conversions, Facebook lead / chat campaigns), as reach or engagement results cannot be added to them
@@ -40691,7 +40775,7 @@ function caPaint(){
   // scrolls down to them (caPlat) so they are seen
   if(CA.open&&CA.plat) html+='<div class="ca-below" id="caBelow">'+section()+'</div>';
   // (16 Nov 2026, Ayush: the explanation paragraph under the table removed)
-  $('caBody').innerHTML=html;
+  $('caBody').innerHTML=caNA(html);
 }
 window.caCmpToggle=function(on){ CA.cmp.on=!!on;
   // the default other side: the previous period, unless that is what the main side already is
@@ -40700,11 +40784,36 @@ window.caCmpToggle=function(on){ CA.cmp.on=!!on;
 window.caCmpPick=function(v){ CA.cmp.period=v; if(v==='custom'&&!CA.cmp.from){ const r=obRange(); CA.cmp.from=r.ps; CA.cmp.to=r.pe; } caLoad(); };
 // The ads of what is open: every campaign of the platform, one campaign, or one ad set.
 // an ad's own CRM leads and qualified leads (camp.crm_adset_daily level 'ad', 16 Nov 2026); nothing shown when the CRM has none for it
-function caAdCrm(id){ const C=CA_D&&CA_D.crmSet; if(!C) return ''; let l=0,q=0,n=0; C.cur.forEach(function(x){ if(x.level==='ad'&&x.ad_id===String(id)){ n++; l+=+x.leads||0; q+=+x.qualified||0; } });
-  return n?'<span>CRM leads</span><b>'+obNum(l)+'</b><span>QL</span><b>'+obNum(q)+(l?' <span style="font-weight:500;color:#64748b">('+Math.round(q/l*100)+'%)</span>':'')+'</b>':''; }
+// 17 Nov 2026 (Ayush): the card also shows SV and CPQL, and NA (not a dash, not left out) when the CRM has nothing for the ad
+function caAdCrm(id,spend){ const C=CA_D&&CA_D.crmSet; let l=0,q=0,sv=0,n=0; if(C) C.cur.forEach(function(x){ if(x.level==='ad'&&x.ad_id===String(id)){ n++; l+=+x.leads||0; q+=+x.qualified||0; sv+=+x.site_visited||0; } });
+  const na='<b style="color:#94a3b8">NA</b>';
+  if(!n) return '<span>CRM leads</span>'+na+'<span>QL</span>'+na+'<span>SV</span>'+na+'<span>CPQL</span>'+na;
+  return '<span>CRM leads</span><b>'+obNum(l)+'</b><span>QL</span><b>'+obNum(q)+(l?' <span style="font-weight:500;color:#64748b">('+Math.round(q/l*100)+'%)</span>':'')+'</b>'
+    +'<span>SV</span><b>'+obNum(sv)+'</b><span>CPQL</span><b>'+(q&&+spend>0?obMoney(spend/q):'NA')+'</b>'; }
+// NA instead of a dash in every empty figure (17 Nov 2026, Ayush: "Any ---- will be NA instead"). Only a dash standing alone
+// as a cell's or line's value is changed, never one inside a campaign's or ad's name.
+function caNA(h){ return String(h).replace(/>(\s*)—(?=\s*<|\s)/g,'>$1NA'); }
+// an ad that is running now: the ad, its campaign and its ad set all switched on - used by the Active / Inactive / Both choice
+function caAdLive(a){ const E=CA_D.ent; return caLive((E['ad:'+a.ad_id]||{}).status)&&caLive((E['campaign:'+a.campaign_id]||{}).status)&&(!a.adset_id||caLive((E['adset:'+a.adset_id]||{}).status)); }
+function caAdOk(a){ return CA_ST==='both'||(CA_ST==='active')===caAdLive(a); }
+/* VIDEOS PLAY (17 Nov 2026, Ayush: "the video thumbnail is showing, I want the video to play"). Google video ads are YouTube
+   videos (played in place). For a Facebook ad the edge function ad-video asks Meta: its video, or Meta's own preview of the
+   ad, which plays it as it looks in the feed. Asked once per ad and kept for the visit; cards of video ads get a play mark. */
+window._caVid=window._caVid||{};
+async function caVidLoad(ids){
+  ids=ids.filter(function(id){ return !(id in window._caVid); }); if(!ids.length) return;
+  ids.forEach(function(id){ window._caVid[id]=null; });
+  try{ const {data:{session}}=await sb.auth.getSession();
+    const r=await fetch(SUPABASE_URL+'/functions/v1/ad-video',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify({ads:ids})});
+    const t=await r.json().catch(function(){ return {}; });
+    Object.keys((t&&t.ads)||{}).forEach(function(id){ window._caVid[id]=t.ads[id]; });
+  }catch(e){ ids.forEach(function(id){ delete window._caVid[id]; }); }
+}
+function caVidMarks(){ document.querySelectorAll('[data-cavid]').forEach(function(el){ const v=window._caVid[el.getAttribute('data-cavid')]; if(v&&(v.iframe||v.src)) el.classList.add('ca-isvid'); }); }
 function caAds(p,pl){
   const W=CA_PLAT[pl], E=CA_D.ent;
-  let ads=CA_D.ads.filter(function(a){ return a.project===p&&a.platform===pl&&caLive((E['ad:'+a.ad_id]||{}).status)&&caLive((E['campaign:'+a.campaign_id]||{}).status)&&(!a.adset_id||caLive((E['adset:'+a.adset_id]||{}).status)); });
+  if(CA_D.adsLoading) return '<div style="font-weight:700;font-size:13.5px;margin:16px 2px 10px"><i class="'+W.icon+'" style="color:'+W.color+'"></i> Ads</div><div style="font-size:12.5px;color:var(--slate);margin:0 2px"><i class="fa-solid fa-spinner fa-spin"></i> Loading ads…</div>';
+  let ads=CA_D.ads.filter(function(a){ return a.project===p&&a.platform===pl&&caAdOk(a); });
   if(CA.camp) ads=ads.filter(function(a){ return a.campaign_id===CA.camp; });
   if(CA.adset) ads=ads.filter(function(a){ return a.adset_id===CA.adset; });
   else { // rows come per ad group (v4): one card per ad, its ad groups added together
@@ -40718,13 +40827,17 @@ function caAds(p,pl){
   let h='<div style="font-weight:700;font-size:13.5px;margin:16px 2px 10px"><i class="'+W.icon+'" style="color:'+W.color+'"></i> Ads <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' that ran in this period · '+esc(p)+' · '+esc(where)+'</span></div>';
   if(!ads.length) return h+'<div style="font-size:12.5px;color:var(--slate);margin:0 2px">No ad ran here in this period.</div>';
   window._caAds=shown;
+  // Facebook cards: ask which are videos (once per ad), then put the play mark on them
+  const fbIds=shown.filter(function(a){ return a.platform==='meta'; }).map(function(a){ return String(a.ad_id); });
+  if(fbIds.length) setTimeout(function(){ caVidLoad(fbIds).then(caVidMarks); caVidMarks(); },0);
   return h+'<div class="ob-ads">'+shown.map(function(a,i){
       const e=E['ad:'+a.ad_id]||{}, words=String(e.body||e.name||('Ad '+a.ad_id)).split('\n');
-      const pic=e.thumbnail?'<div class="pic"><img src="'+esc(e.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" alt=""></div>'
+      const yt=pl==='google'&&caYtId(e.thumbnail);
+      const pic=e.thumbnail?'<div class="pic'+(yt?' ca-isvid':'')+'" data-cavid="'+esc(String(a.ad_id))+'"><img src="'+esc(e.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" alt=""><span class="ca-play"><i class="fa-solid fa-play"></i></span></div>'
         :'<div class="txt">'+(pl==='google'?'<div class="sp">Sponsored</div>':'')+'<div class="h">'+esc(words[0])+'</div>'+(words[1]?'<div class="d">'+esc(words.slice(1).join(' '))+'</div>':'')+'</div>';
       return '<div class="ob-ad" style="cursor:pointer" title="Open this ad" onclick="caAdOpen('+i+')">'+pic+'<div style="padding:9px 12px 0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(e.name||'')+'">'+esc(e.name||('Ad '+a.ad_id))+'</div>'
         +'<div style="padding:0 12px;font-size:11.5px;color:var(--slate)">'+stat(e.status)+'</div>'
-        +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+(pl==='meta'?'Results':W.res)+'</span><b>'+obNum(a.results,0)+'</b><span>Cost per result</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b>'+caAdCrm(a.ad_id)+'</div></div>';
+        +'<div class="m"><span>Spend</span><b>'+obMoney(a.spend)+'</b><span>'+(pl==='meta'?'Results':W.res)+'</span><b>'+obNum(a.results,0)+'</b><span>Cost per result</span><b>'+obMoney(+a.results?a.spend/a.results:null)+'</b><span>CTR</span><b>'+obPct(+a.impressions?a.clicks/a.impressions*100:null)+'</b>'+caAdCrm(a.ad_id,a.spend)+'</div></div>';
     }).join('')+'</div>'
     +(ads.length>shown.length?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="CA.showAds+='+obAdStep(ads.length)+';caPaint()">Show more ('+shown.length+' of '+ads.length+')</button></div>':'');
 }
@@ -40735,15 +40848,23 @@ function caAds(p,pl){
    play"). A Facebook ad shows its full picture (video ads their cover frame - Meta gives the video itself only
    through a separate call). */
 function caYtId(u){ const m=String(u||'').match(/ytimg\.com\/vi\/([A-Za-z0-9_-]{6,})\//); return m?m[1]:null; }
-window.caAdOpen=function(i){
-  const a=(window._caAds||[])[i]; if(!a) return;
+window.caAdOpen=function(i){ const a=(window._caAds||[])[i]; if(a) caAdShow(a); };
+window.caAdOpenRow=function(i){ const a=(window._caRowAds||[])[i]; if(a) caAdShow(a); };
+// a Facebook video in the popup frame: the file itself, else Meta's preview of the ad (which plays it)
+function caFbMedia(v,frame){
+  if(v&&v.src) return '<div style="'+frame+';background:#000"><video src="'+esc(v.src)+'"'+(v.poster?' poster="'+esc(v.poster)+'"':'')+' controls autoplay muted playsinline style="width:100%;height:100%;object-fit:contain"></video></div>';
+  if(v&&v.iframe) return '<div style="'+frame.replace('height:360px','height:560px')+';background:#fff"><iframe src="'+esc(v.iframe)+'" style="width:100%;height:100%;border:0" allow="autoplay; encrypted-media; fullscreen" allowfullscreen scrolling="yes"></iframe></div>';
+  return null;
+}
+function caAdShow(a){
   const pl=a.platform, W=CA_PLAT[pl], E=CA_D.ent, e=E['ad:'+a.ad_id]||{};
   const camp=(E['campaign:'+a.campaign_id]||{}).name||a.campaign_id, set=a.adset_id?((E['adset:'+a.adset_id]||{}).name||a.adset_id):null;
   const words=String(e.body||'').split('\n').filter(Boolean);
   const s=+a.spend||0, rr=a.results==null?null:+a.results, im=+a.impressions||0, cl=+a.clicks||0;
   const on=caLive(e.status), yt=pl==='google'?caYtId(e.thumbnail):null, r=obRange();
   const frame='height:360px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--slate)';
-  const media=yt
+  const fbv=pl==='meta'?caFbMedia(window._caVid[String(a.ad_id)],frame):null;
+  const media=fbv?fbv:yt
     ?'<div style="'+frame+';background:#000"><iframe src="https://www.youtube.com/embed/'+esc(yt)+'?autoplay=1&mute=1&rel=0&playsinline=1" style="width:100%;height:100%;border:0" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>'
     :e.thumbnail
       ?'<div style="'+frame+'"><img src="'+esc(e.thumbnail)+'" referrerpolicy="no-referrer" alt="" style="max-width:100%;max-height:100%;object-fit:contain;display:block"></div>'
@@ -40752,9 +40873,10 @@ window.caAdOpen=function(i){
         +(words.length>1?'<div style="font-size:13px;color:#4d5156;line-height:1.5">'+esc(words.slice(1).join(' '))+'</div>':'')+'</div></div>';
   const lbl=function(t){ return '<div style="font-size:11.5px;color:var(--slate);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin:14px 0 5px">'+t+'</div>'; };
   const n=function(v){ return '<span style="font-variant-numeric:tabular-nums">'+v+'</span>'; };
+  const openModal=function(h,sz){ return window.openModal(caNA(h),sz); };   // NA instead of dashes in the popup too
   openModal('<div class="modal-head"><h3><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+esc(e.name||('Ad '+a.ad_id))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body" style="display:flex;gap:18px;flex-wrap:wrap">'
-      +'<div style="flex:1 1 320px;min-width:280px">'+media+'</div>'
+      +'<div id="caAdMedia" style="flex:1 1 320px;min-width:280px">'+media+'</div>'
       +'<div style="flex:1 1 300px;min-width:270px">'
         +'<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
           +compDetailRow('Project',esc(a.project))+compDetailRow('Campaign',esc(camp))+(set?compDetailRow(W.set,esc(set)):'')
@@ -40772,7 +40894,10 @@ window.caAdOpen=function(i){
         +'</div>'
       +'</div>'
     +'</div>','lg');
-};
+  // a Facebook ad not asked about yet: ask now, and play its video in the frame once Meta answers
+  if(pl==='meta'&&!fbv&&!(String(a.ad_id) in window._caVid)) caVidLoad([String(a.ad_id)]).then(function(){
+    const m=caFbMedia(window._caVid[String(a.ad_id)],frame), host=$('caAdMedia'); if(m&&host) host.innerHTML=m; });
+}
 function caReset(){ CA.open=CA.proj==='all'?null:CA.proj; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; }
 window.caPickProject=function(v){ CA.proj=v; CA.open=v==='all'?null:v; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
 window.caToggle=function(i){ const p=window._caP[i]; CA.open=CA.open===p?null:p; CA.plat=null; CA.camp=null; CA.adset=null; CA.showAds=12; caPaint(); };
@@ -41328,263 +41453,6 @@ function orgOverview(rows){
     +'<div class="org-h2"><i class="fa-solid fa-shapes"></i> By post type</div>'+tbl(agg(function(r){return orgKindLabel(r.kind)+'s';}),'Post type')
     +(top.length?'<div class="org-h2" style="margin-top:14px"><i class="fa-solid fa-trophy"></i> Top 5 this period</div>'+orgTable(top,['views','likes','rate'],{rank:true}):'')
     +'<div class="org-note" style="margin-top:14px"><i class="fa-solid fa-circle-info"></i><span><b>Reach</b> here is Meta\'s daily Viewers for the Page, added up day by day - someone who saw the Page on two days counts twice, as Meta gives no de-duplicated total. Meta does not give reach for each Facebook post.</span></div>';
-}
-/* ============================ MARKET WATCH ============================
-   One Marketing page, three tabs (14 Nov 2026, Ayush: "One page with three tabs, Kolkata plus nearby.
-   I just want the Trend Video, Project Names and data, and Hook Video - no Gemini required.")
-
-   TRENDS     YouTube's own Trending chart - India, and World (US, UK, UAE, Singapore and Australia read
-              and shown together as one list; Ayush 14 Nov: "only India and World, not other countries").
-   LAUNCHES   Projects registered on West Bengal RERA in Kolkata, North 24-Parganas, South 24-Parganas
-              and Howrah by WELL-KNOWN DEVELOPERS ONLY, last 3 months (Ayush 14 Nov, later the same day:
-              "premium projects ... from well renowned companies" - see MW_REPUTED) - name, developer,
-              place, size, completion date and RERA number, with how many days since it was registered.
-              Marked Our Brand / Competitor by developer. From camp.pi_rera_projects (public-intel, daily).
-   HOOK LIBRARY  The most-watched professionally made Shorts of the last 30 days - ad films, cinematic
-              shots, cars, tech launches, design, luxury, travel - from channels with 10 lakh+ subscribers,
-              never comedy / vlog / gaming (Ayush 14 Nov: "professional, not low quality"). Kept as they
-              are found, with YouTube's real view / like counts. Filters: market-watch HOOK_SEARCHES.
-
-   The videos come from the market-watch edge function into camp.mkt_videos. Nothing is written or
-   judged by AI; every figure is the source's own. */
-let MW_TAB='trends', MW_REGION='IN', MW_HOOKTAG='all', MW_HOOKSORT='views', MW_LDAYS='90', MW_LWHO='all', MW_LDIST='all', MW_LQ='';
-const MW_FN=SUPABASE_URL+'/functions/v1/market-watch';
-const MW_DISTRICTS=['Kolkata','North 24-Parganas','South 24-Parganas','Howrah'];
-const MW_REGIONS=[['IN','India'],['WORLD','World']];
-const MW_HOOKTAGS=[['all','All'],['ads','Ad films'],['cinematic','Cinematic'],['cars','Cars'],['tech','Tech launches'],['design','Design'],['luxury','Luxury'],['travel','Travel']];
-let MW_VID=null, MW_RERA=null, MW_WL=null;
-
-const MW_CSS='<style>'
-  +'.mw-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:14px}'
-  +'.mw-head h1{margin:0;font-size:24px;font-weight:700;display:flex;align-items:center;gap:10px}'
-  +'.mw-head p{margin:5px 0 0;color:var(--slate);font-size:13.5px;max-width:760px;line-height:1.5}'
-  +'.mw-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px}'
-  +'.mw-tab{border:0;background:none;padding:10px 16px;font:inherit;font-weight:600;font-size:14px;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;align-items:center;gap:8px}'
-  +'.mw-tab.on{color:var(--brand);border-bottom-color:var(--brand)}'
-  +'.mw-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}'
-  +'.mw-chip{border:1px solid var(--line);background:var(--card,#fff);border-radius:999px;padding:6px 13px;font:inherit;font-size:12.5px;font-weight:600;color:var(--ink-2,#334155);cursor:pointer}'
-  +'.mw-chip.on{background:var(--brand);border-color:var(--brand);color:#fff}'
-  +'.mw-meta{margin-left:auto;font-size:12px;color:var(--slate);display:flex;align-items:center;gap:10px}'
-  +'.mw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}'
-  +'.mw-card{background:var(--card,#fff);border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;transition:box-shadow .15s}'
-  +'.mw-card:hover{box-shadow:0 8px 24px rgba(15,23,42,.12)}'
-  +'.mw-thumb{position:relative;aspect-ratio:16/9;background:#0f172a center/cover no-repeat}'
-  +'.mw-thumb.v{aspect-ratio:9/12}'
-  +'.mw-dur{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.78);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:5px}'
-  +'.mw-rank{position:absolute;left:6px;top:6px;background:rgba(0,0,0,.72);color:#fff;font-size:11px;font-weight:700;padding:2px 7px;border-radius:5px}'
-  +'.mw-cb{padding:10px 12px 12px;display:flex;flex-direction:column;gap:5px;min-width:0}'
-  +'.mw-ct{font-weight:650;font-size:13.5px;line-height:1.35;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}'
-  +'.mw-cc{font-size:12px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
-  +'.mw-cs{font-size:12px;color:var(--ink-2,#334155);display:flex;gap:10px;flex-wrap:wrap}'
-  +'.mw-cs i{color:#94a3b8;margin-right:3px}'
-  +'.mw-tw{border:1px solid var(--line);border-radius:12px;overflow:auto;background:var(--card,#fff)}'
-  +'.mw-t{width:100%;border-collapse:collapse;font-size:13px}'
-  +'.mw-t th{position:sticky;top:0;background:#f8fafc;text-align:left;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}'
-  +'.mw-t td{padding:10px 12px;border-bottom:1px solid var(--line-2,#eef1f6);vertical-align:top}'
-  +'.mw-t tr:hover td{background:#f8fafc}'
-  +'.mw-pn{font-weight:650;color:var(--ink)}'
-  +'.mw-sub{font-size:11.5px;color:var(--slate);margin-top:2px}'
-  +'.mw-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;margin-top:4px}'
-  +'.mw-tag.own{background:#dcfce7;color:#166534}.mw-tag.comp{background:#fee2e2;color:#991b1b}.mw-tag.rep{background:#e0e7ff;color:#3730a3}'
-  +'.mw-days{font-weight:700;white-space:nowrap}.mw-days.new{color:#16a34a}'
-  +'.mw-in{height:34px;border:1px solid var(--line);border-radius:9px;padding:0 10px;font:inherit;font-size:13px;min-width:220px}'
-  +'.mw-sel{height:34px;border:1px solid var(--line);border-radius:9px;padding:0 8px;font:inherit;font-size:13px;background:#fff}'
-  +'@media(max-width:700px){.mw-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}.mw-meta{margin-left:0}}'
-  +'</style>';
-
-async function mwCall(body){
-  const {data:{session}}=await sb.auth.getSession();
-  const r=await fetch(MW_FN,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify(body)});
-  const jr=await r.json().catch(function(){return {};});
-  if(!r.ok||jr.error) throw new Error(jr.error||('server said '+r.status));
-  return jr;
-}
-function mwNum(n){ n=Number(n); if(!isFinite(n)) return '—'; if(n>=1e7) return (n/1e7).toFixed(1).replace(/\.0$/,'')+' Cr'; if(n>=1e5) return (n/1e5).toFixed(1).replace(/\.0$/,'')+' L'; if(n>=1e3) return (n/1e3).toFixed(1).replace(/\.0$/,'')+'K'; return String(n); }
-function mwDur(s){ s=Number(s); if(!isFinite(s)||s<=0) return ''; const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); }
-function mwAgo(iso){ if(!iso) return ''; const d=(Date.now()-Date.parse(iso))/1000; if(d<3600) return Math.max(1,Math.round(d/60))+' min ago'; if(d<86400) return Math.round(d/3600)+' h ago'; const n=Math.round(d/86400); return n+' day'+(n===1?'':'s')+' ago'; }
-function mwDmy(iso){ if(!iso) return '—'; const s=String(iso).slice(0,10).split('-'); return s.length===3?s[2]+'/'+s[1]+'/'+s[0]:String(iso); }
-function mwDaysSince(iso){ if(!iso) return null; const t=new Date(); t.setHours(12,0,0,0); return Math.round((t-new Date(String(iso).slice(0,10)+'T12:00:00'))/86400000); }
-
-VIEWS.market_watch=async function(v,seg){
-  if(seg&&['trends','launches','hooks'].indexOf(seg[0])!==-1) MW_TAB=seg[0];
-  setCrumb(['Growth & Strategy','Market Watch']);
-  const tab=function(id,icon,label){ return '<button class="mw-tab'+(MW_TAB===id?' on':'')+'" onclick="navTo(\'market_watch/'+id+'\')"><i class="fa-solid '+icon+'"></i> '+label+'</button>'; };
-  v.innerHTML=MW_CSS
-    +'<div class="mw-head"><div><h1><i class="fa-solid fa-binoculars" style="color:var(--brand)"></i> Market Watch</h1>'
-      +'<p>What people are talking about right now, luxury and premium launches across India, and hooks that stop the scroll.</p></div></div>'
-    +'<div class="mw-tabs">'+tab('trends','fa-fire','Trends')+tab('launches','fa-building-flag','Launches')+tab('hooks','fa-bolt','Hook Library')+'</div>'
-    +'<div id="mwBody"><div class="loader"><div class="spin"></div></div></div>';
-  try{
-    // 16 Nov 2026 (Ayush): Trends, Hook Library and Launches are the AI versions (50-market-watch-ai.js); the YouTube
-    // video grid and the RERA table below are no longer opened from here
-    if(MW_TAB==='launches') await mwAiLaunches(); else if(MW_TAB==='hooks') await mwAiHooks(); else await mwAiTrends();
-  }catch(e){ const b=$('mwBody'); if(b) b.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load: '+esc((e&&e.message)||String(e))+'</div></div>'; }
-};
-
-/* ---------------------------------------------------------------- videos (Trends + Hook Library) */
-async function mwLoadVideos(){
-  if(MW_VID) return MW_VID;
-  const {data,error}=await sb.schema('camp').from('mkt_videos').select('*').order('last_seen',{ascending:false}).limit(5000);
-  if(!error){ MW_VID={rows:data||[],live:false}; return MW_VID; }
-  // Before the table is made (it is made after office hours), the same videos straight from YouTube.
-  const r=await mwCall({action:'preview'});
-  MW_VID={rows:(r.trend||[]).concat(r.hook||[]),live:true}; return MW_VID;
-}
-async function mwVideos(kind){
-  const d=await mwLoadVideos(); if(!$('mwBody')) return;
-  const all=d.rows.filter(x=>x.kind===kind);
-  const latest=all.reduce((m,x)=>x.last_seen>m?x.last_seen:m,'');
-  let list;
-  if(kind==='trend'){
-    // only what YouTube lists on its chart right now (the latest read), in its own order
-    const cur=all.filter(x=>Date.parse(latest)-Date.parse(x.last_seen)<30*60000);
-    if(MW_REGION==='WORLD'){
-      const by={}; cur.filter(x=>x.tag!=='IN').forEach(x=>{ if(!by[x.video_id]||Number(x.views)>Number(by[x.video_id].views)) by[x.video_id]=x; });
-      list=Object.values(by).sort((a,b)=>Number(b.views||0)-Number(a.views||0));
-    } else list=cur.filter(x=>x.tag===MW_REGION).sort((a,b)=>(a.rank||999)-(b.rank||999));
-  } else {
-    const by={}; all.filter(x=>MW_HOOKTAG==='all'||x.tag===MW_HOOKTAG).forEach(x=>{ if(!by[x.video_id]||x.last_seen>by[x.video_id].last_seen) by[x.video_id]=x; });
-    list=Object.values(by);
-    const eng=x=>Number(x.views)>0?(Number(x.likes||0)+Number(x.comments||0))/Number(x.views):0;
-    if(MW_HOOKSORT==='views') list.sort((a,b)=>Number(b.views||0)-Number(a.views||0));
-    else if(MW_HOOKSORT==='newest') list.sort((a,b)=>String(b.published_at).localeCompare(String(a.published_at)));
-    else list.sort((a,b)=>eng(b)-eng(a));
-  }
-  const chips=kind==='trend'
-    ? MW_REGIONS.map(r=>'<button class="mw-chip'+(MW_REGION===r[0]?' on':'')+'" onclick="mwSet(\'MW_REGION\',\''+r[0]+'\')">'+esc(r[1])+'</button>').join('')
-    : MW_HOOKTAGS.map(r=>'<button class="mw-chip'+(MW_HOOKTAG===r[0]?' on':'')+'" onclick="mwSet(\'MW_HOOKTAG\',\''+r[0]+'\')">'+esc(r[1])+'</button>').join('')
-      +'<select class="mw-sel" onchange="mwSet(\'MW_HOOKSORT\',this.value)">'+[['views','Most viewed'],['engaging','Most liked / commented per view'],['newest','Newest']].map(o=>'<option value="'+o[0]+'"'+(MW_HOOKSORT===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select>';
-  const meta='<span class="mw-meta">'+list.length+' video'+(list.length===1?'':'s')+(latest?' · YouTube read '+mwAgo(latest):'')
-    +(d.live?' · live from YouTube (not saved yet)':'')
-    +' <button class="btn" style="height:30px;font-size:12px" onclick="mwRefresh(this)"><i class="fa-solid fa-rotate"></i> Refresh</button></span>';
-  const note=kind==='trend'
-    ? '<div class="mw-sub" style="margin:-6px 0 12px">YouTube\u2019s own Trending list'+(MW_REGION==='WORLD'?' - United States, United Kingdom, UAE, Singapore and Australia together, most viewed first':' - in YouTube\u2019s order')+'.</div>'
-    : '<div class="mw-sub" style="margin:-6px 0 12px">The most-watched professionally made Shorts of the 30 days before each read - only brands and studios with 10 lakh+ subscribers, no DIY, comedy, vlogs, gaming or clickbait. Every video found stays in the library.</div>';
-  $('mwBody').innerHTML='<div class="mw-bar">'+chips+meta+'</div>'+note
-    +(list.length?'<div class="mw-grid">'+list.map(x=>mwCard(x,kind)).join('')+'</div>'
-      :'<div class="card card-pad empty"><i class="fa-solid fa-film"></i><div>No videos yet - press Refresh.</div></div>');
-}
-function mwCard(x,kind){
-  const short=kind==='hook'&&Number(x.duration_s)<=180;
-  return '<div class="mw-card" onclick="mwPlay(\''+esc(x.video_id)+'\','+(short?1:0)+')">'
-    +'<div class="mw-thumb'+(short?' v':'')+'" style="background-image:url(\''+esc(x.thumb||'')+'\')">'
-      +(kind==='trend'&&MW_REGION!=='WORLD'&&x.rank?'<span class="mw-rank">#'+x.rank+'</span>':'')
-      +(x.duration_s?'<span class="mw-dur">'+mwDur(x.duration_s)+'</span>':'')+'</div>'
-    +'<div class="mw-cb"><div class="mw-ct" title="'+esc(x.title)+'">'+esc(x.title)+'</div>'
-      +'<div class="mw-cc">'+esc(x.channel||'')+'</div>'
-      +'<div class="mw-cs"><span><i class="fa-solid fa-eye"></i>'+mwNum(x.views)+'</span>'
-        +(x.likes!=null?'<span><i class="fa-solid fa-thumbs-up"></i>'+mwNum(x.likes)+'</span>':'')
-        +(x.comments!=null?'<span><i class="fa-solid fa-comment"></i>'+mwNum(x.comments)+'</span>':'')
-        +'<span><i class="fa-regular fa-clock"></i>'+mwAgo(x.published_at)+'</span></div></div></div>';
-}
-window.mwPlay=function(id,vertical){
-  openModal('<div class="modal-head"><h3><i class="fa-brands fa-youtube" style="color:#dc2626"></i> Video</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="display:flex;justify-content:center;background:#000;padding:0">'
-      +'<iframe src="https://www.youtube.com/embed/'+encodeURIComponent(id)+'?autoplay=1&rel=0" style="border:0;width:'+(vertical?'min(380px,100%)':'100%')+';aspect-ratio:'+(vertical?'9/16':'16/9')+';max-height:78vh" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>'
-    +'<div class="modal-foot"><a class="btn" href="https://www.youtube.com/watch?v='+encodeURIComponent(id)+'" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open on YouTube</a><button class="btn primary" onclick="closeModal()">Close</button></div>',vertical?'md':'lg');
-};
-window.mwSet=function(k,v){ if(k==='MW_REGION') MW_REGION=v; else if(k==='MW_HOOKTAG') MW_HOOKTAG=v; else if(k==='MW_HOOKSORT') MW_HOOKSORT=v;
-  else if(k==='MW_LDAYS') MW_LDAYS=v; else if(k==='MW_LWHO') MW_LWHO=v; else if(k==='MW_LDIST') MW_LDIST=v;
-  if(MW_TAB==='launches') mwDrawLaunches(); else mwVideos(MW_TAB==='hooks'?'hook':'trend'); };
-window.mwRefresh=async function(btn){
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading YouTube…'; }
-  try{ const r=await mwCall({action:'refresh',force:true}); MW_VID=null; toast('Read from YouTube: '+Object.keys(r.saved||{}).map(k=>(r.saved[k])+' '+(k==='trend'?'trend':'hook')+' rows').join(', '),'ok'); }
-  catch(e){ if(/mkt_videos/.test(e.message)) MW_VID=null; else toast(e.message,'err'); MW_VID=null; }
-  renderPage();
-};
-
-/* ---------------------------------------------------------------- Launches (WB RERA) */
-// A developer is marked Competitor when its RERA name holds the distinctive word(s) of a name on the
-// Competitor watch list (e.g. "MERLIN" for Merlin Group); Our Brand for Dream Gateway Hotels Ltd and
-// any RERA developer the watch list ties to our own brand. The words matched are shown on hover.
-const MW_GENERIC=/\b(group|realty|realtors|limited|ltd|pvt|private|kolkata|projects?|by|the|and|properties|developers?|infra(structure)?|homes?|estates?)\b/gi;
-function mwKeyOf(name){ const k=String(name||'').replace(MW_GENERIC,' ').replace(/[^a-z0-9 ]/gi,' ').replace(/\s+/g,' ').trim().toUpperCase(); return k.length>=3?k:String(name||'').toUpperCase().trim(); }
-async function mwLaunches(){
-  if(!MW_RERA){
-    const cols='procode,name,reg_no,reg_date,promoter_name,promoter_type,district,block,police_station,pincode,address,project_type,project_status,apartments,land_area_sqm,built_area_sqm,carpet_area_sqm,completion_date,source_url,list_seen_at';
-    const [rows,wl,tg]=await Promise.all([
-      ciAll(function(){ return sb.schema('camp').from('pi_rera_projects').select(cols).in('district',MW_DISTRICTS).eq('list_status','approved').order('reg_date',{ascending:false}); }),
-      sb.schema('camp').from('competitor_watchlist').select('id,name,category,is_own_brand'),
-      sb.schema('camp').from('pi_targets').select('value,watchlist_id').eq('source','rera').eq('kind','promoter')
-    ]);
-    MW_RERA=rows;
-    const w=(wl&&wl.data)||[];
-    const own=new Set(w.filter(x=>x.is_own_brand).map(x=>x.id));
-    MW_WL={ownPromoters:((tg&&tg.data)||[]).filter(t=>own.has(t.watchlist_id)).map(t=>String(t.value).toUpperCase()),
-      comps:w.filter(x=>x.category==='competitor').map(x=>({name:x.name,key:mwKeyOf(x.name)}))};
-    if(!MW_WL.ownPromoters.length) MW_WL.ownPromoters=['DREAM GATEWAY HOTELS'];
-  }
-  mwDrawLaunches();
-}
-function mwWho(r){
-  const p=String(r.promoter_name||'').toUpperCase();
-  if(MW_WL.ownPromoters.some(x=>p.indexOf(x.replace(/\s+LTD\.?$|\s+LIMITED$/,''))!==-1)) return {k:'own',label:'Our Brand'};
-  const c=MW_WL.comps.find(c=>c.key&&new RegExp('\\b'+c.key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b').test(p));
-  if(c) return {k:'comp',label:c.name};
-  const n=MW_REPUTED.find(x=>x[1].test(p));
-  return n?{k:'rep',label:n[0]}:null;
-}
-/* PREMIUM ONLY (14 Nov 2026, Ayush: "LAUNCHES too should be premium projects ... apartments from well renowned
-   companies", chose "Named developers only"). A launch shows only when its RERA developer is Our Brand, on the
-   Competitor watch list, or one of these well-known developers (matched in the RERA developer name). A project a big
-   developer registers under a differently named company (an SPV) does not match; add its name here to show it. */
-const MW_REPUTED=[
-  ['Ambuja Neotia',/\bAMBUJA\b|\bNEOTIA\b/],['PS Group',/\bPS GROUP\b/],['Merlin',/\bMERLIN\b/],['Siddha',/\bSIDDHA\b/],
-  ['Eden',/\bEDEN\b/],['Godrej',/\bGODREJ\b/],['Srijan',/\bSRIJAN\b/],['DTC',/\bDTC\b/],['Shapoorji Pallonji',/\bSHAPOORJI\b/],
-  ['Tata Housing',/\bTATA (HOUSING|REALTY)\b/],['DLF',/\bDLF\b/],['Sugam',/\bSUGAM\b/],['Shrachi',/\bSHRACHI\b/],['Atri',/\bATRI\b/],
-  ['Primarc',/\bPRIMARC\b/],['Mani Group',/\bMANI GROUP\b/],['Orbit',/\bORBIT\b/],['Salarpuria Sattva',/\bSALARPURIA\b|\bSATTVA\b/],
-  ['Bengal Peerless',/\bBENGAL PEERLESS\b/],['Purti',/\bPURTI\b/],['Unimark',/\bUNIMARK\b/],['Rajwada',/\bRAJWADA\b/],
-  ['Alcove',/\bALCOVE\b/],['Lodha',/\bLODHA\b|\bMACROTECH\b/],['Prestige',/\bPRESTIGE ESTATES?\b/],['Sobha',/\bSOBHA\b/],
-  ['Puravankara',/\bPURAVANKARA\b|\bPROVIDENT HOUSING\b/],['Mahindra Lifespaces',/\bMAHINDRA LIFESPACE/],['South City',/\bSOUTH CITY PROJECTS\b/]
-];
-function mwLaunchList(){
-  const days=MW_LDAYS==='all'?null:Number(MW_LDAYS);
-  const q=MW_LQ.trim().toLowerCase();
-  return MW_RERA.map(r=>Object.assign({},r,{_who:mwWho(r),_d:mwDaysSince(r.reg_date)})).filter(r=>{
-    if(!r._who) return false;   // named developers only (MW_REPUTED)
-    if(days!=null&&(r._d==null||r._d>days)) return false;
-    if(MW_LDIST!=='all'&&r.district!==MW_LDIST) return false;
-    if(MW_LWHO==='own'&&!(r._who&&r._who.k==='own')) return false;
-    if(MW_LWHO==='comp'&&!(r._who&&r._who.k==='comp')) return false;
-    if(q&&[r.name,r.promoter_name,r.address,r.police_station,r.pincode,r.block,r.reg_no].join(' ').toLowerCase().indexOf(q)===-1) return false;
-    return true;
-  });
-}
-function mwDrawLaunches(){
-  const b=$('mwBody'); if(!b) return;
-  const chip=(k,v,l,cur)=>'<button class="mw-chip'+(cur===v?' on':'')+'" onclick="mwSet(\''+k+'\',\''+v+'\')">'+l+'</button>';
-  b.innerHTML='<div class="mw-bar">'
-      +[['all','All named developers'],['own','Our Brand'],['comp','Competitors']].map(o=>chip('MW_LWHO',o[0],o[1],MW_LWHO)).join('')
-      +'<select class="mw-sel" onchange="mwSet(\'MW_LDIST\',this.value)"><option value="all">Kolkata + nearby</option>'+MW_DISTRICTS.map(d=>'<option'+(MW_LDIST===d?' selected':'')+'>'+esc(d)+'</option>').join('')+'</select>'
-      +'<input class="mw-in" placeholder="Search project, developer, area, PIN" value="'+esc(MW_LQ)+'" oninput="MW_LQ=this.value;clearTimeout(window._mwT);window._mwT=setTimeout(mwLaunchTable,250)">'
-      +'<span class="mw-meta" id="mwLCount"></span>'
-    +'</div>'
-    +'<div class="mw-sub" style="margin:-6px 0 12px">Projects by well-known developers (Our Brand, the Competitor list, and names such as Ambuja Neotia, PS Group, Merlin, Siddha, Godrej, Shapoorji Pallonji) registered in the last 3 months on West Bengal RERA in Kolkata, North 24-Parganas, South 24-Parganas and Howrah. "Launched" is the RERA registration date. Areas are RERA\u2019s square metres shown in sq ft.</div>'
-    +'<div id="mwLT"></div>';
-  mwLaunchTable();
-}
-function mwLaunchTable(){
-  const host=$('mwLT'); if(!host) return;
-  const list=mwLaunchList();
-  const seen=MW_RERA.reduce((m,x)=>x.list_seen_at>m?x.list_seen_at:m,'');
-  const c=$('mwLCount'); if(c) c.textContent=list.length+' project'+(list.length===1?'':'s')+(seen?' · RERA read '+mwAgo(seen):'');
-  const sqft=v=>v==null||v===''?'—':inrGroup(String(Math.round(Number(v)*10.7639)));
-  host.innerHTML=list.length?'<div class="mw-tw" style="max-height:calc(100vh - 300px)"><table class="mw-t"><thead><tr>'
-        +'<th>Launched</th><th>Project</th><th>Developer</th><th>Location</th><th>Type</th><th style="text-align:right">Flats</th><th style="text-align:right">Built-up (sq ft)</th><th style="text-align:right">Land (sq ft)</th><th>Completion</th><th>RERA No.</th></tr></thead><tbody>'
-        +list.map(r=>'<tr>'
-          +'<td><div class="mw-days'+(r._d!=null&&r._d<=30?' new':'')+'">'+(r._d==null?'—':r._d===0?'Today':r._d+' day'+(r._d===1?'':'s')+' ago')+'</div><div class="mw-sub">'+mwDmy(r.reg_date)+'</div></td>'
-          +'<td><div class="mw-pn">'+esc(String(r.name||'').replace(/^"+|"+$/g,''))+'</div><div class="mw-sub">'+esc(r.project_status||'')+'</div></td>'
-          +'<td><div>'+esc(r.promoter_name||'—')+'</div><div class="mw-sub">'+esc(r.promoter_type||'')+'</div>'
-            +(r._who?'<span class="mw-tag '+r._who.k+'">'+esc(r._who.k==='own'?'Our Brand':r._who.k==='comp'?'Competitor · '+r._who.label:r._who.label)+'</span>':'')+'</td>'
-          +'<td><div>'+esc(r.address||'—')+'</div><div class="mw-sub">'+esc([r.police_station,r.block,r.district,r.pincode].filter(Boolean).join(' · '))+'</div></td>'
-          +'<td>'+esc(r.project_type||'—')+'</td>'
-          +'<td style="text-align:right">'+(r.apartments==null?'—':esc(String(r.apartments)))+'</td>'
-          +'<td style="text-align:right">'+sqft(r.built_area_sqm)+'</td>'
-          +'<td style="text-align:right">'+sqft(r.land_area_sqm)+'</td>'
-          +'<td style="white-space:nowrap">'+mwDmy(r.completion_date)+'</td>'
-          +'<td><a href="'+esc(r.source_url||('https://rera.wb.gov.in/project_details.php?procode='+r.procode))+'" target="_blank" rel="noopener" style="white-space:nowrap">'+esc(r.reg_no||'View')+' <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i></a></td>'
-        +'</tr>').join('')+'</tbody></table></div>'
-      :'<div class="card card-pad empty"><i class="fa-solid fa-building"></i><div>No projects for this choice.</div></div>';
 }
 /* ============================ MARKETING ANALYTICS ============================
    The "Analytics" tab of Campaign Analytics (16 Nov 2026, Ayush: "make a new Tab named Analytics and start with these
@@ -42689,273 +42557,3 @@ maReg({id:'hours',title:'Best hours',icon:'fa-solid fa-clock',data:maHourData,re
     return maHead('fa-solid fa-clock','','Best hours',
         'Last 28 days, lead campaigns: leads each 4-hour block brought for its share of spend. +30% = 30% more leads than its spend predicts at the average rate. A real pattern needs the chi-square test (p < 0.01) and some block 15%+ off average. Use it to schedule ads or shift bids by time of day.')
       +(rows.length?maTable(['Platform'].concat(d.blocks.map(function(b){ return b[0]+':00–'+b[1]+':00'; })),rows):'<div class="ma-card">Not enough leads in the hourly figures yet.</div>'); }});
-/* MARKET WATCH - OUR ADS' HOOK AND HOLD RATES (16 Nov 2026, Ayush: "Build all three"): our own Facebook video ads ranked by
-   hook rate (3-second views / impressions) and hold rate (ThruPlays / 3-second views), joined to the CRM's leads and
-   qualified leads per ad. Shown as Hook Library > Our ads (50-market-watch-ai.js). The Kolkata-buyers and the word-rule
-   launch list that were here were replaced the same evening by the AI Trends and Launches (Ayush: "Remove Kolkata Buyers",
-   "the data of Launches is wrong, it's not based on Ads"). */
-
-const MWP_CSS='<style>'
-  +'.mwp-stats{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px}'
-  +'.mwp-st{background:var(--card,#fff);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:150px}'
-  +'.mwp-st b{display:block;font-size:20px;font-weight:700;color:var(--ink)}.mwp-st span{font-size:11.5px;color:var(--slate)}'
-  +'.mwp-card{background:var(--card,#fff);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}'
-  +'.mwp-th{aspect-ratio:1/1;background:#0f172a center/contain no-repeat}'
-  +'.mwp-cb{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}'
-  +'.mwp-row{display:flex;gap:6px;flex-wrap:wrap}'
-  +'.mwp-pill{font-size:11.5px;font-weight:650;padding:3px 8px;border-radius:999px;background:#f1f5f9;color:#334155}'
-  +'.mwp-pill.good{background:#dcfce7;color:#166534}.mwp-pill.low{background:#fef3c7;color:#92400e}'
-  +'.mwp-h{font-size:15px;font-weight:700;margin:4px 0 4px;color:var(--ink)}'
-  +'.mwp-up{color:#16a34a;font-weight:700}.mwp-dn{color:#dc2626;font-weight:700}'
-  +'.mwp-sec{margin:0 0 18px}'
-  +'</style>';
-const mwpDay=function(n){ const d=new Date(Date.now()+5.5*3600e3); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); };
-const mwpPct=function(x,dp){ return isFinite(x)?(x*100).toFixed(dp==null?1:dp)+'%':'—'; };
-const mwpRs=function(x){ return isFinite(x)&&x>0?'₹'+inrGroup(String(Math.round(x))):'—'; };
-function mwpMed(a){ const s=a.filter(isFinite).slice().sort((x,y)=>x-y); if(!s.length) return NaN; const m=s.length>>1; return s.length%2?s[m]:(s[m-1]+s[m])/2; }
-function mwpSpark(vals,w,h){
-  w=w||110; h=h||26; const v=vals.map(Number).filter(isFinite); if(v.length<2) return '';
-  const mx=Math.max.apply(null,v), mn=Math.min.apply(null,v), r=mx-mn||1;
-  const pts=v.map((y,i)=>(i*(w-2)/(v.length-1)+1).toFixed(1)+','+(h-2-(y-mn)/r*(h-4)).toFixed(1)).join(' ');
-  return '<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'" style="display:block"><polyline points="'+pts+'" fill="none" stroke="var(--brand)" stroke-width="1.6" stroke-linejoin="round"/></svg>';
-}
-
-/* ---------------------------------------------------------------- 1. Hook Library > Our ads */
-let MWP_HOOKS=null, MWP_HSORT='ql';
-async function mwOurHooks(){
-  const x=$('mwX'); if(!x) return;
-  if(!MWP_HOOKS){
-    const from=mwpDay(-90);
-    let rows;
-    try{
-      rows=await ciAll(()=>sb.schema('camp').from('ads_ad_daily').select('ad_id,campaign_id,spend,impressions,video_3s,video_p25,video_p50,video_p100,video_thruplay').eq('platform','meta').gte('day',from).gt('impressions',0));
-    }catch(e){
-      if(/video_3s/.test((e&&e.message)||'')){ x.innerHTML=MWP_CSS+'<div class="card card-pad empty"><i class="fa-solid fa-clock"></i><div>Our ads\u2019 video plays are read from Facebook tonight (from 20:20). Hook and hold rates show here from tomorrow morning.</div></div>'; return; }
-      throw e;
-    }
-    const by={};
-    rows.forEach(r=>{ const o=by[r.ad_id]=by[r.ad_id]||{ad_id:r.ad_id,campaign_id:r.campaign_id,spend:0,imp:0,v3:0,p25:0,p50:0,p100:0,thru:0};
-      o.spend+=+r.spend||0; o.imp+=+r.impressions||0; o.v3+=+r.video_3s||0; o.p25+=+r.video_p25||0; o.p50+=+r.video_p50||0; o.p100+=+r.video_p100||0; o.thru+=+r.video_thruplay||0; });
-    const ads=Object.values(by).filter(o=>o.v3>0&&o.imp>=3000);
-    const ids=ads.map(o=>o.ad_id);
-    const [crm,ents]=await Promise.all([
-      ids.length?ciAll(()=>sb.schema('camp').from('crm_adset_daily').select('ad_id,leads,qualified').eq('src','facebook').eq('level','ad').gte('day',from)):[],
-      ids.length?ciAll(()=>sb.schema('camp').from('ads_entities').select('id,kind,name,thumbnail,body,status').eq('platform','meta').in('kind',['ad','campaign'])):[]
-    ]);
-    const cr={}; crm.forEach(r=>{ const o=cr[r.ad_id]=cr[r.ad_id]||{l:0,q:0}; o.l+=+r.leads||0; o.q+=+r.qualified||0; });
-    const en={}; ents.forEach(e=>{ en[e.kind+'|'+e.id]=e; });
-    // Shrunk rates (Beta prior from all our video ads): an ad with few impressions is pulled toward the average, so a
-    // lucky 2,000-impression ad does not top a steady 2-lakh one.
-    const H=ads.reduce((s,o)=>s+o.v3,0)/ads.reduce((s,o)=>s+o.imp,0)||0;
-    const T=ads.reduce((s,o)=>s+o.thru,0)/ads.reduce((s,o)=>s+o.v3,0)||0;
-    const KH=2000, KT=300;
-    ads.forEach(o=>{ const c=cr[o.ad_id]||{l:0,q:0}; o.leads=c.l; o.ql=c.q;
-      o.hook=(o.v3+KH*H)/(o.imp+KH); o.hold=(o.thru+KT*T)/(o.v3+KT); o.rawHook=o.v3/o.imp; o.rawHold=o.v3?o.thru/o.v3:0;
-      const a=en['ad|'+o.ad_id]||{}, c2=en['campaign|'+o.campaign_id]||{};
-      o.name=a.name||o.ad_id; o.thumb=a.thumbnail||''; o.body=a.body||''; o.status=a.status||''; o.camp=c2.name||''; });
-    MWP_HOOKS={ads,H,T,medH:mwpMed(ads.map(o=>o.hook)),medT:mwpMed(ads.map(o=>o.hold))};
-  }
-  mwDrawOurHooks();
-}
-window.mwHSort=function(v){ MWP_HSORT=v; mwDrawOurHooks(); };
-function mwDrawOurHooks(){
-  const x=$('mwX'); if(!x||!MWP_HOOKS) return;
-  const d=MWP_HOOKS, list=d.ads.slice();
-  if(!list.length){ x.innerHTML=MWP_CSS+'<div class="card card-pad empty"><i class="fa-solid fa-film"></i><div>No video ads with 3,000+ impressions in the last 90 days yet.</div></div>'; return; }
-  if(MWP_HSORT==='hook') list.sort((a,b)=>b.hook-a.hook);
-  else if(MWP_HSORT==='hold') list.sort((a,b)=>b.hold-a.hold);
-  else list.sort((a,b)=>(b.ql-a.ql)||(b.hook-a.hook));
-  const chip=(v,l)=>'<button class="mw-chip'+(MWP_HSORT===v?' on':'')+'" onclick="mwHSort(\''+v+'\')">'+l+'</button>';
-  const pill=(lab,v,med)=>'<span class="mwp-pill '+(v>=med*1.15?'good':v<=med*0.85?'low':'')+'">'+lab+' '+mwpPct(v)+'</span>';
-  x.innerHTML=MWP_CSS
-    +'<div class="mwp-stats">'
-      +'<div class="mwp-st"><b>'+list.length+'</b><span>video ads, last 90 days</span></div>'
-      +'<div class="mwp-st"><b>'+mwpPct(d.H)+'</b><span>hook rate overall (3-sec views / impressions)</span></div>'
-      +'<div class="mwp-st"><b>'+mwpPct(d.T)+'</b><span>hold rate overall (ThruPlays / 3-sec views)</span></div>'
-    +'</div>'
-    +'<div class="mw-bar">'+chip('ql','Most qualified leads')+chip('hook','Best hook')+chip('hold','Best hold')+'</div>'
-    +'<div class="mw-sub" style="margin:-6px 0 12px">Green = 15%+ above our median, amber = 15%+ below. Rates are adjusted for how many people saw the ad, so a small lucky ad does not top a proven one. Leads and QL are the CRM\u2019s count for that ad.</div>'
-    +'<div class="mw-grid">'+list.slice(0,24).map(o=>{
-      const cpq=o.ql?o.spend/o.ql:NaN;
-      return '<div class="mwp-card" title="'+esc('Of 3-second viewers: '+mwpPct(o.p25/o.v3,0)+' reached 25%, '+mwpPct(o.p50/o.v3,0)+' 50%, '+mwpPct(o.p100/o.v3,0)+' the end')+'">'
-        +'<div class="mwp-th" style="background-image:url(\''+esc(o.thumb)+'\')"></div>'
-        +'<div class="mwp-cb"><div class="mw-ct" title="'+esc(o.name)+'">'+esc(o.name)+'</div>'
-          +'<div class="mw-cc">'+esc(o.camp)+(o.status&&o.status!=='ACTIVE'?' · '+esc(o.status.toLowerCase())+'':'')+'</div>'
-          +'<div class="mwp-row">'+pill('Hook',o.hook,d.medH)+pill('Hold',o.hold,d.medT)+'</div>'
-          +'<div class="mw-cs"><span>'+inrGroup(String(o.leads))+' leads</span><span><b>'+inrGroup(String(o.ql))+'</b> QL</span><span>'+(o.ql?mwpRs(cpq)+' / QL':mwpRs(o.spend)+' spent')+'</span></div>'
-        +'</div></div>';
-    }).join('')+'</div>';
-}
-
-/* MARKET WATCH - AI TABS (16 Nov 2026, Ayush: "Can we put AI somewhere if free ... Trending means it's going on lately,
-   people are discussing it, it's blowing up - not necessarily a video ... videos, photos, movies, a phrase, a song ...
-   everything positive ... the Hooks are not hooks, they are proper videos - I want hook ideas where the user's thumb stops
-   ... attracting hooks on photos as well ... Launch data from its data").
-   The work is done by the market-watch edge function (ai.ts): Trends every 3 hours, Hook ideas and Launches every
-   morning; this page reads what it saved (action ai_get). Gemini / Groq free tiers. */
-
-let MWA={trends:null,hooks:null,launches:null}, MWA_REG='all', MWA_KIND='all', MWA_HTAB='ideas', MWA_HFMT='all';
-const MWA_CSS='<style>'
-  +'.mwa-card{background:var(--card,#fff);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}'
-  +'.mwa-pic{aspect-ratio:16/9;background:#e2e8f0 center/cover no-repeat;position:relative}'
-  +'.mwa-pic.none{display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:26px;background:linear-gradient(135deg,#eef2ff,#f8fafc)}'
-  +'.mwa-badge{position:absolute;left:8px;top:8px;background:#16a34a;color:#fff;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px}'
-  +'.mwa-kind{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--brand)}'
-  +'.mwa-b{padding:11px 13px 13px;display:flex;flex-direction:column;gap:6px;flex:1}'
-  +'.mwa-t{font-weight:700;font-size:15px;line-height:1.3;color:var(--ink)}'
-  +'.mwa-why{font-size:12.5px;color:var(--ink-2,#334155);line-height:1.45}'
-  +'.mwa-sig{display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--slate)}'
-  +'.mwa-sig a{color:var(--slate);text-decoration:none}.mwa-sig a:hover{color:var(--brand)}'
-  +'.mwa-idea{margin-top:auto;background:#f8fafc;border-radius:8px;padding:7px 9px;font-size:12px;color:#334155;line-height:1.4}'
-  +'.mwa-idea b{color:var(--brand)}'
-  +'.mwa-hook{font-size:17px;font-weight:750;line-height:1.3;color:var(--ink)}'
-  +'.mwa-row{font-size:12px;color:#334155;line-height:1.45}.mwa-row span{color:var(--slate);font-weight:600}'
-  +'.mwa-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;margin-right:4px}'
-  +'.mwa-tag.v{background:#fee2e2;color:#991b1b}.mwa-tag.p{background:#e0f2fe;color:#075985}.mwa-tag.t{background:#dcfce7;color:#166534}'
-  +'.mwa-copy{border:1px solid var(--line);background:#fff;border-radius:8px;height:28px;padding:0 10px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;align-self:flex-start}'
-  +'.mwa-media{aspect-ratio:1/1;background:#0f172a center/contain no-repeat;position:relative}'
-  +'.mwa-media video{width:100%;height:100%;object-fit:contain;display:block}'
-  +'.mwa-wait{display:flex;align-items:center;gap:10px}'
-  +'</style>';
-
-async function mwaGet(what){
-  if(MWA[what]) return MWA[what];
-  const r=await mwCall({action:'ai_get',what:what}); MWA[what]=r.data||null; return MWA[what];
-}
-window.mwaRefresh=async function(what,btn){
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Asking AI…'; }
-  try{ const r=await mwCall({action:'ai_refresh',what:what}); MWA[what]=r.data; }
-  catch(e){ toast(e.message,'err'); }
-  if(what==='trends') mwaDrawTrends(); else if(what==='hooks') mwaDrawHooks(); else mwaDrawLaunches();
-};
-function mwaMeta(d,what){
-  return '<span class="mw-meta">'+(d&&d.at?'AI read '+mwAgo(d.at):'')
-    +' <button class="btn" style="height:30px;font-size:12px" onclick="mwaRefresh(\''+what+'\',this)"><i class="fa-solid fa-rotate"></i> Refresh</button></span>';
-}
-function mwaEmpty(what,txt){
-  return '<div class="card card-pad empty"><i class="fa-solid fa-wand-magic-sparkles"></i><div>'+txt+'</div>'
-    +'<button class="btn primary" style="margin-top:10px" onclick="mwaRefresh(\''+what+'\',this)">Read now</button></div>';
-}
-
-/* ---------------------------------------------------------------- Trends */
-const MWA_KINDS=[['all','All'],['screen','Movies & shows'],['song','Music'],['person','People'],['sport','Sport'],['techbiz','Tech & business'],['moment','Moments & phrases']];
-const MWA_KMAP={movie:'screen',show:'screen',song:'song',person:'person',sport:'sport',tech:'techbiz',business:'techbiz',phrase:'moment',event:'moment',festival:'moment',other:'moment'};
-const MWA_KICON={movie:'fa-film',show:'fa-tv',song:'fa-music',person:'fa-user',sport:'fa-futbol',tech:'fa-microchip',business:'fa-briefcase',phrase:'fa-quote-left',event:'fa-calendar-days',festival:'fa-star',other:'fa-bolt'};
-async function mwAiTrends(){ await mwaGet('trends'); mwaDrawTrends(); }
-window.mwaSet=function(k,v){ if(k==='reg') MWA_REG=v; else if(k==='kind') MWA_KIND=v; else if(k==='htab') MWA_HTAB=v; else if(k==='hfmt') MWA_HFMT=v;
-  if(MW_TAB==='hooks') mwaDrawHooks(); else if(MW_TAB==='launches') mwaDrawLaunches(); else mwaDrawTrends(); };
-function mwaChip(k,v,l,cur){ return '<button class="mw-chip'+(cur===v?' on':'')+'" onclick="mwaSet(\''+k+'\',\''+v+'\')">'+l+'</button>'; }
-function mwaDrawTrends(){
-  const b=$('mwBody'); if(!b) return;
-  const d=MWA.trends;
-  const bar='<div class="mw-bar">'+[['all','India + World'],['IN','India'],['WORLD','World']].map(o=>mwaChip('reg',o[0],o[1],MWA_REG)).join('')+mwaMeta(d,'trends')+'</div>'
-    +'<div class="mw-bar">'+MWA_KINDS.map(o=>mwaChip('kind',o[0],o[1],MWA_KIND)).join('')+'</div>';
-  if(!d||!(d.topics||[]).length){ b.innerHTML=MWA_CSS+bar+mwaEmpty('trends','Trends are read every 3 hours.'); return; }
-  const list=d.topics.filter(t=>(MWA_REG==='all'||t.region===MWA_REG)&&(MWA_KIND==='all'||MWA_KMAP[t.kind]===MWA_KIND));
-  const day=Date.now()-24*3600e3;
-  b.innerHTML=MWA_CSS+bar
-    +'<div class="mw-sub" style="margin:-6px 0 12px">What is rising right now - searches that jumped on Google, Wikipedia pages read far more than usual, YouTube’s trending chart - merged into topics by AI. Only positive topics; anything sad, negative or divisive is left out.</div>'
-    +(list.length?'<div class="mw-grid">'+list.map(t=>{
-      const sig=[];
-      if(t.searches) sig.push('<span><i class="fa-brands fa-google"></i> '+mwNum(t.searches)+'+ searches</span>');
-      if(t.spike) sig.push('<span><i class="fa-brands fa-wikipedia-w"></i> read '+(t.spike>=50?'50+':t.spike)+'× usual</span>');
-      if(t.yt_views) sig.push('<span><i class="fa-brands fa-youtube"></i> '+mwNum(t.yt_views)+' views</span>');
-      const links=(t.links||[]).filter(l=>l.url).slice(0,3).map(l=>'<a href="'+esc(l.url)+'" target="_blank" rel="noopener" title="'+esc(l.title)+'"><i class="fa-solid fa-arrow-up-right-from-square"></i> '+esc(l.src==='google'?'News':l.src==='wikipedia'?'Wikipedia':'YouTube')+'</a>').join('');
-      return '<div class="mwa-card">'
-        +(t.picture?'<div class="mwa-pic" style="background-image:url(\''+esc(t.picture)+'\')">':'<div class="mwa-pic none"><i class="fa-solid '+(MWA_KICON[t.kind]||'fa-bolt')+'"></i>')
-          +(Date.parse(t.first_seen)>day?'<span class="mwa-badge">New today</span>':'')+'</div>'
-        +'<div class="mwa-b"><div class="mwa-kind"><i class="fa-solid '+(MWA_KICON[t.kind]||'fa-bolt')+'"></i> '+esc(t.kind)+' · '+(t.region==='IN'?'India':'World')+'</div>'
-          +'<div class="mwa-t">'+esc(t.topic)+'</div><div class="mwa-why">'+esc(t.why)+'</div>'
-          +'<div class="mwa-sig">'+sig.join('')+'</div><div class="mwa-sig">'+links+'</div>'
-          +(t.hook?'<div class="mwa-idea"><b>Idea:</b> '+esc(t.hook)+'</div>':'')+'</div></div>';
-    }).join('')+'</div>':'<div class="card card-pad empty"><i class="fa-solid fa-filter"></i><div>Nothing in this choice right now.</div></div>');
-}
-
-/* ---------------------------------------------------------------- Hook Library */
-async function mwAiHooks(){ if(MWA_HTAB!=='ours') await mwaGet('hooks'); mwaDrawHooks(); }
-window.mwaCopy=function(i){ const x=(MWA.hooks&&MWA.hooks.ideas||[])[i]; if(!x) return;
-  const txt=x.hook+(x.on_screen?'\nOn screen: '+x.on_screen:'')+(x.visual?'\nShot: '+x.visual:'');
-  try{ navigator.clipboard.writeText(txt).then(()=>toast('Hook copied','ok')); }catch(e){ toast('Could not copy','err'); } };
-function mwaDrawHooks(){
-  const b=$('mwBody'); if(!b) return;
-  const d=MWA.hooks;
-  const tabs='<div class="mw-bar">'+mwaChip('htab','ideas','Hook ideas',MWA_HTAB)+mwaChip('htab','proven','Proven in ads',MWA_HTAB)+mwaChip('htab','ours','Our ads',MWA_HTAB)
-    +(MWA_HTAB==='ours'?'':mwaMeta(d,'hooks'))+'</div>';
-  if(MWA_HTAB==='ours'){ b.innerHTML=MWA_CSS+tabs+'<div id="mwX"><div class="loader"><div class="spin"></div></div></div>'; mwOurHooks().catch(e=>{ const x=$('mwX'); if(x) x.innerHTML='<div class="card card-pad empty"><div>Could not load: '+esc(e.message)+'</div></div>'; }); return; }
-  if(!d){ if(!MWA.hooks){ mwaGet('hooks').then(()=>{ if(MWA.hooks) mwaDrawHooks(); }); } b.innerHTML=MWA_CSS+tabs+mwaEmpty('hooks','Hook ideas are written every morning.'); return; }
-  if(MWA_HTAB==='ideas'){
-    const list=(d.ideas||[]).map((x,i)=>Object.assign({_i:i},x)).filter(x=>MWA_HFMT==='all'||x.format===MWA_HFMT);
-    b.innerHTML=MWA_CSS+tabs
-      +'<div class="mw-bar">'+[['all','Video + photo'],['video','Video openers'],['photo','Photo headlines']].map(o=>mwaChip('hfmt',o[0],o[1],MWA_HFMT)).join('')+'</div>'
-      +'<div class="mw-sub" style="margin:-6px 0 12px">Openings written by AI for our projects - what the first 2 seconds of a video or the headline on a photo should be to stop the thumb. They ride today’s positive trends and the patterns of competitor ads that kept running 30+ days. Facts are kept to what we told it: check any detail before using.</div>'
-      +(list.length?'<div class="mw-grid">'+list.map(x=>'<div class="mwa-card"><div class="mwa-b">'
-        +'<div><span class="mwa-tag '+(x.format==='video'?'v':'p')+'"><i class="fa-solid '+(x.format==='video'?'fa-video':'fa-image')+'"></i> '+(x.format==='video'?'Video':'Photo')+'</span><span class="mwa-tag">'+esc(x.pattern||'')+'</span>'+(x.trend?'<span class="mwa-tag t">'+esc(x.trend)+'</span>':'')+'</div>'
-        +'<div class="mwa-hook">“'+esc(x.hook)+'”</div>'
-        +(x.on_screen?'<div class="mwa-row"><span>On screen:</span> '+esc(x.on_screen)+'</div>':'')
-        +(x.visual?'<div class="mwa-row"><span>'+(x.format==='video'?'First 2 seconds:':'The photo:')+'</span> '+esc(x.visual)+'</div>':'')
-        +(x.why?'<div class="mwa-row"><span>Why it stops the scroll:</span> '+esc(x.why)+'</div>':'')
-        +'<div class="mwa-row"><span>For:</span> '+esc(x.project||'')+'</div>'
-        +'<button class="mwa-copy" onclick="mwaCopy('+x._i+')"><i class="fa-regular fa-copy"></i> Copy</button>'
-        +'</div></div>').join('')+'</div>':'<div class="card card-pad empty"><div>No ideas in this choice.</div></div>');
-    return;
-  }
-  // proven: competitor ads still running after 30+ days - the opening line and the creative
-  const list=(d.proven||[]);
-  b.innerHTML=MWA_CSS+tabs
-    +'<div class="mw-sub" style="margin:-6px 0 12px">Competitor ads that are still running after 30+ days - a brand keeps paying only for an ad that works. Their opening line is the hook; AI names the pattern and why it works.</div>'
-    +(list.length?'<div class="mw-grid">'+list.map((x,i)=>'<div class="mwa-card" style="cursor:pointer" onclick="'+(x.snapshot?'window.open(\''+esc(x.snapshot)+'\',\'_blank\')':'')+'">'
-      +'<div class="mwa-media" id="mwaM'+i+'"></div>'
-      +'<div class="mwa-b"><div><span class="mwa-tag '+(x.media_type==='video'?'v':'p')+'">'+(x.media_type==='video'?'Video':'Photo')+'</span>'+(x.pattern?'<span class="mwa-tag">'+esc(x.pattern)+'</span>':'')+'<span class="mwa-tag t">Running '+x.days+' days</span></div>'
-        +'<div class="mwa-hook" style="font-size:15px">“'+esc(x.first)+'”</div>'
-        +(x.why?'<div class="mwa-row"><span>Why it works:</span> '+esc(x.why)+'</div>':'')
-        +'<div class="mw-cc">'+esc(x.brand||'')+'</div></div></div>').join('')+'</div>'
-      :'<div class="card card-pad empty"><div>No long-running competitor ads found.</div></div>');
-  mwaMedia(list,'mwaM');
-}
-// the ad's picture / first video frame, through the same signed links as Competitor Ads
-function mwaMedia(list,prefix){
-  if(typeof compThumbFor!=='function'||typeof compSignedUrl!=='function') return;
-  list.forEach((x,i)=>{ const el=$(prefix+i); if(!el) return; const m=compThumbFor(x); if(!m) return;
-    compSignedUrl(m.key).then(u=>{ if(!u||!$(prefix+i)) return;
-      if(m.kind==='video') el.innerHTML='<video src="'+esc(u)+'#t=0.1" muted playsinline preload="metadata"></video>'; else el.style.backgroundImage='url(\''+u+'\')'; }); });
-}
-
-/* ---------------------------------------------------------------- Launches */
-/* Premium and luxury residential launches across India, from launch news read by AI (16 Nov 2026, Ayush: "Premium and
-   Luxury Launches but all over India ... not through Ads ... don't consider CPs"; later the same evening: "limited to these
-   companies or brands" - the 18 developers in MWA_DEVS, matched in the edge function). Filters: developer and city. */
-const MWA_DEVS=['DTC Group','Siddha Group','Srijan Realty','Diamond Group','Merlin Group','Eden Group','Ambuja Neotia','Alcove Realty','Godrej Properties',
-  'Mani Group','Vinayak Group','Unimark Group','Emami Realty','Sugam Homes','Primarc Group','Orbit Group','Gems Group'];
-const MWA_CITY=[['all','All India'],['mum','Mumbai region'],['ncr','Delhi NCR'],['blr','Bengaluru'],['pune','Pune'],['hyd','Hyderabad'],['chn','Chennai'],['kol','Kolkata'],['other','Other cities']];
-function mwaCityOf(c){ c=String(c||'').toLowerCase();
-  if(/mumbai|thane|navi mumbai|panvel|worli|bandra|andheri|powai|borivali|mira|vasai|kalyan|dombivli|lonavala|alibaug/.test(c)) return 'mum';
-  if(/gurugram|gurgaon|noida|delhi|ghaziabad|faridabad|greater noida|sonipat|ncr/.test(c)) return 'ncr';
-  if(/bengaluru|bangalore/.test(c)) return 'blr'; if(/pune|pimpri|hinjewadi|kharadi/.test(c)) return 'pune';
-  if(/hyderabad|secunderabad|gachibowli|kokapet/.test(c)) return 'hyd'; if(/chennai/.test(c)) return 'chn';
-  if(/kolkata|howrah|rajarhat|new town|newtown|salt lake/.test(c)) return 'kol'; return 'other'; }
-let MWA_LCITY='all', MWA_LDEV='all';
-async function mwAiLaunches(){ await mwaGet('launches'); mwaDrawLaunches(); }
-window.mwaLSet=function(k,v){ if(k==='city') MWA_LCITY=v; else MWA_LDEV=v; mwaDrawLaunches(); };
-function mwaDrawLaunches(){
-  const b=$('mwBody'); if(!b) return;
-  const d=MWA.launches;
-  const ch=(k,v,l,cur)=>'<button class="mw-chip'+(cur===v?' on':'')+'" onclick="mwaLSet(\''+k+'\',\''+v+'\')">'+l+'</button>';
-  const bar='<div class="mw-bar"><select class="mw-sel" onchange="mwaLSet(\'dev\',this.value)"><option value="all">All 17 developers</option>'
-      +MWA_DEVS.map(x=>'<option'+(MWA_LDEV===x?' selected':'')+'>'+esc(x)+'</option>').join('')+'</select>'+mwaMeta(d,'launches')+'</div>'
-    +'<div class="mw-bar">'+MWA_CITY.map(o=>ch('city',o[0],o[1],MWA_LCITY)).join('')+'</div>';
-  if(!d||!(d.projects||[]).length||!('launched' in (d.projects[0]||{}))){ b.innerHTML=MWA_CSS+bar+mwaEmpty('launches','Launch news is read by AI every morning.'); return; }
-  const list=d.projects.filter(p=>(MWA_LDEV==='all'||p.brand===MWA_LDEV)&&(MWA_LCITY==='all'||mwaCityOf(p.city+' '+p.locality)===MWA_LCITY));
-  b.innerHTML=MWA_CSS+bar
-    +'<div class="mw-sub" style="margin:0 0 12px">New residential projects by DTC, Siddha, Srijan, Diamond, Merlin, Eden, Ambuja Neotia, Alcove, Godrej, Mani, Vinayak, Unimark, Emami, Sugam, Primarc, Orbit and Gems - anywhere in India, launched in the last 60 days. Every morning AI reads the launch news and searches the web for each developer; a new building is added to this list and drops off 60 days after its launch. Brokers and channel partners are left out.</div>'
-    +(list.length?'<div class="mw-tw" style="max-height:calc(100vh - 320px)"><table class="mw-t"><thead><tr><th>Launched</th><th>Project</th><th>Developer</th><th>Location</th><th>Segment</th><th>Price from · Size</th><th>News</th></tr></thead><tbody>'
-      +list.map(p=>{ const dd=mwDaysSince(p.launched);
-        return '<tr><td><div class="mw-days'+(dd!=null&&dd<=14?' new':'')+'">'+(dd==null?'—':dd===0?'Today':dd+' day'+(dd===1?'':'s')+' ago')+'</div><div class="mw-sub">'+mwDmy(p.launched)+'</div></td>'
-          +'<td><div class="mw-pn">'+esc(p.project)+'</div>'+(p.first_seen&&Date.now()-Date.parse(p.first_seen)<36*3600e3&&d.projects.some(x=>x.first_seen&&x.first_seen<p.first_seen)?'<span class="mw-tag own">New - added today</span>':'')+(p.reports>1?'<div class="mw-sub">'+p.reports+' reports</div>':'')+'</td>'
-          +'<td>'+esc(p.developer||'—')+'</td>'
-          +'<td>'+esc([p.locality,p.city].filter(Boolean).join(', ')||'—')+'</td>'
-          +'<td>'+(p.segment?'<span class="mw-tag '+(p.segment==='luxury'?'comp':'rep')+'">'+esc(p.segment.charAt(0).toUpperCase()+p.segment.slice(1))+'</span>':'—')+'</td>'
-          +'<td>'+esc([p.price,p.size].filter(Boolean).join(' · ')||'—')+'</td>'
-          +'<td>'+(p.news||[]).map(n=>'<div><a href="'+esc(n.link)+'" target="_blank" rel="noopener" title="'+esc(n.title)+'">'+esc(n.source||'News')+' <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i></a></div>').join('')+'</td></tr>'; }).join('')
-      +'</tbody></table></div>':'<div class="card card-pad empty"><div>No launches for this choice in the last 60 days.</div></div>');
-}
-
