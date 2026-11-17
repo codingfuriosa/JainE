@@ -35,7 +35,6 @@ const NAV=[
   {group:'Governance',items:[
     {id:'finance',label:'Finance Vault',icon:'fa-indian-rupee-sign'},
     {id:'accounts',label:'Accounts',icon:'fa-calculator'},
-    {id:'legal',label:'Legal',icon:'fa-scale-balanced'},
     {id:'legal2',label:'Legal 2',icon:'fa-scale-balanced'},
     {id:'compliance',label:'Renewals & Compliance',icon:'fa-calendar-check'},
   ]},
@@ -46,7 +45,7 @@ const NAV=[
        Metrics no longer has a page: its tabs live in Our Brand and Competitor Data. */
     {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},   // named Our Brand 16 Oct - 6 Nov 2026
     {id:'competitors',label:'Competitor Data',icon:'fa-magnifying-glass-chart'},
-    {id:'market_watch',label:'Market Watch',icon:'fa-binoculars'},   // new empty module 17 Nov 2026 - 44-market-watch.js
+    {id:'market_watch',label:'Market Watch',icon:'fa-binoculars'},   // rebuilt 17 Nov 2026 (Competitor Launches + Trends) - 44-market-watch.js
     {id:'channel_partners',label:'Channel Partners',icon:'fa-people-arrows'},
     {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},   // back 6 Nov 2026 - 43-posts-and-reels.js
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
@@ -293,10 +292,15 @@ function wsRefreshNav(){
    Administrator, Dhruti Patel (legal@) and Ankita Bhandari (legal5@). Same arrangement as Inventory:
    checked before the state.super shortcut, so other super admins do not get it. Both pages read and
    write the same live cases. To add someone, add an address here. */
+/* LEGAL REMOVED, LEGAL 2 FOR EVERYONE WHO HAD LEGAL (17 Nov 2026, Ayush: "remove Legal Module, though Legal 2 will still be
+   there" - and Legal 2 for "everyone who has Legal"). The original Legal page is gone; anyone allowed into Legal (their
+   'legal' module, or a super admin) now opens Legal 2, plus the three named people above. Every Legal link opens Legal 2. */
 const LEGAL2_PEOPLE=['ayushruia1@gmail.com','legal@thejaingroup.com','legal5@thejaingroup.com'];
 function canLegal2(){
   if(state.isCustomer||state.impersonating) return false;
-  return LEGAL2_PEOPLE.indexOf(String(state.email||'').trim().toLowerCase())!==-1;
+  if(LEGAL2_PEOPLE.indexOf(String(state.email||'').trim().toLowerCase())!==-1||pageAllowed('legal')) return true;
+  // or granted "Legal 2" in Control Panel (the module list there now shows Legal 2 only)
+  const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.length>0&&expandModules(new Set(m)).has('legal2');
 }
 function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='legal2')?canLegal2():(it.id==='feedback_hub')?canFeedbackHub():(it.id==='inventory')?canInventory():(it.id==='accounts')?canAccounts():(it.id==='weekly_status')?canWeeklyStatus():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
   const admItems=[];

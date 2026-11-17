@@ -125,22 +125,6 @@ async function hasImpShare() {
   if (HAS_IS === null) { const { error } = await db.from('ads_daily').select('budget_lost_is').limit(1); HAS_IS = !error; }
   return HAS_IS;
 }
-/* HOOK AND HOLD RATES (16 Nov 2026, Ayush: "Build all three" - Facebook hook & hold rates for our own ads, joined to
-   CRM QL). Per ad and day: 3-second video views (Meta's 'video_view' action), plays to 25 / 50 / 100% and ThruPlays
-   (15 s or the whole video). Hook rate = 3-second views / impressions; hold rate = ThruPlays / 3-second views. Written
-   only once the columns exist (migration 20261116210000); until then left out, so a run never stops. */
-let HAS_VIDEO: boolean | null = null;
-async function hasVideo() {
-  if (HAS_VIDEO === null) { const { error } = await db.from('ads_ad_daily').select('video_3s').limit(1); HAS_VIDEO = !error; }
-  return HAS_VIDEO;
-}
-const VIDEO_F = ',video_p25_watched_actions,video_p50_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions';
-function fbVid(a: any) { return Array.isArray(a) ? a.reduce((n: number, x: any) => n + (x && (!x.action_type || x.action_type === 'video_view') ? num(x.value) : 0), 0) : 0; }
-function videoOf(r: any) {
-  const v3 = Array.isArray(r.actions) ? r.actions.find((x: any) => x && x.action_type === 'video_view') : null;
-  return { video_3s: v3 ? num(v3.value) : 0, video_p25: fbVid(r.video_p25_watched_actions), video_p50: fbVid(r.video_p50_watched_actions),
-    video_p100: fbVid(r.video_p100_watched_actions), video_thruplay: fbVid(r.video_thruplay_watched_actions) };
-}
 async function hasAdset() {
   if (HAS_ADSET === null) { const { error } = await db.from('ads_ad_daily').select('adset_id').limit(1); HAS_ADSET = !error; }
   return HAS_ADSET;
@@ -257,8 +241,7 @@ async function fbRead(acc: string, s: string, e: string) {
     + `&time_range=${encodeURIComponent(JSON.stringify({ since: s, until: e }))}&access_token=${META_TOKEN}`;
   const withReach = await hasReach(), rf = withReach ? ',reach,frequency' : '';
   const camp = await fbInsights(base + '&level=campaign', 'campaign_id,spend,impressions,clicks,actions' + rf);
-  const withVid = await hasVideo();
-  const ads = await fbInsights(base + '&level=ad', 'ad_id,adset_id,campaign_id,spend,impressions,clicks,actions' + rf + (withVid ? VIDEO_F : ''));
+  const ads = await fbInsights(base + '&level=ad', 'ad_id,adset_id,campaign_id,spend,impressions,clicks,actions' + rf);
   const withSet = await hasAdset();
   const now = new Date().toISOString();
   const rfOf = (r: any) => (withReach ? { reach: r.reach != null ? num(r.reach) : null, frequency: r.frequency != null ? num(r.frequency) : null } : {});
@@ -266,7 +249,7 @@ async function fbRead(acc: string, s: string, e: string) {
     spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), ...rfOf(r), synced_at: now }));
   const aRows = ads.filter((r) => r.ad_id && r.date_start).map((r) => ({ platform: 'meta', account_id: acc, campaign_id: r.campaign_id || null, ad_id: r.ad_id, day: r.date_start,
     ...(withSet ? { adset_id: r.adset_id || null } : {}),
-    spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), ...rfOf(r), ...(withVid ? videoOf(r) : {}), synced_at: now }));
+    spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), ...rfOf(r), synced_at: now }));
   await replaceDays('ads_daily', 'meta', acc, s, e, cRows, 'platform,campaign_id,day');
   await writeAdDays('meta', acc, s, e, aRows.map((r: any) => ({ ...r, adset_id: r.adset_id || '' })), aRows);
   return cRows.length + aRows.length;
@@ -696,49 +679,6 @@ async function hourly(platform: string, days: number) {
   return { ok: true, notes: out };
 }
 
-/* BUYER DEMAND FROM GOOGLE KEYWORD PLANNER ({platform:'google', keywords:{preview?}}; 16 Nov 2026, Ayush: "Build all
-   three" - Market Watch Trends shows what Kolkata home buyers search for, not only what videos trend). Google's own
-   monthly search counts (last 12 months) for flat searches by Kolkata area, by flat type and for our projects, searched
-   from Kolkata in English on Google Search, plus the top-of-page bid range (what a click costs there). Written to
-   camp.kw_monthly (migration 20261116210000), replaced per keyword and month; preview returns them without writing. */
-const KW_AREAS = ['new town', 'rajarhat', 'salt lake', 'madhyamgram', 'barasat', 'dum dum', 'baguiati', 'kestopur', 'lake town', 'bt road',
-  'ej bypass', 'garia', 'narendrapur', 'sonarpur', 'tollygunge', 'behala', 'joka', 'ballygunge', 'alipore', 'howrah', 'park street', 'sodepur', 'barrackpore', 'belgharia'];
-const KW_TYPES = ['flats in kolkata', 'new projects in kolkata', 'luxury flats in kolkata', '2 bhk flat in kolkata', '3 bhk flat in kolkata',
-  '4 bhk flat in kolkata', 'ready to move flats in kolkata', 'apartment in kolkata', 'villa in kolkata', 'plots in kolkata', 'gated community kolkata', 'township in kolkata'];
-const KW_OURS = ['dream gurukul', 'dream world city', 'dream one', 'dream ananta', 'dream eco city', 'jain group kolkata', 'dream diamond'];
-async function kwDemand(preview: boolean) {
-  const cust = G_CUSTS[0]; if (!cust) return { ok: false, error: 'no Google account' };
-  const at = await gToken();
-  const geo = await gaql(cust, "SELECT geo_target_constant.resource_name, geo_target_constant.name, geo_target_constant.target_type FROM geo_target_constant WHERE geo_target_constant.name = 'Kolkata' AND geo_target_constant.country_code = 'IN'");
-  const city = (geo.find((g: any) => g.geoTargetConstant && g.geoTargetConstant.targetType === 'City') || geo[0] || {}).geoTargetConstant;
-  if (!city) return { ok: false, error: 'Kolkata not found in Google geo targets' };
-  const kws: [string, string][] = [...KW_AREAS.map((a): [string, string] => ['flats in ' + a, 'area']), ...KW_TYPES.map((k): [string, string] => [k, 'type']), ...KW_OURS.map((k): [string, string] => [k, 'ours'])];
-  const grp: Record<string, string> = {}; for (const [k, g] of kws) grp[k] = g;
-  const end = addD(ist().slice(0, 8) + '01', -1), y = +end.slice(0, 4), m = +end.slice(5, 7);
-  const sm = m === 12 ? 1 : m + 1, sy = m === 12 ? y : y - 1;
-  const MON = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
-  const r = await fetch(`https://googleads.googleapis.com/${GV}/customers/${cust}:generateKeywordHistoricalMetrics`, { method: 'POST',
-    headers: { Authorization: 'Bearer ' + at, 'developer-token': G_DEV, 'login-customer-id': G_LOGIN, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keywords: kws.map((k) => k[0]), geoTargetConstants: [city.resourceName], language: 'languageConstants/1000', keywordPlanNetwork: 'GOOGLE_SEARCH',
-      historicalMetricsOptions: { includeAverageCpc: true, yearMonthRange: { start: { year: sy, month: MON[sm - 1] }, end: { year: y, month: MON[m - 1] } } } }) });
-  if (!r.ok) return { ok: false, error: 'Google HTTP ' + r.status + ' ' + (await r.text()).replace(/s+/g, ' ').slice(0, 400) };
-  const t = await r.json(), now = new Date().toISOString(), recs: any[] = [];
-  for (const x of t.results || []) {
-    const km = x.keywordMetrics || {}, kw = String(x.text || '').toLowerCase();
-    for (const v of km.monthlySearchVolumes || []) {
-      const mi = MON.indexOf(String(v.month)) + 1; if (!mi) continue;
-      recs.push({ keyword: kw, grp: grp[kw] || 'other', month: v.year + '-' + String(mi).padStart(2, '0') + '-01', searches: num(v.monthlySearches),
-        avg_monthly: num(km.avgMonthlySearches), competition: km.competition || null,
-        low_bid: km.lowTopOfPageBidMicros != null ? num(km.lowTopOfPageBidMicros) / 1e6 : null,
-        high_bid: km.highTopOfPageBidMicros != null ? num(km.highTopOfPageBidMicros) / 1e6 : null, fetched_at: now });
-    }
-  }
-  if (preview) return { ok: true, geo: city.name, keywords: (t.results || []).length, months: recs.length,
-    sample: (t.results || []).slice(0, 40).map((x: any) => ({ k: x.text, avg: x.keywordMetrics && x.keywordMetrics.avgMonthlySearches, comp: x.keywordMetrics && x.keywordMetrics.competition })) };
-  for (let i = 0; i < recs.length; i += 500) { const { error } = await db.from('kw_monthly').upsert(recs.slice(i, i + 500), { onConflict: 'keyword,month' }); if (error) return { ok: false, error: 'kw_monthly write: ' + error.message }; }
-  return { ok: true, keywords: (t.results || []).length, rows: recs.length };
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   T0 = Date.now(); gTok = '';
@@ -754,7 +694,6 @@ Deno.serve(async (req) => {
     const rows = await gaql(G_LOGIN || G_CUSTS[0], 'SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, customer_client.status FROM customer_client');
     return j({ ok: true, accounts: rows.map((x: any) => ({ id: String(x.customerClient.id), name: x.customerClient.descriptiveName, manager: !!x.customerClient.manager, status: x.customerClient.status })) });
   }
-  if (body.keywords && platform === 'google') return j(await kwDemand(!!body.keywords.preview));
   if (body.hourly) return j(await hourly(platform, Math.min(60, Math.max(7, +body.hourly.days || 28))));
   const { data: log } = await db.from('ads_sync_log').insert({ platform }).select('id').single();
   try {
