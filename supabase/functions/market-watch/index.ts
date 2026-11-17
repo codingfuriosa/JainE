@@ -19,6 +19,7 @@
 
    WHO MAY CALL: the cron only (x-mw-secret = acc.job_secrets 'market_watch'). */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import { trendsCollect, trendsCompile } from "./trends.ts";   // the Trends tab (17 Nov 2026) - see trends.ts
 
 const SB = Deno.env.get('SUPABASE_URL')!;
 const SRV = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -255,7 +256,13 @@ ${fresh.slice(0, 200).map(([u, l], i) => `${i} | ${u} | ${l}`).join('\n')}`);
 }
 
 // ---------------------------------------------------------------- 2. news
-type Item = { key: string; title: string; source: string; url: string; date: string; text: string; direct: boolean };
+type Item = { key: string; title: string; source: string; url: string; date: string; text: string; direct: boolean; pubMeta?: string };
+// the publish date an article page states about itself (schema.org / Open Graph), when it does
+function metaDate(html: string): string {
+  const m = html.match(/"datePublished"\s*:\s*"(\d{4}-\d{2}-\d{2})/i) || html.match(/(?:article:published_time|datePublished|pubdate|publish-date)["']?\s+content=["'](\d{4}-\d{2}-\d{2})/i)
+    || html.match(/content=["'](\d{4}-\d{2}-\d{2})[^"']*["']\s+(?:property|itemprop|name)=["'](?:article:published_time|datePublished|pubdate|publish-date)/i);
+  return m ? m[1] : '';
+}
 function tag(xml: string, t: string) { const m = xml.match(new RegExp('<' + t + '[^>]*>([\\s\\S]*?)</' + t + '>')); return m ? decode(m[1]).trim() : ''; }
 async function googleNews(q: string, days: number): Promise<Item[]> {
   const url = 'https://news.google.com/rss/search?q=' + encodeURIComponent(q + ' when:' + days + 'd') + '&hl=en-IN&gl=IN&ceid=IN:en';
@@ -296,7 +303,7 @@ async function newsStep(dev: any, days: number): Promise<{ found: number; items:
   const items = keys.filter((k) => !seen.has(k)).map((k) => byKey.get(k)!).slice(0, 25);
   if (!items.length) return { found: 0, items: 0 };
   // read the articles themselves where the link is the paper's own
-  await pool(items.filter((x) => x.direct).slice(0, 12), 4, async (x) => { if (devElapsed() > 100_000) return; try { const t = textOf(await get(x.url, 12000)); if (t.length > x.text.length) x.text = t.slice(0, 6000); } catch { /* headline + summary only */ } });
+  await pool(items.filter((x) => x.direct).slice(0, 12), 4, async (x) => { if (devElapsed() > 100_000) return; try { const html = await get(x.url, 12000); x.pubMeta = metaDate(html); const t = textOf(html); if (t.length > x.text.length) x.text = t.slice(0, 6000); } catch { /* headline + summary only */ } });
   const r = await ask(`News items found for "${dev.name}" (a real-estate developer in Kolkata, India). For each item decide, from ITS OWN TEXT ONLY, whether it reports that ${dev.name} has launched a new project.
 Be careful with similar names: only "${dev.name}" counts${dev.name.startsWith('Eden') ? ' (Eden Group and Eden Realty are DIFFERENT companies)' : ''}.
 ${LAUNCH_RULES}
@@ -314,8 +321,15 @@ ${items.map((x, i) => `--- ITEM ${i} | ${x.date} | ${x.source}\nTITLE: ${x.title
     if (!quoteIn(String(v.quote || ''), body)) continue;      // the sentence must really be in the item
     const devWord = flat(dev.name).split(' ')[0];
     if (!flat(body).includes(devWord)) continue;               // and the developer must be named in it
-    let date = x.date;
-    if (validDate(v.opened_on) && v.opened_on <= x.date && v.opened_on >= daysAgo(400)) date = v.opened_on;
+    /* THE FEED'S DATE IS NOT TRUSTED ALONE (17 Nov 2026: Bing dated a 2021 article on Primarc Chambers 29 Oct 2026, and
+       the paper's site blocks readers). The article's own stated date and the day web.archive.org first saved it are
+       checked too; the earliest wins, and an article older than 60 days is not a new launch. */
+    const dates = [x.date];
+    if (validDate(x.pubMeta)) dates.push(x.pubMeta!);
+    if (x.direct) { const a = await firstArchived(x.url); if (a && a !== 'err') dates.push(a); }
+    let date = dates.sort()[0];
+    if (validDate(v.opened_on) && v.opened_on <= date && v.opened_on >= daysAgo(400)) date = v.opened_on;
+    if (date < daysAgo(WINDOW_DAYS)) continue;
     found += await addEvidence(dev, String(v.project), String(v.locality || ''), { kind: 'news', url: x.url, source: x.source, title: x.title, published: date, quote: String(v.quote), stage: String(v.stage || '') });
   }
   return { found, items: items.length };
@@ -343,6 +357,9 @@ Deno.serve(async (req) => {
     if (!s?.value || req.headers.get('x-mw-secret') !== s.value) return j({ error: 'not allowed' }, 401);
     const body = await req.json().catch(() => ({}));
     DRY = false; DRY_OUT = [];
+    // TRENDS: {action:'trends_collect'} 4 times a day, {action:'trends_compile'} on Monday; {dry:true} writes nothing
+    if (body.action === 'trends_collect') return j({ ok: true, ...(await trendsCollect({ db, ask, dry: !!body.dry })) });
+    if (body.action === 'trends_compile') return j({ ok: true, ...(await trendsCompile({ db, ask, dry: !!body.dry }, { region: body.region })) });
     if (body.dry && body.developer) {
       DRY = true;
       try { const r = await checkDeveloper({ id: 0, baseline_at: body.baseline === false ? 'x' : null, ...body.developer }); return j({ ok: true, dry: true, result: r, would_record: DRY_OUT }); }
