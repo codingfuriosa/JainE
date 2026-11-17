@@ -13,7 +13,8 @@
    No Meta Ad Library here: the daily Competitor / CP / Our Brand pulls use every Proxy credit (Ayush: Trends must
    not affect them). */
 
-type Ctx = { db: any; ask: (p: string) => Promise<any>; dry: boolean };
+// raw: a preview hands in a fresh snapshot instead of the stored week ({action:'trends_preview'} - writes nothing)
+type Ctx = { db: any; ask: (p: string) => Promise<any>; dry: boolean; raw?: any[] };
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const YT_KEY = Deno.env.get('YOUTUBE_API_KEY') || '';
 const WORLD_GEOS = ['US', 'GB', 'AE', 'SG', 'AU'];
@@ -107,16 +108,7 @@ async function wikiSummary(title: string): Promise<{ extract: string; image: str
 
 // ---------------------------------------------------------------- 1. collect (cron, 4 times a day)
 export async function trendsCollect(ctx: Ctx) {
-  const jobs: [string, () => Promise<Raw[]>][] = [
-    ['google IN', () => googleTrends('IN', 'IN')], ...WORLD_GEOS.map((g) => ['google ' + g, () => googleTrends(g, 'WORLD')] as [string, () => Promise<Raw[]>]),
-    ['youtube IN', () => youtube('IN', 'IN')], ['youtube US', () => youtube('US', 'WORLD')], ['youtube GB', () => youtube('GB', 'WORLD')],
-    ['apple IN', () => apple('in', 'IN')], ['apple US', () => apple('us', 'WORLD')],
-  ];
-  const rows: Raw[] = []; const errs: string[] = []; const counts: Record<string, number> = {};
-  for (const [name, f] of jobs) { try { const r = await f(); rows.push(...r); counts[name] = r.length; } catch (e) { errs.push(`${name}: ${(e as Error).message}`); } }
-  // one row per source + region + item + day; the latest reading of the day wins (views keep growing)
-  const uniq = new Map<string, Raw>(); for (const r of rows) uniq.set([r.source, r.region, r.key, r.day].join('|'), r);
-  const list = [...uniq.values()];
+  const { list, counts, errs } = await collectRows();
   if (!ctx.dry) {
     for (let i = 0; i < list.length; i += 200) {
       const { error } = await ctx.db.from('mw_trend_raw').upsert(list.slice(i, i + 200).map((r) => ({ ...r, collected_at: new Date().toISOString() })), { onConflict: 'source,region,key,day' });
@@ -126,17 +118,32 @@ export async function trendsCollect(ctx: Ctx) {
   }
   return { items: list.length, counts, errors: errs, sample: ctx.dry ? list.slice(0, 5) : undefined };
 }
+// a snapshot of everything trending right now, for one region or both
+export async function collectRows(region?: string) {
+  const all: [string, string, () => Promise<Raw[]>][] = [
+    ['IN', 'google IN', () => googleTrends('IN', 'IN')], ...WORLD_GEOS.map((g) => ['WORLD', 'google ' + g, () => googleTrends(g, 'WORLD')] as [string, string, () => Promise<Raw[]>]),
+    ['IN', 'youtube IN', () => youtube('IN', 'IN')], ['WORLD', 'youtube US', () => youtube('US', 'WORLD')], ['WORLD', 'youtube GB', () => youtube('GB', 'WORLD')],
+    ['IN', 'apple IN', () => apple('in', 'IN')], ['WORLD', 'apple US', () => apple('us', 'WORLD')],
+  ];
+  const jobs = all.filter((x) => !region || x[0] === region);
+  const rows: Raw[] = []; const errs: string[] = []; const counts: Record<string, number> = {};
+  await Promise.all(jobs.map(async ([, name, f]) => { try { const r = await f(); rows.push(...r); counts[name] = r.length; } catch (e) { errs.push(`${name}: ${(e as Error).message}`); } }));
+  // one row per source + region + item + day; the latest reading of the day wins (views keep growing)
+  const uniq = new Map<string, Raw>(); for (const r of rows) uniq.set([r.source, r.region, r.key, r.day].join('|'), r);
+  return { list: [...uniq.values()], counts, errs };
+}
 
 // ---------------------------------------------------------------- 2. compile (Monday morning)
 type Cand = { id: string; source: string; title: string; text: string; metric: number; metricText: string; date: string; url: string;
   media_url: string | null; media_type: string | null; video_id: string | null; links: { label: string; title: string; url: string }[] };
 
 async function candidates(ctx: Ctx, region: string, from: string, to: string, days: string[]): Promise<Cand[]> {
-  const { data, error } = await ctx.db.from('mw_trend_raw').select('*').eq('region', region).gte('day', from).lte('day', to);
-  if (error) throw new Error('read: ' + error.message);
+  let data: any[] = [];
+  if (ctx.raw) data = ctx.raw.filter((r) => r.region === region);
+  else { const q = await ctx.db.from('mw_trend_raw').select('*').eq('region', region).gte('day', from).lte('day', to); if (q.error) throw new Error('read: ' + q.error.message); data = q.data || []; }
   // the same item over several days / countries -> one, with its biggest reading
   const agg = new Map<string, any>();
-  for (const r of data || []) {
+  for (const r of data) {
     const k = r.source + '|' + r.key; const o = agg.get(k);
     const better = !o || (r.source === 'apple' ? r.metric_value < o.metric_value : r.metric_value > o.metric_value);
     const days = new Set([...(o?._days || []), r.day]); const ctry = new Set([...(o?._c || []), r.country]);

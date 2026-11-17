@@ -19,7 +19,7 @@
 
    WHO MAY CALL: the cron only (x-mw-secret = acc.job_secrets 'market_watch'). */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
-import { trendsCollect, trendsCompile } from "./trends.ts";   // the Trends tab (17 Nov 2026) - see trends.ts
+import { trendsCollect, trendsCompile, collectRows } from "./trends.ts";   // the Trends tab (17 Nov 2026) - see trends.ts
 
 const SB = Deno.env.get('SUPABASE_URL')!;
 const SRV = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -363,6 +363,12 @@ Deno.serve(async (req) => {
     // TRENDS: {action:'trends_collect'} 4 times a day, {action:'trends_compile'} on Monday; {dry:true} writes nothing
     if (body.action === 'trends_collect') return j({ ok: true, ...(await trendsCollect({ db, ask, dry: !!body.dry })) });
     if (body.action === 'trends_compile') return j({ ok: true, ...(await trendsCompile({ db, ask, dry: !!body.dry }, { region: body.region })) });
+    // a look right now, from a fresh snapshot + the week's Wikipedia - writes nothing (one region per call)
+    if (body.action === 'trends_preview') {
+      const region = body.region === 'WORLD' ? 'WORLD' : 'IN';
+      const snap = await collectRows(region);
+      return j({ ok: true, preview: true, counts: snap.counts, errors: snap.errs, ...(await trendsCompile({ db, ask, dry: true, raw: snap.list }, { region })) });
+    }
     if (body.dry && body.developer) {
       DRY = true;
       try { const r = await checkDeveloper({ id: 0, baseline_at: body.baseline === false ? 'x' : null, ...body.developer }); return j({ ok: true, dry: true, result: r, would_record: DRY_OUT }); }
