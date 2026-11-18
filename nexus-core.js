@@ -433,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'4952e52419','insp-items.js':'af05d4a323','postsales.js':'9469a48d2a','scheduling.js':'50da5d7188','accounts.js':'cc8a8c6515','accounts-bank.js':'ea9648a540','accounts-books.js':'ed0e987851','purchase.js':'8109127afb','purchase-indent.js':'f6a398b898','purchase-rfq.js':'e6b7d700d5','purchase-po.js':'7239d968b5','purchase-stores.js':'5ff625e1d0','purchase-reports.js':'62c2dbe660','engineering.js':'ded15ec2c9','engineering-boq.js':'786ffa81a5','engineering-wo.js':'3dbf851a12','engineering-amend.js':'237625a694','engineering-ra.js':'2ce94b7221','engineering-ret.js':'645ea33273'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'5f4484bba7','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -1287,9 +1287,20 @@ function fhIsSystems(){ return fhMe()===FEEDBACK_HUB_ADMIN||fhMyDepts().indexOf(
 // Systems people (the Administrator included) post and read System Feedbacks; they never rate them -
 // not even system.admin@, who is also listed under Sales and Pre Sales.
 function fhIsRater(){ if(fhIsSystems()) return false; return SYSTEM_FEEDBACK_EXTRA.indexOf(fhMe())!==-1||fhMyDepts().some(function(d){ return d==='Sales'||d==='Pre Sales'; }); }
+/* ACCOUNTS FILL THE FORMS IN; THEY DO NOT BUILD THEM (18 Nov 2026).
+   The whole Accounts department, by department rather than by name - there are eight of them and
+   the list would go stale the first time somebody joined. They get the forms and the answers given:
+   enough to open any form and submit it, and to read what came back. Designing - editing a form,
+   closing it, deleting it - stays with FEEDBACK_HUB_PEOPLE above.
+   The answers people gave are NOT theirs: six of the seven forms carry the respondent's name and
+   phone, so reading the records stays with the three as well.
+   feedback.can_design_forms() and feedback.can_use_forms() hold the same rules in the database, and
+   those are what actually enforce them; this only decides what the page offers. */
+function fhCanFillForms(){ return fhMyDepts().indexOf('Accounts')!==-1; }
+function fhCanSeeForms(){ return fhCanQrForms()||fhCanFillForms(); }
 function canFeedbackHub(){
   if(state.isCustomer||state.impersonating) return false;
-  return fhCanQrForms()||fhIsSystems()||fhIsRater();
+  return fhCanSeeForms()||fhIsSystems()||fhIsRater();
 }
 /* INVENTORY (PURCHASE & STORES) IS FOR THREE PEOPLE, BY NAME, WHILE IT IS BEING BUILT AND REVIEWED.
 
@@ -13022,16 +13033,21 @@ function fhFillUrl(token){ return location.origin+'/feedback-fill.html?f='+token
 /* ---- router: named sub-routes checked first (dedicated pages), numeric tab as the fallback ---- */
 VIEWS.feedback_hub=async function(v,seg){
   loadQRLib(); // fire-and-forget preload, so the QR modal feels instant instead of loading on first click
-  if(seg[0]==='new')       return fhFormPage(v,null);
-  if(seg[0]==='form'&&seg[1])     return fhFormPage(v,Number(seg[1]));
+  // Typed straight into the address bar, these would otherwise open the builder for somebody who
+  // may only fill forms in. The database refuses their save either way; this refuses the page.
+  if(seg[0]==='new')       return fhCanQrForms()?fhFormPage(v,null):fhDenied(v);
+  if(seg[0]==='form'&&seg[1])     return fhCanQrForms()?fhFormPage(v,Number(seg[1])):fhDenied(v);
   if(seg[0]==='preview')   return fhPreviewPage(v);
-  if(seg[0]==='records'&&seg[1]) return fhRecordsPage(v,Number(seg[1]));
-  if(seg[0]==='response'&&seg[1]) return fhResponseDetailPage(v,seg[1]);
+  if(seg[0]==='records'&&seg[1]) return fhCanQrForms()?fhRecordsPage(v,Number(seg[1])):fhDenied(v);
+  if(seg[0]==='response'&&seg[1]) return fhCanQrForms()?fhResponseDetailPage(v,seg[1]):fhDenied(v);
   if(seg[0]==='sys'&&seg[1]&&fhIsSystems()) return /^m\d+$/.test(seg[1])?sfModPage(v,Number(seg[1].slice(1))):sfItemPage(v,Number(seg[1]));
   if(seg[0]==='give'&&seg[1]&&fhIsRater()) return sfRatePage(v,seg[1]);   // m<module> or <item>
   setCrumb(['Feedback','Feedback Hub']);
   // Each person gets only the tabs that are theirs (see canFeedbackHub in 06-nav.js).
-  const all=[['design','Design',fhCanQrForms],['records','Records',fhCanQrForms],['system','System Feedbacks',fhIsSystems],['give','Give Feedback',fhIsRater]];
+  /* One list, two readings of it: a designer's tab is "Design" and carries the full set of actions,
+     a filler's is "Forms" and carries Open, Records and the QR code. Rather than a second tab that
+     would be the same list with three buttons missing. */
+  const all=[['design',fhCanQrForms()?'Design':'Forms',fhCanSeeForms],['records','Records',fhCanQrForms],['system','System Feedbacks',fhIsSystems],['give','Give Feedback',fhIsRater]];
   const mine=all.filter(function(t){ return t[2](); });
   if(!mine.length){ v.innerHTML='<div class="card"><div class="empty">You do not have access to Feedback Hub.</div></div>'; return; }
   const ti=mTab(seg,mine.length);
@@ -13042,6 +13058,15 @@ VIEWS.feedback_hub=async function(v,seg){
   if(key==='system'){await sfManage();return;}
   await sfGive();
 };
+/* Shown instead of the builder when somebody who may only fill forms in types its address. The
+   database would refuse the save regardless; this means they are told so rather than finding out
+   when Save does nothing. */
+function fhDenied(v){
+  setCrumb(['Feedback','Feedback Hub']);
+  v.innerHTML=FH_CSS+'<div class="card card-pad empty" style="padding:40px"><i class="fa-solid fa-lock"></i>'
+    +'<div>That part of Feedback Hub is not yours. You can open any form to fill it in, and share its QR code.</div>'
+    +'<div style="margin-top:14px"><button class="btn" onclick="navTo(\'feedback_hub\')">Back to Feedback Hub</button></div></div>';
+}
 async function fhLoadForms(force){
   if(FH_FORMS&&!force)return FH_FORMS;
   const{data,error}=await sb.schema('feedback').from('forms').select('*').order('created_at',{ascending:false});
@@ -13061,9 +13086,10 @@ async function fhDesign(){
 async function fhDesignRender(){
   const b=$('fhBody');if(!b)return;
   const rows=FH_FORMS||[];
+  const design=fhCanQrForms();
   b.innerHTML=`<div class="fh-head">
-    <div><div class="sec-title" style="margin:0">Your Forms</div><div class="sec-sub" style="margin:0">Build a form, share its QR code or link, and watch responses come in.</div></div>
-    <button class="btn btn-primary" onclick="navTo('feedback_hub/new')"><i class="fa-solid fa-plus"></i> New Form</button>
+    <div><div class="sec-title" style="margin:0">${design?'Your Forms':'Feedback Forms'}</div><div class="sec-sub" style="margin:0">${design?'Build a form, share its QR code or link, and watch responses come in.':'Open a form to fill it in, or share its QR code.'}</div></div>
+    ${design?`<button class="btn btn-primary" onclick="navTo('feedback_hub/new')"><i class="fa-solid fa-plus"></i> New Form</button>`:''}
   </div>
   ${rows.length?`<div class="fh-rowlist">${rows.map(f=>`
     <div class="fh-row">
@@ -13072,11 +13098,12 @@ async function fhDesignRender(){
         <div class="fh-row-meta"><span id="fhQCount_${f.id}">…</span>${f.is_active?'<span class="tag t-green">Active</span>':'<span class="tag t-red">Closed</span>'}</div>
       </div>
       <div class="fh-row-actions">
-        <button class="btn btn-sm" onclick="navTo('feedback_hub/form/${f.id}')"><i class="fa-solid fa-pen"></i> <span>Edit</span></button>
-        <button class="btn btn-sm" onclick="navTo('feedback_hub/records/${f.id}')"><i class="fa-solid fa-chart-simple"></i> <span>Records</span></button>
+        ${design?`<button class="btn btn-sm" onclick="navTo('feedback_hub/form/${f.id}')"><i class="fa-solid fa-pen"></i> <span>Edit</span></button>`
+          : `<a class="btn btn-sm" href="${esc(fhFillUrl(f.qr_token))}" target="_blank" rel="noopener"><i class="fa-solid fa-up-right-from-square"></i> <span>Open</span></a>`}
+        ${design?`<button class="btn btn-sm" onclick="navTo('feedback_hub/records/${f.id}')"><i class="fa-solid fa-chart-simple"></i> <span>Records</span></button>`:''}
         <button class="btn btn-sm fh-row-icon-btn" title="QR Code" onclick="fhShowQR(${f.id})"><i class="fa-solid fa-qrcode"></i></button>
-        <button class="btn btn-sm fh-row-icon-btn" title="${f.is_active?'Close to new responses':'Reopen for responses'}" onclick="fhToggleActive(${f.id},${!f.is_active})">${f.is_active?'<i class="fa-solid fa-lock"></i>':'<i class="fa-solid fa-lock-open"></i>'}</button>
-        <button class="btn btn-sm fh-danger fh-row-icon-btn" title="Delete" onclick="fhDeleteForm(${f.id})"><i class="fa-solid fa-trash"></i></button>
+        ${design?`<button class="btn btn-sm fh-row-icon-btn" title="${f.is_active?'Close to new responses':'Reopen for responses'}" onclick="fhToggleActive(${f.id},${!f.is_active})">${f.is_active?'<i class="fa-solid fa-lock"></i>':'<i class="fa-solid fa-lock-open"></i>'}</button>
+        <button class="btn btn-sm fh-danger fh-row-icon-btn" title="Delete" onclick="fhDeleteForm(${f.id})"><i class="fa-solid fa-trash"></i></button>`:''}
       </div>
     </div>`).join('')}</div>`
     :`<div class="card"><div class="empty"><i class="fa-solid fa-qrcode"></i>
