@@ -528,7 +528,12 @@ function caPaint(){
         });
       });
     });
-    const tot=G.out.reduce(function(t,a){ t.spend+=a.spend; t.clicks+=a.clicks; t.impressions+=a.impressions; if(a.results!=null) t.results=(t.results||0)+a.results; return t; },{spend:0,clicks:0,impressions:0,results:null});
+    /* LEADS ONLY IN THE TOTAL (18 Nov 2026, found checking every total against its row): the Facebook Total added every ad's
+       result - reach, views, engagement of non-lead campaigns too - so Dream Ananta's Total read 188,317 against 526 leads in
+       the row above. As on the Campaigns tab, a Facebook ad's results count in the Total only when its campaign is a lead /
+       chat campaign; Google's are form leads already. */
+    const tot=G.out.reduce(function(t,a){ t.spend+=a.spend; t.clicks+=a.clicks; t.impressions+=a.impressions;
+      a.rows.forEach(function(r){ if(r.results==null) return; if(pl==='meta'&&!obIsLead(E,{campaign_id:r.campaign_id,platform:'meta'})) return; t.results=(t.results||0)+(+r.results||0); }); return t; },{spend:0,clicks:0,impressions:0,results:null});
     const allIds={}; G.out.forEach(function(a){ Object.keys(a.ids).forEach(function(k){ allIds[k]=1; }); });
     /* TOTAL = THE PLATFORM ROW (18 Nov 2026, Ayush: a total that differs from the row above "is misleading - fix it
        everywhere"). The CRM ties only some leads to an ad; the Total shows the project's whole Google / Facebook CRM figure
@@ -544,7 +549,7 @@ function caPaint(){
     return top+' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' ad'+(ads.length===1?'':'s')+'; click one for the campaigns it runs in, then its '+W.sets.toLowerCase()+'</span></div>'
       +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Ad',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
       +(rows||'<tr><td colspan="'+(7+NCRM)+'" style="text-align:center;color:var(--slate);padding:18px">No ad ran here in this period for this choice</td></tr>')+'</tbody>'
-      +(ads.length?'<tfoot><tr class="ca-tot"><td>Total · '+ads.length+' ad'+(ads.length===1?'':'s')+'</td>'+money(null)+cols(raw(tot,pl,null),{},TT&&TT.t?TT:AA)+'</tr></tfoot>':'')+'</table></div>'
+      +(ads.length?'<tfoot><tr class="ca-tot"><td>Total · '+ads.length+' ad'+(ads.length===1?'':'s')+(pl==='meta'?' <span style="font-weight:500;color:var(--slate);font-size:11px">(leads only)</span>':'')+'</td>'+money(null)+cols(raw(tot,pl,null),{},TT&&TT.t?TT:AA)+'</tr></tfoot>':'')+'</table></div>'
       +(ads.length>ashow?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="CA.adShow=(CA.adShow||50)+50;caPaint()">Show more ('+ashow+' of '+ads.length+')</button></div>':'')
       +'</div>';
   };

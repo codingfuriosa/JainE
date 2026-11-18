@@ -182,7 +182,11 @@ var R=(function(){
       });
     });
     var tot={spend:0,leads:null,clicks:0,impr:0}, allIds={};
-    ads.forEach(function(a){ tot.spend+=a.spend; tot.clicks+=a.clicks; tot.impr+=a.impressions; if(a.results!=null) tot.leads=(tot.leads||0)+a.results; Object.keys(a.ids).forEach(function(k){ allIds[k]=1; }); });
+    // 18 Nov 2026: Facebook results count in the Total only from lead / chat campaigns (reach, views and engagement of other
+    // campaigns are not leads) - the same rule as everywhere else
+    ads.forEach(function(a){ tot.spend+=a.spend; tot.clicks+=a.clicks; tot.impr+=a.impressions;
+      a.rows.forEach(function(r){ if(r.results==null) return; if(pl==='meta'&&!(X.camp[r.cid]||{}).lead) return; tot.leads=(tot.leads||0)+r.results; });
+      Object.keys(a.ids).forEach(function(k){ allIds[k]=1; }); });
     var tc=crmOf(allIds); tot.res=tot.leads;
     // 18 Nov 2026: the Total's CRM figures = the project's whole platform figure (as the row above in the projects table);
     // the leads not tied to an ad get a row of their own, so the rows add up

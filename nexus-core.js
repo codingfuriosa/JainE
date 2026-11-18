@@ -40866,7 +40866,12 @@ function caPaint(){
         });
       });
     });
-    const tot=G.out.reduce(function(t,a){ t.spend+=a.spend; t.clicks+=a.clicks; t.impressions+=a.impressions; if(a.results!=null) t.results=(t.results||0)+a.results; return t; },{spend:0,clicks:0,impressions:0,results:null});
+    /* LEADS ONLY IN THE TOTAL (18 Nov 2026, found checking every total against its row): the Facebook Total added every ad's
+       result - reach, views, engagement of non-lead campaigns too - so Dream Ananta's Total read 188,317 against 526 leads in
+       the row above. As on the Campaigns tab, a Facebook ad's results count in the Total only when its campaign is a lead /
+       chat campaign; Google's are form leads already. */
+    const tot=G.out.reduce(function(t,a){ t.spend+=a.spend; t.clicks+=a.clicks; t.impressions+=a.impressions;
+      a.rows.forEach(function(r){ if(r.results==null) return; if(pl==='meta'&&!obIsLead(E,{campaign_id:r.campaign_id,platform:'meta'})) return; t.results=(t.results||0)+(+r.results||0); }); return t; },{spend:0,clicks:0,impressions:0,results:null});
     const allIds={}; G.out.forEach(function(a){ Object.keys(a.ids).forEach(function(k){ allIds[k]=1; }); });
     /* TOTAL = THE PLATFORM ROW (18 Nov 2026, Ayush: a total that differs from the row above "is misleading - fix it
        everywhere"). The CRM ties only some leads to an ad; the Total shows the project's whole Google / Facebook CRM figure
@@ -40882,7 +40887,7 @@ function caPaint(){
     return top+' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' ad'+(ads.length===1?'':'s')+'; click one for the campaigns it runs in, then its '+W.sets.toLowerCase()+'</span></div>'
       +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Ad',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
       +(rows||'<tr><td colspan="'+(7+NCRM)+'" style="text-align:center;color:var(--slate);padding:18px">No ad ran here in this period for this choice</td></tr>')+'</tbody>'
-      +(ads.length?'<tfoot><tr class="ca-tot"><td>Total · '+ads.length+' ad'+(ads.length===1?'':'s')+'</td>'+money(null)+cols(raw(tot,pl,null),{},TT&&TT.t?TT:AA)+'</tr></tfoot>':'')+'</table></div>'
+      +(ads.length?'<tfoot><tr class="ca-tot"><td>Total · '+ads.length+' ad'+(ads.length===1?'':'s')+(pl==='meta'?' <span style="font-weight:500;color:var(--slate);font-size:11px">(leads only)</span>':'')+'</td>'+money(null)+cols(raw(tot,pl,null),{},TT&&TT.t?TT:AA)+'</tr></tfoot>':'')+'</table></div>'
       +(ads.length>ashow?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="CA.adShow=(CA.adShow||50)+50;caPaint()">Show more ('+ashow+' of '+ads.length+')</button></div>':'')
       +'</div>';
   };
@@ -42992,11 +42997,25 @@ const WAT_CSS='<style>'
 +'}'
 +'</style>';
 
+/* 18 Nov 2026 (Ayush: "Templates does not load", "after Templates or Knocking I can't open Deliveries"): a failed read of the
+   sheet used to be remembered as an empty sheet - Templates then showed nothing for the rest of the visit and Deliveries
+   broke on the missing project list. Now a failure is not kept (the next visit to the tab tries again, twice), and the
+   page says what went wrong. Opened as a file (file:///...) the browser blocks the read - JainE must be opened at
+   http://localhost:8080 (or the live site). */
+let WAT_ERR=null;
 async function watLoad(){
-  try{ const r=await fetch('assets/wa-templates/flows.json?v=1',{cache:'no-cache'}); WAT_DATA=await r.json(); }
-  catch(_e){ WAT_DATA={projects:[]}; }
-  if(!WAT_PROJ && WAT_DATA.projects[0]) WAT_PROJ=WAT_DATA.projects[0].key;
+  WAT_ERR=null;
+  if(location.protocol==='file:'){ WAT_ERR='file'; return; }
+  for(let tries=0;tries<2&&!WAT_DATA;tries++){
+    try{ const r=await fetch('assets/wa-templates/flows.json?v=2',{cache:'no-cache'}); if(!r.ok) throw new Error('HTTP '+r.status);
+      const d=await r.json(); if(d&&Array.isArray(d.projects)&&d.projects.length) WAT_DATA=d; else throw new Error('empty'); }
+    catch(e){ WAT_ERR=String((e&&e.message)||e); }
+  }
+  if(WAT_DATA){ WAT_ERR=null; if(!WAT_PROJ) WAT_PROJ=WAT_DATA.projects[0].key; }
 }
+function watErrBox(){ return '<div class="card card-pad" style="color:#b91c1c;font-size:13.5px"><i class="fa-solid fa-triangle-exclamation"></i> '
+  +(WAT_ERR==='file'?'This page was opened as a file, so the browser blocks its data. Open JainE at <b>http://localhost:8080/wa_templates.html</b> instead.'
+    :'The templates sheet could not be read ('+esc(WAT_ERR||'unknown')+'). <a href="javascript:void(0)" onclick="WAT_DATA=null;renderPage()">Try again</a>')+'</div>'; }
 function watKind(t){ t=String(t||'').toLowerCase();
   if(/video/.test(t)) return ['fa-solid fa-video','Video'];
   if(/pdf/.test(t)) return ['fa-regular fa-file-pdf','PDF'];
@@ -43071,16 +43090,28 @@ VIEWS.wa_templates=async function(v,seg){
   setCrumb(['Growth & Strategy','WhatsApp Templates']);
   const ti=mTab(seg,WAT_TABS.length);
   const head=WAT_CSS+mHead('fa-comments','#16a34a','WhatsApp Templates'), load=head+mTabs('wa_templates',WAT_TABS,ti)+'<div class="loader"><div class="spin"></div></div>';
-  if(!WAT_DATA){ v.innerHTML=load; await watLoad(); if(PAGE!=='wa_templates') return; }
-  if(ti>0){
-    if(!WAD){ v.innerHTML=load; await wadLoad(); if(PAGE!=='wa_templates') return; }
-    const acc=ti===1?wadAccFor(watProj().label):((WAD.acc||[]).filter(function(a){ return /ananta/i.test(a.name); })[0]||null);
-    if(acc&&!WAD.byAcc[acc.id]){ v.innerHTML=load; await wadLoadAcc(acc.id); if(PAGE!=='wa_templates') return; }
+  try{
+    if(!WAT_DATA){ v.innerHTML=load; await watLoad(); if(PAGE!=='wa_templates') return; }
+    // Templates and Deliveries need the sheet; Knocking does not
+    if(!WAT_DATA&&ti<2){ v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+watErrBox(); return; }
+    if(ti>0){
+      if(!WAD){ v.innerHTML=load; await wadPrep(); if(PAGE!=='wa_templates') return; }
+      const acc=ti===1?wadAccFor(watProj().label):((WAD.acc||[]).filter(function(a){ return /ananta/i.test(a.name); })[0]||null);
+      if(acc&&!WAD.byAcc[acc.id]){ v.innerHTML=load; await wadLoadAcc(acc.id); if(PAGE!=='wa_templates') return; }
+    }
+    const body=ti===0?watTemplates():ti===1?watDeliveries():watKnocking();
+    v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+body;
+    if(ti===1) wadDrawChart();
+    // while Templates or Knocking is open, Deliveries' figures load in the background, so the tab opens at once
+    if(ti!==1&&WAT_DATA) setTimeout(function(){ wadPrep().then(function(){ const a=wadAccFor(watProj().label); if(a) return wadLoadAcc(a.id); }).catch(function(){}); },300);
+  }catch(e){
+    v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+'<div class="card card-pad" style="color:#b91c1c;font-size:13.5px"><i class="fa-solid fa-triangle-exclamation"></i> This tab could not be shown: '+esc(String((e&&e.message)||e))+'. <a href="javascript:void(0)" onclick="WAD=null;renderPage()">Try again</a></div>';
+    try{ console.error('wa_templates',e); }catch(_e){}
   }
-  const body=ti===0?watTemplates():ti===1?watDeliveries():watKnocking();
-  v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+body;
-  if(ti===1) wadDrawChart();
 };
+// one shared load of the account list, however many tabs ask for it at once
+let WAD_P=null;
+function wadPrep(){ if(WAD) return Promise.resolve(); if(!WAD_P) WAD_P=wadLoad().finally(function(){ WAD_P=null; }); return WAD_P; }
 
 /* THE POPUP (17 Nov 2026, Ayush, second version: "like the one before when it was on the right - the green top with
    the project name, status and then its level, then the look, and in the bottom left the Id - the bigger the better").
@@ -43285,7 +43316,13 @@ async function wadLoad(){
   ]);
   WAD={state:got[0],acc:got[1],tpl:got[2],byAcc:{}};
 }
-async function wadLoadAcc(accId){
+const WAD_ACC_P={};
+function wadLoadAcc(accId){   // one load per account, even when the background load and a click ask together
+  if(!WAD||!accId||WAD.byAcc[accId]) return Promise.resolve();
+  if(!WAD_ACC_P[accId]) WAD_ACC_P[accId]=wadLoadAcc0(accId).finally(function(){ delete WAD_ACC_P[accId]; });
+  return WAD_ACC_P[accId];
+}
+async function wadLoadAcc0(accId){
   if(!WAD||!accId||WAD.byAcc[accId]) return;
   const C=sb.schema('camp'), ids=WAD.tpl.filter(function(t){ return t.waba_id===accId; }).map(function(t){ return t.id; });
   const parts=[]; for(let i=0;i<ids.length;i+=60) parts.push(ids.slice(i,i+60));
