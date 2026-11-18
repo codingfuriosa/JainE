@@ -1191,6 +1191,17 @@ function trCompGridHtml(leads){
     +'</div>';
   }).join('')+'</div>';
 }
+const TR_LAUNCH_SOURCE_ID=20741; // Ananta "Launch Offer - Image"
+function trLeadSourceFill(row){
+  if(!row||!row.id)return;
+  Promise.resolve(sb.schema('acc').from('transcriptions')
+    .select('source_id:original_crm_response->>source_id,source_name:original_crm_response->>source_name')
+    .eq('id',row.id).maybeSingle()).then(function(x){
+      const d=x&&x.data, el=document.getElementById('trLeadSrc');
+      if(!d||!el||Number(d.source_id)!==TR_LAUNCH_SOURCE_ID||!d.source_name)return;
+      el.innerHTML=' · Source: <b>'+esc(d.source_name)+'</b>';
+    },function(){});
+}
 function trCompDetailHtml(leads,leadId){
   const g=leads.find(function(x){return String(x.leadId)===String(leadId);});
   if(!g)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/5\')">Back</button></div>';
@@ -1199,7 +1210,12 @@ function trCompDetailHtml(leads,leadId){
   const latest=trLatestVerdict(g.rows);
   const o=trOutcome(latest.qualification);
   const backBtn='<button class="btn btn-sm" onclick="goBack(\'transcription/5\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
-  const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
+  /* ONE audience only: Ananta leads that came in on source 20741 ("Launch Offer - Image") show the
+     source's real name beside the project. The list rows carry no CRM payload, so the name is read
+     off the stored response for this one call and filled in when it arrives. Nobody else gets it. */
+  const srcSlot=String(last.business_unit_name||'').trim().toLowerCase()==='ananta'?'<span id="trLeadSrc"></span>':'';
+  if(srcSlot)trLeadSourceFill(last);
+  const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+srcSlot+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
   // Says which call the verdict came from, so nobody reads it as a merge of all of them.
   const verdictFrom=latest.row
     ? ('from the '+(latest.stale?'most recent call with a transcript':'latest call')

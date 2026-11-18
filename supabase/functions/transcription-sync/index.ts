@@ -386,6 +386,59 @@ const callKeyOf = (leadId: number, uuid: string | null, url: string | null) =>
 
 type Check = { check: string; status: "pass" | "fail" | "skip"; detail: string };
 
+/* The CRM now answers with ONE OBJECT PER LEAD, its calls nested in `history`:
+   { lead_id, lead_name, status, business_unit_name, source_id, source_name, source_hierarchy,
+     lost_reason, history: [ { follow_up_id, recording_url, remarks, status, ... } ] }
+   Everything downstream works on one row per CALL, so a lead is expanded here: the lead's own fields
+   with each history entry laid over them (the call's status / lost_reason / remarks win, being the
+   call's own). An old flat row, with no history array, passes through untouched. A lead with an empty
+   history yields no rows, same as a lead with no calls. */
+function flattenFeed(body: unknown[]): FeedRow[] {
+  const out: FeedRow[] = [];
+  for (const item of body) {
+    const lead = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+    if (!Array.isArray(lead.history)) { out.push(lead); continue; }
+    const { history, ...leadFields } = lead as Record<string, unknown> & { history: unknown[] };
+    for (const call of history) {
+      if (call && typeof call === "object") out.push({ ...leadFields, ...(call as Record<string, unknown>) });
+    }
+  }
+  return out;
+}
+
+/* ------------------------------------------------- ANANTA LAUNCH-OFFER CHECK
+   Scoped to exactly ONE audience: leads of business unit Ananta whose source_id is 20741 ("Launch
+   Offer - Image"). Those leads came in on the launch-offer ad, so the first time an agent actually
+   gets them on the phone the offer should be briefed. Nothing else is checked, for any other lead. */
+const LAUNCH_OFFER_BUSINESS_UNIT = "ananta";
+const LAUNCH_OFFER_SOURCE_ID = 20741;
+const isAnantaLaunchOfferLead = (row: any): boolean => {
+  const bu = String(row?.business_unit_name ?? row?.original_crm_response?.business_unit_name ?? "").trim().toLowerCase();
+  const src = Number(row?.original_crm_response?.source_id);
+  return bu === LAUNCH_OFFER_BUSINESS_UNIT && src === LAUNCH_OFFER_SOURCE_ID;
+};
+/* "First connected call" = no EARLIER call of this lead reached a real conversation. Earlier calls
+   live in call_history; a ring-out or non-transcribable one never connected, so it does not count. */
+const hasEarlierConnectedCall = (row: any): boolean =>
+  (Array.isArray(row?.call_history) ? row.call_history : []).some((c: any) => c?.processing_status === "completed");
+
+const LAUNCH_OFFER_PROMPT = `
+
+### EXTRA TASK - ANANTA LAUNCH OFFER BRIEFING (this call only)
+This lead enquired through the Dream Ananta "Launch Offer" advertisement, and this is the first call in
+which the Agent actually reached the customer. Judge ONLY whether the Agent briefed the Dream Ananta
+launch offer. Add one more top-level key to the JSON, "launch_offer_check":
+{ "status": "Pass" | "Partial" | "Fail", "evidence": "<quote with timestamp, or empty>", "notes": "<one or two sentences>" }
+- Pass: the Agent clearly told the customer a launch offer is running on Dream Ananta, on a limited
+  number of units, in a way the customer could follow.
+- Partial: the offer was only mentioned in passing, or without saying it is limited, or the customer
+  was left unsure what it is.
+- Fail: the offer was never mentioned, or it was misrepresented (for example presented as running on
+  another project, or as unlimited).
+The offer's terms are not given to you, so do NOT treat any specific discount figure or term the
+Agent quotes as verified or as a failure: judge the briefing, not the number. Base the status only on
+what was said in the audio. Do not give credit for anything not spoken.`;
+
 /* ------------------------------------------------- DERIVED STATUS + COMPARISON
    The transcription-derived status, in the CRM's own vocabulary so the two can be compared at all.
    Three outcomes, not two: a customer who asked to be called back has neither matched nor been
@@ -563,7 +616,7 @@ async function fetchFeed(from: string, to: string): Promise<{ rows: FeedRow[]; r
       if (!res.ok) throw new Error(`feed returned ${res.status}`);
       const body = await res.json();
       if (!Array.isArray(body)) throw new Error("feed did not return a JSON array");
-      return { rows: body as FeedRow[], raw: body };
+      return { rows: flattenFeed(body), raw: body };
     } catch (e) {
       lastErr = String((e as any)?.message || e);
     }
@@ -894,6 +947,8 @@ async function processOne(db: DB, row: any, geminiKey: string, geminiModel: stri
 
   /* ---- 2. Gemini: pre-check, transcription, dashboard fields, QA, verdict ---- */
   let rawText = "";
+  const launchScope = isAnantaLaunchOfferLead(row);
+  const launchOfferAsked = launchScope && !hasEarlierConnectedCall(row);
   try {
     const gr = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`,
@@ -901,7 +956,7 @@ async function processOne(db: DB, row: any, geminiKey: string, geminiModel: stri
         headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
         body: JSON.stringify({
           contents: [{ parts: [
-            { text: QA_PROMPT },
+            { text: launchOfferAsked ? QA_PROMPT + LAUNCH_OFFER_PROMPT : QA_PROMPT },
             { inline_data: { mime_type: mimeType, data: encodeBase64(audio) } },
           ] }],
           generationConfig: {
@@ -1027,6 +1082,24 @@ async function processOne(db: DB, row: any, geminiKey: string, geminiModel: stri
       detail: knownName
         ? "No name was spoken aloud on the call, so there was nothing to check the CRM name against."
         : "The CRM holds no name for this lead, so there was nothing to check against." });
+  }
+
+  /* Ananta + source 20741 only. Asked on the lead's first connected call; a later call just records
+     that it was not the one under test. */
+  if (launchScope) {
+    if (!launchOfferAsked) {
+      checks.push({ check: "ananta_launch_offer_briefed", status: "skip",
+        detail: "Not the first connected call for this lead - the launch-offer briefing is only checked on that one." });
+    } else {
+      const lo = parsed.launch_offer_check && typeof parsed.launch_offer_check === "object" ? parsed.launch_offer_check : null;
+      const loStatus = String(lo?.status || "").trim().toLowerCase();
+      const label = loStatus === "pass" ? "Pass" : loStatus === "partial" ? "Partial" : loStatus === "fail" ? "Fail" : null;
+      const said = [lo?.notes, lo?.evidence ? `"${String(lo.evidence).slice(0, 300)}"` : ""].filter(Boolean).join(" ");
+      checks.push({ check: "ananta_launch_offer_briefed", status: label === "Pass" ? "pass" : label ? "fail" : "skip",
+        detail: label
+          ? `First connected call of an Ananta "Launch Offer - Image" lead. Launch offer briefing: ${label}. ${said}`.trim()
+          : "First connected call of an Ananta \"Launch Offer - Image\" lead, but the model returned no launch-offer verdict." });
+    }
   }
 
   const cmp = compareWithCrm(row.crm_status, derived, "completed");

@@ -433,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'5f4484bba7','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'4952e52419','insp-items.js':'af05d4a323','postsales.js':'9469a48d2a','scheduling.js':'50da5d7188','accounts.js':'cc8a8c6515','accounts-bank.js':'ea9648a540','accounts-books.js':'ed0e987851','purchase.js':'8109127afb','purchase-indent.js':'f6a398b898','purchase-rfq.js':'e6b7d700d5','purchase-po.js':'7239d968b5','purchase-stores.js':'5ff625e1d0','purchase-reports.js':'62c2dbe660','engineering.js':'ded15ec2c9','engineering-boq.js':'786ffa81a5','engineering-wo.js':'3dbf851a12','engineering-amend.js':'237625a694','engineering-ra.js':'2ce94b7221','engineering-ret.js':'645ea33273'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -36278,6 +36278,17 @@ function trCompGridHtml(leads){
     +'</div>';
   }).join('')+'</div>';
 }
+const TR_LAUNCH_SOURCE_ID=20741; // Ananta "Launch Offer - Image"
+function trLeadSourceFill(row){
+  if(!row||!row.id)return;
+  Promise.resolve(sb.schema('acc').from('transcriptions')
+    .select('source_id:original_crm_response->>source_id,source_name:original_crm_response->>source_name')
+    .eq('id',row.id).maybeSingle()).then(function(x){
+      const d=x&&x.data, el=document.getElementById('trLeadSrc');
+      if(!d||!el||Number(d.source_id)!==TR_LAUNCH_SOURCE_ID||!d.source_name)return;
+      el.innerHTML=' · Source: <b>'+esc(d.source_name)+'</b>';
+    },function(){});
+}
 function trCompDetailHtml(leads,leadId){
   const g=leads.find(function(x){return String(x.leadId)===String(leadId);});
   if(!g)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/5\')">Back</button></div>';
@@ -36286,7 +36297,12 @@ function trCompDetailHtml(leads,leadId){
   const latest=trLatestVerdict(g.rows);
   const o=trOutcome(latest.qualification);
   const backBtn='<button class="btn btn-sm" onclick="goBack(\'transcription/5\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
-  const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
+  /* ONE audience only: Ananta leads that came in on source 20741 ("Launch Offer - Image") show the
+     source's real name beside the project. The list rows carry no CRM payload, so the name is read
+     off the stored response for this one call and filled in when it arrives. Nobody else gets it. */
+  const srcSlot=String(last.business_unit_name||'').trim().toLowerCase()==='ananta'?'<span id="trLeadSrc"></span>':'';
+  if(srcSlot)trLeadSourceFill(last);
+  const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+srcSlot+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
   // Says which call the verdict came from, so nobody reads it as a merge of all of them.
   const verdictFrom=latest.row
     ? ('from the '+(latest.stale?'most recent call with a transcript':'latest call')
