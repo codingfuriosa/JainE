@@ -43013,7 +43013,7 @@ function watTemplates(){
   if(WAT_STAGE>=p.stages.length) WAT_STAGE=0;
   const real=function(st){ return st.steps.filter(function(t){ return !watIsPlan(t); }); };
   let h='<div class="wat-top"><div class="wat-seg">'+P.map(function(x){ return '<button class="'+(x.key===p.key?'on':'')+'" onclick="watPick(\''+x.key+'\')">'+esc(x.label)+'</button>'; }).join('')+'</div>'
-    +'<div class="wat-links">'+(p.links||[]).filter(function(l){ return /^https:\/\//.test(l[1]); }).map(function(l){ return '<a href="'+esc(l[1])+'" target="_blank" rel="noopener" title="'+esc(l[0])+'"><i class="fa-solid '+(/flow/i.test(l[0])?'fa-diagram-project':'fa-table')+'"></i></a>'; }).join('')+'</div></div>';
+    +'</div>';
   h+='<div class="wat-journey">'+p.stages.map(function(st,i){
     const c=WAT_STAGE_COL[st.name.toLowerCase()]||'#64748b', on=i===WAT_STAGE;
     return '<button class="wat-step'+(on?' on':'')+'" style="'+(on?'border-color:'+c:'')+'" onclick="watStage('+i+')"><div class="nm"><i style="background:'+c+'"></i>'+esc(st.name)+'</div>'
@@ -43039,12 +43039,16 @@ window.watStage=function(i){ WAT_STAGE=i; renderPage(); };
 VIEWS.wa_templates=async function(v,seg){
   setCrumb(['Growth & Strategy','WhatsApp Templates']);
   const ti=mTab(seg,WAT_TABS.length);
-  const head=WAT_CSS+mHead('fa-comments','#16a34a','WhatsApp Templates');
-  if(!WAT_DATA){ v.innerHTML=head+'<div class="loader"><div class="spin"></div></div>'; await watLoad(); if(PAGE!=='wa_templates') return; }
-  if(ti===2&&!KN){ v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+'<div class="loader"><div class="spin"></div></div>'; await knLoad(); if(PAGE!=='wa_templates') return; }
-  if(ti===1&&!WAD){ v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+'<div class="loader"><div class="spin"></div></div>'; await wadLoad(); if(PAGE!=='wa_templates') return; }
+  const head=WAT_CSS+mHead('fa-comments','#16a34a','WhatsApp Templates'), load=head+mTabs('wa_templates',WAT_TABS,ti)+'<div class="loader"><div class="spin"></div></div>';
+  if(!WAT_DATA){ v.innerHTML=load; await watLoad(); if(PAGE!=='wa_templates') return; }
+  if(ti>0){
+    if(!WAD){ v.innerHTML=load; await wadLoad(); if(PAGE!=='wa_templates') return; }
+    const acc=ti===1?wadAccFor(watProj().label):((WAD.acc||[]).filter(function(a){ return /ananta/i.test(a.name); })[0]||null);
+    if(acc&&!WAD.byAcc[acc.id]){ v.innerHTML=load; await wadLoadAcc(acc.id); if(PAGE!=='wa_templates') return; }
+  }
   const body=ti===0?watTemplates():ti===1?watDeliveries():watKnocking();
   v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+body;
+  if(ti===1) wadDrawChart();
 };
 
 /* THE POPUP (17 Nov 2026, Ayush, second version: "like the one before when it was on the right - the green top with
@@ -43121,244 +43125,270 @@ function watFit(){
 }
 if(!window._watFitWired){ window._watFitWired=true; window.addEventListener('resize',function(){ watFit(); }); }
 
-/* ---------------- DELIVERIES (17 Nov 2026, list approved by Ayush) ----------------
-   One project at a time; a date range (quick picks + from / to, this year only) or one day (click a bar);
-   cards Sent / Delivered / Read / Clicked / Failed; the daily bars; the stage as sub-tabs; every template of
-   the sheet as a full-width row with its figures - a click opens its WhatsApp look, Meta's status and the
-   failure reasons. Figures: camp.wa_template_daily (Meta template analytics) and camp.wa_msg_status (failed
-   + reason, only from numbers whose webhooks reach JainE), filled nightly by wa-deliveries-sync. */
-let WAD=null, WAD_STAGE=-1;
+/* ---------------- DELIVERIES + KNOCKING (17-18 Nov 2026) ----------------
+   18 Nov 2026, Ayush: Deliveries "takes too much time to open"; "why is Failed NA"; range buttons Yesterday / Last 7 / 14 /
+   30 days / Custom, no loose date picker, Custom opens a calendar like Accountability's task date picker (without the
+   frequency); "the bar graph more detailed, not such thin bars"; the green date chip after clicking a bar removed;
+   "Ananta's graph - why negative space if there is no data for most of the period" (the chart now starts at the first
+   day with data); Knocking "not segregated, row-wise one by one".
+   SPEED: only the open project's WhatsApp account is read (its templates' daily rows and contents), every page at once,
+   and kept for the visit - before, all 8,000+ rows of every account were read one page after another (~5 s).
+   NOT DELIVERED: Meta's template analytics have no "failed" figure; failures with their reason reach only the number's
+   webhook, which is the sending tool's, not JainE's. "Not delivered" = sent - delivered (failed, or not delivered yet).
+   Figures: camp.wa_template_daily (Meta template analytics, UTC days, read nightly by wa-deliveries-sync). */
+let WAD=null, WAD_STAGE=-1, KN=null;
 const WAD_Y0=new Date().getFullYear()+'-01-01';
 const WAD_R={q:'30',from:null,to:null,day:null};
+const WCAL={open:false,y:0,m:0,a:null,b:null};
 const WAD_CSS='<style>'
-+'.wad-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 14px}'
++'.wad-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 14px;position:relative}'
 +'.wad-q{display:inline-flex;background:#f1f5f9;border-radius:10px;padding:3px;gap:2px;max-width:100%;overflow-x:auto;scrollbar-width:none}.wad-q::-webkit-scrollbar{display:none}'
-+'.wad-q button{border:0;background:transparent;border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;color:#475569;cursor:pointer;font-family:inherit;white-space:nowrap}'
++'.wad-q button{border:0;background:transparent;border-radius:8px;padding:7px 13px;font-size:12.5px;font-weight:600;color:#475569;cursor:pointer;font-family:inherit;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}'
 +'.wad-q button.on{background:#fff;color:#0f172a;box-shadow:0 1px 3px rgba(15,23,42,.12)}'
-+'.wad-bar input[type=date]{height:34px;border:1px solid var(--line);border-radius:8px;padding:0 8px;font-family:inherit;font-size:12.5px;background:#fff}'
-+'.wad-day{display:inline-flex;align-items:center;gap:8px;background:#ecfdf5;color:#065f46;border-radius:8px;padding:6px 10px;font-size:12.5px;font-weight:600}'
-+'.wad-day button{border:0;background:transparent;color:#065f46;cursor:pointer}'
-+'.wad-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:0 0 14px}'
++'.wad-rng{font-size:12.5px;color:var(--slate)}'
++'.wcal{position:absolute;top:44px;left:0;z-index:40;width:300px;max-width:94vw;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(16,24,40,.16);overflow:hidden}'
++'.wcal-main{padding:10px 12px 12px}'
++'.wcal-head{display:flex;align-items:center;gap:2px;margin-bottom:4px}.wcal-title{flex:1;text-align:center;font-size:12.5px;font-weight:700}'
++'.wcal-nav{width:25px;height:25px;display:flex;align-items:center;justify-content:center;border:0;border-radius:7px;background:transparent;color:var(--slate);cursor:pointer;font-size:11px}.wcal-nav:hover{background:#eef2ff;color:#1d4ed8}'
++'.wcal-dow{display:grid;grid-template-columns:repeat(7,1fr)}.wcal-dow span{text-align:center;font-size:10px;font-weight:700;color:#94a3b8;padding-bottom:2px}'
++'.wcal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px}'
++'.wcal-day{height:30px;border:0;border-radius:7px;background:transparent;font:inherit;font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink,#0f172a);cursor:pointer;padding:0;position:relative}'
++'.wcal-day:hover:not([disabled]):not(.on){background:#eef2ff}.wcal-day.pad{visibility:hidden}.wcal-day[disabled]{color:#94a3b8;opacity:.35;cursor:default}'
++'.wcal-day.in{background:#eff4ff;color:#1e40af;border-radius:0}.wcal-day.on{background:#1d4ed8;color:#fff;font-weight:700}'
++'.wcal-day.today:not(.on)::after{content:"";position:absolute;left:50%;bottom:4px;width:3px;height:3px;margin-left:-1.5px;border-radius:50%;background:#1d4ed8}'
++'.wcal-says{border-top:1px solid var(--line);background:#f8fafc;padding:9px 12px;font-size:11.5px;color:var(--slate);min-height:20px}.wcal-says b{color:#0f172a}'
++'.wcal-foot{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding:9px 12px}'
++'.wcal-foot .clr{border:0;background:transparent;padding:0;font:inherit;font-size:12px;color:var(--slate);cursor:pointer}.wcal-foot .clr:hover{color:#dc2626}'
++'.wcal-foot .done{margin-left:auto;height:31px;padding:0 17px;border:0;border-radius:8px;background:#1d4ed8;color:#fff;font:inherit;font-size:12px;font-weight:600;cursor:pointer}.wcal-foot .done[disabled]{opacity:.45;cursor:not-allowed}'
++'.wad-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:0 0 14px}.wad-cards.c4{grid-template-columns:repeat(4,minmax(0,1fr))}'
 +'.wad-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px 15px}'
 +'.wad-card .l{font-size:12px;color:var(--slate);font-weight:600;display:flex;align-items:center;gap:6px}.wad-card .l i{width:8px;height:8px;border-radius:50%}'
-+'.wad-card .v{font-size:24px;font-weight:700;color:#0f172a;margin-top:5px;line-height:1.1}'
-+'.wad-card .p{font-size:12px;color:var(--slate);margin-top:2px}'
-+'.wad-chart{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 14px 8px;margin:0 0 14px}'
-+'.wad-cols{display:flex;align-items:flex-end;gap:2px;height:150px}'
-+'.wad-col{flex:1;display:flex;align-items:flex-end;justify-content:center;gap:1px;height:100%;cursor:pointer;border-radius:4px;min-width:0}'
-+'.wad-col:hover{background:#f1f5f9}.wad-col.on{background:#ecfdf5}'
-+'.wad-col i{display:block;width:30%;max-width:9px;border-radius:2px 2px 0 0;min-height:0}'
-+'.wad-ax{display:flex;justify-content:space-between;font-size:10.5px;color:#94a3b8;margin-top:5px}'
-+'.wad-leg{display:flex;gap:14px;font-size:11.5px;color:var(--slate);margin:0 0 8px}.wad-leg span{display:inline-flex;align-items:center;gap:5px}.wad-leg i{width:9px;height:9px;border-radius:2px}'
++'.wad-card .v{font-size:24px;font-weight:700;color:#0f172a;margin-top:5px;line-height:1.1}.wad-card .p{font-size:12px;color:var(--slate);margin-top:2px}'
++'.wad-chart{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px 10px;margin:0 0 14px}'
++'.wad-chart .hd{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--slate);margin:0 0 6px}.wad-chart .hd b{color:#0f172a;font-size:13px}'
++'.wad-chart .cv{position:relative;height:280px}'
 +'.wad-stg{display:flex;gap:6px;overflow-x:auto;margin:0 0 10px;scrollbar-width:none}.wad-stg::-webkit-scrollbar{display:none}'
 +'.wad-stg button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:600;color:#475569;cursor:pointer;white-space:nowrap;font-family:inherit}'
 +'.wad-stg button.on{background:#0f172a;border-color:#0f172a;color:#fff}'
-+'.wad-row{display:grid;grid-template-columns:54px 40px minmax(0,1fr) repeat(5,minmax(62px,auto)) 16px;gap:12px;align-items:center;padding:10px 16px;border-top:1px solid #f1f5f9;cursor:pointer}'
-+'.wad-row:hover{background:#f8fafc}.wad-row.on{background:#f0fdf4}'
++'.wad-row{display:grid;grid-template-columns:54px 40px minmax(0,1fr) repeat(5,minmax(66px,auto)) 16px;gap:12px;align-items:center;padding:10px 16px;border-top:1px solid #f1f5f9;cursor:pointer}'
++'.wad-row.kn{grid-template-columns:118px minmax(0,1fr) repeat(4,minmax(70px,auto)) 16px}'
++'.wad-row:hover{background:#f8fafc}'
 +'.wad-row.h{cursor:default;background:#f8fafc;font-size:11px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;padding:9px 16px;border-top:0}'
-+'.wad-row .th{width:40px;height:40px;border-radius:8px;object-fit:cover;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;overflow:hidden}'
-+'.wad-row .th img{width:100%;height:100%;object-fit:cover}'
-+'.wad-row .n{text-align:right;font-variant-numeric:tabular-nums;font-size:13px;color:#0f172a}.wad-row .n small{display:block;font-size:10.5px;color:var(--slate)}'
-+'.wad-row .n.bad{color:#b91c1c}'
++'.wad-row .th{width:40px;height:40px;border-radius:8px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;overflow:hidden}.wad-row .th img{width:100%;height:100%;object-fit:cover}'
++'.wad-row .n{text-align:right;font-variant-numeric:tabular-nums;font-size:13px;color:#0f172a}.wad-row .n small{display:block;font-size:10.5px;color:var(--slate)}.wad-row .n.bad{color:#b91c1c}'
 +'.wad-row .t{font-size:13.5px;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
 +'.wad-row .id{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;color:#475569;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
-+'.wad-row .cv{color:#94a3b8;font-size:12px}.wad-row.on .cv{transform:rotate(180deg)}'
-+'.wad-fail{margin-top:14px}.wad-fail .r{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid #f1f5f9;font-size:13px}'
++'.wad-row .cv{color:#94a3b8;font-size:12px}'
++'.wad-path{font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}.wad-path i{width:8px;height:8px;border-radius:50%}'
++'.wad-btns{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}.wad-btns span{border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:600;white-space:nowrap}.wad-btns span.off{border-color:var(--line);background:#f8fafc;color:#94a3b8;font-weight:500}'
 +'.wad-empty{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px;color:#475569;font-size:13.5px;display:flex;gap:12px;align-items:flex-start}'
 +'@media(max-width:900px){.wad-cards{grid-template-columns:repeat(3,minmax(0,1fr))}}'
 +'@media(max-width:720px){'
-+'.wad-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.wad-card .v{font-size:20px}'
-+'.wad-row{grid-template-columns:40px minmax(0,1fr) 16px;grid-template-areas:"th t cv" "th nums cv";gap:4px 10px;padding:10px 12px}'
-+'.wad-row .th{grid-area:th}.wad-row .d{display:none}.wad-row>div:nth-child(3){grid-area:t;min-width:0}.wad-row .cv{grid-area:cv}'
-+'.wad-row .n::before{content:attr(data-l) " ";color:var(--slate)}.wad-row .n small{display:inline;margin-left:3px}'
-+'.wad-row .nums{grid-area:nums;display:flex;gap:12px;flex-wrap:wrap}.wad-row .n{text-align:left;font-size:12px}.wad-row.h{display:none}'
++'.wad-cards,.wad-cards.c4{grid-template-columns:repeat(2,minmax(0,1fr))}.wad-card .v{font-size:20px}.wad-chart .cv{height:220px}'
++'.wad-row,.wad-row.kn{grid-template-columns:40px minmax(0,1fr) 16px;grid-template-areas:"th t cv" "th nums cv";gap:4px 10px;padding:10px 12px}'
++'.wad-row .th,.wad-row .pth{grid-area:th}.wad-row .d{display:none}.wad-row>div.tt{grid-area:t;min-width:0}.wad-row .cv{grid-area:cv}'
++'.wad-row .nums{grid-area:nums;display:flex;gap:12px;flex-wrap:wrap}.wad-row .n{text-align:left;font-size:12px}.wad-row .n::before{content:attr(data-l) " ";color:var(--slate)}.wad-row .n small{display:inline;margin-left:3px}.wad-row.h{display:none}'
++'.wad-row.kn .pth .wad-path span{display:none}'
 +'}'
 +'@media(min-width:721px){.wad-row .nums{display:contents}}'
 +'</style>';
 
-async function wadLoad(){
-  const C=sb.schema('camp');
-  const all=async function(q){ const out=[]; for(let i=0;i<60;i++){ const r=await q().range(i*1000,i*1000+999); if(r.error) break; out.push.apply(out,r.data||[]); if(!r.data||r.data.length<1000) break; } return out; };
-  const got=await Promise.all([
-    C.from('wa_sync_state').select('*').eq('id',1).maybeSingle().then(function(r){ return r.error?{missing:true}:(r.data||{}); },function(){ return {missing:true}; }),
-    C.from('wa_accounts').select('*').then(function(r){ return r.data||[]; },function(){ return []; }),
-    all(function(){ return C.from('wa_templates').select('id,waba_id,name,language,status,category,quality,rejected_reason').order('id'); }),
-    all(function(){ return C.from('wa_template_daily').select('template_id,day,sent,delivered,read,clicked').gte('day',WAD_Y0).order('day'); }),
-    all(function(){ return C.from('wa_msg_status').select('message_id,ts,template_name,error_code,error_title,error_detail').eq('status','failed').gte('ts',WAD_Y0).order('ts'); })
-  ]);
-  WAD={state:got[0],acc:got[1],tpl:got[2],daily:got[3],fail:got[4]};
-}
 function wadIso(d){ return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10); }
-function wadRange(){
-  const t=new Date(), today=wadIso(t);
-  if(WAD_R.day) return {s:WAD_R.day,e:WAD_R.day};
-  if(WAD_R.q==='custom') return {s:WAD_R.from||WAD_Y0,e:WAD_R.to||today};
-  if(WAD_R.q==='month') return {s:today.slice(0,8)+'01',e:today};
-  if(WAD_R.q==='year') return {s:WAD_Y0,e:today};
-  const s=new Date(t.getTime()-(+WAD_R.q-1)*864e5); return {s:wadIso(s)<WAD_Y0?WAD_Y0:wadIso(s),e:today};
-}
+function wadAdd(iso,n){ return wadIso(new Date(new Date(iso+'T00:00:00').getTime()+n*864e5)); }
 function wadN(n){ return n==null?'NA':Number(n).toLocaleString('en-IN'); }
 function wadPct(a,b){ return b?Math.round(a/b*1000)/10+'%':''; }
-
-function watDeliveries(){
-  const P=WAT_DATA.projects, p=watProj();
-  if(!WAD) return '<div class="loader"><div class="spin"></div></div>';
-  let h=WAD_CSS+'<div class="wat-top"><div class="wat-seg">'+P.map(function(x){ return '<button class="'+(x.key===p.key?'on':'')+'" onclick="watPick(\''+x.key+'\')">'+esc(x.label)+'</button>'; }).join('')+'</div></div>';
-  if(WAD.state.missing||!WAD.acc.length){
-    return h+'<div class="wad-empty"><i class="fa-brands fa-whatsapp" style="font-size:22px;color:#16a34a"></i><div><b style="color:#0f172a">No WhatsApp account is connected yet.</b><br>'
-      +'Meta shows no WhatsApp Business Account on the JAIN-E Sync system user. Once the drip number&rsquo;s account is assigned to it, the figures fill in here from the next morning.</div></div>';
-  }
-  const r=wadRange(), today=wadIso(new Date());
-  // the sheet's templates of this project, by stage, matched to Meta's templates by name
-  const byName={}; WAD.tpl.forEach(function(t){ (byName[t.name]=byName[t.name]||[]).push(t); });
-  const stages=p.stages.map(function(st){ return {name:st.name,steps:st.steps.filter(function(s){ return s.name; })}; }).filter(function(st){ return st.steps.length; });
-  if(WAD_STAGE>=stages.length) WAD_STAGE=-1;
-  const shown=WAD_STAGE===-1?stages:[stages[WAD_STAGE]];
-  const ids={}; shown.forEach(function(st){ st.steps.forEach(function(s){ (byName[s.name]||[]).forEach(function(t){ ids[t.id]=s.name; }); }); });
-  const names={}; Object.keys(ids).forEach(function(k){ names[ids[k]]=1; });
-  const inR=function(d){ return d>=r.s&&d<=r.e; };
-  const per={}, perDay={}, tot={sent:0,delivered:0,read:0,clicked:0};
-  WAD.daily.forEach(function(x){ const nm=ids[x.template_id]; if(!nm) return;
-    const allR=WAD_R.day?{s:wadRange0().s,e:wadRange0().e}:r;
-    if(x.day>=allR.s&&x.day<=allR.e){ const dd=perDay[x.day]=perDay[x.day]||{sent:0,delivered:0,read:0}; dd.sent+=x.sent; dd.delivered+=x.delivered; dd.read+=x.read; }
-    if(!inR(x.day)) return;
-    const m=per[nm]=per[nm]||{sent:0,delivered:0,read:0,clicked:0,failed:0,reasons:{}};
-    ['sent','delivered','read','clicked'].forEach(function(k){ m[k]+=+x[k]||0; tot[k]+=+x[k]||0; }); });
-  let failed=0; const reasons={};
-  WAD.fail.forEach(function(f){ const d=String(f.ts).slice(0,10); if(!inR(d)||!names[f.template_name]) return; failed++;
-    const why=f.error_title||('Error '+(f.error_code||'?')); reasons[why]=(reasons[why]||0)+1;
-    const m=per[f.template_name]=per[f.template_name]||{sent:0,delivered:0,read:0,clicked:0,failed:0,reasons:{}}; m.failed++; m.reasons[why]=(m.reasons[why]||0)+1; });
-  const tracksFail=WAD.fail.length>0;
-  // range bar
-  h+='<div class="wad-bar"><div class="wad-q">'+[['7','7 days'],['30','30 days'],['month','This month'],['year','This year'],['custom','Custom']].map(function(o){ return '<button class="'+(!WAD_R.day&&WAD_R.q===o[0]?'on':'')+'" onclick="wadQ(\''+o[0]+'\')">'+o[1]+'</button>'; }).join('')+'</div>'
-    +(WAD_R.q==='custom'&&!WAD_R.day?'<input type="date" min="'+WAD_Y0+'" max="'+today+'" value="'+(WAD_R.from||WAD_Y0)+'" onchange="WAD_R.from=this.value;renderPage()"><span style="color:var(--slate)">to</span><input type="date" min="'+WAD_Y0+'" max="'+today+'" value="'+(WAD_R.to||today)+'" onchange="WAD_R.to=this.value;renderPage()">':'')
-    +(WAD_R.day?'<span class="wad-day"><i class="fa-regular fa-calendar"></i>'+esc(fmtDate(WAD_R.day))+'<button onclick="WAD_R.day=null;renderPage()" title="Back to the range"><i class="fa-solid fa-xmark"></i></button></span>':'')
-    +'<input type="date" min="'+WAD_Y0+'" max="'+today+'" value="'+(WAD_R.day||'')+'" title="One day" onchange="WAD_R.day=this.value||null;renderPage()" style="margin-left:auto"></div>';
-  // cards
-  const card=function(col,l,v,pc){ return '<div class="wad-card"><div class="l"><i style="background:'+col+'"></i>'+l+'</div><div class="v">'+v+'</div><div class="p">'+(pc||'&nbsp;')+'</div></div>'; };
-  h+='<div class="wad-cards">'+card('#64748b','Sent',wadN(tot.sent))+card('#2563eb','Delivered',wadN(tot.delivered),wadPct(tot.delivered,tot.sent)+(tot.sent?' of sent':''))
-    +card('#16a34a','Read',wadN(tot.read),wadPct(tot.read,tot.delivered)+(tot.delivered?' of delivered':''))+card('#7c3aed','Clicked',wadN(tot.clicked),wadPct(tot.clicked,tot.read)+(tot.read?' of read':''))
-    +card('#dc2626','Failed',tracksFail?wadN(failed):'NA',tracksFail?wadPct(failed,tot.sent):'Not reported to JainE')+'</div>';
-  // daily bars (by week when the range is long)
-  const R0=wadRange0(), days=[]; for(let d=new Date(R0.s+'T00:00:00');wadIso(d)<=R0.e;d=new Date(d.getTime()+864e5)) days.push(wadIso(d));
-  const wk=days.length>62, buckets=[];
-  days.forEach(function(d,i){ if(!wk||i%7===0) buckets.push({k:d,days:[]}); buckets[buckets.length-1].days.push(d); });
-  buckets.forEach(function(b){ b.sent=0; b.delivered=0; b.read=0; b.days.forEach(function(d){ const x=perDay[d]; if(x){ b.sent+=x.sent; b.delivered+=x.delivered; b.read+=x.read; } }); });
-  const mx=Math.max.apply(null,buckets.map(function(b){ return b.sent; }).concat([1]));
-  h+='<div class="wad-chart"><div class="wad-leg"><span><i style="background:#94a3b8"></i>Sent</span><span><i style="background:#2563eb"></i>Delivered</span><span><i style="background:#16a34a"></i>Read</span><span style="margin-left:auto">'+(wk?'By week':'By day')+' · click a bar for that day</span></div><div class="wad-cols">'
-    +buckets.map(function(b){ const on=WAD_R.day&&b.days.indexOf(WAD_R.day)>-1;
-      return '<div class="wad-col'+(on?' on':'')+'" title="'+esc(fmtDate(b.k))+(wk?' (week)':'')+' - Sent '+b.sent+', Delivered '+b.delivered+', Read '+b.read+'" onclick="wadDay(\''+b.k+'\')">'
-        +[['sent','#94a3b8'],['delivered','#2563eb'],['read','#16a34a']].map(function(m){ return '<i style="height:'+(b[m[0]]/mx*100)+'%;background:'+m[1]+'"></i>'; }).join('')+'</div>'; }).join('')
-    +'</div><div class="wad-ax"><span>'+esc(fmtDate(R0.s))+'</span><span>'+esc(fmtDate(R0.e))+'</span></div></div>';
-  // stage sub-tabs + template rows
-  h+='<div class="wad-stg"><button class="'+(WAD_STAGE===-1?'on':'')+'" onclick="wadStage(-1)">All stages</button>'+stages.map(function(st,i){ return '<button class="'+(WAD_STAGE===i?'on':'')+'" onclick="wadStage('+i+')">'+esc(st.name)+'</button>'; }).join('')+'</div>';
-  window._watRows=[];
-  let rows='<div class="wad-row h"><div>Day</div><div></div><div>Template</div><div style="text-align:right">Sent</div><div style="text-align:right">Delivered</div><div style="text-align:right">Read</div><div style="text-align:right">Clicked</div><div style="text-align:right">Failed</div><div></div></div>';
-  shown.forEach(function(st){
-    if(WAD_STAGE===-1) rows+='<div class="wad-row h" style="display:block;background:#fff;color:#0f172a;font-size:12px;border-top:1px solid var(--line)">'+esc(st.name)+'</div>';
-    st.steps.forEach(function(s){ const m=per[s.name]||{sent:0,delivered:0,read:0,clicked:0,failed:0,reasons:{}}, meta=byName[s.name]||[];
-      const pic=[s.attach].concat(s.preview||[]).filter(function(u){ return u&&/\.(jpe?g|png|webp|gif)(\?|$)/i.test(u); })[0], k=watKind(s.type);
-      const pi=window._watRows.push({p:p,st:st,s:s,m:m,meta:meta,tracksFail:tracksFail,range:r})-1;
-      rows+='<div class="wad-row" onclick="watPop('+pi+')"><div class="d" style="font-size:12px;color:var(--slate);font-weight:600">'+(s.day==null?'':'Day <b style="color:#0f172a;font-size:15px">'+s.day+'</b>')+'</div>'
-        +'<div class="th">'+(pic?'<img src="'+esc(pic)+'" alt="" loading="lazy">':'<i class="'+k[0]+'"></i>')+'</div>'
-        +'<div><div class="t">'+esc(watTitle(s))+'</div><div class="id">'+esc(s.name)+(meta.length?'':' · not found at Meta')+'</div></div>'
-        +'<div class="nums"><div class="n" data-l="Sent">'+wadN(m.sent)+'</div><div class="n" data-l="Delivered">'+wadN(m.delivered)+'<small>'+wadPct(m.delivered,m.sent)+'</small></div><div class="n" data-l="Read">'+wadN(m.read)+'<small>'+wadPct(m.read,m.delivered)+'</small></div>'
-        +'<div class="n" data-l="Clicked">'+wadN(m.clicked)+'<small>'+wadPct(m.clicked,m.read)+'</small></div><div class="n'+(m.failed?' bad':'')+'" data-l="Failed">'+(tracksFail?wadN(m.failed):'NA')+'</div></div>'
-        +'<i class="fa-solid fa-chevron-right cv"></i></div>';
-    });
-  });
-  h+='<div class="wat-list">'+rows+'</div>';
-  if(Object.keys(reasons).length) h+='<div class="card card-pad wad-fail" style="margin-top:14px"><div class="lbl" style="font-weight:700;margin-bottom:6px">Why messages failed</div>'+Object.keys(reasons).sort(function(a,b){ return reasons[b]-reasons[a]; }).map(function(w){ return '<div class="r"><span>'+esc(w)+'</span><b>'+reasons[w]+'</b></div>'; }).join('')+'</div>';
-  return h;
+// the chosen range: Yesterday / last 7, 14, 30 days (up to yesterday - today is only part-read in the morning) / custom
+function wadRange0(){
+  const today=wadIso(new Date()), y=wadAdd(today,-1);
+  if(WAD_R.q==='y') return {s:y,e:y};
+  if(WAD_R.q==='custom'&&WAD_R.from) return {s:WAD_R.from,e:WAD_R.to||WAD_R.from};
+  const n=+WAD_R.q||30; return {s:wadAdd(today,-n),e:y};
 }
-// the range the bars cover - the chosen range even while one day is picked
-function wadRange0(){ const d=WAD_R.day; WAD_R.day=null; const r=wadRange(); WAD_R.day=d; return r; }
-window.wadQ=function(q){ WAD_R.q=q; WAD_R.day=null; renderPage(); };
-window.wadDay=function(d){ WAD_R.day=WAD_R.day===d?null:d; renderPage(); };
+function wadRange(){ return WAD_R.day?{s:WAD_R.day,e:WAD_R.day}:wadRange0(); }
+function wadShort(iso){ return new Date(iso+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'}); }
+function wadBar(){
+  const r=wadRange0();
+  let h='<div class="wad-bar"><div class="wad-q">'+[['y','Yesterday'],['7','Last 7 days'],['14','Last 14 days'],['30','Last 30 days']].map(function(o){ return '<button class="'+(WAD_R.q===o[0]?'on':'')+'" onclick="wadQ(\''+o[0]+'\')">'+o[1]+'</button>'; }).join('')
+    +'<button class="'+(WAD_R.q==='custom'?'on':'')+'" onclick="event.stopPropagation();wcalOpen()"><i class="fa-regular fa-calendar"></i>'+(WAD_R.q==='custom'&&WAD_R.from?esc(wadShort(r.s))+(r.s!==r.e?' – '+esc(wadShort(r.e)):''):'Custom')+'</button></div>'
+    +'<span class="wad-rng">'+esc(fmtDate(r.s))+(r.s!==r.e?' – '+esc(fmtDate(r.e)):'')+'</span>';
+  if(WCAL.open) h+=wcalHtml();
+  return h+'</div>';
+}
+/* THE CUSTOM CALENDAR - Accountability's task date picker look (month, arrows, Mon-Sun grid, today's dot, Clear / Done),
+   without the frequency rail: first click = from, second click = to. */
+const WCAL_MON=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function wcalHtml(){
+  const y=WCAL.y, m=WCAL.m, first=(new Date(y,m,1).getDay()+6)%7, n=new Date(y,m+1,0).getDate(), today=wadIso(new Date());
+  const a=WCAL.a, b=WCAL.b||WCAL.a;
+  let g='';
+  for(let i=0;i<first;i++) g+='<button type="button" class="wcal-day pad" disabled></button>';
+  for(let d=1;d<=n;d++){ const iso=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'), off=iso>today||iso<WAD_Y0;
+    const on=iso===a||iso===b, inr=a&&b&&iso>a&&iso<b;
+    g+='<button type="button" class="wcal-day'+(on?' on':inr?' in':'')+(iso===today?' today':'')+'"'+(off?' disabled':' onclick="event.stopPropagation();wcalPick(\''+iso+'\')"')+'>'+d+'</button>'; }
+  const says=a?(WCAL.b?'<b>'+esc(fmtDate(a))+'</b> to <b>'+esc(fmtDate(WCAL.b))+'</b>':'From <b>'+esc(fmtDate(a))+'</b> - now pick the last day (or Done for this one day)'):'Pick the first day';
+  return '<div class="wcal" onclick="event.stopPropagation()"><div class="wcal-main"><div class="wcal-head"><button type="button" class="wcal-nav" onclick="wcalMv(-1)"><i class="fa-solid fa-chevron-left"></i></button><div class="wcal-title">'+WCAL_MON[m]+' '+y+'</div><button type="button" class="wcal-nav" onclick="wcalMv(1)"><i class="fa-solid fa-chevron-right"></i></button></div>'
+    +'<div class="wcal-dow">'+['Mo','Tu','We','Th','Fr','Sa','Su'].map(function(x){ return '<span>'+x+'</span>'; }).join('')+'</div><div class="wcal-grid">'+g+'</div></div>'
+    +'<div class="wcal-says">'+says+'</div><div class="wcal-foot"><button type="button" class="clr" onclick="wcalClear()">Clear</button><button type="button" class="done"'+(a?'':' disabled')+' onclick="wcalDone()">Done</button></div></div>';
+}
+window.wcalOpen=function(){ const r=wadRange0(), d=new Date((WAD_R.q==='custom'?r.e:wadIso(new Date()))+'T00:00:00');
+  WCAL.open=!WCAL.open; WCAL.y=d.getFullYear(); WCAL.m=d.getMonth(); WCAL.a=WAD_R.q==='custom'?WAD_R.from:null; WCAL.b=WAD_R.q==='custom'?WAD_R.to:null; renderPage(); };
+window.wcalMv=function(n){ const d=new Date(WCAL.y,WCAL.m+n,1); WCAL.y=d.getFullYear(); WCAL.m=d.getMonth(); renderPage(); };
+window.wcalPick=function(iso){ if(!WCAL.a||WCAL.b){ WCAL.a=iso; WCAL.b=null; } else if(iso<WCAL.a){ WCAL.b=WCAL.a; WCAL.a=iso; } else WCAL.b=iso; renderPage(); };
+window.wcalClear=function(){ WCAL.a=null; WCAL.b=null; renderPage(); };
+window.wcalDone=function(){ if(!WCAL.a) return; WAD_R.q='custom'; WAD_R.from=WCAL.a; WAD_R.to=WCAL.b||WCAL.a; WAD_R.day=null; WCAL.open=false; renderPage(); };
+if(!window._wcalWired){ window._wcalWired=true; document.addEventListener('click',function(){ if(WCAL.open){ WCAL.open=false; if(PAGE==='wa_templates') renderPage(); } }); }
+window.wadQ=function(q){ WAD_R.q=q; WAD_R.day=null; WCAL.open=false; renderPage(); };
 window.wadStage=function(i){ WAD_STAGE=i; renderPage(); };
 
-
-/* ---------------- KNOCKING (17 Nov 2026, Ayush: "these are Knocking Messages - I want them in a different tab, they will
-   not be included in the Deliveries tab; for these 8 messages I want the Sent, Delivered, Failed, Read and how many
-   clicked the different buttons offered as CTAs"). The ask_question* templates of a project's WhatsApp account, laid out
-   the way they run: the first knock, then what goes to people who said Yes, who said No, and who did not reply. Each shows
-   Sent, Delivered, Not delivered, Read and every button with its clicks. Figures: camp.wa_template_daily (Meta's template
-   analytics, kept by Meta for ~90 days; read nightly). Meta does not report failed sends: "Not delivered" = sent minus
-   delivered (failed, or not delivered yet). Phone-call buttons are not counted by Meta - they say so. */
-let KN=null, KN_ACC=null;
-const KN_RE=/^ask_question/i;
-async function knLoad(){
-  const C=sb.schema('camp');
-  const all=async function(q){ const out=[]; for(let i=0;i<60;i++){ const r=await q().range(i*1000,i*1000+999); if(r.error) break; out.push.apply(out,r.data||[]); if(!r.data||r.data.length<1000) break; } return out; };
-  const got=await Promise.all([
-    C.from('wa_accounts').select('id,name,phones').then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; }),
-    all(function(){ return C.from('wa_templates').select('id,waba_id,name,status,category,components').ilike('name','ask_question%').order('id'); })
-  ]);
-  const tpl=got[1]||[], ids=tpl.map(function(t){ return t.id; });
-  let daily=[];
-  for(let i=0;i<ids.length;i+=100){ const part=ids.slice(i,i+100);
-    daily=daily.concat(await all(function(){ return C.from('wa_template_daily').select('template_id,day,sent,delivered,read,clicked,clicks').in('template_id',part).gte('day',WAD_Y0).order('day'); })); }
-  KN={acc:got[0],tpl:tpl,daily:daily};
+// ---- loading: the accounts and template list once; a project's own account's figures when it is first opened ----
+async function wadPages(q){   // four pages at a time until one comes back short
+  let out=[]; for(let f=0;;f+=4000){ const got=await Promise.all([0,1,2,3].map(function(i){ return q().range(f+i*1000,f+i*1000+999); }));
+    for(const g of got){ out=out.concat(g.data||[]); if(g.error||!g.data||g.data.length<1000) return out; } }
 }
+async function wadLoad(){
+  const C=sb.schema('camp');
+  const got=await Promise.all([
+    C.from('wa_sync_state').select('last_sync_at').eq('id',1).maybeSingle().then(function(r){ return r.error?{missing:true}:(r.data||{}); },function(){ return {missing:true}; }),
+    C.from('wa_accounts').select('id,name,phones').then(function(r){ return r.data||[]; },function(){ return []; }),
+    C.from('wa_templates').select('id,waba_id,name,language,status,category,quality,rejected_reason').order('id').range(0,1999).then(function(r){ return r.data||[]; },function(){ return []; })
+  ]);
+  WAD={state:got[0],acc:got[1],tpl:got[2],byAcc:{}};
+}
+async function wadLoadAcc(accId){
+  if(!WAD||!accId||WAD.byAcc[accId]) return;
+  const C=sb.schema('camp'), ids=WAD.tpl.filter(function(t){ return t.waba_id===accId; }).map(function(t){ return t.id; });
+  const parts=[]; for(let i=0;i<ids.length;i+=60) parts.push(ids.slice(i,i+60));
+  const res=await Promise.all([
+    C.from('wa_templates').select('id,components').eq('waba_id',accId).then(function(r){ return r.data||[]; },function(){ return []; })
+  ].concat(parts.map(function(p){ return wadPages(function(){ return C.from('wa_template_daily').select('template_id,day,sent,delivered,read,clicked,clicks').in('template_id',p).gte('day',WAD_Y0).order('day').order('template_id'); }); })));
+  const comp={}; (res[0]||[]).forEach(function(x){ comp[x.id]=x.components; });
+  WAD.tpl.forEach(function(t){ if(t.waba_id===accId) t.components=comp[t.id]||null; });
+  WAD.byAcc[accId]={daily:[].concat.apply([],res.slice(1))};
+}
+function wadAccFor(label){ const pn=function(x){ return String(x||'').toLowerCase().replace(/dream|by jain group/g,'').replace(/[^a-z0-9]/g,''); };
+  return ((WAD&&WAD.acc)||[]).filter(function(a){ return pn(a.name)===pn(label); })[0]||null; }
+function wadNoData(){ return '<div class="wad-empty"><i class="fa-brands fa-whatsapp" style="font-size:22px;color:#16a34a"></i><div><b style="color:#0f172a">No WhatsApp figures here yet.</b><br>They are read from Meta every morning at 06:15 IST.</div></div>'; }
 function knBranch(n){ n=String(n).toLowerCase(); return /_yes_/.test(n)?1:/_no_/.test(n)?2:/_silent_/.test(n)?3:0; }
 function knStep(n){ const m=String(n).match(/q(\d+)/i); return m?+m[1]:0; }
 function knLabel(n){ const b=['First knock','Said Yes','Said No','No reply'][knBranch(n)], q=knStep(n); return knBranch(n)===0?'First knock':b+(q?' · Q'+q:''); }
 function knBody(t){ const c=(t.components||[]).filter(function(x){ return x.type==='BODY'; })[0]; return String((c&&c.text)||''); }
 function knButtons(t){ const c=(t.components||[]).filter(function(x){ return x.type==='BUTTONS'; })[0]; return ((c&&c.buttons)||[]).map(function(b){ return {text:b.text,type:b.type}; }); }
-function watKnocking(){
-  if(!KN) return '<div class="loader"><div class="spin"></div></div>';
-  let h=WAD_CSS+'<style>'
-    +'.wad-cards.kn-cards{grid-template-columns:repeat(4,minmax(0,1fr))}@media(max-width:720px){.wad-cards.kn-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}'
-    +'.kn-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:start}'
-    +'@media(max-width:1100px){.kn-board{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:620px){.kn-board{grid-template-columns:1fr}}'
-    +'.kn-col h4{margin:0 0 8px;font-size:13px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:7px}.kn-col h4 i{width:9px;height:9px;border-radius:50%}'
-    +'.kn-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px 14px;margin:0 0 10px;cursor:pointer}.kn-card:hover{border-color:#94a3b8}'
-    +'.kn-card .nm{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;color:#475569;background:#f1f5f9;border-radius:6px;padding:2px 7px;display:inline-block;margin-bottom:6px}'
-    +'.kn-card .tx{font-size:13px;color:#0f172a;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:10px}'
-    +'.kn-n{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-bottom:10px}'
-    +'.kn-n div{background:#f8fafc;border-radius:8px;padding:6px 7px;font-size:10.5px;color:var(--slate);font-weight:600}.kn-n b{display:block;font-size:16px;color:#0f172a}'
-    +'.kn-b{display:flex;flex-wrap:wrap;gap:6px}.kn-b span{border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600}'
-    +'.kn-b span.off{border-color:var(--line);background:#f8fafc;color:#94a3b8;font-weight:500}'
-    +'.kn-none{color:#94a3b8;font-size:12.5px;padding:6px 2px}'
-    +'</style>';
-  if(KN.acc===null||!KN.tpl.length) return h+'<div class="wad-empty"><i class="fa-brands fa-whatsapp" style="font-size:22px;color:#16a34a"></i><div><b style="color:#0f172a">The knocking figures are not read yet.</b><br>They show here after the next read from Meta.</div></div>';
-  // ANANTA ONLY (17 Nov 2026, Ayush: "there is only for Ananta") - knocking runs on the Ananta number alone; other accounts
-  // carry templates of the same names but they are not shown here
-  const accName=function(id){ return ((KN.acc||[]).filter(function(a){ return a.id===id; })[0]||{}).name||id; };
-  const accIds=[...new Set(KN.tpl.map(function(t){ return t.waba_id; }))].filter(function(id){ return /ananta/i.test(accName(id)); });
-  KN_ACC=accIds[0]||null;
-  if(!KN_ACC) return h+'<div class="wad-empty"><div>No knocking templates found on the Ananta number.</div></div>';
-  h+='<div class="wat-top"><div style="font-size:15px;font-weight:700;color:#0f172a"><i class="fa-brands fa-whatsapp" style="color:#16a34a"></i> '+esc(accName(KN_ACC))+' <span style="font-weight:500;color:var(--slate);font-size:13px">· knocking messages</span></div></div>';
-  const r=wadRange(), today=wadIso(new Date());
-  h+='<div class="wad-bar"><div class="wad-q">'+[['7','7 days'],['30','30 days'],['month','This month'],['year','This year'],['custom','Custom']].map(function(o){ return '<button class="'+(!WAD_R.day&&WAD_R.q===o[0]?'on':'')+'" onclick="wadQ(\''+o[0]+'\')">'+o[1]+'</button>'; }).join('')+'</div>'
-    +(WAD_R.q==='custom'&&!WAD_R.day?'<input type="date" min="'+WAD_Y0+'" max="'+today+'" value="'+(WAD_R.from||WAD_Y0)+'" onchange="WAD_R.from=this.value;renderPage()"><span style="color:var(--slate)">to</span><input type="date" min="'+WAD_Y0+'" max="'+today+'" value="'+(WAD_R.to||today)+'" onchange="WAD_R.to=this.value;renderPage()">':'')
-    +(WAD_R.day?'<span class="wad-day"><i class="fa-regular fa-calendar"></i>'+esc(fmtDate(WAD_R.day))+'<button onclick="WAD_R.day=null;renderPage()"><i class="fa-solid fa-xmark"></i></button></span>':'')
-    +'<input type="date" min="'+WAD_Y0+'" max="'+today+'" value="'+(WAD_R.day||'')+'" title="One day" onchange="WAD_R.day=this.value||null;renderPage()" style="margin-left:auto"></div>';
-  const tpl=KN.tpl.filter(function(t){ return t.waba_id===KN_ACC; });
-  const per={}, tot={sent:0,delivered:0,read:0,clicked:0};
-  KN.daily.forEach(function(x){ if(x.day<r.s||x.day>r.e) return; const t=tpl.filter(function(z){ return z.id===x.template_id; })[0]; if(!t) return;
-    const m=per[t.id]=per[t.id]||{sent:0,delivered:0,read:0,clicked:0,btn:{}};
+function wadChips(btns,cnt){ return btns.length?'<div class="wad-btns">'+btns.map(function(b){ return /PHONE/i.test(b.type)?'<span class="off" title="Meta does not count clicks on call buttons">'+esc(b.text)+' · not counted</span>':'<span>'+esc(b.text)+' · '+wadN((cnt||{})[b.text]||0)+'</span>'; }).join('')+'</div>':''; }
+function wadCard(col,l,v,pc,ttl){ return '<div class="wad-card"'+(ttl?' title="'+esc(ttl)+'"':'')+'><div class="l"><i style="background:'+col+'"></i>'+l+'</div><div class="v">'+v+'</div><div class="p">'+(pc||'&nbsp;')+'</div></div>'; }
+const WAD_ND='Meta does not report failed messages - this is sent minus delivered (failed, or not delivered yet)';
+// sums per template (in the range) and per day (for the chart) of the chosen templates
+function wadSum(daily,ids,r){
+  const per={}, perDay={}, tot={sent:0,delivered:0,read:0,clicked:0}, r0=wadRange0();
+  daily.forEach(function(x){ if(!ids[x.template_id]) return;
+    if(x.day>=r0.s&&x.day<=r0.e){ const dd=perDay[x.day]=perDay[x.day]||{sent:0,delivered:0,read:0}; dd.sent+=+x.sent||0; dd.delivered+=+x.delivered||0; dd.read+=+x.read||0; }
+    if(x.day<r.s||x.day>r.e) return;
+    const m=per[x.template_id]=per[x.template_id]||{sent:0,delivered:0,read:0,clicked:0,btn:{}};
     ['sent','delivered','read','clicked'].forEach(function(k){ m[k]+=+x[k]||0; tot[k]+=+x[k]||0; });
     (x.clicks||[]).forEach(function(c){ const b=c.button_content||c.type||'Button'; m.btn[b]=(m.btn[b]||0)+(+c.count||0); }); });
-  const card=function(col,l,v,pc,ttl){ return '<div class="wad-card"'+(ttl?' title="'+esc(ttl)+'"':'')+'><div class="l"><i style="background:'+col+'"></i>'+l+'</div><div class="v">'+v+'</div><div class="p">'+(pc||'&nbsp;')+'</div></div>'; };
-  const nd=Math.max(0,tot.sent-tot.delivered);
-  // 17 Nov 2026 (Ayush: "remove button clicks"): no total-clicks card - the clicks stay per button on each template
-  h+='<div class="wad-cards kn-cards">'+card('#64748b','Sent',wadN(tot.sent))+card('#2563eb','Delivered',wadN(tot.delivered),wadPct(tot.delivered,tot.sent)+(tot.sent?' of sent':''))
-    +card('#dc2626','Not delivered',wadN(nd),wadPct(nd,tot.sent)+(tot.sent?' of sent':''),'Meta does not report failed messages - this is sent minus delivered (failed, or not delivered yet)')
-    +card('#16a34a','Read',wadN(tot.read),wadPct(tot.read,tot.delivered)+(tot.delivered?' of delivered':''))+'</div>';
-  window._watRows=[];
-  const cols=[['First knock','#0f172a'],['Said Yes','#16a34a'],['Said No','#dc2626'],['No reply','#d97706']];
-  h+='<div class="kn-board">'+cols.map(function(c,bi){
-    const list=tpl.filter(function(t){ return knBranch(t.name)===bi; }).sort(function(a,b){ return knStep(a.name)-knStep(b.name)||a.name.localeCompare(b.name); });
-    return '<div class="kn-col"><h4><i style="background:'+c[1]+'"></i>'+c[0]+'</h4>'+(list.length?list.map(function(t){
-      const m=per[t.id]||{sent:0,delivered:0,read:0,clicked:0,btn:{}}, btns=knButtons(t), body=knBody(t);
-      const s={text:body+(btns.length?'\nCTA - '+btns.map(function(b){ return b.text; }).join(' & '):''),name:t.name,day:null,status:'',type:'text'};
-      const pi=window._watRows.push({p:{label:accName(KN_ACC)},st:{name:knLabel(t.name)},s:s,meta:[t],m:{sent:m.sent,delivered:m.delivered,read:m.read,clicked:m.clicked,failed:Math.max(0,m.sent-m.delivered),reasons:{}},tracksFail:true,failLabel:'Not delivered',btns:btns,btnCount:m.btn,range:r})-1;
-      return '<div class="kn-card" onclick="watPop('+pi+')"><span class="nm">'+esc(t.name)+'</span><div class="tx">'+esc(watTitle({text:body}))+'</div>'
-        +'<div class="kn-n"><div>Sent<b>'+wadN(m.sent)+'</b></div><div>Delivered<b>'+wadN(m.delivered)+'</b></div><div title="Sent minus delivered">Not deliv.<b>'+wadN(Math.max(0,m.sent-m.delivered))+'</b></div><div>Read<b>'+wadN(m.read)+'</b></div></div>'
-        +'<div class="kn-b">'+(btns.length?btns.map(function(b){ const ph=/PHONE/i.test(b.type); return ph?'<span class="off" title="Meta does not count clicks on call buttons">'+esc(b.text)+' · not counted</span>':'<span>'+esc(b.text)+' · '+wadN(m.btn[b.text]||0)+'</span>'; }).join(''):'<span class="off">No buttons</span>')+'</div></div>';
-    }).join(''):'<div class="kn-none">None in this account</div>')+'</div>';
-  }).join('')+'</div>';
-  return h;
+  return {per:per,perDay:perDay,tot:tot};
 }
-window.knPick=function(id){ KN_ACC=id; renderPage(); };
+
+function watDeliveries(){
+  const P=WAT_DATA.projects, p=watProj();
+  if(!WAD) return '<div class="loader"><div class="spin"></div></div>';
+  let h=WAD_CSS+'<div class="wat-top"><div class="wat-seg">'+P.map(function(x){ return '<button class="'+(x.key===p.key?'on':'')+'" onclick="watPick(\''+x.key+'\')">'+esc(x.label)+'</button>'; }).join('')+'</div></div>';
+  const acc=wadAccFor(p.label);
+  if(WAD.state.missing||!acc||!WAD.byAcc[acc.id]) return h+wadNoData();
+  h+=wadBar();
+  const r=wadRange(), D=WAD.byAcc[acc.id].daily;
+  // the sheet's templates of this project, matched by name to its own account's templates
+  const byName={}; WAD.tpl.forEach(function(t){ if(t.waba_id===acc.id) byName[t.name]=t; });
+  const stages=p.stages.map(function(st){ return {name:st.name,steps:st.steps.filter(function(s){ return s.name; })}; }).filter(function(st){ return st.steps.length; });
+  if(WAD_STAGE>=stages.length) WAD_STAGE=-1;
+  const shown=WAD_STAGE===-1?stages:[stages[WAD_STAGE]];
+  const ids={}; shown.forEach(function(st){ st.steps.forEach(function(s){ const t=byName[s.name]; if(t) ids[t.id]=1; }); });
+  const S=wadSum(D,ids,r), tot=S.tot, nd=Math.max(0,tot.sent-tot.delivered);
+  h+='<div class="wad-cards">'+wadCard('#64748b','Sent',wadN(tot.sent))+wadCard('#2563eb','Delivered',wadN(tot.delivered),wadPct(tot.delivered,tot.sent)+(tot.sent?' of sent':''))
+    +wadCard('#16a34a','Read',wadN(tot.read),wadPct(tot.read,tot.delivered)+(tot.delivered?' of delivered':''))+wadCard('#7c3aed','Clicked',wadN(tot.clicked),wadPct(tot.clicked,tot.read)+(tot.read?' of read':''))
+    +wadCard('#dc2626','Not delivered',wadN(nd),wadPct(nd,tot.sent)+(tot.sent?' of sent':''),WAD_ND)+'</div>';
+  h+=wadChartBox(S.perDay);
+  h+='<div class="wad-stg"><button class="'+(WAD_STAGE===-1?'on':'')+'" onclick="wadStage(-1)">All stages</button>'+stages.map(function(st,i){ return '<button class="'+(WAD_STAGE===i?'on':'')+'" onclick="wadStage('+i+')">'+esc(st.name)+'</button>'; }).join('')+'</div>';
+  window._watRows=[];
+  let rows='<div class="wad-row h"><div>Day</div><div></div><div>Template</div><div style="text-align:right">Sent</div><div style="text-align:right">Delivered</div><div style="text-align:right">Read</div><div style="text-align:right">Clicked</div><div style="text-align:right" title="'+esc(WAD_ND)+'">Not delivered</div><div></div></div>';
+  shown.forEach(function(st){
+    if(WAD_STAGE===-1) rows+='<div class="wad-row h" style="display:block;background:#fff;color:#0f172a;font-size:12px;border-top:1px solid var(--line)">'+esc(st.name)+'</div>';
+    st.steps.forEach(function(s){ const t=byName[s.name], m=(t&&S.per[t.id])||{sent:0,delivered:0,read:0,clicked:0,btn:{}}, btns=t?knButtons(t):[], nd1=Math.max(0,m.sent-m.delivered);
+      const pic=[s.attach].concat(s.preview||[]).filter(function(u){ return u&&/\.(jpe?g|png|webp|gif)(\?|$)/i.test(u); })[0], k=watKind(s.type);
+      const pi=window._watRows.push({p:p,st:st,s:s,m:{sent:m.sent,delivered:m.delivered,read:m.read,clicked:m.clicked,failed:nd1,reasons:{}},meta:t?[t]:[],tracksFail:true,failLabel:'Not delivered',range:r,btns:btns,btnCount:m.btn})-1;
+      rows+='<div class="wad-row" onclick="watPop('+pi+')"><div class="d" style="font-size:12px;color:var(--slate);font-weight:600">'+(s.day==null?'':'Day <b style="color:#0f172a;font-size:15px">'+s.day+'</b>')+'</div>'
+        +'<div class="th">'+(pic?'<img src="'+esc(pic)+'" alt="" loading="lazy">':'<i class="'+k[0]+'"></i>')+'</div>'
+        +'<div class="tt"><div class="t">'+esc(watTitle(s))+'</div><div class="id">'+esc(s.name)+(t?'':' · not found on this number')+'</div>'+wadChips(btns,m.btn)+'</div>'
+        +'<div class="nums"><div class="n" data-l="Sent">'+wadN(m.sent)+'</div><div class="n" data-l="Delivered">'+wadN(m.delivered)+'<small>'+wadPct(m.delivered,m.sent)+'</small></div><div class="n" data-l="Read">'+wadN(m.read)+'<small>'+wadPct(m.read,m.delivered)+'</small></div>'
+        +'<div class="n" data-l="Clicked">'+wadN(m.clicked)+'<small>'+wadPct(m.clicked,m.read)+'</small></div><div class="n'+(nd1?' bad':'')+'" data-l="Not delivered">'+wadN(nd1)+'</div></div>'
+        +'<i class="fa-solid fa-chevron-right cv"></i></div>';
+    });
+  });
+  return h+'<div class="wat-list">'+rows+'</div>';
+}
+
+/* THE CHART (18 Nov 2026): Chart.js grouped bars - Sent, Delivered, Read per day (per week past 45 days), with axes, values
+   on hover and wide bars; it starts at the first day that has figures, so a project that began sending late (Ananta, mid
+   November) is not a long empty strip. A click on a bar shows that day; the range buttons go back. */
+let WAD_CH=null;
+function wadChartBox(perDay){
+  const r0=wadRange0(), days=[]; for(let d=r0.s; d<=r0.e; d=wadAdd(d,1)) days.push(d);
+  const firstData=days.findIndex(function(d){ const x=perDay[d]; return x&&(x.sent||x.delivered||x.read); });
+  if(firstData<0){ window._wadChart=null; return '<div class="wad-chart"><div class="hd"><b>By day</b></div><div style="padding:30px 0;text-align:center;color:var(--slate);font-size:13px">Nothing sent in this period</div></div>'; }
+  const use=days.slice(firstData), wk=use.length>45, B=[];
+  use.forEach(function(d,i){ if(!wk||i%7===0) B.push({k:d,days:[],sent:0,delivered:0,read:0}); const b=B[B.length-1]; b.days.push(d); const x=perDay[d]; if(x){ b.sent+=x.sent; b.delivered+=x.delivered; b.read+=x.read; } });
+  window._wadChart={B:B,wk:wk};
+  return '<div class="wad-chart"><div class="hd"><b>'+(wk?'By week':'By day')+'</b><span>'+esc(fmtDate(use[0]))+' – '+esc(fmtDate(use[use.length-1]))+(firstData>0?' · from the first day with messages':'')+'</span><span style="margin-left:auto">Click a bar for that day</span></div><div class="cv"><canvas id="wadCanvas"></canvas></div></div>';
+}
+function wadDrawChart(){
+  const cv=document.getElementById('wadCanvas'); if(WAD_CH){ try{ WAD_CH.destroy(); }catch(_e){} WAD_CH=null; }
+  if(!cv||!window._wadChart||typeof Chart==='undefined') return;
+  const B=window._wadChart.B, wk=window._wadChart.wk;
+  const lab=B.map(function(b){ return wk?'Wk of '+wadShort(b.k):wadShort(b.k); });
+  const sel=function(c){ return B.map(function(b){ return WAD_R.day&&b.days.indexOf(WAD_R.day)>-1?c[0]:(WAD_R.day?c[1]:c[0]); }); };
+  WAD_CH=new Chart(cv,{type:'bar',data:{labels:lab,datasets:[
+      {label:'Sent',data:B.map(function(b){ return b.sent; }),backgroundColor:sel(['#94a3b8','#cbd5e1']),borderRadius:4,maxBarThickness:28},
+      {label:'Delivered',data:B.map(function(b){ return b.delivered; }),backgroundColor:sel(['#2563eb','#bfdbfe']),borderRadius:4,maxBarThickness:28},
+      {label:'Read',data:B.map(function(b){ return b.read; }),backgroundColor:sel(['#16a34a','#bbf7d0']),borderRadius:4,maxBarThickness:28}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{position:'top',align:'end',labels:{boxWidth:10,boxHeight:10,font:{size:11.5}}},
+        tooltip:{callbacks:{title:function(it){ const b=B[it[0].dataIndex]; return wk?fmtDate(b.days[0])+' – '+fmtDate(b.days[b.days.length-1]):fmtDate(b.k); },
+          label:function(c){ return ' '+c.dataset.label+': '+Number(c.raw).toLocaleString('en-IN'); }}}},
+      scales:{x:{grid:{display:false},ticks:{font:{size:11},maxRotation:0,autoSkip:true,autoSkipPadding:10}},y:{beginAtZero:true,grid:{color:'#f1f5f9'},ticks:{font:{size:11},precision:0}}},
+      categoryPercentage:.82,barPercentage:.92,
+      onClick:function(_e,els){ if(!els.length||wk) return; const b=B[els[0].index]; WAD_R.day=WAD_R.day===b.k?null:b.k; renderPage(); }}});
+}
+
+/* ---------------- KNOCKING (17 Nov 2026; rows 18 Nov 2026 - Ayush: "not segregated on any basis, row-wise one by one") ----
+   Ananta's ask_question* templates ("knocking messages") only - not in Deliveries. One full-width row each, in the order
+   they run (first knock, then said Yes, said No, no reply), its path as a small tag: Sent, Delivered, Not delivered, Read
+   and the clicks on every button (Meta does not count phone-call buttons). */
+const KN_RE=/^ask_question/i;
+function watKnocking(){
+  if(!WAD) return '<div class="loader"><div class="spin"></div></div>';
+  let h=WAD_CSS;
+  const acc=((WAD.acc)||[]).filter(function(a){ return /ananta/i.test(a.name); })[0];
+  if(WAD.state.missing||!acc||!WAD.byAcc[acc.id]) return h+wadNoData();
+  h+='<div class="wat-top"><div style="font-size:15px;font-weight:700;color:#0f172a"><i class="fa-brands fa-whatsapp" style="color:#16a34a"></i> '+esc(acc.name)+' <span style="font-weight:500;color:var(--slate);font-size:13px">· knocking messages</span></div></div>';
+  h+=wadBar();
+  const r=wadRange(), tpl=WAD.tpl.filter(function(t){ return t.waba_id===acc.id&&KN_RE.test(t.name); });
+  const ids={}; tpl.forEach(function(t){ ids[t.id]=1; });
+  const S=wadSum(WAD.byAcc[acc.id].daily,ids,r), tot=S.tot, nd=Math.max(0,tot.sent-tot.delivered);
+  h+='<div class="wad-cards c4">'+wadCard('#64748b','Sent',wadN(tot.sent))+wadCard('#2563eb','Delivered',wadN(tot.delivered),wadPct(tot.delivered,tot.sent)+(tot.sent?' of sent':''))
+    +wadCard('#dc2626','Not delivered',wadN(nd),wadPct(nd,tot.sent)+(tot.sent?' of sent':''),WAD_ND)
+    +wadCard('#16a34a','Read',wadN(tot.read),wadPct(tot.read,tot.delivered)+(tot.delivered?' of delivered':''))+'</div>';
+  const cols=[['First knock','#0f172a'],['Said Yes','#16a34a'],['Said No','#dc2626'],['No reply','#d97706']];
+  const ordered=tpl.slice().sort(function(a,b){ return knBranch(a.name)-knBranch(b.name)||knStep(a.name)-knStep(b.name)||a.name.localeCompare(b.name); });
+  window._watRows=[];
+  let rows='<div class="wad-row kn h"><div>Path</div><div>Template</div><div style="text-align:right">Sent</div><div style="text-align:right">Delivered</div><div style="text-align:right" title="'+esc(WAD_ND)+'">Not delivered</div><div style="text-align:right">Read</div><div></div></div>';
+  ordered.forEach(function(t){
+    const c=cols[knBranch(t.name)], m=S.per[t.id]||{sent:0,delivered:0,read:0,clicked:0,btn:{}}, btns=knButtons(t), body=knBody(t), nd1=Math.max(0,m.sent-m.delivered);
+    const s={text:body+(btns.length?'\nCTA - '+btns.map(function(b){ return b.text; }).join(' & '):''),name:t.name,day:null,status:'',type:'text'};
+    const pi=window._watRows.push({p:{label:acc.name},st:{name:knLabel(t.name)},s:s,meta:[t],m:{sent:m.sent,delivered:m.delivered,read:m.read,clicked:m.clicked,failed:nd1,reasons:{}},tracksFail:true,failLabel:'Not delivered',btns:btns,btnCount:m.btn,range:r})-1;
+    rows+='<div class="wad-row kn" onclick="watPop('+pi+')"><div class="pth"><span class="wad-path" style="color:'+c[1]+'"><i style="background:'+c[1]+'"></i><span>'+esc(knLabel(t.name))+'</span></span></div>'
+      +'<div class="tt"><div class="t">'+esc(watTitle({text:body}))+'</div><div class="id">'+esc(t.name)+'</div>'+(btns.length?wadChips(btns,m.btn):'<div class="wad-btns"><span class="off">No buttons</span></div>')+'</div>'
+      +'<div class="nums"><div class="n" data-l="Sent">'+wadN(m.sent)+'</div><div class="n" data-l="Delivered">'+wadN(m.delivered)+'<small>'+wadPct(m.delivered,m.sent)+'</small></div>'
+      +'<div class="n'+(nd1?' bad':'')+'" data-l="Not delivered">'+wadN(nd1)+'<small>'+wadPct(nd1,m.sent)+'</small></div><div class="n" data-l="Read">'+wadN(m.read)+'<small>'+wadPct(m.read,m.delivered)+'</small></div></div>'
+      +'<i class="fa-solid fa-chevron-right cv"></i></div>';
+  });
+  return h+'<div class="wat-list">'+(ordered.length?rows:'<div style="padding:16px;color:var(--slate)">No knocking templates on this number.</div>')+'</div>';
+}
