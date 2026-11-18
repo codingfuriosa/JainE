@@ -40532,11 +40532,25 @@ async function caAllPages(qf){
 }
 // names, status, budgets and pictures of every campaign / ad set / ad, kept for 10 minutes
 window._caEnt=window._caEnt||{};
+/* FASTER AGAIN (18 Nov 2026, Ayush: "Campaign & Ads tab is very slow"). Every campaign, ad set AND ad ever run was read before
+   the first paint - 5,200 rows, 3,900 of them ads with their words and pictures (~4 s), alongside the CRM's 4,000 ad-level rows,
+   all slowing each other down (each request took 5-7 s). Now the table is drawn from the campaigns and ad sets only (1,300
+   short rows); the ads' names and pictures are read only for the ads that ran in the period (~250, not 3,900), together with
+   the other ad-level figures, after the table is on screen. */
 async function caEntities(platform){
   const hit=window._caEnt[platform]; if(hit&&hit.at>Date.now()-600000) return hit.rows;
-  const rows=await caAllPages(function(){ return sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,objective,daily_budget,lifetime_budget,thumbnail,body').eq('platform',platform).order('kind').order('id'); });
+  const rows=await caAllPages(function(){ return sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,objective,daily_budget,lifetime_budget').eq('platform',platform).in('kind',['campaign','adset']).order('kind').order('id'); });
   if(!rows) return obEntities(platform);
   window._caEnt[platform]={at:Date.now(),rows:rows}; return rows;
+}
+// the ads' own names, status, words and pictures - only the ones asked for, 150 a request, all at once; kept for 10 minutes
+window._caAdEnt=window._caAdEnt||{};
+async function caAdEntities(ids){
+  const now=Date.now(), need=[...new Set(ids.map(String))].filter(function(id){ const h=window._caAdEnt[id]; return !h||h.at<now-600000; });
+  const parts=[]; for(let i=0;i<need.length;i+=150) parts.push(need.slice(i,i+150));
+  const got=await Promise.all(parts.map(function(p){ return sb.schema('camp').from('ads_entities').select('kind,id,account_id,campaign_id,name,status,objective,daily_budget,lifetime_budget,thumbnail,body').eq('kind','ad').in('id',p).then(function(r){ return r.data||[]; },function(){ return []; }); }));
+  got.forEach(function(rows){ rows.forEach(function(x){ window._caAdEnt[String(x.id)]={at:now,row:x}; }); });
+  return ids.map(function(id){ const h=window._caAdEnt[String(id)]; return h&&h.row; }).filter(Boolean);
 }
 async function caLoad(){
   const r=obRange(), rpc=function(fn,a){ return sb.schema('camp').rpc(fn,a); };
@@ -40563,7 +40577,9 @@ async function caLoad(){
   const noRows=Promise.resolve([]);
   // the ad-level figures (ads, ad sets, the CRM by ad set / ad) are only seen once a platform is opened: they are read
   // alongside but the table is drawn without waiting for them, and filled in when they arrive
-  const laterP=Promise.all([ads('meta',r.s,r.e), ads('google',r.s,r.e), cmp?ads('meta',c.s,c.e):none, cmp?ads('google',c.s,c.e):none, crmSets(r.s,r.e), cmp?crmSets(c.s,c.e):noRows]);
+  // started only once the table is drawn (18 Nov 2026), so it does not slow the first paint
+  const startLater=function(){ return Promise.all([ads('meta',r.s,r.e), ads('google',r.s,r.e), cmp?ads('meta',c.s,c.e):none, cmp?ads('google',c.s,c.e):none, crmSets(r.s,r.e), cmp?crmSets(c.s,c.e):noRows])
+    .then(async function(L){ const ids=[]; [0,1,2,3].forEach(function(i){ ((L[i]&&L[i].rows)||[]).forEach(function(a){ if(a.ad_id) ids.push(a.ad_id); }); }); L.adEnt=await caAdEntities(ids); return L; }); };
   const res=await Promise.all([
     sb.schema('camp').from('ads_accounts').select('platform,account_id,name,project').eq('include',true),
     caEntities('meta'), caEntities('google'),
@@ -40626,7 +40642,8 @@ async function caLoad(){
   caStatusApply();
   caPaint();
   const D0=CA_D;
-  laterP.then(function(L){ if(CA_D!==D0) return;   // a newer load has started
+  startLater().then(function(L){ if(CA_D!==D0) return;   // a newer load has started
+    (L.adEnt||[]).forEach(function(x){ D0.ent['ad:'+x.id]=x; });
     D0.raw.ads=tag('meta',L[0].rows).concat(tag('google',L[1].rows)); D0.hasSets=L[0].sets&&L[1].sets;
     if(D0.cmp) D0.raw.cmpAds=tag('meta',L[2].rows).concat(tag('google',L[3].rows));
     D0.raw.crmSet=L[4]==null?null:{cur:L[4],prev:L[5]||[]};
