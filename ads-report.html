@@ -183,10 +183,17 @@ var R=(function(){
     });
     var tot={spend:0,leads:null,clicks:0,impr:0}, allIds={};
     ads.forEach(function(a){ tot.spend+=a.spend; tot.clicks+=a.clicks; tot.impr+=a.impressions; if(a.results!=null) tot.leads=(tot.leads||0)+a.results; Object.keys(a.ids).forEach(function(k){ allIds[k]=1; }); });
-    var tc=crmOf(allIds); tot.crm=tc||{}; tot.res=tot.leads;
+    var tc=crmOf(allIds); tot.res=tot.leads;
+    // 18 Nov 2026: the Total's CRM figures = the project's whole platform figure (as the row above in the projects table);
+    // the leads not tied to an ad get a row of their own, so the rows add up
+    var PT={leads:0,ql:0,sv:0,booked:0,lost:0}, K=['leads','ql','sv','booked','lost'];
+    crm.filter(function(x){ return x.project===p&&x.pl===pl; }).forEach(function(x){ K.forEach(function(k){ PT[k]+=x[k]||0; }); });
+    var UD={}, anyU=false; K.forEach(function(k){ UD[k]=Math.max(0,PT[k]-((tc||{})[k]||0)); if(UD[k]) anyU=true; });
+    if(anyU&&ads.length) rows+='<tr class="l0"><td class="nm"><span class="nmx" style="font-style:italic">Not tied to an ad</span></td>'+bcell(null)+cols({spend:null,leads:null,clicks:null,impr:null,crm:UD},null,true)+'</tr>';
+    tot.crm=PT;
     return '<div class="sec" id="below"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><span style="color:'+W.color+'">●</span> '+W.name+' · '+esc(p)+' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' ad'+(ads.length===1?'':'s')+'; click one for the campaigns it runs in, then its '+W.sets.toLowerCase()+'</span></div>'
       +'<div style="overflow-x:auto"><table class="tbl"><thead>'+head('Ad',W.res,W.per)+'</thead><tbody>'+(rows||'<tr class="none"><td colspan="16" style="text-align:center;padding:18px">No ad ran here in this period for this choice</td></tr>')+'</tbody>'
-      +(ads.length?'<tfoot><tr class="tot"><td>Total · '+ads.length+' ad'+(ads.length===1?'':'s')+'</td>'+bcell(null)+cols(tot,null,!!tc)+'</tr></tfoot>':'')+'</table></div>'
+      +(ads.length?'<tfoot><tr class="tot"><td>Total · '+ads.length+' ad'+(ads.length===1?'':'s')+'</td>'+bcell(null)+cols(tot,null,true)+'</tr></tfoot>':'')+'</table></div>'
       +(ads.length>S.axShow?'<div style="text-align:center;margin:14px 0"><button class="btn" data-axmore="1">Show more ('+S.axShow+' of '+ads.length+')</button></div>':'')+'</div>';
   }
   function section(C,crm){
@@ -219,7 +226,7 @@ var R=(function(){
     if(uk.length){ var ut={spend:null,leads:null,clicks:null,impr:null,crm:{leads:0,ql:0,sv:0,booked:0,lost:0}}, by={};
       uk.forEach(function(x){ ['leads','ql','sv','booked','lost'].forEach(function(k){ ut.crm[k]+=x[k]||0; }); by[x.utype]=(by[x.utype]||0)+(x.leads||0); });
       sec+='<tr class="l0"><td class="nm"><span class="nmx" style="font-style:italic">Not tied to a campaign</span><div class="ssub">'+esc(Object.keys(by).sort(function(a,b){ return by[b]-by[a]; }).map(function(k){ return k+' '+by[k]; }).join(' · '))+'</div></td>'+bcell(null)+cols(ut,null,true)+'</tr>'; }
-    var tot=sum(cs,crm.filter(function(x){ return x.project===p&&x.pl===pl&&!x.untied; }));
+    var tot=sum(cs,crm.filter(function(x){ return x.project===p&&x.pl===pl; }));   // 18 Nov 2026: includes "Not tied to a campaign", as the row above does
     var html='<div class="sec" id="below"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><span style="color:'+W.color+'">●</span> '+W.name+' · '+esc(p)+' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+cs.length+' campaign'+(cs.length===1?'':'s')+'; click one for its '+W.sets.toLowerCase()+'</span></div>'
       +'<div style="overflow-x:auto"><table class="tbl"><thead>'+head('Campaign',W.res,W.per)+'</thead><tbody>'+(sec||'<tr class="none"><td colspan="16" style="text-align:center;padding:18px">No campaign ran in this period</td></tr>')+'</tbody>'
       +(cs.length?'<tfoot><tr class="tot"><td>Total · '+cs.length+' campaign'+(cs.length===1?'':'s')+'</td>'+bcell(tot.bud)+cols(tot,null,true)+'</tr></tfoot>':'')+'</table></div>'

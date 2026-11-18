@@ -40783,7 +40783,10 @@ function caPaint(){
     const ids={}; camps.forEach(function(c){ ids[c.campaign_id]=1; });
     const tot=camps.length?'<tfoot><tr class="ca-tot"><td>Total · '+camps.length+' campaign'+(camps.length===1?'':'s')+(pl==='meta'?' <span style="font-weight:500;color:var(--slate);font-size:11px">(leads only)</span>':'')+'</td>'
       +money(camps.reduce(function(t,c){ const b=cBud(c.campaign_id); return b==null?t:(t||0)+(+b); },null))
-      +cols(sum(camps,pl),sum(prev.filter(function(x){ return x.platform===pl&&ids[x.campaign_id]; }),pl),crmX(function(x){ return ids[x.campaign_id]||(pl==='meta'&&waOne&&x.wa&&x.project===p); },pl==='google'?'google':'facebook'))+'</tr></tfoot>':'';
+      +cols(sum(camps,pl),sum(prev.filter(function(x){ return x.platform===pl&&ids[x.campaign_id]; }),pl),crmX(function(x){ return x.project===p; },pl==='google'?'google':'facebook'))+'</tr></tfoot>':'';
+    // 18 Nov 2026 (Ayush: "Dream World City: the table total shows 56, the row above 62 counting the 6 not tied to a campaign -
+    // misleading"): the Total's CRM figures are the project's whole platform figure - the same as its Google / Facebook row
+    // above - so they include the "Not tied to a campaign" row and the WhatsApp leads counted for the project as a whole.
     return '<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p)
       +' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+camps.length+' '+(CA_ST==='active'?'active':CA_ST==='inactive'?'inactive':'')+(CA_ST==='both'?'':' ')+'campaign'+(camps.length===1?'':'s')+'; click one for its '+W.sets.toLowerCase()+'</span></div>'
       +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Campaign',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
@@ -40848,10 +40851,21 @@ function caPaint(){
     });
     const tot=G.out.reduce(function(t,a){ t.spend+=a.spend; t.clicks+=a.clicks; t.impressions+=a.impressions; if(a.results!=null) t.results=(t.results||0)+a.results; return t; },{spend:0,clicks:0,impressions:0,results:null});
     const allIds={}; G.out.forEach(function(a){ Object.keys(a.ids).forEach(function(k){ allIds[k]=1; }); });
+    /* TOTAL = THE PLATFORM ROW (18 Nov 2026, Ayush: a total that differs from the row above "is misleading - fix it
+       everywhere"). The CRM ties only some leads to an ad; the Total shows the project's whole Google / Facebook CRM figure
+       (as the projects table does) and the leads it could not tie to an ad have a row of their own, so the rows add up. */
+    const srcA=pl==='google'?'google':'facebook', TT=crmX(function(x){ return x.project===p; },srcA), AA=crmIds(allIds,tot.spend,0);
+    let untiedAd='';
+    if(TT&&TT.t){ const A0=(AA&&AA.t)||{leads:0,ql:0,sv:0,bk:0,lost:0};
+      const d={leads:Math.max(0,TT.t.leads-A0.leads),ql:Math.max(0,TT.t.ql-A0.ql),sv:Math.max(0,TT.t.sv-A0.sv),bk:Math.max(0,TT.t.bk-A0.bk),lost:Math.max(0,TT.t.lost-A0.lost)};
+      if(d.leads||d.ql||d.sv||d.bk||d.lost){ const dash='<span style="color:#94a3b8">—</span>';
+        untiedAd='<tr class="ca-l0" title="Leads the CRM has for '+esc(p)+' from '+W.name+' without an ad tied to them - counted in the Total and the projects table"><td class="ca-nm"><span class="ca-nmx" style="font-style:italic"><i class="fa-solid fa-link-slash" style="color:#94a3b8;margin-right:6px"></i>Not tied to an ad</span></td>'+money(null)
+          +cols({spend:null,ln:null,pl:pl,lead:dash,cpl:null,clicks:null,ctr:null},{},{t:crmT(d,0)})+'</tr>'; } }
+    if(rows) rows+=untiedAd;
     return top+' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' ad'+(ads.length===1?'':'s')+'; click one for the campaigns it runs in, then its '+W.sets.toLowerCase()+'</span></div>'
       +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Ad',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
       +(rows||'<tr><td colspan="'+(7+NCRM)+'" style="text-align:center;color:var(--slate);padding:18px">No ad ran here in this period for this choice</td></tr>')+'</tbody>'
-      +(ads.length?'<tfoot><tr class="ca-tot"><td>Total · '+ads.length+' ad'+(ads.length===1?'':'s')+'</td>'+money(null)+cols(raw(tot,pl,null),{},crmIds(allIds,tot.spend,0))+'</tr></tfoot>':'')+'</table></div>'
+      +(ads.length?'<tfoot><tr class="ca-tot"><td>Total · '+ads.length+' ad'+(ads.length===1?'':'s')+'</td>'+money(null)+cols(raw(tot,pl,null),{},TT&&TT.t?TT:AA)+'</tr></tfoot>':'')+'</table></div>'
       +(ads.length>ashow?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="CA.adShow=(CA.adShow||50)+50;caPaint()">Show more ('+ashow+' of '+ads.length+')</button></div>':'')
       +'</div>';
   };
