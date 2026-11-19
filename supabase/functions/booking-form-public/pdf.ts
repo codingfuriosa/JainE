@@ -148,7 +148,7 @@ export async function bookingPdf(o: { projectName: string; company: string; ref:
   const parks = Array.isArray(fl.parkings) && fl.parkings.length ? fl.parkings : (fl.parking ? [fl.parking] : []);
   doc.heading("Unit, size & price");
   doc.rows([["Block", fl.block], ["Floor", fl.floor], ["Flat number", String(fl.flat_no || "").toUpperCase()], ["Bedrooms", fl.bhk],
-    ["Car park", parks.join(", ")], ["Super built-up area", pr.sba ? pr.sba + " sq.ft." : ""], ["Total sale price", money(pr.total)], ["Booking price", money(pr.booking)],
+    ["Car park", parks.join(", ")], ["Super built-up area", pr.sba ? pr.sba + " sq.ft." : ""], ["Estimated Sale Price", money(pr.total)], ["Booking price", money(pr.booking)],
     ["Home loan required", (pr.loan || "") + (pr.loan === "Yes" && pr.bank ? " - " + pr.bank : "")]]);
   const pay = d.pay || {};
   doc.heading("Booking amount");

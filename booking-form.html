@@ -357,6 +357,8 @@
   .zoomov .zbtns{display:flex;gap:8px;flex-wrap:wrap}
   .zoomov .zbar button{min-width:42px;height:40px;border-radius:10px;border:0;background:rgba(255,255,255,.16);color:#fff;font:inherit;font-weight:600;padding:0 14px;cursor:pointer}
   .zoomov .zbar button:hover{background:rgba(255,255,255,.3)}
+  .zoomov .zbar button[disabled]{opacity:.3;cursor:default;background:rgba(255,255,255,.16)}
+  .zoomov .zbar button[data-z=prev],.zoomov .zbar button[data-z=next]{font-size:24px;line-height:1}
   .zoomov .zarea{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;text-align:center;padding:0 14px 20px;touch-action:pan-x pan-y pinch-zoom}
   .zoomov .zarea img{background:#fff;border-radius:6px;max-width:none;display:inline-block;vertical-align:top}
   .otpbg{position:fixed;inset:0;z-index:220;background:rgba(15,23,42,.6);display:flex;align-items:center;justify-content:center;padding:16px}
@@ -406,6 +408,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261119b"></script>
+<script src="booking-form.js?v=20261119d"></script>
 </body>
 </html>

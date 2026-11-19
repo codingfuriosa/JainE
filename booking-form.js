@@ -266,18 +266,19 @@ function stepFlat(){
       +chips('flat.block','Block',CONF.blocks,{req:!LOCK.has('flat.block')})
       +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4})
       +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:!LOCK.has('flat.flat_no')})
-      +'</div></div>'
-      +'<div class="pnl"><div class="grp">Configuration</div><div class="stack">'
       +chips('flat.bhk','Bedrooms',CONF.bhk)
-      +parkCtl
       +'</div></div>'
-      +'</div>')
-    +card('','','Area & price',fixed?'Fixed by our sales team.':(agreed||'Optional'),
-      '<div class="grid">'
+      /* 19 Nov 2026 (Ayush: "Configuration has too much negative space"; "Flat & Size & Price not divided properly, nothing looks aligned"): one card, two
+         equal panels side by side - the unit on the left (block, floor, flat, bedrooms), its car parks, size and price on the right - instead of a half-empty
+         Configuration panel and a separate Area & price card with a lone field. */
+      +'<div class="pnl"><div class="grp">Size &amp; price</div><div class="stack">'
+      +parkCtl
       +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1})
       +rate
-      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div>'+(CONF.showRate?'<div class="words" id="w-calc">'+esc(calcHint())+'</div>':'')})
-      +(S.price.booking||LOCK.has('price.booking')?field('price.booking','Booking price (₹)',{mode:'numeric',full:1,after:'<div class="words">'+esc(words(S.price.booking))+'</div>'}):'')+'</div>')
+      +field('price.total','Estimated Sale Price (₹)',{mode:'numeric',full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div>'+(CONF.showRate?'<div class="words" id="w-calc">'+esc(calcHint())+'</div>':'')})
+      +(S.price.booking||LOCK.has('price.booking')?field('price.booking','Booking price (₹)',{mode:'numeric',full:1,after:'<div class="words">'+esc(words(S.price.booking))+'</div>'}):'')
+      +'</div></div>'
+      +'</div>')
     +card('','','Home loan','',
       '<div class="grid">'
       +chips('price.loan','Home loan required?',['No','Yes'])
@@ -294,25 +295,28 @@ function stepPay(){
   const chq=S.pay.mode==='Demand Draft';
   const proof='doc.0.payment';
   return card('','','Booking amount','Paid in favour of '+esc(String(CONF.company||'').replace(/[.]+$/,''))+'. Cash is not accepted.',
+      /* 19 Nov 2026 (Ayush: "the Booking Amount page's first section is a bit cluttered"): every field of this card now has its label ABOVE it and sits in the same
+         two-column grid - Paid by | Booking Amount on the first row, the receipts | date, reference, bank under them - instead of mixing label-on-the-left rows
+         with label-above boxes. Wording unchanged. */
       '<div class="grid">'
-      +chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Demand Draft','Card'],{mcols:3})
-      +field('pay.amount','Booking Amount (₹)',{mode:'numeric',req:!LOCK.has('pay.amount'),full:1,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})
+      +'<div class="paygrid"><div class="pcol">'+chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Demand Draft','Card'],{mcols:3})+'</div>'
+      +'<div class="pcol">'+field('pay.amount','Booking Amount (₹)',{mode:'numeric',req:!LOCK.has('pay.amount'),full:1,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})+'</div>'
       /* 19 Nov 2026 (Ayush): any number of receipts; they list down the left while date, reference and bank sit on the right (Bank below the reference),
          so more receipts only make the left column longer. On a phone the two simply follow each other. */
       // with fewer than 3 receipts Bank sits on the left under them; from the 3rd receipt it moves to the right, under the reference (Ayush, 19 Nov 2026)
       +(function(){
         const nRc=((FILES[0]&&FILES[0].payment)||[]).length;
         const bank=chq?field('pay.bank','Bank (drawn on)',{req:1,full:1})+field('pay.branch','Branch',{optional:1,full:1}):field('pay.bank','Bank',{optional:1,full:1});
-        return '<div class="paygrid"><div class="pcol">'
+        return '<div class="pcol">'
           +wrapF(proof,'Payment proof',{full:1,req:1,note:'Screenshots or receipts of the payment - add as many as you need'},docUpl(0,'payment','Take a photo or attach the receipt','The UTR / transaction number should be readable',10))
           +(nRc<3?bank:'')
           +'</div><div class="pcol">'
           +field('pay.date',chq?'DD date':'Date paid',{type:'date',req:1,full:1})
-          +field('pay.ref',({'Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{req:1,cls:'up',full:1})
+          +field('pay.ref',({'Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{optional:1,cls:'up',full:1})   /* optional (19 Nov 2026) */
           +(nRc>=3?bank:'')
-          +'</div></div>';
+          +'</div>';
       })()
-      +'</div>')
+      +'</div></div>')
     +card('','','Booking details','',
       '<div class="grid">'
       +chips('purpose','Purpose of booking',['Residential','Investment'])
@@ -407,7 +411,8 @@ function stepTerms(){
       '<details class="t"><summary>Terms of application (15)</summary>'+list(TERMS)+'</details>'
       +'<details class="t"><summary>Declaration (2)</summary>'+list(DECL)+'</details>'
       +'<details class="t"><summary>Special Conditions (11)</summary>'+list(SPECIAL)+'</details>')
-    // 19 Nov 2026: the cost sheet is now at the very top of the form (Cost Sheet and Payment Plan), not here
+    // 19 Nov 2026: the cost sheet is at the top of the form AND here again, just before the customer agrees to it (Ayush: "why is there no cost sheet in the Terms page")
+    +(COST.meta?card('','','Cost sheet','Prepared for you by our Sales team. Tap a page to zoom in; you can download it too.',costBody()):'')
     +card('','','Agreement','',
       '<label class="agree'+(ERR.terms_accepted?' bad':'')+'" id="f-terms_accepted"><input type="checkbox" data-check="terms_accepted"'+(S.terms_accepted?' checked':'')+'><span><b>I/We have read and agree to all the above'+(COST.meta?' and to the cost sheet':'')+'.</b><br><span style="color:var(--slate);font-size:13px">I/We confirm that everything in this form is true.</span><div class="err">'+esc(ERR.terms_accepted||'')+'</div></span></label>');
 }
@@ -439,7 +444,7 @@ function stepReview(){
     +h('Your flat',3)+rows([['Block',S.flat.block],['Floor',S.flat.floor],['Flat',String(S.flat.flat_no||'').toUpperCase()],['Bedrooms',S.flat.bhk],['Car park',parkList().join(', ')],
       ['Super built-up area',S.price.sba?S.price.sba+' sq.ft.':''],
       ['Rate / sq.ft.',rateTotal()?'₹'+fmtN(rateTotal())+' (Basic '+(S.price.basic||0)+' + PLC '+(S.price.plc||0)+' + FLC '+(S.price.flc||0)+')':''],
-      ['Total sale price',S.price.total?'₹'+Number(S.price.total).toLocaleString('en-IN'):''],['Booking price',S.price.booking?'₹'+Number(S.price.booking).toLocaleString('en-IN'):''],
+      ['Estimated Sale Price',S.price.total?'₹'+Number(S.price.total).toLocaleString('en-IN'):''],['Booking price',S.price.booking?'₹'+Number(S.price.booking).toLocaleString('en-IN'):''],
       ['Home loan',S.price.loan+(S.price.loan==='Yes'&&S.price.bank?' - '+S.price.bank:'')]])
     +h('Booking amount',4)+rows([['Booking Amount',S.pay.amount?'₹'+Number(S.pay.amount).toLocaleString('en-IN')+' ('+words(S.pay.amount)+')':''],['Payment proof',(FILES[0]&&FILES[0].payment||[]).length?'Attached':''],['Paid by',S.pay.mode],['Reference',S.pay.ref],
       ['Bank / branch',[S.pay.bank,S.pay.branch].filter(Boolean).join(', ')],['Date',fmtD(S.pay.date)],['Purpose',S.purpose],['Booked through',S.sales+(S.sales_name?' - '+S.sales_name:'')],['Lead ID',S.lead_id]])
@@ -493,7 +498,7 @@ function check(step){
     if(!(Number(S.pay.amount)>0)) bad('pay.amount','Please write the booking amount','Booking Amount');
     if(!((FILES[0]&&FILES[0].payment)||[]).length) bad('doc.0.payment','Please attach the payment proof','Payment proof');
     need('pay.date','Please choose the date','Payment date');
-    if(S.pay.date&&S.pay.date>todayISO()) bad('pay.date','The payment date cannot be in the future','Payment date'); need('pay.ref',null,'Payment reference');
+    if(S.pay.date&&S.pay.date>todayISO()) bad('pay.date','The payment date cannot be in the future','Payment date');
     if(S.pay.mode==='Demand Draft') need('pay.bank',null,'Bank');
     if(SHOW_SALES_FIELDS&&S.sales!=='Direct') need('sales_name',null,'Agent / channel partner name');
   }
@@ -578,14 +583,30 @@ function downloadPdf(){ if(!COST.bytes) return; const u=URL.createObjectURL(new 
 function openZoom(i){
   closeZoom(); let z=1;
   const d=document.createElement('div'); d.className='zoomov'; d.id='zoomov';
-  d.innerHTML='<div class="zbar"><b>Cost sheet · page '+(i+1)+' of '+COST.pages.length+'</b><div class="zbtns"><button type="button" data-z="out" aria-label="Zoom out">−</button><button type="button" data-z="in" aria-label="Zoom in">+</button><button type="button" data-z="fit">Fit</button><button type="button" data-z="dl" aria-label="Download this page" title="Download this page"><svg class="i" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7.5 11 12 15.5 16.5 11"/><path d="M5 19h14"/></svg></button><button type="button" data-z="x" aria-label="Close">×</button></div></div>'
+  /* 19 Nov 2026 (Ayush: "in zoomed mode it can't go after and before"): previous / next page right in the zoomed view (also the arrow keys) */
+  const n=COST.pages.length;
+  d.innerHTML='<div class="zbar"><b id="zttl">Cost sheet · page '+(i+1)+' of '+n+'</b><div class="zbtns">'
+    +(n>1?'<button type="button" data-z="prev" aria-label="Previous page"'+(i===0?' disabled':'')+'>&#8249;</button><button type="button" data-z="next" aria-label="Next page"'+(i===n-1?' disabled':'')+'>&#8250;</button>':'')
+    +'<button type="button" data-z="out" aria-label="Zoom out">−</button><button type="button" data-z="in" aria-label="Zoom in">+</button><button type="button" data-z="fit">Fit</button><button type="button" data-z="dl" aria-label="Download this page" title="Download this page"><svg class="i" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7.5 11 12 15.5 16.5 11"/><path d="M5 19h14"/></svg></button><button type="button" data-z="x" aria-label="Close">×</button></div></div>'
     +'<div class="zarea" id="zarea"><img alt="Cost sheet page '+(i+1)+'" src="'+COST.pages[i]+'"></div>';
   document.body.appendChild(d); document.documentElement.classList.add('noscroll');
   const img=d.querySelector('img');
   const apply=function(){ img.style.width=Math.round(Math.min(window.innerWidth-28,1100)*z)+'px'; };
   apply();
+  // another page: the picture, the title and the buttons follow, the zoom goes back to fit, and the page under the zoom moves with it
+  const turn=function(step){
+    const j=Math.max(0,Math.min(n-1,i+step)); if(j===i) return; i=j; z=1; apply();
+    img.src=COST.pages[i]; img.alt='Cost sheet page '+(i+1);
+    const t=d.querySelector('#zttl'); if(t) t.textContent='Cost sheet · page '+(i+1)+' of '+n;
+    const p=d.querySelector('[data-z="prev"]'), q=d.querySelector('[data-z="next"]'); if(p) p.disabled=i===0; if(q) q.disabled=i===n-1;
+    const za=d.querySelector('#zarea'); if(za) za.scrollTop=0;
+    COST.cur=i; const h=$('costv'); if(h) h.innerHTML=costInner();
+  };
+  const onKey=function(e){ if(!document.getElementById('zoomov')){ document.removeEventListener('keydown',onKey); return; } if(e.key==='ArrowRight') turn(1); if(e.key==='ArrowLeft') turn(-1); };
+  document.addEventListener('keydown',onKey);
   d.addEventListener('click',function(e){
     const b=e.target.closest('[data-z]'); if(!b) return; const k=b.getAttribute('data-z');
+    if(k==='prev'||k==='next'){ turn(k==='next'?1:-1); return; }
     if(k==='in') z=Math.min(5,z*1.4); else if(k==='out') z=Math.max(1,z/1.4); else if(k==='fit') z=1;
     else if(k==='dl'){ dl(COST.pages[i],'Cost sheet - page '+(i+1)+'.jpg'); return; }
     else if(k==='x'){ closeZoom(); return; }

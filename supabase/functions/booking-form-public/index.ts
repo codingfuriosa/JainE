@@ -292,10 +292,15 @@ async function sendMail(o: { to: string[]; cc?: string[]; bcc?: string[]; subjec
   return { live: conf.live, via: "smtp" };
 }
 const logoUrl = (rel: string) => `${SITE}/${rel.split("/").filter(Boolean).join("/")}`;
+/* The email header is ONE picture per project (assets/brand/email/header-<key>.png: white ground, Jain Group logo on the left, the project's logo or name on the right). A mail app that
+   darkens an email changes backgrounds and text but leaves pictures alone, so loose transparent logos (the black Jain Group lettering) vanished on a dark background (19 Nov 2026). */
 const shell = (inner: string, proj?: Proj) => {
-  const right = proj ? (proj.logo ? `<img src="${hE(logoUrl(proj.logo))}" alt="${hE(proj.name)}" height="46" style="display:block;height:46px;width:auto;border:0">` : `<span style="font-size:15px;font-weight:700;letter-spacing:.06em;color:#111827;text-transform:uppercase">${hE(proj.name)}</span>`) : "";
+  const key = proj ? Object.keys(PROJECTS).find((k) => PROJECTS[k] === proj) || "" : "";
+  const head = key
+    ? `<div style="background:#ffffff;border-bottom:3px solid #b3171d"><img src="${hE(logoUrl("assets/brand/email/header-" + key + ".png"))}" alt="${hE(proj!.name)} - The Jain Group" width="600" style="display:block;width:100%;max-width:600px;height:auto;border:0"></div>`
+    : `<div style="background:#ffffff;border-bottom:3px solid #b3171d;padding:16px 28px"><img src="${hE(logoUrl("assets/brand/jaingroup-logo.png"))}" alt="The Jain Group" height="46" style="display:block;height:46px;width:auto;border:0"></div>`;
   return `<div style="background:#f3f4f6;padding:24px 0;font-family:Arial,Helvetica,sans-serif"><div style="max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb">`
-    + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-bottom:3px solid #b3171d"><tr><td style="padding:16px 28px"><img src="${hE(logoUrl("assets/brand/jaingroup-logo.png"))}" alt="The Jain Group" height="46" style="display:block;height:46px;width:auto;border:0"></td><td align="right" style="padding:16px 28px">${right}</td></tr></table>`
+    + head
     + `<div style="padding:26px 28px 8px;font-size:15px;line-height:1.7;color:#111827">${inner}</div>`
     + `<div style="padding:14px 28px 22px;font-size:12px;color:#6b7280;border-top:1px solid #f0f1f3">The Jain Group &middot; 44/2A Hazra Road, Kolkata &ndash; 700 019</div></div></div>`;
 };
