@@ -93,6 +93,21 @@ function trcQaTableHtml(r,m){
                  ?'Qualified and wants to buy, but this is the FIRST call that qualifies this lead - the site visit being unsettled does not excuse it, so the CRM genuinely needs to be told.':null,
                m?m.label:null,sa.reason])}
   ].filter(Boolean);
+  /* Ananta ONLY: leads that came in on CRM source 20741 ("Launch Offer - Image") get the launch-offer
+     briefing verdict, judged on the lead's first connected call (crm-snapshot-qa launchOfferCheck).
+     EVERY Ananta call carries this point; only a Launch Offer lead is actually judged - any other
+     source is Not Applicable, saying which source it came in on. Other projects never show it. */
+  if(String(r.business_unit_name||'').toLowerCase().indexOf('ananta')!==-1){
+    const lo=r.launch_offer_check||{};
+    const fromLaunch=String(r.lead_source_id||'')==='20741';
+    const status=r.launch_offer_status||(fromLaunch?'Not checked yet':'Not Applicable');
+    const fallback=r.launch_offer_status?null
+      :fromLaunch?'This lead came in on "'+(r.lead_source_name||'Launch Offer - Image')+'"; the launch-offer briefing check has not run on this call yet.'
+      :(r.lead_source_name?'This lead came in on "'+r.lead_source_name+'", not the Launch Offer source - the launch-offer briefing is only checked for Launch Offer leads.'
+                          :'No CRM source recorded for this lead, so it is not a Launch Offer lead - the launch-offer briefing is not checked.');
+    topics.push({topic:'Launch offer status',status:status,score:null,
+      why:join([lo.notes||fallback,lo.evidence?'"'+lo.evidence+'"':null])});
+  }
   if(Array.isArray(r.agent_qa)){
     r.agent_qa.forEach(function(a){
       topics.push({topic:a&&a.point,status:a&&a.status,
@@ -203,6 +218,8 @@ function trcCallHtml(r,i,total){
     +'<div style="font-size:12.5px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-address-card" style="color:#0d9488"></i> What the CRM recorded</div>'
     +trcKV('Follow-up ID',r.follow_up_id)
     +trcKV('Personnel',r.personnel_name||null)
+    // Every lead: the CRM source it came in on (crm_lead_detail adds it to each call row).
+    +trcKV('Lead source',r.lead_source_name||null)
     +trcKV('Status',r.status_detail||r.crm_status_raw||r.crm_status)
     +(trcIsRegression(r)?trcKV('Went back from',r.prev_status+' - not a legitimate step back'):'')
     +trcKV('Next follow-up',trcWall(r.next_follow_up_text,true)||r.next_follow_up_text)
@@ -1191,6 +1208,17 @@ function trCompGridHtml(leads){
     +'</div>';
   }).join('')+'</div>';
 }
+const TR_LAUNCH_SOURCE_ID=20741; // Ananta "Launch Offer - Image"
+function trLeadSourceFill(row){
+  if(!row||!row.id)return;
+  Promise.resolve(sb.schema('acc').from('transcriptions')
+    .select('source_id:original_crm_response->>source_id,source_name:original_crm_response->>source_name')
+    .eq('id',row.id).maybeSingle()).then(function(x){
+      const d=x&&x.data, el=document.getElementById('trLeadSrc');
+      if(!d||!el||Number(d.source_id)!==TR_LAUNCH_SOURCE_ID||!d.source_name)return;
+      el.innerHTML=' · Source: <b>'+esc(d.source_name)+'</b>';
+    },function(){});
+}
 function trCompDetailHtml(leads,leadId){
   const g=leads.find(function(x){return String(x.leadId)===String(leadId);});
   if(!g)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/5\')">Back</button></div>';
@@ -1199,7 +1227,12 @@ function trCompDetailHtml(leads,leadId){
   const latest=trLatestVerdict(g.rows);
   const o=trOutcome(latest.qualification);
   const backBtn='<button class="btn btn-sm" onclick="goBack(\'transcription/5\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
-  const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
+  /* ONE audience only: Ananta leads that came in on source 20741 ("Launch Offer - Image") show the
+     source's real name beside the project. The list rows carry no CRM payload, so the name is read
+     off the stored response for this one call and filled in when it arrives. Nobody else gets it. */
+  const srcSlot=String(last.business_unit_name||'').toLowerCase().indexOf('ananta')!==-1?'<span id="trLeadSrc"></span>':'';
+  if(srcSlot)trLeadSourceFill(last);
+  const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+srcSlot+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
   // Says which call the verdict came from, so nobody reads it as a merge of all of them.
   const verdictFrom=latest.row
     ? ('from the '+(latest.stale?'most recent call with a transcript':'latest call')

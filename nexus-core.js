@@ -1291,9 +1291,20 @@ function fhIsSystems(){ return fhMe()===FEEDBACK_HUB_ADMIN||fhMyDepts().indexOf(
 // Systems people (the Administrator included) post and read System Feedbacks; they never rate them -
 // not even system.admin@, who is also listed under Sales and Pre Sales.
 function fhIsRater(){ if(fhIsSystems()) return false; return SYSTEM_FEEDBACK_EXTRA.indexOf(fhMe())!==-1||fhMyDepts().some(function(d){ return d==='Sales'||d==='Pre Sales'; }); }
+/* ACCOUNTS FILL THE FORMS IN; THEY DO NOT BUILD THEM (18 Nov 2026).
+   The whole Accounts department, by department rather than by name - there are eight of them and
+   the list would go stale the first time somebody joined. They get the forms and the answers given:
+   enough to open any form and submit it, and to read what came back. Designing - editing a form,
+   closing it, deleting it - stays with FEEDBACK_HUB_PEOPLE above.
+   The answers people gave are NOT theirs: six of the seven forms carry the respondent's name and
+   phone, so reading the records stays with the three as well.
+   feedback.can_design_forms() and feedback.can_use_forms() hold the same rules in the database, and
+   those are what actually enforce them; this only decides what the page offers. */
+function fhCanFillForms(){ return fhMyDepts().indexOf('Accounts')!==-1; }
+function fhCanSeeForms(){ return fhCanQrForms()||fhCanFillForms(); }
 function canFeedbackHub(){
   if(state.isCustomer||state.impersonating) return false;
-  return fhCanQrForms()||fhIsSystems()||fhIsRater();
+  return fhCanSeeForms()||fhIsSystems()||fhIsRater();
 }
 /* INVENTORY (PURCHASE & STORES) IS FOR THREE PEOPLE, BY NAME, WHILE IT IS BEING BUILT AND REVIEWED.
 
@@ -13027,16 +13038,21 @@ function fhFillUrl(token){ return location.origin+'/feedback-fill.html?f='+token
 /* ---- router: named sub-routes checked first (dedicated pages), numeric tab as the fallback ---- */
 VIEWS.feedback_hub=async function(v,seg){
   loadQRLib(); // fire-and-forget preload, so the QR modal feels instant instead of loading on first click
-  if(seg[0]==='new')       return fhFormPage(v,null);
-  if(seg[0]==='form'&&seg[1])     return fhFormPage(v,Number(seg[1]));
+  // Typed straight into the address bar, these would otherwise open the builder for somebody who
+  // may only fill forms in. The database refuses their save either way; this refuses the page.
+  if(seg[0]==='new')       return fhCanQrForms()?fhFormPage(v,null):fhDenied(v);
+  if(seg[0]==='form'&&seg[1])     return fhCanQrForms()?fhFormPage(v,Number(seg[1])):fhDenied(v);
   if(seg[0]==='preview')   return fhPreviewPage(v);
-  if(seg[0]==='records'&&seg[1]) return fhRecordsPage(v,Number(seg[1]));
-  if(seg[0]==='response'&&seg[1]) return fhResponseDetailPage(v,seg[1]);
+  if(seg[0]==='records'&&seg[1]) return fhCanQrForms()?fhRecordsPage(v,Number(seg[1])):fhDenied(v);
+  if(seg[0]==='response'&&seg[1]) return fhCanQrForms()?fhResponseDetailPage(v,seg[1]):fhDenied(v);
   if(seg[0]==='sys'&&seg[1]&&fhIsSystems()) return /^m\d+$/.test(seg[1])?sfModPage(v,Number(seg[1].slice(1))):sfItemPage(v,Number(seg[1]));
   if(seg[0]==='give'&&seg[1]&&fhIsRater()) return sfRatePage(v,seg[1]);   // m<module> or <item>
   setCrumb(['Feedback','Feedback Hub']);
   // Each person gets only the tabs that are theirs (see canFeedbackHub in 06-nav.js).
-  const all=[['design','Design',fhCanQrForms],['records','Records',fhCanQrForms],['system','System Feedbacks',fhIsSystems],['give','Give Feedback',fhIsRater]];
+  /* One list, two readings of it: a designer's tab is "Design" and carries the full set of actions,
+     a filler's is "Forms" and carries Open, Records and the QR code. Rather than a second tab that
+     would be the same list with three buttons missing. */
+  const all=[['design',fhCanQrForms()?'Design':'Forms',fhCanSeeForms],['records','Records',fhCanQrForms],['system','System Feedbacks',fhIsSystems],['give','Give Feedback',fhIsRater]];
   const mine=all.filter(function(t){ return t[2](); });
   if(!mine.length){ v.innerHTML='<div class="card"><div class="empty">You do not have access to Feedback Hub.</div></div>'; return; }
   const ti=mTab(seg,mine.length);
@@ -13047,6 +13063,15 @@ VIEWS.feedback_hub=async function(v,seg){
   if(key==='system'){await sfManage();return;}
   await sfGive();
 };
+/* Shown instead of the builder when somebody who may only fill forms in types its address. The
+   database would refuse the save regardless; this means they are told so rather than finding out
+   when Save does nothing. */
+function fhDenied(v){
+  setCrumb(['Feedback','Feedback Hub']);
+  v.innerHTML=FH_CSS+'<div class="card card-pad empty" style="padding:40px"><i class="fa-solid fa-lock"></i>'
+    +'<div>That part of Feedback Hub is not yours. You can open any form to fill it in, and share its QR code.</div>'
+    +'<div style="margin-top:14px"><button class="btn" onclick="navTo(\'feedback_hub\')">Back to Feedback Hub</button></div></div>';
+}
 async function fhLoadForms(force){
   if(FH_FORMS&&!force)return FH_FORMS;
   const{data,error}=await sb.schema('feedback').from('forms').select('*').order('created_at',{ascending:false});
@@ -13066,9 +13091,10 @@ async function fhDesign(){
 async function fhDesignRender(){
   const b=$('fhBody');if(!b)return;
   const rows=FH_FORMS||[];
+  const design=fhCanQrForms();
   b.innerHTML=`<div class="fh-head">
-    <div><div class="sec-title" style="margin:0">Your Forms</div><div class="sec-sub" style="margin:0">Build a form, share its QR code or link, and watch responses come in.</div></div>
-    <button class="btn btn-primary" onclick="navTo('feedback_hub/new')"><i class="fa-solid fa-plus"></i> New Form</button>
+    <div><div class="sec-title" style="margin:0">${design?'Your Forms':'Feedback Forms'}</div><div class="sec-sub" style="margin:0">${design?'Build a form, share its QR code or link, and watch responses come in.':'Open a form to fill it in, or share its QR code.'}</div></div>
+    ${design?`<button class="btn btn-primary" onclick="navTo('feedback_hub/new')"><i class="fa-solid fa-plus"></i> New Form</button>`:''}
   </div>
   ${rows.length?`<div class="fh-rowlist">${rows.map(f=>`
     <div class="fh-row">
@@ -13077,11 +13103,12 @@ async function fhDesignRender(){
         <div class="fh-row-meta"><span id="fhQCount_${f.id}">…</span>${f.is_active?'<span class="tag t-green">Active</span>':'<span class="tag t-red">Closed</span>'}</div>
       </div>
       <div class="fh-row-actions">
-        <button class="btn btn-sm" onclick="navTo('feedback_hub/form/${f.id}')"><i class="fa-solid fa-pen"></i> <span>Edit</span></button>
-        <button class="btn btn-sm" onclick="navTo('feedback_hub/records/${f.id}')"><i class="fa-solid fa-chart-simple"></i> <span>Records</span></button>
+        ${design?`<button class="btn btn-sm" onclick="navTo('feedback_hub/form/${f.id}')"><i class="fa-solid fa-pen"></i> <span>Edit</span></button>`
+          : `<a class="btn btn-sm" href="${esc(fhFillUrl(f.qr_token))}" target="_blank" rel="noopener"><i class="fa-solid fa-up-right-from-square"></i> <span>Open</span></a>`}
+        ${design?`<button class="btn btn-sm" onclick="navTo('feedback_hub/records/${f.id}')"><i class="fa-solid fa-chart-simple"></i> <span>Records</span></button>`:''}
         <button class="btn btn-sm fh-row-icon-btn" title="QR Code" onclick="fhShowQR(${f.id})"><i class="fa-solid fa-qrcode"></i></button>
-        <button class="btn btn-sm fh-row-icon-btn" title="${f.is_active?'Close to new responses':'Reopen for responses'}" onclick="fhToggleActive(${f.id},${!f.is_active})">${f.is_active?'<i class="fa-solid fa-lock"></i>':'<i class="fa-solid fa-lock-open"></i>'}</button>
-        <button class="btn btn-sm fh-danger fh-row-icon-btn" title="Delete" onclick="fhDeleteForm(${f.id})"><i class="fa-solid fa-trash"></i></button>
+        ${design?`<button class="btn btn-sm fh-row-icon-btn" title="${f.is_active?'Close to new responses':'Reopen for responses'}" onclick="fhToggleActive(${f.id},${!f.is_active})">${f.is_active?'<i class="fa-solid fa-lock"></i>':'<i class="fa-solid fa-lock-open"></i>'}</button>
+        <button class="btn btn-sm fh-danger fh-row-icon-btn" title="Delete" onclick="fhDeleteForm(${f.id})"><i class="fa-solid fa-trash"></i></button>`:''}
       </div>
     </div>`).join('')}</div>`
     :`<div class="card"><div class="empty"><i class="fa-solid fa-qrcode"></i>
@@ -33102,7 +33129,8 @@ function trCacheClear(key){try{sessionStorage.removeItem(key);}catch(e){}}
    window skip the fetch too, and is allowed to fail (quota, private browsing) without the caller
    ever knowing - the rows are already in hand either way. One key per lead rather than one map:
    writing a lead must not mean re-serialising every other lead already cached. */
-const TRC_LEAD_CACHE_PREFIX='trc_lead_';
+// v2 (19 Nov 2026): call rows now carry lead_source_* and launch_offer_*; older cached leads lack them.
+const TRC_LEAD_CACHE_PREFIX='trc_lead2_';
 let TRC_LEAD_MEM=Object.create(null);
 function trcLeadCacheRead(id){
   const k=String(id);
@@ -34747,6 +34775,37 @@ function trcClipCell(inner){
    question being asked: "show me the day's leads" is a lead per row, and "show me the mismatches" is
    a CALL per row, because that is the level a mismatch exists at. ---- */
 const TRC_LEAD_COLS=11, TRC_CALL_COLS=7;
+/* ANANTA ONLY: with the Business Unit filter on Ananta, the lead table gains a "Lead source" column
+   (the CRM's source_name). The list's own fetch carries no CRM payload, so the names are read off
+   acc.crm_leads for just the leads on screen, after the rows are drawn, and cached for the session. */
+function trcAnantaSourceOn(){
+  return TRC_F.match!=='MISMATCH'&&String(TRC_F.bu||'').toLowerCase().indexOf('ananta')!==-1;
+}
+function trcLeadColCount(){return TRC_LEAD_COLS+(trcAnantaSourceOn()?1:0);}
+const TRC_LEAD_SOURCE=Object.create(null);
+function trcLeadSourceCell(leadId){
+  const k=String(leadId), v=TRC_LEAD_SOURCE[k];
+  return '<td id="trcSrc'+esc(k)+'" style="font-size:12.5px">'
+    +(v===undefined?'<span style="color:var(--slate)">…</span>':v?esc(v):'<span style="color:var(--slate)">—</span>')+'</td>';
+}
+async function trcFillLeadSources(items){
+  const ids=(items||[]).map(function(g){return g.lead_id;})
+    .filter(function(id){return id!=null&&TRC_LEAD_SOURCE[String(id)]===undefined;});
+  if(ids.length){
+    try{
+      const {data,error}=await sb.schema('acc').from('crm_leads')
+        .select('lead_id,source_name:raw->>source_name').in('lead_id',ids);
+      if(error)throw error;
+      ids.forEach(function(id){TRC_LEAD_SOURCE[String(id)]=null;});
+      (data||[]).forEach(function(d){TRC_LEAD_SOURCE[String(d.lead_id)]=d.source_name||null;});
+    }catch(e){return;}
+  }
+  (items||[]).forEach(function(g){
+    const el=$('trcSrc'+g.lead_id);if(!el)return;
+    const v=TRC_LEAD_SOURCE[String(g.lead_id)];
+    el.innerHTML=v?esc(v):'<span style="color:var(--slate)">—</span>';
+  });
+}
 
 /* sl is display-only - the row's position in the currently rendered, currently filtered list, purely
    so someone can say "row 12" out loud when talking to a colleague. Not stored anywhere: it is
@@ -34805,6 +34864,7 @@ function trcLeadRowHtml(g,sl){
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))
     +trcTextCell(g.bu,160)
+    +(trcAnantaSourceOn()?trcLeadSourceCell(g.lead_id):'')
     /* Whoever was on the phone for the LATEST call, not the lead as a whole - a lead's calls can move
        between Pre-Sales and Sales (or between people on the same team), so the personnel column is
        g.last's, matching what "latest call recording" means everywhere else on this row (g.lastDate,
@@ -34841,7 +34901,7 @@ function trcCallRowHtml(r){
 
 function trcTableHtml(items,callLevel,slOffset){
   if(!items.length){
-    return '<tr><td colspan="'+(callLevel?TRC_CALL_COLS:TRC_LEAD_COLS)+'"><div class="empty" style="padding:40px">'
+    return '<tr><td colspan="'+(callLevel?TRC_CALL_COLS:trcLeadColCount())+'"><div class="empty" style="padding:40px">'
       +'<i class="fa-solid fa-inbox"></i><div>Nothing matches these filters</div></div></td></tr>';
   }
   if(callLevel)return items.map(trcCallRowHtml).join('');
@@ -34855,7 +34915,8 @@ function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
     : '<tr><th style="text-align:center">SL No</th><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
-      +'<th>Business Unit</th><th>Personnel</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th></tr>';
+      +'<th>Business Unit</th>'+(trcAnantaSourceOn()?'<th>Lead source</th>':'')
+      +'<th>Personnel</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th></tr>';
 }
 /* Fixed proportions per column, matched 1:1 to trcHeadHtml's columns - paired with table-layout:fixed
    on the table itself (see trcView), this is what actually stops one long value (a badge holding an
@@ -34866,6 +34927,10 @@ function trcColsHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<col style="width:9%"><col style="width:20%"><col style="width:15%"><col style="width:11%">'
       +'<col style="width:15%"><col style="width:16%"><col style="width:14%">'
+    : trcAnantaSourceOn()
+    ? '<col style="width:4%"><col style="width:6%"><col style="width:13%"><col style="width:8%">'
+      +'<col style="width:8%"><col style="width:9%"><col style="width:7%"><col style="width:11%"><col style="width:8%">'
+      +'<col style="width:7%"><col style="width:8%"><col style="width:11%">'
     : '<col style="width:4%"><col style="width:7%"><col style="width:15%"><col style="width:9%">'
       +'<col style="width:9%"><col style="width:10%"><col style="width:10%"><col style="width:9%">'
       +'<col style="width:7%"><col style="width:9%"><col style="width:11%">';
@@ -34925,8 +34990,9 @@ function trcRender(full,keepPage){
   const pageItems=items.slice(pageOffset,pageOffset+TRC_PAGE_SIZE);
   TRC_PAGE_ROWS=pageItems;
   const b=$('trcRows');if(b)b.innerHTML=histLoading
-    ?'<tr><td colspan="'+TRC_LEAD_COLS+'"><div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i><div>Loading the full follow-up history of each lead…</div></div></td></tr>'
+    ?'<tr><td colspan="'+trcLeadColCount()+'"><div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i><div>Loading the full follow-up history of each lead…</div></div></td></tr>'
     :trcTableHtml(pageItems,callLevel,pageOffset);
+  if(!histLoading&&!callLevel&&trcAnantaSourceOn())trcFillLeadSources(pageItems);
   const pg=$('trcPager');if(pg)pg.innerHTML=trcPagerHtml(totalItems,totalPages);
   const c=$('trcCount');
   if(c){
@@ -35196,6 +35262,21 @@ function trcQaTableHtml(r,m){
                  ?'Qualified and wants to buy, but this is the FIRST call that qualifies this lead - the site visit being unsettled does not excuse it, so the CRM genuinely needs to be told.':null,
                m?m.label:null,sa.reason])}
   ].filter(Boolean);
+  /* Ananta ONLY: leads that came in on CRM source 20741 ("Launch Offer - Image") get the launch-offer
+     briefing verdict, judged on the lead's first connected call (crm-snapshot-qa launchOfferCheck).
+     EVERY Ananta call carries this point; only a Launch Offer lead is actually judged - any other
+     source is Not Applicable, saying which source it came in on. Other projects never show it. */
+  if(String(r.business_unit_name||'').toLowerCase().indexOf('ananta')!==-1){
+    const lo=r.launch_offer_check||{};
+    const fromLaunch=String(r.lead_source_id||'')==='20741';
+    const status=r.launch_offer_status||(fromLaunch?'Not checked yet':'Not Applicable');
+    const fallback=r.launch_offer_status?null
+      :fromLaunch?'This lead came in on "'+(r.lead_source_name||'Launch Offer - Image')+'"; the launch-offer briefing check has not run on this call yet.'
+      :(r.lead_source_name?'This lead came in on "'+r.lead_source_name+'", not the Launch Offer source - the launch-offer briefing is only checked for Launch Offer leads.'
+                          :'No CRM source recorded for this lead, so it is not a Launch Offer lead - the launch-offer briefing is not checked.');
+    topics.push({topic:'Launch offer status',status:status,score:null,
+      why:join([lo.notes||fallback,lo.evidence?'"'+lo.evidence+'"':null])});
+  }
   if(Array.isArray(r.agent_qa)){
     r.agent_qa.forEach(function(a){
       topics.push({topic:a&&a.point,status:a&&a.status,
@@ -35306,6 +35387,8 @@ function trcCallHtml(r,i,total){
     +'<div style="font-size:12.5px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-address-card" style="color:#0d9488"></i> What the CRM recorded</div>'
     +trcKV('Follow-up ID',r.follow_up_id)
     +trcKV('Personnel',r.personnel_name||null)
+    // Every lead: the CRM source it came in on (crm_lead_detail adds it to each call row).
+    +trcKV('Lead source',r.lead_source_name||null)
     +trcKV('Status',r.status_detail||r.crm_status_raw||r.crm_status)
     +(trcIsRegression(r)?trcKV('Went back from',r.prev_status+' - not a legitimate step back'):'')
     +trcKV('Next follow-up',trcWall(r.next_follow_up_text,true)||r.next_follow_up_text)
@@ -36294,6 +36377,17 @@ function trCompGridHtml(leads){
     +'</div>';
   }).join('')+'</div>';
 }
+const TR_LAUNCH_SOURCE_ID=20741; // Ananta "Launch Offer - Image"
+function trLeadSourceFill(row){
+  if(!row||!row.id)return;
+  Promise.resolve(sb.schema('acc').from('transcriptions')
+    .select('source_id:original_crm_response->>source_id,source_name:original_crm_response->>source_name')
+    .eq('id',row.id).maybeSingle()).then(function(x){
+      const d=x&&x.data, el=document.getElementById('trLeadSrc');
+      if(!d||!el||Number(d.source_id)!==TR_LAUNCH_SOURCE_ID||!d.source_name)return;
+      el.innerHTML=' · Source: <b>'+esc(d.source_name)+'</b>';
+    },function(){});
+}
 function trCompDetailHtml(leads,leadId){
   const g=leads.find(function(x){return String(x.leadId)===String(leadId);});
   if(!g)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/5\')">Back</button></div>';
@@ -36302,7 +36396,12 @@ function trCompDetailHtml(leads,leadId){
   const latest=trLatestVerdict(g.rows);
   const o=trOutcome(latest.qualification);
   const backBtn='<button class="btn btn-sm" onclick="goBack(\'transcription/5\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
-  const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
+  /* ONE audience only: Ananta leads that came in on source 20741 ("Launch Offer - Image") show the
+     source's real name beside the project. The list rows carry no CRM payload, so the name is read
+     off the stored response for this one call and filled in when it arrives. Nobody else gets it. */
+  const srcSlot=String(last.business_unit_name||'').toLowerCase().indexOf('ananta')!==-1?'<span id="trLeadSrc"></span>':'';
+  if(srcSlot)trLeadSourceFill(last);
+  const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+srcSlot+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
   // Says which call the verdict came from, so nobody reads it as a merge of all of them.
   const verdictFrom=latest.row
     ? ('from the '+(latest.stale?'most recent call with a transcript':'latest call')

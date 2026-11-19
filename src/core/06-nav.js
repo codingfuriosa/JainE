@@ -190,9 +190,20 @@ function fhIsSystems(){ return fhMe()===FEEDBACK_HUB_ADMIN||fhMyDepts().indexOf(
 // Systems people (the Administrator included) post and read System Feedbacks; they never rate them -
 // not even system.admin@, who is also listed under Sales and Pre Sales.
 function fhIsRater(){ if(fhIsSystems()) return false; return SYSTEM_FEEDBACK_EXTRA.indexOf(fhMe())!==-1||fhMyDepts().some(function(d){ return d==='Sales'||d==='Pre Sales'; }); }
+/* ACCOUNTS FILL THE FORMS IN; THEY DO NOT BUILD THEM (18 Nov 2026).
+   The whole Accounts department, by department rather than by name - there are eight of them and
+   the list would go stale the first time somebody joined. They get the forms and the answers given:
+   enough to open any form and submit it, and to read what came back. Designing - editing a form,
+   closing it, deleting it - stays with FEEDBACK_HUB_PEOPLE above.
+   The answers people gave are NOT theirs: six of the seven forms carry the respondent's name and
+   phone, so reading the records stays with the three as well.
+   feedback.can_design_forms() and feedback.can_use_forms() hold the same rules in the database, and
+   those are what actually enforce them; this only decides what the page offers. */
+function fhCanFillForms(){ return fhMyDepts().indexOf('Accounts')!==-1; }
+function fhCanSeeForms(){ return fhCanQrForms()||fhCanFillForms(); }
 function canFeedbackHub(){
   if(state.isCustomer||state.impersonating) return false;
-  return fhCanQrForms()||fhIsSystems()||fhIsRater();
+  return fhCanSeeForms()||fhIsSystems()||fhIsRater();
 }
 /* INVENTORY (PURCHASE & STORES) IS FOR THREE PEOPLE, BY NAME, WHILE IT IS BEING BUILT AND REVIEWED.
 

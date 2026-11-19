@@ -872,6 +872,106 @@ async function callOpenAiQa(key: string, model: string, system: string, user: st
   return text;
 }
 
+/* ------------------------------------------------- ANANTA LAUNCH-OFFER CHECK
+   ONE audience only: leads of business unit Ananta (the CRM writes "Ananta"; "Dream Ananta" also
+   matches) whose CRM source_id is 20741 ("Launch Offer - Image"). They came in on the launch-offer ad,
+   so on the FIRST call that actually connected (an earlier follow-up with a completed transcript means
+   this one is not first) the agent should brief the offer. A separate small judge, run after the main
+   QA is saved, so it can never fail or change the main assessment. Every OTHER Ananta lead gets the
+   point as Not Applicable (no model call); leads of other projects are left untouched (null). */
+const LAUNCH_OFFER_SOURCE_ID = "20741";
+const LAUNCH_OFFER_PROMPT = `You review one sales call of Jain Group (real estate, Kolkata).
+This lead enquired through the Dream Ananta "Launch Offer" advertisement, and this is the first call in
+which the Agent actually reached the customer. Judge ONLY whether the Agent briefed the Dream Ananta
+launch offer. Dream Ananta is Phase 2 of Dream Gurukul, so an agent who calls it "Gurukul" or
+"Gurukul Phase 2" while briefing the offer still counts.
+Reply with JSON only:
+{ "status": "Pass" | "Partial" | "Fail", "evidence": "<short quote from the transcript, or empty>", "notes": "<one or two sentences>" }
+- Pass: the Agent clearly told the customer a launch offer is running on Dream Ananta, on a limited
+  number of units, in a way the customer could follow.
+- Partial: the offer was only mentioned in passing, or without saying it is limited, or the customer
+  was left unsure what it is.
+- Fail: the offer was never mentioned, or it was misrepresented (for example presented as running on
+  another project, or as unlimited).
+The offer's terms are not given to you, so do NOT treat any specific discount figure or term the Agent
+quotes as verified or as a failure: judge the briefing, not the number. Base the status only on what
+the transcript shows was said. Do not give credit for anything not said.`;
+
+const isLaunchOfferLead = (businessUnit: unknown, sourceId: unknown) =>
+  String(businessUnit ?? "").toLowerCase().includes("ananta") && String(sourceId ?? "").trim() === LAUNCH_OFFER_SOURCE_ID;
+
+/* Returns what was stored, or null when the call is outside the audience. Throws only on a judge
+   failure, which leaves the columns null so the `launch_offer` action can pick it up again. */
+async function launchOfferCheck(db: DB, followUpId: number, openaiKey: string, qaModel: string) {
+  const { data: fu } = await db.schema("acc").from("crm_followups")
+    .select("follow_up_id, lead_id, business_unit_name, communication_time, call_start_text, recording_url")
+    .eq("follow_up_id", followUpId).maybeSingle();
+  if (!fu) return null;
+  const { data: lead } = await db.schema("acc").from("crm_leads")
+    .select("business_unit_name, source_id:raw->>source_id, source_name:raw->>source_name")
+    .eq("lead_id", fu.lead_id).maybeSingle();
+  const bu = fu.business_unit_name ?? (lead as any)?.business_unit_name;
+  if (!String(bu ?? "").toLowerCase().includes("ananta")) return null; // only Ananta carries this QA point at all
+
+  /* Every Ananta lead carries the point; only the Launch Offer source is judged. Any other source is
+     Not Applicable, saying which source it came in on (or that the CRM sent none). No model call. */
+  if (!isLaunchOfferLead(bu, (lead as any)?.source_id)) {
+    const sid = String((lead as any)?.source_id ?? "").trim();
+    const sname = (lead as any)?.source_name ?? null;
+    const check = { status: "Not Applicable",
+      notes: sid
+        ? `This lead came in on "${sname || "source " + sid}" (source ${sid}), not the Launch Offer source - the launch-offer briefing is only checked for Launch Offer leads.`
+        : "The CRM sent no source for this lead, so it is not a Launch Offer lead - the launch-offer briefing is not checked.",
+      source_id: sid || null, source_name: sname };
+    const { error } = await db.schema("acc").from("followup_qa")
+      .update({ launch_offer_check: check, launch_offer_status: check.status, updated_at: nowIso() })
+      .eq("follow_up_id", followUpId);
+    if (error) throw new Error("could not save the launch-offer check: " + error.message);
+    return check;
+  }
+
+  // Earlier calls of this lead that connected = an earlier follow-up whose recording has a completed transcript.
+  const when = fu.communication_time || fu.call_start_text;
+  const { data: earlier } = await db.schema("acc").from("crm_followups")
+    .select("follow_up_id, recording_url, communication_time, call_start_text")
+    .eq("lead_id", fu.lead_id).neq("follow_up_id", followUpId).not("recording_url", "is", null);
+  const earlierUrls = (earlier || []).filter((e: any) => {
+    const t = e.communication_time || e.call_start_text;
+    return t && when && new Date(t).getTime() < new Date(when).getTime();
+  }).map((e: any) => e.recording_url);
+  let connectedBefore = false;
+  if (earlierUrls.length) {
+    const { count } = await db.schema("acc").from("call_transcripts")
+      .select("id", { count: "exact", head: true }).in("recording_url", earlierUrls).eq("status", "completed");
+    connectedBefore = (count ?? 0) > 0;
+  }
+
+  let check: Record<string, unknown>;
+  if (connectedBefore) {
+    check = { status: "Not Applicable", notes: "Not the first connected call for this lead - the launch-offer briefing is only checked on that one.",
+              source_id: LAUNCH_OFFER_SOURCE_ID, source_name: (lead as any)?.source_name ?? null };
+  } else {
+    const { data: tr } = await db.schema("acc").from("call_transcripts")
+      .select("status, transcript_text").eq("recording_url", fu.recording_url).maybeSingle();
+    if (!tr || tr.status !== "completed" || !tr.transcript_text) return null; // judged once a transcript exists
+    if (!openaiKey) throw new Error("CHATGPT_API_KEY is not set");
+    const raw = await callOpenAiQa(openaiKey, qaModel, LAUNCH_OFFER_PROMPT,
+      `Lead: ${fu.lead_id} - project Ananta - source "${(lead as any)?.source_name ?? "Launch Offer - Image"}"\n\nTRANSCRIPT:\n${tr.transcript_text}`);
+    const p = parseModelJson(raw);
+    const s = String(p?.status || "").trim().toLowerCase();
+    const label = s === "pass" ? "Pass" : s === "partial" ? "Partial" : s === "fail" ? "Fail" : null;
+    if (!label) throw new Error("the launch-offer judge returned no Pass/Partial/Fail");
+    check = { status: label, evidence: p?.evidence ? String(p.evidence).slice(0, 500) : "",
+              notes: p?.notes ? String(p.notes).slice(0, 600) : "", first_connected_call: true,
+              source_id: LAUNCH_OFFER_SOURCE_ID, source_name: (lead as any)?.source_name ?? null, model: qaModel };
+  }
+  const { error } = await db.schema("acc").from("followup_qa")
+    .update({ launch_offer_check: check, launch_offer_status: check.status, updated_at: nowIso() })
+    .eq("follow_up_id", followUpId);
+  if (error) throw new Error("could not save the launch-offer check: " + error.message);
+  return check;
+}
+
 async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
   const attempt = Number(item.qa_attempt_count || 0) + 1;
   const failQueue = async (msg: string) => {
@@ -1076,6 +1176,11 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
 
   if (saveErr) return failQueue("could not save the QA result: " + saveErr.message);
 
+  // Ananta launch-offer leads only; a failure here is left for the `launch_offer` action to redo.
+  let launchOffer: unknown = null;
+  try { launchOffer = (await launchOfferCheck(db, Number(fu.follow_up_id), openaiKey, qaModel))?.status ?? null; }
+  catch (e) { launchOffer = "error: " + String((e as any)?.message || e).slice(0, 200); }
+
   await finish();
   return { follow_up_id: item.follow_up_id, phase: "qa", status: "completed", qa_id: saved.id,
            pitch: pitchStatus, pitch_score: pitchScore,
@@ -1083,7 +1188,8 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
            personal_mobile_requested: mobileAsk.status, remarks: rem.status,
            crm_status: ctx.crm_status, ai_assessed_status: aiStatus,
            model_assessed_status: modelStatus, qualification_ratcheted: derived.ratcheted,
-           status_match: derived.status_match, mismatch_type: derived.mismatch_type };
+           status_match: derived.status_match, mismatch_type: derived.mismatch_type,
+           ...(launchOffer ? { launch_offer: launchOffer } : {}) };
 }
 
 async function promoteRetries(db: DB) {
@@ -1435,6 +1541,32 @@ Deno.serve(async (req: Request) => {
       }
       return j({ ok: true, follow_up_id: followUpId, resumed_at: updated.status,
                  work: await doWork(db, GEMINI_KEY, OPENAI_KEY, geminiModel, qaModel, followUpId) });
+    }
+
+    if (action === "launch_offer") {
+      /* Backfill / redo of the Ananta launch-offer check on calls that already have a QA result.
+         Optional follow_up_id for one call; otherwise every in-scope call still missing a verdict
+         (force: true re-judges ones already done). Never touches the main QA. */
+      if (!OPENAI_KEY) return j({ error: "CHATGPT_API_KEY is not set in Edge Function Secrets" }, 500);
+      const one = Number(body.follow_up_id || 0);
+      let ids: number[] = [];
+      if (one) ids = [one];
+      else {
+        // Every Ananta call with a QA result: Launch Offer leads are judged, the rest marked Not Applicable.
+        let q = db.schema("acc").from("followup_qa").select("follow_up_id").ilike("business_unit_name", "%ananta%");
+        if (!body.force) q = q.is("launch_offer_status", null);
+        const { data: rows, error: qErr } = await q.order("call_date", { ascending: true })
+          .limit(Math.min(Number(body.limit) || 200, 500));
+        if (qErr) return j({ error: qErr.message }, 500);
+        ids = (rows || []).map((r: any) => Number(r.follow_up_id));
+      }
+      const results: any[] = [];
+      for (const id of ids) {
+        try { const c: any = await launchOfferCheck(db, id, OPENAI_KEY, qaModel);
+              results.push({ follow_up_id: id, status: c?.status ?? "out_of_scope" }); }
+        catch (e) { results.push({ follow_up_id: id, status: "error", error: String((e as any)?.message || e).slice(0, 300) }); }
+      }
+      return j({ ok: true, action, checked: results.length, results });
     }
 
     if (action === "snapshot") {

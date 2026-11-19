@@ -223,7 +223,8 @@ function trCacheClear(key){try{sessionStorage.removeItem(key);}catch(e){}}
    window skip the fetch too, and is allowed to fail (quota, private browsing) without the caller
    ever knowing - the rows are already in hand either way. One key per lead rather than one map:
    writing a lead must not mean re-serialising every other lead already cached. */
-const TRC_LEAD_CACHE_PREFIX='trc_lead_';
+// v2 (19 Nov 2026): call rows now carry lead_source_* and launch_offer_*; older cached leads lack them.
+const TRC_LEAD_CACHE_PREFIX='trc_lead2_';
 let TRC_LEAD_MEM=Object.create(null);
 function trcLeadCacheRead(id){
   const k=String(id);
@@ -1868,6 +1869,37 @@ function trcClipCell(inner){
    question being asked: "show me the day's leads" is a lead per row, and "show me the mismatches" is
    a CALL per row, because that is the level a mismatch exists at. ---- */
 const TRC_LEAD_COLS=11, TRC_CALL_COLS=7;
+/* ANANTA ONLY: with the Business Unit filter on Ananta, the lead table gains a "Lead source" column
+   (the CRM's source_name). The list's own fetch carries no CRM payload, so the names are read off
+   acc.crm_leads for just the leads on screen, after the rows are drawn, and cached for the session. */
+function trcAnantaSourceOn(){
+  return TRC_F.match!=='MISMATCH'&&String(TRC_F.bu||'').toLowerCase().indexOf('ananta')!==-1;
+}
+function trcLeadColCount(){return TRC_LEAD_COLS+(trcAnantaSourceOn()?1:0);}
+const TRC_LEAD_SOURCE=Object.create(null);
+function trcLeadSourceCell(leadId){
+  const k=String(leadId), v=TRC_LEAD_SOURCE[k];
+  return '<td id="trcSrc'+esc(k)+'" style="font-size:12.5px">'
+    +(v===undefined?'<span style="color:var(--slate)">…</span>':v?esc(v):'<span style="color:var(--slate)">—</span>')+'</td>';
+}
+async function trcFillLeadSources(items){
+  const ids=(items||[]).map(function(g){return g.lead_id;})
+    .filter(function(id){return id!=null&&TRC_LEAD_SOURCE[String(id)]===undefined;});
+  if(ids.length){
+    try{
+      const {data,error}=await sb.schema('acc').from('crm_leads')
+        .select('lead_id,source_name:raw->>source_name').in('lead_id',ids);
+      if(error)throw error;
+      ids.forEach(function(id){TRC_LEAD_SOURCE[String(id)]=null;});
+      (data||[]).forEach(function(d){TRC_LEAD_SOURCE[String(d.lead_id)]=d.source_name||null;});
+    }catch(e){return;}
+  }
+  (items||[]).forEach(function(g){
+    const el=$('trcSrc'+g.lead_id);if(!el)return;
+    const v=TRC_LEAD_SOURCE[String(g.lead_id)];
+    el.innerHTML=v?esc(v):'<span style="color:var(--slate)">—</span>';
+  });
+}
 
 /* sl is display-only - the row's position in the currently rendered, currently filtered list, purely
    so someone can say "row 12" out loud when talking to a colleague. Not stored anywhere: it is
@@ -1926,6 +1958,7 @@ function trcLeadRowHtml(g,sl){
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))
     +trcTextCell(g.bu,160)
+    +(trcAnantaSourceOn()?trcLeadSourceCell(g.lead_id):'')
     /* Whoever was on the phone for the LATEST call, not the lead as a whole - a lead's calls can move
        between Pre-Sales and Sales (or between people on the same team), so the personnel column is
        g.last's, matching what "latest call recording" means everywhere else on this row (g.lastDate,
@@ -1962,7 +1995,7 @@ function trcCallRowHtml(r){
 
 function trcTableHtml(items,callLevel,slOffset){
   if(!items.length){
-    return '<tr><td colspan="'+(callLevel?TRC_CALL_COLS:TRC_LEAD_COLS)+'"><div class="empty" style="padding:40px">'
+    return '<tr><td colspan="'+(callLevel?TRC_CALL_COLS:trcLeadColCount())+'"><div class="empty" style="padding:40px">'
       +'<i class="fa-solid fa-inbox"></i><div>Nothing matches these filters</div></div></td></tr>';
   }
   if(callLevel)return items.map(trcCallRowHtml).join('');
@@ -1976,7 +2009,8 @@ function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
     : '<tr><th style="text-align:center">SL No</th><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
-      +'<th>Business Unit</th><th>Personnel</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th></tr>';
+      +'<th>Business Unit</th>'+(trcAnantaSourceOn()?'<th>Lead source</th>':'')
+      +'<th>Personnel</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th></tr>';
 }
 /* Fixed proportions per column, matched 1:1 to trcHeadHtml's columns - paired with table-layout:fixed
    on the table itself (see trcView), this is what actually stops one long value (a badge holding an
@@ -1987,6 +2021,10 @@ function trcColsHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<col style="width:9%"><col style="width:20%"><col style="width:15%"><col style="width:11%">'
       +'<col style="width:15%"><col style="width:16%"><col style="width:14%">'
+    : trcAnantaSourceOn()
+    ? '<col style="width:4%"><col style="width:6%"><col style="width:13%"><col style="width:8%">'
+      +'<col style="width:8%"><col style="width:9%"><col style="width:7%"><col style="width:11%"><col style="width:8%">'
+      +'<col style="width:7%"><col style="width:8%"><col style="width:11%">'
     : '<col style="width:4%"><col style="width:7%"><col style="width:15%"><col style="width:9%">'
       +'<col style="width:9%"><col style="width:10%"><col style="width:10%"><col style="width:9%">'
       +'<col style="width:7%"><col style="width:9%"><col style="width:11%">';
@@ -2046,8 +2084,9 @@ function trcRender(full,keepPage){
   const pageItems=items.slice(pageOffset,pageOffset+TRC_PAGE_SIZE);
   TRC_PAGE_ROWS=pageItems;
   const b=$('trcRows');if(b)b.innerHTML=histLoading
-    ?'<tr><td colspan="'+TRC_LEAD_COLS+'"><div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i><div>Loading the full follow-up history of each lead…</div></div></td></tr>'
+    ?'<tr><td colspan="'+trcLeadColCount()+'"><div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i><div>Loading the full follow-up history of each lead…</div></div></td></tr>'
     :trcTableHtml(pageItems,callLevel,pageOffset);
+  if(!histLoading&&!callLevel&&trcAnantaSourceOn())trcFillLeadSources(pageItems);
   const pg=$('trcPager');if(pg)pg.innerHTML=trcPagerHtml(totalItems,totalPages);
   const c=$('trcCount');
   if(c){
