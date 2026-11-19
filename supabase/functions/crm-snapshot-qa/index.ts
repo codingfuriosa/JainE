@@ -877,8 +877,8 @@ async function callOpenAiQa(key: string, model: string, system: string, user: st
    matches) whose CRM source_id is 20741 ("Launch Offer - Image"). They came in on the launch-offer ad,
    so on the FIRST call that actually connected (an earlier follow-up with a completed transcript means
    this one is not first) the agent should brief the offer. A separate small judge, run after the main
-   QA is saved, so it can never fail or change the main assessment. Every other lead is left untouched
-   (launch_offer_status stays null). */
+   QA is saved, so it can never fail or change the main assessment. Every OTHER Ananta lead gets the
+   point as Not Applicable (no model call); leads of other projects are left untouched (null). */
 const LAUNCH_OFFER_SOURCE_ID = "20741";
 const LAUNCH_OFFER_PROMPT = `You review one sales call of Jain Group (real estate, Kolkata).
 This lead enquired through the Dream Ananta "Launch Offer" advertisement, and this is the first call in
@@ -910,7 +910,25 @@ async function launchOfferCheck(db: DB, followUpId: number, openaiKey: string, q
   const { data: lead } = await db.schema("acc").from("crm_leads")
     .select("business_unit_name, source_id:raw->>source_id, source_name:raw->>source_name")
     .eq("lead_id", fu.lead_id).maybeSingle();
-  if (!isLaunchOfferLead(fu.business_unit_name ?? (lead as any)?.business_unit_name, (lead as any)?.source_id)) return null;
+  const bu = fu.business_unit_name ?? (lead as any)?.business_unit_name;
+  if (!String(bu ?? "").toLowerCase().includes("ananta")) return null; // only Ananta carries this QA point at all
+
+  /* Every Ananta lead carries the point; only the Launch Offer source is judged. Any other source is
+     Not Applicable, saying which source it came in on (or that the CRM sent none). No model call. */
+  if (!isLaunchOfferLead(bu, (lead as any)?.source_id)) {
+    const sid = String((lead as any)?.source_id ?? "").trim();
+    const sname = (lead as any)?.source_name ?? null;
+    const check = { status: "Not Applicable",
+      notes: sid
+        ? `This lead came in on "${sname || "source " + sid}" (source ${sid}), not the Launch Offer source - the launch-offer briefing is only checked for Launch Offer leads.`
+        : "The CRM sent no source for this lead, so it is not a Launch Offer lead - the launch-offer briefing is not checked.",
+      source_id: sid || null, source_name: sname };
+    const { error } = await db.schema("acc").from("followup_qa")
+      .update({ launch_offer_check: check, launch_offer_status: check.status, updated_at: nowIso() })
+      .eq("follow_up_id", followUpId);
+    if (error) throw new Error("could not save the launch-offer check: " + error.message);
+    return check;
+  }
 
   // Earlier calls of this lead that connected = an earlier follow-up whose recording has a completed transcript.
   const when = fu.communication_time || fu.call_start_text;
@@ -1534,17 +1552,13 @@ Deno.serve(async (req: Request) => {
       let ids: number[] = [];
       if (one) ids = [one];
       else {
-        const { data: leads, error: lErr } = await db.schema("acc").from("crm_leads")
-          .select("lead_id, business_unit_name").eq("raw->>source_id", LAUNCH_OFFER_SOURCE_ID);
-        if (lErr) return j({ error: lErr.message }, 500);
-        const leadIds = (leads || []).filter((l: any) => isLaunchOfferLead(l.business_unit_name, LAUNCH_OFFER_SOURCE_ID)).map((l: any) => l.lead_id);
-        if (leadIds.length) {
-          let q = db.schema("acc").from("followup_qa").select("follow_up_id").in("lead_id", leadIds);
-          if (!body.force) q = q.is("launch_offer_status", null);
-          const { data: rows, error: qErr } = await q.order("call_date", { ascending: true }).limit(40);
-          if (qErr) return j({ error: qErr.message }, 500);
-          ids = (rows || []).map((r: any) => Number(r.follow_up_id));
-        }
+        // Every Ananta call with a QA result: Launch Offer leads are judged, the rest marked Not Applicable.
+        let q = db.schema("acc").from("followup_qa").select("follow_up_id").ilike("business_unit_name", "%ananta%");
+        if (!body.force) q = q.is("launch_offer_status", null);
+        const { data: rows, error: qErr } = await q.order("call_date", { ascending: true })
+          .limit(Math.min(Number(body.limit) || 200, 500));
+        if (qErr) return j({ error: qErr.message }, 500);
+        ids = (rows || []).map((r: any) => Number(r.follow_up_id));
       }
       const results: any[] = [];
       for (const id of ids) {

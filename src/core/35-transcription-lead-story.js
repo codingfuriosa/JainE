@@ -95,14 +95,18 @@ function trcQaTableHtml(r,m){
   ].filter(Boolean);
   /* Ananta ONLY: leads that came in on CRM source 20741 ("Launch Offer - Image") get the launch-offer
      briefing verdict, judged on the lead's first connected call (crm-snapshot-qa launchOfferCheck).
-     Shown on every assessed call of such a lead - Not checked yet until the judge has run on it. */
-  const launchLead=String(r.business_unit_name||'').toLowerCase().indexOf('ananta')!==-1
-    &&String(r.lead_source_id||'')==='20741';
-  if(launchLead||(r.launch_offer_status&&String(r.business_unit_name||'').toLowerCase().indexOf('ananta')!==-1)){
+     EVERY Ananta call carries this point; only a Launch Offer lead is actually judged - any other
+     source is Not Applicable, saying which source it came in on. Other projects never show it. */
+  if(String(r.business_unit_name||'').toLowerCase().indexOf('ananta')!==-1){
     const lo=r.launch_offer_check||{};
-    topics.push({topic:'Launch offer status',status:r.launch_offer_status||'Not checked yet',score:null,
-      why:join([lo.notes||(r.launch_offer_status?null:'This lead came in on "'+(r.lead_source_name||'Launch Offer - Image')+'"; the launch-offer briefing check has not run on this call yet.'),
-                lo.evidence?'"'+lo.evidence+'"':null])});
+    const fromLaunch=String(r.lead_source_id||'')==='20741';
+    const status=r.launch_offer_status||(fromLaunch?'Not checked yet':'Not Applicable');
+    const fallback=r.launch_offer_status?null
+      :fromLaunch?'This lead came in on "'+(r.lead_source_name||'Launch Offer - Image')+'"; the launch-offer briefing check has not run on this call yet.'
+      :(r.lead_source_name?'This lead came in on "'+r.lead_source_name+'", not the Launch Offer source - the launch-offer briefing is only checked for Launch Offer leads.'
+                          :'No CRM source recorded for this lead, so it is not a Launch Offer lead - the launch-offer briefing is not checked.');
+    topics.push({topic:'Launch offer status',status:status,score:null,
+      why:join([lo.notes||fallback,lo.evidence?'"'+lo.evidence+'"':null])});
   }
   if(Array.isArray(r.agent_qa)){
     r.agent_qa.forEach(function(a){
