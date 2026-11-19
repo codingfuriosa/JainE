@@ -308,6 +308,9 @@ async function pullProxy(ids: string[], country: string, perPage: number, rep: a
       said.push("account " + acct.id + ": " + msg); continue;
     }
     const errs = rep.errors.slice(before);
+    /* Proxy answered but in a shape we could not place: asking the next account would only spend
+       its credits on the same answer, so the run stops here and the pages stay queued. */
+    if (errs.some((x: string) => /could not be matched to a page/.test(x))) { rep.proxy_account = acct.id; return out; }
     if (out.size || !errs.length) {
       await save({ last_used_at: new Date().toISOString(), last_error: null }, acct.id);
       rep.proxy_account = acct.id;
@@ -325,6 +328,15 @@ async function pullProxy(ids: string[], country: string, perPage: number, rep: a
   rep.errors.push(...said);
   return new Map<string, NormAd[]>();
 }
+/* The page an ad belongs to, from whichever field Proxy uses for it. */
+function adPageId(a: any) {
+  for (const v of [a?.page_id, a?.pageId, a?.platform_id, a?.advertiser_id, a?.page?.id,
+                   a?.snapshot?.page_id, a?.page_info?.page_id]) {
+    if (v !== null && v !== undefined && String(v).trim()) return String(v).trim();
+  }
+  return "";
+}
+const normName = (x: unknown) => String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 async function pullProxyAs(acct: any, ids: string[], country: string, perPage: number, rep: any) {
   const out = new Map<string, NormAd[]>();
   const token = await accessToken(acct);
@@ -347,10 +359,39 @@ async function pullProxyAs(acct: any, ids: string[], country: string, perPage: n
     return out;
   }
   const media = u.media || {};
-  for (const pageId of Object.keys(u.data.ads)) {
-    const list = Array.isArray(u.data.ads[pageId]) ? u.data.ads[pageId] : [];
-    out.set(String(pageId), list.filter((a: any) => String(a?.ad_id || "").trim()).map((a: any) => {
-      const id = String(a.ad_id).trim();
+  /* SINCE 14 NOV PROXY ANSWERS WITH ONE FLAT LIST, not a list per page. Read keyed by page, the
+     list's own positions ("0", "1", ...) became the page ids, no watchlist page matched them, and
+     every requested page was then filled in below as "pulled, no ads" - five days of runs that
+     spent their credits, wrote nothing and still reported done. Each ad is now put back under its
+     page by whatever id or name it carries; ads that cannot be placed make the run an error so
+     the pages stay in the queue instead of being marked done with nothing. */
+  let groups: Record<string, any[]> = {};
+  if (Array.isArray(u.data.ads)) {
+    const want = new Set(ids.map(String));
+    const names: Map<string, string> = rep._names || new Map();
+    const byName = new Map<string, string>();
+    for (const [pid, nm] of names) if (nm) byName.set(normName(nm), pid);
+    let unplaced = 0; const keys = new Set<string>();
+    for (const a of u.data.ads) {
+      Object.keys(a || {}).forEach((k) => keys.add(k));
+      let pid = adPageId(a);
+      if (!pid || !want.has(pid)) {
+        const nm = normName(a?.page_name || a?.advertiser_name || a?.page?.name || "");
+        pid = (nm && byName.get(nm)) || (ids.length === 1 ? String(ids[0]) : "");
+      }
+      if (!pid) { unplaced++; continue; }
+      (groups[pid] = groups[pid] || []).push(a);
+    }
+    if (unplaced) {
+      rep.errors.push("Proxy sent " + unplaced + " ads that could not be matched to a page (fields: "
+        + Array.from(keys).slice(0, 30).join(",") + ")");
+      return out;
+    }
+  } else groups = u.data.ads;
+  for (const pageId of Object.keys(groups)) {
+    const list = Array.isArray(groups[pageId]) ? groups[pageId] : [];
+    out.set(String(pageId), list.filter((a: any) => String(a?.ad_id || a?.ad_archive_id || a?.id || "").trim()).map((a: any) => {
+      const id = String(a.ad_id || a.ad_archive_id || a.id).trim();
       const row: any = { page_name: a?.page_name || a?.advertiser_name || null,
         ad_creative_bodies: a?.body ? [String(a.body)] : null,
         ad_creative_link_titles: a?.headline ? [String(a.headline)] : null,
@@ -487,6 +528,7 @@ async function pullAndWrite(wl: any[], body: any) {
   rep.source = {} as Record<string, string>;   // page name -> which service its ads came from
   if (provider === "scrapecreators") pulled = await pullScrapeCreators(scKey, ids, country, rep);
   else {
+    rep._names = new Map(wl.map((w) => [String(w.page_id || "").trim(), String(w.name || "")]));
     try { pulled = await pullProxy(ids, country, perPage, rep); }
     catch (e) {
       // Proxy unreachable or signed out: on its own that ends the run; with both, it is a gap.
@@ -494,6 +536,7 @@ async function pullAndWrite(wl: any[], body: any) {
       rep.errors.push("Proxy: " + String((e as Error)?.message || e).slice(0, 160));
       pulled = new Map();
     }
+    delete rep._names;
     if (provider === "both") {
       /* Proxy's refusals are not failures of the run when ScrapeCreators can cover them, so
          they are moved aside as notes; only what ScrapeCreators cannot answer stays an error. */
@@ -749,7 +792,9 @@ Deno.serve(async (req) => {
       const said = [...(rep.errors || []), ...(rep.proxy_notes || [])].join(" | ");
       /* Nothing answered and Proxy talked about credits or limits: the day's allowance is gone,
          whatever our own count says. Those pages go back in line and the day is closed. */
-      const refused = !ok.size && /credit|limit|quota|exhaust/i.test(said);
+      /* Ads Proxy sent that could not be placed on a page close the day the same way: one call is
+         spent finding that out, not the whole day's credits retrying it. */
+      const refused = !ok.size && /credit|limit|quota|exhaust|could not be matched to a page/i.test(said);
       const results = wl.map((w) => ({ queue_id: w.queue_id, ok: ok.has(Number(w.id)),
         ads: rep.per_page?.[w.name] ?? 0, error: ok.has(Number(w.id)) ? null : (said.slice(0, 300) || "no answer") }));
       const fin = await rpc("competitor_finish_pulls", { p_results: results, p_refused: refused });

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Facebook Checklist · The Jain Group</title>
+<!-- PUBLIC FACEBOOK CHECKLIST (18 Nov 2026, Ayush). Anyone with the link can open it; it holds no JainE code and no database key.
+     It asks the checklist-share function for the latest saved checklist alerts, with the key in the link (#k=...), and draws
+     them with the same layout as Campaign Analytics > Checklist (assets/ck-render.js): section > point > every problem.
+     "Download PDF" prints the same page. While the link is switched off, or the key is wrong, it shows nothing. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}html,body{margin:0;background:#f6f7fb;color:#0f172a;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px 16px 60px}
+  .head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:2px solid #e0121c;padding:0 0 12px;margin:0 0 16px}
+  .head h1{margin:0;font-size:21px;font-weight:800}.head .sub{color:#64748b;font-size:12.5px;margin-top:2px}
+  .btn{border:1px solid #e5e7eb;background:#fff;border-radius:9px;height:38px;padding:0 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+  .btn:hover{background:#f8fafc}
+  .off{max-width:520px;margin:18vh auto;text-align:center;color:#64748b}.off b{display:block;color:#0f172a;font-size:18px;margin-bottom:6px}
+  .loading{padding:60px;text-align:center;color:#64748b}
+  @media print{.btn{display:none}.wrap{max-width:none;padding:0}@page{size:A4;margin:14mm 12mm}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style>
+<script src="assets/ck-render.js?v=5"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="head"><div><h1>Facebook Checklist · The Jain Group</h1><div class="sub">Alerts from the latest check of every running Facebook campaign, ad set and ad</div></div>
+    <button class="btn ck-noprint" id="pdf" onclick="window.print()" style="display:none">&#8681; Download PDF</button></div>
+  <div id="app"><div class="loading">Loading…</div></div>
+</div>
+<script>
+(function(){
+  'use strict';
+  var FN='https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/checklist-share';
+  var key=(location.hash.match(/k=([A-Za-z0-9]+)/)||[])[1]||'';
+  var app=document.getElementById('app');
+  var st=document.createElement('style'); st.textContent=window.CK_CSS||''; document.head.appendChild(st);
+  function off(){ app.innerHTML='<div class="off"><b>This checklist is not available</b>The link has been switched off or is not valid.</div>'; }
+  if(!key){ off(); return; }
+  fetch(FN,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({k:key})}).then(function(r){ return r.json(); }).then(function(d){
+    if(!d||d.off||d.error||!d.ok){ off(); return; }
+    app.innerHTML=window.ckRender(d,{});
+    document.getElementById('pdf').style.display='';
+    document.title='Facebook Checklist '+new Date().toISOString().slice(0,10)+' · The Jain Group';
+  }).catch(off);
+})();
+</script>
+</body>
+</html>

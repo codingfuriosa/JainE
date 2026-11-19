@@ -105,12 +105,18 @@ async function gadsTick(trigger: string, force: boolean) {
   // A target never read to the end and not yet started goes first, so one busy advertiser's long
   // list cannot keep the small ones waiting for hours; then the passes in progress.
   // A target whose read failed in the last 6 h steps aside, so it cannot hold up the others.
-  const failed = new Set((await lastRuns('google_ads', 6 * HOUR)).filter((r: any) => r.ok === false).map((r: any) => r.unit));
-  let t = all.find((x: any) => !x.full_at && !x.cursor && !failed.has(key(x)));
+  /* NO ONE TARGET MAY HOLD UP THE REST (19 Nov 2026). A pass in progress used to go first whatever happened to it:
+     Merlin's long list hit Google's CAPTCHA at page 11, the whole source waited 6 h, and the next tick went straight
+     back to Merlin's page 11 - from 15 Nov nothing else was read, Jain Group included. Now a target that failed in
+     the last 24 h steps aside everywhere, and the daily refresh of each target's newest pages (in sort order, so our
+     own brand first) comes before reading deeper into anyone's history. */
+  const failed = new Set((await lastRuns('google_ads', 24 * HOUR)).filter((r: any) => r.ok === false).map((r: any) => r.unit));
+  const free = all.filter((x: any) => !failed.has(key(x)));
+  let t = free.find((x: any) => !x.full_at && !x.cursor);
   let mode = 'full';
-  if (!t) { t = all.find((x: any) => x.cursor); mode = 'continue'; }
-  if (!t) { t = all.find((x: any) => Date.parse(x.full_at) < weekAgo); mode = 'full'; }
-  if (!t) { t = all.find((x: any) => !okRecently.has(key(x))); mode = 'refresh'; }
+  if (!t) { t = free.find((x: any) => !okRecently.has(key(x))); mode = 'refresh'; }
+  if (!t) { t = free.find((x: any) => x.cursor); mode = 'continue'; }
+  if (!t) { t = free.find((x: any) => Date.parse(x.full_at) < weekAgo); mode = 'full'; }
   if (!t && force) { t = all[0]; mode = 'refresh'; }
   if (!t) return { source: 'google_ads', skipped: 'nothing due' };
   return unit('google_ads', key(t), trigger, async (runId) => {

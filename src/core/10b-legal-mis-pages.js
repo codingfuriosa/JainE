@@ -581,7 +581,7 @@ window.lmRowUpload=function(id){ window._lmHasFolder=!!LM.docFolders[id]; lmAddF
    lands back on it through this check. */
 async function legalMIS(opened){
   if(PAGE!=='legal2') return legalMISOld();
-  setCrumb(['Legal 2','MIS']);
+  setCrumb(['Legal','MIS']);
   lmStyles();
   const hAct=$('legalHeadActions'); if(hAct) hAct.innerHTML='';
   const body=$('legalBody'); if(!body) return;

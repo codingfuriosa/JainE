@@ -37,8 +37,10 @@ async function mkDrawTab(host,base,t,scope,metaKey){
   if(t[3]==='meta') return compMetaView(host,metaKey);
   if(t[3]==='ca') return caView(host);
   if(t[3]==='ads') return obAdsView(host,t[0]==='google'?'google':'meta');
+  if(t[3]==='own') return ownAdsView(host,t[4]);   // our own ads from our own ad accounts (54-own-ads.js)
   if(t[3]==='dm') return dmTabView(host,t[0],scope);
-  return ciTabView(host,t[0],scope,base+'/'+t[0]);
+  // t[5] / t[6]: a ci tab drawn under another route name and side (Jain Group Google Ads = our Google Ads Transparency)
+  return ciTabView(host,t[5]||t[0],t[6]||scope,base+'/'+t[0]);
 }
 
 /* ---------------------------------------------------------------- Our Brand ('campaigns')
@@ -84,20 +86,30 @@ VIEWS.campaigns=async function(v,seg){
 const CD_TABS=[
   ['','Meta Ads','fa-brands fa-meta','meta'],
   ['google-ads','Google Ads Transparency','fa-solid fa-rectangle-ad','ci'],
-  // our own pages' ads in the Meta Ad Library, moved here from Campaign Analytics (7 Nov 2026); 5th = whose ads
-  ['brands','Meta Ad Library','fa-brands fa-meta','meta','brands']
+  // our own pages' ads in the Meta Ad Library, moved here from Campaign Analytics (7 Nov 2026); 5th = whose ads.
+  // 18 Nov 2026 (Ayush): renamed Jain Group Fb Ads, and beside it Jain Group Google Ads - our own ads in Google's Ads
+  // Transparency Center (the same view as the competitors' Google tab, our side: 6th = ci tab, 7th = side).
+  // 19 Nov 2026 (Ayush: "their data won't come from Ads Transparency Center"): both now show our own ads from our own ad
+  // accounts, project by project, with Campaign Analytics' figures ('own' renderer, 54-own-ads.js; 5th = platform).
+  ['brands','Jain Group Fb Ads','fa-brands fa-facebook','own','meta'],
+  ['jg-google','Jain Group Google Ads','fa-brands fa-google','own','google']
 ];
+/* JAIN GROUP TABS ONLY (18 Nov 2026, Ayush: Arijit Sarkar, Dipanwita Chatterjee, Avishek Das, Sourish Podder and Sandip Das see
+   "only the Jain Group Fb Ads and Jain Group Google Ads tabs, not the two competitor tabs"). Module 'competitors_jg' opens this
+   page with those two tabs (cdJgOnly() in 06-nav.js); 'competitors' keeps all four. */
+const CD_JG=['brands','jg-google'];
 VIEWS.competitors=async function(v,seg){
   const want=(seg&&seg[0])||'';
   // The two tabs that moved out of this page. An old bookmark follows them rather than landing on
   // the competitors' ads and leaving the person wondering where ours went.
   if(want==='partners'){ navTo('channel_partners'); return; }
-  const t=CD_TABS.filter(function(x){ return x[0]===want; })[0]||CD_TABS[0];
+  const tabs=cdJgOnly()?CD_TABS.filter(function(x){ return CD_JG.indexOf(x[0])!==-1; }):CD_TABS;
+  const t=tabs.filter(function(x){ return x[0]===want; })[0]||tabs[0];
   setCrumb(['Growth & Strategy','Competitor Data',t[1]]);
   v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Data')
-    +'<div class="tabs" style="margin-top:-6px">'+CD_TABS.map(function(x){ return mkTab('competitors',x,t[0]); }).join('')+'</div>'
+    +'<div class="tabs" style="margin-top:-6px">'+tabs.map(function(x){ return mkTab('competitors',x,t[0]); }).join('')+'</div>'
     +'<div id="mkHost"><div class="loader"><div class="spin"></div></div></div>';
-  await mkDrawTab($('mkHost'),'competitors',t,'competitor',t[4]||'competitors');
+  await mkDrawTab($('mkHost'),'competitors',t,'competitor',t[3]==='meta'?(t[4]||'competitors'):'competitors');
 };
 
 /* ---------------------------------------------------------------- Channel Partners ('channel_partners')

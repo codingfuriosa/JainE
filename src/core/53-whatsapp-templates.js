@@ -336,9 +336,20 @@ function wadIso(d){ return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISO
 function wadAdd(iso,n){ return wadIso(new Date(new Date(iso+'T00:00:00').getTime()+n*864e5)); }
 function wadN(n){ return n==null?'NA':Number(n).toLocaleString('en-IN'); }
 function wadPct(a,b){ return b?Math.round(a/b*1000)/10+'%':''; }
-// the chosen range: Yesterday / last 7, 14, 30 days (up to yesterday - today is only part-read in the morning) / custom
+/* TODAY (19 Nov 2026, Ayush: "every day a scheduler starts at 14:00 and pulls present day WhatsApp Template data - as it's
+   pulled a Today tab will appear, and at 00:00 the Today tab will disappear"). The cron 'wa-deliveries-today' (14:00 IST)
+   reads today's figures so far; the Today button shows from that read until the date changes at midnight. Meta's days are
+   UTC days, so "today" here runs from 05:30 IST to the 14:00 read. */
+function wadTodayOk(){
+  const t=WAD&&WAD.state&&WAD.state.last_sync_at; if(!t) return false;
+  const now=new Date(), today=wadIso(now), at14=new Date(today+'T14:00:00+05:30');
+  return now>=at14&&new Date(t)>=at14&&wadIso(new Date(t))===today;
+}
+// the chosen range: Today (after the 14:00 read) / Yesterday / last 7, 14, 30 days (up to yesterday) / custom
 function wadRange0(){
   const today=wadIso(new Date()), y=wadAdd(today,-1);
+  if(WAD_R.q==='today'&&!wadTodayOk()) WAD_R.q='y';   // past midnight the Today button is gone - show yesterday instead
+  if(WAD_R.q==='today') return {s:today,e:today};
   if(WAD_R.q==='y') return {s:y,e:y};
   if(WAD_R.q==='custom'&&WAD_R.from) return {s:WAD_R.from,e:WAD_R.to||WAD_R.from};
   const n=+WAD_R.q||30; return {s:wadAdd(today,-n),e:y};
@@ -347,7 +358,7 @@ function wadRange(){ return WAD_R.day?{s:WAD_R.day,e:WAD_R.day}:wadRange0(); }
 function wadShort(iso){ return new Date(iso+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'}); }
 function wadBar(){
   const r=wadRange0();
-  let h='<div class="wad-bar"><div class="wad-q">'+[['y','Yesterday'],['7','Last 7 days'],['14','Last 14 days'],['30','Last 30 days']].map(function(o){ return '<button class="'+(WAD_R.q===o[0]?'on':'')+'" onclick="wadQ(\''+o[0]+'\')">'+o[1]+'</button>'; }).join('')
+  let h='<div class="wad-bar"><div class="wad-q">'+(wadTodayOk()?[['today','Today']]:[]).concat([['y','Yesterday'],['7','Last 7 days'],['14','Last 14 days'],['30','Last 30 days']]).map(function(o){ return '<button class="'+(WAD_R.q===o[0]?'on':'')+'" onclick="wadQ(\''+o[0]+'\')">'+o[1]+'</button>'; }).join('')
     +'<button class="'+(WAD_R.q==='custom'?'on':'')+'" onclick="event.stopPropagation();wcalOpen()"><i class="fa-regular fa-calendar"></i>'+(WAD_R.q==='custom'&&WAD_R.from?esc(wadShort(r.s))+(r.s!==r.e?' – '+esc(wadShort(r.e)):''):'Custom')+'</button></div>'
     +'<span class="wad-rng">'+esc(fmtDate(r.s))+(r.s!==r.e?' – '+esc(fmtDate(r.e)):'')+'</span>';
   if(WCAL.open) h+=wcalHtml();
@@ -412,7 +423,7 @@ async function wadLoadAcc0(accId){
 }
 function wadAccFor(label){ const pn=function(x){ return String(x||'').toLowerCase().replace(/dream|by jain group/g,'').replace(/[^a-z0-9]/g,''); };
   return ((WAD&&WAD.acc)||[]).filter(function(a){ return pn(a.name)===pn(label); })[0]||null; }
-function wadNoData(){ return '<div class="wad-empty"><i class="fa-brands fa-whatsapp" style="font-size:22px;color:#16a34a"></i><div><b style="color:#0f172a">No WhatsApp figures here yet.</b><br>They are read from Meta every morning at 06:15 IST.</div></div>'; }
+function wadNoData(){ return '<div class="wad-empty"><i class="fa-brands fa-whatsapp" style="font-size:22px;color:#16a34a"></i><div><b style="color:#0f172a">No WhatsApp figures here yet.</b><br>They are read from Meta every morning at 06:15 IST, and today so far at 14:00 IST.</div></div>'; }
 function knBranch(n){ n=String(n).toLowerCase(); return /_yes_/.test(n)?1:/_no_/.test(n)?2:/_silent_/.test(n)?3:0; }
 function knStep(n){ const m=String(n).match(/q(\d+)/i); return m?+m[1]:0; }
 function knLabel(n){ const b=['First knock','Said Yes','Said No','No reply'][knBranch(n)], q=knStep(n); return knBranch(n)===0?'First knock':b+(q?' · Q'+q:''); }

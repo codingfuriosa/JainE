@@ -121,6 +121,24 @@ async function hasReach() {
   if (HAS_REACH === null) { const { error } = await db.from('ads_ad_daily').select('reach').limit(1); HAS_REACH = !error; }
   return HAS_REACH;
 }
+/* VIDEO PLAYS AND START DATES (18 Nov 2026, Ayush: the Facebook Ads tab's ThumbStop %, 25 / 50 / 75 / 100% plays, Started).
+   Per ad and day: plays started (video_play_actions), 3-second plays (actions video_view - the "thumb stop"), and plays
+   watched to 25 / 50 / 75 / 100%. An ad's created time goes on its ads_entities row. Written only once the columns exist
+   (migration 20261118203000); if Meta will not give the video fields the read goes on without them. */
+let HAS_VIDEO: boolean | null = null, HAS_CT: boolean | null = null, fbVideoOk = true;
+async function hasVideo() {
+  if (HAS_VIDEO === null) { const { error } = await db.from('ads_ad_daily').select('v_plays').limit(1); HAS_VIDEO = !error; }
+  return HAS_VIDEO;
+}
+async function hasCreated() {
+  if (HAS_CT === null) { const { error } = await db.from('ads_entities').select('created_time').limit(1); HAS_CT = !error; }
+  return HAS_CT;
+}
+const VF = ',video_play_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions';
+function actSum(list: any, type?: string) {
+  if (!Array.isArray(list)) return 0;
+  return list.reduce((t: number, x: any) => (x && (!type || x.action_type === type) ? t + num(x.value) : t), 0);
+}
 async function hasImpShare() {
   if (HAS_IS === null) { const { error } = await db.from('ads_daily').select('budget_lost_is').limit(1); HAS_IS = !error; }
   return HAS_IS;
@@ -241,15 +259,21 @@ async function fbRead(acc: string, s: string, e: string) {
     + `&time_range=${encodeURIComponent(JSON.stringify({ since: s, until: e }))}&access_token=${META_TOKEN}`;
   const withReach = await hasReach(), rf = withReach ? ',reach,frequency' : '';
   const camp = await fbInsights(base + '&level=campaign', 'campaign_id,spend,impressions,clicks,actions' + rf);
-  const ads = await fbInsights(base + '&level=ad', 'ad_id,adset_id,campaign_id,spend,impressions,clicks,actions' + rf);
+  let withVid = fbVideoOk && await hasVideo(), ads: any[];
+  if (withVid) {
+    try { ads = await fbInsights(base + '&level=ad', 'ad_id,adset_id,campaign_id,spend,impressions,clicks,actions' + rf + VF); }
+    catch (e) { if (!/video|\(#100\)|code 100/i.test(String((e as Error).message))) throw e; fbVideoOk = false; withVid = false; console.log('meta: no video fields - ' + String((e as Error).message).slice(0, 160)); ads = await fbInsights(base + '&level=ad', 'ad_id,adset_id,campaign_id,spend,impressions,clicks,actions' + rf); }
+  } else ads = await fbInsights(base + '&level=ad', 'ad_id,adset_id,campaign_id,spend,impressions,clicks,actions' + rf);
   const withSet = await hasAdset();
   const now = new Date().toISOString();
   const rfOf = (r: any) => (withReach ? { reach: r.reach != null ? num(r.reach) : null, frequency: r.frequency != null ? num(r.frequency) : null } : {});
+  const vOf = (r: any) => (withVid ? { v_plays: actSum(r.video_play_actions), v_3s: actSum(r.actions, 'video_view'), v_p25: actSum(r.video_p25_watched_actions),
+    v_p50: actSum(r.video_p50_watched_actions), v_p75: actSum(r.video_p75_watched_actions), v_p100: actSum(r.video_p100_watched_actions) } : {});
   const cRows = camp.filter((r) => r.campaign_id && r.date_start).map((r) => ({ platform: 'meta', account_id: acc, campaign_id: r.campaign_id, day: r.date_start,
     spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), ...rfOf(r), synced_at: now }));
   const aRows = ads.filter((r) => r.ad_id && r.date_start).map((r) => ({ platform: 'meta', account_id: acc, campaign_id: r.campaign_id || null, ad_id: r.ad_id, day: r.date_start,
     ...(withSet ? { adset_id: r.adset_id || null } : {}),
-    spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), ...rfOf(r), synced_at: now }));
+    spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), results: fbResult(r), ...rfOf(r), ...vOf(r), synced_at: now }));
   await replaceDays('ads_daily', 'meta', acc, s, e, cRows, 'platform,campaign_id,day');
   await writeAdDays('meta', acc, s, e, aRows.map((r: any) => ({ ...r, adset_id: r.adset_id || '' })), aRows);
   return cRows.length + aRows.length;
@@ -283,7 +307,8 @@ async function fbEntities(acc: string) {
      uploaded with a video (object_story_spec.video_data.image_url), a link ad's picture, the first image of a dynamic
      (asset feed) ad, and for a video with none of these the video's own preferred frame at its own shape. The square
      thumbnail is the last resort. */
-  const ads = await fbAll(`https://graph.facebook.com/${FBV}/act_${acc}/ads?fields=id,name,campaign_id,effective_status,creative.thumbnail_width(640).thumbnail_height(640){thumbnail_url,image_url,image_hash,body,title,video_id,object_story_spec{video_data{image_url,video_id},link_data{picture,image_hash}},asset_feed_spec{images{url,hash},videos{video_id,thumbnail_url}},effective_object_story_id}&limit=200${tok}`);
+  const withCt = await hasCreated();
+  const ads = await fbAll(`https://graph.facebook.com/${FBV}/act_${acc}/ads?fields=id,name,campaign_id,effective_status${withCt ? ',created_time' : ''},creative.thumbnail_width(640).thumbnail_height(640){thumbnail_url,image_url,image_hash,body,title,video_id,object_story_spec{video_data{image_url,video_id},link_data{picture,image_hash}},asset_feed_spec{images{url,hash},videos{video_id,thumbnail_url}},effective_object_story_id}&limit=200${tok}`);
   const full: Record<string, string> = {}, needVid: Record<string, string[]> = {}, needHash: Record<string, string[]> = {};
   for (const a of ads) {
     const cr = a.creative || {}, os = cr.object_story_spec || {}, af = cr.asset_feed_spec || {};
@@ -334,7 +359,7 @@ async function fbEntities(acc: string) {
   for (const a of ads) {
     const cr = a.creative || {};
     rows.push({ platform: 'meta', kind: 'ad', id: a.id, account_id: acc, campaign_id: a.campaign_id || null, name: a.name, status: a.effective_status || null,
-      thumbnail: full[a.id] || cr.thumbnail_url || null, body: [cr.title, cr.body].filter(Boolean).join(' - ') || null, updated_at: now });
+      thumbnail: full[a.id] || cr.thumbnail_url || null, body: [cr.title, cr.body].filter(Boolean).join(' - ') || null, ...(withCt ? { created_time: a.created_time || null } : {}), updated_at: now });
   }
   await upsertEntities(rows);
 }
@@ -693,6 +718,15 @@ Deno.serve(async (req) => {
   if (body.accounts && platform === 'google') {
     const rows = await gaql(G_LOGIN || G_CUSTS[0], 'SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, customer_client.status FROM customer_client');
     return j({ ok: true, accounts: rows.map((x: any) => ({ id: String(x.customerClient.id), name: x.customerClient.descriptiveName, manager: !!x.customerClient.manager, status: x.customerClient.status })) });
+  }
+  /* ONE ACCOUNT, ONE PERIOD AFRESH ({platform:'meta', range:{account, from, to, entities?}}; 18 Nov 2026): re-reads that
+     account's days from Meta (in 10-day pieces) - used once to fill the new video columns back - and, with entities,
+     its names / pictures / start dates. */
+  if (body.range && platform === 'meta') {
+    const acc = String(body.range.account || '').replace(/\D/g, ''), f = String(body.range.from || ''), t = String(body.range.to || '');
+    if (!acc || !/^\d{4}-\d{2}-\d{2}$/.test(f) || !/^\d{4}-\d{2}-\d{2}$/.test(t)) return j({ error: 'range: account, from, to' }, 400);
+    try { const n = await fbReadPieces(acc, f, t); if (body.range.entities) await fbEntities(acc); return j({ ok: true, rows: n, video: fbVideoOk && !!HAS_VIDEO, created: !!HAS_CT }); }
+    catch (e) { return j({ ok: false, error: String((e as Error).message || e).slice(0, 400) }); }
   }
   if (body.hourly) return j(await hourly(platform, Math.min(60, Math.max(7, +body.hourly.days || 28))));
   const { data: log } = await db.from('ads_sync_log').insert({ platform }).select('id').single();

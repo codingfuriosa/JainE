@@ -132,6 +132,9 @@ async function ciTabView(host,tab,scope,route){
    "Fetch next now" button and the Collection log below it, as asked on 16 Oct 2026. */
 const CI_SOURCE_LABEL={google_ads:'Google Ads',gads_detail:'Google ad contents',rera_list:'RERA project list',rera_detail:'RERA project pages',trends:'Google Trends'};
 async function ciStatus(sources,blurb,extra){
+  // Jain Group Google Ads on Competitor Data (18 Nov 2026, Ayush: "remove this"): no paragraph, no Fetch button, no
+  // "updated automatically" line and no collection log - just the ads
+  if(CI_ROUTE==='competitors/jg-google'){ const el=$('ciRuns'); if(el) el.innerHTML=''; return; }
   const {data}=await sb.schema('camp').from('pi_runs').select('finished_at').in('source',sources).eq('ok',true).order('finished_at',{ascending:false}).limit(1);
   const last=data&&data[0]&&data[0].finished_at;
   const btn=CI_SCOPE!=='competitor'?sources.filter(function(s){ return s!=='rera_list'&&s!=='gads_detail'; })[0]:null;

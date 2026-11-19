@@ -35,7 +35,7 @@ const NAV=[
   {group:'Governance',items:[
     {id:'finance',label:'Finance Vault',icon:'fa-indian-rupee-sign'},
     {id:'accounts',label:'Accounts',icon:'fa-calculator'},
-    {id:'legal2',label:'Legal 2',icon:'fa-scale-balanced'},
+    {id:'legal2',label:'Legal',icon:'fa-scale-balanced'},
     {id:'compliance',label:'Renewals & Compliance',icon:'fa-calendar-check'},
   ]},
   {group:'Growth & Strategy',items:[
@@ -119,9 +119,13 @@ function expandModules(ss){
   });
   if(ss.has('custportal_photos')||ss.has('custportal_photo_approver')||ss.has('custportal_photo_backup')) ss.add('custportal_admin');
   if(ss.has('campaigns')) ss.add('wa_templates');   // WhatsApp Templates: everyone with Campaign Analytics (17 Nov 2026)
+  if(ss.has('competitors_jg')) ss.add('competitors');   // Competitor Data, Jain Group tabs only (18 Nov 2026) - see cdJgOnly()
   ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
+/* 'competitors_jg' = Competitor Data limited to its Jain Group Fb Ads and Jain Group Google Ads tabs (18 Nov 2026). Someone who
+   also holds 'competitors' sees all four. */
+function cdJgOnly(){ if(state.super)return false; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('competitors_jg')!==-1&&m.indexOf('competitors')===-1; }
 /* 'custportal_photos' = Customer Portal Admin limited to its Photos & Videos tab. The database
    enforces the same boundary (app.is_custportal_media_editor): such an account can write the four
    photo tables and read project names and a bare flat list, and nothing else in cust.*. */

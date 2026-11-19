@@ -10,7 +10,10 @@
    Each step down filters the figures and the ads; the trail at the top of the platform section goes back up.
    Data: camp.ads_daily / ads_ad_daily via the RPCs and helpers of 41-our-brand-ads.js (obRange, obIsLead ...).
    Ad sets come from ads_ad_daily.adset_id, recorded from 6 Nov 2026 (migration 20261106200000). */
-let CA={proj:'all',open:null,plat:null,camp:null,adset:null,showAds:12,cmp:{on:false,period:'prev',from:'',to:''}};
+/* WHERE YOU WERE (18 Nov 2026, Ayush: "a reload opens Campaigns instead of where I was working"): the tab, the open project and
+   the open platform are kept in this browser and come back after a reload. */
+const CA_WHERE=(function(){ try{ return JSON.parse(localStorage.getItem('caWhere')||'{}')||{}; }catch(e){ return {}; } })();
+let CA={proj:'all',open:CA_WHERE.open||null,plat:CA_WHERE.plat||null,camp:null,adset:null,showAds:12,cmp:{on:false,period:'prev',from:'',to:''}};
 let CA_D=null;   // the period's data: {acc, ent, cur, prev, ads, hasSets}
 const CA_PLAT={google:{name:'Google',icon:'fa-brands fa-google',color:'#ea4335',res:'Leads',per:'Cost per lead',set:'Ad group',sets:'Ad groups'},
                meta:{name:'Facebook',icon:'fa-brands fa-facebook',color:'#1877f2',res:'Leads & chats',per:'Cost per lead',set:'Ad set',sets:'Ad sets'}};
@@ -39,7 +42,9 @@ const CA_CSS='<style>'
   +'.ca-tbl th.ca-crm{color:#6d28d9;background:#f5f3ff}'
   +'.ca-sec .ca-tbl td.ca-nm,.ca-sec .ca-tbl th.ca-nm{width:340px;min-width:340px;max-width:340px}.ca-nmx{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
   +'.ca-sub{font-size:10.5px;color:#94a3b8;margin-top:1px;white-space:nowrap}'
-  +'.ca-stg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}.ca-st{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;font-size:12.5px;font-weight:600;color:#334155;cursor:pointer;border-right:1px solid var(--line)}.ca-st:last-child{border-right:0}.ca-st input{margin:0;accent-color:#2563eb}.ca-st.on{background:#eef4ff;color:#1d4ed8}'
+  // 18 Nov 2026 (Ayush: "when I choose Custom it goes to a 2nd line"): narrower date boxes and gaps keep the strip on one line
+  +'.ob-bar{gap:8px}.ob-bar input[type=date]{width:120px;padding:0 4px 0 8px;font-size:12.5px}'
+  +'.ca-stg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}.ca-st{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;font-size:12.5px;font-weight:600;color:#334155;cursor:pointer;border-right:1px solid var(--line)}.ca-st:last-child{border-right:0}.ca-st input{margin:0;accent-color:#2563eb}.ca-st.on{background:#eef4ff;color:#1d4ed8}'
   // a video ad's card: a play mark over its picture (17 Nov 2026)
   // the card's figures two pairs to a line, so every card is short and the same height (17 Nov 2026, Ayush); the picture
   // stays the fixed 190 px, cropped to fill (41-our-brand-ads.js)
@@ -122,7 +127,7 @@ function caShareBar(){
   if(!CA_SHARE.loaded&&!CA_SHARE.busy){ CA_SHARE.busy=true; caShareCall({action:'status'}).then(function(t){ CA_SHARE.on=!!t.on; CA_SHARE.token=t.token||null; }).catch(function(){}).then(function(){ CA_SHARE.loaded=true; CA_SHARE.busy=false; if(CA_D) caPaint(); }); }
   return '<span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">'
     +'<label class="ca-sw'+(CA_SHARE.on?' on':'')+'" title="Anyone with the link can see the campaign report while this is on"><input type="checkbox"'+(CA_SHARE.on?' checked':'')+(CA_SHARE.loaded?'':' disabled')+' onchange="caShareSet(this.checked)"><span class="k"></span>Public link</label>'
-    +'<button class="btn btn-sm" style="height:32px" onclick="caShareCopy()"'+(CA_SHARE.token?'':' disabled title="Switch the public link on first"')+'><i class="fa-regular fa-copy"></i> Copy link</button></span>';
+    +'<button class="btn btn-sm" style="height:32px;width:36px;padding:0;justify-content:center;gap:0" onclick="caShareCopy()"'+(CA_SHARE.token?' title="Copy the public link"':' disabled title="Switch the public link on first"')+'><i class="fa-regular fa-copy"></i></button></span>';
 }
 window.caShareSet=async function(on){
   try{ const t=await caShareCall({action:'set',on:!!on}); CA_SHARE.on=!!t.on; CA_SHARE.token=t.token||null; toast(t.on?'Public link is on - anyone with the link can see the report':'Public link is off - the link now shows nothing','ok'); }
@@ -153,18 +158,19 @@ function caLeads(x){ return obNum(x,0); } // whole numbers everywhere (14 Nov 20
 
 /* TWO TABS (16 Nov 2026, Ayush: "make a new Tab named Analytics"): Overview (this page as it was) and Analytics
    (45-marketing-analytics.js - the models). */
-let CA_TAB='overview';
+let CA_TAB=['overview','ads','audience','checklist','analytics'].indexOf(CA_WHERE.tab)>=0?CA_WHERE.tab:'overview';
+function caKeepWhere(){ try{ localStorage.setItem('caWhere',JSON.stringify({tab:CA_TAB,open:CA.open,plat:CA.plat})); }catch(e){} }
 async function caView(host){
   host.innerHTML=OB_CSS+CA_CSS+MA_CSS+'<div class="ca-tabs" id="caTabs"></div><div id="caMain"></div>';
   caTabsPaint(); await caShowTab();
 }
 function caTabsPaint(){ const t=$('caTabs'); if(!t) return;
   // 17 Nov 2026 (Ayush): Overview renamed Campaigns; a new Ads tab - the same page, read from the ad upwards
-  t.innerHTML=[['overview','Campaigns'],['ads','Ads'],['analytics','Analytics']].map(function(x){ return '<button class="ca-tab'+(CA_TAB===x[0]?' on':'')+'" onclick="caTab(\''+x[0]+'\')">'+x[1]+'</button>'; }).join(''); }
+  t.innerHTML=[['overview','Campaigns'],['ads','Ads'],['audience','Audience'],['checklist','Checklist'],['analytics','Analytics']].map(function(x){ return '<button class="ca-tab'+(CA_TAB===x[0]?' on':'')+'" onclick="caTab(\''+x[0]+'\')">'+x[1]+'</button>'; }).join(''); }
 window.caTab=function(t){ if(t===CA_TAB) return;
   // Campaigns <-> Ads share the loaded data: only the table is drawn again
   if(t!=='analytics'&&CA_TAB!=='analytics'&&CA_D&&$('caBody')){ CA_TAB=t; caTabsPaint(); caPaint(); return; }
-  CA_TAB=t; caTabsPaint(); caShowTab(); };
+  CA_TAB=t; caKeepWhere(); caTabsPaint(); caShowTab(); };
 async function caShowTab(){
   const m=$('caMain'); if(!m) return;
   if(CA_TAB==='analytics') return maView(m);
@@ -219,7 +225,9 @@ async function caLoad(){
   const cmp=CA.cmp.on&&!caCmpSame(), c=cmp?caCmpRange():{s:r.ps,e:r.pe};
   if(CA_D) $('caBody').style.opacity='.55';
   // v4 (16 Nov 2026): an ad's figures per campaign and ad group, so an ad copied into another campaign counts in each
-  const ads=async function(p,s,e){ const v4=await rpc('ads_ad_totals_v4',{p_platform:p,p_from:s,p_to:e,p_limit:5000}); if(!v4.error) return {rows:v4.data||[],sets:true};
+  // v5 (18 Nov 2026 night): v4 + video plays (25 / 50 / 75 / 100%, 3-second) and the first / last day the ad ran in the period
+  const ads=async function(p,s,e){ const v5=await rpc('ads_ad_totals_v5',{p_platform:p,p_from:s,p_to:e,p_limit:5000}); if(!v5.error) return {rows:v5.data||[],sets:true,video:true};
+    const v4=await rpc('ads_ad_totals_v4',{p_platform:p,p_from:s,p_to:e,p_limit:5000}); if(!v4.error) return {rows:v4.data||[],sets:true};
     const v3=await rpc('ads_ad_totals_v3',{p_platform:p,p_from:s,p_to:e,p_limit:5000}); if(!v3.error) return {rows:v3.data||[],sets:true};
     const v=await rpc('ads_ad_totals_v2',{p_platform:p,p_from:s,p_to:e,p_limit:5000});
     if(!v.error) return {rows:v.data||[],sets:true};
@@ -309,6 +317,7 @@ async function caLoad(){
     D0.raw.ads=tag('meta',L[0].rows).concat(tag('google',L[1].rows)); D0.hasSets=L[0].sets&&L[1].sets;
     if(D0.cmp) D0.raw.cmpAds=tag('meta',L[2].rows).concat(tag('google',L[3].rows));
     D0.raw.crmSet=L[4]==null?null:{cur:L[4],prev:L[5]||[]};
+    D0.video=!!L[0].video;
     D0.adsLoading=false; caStatusApply(); caPaint(); });
 }
 // every project with an account on either platform, the biggest spender first
@@ -322,6 +331,8 @@ function caProjects(){
    Every row has the same columns; only the indent and the caret say how deep it is. The ads of whatever
    is open sit under the table and narrow as you go down. */
 function caPaint(){
+  caKeepWhere();
+  if(CA_TAB==='checklist'){ ckPaint(); return; }   // the Checklist tab is the alerts layout (ckPaint), not the projects table
   const r=obRange(), P=caProjects(), E=CA_D.ent; window._caP=P;
   if(CA.proj!=='all'&&P.indexOf(CA.proj)===-1) CA.proj='all';
   const C=CA.cmp, same=caCmpSame(), cmpOn=C.on&&!same&&!!CA_D.cmp, cr=C.on?caCmpRange():null;
@@ -329,14 +340,14 @@ function caPaint(){
   const sel=function(id,list,cur,onch,off){ return '<select class="comp-sel" id="'+id+'" onchange="'+onch+'">'+list.map(function(o){
     const dis=off&&off!=='custom'&&o[0]===off; return '<option value="'+o[0]+'"'+(String(cur)===String(o[0])?' selected':'')+(dis?' disabled':'')+'>'+esc(o[1])+(dis?' (chosen on the other side)':'')+'</option>'; }).join('')+'</select>'; };
   $('caHead').innerHTML='<div class="ob-bar">'
-    +sel('caPer',OB_PERIODS,OB_P.period,"OB_P.period=this.value;caReset();caLoad()",C.on?C.period:null)
-    +(OB_P.period==='custom'?'<input type="date" value="'+esc(r.s)+'" onchange="OB_P.from=this.value;caLoad()"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(r.e)+'" onchange="OB_P.to=this.value;caLoad()">':'')
+    +caPerPicker(C.on?C.period:null)
+    +(OB_P.period==='custom'?'<input type="date" value="'+esc(r.s)+'" onchange="OB_P.from=this.value;caLoad()"><span style="color:var(--slate)">–</span><input type="date" value="'+esc(r.e)+'" onchange="OB_P.to=this.value;caLoad()">':'')
     +'<span class="ca-stg">'+[['active','Active'],['inactive','Inactive'],['both','Both']].map(function(o){ return '<label class="ca-st'+(CA_ST===o[0]?' on':'')+'"><input type="radio" name="caSt"'+(CA_ST===o[0]?' checked':'')+' onchange="caSt(\''+o[0]+'\')">'+o[1]+'</label>'; }).join('')+'</span>'
     // 17 Nov 2026 (Ayush): the projects dropdown and the dates line under the bar removed to save space - the dates show on
     // hover over the period, and in Compare mode beside "with"
     +'<label class="ca-sw'+(C.on?' on':'')+'" title="Compare with another period"><input type="checkbox"'+(C.on?' checked':'')+' onchange="caCmpToggle(this.checked)"><span class="k"></span>Compare</label>'
     +(C.on?'<span style="color:var(--slate);font-size:12.5px" title="'+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+' vs '+esc(fmtDate(cr.s))+' – '+esc(fmtDate(cr.e))+'">with</span>'+sel('caCmpPer',CA_CMP_OPTS,C.period,"caCmpPick(this.value)",OB_P.period)
-      +(C.period==='custom'?'<input type="date" value="'+esc(cr.s)+'" onchange="CA.cmp.from=this.value;caLoad()"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(cr.e)+'" onchange="CA.cmp.to=this.value;caLoad()">':''):'')
+      +(C.period==='custom'?'<input type="date" value="'+esc(cr.s)+'" onchange="CA.cmp.from=this.value;caLoad()"><span style="color:var(--slate)">–</span><input type="date" value="'+esc(cr.e)+'" onchange="CA.cmp.to=this.value;caLoad()">':''):'')
     +caShareBar()+'</div>'
     +(C.on&&same?'<div class="ca-warn"><i class="fa-solid fa-triangle-exclamation"></i> Both sides are the same dates ('+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+'). Pick a different period to compare with.</div>':'');
   CA.proj='all';
@@ -358,10 +369,10 @@ function caPaint(){
   const cols=function(t,w,x){ w=w||{};
     return cell(t.spend,w.spend,obMoney,null,true)
       +(cmpOn?cell(t.ln,w.ln,function(v){ return caLeads(v,t.pl); },true).replace('</td>',(t.tag||'')+'</td>'):'<td>'+t.lead+'</td>')
-      +crmPart(x,'a')+cell(t.cpl,w.cpl,obMoney,false)+crmPart(x,'b')+cell(t.clicks,w.clicks,obNum,true)+cell(t.ctr,w.ctr,obPct,true)+crmPart(x,'c'); };
-  const sum=function(rows,pl){ const a=caAgg(rows); return {spend:a.spend,ln:a.leads,pl:pl,lead:caLeads(a.leads,pl),cpl:a.cpl,clicks:a.clicks,ctr:a.ctr,fl:a.hasForm?a.form:null}; };
+      +crmPart(x,'a')+cell(t.cpl,w.cpl,obMoney,false)+crmPart(x,'b')+(fbX?xCells(t,w,fbX):cell(t.clicks,w.clicks,obNum,true)+cell(t.ctr,w.ctr,obPct,true))+crmPart(x,'c'); };
+  const sum=function(rows,pl){ const a=caAgg(rows); return {spend:a.spend,ln:a.leads,pl:pl,lead:caLeads(a.leads,pl),cpl:a.cpl,clicks:a.clicks,ctr:a.ctr,imp:a.impr,fl:a.hasForm?a.form:null}; };
   const raw=function(x,pl,lead){ x=x||{}; const s=+x.spend||0, rr=x.results==null&&x.spend!=null?null:+x.results||0, tag=lead===false?' <span class="tag t-gray" style="font-size:10px">not leads</span>':'';
-    return {spend:s,ln:rr,pl:pl==='google'?'google':'meta',tag:tag,lead:(rr==null?'<span style="color:#94a3b8" title="Google leads per ad group are read from 13 Nov 2026 night">—</span>':obNum(rr,0))+tag,cpl:rr?s/rr:null,clicks:+x.clicks||0,ctr:+x.impressions?x.clicks/x.impressions*100:null,fl:x.form_leads!=null?+x.form_leads:null}; };
+    return {spend:s,ln:rr,pl:pl==='google'?'google':'meta',tag:tag,lead:(rr==null?'<span style="color:#94a3b8" title="Google leads per ad group are read from 13 Nov 2026 night">—</span>':obNum(rr,0))+tag,cpl:rr?s/rr:null,imp:+x.impressions||0,clicks:+x.clicks||0,ctr:+x.impressions?x.clicks/x.impressions*100:null,fl:x.form_leads!=null?+x.form_leads:null}; };
   const prev=CA_D.prev||[];
   /* CRM COLUMNS (10 Nov 2026, Ayush): beside the platforms' own leads, the CRM's count of the Google leads left after
      its filtering, so the two can be compared - and how far they got: QL% (qualified of CRM leads), CPQL (Google spend
@@ -373,14 +384,31 @@ function caPaint(){
   // the spend the CRM's leads are set against: Google's, Facebook's, or both (src empty)
   const gSpend=function(list,pred,src){ const plat=src==='facebook'?'meta':src; return (list||[]).reduce(function(t,c){ return (!plat||c.platform===plat)&&pred(c)?t+(+c.spend||0):t; },0); };
   const pc0=function(x){ return x==null||!isFinite(x)?'—':x.toFixed(0)+'%'; };
+  // the Ads tab has no QL to SV % (18 Nov 2026, Ayush: "the last column QL to SV % is not required"); set while it is drawn
+  let noSvp=false;
+  /* THE COLUMNS DROPDOWN (18 Nov 2026, Ayush: "Frequency, Reach, Impressions, CPM, CPC, CTR, Clicks - hidden by default, a dropdown
+     where more than one column can be shown or hidden, for both tabs, Facebook only; in Ads CTR, Impressions, Reach won't be
+     there"). fbX = the extra columns picked for the Facebook section being drawn (null = the usual Clicks and CTR). */
+  let fbX=null;
+  const xHead=function(list){ return list.map(function(k){ return '<th>'+CA_XC_NAMES[k]+'</th>'; }).join(''); };
+  const rCell=function(R,fmt){ if(!R) return '<td><span style="color:#94a3b8">—</span></td>'; if(R.st==='load') return '<td title="Asking Meta for the reach of these dates"><i class="fa-solid fa-spinner fa-spin" style="color:#94a3b8;font-size:11px"></i></td>';
+    if(R.st==='err'||R.v==null) return '<td title="'+esc(R.why||'No reach from Meta for these dates')+'"><span style="color:#94a3b8">—</span></td>'; return '<td>'+fmt(R.v)+'</td>'; };
+  const xCells=function(t,w,list){ w=w||{}; return list.map(function(k){ const imp=t.imp, sp=t.spend;
+    if(k==='freq') return rCell(t.rk,function(v){ return v&&imp?(imp/v).toFixed(2):'—'; });
+    if(k==='reach') return rCell(t.rk,function(v){ return obNum(v); });
+    if(k==='imp') return cell(imp,w.imp,obNum,true);
+    if(k==='cpm') return cell(imp&&sp!=null?sp/imp*1000:null,w.imp&&w.spend!=null?w.spend/w.imp*1000:null,obMoney,false);
+    if(k==='cpc') return cell(t.clicks&&sp!=null?sp/t.clicks:null,w.clicks&&w.spend!=null?w.spend/w.clicks:null,obMoney,false);
+    if(k==='ctr') return cell(t.ctr,w.ctr,obPct,true);
+    return cell(t.clicks,w.clicks,obNum,true); }).join(''); };
   const crmPart=function(x,which){
     if(!x) return '';
-    const n={a:5,b:2,c:2}[which];
+    const n={a:5,b:2,c:noSvp?1:2}[which];
     if(!CR||x.why){ const why=!CR?'CRM figures are read at night - they show from the next morning':x.why; let h='';
       for(let i=0;i<n;i++) h+='<td class="ca-crm" title="'+esc(why)+'"><span style="color:#94a3b8">—</span></td>'; return h; }
     const t=x.t, w=x.w||{};
     const h=which==='a'?cell(t.leads,w.leads,obNum,true,true)+cell(t.ql,w.ql,obNum,true)+cell(t.sv,w.sv,obNum,true)+cell(t.bk,w.bk,obNum,true)+cell(t.lost,w.lost,obNum,false)
-      :which==='b'?cell(t.cplc,w.cplc,obMoney,false)+cell(t.cpql,w.cpql,obMoney,false):cell(t.qlp,w.qlp,pc0,true)+cell(t.svp,w.svp,pc0,true);
+      :which==='b'?cell(t.cplc,w.cplc,obMoney,false)+cell(t.cpql,w.cpql,obMoney,false):cell(t.qlp,w.qlp,pc0,true)+(noSvp?'':cell(t.svp,w.svp,pc0,true));
     return h.replace(/<td>/g,'<td class="ca-crm">'); };
   // sp: which ad rows' spend goes against these leads, when it is not the same test (a WhatsApp campaign)
   const crmX=function(pred,src,sp){ if(!CR) return {}; if(src==='facebook'&&!CR.cur.some(function(x){ return x.src==='facebook'; })) return {why:'No Facebook figures from the CRM yet for these dates - they are read at night and show from the next morning'}; const p2=function(x){ return (!src||x.src===src)&&pred(x); }, ps=sp||pred;
@@ -398,8 +426,8 @@ function caPaint(){
   const ct=function(t,title){ return '<th class="ca-crm" title="'+esc(title)+'">'+t+'</th>'; };
   const head=function(name,res,cpl,crm){ return '<tr><th class="ca-nm">'+name+'</th><th title="Daily budget as set today">Daily budget</th><th>Spend</th><th>'+res+'</th>'
     +(crm?ct('CRM leads','Google and Facebook leads in the CRM after its filtering')+ct('QL','Qualified leads (CRM)')+ct('SV','Site visits (CRM)')+ct('Booked','Booked (CRM)')+ct('Lost','Lost (CRM)'):'')
-    +'<th>'+cpl+'</th>'+(crm?ct('CRM CPL','Spend per CRM lead - the cost per lead counted on the CRM\x27s leads, not the platform\x27s')+ct('CPQL','Spend per qualified lead (CRM)'):'')+'<th>Clicks</th><th>CTR</th>'
-    +(crm?ct('QL%','Qualified leads as a share of CRM leads')+ct('QL to SV %','Site visits as a share of qualified leads'):'')+'</tr>'; };
+    +'<th>'+cpl+'</th>'+(crm?ct('CRM CPL','Spend per CRM lead - the cost per lead counted on the CRM\x27s leads, not the platform\x27s')+ct('CPQL','Spend per qualified lead (CRM)'):'')+(fbX?xHead(fbX):'<th>Clicks</th><th>CTR</th>')
+    +(crm?ct('QL%','Qualified leads as a share of CRM leads')+(noSvp?'':ct('QL to SV %','Site visits as a share of qualified leads')):'')+'</tr>'; };
   // a name never wraps: it stops at the column's width with "...", the whole name on hover
   const nm=function(lead,text){ return '<td class="ca-nm"><span class="ca-nmx" title="'+esc(text)+'">'+lead+esc(text)+'</span></td>'; };
   const money=function(v){ return '<td>'+(v==null?'<span style="color:#94a3b8">—</span>':obMoney(v))+'</td>'; };
@@ -414,7 +442,21 @@ function caPaint(){
     const camps=CA_D.cur.filter(function(c){ return c.project===p&&c.platform===pl&&caAct(c); }).sort(function(a,b){ return b.spend-a.spend; });
     const was=function(id){ return prev.filter(function(x){ return x.platform===pl&&x.campaign_id===id; }); };
     const setsOf=function(list,cid){ const g={}; list.forEach(function(a){ if(a.platform!==pl||a.campaign_id!==cid||!a.adset_id) return; const x=g[a.adset_id]||(g[a.adset_id]={adset_id:a.adset_id,spend:0,results:null,clicks:0,impressions:0}); x.spend+=+a.spend||0; if(a.results!=null) x.results=(x.results||0)+(+a.results); x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; }); return g; };
-    const nc=7+NCRM;
+    fbX=pl==='meta'?caXcList('camp'):null;
+    const nc=7+NCRM+(fbX?fbX.length-2:0);
+    // Reach / Frequency picked: asked from Meta for exactly these dates (ad-reach), campaigns, ad sets and ads of the section
+    const needR=!!fbX&&(fbX.indexOf('freq')>=0||fbX.indexOf('reach')>=0), SK='sec|'+[r.s,r.e,p,CA_ST].join('|');
+    window._caReach=window._caReach||{};
+    if(needR&&camps.length&&!CA_D.adsLoading){ const b0=window._caReach[SK]; if(!b0||b0.at<Date.now()-600000){
+      const req={from:r.s,to:r.e,accounts:{},groups:{}}, accOf=function(id){ return req.accounts[id]||(req.accounts[id]={ad:[],adset:[],campaign:[]}); }, inC={}, ss={}, aa={};
+      Object.keys(CA_D.acc).forEach(function(k){ if(k.indexOf('meta:')===0&&CA_D.acc[k].project===p) accOf(k.slice(5)); });
+      camps.forEach(function(c){ inC[c.campaign_id]=1; accOf(c.account_id).campaign.push(c.campaign_id); });
+      CA_D.ads.forEach(function(a){ if(a.platform!=='meta'||!inC[a.campaign_id]) return; if(a.adset_id&&!ss[a.adset_id]){ ss[a.adset_id]=1; accOf(a.account_id).adset.push(a.adset_id); } if(!aa[a.ad_id]){ aa[a.ad_id]=1; accOf(a.account_id).ad.push(a.ad_id); } });
+      window._caReach[SK]={st:'load',at:Date.now()}; caReachLoad(SK,req); } }
+    const rS=function(level,id){ if(!needR) return null; const b=window._caReach[SK]; if(!b||b.st==='load') return {st:'load'}; if(b.st==='err') return {st:'err',why:b.why};
+      if(level==='total'){ let t0=null; Object.keys(b.d.account||{}).forEach(function(a){ t0=(t0||0)+(+b.d.account[a]); }); return {st:'ok',v:t0}; }
+      const v=(b.d[level]||{})[id]; return {st:'ok',v:v==null?null:+v}; };
+    const RX=function(t,level,id){ if(fbX) t.rk=rS(level,id); return t; };
     const waOne=pl==='meta'&&camps.filter(function(c){ return isWa(c.campaign_id); }).length===1;
     let sec='';
     camps.forEach(function(c){
@@ -422,7 +464,7 @@ function caPaint(){
       const src=pl==='google'?'google':'facebook';
       // one WhatsApp campaign in the project: the CRM's WhatsApp count is all its own (14 Nov 2026)
       const cx=pl==='meta'&&isWa(c.campaign_id)&&waOne?crmX(function(x){ return x.wa&&x.project===p; },'facebook',function(x){ return x.campaign_id===c.campaign_id; }):pl==='meta'&&isWa(c.campaign_id)?crmNo('A WhatsApp campaign: the CRM counts all WhatsApp campaigns of a project together - they are in the Facebook row above'):crmX(function(x){ return x.campaign_id===c.campaign_id; },src);
-      sec+='<tr class="ca-row ca-l0'+(con?' ca-on':'')+'" onclick="caCamp(\''+c.campaign_id+'\')">'+nm(caret(con)+caDot(e.status),e.name||c.campaign_id)+(cBud(c.campaign_id)==null&&caCampBud(c.campaign_id,true)!=null&&caLive(e.status)?idle(c.campaign_id):!caLive(e.status)?'<td>'+(cBud(c.campaign_id)==null?'<span style="color:#94a3b8">—</span>':obMoney(cBud(c.campaign_id)))+'<div class="ca-sub">'+esc(String(e.status||'stopped').toLowerCase())+'</div></td>':money(cBud(c.campaign_id)))+cols(raw(c,pl,lead),raw(was(c.campaign_id)[0],pl,lead),cx)+'</tr>';
+      sec+='<tr class="ca-row ca-l0'+(con?' ca-on':'')+'" onclick="caCamp(\''+c.campaign_id+'\')">'+nm(caret(con)+caDot(e.status),e.name||c.campaign_id)+(cBud(c.campaign_id)==null&&caCampBud(c.campaign_id,true)!=null&&caLive(e.status)?idle(c.campaign_id):!caLive(e.status)?'<td>'+(cBud(c.campaign_id)==null?'<span style="color:#94a3b8">—</span>':obMoney(cBud(c.campaign_id)))+'<div class="ca-sub">'+esc(String(e.status||'stopped').toLowerCase())+'</div></td>':money(cBud(c.campaign_id)))+cols(RX(raw(c,pl,lead),'campaign',c.campaign_id),raw(was(c.campaign_id)[0],pl,lead),cx)+'</tr>';
       if(!con) return;
       const ads=CA_D.ads.filter(function(a){ return a.platform===pl&&a.campaign_id===c.campaign_id; });
       if(CA_D.adsLoading){ sec+='<tr class="ca-l1 ca-none"><td colspan="'+nc+'"><i class="fa-solid fa-spinner fa-spin"></i> Loading '+W.sets.toLowerCase()+'…</td></tr>'; return; }
@@ -437,7 +479,7 @@ function caPaint(){
           // its own budget; or, when the budget is set on the campaign (Facebook CBO, every Google ad group), the campaign's, marked shared
           const b=(E['adset:'+s.adset_id]||{}).daily_budget; if(cBud(c.campaign_id)==null&&CA_D.sp3&&!CA_D.sp3[c.campaign_id]) return money(null); if(b!=null) return money(b);
           return e.daily_budget!=null?'<td title="The budget is set on the campaign and shared by its '+W.sets.toLowerCase()+'"><span style="color:#64748b">'+obMoney(e.daily_budget)+'</span><div class="ca-sub">shared</div></td>':money(null); })()
-          +cols(raw(s,pl,null),raw(gw[s.adset_id],pl,null),crmSetX(s.adset_id,s.spend,(gw[s.adset_id]||{}).spend))+'</tr>';
+          +cols(RX(raw(s,pl,null),'adset',s.adset_id),raw(gw[s.adset_id],pl,null),crmSetX(s.adset_id,s.spend,(gw[s.adset_id]||{}).spend))+'</tr>';
         if(!son) return;
         /* AD ROWS (17 Nov 2026, Ayush: "in Facebook and Google I want to see ad-wise data as well, so even ad sets will have a
            dropdown"). An open ad set lists its ads, the same columns, following Active / Inactive / Both; a row opens the ad. */
@@ -447,7 +489,7 @@ function caPaint(){
           const ae=E['ad:'+a.ad_id]||{}, aw=cmpOn?(CA_D.cmp.ads||[]).filter(function(x){ return x.ad_id===a.ad_id&&x.adset_id===a.adset_id; })[0]:null;
           const ri=(window._caRowAds=window._caRowAds||[]).push(a)-1;
           sec+='<tr class="ca-row ca-l2" onclick="event.stopPropagation();caAdOpenRow('+ri+')" title="Open this ad">'+nm(caDot(ae.status),ae.name||('Ad '+a.ad_id))+money(null)
-            +cols(raw(a,pl,null),raw(aw,pl,null),crmAdX(a.ad_id,a.spend,aw&&aw.spend))+'</tr>';
+            +cols(RX(raw(a,pl,null),'ad',a.ad_id),raw(aw,pl,null),crmAdX(a.ad_id,a.spend,aw&&aw.spend))+'</tr>';
         });
       });
     });
@@ -462,15 +504,16 @@ function caPaint(){
     const ids={}; camps.forEach(function(c){ ids[c.campaign_id]=1; });
     const tot=camps.length?'<tfoot><tr class="ca-tot"><td>Total · '+camps.length+' campaign'+(camps.length===1?'':'s')+(pl==='meta'?' <span style="font-weight:500;color:var(--slate);font-size:11px">(leads only)</span>':'')+'</td>'
       +money(camps.reduce(function(t,c){ const b=cBud(c.campaign_id); return b==null?t:(t||0)+(+b); },null))
-      +cols(sum(camps,pl),sum(prev.filter(function(x){ return x.platform===pl&&ids[x.campaign_id]; }),pl),crmX(function(x){ return x.project===p; },pl==='google'?'google':'facebook'))+'</tr></tfoot>':'';
+      +cols(RX(sum(camps,pl),'total'),sum(prev.filter(function(x){ return x.platform===pl&&ids[x.campaign_id]; }),pl),crmX(function(x){ return x.project===p; },pl==='google'?'google':'facebook'))+'</tr></tfoot>':'';
     // 18 Nov 2026 (Ayush: "Dream World City: the table total shows 56, the row above 62 counting the 6 not tied to a campaign -
     // misleading"): the Total's CRM figures are the project's whole platform figure - the same as its Google / Facebook row
     // above - so they include the "Not tied to a campaign" row and the WhatsApp leads counted for the project as a whole.
-    return '<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p)
+    const secOut='<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p)
       +' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+camps.length+' '+(CA_ST==='active'?'active':CA_ST==='inactive'?'inactive':'')+(CA_ST==='both'?'':' ')+'campaign'+(camps.length===1?'':'s')+'; click one for its '+W.sets.toLowerCase()+'</span></div>'
       +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Campaign',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
-      +(sec||'<tr><td colspan="'+nc+'" style="text-align:center;color:var(--slate);padding:18px">No '+(CA_ST==='both'?'':CA_ST+' ')+'campaign spent in this period</td></tr>')+'</tbody>'+tot+'</table></div></div>'
-      +caAds(p,pl);
+      +(sec||'<tr><td colspan="'+nc+'" style="text-align:center;color:var(--slate);padding:18px">No '+(CA_ST==='both'?'':CA_ST+' ')+'campaign spent in this period</td></tr>')+'</tbody>'+tot+'</table></div></div>';
+    fbX=null;
+    return secOut+caAds(p,pl);
   };
   const shown=CA.proj==='all'?P:[CA.proj];
   const B=CA_D.bud||{};
@@ -483,21 +526,84 @@ function caPaint(){
      the campaigns it runs in, each campaign the ad sets / ad groups it runs in there. Every row shows that row's own
      figures, with the same columns, budgets, CRM and Active / Inactive / Both. The picture opens the ad. */
   const adsTree=function(p,pl){
-    const W=CA_PLAT[pl];
+    const W=CA_PLAT[pl], FB=pl==='meta';
+    noSvp=true;
     const top='<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p);
     if(CA_D.adsLoading) return top+'</div><div style="padding:16px;color:var(--slate)"><i class="fa-solid fa-spinner fa-spin"></i> Loading ads…</div></div>';
     const AX=CA.ax=CA.ax||{ad:null,camp:null}, ashow=CA.adShow||50;
     const keyOf=function(a){ return a.platform+':'+String((E['ad:'+a.ad_id]||{}).name||a.ad_id).trim().toLowerCase().replace(/\s+/g,' '); };
     const live=CA_D.ads.filter(function(a){ return a.project===p&&a.platform===pl&&caAdOk(a)&&((+a.spend||0)>0||(+a.impressions||0)>0||(+a.clicks||0)>0||(+a.results||0)>0); });
+    // video plays of the rows added up (ads_ad_totals_v5, from 18 Nov 2026 night); hasV = any row had them read
+    const VF=['v_plays','v_3s','v_p25','v_p50','v_p75','v_p100'];
+    const vAdd=function(m,a){ VF.forEach(function(f){ if(m[f]==null) m[f]=0; if(a[f]!=null){ m[f]+=+a[f]||0; m.hasV=true; } }); };
     const grp=function(list){ const by={}, out=[]; list.forEach(function(a){ const k=keyOf(a); let m=by[k];
       if(!m){ m=by[k]={k:k,platform:a.platform,ad_id:a.ad_id,project:a.project,campaign_id:a.campaign_id,adset_id:null,spend:0,results:null,clicks:0,impressions:0,rows:[],ids:{},top:0}; out.push(m); }
-      m.spend+=+a.spend||0; m.clicks+=+a.clicks||0; m.impressions+=+a.impressions||0; if(a.results!=null) m.results=(m.results==null?0:m.results)+(+a.results);
+      m.spend+=+a.spend||0; m.clicks+=+a.clicks||0; m.impressions+=+a.impressions||0; if(a.results!=null) m.results=(m.results==null?0:m.results)+(+a.results); vAdd(m,a);
       m.rows.push(a); m.ids[String(a.ad_id)]=1; if((+a.spend||0)>m.top){ m.top=+a.spend||0; m.ad_id=a.ad_id; m.campaign_id=a.campaign_id; } }); return {by:by,out:out}; };
     const G=grp(live), ads=G.out.sort(function(x,y){ return y.spend-x.spend; }), W2=cmpOn?grp((CA_D.cmp&&CA_D.cmp.ads)||[]).by:{};
     // the CRM's figures of every copy of the ad together
     const crmIds=function(ids,sp,spw){ if(!CS) return crmNo('CRM figures by ad are read at night - they show from the next morning'); const pp=function(x){ return x.level==='ad'&&ids[x.ad_id]; };
       if(!CS.cur.some(pp)) return crmNo('The CRM has no leads tied to this ad for these dates'); return {t:crmT(crmAgg(CS.cur,pp),+sp||0),w:crmT(crmAgg(CS.prev,pp),+spw||0)}; };
-    const setAgg=function(list,sid){ const x={spend:0,results:null,clicks:0,impressions:0}; list.forEach(function(a){ if(a.adset_id!==sid) return; x.spend+=+a.spend||0; x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; if(a.results!=null) x.results=(x.results||0)+(+a.results); }); return x; };
+    // every ad row of this platform that passes pred, added up (an ad set's, or for Facebook a campaign's video plays and dates)
+    const agg=function(list,pred){ const x={spend:0,results:null,clicks:0,impressions:0,ids:{}}; list.forEach(function(a){ if(a.platform!==pl||!pred(a)) return; x.spend+=+a.spend||0; x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; if(a.results!=null) x.results=(x.results||0)+(+a.results); vAdd(x,a); x.ids[String(a.ad_id)]=1; }); return x; };
+    const setAgg=function(list,sid){ return agg(list,function(a){ return a.adset_id===sid; }); };
+    /* THE FACEBOOK COLUMNS (18 Nov 2026, Ayush: "the Facebook metrics in the Ads tab for each project - Facebook only, not for
+       Google"): Spend | Leads Generated | CPL | Qualified | QL% | CPQL | Site Visited | Lost | ThumbStop % | CTL % | CTR % |
+       Cost Per 1K Reach | Impressions | Reach | 25 / 50 / 75 / 100% Play | the same as %.
+       QL% = qualified (CRM) of the leads generated; ThumbStop % = 3-second plays of impressions; CTL % = leads of clicks;
+       play % = people who watched that far of the people reached (Ayush's sheet: 25% Play ÷ Reach, every row). Reach is people,
+       so it is asked from Meta for exactly these dates (edge function ad-reach) - it cannot be added up from days.
+       18 Nov 2026 (Ayush): Started and Last Run removed. */
+    window._caReach=window._caReach||{};
+    const RK=FB?[r.s,r.e,p,CA_ST,ashow].join('|'):'', RCH=FB?window._caReach[RK]:null;
+    const reachOf=function(level,id){ if(!FB) return null; const b=window._caReach[RK]; if(!b||b.st==='load') return {st:'load'}; if(b.st==='err') return {st:'err',why:b.why};
+      const v=level==='total'?id.reduce(function(t,a){ return b.d.account[a]==null?t:(t==null?0:t)+(+b.d.account[a]); },null):(b.d[level]||{})[id];
+      return {st:'ok',v:v==null?null:+v}; };
+    const dash0=function(why,cls){ return '<td'+(cls?' class="'+cls+'"':'')+(why?' title="'+esc(why)+'"':'')+'><span style="color:#94a3b8">—</span></td>'; };
+    const reachCell=function(R,fmt){ if(!R) return dash0(''); if(R.st==='load') return '<td title="Asking Meta for the reach of these dates"><i class="fa-solid fa-spinner fa-spin" style="color:#94a3b8;font-size:11px"></i></td>';
+      if(R.st==='err') return dash0('Meta did not give the reach: '+(R.why||'')); return R.v==null?dash0('No reach from Meta for these dates'):'<td>'+fmt(R.v)+'</td>'; };
+    const fh=function(t,title){ return '<th'+(title?' title="'+esc(title)+'"':'')+'>'+t+'</th>'; };
+    const fbHead=function(name){ return '<tr><th class="ca-nm">'+name+'</th>'+fh('Spend')+fh('Leads Generated','Leads of lead / chat campaigns - Ads Manager\x27s Results')+fh('CPL','Spend per lead generated')
+      +ct('Qualified','Qualified leads (CRM)')+ct('QL%','Qualified leads (CRM) as a share of the leads generated')+ct('CPQL','Spend per qualified lead (CRM)')+ct('Site Visited','Site visits (CRM)')+ct('Lost','Lost (CRM)')
+      +fh('ThumbStop %','3-second video plays as a share of impressions')+fh('CTL %','Leads generated as a share of clicks')+fh('CTR %','Clicks as a share of impressions')
+      +fh('Cost Per 1K Reach','Spend per 1,000 people reached')+fh('Impressions')+fh('Reach','People reached in these dates, from Meta')
+      +fh('25% Play','Video plays watched to 25%')+fh('50% Play','Video plays watched to 50%')+fh('75% Play','Video plays watched to 75%')+fh('100% Play','Video plays watched to the end')
+      +fh('25% Play %','People who watched to 25% as a share of the people reached')+fh('50% Play %','People who watched to 50% as a share of the people reached')+fh('75% Play %','People who watched to 75% as a share of the people reached')+fh('100% Play %','People who watched to the end as a share of the people reached')+xHead(fbXa)+'</tr>'; };
+    const fbXa=FB?caXcList('ads'):[], NFB=23+fbXa.length;
+    const fbCols=function(t,w,x,v){ w=w||{}; v=v||{};
+      const hasC=!!(CR&&x&&x.t), c=hasC?x.t:{}, cw=hasC?(x.w||{}):{}, why=!CR?'CRM figures are read at night - they show from the next morning':((x&&x.why)||'');
+      const crm=function(val,was,fmt,up){ return hasC?cell(val,was,fmt,up).replace('<td>','<td class="ca-crm">'):dash0(why,'ca-crm'); };
+      const pct=function(a,b){ return a!=null&&b?a/b*100:null; };
+      const ln=t.ln, vwhy='Video plays are read from 18 Nov 2026 night - they show from then', vid=!!v.hasV;
+      const vc=function(n){ return vid?cell(n,null,obNum,true):dash0(vwhy); }, vp=function(n){ return !vid?dash0(vwhy):reachCell(v.reach,function(rv){ return obPct(pct(n,rv)); }); };
+      return cell(t.spend,w.spend,obMoney,null,true)
+        +(cmpOn?cell(t.ln,w.ln,function(n){ return caLeads(n,t.pl); },true).replace('</td>',(t.tag||'')+'</td>'):'<td>'+t.lead+'</td>')
+        +cell(t.cpl,w.cpl,obMoney,false)
+        +crm(c.ql,cw.ql,obNum,true)+crm(pct(c.ql,ln),pct(cw.ql,w.ln),pc0,true)+crm(c.cpql,cw.cpql,obMoney,false)+crm(c.sv,cw.sv,obNum,true)+crm(c.lost,cw.lost,obNum,false)
+        +(vid?cell(pct(v.v_3s,v.imp),null,obPct,true):dash0(vwhy))
+        +cell(pct(ln,t.clicks),pct(w.ln,w.clicks),obPct,true)
+        +cell(t.ctr,w.ctr,obPct,true)
+        +reachCell(v.reach,function(rv){ return rv&&t.spend!=null?obMoney(t.spend/rv*1000):'—'; })
+        +(v.imp==null?dash0(''):cell(v.imp,null,obNum,true))
+        +reachCell(v.reach,function(rv){ return obNum(rv); })
+        +vc(v.v_p25)+vc(v.v_p50)+vc(v.v_p75)+vc(v.v_p100)+vp(v.v_p25)+vp(v.v_p50)+vp(v.v_p75)+vp(v.v_p100)
+        +fbXa.map(function(k){ if(k==='freq') return reachCell(v.reach,function(rv){ return rv&&v.imp?(v.imp/rv).toFixed(2):'—'; });
+          if(k==='cpm') return cell(v.imp&&t.spend!=null?t.spend/v.imp*1000:null,null,obMoney,false);
+          if(k==='cpc') return cell(t.clicks&&t.spend!=null?t.spend/t.clicks:null,w.clicks&&w.spend!=null?w.spend/w.clicks:null,obMoney,false);
+          return cell(t.clicks,w.clicks,obNum,true); }).join(''); };
+    const vOf=function(m,R){ return {hasV:m.hasV,v_plays:m.v_plays,v_3s:m.v_3s,v_p25:m.v_p25,v_p50:m.v_p50,v_p75:m.v_p75,v_p100:m.v_p100,imp:m.impressions,reach:R}; };
+    // one set of columns or the other: Facebook its own, Google as on Campaigns (less QL to SV %)
+    const rowCols=function(t,w,x,m,R){ return FB?fbCols(t,w,x,vOf(m,R)):cols(t,w,x); };
+    /* LEADS GENERATED = LEADS ONLY (18 Nov 2026, found checking the page): an ad of an awareness / engagement campaign showed its
+       reach or views (2,459, 48,118) as leads. A Facebook row counts results only of rows whose campaign is a lead / chat
+       campaign - as the Total does; with none, "—" (not a lead campaign). Its CPL and CTL % follow. */
+    const isLeadC=function(cid){ return obIsLead(E,{campaign_id:cid,platform:'meta'}); };
+    const fbT=function(x,pl0,rowsOf){ if(!FB||!x) return raw(x,pl0,null); const rs=rowsOf||[];
+      const lr=rs.filter(function(r0){ return isLeadC(r0.campaign_id); });
+      if(!lr.length) return Object.assign(raw(Object.assign({},x,{results:0}),pl0,null),{ln:null,cpl:null,lead:'<span style="color:#94a3b8" title="Not a lead campaign - its results are reach, views or engagement, not leads">—</span>'});
+      const n=lr.reduce(function(t0,r0){ return r0.results==null?t0:t0+(+r0.results||0); },0);
+      return raw(Object.assign({},x,{results:n}),pl0,null); };
+    const nc=FB?NFB:6+NCRM;
     window._caAdsTab=[]; window._caAxK=[]; let rows='';
     ads.slice(0,ashow).forEach(function(a){
       const ae=E['ad:'+a.ad_id]||{}, aon=AX.ad===a.k, i=window._caAdsTab.push(a)-1, copies=Object.keys(a.ids).length;
@@ -506,8 +612,8 @@ function caPaint(){
         :'<i class="fa-regular fa-rectangle-list" onclick="event.stopPropagation();caAdTabOpen('+i+')" title="Open this ad" style="color:#94a3b8;margin-right:8px;cursor:zoom-in"></i>';
       const nCamps=[...new Set(a.rows.map(function(r){ return r.campaign_id; }))].length;
       rows+='<tr class="ca-row ca-l0'+(aon?' ca-on':'')+'" onclick="caAx(\'ad\',_caAxK['+(window._caAxK.push(a.k)-1)+'])" title="'+(nCamps>1?'In '+nCamps+' campaigns':'')+(copies>1?(nCamps>1?' · ':'')+copies+' copies counted together':'')+'">'
-        +nm(caret(aon)+caDot(anyLive?'ACTIVE':ae.status)+thumb,(ae.name||('Ad '+a.ad_id))+(nCamps>1?'  ·  '+nCamps+' campaigns':''))+money(null)
-        +cols(raw(a,pl,null),raw(W2[a.k],pl,null),crmIds(a.ids,a.spend,(W2[a.k]||{}).spend))+'</tr>';
+        +nm(caret(aon)+caDot(anyLive?'ACTIVE':ae.status)+thumb,(ae.name||('Ad '+a.ad_id))+(nCamps>1?'  ·  '+nCamps+' campaigns':''))+(FB?'':money(null))
+        +rowCols(fbT(a,pl,a.rows),W2[a.k]?fbT(W2[a.k],pl,W2[a.k].rows):raw(null,pl,null),crmIds(a.ids,a.spend,(W2[a.k]||{}).spend),a,copies>1?reachOf('group',a.k):reachOf('ad',Object.keys(a.ids)[0]))+'</tr>';
       if(!aon) return;
       // up one: every campaign the ad runs in - the campaign's own figures
       const cids=[...new Set(a.rows.map(function(r){ return r.campaign_id; }))].sort(function(x,y){ const cx=CA_D.cur.filter(function(c){ return c.campaign_id===x; })[0]||{}, cy=CA_D.cur.filter(function(c){ return c.campaign_id===y; })[0]||{}; return (+cy.spend||0)-(+cx.spend||0); });
@@ -515,16 +621,16 @@ function caPaint(){
         const c=CA_D.cur.filter(function(x){ return x.platform===pl&&x.campaign_id===cid; })[0]||{campaign_id:cid,platform:pl,project:p,spend:0,clicks:0,impressions:0,results:0};
         const ce=E['campaign:'+cid]||{}, ck=a.k+'|'+cid, con=AX.camp===ck, lead=pl==='meta'?obIsLead(E,c):null, was=prev.filter(function(x){ return x.platform===pl&&x.campaign_id===cid; })[0];
         rows+='<tr class="ca-row ca-l1'+(con?' ca-on':'')+'" onclick="caAx(\'camp\',_caAxK['+(window._caAxK.push(ck)-1)+'])">'+nm(caret(con)+caDot(ce.status),ce.name||cid)
-          +(cBud(cid)==null&&caCampBud(cid,true)!=null&&caLive(ce.status)?idle(cid):!caLive(ce.status)?'<td>'+(cBud(cid)==null?'<span style="color:#94a3b8">—</span>':obMoney(cBud(cid)))+'<div class="ca-sub">'+esc(String(ce.status||'stopped').toLowerCase())+'</div></td>':money(cBud(cid)))
-          +cols(raw(c,pl,lead),raw(was,pl,lead),crmX(function(x){ return x.campaign_id===cid; },pl==='google'?'google':'facebook'))+'</tr>';
+          +(FB?'':(cBud(cid)==null&&caCampBud(cid,true)!=null&&caLive(ce.status)?idle(cid):!caLive(ce.status)?'<td>'+(cBud(cid)==null?'<span style="color:#94a3b8">—</span>':obMoney(cBud(cid)))+'<div class="ca-sub">'+esc(String(ce.status||'stopped').toLowerCase())+'</div></td>':money(cBud(cid))))
+          +rowCols(FB?fbT(c,pl,[c]):raw(c,pl,lead),FB&&was?fbT(was,pl,[was]):raw(was,pl,lead),crmX(function(x){ return x.campaign_id===cid; },pl==='google'?'google':'facebook'),FB?Object.assign(agg(CA_D.ads,function(r){ return r.campaign_id===cid; }),{impressions:+c.impressions||0}):null,reachOf('campaign',cid))+'</tr>';
         if(!con) return;
         // up again: the ad sets / ad groups of that campaign the ad runs in - the ad set's own figures
         const sids=[...new Set(a.rows.filter(function(r){ return r.campaign_id===cid&&r.adset_id; }).map(function(r){ return r.adset_id; }))];
-        if(!sids.length){ rows+='<tr class="ca-l2 ca-none"><td colspan="'+(7+NCRM)+'">No '+W.set.toLowerCase()+' recorded for this ad here</td></tr>'; return; }
+        if(!sids.length){ rows+='<tr class="ca-l2 ca-none"><td colspan="'+nc+'">No '+W.set.toLowerCase()+' recorded for this ad here</td></tr>'; return; }
         sids.forEach(function(sid){
           const se=E['adset:'+sid]||{}, sa=setAgg(CA_D.ads,sid), sw=cmpOn?setAgg((CA_D.cmp&&CA_D.cmp.ads)||[],sid):null;
           const sb=se.daily_budget!=null?money(se.daily_budget):ce.daily_budget!=null?'<td title="The budget is set on the campaign and shared by its '+W.sets.toLowerCase()+'"><span style="color:#64748b">'+obMoney(ce.daily_budget)+'</span><div class="ca-sub">shared</div></td>':money(null);
-          rows+='<tr class="ca-l2"><td class="ca-nm"><span class="ca-nmx" title="'+esc(se.name||sid)+'">'+caDot(se.status||ce.status)+esc(se.name||sid)+'</span></td>'+sb+cols(raw(sa,pl,null),raw(sw,pl,null),crmSetX(sid,sa.spend,sw&&sw.spend))+'</tr>';
+          rows+='<tr class="ca-l2"><td class="ca-nm"><span class="ca-nmx" title="'+esc(se.name||sid)+'">'+caDot(se.status||ce.status)+esc(se.name||sid)+'</span></td>'+(FB?'':sb)+rowCols(fbT(sa,pl,[{campaign_id:cid,results:sa.results}]),sw?fbT(sw,pl,[{campaign_id:cid,results:sw.results}]):raw(null,pl,null),crmSetX(sid,sa.spend,sw&&sw.spend),sa,reachOf('adset',sid))+'</tr>';
         });
       });
     });
@@ -532,9 +638,9 @@ function caPaint(){
        result - reach, views, engagement of non-lead campaigns too - so Dream Ananta's Total read 188,317 against 526 leads in
        the row above. As on the Campaigns tab, a Facebook ad's results count in the Total only when its campaign is a lead /
        chat campaign; Google's are form leads already. */
-    const tot=G.out.reduce(function(t,a){ t.spend+=a.spend; t.clicks+=a.clicks; t.impressions+=a.impressions;
-      a.rows.forEach(function(r){ if(r.results==null) return; if(pl==='meta'&&!obIsLead(E,{campaign_id:r.campaign_id,platform:'meta'})) return; t.results=(t.results||0)+(+r.results||0); }); return t; },{spend:0,clicks:0,impressions:0,results:null});
-    const allIds={}; G.out.forEach(function(a){ Object.keys(a.ids).forEach(function(k){ allIds[k]=1; }); });
+    const tot=G.out.reduce(function(t,a){ t.spend+=a.spend; t.clicks+=a.clicks; t.impressions+=a.impressions; a.rows.forEach(function(r0){ vAdd(t,r0); }); Object.keys(a.ids).forEach(function(k){ t.ids[k]=1; });
+      a.rows.forEach(function(r){ if(r.results==null) return; if(pl==='meta'&&!obIsLead(E,{campaign_id:r.campaign_id,platform:'meta'})) return; t.results=(t.results||0)+(+r.results||0); }); return t; },{spend:0,clicks:0,impressions:0,results:null,ids:{}});
+    const allIds=tot.ids;
     /* TOTAL = THE PLATFORM ROW (18 Nov 2026, Ayush: a total that differs from the row above "is misleading - fix it
        everywhere"). The CRM ties only some leads to an ad; the Total shows the project's whole Google / Facebook CRM figure
        (as the projects table does) and the leads it could not tie to an ad have a row of their own, so the rows add up. */
@@ -543,23 +649,100 @@ function caPaint(){
     if(TT&&TT.t){ const A0=(AA&&AA.t)||{leads:0,ql:0,sv:0,bk:0,lost:0};
       const d={leads:Math.max(0,TT.t.leads-A0.leads),ql:Math.max(0,TT.t.ql-A0.ql),sv:Math.max(0,TT.t.sv-A0.sv),bk:Math.max(0,TT.t.bk-A0.bk),lost:Math.max(0,TT.t.lost-A0.lost)};
       if(d.leads||d.ql||d.sv||d.bk||d.lost){ const dash='<span style="color:#94a3b8">—</span>';
-        untiedAd='<tr class="ca-l0" title="Leads the CRM has for '+esc(p)+' from '+W.name+' without an ad tied to them - counted in the Total and the projects table"><td class="ca-nm"><span class="ca-nmx" style="font-style:italic"><i class="fa-solid fa-link-slash" style="color:#94a3b8;margin-right:6px"></i>Not tied to an ad</span></td>'+money(null)
-          +cols({spend:null,ln:null,pl:pl,lead:dash,cpl:null,clicks:null,ctr:null},{},{t:crmT(d,0)})+'</tr>'; } }
+        untiedAd='<tr class="ca-l0" title="Leads the CRM has for '+esc(p)+' from '+W.name+' without an ad tied to them - counted in the Total and the projects table"><td class="ca-nm"><span class="ca-nmx" style="font-style:italic"><i class="fa-solid fa-link-slash" style="color:#94a3b8;margin-right:6px"></i>Not tied to an ad</span></td>'+(FB?'':money(null))
+          +(FB?fbCols({spend:null,ln:null,pl:pl,lead:dash,cpl:null,clicks:null,ctr:null},{},{t:crmT(d,0)},{imp:null}):cols({spend:null,ln:null,pl:pl,lead:dash,cpl:null,clicks:null,ctr:null},{},{t:crmT(d,0)}))+'</tr>'; } }
     if(rows) rows+=untiedAd;
+    // Facebook: ask Meta once for the reach of everything listed (ads, copies together, ad sets, campaigns, each account), then draw again
+    if(FB&&(!RCH||RCH.at<Date.now()-600000)&&ads.length){
+      const req={from:r.s,to:r.e,accounts:{},groups:{}};
+      const accOf=function(id){ if(!req.accounts[id]) req.accounts[id]={ad:[],adset:[],campaign:[]}; return req.accounts[id]; };
+      Object.keys(CA_D.acc).forEach(function(k){ if(k.indexOf('meta:')===0&&CA_D.acc[k].project===p) accOf(k.slice(5)); });
+      const seenC={}, seenS={};
+      ads.slice(0,ashow).forEach(function(a){ const ids=Object.keys(a.ids);
+        if(ids.length===1) accOf(a.rows[0].account_id).ad.push(ids[0]);
+        else { const g=req.groups[a.k]={}; a.rows.forEach(function(r0){ const l=g[r0.account_id]=g[r0.account_id]||[]; if(l.indexOf(String(r0.ad_id))<0) l.push(String(r0.ad_id)); }); }
+        a.rows.forEach(function(r0){ const ac=accOf(r0.account_id); if(r0.campaign_id&&!seenC[r0.campaign_id]){ seenC[r0.campaign_id]=1; ac.campaign.push(r0.campaign_id); } if(r0.adset_id&&!seenS[r0.adset_id]){ seenS[r0.adset_id]=1; ac.adset.push(r0.adset_id); } }); });
+      window._caReach[RK]={st:'load',at:Date.now()};
+      caReachLoad(RK,req);
+    }
+    const accsP=Object.keys(CA_D.acc).filter(function(k){ return k.indexOf('meta:')===0&&CA_D.acc[k].project===p; }).map(function(k){ return k.slice(5); });
+    const foot=ads.length?'<tfoot><tr class="ca-tot"><td>Total · '+ads.length+' ad'+(ads.length===1?'':'s')+(pl==='meta'?' <span style="font-weight:500;color:var(--slate);font-size:11px">(leads only)</span>':'')+'</td>'+(FB?'':money(null))
+      +(FB?fbCols(raw(tot,pl,null),{},TT&&TT.t?TT:AA,vOf(tot,reachOf('total',accsP))):cols(raw(tot,pl,null),{},TT&&TT.t?TT:AA))+'</tr></tfoot>':'';
     return top+' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+ads.length+' ad'+(ads.length===1?'':'s')+'; click one for the campaigns it runs in, then its '+W.sets.toLowerCase()+'</span></div>'
-      +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Ad',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
-      +(rows||'<tr><td colspan="'+(7+NCRM)+'" style="text-align:center;color:var(--slate);padding:18px">No ad ran here in this period for this choice</td></tr>')+'</tbody>'
-      +(ads.length?'<tfoot><tr class="ca-tot"><td>Total · '+ads.length+' ad'+(ads.length===1?'':'s')+(pl==='meta'?' <span style="font-weight:500;color:var(--slate);font-size:11px">(leads only)</span>':'')+'</td>'+money(null)+cols(raw(tot,pl,null),{},TT&&TT.t?TT:AA)+'</tr></tfoot>':'')+'</table></div>'
+      +'<div style="overflow-x:auto"><table class="ca-tbl'+(FB?' ca-fb':'')+'"><thead>'+(FB?fbHead('Ad'):head('Ad',W.res,W.per,true))+'</thead><tbody>'
+      +(rows||'<tr><td colspan="'+nc+'" style="text-align:center;color:var(--slate);padding:18px">No ad ran here in this period for this choice</td></tr>')+'</tbody>'
+      +foot+'</table></div>'
       +(ads.length>ashow?'<div style="text-align:center;margin:14px 0"><button class="btn" onclick="CA.adShow=(CA.adShow||50)+50;caPaint()">Show more ('+ashow+' of '+ads.length+')</button></div>':'')
       +'</div>';
   };
+  /* THE AUDIENCE TAB (18 Nov 2026, Ayush: "a new Audience tab, the same structure as Campaigns and Ads" - "in Audience only Who It
+     Is will be there"). The projects table as on Campaigns; Facebook opens the section below. Each row is an audience: the
+     targeting of the ad sets that ran in the period, ad sets with the same targeting counted as one. Its arrow opens the
+     campaigns using it, each campaign its ad sets. Columns: Audience type (Advantage+ / Lookalike / Custom list / Interest /
+     Broad - the interests and audiences on hover), Locations, Age, Gender, and Meta's estimate of the people it can reach.
+     Read from Meta now (edge function ad-audience), kept 10 minutes. Google ad groups have no such targeting here. */
+  const audTree=function(p,pl){
+    const W=CA_PLAT[pl];
+    const top='<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p);
+    if(pl!=='meta') return top+'</div><div style="padding:16px;color:var(--slate)"><i class="fa-solid fa-circle-info"></i> Audiences are shown for Facebook ad sets - open Facebook above.</div></div>';
+    if(CA_D.adsLoading) return top+'</div><div style="padding:16px;color:var(--slate)"><i class="fa-solid fa-spinner fa-spin"></i> Loading audiences…</div></div>';
+    const AU=CA.au=CA.au||{a:null,camp:null};
+    // the ad sets that ran here in the period (following Active / Inactive / Both), biggest spend first
+    const sp={}, campOf={};
+    CA_D.ads.forEach(function(a){ if(a.project!==p||a.platform!=='meta'||!a.adset_id||!caAdOk(a)) return; if(!((+a.spend||0)>0||(+a.impressions||0)>0)) return;
+      sp[a.adset_id]=(sp[a.adset_id]||0)+(+a.spend||0); campOf[a.adset_id]=a.campaign_id; });
+    const sids=Object.keys(sp).sort(function(x,y){ return sp[y]-sp[x]; });
+    window._caAud=window._caAud||{};
+    const now=Date.now(), need=sids.filter(function(id){ const h=window._caAud[id]; return !h||h.at<now-600000; });
+    if(need.length&&!window._caAudBusy&&!((window._caAudErrAt||0)>now-60000)) caAudLoad(need);   // after a failure, asked again a minute later
+    const A=function(id){ const h=window._caAud[id]; return h&&h.d; };
+    const dash='<span style="color:#94a3b8">—</span>';
+    const big=function(n){ return n>=1e7?(n/1e7).toFixed(1)+' Cr':n>=1e5?(n/1e5).toFixed(1)+' L':obNum(n); };
+    const listCell=function(list,n){ if(!list||!list.length) return '<td style="text-align:left">'+dash+'</td>';
+      return '<td style="text-align:left;white-space:normal;min-width:180px;max-width:280px" title="'+esc(list.join('\n'))+'">'+esc(list.slice(0,n).join(', '))+(list.length>n?' <span style="color:var(--slate)">+'+(list.length-n)+' more</span>':'')+'</td>'; };
+    const who=function(d){ if(!d) return '<td colspan="5" style="text-align:left;color:var(--slate)">'+(window._caAudErr?'Meta did not answer: '+esc(window._caAudErr):'<i class="fa-solid fa-spinner fa-spin"></i> Asking Meta…')+'</td>';
+      const names=(d.audiences||[]).concat(d.interests||[]);
+      const sub=[(d.audiences||[]).length?d.audiences.length+' audience'+(d.audiences.length===1?'':'s'):'',(d.interests||[]).length?d.interests.length+' interest'+(d.interests.length===1?'':'s'):''].filter(Boolean).join(' · ');
+      return '<td style="text-align:left"'+(names.length?' title="'+esc(names.join('\n'))+'"':'')+'><b>'+esc(d.type||'—')+'</b>'+(sub?'<div class="ca-sub">'+esc(sub)+'</div>':'')+'</td>'
+        +listCell((d.locations||[]).map(function(x){ return /^-?\d+\.\d+, -?\d+\.\d+/.test(x)?'Pin '+x:x; }),2)+'<td>'+esc(d.age||'—')+'</td><td>'+esc(d.gender||'—')+'</td>'
+        +'<td title="Meta\x27s estimate of the people this ad set can reach (monthly active)">'+(!d.size?dash:d.size.hi<=1000?'Below 1,000':big(d.size.lo)+' – '+big(d.size.hi))+'</td>'; };
+    const keyOf=function(d){ return d?JSON.stringify([d.type,(d.audiences||[]).slice().sort(),(d.interests||[]).slice().sort(),(d.locations||[]).slice().sort(),(d.excluded||[]).slice().sort(),d.age,d.gender]):''; };
+    // ad sets with the same targeting together; ones not read yet stand alone
+    const groups=[], byK={};
+    sids.forEach(function(id){ const d=A(id), k=d?keyOf(d):'id:'+id; let g=byK[k]; if(!g){ g=byK[k]={k:k,ids:[],spend:0}; groups.push(g); } g.ids.push(id); g.spend+=sp[id]; });
+    groups.sort(function(x,y){ return y.spend-x.spend; });
+    window._caAuK=[]; let rows='';
+    groups.forEach(function(g){
+      const lead=g.ids[0], d=A(lead), on=AU.a===g.k, nm0=(E['adset:'+lead]||{}).name||(d&&d.name)||lead;
+      const nC=[...new Set(g.ids.map(function(id){ return campOf[id]; }))].length;
+      rows+='<tr class="ca-row ca-l0'+(on?' ca-on':'')+'" onclick="caAu(\'a\',_caAuK['+(window._caAuK.push(g.k)-1)+'])">'
+        +nm(caret(on),nm0+(g.ids.length>1?'  ·  '+g.ids.length+' ad sets':''))+who(d)+'</tr>';
+      if(!on) return;
+      [...new Set(g.ids.map(function(id){ return campOf[id]; }))].forEach(function(cid){
+        const ce=E['campaign:'+cid]||{}, ck=g.k+'|'+cid, con=AU.camp===ck, mine=g.ids.filter(function(id){ return campOf[id]===cid; });
+        rows+='<tr class="ca-row ca-l1'+(con?' ca-on':'')+'" onclick="caAu(\'camp\',_caAuK['+(window._caAuK.push(ck)-1)+'])">'+nm(caret(con)+caDot(ce.status),ce.name||cid)+who(d)+'</tr>';
+        if(!con) return;
+        mine.forEach(function(sid){ const se=E['adset:'+sid]||{};
+          rows+='<tr class="ca-l2"><td class="ca-nm"><span class="ca-nmx" title="'+esc(se.name||sid)+'">'+caDot(se.status||ce.status)+esc(se.name||sid)+'</span></td>'+who(A(sid))+'</tr>'; });
+      });
+    });
+    return top+' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+groups.length+' audience'+(groups.length===1?'':'s')+' from '+sids.length+' ad set'+(sids.length===1?'':'s')+'; click one for the campaigns using it, then its ad sets</span></div>'
+      +'<div style="overflow-x:auto"><table class="ca-tbl"><thead><tr><th class="ca-nm">Audience</th><th style="text-align:left">Audience type</th><th style="text-align:left">Locations</th><th>Age</th><th>Gender</th><th title="Meta\x27s estimate of the people it can reach (monthly active)">Est. audience size</th></tr></thead><tbody>'
+      +(rows||'<tr><td colspan="6" style="text-align:center;color:var(--slate);padding:18px">No ad set ran here in this period for this choice</td></tr>')+'</tbody></table></div></div>';
+  };
   const bud=function(v){ return '<td>'+(v==null?'<span style="color:#94a3b8">—</span>':obMoney(v))+'</td>'; };
   let rows='';
-  shown.forEach(function(p){
-    const cur=CA_D.cur.filter(function(c){ return c.project===p; }), pw=prev.filter(function(c){ return c.project===p; }), on=CA.open===p;
-    rows+='<tr class="ca-row ca-l0'+(on?' ca-on':'')+'" onclick="caToggle('+P.indexOf(p)+')"><td>'+caret(on)+esc(p)+'</td>'+bud(budV(p))+cols(sum(cur),sum(pw),crmX(function(x){ return x.project===p; }))+'</tr>';
+  /* THE AUDIENCE TAB IS FACEBOOK ONLY (18 Nov 2026, Ayush: "in Audience why is there Google?"): its projects table lists only
+     projects with a Facebook account, their rows and the Total count Facebook alone, and there is no Google row. */
+  const AUD=CA_TAB==='audience'||CA_TAB==='checklist', fbOf=function(list){ return AUD?list.filter(function(c){ return c.platform==='meta'; }):list; };
+  const hasFb=function(p){ return Object.keys(CA_D.acc).some(function(k){ return k.indexOf('meta:')===0&&CA_D.acc[k].project===p; }); };
+  if(AUD&&CA.plat!=='meta') CA.plat=CA.open?'meta':CA.plat;
+  const shownT=AUD?shown.filter(hasFb):shown, srcT=AUD?'facebook':undefined;
+  shownT.forEach(function(p){
+    const cur=fbOf(CA_D.cur.filter(function(c){ return c.project===p; })), pw=fbOf(prev.filter(function(c){ return c.project===p; })), on=CA.open===p;
+    rows+='<tr class="ca-row ca-l0'+(on?' ca-on':'')+'" onclick="caToggle('+P.indexOf(p)+')"><td>'+caret(on)+esc(p)+'</td>'+bud(AUD?budV(p,'meta'):budV(p))+cols(sum(cur,AUD?'meta':undefined),sum(pw,AUD?'meta':undefined),crmX(function(x){ return x.project===p; },srcT))+'</tr>';
     if(!on) return;
-    ['google','meta'].forEach(function(pl){
+    (AUD?['meta']:['google','meta']).forEach(function(pl){
       const W=CA_PLAT[pl], pc=cur.filter(function(c){ return c.platform===pl; }), pon=CA.plat===pl;
       const has=Object.keys(CA_D.acc).some(function(k){ return k.indexOf(pl+':')===0&&CA_D.acc[k].project===p; });
       // a platform the project has no account on is not listed at all (11 Nov 2026, Ayush: Sarovar Hotel's "Google" row removed)
@@ -569,23 +752,190 @@ function caPaint(){
     });
   });
   // 7 Nov 2026: the overall Total under the projects - every project shown, Google and Facebook together
-  const inP={}; shown.forEach(function(p){ inP[p]=1; });
-  const tb=shown.reduce(function(s,p){ const v=budV(p); return v==null?s:(s||0)+v; },null);
-  const foot=shown.length>1||CA.proj==='all'?'<tfoot><tr class="ca-tot"><td>Total</td>'+bud(tb)
-    +cols(sum(CA_D.cur.filter(function(c){ return inP[c.project]; })),sum(prev.filter(function(c){ return inP[c.project]; })),crmX(function(x){ return inP[x.project]; }))+'</tr></tfoot>':'';
+  const inP={}; shownT.forEach(function(p){ inP[p]=1; });
+  const tb=shownT.reduce(function(s,p){ const v=AUD?budV(p,'meta'):budV(p); return v==null?s:(s||0)+v; },null);
+  const foot=shownT.length>1||CA.proj==='all'?'<tfoot><tr class="ca-tot"><td>Total</td>'+bud(tb)
+    +cols(sum(fbOf(CA_D.cur.filter(function(c){ return inP[c.project]; })),AUD?'meta':undefined),sum(fbOf(prev.filter(function(c){ return inP[c.project]; })),AUD?'meta':undefined),crmX(function(x){ return inP[x.project]; },srcT))+'</tr></tfoot>':'';
   let html='<div class="card" style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Project','Leads','Cost per lead',true)+'</thead><tbody>'
     +(rows||'<tr><td colspan="'+(7+NCRM)+'" style="text-align:center;color:var(--slate);padding:24px">No ad accounts</td></tr>')+'</tbody>'+foot+'</table></div>';
   // the open platform's campaigns, ad sets and ads come under the whole projects table, and the page
   // scrolls down to them (caPlat) so they are seen
   // the Ads tab shows the open platform's ads, ad sets and campaigns from the ad upwards (adsTree)
-  if(CA.open&&CA.plat) html+='<div class="ca-below" id="caBelow">'+(CA_TAB==='ads'?adsTree(CA.open,CA.plat):section())+'</div>';
+  if(CA.open&&CA.plat) html+='<div class="ca-below" id="caBelow">'+(CA_TAB==='ads'?adsTree(CA.open,CA.plat):CA_TAB==='audience'?audTree(CA.open,CA.plat):section())+'</div>';
   // (16 Nov 2026, Ayush: the explanation paragraph under the table removed)
   $('caBody').innerHTML=caNA(html);
 }
 // the Ads tab: open / close a level (ad, ad set) and an ad's popup
+/* THE CHECKLIST TAB, ALERTS FIRST (18 Nov 2026, Ayush: "not project-wise - the section, the point, and under it what the
+   problem is; nothing out of sight; a public link and a nice PDF"). The tab is the alerts themselves, drawn by
+   assets/ck-render.js - the same drawing the public link (checklist-report.html) and the PDF use - with a strip above:
+   a download (PDF) icon, and for super admins / Manash the public link switch and copy button (18 Nov 2026, Ayush: no Run
+   button). It shows the latest saved run: the daily points (every day 00:00 IST) and the latest weekly (Mondays 01:00 IST). */
+let CK_SHARE={loaded:false,on:false,token:null,busy:false};
+async function ckShareCall(body){
+  const {data:{session}}=await sb.auth.getSession();
+  const r=await fetch(SUPABASE_URL+'/functions/v1/checklist-share',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify(body)});
+  const t=await r.json().catch(function(){ return {}; }); if(!r.ok||t.error) throw new Error(t.error||('server said '+r.status)); return t;
+}
+function ckShareBar(){
+  if(!state.super&&CA_SHARE_PEOPLE.indexOf(String(state.email||'').trim().toLowerCase())===-1) return '';
+  if(!CK_SHARE.loaded&&!CK_SHARE.busy){ CK_SHARE.busy=true; ckShareCall({action:'status'}).then(function(t){ CK_SHARE.on=!!t.on; CK_SHARE.token=t.token||null; }).catch(function(){}).then(function(){ CK_SHARE.loaded=true; CK_SHARE.busy=false; if(CA_TAB==='checklist') ckPaint(); }); }
+  return '<span style="display:inline-flex;gap:8px;align-items:center">'
+    +'<label class="ca-sw'+(CK_SHARE.on?' on':'')+'" title="Anyone with the link can see the checklist alerts while this is on"><input type="checkbox"'+(CK_SHARE.on?' checked':'')+(CK_SHARE.loaded?'':' disabled')+' onchange="ckShareSet(this.checked)"><span class="k"></span>Public link</label>'
+    +'<button class="btn btn-sm" style="height:32px;width:36px;padding:0;justify-content:center;gap:0" onclick="ckShareCopy()"'+(CK_SHARE.token?' title="Copy the public link"':' disabled title="Switch the public link on first"')+'><i class="fa-regular fa-copy"></i></button></span>';
+}
+window.ckShareSet=async function(on){
+  try{ const t=await ckShareCall({action:'set',on:!!on}); CK_SHARE.on=!!t.on; CK_SHARE.token=t.token||null; toast(t.on?'Public link is on - anyone with the link can see the checklist alerts':'Public link is off - the link now shows nothing','ok'); }
+  catch(e){ toast('Could not change the public link: '+e.message,'err'); }
+  ckPaint();
+};
+window.ckShareCopy=function(){
+  if(!CK_SHARE.token){ toast('Switch the public link on first','err'); return; }
+  const link=location.origin+'/checklist-report.html#k='+CK_SHARE.token;
+  const done=function(){ toast(CK_SHARE.on?'Link copied':'Link copied - it shows nothing until the public link is switched on','ok'); };
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done,function(){ prompt('Copy this link',link); });
+  else prompt('Copy this link',link);
+};
+// the shared drawing (assets/ck-render.js), loaded once
+function ckEnsure(cb){
+  if(window.ckRender) return cb();
+  if(window._ckLoading){ window._ckLoading.push(cb); return; }
+  window._ckLoading=[cb];
+  const s=document.createElement('script'); s.src='assets/ck-render.js?v=5';
+  s.onload=function(){ const st=document.createElement('style'); st.textContent=window.CK_CSS||''; document.head.appendChild(st); const l=window._ckLoading; window._ckLoading=null; l.forEach(function(f){ f(); }); };
+  s.onerror=function(){ const l=window._ckLoading; window._ckLoading=null; l.forEach(function(f){ f(true); }); };
+  document.head.appendChild(s);
+}
+function ckPaint(){
+  const head=$('caHead'), body=$('caBody'); if(!head||!body) return;
+  const K=window._caCk;
+  if(!K) caCkLoad();
+  head.innerHTML='<div class="ob-bar"><span style="font-weight:700;font-size:14px">Facebook Checklist</span>'
+    
+    +'<span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    +'<button class="btn" style="height:36px;width:40px;padding:0;justify-content:center;gap:0" onclick="ckPdf()"'+(K&&K.flags&&K.flags.length?' title="Download PDF"':' disabled title="Nothing to download yet"')+'><i class="fa-solid fa-download"></i></button>'
+    +ckShareBar()+'</span></div>';
+  if(!K||K.st==='load'){ body.innerHTML='<div class="loader"><div class="spin"></div></div>'; return; }
+  ckEnsure(function(err){
+    if(err){ body.innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load the checklist layout - reload the page.</div>'; return; }
+    body.innerHTML='<div style="padding:2px 0 30px">'+window.ckRender({flags:K.flags||[],runs:K.runs||[],live:!!K.live},{})+'</div>';
+  });
+}
+/* DIRECT DOWNLOAD (19 Nov 2026, Ayush: "direct file download", no print preview then Save). The checklist is drawn
+   off-screen and html2pdf turns it into an A4 PDF that downloads straight away. The library loads only on first use. */
+let CK_PDF_LIB=null;
+function ckPdfLib(cb){
+  if(window.html2pdf) return cb();
+  if(!CK_PDF_LIB){ CK_PDF_LIB=[]; const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+    s.onload=function(){ const q=CK_PDF_LIB; CK_PDF_LIB=null; q.forEach(function(f){ f(); }); };
+    s.onerror=function(){ const q=CK_PDF_LIB; CK_PDF_LIB=null; q.forEach(function(f){ f('lib'); }); };
+    document.head.appendChild(s); }
+  CK_PDF_LIB.push(cb);
+}
+window.ckPdf=function(){
+  const K=window._caCk; if(!K||!K.flags||!K.flags.length) return;
+  if(window._ckPdfBusy) return; window._ckPdfBusy=true;
+  toast('Making the PDF…');
+  ckEnsure(function(err){
+    if(err){ window._ckPdfBusy=false; toast('Could not make the PDF - reload the page','err'); return; }
+    ckPdfLib(function(e2){
+      if(e2){ window._ckPdfBusy=false; toast('Could not load the PDF maker - check the internet connection','err'); return; }
+      const box=document.createElement('div');
+      box.id='ckPdfBox'; box.style.cssText='position:fixed;left:-12000px;top:0;width:1000px;background:#fff;font-family:Inter,system-ui,Segoe UI,Arial,sans-serif';
+      box.innerHTML='<style>#ckPdfBox .hd{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e0121c;padding:0 0 10px;margin:0 0 14px}#ckPdfBox .hd b{font-size:18px}#ckPdfBox .hd span{color:#64748b;font-size:12px}'
+        +window.CK_CSS+'#ckPdfBox .ck-noprint{display:none!important}#ckPdfBox .ck tr{break-inside:avoid}</style>'
+        +'<div class="hd"><b>Facebook Checklist · The Jain Group</b><span>'+esc(new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}))+'</span></div>'
+        +window.ckRender({flags:K.flags,runs:K.runs||[],live:!!K.live},{print:true});
+      document.body.appendChild(box);
+      const done=function(){ box.remove(); window._ckPdfBusy=false; };
+      window.html2pdf().set({ margin:[10,8,10,8], filename:'Facebook Checklist '+new Date().toISOString().slice(0,10)+' - The Jain Group.pdf',
+        image:{type:'jpeg',quality:0.95}, html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff',windowWidth:1000},
+        jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}, pagebreak:{mode:['css','legacy'],avoid:['tr','.ck-ph']} })
+        .from(box).save().then(done,function(){ done(); toast('Could not make the PDF','err'); });
+    });
+  });
+};
+// the Columns dropdown of the Facebook sections (Campaigns: CA_XC.camp, Ads: CA_XC.ads), kept in this browser
+const CA_XC_NAMES={freq:'Frequency',reach:'Reach',imp:'Impressions',cpm:'CPM',cpc:'CPC',ctr:'CTR',clicks:'Clicks'};
+const CA_XC_OPTS={camp:['freq','reach','imp','cpm','cpc','ctr','clicks'],ads:['freq','cpm','cpc','clicks']};
+window.CA_XC=(function(){ try{ return JSON.parse(localStorage.getItem('caXC')||'{}')||{}; }catch(e){ return {}; } })();
+function caXcList(tab){ const on=(window.CA_XC[tab]||[]); return CA_XC_OPTS[tab].filter(function(k){ return on.indexOf(k)>=0; }); }
+function caXcPicker(tab){ const on=caXcList(tab);
+  return '<span onclick="event.stopPropagation()" style="position:relative;display:inline-block" title="Extra Facebook columns"><button class="btn" style="height:36px;padding:0 12px;font-size:13px;font-weight:600" onclick="caXcOpen(\''+tab+'\')"><i class="fa-solid fa-table-columns"></i> Columns'+(on.length?' ('+on.length+')':'')+' <i class="fa-solid fa-chevron-'+(window._caXcOpen===tab?'up':'down')+'" style="font-size:10px"></i></button>'
+    +(window._caXcOpen===tab?'<div style="position:absolute;left:0;top:calc(100% + 4px);z-index:30;background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.14);padding:6px;min-width:170px;text-align:left">'
+      +CA_XC_OPTS[tab].map(function(k){ return '<label style="display:flex;gap:8px;align-items:center;padding:6px 8px;font-size:13px;cursor:pointer;border-radius:6px;white-space:nowrap;margin:0"><input type="checkbox" style="height:auto;width:auto;padding:0;margin:0;border:0"'+(on.indexOf(k)>=0?' checked':'')+' onchange="caXcSet(\''+tab+'\',\''+k+'\',this.checked)"> '+CA_XC_NAMES[k]+'</label>'; }).join('')+'</div>':'')+'</span>'; }
+/* THE DATE RANGE DROPDOWN WITH THE COLUMNS IN IT (18 Nov 2026, Ayush: "merge Columns into the Date Range dropdown"). One button
+   on the top strip: the period on the left of its menu, and on the Campaigns / Ads tabs the extra Facebook columns on the
+   right (hidden by default). A period the Compare side already uses cannot be picked (as before). */
+function caPerPicker(off){
+  const tab=CA_TAB==='overview'?'camp':CA_TAB==='ads'?'ads':null, on=tab?caXcList(tab):[], open=window._caXcOpen==='per';
+  const cur=OB_PERIODS.filter(function(o){ return String(o[0])===String(OB_P.period); })[0];
+  const label=esc(cur?cur[1]:'Period')+(on.length?' <span style="color:var(--slate);font-weight:500">· '+on.length+' col'+(on.length===1?'':'s')+'</span>':'');
+  const item=function(o){ const dis=off&&off!=='custom'&&o[0]===off, sel=String(o[0])===String(OB_P.period);
+    return '<button type="button"'+(dis?' disabled title="Chosen on the Compare side"':'')+' onclick="caPerPick('+esc(JSON.stringify(String(o[0])))+')" style="display:block;width:100%;text-align:left;border:0;background:'+(sel?'#eef4ff':'transparent')+';color:'+(dis?'#cbd5e1':sel?'#1d4ed8':'var(--ink)')+';font:inherit;font-size:13px;font-weight:'+(sel?700:500)+';padding:7px 10px;border-radius:6px;cursor:'+(dis?'not-allowed':'pointer')+';white-space:nowrap">'+esc(o[1])+'</button>'; };
+  const cols=tab?'<div style="border-left:1px solid var(--line);padding-left:8px;margin-left:6px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--slate);padding:6px 8px;white-space:nowrap">Facebook columns</div>'
+    +CA_XC_OPTS[tab].map(function(k){ return '<label style="display:flex;gap:8px;align-items:center;padding:6px 8px;font-size:13px;cursor:pointer;border-radius:6px;white-space:nowrap;margin:0"><input type="checkbox" style="height:auto;width:auto;padding:0;margin:0;border:0"'+(on.indexOf(k)>=0?' checked':'')+' onchange="caXcSet(\''+tab+'\',\''+k+'\',this.checked)"> '+CA_XC_NAMES[k]+'</label>'; }).join('')+'</div>':'';
+  return '<span onclick="event.stopPropagation()" style="position:relative;display:inline-block"><button type="button" id="caPer" onclick="caXcOpen(\'per\')" style="height:36px;padding:0 11px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;font-weight:600;background:var(--bg-card);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:8px;white-space:nowrap">'+label+' <i class="fa-solid fa-chevron-'+(open?'up':'down')+'" style="font-size:10px;color:var(--slate)"></i></button>'
+    +(open?'<div style="position:absolute;left:0;top:calc(100% + 4px);z-index:40;background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.14);padding:6px;display:flex;align-items:flex-start"><div style="min-width:150px">'+OB_PERIODS.map(item).join('')+'</div>'+cols+'</div>':'')+'</span>';
+}
+window.caPerPick=function(v){ window._caXcOpen=null; if(String(v)===String(OB_P.period)){ caPaint(); return; } OB_P.period=v; caReset(); caLoad(); };
+window.caXcOpen=function(tab){ window._caXcOpen=window._caXcOpen===tab?null:tab; caPaint(); };
+window.caXcSet=function(tab,k,on){ const l=(window.CA_XC[tab]||[]).filter(function(x){ return x!==k; }); if(on) l.push(k); window.CA_XC[tab]=l; try{ localStorage.setItem('caXC',JSON.stringify(window.CA_XC)); }catch(e){} caPaint(); };
+if(!window._caXcDoc){ window._caXcDoc=true; document.addEventListener('click',function(){ if(window._caXcOpen){ window._caXcOpen=null; if(typeof CA_D!=='undefined'&&CA_D) caPaint(); } }); }
+// the Checklist tab: open / close a campaign or an ad set; the latest saved runs; a check worked out now (nothing saved or sent)
+window.caCk=function(level,id){ const CK=CA.ck=CA.ck||{c:null,s:null}; if(level==='c'){ CK.c=CK.c===id?null:id; CK.s=null; } else CK.s=CK.s===id?null:id; caPaint(); };
+window.caCkLoad=async function(){
+  window._caCk={st:'load'};
+  try{
+    const r=await sb.schema('camp').from('fb_check_runs').select('id,kind,run_day,ran_at,period_from,period_to,flags').order('ran_at',{ascending:false}).limit(20);
+    if(r.error) throw r.error;
+    const runs=[]; ['daily','weekly'].forEach(function(k){ const x=(r.data||[]).filter(function(y){ return y.kind===k; })[0]; if(x) runs.push(x); });
+    let flags=[]; if(runs.length){ const q=await sb.schema('camp').from('fb_check_flags').select('*').in('run_id',runs.map(function(x){ return x.id; })).limit(5000); if(q.error) throw q.error; flags=q.data||[]; }
+    window._caCk={st:'ok',runs:runs,flags:runs.length?flags:null};
+  }catch(e){ window._caCk={st:'ok',runs:[],flags:null,err:String(e&&e.message||e)}; }
+  if(CA_TAB==='checklist') ckPaint();
+};
+window.caCkRun=async function(){
+  const K=window._caCk||{st:'ok'}; K.busy=true; window._caCk=K; caPaint();
+  try{ const {data:{session}}=await sb.auth.getSession();
+    const res=await fetch(SUPABASE_URL+'/functions/v1/fb-checklist',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify({kind:'all',dry:true})});
+    const t=await res.json().catch(function(){ return {}; });
+    if(!res.ok||!t.ok) throw new Error(t.error||('HTTP '+res.status));
+    window._caCk={st:'ok',live:true,runs:[],flags:t.flags||[]};
+  }catch(e){ K.busy=false; alert('The check could not run: '+(e&&e.message||e)); }
+  if(CA_TAB==='checklist') ckPaint();
+};
+// the Audience tab: open / close an audience or a campaign under it
+window.caAu=function(level,k){ const AU=CA.au=CA.au||{a:null,camp:null};
+  if(level==='a'){ AU.a=AU.a===k?null:k; AU.camp=null; } else AU.camp=AU.camp===k?null:k; caPaint(); };
+// who the ad sets are shown to, from Meta (edge function ad-audience), 150 a request; kept 10 minutes
+window.caAudLoad=async function(ids){
+  window._caAudBusy=true; window._caAudErr='';
+  try{ const {data:{session}}=await sb.auth.getSession();
+    for(let i=0;i<ids.length;i+=150){
+      const res=await fetch(SUPABASE_URL+'/functions/v1/ad-audience',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify({adsets:ids.slice(i,i+150)})});
+      const t=await res.json().catch(function(){ return {}; });
+      if(!res.ok||!t.ok){ window._caAudErr=t.error||('HTTP '+res.status); break; }
+      const at=Date.now(); ids.slice(i,i+150).forEach(function(id){ window._caAud[id]={at:at,d:(t.adsets||{})[id]||{type:'—',locations:[],interests:[],audiences:[],age:'—',gender:'—',size:null}}; });
+    }
+  }catch(e){ window._caAudErr=String(e&&e.message||e); }
+  window._caAudBusy=false; if(window._caAudErr) window._caAudErrAt=Date.now();
+  if(CA_TAB==='audience'&&CA_D&&!CA_D.adsLoading) caPaint();
+};
 window.caAx=function(level,k){ const AX=CA.ax=CA.ax||{ad:null,set:null,camp:null};
   if(level==='ad'){ AX.ad=AX.ad===k?null:k; AX.set=null; AX.camp=null; } else if(level==='set'){ AX.set=AX.set===k?null:k; AX.camp=null; } else AX.camp=AX.camp===k?null:k;
   caPaint(); };
+// the Facebook Ads tab's Reach for exactly the dates on screen (edge function ad-reach asks Meta; nothing is stored), kept 10 minutes
+window.caReachLoad=async function(key,req){
+  const box=window._caReach[key];
+  try{ const {data:{session}}=await sb.auth.getSession();
+    const res=await fetch(SUPABASE_URL+'/functions/v1/ad-reach',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify(req)});
+    const t=await res.json().catch(function(){ return {}; });
+    if(!res.ok||!t.ok){ box.st='err'; box.why=t.error||('HTTP '+res.status); }
+    else { box.st='ok'; box.d=t; if(t.errors&&t.errors.length) console.warn('ad-reach',t.errors); }
+  }catch(e){ box.st='err'; box.why=String(e&&e.message||e); }
+  if(window._caReach[key]===box&&typeof CA_TAB!=='undefined'&&(CA_TAB==='ads'||CA_TAB==='overview')&&CA_D&&!CA_D.adsLoading) caPaint();
+};
 window.caAdTabOpen=function(i){ const a=(window._caAdsTab||[])[i]; if(a) caAdShow(a); };
 window.caCmpToggle=function(on){ CA.cmp.on=!!on;
   // the default other side: the previous period, unless that is what the main side already is
@@ -675,7 +1025,7 @@ function caAdShow(a){
   const frame='height:360px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--slate)';
   const fbv=pl==='meta'?caFbMedia(window._caVid[String(a.ad_id)],frame):null;
   const media=fbv?fbv:yt
-    ?'<div style="'+frame+';background:#000"><iframe src="https://www.youtube.com/embed/'+esc(yt)+'?autoplay=1&mute=1&rel=0&playsinline=1" style="width:100%;height:100%;border:0" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>'
+    ?'<div style="'+frame+';background:#000"><iframe src="'+oaYtSrc(yt,true)+'" referrerpolicy="strict-origin-when-cross-origin" style="width:100%;height:100%;border:0" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>'
     :e.thumbnail
       ?'<div style="'+frame+'"><img src="'+esc(e.thumbnail)+'" referrerpolicy="no-referrer" alt="" style="max-width:100%;max-height:100%;object-fit:contain;display:block"></div>'
       :'<div style="'+frame+';align-items:flex-start;justify-content:flex-start;background:#fff;padding:18px 20px;overflow:auto"><div>'+(pl==='google'?'<div style="font-size:11px;font-weight:700;color:#202124;margin-bottom:4px">Sponsored</div>':'')

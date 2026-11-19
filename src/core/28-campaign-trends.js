@@ -3637,6 +3637,19 @@ function compDaysRunning(a){
   const e=a.ad_delivery_stop_time?new Date(a.ad_delivery_stop_time):new Date();
   return Math.max(0,Math.floor((e-s)/86400000));
 }
+/* THE LINK LINE UNDER THE AD (18 Nov 2026, Ayush: "bottom left of the card there is some text which is not in our ad cards").
+   As on Facebook: the link's title, and its description under it, on the left; the button on the right. Template text that
+   a dynamic ad shows the Library ({{product.name}}) is never shown - for our own ads the real words are filled in from our
+   ad accounts every night (edge function brand-ad-text). */
+function compLinkRow(a){
+  const ok=function(s){ s=String(s||'').trim(); return s&&!/\{\{[^}]*\}\}/.test(s)?s:''; };
+  const title=ok(a.headline)||ok((a.ad_creative_link_titles||[])[0]), desc=ok(a.description);
+  if(!title&&!desc&&!a.cta_text) return '';
+  return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:6px 0 4px;padding:7px 8px;background:var(--bg,#f8fafc);border-radius:7px">'
+    +'<div style="min-width:0;flex:1">'+(title?'<div style="font-size:12px;font-weight:600;line-height:1.3;color:var(--ink)">'+esc(title)+'</div>':'')
+      +(desc?'<div style="font-size:11px;color:var(--slate);line-height:1.3;margin-top:1px">'+esc(desc)+'</div>':'')+'</div>'
+    +(a.cta_text?'<span class="tag t-blue" style="flex:none">'+esc(a.cta_text)+'</span>':'')+'</div>';
+}
 function compAdCard(a){
   const stillRunning=!a.ad_delivery_stop_time;
   const days=compDaysRunning(a);
@@ -3650,7 +3663,7 @@ function compAdCard(a){
     +thumb
     +'<div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap"><span class="tag '+(stillRunning?'t-green':'t-gray')+'">'+(stillRunning?'Active':'Inactive')+'</span>'+compReachBits(a)+compPlatformIcons(a)+'</div>'
     +'<div style="font-size:12.5px;margin:6px 0 4px;line-height:1.4;max-height:56px;overflow:hidden">'+esc(bodyText)+'</div>'
-    +(a.cta_text?'<div style="margin:4px 0"><span class="tag t-blue">'+esc(a.cta_text)+'</span></div>':'')
+    +compLinkRow(a)
     +'<div style="font-size:11px;color:var(--slate)">'+esc(a.page_name||'')+'</div>'
     +'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:4px">'
       +'<span style="font-size:11px;color:var(--slate)">'+(stillRunning?'Since ':'Ran from ')+fmtDate(a.ad_delivery_start_time)
@@ -3941,20 +3954,9 @@ function compPaintStatus(){
       :('Both manual pulls for this month are used. They reset on the 1st; the weekly pull carries on.');
     btn.innerHTML='<i class="fa-solid fa-rotate"></i> Pull all now <span style="opacity:.8;font-weight:500">('+left+' of '+limit+' left)</span>';
   }
-  if(!host) return;
-  const run=s.run;
-  let runLine='';
-  /* Only while pages of it are actually still queued (2 Nov 2026). The 14 Oct pull counted 53 pages; 8 were
-     switched off before their turn, so it ended at 45 and this line said "45 of 53" with a spinner for weeks. */
-  if(run && pendingManual>0 && Number(run.finished)<Number(run.pages)){
-    const days=Math.ceil(pendingManual/spare);
-    runLine='<div><i class="fa-solid fa-spinner fa-spin" style="color:#0369a1"></i> Manual pull from '+esc(fmtDate(run.requested_at))
-      +': <b>'+Number(run.finished)+' of '+Number(run.pages)+'</b> pages done'
-      +(pendingManual?' · about '+days+' more day'+(days===1?'':'s')+' on the free allowance':'')+'</div>';
-  }
-  // Only a manual pull still in progress is mentioned, and only where it can be started.
-  host.innerHTML=(runLine&&COMP_TAB!=='competitors')
-    ?'<div class="comp-note" style="margin:0 0 14px">'+runLine+'</div>':'';
+  /* The "Manual pull from ...: x of y pages done · about n more days" line was removed on 19 Nov 2026 (Ayush:
+     "remove this text"). The Pull all now button's tooltip still says how many pages are left. */
+  if(host) host.innerHTML='';
 }
 // Asks the worker to pull whatever today's credits still allow. Returns its report.
 async function compWork(){
@@ -4025,11 +4027,13 @@ window.compOpenDetail=function(id){
 function compDetailHtml(a){
   const stillRunning=!a.ad_delivery_stop_time;
   const t=compAdText(a);
-  const bodyText=t.text||'(no ad text)';
+  let bodyText=t.text||'(no ad text)';
+  // a dynamic ad whose only "text" is its headline: not repeated under Description (18 Nov 2026)
+  if(t.dynamic&&String(bodyText).trim()===String(a.headline||'').trim()) bodyText='';
   const dynamicNote=t.dynamic
     ?'<div style="margin-bottom:7px;font-size:11.5px;color:#92400e;background:#fef3c7;border-radius:6px;padding:6px 9px;line-height:1.45">'
-      +'<i class="fa-solid fa-circle-info"></i> Catalogue ad — Meta fills the wording in from the product feed as it is served, '
-      +'so the Ad Library only stores the template. What you see on Facebook will differ.</div>'
+      +'<i class="fa-solid fa-circle-info"></i> Dynamic ad — Facebook shows several versions of the main text, '
+      +'and the Ad Library only gives a template for it. Open it on Facebook to read every version.</div>'
     :'';
   const extraLinks=Array.isArray(a.extra_links)?a.extra_links:[];
   const media=Array.isArray(a.media_items)&&a.media_items.length?a.media_items:(compFirstMedia(a)?[compFirstMedia(a)]:[]);
@@ -4054,9 +4058,16 @@ function compDetailHtml(a){
           +compDetailRow(stillRunning?'Running for':'Ran for', compRunLength(a))
           +compDetailRow('Library ID', '<span style="font-family:ui-monospace,Menlo,monospace">'+esc(a.id)+'</span>')
         +'</table>'
+        // 18 Nov 2026 (Ayush: "where is the headline - the data in the popup is not fully visible"): the link's headline and the
+        // line under it, then the whole ad text - no box of its own with a scrollbar, nothing cut off
+        +(function(){ const ok=function(s){ s=String(s||'').trim(); return s&&!/\{\{[^}]*\}\}/.test(s)?s:''; };
+          const hl=ok(a.headline)||ok((a.ad_creative_link_titles||[])[0]), ds=ok(a.description);
+          return hl||ds?'<div style="font-size:11.5px;color:var(--slate);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Headline</div>'
+            +'<div style="margin-bottom:14px;padding:9px 11px;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:8px">'+(hl?'<div style="font-size:14px;font-weight:700;line-height:1.35">'+esc(hl)+'</div>':'')
+            +(ds?'<div style="font-size:12.5px;color:var(--slate);margin-top:2px;line-height:1.4">'+esc(ds)+'</div>':'')+'</div>':''; })()
         +'<div style="font-size:11.5px;color:var(--slate);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Description</div>'
         +dynamicNote
-        +'<div style="font-size:13px;line-height:1.55;white-space:pre-wrap;max-height:230px;overflow-y:auto;padding-right:4px">'+esc(bodyText)+'</div>'
+        +'<div style="font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word">'+esc(bodyText)+'</div>'
         +(extraLinks.length
           ?'<div style="margin-top:14px"><div style="font-size:11.5px;color:var(--slate);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Extra links</div>'
             +extraLinks.map(function(l){const u=l&&(l.url||l);

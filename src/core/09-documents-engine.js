@@ -1109,7 +1109,7 @@ VIEWS.legal=async function(v,seg){
     if(canLegal2()){ navTo('legal2/'+seg.join('/')); return; }
     seg=['mis'];
   }
-  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-scale-balanced" style="color:#1e3a8a"></i> ${P==='legal2'?'Legal 2':'Legal'}</h1><p>Document vault and litigation MIS for the Legal department</p></div>
+  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-scale-balanced" style="color:#1e3a8a"></i> Legal</h1><p>Document vault and litigation MIS for the Legal department</p></div>
     <div id="legalHeadActions" style="display:flex;gap:10px;flex-wrap:wrap"></div></div>
     <div class="tabs">
       <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('${P}')"><i class="fa-solid fa-folder-open"></i> Documents</div>
