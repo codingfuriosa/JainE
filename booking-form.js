@@ -63,8 +63,11 @@ function fresh(){ return {project:PROJECT,step:0,applicants:[newApp()],
 let S; if(TOKEN) S=fresh(); else try{ const d=JSON.parse(localStorage.getItem(DRAFT_KEY)||'null')||{}, f=fresh(); S=Object.assign(f,d); ['price','profession'].forEach(function(k){ S[k]=Object.assign(fresh()[k],d[k]||{}); }); }catch(e){ S=fresh(); }
 if(!Array.isArray(S.applicants)||!S.applicants.length) S.applicants=[newApp()];
 if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
+/* The documents each applicant attaches (19 Nov 2026: passport for a foreign national, an optional photograph, and on the first applicant the payment proof). */
+const DOC_KINDS=['pan','aadhaar','passport','photo','payment'];
+function blankFiles(){ return {pan:[],aadhaar:[],passport:[],photo:[],payment:[]}; }
 // Files and the signature live only in this page (too big for the draft).
-let FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
+let FILES=S.applicants.map(function(){ return blankFiles(); });
 let OTP_REQUIRED=false;   // a generated link made with a cost sheet is submitted with an emailed code
 let FROM_REVIEW=false;   // true while one section is being edited from the last (review) page: Continue / Back return straight there
 let PASS_OPEN=new Set();   // applicants whose Passport & bank panel was opened by hand (it is always open for a non-Indian applicant)
@@ -144,8 +147,18 @@ function openSheet(path,kind){
 }
 
 // ---------------------------------------------------------------- steps
+/* COST SHEET & PAYMENT PLAN (19 Nov 2026, Ayush: "below Applicant Details and before the first form, a full-length dropdown named Cost Sheet and Payment Plan
+   ... it should blink, because the customer does not proceed without seeing the cost sheet price"). It pulses until it has been opened once, and Continue on
+   this page waits until it has been (S.cost_seen). */
+let COST_OPEN=false;
+function costPanel(){
+  if(!COST.meta) return '';
+  return '<div class="cpanel'+(S.cost_seen?'':' blink')+(COST_OPEN?' on':'')+(ERR.cost_seen?' bad':'')+'" id="f-cost_seen"><button type="button" class="cph" data-costpanel="1" aria-expanded="'+COST_OPEN+'">'
+    +'<span><b>Cost Sheet and Payment Plan</b><small>'+(S.cost_seen?'Prepared for you by our Sales team':'Please open and read this before you continue')+'</small></span><span class="car">'+(COST_OPEN?'−':'+')+'</span></button>'
+    +(COST_OPEN?'<div class="cpb">'+costBody()+'</div>':'')+(ERR.cost_seen?'<div class="err" style="padding:0 16px 12px">'+esc(ERR.cost_seen)+'</div>':'')+'</div>';
+}
 function stepApplicants(){
-  return card('','','Applicant details','Every person in whose name the unit is to be booked. Joint applicants can be added below.',
+  return costPanel()+card('','','Applicant details','Every person in whose name the unit is to be booked. Joint applicants can be added below.',
     S.applicants.map(function(a,i){
       const p='applicants.'+i+'.', foreign=a.nationality!=='India';
       /* One column, in small labelled groups, so a person always knows which part they are on:
@@ -161,32 +174,32 @@ function stepApplicants(){
         +(i===0?field(p+'dob','Date of birth',{type:'date',req:1,full:1}):'')
         +'</div><div class="grp g2">Identity &amp; occupation</div><div class="stack s2">'
         +pick(p+'nationality','Nationality / Country','country',F)
-        +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:!foreign,optional:foreign,full:1})
-        +field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',optional:1,full:1})
+        /* 19 Nov 2026 (Ayush): the Aadhaar number comes first and is compulsory for an Indian national; a foreign national gives no Aadhaar (their
+           passport, and its number, are asked for on the KYC documents page instead). There are no bank details any more. */
+        +(foreign?'':field(p+'aadhaar','Aadhaar number',{mode:'numeric',max:14,ph:'1234 5678 9012',req:1,full:1}))
+        +field(p+'pan','PAN number',{cls:'up',max:10,ph:'ABCDE1234F',req:1,full:1})   /* 19 Nov 2026: PAN is compulsory for everybody */
         +chips(p+'occupation','Occupation',['Salaried','Business'],{sm:1})
         +'</div>'
-        +(function(){
-          const forced=foreign||!!a.passport||!!a.bank_details;   // needed, or already filled: its panel stays open and the bar is a plain title
-          const ppOpen=forced||PASS_OPEN.has(i), spOpen=i===0&&SPOUSE_OPEN;
-          const bar=function(on,plain,attr,label){ return (plain?'<div class="tg on static">':'<button type="button" class="tg'+(on?' on':'')+'" '+attr+'>')+(on?'−':'+')+' '+label+(plain?'</div>':'</button>'); };
-          return '<div class="xts'+(i===0?'':' one')+(spOpen&&ppOpen?' both':'')+'">'
-            +(i===0?bar(spOpen,false,'data-sp="1"','Spouse &amp; anniversary <span class="opt">(optional)</span>').replace('class="tg','class="tg bsp'):'')
+        +(i===0?(function(){
+          const spOpen=SPOUSE_OPEN;   // the Spouse & anniversary bar alone, full width
+          return '<div class="xts one">'
+            +'<button type="button" class="tg bsp'+(spOpen?' on':'')+'" data-sp="1">'+(spOpen?'−':'+')+' Spouse &amp; anniversary <span class="opt">(optional)</span></button>'
             +(spOpen?'<div class="xp sp"><div class="xp-h">Spouse &amp; anniversary <span class="opt">(optional)</span></div><div class="xp-b">'+field(p+'spouse','Spouse name',{optional:1,cls:'up',full:1})+field(p+'anniversary','Marriage anniversary',{type:'date',optional:1,full:1})+'</div></div>':'')
-            +bar(ppOpen,forced,'data-pp="'+i+'"','Passport &amp; bank details <span class="opt">(NRIs &amp; foreign nationals)</span>').replace('class="tg','class="tg bpp')
-            +(ppOpen?'<div class="xp pp"><div class="xp-h">Passport &amp; bank details <span class="opt">'+(foreign?'(needed for a foreign national)':'(NRIs &amp; foreign nationals only)')+'</span></div><div class="xp-b">'
-              +field(p+'passport','Passport number',{cls:'up',req:foreign,optional:!foreign,full:1})
-              +field(p+'bank_details','Bank account details',{type:'area',full:1,ph:'Bank, account number, branch, SWIFT / IFSC',req:foreign,optional:!foreign})+'</div></div>':'')
             +'</div>';
-        })()
+        })():'')
         +'</div>';
     }).join('')
     +(S.applicants.length<MAX_APPS?'<button type="button" class="btn add" data-add="1">+ Add another applicant</button>':''));
 }
+/* 19 Nov 2026 (Ayush: "the addresses suggested will show only of the particular country chosen"): the country is the first applicant's nationality; outside
+   India the PIN code is a postal / ZIP code of any shape. */
+function addrCountry(){ const a=S.applicants[0]||{}; return byName(a.nationality||'India')||byName('India'); }
+function addrIndia(){ return addrCountry()[0]==='India'; }
 function addrBody(k){
   return '<div class="grid">'
     +'<div class="full ac">'+field(k+'.line','House, street and area',{type:'area',full:1,req:k==='res'||S.off.on,ph:'Type your address'})+'<div id="ac-'+k+'"></div></div>'
     +'<div class="pair">'+field(k+'.city','City / Town',{req:1,auto:k==='res'?'address-level2':'off'})
-    +field(k+'.pin','PIN code',{mode:'numeric',max:6,req:1,auto:k==='res'?'postal-code':'off'})+'</div></div>';
+    +(addrIndia()?field(k+'.pin','PIN code',{mode:'numeric',max:6,req:1,auto:k==='res'?'postal-code':'off'}):field(k+'.pin','Postal / ZIP code',{max:10,req:1,cls:'up',auto:k==='res'?'postal-code':'off'}))+'</div></div>';
 }
 function stepContact(){
   const a=S.applicants[0];
@@ -195,7 +208,7 @@ function stepContact(){
       +field('contact.mobile','Mobile number',{type:'tel',req:1,full:1,mode:'tel',auto:'tel-national',
         before:'<div class="pre">'+pick('contact.cc','','dial',{bare:1}),after:'</div>'})
       +field('contact.email','Email',{type:'email',req:1,full:1,auto:'email',mode:'email'})
-      +field('contact.contact_person','Name of contact person',{optional:1,full:1})+'</div>')
+      +field('contact.contact_person','Primary contact person',{optional:1,full:1})+'</div>')
     +card('','','Residential address','',addrBody('res'))
     +card('','','Office address','Optional',
       '<label class="switch"><input type="checkbox" data-check="off.on"'+(S.off.on?' checked':'')+'><span><b>I want to add an office address</b></span></label>'
@@ -220,7 +233,7 @@ function stepAbout(){
         +'</div></details>')
     +card('','','Source','',
       '<div class="grid">'
-      +chips('heard','How did you come to know about the project?',['Facebook','Instagram','Google','Friend / Relative','Other'])
+      +chips('heard','How did you come to know about the project?',['Facebook','Instagram','Google','Channel Partners','Other'])
       +(S.heard==='Other'?field('heard_other','Where did you hear about it?',{full:1,req:1}):'')
       +'<div class="f full"><label>Why did you choose this project? <span class="opt">(optional)</span></label>'
         +S.why.map(function(w,i){ return '<div style="display:flex;gap:8px;align-items:center"><span class="num" style="width:26px;height:26px;border-radius:50%;background:#f1ede6;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex:none">'+(i+1)+'</span>'
@@ -239,41 +252,67 @@ function stepFlat(){
           +'<div class="f">'+'<label class="sub">FLC</label><input type="text" inputmode="decimal" data-k="price.flc" value="'+esc(S.price.flc)+'" placeholder=" " autocomplete="off"></div><span class="op">=</span>'
           +'<div class="f">'+'<label class="sub">Total</label><div class="sum" id="w-rate">'+esc(rateTotal()?('₹'+fmtN(rateTotal())):'—')+'</div></div>'
         +'</div><div class="words">PLC: preferential location charge · FLC: floor rise charge</div></div>':'';
-  return card('','','Unit selection',agreed||'As discussed with our sales team. The flat number may be left blank if not yet allotted.',
+  /* 19 Nov 2026 (Ayush): on a link from our Sales team the unit, size, price and booking amount are fixed - shown in full, never editable (the server puts them
+     back too); "Location" is "Your unit" (it read like a map address); car parks can be several, or NA; the payment plan choice is gone (it is in the cost sheet)
+     and only "Home loan required?" stays in that strip. */
+  const fixed=LINK&&LOCK.size;
+  const parks=parkList();
+  const parkCtl=LOCK.has('flat.parkings')||LOCK.has('flat.parking')
+    ?wrapF('flat.parkings','Right to use car park',{full:1},'<div class="chips">'+(parks.length?parks:['NA']).map(function(x,i){ return '<button type="button" class="chip on" disabled>'+(parks.length>1?(i+1)+'. ':'')+esc(x)+'</button>'; }).join('')+'</div>')
+    :chips('flat.parking','Right to use car park',['Covered','Open','NA']);
+  return card('','','Unit selection',fixed?'Fixed by our sales team as agreed with you - shown here for you to check.':(agreed||'As discussed with our sales team. The flat number may be left blank if not yet allotted.'),
       '<div class="pn2">'
-      +'<div class="pnl"><div class="grp">Location</div><div class="stack">'
-      +chips('flat.block','Block',CONF.blocks,{req:1})
+      +'<div class="pnl"><div class="grp">Your unit</div><div class="stack">'
+      +chips('flat.block','Block',CONF.blocks,{req:!LOCK.has('flat.block')})
       +chips('flat.floor','Floor',floors,{num:1,cols:8,mcols:4})
-      +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:1})
+      +field('flat.flat_no','Flat number',{cls:'up',ph:'e.g. 5A',max:8,optional:!LOCK.has('flat.flat_no')})
       +'</div></div>'
       +'<div class="pnl"><div class="grp">Configuration</div><div class="stack">'
       +chips('flat.bhk','Bedrooms',CONF.bhk)
-      +chips('flat.parking','Right to use car park',['Covered','Open'])
+      +parkCtl
       +'</div></div>'
       +'</div>')
-    +card('','','Area & price',agreed||'Optional',
+    +card('','','Area & price',fixed?'Fixed by our sales team.':(agreed||'Optional'),
       '<div class="grid">'
       +field('price.sba','Super built-up area (sq.ft.)',{mode:'decimal',full:1})
       +rate
-      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div>'+(CONF.showRate?'<div class="words" id="w-calc">'+esc(calcHint())+'</div>':'')})+'</div>')
-    +card('','','Payment plan & home loan','',
+      +field('price.total','Total sale price (₹)',{mode:'numeric',full:1,after:'<div class="words" id="w-total">'+esc(words(S.price.total))+'</div>'+(CONF.showRate?'<div class="words" id="w-calc">'+esc(calcHint())+'</div>':'')})
+      +(S.price.booking||LOCK.has('price.booking')?field('price.booking','Booking price (₹)',{mode:'numeric',full:1,after:'<div class="words">'+esc(words(S.price.booking))+'</div>'}):'')+'</div>')
+    +card('','','Home loan','',
       '<div class="grid">'
-      +chips('price.plan','Payment plan',['Construction Linked','Down Payment'])
       +chips('price.loan','Home loan required?',['No','Yes'])
       +(S.price.loan==='Yes'?field('price.bank','Preferred bank / institution',{optional:1,full:1,wide:1}):'')+'</div>');
 }
+// the car parks: Sales' list on a generated link, else the one choice on the page
+function parkList(){ const f=S.flat||{}; return (Array.isArray(f.parkings)&&f.parkings.length?f.parkings:(f.parking?[f.parking]:[])).filter(Boolean).map(String); }
 /* 7 Nov 2026: "Name of our sales person" and "Lead ID" are hidden for now (not usually something the customer knows) -
    the user asked to keep reminding about it. To bring them back, set this to true. */
 const SHOW_SALES_FIELDS=false;
 function stepPay(){
-  const chq=S.pay.mode==='Cheque'||S.pay.mode==='Demand Draft';
-  return card('','','Application payment','Paid in favour of '+esc(String(CONF.company||'').replace(/[.]+$/,''))+'. Cash is not accepted.',
+  // 19 Nov 2026: no Cheque; the amount is the Booking Amount set by our Sales team (fixed); the payment proof is attached right below it (compulsory)
+  if(S.pay.mode==='Cheque') S.pay.mode='UPI / NEFT / RTGS';
+  const chq=S.pay.mode==='Demand Draft';
+  const proof='doc.0.payment';
+  return card('','','Booking amount','Paid in favour of '+esc(String(CONF.company||'').replace(/[.]+$/,''))+'. Cash is not accepted.',
       '<div class="grid">'
-      +chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Cheque','Demand Draft','Card'],{mcols:2})
-      +field('pay.amount','Amount (₹)',{mode:'numeric',req:1,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})
-      +'<div class="pair">'+field('pay.date',chq?'Cheque / DD date':'Date paid',{type:'date',req:1})
-      +field('pay.ref',({'Cheque':'Cheque number','Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{req:1,cls:'up'})+'</div>'
-      +(chq?'<div class="pair">'+field('pay.bank','Bank (drawn on)',{req:1})+field('pay.branch','Branch',{optional:1})+'</div>':field('pay.bank','Bank',{optional:1}))+'</div>')
+      +chips('pay.mode','Paid by',['UPI / NEFT / RTGS','Demand Draft','Card'],{mcols:3})
+      +field('pay.amount','Booking Amount (₹)',{mode:'numeric',req:!LOCK.has('pay.amount'),full:1,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})
+      /* 19 Nov 2026 (Ayush): any number of receipts; they list down the left while date, reference and bank sit on the right (Bank below the reference),
+         so more receipts only make the left column longer. On a phone the two simply follow each other. */
+      // with fewer than 3 receipts Bank sits on the left under them; from the 3rd receipt it moves to the right, under the reference (Ayush, 19 Nov 2026)
+      +(function(){
+        const nRc=((FILES[0]&&FILES[0].payment)||[]).length;
+        const bank=chq?field('pay.bank','Bank (drawn on)',{req:1,full:1})+field('pay.branch','Branch',{optional:1,full:1}):field('pay.bank','Bank',{optional:1,full:1});
+        return '<div class="paygrid"><div class="pcol">'
+          +wrapF(proof,'Payment proof',{full:1,req:1,note:'Screenshots or receipts of the payment - add as many as you need'},docUpl(0,'payment','Take a photo or attach the receipt','The UTR / transaction number should be readable',10))
+          +(nRc<3?bank:'')
+          +'</div><div class="pcol">'
+          +field('pay.date',chq?'DD date':'Date paid',{type:'date',req:1,full:1})
+          +field('pay.ref',({'Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{req:1,cls:'up',full:1})
+          +(nRc>=3?bank:'')
+          +'</div></div>';
+      })()
+      +'</div>')
     +card('','','Booking details','',
       '<div class="grid">'
       +chips('purpose','Purpose of booking',['Residential','Investment'])
@@ -302,15 +341,31 @@ function fileList(i,kind){
     return '<div class="file">'+img+'<span>'+esc(f.name)+'</span><button type="button" data-delfile="'+i+'|'+kind+'|'+n+'" aria-label="Remove">×</button></div>';
   }).join('');
 }
+// The attach box of one document: what is attached, and (until 2 are) a button to take a photo or pick a file.
+function docUpl(i,kind,first,hint,max){
+  const L=(FILES[i]&&FILES[i][kind])||[];
+  return '<div class="upl">'+fileList(i,kind)
+    +(L.length<(max||2)?'<label class="pk'+(L.length?' more':'')+'"><span class="pi">'+ICON.camera+'</span><span><b>'+(L.length?'Add another':first)+'</b>'
+      +(L.length?'':'<small>'+hint+'</small>')+'</span><input type="file" accept="'+(kind==='photo'?'image/*':'image/*,application/pdf')+'" data-file="'+i+'|'+kind+'"></label>':'')+'</div>';
+}
+/* 19 Nov 2026 (Ayush): every applicant has their own clearly numbered card ("which PAN or Aadhaar is for whom should be very visible"); an Indian national gives
+   PAN and Aadhaar; anyone else gives their Passport (compulsory) with its number (optional, typed here - it is no longer on the first page) and PAN if they have
+   one; everybody may add a passport-size photograph. */
 function stepDocs(){
   return S.applicants.map(function(a,i){
-    const foreign=a.nationality!=='India';
-    const box=function(kind,label){ const k='doc.'+i+'.'+kind;
-      return wrapF(k,label,{full:1,req:!foreign,optional:foreign},'<div class="upl">'+fileList(i,kind)
-        +(FILES[i][kind].length<2?'<label class="pk'+(FILES[i][kind].length?' more':'')+'"><span class="pi">'+ICON.camera+'</span><span><b>'+(FILES[i][kind].length?'Add another photo':'Take a photo or attach a PDF')+'</b>'
-          +(FILES[i][kind].length?'':'<small>'+(kind==='aadhaar'?'Front and back can be two photos':'Make sure the number is readable')+'</small>')+'</span><input type="file" accept="image/*,application/pdf" data-file="'+i+'|'+kind+'"></label>':'')+'</div>'); };
-    return card('','',esc(a.full_name||('Applicant '+(i+1))),(i?'Joint applicant':'First applicant'),
-      '<div class="grid">'+box('pan','PAN card')+box('aadhaar','Aadhaar card')+'</div>');
+    const foreign=a.nationality!=='India', p='applicants.'+i+'.';
+    const who=[a.title,a.full_name].filter(Boolean).join(' ')||('Applicant '+(i+1));
+    const box=function(kind,label,req,first,hint){ return wrapF('doc.'+i+'.'+kind,label,{full:1,wide:kind==='photo'&&!foreign,req:req,optional:!req},docUpl(i,kind,first,hint)); };   // the photograph runs the full width for an Indian national; for a foreign national it sits beside the PAN card, half and half (19 Nov 2026)
+    return '<div class="sec doc-app"><div class="dah"><span class="dan">'+(i+1)+'</span><div><b>'+esc(who)+'</b><small>'+(i?'Joint applicant '+(i+1):'First / sole applicant')+' · '+esc(a.nationality||'India')+'</small></div></div><div class="sb">'
+      +'<div class="grid">'
+      +(foreign
+        ?box('passport','Passport',true,'Take a photo or attach a PDF','The photo page, with the number readable')
+          +field(p+'passport','Passport number',{cls:'up',req:1,full:1,ph:'As on the passport'})
+          +box('pan','PAN card',true,'Take a photo or attach a PDF','Make sure the number is readable')
+        :box('pan','PAN card',true,'Take a photo or attach a PDF','Make sure the number is readable')
+          +box('aadhaar','Aadhaar card',true,'Take a photo or attach a PDF','Front and back can be two photos'))
+      +box('photo','Photograph',false,'Take or attach a photo','A recent passport-size photo of '+esc(a.full_name||'this applicant'))
+      +'</div></div></div>';
   }).join('');
 }
 const TERMS=[
@@ -352,9 +407,18 @@ function stepTerms(){
       '<details class="t"><summary>Terms of application (15)</summary>'+list(TERMS)+'</details>'
       +'<details class="t"><summary>Declaration (2)</summary>'+list(DECL)+'</details>'
       +'<details class="t"><summary>Special Conditions (11)</summary>'+list(SPECIAL)+'</details>')
-    +(COST.meta?card('','','Cost sheet','Prepared for you by our Sales team. Tap a page to zoom in; you can download it too.',costBody()):'')
+    // 19 Nov 2026: the cost sheet is now at the very top of the form (Cost Sheet and Payment Plan), not here
     +card('','','Agreement','',
       '<label class="agree'+(ERR.terms_accepted?' bad':'')+'" id="f-terms_accepted"><input type="checkbox" data-check="terms_accepted"'+(S.terms_accepted?' checked':'')+'><span><b>I/We have read and agree to all the above'+(COST.meta?' and to the cost sheet':'')+'.</b><br><span style="color:var(--slate);font-size:13px">I/We confirm that everything in this form is true.</span><div class="err">'+esc(ERR.terms_accepted||'')+'</div></span></label>');
+}
+// The Terms, Declaration and Special Conditions, folded - for the submitted form (19 Nov 2026: "in this page ... collapsible")
+function termsBlock(){
+  const co=CONF.company||'';
+  const list=function(arr){ return '<ol>'+arr.map(function(t){ return '<li>'+esc(t.split('Dream Gateway Hotels Ltd.').join(co)).replace(/&lt;br&gt;&lt;br&gt;/g,'<br><br>')+'</li>'; }).join('')+'</ol>'; };
+  return card('','','Terms & conditions','Accepted when the form was submitted. Open a section to read it.',
+    '<details class="t"><summary>Terms of application ('+TERMS.length+')</summary>'+list(TERMS)+'</details>'
+    +'<details class="t"><summary>Declaration ('+DECL.length+')</summary>'+list(DECL)+'</details>'
+    +'<details class="t"><summary>Special Conditions ('+SPECIAL.length+')</summary>'+list(SPECIAL)+'</details>');
 }
 function rows(pairs){ return '<table class="rv">'+pairs.filter(function(p){ return p[1]!==''&&p[1]!=null; }).map(function(p){ return '<tr><td>'+esc(p[0])+'</td><td>'+esc(p[1])+'</td></tr>'; }).join('')+'</table>'; }
 function fmtD(d){ return d?new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):''; }
@@ -364,20 +428,20 @@ function stepReview(){
   return card('','',RO?'Your submitted application':'Review your application',RO?'Saved exactly as you submitted it. It cannot be changed here - please contact our team if something needs correcting.':'Please check every detail. Use Edit to make a change, then submit.',
     S.applicants.map(function(a,i){ return h((i?'Joint applicant '+(i+1):'First applicant'),0)+rows([
       ['Name',a.title+' '+a.full_name],[a.relation,a.relation_name],['Date of birth',i?'':fmtD(a.dob)],['Occupation',a.occupation],['Nationality',a.nationality],
-      ['PAN',a.pan.toUpperCase()],['Aadhaar',a.aadhaar],['Passport',a.passport],['Bank details',a.bank_details],
+      ['Aadhaar',a.aadhaar],['PAN',a.pan.toUpperCase()],['Passport number',a.passport],
       ['Spouse',i?'':a.spouse],['Anniversary',i?'':fmtD(a.anniversary)],
-      ['Documents',(FILES[i].pan.length?'PAN attached':'PAN missing')+' · '+(FILES[i].aadhaar.length?'Aadhaar attached':'Aadhaar missing')]]); }).join('')
+      ['Documents',(a.nationality!=='India'?['passport','pan','photo']:['pan','aadhaar','photo']).filter(function(k){ return (FILES[i][k]||[]).length; }).map(function(k){ return {pan:'PAN card',aadhaar:'Aadhaar card',passport:'Passport',photo:'Photograph'}[k]; }).join(', ')||'None attached']]); }).join('')
     +h('Contact & address',1)+rows([['Mobile',S.contact.cc+' '+S.contact.mobile],['Email',S.contact.email],['Contact person',S.contact.contact_person],
       ['Residential address',addr(S.res)],['Office address',S.off.on?addr(S.off):''],['Letters to',S.mailing==='Other'?'Other: '+S.mailing_other:S.mailing],['Permanent address',S.permanent==='Other'?'Other: '+S.permanent_other:S.permanent]])
     +h('About you',2)+rows([['Profession',S.profession.kind],['Company',S.profession.company],['Designation',S.profession.designation],
       ['Gross income',S.profession.income],['Community',S.profession.community],['Newspaper',S.profession.newspaper],['Magazine',S.profession.magazine],['TV channel',S.profession.tv],['Radio',S.profession.radio],
       ['Heard about us from',S.heard==='Other'?S.heard_other:S.heard],['Why this project',S.why.filter(Boolean).map(function(w,i){ return (i+1)+'. '+w; }).join('   ')]])
-    +h('Your flat',3)+rows([['Block',S.flat.block],['Floor',S.flat.floor],['Flat',S.flat.flat_no.toUpperCase()],['Bedrooms',S.flat.bhk],['Car park',S.flat.parking],
+    +h('Your flat',3)+rows([['Block',S.flat.block],['Floor',S.flat.floor],['Flat',String(S.flat.flat_no||'').toUpperCase()],['Bedrooms',S.flat.bhk],['Car park',parkList().join(', ')],
       ['Super built-up area',S.price.sba?S.price.sba+' sq.ft.':''],
       ['Rate / sq.ft.',rateTotal()?'₹'+fmtN(rateTotal())+' (Basic '+(S.price.basic||0)+' + PLC '+(S.price.plc||0)+' + FLC '+(S.price.flc||0)+')':''],
-      ['Total sale price',S.price.total?'₹'+Number(S.price.total).toLocaleString('en-IN'):''],['Payment plan',S.price.plan],
+      ['Total sale price',S.price.total?'₹'+Number(S.price.total).toLocaleString('en-IN'):''],['Booking price',S.price.booking?'₹'+Number(S.price.booking).toLocaleString('en-IN'):''],
       ['Home loan',S.price.loan+(S.price.loan==='Yes'&&S.price.bank?' - '+S.price.bank:'')]])
-    +h('Payment',4)+rows([['Amount',S.pay.amount?'₹'+Number(S.pay.amount).toLocaleString('en-IN')+' ('+words(S.pay.amount)+')':''],['Paid by',S.pay.mode],['Reference',S.pay.ref],
+    +h('Booking amount',4)+rows([['Booking Amount',S.pay.amount?'₹'+Number(S.pay.amount).toLocaleString('en-IN')+' ('+words(S.pay.amount)+')':''],['Payment proof',(FILES[0]&&FILES[0].payment||[]).length?'Attached':''],['Paid by',S.pay.mode],['Reference',S.pay.ref],
       ['Bank / branch',[S.pay.bank,S.pay.branch].filter(Boolean).join(', ')],['Date',fmtD(S.pay.date)],['Purpose',S.purpose],['Booked through',S.sales+(S.sales_name?' - '+S.sales_name:'')],['Lead ID',S.lead_id]])
     +h('Terms & cost sheet',6)+rows([['Cost sheet',COST.meta?COST.meta.name:''],['Terms',S.terms_accepted?'Accepted':'']])
     +'<div class="hp" aria-hidden="true"><input tabindex="-1" autocomplete="off" id="hpWeb"></div>');
@@ -398,16 +462,17 @@ function check(step){
       if(i===0) need(p+'dob','Please choose the date of birth','Date of birth');
       if(a.dob&&a.dob>todayISO()) bad(p+'dob','The date of birth cannot be in the future',who+'Date of birth');
       if(a.anniversary&&a.anniversary>todayISO()) bad(p+'anniversary','The anniversary cannot be in the future',who+'Marriage anniversary');
-      const pan=a.pan.toUpperCase(), aad=a.aadhaar.replace(/\s/g,'');
-      if(a.nationality==='India'&&!pan) bad(p+'pan','Please write the PAN number',who+'PAN number');
+      const pan=a.pan.toUpperCase(), aad=a.nationality==='India'?a.aadhaar.replace(/\s/g,''):'';
+      if(a.nationality==='India'&&!aad) bad(p+'aadhaar','Please write the Aadhaar number',who+'Aadhaar number');
+      if(!pan) bad(p+'pan','Please write the PAN number',who+'PAN number');
       else if(pan&&!PAN_RE.test(pan)) bad(p+'pan','PAN should look like ABCDE1234F',who+'PAN number');
       else if(pan&&pans[pan]!=null) bad(p+'pan','Same PAN as applicant '+(pans[pan]+1)+' - each applicant has their own',who+'PAN number repeated');
       if(pan) pans[pan]=pans[pan]==null?i:pans[pan];
       if(aad&&!/^\d{12}$/.test(aad)) bad(p+'aadhaar','Aadhaar should be 12 digits',who+'Aadhaar number');
       else if(aad&&aads[aad]!=null) bad(p+'aadhaar','Same Aadhaar as applicant '+(aads[aad]+1)+' - each applicant has their own',who+'Aadhaar number repeated');
       if(aad) aads[aad]=aads[aad]==null?i:aads[aad];
-      if(a.nationality!=='India'){ need(p+'passport',null,who+'Passport number'); need(p+'bank_details',null,who+'Bank account details'); }
     });
+    if(COST.meta&&!S.cost_seen) bad('cost_seen','Please open the Cost Sheet and Payment Plan and read it','Open the Cost Sheet and Payment Plan');
   }
   if(step===1){
     if(S.mailing==='Other') need('mailing_other','Please write the mailing address','Mailing address');
@@ -416,22 +481,28 @@ function check(step){
     if(S.contact.cc==='+91'?!/^[6-9]\d{9}$/.test(m):m.length<6) bad('contact.mobile','Please write a complete mobile number','Mobile number');
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(S.contact.email.trim())) bad('contact.email','Please write a complete email address','Email');
     need('res.line','Please write the address','Residential address'); need('res.city',null,'Residential city');
-    if(!/^\d{6}$/.test(S.res.pin.trim())) bad('res.pin','PIN code is 6 digits','Residential PIN code');
+    const pinOk=function(v){ v=String(v||'').trim(); return addrIndia()?/^\d{6}$/.test(v):/^[A-Za-z0-9][A-Za-z0-9 -]{1,9}$/.test(v); };
+    const pinMsg=addrIndia()?'PIN code is 6 digits':'Please write the postal / ZIP code';
+    if(!pinOk(S.res.pin)) bad('res.pin',pinMsg,'Residential PIN code');
     if(S.off.on){ need('off.line','Please write the address','Office address'); need('off.city',null,'Office city');
-      if(!/^\d{6}$/.test(S.off.pin.trim())) bad('off.pin','PIN code is 6 digits','Office PIN code'); }
+      if(!pinOk(S.off.pin)) bad('off.pin',pinMsg,'Office PIN code'); }
   }
   if(step===2){ if(S.heard==='Other') need('heard_other',null,'Where you heard about it'); }
-  if(step===3) need('flat.block','Please choose the block','Block');
+  if(step===3&&!LOCK.has('flat.block')) need('flat.block','Please choose the block','Block');
   if(step===4){
-    if(!(Number(S.pay.amount)>0)) bad('pay.amount','Please write the amount paid','Amount paid');
+    if(!(Number(S.pay.amount)>0)) bad('pay.amount','Please write the booking amount','Booking Amount');
+    if(!((FILES[0]&&FILES[0].payment)||[]).length) bad('doc.0.payment','Please attach the payment proof','Payment proof');
     need('pay.date','Please choose the date','Payment date');
     if(S.pay.date&&S.pay.date>todayISO()) bad('pay.date','The payment date cannot be in the future','Payment date'); need('pay.ref',null,'Payment reference');
-    if(S.pay.mode==='Cheque'||S.pay.mode==='Demand Draft') need('pay.bank',null,'Bank');
+    if(S.pay.mode==='Demand Draft') need('pay.bank',null,'Bank');
     if(SHOW_SALES_FIELDS&&S.sales!=='Direct') need('sales_name',null,'Agent / channel partner name');
   }
-  if(step===5) S.applicants.forEach(function(a,i){ if(a.nationality!=='India') return; const who=(a.full_name||('Applicant '+(i+1)))+': ';
-    if(!FILES[i].pan.length) bad('doc.'+i+'.pan','Please attach the PAN card',who+'PAN card');
-    if(!FILES[i].aadhaar.length) bad('doc.'+i+'.aadhaar','Please attach the Aadhaar card',who+'Aadhaar card'); });
+  if(step===5) S.applicants.forEach(function(a,i){ const who=(a.full_name||('Applicant '+(i+1)))+': ', F0=FILES[i]||blankFiles();
+    if(a.nationality!=='India'){ if(!F0.passport.length) bad('doc.'+i+'.passport','Please attach the passport',who+'Passport');
+      if(!F0.pan.length) bad('doc.'+i+'.pan','Please attach the PAN card',who+'PAN card');
+      if(!String(a.passport||'').trim()) bad('applicants.'+i+'.passport','Please write the passport number',who+'Passport number'); return; }
+    if(!F0.pan.length) bad('doc.'+i+'.pan','Please attach the PAN card',who+'PAN card');
+    if(!F0.aadhaar.length) bad('doc.'+i+'.aadhaar','Please attach the Aadhaar card',who+'Aadhaar card'); });
   if(step===6){ if(!S.terms_accepted) bad('terms_accepted','Please tick to accept the terms','Accept the terms'); }
   return !MISSING.length;
 }
@@ -473,6 +544,10 @@ async function loadCost(){
     const r=await fetch(FN,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'cost_pdf',token:TOKEN})});
     if(!r.ok) throw new Error('The cost sheet could not be opened');
     COST.bytes=await r.arrayBuffer();
+    // 19 Nov 2026: the cost sheet may be a picture - then it is that one page, shown as it is
+    const ct=String(r.headers.get('content-type')||COST.meta.type||'');
+    if(/^image\//.test(ct)){ COST.type=ct; COST.pages=[URL.createObjectURL(new Blob([COST.bytes],{type:ct}))]; COST.state='ready'; const hh=$('costv'); if(hh) hh.innerHTML=costInner(); return; }
+    COST.type='application/pdf';
     await pdfjsReady();
     const doc=await window.pdfjsLib.getDocument({data:COST.bytes.slice(0)}).promise;
     for(let n=1;n<=doc.numPages;n++){
@@ -498,7 +573,7 @@ function costInner(){
 }
 function costBody(){ if(COST.state==='idle') loadCost(); return '<div id="costv">'+costInner()+'</div>'; }
 function dl(url,name){ const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); }
-function downloadPdf(){ if(!COST.bytes) return; const u=URL.createObjectURL(new Blob([COST.bytes],{type:'application/pdf'})); dl(u,COST.meta.name); setTimeout(function(){ URL.revokeObjectURL(u); },4000); }
+function downloadPdf(){ if(!COST.bytes) return; const u=URL.createObjectURL(new Blob([COST.bytes],{type:COST.type||'application/pdf'})); dl(u,COST.meta.name); setTimeout(function(){ URL.revokeObjectURL(u); },4000); }
 // A page full screen: zoom in / out / fit (also double-tap and ctrl + wheel), scroll to move around, download the picture.
 function openZoom(i){
   closeZoom(); let z=1;
@@ -532,12 +607,14 @@ function suggest(k,q){
   acTimer=setTimeout(async function(){
     const seq=++acSeq;
     try{
-      const r=await fetch('https://photon.komoot.io/api/?limit=5&lang=en&lat=22.57&lon=88.36&q='+encodeURIComponent(q));
+      // only places in the chosen country (19 Nov 2026): more are asked for, the rest of the world is dropped, the first five kept
+      const ctry=addrCountry(), india=ctry[0]==='India';
+      const r=await fetch('https://photon.komoot.io/api/?limit=25&lang=en'+(india?'&lat=22.57&lon=88.36':'')+'&q='+encodeURIComponent(q));
       const j=await r.json(); if(seq!==acSeq) return;
-      const items=(j.features||[]).map(function(f){ const p=f.properties||{};
+      const items=(j.features||[]).filter(function(f){ return String((f.properties||{}).countrycode||'').toLowerCase()===ctry[1]; }).map(function(f){ const p=f.properties||{};
         const line=[p.housenumber,p.name,p.street,p.district||p.locality].filter(Boolean).filter(function(v,i,a){ return a.indexOf(v)===i; }).join(', ');
-        return {line:line||p.name||'',city:p.city||p.county||p.state||'',pin:/^\d{6}$/.test(p.postcode||'')?p.postcode:'',more:[p.city,p.state,p.postcode].filter(Boolean).join(', ')}; })
-        .filter(function(x,i,arr){ return x.line&&arr.findIndex(function(y){ return y.line===x.line&&y.more===x.more; })===i; });
+        return {line:line||p.name||'',city:p.city||p.county||p.state||'',pin:india?(/^\d{6}$/.test(p.postcode||'')?p.postcode:''):String(p.postcode||'').slice(0,10),more:[p.city,p.state,p.postcode].filter(Boolean).join(', ')}; })
+        .filter(function(x,i,arr){ return x.line&&arr.findIndex(function(y){ return y.line===x.line&&y.more===x.more; })===i; }).slice(0,5);
       box.innerHTML=items.length?'<div class="acl">'+items.map(function(x,i){ return '<button type="button" data-acpick="'+k+'|'+i+'">'+esc(x.line)+'<small>'+esc(x.more)+'</small></button>'; }).join('')
         +'<div class="src">Suggestions from OpenStreetMap</div></div>':'';
       box._items=items;
@@ -550,7 +627,7 @@ let SYNC_T=null, SYNC_BUSY=false, SYNC_AGAIN=false, SYNC_FAIL=0;
 function setSaved(txt,bad){ const e=document.querySelector('#nav .saved'); if(e){ e.textContent=txt; e.style.color=bad?'var(--err)':''; } }
 function scheduleSync(){ if(!LINK) return; clearTimeout(SYNC_T); SYNC_T=setTimeout(function(){ doSync(false); },900); setSaved('Saving…'); }
 // The files kept on the server, as the customer has them now (which applicant, which document).
-function fileMeta(){ const out=[]; FILES.forEach(function(f,i){ ['pan','aadhaar'].forEach(function(k){ f[k].forEach(function(x){ if(x.saved) out.push({id:x.id,applicant:i,kind:k}); }); }); }); return out; }
+function fileMeta(){ const out=[]; FILES.forEach(function(f,i){ DOC_KINDS.forEach(function(k){ (f[k]||[]).forEach(function(x){ if(x.saved) out.push({id:x.id,applicant:i,kind:k}); }); }); }); return out; }
 async function doSync(keep){
   if(!LINK) return;
   if(SYNC_BUSY){ SYNC_AGAIN=true; return; }
@@ -569,6 +646,21 @@ async function doSync(keep){
 }
 document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden') doSync(true); });
 window.addEventListener('pagehide',function(){ doSync(true); });
+/* 19 Nov 2026: a photo is made smaller on the phone before it is sent - at most 1800 px on its long side, as a JPEG - so it uploads quickly and the
+   thank-you PDF (which draws every picture) stays within the server's time limit. A PDF, or a photo the browser cannot open (e.g. HEIC on some phones), goes as it is. */
+async function shrinkPhoto(f){
+  try{
+    if(!/^image\/(jpeg|png|webp)$/.test(f.type)) return f;
+    const bmp=await createImageBitmap(f);
+    const k=Math.min(1,1800/Math.max(bmp.width,bmp.height));
+    if(k===1&&f.type==='image/jpeg'&&f.size<900*1024) return f;
+    const cv=document.createElement('canvas'); cv.width=Math.round(bmp.width*k); cv.height=Math.round(bmp.height*k);
+    const g=cv.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,cv.width,cv.height); g.drawImage(bmp,0,0,cv.width,cv.height);
+    const blob=await new Promise(function(res){ cv.toBlob(res,'image/jpeg',0.85); });
+    if(!blob||blob.size>=f.size&&f.type==='image/jpeg') return f;
+    return new File([blob],String(f.name||'photo').replace(/\.[a-z0-9]+$/i,'')+'.jpg',{type:'image/jpeg'});
+  }catch(e){ return f; }
+}
 async function uploadKyc(ai,kind,file){
   toast('Uploading '+file.name+'…');
   const fd=new FormData(); fd.append('action','upload'); fd.append('token',TOKEN); fd.append('applicant',String(ai)); fd.append('kind',kind); fd.append('file',file,file.name);
@@ -594,7 +686,7 @@ function showDone(ref,email){
   $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
   $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Thank you! Your booking form has been received.</h2>'
     +''
-    +(email?'<p style="color:var(--slate)">A confirmation email, with your cost sheet, has been sent to <b style="color:var(--ink)">'+esc(email)+'</b>.</p>':'')
+    +(email?'<p style="color:var(--slate)">A confirmation email, with a copy of your form and the cost sheet, has been sent to <b style="color:var(--ink)">'+esc(email)+'</b>.</p>':'')
     +'<p style="color:var(--slate)">Our team will call you shortly to confirm your booking.</p>'
     +(TOKEN?'<p style="margin-top:14px"><button type="button" class="btn pri" data-viewsub="1" style="max-width:320px">View your submitted form</button></p>':'')+'</div></div>';
   window.scrollTo(0,0);
@@ -619,7 +711,7 @@ function docCard(f,label,who){
 }
 function staffDocs(){
   const fl=STAFF.form.files||[];
-  const nm={pan:'PAN card',aadhaar:'Aadhaar card'};
+  const nm={pan:'PAN card',aadhaar:'Aadhaar card',passport:'Passport',photo:'Photograph',payment:'Payment proof'};
   const people=S.applicants.map(function(a,i){ const mine=fl.filter(function(f){ return f.applicant===i&&f.kind!=='signature'; });
     const who=[a.title,a.full_name].filter(Boolean).join(' ')||('Applicant '+(i+1));
     return '<div class="dgrp"><h4><span class="dn">'+(i+1)+'</span>'+esc(i?'Joint applicant':'First applicant')+' <b>'+esc(who)+'</b></h4><div class="docg">'
@@ -642,13 +734,13 @@ function showStaff(jj){
   if(!Array.isArray(S.applicants)||!S.applicants.length) S.applicants=[newApp()];
   S.applicants=S.applicants.map(function(a){ return Object.assign(newApp(),a); });
   if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
-  FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
+  FILES=S.applicants.map(function(){ return blankFiles(); });
   (f.files||[]).forEach(function(x){ if(x.kind!=='signature'&&FILES[x.applicant]&&FILES[x.applicant][x.kind]) FILES[x.applicant][x.kind].push({saved:true,name:x.name}); });
   setProject(jj.project); COST.meta=jj.cost||null; if(COST.meta) loadCost();
   $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
   $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Submitted booking form</h2><div class="ref">'+esc(jj.ref_no||'')+'</div>'
       +'<p style="color:var(--slate);margin:4px 0 0">'+(f.submitted_at?'Submitted on '+esc(new Date(f.submitted_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})):'')+'</p></div></div>'
-    +stepReview()
+    +stepReview()+termsBlock()
     +(COST.meta?card('','','Cost sheet','Prepared by our Sales team.',costBody()):'')
     +card('','','Documents','Click a picture to enlarge it.',staffDocs());
   window.scrollTo(0,0);
@@ -661,13 +753,13 @@ function showSubmitted(jj){
   if(!Array.isArray(S.applicants)||!S.applicants.length) S.applicants=[newApp()];
   S.applicants=S.applicants.map(function(a){ return Object.assign(newApp(),a); });
   if(!Array.isArray(S.why)||!S.why.length) S.why=[''];
-  FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
+  FILES=S.applicants.map(function(){ return blankFiles(); });
   (sub.docs||[]).forEach(function(x){ if(FILES[x.applicant]&&FILES[x.applicant][x.kind]) FILES[x.applicant][x.kind].push({saved:true,name:x.kind}); });
   setProject(sub.project); COST.meta=sub.cost||null; if(COST.meta) loadCost();
   $('steps').innerHTML=''; $('nav').innerHTML=''; $('missing').innerHTML='';
   $('app').innerHTML='<div class="sec"><div class="done"><div class="ok">'+ICON.check+'</div><h2>Your booking form has been received.</h2>'
     +'<p style="color:var(--slate);margin-top:8px">'+(sub.submitted_at?'Submitted on '+esc(new Date(sub.submitted_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}))+'. ':'')+'Our team will call you shortly to confirm your booking.</p></div></div>'
-    +stepReview()
+    +stepReview()+termsBlock()
     +(COST.meta?card('','','Cost sheet','',costBody()):'');
   window.scrollTo(0,0);
 }
@@ -696,8 +788,11 @@ async function bootLink(){
   /* 13 Nov 2026: what Sales filled in is only a starting point - the customer can change any of it. It is put in when the form is opened
      for the first time; once the customer has a saved draft, the draft (their own answers) is what is shown. */
   if(!jj.draft) (pf.fields||pf.locked||[]).forEach(function(p){ const v=getIn(pf.values||{},p); if(v!=null&&v!=='') setIn(S,p,v); });
+  /* 19 Nov 2026: what Sales LOCKED (unit, size, price, booking amount on links made from today) is shown from Sales' values every time and cannot be changed. */
+  LOCK.clear();
+  (Array.isArray(pf.locked)?pf.locked:[]).forEach(function(p){ LOCK.add(p); const v=getIn(pf.values||{},p); setIn(S,p,v==null?'':v); });
   S.project=PROJECT;
-  FILES=S.applicants.map(function(){ return {pan:[],aadhaar:[]}; });
+  FILES=S.applicants.map(function(){ return blankFiles(); });
   (jj.files||[]).forEach(function(f){ if(FILES[f.applicant]&&FILES[f.applicant][f.kind]) FILES[f.applicant][f.kind].push({saved:true,id:f.id,name:f.name,ext:f.ext}); });
   SPOUSE_OPEN=!!(S.applicants[0]&&(S.applicants[0].spouse||S.applicants[0].anniversary));
   S.step=Math.max(0,Math.min(STEPS.length-1,parseInt(jj.step,10)||0));
@@ -714,7 +809,7 @@ document.addEventListener('input',function(e){
   if(/aadhaar$/.test(k)){ const d=v.replace(/\D/g,'').slice(0,12); v=d.replace(/(\d{4})(?=\d)/g,'$1 '); }
   if(/(price\.total|pay\.amount)$/.test(k)) v=v.replace(/[^\d]/g,'');
   if(/price\.(sba|basic|plc|flc)$/.test(k)) v=v.replace(/[^\d.]/g,'').replace(/(\..*)\./g,'$1');
-  if(/\.pin$/.test(k)) v=v.replace(/\D/g,'').slice(0,6);
+  if(/\.pin$/.test(k)) v=addrIndia()?v.replace(/\D/g,'').slice(0,6):v.toUpperCase().replace(/[^A-Z0-9 -]/g,'').slice(0,10);
   if(v!==e.target.value){ const same=v.length===e.target.value.length, pos=same?e.target.selectionStart:v.length; e.target.value=v; try{ e.target.setSelectionRange(pos,pos); }catch(_e){} }
   set(k,v);
   if(k==='pay.amount'){ const w=$('w-amount'); if(w) w.textContent=words(v); }
@@ -732,7 +827,7 @@ document.addEventListener('change',function(e){
   if(fk&&t.files&&t.files[0]){ const parts=fk.split('|'), f=t.files[0];
     if(f.size>10*1024*1024){ toast('That file is over 10 MB - please take a smaller photo'); return; }
     if(!/^image\//.test(f.type)&&f.type!=='application/pdf'){ toast('Please attach a photo or a PDF'); return; }
-    if(LINK){ uploadKyc(+parts[0],parts[1],f); t.value=''; return; }
+    if(LINK){ t.value=''; shrinkPhoto(f).then(function(g){ uploadKyc(+parts[0],parts[1],g); }); return; }
     FILES[+parts[0]][parts[1]].push(f); delete ERR['doc.'+parts[0]+'.'+parts[1]]; render(); }
 });
 document.addEventListener('click',function(e){
@@ -743,6 +838,7 @@ document.addEventListener('click',function(e){
   if(b.dataset.lbx){ closeLightbox(); return; }
   if(b.dataset.zoom!==undefined){ openZoom(+b.dataset.zoom); return; }
   if(b.dataset.costdl){ downloadPdf(); return; }
+  if(b.dataset.costpanel){ COST_OPEN=!COST_OPEN; if(COST_OPEN&&!S.cost_seen){ S.cost_seen=true; save(); } delete ERR.cost_seen; MISSING=MISSING.filter(function(m){ return m[0]!=='cost_seen'; }); render(); return; }
   if(b.dataset.cnav){ COST.cur=Math.max(0,Math.min(COST.pages.length-1,(COST.cur||0)+Number(b.dataset.cnav))); const h=$('costv'); if(h) h.innerHTML=costInner(); return; }
   if(b.dataset.costretry){ COST.state='idle'; const h=$('costv'); if(h) h.innerHTML=costInner(); loadCost(); return; }
   if(b.dataset.viewsub){ location.reload(); return; }
@@ -750,7 +846,7 @@ document.addEventListener('click',function(e){
   if(b.dataset.chip){ set(b.dataset.chip,b.dataset.v); if(ERR[b.dataset.chip]){ delete ERR[b.dataset.chip]; MISSING=MISSING.filter(function(m){ return m[0]!==b.dataset.chip; }); } render(); return; }
   if(b.dataset.acpick){ const p=b.dataset.acpick.split('|'), box=$('ac-'+p[0]), x=box&&box._items&&box._items[+p[1]]; if(!x) return;
     set(p[0]+'.line',x.line); if(x.city) set(p[0]+'.city',x.city); if(x.pin) set(p[0]+'.pin',x.pin); render(); return; }
-  if(b.dataset.add){ S.applicants.push(newApp()); FILES.push({pan:[],aadhaar:[]}); save(); render();
+  if(b.dataset.add){ S.applicants.push(newApp()); FILES.push(blankFiles()); save(); render();
     const cards=document.querySelectorAll('.app'); cards[cards.length-1].scrollIntoView({behavior:'smooth',block:'start'}); return; }
   /* Remove asks inside the page (a browser pop-up can be blocked or hidden, and then the button seems dead). */
   if(b.dataset.rm){ const i=+b.dataset.rm;
@@ -851,7 +947,7 @@ async function sendForm(otp){
   fd.append('data',JSON.stringify(data));
   if(LINK){ fd.append('token',TOKEN); fd.append('files',JSON.stringify(fileMeta())); }
   if(otp) fd.append('otp',otp);
-  FILES.forEach(function(f,i){ ['pan','aadhaar'].forEach(function(kind){ f[kind].forEach(function(file,n){ if(file instanceof Blob) fd.append('f_'+i+'_'+kind+'_'+n,file,file.name); }); }); });
+  FILES.forEach(function(f,i){ DOC_KINDS.forEach(function(kind){ (f[kind]||[]).forEach(function(file,n){ if(file instanceof Blob) fd.append('f_'+i+'_'+kind+'_'+n,file,file.name); }); }); });
   try{
     const r=await fetch(FN,{method:'POST',body:fd});
     const j=await r.json().catch(function(){ return {}; });

@@ -28,6 +28,7 @@
 // in JainE. The page gets back only a reference number.
 import { AwsClient } from "https://esm.sh/aws4fetch@1.0.20";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import { bookingPdf } from "./pdf.ts";
 
 const SB = Deno.env.get("SUPABASE_URL")!, SRV = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, x-client-info, apikey, authorization", "Access-Control-Allow-Methods": "POST, OPTIONS" };
@@ -84,7 +85,18 @@ function setPath(o: any, path: string, v: unknown) {
 // 13 Nov 2026, on the Administrator's word: what Sales fills in is only pre-filled - the customer CAN change it. Nothing is put back any more
 // (links made earlier carry a `locked` list; it is ignored). To lock answers again, restore the loop below:
 //   for (const p of (Array.isArray(pf?.locked) ? pf.locked : [])) { const v = getPath(pf.values || {}, p); setPath(d, p, v == null ? "" : v); }
-function applyLocked(d: any, _pf: any) {
+/* 19 Nov 2026 (Ayush: "the FLAT & SIZE & PRICE section ... Customer won't be able to alter it"; "the Amount can't be touched, it's the Booking Amount"):
+   links made from now on list the unit, size and price answers in `locked` again - those, and only those, are put back here, and the booking
+   amount the customer pays is the booking price Sales wrote. Name, mobile, email and the rest stay the customer's to change. */
+const LOCKABLE = /^(flat\.(block|floor|flat_no|bhk|parking|parkings)|price\.(sba|total|booking)|pay\.amount)$/;
+function applyLocked(d: any, pf: any) {
+  const vals = pf?.values || {};
+  for (const p of (Array.isArray(pf?.locked) ? pf.locked : [])) {
+    if (!LOCKABLE.test(String(p))) continue;
+    const v = getPath(vals, p); setPath(d, p, v == null ? "" : v);
+  }
+  const bk = getPath(vals, "price.booking");
+  if (bk != null && String(bk) !== "") { d.pay = d.pay && typeof d.pay === "object" ? d.pay : {}; d.pay.amount = String(bk); }
   return d;
 }
 async function getLink(token: string) {
@@ -100,6 +112,7 @@ const awsClient = () => {
 };
 const s3url = (c: { bucket: string; region: string }, key: string) => `https://${c.bucket}.s3.${c.region}.amazonaws.com/${key.split("/").map(encodeURIComponent).join("/")}`;
 const extOf = (name: string) => (name.split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
+const KINDS = ["pan", "aadhaar", "passport", "photo", "payment"];   // 19 Nov 2026: passport (foreign nationals), photograph (optional), payment proof
 const draftFileView = (f: any) => ({ id: f.id, applicant: f.applicant, kind: f.kind, name: f.name, ext: extOf(f.name || "") });
 
 // Customer's list of files (id, applicant, kind) wins; a file nobody lists any more is dropped - but not in its first
@@ -112,7 +125,7 @@ async function reconcileFiles(link: any, listed: any) {
   for (const f of cur) {
     const x = keep.get(f.id);
     if (x) {
-      const a = Number(x.applicant), kind = x.kind === "aadhaar" ? "aadhaar" : x.kind === "pan" ? "pan" : f.kind;
+      const a = Number(x.applicant), kind = KINDS.includes(x.kind) ? x.kind : f.kind;
       out.push({ ...f, applicant: Number.isInteger(a) && a >= 0 && a < MAX_APPLICANTS ? a : f.applicant, kind });
     } else if (Date.now() - (f.at || 0) < 20_000) out.push(f);
     else drop.push(f);
@@ -166,24 +179,30 @@ async function signedGet(c: { bucket: string; region: string; aws: any }, key: s
 
 // ---- Cost sheet (13 Nov 2026): Sales attaches a PDF when making the link (compulsory); the customer sees it after the terms as pictures.
 // It is kept in the private S3 bucket; the page never gets its path - it asks for the bytes with the link's token (cost_pdf).
-const costMeta = (link: any) => { const c = link?.prefill?.cost_sheet; return c && c.path ? { name: String(c.name || "Cost sheet.pdf"), size: Number(c.size) || 0 } : null; };
+const costType = (c: any) => { const t = String(c?.type || ""); if (t) return t; const e = extOf(String(c?.path || c?.name || "")); return e === "png" ? "image/png" : e === "webp" ? "image/webp" : /^(jpe?g)$/.test(e) ? "image/jpeg" : "application/pdf"; };
+const costMeta = (link: any) => { const c = link?.prefill?.cost_sheet; return c && c.path ? { name: String(c.name || "Cost sheet.pdf"), size: Number(c.size) || 0, type: costType(c) } : null; };
 // The prefill as the customer's page may see it: the cost sheet is shown by name and size only.
 const publicPrefill = (link: any) => { const p = JSON.parse(JSON.stringify(link?.prefill || {})); if (p.cost_sheet) p.cost_sheet = { name: p.cost_sheet.name, size: p.cost_sheet.size }; return p; };
 async function handleCostUpload(form: FormData, req: Request) {
   const who = await staffUser(req);
   if (!who) return j({ error: "Not allowed." }, 403);
   const file = form.get("file");
-  if (!(file instanceof File)) return j({ error: "Please choose the cost sheet PDF." }, 400);
-  if (file.size > MAX_FILE) return j({ error: "The cost sheet is over 10 MB. Please attach a smaller PDF." }, 400);
+  if (!(file instanceof File)) return j({ error: "Please choose the cost sheet (PDF or picture)." }, 400);
+  if (file.size > MAX_FILE) return j({ error: "The cost sheet is over 10 MB. Please attach a smaller file." }, 400);
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const head = new TextDecoder().decode(bytes.subarray(0, 5));
-  if (head !== "%PDF-") return j({ error: "The cost sheet must be a PDF file." }, 400);
+  // 19 Nov 2026 (Ayush: "add the flexibility for Image File types"): a PDF, or a JPG / PNG / WEBP picture - told apart by their first bytes, never by the name
+  const b = bytes;
+  const kind = new TextDecoder().decode(b.subarray(0, 5)) === "%PDF-" ? { ext: "pdf", type: "application/pdf" }
+    : b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff ? { ext: "jpg", type: "image/jpeg" }
+    : b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 ? { ext: "png", type: "image/png" }
+    : b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50 ? { ext: "webp", type: "image/webp" } : null;
+  if (!kind) return j({ error: "The cost sheet must be a PDF or a picture (JPG, PNG)." }, 400);
   const c = awsClient();
   if (!c) return j({ error: "The file store is not connected." }, 500);
-  const key = `portal/digital-booking/cost-sheets/${crypto.randomUUID()}.pdf`;
-  const put = await c.aws.fetch(s3url(c, key), { method: "PUT", body: bytes, headers: { "Content-Type": "application/pdf" } });
+  const key = `portal/digital-booking/cost-sheets/${crypto.randomUUID()}.${kind.ext}`;
+  const put = await c.aws.fetch(s3url(c, key), { method: "PUT", body: bytes, headers: { "Content-Type": kind.type } });
   if (!put.ok) return j({ error: "The cost sheet did not upload. Please try again." }, 502);
-  return j({ ok: true, cost: { path: "s3:" + key, name: safeName(file.name || "Cost sheet.pdf").slice(-100), size: file.size } });
+  return j({ ok: true, cost: { path: "s3:" + key, name: safeName(file.name || ("Cost sheet." + kind.ext)).slice(-100), size: file.size, type: kind.type } });
 }
 async function costBytes(link: any): Promise<Uint8Array | null> {
   const p = link?.prefill?.cost_sheet?.path; if (!p) return null;
@@ -247,17 +266,17 @@ async function sendViaGmail(user: string, name: string, m: { to: string[]; cc: s
   return true;
 }
 // Sends one email. to / cc are the REAL recipients; in test mode they are replaced by the test inbox and named in a banner.
-async function sendMail(o: { to: string[]; cc?: string[]; subject: string; html: string; text: string; attachments?: any[]; kind: string }) {
+async function sendMail(o: { to: string[]; cc?: string[]; bcc?: string[]; subject: string; html: string; text: string; attachments?: any[]; kind: string }) {
   const CU = Deno.env.get("CUSTOMER_MAIL_USER"), CP = Deno.env.get("CUSTOMER_MAIL_APP_PASSWORD");
   if (!CU || !CP) throw new Error("Pallabita Ghosh's mailbox is not connected");
   const conf = await mailConf();
-  let { subject, html, text } = o, to = o.to, cc = (o.cc || []).filter((x) => !to.includes(x));
+  let { subject, html, text } = o, to = o.to, cc = (o.cc || []).filter((x) => !to.includes(x)), bcc = (o.bcc || []).filter((x) => !to.includes(x));
   if (!conf.live) {
     const would = `To: ${o.to.join(", ")}${cc.length ? " | CC: " + cc.join(", ") : ""}`;
     subject = "[TEST] " + subject;
     html = `<div style="font-family:Arial,sans-serif;font-size:13px;background:#fef3c7;border:1px solid #f59e0b;padding:10px 14px;margin:0 0 18px;border-radius:6px"><b>TEST MODE</b> - in live mode this ${hE(o.kind)} would have gone to: ${hE(would)}</div>` + html;
     text = `[TEST MODE - in live mode this ${o.kind} would have gone to: ${would}]\n\n` + text;
-    to = [conf.testTo]; cc = [];
+    to = [conf.testTo]; cc = []; bcc = [];
   }
   // Test mode: send AS the Administrator through their own Gmail when they have connected Google; otherwise fall through to the shared mailbox below.
   if (!conf.live && conf.fromUser) {
@@ -267,7 +286,7 @@ async function sendMail(o: { to: string[]; cc?: string[]; subject: string; html:
   const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: CU, password: CP } } });
   try {
     // The mailbox that logs in to send is always customercare1@ (Gmail will not let it send "as" another account); in test mode the name shown and the reply-to are the Administrator's.
-    await client.send({ from: `${conf.live ? "Pallabita Ghosh" : "Ayush Ruia"} - The Jain Group <${CU}>`, ...(conf.live ? {} : { replyTo: conf.testTo }), to, ...(cc.length ? { cc } : {}), subject: asciiSubject(subject),
+    await client.send({ from: `${conf.live ? "Pallabita Ghosh" : "Ayush Ruia"} - The Jain Group <${CU}>`, ...(conf.live ? {} : { replyTo: conf.testTo }), to, ...(cc.length ? { cc } : {}), ...(bcc.length ? { bcc } : {}), subject: asciiSubject(subject),
       mimeContent: [b64Part("text/plain", text), b64Part("text/html", html)], ...(o.attachments && o.attachments.length ? { attachments: o.attachments } : {}) });
   } finally { try { await client.close(); } catch (_) { /* ignore */ } }
   return { live: conf.live, via: "smtp" };
@@ -288,7 +307,7 @@ async function sendOtpMail(proj: Proj, email: string, code: string) {
   return await sendMail({ to: [email], subject: `${code} is your verification code`, html, text, kind: "verification code" });
 }
 const rupee = (v: unknown) => { const n = Number(String(v ?? "").replace(/[^\d.]/g, "")); return n ? "₹" + n.toLocaleString("en-IN") : ""; };
-async function sendConfirmation(proj: Proj, link: any, d: any, ref: string) {
+async function sendConfirmation(proj: Proj, link: any, d: any, ref: string, saved: any[] = []) {
   const first = d.applicants?.[0] || {}, email = clean(d.contact?.email, 200).toLowerCase();
   const names = (d.applicants || []).map((a: any) => [a.title, clean(a.full_name)].filter(Boolean).join(" ")).filter(Boolean);
   const unit = [d.flat?.block, d.flat?.floor ? "Floor " + d.flat.floor : "", d.flat?.flat_no ? "Flat " + String(d.flat.flat_no).toUpperCase() : ""].filter(Boolean).join(", ");
@@ -303,19 +322,55 @@ async function sendConfirmation(proj: Proj, link: any, d: any, ref: string) {
     : { html: `<p style="margin:0"><b>Ayush Ruia</b></p><p style="margin:0 0 14px;color:#4b5563">The Jain Group &middot; ayushruia1@gmail.com</p>`, text: "Ayush Ruia\nThe Jain Group | ayushruia1@gmail.com" };
   const html = shell(`<p style="margin:0 0 14px">Dear <b>${hE(who)}</b>,</p>`
     + `<p style="margin:0 0 14px">Thank you for choosing <b>${hE(proj.name)}</b>. We are truly grateful that you have made ${hE(proj.name)} your new home. Your trust means a great deal to us, and everyone at The Jain Group looks forward to welcoming you to the ${hE(proj.name)} family.</p>`
-    + `<p style="margin:0 0 14px">We have received your booking application${unit ? ` for <b>${hE(unit)}</b>` : ""} and verified your email address. You can see exactly what you submitted at any time here: <a href="${hE(viewUrl)}" style="color:#b3171d;font-weight:700">View your submitted form</a></p>`
+    + `<p style="margin:0 0 14px">We have received your booking application${unit ? ` for <b>${hE(unit)}</b>` : ""} and verified your email address. You can see exactly what you submitted at any time here: <a href="${hE(viewUrl)}" style="color:#b3171d;font-weight:700">View your submitted form</a>, and in the document attached below.</p>`
     + `<p style="margin:0 0 14px">Thank you once again for your confidence in us.</p><p style="margin:0 0 4px">Warm regards,</p>` + sign.html, proj);
   const text = `Dear ${who},\n\nThank you for choosing ${proj.name}. We are truly grateful that you have made ${proj.name} your new home. Your trust means a great deal to us, and everyone at The Jain Group looks forward to welcoming you to the ${proj.name} family.\n\n`
-    + `We have received your booking application${unit ? " for " + unit : ""} and verified your email address. You can see exactly what you submitted at any time here:\n${viewUrl}\n\nThank you once again for your confidence in us.\n\nWarm regards,\n${sign.text}`;
+    + `We have received your booking application${unit ? " for " + unit : ""} and verified your email address. You can see exactly what you submitted at any time here:\n${viewUrl}\nand in the document attached below.\n\nThank you once again for your confidence in us.\n\nWarm regards,\n${sign.text}`;
   const attachments: any[] = [];
-  const pdf = await costBytes(link);
-  if (pdf) { let bin = ""; for (let i = 0; i < pdf.length; i += 0x8000) bin += String.fromCharCode(...pdf.subarray(i, i + 0x8000)); attachments.push({ filename: String(link.prefill?.cost_sheet?.name || "Cost Sheet.pdf"), content: btoa(bin), encoding: "base64", contentType: "application/pdf" }); }
-  const cc = [...new Set([SALES_HEAD, ...proj.team].map((x) => x.toLowerCase()))];
-  return await sendMail({ to: [email], cc, subject: `Thank you for choosing ${proj.name}`, html, text, attachments, kind: "confirmation" });
+  const b64 = (u: Uint8Array) => { let bin = ""; for (let i = 0; i < u.length; i += 0x8000) bin += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(bin); };
+  const separateFiles: any[] = [];
+  // 19 Nov 2026: the submitted form as a PDF (with the Terms, Declaration and Special Conditions), first; then the cost sheet (a PDF or a picture)
+  try {
+    const logos: Uint8Array[] = [];
+    for (const rel of ["assets/brand/jaingroup-logo.png", proj.logo].filter(Boolean)) { try { const r = await fetch(logoUrl(rel)); if (r.ok) logos.push(new Uint8Array(await r.arrayBuffer())); } catch (_) { /* no logo */ } }
+    // 19 Nov 2026 (Ayush: "the Thank You PDF will have the images uploaded as well"): every document the customer attached goes into the PDF
+    /* Only pictures that cost little to draw go INTO the PDF (a JPEG is copied in as it is; a PNG must be decoded, so only a small one). An attached PDF, a
+       large PNG or an iPhone HEIC is attached to the email as its own file and listed in the PDF - merging or decoding those ran past the CPU limit. */
+    const docs: { label: string; type: string; bytes: Uint8Array }[] = [];
+    const separate: string[] = [];
+    let sepBytes = 0;
+    const c3 = awsClient();
+    const NM: Record<string, string> = { pan: "PAN card", aadhaar: "Aadhaar card", passport: "Passport", photo: "Photograph", payment: "Payment proof" };
+    if (c3) for (const f of saved) {
+      if (!f || f.kind === "signature" || typeof f.path !== "string") continue;
+      try {
+        const r = await c3.aws.fetch(s3url(c3, f.path.replace(/^s3:/, "")), { method: "GET" });
+        if (!r.ok) continue;
+        const who = (d.applicants || [])[Number(f.applicant) - 1] || {};
+        const label = `${NM[f.kind] || f.kind}${f.kind === "payment" ? "" : " - " + ([who.title, clean(who.full_name)].filter(Boolean).join(" ") || "Applicant " + f.applicant)}`;
+        const bytes = new Uint8Array(await r.arrayBuffer()), type = String(r.headers.get("content-type") || "");
+        const jpg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff, png = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+        if (jpg || (png && bytes.length < 700_000)) { docs.push({ label, type, bytes }); continue; }
+        const fname = `${label} - ${String(f.name || "file")}`.replace(/[\\/:*?"<>|]+/g, " ").slice(0, 120);
+        if (sepBytes + bytes.length < 15 * 1024 * 1024) { sepBytes += bytes.length; separateFiles.push({ filename: fname, content: b64(bytes), encoding: "base64", contentType: type || "application/octet-stream" }); separate.push(label + " (attached to this email)"); }
+        else separate.push(label + " (kept with the booking form - too large for the email)");
+      } catch (_) { /* a document that cannot be read is left out of the PDF (it is still kept with the form) */ }
+    }
+    const form = await bookingPdf({ projectName: proj.name, company: proj.company, ref, submittedAt: new Date().toISOString(), d, files: saved, logos, docs, separate });
+    attachments.push({ filename: `${proj.name} - Booking application.pdf`, content: b64(form), encoding: "base64", contentType: "application/pdf" });
+  } catch (e) { console.error("form pdf", e); }
+  attachments.push(...separateFiles);
+  const cost = await costBytes(link);
+  if (cost) attachments.push({ filename: String(link.prefill?.cost_sheet?.name || "Cost Sheet.pdf"), content: b64(cost), encoding: "base64", contentType: costType(link.prefill?.cost_sheet) });
+  // 19 Nov 2026 (Ayush: "emails will go to customer email, agm.sales only right now"): the project teams (proj.team) are not copied for now
+  // ...as a BLIND copy (19 Nov 2026, Ayush: the customer should not see other addresses beside their own)
+  const bcc = [SALES_HEAD.toLowerCase()];
+  return await sendMail({ to: [email], bcc, subject: `Thank you for choosing ${proj.name}`, html, text, attachments, kind: "confirmation" });
 }
 
 // ---- OTP (13 Nov 2026): before a generated link is submitted, the customer proves the email address with a 6-digit code. The code is kept only as a hash (acc.digital_booking_links.otp).
 const sha256hex = async (s: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))).map((x) => x.toString(16).padStart(2, "0")).join("");
+const jobKey = (token: string) => sha256hex(`job:${token}:${SRV.slice(0, 32)}`);
 const otpHash = (code: string, link: any, email: string) => sha256hex(`${code}:${link.id}:${email}:${SRV.slice(0, 24)}`);
 const OTP_TTL = 10 * 60_000, OTP_GAP = 30_000, OTP_PER_HOUR = 5, OTP_TRIES = 5;
 const needsOtp = (link: any) => !!(link && link.prefill && link.prefill.cost_sheet && link.prefill.cost_sheet.path);
@@ -396,11 +451,24 @@ async function handleJson(req: Request) {
     return j({ ok: true, staff: true, status: "completed", ref_no: link.ref_no || "", project: projectInfo(link.project), cost: costMeta(link), form: { data, files, submitted_at: f.submitted_at, status: f.status, note: f.note || "", seen_by: f.seen_by || "", seen_at: f.seen_at || null } });
   }
 
+  // The thank-you email, sent in its own run after a submit (see handleSubmit). Only this function can start it: the key is derived from the server's own secret.
+  if (b.action === "send_confirmation") {
+    if (String(b.key || "") !== await jobKey(link.token)) return j({ error: "Not allowed." }, 403);
+    if (!link.form_id) return j({ error: "This form has not been submitted yet." }, 409);
+    const rows = await db(`digital_booking_forms?select=id,ref_no,data,files,confirm_mail&id=eq.${link.form_id}&limit=1`);
+    const f = rows && rows[0]; if (!f) return j({ error: "Form not found." }, 404);
+    if (f.confirm_mail && f.confirm_mail.sent && !b.again) return j({ ok: true, already: true });
+    let mail: any;
+    try { const r = await sendConfirmation(proj, link, f.data || {}, f.ref_no || "", Array.isArray(f.files) ? f.files : []); mail = { sent: true, live: r.live, at: new Date().toISOString() }; }
+    catch (e) { console.error("confirmation mail", e); mail = { sent: false, error: String((e as Error)?.message || e).slice(0, 200), at: new Date().toISOString() }; }
+    await db(`digital_booking_forms?id=eq.${f.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ confirm_mail: mail }) });
+    return j({ ok: true, mail });
+  }
   if (b.action === "cost_pdf") {
     if (link.status === "cancelled") return j({ error: NOT_VALID }, 404);
     const bytes = await costBytes(link);
     if (!bytes) return j({ error: "There is no cost sheet on this link." }, 404);
-    return new Response(bytes, { status: 200, headers: { ...cors, "Content-Type": "application/pdf", "Cache-Control": "no-store" } });
+    return new Response(bytes, { status: 200, headers: { ...cors, "Content-Type": costType(link.prefill?.cost_sheet), "Cache-Control": "no-store" } });
   }
   if (b.action === "otp_send") {
     if (link.status !== "open") return j({ error: link.status === "completed" ? "This form has already been submitted." : NOT_VALID }, 409);
@@ -454,7 +522,7 @@ async function handleUpload(form: FormData) {
   if (!link || link.status !== "open") return j({ error: NOT_VALID }, 404);
   const file = form.get("file");
   const ai = Number(clean(form.get("applicant"), 2)), kind = clean(form.get("kind"), 10);
-  if (!(file instanceof File) || !Number.isInteger(ai) || ai < 0 || ai >= MAX_APPLICANTS || (kind !== "pan" && kind !== "aadhaar")) return j({ error: "That file could not be read." }, 400);
+  if (!(file instanceof File) || !Number.isInteger(ai) || ai < 0 || ai >= MAX_APPLICANTS || !KINDS.includes(kind)) return j({ error: "That file could not be read." }, 400);
   if (file.size > MAX_FILE) return j({ error: "That file is over 10 MB. Please attach a smaller photo or PDF." }, 400);
   if (!OK_TYPES.test(file.type || "")) return j({ error: "Please attach a photo (JPG, PNG) or a PDF." }, 400);
   const cur: any[] = Array.isArray(link.draft_files) ? link.draft_files : [];
@@ -497,10 +565,19 @@ async function handleSubmit(form: FormData, ip: string, req: Request) {
   const apps = Array.isArray(d.applicants) ? d.applicants.slice(0, MAX_APPLICANTS) : [];
   if (!apps.length) return j({ error: "Please add at least one applicant." }, 400);
   const problems: string[] = [];
+  // 19 Nov 2026: the stricter checks (Aadhaar number, date of birth, passport for a foreign national, payment proof) apply to links made by the new
+  // Generate Form (prefill.version 2), so a customer already half-way through an older link is not stopped by questions their page never asked.
+  const v2 = !!(link && Number(link.prefill?.version) >= 2);
   const seenPan: Record<string, number> = {}, seenAad: Record<string, number> = {};
   apps.forEach((a: any, i: number) => {
     const who = i ? `Applicant ${i + 1}` : "First applicant";
     if (!clean(a.full_name)) problems.push(`${who}: name is missing`);
+    const ind = !clean(a.nationality) || /^india$/i.test(clean(a.nationality));
+    // 19 Nov 2026: the Aadhaar number is compulsory for an Indian national; the first applicant's date of birth too
+    if (v2 && ind && !clean(a.aadhaar, 14).replace(/\s/g, "")) problems.push(`${who}: Aadhaar number is missing`);
+    if (v2 && i === 0 && !clean(a.dob, 12)) problems.push(`${who}: date of birth is missing`);
+    if (v2 && !ind && !clean(a.passport, 30)) problems.push(`${who}: passport number is missing`);
+    if (v2 && !clean(a.pan, 10)) problems.push(`${who}: PAN number is missing`);   // 19 Nov 2026: PAN is compulsory for everybody
     const pan = clean(a.pan, 10).toUpperCase(), aad = clean(a.aadhaar, 14).replace(/\s/g, "");
     if (pan && !PAN.test(pan)) problems.push(`${who}: PAN should look like ABCDE1234F`);
     if (aad && !AADHAAR.test(aad)) problems.push(`${who}: Aadhaar number should be 12 digits`);
@@ -520,13 +597,13 @@ async function handleSubmit(form: FormData, ip: string, req: Request) {
   let total = kept.reduce((s, f) => s + (f.size || 0), 0);
   for (const [k, v] of form.entries()) {
     if (!(v instanceof File)) continue;
-    const m = /^f_(\d)_(pan|aadhaar)_\d$/.exec(k) || /^sig_(\d)$/.exec(k);
+    const m = /^f_(\d)_(pan|aadhaar|passport|photo|payment)_\d+$/.exec(k) || /^sig_(\d)$/.exec(k);
     if (!m) continue;
     const ai = Number(m[1]); if (ai >= apps.length) continue;
     if (k.startsWith("sig_")) continue;   // a signature is no longer kept
     const kind = m[2];
     if (v.size > MAX_FILE) return j({ error: `A file for applicant ${ai + 1} is larger than 10 MB. Please attach a smaller photo or PDF.` }, 400);
-    if (kind !== "signature" && !OK_TYPES.test(v.type || "")) return j({ error: `Please attach PAN / Aadhaar as a photo (JPG, PNG) or PDF.` }, 400);
+    if (kind !== "signature" && !OK_TYPES.test(v.type || "")) return j({ error: `Please attach documents as a photo (JPG, PNG) or PDF.` }, 400);
     if (kind === "signature" && v.type !== "image/png") continue;
     total += v.size; files.push({ applicant: ai, kind, file: v });
   }
@@ -536,9 +613,11 @@ async function handleSubmit(form: FormData, ip: string, req: Request) {
     const who = i ? `Applicant ${i + 1}` : "First applicant";
     // 13 Nov 2026: no signature is asked for or kept any more.
     const indian = !clean(a.nationality) || /^india$/i.test(clean(a.nationality));
-    if (indian && !has(i, "pan")) problems.push(`${who}: please attach the PAN card`);
+    if ((indian || v2) && !has(i, "pan")) problems.push(`${who}: please attach the PAN card`);
     if (indian && !has(i, "aadhaar")) problems.push(`${who}: please attach the Aadhaar card`);
+    if (v2 && !indian && !has(i, "passport")) problems.push(`${who}: please attach the passport`);   // 19 Nov 2026: for a foreign national the passport takes the Aadhaar's place
   });
+  if (v2 && !has(0, "payment")) problems.push("Please attach the proof of the booking amount payment");
   if (problems.length) return j({ error: "Please check: " + problems.join("; ") + ".", problems }, 400);
   // A link made with a cost sheet is submitted only with the 6-digit code emailed to the customer (13 Nov 2026).
   if (link && needsOtp(link)) { const bad = await otpCheck(link, clean(c.email, 200).toLowerCase(), clean(form.get("otp"), 12)); if (bad) return bad; }
@@ -580,12 +659,16 @@ async function handleSubmit(form: FormData, ip: string, req: Request) {
       }) });
     }
     let mail: any = null;
+    /* 19 Nov 2026: the thank-you email (with the form PDF and the documents) is built in a SEPARATE run of this function, started here and not waited for.
+       Building it inside this request ran past Supabase's CPU limit ("CPU Time exceeded", error 546) - the booking was saved but the customer saw an error
+       and no email went. Now the customer gets their Thank You at once, and the email follows a few seconds later (confirm_mail records how it went). */
     if (link && needsOtp(link)) {
-      try { const r = await sendConfirmation(proj, link, d, ref); mail = { sent: true, live: r.live, at: new Date().toISOString() }; }
-      catch (e) { console.error("confirmation mail", e); mail = { sent: false, error: String((e as Error)?.message || e).slice(0, 200), at: new Date().toISOString() }; }
-      try { await db("digital_booking_forms?id=eq." + id, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ confirm_mail: mail }) }); } catch (_) { /* column may not exist yet */ }
+      mail = { queued: true, at: new Date().toISOString() };
+      const job = fetch(`${SB}/functions/v1/booking-form-public`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send_confirmation", token: link.token, key: await jobKey(link.token) }) }).catch((e) => console.error("confirmation job", e));
+      try { (globalThis as any).EdgeRuntime?.waitUntil?.(job); } catch (_) { /* best effort */ }
     }
-    return j({ ok: true, ref_no: ref, email: mail && mail.sent ? clean(c.email, 200).toLowerCase() : "" });
+    return j({ ok: true, ref_no: ref, email: mail ? clean(c.email, 200).toLowerCase() : "" });
   } catch (e) {
     console.error(e);
     return j({ error: "We could not save your form just now. Nothing was lost on your phone - please press Submit again in a minute." }, 500);

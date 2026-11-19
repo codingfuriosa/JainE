@@ -17142,7 +17142,7 @@ window.pdfOpen=async function(id){
   if(error||!data){ $('pdfDetail').innerHTML='<div class="empty"><div>Could not load this form'+(error?': '+esc(error.message):'')+'.</div></div>'; return; }
   const d=data.data||{}, apps=d.applicants||[], c=d.contact||{}, fl=d.flat||{}, pr=d.price||{}, py=d.pay||{}, pf=d.profession||{};
   const files=data.files||[];
-  const fileBtns=(i)=>files.filter(f=>f.applicant===i+1&&f.kind!=='signature').map(f=>'<button class="btn" style="padding:4px 10px;margin:2px 6px 2px 0" onclick="s3OpenSigned(\''+esc(f.path)+'\')"><i class="fa-solid fa-paperclip"></i> '+(f.kind==='pan'?'PAN':'Aadhaar')+' &middot; '+esc(f.name)+'</button>').join('');
+  const fileBtns=(i)=>files.filter(f=>f.applicant===i+1&&f.kind!=='signature').map(f=>'<button class="btn" style="padding:4px 10px;margin:2px 6px 2px 0" onclick="s3OpenSigned(\''+esc(f.path)+'\')"><i class="fa-solid fa-paperclip"></i> '+({pan:'PAN',aadhaar:'Aadhaar',passport:'Passport',photo:'Photograph',payment:'Payment proof'}[f.kind]||f.kind)+' &middot; '+esc(f.name)+'</button>').join('');
   const sig=files.filter(f=>f.kind==='signature')[0];
   const html='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="font-size:16px">'+esc(data.ref_no||'')+'</b>'+pdfChip(data.status)
       +'<span style="color:var(--slate);font-size:13px">Received '+esc(pdfWhen(data.submitted_at))+(data.seen_by?' &middot; first opened by '+esc(data.seen_by)+', '+esc(pdfWhen(data.seen_at)):'')+'</span></div>'
@@ -17151,14 +17151,14 @@ window.pdfOpen=async function(id){
         pdfRow('Nationality',a.nationality),pdfRow('PAN',(a.pan||'').toUpperCase()),pdfRow('Aadhaar',a.aadhaar),pdfRow('Passport',a.passport),pdfRow('Bank details',a.bank_details),
         pdfRow('Spouse',a.spouse),pdfRow('Anniversary',pdfD(a.anniversary)),
         '<tr><td style="padding:6px 0;color:var(--slate);vertical-align:top">Documents</td><td style="padding:6px 0">'+(fileBtns(i)||'<span style="color:var(--slate)">None attached</span>')+'</td></tr>'])).join('')
-    +pdfSec('Contact & address',[pdfRow('Mobile',((c.cc||'')+' '+(c.mobile||'')).trim()),pdfRow('Email',c.email),pdfRow('Contact person',c.contact_person),pdfRow('Residential address',pdfAddr(d.res)),
+    +pdfSec('Contact & address',[pdfRow('Mobile',((c.cc||'')+' '+(c.mobile||'')).trim()),pdfRow('Email',c.email),pdfRow('Primary contact person',c.contact_person),pdfRow('Residential address',pdfAddr(d.res)),
         pdfRow('Office address',d.off&&d.off.on?pdfAddr(d.off):''),pdfRow('Letters to',d.mailing==='Other'?'Other: '+(d.mailing_other||''):d.mailing),pdfRow('Permanent address',d.permanent==='Other'?'Other: '+(d.permanent_other||''):d.permanent)])
     +pdfSec('About',[pdfRow('Profession',pf.kind),pdfRow('Company',pf.company),pdfRow('Designation',pf.designation),pdfRow('Gross income',pf.income),pdfRow('Community',pf.community),
         pdfRow('Heard about us from',d.heard==='Other'?d.heard_other:d.heard),pdfRow('Why this project',(d.why||[]).filter(Boolean).map((w,i)=>(i+1)+'. '+w).join('   '))])
-    +pdfSec('Flat',[pdfRow('Block',fl.block),pdfRow('Floor',fl.floor),pdfRow('Flat',(fl.flat_no||'').toUpperCase()),pdfRow('Bedrooms',fl.bhk),pdfRow('Car park',fl.parking),
+    +pdfSec('Flat',[pdfRow('Block',fl.block),pdfRow('Floor',fl.floor),pdfRow('Flat',(fl.flat_no||'').toUpperCase()),pdfRow('Bedrooms',fl.bhk),pdfRow('Car park',(Array.isArray(fl.parkings)&&fl.parkings.length?fl.parkings:[fl.parking]).filter(Boolean).join(', ')),
         pdfRow('Super built-up area',pr.sba?pr.sba+' sq.ft.':''),pdfRow('Rate per sq.ft.',[pr.basic&&'Basic '+pr.basic,pr.plc&&'PLC '+pr.plc,pr.flc&&'FLC '+pr.flc].filter(Boolean).join(' + ')),
-        pdfRow('Total sale price',pr.total?'₹'+Number(pr.total).toLocaleString('en-IN'):''),pdfRow('Payment plan',pr.plan),pdfRow('Home loan',pr.loan==='Yes'?'Yes'+(pr.bank?' - '+pr.bank:''):pr.loan)])
-    +pdfSec('Application payment',[pdfRow('Amount',py.amount?'₹'+Number(py.amount).toLocaleString('en-IN'):''),pdfRow('Paid by',py.mode),pdfRow('Reference',py.ref),pdfRow('Bank / branch',[py.bank,py.branch].filter(Boolean).join(', ')),
+        pdfRow('Total sale price',pr.total?'₹'+Number(pr.total).toLocaleString('en-IN'):''),pdfRow('Booking price',pr.booking?'₹'+Number(pr.booking).toLocaleString('en-IN'):''),pdfRow('Home loan',pr.loan==='Yes'?'Yes'+(pr.bank?' - '+pr.bank:''):pr.loan)])
+    +pdfSec('Booking amount',[pdfRow('Booking amount',py.amount?'₹'+Number(py.amount).toLocaleString('en-IN'):''),pdfRow('Paid by',py.mode),pdfRow('Reference',py.ref),pdfRow('Bank / branch',[py.bank,py.branch].filter(Boolean).join(', ')),
         pdfRow('Date',pdfD(py.date)),pdfRow('Purpose',d.purpose),pdfRow('Booked through',(d.sales||'')+(d.sales_name?' - '+d.sales_name:'')),pdfRow('Lead ID',d.lead_id)])
     +'<div style="margin-top:16px"><div style="font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);margin-bottom:6px">Signature</div>'
       +(sig?'<button class="btn" style="padding:4px 10px" onclick="s3OpenSigned(\''+esc(sig.path)+'\')"><i class="fa-solid fa-signature"></i> Open signature</button>':'<span style="color:var(--slate)">Not found</span>')
@@ -17386,18 +17386,33 @@ function pgCostDraw(){
   const h=$('pgCostBox'); if(!h) return;
   if(PG.uploading){ h.innerHTML='<span class="up"><i class="fa-solid fa-spinner fa-spin"></i> Uploading...</span>'; return; }
   const c=PG.cost;
-  h.innerHTML=(c&&c.path)?'<i class="fa-regular fa-file-pdf pdf"></i><span class="nm" title="'+esc(c.name||'')+'">'+esc(c.name||'Cost sheet.pdf')+'</span><span class="sz">&middot; '+esc(pgSize(c.size))+'</span><button type="button" class="btn" style="padding:4px 12px" onclick="pgCostChoose()">Replace</button>'
-    :'<button type="button" class="btn" onclick="pgCostChoose()"><i class="fa-solid fa-file-arrow-up"></i> Choose PDF</button><span class="sz">PDF only, up to 10 MB</span>';
+  h.innerHTML=(c&&c.path)?'<i class="fa-regular '+(/^image\//.test(c.type||'')?'fa-file-image':'fa-file-pdf')+' pdf"></i><span class="nm" title="'+esc(c.name||'')+'">'+esc(c.name||'Cost sheet.pdf')+'</span><span class="sz">&middot; '+esc(pgSize(c.size))+'</span><button type="button" class="btn" style="padding:4px 12px" onclick="pgCostChoose()">Replace</button>'
+    :'<button type="button" class="btn" onclick="pgCostChoose()"><i class="fa-solid fa-file-arrow-up"></i> Choose file</button><span class="sz">PDF or picture (JPG, PNG), up to 10 MB</span>';
 }
+/* CAR PARKS (19 Nov 2026, Ayush: "maybe customer is taking more than 1 ... one more option along with Covered and Open, NA"). PG.parks is the list, one entry per car
+   park, each Covered or Open; the first can be NA (no car park), which leaves just that. */
+function pgParkDraw(){
+  const h=$('pgParkBox'); if(!h) return;
+  const P=PG.parks&&PG.parks.length?PG.parks:['Covered'];
+  h.innerHTML=P.map(function(v,i){
+    const opts=i?['Covered','Open']:['Covered','Open','NA'];
+    return '<div style="display:flex;align-items:center;gap:8px;margin:0 0 6px"><span style="min-width:20px;font-size:12px;color:var(--slate);font-weight:600">'+(P[0]==='NA'?'':(i+1)+'.')+'</span><div class="pg-seg" role="radiogroup">'
+      +opts.map(function(o){ return '<button type="button" class="'+(o===v?'on':'')+'" onclick="pgParkSet('+i+',\''+o+'\')">'+o+'</button>'; }).join('')+'</div>'
+      +(i?'<button type="button" class="btn" style="padding:2px 9px" title="Remove this car park" onclick="pgParkRm('+i+')">&times;</button>':'')+'</div>'; }).join('')
+    +(P[0]!=='NA'&&P.length<6?'<button type="button" class="btn" style="padding:4px 12px;margin-top:2px" onclick="pgParkAdd()"><i class="fa-solid fa-plus"></i> Add another car park</button>':'');
+}
+window.pgParkSet=function(i,o){ PG.parks=(PG.parks&&PG.parks.length?PG.parks:['Covered']).slice(); PG.parks[i]=o; if(i===0&&o==='NA') PG.parks=['NA']; pgParkDraw(); };
+window.pgParkAdd=function(){ PG.parks=(PG.parks||['Covered']).concat(['Covered']); pgParkDraw(); };
+window.pgParkRm=function(i){ PG.parks.splice(i,1); pgParkDraw(); };
 function pgCostMsg(m){ const e=$('pgE_pgCost'), fb=$('pgF_pgCost'); if(e) e.textContent=m||''; if(fb&&fb.classList) fb.classList.toggle('bad',!!m); }
 window.pgCostChoose=function(){ const i=$('pgCostFile'); if(i&&!PG.uploading) i.click(); };
 window.pgCostPick=async function(inp){
   const file=inp.files&&inp.files[0]; inp.value='';
   if(!file) return;
   pgCostMsg('');
-  if(!(file.type==='application/pdf'||/\.pdf$/i.test(file.name))){ pgCostMsg('The cost sheet must be a PDF file. Please choose a .pdf file.'); return; }
-  if(file.size>10*1048576){ pgCostMsg('This PDF is '+pgSize(file.size)+'. The cost sheet can be 10 MB at most.'); return; }
-  if(!file.size){ pgCostMsg('This file is empty. Please choose the cost sheet PDF.'); return; }
+  if(!(file.type==='application/pdf'||/^image\/(jpeg|png|webp)$/.test(file.type)||/\.(pdf|jpe?g|png|webp)$/i.test(file.name))){ pgCostMsg('The cost sheet must be a PDF or a picture (JPG, PNG).'); return; }
+  if(file.size>10*1048576){ pgCostMsg('This file is '+pgSize(file.size)+'. The cost sheet can be 10 MB at most.'); return; }
+  if(!file.size){ pgCostMsg('This file is empty. Please choose the cost sheet.'); return; }
   const seq=PG.openSeq;
   PG.uploading=true; pgCostDraw(); pgSyncGo();
   let cost=null, msg='';
@@ -17417,7 +17432,7 @@ window.pgCostPick=async function(inp){
 window.pdfGenOpen=function(editRow){
   if(!pdfCanGenerate()) return;
   PG.editId=editRow&&editRow.id||null; PG.editToken=editRow&&editRow.token||null; PG.draftId=null;
-  PG.project=null; PG.projReady=false; PG.cost=null; PG.uploading=false; PG.openSeq++;
+  PG.project=null; PG.projReady=false; PG.cost=null; PG.uploading=false; PG.openSeq++; PG.parks=['Covered'];
   const old=document.getElementById('pgPage'); if(old) old.remove();
   const f=(id,label,ctl,o)=>{ o=o||{}; return '<div class="pg-f" id="pgF_'+id+'"><label for="'+id+'">'+label+(o.req?' <span class="r">*</span>':'')+(o.opt?' <span class="o">(optional)</span>':'')+'</label>'+ctl
     +(o.help?'<div class="pg-help" id="pgH_'+id+'">'+o.help+'</div>':'')+'<div class="pg-e" id="pgE_'+id+'"></div></div>'; };
@@ -17437,36 +17452,41 @@ window.pdfGenOpen=function(editRow){
       +f('pgName','Customer name','<input class="pg-in" id="pgName" style="text-transform:uppercase" autocomplete="off" placeholder="As on the PAN card" oninput="pgNameSync()">',{req:1})
     +'</div><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
       +f('pgNat','Nationality',sel('pgNat',PDF_COUNTRIES.map(c=>c[0]),'India').replace('<select ','<select onchange="pgNatSync()" '))
-      +f('pgDob','Date of birth','<input class="pg-in" type="date" id="pgDob">',{req:1})
+      +f('pgDob','Date of birth','<input class="pg-in" type="date" id="pgDob">',{opt:1})
     +'</div></div>'
     +'<div class="pg-card"><h4>Contact</h4><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
       +f('pgMobile','Mobile number','<div class="pg-row">'+sel('pgCc',codes,'+91','cc')+'<input class="pg-in" id="pgMobile" inputmode="tel" autocomplete="off" placeholder="98300 12345"></div>',{req:1})
       +f('pgEmail','Email','<input class="pg-in" type="email" id="pgEmail" autocomplete="off" placeholder="name@example.com">',{req:1})
     +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
-      +f('pgContact','Contact person','<input class="pg-in" id="pgContact" style="text-transform:uppercase" autocomplete="off" placeholder="Same as the customer name" oninput="this.dataset.touched=1">',{opt:1})
+      +f('pgContact','Primary contact person','<input class="pg-in" id="pgContact" style="text-transform:uppercase" autocomplete="off" placeholder="Same as the customer name" oninput="this.dataset.touched=1">',{opt:1})
     +'</div></div>'
     +'<div class="pg-card"><h4>Flat</h4><div class="pg-bf" style="--c:minmax(0,1fr)">'
       +f('pgBlock','Block','<div id="pgC_pgBlock">'+seg('pgBlock',[],'')+'</div>')
     +'</div><div class="pg-bf" style="--c:auto minmax(0,1fr)">'
       +f('pgFloor','Floor','<div id="pgC_pgFloor">'+seg('pgFloor',[],'')+'</div>')
-      +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{opt:1})
+      +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{req:1})
     +'</div></div>'
-    +'<div class="pg-card"><h4>Size &amp; price</h4><div class="pg-bf" style="--c:auto auto">'
+    /* 19 Nov 2026 (Ayush): the Flat and Size & price cards are compulsory and are LOCKED for the customer (they see them, cannot change them); car parks
+       can be more than one, each Covered or Open, or NA for none; Booking amount is new - what the customer pays now, shown to them as the Booking Amount. */
+    +'<div class="pg-card"><h4>Size &amp; price</h4><div class="pg-bf" style="--c:minmax(0,1fr)">'
       +f('pgBhk','Bedrooms','<div id="pgC_pgBhk">'+seg('pgBhk',[],'')+'</div>')
-      +f('pgPark','Car park',seg('pgPark',['Covered','Open'],'Covered'))
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
+      +f('pgPark','Car park','<div id="pgParkBox"></div>',{req:1})
     +'</div><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
       +f('pgSba','Super built-up area','<div class="pg-suf"><input class="pg-in" id="pgSba" inputmode="decimal" autocomplete="off" placeholder="1325"><span>sq.ft.</span></div>',{req:1})
       +f('pgTotal','Total sale price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
+      +f('pgBook','Booking amount','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgBook" inputmode="numeric" autocomplete="off" placeholder="1,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
     +'</div></div>'
     +'</div>'
-    +'<div class="pg-card pg-slim pg-f" id="pgF_pgCost"><label>Cost sheet (PDF) <span class="r">*</span></label><div class="ctl w"><div class="pg-cost" id="pgCostBox"></div><input type="file" id="pgCostFile" accept="application/pdf,.pdf" style="display:none" onchange="pgCostPick(this)"></div><div class="pg-e" id="pgE_pgCost"></div></div>'
+    +'<div class="pg-card pg-slim pg-f" id="pgF_pgCost"><label>Cost sheet &amp; payment plan (PDF or picture) <span class="r">*</span></label><div class="ctl w"><div class="pg-cost" id="pgCostBox"></div><input type="file" id="pgCostFile" accept="application/pdf,.pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" style="display:none" onchange="pgCostPick(this)"></div><div class="pg-e" id="pgE_pgCost"></div></div>'
     +'</div>'
-    +'<div class="pg-wrap"><div class="pg-bar"><span class="msg" id="pgErr" style="color:var(--slate);font-weight:400">What you fill in is pre-filled for the customer - they can still change it. They fill in the rest (PAN, Aadhaar, address, payment).</span><button class="btn" onclick="pgClose()">Cancel</button><button class="btn" id="pgDraftBtn" onclick="pgSaveDraft()"><i class="fa-regular fa-floppy-disk"></i> Save draft</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div></div>'
+    +'<div class="pg-wrap"><div class="pg-bar"><span class="msg" id="pgErr" style="color:var(--slate);font-weight:400">Name, mobile and email are pre-filled - the customer can correct them. Flat, size, price and booking amount are fixed for the customer. They fill in the rest (Aadhaar, PAN, address, payment proof).</span><button class="btn" onclick="pgClose()">Cancel</button><button class="btn" id="pgDraftBtn" onclick="pgSaveDraft()"><i class="fa-regular fa-floppy-disk"></i> Save draft</button><button class="btn btn-primary" id="pgGo" onclick="pdfGenerate()"><i class="fa-solid fa-link"></i> Generate link</button></div></div>'
     +'</div></div>'
     +'<div class="pg-main" id="pgDraftsWrap" style="display:none"><div id="pgDrafts"></div></div>'
     +'<div class="pg-main" id="pgListWrap" style="display:none"><div id="pgList"></div></div>';
   document.body.appendChild(page); pgFit(page);
-  pgCostDraw(); pgSyncGo();
+  pgCostDraw(); pgParkDraw(); pgSyncGo();
   pgProjInit(editRow||null);   // fills the project list, then (when editing) the boxes
   pdfGenList();
 };
@@ -17475,12 +17495,12 @@ window.pgClose=function(){ const p=document.getElementById('pgPage'); if(p) p.re
 window.pgSeg=function(btn,id){ btn.parentNode.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); }); btn.classList.add('on'); $(id).value=btn.textContent.trim(); };
 window.pgNameSync=function(){ const c=$('pgContact'); if(c&&!c.dataset.touched) c.value=($('pgName').value||''); };
 window.pgNatSync=function(){ const n=PDF_COUNTRIES.filter(c=>c[0]===$('pgNat').value)[0]; if(n&&$('pgCc')) $('pgCc').value=n[1]; };
-window.pgMoney=function(inp){ const d=inp.value.replace(/[^\d]/g,''); inp.value=d?Number(d).toLocaleString('en-IN'):''; const h=$('pgH_pgTotal'); if(h) h.textContent=pdfWords(d); };
+window.pgMoney=function(inp){ const d=inp.value.replace(/[^\d]/g,''); inp.value=d?Number(d).toLocaleString('en-IN'):''; const h=$('pgH_'+inp.id); if(h) h.textContent=pdfWords(d); };
 // Editing a link: its details go back into the boxes.
 // The boxes as they are now (a draft keeps them exactly like this, even half empty).
 function pgRaw(){ const g=id=>($(id)||{}).value||''; const c=$('pgContact');
   return {title:g('pgTitle'),nat:g('pgNat'),name:g('pgName'),dob:g('pgDob'),cc:g('pgCc'),mobile:g('pgMobile'),email:g('pgEmail'),contact:g('pgContact'),contactTouched:!!(c&&c.dataset&&c.dataset.touched),
-    block:g('pgBlock'),floor:g('pgFloor'),bhk:g('pgBhk'),park:g('pgPark'),flat:g('pgFlat'),sba:g('pgSba'),total:g('pgTotal'),
+    block:g('pgBlock'),floor:g('pgFloor'),bhk:g('pgBhk'),park:(PG.parks||[])[0]||'',parks:(PG.parks||[]).slice(),flat:g('pgFlat'),sba:g('pgSba'),total:g('pgTotal'),book:g('pgBook'),
     project:g('pgProject'),cost:PG.cost||null}; }
 function pgFillRaw(r){
   const set=(id,val)=>{ const e=$(id); if(e&&val!=null) e.value=val; };
@@ -17495,14 +17515,16 @@ function pgFillRaw(r){
   if('cost' in r){ PG.cost=(r.cost&&r.cost.path)?r.cost:null; pgCostDraw(); pgCostMsg(''); }
   set('pgTitle',r.title); set('pgNat',r.nat); set('pgName',r.name); set('pgDob',r.dob); set('pgCc',r.cc); set('pgMobile',r.mobile); set('pgEmail',r.email); set('pgContact',r.contact);
   if(r.contactTouched&&$('pgContact')) $('pgContact').dataset.touched=1;
-  seg('pgBlock',r.block); seg('pgFloor',r.floor); seg('pgBhk',r.bhk); seg('pgPark',r.park); set('pgFlat',r.flat); set('pgSba',r.sba); set('pgTotal',r.total);
+  seg('pgBlock',r.block); seg('pgFloor',r.floor); seg('pgBhk',r.bhk); set('pgFlat',r.flat); set('pgSba',r.sba); set('pgTotal',r.total); set('pgBook',r.book);
+  const pk=Array.isArray(r.parks)&&r.parks.length?r.parks:(r.park?[r.park]:null); if(pk){ PG.parks=pk.map(String); pgParkDraw(); }
   const h=$('pgH_pgTotal'); if(h) h.textContent=pdfWords(String(r.total||'').replace(/[^\d]/g,''));
+  const hb=$('pgH_pgBook'); if(hb) hb.textContent=pdfWords(String(r.book||'').replace(/[^\d]/g,''));
 }
 // Editing a link: its details go back into the boxes.
 function pgFill(row){
   const v=(row.prefill&&row.prefill.values)||{}, a=(v.applicants&&v.applicants[0])||{}, c=v.contact||{}, fl=v.flat||{}, pr=v.price||{};
   pgFillRaw({title:a.title,nat:a.nationality,name:a.full_name,dob:a.dob,cc:c.cc,mobile:c.mobile,email:c.email,contact:c.contact_person,contactTouched:!!(c.contact_person&&c.contact_person!==a.full_name),
-    block:fl.block,floor:fl.floor,bhk:fl.bhk,park:fl.parking,flat:fl.flat_no,sba:pr.sba,total:pr.total?Number(pr.total).toLocaleString('en-IN'):'',
+    block:fl.block,floor:fl.floor,bhk:fl.bhk,park:fl.parking,parks:fl.parkings,flat:fl.flat_no,sba:pr.sba,total:pr.total?Number(pr.total).toLocaleString('en-IN'):'',book:pr.booking?Number(pr.booking).toLocaleString('en-IN'):'',
     cost:row.prefill&&row.prefill.cost_sheet});
   const n=$('pgEditNote'); if(n) n.innerHTML='<div class="pg-edit"><b>Editing the link for '+esc(a.full_name||'this customer')+'.</b> The link stays the same. The customer sees the new details the next time they open or refresh the form; what they have already typed stays.</div>';
   const g=$('pgGo'); if(g) g.innerHTML='<i class="fa-solid fa-floppy-disk"></i> Save changes';
@@ -17512,16 +17534,20 @@ window.pdfGenerate=async function(){
   const g=id=>($(id)||{}).value||'';
   const fails=[]; const bad=(id,m)=>fails.push([id,m]);
   const name=g('pgName').trim().toUpperCase(), mobile=g('pgMobile').replace(/[^\d]/g,''), email=g('pgEmail').trim().toLowerCase(), cc=g('pgCc');
-  const sba=g('pgSba').replace(/[^\d.]/g,''), total=g('pgTotal').replace(/[^\d]/g,'');
+  const sba=g('pgSba').replace(/[^\d.]/g,''), total=g('pgTotal').replace(/[^\d]/g,''), book=g('pgBook').replace(/[^\d]/g,'');
+  const parks=(PG.parks&&PG.parks.length?PG.parks:['Covered']).slice();
   if(!name) bad('pgName','Please write the customer name.');
-  if(!g('pgDob')) bad('pgDob','Please choose the date of birth.');
+  // 19 Nov 2026: date of birth and nationality are optional for Sales (the customer must give them); the flat number and the booking amount are compulsory
+  if(!g('pgFlat').trim()) bad('pgFlat','Please write the flat number.');
+  if(!(Number(book)>0)) bad('pgBook','Please write the booking amount.');
+  else if(Number(total)>0&&Number(book)>Number(total)) bad('pgBook','The booking amount cannot be more than the total sale price.');
   if(cc==='+91'?!/^[6-9]\d{9}$/.test(mobile):mobile.length<6) bad('pgMobile','Please write a complete mobile number'+(cc==='+91'?' (10 digits).':'.'));
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) bad('pgEmail','Please write a complete email address.');
   if(!(Number(sba)>0)) bad('pgSba','Please write the super built-up area.');
   if(!(Number(total)>0)) bad('pgTotal','Please write the total sale price.');
   if(!PG.project) bad('pgProject','Please choose the project.');
-  if(!PG.cost||!PG.cost.path) bad('pgCost','Please attach the cost sheet (PDF).');
-  ['pgName','pgDob','pgMobile','pgEmail','pgSba','pgTotal','pgProject','pgCost'].forEach(function(id){ const e=$('pgE_'+id), fb=$('pgF_'+id); if(e) e.textContent=''; if(fb&&fb.classList) fb.classList.remove('bad'); });
+  if(!PG.cost||!PG.cost.path) bad('pgCost','Please attach the cost sheet (PDF or picture).');
+  ['pgName','pgDob','pgMobile','pgEmail','pgFlat','pgSba','pgTotal','pgBook','pgProject','pgCost'].forEach(function(id){ const e=$('pgE_'+id), fb=$('pgF_'+id); if(e) e.textContent=''; if(fb&&fb.classList) fb.classList.remove('bad'); });
   if(fails.length){
     fails.forEach(function(x){ const e=$('pgE_'+x[0]), fb=$('pgF_'+x[0]); if(e) e.textContent=x[1]; if(fb&&fb.classList) fb.classList.add('bad'); });
     const m=$('pgErr'); if(m){ m.textContent=fails.length===1?'One thing to fix':fails.length+' things to fix'; m.style.color='#b3171d'; m.style.fontWeight='600'; }
@@ -17531,12 +17557,15 @@ window.pdfGenerate=async function(){
   const m0=$('pgErr'); if(m0) m0.textContent='';
   const values={applicants:[{title:g('pgTitle'),full_name:name,nationality:g('pgNat'),dob:g('pgDob')}],
     contact:{cc:cc,mobile:mobile,email:email,contact_person:(g('pgContact').trim()||name).toUpperCase()},
-    flat:{block:g('pgBlock'),floor:g('pgFloor'),flat_no:g('pgFlat').trim().toUpperCase(),bhk:g('pgBhk'),parking:g('pgPark')},
-    price:{sba:sba,total:total}};
+    flat:{block:g('pgBlock'),floor:g('pgFloor'),flat_no:g('pgFlat').trim().toUpperCase(),bhk:g('pgBhk'),parking:parks[0],parkings:parks},
+    price:{sba:sba,total:total,booking:book},pay:{amount:book}};
   const fields=['applicants.0.title','applicants.0.full_name','applicants.0.nationality','applicants.0.dob','contact.cc','contact.mobile','contact.email','contact.contact_person',
-    'flat.block','flat.floor','flat.flat_no','flat.bhk','flat.parking','price.sba','price.total'];
+    'flat.block','flat.floor','flat.flat_no','flat.bhk','flat.parking','flat.parkings','price.sba','price.total','price.booking','pay.amount'];
   const btn=$('pgGo'); btn.disabled=true; btn.textContent=PG.editId?'Saving…':'Generating…';
-  const prefill={values:values,locked:[],fields:fields,cost_sheet:PG.cost};   // locked: [] - nothing is locked since 13 Nov 2026; fields = what was pre-filled; cost_sheet = {path,name,size}
+  /* 19 Nov 2026 (Ayush): the unit, size, price and booking amount are LOCKED for the customer again (the server puts them back on every save and on submit);
+     name, mobile, email and the rest stay pre-filled only. version 2 = a link made by this page (the server's stricter checks apply to these). */
+  const locked=['flat.block','flat.floor','flat.flat_no','flat.bhk','flat.parking','flat.parkings','price.sba','price.total','price.booking','pay.amount'];
+  const prefill={values:values,locked:locked,fields:fields,cost_sheet:PG.cost,version:2};
   const editing=!!PG.editId;
   const res=editing?await sb.schema('acc').rpc('update_booking_link',{p_id:PG.editId,p_prefill:prefill})
                    :await sb.schema('acc').rpc('generate_booking_link',{p_project:PG.project.key,p_prefill:prefill});

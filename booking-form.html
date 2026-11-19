@@ -369,6 +369,25 @@
   .otp .olinks{display:flex;justify-content:space-between;gap:10px;margin-top:12px;font-size:13.5px}
   .otp .olinks button{background:none;border:0;color:var(--brand-dark);font:inherit;font-weight:600;cursor:pointer;padding:4px 0}.otp .olinks button[disabled]{color:var(--slate);cursor:default}
   @media print{.steps,.nav,.btn,.rvh button{display:none!important}.sec{border:1px solid #ddd}}
+  /* 19 Nov 2026: Cost Sheet and Payment Plan - a full-width panel at the top that pulses (red ring) until it has been opened once */
+  /* 19 Nov 2026 (Ayush): not stuck to the top, square corners, and a blink that is plainly visible (border + tint flash, also on computers set to reduce motion) */
+  .cpanel{background:var(--card);border:2px solid var(--line);border-radius:0;margin:16px 14px 0;overflow:hidden}
+  .cpanel .cph{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;background:none;border:0;font:inherit;color:var(--ink);text-align:left;cursor:pointer}
+  .cpanel .cph b{display:block;font-size:16px}.cpanel .cph small{display:block;color:var(--slate);font-size:12.5px;margin-top:2px}
+  .cpanel .car{flex:none;width:30px;height:30px;border-radius:50%;background:var(--soft);color:var(--brand);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700}
+  .cpanel.on{border-color:var(--brand)}.cpanel .cpb{padding:0 14px 16px}.cpanel.bad{border-color:var(--err)}
+  .cpanel.blink{animation:cpBlink 1s steps(1,end) infinite}
+  .cpanel.blink .cph small{color:var(--brand);font-weight:600}
+  @keyframes cpBlink{0%{border-color:var(--brand);background:#fdecec}50%{border-color:var(--line);background:var(--card)}100%{border-color:var(--brand);background:#fdecec}}
+  /* 19 Nov 2026: the booking amount page - receipts on the left (as many as needed, the list grows), date / reference / bank on the right */
+  .paygrid{display:grid;grid-template-columns:1fr;gap:18px}
+  .paygrid .pcol{display:flex;flex-direction:column;gap:16px;min-width:0}
+  @media (min-width:700px){.paygrid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:28px;align-items:start}}
+  /* 19 Nov 2026: KYC documents - one clearly numbered card per applicant */
+  .doc-app .dah{display:flex;align-items:center;gap:12px;padding:14px 18px;background:var(--soft);border-bottom:1px solid var(--line2)}
+  .doc-app .dan{flex:none;width:34px;height:34px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px}
+  .doc-app .dah b{display:block;font-size:16px;letter-spacing:.01em}.doc-app .dah small{display:block;color:var(--slate);font-size:12.5px}
+  .xts.one{grid-template-columns:1fr}
 </style>
 </head>
 <body>
@@ -387,6 +406,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261113h"></script>
+<script src="booking-form.js?v=20261119b"></script>
 </body>
 </html>
