@@ -93,6 +93,17 @@ function trcQaTableHtml(r,m){
                  ?'Qualified and wants to buy, but this is the FIRST call that qualifies this lead - the site visit being unsettled does not excuse it, so the CRM genuinely needs to be told.':null,
                m?m.label:null,sa.reason])}
   ].filter(Boolean);
+  /* Ananta ONLY: leads that came in on CRM source 20741 ("Launch Offer - Image") get the launch-offer
+     briefing verdict, judged on the lead's first connected call (crm-snapshot-qa launchOfferCheck).
+     Shown on every assessed call of such a lead - Not checked yet until the judge has run on it. */
+  const launchLead=String(r.business_unit_name||'').toLowerCase().indexOf('ananta')!==-1
+    &&String(r.lead_source_id||'')==='20741';
+  if(launchLead||(r.launch_offer_status&&String(r.business_unit_name||'').toLowerCase().indexOf('ananta')!==-1)){
+    const lo=r.launch_offer_check||{};
+    topics.push({topic:'Launch offer status',status:r.launch_offer_status||'Not checked yet',score:null,
+      why:join([lo.notes||(r.launch_offer_status?null:'This lead came in on "'+(r.lead_source_name||'Launch Offer - Image')+'"; the launch-offer briefing check has not run on this call yet.'),
+                lo.evidence?'"'+lo.evidence+'"':null])});
+  }
   if(Array.isArray(r.agent_qa)){
     r.agent_qa.forEach(function(a){
       topics.push({topic:a&&a.point,status:a&&a.status,
@@ -203,6 +214,8 @@ function trcCallHtml(r,i,total){
     +'<div style="font-size:12.5px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-address-card" style="color:#0d9488"></i> What the CRM recorded</div>'
     +trcKV('Follow-up ID',r.follow_up_id)
     +trcKV('Personnel',r.personnel_name||null)
+    // Every lead: the CRM source it came in on (crm_lead_detail adds it to each call row).
+    +trcKV('Lead source',r.lead_source_name||null)
     +trcKV('Status',r.status_detail||r.crm_status_raw||r.crm_status)
     +(trcIsRegression(r)?trcKV('Went back from',r.prev_status+' - not a legitimate step back'):'')
     +trcKV('Next follow-up',trcWall(r.next_follow_up_text,true)||r.next_follow_up_text)
