@@ -415,7 +415,8 @@ const LAUNCH_OFFER_SOURCE_ID = 20741;
 const isAnantaLaunchOfferLead = (row: any): boolean => {
   const bu = String(row?.business_unit_name ?? row?.original_crm_response?.business_unit_name ?? "").trim().toLowerCase();
   const src = Number(row?.original_crm_response?.source_id);
-  return bu === LAUNCH_OFFER_BUSINESS_UNIT && src === LAUNCH_OFFER_SOURCE_ID;
+  // The CRM names it "Dream Ananta" (every project carries the "Dream" prefix), so match the word.
+  return bu.includes(LAUNCH_OFFER_BUSINESS_UNIT) && src === LAUNCH_OFFER_SOURCE_ID;
 };
 /* "First connected call" = no EARLIER call of this lead reached a real conversation. Earlier calls
    live in call_history; a ring-out or non-transcribable one never connected, so it does not count. */

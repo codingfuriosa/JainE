@@ -1213,7 +1213,7 @@ function trCompDetailHtml(leads,leadId){
   /* ONE audience only: Ananta leads that came in on source 20741 ("Launch Offer - Image") show the
      source's real name beside the project. The list rows carry no CRM payload, so the name is read
      off the stored response for this one call and filled in when it arrives. Nobody else gets it. */
-  const srcSlot=String(last.business_unit_name||'').trim().toLowerCase()==='ananta'?'<span id="trLeadSrc"></span>':'';
+  const srcSlot=String(last.business_unit_name||'').toLowerCase().indexOf('ananta')!==-1?'<span id="trLeadSrc"></span>':'';
   if(srcSlot)trLeadSourceFill(last);
   const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+srcSlot+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
   // Says which call the verdict came from, so nobody reads it as a merge of all of them.
