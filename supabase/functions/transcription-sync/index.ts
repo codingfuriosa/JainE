@@ -407,16 +407,18 @@ function flattenFeed(body: unknown[]): FeedRow[] {
 }
 
 /* ------------------------------------------------- ANANTA LAUNCH-OFFER CHECK
-   Scoped to exactly ONE audience: leads of business unit Ananta whose source_id is 20741 ("Launch
-   Offer - Image"). Those leads came in on the launch-offer ad, so the first time an agent actually
+   Scoped to exactly ONE audience: leads of business unit Ananta whose source name contains "Launch
+   Offer" (e.g. "Launch Offer - Image", 20741 / 20774). Those leads came in on the launch-offer ad, so the first time an agent actually
    gets them on the phone the offer should be briefed. Nothing else is checked, for any other lead. */
 const LAUNCH_OFFER_BUSINESS_UNIT = "ananta";
 const LAUNCH_OFFER_SOURCE_ID = 20741;
 const isAnantaLaunchOfferLead = (row: any): boolean => {
   const bu = String(row?.business_unit_name ?? row?.original_crm_response?.business_unit_name ?? "").trim().toLowerCase();
   const src = Number(row?.original_crm_response?.source_id);
+  const srcName = String(row?.original_crm_response?.source_name ?? "");
   // The CRM names it "Dream Ananta" (every project carries the "Dream" prefix), so match the word.
-  return bu.includes(LAUNCH_OFFER_BUSINESS_UNIT) && src === LAUNCH_OFFER_SOURCE_ID;
+  // Any source whose name contains "launch offer" counts (20741, 20774, ...); the id is a fallback.
+  return bu.includes(LAUNCH_OFFER_BUSINESS_UNIT) && (/launch\s*offer/i.test(srcName) || src === LAUNCH_OFFER_SOURCE_ID);
 };
 /* "First connected call" = no EARLIER call of this lead reached a real conversation. Earlier calls
    live in call_history; a ring-out or non-transcribable one never connected, so it does not count. */
@@ -1085,7 +1087,7 @@ async function processOne(db: DB, row: any, geminiKey: string, geminiModel: stri
         : "The CRM holds no name for this lead, so there was nothing to check against." });
   }
 
-  /* Ananta + source 20741 only. Asked on the lead's first connected call; a later call just records
+  /* Ananta + a "Launch Offer" source only. Asked on the lead's first connected call; a later call just records
      that it was not the one under test. */
   if (launchScope) {
     if (!launchOfferAsked) {

@@ -874,7 +874,7 @@ async function callOpenAiQa(key: string, model: string, system: string, user: st
 
 /* ------------------------------------------------- ANANTA LAUNCH-OFFER CHECK
    ONE audience only: leads of business unit Ananta (the CRM writes "Ananta"; "Dream Ananta" also
-   matches) whose CRM source_id is 20741 ("Launch Offer - Image"). They came in on the launch-offer ad,
+   matches) whose CRM source name contains "Launch Offer" (e.g. "Launch Offer - Image", 20741 / 20774). They came in on the launch-offer ad,
    so on the FIRST call that actually connected (an earlier follow-up with a completed transcript means
    this one is not first) the agent should brief the offer. A separate small judge, run after the main
    QA is saved, so it can never fail or change the main assessment. Every OTHER Ananta lead gets the
@@ -897,8 +897,12 @@ The offer's terms are not given to you, so do NOT treat any specific discount fi
 quotes as verified or as a failure: judge the briefing, not the number. Base the status only on what
 the transcript shows was said. Do not give credit for anything not said.`;
 
-const isLaunchOfferLead = (businessUnit: unknown, sourceId: unknown) =>
-  String(businessUnit ?? "").toLowerCase().includes("ananta") && String(sourceId ?? "").trim() === LAUNCH_OFFER_SOURCE_ID;
+/* A Launch Offer lead = any CRM source whose NAME contains "launch offer" (e.g. "Launch Offer - Image",
+   source 20774, as well as the original 20741). The id is kept only as a fallback for a nameless source. */
+const isLaunchOfferSource = (sourceId: unknown, sourceName: unknown) =>
+  /launch\s*offer/i.test(String(sourceName ?? "")) || String(sourceId ?? "").trim() === LAUNCH_OFFER_SOURCE_ID;
+const isLaunchOfferLead = (businessUnit: unknown, sourceId: unknown, sourceName?: unknown) =>
+  String(businessUnit ?? "").toLowerCase().includes("ananta") && isLaunchOfferSource(sourceId, sourceName);
 
 /* Returns what was stored, or null when the call is outside the audience. Throws only on a judge
    failure, which leaves the columns null so the `launch_offer` action can pick it up again. */
@@ -915,7 +919,7 @@ async function launchOfferCheck(db: DB, followUpId: number, openaiKey: string, q
 
   /* Every Ananta lead carries the point; only the Launch Offer source is judged. Any other source is
      Not Applicable, saying which source it came in on (or that the CRM sent none). No model call. */
-  if (!isLaunchOfferLead(bu, (lead as any)?.source_id)) {
+  if (!isLaunchOfferLead(bu, (lead as any)?.source_id, (lead as any)?.source_name)) {
     const sid = String((lead as any)?.source_id ?? "").trim();
     const sname = (lead as any)?.source_name ?? null;
     const check = { status: "Not Applicable",
@@ -949,7 +953,7 @@ async function launchOfferCheck(db: DB, followUpId: number, openaiKey: string, q
   let check: Record<string, unknown>;
   if (connectedBefore) {
     check = { status: "Not Applicable", notes: "Not the first connected call for this lead - the launch-offer briefing is only checked on that one.",
-              source_id: LAUNCH_OFFER_SOURCE_ID, source_name: (lead as any)?.source_name ?? null };
+              source_id: String((lead as any)?.source_id ?? "").trim() || null, source_name: (lead as any)?.source_name ?? null };
   } else {
     const { data: tr } = await db.schema("acc").from("call_transcripts")
       .select("status, transcript_text").eq("recording_url", fu.recording_url).maybeSingle();
@@ -963,7 +967,7 @@ async function launchOfferCheck(db: DB, followUpId: number, openaiKey: string, q
     if (!label) throw new Error("the launch-offer judge returned no Pass/Partial/Fail");
     check = { status: label, evidence: p?.evidence ? String(p.evidence).slice(0, 500) : "",
               notes: p?.notes ? String(p.notes).slice(0, 600) : "", first_connected_call: true,
-              source_id: LAUNCH_OFFER_SOURCE_ID, source_name: (lead as any)?.source_name ?? null, model: qaModel };
+              source_id: String((lead as any)?.source_id ?? "").trim() || null, source_name: (lead as any)?.source_name ?? null, model: qaModel };
   }
   const { error } = await db.schema("acc").from("followup_qa")
     .update({ launch_offer_check: check, launch_offer_status: check.status, updated_at: nowIso() })

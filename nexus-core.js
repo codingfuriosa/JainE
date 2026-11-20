@@ -433,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'5f4484bba7','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'4952e52419','insp-items.js':'af05d4a323','postsales.js':'9469a48d2a','scheduling.js':'50da5d7188','accounts.js':'cc8a8c6515','accounts-bank.js':'ea9648a540','accounts-books.js':'ed0e987851','purchase.js':'8109127afb','purchase-indent.js':'f6a398b898','purchase-rfq.js':'e6b7d700d5','purchase-po.js':'7239d968b5','purchase-stores.js':'5ff625e1d0','purchase-reports.js':'62c2dbe660','engineering.js':'ded15ec2c9','engineering-boq.js':'786ffa81a5','engineering-wo.js':'3dbf851a12','engineering-amend.js':'237625a694','engineering-ra.js':'2ce94b7221','engineering-ret.js':'645ea33273'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -35292,17 +35292,17 @@ function trcQaTableHtml(r,m){
                  ?'Qualified and wants to buy, but this is the FIRST call that qualifies this lead - the site visit being unsettled does not excuse it, so the CRM genuinely needs to be told.':null,
                m?m.label:null,sa.reason])}
   ].filter(Boolean);
-  /* Ananta ONLY: leads that came in on CRM source 20741 ("Launch Offer - Image") get the launch-offer
+  /* Ananta ONLY: leads that came in on a CRM source whose name contains "Launch Offer" (20741, 20774, ...) get the launch-offer
      briefing verdict, judged on the lead's first connected call (crm-snapshot-qa launchOfferCheck).
      EVERY Ananta call carries this point; only a Launch Offer lead is actually judged - any other
      source is Not Applicable, saying which source it came in on. Other projects never show it. */
   if(String(r.business_unit_name||'').toLowerCase().indexOf('ananta')!==-1){
     const lo=r.launch_offer_check||{};
-    const fromLaunch=String(r.lead_source_id||'')==='20741';
+    const fromLaunch=trIsLaunchSource(r.lead_source_id,r.lead_source_name);
     const status=r.launch_offer_status||(fromLaunch?'Not checked yet':'Not Applicable');
     const fallback=r.launch_offer_status?null
       :fromLaunch?'This lead came in on "'+(r.lead_source_name||'Launch Offer - Image')+'"; the launch-offer briefing check has not run on this call yet.'
-      :(r.lead_source_name?'This lead came in on "'+r.lead_source_name+'", not the Launch Offer source - the launch-offer briefing is only checked for Launch Offer leads.'
+      :(r.lead_source_name?'This lead came in on "'+r.lead_source_name+'", not a Launch Offer source - the launch-offer briefing is only checked for Launch Offer leads.'
                           :'No CRM source recorded for this lead, so it is not a Launch Offer lead - the launch-offer briefing is not checked.');
     topics.push({topic:'Launch offer status',status:status,score:null,
       why:join([lo.notes||fallback,lo.evidence?'"'+lo.evidence+'"':null])});
@@ -36407,14 +36407,16 @@ function trCompGridHtml(leads){
     +'</div>';
   }).join('')+'</div>';
 }
-const TR_LAUNCH_SOURCE_ID=20741; // Ananta "Launch Offer - Image"
+const TR_LAUNCH_SOURCE_ID=20741; // Ananta "Launch Offer - Image" (fallback when the CRM sends no source name)
+// A Launch Offer lead = any source whose NAME contains "launch offer" (e.g. 20741 and 20774 "Launch Offer - Image").
+function trIsLaunchSource(id,name){return /launch\s*offer/i.test(String(name||''))||Number(id)===TR_LAUNCH_SOURCE_ID;}
 function trLeadSourceFill(row){
   if(!row||!row.id)return;
   Promise.resolve(sb.schema('acc').from('transcriptions')
     .select('source_id:original_crm_response->>source_id,source_name:original_crm_response->>source_name')
     .eq('id',row.id).maybeSingle()).then(function(x){
       const d=x&&x.data, el=document.getElementById('trLeadSrc');
-      if(!d||!el||Number(d.source_id)!==TR_LAUNCH_SOURCE_ID||!d.source_name)return;
+      if(!d||!el||!d.source_name||!trIsLaunchSource(d.source_id,d.source_name))return;
       el.innerHTML=' · Source: <b>'+esc(d.source_name)+'</b>';
     },function(){});
 }
@@ -36426,7 +36428,7 @@ function trCompDetailHtml(leads,leadId){
   const latest=trLatestVerdict(g.rows);
   const o=trOutcome(latest.qualification);
   const backBtn='<button class="btn btn-sm" onclick="goBack(\'transcription/5\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
-  /* ONE audience only: Ananta leads that came in on source 20741 ("Launch Offer - Image") show the
+  /* ONE audience only: Ananta leads that came in on a "Launch Offer" source (name match) show the
      source's real name beside the project. The list rows carry no CRM payload, so the name is read
      off the stored response for this one call and filled in when it arrives. Nobody else gets it. */
   const srcSlot=String(last.business_unit_name||'').toLowerCase().indexOf('ananta')!==-1?'<span id="trLeadSrc"></span>':'';
