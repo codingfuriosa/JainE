@@ -35251,6 +35251,13 @@ function trcQaResultIcon(s){
     :/^(inaccurate|fail|mismatch)$/i.test(s)?'fa-xmark'
     :/^(partial|partially accurate)$/i.test(s)?'fa-circle-half-stroke':'fa-circle-question';
 }
+function trPitchRedirectNote(pitch,r){
+  const rd=pitch&&pitch.redirect;
+  if(!rd||rd.customer_declined_own_project!==true)return null;
+  return 'Customer did not want '+(r.business_unit_name||'the lead\'s own project')
+    +(rd.project_pitched_instead?', so the agent pitched '+rd.project_pitched_instead:', so the agent pitched another project')
+    +(rd.why?' ('+rd.why+')':'')+' - this is fine and does not count against pitch accuracy.';
+}
 function trcQaTableHtml(r,m){
   if(!r.qa_id){
     return '<div style="margin-top:12px;font-size:13px;color:var(--slate)">'
@@ -35263,8 +35270,10 @@ function trcQaTableHtml(r,m){
         mobileAsk=r.personal_mobile_requested||{};
   const join=function(parts){return parts.filter(function(x){return x;}).join(' — ');};
   const topics=[
+    /* A customer who did not want the lead's own project and was pitched another one instead is good
+       selling, not a pitch error (qa-prompt.ts LEAD DID NOT WANT ITS OWN PROJECT) - say so up front. */
     {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
-     why:join([pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])},
+     why:join([trPitchRedirectNote(pitch,r),pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])},
     {topic:'Follow-up date accuracy',status:r.followup_date_status,score:fdate.score,
      why:join([fdate.reason,fdate.crm_date?'CRM: '+fdate.crm_date:null,
                fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},

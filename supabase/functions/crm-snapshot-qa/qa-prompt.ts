@@ -197,8 +197,8 @@ lead belongs to, and only where the subject actually came up on the call.
   discussing, not on the lead's original business_unit, and do not mark this a Mismatch for
   discussing a different project. Every fact actually stated about Ananta is still checked against
   Ananta's own catalogue entry as rigorously as any other claim (see OTHER PROJECTS MENTIONED) - only
-  the redirect itself is not an error. This exception is specific to this one project pair; it is not
-  a licence to excuse pitching an unrelated project as though the lead's own were not discussed.
+  the redirect itself is not an error. The same now holds for EVERY project - see "LEAD DID NOT WANT
+  ITS OWN PROJECT" under PITCH ACCURACY.
 - Durbaar Banquets runs a DIFFERENT funnel, and point 1 of the rubric must be read against this one:
   greet -> what kind of event -> expected guest count -> hall, lawn or both -> ask for the venue
   visit. There is no configuration step and no BHK question, so their absence is not a skipped step.
@@ -240,6 +240,9 @@ Every key below must be present on every reply. Where you have nothing to say, u
     "status": "Accurate" | "Partially Accurate" | "Inaccurate" | "Not Applicable",
     "issues": ["one short line per specific problem, quoting the claim"],
     "reason": "why this verdict",
+    "redirect": { "customer_declined_own_project": true | false,
+                  "project_pitched_instead": "the other project's name, or null",
+                  "why": "one line on what the customer did not like about the lead's own project, or null" },
     "fact_checks": [
       { "fact": "Project" | "Configuration" | "Budget" | "Area (sqft)" | "Location" | "Possession",
         "project": null,
@@ -388,7 +391,8 @@ Judge against the approved project information supplied below - for the project 
 AND for any other project the agent brought figures for (see OTHER PROJECTS MENTIONED below; a wrong
 price, location, sqft or ready-to-move/under-construction claim counts here regardless of which
 project it was about).
-Consider: was the correct project discussed; was the information given correct; were there incorrect
+Consider: was the correct project discussed (pitching another project after the customer showed they did
+not want the lead's own is correct - see LEAD DID NOT WANT ITS OWN PROJECT below); was the information given correct; were there incorrect
 claims about the lead's own project OR about any other project named on the call; did the pitch follow
 the company funnel; were required points missed; was any wrong product information given.
 - "score" is 0-100 for the accuracy of what was said, not for how good the agent was.
@@ -400,12 +404,29 @@ the company funnel; were required points missed; was any wrong product informati
 NEVER invent a project fact. If the agent stated something the approved information does not cover,
 that is not an error - say so in "reason" and do not count it against them.
 
+LEAD DID NOT WANT ITS OWN PROJECT - applies to EVERY project, not only Gurukul/Ananta. When the
+transcript shows the customer does not like, or is not interested in, the project (business unit) this
+lead came in on - its location, budget, configuration, size, possession timeline, or simply "not
+interested in this one" - the agent pitching a DIFFERENT project instead is COMPLETELY FINE and is good
+selling, not an error:
+- Never put the redirect itself in "issues", never let it lower "score" or "status", and never call it
+  a wrong-project pitch or a skipped step in the funnel.
+- Judge the six fact_checks on the project the call actually ended up pitching (the "Project" fact is
+  then a Match, with a note saying the customer declined the lead's own project), and check what was
+  said about that project against ITS OWN catalogue entry.
+- A Project Mismatch is only for an agent who pitched a different project WITHOUT the customer having
+  shown any dislike of, or lack of interest in, the lead's own project.
+- Fill "redirect" (see OUTPUT FORMAT): customer_declined_own_project true, the project pitched instead,
+  and one line on what the customer did not like.
+
 Then give "fact_checks": the same call, broken into the six facts a lead actually compares projects
 on, each one checked against CATALOGUE (and PROJECT_EXCEPTIONS where it applies) independently of the
 others - a call can be correct on Budget and wrong on Area in the same breath, and both must show.
 - Project - was the project this lead belongs to the one actually discussed, or a different one (see
   the confusions listed under ABBREVIATIONS - "the new project near the Airport" spoken without a
-  name is not itself a mismatch, resolve it from context first).
+  name is not itself a mismatch, resolve it from context first). If the customer did not want the
+  lead's own project and the agent pitched another one, this is a Match on the project pitched - see
+  LEAD DID NOT WANT ITS OWN PROJECT above.
 - Configuration - the BHK/type discussed, checked against what the project actually offers (Dream
   Valley is 3BHK only; Durbaar Banquets has no configuration - use Not Discussed there, never Mismatch
   for a question that does not apply to a venue).
