@@ -433,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'4952e52419','insp-items.js':'af05d4a323','postsales.js':'9469a48d2a','scheduling.js':'50da5d7188','accounts.js':'cc8a8c6515','accounts-bank.js':'ea9648a540','accounts-books.js':'ed0e987851','purchase.js':'8109127afb','purchase-indent.js':'f6a398b898','purchase-rfq.js':'e6b7d700d5','purchase-po.js':'7239d968b5','purchase-stores.js':'5ff625e1d0','purchase-reports.js':'62c2dbe660','engineering.js':'ded15ec2c9','engineering-boq.js':'786ffa81a5','engineering-wo.js':'3dbf851a12','engineering-amend.js':'237625a694','engineering-ra.js':'2ce94b7221','engineering-ret.js':'645ea33273'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'5f4484bba7','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -1118,6 +1118,8 @@ const NAV=[
     {id:'postsales',label:'Post Sales',icon:'fa-headset'},
     // Site Visit / Booked customers by PIN code on a map, month by month - src/core/41-lead-map.js
     {id:'lead_map',label:'Lead Map',icon:'fa-map-location-dot'},
+    // project information for Sales, verified before it shows (21 Nov 2026) - 60-reckoner.js
+    {id:'reckoner',label:'Reckoner',icon:'fa-book-bookmark'},
   ]},
   {group:'Operations',items:[
     {id:'projects',label:'Projects',icon:'fa-building'},
@@ -1226,7 +1228,10 @@ function expandModules(ss){
 }
 /* 'competitors_jg' = Competitor Data limited to its Jain Group Fb Ads and Jain Group Google Ads tabs (18 Nov 2026). Someone who
    also holds 'competitors' sees all four. */
-function cdJgOnly(){ if(state.super)return false; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('competitors_jg')!==-1&&m.indexOf('competitors')===-1; }
+/* TEMPORARILY (20 Nov 2026, the user: "for Administrator remove the Competitor Facebook and Google data temporarily in Competitor Data"): the Administrator (super admin) sees only the two Jain Group
+   tabs, like the Jain Group-only accounts - the Meta Ads and Google Ads Transparency (competitor) tabs are hidden for them. Nothing is deleted; set CD_ADMIN_NO_COMPETITORS to false to bring them back. */
+const CD_ADMIN_NO_COMPETITORS=false;
+function cdJgOnly(){ if(state.super)return CD_ADMIN_NO_COMPETITORS; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('competitors_jg')!==-1&&m.indexOf('competitors')===-1; }
 /* 'custportal_photos' = Customer Portal Admin limited to its Photos & Videos tab. The database
    enforces the same boundary (app.is_custportal_media_editor): such an account can write the four
    photo tables and read project names and a bare flat list, and nothing else in cust.*. */
@@ -15859,12 +15864,17 @@ VIEWS.gtd=function(v,seg){
    daily-crm-updates task pulls out of RealtyBucket every morning. With it alone there is nothing
    to tab between, so the tab strip is gone too and the page opens straight onto it. The Open
    button still goes to RealtyBucket, which is where the actual CRM work happens. */
+/* 20 Nov 2026: a second tab, Qualified Leads (Daily / Weekly / Monthly) - the report that used to live in the
+   "Qualified Leads" Google Sheet. See 23b-crm-qualified.js. */
 VIEWS.crm=function(v,seg){
   setCrumb(['Sales','CRM & Sales']);
+  const ql=seg&&seg[0]==='qualified';
   v.innerHTML=mHead('fa-handshake','#7c3aed','CRM & Sales')
     +'<div style="margin:-8px 0 12px"><button class="btn btn-primary" onclick="window.open(\'https://www.realtybucket.com/\',\'_blank\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open</button></div>'
-    +'<div style="margin-top:16px"><div id="crmDuWrap"><div class="loader"><div class="spin"></div></div></div></div>';
-  crmDuLoad();
+    +'<div class="tabs" style="margin-top:14px"><div class="tab'+(ql?'':' active')+'" onclick="navTo(\'crm\')"><i class="fa-regular fa-chart-bar"></i> Daily Updates</div><div class="tab'+(ql?' active':'')+'" onclick="navTo(\'crm/qualified\')"><i class="fa-solid fa-user-check"></i> Qualified Leads</div></div>'
+    +(ql?CQ_CSS+'<div style="margin-top:16px"><div id="cqWrap"><div class="loader"><div class="spin"></div></div></div></div>'
+        :'<div style="margin-top:16px"><div id="crmDuWrap"><div class="loader"><div class="spin"></div></div></div></div>');
+  if(ql) cqLoad(); else crmDuLoad();
 };
 /* ============================ CRM & SALES — DAILY UPDATES TAB ============================
    Read-only viewer over acc.crm_daily_updates: the Qualified / Site Visits / Agent Visits rollup
@@ -15919,6 +15929,54 @@ function crmDuRender(dateStr,rows){
 }
 window.crmDuOnDateChange=function(v){ CRM_DU_DATE=v||null; crmDuLoad(); };
 
+
+/* ============================ CRM & SALES — QUALIFIED LEADS REPORT (20 Nov 2026) ============================
+   Ayush: "I want the data to be uploaded in JainE in CRM & Sales as a new Report divided into Daily, Weekly, Monthly".
+   It replaces the Google Sheet "Qualified Leads" that a browser routine filled from RealtyBucket: the CRM's Qualified
+   leads from Online + Other Project Campaign, per project. Read-only over acc.crm_qualified_report - the Sheet's rows
+   were copied in once, and every night at 02:00 IST acc.crm_qualified_refresh() re-reads the last 30 days from the
+   CRM's source report and overwrites any figure that changed, in place. Columns and labels are the Sheet's. */
+const CQ_COLS=[[70,'Dream Gurukul'],[3,'Dream World City'],[2,'Dream One'],[6,'Dream Valley'],[5,'Dream Eco City'],[4,'Dream Exotica'],[71,'Durbaar Banquets'],[7,'Dream Pallazo'],[8,'Dream Residency Manor'],[1,'Dream Patham'],[171,'New Project']];
+const CQ_KINDS=[['daily','Daily','Day'],['weekly','Weekly','Week'],['monthly','Monthly','Month']];
+let CQ={kind:'daily',rows:null};
+const CQ_MON=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function cqOrd(n){ const s=n%100; return n+((s>10&&s<14)?'th':({1:'st',2:'nd',3:'rd'}[n%10]||'th')); }
+function cqDay(d,full){ const p=d.split('-'); return cqOrd(+p[2])+' '+(full?CQ_MON[+p[1]-1]:CQ_MON[+p[1]-1].slice(0,3))+"'"+p[0].slice(2); }
+// the Sheet's labels: "1st October'26", "28th Sep'26 - 4th Oct'26", "Oct'26"
+function cqLabel(kind,s,e){ if(kind==='daily') return cqDay(s,true); if(kind==='weekly') return cqDay(s,false)+' - '+cqDay(e,false);
+  const p=s.split('-'); return CQ_MON[+p[1]-1].slice(0,3)+"'"+p[0].slice(2); }
+async function cqLoad(){
+  const wrap=$('cqWrap'); if(!wrap) return; loader(wrap);
+  const out=[];
+  for(let f=0;;f+=1000){
+    const q=await sb.schema('acc').from('crm_qualified_report').select('period_start,period_end,bu_id,q,origin,updated_at').eq('kind',CQ.kind).order('period_start',{ascending:false}).range(f,f+999);
+    if(q.error){ wrap.innerHTML=/crm_qualified_report|does not exist|schema cache/i.test(q.error.message)
+        ?'<div class="card card-pad" style="color:var(--slate)"><i class="fa-solid fa-moon"></i> The report is being set up tonight - it shows here from 20:15 IST today.</div>'
+        :'<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(q.error.message)+'</div>'; return; }
+    out.push.apply(out,q.data||[]); if(!q.data||q.data.length<1000) break; }
+  CQ.rows=out; cqPaint();
+}
+function cqPaint(){
+  const wrap=$('cqWrap'); if(!wrap||!CQ.rows) return;
+  const by={}; let last=null;
+  CQ.rows.forEach(function(r){ const x=by[r.period_start]||(by[r.period_start]={s:r.period_start,e:r.period_end,v:{}}); x.v[r.bu_id]=r.q; if(r.origin==='api'&&(!last||r.updated_at>last)) last=r.updated_at; });
+  const keys=Object.keys(by).sort().reverse();
+  const k=CQ_KINDS.filter(function(x){ return x[0]===CQ.kind; })[0];
+  const th='<th style="text-align:left">'+k[2]+'</th>'+CQ_COLS.map(function(c){ return '<th>'+esc(c[1])+'</th>'; }).join('')+'<th>Total</th>';
+  const body=keys.map(function(p){ const x=by[p]; let t=0;
+    const cells=CQ_COLS.map(function(c){ const v=x.v[c[0]]||0; t+=v; return '<td'+(v?'':' style="color:#cbd5e1"')+'>'+v+'</td>'; }).join('');
+    return '<tr><td style="text-align:left;font-weight:600">'+esc(cqLabel(CQ.kind,x.s,x.e))+'</td>'+cells+'<td><b>'+t+'</b></td></tr>'; }).join('');
+  wrap.innerHTML='<div class="cq-tabs">'+CQ_KINDS.map(function(x){ return '<button type="button" class="'+(x[0]===CQ.kind?'on':'')+'" onclick="cqKind(\''+x[0]+'\')">'+x[1]+'</button>'; }).join('')+'</div>'
+    +'<div class="card" style="padding:0;overflow:auto;max-height:70vh"><table class="cq-t"><thead><tr>'+th+'</tr></thead><tbody>'
+    +(body||'<tr><td colspan="13" style="text-align:center;color:var(--slate);padding:24px">Nothing yet</td></tr>')+'</tbody></table></div>'
+    +'<div style="font-size:12px;color:var(--slate);margin-top:10px;line-height:1.5">Qualified leads from Online + Other Project Campaign, as the CRM counts them. Every night at 2:00 the last 30 days are read again and any changed figure is corrected in place.'+(last?' Last corrected '+esc(fmtDate(last))+'.':'')+'</div>';
+}
+window.cqKind=function(k){ CQ.kind=k; cqLoad(); };
+const CQ_CSS='<style>.cq-tabs{display:inline-flex;gap:4px;background:#f1f5f9;border-radius:10px;padding:4px;margin:0 0 12px}'
+  +'.cq-tabs button{border:0;background:transparent;font:inherit;font-size:13px;font-weight:600;color:var(--slate);padding:7px 16px;border-radius:7px;cursor:pointer}'
+  +'.cq-tabs button.on{background:var(--bg-card,#fff);color:var(--ink);box-shadow:0 1px 3px rgba(15,23,42,.12)}'
+  +'.cq-t{width:100%;border-collapse:collapse;font-size:13px}.cq-t th{position:sticky;top:0;z-index:1;background:#f8fafc;font-size:11px;text-transform:uppercase;letter-spacing:.3px;color:var(--slate);padding:9px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}'
+  +'.cq-t td{padding:8px 10px;border-bottom:1px solid #eef1f4;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.cq-t tr:hover td{background:#f8fafc}</style>';
 /* ============================ POST SALES — ADHOC bulk replace ============================
    Converted output files upload to S3 (postsales/adhoc/...) and the conversion record (file
    name, replacement count, uploader, timestamp) is stored in postsales.adhoc_docs — a shared,
@@ -16670,8 +16728,8 @@ function prmStyles(){
   .prm-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
   .prm-src{font-size:12.5px;color:var(--slate)}
   .prm-src b{color:var(--ink)}
-  .prm-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
-  @media(max-width:900px){.prm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .prm-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-bottom:16px}
+  @media(max-width:1100px){.prm-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:700px){.prm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
   .prm-stat{background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:14px;padding:14px 16px;cursor:pointer;transition:border-color .12s,box-shadow .12s}
   .prm-stat:hover{border-color:#c4b5fd}
   .prm-stat.on{border-color:#7e22ce;box-shadow:0 0 0 3px #f3e8ff}
@@ -16723,6 +16781,7 @@ window.prmRender=async function(host){
   try{ await prmFvRead(); }catch(_e){ PRM_FVSTATUS={}; }
   PRM.rows=((l.data||[]).filter(r=>r.change==='removed'||(Number(r.net_outstanding||0)>=PRM_MIN&&PRM_FVSTATUS[r.booking_no]==='Active'))); PRM.settings=s.data||{};
   const keep=new Set(PRM.rows.map(r=>r.booking_no)); PRM.sel.forEach(k=>{ if(!keep.has(k)) PRM.sel.delete(k); });
+  await prmSchedRead();
   prmDraw(host);
 };
 // Who belongs in each view.
@@ -16740,7 +16799,7 @@ function prmDraw(host){
   const remind=PRM.rows.filter(r=>prmIn(r,'remind')), changes=PRM.rows.filter(r=>prmIn(r,'changes')),
         held=PRM.rows.filter(r=>prmIn(r,'held')), removed=PRM.rows.filter(r=>prmIn(r,'removed'));
   const total=remind.reduce((a,r)=>a+Number(r.net_outstanding||0),0);
-  const stat=(view,l,v,s)=>'<div class="prm-stat'+(PRM.f.view===view?' on':'')+'" onclick="PRM.f.view=\''+view+'\';prmDraw()"><div class="l">'+l+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>';
+  const stat=(view,l,v,s)=>'<div class="prm-stat'+(PRM.f.view===view?' on':'')+'" data-v="'+view+'" onclick="PRM.f.view=\''+view+'\';prmDraw()"><div class="l">'+l+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>';
   const projects=[...new Set(PRM.rows.filter(r=>r.change!=='removed').map(r=>r.project))].sort();
   const pc=p=>PRM.rows.filter(r=>prmIn(r,PRM.f.view)&&(!p||r.project===p)).length;
   host.innerHTML='<div class="prm-head"><div class="prm-src"><i class="fa-solid fa-file-excel" style="color:#16a34a"></i> From Farvision\u2019s <b>Customer Outstanding Summary</b>, '
@@ -16751,17 +16810,96 @@ function prmDraw(host){
       +stat('changes','Changes today',changes.length,changes.filter(r=>r.change==='new').length+' new &middot; '+changes.filter(r=>r.change==='changed').length+' amount changed')
       +stat('removed','Removed',removed.length,'paid up or no longer due')
       +stat('held','Held back',held.length,'disputed or no email')
+      +stat('log','Sent log',PRM.logAll==null?'…':prmInr(PRM.logAll),PRM.logToday==null?'reminders sent':PRM.logToday+' sent today')
+      +stat('sched','Scheduled',PRM.sched?Object.keys(PRM.sched).filter(k=>PRM.sched[k].active).length:'—',PRM.sched?'go 15 min after each import':'ready from 8 PM tonight')
     +'</div>'
-    +'<div class="card" style="padding:0;overflow:hidden">'
+    +(PRM.f.view==='sched'?'<div class="card" style="padding:0;overflow:hidden" id="prmSched"></div>':PRM.f.view==='log'?'<div class="card" style="padding:0;overflow:hidden" id="prmLog"></div>':'<div class="card" style="padding:0;overflow:hidden">'
       +'<div class="prm-tools">'
         +'<button class="prm-chip'+(!PRM.f.proj?' on':'')+'" onclick="PRM.f.proj=\'\';prmDraw()">All projects<span class="n">'+pc('')+'</span></button>'
         +projects.map(p=>'<button class="prm-chip'+(PRM.f.proj===p?' on':'')+'" onclick="PRM.f.proj=\''+esc(p).replace(/'/g,"\\'")+'\';prmDraw()">'+esc(prmProj(p))+'<span class="n">'+pc(p)+'</span></button>').join('')
       +'</div>'
       +'<div class="prm-selbar" id="prmSelBar"></div>'
       +'<div style="overflow:auto;max-height:calc(100vh - 400px)" id="prmList"></div>'
-    +'</div>';
-  prmList();
+    +'</div>');
+  if(PRM.f.view==='sched') prmSchedDraw(); else if(PRM.f.view==='log') prmLogLoad(); else prmList();
+  if(PRM.logToday==null) prmLogCount();
 }
+/* SENT LOG (20 Nov 2026, Ayush: "I want a proper Log System in Reminders"). Every reminder email - who it went to,
+   when, for how much, which flat, from which mailbox, who sent it, with what letter, sent or failed - from
+   postsales.reminder_send_log. Two sources: JAIN-E (this page) and Farvision (reminders Farvision sends through the
+   same customercare2 mailbox, read back from its Sent folder). Tests are kept apart. Nothing here sends anything. */
+PRM.log={rows:null,period:'all',src:'',type:'real',q:''};
+async function prmLogCount(){
+  const d=new Date(Date.now()+5.5*3600e3).toISOString().slice(0,10)+'T00:00:00+05:30';
+  // the card: every reminder ever sent (21 Nov 2026 - it showed only today's, so it looked empty on a day nothing went), today's below
+  const [t,a]=await Promise.all([sb.schema('postsales').from('reminder_send_log').select('id',{count:'exact',head:true}).eq('test',false).eq('ok',true).gte('sent_at',d),
+    sb.schema('postsales').from('reminder_send_log').select('id',{count:'exact',head:true}).eq('test',false).eq('ok',true)]);
+  PRM.logToday=t.count||0; PRM.logAll=a.count||0;
+  const v=document.querySelector('.prm-stat[data-v=log] .v'), sm=document.querySelector('.prm-stat[data-v=log] .s');
+  if(v) v.textContent=prmInr(PRM.logAll); if(sm) sm.textContent=PRM.logToday+' sent today';
+}
+async function prmLogLoad(){
+  const host=$('prmLog'); if(!host) return;
+  if(!PRM.log.rows){ host.innerHTML='<div class="loader" style="padding:30px"><div class="spin"></div></div>';
+    const out=[]; for(let f=0;;f+=1000){ const {data,error}=await sb.schema('postsales').from('reminder_send_log').select('*').order('sent_at',{ascending:false}).range(f,f+999);
+      if(error){ host.innerHTML='<div class="empty" style="padding:26px">Could not read the log: '+esc(error.message)+'</div>'; return; }
+      out.push.apply(out,data||[]); if(!data||data.length<1000) break; }
+    PRM.log.rows=out; }
+  prmLogDraw();
+}
+// Farvision's reminders sent through the mailboxes, into the log now (the weekly job does the same every Monday)
+window.prmLogSync=async function(){
+  const b=$('prmLogSyncBtn'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading mailboxes…'; }
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const rq=await fetch(SUPABASE_URL+'/functions/v1/customer-invite',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify({action:'reminder_log_sync',days:8})});
+    const o=await rq.json().catch(()=>({}));
+    if(!rq.ok||o.error){ toast(o.error||('HTTP '+rq.status),'err'); }
+    else{ const added=(o.mailboxes||[]).reduce((a,m)=>a+(m.added||0),0); toast(added?added+' new Farvision reminder'+(added===1?'':'s')+' added to the log':'Nothing new in the mailboxes','ok'); }
+  }catch(e){ toast(e.message,'err'); }
+  PRM.log.rows=null; PRM.logToday=null; prmLogCount(); prmLogLoad();
+};
+function prmLogAmt(r){ if(r.amount!=null) return Number(r.amount); const m=String(r.error||'').match(/^amount ([\d.]+)/); if(m) return Number(m[1]);
+  // sends from before the log kept the amount (20 Nov 2026): the booking's Net Outstanding, which is what the email gave
+  const x=!r.test&&r.ok&&PRM.rows.find(y=>y.booking_no===r.booking_no); return x?Number(x.net_outstanding):null; }
+function prmLogSrc(r){ return r.source||(/^Farvision/.test(r.sent_by||'')?'Farvision':'JAIN-E'); }
+window.prmLogDraw=function(){
+  const host=$('prmLog'); if(!host||!PRM.log.rows) return;
+  const L=PRM.log, q=L.q.trim().toLowerCase();
+  const day=new Date(Date.now()+5.5*3600e3).toISOString().slice(0,10);
+  const since={today:day+'T00:00:00+05:30',d7:new Date(Date.now()-7*864e5).toISOString(),d30:new Date(Date.now()-30*864e5).toISOString()}[L.period]||'';
+  const rows=L.rows.filter(function(r){
+    if(since&&r.sent_at<since) return false;
+    if(L.type==='real'&&r.test) return false; if(L.type==='test'&&!r.test) return false;
+    if(L.src&&prmLogSrc(r)!==L.src) return false;
+    if(q&&[r.customer_name,r.booking_no,r.recipient_email,r.unit,r.project,r.sent_by].join(' ').toLowerCase().indexOf(q)===-1) return false;
+    return true; });
+  const sent=rows.filter(r=>r.ok), failed=rows.filter(r=>!r.ok), amt=sent.reduce((a,r)=>a+(prmLogAmt(r)||0),0);
+  const chip=(k,v,l)=>'<button class="prm-chip'+(L[k]===v?' on':'')+'" onclick="PRM.log.'+k+'=\''+v+'\';prmLogDraw()">'+l+'</button>';
+  const dt=s=>{ const d=new Date(s); return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',timeZone:'Asia/Kolkata'})+' '+d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'}); };
+  const proj=r=>r.project||(PRM.rows.find(x=>x.booking_no===r.booking_no)||{}).project||'';
+  host.innerHTML='<div class="prm-tools">'
+      +chip('period','today','Today')+chip('period','d7','Last 7 days')+chip('period','d30','Last 30 days')+chip('period','all','All')
+      +'<span style="width:1px;height:22px;background:var(--line);margin:0 4px"></span>'
+      +chip('src','','All sources')+chip('src','JAIN-E','JAIN-E')+chip('src','Farvision','Farvision')
+      +'<span style="width:1px;height:22px;background:var(--line);margin:0 4px"></span>'
+      +chip('type','real','Customers')+chip('type','test','Tests')
+      +'<div class="prm-q"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Search name, flat, email…" value="'+esc(L.q)+'" oninput="PRM.log.q=this.value;prmLogDraw()"></div></div>'
+    +'<div class="prm-selbar"><span><b>'+sent.length+'</b> sent'+(failed.length?' &middot; <b style="color:#b91c1c">'+failed.length+'</b> failed':'')+(L.type==='real'?' &middot; ₹'+prmInr(amt)+' reminded':'')+'</span>'
+      +'<button class="btn btn-sm" style="margin-left:auto" id="prmLogSyncBtn" title="Reads customercare2 and customercare1 Sent folders for reminders Farvision sent (last 8 days) and adds new ones here. Also runs by itself every Monday 7 AM." onclick="prmLogSync()"><i class="fa-solid fa-envelope-circle-check"></i> Check mailboxes now</button>'
+      +'<button class="btn btn-sm" onclick="PRM.log.rows=null;prmLogLoad();prmLogCount()"><i class="fa-solid fa-rotate"></i> Refresh</button></div>'
+    +'<div style="overflow:auto;max-height:calc(100vh - 400px)"><table id="prmTbl"><thead><tr><th>Sent</th><th>Customer</th><th>Sent to</th><th style="text-align:right">Amount</th><th>From / by</th><th>Letter</th><th>Status</th></tr></thead><tbody>'
+    +(rows.length?rows.map(function(r){ const a=prmLogAmt(r), src=prmLogSrc(r);
+        return '<tr class="row"><td style="white-space:nowrap">'+esc(dt(r.sent_at))+'</td>'
+          +'<td><div class="prm-nm">'+esc(String(r.customer_name||'').trim()||'—')+'</div><div class="prm-sub">'+esc([prmProj(proj(r)),r.unit].filter(Boolean).join(' · '))+(r.booking_no?' &middot; '+esc(r.booking_no):'')+'</div></td>'
+          +'<td class="prm-email">'+esc(r.recipient_email||'')+'</td>'
+          +'<td class="prm-amt">'+(a!=null?'₹'+prmInr(a):'<span style="color:var(--slate);font-weight:500">—</span>')+'</td>'
+          +'<td><div style="font-size:12.5px">'+esc(r.from_email||'')+'</div><div class="prm-sub"><span class="prm-badge" style="margin:0;background:'+(src==='Farvision'?'#fef3c7;color:#92400e':'#ede9fe;color:#5b21b6')+'">'+src+'</span> '+(src==='JAIN-E'?esc(r.sent_by||''):'')+(r.test?' <span class="prm-badge" style="background:#e0f2fe;color:#075985">Test</span>':'')+'</div></td>'
+          +'<td class="prm-sub" style="max-width:220px">'+esc(r.attachment||(/attachment (.+)$/.exec(r.error||'')||[])[1]||'')+'</td>'
+          +'<td>'+(r.ok?'<span class="prm-badge removed" style="margin:0">Sent</span>':'<span class="prm-badge held" style="margin:0" title="'+esc(r.error||'')+'">Failed</span><div class="prm-sub" style="color:#b91c1c;white-space:normal;max-width:220px">'+esc(r.error||'')+'</div>')+'</td></tr>'; }).join('')
+      :'<tr><td colspan="7"><div class="empty" style="padding:26px">Nothing sent in this period</div></td></tr>')
+    +'</tbody></table></div>';
+};
 window.prmList=function(){
   const host=$('prmList'); if(!host) return;
   const f=PRM.f, q=f.q.trim().toLowerCase();
@@ -16772,7 +16910,8 @@ window.prmList=function(){
     return true;
   });
   const badge=r=>(r.change==='new'?'<span class="prm-badge new">New</span>':'')+(r.change==='changed'?'<span class="prm-badge changed">Changed</span>':'')
-    +(r.change==='removed'?'<span class="prm-badge removed">Removed</span>':'')+(r.held?'<span class="prm-badge held">Held</span>':'');
+    +(r.change==='removed'?'<span class="prm-badge removed">Removed</span>':'')+(r.held?'<span class="prm-badge held">Held</span>':'')
+    +(PRM.sched&&PRM.sched[r.booking_no]&&PRM.sched[r.booking_no].active?'<span class="prm-badge" style="background:#ecfdf5;color:#065f46" title="Scheduled reminder"><i class="fa-regular fa-clock" style="margin-right:3px"></i>'+esc(prmSchedLabel(PRM.sched[r.booking_no]))+'</span>':'');
   const groups={}; rows.forEach(r=>{ (groups[r.project]=groups[r.project]||[]).push(r); });
   const body=Object.keys(groups).sort().map(function(p){
     const g=groups[p], t=g.reduce((a,r)=>a+Number(r.net_outstanding||0),0);
@@ -16799,7 +16938,7 @@ window.prmList=function(){
 };
 function prmEmailHtml(subj,body,to){
   const st=PRM.settings||{};
-  return '<div style="color:var(--slate);font-size:12.5px;line-height:1.75"><b>From</b> Pallabita Ghosh - The Jain Group &lt;customercare1@thejaingroup.com&gt;'
+  return '<div style="color:var(--slate);font-size:12.5px;line-height:1.75"><b>From</b> Riya Roy - The Jain Group &lt;customercare2@thejaingroup.com&gt;'
       +(to!=null?'<br><b>To</b> '+esc(to||'(no email)'):'')+'<br><b>Subject</b> '+esc(subj)
       +'<br><b>Attachment</b> Reminder Letter (PDF)'+(st.attachment_name?', '+esc(st.attachment_name):'')+'</div>'
     +'<div style="margin-top:12px;padding:16px;border:1px solid var(--line);border-radius:12px;white-space:pre-wrap;line-height:1.65;font-size:13.5px">'+esc(body)+'</div>';
@@ -16842,7 +16981,9 @@ function prmSelBar(){
     +'<button class="btn btn-sm" onclick="prmSelShown(true)">Select all shown</button>'
     +'<button class="btn btn-sm" onclick="prmSelShown(false)">Unselect all shown</button>'
     +(sel.length?'<button class="btn btn-sm" onclick="PRM.sel.clear();prmList()">Clear selection</button>':'')
-    +'<button class="btn btn-sm btn-primary" style="margin-left:auto"'+(sel.length?'':' disabled')+' onclick="prmSendAsk()"><i class="fa-solid fa-paper-plane"></i> Send reminder'+(sel.length?' to '+sel.length:'')+'</button>';
+    +'<button class="btn btn-sm" style="margin-left:auto"'+(sel.length&&PRM.sched?'':' disabled title="'+(PRM.sched?'Tick customers to schedule':'Scheduling is ready from 8 PM tonight')+'"')+' onclick="prmSchedAsk()"><i class="fa-regular fa-clock"></i> Schedule'+(sel.length?' ('+sel.length+')':'')+'</button>'
+    +'<button class="btn btn-sm"'+(sel.length&&sel.length<=5?'':' disabled title="Tick 1 to 5 customers to test with"')+' onclick="prmTestAsk()"><i class="fa-solid fa-flask"></i> Send test'+(sel.length&&sel.length<=5?' ('+sel.length+')':'')+'</button>'
+    +'<button class="btn btn-sm btn-primary"'+(sel.length?'':' disabled')+' onclick="prmSendAsk()"><i class="fa-solid fa-paper-plane"></i> Send reminder'+(sel.length?' to '+sel.length:'')+'</button>';
 }
 /* SENDING (2 Nov 2026) - anyone with the Post Sales module, from Pallabita Ghosh's customer-care mailbox.
    Each ticked customer's Reminder Letter is drawn here and goes with their email; the server decides who
@@ -16855,45 +16996,93 @@ window.prmSendAsk=function(){
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-paper-plane"></i> Send outstanding reminders</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body" style="width:min(94vw,520px)"><div id="prmSendBody" style="font-size:13.5px;line-height:1.7">'
       +'<b>'+sel.length+'</b> customer'+(sel.length===1?'':'s')+' &middot; ₹'+prmInr(total)+' outstanding<br>'
-      +'From <b>Pallabita Ghosh - The Jain Group</b> &lt;customercare1@thejaingroup.com&gt;<br>'
+      +'From <b>Riya Roy - The Jain Group</b> &lt;customercare2@thejaingroup.com&gt;<br>'
       +'Each gets the reminder email with their own <b>Reminder Letter</b> (PDF) attached.'
       +'<div style="font-size:12px;color:var(--slate);margin-top:8px">Customers already reminded today are skipped.</div></div></div>'
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="prmGo" onclick="prmSendGo()"><i class="fa-solid fa-paper-plane"></i> Send '+sel.length+'</button></div>','md');
 };
-window.prmSendGo=async function(){
-  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r));
-  const go=$('prmGo'), box=$('prmSendBody'); if(go) go.disabled=true;
-  const say=t=>{ if(box) box.innerHTML=t; };
-  const res={sent:0,failed:[],skipped:[]};
-  const {data:{session}}=await sb.auth.getSession();
-  for(let i=0;i<sel.length;i+=10){
-    const part=sel.slice(i,i+10), letters={}, nos=[];
-    say('<i class="fa-solid fa-spinner fa-spin"></i> Preparing letters and sending - '+Math.min(i+part.length,sel.length)+' of '+sel.length+'…');
-    for(const r of part){
-      try{
-        const d=await prmLetterData(r.booking_no);
-        if(d.net==null||Math.abs(d.total-Number(r.net_outstanding||0))>1){ res.skipped.push(prmName(r)+' - letter total does not match'); continue; }
-        letters[r.booking_no]={filename:'Reminder Letter - '+String(r.booking_no).replace(/[^\w\-]+/g,'_')+'.pdf',pdf_base64:prmB64(await prmLetterPdf(d))};
-        nos.push(r.booking_no);
-      }catch(e){ res.skipped.push(prmName(r)+' - '+e.message); }
-    }
-    if(!nos.length) continue;
+/* 20 Nov 2026 (Ayush: "if so many emails are sent they should go one by one, if time is taken that's fine"):
+   ONE customer per call, one after the other. Each letter is built, checked (its total = the customer's Net
+   Outstanding) and sent on its own, and the server checks it again (whole PDF, total, every {field} filled)
+   before it goes. A call that fails on the network is tried once more; Stop finishes the one in hand and stops.
+   test_to = test address ids: the same email and letter go to those addresses only (Send test). */
+async function prmSendOne(r,session,testTo){
+  const d=await prmLetterData(r.booking_no);
+  if(d.net==null||Math.abs(d.total-Number(r.net_outstanding||0))>1) return {skipped:'letter total ₹'+prmInr(d.total)+' does not match Net Outstanding ₹'+prmInr(r.net_outstanding)};
+  const letters={}; letters[r.booking_no]={filename:'Reminder Letter - '+String(r.booking_no).replace(/[^\w\-]+/g,'_')+'.pdf',pdf_base64:prmB64(await prmLetterPdf(d)),total:d.total};
+  const body=JSON.stringify(Object.assign({action:'reminder_send_customers',booking_nos:[r.booking_no],letters:letters},testTo?{test_to:testTo}:{}));
+  for(let tryNo=1;;tryNo++){
     try{
       const rq=await fetch(SUPABASE_URL+'/functions/v1/customer-invite',{method:'POST',
-        headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},
-        body:JSON.stringify({action:'reminder_send_customers',booking_nos:nos,letters:letters})});
+        headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:body});
       const out=await rq.json().catch(()=>({}));
-      if(!rq.ok||out.error){ say('<span style="color:#b91c1c"><i class="fa-solid fa-triangle-exclamation"></i> '+esc(out.error||('HTTP '+rq.status))+'</span>'+(res.sent?'<br>'+res.sent+' sent before this.':'')); if(go){ go.disabled=false; go.textContent='Close'; go.onclick=closeModal; } return; }
-      res.sent+=out.sent||0;
-      (out.results||[]).forEach(x=>{ const r=PRM.rows.find(y=>y.booking_no===x.booking_no); const nm=r?prmName(r):x.booking_no;
-        if(x.skipped) res.skipped.push(nm+' - '+x.error); else if(!x.ok) res.failed.push(nm+' - '+x.error); });
-    }catch(e){ res.failed.push('Batch '+(i/10+1)+' - '+e.message); }
+      if(!rq.ok||out.error) return {fatal:out.error||('HTTP '+rq.status)};
+      return out;
+    }catch(e){ if(tryNo>=2) return {failed:e.message}; await new Promise(z=>setTimeout(z,3000)); }
   }
-  say('<b style="color:#15803d"><i class="fa-solid fa-circle-check"></i> '+res.sent+' reminder'+(res.sent===1?'':'s')+' sent</b>'
+}
+window.prmSendGo=async function(testTo){
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r));
+  const go=$('prmGo'), box=$('prmSendBody'); if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-stop"></i> Stop'; go.onclick=function(){ PRM.stop=true; go.disabled=true; go.textContent='Stopping…'; }; }
+  PRM.stop=false;
+  const say=t=>{ if(box) box.innerHTML=t; };
+  const res={sent:0,failed:[],skipped:[],done:0};
+  const {data:{session}}=await sb.auth.getSession();
+  for(const r of sel){
+    if(PRM.stop) break;
+    say('<i class="fa-solid fa-spinner fa-spin"></i> '+(testTo?'Test - ':'')+'Sending '+(res.done+1)+' of '+sel.length+': <b>'+esc(prmName(r))+'</b>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:6px">'+res.sent+' sent &middot; '+res.skipped.length+' skipped &middot; '+res.failed.length+' not sent. One at a time - keep this window open.</div>');
+    let out;
+    try{ out=await prmSendOne(r,session,testTo); }catch(e){ out={skipped:e.message}; }
+    res.done++;
+    if(out.fatal){ res.failed.push(prmName(r)+' - '+out.fatal); if(/switched on|sign in|Post Sales module|mailbox/i.test(out.fatal)) break; continue; }
+    if(out.skipped&&!out.results){ res.skipped.push(prmName(r)+' - '+out.skipped); continue; }
+    if(out.failed&&!out.results){ res.failed.push(prmName(r)+' - '+out.failed); continue; }
+    res.sent+=out.sent||0;
+    (out.results||[]).forEach(x=>{ if(x.skipped) res.skipped.push(prmName(r)+' - '+x.error); else if(!x.ok) res.failed.push(prmName(r)+(x.to?' ('+x.to+')':'')+' - '+x.error); });
+  }
+  say('<b style="color:#15803d"><i class="fa-solid fa-circle-check"></i> '+res.sent+' '+(testTo?'test email':'reminder')+(res.sent===1?'':'s')+' sent</b>'
+    +(PRM.stop?' <span style="color:var(--slate)">- stopped after '+res.done+' of '+sel.length+'</span>':'')
     +(res.failed.length?'<div style="margin-top:8px;color:#b91c1c"><b>Not sent ('+res.failed.length+')</b><br>'+res.failed.map(esc).join('<br>')+'</div>':'')
     +(res.skipped.length?'<div style="margin-top:8px;color:var(--slate)"><b>Skipped ('+res.skipped.length+')</b><br>'+res.skipped.map(esc).join('<br>')+'</div>':''));
   if(go){ go.disabled=false; go.innerHTML='Close'; go.onclick=closeModal; }
-  if(res.sent){ PRM.sel.clear(); prmList(); }
+  PRM.log.rows=null; PRM.logToday=null; prmLogCount();
+  if(res.sent&&!testTo){ PRM.sel.clear(); prmList(); }
+};
+/* SEND TEST (20 Nov 2026, "Bring Tests again") - the ticked customers' real emails and Reminder Letters, sent
+   from the same mailbox to test addresses only (postsales.reminder_test_recipients, editable here). */
+window.prmTestAsk=async function(){
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length||sel.length>5) return;
+  const {data:tt}=await sb.schema('postsales').from('reminder_test_recipients').select('id,email,customer_name').order('id');
+  PRM.tests=tt||[]; if(!PRM.testOn) PRM.testOn=new Set(PRM.tests.filter(t=>t.email===state.email).map(t=>t.id));
+  const list=()=>PRM.tests.map(t=>'<label style="display:flex;align-items:center;gap:8px;padding:5px 0"><input type="checkbox" class="prm-cb"'+(PRM.testOn.has(t.id)?' checked':'')+' onchange="prmTestPick('+t.id+',this.checked)"> '+esc(t.email)
+    +'<button class="prm-ibtn" style="margin-left:auto;width:26px;height:26px" title="Remove this test address" onclick="prmTestDel('+t.id+')"><i class="fa-solid fa-xmark"></i></button></label>').join('');
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-flask"></i> Send test</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,520px)"><div id="prmSendBody" style="font-size:13.5px;line-height:1.7">'
+      +'The real email and Reminder Letter of <b>'+sel.map(r=>esc(prmName(r))).join(', ')+'</b> - from <b>your Gmail (ayushruia1@gmail.com)</b>, subject marked [TEST] - go <b>only</b> to the test addresses ticked below. The customer gets nothing.'
+      +'<div style="margin-top:10px;font-weight:700">Test addresses</div><div id="prmTestList">'+list()+'</div>'
+      +'<div style="display:flex;gap:6px;margin-top:6px"><input id="prmTestNew" type="email" placeholder="Add a test email address" style="flex:1;height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px"><button class="btn btn-sm" onclick="prmTestAdd()">Add</button></div>'
+    +'</div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="prmGo" onclick="prmTestGo()"><i class="fa-solid fa-flask"></i> Send test</button></div>','md');
+  PRM._testList=list;
+};
+window.prmTestPick=function(id,on){ if(on) PRM.testOn.add(id); else PRM.testOn.delete(id); };
+window.prmTestAdd=async function(){
+  const el=$('prmTestNew'), v=String(el&&el.value||'').trim().toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)){ toast('Enter an email address','err'); return; }
+  const {data,error}=await sb.schema('postsales').from('reminder_test_recipients').insert({customer_name:'Test - '+v,email:v,project:'TEST',flat:'Test',net_outstanding:10000,added_by:state.email}).select('id,email,customer_name').single();
+  if(error){ toast(error.message,'err'); return; }
+  PRM.tests.push(data); PRM.testOn.add(data.id); $('prmTestList').innerHTML=PRM._testList(); el.value='';
+};
+window.prmTestDel=async function(id){
+  const {error}=await sb.schema('postsales').from('reminder_test_recipients').delete().eq('id',id);
+  if(error){ toast(error.message,'err'); return; }
+  PRM.tests=PRM.tests.filter(t=>t.id!==id); PRM.testOn.delete(id); $('prmTestList').innerHTML=PRM._testList();
+};
+window.prmTestGo=function(){
+  const ids=[...PRM.testOn].filter(id=>PRM.tests.some(t=>t.id===id)).slice(0,5);
+  if(!ids.length){ toast('Tick at least one test address','err'); return; }
+  prmSendGo(ids);
 };
 /* THE REMINDER LETTER (2 Nov 2026) - Farvision's "Reminder Letter", built by JAIN-E from its own data so
    it can go with the email: the company block from Post Sales > Setup, the customer from Farvision's
@@ -17024,13 +17213,18 @@ async function prmLetterPdf(d){
   wrap('According to which you had to deposit your due payment against the total value of your Unit. But after repeated Demand / reminder, you have not made payments. Now the company is providing you an opportunity to pay your dues, mentioned as under:',W-2*M,reg,8)
     .forEach(l=>{ txt(l,M,y-8); y-=11; });
   y-=10; txt('Outstanding details :',M+4,y-10,{bold:true,size:9.5}); y-=22;
-  const cw=[150,92,52,52,40,60,52,42], ttl=['Particulars','Bill No.','Bill Date','Due Date','Due Days','Bill Amt.','Rec Amt.','Bal Amt.'], rgt=[0,0,0,0,1,1,1,1];
+  /* 20 Nov 2026 (Ayush: "the Table's last 2 Column's data is overlapping"): Rec Amt. and Bal Amt. were 52 and 42pt
+     wide, too narrow for lakh figures such as 7,70,070.00, so the numbers ran into the column beside them. The money
+     columns are now 68pt each (the same 540pt page width overall), and a figure that still does not fit is set a
+     little smaller to stay inside its own box - it never crosses a line. */
+  const cw=[126,82,48,48,32,68,68,68], ttl=['Particulars','Bill No.','Bill Date','Due Date','Due Days','Bill Amt.','Rec Amt.','Bal Amt.'], rgt=[0,0,0,0,1,1,1,1];
   const row=(cells,o)=>{ o=o||{}; const f=o.bold?bold:reg, s=7.6, pad=3, lh=s+2.6;
-    const laid=cells.map((t,i)=>rgt[i]?[clean(t)]:wrap(t,cw[i]-2*pad,f,s)); const h=Math.max(...laid.map(x=>x.length))*lh+2*pad;
+    const laid=cells.map((t,i)=>(rgt[i]&&!o.head)?[clean(t)]:wrap(t,cw[i]-2*pad,f,s)); const h=Math.max(...laid.map(x=>x.length))*lh+2*pad;
     if(y-h<M+30){ pg=doc.addPage([W,H]); y=H-M; if(!o.head) row(ttl,{bold:true,fill:GREY,head:true}); }
     let x=M; laid.forEach((ls,i)=>{ if(o.fill) pg.drawRectangle({x:x,y:y-h,width:cw[i],height:h,color:o.fill});
       pg.drawRectangle({x:x,y:y-h,width:cw[i],height:h,borderColor:INK,borderWidth:.5});
-      ls.forEach((ln,j)=>{ const tw=f.widthOfTextAtSize(ln,s); pg.drawText(ln,{x:rgt[i]?x+cw[i]-pad-tw:x+pad,y:y-pad-s-j*lh+1.5,size:s,font:f,color:INK}); });
+      ls.forEach((ln,j)=>{ let ss=s, tw=f.widthOfTextAtSize(ln,s); const room=cw[i]-2*pad; if(tw>room){ ss=s*room/tw; tw=room; }
+        pg.drawText(ln,{x:rgt[i]?x+cw[i]-pad-tw:x+pad,y:y-pad-s-j*lh+1.5,size:ss,font:f,color:INK}); });
       x+=cw[i]; }); y-=h; };
   row(ttl,{bold:true,fill:GREY,head:true});
   d.lines.forEach(l=>row([l.particulars,l.bill_no,prmDmy(l.bill_date),prmDmy(l.due_date),String(l.days),prmMoney(l.bill),prmMoney(l.rec),prmMoney(l.bal)]));
@@ -17068,6 +17262,93 @@ window.prmSel=function(ix,on){ const r=PRM.rows[ix]; if(!r) return; if(on) PRM.s
 window.prmSelGroup=function(gi,on){ const p=(PRM._grp||[])[gi]; PRM.rows.filter(r=>r.project===p&&prmPick(r)).forEach(r=>{ if(on) PRM.sel.add(r.booking_no); else PRM.sel.delete(r.booking_no); }); prmList(); };
 window.prmSelShown=function(on){ prmShown().forEach(r=>{ if(on) PRM.sel.add(r.booking_no); else PRM.sel.delete(r.booking_no); }); prmList(); };
 
+
+/* SCHEDULES (20 Nov 2026, Ayush: "a person can choose some customers and then select in what frequency their email will
+   go - Daily, Weekly, Fortnightly or Monthly ... 15 mins after the Import is fully done ... if the Import does not happen
+   that day the Email won't go"). postsales.reminder_schedules, one per customer. The server sends them (customer-invite
+   reminder_schedule_run) 15 minutes after the day's Farvision import; anyone scheduled can still be sent by hand. */
+const PRM_DOW=['','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+async function prmSchedRead(){
+  const {data,error}=await sb.schema('postsales').from('reminder_schedules').select('*');
+  if(error){ PRM.sched=null; return; }   // the table arrives tonight
+  PRM.sched={}; (data||[]).forEach(s=>{ PRM.sched[s.booking_no]=s; });
+}
+function prmOrd(n){ const s=n%100; return n+((s>10&&s<14)?'th':({1:'st',2:'nd',3:'rd'}[n%10]||'th')); }
+function prmSchedLabel(s){
+  if(s.frequency==='daily') return 'Daily';
+  if(s.frequency==='weekly') return 'Weekly · '+PRM_DOW[s.weekday].slice(0,3);
+  if(s.frequency==='fortnightly') return 'Fortnightly · '+PRM_DOW[s.weekday].slice(0,3);
+  return 'Monthly · '+prmOrd(s.month_day);
+}
+// the next day it is due (an import has to happen that day for it to go)
+function prmSchedNext(s){
+  const ist=new Date(Date.now()+5.5*3600e3); const d=new Date(Date.UTC(ist.getUTCFullYear(),ist.getUTCMonth(),ist.getUTCDate()));
+  const start=new Date(s.start_date+'T00:00:00Z');
+  for(let i=0;i<70;i++){ const dd=new Date(d.getTime()+i*864e5); if(dd<start) continue;
+    const dow=((dd.getUTCDay()+6)%7)+1, last=new Date(Date.UTC(dd.getUTCFullYear(),dd.getUTCMonth()+1,0)).getUTCDate();
+    const ok=s.frequency==='daily'||(s.frequency==='weekly'&&dow===s.weekday)||(s.frequency==='fortnightly'&&dow===s.weekday&&Math.floor((dd-start)/864e5/7)%2===0)
+      ||(s.frequency==='monthly'&&dd.getUTCDate()===Math.min(s.month_day,last));
+    if(ok) return dd.toISOString().slice(0,10); }
+  return null;
+}
+window.prmSchedAsk=function(){
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length||!PRM.sched) return;
+  const now=new Date(Date.now()+5.5*3600e3), dow=((now.getUTCDay()+6)%7)+1, dom=now.getUTCDate();
+  openModal('<div class="modal-head"><h3><i class="fa-regular fa-clock"></i> Schedule reminders</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,520px);font-size:13.5px;line-height:1.7">'
+      +'<b>'+sel.length+'</b> customer'+(sel.length===1?'':'s')+': '+sel.slice(0,6).map(r=>esc(prmName(r))).join(', ')+(sel.length>6?' and '+(sel.length-6)+' more':'')
+      +'<div style="margin-top:12px;font-weight:700">How often</div>'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">'+[['daily','Daily'],['weekly','Weekly'],['fortnightly','Fortnightly'],['monthly','Monthly']].map((f,i)=>'<label class="prm-chip'+(i===1?' on':'')+'" style="display:inline-flex;align-items:center;gap:6px"><input type="radio" name="prmFreq" value="'+f[0]+'"'+(i===1?' checked':'')+' onchange="prmSchedFreq()" style="display:none">'+f[1]+'</label>').join('')+'</div>'
+      +'<div id="prmSchedWd" style="margin-top:10px">On <select id="prmSchedDow" class="sel" style="height:34px;margin-left:6px">'+PRM_DOW.slice(1).map((d,i)=>'<option value="'+(i+1)+'"'+(i+1===dow?' selected':'')+'>'+d+'</option>').join('')+'</select></div>'
+      +'<div id="prmSchedMd" style="margin-top:10px;display:none">On the <select id="prmSchedDom" class="sel" style="height:34px;margin:0 6px">'+Array.from({length:31},(_,i)=>'<option value="'+(i+1)+'"'+(i+1===dom?' selected':'')+'>'+prmOrd(i+1)+'</option>').join('')+'</select>of each month</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:12px">Each reminder goes <b>15 minutes after that day’s Farvision import</b> is complete, from Riya Roy - The Jain Group &lt;customercare2@thejaingroup.com&gt;, with the customer’s Reminder Letter. If there is no import that day, it does not go that day. Held, paid-up or already-reminded-that-day customers are skipped. You can still send to them by hand any time.</div>'
+    +'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="prmSchedGo" onclick="prmSchedSave()"><i class="fa-regular fa-clock"></i> Schedule '+sel.length+'</button></div>','md');
+  prmSchedFreq();
+};
+window.prmSchedFreq=function(){
+  const f=(document.querySelector('input[name=prmFreq]:checked')||{}).value;
+  document.querySelectorAll('input[name=prmFreq]').forEach(x=>x.parentNode.classList.toggle('on',x.checked));
+  $('prmSchedWd').style.display=(f==='weekly'||f==='fortnightly')?'':'none'; $('prmSchedMd').style.display=f==='monthly'?'':'none';
+};
+window.prmSchedSave=async function(){
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length) return;
+  const f=(document.querySelector('input[name=prmFreq]:checked')||{}).value||'weekly';
+  const wd=Number($('prmSchedDow').value), md=Number($('prmSchedDom').value);
+  const go=$('prmSchedGo'); if(go){ go.disabled=true; go.textContent='Saving…'; }
+  const rows=sel.map(r=>({booking_no:r.booking_no,customer_name:String(r.customer_name||'').trim(),project:prmProj(r.project),frequency:f,
+    weekday:(f==='weekly'||f==='fortnightly')?wd:null,month_day:f==='monthly'?md:null,active:true,created_by:state.email,updated_at:new Date().toISOString()}));
+  const {error}=await sb.schema('postsales').from('reminder_schedules').upsert(rows,{onConflict:'booking_no'});
+  if(error){ toast(error.message,'err'); if(go){ go.disabled=false; go.textContent='Schedule'; } return; }
+  closeModal(); toast(sel.length+' customer'+(sel.length===1?'':'s')+' scheduled','ok'); PRM.sel.clear(); await prmSchedRead(); prmDraw();
+};
+window.prmSchedDraw=function(){
+  const host=$('prmSched'); if(!host) return;
+  if(!PRM.sched){ host.innerHTML='<div class="empty" style="padding:26px">Scheduling is being set up - it is ready from 8 PM tonight.</div>'; return; }
+  const list=Object.values(PRM.sched).sort((a,b)=>(b.active-a.active)||String(a.project).localeCompare(String(b.project))||String(a.customer_name).localeCompare(String(b.customer_name)));
+  const net=b=>{ const r=PRM.rows.find(x=>x.booking_no===b); return r?Number(r.net_outstanding):null; };
+  host.innerHTML='<div class="prm-selbar"><span><b>'+list.filter(s=>s.active).length+'</b> scheduled'+(list.some(s=>!s.active)?' &middot; '+list.filter(s=>!s.active).length+' paused':'')+'</span>'
+      +'<span style="margin-left:auto;font-size:12px;color:var(--slate)">Each goes 15 min after that day’s import. No import that day = not sent that day.</span></div>'
+    +'<div style="overflow:auto;max-height:calc(100vh - 400px)"><table id="prmTbl"><thead><tr><th>Customer</th><th>How often</th><th>Next due</th><th>Last sent</th><th style="text-align:right">Outstanding now</th><th></th></tr></thead><tbody>'
+    +(list.length?list.map(s=>{ const n=net(s.booking_no), nx=s.active?prmSchedNext(s):null;
+      return '<tr class="row"'+(s.active?'':' style="opacity:.55"')+'><td><div class="prm-nm">'+esc(s.customer_name||'')+'</div><div class="prm-sub">'+esc(s.project||'')+' &middot; '+esc(s.booking_no)+'</div></td>'
+        +'<td>'+esc(prmSchedLabel(s))+(s.active?'':' <span class="prm-badge held" style="margin:0">Paused</span>')+'</td>'
+        +'<td>'+(nx?esc(prmDmy(nx)):'—')+'</td>'
+        +'<td>'+(s.last_sent_on?esc(prmDmy(s.last_sent_on)):'—')+(s.last_note&&s.last_note!=='sent'?'<div class="prm-sub" style="color:#b91c1c;white-space:normal">'+esc(s.last_note)+'</div>':'')+'</td>'
+        +'<td class="prm-amt">'+(n!=null?'₹'+prmInr(n):'<span style="color:var(--slate);font-weight:500">not due</span>')+'</td>'
+        +'<td class="prm-act"><button class="prm-ibtn" title="'+(s.active?'Pause':'Resume')+'" onclick="prmSchedToggle('+s.id+','+(!s.active)+')"><i class="fa-solid fa-'+(s.active?'pause':'play')+'"></i></button>'
+        +'<button class="prm-ibtn" title="Remove the schedule" onclick="prmSchedDel('+s.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>'; }).join('')
+      :'<tr><td colspan="6"><div class="empty" style="padding:26px">Nobody is scheduled yet. Tick customers under To remind and press Schedule.</div></td></tr>')
+    +'</tbody></table></div>';
+};
+window.prmSchedToggle=async function(id,on){
+  const {error}=await sb.schema('postsales').from('reminder_schedules').update({active:on,updated_at:new Date().toISOString()}).eq('id',id);
+  if(error){ toast(error.message,'err'); return; } await prmSchedRead(); prmDraw();
+};
+window.prmSchedDel=async function(id){
+  if(!confirm('Remove this customer’s schedule? (They can still be reminded by hand.)')) return;
+  const {error}=await sb.schema('postsales').from('reminder_schedules').delete().eq('id',id);
+  if(error){ toast(error.message,'err'); return; } await prmSchedRead(); prmDraw();
+};
 /* Post Sales > Digital Forms (6 Nov 2026): the Digital Booking Form (booking-form.html) that customers fill from
    anywhere lands in acc.digital_booking_forms through the booking-form-public edge function. This tab is where staff
    see those forms: a list (newest first), and for each one every answer, the PAN / Aadhaar photos and the signature.
@@ -17261,6 +17542,21 @@ const PG_CSS='<style>'
   +'.pg-edit{margin:0 0 12px;padding:9px 14px;border-radius:8px;background:#fff8e8;border:1px solid #f3e1b5;color:#8a5a0b;font-size:13px}'
   +'.pg-wrap{max-width:1180px}'
   +'.pg-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch}'
+  // FLAT | SIZE & PRICE (20 Nov 2026, Ayush: "the alignment of these two sections is very bad"): both cards take the same four rows (title + three), so every row of the one sits level with the same row of the other
+  +'.pg-card.pg-al{display:grid;grid-row:span 5;grid-template-rows:subgrid;row-gap:14px;align-content:start}.pg-card.pg-al>.pg-bf+.pg-bf{margin-top:0}.pg-card.pg-al>h4{margin:0}'
+  +'@media(max-width:1100px){.pg-card.pg-al{display:block;grid-row:auto}.pg-card.pg-al>.pg-bf+.pg-bf{margin-top:14px}.pg-card.pg-al>h4{margin:0 0 12px}}'
+  // BLOCKS IN ONE STRIP (20 Nov 2026, Ayush: "if there are too many blocks make it slide - one strip with a horizontal scroll"): the block buttons never wrap; past the card's width the strip slides sideways
+  +'#pgC_pgBlock .pg-seg{flex-wrap:nowrap;overflow-x:auto;max-width:100%;scrollbar-width:thin;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}#pgC_pgBlock .pg-seg button{flex:none}'
+  // car parks on one line: how many, then one small Covered | Open pair per car park, wrapping only when the card is full
+  +'.pg-pkc{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}.pg-pk{display:inline-flex;align-items:center;gap:6px}.pg-pk>b{width:20px;height:20px;border-radius:50%;background:#e5e7eb;color:#4b5563;font-size:11.5px;display:inline-flex;align-items:center;justify-content:center;flex:none}'
+  +'.pg-pk .pg-seg button{min-width:0;height:28px;padding:0 9px;font-size:12.5px}'
+  // the flat menu: a button that opens a panel with a search box and the flats as tiles under their floor
+  +'.pg-dd{position:relative}.pg-dd-b{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;cursor:pointer;background:#fff}.pg-dd-b.ph{color:#9aa1ad}.pg-dd-b i{font-size:11px;color:#9aa1ad}'
+  +'.pg-dd-p{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:60;background:#fff;border:1px solid #d7dbe2;border-radius:10px;box-shadow:0 12px 30px rgba(16,24,40,.18);padding:10px}'
+  +'.pg-dd-m{margin:8px 2px 0;font-size:11.5px;color:#9aa1ad}.pg-dd-l{max-height:250px;overflow:auto;margin-top:4px;padding-right:2px}.pg-dd-e{padding:14px 4px;font-size:13px;color:#9aa1ad;text-align:center}'
+  +'.pg-dd-fl{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#9aa1ad;margin:10px 2px 6px}'
+  +'.pg-dd-t{display:flex;flex-wrap:wrap;gap:6px}.pg-dd-t button{min-width:52px;height:34px;padding:0 8px;border:1px solid #d7dbe2;border-radius:8px;background:#fff;font:inherit;font-size:13.5px;cursor:pointer}'
+  +'.pg-dd-t button:hover:not([disabled]){border-color:#1d4ed8;color:#1d4ed8}.pg-dd-t button.on{background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700}.pg-dd-t button[disabled]{background:#f3f4f6;color:#b4bac4;cursor:not-allowed;text-decoration:line-through}'
   +'@media(max-width:1100px){.pg-cards{grid-template-columns:minmax(0,1fr)}}'
   +'.pg-card{background:#fff;border:1px solid var(--pgl);border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,.04);padding:16px 20px 20px}'
   +'.pg-card>h4{margin:0 0 12px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:#9aa1ad;font-weight:700}'
@@ -17344,12 +17640,96 @@ function pgProjApply(p){
   const nf=Math.max(1,Math.floor(Number(p.floors))||8), bd=bhk.indexOf(p.bhkDefault)>=0?p.bhkDefault:(bhk[0]||'');
   const b=$('pgC_pgBlock'); if(b) b.innerHTML=pgSegH('pgBlock',blocks,blocks[0]||'');
   const h=$('pgC_pgBhk'); if(h) h.innerHTML=pgSegH('pgBhk',bhk,bd);
-  const fl=$('pgC_pgFloor');
-  if(fl){
-    const fs=[]; for(let i=1;i<=nf;i++) fs.push(String(i));
-    fl.innerHTML=nf>12?'<select class="pg-in" id="pgFloor" style="min-width:96px">'+fs.map(x=>'<option value="'+x+'">'+x+'</option>').join('')+'</select>':pgSegH('pgFloor',fs,'1');
-  }
+  pgBlocksFromStock(p);
+  pgFloorPlain(p);
+  PG.invMode=false; PG.flFilter=null; pgInvRefresh();
 }
+function pgFloorPlain(p){
+  const fl=$('pgC_pgFloor'); if(!fl||!p) return;
+  const nf=Math.max(1,Math.floor(Number(p.floors))||8), fs=[]; for(let i=1;i<=nf;i++) fs.push(String(i));
+  fl.innerHTML=nf>12?'<select class="pg-in" id="pgFloor" style="min-width:96px">'+fs.map(x=>'<option value="'+x+'">'+x+'</option>').join('')+'</select>':pgSegH('pgFloor',fs,'1');
+}
+/* FLATS FROM THE STOCK LIST (20 Nov 2026, Ayush: "if the Sales people get to choose the flat as a dropdown - I select a block and the Flat shows all the flats
+   inside the block; if I choose 3A the Floor becomes 3 by itself; if Floor is 4 only the flats on that floor come"). The flats of postsales.flats
+   (the Farvision stock: block, floor, flat, available / booked) are read once. For a project and block that have flats there, Flat number is a dropdown
+   (booked flats shown but not selectable; "Other" at the end lets a flat that is not in the list be typed) and Floor gets an "All" choice first: All = every
+   flat of the block, a floor = only that floor's flats; picking a flat sets the Floor. Projects / blocks without stock (Dream World City) keep the plain boxes. */
+const PG_INV_PROJ={ananta:[2],dreamgurukul:[1],dreamone:[3,8],dreamvalley:[5],dreamecocity:[6,7],dreamexotica:[4],dreamworldcity:[9,10]};   // booking-form project -> cust.projects ids
+// Dream World City is Pailan: two stock projects (Dream Jain-Pailan, Dream Gateway Pailan Projects), each with a Block-1, 2, 3 - its blocks carry the stock project's name
+const PG_INV_TAG={9:'Jain Pailan',10:'Gateway Pailan'};
+const PG_INV={st:null,blocks:{},names:{}};
+const pgNorm=function(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,''); };
+async function pgInvLoad(){
+  if(PG_INV.st) return; PG_INV.st='load';
+  try{
+    const all=async function(tbl,cols,fn){ let out=[],f=0; for(;;){ let q=sb.schema('postsales').from(tbl).select(cols); if(fn) q=fn(q); const r=await q.range(f,f+999); if(r.error) throw r.error; out=out.concat(r.data||[]); if((r.data||[]).length<1000) break; f+=1000; } return out; };
+    const res=await Promise.all([all('towers','id,project_id,name',function(q){ return q.is('deleted_at',null).order('id'); }), all('floors','id,floor_no',function(q){ return q.order('id'); }), all('flats','tower_id,floor_id,flat_code,status,sba_sqft',function(q){ return q.is('deleted_at',null).order('id'); })]);
+    const byProj={}; Object.keys(PG_INV_PROJ).forEach(function(k){ PG_INV_PROJ[k].forEach(function(id){ byProj[id]=k; }); });
+    const label=function(t){ return PG_INV_TAG[t.project_id]?t.name+' ('+PG_INV_TAG[t.project_id]+')':t.name; };
+    const tw={}, fn={}; res[0].forEach(function(t){ tw[t.id]=t; const k=byProj[t.project_id]; if(!k) return; const nm=(PG_INV.names[k]=PG_INV.names[k]||[]), lb=label(t); if(nm.indexOf(lb)<0) nm.push(lb); }); res[1].forEach(function(x){ fn[x.id]=x.floor_no; });
+    res[2].forEach(function(f){ const t=tw[f.tower_id]; if(!t||!byProj[t.project_id]||!f.flat_code) return; const k=byProj[t.project_id], lb=label(t), nb=pgNorm(lb);
+      const o=(PG_INV.blocks[k]=PG_INV.blocks[k]||{})[nb]=PG_INV.blocks[k][nb]||{name:lb,flats:[]};
+      o.flats.push({code:String(f.flat_code).toUpperCase(),floor:fn[f.floor_id]==null?null:Number(fn[f.floor_id]),st:f.status}); });
+    Object.keys(PG_INV.blocks).forEach(function(k){ Object.keys(PG_INV.blocks[k]).forEach(function(b){ PG_INV.blocks[k][b].flats.sort(function(a,c){ return (a.floor||0)-(c.floor||0)||a.code.localeCompare(c.code,'en',{numeric:true}); }); }); });
+    PG_INV.st='ok';
+  }catch(e){ PG_INV.st=null; console.warn('flat stock',e); return; }
+  if($('pgFlatDD')){ if(PG.project) pgBlocksFromStock(PG.project); pgInvRefresh(true); }
+}
+// the blocks of a project whose block list in the booking form is only a placeholder (Dream World City) come from the stock
+function pgBlocksFromStock(p){ const nm=p&&p.key==='dreamworldcity'&&PG_INV.st==='ok'?PG_INV.names[p.key]:null; const b=$('pgC_pgBlock'); if(nm&&nm.length&&b) b.innerHTML=pgSegH('pgBlock',nm,nm[0]); }
+function pgInvFor(){ const p=PG.project, b=($('pgBlock')||{}).value; if(!p||PG_INV.st!=='ok') return null; const bl=PG_INV.blocks[p.key]; const x=bl&&bl[pgNorm(b)]; return x&&x.flats.length?x:null; }
+// keep = keep what is chosen (a draft / edited link was just put into the boxes); otherwise the flat and floor go back to the start
+function pgInvRefresh(keep){
+  const dd=$('pgFlatDD'), inp=$('pgFlat'); if(!dd||!inp) return;
+  const x=pgInvFor();
+  PG.ddOpen=false; PG.ddQ='';
+  if(!x){ if(PG.invMode){ PG.invMode=false; PG.flFilter=null; pgFloorPlain(PG.project); } dd.style.display='none'; inp.style.display=''; return; }
+  const prevFloor=($('pgFloor')||{}).value, code=keep?String(inp.value||'').trim().toUpperCase():'';
+  const cur=code?x.flats.filter(function(f){ return f.code===code; })[0]:null;
+  PG.invMode=true; PG.flFilter=null; if(!keep) inp.value='';
+  const fl=$('pgC_pgFloor'), floors=[]; x.flats.forEach(function(f){ if(f.floor!=null&&floors.indexOf(String(f.floor))<0) floors.push(String(f.floor)); });
+  floors.sort(function(a,b){ return a-b; });
+  const startFloor=cur&&cur.floor!=null?String(cur.floor):(keep&&floors.indexOf(String(prevFloor))>=0?String(prevFloor):'All');
+  if(fl) fl.innerHTML=floors.length>11?'<select class="pg-in" id="pgFloor" style="min-width:110px" onchange="pgInvFloor()"><option value="All">All floors</option>'+floors.map(function(v){ return '<option value="'+v+'"'+(v===startFloor?' selected':'')+'>'+v+'</option>'; }).join('')+'</select>':pgSegH('pgFloor',['All'].concat(floors),startFloor);
+  dd.style.display=''; inp.style.display='none'; pgDDDraw();
+}
+/* THE FLAT MENU (20 Nov 2026, Ayush: "remove the Other option in Flats and make the dropdown menu better"): a button that opens a panel - a search box, then the
+   flats as tiles under their floor (booked ones greyed, not selectable). No "Other": only flats of the stock list can be chosen. */
+function pgDDDraw(){
+  const dd=$('pgFlatDD'), x=pgInvFor(); if(!dd||!x) return;
+  const inp=$('pgFlat'), code=String(inp.value||'').trim().toUpperCase(), fl=PG.flFilter, q=String(PG.ddQ||'').trim().toUpperCase();
+  const list=x.flats.filter(function(f){ return (fl==null||f.floor===fl)&&(!q||f.code.indexOf(q)>=0); });
+  const cur=x.flats.filter(function(f){ return f.code===code; })[0];
+  const shown=code?code+(cur&&cur.floor!=null?' · Floor '+cur.floor:'')+(cur&&cur.st!=='available'?' · booked':''):'';
+  const n=x.flats.filter(function(f){ return f.st==='available'&&(fl==null||f.floor===fl); }).length;
+  let body='';
+  if(!list.length) body='<div class="pg-dd-e">'+(q?'No flat matches "'+esc(PG.ddQ)+'"':'No flat on this floor')+'</div>';
+  else { const by={}; list.forEach(function(f){ const k=f.floor==null?'-':f.floor; (by[k]=by[k]||[]).push(f); });
+    Object.keys(by).sort(function(a,b){ return a-b; }).forEach(function(k){
+      body+=(fl==null?'<div class="pg-dd-fl">Floor '+esc(k)+'</div>':'')+'<div class="pg-dd-t">'+by[k].map(function(f){ const on=f.st==='available'||f.code===code;
+        return '<button type="button"'+(on?'':' disabled title="Booked"')+(f.code===code?' class="on"':'')+' onclick="pgInvPick(\''+esc(f.code)+'\')">'+esc(f.code)+'</button>'; }).join('')+'</div>'; }); }
+  const open=!!PG.ddOpen;
+  dd.innerHTML='<button type="button" class="pg-in pg-dd-b'+(code?'':' ph')+'" onclick="pgDDToggle(event)"><span>'+(code?esc(shown):'Select the flat')+'</span><i class="fa-solid fa-chevron-'+(open?'up':'down')+'"></i></button>'
+    +(open?'<div class="pg-dd-p" onclick="event.stopPropagation()"><input class="pg-in pg-dd-s" id="pgDDQ" placeholder="Search a flat, e.g. 3C" value="'+esc(PG.ddQ||'')+'" oninput="pgDDSearch(this.value)" autocomplete="off"><div class="pg-dd-m">'+n+' available'+(fl==null?' in this block':' on floor '+fl)+' · booked flats are greyed</div><div class="pg-dd-l">'+body+'</div></div>':'');
+}
+window.pgDDToggle=function(ev){ if(ev) ev.stopPropagation(); PG.ddOpen=!PG.ddOpen; PG.ddQ=''; pgDDDraw(); if(PG.ddOpen){ const i=$('pgDDQ'); if(i) i.focus(); } };
+window.pgDDSearch=function(v){ PG.ddQ=v; pgDDDraw(); const i=$('pgDDQ'); if(i){ i.focus(); try{ i.setSelectionRange(v.length,v.length); }catch(e){} } };
+if(!window._pgDDDoc){ window._pgDDDoc=true; document.addEventListener('click',function(){ if(typeof PG!=='undefined'&&PG.ddOpen){ PG.ddOpen=false; pgDDDraw(); } }); }
+window.pgInvFloor=function(){
+  if(!PG.invMode) return; const v=($('pgFloor')||{}).value; PG.flFilter=(v==='All'||v==='')?null:Number(v);
+  const x=pgInvFor(), inp=$('pgFlat'), code=String(inp&&inp.value||'').trim().toUpperCase();
+  if(x&&code&&PG.flFilter!=null){ const f0=x.flats.filter(function(f){ return f.code===code; })[0]; if(f0&&f0.floor!==PG.flFilter) inp.value=''; }   // the chosen flat is not on the floor now picked
+  PG.ddOpen=false; pgDDDraw();
+};
+window.pgInvPick=function(v){
+  const inp=$('pgFlat'), x=pgInvFor(); if(!inp) return;
+  inp.value=v||''; PG.ddOpen=false; PG.ddQ='';
+  const f=x&&v?x.flats.filter(function(y){ return y.code===v; })[0]:null;
+  if(f&&f.floor!=null){ const e=$('pgFloor'), s=String(f.floor);   // the flat sets the Floor (the menu keeps showing what it showed)
+    if(e&&e.tagName==='SELECT') e.value=s; else if(e){ e.value=s; e.parentNode.querySelectorAll('.pg-seg button').forEach(function(b){ b.classList.toggle('on',b.textContent.trim()===s); }); } }
+  const er=$('pgE_pgFlat'), fb=$('pgF_pgFlat'); if(er) er.textContent=''; if(fb&&fb.classList) fb.classList.remove('bad');
+  pgDDDraw();
+};
 window.pgProjChange=function(){ const k=($('pgProject')||{}).value, p=(PG_PROJ.list||[]).filter(x=>x.key===k)[0]; if(p) pgProjApply(p); };
 async function pgProjInit(editRow){
   const seq=PG.openSeq, sel=$('pgProject');
@@ -17391,19 +17771,17 @@ function pgCostDraw(){
 }
 /* CAR PARKS (19 Nov 2026, Ayush: "maybe customer is taking more than 1 ... one more option along with Covered and Open, NA"). PG.parks is the list, one entry per car
    park, each Covered or Open; the first can be NA (no car park), which leaves just that. */
+/* 20 Nov 2026 (Ayush: "the car park does not have a good adding process"): first say HOW MANY (NA = none, 1 to 4), then one line per car park to say Covered or Open -
+   instead of a first row with NA and an "Add another" button. None = ['NA']; the list is kept when the number changes. */
 function pgParkDraw(){
   const h=$('pgParkBox'); if(!h) return;
-  const P=PG.parks&&PG.parks.length?PG.parks:['Covered'];
-  h.innerHTML=P.map(function(v,i){
-    const opts=i?['Covered','Open']:['Covered','Open','NA'];
-    return '<div style="display:flex;align-items:center;gap:8px;margin:0 0 6px"><span style="min-width:20px;font-size:12px;color:var(--slate);font-weight:600">'+(P[0]==='NA'?'':(i+1)+'.')+'</span><div class="pg-seg" role="radiogroup">'
-      +opts.map(function(o){ return '<button type="button" class="'+(o===v?'on':'')+'" onclick="pgParkSet('+i+',\''+o+'\')">'+o+'</button>'; }).join('')+'</div>'
-      +(i?'<button type="button" class="btn" style="padding:2px 9px" title="Remove this car park" onclick="pgParkRm('+i+')">&times;</button>':'')+'</div>'; }).join('')
-    +(P[0]!=='NA'&&P.length<6?'<button type="button" class="btn" style="padding:4px 12px;margin-top:2px" onclick="pgParkAdd()"><i class="fa-solid fa-plus"></i> Add another car park</button>':'');
+  const P=PG.parks&&PG.parks.length?PG.parks:['Covered'], none=P[0]==='NA', n=none?0:P.length;
+  h.innerHTML='<div class="pg-pkc"><div class="pg-seg" role="radiogroup" title="How many car parks (NA = none)">'+[0,1,2,3,4].map(function(k){ return '<button type="button" class="'+(k===n?'on':'')+'" onclick="pgParkCount('+k+')">'+(k?k:'NA')+'</button>'; }).join('')+'</div>'
+    +(none?'':P.map(function(v,i){ return '<span class="pg-pk"><b>'+(i+1)+'</b><div class="pg-seg" role="radiogroup">'
+      +['Covered','Open'].map(function(o){ return '<button type="button" class="'+(o===v?'on':'')+'" onclick="pgParkSet('+i+',\''+o+'\')">'+o+'</button>'; }).join('')+'</div></span>'; }).join(''))+'</div>';
 }
-window.pgParkSet=function(i,o){ PG.parks=(PG.parks&&PG.parks.length?PG.parks:['Covered']).slice(); PG.parks[i]=o; if(i===0&&o==='NA') PG.parks=['NA']; pgParkDraw(); };
-window.pgParkAdd=function(){ PG.parks=(PG.parks||['Covered']).concat(['Covered']); pgParkDraw(); };
-window.pgParkRm=function(i){ PG.parks.splice(i,1); pgParkDraw(); };
+window.pgParkCount=function(k){ const cur=(PG.parks&&PG.parks[0]!=='NA'?PG.parks:[]).slice(0,k); if(!k) PG.parks=['NA']; else { while(cur.length<k) cur.push('Covered'); PG.parks=cur; } pgParkDraw(); };
+window.pgParkSet=function(i,o){ PG.parks=(PG.parks&&PG.parks.length&&PG.parks[0]!=='NA'?PG.parks:['Covered']).slice(); PG.parks[i]=o; pgParkDraw(); };
 function pgCostMsg(m){ const e=$('pgE_pgCost'), fb=$('pgF_pgCost'); if(e) e.textContent=m||''; if(fb&&fb.classList) fb.classList.toggle('bad',!!m); }
 window.pgCostChoose=function(){ const i=$('pgCostFile'); if(i&&!PG.uploading) i.click(); };
 window.pgCostPick=async function(inp){
@@ -17460,24 +17838,27 @@ window.pdfGenOpen=function(editRow){
     +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
       +f('pgContact','Primary contact person','<input class="pg-in" id="pgContact" style="text-transform:uppercase" autocomplete="off" placeholder="Same as the customer name" oninput="this.dataset.touched=1">',{opt:1})
     +'</div></div>'
-    +'<div class="pg-card"><h4>Flat</h4><div class="pg-bf" style="--c:minmax(0,1fr)">'
+    +'<div class="pg-card pg-al"><h4>Flat</h4><div class="pg-bf" style="--c:minmax(0,1fr)">'
       +f('pgBlock','Block','<div id="pgC_pgBlock">'+seg('pgBlock',[],'')+'</div>')
-    +'</div><div class="pg-bf" style="--c:auto minmax(0,1fr)">'
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
       +f('pgFloor','Floor','<div id="pgC_pgFloor">'+seg('pgFloor',[],'')+'</div>')
-      +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{req:1})
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
+      +f('pgFlat','Flat number','<div class="pg-dd" id="pgFlatDD" style="display:none"></div><input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{req:1})
     // Bedrooms moved here from Size & price (19 Nov 2026, Ayush: "give equal fields to both") - each card now has three rows
     +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
       +f('pgBhk','Bedrooms','<div id="pgC_pgBhk">'+seg('pgBhk',[],'')+'</div>')
     +'</div></div>'
     /* 19 Nov 2026 (Ayush): the Flat and Size & price cards are compulsory and are LOCKED for the customer (they see them, cannot change them); car parks
        can be more than one, each Covered or Open, or NA for none; Booking amount is new - what the customer pays now, shown to them as the Booking Amount. */
-    +'<div class="pg-card"><h4>Size &amp; price</h4><div class="pg-bf" style="--c:minmax(0,1fr)">'
-      +f('pgPark','Car park','<div id="pgParkBox"></div>',{req:1})
-    +'</div><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
+    /* 20 Nov 2026 (Ayush): the two cards share their rows (Block | Area and price, Floor and flat | Booking amount, Bedrooms | Car park), so they sit level;
+       the amount in words under a number is gone; the car park (the one part that grows) is the last row. */
+    +'<div class="pg-card pg-al"><h4>Size &amp; price</h4><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
       +f('pgSba','Super built-up area','<div class="pg-suf"><input class="pg-in" id="pgSba" inputmode="decimal" autocomplete="off" placeholder="1325"><span>sq.ft.</span></div>',{req:1})
-      +f('pgTotal','Estimated Sale Price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
+      +f('pgTotal','Estimated Sale Price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1})
     +'</div><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
-      +f('pgBook','Booking amount','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgBook" inputmode="numeric" autocomplete="off" placeholder="1,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
+      +f('pgBook','Booking amount','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgBook" inputmode="numeric" autocomplete="off" placeholder="1,00,000" oninput="pgMoney(this)"></div>',{req:1})
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr);grid-row:span 2">'
+      +f('pgPark','Car park','<div id="pgParkBox"></div>',{req:1})
     +'</div></div>'
     +'</div>'
     +'<div class="pg-card pg-slim pg-f" id="pgF_pgCost"><label>Cost sheet <span class="r">*</span></label><div class="ctl w"><div class="pg-cost" id="pgCostBox"></div><input type="file" id="pgCostFile" accept="application/pdf,.pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" style="display:none" onchange="pgCostPick(this)"></div><div class="pg-e" id="pgE_pgCost"></div></div>'
@@ -17487,13 +17868,13 @@ window.pdfGenOpen=function(editRow){
     +'<div class="pg-main" id="pgDraftsWrap" style="display:none"><div id="pgDrafts"></div></div>'
     +'<div class="pg-main" id="pgListWrap" style="display:none"><div id="pgList"></div></div>';
   document.body.appendChild(page); pgFit(page);
-  pgCostDraw(); pgParkDraw(); pgSyncGo();
+  pgCostDraw(); pgParkDraw(); pgSyncGo(); pgInvLoad();
   pgProjInit(editRow||null);   // fills the project list, then (when editing) the boxes
   pdfGenList();
 };
 window.pgTab=function(t){ [['new','pgNew','pgT_new'],['drafts','pgDraftsWrap','pgT_drafts'],['list','pgListWrap','pgT_list']].forEach(function(x){ const on=x[0]===t; $(x[1]).style.display=on?'':'none'; $(x[2]).className=on?'on':''; }); };
 window.pgClose=function(){ const p=document.getElementById('pgPage'); if(p) p.remove(); };
-window.pgSeg=function(btn,id){ btn.parentNode.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); }); btn.classList.add('on'); $(id).value=btn.textContent.trim(); };
+window.pgSeg=function(btn,id){ btn.parentNode.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); }); btn.classList.add('on'); $(id).value=btn.textContent.trim(); if(id==='pgBlock') pgInvRefresh(); else if(id==='pgFloor') pgInvFloor(); };
 window.pgNameSync=function(){ const c=$('pgContact'); if(c&&!c.dataset.touched) c.value=($('pgName').value||''); };
 window.pgNatSync=function(){ const n=PDF_COUNTRIES.filter(c=>c[0]===$('pgNat').value)[0]; if(n&&$('pgCc')) $('pgCc').value=n[1]; };
 window.pgMoney=function(inp){ const d=inp.value.replace(/[^\d]/g,''); inp.value=d?Number(d).toLocaleString('en-IN'):''; const h=$('pgH_'+inp.id); if(h) h.textContent=pdfWords(d); };
@@ -17520,6 +17901,7 @@ function pgFillRaw(r){
   const pk=Array.isArray(r.parks)&&r.parks.length?r.parks:(r.park?[r.park]:null); if(pk){ PG.parks=pk.map(String); pgParkDraw(); }
   const h=$('pgH_pgTotal'); if(h) h.textContent=pdfWords(String(r.total||'').replace(/[^\d]/g,''));
   const hb=$('pgH_pgBook'); if(hb) hb.textContent=pdfWords(String(r.book||'').replace(/[^\d]/g,''));
+  pgInvRefresh(true);
 }
 // Editing a link: its details go back into the boxes.
 function pgFill(row){
@@ -17539,7 +17921,9 @@ window.pdfGenerate=async function(){
   const parks=(PG.parks&&PG.parks.length?PG.parks:['Covered']).slice();
   if(!name) bad('pgName','Please write the customer name.');
   // 19 Nov 2026: date of birth and nationality are optional for Sales (the customer must give them); the flat number and the booking amount are compulsory
-  if(!g('pgFlat').trim()) bad('pgFlat','Please write the flat number.');
+  if(!g('pgFlat').trim()) bad('pgFlat',PG.invMode?'Please choose the flat.':'Please write the flat number.');
+  // with the flat list the Floor can still read "All" (a flat typed under "Other"): take it from the flat number (5A -> 5), else ask
+  else if(PG.invMode&&!/^\d+$/.test(g('pgFloor'))){ const m=g('pgFlat').trim().match(/^(\d+)/); if(m){ const e=$('pgFloor'); if(e&&e.tagName==='SELECT'){ if([].some.call(e.options,function(o){ return o.value===m[1]; })) e.value=m[1]; } else if(e) e.value=m[1]; } if(!/^\d+$/.test(g('pgFloor'))) bad('pgFlat','Please choose the floor too.'); }
   if(!(Number(book)>0)) bad('pgBook','Please write the booking amount.');
   else if(Number(total)>0&&Number(book)>Number(total)) bad('pgBook','The booking amount cannot be more than the estimated sale price.');
   if(cc==='+91'?!/^[6-9]\d{9}$/.test(mobile):mobile.length<6) bad('pgMobile','Please write a complete mobile number'+(cc==='+91'?' (10 digits).':'.'));
@@ -40667,7 +41051,7 @@ function caLeads(x){ return obNum(x,0); } // whole numbers everywhere (14 Nov 20
 
 /* TWO TABS (16 Nov 2026, Ayush: "make a new Tab named Analytics"): Overview (this page as it was) and Analytics
    (45-marketing-analytics.js - the models). */
-let CA_TAB=['overview','ads','audience','checklist','analytics'].indexOf(CA_WHERE.tab)>=0?CA_WHERE.tab:'overview';
+let CA_TAB=['overview','ads','audience','checklist','analytics','sources'].indexOf(CA_WHERE.tab)>=0?CA_WHERE.tab:'overview';
 function caKeepWhere(){ try{ localStorage.setItem('caWhere',JSON.stringify({tab:CA_TAB,open:CA.open,plat:CA.plat})); }catch(e){} }
 async function caView(host){
   host.innerHTML=OB_CSS+CA_CSS+MA_CSS+'<div class="ca-tabs" id="caTabs"></div><div id="caMain"></div>';
@@ -40675,14 +41059,15 @@ async function caView(host){
 }
 function caTabsPaint(){ const t=$('caTabs'); if(!t) return;
   // 17 Nov 2026 (Ayush): Overview renamed Campaigns; a new Ads tab - the same page, read from the ad upwards
-  t.innerHTML=[['overview','Campaigns'],['ads','Ads'],['audience','Audience'],['checklist','Checklist'],['analytics','Analytics']].map(function(x){ return '<button class="ca-tab'+(CA_TAB===x[0]?' on':'')+'" onclick="caTab(\''+x[0]+'\')">'+x[1]+'</button>'; }).join(''); }
+  t.innerHTML=[['overview','Campaigns'],['ads','Ads'],['audience','Audience'],['checklist','Checklist'],['analytics','Analytics'],['sources','Sources']].map(function(x){ return '<button class="ca-tab'+(CA_TAB===x[0]?' on':'')+'" onclick="caTab(\''+x[0]+'\')">'+x[1]+'</button>'; }).join(''); }
 window.caTab=function(t){ if(t===CA_TAB) return;
   // Campaigns <-> Ads share the loaded data: only the table is drawn again
-  if(t!=='analytics'&&CA_TAB!=='analytics'&&CA_D&&$('caBody')){ CA_TAB=t; caTabsPaint(); caPaint(); return; }
+  if(t!=='analytics'&&CA_TAB!=='analytics'&&t!=='sources'&&CA_TAB!=='sources'&&CA_D&&$('caBody')){ CA_TAB=t; caTabsPaint(); caPaint(); return; }
   CA_TAB=t; caKeepWhere(); caTabsPaint(); caShowTab(); };
 async function caShowTab(){
   const m=$('caMain'); if(!m) return;
   if(CA_TAB==='analytics') return maView(m);
+  if(CA_TAB==='sources') return srcView(m);   // 19 Nov 2026: what every lead source produced, from the CRM (49-crm-sources.js)
   m.innerHTML='<div id="caHead"></div><div id="caBody"><div class="loader"><div class="spin"></div></div></div>';
   CA_D=null; await caLoad();
 }
@@ -40878,10 +41263,10 @@ function caPaint(){
   const cols=function(t,w,x){ w=w||{};
     return cell(t.spend,w.spend,obMoney,null,true)
       +(cmpOn?cell(t.ln,w.ln,function(v){ return caLeads(v,t.pl); },true).replace('</td>',(t.tag||'')+'</td>'):'<td>'+t.lead+'</td>')
-      +crmPart(x,'a')+cell(t.cpl,w.cpl,obMoney,false)+crmPart(x,'b')+(fbX?xCells(t,w,fbX):cell(t.clicks,w.clicks,obNum,true)+cell(t.ctr,w.ctr,obPct,true))+crmPart(x,'c'); };
-  const sum=function(rows,pl){ const a=caAgg(rows); return {spend:a.spend,ln:a.leads,pl:pl,lead:caLeads(a.leads,pl),cpl:a.cpl,clicks:a.clicks,ctr:a.ctr,imp:a.impr,fl:a.hasForm?a.form:null}; };
+      +crmPart(x,'a')+cell(t.cpl,w.cpl,obMoney,false)+crmPart(x,'b')+(fbX?xCells(t,w,fbX):cell(t.clicks,w.clicks,obNum,true)+cell(t.ctr,w.ctr,obPct,true)+(gxL&&gxL.length?gCells(t,w,gxL):''))+crmPart(x,'c'); };
+  const sum=function(rows,pl){ const a=caAgg(rows); return {spend:a.spend,ln:a.leads,pl:pl,lead:caLeads(a.leads,pl),cpl:a.cpl,clicks:a.clicks,ctr:a.ctr,imp:a.impr,fl:a.hasForm?a.form:null,gc:(rows||[]).map(function(x){ return x.campaign_id; }).filter(Boolean)}; };
   const raw=function(x,pl,lead){ x=x||{}; const s=+x.spend||0, rr=x.results==null&&x.spend!=null?null:+x.results||0, tag=lead===false?' <span class="tag t-gray" style="font-size:10px">not leads</span>':'';
-    return {spend:s,ln:rr,pl:pl==='google'?'google':'meta',tag:tag,lead:(rr==null?'<span style="color:#94a3b8" title="Google leads per ad group are read from 13 Nov 2026 night">—</span>':obNum(rr,0))+tag,cpl:rr?s/rr:null,imp:+x.impressions||0,clicks:+x.clicks||0,ctr:+x.impressions?x.clicks/x.impressions*100:null,fl:x.form_leads!=null?+x.form_leads:null}; };
+    return {spend:s,ln:rr,pl:pl==='google'?'google':'meta',tag:tag,lead:(rr==null?'<span style="color:#94a3b8" title="Google leads per ad group are read from 13 Nov 2026 night">—</span>':obNum(rr,0))+tag,cpl:rr?s/rr:null,imp:+x.impressions||0,clicks:+x.clicks||0,ctr:+x.impressions?x.clicks/x.impressions*100:null,fl:x.form_leads!=null?+x.form_leads:null,gc:x.campaign_id&&!x.adset_id&&!x.ad_id?[x.campaign_id]:(x.gc||null)}; };
   const prev=CA_D.prev||[];
   /* CRM COLUMNS (10 Nov 2026, Ayush): beside the platforms' own leads, the CRM's count of the Google leads left after
      its filtering, so the two can be compared - and how far they got: QL% (qualified of CRM leads), CPQL (Google spend
@@ -40899,7 +41284,28 @@ function caPaint(){
      where more than one column can be shown or hidden, for both tabs, Facebook only; in Ads CTR, Impressions, Reach won't be
      there"). fbX = the extra columns picked for the Facebook section being drawn (null = the usual Clicks and CTR). */
   let fbX=null;
-  const xHead=function(list){ return list.map(function(k){ return '<th>'+CA_XC_NAMES[k]+'</th>'; }).join(''); };
+  /* GOOGLE'S EXTRA COLUMNS (19 Nov 2026, Ayush): gxL = the extras picked for the Google section being drawn, added after Clicks and CTR.
+     Impression share is Google's own figure per campaign and day (camp.ads_daily, read the first time a share column is picked): the
+     period's share = impressions / the impressions the campaign was eligible for (impressions / share, every day added up); the lost
+     shares are weighted the same way. Ad groups and ads have none. */
+  let gxL=null;
+  window._caGis=window._caGis||{};
+  const gisKey=function(s,e){ return s+'|'+e; };
+  const gisRows=function(s,e){ const b=window._caGis[gisKey(s,e)]; return b&&b.st==='ok'?b.d:null; };
+  const gisVal=function(ids,s,e,k){ const rows=gisRows(s,e); if(!ids||!rows) return undefined;
+    const m={}; ids.forEach(function(i){ m[i]=1; }); let el=0, im=0, lb=0, lr=0, n=0;
+    rows.forEach(function(x){ if(!m[x.campaign_id]) return; const sh=+x.imp_share, imp=+x.impressions; if(!(sh>0)||!(imp>=0)) return; const ee=imp/sh; el+=ee; im+=imp; lb+=ee*(+x.budget_lost_is||0); lr+=ee*(+x.rank_lost_is||0); n++; });
+    if(!n||!(el>0)) return null; return k==='is'?im/el*100:k==='blis'?lb/el*100:lr/el*100; };
+  const gisNeed=function(s,e){ const key=gisKey(s,e); if(window._caGis[key]) return; window._caGis[key]={st:'load'}; caGisLoad(key,s,e); };
+  const xHead=function(list){ return list.map(function(k){ return '<th'+(k==='is'?' title="Google\'s Search impression share: the share of the searches you could have shown on that you did"':k==='blis'?' title="Search impressions lost because the budget ran out"':k==='rlis'?' title="Search impressions lost because the ad rank was too low"':'')+'>'+CA_XC_NAMES[k]+'</th>'; }).join(''); };
+  const gCells=function(t,w,list){ w=w||{}; const cr0=r, c0=cr; return list.map(function(k){ const imp=t.imp, sp=t.spend;
+    if(k==='imp') return cell(imp,w.imp,obNum,true);
+    if(k==='cpm') return cell(imp&&sp!=null?sp/imp*1000:null,w.imp&&w.spend!=null?w.spend/w.imp*1000:null,obMoney,false);
+    if(k==='cpc') return cell(t.clicks&&sp!=null?sp/t.clicks:null,w.clicks&&w.spend!=null?w.spend/w.clicks:null,obMoney,false);
+    const v=gisVal(t.gc,cr0.s,cr0.e,k), vw=cmpOn&&c0?gisVal(w.gc,c0.s,c0.e,k):null;
+    if(v===undefined) return '<td title="'+(t.gc?'Reading the impression share':'Impression share is Google\'s figure per campaign - ad groups and ads have none')+'"><span style="color:#94a3b8">'+(t.gc?'…':'—')+'</span></td>';
+    if(v===null) return '<td title="Google gave no impression share for these dates (Display, Video and very small campaigns have none)"><span style="color:#94a3b8">—</span></td>';
+    return cell(v,vw,obPct,k==='is'?true:false); }).join(''); };
   const rCell=function(R,fmt){ if(!R) return '<td><span style="color:#94a3b8">—</span></td>'; if(R.st==='load') return '<td title="Asking Meta for the reach of these dates"><i class="fa-solid fa-spinner fa-spin" style="color:#94a3b8;font-size:11px"></i></td>';
     if(R.st==='err'||R.v==null) return '<td title="'+esc(R.why||'No reach from Meta for these dates')+'"><span style="color:#94a3b8">—</span></td>'; return '<td>'+fmt(R.v)+'</td>'; };
   const xCells=function(t,w,list){ w=w||{}; return list.map(function(k){ const imp=t.imp, sp=t.spend;
@@ -40935,7 +41341,7 @@ function caPaint(){
   const ct=function(t,title){ return '<th class="ca-crm" title="'+esc(title)+'">'+t+'</th>'; };
   const head=function(name,res,cpl,crm){ return '<tr><th class="ca-nm">'+name+'</th><th title="Daily budget as set today">Daily budget</th><th>Spend</th><th>'+res+'</th>'
     +(crm?ct('CRM leads','Google and Facebook leads in the CRM after its filtering')+ct('QL','Qualified leads (CRM)')+ct('SV','Site visits (CRM)')+ct('Booked','Booked (CRM)')+ct('Lost','Lost (CRM)'):'')
-    +'<th>'+cpl+'</th>'+(crm?ct('CRM CPL','Spend per CRM lead - the cost per lead counted on the CRM\x27s leads, not the platform\x27s')+ct('CPQL','Spend per qualified lead (CRM)'):'')+(fbX?xHead(fbX):'<th>Clicks</th><th>CTR</th>')
+    +'<th>'+cpl+'</th>'+(crm?ct('CRM CPL','Spend per CRM lead - the cost per lead counted on the CRM\x27s leads, not the platform\x27s')+ct('CPQL','Spend per qualified lead (CRM)'):'')+(fbX?xHead(fbX):'<th>Clicks</th><th>CTR</th>'+(gxL&&gxL.length?xHead(gxL):''))
     +(crm?ct('QL%','Qualified leads as a share of CRM leads')+(noSvp?'':ct('QL to SV %','Site visits as a share of qualified leads')):'')+'</tr>'; };
   // a name never wraps: it stops at the column's width with "...", the whole name on hover
   const nm=function(lead,text){ return '<td class="ca-nm"><span class="ca-nmx" title="'+esc(text)+'">'+lead+esc(text)+'</span></td>'; };
@@ -40952,7 +41358,9 @@ function caPaint(){
     const was=function(id){ return prev.filter(function(x){ return x.platform===pl&&x.campaign_id===id; }); };
     const setsOf=function(list,cid){ const g={}; list.forEach(function(a){ if(a.platform!==pl||a.campaign_id!==cid||!a.adset_id) return; const x=g[a.adset_id]||(g[a.adset_id]={adset_id:a.adset_id,spend:0,results:null,clicks:0,impressions:0}); x.spend+=+a.spend||0; if(a.results!=null) x.results=(x.results||0)+(+a.results); x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; }); return g; };
     fbX=pl==='meta'?caXcList('camp'):null;
-    const nc=7+NCRM+(fbX?fbX.length-2:0);
+    gxL=pl==='google'?caXcList('gcamp'):null;
+    if(gxL&&gxL.some(function(k){ return k==='is'||k==='blis'||k==='rlis'; })){ gisNeed(r.s,r.e); if(cmpOn&&cr) gisNeed(cr.s,cr.e); }
+    const nc=7+NCRM+(fbX?fbX.length-2:0)+(gxL?gxL.length:0);
     // Reach / Frequency picked: asked from Meta for exactly these dates (ad-reach), campaigns, ad sets and ads of the section
     const needR=!!fbX&&(fbX.indexOf('freq')>=0||fbX.indexOf('reach')>=0), SK='sec|'+[r.s,r.e,p,CA_ST].join('|');
     window._caReach=window._caReach||{};
@@ -41021,7 +41429,7 @@ function caPaint(){
       +' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+camps.length+' '+(CA_ST==='active'?'active':CA_ST==='inactive'?'inactive':'')+(CA_ST==='both'?'':' ')+'campaign'+(camps.length===1?'':'s')+'; click one for its '+W.sets.toLowerCase()+'</span></div>'
       +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Campaign',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
       +(sec||'<tr><td colspan="'+nc+'" style="text-align:center;color:var(--slate);padding:18px">No '+(CA_ST==='both'?'':CA_ST+' ')+'campaign spent in this period</td></tr>')+'</tbody>'+tot+'</table></div></div>';
-    fbX=null;
+    fbX=null; gxL=null;
     return secOut+caAds(p,pl);
   };
   const shown=CA.proj==='all'?P:[CA.proj];
@@ -41034,7 +41442,8 @@ function caPaint(){
      copied into another campaign or ad set gets a new id but keeps its name) are counted together - and its arrow opens
      the campaigns it runs in, each campaign the ad sets / ad groups it runs in there. Every row shows that row's own
      figures, with the same columns, budgets, CRM and Active / Inactive / Both. The picture opens the ad. */
-  const adsTree=function(p,pl){
+  const adsTree=function(p,pl){ gxL=pl==='google'?caXcList('gads'):null; try{ return adsTree0(p,pl); } finally{ gxL=null; } };
+  const adsTree0=function(p,pl){
     const W=CA_PLAT[pl], FB=pl==='meta';
     noSvp=true;
     const top='<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p);
@@ -41112,7 +41521,7 @@ function caPaint(){
       if(!lr.length) return Object.assign(raw(Object.assign({},x,{results:0}),pl0,null),{ln:null,cpl:null,lead:'<span style="color:#94a3b8" title="Not a lead campaign - its results are reach, views or engagement, not leads">—</span>'});
       const n=lr.reduce(function(t0,r0){ return r0.results==null?t0:t0+(+r0.results||0); },0);
       return raw(Object.assign({},x,{results:n}),pl0,null); };
-    const nc=FB?NFB:6+NCRM;
+    const nc=FB?NFB:6+NCRM+(gxL?gxL.length:0);
     window._caAdsTab=[]; window._caAxK=[]; let rows='';
     ads.slice(0,ashow).forEach(function(a){
       const ae=E['ad:'+a.ad_id]||{}, aon=AX.ad===a.k, i=window._caAdsTab.push(a)-1, copies=Object.keys(a.ids).length;
@@ -41281,6 +41690,8 @@ function caPaint(){
    a download (PDF) icon, and for super admins / Manash the public link switch and copy button (18 Nov 2026, Ayush: no Run
    button). It shows the latest saved run: the daily points (every day 00:00 IST) and the latest weekly (Mondays 01:00 IST). */
 let CK_SHARE={loaded:false,on:false,token:null,busy:false};
+let CK_PLAT='facebook';
+window.ckPlat=function(k){ if(CK_PLAT===k) return; CK_PLAT=k; ckPaint(); };
 async function ckShareCall(body){
   const {data:{session}}=await sb.auth.getSession();
   const r=await fetch(SUPABASE_URL+'/functions/v1/checklist-share',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify(body)});
@@ -41310,24 +41721,27 @@ function ckEnsure(cb){
   if(window.ckRender) return cb();
   if(window._ckLoading){ window._ckLoading.push(cb); return; }
   window._ckLoading=[cb];
-  const s=document.createElement('script'); s.src='assets/ck-render.js?v=5';
+  const s=document.createElement('script'); s.src='assets/ck-render.js?v=6';
   s.onload=function(){ const st=document.createElement('style'); st.textContent=window.CK_CSS||''; document.head.appendChild(st); const l=window._ckLoading; window._ckLoading=null; l.forEach(function(f){ f(); }); };
   s.onerror=function(){ const l=window._ckLoading; window._ckLoading=null; l.forEach(function(f){ f(true); }); };
   document.head.appendChild(s);
 }
 function ckPaint(){
   const head=$('caHead'), body=$('caBody'); if(!head||!body) return;
-  const K=window._caCk;
-  if(!K) caCkLoad();
-  head.innerHTML='<div class="ob-bar"><span style="font-weight:700;font-size:14px">Facebook Checklist</span>'
-    
+  const G=CK_PLAT==='google', K=G?window._caCkG:window._caCk;
+  if(!K) caCkLoad(CK_PLAT);
+  /* FACEBOOK | GOOGLE (19 Nov 2026, Ayush: "Execute the Google Checklist, Facebook is done already"): one Checklist tab, the platform
+     chosen at the top. Google's points come from the Google sheet of "Pre-emptive Alert - Checklists" (edge function gads-checklist,
+     saved in camp.gads_check_runs / gads_check_flags). The public link shows the Facebook checklist only. */
+  const sw=function(k,t){ return '<button type="button" onclick="ckPlat(\''+k+'\')" style="height:34px;padding:0 14px;border:0;border-radius:8px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;background:'+(CK_PLAT===k?'var(--bg-card,#fff)':'transparent')+';color:'+(CK_PLAT===k?'var(--ink)':'var(--slate)')+';box-shadow:'+(CK_PLAT===k?'0 1px 3px rgba(15,23,42,.15)':'none')+'">'+t+'</button>'; };
+  head.innerHTML='<div class="ob-bar"><span style="display:inline-flex;gap:2px;padding:3px;border-radius:11px;background:#eef2f7">'+sw('facebook','Facebook Checklist')+sw('google','Google Checklist')+'</span>'
     +'<span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap">'
     +'<button class="btn" style="height:36px;width:40px;padding:0;justify-content:center;gap:0" onclick="ckPdf()"'+(K&&K.flags&&K.flags.length?' title="Download PDF"':' disabled title="Nothing to download yet"')+'><i class="fa-solid fa-download"></i></button>'
-    +ckShareBar()+'</span></div>';
+    +(G?'':ckShareBar())+'</span></div>';
   if(!K||K.st==='load'){ body.innerHTML='<div class="loader"><div class="spin"></div></div>'; return; }
   ckEnsure(function(err){
     if(err){ body.innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load the checklist layout - reload the page.</div>'; return; }
-    body.innerHTML='<div style="padding:2px 0 30px">'+window.ckRender({flags:K.flags||[],runs:K.runs||[],live:!!K.live},{})+'</div>';
+    body.innerHTML='<div style="padding:2px 0 30px">'+window.ckRender({flags:K.flags||[],runs:K.runs||[],live:!!K.live,emptyNote:G?'No Google check has been saved yet. The daily points are checked every day at 00:15 IST, the weekly points every Monday at 01:15 IST.':''},{})+'</div>';
   });
 }
 /* DIRECT DOWNLOAD (19 Nov 2026, Ayush: "direct file download", no print preview then Save). The checklist is drawn
@@ -41342,7 +41756,7 @@ function ckPdfLib(cb){
   CK_PDF_LIB.push(cb);
 }
 window.ckPdf=function(){
-  const K=window._caCk; if(!K||!K.flags||!K.flags.length) return;
+  const G=CK_PLAT==='google', K=G?window._caCkG:window._caCk, PT=G?'Google Checklist':'Facebook Checklist'; if(!K||!K.flags||!K.flags.length) return;
   if(window._ckPdfBusy) return; window._ckPdfBusy=true;
   toast('Making the PDF…');
   ckEnsure(function(err){
@@ -41353,11 +41767,11 @@ window.ckPdf=function(){
       box.id='ckPdfBox'; box.style.cssText='position:fixed;left:-12000px;top:0;width:1000px;background:#fff;font-family:Inter,system-ui,Segoe UI,Arial,sans-serif';
       box.innerHTML='<style>#ckPdfBox .hd{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e0121c;padding:0 0 10px;margin:0 0 14px}#ckPdfBox .hd b{font-size:18px}#ckPdfBox .hd span{color:#64748b;font-size:12px}'
         +window.CK_CSS+'#ckPdfBox .ck-noprint{display:none!important}#ckPdfBox .ck tr{break-inside:avoid}</style>'
-        +'<div class="hd"><b>Facebook Checklist · The Jain Group</b><span>'+esc(new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}))+'</span></div>'
+        +'<div class="hd"><b>'+PT+' · The Jain Group</b><span>'+esc(new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}))+'</span></div>'
         +window.ckRender({flags:K.flags,runs:K.runs||[],live:!!K.live},{print:true});
       document.body.appendChild(box);
       const done=function(){ box.remove(); window._ckPdfBusy=false; };
-      window.html2pdf().set({ margin:[10,8,10,8], filename:'Facebook Checklist '+new Date().toISOString().slice(0,10)+' - The Jain Group.pdf',
+      window.html2pdf().set({ margin:[10,8,10,8], filename:PT+' '+new Date().toISOString().slice(0,10)+' - The Jain Group.pdf',
         image:{type:'jpeg',quality:0.95}, html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff',windowWidth:1000},
         jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}, pagebreak:{mode:['css','legacy'],avoid:['tr','.ck-ph']} })
         .from(box).save().then(done,function(){ done(); toast('Could not make the PDF','err'); });
@@ -41365,8 +41779,10 @@ window.ckPdf=function(){
   });
 };
 // the Columns dropdown of the Facebook sections (Campaigns: CA_XC.camp, Ads: CA_XC.ads), kept in this browser
-const CA_XC_NAMES={freq:'Frequency',reach:'Reach',imp:'Impressions',cpm:'CPM',cpc:'CPC',ctr:'CTR',clicks:'Clicks'};
-const CA_XC_OPTS={camp:['freq','reach','imp','cpm','cpc','ctr','clicks'],ads:['freq','cpm','cpc','clicks']};
+const CA_XC_NAMES={freq:'Frequency',reach:'Reach',imp:'Impressions',cpm:'CPM',cpc:'CPC',ctr:'CTR',clicks:'Clicks',is:'Search impression share',blis:'Lost IS (budget)',rlis:'Lost IS (rank)'};
+/* GOOGLE'S EXTRA COLUMNS (19 Nov 2026, Ayush: "the extra things add in the dropdown like it happens for Facebook"): gcamp = Campaigns
+   tab, gads = Ads tab (impression share is per campaign, so only the Campaigns tab has it). Clicks and CTR stay in Google's table as before. */
+const CA_XC_OPTS={camp:['freq','reach','imp','cpm','cpc','ctr','clicks'],ads:['freq','cpm','cpc','clicks'],gcamp:['imp','cpc','cpm','is','blis','rlis'],gads:['imp','cpc','cpm']};
 window.CA_XC=(function(){ try{ return JSON.parse(localStorage.getItem('caXC')||'{}')||{}; }catch(e){ return {}; } })();
 function caXcList(tab){ const on=(window.CA_XC[tab]||[]); return CA_XC_OPTS[tab].filter(function(k){ return on.indexOf(k)>=0; }); }
 function caXcPicker(tab){ const on=caXcList(tab);
@@ -41377,31 +41793,43 @@ function caXcPicker(tab){ const on=caXcList(tab);
    on the top strip: the period on the left of its menu, and on the Campaigns / Ads tabs the extra Facebook columns on the
    right (hidden by default). A period the Compare side already uses cannot be picked (as before). */
 function caPerPicker(off){
-  const tab=CA_TAB==='overview'?'camp':CA_TAB==='ads'?'ads':null, on=tab?caXcList(tab):[], open=window._caXcOpen==='per';
+  const tab=CA_TAB==='overview'?'camp':CA_TAB==='ads'?'ads':null, on=tab?caXcList(tab).concat(caXcList('g'+tab)):[], open=window._caXcOpen==='per';
   const cur=OB_PERIODS.filter(function(o){ return String(o[0])===String(OB_P.period); })[0];
   const label=esc(cur?cur[1]:'Period')+(on.length?' <span style="color:var(--slate);font-weight:500">· '+on.length+' col'+(on.length===1?'':'s')+'</span>':'');
   const item=function(o){ const dis=off&&off!=='custom'&&o[0]===off, sel=String(o[0])===String(OB_P.period);
-    return '<button type="button"'+(dis?' disabled title="Chosen on the Compare side"':'')+' onclick="caPerPick('+esc(JSON.stringify(String(o[0])))+')" style="display:block;width:100%;text-align:left;border:0;background:'+(sel?'#eef4ff':'transparent')+';color:'+(dis?'#cbd5e1':sel?'#1d4ed8':'var(--ink)')+';font:inherit;font-size:13px;font-weight:'+(sel?700:500)+';padding:7px 10px;border-radius:6px;cursor:'+(dis?'not-allowed':'pointer')+';white-space:nowrap">'+esc(o[1])+'</button>'; };
-  const cols=tab?'<div style="border-left:1px solid var(--line);padding-left:8px;margin-left:6px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--slate);padding:6px 8px;white-space:nowrap">Facebook columns</div>'
-    +CA_XC_OPTS[tab].map(function(k){ return '<label style="display:flex;gap:8px;align-items:center;padding:6px 8px;font-size:13px;cursor:pointer;border-radius:6px;white-space:nowrap;margin:0"><input type="checkbox" style="height:auto;width:auto;padding:0;margin:0;border:0"'+(on.indexOf(k)>=0?' checked':'')+' onchange="caXcSet(\''+tab+'\',\''+k+'\',this.checked)"> '+CA_XC_NAMES[k]+'</label>'; }).join('')+'</div>':'';
+    return '<button type="button"'+(dis?' disabled title="Chosen on the Compare side"':'')+' onclick="caPerPick('+esc(JSON.stringify(String(o[0])))+')" style="display:block;width:100%;text-align:left;border:0;background:'+(sel?'#eef4ff':'transparent')+';color:'+(dis?'#cbd5e1':sel?'#1d4ed8':'var(--ink)')+';font:inherit;font-size:13px;font-weight:'+(sel?700:500)+';height:32px;padding:0 10px;border-radius:6px;cursor:'+(dis?'not-allowed':'pointer')+';white-space:nowrap">'+esc(o[1])+'</button>'; };
+  /* THREE EVEN COLUMNS (20 Nov 2026, Ayush: "the 2 sections are still not nicely divided, not nicely aligned"): Date range | Facebook columns |
+     Google columns - the same width, the same heading strip, every row the same height, a thin divider the full height between them. */
+  const colBox=function(title,icon,body,first){ var w=first?176:206; return '<div style="flex:0 0 '+w+'px;width:'+w+'px;padding:0 6px;box-sizing:border-box'+(first?'':';border-left:1px solid var(--line)')+'"><div style="height:30px;display:flex;align-items:center;gap:7px;padding:0 10px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate);white-space:nowrap;border-bottom:1px solid var(--line);margin-bottom:4px">'+icon+title+'</div>'+body+'</div>'; };
+  const panel=function(tb,title,icon){ const onT=caXcList(tb); return colBox(title,icon,CA_XC_OPTS[tb].map(function(k){ return '<label style="display:flex;gap:9px;align-items:center;height:32px;padding:0 10px;font-size:13px;font-weight:500;cursor:pointer;border-radius:6px;white-space:nowrap;margin:0"><input type="checkbox" style="height:auto;width:auto;padding:0;margin:0;border:0;flex:none"'+(onT.indexOf(k)>=0?' checked':'')+' onchange="caXcSet(\''+tb+'\',\''+k+'\',this.checked)"><span>'+CA_XC_NAMES[k]+'</span></label>'; }).join(''),false); };
+  const cols=tab?panel(tab,'Facebook','<i class="fa-brands fa-facebook" style="color:#1877f2;font-size:13px"></i>')+panel('g'+tab,'Google','<i class="fa-brands fa-google" style="color:#ea4335;font-size:12px"></i>'):'';
   return '<span onclick="event.stopPropagation()" style="position:relative;display:inline-block"><button type="button" id="caPer" onclick="caXcOpen(\'per\')" style="height:36px;padding:0 11px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;font-weight:600;background:var(--bg-card);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:8px;white-space:nowrap">'+label+' <i class="fa-solid fa-chevron-'+(open?'up':'down')+'" style="font-size:10px;color:var(--slate)"></i></button>'
-    +(open?'<div style="position:absolute;left:0;top:calc(100% + 4px);z-index:40;background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.14);padding:6px;display:flex;align-items:flex-start"><div style="min-width:150px">'+OB_PERIODS.map(item).join('')+'</div>'+cols+'</div>':'')+'</span>';
+    +(open?'<div style="position:absolute;left:0;top:calc(100% + 4px);z-index:40;background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.14);padding:8px 4px;display:flex;align-items:stretch">'+colBox('Date range','<i class="fa-regular fa-calendar" style="font-size:12px"></i>',OB_PERIODS.map(item).join(''),true)+cols+'</div>':'')+'</span>';
 }
 window.caPerPick=function(v){ window._caXcOpen=null; if(String(v)===String(OB_P.period)){ caPaint(); return; } OB_P.period=v; caReset(); caLoad(); };
+// Google's impression share per campaign and day for the dates on screen (camp.ads_daily, kept for the visit), then drawn again
+window.caGisLoad=async function(key,s,e){
+  const box=window._caGis[key];
+  try{ box.d=(await caAllPages(function(){ return sb.schema('camp').from('ads_daily').select('campaign_id,day,impressions,imp_share,budget_lost_is,rank_lost_is').eq('platform','google').gte('day',s).lte('day',e).not('imp_share','is',null).order('day').order('campaign_id'); }))||[]; }
+  catch(err){ console.warn('impression share',err); box.d=[]; }
+  box.st='ok';
+  if(typeof CA_TAB!=='undefined'&&(CA_TAB==='overview')&&CA_D&&!CA_D.adsLoading) caPaint();
+};
 window.caXcOpen=function(tab){ window._caXcOpen=window._caXcOpen===tab?null:tab; caPaint(); };
 window.caXcSet=function(tab,k,on){ const l=(window.CA_XC[tab]||[]).filter(function(x){ return x!==k; }); if(on) l.push(k); window.CA_XC[tab]=l; try{ localStorage.setItem('caXC',JSON.stringify(window.CA_XC)); }catch(e){} caPaint(); };
 if(!window._caXcDoc){ window._caXcDoc=true; document.addEventListener('click',function(){ if(window._caXcOpen){ window._caXcOpen=null; if(typeof CA_D!=='undefined'&&CA_D) caPaint(); } }); }
 // the Checklist tab: open / close a campaign or an ad set; the latest saved runs; a check worked out now (nothing saved or sent)
 window.caCk=function(level,id){ const CK=CA.ck=CA.ck||{c:null,s:null}; if(level==='c'){ CK.c=CK.c===id?null:id; CK.s=null; } else CK.s=CK.s===id?null:id; caPaint(); };
-window.caCkLoad=async function(){
-  window._caCk={st:'load'};
+window.caCkLoad=async function(plat){
+  const G=plat==='google', slot=G?'_caCkG':'_caCk', pre=G?'gads':'fb';
+  window[slot]={st:'load'};
   try{
-    const r=await sb.schema('camp').from('fb_check_runs').select('id,kind,run_day,ran_at,period_from,period_to,flags').order('ran_at',{ascending:false}).limit(20);
+    const r=await sb.schema('camp').from(pre+'_check_runs').select('id,kind,run_day,ran_at,period_from,period_to,flags').order('ran_at',{ascending:false}).limit(20);
     if(r.error) throw r.error;
     const runs=[]; ['daily','weekly'].forEach(function(k){ const x=(r.data||[]).filter(function(y){ return y.kind===k; })[0]; if(x) runs.push(x); });
-    let flags=[]; if(runs.length){ const q=await sb.schema('camp').from('fb_check_flags').select('*').in('run_id',runs.map(function(x){ return x.id; })).limit(5000); if(q.error) throw q.error; flags=q.data||[]; }
-    window._caCk={st:'ok',runs:runs,flags:runs.length?flags:null};
-  }catch(e){ window._caCk={st:'ok',runs:[],flags:null,err:String(e&&e.message||e)}; }
+    let flags=[]; if(runs.length){ const q=await sb.schema('camp').from(pre+'_check_flags').select('*').in('run_id',runs.map(function(x){ return x.id; })).limit(5000); if(q.error) throw q.error; flags=q.data||[]; }
+    window[slot]={st:'ok',runs:runs,flags:runs.length?flags:null};
+  }catch(e){ window[slot]={st:'ok',runs:[],flags:null,err:String(e&&e.message||e)}; }
   if(CA_TAB==='checklist') ckPaint();
 };
 window.caCkRun=async function(){
@@ -43442,6 +43870,144 @@ maReg({id:'hours',title:'Best hours',icon:'fa-solid fa-clock',data:maHourData,re
     return maHead('fa-solid fa-clock','','Best hours',
         'Last 28 days, lead campaigns: leads each 4-hour block brought for its share of spend. +30% = 30% more leads than its spend predicts at the average rate. A real pattern needs the chi-square test (p < 0.01) and some block 15%+ off average. Use it to schedule ads or shift bids by time of day.')
       +(rows.length?maTable(['Platform'].concat(d.blocks.map(function(b){ return b[0]+':00–'+b[1]+':00'; })),rows):'<div class="ma-card">Not enough leads in the hourly figures yet.</div>'); }});
+
+/* ============================ CAMPAIGN ANALYTICS - SOURCES (19 Nov 2026) ============================
+   Ayush: "Yes build the Sources view". What every lead source produced in the CRM - not just the ads: Online (Facebook,
+   Google ...), Agent, Walk In, Hoarding, Other Project Campaign, Reference ... - as Qualified, Site visits, Revisits,
+   Booked and Lost, for the dates chosen.
+   Data: camp.crm_source_daily, the CRM's source_wise_absolute_api read one day at a time at night (ads-daily-sync
+   {srcwise}). Each row is one node of the CRM's source tree (category > source > campaign > ad set > ad) on one day;
+   tot_* is the node with everything under it, so a period is the days added up.
+   The page: the period (as on the Campaigns tab) and a project; five figures across the top; "By source" - every
+   top-level source over the projects shown; "By project" - each project opening into its sources, and each source into
+   its campaigns, ad sets and ads, as deep as the CRM goes.
+   20 Nov: "the dropdown is not good ... I want two dropdowns to compare the range" - the period and project are
+   button pickers (as on the Campaigns tab); Compare sets Range A against Range B, each its own period or dates (B can
+   also be the period just before A); the same choice cannot be made on both sides. */
+let SRC={period:'last_30d',from:'',to:'',bper:'prev',bfrom:'',bto:'',proj:'all',cmp:false,pop:null,open:{},data:null,prev:null,busy:false};
+const SRC_BOPTS=[['prev','Period before A']].concat(OB_PERIODS);
+const SRC_CSS='<style>'
+  +'.src-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px}'
+  +'.src-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:0 0 16px}@media(max-width:900px){.src-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+  +'.src-k{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}.src-k .l{font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px}'
+  +'.src-k .v{font-size:22px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}.src-k .c{font-size:11.5px;margin-top:2px;color:var(--slate)}'
+  +'.src-t{width:100%;border-collapse:collapse;font-size:13px}.src-t th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--slate);background:#f8fafc;padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}'
+  +'.src-t th:first-child,.src-t td:first-child{text-align:left}.src-t td{padding:9px 12px;border-bottom:1px solid #eef1f4;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}'
+  +'.src-t tr.on>td{background:#eef4ff}.src-t tr.op{cursor:pointer}.src-t tr.op:hover>td{background:#f8fafc}'
+  +'.src-t td.nm{white-space:normal;max-width:420px}.src-t .car{color:#94a3b8;font-size:11px;width:14px;display:inline-block}'
+  +'.src-t tr.tot td{font-weight:800;background:#f1f5f9;border-top:2px solid #cbd5e1}'
+  +'.src-cmp{font-size:11px;color:#94a3b8;margin-top:1px}.src-cmp .g{color:#15803d;font-weight:700}.src-cmp .b{color:#b91c1c;font-weight:700}'
+  +'.src-h{font-weight:800;font-size:14px;margin:18px 2px 8px}.src-note{font-size:11.5px;color:var(--slate);margin:10px 2px;line-height:1.5}'
+  +'</style>';
+const SRC_K=[['q','Qualified',true],['sv','Site visits',true],['rv','Revisits',true],['bk','Booked',true],['lost','Lost',false]];
+function srcRangeOf(p,f,t){ const keep=OB_P; OB_P=Object.assign({},OB_P,{period:p,from:f,to:t}); try{ return obRange(); } finally{ OB_P=keep; } }
+function srcRange(){ return srcRangeOf(SRC.period,SRC.from,SRC.to); }
+// Range B: its own period or dates, or the same number of days just before A
+function srcRangeB(){ const a=srcRange(); if(SRC.bper==='prev') return {s:a.ps,e:a.pe}; const b=srcRangeOf(SRC.bper,SRC.bfrom,SRC.bto); return {s:b.s,e:b.e}; }
+function srcSame(){ const a=srcRange(), b=srcRangeB(); return a.s===b.s&&a.e===b.e; }
+// a button that opens a list - the Campaigns tab's period picker, for the Sources tab
+function srcPicker(id,opts,cur,pick,off,tag){
+  const open=SRC.pop===id, c=opts.filter(function(o){ return String(o[0])===String(cur); })[0];
+  const item=function(o){ const dis=off!=null&&off!=='custom'&&String(o[0])===String(off), sel=String(o[0])===String(cur);
+    return '<button type="button"'+(dis?' disabled title="Chosen on the other side"':'')+' onclick="'+pick+'('+esc(JSON.stringify(String(o[0])))+')" style="display:block;width:100%;text-align:left;border:0;background:'+(sel?'#eef4ff':'transparent')+';color:'+(dis?'#cbd5e1':sel?'#1d4ed8':'var(--ink)')+';font:inherit;font-size:13px;font-weight:'+(sel?700:500)+';padding:7px 10px;border-radius:6px;cursor:'+(dis?'not-allowed':'pointer')+';white-space:nowrap">'+esc(o[1])+'</button>'; };
+  return '<span onclick="event.stopPropagation()" style="position:relative;display:inline-block"><button type="button" onclick="srcPop(\''+id+'\')" style="height:36px;padding:0 11px;border:1px solid '+(open?'#93c5fd':'var(--line)')+';border-radius:9px;font:inherit;font-size:13px;font-weight:600;background:var(--bg-card);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:8px;white-space:nowrap">'
+    +(tag?'<span style="font-size:10.5px;font-weight:800;color:#fff;background:'+(tag==='A'?'#2563eb':'#7c3aed')+';border-radius:5px;padding:1px 6px">'+tag+'</span>':'')
+    +esc(c?c[1]:'Choose')+' <i class="fa-solid fa-chevron-'+(open?'up':'down')+'" style="font-size:10px;color:var(--slate)"></i></button>'
+    +(open?'<div style="position:absolute;left:0;top:calc(100% + 4px);z-index:40;background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.14);padding:6px;min-width:170px;max-height:340px;overflow-y:auto">'+opts.map(item).join('')+'</div>':'')+'</span>';
+}
+function srcDates(r,fk,tk){ return '<input type="date" value="'+esc(r.s)+'" onchange="SRC.'+fk+'=this.value;srcLoad()" style="height:36px"><span style="color:var(--slate)">to</span><input type="date" value="'+esc(r.e)+'" onchange="SRC.'+tk+'=this.value;srcLoad()" style="height:36px">'; }
+window.srcPop=function(id){ SRC.pop=SRC.pop===id?null:id; srcPaint(); };
+window.srcPickA=function(v){ SRC.pop=null; if(v===SRC.period){ srcPaint(); return; } SRC.period=v; srcLoad(); };
+window.srcPickB=function(v){ SRC.pop=null; if(v===SRC.bper){ srcPaint(); return; } SRC.bper=v; srcLoad(); };
+window.srcPickP=function(v){ SRC.pop=null; SRC.proj=v; srcPaint(); };
+window.srcCmp=function(on){ SRC.cmp=on; if(on&&SRC.bper===SRC.period&&SRC.bper!=='custom') SRC.bper='prev'; srcLoad(); };
+if(!window._srcDoc){ window._srcDoc=true; document.addEventListener('click',function(){ if(SRC.pop){ SRC.pop=null; srcPaint(); } }); }
+async function srcRows(s,e){
+  const out=[]; for(let f=0;;f+=1000){
+    const q=await sb.schema('camp').from('crm_source_daily').select('bu_id,business_unit,node_id,parent_id,level,top_source,source,tot_q,tot_sv,tot_rv,tot_bk,tot_lost').gte('day',s).lte('day',e).range(f,f+999);
+    if(q.error) return {error:q.error}; out.push.apply(out,q.data||[]); if(!q.data||q.data.length<1000) break; }
+  // the period: each project's node added up over the days
+  const by={};
+  out.forEach(function(r){ const k=r.bu_id+'|'+r.node_id; const x=by[k]||(by[k]={bu:r.bu_id,project:r.business_unit,id:r.node_id,parent:r.parent_id,level:r.level,top:r.top_source,name:r.source,q:0,sv:0,rv:0,bk:0,lost:0});
+    x.q+=r.tot_q; x.sv+=r.tot_sv; x.rv+=r.tot_rv; x.bk+=r.tot_bk; x.lost+=r.tot_lost; });
+  return {nodes:by,days:new Set(out.map(function(r){ return r.day; })).size};
+}
+async function srcView(host){
+  host.innerHTML=SRC_CSS+'<div id="srcHead"></div><div id="srcBody"><div class="loader"><div class="spin"></div></div></div>';
+  await srcLoad();
+}
+async function srcLoad(){
+  const r=srcRange();
+  if($('srcBody')&&SRC.data) $('srcBody').style.opacity='.55';
+  const rb=srcRangeB();
+  const [a,b]=await Promise.all([srcRows(r.s,r.e), SRC.cmp?srcRows(rb.s,rb.e):Promise.resolve({nodes:{}})]);
+  if($('srcBody')) $('srcBody').style.opacity='';
+  if(a.error){ SRC.data=null; srcPaint(a.error.message); return; }
+  SRC.data=a; SRC.prev=b.error?null:b; srcPaint();
+}
+function srcPaint(err){
+  const head=$('srcHead'), body=$('srcBody'); if(!head||!body) return;
+  const r=srcRange();
+  const projects=SRC.data?[...new Set(Object.keys(SRC.data.nodes).map(function(k){ return SRC.data.nodes[k].project; }))].sort():[];
+  const rb=srcRangeB(), same=SRC.cmp&&srcSame();
+  head.innerHTML='<div class="src-bar">'
+    +srcPicker('proj',[['all','All projects']].concat(projects.map(function(p){ return [p,p]; })),SRC.proj,'srcPickP')
+    +srcPicker('a',OB_PERIODS,SRC.period,'srcPickA',SRC.cmp?SRC.bper:null,SRC.cmp?'A':'')
+    +(SRC.period==='custom'?srcDates(r,'from','to'):'')
+    +'<label class="ca-sw'+(SRC.cmp?' on':'')+'" title="Compare two date ranges"><input type="checkbox"'+(SRC.cmp?' checked':'')+' onchange="srcCmp(this.checked)"><span class="k"></span>Compare</label>'
+    +(SRC.cmp?'<b style="color:#334155;font-size:12.5px">vs</b>'+srcPicker('b',SRC_BOPTS,SRC.bper,'srcPickB',SRC.period,'B')+(SRC.bper==='custom'?srcDates(rb,'bfrom','bto'):''):'')
+    +'</div><div style="font-size:12.5px;color:var(--slate);margin:-6px 2px 12px">'
+    +(SRC.cmp?'<b style="color:#2563eb">A</b> '+esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+' &nbsp;<b style="color:#334155">vs</b>&nbsp; <b style="color:#7c3aed">B</b> '+esc(fmtDate(rb.s))+' – '+esc(fmtDate(rb.e))+' · the small grey figure under each number is B'
+      +(same?' <span style="color:#b91c1c;font-weight:700"> · A and B are the same dates - choose different ones</span>':'')
+      :esc(fmtDate(r.s))+' – '+esc(fmtDate(r.e))+' · from the CRM')+'</div>';
+  if(err){ body.innerHTML=/crm_source_daily|does not exist|schema cache/i.test(err)
+      ?'<div class="card card-pad" style="color:var(--slate)"><i class="fa-solid fa-moon"></i> The CRM\'s source figures are read at night - they show here from tomorrow morning.</div>'
+      :'<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(err)+'</div>'; return; }
+  const N=SRC.data.nodes, P=(SRC.prev&&SRC.prev.nodes)||{};
+  const inP=function(x){ return SRC.proj==='all'||x.project===SRC.proj; };
+  const keys=Object.keys(N).filter(function(k){ return inP(N[k]); });
+  const zero=function(x){ return !(x.q||x.sv||x.rv||x.bk||x.lost); };
+  const add=function(t,x){ SRC_K.forEach(function(k){ t[k[0]]+=(x&&x[k[0]])||0; }); return t; };
+  const blank=function(){ return {q:0,sv:0,rv:0,bk:0,lost:0}; };
+  const pct=function(a,b){ return b?Math.round(a/b*100)+'%':'—'; };
+  const chg=function(now,was,goodUp){ if(!SRC.cmp) return ''; let c=''; if(was){ const p=(now-was)/was*100; c=Math.abs(p)<0.5?'=':'<span class="'+((p>0)===goodUp?'g':'b')+'">'+(p>0?'▲':'▼')+Math.abs(p).toFixed(0)+'%</span>'; } else if(now) c='<span class="'+(goodUp?'g':'b')+'">new</span>';
+    return '<div class="src-cmp">'+obNum(was||0)+' '+c+'</div>'; };
+  const cells=function(t,w){ w=w||blank(); return SRC_K.map(function(k){ return '<td>'+(k[0]==='q'||k[0]==='bk'?'<b>':'')+obNum(t[k[0]])+(k[0]==='q'||k[0]==='bk'?'</b>':'')+chg(t[k[0]],w[k[0]],k[2])+'</td>'; }).join('')
+    +'<td>'+pct(t.sv,t.q)+'</td><td>'+pct(t.bk,t.sv)+'</td>'; };
+  const thead=function(first){ return '<thead><tr><th>'+first+'</th>'+SRC_K.map(function(k){ return '<th>'+k[1]+'</th>'; }).join('')+'<th title="Site visits as a share of Qualified">QL to SV %</th><th title="Booked as a share of Site visits">SV to Booked %</th></tr></thead>'; };
+  // the totals: every project's top-level sources
+  const tops=keys.filter(function(k){ return N[k].level===0; });
+  const T=tops.reduce(function(t,k){ return add(t,N[k]); },blank());
+  const TW=Object.keys(P).filter(function(k){ return P[k].level===0&&inP(P[k]); }).reduce(function(t,k){ return add(t,P[k]); },blank());
+  let h='<div class="src-kpis">'+SRC_K.map(function(k){ return '<div class="src-k"><div class="l">'+k[1]+'</div><div class="v">'+obNum(T[k[0]])+'</div>'+(SRC.cmp?'<div class="c">'+chg(T[k[0]],TW[k[0]],k[2]).replace('src-cmp','')+'</div>':'')+'</div>'; }).join('')+'</div>';
+  // BY SOURCE: each top-level source over the projects shown
+  const bySrc={}, bySrcW={};
+  tops.forEach(function(k){ const x=N[k]; add(bySrc[x.name]||(bySrc[x.name]=blank()),x); });
+  Object.keys(P).forEach(function(k){ const x=P[k]; if(x.level===0&&inP(x)) add(bySrcW[x.name]||(bySrcW[x.name]=blank()),x); });
+  const srcNames=Object.keys(bySrc).filter(function(n){ return !zero(bySrc[n]); }).sort(function(a,b){ return bySrc[b].q-bySrc[a].q||bySrc[b].sv-bySrc[a].sv; });
+  h+='<div class="src-h"><i class="fa-solid fa-filter"></i> By source <span style="font-weight:500;color:var(--slate);font-size:12px">- '+(SRC.proj==='all'?'all projects':esc(SRC.proj))+'</span></div>'
+    +'<div class="card" style="overflow-x:auto"><table class="src-t">'+thead('Source')+'<tbody>'
+    +(srcNames.length?srcNames.map(function(n){ return '<tr><td class="nm"><b>'+esc(n)+'</b></td>'+cells(bySrc[n],bySrcW[n])+'</tr>'; }).join(''):'<tr><td colspan="8" style="text-align:center;color:var(--slate);padding:20px">Nothing in these dates</td></tr>')
+    +'</tbody><tfoot><tr class="tot"><td>Total</td>'+cells(T,TW)+'</tr></tfoot></table></div>';
+  // BY PROJECT: project > source > campaign > ad set > ad
+  const kids={}; keys.forEach(function(k){ const x=N[k]; const pk=x.parent==null?('p:'+x.bu):(x.bu+'|'+x.parent); (kids[pk]||(kids[pk]=[])).push(k); });
+  const projT={}; tops.forEach(function(k){ const x=N[k]; add(projT[x.bu]||(projT[x.bu]=Object.assign(blank(),{name:x.project})),x); });
+  const projW={}; Object.keys(P).forEach(function(k){ const x=P[k]; if(x.level===0&&inP(x)) add(projW[x.bu]||(projW[x.bu]=blank()),x); });
+  const rowsOf=function(pk,depth){ return (kids[pk]||[]).filter(function(k){ return !zero(N[k]); }).sort(function(a,b){ return N[b].q-N[a].q||N[b].sv-N[a].sv; }).map(function(k){
+      const x=N[k], has=(kids[k]||[]).some(function(c){ return !zero(N[c]); }), on=!!SRC.open[k];
+      return '<tr class="'+(has?'op':'')+(on?' on':'')+'"'+(has?' onclick="srcToggle(\''+k+'\')"':'')+'><td class="nm" style="padding-left:'+(12+depth*20)+'px"><span class="car">'+(has?'<i class="fa-solid fa-chevron-'+(on?'down':'right')+'"></i>':'')+'</span>'+esc(x.name)+'</td>'+cells(x,P[k])+'</tr>'
+        +(on?rowsOf(k,depth+1):''); }).join(''); };
+  const projIds=Object.keys(projT).filter(function(b){ return !zero(projT[b]); }).sort(function(a,b){ return projT[b].q-projT[a].q; });
+  h+='<div class="src-h"><i class="fa-solid fa-building"></i> By project <span style="font-weight:500;color:var(--slate);font-size:12px">- open a project for its sources, a source for its campaigns, ad sets and ads</span></div>'
+    +'<div class="card" style="overflow-x:auto"><table class="src-t">'+thead('Project / source')+'<tbody>'
+    +(projIds.length?projIds.map(function(b){ const pk='p:'+b, on=!!SRC.open[pk];
+        return '<tr class="op'+(on?' on':'')+'" onclick="srcToggle(\''+pk+'\')"><td class="nm"><span class="car"><i class="fa-solid fa-chevron-'+(on?'down':'right')+'"></i></span><b>'+esc(projT[b].name)+'</b></td>'+cells(projT[b],projW[b])+'</tr>'+(on?rowsOf(pk,1):''); }).join('')
+      :'<tr><td colspan="8" style="text-align:center;color:var(--slate);padding:20px">Nothing in these dates</td></tr>')
+    +'</tbody></table></div>'
+    +'<div class="src-note">From the CRM\'s source report (its absolute figures), all lead sources - not only ads. Read every night; today is not included.'+(SRC.data.days?'':' No days read for these dates yet.')+'</div>';
+  body.innerHTML=h;
+}
+window.srcToggle=function(k){ SRC.open[k]=!SRC.open[k]; srcPaint(); };
 /* =============================================================================================
    WHATSAPP TEMPLATES (module id 'wa_templates', 17 Nov 2026 - Ayush).
    Tab 1 TEMPLATES: the WhatsApp drip flow of each project, from the team's sheet "Lead Nurturing 2026
@@ -43891,8 +44457,9 @@ function wadSum(daily,ids,r){
 function watDeliveries(){
   const P=WAT_DATA.projects, p=watProj();
   if(!WAD) return '<div class="loader"><div class="spin"></div></div>';
-  let h=WAD_CSS+'<div class="wat-top"><div class="wat-seg">'+P.map(function(x){ return '<button class="'+(x.key===p.key?'on':'')+'" onclick="watPick(\''+x.key+'\')">'+esc(x.label)+'</button>'; }).join('')+'</div></div>';
-  const acc=wadAccFor(p.label);
+  const acc=wadAccFor(p.label), canRep=!!(acc&&WAD.byAcc[acc.id]&&!WAD.state.missing);
+  let h=WAD_CSS+'<div class="wat-top"><div class="wat-seg">'+P.map(function(x){ return '<button class="'+(x.key===p.key?'on':'')+'" onclick="watPick(\''+x.key+'\')">'+esc(x.label)+'</button>'; }).join('')+'</div>'
+    +'<button class="btn" style="margin-left:auto;height:36px" id="wadRepBtn"'+(canRep?'':' disabled title="No figures for this project yet"')+' onclick="wadReport()"><i class="fa-solid fa-file-arrow-down"></i> Download report</button></div>';
   if(WAD.state.missing||!acc||!WAD.byAcc[acc.id]) return h+wadNoData();
   h+=wadBar();
   const r=wadRange(), D=WAD.byAcc[acc.id].daily;
@@ -43992,6 +44559,80 @@ function watKnocking(){
   });
   return h+'<div class="wat-list">'+(ordered.length?rows:'<div style="padding:16px;color:var(--slate)">No knocking templates on this number.</div>')+'</div>';
 }
+
+/* DOWNLOAD REPORT (21 Nov 2026, Ayush: "whichever Project and Date Range is chosen ... a Button to download ... in the same
+   strip as the Project but at the right side, which downloads everything like this format" - his
+   Ananta_WhatsApp_Report_19_Nov_2026_All_Templates.pdf). One PDF for the project and range on screen (a clicked chart day
+   counts as the range): the four totals, a By stage table, then one table per stage - each template with its day, Sent,
+   Delivered, Read and Not delivered, as Meta's template analytics give them. Built in the page; nothing is sent anywhere. */
+window.wadReport=async function(){
+  const p=watProj(), acc=wadAccFor(p.label); if(!acc||!WAD||!WAD.byAcc[acc.id]) return;
+  const btn=$('wadRepBtn'); if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Preparing…'; }
+  try{
+    const L=await loadPdfLib(); if(!L) throw new Error('The PDF library could not be loaded');
+    const r=wadRange(), D=WAD.byAcc[acc.id].daily;
+    const byName={}; WAD.tpl.forEach(function(t){ if(t.waba_id===acc.id) byName[t.name]=t; });
+    const stages=p.stages.map(function(st){ return {name:st.name,steps:st.steps.filter(function(s){ return s.name; })}; }).filter(function(st){ return st.steps.length; });
+    const sum=function(steps){ const ids={}; steps.forEach(function(s){ const t=byName[s.name]; if(t) ids[t.id]=1; }); return wadSum(D,ids,r); };
+    const all=sum([].concat.apply([],stages.map(function(st){ return st.steps; }))), T=all.tot;
+    const N=function(n){ return Number(n||0).toLocaleString('en-IN'); }, P=function(a,b){ return b?Math.round(a/b*100)+'%':'–'; };
+    const dl=function(iso){ return new Date(iso+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}); };
+    const rangeTxt=r.s===r.e?dl(r.s):dl(r.s)+' to '+dl(r.e);
+    const doc=await L.PDFDocument.create(); doc.setTitle(p.label+' WhatsApp report '+rangeTxt);
+    const reg=await doc.embedFont(L.StandardFonts.Helvetica), bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const W=595, H=842, M=40, INK=L.rgb(.06,.09,.16), SL=L.rgb(.39,.45,.55), LINE=L.rgb(.89,.91,.94), HEAD=L.rgb(.95,.96,.98), RED=L.rgb(.73,.11,.11), GRN=L.rgb(.09,.5,.24), BLU=L.rgb(.15,.39,.92);
+    const clean=function(t){ return String(t==null?'':t).replace(/[–—]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[^ -ÿ]/g,''); };
+    let pg=doc.addPage([W,H]), y=H-M;
+    const txt=function(t,x,yy,o){ o=o||{}; const f=o.bold?bold:reg, s=o.size||9, c=clean(t), tw=f.widthOfTextAtSize(c,s);
+      pg.drawText(c,{x:o.align==='right'?x-tw:o.align==='center'?x-tw/2:x,y:yy,size:s,font:f,color:o.color||INK}); return tw; };
+    const wrap=function(t,w,f,s){ const out=[]; let ln=''; clean(t).split(/\s+/).filter(Boolean).forEach(function(wd){ const x=ln?ln+' '+wd:wd; if(f.widthOfTextAtSize(x,s)>w&&ln){ out.push(ln); ln=wd; } else ln=x; }); if(ln) out.push(ln); return out; };
+    const need=function(h){ if(y-h<M+20){ pg=doc.addPage([W,H]); y=H-M; } };
+    // title
+    txt(p.label+': WhatsApp templates, '+rangeTxt,M,y-14,{bold:true,size:15}); y-=26;
+    wrap('Sends made '+(r.s===r.e?'on '+dl(r.s):'from '+dl(r.s)+' to '+dl(r.e))+' (Meta\'s days, 05:30-05:29 IST) - Source: Meta WhatsApp template analytics, account '+acc.name+' - Prepared '+dl(wadIso(new Date())),W-2*M,reg,8.5)
+      .forEach(function(l){ txt(l,M,y-9,{size:8.5,color:SL}); y-=12; });
+    y-=8;
+    // the four totals
+    const nd=Math.max(0,T.sent-T.delivered), bw=(W-2*M-18)/4;
+    [['Sent (accepted by Meta)',N(T.sent),'',INK],['Delivered',N(T.delivered),P(T.delivered,T.sent),BLU],['Read',N(T.read),P(T.read,T.sent),GRN],['Not delivered',N(nd),P(nd,T.sent),RED]].forEach(function(k,i){
+      const x=M+i*(bw+6); pg.drawRectangle({x:x,y:y-52,width:bw,height:52,borderColor:LINE,borderWidth:1,color:L.rgb(1,1,1)});
+      txt(k[0],x+10,y-15,{size:8,color:SL}); const tw=txt(k[1],x+10,y-38,{bold:true,size:17,color:k[3]}); if(k[2]) txt('('+k[2]+')',x+14+tw,y-37,{size:9,color:SL}); });
+    y-=70;
+    // a table
+    const table=function(title,cols,rows,foot){
+      need(40); txt(title,M,y-12,{bold:true,size:11.5}); y-=20;
+      const widths=cols.map(function(c){ return c[1]; }), x0=M;
+      const drawRow=function(cells,o){ o=o||{}; const f=o.bold?bold:reg, s=8.2;
+        const lines=cells.map(function(c,i){ return cols[i][2]?[clean(c)]:wrap(c,widths[i]-8,f,s); }), h=Math.max(1,Math.max.apply(null,lines.map(function(l){ return l.length; })))*11+7;
+        need(h); let x=x0;
+        if(o.fill) pg.drawRectangle({x:x0,y:y-h,width:widths.reduce(function(a,b){ return a+b; },0),height:h,color:o.fill});
+        lines.forEach(function(ls,i){ ls.forEach(function(ln,j){ const tw=f.widthOfTextAtSize(ln,s); pg.drawText(ln,{x:cols[i][2]?x+widths[i]-4-tw:x+4,y:y-11-j*11,size:s,font:f,color:o.color||INK}); }); x+=widths[i]; });
+        pg.drawLine({start:{x:x0,y:y-h},end:{x:x0+widths.reduce(function(a,b){ return a+b; },0),y:y-h},thickness:.5,color:LINE}); y-=h; };
+      drawRow(cols.map(function(c){ return c[0]; }),{bold:true,fill:HEAD,color:SL});
+      rows.forEach(function(rw){ drawRow(rw); });
+      if(foot) drawRow(foot,{bold:true,fill:HEAD});
+      y-=16; };
+    // by stage
+    const st=stages.map(function(s){ return {name:s.name,S:sum(s.steps).tot}; });
+    table('By stage',[['Stage',175],['Sent',62,1],['Delivered',72,1],['Deliv. %',58,1],['Read',58,1],['Not delivered',90,1]],
+      st.map(function(x){ const n=Math.max(0,x.S.sent-x.S.delivered); return [x.name,N(x.S.sent),N(x.S.delivered),P(x.S.delivered,x.S.sent),N(x.S.read),N(n)]; }),
+      ['Total',N(T.sent),N(T.delivered),P(T.delivered,T.sent),N(T.read),N(nd)]);
+    // one table per stage, each template
+    stages.forEach(function(s){
+      const S=sum(s.steps), tt=S.tot, n0=Math.max(0,tt.sent-tt.delivered);
+      table(s.name,[['Template',150],['When',58],['Sent',42,1],['Delivered',52,1],['Deliv. %',44,1],['Read',40,1],['Not delivered',62,1],['Not deliv. %',57,1]],
+        s.steps.map(function(x){ const t=byName[x.name], m=(t&&S.per[t.id])||{sent:0,delivered:0,read:0}, n=Math.max(0,m.sent-m.delivered);
+          return [x.name+(t?'':' (not on this number)'),x.day==null?'':'Day '+x.day,N(m.sent),N(m.delivered),P(m.delivered,m.sent),N(m.read),N(n),P(n,m.sent)]; }),
+        ['Total '+s.name,'',N(tt.sent),N(tt.delivered),P(tt.delivered,tt.sent),N(tt.read),N(n0),P(n0,tt.sent)]);
+    });
+    need(30); wrap('Not delivered = sent minus delivered: Meta does not report failed messages separately, so this counts failed ones and any not delivered yet. Read is counted against sent.',W-2*M,reg,7.8).forEach(function(l){ txt(l,M,y-9,{size:7.8,color:SL}); y-=11; });
+    const pages=doc.getPages(); pages.forEach(function(pp,i){ const t='Page '+(i+1)+' of '+pages.length; pp.drawText(t,{x:W-M-reg.widthOfTextAtSize(t,7.5),y:22,size:7.5,font:reg,color:SL}); pp.drawText(clean(p.label+' - WhatsApp templates - '+rangeTxt),{x:M,y:22,size:7.5,font:reg,color:SL}); });
+    const bytes=await doc.save();
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
+    a.download=(p.label+'_WhatsApp_Report_'+rangeTxt+'_All_Templates').replace(/[^\w\-]+/g,'_')+'.pdf'; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },2000);
+  }catch(e){ toast('Could not make the report: '+e.message,'err'); }
+  if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-file-arrow-down"></i> Download report'; }
+};
 
 /* ---------------------------------------------------------------- Jain Group Fb Ads / Jain Group Google Ads (Competitor Data)
    OUR OWN ADS, FROM OUR OWN AD ACCOUNTS (19 Nov 2026, Ayush: "I want to see the ads in Facebook and Google showing in
@@ -44203,3 +44844,791 @@ window.oaOpen=function(i){
     +'<div class="modal-body"><div class="oa-pop"><div>'+left+'</div><div>'+acc+'</div></div></div>','lg');
   if(s.length) oaPaintSlide();
 };
+/* =============================================================================================
+   RECKONER (module id 'reckoner', 21 Nov 2026 - Ayush). One verified source of project information
+   for Sales: Project Directory, the same 8-tab Profile for every project, Comparison, Pending
+   Verifications, Audit log, Roles. Plan: "Claude outputs/Reckoner/Reckoner plan.md".
+   Database: schema rk (migration 20261121205000_reckoner.sql).
+   - Nobody writes a record directly. Every add / change / removal goes to rk.changes through
+     rk.propose() and only reaches the record when an approver accepts it (rk.review). rk.changes is
+     also the audit log.
+   - Every record carries its verification status. Missing is shown as "Not Available", never as 0.
+     "Customer view" shows only Verified, in-date, customer-facing values.
+   - Sales see internal information too (Ayush, 21 Nov) - it is marked Internal.
+   - Inventory shows only free units: units Farvision has booked are hidden (rk.units_free).
+   - Approvers: super admins + rk.roles 'sales_head' / 'project_admin' (mgr.sales@, agm.sales@, sm.sales2@).
+   Second file: 61-reckoner-review.js (Pending Verifications, Audit, Compare, Roles).
+   ============================================================================================= */
+const RK={role:null,projects:null,cfg:[],rates:[],stats:{},lists:{},fv:null,proj:{},q:'',f:{cat:'',status:'',city:'',cfg:''},cust:false,cmp:[],pendN:0,inv:{q:'',tower:'',cfg:'',status:''}};
+const RKS=function(){ return sb.schema('rk'); };
+const RK_TABS=['Overview','Configurations','Pricing','Inventory','Amenities','Location','Sales Info','Documents'];
+const RK_TBL_LABEL={projects:'Project',locations:'Location',configurations:'Configuration',charges:'Price component',payment_plans:'Payment plan stage',offers:'Offer',units:'Unit',amenities:'Amenity',landmarks:'Landmark',sales_notes:'Sales note',bank_approvals:'Bank approval',documents:'Document',assignments:'Team member'};
+const RK_NOTE_KIND={usp:'USP',selling_point:'Selling point',target_customer:'Target customer',differentiator:'Differentiator',booking_procedure:'Booking procedure',faq:'FAQ',guideline:'Guideline',do_not_promise:'Do not promise',pitch:'Pitch',other:'Other'};
+const RK_CHARGE_KIND={base_rate:'Base rate',unit_price:'Unit price',edc:'EDC',idc:'IDC',gst:'GST',parking:'Parking',frc:'FRC',plc:'PLC',club:'Club',maintenance:'Maintenance',registration:'Registration',other:'Other'};
+const RK_PER={per_sqft:'per sq ft',lump_sum:'lump sum',percent:'%'};
+/* the form of each record table: [column, label, type, required]. Types: text, area, num, int, date, bool,
+   list:<rk.lists list>, sel:a=A,b=B (or plain values), cfg (a configuration of this project), fv (Farvision project), file */
+const RK_F={
+  projects:[['name','Project name','text',1],['code','Short code'],['category','Category','list:category'],['status','Status','list:status'],['stage','Development stage'],['city','City'],['locality','Locality'],['developer','Developer'],['land_area','Land area (as stated, e.g. 5.12 Acres)'],['towers','Towers / blocks'],['height','Height (e.g. B+G+8)'],['total_units','Total units','int'],['open_space','Open space'],['launch_date','Launch date','date'],['possession_date','Possession date','date'],['possession_note','Possession note'],['rera_no','RERA number'],['rera_note','RERA note'],['description','Description','area'],['fv_project_ids','Farvision project(s) (hides booked units)','fv']],
+  locations:[['address','Address','area',1],['pin','PIN code'],['maps_url','Google Maps link'],['lat','Latitude','num'],['lng','Longitude','num'],['directions','Directions','area']],
+  configurations:[['name','Name (e.g. 2 BHK Type A)','text',1],['kind','Type (Apartment, Bungalow, Studio, Shop)'],['bedrooms','Bedrooms','num'],['bathrooms','Bathrooms','num'],['balconies','Balconies','num'],['sba_min','Super built-up from (sq ft)','num'],['sba_max','Super built-up to (sq ft)','num'],['built_up','Built-up (sq ft)','num'],['carpet','Carpet (sq ft)','num'],['area_note','Area note'],['floors','Floors'],['facing','Facing'],['room_sizes','Room sizes','area'],['features','Features','area'],['sort','Order','int']],
+  charges:[['name','Component','text',1],['kind','Kind','sel:'+Object.keys(RK_CHARGE_KIND).map(function(k){ return k+'='+RK_CHARGE_KIND[k]; }).join(','),1],['configuration_id','Applies to','cfg'],['amount','Amount / rate','num'],['unit','Per','sel:per_sqft=per sq ft,lump_sum=lump sum,percent=% of base'],['in_base','Included in base price','tri'],['in_final','Included in final price','tri'],['gst_included','GST included','tri'],['edc_included','EDC included','tri'],['parking_included','Parking included','tri'],['confirmed','Confirmed (not indicative)','bool'],['internal','Internal only (do not pitch)','bool'],['note','Note','area'],['sort','Order','int']],
+  payment_plans:[['stage','Stage','text',1],['percent','Percent','num'],['amount','Amount','num'],['note','Note'],['sort','Order','int']],
+  offers:[['title','Offer','text',1],['details','Details','area'],['internal','Internal only','bool']],
+  units:[['unit_no','Unit no.','text',1],['tower','Tower / block'],['floor','Floor'],['configuration_id','Configuration','cfg'],['area','Area (sq ft)','num'],['facing','Facing'],['view','View'],['base_price','Base price','num'],['extra_charges','Extra charges','num'],['quoted_price','Quoted price','num'],['status','Status','sel:Available,On Hold,Booked,Sold,Blocked,Under Verification'],['booking_date','Booking date','date'],['note','Remarks']],
+  amenities:[['name','Amenity','text',1],['category','Category','list:amenity'],['description','Description','area'],['status','Status (e.g. Ready, Under construction)'],['place','Where in the project'],['sort','Order','int']],
+  landmarks:[['name','Landmark','text',1],['category','Category','list:landmark'],['distance_km','Distance (km)','num'],['travel_min','Travel time (minutes)','num'],['travel_note','Travel note'],['sort','Order','int']],
+  sales_notes:[['kind','Kind','sel:'+Object.keys(RK_NOTE_KIND).map(function(k){ return k+'='+RK_NOTE_KIND[k]; }).join(','),1],['title','Title'],['body','Text','area',1],['internal','Internal only','bool'],['sort','Order','int']],
+  bank_approvals:[['bank','Bank','text',1],['status','Status'],['reference','Reference']],
+  documents:[['category','Category','list:document',1],['title','Title','text',1],['version','Version'],['internal','Internal only','bool'],['s3_key','File','file']],
+  assignments:[['email','Email','text',1],['name','Name'],['role','Role','sel:project_manager=Project manager,sales_executive=Sales executive,project_admin=Project admin',1]]
+};
+const RK_COMMON=[['effective_from','Effective from','date'],['valid_until','Valid until','date'],['source','Source / reference'],['remarks','Remarks','area']];
+
+const RK_CSS='<style>'
++'.rk-nav{display:flex;gap:4px;background:#f1f5f9;border-radius:12px;padding:4px;margin:0 0 16px;overflow-x:auto;scrollbar-width:none}'
++'.rk-nav a{border-radius:9px;padding:8px 16px;font-size:13.5px;font-weight:600;color:#475569;cursor:pointer;white-space:nowrap;text-decoration:none}'
++'.rk-nav a.on{background:#fff;color:#0f172a;box-shadow:0 1px 3px rgba(15,23,42,.12)}'
++'.rk-nav .n{background:#f59e0b;color:#fff;border-radius:9px;padding:1px 7px;font-size:11.5px;margin-left:5px}'
++'.rk-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px}'
++'.rk-bar input,.rk-bar select,.rk-form input,.rk-form select,.rk-form textarea{border:1px solid var(--line);border-radius:9px;padding:8px 11px;font-size:13.5px;font-family:inherit;background:#fff;color:#0f172a}'
++'.rk-bar input[type=search]{flex:1;min-width:200px}'
++'.rk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}'
++'.rk-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;cursor:pointer;display:flex;flex-direction:column;gap:8px;position:relative}'
++'.rk-card:hover{border-color:#94a3b8;box-shadow:0 4px 14px rgba(15,23,42,.06)}'
++'.rk-card h3{margin:0;font-size:16px;color:#0f172a;padding-right:70px}'
++'.rk-card .loc{color:#64748b;font-size:13px}'
++'.rk-card .cmp{position:absolute;top:14px;right:14px;font-size:12px;color:#475569;display:flex;gap:5px;align-items:center}'
++'.rk-chips{display:flex;flex-wrap:wrap;gap:5px}'
++'.rk-chip{background:#f1f5f9;color:#334155;border-radius:7px;padding:2px 8px;font-size:12px}'
++'.rk-meta{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:12.5px;color:#475569}'
++'.rk-meta b{color:#0f172a;font-weight:600}'
++'.rk-prog{height:6px;background:#e2e8f0;border-radius:4px;overflow:hidden}.rk-prog i{display:block;height:100%;background:#16a34a}'
++'.rk-vs{display:inline-flex;align-items:center;gap:4px;border-radius:7px;padding:1px 7px;font-size:11.5px;font-weight:600;white-space:nowrap;vertical-align:middle}'
++'.rk-vs.verified{background:#dcfce7;color:#166534}.rk-vs.pending{background:#fef3c7;color:#92400e}.rk-vs.outdated{background:#fee2e2;color:#991b1b}'
++'.rk-vs.rejected{background:#fee2e2;color:#991b1b}.rk-vs.na{background:#e2e8f0;color:#475569}.rk-vs.internal{background:#ede9fe;color:#5b21b6}.rk-vs.chg{background:#dbeafe;color:#1e40af}'
++'.rk-na{color:#94a3b8;font-style:italic}'
++'.rk-ph{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 6px}'
++'.rk-ph h2{margin:0;font-size:21px}'
++'.rk-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:12px 0 16px;overflow-x:auto;scrollbar-width:none}'
++'.rk-tabs a{padding:9px 14px;font-size:13.5px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}'
++'.rk-tabs a.on{color:#0f172a;border-bottom-color:#2563eb}'
++'.rk-sec{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin:0 0 14px}'
++'.rk-sec>h4{margin:0 0 12px;font-size:14.5px;display:flex;align-items:center;gap:8px}'
++'.rk-sec>h4 .r{margin-left:auto;display:flex;gap:6px}'
++'.rk-kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px 18px}'
++'.rk-kv>div{font-size:13.5px}.rk-kv .k{color:#64748b;font-size:12px;margin-bottom:2px}'
++'.rk-t{width:100%;border-collapse:collapse;font-size:13px}'
++'.rk-t th{text-align:left;color:#64748b;font-weight:600;font-size:12px;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}'
++'.rk-t td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}'
++'.rk-t tr.int td{background:#faf5ff}'
++'.rk-wrap{overflow-x:auto}'
++'.rk-ib{border:0;background:transparent;color:#64748b;cursor:pointer;padding:2px 5px;border-radius:6px;font-size:12.5px}.rk-ib:hover{background:#f1f5f9;color:#0f172a}'
++'.rk-two{display:grid;grid-template-columns:1fr 1fr;gap:14px}'
++'.rk-pend{background:#eff6ff;border:1px dashed #93c5fd;border-radius:10px;padding:8px 12px;font-size:12.5px;color:#1e40af;margin:8px 0 0}'
++'.rk-form{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}'
++'.rk-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#475569;font-weight:600}'
++'.rk-form label.w{grid-column:1/-1}'
++'.rk-form label.cb{flex-direction:row;align-items:center;gap:8px;font-weight:500;color:#0f172a;font-size:13px}'
++'.rk-form hr{grid-column:1/-1;border:0;border-top:1px solid var(--line);margin:4px 0}'
++'.rk-empty{padding:22px;text-align:center;color:#64748b;font-size:13.5px}'
++'.rk-tot{font-size:20px;font-weight:700;color:#0f172a}'
++'@media(max-width:760px){.rk-two,.rk-form{grid-template-columns:1fr}.rk-grid{grid-template-columns:1fr}.rk-meta{grid-template-columns:1fr}}'
++'@media print{.rk-noprint,.sidebar,.topbar{display:none!important}}'
++'</style>';
+
+/* ---------------------------------------------------------------- small helpers */
+function rkToday(){ return new Date(Date.now()+5.5*3600e3).toISOString().slice(0,10); }
+function rkState(r){ if(!r) return 'na'; if(r.vstatus==='na') return 'na'; if(r.vstatus==='verified'&&r.valid_until&&r.valid_until<rkToday()) return 'outdated'; return r.vstatus||'pending'; }
+function rkOk(r){ return rkState(r)==='verified'; }
+function rkChip(r,always){
+  const s=rkState(r), src=r&&r.source?'Source: '+r.source:'';
+  // the question raised about this value (workbook conflicts etc.) - shown to staff, never in Customer view
+  const q=r&&r.remarks&&!RK.cust?' <i class="fa-solid fa-circle-exclamation" style="color:#d97706;cursor:help" title="'+esc(r.remarks)+'"></i>':'';
+  if(s==='verified'&&!always) return '<span class="rk-vs verified" title="Verified'+(r.verified_by?' by '+esc(r.verified_by):'')+(r.verified_at?' on '+esc(fmtDate(r.verified_at)):'')+(src?' · '+esc(src):'')+'"><i class="fa-solid fa-check"></i></span>'+q;
+  const L={verified:'Verified',pending:'Pending verification',outdated:'Outdated',rejected:'Rejected',na:'Not applicable'};
+  return '<span class="rk-vs '+s+'" title="'+esc(src)+'">'+L[s]+'</span>'+q;
+}
+function rkInt(r){ return r&&r.internal?' <span class="rk-vs internal">Internal</span>':''; }
+function rkNA(){ return '<span class="rk-na">Not Available</span>'; }
+function rkInr(n){ if(n==null||n==='') return null; n=Number(n); if(!isFinite(n)) return null;
+  const neg=n<0; n=Math.abs(n); const r=Math.round(n*100)/100; let [a,b]=String(r).split('.');
+  const last=a.slice(-3), rest=a.slice(0,-3); a=(rest?rest.replace(/\B(?=(\d{2})+(?!\d))/g,',')+',':'')+last;
+  return (neg?'-':'')+'₹'+a+(b?'.'+(b+'0').slice(0,2):''); }
+function rkCr(n){ n=Number(n); if(!isFinite(n)) return ''; if(n>=1e7) return '₹'+(Math.round(n/1e5)/100)+' Cr'; if(n>=1e5) return '₹'+(Math.round(n/1e3)/100)+' L'; return rkInr(n); }
+function rkNum(n){ if(n==null||n==='') return null; const x=Number(n); return isFinite(x)?x.toLocaleString('en-IN'):String(n); }
+function rkArea(c){ if(!c) return null; const a=c.sba_min, b=c.sba_max; if(a==null&&b==null) return null; if(a!=null&&b!=null&&Number(a)!==Number(b)) return rkNum(a)+' – '+rkNum(b)+' sq ft'; return rkNum(a!=null?a:b)+' sq ft'; }
+function rkCopyBtn(t){ if(t==null||t==='') return ''; return ' <button class="rk-ib rk-noprint" title="Copy" onclick="event.stopPropagation();rkCopy(this)" data-t="'+esc(String(t))+'"><i class="fa-regular fa-copy"></i></button>'; }
+window.rkCopy=function(b){ const t=b.getAttribute('data-t'); try{ navigator.clipboard.writeText(t).then(function(){ toast('Copied','ok'); }); }catch(e){ toast('Could not copy','err'); } };
+function rkCanPropose(pid){ const r=RK.role; if(r==='super'||r==='sales_head') return true; const d=pid&&RK.proj[pid];
+  if(r==='project_admin') return !pid||!!(d&&d.mine); if(r==='project_manager') return !!(pid&&d&&d.mine); return false; }
+function rkCanApprove(){ return RK.role==='super'||RK.role==='sales_head'||RK.role==='project_admin'; }
+function rkErrText(e){ const m=String((e&&e.message)||e||''); if(/schema must be one of|rk\.|does not exist|PGRST106|Invalid schema/i.test(m)) return 'setup'; return m; }
+function rkProjName(id){ const p=(RK.projects||[]).find(function(x){ return x.id===id; }); return p?p.name:'(project)'; }
+// rows the customer may see: verified, in date, not internal
+function rkShow(rows){ return RK.cust?(rows||[]).filter(function(r){ return rkOk(r)&&!r.internal; }):(rows||[]); }
+function rkChgFor(d,id){ return (d&&d.pend||[]).filter(function(c){ return c.record_id===id; }); }
+function rkChgChip(d,id){ const n=rkChgFor(d,id).length; return n?' <span class="rk-vs chg" title="A change to this is waiting for approval">Change pending</span>':''; }
+function rkNewPend(d,tbl){ const n=(d&&d.pend||[]).filter(function(c){ return c.tbl===tbl&&c.op==='insert'; }).length;
+  return n?'<div class="rk-pend"><i class="fa-regular fa-clock"></i> '+n+' new '+(n===1?'entry':'entries')+' waiting for approval - <a href="javascript:void(0)" onclick="navTo(\'reckoner/pending\')">see Pending Verifications</a></div>':''; }
+
+/* ---------------------------------------------------------------- loading */
+async function rkPages(q){ let out=[]; for(let f=0;;f+=1000){ const r=await q().range(f,f+999); if(r.error) throw r.error; out=out.concat(r.data||[]); if((r.data||[]).length<1000) return out; } }
+async function rkBase(force){
+  if(RK.projects&&!force) return;
+  const S=RKS();
+  const role=await S.rpc('my_role'); if(role.error) throw role.error;
+  RK.role=role.data||'viewer';
+  const got=await Promise.all([
+    rkPages(function(){ return S.from('projects').select('*').eq('archived',false).order('name'); }),
+    rkPages(function(){ return S.from('configurations').select('id,project_id,name,kind,bedrooms,sba_min,sba_max,vstatus,valid_until,updated_at').eq('archived',false).order('sort'); }),
+    rkPages(function(){ return S.from('charges').select('id,project_id,configuration_id,kind,amount,unit,vstatus,valid_until,internal,confirmed,updated_at').eq('archived',false).in('kind',['base_rate','unit_price']); }),
+    S.from('lists').select('*').order('sort').then(function(r){ return r.data||[]; }),
+    S.from('changes').select('id',{count:'exact',head:true}).eq('status','pending').then(function(r){ return r.count||0; },function(){ return 0; })
+  ].concat(['locations','amenities','landmarks','sales_notes','documents','units','charges','assignments'].map(function(t){
+    return rkPages(function(){ return S.from(t).select(t==='assignments'?'project_id,email,updated_at':'project_id,updated_at').eq('archived',false); }).then(function(rows){ return [t,rows]; });
+  })));
+  RK.projects=got[0]; RK.cfg=got[1]; RK.rates=got[2]; RK.pendN=got[4];
+  RK.lists={}; got[3].forEach(function(l){ (RK.lists[l.list]=RK.lists[l.list]||[]).push(l.value); });
+  const st={}; const me=String((state.user&&state.user.email)||'').toLowerCase();
+  RK.projects.forEach(function(p){ st[p.id]={n:{},last:p.updated_at,mine:false}; });
+  RK.cfg.forEach(function(c){ const s=st[c.project_id]; if(s){ s.n.configurations=(s.n.configurations||0)+1; if(c.updated_at>s.last) s.last=c.updated_at; } });
+  got.slice(5).forEach(function(pair){ pair[1].forEach(function(r){ const s=st[r.project_id]; if(!s) return; s.n[pair[0]]=(s.n[pair[0]]||0)+1; if(r.updated_at>s.last) s.last=r.updated_at; if(pair[0]==='assignments'&&String(r.email||'').toLowerCase()===me) s.mine=true; }); });
+  RK.stats=st;
+}
+// how much of the 8 tabs has anything in it
+function rkComplete(p){ const n=(RK.stats[p.id]||{}).n||{};
+  const have=[!!(p.possession_date||p.description||p.rera_no||p.total_units), n.configurations, n.charges, n.units, n.amenities, (n.locations||n.landmarks), n.sales_notes, n.documents];
+  return Math.round(have.filter(Boolean).length/8*100); }
+async function rkDetail(id,force){
+  if(RK.proj[id]&&!force) return RK.proj[id];
+  const S=RKS(), all=function(t,q){ return rkPages(function(){ let b=S.from(t).select('*').eq('project_id',id); if(t!=='units_free') b=b.eq('archived',false); return q?q(b):b; }); };
+  const got=await Promise.all([
+    S.from('projects').select('*').eq('id',id).maybeSingle(),
+    all('locations'), all('configurations',function(b){ return b.order('sort').order('name'); }), all('charges',function(b){ return b.order('sort'); }),
+    all('payment_plans',function(b){ return b.order('sort'); }), all('offers'), all('units_free',function(b){ return b.order('tower').order('unit_no'); }),
+    all('amenities',function(b){ return b.order('sort').order('name'); }), all('landmarks',function(b){ return b.order('sort').order('travel_min'); }),
+    all('sales_notes',function(b){ return b.order('sort'); }), all('bank_approvals'), all('documents',function(b){ return b.order('category').order('title'); }), all('assignments'),
+    S.from('changes').select('*').eq('project_id',id).eq('status','pending').order('id').then(function(r){ return r.data||[]; }),
+    rkFv()
+  ]);
+  if(got[0].error) throw got[0].error;
+  if(!got[0].data) throw new Error('This project was not found (it may have been archived).');
+  const me=String((state.user&&state.user.email)||'').toLowerCase();
+  const d={p:got[0].data,loc:got[1],cfg:got[2],chg:got[3],plan:got[4],off:got[5],units:got[6],am:got[7],lm:got[8],notes:got[9],bank:got[10],docs:got[11],team:got[12],pend:got[13]};
+  d.mine=d.team.some(function(a){ return String(a.email||'').toLowerCase()===me; });
+  RK.proj[id]=d; return d;
+}
+function rkFv(){ if(RK.fv) return Promise.resolve(RK.fv);
+  return sb.schema('cust').from('projects').select('id,name').order('name').then(function(r){ RK.fv=r.data||[]; return RK.fv; },function(){ RK.fv=[]; return RK.fv; }); }
+
+/* ---------------------------------------------------------------- the page */
+function rkNav(on){
+  const items=[['','Directory','fa-building'],['compare','Compare','fa-scale-balanced'],['pending','Pending Verifications','fa-clipboard-check'],['audit','Audit Log','fa-clock-rotate-left']];
+  if(RK.role==='super') items.push(['roles','Roles','fa-user-shield']);
+  return '<div class="rk-nav rk-noprint">'+items.map(function(i){ return '<a class="'+(i[0]===on?'on':'')+'" onclick="navTo(\'reckoner'+(i[0]?'/'+i[0]:'')+'\')"><i class="fa-solid '+i[2]+'"></i> '+i[1]+(i[0]==='pending'&&RK.pendN?'<span class="n">'+RK.pendN+'</span>':'')+'</a>'; }).join('')+'</div>';
+}
+VIEWS.reckoner=async function(v,seg){
+  setCrumb(['Sales','Reckoner']);
+  const head=RK_CSS+mHead('fa-book-bookmark','#0f766e','Reckoner');
+  const s0=seg&&seg[0]||'';
+  try{
+    if(!RK.projects){ v.innerHTML=head+'<div class="loader"><div class="spin"></div></div>'; await rkBase(); if(PAGE!=='reckoner') return; }
+    if(s0==='p'&&seg[1]){
+      const id=seg[1], ti=Math.max(0,Math.min(7,parseInt(seg[2]||'0',10)||0));
+      if(!RK.proj[id]){ v.innerHTML=head+rkNav('')+'<div class="loader"><div class="spin"></div></div>'; await rkDetail(id); if(PAGE!=='reckoner') return; }
+      v.innerHTML=head+rkNav('')+rkProfile(id,ti); return;
+    }
+    if(s0==='compare'){ v.innerHTML=head+rkNav('compare')+'<div class="loader"><div class="spin"></div></div>'; const h=await rkCompareView(); if(PAGE!=='reckoner') return; v.innerHTML=head+rkNav('compare')+h; return; }
+    if(s0==='pending'){ v.innerHTML=head+rkNav('pending')+'<div class="loader"><div class="spin"></div></div>'; const h=await rkPendingView(); if(PAGE!=='reckoner') return; v.innerHTML=head+rkNav('pending')+h; return; }
+    if(s0==='audit'){ v.innerHTML=head+rkNav('audit')+'<div class="loader"><div class="spin"></div></div>'; const h=await rkAuditView(); if(PAGE!=='reckoner') return; v.innerHTML=head+rkNav('audit')+h; return; }
+    if(s0==='roles'){ v.innerHTML=head+rkNav('roles')+'<div class="loader"><div class="spin"></div></div>'; const h=await rkRolesView(); if(PAGE!=='reckoner') return; v.innerHTML=head+rkNav('roles')+h; return; }
+    v.innerHTML=head+rkNav('')+rkDirectory();
+  }catch(e){
+    const t=rkErrText(e);
+    v.innerHTML=head+'<div class="card card-pad" style="font-size:13.5px;'+(t==='setup'?'color:#475569':'color:#b91c1c')+'">'
+      +(t==='setup'?'<i class="fa-regular fa-clock"></i> Reckoner\'s database is being set up tonight after 8 PM. The page works once that has run.'
+        :'<i class="fa-solid fa-triangle-exclamation"></i> Reckoner could not be shown: '+esc(t)+'. <a href="javascript:void(0)" onclick="rkReload()">Try again</a>')+'</div>';
+    try{ console.error('reckoner',e); }catch(_e){}
+  }
+};
+window.rkReload=function(){ RK.projects=null; RK.proj={}; renderPage(); };
+
+/* ---------------------------------------------------------------- Directory */
+function rkDirectory(){
+  const P=RK.projects||[], f=RK.f, q=RK.q.trim().toLowerCase();
+  const uniq=function(a){ return Array.from(new Set(a.filter(Boolean))).sort(); };
+  const cats=uniq(P.map(function(p){ return p.category; })), sts=uniq(P.map(function(p){ return p.status; })), cities=uniq(P.map(function(p){ return p.city; }));
+  const cfgNames=uniq(RK.cfg.map(function(c){ const m=String(c.name||'').match(/\d+(\.\d+)?\s*(BHK|RK)|Studio|Bungalow|Villa|Shop|Duplex|Penthouse/i); return m?m[0].toUpperCase().replace(/\s+/,' '):null; }));
+  const cfgOf=function(id){ return RK.cfg.filter(function(c){ return c.project_id===id; }); };
+  const list=P.filter(function(p){
+    if(f.cat&&p.category!==f.cat) return false; if(f.status&&p.status!==f.status) return false; if(f.city&&p.city!==f.city) return false;
+    const cs=cfgOf(p.id);
+    if(f.cfg&&!cs.some(function(c){ return String(c.name||'').toUpperCase().replace(/\s+/g,' ').indexOf(f.cfg)!==-1; })) return false;
+    if(q){ const hay=[p.name,p.code,p.city,p.locality,p.developer,p.rera_no,p.category,p.status,p.stage].concat(cs.map(function(c){ return c.name; })).join(' ').toLowerCase(); if(hay.indexOf(q)===-1) return false; }
+    return true;
+  });
+  const opt=function(v,arr,lbl){ return '<select onchange="rkF(\''+v+'\',this.value)"><option value="">'+lbl+'</option>'+arr.map(function(x){ return '<option'+(f[v]===x?' selected':'')+'>'+esc(x)+'</option>'; }).join('')+'</select>'; };
+  let h='<div class="rk-bar rk-noprint"><input type="search" placeholder="Search project, locality, configuration, RERA..." value="'+esc(RK.q)+'" oninput="rkQ(this.value)" id="rkQ">'
+    +opt('cat',cats,'All categories')+opt('status',sts,'All statuses')+opt('city',cities,'All cities')+opt('cfg',cfgNames,'Any configuration')
+    +(RK.cmp.length?'<button class="btn btn-primary btn-sm" onclick="navTo(\'reckoner/compare\')"><i class="fa-solid fa-scale-balanced"></i> Compare '+RK.cmp.length+'</button>':'')
+    +(rkCanPropose(null)?'<button class="btn btn-sm" onclick="rkEdit(\'projects\',null,null)"><i class="fa-solid fa-plus"></i> Add project</button>':'')+'</div>';
+  if(!P.length) return h+'<div class="rk-sec rk-empty">No projects yet.'+(rkCanPropose(null)?' Use <b>Add project</b>; it appears here once an approver accepts it.':'')+'<br>The workbook data is added after it has been reviewed.</div>';
+  if(!list.length) return h+'<div class="rk-sec rk-empty">No project matches these filters.</div>';
+  return h+'<div class="rk-grid">'+list.map(function(p){
+    const s=RK.stats[p.id]||{n:{}}, cs=cfgOf(p.id), pc=rkComplete(p);
+    const rates=RK.rates.filter(function(r){ return r.project_id===p.id&&r.kind==='base_rate'&&r.unit==='per_sqft'&&r.amount!=null&&!r.internal; });
+    const minRate=rates.length?Math.min.apply(null,rates.map(function(r){ return Number(r.amount); })):null;
+    return '<div class="rk-card" onclick="navTo(\'reckoner/p/'+p.id+'\')">'
+      +'<label class="cmp rk-noprint" onclick="event.stopPropagation()"><input type="checkbox" '+(RK.cmp.indexOf(p.id)!==-1?'checked':'')+' onchange="rkCmpToggle(\''+p.id+'\',this.checked)"> Compare</label>'
+      +'<h3>'+esc(p.name)+'</h3><div class="loc"><i class="fa-solid fa-location-dot"></i> '+(esc([p.locality,p.city].filter(Boolean).join(', '))||'Location not available')+'</div>'
+      +'<div class="rk-chips">'+[p.category,p.status,p.stage].filter(Boolean).map(function(x){ return '<span class="rk-chip">'+esc(x)+'</span>'; }).join('')+' '+rkChip(p,true)+'</div>'
+      +'<div class="rk-meta"><div>Possession: <b>'+(p.possession_date?esc(fmtDate(p.possession_date)):(p.possession_note?esc(p.possession_note):'—'))+'</b></div>'
+      +'<div>Base rate from: <b>'+(minRate!=null?rkInr(minRate)+'/sq ft':'—')+'</b></div>'
+      +'<div>Configurations: <b>'+(cs.length?esc(cs.slice(0,4).map(function(c){ return c.name; }).join(', '))+(cs.length>4?' +'+(cs.length-4):''):'—')+'</b></div>'
+      +'<div>Updated: <b>'+(s.last?esc(fmtDate(s.last)):'—')+'</b></div></div>'
+      +'<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#64748b"><div class="rk-prog" style="flex:1"><i style="width:'+pc+'%"></i></div>'+pc+'% filled</div>'
+      +'</div>';
+  }).join('')+'</div>';
+}
+window.rkF=function(k,v){ RK.f[k]=v; renderPage(); };
+let RK_QT=null;
+window.rkQ=function(v){ RK.q=v; clearTimeout(RK_QT); RK_QT=setTimeout(function(){ renderPage(); setTimeout(function(){ const i=$('rkQ'); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } },0); },250); };
+window.rkCmpToggle=function(id,on){ const i=RK.cmp.indexOf(id); if(on&&i===-1){ if(RK.cmp.length>=4){ toast('Compare up to 4 projects','warn'); renderPage(); return; } RK.cmp.push(id); } if(!on&&i!==-1) RK.cmp.splice(i,1); renderPage(); };
+
+/* ---------------------------------------------------------------- Profile */
+const RK_KEY={locations:'loc',configurations:'cfg',charges:'chg',payment_plans:'plan',offers:'off',units:'units',amenities:'am',landmarks:'lm',sales_notes:'notes',bank_approvals:'bank',documents:'docs',assignments:'team'};
+function rkSec(title,icon,tbl,pid,body,extraBtns){
+  if(tbl&&pid&&rkCanApprove()&&RK.proj[pid]){ const un=(RK.proj[pid][RK_KEY[tbl]]||[]).filter(function(x){ return rkState(x)==='pending'; });
+    if(un.length) extraBtns=(extraBtns||'')+'<button class="btn btn-sm" style="color:#166534" onclick="rkVerifyAll(\''+tbl+'\',\''+pid+'\')"><i class="fa-solid fa-check-double"></i> Verify all ('+un.length+')</button>'; }
+  return '<div class="rk-sec"><h4><i class="fa-solid '+icon+'" style="color:#0f766e"></i> '+title+'<span class="r rk-noprint">'+(extraBtns||'')
+    +(tbl&&rkCanPropose(pid)?'<button class="btn btn-sm" onclick="rkEdit(\''+tbl+'\',null,\''+pid+'\')"><i class="fa-solid fa-plus"></i> Add</button>':'')+'</span></h4>'+body+'</div>';
+}
+function rkRowBtns(tbl,r,pid){
+  const vb=rkCanApprove()&&rkState(r)!=='verified'?'<button class="rk-ib" title="Mark verified" style="color:#16a34a" onclick="event.stopPropagation();rkVerify(\''+tbl+'\',[\''+r.id+'\'],\''+pid+'\')"><i class="fa-solid fa-check-double"></i></button>':'';
+  if(!rkCanPropose(pid)) return vb?'<span class="rk-noprint" style="white-space:nowrap">'+vb+'</span>':'';
+  return '<span class="rk-noprint" style="white-space:nowrap">'+vb+'<button class="rk-ib" title="Propose a change" onclick="event.stopPropagation();rkEdit(\''+tbl+'\',\''+r.id+'\',\''+pid+'\')"><i class="fa-solid fa-pen"></i></button>'
+    +'<button class="rk-ib" title="Propose removal" onclick="event.stopPropagation();rkArchive(\''+tbl+'\',\''+r.id+'\',\''+pid+'\')"><i class="fa-solid fa-box-archive"></i></button></span>'; }
+function rkVal(v,fmt){ if(v==null||v==='') return rkNA(); return fmt?fmt(v):esc(String(v)); }
+function rkProfile(id,ti){
+  const d=RK.proj[id], p=d.p;
+  let h='<div class="rk-ph"><a class="rk-ib rk-noprint" onclick="navTo(\'reckoner\')"><i class="fa-solid fa-arrow-left"></i> Directory</a></div>'
+    +'<div class="rk-ph"><h2>'+esc(p.name)+'</h2>'+rkChip(p,true)+rkChgChip(d,p.id)
+    +'<span style="margin-left:auto;display:flex;gap:8px;align-items:center" class="rk-noprint">'
+    +'<label style="font-size:12.5px;color:#475569;display:flex;gap:5px;align-items:center" title="Show only verified, in-date, customer-facing information"><input type="checkbox" '+(RK.cust?'checked':'')+' onchange="RK.cust=this.checked;renderPage()"> Customer view</label>'
+    +'<button class="btn btn-sm" onclick="rkRefresh(\''+id+'\')" title="Load again"><i class="fa-solid fa-rotate"></i></button>'
+    +'<button class="btn btn-sm" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button></span></div>'
+    +'<div style="color:#64748b;font-size:13px">'+esc([p.locality,p.city].filter(Boolean).join(', '))+(p.category?' · '+esc(p.category):'')+(p.status?' · '+esc(p.status):'')+'</div>'
+    +(RK.cust?'<div class="rk-pend" style="background:#f0fdf4;border-color:#86efac;color:#166534"><i class="fa-solid fa-eye"></i> Customer view: only verified, in-date, customer-facing information is shown.</div>':'')
+    +'<div class="rk-tabs rk-noprint">'+RK_TABS.map(function(t,i){ return '<a class="'+(i===ti?'on':'')+'" onclick="navTo(\'reckoner/p/'+id+'/'+i+'\')">'+t+'</a>'; }).join('')+'</div>';
+  const body=[rkTabOverview,rkTabConfig,rkTabPricing,rkTabInventory,rkTabAmenities,rkTabLocation,rkTabSales,rkTabDocs][ti](d,id);
+  return h+body;
+}
+window.rkRefresh=async function(id){ try{ await rkDetail(id,true); await rkBase(true); }catch(e){ toast(String(e.message||e),'err'); } renderPage(); };
+
+function rkTabOverview(d,id){
+  const p=d.p, ok=!RK.cust||rkOk(p);
+  const f=function(lbl,v,fmt,copy){ return '<div><div class="k">'+lbl+'</div>'+(ok?rkVal(v,fmt):'<span class="rk-na">Pending Verification</span>')+(ok&&copy?rkCopyBtn(v):'')+'</div>'; };
+  let kv='<div class="rk-kv">'+f('Category',p.category)+f('Project status',p.status)+f('Development stage',p.stage)+f('City',p.city)+f('Locality',p.locality)+f('Developer',p.developer)
+    +f('Land area',p.land_area)+f('Towers / blocks',p.towers)+f('Height',p.height)+f('Total units',p.total_units,rkNum)+f('Open space',p.open_space)
+    +f('Launch date',p.launch_date,fmtDate)+f('Possession',p.possession_date,fmtDate)+f('Possession note',p.possession_note)+f('RERA number',p.rera_no,null,true)+f('RERA note',p.rera_note)
+    +(!RK.cust?f('Farvision project',(p.fv_project_ids||[]).length?p.fv_project_ids.map(function(i){ return ((RK.fv||[]).find(function(x){ return String(x.id)===String(i); })||{name:'#'+i}).name; }).join(', '):null):'')+'</div>'
+    +(p.description&&ok?'<div style="margin-top:12px;font-size:13.5px;line-height:1.55;white-space:pre-wrap">'+esc(p.description)+'</div>':'')
+    +'<div style="margin-top:12px;font-size:12px;color:#64748b">'+(p.source?'Source: '+esc(p.source)+' · ':'')+(p.verified_at?'Verified by '+esc(p.verified_by||'')+' on '+esc(fmtDate(p.verified_at))+' · ':'')+'Updated '+esc(fmtDate(p.updated_at))+(p.valid_until?' · Valid until '+esc(fmtDate(p.valid_until)):'')+'</div>';
+  const edit=(rkCanApprove()&&rkState(p)!=='verified'?'<button class="btn btn-sm" style="color:#166534" onclick="rkVerify(\'projects\',[\''+id+'\'],\''+id+'\')"><i class="fa-solid fa-check-double"></i> Mark overview verified</button> ':'')+(rkCanPropose(id)?'<button class="btn btn-sm" onclick="rkEdit(\'projects\',\''+id+'\',\''+id+'\')"><i class="fa-solid fa-pen"></i> Propose change</button>':'');
+  let h=rkSec('Overview','fa-circle-info',null,id,kv,edit);
+  const off=rkShow(d.off);
+  if(!RK.cust||off.length) h+=rkSec('Offers','fa-tag','offers',id,(off.length?'<table class="rk-t"><tr><th>Offer</th><th>Details</th><th>Valid</th><th></th><th></th></tr>'+off.map(function(o){ return '<tr'+(o.internal?' class="int"':'')+'><td><b>'+esc(o.title)+'</b>'+rkInt(o)+'</td><td>'+rkVal(o.details)+'</td><td>'+(o.valid_until?'until '+esc(fmtDate(o.valid_until)):'—')+'</td><td>'+rkChip(o)+rkChgChip(d,o.id)+'</td><td>'+rkRowBtns('offers',o,id)+'</td></tr>'; }).join('')+'</table>':'<div class="rk-empty">No offers recorded.</div>')+rkNewPend(d,'offers'));
+  if(!RK.cust) h+=rkSec('Team','fa-users','assignments',id,(d.team.length?'<table class="rk-t"><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr>'+d.team.map(function(a){ return '<tr><td>'+rkVal(a.name)+'</td><td>'+esc(a.email||'')+'</td><td>'+esc(String(a.role||'').replace(/_/g,' '))+'</td><td>'+rkRowBtns('assignments',a,id)+'</td></tr>'; }).join('')+'</table>':'<div class="rk-empty">No project manager or sales executive assigned yet.</div>')+rkNewPend(d,'assignments'));
+  return h;
+}
+function rkTabConfig(d,id){
+  const rows=rkShow(d.cfg);
+  const body=rows.length?'<div class="rk-wrap"><table class="rk-t"><tr><th>Configuration</th><th>Type</th><th>Bed / Bath / Balcony</th><th>Super built-up</th><th>Built-up</th><th>Carpet</th><th>Floors</th><th>Facing</th><th></th><th></th></tr>'
+    +rows.map(function(c){ return '<tr><td><b>'+esc(c.name)+'</b>'+(c.area_note?'<div style="color:#64748b;font-size:12px">'+esc(c.area_note)+'</div>':'')+(c.room_sizes?'<div style="font-size:12px;white-space:pre-wrap">'+esc(c.room_sizes)+'</div>':'')+(c.features?'<div style="font-size:12px;color:#475569;white-space:pre-wrap">'+esc(c.features)+'</div>':'')+'</td>'
+      +'<td>'+rkVal(c.kind)+'</td><td>'+[c.bedrooms,c.bathrooms,c.balconies].map(function(x){ return x==null?'–':rkNum(x); }).join(' / ')+'</td><td>'+(rkArea(c)||rkNA())+'</td><td>'+rkVal(c.built_up,function(x){ return rkNum(x)+' sq ft'; })+'</td><td>'+rkVal(c.carpet,function(x){ return rkNum(x)+' sq ft'; })+'</td>'
+      +'<td>'+rkVal(c.floors)+'</td><td>'+rkVal(c.facing)+'</td><td>'+rkChip(c)+rkChgChip(d,c.id)+'</td><td>'+rkRowBtns('configurations',c,id)+'</td></tr>'; }).join('')+'</table></div>'
+    :'<div class="rk-empty">'+(RK.cust&&d.cfg.length?'Configurations are pending verification.':'No configurations recorded.')+'</div>';
+  return rkSec('Configurations','fa-house','configurations',id,body+rkNewPend(d,'configurations'));
+}
+function rkTabPricing(d,id){
+  const ch=rkShow(d.chg), cfgName=function(cid){ const c=d.cfg.find(function(x){ return x.id===cid; }); return c?c.name:'All configurations'; };
+  const fmtAmt=function(c){ if(c.amount==null) return rkNA(); if(c.unit==='percent') return rkNum(c.amount)+'%'; return rkInr(c.amount)+(c.unit==='per_sqft'?' / sq ft':''); };
+  const yn=function(v){ return v==null?'<span class="rk-na">–</span>':v?'Yes':'No'; };
+  const groups={}; ch.forEach(function(c){ const k=c.configuration_id||''; (groups[k]=groups[k]||[]).push(c); });
+  let body=ch.length?Object.keys(groups).sort(function(a,b){ return a===''?-1:b===''?1:cfgName(a).localeCompare(cfgName(b)); }).map(function(k){
+    return '<div style="font-weight:600;font-size:13px;margin:10px 0 4px">'+esc(cfgName(k||null))+'</div><div class="rk-wrap"><table class="rk-t"><tr><th>Component</th><th>Amount</th><th>In base</th><th>In final</th><th>GST incl.</th><th>Confirmed</th><th>Valid</th><th></th><th></th></tr>'
+      +groups[k].map(function(c){ return '<tr'+(c.internal?' class="int"':'')+'><td><b>'+esc(c.name)+'</b> <span style="color:#64748b;font-size:12px">'+esc(RK_CHARGE_KIND[c.kind]||c.kind)+'</span>'+rkInt(c)+(c.note?'<div style="font-size:12px;color:#475569">'+esc(c.note)+'</div>':'')+'</td>'
+        +'<td style="white-space:nowrap">'+fmtAmt(c)+'</td><td>'+yn(c.in_base)+'</td><td>'+yn(c.in_final)+'</td><td>'+yn(c.gst_included)+'</td><td>'+(c.confirmed?'Confirmed':'<span style="color:#b45309">Indicative</span>')+'</td>'
+        +'<td style="white-space:nowrap">'+(c.effective_from?esc(fmtDate(c.effective_from)):'')+(c.valid_until?' – '+esc(fmtDate(c.valid_until)):'')+'</td><td>'+rkChip(c)+rkChgChip(d,c.id)+'</td><td>'+rkRowBtns('charges',c,id)+'</td></tr>'; }).join('')+'</table></div>';
+  }).join(''):'<div class="rk-empty">'+(RK.cust&&d.chg.length?'Prices are pending verification.':'No price components recorded.')+'</div>';
+  let h=rkSec('Price breakdown','fa-indian-rupee-sign','charges',id,body+rkNewPend(d,'charges'));
+  h+=rkSec('Price calculator','fa-calculator',null,id,rkCalc(d));
+  const plan=rkShow(d.plan);
+  h+=rkSec('Payment plan','fa-list-ol','payment_plans',id,(plan.length?'<table class="rk-t"><tr><th>Stage</th><th>Percent</th><th>Amount</th><th>Note</th><th></th><th></th></tr>'+plan.map(function(s){ return '<tr><td>'+esc(s.stage)+'</td><td>'+(s.percent!=null?rkNum(s.percent)+'%':'—')+'</td><td>'+(s.amount!=null?rkInr(s.amount):'—')+'</td><td>'+esc(s.note||'')+'</td><td>'+rkChip(s)+rkChgChip(d,s.id)+'</td><td>'+rkRowBtns('payment_plans',s,id)+'</td></tr>'; }).join('')+'</table>':'<div class="rk-empty">No payment plan recorded.</div>')+rkNewPend(d,'payment_plans'));
+  return h;
+}
+/* The total is worked out only from what is recorded: per-sq-ft components x the area, lump sums as they are,
+   percentages of the base. Anything unverified or indicative makes the total "Indicative"; nothing missing is
+   counted as 0 - with no base rate or unit price there is no total. */
+const RK_CALC={};
+function rkCalc(d){
+  const pid=d.p.id, st=RK_CALC[pid]=RK_CALC[pid]||{cfg:'',area:''};
+  const cfgs=rkShow(d.cfg); if(!st.cfg&&cfgs.length) st.cfg=cfgs[0].id;
+  const c=cfgs.find(function(x){ return x.id===st.cfg; });
+  const area=st.area!==''?Number(st.area):(c&&(c.sba_min!=null?Number(c.sba_min):c.sba_max!=null?Number(c.sba_max):null));
+  const parts=rkShow(d.chg).filter(function(x){ return (!x.configuration_id||x.configuration_id===st.cfg)&&x.amount!=null&&!(x.in_base&&x.kind!=='base_rate'&&x.kind!=='unit_price'); });
+  let base=0, hasBase=false, lines=[], tentative=false, needArea=false;
+  parts.filter(function(x){ return x.kind==='base_rate'||x.kind==='unit_price'; }).forEach(function(x){
+    let v=null; if(x.unit==='per_sqft'){ if(area==null||!isFinite(area)){ needArea=true; return; } v=Number(x.amount)*area; } else if(x.unit!=='percent') v=Number(x.amount);
+    if(v==null) return; base+=v; hasBase=true; lines.push([x,v]); if(!rkOk(x)||!x.confirmed) tentative=true; });
+  let total=base;
+  parts.filter(function(x){ return x.kind!=='base_rate'&&x.kind!=='unit_price'; }).forEach(function(x){
+    let v=null; if(x.unit==='percent') v=hasBase?base*Number(x.amount)/100:null; else if(x.unit==='per_sqft'){ if(area==null||!isFinite(area)){ needArea=true; return; } v=Number(x.amount)*area; } else v=Number(x.amount);
+    if(v==null) return; total+=v; lines.push([x,v]); if(!rkOk(x)||!x.confirmed) tentative=true; });
+  let h='<div class="rk-bar"><select onchange="RK_CALC[\''+pid+'\'].cfg=this.value;RK_CALC[\''+pid+'\'].area=\'\';renderPage()">'+(cfgs.length?cfgs.map(function(x){ return '<option value="'+x.id+'"'+(x.id===st.cfg?' selected':'')+'>'+esc(x.name)+'</option>'; }).join(''):'<option>No configuration</option>')+'</select>'
+    +'<input type="number" placeholder="Area (sq ft)" style="width:150px" value="'+(area!=null&&isFinite(area)?area:'')+'" onchange="RK_CALC[\''+pid+'\'].area=this.value;renderPage()"> <span style="font-size:12px;color:#64748b">sq ft</span></div>';
+  if(!hasBase) return h+'<div class="rk-empty">'+(needArea?'Enter the area to work out a price.':'Not enough information to total: no base rate or unit price is recorded'+(RK.cust?' and verified':'')+' for this configuration.')+'</div>';
+  h+='<table class="rk-t">'+lines.map(function(l){ const x=l[0]; return '<tr><td>'+esc(x.name)+rkInt(x)+'</td><td style="color:#64748b;font-size:12px">'+(x.unit==='per_sqft'?rkInr(x.amount)+' × '+rkNum(area)+' sq ft':x.unit==='percent'?rkNum(x.amount)+'% of base':'')+'</td><td style="text-align:right;white-space:nowrap">'+rkInr(l[1])+'</td><td>'+rkChip(x)+'</td></tr>'; }).join('')
+    +'<tr><td colspan="2"><b>Total</b> '+(tentative?'<span class="rk-vs pending">Indicative</span>':'<span class="rk-vs verified">All components verified and confirmed</span>')+'</td><td style="text-align:right" class="rk-tot">'+rkInr(total)+'</td><td>'+rkCopyBtn(rkInr(total))+'</td></tr></table>'
+    +(needArea?'<div class="rk-pend">Some per-sq-ft components were left out because no area is set.</div>':'')
+    +'<div style="font-size:12px;color:#64748b;margin-top:8px">Components marked "included in base" are not added again. Missing components are not counted.</div>';
+  return h;
+}
+function rkTabInventory(d,id){
+  const f=RK.inv, all=rkShow(d.units), uniq=function(a){ return Array.from(new Set(a.filter(Boolean))).sort(); };
+  const cfgName=function(cid){ const c=d.cfg.find(function(x){ return x.id===cid; }); return c?c.name:''; };
+  const rows=all.filter(function(u){ if(f.tower&&u.tower!==f.tower) return false; if(f.cfg&&u.configuration_id!==f.cfg) return false; if(f.status&&u.status!==f.status) return false;
+    if(f.q){ const q=f.q.toLowerCase(); if([u.unit_no,u.tower,u.floor,u.facing,u.view,cfgName(u.configuration_id)].join(' ').toLowerCase().indexOf(q)===-1) return false; } return true; });
+  const last=all.reduce(function(m,u){ return u.updated_at>m?u.updated_at:m; },'');
+  window._rkInvRows=rows.map(function(u){ return Object.assign({},u,{configuration:cfgName(u.configuration_id)}); });
+  const bar='<div class="rk-bar rk-noprint"><input type="search" placeholder="Unit, tower, floor..." value="'+esc(f.q)+'" onchange="RK.inv.q=this.value;renderPage()">'
+    +'<select onchange="RK.inv.tower=this.value;renderPage()"><option value="">All towers</option>'+uniq(all.map(function(u){ return u.tower; })).map(function(t){ return '<option'+(f.tower===t?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+'</select>'
+    +'<select onchange="RK.inv.cfg=this.value;renderPage()"><option value="">All configurations</option>'+d.cfg.map(function(c){ return '<option value="'+c.id+'"'+(f.cfg===c.id?' selected':'')+'>'+esc(c.name)+'</option>'; }).join('')+'</select>'
+    +'<select onchange="RK.inv.status=this.value;renderPage()"><option value="">Any status</option>'+['Available','On Hold','Under Verification'].map(function(s){ return '<option'+(f.status===s?' selected':'')+'>'+s+'</option>'; }).join('')+'</select>'
+    +'<button class="btn btn-sm" onclick="rkInvExport(\''+id+'\')"><i class="fa-solid fa-file-excel"></i> Export</button>'
+    +(rkCanPropose(id)?'<button class="btn btn-sm" onclick="rkInvImportAsk(\''+id+'\')"><i class="fa-solid fa-file-import"></i> Import Excel</button>':'')+'</div>';
+  const body=rows.length?'<div class="rk-wrap"><table class="rk-t"><tr><th>Unit</th><th>Tower</th><th>Floor</th><th>Configuration</th><th>Area</th><th>Facing / view</th><th>Base price</th><th>Quoted price</th><th>Status</th><th></th><th></th></tr>'
+    +rows.map(function(u){ return '<tr><td><b>'+esc(u.unit_no)+'</b></td><td>'+rkVal(u.tower)+'</td><td>'+rkVal(u.floor)+'</td><td>'+rkVal(cfgName(u.configuration_id))+'</td><td>'+rkVal(u.area,function(x){ return rkNum(x)+' sq ft'; })+'</td>'
+      +'<td>'+esc([u.facing,u.view].filter(Boolean).join(' / ')||'—')+'</td><td>'+rkVal(u.base_price,rkInr)+'</td><td>'+rkVal(u.quoted_price,rkInr)+'</td><td>'+esc(u.status)+(u.note?'<div style="font-size:12px;color:#64748b">'+esc(u.note)+'</div>':'')+'</td>'
+      +'<td>'+rkChip(u)+rkChgChip(d,u.id)+'</td><td>'+rkRowBtns('units',u,id)+'</td></tr>'; }).join('')+'</table></div>'
+    :'<div class="rk-empty">'+(all.length?'No unit matches these filters.':'No free units recorded.')+'</div>';
+  return rkSec('Inventory - free units','fa-table-cells','units',id,'<div style="font-size:12.5px;color:#64748b;margin:-4px 0 10px">'+rows.length+' of '+all.length+' free units'+(last?' · last updated '+esc(fmtDate(last)):'')+' · units Farvision shows as booked are hidden'+((d.p.fv_project_ids||[]).length?'':' (this project is not linked to Farvision yet)')+'</div>'+bar+body+rkNewPend(d,'units'));
+}
+function rkTabAmenities(d,id){
+  const rows=rkShow(d.am), g={}; rows.forEach(function(a){ (g[a.category||'Other']=g[a.category||'Other']||[]).push(a); });
+  const order=(RK.lists.amenity||[]).concat(Object.keys(g)).filter(function(k,i,a){ return g[k]&&a.indexOf(k)===i; });
+  const body=rows.length?order.map(function(k){ return '<div style="font-weight:600;font-size:13px;margin:10px 0 6px">'+esc(k)+'</div><table class="rk-t">'+g[k].map(function(a){ return '<tr><td style="width:30%"><b>'+esc(a.name)+'</b></td><td>'+esc(a.description||'')+(a.place?'<div style="font-size:12px;color:#64748b">'+esc(a.place)+'</div>':'')+'</td><td>'+esc(a.status||'')+'</td><td>'+rkChip(a)+rkChgChip(d,a.id)+'</td><td>'+rkRowBtns('amenities',a,id)+'</td></tr>'; }).join('')+'</table>'; }).join('')
+    :'<div class="rk-empty">'+(RK.cust&&d.am.length?'Amenities are pending verification.':'No amenities recorded.')+'</div>';
+  return rkSec('Amenities','fa-person-swimming','amenities',id,body+rkNewPend(d,'amenities'));
+}
+function rkTabLocation(d,id){
+  const loc=rkShow(d.loc);
+  let h=rkSec('Address','fa-location-dot','locations',id,(loc.length?loc.map(function(l){ return '<div style="display:flex;gap:10px;align-items:flex-start;margin:0 0 10px"><div style="flex:1;font-size:13.5px"><div style="white-space:pre-wrap">'+esc(l.address||'')+(l.pin?' - '+esc(l.pin):'')+rkCopyBtn([l.address,l.pin].filter(Boolean).join(' - '))+'</div>'
+      +(l.directions?'<div style="font-size:12.5px;color:#475569;margin-top:4px;white-space:pre-wrap">'+esc(l.directions)+'</div>':'')
+      +((l.maps_url||(l.lat&&l.lng))?'<a href="'+esc(l.maps_url||('https://www.google.com/maps?q='+l.lat+','+l.lng))+'" target="_blank" rel="noopener" style="font-size:13px"><i class="fa-solid fa-map"></i> Open in Google Maps</a>'+rkCopyBtn(l.maps_url||(l.lat+','+l.lng)):'')
+      +'</div>'+rkChip(l)+rkChgChip(d,l.id)+rkRowBtns('locations',l,id)+'</div>'; }).join(''):'<div class="rk-empty">No address recorded.</div>')+rkNewPend(d,'locations'));
+  const lm=rkShow(d.lm), g={}; lm.forEach(function(a){ (g[a.category||'Landmark']=g[a.category||'Landmark']||[]).push(a); });
+  const order=(RK.lists.landmark||[]).concat(Object.keys(g)).filter(function(k,i,a){ return g[k]&&a.indexOf(k)===i; });
+  h+=rkSec('Nearby','fa-signs-post','landmarks',id,(lm.length?'<div class="rk-wrap"><table class="rk-t"><tr><th>Place</th><th>Kind</th><th>Distance</th><th>Travel time</th><th>Checked</th><th></th><th></th></tr>'+order.map(function(k){ return g[k].map(function(a){
+      return '<tr><td><b>'+esc(a.name)+'</b>'+(a.travel_note?'<div style="font-size:12px;color:#64748b">'+esc(a.travel_note)+'</div>':'')+'</td><td>'+esc(k)+'</td><td>'+(a.distance_km!=null?rkNum(a.distance_km)+' km':rkNA())+'</td><td>'+(a.travel_min!=null?rkNum(a.travel_min)+' min':rkNA())+'</td><td>'+(a.verified_at?esc(fmtDate(a.verified_at)):'—')+'</td><td>'+rkChip(a)+rkChgChip(d,a.id)+'</td><td>'+rkRowBtns('landmarks',a,id)+'</td></tr>'; }).join(''); }).join('')+'</table></div>'
+    :'<div class="rk-empty">No nearby places recorded.</div>')+rkNewPend(d,'landmarks'));
+  return h;
+}
+function rkTabSales(d,id){
+  const rows=rkShow(d.notes);
+  const block=function(list,title,cls){ const g={}; list.forEach(function(n){ (g[n.kind]=g[n.kind]||[]).push(n); });
+    return '<div class="rk-sec" style="margin:0'+(cls?';'+cls:'')+'"><h4>'+title+'</h4>'+(list.length?Object.keys(RK_NOTE_KIND).filter(function(k){ return g[k]; }).map(function(k){
+      return '<div style="font-weight:600;font-size:12.5px;color:#475569;margin:10px 0 4px;text-transform:uppercase;letter-spacing:.03em">'+RK_NOTE_KIND[k]+'</div>'+g[k].map(function(n){
+        return '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #f1f5f9"><div style="flex:1;font-size:13.5px">'+(n.title?'<b>'+esc(n.title)+'</b><br>':'')+'<span style="white-space:pre-wrap">'+esc(n.body)+'</span>'+rkCopyBtn(n.body)+'</div>'+rkChip(n)+rkChgChip(d,n.id)+rkRowBtns('sales_notes',n,id)+'</div>'; }).join(''); }).join('')
+      :'<div class="rk-empty">Nothing recorded.</div>')+'</div>'; };
+  let h=rkSec('Sales information','fa-bullhorn','sales_notes',id,'<div class="rk-two">'+block(rows.filter(function(n){ return !n.internal; }),'<i class="fa-solid fa-user" style="color:#16a34a"></i> Customer-facing')
+    +(RK.cust?'':block(rows.filter(function(n){ return n.internal; }),'<i class="fa-solid fa-lock" style="color:#7c3aed"></i> Internal - do not share with customers','background:#faf5ff'))+'</div>'+rkNewPend(d,'sales_notes'));
+  const bank=rkShow(d.bank);
+  h+=rkSec('Bank approvals','fa-building-columns','bank_approvals',id,(bank.length?'<table class="rk-t"><tr><th>Bank</th><th>Status</th><th>Reference</th><th></th><th></th></tr>'+bank.map(function(b){ return '<tr><td><b>'+esc(b.bank)+'</b></td><td>'+rkVal(b.status)+'</td><td>'+rkVal(b.reference)+'</td><td>'+rkChip(b)+rkChgChip(d,b.id)+'</td><td>'+rkRowBtns('bank_approvals',b,id)+'</td></tr>'; }).join('')+'</table>':'<div class="rk-empty">No bank approvals recorded.</div>')+rkNewPend(d,'bank_approvals'));
+  return h;
+}
+function rkTabDocs(d,id){
+  const rows=rkShow(d.docs), g={}; rows.forEach(function(x){ (g[x.category]=g[x.category]||[]).push(x); });
+  const order=(RK.lists.document||[]).concat(Object.keys(g)).filter(function(k,i,a){ return g[k]&&a.indexOf(k)===i; });
+  const body=rows.length?'<table class="rk-t"><tr><th>Document</th><th>Category</th><th>Version</th><th>Added</th><th></th><th></th></tr>'+order.map(function(k){ return g[k].map(function(x){
+      return '<tr'+(x.internal?' class="int"':'')+'><td>'+(x.s3_key?'<a href="javascript:void(0)" onclick="rkOpenDoc(\''+id+'\',\''+x.id+'\')"><i class="fa-regular fa-file"></i> '+esc(x.title)+'</a>':esc(x.title)+' <span class="rk-na">(no file)</span>')+rkInt(x)+'</td><td>'+esc(k)+'</td><td>'+esc(x.version||'')+'</td><td>'+esc(fmtDate(x.entered_at))+(x.entered_by?'<div style="font-size:11.5px;color:#64748b">'+esc(x.entered_by)+'</div>':'')+'</td><td>'+rkChip(x)+rkChgChip(d,x.id)+'</td><td>'+rkRowBtns('documents',x,id)+'</td></tr>'; }).join(''); }).join('')+'</table>'
+    :'<div class="rk-empty">No documents uploaded.</div>';
+  return rkSec('Documents','fa-folder-open','documents',id,body+rkNewPend(d,'documents'));
+}
+window.rkOpenDoc=function(pid,did){ const x=(RK.proj[pid].docs||[]).find(function(r){ return r.id===did; }); if(x&&x.s3_key) s3OpenSigned(x.s3_key,x.file_name||x.title); };
+
+/* ---------------------------------------------------------------- proposing a change */
+function rkFields(tbl){ return RK_F[tbl].concat(tbl==='assignments'?[]:RK_COMMON); }
+function rkRec(tbl,id,pid){ if(tbl==='projects') return (RK.proj[id]&&RK.proj[id].p)||(RK.projects||[]).find(function(p){ return p.id===id; });
+  const d=RK.proj[pid]; if(!d) return null; const m={locations:'loc',configurations:'cfg',charges:'chg',payment_plans:'plan',offers:'off',units:'units',amenities:'am',landmarks:'lm',sales_notes:'notes',bank_approvals:'bank',documents:'docs',assignments:'team'};
+  return (d[m[tbl]]||[]).find(function(r){ return r.id===id; }); }
+function rkInput(f,val,pid){
+  const col=f[0], lbl=f[1], ty=f[2]||'text', req=f[3]?' *':'', v=val==null?'':val, nm=' data-c="'+col+'" data-t="'+ty.split(':')[0]+'"';
+  if(ty==='bool') return '<label class="cb"><input type="checkbox"'+nm+(val?' checked':'')+'> '+esc(lbl)+'</label>';
+  if(ty==='fv'){ const on=(Array.isArray(val)?val:[]).map(String);
+    return '<label class="w">'+esc(lbl)+'<span'+nm+' style="display:flex;flex-wrap:wrap;gap:6px 16px;font-weight:500;color:#0f172a">'+(RK.fv||[]).map(function(p){ return '<span style="display:inline-flex;gap:5px;align-items:center"><input type="checkbox" value="'+p.id+'"'+(on.indexOf(String(p.id))!==-1?' checked':'')+'> '+esc(p.name)+'</span>'; }).join('')+'</span></label>'; }
+  if(ty==='tri') return '<label>'+esc(lbl)+'<select'+nm+'><option value="">Not known</option><option value="true"'+(val===true?' selected':'')+'>Yes</option><option value="false"'+(val===false?' selected':'')+'>No</option></select></label>';
+  if(ty==='area') return '<label class="w">'+esc(lbl)+req+'<textarea rows="3"'+nm+'>'+esc(String(v))+'</textarea></label>';
+  if(ty==='file') return '<label class="w">'+esc(lbl)+(val?' (a file is attached; choose one to replace it)':'')+'<input type="file"'+nm+'></label>';
+  if(ty.indexOf('sel:')===0||ty.indexOf('list:')===0||ty==='cfg'||ty==='fv'){
+    let opts=[];
+    if(ty.indexOf('sel:')===0) opts=ty.slice(4).split(',').map(function(o){ const p=o.split('='); return [p[0],p[1]||p[0]]; });
+    else if(ty.indexOf('list:')===0) opts=(RK.lists[ty.slice(5)]||[]).map(function(o){ return [o,o]; });
+    else if(ty==='cfg') opts=[['','All configurations / not specific']].concat(((RK.proj[pid]||{}).cfg||[]).map(function(c){ return [c.id,c.name]; }));
+    else opts=[['','Not linked']].concat((RK.fv||[]).map(function(p){ return [String(p.id),p.name]; }));
+    if(ty.indexOf('list:')===0&&v&&!opts.some(function(o){ return o[0]===v; })) opts.push([v,v]);
+    return '<label>'+esc(lbl)+req+'<select'+nm+'>'+(ty==='cfg'||ty==='fv'?'':'<option value=""></option>')+opts.map(function(o){ return '<option value="'+esc(o[0])+'"'+(String(v)===String(o[0])?' selected':'')+'>'+esc(o[1])+'</option>'; }).join('')+'</select></label>';
+  }
+  const it=ty==='num'||ty==='int'?'number" step="any':ty==='date'?'date':'text';
+  return '<label'+(col==='name'||col==='title'||col==='maps_url'?' class="w"':'')+'>'+esc(lbl)+req+'<input type="'+it+'"'+nm+' value="'+esc(String(v))+'"></label>';
+}
+window.rkEdit=async function(tbl,id,pid){
+  if(tbl==='projects') await rkFv();
+  const r=id?rkRec(tbl,id,pid):null;
+  if(id&&!r){ toast('This record is not loaded - refresh the page','err'); return; }
+  const pend=id&&pid&&RK.proj[pid]?rkChgFor(RK.proj[pid],id):[];
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> '+(id?'Propose a change - ':'Add ')+esc(RK_TBL_LABEL[tbl])+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><div class="rk-pend" style="margin:0 0 12px"><i class="fa-solid fa-shield-halved"></i> Nothing changes until an approver accepts it. Until then the current approved value stays on screen, marked "Change pending".</div>'
+    +(pend.length?'<div class="rk-pend" style="margin:0 0 12px;background:#fffbeb;border-color:#fcd34d;color:#92400e">'+pend.length+' change(s) to this are already waiting for approval.</div>':'')
+    +'<div class="rk-form" id="rkForm">'+rkFields(tbl).map(function(f){ return rkInput(f,r?r[f[0]]:(f[2]==='bool'?false:null),pid); }).join('')
+    +'<hr><label class="w">Reason for this change<input type="text" id="rkReason" placeholder="e.g. new price list from 20 Nov"></label></div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="rkSave" onclick="rkSave(\''+tbl+'\','+(id?'\''+id+'\'':'null')+','+(pid?'\''+pid+'\'':'null')+')"><i class="fa-solid fa-paper-plane"></i> Send for approval</button></div>','lg');
+};
+window.rkSave=async function(tbl,id,pid){
+  const btn=$('rkSave'), form=$('rkForm'); if(!form) return;
+  const r=id?rkRec(tbl,id,pid):null, payload={};
+  let file=null, missing=[];
+  form.querySelectorAll('[data-c]').forEach(function(el){
+    const c=el.getAttribute('data-c'), t=el.getAttribute('data-t'); let v;
+    if(t==='file'){ if(el.files&&el.files[0]) file=el.files[0]; return; }
+    if(t==='fv'){ v=Array.from(el.querySelectorAll('input:checked')).map(function(x){ return Number(x.value); }).sort(function(a,b){ return a-b; }); if(!v.length) v=null; } else if(t==='bool') v=el.checked; else if(t==='tri') v=el.value===''?null:el.value==='true'; else { v=el.value.trim(); if(v==='') v=null; else if(t==='num') v=Number(v); else if(t==='int') v=parseInt(v,10); }
+    const f=rkFields(tbl).find(function(x){ return x[0]===c; }); if(f&&f[3]&&(v==null||v==='')) missing.push(f[1]);
+    if(r){ const old=Array.isArray(r[c])?r[c].slice().sort(function(a,b){ return a-b; }):r[c]; const same=(old==null&&v==null)||(old!=null&&v!=null&&String(old)===String(v))||(t==='bool'&&!!old===!!v); if(!same) payload[c]=v; }
+    else if(t==='bool'||v!=null) payload[c]=v;
+  });
+  if(tbl==='documents'&&!id&&!file) missing.push('File');
+  if(missing.length){ toast('Please fill: '+missing.join(', '),'warn'); return; }
+  btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending...';
+  try{
+    if(file){
+      const up=await uploadFileToS3('portal/reckoner/'+(pid||'new')+'/'+s3Stamp()+'_'+s3SafeName(file.name),file);
+      if(up.error) throw up.error;
+      Object.assign(payload,{s3_key:up.data.path,file_name:file.name,mime:file.type||null,size_bytes:file.size});
+    }
+    if(id&&!Object.keys(payload).length){ toast('Nothing was changed','warn'); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send for approval'; return; }
+    if(!id&&tbl!=='projects') payload.project_id=pid;
+    const res=await RKS().rpc('propose',{p_tbl:tbl,p_record:id,p_op:id?'update':'insert',p_payload:payload,p_reason:($('rkReason')||{}).value||null,p_source:payload.source||null,p_project:tbl==='projects'?id:pid,p_batch:null});
+    if(res.error) throw res.error;
+    closeModal(); toast('Sent for approval','ok'); RK.pendN++;
+    if(pid) await rkDetail(pid,true);
+    renderPage();
+  }catch(e){ toast(String((e&&e.message)||e),'err'); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send for approval'; }
+};
+window.rkArchive=async function(tbl,id,pid){
+  const r=rkRec(tbl,id,pid); if(!r) return;
+  const ok=await confirmDialog('Propose removing "'+(r.name||r.title||r.unit_no||r.stage||r.bank||r.email||r.address||'this entry')+'"? It stays visible until an approver accepts the removal, and is kept in the history after that.',{title:'Propose removal',okLabel:'Send for approval',danger:false});
+  if(!ok) return;
+  const res=await RKS().rpc('propose',{p_tbl:tbl,p_record:id,p_op:'archive',p_payload:{},p_reason:null,p_source:null,p_project:pid,p_batch:null});
+  if(res.error){ toast(res.error.message,'err'); return; }
+  toast('Removal sent for approval','ok'); RK.pendN++; await rkDetail(pid,true); renderPage();
+};
+
+/* ---------------------------------------------------------------- inventory Excel */
+const RK_INV_COLS=[['unit_no','Unit no.'],['tower','Tower'],['floor','Floor'],['configuration','Configuration'],['area','Area (sq ft)'],['facing','Facing'],['view','View'],['base_price','Base price'],['extra_charges','Extra charges'],['quoted_price','Quoted price'],['status','Status'],['note','Remarks']];
+window.rkInvExport=async function(pid){
+  const XL=await loadXLSX(); if(!XL){ toast('Excel library did not load','err'); return; }
+  const rows=(window._rkInvRows||[]).map(function(u){ const o={}; RK_INV_COLS.forEach(function(c){ o[c[1]]=u[c[0]]==null?'':u[c[0]]; }); o['Verification']=rkState(u); return o; });
+  const ws=XL.utils.json_to_sheet(rows.length?rows:[RK_INV_COLS.reduce(function(o,c){ o[c[1]]=''; return o; },{})]);
+  const wb=XL.utils.book_new(); XL.utils.book_append_sheet(wb,ws,'Inventory');
+  XL.writeFile(wb,'Reckoner inventory - '+rkProjName(pid).replace(/[^\w\- ]/g,'')+' - '+rkToday()+'.xlsx');
+};
+window.rkInvImportAsk=function(pid){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-file-import"></i> Import units from Excel</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="font-size:13.5px"><p>Columns (first row): '+RK_INV_COLS.map(function(c){ return '<b>'+c[1]+'</b>'; }).join(', ')+'. Use <b>Export</b> for a sheet with these headings.</p>'
+    +'<p>A unit already in Reckoner (same unit no. and tower) becomes a proposed change; a new one becomes a proposed addition. All of it waits for approval.</p>'
+    +'<input type="file" id="rkInvFile" accept=".xlsx,.xls,.csv"><div id="rkInvOut" style="margin-top:10px"></div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" id="rkInvGo" onclick="rkInvImport(\''+pid+'\')">Read and send</button></div>');
+};
+window.rkInvImport=async function(pid){
+  const inp=$('rkInvFile'), out=$('rkInvOut'), btn=$('rkInvGo'); if(!inp||!inp.files[0]){ toast('Choose a file','warn'); return; }
+  btn.disabled=true;
+  try{
+    const XL=await loadXLSX(); const wb=XL.read(await inp.files[0].arrayBuffer(),{type:'array'});
+    const raw=XL.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+    const norm=function(s){ return String(s).toLowerCase().replace(/[^a-z]/g,''); };
+    const d=RK.proj[pid];
+    const allU=await rkPages(function(){ return RKS().from('units').select('*').eq('project_id',pid).eq('archived',false); });
+    const key=function(u,t){ return String(u||'').trim().toUpperCase()+'|'+String(t||'').trim().toUpperCase(); };
+    const have={}; allU.forEach(function(u){ have[key(u.unit_no,u.tower)]=u; });
+    const batch='import-'+Date.now(); let add=0, chg=0, same=0, bad=[];
+    const jobs=[];
+    raw.forEach(function(row,i){
+      const get=function(lbl){ const k=Object.keys(row).find(function(k){ return norm(k)===norm(lbl); }); return k==null?undefined:row[k]; };
+      const p={};
+      RK_INV_COLS.forEach(function(c){ let v=get(c[1]); if(v===undefined) return; v=typeof v==='string'?v.trim():v; if(v==='') v=null;
+        if(c[0]==='configuration'){ if(v==null){ p.configuration_id=null; return; } const cf=d.cfg.find(function(x){ return norm(x.name)===norm(v); }); if(!cf){ bad.push('row '+(i+2)+': configuration "'+v+'" not found'); return; } p.configuration_id=cf.id; return; }
+        if(['area','base_price','extra_charges','quoted_price'].indexOf(c[0])!==-1&&v!=null){ const n=Number(String(v).replace(/[,₹\s]/g,'')); if(!isFinite(n)){ bad.push('row '+(i+2)+': '+c[1]+' is not a number'); return; } v=n; }
+        if(c[0]==='status'&&v!=null&&['Available','On Hold','Booked','Sold','Blocked','Under Verification'].indexOf(v)===-1){ bad.push('row '+(i+2)+': status "'+v+'" not allowed'); return; }
+        p[c[0]]=v==null?null:(typeof v==='number'?v:String(v)); });
+      if(!p.unit_no){ if(Object.keys(p).length) bad.push('row '+(i+2)+': no unit no.'); return; }
+      const ex=have[key(p.unit_no,p.tower)];
+      if(ex){ const diff={}; Object.keys(p).forEach(function(k){ if(String(ex[k]==null?'':ex[k])!==String(p[k]==null?'':p[k])) diff[k]=p[k]; });
+        if(!Object.keys(diff).length){ same++; return; } chg++; jobs.push({p_tbl:'units',p_record:ex.id,p_op:'update',p_payload:diff,p_reason:'Excel import',p_source:inp.files[0].name,p_project:pid,p_batch:batch}); }
+      else { add++; p.project_id=pid; if(!p.status) p.status='Available'; jobs.push({p_tbl:'units',p_record:null,p_op:'insert',p_payload:p,p_reason:'Excel import',p_source:inp.files[0].name,p_project:pid,p_batch:batch}); }
+    });
+    if(bad.length){ out.innerHTML='<div style="color:#b91c1c">Nothing was sent. Please fix these rows:<br>'+bad.slice(0,30).map(esc).join('<br>')+(bad.length>30?'<br>... and '+(bad.length-30)+' more':'')+'</div>'; btn.disabled=false; return; }
+    if(!jobs.length){ out.innerHTML='Nothing to send: every row matches what is already recorded ('+same+').'; btn.disabled=false; return; }
+    let done=0, fail=[];
+    for(let i=0;i<jobs.length;i+=5){
+      const got=await Promise.all(jobs.slice(i,i+5).map(function(j){ return RKS().rpc('propose',j); }));
+      got.forEach(function(r,k){ if(r.error) fail.push((jobs[i+k].p_payload.unit_no||'unit')+': '+r.error.message); else done++; });
+      out.innerHTML='Sending... '+done+' of '+jobs.length;
+    }
+    out.innerHTML='<b>'+done+'</b> sent for approval ('+add+' new, '+chg+' changed, '+same+' unchanged).'+(fail.length?'<div style="color:#b91c1c">Not sent: '+fail.slice(0,20).map(esc).join('; ')+'</div>':'');
+    RK.pendN+=done; await rkDetail(pid,true); renderPage();
+  }catch(e){ out.innerHTML='<div style="color:#b91c1c">'+esc(String((e&&e.message)||e))+'</div>'; btn.disabled=false; }
+};
+
+/* Verifying a record as it is (workbook imports arrive as Pending Verification): approvers only, through rk.set_vstatus,
+   which is re-checked in the database and written to the audit log. */
+window.rkVerify=async function(tbl,ids,pid,quiet){
+  let ok=0, err=null;
+  for(const id of ids){ const r=await RKS().rpc('set_vstatus',{p_tbl:tbl,p_id:id,p_status:'verified',p_remarks:null}); if(r.error){ err=r.error.message; break; } ok++; }
+  if(err) toast(err,'err'); else if(!quiet) toast(ok===1?'Verified':'Verified '+ok,'ok');
+  if(pid){ try{ await rkDetail(pid,true); }catch(e){} } RK.projects=null; renderPage();
+};
+window.rkVerifyAll=async function(tbl,pid){
+  const d=RK.proj[pid]; if(!d) return; const rows=(d[RK_KEY[tbl]]||[]).filter(function(x){ return rkState(x)==='pending'; });
+  const ok=await confirmDialog('Mark all '+rows.length+' '+(RK_TBL_LABEL[tbl]||tbl).toLowerCase()+' entries of '+d.p.name+' as verified? Check each one against its source first - this tells Sales they are correct.',{title:'Verify all',okLabel:'Verify '+rows.length,danger:false});
+  if(!ok) return; rkVerify(tbl,rows.map(function(x){ return x.id; }),pid);
+};
+/* =============================================================================================
+   RECKONER, part 2 (21 Nov 2026): Pending Verifications, Audit Log, Compare, Roles. See 60-reckoner.js.
+   ============================================================================================= */
+function rkFieldLabel(tbl,col){ const f=(RK_F[tbl]||[]).concat(RK_COMMON).find(function(x){ return x[0]===col; }); return f?f[1]:col.replace(/_/g,' '); }
+function rkFmtVal(tbl,col,v){
+  if(v==null||v==='') return '<span class="rk-na">empty</span>';
+  if(typeof v==='boolean') return v?'Yes':'No';
+  if(col==='configuration_id'){ const c=(RK.cfg||[]).find(function(x){ return x.id===v; }); return esc(c?c.name:'(configuration)'); }
+  if(col==='project_id') return esc(rkProjName(v));
+  if(col==='fv_project_ids'){ return esc((Array.isArray(v)?v:[v]).map(function(i){ const p=(RK.fv||[]).find(function(x){ return String(x.id)===String(i); }); return p?p.name:'#'+i; }).join(', ')); }
+  if(col==='s3_key') return '<i class="fa-regular fa-file"></i> file';
+  if(col==='kind'&&tbl==='charges') return esc(RK_CHARGE_KIND[v]||v);
+  if(col==='kind'&&tbl==='sales_notes') return esc(RK_NOTE_KIND[v]||v);
+  if(col==='unit') return esc(RK_PER[v]||v);
+  if(col==='size_bytes') return esc(fmtBytes(v));
+  if(/price|amount|charges$/.test(col)&&typeof v==='number') return rkInr(v);
+  return '<span style="white-space:pre-wrap">'+esc(String(v))+'</span>';
+}
+function rkChgLabel(c,cur){ const r=Object.assign({},cur||{},c.previous||{},c.payload||{}); return r.name||r.title||r.unit_no||r.stage||r.bank||r.email||(r.address?String(r.address).slice(0,50):'')||(r.body?String(r.body).slice(0,50):'')||''; }
+async function rkCurrent(rows){
+  const by={}; rows.forEach(function(c){ if(c.record_id) (by[c.tbl]=by[c.tbl]||[]).push(c.record_id); });
+  const cur={};
+  await Promise.all(Object.keys(by).map(function(t){ const ids=Array.from(new Set(by[t]));
+    return RKS().from(t).select('*').in('id',ids.slice(0,300)).then(function(r){ (r.data||[]).forEach(function(x){ cur[x.id]=x; }); }); }));
+  return cur;
+}
+const RK_OP={insert:['New','#16a34a','fa-plus'],update:['Change','#2563eb','fa-pen'],archive:['Remove','#dc2626','fa-box-archive']};
+function rkDiff(c,cur){
+  const keys=Object.keys(c.payload||{}).filter(function(k){ return !(c.tbl!=='projects'&&k==='project_id')&&k!=='file_name'&&k!=='mime'; });
+  if(c.op==='archive') return '<div style="font-size:13px;color:#991b1b">Remove this '+esc((RK_TBL_LABEL[c.tbl]||c.tbl).toLowerCase())+' (it is kept in the history).</div>';
+  if(!keys.length) return '';
+  return '<table class="rk-t" style="margin-top:6px"><tr><th style="width:28%">Field</th>'+(c.op==='update'?'<th>Now</th>':'')+'<th>'+(c.op==='update'?'Proposed':'Value')+'</th></tr>'
+    +keys.map(function(k){ const old=c.op==='update'?(c.previous&&k in c.previous?c.previous[k]:(cur&&cur[k])):null;
+      return '<tr><td style="color:#475569">'+esc(rkFieldLabel(c.tbl,k))+'</td>'+(c.op==='update'?'<td style="color:#64748b">'+rkFmtVal(c.tbl,k,old)+'</td>':'')+'<td><b>'+rkFmtVal(c.tbl,k,c.payload[k])+'</b></td></tr>'; }).join('')+'</table>';
+}
+
+/* ---------------------------------------------------------------- Pending Verifications */
+const RK_PSEL=new Set();
+async function rkPendingView(){
+  const rows=await rkPages(function(){ return RKS().from('changes').select('*').eq('status','pending').order('id'); });
+  RK.pendN=rows.length; await rkFv();
+  const cur=await rkCurrent(rows);
+  window._rkPend=rows; window._rkCur=cur;
+  const me=String((state.user&&state.user.email)||'').toLowerCase(), ap=rkCanApprove();
+  Array.from(RK_PSEL).forEach(function(id){ if(!rows.some(function(c){ return c.id===id; })) RK_PSEL.delete(id); });
+  let h='';
+  if(!rows.length) h+='<div class="rk-sec rk-empty"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Nothing is waiting for approval.</div>';
+  else {
+    h+='<div class="rk-bar rk-noprint" style="justify-content:space-between"><div style="font-size:13px;color:#475569">'+rows.length+' waiting · '+(ap?'you can approve':'only approvers can approve; you can withdraw your own')+'</div>'
+      +(ap?'<div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="rkSelAll()">Select all</button><button class="btn btn-sm btn-primary" onclick="rkReviewSel(true)" '+(RK_PSEL.size?'':'disabled')+'><i class="fa-solid fa-check"></i> Approve selected ('+RK_PSEL.size+')</button><button class="btn btn-sm" onclick="rkReviewSel(false)" '+(RK_PSEL.size?'':'disabled')+'><i class="fa-solid fa-xmark"></i> Reject selected</button></div>':'')+'</div>';
+    const g={}; rows.forEach(function(c){ const k=c.project_id||'_new'; (g[k]=g[k]||[]).push(c); });
+    Object.keys(g).sort(function(a,b){ return a==='_new'?-1:b==='_new'?1:rkProjName(a).localeCompare(rkProjName(b)); }).forEach(function(k){
+      const batches={}; g[k].forEach(function(c){ if(c.batch) batches[c.batch]=(batches[c.batch]||0)+1; });
+      h+='<div class="rk-sec"><h4><i class="fa-solid fa-building" style="color:#0f766e"></i> '+(k==='_new'?'New projects':'<a href="javascript:void(0)" onclick="navTo(\'reckoner/p/'+k+'\')">'+esc(rkProjName(k))+'</a>')+' <span style="color:#64748b;font-weight:500">'+g[k].length+'</span>'
+        +(ap?'<span class="r">'+Object.keys(batches).filter(function(b){ return batches[b]>1; }).map(function(b){ return '<button class="btn btn-sm" onclick="rkSelBatch(\''+esc(b)+'\')">Select import ('+batches[b]+')</button>'; }).join('')+'</span>':'')+'</h4>'
+        +g[k].map(function(c){
+          const o=RK_OP[c.op], days=Math.floor((Date.now()-new Date(c.proposed_at))/864e5), mine=String(c.proposed_by).toLowerCase()===me;
+          return '<div style="border-top:1px solid #f1f5f9;padding:10px 0;display:flex;gap:10px">'
+            +(ap?'<input type="checkbox" style="margin-top:4px" '+(RK_PSEL.has(c.id)?'checked':'')+' onchange="rkSel('+c.id+',this.checked)">':'')
+            +'<div style="flex:1;min-width:0"><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13.5px"><span class="rk-vs" style="background:'+o[1]+'1a;color:'+o[1]+'"><i class="fa-solid '+o[2]+'"></i> '+o[0]+'</span>'
+            +'<b>'+esc(RK_TBL_LABEL[c.tbl]||c.tbl)+'</b> '+esc(rkChgLabel(c,cur[c.record_id]))
+            +'<span style="color:#64748b;font-size:12px">by '+esc(c.proposed_by)+' · '+esc(relTime(c.proposed_at))+'</span>'+(days>=3?'<span class="rk-vs outdated">Waiting '+days+' days</span>':'')+'</div>'
+            +(c.reason||c.source?'<div style="font-size:12.5px;color:#475569;margin-top:3px">'+(c.reason?'Reason: '+esc(c.reason):'')+(c.reason&&c.source?' · ':'')+(c.source?'Source: '+esc(c.source):'')+'</div>':'')
+            +rkDiff(c,cur[c.record_id])+'</div>'
+            +'<div style="display:flex;flex-direction:column;gap:5px" class="rk-noprint">'+(ap?'<button class="btn btn-sm btn-primary" onclick="rkReview(['+c.id+'],true)"><i class="fa-solid fa-check"></i> Approve</button><button class="btn btn-sm" onclick="rkReview(['+c.id+'],false)"><i class="fa-solid fa-xmark"></i> Reject</button>':'')
+            +(mine?'<button class="btn btn-sm" onclick="rkWithdraw('+c.id+')">Withdraw</button>':'')+'</div></div>';
+        }).join('')+'</div>';
+    });
+  }
+  h+=await rkUnverifiedBlock();
+  h+=await rkOutdatedBlock();
+  return h;
+}
+// verified values whose "valid until" date has passed
+async function rkOutdatedBlock(){
+  const t=rkToday(), S=RKS();
+  const got=await Promise.all(['projects','charges','offers','payment_plans','units','configurations'].map(function(tb){
+    return S.from(tb).select('*').eq('archived',false).eq('vstatus','verified').lt('valid_until',t).limit(200).then(function(r){ return (r.data||[]).map(function(x){ return [tb,x]; }); },function(){ return []; }); }));
+  const all=[].concat.apply([],got); if(!all.length) return '';
+  return '<div class="rk-sec"><h4><i class="fa-regular fa-calendar-xmark" style="color:#dc2626"></i> Past their "valid until" date ('+all.length+')</h4><div style="font-size:12.5px;color:#64748b;margin:-6px 0 8px">These show as Outdated everywhere. Propose new values, or '+(rkCanApprove()?'mark them Outdated for good.':'ask an approver.')+'</div><table class="rk-t"><tr><th>Project</th><th>What</th><th>Valid until</th><th></th></tr>'
+    +all.map(function(p){ const tb=p[0], x=p[1], pid=tb==='projects'?x.id:x.project_id;
+      return '<tr><td><a href="javascript:void(0)" onclick="navTo(\'reckoner/p/'+pid+'\')">'+esc(rkProjName(pid))+'</a></td><td>'+esc(RK_TBL_LABEL[tb])+' '+esc(x.name||x.title||x.unit_no||x.stage||'')+'</td><td>'+esc(fmtDate(x.valid_until))+'</td><td>'+(rkCanApprove()?'<button class="btn btn-sm" onclick="rkMarkOutdated(\''+tb+'\',\''+x.id+'\')">Mark outdated</button>':'')+'</td></tr>'; }).join('')+'</table></div>';
+}
+window.rkSel=function(id,on){ if(on) RK_PSEL.add(id); else RK_PSEL.delete(id); renderPage(); };
+window.rkSelAll=function(){ (window._rkPend||[]).forEach(function(c){ RK_PSEL.add(c.id); }); renderPage(); };
+window.rkSelBatch=function(b){ (window._rkPend||[]).forEach(function(c){ if(c.batch===b) RK_PSEL.add(c.id); }); renderPage(); };
+window.rkReviewSel=function(ap){ rkReview(Array.from(RK_PSEL).sort(function(a,b){ return a-b; }),ap); };
+window.rkReview=async function(ids,approve){
+  if(!ids.length) return;
+  let remarks=null;
+  if(!approve||ids.length>1){
+    remarks=await new Promise(function(res){
+      window._rkRemRes=res;
+      openModal('<div class="modal-head"><h3>'+(approve?'Approve '+ids.length+' changes':'Reject '+(ids.length>1?ids.length+' changes':'this change'))+'</h3><span class="x" onclick="closeModal();_rkRemRes(false)">&times;</span></div>'
+        +'<div class="modal-body"><label style="font-size:12.5px;color:#475569;font-weight:600">Remarks'+(approve?' (optional)':' - why it is rejected')+'</label><textarea id="rkRem" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px;font-family:inherit;margin-top:4px"></textarea></div>'
+        +'<div class="modal-foot"><button class="btn" onclick="closeModal();_rkRemRes(false)">Cancel</button><button class="btn '+(approve?'btn-primary':'btn-danger')+'" onclick="var v=$(\'rkRem\').value.trim();closeModal();_rkRemRes(v)">'+(approve?'Approve':'Reject')+'</button></div>');
+    });
+    if(remarks===false) return;
+    if(!approve&&!remarks){ toast('Please give a reason for rejecting','warn'); return; }
+  }
+  let ok=0, fail=[];
+  for(const id of ids){
+    const r=await RKS().rpc('review',{p_id:id,p_approve:approve,p_remarks:remarks||null});
+    if(r.error) fail.push('#'+id+': '+r.error.message); else { ok++; RK_PSEL.delete(id); }
+  }
+  toast((approve?'Approved ':'Rejected ')+ok+(fail.length?' · '+fail.length+' failed':''),fail.length?'warn':'ok');
+  if(fail.length) try{ console.warn('reckoner review',fail); }catch(e){}
+  if(fail.length&&ids.length===1) toast(fail[0],'err');
+  RK.proj={}; await rkBase(true); renderPage();
+};
+window.rkWithdraw=async function(id){
+  const ok=await confirmDialog('Withdraw this proposed change?',{title:'Withdraw',okLabel:'Withdraw',danger:false}); if(!ok) return;
+  const r=await RKS().rpc('withdraw',{p_id:id}); if(r.error){ toast(r.error.message,'err'); return; }
+  toast('Withdrawn','ok'); RK.proj={}; await rkBase(true); renderPage();
+};
+window.rkMarkOutdated=async function(tb,id){
+  const r=await RKS().rpc('set_vstatus',{p_tbl:tb,p_id:id,p_status:'outdated',p_remarks:'Past its valid-until date'});
+  if(r.error){ toast(r.error.message,'err'); return; } toast('Marked outdated','ok'); RK.proj={}; renderPage();
+};
+
+/* ---------------------------------------------------------------- Audit Log */
+const RK_AUD={proj:'',status:''};
+async function rkAuditView(){
+  await rkFv();
+  let rows=await (function(){ let q=RKS().from('changes').select('*').order('id',{ascending:false}).limit(300);
+    if(RK_AUD.proj) q=q.eq('project_id',RK_AUD.proj); if(RK_AUD.status) q=q.eq('status',RK_AUD.status); return q; })().then(function(r){ if(r.error) throw r.error; return r.data||[]; });
+  window._rkAud=rows;
+  const cur=await rkCurrent(rows.filter(function(c){ return c.op!=='insert'; }));
+  window._rkAudCur=cur;
+  const S={pending:'pending',approved:'verified',rejected:'rejected',withdrawn:'na'};
+  let h='<div class="rk-bar rk-noprint"><select onchange="RK_AUD.proj=this.value;renderPage()"><option value="">All projects</option>'+(RK.projects||[]).map(function(p){ return '<option value="'+p.id+'"'+(RK_AUD.proj===p.id?' selected':'')+'>'+esc(p.name)+'</option>'; }).join('')+'</select>'
+    +'<select onchange="RK_AUD.status=this.value;renderPage()"><option value="">Any status</option>'+['pending','approved','rejected','withdrawn'].map(function(s){ return '<option'+(RK_AUD.status===s?' selected':'')+'>'+s+'</option>'; }).join('')+'</select>'
+    +'<span style="font-size:12.5px;color:#64748b">Latest 300 · every proposed, approved and rejected change, with who and when</span></div>';
+  if(!rows.length) return h+'<div class="rk-sec rk-empty">No changes yet.</div>';
+  return h+'<div class="rk-sec"><div class="rk-wrap"><table class="rk-t"><tr><th>#</th><th>When</th><th>Project</th><th>What</th><th>By</th><th>Status</th><th>Reviewed</th></tr>'
+    +rows.map(function(c,i){ const o=RK_OP[c.op];
+      return '<tr style="cursor:pointer" onclick="rkAudOpen('+i+')"><td style="color:#94a3b8">'+c.id+'</td><td style="white-space:nowrap">'+esc(fmtDate(c.proposed_at))+'<div style="font-size:11.5px;color:#94a3b8">'+esc(new Date(c.proposed_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}))+'</div></td>'
+        +'<td>'+esc(c.project_id?rkProjName(c.project_id):(c.payload&&c.payload.name)||'New project')+'</td><td><span style="color:'+o[1]+'">'+o[0]+'</span> '+esc(RK_TBL_LABEL[c.tbl]||c.tbl)+' <span style="color:#475569">'+esc(rkChgLabel(c,cur[c.record_id]))+'</span></td>'
+        +'<td style="font-size:12.5px">'+esc(c.proposed_by)+'</td><td><span class="rk-vs '+(S[c.status]||'na')+'">'+esc(c.status)+'</span></td><td style="font-size:12.5px">'+(c.reviewed_by?esc(c.reviewed_by)+'<div style="color:#94a3b8">'+esc(fmtDate(c.reviewed_at))+'</div>':'')+(c.review_remarks?'<div style="color:#475569">'+esc(c.review_remarks)+'</div>':'')+'</td></tr>'; }).join('')+'</table></div></div>';
+}
+window.rkAudOpen=function(i){ const c=(window._rkAud||[])[i]; if(!c) return;
+  openModal('<div class="modal-head"><h3>Change #'+c.id+' - '+esc(RK_OP[c.op][0])+' '+esc(RK_TBL_LABEL[c.tbl]||c.tbl)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="font-size:13px"><div>Proposed by <b>'+esc(c.proposed_by)+'</b> on '+esc(new Date(c.proposed_at).toLocaleString('en-IN'))+'</div>'
+    +(c.reason?'<div>Reason: '+esc(c.reason)+'</div>':'')+(c.source?'<div>Source: '+esc(c.source)+'</div>':'')+(c.batch?'<div>Batch: '+esc(c.batch)+'</div>':'')
+    +'<div>Status: <b>'+esc(c.status)+'</b>'+(c.reviewed_by?' by '+esc(c.reviewed_by)+' on '+esc(new Date(c.reviewed_at).toLocaleString('en-IN')):'')+'</div>'+(c.review_remarks?'<div>Remarks: '+esc(c.review_remarks)+'</div>':'')
+    +rkDiff(c,(window._rkAudCur||{})[c.record_id])+'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','lg'); };
+
+/* ---------------------------------------------------------------- Compare */
+async function rkCompareView(){
+  RK.cmp=RK.cmp.filter(function(id){ return (RK.projects||[]).some(function(p){ return p.id===id; }); });
+  await Promise.all(RK.cmp.map(function(id){ return rkDetail(id); }));
+  const left=(RK.projects||[]).filter(function(p){ return RK.cmp.indexOf(p.id)===-1; });
+  let h='<div class="rk-bar rk-noprint">'+(RK.cmp.length<4?'<select onchange="if(this.value){RK.cmp.push(this.value);renderPage();}"><option value="">Add a project to compare...</option>'+left.map(function(p){ return '<option value="'+p.id+'">'+esc(p.name)+'</option>'; }).join('')+'</select>':'<span style="font-size:12.5px;color:#64748b">Up to 4 projects</span>')
+    +'<label style="font-size:12.5px;color:#475569;display:flex;gap:5px;align-items:center"><input type="checkbox" '+(RK.cust?'checked':'')+' onchange="RK.cust=this.checked;renderPage()"> Customer view</label>'
+    +(RK.cmp.length?'<button class="btn btn-sm" onclick="rkCmpExport()"><i class="fa-solid fa-file-excel"></i> Excel</button><button class="btn btn-sm" onclick="window.print()"><i class="fa-solid fa-print"></i> Print / PDF</button>':'')+'</div>';
+  if(RK.cmp.length<2) return h+'<div class="rk-sec rk-empty">Pick at least 2 projects - here or with the Compare box on the Directory cards.</div>';
+  const M=rkCmpMatrix();
+  window._rkCmp=M;
+  return h+'<div class="rk-sec"><div class="rk-wrap"><table class="rk-t"><tr><th style="width:170px"></th>'+M.heads.map(function(n,i){ return '<th style="font-size:14px;color:#0f172a">'+esc(n)+' <button class="rk-ib rk-noprint" title="Remove" onclick="RK.cmp.splice('+i+',1);renderPage()"><i class="fa-solid fa-xmark"></i></button></th>'; }).join('')+'</tr>'
+    +M.rows.map(function(r){ return '<tr><td style="color:#475569;font-weight:600;font-size:12.5px">'+esc(r[0])+'</td>'+r[1].map(function(c){
+      return '<td'+(c.flag?' style="background:#fffbeb"':'')+'>'+(c.t==null||c.t===''?rkNA():'<span style="white-space:pre-wrap">'+esc(c.t)+'</span>')+(c.flag?'<div style="font-size:11.5px;color:#92400e">'+esc(c.flag)+'</div>':'')+'</td>'; }).join('')+'</tr>'; }).join('')
+    +'</table></div><div style="font-size:12px;color:#64748b;margin-top:8px">Shaded cells include information that is not verified yet. "Not Available" means nothing is recorded.</div></div>';
+}
+function rkCmpMatrix(){
+  const D=RK.cmp.map(function(id){ return RK.proj[id]; });
+  const pv=function(d,v,fmt){ const ok=rkOk(d.p); if(RK.cust&&!ok) return {t:null,flag:'Pending verification'}; return {t:v==null||v===''?null:(fmt?fmt(v):String(v)),flag:ok||v==null||v===''?'':'Pending verification'}; };
+  const lst=function(rows,fn){ const s=rkShow(rows); const un=s.filter(function(r){ return !rkOk(r); }).length; return {t:s.length?fn(s):null,flag:un?un+' not verified':''}; };
+  const range=function(a){ a=a.filter(function(x){ return x!=null&&isFinite(x); }); if(!a.length) return null; const lo=Math.min.apply(null,a), hi=Math.max.apply(null,a); return lo===hi?[lo]:[lo,hi]; };
+  const rows=[
+    ['Location',D.map(function(d){ return pv(d,[d.p.locality,d.p.city].filter(Boolean).join(', ')); })],
+    ['Category',D.map(function(d){ return pv(d,d.p.category); })],
+    ['Status',D.map(function(d){ return pv(d,d.p.status); })],
+    ['Stage',D.map(function(d){ return pv(d,d.p.stage); })],
+    ['Land area',D.map(function(d){ return pv(d,d.p.land_area); })],
+    ['Towers / height',D.map(function(d){ return pv(d,[d.p.towers,d.p.height].filter(Boolean).join(' · ')); })],
+    ['Total units',D.map(function(d){ return pv(d,d.p.total_units,rkNum); })],
+    ['Open space',D.map(function(d){ return pv(d,d.p.open_space); })],
+    ['Possession',D.map(function(d){ return pv(d,d.p.possession_date?fmtDate(d.p.possession_date):d.p.possession_note); })],
+    ['RERA',D.map(function(d){ return pv(d,d.p.rera_no); })],
+    ['Configurations',D.map(function(d){ return lst(d.cfg,function(s){ return s.map(function(c){ const a=rkArea(c); return c.name+(a?' - '+a:''); }).join('\n'); }); })],
+    ['Base rate',D.map(function(d){ return lst(d.chg.filter(function(c){ return c.kind==='base_rate'&&c.unit==='per_sqft'&&c.amount!=null; }),function(s){ const r=range(s.map(function(c){ return Number(c.amount); })); return r?r.map(rkInr).join(' – ')+' / sq ft':null; }); })],
+    ['Unit prices',D.map(function(d){ return lst(d.chg.filter(function(c){ return c.kind==='unit_price'&&c.amount!=null&&c.unit!=='percent'&&c.unit!=='per_sqft'; }),function(s){ const r=range(s.map(function(c){ return Number(c.amount); })); return r?r.map(rkCr).join(' – '):null; }); })],
+    ['Other charges',D.map(function(d){ return lst(d.chg.filter(function(c){ return ['base_rate','unit_price'].indexOf(c.kind)===-1; }),function(s){ return s.map(function(c){ return c.name+': '+(c.amount==null?'–':c.unit==='percent'?rkNum(c.amount)+'%':rkInr(c.amount)+(c.unit==='per_sqft'?'/sq ft':'')); }).join('\n'); }); })],
+    ['Free units',D.map(function(d){ return lst(d.units,function(s){ return String(s.length); }); })],
+    ['Offers',D.map(function(d){ return lst(d.off,function(s){ return s.map(function(o){ return o.title; }).join('\n'); }); })],
+    ['Amenities',D.map(function(d){ return lst(d.am,function(s){ return s.length+': '+s.slice(0,10).map(function(a){ return a.name; }).join(', ')+(s.length>10?'...':''); }); })],
+    ['Nearby',D.map(function(d){ return lst(d.lm,function(s){ return s.slice().sort(function(a,b){ return (a.travel_min==null?1e9:a.travel_min)-(b.travel_min==null?1e9:b.travel_min); }).slice(0,5).map(function(a){ return a.name+(a.travel_min!=null?' - '+rkNum(a.travel_min)+' min':'')+(a.distance_km!=null?' ('+rkNum(a.distance_km)+' km)':''); }).join('\n'); }); })],
+    ['Bank approvals',D.map(function(d){ return lst(d.bank,function(s){ return s.map(function(b){ return b.bank; }).join(', '); }); })],
+    ['USPs',D.map(function(d){ return lst(d.notes.filter(function(n){ return n.kind==='usp'&&!n.internal; }),function(s){ return s.map(function(n){ return n.title||n.body; }).join('\n'); }); })]
+  ];
+  return {heads:D.map(function(d){ return d.p.name; }),rows:rows};
+}
+window.rkCmpExport=async function(){
+  const M=window._rkCmp; if(!M) return; const XL=await loadXLSX(); if(!XL){ toast('Excel library did not load','err'); return; }
+  const aoa=[['']].concat([]); aoa[0]=[''].concat(M.heads);
+  M.rows.forEach(function(r){ aoa.push([r[0]].concat(r[1].map(function(c){ return (c.t==null||c.t===''?'Not Available':c.t)+(c.flag?' ['+c.flag+']':''); }))); });
+  const ws=XL.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:18}].concat(M.heads.map(function(){ return {wch:40}; }));
+  const wb=XL.utils.book_new(); XL.utils.book_append_sheet(wb,ws,'Comparison'); XL.writeFile(wb,'Reckoner comparison - '+rkToday()+'.xlsx');
+};
+
+/* ---------------------------------------------------------------- Roles (super admins) */
+const RK_ROLE_L={sales_head:'Sales Head - approves',project_admin:'Project Admin - approves, edits assigned projects',project_manager:'Project Manager - proposes for assigned projects',viewer:'Viewer'};
+async function rkRolesView(){
+  if(RK.role!=='super') return '<div class="rk-sec rk-empty">Only super admins manage Reckoner roles.</div>';
+  const r=await RKS().from('roles').select('*').order('email'); if(r.error) throw r.error;
+  return '<div class="rk-sec"><h4><i class="fa-solid fa-user-shield" style="color:#0f766e"></i> Reckoner roles</h4>'
+    +'<div style="font-size:12.5px;color:#64748b;margin:-6px 0 10px">Super admins can do everything. Everyone else with the Reckoner module can view (internal information included). A person also needs the <b>Reckoner</b> module in Control Panel to see it in the menu. Project Managers and Project Admins are tied to projects on each project\'s Overview → Team.</div>'
+    +'<table class="rk-t"><tr><th>Email</th><th>Role</th><th>Added</th><th></th></tr>'+(r.data||[]).map(function(x){ return '<tr><td>'+esc(x.email)+'</td><td>'+esc(RK_ROLE_L[x.role]||x.role)+'</td><td style="font-size:12px;color:#64748b">'+esc(fmtDate(x.added_at))+(x.added_by?' by '+esc(x.added_by):'')+'</td><td><button class="rk-ib" title="Remove role" onclick="rkSetRole(\''+esc(x.email)+'\',null)"><i class="fa-solid fa-trash"></i></button></td></tr>'; }).join('')+'</table>'
+    +'<div class="rk-bar" style="margin-top:12px"><input type="email" id="rkRoleEmail" placeholder="name@thejaingroup.com" style="min-width:240px"><select id="rkRoleSel">'+Object.keys(RK_ROLE_L).map(function(k){ return '<option value="'+k+'">'+esc(RK_ROLE_L[k])+'</option>'; }).join('')+'</select><button class="btn btn-sm btn-primary" onclick="rkSetRole($(\'rkRoleEmail\').value,$(\'rkRoleSel\').value)">Add / change</button></div></div>';
+}
+window.rkSetRole=async function(email,role){
+  email=String(email||'').trim().toLowerCase(); if(!/^[^@\s]+@[^@\s]+$/.test(email)){ toast('Enter an email address','warn'); return; }
+  if(!role){ const ok=await confirmDialog('Remove the Reckoner role of '+email+'?',{title:'Remove role',okLabel:'Remove'}); if(!ok) return; }
+  const r=await RKS().rpc('set_role',{p_email:email,p_role:role}); if(r.error){ toast(r.error.message,'err'); return; }
+  toast('Saved','ok'); renderPage();
+};
+
+// records that exist but are not verified yet (e.g. the workbook import): counted per project, verified on the project's tabs
+async function rkUnverifiedBlock(){
+  const T=['projects','configurations','charges','payment_plans','offers','units','amenities','landmarks','locations','sales_notes','bank_approvals','documents'];
+  const got=await Promise.all(T.map(function(t){ return rkPages(function(){ return RKS().from(t).select(t==='projects'?'id':'project_id').eq('vstatus','pending').eq('archived',false); }).then(function(r){ return [t,r]; },function(){ return [t,[]]; }); }));
+  const by={}; let total=0;
+  got.forEach(function(g){ g[1].forEach(function(r){ const pid=g[0]==='projects'?r.id:r.project_id; by[pid]=by[pid]||{}; by[pid][g[0]]=(by[pid][g[0]]||0)+1; total++; }); });
+  if(!total) return '';
+  const tabOf={projects:0,configurations:1,charges:2,payment_plans:2,offers:0,units:3,amenities:4,landmarks:5,locations:5,sales_notes:6,bank_approvals:6,documents:7};
+  return '<div class="rk-sec"><h4><i class="fa-solid fa-hourglass-half" style="color:#d97706"></i> Not verified yet ('+total+')</h4><div style="font-size:12.5px;color:#64748b;margin:-6px 0 8px">Information already in Reckoner but not checked - mostly the workbook import of 21 Nov. '+(rkCanApprove()?'Open a project, check each item against its source (shown under it) and press <i class="fa-solid fa-check-double"></i> or "Verify all".':'An approver verifies these.')+'</div>'
+    +'<table class="rk-t"><tr><th>Project</th><th>Waiting</th></tr>'+Object.keys(by).sort(function(a,b){ return rkProjName(a).localeCompare(rkProjName(b)); }).map(function(pid){
+      return '<tr><td><a href="javascript:void(0)" onclick="navTo(\'reckoner/p/'+pid+'\')"><b>'+esc(rkProjName(pid))+'</b></a></td><td>'+Object.keys(by[pid]).map(function(t){ return '<a href="javascript:void(0)" class="rk-chip" style="display:inline-block;margin:2px" onclick="navTo(\'reckoner/p/'+pid+'/'+tabOf[t]+'\')">'+esc(RK_TBL_LABEL[t]||t)+' '+by[pid][t]+'</a>'; }).join('')+'</td></tr>'; }).join('')+'</table></div>';
+}

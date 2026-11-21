@@ -31,6 +31,9 @@ import { handleBookingMail } from "./booking-mail.ts";
 import { bounceCheck } from "./booking-bounce.ts";
 import { postsalesMailSync, postsalesMailHistory } from "./postsales-mail.ts";
 import { reminderSend, reminderSendCustomers } from "./postsales-reminder.ts";
+import { reminderSentCheck } from "./reminder-check.ts";
+import { reminderLogSync, reminderLogRefill } from "./reminder-log-sync.ts";
+import { reminderScheduleRun, reminderLetterCheck } from "./reminder-schedule.ts";
 import { legalHearingOverdue } from "./legal-overdue.ts";
 
 // 13 Nov 2026: denomailer 1.6.0 packs html/text as quoted-printable itself and gets it wrong (lower-case =3d, broken wrapping), so some mail apps show raw code.
@@ -190,7 +193,7 @@ Deno.serve(async (req: Request) => {
   const action = String(body.action || "");
 
   // ------------------------------------------------- booking documents (staff, or the job)
-  if (action === "booking_doc_mail" || action === "booking_welcome_auto" || action === "booking_welcome2_reminders"
+  if (action === "booking_doc_mail" || action === "booking_doc_test" || action === "booking_welcome_auto" || action === "booking_welcome2_reminders"
       || action === "booking_read_failed") {
     try { return await handleBookingMail(req, body, db, j, SB, SRV, createClient); }
     catch (e) { return j({ error: "Could not email the document: " + String((e as Error).message || e).slice(0, 300) }, 500); }
@@ -213,6 +216,29 @@ Deno.serve(async (req: Request) => {
     catch (e) { return j({ error: "Legal reminder failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
   }
   // ------------------------------------- outstanding reminders to customers (Post Sales module, switched)
+  // read-only: sent reminder emails in customercare1 / customercare2 (20 Nov 2026)
+  // reminder emails Farvision sent through the mailboxes, into the log (weekly job or a Post Sales person) - 20 Nov 2026
+  // scheduled reminders, 15 min after the day's import (the job only) - 20 Nov 2026
+  if (action === "reminder_letter_check") {
+    try { return await reminderLetterCheck(req, body, db, j); }
+    catch (e) { return j({ error: String((e as Error).message || e).slice(0, 300) }, 500); }
+  }
+  if (action === "reminder_schedule_run") {
+    try { return await reminderScheduleRun(req, db, j); }
+    catch (e) { return j({ error: "Schedule run failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
+  }
+  if (action === "reminder_log_refill") {
+    try { return await reminderLogRefill(req, body, db, j); }
+    catch (e) { return j({ error: String((e as Error).message || e).slice(0, 300) }, 500); }
+  }
+  if (action === "reminder_log_sync") {
+    try { return await reminderLogSync(req, body, db, j, SB, createClient); }
+    catch (e) { return j({ error: "Log sync failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
+  }
+  if (action === "reminder_sent_check") {
+    try { return await reminderSentCheck(req, body, j, SB, createClient); }
+    catch (e) { return j({ error: "Check failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }
+  }
   if (action === "reminder_send_customers") {
     try { return await reminderSendCustomers(req, body, db, j, SB, createClient); }
     catch (e) { return j({ error: "Sending failed: " + String((e as Error).message || e).slice(0, 300) }, 500); }

@@ -291,7 +291,7 @@ export function welcomeEmail(res: any) {
     + `It is always our pleasure to be of service to you today and in the future.\n\n`
     + `Once again we warmly welcome you to the growing Jain Group family.\n\nThanking you,\n\n`
     + `Pallabita Ghosh\nManager – Post Sales\nReach me @ 8420541541`;
-  return { html, text, customer: v.who[0] || nameCase(res?.fields?.customer_name?.value) || "Customer" };
+  return { html, text, customer: v.who[0] || nameCase(res?.fields?.customer_name?.value) || "Customer", unit: v.flat, block: v.block, project: v.project };
 }
 
 /* AN EDITED WELCOME LETTER, as the email body. The editor's page is HTML a person typed into, so
@@ -345,7 +345,11 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
 
   // ---- who is asking
   let sender = "system";
-  if (action === "booking_welcome_auto") {
+  /* booking_doc_test (20 Nov 2026, Ayush: "Send a Welcome Letter ... to ayushruia1@gmail.com through that email"): the real
+     document of a booking, built exactly as for the customer, sent from customercare1 ONLY to test_to with [TEST] and a banner
+     naming who it would have gone to. The job secret only; nothing about the booking is changed or counted. */
+  const docTest = action === "booking_doc_test";
+  if (action === "booking_welcome_auto" || docTest) {
     const secret = req.headers.get("x-audit-secret") || "";
     const { data: s } = await acc.from("job_secrets").select("value").eq("name", "booking_audit").maybeSingle();
     if (!secret || !s?.value || s.value !== secret) return j({ error: "unauthorized" }, 401);
@@ -361,6 +365,7 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
   }
 
   const kind = action === "booking_welcome_auto" ? "welcome" : String(body.kind || "");
+  if (docTest && !EMAIL_RE.test(String(body.test_to || "").trim())) return j({ error: "test_to is required" }, 400);
   if (!KINDS.includes(kind)) return j({ error: "Unknown document." }, 400);
 
   // ---- the mailbox
@@ -384,8 +389,8 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
     .in("name", ["booking_mail_mode", "booking_mail_test_to"]);
   const conf: Record<string, string> = {};
   for (const r of (secrets || [])) conf[r.name] = String(r.value || "");
-  const live = conf.booking_mail_mode === "live";
-  const testTo = (conf.booking_mail_test_to || "").trim();
+  const live = docTest ? false : conf.booking_mail_mode === "live";
+  const testTo = docTest ? String(body.test_to).trim() : (conf.booking_mail_test_to || "").trim();
   const intended = customerEmails(res);
   if (live && !intended.length) return j({ error: "No email address was found in the booking file." }, 422);
   if (!live && !EMAIL_RE.test(testTo)) return j({ error: "Test mode is on but no test inbox is set." }, 500);
@@ -405,7 +410,10 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
     return j({ error: "The flat's total cost was not read from the cost sheet, so the amount cannot be set and the 2nd Welcome Letter cannot be emailed." }, 422);
   }
   // No "(MODIFIED)" in the subject: an edited letter goes out under the same subject (15 Oct 2026).
-  let subject = kind === "welcome2" ? "Allotment Payment Letter" : `${DOC_NAME[kind]} - ${w.customer}`;
+  // 20 Nov 2026 (Ayush): the Welcome Letter's subject is "Booking Confirmation against Unit No. __, Block No. __ in the Project - __"
+  let subject = kind === "welcome2" ? "Allotment Payment Letter"
+    : kind === "welcome" ? `Booking Confirmation against Unit No. ${w.unit || "-"}, Block No. ${w.block || "-"} in the Project - ${w.project || "-"}`
+    : `${DOC_NAME[kind]} - ${w.customer}`;
   let html = "", text = "";
   const attachments: any[] = [];
   if (TEXT_KINDS.includes(kind)) {
@@ -500,7 +508,7 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
   const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true,
     auth: { username: CU, password: CP } } });
   try {
-    await client.send({ from: `Pallabita Ghosh - The Jain Group <${CU}>`, to, subject: asciiSubject(subject), ...mailBody(text, html),
+    await client.send({ from: `The Jain Group <${CU}>`, to, subject: asciiSubject(subject), ...mailBody(text, html),
       ...(attachments.length ? { attachments } : {}) });
   } catch (e) {
     if (action === "booking_welcome_auto") {
@@ -509,6 +517,7 @@ export async function handleBookingMail(req: Request, body: any, db: any, j: J, 
     return j({ error: "Could not send: " + String((e as Error).message || e).slice(0, 300) }, 502);
   } finally { try { await client.close(); } catch { /* ignore */ } }
 
+  if (docTest) return j({ ok: true, test: true, sent_to: to, intended_to: intended, subject });
   const now = new Date().toISOString();
   const prev = Number(st?.email_count || 0);
   await acc.from("booking_doc_status").upsert({

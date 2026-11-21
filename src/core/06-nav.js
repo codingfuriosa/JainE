@@ -17,6 +17,8 @@ const NAV=[
     {id:'postsales',label:'Post Sales',icon:'fa-headset'},
     // Site Visit / Booked customers by PIN code on a map, month by month - src/core/41-lead-map.js
     {id:'lead_map',label:'Lead Map',icon:'fa-map-location-dot'},
+    // project information for Sales, verified before it shows (21 Nov 2026) - 60-reckoner.js
+    {id:'reckoner',label:'Reckoner',icon:'fa-book-bookmark'},
   ]},
   {group:'Operations',items:[
     {id:'projects',label:'Projects',icon:'fa-building'},
@@ -125,7 +127,10 @@ function expandModules(ss){
 }
 /* 'competitors_jg' = Competitor Data limited to its Jain Group Fb Ads and Jain Group Google Ads tabs (18 Nov 2026). Someone who
    also holds 'competitors' sees all four. */
-function cdJgOnly(){ if(state.super)return false; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('competitors_jg')!==-1&&m.indexOf('competitors')===-1; }
+/* TEMPORARILY (20 Nov 2026, the user: "for Administrator remove the Competitor Facebook and Google data temporarily in Competitor Data"): the Administrator (super admin) sees only the two Jain Group
+   tabs, like the Jain Group-only accounts - the Meta Ads and Google Ads Transparency (competitor) tabs are hidden for them. Nothing is deleted; set CD_ADMIN_NO_COMPETITORS to false to bring them back. */
+const CD_ADMIN_NO_COMPETITORS=false;
+function cdJgOnly(){ if(state.super)return CD_ADMIN_NO_COMPETITORS; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('competitors_jg')!==-1&&m.indexOf('competitors')===-1; }
 /* 'custportal_photos' = Customer Portal Admin limited to its Photos & Videos tab. The database
    enforces the same boundary (app.is_custportal_media_editor): such an account can write the four
    photo tables and read project names and a bare flat list, and nothing else in cust.*. */

@@ -143,6 +143,11 @@ async function hasImpShare() {
   if (HAS_IS === null) { const { error } = await db.from('ads_daily').select('budget_lost_is').limit(1); HAS_IS = !error; }
   return HAS_IS;
 }
+let HAS_TOP: boolean | null = null;
+async function hasTopShare() {
+  if (HAS_TOP === null) { const { error } = await db.from('ads_daily').select('abs_top_is').limit(1); HAS_TOP = !error; }
+  return HAS_TOP;
+}
 async function hasAdset() {
   if (HAS_ADSET === null) { const { error } = await db.from('ads_ad_daily').select('adset_id').limit(1); HAS_ADSET = !error; }
   return HAS_ADSET;
@@ -403,9 +408,13 @@ async function gRead(cust: string, s: string, e: string) {
   if (await hasImpShare()) {
     try {
       isMap = {};
-      for (const x of await gaql(cust, `SELECT segments.date, campaign.id, metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share FROM campaign WHERE ${clause} AND campaign.advertising_channel_type = 'SEARCH'`)) {
+      // 21 Nov 2026: also the top-of-page shares (Auction Insights stand-in - Google keeps auction_insight_* metrics to allowlisted tokens):
+      // top_is = shown above the organic results, abs_top_is = shown as the very first ad. Only when those columns exist.
+      const top = await hasTopShare();
+      for (const x of await gaql(cust, `SELECT segments.date, campaign.id, metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share${top ? ', metrics.search_top_impression_share, metrics.search_absolute_top_impression_share' : ''} FROM campaign WHERE ${clause} AND campaign.advertising_channel_type = 'SEARCH'`)) {
         const m = x.metrics || {}, f = (v: any) => (v == null || v === '' ? null : num(v));
-        isMap[String(x.campaign.id) + '|' + x.segments.date] = { imp_share: f(m.searchImpressionShare), budget_lost_is: f(m.searchBudgetLostImpressionShare), rank_lost_is: f(m.searchRankLostImpressionShare) };
+        isMap[String(x.campaign.id) + '|' + x.segments.date] = { imp_share: f(m.searchImpressionShare), budget_lost_is: f(m.searchBudgetLostImpressionShare), rank_lost_is: f(m.searchRankLostImpressionShare),
+          ...(top ? { top_is: f(m.searchTopImpressionShare), abs_top_is: f(m.searchAbsoluteTopImpressionShare) } : {}) };
       }
     } catch (_) { isMap = null; }
   }
@@ -620,6 +629,40 @@ async function crmSync(o: any) {
   return { ok: true, crm: true, src: fb ? 'facebook' : 'google', from, to, days, notes };
 }
 
+/* CRM SOURCE-WISE FUNNEL ({srcwise:{days:N} | {from,to}}; 19 Nov 2026, Ayush: "build the Sources view").
+   source_wise_absolute_api: per project a tree of lead sources (category > source > campaign > ad set > ad), each node
+   with its own figures ("self") and with everything under it ("total"): qualified, site_visited, revisited, booked, lost
+   - what happened on the dates asked for. Read one day at a time into camp.crm_source_daily (the day replaced whole);
+   the Sources view adds up any period. Night only, like the other CRM reads. */
+const CRM_SRC_URL = 'https://www.realtybucket.com/report/source_wise_absolute_api';
+async function srcWiseSync(o: any) {
+  const today = ist();
+  let to = String(o.to || today), from = String(o.from || addD(to, -(Math.max(1, Math.min(400, Number(o.days) || 45)) - 1)));
+  if (from > to) { const x = from; from = to; to = x; }
+  let days = 0, rowsN = 0; const notes: string[] = [];
+  for (let d = to; d >= from; d = addD(d, -1)) {
+    if (left() < 15_000) { notes.push('stopped at ' + d + ' (time)'); break; }
+    const r = await fetch(`${CRM_SRC_URL}?from=${d}&to=${d}`); const t = await r.json().catch(() => null);
+    if (!r.ok || !t || !Array.isArray(t.projects)) { notes.push(d + ': HTTP ' + r.status); continue; }
+    const rows: any[] = [], now = new Date().toISOString();
+    const walk = (p: any, n: any, parent: number | null, level: number, top: string) => {
+      const s = n.self || {}, tt = n.total || {};
+      rows.push({ day: d, bu_id: Number(p.business_unit_id) || 0, business_unit: p.business_unit || '', node_id: Number(n.source_category_id) || 0,
+        parent_id: parent, level, top_source: top, source: String(n.source || '').trim(),
+        self_q: num(s.qualified), self_sv: num(s.site_visited), self_rv: num(s.revisited), self_bk: num(s.booked), self_lost: num(s.lost),
+        tot_q: num(tt.qualified), tot_sv: num(tt.site_visited), tot_rv: num(tt.revisited), tot_bk: num(tt.booked), tot_lost: num(tt.lost), fetched_at: now });
+      for (const c of (n.children || [])) walk(p, c, Number(n.source_category_id) || 0, level + 1, top);
+    };
+    for (const p of t.projects) for (const s of (p.sources || [])) walk(p, s, null, 0, String(s.source || '').trim());
+    // one node can appear twice under a project (the CRM repeats a source name in two places): keep the first
+    const seen = new Set<string>(), uniq = rows.filter((x) => { const k = x.bu_id + '|' + x.node_id; if (seen.has(k)) return false; seen.add(k); return true; });
+    const dr = await db.from('crm_source_daily').delete().eq('day', d); if (dr.error) throw new Error('crm_source_daily: ' + dr.error.message);
+    for (let i = 0; i < uniq.length; i += 500) { const ins = await db.from('crm_source_daily').insert(uniq.slice(i, i + 500)); if (ins.error) throw new Error('crm_source_daily: ' + ins.error.message); }
+    days++; rowsN += uniq.length;
+  }
+  return { ok: true, srcwise: true, from, to, days, rows: rowsN, notes };
+}
+
 async function caller(req: Request) {
   const sec = req.headers.get('x-ads-secret');
   if (sec) {
@@ -704,15 +747,108 @@ async function hourly(platform: string, days: number) {
   return { ok: true, notes: out };
 }
 
+/* GOOGLE RESULTS BY AGE ({platform:'google', age:{days:N, dry?:true}}; 20 Nov 2026, Ayush: "Get Age from Google, if we don't pull it
+   then start pulling it now" - the Google checklist's Age point). Google's age_range_view added up to campaign and age range over the last
+   N days (7..90, default 28): spend, impressions, clicks. Leads by age are NOT read (Google refuses the conversion-action segments on this view), so leads is null;
+   Replaced whole each run in camp.ads_age (migration 20261120190000). With dry:true nothing is written -
+   the figures come back in the answer (used to look at the data before the table exists). */
+async function gAge(days: number, dry: boolean) {
+  const { data: accs } = await db.from('ads_accounts').select('account_id').eq('platform', 'google').eq('include', true);
+  const e = addD(ist(), -1), s = addD(e, -(days - 1)), out: string[] = [], all: any[] = [];
+  for (const a of accs || []) {
+    if (left() < 30_000) { out.push('out of time at ' + a.account_id); break; }
+    try {
+      const agg: Record<string, any> = {};
+      const put = (cid: string, ar: string) => (agg[cid + '|' + ar] = agg[cid + '|' + ar] || { platform: 'google', account_id: a.account_id, campaign_id: cid, age_range: ar, period_end: e, days, spend: 0, impressions: 0, clicks: 0, leads: null });
+      const clause = `segments.date BETWEEN '${s}' AND '${e}'`;
+      for (const x of await gaql(a.account_id, `SELECT campaign.id, ad_group_criterion.age_range.type, metrics.cost_micros, metrics.impressions, metrics.clicks FROM age_range_view WHERE ${clause}`)) {
+        const ar = String((x.adGroupCriterion && x.adGroupCriterion.ageRange && x.adGroupCriterion.ageRange.type) || 'UNKNOWN').replace(/^AGE_RANGE_/, '');
+        const o = put(String(x.campaign.id), ar); o.spend += num(x.metrics.costMicros) / 1e6; o.impressions += num(x.metrics.impressions); o.clicks += num(x.metrics.clicks); }
+      const recs = Object.values(agg);
+      if (dry) { all.push(...recs); out.push(a.account_id + ': ' + recs.length + ' (not saved)'); continue; }
+      const { error: de } = await db.from('ads_age').delete().eq('platform', 'google').eq('account_id', a.account_id);
+      if (de) throw new Error('ads_age delete: ' + de.message);
+      for (let i = 0; i < recs.length; i += 500) { const { error } = await db.from('ads_age').insert(recs.slice(i, i + 500)); if (error) throw new Error('ads_age write: ' + error.message); }
+      out.push(a.account_id + ': ' + recs.length);
+    } catch (err) { out.push(a.account_id + ': ' + String((err as Error).message || err).slice(0, 200)); }
+  }
+  return dry ? { ok: true, notes: out, rows: all } : { ok: true, notes: out };
+}
+
+/* KEYWORD QUALITY ({platform:'google', quality:{dry?:true}}; 21 Nov 2026, Ayush: "in Keywords ... Landing Page Experience, Ad Relevance,
+   Expected CTR, Quality Score ... should not be Below Average, and Quality Score below 5 then Alert"). Every ENABLED keyword in an ENABLED ad
+   group of an ENABLED campaign, with Google's quality_info (no date - Google gives today's value). Replaced whole each run in
+   camp.ads_kw_quality (migration 20261121203000). Keywords Google gives no values for are kept with nulls; the checklist leaves them out. */
+async function gQuality(dry: boolean) {
+  const { data: accs } = await db.from('ads_accounts').select('account_id').eq('platform', 'google').eq('include', true);
+  const out: string[] = [], all: any[] = [];
+  const v = (s: unknown) => { const t = String(s || ''); return /^(UNSPECIFIED|UNKNOWN)$/.test(t) || !t ? null : t; };
+  for (const a of accs || []) {
+    if (left() < 30_000) { out.push('out of time at ' + a.account_id); break; }
+    try {
+      const recs: any[] = [];
+      for (const x of await gaql(a.account_id, `SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.quality_info.quality_score, ad_group_criterion.quality_info.creative_quality_score, ad_group_criterion.quality_info.post_click_quality_score, ad_group_criterion.quality_info.search_predicted_ctr FROM keyword_view WHERE campaign.status = 'ENABLED' AND ad_group.status = 'ENABLED' AND ad_group_criterion.status = 'ENABLED' AND ad_group_criterion.negative = FALSE`)) {
+        const q = (x.adGroupCriterion && x.adGroupCriterion.qualityInfo) || {};
+        recs.push({ platform: 'google', account_id: a.account_id, campaign_id: String(x.campaign.id), campaign_name: x.campaign.name, ad_group_id: String(x.adGroup.id), ad_group_name: x.adGroup.name,
+          keyword_id: String(x.adGroupCriterion.criterionId), keyword: (x.adGroupCriterion.keyword && x.adGroupCriterion.keyword.text) || '', match_type: (x.adGroupCriterion.keyword && x.adGroupCriterion.keyword.matchType) || null,
+          quality_score: q.qualityScore == null ? null : Number(q.qualityScore), ad_relevance: v(q.creativeQualityScore), landing_page: v(q.postClickQualityScore), expected_ctr: v(q.searchPredictedCtr), read_at: new Date().toISOString() });
+      }
+      if (dry) { all.push(...recs); out.push(a.account_id + ': ' + recs.length + ' (not saved)'); continue; }
+      const { error: de } = await db.from('ads_kw_quality').delete().eq('platform', 'google').eq('account_id', a.account_id);
+      if (de) throw new Error('ads_kw_quality delete: ' + de.message);
+      for (let i = 0; i < recs.length; i += 500) { const { error } = await db.from('ads_kw_quality').insert(recs.slice(i, i + 500)); if (error) throw new Error('ads_kw_quality write: ' + error.message); }
+      out.push(a.account_id + ': ' + recs.length);
+    } catch (err) { out.push(a.account_id + ': ' + String((err as Error).message || err).slice(0, 200)); }
+  }
+  return dry ? { ok: true, notes: out, rows: all } : { ok: true, notes: out };
+}
+/* AUCTION INSIGHTS ({platform:'google', auction:{days?:7, dry?:true}}; 21 Nov 2026, Ayush: "Auction Insights ... if our Ads, termed You, is in
+   2nd position or below then Alert"). Per ENABLED Search campaign over the last N days: our own search impression share ("You") and each
+   competitor domain's (metrics.auction_insight_search_impression_share by segments.auction_insight_domain), with overlap, position-above and
+   top-of-page rates. Our place = 1 + the domains with a higher impression share than ours. Replaced whole each run in camp.ads_auction. */
+async function gAuction(days: number, dry: boolean) {
+  const { data: accs } = await db.from('ads_accounts').select('account_id').eq('platform', 'google').eq('include', true);
+  const e = addD(ist(), -1), s = addD(e, -(days - 1)), out: string[] = [], all: any[] = [];
+  for (const a of accs || []) {
+    if (left() < 30_000) { out.push('out of time at ' + a.account_id); break; }
+    try {
+      const clause = `segments.date BETWEEN '${s}' AND '${e}' AND campaign.status = 'ENABLED' AND campaign.advertising_channel_type = 'SEARCH'`;
+      const own: Record<string, any> = {};
+      for (const x of await gaql(a.account_id, `SELECT campaign.id, campaign.name, metrics.search_impression_share, metrics.search_top_impression_share, metrics.impressions FROM campaign WHERE ${clause}`))
+        own[String(x.campaign.id)] = { name: x.campaign.name, is: x.metrics.searchImpressionShare == null ? null : Number(x.metrics.searchImpressionShare), imp: num(x.metrics.impressions) };
+      const recs: any[] = [];
+      for (const cid of Object.keys(own)) recs.push({ platform: 'google', account_id: a.account_id, campaign_id: cid, campaign_name: own[cid].name, domain: 'You', period_end: e, days,
+        impression_share: own[cid].is, overlap_rate: null, position_above_rate: null, top_of_page_rate: null, outranking_share: null });
+      for (const x of await gaql(a.account_id, `SELECT campaign.id, segments.auction_insight_domain, metrics.auction_insight_search_impression_share, metrics.auction_insight_search_overlap_rate, metrics.auction_insight_search_position_above_rate, metrics.auction_insight_search_top_impression_percentage, metrics.auction_insight_search_outranking_share FROM campaign WHERE ${clause}`)) {
+        const m = x.metrics || {};
+        recs.push({ platform: 'google', account_id: a.account_id, campaign_id: String(x.campaign.id), campaign_name: (own[String(x.campaign.id)] || {}).name || null, domain: x.segments.auctionInsightDomain, period_end: e, days,
+          impression_share: m.auctionInsightSearchImpressionShare == null ? null : Number(m.auctionInsightSearchImpressionShare), overlap_rate: m.auctionInsightSearchOverlapRate == null ? null : Number(m.auctionInsightSearchOverlapRate),
+          position_above_rate: m.auctionInsightSearchPositionAboveRate == null ? null : Number(m.auctionInsightSearchPositionAboveRate), top_of_page_rate: m.auctionInsightSearchTopImpressionPercentage == null ? null : Number(m.auctionInsightSearchTopImpressionPercentage),
+          outranking_share: m.auctionInsightSearchOutrankingShare == null ? null : Number(m.auctionInsightSearchOutrankingShare) });
+      }
+      if (dry) { all.push(...recs); out.push(a.account_id + ': ' + recs.length + ' (not saved)'); continue; }
+      const { error: de } = await db.from('ads_auction').delete().eq('platform', 'google').eq('account_id', a.account_id);
+      if (de) throw new Error('ads_auction delete: ' + de.message);
+      for (let i = 0; i < recs.length; i += 500) { const { error } = await db.from('ads_auction').insert(recs.slice(i, i + 500)); if (error) throw new Error('ads_auction write: ' + error.message); }
+      out.push(a.account_id + ': ' + recs.length);
+    } catch (err) { out.push(a.account_id + ': ' + String((err as Error).message || err).slice(0, 300)); }
+  }
+  return dry ? { ok: true, notes: out, rows: all } : { ok: true, notes: out };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   T0 = Date.now(); gTok = '';
   let body: any = {}; try { body = await req.json(); } catch (_) { /* empty */ }
   if (!(await caller(req))) return j({ error: 'not allowed' }, 401);
   if (body.crm) return j(await crmSync(body.crm));
+  if (body.srcwise) return j(await srcWiseSync(body.srcwise));
   const platform = body.platform === 'google' ? 'google' : body.platform === 'meta' ? 'meta' : '';
   if (!platform) return j({ error: 'platform must be meta or google' }, 400);
   if (body.verify && platform === 'meta') return j(await fbVerify(String(body.verify.from), String(body.verify.to), body.verify.account || undefined));
+  if (body.quality && platform === 'google') return j(await gQuality(!!body.quality.dry));
+  if (body.auction && platform === 'google') return j(await gAuction(Math.min(30, Math.max(1, +body.auction.days || 7)), !!body.auction.dry));
+  if (body.age && platform === 'google') return j(await gAge(Math.min(90, Math.max(7, +body.age.days || 28)), !!body.age.dry));
   if (body.geo && platform === 'google') return j(await gGeo(Math.min(6, Math.max(1, +body.geo.months || 2))));
   // every Google Ads account under the manager account (16 Nov 2026: finding Dream Ananta's account to add it)
   if (body.accounts && platform === 'google') {

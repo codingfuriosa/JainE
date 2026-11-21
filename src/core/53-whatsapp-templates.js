@@ -447,8 +447,9 @@ function wadSum(daily,ids,r){
 function watDeliveries(){
   const P=WAT_DATA.projects, p=watProj();
   if(!WAD) return '<div class="loader"><div class="spin"></div></div>';
-  let h=WAD_CSS+'<div class="wat-top"><div class="wat-seg">'+P.map(function(x){ return '<button class="'+(x.key===p.key?'on':'')+'" onclick="watPick(\''+x.key+'\')">'+esc(x.label)+'</button>'; }).join('')+'</div></div>';
-  const acc=wadAccFor(p.label);
+  const acc=wadAccFor(p.label), canRep=!!(acc&&WAD.byAcc[acc.id]&&!WAD.state.missing);
+  let h=WAD_CSS+'<div class="wat-top"><div class="wat-seg">'+P.map(function(x){ return '<button class="'+(x.key===p.key?'on':'')+'" onclick="watPick(\''+x.key+'\')">'+esc(x.label)+'</button>'; }).join('')+'</div>'
+    +'<button class="btn" style="margin-left:auto;height:36px" id="wadRepBtn"'+(canRep?'':' disabled title="No figures for this project yet"')+' onclick="wadReport()"><i class="fa-solid fa-file-arrow-down"></i> Download report</button></div>';
   if(WAD.state.missing||!acc||!WAD.byAcc[acc.id]) return h+wadNoData();
   h+=wadBar();
   const r=wadRange(), D=WAD.byAcc[acc.id].daily;
@@ -548,3 +549,77 @@ function watKnocking(){
   });
   return h+'<div class="wat-list">'+(ordered.length?rows:'<div style="padding:16px;color:var(--slate)">No knocking templates on this number.</div>')+'</div>';
 }
+
+/* DOWNLOAD REPORT (21 Nov 2026, Ayush: "whichever Project and Date Range is chosen ... a Button to download ... in the same
+   strip as the Project but at the right side, which downloads everything like this format" - his
+   Ananta_WhatsApp_Report_19_Nov_2026_All_Templates.pdf). One PDF for the project and range on screen (a clicked chart day
+   counts as the range): the four totals, a By stage table, then one table per stage - each template with its day, Sent,
+   Delivered, Read and Not delivered, as Meta's template analytics give them. Built in the page; nothing is sent anywhere. */
+window.wadReport=async function(){
+  const p=watProj(), acc=wadAccFor(p.label); if(!acc||!WAD||!WAD.byAcc[acc.id]) return;
+  const btn=$('wadRepBtn'); if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Preparing…'; }
+  try{
+    const L=await loadPdfLib(); if(!L) throw new Error('The PDF library could not be loaded');
+    const r=wadRange(), D=WAD.byAcc[acc.id].daily;
+    const byName={}; WAD.tpl.forEach(function(t){ if(t.waba_id===acc.id) byName[t.name]=t; });
+    const stages=p.stages.map(function(st){ return {name:st.name,steps:st.steps.filter(function(s){ return s.name; })}; }).filter(function(st){ return st.steps.length; });
+    const sum=function(steps){ const ids={}; steps.forEach(function(s){ const t=byName[s.name]; if(t) ids[t.id]=1; }); return wadSum(D,ids,r); };
+    const all=sum([].concat.apply([],stages.map(function(st){ return st.steps; }))), T=all.tot;
+    const N=function(n){ return Number(n||0).toLocaleString('en-IN'); }, P=function(a,b){ return b?Math.round(a/b*100)+'%':'–'; };
+    const dl=function(iso){ return new Date(iso+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}); };
+    const rangeTxt=r.s===r.e?dl(r.s):dl(r.s)+' to '+dl(r.e);
+    const doc=await L.PDFDocument.create(); doc.setTitle(p.label+' WhatsApp report '+rangeTxt);
+    const reg=await doc.embedFont(L.StandardFonts.Helvetica), bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const W=595, H=842, M=40, INK=L.rgb(.06,.09,.16), SL=L.rgb(.39,.45,.55), LINE=L.rgb(.89,.91,.94), HEAD=L.rgb(.95,.96,.98), RED=L.rgb(.73,.11,.11), GRN=L.rgb(.09,.5,.24), BLU=L.rgb(.15,.39,.92);
+    const clean=function(t){ return String(t==null?'':t).replace(/[–—]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[^ -ÿ]/g,''); };
+    let pg=doc.addPage([W,H]), y=H-M;
+    const txt=function(t,x,yy,o){ o=o||{}; const f=o.bold?bold:reg, s=o.size||9, c=clean(t), tw=f.widthOfTextAtSize(c,s);
+      pg.drawText(c,{x:o.align==='right'?x-tw:o.align==='center'?x-tw/2:x,y:yy,size:s,font:f,color:o.color||INK}); return tw; };
+    const wrap=function(t,w,f,s){ const out=[]; let ln=''; clean(t).split(/\s+/).filter(Boolean).forEach(function(wd){ const x=ln?ln+' '+wd:wd; if(f.widthOfTextAtSize(x,s)>w&&ln){ out.push(ln); ln=wd; } else ln=x; }); if(ln) out.push(ln); return out; };
+    const need=function(h){ if(y-h<M+20){ pg=doc.addPage([W,H]); y=H-M; } };
+    // title
+    txt(p.label+': WhatsApp templates, '+rangeTxt,M,y-14,{bold:true,size:15}); y-=26;
+    wrap('Sends made '+(r.s===r.e?'on '+dl(r.s):'from '+dl(r.s)+' to '+dl(r.e))+' (Meta\'s days, 05:30-05:29 IST) - Source: Meta WhatsApp template analytics, account '+acc.name+' - Prepared '+dl(wadIso(new Date())),W-2*M,reg,8.5)
+      .forEach(function(l){ txt(l,M,y-9,{size:8.5,color:SL}); y-=12; });
+    y-=8;
+    // the four totals
+    const nd=Math.max(0,T.sent-T.delivered), bw=(W-2*M-18)/4;
+    [['Sent (accepted by Meta)',N(T.sent),'',INK],['Delivered',N(T.delivered),P(T.delivered,T.sent),BLU],['Read',N(T.read),P(T.read,T.sent),GRN],['Not delivered',N(nd),P(nd,T.sent),RED]].forEach(function(k,i){
+      const x=M+i*(bw+6); pg.drawRectangle({x:x,y:y-52,width:bw,height:52,borderColor:LINE,borderWidth:1,color:L.rgb(1,1,1)});
+      txt(k[0],x+10,y-15,{size:8,color:SL}); const tw=txt(k[1],x+10,y-38,{bold:true,size:17,color:k[3]}); if(k[2]) txt('('+k[2]+')',x+14+tw,y-37,{size:9,color:SL}); });
+    y-=70;
+    // a table
+    const table=function(title,cols,rows,foot){
+      need(40); txt(title,M,y-12,{bold:true,size:11.5}); y-=20;
+      const widths=cols.map(function(c){ return c[1]; }), x0=M;
+      const drawRow=function(cells,o){ o=o||{}; const f=o.bold?bold:reg, s=8.2;
+        const lines=cells.map(function(c,i){ return cols[i][2]?[clean(c)]:wrap(c,widths[i]-8,f,s); }), h=Math.max(1,Math.max.apply(null,lines.map(function(l){ return l.length; })))*11+7;
+        need(h); let x=x0;
+        if(o.fill) pg.drawRectangle({x:x0,y:y-h,width:widths.reduce(function(a,b){ return a+b; },0),height:h,color:o.fill});
+        lines.forEach(function(ls,i){ ls.forEach(function(ln,j){ const tw=f.widthOfTextAtSize(ln,s); pg.drawText(ln,{x:cols[i][2]?x+widths[i]-4-tw:x+4,y:y-11-j*11,size:s,font:f,color:o.color||INK}); }); x+=widths[i]; });
+        pg.drawLine({start:{x:x0,y:y-h},end:{x:x0+widths.reduce(function(a,b){ return a+b; },0),y:y-h},thickness:.5,color:LINE}); y-=h; };
+      drawRow(cols.map(function(c){ return c[0]; }),{bold:true,fill:HEAD,color:SL});
+      rows.forEach(function(rw){ drawRow(rw); });
+      if(foot) drawRow(foot,{bold:true,fill:HEAD});
+      y-=16; };
+    // by stage
+    const st=stages.map(function(s){ return {name:s.name,S:sum(s.steps).tot}; });
+    table('By stage',[['Stage',175],['Sent',62,1],['Delivered',72,1],['Deliv. %',58,1],['Read',58,1],['Not delivered',90,1]],
+      st.map(function(x){ const n=Math.max(0,x.S.sent-x.S.delivered); return [x.name,N(x.S.sent),N(x.S.delivered),P(x.S.delivered,x.S.sent),N(x.S.read),N(n)]; }),
+      ['Total',N(T.sent),N(T.delivered),P(T.delivered,T.sent),N(T.read),N(nd)]);
+    // one table per stage, each template
+    stages.forEach(function(s){
+      const S=sum(s.steps), tt=S.tot, n0=Math.max(0,tt.sent-tt.delivered);
+      table(s.name,[['Template',150],['When',58],['Sent',42,1],['Delivered',52,1],['Deliv. %',44,1],['Read',40,1],['Not delivered',62,1],['Not deliv. %',57,1]],
+        s.steps.map(function(x){ const t=byName[x.name], m=(t&&S.per[t.id])||{sent:0,delivered:0,read:0}, n=Math.max(0,m.sent-m.delivered);
+          return [x.name+(t?'':' (not on this number)'),x.day==null?'':'Day '+x.day,N(m.sent),N(m.delivered),P(m.delivered,m.sent),N(m.read),N(n),P(n,m.sent)]; }),
+        ['Total '+s.name,'',N(tt.sent),N(tt.delivered),P(tt.delivered,tt.sent),N(tt.read),N(n0),P(n0,tt.sent)]);
+    });
+    need(30); wrap('Not delivered = sent minus delivered: Meta does not report failed messages separately, so this counts failed ones and any not delivered yet. Read is counted against sent.',W-2*M,reg,7.8).forEach(function(l){ txt(l,M,y-9,{size:7.8,color:SL}); y-=11; });
+    const pages=doc.getPages(); pages.forEach(function(pp,i){ const t='Page '+(i+1)+' of '+pages.length; pp.drawText(t,{x:W-M-reg.widthOfTextAtSize(t,7.5),y:22,size:7.5,font:reg,color:SL}); pp.drawText(clean(p.label+' - WhatsApp templates - '+rangeTxt),{x:M,y:22,size:7.5,font:reg,color:SL}); });
+    const bytes=await doc.save();
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
+    a.download=(p.label+'_WhatsApp_Report_'+rangeTxt+'_All_Templates').replace(/[^\w\-]+/g,'_')+'.pdf'; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },2000);
+  }catch(e){ toast('Could not make the report: '+e.message,'err'); }
+  if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-file-arrow-down"></i> Download report'; }
+};

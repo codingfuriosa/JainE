@@ -158,7 +158,7 @@ function caLeads(x){ return obNum(x,0); } // whole numbers everywhere (14 Nov 20
 
 /* TWO TABS (16 Nov 2026, Ayush: "make a new Tab named Analytics"): Overview (this page as it was) and Analytics
    (45-marketing-analytics.js - the models). */
-let CA_TAB=['overview','ads','audience','checklist','analytics'].indexOf(CA_WHERE.tab)>=0?CA_WHERE.tab:'overview';
+let CA_TAB=['overview','ads','audience','checklist','analytics','sources'].indexOf(CA_WHERE.tab)>=0?CA_WHERE.tab:'overview';
 function caKeepWhere(){ try{ localStorage.setItem('caWhere',JSON.stringify({tab:CA_TAB,open:CA.open,plat:CA.plat})); }catch(e){} }
 async function caView(host){
   host.innerHTML=OB_CSS+CA_CSS+MA_CSS+'<div class="ca-tabs" id="caTabs"></div><div id="caMain"></div>';
@@ -166,14 +166,15 @@ async function caView(host){
 }
 function caTabsPaint(){ const t=$('caTabs'); if(!t) return;
   // 17 Nov 2026 (Ayush): Overview renamed Campaigns; a new Ads tab - the same page, read from the ad upwards
-  t.innerHTML=[['overview','Campaigns'],['ads','Ads'],['audience','Audience'],['checklist','Checklist'],['analytics','Analytics']].map(function(x){ return '<button class="ca-tab'+(CA_TAB===x[0]?' on':'')+'" onclick="caTab(\''+x[0]+'\')">'+x[1]+'</button>'; }).join(''); }
+  t.innerHTML=[['overview','Campaigns'],['ads','Ads'],['audience','Audience'],['checklist','Checklist'],['analytics','Analytics'],['sources','Sources']].map(function(x){ return '<button class="ca-tab'+(CA_TAB===x[0]?' on':'')+'" onclick="caTab(\''+x[0]+'\')">'+x[1]+'</button>'; }).join(''); }
 window.caTab=function(t){ if(t===CA_TAB) return;
   // Campaigns <-> Ads share the loaded data: only the table is drawn again
-  if(t!=='analytics'&&CA_TAB!=='analytics'&&CA_D&&$('caBody')){ CA_TAB=t; caTabsPaint(); caPaint(); return; }
+  if(t!=='analytics'&&CA_TAB!=='analytics'&&t!=='sources'&&CA_TAB!=='sources'&&CA_D&&$('caBody')){ CA_TAB=t; caTabsPaint(); caPaint(); return; }
   CA_TAB=t; caKeepWhere(); caTabsPaint(); caShowTab(); };
 async function caShowTab(){
   const m=$('caMain'); if(!m) return;
   if(CA_TAB==='analytics') return maView(m);
+  if(CA_TAB==='sources') return srcView(m);   // 19 Nov 2026: what every lead source produced, from the CRM (49-crm-sources.js)
   m.innerHTML='<div id="caHead"></div><div id="caBody"><div class="loader"><div class="spin"></div></div></div>';
   CA_D=null; await caLoad();
 }
@@ -369,10 +370,10 @@ function caPaint(){
   const cols=function(t,w,x){ w=w||{};
     return cell(t.spend,w.spend,obMoney,null,true)
       +(cmpOn?cell(t.ln,w.ln,function(v){ return caLeads(v,t.pl); },true).replace('</td>',(t.tag||'')+'</td>'):'<td>'+t.lead+'</td>')
-      +crmPart(x,'a')+cell(t.cpl,w.cpl,obMoney,false)+crmPart(x,'b')+(fbX?xCells(t,w,fbX):cell(t.clicks,w.clicks,obNum,true)+cell(t.ctr,w.ctr,obPct,true))+crmPart(x,'c'); };
-  const sum=function(rows,pl){ const a=caAgg(rows); return {spend:a.spend,ln:a.leads,pl:pl,lead:caLeads(a.leads,pl),cpl:a.cpl,clicks:a.clicks,ctr:a.ctr,imp:a.impr,fl:a.hasForm?a.form:null}; };
+      +crmPart(x,'a')+cell(t.cpl,w.cpl,obMoney,false)+crmPart(x,'b')+(fbX?xCells(t,w,fbX):cell(t.clicks,w.clicks,obNum,true)+cell(t.ctr,w.ctr,obPct,true)+(gxL&&gxL.length?gCells(t,w,gxL):''))+crmPart(x,'c'); };
+  const sum=function(rows,pl){ const a=caAgg(rows); return {spend:a.spend,ln:a.leads,pl:pl,lead:caLeads(a.leads,pl),cpl:a.cpl,clicks:a.clicks,ctr:a.ctr,imp:a.impr,fl:a.hasForm?a.form:null,gc:(rows||[]).map(function(x){ return x.campaign_id; }).filter(Boolean)}; };
   const raw=function(x,pl,lead){ x=x||{}; const s=+x.spend||0, rr=x.results==null&&x.spend!=null?null:+x.results||0, tag=lead===false?' <span class="tag t-gray" style="font-size:10px">not leads</span>':'';
-    return {spend:s,ln:rr,pl:pl==='google'?'google':'meta',tag:tag,lead:(rr==null?'<span style="color:#94a3b8" title="Google leads per ad group are read from 13 Nov 2026 night">—</span>':obNum(rr,0))+tag,cpl:rr?s/rr:null,imp:+x.impressions||0,clicks:+x.clicks||0,ctr:+x.impressions?x.clicks/x.impressions*100:null,fl:x.form_leads!=null?+x.form_leads:null}; };
+    return {spend:s,ln:rr,pl:pl==='google'?'google':'meta',tag:tag,lead:(rr==null?'<span style="color:#94a3b8" title="Google leads per ad group are read from 13 Nov 2026 night">—</span>':obNum(rr,0))+tag,cpl:rr?s/rr:null,imp:+x.impressions||0,clicks:+x.clicks||0,ctr:+x.impressions?x.clicks/x.impressions*100:null,fl:x.form_leads!=null?+x.form_leads:null,gc:x.campaign_id&&!x.adset_id&&!x.ad_id?[x.campaign_id]:(x.gc||null)}; };
   const prev=CA_D.prev||[];
   /* CRM COLUMNS (10 Nov 2026, Ayush): beside the platforms' own leads, the CRM's count of the Google leads left after
      its filtering, so the two can be compared - and how far they got: QL% (qualified of CRM leads), CPQL (Google spend
@@ -390,7 +391,28 @@ function caPaint(){
      where more than one column can be shown or hidden, for both tabs, Facebook only; in Ads CTR, Impressions, Reach won't be
      there"). fbX = the extra columns picked for the Facebook section being drawn (null = the usual Clicks and CTR). */
   let fbX=null;
-  const xHead=function(list){ return list.map(function(k){ return '<th>'+CA_XC_NAMES[k]+'</th>'; }).join(''); };
+  /* GOOGLE'S EXTRA COLUMNS (19 Nov 2026, Ayush): gxL = the extras picked for the Google section being drawn, added after Clicks and CTR.
+     Impression share is Google's own figure per campaign and day (camp.ads_daily, read the first time a share column is picked): the
+     period's share = impressions / the impressions the campaign was eligible for (impressions / share, every day added up); the lost
+     shares are weighted the same way. Ad groups and ads have none. */
+  let gxL=null;
+  window._caGis=window._caGis||{};
+  const gisKey=function(s,e){ return s+'|'+e; };
+  const gisRows=function(s,e){ const b=window._caGis[gisKey(s,e)]; return b&&b.st==='ok'?b.d:null; };
+  const gisVal=function(ids,s,e,k){ const rows=gisRows(s,e); if(!ids||!rows) return undefined;
+    const m={}; ids.forEach(function(i){ m[i]=1; }); let el=0, im=0, lb=0, lr=0, n=0;
+    rows.forEach(function(x){ if(!m[x.campaign_id]) return; const sh=+x.imp_share, imp=+x.impressions; if(!(sh>0)||!(imp>=0)) return; const ee=imp/sh; el+=ee; im+=imp; lb+=ee*(+x.budget_lost_is||0); lr+=ee*(+x.rank_lost_is||0); n++; });
+    if(!n||!(el>0)) return null; return k==='is'?im/el*100:k==='blis'?lb/el*100:lr/el*100; };
+  const gisNeed=function(s,e){ const key=gisKey(s,e); if(window._caGis[key]) return; window._caGis[key]={st:'load'}; caGisLoad(key,s,e); };
+  const xHead=function(list){ return list.map(function(k){ return '<th'+(k==='is'?' title="Google\'s Search impression share: the share of the searches you could have shown on that you did"':k==='blis'?' title="Search impressions lost because the budget ran out"':k==='rlis'?' title="Search impressions lost because the ad rank was too low"':'')+'>'+CA_XC_NAMES[k]+'</th>'; }).join(''); };
+  const gCells=function(t,w,list){ w=w||{}; const cr0=r, c0=cr; return list.map(function(k){ const imp=t.imp, sp=t.spend;
+    if(k==='imp') return cell(imp,w.imp,obNum,true);
+    if(k==='cpm') return cell(imp&&sp!=null?sp/imp*1000:null,w.imp&&w.spend!=null?w.spend/w.imp*1000:null,obMoney,false);
+    if(k==='cpc') return cell(t.clicks&&sp!=null?sp/t.clicks:null,w.clicks&&w.spend!=null?w.spend/w.clicks:null,obMoney,false);
+    const v=gisVal(t.gc,cr0.s,cr0.e,k), vw=cmpOn&&c0?gisVal(w.gc,c0.s,c0.e,k):null;
+    if(v===undefined) return '<td title="'+(t.gc?'Reading the impression share':'Impression share is Google\'s figure per campaign - ad groups and ads have none')+'"><span style="color:#94a3b8">'+(t.gc?'…':'—')+'</span></td>';
+    if(v===null) return '<td title="Google gave no impression share for these dates (Display, Video and very small campaigns have none)"><span style="color:#94a3b8">—</span></td>';
+    return cell(v,vw,obPct,k==='is'?true:false); }).join(''); };
   const rCell=function(R,fmt){ if(!R) return '<td><span style="color:#94a3b8">—</span></td>'; if(R.st==='load') return '<td title="Asking Meta for the reach of these dates"><i class="fa-solid fa-spinner fa-spin" style="color:#94a3b8;font-size:11px"></i></td>';
     if(R.st==='err'||R.v==null) return '<td title="'+esc(R.why||'No reach from Meta for these dates')+'"><span style="color:#94a3b8">—</span></td>'; return '<td>'+fmt(R.v)+'</td>'; };
   const xCells=function(t,w,list){ w=w||{}; return list.map(function(k){ const imp=t.imp, sp=t.spend;
@@ -426,7 +448,7 @@ function caPaint(){
   const ct=function(t,title){ return '<th class="ca-crm" title="'+esc(title)+'">'+t+'</th>'; };
   const head=function(name,res,cpl,crm){ return '<tr><th class="ca-nm">'+name+'</th><th title="Daily budget as set today">Daily budget</th><th>Spend</th><th>'+res+'</th>'
     +(crm?ct('CRM leads','Google and Facebook leads in the CRM after its filtering')+ct('QL','Qualified leads (CRM)')+ct('SV','Site visits (CRM)')+ct('Booked','Booked (CRM)')+ct('Lost','Lost (CRM)'):'')
-    +'<th>'+cpl+'</th>'+(crm?ct('CRM CPL','Spend per CRM lead - the cost per lead counted on the CRM\x27s leads, not the platform\x27s')+ct('CPQL','Spend per qualified lead (CRM)'):'')+(fbX?xHead(fbX):'<th>Clicks</th><th>CTR</th>')
+    +'<th>'+cpl+'</th>'+(crm?ct('CRM CPL','Spend per CRM lead - the cost per lead counted on the CRM\x27s leads, not the platform\x27s')+ct('CPQL','Spend per qualified lead (CRM)'):'')+(fbX?xHead(fbX):'<th>Clicks</th><th>CTR</th>'+(gxL&&gxL.length?xHead(gxL):''))
     +(crm?ct('QL%','Qualified leads as a share of CRM leads')+(noSvp?'':ct('QL to SV %','Site visits as a share of qualified leads')):'')+'</tr>'; };
   // a name never wraps: it stops at the column's width with "...", the whole name on hover
   const nm=function(lead,text){ return '<td class="ca-nm"><span class="ca-nmx" title="'+esc(text)+'">'+lead+esc(text)+'</span></td>'; };
@@ -443,7 +465,9 @@ function caPaint(){
     const was=function(id){ return prev.filter(function(x){ return x.platform===pl&&x.campaign_id===id; }); };
     const setsOf=function(list,cid){ const g={}; list.forEach(function(a){ if(a.platform!==pl||a.campaign_id!==cid||!a.adset_id) return; const x=g[a.adset_id]||(g[a.adset_id]={adset_id:a.adset_id,spend:0,results:null,clicks:0,impressions:0}); x.spend+=+a.spend||0; if(a.results!=null) x.results=(x.results||0)+(+a.results); x.clicks+=+a.clicks||0; x.impressions+=+a.impressions||0; }); return g; };
     fbX=pl==='meta'?caXcList('camp'):null;
-    const nc=7+NCRM+(fbX?fbX.length-2:0);
+    gxL=pl==='google'?caXcList('gcamp'):null;
+    if(gxL&&gxL.some(function(k){ return k==='is'||k==='blis'||k==='rlis'; })){ gisNeed(r.s,r.e); if(cmpOn&&cr) gisNeed(cr.s,cr.e); }
+    const nc=7+NCRM+(fbX?fbX.length-2:0)+(gxL?gxL.length:0);
     // Reach / Frequency picked: asked from Meta for exactly these dates (ad-reach), campaigns, ad sets and ads of the section
     const needR=!!fbX&&(fbX.indexOf('freq')>=0||fbX.indexOf('reach')>=0), SK='sec|'+[r.s,r.e,p,CA_ST].join('|');
     window._caReach=window._caReach||{};
@@ -512,7 +536,7 @@ function caPaint(){
       +' <span style="font-weight:500;color:var(--slate);font-size:12px">- '+camps.length+' '+(CA_ST==='active'?'active':CA_ST==='inactive'?'inactive':'')+(CA_ST==='both'?'':' ')+'campaign'+(camps.length===1?'':'s')+'; click one for its '+W.sets.toLowerCase()+'</span></div>'
       +'<div style="overflow-x:auto"><table class="ca-tbl"><thead>'+head('Campaign',pl==='meta'?'Results':W.res,pl==='meta'?'Cost per result':W.per,true)+'</thead><tbody>'
       +(sec||'<tr><td colspan="'+nc+'" style="text-align:center;color:var(--slate);padding:18px">No '+(CA_ST==='both'?'':CA_ST+' ')+'campaign spent in this period</td></tr>')+'</tbody>'+tot+'</table></div></div>';
-    fbX=null;
+    fbX=null; gxL=null;
     return secOut+caAds(p,pl);
   };
   const shown=CA.proj==='all'?P:[CA.proj];
@@ -525,7 +549,8 @@ function caPaint(){
      copied into another campaign or ad set gets a new id but keeps its name) are counted together - and its arrow opens
      the campaigns it runs in, each campaign the ad sets / ad groups it runs in there. Every row shows that row's own
      figures, with the same columns, budgets, CRM and Active / Inactive / Both. The picture opens the ad. */
-  const adsTree=function(p,pl){
+  const adsTree=function(p,pl){ gxL=pl==='google'?caXcList('gads'):null; try{ return adsTree0(p,pl); } finally{ gxL=null; } };
+  const adsTree0=function(p,pl){
     const W=CA_PLAT[pl], FB=pl==='meta';
     noSvp=true;
     const top='<div class="ca-sec"><div style="padding:11px 14px;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--line)"><i class="'+W.icon+'" style="color:'+W.color+'"></i> '+W.name+' · '+esc(p);
@@ -603,7 +628,7 @@ function caPaint(){
       if(!lr.length) return Object.assign(raw(Object.assign({},x,{results:0}),pl0,null),{ln:null,cpl:null,lead:'<span style="color:#94a3b8" title="Not a lead campaign - its results are reach, views or engagement, not leads">—</span>'});
       const n=lr.reduce(function(t0,r0){ return r0.results==null?t0:t0+(+r0.results||0); },0);
       return raw(Object.assign({},x,{results:n}),pl0,null); };
-    const nc=FB?NFB:6+NCRM;
+    const nc=FB?NFB:6+NCRM+(gxL?gxL.length:0);
     window._caAdsTab=[]; window._caAxK=[]; let rows='';
     ads.slice(0,ashow).forEach(function(a){
       const ae=E['ad:'+a.ad_id]||{}, aon=AX.ad===a.k, i=window._caAdsTab.push(a)-1, copies=Object.keys(a.ids).length;
@@ -772,6 +797,8 @@ function caPaint(){
    a download (PDF) icon, and for super admins / Manash the public link switch and copy button (18 Nov 2026, Ayush: no Run
    button). It shows the latest saved run: the daily points (every day 00:00 IST) and the latest weekly (Mondays 01:00 IST). */
 let CK_SHARE={loaded:false,on:false,token:null,busy:false};
+let CK_PLAT='facebook';
+window.ckPlat=function(k){ if(CK_PLAT===k) return; CK_PLAT=k; ckPaint(); };
 async function ckShareCall(body){
   const {data:{session}}=await sb.auth.getSession();
   const r=await fetch(SUPABASE_URL+'/functions/v1/checklist-share',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify(body)});
@@ -801,24 +828,27 @@ function ckEnsure(cb){
   if(window.ckRender) return cb();
   if(window._ckLoading){ window._ckLoading.push(cb); return; }
   window._ckLoading=[cb];
-  const s=document.createElement('script'); s.src='assets/ck-render.js?v=5';
+  const s=document.createElement('script'); s.src='assets/ck-render.js?v=6';
   s.onload=function(){ const st=document.createElement('style'); st.textContent=window.CK_CSS||''; document.head.appendChild(st); const l=window._ckLoading; window._ckLoading=null; l.forEach(function(f){ f(); }); };
   s.onerror=function(){ const l=window._ckLoading; window._ckLoading=null; l.forEach(function(f){ f(true); }); };
   document.head.appendChild(s);
 }
 function ckPaint(){
   const head=$('caHead'), body=$('caBody'); if(!head||!body) return;
-  const K=window._caCk;
-  if(!K) caCkLoad();
-  head.innerHTML='<div class="ob-bar"><span style="font-weight:700;font-size:14px">Facebook Checklist</span>'
-    
+  const G=CK_PLAT==='google', K=G?window._caCkG:window._caCk;
+  if(!K) caCkLoad(CK_PLAT);
+  /* FACEBOOK | GOOGLE (19 Nov 2026, Ayush: "Execute the Google Checklist, Facebook is done already"): one Checklist tab, the platform
+     chosen at the top. Google's points come from the Google sheet of "Pre-emptive Alert - Checklists" (edge function gads-checklist,
+     saved in camp.gads_check_runs / gads_check_flags). The public link shows the Facebook checklist only. */
+  const sw=function(k,t){ return '<button type="button" onclick="ckPlat(\''+k+'\')" style="height:34px;padding:0 14px;border:0;border-radius:8px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;background:'+(CK_PLAT===k?'var(--bg-card,#fff)':'transparent')+';color:'+(CK_PLAT===k?'var(--ink)':'var(--slate)')+';box-shadow:'+(CK_PLAT===k?'0 1px 3px rgba(15,23,42,.15)':'none')+'">'+t+'</button>'; };
+  head.innerHTML='<div class="ob-bar"><span style="display:inline-flex;gap:2px;padding:3px;border-radius:11px;background:#eef2f7">'+sw('facebook','Facebook Checklist')+sw('google','Google Checklist')+'</span>'
     +'<span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap">'
     +'<button class="btn" style="height:36px;width:40px;padding:0;justify-content:center;gap:0" onclick="ckPdf()"'+(K&&K.flags&&K.flags.length?' title="Download PDF"':' disabled title="Nothing to download yet"')+'><i class="fa-solid fa-download"></i></button>'
-    +ckShareBar()+'</span></div>';
+    +(G?'':ckShareBar())+'</span></div>';
   if(!K||K.st==='load'){ body.innerHTML='<div class="loader"><div class="spin"></div></div>'; return; }
   ckEnsure(function(err){
     if(err){ body.innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load the checklist layout - reload the page.</div>'; return; }
-    body.innerHTML='<div style="padding:2px 0 30px">'+window.ckRender({flags:K.flags||[],runs:K.runs||[],live:!!K.live},{})+'</div>';
+    body.innerHTML='<div style="padding:2px 0 30px">'+window.ckRender({flags:K.flags||[],runs:K.runs||[],live:!!K.live,emptyNote:G?'No Google check has been saved yet. The daily points are checked every day at 00:15 IST, the weekly points every Monday at 01:15 IST.':''},{})+'</div>';
   });
 }
 /* DIRECT DOWNLOAD (19 Nov 2026, Ayush: "direct file download", no print preview then Save). The checklist is drawn
@@ -833,7 +863,7 @@ function ckPdfLib(cb){
   CK_PDF_LIB.push(cb);
 }
 window.ckPdf=function(){
-  const K=window._caCk; if(!K||!K.flags||!K.flags.length) return;
+  const G=CK_PLAT==='google', K=G?window._caCkG:window._caCk, PT=G?'Google Checklist':'Facebook Checklist'; if(!K||!K.flags||!K.flags.length) return;
   if(window._ckPdfBusy) return; window._ckPdfBusy=true;
   toast('Making the PDF…');
   ckEnsure(function(err){
@@ -844,11 +874,11 @@ window.ckPdf=function(){
       box.id='ckPdfBox'; box.style.cssText='position:fixed;left:-12000px;top:0;width:1000px;background:#fff;font-family:Inter,system-ui,Segoe UI,Arial,sans-serif';
       box.innerHTML='<style>#ckPdfBox .hd{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e0121c;padding:0 0 10px;margin:0 0 14px}#ckPdfBox .hd b{font-size:18px}#ckPdfBox .hd span{color:#64748b;font-size:12px}'
         +window.CK_CSS+'#ckPdfBox .ck-noprint{display:none!important}#ckPdfBox .ck tr{break-inside:avoid}</style>'
-        +'<div class="hd"><b>Facebook Checklist · The Jain Group</b><span>'+esc(new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}))+'</span></div>'
+        +'<div class="hd"><b>'+PT+' · The Jain Group</b><span>'+esc(new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}))+'</span></div>'
         +window.ckRender({flags:K.flags,runs:K.runs||[],live:!!K.live},{print:true});
       document.body.appendChild(box);
       const done=function(){ box.remove(); window._ckPdfBusy=false; };
-      window.html2pdf().set({ margin:[10,8,10,8], filename:'Facebook Checklist '+new Date().toISOString().slice(0,10)+' - The Jain Group.pdf',
+      window.html2pdf().set({ margin:[10,8,10,8], filename:PT+' '+new Date().toISOString().slice(0,10)+' - The Jain Group.pdf',
         image:{type:'jpeg',quality:0.95}, html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff',windowWidth:1000},
         jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}, pagebreak:{mode:['css','legacy'],avoid:['tr','.ck-ph']} })
         .from(box).save().then(done,function(){ done(); toast('Could not make the PDF','err'); });
@@ -856,8 +886,10 @@ window.ckPdf=function(){
   });
 };
 // the Columns dropdown of the Facebook sections (Campaigns: CA_XC.camp, Ads: CA_XC.ads), kept in this browser
-const CA_XC_NAMES={freq:'Frequency',reach:'Reach',imp:'Impressions',cpm:'CPM',cpc:'CPC',ctr:'CTR',clicks:'Clicks'};
-const CA_XC_OPTS={camp:['freq','reach','imp','cpm','cpc','ctr','clicks'],ads:['freq','cpm','cpc','clicks']};
+const CA_XC_NAMES={freq:'Frequency',reach:'Reach',imp:'Impressions',cpm:'CPM',cpc:'CPC',ctr:'CTR',clicks:'Clicks',is:'Search impression share',blis:'Lost IS (budget)',rlis:'Lost IS (rank)'};
+/* GOOGLE'S EXTRA COLUMNS (19 Nov 2026, Ayush: "the extra things add in the dropdown like it happens for Facebook"): gcamp = Campaigns
+   tab, gads = Ads tab (impression share is per campaign, so only the Campaigns tab has it). Clicks and CTR stay in Google's table as before. */
+const CA_XC_OPTS={camp:['freq','reach','imp','cpm','cpc','ctr','clicks'],ads:['freq','cpm','cpc','clicks'],gcamp:['imp','cpc','cpm','is','blis','rlis'],gads:['imp','cpc','cpm']};
 window.CA_XC=(function(){ try{ return JSON.parse(localStorage.getItem('caXC')||'{}')||{}; }catch(e){ return {}; } })();
 function caXcList(tab){ const on=(window.CA_XC[tab]||[]); return CA_XC_OPTS[tab].filter(function(k){ return on.indexOf(k)>=0; }); }
 function caXcPicker(tab){ const on=caXcList(tab);
@@ -868,31 +900,43 @@ function caXcPicker(tab){ const on=caXcList(tab);
    on the top strip: the period on the left of its menu, and on the Campaigns / Ads tabs the extra Facebook columns on the
    right (hidden by default). A period the Compare side already uses cannot be picked (as before). */
 function caPerPicker(off){
-  const tab=CA_TAB==='overview'?'camp':CA_TAB==='ads'?'ads':null, on=tab?caXcList(tab):[], open=window._caXcOpen==='per';
+  const tab=CA_TAB==='overview'?'camp':CA_TAB==='ads'?'ads':null, on=tab?caXcList(tab).concat(caXcList('g'+tab)):[], open=window._caXcOpen==='per';
   const cur=OB_PERIODS.filter(function(o){ return String(o[0])===String(OB_P.period); })[0];
   const label=esc(cur?cur[1]:'Period')+(on.length?' <span style="color:var(--slate);font-weight:500">· '+on.length+' col'+(on.length===1?'':'s')+'</span>':'');
   const item=function(o){ const dis=off&&off!=='custom'&&o[0]===off, sel=String(o[0])===String(OB_P.period);
-    return '<button type="button"'+(dis?' disabled title="Chosen on the Compare side"':'')+' onclick="caPerPick('+esc(JSON.stringify(String(o[0])))+')" style="display:block;width:100%;text-align:left;border:0;background:'+(sel?'#eef4ff':'transparent')+';color:'+(dis?'#cbd5e1':sel?'#1d4ed8':'var(--ink)')+';font:inherit;font-size:13px;font-weight:'+(sel?700:500)+';padding:7px 10px;border-radius:6px;cursor:'+(dis?'not-allowed':'pointer')+';white-space:nowrap">'+esc(o[1])+'</button>'; };
-  const cols=tab?'<div style="border-left:1px solid var(--line);padding-left:8px;margin-left:6px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--slate);padding:6px 8px;white-space:nowrap">Facebook columns</div>'
-    +CA_XC_OPTS[tab].map(function(k){ return '<label style="display:flex;gap:8px;align-items:center;padding:6px 8px;font-size:13px;cursor:pointer;border-radius:6px;white-space:nowrap;margin:0"><input type="checkbox" style="height:auto;width:auto;padding:0;margin:0;border:0"'+(on.indexOf(k)>=0?' checked':'')+' onchange="caXcSet(\''+tab+'\',\''+k+'\',this.checked)"> '+CA_XC_NAMES[k]+'</label>'; }).join('')+'</div>':'';
+    return '<button type="button"'+(dis?' disabled title="Chosen on the Compare side"':'')+' onclick="caPerPick('+esc(JSON.stringify(String(o[0])))+')" style="display:block;width:100%;text-align:left;border:0;background:'+(sel?'#eef4ff':'transparent')+';color:'+(dis?'#cbd5e1':sel?'#1d4ed8':'var(--ink)')+';font:inherit;font-size:13px;font-weight:'+(sel?700:500)+';height:32px;padding:0 10px;border-radius:6px;cursor:'+(dis?'not-allowed':'pointer')+';white-space:nowrap">'+esc(o[1])+'</button>'; };
+  /* THREE EVEN COLUMNS (20 Nov 2026, Ayush: "the 2 sections are still not nicely divided, not nicely aligned"): Date range | Facebook columns |
+     Google columns - the same width, the same heading strip, every row the same height, a thin divider the full height between them. */
+  const colBox=function(title,icon,body,first){ var w=first?176:206; return '<div style="flex:0 0 '+w+'px;width:'+w+'px;padding:0 6px;box-sizing:border-box'+(first?'':';border-left:1px solid var(--line)')+'"><div style="height:30px;display:flex;align-items:center;gap:7px;padding:0 10px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate);white-space:nowrap;border-bottom:1px solid var(--line);margin-bottom:4px">'+icon+title+'</div>'+body+'</div>'; };
+  const panel=function(tb,title,icon){ const onT=caXcList(tb); return colBox(title,icon,CA_XC_OPTS[tb].map(function(k){ return '<label style="display:flex;gap:9px;align-items:center;height:32px;padding:0 10px;font-size:13px;font-weight:500;cursor:pointer;border-radius:6px;white-space:nowrap;margin:0"><input type="checkbox" style="height:auto;width:auto;padding:0;margin:0;border:0;flex:none"'+(onT.indexOf(k)>=0?' checked':'')+' onchange="caXcSet(\''+tb+'\',\''+k+'\',this.checked)"><span>'+CA_XC_NAMES[k]+'</span></label>'; }).join(''),false); };
+  const cols=tab?panel(tab,'Facebook','<i class="fa-brands fa-facebook" style="color:#1877f2;font-size:13px"></i>')+panel('g'+tab,'Google','<i class="fa-brands fa-google" style="color:#ea4335;font-size:12px"></i>'):'';
   return '<span onclick="event.stopPropagation()" style="position:relative;display:inline-block"><button type="button" id="caPer" onclick="caXcOpen(\'per\')" style="height:36px;padding:0 11px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;font-weight:600;background:var(--bg-card);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:8px;white-space:nowrap">'+label+' <i class="fa-solid fa-chevron-'+(open?'up':'down')+'" style="font-size:10px;color:var(--slate)"></i></button>'
-    +(open?'<div style="position:absolute;left:0;top:calc(100% + 4px);z-index:40;background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.14);padding:6px;display:flex;align-items:flex-start"><div style="min-width:150px">'+OB_PERIODS.map(item).join('')+'</div>'+cols+'</div>':'')+'</span>';
+    +(open?'<div style="position:absolute;left:0;top:calc(100% + 4px);z-index:40;background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.14);padding:8px 4px;display:flex;align-items:stretch">'+colBox('Date range','<i class="fa-regular fa-calendar" style="font-size:12px"></i>',OB_PERIODS.map(item).join(''),true)+cols+'</div>':'')+'</span>';
 }
 window.caPerPick=function(v){ window._caXcOpen=null; if(String(v)===String(OB_P.period)){ caPaint(); return; } OB_P.period=v; caReset(); caLoad(); };
+// Google's impression share per campaign and day for the dates on screen (camp.ads_daily, kept for the visit), then drawn again
+window.caGisLoad=async function(key,s,e){
+  const box=window._caGis[key];
+  try{ box.d=(await caAllPages(function(){ return sb.schema('camp').from('ads_daily').select('campaign_id,day,impressions,imp_share,budget_lost_is,rank_lost_is').eq('platform','google').gte('day',s).lte('day',e).not('imp_share','is',null).order('day').order('campaign_id'); }))||[]; }
+  catch(err){ console.warn('impression share',err); box.d=[]; }
+  box.st='ok';
+  if(typeof CA_TAB!=='undefined'&&(CA_TAB==='overview')&&CA_D&&!CA_D.adsLoading) caPaint();
+};
 window.caXcOpen=function(tab){ window._caXcOpen=window._caXcOpen===tab?null:tab; caPaint(); };
 window.caXcSet=function(tab,k,on){ const l=(window.CA_XC[tab]||[]).filter(function(x){ return x!==k; }); if(on) l.push(k); window.CA_XC[tab]=l; try{ localStorage.setItem('caXC',JSON.stringify(window.CA_XC)); }catch(e){} caPaint(); };
 if(!window._caXcDoc){ window._caXcDoc=true; document.addEventListener('click',function(){ if(window._caXcOpen){ window._caXcOpen=null; if(typeof CA_D!=='undefined'&&CA_D) caPaint(); } }); }
 // the Checklist tab: open / close a campaign or an ad set; the latest saved runs; a check worked out now (nothing saved or sent)
 window.caCk=function(level,id){ const CK=CA.ck=CA.ck||{c:null,s:null}; if(level==='c'){ CK.c=CK.c===id?null:id; CK.s=null; } else CK.s=CK.s===id?null:id; caPaint(); };
-window.caCkLoad=async function(){
-  window._caCk={st:'load'};
+window.caCkLoad=async function(plat){
+  const G=plat==='google', slot=G?'_caCkG':'_caCk', pre=G?'gads':'fb';
+  window[slot]={st:'load'};
   try{
-    const r=await sb.schema('camp').from('fb_check_runs').select('id,kind,run_day,ran_at,period_from,period_to,flags').order('ran_at',{ascending:false}).limit(20);
+    const r=await sb.schema('camp').from(pre+'_check_runs').select('id,kind,run_day,ran_at,period_from,period_to,flags').order('ran_at',{ascending:false}).limit(20);
     if(r.error) throw r.error;
     const runs=[]; ['daily','weekly'].forEach(function(k){ const x=(r.data||[]).filter(function(y){ return y.kind===k; })[0]; if(x) runs.push(x); });
-    let flags=[]; if(runs.length){ const q=await sb.schema('camp').from('fb_check_flags').select('*').in('run_id',runs.map(function(x){ return x.id; })).limit(5000); if(q.error) throw q.error; flags=q.data||[]; }
-    window._caCk={st:'ok',runs:runs,flags:runs.length?flags:null};
-  }catch(e){ window._caCk={st:'ok',runs:[],flags:null,err:String(e&&e.message||e)}; }
+    let flags=[]; if(runs.length){ const q=await sb.schema('camp').from(pre+'_check_flags').select('*').in('run_id',runs.map(function(x){ return x.id; })).limit(5000); if(q.error) throw q.error; flags=q.data||[]; }
+    window[slot]={st:'ok',runs:runs,flags:runs.length?flags:null};
+  }catch(e){ window[slot]={st:'ok',runs:[],flags:null,err:String(e&&e.message||e)}; }
   if(CA_TAB==='checklist') ckPaint();
 };
 window.caCkRun=async function(){

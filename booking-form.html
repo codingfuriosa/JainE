@@ -257,6 +257,10 @@
     .grid>.f,.stack>.f,.pair>.f,.ac>.f,.sb>.f{display:grid;grid-template-columns:210px minmax(0,1fr);max-width:952px;column-gap:22px;row-gap:5px;align-items:start}
     .grid>.f>label,.stack>.f>label,.pair>.f>label,.ac>.f>label,.sb>.f>label{grid-column:1;grid-row:1;padding-top:13px;font-size:14px;line-height:1.35}
     .grid>.f>:not(label),.stack>.f>:not(label),.pair>.f>:not(label),.ac>.f>:not(label),.sb>.f>:not(label){grid-column:2;min-width:0}
+    /* MORE ABOUT YOU (20 Nov 2026, Ayush: "make the fields full width - why is there negative space on the right"): opened, its questions use the whole
+       width in the same columns as the sections around it (label | answer, no 952px stop) instead of one narrow column with an empty right side */
+    details.opt-d[open]>.stack{display:grid;grid-template-columns:repeat(auto-fill,minmax(520px,1fr));column-gap:44px;align-items:start}
+    details.opt-d>.stack>.f{max-width:none}
     input[type=text],input[type=tel],input[type=email],input[type=date],textarea{font-size:15.5px;min-height:46px}
     textarea{min-height:68px}
     .pick{font-size:15.5px;min-height:46px}
@@ -408,6 +412,6 @@
   <form id="app" autocomplete="on" novalidate onsubmit="return false"></form>
 </div>
 <div class="nav" id="nav"></div>
-<script src="booking-form.js?v=20261119d"></script>
+<script src="booking-form.js?v=20261120a"></script>
 </body>
 </html>

@@ -27,8 +27,8 @@ function prmStyles(){
   .prm-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
   .prm-src{font-size:12.5px;color:var(--slate)}
   .prm-src b{color:var(--ink)}
-  .prm-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
-  @media(max-width:900px){.prm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .prm-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-bottom:16px}
+  @media(max-width:1100px){.prm-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:700px){.prm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
   .prm-stat{background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:14px;padding:14px 16px;cursor:pointer;transition:border-color .12s,box-shadow .12s}
   .prm-stat:hover{border-color:#c4b5fd}
   .prm-stat.on{border-color:#7e22ce;box-shadow:0 0 0 3px #f3e8ff}
@@ -80,6 +80,7 @@ window.prmRender=async function(host){
   try{ await prmFvRead(); }catch(_e){ PRM_FVSTATUS={}; }
   PRM.rows=((l.data||[]).filter(r=>r.change==='removed'||(Number(r.net_outstanding||0)>=PRM_MIN&&PRM_FVSTATUS[r.booking_no]==='Active'))); PRM.settings=s.data||{};
   const keep=new Set(PRM.rows.map(r=>r.booking_no)); PRM.sel.forEach(k=>{ if(!keep.has(k)) PRM.sel.delete(k); });
+  await prmSchedRead();
   prmDraw(host);
 };
 // Who belongs in each view.
@@ -97,7 +98,7 @@ function prmDraw(host){
   const remind=PRM.rows.filter(r=>prmIn(r,'remind')), changes=PRM.rows.filter(r=>prmIn(r,'changes')),
         held=PRM.rows.filter(r=>prmIn(r,'held')), removed=PRM.rows.filter(r=>prmIn(r,'removed'));
   const total=remind.reduce((a,r)=>a+Number(r.net_outstanding||0),0);
-  const stat=(view,l,v,s)=>'<div class="prm-stat'+(PRM.f.view===view?' on':'')+'" onclick="PRM.f.view=\''+view+'\';prmDraw()"><div class="l">'+l+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>';
+  const stat=(view,l,v,s)=>'<div class="prm-stat'+(PRM.f.view===view?' on':'')+'" data-v="'+view+'" onclick="PRM.f.view=\''+view+'\';prmDraw()"><div class="l">'+l+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>';
   const projects=[...new Set(PRM.rows.filter(r=>r.change!=='removed').map(r=>r.project))].sort();
   const pc=p=>PRM.rows.filter(r=>prmIn(r,PRM.f.view)&&(!p||r.project===p)).length;
   host.innerHTML='<div class="prm-head"><div class="prm-src"><i class="fa-solid fa-file-excel" style="color:#16a34a"></i> From Farvision\u2019s <b>Customer Outstanding Summary</b>, '
@@ -108,17 +109,96 @@ function prmDraw(host){
       +stat('changes','Changes today',changes.length,changes.filter(r=>r.change==='new').length+' new &middot; '+changes.filter(r=>r.change==='changed').length+' amount changed')
       +stat('removed','Removed',removed.length,'paid up or no longer due')
       +stat('held','Held back',held.length,'disputed or no email')
+      +stat('log','Sent log',PRM.logAll==null?'…':prmInr(PRM.logAll),PRM.logToday==null?'reminders sent':PRM.logToday+' sent today')
+      +stat('sched','Scheduled',PRM.sched?Object.keys(PRM.sched).filter(k=>PRM.sched[k].active).length:'—',PRM.sched?'go 15 min after each import':'ready from 8 PM tonight')
     +'</div>'
-    +'<div class="card" style="padding:0;overflow:hidden">'
+    +(PRM.f.view==='sched'?'<div class="card" style="padding:0;overflow:hidden" id="prmSched"></div>':PRM.f.view==='log'?'<div class="card" style="padding:0;overflow:hidden" id="prmLog"></div>':'<div class="card" style="padding:0;overflow:hidden">'
       +'<div class="prm-tools">'
         +'<button class="prm-chip'+(!PRM.f.proj?' on':'')+'" onclick="PRM.f.proj=\'\';prmDraw()">All projects<span class="n">'+pc('')+'</span></button>'
         +projects.map(p=>'<button class="prm-chip'+(PRM.f.proj===p?' on':'')+'" onclick="PRM.f.proj=\''+esc(p).replace(/'/g,"\\'")+'\';prmDraw()">'+esc(prmProj(p))+'<span class="n">'+pc(p)+'</span></button>').join('')
       +'</div>'
       +'<div class="prm-selbar" id="prmSelBar"></div>'
       +'<div style="overflow:auto;max-height:calc(100vh - 400px)" id="prmList"></div>'
-    +'</div>';
-  prmList();
+    +'</div>');
+  if(PRM.f.view==='sched') prmSchedDraw(); else if(PRM.f.view==='log') prmLogLoad(); else prmList();
+  if(PRM.logToday==null) prmLogCount();
 }
+/* SENT LOG (20 Nov 2026, Ayush: "I want a proper Log System in Reminders"). Every reminder email - who it went to,
+   when, for how much, which flat, from which mailbox, who sent it, with what letter, sent or failed - from
+   postsales.reminder_send_log. Two sources: JAIN-E (this page) and Farvision (reminders Farvision sends through the
+   same customercare2 mailbox, read back from its Sent folder). Tests are kept apart. Nothing here sends anything. */
+PRM.log={rows:null,period:'all',src:'',type:'real',q:''};
+async function prmLogCount(){
+  const d=new Date(Date.now()+5.5*3600e3).toISOString().slice(0,10)+'T00:00:00+05:30';
+  // the card: every reminder ever sent (21 Nov 2026 - it showed only today's, so it looked empty on a day nothing went), today's below
+  const [t,a]=await Promise.all([sb.schema('postsales').from('reminder_send_log').select('id',{count:'exact',head:true}).eq('test',false).eq('ok',true).gte('sent_at',d),
+    sb.schema('postsales').from('reminder_send_log').select('id',{count:'exact',head:true}).eq('test',false).eq('ok',true)]);
+  PRM.logToday=t.count||0; PRM.logAll=a.count||0;
+  const v=document.querySelector('.prm-stat[data-v=log] .v'), sm=document.querySelector('.prm-stat[data-v=log] .s');
+  if(v) v.textContent=prmInr(PRM.logAll); if(sm) sm.textContent=PRM.logToday+' sent today';
+}
+async function prmLogLoad(){
+  const host=$('prmLog'); if(!host) return;
+  if(!PRM.log.rows){ host.innerHTML='<div class="loader" style="padding:30px"><div class="spin"></div></div>';
+    const out=[]; for(let f=0;;f+=1000){ const {data,error}=await sb.schema('postsales').from('reminder_send_log').select('*').order('sent_at',{ascending:false}).range(f,f+999);
+      if(error){ host.innerHTML='<div class="empty" style="padding:26px">Could not read the log: '+esc(error.message)+'</div>'; return; }
+      out.push.apply(out,data||[]); if(!data||data.length<1000) break; }
+    PRM.log.rows=out; }
+  prmLogDraw();
+}
+// Farvision's reminders sent through the mailboxes, into the log now (the weekly job does the same every Monday)
+window.prmLogSync=async function(){
+  const b=$('prmLogSyncBtn'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading mailboxes…'; }
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const rq=await fetch(SUPABASE_URL+'/functions/v1/customer-invite',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:JSON.stringify({action:'reminder_log_sync',days:8})});
+    const o=await rq.json().catch(()=>({}));
+    if(!rq.ok||o.error){ toast(o.error||('HTTP '+rq.status),'err'); }
+    else{ const added=(o.mailboxes||[]).reduce((a,m)=>a+(m.added||0),0); toast(added?added+' new Farvision reminder'+(added===1?'':'s')+' added to the log':'Nothing new in the mailboxes','ok'); }
+  }catch(e){ toast(e.message,'err'); }
+  PRM.log.rows=null; PRM.logToday=null; prmLogCount(); prmLogLoad();
+};
+function prmLogAmt(r){ if(r.amount!=null) return Number(r.amount); const m=String(r.error||'').match(/^amount ([\d.]+)/); if(m) return Number(m[1]);
+  // sends from before the log kept the amount (20 Nov 2026): the booking's Net Outstanding, which is what the email gave
+  const x=!r.test&&r.ok&&PRM.rows.find(y=>y.booking_no===r.booking_no); return x?Number(x.net_outstanding):null; }
+function prmLogSrc(r){ return r.source||(/^Farvision/.test(r.sent_by||'')?'Farvision':'JAIN-E'); }
+window.prmLogDraw=function(){
+  const host=$('prmLog'); if(!host||!PRM.log.rows) return;
+  const L=PRM.log, q=L.q.trim().toLowerCase();
+  const day=new Date(Date.now()+5.5*3600e3).toISOString().slice(0,10);
+  const since={today:day+'T00:00:00+05:30',d7:new Date(Date.now()-7*864e5).toISOString(),d30:new Date(Date.now()-30*864e5).toISOString()}[L.period]||'';
+  const rows=L.rows.filter(function(r){
+    if(since&&r.sent_at<since) return false;
+    if(L.type==='real'&&r.test) return false; if(L.type==='test'&&!r.test) return false;
+    if(L.src&&prmLogSrc(r)!==L.src) return false;
+    if(q&&[r.customer_name,r.booking_no,r.recipient_email,r.unit,r.project,r.sent_by].join(' ').toLowerCase().indexOf(q)===-1) return false;
+    return true; });
+  const sent=rows.filter(r=>r.ok), failed=rows.filter(r=>!r.ok), amt=sent.reduce((a,r)=>a+(prmLogAmt(r)||0),0);
+  const chip=(k,v,l)=>'<button class="prm-chip'+(L[k]===v?' on':'')+'" onclick="PRM.log.'+k+'=\''+v+'\';prmLogDraw()">'+l+'</button>';
+  const dt=s=>{ const d=new Date(s); return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',timeZone:'Asia/Kolkata'})+' '+d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'}); };
+  const proj=r=>r.project||(PRM.rows.find(x=>x.booking_no===r.booking_no)||{}).project||'';
+  host.innerHTML='<div class="prm-tools">'
+      +chip('period','today','Today')+chip('period','d7','Last 7 days')+chip('period','d30','Last 30 days')+chip('period','all','All')
+      +'<span style="width:1px;height:22px;background:var(--line);margin:0 4px"></span>'
+      +chip('src','','All sources')+chip('src','JAIN-E','JAIN-E')+chip('src','Farvision','Farvision')
+      +'<span style="width:1px;height:22px;background:var(--line);margin:0 4px"></span>'
+      +chip('type','real','Customers')+chip('type','test','Tests')
+      +'<div class="prm-q"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Search name, flat, email…" value="'+esc(L.q)+'" oninput="PRM.log.q=this.value;prmLogDraw()"></div></div>'
+    +'<div class="prm-selbar"><span><b>'+sent.length+'</b> sent'+(failed.length?' &middot; <b style="color:#b91c1c">'+failed.length+'</b> failed':'')+(L.type==='real'?' &middot; ₹'+prmInr(amt)+' reminded':'')+'</span>'
+      +'<button class="btn btn-sm" style="margin-left:auto" id="prmLogSyncBtn" title="Reads customercare2 and customercare1 Sent folders for reminders Farvision sent (last 8 days) and adds new ones here. Also runs by itself every Monday 7 AM." onclick="prmLogSync()"><i class="fa-solid fa-envelope-circle-check"></i> Check mailboxes now</button>'
+      +'<button class="btn btn-sm" onclick="PRM.log.rows=null;prmLogLoad();prmLogCount()"><i class="fa-solid fa-rotate"></i> Refresh</button></div>'
+    +'<div style="overflow:auto;max-height:calc(100vh - 400px)"><table id="prmTbl"><thead><tr><th>Sent</th><th>Customer</th><th>Sent to</th><th style="text-align:right">Amount</th><th>From / by</th><th>Letter</th><th>Status</th></tr></thead><tbody>'
+    +(rows.length?rows.map(function(r){ const a=prmLogAmt(r), src=prmLogSrc(r);
+        return '<tr class="row"><td style="white-space:nowrap">'+esc(dt(r.sent_at))+'</td>'
+          +'<td><div class="prm-nm">'+esc(String(r.customer_name||'').trim()||'—')+'</div><div class="prm-sub">'+esc([prmProj(proj(r)),r.unit].filter(Boolean).join(' · '))+(r.booking_no?' &middot; '+esc(r.booking_no):'')+'</div></td>'
+          +'<td class="prm-email">'+esc(r.recipient_email||'')+'</td>'
+          +'<td class="prm-amt">'+(a!=null?'₹'+prmInr(a):'<span style="color:var(--slate);font-weight:500">—</span>')+'</td>'
+          +'<td><div style="font-size:12.5px">'+esc(r.from_email||'')+'</div><div class="prm-sub"><span class="prm-badge" style="margin:0;background:'+(src==='Farvision'?'#fef3c7;color:#92400e':'#ede9fe;color:#5b21b6')+'">'+src+'</span> '+(src==='JAIN-E'?esc(r.sent_by||''):'')+(r.test?' <span class="prm-badge" style="background:#e0f2fe;color:#075985">Test</span>':'')+'</div></td>'
+          +'<td class="prm-sub" style="max-width:220px">'+esc(r.attachment||(/attachment (.+)$/.exec(r.error||'')||[])[1]||'')+'</td>'
+          +'<td>'+(r.ok?'<span class="prm-badge removed" style="margin:0">Sent</span>':'<span class="prm-badge held" style="margin:0" title="'+esc(r.error||'')+'">Failed</span><div class="prm-sub" style="color:#b91c1c;white-space:normal;max-width:220px">'+esc(r.error||'')+'</div>')+'</td></tr>'; }).join('')
+      :'<tr><td colspan="7"><div class="empty" style="padding:26px">Nothing sent in this period</div></td></tr>')
+    +'</tbody></table></div>';
+};
 window.prmList=function(){
   const host=$('prmList'); if(!host) return;
   const f=PRM.f, q=f.q.trim().toLowerCase();
@@ -129,7 +209,8 @@ window.prmList=function(){
     return true;
   });
   const badge=r=>(r.change==='new'?'<span class="prm-badge new">New</span>':'')+(r.change==='changed'?'<span class="prm-badge changed">Changed</span>':'')
-    +(r.change==='removed'?'<span class="prm-badge removed">Removed</span>':'')+(r.held?'<span class="prm-badge held">Held</span>':'');
+    +(r.change==='removed'?'<span class="prm-badge removed">Removed</span>':'')+(r.held?'<span class="prm-badge held">Held</span>':'')
+    +(PRM.sched&&PRM.sched[r.booking_no]&&PRM.sched[r.booking_no].active?'<span class="prm-badge" style="background:#ecfdf5;color:#065f46" title="Scheduled reminder"><i class="fa-regular fa-clock" style="margin-right:3px"></i>'+esc(prmSchedLabel(PRM.sched[r.booking_no]))+'</span>':'');
   const groups={}; rows.forEach(r=>{ (groups[r.project]=groups[r.project]||[]).push(r); });
   const body=Object.keys(groups).sort().map(function(p){
     const g=groups[p], t=g.reduce((a,r)=>a+Number(r.net_outstanding||0),0);
@@ -156,7 +237,7 @@ window.prmList=function(){
 };
 function prmEmailHtml(subj,body,to){
   const st=PRM.settings||{};
-  return '<div style="color:var(--slate);font-size:12.5px;line-height:1.75"><b>From</b> Pallabita Ghosh - The Jain Group &lt;customercare1@thejaingroup.com&gt;'
+  return '<div style="color:var(--slate);font-size:12.5px;line-height:1.75"><b>From</b> Riya Roy - The Jain Group &lt;customercare2@thejaingroup.com&gt;'
       +(to!=null?'<br><b>To</b> '+esc(to||'(no email)'):'')+'<br><b>Subject</b> '+esc(subj)
       +'<br><b>Attachment</b> Reminder Letter (PDF)'+(st.attachment_name?', '+esc(st.attachment_name):'')+'</div>'
     +'<div style="margin-top:12px;padding:16px;border:1px solid var(--line);border-radius:12px;white-space:pre-wrap;line-height:1.65;font-size:13.5px">'+esc(body)+'</div>';
@@ -199,7 +280,9 @@ function prmSelBar(){
     +'<button class="btn btn-sm" onclick="prmSelShown(true)">Select all shown</button>'
     +'<button class="btn btn-sm" onclick="prmSelShown(false)">Unselect all shown</button>'
     +(sel.length?'<button class="btn btn-sm" onclick="PRM.sel.clear();prmList()">Clear selection</button>':'')
-    +'<button class="btn btn-sm btn-primary" style="margin-left:auto"'+(sel.length?'':' disabled')+' onclick="prmSendAsk()"><i class="fa-solid fa-paper-plane"></i> Send reminder'+(sel.length?' to '+sel.length:'')+'</button>';
+    +'<button class="btn btn-sm" style="margin-left:auto"'+(sel.length&&PRM.sched?'':' disabled title="'+(PRM.sched?'Tick customers to schedule':'Scheduling is ready from 8 PM tonight')+'"')+' onclick="prmSchedAsk()"><i class="fa-regular fa-clock"></i> Schedule'+(sel.length?' ('+sel.length+')':'')+'</button>'
+    +'<button class="btn btn-sm"'+(sel.length&&sel.length<=5?'':' disabled title="Tick 1 to 5 customers to test with"')+' onclick="prmTestAsk()"><i class="fa-solid fa-flask"></i> Send test'+(sel.length&&sel.length<=5?' ('+sel.length+')':'')+'</button>'
+    +'<button class="btn btn-sm btn-primary"'+(sel.length?'':' disabled')+' onclick="prmSendAsk()"><i class="fa-solid fa-paper-plane"></i> Send reminder'+(sel.length?' to '+sel.length:'')+'</button>';
 }
 /* SENDING (2 Nov 2026) - anyone with the Post Sales module, from Pallabita Ghosh's customer-care mailbox.
    Each ticked customer's Reminder Letter is drawn here and goes with their email; the server decides who
@@ -212,45 +295,93 @@ window.prmSendAsk=function(){
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-paper-plane"></i> Send outstanding reminders</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body" style="width:min(94vw,520px)"><div id="prmSendBody" style="font-size:13.5px;line-height:1.7">'
       +'<b>'+sel.length+'</b> customer'+(sel.length===1?'':'s')+' &middot; ₹'+prmInr(total)+' outstanding<br>'
-      +'From <b>Pallabita Ghosh - The Jain Group</b> &lt;customercare1@thejaingroup.com&gt;<br>'
+      +'From <b>Riya Roy - The Jain Group</b> &lt;customercare2@thejaingroup.com&gt;<br>'
       +'Each gets the reminder email with their own <b>Reminder Letter</b> (PDF) attached.'
       +'<div style="font-size:12px;color:var(--slate);margin-top:8px">Customers already reminded today are skipped.</div></div></div>'
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="prmGo" onclick="prmSendGo()"><i class="fa-solid fa-paper-plane"></i> Send '+sel.length+'</button></div>','md');
 };
-window.prmSendGo=async function(){
-  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r));
-  const go=$('prmGo'), box=$('prmSendBody'); if(go) go.disabled=true;
-  const say=t=>{ if(box) box.innerHTML=t; };
-  const res={sent:0,failed:[],skipped:[]};
-  const {data:{session}}=await sb.auth.getSession();
-  for(let i=0;i<sel.length;i+=10){
-    const part=sel.slice(i,i+10), letters={}, nos=[];
-    say('<i class="fa-solid fa-spinner fa-spin"></i> Preparing letters and sending - '+Math.min(i+part.length,sel.length)+' of '+sel.length+'…');
-    for(const r of part){
-      try{
-        const d=await prmLetterData(r.booking_no);
-        if(d.net==null||Math.abs(d.total-Number(r.net_outstanding||0))>1){ res.skipped.push(prmName(r)+' - letter total does not match'); continue; }
-        letters[r.booking_no]={filename:'Reminder Letter - '+String(r.booking_no).replace(/[^\w\-]+/g,'_')+'.pdf',pdf_base64:prmB64(await prmLetterPdf(d))};
-        nos.push(r.booking_no);
-      }catch(e){ res.skipped.push(prmName(r)+' - '+e.message); }
-    }
-    if(!nos.length) continue;
+/* 20 Nov 2026 (Ayush: "if so many emails are sent they should go one by one, if time is taken that's fine"):
+   ONE customer per call, one after the other. Each letter is built, checked (its total = the customer's Net
+   Outstanding) and sent on its own, and the server checks it again (whole PDF, total, every {field} filled)
+   before it goes. A call that fails on the network is tried once more; Stop finishes the one in hand and stops.
+   test_to = test address ids: the same email and letter go to those addresses only (Send test). */
+async function prmSendOne(r,session,testTo){
+  const d=await prmLetterData(r.booking_no);
+  if(d.net==null||Math.abs(d.total-Number(r.net_outstanding||0))>1) return {skipped:'letter total ₹'+prmInr(d.total)+' does not match Net Outstanding ₹'+prmInr(r.net_outstanding)};
+  const letters={}; letters[r.booking_no]={filename:'Reminder Letter - '+String(r.booking_no).replace(/[^\w\-]+/g,'_')+'.pdf',pdf_base64:prmB64(await prmLetterPdf(d)),total:d.total};
+  const body=JSON.stringify(Object.assign({action:'reminder_send_customers',booking_nos:[r.booking_no],letters:letters},testTo?{test_to:testTo}:{}));
+  for(let tryNo=1;;tryNo++){
     try{
       const rq=await fetch(SUPABASE_URL+'/functions/v1/customer-invite',{method:'POST',
-        headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},
-        body:JSON.stringify({action:'reminder_send_customers',booking_nos:nos,letters:letters})});
+        headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+((session&&session.access_token)||'')},body:body});
       const out=await rq.json().catch(()=>({}));
-      if(!rq.ok||out.error){ say('<span style="color:#b91c1c"><i class="fa-solid fa-triangle-exclamation"></i> '+esc(out.error||('HTTP '+rq.status))+'</span>'+(res.sent?'<br>'+res.sent+' sent before this.':'')); if(go){ go.disabled=false; go.textContent='Close'; go.onclick=closeModal; } return; }
-      res.sent+=out.sent||0;
-      (out.results||[]).forEach(x=>{ const r=PRM.rows.find(y=>y.booking_no===x.booking_no); const nm=r?prmName(r):x.booking_no;
-        if(x.skipped) res.skipped.push(nm+' - '+x.error); else if(!x.ok) res.failed.push(nm+' - '+x.error); });
-    }catch(e){ res.failed.push('Batch '+(i/10+1)+' - '+e.message); }
+      if(!rq.ok||out.error) return {fatal:out.error||('HTTP '+rq.status)};
+      return out;
+    }catch(e){ if(tryNo>=2) return {failed:e.message}; await new Promise(z=>setTimeout(z,3000)); }
   }
-  say('<b style="color:#15803d"><i class="fa-solid fa-circle-check"></i> '+res.sent+' reminder'+(res.sent===1?'':'s')+' sent</b>'
+}
+window.prmSendGo=async function(testTo){
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r));
+  const go=$('prmGo'), box=$('prmSendBody'); if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-stop"></i> Stop'; go.onclick=function(){ PRM.stop=true; go.disabled=true; go.textContent='Stopping…'; }; }
+  PRM.stop=false;
+  const say=t=>{ if(box) box.innerHTML=t; };
+  const res={sent:0,failed:[],skipped:[],done:0};
+  const {data:{session}}=await sb.auth.getSession();
+  for(const r of sel){
+    if(PRM.stop) break;
+    say('<i class="fa-solid fa-spinner fa-spin"></i> '+(testTo?'Test - ':'')+'Sending '+(res.done+1)+' of '+sel.length+': <b>'+esc(prmName(r))+'</b>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:6px">'+res.sent+' sent &middot; '+res.skipped.length+' skipped &middot; '+res.failed.length+' not sent. One at a time - keep this window open.</div>');
+    let out;
+    try{ out=await prmSendOne(r,session,testTo); }catch(e){ out={skipped:e.message}; }
+    res.done++;
+    if(out.fatal){ res.failed.push(prmName(r)+' - '+out.fatal); if(/switched on|sign in|Post Sales module|mailbox/i.test(out.fatal)) break; continue; }
+    if(out.skipped&&!out.results){ res.skipped.push(prmName(r)+' - '+out.skipped); continue; }
+    if(out.failed&&!out.results){ res.failed.push(prmName(r)+' - '+out.failed); continue; }
+    res.sent+=out.sent||0;
+    (out.results||[]).forEach(x=>{ if(x.skipped) res.skipped.push(prmName(r)+' - '+x.error); else if(!x.ok) res.failed.push(prmName(r)+(x.to?' ('+x.to+')':'')+' - '+x.error); });
+  }
+  say('<b style="color:#15803d"><i class="fa-solid fa-circle-check"></i> '+res.sent+' '+(testTo?'test email':'reminder')+(res.sent===1?'':'s')+' sent</b>'
+    +(PRM.stop?' <span style="color:var(--slate)">- stopped after '+res.done+' of '+sel.length+'</span>':'')
     +(res.failed.length?'<div style="margin-top:8px;color:#b91c1c"><b>Not sent ('+res.failed.length+')</b><br>'+res.failed.map(esc).join('<br>')+'</div>':'')
     +(res.skipped.length?'<div style="margin-top:8px;color:var(--slate)"><b>Skipped ('+res.skipped.length+')</b><br>'+res.skipped.map(esc).join('<br>')+'</div>':''));
   if(go){ go.disabled=false; go.innerHTML='Close'; go.onclick=closeModal; }
-  if(res.sent){ PRM.sel.clear(); prmList(); }
+  PRM.log.rows=null; PRM.logToday=null; prmLogCount();
+  if(res.sent&&!testTo){ PRM.sel.clear(); prmList(); }
+};
+/* SEND TEST (20 Nov 2026, "Bring Tests again") - the ticked customers' real emails and Reminder Letters, sent
+   from the same mailbox to test addresses only (postsales.reminder_test_recipients, editable here). */
+window.prmTestAsk=async function(){
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length||sel.length>5) return;
+  const {data:tt}=await sb.schema('postsales').from('reminder_test_recipients').select('id,email,customer_name').order('id');
+  PRM.tests=tt||[]; if(!PRM.testOn) PRM.testOn=new Set(PRM.tests.filter(t=>t.email===state.email).map(t=>t.id));
+  const list=()=>PRM.tests.map(t=>'<label style="display:flex;align-items:center;gap:8px;padding:5px 0"><input type="checkbox" class="prm-cb"'+(PRM.testOn.has(t.id)?' checked':'')+' onchange="prmTestPick('+t.id+',this.checked)"> '+esc(t.email)
+    +'<button class="prm-ibtn" style="margin-left:auto;width:26px;height:26px" title="Remove this test address" onclick="prmTestDel('+t.id+')"><i class="fa-solid fa-xmark"></i></button></label>').join('');
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-flask"></i> Send test</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,520px)"><div id="prmSendBody" style="font-size:13.5px;line-height:1.7">'
+      +'The real email and Reminder Letter of <b>'+sel.map(r=>esc(prmName(r))).join(', ')+'</b> - from <b>your Gmail (ayushruia1@gmail.com)</b>, subject marked [TEST] - go <b>only</b> to the test addresses ticked below. The customer gets nothing.'
+      +'<div style="margin-top:10px;font-weight:700">Test addresses</div><div id="prmTestList">'+list()+'</div>'
+      +'<div style="display:flex;gap:6px;margin-top:6px"><input id="prmTestNew" type="email" placeholder="Add a test email address" style="flex:1;height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px"><button class="btn btn-sm" onclick="prmTestAdd()">Add</button></div>'
+    +'</div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="prmGo" onclick="prmTestGo()"><i class="fa-solid fa-flask"></i> Send test</button></div>','md');
+  PRM._testList=list;
+};
+window.prmTestPick=function(id,on){ if(on) PRM.testOn.add(id); else PRM.testOn.delete(id); };
+window.prmTestAdd=async function(){
+  const el=$('prmTestNew'), v=String(el&&el.value||'').trim().toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)){ toast('Enter an email address','err'); return; }
+  const {data,error}=await sb.schema('postsales').from('reminder_test_recipients').insert({customer_name:'Test - '+v,email:v,project:'TEST',flat:'Test',net_outstanding:10000,added_by:state.email}).select('id,email,customer_name').single();
+  if(error){ toast(error.message,'err'); return; }
+  PRM.tests.push(data); PRM.testOn.add(data.id); $('prmTestList').innerHTML=PRM._testList(); el.value='';
+};
+window.prmTestDel=async function(id){
+  const {error}=await sb.schema('postsales').from('reminder_test_recipients').delete().eq('id',id);
+  if(error){ toast(error.message,'err'); return; }
+  PRM.tests=PRM.tests.filter(t=>t.id!==id); PRM.testOn.delete(id); $('prmTestList').innerHTML=PRM._testList();
+};
+window.prmTestGo=function(){
+  const ids=[...PRM.testOn].filter(id=>PRM.tests.some(t=>t.id===id)).slice(0,5);
+  if(!ids.length){ toast('Tick at least one test address','err'); return; }
+  prmSendGo(ids);
 };
 /* THE REMINDER LETTER (2 Nov 2026) - Farvision's "Reminder Letter", built by JAIN-E from its own data so
    it can go with the email: the company block from Post Sales > Setup, the customer from Farvision's
@@ -381,13 +512,18 @@ async function prmLetterPdf(d){
   wrap('According to which you had to deposit your due payment against the total value of your Unit. But after repeated Demand / reminder, you have not made payments. Now the company is providing you an opportunity to pay your dues, mentioned as under:',W-2*M,reg,8)
     .forEach(l=>{ txt(l,M,y-8); y-=11; });
   y-=10; txt('Outstanding details :',M+4,y-10,{bold:true,size:9.5}); y-=22;
-  const cw=[150,92,52,52,40,60,52,42], ttl=['Particulars','Bill No.','Bill Date','Due Date','Due Days','Bill Amt.','Rec Amt.','Bal Amt.'], rgt=[0,0,0,0,1,1,1,1];
+  /* 20 Nov 2026 (Ayush: "the Table's last 2 Column's data is overlapping"): Rec Amt. and Bal Amt. were 52 and 42pt
+     wide, too narrow for lakh figures such as 7,70,070.00, so the numbers ran into the column beside them. The money
+     columns are now 68pt each (the same 540pt page width overall), and a figure that still does not fit is set a
+     little smaller to stay inside its own box - it never crosses a line. */
+  const cw=[126,82,48,48,32,68,68,68], ttl=['Particulars','Bill No.','Bill Date','Due Date','Due Days','Bill Amt.','Rec Amt.','Bal Amt.'], rgt=[0,0,0,0,1,1,1,1];
   const row=(cells,o)=>{ o=o||{}; const f=o.bold?bold:reg, s=7.6, pad=3, lh=s+2.6;
-    const laid=cells.map((t,i)=>rgt[i]?[clean(t)]:wrap(t,cw[i]-2*pad,f,s)); const h=Math.max(...laid.map(x=>x.length))*lh+2*pad;
+    const laid=cells.map((t,i)=>(rgt[i]&&!o.head)?[clean(t)]:wrap(t,cw[i]-2*pad,f,s)); const h=Math.max(...laid.map(x=>x.length))*lh+2*pad;
     if(y-h<M+30){ pg=doc.addPage([W,H]); y=H-M; if(!o.head) row(ttl,{bold:true,fill:GREY,head:true}); }
     let x=M; laid.forEach((ls,i)=>{ if(o.fill) pg.drawRectangle({x:x,y:y-h,width:cw[i],height:h,color:o.fill});
       pg.drawRectangle({x:x,y:y-h,width:cw[i],height:h,borderColor:INK,borderWidth:.5});
-      ls.forEach((ln,j)=>{ const tw=f.widthOfTextAtSize(ln,s); pg.drawText(ln,{x:rgt[i]?x+cw[i]-pad-tw:x+pad,y:y-pad-s-j*lh+1.5,size:s,font:f,color:INK}); });
+      ls.forEach((ln,j)=>{ let ss=s, tw=f.widthOfTextAtSize(ln,s); const room=cw[i]-2*pad; if(tw>room){ ss=s*room/tw; tw=room; }
+        pg.drawText(ln,{x:rgt[i]?x+cw[i]-pad-tw:x+pad,y:y-pad-s-j*lh+1.5,size:ss,font:f,color:INK}); });
       x+=cw[i]; }); y-=h; };
   row(ttl,{bold:true,fill:GREY,head:true});
   d.lines.forEach(l=>row([l.particulars,l.bill_no,prmDmy(l.bill_date),prmDmy(l.due_date),String(l.days),prmMoney(l.bill),prmMoney(l.rec),prmMoney(l.bal)]));
@@ -425,3 +561,90 @@ window.prmSel=function(ix,on){ const r=PRM.rows[ix]; if(!r) return; if(on) PRM.s
 window.prmSelGroup=function(gi,on){ const p=(PRM._grp||[])[gi]; PRM.rows.filter(r=>r.project===p&&prmPick(r)).forEach(r=>{ if(on) PRM.sel.add(r.booking_no); else PRM.sel.delete(r.booking_no); }); prmList(); };
 window.prmSelShown=function(on){ prmShown().forEach(r=>{ if(on) PRM.sel.add(r.booking_no); else PRM.sel.delete(r.booking_no); }); prmList(); };
 
+
+/* SCHEDULES (20 Nov 2026, Ayush: "a person can choose some customers and then select in what frequency their email will
+   go - Daily, Weekly, Fortnightly or Monthly ... 15 mins after the Import is fully done ... if the Import does not happen
+   that day the Email won't go"). postsales.reminder_schedules, one per customer. The server sends them (customer-invite
+   reminder_schedule_run) 15 minutes after the day's Farvision import; anyone scheduled can still be sent by hand. */
+const PRM_DOW=['','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+async function prmSchedRead(){
+  const {data,error}=await sb.schema('postsales').from('reminder_schedules').select('*');
+  if(error){ PRM.sched=null; return; }   // the table arrives tonight
+  PRM.sched={}; (data||[]).forEach(s=>{ PRM.sched[s.booking_no]=s; });
+}
+function prmOrd(n){ const s=n%100; return n+((s>10&&s<14)?'th':({1:'st',2:'nd',3:'rd'}[n%10]||'th')); }
+function prmSchedLabel(s){
+  if(s.frequency==='daily') return 'Daily';
+  if(s.frequency==='weekly') return 'Weekly · '+PRM_DOW[s.weekday].slice(0,3);
+  if(s.frequency==='fortnightly') return 'Fortnightly · '+PRM_DOW[s.weekday].slice(0,3);
+  return 'Monthly · '+prmOrd(s.month_day);
+}
+// the next day it is due (an import has to happen that day for it to go)
+function prmSchedNext(s){
+  const ist=new Date(Date.now()+5.5*3600e3); const d=new Date(Date.UTC(ist.getUTCFullYear(),ist.getUTCMonth(),ist.getUTCDate()));
+  const start=new Date(s.start_date+'T00:00:00Z');
+  for(let i=0;i<70;i++){ const dd=new Date(d.getTime()+i*864e5); if(dd<start) continue;
+    const dow=((dd.getUTCDay()+6)%7)+1, last=new Date(Date.UTC(dd.getUTCFullYear(),dd.getUTCMonth()+1,0)).getUTCDate();
+    const ok=s.frequency==='daily'||(s.frequency==='weekly'&&dow===s.weekday)||(s.frequency==='fortnightly'&&dow===s.weekday&&Math.floor((dd-start)/864e5/7)%2===0)
+      ||(s.frequency==='monthly'&&dd.getUTCDate()===Math.min(s.month_day,last));
+    if(ok) return dd.toISOString().slice(0,10); }
+  return null;
+}
+window.prmSchedAsk=function(){
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length||!PRM.sched) return;
+  const now=new Date(Date.now()+5.5*3600e3), dow=((now.getUTCDay()+6)%7)+1, dom=now.getUTCDate();
+  openModal('<div class="modal-head"><h3><i class="fa-regular fa-clock"></i> Schedule reminders</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,520px);font-size:13.5px;line-height:1.7">'
+      +'<b>'+sel.length+'</b> customer'+(sel.length===1?'':'s')+': '+sel.slice(0,6).map(r=>esc(prmName(r))).join(', ')+(sel.length>6?' and '+(sel.length-6)+' more':'')
+      +'<div style="margin-top:12px;font-weight:700">How often</div>'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">'+[['daily','Daily'],['weekly','Weekly'],['fortnightly','Fortnightly'],['monthly','Monthly']].map((f,i)=>'<label class="prm-chip'+(i===1?' on':'')+'" style="display:inline-flex;align-items:center;gap:6px"><input type="radio" name="prmFreq" value="'+f[0]+'"'+(i===1?' checked':'')+' onchange="prmSchedFreq()" style="display:none">'+f[1]+'</label>').join('')+'</div>'
+      +'<div id="prmSchedWd" style="margin-top:10px">On <select id="prmSchedDow" class="sel" style="height:34px;margin-left:6px">'+PRM_DOW.slice(1).map((d,i)=>'<option value="'+(i+1)+'"'+(i+1===dow?' selected':'')+'>'+d+'</option>').join('')+'</select></div>'
+      +'<div id="prmSchedMd" style="margin-top:10px;display:none">On the <select id="prmSchedDom" class="sel" style="height:34px;margin:0 6px">'+Array.from({length:31},(_,i)=>'<option value="'+(i+1)+'"'+(i+1===dom?' selected':'')+'>'+prmOrd(i+1)+'</option>').join('')+'</select>of each month</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:12px">Each reminder goes <b>15 minutes after that day’s Farvision import</b> is complete, from Riya Roy - The Jain Group &lt;customercare2@thejaingroup.com&gt;, with the customer’s Reminder Letter. If there is no import that day, it does not go that day. Held, paid-up or already-reminded-that-day customers are skipped. You can still send to them by hand any time.</div>'
+    +'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="prmSchedGo" onclick="prmSchedSave()"><i class="fa-regular fa-clock"></i> Schedule '+sel.length+'</button></div>','md');
+  prmSchedFreq();
+};
+window.prmSchedFreq=function(){
+  const f=(document.querySelector('input[name=prmFreq]:checked')||{}).value;
+  document.querySelectorAll('input[name=prmFreq]').forEach(x=>x.parentNode.classList.toggle('on',x.checked));
+  $('prmSchedWd').style.display=(f==='weekly'||f==='fortnightly')?'':'none'; $('prmSchedMd').style.display=f==='monthly'?'':'none';
+};
+window.prmSchedSave=async function(){
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length) return;
+  const f=(document.querySelector('input[name=prmFreq]:checked')||{}).value||'weekly';
+  const wd=Number($('prmSchedDow').value), md=Number($('prmSchedDom').value);
+  const go=$('prmSchedGo'); if(go){ go.disabled=true; go.textContent='Saving…'; }
+  const rows=sel.map(r=>({booking_no:r.booking_no,customer_name:String(r.customer_name||'').trim(),project:prmProj(r.project),frequency:f,
+    weekday:(f==='weekly'||f==='fortnightly')?wd:null,month_day:f==='monthly'?md:null,active:true,created_by:state.email,updated_at:new Date().toISOString()}));
+  const {error}=await sb.schema('postsales').from('reminder_schedules').upsert(rows,{onConflict:'booking_no'});
+  if(error){ toast(error.message,'err'); if(go){ go.disabled=false; go.textContent='Schedule'; } return; }
+  closeModal(); toast(sel.length+' customer'+(sel.length===1?'':'s')+' scheduled','ok'); PRM.sel.clear(); await prmSchedRead(); prmDraw();
+};
+window.prmSchedDraw=function(){
+  const host=$('prmSched'); if(!host) return;
+  if(!PRM.sched){ host.innerHTML='<div class="empty" style="padding:26px">Scheduling is being set up - it is ready from 8 PM tonight.</div>'; return; }
+  const list=Object.values(PRM.sched).sort((a,b)=>(b.active-a.active)||String(a.project).localeCompare(String(b.project))||String(a.customer_name).localeCompare(String(b.customer_name)));
+  const net=b=>{ const r=PRM.rows.find(x=>x.booking_no===b); return r?Number(r.net_outstanding):null; };
+  host.innerHTML='<div class="prm-selbar"><span><b>'+list.filter(s=>s.active).length+'</b> scheduled'+(list.some(s=>!s.active)?' &middot; '+list.filter(s=>!s.active).length+' paused':'')+'</span>'
+      +'<span style="margin-left:auto;font-size:12px;color:var(--slate)">Each goes 15 min after that day’s import. No import that day = not sent that day.</span></div>'
+    +'<div style="overflow:auto;max-height:calc(100vh - 400px)"><table id="prmTbl"><thead><tr><th>Customer</th><th>How often</th><th>Next due</th><th>Last sent</th><th style="text-align:right">Outstanding now</th><th></th></tr></thead><tbody>'
+    +(list.length?list.map(s=>{ const n=net(s.booking_no), nx=s.active?prmSchedNext(s):null;
+      return '<tr class="row"'+(s.active?'':' style="opacity:.55"')+'><td><div class="prm-nm">'+esc(s.customer_name||'')+'</div><div class="prm-sub">'+esc(s.project||'')+' &middot; '+esc(s.booking_no)+'</div></td>'
+        +'<td>'+esc(prmSchedLabel(s))+(s.active?'':' <span class="prm-badge held" style="margin:0">Paused</span>')+'</td>'
+        +'<td>'+(nx?esc(prmDmy(nx)):'—')+'</td>'
+        +'<td>'+(s.last_sent_on?esc(prmDmy(s.last_sent_on)):'—')+(s.last_note&&s.last_note!=='sent'?'<div class="prm-sub" style="color:#b91c1c;white-space:normal">'+esc(s.last_note)+'</div>':'')+'</td>'
+        +'<td class="prm-amt">'+(n!=null?'₹'+prmInr(n):'<span style="color:var(--slate);font-weight:500">not due</span>')+'</td>'
+        +'<td class="prm-act"><button class="prm-ibtn" title="'+(s.active?'Pause':'Resume')+'" onclick="prmSchedToggle('+s.id+','+(!s.active)+')"><i class="fa-solid fa-'+(s.active?'pause':'play')+'"></i></button>'
+        +'<button class="prm-ibtn" title="Remove the schedule" onclick="prmSchedDel('+s.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>'; }).join('')
+      :'<tr><td colspan="6"><div class="empty" style="padding:26px">Nobody is scheduled yet. Tick customers under To remind and press Schedule.</div></td></tr>')
+    +'</tbody></table></div>';
+};
+window.prmSchedToggle=async function(id,on){
+  const {error}=await sb.schema('postsales').from('reminder_schedules').update({active:on,updated_at:new Date().toISOString()}).eq('id',id);
+  if(error){ toast(error.message,'err'); return; } await prmSchedRead(); prmDraw();
+};
+window.prmSchedDel=async function(id){
+  if(!confirm('Remove this customer’s schedule? (They can still be reminded by hand.)')) return;
+  const {error}=await sb.schema('postsales').from('reminder_schedules').delete().eq('id',id);
+  if(error){ toast(error.message,'err'); return; } await prmSchedRead(); prmDraw();
+};

@@ -111,6 +111,8 @@ function field(path,label,o){
    (the user preferred this to equal-width buttons squeezed into one row, 2 Nov 2026). */
 function chips(path,label,options,o){
   o=o||{}; const v=get(path);
+  // a value Sales fixed that is not in the page's list (a block named in the flat stock, e.g. Dream World City's) is still shown, as a chip
+  if(LOCK.has(path)&&v&&!options.some(function(x){ return (Array.isArray(x)?x[0]:x)===v; })) options=options.concat([v]);
   return wrapF(path,label,Object.assign({full:o.full!==false},o),'<div class="chips'+(o.num?' num':'')+'" role="radiogroup">'
     +options.map(function(x){ const val=Array.isArray(x)?x[0]:x, txt=Array.isArray(x)?x[1]:x;
       return '<button type="button" class="chip'+(v===val?' on':'')+'" role="radio" aria-checked="'+(v===val)+'" data-chip="'+path+'" data-v="'+esc(val)+'"'+(LOCK.has(path)?' disabled':'')+'>'+esc(txt)+'</button>'; }).join('')+'</div>');
@@ -303,17 +305,17 @@ function stepPay(){
       +'<div class="pcol">'+field('pay.amount','Booking Amount (₹)',{mode:'numeric',req:!LOCK.has('pay.amount'),full:1,after:'<div class="words" id="w-amount">'+esc(words(S.pay.amount))+'</div>'})+'</div>'
       /* 19 Nov 2026 (Ayush): any number of receipts; they list down the left while date, reference and bank sit on the right (Bank below the reference),
          so more receipts only make the left column longer. On a phone the two simply follow each other. */
-      // with fewer than 3 receipts Bank sits on the left under them; from the 3rd receipt it moves to the right, under the reference (Ayush, 19 Nov 2026)
+      // with fewer than 2 receipts Bank sits on the left under them; from the 2nd receipt it moves to the right, under the reference (Ayush, 20 Nov 2026; was the 3rd)
       +(function(){
         const nRc=((FILES[0]&&FILES[0].payment)||[]).length;
         const bank=chq?field('pay.bank','Bank (drawn on)',{req:1,full:1})+field('pay.branch','Branch',{optional:1,full:1}):field('pay.bank','Bank',{optional:1,full:1});
         return '<div class="pcol">'
           +wrapF(proof,'Payment proof',{full:1,req:1,note:'Screenshots or receipts of the payment - add as many as you need'},docUpl(0,'payment','Take a photo or attach the receipt','The UTR / transaction number should be readable',10))
-          +(nRc<3?bank:'')
+          +(nRc<2?bank:'')
           +'</div><div class="pcol">'
           +field('pay.date',chq?'DD date':'Date paid',{type:'date',req:1,full:1})
           +field('pay.ref',({'Demand Draft':'DD number','Card':'Card transaction ID'}[S.pay.mode]||'UTR / transaction reference'),{optional:1,cls:'up',full:1})   /* optional (19 Nov 2026) */
-          +(nRc>=3?bank:'')
+          +(nRc>=2?bank:'')
           +'</div>';
       })()
       +'</div></div>')

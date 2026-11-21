@@ -191,6 +191,21 @@ const PG_CSS='<style>'
   +'.pg-edit{margin:0 0 12px;padding:9px 14px;border-radius:8px;background:#fff8e8;border:1px solid #f3e1b5;color:#8a5a0b;font-size:13px}'
   +'.pg-wrap{max-width:1180px}'
   +'.pg-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch}'
+  // FLAT | SIZE & PRICE (20 Nov 2026, Ayush: "the alignment of these two sections is very bad"): both cards take the same four rows (title + three), so every row of the one sits level with the same row of the other
+  +'.pg-card.pg-al{display:grid;grid-row:span 5;grid-template-rows:subgrid;row-gap:14px;align-content:start}.pg-card.pg-al>.pg-bf+.pg-bf{margin-top:0}.pg-card.pg-al>h4{margin:0}'
+  +'@media(max-width:1100px){.pg-card.pg-al{display:block;grid-row:auto}.pg-card.pg-al>.pg-bf+.pg-bf{margin-top:14px}.pg-card.pg-al>h4{margin:0 0 12px}}'
+  // BLOCKS IN ONE STRIP (20 Nov 2026, Ayush: "if there are too many blocks make it slide - one strip with a horizontal scroll"): the block buttons never wrap; past the card's width the strip slides sideways
+  +'#pgC_pgBlock .pg-seg{flex-wrap:nowrap;overflow-x:auto;max-width:100%;scrollbar-width:thin;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}#pgC_pgBlock .pg-seg button{flex:none}'
+  // car parks on one line: how many, then one small Covered | Open pair per car park, wrapping only when the card is full
+  +'.pg-pkc{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}.pg-pk{display:inline-flex;align-items:center;gap:6px}.pg-pk>b{width:20px;height:20px;border-radius:50%;background:#e5e7eb;color:#4b5563;font-size:11.5px;display:inline-flex;align-items:center;justify-content:center;flex:none}'
+  +'.pg-pk .pg-seg button{min-width:0;height:28px;padding:0 9px;font-size:12.5px}'
+  // the flat menu: a button that opens a panel with a search box and the flats as tiles under their floor
+  +'.pg-dd{position:relative}.pg-dd-b{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;cursor:pointer;background:#fff}.pg-dd-b.ph{color:#9aa1ad}.pg-dd-b i{font-size:11px;color:#9aa1ad}'
+  +'.pg-dd-p{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:60;background:#fff;border:1px solid #d7dbe2;border-radius:10px;box-shadow:0 12px 30px rgba(16,24,40,.18);padding:10px}'
+  +'.pg-dd-m{margin:8px 2px 0;font-size:11.5px;color:#9aa1ad}.pg-dd-l{max-height:250px;overflow:auto;margin-top:4px;padding-right:2px}.pg-dd-e{padding:14px 4px;font-size:13px;color:#9aa1ad;text-align:center}'
+  +'.pg-dd-fl{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#9aa1ad;margin:10px 2px 6px}'
+  +'.pg-dd-t{display:flex;flex-wrap:wrap;gap:6px}.pg-dd-t button{min-width:52px;height:34px;padding:0 8px;border:1px solid #d7dbe2;border-radius:8px;background:#fff;font:inherit;font-size:13.5px;cursor:pointer}'
+  +'.pg-dd-t button:hover:not([disabled]){border-color:#1d4ed8;color:#1d4ed8}.pg-dd-t button.on{background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700}.pg-dd-t button[disabled]{background:#f3f4f6;color:#b4bac4;cursor:not-allowed;text-decoration:line-through}'
   +'@media(max-width:1100px){.pg-cards{grid-template-columns:minmax(0,1fr)}}'
   +'.pg-card{background:#fff;border:1px solid var(--pgl);border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,.04);padding:16px 20px 20px}'
   +'.pg-card>h4{margin:0 0 12px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:#9aa1ad;font-weight:700}'
@@ -274,12 +289,96 @@ function pgProjApply(p){
   const nf=Math.max(1,Math.floor(Number(p.floors))||8), bd=bhk.indexOf(p.bhkDefault)>=0?p.bhkDefault:(bhk[0]||'');
   const b=$('pgC_pgBlock'); if(b) b.innerHTML=pgSegH('pgBlock',blocks,blocks[0]||'');
   const h=$('pgC_pgBhk'); if(h) h.innerHTML=pgSegH('pgBhk',bhk,bd);
-  const fl=$('pgC_pgFloor');
-  if(fl){
-    const fs=[]; for(let i=1;i<=nf;i++) fs.push(String(i));
-    fl.innerHTML=nf>12?'<select class="pg-in" id="pgFloor" style="min-width:96px">'+fs.map(x=>'<option value="'+x+'">'+x+'</option>').join('')+'</select>':pgSegH('pgFloor',fs,'1');
-  }
+  pgBlocksFromStock(p);
+  pgFloorPlain(p);
+  PG.invMode=false; PG.flFilter=null; pgInvRefresh();
 }
+function pgFloorPlain(p){
+  const fl=$('pgC_pgFloor'); if(!fl||!p) return;
+  const nf=Math.max(1,Math.floor(Number(p.floors))||8), fs=[]; for(let i=1;i<=nf;i++) fs.push(String(i));
+  fl.innerHTML=nf>12?'<select class="pg-in" id="pgFloor" style="min-width:96px">'+fs.map(x=>'<option value="'+x+'">'+x+'</option>').join('')+'</select>':pgSegH('pgFloor',fs,'1');
+}
+/* FLATS FROM THE STOCK LIST (20 Nov 2026, Ayush: "if the Sales people get to choose the flat as a dropdown - I select a block and the Flat shows all the flats
+   inside the block; if I choose 3A the Floor becomes 3 by itself; if Floor is 4 only the flats on that floor come"). The flats of postsales.flats
+   (the Farvision stock: block, floor, flat, available / booked) are read once. For a project and block that have flats there, Flat number is a dropdown
+   (booked flats shown but not selectable; "Other" at the end lets a flat that is not in the list be typed) and Floor gets an "All" choice first: All = every
+   flat of the block, a floor = only that floor's flats; picking a flat sets the Floor. Projects / blocks without stock (Dream World City) keep the plain boxes. */
+const PG_INV_PROJ={ananta:[2],dreamgurukul:[1],dreamone:[3,8],dreamvalley:[5],dreamecocity:[6,7],dreamexotica:[4],dreamworldcity:[9,10]};   // booking-form project -> cust.projects ids
+// Dream World City is Pailan: two stock projects (Dream Jain-Pailan, Dream Gateway Pailan Projects), each with a Block-1, 2, 3 - its blocks carry the stock project's name
+const PG_INV_TAG={9:'Jain Pailan',10:'Gateway Pailan'};
+const PG_INV={st:null,blocks:{},names:{}};
+const pgNorm=function(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,''); };
+async function pgInvLoad(){
+  if(PG_INV.st) return; PG_INV.st='load';
+  try{
+    const all=async function(tbl,cols,fn){ let out=[],f=0; for(;;){ let q=sb.schema('postsales').from(tbl).select(cols); if(fn) q=fn(q); const r=await q.range(f,f+999); if(r.error) throw r.error; out=out.concat(r.data||[]); if((r.data||[]).length<1000) break; f+=1000; } return out; };
+    const res=await Promise.all([all('towers','id,project_id,name',function(q){ return q.is('deleted_at',null).order('id'); }), all('floors','id,floor_no',function(q){ return q.order('id'); }), all('flats','tower_id,floor_id,flat_code,status,sba_sqft',function(q){ return q.is('deleted_at',null).order('id'); })]);
+    const byProj={}; Object.keys(PG_INV_PROJ).forEach(function(k){ PG_INV_PROJ[k].forEach(function(id){ byProj[id]=k; }); });
+    const label=function(t){ return PG_INV_TAG[t.project_id]?t.name+' ('+PG_INV_TAG[t.project_id]+')':t.name; };
+    const tw={}, fn={}; res[0].forEach(function(t){ tw[t.id]=t; const k=byProj[t.project_id]; if(!k) return; const nm=(PG_INV.names[k]=PG_INV.names[k]||[]), lb=label(t); if(nm.indexOf(lb)<0) nm.push(lb); }); res[1].forEach(function(x){ fn[x.id]=x.floor_no; });
+    res[2].forEach(function(f){ const t=tw[f.tower_id]; if(!t||!byProj[t.project_id]||!f.flat_code) return; const k=byProj[t.project_id], lb=label(t), nb=pgNorm(lb);
+      const o=(PG_INV.blocks[k]=PG_INV.blocks[k]||{})[nb]=PG_INV.blocks[k][nb]||{name:lb,flats:[]};
+      o.flats.push({code:String(f.flat_code).toUpperCase(),floor:fn[f.floor_id]==null?null:Number(fn[f.floor_id]),st:f.status}); });
+    Object.keys(PG_INV.blocks).forEach(function(k){ Object.keys(PG_INV.blocks[k]).forEach(function(b){ PG_INV.blocks[k][b].flats.sort(function(a,c){ return (a.floor||0)-(c.floor||0)||a.code.localeCompare(c.code,'en',{numeric:true}); }); }); });
+    PG_INV.st='ok';
+  }catch(e){ PG_INV.st=null; console.warn('flat stock',e); return; }
+  if($('pgFlatDD')){ if(PG.project) pgBlocksFromStock(PG.project); pgInvRefresh(true); }
+}
+// the blocks of a project whose block list in the booking form is only a placeholder (Dream World City) come from the stock
+function pgBlocksFromStock(p){ const nm=p&&p.key==='dreamworldcity'&&PG_INV.st==='ok'?PG_INV.names[p.key]:null; const b=$('pgC_pgBlock'); if(nm&&nm.length&&b) b.innerHTML=pgSegH('pgBlock',nm,nm[0]); }
+function pgInvFor(){ const p=PG.project, b=($('pgBlock')||{}).value; if(!p||PG_INV.st!=='ok') return null; const bl=PG_INV.blocks[p.key]; const x=bl&&bl[pgNorm(b)]; return x&&x.flats.length?x:null; }
+// keep = keep what is chosen (a draft / edited link was just put into the boxes); otherwise the flat and floor go back to the start
+function pgInvRefresh(keep){
+  const dd=$('pgFlatDD'), inp=$('pgFlat'); if(!dd||!inp) return;
+  const x=pgInvFor();
+  PG.ddOpen=false; PG.ddQ='';
+  if(!x){ if(PG.invMode){ PG.invMode=false; PG.flFilter=null; pgFloorPlain(PG.project); } dd.style.display='none'; inp.style.display=''; return; }
+  const prevFloor=($('pgFloor')||{}).value, code=keep?String(inp.value||'').trim().toUpperCase():'';
+  const cur=code?x.flats.filter(function(f){ return f.code===code; })[0]:null;
+  PG.invMode=true; PG.flFilter=null; if(!keep) inp.value='';
+  const fl=$('pgC_pgFloor'), floors=[]; x.flats.forEach(function(f){ if(f.floor!=null&&floors.indexOf(String(f.floor))<0) floors.push(String(f.floor)); });
+  floors.sort(function(a,b){ return a-b; });
+  const startFloor=cur&&cur.floor!=null?String(cur.floor):(keep&&floors.indexOf(String(prevFloor))>=0?String(prevFloor):'All');
+  if(fl) fl.innerHTML=floors.length>11?'<select class="pg-in" id="pgFloor" style="min-width:110px" onchange="pgInvFloor()"><option value="All">All floors</option>'+floors.map(function(v){ return '<option value="'+v+'"'+(v===startFloor?' selected':'')+'>'+v+'</option>'; }).join('')+'</select>':pgSegH('pgFloor',['All'].concat(floors),startFloor);
+  dd.style.display=''; inp.style.display='none'; pgDDDraw();
+}
+/* THE FLAT MENU (20 Nov 2026, Ayush: "remove the Other option in Flats and make the dropdown menu better"): a button that opens a panel - a search box, then the
+   flats as tiles under their floor (booked ones greyed, not selectable). No "Other": only flats of the stock list can be chosen. */
+function pgDDDraw(){
+  const dd=$('pgFlatDD'), x=pgInvFor(); if(!dd||!x) return;
+  const inp=$('pgFlat'), code=String(inp.value||'').trim().toUpperCase(), fl=PG.flFilter, q=String(PG.ddQ||'').trim().toUpperCase();
+  const list=x.flats.filter(function(f){ return (fl==null||f.floor===fl)&&(!q||f.code.indexOf(q)>=0); });
+  const cur=x.flats.filter(function(f){ return f.code===code; })[0];
+  const shown=code?code+(cur&&cur.floor!=null?' · Floor '+cur.floor:'')+(cur&&cur.st!=='available'?' · booked':''):'';
+  const n=x.flats.filter(function(f){ return f.st==='available'&&(fl==null||f.floor===fl); }).length;
+  let body='';
+  if(!list.length) body='<div class="pg-dd-e">'+(q?'No flat matches "'+esc(PG.ddQ)+'"':'No flat on this floor')+'</div>';
+  else { const by={}; list.forEach(function(f){ const k=f.floor==null?'-':f.floor; (by[k]=by[k]||[]).push(f); });
+    Object.keys(by).sort(function(a,b){ return a-b; }).forEach(function(k){
+      body+=(fl==null?'<div class="pg-dd-fl">Floor '+esc(k)+'</div>':'')+'<div class="pg-dd-t">'+by[k].map(function(f){ const on=f.st==='available'||f.code===code;
+        return '<button type="button"'+(on?'':' disabled title="Booked"')+(f.code===code?' class="on"':'')+' onclick="pgInvPick(\''+esc(f.code)+'\')">'+esc(f.code)+'</button>'; }).join('')+'</div>'; }); }
+  const open=!!PG.ddOpen;
+  dd.innerHTML='<button type="button" class="pg-in pg-dd-b'+(code?'':' ph')+'" onclick="pgDDToggle(event)"><span>'+(code?esc(shown):'Select the flat')+'</span><i class="fa-solid fa-chevron-'+(open?'up':'down')+'"></i></button>'
+    +(open?'<div class="pg-dd-p" onclick="event.stopPropagation()"><input class="pg-in pg-dd-s" id="pgDDQ" placeholder="Search a flat, e.g. 3C" value="'+esc(PG.ddQ||'')+'" oninput="pgDDSearch(this.value)" autocomplete="off"><div class="pg-dd-m">'+n+' available'+(fl==null?' in this block':' on floor '+fl)+' · booked flats are greyed</div><div class="pg-dd-l">'+body+'</div></div>':'');
+}
+window.pgDDToggle=function(ev){ if(ev) ev.stopPropagation(); PG.ddOpen=!PG.ddOpen; PG.ddQ=''; pgDDDraw(); if(PG.ddOpen){ const i=$('pgDDQ'); if(i) i.focus(); } };
+window.pgDDSearch=function(v){ PG.ddQ=v; pgDDDraw(); const i=$('pgDDQ'); if(i){ i.focus(); try{ i.setSelectionRange(v.length,v.length); }catch(e){} } };
+if(!window._pgDDDoc){ window._pgDDDoc=true; document.addEventListener('click',function(){ if(typeof PG!=='undefined'&&PG.ddOpen){ PG.ddOpen=false; pgDDDraw(); } }); }
+window.pgInvFloor=function(){
+  if(!PG.invMode) return; const v=($('pgFloor')||{}).value; PG.flFilter=(v==='All'||v==='')?null:Number(v);
+  const x=pgInvFor(), inp=$('pgFlat'), code=String(inp&&inp.value||'').trim().toUpperCase();
+  if(x&&code&&PG.flFilter!=null){ const f0=x.flats.filter(function(f){ return f.code===code; })[0]; if(f0&&f0.floor!==PG.flFilter) inp.value=''; }   // the chosen flat is not on the floor now picked
+  PG.ddOpen=false; pgDDDraw();
+};
+window.pgInvPick=function(v){
+  const inp=$('pgFlat'), x=pgInvFor(); if(!inp) return;
+  inp.value=v||''; PG.ddOpen=false; PG.ddQ='';
+  const f=x&&v?x.flats.filter(function(y){ return y.code===v; })[0]:null;
+  if(f&&f.floor!=null){ const e=$('pgFloor'), s=String(f.floor);   // the flat sets the Floor (the menu keeps showing what it showed)
+    if(e&&e.tagName==='SELECT') e.value=s; else if(e){ e.value=s; e.parentNode.querySelectorAll('.pg-seg button').forEach(function(b){ b.classList.toggle('on',b.textContent.trim()===s); }); } }
+  const er=$('pgE_pgFlat'), fb=$('pgF_pgFlat'); if(er) er.textContent=''; if(fb&&fb.classList) fb.classList.remove('bad');
+  pgDDDraw();
+};
 window.pgProjChange=function(){ const k=($('pgProject')||{}).value, p=(PG_PROJ.list||[]).filter(x=>x.key===k)[0]; if(p) pgProjApply(p); };
 async function pgProjInit(editRow){
   const seq=PG.openSeq, sel=$('pgProject');
@@ -321,19 +420,17 @@ function pgCostDraw(){
 }
 /* CAR PARKS (19 Nov 2026, Ayush: "maybe customer is taking more than 1 ... one more option along with Covered and Open, NA"). PG.parks is the list, one entry per car
    park, each Covered or Open; the first can be NA (no car park), which leaves just that. */
+/* 20 Nov 2026 (Ayush: "the car park does not have a good adding process"): first say HOW MANY (NA = none, 1 to 4), then one line per car park to say Covered or Open -
+   instead of a first row with NA and an "Add another" button. None = ['NA']; the list is kept when the number changes. */
 function pgParkDraw(){
   const h=$('pgParkBox'); if(!h) return;
-  const P=PG.parks&&PG.parks.length?PG.parks:['Covered'];
-  h.innerHTML=P.map(function(v,i){
-    const opts=i?['Covered','Open']:['Covered','Open','NA'];
-    return '<div style="display:flex;align-items:center;gap:8px;margin:0 0 6px"><span style="min-width:20px;font-size:12px;color:var(--slate);font-weight:600">'+(P[0]==='NA'?'':(i+1)+'.')+'</span><div class="pg-seg" role="radiogroup">'
-      +opts.map(function(o){ return '<button type="button" class="'+(o===v?'on':'')+'" onclick="pgParkSet('+i+',\''+o+'\')">'+o+'</button>'; }).join('')+'</div>'
-      +(i?'<button type="button" class="btn" style="padding:2px 9px" title="Remove this car park" onclick="pgParkRm('+i+')">&times;</button>':'')+'</div>'; }).join('')
-    +(P[0]!=='NA'&&P.length<6?'<button type="button" class="btn" style="padding:4px 12px;margin-top:2px" onclick="pgParkAdd()"><i class="fa-solid fa-plus"></i> Add another car park</button>':'');
+  const P=PG.parks&&PG.parks.length?PG.parks:['Covered'], none=P[0]==='NA', n=none?0:P.length;
+  h.innerHTML='<div class="pg-pkc"><div class="pg-seg" role="radiogroup" title="How many car parks (NA = none)">'+[0,1,2,3,4].map(function(k){ return '<button type="button" class="'+(k===n?'on':'')+'" onclick="pgParkCount('+k+')">'+(k?k:'NA')+'</button>'; }).join('')+'</div>'
+    +(none?'':P.map(function(v,i){ return '<span class="pg-pk"><b>'+(i+1)+'</b><div class="pg-seg" role="radiogroup">'
+      +['Covered','Open'].map(function(o){ return '<button type="button" class="'+(o===v?'on':'')+'" onclick="pgParkSet('+i+',\''+o+'\')">'+o+'</button>'; }).join('')+'</div></span>'; }).join(''))+'</div>';
 }
-window.pgParkSet=function(i,o){ PG.parks=(PG.parks&&PG.parks.length?PG.parks:['Covered']).slice(); PG.parks[i]=o; if(i===0&&o==='NA') PG.parks=['NA']; pgParkDraw(); };
-window.pgParkAdd=function(){ PG.parks=(PG.parks||['Covered']).concat(['Covered']); pgParkDraw(); };
-window.pgParkRm=function(i){ PG.parks.splice(i,1); pgParkDraw(); };
+window.pgParkCount=function(k){ const cur=(PG.parks&&PG.parks[0]!=='NA'?PG.parks:[]).slice(0,k); if(!k) PG.parks=['NA']; else { while(cur.length<k) cur.push('Covered'); PG.parks=cur; } pgParkDraw(); };
+window.pgParkSet=function(i,o){ PG.parks=(PG.parks&&PG.parks.length&&PG.parks[0]!=='NA'?PG.parks:['Covered']).slice(); PG.parks[i]=o; pgParkDraw(); };
 function pgCostMsg(m){ const e=$('pgE_pgCost'), fb=$('pgF_pgCost'); if(e) e.textContent=m||''; if(fb&&fb.classList) fb.classList.toggle('bad',!!m); }
 window.pgCostChoose=function(){ const i=$('pgCostFile'); if(i&&!PG.uploading) i.click(); };
 window.pgCostPick=async function(inp){
@@ -390,24 +487,27 @@ window.pdfGenOpen=function(editRow){
     +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
       +f('pgContact','Primary contact person','<input class="pg-in" id="pgContact" style="text-transform:uppercase" autocomplete="off" placeholder="Same as the customer name" oninput="this.dataset.touched=1">',{opt:1})
     +'</div></div>'
-    +'<div class="pg-card"><h4>Flat</h4><div class="pg-bf" style="--c:minmax(0,1fr)">'
+    +'<div class="pg-card pg-al"><h4>Flat</h4><div class="pg-bf" style="--c:minmax(0,1fr)">'
       +f('pgBlock','Block','<div id="pgC_pgBlock">'+seg('pgBlock',[],'')+'</div>')
-    +'</div><div class="pg-bf" style="--c:auto minmax(0,1fr)">'
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
       +f('pgFloor','Floor','<div id="pgC_pgFloor">'+seg('pgFloor',[],'')+'</div>')
-      +f('pgFlat','Flat number','<input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{req:1})
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
+      +f('pgFlat','Flat number','<div class="pg-dd" id="pgFlatDD" style="display:none"></div><input class="pg-in" id="pgFlat" maxlength="8" style="text-transform:uppercase" autocomplete="off" placeholder="e.g. 5A">',{req:1})
     // Bedrooms moved here from Size & price (19 Nov 2026, Ayush: "give equal fields to both") - each card now has three rows
     +'</div><div class="pg-bf" style="--c:minmax(0,1fr)">'
       +f('pgBhk','Bedrooms','<div id="pgC_pgBhk">'+seg('pgBhk',[],'')+'</div>')
     +'</div></div>'
     /* 19 Nov 2026 (Ayush): the Flat and Size & price cards are compulsory and are LOCKED for the customer (they see them, cannot change them); car parks
        can be more than one, each Covered or Open, or NA for none; Booking amount is new - what the customer pays now, shown to them as the Booking Amount. */
-    +'<div class="pg-card"><h4>Size &amp; price</h4><div class="pg-bf" style="--c:minmax(0,1fr)">'
-      +f('pgPark','Car park','<div id="pgParkBox"></div>',{req:1})
-    +'</div><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
+    /* 20 Nov 2026 (Ayush): the two cards share their rows (Block | Area and price, Floor and flat | Booking amount, Bedrooms | Car park), so they sit level;
+       the amount in words under a number is gone; the car park (the one part that grows) is the last row. */
+    +'<div class="pg-card pg-al"><h4>Size &amp; price</h4><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
       +f('pgSba','Super built-up area','<div class="pg-suf"><input class="pg-in" id="pgSba" inputmode="decimal" autocomplete="off" placeholder="1325"><span>sq.ft.</span></div>',{req:1})
-      +f('pgTotal','Estimated Sale Price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
+      +f('pgTotal','Estimated Sale Price','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgTotal" inputmode="numeric" autocomplete="off" placeholder="72,00,000" oninput="pgMoney(this)"></div>',{req:1})
     +'</div><div class="pg-bf" style="--c:minmax(0,1fr) minmax(0,1fr)">'
-      +f('pgBook','Booking amount','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgBook" inputmode="numeric" autocomplete="off" placeholder="1,00,000" oninput="pgMoney(this)"></div>',{req:1,help:'&nbsp;'})
+      +f('pgBook','Booking amount','<div class="pg-pre"><span>&#8377;</span><input class="pg-in" id="pgBook" inputmode="numeric" autocomplete="off" placeholder="1,00,000" oninput="pgMoney(this)"></div>',{req:1})
+    +'</div><div class="pg-bf" style="--c:minmax(0,1fr);grid-row:span 2">'
+      +f('pgPark','Car park','<div id="pgParkBox"></div>',{req:1})
     +'</div></div>'
     +'</div>'
     +'<div class="pg-card pg-slim pg-f" id="pgF_pgCost"><label>Cost sheet <span class="r">*</span></label><div class="ctl w"><div class="pg-cost" id="pgCostBox"></div><input type="file" id="pgCostFile" accept="application/pdf,.pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" style="display:none" onchange="pgCostPick(this)"></div><div class="pg-e" id="pgE_pgCost"></div></div>'
@@ -417,13 +517,13 @@ window.pdfGenOpen=function(editRow){
     +'<div class="pg-main" id="pgDraftsWrap" style="display:none"><div id="pgDrafts"></div></div>'
     +'<div class="pg-main" id="pgListWrap" style="display:none"><div id="pgList"></div></div>';
   document.body.appendChild(page); pgFit(page);
-  pgCostDraw(); pgParkDraw(); pgSyncGo();
+  pgCostDraw(); pgParkDraw(); pgSyncGo(); pgInvLoad();
   pgProjInit(editRow||null);   // fills the project list, then (when editing) the boxes
   pdfGenList();
 };
 window.pgTab=function(t){ [['new','pgNew','pgT_new'],['drafts','pgDraftsWrap','pgT_drafts'],['list','pgListWrap','pgT_list']].forEach(function(x){ const on=x[0]===t; $(x[1]).style.display=on?'':'none'; $(x[2]).className=on?'on':''; }); };
 window.pgClose=function(){ const p=document.getElementById('pgPage'); if(p) p.remove(); };
-window.pgSeg=function(btn,id){ btn.parentNode.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); }); btn.classList.add('on'); $(id).value=btn.textContent.trim(); };
+window.pgSeg=function(btn,id){ btn.parentNode.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); }); btn.classList.add('on'); $(id).value=btn.textContent.trim(); if(id==='pgBlock') pgInvRefresh(); else if(id==='pgFloor') pgInvFloor(); };
 window.pgNameSync=function(){ const c=$('pgContact'); if(c&&!c.dataset.touched) c.value=($('pgName').value||''); };
 window.pgNatSync=function(){ const n=PDF_COUNTRIES.filter(c=>c[0]===$('pgNat').value)[0]; if(n&&$('pgCc')) $('pgCc').value=n[1]; };
 window.pgMoney=function(inp){ const d=inp.value.replace(/[^\d]/g,''); inp.value=d?Number(d).toLocaleString('en-IN'):''; const h=$('pgH_'+inp.id); if(h) h.textContent=pdfWords(d); };
@@ -450,6 +550,7 @@ function pgFillRaw(r){
   const pk=Array.isArray(r.parks)&&r.parks.length?r.parks:(r.park?[r.park]:null); if(pk){ PG.parks=pk.map(String); pgParkDraw(); }
   const h=$('pgH_pgTotal'); if(h) h.textContent=pdfWords(String(r.total||'').replace(/[^\d]/g,''));
   const hb=$('pgH_pgBook'); if(hb) hb.textContent=pdfWords(String(r.book||'').replace(/[^\d]/g,''));
+  pgInvRefresh(true);
 }
 // Editing a link: its details go back into the boxes.
 function pgFill(row){
@@ -469,7 +570,9 @@ window.pdfGenerate=async function(){
   const parks=(PG.parks&&PG.parks.length?PG.parks:['Covered']).slice();
   if(!name) bad('pgName','Please write the customer name.');
   // 19 Nov 2026: date of birth and nationality are optional for Sales (the customer must give them); the flat number and the booking amount are compulsory
-  if(!g('pgFlat').trim()) bad('pgFlat','Please write the flat number.');
+  if(!g('pgFlat').trim()) bad('pgFlat',PG.invMode?'Please choose the flat.':'Please write the flat number.');
+  // with the flat list the Floor can still read "All" (a flat typed under "Other"): take it from the flat number (5A -> 5), else ask
+  else if(PG.invMode&&!/^\d+$/.test(g('pgFloor'))){ const m=g('pgFlat').trim().match(/^(\d+)/); if(m){ const e=$('pgFloor'); if(e&&e.tagName==='SELECT'){ if([].some.call(e.options,function(o){ return o.value===m[1]; })) e.value=m[1]; } else if(e) e.value=m[1]; } if(!/^\d+$/.test(g('pgFloor'))) bad('pgFlat','Please choose the floor too.'); }
   if(!(Number(book)>0)) bad('pgBook','Please write the booking amount.');
   else if(Number(total)>0&&Number(book)>Number(total)) bad('pgBook','The booking amount cannot be more than the estimated sale price.');
   if(cc==='+91'?!/^[6-9]\d{9}$/.test(mobile):mobile.length<6) bad('pgMobile','Please write a complete mobile number'+(cc==='+91'?' (10 digits).':'.'));

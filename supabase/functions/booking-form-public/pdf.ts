@@ -3,7 +3,7 @@
 // another ends"). Built here on the server from the answers that were saved (never from the customer's page), and attached to the thank-you
 // email next to the cost sheet. A4, the Jain Group and project logos at the top, the answers in labelled sections, then the Terms, the
 // Declaration and the Special Conditions each starting on a page of its own.
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type PDFImage } from "https://esm.sh/pdf-lib@1.17.1";
+import { PDFDocument, StandardFonts, rgb, ParseSpeeds, type PDFFont, type PDFPage, type PDFImage } from "https://esm.sh/pdf-lib@1.17.1";
 import { TERMS, DECL, SPECIAL } from "./terms.ts";
 
 const A4: [number, number] = [595.28, 841.89];
@@ -83,7 +83,7 @@ class Doc {
 
 // The documents the customer attached (19 Nov 2026: "the Thank You PDF will have the images uploaded as well"): a picture on a page of its own, scaled to fit,
 // with what it is above it; an attached PDF has its own pages put in, labelled at the top; anything else (e.g. an iPhone HEIC photo) is named as kept with the form.
-async function addDocs(doc: Doc, docs: { label: string; type: string; bytes: Uint8Array }[]) {
+async function addDocs(doc: Doc, docs: { label: string; type: string; bytes: Uint8Array }[], maxPages?: number) {   // maxPages undefined = every page, however long (20 Nov 2026, Ayush); set only on a lighter retry
   if (!docs.length) return;
   const isJpg = (b: Uint8Array) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
   const isPng = (b: Uint8Array) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
@@ -91,13 +91,13 @@ async function addDocs(doc: Doc, docs: { label: string; type: string; bytes: Uin
   for (const x of docs) {
     try {
       if (isPdf(x.bytes)) {
-        const src = await PDFDocument.load(x.bytes, { ignoreEncryption: true });
-        const pages = await doc.pdf.copyPages(src, src.getPageIndices());
+        const src = await PDFDocument.load(x.bytes, { ignoreEncryption: true, parseSpeed: ParseSpeeds.Fastest, updateMetadata: false });   // fastest parse: this is the costly part
+        const pages = await doc.pdf.copyPages(src, maxPages ? src.getPageIndices().slice(0, maxPages) : src.getPageIndices());
         for (const p of pages) {
           doc.pdf.addPage(p);
           const { height } = p.getSize();
           p.drawRectangle({ x: 0, y: height - 22, width: p.getSize().width, height: 22, color: rgb(1, 1, 1), opacity: 0.85 });
-          p.drawText(plain("Documents submitted - " + x.label), { x: 12, y: height - 15, size: 9, font: doc.b, color: RED });
+          p.drawText(plain("Documents submitted - " + x.label + (maxPages && src.getPageCount() > maxPages ? " (first " + maxPages + " of " + src.getPageCount() + " pages - the whole file is kept with the booking form)" : "")), { x: 12, y: height - 15, size: 9, font: doc.b, color: RED });
         }
         continue;
       }
@@ -118,7 +118,7 @@ async function addDocs(doc: Doc, docs: { label: string; type: string; bytes: Uin
   }
 }
 
-export async function bookingPdf(o: { projectName: string; company: string; ref: string; submittedAt: string; d: any; files: any[]; logos: Uint8Array[]; docs?: { label: string; type: string; bytes: Uint8Array }[]; separate?: string[] }) {
+export async function bookingPdf(o: { projectName: string; company: string; ref: string; submittedAt: string; d: any; files: any[]; logos: Uint8Array[]; docs?: { label: string; type: string; bytes: Uint8Array }[]; separate?: string[]; maxPages?: number }) {
   const d = o.d || {}, title = `${o.projectName} - Booking application ${o.ref}`;
   const doc = await Doc.make(title, o.logos);
   doc.text(`${o.projectName} - Booking Application Form`, { size: 17, bold: true, gap: 2 });
@@ -157,7 +157,7 @@ export async function bookingPdf(o: { projectName: string; company: string; ref:
   doc.heading("Agreement");
   doc.text(d.terms_accepted ? "I/We have read and agree to the Terms of application, the Declaration, the Special Conditions and the cost sheet, and confirm that everything in this form is true. Accepted on submission, after verifying the email address with a one-time code." : "Terms not accepted.", { size: 9.5 });
 
-  await addDocs(doc, o.docs || []);
+  await addDocs(doc, o.docs || [], o.maxPages);
   // documents that are not drawn here (attached PDFs, large or HEIC photos): named, with where they are
   if (o.separate && o.separate.length) {
     doc.newPage();
@@ -172,5 +172,5 @@ export async function bookingPdf(o: { projectName: string; company: string; ref:
     doc.numbered(arr, o.company);
   }
   doc.footer();
-  return await doc.pdf.save();
+  return await doc.pdf.save({ useObjectStreams: false });   // no object-stream packing: cheaper in CPU
 }

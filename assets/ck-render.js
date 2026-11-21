@@ -58,7 +58,7 @@
     var when = D && D.live ? 'Worked out just now - not saved, no emails'
       : runs.length ? runs.map(function (r) { return (r.kind === 'weekly' ? 'Weekly points: ' + dt(r.period_from) + ' – ' + dt(r.period_to) : 'Daily points') + ' · checked ' + dt(r.ran_at) + (tm(r.ran_at) ? ' ' + tm(r.ran_at) : ''); }).join('   |   ')
       : '';
-    if (!F.length) return '<div class="ck">' + (when ? '<div class="ck-when">' + esc(when) + '</div>' : '') + '<div class="ck-empty">' + (runs.length || (D && D.live) ? 'No alerts - every point is within its limit.' : 'No check has been saved yet. The daily points are checked every day at 00:00 IST, the weekly points every Monday at 01:00 IST.') + '</div></div>';
+    if (!F.length) return '<div class="ck">' + (when ? '<div class="ck-when">' + esc(when) + '</div>' : '') + '<div class="ck-empty">' + (runs.length || (D && D.live) ? 'No alerts - every point is within its limit.' : ((D && D.emptyNote) || 'No check has been saved yet. The daily points are checked every day at 00:00 IST, the weekly points every Monday at 01:00 IST.')) + '</div></div>';
     // section -> point -> rows
     var secs = {}, order = [];
     F.forEach(function (f) { var s = secs[f.section]; if (!s) { s = secs[f.section] = { name: f.section, pts: {}, porder: [] }; order.push(f.section); }

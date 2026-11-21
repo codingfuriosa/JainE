@@ -28,6 +28,7 @@
 // in JainE. The page gets back only a reference number.
 import { AwsClient } from "https://esm.sh/aws4fetch@1.0.20";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { bookingPdf } from "./pdf.ts";
 
 const SB = Deno.env.get("SUPABASE_URL")!, SRV = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -224,7 +225,7 @@ function b64Part(mimeType: string, s: string) {
 // 14 Nov 2026: denomailer 1.6.0 writes a non-ASCII subject as =?utf-8?Q?...?= WITHOUT escaping spaces or "?" and folds it with "=" line breaks. That is an invalid header, so some
 // mail apps then show the WHOLE message as raw source (headers, boundaries, base64). A subject that is plain ASCII is passed through untouched, so make every subject ASCII first.
 function asciiSubject(s: string) {
-  const M: Record<string, string> = { "—": "-", "–": "-", "‒": "-", "−": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "…": "...", "₹": "Rs.", " ": " ", "•": "-", "·": "-", "×": "x" };
+  const M: Record<string, string> = { "—": "-", "–": "-", "‒": "-", "−": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "…": "...", "₹": "Rs.", [String.fromCharCode(160)]: " ", "•": "-", "·": "-", "×": "x" };
   return String(s ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\x00-\x7f]/g, (c) => M[c] ?? "").replace(/[\r\n]+/g, " ").replace(/\s{2,}/g, " ").trim().replace(/^=\?/, "= ?");
 }
 const maskEmail = (e: string) => { const [u, d] = e.split("@"); return (u.length <= 2 ? u[0] + "*" : u.slice(0, 2) + "*".repeat(Math.min(6, Math.max(2, u.length - 2)))) + "@" + d; };
@@ -265,13 +266,72 @@ async function sendViaGmail(user: string, name: string, m: { to: string[]; cc: s
   if (!gr.ok) throw new Error("Gmail " + gr.status + " " + (await gr.text()).slice(0, 160));
   return true;
 }
+/* A BIG ATTACHMENT BY OUR OWN LIGHT SMTP (20 Nov 2026): the Responses PDF with every document of the customer is several MB, and the mail library's own MIME handling of such an attachment ran
+   past the CPU limit (the same email with 1.6 MB went; 4.4 MB died in the send step). So when the attachments are big the message is written here as plain MIME (the attachments are
+   base64 already; lines are wrapped with one regex pass) and handed to Gmail's SMTP over TLS in large chunks - almost no CPU per MB. Small emails still go through the library. */
+function rawMime(o: { from: string; to: string[]; cc?: string[]; subject: string; text: string; html: string; attachments: any[] }): Uint8Array {
+  const id = () => crypto.randomUUID().split("-").join("");
+  const bnd = "=_m" + id(), alt = "=_a" + id();
+  const wrap = (s: string) => s.replace(/.{76}/g, "$&\r\n");
+  const enc = (s: string) => encodeBase64(new TextEncoder().encode(s));
+  const q = (s: string) => String(s).split('"').join("'").split("\r").join(" ").split("\n").join(" ");
+  const head = ["From: " + o.from, "To: " + o.to.join(", "), ...((o.cc || []).length ? ["Cc: " + (o.cc || []).join(", ")] : []), "Subject: " + asciiSubject(o.subject), "MIME-Version: 1.0",
+    "Date: " + new Date().toUTCString().replace("GMT", "+0000"), "Message-ID: <" + id() + "@thejaingroup.com>", 'Content-Type: multipart/mixed; boundary="' + bnd + '"'].join("\r\n");
+  let body = "--" + bnd + "\r\nContent-Type: multipart/alternative; boundary=\"" + alt + "\"\r\n\r\n"
+    + "--" + alt + "\r\nContent-Type: text/plain; charset=\"utf-8\"\r\nContent-Transfer-Encoding: base64\r\n\r\n" + wrap(enc(o.text)) + "\r\n"
+    + "--" + alt + "\r\nContent-Type: text/html; charset=\"utf-8\"\r\nContent-Transfer-Encoding: base64\r\n\r\n" + wrap(enc(o.html)) + "\r\n--" + alt + "--\r\n";
+  for (const a of o.attachments || []) {
+    const fn = q(a.filename || "file");
+    body += "--" + bnd + "\r\nContent-Type: " + (a.contentType || "application/octet-stream") + '; name="' + fn + '"\r\nContent-Disposition: attachment; filename="' + fn + '"\r\nContent-Transfer-Encoding: base64\r\n\r\n' + wrap(String(a.content || "")) + "\r\n";
+  }
+  body += "--" + bnd + "--\r\n";
+  return new TextEncoder().encode(head + "\r\n\r\n" + body);
+}
+async function smtpSendRaw(user: string, pass: string, rcpts: string[], raw: Uint8Array) {
+  const conn = await (Deno as any).connectTls({ hostname: "smtp.gmail.com", port: 465 });
+  const te = new TextEncoder(), td = new TextDecoder();
+  let buf = "";
+  const writeAll = async (u: Uint8Array) => { let off = 0; while (off < u.length) off += await conn.write(u.subarray(off)); };
+  const readResp = async (): Promise<{ code: number; text: string }> => {
+    for (;;) {
+      const lines = buf.split("\r\n");
+      for (let i = 0; i < lines.length - 1; i++) {
+        if (/^\d{3} /.test(lines[i]) || /^\d{3}$/.test(lines[i])) { const text = lines.slice(0, i + 1).join(" | "); buf = lines.slice(i + 1).join("\r\n"); return { code: Number(lines[i].slice(0, 3)), text }; }
+      }
+      const chunk = new Uint8Array(8192), n = await conn.read(chunk);
+      if (n === null) throw new Error("SMTP connection closed");
+      buf += td.decode(chunk.subarray(0, n));
+    }
+  };
+  const cmd = async (c: string, ok: number[]) => { await writeAll(te.encode(c + "\r\n")); const r = await readResp(); if (!ok.includes(r.code)) throw new Error("SMTP " + r.text.slice(0, 160)); return r; };
+  try {
+    const hello = await readResp(); if (hello.code !== 220) throw new Error("SMTP " + hello.text.slice(0, 160));
+    await cmd("EHLO jaine.thejaingroup.com", [250]);
+    await cmd("AUTH PLAIN " + btoa(String.fromCharCode(0) + user + String.fromCharCode(0) + pass), [235]);
+    await cmd("MAIL FROM:<" + user + ">", [250]);
+    for (const r of rcpts) await cmd("RCPT TO:<" + r + ">", [250, 251]);
+    await cmd("DATA", [354]);
+    await writeAll(raw);
+    await writeAll(te.encode("\r\n.\r\n"));
+    const done = await readResp(); if (done.code !== 250) throw new Error("SMTP " + done.text.slice(0, 160));
+    try { await cmd("QUIT", [221]); } catch (_) { /* the message is accepted */ }
+  } finally { try { conn.close(); } catch (_) { /* ignore */ } }
+}
 // Sends one email. to / cc are the REAL recipients; in test mode they are replaced by the test inbox and named in a banner.
+// test_mail (20 Nov 2026): while set, every email goes ONLY here, from customercare1, marked [TEST]
+let FORCE_TO: string | null = null;
 async function sendMail(o: { to: string[]; cc?: string[]; bcc?: string[]; subject: string; html: string; text: string; attachments?: any[]; kind: string }) {
   const CU = Deno.env.get("CUSTOMER_MAIL_USER"), CP = Deno.env.get("CUSTOMER_MAIL_APP_PASSWORD");
   if (!CU || !CP) throw new Error("Pallabita Ghosh's mailbox is not connected");
   const conf = await mailConf();
   let { subject, html, text } = o, to = o.to, cc = (o.cc || []).filter((x) => !to.includes(x)), bcc = (o.bcc || []).filter((x) => !to.includes(x));
-  if (!conf.live) {
+  if (FORCE_TO) {
+    subject = "[TEST] " + subject;
+    html = `<div style="font-family:Arial,sans-serif;font-size:13px;background:#fef3c7;border:1px solid #f59e0b;padding:10px 14px;margin:0 0 18px;border-radius:6px"><b>TEST</b> - a copy of this ${o.kind}; for the customer it goes to: ${o.to.join(", ")}${cc.length ? " | CC: " + cc.join(", ") : ""}</div>` + html;
+    text = `[TEST - a copy of this ${o.kind}]\n\n` + text;
+    to = [FORCE_TO]; cc = []; bcc = [];
+    conf.live = true;   // the shared mailbox (customercare1), never a personal Gmail
+  } else if (!conf.live) {
     const would = `To: ${o.to.join(", ")}${cc.length ? " | CC: " + cc.join(", ") : ""}`;
     subject = "[TEST] " + subject;
     html = `<div style="font-family:Arial,sans-serif;font-size:13px;background:#fef3c7;border:1px solid #f59e0b;padding:10px 14px;margin:0 0 18px;border-radius:6px"><b>TEST MODE</b> - in live mode this ${hE(o.kind)} would have gone to: ${hE(would)}</div>` + html;
@@ -283,10 +343,15 @@ async function sendMail(o: { to: string[]; cc?: string[]; bcc?: string[]; subjec
     try { if (await sendViaGmail(conf.fromUser, "Ayush Ruia - The Jain Group", { to, cc, subject, html, text, attachments: o.attachments })) return { live: false, via: "gmail:" + conf.fromUser }; }
     catch (e) { console.error("gmail send failed, using the shared mailbox", e); }
   }
+  // big attachments: our own light SMTP (see rawMime)
+  if ((o.attachments || []).reduce((t: number, x: any) => t + String(x.content || "").length, 0) > 1_000_000) {
+    await smtpSendRaw(CU, CP, [...to, ...cc, ...bcc], rawMime({ from: `The Jain Group <${CU}>`, to, cc, subject, text, html, attachments: o.attachments || [] }));
+    return { live: conf.live, via: "smtp-raw" };
+  }
   const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: CU, password: CP } } });
   try {
     // The mailbox that logs in to send is always customercare1@ (Gmail will not let it send "as" another account); in test mode the name shown and the reply-to are the Administrator's.
-    await client.send({ from: `${conf.live ? "Pallabita Ghosh" : "Ayush Ruia"} - The Jain Group <${CU}>`, ...(conf.live ? {} : { replyTo: conf.testTo }), to, ...(cc.length ? { cc } : {}), ...(bcc.length ? { bcc } : {}), subject: asciiSubject(subject),
+    await client.send({ from: `The Jain Group <${CU}>`, ...(conf.live ? {} : { replyTo: conf.testTo }), to, ...(cc.length ? { cc } : {}), ...(bcc.length ? { bcc } : {}), subject: asciiSubject(subject),
       mimeContent: [b64Part("text/plain", text), b64Part("text/html", html)], ...(o.attachments && o.attachments.length ? { attachments: o.attachments } : {}) });
   } finally { try { await client.close(); } catch (_) { /* ignore */ } }
   return { live: conf.live, via: "smtp" };
@@ -312,7 +377,13 @@ async function sendOtpMail(proj: Proj, email: string, code: string) {
   return await sendMail({ to: [email], subject: `${code} is your verification code`, html, text, kind: "verification code" });
 }
 const rupee = (v: unknown) => { const n = Number(String(v ?? "").replace(/[^\d.]/g, "")); return n ? "₹" + n.toLocaleString("en-IN") : ""; };
-async function sendConfirmation(proj: Proj, link: any, d: any, ref: string, saved: any[] = []) {
+/* THE THANK YOU MUST GO NO MATTER WHAT, AS ONE EMAIL, AND A CUSTOMER'S DOCUMENTS ARE NEVER SENT IN PART (20 Nov 2026, Ayush: "the email has to go no matter what", "I want it as
+   one", "no matter how long the PDF is it is fine - we can't send only a part of confidential information"). One email with two attachments: the Responses document (the answers,
+   then EVERY page of EVERY document the customer uploaded - KYC, payment proof - then Terms, Declaration, Special Conditions) and the Cost Sheet. A try that dies (CPU limit) or
+   fails to send sends nothing, so the customer still gets exactly one email. The sweeper (cron booking-confirm-sweep, every minute) makes the next try; tries 1-3 are all complete
+   (lvl 0 - a failure can be a one-off). Only if the third also fails (lvl 3) the customer gets the Thank You with the link and no attachment, and agm.sales and the
+   Administrator are told to send the documents by hand - never a PDF with pages missing. */
+async function sendConfirmation(proj: Proj, link: any, d: any, ref: string, saved: any[] = [], lvl = 0, dry = false, mode: "all" | "build" | "send" = "all", pre: Uint8Array | null = null) {
   const first = d.applicants?.[0] || {}, email = clean(d.contact?.email, 200).toLowerCase();
   const names = (d.applicants || []).map((a: any) => [a.title, clean(a.full_name)].filter(Boolean).join(" ")).filter(Boolean);
   const unit = [d.flat?.block, d.flat?.floor ? "Floor " + d.flat.floor : "", d.flat?.flat_no ? "Flat " + String(d.flat.flat_no).toUpperCase() : ""].filter(Boolean).join(", ");
@@ -323,19 +394,18 @@ async function sendConfirmation(proj: Proj, link: any, d: any, ref: string, save
   const who = [first.title, clean(first.full_name)].filter(Boolean).join(" ") || "Sir / Madam";
   // Until the Administrator says live, the sign-off is the Administrator's; live it is Pallabita Ghosh's.
   const sign = conf.live
-    ? { html: `<p style="margin:0"><b>Pallabita Ghosh</b></p><p style="margin:0;color:#4b5563">Manager &ndash; Post Sales &middot; Customer Relations Team</p><p style="margin:0 0 14px;color:#4b5563">Reach me @ 8420541541</p>`, text: "Pallabita Ghosh\nManager - Post Sales | Customer Relations Team\nReach me @ 8420541541" }
+    ? { html: `<p style="margin:0"><b>The Jain Group</b></p><p style="margin:0;color:#4b5563">Customer Relations Team</p><p style="margin:0 0 14px;color:#4b5563">Reach us @ 8420541541</p>`, text: "The Jain Group\nCustomer Relations Team\nReach us @ 8420541541" }
     : { html: `<p style="margin:0"><b>Ayush Ruia</b></p><p style="margin:0 0 14px;color:#4b5563">The Jain Group &middot; ayushruia1@gmail.com</p>`, text: "Ayush Ruia\nThe Jain Group | ayushruia1@gmail.com" };
   const html = shell(`<p style="margin:0 0 14px">Dear <b>${hE(who)}</b>,</p>`
     + `<p style="margin:0 0 14px">Thank you for choosing <b>${hE(proj.name)}</b>. We are truly grateful that you have made ${hE(proj.name)} your new home. Your trust means a great deal to us, and everyone at The Jain Group looks forward to welcoming you to the ${hE(proj.name)} family.</p>`
-    + `<p style="margin:0 0 14px">We have received your booking application${unit ? ` for <b>${hE(unit)}</b>` : ""} and verified your email address. You can see exactly what you submitted at any time here: <a href="${hE(viewUrl)}" style="color:#b3171d;font-weight:700">View your submitted form</a>, and in the document attached below.</p>`
+    + `<p style="margin:0 0 14px">We have received your booking application${unit ? ` for <b>${hE(unit)}</b>` : ""} and verified your email address. You can see exactly what you submitted at any time here: <a href="${hE(viewUrl)}" style="color:#b3171d;font-weight:700">View your submitted form</a>${lvl < 3 ? ", and in the document attached below" : ""}.</p>`
     + `<p style="margin:0 0 14px">Thank you once again for your confidence in us.</p><p style="margin:0 0 4px">Warm regards,</p>` + sign.html, proj);
   const text = `Dear ${who},\n\nThank you for choosing ${proj.name}. We are truly grateful that you have made ${proj.name} your new home. Your trust means a great deal to us, and everyone at The Jain Group looks forward to welcoming you to the ${proj.name} family.\n\n`
-    + `We have received your booking application${unit ? " for " + unit : ""} and verified your email address. You can see exactly what you submitted at any time here:\n${viewUrl}\nand in the document attached below.\n\nThank you once again for your confidence in us.\n\nWarm regards,\n${sign.text}`;
+    + `We have received your booking application${unit ? " for " + unit : ""} and verified your email address. You can see exactly what you submitted at any time here:\n${viewUrl}\n${lvl < 3 ? "and in the document attached below.\n" : ""}\nThank you once again for your confidence in us.\n\nWarm regards,\n${sign.text}`;
   const attachments: any[] = [];
-  const b64 = (u: Uint8Array) => { let bin = ""; for (let i = 0; i < u.length; i += 0x8000) bin += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(bin); };
-  const separateFiles: any[] = [];
+  const b64 = (u: Uint8Array) => encodeBase64(u);   // the library routine - the old String.fromCharCode loop cost a lot of CPU on a multi-MB PDF
   // 19 Nov 2026: the submitted form as a PDF (with the Terms, Declaration and Special Conditions), first; then the cost sheet (a PDF or a picture)
-  try {
+  if (lvl < 3 && mode !== "send") try {
     const logos: Uint8Array[] = [];
     for (const rel of ["assets/brand/jaingroup-logo.png", proj.logo].filter(Boolean)) { try { const r = await fetch(logoUrl(rel)); if (r.ok) logos.push(new Uint8Array(await r.arrayBuffer())); } catch (_) { /* no logo */ } }
     // 19 Nov 2026 (Ayush: "the Thank You PDF will have the images uploaded as well"): every document the customer attached goes into the PDF
@@ -343,7 +413,7 @@ async function sendConfirmation(proj: Proj, link: any, d: any, ref: string, save
        large PNG or an iPhone HEIC is attached to the email as its own file and listed in the PDF - merging or decoding those ran past the CPU limit. */
     const docs: { label: string; type: string; bytes: Uint8Array }[] = [];
     const separate: string[] = [];
-    let sepBytes = 0;
+    let pdfBytes = 0;
     const c3 = awsClient();
     const NM: Record<string, string> = { pan: "PAN card", aadhaar: "Aadhaar card", passport: "Passport", photo: "Photograph", payment: "Payment proof" };
     if (c3) for (const f of saved) {
@@ -355,21 +425,25 @@ async function sendConfirmation(proj: Proj, link: any, d: any, ref: string, save
         const label = `${NM[f.kind] || f.kind}${f.kind === "payment" ? "" : " - " + ([who.title, clean(who.full_name)].filter(Boolean).join(" ") || "Applicant " + f.applicant)}`;
         const bytes = new Uint8Array(await r.arrayBuffer()), type = String(r.headers.get("content-type") || "");
         const jpg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff, png = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
-        if (jpg || (png && bytes.length < 700_000)) { docs.push({ label, type, bytes }); continue; }
-        const fname = `${label} - ${String(f.name || "file")}`.replace(/[\\/:*?"<>|]+/g, " ").slice(0, 120);
-        if (sepBytes + bytes.length < 15 * 1024 * 1024) { sepBytes += bytes.length; separateFiles.push({ filename: fname, content: b64(bytes), encoding: "base64", contentType: type || "application/octet-stream" }); separate.push(label + " (attached to this email)"); }
-        else separate.push(label + " (kept with the booking form - too large for the email)");
+        const pdfF = bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+        if (jpg || png) { docs.push({ label, type, bytes }); continue; }
+        if (pdfF) { pdfBytes += bytes.length; docs.push({ label, type: type || "application/pdf", bytes }); continue; }
+        separate.push(label + " (kept with the booking form - open it with the link)");
       } catch (_) { /* a document that cannot be read is left out of the PDF (it is still kept with the form) */ }
     }
     const form = await bookingPdf({ projectName: proj.name, company: proj.company, ref, submittedAt: new Date().toISOString(), d, files: saved, logos, docs, separate });
+    if (mode === "build") return { built: form } as any;
     attachments.push({ filename: `${proj.name} - Booking application.pdf`, content: b64(form), encoding: "base64", contentType: "application/pdf" });
   } catch (e) { console.error("form pdf", e); }
-  attachments.push(...separateFiles);
-  const cost = await costBytes(link);
-  if (cost) attachments.push({ filename: String(link.prefill?.cost_sheet?.name || "Cost Sheet.pdf"), content: b64(cost), encoding: "base64", contentType: costType(link.prefill?.cost_sheet) });
+  if (mode === "send" && pre && lvl < 3) attachments.push({ filename: `${proj.name} - Booking application.pdf`, content: b64(pre), encoding: "base64", contentType: "application/pdf" });
+  if (lvl < 3) {
+    const cost = await costBytes(link);
+    if (cost) attachments.push({ filename: String(link.prefill?.cost_sheet?.name || "Cost Sheet.pdf"), content: b64(cost), encoding: "base64", contentType: costType(link.prefill?.cost_sheet) });
+  }
   // 19 Nov 2026 (Ayush: "emails will go to customer email, agm.sales only right now"): the project teams (proj.team) are not copied for now
   // ...as a BLIND copy (19 Nov 2026, Ayush: the customer should not see other addresses beside their own)
   const bcc = [SALES_HEAD.toLowerCase()];
+  if (dry) return { live: false, dry: true, attachments: attachments.map((a: any) => [a.filename, Math.round(a.content.length * 3 / 4)]) };
   return await sendMail({ to: [email], bcc, subject: `Thank you for choosing ${proj.name}`, html, text, attachments, kind: "confirmation" });
 }
 
@@ -458,16 +532,90 @@ async function handleJson(req: Request) {
 
   // The thank-you email, sent in its own run after a submit (see handleSubmit). Only this function can start it: the key is derived from the server's own secret.
   if (b.action === "send_confirmation") {
-    if (String(b.key || "") !== await jobKey(link.token)) return j({ error: "Not allowed." }, 403);
+    // started by the submit itself (its own key), or - to send a Thank You again - by the server's jobs (the ads job secret, as the other functions' crons)
+    let okRun = String(b.key || "") === await jobKey(link.token);
+    const sec = req.headers.get("x-ads-secret") || "";
+    if (!okRun && sec) { const sr = await db("job_secrets?select=value&name=eq.ads_daily&limit=1").catch(() => null); okRun = !!(sr && sr[0] && sr[0].value === sec); }
+    if (!okRun) return j({ error: "Not allowed." }, 403);
     if (!link.form_id) return j({ error: "This form has not been submitted yet." }, 409);
     const rows = await db(`digital_booking_forms?select=id,ref_no,data,files,confirm_mail&id=eq.${link.form_id}&limit=1`);
     const f = rows && rows[0]; if (!f) return j({ error: "Form not found." }, 404);
-    if (f.confirm_mail && f.confirm_mail.sent && !b.again) return j({ ok: true, already: true });
-    let mail: any;
-    try { const r = await sendConfirmation(proj, link, f.data || {}, f.ref_no || "", Array.isArray(f.files) ? f.files : []); mail = { sent: true, live: r.live, at: new Date().toISOString() }; }
-    catch (e) { console.error("confirmation mail", e); mail = { sent: false, error: String((e as Error)?.message || e).slice(0, 200), at: new Date().toISOString() }; }
-    await db(`digital_booking_forms?id=eq.${f.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ confirm_mail: mail }) });
-    return j({ ok: true, mail });
+    /* ONE email (see sendConfirmation): confirm_mail = {attempts, sent, lvl, busy, error, at}. A form sent before this change has {sent:true}. Each try is claimed and counted BEFORE it
+       starts, so one that dies (CPU) leaves the count behind and the next try - the sweeper's, a minute or two later - attaches less. */
+    const cm: any = f.confirm_mail && typeof f.confirm_mail === "object" ? f.confirm_mail : {};
+    if (b.dry) { const t0 = Date.now(), dl = Math.max(0, Math.min(3, Number(b.lvl || 0))); try { const r: any = await sendConfirmation(proj, link, f.data || {}, f.ref_no || "", Array.isArray(f.files) ? f.files : [], dl, true); return j({ ok: true, dry: true, lvl: dl, ms: Date.now() - t0, attachments: r.attachments }); } catch (e) { return j({ ok: false, dry: true, lvl: dl, ms: Date.now() - t0, error: String((e as Error)?.message || e).slice(0, 200) }); } }
+    if (cm.sent === true && !b.again) return j({ ok: true, already: true });
+    if (cm.busy && Date.now() - Date.parse(cm.busy) < 100_000 && !b.again) return j({ ok: true, busy: true });
+    /* THREE STEPS, EACH IN A RUN OF ITS OWN (20 Nov 2026: building a 4 MB Responses PDF and sending it in ONE run hit the CPU limit - no part of a customer's documents is ever dropped, so the
+       work is split): 1 build - the Responses PDF with every uploaded document, stored in the file store (confirm_mail.pdf); 2 send - that PDF + the Cost Sheet in one email; the build starts the
+       send at once in a new run, and the sweeper does it if that did not happen. After 3 failed tries of either step: the Thank You with the link only + an alert to staff (lvl 3). */
+    if (b.again) { delete cm.pdf; cm.buildTries = 0; cm.sendTries = 0; cm.attempts = 0; cm.sent = false; }
+    const stage = cm.pdf && cm.pdf.path ? "send" : "build";
+    const giveUp = Number(cm.buildTries || 0) >= 3 || Number(cm.sendTries || 0) >= 3;
+    const out: any = { ...cm, attempts: Number(cm.attempts || 0) + 1, busy: new Date().toISOString(), sent: false };
+    const save = () => db(`digital_booking_forms?id=eq.${f.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ confirm_mail: out }) });
+    const files = Array.isArray(f.files) ? f.files : [];
+    if (giveUp) {
+      await save();
+      try {
+        const r = await sendConfirmation(proj, link, f.data || {}, f.ref_no || "", files, 3); out.sent = true; out.live = r.live; out.lvl = 3; out.docsNotSent = true; out.at = new Date().toISOString();
+        try { await sendMail({ to: ["ayushruia1@gmail.com", SALES_HEAD.toLowerCase()], subject: `ACTION NEEDED: documents not emailed - ${f.ref_no || ""}`, html: `<p>The Thank You for booking <b>${hE(f.ref_no || "")}</b> went to the customer WITHOUT the Responses document and Cost Sheet - the tries to build / send them failed (${hE(String(cm.error || "see the logs"))}). The customer's documents are safe with the form: <a href="${hE(SITE + "/booking-form.html?t=" + link.token)}">open the form</a>. Please send the documents to the customer by hand.</p>`, text: `The Thank You for booking ${f.ref_no || ""} went to the customer WITHOUT the Responses document and Cost Sheet - the tries failed. The documents are safe with the form: ${SITE}/booking-form.html?t=${link.token}\nPlease send them to the customer by hand.`, kind: "alert" }); } catch (_) { /* best effort; the form row says docsNotSent */ }
+      } catch (e) { console.error("thank-you only", e); out.error = String((e as Error)?.message || e).slice(0, 200); }
+      delete out.busy; await save();
+      return j({ ok: true, mail: { sent: out.sent === true, stage: "words", attempts: out.attempts, error: out.error || null } });
+    }
+    if (stage === "build") {
+      out.buildTries = Number(cm.buildTries || 0) + 1; await save();   // counted first: if this run dies, the next one knows
+      try {
+        const r: any = await sendConfirmation(proj, link, f.data || {}, f.ref_no || "", files, 0, false, "build");
+        const bytes: Uint8Array = r.built, c3 = awsClient(); if (!c3) throw new Error("The file store is not connected.");
+        const key = `portal/digital-booking/${link.id}/responses-${String(f.ref_no || "form").replace(/[^A-Za-z0-9_-]/g, "")}-${Date.now()}.pdf`;
+        const put = await c3.aws.fetch(s3url(c3, key), { method: "PUT", body: bytes, headers: { "Content-Type": "application/pdf" } });
+        if (!put.ok) throw new Error("The Responses PDF did not store (" + put.status + ").");
+        out.pdf = { path: "s3:" + key, size: bytes.length, at: new Date().toISOString() }; delete out.error; delete out.busy; await save();
+        // the send step in a run of its own, started now and not waited for
+        const job = fetch(`${SB}/functions/v1/booking-form-public`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "send_confirmation", token: link.token, key: await jobKey(link.token) }) }).catch((e2) => console.error("send job", e2));
+        try { (globalThis as any).EdgeRuntime?.waitUntil?.(job); } catch (_) { /* best effort */ }
+        return j({ ok: true, mail: { sent: false, stage: "built", size: bytes.length, attempts: out.attempts, error: null } });
+      } catch (e) { console.error("build responses pdf", e); out.error = String((e as Error)?.message || e).slice(0, 200); delete out.busy; await save(); return j({ ok: true, mail: { sent: false, stage: "build", attempts: out.attempts, error: out.error } }); }
+    }
+    // stage "send"
+    out.sendTries = Number(cm.sendTries || 0) + 1; await save();
+    try {
+      const c3 = awsClient(); if (!c3) throw new Error("The file store is not connected.");
+      const gr = await c3.aws.fetch(s3url(c3, String(cm.pdf.path).replace(/^s3:/, "")), { method: "GET" });
+      if (!gr.ok) throw new Error("The stored Responses PDF could not be read (" + gr.status + ").");
+      const pdfBytes = new Uint8Array(await gr.arrayBuffer());
+      const r = await sendConfirmation(proj, link, f.data || {}, f.ref_no || "", files, 0, false, "send", pdfBytes); out.sent = true; out.live = r.live; out.lvl = 0; out.at = new Date().toISOString(); delete out.error;
+    } catch (e) { console.error("send confirmation", e); out.sent = false; out.error = String((e as Error)?.message || e).slice(0, 200); }
+    delete out.busy; await save();
+    return j({ ok: true, mail: { sent: out.sent === true, stage: "send", attempts: out.attempts, error: out.error || null } });
+  }
+  /* test_mail (20 Nov 2026, Ayush: "Send a Welcome Letter, OTP, Thank You msg to ayushruia1@gmail.com through that email"):
+     the OTP email and/or this form's Thank You (its stored Responses PDF + Cost Sheet), sent from customercare1 ONLY to test_to.
+     The job secret only. Nothing on the link or the form is changed. */
+  if (b.action === "test_mail") {
+    const sec = req.headers.get("x-ads-secret") || "";
+    const sr = sec ? await db("job_secrets?select=value&name=eq.ads_daily&limit=1").catch(() => null) : null;
+    if (!(sr && sr[0] && sr[0].value === sec)) return j({ error: "Not allowed." }, 403);
+    const to = String(b.test_to || "").trim().toLowerCase();
+    if (!MAIL_RE.test(to)) return j({ error: "test_to is required" }, 400);
+    const out: any = {};
+    FORCE_TO = to;
+    try {
+      if (b.kind === "otp" || b.kind === "all") { await sendOtpMail(proj, to, "123456"); out.otp = "sent"; }
+      if (b.kind === "thankyou" || b.kind === "all") {
+        const rows = link.form_id ? await db(`digital_booking_forms?select=id,ref_no,data,files,confirm_mail&id=eq.${link.form_id}&limit=1`) : null;
+        const f = rows && rows[0]; if (!f) return j({ ...out, error: "This link has no submitted form." }, 409);
+        const cm: any = f.confirm_mail || {};
+        let pdf: Uint8Array | null = null;
+        if (cm.pdf && cm.pdf.path) { const c3 = awsClient(); const gr = c3 ? await c3.aws.fetch(s3url(c3, String(cm.pdf.path).replace(/^s3:/, "")), { method: "GET" }) : null;
+          if (gr && gr.ok) pdf = new Uint8Array(await gr.arrayBuffer()); }
+        await sendConfirmation(proj, link, f.data || {}, f.ref_no || "", Array.isArray(f.files) ? f.files : [], pdf ? 0 : 3, false, pdf ? "send" : "all", pdf);
+        out.thankyou = pdf ? "sent with the stored Responses PDF" : "sent (link only - no stored PDF)";
+      }
+    } finally { FORCE_TO = null; }
+    return j({ ok: true, ...out });
   }
   if (b.action === "cost_pdf") {
     if (link.status === "cancelled") return j({ error: NOT_VALID }, 404);

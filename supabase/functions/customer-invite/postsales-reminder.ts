@@ -156,27 +156,56 @@ const MIN_AMOUNT = 5000;
 const projName = (s: unknown) => String(s || "").replace(/\(.*?\)/g, "").replace(/\s+/g, " ").trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 export async function reminderSendCustomers(req: Request, body: any, db: any, j: J, SB: string, createClient: any): Promise<Response> {
   const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
-  const { data: who } = await createClient(SB, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: "Bearer " + bearer } } }).auth.getUser();
+  const asUser = createClient(SB, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: "Bearer " + bearer } } });
+  const { data: who } = await asUser.auth.getUser();
   const me = String(who?.user?.email || "").toLowerCase();
   if (!me) return j({ error: "Please sign in again." }, 401);
-  // the Post Sales module, as JAIN-E's own app.has_module decides it
-  const [{ data: au }, { data: sa }] = await Promise.all([
-    db.schema("adm").from("users").select("active,modules").ilike("email", me).maybeSingle(),
-    db.schema("adm").from("user_permissions").select("super_admin").ilike("email", me).maybeSingle()]);
-  const allowed = !!sa?.super_admin || (!!au?.active && Array.isArray(au?.modules) && au.modules.includes("postsales"));
-  if (!allowed) return j({ error: "Only people with the Post Sales module can send reminders." }, 403);
+  /* the Post Sales module, as JAIN-E's own app.has_module decides it - asked as the signed-in person.
+     20 Nov 2026: this read adm.users with the service key, which no longer has access to the adm schema, so it
+     said "no" to everyone, Ayush included. */
+  const { data: allowed, error: ae } = await asUser.schema("app").rpc("has_module", { p_module: "postsales" });
+  if (ae) return j({ error: "Could not check your Post Sales access: " + ae.message }, 500);
+  if (allowed !== true) return j({ error: "Only people with the Post Sales module can send reminders." }, 403);
 
   const acc = db.schema("acc"), PS = db.schema("postsales");
+  /* TESTS (20 Nov 2026, Ayush: "Bring Tests again, I want to test"): { test_to: [test recipient ids] } sends the very
+     same email and Reminder Letter a real customer would get - same mailbox, same template, same letter - but to the
+     test addresses only (postsales.reminder_test_recipients), subject marked [TEST], logged as test. Allowed even
+     while customer sending is off; at most 5 customers x 5 test addresses a call. */
+  const testIds = (Array.isArray(body?.test_to) ? body.test_to : []).map(Number).filter((x: number) => x > 0).slice(0, 5);
+  const isTest = testIds.length > 0;
   const { data: mode } = await acc.from("job_secrets").select("value").eq("name", "reminder_send_mode").maybeSingle();
-  if (String(mode?.value || "off") !== "live") return j({ error: "Sending reminders to customers is not switched on yet." }, 409);
+  if (!isTest && String(mode?.value || "off") !== "live") return j({ error: "Sending reminders to customers is not switched on yet." }, 409);
+  let testTo: any[] = [];
+  if (isTest) {
+    const { data: tt } = await PS.from("reminder_test_recipients").select("id,email,customer_name").in("id", testIds);
+    testTo = (tt || []).filter((t: any) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(t.email || "").trim()));
+    if (!testTo.length) return j({ error: "Choose at least one test address." }, 400);
+  }
 
-  const want: string[] = [...new Set<string>((Array.isArray(body?.booking_nos) ? body.booking_nos : []).map((x: unknown) => String(x)))].slice(0, 25);
+  const want: string[] = [...new Set<string>((Array.isArray(body?.booking_nos) ? body.booking_nos : []).map((x: unknown) => String(x)))].slice(0, isTest ? 5 : 25);
   if (!want.length) return j({ error: "Choose at least one customer." }, 400);
-  const CU = Deno.env.get("CUSTOMER_MAIL_USER"), CP = Deno.env.get("CUSTOMER_MAIL_APP_PASSWORD");
-  if (!CU || !CP) return j({ error: "The customer-care mailbox is not connected." }, 500);
+  /* 20 Nov 2026 (Ayush): reminders go from customercare2@thejaingroup.com - its own mailbox, kept apart from
+     customercare1 (CUSTOMER_MAIL_*), which still sends the booking emails. Nothing is sent until its app password
+     is saved as the REMINDER_MAIL_* secrets; there is no falling back to customercare1. */
+  /* Tests go from Ayush's own Gmail instead (20 Nov 2026: "Test will go through my email, real Reminders through
+     customercare2") - sent with his Google connection (acc.google_tokens, gmail.send), never from customercare2. */
+  const TEST_SENDER = "ayushruia1@gmail.com";
+  let CU = Deno.env.get("REMINDER_MAIL_USER"), gTok = "";
+  const CP = Deno.env.get("REMINDER_MAIL_APP_PASSWORD");
+  if (isTest) {
+    const { data: g } = await acc.from("google_tokens").select("refresh_token, scope").eq("email", TEST_SENDER).maybeSingle();
+    if (!g?.refresh_token || !String(g.scope || "").includes("gmail.send")) return j({ error: "Your Google connection (" + TEST_SENDER + ") cannot send email - connect Google again." }, 409);
+    const tr = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: Deno.env.get("GOOGLE_CLIENT_ID")!, client_secret: Deno.env.get("GOOGLE_CLIENT_SECRET")!, refresh_token: g.refresh_token, grant_type: "refresh_token" }).toString() });
+    const tok = await tr.json().catch(() => ({}));
+    if (!tr.ok || !tok.access_token) return j({ error: "Your Google connection (" + TEST_SENDER + ") has expired - connect Google again." }, 409);
+    gTok = tok.access_token; CU = TEST_SENDER;
+  } else if (!CU || !CP) return j({ error: "The reminder mailbox (customercare2) is not connected yet." }, 500);
 
   const [{ data: list, error: le }, { data: st }] = await Promise.all([
-    PS.rpc("outstanding_reminder_list"), PS.from("reminder_settings").select("*").eq("id", 1).maybeSingle()]);
+    // read as the signed-in person - the service key may not run this function (20 Nov 2026)
+    asUser.schema("postsales").rpc("outstanding_reminder_list"), PS.from("reminder_settings").select("*").eq("id", 1).maybeSingle()]);
   if (le) return j({ error: "Could not read the reminder list: " + le.message }, 500);
   if (!st?.subject || !st?.body) return j({ error: "The reminder email has no subject or body." }, 500);
   const byNo: Record<string, any> = {};
@@ -193,31 +222,62 @@ export async function reminderSendCustomers(req: Request, body: any, db: any, j:
 
   const letters = (body?.letters && typeof body.letters === "object") ? body.letters : {};
   const out: any[] = [];
-  const client = new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: CU, password: CP } } });
+  const client = isTest ? null : new SMTPClient({ connection: { hostname: "smtp.gmail.com", port: 465, tls: true, auth: { username: CU!, password: CP! } } });
   try {
     for (const bno of want) {
       const r = byNo[bno];
       const why = !r ? "not on the reminder list" : r.change === "removed" ? "no longer outstanding" : status[bno] !== "Active" ? "booking not active in Farvision"
         : r.held ? "held back" : !r.email ? "no email on record"
-        : Number(r.net_outstanding || 0) < MIN_AMOUNT ? "under Rs 5,000" : sentToday.has(bno) ? "already reminded today" : null;
+        : Number(r.net_outstanding || 0) < MIN_AMOUNT ? "under Rs 5,000" : (!isTest && sentToday.has(bno)) ? "already reminded today" : null;
       const lt = letters[bno];
-      const letterOk = lt && typeof lt.pdf_base64 === "string" && lt.pdf_base64.length < 3_000_000 && atob(lt.pdf_base64.slice(0, 8)).startsWith("%PDF");
-      if (why || !letterOk) { out.push({ booking_no: bno, ok: false, skipped: true, error: why || "no Reminder Letter" }); continue; }
+      // 20 Nov 2026 - every email is checked before it goes, so nothing goes out cut short or wrong:
+      //   the letter is a whole PDF (starts %PDF, ends %%EOF), its total is this customer's Net Outstanding,
+      //   and the filled-in subject and text have no {placeholder} left in them.
+      const bad = letterProblem(lt, r.net_outstanding);
+      if (why || bad) { out.push({ booking_no: bno, ok: false, skipped: true, error: why || bad }); continue; }
       const row = { customer_name: String(r.customer_name || "").trim(), project: projName(r.project),
                     flat: [r.unit_code, r.tower].filter(Boolean).join(", "), net_outstanding: r.net_outstanding };
-      const subject = fill(st.subject, row), text = fill(st.body, row);
+      const subject = (isTest ? "[TEST] " : "") + fill(st.subject, row), text = fill(st.body, row);
+      if (/\{[A-Za-z ]+\}/.test(subject + text)) { out.push({ booking_no: bno, ok: false, skipped: true, error: "a {field} in the email was not filled in" }); continue; }
       const html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111827;white-space:pre-wrap">' + esc(text) + "</div>";
       const fname = String(lt.filename || ("Reminder Letter - " + bno + ".pdf")).replace(/[^\w\-. ]+/g, "_").slice(0, 120);
-      let ok = true, err: string | null = null;
-      try {
-        await client.send({ from: `Pallabita Ghosh - The Jain Group <${CU}>`, to: String(r.email).trim(), subject: asciiSubject(subject), ...mailBody(text, html),
-          attachments: [{ filename: fname.endsWith(".pdf") ? fname : fname + ".pdf", content: lt.pdf_base64, encoding: "base64", contentType: "application/pdf" }] });
-      } catch (e) { ok = false; err = String((e as Error)?.message || e).slice(0, 300); }
-      await PS.from("reminder_send_log").insert({ sent_by: me, from_email: CU, recipient_email: String(r.email).trim(), customer_name: row.customer_name,
-        booking_no: bno, subject, ok, error: err, test: false });
-      out.push({ booking_no: bno, ok, error: err });
+      const att = [{ filename: fname.endsWith(".pdf") ? fname : fname + ".pdf", content: lt.pdf_base64, encoding: "base64", contentType: "application/pdf" }];
+      const targets = isTest ? testTo.map((t: any) => String(t.email).trim()) : [String(r.email).trim()];
+      for (const to of targets) {
+        let ok = true, err: string | null = null;
+        try {
+          if (isTest) {
+            const g = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", { method: "POST",
+              headers: { Authorization: "Bearer " + gTok, "Content-Type": "application/json" },
+              body: JSON.stringify({ raw: b64url(mime(CU!, to, subject, text, html, att)) }) });
+            if (!g.ok) { ok = false; err = ("Gmail " + g.status + ": " + (await g.text())).slice(0, 300); }
+          } else {
+            await client!.send({ from: `Riya Roy - The Jain Group <${CU}>`, to, subject: asciiSubject(subject), ...mailBody(text, html), attachments: att });
+          }
+        } catch (e) { ok = false; err = String((e as Error)?.message || e).slice(0, 300); }
+        // the log keeps what went: amount, project, flat and letter too (20 Nov 2026, "a proper Log System");
+        // until those columns exist (added 20 Nov night) the row is written without them
+        const base = { sent_by: me, from_email: CU, recipient_email: to, customer_name: row.customer_name, booking_no: bno, subject, ok, error: err, test: isTest };
+        const { error: le2 } = await PS.from("reminder_send_log").insert({ ...base, amount: Number(r.net_outstanding || 0), project: projName(r.project),
+          unit: [r.tower, r.unit_code].filter(Boolean).join(" "), source: "JAIN-E", attachment: att[0].filename });
+        if (le2) await PS.from("reminder_send_log").insert(base);
+        out.push({ booking_no: bno, to, ok, error: err });
+      }
     }
-  } finally { try { await client.close(); } catch { /* ignore */ } }
-  return j({ ok: true, from: CU, sent: out.filter((x) => x.ok).length, failed: out.filter((x) => !x.ok && !x.skipped).length,
+  } finally { try { if (client) await client.close(); } catch { /* ignore */ } }
+  return j({ ok: true, from: CU, test: isTest, sent: out.filter((x) => x.ok).length, failed: out.filter((x) => !x.ok && !x.skipped).length,
              skipped: out.filter((x) => x.skipped).length, results: out });
+}
+
+// What is wrong with a Reminder Letter, or null when it is whole and adds up to the customer's Net Outstanding.
+function letterProblem(lt: any, net: unknown): string | null {
+  if (!lt || typeof lt.pdf_base64 !== "string" || lt.pdf_base64.length < 200) return "no Reminder Letter";
+  if (lt.pdf_base64.length > 3_000_000) return "Reminder Letter too large";
+  try {
+    if (!atob(lt.pdf_base64.slice(0, 8)).startsWith("%PDF")) return "Reminder Letter is not a PDF";
+    const s = lt.pdf_base64.replace(/\s+/g, ""); const tail = atob(s.slice(Math.max(0, s.length - 64 - (s.length % 4))));
+    if (tail.indexOf("%%EOF") < 0) return "Reminder Letter is incomplete";
+  } catch { return "Reminder Letter could not be read"; }
+  if (lt.total == null || Math.abs(Number(lt.total) - Number(net || 0)) > 1) return "letter total does not match Net Outstanding";
+  return null;
 }
