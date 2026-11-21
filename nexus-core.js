@@ -433,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'5f4484bba7','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'4952e52419','insp-items.js':'af05d4a323','postsales.js':'9469a48d2a','scheduling.js':'50da5d7188','accounts.js':'cc8a8c6515','accounts-bank.js':'ea9648a540','accounts-books.js':'ed0e987851','purchase.js':'8109127afb','purchase-indent.js':'f6a398b898','purchase-rfq.js':'e6b7d700d5','purchase-po.js':'7239d968b5','purchase-stores.js':'5ff625e1d0','purchase-reports.js':'62c2dbe660','engineering.js':'ded15ec2c9','engineering-boq.js':'786ffa81a5','engineering-wo.js':'3dbf851a12','engineering-amend.js':'237625a694','engineering-ra.js':'2ce94b7221','engineering-ret.js':'645ea33273'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -33754,7 +33754,7 @@ function trcSortHistory(rows){
      that transition is visible - which resets TRC_F back to these same defaults and clears this same
      key, so a reload caught right after landing here restores THIS visit, not the one before it. */
 const TRC_F=(function(){
-  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',missedIn:'all',cadence:'all',promised:'all',notConn:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
+  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',missedIn:'all',cadence:'all',promised:'all',notConn:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',launchOffer:'all',personalMobile:'all'};
   try{
     const saved=JSON.parse(sessionStorage.getItem('trc_filters_state')||'null');
     if(saved&&typeof saved==='object')return Object.assign(fallback,saved);
@@ -33774,10 +33774,11 @@ function trcResetFilters(){
   TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
   TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
   TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.missedIn='all';
-  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.notConn='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
+  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.notConn='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';TRC_F.launchOffer='all';
   TRC_PAGE=0;
   TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
+  TRC_LO_MAP=null;TRC_LO_RANGE=null;
   try{sessionStorage.removeItem('trc_filters_state');}catch(e){}
 }
 
@@ -34264,6 +34265,48 @@ async function trcEnsureFullEnrichment(){
    Cached per range the same way that one is (TRC_QA_MERGED_RANGE), so switching between CRM Match,
    CRM Mismatch and the four mismatch categories after the first click is a plain guard clause, not a
    refetch every time - which is what made switching between them look like the page kept reloading. */
+/* ANANTA LAUNCH OFFER FILTER (21 Nov 2026). launch_offer_status/launch_offer_check live only on
+   acc.followup_qa - neither followup_timeline_v (the full path) nor the light fetch carries them - so
+   they are read in one small, separate query over the same date range and kept beside TRC_ROWS keyed
+   by follow_up_id, rather than merged into rows that the full path may already have cached. Only
+   rows with a launch-offer verdict exist at all (Ananta calls only - see crm-snapshot-qa's
+   launchOfferCheck), so this stays tiny. */
+let TRC_LO_MAP=null, TRC_LO_RANGE=null;
+async function trcEnsureLaunchOffer(force){
+  const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
+  if(!force&&TRC_LO_MAP&&TRC_LO_RANGE===rangeKey)return;
+  try{
+    const data=await trcReadAll(function(){
+      let q=sb.schema('acc').from('followup_qa')
+        .select('follow_up_id,launch_offer_status,lo_source_id:launch_offer_check->>source_id,lo_source_name:launch_offer_check->>source_name')
+        .not('launch_offer_status','is',null).order('follow_up_id',{ascending:false});
+      if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
+      if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
+      return q;
+    });
+    const m={};
+    (data||[]).forEach(function(r){m[String(r.follow_up_id)]=r;});
+    TRC_LO_MAP=m;TRC_LO_RANGE=rangeKey;
+  }catch(e){
+    toast('Could not load launch-offer data: '+((e&&e.message)||e),'err');
+  }
+}
+function trcIsAnanta(r){return String((r&&r.business_unit_name)||'').toLowerCase().indexOf('ananta')!==-1;}
+/* One call against the launch-offer filter. Every value other than 'all' means Ananta calls only.
+   LEADS = every call of a lead that came in on a "Launch Offer" source (any status, including the
+   later-call Not Applicable ones); OTHER = Ananta calls from any other source. */
+function trcLaunchOfferPass(r){
+  const v=TRC_F.launchOffer;
+  if(!v||v==='all')return true;
+  if(!trcIsAnanta(r))return false;
+  const lo=(TRC_LO_MAP||{})[String(r.follow_up_id)]||null;
+  const st=lo?String(lo.launch_offer_status||''):'';
+  const fromLaunch=!!(lo&&(lo.lo_source_id||lo.lo_source_name)&&trIsLaunchSource(lo.lo_source_id,lo.lo_source_name));
+  if(v==='LEADS')return fromLaunch;
+  if(v==='OTHER')return !!lo&&!fromLaunch;
+  if(v==='NONE')return !st;
+  return st===v;
+}
 async function trcEnsureQaFieldsMerged(){
   if(TRC_ROWS_ENRICHED)return;
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
@@ -34455,6 +34498,8 @@ async function trcFetchBoth(){
   if(TRC_KPI_FAST&&TRC_ROWS&&TRC_KPI_FAST.total_followups!==TRC_ROWS.filter(trcRecordingEligible).length){
     await trcFetch(true);
   }
+  // A restored or still-selected launch-offer filter must follow the new range (see trcEnsureLaunchOffer).
+  if(TRC_F.launchOffer&&TRC_F.launchOffer!=='all')await trcEnsureLaunchOffer();
 }
 
 /* Makes good on the promise above: if the lead a deep link names isn't in the date-ranged fetch at
@@ -34534,6 +34579,7 @@ function trcApply(rows,skipCards,allCalls){
       if(TRC_F.personalMobile==='NONE'){ if(r.personal_mobile_status)return false; }
       else if(String(r.personal_mobile_status||'')!==TRC_F.personalMobile)return false;
     }
+    if(!trcLaunchOfferPass(r))return false;
     if(!skipCards){
       if(TRC_F.proc!=='all'&&trcEligBucket(r)!==TRC_F.proc)return false;
       // MATCH/MISMATCH mean "currently" (see trcCountsMatch/trcCountsMismatch) - a superseded old
@@ -35128,6 +35174,16 @@ function trcFilterBar(all){
       +opt('No','Personal mobile asked: No',TRC_F.personalMobile)
       +opt('NONE','Personal mobile asked: Not yet assessed',TRC_F.personalMobile)
     +'</select>'
+    +'<select onchange="trcSet(\'launchOffer\',this.value)" style="padding:6px 8px" title="Ananta only - any choice here shows Ananta calls only. The launch-offer briefing is judged on the first connected call of a lead that came in on a Launch Offer source">'
+      +opt('all','Ananta launch offer: all',TRC_F.launchOffer)
+      +opt('LEADS','Ananta: Launch Offer leads',TRC_F.launchOffer)
+      +opt('OTHER','Ananta: other sources',TRC_F.launchOffer)
+      +opt('Pass','Launch offer: Pass',TRC_F.launchOffer)
+      +opt('Partial','Launch offer: Partial',TRC_F.launchOffer)
+      +opt('Fail','Launch offer: Fail',TRC_F.launchOffer)
+      +opt('Not Applicable','Launch offer: Not Applicable',TRC_F.launchOffer)
+      +opt('NONE','Launch offer: Not yet assessed',TRC_F.launchOffer)
+    +'</select>'
     +'<input id="trcQ" placeholder="Search lead ID, name, personnel or follow-up ID…" value="'+esc(TRC_F.q||'')+'" oninput="trcSet(\'q\',this.value)" style="padding:6px 10px;min-width:250px">'
     +'<div class="grow"></div>'
     // Refresh now lives at the top of the page, beside the count it reloads - see trcView.
@@ -35143,13 +35199,14 @@ window.trcSet=async function(k,v){
   // followup_date_status/remarks_status live on acc.followup_qa exactly like match/mismatch do - same
   // light merge, no join to call_transcripts/transcription_queue needed.
   if((k==='fdate'||k==='remarks'||k==='pitch'||k==='etiquette'||k==='queryHandling'||k==='retention'||k==='lostReason'||k==='personalMobile')&&v!=='all')await trcEnsureQaFieldsMerged();
+  if(k==='launchOffer'&&v!=='all')await trcEnsureLaunchOffer();
   // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
   trcRender(k!=='q');
 };
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
   TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.missedIn='all';
-  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.notConn='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
+  TRC_F.cadence='all';TRC_F.promised='all';TRC_F.notConn='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';TRC_F.launchOffer='all';
   TRC_F.q='';
   // Not null/null - that was "All time". Clearing the filters resets the date range to the same
   // Previous day default the page opens with, rather than reopening that door.
@@ -35166,7 +35223,10 @@ window.trcRefresh=async function(){
   trcLeadCacheClearAll();
   // keepPage: Refresh means "get me current data for exactly what I'm looking at", not "start over" -
   // every filter in TRC_F is already untouched by this function, and the page number should be too.
-  await Promise.all([trcFetch(true),trcKpiFastFetch(true)]);trcRender(true,true);
+  TRC_LO_MAP=null;TRC_LO_RANGE=null;
+  await Promise.all([trcFetch(true),trcKpiFastFetch(true)]);
+  if(TRC_F.launchOffer&&TRC_F.launchOffer!=='all')await trcEnsureLaunchOffer(true);
+  trcRender(true,true);
   trcAfterListRender();
 };
 
