@@ -9,7 +9,7 @@ const NAV=[
     {id:'scoreboard',label:'Scoreboard',icon:'fa-ranking-star'},
     /* Sits under Overview rather than Operations because it is read by the people who chair the
        meeting, not only by the people doing the work it creates. */
-    {id:'weekly_status',label:'Weekly Status',icon:'fa-people-group'},
+    {id:'weekly_status',label:'JainE-Meetings',icon:'fa-people-group'},
   ]},
   {group:'Sales',items:[
     {id:'gtd',label:'GTD',icon:'fa-brain'},
