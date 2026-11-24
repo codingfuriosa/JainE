@@ -15482,6 +15482,8 @@ table.rt td.s{width:10%;white-space:nowrap;font-weight:700}
 table.rt td.m{white-space:pre-wrap;word-break:break-word}
 table.rt td.d{width:13%;white-space:nowrap;color:#64748b;font-size:11px}
 .rh .when b{color:#0f172a}
+h3.sec{font-size:10.5px;letter-spacing:.8px;text-transform:uppercase;color:#64748b;margin:18px 0 2px}
+.toc .pc{color:#64748b;font-weight:400;font-size:11px}
 `;
 function sfReportHtml(d){
   const plural=function(n,w){ return n+' '+w+(n===1?'':'s'); };
@@ -15489,6 +15491,20 @@ function sfReportHtml(d){
   const raters={}; d.ratings.forEach(function(r){ raters[r.rater_email]=1; });
   const avgAll=d.ratings.length?sfAvg(d.ratings).toFixed(1)+' / 10':'—';
   const avgTxt=function(rs){ return rs.length?sfAvg(rs).toFixed(1)+' / 10':'—'; };
+  // Page one, first thing under the heading: how many New Features and how many Bugs Fixed were posted,
+  // how many of each have been rated and how many are still waiting. "Rated" counts feedbacks that have
+  // at least one rating; "Ratings" counts the ratings themselves (one feedback can be rated by several).
+  const typeRow=function(label,es){
+    const rs=[].concat.apply([],es.map(function(e){ return e.ratings; }));
+    const n=es.filter(function(e){ return e.ratings.length; }).length;
+    const pc=es.length?' <span class="pc">('+Math.round(n*100/es.length)+'%)</span>':'';
+    return '<tr><td>'+label+'</td><td class="r">'+es.length+'</td><td class="r"><b>'+n+'</b>'+pc+'</td><td class="r">'+(es.length-n)+'</td><td class="r">'+rs.length+'</td><td class="r">'+avgTxt(rs)+'</td></tr>';
+  };
+  const isNew=function(e){ return e.item.kind==='New Feature'; };
+  const byType='<h3 class="sec">Rated and not yet rated, by type</h3>'
+    +'<table class="toc"><thead><tr><th>Type</th><th class="r">Posted</th><th class="r">Rated</th><th class="r">Not yet rated</th><th class="r">Ratings received</th><th class="r">Average</th></tr></thead><tbody>'
+    +typeRow('New Features',allEntries.filter(isNew))+typeRow('Bugs Fixed',allEntries.filter(function(e){ return !isNew(e); }))+'</tbody>'
+    +'<tfoot><tr><td>Total</td><td class="r">'+allEntries.length+'</td><td class="r">'+allEntries.filter(function(e){ return e.ratings.length; }).length+'</td><td class="r">'+allEntries.filter(function(e){ return !e.ratings.length; }).length+'</td><td class="r">'+d.ratings.length+'</td><td class="r">'+avgAll+'</td></tr></tfoot></table>';
   // A module nobody has rated gets no page: it stays in the overview and is named once under it.
   const rated=d.mods.filter(function(m){ return sfModRatings(m).length; });
   const unrated=d.mods.filter(function(m){ return !sfModRatings(m).length; });
@@ -15520,6 +15536,8 @@ function sfReportHtml(d){
     +'<div class="bar noprint"><span>The print window opens by itself. To keep a copy instead, choose “Save as PDF” as the printer.</span><button onclick="window.print()">Print</button></div>'
     +'<header class="top"><div class="brand">THE JAIN GROUP</div><h1>System Feedbacks — report</h1>'
     +'<div class="meta">Prepared by '+esc(nameOf(fhMe()))+' · '+esc(fhNiceWhen(new Date()))+' · '+plural(d.mods.length,'module')+' · '+plural(allEntries.length,'feedback')+' · '+plural(d.ratings.length,'rating')+' from '+plural(Object.keys(raters).length,'person').replace('persons','people')+' · average '+avgAll+'</div></header>'
+    +byType
+    +'<h3 class="sec">By module</h3>'
     +'<table class="toc"><thead><tr><th>Module</th><th class="r">New Features</th><th class="r">Bugs Fixed</th><th class="r">Ratings</th><th class="r">Average</th></tr></thead><tbody>'+overview+'</tbody>'
     +'<tfoot><tr><td>Total</td><td class="r">'+sfKindN(allEntries,true)+'</td><td class="r">'+sfKindN(allEntries,false)+'</td><td class="r">'+d.ratings.length+'</td><td class="r">'+avgAll+'</td></tr></tfoot></table>'
     +note+sections+'</body></html>';
