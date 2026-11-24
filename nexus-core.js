@@ -11491,7 +11491,7 @@ VIEWS.weekly_status=async function(v){
    * Starting or scheduling a new meeting needs Weekly Status itself (WM.ro is true without it).
    Ticking or approving a task follows Accountability's own rule (only who assigned it), so those stay. */
 const WM_NEW=/\bwm(?:StartMeeting|ScheduleMeeting|MeetingSave)\b/;
-const WM_EDIT=/\bwm(?:EditItem|NoteEdit|SeriesStop|EndMeeting|Reopen|AgStart|AgStep|AgPause|AgAdd|AgStepAdd|AgStepAddSave|AgStepDel|AgMins|AgNoteInput|AgNoteSave|KpiAdd|KpiInput|KpiSave|KpiColAdd|KpiColDel|KpiColName|KpiCell|OoAdd|NoteAdd|NoteInput|NoteSave|NoteSolve|NoteTask|NoteTaskSave|NoteDel|Reschedule|RescheduleSave|EditAttendance|SaveAttendance|Parse|Key|DropMem|PickPeople|SelAll|Promote|BulkPeople|BulkDue|DraftText|DraftDue|DraftDelete|Choose|Add1)\b/;
+const WM_EDIT=/\bwm(?:EditItem|NoteEdit|SeriesStop|EndMeeting|Reopen|AgStart|AgStep|AgPause|AgAdd|AgEdit|AgEditSave|AgStepAdd|AgStepAddSave|AgStepDel|AgMins|AgNoteInput|AgNoteSave|KpiAdd|KpiInput|KpiSave|KpiColAdd|KpiColDel|KpiColName|KpiCell|OoAdd|NoteAdd|NoteInput|NoteSave|NoteSolve|NoteTask|NoteTaskSave|NoteDel|Reschedule|RescheduleSave|EditAttendance|SaveAttendance|Parse|Key|DropMem|PickPeople|SelAll|Promote|BulkPeople|BulkDue|DraftText|DraftDue|DraftDelete|Choose|Add1)\b/;
 function wmCanEdit(id){ const m=wmMeeting(id); return !m||m.can_edit!==false; }
 function wmLockIn(scope,re){
   if(!scope) return;
@@ -11532,7 +11532,7 @@ function wmWatchReadOnly(){
    The old right-hand panel is gone: Start / Schedule are under "+ New meeting", the coming weeks are
    Upcoming, earlier days are History, and the live dot is Running. */
 const WM_NAME='JainE-Meetings';
-function wmCounts(){ wmPaintSide(); wmPaintBoardStats(); }
+function wmCounts(){ wmPaintSide(); wmPaintBoardStats(); if(typeof wmPaintWTabs==='function') wmPaintWTabs(); }
 function wmMonday(iso){ const d=new Date(iso+'T00:00'); d.setDate(d.getDate()-((d.getDay()+6)%7)); return wmIso(d); }
 const WM_DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 const wmTime=t=>t?String(t).slice(0,5):'';
@@ -11837,7 +11837,7 @@ window.wmRescheduleSave=async function(id){
 
 /* ---------- a meeting ---------- */
 window.wmOpenMeeting=function(id){ if(WM.view!=='board') WM.from=WM.view; WM.view='board'; WM.cur=id;
-  WM.tab='pending'; WM.q=''; WM.who=''; WM.showPpl=false; WM.picked={mem:[],due:null,recur:'none'}; wmRender(); window.scrollTo({top:0,behavior:'smooth'}); };
+  WM.tab='pending'; WM.q=''; WM.who=''; WM.showPpl=false; WM.wtab=null; WM.picked={mem:[],due:null,recur:'none'}; wmRender(); window.scrollTo({top:0,behavior:'smooth'}); };
 // Older code repaints "the meeting" through this name; it is the meeting page now.
 function wmPaintMeeting(){ if(WM.view==='board') wmPaintBoard(); else wmRender(); }
 
@@ -11850,18 +11850,15 @@ function wmPaintMeeting(){ if(WM.view==='board') wmPaintBoard(); else wmRender()
      Pending / All Tasks / Finished), KPI and Opportunities & Obstacles stacked on the right. */
 function wmRenderBoard(){
   const v=$('wmView'); if(!v) return;
-  v.innerHTML=`<div class="wm-bd-top wm-in">
-    <button class="wm-back" onclick="wmHome()"><i class="fa-solid fa-arrow-left"></i> ${esc({up:'Upcoming',run:'Running',hist:'History',all:'Tasks'}[WM.from]||'Dashboard')}</button>
-    <div class="wm-bd-stats" id="wmBdStats"></div>
-  </div>
-  ${WM.ro?'<div class="wm-ronote"><i class="fa-solid fa-eye"></i> You can see the meetings you are in. Only the person who started a meeting (or someone they made an editor) can change it.</div>':''}
+  v.innerHTML=`${WM.ro?'<div class="wm-ronote"><i class="fa-solid fa-eye"></i> You can see the meetings you are in. Only the person who started a meeting (or someone they made an editor) can change it.</div>':''}
   <div id="wmMain"></div>`;
   wmPaintBoard(); wmPaintBoardStats();
 }
 // Back to the view the meeting was opened from.
 window.wmHome=function(){ WM.view=WM.from&&WM.from!=='board'?WM.from:'dash'; WM.tab='pending'; WM.showPpl=false; wmRender(); window.scrollTo({top:0,behavior:'smooth'}); };
 // Jumping to a panel (from an agenda step) opens it if it was folded.
-window.wmGoPanel=function(id){ const c=$(id); if(!c) return; const k={wmKpiCard:'kpi',wmTdCard:'td',wmOoCard:'oo'}[id]; if(k&&wmFolded(k)) wmFold(k,id); c.scrollIntoView({behavior:'smooth',block:'start'}); };
+window.wmGoPanel=function(id){ const c=$(id); if(!c) return;
+  { const tk={wmKpiCard:'kpi',wmTdCard:'td',wmOoCard:'oo'}[id]; if(tk&&$('wmWs')){ wmWTab(tk); return; } } const k={wmKpiCard:'kpi',wmTdCard:'td',wmOoCard:'oo'}[id]; if(k&&wmFolded(k)) wmFold(k,id); c.scrollIntoView({behavior:'smooth',block:'start'}); };
 /* The KPI, To-dos and Opportunities & Obstacles panels fold to their header (with a count), so the
    panel being discussed has the room. Which are folded is remembered on this computer. */
 function wmFoldState(){ try{ return JSON.parse(localStorage.getItem('wm_fold')||'{}')||{}; }catch(e){ return {}; } }
@@ -11882,7 +11879,9 @@ function wmPaintBoardStats(){
   const kind=WM.items.filter(it=>it.kind===m.kind&&!it.draft), pend=kind.filter(wmOpen);
   const obs=wmNotesFor(m,'obstacle').filter(n=>!n.solved).length;
   const c=(n,l,cls)=>`<div><b class="${cls}">${n}</b><span>${l}</span></div>`;
-  host.innerHTML=c(pend.length,'pending',pend.length?'r':'')+c(kind.filter(it=>it.st==='awaiting').length,'to approve','a')+c(kind.filter(wmOverdue).length,'overdue','r')+c(obs,'open obstacles','');
+  const aw=kind.filter(it=>it.st==='awaiting').length, od=kind.filter(wmOverdue).length; void obs;
+  host.innerHTML=c(pend.length,'pending','')+(aw?c(aw,'to approve','a'):'')+(od?c(od,'overdue','r'):'');
+  host.title='Every '+(m.kind||'')+' meeting, all dates';
 }
 function wmPaintBoard(){
   clearInterval(WM.timer);
@@ -11892,45 +11891,57 @@ function wmPaintBoard(){
   const today=wmToday(), series=wmSeries(m.kind), first=series.length?series[series.length-1].meeting_date:m.meeting_date;
   const isToday=m.meeting_date===today, att=m.attendees||[], ended=!!m.ended_at;
   const started=(function(){ try{ return Number(localStorage.getItem('wm_start_'+m.id))||0; }catch(e){ return 0; } })();
+  // The header's parts: where Back goes, the status tag, and the More menu (rights, repeats, Reschedule,
+  // earlier meetings, Stop repeating) - kept out of sight until wanted.
+  const backL={up:'Upcoming',run:'Running',hist:'History',all:'Tasks'}[WM.from]||'Dashboard';
+  const runningNow=isToday&&!ended&&(started||m.agenda_run);
+  const when=(m.meeting_date===today?'Today':wmFmtS(m.meeting_date))+(m.start_time?' · '+wmTime(m.start_time):'');
+  const stag=ended?`<span class="wm-stag ok"><i class="fa-solid fa-circle-check"></i> Ended ${esc(wmClock(m.ended_at))}${m.ran_minutes?' · ran '+m.ran_minutes+' min':''}</span>${wmCanEdit(m.id)&&!WM.ro?'<button class="wm-quiet wm-reopen" onclick="wmReopen()">Reopen</button>':''}`
+    :runningNow?`<span class="wm-stag live"><i class="dot"></i> Live${m.start_time?' · '+esc(wmTime(m.start_time)):''}</span>`
+    :m.meeting_date>=today?`<span class="wm-stag up">${esc(m.meeting_date===today?when:'Coming up · '+when)}</span>`:`<span class="wm-stag">${esc('Held · '+when)}</span>`;
+  const recurW=m.series_id&&m.recur?(m.series_active?wmRecurWords(m.recur,(wmSeries(m.kind).filter(x=>x.series_id===m.series_id).pop()||m).meeting_date,m.start_time):'Stopped repeating'):'';
+  const canStop=m.series_id&&m.series_active&&(wmIsStarterOrEditor(m)||WS_OWNERS.includes(String(state.email||'').toLowerCase()));
+  const canRs=!ended&&m.meeting_date>=today&&wmCanEdit(m.id)&&!WM.ro;
+  const others=series.filter(x=>x.id!==m.id).slice(0,8);
+  const moreInfo=[m.created_by?'Started by <b>'+esc(wmName(m.created_by))+'</b>'+((m.editors||[]).length?' · Editor'+((m.editors||[]).length>1?'s':'')+': <b>'+esc((m.editors||[]).map(wmName).join(', '))+'</b>':''):'From the minutes sheet',
+    recurW?'<i class="fa-solid fa-repeat"></i> '+esc(recurW):'', series.length+' meeting'+(series.length===1?'':'s')+' of this kind since '+esc(wmFmtS(first)), m.note?esc(m.note):''].filter(Boolean).join('<br>');
   main.innerHTML=`<div class="wm-card wm-in wm-bd-strip">
-    <div class="wm-bd-head">
+    <div class="wm-bd-head wm-hd2">
       <div class="wm-bd-hl">
-        <div class="wm-eyebrow">${ended?`<span class="wm-ended"><i class="fa-solid fa-circle-check"></i> ${isToday?'Today':esc(wmFmt(m.meeting_date))} · ended at ${esc(wmClock(m.ended_at))}${m.ran_minutes?' · ran '+m.ran_minutes+' min':''}</span><button class="wm-quiet" onclick="wmReopen()">Reopen</button>`
-          :isToday?`<span class="wm-live">Today${m.start_time?' · '+esc(wmTime(m.start_time)):''}</span>`:m.meeting_date>today?'Coming up · '+esc(wmFmt(m.meeting_date))+(m.start_time?', '+esc(wmTime(m.start_time)):''):'Held on '+esc(wmFmt(m.meeting_date))+(m.start_time?', '+esc(wmTime(m.start_time)):'')}</div>
-        ${wmCanEdit(m.id)?'':`<div class="wm-viewonly"><i class="fa-solid fa-eye"></i> View only · ${m.created_by?esc(wmName(m.created_by))+' started this meeting and can change it':'only the owner can change this meeting'}${(m.editors||[]).length?', with '+esc((m.editors||[]).map(wmName).join(', ')):''}</div>`}
-        <h2>${esc(m.kind||'Meeting')}<span class="wm-info"><i class="fa-solid fa-circle-info"></i><span class="tip">${series.length} meeting${series.length===1?'':'s'} of this kind since ${esc(wmFmtS(first))}${m.note?'<br>'+esc(m.note):''}</span></span></h2>
-        <div class="wm-mh2" style="margin-top:8px">
+        <div class="wm-t1">
+          <button class="wm-backb" onclick="wmHome()" title="Back to ${esc(backL)}" aria-label="Back to ${esc(backL)}"><i class="fa-solid fa-arrow-left"></i></button>
+          <h2>${esc(m.kind||'Meeting')}</h2>${stag}${recurW&&m.series_active?`<span class="wm-reptag" title="${esc(recurW)}" aria-label="${esc(recurW)}"><i class="fa-solid fa-repeat"></i></span>`:''}
+        </div>
+        ${wmCanEdit(m.id)?'':`<div class="wm-viewonly wm-t2"><i class="fa-solid fa-eye"></i> View only</div>`}
+        <div class="wm-mh2 wm-t2">
           <div class="wm-dd" id="wmPpl">${wmPplHtml(att)}</div>
-          ${m.series_id&&m.recur?`<span class="wm-rep ${m.series_active?'':'off'}"><i class="fa-solid fa-repeat"></i> ${esc(m.series_active?wmRecurWords(m.recur,(wmSeries(m.kind).filter(x=>x.series_id===m.series_id).pop()||m).meeting_date,m.start_time):'Stopped repeating')}${m.series_active&&(wmIsStarterOrEditor(m)||WS_OWNERS.includes(String(state.email||'').toLowerCase()))?` · <button class="wm-quiet" onclick="wmSeriesStop(${m.series_id})">Stop repeating</button>`:''}</span>`:''}
-          ${m.created_by?`<span class="wm-rep" title="The starter and the editors have the same rights in this meeting"><i class="fa-solid fa-user-pen"></i> Started by ${esc(wmName(m.created_by))}${(m.editors||[]).length?' · Editor'+((m.editors||[]).length>1?'s':'')+': '+esc((m.editors||[]).map(wmName).join(', ')):''}</span>`:''}
-          ${series.length>1?`<select class="wm-hsel" onchange="wmOpenMeeting(Number(this.value))" title="Earlier meetings">${series.map(x=>`<option value="${x.id}" ${x.id===m.id?'selected':''}>${x.id===m.id?'Earlier meetings':(x.meeting_date===today?'Today':esc(wmFmt(x.meeting_date)))}</option>`).join('')}</select>`:''}
-          ${!ended&&m.meeting_date>=today&&wmCanEdit(m.id)&&!WM.ro?`<button class="wm-quiet wm-rs" onclick="wmReschedule(${m.id})"><i class="fa-regular fa-calendar"></i> Reschedule</button>`:''}
+          <div class="wm-more" id="wmMore"><button class="wm-quiet" onclick="wmMoreToggle(event)" aria-haspopup="true" aria-expanded="false"><i class="fa-solid fa-ellipsis"></i> More</button>
+            <div class="wm-more-panel" style="display:none">
+              <div class="wm-more-info">${moreInfo}</div>
+              ${canRs?`<button class="it" onclick="wmMoreToggle();wmReschedule(${m.id})"><i class="fa-regular fa-calendar"></i> Reschedule</button>`:''}
+              ${others.length?`<div class="wm-more-h">Earlier and later ${esc(m.kind||'')} meetings</div>`+others.map(x=>`<button class="it" onclick="wmOpenMeeting(${x.id})"><i class="fa-regular fa-calendar-check"></i> ${esc(x.meeting_date===today?'Today':wmFmt(x.meeting_date))}${x.start_time?', '+esc(wmTime(x.start_time)):''}</button>`).join(''):''}
+              ${canStop?`<button class="it danger" onclick="wmMoreToggle();wmSeriesStop(${m.series_id})"><i class="fa-solid fa-ban"></i> Stop repeating</button>`:''}
+            </div></div>
         </div>
       </div>
-      ${isToday&&!ended?`<div class="wm-mh-r">${started?`<div class="wm-clock" title="How long this meeting has been running"><span>Meeting running</span><b id="wmTimer">0m 00s</b><small>Started ${esc(wmClock(started))} · now <em id="wmNow">${esc(wmClock(Date.now()))}</em></small></div>`:''}<button class="wm-btn wm-red" onclick="wmEndMeeting()">End meeting</button></div>`:''}
+      ${isToday&&!ended?`<div class="wm-mh-r">${started?`<div class="wm-clock" title="Meeting running since ${esc(wmClock(started))}"><i class="fa-regular fa-clock"></i><b id="wmTimer">0m 00s</b></div>`:''}<button class="wm-btn wm-red" onclick="wmEndMeeting()">End meeting</button></div>`:''}
     </div>
     ${m.agenda?'<div class="wm-ag wm-bd-ag" id="wmAg"></div>':`<div class="wm-addsec" style="margin:0 22px 16px"><button class="wm-quiet" onclick="wmAgAdd()"><i class="fa-solid fa-stopwatch"></i> Run this meeting on the timed agenda</button></div>`}
   </div>
-  <div class="wm-bd-work">
-    <div class="wm-card wm-bd-col wm-bd-act">
-      <div class="wm-bd-h"><span><i class="fa-solid fa-list-check"></i> Action Taken</span><span class="wm-mute" style="font-size:12px;font-weight:500">Type, @person, a date - Enter</span></div>
-      <div class="wm-bd-in">
-        <div class="wm-cap" style="margin-top:6px">
-          <div class="wm-cap-in"><input id="wmSmart" autocomplete="off" placeholder="Write an action and press Enter…" oninput="wmParse()" onkeydown="wmKey(event)"><span class="kbd">Enter ↵</span></div>
-          <div class="wm-parsed" id="wmParsed"></div>
-          <div class="wm-sugg" id="wmSugg" style="display:none"></div>
-        </div>
-        <div id="wmDrafts"></div>
-        <div class="wm-v6" id="wmTasks"></div>
-      </div>
+  <div class="wm-card wm-bd-ws" id="wmWs">
+    <div class="wm-cap wm-ws-cap">
+      <div class="wm-cap-in"><i class="fa-solid fa-plus wm-cap-ic"></i><input id="wmSmart" autocomplete="off" placeholder="Add an action - @person, a date - then Enter…" oninput="wmParse()" onkeydown="wmKey(event)"><span class="kbd">Enter ↵</span></div>
+      <div class="wm-parsed" id="wmParsed"></div>
+      <div class="wm-sugg" id="wmSugg" style="display:none"></div>
     </div>
-    <div class="wm-bd-right">
-      <div class="wm-card wm-bd-col" id="wmKpiCard"></div>
-      <div class="wm-card wm-bd-col" id="wmTdCard"></div>
-      <div class="wm-card wm-bd-col" id="wmOoCard"></div>
-    </div>
+    <div class="wm-wtabs" role="tablist" id="wmWTabs"></div>
+    <div class="wm-wpane" data-p="act"><div class="wm-bd-in"><div id="wmDrafts"></div><div class="wm-v6" id="wmTasks"></div></div></div>
+    <div class="wm-wpane wm-bd-col" data-p="kpi" id="wmKpiCard"></div>
+    <div class="wm-wpane wm-bd-col" data-p="td" id="wmTdCard"></div>
+    <div class="wm-wpane wm-bd-col" data-p="oo" id="wmOoCard"></div>
   </div>`;
-  wmRepaintKpi(); wmRepaintTd(); wmRepaintOo(); wmParse(); wmPaintDrafts(); wmPaintTabs();
+  if(!WM.wtab){ const s0=m.agenda?wmAgState(m):null; WM.wtab=s0&&s0.run&&!s0.done&&!s0.finished&&s0.items[s0.i]?wmTabOf(s0.items[s0.i].k):'act'; }
+  wmRepaintKpi(); wmRepaintTd(); wmRepaintOo(); wmParse(); wmPaintDrafts(); wmPaintTabs(); wmPaintWTabs();
   if(m.agenda) wmPaintAgenda(true);
   if(isToday&&started&&!ended){
     const tick=()=>{ const t=$('wmTimer'); if(!t) return; const x=Math.max(0,Math.floor((Date.now()-started)/1000)), hh=Math.floor(x/3600), mm=Math.floor(x%3600/60), ss=x%60;
@@ -11942,24 +11953,30 @@ function wmPaintBoard(){
 // The agenda as eight step chips: done ones ticked, the running one red with its countdown and bar,
 // the minutes of the others editable. The open step (big countdown, its notes) sits under the chips.
 const WM_AG_SHORT={wins:'Wins',core:'Core values',goal:'#1 goal',prio:'Priorities',kpi:'KPIs',events:'Upcoming events',todos:'To-dos',oo:'Opportunities & obstacles'};
+// The agenda on the meeting page (refined 24 Nov): one "Now" bar - the step, one big countdown, a bar,
+// what comes next, when it ends, the timer buttons and Edit agenda - and under it a single row of slim
+// step pills. Minutes, order and steps of your own are changed in Edit agenda, not on the pills.
+// The agenda on the meeting page (cleaned up 24 Nov): the Now area - the step, one big countdown, what
+// comes next, when it ends, the timer buttons and Edit agenda - and under it one thin bar with a segment
+// per step, as wide as its minutes: done green, the running one filling red, the rest grey. Hovering a
+// segment names the step; clicking it opens that step (its notes, or its KPIs / To-dos / O&O tab).
 function wmPaintAgChips(host,s,curK,ctl,tot){
-  const m=wmMeeting(WM.cur), canEd=!!m&&wmCanEdit(m.id)&&!WM.ro, nowMin=Math.floor(wmNowSec()/60);
-  // When it ends: from now while the timer runs, else from the start time.
+  const m=wmMeeting(WM.cur), canEd=!!m&&wmCanEdit(m.id)&&!WM.ro&&!m.ended_at, nowMin=Math.floor(wmNowSec()/60);
+  const cur=curK?s.items[s.i]:null, nxt=cur?s.items[s.i+1]:(!s.run?s.items[0]:null);
   let ends='';
-  if(curK){ const rem=Math.ceil(s.left/60)+s.items.slice(s.i+1).reduce((a,x)=>a+x.mins,0); ends=(s.run.paused?'paused · ':'')+'ends about '+wmHHMM(nowMin+rem); }
+  if(cur){ const rem=Math.ceil(s.left/60)+s.items.slice(s.i+1).reduce((a,x)=>a+x.mins,0); ends='ends about '+wmHHMM(nowMin+rem); }
   else if(!s.run&&m&&m.start_time) ends=wmTime(m.start_time)+' – '+wmHHMM(wmMin(m.start_time)+tot);
-  const nextI=curK?s.i+1:(!s.run?0:-1);
-  host.innerHTML=`<div class="wm-agh"><div class="wm-agh-l"><b><i class="fa-solid fa-stopwatch"></i> Agenda</b><span>${s.items.length} step${s.items.length===1?'':'s'} · ${tot} min${ends?' · '+esc(ends):''}</span></div>
-    <div class="wm-ag-ctl">${curK?`<div class="wm-bd-now"><span>Now · ${esc((s.items.find(x=>x.k===curK)||{}).l||'')}</span><b id="wmAgBig" class="${s.run.paused?'paused':''}">${wmMMSS(s.left)}</b></div>`:(s.done||s.finished?'<span class="wm-mute" style="font-size:12px">Agenda finished</span>':'')}${ctl}</div></div>
-    <div class="wm-bd-chips">${s.items.map((x,j)=>{ const past=s.run&&(s.done||s.finished||j<s.i), now=x.k===curK, nx=j===nextI&&!now;
-      return `<div class="wm-chip ${now?'n':''} ${past?'d':''} ${nx?'nx':''} ${WM.agView===x.k?'v':''}" onclick="wmAgView('${x.k}')" title="${esc(x.l)} · ${x.mins} min${x.custom?' · a step added for this meeting':''}">
-        <span class="no">${past?'<i class="fa-solid fa-check"></i>':j+1}</span>
-        <span class="tx"><b>${esc(WM_AG_SHORT[x.k]||x.l)}</b>
-        ${now?`<span><em id="wmAgCd">${wmMMSS(s.left)}</em> left of ${x.mins} min</span>`
-             :`<span><input class="mn" type="number" min="1" max="180" value="${x.mins}" title="Minutes" onclick="event.stopPropagation()" onchange="wmAgMins('${x.k}',this.value)">min${nx?' · <i class="nxl">next</i>':''}</span>`}</span>
-        ${x.custom&&!now&&canEd?`<button class="x" title="Remove this step" onclick="event.stopPropagation();wmAgStepDel('${x.k}')"><i class="fa-solid fa-xmark"></i></button>`:''}
-        ${now?`<span class="bar"><span id="wmAgBar" style="width:${Math.min(100,100-(s.left/(x.mins*60))*100)}%"></span></span>`:''}</div>`; }).join('')}
-      ${canEd&&!(m&&m.ended_at)?'<button class="wm-chip-add" onclick="wmAgStepAdd()"><i class="fa-solid fa-plus"></i> Add step</button>':''}</div>
+  const edit=canEd?`<button class="wm-agedit" onclick="wmAgEdit()" title="Minutes, order, steps of your own"><i class="fa-solid fa-sliders"></i> Edit agenda</button>`:'';
+  const pc=cur?Math.min(100,100-(s.left/(cur.mins*60))*100):0;
+  const bar=cur?`<div class="wm-agnow ${s.run.paused?'paused':''}">
+      <div class="l"><span class="k">${s.run.paused?'Paused':'<i class="dot"></i>Now'} · step ${s.i+1} of ${s.items.length}</span><b>${esc(cur.l)}</b>
+        <span class="sub">${nxt?'Next: '+esc(nxt.l)+' · ':'Last step · '}${esc(ends)}</span></div>
+      <b class="cd" id="wmAgBig">${wmMMSS(s.left)}</b>
+      <div class="wm-ag-ctl">${ctl}${edit}</div></div>`
+    :`<div class="wm-agnow idle"><div class="l"><span class="k"><i class="fa-solid fa-stopwatch"></i> ${s.done||s.finished?'Agenda finished':'Agenda'}</span><b>${s.items.length} step${s.items.length===1?'':'s'} · ${tot} min</b>${ends?`<span class="sub">${esc(ends)}</span>`:''}</div>
+      <div class="wm-ag-ctl">${ctl}${edit}</div></div>`;
+  host.innerHTML=bar+`<div class="wm-agseg ${cur&&s.run.paused?'paused':''}" role="list" aria-label="Agenda steps">${s.items.map((x,j)=>{ const past=s.run&&(s.done||s.finished||j<s.i), now=x.k===curK, lab=(j+1)+'. '+x.l+' · '+x.mins+' min'+(now?' · now':past?' · done':'');
+      return `<button role="listitem" class="seg ${now?'n':''} ${past?'d':''} ${WM.agView===x.k&&!now?'v':''}" style="flex:${Math.max(1,x.mins)} 1 0" onclick="wmAgView('${x.k}')" title="${esc(lab)}" aria-label="${esc(lab)}">${now?`<i id="wmAgBigBar" style="width:${pc}%"></i>`:''}</button>`; }).join('')}</div>
     <div class="wm-ag-panel wm-bd-panel" id="wmAgPanel"></div>`;
 }
 // The KPI and Opportunities & Obstacles panels, redrawn after their own changes.
@@ -12038,7 +12055,7 @@ window.wmFormKind=function(){
 function wmFormAgenda(){
   const host=$('wmAgForm'); if(!host) return;
   const on=WM.formAg.filter(x=>x.on), tot=on.reduce((s,x)=>s+(Number(x.mins)||0),0);
-  const t=$('wmTime')?$('wmTime').value:wmNowTime(), ends=t&&tot?' · ends about '+wmHHMM(wmMin(t)+tot):'';
+  const t=WM.agEditing?'':($('wmTime')?$('wmTime').value:wmNowTime()), ends=t&&tot?' · ends about '+wmHHMM(wmMin(t)+tot):'';
   const keep=document.activeElement&&document.activeElement.id==='wmAgNewName';
   host.innerHTML=WM.formAg.map((x,i)=>
     // Plain rows rather than form fields: JainE's form styles stretch every input to full width.
@@ -12281,6 +12298,7 @@ function wmAgAdvanced(m,s){
   const typing=document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#wmAgPanel');
   if(WM.agFollow&&!typing&&!s.finished) WM.agView=run.k;
   wmPaintAgenda(false);
+  if(!s.finished) wmWTabFor(run.k);
 }
 function wmPaintAgPanel(s){
   const p=$('wmAgPanel'), m=wmMeeting(WM.cur); if(!p||!m) return;
@@ -12313,7 +12331,7 @@ window.wmAgView=function(k){
 window.wmAgStart=async function(){
   const m=wmMeeting(WM.cur); if(!m) return; const items=wmAgOn(m); if(!items.length) return;
   try{ if(!localStorage.getItem('wm_start_'+m.id)) localStorage.setItem('wm_start_'+m.id,String(Date.now())); }catch(e){}
-  await wmAgSaveRun(m,{k:items[0].k,at:Date.now(),paused:false}); WM.agView=items[0].k; WM.agFollow=true; wmPaintMeeting();
+  await wmAgSaveRun(m,{k:items[0].k,at:Date.now(),paused:false}); WM.agView=items[0].k; WM.agFollow=true; WM.wtab=wmTabOf(items[0].k); wmPaintMeeting();
 };
 window.wmAgPause=async function(){
   const m=wmMeeting(WM.cur), s=wmAgState(m); if(!s.run||s.done) return;
@@ -12326,7 +12344,7 @@ window.wmAgStep=async function(dir){
   const cur=s.done||s.finished?s.items.length:s.i, j=cur+dir;
   if(j<0) return;
   const run=j>=s.items.length?{k:s.items[s.items.length-1].k,done:true}:{k:s.items[j].k,at:Date.now(),paused:false};
-  await wmAgSaveRun(m,run); WM.agView=run.k; WM.agFollow=true; wmPaintAgenda(false);
+  await wmAgSaveRun(m,run); WM.agView=run.k; WM.agFollow=true; wmPaintAgenda(false); if(!run.done) wmWTabFor(run.k);
 };
 // Changing a step's minutes. On the running step the time already spent still counts.
 window.wmAgMins=async function(k,v){
@@ -12384,6 +12402,46 @@ window.wmAgStepDel=async function(k){
     m.agenda={items}; if(WM.agView===k) WM.agView=null; toast('Removed: '+x.l,'ok'); wmPaintAgenda(false);
   }catch(e){ toast('Could not remove it: '+((e&&e.message)||e)+' - try again.','err'); }
 };
+/* Edit agenda: the same editor as the Start / Schedule form, for this meeting - tick steps on or off,
+   change minutes, move steps, rename / remove / add steps of your own. The step the timer is on must stay. */
+window.wmAgEdit=function(){
+  const m=wmMeeting(WM.cur); if(!m||!wmCanEdit(m.id)) return;
+  WM.formAg=wmAgMerge(m.agenda).map(x=>Object.assign({},x)); WM.agEditing=true;
+  openModal(`<div class="modal-head"><h3>Edit the agenda</h3><span class="x" onclick="WM.agEditing=false;closeModal()">&times;</span></div>
+  <div class="modal-body frm"><div class="wm-fp-help" style="margin:0 0 10px">Untick what this meeting skips, change the minutes, move steps with the arrows, or add a step of your own. Only this meeting changes.</div><div class="wm-agf" id="wmAgForm"></div></div>
+  <div class="modal-foot"><button class="btn" onclick="WM.agEditing=false;closeModal()">Cancel</button><button class="btn btn-primary" id="wmAgEdGo" onclick="wmAgEditSave()"><i class="fa-solid fa-check"></i> Save agenda</button></div>`);
+  wmFormAgenda();
+};
+window.wmAgEditSave=async function(){
+  const m=wmMeeting(WM.cur); if(!m) return;
+  const on=WM.formAg.filter(x=>x.on); if(!on.length){ toast('Keep at least one step','err'); return; }
+  const s=wmAgState(m);
+  if(s.run&&!s.done&&!s.finished){ const k=s.items[s.i].k; if(!on.some(x=>x.k===k)){ toast('The timer is on "'+s.items[s.i].l+'" - keep that step, or move the timer on first','warn'); return; } }
+  const b=$('wmAgEdGo'); if(b) b.disabled=true;
+  try{
+    const items=wmAgSer(WM.formAg); const {error}=await sb.rpc('ops_meeting_set_agenda',{p_meeting:m.id,p_agenda:{items}}); if(error) throw error;
+    m.agenda={items}; WM.agEditing=false; closeModal(); toast('Agenda saved','ok'); wmPaintAgenda(false);
+  }catch(e){ if(b) b.disabled=false; toast('Could not save the agenda: '+((e&&e.message)||e)+' - try again.','err'); }
+};
+/* The meeting's work area (24 Nov, less clutter): one card with the action line on top and four tabs -
+   Actions, KPIs, To-dos, Opportunities & Obstacles - one shown at a time. When the agenda moves to the
+   KPIs, To-dos or O&O step the matching tab opens (any other step opens Actions); a tab can always be
+   picked by hand. The kind's task counters sit at the right of the tabs. */
+function wmTabOf(k){ return k==='kpi'?'kpi':k==='todos'?'td':k==='oo'?'oo':'act'; }
+function wmPaintWTabs(){
+  const h=$('wmWTabs'), m=wmMeeting(WM.cur); if(!h||!m) return;
+  if(!['act','kpi','td','oo'].includes(WM.wtab)) WM.wtab='act';
+  const td=WM_TD_SECS.flatMap(s=>wmNotesFor(m,s)).filter(n=>!n.solved).length, oo=['opportunity','obstacle'].flatMap(s=>wmNotesFor(m,s)).filter(n=>!n.solved).length;
+  const tb=(k,ic,l,n,sh)=>`<button class="wm-wtab ${WM.wtab===k?'on':''}" role="tab" aria-selected="${WM.wtab===k}" title="${l}" onclick="wmWTab('${k}')"><i class="fa-solid ${ic}"></i><span class="lg">${l}</span><span class="sh">${sh||l}</span>${n?`<em>${n}</em>`:''}</button>`;
+  h.innerHTML=tb('act','fa-list-check','Actions',0)+tb('kpi','fa-chart-line','KPIs',0)+tb('td','fa-bullseye','To-dos',td)+tb('oo','fa-scale-balanced','Opportunities & Obstacles',oo,'O&amp;O')+'<span class="wm-bd-stats" id="wmBdStats"></span>';
+  wmPaintBoardStats();
+  document.querySelectorAll('#wmWs .wm-wpane').forEach(p=>p.classList.toggle('on',p.dataset.p===WM.wtab));
+}
+window.wmWTab=function(k){ WM.wtab=k; wmPaintWTabs(); };
+function wmWTabFor(k){ if(!$('wmWs')) return; WM.wtab=wmTabOf(k); wmPaintWTabs(); }
+// The meeting's More menu: open / close; any click outside closes it.
+window.wmMoreToggle=function(e){ if(e) e.stopPropagation(); const w=$('wmMore'); if(!w) return; const p=w.querySelector('.wm-more-panel'), b=w.querySelector('button'); const open=p.style.display==='none'; p.style.display=open?'':'none'; if(b) b.setAttribute('aria-expanded',String(open)); };
+document.addEventListener('click',function(e){ const w=$('wmMore'); if(!w) return; const p=w.querySelector('.wm-more-panel'); if(p&&p.style.display!=='none'&&!e.target.closest('#wmMore')) wmMoreToggle(); });
 window.wmAgNoteInput=function(k,el){ WM.noteT=WM.noteT||{}; clearTimeout(WM.noteT[k]); WM.noteT[k]=setTimeout(()=>wmAgNoteSave(k,el),900); };
 window.wmAgNoteSave=async function(k,el){
   if(WM.noteT) clearTimeout(WM.noteT[k]);
@@ -12670,7 +12728,7 @@ function wmRow(it,forKey,showPeople,showMeeting){
   } else if(it.st==='awaiting') bits.push(`<span class="aw">Marked done — ${wmIsMe(it.delegator)?'waiting for your approval':'awaiting approval'}</span>`);
   else if(it.st==='in_progress') bits.push('<span class="aw">In progress</span>');
   else if(it.st==='not_done') bits.push('<span class="od">Not done</span>');
-  if(wmOpen(it)&&due){ const d=wmDays(due,today); bits.push(wmOverdue(it)?`<span class="od">Overdue ${d} day${d>1?'s':''} · was due ${esc(wmFmtS(due))}</span>`:`<span>Due ${esc(wmFmt(due))}</span>`); }
+  if(wmOpen(it)&&due){ const d=wmDays(due,today); bits.push(wmOverdue(it)?`<span class="od" title="Was due ${esc(wmFmt(due))}">${d} day${d>1?'s':''} overdue</span>`:`<span>Due ${esc(wmFmtS(due))}</span>`); }
   else if(wmOpen(it)&&!due&&it.dueRaw) bits.push(`<span>Due: ${esc(it.dueRaw)}</span>`);
   if(it.recur&&it.recur.freq&&it.recur.freq!=='none') bits.push(`<span><i class="fa-solid fa-repeat"></i> ${esc(it.recur.freq==='weekly'?'Weekly':it.recur.freq==='monthly'?'Monthly':it.recur.freq)}</span>`);
   // Imported lines keep the sheet's four states, so they get the sheet's control; tasks follow Accountability.
@@ -12984,7 +13042,7 @@ function wmPaintDrafts(){
   const memOf=d=>WM.draftMem[d.id]||[], ready=list.filter(d=>memOf(d).length).length, allOn=list.every(d=>WM.sel.has(d.id));
   host.innerHTML=`<div class="wm-un">
     <div class="wm-sec"><input type="checkbox" class="wm-ck" title="Select all" ${allOn?'checked':''} onchange="wmSelAll(this.checked)"> Unassigned <em>${list.length}</em>
-      <span class="r">${ready?`<button class="wm-btn wm-sm wm-light" onclick="wmPromote(wmDrafts().filter(d=>(WM.draftMem[d.id]||[]).length).map(d=>d.id))">Create ${ready} ready</button>`:'<span class="wm-mute" style="font-size:12.5px;letter-spacing:0;text-transform:none">Give each a person to send it to Accountability</span>'}</span></div>
+      <span class="r">${ready?`<button class="wm-btn wm-sm wm-light" onclick="wmPromote(wmDrafts().filter(d=>(WM.draftMem[d.id]||[]).length).map(d=>d.id))">Create ${ready} ready</button>`:'<span class="wm-mute" style="font-size:12.5px;letter-spacing:0;text-transform:none">Give each one a person</span>'}</span></div>
     ${WM.sel.size?`<div class="wm-bulk"><b>${WM.sel.size} selected</b>
       <button class="ctl" onclick="wmBulkPeople()"><i class="fa-regular fa-user"></i> Assign to…</button>
       <label class="ctl"><i class="fa-regular fa-calendar"></i><input type="date" min="${wmToday()}" onchange="wmBulkDue(this.value)"></label>
@@ -13569,6 +13627,88 @@ const WM_CSS='<style id="wmCss">'
   +'body:has(#wmShell) #modalHost .frm.wm-ntm label.pp input,body:has(#wmShell) #modalHost .wm-pk input{accent-color:#5B4BE8}'
   +'body:has(#wmShell) #modalHost .modal-body.frm>label{font-size:13px;font-weight:700;color:#1C1F2E;margin-top:16px}'
   +'@media(max-width:700px){.mt-shell .wm-bd-head{grid-template-columns:1fr}.mt-shell .wm-bd-head .wm-mh-r{justify-content:space-between}}'
++'/* less clutter on the meeting page, 24 Nov */'
+  +'.wm-crumb{border:0;background:none;padding:0;margin:0 0 6px;font:inherit;font-size:12.5px;font-weight:700;color:#7A8095;cursor:pointer;display:inline-flex;align-items:center;gap:6px}.wm-crumb:hover{color:#5B4BE8}.wm-crumb i{font-size:11px}'
+  +'.mt-shell .wm-clock{flex-direction:row;align-items:baseline;gap:8px}.mt-shell .wm-clock small{display:none}.mt-shell .wm-clock span{font-size:11px}.mt-shell .wm-clock b{font-size:22px;margin:0;color:var(--t2)}'
+  +'.mt-shell .wm-bd-head{padding:16px 22px 12px}.mt-shell .wm-bd-head h2{font-size:22px}'
+  +'.mt-shell .wm-mh2{margin-top:6px!important;font-size:12.5px}.mt-shell .wm-mh2 .wm-quiet,.mt-shell .wm-mh2 .wm-hsel,.mt-shell .wm-mh2 .wm-rep{font-size:12.5px}'
+  +'.wm-bd-h .wm-bd-stats{display:inline-flex;gap:6px;margin:0;border:0;background:none;box-shadow:none;border-radius:0;overflow:visible;flex-wrap:wrap}'
+  +'.wm-bd-h .wm-bd-stats div{display:inline-flex;align-items:baseline;gap:4px;padding:2px 9px;border:0;border-radius:20px;background:#F0F1F5;text-align:left}'
+  +'.wm-bd-h .wm-bd-stats b{display:inline;font-size:12px;color:#4A4F63}.wm-bd-h .wm-bd-stats b.a{color:#C46E12}.wm-bd-h .wm-bd-stats b.r{color:#D63B41}.wm-bd-h .wm-bd-stats span{font-size:11.5px;color:#7A8095;font-weight:600}'
+  +'.mt-shell .wm-bd-ag{padding:12px 22px 14px}'
+  +'.wm-agnow{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:6px 18px;background:#FAFAFD;border:1px solid #ECEEF3;border-radius:12px;padding:12px 16px 14px;overflow:hidden}'
+  +'.wm-agnow .l{min-width:0;display:flex;flex-direction:column;gap:2px}.wm-agnow .k{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#D63B41;display:inline-flex;align-items:center;gap:6px}'
+  +'.wm-agnow .k .dot{width:7px;height:7px;border-radius:50%;background:#E5484D;animation:mtPulse 1.6s infinite;display:inline-block}'
+  +'.wm-agnow .l b{font-size:17px;font-weight:800;color:#1C1F2E;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wm-agnow .sub{font-size:12.5px;color:#7A8095;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.wm-agnow .cd{font-size:40px;font-weight:800;letter-spacing:-1.5px;color:#D63B41;font-variant-numeric:tabular-nums;line-height:1}'
+  +'.wm-agnow .bar{position:absolute;left:0;right:0;bottom:0;height:4px;background:#F0E3E4}.wm-agnow .bar span{display:block;height:100%;background:#E5484D;transition:width 1s linear}'
+  +'.wm-agnow.paused .k{color:#7A8095}.wm-agnow.paused .cd{color:#9AA0B4}.wm-agnow.paused .bar span{background:#C9CCD6}'
+  +'.wm-agnow.idle{grid-template-columns:minmax(0,1fr) auto}.wm-agnow.idle .k{color:#5B4BE8}.wm-agnow.idle .l b{font-size:15px}'
+  +'.wm-agnow .wm-ag-ctl{display:flex;align-items:center;gap:6px;margin:0}'
+  +'.mt-shell .wm-agnow .wm-red{background:#5B4BE8}.mt-shell .wm-agnow .wm-red:hover{background:#4A3AD6}'
+  +'.wm-agedit{height:32px;border:1px solid #E3E5EC;border-radius:10px;background:#fff;color:#4A4F63;font:inherit;font-size:12.5px;font-weight:700;padding:0 11px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;margin-left:4px;white-space:nowrap}.wm-agedit:hover{border-color:#5B4BE8;color:#5B4BE8}'
+  +'.wm-agpills{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}'
+  +'.wm-agp{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 10px 0 5px;border:1px solid #ECEEF3;border-radius:20px;background:#fff;font:inherit;font-size:12.5px;font-weight:600;color:#4A4F63;cursor:pointer;max-width:220px}'
+  +'.wm-agp:hover{border-color:#C9C2FA}.wm-agp .no{width:22px;height:22px;flex:none;border-radius:50%;background:#F0F1F5;color:#6B7083;font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center}'
+  +'.wm-agp .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wm-agp em{font-style:normal;font-size:11.5px;color:#9AA0B4;font-weight:600;font-variant-numeric:tabular-nums}'
+  +'.wm-agp.d{color:#9AA0B4}.wm-agp.d .no{background:#E3F6EC;color:#1E8A55}.wm-agp.d .no i{font-size:9px}'
+  +'.wm-agp.n{border-color:#F3B9BC;background:#FDECEC;color:#1C1F2E}.wm-agp.n .no{background:#E5484D;color:#fff}.wm-agp.n em{color:#D63B41;font-weight:800}'
+  +'.wm-agp.v{border-color:#5B4BE8;box-shadow:0 0 0 1px #5B4BE8 inset}'
+  +'.mt-shell .wm-clock b{white-space:nowrap}.wm-bd-h:has(.wm-bd-stats){flex-wrap:wrap;gap:6px 10px}'
+  +'@media(max-width:700px){.mt-shell .wm-clock span{display:none}.wm-bd-h .wm-bd-stats{width:auto;margin:0}.wm-bd-h .wm-bd-stats div{flex:none;padding:2px 8px}}'
+  +'@media(max-width:900px){.wm-agnow{grid-template-columns:minmax(0,1fr) auto}.wm-agnow .wm-ag-ctl{grid-column:1/-1;flex-wrap:wrap}.wm-agnow .cd{font-size:32px}}'
++'/* one work area with tabs, 24 Nov */'
+  +'.wm-bd-ws{margin-top:16px;overflow:visible}'
+  +'.wm-ws-cap{margin:0;padding:14px 20px 4px}.wm-ws-cap .wm-cap-in{padding-bottom:10px;gap:10px}.wm-ws-cap .wm-cap-in input{font-size:16px;height:34px}.wm-cap-ic{color:#5B4BE8;font-size:13px}'
+  +'.wm-ws-cap .wm-parsed{margin-top:6px}.wm-ws-cap .wm-parsed:empty{display:none}'
+  +'.wm-wtabs{display:flex;align-items:center;gap:2px;padding:0 14px;border-bottom:1px solid #ECEEF3;flex-wrap:wrap}'
+  +'.wm-wtab{border:0;background:none;font:inherit;font-size:13.5px;font-weight:700;color:#6B7083;padding:12px 10px 11px;cursor:pointer;position:relative;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}'
+  +'.wm-wtab i{font-size:12px;color:#9AA0B4}.wm-wtab em{font-style:normal;font-size:11px;font-weight:800;background:#EEF0F6;color:#5D6378;border-radius:20px;padding:1px 7px}'
+  +'.wm-wtab:hover{color:#1C1F2E}.wm-wtab.on{color:#1C1F2E}.wm-wtab.on i{color:#5B4BE8}.wm-wtab.on em{background:#EDEBFE;color:#4A3AD6}'
+  +'.wm-wtab.on:after{content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:3px;border-radius:3px 3px 0 0;background:#5B4BE8}'
+  +'.wm-wtabs .wm-bd-stats{margin-left:auto;padding:6px 0}'
+  +'.wm-wpane{display:none}.wm-wpane.on{display:block}'
+  +'.wm-wtabs .wm-bd-stats{display:inline-flex;gap:6px;border:0;background:none;box-shadow:none;border-radius:0;overflow:visible;flex-wrap:wrap}.wm-wtabs .wm-bd-stats div{display:inline-flex;align-items:baseline;gap:4px;padding:2px 9px;border:0;border-radius:20px;background:#F0F1F5;text-align:left;flex:none}'
+  +'.wm-wtabs .wm-bd-stats b{display:inline;font-size:12px;color:#4A4F63}.wm-wtabs .wm-bd-stats b.a{color:#C46E12}.wm-wtabs .wm-bd-stats b.r{color:#D63B41}.wm-wtabs .wm-bd-stats span{font-size:11.5px;color:#7A8095;font-weight:600}'
+  +'.wm-bd-ws .wm-bd-in{padding:6px 20px 18px}'
+  +'.wm-bd-ws .wm-fh{padding:0;border:0;min-height:0;background:none;cursor:default;justify-content:flex-end}.wm-bd-ws .wm-fh>span:first-child,.wm-bd-ws .wm-fh .wm-fh-n,.wm-bd-ws .wm-fold{display:none}'
+  +'.wm-bd-ws .wm-fh .wm-kpi-state:not(:empty){position:absolute;right:20px;margin-top:10px}'
+  +'.wm-bd-ws .wm-bd-col{position:relative}.wm-bd-ws .wm-bd-col.folded .wm-bd-in{display:block}'
+  +'.wm-bd-ws .wm-wpane .wm-bd-in .wm-v6 .person{grid-template-columns:190px minmax(0,1fr);gap:14px;padding:12px 0}'
+  +'.wm-bd-ws .wm-wpane .wm-bd-in .wm-v6 .who{align-items:flex-start}.wm-bd-ws .wm-wpane .wm-bd-in .wm-v6 .who br{display:block}.wm-bd-ws .wm-wpane .wm-bd-in .wm-v6 .who .cnt{margin:4px 6px 0 0}'
+  +'.wm-bd-ws .wm-v6 .ttabs{border-bottom:0;gap:4px;margin:8px 0 6px;align-items:center}'
+  +'.wm-bd-ws .wm-v6 .ttab{padding:5px 12px;margin:0;border-radius:20px;font-size:12.5px;background:#F5F6FA;color:#6B7083}.wm-bd-ws .wm-v6 .ttab:after{display:none}'
+  +'.wm-bd-ws .wm-v6 .ttab.on{background:#EDEBFE;color:#4A3AD6}.wm-bd-ws .wm-v6 .ttab .n{background:#fff}.wm-bd-ws .wm-v6 .ttab.on .n,.wm-bd-ws .wm-v6 .ttab.on.pend .n,.wm-bd-ws .wm-v6 .ttab.on.fin .n{background:#5B4BE8;color:#fff}'
+  +'.wm-bd-ws .wm-v6 .tfilter select,.wm-bd-ws .wm-v6 .tfilter input{height:30px;border-color:#ECEEF3;border-radius:8px;background:#FAFAFD}'
+  +'.mt-shell .wm-v6 .task .mt .by{display:none}.mt-shell .wm-v6 .task .mt{gap:8px}'
+  +'.mt-shell .wm-v6 .wm-st-sel{border:0;background:#F0F1F5;border-radius:20px;height:24px;font-weight:700;color:#5D6378;padding:0 6px}'
+  +'.wm-bd-ws .wm-oo{gap:12px}.wm-bd-ws .wm-kt-wrap{margin-top:12px}'
+  +'.wm-wtab .sh{display:none}'
+  +'@media(max-width:900px){.wm-wtab .lg{display:none}.wm-wtab .sh{display:inline}.wm-wtab{padding:12px 6px 11px;gap:4px;font-size:13px}.wm-wtab.on:after{left:4px;right:4px}.wm-ws-cap .kbd{display:none}.wm-wtabs{flex-wrap:wrap}.wm-bd-ws .wm-wpane .wm-bd-in .wm-v6 .person{grid-template-columns:1fr}.wm-bd-ws .wm-bd-in{padding:6px 14px 14px}.wm-ws-cap{padding:12px 14px 4px}.wm-wtabs{padding:0 6px}.wm-wtabs .wm-bd-stats{width:100%;margin:0;padding:6px 6px 8px}}'
++'/* the top of the meeting, cleaned up: two lines, a More menu, a flat Now area, one bar of steps */'
+  +'.wm-hd2 .wm-t1{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}'
+  +'.wm-hd2 h2{margin:0!important;font-size:22px!important;line-height:1.2}'
+  +'.wm-backb{width:30px;height:30px;flex:none;border:1px solid #ECEEF3;border-radius:9px;background:#fff;color:#6B7083;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;justify-content:center}.wm-backb:hover{border-color:#5B4BE8;color:#5B4BE8}'
+  +'.wm-stag{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;border-radius:20px;padding:3px 10px;background:#F0F1F5;color:#5D6378;white-space:nowrap}'
+  +'.wm-stag.live{background:#FDECEC;color:#D63B41}.wm-stag.live .dot{width:7px;height:7px;border-radius:50%;background:#E5484D;animation:mtPulse 1.6s infinite;display:inline-block}'
+  +'.wm-stag.ok{background:#E3F6EC;color:#1E8A55}.wm-stag.up{background:#EDEBFE;color:#4A3AD6}.wm-reopen{font-size:12.5px;text-decoration:underline}'
+  +'.wm-reptag{color:#9AA0B4;font-size:12px}'
+  +'.mt-shell .wm-hd2 .wm-t2{margin:6px 0 0 40px!important}.wm-hd2 .wm-viewonly{margin-top:6px}'
+  +'.wm-hd2 .wm-mh2{gap:6px 16px}'
+  +'.wm-more{position:relative}.wm-more-panel{position:absolute;left:0;top:calc(100% + 8px);z-index:30;width:300px;max-width:80vw;background:#fff;border:1px solid #ECEEF3;border-radius:12px;padding:6px;box-shadow:0 12px 32px rgba(28,31,46,.12)}'
+  +'.wm-more-info{font-size:12.5px;color:#6B7083;line-height:1.6;padding:6px 8px 8px;border-bottom:1px solid #F1F2F6;margin-bottom:4px}.wm-more-info b{color:#1C1F2E;font-weight:700}.wm-more-info i{font-size:10px;margin-right:2px}'
+  +'.wm-more-h{font-size:11px;font-weight:700;color:#9AA0B4;text-transform:uppercase;letter-spacing:.06em;padding:8px 8px 2px}'
+  +'.wm-more-panel .it{display:flex;align-items:center;gap:9px;width:100%;border:0;background:none;padding:8px;border-radius:8px;font:inherit;font-size:13px;color:#1C1F2E;cursor:pointer;text-align:left}.wm-more-panel .it:hover{background:#EDEBFE}.wm-more-panel .it i{color:#5B4BE8;width:14px;font-size:12px}.wm-more-panel .it.danger i{color:#D63B41}'
+  +'.mt-shell .wm-hd2 .wm-clock{display:inline-flex;flex-direction:row;align-items:center;gap:6px;color:#6B7083}.mt-shell .wm-hd2 .wm-clock b{font-size:18px;color:#4A4F63;letter-spacing:-.3px}.mt-shell .wm-hd2 .wm-clock i{font-size:13px}'
+  +'.mt-shell .wm-hd2 .wm-mh-r .wm-btn{height:36px;padding:0 16px}'
+  +'.wm-agnow{background:none;border:0;border-radius:0;padding:2px 0 0;overflow:visible}.wm-agnow .bar{display:none}'
+  +'.wm-agseg{display:flex;gap:3px;margin-top:12px}'
+  +'.wm-agseg .seg{position:relative;height:10px;min-width:12px;padding:0;border:0;border-radius:5px;background:#E6E8EF;cursor:pointer;overflow:hidden}'
+  +'.wm-agseg .seg:hover{background:#C9C2FA}.wm-agseg .seg.d{background:#9CD9B8}.wm-agseg .seg.d:hover{background:#7CCB9F}'
+  +'.wm-agseg .seg.n{background:#FBD5D7}.wm-agseg .seg.n i{position:absolute;left:0;top:0;bottom:0;display:block;background:#E5484D;transition:width 1s linear}'
+  +'.wm-agseg.paused .seg.n i{background:#B8BCC8}.wm-agseg .seg.v{box-shadow:0 0 0 2px #5B4BE8}'
+  +'.wm-agseg .seg:focus-visible{outline:2px solid #5B4BE8;outline-offset:2px}'
+  +'@media(max-width:700px){.mt-shell .wm-hd2 .wm-t2{margin-left:0!important}.wm-hd2 h2{font-size:20px!important}.wm-more-panel{position:fixed;left:16px;right:16px;top:auto;width:auto;max-width:none;margin-top:8px}}'
 +'</style>';
 /* ===== Global first-login onboarding (full screen, no sidebar) ===== */
 async function renderOnboarding(){
