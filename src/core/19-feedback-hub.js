@@ -659,12 +659,13 @@ async function fhRecords(){
   const{data:counts}=await sb.schema('feedback').from('responses').select('form_id').in('form_id',rows.map(f=>f.id));
   const byForm={};
   (counts||[]).forEach(r=>{byForm[r.form_id]=(byForm[r.form_id]||0)+1;});
+  const takeAll=fhCanTakeAll();
   b.innerHTML=`<div class="fh-head">
-    <div><div class="sec-title" style="margin:0 0 4px">Pick a form</div><div class="sec-sub" style="margin:0">Select one to see its responses, or take every form's responses at once.</div></div>
-    <div class="fh-row-actions">
+    <div><div class="sec-title" style="margin:0 0 4px">Pick a form</div><div class="sec-sub" style="margin:0">${takeAll?'Select one to see its responses, or take every form\'s responses at once.':'Select one to see its responses.'}</div></div>
+    ${takeAll?`<div class="fh-row-actions">
       <button class="btn btn-sm" id="fhAllPrintBtn" onclick="fhPrintAll()" title="One printout with every response to every form, in full"><i class="fa-solid fa-print"></i> <span>Print all responses</span></button>
       <button class="btn btn-sm" id="fhAllXlsBtn" onclick="fhExportAll()" title="One Excel file: a sheet for each form, a summary, and every answer in one list"><i class="fa-solid fa-file-excel"></i> <span>Download Excel</span></button>
-    </div>
+    </div>`:''}
   </div>
   <div class="fh-rowlist">${rows.map(f=>`
     <div class="fh-row fh-row-click" onclick="navTo('feedback_hub/records/${f.id}')">
@@ -733,12 +734,17 @@ async function fhRecordsPage(v,formId){
   </div>`;
 }
 /* ---- Records, every form at once: a printout and an Excel file ----
-   One loader feeds both, so the paper and the spreadsheet can never disagree. Designers only - the
-   same people who can open Records - and the database enforces that on the reads regardless.
+   One loader feeds both, so the paper and the spreadsheet can never disagree. Systems team only (see
+   fhCanTakeAll), and only people who can open Records; the database enforces Records' reads regardless.
    Everything is read in pages of 1000 (the most a single request returns), so a form that has grown
    past that is not silently cut short. Answers are fetched by question, not by a long list of
    response ids, which keeps the request short however many responses there are. */
 let FH_ALL_BUSY=false;
+/* Print-all and Excel are for the Systems team, and only those of them who can open Records at all
+   (the Administrator counts as Systems, as for System Feedbacks). The other Records people still read
+   responses one form at a time; this decides who is offered the all-at-once buttons. It is the page
+   that offers them - the responses themselves are read under the same database rule as Records. */
+function fhCanTakeAll(){return fhCanQrForms()&&fhIsSystems();}
 async function fhFetchAll(make){
   const out=[], step=1000;
   for(let from=0;;from+=step){
@@ -860,7 +866,7 @@ function fhAllPrintHtml(data){
     +sections+'</body></html>';
 }
 window.fhPrintAll=async function(){
-  if(FH_ALL_BUSY||!fhCanQrForms())return;
+  if(FH_ALL_BUSY||!fhCanTakeAll())return;
   // The tab has to be opened here, inside the click: a tab opened after the data arrives is taken for
   // a pop-up and blocked. It is filled in once the responses are in.
   const w=window.open('','_blank');
@@ -983,7 +989,7 @@ function fhDownload(blob,name){
   setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1500);
 }
 window.fhExportAll=async function(){
-  if(FH_ALL_BUSY||!fhCanQrForms())return;
+  if(FH_ALL_BUSY||!fhCanTakeAll())return;
   FH_ALL_BUSY=true;fhAllBusy('fhAllXlsBtn',true,'Preparing…');
   try{
     const data=await fhAllData();
