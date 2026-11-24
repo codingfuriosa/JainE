@@ -203,7 +203,8 @@ VIEWS.feedback_hub=async function(v,seg){
   /* One list, two readings of it: a designer's tab is "Design" and carries the full set of actions,
      a filler's is "Forms" and carries Open, Records and the QR code. Rather than a second tab that
      would be the same list with three buttons missing. */
-  const all=[['design',fhCanQrForms()?'Design':'Forms',fhCanSeeForms],['records','Records',fhCanQrForms],['system','System Feedbacks',fhIsSystems],['give','Give Feedback',fhIsRater]];
+  // All Responses goes last so nobody's existing tab numbers (feedback_hub/2 and so on) move.
+  const all=[['design',fhCanQrForms()?'Design':'Forms',fhCanSeeForms],['records','Records',fhCanQrForms],['system','System Feedbacks',fhIsSystems],['give','Give Feedback',fhIsRater],['all','All Responses',fhCanTakeAll]];
   const mine=all.filter(function(t){ return t[2](); });
   if(!mine.length){ v.innerHTML='<div class="card"><div class="empty">You do not have access to Feedback Hub.</div></div>'; return; }
   const ti=mTab(seg,mine.length);
@@ -212,6 +213,7 @@ VIEWS.feedback_hub=async function(v,seg){
   if(key==='design'){await fhDesign();return;}
   if(key==='records'){await fhRecords();return;}
   if(key==='system'){await sfManage();return;}
+  if(key==='all'){await fhAllTab();return;}
   await sfGive();
 };
 /* Shown instead of the builder when somebody who may only fill forms in types its address. The
@@ -659,14 +661,7 @@ async function fhRecords(){
   const{data:counts}=await sb.schema('feedback').from('responses').select('form_id').in('form_id',rows.map(f=>f.id));
   const byForm={};
   (counts||[]).forEach(r=>{byForm[r.form_id]=(byForm[r.form_id]||0)+1;});
-  const takeAll=fhCanTakeAll();
-  b.innerHTML=`<div class="fh-head">
-    <div><div class="sec-title" style="margin:0 0 4px">Pick a form</div><div class="sec-sub" style="margin:0">${takeAll?'Select one to see its responses, or take every form\'s responses at once.':'Select one to see its responses.'}</div></div>
-    ${takeAll?`<div class="fh-row-actions">
-      <button class="btn btn-sm" id="fhAllPrintBtn" onclick="fhPrintAll()" title="One printout with every response to every form, in full"><i class="fa-solid fa-print"></i> <span>Print all responses</span></button>
-      <button class="btn btn-sm" id="fhAllXlsBtn" onclick="fhExportAll()" title="One Excel file: a sheet for each form, a summary, and every answer in one list"><i class="fa-solid fa-file-excel"></i> <span>Download Excel</span></button>
-    </div>`:''}
-  </div>
+  b.innerHTML=`<div class="sec-title" style="margin:0 0 4px">Pick a form</div><div class="sec-sub" style="margin:0 0 12px">Select one to see its responses.</div>
   <div class="fh-rowlist">${rows.map(f=>`
     <div class="fh-row fh-row-click" onclick="navTo('feedback_hub/records/${f.id}')">
       <div class="fh-row-icon"><i class="fa-solid fa-chart-simple"></i></div>
@@ -740,11 +735,49 @@ async function fhRecordsPage(v,formId){
    past that is not silently cut short. Answers are fetched by question, not by a long list of
    response ids, which keeps the request short however many responses there are. */
 let FH_ALL_BUSY=false;
-/* Print-all and Excel are for the Systems team, and only those of them who can open Records at all
-   (the Administrator counts as Systems, as for System Feedbacks). The other Records people still read
-   responses one form at a time; this decides who is offered the all-at-once buttons. It is the page
-   that offers them - the responses themselves are read under the same database rule as Records. */
-function fhCanTakeAll(){return fhCanQrForms()&&fhIsSystems();}
+/* Print-all and Excel are for the Systems team - all of it, the Administrator included (as for System
+   Feedbacks) - and for nobody else, the Records people outside Systems too. They live on their own tab,
+   All Responses, because most of Systems cannot open Records. feedback.can_take_all_responses() holds
+   the same rule in the database and is what lets those people read the responses at all; this only
+   decides who is offered the tab. */
+function fhCanTakeAll(){return fhIsSystems();}
+/* The All Responses tab: what is about to be printed or exported (the forms and how many answers each
+   holds), and the two buttons. Read-only - there is no way from here into a single response. */
+async function fhAllTab(){
+  const b=$('fhBody');if(!b)return;
+  loader(b);
+  let rows=[], counts={};
+  try{
+    rows=await fhFetchAll(function(){return sb.schema('feedback').from('forms').select('id,title,is_active').order('created_at',{ascending:false}).order('id',{ascending:false});});
+    await Promise.all(rows.map(async function(f){
+      const{count,error}=await sb.schema('feedback').from('responses').select('id',{count:'exact',head:true}).eq('form_id',f.id);
+      if(error)throw new Error(error.message);
+      counts[f.id]=count||0;
+    }));
+  }catch(e){
+    b.innerHTML='<div class="err">'+esc((e&&e.message)||String(e))+'</div>';
+    return;
+  }
+  if(!rows.length){
+    b.innerHTML='<div class="card"><div class="empty"><i class="fa-solid fa-inbox"></i><div>No forms yet</div></div></div>';
+    return;
+  }
+  const total=rows.reduce(function(n,f){return n+counts[f.id];},0);
+  b.innerHTML=`<div class="fh-head">
+    <div><div class="sec-title" style="margin:0 0 4px">All responses</div><div class="sec-sub" style="margin:0">${rows.length} form${rows.length===1?'':'s'} · ${total} response${total===1?'':'s'}. Print them all, or download them as one Excel file.</div></div>
+    <div class="fh-row-actions">
+      <button class="btn btn-sm" id="fhAllPrintBtn" onclick="fhPrintAll()" title="One printout with every response to every form that has any, in full"><i class="fa-solid fa-print"></i> <span>Print all responses</span></button>
+      <button class="btn btn-sm" id="fhAllXlsBtn" onclick="fhExportAll()" title="One Excel file: a sheet for each form, a summary, and every answer in one list"><i class="fa-solid fa-file-excel"></i> <span>Download Excel</span></button>
+    </div>
+  </div>
+  <div class="fh-rowlist">${rows.map(f=>`
+    <div class="fh-row">
+      <div class="fh-row-icon"><i class="fa-solid fa-clipboard-list"></i></div>
+      <div class="fh-row-main"><div class="fh-row-title">${esc(f.title)}</div>
+        <div class="fh-row-meta">${counts[f.id]} response${counts[f.id]===1?'':'s'}${f.is_active?'':' · <span class="tag t-red">Closed</span>'}</div>
+      </div>
+    </div>`).join('')}</div>`;
+}
 async function fhFetchAll(make){
   const out=[], step=1000;
   for(let from=0;;from+=step){
@@ -814,7 +847,7 @@ h2{font-size:17px;margin:0 0 3px}
 .toc tfoot td{font-weight:700;border-top:2px solid #0f172a;border-bottom:0}
 section.form{break-before:page;page-break-before:always;margin-top:34px;padding-top:18px;border-top:1px solid #cbd5e1}
 .desc{margin:6px 0 0;color:#334155;white-space:pre-wrap}
-.none{margin:18px 0;color:#64748b;font-style:italic}
+.none{margin:14px 0 0;color:#475569}
 .resp{break-inside:avoid;page-break-inside:avoid;border:1px solid #cbd5e1;border-radius:6px;margin:12px 0 0;overflow:hidden}
 .rh{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;background:#f1f5f9;padding:6px 10px;border-bottom:1px solid #cbd5e1}
 .rh .who{flex:1;color:#334155}
@@ -843,7 +876,11 @@ function fhAllPrintHtml(data){
   const toc=data.map(function(d){
     return '<tr><td>'+esc(d.form.title||'(untitled form)')+'</td><td>'+(d.form.is_active?'Active':'Closed')+'</td><td class="r">'+d.questions.length+'</td><td class="r">'+d.responses.length+'</td></tr>';
   }).join('');
-  const sections=data.map(function(d){
+  // A form nobody has answered gets no page of its own: it stays in the contents table (with its 0)
+  // and is named once in a line under it. Pages are for forms that have something to read.
+  const answered=data.filter(function(d){return d.responses.length;});
+  const unanswered=data.filter(function(d){return !d.responses.length;});
+  const sections=answered.map(function(d){
     const f=d.form, qs=d.questions, sh=fhShowCols(d);
     const blocks=d.responses.map(function(r,i){
       const who=[sh.name&&r.respondent_name,sh.phone&&r.respondent_phone,sh.email&&r.respondent_email].filter(Boolean).map(function(x){return esc(x);}).join(' · ')||'Anonymous';
@@ -855,15 +892,18 @@ function fhAllPrintHtml(data){
     return '<section class="form"><h2>'+esc(f.title||'(untitled form)')+'</h2>'
       +'<div class="meta">'+(f.is_active?'Active':'Closed')+' · '+plural(qs.length,'question')+' · '+plural(d.responses.length,'response')+'</div>'
       +(f.description?'<p class="desc">'+esc(f.description)+'</p>':'')
-      +(blocks||'<p class="none">No responses yet.</p>')+'</section>';
+      +blocks+'</section>';
   }).join('');
+  const noneNote=unanswered.length
+    ?'<p class="none"><b>'+(answered.length?'No responses yet:':'No responses to any form yet:')+'</b> '+unanswered.map(function(d){return esc(d.form.title||'(untitled form)');}).join(' · ')+'</p>'
+    :'';
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Feedback Hub - all responses</title><style>'+FH_PRINT_CSS+'</style></head><body>'
     +'<div class="bar noprint"><span>The print window opens by itself. To keep a copy instead, choose “Save as PDF” as the printer.</span><button onclick="window.print()">Print</button></div>'
     +'<header class="top"><div class="brand">THE JAIN GROUP</div><h1>Feedback Hub — all responses</h1>'
     +'<div class="meta">Printed '+fhNiceWhen(new Date())+' · '+plural(data.length,'form')+' · '+plural(total,'response')+'</div></header>'
     +'<table class="toc"><thead><tr><th>Form</th><th>Status</th><th class="r">Questions</th><th class="r">Responses</th></tr></thead><tbody>'+toc+'</tbody>'
     +'<tfoot><tr><td colspan="3">Total</td><td class="r">'+total+'</td></tr></tfoot></table>'
-    +sections+'</body></html>';
+    +noneNote+sections+'</body></html>';
 }
 window.fhPrintAll=async function(){
   if(FH_ALL_BUSY||!fhCanTakeAll())return;
