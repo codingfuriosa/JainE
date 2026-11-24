@@ -553,7 +553,7 @@ function wmPaintBoard(){
   const backL={up:'Upcoming',run:'Running',hist:'History',all:'Tasks'}[WM.from]||'Dashboard';
   const runningNow=isToday&&!ended&&(started||m.agenda_run);
   const when=(m.meeting_date===today?'Today':wmFmtS(m.meeting_date))+(m.start_time?' · '+wmTime(m.start_time):'');
-  const stag=ended?`<span class="wm-stag ok"><i class="fa-solid fa-circle-check"></i> Ended ${esc(wmClock(m.ended_at))}${m.ran_minutes?' · ran '+m.ran_minutes+' min':''}</span>${wmCanEdit(m.id)&&!WM.ro?'<button class="wm-quiet wm-reopen" onclick="wmReopen()">Reopen</button>':''}`
+  const stag=ended?`<span class="wm-stag ok"><i class="fa-solid fa-circle-check"></i> Ended · ${m.meeting_date!==wmToday()?esc(wmFmtS(m.meeting_date))+' · ':''}${m.start_time?esc(String(m.start_time).slice(0,5))+' – ':''}${esc(wmClock(m.ended_at))}${m.ran_minutes?' · ran '+m.ran_minutes+' min':''}</span>${wmCanEdit(m.id)&&!WM.ro?'<button class="wm-quiet wm-reopen" onclick="wmReopen()">Reopen</button>':''}`
     :runningNow?`<span class="wm-stag live"><i class="dot"></i> Live${m.start_time?' · '+esc(wmTime(m.start_time)):''}</span>`
     :m.meeting_date>=today?`<span class="wm-stag up">${esc(m.meeting_date===today?when:'Coming up · '+when)}</span>`:`<span class="wm-stag">${esc('Held · '+when)}</span>`;
   const recurW=m.series_id&&m.recur?(m.series_active?wmRecurWords(m.recur,(wmSeries(m.kind).filter(x=>x.series_id===m.series_id).pop()||m).meeting_date,m.start_time):'Stopped repeating'):'';
