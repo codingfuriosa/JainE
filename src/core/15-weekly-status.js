@@ -1234,7 +1234,8 @@ function wmTdHtml(m){
   const old=String((m.agenda_notes||{}).todos||'').trim(), fold=wmTdFoldState();
   const secs=WM_TD.map(([sec,l,i,ph])=>({sec,l,i,ph,tasks:wmTdTasks(m,sec),notes:sec==='target'?[]:wmNotesFor(m,sec),off:!!fold[sec]}));
   const cols='minmax(140px,190px) '+secs.map(s=>s.off?'46px':'minmax(0,1fr)').join(' ');
-  const keys=[...new Set(secs.flatMap(s=>s.tasks.flatMap(wmWhoKeys)))].sort((x,y)=>wmKeyName(x)<wmKeyName(y)?-1:1);
+  const open=secs.filter(s=>!s.off), allOff=!open.length;
+  const keys=[...new Set(open.flatMap(s=>s.tasks.flatMap(wmWhoKeys)))].sort((x,y)=>wmKeyName(x)<wmKeyName(y)?-1:1);
   const drop=s=>`ondragover="wmTdOver(event,this)" ondragleave="if(!this.contains(event.relatedTarget))this.classList.remove('drop')" ondrop="wmTdDrop(event,'${s.sec}',this)"`;
   const cell=(s,inner,dz,none)=>`<div class="wm-tdg-c ${s.sec} ${s.off?'off':''} ${none?'none':''}" data-l="${esc(s.l)}" ${dz&&!s.off?drop(s):''}>${s.off?'':inner}</div>`;
   const head=`<div class="wm-tdg-h wm-tdg-p">Person</div>`+secs.map(s=>{ const open=s.tasks.filter(wmOpen).length+s.notes.filter(n=>!n.solved).length;
@@ -1245,8 +1246,10 @@ function wmTdHtml(m){
   const empty=keys.length?'':`<div class="wm-tdg-p who wm-tdg-none"><span>No tasks yet</span></div>`+secs.map(s=>cell(s,`<div class="wm-mute wm-td-empty">${s.sec==='target'?'Every task given in this meeting shows here.':'Drag a task here.'}</div>`,true)).join('');
   const noteRow=`<div class="wm-tdg-p who wm-tdg-notes"><i class="fa-regular fa-note-sticky"></i><div><b>Typed to-dos</b><span>Not given to anyone yet</span></div></div>`
     +secs.map(s=>cell(s,s.sec==='target'?'<div class="wm-mute wm-td-empty">Tasks only</div>':`<input class="wm-nt-add" id="wmNtAdd_${s.sec}" placeholder="${esc(s.ph)}" onkeydown="if(event.key==='Enter'){event.preventDefault();wmNoteAdd('${s.sec}',this)}"><div class="wm-nt-list">${s.notes.map(n=>wmNoteRow(n,m)).join('')}</div>`,false)).join('');
+  const notesOpen=open.some(s=>s.sec!=='target');
+  if(allOff) return `<div class="wm-tdg alloff" style="grid-template-columns:repeat(${secs.length},minmax(0,1fr))">${head.replace('<div class="wm-tdg-h wm-tdg-p">Person</div>','')}</div><div class="wm-mute wm-td-empty">All three sections are folded - click one to open it.</div>`;
   return (old?`<div class="wm-oo-old"><div><b>To-do notes written earlier</b><div>${esc(old).replace(/\n/g,'<br>')}</div></div></div>`:'')
-    +`<div class="wm-tdg" style="grid-template-columns:${cols}">${head}${rows}${empty}${noteRow}</div>`;
+    +`<div class="wm-tdg" style="grid-template-columns:${cols}">${head}${rows}${empty}${notesOpen?noteRow:''}</div>`;
 }
 async function wmSetSec(id){ const s=WM.tdSec||'target'; if(id&&s!=='target'){ const {error}=await sb.rpc('ops_item_set_section',{p_id:id,p_section:s}); if(error) throw error; } }
 window.wmTdDrag=function(e,id){ WM.tdDrag=id; try{ e.dataTransfer.setData('text/plain',String(id)); e.dataTransfer.effectAllowed='move'; }catch(_){} if(e.currentTarget&&e.currentTarget.classList) e.currentTarget.classList.add('dragging'); };
@@ -2511,7 +2514,7 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-tdg-h i{color:#9AA0B4;font-size:11px}.wm-tdg-h .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
   +'.wm-tdg-h em{font-style:normal;font-size:11px;background:#fff;color:#5D6378;border-radius:20px;padding:1px 7px;letter-spacing:0}.wm-tdg-h .chev{font-size:9px}'
   +'.wm-tdg-h.target{border-top-color:#5B4BE8}.wm-tdg-h.target i:first-child{color:#5B4BE8}.wm-tdg-h.trying{border-top-color:#3767DB}.wm-tdg-h.trying i:first-child{color:#3767DB}.wm-tdg-h.future{border-top-color:#9AA0B4}'
-  +'.wm-tdg-h.off{flex-direction:column;align-items:center;padding:9px 4px;gap:8px}.wm-tdg-h.off .t{writing-mode:vertical-rl;transform:rotate(180deg);flex:none;max-height:170px}'
+  +'.wm-tdg-h.off{flex-direction:column;align-items:center;justify-content:center;padding:9px 4px;gap:4px}.wm-tdg-h.off .t,.wm-tdg-h.off .chev{display:none}'
   +'.wm-tdg-p.who{display:flex;gap:9px;align-items:flex-start;min-width:0;padding:11px 12px;border-bottom:1px solid #F1F2F6;background:#FCFCFE}'
   +'.wm-tdg-p.who>div{min-width:0}.wm-tdg-p.who b{display:block;font-size:13px;color:#1C1F2E;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wm-tdg-p.who span{display:block;font-size:11.5px;color:#7A8095}'
   +'.wm-tdg-p.who .cnt{display:inline-block;margin-top:3px;font-size:11px;font-weight:800;background:#F0F1F5;color:#4A4F63;border-radius:7px;padding:1px 7px}'
@@ -2525,4 +2528,5 @@ const WM_CSS='<style id="wmCss">'
   +'@media(hover:none){.wm-tdmv-s{opacity:1}}'
   +'@media(max-width:900px){.wm-tdg{grid-template-columns:1fr!important}.wm-tdg-h.wm-tdg-p{display:none}.wm-tdg-h{border-left:0}.wm-tdg-h.off{flex-direction:row;padding:9px 11px}.wm-tdg-h.off .t{writing-mode:horizontal-tb;transform:none;flex:1}.wm-tdg-c{border-left:0}.wm-tdg-c.off,.wm-tdg-c.none{display:none}.wm-tdg-c::before{content:attr(data-l);display:block;font-size:10.5px;font-weight:800;color:#9AA0B4;text-transform:uppercase;letter-spacing:.05em;margin:6px 0 2px}}'
   +'.wm-td-drafts{padding-bottom:0}.wm-td-drafts:has(#wmDrafts:empty){display:none}'
+  +'.wm-tdg.alloff .wm-tdg-h.off{flex-direction:row;justify-content:flex-start;padding:9px 11px;gap:7px;border-bottom:0}.wm-tdg.alloff .wm-tdg-h.off .t,.wm-tdg.alloff .wm-tdg-h.off .chev{display:inline}.wm-tdg.alloff .wm-tdg-h.off .t{flex:1}.wm-tdg.alloff .wm-tdg-h:first-child{border-left:0}'
 +'</style>';
