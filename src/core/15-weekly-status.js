@@ -623,19 +623,19 @@ function wmPaintAgChips(host,s,curK,ctl,tot){
   const m=wmMeeting(WM.cur), canEd=!!m&&wmCanEdit(m.id)&&!WM.ro&&!m.ended_at, nowMin=Math.floor(wmNowSec()/60);
   const cur=curK?s.items[s.i]:null, nxt=cur?s.items[s.i+1]:(!s.run?s.items[0]:null);
   let ends='';
-  if(cur){ const rem=Math.ceil(s.left/60)+s.items.slice(s.i+1).reduce((a,x)=>a+x.mins,0); ends='ends about '+wmHHMM(nowMin+rem); }
+  if(cur){ const rem=Math.max(0,Math.ceil(s.left/60))+s.items.slice(s.i+1).reduce((a,x)=>a+x.mins,0); ends='ends about '+wmHHMM(nowMin+rem); }
   else if(!s.run&&m&&m.start_time) ends=wmTime(m.start_time)+' – '+wmHHMM(wmMin(m.start_time)+tot);
   const edit=canEd?`<button class="wm-agedit" onclick="wmAgEdit()" title="Minutes, order, steps of your own"><i class="fa-solid fa-sliders"></i> Edit agenda</button>`:'';
-  const pc=cur?Math.min(100,100-(s.left/(cur.mins*60))*100):0;
-  const bar=cur?`<div class="wm-agnow ${s.run.paused?'paused':''}">
-      <div class="l"><span class="k">${s.run.paused?'Paused':'<i class="dot"></i>Now'} · step ${s.i+1} of ${s.items.length}</span><b>${esc(cur.l)}</b>
+  const pc=cur?Math.min(100,100-(s.left/(cur.mins*60))*100):0, over=!!cur&&s.left<0;
+  const bar=cur?`<div class="wm-agnow ${s.run.paused?'paused':''} ${over?'over':''}">
+      <div class="l"><span class="k">${s.run.paused?'Paused':'<i class="dot"></i>Now'} · step ${s.i+1} of ${s.items.length}<em class="ovl">${over?' · over time':''}</em></span><b>${esc(cur.l)}</b>
         <span class="sub">${nxt?'Next: '+esc(nxt.l)+' · ':'Last step · '}${esc(ends)}</span></div>
-      <b class="cd" id="wmAgBig">${wmMMSS(s.left)}</b>
+      <b class="cd" id="wmAgBig">${wmSMMSS(s.left)}</b>
       <div class="wm-ag-ctl">${ctl}${edit}</div></div>`
     :`<div class="wm-agnow idle"><div class="l"><span class="k"><i class="fa-solid fa-stopwatch"></i> ${s.done||s.finished?'Agenda finished':'Agenda'}</span><b>${s.items.length} step${s.items.length===1?'':'s'} · ${tot} min</b>${ends?`<span class="sub">${esc(ends)}</span>`:''}</div>
       <div class="wm-ag-ctl">${ctl}${edit}</div></div>`;
-  host.innerHTML=bar+`<div class="wm-agseg ${cur&&s.run.paused?'paused':''}" role="list" aria-label="Agenda steps">${s.items.map((x,j)=>{ const past=s.run&&(s.done||s.finished||j<s.i), now=x.k===curK, lab=(j+1)+'. '+x.l+' · '+x.mins+' min'+(now?' · now':past?' · done':'');
-      return `<button role="listitem" class="seg ${now?'n':''} ${past?'d':''} ${WM.agView===x.k&&!now?'v':''}" style="flex:${Math.max(1,x.mins)} 1 0" onclick="wmAgView('${x.k}')" title="${esc(lab)}" aria-label="${esc(lab)}">${now?`<i id="wmAgBigBar" style="width:${pc}%"></i>`:''}</button>`; }).join('')}</div>
+  host.innerHTML=bar+`<div class="wm-agseg ${cur&&s.run.paused?'paused':''}" role="list" aria-label="Agenda steps">${s.items.map((x,j)=>{ const past=s.run&&(s.done||s.finished||j<s.i), now=x.k===curK, lab=wmAgSegLabel(s,x,j,now,past);
+      return `<button role="listitem" class="seg ${now?'n':''} ${now&&over?'o':''} ${past?'d':''} ${past&&wmAgOver(s,x)?'do':''} ${WM.agView===x.k&&!now?'v':''}" style="flex:${Math.max(1,x.mins)} 1 0" onclick="wmAgView('${x.k}')" title="${esc(lab)}" aria-label="${esc(lab)}">${now?`<i id="wmAgBigBar" style="width:${pc}%"></i>`:''}</button>`; }).join('')}</div>
     <div class="wm-ag-panel wm-bd-panel" id="wmAgPanel"></div>`;
 }
 // The KPI and Opportunities & Obstacles panels, redrawn after their own changes.
@@ -894,15 +894,31 @@ const wmAgKey=()=>'c_'+Date.now().toString(36)+Math.random().toString(36).slice(
 const wmHHMM=mn=>{ mn=((Math.round(mn)%1440)+1440)%1440; return String(Math.floor(mn/60)).padStart(2,'0')+':'+String(mn%60).padStart(2,'0'); };
 const wmAgOn=m=>wmAgMerge(m.agenda).filter(x=>x.on);
 // Where the timer is now. Steps whose time ran out while nobody was looking are stepped past here.
+// Where the timer is now (24 Nov: it no longer moves on by itself). A step whose time is up keeps
+// counting below zero - overtime - until someone presses Next; "left" is then negative.
+// agenda_run: {k, at, paused, left, done, spent:{stepKey: seconds actually spent}}.
 function wmAgState(m){
   const items=wmAgOn(m), run=m.agenda_run;
   if(!run||!items.length) return {items,run:null};
   if(run.done) return {items,run,done:true};
   let i=items.findIndex(x=>x.k===run.k); if(i<0) i=0;
-  if(run.paused) return {items,run,i,left:Math.max(0,Number(run.left)||0)};
-  let at=Number(run.at)||Date.now(), moved=false;
-  while(Date.now()-at>=items[i].mins*60000){ at+=items[i].mins*60000; moved=true; if(i===items.length-1) return {items,run,i,moved,finished:true}; i++; }
-  return {items,run,i,at,moved,left:Math.ceil((items[i].mins*60000-(Date.now()-at))/1000)};
+  if(run.paused) return {items,run,i,left:Math.round(Number(run.left)||0)};
+  const at=Number(run.at)||Date.now();
+  return {items,run,i,at,left:Math.ceil((items[i].mins*60000-(Date.now()-at))/1000)};
+}
+// Seconds spent so far on the step the timer is on, and every step's time with it added.
+function wmAgElapsed(s){ if(!s||!s.run||s.done||s.i==null) return 0; return Math.max(0,s.items[s.i].mins*60-s.left); }
+function wmAgSpentWith(s){ const sp=Object.assign({},(s&&s.run&&s.run.spent)||{}); if(s&&s.run&&!s.done&&s.i!=null){ const k=s.items[s.i].k; sp[k]=(Number(sp[k])||0)+wmAgElapsed(s); } return sp; }
+// A countdown that can go below zero: 3:58, then 0:00, then −0:12.
+function wmSMMSS(x){ return x<0?'−'+wmMMSS(-x):wmMMSS(x); }
+// What a step took, against what it was given.
+function wmAgOver(s,x){ const sp=Number(((s.run&&s.run.spent)||{})[x.k]); return !isNaN(sp)&&sp>x.mins*60; }
+function wmAgSegLabel(s,x,j,now,past){
+  let l=(j+1)+'. '+x.l+' · planned '+x.mins+' min';
+  if(now) return l+(s.left<0?' · now, '+wmMMSS(-s.left)+' over':' · now, '+wmMMSS(s.left)+' left');
+  const sp=Number(((s.run&&s.run.spent)||{})[x.k]);
+  if(past&&!isNaN(sp)&&((s.run&&s.run.spent)||{})[x.k]!=null){ const d=sp-x.mins*60; return l+' · took '+wmMMSS(sp)+(d>0?' ('+wmMMSS(d)+' over)':d<0?' ('+wmMMSS(-d)+' under)':' (on time)'); }
+  return l+(past?' · done':'');
 }
 const wmMMSS=s=>{ s=Math.max(0,Math.round(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
 async function wmAgSaveRun(m,run){
@@ -924,7 +940,8 @@ function wmPaintAgenda(fresh){
     :s.done||s.finished?`<span class="wm-mute" style="font-size:13px"><i class="fa-solid fa-flag-checkered"></i> Agenda finished</span><button class="wm-ib" title="Back to the last step" onclick="wmAgStep(-1)"><i class="fa-solid fa-backward-step"></i></button>`
     :`<button class="wm-ib" title="Back a step" onclick="wmAgStep(-1)"><i class="fa-solid fa-backward-step"></i></button>
       <button class="wm-btn wm-sm wm-light" onclick="wmAgPause()"><i class="fa-solid fa-${s.run.paused?'play':'pause'}"></i> ${s.run.paused?'Resume':'Pause'}</button>
-      <button class="wm-ib" title="Next step" onclick="wmAgStep(1)"><i class="fa-solid fa-forward-step"></i></button>`;
+      <button class="wm-ib ${s.left<0?'hot':''}" title="Next step" onclick="wmAgStep(1)"><i class="fa-solid fa-forward-step"></i></button>`;
+  if(s.run&&!s.done&&s.i!=null&&s.left<=0&&WM.agOverK==null) WM.agOverK=s.items[s.i].k+':'+s.run.at;   // already over when opened: no chime
   if(WM.view==='board'){ wmPaintAgChips(host,s,curK,ctl,tot); wmPaintAgPanel(s); if(s.moved||s.finished) wmAgAdvanced(m,s); if(s.run&&!s.run.paused&&!s.done&&!s.finished) WM.agTimer=setInterval(wmAgTick,1000); return; }
   host.innerHTML=`<div class="wm-ag-head"><div><b>Agenda</b> <span class="wm-mute">· ${tot} min</span></div><div class="wm-ag-ctl">${ctl}</div></div>
     <div class="wm-ag-grid"><div class="wm-ag-steps">${s.items.map((x,j)=>{ const past=s.run&&(s.done||s.finished||j<s.i), now=x.k===curK;
@@ -939,15 +956,19 @@ function wmPaintAgenda(fresh){
 }
 // Every second: the countdown and its bar only, so nothing being typed is disturbed. A step that
 // runs out moves the agenda on; the open notes follow it unless someone is typing in them.
+// Every second: the countdown and its bar only, so nothing being typed is disturbed. When a step's time
+// is up the timer does not move on: it chimes once, says so, turns red and counts on below zero
+// until someone presses Next.
 function wmAgTick(){
   const m=wmMeeting(WM.cur); if(!m||!$('wmAg')){ clearInterval(WM.agTimer); return; }
-  const s=wmAgState(m);
-  if(s.moved||s.finished){ wmAgAdvanced(m,s); return; }
-  const cd=$('wmAgCd'), bar=$('wmAgBar'), it=s.items[s.i];
-  if(cd) cd.textContent=wmMMSS(s.left); if(bar) bar.style.width=Math.min(100,100-(s.left/(it.mins*60))*100)+'%';
-  const big=$('wmAgBig'); if(big) big.textContent=wmMMSS(s.left);
-  const bb=$('wmAgBigBar'); if(bb) bb.style.width=Math.min(100,100-(s.left/(it.mins*60))*100)+'%';
-  const w=document.querySelector('.wm-ag-bigw'); if(w) w.classList.toggle('low',s.left<=60);
+  const s=wmAgState(m); if(!s.run||s.done||s.run.paused||s.i==null) return;
+  const it=s.items[s.i], over=s.left<0, key=it.k+':'+s.run.at, pc=Math.min(100,100-(s.left/(it.mins*60))*100)+'%';
+  if(s.left<=0&&WM.agOverK!==key){ WM.agOverK=key; wmChime(); toast('Time is up for '+it.l+' - press ⏭ to move on when ready','warn'); }
+  const big=$('wmAgBig'); if(big) big.textContent=wmSMMSS(s.left);
+  const bb=$('wmAgBigBar'); if(bb){ bb.style.width=pc; const sg=bb.closest('.seg'); if(sg) sg.classList.toggle('o',over); }
+  const nw=document.querySelector('.wm-agnow'); if(nw){ nw.classList.toggle('over',over); const ov=nw.querySelector('.ovl'); if(ov) ov.textContent=over?' · over time':''; }
+  const nx=document.querySelector('#wmAg [onclick="wmAgStep(1)"]'); if(nx) nx.classList.toggle('hot',over);
+  const seg=document.querySelector('.wm-agseg .seg.n'); if(seg){ const lab=wmAgSegLabel(s,it,s.i,true,false); seg.title=lab; seg.setAttribute('aria-label',lab); }
 }
 function wmAgAdvanced(m,s){
   wmChime();
@@ -990,19 +1011,21 @@ window.wmAgView=function(k){
 window.wmAgStart=async function(){
   const m=wmMeeting(WM.cur); if(!m) return; const items=wmAgOn(m); if(!items.length) return;
   try{ if(!localStorage.getItem('wm_start_'+m.id)) localStorage.setItem('wm_start_'+m.id,String(Date.now())); }catch(e){}
-  await wmAgSaveRun(m,{k:items[0].k,at:Date.now(),paused:false}); WM.agView=items[0].k; WM.agFollow=true; WM.wtab=wmTabOf(items[0].k); wmPaintMeeting();
+  await wmAgSaveRun(m,{k:items[0].k,at:Date.now(),paused:false,spent:{}}); WM.agView=items[0].k; WM.agFollow=true; WM.wtab=wmTabOf(items[0].k); wmPaintMeeting();
 };
 window.wmAgPause=async function(){
   const m=wmMeeting(WM.cur), s=wmAgState(m); if(!s.run||s.done) return;
   const it=s.items[s.i];
-  const run=s.run.paused?{k:it.k,at:Date.now()-(it.mins*60-s.left)*1000,paused:false}:{k:it.k,paused:true,left:s.left};
+  const sp=(s.run&&s.run.spent)||{};
+  const run=s.run.paused?{k:it.k,at:Date.now()-(it.mins*60-s.left)*1000,paused:false,spent:sp}:{k:it.k,paused:true,left:s.left,spent:sp};
   await wmAgSaveRun(m,run); wmPaintAgenda(false);
 };
 window.wmAgStep=async function(dir){
   const m=wmMeeting(WM.cur), s=wmAgState(m); if(!s.run) return;
   const cur=s.done||s.finished?s.items.length:s.i, j=cur+dir;
   if(j<0) return;
-  const run=j>=s.items.length?{k:s.items[s.items.length-1].k,done:true}:{k:s.items[j].k,at:Date.now(),paused:false};
+  const spent=wmAgSpentWith(s);
+  const run=j>=s.items.length?{k:s.items[s.items.length-1].k,done:true,spent}:{k:s.items[j].k,at:Date.now(),paused:false,spent};
   await wmAgSaveRun(m,run); WM.agView=run.k; WM.agFollow=true; wmPaintAgenda(false); if(!run.done) wmWTabFor(run.k);
 };
 // Changing a step's minutes. On the running step the time already spent still counts.
@@ -1047,7 +1070,7 @@ window.wmAgStepAddSave=async function(){
   try{
     const items=wmAgSer(list); const {error}=await sb.rpc('ops_meeting_set_agenda',{p_meeting:m.id,p_agenda:{items}}); if(error) throw error;
     m.agenda={items}; closeModal(); toast('Added: '+step.l+' · '+step.mins+' min','ok');
-    if((s.done||s.finished)&&!m.ended_at) await wmAgSaveRun(m,{k:step.k,at:Date.now(),paused:false});
+    if((s.done||s.finished)&&!m.ended_at) await wmAgSaveRun(m,{k:step.k,at:Date.now(),paused:false,spent:(s.run&&s.run.spent)||{}});
     WM.agView=step.k; wmPaintAgenda(false);
   }catch(e){ if(b) b.disabled=false; wmErr('Could not add the step',e); }
 };
@@ -1195,18 +1218,32 @@ function wmTdTaskRow(it,m){
       <div class="mt"><span class="st ${pill[0]}">${pill[1]}</span><span>${it.mem.map(e=>esc(wmFirst(e))).join(', ')}</span>${due?`<span>${wmOverdue(it)?'was due':'due'} ${esc(wmFmtS(due))}</span>`:''}${from?`<span class="fr" onclick="wmOpenMeeting(${it.meeting})">From ${esc(wmFmtS(it.date))}</span>`:''}
         ${ed?`<button class="wm-quiet wm-tdmv" onclick="wmTdMove(${it.id},'${other}')"><i class="fa-solid fa-arrow-right-arrow-left"></i> Move to ${other==='trying'?'Trying':'Target'}</button>`:''}</div></div></div>`;
 }
+// Tasks in a To-dos list look exactly like the Actions task list: grouped by person, the same row (tick,
+// title, details, status, Approve / Send back), each row draggable to the other list.
+function wmTdTaskList(tasks,m){
+  if(!tasks.length) return '';
+  const keys=[...new Set(tasks.flatMap(wmWhoKeys))].sort((x,y)=>wmKeyName(x)<wmKeyName(y)?-1:1);
+  return '<div class="wm-v6 wm-tdv6">'+keys.map(k=>{ const mine=tasks.filter(it=>wmWhoKeys(it).includes(k)), od=mine.filter(wmOverdue).length;
+    return `<div class="person"><div class="who">${wmAvatar(wmKeyName(k),28)}<div><b>${esc(wmKeyName(k))}</b><span>${esc(wmKeyDept(k))}</span> <span class="cnt">${mine.filter(wmOpen).length} to do</span>${od?` <span class="cnt red">${od} overdue</span>`:''}</div></div>
+      <div>${mine.map(it=>wmTdWrap(it,m,k)).join('')}</div></div>`; }).join('')+'</div>';
+}
+function wmTdWrap(it,m,k){
+  const ed=wmCanEdit(it.meeting)&&wmCanEdit(m.id)&&!WM.ro, other=(it.sec||'target')==='target'?'trying':'target';
+  return `<div class="wm-tdt2" data-id="${it.id}" ${ed?`draggable="true" ondragstart="wmTdDrag(event,${it.id})" ondragend="wmTdDragEnd()" title="Drag to the other list"`:''}>${wmRow(it,k)}
+    ${ed?`<button class="wm-quiet wm-tdmv" onclick="wmTdMove(${it.id},'${other}')"><i class="fa-solid fa-arrow-right-arrow-left"></i> Move to ${other==='trying'?'Trying':'Target'}</button>`:''}</div>`;
+}
 function wmTdHtml(m){
   const old=String((m.agenda_notes||{}).todos||'').trim();
   return `${old?`<div class="wm-oo-old"><div><b>To-do notes written earlier</b><div>${esc(old).replace(/\n/g,'<br>')}</div></div></div>`:''}
-  <div class="wm-oo" style="margin-top:0">${WM_TD.map(([sec,l,i,ph])=>{ const list=wmNotesFor(m,sec), tasks=wmTdTasks(m,sec), open=list.filter(n=>!n.solved).length+tasks.filter(wmOpen).length;
+  <div class="wm-oo" style="margin-top:0">${WM_TD.map(([sec,l,i,ph])=>{ const list=sec==='target'?[]:wmNotesFor(m,sec), tasks=wmTdTasks(m,sec), open=list.filter(n=>!n.solved).length+tasks.filter(wmOpen).length;
     return `<div class="wm-oo-box wm-td-box ${sec}" ondragover="wmTdOver(event,this)" ondragleave="if(!this.contains(event.relatedTarget))this.classList.remove('drop')" ondrop="wmTdDrop(event,'${sec}',this)"><div class="wm-sec"><span><i class="fa-solid ${i}" style="margin-right:6px"></i>${l}</span><span class="r wm-mute wm-nst">${open} to do</span></div>
-      <input class="wm-nt-add" id="wmNtAdd_${sec}" placeholder="${ph}" onkeydown="if(event.key==='Enter'){event.preventDefault();wmNoteAdd('${sec}',this)}">
-      <div class="wm-nt-list">${tasks.map(it=>wmTdTaskRow(it,m)).join('')}${list.map(n=>wmNoteRow(n,m)).join('')}${!tasks.length&&!list.length?`<div class="wm-mute wm-td-empty">${sec==='trying'?'Nothing yet - drag a task here, or type one.':'Nothing yet.'}</div>`:''}</div></div>`; }).join('')}</div>`;
+      ${sec==='target'?'':`<input class="wm-nt-add" id="wmNtAdd_${sec}" placeholder="${ph}" onkeydown="if(event.key==='Enter'){event.preventDefault();wmNoteAdd('${sec}',this)}">`}
+      ${wmTdTaskList(tasks,m)}<div class="wm-nt-list">${list.map(n=>wmNoteRow(n,m)).join('')}${!tasks.length&&!list.length?`<div class="wm-mute wm-td-empty">${sec==='trying'?'Nothing yet - drag a task here, or type one.':'No tasks yet - every task given in this meeting shows here.'}</div>`:''}</div></div>`; }).join('')}</div>`;
 }
 // Saving which list a new line goes in (Target needs nothing: an empty list means Target).
 async function wmSetSec(id){ if(id&&(WM.tdSec||'target')==='trying'){ const {error}=await sb.rpc('ops_item_set_section',{p_id:id,p_section:'trying'}); if(error) throw error; } }
 window.wmTdDrag=function(e,id){ WM.tdDrag=id; try{ e.dataTransfer.setData('text/plain',String(id)); e.dataTransfer.effectAllowed='move'; }catch(_){} if(e.currentTarget&&e.currentTarget.classList) e.currentTarget.classList.add('dragging'); };
-window.wmTdDragEnd=function(){ WM.tdDrag=null; document.querySelectorAll('.wm-td-box.drop,.wm-tdt.dragging').forEach(x=>x.classList.remove('drop','dragging')); };
+window.wmTdDragEnd=function(){ WM.tdDrag=null; document.querySelectorAll('.wm-td-box.drop,.wm-tdt.dragging,.wm-tdt2.dragging').forEach(x=>x.classList.remove('drop','dragging')); };
 window.wmTdOver=function(e,el){ if(WM.tdDrag==null) return; e.preventDefault(); try{ e.dataTransfer.dropEffect='move'; }catch(_){} el.classList.add('drop'); };
 window.wmTdDrop=function(e,sec,el){ if(WM.tdDrag==null) return; e.preventDefault(); el.classList.remove('drop'); const id=WM.tdDrag; wmTdDragEnd(); wmTdMove(id,sec); };
 window.wmTdMove=async function(id,sec){
@@ -1840,8 +1877,9 @@ window.wmEndMeeting=async function(force){
   let mins=0, s=0; try{ s=Number(localStorage.getItem('wm_start_'+m.id))||0; if(s) mins=Math.max(1,Math.round((Date.now()-s)/60000)); }catch(e){}
   const btn=document.querySelector('.wm-btn.wm-red'); if(btn) btn.disabled=true;
   try{
+    { const s0=m.agenda?wmAgState(m):null; if(s0&&s0.run&&!s0.done){ await wmAgSaveRun(m,{k:s0.items[s0.i].k,done:true,spent:wmAgSpentWith(s0)}); } }
     const {error}=await sb.rpc('ops_meeting_end',{p_meeting:m.id,p_minutes:mins||null}); if(error) throw error;
-    m.ended_at=new Date().toISOString(); m.ran_minutes=mins||null; if(m.agenda_run&&!m.agenda_run.done) m.agenda_run={k:m.agenda_run.k,done:true};
+    m.ended_at=new Date().toISOString(); m.ran_minutes=mins||null; if(m.agenda_run&&!m.agenda_run.done) m.agenda_run=Object.assign({},m.agenda_run,{done:true});
     try{ localStorage.removeItem('wm_start_'+m.id); }catch(e){}
   }catch(e){ if(btn) btn.disabled=false; wmErr('Could not end the meeting',e); return; }
   const mine=WM.items.filter(it=>it.meeting===m.id&&!it.draft), keys=[...new Set(mine.flatMap(wmWhoKeys))];
@@ -2452,4 +2490,11 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-secpick button{border:0;background:none;font:inherit;font-size:12px;font-weight:700;color:#6B7083;padding:2px 9px;border-radius:20px;cursor:pointer;margin-left:2px}'
   +'.wm-secpick button.on{background:#5B4BE8;color:#fff}'
   +'@media(hover:none){.wm-tdmv{opacity:1}}'
++'/* overtime: the step whose time is up counts on below zero until Next */'
+  +'.wm-agnow.over .cd{animation:wmBlink 1s steps(2) infinite}.wm-agnow .ovl{font-style:normal}'
+  +'.wm-agseg .seg.o{background:#E5484D;box-shadow:0 0 0 2px #FBD5D7}'
+  +'.wm-agseg .seg.do{background:#F3B37A}.wm-agseg .seg.do:hover{background:#E99A55}'
+  +'.wm-ib.hot{background:#5B4BE8;border-color:#5B4BE8;color:#fff;animation:mtPulse 1.6s infinite}'
+  +'.wm-td-box .wm-tdv6{border:0;padding:0;margin:4px 0 0;background:none;border-radius:0}.wm-bd-ws .wm-wpane .wm-bd-in .wm-td-box .wm-tdv6 .person{grid-template-columns:1fr;gap:4px;padding:8px 0}.wm-td-box .wm-tdv6 .who{align-items:center}.wm-td-box .wm-tdv6 .who .cnt{margin:0 0 0 4px}'
+  +'.wm-tdt2[draggable=true]{cursor:grab}.wm-tdt2.dragging{opacity:.4}.wm-tdt2 .wm-tdmv{margin:0 0 4px 38px}.wm-tdt2:hover .wm-tdmv,.wm-tdt2 .wm-tdmv:focus{opacity:1}'
 +'</style>';
