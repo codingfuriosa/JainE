@@ -487,7 +487,7 @@ window.wmRescheduleSave=async function(id){
   const b=$('wmRsGo'); b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';
   try{ const {error}=await sb.rpc('ops_meeting_reschedule',{p_meeting:id,p_date:d,p_time:t}); if(error) throw error;
     await wmReloadMeetings(); closeModal(); toast('Moved to '+wmFmt(d)+(t?', '+t:''),'ok'); wmRender(); }
-  catch(e){ b.disabled=false; b.innerHTML='<i class="fa-regular fa-calendar"></i> Reschedule'; toast('Could not reschedule: '+((e&&e.message)||e),'err'); }
+  catch(e){ b.disabled=false; b.innerHTML='<i class="fa-regular fa-calendar"></i> Reschedule'; wmErr('Could not reschedule',e); }
 };
 
 /* ---------- a meeting ---------- */
@@ -807,7 +807,7 @@ window.wmMeetingSave=async function(mode){
     await wmReloadMeetings(); closeModal();
     toast((recur!=='none'?'Scheduled: '+wmRecurWords(recur,date,time):later?'Scheduled for '+wmFmt(date)+(time?', '+wmTime(time):''):'Meeting started')+' · in '+(emails.length+1)+' calendars','ok');
     wmOpenMeeting(Number(data));
-  }catch(e){ b.disabled=false; toast('Could not '+(later?'schedule':'start')+' the meeting: '+((e&&e.message)||e),'err'); }
+  }catch(e){ b.disabled=false; wmErr('Could not '+(later?'schedule':'start')+' the meeting',e); }
 };
 
 /* Stop a repeating meeting: no more dates are made, future dates nobody has written on are removed,
@@ -826,7 +826,7 @@ window.wmSeriesStop=function(sid,go){
       closeModal(); await wmReloadMeetings();
       if(!wmMeeting(WM.cur)) WM.cur=((WM.meetings||[]).find(x=>x.meeting_date<=wmToday())||{}).id||null;
       toast('Stopped repeating'+(data?' · '+data+' coming date'+(data===1?'':'s')+' removed':''),'ok'); wmRender();
-    }catch(e){ toast('Could not stop it: '+((e&&e.message)||e),'err'); }
+    }catch(e){ wmErr('Could not stop it',e); }
   })();
 };
 
@@ -838,7 +838,7 @@ window.wmKpiSave=async function(el){
   const v=el.value; if((m.kpi_notes||'')===v) return;
   const st=$('wmKpiSt'); if(st) st.textContent='Saving…';
   try{ const {error}=await sb.rpc('ops_meeting_set_kpi',{p_meeting:m.id,p_on:true,p_notes:v}); if(error) throw error; m.kpi_notes=v; if(st) st.textContent='Saved'; }
-  catch(e){ if(st) st.textContent=''; toast('Could not save the KPI notes: '+((e&&e.message)||e),'err'); }
+  catch(e){ if(st) st.textContent=''; wmErr('Could not save the KPI notes',e); }
 };
 /* Obstacles & Opportunities: two notes boxes, each saved on its own as you pause and when you leave it. */
 window.wmNoteInput=function(f,el){ WM.noteT=WM.noteT||{}; clearTimeout(WM.noteT[f]); WM.noteT[f]=setTimeout(()=>wmNoteSave(f,el),900); };
@@ -848,12 +848,12 @@ window.wmNoteSave=async function(f,el){
   const v=el.value; if((m[f]||'')===v) return;
   const st=$('wmSt_'+f); if(st) st.textContent='Saving…';
   try{ const {error}=await sb.rpc('ops_meeting_set_note',{p_meeting:m.id,p_field:f,p_value:v}); if(error) throw error; m[f]=v; if(st) st.textContent='Saved'; }
-  catch(e){ if(st) st.textContent=''; toast('Could not save the '+f+': '+((e&&e.message)||e),'err'); }
+  catch(e){ if(st) st.textContent=''; wmErr('Could not save the '+f,e); }
 };
 window.wmOoAdd=async function(){
   const m=wmMeeting(WM.cur); if(!m) return;
   try{ const {error}=await sb.rpc('ops_meeting_set_oo',{p_meeting:m.id,p_on:true}); if(error) throw error; m.has_oo=true; wmPaintMeeting(); const t=$('wmNote_obstacles'); if(t) t.focus(); }
-  catch(e){ toast('Could not add the section: '+((e&&e.message)||e),'err'); }
+  catch(e){ wmErr('Could not add the section',e); }
 };
 /* ---------- the timed agenda ----------
    Eight steps in a fixed order, each with its own minutes. The timer starts on the first step and
@@ -906,7 +906,7 @@ async function wmAgSaveRun(m,run){
   if(!wmCanEdit(m.id)) return;   // someone reading the meeting follows the timer; only an editor moves it
   if(WM.ro) return;
   try{ const {error}=await sb.rpc('ops_meeting_set_run',{p_meeting:m.id,p_run:run}); if(error) throw error; }
-  catch(e){ toast('Could not save the timer: '+((e&&e.message)||e),'err'); }
+  catch(e){ wmErr('Could not save the timer',e); }
 }
 function wmChime(){ try{ const c=new (window.AudioContext||window.webkitAudioContext)(), o=c.createOscillator(), g=c.createGain(); o.frequency.value=880; o.connect(g); g.connect(c.destination); g.gain.setValueAtTime(.15,c.currentTime); g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.6); o.start(); o.stop(c.currentTime+.6); }catch(e){} }
 
@@ -1006,7 +1006,7 @@ window.wmAgMins=async function(k,v){
   const m=wmMeeting(WM.cur); if(!m) return;
   const items=wmAgSer(wmAgMerge(m.agenda).map(x=>Object.assign(x,{mins:x.k===k?Math.max(1,Math.min(180,Number(v)||1)):x.mins})));
   try{ const {error}=await sb.rpc('ops_meeting_set_agenda',{p_meeting:m.id,p_agenda:{items}}); if(error) throw error; m.agenda={items}; }
-  catch(e){ toast('Could not change the minutes: '+((e&&e.message)||e),'err'); }
+  catch(e){ wmErr('Could not change the minutes',e); }
   wmPaintAgenda(false);
 };
 // A meeting set up without the agenda can take it on later: the standard steps, keeping any KPI or
@@ -1015,7 +1015,7 @@ window.wmAgAdd=async function(){
   const m=wmMeeting(WM.cur); if(!m) return;
   const items=WM_AGENDA.map(d=>({k:d.k,mins:d.mins,on:true}));
   try{ const {error}=await sb.rpc('ops_meeting_set_agenda',{p_meeting:m.id,p_agenda:{items}}); if(error) throw error; m.agenda={items}; m.has_kpi=true; m.has_oo=true; wmPaintMeeting(); }
-  catch(e){ toast('Could not add the agenda: '+((e&&e.message)||e),'err'); }
+  catch(e){ wmErr('Could not add the agenda',e); }
 };
 /* A step of your own, added during the meeting by the starter or an editor. While the timer runs it goes
    right after the step the timer is on; before the timer starts, before Opportunities & obstacles; once
@@ -1045,7 +1045,7 @@ window.wmAgStepAddSave=async function(){
     m.agenda={items}; closeModal(); toast('Added: '+step.l+' · '+step.mins+' min','ok');
     if((s.done||s.finished)&&!m.ended_at) await wmAgSaveRun(m,{k:step.k,at:Date.now(),paused:false});
     WM.agView=step.k; wmPaintAgenda(false);
-  }catch(e){ if(b) b.disabled=false; toast('Could not add the step: '+((e&&e.message)||e)+' - try again.','err'); }
+  }catch(e){ if(b) b.disabled=false; wmErr('Could not add the step',e); }
 };
 window.wmAgStepDel=async function(k){
   const m=wmMeeting(WM.cur); if(!m) return;
@@ -1055,7 +1055,7 @@ window.wmAgStepDel=async function(k){
   try{
     const items=wmAgSer(list.filter(i=>i.k!==k)); const {error}=await sb.rpc('ops_meeting_set_agenda',{p_meeting:m.id,p_agenda:{items}}); if(error) throw error;
     m.agenda={items}; if(WM.agView===k) WM.agView=null; toast('Removed: '+x.l,'ok'); wmPaintAgenda(false);
-  }catch(e){ toast('Could not remove it: '+((e&&e.message)||e)+' - try again.','err'); }
+  }catch(e){ wmErr('Could not remove it',e); }
 };
 /* Edit agenda: the same editor as the Start / Schedule form, for this meeting - tick steps on or off,
    change minutes, move steps, rename / remove / add steps of your own. The step the timer is on must stay. */
@@ -1076,7 +1076,7 @@ window.wmAgEditSave=async function(){
   try{
     const items=wmAgSer(WM.formAg); const {error}=await sb.rpc('ops_meeting_set_agenda',{p_meeting:m.id,p_agenda:{items}}); if(error) throw error;
     m.agenda={items}; WM.agEditing=false; closeModal(); toast('Agenda saved','ok'); wmPaintAgenda(false);
-  }catch(e){ if(b) b.disabled=false; toast('Could not save the agenda: '+((e&&e.message)||e)+' - try again.','err'); }
+  }catch(e){ if(b) b.disabled=false; wmErr('Could not save the agenda',e); }
 };
 /* The meeting's work area (24 Nov, less clutter): one card with the action line on top and four tabs -
    Actions, KPIs, To-dos, Opportunities & Obstacles - one shown at a time. When the agenda moves to the
@@ -1104,7 +1104,7 @@ window.wmAgNoteSave=async function(k,el){
   const v=el.value, have=(m.agenda_notes||{})[k]||''; if(have===v) return;
   const st=$('wmSt_'+k); if(st) st.textContent='Saving…';
   try{ const {error}=await sb.rpc('ops_meeting_set_agenda_note',{p_meeting:m.id,p_key:k,p_value:v}); if(error) throw error; m.agenda_notes=Object.assign({},m.agenda_notes,{[k]:v}); if(st) st.textContent='Saved'; }
-  catch(e){ if(st) st.textContent=''; toast('Could not save the notes: '+((e&&e.message)||e),'err'); }
+  catch(e){ if(st) st.textContent=''; wmErr('Could not save the notes',e); }
 };
 
 /* ---------- Obstacles & Opportunities: separate notes, solved or not, each can become a task ----------
@@ -1188,16 +1188,16 @@ window.wmNoteAdd=async function(sec,el){
   const m=wmMeeting(WM.cur), v=(el.value||'').trim(); if(!m||!v) return;
   el.disabled=true;
   try{ const {error}=await sb.rpc('ops_note_add',{p_meeting:m.id,p_section:sec,p_body:v}); if(error) throw error; await wmReloadNotes(); wmPaintOo(sec); }
-  catch(e){ el.disabled=false; toast('Could not add the note: '+((e&&e.message)||e),'err'); }
+  catch(e){ el.disabled=false; wmErr('Could not add the note',e); }
 };
 window.wmNoteSolve=async function(id,v){
   try{ const {error}=await sb.rpc('ops_note_set',{p_id:id,p_body:null,p_solved:v}); if(error) throw error; await wmReloadNotes(); wmPaintOo(); { const nn=(WM.notes||[]).find(x=>x.id===id); toast(wmIsTd(nn)?(v?'Marked done':'Marked not done'):(v?'Marked solved':'Marked unsolved'),'ok'); }; }
-  catch(e){ toast('Could not change it: '+((e&&e.message)||e),'err'); }
+  catch(e){ wmErr('Could not change it',e); }
 };
 window.wmNoteDel=async function(id){
   if(!confirm('Delete this note?')) return;
   try{ const {error}=await sb.rpc('ops_note_delete',{p_id:id}); if(error) throw error; await wmReloadNotes(); wmPaintOo(); }
-  catch(e){ toast('Could not delete it: '+((e&&e.message)||e),'err'); }
+  catch(e){ wmErr('Could not delete it',e); }
 };
 // Make a task from a note: the same rules as a typed task - a title, at least one person, never
 // yourself, an optional due date that is not in the past.
@@ -1226,7 +1226,7 @@ window.wmNoteTaskSave=async function(id){
     const r2=await sb.rpc('ops_note_link_task',{p_id:id,p_ptask:tid}); if(r2.error) throw r2.error;
     closeModal(); toast('Task created for '+mem.map(wmName).join(', '),'ok');
     await Promise.all([wmReload(),wmReloadNotes()]); wmCounts(); wmPaintOo(); wmPaintTabs(); wmPaintNav();
-  }catch(e){ b.disabled=false; toast('Failed: '+((e&&e.message)||e),'err'); }
+  }catch(e){ b.disabled=false; wmErr('Could not finish that',e); }
 };
 
 /* ---------- KPI review: the values from every earlier meeting of this kind, by date and time ---------- */
@@ -1272,7 +1272,7 @@ function wmKpiStatus(t,bad){ const st=$('wmKpiState'); if(!st) return; st.textCo
 async function wmKpiSaveCols(m,cols){
   wmKpiStatus('Saving…');
   try{ const {error}=await sb.rpc('ops_meeting_set_kpi_cols',{p_meeting:m.id,p_cols:cols}); if(error) throw error; m.kpi_cols=cols; wmKpiStatus('Saved'); }
-  catch(e){ wmKpiStatus('Not saved',true); toast('Could not save the columns: '+((e&&e.message)||e)+' - try again.','err'); }
+  catch(e){ wmKpiStatus('Not saved',true); wmErr('Could not save the columns',e); }
 }
 window.wmKpiColAdd=async function(){
   const m=wmMeeting(WM.cur); if(!m) return; const id='c'+Date.now().toString(36);
@@ -1290,13 +1290,13 @@ window.wmKpiCell=async function(person,col,v){
   const el=document.activeElement&&document.activeElement.tagName==='INPUT'?document.activeElement:null; wmKpiStatus('Saving…');
   try{ const {error}=await sb.rpc('ops_meeting_set_kpi_cell',{p_meeting:m.id,p_person:person,p_col:col,p_value:v}); if(error) throw error;
     m.kpi_vals=Object.assign({},m.kpi_vals); m.kpi_vals[person]=Object.assign({},m.kpi_vals[person],{[col]:v}); wmCounts(); wmKpiStatus('Saved'); }
-  catch(e){ wmKpiStatus('Not saved',true); if(el) el.classList.add('wm-bad'); toast('Could not save that value: '+((e&&e.message)||e)+' - type it again.','err'); }
+  catch(e){ wmKpiStatus('Not saved',true); if(el) el.classList.add('wm-bad'); wmErr('Could not save that value',e); }
 };
 
 window.wmKpiAdd=async function(){
   const m=wmMeeting(WM.cur); if(!m) return;
   try{ const {error}=await sb.rpc('ops_meeting_set_kpi',{p_meeting:m.id,p_on:true,p_notes:m.kpi_notes||''}); if(error) throw error; m.has_kpi=true; wmPaintMeeting(); const t=$('wmKpiTxt'); if(t) t.focus(); }
-  catch(e){ toast('Could not add the KPI section: '+((e&&e.message)||e),'err'); }
+  catch(e){ wmErr('Could not add the KPI section',e); }
 };
 
 /* Attendance, by name - the way the imported meetings record it. */
@@ -1316,7 +1316,7 @@ window.wmSaveAttendance=async function(){
     if(m&&m.acc_meeting_id) args.p_emails=[..._wmAtt].map(n=>WM.people.find(p=>p.name.toLowerCase()===String(n).toLowerCase())).filter(Boolean).map(p=>p.email);
     const {error}=await sb.rpc('ops_meeting_set_attendees',args); if(error) throw error;
     await wmReloadMeetings(); closeModal(); WM.showPpl=true; wmPaintMeeting();
-  }catch(e){ toast('Could not save attendance: '+((e&&e.message)||e),'err'); }
+  }catch(e){ wmErr('Could not save attendance',e); }
 };
 
 /* ---------- Pending / All tasks / Finished: every meeting of this kind, all its dates ---------- */
@@ -1466,7 +1466,7 @@ window.wmEditItemSave=async function(id){
     closeModal(); toast(done.length?'Saved: '+done.join(', '):'Nothing changed','ok');
     try{ usageQueue('tasks.tasks.edit_task_title','update',{title:text}); }catch(_e){}
     await wmAfterWrite();
-  }catch(e){ b.disabled=false; b.innerHTML='<i class="fa-solid fa-check"></i> Save'; toast('Could not save'+(done.length?' (saved: '+done.join(', ')+')':'')+': '+((e&&e.message)||e)+' - try again.','err'); }
+  }catch(e){ b.disabled=false; b.innerHTML='<i class="fa-solid fa-check"></i> Save'; wmErr('Could not save'+(done.length?' everything (saved: '+done.join(', ')+')':''),e); }
 };
 // An obstacle or opportunity: its wording.
 window.wmNoteEdit=function(id){
@@ -1480,7 +1480,7 @@ window.wmNoteEditSave=async function(id){
   const v=($('wmNoteEdTxt').value||'').trim(); if(!v){ toast('A note cannot be empty','err'); return; }
   const b=$('wmNoteEdGo'); b.disabled=true;
   try{ const {error}=await sb.rpc('ops_note_set',{p_id:id,p_body:v,p_solved:null}); if(error) throw error; closeModal(); toast('Saved','ok'); await wmReloadNotes(); wmPaintOo(); }
-  catch(e){ b.disabled=false; toast('Could not save the note: '+((e&&e.message)||e)+' - try again.','err'); }
+  catch(e){ b.disabled=false; wmErr('Could not save the note',e); }
 };
 function wmFind(id){ return WM.items.find(it=>it.id===id); }
 async function wmAfterWrite(){ await wmReload(); wmCounts(); wmPaintTabs(); wmPaintNav(); }
@@ -1491,7 +1491,7 @@ window.wmSetLegacy=async function(id,status,el){
     usageQueue('weekly_status.tick_an_action_item','update',{status:status});
     toast(status==='done'?'Closed — with your name on it':'Marked '+WM_LEGACY[status].toLowerCase(),'ok');
     await wmAfterWrite();
-  }catch(e){ if(el) el.disabled=false; toast('Could not update: '+((e&&e.message)||e),'err'); }
+  }catch(e){ if(el) el.disabled=false; wmErr('Could not update',e); }
 };
 window.wmToggle=async function(id){
   const it=wmFind(id); if(!it) return;
@@ -1514,7 +1514,7 @@ window.wmToggle=async function(id){
       toast('Completed','ok');
     }
     await wmAfterWrite();
-  }catch(e){ toast('Could not update the task: '+((e&&e.message)||e),'err'); }
+  }catch(e){ wmErr('Could not update the task',e); }
 };
 window.wmApprove=async function(id,yes){
   const it=wmFind(id); if(!it||!it.linked) return; const tid=it.ptask;
@@ -1533,7 +1533,7 @@ window.wmApprove=async function(id,yes){
     try{ await ACCX().from('notifications').update({read:true}).eq('task_id',tid).eq('kind','approval').eq('recipient',state.email); }catch(e){}
     toast(yes?'Approved':'Sent back','ok');
     await wmAfterWrite();
-  }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  }catch(e){ wmErr('Could not finish that',e); }
 };
 
 /* ---------- every pending task, across all meetings ---------- */
@@ -1683,7 +1683,7 @@ async function wmAdd1(){
     $('wmSmart').value=''; WM.picked={mem:[],due:null,recur:'none'};
     await wmReload(); wmCounts(); wmParse(); wmPaintDrafts(); wmPaintTabs(); wmPaintNav();
     $('wmSmart').focus();
-  }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  }catch(e){ wmErr('Could not finish that',e); }
   finally{ WM.busy=false; }
 }
 
@@ -1718,22 +1718,22 @@ window.wmSelAll=function(on){ wmDrafts().forEach(d=>on?WM.sel.add(d.id):WM.sel.d
 window.wmBulkPeople=function(){ wmPickPeople([],`Assign ${WM.sel.size} task${WM.sel.size>1?'s':''} to`,m=>{ WM.sel.forEach(id=>WM.draftMem[id]=m.slice()); wmPaintDrafts(); }); };
 window.wmBulkDue=async function(v){
   try{ for(const id of WM.sel){ const {error}=await sb.rpc('ops_item_set_due',{p_id:id,p_due:v||null}); if(error) throw error; }
-       await wmReload(); wmPaintDrafts(); }catch(e){ toast('Could not set the date: '+((e&&e.message)||e),'err'); }
+       await wmReload(); wmPaintDrafts(); }catch(e){ wmErr('Could not set the date',e); }
 };
 window.wmDraftDue=async function(id,v){
   try{ const {error}=await sb.rpc('ops_item_set_due',{p_id:id,p_due:v||null}); if(error) throw error; await wmReload(); wmPaintDrafts(); }
-  catch(e){ toast('Could not set the date: '+((e&&e.message)||e),'err'); }
+  catch(e){ wmErr('Could not set the date',e); }
 };
 window.wmDraftText=async function(id,v){
   if(!String(v||'').trim()){ toast('Type a title','err'); wmPaintDrafts(); return; }
   try{ const {error}=await sb.rpc('ops_item_set_text',{p_id:id,p_item:v}); if(error) throw error; await wmReload(); }
-  catch(e){ toast('Could not save: '+((e&&e.message)||e),'err'); }
+  catch(e){ wmErr('Could not save',e); }
 };
 window.wmDraftDelete=async function(id){
   const d=(WM.items||[]).find(it=>it.id===id);
   if(!confirm('Remove "'+((d&&d.t)||'this line')+'"? It has no person yet, so nothing else is lost - but it cannot be brought back.')) return;
   try{ const {error}=await sb.rpc('ops_item_delete_draft',{p_id:id}); if(error) throw error; WM.sel.delete(id); delete WM.draftMem[id]; await wmReload(); wmPaintDrafts(); }
-  catch(e){ toast('Could not remove: '+((e&&e.message)||e),'err'); }
+  catch(e){ wmErr('Could not remove',e); }
 };
 window.wmPromote=async function(ids){
   const ds=ids.map(id=>wmFind(id)).filter(Boolean);
@@ -1750,7 +1750,7 @@ window.wmPromote=async function(ids){
       delete WM.draftMem[d.id]; delete WM.draftRecur[d.id]; WM.sel.delete(d.id); WM.lastNew=d.id; made++;
     }
     toast(made>1?made+' tasks created':'Task created for '+lastNames,'ok');
-  }catch(e){ toast((made?made+' created, then: ':'')+'Failed: '+((e&&e.message)||e),'err'); }
+  }catch(e){ wmErr((made?made+' created, then could not create the rest':'Could not create the tasks'),e); }
   finally{ WM.busy=false; WM.tab='pending'; await wmReload(); wmCounts(); wmPaintDrafts(); wmPaintTabs(); wmPaintNav(); }
 };
 
@@ -1783,6 +1783,14 @@ window.wmEndMeeting=async function(force){
       <div class="modal-foot"><button class="btn" onclick="closeModal();wmEndMeeting(true)">End anyway</button><button class="btn btn-primary" onclick="closeModal();$('wmDrafts').scrollIntoView({behavior:'smooth',block:'center'})">Assign them now</button></div>`);
     return;
   }
+  // Nothing unassigned: still ask once, so a stray click cannot end a running meeting.
+  if(!force){
+    let run=0; try{ const st=Number(localStorage.getItem('wm_start_'+m.id))||0; if(st) run=Math.max(1,Math.round((Date.now()-st)/60000)); }catch(e){}
+    openModal(`<div class="modal-head"><h3>End ${esc(m.kind||'the meeting')}?</h3><span class="x" onclick="closeModal()">&times;</span></div>
+      <div class="modal-body" style="font-size:14px;color:var(--slate);line-height:1.6">${run?'It has run '+run+' min. ':''}The timer stops and the meeting moves to History with its summary. You can reopen it later if needed.</div>
+      <div class="modal-foot"><button class="btn" onclick="closeModal()">Keep going</button><button class="btn btn-primary" style="background:#e0121c;border-color:#e0121c" onclick="closeModal();wmEndMeeting(true)">End meeting</button></div>`);
+    return;
+  }
   // Ending is saved on the meeting (and stops the agenda timer there), so it stays ended after a
   // reload: no End meeting button, no live dot, "ended at …" on the card.
   clearInterval(WM.agTimer); clearInterval(WM.timer);
@@ -1792,7 +1800,7 @@ window.wmEndMeeting=async function(force){
     const {error}=await sb.rpc('ops_meeting_end',{p_meeting:m.id,p_minutes:mins||null}); if(error) throw error;
     m.ended_at=new Date().toISOString(); m.ran_minutes=mins||null; if(m.agenda_run&&!m.agenda_run.done) m.agenda_run={k:m.agenda_run.k,done:true};
     try{ localStorage.removeItem('wm_start_'+m.id); }catch(e){}
-  }catch(e){ if(btn) btn.disabled=false; toast('Could not end the meeting: '+((e&&e.message)||e),'err'); return; }
+  }catch(e){ if(btn) btn.disabled=false; wmErr('Could not end the meeting',e); return; }
   const mine=WM.items.filter(it=>it.meeting===m.id&&!it.draft), keys=[...new Set(mine.flatMap(wmWhoKeys))];
   const open=WM.items.filter(it=>it.kind===m.kind&&!it.draft&&wmOpen(it)).length;
   openModal(`<div class="modal-head"><h3>Meeting ended</h3><span class="x" onclick="closeModal();wmRender()">&times;</span></div>
@@ -1804,11 +1812,35 @@ window.wmEndMeeting=async function(force){
 window.wmReopen=async function(){
   const m=wmMeeting(WM.cur); if(!m) return;
   try{ const {error}=await sb.rpc('ops_meeting_reopen',{p_meeting:m.id}); if(error) throw error; m.ended_at=null; m.ran_minutes=null; wmRender(); toast('Meeting reopened','ok'); }
-  catch(e){ toast('Could not reopen it: '+((e&&e.message)||e),'err'); }
+  catch(e){ wmErr('Could not reopen it',e); }
 };
 // "12:40" in India time, for when a meeting ended.
 function wmClock(ts){ try{ return new Date(ts).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } }
 
+/* ---------- when something fails, and while something is working (UI/UX checklist, 24 Nov) ----------
+   wmErr: every failure says what failed, why in plain words, and what to do next.
+   wmBusy + the wrappers below: while Approve, Send back, ticking a task or ticking a note is being
+   saved, that control dims, shows a busy cursor and ignores more clicks, so nothing is done twice. */
+function wmErr(what,e){
+  const raw=String((e&&e.message)||e||'').trim();
+  let why=raw, fix='Try again. If it keeps failing, reload the page.';
+  if(/failed to fetch|networkerror|network request|load failed|timeout|timed out/i.test(raw)){ why='JainE could not be reached'; fix='Check the internet connection, then try again.'; }
+  else if(/jwt|expired|not authenticated|invalid claim|refresh token/i.test(raw)){ why='your sign-in has expired'; fix='Reload the page and sign in again.'; }
+  else if(/only the person|or its editor|only the owner|not allowed|permission denied|cannot change/i.test(raw)){ fix='Ask whoever started the meeting, or one of its editors, to do it.'; }
+  else if(/no longer exists|not found/i.test(raw)){ fix='Reload the page to see the latest.'; }
+  else if(/duplicate|already/i.test(raw)){ fix='Reload the page - it may already be done.'; }
+  toast(what+(why?': '+why.replace(/[.\s]+$/,''):'')+'. '+fix,'err');
+}
+function wmBusy(sel,on){ document.querySelectorAll(sel).forEach(function(el){ el.classList.toggle('wm-busy',on); el.setAttribute('aria-busy',on?'true':'false'); if('disabled' in el) el.disabled=on; }); }
+(function(){
+  const wrap=function(name,sel){ const fn=window[name]; if(typeof fn!=='function') return;
+    window[name]=async function(){ const a=arguments, k=name+':'+a[0]; WM.busyK=WM.busyK||{}; if(WM.busyK[k]) return; WM.busyK[k]=1; const s=sel(a[0]); wmBusy(s,true);
+      try{ return await fn.apply(this,a); } finally{ delete WM.busyK[k]; wmBusy(s,false); } }; };
+  wrap('wmToggle',id=>'[onclick="wmToggle('+id+')"]');
+  wrap('wmApprove',id=>'[onclick^="wmApprove('+id+',"]');
+  wrap('wmNoteSolve',id=>'[onclick^="wmNoteSolve('+id+',"]');
+  wrap('wmSetLegacy',id=>'[onchange^="wmSetLegacy('+id+',"]');
+})();
 const WM_CSS='<style id="wmCss">'
   /* Light, like the rest of JainE: white cards on the normal page background. */
   +'.wm{--ink:#0b1220;--ink2:#334155;--mute:#64748b;--mute2:#94a3b8;--hair:#e6eaf1;--hair2:#eef1f6;--red:#e0121c;--green:#16a34a;color:var(--ink);padding:12px 18px 60px}'
@@ -2364,4 +2396,5 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-agseg.paused .seg.n i{background:#B8BCC8}.wm-agseg .seg.v{box-shadow:0 0 0 2px #5B4BE8}'
   +'.wm-agseg .seg:focus-visible{outline:2px solid #5B4BE8;outline-offset:2px}'
   +'@media(max-width:700px){.mt-shell .wm-hd2 .wm-t2{margin-left:0!important}.wm-hd2 h2{font-size:20px!important}.wm-more-panel{position:fixed;left:16px;right:16px;top:auto;width:auto;max-width:none;margin-top:8px}}'
+  +'.wm-busy{opacity:.45;pointer-events:none;cursor:progress}.wm-busy.bx{border-style:dashed!important}'
 +'</style>';
