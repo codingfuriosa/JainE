@@ -604,7 +604,7 @@ function wmPaintBoard(){
   if(m.agenda) wmPaintAgenda(true);
   if(isToday&&started&&!ended){
     const tick=()=>{ const t=$('wmTimer'); if(!t) return; const x=Math.max(0,Math.floor((Date.now()-started)/1000)), hh=Math.floor(x/3600), mm=Math.floor(x%3600/60), ss=x%60;
-      t.textContent=hh?hh+'h '+String(mm).padStart(2,'0')+'m':mm+'m '+String(ss).padStart(2,'0')+'s';
+      t.textContent=(hh?hh+'h '+String(mm).padStart(2,'0')+'m ':mm+'m ')+String(ss).padStart(2,'0')+'s';   // seconds stay after the first hour too
       const n=$('wmNow'); if(n) n.textContent=wmClock(Date.now()); };
     tick(); WM.timer=setInterval(tick,1000);
   }
