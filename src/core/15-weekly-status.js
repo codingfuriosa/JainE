@@ -1235,26 +1235,37 @@ function wmTdWrap(it,m,k){
   return `<div class="wm-tdt2" data-id="${it.id}" ${ed?`draggable="true" ondragstart="wmTdDrag(event,${it.id})" ondragend="wmTdDragEnd()" title="Drag to another list"`:''}>${wmRow(it,k)}
     ${ed?`<select class="wm-tdmv-s" onchange="wmTdMove(${it.id},this.value)" aria-label="Move to another list"><option value="">Move to…</option>${WM_TD.filter(x=>x[0]!==cur).map(x=>`<option value="${x[0]}">${esc(x[1])}</option>`).join('')}</select>`:''}</div>`;
 }
+/* 24 Nov, later still: person cards (the owner's pick, option B of todos_prototypes.html, changed so a card
+   shows ALL of that person's tasks - no "+N more" - and the grey "Pending" tag is left off; Done, Overdue and
+   Awaiting approval still show). Cards sit side by side; each task is one line with a small Target / Trying /
+   Future tag; the card header shows the person's split as a bar. A click on the name folds the card (remembered
+   here). The three section chips on top show or hide a section (the old fold state) and take a dragged task. */
+function wmTdCardOff(){ try{ return JSON.parse(localStorage.getItem('wm_td_cards')||'{}')||{}; }catch(e){ return {}; } }
+window.wmTdCardFold=function(k){ const s=wmTdCardOff(); s[k]=!s[k]; try{ localStorage.setItem('wm_td_cards',JSON.stringify(s)); }catch(e){} wmRepaintTd(); };
+const WM_TD_TAG={target:'Target',trying:'Trying',future:'Future'};
+const WM_TD_COL={target:'#5B4BE8',trying:'#3767DB',future:'#C4C8D6'};
 function wmTdHtml(m){
-  const old=String((m.agenda_notes||{}).todos||'').trim(), fold=wmTdFoldState();
+  const old=String((m.agenda_notes||{}).todos||'').trim(), fold=wmTdFoldState(), cardOff=wmTdCardOff();
   const secs=WM_TD.map(([sec,l,i,ph])=>({sec,l,i,ph,tasks:wmTdTasks(m,sec),notes:sec==='target'?[]:wmNotesFor(m,sec),off:!!fold[sec]}));
-  const cols=secs.map(s=>s.off?'46px':'minmax(0,1fr)').join(' ');
-  const open=secs.filter(s=>!s.off), allOff=!open.length;
+  const open=secs.filter(s=>!s.off);
+  const drop=sec=>`ondragover="wmTdOver(event,this)" ondragleave="if(!this.contains(event.relatedTarget))this.classList.remove('drop')" ondrop="wmTdDrop(event,'${sec}',this)"`;
+  const chips=secs.map(s=>{ const n=s.tasks.filter(wmOpen).length+s.notes.filter(x=>!x.solved).length;
+    return `<button type="button" class="wm-tdb-chip ${s.sec} ${s.off?'off':''}" onclick="wmTdFold('${s.sec}')" aria-pressed="${!s.off}" title="${s.off?'Show':'Hide'} ${esc(s.l)} - or drop a task here to move it" ${drop(s.sec)}><i class="fa-solid ${s.i}"></i>${esc(s.l)}<em>${n}</em></button>`; }).join('');
+  const bar=`<div class="wm-tdb-bar">${chips}</div>`;
+  if(!open.length) return bar+'<div class="wm-mute wm-td-empty">All three sections are hidden - click one to show it.</div>';
   const keys=[...new Set(open.flatMap(s=>s.tasks.flatMap(wmWhoKeys)))].sort((x,y)=>wmKeyName(x)<wmKeyName(y)?-1:1);
-  const drop=s=>`ondragover="wmTdOver(event,this)" ondragleave="if(!this.contains(event.relatedTarget))this.classList.remove('drop')" ondrop="wmTdDrop(event,'${s.sec}',this)"`;
-  const cell=(s,inner,dz,none)=>`<div class="wm-tdg-c ${s.sec} ${s.off?'off':''} ${none?'none':''}" data-l="${esc(s.l)}" ${dz&&!s.off?drop(s):''}>${s.off?'':inner}</div>`;
-  const head=secs.map(s=>{ const open=s.tasks.filter(wmOpen).length+s.notes.filter(n=>!n.solved).length;
-    return `<button type="button" class="wm-tdg-h ${s.sec} ${s.off?'off':''}" onclick="wmTdFold('${s.sec}')" aria-expanded="${!s.off}" title="${s.off?'Show':'Fold'} ${esc(s.l)}"><i class="fa-solid ${s.i}"></i><span class="t">${esc(s.l)}</span><em>${open}</em><i class="fa-solid fa-chevron-${s.off?'right':'left'} chev"></i></button>`; }).join('');
-  const rows=keys.map(k=>{ const n=secs.reduce((a,s)=>a+s.tasks.filter(it=>wmWhoKeys(it).includes(k)&&wmOpen(it)).length,0);
-    return `<div class="wm-tdg-who">${wmAvatar(wmKeyName(k),20)}<b>${esc(wmKeyName(k))}</b><span>${esc(wmKeyDept(k))}</span><span class="cnt">${n} to do</span></div>`
-      +secs.map(s=>{ const mine=s.tasks.filter(it=>wmWhoKeys(it).includes(k)); return cell(s,`<div class="wm-v6">${mine.map(it=>wmTdWrap(it,m,k)).join('')}</div>`,true,!mine.length); }).join(''); }).join('');
-  const empty=keys.length?'':`<div class="wm-tdg-who wm-tdg-none"><span>No tasks yet</span></div>`+secs.map(s=>cell(s,`<div class="wm-mute wm-td-empty">${s.sec==='target'?'Every task given in this meeting shows here.':'Drag a task here.'}</div>`,true)).join('');
-  const noteRow=`<div class="wm-tdg-who wm-tdg-notes"><i class="fa-regular fa-note-sticky"></i><b>Typed to-dos</b><span>Not given to anyone yet</span></div>`
-    +secs.map(s=>cell(s,s.sec==='target'?'<div class="wm-mute wm-td-empty">Tasks only</div>':`<input class="wm-nt-add" id="wmNtAdd_${s.sec}" placeholder="${esc(s.ph)}" onkeydown="if(event.key==='Enter'){event.preventDefault();wmNoteAdd('${s.sec}',this)}"><div class="wm-nt-list">${s.notes.map(n=>wmNoteRow(n,m)).join('')}</div>`,false)).join('');
-  const notesOpen=open.some(s=>s.sec!=='target');
-  if(allOff) return `<div class="wm-tdg alloff" style="grid-template-columns:repeat(${secs.length},minmax(0,1fr))">${head}</div><div class="wm-mute wm-td-empty">All three sections are folded - click one to open it.</div>`;
+  const tag=sec=>`<span class="wm-tdb-tag ${sec}">${WM_TD_TAG[sec]}</span>`;
+  const cards=keys.map(k=>{
+    const per=open.map(s=>({sec:s.sec,list:s.tasks.filter(it=>wmWhoKeys(it).includes(k))}));
+    const all=per.flatMap(p=>p.list.map(it=>({it,sec:p.sec}))), n=all.filter(x=>wmOpen(x.it)).length, off=!!cardOff[k];
+    const split=per.map(p=>{ const c=p.list.filter(wmOpen).length; return c?`<i title="${c} ${esc(WM_TD_TAG[p.sec])}" style="flex:${c};background:${WM_TD_COL[p.sec]}"></i>`:''; }).join('');
+    const rows=all.map(x=>wmTdWrap(x.it,m,k).replace('<span class="tx1">',tag(x.sec)+'<span class="tx1">')).join('');
+    return `<div class="wm-tdb-card ${off?'off':''}"><button type="button" class="wm-tdb-hd" onclick="wmTdCardFold('${esc(k)}')" aria-expanded="${!off}" title="${off?'Show':'Fold'} these tasks">${wmAvatar(wmKeyName(k),24)}<span class="nm"><b>${esc(wmKeyName(k))}</b><span>${esc(wmKeyDept(k))}</span></span><span class="sp">${split}</span><span class="cnt">${n} to do</span><i class="fa-solid fa-chevron-${off?'down':'up'} chev"></i></button>${off?'':`<div class="wm-tdb-c"><div class="wm-v6">${rows}</div></div>`}</div>`; }).join('');
+  const empty=keys.length?'':`<div class="wm-tdb-card wm-tdb-none"><div class="wm-mute wm-td-empty">No tasks yet. Every task given in this meeting shows here, under Target.</div></div>`;
+  const nsecs=open.filter(s=>s.sec!=='target');
+  const notes=nsecs.length?`<div class="wm-tdb-card wm-tdb-notes"><div class="wm-tdb-hd static"><i class="fa-regular fa-note-sticky"></i><span class="nm"><b>Typed to-dos</b><span>Not given to anyone yet</span></span></div>${nsecs.map(s=>`<div class="wm-tdb-ns">${tag(s.sec)}<input class="wm-nt-add" id="wmNtAdd_${s.sec}" placeholder="${esc(s.ph)}" onkeydown="if(event.key==='Enter'){event.preventDefault();wmNoteAdd('${s.sec}',this)}"><div class="wm-nt-list">${s.notes.map(n=>wmNoteRow(n,m)).join('')}</div></div>`).join('')}</div>`:'';
   return (old?`<div class="wm-oo-old"><div><b>To-do notes written earlier</b><div>${esc(old).replace(/\n/g,'<br>')}</div></div></div>`:'')
-    +`<div class="wm-tdg" style="grid-template-columns:${cols}">${head}${rows}${empty}${notesOpen?noteRow:''}</div>`;
+    +bar+`<div class="wm-tdb">${cards}${empty}${notes}</div>`;
 }
 async function wmSetSec(id){ const s=WM.tdSec||'target'; if(id&&s!=='target'){ const {error}=await sb.rpc('ops_item_set_section',{p_id:id,p_section:s}); if(error) throw error; } }
 window.wmTdDrag=function(e,id){ WM.tdDrag=id; try{ e.dataTransfer.setData('text/plain',String(id)); e.dataTransfer.effectAllowed='move'; }catch(_){} if(e.currentTarget&&e.currentTarget.classList) e.currentTarget.classList.add('dragging'); };
@@ -2526,7 +2537,7 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-tdg-notes>i{color:#9AA0B4;margin-top:3px}.wm-tdg-none span{font-size:12.5px;color:#9AA0B4}'
   +'.wm-tdg-c{min-width:0;border-left:1px solid #F1F2F6;border-bottom:1px solid #F1F2F6;padding:4px 8px 6px}'
   +'.wm-tdg-c.off{background:#FAFAFD;padding:0}.wm-tdg-c.drop{background:#F4F2FF;outline:2px dashed #5B4BE8;outline-offset:-3px}'
-  +'.wm-tdg-c .wm-v6{border:0;padding:0;margin:0;background:none;border-radius:0}.wm-tdg-c .wm-v6 .task{padding:6px 4px}'
+  +'.wm-tdb-c .wm-v6{border:0;padding:0;margin:0;background:none;border-radius:0}.wm-tdb-c .wm-v6 .task{padding:6px 4px}'
   +'.wm-tdg-c .wm-nt-add{margin:4px 0 2px}.wm-tdg-c .wm-td-empty{padding:8px 2px;font-size:12px}'
   +'.wm-tdmv-s{height:24px;margin:0 0 4px 30px;border:1px solid #E3E5EC;border-radius:7px;background:#fff;font:inherit;font-size:11.5px;color:#5B4BE8;font-weight:700;padding:0 4px;cursor:pointer;opacity:0;transition:opacity .15s}'
   +'.wm-tdt2:hover .wm-tdmv-s,.wm-tdmv-s:focus{opacity:1}'
@@ -2537,17 +2548,38 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-tdg-who{grid-column:1/-1;display:flex;align-items:center;gap:8px;min-width:0;padding:5px 12px;background:#FAFAFD;border-bottom:1px solid #F1F2F6;font-size:12px}'
   +'.wm-tdg-who b{font-size:12.5px;color:#1C1F2E;white-space:nowrap}.wm-tdg-who span{color:#7A8095;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
   +'.wm-tdg-who .cnt{flex:none;font-size:10.5px;font-weight:800;background:#F0F1F5;color:#4A4F63;border-radius:7px;padding:1px 7px}.wm-tdg-who>i{color:#9AA0B4}'
-  +'.wm-tdg-c{padding:1px 6px 2px}.wm-tdg-c .wm-v6 .task{align-items:center;gap:8px;padding:4px 4px;border-radius:7px;min-height:30px}'
-  +'.wm-tdg-c .wm-v6 .task .bx{width:16px;height:16px;margin-top:0}'
-  +'.wm-tdg-c .wm-v6 .task>div:nth-child(2){display:flex;flex-wrap:wrap;align-items:center;column-gap:8px}'
-  +'.wm-tdg-c .wm-v6 .task .tt{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:4px;font-size:13px;line-height:1.3}'
-  +'.wm-tdg-c .wm-v6 .task .tt .tx1{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
-  +'.wm-tdg-c .wm-v6 .task .tt .wm-ed{flex:none}'
-  +'.wm-tdg-c .wm-v6 .task .mt{flex:none;margin-top:0;flex-wrap:nowrap;gap:7px;font-size:11px;white-space:nowrap}.wm-tdg-c .wm-v6 .task .mt .by{display:none}'
-  +'.wm-tdg-c .wm-v6 .task>div:nth-child(2)>div:not(.tt):not(.mt){flex-basis:100%}'
-  +'.wm-tdg-c .wm-v6 .task .st{font-size:10.5px;padding:2px 7px}'
-  +'.wm-tdg-c .wm-v6 .task .mt>span:first-child:not(.from),.wm-tdg-c .wm-v6 .task .mt .aw{display:none}'
+  +'.wm-tdg-c{padding:1px 6px 2px}.wm-tdb-c .wm-v6 .task{align-items:center;gap:8px;padding:4px 4px;border-radius:7px;min-height:30px}'
+  +'.wm-tdb-c .wm-v6 .task .bx{width:16px;height:16px;margin-top:0}'
+  +'.wm-tdb-c .wm-v6 .task>div:nth-child(2){display:flex;flex-wrap:wrap;align-items:center;column-gap:8px}'
+  +'.wm-tdb-c .wm-v6 .task .tt{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:4px;font-size:13px;line-height:1.3}'
+  +'.wm-tdb-c .wm-v6 .task .tt .tx1{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.wm-tdb-c .wm-v6 .task .tt .wm-ed{flex:none}'
+  +'.wm-tdb-c .wm-v6 .task .mt{flex:none;margin-top:0;flex-wrap:nowrap;gap:7px;font-size:11px;white-space:nowrap}.wm-tdb-c .wm-v6 .task .mt .by{display:none}'
+  +'.wm-tdb-c .wm-v6 .task>div:nth-child(2)>div:not(.tt):not(.mt){flex-basis:100%}'
+  +'.wm-tdb-c .wm-v6 .task .st{font-size:10.5px;padding:2px 7px}'
+  +'.wm-tdb-c .wm-v6 .task .mt>span:first-child:not(.from),.wm-tdb-c .wm-v6 .task .mt .aw{display:none}'
   +'.wm-tdt2{position:relative}'
   +'@media(hover:hover){.wm-tdt2 .wm-tdmv-s{position:absolute;right:4px;top:3px;margin:0;z-index:2;box-shadow:0 2px 8px rgba(20,20,60,.12)}}'
-  +'@media(max-width:900px){.wm-tdg-c .wm-v6 .task .mt{display:none}}'
+  +'@media(max-width:600px){.wm-tdb-c .wm-v6 .task .mt{display:none}}'
+  +'.wm-tdb-bar{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 10px}'
+  +'.wm-tdb-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #E3E5EC;border-radius:20px;background:#fff;padding:5px 11px;font:inherit;font-size:12px;font-weight:700;color:#4A4F63;cursor:pointer}'
+  +'.wm-tdb-chip em{font-style:normal;font-size:11px;background:#F0F1F5;border-radius:20px;padding:0 7px;color:#5D6378}'
+  +'.wm-tdb-chip.target i{color:#5B4BE8}.wm-tdb-chip.trying i{color:#3767DB}.wm-tdb-chip.future i{color:#9AA0B4}'
+  +'.wm-tdb-chip.off{background:#F6F7FA;color:#9AA0B4;text-decoration:line-through}.wm-tdb-chip.off i{color:#C4C8D6}'
+  +'.wm-tdb-chip.drop{outline:2px dashed #5B4BE8;outline-offset:1px;background:#F4F2FF}'
+  +'.wm-tdb{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr));gap:12px;align-items:start}'
+  +'.wm-tdb-card{background:#fff;border:1px solid #ECEEF3;border-radius:12px;overflow:hidden;min-width:0}'
+  +'.wm-tdb-hd{display:flex;align-items:center;gap:9px;width:100%;border:0;border-bottom:1px solid #ECEEF3;background:#FAFAFD;padding:8px 12px;font:inherit;text-align:left;cursor:pointer}'
+  +'.wm-tdb-hd.static{cursor:default}.wm-tdb-hd>i{color:#9AA0B4}.wm-tdb-card.off .wm-tdb-hd{border-bottom:0}'
+  +'.wm-tdb-hd .nm{flex:1;min-width:0;display:flex;align-items:baseline;gap:7px}.wm-tdb-hd .nm b{font-size:13px;color:#1C1F2E;white-space:nowrap}'
+  +'.wm-tdb-hd .nm span{font-size:11.5px;color:#7A8095;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.wm-tdb-hd .sp{display:flex;gap:3px;width:60px;flex:none}.wm-tdb-hd .sp i{display:block;height:6px;border-radius:3px;min-width:6px}'
+  +'.wm-tdb-hd .cnt{flex:none;font-size:10.5px;font-weight:800;background:#F0F1F5;color:#4A4F63;border-radius:7px;padding:1px 7px}.wm-tdb-hd .chev{font-size:10px;flex:none}'
+  +'.wm-tdb-c{padding:2px 6px 4px}.wm-tdb-c .wm-tdt2:nth-child(even) .task{background:#FBFBFD}'
+  +'.wm-tdb-c .wm-v6 .task .st.p,.wm-tdb-c .wm-v6 .task .mt .ok,.wm-tdb-ns .st.n{display:none}'
+  +'@media(min-width:601px){.wm-tdb-c .wm-v6 .task .st.o{display:none}}'
+  +'.wm-tdb-tag{flex:none;font-size:9.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;border-radius:5px;padding:1px 5px;background:#F0F1F5;color:#5D6378}'
+  +'.wm-tdb-tag.target{background:#EEEBFF;color:#5B4BE8}.wm-tdb-tag.trying{background:#E7F1FB;color:#3767DB}'
+  +'.wm-tdb-ns{padding:6px 12px 4px;border-top:1px solid #F4F5F8}.wm-tdb-ns:first-of-type{border-top:0}.wm-tdb-ns .wm-nt-add{margin:4px 0 2px}'
+  +'.wm-tdb-none{grid-column:1/-1}.wm-tdb-none .wm-td-empty{padding:12px}'
 +'</style>';
