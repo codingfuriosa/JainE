@@ -11932,7 +11932,7 @@ function wmPaintBoard(){
   </div>
   <div class="wm-card wm-bd-ws" id="wmWs">
     <div class="wm-cap wm-ws-cap">
-      <div class="wm-cap-in"><i class="fa-solid fa-plus wm-cap-ic"></i><input id="wmSmart" autocomplete="off" placeholder="Add an action - @person, a date - then Enter…" oninput="wmParse()" onkeydown="wmKey(event)"><span class="kbd">Enter ↵</span></div>
+      <div class="wm-cap-in"><i class="fa-solid fa-plus wm-cap-ic"></i><input id="wmSmart" autocomplete="off" placeholder="Add an action - @person, a date - then Enter…" oninput="wmParse()" onkeydown="wmKey(event)"><span class="tok wm-secpick wm-cap-sec" id="wmCapSec" title="Which To-dos list it goes in"></span><span class="kbd">Enter ↵</span></div>
       <div class="wm-parsed" id="wmParsed"></div>
       <div class="wm-sugg" id="wmSugg" style="display:none"></div>
     </div>
@@ -12598,7 +12598,9 @@ function wmTdHtml(m){
     return `<button type="button" class="wm-tdb-chip ${s.sec} ${s.off?'off':''}" onclick="wmTdFold('${s.sec}')" aria-pressed="${!s.off}" title="${s.off?'Show':'Hide'} ${esc(s.l)} - or drop a task here to move it" ${drop(s.sec)}><i class="fa-solid ${s.i}"></i>${esc(s.l)}<em>${n}</em></button>`; }).join('');
   const bar=`<div class="wm-tdb-bar">${chips}</div>`;
   if(!open.length) return bar+'<div class="wm-mute wm-td-empty">All three sections are hidden - click one to show it.</div>';
-  const keys=[...new Set(open.flatMap(s=>s.tasks.flatMap(wmWhoKeys)))].sort((x,y)=>wmKeyName(x)<wmKeyName(y)?-1:1);
+  // Shortest card first, longest last (the owner's ask, 24 Nov): by how many tasks the card lists, then by name.
+  const len=k=>open.reduce((a,s)=>a+s.tasks.filter(it=>wmWhoKeys(it).includes(k)).length,0);
+  const keys=[...new Set(open.flatMap(s=>s.tasks.flatMap(wmWhoKeys)))].sort((x,y)=>(len(x)-len(y))||(wmKeyName(x)<wmKeyName(y)?-1:1));
   const tag=sec=>`<span class="wm-tdb-tag ${sec}">${WM_TD_TAG[sec]}</span>`;
   const cards=keys.map(k=>{
     const per=open.map(s=>({sec:s.sec,list:s.tasks.filter(it=>wmWhoKeys(it).includes(k))}));
@@ -12607,8 +12609,8 @@ function wmTdHtml(m){
     const rows=all.map(x=>wmTdWrap(x.it,m,k).replace('<span class="tx1">',tag(x.sec)+'<span class="tx1">')).join('');
     return `<div class="wm-tdb-card ${off?'off':''}"><button type="button" class="wm-tdb-hd" onclick="wmTdCardFold('${esc(k)}')" aria-expanded="${!off}" title="${off?'Show':'Fold'} these tasks">${wmAvatar(wmKeyName(k),24)}<span class="nm"><b>${esc(wmKeyName(k))}</b><span>${esc(wmKeyDept(k))}</span></span><span class="sp">${split}</span><span class="cnt">${n} to do</span><i class="fa-solid fa-chevron-${off?'down':'up'} chev"></i></button>${off?'':`<div class="wm-tdb-c"><div class="wm-v6">${rows}</div></div>`}</div>`; }).join('');
   const empty=keys.length?'':`<div class="wm-tdb-card wm-tdb-none"><div class="wm-mute wm-td-empty">No tasks yet. Every task given in this meeting shows here, under Target.</div></div>`;
-  const nsecs=open.filter(s=>s.sec!=='target');
-  const notes=nsecs.length?`<div class="wm-tdb-card wm-tdb-notes"><div class="wm-tdb-hd static"><i class="fa-regular fa-note-sticky"></i><span class="nm"><b>Typed to-dos</b><span>Not given to anyone yet</span></span></div>${nsecs.map(s=>`<div class="wm-tdb-ns">${tag(s.sec)}<input class="wm-nt-add" id="wmNtAdd_${s.sec}" placeholder="${esc(s.ph)}" onkeydown="if(event.key==='Enter'){event.preventDefault();wmNoteAdd('${s.sec}',this)}"><div class="wm-nt-list">${s.notes.map(n=>wmNoteRow(n,m)).join('')}</div></div>`).join('')}</div>`:'';
+  const nsecs=open.filter(s=>s.sec!=='target'&&s.notes.length); // typed to-dos are added from the action line (24 Nov)
+  const notes=nsecs.length?`<div class="wm-tdb-card wm-tdb-notes"><div class="wm-tdb-hd static"><i class="fa-regular fa-note-sticky"></i><span class="nm"><b>Typed to-dos</b><span>Not given to anyone yet - add more on the action line with Trying or Future</span></span></div>${nsecs.map(s=>`<div class="wm-tdb-ns">${tag(s.sec)}<div class="wm-nt-list">${s.notes.map(n=>wmNoteRow(n,m)).join('')}</div></div>`).join('')}</div>`:'';
   return (old?`<div class="wm-oo-old"><div><b>To-do notes written earlier</b><div>${esc(old).replace(/\n/g,'<br>')}</div></div></div>`:'')
     +bar+`<div class="wm-tdb">${cards}${empty}${notes}</div>`;
 }
@@ -13055,16 +13057,25 @@ window.wmParse=function(){
   const r=wmParseText(inp.value), P=WM.picked;
   const mem=[...new Set([...r.mem,...P.mem])], due=r.due||P.due, recur=r.recur!=='none'?r.recur:P.recur;
   WM.parsed={title:r.title,mem,due,recur:due?recur:'none'};
-  const box=$('wmParsed');
+  const box=$('wmParsed'), sec=WM.tdSec||'target';
+  wmPaintCapSec(inp,sec);
   if(!inp.value.trim()&&!P.mem.length) box.innerHTML=`<span class="hint">Add people and dates now or later — <code>@Name</code>, <code>by Friday</code>, <code>in 3 days</code>, <code>every week</code>.</span>`;
   else box.innerHTML=mem.map(e=>`<span class="tok">${wmAvatar(wmName(e),20)} ${esc(wmName(e))} <i class="fa-solid fa-xmark x" onclick="wmDropMem('${esc(e)}')"></i></span>`).join('')+
     `<button class="ctl" onclick="wmPickPeople(WM.parsed.mem,'Assign to',m=>{WM.picked.mem=m;wmParse()})"><i class="fa-solid fa-plus" style="font-size:10px"></i> ${mem.length?'Person':'Assign to'}</button>`+
     `<span class="tok"><i class="fa-regular fa-calendar"></i><input type="date" min="${wmToday()}" value="${due||''}" onchange="WM.picked.due=this.value||null;wmParse()"></span>`+
     (due?`<span class="tok"><i class="fa-solid fa-repeat"></i><select onchange="WM.picked.recur=this.value;wmParse()">${Object.entries(WM_RECUR).map(([k,v])=>`<option value="${k}" ${recur===k?'selected':''}>${v}</option>`).join('')}</select></span>`:'')+
-    `<span class="tok wm-secpick" title="Which To-dos list it goes in">To-do <button type="button" class="${(WM.tdSec||'target')==='target'?'on':''}" onclick="WM.tdSec='target';wmParse();$('wmSmart').focus()">Target</button><button type="button" class="${WM.tdSec==='trying'?'on':''}" onclick="WM.tdSec='trying';wmParse();$('wmSmart').focus()">Trying</button><button type="button" class="${WM.tdSec==='future'?'on':''}" onclick="WM.tdSec='future';wmParse();$('wmSmart').focus()">Future</button></span>`+
-    `<span style="margin-left:auto">${mem.length?'Enter creates the task':'Enter saves it — assign later'}</span>`;
+    `<span style="margin-left:auto">${mem.length?'Enter creates the task':sec==='target'?'Enter saves it — assign later':'Enter adds it to Typed to-dos ('+(sec==='trying'?'Trying':'Future work')+') — @person makes it a task'}</span>`;
   wmSuggest();
 };
+/* 24 Nov: Target / Trying / Future sits on the action line (the owner's ask), so typed to-dos are added there
+   too: with Trying or Future picked and nobody named, Enter writes a typed to-do (a meeting note in that list);
+   with a person it is a task in that list, as before. With Target and nobody named it stays an unassigned line. */
+const WM_CAP_PH={target:'Add an action - @person, a date - then Enter…',trying:'Something to try - @person makes it a task - then Enter…',future:'Something for later - @person makes it a task - then Enter…'};
+function wmPaintCapSec(inp,sec){
+  const host=$('wmCapSec'); if(host) host.innerHTML=[['target','Target'],['trying','Trying'],['future','Future']].map(([k,l])=>`<button type="button" class="${sec===k?'on':''}" onclick="wmCapSec('${k}')">${l}</button>`).join('');
+  if(inp&&inp.placeholder!==WM_CAP_PH[sec]) inp.placeholder=WM_CAP_PH[sec];
+}
+window.wmCapSec=function(k){ WM.tdSec=k; wmParse(); const i=$('wmSmart'); if(i) i.focus(); };
 window.wmDropMem=function(e){ WM.picked.mem=WM.picked.mem.filter(x=>x!==e); const p=wmPerson(e), i=$('wmSmart'); if(p) i.value=i.value.replace(new RegExp('@('+wmTag(p)+'|'+p.name.split(' ')[0]+')\\b','i'),'').replace(/\s+/g,' '); wmParse(); };
 function wmSuggest(){
   const inp=$('wmSmart'), box=$('wmSugg'); if(!inp||!box) return;
@@ -13126,6 +13137,11 @@ async function wmAdd1(){
       await wmSetSec(data);
       WM.lastNew=data; WM.tab='pending';
       toast('Task created for '+c.mem.map(wmName).join(', '),'ok');
+    } else if(WM.tdSec==='trying'||WM.tdSec==='future'){
+      const body=($('wmSmart').value||'').replace(/\s+/g,' ').trim()||c.title;
+      const {error}=await sb.rpc('ops_note_add',{p_meeting:m.id,p_section:WM.tdSec,p_body:body}); if(error) throw error;
+      await wmReloadNotes();
+      toast('Added to Typed to-dos ('+(WM.tdSec==='trying'?'Trying':'Future work')+')','ok');
     } else {
       const {data,error}=await sb.rpc('ops_item_add',{p_meeting:m.id,p_item:c.title,p_ptask:null,p_owner:null,p_due:c.due||null}); if(error) throw error;
       await wmSetSec(data);
@@ -13927,6 +13943,8 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-tdb-tag.target{background:#EEEBFF;color:#5B4BE8}.wm-tdb-tag.trying{background:#E7F1FB;color:#3767DB}'
   +'.wm-tdb-ns{padding:6px 12px 4px;border-top:1px solid #F4F5F8}.wm-tdb-ns:first-of-type{border-top:0}.wm-tdb-ns .wm-nt-add{margin:4px 0 2px}'
   +'.wm-tdb-none{grid-column:1/-1}.wm-tdb-none .wm-td-empty{padding:12px}'
+  +'.wm-cap-in .wm-cap-sec{flex:none;display:inline-flex;align-items:center;margin:0 8px}'
+  +'@media(max-width:600px){.wm-ws-cap .wm-cap-in{flex-wrap:wrap;row-gap:6px}.wm-ws-cap .wm-cap-in input{flex:1 1 calc(100% - 30px);min-width:0}.wm-ws-cap .wm-cap-in .kbd{display:none}.wm-cap-in .wm-cap-sec{margin:0 0 0 23px}}'
 +'</style>';
 /* ===== Global first-login onboarding (full screen, no sidebar) ===== */
 async function renderOnboarding(){
