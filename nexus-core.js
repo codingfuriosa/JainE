@@ -14911,28 +14911,35 @@ function fhAllPrintHtml(data){
     +'<tfoot><tr><td colspan="3">Total</td><td class="r">'+total+'</td></tr></tfoot></table>'
     +noneNote+sections+'</body></html>';
 }
-window.fhPrintAll=async function(){
-  if(FH_ALL_BUSY||!fhCanTakeAll())return;
+/* The printout and the Excel file are run by two small shared runners, used by All Responses here and by
+   the System Feedbacks report: the caller says which button was pressed and how to make the thing. */
+async function fhPrintTab(btnId,makeHtml){
+  if(FH_ALL_BUSY)return;
   // The tab has to be opened here, inside the click: a tab opened after the data arrives is taken for
   // a pop-up and blocked. It is filled in once the responses are in.
   const w=window.open('','_blank');
   if(!w){toast('Your browser blocked the printout window. Allow pop-ups for this site, then press Print again.','warn');return;}
   try{w.document.write('<!doctype html><title>Preparing…</title><body style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#334155">Preparing the printout…</body>');}catch(e){}
-  FH_ALL_BUSY=true;fhAllBusy('fhAllPrintBtn',true,'Preparing…');
+  FH_ALL_BUSY=true;fhAllBusy(btnId,true,'Preparing…');
   try{
-    const data=await fhAllData();
+    const html=await makeHtml();
     if(w.closed)return;
-    w.document.open();w.document.write(fhAllPrintHtml(data));w.document.close();
+    w.document.open();w.document.write(html);w.document.close();
     w.focus();
     setTimeout(function(){try{w.print();}catch(e){}},600);
   }catch(e){
     try{w.close();}catch(_){}
     toast('Could not prepare the printout: '+((e&&e.message)||e),'err');
-  }finally{FH_ALL_BUSY=false;fhAllBusy('fhAllPrintBtn',false);}
+  }finally{FH_ALL_BUSY=false;fhAllBusy(btnId,false);}
+}
+window.fhPrintAll=function(){
+  if(!fhCanTakeAll())return;
+  return fhPrintTab('fhAllPrintBtn',async function(){return fhAllPrintHtml(await fhAllData());});
 };
 function fhAllBusy(id,on,label){
-  ['fhAllPrintBtn','fhAllXlsBtn'].forEach(function(x){const b=$(x);if(b)b.disabled=!!on;});
   const b=$(id);if(!b)return;
+  // Every button beside it (the pair share one container) is held while one of them works.
+  if(b.parentNode)b.parentNode.querySelectorAll('button').forEach(function(x){x.disabled=!!on;});
   const s=b.querySelector('span'), i=b.querySelector('i');
   if(on){
     b.dataset.lbl=s?s.textContent:'';b.dataset.ic=i?i.className:'';
@@ -15001,23 +15008,29 @@ function fhSheetName(title,used){
   used[n.toLowerCase()]=1;
   return n;
 }
-function fhAllWorkbook(XL,data){
-  const wb=XL.utils.book_new(), used={summary:1,'all answers':1};
-  const add=function(name,aoa){
-    const ws=XL.utils.aoa_to_sheet(aoa);
+// A workbook is a list of {name, rows}; column widths follow the longest of the first 200 rows.
+function fhSheetsWorkbook(XL,sheets){
+  const wb=XL.utils.book_new();
+  sheets.forEach(function(s){
+    const ws=XL.utils.aoa_to_sheet(s.rows);
     const cols=[];
-    aoa.slice(0,200).forEach(function(row){row.forEach(function(c,i){
+    s.rows.slice(0,200).forEach(function(row){row.forEach(function(c,i){
       const len=Math.min(String(c==null?'':c).length,60);
       cols[i]=Math.max(cols[i]||8,len+2);
     });});
     ws['!cols']=cols.map(function(w){return {wch:w};});
-    XL.utils.book_append_sheet(wb,ws,name);
-  };
-  add('Summary',fhSummaryTable(data));
-  data.forEach(function(d){add(fhSheetName(d.form.title,used),fhFormTable(d));});
-  add('All answers',fhFlatTable(data));
+    XL.utils.book_append_sheet(wb,ws,s.name);
+  });
   return wb;
 }
+function fhAllSheets(data){
+  const used={summary:1,'all answers':1};
+  const out=[{name:'Summary',rows:fhSummaryTable(data)}];
+  data.forEach(function(d){out.push({name:fhSheetName(d.form.title,used),rows:fhFormTable(d)});});
+  out.push({name:'All answers',rows:fhFlatTable(data)});
+  return out;
+}
+function fhAllWorkbook(XL,data){return fhSheetsWorkbook(XL,fhAllSheets(data));}
 // Only if the spreadsheet library cannot be fetched: the flat list as CSV, which Excel opens too. The
 // byte-order mark makes Excel read Hindi and other non-English text correctly; a cell starting with
 // = + - @ would be run as a formula by Excel, so it is given a leading quote.
@@ -15034,25 +15047,33 @@ function fhDownload(blob,name){
   document.body.appendChild(a);a.click();
   setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1500);
 }
-window.fhExportAll=async function(){
-  if(FH_ALL_BUSY||!fhCanTakeAll())return;
-  FH_ALL_BUSY=true;fhAllBusy('fhAllXlsBtn',true,'Preparing…');
+// make() returns {sheets:[{name,rows}], csv:rows, base:'File-name-start'}.
+async function fhExportFile(btnId,make){
+  if(FH_ALL_BUSY)return;
+  FH_ALL_BUSY=true;fhAllBusy(btnId,true,'Preparing…');
   try{
-    const data=await fhAllData();
+    const f=await make();
     const day=new Date().toLocaleDateString('en-CA');
     let XL=null;
     try{XL=await loadXLSX();}catch(e){XL=null;}
     if(XL){
-      const out=XL.write(fhAllWorkbook(XL,data),{bookType:'xlsx',type:'array'});
-      fhDownload(new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),'Feedback-Hub-responses-'+day+'.xlsx');
+      const out=XL.write(fhSheetsWorkbook(XL,f.sheets),{bookType:'xlsx',type:'array'});
+      fhDownload(new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),f.base+'-'+day+'.xlsx');
       toast('Excel file downloaded','ok');
     }else{
-      fhDownload(new Blob(['﻿'+fhCsv(fhFlatTable(data))],{type:'text/csv;charset=utf-8'}),'Feedback-Hub-responses-'+day+'.csv');
+      fhDownload(new Blob(['\uFEFF'+fhCsv(f.csv)],{type:'text/csv;charset=utf-8'}),f.base+'-'+day+'.csv');
       toast('The Excel maker could not load, so you got a CSV file instead. Excel opens it the same way.','warn');
     }
   }catch(e){
     toast('Could not prepare the file: '+((e&&e.message)||e),'err');
-  }finally{FH_ALL_BUSY=false;fhAllBusy('fhAllXlsBtn',false);}
+  }finally{FH_ALL_BUSY=false;fhAllBusy(btnId,false);}
+}
+window.fhExportAll=function(){
+  if(!fhCanTakeAll())return;
+  return fhExportFile('fhAllXlsBtn',async function(){
+    const data=await fhAllData();
+    return {sheets:fhAllSheets(data),csv:fhFlatTable(data),base:'Feedback-Hub-responses'};
+  });
 };
 window.fhToggleTextList=function(qid){
   const el=$('fhTextList_'+qid);if(!el)return;
@@ -15371,7 +15392,10 @@ async function sfManage(){
   const by={}; resp.forEach(function(r){ (by[r.item_id]=by[r.item_id]||[]).push(r); });
   SF_DATA={items:items,by:by};
   b.innerHTML='<div class="sf-bar"><div><h2>System Feedbacks</h2><p>New features and bug fixes by module, rated by Sales and Pre Sales. Only the Systems department sees the ratings.</p></div>'
-    +'<button class="btn btn-primary" onclick="sfOpenNew()"><i class="fa-solid fa-plus"></i> New System Feedback</button></div>'
+    +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    +'<div class="fh-row-actions"><button class="btn" id="sfRepPrintBtn" onclick="sfPrintReport()" title="A report of every rating and remark that came in, for printing or saving as PDF"><i class="fa-solid fa-print"></i> <span>Print report</span></button>'
+    +'<button class="btn" id="sfRepXlsBtn" onclick="sfExportReport()" title="Every rating and remark in one Excel file: by module, by feedback, and the full list"><i class="fa-solid fa-file-excel"></i> <span>Download Excel</span></button></div>'
+    +'<button class="btn btn-primary" onclick="sfOpenNew()"><i class="fa-solid fa-plus"></i> New System Feedback</button></div></div>'
     +'<div class="sf-tools">'
     +'<div class="sf-filter" id="sfKindF">'+['All'].concat(SF_KINDS).map(function(k){ return '<button data-k="'+k+'" class="'+(k===SF_FILTER?'on':'')+'" onclick="sfSetFilter(\''+k+'\')">'+(k==='All'?'All':k==='New Feature'?'New Features':'Bugs Fixed')+'</button>'; }).join('')+'</div>'
     +sfSearchBox('sfManageQ')+'</div>'
@@ -15407,6 +15431,108 @@ function sfSysRow(i,by){
     +'<span class="rt">'+(rs.length?'<b>'+avg.toFixed(1)+'</b> / 10 · '+rs.length:'No ratings')+'</span>'
     +'<i class="fa-solid fa-chevron-right go"></i></div>';
 }
+/* ---- Report: every rating that came in, to hand to a senior (24 Nov 2026) ----
+   For the Systems team only - the same people who can see the ratings at all. Both the printout and the
+   Excel file are made from one read of the three tables (in pages of 1000), so they cannot disagree, and
+   both are run by the same two runners as Feedback Hub's All Responses (fhPrintTab / fhExportFile). */
+function sfRaterDept(email){
+  const e=String(email||'').toLowerCase();
+  const p=(PEOPLE||[]).find(function(x){ return x.email&&x.email.toLowerCase()===e; });
+  return ((p&&p.depts)||[]).filter(function(d){ return d==='Sales'||d==='Pre Sales'; }).join(', ');
+}
+async function sfReportData(){
+  await getPeople(); await sfLoadMods();
+  const items=await fhFetchAll(function(){ return sb.schema('feedback').from('system_items').select('id,kind,title,description,executed_by,is_active,created_by,created_at,module_id').order('created_at',{ascending:false}).order('id',{ascending:false}); });
+  if(!items.length) throw new Error('There are no System Feedbacks yet.');
+  const rows=await fhFetchAll(function(){ return sb.schema('feedback').from('system_responses').select('id,item_id,rater_email,rating,remarks,submitted_at,updated_at').order('submitted_at',{ascending:true}).order('id',{ascending:true}); });
+  const by={}; rows.forEach(function(r){ (by[r.item_id]=by[r.item_id]||[]).push(r); });
+  // Modules as the page lists them (newest feedback first); the feedbacks of each newest first.
+  const mods=sfByModule(items).map(function(m){
+    return {id:m.id, name:m.name, entries:m.items.map(function(i){ return {item:i, ratings:by[i.id]||[]}; })};
+  });
+  return {mods:mods, ratings:rows};
+}
+function sfModRatings(m){ return [].concat.apply([],m.entries.map(function(e){ return e.ratings; })); }
+function sfAvg2(rs){ return rs.length?Math.round(sfAvg(rs)*100)/100:''; }
+function sfKindN(entries,newFeature){ return entries.filter(function(e){ return (e.item.kind==='New Feature')===newFeature; }).length; }
+function sfReportSheets(d){
+  const all=d.ratings, allEntries=[].concat.apply([],d.mods.map(function(m){ return m.entries; }));
+  const byMod=[['Module','New Features','Bugs Fixed','Feedbacks','Ratings','Average (out of 10)']];
+  d.mods.forEach(function(m){ const rs=sfModRatings(m); byMod.push([m.name,sfKindN(m.entries,true),sfKindN(m.entries,false),m.entries.length,rs.length,sfAvg2(rs)]); });
+  byMod.push(['Total',sfKindN(allEntries,true),sfKindN(allEntries,false),allEntries.length,all.length,sfAvg2(all)]);
+  const fbs=[['Module','Type','Feedback','Description','Executed by','Status','Posted by','Posted on','Ratings','Average (out of 10)']];
+  const rat=[['Module','Type','Feedback','Rated by','Department','Rating (out of 10)','Remarks','Date']];
+  d.mods.forEach(function(m){ m.entries.forEach(function(e){
+    const i=e.item;
+    fbs.push([m.name,i.kind,i.title,String(i.description||'').trim(),(i.executed_by||[]).map(nameOf).join(', '),i.is_active?'Active':'Archived',nameOf(i.created_by),fhStamp(i.created_at).slice(0,10),e.ratings.length,sfAvg2(e.ratings)]);
+    e.ratings.forEach(function(r){ rat.push([m.name,i.kind,i.title,nameOf(r.rater_email),sfRaterDept(r.rater_email),r.rating,String(r.remarks||'').trim(),fhStamp(r.updated_at||r.submitted_at)]); });
+  }); });
+  return {sheets:[{name:'By module',rows:byMod},{name:'Feedbacks',rows:fbs},{name:'All ratings',rows:rat}], csv:rat, base:'System-Feedbacks-report'};
+}
+// A function, not a constant: FH_PRINT_CSS belongs to another source file and is only read when needed.
+function sfPrintCss(){ return FH_PRINT_CSS+SF_PRINT_EXTRA; }
+const SF_PRINT_EXTRA=`
+.sfd{padding:7px 10px;color:#334155;white-space:pre-wrap;border-bottom:1px solid #e2e8f0}
+table.rt{width:100%;border-collapse:collapse}
+table.rt td{padding:5px 10px;vertical-align:top;border-top:1px solid #eef2f7}
+table.rt tr:first-child td{border-top:0}
+table.rt td.p{width:27%;font-weight:600}
+table.rt td.p small{display:block;font-weight:400;color:#64748b}
+table.rt td.s{width:10%;white-space:nowrap;font-weight:700}
+table.rt td.m{white-space:pre-wrap;word-break:break-word}
+table.rt td.d{width:13%;white-space:nowrap;color:#64748b;font-size:11px}
+.rh .when b{color:#0f172a}
+`;
+function sfReportHtml(d){
+  const plural=function(n,w){ return n+' '+w+(n===1?'':'s'); };
+  const allEntries=[].concat.apply([],d.mods.map(function(m){ return m.entries; }));
+  const raters={}; d.ratings.forEach(function(r){ raters[r.rater_email]=1; });
+  const avgAll=d.ratings.length?sfAvg(d.ratings).toFixed(1)+' / 10':'—';
+  const avgTxt=function(rs){ return rs.length?sfAvg(rs).toFixed(1)+' / 10':'—'; };
+  // A module nobody has rated gets no page: it stays in the overview and is named once under it.
+  const rated=d.mods.filter(function(m){ return sfModRatings(m).length; });
+  const unrated=d.mods.filter(function(m){ return !sfModRatings(m).length; });
+  const overview=d.mods.map(function(m){
+    const rs=sfModRatings(m);
+    return '<tr><td>'+esc(m.name)+'</td><td class="r">'+sfKindN(m.entries,true)+'</td><td class="r">'+sfKindN(m.entries,false)+'</td><td class="r">'+rs.length+'</td><td class="r">'+avgTxt(rs)+'</td></tr>';
+  }).join('');
+  const sections=rated.map(function(m){
+    const rs=sfModRatings(m);
+    const withR=m.entries.filter(function(e){ return e.ratings.length; }), without=m.entries.filter(function(e){ return !e.ratings.length; });
+    const blocks=withR.map(function(e){
+      const i=e.item;
+      return '<div class="resp"><div class="rh"><b>'+esc(i.title)+'</b><span class="who">'+esc(i.kind)+(i.executed_by&&i.executed_by.length?' · by '+esc(i.executed_by.map(nameOf).join(', ')):'')+(i.is_active?'':' · Archived')+'</span>'
+        +'<span class="when"><b>'+sfAvg(e.ratings).toFixed(1)+'</b> / 10 · '+plural(e.ratings.length,'rating')+'</span></div>'
+        +(String(i.description||'').trim()?'<div class="sfd">'+esc(String(i.description).trim())+'</div>':'')
+        +'<table class="rt">'+e.ratings.map(function(r){
+          const dept=sfRaterDept(r.rater_email);
+          return '<tr><td class="p">'+esc(nameOf(r.rater_email))+(dept?'<small>'+esc(dept)+'</small>':'')+'</td><td class="s">'+r.rating+' / 10</td>'
+            +'<td class="m">'+(esc(String(r.remarks||'').trim())||'<span class="nil">—</span>')+'</td><td class="d">'+esc(fhNiceWhen(r.updated_at||r.submitted_at))+'</td></tr>';
+        }).join('')+'</table></div>';
+    }).join('');
+    return '<section class="form"><h2>'+esc(m.name)+'</h2><div class="meta">'+plural(m.entries.length,'feedback')+' · '+plural(rs.length,'rating')+' · average '+avgTxt(rs)+'</div>'
+      +blocks
+      +(without.length?'<p class="none"><b>No ratings yet:</b> '+without.map(function(e){ return esc(e.item.title); }).join(' · ')+'</p>':'')+'</section>';
+  }).join('');
+  const note=!d.ratings.length?'<p class="none"><b>No ratings have come in yet.</b></p>'
+    :(unrated.length?'<p class="none"><b>No ratings yet:</b> '+unrated.map(function(m){ return esc(m.name); }).join(' · ')+'</p>':'');
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>System Feedbacks - report</title><style>'+sfPrintCss()+'</style></head><body>'
+    +'<div class="bar noprint"><span>The print window opens by itself. To keep a copy instead, choose “Save as PDF” as the printer.</span><button onclick="window.print()">Print</button></div>'
+    +'<header class="top"><div class="brand">THE JAIN GROUP</div><h1>System Feedbacks — report</h1>'
+    +'<div class="meta">Prepared by '+esc(nameOf(fhMe()))+' · '+esc(fhNiceWhen(new Date()))+' · '+plural(d.mods.length,'module')+' · '+plural(allEntries.length,'feedback')+' · '+plural(d.ratings.length,'rating')+' from '+plural(Object.keys(raters).length,'person').replace('persons','people')+' · average '+avgAll+'</div></header>'
+    +'<table class="toc"><thead><tr><th>Module</th><th class="r">New Features</th><th class="r">Bugs Fixed</th><th class="r">Ratings</th><th class="r">Average</th></tr></thead><tbody>'+overview+'</tbody>'
+    +'<tfoot><tr><td>Total</td><td class="r">'+sfKindN(allEntries,true)+'</td><td class="r">'+sfKindN(allEntries,false)+'</td><td class="r">'+d.ratings.length+'</td><td class="r">'+avgAll+'</td></tr></tfoot></table>'
+    +note+sections+'</body></html>';
+}
+window.sfPrintReport=function(){
+  if(!fhIsSystems()) return;
+  return fhPrintTab('sfRepPrintBtn',async function(){ return sfReportHtml(await sfReportData()); });
+};
+window.sfExportReport=function(){
+  if(!fhIsSystems()) return;
+  return fhExportFile('sfRepXlsBtn',async function(){ return sfReportSheets(await sfReportData()); });
+};
+
 /* ---- Systems: one module - its feedbacks, open first, then archived ---- */
 async function sfModPage(v,modId){
   v.innerHTML=FH_CSS+SF_CSS+'<div class="loader"><div class="spin"></div></div>';
