@@ -905,28 +905,35 @@ function fhAllPrintHtml(data){
     +'<tfoot><tr><td colspan="3">Total</td><td class="r">'+total+'</td></tr></tfoot></table>'
     +noneNote+sections+'</body></html>';
 }
-window.fhPrintAll=async function(){
-  if(FH_ALL_BUSY||!fhCanTakeAll())return;
+/* The printout and the Excel file are run by two small shared runners, used by All Responses here and by
+   the System Feedbacks report: the caller says which button was pressed and how to make the thing. */
+async function fhPrintTab(btnId,makeHtml){
+  if(FH_ALL_BUSY)return;
   // The tab has to be opened here, inside the click: a tab opened after the data arrives is taken for
   // a pop-up and blocked. It is filled in once the responses are in.
   const w=window.open('','_blank');
   if(!w){toast('Your browser blocked the printout window. Allow pop-ups for this site, then press Print again.','warn');return;}
   try{w.document.write('<!doctype html><title>Preparing…</title><body style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#334155">Preparing the printout…</body>');}catch(e){}
-  FH_ALL_BUSY=true;fhAllBusy('fhAllPrintBtn',true,'Preparing…');
+  FH_ALL_BUSY=true;fhAllBusy(btnId,true,'Preparing…');
   try{
-    const data=await fhAllData();
+    const html=await makeHtml();
     if(w.closed)return;
-    w.document.open();w.document.write(fhAllPrintHtml(data));w.document.close();
+    w.document.open();w.document.write(html);w.document.close();
     w.focus();
     setTimeout(function(){try{w.print();}catch(e){}},600);
   }catch(e){
     try{w.close();}catch(_){}
     toast('Could not prepare the printout: '+((e&&e.message)||e),'err');
-  }finally{FH_ALL_BUSY=false;fhAllBusy('fhAllPrintBtn',false);}
+  }finally{FH_ALL_BUSY=false;fhAllBusy(btnId,false);}
+}
+window.fhPrintAll=function(){
+  if(!fhCanTakeAll())return;
+  return fhPrintTab('fhAllPrintBtn',async function(){return fhAllPrintHtml(await fhAllData());});
 };
 function fhAllBusy(id,on,label){
-  ['fhAllPrintBtn','fhAllXlsBtn'].forEach(function(x){const b=$(x);if(b)b.disabled=!!on;});
   const b=$(id);if(!b)return;
+  // Every button beside it (the pair share one container) is held while one of them works.
+  if(b.parentNode)b.parentNode.querySelectorAll('button').forEach(function(x){x.disabled=!!on;});
   const s=b.querySelector('span'), i=b.querySelector('i');
   if(on){
     b.dataset.lbl=s?s.textContent:'';b.dataset.ic=i?i.className:'';
@@ -995,23 +1002,29 @@ function fhSheetName(title,used){
   used[n.toLowerCase()]=1;
   return n;
 }
-function fhAllWorkbook(XL,data){
-  const wb=XL.utils.book_new(), used={summary:1,'all answers':1};
-  const add=function(name,aoa){
-    const ws=XL.utils.aoa_to_sheet(aoa);
+// A workbook is a list of {name, rows}; column widths follow the longest of the first 200 rows.
+function fhSheetsWorkbook(XL,sheets){
+  const wb=XL.utils.book_new();
+  sheets.forEach(function(s){
+    const ws=XL.utils.aoa_to_sheet(s.rows);
     const cols=[];
-    aoa.slice(0,200).forEach(function(row){row.forEach(function(c,i){
+    s.rows.slice(0,200).forEach(function(row){row.forEach(function(c,i){
       const len=Math.min(String(c==null?'':c).length,60);
       cols[i]=Math.max(cols[i]||8,len+2);
     });});
     ws['!cols']=cols.map(function(w){return {wch:w};});
-    XL.utils.book_append_sheet(wb,ws,name);
-  };
-  add('Summary',fhSummaryTable(data));
-  data.forEach(function(d){add(fhSheetName(d.form.title,used),fhFormTable(d));});
-  add('All answers',fhFlatTable(data));
+    XL.utils.book_append_sheet(wb,ws,s.name);
+  });
   return wb;
 }
+function fhAllSheets(data){
+  const used={summary:1,'all answers':1};
+  const out=[{name:'Summary',rows:fhSummaryTable(data)}];
+  data.forEach(function(d){out.push({name:fhSheetName(d.form.title,used),rows:fhFormTable(d)});});
+  out.push({name:'All answers',rows:fhFlatTable(data)});
+  return out;
+}
+function fhAllWorkbook(XL,data){return fhSheetsWorkbook(XL,fhAllSheets(data));}
 // Only if the spreadsheet library cannot be fetched: the flat list as CSV, which Excel opens too. The
 // byte-order mark makes Excel read Hindi and other non-English text correctly; a cell starting with
 // = + - @ would be run as a formula by Excel, so it is given a leading quote.
@@ -1028,25 +1041,33 @@ function fhDownload(blob,name){
   document.body.appendChild(a);a.click();
   setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1500);
 }
-window.fhExportAll=async function(){
-  if(FH_ALL_BUSY||!fhCanTakeAll())return;
-  FH_ALL_BUSY=true;fhAllBusy('fhAllXlsBtn',true,'Preparing…');
+// make() returns {sheets:[{name,rows}], csv:rows, base:'File-name-start'}.
+async function fhExportFile(btnId,make){
+  if(FH_ALL_BUSY)return;
+  FH_ALL_BUSY=true;fhAllBusy(btnId,true,'Preparing…');
   try{
-    const data=await fhAllData();
+    const f=await make();
     const day=new Date().toLocaleDateString('en-CA');
     let XL=null;
     try{XL=await loadXLSX();}catch(e){XL=null;}
     if(XL){
-      const out=XL.write(fhAllWorkbook(XL,data),{bookType:'xlsx',type:'array'});
-      fhDownload(new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),'Feedback-Hub-responses-'+day+'.xlsx');
+      const out=XL.write(fhSheetsWorkbook(XL,f.sheets),{bookType:'xlsx',type:'array'});
+      fhDownload(new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),f.base+'-'+day+'.xlsx');
       toast('Excel file downloaded','ok');
     }else{
-      fhDownload(new Blob(['﻿'+fhCsv(fhFlatTable(data))],{type:'text/csv;charset=utf-8'}),'Feedback-Hub-responses-'+day+'.csv');
+      fhDownload(new Blob(['\uFEFF'+fhCsv(f.csv)],{type:'text/csv;charset=utf-8'}),f.base+'-'+day+'.csv');
       toast('The Excel maker could not load, so you got a CSV file instead. Excel opens it the same way.','warn');
     }
   }catch(e){
     toast('Could not prepare the file: '+((e&&e.message)||e),'err');
-  }finally{FH_ALL_BUSY=false;fhAllBusy('fhAllXlsBtn',false);}
+  }finally{FH_ALL_BUSY=false;fhAllBusy(btnId,false);}
+}
+window.fhExportAll=function(){
+  if(!fhCanTakeAll())return;
+  return fhExportFile('fhAllXlsBtn',async function(){
+    const data=await fhAllData();
+    return {sheets:fhAllSheets(data),csv:fhFlatTable(data),base:'Feedback-Hub-responses'};
+  });
 };
 window.fhToggleTextList=function(qid){
   const el=$('fhTextList_'+qid);if(!el)return;
