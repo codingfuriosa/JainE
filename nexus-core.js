@@ -11413,7 +11413,7 @@ function wmItem(r){
   return {id:r.id, meeting:r.meeting_id, date:r.meeting_date, kind:r.kind||'Meeting', t:r.item||'', linked, draft:!!r.is_draft,
     ptask:r.ptask_id, st, due:linked?r.task_due:r.due_date, dueRaw:r.due_raw,
     mem:linked?(r.task_assignees||[]):[], owner:r.owner||r.owner_raw||'',
-    doneOn:linked?(r.task_approved_at||r.task_completed_at):r.done_at, recur:r.task_recur, delegator:r.task_delegator};
+    doneOn:linked?(r.task_approved_at||r.task_completed_at):r.done_at, recur:r.task_recur, delegator:r.task_delegator, sec:r.todo_section||null};
 }
 const wmOpen=it=>it.st!=='done';
 const wmOverdue=it=>wmOpen(it)&&it.due&&String(it.due).slice(0,10)<wmToday();
@@ -11462,6 +11462,10 @@ const wmSeries=kind=>(WM.meetings||[]).filter(m=>m.kind===kind);
 
 VIEWS.weekly_status=async function(v){
   setCrumb(['Overview',WM_NAME]);
+  // JainE's own left panel retracts when the meetings page opens, so the meetings workspace (which has its
+  // own sidebar) gets the width; the menu button (☰) brings it back. Only the page is changed - the saved
+  // choice for other pages (localStorage nav_closed) is left as it is. Phones and tablets already hide it.
+  if(window.innerWidth>1024) document.body.classList.add('nav-closed');
   // The handoff's typeface, loaded once.
   if(!document.getElementById('wmFont')){ const l=document.createElement('link'); l.id='wmFont'; l.rel='stylesheet'; l.href='https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap'; document.head.appendChild(l); }
   WM.ro=!canEditWeeklyStatus();   // a person on the meeting reads it; the starter edits
@@ -11491,7 +11495,7 @@ VIEWS.weekly_status=async function(v){
    * Starting or scheduling a new meeting needs Weekly Status itself (WM.ro is true without it).
    Ticking or approving a task follows Accountability's own rule (only who assigned it), so those stay. */
 const WM_NEW=/\bwm(?:StartMeeting|ScheduleMeeting|MeetingSave)\b/;
-const WM_EDIT=/\bwm(?:EditItem|NoteEdit|SeriesStop|EndMeeting|Reopen|AgStart|AgStep|AgPause|AgAdd|AgEdit|AgEditSave|AgStepAdd|AgStepAddSave|AgStepDel|AgMins|AgNoteInput|AgNoteSave|KpiAdd|KpiInput|KpiSave|KpiColAdd|KpiColDel|KpiColName|KpiCell|OoAdd|NoteAdd|NoteInput|NoteSave|NoteSolve|NoteTask|NoteTaskSave|NoteDel|Reschedule|RescheduleSave|EditAttendance|SaveAttendance|Parse|Key|DropMem|PickPeople|SelAll|Promote|BulkPeople|BulkDue|DraftText|DraftDue|DraftDelete|Choose|Add1)\b/;
+const WM_EDIT=/\bwm(?:EditItem|NoteEdit|SeriesStop|EndMeeting|Reopen|AgStart|AgStep|AgPause|AgAdd|AgEdit|AgEditSave|AgStepAdd|AgStepAddSave|AgStepDel|AgMins|AgNoteInput|AgNoteSave|KpiAdd|KpiInput|KpiSave|KpiColAdd|KpiColDel|KpiColName|KpiCell|OoAdd|NoteAdd|NoteInput|NoteSave|NoteSolve|NoteTask|NoteTaskSave|NoteDel|TdMove|Reschedule|RescheduleSave|EditAttendance|SaveAttendance|Parse|Key|DropMem|PickPeople|SelAll|Promote|BulkPeople|BulkDue|DraftText|DraftDue|DraftDelete|Choose|Add1)\b/;
 function wmCanEdit(id){ const m=wmMeeting(id); return !m||m.can_edit!==false; }
 function wmLockIn(scope,re){
   if(!scope) return;
@@ -12431,7 +12435,7 @@ function wmTabOf(k){ return k==='kpi'?'kpi':k==='todos'?'td':k==='oo'?'oo':'act'
 function wmPaintWTabs(){
   const h=$('wmWTabs'), m=wmMeeting(WM.cur); if(!h||!m) return;
   if(!['act','kpi','td','oo'].includes(WM.wtab)) WM.wtab='act';
-  const td=WM_TD_SECS.flatMap(s=>wmNotesFor(m,s)).filter(n=>!n.solved).length, oo=['opportunity','obstacle'].flatMap(s=>wmNotesFor(m,s)).filter(n=>!n.solved).length;
+  const td=WM_TD_SECS.flatMap(s=>wmNotesFor(m,s)).filter(n=>!n.solved).length+WM_TD_SECS.flatMap(s=>wmTdTasks(m,s)).filter(wmOpen).length, oo=['opportunity','obstacle'].flatMap(s=>wmNotesFor(m,s)).filter(n=>!n.solved).length;
   const tb=(k,ic,l,n,sh)=>`<button class="wm-wtab ${WM.wtab===k?'on':''}" role="tab" aria-selected="${WM.wtab===k}" title="${l}" onclick="wmWTab('${k}')"><i class="fa-solid ${ic}"></i><span class="lg">${l}</span><span class="sh">${sh||l}</span>${n?`<em>${n}</em>`:''}</button>`;
   h.innerHTML=tb('act','fa-list-check','Actions',0)+tb('kpi','fa-chart-line','KPIs',0)+tb('td','fa-bullseye','To-dos',td)+tb('oo','fa-scale-balanced','Opportunities & Obstacles',oo,'O&amp;O')+'<span class="wm-bd-stats" id="wmBdStats"></span>';
   wmPaintBoardStats();
@@ -12514,17 +12518,52 @@ const WM_TD_SECS=WM_TD.map(x=>x[0]);
 const WM_SEC_L={target:'target',trying:'thing to try',obstacle:'obstacle',opportunity:'opportunity'};
 const WM_SEC_H={target:'Target',trying:'Trying',obstacle:'Obstacle',opportunity:'Opportunity'};
 const wmIsTd=n=>WM_TD_SECS.includes(n&&n.section);
+/* Tasks in the To-dos lists (24 Nov): every task given in this meeting shows under Target for the coming
+   week unless it was put under Trying - when it was typed (the To-do switch on the action line) or by
+   dragging it across (or "Move to"). A task still open from an earlier meeting of the same kind carries
+   over, marked "From <date>", like a to-do note. A task made from a to-do note is shown by that note, not
+   twice. Only the starter and editors can move a task (ops_item_set_section checks the same). */
+function wmTdTasks(m,sec){
+  const fromNote=new Set((WM.notes||[]).filter(n=>n.ptask_id&&WM_TD_SECS.includes(n.section)).map(n=>n.ptask_id));
+  const ok=it=>it.linked&&!it.draft&&!fromNote.has(it.ptask)&&(it.sec||'target')===sec;
+  const here=WM.items.filter(it=>it.meeting===m.id&&ok(it));
+  const carried=WM.items.filter(it=>it.meeting!==m.id&&it.kind===m.kind&&String(it.date)<String(m.meeting_date)&&wmOpen(it)&&ok(it));
+  return here.concat(carried).sort((a,b)=>(wmOpen(b)-wmOpen(a))||(String(a.date)<String(b.date)?-1:String(a.date)>String(b.date)?1:a.id-b.id));
+}
+function wmTdTaskRow(it,m){
+  const from=it.meeting!==m.id, ed=wmCanEdit(it.meeting)&&wmCanEdit(m.id)&&!WM.ro, cur=it.sec||'target', other=cur==='target'?'trying':'target';
+  const pill=it.st==='done'?['y','Done']:it.st==='awaiting'?['a','Awaiting approval']:wmOverdue(it)?['n','Overdue']:['p','To do'];
+  const due=it.due?String(it.due).slice(0,10):'', mine=wmIsMe(it.delegator);
+  return `<div class="wm-nt wm-tdt ${it.st==='done'?'solved':''}" data-id="${it.id}" ${ed?`draggable="true" ondragstart="wmTdDrag(event,${it.id})" ondragend="wmTdDragEnd()" title="Drag to the other list"`:''}>
+    <button class="ck" ${mine?`onclick="wmToggle(${it.id})" title="${it.st==='done'?'Reopen':'Mark finished'}"`:`disabled title="Only ${esc(wmName(it.delegator))}, who gave this task, can finish it"`}><i class="fa-solid fa-check"></i></button>
+    <div class="tx"><div class="bd"><i class="fa-solid fa-list-check wm-tdt-ic" title="A task"></i>${esc(it.t)}</div>
+      <div class="mt"><span class="st ${pill[0]}">${pill[1]}</span><span>${it.mem.map(e=>esc(wmFirst(e))).join(', ')}</span>${due?`<span>${wmOverdue(it)?'was due':'due'} ${esc(wmFmtS(due))}</span>`:''}${from?`<span class="fr" onclick="wmOpenMeeting(${it.meeting})">From ${esc(wmFmtS(it.date))}</span>`:''}
+        ${ed?`<button class="wm-quiet wm-tdmv" onclick="wmTdMove(${it.id},'${other}')"><i class="fa-solid fa-arrow-right-arrow-left"></i> Move to ${other==='trying'?'Trying':'Target'}</button>`:''}</div></div></div>`;
+}
 function wmTdHtml(m){
   const old=String((m.agenda_notes||{}).todos||'').trim();
   return `${old?`<div class="wm-oo-old"><div><b>To-do notes written earlier</b><div>${esc(old).replace(/\n/g,'<br>')}</div></div></div>`:''}
-  <div class="wm-oo" style="margin-top:0">${WM_TD.map(([sec,l,i,ph])=>{ const list=wmNotesFor(m,sec), open=list.filter(n=>!n.solved).length;
-    return `<div class="wm-oo-box wm-td-box ${sec}"><div class="wm-sec"><span><i class="fa-solid ${i}" style="margin-right:6px"></i>${l}</span><span class="r wm-mute wm-nst">${open} to do</span></div>
+  <div class="wm-oo" style="margin-top:0">${WM_TD.map(([sec,l,i,ph])=>{ const list=wmNotesFor(m,sec), tasks=wmTdTasks(m,sec), open=list.filter(n=>!n.solved).length+tasks.filter(wmOpen).length;
+    return `<div class="wm-oo-box wm-td-box ${sec}" ondragover="wmTdOver(event,this)" ondragleave="if(!this.contains(event.relatedTarget))this.classList.remove('drop')" ondrop="wmTdDrop(event,'${sec}',this)"><div class="wm-sec"><span><i class="fa-solid ${i}" style="margin-right:6px"></i>${l}</span><span class="r wm-mute wm-nst">${open} to do</span></div>
       <input class="wm-nt-add" id="wmNtAdd_${sec}" placeholder="${ph}" onkeydown="if(event.key==='Enter'){event.preventDefault();wmNoteAdd('${sec}',this)}">
-      <div class="wm-nt-list">${list.map(n=>wmNoteRow(n,m)).join('')||'<div class="wm-mute" style="font-size:12.5px;padding:8px 2px">Nothing yet.</div>'}</div></div>`; }).join('')}</div>`;
+      <div class="wm-nt-list">${tasks.map(it=>wmTdTaskRow(it,m)).join('')}${list.map(n=>wmNoteRow(n,m)).join('')}${!tasks.length&&!list.length?`<div class="wm-mute wm-td-empty">${sec==='trying'?'Nothing yet - drag a task here, or type one.':'Nothing yet.'}</div>`:''}</div></div>`; }).join('')}</div>`;
 }
+// Saving which list a new line goes in (Target needs nothing: an empty list means Target).
+async function wmSetSec(id){ if(id&&(WM.tdSec||'target')==='trying'){ const {error}=await sb.rpc('ops_item_set_section',{p_id:id,p_section:'trying'}); if(error) throw error; } }
+window.wmTdDrag=function(e,id){ WM.tdDrag=id; try{ e.dataTransfer.setData('text/plain',String(id)); e.dataTransfer.effectAllowed='move'; }catch(_){} if(e.currentTarget&&e.currentTarget.classList) e.currentTarget.classList.add('dragging'); };
+window.wmTdDragEnd=function(){ WM.tdDrag=null; document.querySelectorAll('.wm-td-box.drop,.wm-tdt.dragging').forEach(x=>x.classList.remove('drop','dragging')); };
+window.wmTdOver=function(e,el){ if(WM.tdDrag==null) return; e.preventDefault(); try{ e.dataTransfer.dropEffect='move'; }catch(_){} el.classList.add('drop'); };
+window.wmTdDrop=function(e,sec,el){ if(WM.tdDrag==null) return; e.preventDefault(); el.classList.remove('drop'); const id=WM.tdDrag; wmTdDragEnd(); wmTdMove(id,sec); };
+window.wmTdMove=async function(id,sec){
+  const it=wmFind(id); if(!it||(it.sec||'target')===sec) return;
+  if(!wmCanEdit(it.meeting)||!wmCanEdit(WM.cur)||WM.ro){ toast('Only whoever started that meeting, or one of its editors, can move this task','warn'); return; }
+  const was=it.sec; it.sec=sec; wmRepaintTd(); wmPaintWTabs();
+  try{ const {error}=await sb.rpc('ops_item_set_section',{p_id:id,p_section:sec}); if(error) throw error; toast('Moved to '+(sec==='trying'?'Trying':'Target')+' for the coming week','ok'); }
+  catch(e){ it.sec=was; wmRepaintTd(); wmPaintWTabs(); wmErr('Could not move the task',e); }
+};
 function wmRepaintTd(focusSec){
   const m=wmMeeting(WM.cur), c=$('wmTdCard'); if(!m||!c) return;
-  const open=WM_TD_SECS.flatMap(s=>wmNotesFor(m,s)).filter(n=>!n.solved).length;
+  const open=WM_TD_SECS.flatMap(s=>wmNotesFor(m,s)).filter(n=>!n.solved).length+WM_TD_SECS.flatMap(s=>wmTdTasks(m,s)).filter(wmOpen).length;
   c.innerHTML=wmCardHead('td','wmTdCard','fa-list-check','To-dos for the coming week',`<span class="wm-fh-n">${open} to do</span>`)+`<div class="wm-bd-in"><div class="wm-kpi-grey" style="margin:8px 0 4px">A to-do not ticked comes back at the next ${esc(m.kind||'')} meeting.</div>${wmTdHtml(m)}</div>`;
   c.classList.toggle('folded',wmFolded('td'));
   if(focusSec){ const i=$('wmNtAdd_'+focusSec); if(i) i.focus(); }
@@ -12569,6 +12608,7 @@ window.wmNoteTaskSave=async function(id){
     const tid=await wmCreateTask(title,mem,due,'none');
     const r1=await sb.rpc('ops_item_add',{p_meeting:m.id,p_item:title,p_ptask:tid,p_owner:mem.map(wmName).join(', '),p_due:due}); if(r1.error) throw r1.error;
     const r2=await sb.rpc('ops_note_link_task',{p_id:id,p_ptask:tid}); if(r2.error) throw r2.error;
+    { const nn=(WM.notes||[]).find(x=>x.id===id); if(nn&&nn.section==='trying'&&r1.data){ const r3=await sb.rpc('ops_item_set_section',{p_id:r1.data,p_section:'trying'}); if(r3.error) throw r3.error; } }
     closeModal(); toast('Task created for '+mem.map(wmName).join(', '),'ok');
     await Promise.all([wmReload(),wmReloadNotes()]); wmCounts(); wmPaintOo(); wmPaintTabs(); wmPaintNav();
   }catch(e){ b.disabled=false; wmErr('Could not finish that',e); }
@@ -12828,7 +12868,7 @@ window.wmNoteEditSave=async function(id){
   catch(e){ b.disabled=false; wmErr('Could not save the note',e); }
 };
 function wmFind(id){ return WM.items.find(it=>it.id===id); }
-async function wmAfterWrite(){ await wmReload(); wmCounts(); wmPaintTabs(); wmPaintNav(); }
+async function wmAfterWrite(){ await wmReload(); wmCounts(); wmPaintTabs(); wmPaintNav(); if($('wmTdCard')) wmRepaintTd(); }
 window.wmSetLegacy=async function(id,status,el){
   if(el) el.disabled=true;
   try{
@@ -12958,6 +12998,7 @@ window.wmParse=function(){
     `<button class="ctl" onclick="wmPickPeople(WM.parsed.mem,'Assign to',m=>{WM.picked.mem=m;wmParse()})"><i class="fa-solid fa-plus" style="font-size:10px"></i> ${mem.length?'Person':'Assign to'}</button>`+
     `<span class="tok"><i class="fa-regular fa-calendar"></i><input type="date" min="${wmToday()}" value="${due||''}" onchange="WM.picked.due=this.value||null;wmParse()"></span>`+
     (due?`<span class="tok"><i class="fa-solid fa-repeat"></i><select onchange="WM.picked.recur=this.value;wmParse()">${Object.entries(WM_RECUR).map(([k,v])=>`<option value="${k}" ${recur===k?'selected':''}>${v}</option>`).join('')}</select></span>`:'')+
+    `<span class="tok wm-secpick" title="Which To-dos list it goes in">To-do <button type="button" class="${(WM.tdSec||'target')==='target'?'on':''}" onclick="WM.tdSec='target';wmParse();$('wmSmart').focus()">Target</button><button type="button" class="${WM.tdSec==='trying'?'on':''}" onclick="WM.tdSec='trying';wmParse();$('wmSmart').focus()">Trying</button></span>`+
     `<span style="margin-left:auto">${mem.length?'Enter creates the task':'Enter saves it — assign later'}</span>`;
   wmSuggest();
 };
@@ -13019,14 +13060,16 @@ async function wmAdd1(){
     if(c.mem.length){
       const tid=await wmCreateTask(c.title,c.mem,c.due,c.recur);
       const {data,error}=await sb.rpc('ops_item_add',{p_meeting:m.id,p_item:c.title,p_ptask:tid,p_owner:c.mem.map(wmName).join(', '),p_due:c.due||null}); if(error) throw error;
+      await wmSetSec(data);
       WM.lastNew=data; WM.tab='pending';
       toast('Task created for '+c.mem.map(wmName).join(', '),'ok');
     } else {
       const {data,error}=await sb.rpc('ops_item_add',{p_meeting:m.id,p_item:c.title,p_ptask:null,p_owner:null,p_due:c.due||null}); if(error) throw error;
+      await wmSetSec(data);
       WM.lastDraft=data; if(c.recur&&c.recur!=='none') WM.draftRecur[data]=c.recur;
     }
     $('wmSmart').value=''; WM.picked={mem:[],due:null,recur:'none'};
-    await wmReload(); wmCounts(); wmParse(); wmPaintDrafts(); wmPaintTabs(); wmPaintNav();
+    await wmReload(); wmCounts(); wmParse(); wmPaintDrafts(); wmPaintTabs(); wmPaintNav(); if($('wmTdCard')) wmRepaintTd();
     $('wmSmart').focus();
   }catch(e){ wmErr('Could not finish that',e); }
   finally{ WM.busy=false; }
@@ -13096,7 +13139,7 @@ window.wmPromote=async function(ids){
     }
     toast(made>1?made+' tasks created':'Task created for '+lastNames,'ok');
   }catch(e){ wmErr((made?made+' created, then could not create the rest':'Could not create the tasks'),e); }
-  finally{ WM.busy=false; WM.tab='pending'; await wmReload(); wmCounts(); wmPaintDrafts(); wmPaintTabs(); wmPaintNav(); }
+  finally{ WM.busy=false; WM.tab='pending'; await wmReload(); wmCounts(); wmPaintDrafts(); wmPaintTabs(); wmPaintNav(); if($('wmTdCard')) wmRepaintTd(); }
 };
 
 // One people picker for the typing line, one draft, or several drafts at once. Not yourself, unless you
@@ -13742,6 +13785,18 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-agseg .seg:focus-visible{outline:2px solid #5B4BE8;outline-offset:2px}'
   +'@media(max-width:700px){.mt-shell .wm-hd2 .wm-t2{margin-left:0!important}.wm-hd2 h2{font-size:20px!important}.wm-more-panel{position:fixed;left:16px;right:16px;top:auto;width:auto;max-width:none;margin-top:8px}}'
   +'.wm-busy{opacity:.45;pointer-events:none;cursor:progress}.wm-busy.bx{border-style:dashed!important}'
++'/* tasks in the To-dos lists, drag between them, the To-do switch on the action line */'
+  +'.wm-tdt[draggable=true]{cursor:grab}.wm-tdt.dragging{opacity:.4}'
+  +'.wm-td-box.drop{outline:2px dashed #5B4BE8;outline-offset:2px;background:#F4F2FF}'
+  +'.wm-tdt-ic{font-size:10px;color:#5B4BE8;margin-right:6px;vertical-align:1px}'
+  +'.wm-nt .st.p{background:#F0F1F5;color:#5D6378}.wm-nt .st.a{background:#FFF1E2;color:#C46E12}'
+  +'.wm-nt .ck:disabled{cursor:default;opacity:.5}'
+  +'.wm-tdmv{font-size:12px;color:#5B4BE8!important;opacity:0;transition:opacity .15s}.wm-tdt:hover .wm-tdmv,.wm-tdmv:focus{opacity:1}'
+  +'.wm-td-empty{font-size:12.5px;padding:10px 2px}'
+  +'.wm-secpick{gap:0!important;border:1px solid #E3E5EC;border-radius:20px;padding:2px;background:#fff;font-size:12px;color:#7A8095}'
+  +'.wm-secpick button{border:0;background:none;font:inherit;font-size:12px;font-weight:700;color:#6B7083;padding:2px 9px;border-radius:20px;cursor:pointer;margin-left:2px}'
+  +'.wm-secpick button.on{background:#5B4BE8;color:#fff}'
+  +'@media(hover:none){.wm-tdmv{opacity:1}}'
 +'</style>';
 /* ===== Global first-login onboarding (full screen, no sidebar) ===== */
 async function renderOnboarding(){
