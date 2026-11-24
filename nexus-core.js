@@ -12563,7 +12563,12 @@ function wmTdTaskRow(it,m){
 }
 // Tasks in a To-dos list look exactly like the Actions task list: grouped by person, the same row (tick,
 // title, details, status, Approve / Send back), each row draggable to the other list.
-/* The To-dos tab as one grid (24 Nov): a row per person, so each person's Target, Trying and Future work
+/* 24 Nov, later: denser (the owner's pick, option A of todos_prototypes.html) - each task is one line
+   (title cut with "...", full text on hover; From date, who else, status on the same line), the person is a
+   slim heading line across all three sections instead of a tall left column, so the same person still sits
+   on the same line in every section, and "Move to..." floats over the row on hover instead of taking a line.
+   About three times as many tasks fit on a screen.
+   The To-dos tab as one grid (24 Nov): a row per person, so each person's Target, Trying and Future work
    tasks sit on the same line, and a last row for typed to-dos (Trying and Future work; Target is tasks
    only). Every cell takes a dragged task (into that list, same person). Each of the three sections folds
    to a narrow strip with its count when its header is clicked; folded sections are remembered here. */
@@ -12578,21 +12583,21 @@ function wmTdWrap(it,m,k){
 function wmTdHtml(m){
   const old=String((m.agenda_notes||{}).todos||'').trim(), fold=wmTdFoldState();
   const secs=WM_TD.map(([sec,l,i,ph])=>({sec,l,i,ph,tasks:wmTdTasks(m,sec),notes:sec==='target'?[]:wmNotesFor(m,sec),off:!!fold[sec]}));
-  const cols='minmax(140px,190px) '+secs.map(s=>s.off?'46px':'minmax(0,1fr)').join(' ');
+  const cols=secs.map(s=>s.off?'46px':'minmax(0,1fr)').join(' ');
   const open=secs.filter(s=>!s.off), allOff=!open.length;
   const keys=[...new Set(open.flatMap(s=>s.tasks.flatMap(wmWhoKeys)))].sort((x,y)=>wmKeyName(x)<wmKeyName(y)?-1:1);
   const drop=s=>`ondragover="wmTdOver(event,this)" ondragleave="if(!this.contains(event.relatedTarget))this.classList.remove('drop')" ondrop="wmTdDrop(event,'${s.sec}',this)"`;
   const cell=(s,inner,dz,none)=>`<div class="wm-tdg-c ${s.sec} ${s.off?'off':''} ${none?'none':''}" data-l="${esc(s.l)}" ${dz&&!s.off?drop(s):''}>${s.off?'':inner}</div>`;
-  const head=`<div class="wm-tdg-h wm-tdg-p">Person</div>`+secs.map(s=>{ const open=s.tasks.filter(wmOpen).length+s.notes.filter(n=>!n.solved).length;
+  const head=secs.map(s=>{ const open=s.tasks.filter(wmOpen).length+s.notes.filter(n=>!n.solved).length;
     return `<button type="button" class="wm-tdg-h ${s.sec} ${s.off?'off':''}" onclick="wmTdFold('${s.sec}')" aria-expanded="${!s.off}" title="${s.off?'Show':'Fold'} ${esc(s.l)}"><i class="fa-solid ${s.i}"></i><span class="t">${esc(s.l)}</span><em>${open}</em><i class="fa-solid fa-chevron-${s.off?'right':'left'} chev"></i></button>`; }).join('');
   const rows=keys.map(k=>{ const n=secs.reduce((a,s)=>a+s.tasks.filter(it=>wmWhoKeys(it).includes(k)&&wmOpen(it)).length,0);
-    return `<div class="wm-tdg-p who">${wmAvatar(wmKeyName(k),28)}<div><b>${esc(wmKeyName(k))}</b><span>${esc(wmKeyDept(k))}</span><span class="cnt">${n} to do</span></div></div>`
+    return `<div class="wm-tdg-who">${wmAvatar(wmKeyName(k),20)}<b>${esc(wmKeyName(k))}</b><span>${esc(wmKeyDept(k))}</span><span class="cnt">${n} to do</span></div>`
       +secs.map(s=>{ const mine=s.tasks.filter(it=>wmWhoKeys(it).includes(k)); return cell(s,`<div class="wm-v6">${mine.map(it=>wmTdWrap(it,m,k)).join('')}</div>`,true,!mine.length); }).join(''); }).join('');
-  const empty=keys.length?'':`<div class="wm-tdg-p who wm-tdg-none"><span>No tasks yet</span></div>`+secs.map(s=>cell(s,`<div class="wm-mute wm-td-empty">${s.sec==='target'?'Every task given in this meeting shows here.':'Drag a task here.'}</div>`,true)).join('');
-  const noteRow=`<div class="wm-tdg-p who wm-tdg-notes"><i class="fa-regular fa-note-sticky"></i><div><b>Typed to-dos</b><span>Not given to anyone yet</span></div></div>`
+  const empty=keys.length?'':`<div class="wm-tdg-who wm-tdg-none"><span>No tasks yet</span></div>`+secs.map(s=>cell(s,`<div class="wm-mute wm-td-empty">${s.sec==='target'?'Every task given in this meeting shows here.':'Drag a task here.'}</div>`,true)).join('');
+  const noteRow=`<div class="wm-tdg-who wm-tdg-notes"><i class="fa-regular fa-note-sticky"></i><b>Typed to-dos</b><span>Not given to anyone yet</span></div>`
     +secs.map(s=>cell(s,s.sec==='target'?'<div class="wm-mute wm-td-empty">Tasks only</div>':`<input class="wm-nt-add" id="wmNtAdd_${s.sec}" placeholder="${esc(s.ph)}" onkeydown="if(event.key==='Enter'){event.preventDefault();wmNoteAdd('${s.sec}',this)}"><div class="wm-nt-list">${s.notes.map(n=>wmNoteRow(n,m)).join('')}</div>`,false)).join('');
   const notesOpen=open.some(s=>s.sec!=='target');
-  if(allOff) return `<div class="wm-tdg alloff" style="grid-template-columns:repeat(${secs.length},minmax(0,1fr))">${head.replace('<div class="wm-tdg-h wm-tdg-p">Person</div>','')}</div><div class="wm-mute wm-td-empty">All three sections are folded - click one to open it.</div>`;
+  if(allOff) return `<div class="wm-tdg alloff" style="grid-template-columns:repeat(${secs.length},minmax(0,1fr))">${head}</div><div class="wm-mute wm-td-empty">All three sections are folded - click one to open it.</div>`;
   return (old?`<div class="wm-oo-old"><div><b>To-do notes written earlier</b><div>${esc(old).replace(/\n/g,'<br>')}</div></div></div>`:'')
     +`<div class="wm-tdg" style="grid-template-columns:${cols}">${head}${rows}${empty}${notesOpen?noteRow:''}</div>`;
 }
@@ -12824,7 +12829,7 @@ function wmRow(it,forKey,showPeople,showMeeting){
   const pill=it.st==='done'?['f','Finished']:it.st==='awaiting'?['a','Awaiting approval']:wmOverdue(it)?['o','Overdue']:['p',it.linked?'Pending':WM_LEGACY[it.st]||'Open'];
   return `<div class="task ${it.st==='done'?'done':''} ${it.id===WM.lastNew?'new':''}">
     <div class="bx" ${ed||it.linked?`onclick="wmToggle(${it.id})"`:'style="cursor:default;opacity:.5"'} title="${it.st==='done'?'Reopen':'Mark finished'}">${it.st==='done'?'<i class="fa-solid fa-check"></i>':''}</div>
-    <div style="flex:1;min-width:0"><div class="tt">${esc(it.t)}${wmItemEditable(it)?`<button class="wm-ed" title="Edit" onclick="wmEditItem(${it.id})"><i class="fa-solid fa-pen"></i></button>`:''}</div><div class="mt">${bits.join('')}</div>
+    <div style="flex:1;min-width:0"><div class="tt" title="${esc(it.t)}"><span class="tx1">${esc(it.t)}</span>${wmItemEditable(it)?`<button class="wm-ed" title="Edit" onclick="wmEditItem(${it.id})"><i class="fa-solid fa-pen"></i></button>`:''}</div><div class="mt">${bits.join('')}</div>
       ${it.st==='awaiting'?(wmIsMe(it.delegator)?`<div style="display:flex;gap:6px;margin-top:6px"><button class="b ok sm" onclick="wmApprove(${it.id},true)"><i class="fa-solid fa-check"></i> Approve</button><button class="b sb sm" onclick="wmApprove(${it.id},false)">Send back</button></div>`:`<div class="aw-wait">Waiting for ${esc(wmName(it.delegator))} to approve</div>`):''}</div>
     ${it.linked?`<span class="st ${pill[0]}">${pill[1]}</span>`:showPeople?`<span class="st ${pill[0]}">${pill[1]}</span>`:legacyCtl}
   </div>`;
@@ -13874,6 +13879,22 @@ const WM_CSS='<style id="wmCss">'
   +'@media(max-width:900px){.wm-tdg{grid-template-columns:1fr!important}.wm-tdg-h.wm-tdg-p{display:none}.wm-tdg-h{border-left:0}.wm-tdg-h.off{flex-direction:row;padding:9px 11px}.wm-tdg-h.off .t{writing-mode:horizontal-tb;transform:none;flex:1}.wm-tdg-c{border-left:0}.wm-tdg-c.off,.wm-tdg-c.none{display:none}.wm-tdg-c::before{content:attr(data-l);display:block;font-size:10.5px;font-weight:800;color:#9AA0B4;text-transform:uppercase;letter-spacing:.05em;margin:6px 0 2px}}'
   +'.wm-td-drafts{padding-bottom:0}.wm-td-drafts:has(#wmDrafts:empty){display:none}'
   +'.wm-tdg.alloff .wm-tdg-h.off{flex-direction:row;justify-content:flex-start;padding:9px 11px;gap:7px;border-bottom:0}.wm-tdg.alloff .wm-tdg-h.off .t,.wm-tdg.alloff .wm-tdg-h.off .chev{display:inline}.wm-tdg.alloff .wm-tdg-h.off .t{flex:1}.wm-tdg.alloff .wm-tdg-h:first-child{border-left:0}'
+  +'.wm-tdg-who{grid-column:1/-1;display:flex;align-items:center;gap:8px;min-width:0;padding:5px 12px;background:#FAFAFD;border-bottom:1px solid #F1F2F6;font-size:12px}'
+  +'.wm-tdg-who b{font-size:12.5px;color:#1C1F2E;white-space:nowrap}.wm-tdg-who span{color:#7A8095;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.wm-tdg-who .cnt{flex:none;font-size:10.5px;font-weight:800;background:#F0F1F5;color:#4A4F63;border-radius:7px;padding:1px 7px}.wm-tdg-who>i{color:#9AA0B4}'
+  +'.wm-tdg-c{padding:1px 6px 2px}.wm-tdg-c .wm-v6 .task{align-items:center;gap:8px;padding:4px 4px;border-radius:7px;min-height:30px}'
+  +'.wm-tdg-c .wm-v6 .task .bx{width:16px;height:16px;margin-top:0}'
+  +'.wm-tdg-c .wm-v6 .task>div:nth-child(2){display:flex;flex-wrap:wrap;align-items:center;column-gap:8px}'
+  +'.wm-tdg-c .wm-v6 .task .tt{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:4px;font-size:13px;line-height:1.3}'
+  +'.wm-tdg-c .wm-v6 .task .tt .tx1{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.wm-tdg-c .wm-v6 .task .tt .wm-ed{flex:none}'
+  +'.wm-tdg-c .wm-v6 .task .mt{flex:none;margin-top:0;flex-wrap:nowrap;gap:7px;font-size:11px;white-space:nowrap}.wm-tdg-c .wm-v6 .task .mt .by{display:none}'
+  +'.wm-tdg-c .wm-v6 .task>div:nth-child(2)>div:not(.tt):not(.mt){flex-basis:100%}'
+  +'.wm-tdg-c .wm-v6 .task .st{font-size:10.5px;padding:2px 7px}'
+  +'.wm-tdg-c .wm-v6 .task .mt>span:first-child:not(.from),.wm-tdg-c .wm-v6 .task .mt .aw{display:none}'
+  +'.wm-tdt2{position:relative}'
+  +'@media(hover:hover){.wm-tdt2 .wm-tdmv-s{position:absolute;right:4px;top:3px;margin:0;z-index:2;box-shadow:0 2px 8px rgba(20,20,60,.12)}}'
+  +'@media(max-width:900px){.wm-tdg-c .wm-v6 .task .mt{display:none}}'
 +'</style>';
 /* ===== Global first-login onboarding (full screen, no sidebar) ===== */
 async function renderOnboarding(){
