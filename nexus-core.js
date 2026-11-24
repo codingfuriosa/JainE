@@ -14640,7 +14640,14 @@ async function fhRecords(){
   const{data:counts}=await sb.schema('feedback').from('responses').select('form_id').in('form_id',rows.map(f=>f.id));
   const byForm={};
   (counts||[]).forEach(r=>{byForm[r.form_id]=(byForm[r.form_id]||0)+1;});
-  b.innerHTML=`<div class="sec-title" style="margin:0 0 4px">Pick a form</div><div class="sec-sub" style="margin:0 0 12px">Select one to see its responses.</div>
+  const takeAll=fhCanTakeAll();
+  b.innerHTML=`<div class="fh-head">
+    <div><div class="sec-title" style="margin:0 0 4px">Pick a form</div><div class="sec-sub" style="margin:0">${takeAll?'Select one to see its responses, or take every form\'s responses at once.':'Select one to see its responses.'}</div></div>
+    ${takeAll?`<div class="fh-row-actions">
+      <button class="btn btn-sm" id="fhAllPrintBtn" onclick="fhPrintAll()" title="One printout with every response to every form, in full"><i class="fa-solid fa-print"></i> <span>Print all responses</span></button>
+      <button class="btn btn-sm" id="fhAllXlsBtn" onclick="fhExportAll()" title="One Excel file: a sheet for each form, a summary, and every answer in one list"><i class="fa-solid fa-file-excel"></i> <span>Download Excel</span></button>
+    </div>`:''}
+  </div>
   <div class="fh-rowlist">${rows.map(f=>`
     <div class="fh-row fh-row-click" onclick="navTo('feedback_hub/records/${f.id}')">
       <div class="fh-row-icon"><i class="fa-solid fa-chart-simple"></i></div>
@@ -14707,6 +14714,281 @@ async function fhRecordsPage(v,formId){
   </table>
   </div>`;
 }
+/* ---- Records, every form at once: a printout and an Excel file ----
+   One loader feeds both, so the paper and the spreadsheet can never disagree. Systems team only (see
+   fhCanTakeAll), and only people who can open Records; the database enforces Records' reads regardless.
+   Everything is read in pages of 1000 (the most a single request returns), so a form that has grown
+   past that is not silently cut short. Answers are fetched by question, not by a long list of
+   response ids, which keeps the request short however many responses there are. */
+let FH_ALL_BUSY=false;
+/* Print-all and Excel are for the Systems team, and only those of them who can open Records at all
+   (the Administrator counts as Systems, as for System Feedbacks). The other Records people still read
+   responses one form at a time; this decides who is offered the all-at-once buttons. It is the page
+   that offers them - the responses themselves are read under the same database rule as Records. */
+function fhCanTakeAll(){return fhCanQrForms()&&fhIsSystems();}
+async function fhFetchAll(make){
+  const out=[], step=1000;
+  for(let from=0;;from+=step){
+    const{data,error}=await make().range(from,from+step-1);
+    if(error)throw new Error(error.message);
+    out.push(...(data||[]));
+    if(!data||data.length<step)break;
+  }
+  return out;
+}
+async function fhAllData(){
+  // Not fhLoadForms: that one swallows a failed read and hands back an empty list, which here would
+  // mean a blank printout and an empty spreadsheet with no word of what went wrong. Newest form first,
+  // as Records lists them.
+  const forms=await fhFetchAll(function(){return sb.schema('feedback').from('forms').select('id,title,description,is_active,collect_name,collect_phone,collect_email,created_at').order('created_at',{ascending:false}).order('id',{ascending:false});});
+  if(!forms.length)throw new Error('There are no forms yet.');
+  return Promise.all(forms.map(async function(f){
+    const qs=await fhFetchAll(function(){return sb.schema('feedback').from('form_questions').select('id,seq,prompt,type,rating_max').eq('form_id',f.id).order('seq').order('id');});
+    // Oldest first: a printout and a spreadsheet read top to bottom as the feedback came in.
+    const rs=await fhFetchAll(function(){return sb.schema('feedback').from('responses').select('id,respondent_name,respondent_phone,respondent_email,submitted_at').eq('form_id',f.id).order('submitted_at',{ascending:true}).order('id');});
+    const by={};
+    if(rs.length&&qs.length){
+      const qids=qs.map(function(q){return q.id;});
+      const an=await fhFetchAll(function(){return sb.schema('feedback').from('response_answers').select('response_id,question_id,answer_text').in('question_id',qids).order('id');});
+      an.forEach(function(a){(by[a.response_id]=by[a.response_id]||{})[a.question_id]=a.answer_text;});
+    }
+    return {form:f,questions:qs,responses:rs,answers:by};
+  }));
+}
+// Name, phone and email columns follow the form's own settings (as Records does), but a column is
+// also kept when somebody did fill it in before the setting was switched off - never drop real data.
+function fhShowCols(d){
+  const rs=d.responses, f=d.form;
+  return {
+    name:f.collect_name!=='off'||rs.some(function(r){return r.respondent_name;}),
+    phone:f.collect_phone!=='off'||rs.some(function(r){return r.respondent_phone;}),
+    email:f.collect_email!=='off'||rs.some(function(r){return r.respondent_email;})
+  };
+}
+function fhPad2(n){return String(n).padStart(2,'0');}
+function fhStamp(ts){
+  if(!ts)return '';
+  const d=new Date(ts);
+  return d.getFullYear()+'-'+fhPad2(d.getMonth()+1)+'-'+fhPad2(d.getDate())+' '+fhPad2(d.getHours())+':'+fhPad2(d.getMinutes());
+}
+function fhNiceWhen(ts){
+  return ts?new Date(ts).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+}
+function fhTotalResponses(data){return data.reduce(function(n,d){return n+d.responses.length;},0);}
+/* ---- the printout: its own page in a new tab, so none of the app's menus print with it ---- */
+const FH_PRINT_CSS=`
+*{box-sizing:border-box}
+html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{margin:0;padding:0 28px 40px;font-family:"Segoe UI",Arial,sans-serif;font-size:12px;line-height:1.45;color:#0f172a;background:#fff}
+@page{size:A4;margin:14mm 12mm 16mm;@bottom-right{content:counter(page);font-size:10px;color:#64748b}}
+.bar{position:sticky;top:0;background:#0f172a;color:#e2e8f0;margin:0 -28px 22px;padding:10px 28px;display:flex;align-items:center;justify-content:space-between;gap:14px;font-size:12.5px}
+.bar button{background:#fff;color:#0f172a;border:0;border-radius:8px;padding:7px 18px;font-weight:700;font-size:13px;cursor:pointer}
+.top{border-bottom:2px solid #0f172a;padding-bottom:10px;margin-bottom:16px}
+.brand{font-size:11px;font-weight:700;letter-spacing:1.2px;color:#64748b}
+h1{font-size:21px;margin:4px 0 2px}
+h2{font-size:17px;margin:0 0 3px}
+.meta{font-size:11.5px;color:#475569}
+.toc{width:100%;border-collapse:collapse;margin:6px 0 4px}
+.toc th,.toc td{text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px}
+.toc th{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:#64748b}
+.toc .r{text-align:right;white-space:nowrap}
+.toc tfoot td{font-weight:700;border-top:2px solid #0f172a;border-bottom:0}
+section.form{break-before:page;page-break-before:always;margin-top:34px;padding-top:18px;border-top:1px solid #cbd5e1}
+.desc{margin:6px 0 0;color:#334155;white-space:pre-wrap}
+.none{margin:18px 0;color:#64748b;font-style:italic}
+.resp{break-inside:avoid;page-break-inside:avoid;border:1px solid #cbd5e1;border-radius:6px;margin:12px 0 0;overflow:hidden}
+.rh{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;background:#f1f5f9;padding:6px 10px;border-bottom:1px solid #cbd5e1}
+.rh .who{flex:1;color:#334155}
+.rh .when{color:#64748b;font-size:11px;white-space:nowrap}
+table.qa{width:100%;border-collapse:collapse}
+table.qa td{padding:5px 10px;vertical-align:top;border-top:1px solid #eef2f7}
+table.qa tr:first-child td{border-top:0}
+td.n{width:26px;color:#94a3b8;font-size:11px;padding-right:0}
+td.q{width:46%;color:#475569;white-space:pre-wrap}
+td.a{font-weight:600;white-space:pre-wrap;word-break:break-word}
+.nil{color:#94a3b8;font-weight:400}
+.of{color:#64748b;font-weight:400}
+@media print{.noprint{display:none!important}body{padding:0}section.form{margin-top:0;padding-top:0;border-top:0}}
+`;
+function fhAllPrintHtml(data){
+  const total=fhTotalResponses(data);
+  const plural=function(n,w){return n+' '+w+(n===1?'':'s');};
+  const ans=function(q,val){
+    if(val==null||val==='')return '<span class="nil">—</span>';
+    if(q.type==='rating'||q.type==='scale')return esc(val)+'<span class="of"> / '+(q.rating_max||5)+'</span>';
+    if(q.type==='nps')return esc(val)+'<span class="of"> / 10</span>';
+    // Several picks arrive as one piece of text; one per line reads better on paper.
+    if(q.type==='multi')return String(val).split(' | ').map(function(x){return esc(x);}).join('<br>');
+    return esc(val);
+  };
+  const toc=data.map(function(d){
+    return '<tr><td>'+esc(d.form.title||'(untitled form)')+'</td><td>'+(d.form.is_active?'Active':'Closed')+'</td><td class="r">'+d.questions.length+'</td><td class="r">'+d.responses.length+'</td></tr>';
+  }).join('');
+  const sections=data.map(function(d){
+    const f=d.form, qs=d.questions, sh=fhShowCols(d);
+    const blocks=d.responses.map(function(r,i){
+      const who=[sh.name&&r.respondent_name,sh.phone&&r.respondent_phone,sh.email&&r.respondent_email].filter(Boolean).map(function(x){return esc(x);}).join(' · ')||'Anonymous';
+      return '<div class="resp"><div class="rh"><b>Response '+(i+1)+'</b><span class="who">'+who+'</span><span class="when">'+fhNiceWhen(r.submitted_at)+'</span></div>'
+        +'<table class="qa">'+qs.map(function(q,qi){
+          return '<tr><td class="n">'+(qi+1)+'</td><td class="q">'+esc(q.prompt||'')+'</td><td class="a">'+ans(q,(d.answers[r.id]||{})[q.id])+'</td></tr>';
+        }).join('')+'</table></div>';
+    }).join('');
+    return '<section class="form"><h2>'+esc(f.title||'(untitled form)')+'</h2>'
+      +'<div class="meta">'+(f.is_active?'Active':'Closed')+' · '+plural(qs.length,'question')+' · '+plural(d.responses.length,'response')+'</div>'
+      +(f.description?'<p class="desc">'+esc(f.description)+'</p>':'')
+      +(blocks||'<p class="none">No responses yet.</p>')+'</section>';
+  }).join('');
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Feedback Hub - all responses</title><style>'+FH_PRINT_CSS+'</style></head><body>'
+    +'<div class="bar noprint"><span>The print window opens by itself. To keep a copy instead, choose “Save as PDF” as the printer.</span><button onclick="window.print()">Print</button></div>'
+    +'<header class="top"><div class="brand">THE JAIN GROUP</div><h1>Feedback Hub — all responses</h1>'
+    +'<div class="meta">Printed '+fhNiceWhen(new Date())+' · '+plural(data.length,'form')+' · '+plural(total,'response')+'</div></header>'
+    +'<table class="toc"><thead><tr><th>Form</th><th>Status</th><th class="r">Questions</th><th class="r">Responses</th></tr></thead><tbody>'+toc+'</tbody>'
+    +'<tfoot><tr><td colspan="3">Total</td><td class="r">'+total+'</td></tr></tfoot></table>'
+    +sections+'</body></html>';
+}
+window.fhPrintAll=async function(){
+  if(FH_ALL_BUSY||!fhCanTakeAll())return;
+  // The tab has to be opened here, inside the click: a tab opened after the data arrives is taken for
+  // a pop-up and blocked. It is filled in once the responses are in.
+  const w=window.open('','_blank');
+  if(!w){toast('Your browser blocked the printout window. Allow pop-ups for this site, then press Print again.','warn');return;}
+  try{w.document.write('<!doctype html><title>Preparing…</title><body style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#334155">Preparing the printout…</body>');}catch(e){}
+  FH_ALL_BUSY=true;fhAllBusy('fhAllPrintBtn',true,'Preparing…');
+  try{
+    const data=await fhAllData();
+    if(w.closed)return;
+    w.document.open();w.document.write(fhAllPrintHtml(data));w.document.close();
+    w.focus();
+    setTimeout(function(){try{w.print();}catch(e){}},600);
+  }catch(e){
+    try{w.close();}catch(_){}
+    toast('Could not prepare the printout: '+((e&&e.message)||e),'err');
+  }finally{FH_ALL_BUSY=false;fhAllBusy('fhAllPrintBtn',false);}
+};
+function fhAllBusy(id,on,label){
+  ['fhAllPrintBtn','fhAllXlsBtn'].forEach(function(x){const b=$(x);if(b)b.disabled=!!on;});
+  const b=$(id);if(!b)return;
+  const s=b.querySelector('span'), i=b.querySelector('i');
+  if(on){
+    b.dataset.lbl=s?s.textContent:'';b.dataset.ic=i?i.className:'';
+    if(s)s.textContent=label;
+    if(i)i.className='fa-solid fa-spinner fa-spin';
+  }else{
+    if(s&&b.dataset.lbl)s.textContent=b.dataset.lbl;
+    if(i&&b.dataset.ic)i.className=b.dataset.ic;
+  }
+}
+/* ---- the Excel file: Summary, one sheet per form, and every answer in one flat list ---- */
+function fhQHead(q,i){
+  let h=String(q.prompt||('Question '+(i+1))).replace(/\s+/g,' ').trim();
+  if(q.type==='rating'||q.type==='scale')h+=' (out of '+(q.rating_max||5)+')';
+  else if(q.type==='nps')h+=' (0-10)';
+  return h;
+}
+// Scores go in as numbers so a column can be averaged; everything else stays text exactly as given.
+function fhCellValue(q,val){
+  if(val==null||val==='')return '';
+  if((q.type==='rating'||q.type==='scale'||q.type==='nps')&&/^\d+(\.\d+)?$/.test(String(val).trim()))return Number(val);
+  return String(val);
+}
+function fhFormTable(d){
+  const sh=fhShowCols(d), qs=d.questions, seen={};
+  // Two questions can carry the same wording; a duplicate column title would make them look like one.
+  const qHeads=qs.map(function(q,i){const h=fhQHead(q,i);seen[h]=(seen[h]||0)+1;return seen[h]>1?h+' ('+seen[h]+')':h;});
+  const head=['#','Submitted'].concat(sh.name?['Name']:[],sh.phone?['Phone']:[],sh.email?['Email']:[],qHeads);
+  const rows=d.responses.map(function(r,i){
+    const c=[i+1,fhStamp(r.submitted_at)];
+    if(sh.name)c.push(r.respondent_name||'');
+    if(sh.phone)c.push(r.respondent_phone||'');
+    if(sh.email)c.push(r.respondent_email||'');
+    qs.forEach(function(q){c.push(fhCellValue(q,(d.answers[r.id]||{})[q.id]));});
+    return c;
+  });
+  return [head].concat(rows);
+}
+function fhFlatTable(data){
+  const rows=[['Form','Response #','Submitted','Name','Phone','Email','Q #','Question','Answer']];
+  data.forEach(function(d){
+    d.responses.forEach(function(r,i){
+      d.questions.forEach(function(q,qi){
+        const v=(d.answers[r.id]||{})[q.id];
+        if(v==null||v==='')return;
+        rows.push([d.form.title||'',i+1,fhStamp(r.submitted_at),r.respondent_name||'',r.respondent_phone||'',r.respondent_email||'',qi+1,String(q.prompt||'').replace(/\s+/g,' ').trim(),String(v)]);
+      });
+    });
+  });
+  return rows;
+}
+function fhSummaryTable(data){
+  const rows=[['Form','Status','Questions','Responses','Latest response']];
+  data.forEach(function(d){
+    rows.push([d.form.title||'',d.form.is_active?'Active':'Closed',d.questions.length,d.responses.length,d.responses.length?fhStamp(d.responses[d.responses.length-1].submitted_at):'']);
+  });
+  rows.push(['Total','','',fhTotalResponses(data),'']);
+  return rows;
+}
+// Excel allows 31 characters and none of  [ ] : * ? / \  in a sheet name, and treats names as the same
+// whatever their capitals - so two forms with long, similar titles must not collide.
+function fhSheetName(title,used){
+  const base=String(title||'Form').replace(/[\[\]:*?\/\\]/g,' ').replace(/\s+/g,' ').trim().slice(0,31)||'Form';
+  let n=base,k=2;
+  while(used[n.toLowerCase()]){const suf=' ('+(k++)+')';n=base.slice(0,31-suf.length)+suf;}
+  used[n.toLowerCase()]=1;
+  return n;
+}
+function fhAllWorkbook(XL,data){
+  const wb=XL.utils.book_new(), used={summary:1,'all answers':1};
+  const add=function(name,aoa){
+    const ws=XL.utils.aoa_to_sheet(aoa);
+    const cols=[];
+    aoa.slice(0,200).forEach(function(row){row.forEach(function(c,i){
+      const len=Math.min(String(c==null?'':c).length,60);
+      cols[i]=Math.max(cols[i]||8,len+2);
+    });});
+    ws['!cols']=cols.map(function(w){return {wch:w};});
+    XL.utils.book_append_sheet(wb,ws,name);
+  };
+  add('Summary',fhSummaryTable(data));
+  data.forEach(function(d){add(fhSheetName(d.form.title,used),fhFormTable(d));});
+  add('All answers',fhFlatTable(data));
+  return wb;
+}
+// Only if the spreadsheet library cannot be fetched: the flat list as CSV, which Excel opens too. The
+// byte-order mark makes Excel read Hindi and other non-English text correctly; a cell starting with
+// = + - @ would be run as a formula by Excel, so it is given a leading quote.
+function fhCsv(rows){
+  return rows.map(function(r){return r.map(function(c){
+    let s=c==null?'':String(c);
+    if(typeof c!=='number'&&/^[=+\-@\t\r]/.test(s))s="'"+s;
+    return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+  }).join(',');}).join('\r\n');
+}
+function fhDownload(blob,name){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1500);
+}
+window.fhExportAll=async function(){
+  if(FH_ALL_BUSY||!fhCanTakeAll())return;
+  FH_ALL_BUSY=true;fhAllBusy('fhAllXlsBtn',true,'Preparing…');
+  try{
+    const data=await fhAllData();
+    const day=new Date().toLocaleDateString('en-CA');
+    let XL=null;
+    try{XL=await loadXLSX();}catch(e){XL=null;}
+    if(XL){
+      const out=XL.write(fhAllWorkbook(XL,data),{bookType:'xlsx',type:'array'});
+      fhDownload(new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),'Feedback-Hub-responses-'+day+'.xlsx');
+      toast('Excel file downloaded','ok');
+    }else{
+      fhDownload(new Blob(['﻿'+fhCsv(fhFlatTable(data))],{type:'text/csv;charset=utf-8'}),'Feedback-Hub-responses-'+day+'.csv');
+      toast('The Excel maker could not load, so you got a CSV file instead. Excel opens it the same way.','warn');
+    }
+  }catch(e){
+    toast('Could not prepare the file: '+((e&&e.message)||e),'err');
+  }finally{FH_ALL_BUSY=false;fhAllBusy('fhAllXlsBtn',false);}
+};
 window.fhToggleTextList=function(qid){
   const el=$('fhTextList_'+qid);if(!el)return;
   const btn=$('fhTextBtn_'+qid);
