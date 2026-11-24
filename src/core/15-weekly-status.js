@@ -359,14 +359,12 @@ function wmDashHtml(){
     return `<div class="mt-rc" onclick="wmOpenMeeting(${m.id})"><div style="min-width:0"><b class="mt-trunc" style="display:block">${esc(m.kind||'Meeting')}</b><small>${esc(wmHost(m))}</small></div><span>${wmTyPill(m.kind)}</span><span class="hide">${esc(wmFmtS(m.meeting_date))}${m.start_time?'<small style="display:block;color:#9AA0B4">'+esc(wmTime(m.start_time))+'</small>':''}</span><span><span class="mt-pill" style="background:${h[2]};color:${h[3]}">${h[1]}</span></span></div>`; }).join('')
     ||'<div class="mt-empty">No past meetings yet.</div>';
   return `<div class="mt-ph"><div><h1>${wmGreet()}${nm?', '+esc(nm):''}</h1><p>Here's how your meetings are shaping up this week.</p></div></div>
-    <div class="mt-stats">${stat('Meetings this week',wk.length,(d>0?'+':'')+d+' vs last week',d>0?'#1E8A55':d<0?'#D63B41':'#7A8095',"WM.upTab='week';wmGo('up')",'Open the meetings still to come this week')}${stat('Upcoming',up.length,todayUp+' today','#7A8095',"WM.upTab='all';wmGo('up')",'Open Upcoming')}${stat('Running now',live.length,live.length?'live':'none live',live.length?'#D63B41':'#7A8095',"wmGo('run')",'Open Running')}${stat('Hours scheduled',hrs,'this week','#7A8095',"WM.upTab='week';wmGo('up')",'Open this week')}</div>
+    <div class="mt-stats">${stat('Meetings this week',wk.length,(d>0?'+':'')+d+' vs last week',d>0?'#1E8A55':d<0?'#D63B41':'#7A8095',"WM.upTab='week';wmGo('up')",'Open the meetings still to come this week')}${stat('Upcoming',up.length,todayUp+' today','#7A8095',"WM.upTab='all';wmGo('up')",'Open Upcoming')}${stat('Hours scheduled',hrs,'this week','#7A8095',"WM.upTab='week';wmGo('up')",'Open this week')}</div>
     <div class="mt-two">
       <div class="mt-card"><div class="mt-ch"><h3>Today's schedule</h3><button class="mt-lk" onclick="wmGo('up')">Upcoming →</button></div>${sched}</div>
       <div class="mt-stack">
-        <div class="mt-card"><div class="mt-ch"><h3>${live.length?'<i class="mt-dot"></i>':''}Live now</h3><button class="mt-lk" onclick="wmGo('run')">View all →</button></div>${lives}</div>
         <div class="mt-card"><div class="mt-ch"><h3>Open actions</h3><button class="mt-lk" onclick="wmOpenAll('pending')">All tasks →</button></div>
           <div class="mt-acts"><button class="mt-act" onclick="wmOpenAll('pending')"><b>${pend}</b><span>pending</span></button><button class="mt-act" onclick="wmOpenAll('awaiting')"><b style="color:${aw?'#C46E12':'inherit'}">${aw}</b><span>to approve</span></button><button class="mt-act" onclick="wmOpenAll('overdue')"><b style="color:${od?'#D63B41':'inherit'}">${od}</b><span>overdue</span></button></div></div>
-        <div class="mt-card"><div class="mt-ch"><h3>This week by type</h3></div>${types}</div>
       </div>
     </div>
     <div class="mt-card"><div class="mt-ch"><h3>Recently completed</h3><button class="mt-lk" onclick="wmGo('hist')">Full history →</button></div>${recent}</div>`;
@@ -1191,10 +1189,10 @@ function wmPaintOo(focusSec){ wmRepaintOo(WM_TD_SECS.includes(focusSec)?null:foc
    a meeting note (section 'target' / 'trying'): ticked done, edited, deleted or made into a task by the
    starter or an editor only; one not done comes back at every later meeting of the same kind, marked
    "From <date>", until it is ticked. */
-const WM_TD=[['target','Target for the coming week','fa-bullseye','New target, then Enter'],['trying','Trying for the coming week','fa-flask','Something to try, then Enter']];
+const WM_TD=[['target','Target for the coming week','fa-bullseye','New target, then Enter'],['trying','Trying for the coming week','fa-flask','Something to try, then Enter'],['future','Future work','fa-hourglass-half','Something for later, then Enter']];
 const WM_TD_SECS=WM_TD.map(x=>x[0]);
-const WM_SEC_L={target:'target',trying:'thing to try',obstacle:'obstacle',opportunity:'opportunity'};
-const WM_SEC_H={target:'Target',trying:'Trying',obstacle:'Obstacle',opportunity:'Opportunity'};
+const WM_SEC_L={target:'target',trying:'thing to try',future:'piece of future work',obstacle:'obstacle',opportunity:'opportunity'};
+const WM_SEC_H={target:'Target',trying:'Trying',future:'Future work',obstacle:'Obstacle',opportunity:'Opportunity'};
 const wmIsTd=n=>WM_TD_SECS.includes(n&&n.section);
 /* Tasks in the To-dos lists (24 Nov): every task given in this meeting shows under Target for the coming
    week unless it was put under Trying - when it was typed (the To-do switch on the action line) or by
@@ -1220,43 +1218,52 @@ function wmTdTaskRow(it,m){
 }
 // Tasks in a To-dos list look exactly like the Actions task list: grouped by person, the same row (tick,
 // title, details, status, Approve / Send back), each row draggable to the other list.
-function wmTdTaskList(tasks,m){
-  if(!tasks.length) return '';
-  const keys=[...new Set(tasks.flatMap(wmWhoKeys))].sort((x,y)=>wmKeyName(x)<wmKeyName(y)?-1:1);
-  return '<div class="wm-v6 wm-tdv6">'+keys.map(k=>{ const mine=tasks.filter(it=>wmWhoKeys(it).includes(k)), od=mine.filter(wmOverdue).length;
-    return `<div class="person"><div class="who">${wmAvatar(wmKeyName(k),28)}<div><b>${esc(wmKeyName(k))}</b><span>${esc(wmKeyDept(k))}</span> <span class="cnt">${mine.filter(wmOpen).length} to do</span>${od?` <span class="cnt red">${od} overdue</span>`:''}</div></div>
-      <div>${mine.map(it=>wmTdWrap(it,m,k)).join('')}</div></div>`; }).join('')+'</div>';
-}
+/* The To-dos tab as one grid (24 Nov): a row per person, so each person's Target, Trying and Future work
+   tasks sit on the same line, and a last row for typed to-dos (Trying and Future work; Target is tasks
+   only). Every cell takes a dragged task (into that list, same person). Each of the three sections folds
+   to a narrow strip with its count when its header is clicked; folded sections are remembered here. */
+function wmTdFoldState(){ try{ return JSON.parse(localStorage.getItem('wm_td_fold')||'{}')||{}; }catch(e){ return {}; } }
+window.wmTdFold=function(sec){ const s=wmTdFoldState(); s[sec]=!s[sec]; try{ localStorage.setItem('wm_td_fold',JSON.stringify(s)); }catch(e){} wmRepaintTd(); };
+// One task, drawn as the Actions task list draws it, draggable, with a "Move to…" list.
 function wmTdWrap(it,m,k){
-  const ed=wmCanEdit(it.meeting)&&wmCanEdit(m.id)&&!WM.ro, other=(it.sec||'target')==='target'?'trying':'target';
-  return `<div class="wm-tdt2" data-id="${it.id}" ${ed?`draggable="true" ondragstart="wmTdDrag(event,${it.id})" ondragend="wmTdDragEnd()" title="Drag to the other list"`:''}>${wmRow(it,k)}
-    ${ed?`<button class="wm-quiet wm-tdmv" onclick="wmTdMove(${it.id},'${other}')"><i class="fa-solid fa-arrow-right-arrow-left"></i> Move to ${other==='trying'?'Trying':'Target'}</button>`:''}</div>`;
+  const ed=wmCanEdit(it.meeting)&&wmCanEdit(m.id)&&!WM.ro, cur=it.sec||'target';
+  return `<div class="wm-tdt2" data-id="${it.id}" ${ed?`draggable="true" ondragstart="wmTdDrag(event,${it.id})" ondragend="wmTdDragEnd()" title="Drag to another list"`:''}>${wmRow(it,k)}
+    ${ed?`<select class="wm-tdmv-s" onchange="wmTdMove(${it.id},this.value)" aria-label="Move to another list"><option value="">Move to…</option>${WM_TD.filter(x=>x[0]!==cur).map(x=>`<option value="${x[0]}">${esc(x[1])}</option>`).join('')}</select>`:''}</div>`;
 }
 function wmTdHtml(m){
-  const old=String((m.agenda_notes||{}).todos||'').trim();
-  return `${old?`<div class="wm-oo-old"><div><b>To-do notes written earlier</b><div>${esc(old).replace(/\n/g,'<br>')}</div></div></div>`:''}
-  <div class="wm-oo" style="margin-top:0">${WM_TD.map(([sec,l,i,ph])=>{ const list=sec==='target'?[]:wmNotesFor(m,sec), tasks=wmTdTasks(m,sec), open=list.filter(n=>!n.solved).length+tasks.filter(wmOpen).length;
-    return `<div class="wm-oo-box wm-td-box ${sec}" ondragover="wmTdOver(event,this)" ondragleave="if(!this.contains(event.relatedTarget))this.classList.remove('drop')" ondrop="wmTdDrop(event,'${sec}',this)"><div class="wm-sec"><span><i class="fa-solid ${i}" style="margin-right:6px"></i>${l}</span><span class="r wm-mute wm-nst">${open} to do</span></div>
-      ${sec==='target'?'':`<input class="wm-nt-add" id="wmNtAdd_${sec}" placeholder="${ph}" onkeydown="if(event.key==='Enter'){event.preventDefault();wmNoteAdd('${sec}',this)}">`}
-      ${wmTdTaskList(tasks,m)}<div class="wm-nt-list">${list.map(n=>wmNoteRow(n,m)).join('')}${!tasks.length&&!list.length?`<div class="wm-mute wm-td-empty">${sec==='trying'?'Nothing yet - drag a task here, or type one.':'No tasks yet - every task given in this meeting shows here.'}</div>`:''}</div></div>`; }).join('')}</div>`;
+  const old=String((m.agenda_notes||{}).todos||'').trim(), fold=wmTdFoldState();
+  const secs=WM_TD.map(([sec,l,i,ph])=>({sec,l,i,ph,tasks:wmTdTasks(m,sec),notes:sec==='target'?[]:wmNotesFor(m,sec),off:!!fold[sec]}));
+  const cols='minmax(140px,190px) '+secs.map(s=>s.off?'46px':'minmax(0,1fr)').join(' ');
+  const keys=[...new Set(secs.flatMap(s=>s.tasks.flatMap(wmWhoKeys)))].sort((x,y)=>wmKeyName(x)<wmKeyName(y)?-1:1);
+  const drop=s=>`ondragover="wmTdOver(event,this)" ondragleave="if(!this.contains(event.relatedTarget))this.classList.remove('drop')" ondrop="wmTdDrop(event,'${s.sec}',this)"`;
+  const cell=(s,inner,dz,none)=>`<div class="wm-tdg-c ${s.sec} ${s.off?'off':''} ${none?'none':''}" data-l="${esc(s.l)}" ${dz&&!s.off?drop(s):''}>${s.off?'':inner}</div>`;
+  const head=`<div class="wm-tdg-h wm-tdg-p">Person</div>`+secs.map(s=>{ const open=s.tasks.filter(wmOpen).length+s.notes.filter(n=>!n.solved).length;
+    return `<button type="button" class="wm-tdg-h ${s.sec} ${s.off?'off':''}" onclick="wmTdFold('${s.sec}')" aria-expanded="${!s.off}" title="${s.off?'Show':'Fold'} ${esc(s.l)}"><i class="fa-solid ${s.i}"></i><span class="t">${esc(s.l)}</span><em>${open}</em><i class="fa-solid fa-chevron-${s.off?'right':'left'} chev"></i></button>`; }).join('');
+  const rows=keys.map(k=>{ const n=secs.reduce((a,s)=>a+s.tasks.filter(it=>wmWhoKeys(it).includes(k)&&wmOpen(it)).length,0);
+    return `<div class="wm-tdg-p who">${wmAvatar(wmKeyName(k),28)}<div><b>${esc(wmKeyName(k))}</b><span>${esc(wmKeyDept(k))}</span><span class="cnt">${n} to do</span></div></div>`
+      +secs.map(s=>{ const mine=s.tasks.filter(it=>wmWhoKeys(it).includes(k)); return cell(s,`<div class="wm-v6">${mine.map(it=>wmTdWrap(it,m,k)).join('')}</div>`,true,!mine.length); }).join(''); }).join('');
+  const empty=keys.length?'':`<div class="wm-tdg-p who wm-tdg-none"><span>No tasks yet</span></div>`+secs.map(s=>cell(s,`<div class="wm-mute wm-td-empty">${s.sec==='target'?'Every task given in this meeting shows here.':'Drag a task here.'}</div>`,true)).join('');
+  const noteRow=`<div class="wm-tdg-p who wm-tdg-notes"><i class="fa-regular fa-note-sticky"></i><div><b>Typed to-dos</b><span>Not given to anyone yet</span></div></div>`
+    +secs.map(s=>cell(s,s.sec==='target'?'<div class="wm-mute wm-td-empty">Tasks only</div>':`<input class="wm-nt-add" id="wmNtAdd_${s.sec}" placeholder="${esc(s.ph)}" onkeydown="if(event.key==='Enter'){event.preventDefault();wmNoteAdd('${s.sec}',this)}"><div class="wm-nt-list">${s.notes.map(n=>wmNoteRow(n,m)).join('')}</div>`,false)).join('');
+  return (old?`<div class="wm-oo-old"><div><b>To-do notes written earlier</b><div>${esc(old).replace(/\n/g,'<br>')}</div></div></div>`:'')
+    +`<div class="wm-tdg" style="grid-template-columns:${cols}">${head}${rows}${empty}${noteRow}</div>`;
 }
-// Saving which list a new line goes in (Target needs nothing: an empty list means Target).
-async function wmSetSec(id){ if(id&&(WM.tdSec||'target')==='trying'){ const {error}=await sb.rpc('ops_item_set_section',{p_id:id,p_section:'trying'}); if(error) throw error; } }
+async function wmSetSec(id){ const s=WM.tdSec||'target'; if(id&&s!=='target'){ const {error}=await sb.rpc('ops_item_set_section',{p_id:id,p_section:s}); if(error) throw error; } }
 window.wmTdDrag=function(e,id){ WM.tdDrag=id; try{ e.dataTransfer.setData('text/plain',String(id)); e.dataTransfer.effectAllowed='move'; }catch(_){} if(e.currentTarget&&e.currentTarget.classList) e.currentTarget.classList.add('dragging'); };
-window.wmTdDragEnd=function(){ WM.tdDrag=null; document.querySelectorAll('.wm-td-box.drop,.wm-tdt.dragging,.wm-tdt2.dragging').forEach(x=>x.classList.remove('drop','dragging')); };
+window.wmTdDragEnd=function(){ WM.tdDrag=null; document.querySelectorAll('.wm-td-box.drop,.wm-tdg-c.drop,.wm-tdt.dragging,.wm-tdt2.dragging').forEach(x=>x.classList.remove('drop','dragging')); };
 window.wmTdOver=function(e,el){ if(WM.tdDrag==null) return; e.preventDefault(); try{ e.dataTransfer.dropEffect='move'; }catch(_){} el.classList.add('drop'); };
 window.wmTdDrop=function(e,sec,el){ if(WM.tdDrag==null) return; e.preventDefault(); el.classList.remove('drop'); const id=WM.tdDrag; wmTdDragEnd(); wmTdMove(id,sec); };
 window.wmTdMove=async function(id,sec){
-  const it=wmFind(id); if(!it||(it.sec||'target')===sec) return;
+  const it=wmFind(id); if(!it||!sec||(it.sec||'target')===sec) return;
   if(!wmCanEdit(it.meeting)||!wmCanEdit(WM.cur)||WM.ro){ toast('Only whoever started that meeting, or one of its editors, can move this task','warn'); return; }
   const was=it.sec; it.sec=sec; wmRepaintTd(); wmPaintWTabs();
-  try{ const {error}=await sb.rpc('ops_item_set_section',{p_id:id,p_section:sec}); if(error) throw error; toast('Moved to '+(sec==='trying'?'Trying':'Target')+' for the coming week','ok'); }
+  try{ const {error}=await sb.rpc('ops_item_set_section',{p_id:id,p_section:sec}); if(error) throw error; toast('Moved to '+(WM_TD.find(x=>x[0]===sec)||[0,sec])[1],'ok'); }
   catch(e){ it.sec=was; wmRepaintTd(); wmPaintWTabs(); wmErr('Could not move the task',e); }
 };
 function wmRepaintTd(focusSec){
   const m=wmMeeting(WM.cur), c=$('wmTdCard'); if(!m||!c) return;
   const open=WM_TD_SECS.flatMap(s=>wmNotesFor(m,s)).filter(n=>!n.solved).length+WM_TD_SECS.flatMap(s=>wmTdTasks(m,s)).filter(wmOpen).length;
-  c.innerHTML=wmCardHead('td','wmTdCard','fa-list-check','To-dos for the coming week',`<span class="wm-fh-n">${open} to do</span>`)+`<div class="wm-bd-in"><div class="wm-kpi-grey" style="margin:8px 0 4px">A to-do not ticked comes back at the next ${esc(m.kind||'')} meeting.</div>${wmTdHtml(m)}</div>`;
+  c.innerHTML=wmCardHead('td','wmTdCard','fa-list-check','To-dos',`<span class="wm-fh-n">${open} to do</span>`)+`<div class="wm-bd-in"><div class="wm-kpi-grey" style="margin:8px 0 4px">A to-do not ticked comes back at the next ${esc(m.kind||'')} meeting.</div>${wmTdHtml(m)}</div>`;
   c.classList.toggle('folded',wmFolded('td'));
   if(focusSec){ const i=$('wmNtAdd_'+focusSec); if(i) i.focus(); }
 }
@@ -1300,7 +1307,7 @@ window.wmNoteTaskSave=async function(id){
     const tid=await wmCreateTask(title,mem,due,'none');
     const r1=await sb.rpc('ops_item_add',{p_meeting:m.id,p_item:title,p_ptask:tid,p_owner:mem.map(wmName).join(', '),p_due:due}); if(r1.error) throw r1.error;
     const r2=await sb.rpc('ops_note_link_task',{p_id:id,p_ptask:tid}); if(r2.error) throw r2.error;
-    { const nn=(WM.notes||[]).find(x=>x.id===id); if(nn&&nn.section==='trying'&&r1.data){ const r3=await sb.rpc('ops_item_set_section',{p_id:r1.data,p_section:'trying'}); if(r3.error) throw r3.error; } }
+    { const nn=(WM.notes||[]).find(x=>x.id===id); if(nn&&(nn.section==='trying'||nn.section==='future')&&r1.data){ const r3=await sb.rpc('ops_item_set_section',{p_id:r1.data,p_section:nn.section}); if(r3.error) throw r3.error; } }
     closeModal(); toast('Task created for '+mem.map(wmName).join(', '),'ok');
     await Promise.all([wmReload(),wmReloadNotes()]); wmCounts(); wmPaintOo(); wmPaintTabs(); wmPaintNav();
   }catch(e){ b.disabled=false; wmErr('Could not finish that',e); }
@@ -1690,7 +1697,7 @@ window.wmParse=function(){
     `<button class="ctl" onclick="wmPickPeople(WM.parsed.mem,'Assign to',m=>{WM.picked.mem=m;wmParse()})"><i class="fa-solid fa-plus" style="font-size:10px"></i> ${mem.length?'Person':'Assign to'}</button>`+
     `<span class="tok"><i class="fa-regular fa-calendar"></i><input type="date" min="${wmToday()}" value="${due||''}" onchange="WM.picked.due=this.value||null;wmParse()"></span>`+
     (due?`<span class="tok"><i class="fa-solid fa-repeat"></i><select onchange="WM.picked.recur=this.value;wmParse()">${Object.entries(WM_RECUR).map(([k,v])=>`<option value="${k}" ${recur===k?'selected':''}>${v}</option>`).join('')}</select></span>`:'')+
-    `<span class="tok wm-secpick" title="Which To-dos list it goes in">To-do <button type="button" class="${(WM.tdSec||'target')==='target'?'on':''}" onclick="WM.tdSec='target';wmParse();$('wmSmart').focus()">Target</button><button type="button" class="${WM.tdSec==='trying'?'on':''}" onclick="WM.tdSec='trying';wmParse();$('wmSmart').focus()">Trying</button></span>`+
+    `<span class="tok wm-secpick" title="Which To-dos list it goes in">To-do <button type="button" class="${(WM.tdSec||'target')==='target'?'on':''}" onclick="WM.tdSec='target';wmParse();$('wmSmart').focus()">Target</button><button type="button" class="${WM.tdSec==='trying'?'on':''}" onclick="WM.tdSec='trying';wmParse();$('wmSmart').focus()">Trying</button><button type="button" class="${WM.tdSec==='future'?'on':''}" onclick="WM.tdSec='future';wmParse();$('wmSmart').focus()">Future</button></span>`+
     `<span style="margin-left:auto">${mem.length?'Enter creates the task':'Enter saves it — assign later'}</span>`;
   wmSuggest();
 };
@@ -2497,4 +2504,24 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-ib.hot{background:#5B4BE8;border-color:#5B4BE8;color:#fff;animation:mtPulse 1.6s infinite}'
   +'.wm-td-box .wm-tdv6{border:0;padding:0;margin:4px 0 0;background:none;border-radius:0}.wm-bd-ws .wm-wpane .wm-bd-in .wm-td-box .wm-tdv6 .person{grid-template-columns:1fr;gap:4px;padding:8px 0}.wm-td-box .wm-tdv6 .who{align-items:center}.wm-td-box .wm-tdv6 .who .cnt{margin:0 0 0 4px}'
   +'.wm-tdt2[draggable=true]{cursor:grab}.wm-tdt2.dragging{opacity:.4}.wm-tdt2 .wm-tdmv{margin:0 0 4px 38px}.wm-tdt2:hover .wm-tdmv,.wm-tdt2 .wm-tdmv:focus{opacity:1}'
++'/* the To-dos grid: a row per person, Target / Trying / Future work columns that fold */'
+  +'.wm-tdg{display:grid;border:1px solid #ECEEF3;border-radius:12px;overflow:hidden;margin-top:6px;background:#fff}'
+  +'.wm-tdg-h{display:flex;align-items:center;gap:7px;min-width:0;background:#F6F7FA;border:0;border-left:1px solid #ECEEF3;border-bottom:1px solid #ECEEF3;border-top:3px solid #D5D8E2;padding:9px 11px;font:inherit;font-size:11.5px;font-weight:800;color:#4A4F63;text-transform:uppercase;letter-spacing:.05em;text-align:left;cursor:pointer}'
+  +'.wm-tdg-h:hover{background:#EFEFF8}.wm-tdg-h.wm-tdg-p{border-left:0;cursor:default;color:#9AA0B4}'
+  +'.wm-tdg-h i{color:#9AA0B4;font-size:11px}.wm-tdg-h .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.wm-tdg-h em{font-style:normal;font-size:11px;background:#fff;color:#5D6378;border-radius:20px;padding:1px 7px;letter-spacing:0}.wm-tdg-h .chev{font-size:9px}'
+  +'.wm-tdg-h.target{border-top-color:#5B4BE8}.wm-tdg-h.target i:first-child{color:#5B4BE8}.wm-tdg-h.trying{border-top-color:#3767DB}.wm-tdg-h.trying i:first-child{color:#3767DB}.wm-tdg-h.future{border-top-color:#9AA0B4}'
+  +'.wm-tdg-h.off{flex-direction:column;align-items:center;padding:9px 4px;gap:8px}.wm-tdg-h.off .t{writing-mode:vertical-rl;transform:rotate(180deg);flex:none;max-height:170px}'
+  +'.wm-tdg-p.who{display:flex;gap:9px;align-items:flex-start;min-width:0;padding:11px 12px;border-bottom:1px solid #F1F2F6;background:#FCFCFE}'
+  +'.wm-tdg-p.who>div{min-width:0}.wm-tdg-p.who b{display:block;font-size:13px;color:#1C1F2E;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wm-tdg-p.who span{display:block;font-size:11.5px;color:#7A8095}'
+  +'.wm-tdg-p.who .cnt{display:inline-block;margin-top:3px;font-size:11px;font-weight:800;background:#F0F1F5;color:#4A4F63;border-radius:7px;padding:1px 7px}'
+  +'.wm-tdg-notes>i{color:#9AA0B4;margin-top:3px}.wm-tdg-none span{font-size:12.5px;color:#9AA0B4}'
+  +'.wm-tdg-c{min-width:0;border-left:1px solid #F1F2F6;border-bottom:1px solid #F1F2F6;padding:4px 8px 6px}'
+  +'.wm-tdg-c.off{background:#FAFAFD;padding:0}.wm-tdg-c.drop{background:#F4F2FF;outline:2px dashed #5B4BE8;outline-offset:-3px}'
+  +'.wm-tdg-c .wm-v6{border:0;padding:0;margin:0;background:none;border-radius:0}.wm-tdg-c .wm-v6 .task{padding:6px 4px}'
+  +'.wm-tdg-c .wm-nt-add{margin:4px 0 2px}.wm-tdg-c .wm-td-empty{padding:8px 2px;font-size:12px}'
+  +'.wm-tdmv-s{height:24px;margin:0 0 4px 30px;border:1px solid #E3E5EC;border-radius:7px;background:#fff;font:inherit;font-size:11.5px;color:#5B4BE8;font-weight:700;padding:0 4px;cursor:pointer;opacity:0;transition:opacity .15s}'
+  +'.wm-tdt2:hover .wm-tdmv-s,.wm-tdmv-s:focus{opacity:1}'
+  +'@media(hover:none){.wm-tdmv-s{opacity:1}}'
+  +'@media(max-width:900px){.wm-tdg{grid-template-columns:1fr!important}.wm-tdg-h.wm-tdg-p{display:none}.wm-tdg-h{border-left:0}.wm-tdg-h.off{flex-direction:row;padding:9px 11px}.wm-tdg-h.off .t{writing-mode:horizontal-tb;transform:none;flex:1}.wm-tdg-c{border-left:0}.wm-tdg-c.off,.wm-tdg-c.none{display:none}.wm-tdg-c::before{content:attr(data-l);display:block;font-size:10.5px;font-weight:800;color:#9AA0B4;text-transform:uppercase;letter-spacing:.05em;margin:6px 0 2px}}'
 +'</style>';
