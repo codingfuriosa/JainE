@@ -11937,12 +11937,11 @@ function wmPaintBoard(){
       <div class="wm-sugg" id="wmSugg" style="display:none"></div>
     </div>
     <div class="wm-wtabs" role="tablist" id="wmWTabs"></div>
-    <div class="wm-wpane" data-p="act"><div class="wm-bd-in"><div id="wmDrafts"></div><div class="wm-v6" id="wmTasks"></div></div></div>
     <div class="wm-wpane wm-bd-col" data-p="kpi" id="wmKpiCard"></div>
-    <div class="wm-wpane wm-bd-col" data-p="td" id="wmTdCard"></div>
+    <div class="wm-wpane" data-p="td"><div class="wm-bd-in wm-td-drafts"><div id="wmDrafts"></div></div><div class="wm-bd-col" id="wmTdCard"></div></div>
     <div class="wm-wpane wm-bd-col" data-p="oo" id="wmOoCard"></div>
   </div>`;
-  if(!WM.wtab){ const s0=m.agenda?wmAgState(m):null; WM.wtab=s0&&s0.run&&!s0.done&&!s0.finished&&s0.items[s0.i]?wmTabOf(s0.items[s0.i].k):'act'; }
+  if(!WM.wtab){ const s0=m.agenda?wmAgState(m):null; WM.wtab=s0&&s0.run&&!s0.done&&!s0.finished&&s0.items[s0.i]?wmTabOf(s0.items[s0.i].k):'td'; }
   wmRepaintKpi(); wmRepaintTd(); wmRepaintOo(); wmParse(); wmPaintDrafts(); wmPaintTabs(); wmPaintWTabs();
   if(m.agenda) wmPaintAgenda(true);
   if(isToday&&started&&!ended){
@@ -12452,13 +12451,14 @@ window.wmAgEditSave=async function(){
    Actions, KPIs, To-dos, Opportunities & Obstacles - one shown at a time. When the agenda moves to the
    KPIs, To-dos or O&O step the matching tab opens (any other step opens Actions); a tab can always be
    picked by hand. The kind's task counters sit at the right of the tabs. */
-function wmTabOf(k){ return k==='kpi'?'kpi':k==='todos'?'td':k==='oo'?'oo':'act'; }
+// The work area opens on To-dos; the KPIs and O&O steps open their own tabs (24 Nov: no Actions tab).
+function wmTabOf(k){ return k==='kpi'?'kpi':k==='oo'?'oo':'td'; }
 function wmPaintWTabs(){
   const h=$('wmWTabs'), m=wmMeeting(WM.cur); if(!h||!m) return;
-  if(!['act','kpi','td','oo'].includes(WM.wtab)) WM.wtab='act';
+  if(!['td','kpi','oo'].includes(WM.wtab)) WM.wtab='td';
   const td=WM_TD_SECS.flatMap(s=>wmNotesFor(m,s)).filter(n=>!n.solved).length+WM_TD_SECS.flatMap(s=>wmTdTasks(m,s)).filter(wmOpen).length, oo=['opportunity','obstacle'].flatMap(s=>wmNotesFor(m,s)).filter(n=>!n.solved).length;
   const tb=(k,ic,l,n,sh)=>`<button class="wm-wtab ${WM.wtab===k?'on':''}" role="tab" aria-selected="${WM.wtab===k}" title="${l}" onclick="wmWTab('${k}')"><i class="fa-solid ${ic}"></i><span class="lg">${l}</span><span class="sh">${sh||l}</span>${n?`<em>${n}</em>`:''}</button>`;
-  h.innerHTML=tb('act','fa-list-check','Actions',0)+tb('kpi','fa-chart-line','KPIs',0)+tb('td','fa-bullseye','To-dos',td)+tb('oo','fa-scale-balanced','Opportunities & Obstacles',oo,'O&amp;O')+'<span class="wm-bd-stats" id="wmBdStats"></span>';
+  h.innerHTML=tb('td','fa-bullseye','To-dos',td)+tb('kpi','fa-chart-line','KPIs',0)+tb('oo','fa-scale-balanced','Opportunities & Obstacles',oo,'O&amp;O')+'<span class="wm-bd-stats" id="wmBdStats"></span>';
   wmPaintBoardStats();
   document.querySelectorAll('#wmWs .wm-wpane').forEach(p=>p.classList.toggle('on',p.dataset.p===WM.wtab));
 }
@@ -13869,6 +13869,7 @@ const WM_CSS='<style id="wmCss">'
   +'.wm-tdt2:hover .wm-tdmv-s,.wm-tdmv-s:focus{opacity:1}'
   +'@media(hover:none){.wm-tdmv-s{opacity:1}}'
   +'@media(max-width:900px){.wm-tdg{grid-template-columns:1fr!important}.wm-tdg-h.wm-tdg-p{display:none}.wm-tdg-h{border-left:0}.wm-tdg-h.off{flex-direction:row;padding:9px 11px}.wm-tdg-h.off .t{writing-mode:horizontal-tb;transform:none;flex:1}.wm-tdg-c{border-left:0}.wm-tdg-c.off,.wm-tdg-c.none{display:none}.wm-tdg-c::before{content:attr(data-l);display:block;font-size:10.5px;font-weight:800;color:#9AA0B4;text-transform:uppercase;letter-spacing:.05em;margin:6px 0 2px}}'
+  +'.wm-td-drafts{padding-bottom:0}.wm-td-drafts:has(#wmDrafts:empty){display:none}'
 +'</style>';
 /* ===== Global first-login onboarding (full screen, no sidebar) ===== */
 async function renderOnboarding(){
