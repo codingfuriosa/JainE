@@ -433,7 +433,7 @@ const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',po
    postsales.js?v=20261214 from its own script tag - a DIFFERENT url, a different cached file.
    Two people on the same build could see two different apps, which is exactly what "for some
    it is still the same" was. Both spellings are bumped together from now on. */
-const PAGE_SCRIPT_VERSION={'accountability.js':'5f4484bba7','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
+const PAGE_SCRIPT_VERSION={'accountability.js':'45eac5a698','insp-items.js':'7b022b36bf','postsales.js':'751e4040e1','scheduling.js':'724e365b36','accounts.js':'c69fd87dca','accounts-bank.js':'d127977980','accounts-books.js':'9a7060ae47','purchase.js':'de3d9e4107','purchase-indent.js':'c9c138b6fd','purchase-rfq.js':'3e159eff0a','purchase-po.js':'7896a91708','purchase-stores.js':'7ed802f801','purchase-reports.js':'7636d57fc8','engineering.js':'5e87aed3fd','engineering-boq.js':'87be928a08','engineering-wo.js':'3e075d95c5','engineering-amend.js':'2de7a60e3a','engineering-ra.js':'4b0d9a0c71','engineering-ret.js':'f956c58ac6'};
 /* Where module scripts are loaded from. '' in the readable nexus-core.js; the build sets it to 'min/'
    in the copy the pages actually load (min/nexus-core.js), so that copy pulls in the shrunk module
    files beside it. See tools/build.mjs. */
@@ -1118,7 +1118,7 @@ const NAV=[
     {id:'postsales',label:'Post Sales',icon:'fa-headset'},
     // Site Visit / Booked customers by PIN code on a map, month by month - src/core/41-lead-map.js
     {id:'lead_map',label:'Lead Map',icon:'fa-map-location-dot'},
-    // project information for Sales, verified before it shows (21 Nov 2026) - 60-reckoner.js
+    // project information for Pre-Sales and Sales calls (21 Nov 2026, rebuilt 23 Nov) - 60/62-reckoner
     {id:'reckoner',label:'Reckoner',icon:'fa-book-bookmark'},
   ]},
   {group:'Operations',items:[
@@ -1223,6 +1223,7 @@ function expandModules(ss){
   if(ss.has('custportal_photos')||ss.has('custportal_photo_approver')||ss.has('custportal_photo_backup')) ss.add('custportal_admin');
   if(ss.has('campaigns')) ss.add('wa_templates');   // WhatsApp Templates: everyone with Campaign Analytics (17 Nov 2026)
   if(ss.has('competitors_jg')) ss.add('competitors');   // Competitor Data, Jain Group tabs only (18 Nov 2026) - see cdJgOnly()
+  if(ss.has('crm_perf')) ss.add('crm');   // CRM & Sales, Performance Report tab only (25 Nov 2026) - see crmPerfOnly()
   ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
@@ -1231,6 +1232,10 @@ function expandModules(ss){
 /* TEMPORARILY (20 Nov 2026, the user: "for Administrator remove the Competitor Facebook and Google data temporarily in Competitor Data"): the Administrator (super admin) sees only the two Jain Group
    tabs, like the Jain Group-only accounts - the Meta Ads and Google Ads Transparency (competitor) tabs are hidden for them. Nothing is deleted; set CD_ADMIN_NO_COMPETITORS to false to bring them back. */
 const CD_ADMIN_NO_COMPETITORS=false;
+/* 'crm_perf' = CRM & Sales limited to its Performance Report tab (25 Nov 2026, Ayush: "Give Campaign Analytics and
+   Performance Report to Riya Dey" - Performance Report only). Someone who also holds 'crm' sees every tab. The database lets
+   'crm_perf' type the Spent amounts (acc.crm_perf_spend write policy). */
+function crmPerfOnly(){ if(state.super) return false; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('crm_perf')!==-1&&m.indexOf('crm')===-1; }
 function cdJgOnly(){ if(state.super)return CD_ADMIN_NO_COMPETITORS; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('competitors_jg')!==-1&&m.indexOf('competitors')===-1; }
 /* 'custportal_photos' = Customer Portal Admin limited to its Photos & Videos tab. The database
    enforces the same boundary (app.is_custportal_media_editor): such an account can write the four
@@ -1952,8 +1957,6 @@ const MODMETA={
   inventory:{icon:'fa-boxes-stacked',c:'#0f766e',bg:'#f0fdfa',desc:'One stock truth — indents, GRNs, issues, returns & moving-average valuation.',kpis:[['SKUs','248','fa-tags'],['Stock Value','₹3.4 Cr','fa-warehouse'],['Low Stock','6','fa-triangle-exclamation'],['Pending GRN','3','fa-truck-ramp-box']],cols:['Item','Category','In Stock','UoM','Value'],rows:[['OPC 53 Cement','Cement','420','Bags','₹1.6L'],['TMT Steel 12mm','Steel','18','MT','₹9.2L'],['River Sand','Aggregates','60','Brass','₹3.0L']]},
   procurement:{icon:'fa-cart-shopping',c:'#b45309',bg:'#fffbeb',desc:'Indent → RFQ → PO → GRN with multi-level approvals & 3-way match.',kpis:[['Open POs','14','fa-file-invoice'],['Pending Approval','5','fa-clock'],['Vendors','86','fa-store'],['Spend (mo)','₹62L','fa-indian-rupee-sign']],cols:['PO No','Vendor','Amount','Status','Date'],rows:[['PO-0042','ACC Cement','₹4.2L','Pending','27 Jun'],['PO-0041','Tata Steel','₹9.1L','Approved','25 Jun'],['PO-0040','Pidilite','₹1.3L','Received','22 Jun']]},
   finance:{icon:'fa-indian-rupee-sign',c:'#15803d',bg:'#f0fdf4',desc:'Director vault — collections, dues, payables & project P&L.',kpis:[['Collections (mo)','₹1.2 Cr','fa-arrow-down'],['Outstanding','₹3.8 Cr','fa-hourglass'],['Payables','₹64L','fa-file-invoice-dollar'],['Net Position','₹5.6 Cr','fa-scale-balanced']],cols:['Account','Type','Amount','Status','Date'],rows:[['Skyline Collections','Inflow','₹42L','Cleared','26 Jun'],['Contractor Payment','Outflow','₹18L','Pending','27 Jun']]},
-  hr:{icon:'fa-users',c:'#be123c',bg:'#fff1f2',desc:'Directory, attendance, payroll-grade data, performance & statutory.',kpis:[['Headcount','3','fa-users'],['Present Today','3','fa-user-check'],['On Leave','0','fa-plane'],['Open Requests','2','fa-inbox']],cols:['Employee','Department','Designation','Status','Joined'],rows:[['(salary columns are protected)','—','—','—','—']]},
-  recruitment:{icon:'fa-user-plus',c:'#0369a1',bg:'#f0f9ff',desc:'Hiring funnel — request → applications → interviews → offer → onboarding.',kpis:[['Open Roles','4','fa-briefcase'],['Applicants','37','fa-id-card'],['Interviews (wk)','6','fa-comments'],['Offers Out','2','fa-envelope-open-text']],cols:['Applicant','Role','Stage','Score','Status'],rows:[['Neha Verma','Site Engineer','Interview L2','82','Active'],['Karan Singh','Accountant','Shortlisted','—','Active']]},
   maintenance:{icon:'fa-screwdriver-wrench',c:'#7c3aed',bg:'#f5f3ff',desc:'Asset register, preventive-maintenance schedules & breakdown tracking.',kpis:[['Assets','64','fa-gears'],['PM Due (wk)','8','fa-calendar-check'],['Under Repair','2','fa-wrench'],['Downtime','3.2h','fa-clock']],cols:['Asset','Category','Location','Next PM','Status'],rows:[['DG Set 250kVA','Electrical','Skyline','02 Jul','Active'],['Passenger Lift 1','Mechanical','Greenfield','—','Under Repair']]},
   reports:{icon:'fa-chart-pie',c:'#1d4ed8',bg:'#eff4ff',desc:'Cross-module analytics, scoreboards & reconciliation tools.',kpis:[['Saved Reports','12','fa-floppy-disk'],['Reconciliations','4','fa-not-equal'],['Scheduled','3','fa-clock'],['Exports (mo)','28','fa-file-export']],cols:['Report','Module','Type','Last Run','Owner'],rows:[['Collections vs Demand','CRM','Reconciliation','Today','You'],['Stock Variance','Inventory','Reconciliation','Yesterday','You']]},
   gtd:{icon:'fa-brain',c:'#7c3aed',bg:'#f5f3ff',desc:'Getting Things Done — one trusted system: capture, clarify, organise, reflect, engage.',kpis:[['Inbox','9','fa-inbox'],['Next Actions','14','fa-bolt'],['Waiting On','5','fa-hourglass-half'],['Someday','21','fa-cloud']],cols:['Action','Context','Project','Due','Status'],rows:[['Finalise RERA filing','@office','Skyline','Today','Next'],['Call structural consultant','@calls','Riverdale','Tomorrow','Waiting'],['Review tender draft','@computer','Greenfield','2 days','Next']]},
@@ -1994,10 +1997,6 @@ const MODTABS={
     {t:'Collections',cols:['Account','Project','Amount','Mode','Date'],rows:[['Skyline Collections','Skyline','₹42L','RTGS','26 Jun'],['Greenfield','Greenfield','₹28L','Cheque','25 Jun']]},
     {t:'Payables',cols:['Payee','Type','Amount','Due','Status'],rows:[['Shree Const.','Contractor','₹18L','28 Jun','Pending'],['Tata Steel','Supplier','₹9.1L','01 Jul','Scheduled']]},
     {t:'Project P&L',cols:['Project','Revenue','Cost','Margin','Status'],rows:[['Skyline','₹62Cr','₹44Cr','29%','Healthy'],['Riverdale','₹18Cr','₹15Cr','17%','Watch']]}],
-  recruitment:[
-    {t:'Openings',cols:['Role','Dept','Location','Applicants','Status'],rows:[['Site Engineer','Projects','Mumbai','18','Open'],['Accountant','Finance','Mumbai','12','Open']]},
-    {t:'Applicants',cols:['Applicant','Role','Stage','Score','Status'],rows:[['Neha Verma','Site Engineer','Interview L2','82','Active'],['Karan Singh','Accountant','Shortlisted','—','Active']]},
-    {t:'Interviews',cols:['Candidate','Role','Round','Date','Panel'],rows:[['Neha Verma','Site Engineer','L2','30 Jun','PMO'],['Rohit S.','Sales Exec','L1','01 Jul','Sales Head']]}],
   maintenance:[
     {t:'Assets',cols:['Asset','Category','Location','Next PM','Status'],rows:[['DG Set 250kVA','Electrical','Skyline','02 Jul','Active'],['Lift 1','Mechanical','Greenfield','—','Under Repair']]},
     {t:'PM Schedule',cols:['Asset','Frequency','Last PM','Next PM','Owner'],rows:[['DG Set','Monthly','02 Jun','02 Jul','Facility'],['STP','Weekly','24 Jun','01 Jul','Facility']]},
@@ -9497,11 +9496,6 @@ window.setProfileSave=async function(){
 
 /* ============================ HUMAN RESOURCES ============================ */
 let HR_EMP=null, HR_DIR_Q='', HR_DIR_DEPT='', HR_ATT_DATE=null;
-async function hrEmployees(force){
-  if(HR_EMP&&!force)return HR_EMP;
-  try{const {data}=await sb.schema('hr').from('employees').select('id,emp_code,full_name,department,designation,email,phone,date_of_joining,location,reporting_to,status').order('full_name');HR_EMP=data||[];}catch(e){HR_EMP=[];}
-  return HR_EMP;
-}
 function hrName(code){const e=(HR_EMP||[]).find(x=>x.emp_code===code);return e?e.full_name:(code||'—');}
 function hrCan(){return state.super||(state.roles&&state.roles.hr);}
 function hrCanWrite(){return state.super||(state.roles&&['ADMIN','MANAGER','EDITOR','HR'].includes(state.roles.hr));}
@@ -9547,13 +9541,13 @@ function recGuard(){
   toast('Read-only — only HR, Abhay Mati and Administrators can change Recruitment records','err');
   return false;
 }
-const REC_WRITE_FNS=['rtAdd','rtRename','rtDelete','rtSave','rtUpdate','rtShareSend',
+const REC_WRITE_FNS=['rtSave','rtUpdate','rtShareSend',
   // mpEdit/mpUpdate are not here: whoever raised a hiring request may edit it too (tpMpCanChange).
-  'mpFillForm','mpEditSel','mpDeleteSel','mpDeleteOne','mpSave','tpTrEdit','tpTrEditSave',
+  'tpTrEdit','tpTrEditSave',
   'recUploadModal','recDeleteSel','recJdSave','recJdDelete',
-  'tpMpApprove','tpMpReject','tpMpRejectConfirm','tpMpDeleteOne','tpMpGenerate',
-  'tpRefConnect','tpRefConnectGo','tpRefReject','tpTrAdd','tpTrSave','tpTrEmailSel','tpTrEmailSelSend','tpTrDeleteSel',
-  'tpMuOpenMonth','tpMuDeleteRow'];
+  'tpMpGenerate',
+  'tpRefConnect','tpRefConnectGo','tpTrAdd','tpTrSave','tpTrEmailSel','tpTrEmailSelSend','tpTrDeleteSel',
+  'tpMuDeleteRow'];
 /* CONTROLS ARE DISABLED AND EXPLAINED, NOT DELETED.
 
    This used to call el.remove(), and that one decision cost more time today than any bug in the
@@ -9606,617 +9600,26 @@ function recWatchPerms(){
 }
 function hrEmpOptions(sel){return (HR_EMP||[]).map(e=>`<option value="${esc(e.emp_code)}" ${e.emp_code===sel?'selected':''}>${esc(e.full_name)} (${esc(e.emp_code)})</option>`).join('');}
 
-// Human Resources (New) -- retired hr.html's four tabs, rebuilt on talent's better Tracker/Monthly
-// Update (tpTracker/tpMonthlyUpdate: counted from hr.candidates, never hand-typed) instead of v1's
-// hrTracker/hrMonthlyUpdate, which are deleted. Resumes and Interview Qs had no v2 equivalent in
-// talent, so hrResumes/hrInterviewQs are reused as-is -- they, and tp*, disagree on which body
-// container id they render into (hrBody vs recBody), so the id switches per tab below.
+// Human Resources (New) -- retired hr.html's four tabs, rebuilt on talent's Tracker/Monthly
+// Update (tpTracker/tpMonthlyUpdate: counted from hr.candidates, never hand-typed). v1's
+// hrTracker/hrMonthlyUpdate and the hidden Interview Qs tab were deleted 23 Nov 2026. Resumes
+// (hrResumes) renders into hrBody while tp* render into recBody, so the id switches per tab below.
 VIEWS.hr_new=async function(v,seg){
   setCrumb(['People','Human Resources']);
-  const tabs=['Interviews','Monthly Progress','Resumes'];
+  // Renamed and extended 23 Nov 2026: Interviews -> Candidates, and Archive (rejected people) added at the end.
+  const tabs=['Candidates','Monthly Progress','Resumes','Archive'];
   const ti=mTab(seg,tabs.length);
-  const bodyId=(ti<=1)?'recBody':'hrBody';
+  const bodyId=(ti===2)?'hrBody':'recBody';
   v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-users','#be123c','Human Resources')
-    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Approving, editing and deleting here is limited to HR, Abhay Mati and Administrators.</div>')
+    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Editing and deleting here is limited to HR, Abhay Mati and Administrators.</div>')
     +mTabs('hr_new',tabs,ti)+'<div id="'+bodyId+'" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
   recWatchPerms();
   if(ti===0){await tpTracker();return;}
   if(ti===1){await tpMonthlyUpdate();return;}
-  /* Resumes is the last tab now. Interview Qs was removed: it was a library nobody was reaching
-     for, and it sat in the tab strip costing a decision on every visit. hrInterviewQs() is left in
-     the file rather than deleted, so nothing is lost if it is ever wanted back. */
+  if(ti===3){await tpArchive();return;}
+  // Resumes is the last tab now (Interview Qs was removed, and its code deleted 23 Nov 2026).
   await hrResumes();
 };
-
-/* ── Monthly Update ──
-   Rebuilt against hr.monthly_view. The nine columns — Tests Sent, Test Passed, Interview Scheduled,
-   Interview Done, Selected, Rejected, Hold, Backed Out, Joined — are COUNTED from hr.candidates,
-   never typed. The old screen was a grid of number boxes somebody had to keep in step with reality
-   by hand; every figure here is derived, so it cannot drift.
-   The first four columns are cumulative ("how many got at least this far") and read the candidate's
-   high-water mark, not their current stage — otherwise anybody who dropped out after their test
-   would still be counted as having been interviewed. The last five are exact outcomes. That split
-   lives in hr.tracker_stages.counts_as, so adding a stage is a database change, not a code change.
-   A candidate begins BELOW all nine, at 'Applied' (seq 0), so filling in the careers-page form no
-   longer reports a test as having been sent to them. Nothing counts them until something really
-   happens; how many applied is candidate_total, which hr.monthly_view returns separately. */
-let MU_MONTHS_CACHE=null, MU_CUR=null, MU_ROWS=null, MU_SEL=new Set();
-const MU_MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
-/* The nine column names come from the database (hr.tracker_stages) so the screen cannot disagree
-   with what the counts were computed against. The literal below is the same list, and is what gets
-   used if that one read fails — a stale header is better than a blank page. */
-let MU_STAGES=['Tests Sent','Test Passed','Interview Scheduled','Interview Done','Selected','Rejected','Hold','Backed Out','Joined'];
-let MU_STAGES_LOADED=false;
-function muMonthLabel(iso){
-  if(!iso) return '';
-  const parts=String(iso).split('-');
-  return (MU_MONTH_NAMES[parseInt(parts[1],10)-1]||'')+' '+parts[0];
-}
-async function muLoadStages(){
-  if(MU_STAGES_LOADED) return;
-  MU_STAGES_LOADED=true;
-  try{
-    const {data}=await sb.schema('hr').from('tracker_stages').select('seq,label').order('seq');
-    if(data&&data.length) MU_STAGES=data.map(function(s){return s.label;});
-  }catch(e){/* keep the literal order above */}
-}
-
-async function hrMonthlyUpdate(){
-  const b=$('hrBody');
-  if(MU_CUR!=null) return muRenderDetail(b);
-  loader(b);
-  await muLoadStages();
-  try{
-    const {data,error}=await sb.schema('hr').rpc('monthly_months');
-    if(error) throw error;
-    MU_MONTHS_CACHE=data||[];
-  }catch(e){
-    b.innerHTML='<div class="card card-pad empty" style="color:var(--err)">'+esc(e.message||String(e))+'</div>';
-    return;
-  }
-  muRenderList(b);
-}
-
-function muRenderList(b){
-  const rows=MU_MONTHS_CACHE||[];
-  let html='<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">'
-    +'<div class="sec-title" style="margin:0">Monthly Updates</div>'
-    +'<span class="mu-computed"><i class="fa-solid fa-circle-check"></i> Every figure is counted from the candidates — nothing is typed in</span>'
-    +'</div>';
-  if(!rows.length){
-    html+='<div class="card card-pad empty"><i class="fa-regular fa-calendar"></i>'
-      +'<div style="font-weight:600;color:var(--ink)">No months yet</div>'
-      +'<p style="max-width:400px;margin:6px auto 0">A month appears here as soon as a hiring request lands in it. '
-      +'Fill a ManPower Form in Recruitment to start one.</p></div>';
-  } else {
-    html+='<div class="mu-grid">'+rows.map(function(r){
-      const pending=Number(r.pending||0);
-      const pos=Number(r.positions||0);
-      return '<div class="mu-card" onclick="muViewMonth(\''+esc(r.row_month)+'\')">'
-        +'<div class="mu-card-icon"><i class="fa-solid fa-calendar-days"></i></div>'
-        +'<div class="mu-card-body"><div class="mu-card-label">'+esc(muMonthLabel(r.row_month))
-          +(pending?'<span class="mu-card-pending">'+pending+' to approve</span>':'')+'</div>'
-          +'<div class="mu-card-meta">'+pos+' position'+(pos===1?'':'s')+'</div></div>'
-        +'<i class="fa-solid fa-chevron-right mu-card-arrow"></i></div>';
-    }).join('')+'</div>';
-  }
-  b.innerHTML=html;
-}
-
-window.muViewMonth=function(iso){ MU_CUR=iso; MU_ROWS=null; MU_SEL=new Set(); hrMonthlyUpdate(); };
-window.muBack=function(){ MU_CUR=null; MU_ROWS=null; MU_SEL=new Set(); MU_MONTHS_CACHE=null; hrMonthlyUpdate(); };
-
-async function muRenderDetail(b){
-  await muLoadStages();
-  if(!MU_ROWS){
-    loader(b);
-    try{
-      const {data,error}=await sb.schema('hr').rpc('monthly_view',{p_month:MU_CUR});
-      if(error) throw error;
-      MU_ROWS=data||[];
-    }catch(e){
-      b.innerHTML='<div class="card card-pad empty" style="color:var(--err)">'+esc(e.message||String(e))+'</div>';
-      return;
-    }
-  }
-  const rows=MU_ROWS, stages=MU_STAGES;
-  const depts=[...new Set(rows.map(function(r){return r.department;}).filter(Boolean))].sort();
-  const n=MU_SEL.size;
-  const dis='opacity:.45;cursor:not-allowed;pointer-events:none';
-  const canAppr=hrCan();
-
-  const head='<tr>'
-    +'<th style="width:36px"><input type="checkbox" class="mu-cb" id="muChkAll" onchange="muToggleAll(this)"></th>'
-    +'<th>Position</th><th>Vacancies</th><th>Status</th><th>Hiring</th>'
-    +stages.map(function(s,i){ return '<th class="mu-n'+(i===0?' mu-split':'')+'">'+esc(s)+'</th>'; }).join('')
-    +'</tr>';
-
-  const body=rows.map(function(r){
-    const c=r.counts||{};
-    const st=r.approval_status||'Pending';
-    const cells=stages.map(function(s,i){
-      const v=Number(c[s]||0);
-      return '<td class="mu-n'+(i===0?' mu-split':'')+(v?'':' mu-zero')+'">'+v+'</td>';
-    }).join('');
-    let appr;
-    if(st==='Pending'){
-      appr=canAppr
-        ? '<span class="mu-appr">'
-            +'<button class="btn btn-sm btn-ok" onclick="event.stopPropagation();muApprove('+r.manpower_id+',true)"><i class="fa-solid fa-check"></i> Approve</button>'
-            +'<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();muApprove('+r.manpower_id+',false)"><i class="fa-solid fa-xmark"></i> Reject</button>'
-          +'</span>'
-        : '<span class="tag t-amber">Awaiting HR</span>';
-    } else if(st==='Rejected'){
-      appr='<span class="tag t-red" title="'+esc(r.rejection_reason||'')+'">Rejected</span>';
-    } else {
-      appr='<span class="tag t-green" title="'+esc('Approved by '+(r.approved_by||'—'))+'">Approved</span>';
-    }
-    const open=(r.hiring_status||'Open')==='Open';
-    const cls=[st==='Pending'?'mu-fresh':'', open?'':'mu-closed'].filter(Boolean).join(' ');
-    return '<tr data-id="'+r.row_id+'" data-pos="'+esc((r.position_title||'').toLowerCase())+'" data-dept="'+esc(r.department||'')+'"'
-      +(cls?' class="'+cls+'"':'')+'>'
-      +'<td><input type="checkbox" class="mu-cb mu-row-cb" data-id="'+r.row_id+'" onchange="muRowCheck(this)"></td>'
-      +'<td class="mu-pos">'+esc(r.position_title||'—')
-        +'<div class="mu-sub">'+esc(r.department||'No department')
-        +(r.raised_by?' · raised by '+esc(r.raised_by):'')
-        +(r.priority==='Urgent'?' · <b style="color:var(--err)">Urgent</b>':'')+'</div></td>'
-      +'<td>'+esc(r.vacancies||'—')+'</td>'
-      +'<td>'+appr+'</td>'
-      +'<td class="mu-hire">'+muHireCell(r,open,canAppr)+'</td>'
-      +cells
-      +'</tr>';
-  }).join('');
-
-  b.innerHTML='<div class="mu-detail-bar">'
-      +'<button class="btn" onclick="muBack()"><i class="fa-solid fa-arrow-left"></i> Back</button>'
-      +'<h2 style="margin:0;font-size:18px;font-weight:700"><i class="fa-solid fa-calendar-days" style="color:#be123c;margin-right:8px"></i>'+esc(muMonthLabel(MU_CUR))+'</h2>'
-      +'<div class="mu-detail-actions">'
-        +'<button class="btn btn-sm" onclick="muRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
-        +'<button class="btn btn-sm" id="muDelBtn" '+(n?'':'disabled style="'+dis+'"')
-          +' onclick="muDeleteSel()"><i class="fa-solid fa-trash"></i> Delete'+(n?' ('+n+')':'')+'</button>'
-      +'</div>'
-    +'</div>'
-    +(rows.length
-      ? '<div class="mu-filters">'
-          +'<div class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i>'
-            +'<input id="muQ" placeholder="Search position…" oninput="muFilter()"></div>'
-          +'<select class="mu-sel" id="muDeptF" onchange="muFilter()"><option value="">All Departments</option>'
-            +depts.map(function(d){return '<option>'+esc(d)+'</option>';}).join('')+'</select>'
-          +'<select class="mu-sel" id="muApprF" onchange="muFilter()"><option value="">All</option>'
-            +'<option value="Pending">To approve</option><option value="Approved">Approved</option><option value="Rejected">Rejected</option></select>'
-          +'<select class="mu-sel" id="muHireF" onchange="muFilter()"><option value="">Open and closed</option>'
-            +'<option value="Open">Still hiring</option><option value="Closed">Closed</option></select>'
-          +'<span class="mu-count" id="muCount">'+rows.length+' position'+(rows.length===1?'':'s')+'</span>'
-          +'<span class="mu-computed" style="margin-left:auto"><i class="fa-solid fa-circle-check"></i> Counted live from the Tracker</span>'
-        +'</div>'
-        +'<div class="mu-tbl-wrap"><table class="mu-tbl"><thead>'+head+'</thead><tbody id="muTbody">'+body+'</tbody></table>'
-        +'<div id="muNoMatch" class="empty" style="display:none;padding:26px">No matches</div></div>'
-      : '<div class="card card-pad empty"><i class="fa-regular fa-folder-open"></i>'
-        +'<div style="font-weight:600;color:var(--ink)">Nothing in '+esc(muMonthLabel(MU_CUR))+' yet</div>'
-        +'<p style="max-width:400px;margin:6px auto 0">Positions appear here from hiring requests.</p></div>');
-}
-
-/* Closing a position is what takes its page off the website. hr.public_position only answers for
-   a requisition whose status is Open, so the moment this is closed thejaingroup.com/career/<slug>
-   stops showing the role and says it is no longer open instead. Nothing else has to be changed and
-   nothing has to be taken down by hand. */
-function muHireCell(r,open,canAppr){
-  if(!r.manpower_id) return '<span style="color:var(--slate-2)">—</span>';
-  if(!r.has_description){
-    return '<span class="tag t-gray" title="A position goes live once its job description is written">Not live</span>';
-  }
-  const live='<span class="tag t-green" title="'+esc('Live at /career/'+(r.slug||''))+'">Hiring</span>';
-  const shut='<span class="tag t-gray" title="'+esc(r.closed_at?('Closed '+muWhen(r.closed_at)):'Closed')+'">Closed</span>';
-  if(!canAppr) return open?live:shut;
-  return '<span class="mu-hire-wrap">'+(open?live:shut)
-    +'<button class="btn btn-sm" title="'+(open?'Close hiring — this takes the page off the website'
-                                              :'Reopen hiring — the page goes back up')+'"'
-    +' onclick="event.stopPropagation();muSetHiring('+r.manpower_id+','+(open?'false':'true')+')">'
-    +'<i class="fa-solid fa-'+(open?'lock':'lock-open')+'"></i></button></span>';
-}
-function muWhen(ts){
-  if(!ts) return '';
-  try{ return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
-  catch(e){ return String(ts); }
-}
-window.muSetHiring=async function(manpowerId,open){
-  if(!hrCan()){ toast('Only HR can open or close a position','err'); return; }
-  const row=(MU_ROWS||[]).find(function(r){ return r.manpower_id===manpowerId; })||{};
-  const who=row.position_title||'this position';
-  const msg=open
-    ? 'Reopen hiring for “'+who+'”? Its page goes back up on the website and candidates can apply again.'
-    : 'Close hiring for “'+who+'”? Its page comes off the website immediately — anyone opening the '
-      +'link will be told the position is no longer open. Everything already recorded is kept.';
-  if(!await confirmDialog(msg, open
-      ? {title:'Reopen hiring', okLabel:'Reopen', icon:'fa-lock-open', danger:false}
-      : {title:'Close hiring',  okLabel:'Close',  icon:'fa-lock'})) return;
-  try{
-    const {error}=await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:manpowerId,p_open:open});
-    if(error) throw error;
-  }catch(e){ toast((e&&e.message)||String(e),'err'); return; }
-  toast(open?'Hiring reopened — the page is live again':'Closed — the page is off the website','ok');
-  MP_RECORDS=null;
-  muRefresh();
-};
-
-window.muToggleAll=function(el){
-  MU_SEL=new Set();
-  document.querySelectorAll('#muTbody tr').forEach(function(tr){
-    if(tr.style.display==='none') return;   // only what the filter is actually showing
-    const cb=tr.querySelector('.mu-row-cb'); if(!cb) return;
-    cb.checked=el.checked;
-    tr.classList.toggle('mu-selected',el.checked);
-    if(el.checked) MU_SEL.add(parseInt(cb.dataset.id,10));
-  });
-  muSyncDelBtn();
-};
-window.muRowCheck=function(cb){
-  const id=parseInt(cb.dataset.id,10);
-  if(cb.checked) MU_SEL.add(id); else MU_SEL.delete(id);
-  const tr=cb.closest('tr'); if(tr) tr.classList.toggle('mu-selected',cb.checked);
-  muSyncDelBtn();
-};
-function muSyncDelBtn(){
-  const btn=$('muDelBtn'); if(!btn) return;
-  const n=MU_SEL.size;
-  btn.disabled=!n;
-  btn.style.cssText=n?'':'opacity:.45;cursor:not-allowed;pointer-events:none';
-  btn.innerHTML='<i class="fa-solid fa-trash"></i> Delete'+(n?' ('+n+')':'');
-}
-window.muFilter=function(){
-  const q=(($('muQ')||{}).value||'').trim().toLowerCase();
-  const dept=($('muDeptF')||{}).value||'';
-  const appr=($('muApprF')||{}).value||'';
-  const hire=($('muHireF')||{}).value||'';
-  let shown=0;
-  document.querySelectorAll('#muTbody tr').forEach(function(tr){
-    const row=(MU_ROWS||[]).find(function(r){return String(r.row_id)===tr.dataset.id;})||{};
-    let ok=true;
-    if(q && (tr.dataset.pos||'').indexOf(q)===-1) ok=false;
-    if(ok && dept && (tr.dataset.dept||'')!==dept) ok=false;
-    if(ok && appr && (row.approval_status||'Pending')!==appr) ok=false;
-    if(ok && hire){
-      const isOpen=(row.hiring_status||'Open')==='Open';
-      if(hire==='Open' ? !isOpen : isOpen) ok=false;
-    }
-    tr.style.display=ok?'':'none';
-    if(ok) shown++;
-  });
-  const c=$('muCount'); if(c) c.textContent=shown+' position'+(shown===1?'':'s');
-  const nm=$('muNoMatch'); if(nm) nm.style.display=shown?'none':'block';
-};
-window.muRefresh=function(){ MU_ROWS=null; MU_SEL=new Set(); hrMonthlyUpdate(); };
-
-/* Deleting a row takes the POSITION out of this month. The candidates attached to it are the real
-   record of what happened, so this is refused rather than cascading — move or remove the people
-   first. The requisition itself is never deleted here. */
-window.muDeleteSel=async function(){
-  const ids=[...MU_SEL];
-  if(!ids.length) return;
-  if(!hrCan()){ toast('Only HR can change the Monthly Update','err'); return; }
-  const picked=(MU_ROWS||[]).filter(function(r){return ids.indexOf(r.row_id)>-1;});
-  const withPeople=picked.filter(function(r){return Number(r.candidate_total||0)>0;});
-  if(withPeople.length){
-    toast(withPeople.length===1
-      ? '“'+(withPeople[0].position_title||'That position')+'” still has '+withPeople[0].candidate_total+' candidate(s) — remove them first'
-      : withPeople.length+' of the selected positions still have candidates — remove them first','err');
-    return;
-  }
-  const what=ids.length===1
-    ? 'Remove “'+((picked[0]&&picked[0].position_title)||'this position')+'” from '+muMonthLabel(MU_CUR)+'?'
-    : 'Remove '+ids.length+' positions from '+muMonthLabel(MU_CUR)+'?';
-  if(!await confirmDialog(what+' The hiring request itself is not deleted.',
-      {title:'Remove from month', okLabel:'Remove'})) return;
-  const {error}=await sb.schema('hr').from('tracker_rows').delete().in('id',ids);
-  if(error){ toast(error.message,'err'); return; }
-  toast(ids.length===1?'Position removed':ids.length+' positions removed','ok');
-  try{usageQueue('hr.monthly_update.delete_rows_or_whole_month','delete',{title:(ids.length===1?((picked[0]&&picked[0].position_title)||'1 position'):ids.length+' positions')+' — '+muMonthLabel(MU_CUR)});}catch(_e){}
-  muRefresh();
-};
-
-/* Approve / Reject a fresh row. The decision is recorded against the REQUISITION, which is what the
-   emailed one-click links act on as well, so both routes land in exactly the same place. */
-window.muApprove=async function(manpowerId,ok){
-  if(!manpowerId){ toast('This row has no hiring request behind it','err'); return; }
-  if(!hrCan()){ toast('Only HR can approve a hiring request','err'); return; }
-  const row=(MU_ROWS||[]).find(function(r){return r.manpower_id===manpowerId;})||{};
-  const who=row.position_title||'this request';
-  /* confirmDialog defaults to danger:true with the OK button labelled "Delete" - which turned the
-     Approve prompt into a red delete warning. Both buttons are named for what they actually do. */
-  const okd=await confirmDialog(
-    (ok?'Approve the hiring request for “':'Reject the hiring request for “')+who+'”?',
-    ok ? {title:'Approve hiring request', okLabel:'Approve', icon:'fa-circle-check', danger:false}
-       : {title:'Reject hiring request',  okLabel:'Reject',  icon:'fa-circle-xmark', danger:true});
-  if(!okd) return;
-  const patch=ok
-    ? {approval_status:'Approved', approved_by:state.email, approved_at:new Date().toISOString(), rejection_reason:null}
-    : {approval_status:'Rejected', approved_by:state.email, approved_at:new Date().toISOString()};
-  const {error}=await sb.schema('hr').from('manpower_requests').update(patch).eq('id',manpowerId);
-  if(error){ toast(error.message,'err'); return; }
-  toast(ok?'Approved':'Rejected','ok');
-  MP_RECORDS=null;          // the Recruitment ManPower list shows the same status
-  muRefresh();
-};
-
-window.muReload=function(){ MU_MONTHS_CACHE=null; MU_ROWS=null; MU_CUR=null; MU_SEL=new Set(); if(PAGE==='hr')renderPage(); };
-
-/* Preview opens the CV in a tab; Download saves it under the candidate's own name rather than the
-   stamped storage filename. Both go through s3OpenSigned, which mints a short-lived signed URL -
-   the bucket itself stays private, exactly as it does for the Resumes tab. */
-function trResumeCell(r){
-  const cv=r.candidate_id?(window._trResume||{})[r.candidate_id]:null;
-  if(!cv||!cv.storage_path) return '<span style="color:var(--slate-2)">—</span>';
-  const nm=(r.candidate_name||'Candidate').replace(/[^A-Za-z0-9 .()-]/g,'').trim()||'Candidate';
-  const ext=String(cv.file_name||'').split('.').pop().toLowerCase();
-  const dl=nm+' - CV'+(ext&&ext.length<=5?'.'+ext:'');
-  return '<span style="display:inline-flex;gap:4px">'
-    +'<button class="btn btn-sm" title="Preview the CV" onclick="trResumeOpen('+r.id+',0)"><i class="fa-regular fa-eye"></i></button>'
-    +'<button class="btn btn-sm" title="Download the CV" onclick="trResumeOpen('+r.id+',1,&quot;'+esc(dl)+'&quot;)"><i class="fa-solid fa-download"></i></button>'
-    +'</span>';
-}
-window.trResumeOpen=function(trackerId,download,name){
-  const r=(window._trRows||[]).find(function(x){return x.id===trackerId;});
-  const cv=r&&r.candidate_id?(window._trResume||{})[r.candidate_id]:null;
-  if(!cv||!cv.storage_path){ toast('No CV on this row','err'); return; }
-  s3OpenSigned(cv.storage_path, download?(name||'CV'):null);
-};
-
-/* ── Interview Tracker ── */
-async function hrTracker(){
-  const b=$('hrBody');
-  loader(b);
-  let rows=[];
-  try{const {data}=await sb.schema('hr').from('interview_tracker').select('*').order('id',{ascending:false});rows=data||[];}catch(e){}
-  /* The CV for each row. interview_tracker does not hold one - the candidate does - so the resumes
-     are fetched in a single follow-up query keyed on the candidates actually on screen, rather than
-     one request per row. Applications from the careers pages arrive with a CV already attached;
-     rows typed in by hand simply have none. */
-  window._trResume={};
-  const candIds=[...new Set(rows.map(function(r){return r.candidate_id;}).filter(Boolean))];
-  if(candIds.length){
-    try{
-      const {data}=await sb.schema('hr').from('candidates')
-        .select('id,resume_id,resumes(id,file_name,storage_path)').in('id',candIds);
-      (data||[]).forEach(function(c){ if(c&&c.resumes) window._trResume[c.id]=c.resumes; });
-    }catch(e){/* the column just shows a dash */}
-  }
-  window._trRows=rows;
-  window._trSel=new Set();
-  const fbTag=s=>{
-    const m={'Shortlisted':'tr-green','Selected':'tr-green','Rejected':'tr-red','No Show':'tr-gray','Pending':'tr-amber','Hold':'tr-amber'};
-    return s?`<span class="tr-tag tr-tag--${(m[s]||'tr-amber').replace('tr-','')}">${esc(s)}</span>`:'';
-  };
-  const cel=v=>v?esc(v):'';
-  b.innerHTML=`
-    <style>
-      .tr-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-      .tr-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
-      .tr-filters{display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap;min-width:0}
-      .tr-sw{position:relative;display:flex;align-items:center;min-width:0}
-      .tr-sw i{position:absolute;left:10px;color:var(--slate);font-size:12px;pointer-events:none}
-      .tr-sw input{padding-left:28px;height:36px;min-width:190px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:var(--bg-card);color:var(--ink)}
-      .tr-sw input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
-      select.tr-sel{height:36px;padding:0 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:var(--bg-card);color:var(--ink);min-width:140px;cursor:pointer}
-      select.tr-sel:focus{outline:none;border-color:var(--brand)}
-      .tr-count{font-size:12.5px;color:var(--slate);white-space:nowrap;padding:0 2px}
-      .tr-tag{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
-      .tr-tag--green{background:#d1fae5;color:#065f46}
-      .tr-tag--red{background:#fee2e2;color:#991b1b}
-      .tr-tag--gray{background:#f1f5f9;color:#475569}
-      .tr-tag--amber{background:#fef3c7;color:#92400e}
-      #trTbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:1580px;table-layout:fixed}
-      #trTbl thead th{background:var(--bg-subtle,#f8fafc);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);padding:11px 14px;border-bottom:2px solid var(--line);text-align:left;white-space:normal;word-break:break-word;vertical-align:bottom}
-      #trTbl tbody tr{border-bottom:1px solid var(--line-2);transition:background .12s}
-      #trTbl tbody tr:hover{background:var(--bg-hover,#f8fafc)}
-      #trTbl tbody tr.tr-selected{background:#eff6ff}
-      #trTbl tbody td{padding:12px 14px;vertical-align:middle;white-space:normal;word-break:break-word;overflow-wrap:anywhere;line-height:1.4}
-      #trTbl td.tr-nowrap,#trTbl th.tr-nowrap{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .tr-cb{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
-      @media(max-width:900px){
-        .tr-toolbar{flex-direction:column;align-items:stretch}
-        .tr-actions{width:100%}
-        .tr-actions .btn{flex:1 1 auto;justify-content:center}
-        .tr-count{width:100%;text-align:center;order:99}
-        .tr-filters{margin-left:0;width:100%}
-        .tr-sw{width:100%}
-        .tr-sw input{min-width:0;width:100%}
-        select.tr-sel{min-width:0;width:100%}
-        #trTbl{min-width:1400px;font-size:13px}
-        #trTbl thead th,#trTbl tbody td{padding:9px 10px}
-      }
-    </style>
-    <div class="tr-toolbar">
-      <div class="tr-actions">
-        <button class="btn btn-primary" onclick="trackerCreate()"><i class="fa-solid fa-plus"></i> Add</button>
-        <button class="btn" id="trEditBtn" onclick="trackerEditSel()" disabled style="opacity:.45"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn" id="trDelBtn" onclick="trackerDeleteSel()" disabled style="opacity:.45;color:var(--err);border-color:var(--err)"><i class="fa-solid fa-trash"></i> Delete</button>
-        <span class="tr-count" id="trCount">${rows.length} entries</span>
-      </div>
-      <div class="tr-filters">
-        <div class="tr-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="trQ" placeholder="Search name, position…" oninput="trackerFilter()"></div>
-        <select class="tr-sel" id="trFbF" onchange="trackerFilter()">
-          <option value="">All Feedback</option>
-          <option>Shortlisted</option><option>Selected</option><option>Rejected</option><option>No Show</option><option>Hold</option>
-        </select>
-        <select class="tr-sel" id="trEntityF" onchange="trackerFilter()">
-          <option value="">All Entities</option>
-          ${[...new Set(rows.map(r=>r.entity).filter(Boolean))].sort().map(e=>`<option>${esc(e)}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-    <div class="card" style="overflow:hidden">
-      <div style="overflow-x:auto">
-      <table id="trTbl">
-        <thead><tr>
-          <th class="tr-nowrap" style="width:36px"><input type="checkbox" class="tr-cb" id="trChkAll" onchange="trToggleAll(this)"></th>
-          <th style="width:14%">Candidate</th><th style="width:11%">Position</th><th style="width:9%">Source</th><th style="width:9%">Entity</th><th class="tr-nowrap" style="width:12%">Phone</th><th style="width:14%">Email</th><th class="tr-nowrap" style="width:14%">Date & Time</th><th class="tr-nowrap" style="width:11%">Feedback</th><th class="tr-nowrap" style="width:9%">Resumes</th><th style="width:14%">Notes</th>
-        </tr></thead>
-        <tbody id="trTbody">
-          ${rows.length?rows.map(r=>`<tr data-id="${r.id}" data-name="${esc((r.candidate_name||'').toLowerCase())}" data-pos="${esc((r.position||'').toLowerCase())}" data-fb="${esc(r.feedback||'')}" data-entity="${esc((r.entity||'').toLowerCase())}">
-            <td class="tr-nowrap"><input type="checkbox" class="tr-cb tr-row-cb" data-id="${r.id}" onchange="trRowCheck(this)"></td>
-            <td style="font-weight:600">${cel(r.candidate_name)}</td>
-            <td style="color:var(--slate)">${cel(r.position)}</td>
-            <td style="font-size:12px;color:var(--slate)">${cel(r.source)}</td>
-            <td style="font-size:12px">${cel(r.entity)}</td>
-            <td class="tr-nowrap" style="font-family:monospace;font-size:12px">${cel(r.number)}</td>
-            <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" onclick="hrTrackerMailed(${esc(JSON.stringify(r.candidate_name||''))})" style="color:var(--brand)">${esc(r.email)}</a>`:''}</td>
-            <td class="tr-nowrap" style="font-size:12px;color:var(--slate)">${cel(r.scheduled_date)}</td>
-            <td class="tr-nowrap">${fbTag(r.feedback)}</td>
-            <td class="tr-nowrap">${trResumeCell(r)}</td>
-            <td style="font-size:12px;color:var(--slate)">${cel(r.notes)}</td>
-          </tr>`).join(''):'<tr><td colspan="11"><div class="empty" style="padding:32px"><i class="fa-regular fa-calendar"></i><div style="font-weight:600;color:var(--ink)">No interviews yet</div><p>Click <b>Add</b> to schedule the first interview.</p></div></td></tr>'}
-        </tbody>
-      </table>
-      </div>
-    </div>`;
-}
-window.hrTrackerMailed=function(nm){
-  usageQueue('hr.interview_tracker.email_candidate_from_list','view',{title:nm||undefined});
-};
-window.trRowCheck=function(cb){
-  const id=Number(cb.dataset.id);
-  if(cb.checked)window._trSel.add(id);else window._trSel.delete(id);
-  cb.closest('tr').classList.toggle('tr-selected',cb.checked);
-  trUpdateToolbar();
-};
-window.trToggleAll=function(master){
-  document.querySelectorAll('.tr-row-cb').forEach(cb=>{
-    const tr=cb.closest('tr');if(tr.style.display==='none')return;
-    cb.checked=master.checked;
-    const id=Number(cb.dataset.id);
-    if(master.checked)window._trSel.add(id);else window._trSel.delete(id);
-    tr.classList.toggle('tr-selected',master.checked);
-  });
-  trUpdateToolbar();
-};
-window.trUpdateToolbar=function(){
-  const n=window._trSel.size;
-  const e=$('trEditBtn'),d=$('trDelBtn');
-  if(e){e.disabled=(n!==1);e.style.opacity=(n===1)?'1':'.45';}
-  if(d){d.disabled=(n===0);d.style.opacity=(n>0)?'1':'.45';}
-};
-window.trackerFilter=function(){
-  const q=($('trQ').value||'').toLowerCase();
-  const fb=$('trFbF').value;
-  const ent=$('trEntityF').value.toLowerCase();
-  let vis=0;
-  document.querySelectorAll('#trTbody tr[data-id]').forEach(tr=>{
-    const nm=tr.dataset.name||'',pos=tr.dataset.pos||'',f=tr.dataset.fb||'',e=tr.dataset.entity||'';
-    const show=(!q||(nm.includes(q)||pos.includes(q)))&&(!fb||f===fb)&&(!ent||e===ent);
-    tr.style.display=show?'':'none';if(show)vis++;
-    if(!show&&tr.querySelector('.tr-row-cb').checked){
-      tr.querySelector('.tr-row-cb').checked=false;
-      window._trSel.delete(Number(tr.dataset.id));
-      tr.classList.remove('tr-selected');
-    }
-  });
-  const c=$('trCount');if(c)c.textContent=vis+' entries';
-  trUpdateToolbar();
-  usageQueueDebounced('hr.interview_tracker.search_filter_interviews', q);
-};
-window.trackerCreate=function(){
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-calendar-check"></i> Schedule Interview</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div class="two"><div><label>Candidate Name *</label><input id="trFName" class="sel" placeholder="Full name"></div>
-    <div><label>Position *</label><input id="trFPos" class="sel" placeholder="e.g. Sales Executive"></div></div>
-    <div class="two"><div><label>Entity</label><input id="trFEntity" class="sel" placeholder="e.g. Rajanya, Zainab"></div>
-    <div><label>Source</label><input id="trFSrc" class="sel" placeholder="e.g. Naukri, Apna, Referral"></div></div>
-    <div class="two"><div><label>Interview Date</label><input id="trFDate" class="sel" type="date"></div>
-    <div><label>Interview Time</label><input id="trFTime" class="sel" type="time"></div></div>
-    <div class="two"><div><label>Phone</label><input id="trFNum" class="sel" placeholder="10-digit number"></div>
-    <div><label>Email</label><input id="trFEmail" class="sel" type="email" placeholder="candidate@email.com"></div></div>
-    <div class="two"><div><label>Feedback</label><select id="trFFb" class="sel">
-      <option value="">— Select —</option><option>Shortlisted</option><option>Selected</option><option>Rejected</option><option>No Show</option><option>Hold</option>
-    </select></div>
-    <div><label>Notes</label><input id="trFNotes" class="sel" placeholder="Any remarks (optional)"></div></div>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="trSaveBtn" onclick="trackerSave()"><i class="fa-solid fa-check"></i> Save</button></div>`);
-};
-function trDateStr(){
-  const d=($('trFDate').value||'').trim(),t=($('trFTime').value||'').trim();
-  if(d&&t){const [y,mo,dy]=d.split('-');const [h,mi]=t.split(':');const hr=parseInt(h);const ampm=hr>=12?'PM':'AM';const h12=hr%12||12;return `${parseInt(dy)} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(mo)-1]}, ${y} @ ${h12}:${mi} ${ampm}`;}
-  if(d){const [y,mo,dy]=d.split('-');return `${parseInt(dy)} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(mo)-1]}, ${y}`;}
-  return '';
-}
-window.trackerSave=async function(){
-  const name=($('trFName').value||'').trim(),pos=($('trFPos').value||'').trim();
-  if(!name||!pos){toast('Name and position required','err');return;}
-  const btn=$('trSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const dateStr=trDateStr();
-  const fb=($('trFFb').value||'').trim();
-  const notes=($('trFNotes').value||'').trim();
-  const {error}=await sb.schema('hr').from('interview_tracker').insert({
-    candidate_name:name,position:pos,entity:($('trFEntity').value||'').trim()||null,
-    source:($('trFSrc').value||'').trim()||null,scheduled_date:dateStr||null,
-    number:($('trFNum').value||'').trim()||null,email:($('trFEmail').value||'').trim()||null,
-    feedback:fb||null,notes:notes||null
-  });
-  if(error){toast('Could not save: '+error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
-  closeModal();toast('Interview scheduled','ok');hrTracker();
-};
-window.trackerEditSel=function(){
-  const sel=[...window._trSel];
-  if(sel.length===0){toast('Select a row first','err');return;}
-  if(sel.length>1){toast('Select only one entry to edit','err');return;}
-  const r=(window._trRows||[]).find(x=>x.id===sel[0]);if(!r)return;
-  // Parse date back for input
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit Interview</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div class="two"><div><label>Candidate Name *</label><input id="trFName" class="sel" value="${esc(r.candidate_name||'')}"></div>
-    <div><label>Position *</label><input id="trFPos" class="sel" value="${esc(r.position||'')}"></div></div>
-    <div class="two"><div><label>Entity</label><input id="trFEntity" class="sel" value="${esc(r.entity||'')}"></div>
-    <div><label>Source</label><input id="trFSrc" class="sel" value="${esc(r.source||'')}"></div></div>
-    <div class="two"><div><label>Date & Time (text)</label><input id="trFDateTxt" class="sel" value="${esc(r.scheduled_date||'')}" placeholder="e.g. 15 Jul, Tuesday @ 3 PM"></div>
-    <div><label>Phone</label><input id="trFNum" class="sel" value="${esc(r.number||'')}"></div></div>
-    <div class="two"><div><label>Email</label><input id="trFEmail" class="sel" value="${esc(r.email||'')}"></div>
-    <div><label>Feedback</label><select id="trFFb" class="sel">
-      <option value="">— Select —</option>${['Shortlisted','Selected','Rejected','No Show','Hold'].map(s=>`<option ${r.feedback===s?'selected':''}>${s}</option>`).join('')}
-    </select></div></div>
-    <div><label>Notes</label><input id="trFNotes" class="sel" value="${esc(r.notes||'')}" placeholder="Any remarks (optional)"></div>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="trSaveBtn" onclick="trackerUpdate(${r.id})"><i class="fa-solid fa-check"></i> Update</button></div>`);
-};
-window.trackerUpdate=async function(id){
-  const name=($('trFName').value||'').trim(),pos=($('trFPos').value||'').trim();
-  if(!name||!pos){toast('Name and position required','err');return;}
-  const btn=$('trSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {error}=await sb.schema('hr').from('interview_tracker').update({
-    candidate_name:name,position:pos,entity:($('trFEntity').value||'').trim()||null,
-    source:($('trFSrc').value||'').trim()||null,scheduled_date:($('trFDateTxt').value||'').trim()||null,
-    number:($('trFNum').value||'').trim()||null,email:($('trFEmail').value||'').trim()||null,
-    feedback:($('trFFb').value||'')||null,notes:($('trFNotes').value||'').trim()||null
-  }).eq('id',id);
-  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Update';}return;}
-  closeModal();toast('Updated','ok');hrTracker();
-};
-window.trackerDeleteSel=async function(){
-  const sel=[...window._trSel];if(!sel.length)return;
-  if(!await confirmDialog(`Delete ${sel.length} entr${sel.length>1?'ies':'y'}?`))return;
-  const {error}=await sb.schema('hr').from('interview_tracker').delete().in('id',sel);
-  if(error){toast(error.message,'err');return;}
-  toast(sel.length>1?`${sel.length} entries deleted`:'Entry deleted','ok');
-  hrTracker();
-};
-window.trackerDelete=async function(id){
-  if(!await confirmDialog('Delete this entry?'))return;
-  const {error}=await sb.schema('hr').from('interview_tracker').delete().eq('id',id);
-  if(error){toast(error.message,'err');return;}
-  toast('Deleted','ok');hrTracker();
-};
-
-/* ── AI edge function helper (shared by Resumes + Interview Qs) ── */
-async function resumeAI(payload){
-  const {data:{session}}=await sb.auth.getSession();
-  const token=session&&session.access_token;
-  const res=await fetch(SUPABASE_URL+'/functions/v1/resume-ai',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-    body:JSON.stringify(payload)
-  });
-  const out=await res.json().catch(()=>({}));
-  if(!res.ok||out.error)throw new Error(out.error||('resume-ai '+res.status));
-  return out;
-}
 
 /* ── Resumes (AI-parsed resume bank) ── */
 let RS_ROWS=null, RS_SEARCH=null, RS_SEL=new Set(), RS_Q='';
@@ -10517,15 +9920,6 @@ async function rsParseUploaded(ids){
   if(failed) toast(failed+' CV'+(failed===1?' could':'s could')+' not be read \u2014 the file is still there, open it to check','err');
 }
 
-/* Download keeps the candidate's own name on the file rather than the stamped storage name, the
-   same as the Tracker's Resumes column does. */
-window.rsDownload=function(id){
-  const r=(RS_ROWS||[]).find(x=>x.id===id);
-  if(!r||!r.storage_path){ toast('No file on this row','err'); return; }
-  const base=(r.candidate_name||r.file_name||'Resume').replace(/[^A-Za-z0-9 .()-]/g,'').trim()||'Resume';
-  const ext=String(r.file_name||'').split('.').pop().toLowerCase();
-  s3OpenSigned(r.storage_path, base+(base.toLowerCase().endsWith('.'+ext)?'':(ext&&ext.length<=5?'.'+ext:'')));
-};
 async function rsGet(id){const {data}=await sb.schema('hr').from('resumes').select('*').eq('id',id).single();return data;}
 window.rsPreview=async function(id){
   const r=await rsGet(id);if(!r||!r.storage_path){toast('No file attached','');return;}
@@ -10555,93 +9949,6 @@ async function hrRemoveFiles(rows){
   }));
   return paths.length;
 }
-
-window.rsDelete=async function(id){
-  if(!await confirmDialog(
-      'Delete this CV permanently? If somebody is still waiting to be approved on the strength of '
-      +'it, their approval task is cancelled too \u2014 there would be nothing left to read.',
-      {title:'Delete CV', okLabel:'Delete', icon:'fa-trash', danger:true}))return;
-  /* Through hr.resume_delete rather than a plain delete, so the rule about pending approval
-     tasks holds however the CV is removed. */
-  const {data,error}=await sb.schema('hr').rpc('resume_delete',{p_ids:[id]});
-  if(error){toast('Could not delete: '+error.message,'err');return;}
-  await hrRemoveFiles(data);
-  RS_ROWS=(RS_ROWS||[]).filter(x=>x.id!==id);
-  if(RS_SEARCH)RS_SEARCH=RS_SEARCH.filter(x=>x.id!==id);
-  toast('Deleted','ok');rsRender();
-};
-
-/* ── Interview Qs (AI-generated interview guides) ── */
-let IG_ROWS=null;
-async function hrInterviewQs(){
-  const b=$('hrBody');loader(b);
-  try{const {data,error}=await sb.schema('hr').from('interview_guides').select('*').order('created_at',{ascending:false});if(error)throw error;IG_ROWS=data||[];}
-  catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:var(--err)">'+esc(e.message)+'</div>';return;}
-  igRender();
-}
-function igRender(){
-  const b=$('hrBody');if(!b)return;
-  const rows=IG_ROWS||[];
-  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">Interview Guides <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
-    <div style="margin-left:auto"><button class="btn btn-primary" onclick="igGenModal()"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate Guide</button></div>
-  </div>
-  <div id="igList">${rows.length?rows.map(g=>`<div class="card card-pad" style="margin-bottom:12px;cursor:pointer" onclick="igOpen(${g.id})">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
-      <div style="min-width:0"><div style="font-weight:700;font-size:14.5px">${esc((g.guide&&g.guide.title)||g.title||'Interview Guide')}</div>
-      <div style="color:var(--slate);font-size:12.5px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.brief||'')}</div>
-      <div style="color:var(--slate);font-size:11.5px;margin-top:5px">${relTime(g.created_at)} · ${esc(g.created_by||'')}</div></div>
-      <button class="btn btn-sm" style="color:var(--err);border-color:var(--err);flex-shrink:0" onclick="event.stopPropagation();igDelete(${g.id})"><i class="fa-solid fa-trash"></i></button>
-    </div></div>`).join(''):'<div class="empty" style="padding:40px"><i class="fa-solid fa-comments"></i><div>No interview guides yet — click Generate Guide</div></div>'}</div>
-  <div id="igDetail"></div>`;
-}
-window.igGenModal=function(){
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-wand-magic-sparkles"></i> Generate Interview Guide</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <label>Describe the hiring situation</label>
-    <textarea id="igBrief" rows="4" placeholder="e.g. Hiring a mid-level Sales Executive for residential real estate, 2-4 years experience, needs strong negotiation and client-facing skills"></textarea>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="igGenBtn" onclick="igGenerate()"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate</button></div>`,'lg');
-  setTimeout(()=>{const el=$('igBrief');if(el)el.focus();},100);
-};
-window.igGenerate=async function(){
-  const brief=($('igBrief')||{}).value?.trim();if(!brief){toast('Describe the hiring situation first','err');return;}
-  const btn=$('igGenBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Generating…';
-  try{
-    const out=await resumeAI({action:'interview',brief});
-    const guide=out.guide;if(!guide)throw new Error('AI returned no guide');
-    const {data:row,error}=await sb.schema('hr').from('interview_guides').insert({title:guide.title||brief.slice(0,80),brief,guide,created_by:state.email}).select().single();
-    if(error)throw new Error(error.message);
-    IG_ROWS=[row,...(IG_ROWS||[])];
-    closeModal();toast('Interview guide generated','ok');
-    igRender();igOpen(row.id);
-  }catch(e){toast('Generation failed: '+e.message,'err');const b2=$('igGenBtn');if(b2){b2.disabled=false;b2.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Generate';}}
-};
-window.igOpen=function(id){
-  const g=(IG_ROWS||[]).find(x=>x.id===id);const host=$('igDetail');if(!g||!host)return;
-  const guide=g.guide||{};
-  host.innerHTML=`<div class="card card-pad" style="margin-top:6px">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
-      <div><div style="font-weight:700;font-size:16px">${esc(guide.title||g.title||'')}</div>
-      <p style="font-size:13px;color:var(--slate);margin-top:5px;max-width:640px">${esc(guide.overview||'')}</p></div>
-      <button style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--slate)" onclick="document.getElementById('igDetail').innerHTML=''">&times;</button>
-    </div>
-    ${(guide.sections||[]).map(s=>`<div style="margin-top:16px"><div style="font-weight:700;font-size:13.5px;color:#0369a1;margin-bottom:8px">${esc(s.name||'')}</div>
-      ${(s.questions||[]).map(q=>`<div style="padding:10px 0;border-bottom:1px solid var(--line-2)"><div style="font-weight:500;font-size:13.5px">${esc(q.q||'')}</div><div style="font-size:12px;color:var(--slate);margin-top:3px"><i class="fa-solid fa-eye" style="width:12px"></i> Look for: ${esc(q.look_for||'')}</div></div>`).join('')}
-    </div>`).join('')}
-    ${(guide.red_flags||[]).length?`<div style="margin-top:16px"><div style="font-weight:700;font-size:13px;color:#c83232;margin-bottom:6px"><i class="fa-solid fa-triangle-exclamation"></i> Red flags</div><ul style="font-size:12.5px;color:var(--ink);padding-left:18px;line-height:1.7">${guide.red_flags.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul></div>`:''}
-    ${(guide.tips||[]).length?`<div style="margin-top:14px"><div style="font-weight:700;font-size:13px;color:#15803d;margin-bottom:6px"><i class="fa-solid fa-lightbulb"></i> Tips</div><ul style="font-size:12.5px;color:var(--ink);padding-left:18px;line-height:1.7">${guide.tips.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul></div>`:''}
-  </div>`;
-  host.scrollIntoView({behavior:'smooth',block:'start'});
-};
-window.igDelete=async function(id){
-  if(!await confirmDialog('Delete this interview guide?'))return;
-  const {error}=await sb.schema('hr').from('interview_guides').delete().eq('id',id);
-  if(error){toast(error.message,'err');return;}
-  IG_ROWS=(IG_ROWS||[]).filter(x=>x.id!==id);
-  toast('Deleted','ok');igRender();
-};
-
 
 /* ── Inspection globals & helpers ── */
 let INSP_ROWS=null, INSP_SCOPE={block:'All',floor:'All',flat:'All',work:'All',project:'All'}, INSP_DRILL=null, INSP_SUBS=[];
@@ -11236,6 +10543,7 @@ async function secUserDetail(v,email){
             .concat(m.id==='custportal_admin'?['<label class="chk-tile" title="Opens Customer Portal Admin with only the Photos &amp; Videos tab"><input type="checkbox" class="secMod" value="custportal_photos" '+(mods.includes('custportal_photos')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-photo-film tile-ic"></i>Customer Portal: Photos &amp; Videos only</label>',
               '<label class="chk-tile" title="May publish or reject construction photos and videos before customers see them (Photos &amp; Videos &gt; Review)"><input type="checkbox" class="secMod" value="custportal_photo_approver" '+(mods.includes('custportal_photo_approver')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-stamp tile-ic"></i>Customer Portal: approve photos</label>',
               '<label class="chk-tile" title="May approve like an approver, but is only told when photos have waited more than 2 days"><input type="checkbox" class="secMod" value="custportal_photo_backup" '+(mods.includes('custportal_photo_backup')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-user-shield tile-ic"></i>Customer Portal: backup photo approver</label>']:[])
+            .concat(m.id==='crm'?['<label class="chk-tile" title="Opens CRM &amp; Sales with only the Performance Report tab, and may type its Spent amounts"><input type="checkbox" class="secMod" value="crm_perf" '+(mods.includes('crm_perf')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-chart-column tile-ic"></i>CRM &amp; Sales: Performance Report only</label>']:[])
             .concat(m.id==='competitors'?['<label class="chk-tile" title="Opens Competitor Data with only the Jain Group Fb Ads and Jain Group Google Ads tabs"><input type="checkbox" class="secMod" value="competitors_jg" '+(mods.includes('competitors_jg')?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid fa-building-flag tile-ic"></i>Competitor Data: Jain Group tabs only</label>']:[]))];}).join('')}</div>
       </div>
     </div>
@@ -17538,13 +16846,15 @@ VIEWS.gtd=function(v,seg){
    "Qualified Leads" Google Sheet. See 23b-crm-qualified.js. */
 VIEWS.crm=function(v,seg){
   setCrumb(['Sales','CRM & Sales']);
-  const ql=seg&&seg[0]==='qualified';
+  // 23 Nov 2026: a third tab, Performance Report - see 23c-crm-performance.js
+  const po=crmPerfOnly(), ql=!po&&seg&&seg[0]==='qualified', pf=po||(seg&&seg[0]==='performance');
   v.innerHTML=mHead('fa-handshake','#7c3aed','CRM & Sales')
-    +'<div style="margin:-8px 0 12px"><button class="btn btn-primary" onclick="window.open(\'https://www.realtybucket.com/\',\'_blank\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open</button></div>'
-    +'<div class="tabs" style="margin-top:14px"><div class="tab'+(ql?'':' active')+'" onclick="navTo(\'crm\')"><i class="fa-regular fa-chart-bar"></i> Daily Updates</div><div class="tab'+(ql?' active':'')+'" onclick="navTo(\'crm/qualified\')"><i class="fa-solid fa-user-check"></i> Qualified Leads</div></div>'
-    +(ql?CQ_CSS+'<div style="margin-top:16px"><div id="cqWrap"><div class="loader"><div class="spin"></div></div></div></div>'
+    +(po?'':'<div style="margin:-8px 0 12px"><button class="btn btn-primary" onclick="window.open(\'https://www.realtybucket.com/\',\'_blank\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open</button></div>')
+    +'<div class="tabs" style="margin-top:14px'+(po?';display:none':'')+'"><div class="tab'+(ql||pf?'':' active')+'" onclick="navTo(\'crm\')"><i class="fa-regular fa-chart-bar"></i> Daily Updates</div><div class="tab'+(ql?' active':'')+'" onclick="navTo(\'crm/qualified\')"><i class="fa-solid fa-user-check"></i> Qualified Leads</div><div class="tab'+(pf?' active':'')+'" onclick="navTo(\'crm/performance\')"><i class="fa-solid fa-ranking-star"></i> Performance Report</div></div>'
+    +(pf?CQ_CSS+CP_CSS+'<div style="margin-top:16px"><div id="cpWrap"><div class="loader"><div class="spin"></div></div></div></div>'
+      :ql?CQ_CSS+'<div style="margin-top:16px"><div id="cqWrap"><div class="loader"><div class="spin"></div></div></div></div>'
         :'<div style="margin-top:16px"><div id="crmDuWrap"><div class="loader"><div class="spin"></div></div></div></div>');
-  if(ql) cqLoad(); else crmDuLoad();
+  if(pf) cpLoad(); else if(ql) cqLoad(); else crmDuLoad();
 };
 /* ============================ CRM & SALES — DAILY UPDATES TAB ============================
    Read-only viewer over acc.crm_daily_updates: the Qualified / Site Visits / Agent Visits rollup
@@ -17585,14 +16895,16 @@ function crmDuRender(dateStr,rows){
   const wrap=$('crmDuWrap'); if(!wrap)return;
   const props=rows.filter(function(r){return !r.is_total;});
   const total=rows.find(function(r){return r.is_total;});
+  // Leads added 23 Nov 2026 (the CRM report now carries them); a day saved before then shows a dash
+  const ld=function(r){ return (r.month_leads==null&&r.yesterday_leads==null)?'—':((r.month_leads||0)+' / '+(r.yesterday_leads||0)); };
   const rowsHtml=props.map(function(r){
-    return [r.property_label,r.month_qualified+' / '+r.yesterday_qualified,r.month_visits+' / '+r.yesterday_visits,r.agent_month_visits+' / '+r.agent_yesterday_visits];
+    return [r.property_label,ld(r),r.month_qualified+' / '+r.yesterday_qualified,r.month_visits+' / '+r.yesterday_visits,r.agent_month_visits+' / '+r.agent_yesterday_visits];
   });
   if(total){
-    rowsHtml.push(['<b>Total</b>','<b>'+total.month_qualified+' / '+total.yesterday_qualified+'</b>','<b>'+total.month_visits+' / '+total.yesterday_visits+'</b>','<b>'+total.agent_month_visits+' / '+total.agent_yesterday_visits+'</b>']);
+    rowsHtml.push(['<b>Total</b>','<b>'+ld(total)+'</b>','<b>'+total.month_qualified+' / '+total.yesterday_qualified+'</b>','<b>'+total.month_visits+' / '+total.yesterday_visits+'</b>','<b>'+total.agent_month_visits+' / '+total.agent_yesterday_visits+'</b>']);
   }
   const tableHtml=rowsHtml.length
-    ? mTable(['Property','Qualified (Month / Yesterday)','Site Visits (Month / Yesterday)','Agent Visits (Month / Yesterday)'],rowsHtml)
+    ? mTable(['Property','Leads (Month / Yesterday)','Qualified (Month / Yesterday)','Site Visits (Month / Yesterday)','Agent Visits (Month / Yesterday)'],rowsHtml)
     : '<div class="card card-pad empty" style="padding:32px;text-align:center">No rows recorded for '+esc(fmtDate(dateStr))+'</div>';
   const runAt=props.length&&props[0].run_at?('<div style="font-size:12px;color:var(--slate);margin-top:10px">Last extracted '+esc(fmtDate(props[0].run_at))+'</div>'):'';
   wrap.innerHTML=crmDuDatePicker(dateStr)+tableHtml+runAt;
@@ -17647,6 +16959,235 @@ const CQ_CSS='<style>.cq-tabs{display:inline-flex;gap:4px;background:#f1f5f9;bor
   +'.cq-tabs button.on{background:var(--bg-card,#fff);color:var(--ink);box-shadow:0 1px 3px rgba(15,23,42,.12)}'
   +'.cq-t{width:100%;border-collapse:collapse;font-size:13px}.cq-t th{position:sticky;top:0;z-index:1;background:#f8fafc;font-size:11px;text-transform:uppercase;letter-spacing:.3px;color:var(--slate);padding:9px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}'
   +'.cq-t td{padding:8px 10px;border-bottom:1px solid #eef1f4;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.cq-t tr:hover td{background:#f8fafc}</style>';
+
+/* ============================ CRM & SALES — PERFORMANCE REPORT (23 Nov 2026) ============================
+   Ayush: "a new report in CRM & Sales named Performance Report ... Monthly data is pulled and updated weekly Sunday ...
+   Channel, Spent, Lead, CPL, QL, QL%, CPQL, SV, Booking, QL to SV%, SV to Booking% ... Digital and Non Digital ... 3
+   totals ... Project wise ... Others when clicked shows the drill down ... All Projects as well".
+   Data: acc.crm_perf_report (rebuilt every Sunday 07:00 IST by acc.crm_perf_refresh - this month to Saturday and last
+   month) and acc.crm_perf_spend (the spend typed in for channels other than Facebook / Google). See migration
+   20261123201000_crm_performance_report.sql for where each figure comes from. Lead (and so CPL and QL%) is shown
+   for every channel since 23 Nov 2026 (the CRM source report now carries leads; before that only Facebook / Google). A channel with
+   nothing in the month is not shown (Facebook and Google always are). */
+const CP_DIG=['Facebook','Google','Social Media','ChatGPT','Others'], CP_NON=['Agent','Hoarding','Walk In','Newspaper','Others'];
+const CP_MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let CP={month:null,bu:'all',rows:null,spend:null,open:{},range:null,rangeRows:null,rangeSpend:null};
+// 25 Nov 2026 (Ayush): "make a -, NA instead" - every empty figure reads NA
+const CP_NA='NA';
+function cpMonLabel(m){ if(m==='custom') return cpRangeLabel(); const p=String(m).split('-'); return CP_MON[+p[1]-1]+" '"+p[0].slice(2); }
+function cpInr(n){ return '₹'+Math.round(Number(n)||0).toLocaleString('en-IN'); }
+function cpPct(a,b){ return (b>0)?(Math.round(a/b*1000)/10)+'%':CP_NA; }
+function cpDiv(a,b){ return (a>0&&b>0)?cpInr(a/b):CP_NA; }
+function cpD(s){ const p=String(s).split('-'); return (+p[2])+' '+CP_MON[+p[1]-1]+" '"+p[0].slice(2); }
+function cpRangeLabel(){ return CP.range?cpD(CP.range.from)+' – '+cpD(CP.range.to):'Custom'; }
+// Facebook and Google spend comes from the CRM's own reports - no box to type it (Ayush 25 Nov)
+function cpAutoCh(ch){ return ch==='Facebook'||ch==='Google'; }
+async function cpLoad(){
+  const wrap=$('cpWrap'); if(!wrap) return; loader(wrap);
+  const all=[]; let err=null;
+  for(let f=0;;f+=1000){
+    const q=await sb.schema('acc').from('crm_perf_report').select('month,bu_id,business_unit,grp,channel,sub,leads,auto_spend,ql,sv,bk,refreshed_at').order('month',{ascending:false}).range(f,f+999);
+    if(q.error){ err=q.error; break; } all.push.apply(all,q.data||[]); if(!q.data||q.data.length<1000) break; }
+  if(err){ wrap.innerHTML=/crm_perf_report|does not exist|schema cache/i.test(err.message)
+      ?'<div class="card card-pad" style="color:var(--slate)"><i class="fa-solid fa-moon"></i> The Performance Report is being set up tonight - it shows here from 20:15 IST today.</div>'
+      :'<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(err.message)+'</div>'; return; }
+  const sp=await sb.schema('acc').from('crm_perf_spend').select('month,bu_id,channel,amount,updated_by,updated_at');
+  CP.rows=all; CP.spend=(sp&&sp.data)||[];
+  const months=[...new Set(all.map(r=>r.month))].sort().reverse();
+  if(!CP.month||months.indexOf(CP.month)===-1) CP.month=months[0]||null;
+  cpPaint();
+}
+function cpPaint(){
+  const wrap=$('cpWrap'); if(!wrap||!CP.rows) return;
+  const months=[...new Set(CP.rows.map(r=>r.month))].sort().reverse();
+  if(!CP.month){ wrap.innerHTML='<div class="card card-pad" style="color:var(--slate)">No data yet.</div>'; return; }
+  const isRange=CP.month==='custom';
+  if(isRange&&!CP.rangeRows){ wrap.innerHTML=cpBarHtml(months,{})+'<div class="card card-pad" style="color:var(--slate)">'+(CP.range?'Loading '+esc(cpRangeLabel())+'…':'Choose the From and To dates, then Apply.')+'</div>'; return; }
+  const inMonth=isRange?CP.rangeRows:CP.rows.filter(r=>r.month===CP.month);
+  const projects={}; CP.rows.concat(inMonth).forEach(r=>{ projects[r.bu_id]=r.business_unit||('Project '+r.bu_id); });
+  if(CP.bu!=='all'&&!projects[CP.bu]) CP.bu='all';
+  const pick=inMonth.filter(r=>CP.bu==='all'||r.bu_id===Number(CP.bu));
+  const spends=(isRange?CP.rangeSpend:CP.spend.filter(s=>s.month===CP.month)).filter(s=>(CP.bu==='all'||s.bu_id===Number(CP.bu))&&!/^D:(Facebook|Google)$/.test(s.channel));
+  // one line per channel (Others carries its sub-sources)
+  /* SPEND IS TYPED IN FOR EVERY CHANNEL (23 Nov 2026, Ayush: "Spend will be manually addable"). A typed amount for a
+     project and month is used as it is; for Facebook and Google, a project-month with nothing typed still shows the
+     spend from the CRM's Facebook / Google reports. */
+  const line=function(grp,ch){
+    const rs=pick.filter(r=>r.grp===grp&&r.channel===ch);
+    const o={grp:grp,ch:ch,ql:0,sv:0,bk:0,leads:null,spend:0,manual:false,subs:{}};
+    const key=(grp==='digital'?'D:':'N:')+ch, autoBu={}, typedBu={};
+    spends.filter(s=>s.channel===key).forEach(s=>{ typedBu[s.bu_id]=(typedBu[s.bu_id]||0)+(Number(s.amount)||0); });
+    rs.forEach(r=>{ o.ql+=r.ql; o.sv+=r.sv; o.bk+=r.bk;
+      if(r.leads!=null) o.leads=(o.leads||0)+r.leads; if(r.auto_spend!=null) autoBu[r.bu_id]=(autoBu[r.bu_id]||0)+Number(r.auto_spend);
+      if(r.sub){ const s=o.subs[r.sub]||(o.subs[r.sub]={l:0,ql:0,sv:0,bk:0}); s.l+=r.leads||0; s.ql+=r.ql; s.sv+=r.sv; s.bk+=r.bk; } });
+    new Set(Object.keys(autoBu).concat(Object.keys(typedBu))).forEach(b=>{ if(typedBu[b]!=null){ o.spend+=typedBu[b]; o.manual=true; } else o.spend+=autoBu[b]||0; });
+    // EVERY CHANNEL IS ALWAYS LISTED (23 Nov 2026), so spend can be typed for one that had nothing yet this month and
+    // Non Digital "Others" is never missing.
+    o.show=true;
+    return o;
+  };
+  const dig=CP_DIG.map(c=>line('digital',c)).filter(o=>o.show), non=CP_NON.map(c=>line('nondigital',c)).filter(o=>o.show);
+  const tot=function(list,label){ const t={ch:label,ql:0,sv:0,bk:0,leads:0,spend:0,lspend:0,lql:0,total:true};
+    list.forEach(o=>{ t.ql+=o.ql; t.sv+=o.sv; t.bk+=o.bk; t.spend+=o.spend; if(o.leads!=null){ t.leads+=o.leads; t.lspend+=o.spend; t.lql+=o.ql; } }); return t; };
+  const tD=tot(dig,'Total Digital'), tN=tot(non,'Total Non Digital'), tA=tot(dig.concat(non),'Grand Total');
+  CP.projList=Object.keys(projects).map(id=>[id,projects[id]]).sort((a,b)=>a[1].localeCompare(b[1]));
+  /* SPENT (25 Nov 2026, Ayush: "where data will be added will not have NA instead a small field to add amt and no field
+     for Facebook"): every channel except Facebook / Google gets a small amount box, for one project and one month (the
+     amount is kept per project and month). All Projects and a custom range show the total only. */
+  const boxOk=!isRange&&CP.bu!=='all';
+  const cells=function(o){
+    const hasL=o.total?o.leads>0:o.leads!=null;
+    const lead=hasL?(o.leads||0).toLocaleString('en-IN'):CP_NA;
+    const cpl=o.total?(o.leads>0?cpDiv(o.lspend,o.leads):CP_NA):(hasL?cpDiv(o.spend,o.leads):CP_NA);
+    const qlp=o.total?(o.leads>0?cpPct(o.lql,o.leads):CP_NA):(hasL?cpPct(o.ql,o.leads):CP_NA);
+    const key=o.total?'':(o.grp==='digital'?'D:':'N:')+o.ch;
+    const spent=(!o.total&&boxOk&&!cpAutoCh(o.ch))
+      ?'<input class="cp-in" type="number" min="0" step="1" inputmode="numeric" placeholder="Add ₹" data-k="'+esc(key)+'" value="'+(o.manual?Math.round(o.spend):'')+'" onclick="event.stopPropagation()" onchange="cpSpendSet(this)" onkeydown="if(event.key===\'Enter\')this.blur()">'
+      // All Projects (25 Nov 2026, Ayush: "I can't add anything"): the total, and an Add button that asks for the project
+      :(!o.total&&!isRange&&CP.bu==='all'&&!cpAutoCh(o.ch))
+        ?(o.spend>0?cpInr(o.spend)+' ':'')+'<button class="cp-add" title="Add the amount spent this month for one project" onclick="event.stopPropagation();cpSpendAsk(\''+o.grp+'\',\''+esc(o.ch).replace(/'/g,"\\'")+'\')">+ Add ₹</button>'
+      :(o.spend>0?cpInr(o.spend):CP_NA);
+    return '<td>'+spent+'</td><td>'+lead+'</td><td>'+cpl+'</td><td>'+o.ql+'</td><td>'+qlp+'</td><td>'+cpDiv(o.spend,o.ql)+'</td><td>'+o.sv+'</td><td>'+o.bk+'</td><td>'+cpPct(o.sv,o.ql)+'</td><td>'+cpPct(o.bk,o.sv)+'</td>';
+  };
+  const rowsHtml=function(list){ return list.map(o=>{
+    const subs=Object.keys(o.subs).sort((a,b)=>(o.subs[b].ql+o.subs[b].sv+o.subs[b].l)-(o.subs[a].ql+o.subs[a].sv+o.subs[a].l)||a.localeCompare(b));
+    const k=o.grp+'|'+o.ch, isO=o.ch==='Others'&&subs.length, op=!!CP.open[k];
+    return '<tr'+(isO?' class="cp-op" onclick="cpToggle(\''+k+'\')"':'')+'><td class="cp-ch">'+(isO?'<i class="fa-solid fa-caret-'+(op?'down':'right')+'" style="width:12px;color:#94a3b8"></i> ':'<span style="display:inline-block;width:16px"></span>')+esc(o.ch)+'</td>'+cells(o)+'</tr>'
+      +(isO&&op?subs.map(s=>{ const x=o.subs[s]; return '<tr class="cp-sub"><td class="cp-ch" style="padding-left:40px">'+esc(s)+'</td><td>'+CP_NA+'</td><td>'+(x.l||0).toLocaleString('en-IN')+'</td><td>'+CP_NA+'</td><td>'+x.ql+'</td><td>'+cpPct(x.ql,x.l)+'</td><td>'+CP_NA+'</td><td>'+x.sv+'</td><td>'+x.bk+'</td><td>'+cpPct(x.sv,x.ql)+'</td><td>'+cpPct(x.bk,x.sv)+'</td></tr>'; }).join(''):''); }).join(''); };
+  const totRow=function(t,cls){ return '<tr class="'+cls+'"><td class="cp-ch">'+esc(t.ch)+'</td>'+cells(t)+'</tr>'; };
+  const last=CP.rows.reduce((m,r)=>r.refreshed_at>m?r.refreshed_at:m,'');
+  const fk=document.activeElement&&document.activeElement.classList&&document.activeElement.classList.contains('cp-in')?document.activeElement.getAttribute('data-k'):null;
+  wrap.innerHTML=cpBarHtml(months,projects)
+    +'<div class="card" style="padding:0;overflow:auto"><table class="cp-t"><thead><tr><th style="text-align:left">Channel</th><th>Spent</th><th>Lead</th><th>CPL</th><th>QL</th><th>QL%</th><th>CPQL</th><th>SV</th><th>Booking</th><th>QL to SV%</th><th>SV to Booking%</th></tr></thead><tbody>'
+      +'<tr class="cp-grp"><td colspan="11">Digital</td></tr>'+rowsHtml(dig)+totRow(tD,'cp-tot')
+      +'<tr class="cp-grp"><td colspan="11">Non Digital</td></tr>'+rowsHtml(non)+totRow(tN,'cp-tot')
+      +totRow(tA,'cp-grand')
+    +'</tbody></table></div>'
+    +'<div class="cp-note">'+esc(cpMonLabel(CP.month))+(CP.month===months[0]?' (month to date)':'')+' &middot; '+esc(CP.bu==='all'?'All Projects':projects[CP.bu])
+      +'. Lead, QL, SV and Booking: the CRM\u2019s source report, counted '+(isRange?'on the days they happened':'in the month they happened')+'. Spent: Facebook and Google from the CRM\u2019s Facebook and Google reports; every other channel is typed in the box, per project and month'
+      +(isRange?' (for a custom range, a month\u2019s typed amount is counted for the days of that month inside the range)':(CP.bu==='all'?' (choose a project to type an amount)':''))+'. '
+      +(isRange?'Read live from the CRM\u2019s daily figures.':'Updated every Sunday at 7:00 AM'+(last?' - last on '+esc(fmtDate(last)):'')+'.')+'</div>';
+  if(fk){ const el=wrap.querySelector('.cp-in[data-k="'+fk.replace(/"/g,'\\"')+'"]'); if(el) el.focus(); }
+}
+function cpBarHtml(months,projects){
+  const projOpts=[['all','All Projects']].concat(Object.keys(projects).map(id=>[id,projects[id]]).sort((a,b)=>a[1].localeCompare(b[1])));
+  const isRange=CP.month==='custom', today=new Date(Date.now()+330*60000).toISOString().slice(0,10);
+  return '<div class="cp-bar"><div class="cq-tabs cp-mon">'+months.slice(0,12).map(m=>'<button type="button" class="'+(m===CP.month?'on':'')+'" onclick="cpMonth(\''+m+'\')">'+cpMonLabel(m)+'</button>').join('')
+      +'<button type="button" class="'+(isRange?'on':'')+'" onclick="cpMonth(\'custom\')"><i class="fa-regular fa-calendar"></i> Custom</button></div>'
+    // 25 Nov 2026 (Ayush): months and the project picker on ONE row, the months scroll sideways; the custom dates go under them
+    +'<select class="sel" style="height:36px;margin-left:auto" onchange="cpBu(this.value)">'+projOpts.map(p=>'<option value="'+p[0]+'"'+(String(CP.bu)===String(p[0])?' selected':'')+'>'+esc(p[1])+'</option>').join('')+'</select></div>'+(isRange?'<div class="cp-rng"><label>From <input type="date" id="cpFrom" min="2026-01-01" max="'+today+'" value="'+esc(CP.range?CP.range.from:'')+'"></label><label>To <input type="date" id="cpTo" min="2026-01-01" max="'+today+'" value="'+esc(CP.range?CP.range.to:'')+'"></label><button class="btn btn-primary" style="height:34px" onclick="cpRangeApply()">Apply</button></div>':'');
+}
+window.cpMonth=function(m){ CP.month=m; cpPaint(); };
+/* CUSTOM DATE RANGE (25 Nov 2026, Ayush: "there will be a custom as well for date range"). Built in the page from the
+   same daily tables and the same channel rules as acc.crm_perf_refresh (keep the two in step). */
+window.cpRangeApply=async function(){
+  const f=($('cpFrom')||{}).value, t=($('cpTo')||{}).value;
+  if(!f||!t){ toast('Choose both dates','warn'); return; }
+  if(f>t){ toast('From must be on or before To','warn'); return; }
+  CP.range={from:f,to:t}; CP.rangeRows=null; cpPaint();
+  try{ await cpRangeLoad(f,t); }catch(e){ CP.rangeRows=null; const w=$('cpWrap'); if(w) w.innerHTML='<div class="card card-pad" style="color:#b91c1c">Could not load: '+esc(e.message||String(e))+'</div>'; return; }
+  if(CP.range&&CP.range.from===f&&CP.range.to===t) cpPaint();
+};
+async function cpPaged(mk){ const out=[]; for(let f=0;;f+=1000){ const q=await mk().range(f,f+999); if(q.error) throw q.error; out.push.apply(out,q.data||[]); if(!q.data||q.data.length<1000) break; } return out; }
+async function cpRangeLoad(f,t){
+  const src=await cpPaged(()=>sb.schema('camp').from('crm_source_daily').select('bu_id,business_unit,level,top_source,source,tot_leads,tot_q,tot_sv,tot_bk,self_leads,self_q,self_sv,self_bk').gte('day',f).lte('day',t).lte('level',1).order('day'));
+  const gg=await cpPaged(()=>sb.schema('camp').from('crm_google_daily').select('bu_id,business_unit,campaign_type,cost').gte('day',f).lte('day',t).order('day'));
+  const acc={}; const add=function(bu,name,g,ch,sub,l,q,v,b,sp){ const k=bu+'|'+g+'|'+ch+'|'+sub;
+    const o=acc[k]||(acc[k]={month:'custom',bu_id:bu,business_unit:name||'',grp:g,channel:ch,sub:sub,leads:0,auto_spend:null,ql:0,sv:0,bk:0});
+    if(name&&!o.business_unit) o.business_unit=name; o.leads+=l||0; o.ql+=q||0; o.sv+=v||0; o.bk+=b||0; if(sp!=null) o.auto_spend=(o.auto_spend||0)+Number(sp); };
+  const NONDIG={'Agent':'Agent','Hoarding':'Hoarding','Walk In':'Walk In','NewsPaper':'Newspaper'};
+  const L0X=['Online','Chatgpt','Social Media','Other Project Campaign','sms','Agent','Hoarding','Walk In','NewsPaper'];
+  src.forEach(function(d){ const T=[d.tot_leads,d.tot_q,d.tot_sv,d.tot_bk], a=function(g,ch,sub,x){ add(d.bu_id,d.business_unit,g,ch,sub,x[0],x[1],x[2],x[3]); };
+    if(d.level===1&&d.top_source==='Online'){
+      if(d.source==='FACEBOOK') a('digital','Facebook','',T); else if(d.source==='Google') a('digital','Google','',T);
+      else if(d.source==='Chatgpt') a('digital','ChatGPT','',T); else a('digital','Others',d.source,T);
+    } else if(d.level===0){
+      if(d.source==='Chatgpt') a('digital','ChatGPT','',T);
+      else if(d.source==='Social Media') a('digital','Social Media','',T);
+      else if(d.source==='Online') a('digital','Others','Online (no sub-source)',[d.self_leads,d.self_q,d.self_sv,d.self_bk]);
+      else if(d.source==='Other Project Campaign'||d.source==='sms') a('digital','Others',d.source,T);
+      else if(NONDIG[d.source]) a('nondigital',NONDIG[d.source],'',T);
+      else if(L0X.indexOf(d.source)===-1) a('nondigital','Others',d.source,T);
+    } });
+  gg.forEach(function(r){ add(r.bu_id,r.business_unit,'digital',r.campaign_type==='facebook'?'Facebook':'Google','',0,0,0,0,r.cost); });
+  // a month's typed amount, counted for the days of that month inside the range
+  const day=s=>Date.UTC(+s.slice(0,4),+s.slice(5,7)-1,+s.slice(8,10)), F=day(f), Tt=day(t);
+  CP.rangeSpend=CP.spend.map(function(s){ const m0=day(String(s.month)), y=+String(s.month).slice(0,4), mo=+String(s.month).slice(5,7);
+    const m1=Date.UTC(y,mo,0), a=Math.max(F,m0), b=Math.min(Tt,m1); if(b<a) return null;
+    const dim=new Date(Date.UTC(y,mo,0)).getUTCDate();
+    return {month:'custom',bu_id:s.bu_id,channel:s.channel,amount:Number(s.amount)*(((b-a)/864e5)+1)/dim}; }).filter(Boolean);
+  CP.rangeRows=Object.values(acc);
+}
+window.cpSpendSet=async function(el){
+  const key=el.getAttribute('data-k'), bu=Number(CP.bu), raw=String(el.value||'').trim();
+  if(!bu||CP.month==='custom') return;
+  if(raw===''){
+    const {error}=await sb.schema('acc').from('crm_perf_spend').delete().eq('month',CP.month).eq('bu_id',bu).eq('channel',key);
+    if(error){ toast(error.message,'err'); return; }
+    CP.spend=CP.spend.filter(s=>!(s.month===CP.month&&s.bu_id===bu&&s.channel===key)); toast('Amount removed','ok'); cpPaint(); return;
+  }
+  const v=Number(raw); if(!(v>=0)){ toast('Type an amount','warn'); return; }
+  const row={month:CP.month,bu_id:bu,channel:key,amount:v,updated_by:state.email,updated_at:new Date().toISOString()};
+  const {error}=await sb.schema('acc').from('crm_perf_spend').upsert(row,{onConflict:'month,bu_id,channel'});
+  if(error){ toast(error.message,'err'); return; }
+  CP.spend=CP.spend.filter(s=>!(s.month===row.month&&s.bu_id===row.bu_id&&s.channel===key)).concat([row]);
+  toast('Saved','ok'); cpPaint();
+};
+window.cpBu=function(b){ CP.bu=b; cpPaint(); };
+window.cpToggle=function(k){ CP.open[k]=!CP.open[k]; cpPaint(); };
+window.cpSpendAsk=function(grp,ch){
+  const key=(grp==='digital'?'D:':'N:')+ch;
+  const list=CP.projList||[];
+  const bu=CP.bu!=='all'?String(CP.bu):((list[0]||[])[0]||'');
+  window._cpSpendKey=key;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-indian-rupee-sign"></i> Spend - '+esc(ch)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(92vw,420px);font-size:13.5px">'+esc(cpMonLabel(CP.month))+' &middot; '+(grp==='digital'?'Digital':'Non Digital')
+      +'<div style="margin-top:12px">Project</div><select id="cpSpendBu" class="sel" style="width:100%;height:38px;margin-top:6px" onchange="cpSpendFill()">'
+      +list.map(p=>'<option value="'+p[0]+'"'+(String(p[0])===bu?' selected':'')+'>'+esc(p[1])+'</option>').join('')+'</select>'
+      +'<div style="margin-top:12px">Amount spent this month (₹)</div><input id="cpSpendIn" type="number" min="0" step="1" style="width:100%;height:38px;margin-top:6px;padding:0 10px;border:1px solid var(--line);border-radius:8px;font:inherit">'
+      +'<div id="cpSpendWho" style="font-size:12px;color:var(--slate);margin-top:8px"></div>'
+      +((ch==='Facebook'||ch==='Google')?'<div style="font-size:12px;color:var(--slate);margin-top:6px">A typed amount replaces the spend from the CRM\u2019s '+esc(ch)+' report for this project and month. Clear the box and save to go back to it.</div>':'')
+      +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="cpSpendSave()">Save</button></div>','sm');
+  cpSpendFill();
+  setTimeout(()=>{ const i=$('cpSpendIn'); if(i) i.focus(); },50);
+};
+window.cpSpendFill=function(){
+  const b=Number(($('cpSpendBu')||{}).value), key=window._cpSpendKey;
+  const cur=CP.spend.find(s=>s.month===CP.month&&s.bu_id===b&&s.channel===key);
+  const i=$('cpSpendIn'); if(i) i.value=cur?Number(cur.amount):'';
+  const w=$('cpSpendWho'); if(w) w.textContent=cur&&cur.updated_by?'Last typed by '+cur.updated_by:'';
+};
+window.cpSpendSave=async function(){
+  const key=window._cpSpendKey, bu=Number(($('cpSpendBu')||{}).value);
+  if(!bu){ toast('Choose a project','warn'); return; }
+  const raw=String(($('cpSpendIn')||{}).value||'').trim();
+  // an empty box removes the typed amount (Facebook / Google then show the CRM's spend again)
+  if(raw===''){
+    const {error}=await sb.schema('acc').from('crm_perf_spend').delete().eq('month',CP.month).eq('bu_id',bu).eq('channel',key);
+    if(error){ toast(error.message,'err'); return; }
+    CP.spend=CP.spend.filter(s=>!(s.month===CP.month&&s.bu_id===bu&&s.channel===key));
+    closeModal(); toast('Typed spend removed','ok'); cpPaint(); return;
+  }
+  const v=Number(raw); if(!(v>=0)){ toast('Type an amount','warn'); return; }
+  const row={month:CP.month,bu_id:bu,channel:key,amount:v,updated_by:state.email,updated_at:new Date().toISOString()};
+  const {error}=await sb.schema('acc').from('crm_perf_spend').upsert(row,{onConflict:'month,bu_id,channel'});
+  if(error){ toast(error.message,'err'); return; }
+  CP.spend=CP.spend.filter(s=>!(s.month===row.month&&s.bu_id===row.bu_id&&s.channel===key)).concat([row]);
+  closeModal(); toast('Spend saved','ok'); cpPaint();
+};
+const CP_CSS='<style>.cp-bar{display:flex;gap:10px;align-items:center;flex-wrap:nowrap;margin:0 0 12px}.cp-bar .sel{flex:0 0 auto;margin-left:auto;max-width:240px}@media(max-width:760px){.cp-bar .sel{max-width:42%}}'
+  +'.cp-mon{margin:0;flex:1 1 auto;min-width:0;flex-wrap:nowrap!important;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}.cp-mon>button{flex:0 0 auto;white-space:nowrap}.cp-rng{margin:-4px 0 12px}'
+  +'.cp-t{width:100%;border-collapse:collapse;font-size:13px}.cp-t th{position:sticky;top:0;z-index:1;background:#f8fafc;font-size:11px;text-transform:uppercase;letter-spacing:.3px;color:var(--slate);padding:9px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}'
+  +'.cp-t td{padding:8px 10px;border-bottom:1px solid #eef1f4;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.cp-t td.cp-ch{text-align:left;font-weight:600}'
+  +'.cp-t tr.cp-grp td{background:#eef2ff;color:#3730a3;font-weight:800;text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.4px}'
+  +'.cp-t tr.cp-tot td{background:#f8fafc;font-weight:800}.cp-t tr.cp-grand td{background:#e2e8f0;font-weight:800;border-top:2px solid #94a3b8}'
+  +'.cp-t tr.cp-sub td{color:var(--slate);font-size:12.5px;background:#fcfcfd}.cp-t tr.cp-op{cursor:pointer}.cp-t tr.cp-op:hover td{background:#f8fafc}'
+  +'.cp-ed{border:0;background:none;color:#94a3b8;cursor:pointer;padding:0 0 0 4px;font-size:11px}.cp-ed:hover{color:var(--brand)}'
+  +'.cp-in{width:96px;height:28px;padding:0 8px;border:1px solid #cbd5e1;border-radius:6px;font:inherit;font-size:12.5px;text-align:right;background:#fff}.cp-in:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 2px rgba(15,118,110,.15)}.cp-in::placeholder{color:#94a3b8}'
+  +'.cp-add{height:26px;padding:0 9px;border:1px dashed #94a3b8;border-radius:6px;background:#fff;color:#334155;font:inherit;font-size:12px;font-weight:600;cursor:pointer}.cp-add:hover{border-color:var(--brand);color:var(--brand)}'
+  +'.cp-rng{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--slate)}.cp-rng input{height:34px;margin-left:4px;padding:0 8px;border:1px solid var(--line);border-radius:8px;font:inherit}'
+  +'.cp-note{font-size:12px;color:var(--slate);margin-top:10px;line-height:1.55}</style>';
 /* ============================ POST SALES — ADHOC bulk replace ============================
    Converted output files upload to S3 (postsales/adhoc/...) and the conversion record (file
    name, replacement count, uploader, timestamp) is stored in postsales.adhoc_docs — a shared,
@@ -18608,16 +18149,16 @@ window.prmList=function(){
 };
 function prmEmailHtml(subj,body,to){
   const st=PRM.settings||{};
-  return '<div style="color:var(--slate);font-size:12.5px;line-height:1.75"><b>From</b> Riya Roy - The Jain Group &lt;customercare2@thejaingroup.com&gt;'
+  return '<div style="color:var(--slate);font-size:12.5px;line-height:1.75;overflow-wrap:anywhere"><b>From</b> The Jain Group &lt;customercare2@thejaingroup.com&gt;'
       +(to!=null?'<br><b>To</b> '+esc(to||'(no email)'):'')+'<br><b>Subject</b> '+esc(subj)
       +'<br><b>Attachment</b> Reminder Letter (PDF)'+(st.attachment_name?', '+esc(st.attachment_name):'')+'</div>'
-    +'<div style="margin-top:12px;padding:16px;border:1px solid var(--line);border-radius:12px;white-space:pre-wrap;line-height:1.65;font-size:13.5px">'+esc(body)+'</div>';
+    +'<div style="margin-top:12px;padding:16px;border:1px solid var(--line);border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;line-height:1.65;font-size:13.5px">'+esc(body)+'</div>';
 }
 window.prmPreview=function(ix){
   const r=PRM.rows[ix]; if(!r) return;
   const st=PRM.settings||{};
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-envelope-open-text"></i> '+esc(String(r.customer_name||'').trim())+' - preview, not sent</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="width:min(94vw,660px)">'+prmEmailHtml(prmFill(st.subject,r),prmFill(st.body,r),r.email)+'</div>'
+    +'<div class="modal-body" style="width:min(94vw,660px);max-width:100%;box-sizing:border-box;overflow-x:hidden">'+prmEmailHtml(prmFill(st.subject,r),prmFill(st.body,r),r.email)+'</div>'
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','md');
 };
 window.prmHold=async function(ix){
@@ -18651,7 +18192,7 @@ function prmSelBar(){
     +'<button class="btn btn-sm" onclick="prmSelShown(true)">Select all shown</button>'
     +'<button class="btn btn-sm" onclick="prmSelShown(false)">Unselect all shown</button>'
     +(sel.length?'<button class="btn btn-sm" onclick="PRM.sel.clear();prmList()">Clear selection</button>':'')
-    +'<button class="btn btn-sm" style="margin-left:auto"'+(sel.length&&PRM.sched?'':' disabled title="'+(PRM.sched?'Tick customers to schedule':'Scheduling is ready from 8 PM tonight')+'"')+' onclick="prmSchedAsk()"><i class="fa-regular fa-clock"></i> Schedule'+(sel.length?' ('+sel.length+')':'')+'</button>'
+    +'<button class="btn btn-sm" style="margin-left:auto"'+(sel.length&&PRM.sched?'':' disabled title="'+(PRM.sched?'Tick customers to schedule':'Scheduling is ready from 8 PM tonight')+'"')+' onclick="prmSchedAsk(event)"><i class="fa-regular fa-clock"></i> Schedule'+(sel.length?' ('+sel.length+')':'')+'</button>'
     +'<button class="btn btn-sm"'+(sel.length&&sel.length<=5?'':' disabled title="Tick 1 to 5 customers to test with"')+' onclick="prmTestAsk()"><i class="fa-solid fa-flask"></i> Send test'+(sel.length&&sel.length<=5?' ('+sel.length+')':'')+'</button>'
     +'<button class="btn btn-sm btn-primary"'+(sel.length?'':' disabled')+' onclick="prmSendAsk()"><i class="fa-solid fa-paper-plane"></i> Send reminder'+(sel.length?' to '+sel.length:'')+'</button>';
 }
@@ -18961,35 +18502,47 @@ function prmSchedNext(s){
     if(ok) return dd.toISOString().slice(0,10); }
   return null;
 }
-window.prmSchedAsk=function(){
+/* SCHEDULE = THE ACCOUNTABILITY DATE PICKER, AS ITS OWN DROPDOWN (25 Nov 2026, Ayush: "why is it opening in a popup - it will be a normal date picker like it opens in Accountability"):
+   the Schedule button opens the picker right under itself, as a task's due date does - Every day, Weekly, Fortnightly, Monthly - and Done saves it for the ticked customers. */
+function prmDpClose(){
+  const el=document.getElementById('prmDpPop'); if(el) el.remove();
+  if(PRM._dpOut){ document.removeEventListener('mousedown',PRM._dpOut,true); PRM._dpOut=null; }
+  window.removeEventListener('resize',prmDpClose);
+}
+window.prmSchedAsk=async function(ev){
+  if(ev&&ev.stopPropagation) ev.stopPropagation();
+  const btn=(ev&&ev.currentTarget)||null;
+  if(document.getElementById('prmDpPop')){ prmDpClose(); return; }
   const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length||!PRM.sched) return;
-  const now=new Date(Date.now()+5.5*3600e3), dow=((now.getUTCDay()+6)%7)+1, dom=now.getUTCDate();
-  openModal('<div class="modal-head"><h3><i class="fa-regular fa-clock"></i> Schedule reminders</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="width:min(94vw,520px);font-size:13.5px;line-height:1.7">'
-      +'<b>'+sel.length+'</b> customer'+(sel.length===1?'':'s')+': '+sel.slice(0,6).map(r=>esc(prmName(r))).join(', ')+(sel.length>6?' and '+(sel.length-6)+' more':'')
-      +'<div style="margin-top:12px;font-weight:700">How often</div>'
-      +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">'+[['daily','Daily'],['weekly','Weekly'],['fortnightly','Fortnightly'],['monthly','Monthly']].map((f,i)=>'<label class="prm-chip'+(i===1?' on':'')+'" style="display:inline-flex;align-items:center;gap:6px"><input type="radio" name="prmFreq" value="'+f[0]+'"'+(i===1?' checked':'')+' onchange="prmSchedFreq()" style="display:none">'+f[1]+'</label>').join('')+'</div>'
-      +'<div id="prmSchedWd" style="margin-top:10px">On <select id="prmSchedDow" class="sel" style="height:34px;margin-left:6px">'+PRM_DOW.slice(1).map((d,i)=>'<option value="'+(i+1)+'"'+(i+1===dow?' selected':'')+'>'+d+'</option>').join('')+'</select></div>'
-      +'<div id="prmSchedMd" style="margin-top:10px;display:none">On the <select id="prmSchedDom" class="sel" style="height:34px;margin:0 6px">'+Array.from({length:31},(_,i)=>'<option value="'+(i+1)+'"'+(i+1===dom?' selected':'')+'>'+prmOrd(i+1)+'</option>').join('')+'</select>of each month</div>'
-      +'<div style="font-size:12px;color:var(--slate);margin-top:12px">Each reminder goes <b>15 minutes after that day’s Farvision import</b> is complete, from Riya Roy - The Jain Group &lt;customercare2@thejaingroup.com&gt;, with the customer’s Reminder Letter. If there is no import that day, it does not go that day. Held, paid-up or already-reminded-that-day customers are skipped. You can still send to them by hand any time.</div>'
-    +'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="prmSchedGo" onclick="prmSchedSave()"><i class="fa-regular fa-clock"></i> Schedule '+sel.length+'</button></div>','md');
-  prmSchedFreq();
+  // the date picker lives in Accountability's script (not on this page): load it first
+  if(typeof window.accDpMount!=='function'&&typeof ensurePageScript==='function'){ try{ await ensurePageScript('tasks'); }catch(e){} }
+  if(typeof window.accDpMount!=='function'){ toast('The date picker is still loading - try again in a moment','err'); return; }
+  const now=new Date(Date.now()+5.5*3600e3), dom=now.getUTCDate();
+  const el=document.createElement('div'); el.id='prmDpPop'; el.style.cssText='position:fixed;z-index:100000;top:0;left:0;visibility:hidden';
+  el.innerHTML='<div id="prmDpBox"></div>'; document.body.appendChild(el);
+  window.accDpMount($('prmDpBox'),null,{footer:true,plain:true,freqs:['daily','weekly','fortnightly','monthly'],freq:'weekly',dow:now.getUTCDay(),dom:dom,
+    onDone:function(r){ if(!r){ prmDpClose(); return; } prmSchedSave(r); }});
+  // under the button (above it when there is no room), kept inside the window - placed again once it has its real size
+  const place=function(){ const m=8, vw=document.documentElement.clientWidth, vh=window.innerHeight, q=el.getBoundingClientRect(), w=q.width, h=q.height, r=btn?btn.getBoundingClientRect():{left:m,right:m,top:80,bottom:80};
+    let top=r.bottom+4; if(top+h>vh-m) top=r.top-h-4; if(top<m) top=m;
+    el.style.top=top+'px'; el.style.left=Math.max(m,Math.min(r.right-w,vw-w-m))+'px'; el.style.visibility='visible'; };
+  place(); requestAnimationFrame(place); setTimeout(place,120);
+  PRM._dpOut=function(e){ if(el.contains(e.target)||(btn&&btn.contains(e.target))) return; prmDpClose(); };
+  setTimeout(function(){ document.addEventListener('mousedown',PRM._dpOut,true); },0);
+  window.addEventListener('resize',prmDpClose);
 };
-window.prmSchedFreq=function(){
-  const f=(document.querySelector('input[name=prmFreq]:checked')||{}).value;
-  document.querySelectorAll('input[name=prmFreq]').forEach(x=>x.parentNode.classList.toggle('on',x.checked));
-  $('prmSchedWd').style.display=(f==='weekly'||f==='fortnightly')?'':'none'; $('prmSchedMd').style.display=f==='monthly'?'':'none';
-};
-window.prmSchedSave=async function(){
-  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length) return;
-  const f=(document.querySelector('input[name=prmFreq]:checked')||{}).value||'weekly';
-  const wd=Number($('prmSchedDow').value), md=Number($('prmSchedDom').value);
-  const go=$('prmSchedGo'); if(go){ go.disabled=true; go.textContent='Saving…'; }
+window.prmSchedSave=async function(res){
+  const sel=PRM.rows.filter(r=>PRM.sel.has(r.booking_no)&&prmPick(r)); if(!sel.length){ prmDpClose(); return; }
+  const pk=res&&res.recur; if(!pk){ toast('Choose how often','err'); return; }
+  const f=pk.freq, wd=pk.weekdays&&pk.weekdays.length?(pk.weekdays[0]===0?7:pk.weekdays[0]):null, md=pk.monthdays&&pk.monthdays.length?(pk.monthdays[0]==='last'?31:Number(pk.monthdays[0])):null;
+  // the first fortnightly day the picker offered (it decides which weeks count); every other schedule starts today
+  const today=new Date(Date.now()+5.5*3600e3).toISOString().slice(0,10), start=f==='fortnightly'&&pk.start?pk.start:today;
+  const done=document.querySelector('#prmDpPop .dp-done'); if(done){ done.disabled=true; done.textContent='Saving…'; }
   const rows=sel.map(r=>({booking_no:r.booking_no,customer_name:String(r.customer_name||'').trim(),project:prmProj(r.project),frequency:f,
-    weekday:(f==='weekly'||f==='fortnightly')?wd:null,month_day:f==='monthly'?md:null,active:true,created_by:state.email,updated_at:new Date().toISOString()}));
+    weekday:(f==='weekly'||f==='fortnightly')?wd:null,month_day:f==='monthly'?md:null,start_date:start,active:true,created_by:state.email,updated_at:new Date().toISOString()}));
   const {error}=await sb.schema('postsales').from('reminder_schedules').upsert(rows,{onConflict:'booking_no'});
-  if(error){ toast(error.message,'err'); if(go){ go.disabled=false; go.textContent='Schedule'; } return; }
-  closeModal(); toast(sel.length+' customer'+(sel.length===1?'':'s')+' scheduled','ok'); PRM.sel.clear(); await prmSchedRead(); prmDraw();
+  if(error){ toast(error.message,'err'); if(done){ done.disabled=false; done.textContent='Done'; } return; }
+  prmDpClose(); toast(sel.length+' customer'+(sel.length===1?'':'s')+' scheduled','ok'); PRM.sel.clear(); await prmSchedRead(); prmDraw();
 };
 window.prmSchedDraw=function(){
   const host=$('prmSched'); if(!host) return;
@@ -19221,6 +18774,7 @@ const PG_CSS='<style>'
   +'.pg-pkc{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}.pg-pk{display:inline-flex;align-items:center;gap:6px}.pg-pk>b{width:20px;height:20px;border-radius:50%;background:#e5e7eb;color:#4b5563;font-size:11.5px;display:inline-flex;align-items:center;justify-content:center;flex:none}'
   +'.pg-pk .pg-seg button{min-width:0;height:28px;padding:0 9px;font-size:12.5px}'
   // the flat menu: a button that opens a panel with a search box and the flats as tiles under their floor
+  +'.pg-seg.pg-lock{pointer-events:none;opacity:.85}.pg-seg.pg-lock button:not(.on){display:none}.pg-auto{margin-top:4px;font-size:11.5px;color:#1d4ed8}'
   +'.pg-dd{position:relative}.pg-dd-b{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;cursor:pointer;background:#fff}.pg-dd-b.ph{color:#9aa1ad}.pg-dd-b i{font-size:11px;color:#9aa1ad}'
   +'.pg-dd-p{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:60;background:#fff;border:1px solid #d7dbe2;border-radius:10px;box-shadow:0 12px 30px rgba(16,24,40,.18);padding:10px}'
   +'.pg-dd-m{margin:8px 2px 0;font-size:11.5px;color:#9aa1ad}.pg-dd-l{max-height:250px;overflow:auto;margin-top:4px;padding-right:2px}.pg-dd-e{padding:14px 4px;font-size:13px;color:#9aa1ad;text-align:center}'
@@ -19311,9 +18865,12 @@ function pgProjApply(p){
   const b=$('pgC_pgBlock'); if(b) b.innerHTML=pgSegH('pgBlock',blocks,blocks[0]||'');
   const h=$('pgC_pgBhk'); if(h) h.innerHTML=pgSegH('pgBhk',bhk,bd);
   pgBlocksFromStock(p);
+  pgBookDefault(p);
   pgFloorPlain(p);
   PG.invMode=false; PG.flFilter=null; pgInvRefresh();
 }
+// the booking amount of the project's payment plan goes in the box, (choosing another project starts again from that project's amount; the Sales person can change it after)
+function pgBookDefault(p){ const e=$('pgBook'); if(!e||!p) return; const v=PG_BOOKAMT[p.key]; e.dataset.touched=''; e.value=v?Number(v).toLocaleString('en-IN'):''; e.dataset.auto=v?'1':''; }
 function pgFloorPlain(p){
   const fl=$('pgC_pgFloor'); if(!fl||!p) return;
   const nf=Math.max(1,Math.floor(Number(p.floors))||8), fs=[]; for(let i=1;i<=nf;i++) fs.push(String(i));
@@ -19328,18 +18885,28 @@ const PG_INV_PROJ={ananta:[2],dreamgurukul:[1],dreamone:[3,8],dreamvalley:[5],dr
 // Dream World City is Pailan: two stock projects (Dream Jain-Pailan, Dream Gateway Pailan Projects), each with a Block-1, 2, 3 - its blocks carry the stock project's name
 const PG_INV_TAG={9:'Jain Pailan',10:'Gateway Pailan'};
 const PG_INV={st:null,blocks:{},names:{}};
+// the stock writes 3BHK, 2 BHK, 2.5BHK, 5.00BHK; the form says 3 BHK, 2.5 BHK ...
+const pgBhkNorm=function(v){ const m=String(v||'').match(/(\d+(?:\.\d+)?)/); return m?(+m[1])+' BHK':null; };
+/* WHAT A PROJECT'S RECORDS SAY (23 Nov 2026, Ayush: "check Booking Amount in Dream Gurukul, Ananta and DWC"; "check Ananta ... floor plans"):
+   - BOOKING AMOUNT = the first stage of each project's payment plan in Post Sales: Dream Gurukul 'Booking Amount' Rs 2,10,000; Dream Ananta 'Booking Amount' Rs 2,10,000 (its plan is marked incomplete);
+     Dream World City (Dream Jain-Pailan and Dream Gateway Pailan, both) 'On Booking' Rs 50,000 in the plan, but the user set Rs 1,00,000 on 23 Nov 2026. The same for every BHK. Put into the box when the project is chosen; the Sales person can change it.
+   - BHK BY AREA, for a flat whose BHK is not on record: the configurations of the Reckoner (verified 23 Nov 2026) - Dream Ananta 2 BHK 940-1015, 3 BHK 1075-1405, 4 BHK 1790-1805 sq.ft.;
+     Dream Gurukul 2 BHK 860-875, 3 BHK 1225-1290. (The web has no listing of Dream Ananta; the other ranges overlap, so they are not used.) */
+const PG_BOOKAMT={ananta:210000,dreamgurukul:210000,dreamworldcity:100000};
+const PG_BHK_AREA={ananta:[['2 BHK',940,1015],['3 BHK',1075,1405],['4 BHK',1790,1805]],dreamgurukul:[['2 BHK',860,875],['3 BHK',1225,1290]]};
+const pgBhkByArea=function(proj,sba){ const r=(PG_BHK_AREA[proj]||[]).filter(function(x){ return sba>=x[1]&&sba<=x[2]; })[0]; return r?r[0]:null; };
 const pgNorm=function(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,''); };
 async function pgInvLoad(){
   if(PG_INV.st) return; PG_INV.st='load';
   try{
     const all=async function(tbl,cols,fn){ let out=[],f=0; for(;;){ let q=sb.schema('postsales').from(tbl).select(cols); if(fn) q=fn(q); const r=await q.range(f,f+999); if(r.error) throw r.error; out=out.concat(r.data||[]); if((r.data||[]).length<1000) break; f+=1000; } return out; };
-    const res=await Promise.all([all('towers','id,project_id,name',function(q){ return q.is('deleted_at',null).order('id'); }), all('floors','id,floor_no',function(q){ return q.order('id'); }), all('flats','tower_id,floor_id,flat_code,status,sba_sqft',function(q){ return q.is('deleted_at',null).order('id'); })]);
+    const res=await Promise.all([all('towers','id,project_id,name',function(q){ return q.is('deleted_at',null).order('id'); }), all('floors','id,floor_no',function(q){ return q.order('id'); }), all('flats','tower_id,floor_id,flat_code,status,sba_sqft,bhk',function(q){ return q.is('deleted_at',null).order('id'); })]);
     const byProj={}; Object.keys(PG_INV_PROJ).forEach(function(k){ PG_INV_PROJ[k].forEach(function(id){ byProj[id]=k; }); });
     const label=function(t){ return PG_INV_TAG[t.project_id]?t.name+' ('+PG_INV_TAG[t.project_id]+')':t.name; };
     const tw={}, fn={}; res[0].forEach(function(t){ tw[t.id]=t; const k=byProj[t.project_id]; if(!k) return; const nm=(PG_INV.names[k]=PG_INV.names[k]||[]), lb=label(t); if(nm.indexOf(lb)<0) nm.push(lb); }); res[1].forEach(function(x){ fn[x.id]=x.floor_no; });
     res[2].forEach(function(f){ const t=tw[f.tower_id]; if(!t||!byProj[t.project_id]||!f.flat_code) return; const k=byProj[t.project_id], lb=label(t), nb=pgNorm(lb);
       const o=(PG_INV.blocks[k]=PG_INV.blocks[k]||{})[nb]=PG_INV.blocks[k][nb]||{name:lb,flats:[]};
-      o.flats.push({code:String(f.flat_code).toUpperCase(),floor:fn[f.floor_id]==null?null:Number(fn[f.floor_id]),st:f.status}); });
+      o.flats.push({code:String(f.flat_code).toUpperCase(),floor:fn[f.floor_id]==null?null:Number(fn[f.floor_id]),st:f.status,bhk:pgBhkNorm(f.bhk)||pgBhkByArea(k,+f.sba_sqft),sba:f.sba_sqft!=null&&+f.sba_sqft>0?+f.sba_sqft:null}); });
     Object.keys(PG_INV.blocks).forEach(function(k){ Object.keys(PG_INV.blocks[k]).forEach(function(b){ PG_INV.blocks[k][b].flats.sort(function(a,c){ return (a.floor||0)-(c.floor||0)||a.code.localeCompare(c.code,'en',{numeric:true}); }); }); });
     PG_INV.st='ok';
   }catch(e){ PG_INV.st=null; console.warn('flat stock',e); return; }
@@ -19353,6 +18920,7 @@ function pgInvRefresh(keep){
   const dd=$('pgFlatDD'), inp=$('pgFlat'); if(!dd||!inp) return;
   const x=pgInvFor();
   PG.ddOpen=false; PG.ddQ='';
+  if(!keep) pgBhkLock(false);
   if(!x){ if(PG.invMode){ PG.invMode=false; PG.flFilter=null; pgFloorPlain(PG.project); } dd.style.display='none'; inp.style.display=''; return; }
   const prevFloor=($('pgFloor')||{}).value, code=keep?String(inp.value||'').trim().toUpperCase():'';
   const cur=code?x.flats.filter(function(f){ return f.code===code; })[0]:null;
@@ -19398,8 +18966,19 @@ window.pgInvPick=function(v){
   if(f&&f.floor!=null){ const e=$('pgFloor'), s=String(f.floor);   // the flat sets the Floor (the menu keeps showing what it showed)
     if(e&&e.tagName==='SELECT') e.value=s; else if(e){ e.value=s; e.parentNode.querySelectorAll('.pg-seg button').forEach(function(b){ b.classList.toggle('on',b.textContent.trim()===s); }); } }
   const er=$('pgE_pgFlat'), fb=$('pgF_pgFlat'); if(er) er.textContent=''; if(fb&&fb.classList) fb.classList.remove('bad');
+  pgFlatAuto(f);
   pgDDDraw();
 };
+/* WHAT THE FLAT'S RECORD GIVES (20 Nov 2026, Ayush: "there must be a record of which flat is which BHK - BHK is chosen automatically and cannot be set; SBA too if possible"): a flat with a BHK in the
+   stock list sets the Bedrooms and locks them ("from the flat's record"); its area fills Super built-up area (still editable). A flat with no BHK on record leaves Bedrooms free. */
+function pgBhkLock(on,why){ const w=$('pgC_pgBhk'); if(!w) return; const sg=w.querySelector('.pg-seg'); if(sg) sg.classList.toggle('pg-lock',!!on); let n=w.querySelector('.pg-auto'); if(on){ if(!n){ n=document.createElement('div'); n.className='pg-auto'; w.appendChild(n); } n.textContent=why||'Set from the flat record'; } else if(n) n.remove(); }
+function pgFlatAuto(f){
+  if(!f){ pgBhkLock(false); return; }
+  if(f.bhk){ const h=$('pgBhk'), w=$('pgC_pgBhk'); if(h&&w){ let b=[].slice.call(w.querySelectorAll('.pg-seg button')).filter(function(x){ return x.textContent.trim()===f.bhk; })[0];
+      if(!b){ const bt=document.createElement('button'); bt.type='button'; bt.textContent=f.bhk; bt.setAttribute('onclick',"pgSeg(this,'pgBhk')"); w.querySelector('.pg-seg').appendChild(bt); b=bt; }
+      w.querySelectorAll('.pg-seg button').forEach(function(x){ x.classList.toggle('on',x===b); }); h.value=f.bhk; } pgBhkLock(true,'Set from the flat record'); } else pgBhkLock(false);
+  if(f.sba&&$('pgSba')) $('pgSba').value=String(Math.round(f.sba*100)/100);
+}
 window.pgProjChange=function(){ const k=($('pgProject')||{}).value, p=(PG_PROJ.list||[]).filter(x=>x.key===k)[0]; if(p) pgProjApply(p); };
 async function pgProjInit(editRow){
   const seq=PG.openSeq, sel=$('pgProject');
@@ -19547,7 +19126,7 @@ window.pgClose=function(){ const p=document.getElementById('pgPage'); if(p) p.re
 window.pgSeg=function(btn,id){ btn.parentNode.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); }); btn.classList.add('on'); $(id).value=btn.textContent.trim(); if(id==='pgBlock') pgInvRefresh(); else if(id==='pgFloor') pgInvFloor(); };
 window.pgNameSync=function(){ const c=$('pgContact'); if(c&&!c.dataset.touched) c.value=($('pgName').value||''); };
 window.pgNatSync=function(){ const n=PDF_COUNTRIES.filter(c=>c[0]===$('pgNat').value)[0]; if(n&&$('pgCc')) $('pgCc').value=n[1]; };
-window.pgMoney=function(inp){ const d=inp.value.replace(/[^\d]/g,''); inp.value=d?Number(d).toLocaleString('en-IN'):''; const h=$('pgH_'+inp.id); if(h) h.textContent=pdfWords(d); };
+window.pgMoney=function(inp){ if(inp.id==='pgBook') inp.dataset.touched=1; const d=inp.value.replace(/[^\d]/g,''); inp.value=d?Number(d).toLocaleString('en-IN'):''; const h=$('pgH_'+inp.id); if(h) h.textContent=pdfWords(d); };
 // Editing a link: its details go back into the boxes.
 // The boxes as they are now (a draft keeps them exactly like this, even half empty).
 function pgRaw(){ const g=id=>($(id)||{}).value||''; const c=$('pgContact');
@@ -20402,13 +19981,13 @@ VIEWS.recruitment_new=async function(v,seg){
   const slots=[
     {label:'Tests',run:recTests},
     canApprove?{label:'Job Descriptions',run:()=>recLoadJDs(v)}:null,
-    {label:'Hiring Request',run:tpManpower},
+    {label:'Hiring Requests',run:tpManpower},   // renamed from 'Hiring Request' 23 Nov 2026
     {label:recCanWrite()?'Referrals':'Refer to HR',run:tpReferrals},
   ].filter(Boolean);
   const tabs=slots.map(s=>s.label);
   const ti=mTab(seg,tabs.length);
   v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-user-plus','#0369a1','Recruitment')
-    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Approving, editing and deleting here is limited to HR, Abhay Mati and Administrators — anyone can still submit a ManPower Form or Referral.</div>')
+    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Editing and deleting here is limited to HR, Abhay Mati and Administrators — anyone can still raise a Hiring Request or refer someone.</div>')
     +mTabs('recruitment_new',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
   recWatchPerms();
   await slots[ti].run();
@@ -20435,8 +20014,8 @@ function rtRender(){
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
       <!-- RENAME AND DELETE ARE GONE, BY REQUEST. A test is not a document to tidy: results,
            attempts and answers hang off it, and renaming one silently relabels every result
-           already recorded against it. Email is what this screen is for. The functions are left
-           in the file, unreferenced, so nothing is lost if they are ever wanted back. -->
+           already recorded against it. Email is what this screen is for. (The old Add / Rename /
+           Delete / Get Link / Preview functions were removed 23 Nov 2026.) -->
       ${rtCanManage()?`
       <button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-envelope"></i> Email</button>`
       : `<span style="font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:6px"><i class="fa-solid fa-lock"></i> View only</span>`}
@@ -20501,28 +20080,6 @@ window.rtSyncToolbar=function(){
   const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
   const shr=$('rtShareBtn');
   if(shr){shr.disabled=n!==1;shr.style.cssText=n===1?'':dis;}
-};
-window.rtAdd=function(){if(!recGuard()||!rtTestsGuard())return;
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <label>Test Name *</label><input id="rtFName" class="inp" placeholder="e.g. Sales Aptitude">
-    <label>Type *</label>
-    <select id="rtFEngine" class="inp" onchange="rtAddEngineToggle()">
-      <option value="native">Native — built in JainE (MCQ + descriptive, AI-graded)</option>
-      <option value="legacy">Legacy — external Google Form link</option>
-    </select>
-    <div id="rtFNativeFields">
-      <label>Duration <span style="font-size:11px;color:var(--slate)">(minutes — shown to the candidate, informational only)</span></label>
-      <input id="rtFDuration" class="inp" type="number" min="1" placeholder="e.g. 20">
-    </div>
-    <div id="rtFLegacyFields" style="display:none">
-      <label>Form Link</label><input id="rtFLink" class="inp" placeholder="http://form-timer.com/start/...">
-      <label>Response Sheet URL <span style="font-size:11px;color:var(--slate)">(Google Sheets URL for Preview)</span></label>
-      <input id="rtFSheet" class="inp" placeholder="https://docs.google.com/spreadsheets/d/...">
-    </div>
-  </div>
-  <div class="modal-foot"><button class="btn btn-primary" onclick="rtSave()">Add Test</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
-  setTimeout(()=>{const el=$('rtFName');if(el)el.focus();},100);
 };
 window.rtAddEngineToggle=function(){
   const native=($('rtFEngine')||{}).value==='native';
@@ -20671,61 +20228,6 @@ window.rtQDelete=async function(qId){
    for a specific candidate's email (and candidate_id if this test is being sent from a candidate's
    own row elsewhere — from the Tests tab directly there is no candidate context, so it's left null
    and Tests Sent/Test Passed stage automation simply does not fire for a link generated this way). ── */
-/* One click, no form: mints a real attempt under the previewer's own email and opens it
-   immediately in a new tab, so "does this test actually work" is answered by trying it, not by
-   reading a link out of a modal. Uses the exact same recruit-test-generate-link function a real
-   candidate's link comes from — this is not a fake/simulated preview, it is the real thing. */
-/* THE BUTTON IS DRAWN FOR EVERYONE, AND THE SERVER DECIDES.
-
-   It used to be hidden unless rtCanManage() said so, and when somebody who ought to have had it
-   could not see it there was nothing on the screen to explain why - a control that is simply
-   absent tells you nothing. Now it is always there, and a refusal comes back as a sentence naming
-   the reason. Nothing is loosened: recruit-test-generate-link still asks the database whether this
-   caller may do it, and a visible button does not make the request succeed.
-
-   THE TAB IS OPENED BEFORE THE AWAIT, NOT AFTER. A window.open that runs after an await has lost
-   the click that caused it, and browsers block it as a pop-up - so the old version could do
-   everything correctly, mint the attempt, and then appear to do nothing whatsoever. Opening the
-   tab while the click is still live and pointing it at the paper when the link arrives is what
-   makes Preview work from the page. If the tab is blocked anyway, the address is handed over
-   rather than the attempt being lost. */
-window.rtPreviewNative=async function(testId){
-  const test=(RT_RECORDS||[]).find(t=>t.id===testId);
-  const tab=window.open('', '_blank');          // on the click, before anything is awaited
-  if(tab){ try{ tab.document.write('<!doctype html><meta charset="utf-8"><title>Opening…</title>'
-    +'<body style="font:16px system-ui;padding:40px;color:#334155">Opening the test…</body>'); }catch(_e){} }
-  /* preview:true is what keeps a rehearsal out of Results. The attempt is still real - the paper
-     opens and grades exactly as a candidate's would - it simply is not counted as somebody having
-     sat the test, and carries no candidate, so it can never mark anybody 'Tests Sent'. */
-  const{data,error}=await sb.functions.invoke('recruit-test-generate-link',
-    {body:{test_id:testId,candidate_email:state.email||'preview@thejaingroup.com',
-           origin:location.origin,preview:true}});
-  if(error||data?.error){
-    if(tab) try{ tab.close(); }catch(_e){}
-    toast((data&&data.error)||(error&&error.message)||'Could not open the test','err');
-    return;
-  }
-  if(tab){ try{ tab.location.href=data.link; }catch(_e){ try{ tab.close(); }catch(_x){} } }
-  if(!tab||tab.closed){
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-eye"></i> '+esc((test&&test.name)||'Test')+'</h3>'
-      +'<span class="x" onclick="closeModal()">&times;</span></div>'
-      +'<div class="modal-body frm"><p style="margin:0 0 10px;color:var(--slate);font-size:13px">'
-      +'Your browser blocked the new tab. Open this instead — it is your preview, ready to sit.</p>'
-      +'<input class="inp" readonly value="'+esc(data.link)+'" onclick="this.select()"></div>'
-      +'<div class="modal-foot"><a class="btn btn-primary" href="'+esc(data.link)+'" target="_blank" rel="noopener">Open the test</a>'
-      +'<button class="btn" onclick="closeModal()">Close</button></div>');
-    return;
-  }
-  toast('Preview opened in a new tab — it will not appear in Results');
-};
-window.rtGetLink=function(testId){if(!rtTestsGuard())return;
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Get Test Link</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <label>Candidate Email *</label><input id="rtLinkEmail" class="inp" placeholder="candidate@example.com">
-  </div>
-  <div class="modal-foot"><button class="btn btn-primary" onclick="rtGetLinkGo(${testId})">Generate Link</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
-  setTimeout(()=>{const el=$('rtLinkEmail');if(el)el.focus();},100);
-};
 window.rtGetLinkGo=async function(testId){
   const email=($('rtLinkEmail')||{}).value?.trim();
   if(!email){toast('Candidate email is required','err');return;}
@@ -20769,20 +20271,6 @@ window.rtNativeSendGo=async function(){
     toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
   }
 };
-window.rtRename=function(){if(!recGuard()||!rtTestsGuard())return;
-  const sel=[...document.querySelectorAll('.rt-chk:checked')];
-  if(sel.length!==1)return;
-  const id=parseInt(sel[0].value);
-  const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Rename Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <label>Test Name *</label><input id="rtFRename" class="inp" value="${esc(rec.name)}">
-    <label>Form Link</label><input id="rtFRLink" class="inp" value="${esc(rec.link||'')}">
-    <label>Response Sheet URL</label><input id="rtFRSheet" class="inp" value="${esc(rec.response_sheet_url||'')}">
-  </div>
-  <div class="modal-foot"><button class="btn btn-primary" onclick="rtUpdate(${id})">Save</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
-  setTimeout(()=>{const el=$('rtFRename');if(el)el.focus();},100);
-};
 window.rtUpdate=async function(id){
   if(!rtTestsGuard())return;
   const name=($('rtFRename')||{}).value?.trim();
@@ -20794,15 +20282,6 @@ window.rtUpdate=async function(id){
   const rec=(RT_RECORDS||[]).find(r=>r.id===id);
   if(rec){rec.name=name;rec.link=link;rec.response_sheet_url=sheet||null;}
   closeModal();toast('Test updated');rtRender();
-};
-window.rtDelete=async function(){if(!recGuard()||!rtTestsGuard())return;
-  const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
-  if(!sel.length)return;
-  if(!await confirmDialog('Delete '+sel.length+' test(s)? All associated responses will also be deleted. This cannot be undone.'))return;
-  const{error}=await sb.schema('recruit').from('tests').delete().in('id',sel);
-  if(error){toast(error.message,'err');return;}
-  RT_RECORDS=(RT_RECORDS||[]).filter(r=>!sel.includes(r.id));
-  toast(sel.length+' test(s) deleted');rtRender();
 };
 
 /* ── Share Test (email a form link to candidates via the Email API backend) ── */
@@ -21356,19 +20835,16 @@ window.rtShareSend=async function(id){
 /* Native tests' own results view — same shape as the Google-Forms one above (Score, Timestamps,
    one row per person), except the row is real and clicking it opens that person's actual answers,
    since native tests grade themselves instead of needing a response sheet imported by hand. */
-/* SHOWPREVIEWS decides which of the two lists this is. Hiding rehearsals from the candidate
-   results was right - HR checking a paper is not a result - but hiding them from EVERYWHERE was
-   not: you could sit a test from JainE to check the grading and then have nowhere to see how it
-   was marked, which is the one thing a preview is for. So they are a second list rather than no
-   list, reached by a button, and never mixed into the first. */
-window.rtResultsNative=async function(testId,showPreviews){
+/* Candidate attempts only. The separate "My Previews" list (rehearsals, is_preview=true) had no
+   button left to reach it and was removed 23 Nov 2026. */
+window.rtResultsNative=async function(testId){
   const test=(RT_RECORDS||[]).find(t=>t.id===testId);if(!test)return;
   const panel=$('rtPreviewPanel');if(!panel)return;
   panel.style.display='block';
   panel.innerHTML=`<div class="card card-pad">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <i class="fa-solid fa-chart-simple" style="color:#0369a1;font-size:16px"></i>
-      <span style="font-weight:700;font-size:15px">${esc(test.name)} — ${showPreviews?'My Previews':'Results'}</span>
+      <span style="font-weight:700;font-size:15px">${esc(test.name)} — Results</span>
       <button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--slate)" onclick="document.getElementById('rtPreviewPanel').style.display='none'">&times;</button>
     </div>
     <div id="rtResultsBody"><div class="loader"><div class="spin"></div></div></div>
@@ -21381,7 +20857,7 @@ window.rtResultsNative=async function(testId,showPreviews){
     // candidate had sat anything.
     let{data,error}=await sb.schema('recruit').from('test_attempts')
       .select('id,candidate_email,status,started_at,submitted_at,mcq_score,mcq_max,ai_score,ai_max,ai_status,final_pct,pass_fail')
-      .eq('test_id',testId).eq('is_preview',!!showPreviews).order('submitted_at',{ascending:false,nullsFirst:false});
+      .eq('test_id',testId).eq('is_preview',false).order('submitted_at',{ascending:false,nullsFirst:false});
     if(error)throw new Error(error.message);
 
     /* A RESULT IS SOMEBODY WHO PRESSED START. NOTHING ELSE.
@@ -21407,12 +20883,10 @@ window.rtResultsNative=async function(testId,showPreviews){
     if(!data.length){
       rb.innerHTML='<div class="empty" style="padding:36px;color:var(--slate)">'
         +'<i class="fa-solid fa-inbox" style="font-size:28px;opacity:.3;display:block;margin-bottom:10px"></i>'
-        +(showPreviews
-          ? 'You have not previewed this test yet. Press Preview on its row to sit it \u2014 the marking will show up here.'
-          : (waiting
-             ? '<b>'+waiting+' candidate'+(waiting===1?' has':'s have')+' been sent this test, but nobody has started it yet.</b>'
-               +'<div style="margin-top:6px;font-size:12.5px">A result appears the moment somebody opens their link and presses Start.</div>'
-             : 'No candidate has taken this test yet.'))
+        +(waiting
+           ? '<b>'+waiting+' candidate'+(waiting===1?' has':'s have')+' been sent this test, but nobody has started it yet.</b>'
+             +'<div style="margin-top:6px;font-size:12.5px">A result appears the moment somebody opens their link and presses Start.</div>'
+           : 'No candidate has taken this test yet.')
         +'</div>';
       return;
     }
@@ -21438,7 +20912,7 @@ window.rtResultsNative=async function(testId,showPreviews){
       return `<b style="color:${col}">${r.final_pct}%</b> <span style="font-size:11px;color:var(--slate)">(${(Number(r.mcq_score||0)+Number(r.ai_score||0))} / ${(Number(r.mcq_max||0)+Number(r.ai_max||0))})</span> — <span style="color:${col};font-weight:600">${r.pass_fail?'Pass':'Fail'}</span>`;
     };
     rb.innerHTML=`
-      <div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} ${showPreviews?('preview'+(data.length!==1?'s':'')+' · not counted anywhere'):('response'+(data.length!==1?'s':''))}${(!showPreviews&&waiting)?` · ${waiting} sent but not started yet`:''} · click a row to see answers</div>
+      <div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} response${data.length!==1?'s':''}${waiting?` · ${waiting} sent but not started yet`:''} · click a row to see answers</div>
       <div style="overflow-x:auto">
       <table class="tbl" style="min-width:500px">
         <thead><tr>
@@ -21472,7 +20946,7 @@ window.rtResultsAttemptDetail=async function(attemptId){
     const{data:qs}=await sb.schema('recruit').from('test_questions').select('*').eq('test_id',full.test_id).order('seq',{ascending:true});
     const{data:answers}=await sb.schema('recruit').from('test_answers').select('*').eq('attempt_id',attemptId);
     const byQ={}; (answers||[]).forEach(a=>byQ[a.question_id]=a);
-    rb.innerHTML=`<button class="btn btn-sm" onclick="rtResultsNative(${full.test_id},${!!full.is_preview})" style="margin-bottom:12px"><i class="fa-solid fa-arrow-left"></i> Back to ${full.is_preview?'Previews':'Results'}</button>
+    rb.innerHTML=`<button class="btn btn-sm" onclick="rtResultsNative(${full.test_id})" style="margin-bottom:12px"><i class="fa-solid fa-arrow-left"></i> Back to Results</button>
       <!-- No Retry / Re-grade button (removed 27 Oct 2026 at HR's request): grading is done once,
            when the candidate submits. -->
       <div style="font-size:13px;color:var(--slate);margin-bottom:14px">${esc(full.candidate_email||'—')} · ${full.final_pct!=null?full.final_pct+'% — '+(full.pass_fail?'Pass':'Fail'):'Not yet graded'}
@@ -21500,71 +20974,6 @@ window.rtResultsAttemptDetail=async function(attemptId){
       }).join('')}`;
   }catch(e){
     rb.innerHTML=`<div class="empty" style="padding:30px;color:var(--err)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;
-  }
-};
-window.rtRegradeAttempt=async function(attemptId){
-  toast('Regrading…');
-  try{
-    const{data,error}=await sb.functions.invoke('recruit-test-regrade',{body:{attempt_id:attemptId}});
-    if(error||data?.error)throw new Error((data&&data.error)||error.message);
-    toast('Regraded: '+data.final_pct+'% — '+(data.pass_fail?'Pass':'Fail'));
-    rtResultsAttemptDetail(attemptId);
-  }catch(e){toast('Regrade failed: '+((e&&e.message)||e),'err');}
-};
-window.rtPreview=async function(id){
-  const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
-  const panel=$('rtPreviewPanel');if(!panel)return;
-  panel.style.display='block';
-  panel.innerHTML=`<div class="card card-pad">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-      <i class="fa-solid fa-list-check" style="color:#0369a1;font-size:16px"></i>
-      <span style="font-weight:700;font-size:15px">${esc(rec.name)} — Responses</span>
-      <button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--slate)" onclick="document.getElementById('rtPreviewPanel').style.display='none'">&times;</button>
-    </div>
-    <div id="rtPreviewBody"><div class="loader"><div class="spin"></div></div></div>
-  </div>`;
-  panel.scrollIntoView({behavior:'smooth',block:'start'});
-  const pb=$('rtPreviewBody');
-  try{
-    const{data,error}=await sb.schema('recruit').from('test_responses')
-      .select('respondent,score_got,score_total,time_taken,submitted_at,answers')
-      .eq('test_id',id)
-      .order('score_got',{ascending:false,nullsFirst:false});
-    if(error)throw new Error(error.message);
-    if(!data||!data.length){
-      pb.innerHTML='<div class="empty" style="padding:36px;color:var(--slate)"><i class="fa-solid fa-inbox" style="font-size:28px;opacity:.3;display:block;margin-bottom:10px"></i>No responses imported yet for this test.</div>';
-      return;
-    }
-    const pct=(g,t)=>t?Math.round(g/t*100):null;
-    const scoreTag=(g,t)=>{
-      if(g==null)return '<span style="color:var(--slate)">—</span>';
-      const p=pct(g,t);
-      const col=p==null?'var(--ink)':p>=70?'#16855a':p>=40?'#c08000':'#c83232';
-      return `<b style="color:${col}">${g}${t?' / '+t:''}</b>${p!=null?` <span style="font-size:11px;color:var(--slate)">(${p}%)</span>`:''}`;
-    };
-    const fmtDate=ts=>{if(!ts)return '—';try{return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}catch{return ts;}};
-    pb.innerHTML=`
-      <div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} response${data.length!==1?'s':''} · sorted by score</div>
-      <div style="overflow-x:auto">
-      <table class="tbl" style="min-width:400px">
-        <thead><tr>
-          <th style="width:36px;text-align:center">#</th>
-          <th>Respondent</th>
-          <th style="text-align:center;white-space:nowrap">Score</th>
-          <th style="white-space:nowrap">Time Taken</th>
-          <th style="white-space:nowrap">Date</th>
-        </tr></thead>
-        <tbody>${data.map((r,i)=>`<tr>
-          <td style="text-align:center;color:var(--slate);font-size:12px">${i+1}</td>
-          <td style="font-weight:500">${esc(r.respondent||'—')}</td>
-          <td style="text-align:center;white-space:nowrap">${scoreTag(r.score_got,r.score_total)}</td>
-          <td style="font-size:12px;color:var(--slate);white-space:nowrap">${esc(r.time_taken||'—')}</td>
-          <td style="font-size:12px;color:var(--slate);white-space:nowrap">${fmtDate(r.submitted_at)}</td>
-        </tr>`).join('')}
-        </tbody>
-      </table></div>`;
-  }catch(e){
-    pb.innerHTML=`<div class="empty" style="padding:30px;color:var(--err)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;
   }
 };
 
@@ -21678,113 +21087,6 @@ function mpSelOpt(id,opts,val){
   h+=`<input id="${id}Custom" class="inp" style="margin-top:6px;display:${known||!val?'none':'block'}" value="${esc(!known?val:'')}">`;
   return h;
 }
-async function recManpower(){
-  const b=$('recBody');
-  if(!MP_RECORDS){
-    b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-    try{const {data,error}=await sb.schema('hr').from('manpower_requests').select('*').order('submitted_at',{ascending:false});
-      if(error)throw error; MP_RECORDS=data||[];}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
-  }
-  const rows=MP_RECORDS;
-  const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
-  const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
-  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">Hiring Requests <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
-    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap" id="mpToolbar">
-      <button class="btn btn-primary" onclick="mpFillForm()"><i class="fa-solid fa-pen-to-square"></i> Fill Form</button>
-      <button class="btn" id="mpEditBtn" disabled style="${dis}" onclick="mpEditSel()"><i class="fa-solid fa-pen"></i> Edit</button>
-      <button class="btn" id="mpDelBtn" disabled style="${dis};color:var(--err);border-color:var(--err)" onclick="mpDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>
-    </div>
-  </div>
-  <div style="overflow-x:auto">
-  <table class="tbl" id="mpTbl">
-    <thead><tr>
-      <th style="width:36px;text-align:center"><input type="checkbox" id="mpChkAll" onchange="mpToggleAll(this)"></th>
-      <th>Job Title</th><th>Department</th><th>Date of Request</th>
-      <th style="text-align:center">Vacancy</th><th>Reporting To / HOD</th><th>Experience</th><th>Salary Range</th><th>Location</th><th>Priority</th>
-    </tr></thead>
-    <tbody>${rows.length?rows.map(r=>`<tr class="mp-row" style="cursor:pointer" onclick="mpShowDetail(${r.id},event)">
-      <td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="mp-chk" value="${r.id}" onchange="mpSyncToolbar()"></td>
-      <td style="font-weight:600">${esc(r.job_title||'—')}</td>
-      <td>${esc(r.department||'—')}</td>
-      <td style="color:var(--slate);font-size:12px;white-space:nowrap">${esc(mpFmtDate(r.date_of_request))}</td>
-      <td style="text-align:center">${esc(String(r.no_of_vacancy||'—'))}</td>
-      <td style="font-size:12px">${esc(r.reporting_person||'—')}</td>
-      <td style="font-size:12px">${esc(r.experience||'—')}</td>
-      <td style="font-size:12px">${esc(r.salary_range||'—')}</td>
-      <td>${esc(r.location||'—')}</td>
-      <td>${priTag(r.priority)}</td>
-    </tr>`).join(''):'<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--slate)">No hiring requests yet — click <b>Fill Form</b> to add one</td></tr>'}
-    </tbody>
-  </table>
-  </div>
-  <div id="mpDetail" style="display:none"></div>`;
-}
-window.mpToggleAll=function(el){document.querySelectorAll('.mp-chk').forEach(c=>c.checked=el.checked);mpSyncToolbar();};
-window.mpSyncToolbar=function(){
-  const sel=[...document.querySelectorAll('.mp-chk:checked')];
-  const n=sel.length;
-  const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
-  const editBtn=$('mpEditBtn'),delBtn=$('mpDelBtn');
-  if(editBtn){editBtn.disabled=n!==1;editBtn.style.cssText=n===1?'':'opacity:.38;cursor:not-allowed;pointer-events:none';}
-  if(delBtn){delBtn.disabled=n===0;delBtn.style.cssText=n>0?'color:var(--err);border-color:var(--err)':'opacity:.38;cursor:not-allowed;pointer-events:none;color:var(--err);border-color:var(--err)';}
-};
-window.mpEditSel=function(){if(!recGuard())return;
-  const sel=[...document.querySelectorAll('.mp-chk:checked')];
-  if(sel.length!==1)return;
-  mpEdit(parseInt(sel[0].value));
-};
-window.mpDeleteSel=async function(){if(!recGuard())return;
-  const sel=[...document.querySelectorAll('.mp-chk:checked')].map(c=>parseInt(c.value));
-  if(!sel.length)return;
-  if(!await confirmDialog('Delete '+sel.length+' hiring request'+(sel.length===1?'':'s')+'? This cannot be undone.'))return;
-  const {error}=await sb.schema('hr').from('manpower_requests').delete().in('id',sel);
-  if(error){toast(error.message,'err');return;}
-  if(MP_RECORDS)MP_RECORDS=MP_RECORDS.filter(r=>!sel.includes(r.id));
-  toast(sel.length+' deleted');mpRefreshList();
-};
-window.mpShowDetail=function(id,e){
-  if(e&&e.target&&e.target.type==='checkbox')return;
-  const rec=(MP_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
-  const panel=$('mpDetail');if(!panel)return;
-  const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
-  // Highlight active row
-  document.querySelectorAll('.mp-row').forEach(tr=>tr.style.background='');
-  const rows=[...document.querySelectorAll('.mp-row')];
-  const activeRow=rows.find(tr=>{const chk=tr.querySelector('.mp-chk');return chk&&parseInt(chk.value)===id;});
-  if(activeRow)activeRow.style.background='#fdf4f6';
-  panel.style.display='block';
-  panel.innerHTML=`<div class="card card-pad" style="margin-top:14px;position:relative">
-    <button style="position:absolute;top:12px;right:12px;background:none;border:none;cursor:pointer;font-size:18px;color:var(--slate);line-height:1" onclick="mpCloseDetail()">&times;</button>
-    <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;padding-right:32px">
-      <div style="flex:1;min-width:220px">
-        <div style="font-size:18px;font-weight:700;color:var(--ink)">${esc(rec.job_title||'—')}</div>
-        <div style="color:var(--slate);font-size:13px;margin-top:2px">${esc(rec.department||'—')} &nbsp;·&nbsp; ${mpFmtDate(rec.date_of_request)}</div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        ${priTag(rec.priority)}
-        <button class="btn btn-sm btn-primary" onclick="mpEdit(${rec.id})"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="mpDeleteOne(${rec.id})"><i class="fa-solid fa-trash"></i> Delete</button>
-      </div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 20px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Vacancies</div><div style="font-size:14px;margin-top:2px">${esc(String(rec.no_of_vacancy||'—'))}</div></div>
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Reporting To / HOD</div><div style="font-size:14px;margin-top:2px">${esc(rec.reporting_person||'—')}</div></div>
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Qualification</div><div style="font-size:14px;margin-top:2px">${esc(rec.qualification||'—')}</div></div>
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Experience</div><div style="font-size:14px;margin-top:2px">${esc(rec.experience||'—')}</div></div>
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Gender</div><div style="font-size:14px;margin-top:2px">${esc(rec.gender||'—')}</div></div>
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Salary Range</div><div style="font-size:14px;margin-top:2px">${esc(rec.salary_range||'—')}</div></div>
-      <div><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em">Location</div><div style="font-size:14px;margin-top:2px">${esc(rec.location||'—')}</div></div>
-    </div>
-    ${rec.job_description?`<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em;margin-bottom:6px">Job Description / KPI</div><div style="font-size:13.5px;white-space:pre-wrap;line-height:1.6;color:var(--ink)">${esc(rec.job_description)}</div></div>`:''}
-    ${rec.notes?`<div style="margin-top:12px;padding:10px 14px;background:#fefce8;border-radius:8px;border:1px solid #fde68a"><span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#a16207">Note · </span><span style="font-size:13px;color:#78350f">${esc(rec.notes)}</span></div>`:''}
-    ${mpAiPanel(rec)}
-  </div>`;
-};
-window.mpCloseDetail=function(){
-  const p=$('mpDetail');if(p)p.style.display='none';
-  document.querySelectorAll('.mp-row').forEach(tr=>tr.style.background='');
-};
 window.mpSelChange=function(id){
   const sel=$(`${id}Sel`),cust=$(`${id}Custom`);
   if(sel&&cust)cust.style.display=sel.value==='__other'?'block':'none';
@@ -21932,24 +21234,9 @@ function mpCollect(){
     submitted_at:new Date().toISOString()
   };
 }
-window.mpFillForm=function(){if(!recGuard())return;mpModal('Hiring Request',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="mpSave()"><i class="fa-solid fa-check"></i> Submit</button>');};
-window.mpSave=async function(){
-  const d=mpCollect();
-  if(!d.job_title){toast('Job Title is required','err');return;}
-  const btn=$('mpSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {data,error}=await sb.schema('hr').from('manpower_requests').insert(d).select().single();
-  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit';}return;}
-  MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();toast('Hiring request submitted');mpRefreshList();
-};
-/* REDRAW WHICHEVER LIST IS ACTUALLY ON SCREEN.
-
-   Both layouts render into #recBody: the Hiring Request tab through tpMpRender, and the retired
-   recruitment page through recManpower. Saving an edit called recManpower unconditionally, so the
-   new tab was redrawn with the OLD toolbar - same data, different screen, and only ever after an
-   edit, which is why it looked like the page had changed its mind. */
+// Redraws the Hiring Requests tab after an edit (the retired recManpower list is gone).
 function mpRefreshList(){
-  if(PAGE==='recruitment_new'&&typeof tpManpower==='function'){ tpManpower(); return; }
-  recManpower();
+  if(typeof tpManpower==='function') tpManpower();
 }
 // HR, or whoever raised the request (tpMpCanChange) - the database still refuses once anybody is on it.
 window.mpEdit=function(id){
@@ -21968,476 +21255,6 @@ window.mpUpdate=async function(id){
   if(idx>-1&&MP_RECORDS)MP_RECORDS[idx]=data;
   closeModal();toast('Updated');mpRefreshList();
 };
-window.mpDeleteOne=async function(id){if(!recGuard())return;
-  if(!await confirmDialog('Delete this hiring request?'))return;
-  const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
-  if(error){toast(error.message,'err');return;}
-  if(MP_RECORDS)MP_RECORDS=MP_RECORDS.filter(r=>r.id!==id);
-  toast('Deleted');mpRefreshList();
-};
-window.mpDelete=window.mpDeleteOne;
-window.mpReload=function(){MP_RECORDS=null;if(PAGE==='recruitment')renderPage();};
-
-/* ── ManPower: the AI-written JD, post text and creative ──
-   The generation itself is the manpower-ai-generate edge function: it reads the requisition, takes
-   up to three of our past Job Descriptions as style examples, and writes the JD, the shorter
-   job-board post text and a creative. It stores all three and stamps ai_status on the requisition.
-   Nothing was ever calling it, so this is the button. */
-function mpAiPanel(rec){
-  const st=rec.ai_status||'pending';
-  // The document is built from the JSON in the browser, so that - not the stored file - is what
-  // decides whether there is anything to show.
-  const hasJd=!!rec.ai_job_description_json;
-  const badge={pending:'<span class="tag t-gray">Not generated</span>',
-               generating:'<span class="tag t-blue"><i class="fa-solid fa-spinner fa-spin"></i> Writing…</span>',
-               ready:'<span class="tag t-green">Ready</span>',
-               failed:'<span class="tag t-red">Failed</span>'}[st]||'';
-  let inner;
-  if(st==='ready'&&hasJd){
-    inner='<div class="mp-ai-acts">'
-      +'<button class="btn btn-sm btn-primary" onclick="mpJdDownload('+rec.id+')"><i class="fa-solid fa-file-lines"></i> Job Description</button>'
-      +(rec.ai_creative_path
-        ? '<button class="btn btn-sm" onclick="mpCreativePng('+rec.id+')"><i class="fa-solid fa-image"></i> Creative</button>'
-        : '')
-      +'<button class="btn btn-sm" onclick="mpAiCopyPost('+rec.id+')"><i class="fa-solid fa-copy"></i> Copy post text</button>'
-      +'<button class="btn btn-sm" onclick="mpAiGenerate('+rec.id+',true)"><i class="fa-solid fa-rotate"></i> Rewrite</button>'
-      /* ADD IS WHAT PUTS IT IN THE LIBRARY. Nothing else does - not writing it, not approving the
-         hiring request. A description sits with its request until somebody decides it is good
-         enough to keep, which is the decision the old approval step was pretending to be. The
-         same button is in the email that announces the description, so it can be done from a
-         phone without opening JAIN-E. */
-      +'<span id="mpJdAddWrap'+rec.id+'"></span>'
-      +'</div>'
-      +(rec.ai_platform_post_text
-        ? '<div class="mp-ai-post"><div class="mp-ai-lbl">Post text — for LinkedIn, Naukri or Indeed</div>'
-          +'<div class="mp-ai-post-body" id="mpAiPost'+rec.id+'">'+esc(rec.ai_platform_post_text)+'</div></div>'
-        : '');
-  } else if(st==='generating'){
-    inner='<div class="mp-ai-note">Writing the Job Description now. It takes a few seconds — press Refresh when it settles.</div>'
-      +'<div class="mp-ai-acts"><button class="btn btn-sm" onclick="mpReload()"><i class="fa-solid fa-rotate"></i> Refresh</button></div>';
-  } else {
-    inner='<div class="mp-ai-note">'
-      +(st==='failed'
-        ? 'The last attempt failed. Trying again is safe — nothing was saved.'
-        : 'Writes a full Job Description in our house style, the shorter text for a job board, and a creative to post with it.')
-      +'</div>'
-      +'<div class="mp-ai-acts"><button class="btn btn-sm btn-primary" onclick="mpAiGenerate('+rec.id+')">'
-      +'<i class="fa-solid fa-wand-magic-sparkles"></i> '+(st==='failed'?'Try again':'Generate')+'</button></div>';
-  }
-  const html='<div class="mp-ai"><div class="mp-ai-hd"><i class="fa-solid fa-wand-magic-sparkles"></i> Job Description &amp; creative '+badge+'</div>'+inner+'</div>';
-  /* Whether this description is already in the library is a fact about the DESCRIPTION, held in
-     recruit.job_descriptions, not about the request - so it has to be looked up. Done after the
-     panel is on screen rather than before: the panel is drawn from data already in hand, and
-     holding it back for one more round trip would leave the whole request blank while it waited. */
-  if(st==='ready'&&hasJd) setTimeout(function(){ mpJdAddRefresh(rec.id); },0);
-  return html;
-}
-
-/* Draws the Add button, or says it is already added. Separate from mpAiPanel so pressing Add can
-   redraw just this one span instead of the whole request. */
-async function mpJdAddRefresh(reqId){
-  const host=$('mpJdAddWrap'+reqId); if(!host) return;
-  let jd=null;
-  try{
-    const {data}=await sb.schema('recruit').from('job_descriptions')
-      .select('id,in_library,added_by')
-      .eq('manpower_request_id',reqId).order('created_at',{ascending:false}).limit(1);
-    jd=(data||[])[0]||null;
-  }catch(_e){ return; }   // a failed lookup shows nothing rather than a button that cannot work
-  if(!jd){ host.innerHTML=''; return; }
-  host.innerHTML=jd.in_library
-    ? '<span class="tag t-green" title="'+esc(jd.added_by||'')+'"><i class="fa-solid fa-check"></i> In Descriptions</span>'
-    : '<button class="btn btn-sm btn-primary" id="mpJdAddBtn'+reqId+'" onclick="mpJdAdd('+reqId+',\''+esc(jd.id)+'\')">'
-      +'<i class="fa-solid fa-plus"></i> Add to Descriptions</button>';
-}
-
-window.mpJdAdd=async function(reqId,jdId){
-  if(!recGuard()) return;
-  const btn=$('mpJdAddBtn'+reqId);
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
-  try{
-    // .select() for the same reason as jdEditorSave: an update that row-level security filters
-    // out comes back as success with nothing changed, and a button that lies is worse than one
-    // that fails.
-    const {data,error}=await sb.schema('recruit').from('job_descriptions')
-      .update({in_library:true,added_by:state.email,added_at:new Date().toISOString()})
-      .eq('id',jdId).select('id');
-    if(error) throw new Error(error.message);
-    if(!data||!data.length) throw new Error('nothing changed — you may not have permission');
-    toast('Added — it is in Recruitment › Job Descriptions now','ok');
-    mpJdAddRefresh(reqId);
-  }catch(e){
-    toast('Could not add it: '+((e&&e.message)||e),'err');
-    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-plus"></i> Add to Descriptions'; }
-  }
-};
-
-window.mpAiCopyPost=function(id){
-  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
-  const txt=(rec&&rec.ai_platform_post_text)||'';
-  if(!txt){ toast('No post text yet','err'); return; }
-  // navigator.clipboard needs a secure context and can be refused; the textarea fallback works
-  // everywhere, so a copy never silently does nothing.
-  const done=function(){ toast('Post text copied','ok'); };
-  if(navigator.clipboard&&navigator.clipboard.writeText){
-    navigator.clipboard.writeText(txt).then(done,function(){ mpCopyFallback(txt,done); });
-  } else { mpCopyFallback(txt,done); }
-};
-function mpCopyFallback(txt,done){
-  const ta=document.createElement('textarea');
-  ta.value=txt; ta.style.position='fixed'; ta.style.top='-1000px';
-  document.body.appendChild(ta); ta.select();
-  try{ document.execCommand('copy'); done(); }
-  catch(e){ toast('Could not copy — select the text and copy it by hand','err'); }
-  document.body.removeChild(ta);
-}
-
-window.mpAiGenerate=async function(id,isRewrite){
-  if(!recGuard()) return;
-  if(isRewrite && !await confirmDialog(
-      'Rewrite the Job Description, post text and creative for this hiring request? The current ones are replaced.',
-      {title:'Rewrite', okLabel:'Rewrite', icon:'fa-rotate', danger:false})) return;
-  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
-  if(rec){ rec.ai_status='generating'; mpShowDetail(id); }
-  toast('Writing the Job Description…','ok');
-  try{
-    const {data,error}=await sb.functions.invoke('manpower-ai-generate',
-      {body:{request_id:id, requested_by:state.email}});
-    if(error) throw error;
-    if(data&&data.error) throw new Error(data.error);
-    toast('Job Description ready','ok');
-  }catch(e){
-    // The requisition's own ai_status is set to 'failed' by the function, so the reload below
-    // shows the real state rather than whatever this screen last guessed.
-    toast('Could not generate: '+((e&&e.message)||e),'err');
-  }
-  MP_RECORDS=null;
-  if(PAGE==='recruitment') await recManpower();
-  const still=$('mpDetail');
-  if(still) mpShowDetail(id);
-};
-
-/* The Job Description document, built in the browser.
-   It used to be an HTML file uploaded to public storage, and that can never work: Supabase serves
-   HTML out of a public bucket as text/plain on purpose (it stops a stored page running scripts on
-   the storage domain). The browser therefore showed the raw source - which is the "no CSS, opens
-   some Supabase code" everybody was seeing. Verified: that URL returns Content-Type: text/plain,
-   while the SVG creative beside it correctly returns image/svg+xml.
-   So the document is assembled here instead, from ai_job_description_json which is already stored
-   on the requisition. Print gives a PDF, Download gives a real file, and neither depends on how
-   storage chooses to serve a content type. */
-const JD_LOGO='https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/recruitment-creatives/brand/jain-group-logo.webp';
-
-function mpJdDocHtml(rec){
-  const s=rec.ai_job_description_json||{};
-  const q=s.qualifications||{};
-  const li=function(arr){
-    return (Array.isArray(arr)&&arr.length)
-      ? '<ul>'+arr.map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul>' : '';
-  };
-  const resp=(s.responsibilities||[]).map(function(r){
-    return '<li>'+(r.label?'<b>'+esc(r.label)+'</b>: ':'')+esc(r.detail||'')+'</li>';
-  }).join('');
-  const qual=[];
-  if(q.education) qual.push('<p><b>Educational Background:</b> '+esc(q.education)+'</p>');
-  if(q.experience) qual.push('<p><b>Professional Experience:</b> '+esc(q.experience)+'</p>');
-  if(q.skills&&q.skills.length) qual.push('<p><b>Skills:</b></p>'+li(q.skills));
-  if(q.personal_attributes&&q.personal_attributes.length)
-    qual.push('<p><b>Personal Attributes:</b></p>'+li(q.personal_attributes));
-
-  return '<!doctype html><html><head><meta charset="utf-8">'
-    +'<title>'+esc(s.job_title||rec.job_title||'Job Description')+' — Jain Group</title>'
-    +'<style>'
-      +'@page{margin:18mm 16mm}'
-      +'*{box-sizing:border-box}'
-      +'body{font-family:Inter,"Segoe UI",Arial,sans-serif;color:#111;max-width:820px;margin:0 auto;padding:44px 52px;line-height:1.6}'
-      +'.lh{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;'
-        +'border-bottom:3px solid #D21F3C;padding-bottom:16px;margin-bottom:26px}'
-      +'.lh img{height:42px}'
-      +'h1{font-size:23px;margin:0 0 3px;letter-spacing:-.2px}'
-      +'.dept{color:#555;font-size:14px}'
-      +'h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#D21F3C;'
-        +'border-bottom:1px solid #eee;padding-bottom:5px;margin:26px 0 10px}'
-      +'p,li{font-size:14px}'
-      +'ul{margin:4px 0 4px;padding-left:20px}'
-      +'li{margin-bottom:4px}'
-      +'.foot{margin-top:38px;padding-top:13px;border-top:1px solid #eee;font-size:11.5px;color:#888}'
-      /* the print button is for the person reading it on screen and must never appear on paper */
-      +'.noprint{position:fixed;top:14px;right:14px}'
-      +'.noprint button{font:600 13px Inter,Arial,sans-serif;padding:9px 15px;border-radius:8px;'
-        +'border:0;background:#D21F3C;color:#fff;cursor:pointer}'
-      +'@media print{.noprint{display:none}body{padding:0}}'
-    +'</style></head><body>'
-    +'<div class="noprint"><button onclick="window.print()">Print / Save as PDF</button></div>'
-    +'<div class="lh"><div><h1>'+esc(s.job_title||rec.job_title||'')+'</h1>'
-      +'<div class="dept">'+esc(s.department||rec.department||'')+'</div></div>'
-      +'<img src="'+JD_LOGO+'" alt="Jain Group"></div>'
-    +'<h2>Job Summary</h2><p>'+esc(s.job_summary||'')+'</p>'
-    +(resp?'<h2>Key Responsibilities</h2><ul>'+resp+'</ul>':'')
-    +(qual.length?'<h2>Required Qualifications</h2>'+qual.join(''):'')
-    +(s.compensation?'<h2>Compensation and Benefits</h2><p>'+esc(s.compensation)+'</p>':'')
-    +'<div class="foot">Jain Group — Caring for your dreams. '
-      +esc([rec.location?'Location: '+rec.location:'',
-            rec.no_of_vacancy?'Vacancies: '+rec.no_of_vacancy:''].filter(Boolean).join(' · '))
-      +'</div></body></html>';
-}
-
-function mpJdRec(id){
-  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
-  if(!rec||!rec.ai_job_description_json){ toast('No Job Description generated yet','err'); return null; }
-  return rec;
-}
-
-/* Last resort only. The Job Description is a download, not something that opens in a tab - but if
-   the browser refuses the blob download there has to be some way to get at the document, so it is
-   opened instead and the print dialog offered. */
-function mpJdOpenFallback(rec){
-  const w=window.open('','_blank');
-  if(!w) return false;
-  w.document.open(); w.document.write(mpJdDocHtml(rec)); w.document.close();
-  return true;
-}
-
-// Saves a real file. A Blob URL downloads whatever the server would have argued about.
-window.mpJdDownload=function(id){
-  const rec=mpJdRec(id); if(!rec) return;
-  if(!('download' in document.createElement('a'))){
-    if(!mpJdOpenFallback(rec)) toast('Your browser will not download it — allow pop-ups for JAIN-E','err');
-    return;
-  }
-  const name=String((rec.ai_job_description_json.job_title||rec.job_title||'Job Description'))
-    .replace(/[^A-Za-z0-9 .()-]/g,'').trim().replace(/\s+/g,'_');
-  const blob=new Blob([mpJdDocHtml(rec)],{type:'text/html;charset=utf-8'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url; a.download=(name||'Job_Description')+' — Jain Group.html';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(function(){ URL.revokeObjectURL(url); },4000);
-  toast('Downloaded','ok');
-};
-
-/* The creative is stored as SVG - text stays crisp at any size and the poster can be re-rendered
-   from it - but what anybody actually posts to LinkedIn or WhatsApp is a PNG. The conversion runs
-   here rather than on the server: rasterising in Deno would mean adding an image library, whereas
-   the browser already has one.
-   The SVG is fetched as TEXT and handed back as a same-origin blob. Pointing an <img> at the
-   storage URL directly would taint the canvas and toBlob() would then be refused - the file is
-   cross-origin even though storage does send permissive CORS headers. */
-window.mpCreativePng=async function(id){
-  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
-  if(!rec||!rec.ai_creative_path){ toast('No creative generated yet','err'); return; }
-  const btn=event&&event.currentTarget;
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Building…'; }
-  let url=null;
-  try{
-    const res=await fetch(rec.ai_creative_path,{cache:'no-store'});
-    if(!res.ok) throw new Error('could not read the creative ('+res.status+')');
-    const svg=await res.text();
-    url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'}));
-    const img=new Image();
-    await new Promise(function(ok,bad){
-      img.onload=ok;
-      img.onerror=function(){ bad(new Error('the creative would not render')); };
-      img.src=url;
-    });
-    // 1122x1402 is the artwork's own size, so this is a straight one-to-one raster, no resampling.
-    const c=document.createElement('canvas'); c.width=1122; c.height=1402;
-    const g=c.getContext('2d');
-    g.drawImage(img,0,0,c.width,c.height);
-    const blob=await new Promise(function(r){ c.toBlob(r,'image/png'); });
-    if(!blob) throw new Error('the browser would not produce a PNG');
-    const name=String(rec.job_title||'Hiring').replace(/[^A-Za-z0-9 ()-]/g,'').trim().replace(/\s+/g,'_');
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download=(name||'Hiring')+' - We Are Hiring.png';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function(){ URL.revokeObjectURL(a.href); },4000);
-    toast('PNG downloaded','ok');
-  }catch(e){
-    toast('Could not make the PNG: '+((e&&e.message)||e),'err');
-  }finally{
-    if(url) URL.revokeObjectURL(url);
-    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-image"></i> Creative'; }
-  }
-};
-
-/* ── Referrals ──
-   Anyone signed in may refer somebody for an open position. A referral submitted by HR, the
-   Administrator or Management is approved on the way in (hr.submission_self_approves); everyone
-   else's waits for HR.
-   A referral is recorded HERE AND NOWHERE ELSE - it does not create a candidate and does not appear
-   in the Interview Tracker or in any Monthly Update column. Somebody has to pick it up deliberately. */
-let REF_RECORDS=null, REF_POSITIONS=null;
-
-async function recReferrals(){
-  const b=$('recBody');
-  if(!REF_RECORDS){
-    b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-    try{
-      const q=await sb.schema('hr').from('referrals').select('*').order('created_at',{ascending:false});
-      if(q.error) throw q.error;
-      REF_RECORDS=q.data||[];
-    }catch(e){
-      b.innerHTML='<div class="empty" style="padding:40px;color:var(--err)">'+esc(e.message||String(e))+'</div>';
-      return;
-    }
-  }
-  const rows=REF_RECORDS;
-  const mine=rows.filter(function(r){return (r.referred_by||'').toLowerCase()===(state.email||'').toLowerCase();}).length;
-  const waiting=rows.filter(function(r){return (r.approval_status||'Pending')==='Pending';}).length;
-  const canDecide=hrCan();
-
-  const stTag=function(r){
-    const s=r.approval_status||'Pending';
-    if(s==='Approved') return '<span class="tag t-green" title="'+esc('Approved by '+(r.approved_by||'—'))+'">Approved</span>';
-    if(s==='Rejected') return '<span class="tag t-red" title="'+esc(r.rejection_reason||'')+'">Rejected</span>';
-    return '<span class="tag t-amber">Waiting for HR</span>';
-  };
-
-  b.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
-      +'<div class="sec-title" style="margin:0">Referrals <span class="tag t-gray" style="margin-left:4px">'+rows.length+'</span>'
-        +(waiting?' <span class="tag t-amber" style="margin-left:4px">'+waiting+' waiting</span>':'')+'</div>'
-      +'<div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">'
-        +'<button class="btn btn-primary" onclick="refForm()"><i class="fa-solid fa-user-plus"></i> Refer someone</button>'
-      +'</div>'
-    +'</div>'
-    +'<div class="ref-note"><i class="fa-solid fa-circle-info"></i> '
-      +'A referral is kept here only. It does not create a candidate and is not counted in the Interview Tracker '
-      +'or the Monthly Update until someone takes it forward.'
-      +(mine?' You have referred '+mine+' '+(mine===1?'person':'people')+'.':'')
-    +'</div>'
-    +(rows.length
-      ? '<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table class="tbl">'
-        +'<thead><tr><th>Name</th><th>Position</th><th>Phone</th><th>Email</th>'
-          +'<th>Referred by</th><th>When</th><th>Status</th>'+(canDecide?'<th></th>':'')+'</tr></thead><tbody>'
-        +rows.map(function(r){
-          const pend=(r.approval_status||'Pending')==='Pending';
-          return '<tr>'
-            +'<td style="font-weight:600">'+esc(r.referred_name||'—')+'</td>'
-            +'<td>'+esc(r.position||'—')+'</td>'
-            +'<td style="white-space:nowrap">'+esc(r.referred_phone||'—')+'</td>'
-            +'<td style="font-size:12px">'+esc(r.referred_email||'—')+'</td>'
-            +'<td style="font-size:12px;color:var(--slate)">'+esc(r.referred_by||'—')+'</td>'
-            +'<td style="white-space:nowrap;font-size:12px;color:var(--slate)">'+esc(refWhen(r.created_at))+'</td>'
-            +'<td>'+stTag(r)+'</td>'
-            +(canDecide
-              ? '<td style="white-space:nowrap">'
-                +(pend
-                  ? '<button class="btn btn-sm btn-ok" onclick="refDecide('+r.id+',true)"><i class="fa-solid fa-check"></i> Approve</button> '
-                    +'<button class="btn btn-sm btn-danger" onclick="refDecide('+r.id+',false)"><i class="fa-solid fa-xmark"></i> Reject</button>'
-                  : '<button class="btn btn-sm btn-danger" onclick="refDelete('+r.id+')" title="Delete this referral"><i class="fa-solid fa-trash"></i></button>')
-                +'</td>'
-              : '')
-            +'</tr>';
-        }).join('')
-        +'</tbody></table></div></div>'
-      : '<div class="card card-pad empty"><i class="fa-solid fa-user-plus"></i>'
-        +'<div style="font-weight:600;color:var(--ink)">No referrals yet</div>'
-        +'<p style="max-width:400px;margin:6px auto 0">Know somebody good for an open role? Click <b>Refer someone</b>.</p></div>');
-}
-
-function refWhen(ts){
-  if(!ts) return '—';
-  try{ return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
-  catch(e){ return String(ts); }
-}
-
-window.refForm=async function(){
-  if(!REF_POSITIONS){
-    try{
-      const {data}=await sb.schema('hr').rpc('open_positions');
-      REF_POSITIONS=data||[];
-    }catch(e){ REF_POSITIONS=[]; }
-  }
-  const opts=REF_POSITIONS.map(function(p){
-    return '<option value="'+p.manpower_id+'">'+esc(p.job_title+(p.department?' — '+p.department:''))+'</option>';
-  }).join('');
-  const selfAppr=hrCan();
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-user-plus"></i> Refer someone</h3>'
-      +'<span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm">'
-      +'<div><label>Their name *</label><input id="refFName" class="inp" placeholder="Full name"></div>'
-      +'<div class="two">'
-        +'<div><label>Phone</label><input id="refFPhone" class="inp" placeholder="10-digit mobile"></div>'
-        +'<div><label>Email</label><input id="refFEmail" class="inp" type="email" placeholder="name@example.com"></div>'
-      +'</div>'
-      +'<div><label>Position *</label><select id="refFPos" class="sel">'
-        +(opts?'<option value="">— Choose an open position —</option>'+opts
-              :'<option value="">No open positions right now</option>')
-        +'</select></div>'
-      +'<div><label>Anything we should know</label>'
-        +'<textarea id="refFNotes" class="inp" rows="3" placeholder="How you know them, what they do now, why they would suit it"></textarea></div>'
-      +'<div style="font-size:12.5px;color:var(--slate);margin-top:4px">'
-        +(selfAppr
-          ? 'You are in HR or Management, so this is approved as soon as you submit it.'
-          : 'HR will see this and approve or reject it.')
-      +'</div>'
-    +'</div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
-      +'<button class="btn btn-primary" id="refSaveBtn" onclick="refSave()"><i class="fa-solid fa-check"></i> Submit</button></div>');
-  setTimeout(function(){ const el=$('refFName'); if(el) el.focus(); },50);
-};
-
-window.refSave=async function(){
-  const name=(($('refFName')||{}).value||'').trim();
-  const posId=(($('refFPos')||{}).value||'').trim();
-  const phone=(($('refFPhone')||{}).value||'').trim();
-  const email=(($('refFEmail')||{}).value||'').trim();
-  if(!name){ toast('Enter their name','err'); return; }
-  if(!posId){ toast('Choose the position','err'); return; }
-  if(!phone&&!email){ toast('Give a phone number or an email — otherwise nobody can reach them','err'); return; }
-  const pos=(REF_POSITIONS||[]).find(function(p){return String(p.manpower_id)===posId;});
-  const btn=$('refSaveBtn');
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
-  const {error}=await sb.schema('hr').from('referrals').insert({
-    referred_name:name, referred_phone:phone||null, referred_email:email||null,
-    position:(pos&&pos.job_title)||null, manpower_request_id:parseInt(posId,10),
-    referred_by:state.email, notes:(($('refFNotes')||{}).value||'').trim()||null
-  });
-  if(error){
-    toast(error.message,'err');
-    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Submit'; }
-    return;
-  }
-  closeModal();
-  toast(hrCan()?'Referral added and approved':'Referral sent to HR','ok');
-  REF_RECORDS=null; recReferrals();
-};
-
-window.refDecide=async function(id,ok){
-  if(!hrCan()){ toast('Only HR can approve a referral','err'); return; }
-  const r=(REF_RECORDS||[]).find(function(x){return x.id===id;})||{};
-  const who=r.referred_name||'this referral';
-  if(!await confirmDialog((ok?'Approve the referral for ':'Reject the referral for ')+'“'+who+'”?',
-      ok ? {title:'Approve referral', okLabel:'Approve', icon:'fa-circle-check', danger:false}
-         : {title:'Reject referral',  okLabel:'Reject',  icon:'fa-circle-xmark', danger:true})) return;
-  const {error}=await sb.schema('hr').from('referrals').update({
-    approval_status: ok?'Approved':'Rejected',
-    approved_by: state.email,
-    approved_at: new Date().toISOString()
-  }).eq('id',id);
-  if(error){ toast(error.message,'err'); return; }
-  toast(ok?'Approved':'Rejected','ok');
-  REF_RECORDS=null; recReferrals();
-};
-
-window.refDelete=async function(id){
-  if(!hrCan()){ toast('Only HR can delete a referral','err'); return; }
-  const r=(REF_RECORDS||[]).find(function(x){return x.id===id;})||{};
-  if(!await confirmDialog(
-      'Delete the referral for “'+(r.referred_name||'this person')+'”? The candidate it '
-      +'created is deleted as well, along with their CV. This cannot be undone.',
-      {title:'Delete referral', okLabel:'Delete', icon:'fa-trash', danger:true})) return;
-  /* Through the same function the other screen uses. This one used to delete the row straight
-     out of the table, which left the candidate behind and skipped the rule entirely. */
-  const {data,error}=await sb.schema('hr').rpc('referral_withdraw',{p_id:id});
-  if(error){ toast(error.message,'err'); return; }
-  await hrRemoveFiles(data);
-  toast('Referral deleted \u2014 the candidate was removed too','ok');
-  REF_RECORDS=null; recReferrals();
-};
-
-window.refReload=function(){ REF_RECORDS=null; REF_POSITIONS=null; if(PAGE==='recruitment')renderPage(); };
 
 async function recLoadJDs(v){
   REC_SEL=new Set();
@@ -24451,14 +23268,14 @@ window.tpMpSave=async function(){
   const {data,error}=await sb.schema('hr').from('manpower_requests').insert(d).select().single();
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit';}return;}
   MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();
-  toast(data.approval_status==='Approved'?'Hiring request submitted and approved':'Hiring request submitted — HR has been asked to approve it');
+  toast('Hiring request submitted');
   tpMpRender();
-  // Fire the AI JD/Description/Creative generation in the background — the submitter doesn't need
+  // Fire the AI job-description generation in the background (only the description since 23 Nov 2026 - no post, no image) — the submitter doesn't need
   // to wait or have write access for this; it's just drafting content, not an approval action.
   sb.functions.invoke('manpower-ai-generate',{body:{request_id:data.id,requested_by:state.email||''}}).then(({data:gen,error})=>{
     const rec=(MP_RECORDS||[]).find(r=>r.id===data.id);if(!rec)return;
     if(error||!gen||gen.error){rec.ai_status='failed';return;}
-    rec.ai_status='ready';rec.ai_job_description=gen.job_description;rec.ai_job_description_json=gen.job_description_json;rec.ai_platform_post_text=gen.platform_post_text;rec.ai_creative_path=gen.creative_path;
+    rec.ai_status='ready';rec.ai_job_description=gen.job_description;rec.ai_job_description_json=gen.job_description_json;
     /* NO EMAIL ANY MORE (27 Oct 2026). A new description used to be mailed to HR here; the
        approval task in Accountability already tells them, so the mail was a second copy of the
        same news. */
@@ -24510,7 +23327,7 @@ window.tpMpShowDetail=function(id){
         <div style="font-size:18px;font-weight:700;color:var(--ink)">${esc(rec.job_title||'—')}</div>
         <div style="color:var(--slate);font-size:13px;margin-top:2px">${esc(rec.department||'—')} &nbsp;·&nbsp; ${mpFmtDate(rec.date_of_request)} &nbsp;·&nbsp; raised by ${esc(rec.raised_by||'—')}</div>
       </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${priTag(rec.priority)}${tpApprovalTag(rec)}</div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${priTag(rec.priority)}</div>
     </div>
     <!-- APPROVING DOES NOT HAPPEN HERE ANY MORE.
 
@@ -24526,9 +23343,6 @@ window.tpMpShowDetail=function(id){
     <!-- Edit and Delete moved to the toolbar, on a tick. Opening a request in order to delete it
          meant reading a thing to throw it away, and put the most destructive control on the screen
          you land on after a click. -->
-    ${pending?`<div style="margin-top:10px;font-size:12.5px;color:var(--slate);background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:9px 12px">
-      <i class="fa-solid fa-circle-info"></i> Waiting for approval — approve or reject it from <b>Accountability › Pending Approval</b>.
-    </div>`:''}
     ${rec.approval_status==='Rejected'&&rec.rejection_reason?`<div style="margin-top:10px;padding:10px 14px;background:#fef2f2;border-radius:8px;border:1px solid #fecaca"><span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#b91c1c">Rejection reason · </span><span style="font-size:13px;color:#7f1d1d">${esc(rec.rejection_reason)}</span></div>`:''}
     <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
       <div style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate);margin-bottom:10px">The request</div>
@@ -24602,16 +23416,10 @@ window.tpMpGenerate=async function(id){
     toast((error&&error.message)||(data&&data.error)||'Generation failed','err');
     rec.ai_status='failed';tpMpShowDetail(id);return;
   }
-  rec.ai_status='ready';rec.ai_job_description=data.job_description;rec.ai_job_description_json=data.job_description_json;rec.ai_platform_post_text=data.platform_post_text;rec.ai_creative_path=data.creative_path;
+  rec.ai_status='ready';rec.ai_job_description=data.job_description;rec.ai_job_description_json=data.job_description_json;
   toast('Generated');tpMpShowDetail(id);
 };
 window.tpMpCloseDetail=function(){const p=$('tpMpDetail');if(p)p.style.display='none';document.querySelectorAll('.tp-mp-row').forEach(tr=>tr.style.background='');};
-window.tpMpApprove=async function(id){if(!recGuard())return;
-  const {data,error}=await sb.schema('hr').from('manpower_requests').update({approval_status:'Approved',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:null}).eq('id',id).select().single();
-  if(error){toast(error.message,'err');return;}
-  const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx]=data;
-  toast('Approved');tpMpRender();tpMpShowDetail(id);
-};
 /* Opening/closing hiring reuses hr.set_hiring_open exactly as it always did — that RPC already
    flips status Open/Filled and is what hr.public_position (and so career-apply / career-position.html)
    gates on, so this is the real "take the page down" switch, not just a label change here. */
@@ -24633,46 +23441,6 @@ window.tpMpReopenHiring=async function(id){
     const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx].status='Open';
     toast('Hiring reopened');tpMpRender();tpMpShowDetail(id);
   }catch(e){toast('Could not reopen hiring: '+((e&&e.message)||e),'err');}
-};
-window.tpMpReject=function(id){if(!recGuard())return;
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-xmark"></i> Reject Hiring Request</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm"><label>Reason (optional, shown to the requester)</label><textarea id="tpRejReason" class="inp" rows="3" placeholder="Why is this being rejected?"></textarea></div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" style="background:var(--err);border-color:var(--err)" onclick="tpMpRejectConfirm(${id})"><i class="fa-solid fa-xmark"></i> Reject</button></div>`);
-};
-window.tpMpRejectConfirm=async function(id){
-  const reason=($('tpRejReason')||{}).value?.trim()||null;
-  const {data,error}=await sb.schema('hr').from('manpower_requests').update({approval_status:'Rejected',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:reason}).eq('id',id).select().single();
-  if(error){toast(error.message,'err');return;}
-  const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx]=data;
-  closeModal();toast('Rejected — regenerating the description with your reason');tpMpRender();tpMpShowDetail(id);
-  // Reject implies the draft needs to change, not just be recorded as refused -- regenerate right
-  // away with the reason folded in, then (on success) manpower-ai-generate itself flips the row
-  // back to Pending so the approver reviews a fresh version instead of a dead rejected one.
-  if(reason){
-    const rec=(MP_RECORDS||[]).find(r=>r.id===id);
-    sb.functions.invoke('manpower-ai-generate',{body:{request_id:id,requested_by:state.email||'',rejection_reason:reason}}).then(({data:gen,error})=>{
-      const rec2=(MP_RECORDS||[]).find(r=>r.id===id);if(!rec2)return;
-      if(error||!gen||gen.error){rec2.ai_status='failed';tpMpRender();return;}
-      rec2.ai_status='ready';rec2.ai_job_description=gen.job_description;rec2.ai_job_description_json=gen.job_description_json;
-      rec2.ai_platform_post_text=gen.platform_post_text;rec2.ai_creative_path=gen.creative_path;
-      if(gen.reset_to_pending){rec2.approval_status='Pending';rec2.rejection_reason=null;}
-      tpMpRender();
-    });
-    if(rec)rec.ai_status='generating';
-  }
-};
-window.tpMpDeleteOne=async function(id){if(!recGuard())return;
-  const started=tpMpCandOf(id).started;
-  if(started){
-    toast('This position cannot be deleted \u2014 '+started+' candidate'
-          +(started===1?' has':'s have')+' already started their stages','err');
-    return;
-  }
-  if(!await confirmDialog('Delete this hiring request?'))return;
-  const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
-  if(error){toast(error.message,'err');return;}
-  MP_RECORDS=(MP_RECORDS||[]).filter(r=>r.id!==id);
-  tpMpCloseDetail();toast('Deleted');tpMpRender();
 };
 
 /* ── Referral Tab ── */
@@ -24964,22 +23732,6 @@ window.tpRefConnectGo=async function(id){
   closeModal();
   toast('Connected to '+(req&&req.job_title||'position')+' and added to Interviews');tpRefRender();
 };
-window.tpRefReject=async function(id){if(!rtRefConnectGuard())return;
-  if(!await confirmDialog('Reject this referral?'))return;
-  const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Rejected',approved_by:state.email,approved_at:new Date().toISOString()}).eq('id',id).select().single();
-  if(error){toast(error.message,'err');return;}
-  const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
-  toast('Rejected');tpRefRender();
-  /* The referrer is told, and nobody else. HR and administrators act on these all day; copying
-     them on their own decision is noise they would learn to ignore. Sent from ai@ rather than from
-     whoever pressed the button, because this is the company's answer and not one approver's
-     opinion - putting a name on it invites the referrer to go and argue with a colleague. */
-  if(String(data.referred_by||'').trim()){
-    const r=await hrNotify({kind:'referral_decided',approved:false,
-      referrer_email:data.referred_by,referrer_name:'',candidate_name:data.referred_name||''});
-    if(r&&r.ok) toast('The person who referred them has been told','ok');
-  }
-};
 
 /* ── Interview Tracker v2 ──
    Shows the Hold-only baseline (kept from before the reset) plus every fresh candidate created
@@ -25057,6 +23809,114 @@ async function tpTracker(){
   TP_TR_SEL=new Set();
   tpTrRender();
 }
+/* ── ARCHIVE (23 Nov 2026) ──────────────────────────────────────────────────────────────
+   Everyone who was rejected: rejected candidates, and referrals that were turned down. Same columns
+   as Candidates. The Stage box offers Selected, Hold or Interview Scheduled; choosing one brings the
+   person back to Candidates at that stage, and Monthly Progress counts them again (its numbers are
+   counted from the candidate records). A rejected referral has no candidate record yet, so bringing
+   one back asks which open position they are for, then connects them and sets the stage. */
+const TP_AR_STAGES=['Selected','Hold','Interview Scheduled'];
+let TP_AR_ROWS=null, TP_AR_REFS=null;
+async function tpArchive(){
+  const b=$('recBody'); if(!b)return;
+  b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+  try{
+    const [tr,rf]=await Promise.all([
+      sb.schema('hr').from('interview_tracker').select('*,candidates!interview_tracker_candidate_id_fkey(tracker_row_id,approval_status,resume_id)').eq('feedback','Rejected').order('id',{ascending:false}),
+      sb.schema('hr').from('referrals').select('*').eq('approval_status','Rejected').is('candidate_id',null).order('id',{ascending:false})
+    ]);
+    if(tr.error) throw tr.error; if(rf.error) throw rf.error;
+    TP_AR_ROWS=tr.data||[]; TP_AR_REFS=rf.data||[];
+  }catch(e){ b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message||String(e))+'</div>'; return; }
+  tpArRender();
+}
+function tpArRender(){
+  const b=$('recBody'); if(!b)return;
+  const canAct=recCanWrite();
+  const sel=function(onchange){
+    return canAct
+      ? '<select class="tp-sel" onchange="'+onchange+'"><option value="" selected disabled hidden>Rejected</option><optgroup label="Bring back as…">'
+          +TP_AR_STAGES.map(function(x){return '<option>'+x+'</option>';}).join('')+'</optgroup></select>'
+      : tpTrFbTag('Rejected');
+  };
+  const dateOf=function(d){ return d?new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—'; };
+  const cand=(TP_AR_ROWS||[]).map(function(r){
+    return '<tr><td style="font-weight:600">'+esc(r.candidate_name||'—')+'</td>'
+      +'<td>'+(r.position?esc(r.position):'<span style="color:var(--slate)">No position yet</span>')+'</td>'
+      +'<td style="font-size:12px;color:var(--slate)">'+esc(r.source||'—')+'</td>'
+      +'<td style="font-size:12px">'+esc(r.entity||'—')+'</td>'
+      +'<td style="font-family:monospace;font-size:12px">'+esc(r.number||'—')+'</td>'
+      +'<td style="font-size:12px">'+(r.email?'<a href="mailto:'+esc(r.email)+'" style="color:var(--brand)">'+esc(r.email)+'</a>':'—')+'</td>'
+      +'<td style="font-size:12px;color:var(--slate);white-space:nowrap">'+esc(r.scheduled_date||'—')+'</td>'
+      +'<td>'+sel('tpArBack('+r.id+',this.value)')+'</td>'
+      +'<td class="tp-note" title="'+esc(r.notes||'')+'">'+esc(r.notes||'—')+'</td></tr>';
+  });
+  const refs=(TP_AR_REFS||[]).map(function(r){
+    const note='Referred by '+(r.referred_by||'someone')+(r.notes?' — '+r.notes:'')+(r.rejection_reason?' · Rejected: '+r.rejection_reason:'');
+    return '<tr><td style="font-weight:600">'+esc(r.referred_name||'—')+'</td>'
+      +'<td>'+(r.position?esc(r.position):'<span style="color:var(--slate)">No position yet</span>')+'</td>'
+      +'<td style="font-size:12px;color:var(--slate)"><span class="tag t-gray">Referral</span></td>'
+      +'<td style="font-size:12px">—</td>'
+      +'<td style="font-family:monospace;font-size:12px">'+esc(r.referred_phone||'—')+'</td>'
+      +'<td style="font-size:12px">'+(r.referred_email?'<a href="mailto:'+esc(r.referred_email)+'" style="color:var(--brand)">'+esc(r.referred_email)+'</a>':'—')+'</td>'
+      +'<td style="font-size:12px;color:var(--slate);white-space:nowrap">'+dateOf(r.created_at)+'</td>'
+      +'<td>'+sel('tpArRefBack('+r.id+',this.value)')+'</td>'
+      +'<td class="tp-note" title="'+esc(note)+'">'+esc(note)+'</td></tr>';
+  });
+  const n=cand.length+refs.length;
+  b.innerHTML=TP_SEL_CSS+TP_NOTE_CSS
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div class="sec-title" style="margin:0">Archive <span class="tag t-gray" style="margin-left:4px">'+n+'</span></div></div>'
+    +'<div style="font-size:12px;color:var(--slate);margin-bottom:12px">Rejected candidates and rejected referrals. Choose <b>Selected</b>, <b>Hold</b> or <b>Interview Scheduled</b> to bring someone back to Candidates — Monthly Progress updates with them.</div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="min-width:1200px"><thead><tr>'
+    +'<th>Candidate</th><th>Position</th><th>Source</th><th>Recruiter</th><th>Phone</th><th>Email</th><th>Date &amp; Time</th><th style="width:170px">Stage</th><th>Notes</th>'
+    +'</tr></thead><tbody>'
+    +(n?cand.concat(refs).join(''):'<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--slate)">Nobody has been rejected</td></tr>')
+    +'</tbody></table></div>';
+}
+window.tpArBack=async function(trackerId,stage){
+  if(!recGuard()||!stage)return;
+  const r=(TP_AR_ROWS||[]).find(function(x){return x.id===trackerId;}); if(!r){tpArRender();return;}
+  if(!await confirmDialog('Bring '+(r.candidate_name||'this candidate')+' back as '+stage+'? They move to Candidates and count in Monthly Progress again.',
+      {title:'Bring back',icon:'fa-rotate-left',okLabel:'Bring back',danger:false})){ tpArRender(); return; }
+  let err=null;
+  if(r.candidate_id){
+    const {error}=await sb.schema('hr').rpc('candidate_set_stage',{p_id:r.candidate_id,p_stage:stage}); err=error;
+  }else{
+    const {data,error}=await sb.schema('hr').from('interview_tracker').update({feedback:stage,status:stage}).eq('id',trackerId).select('id');
+    err=error||((!data||!data.length)?{message:'nothing was saved - you may not have permission'}:null);
+  }
+  if(err){ toast('Could not bring them back: '+err.message,'err'); tpArRender(); return; }
+  toast((r.candidate_name||'Candidate')+' is back in Candidates as '+stage,'ok');
+  TP_TR_RECORDS=null; tpArchive();
+};
+window.tpArRefBack=async function(refId,stage){
+  if(!recGuard()||!stage)return;
+  const r=(TP_AR_REFS||[]).find(function(x){return x.id===refId;}); if(!r){tpArRender();return;}
+  try{ await tpEnsurePositions(); }catch(_e){}
+  const open=tpTrOpenPositions();
+  window._tpArPending={refId:refId,stage:stage};
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-rotate-left"></i> Bring back '+esc(r.referred_name||'referral')+'</h3><span class="x" onclick="closeModal();tpArRender()">&times;</span></div>'
+    +'<div class="modal-body frm"><label>Which open position are they for? *</label>'
+    +'<select id="tpArPos" class="sel">'+(open.length===1?'':'<option value="">— Select an open position —</option>')
+    +open.map(function(q){return '<option value="'+q.id+'">'+esc(q.job_title||'—')+(q.department?' · '+esc(q.department):'')+'</option>';}).join('')+'</select>'
+    +(open.length?'<div style="font-size:11.5px;color:var(--slate);margin-top:6px">They are added to Candidates for this position as <b>'+esc(stage)+'</b>.</div>'
+      :'<div style="font-size:11.5px;color:var(--err);margin-top:6px">No open positions — raise a Hiring Request first.</div>')
+    +'</div><div class="modal-foot"><button class="btn" onclick="closeModal();tpArRender()">Cancel</button>'
+    +'<button class="btn btn-primary" id="tpArGo" onclick="tpArRefBackGo()"'+(open.length?'':' disabled')+'><i class="fa-solid fa-check"></i> Bring back</button></div>');
+};
+window.tpArRefBackGo=async function(){
+  const pend=window._tpArPending||{}; const reqId=parseInt((($('tpArPos')||{}).value)||'');
+  if(!reqId){ toast('Pick a position','err'); return; }
+  const btn=$('tpArGo'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  let entity=null; try{ entity=await tpEntityForMe(); }catch(_e){}
+  const {data:rec,error}=await sb.schema('hr').rpc('referral_approve_connect',{p_ref_id:pend.refId,p_req_id:reqId,p_entity:entity});
+  if(error||!rec||!rec.candidate_id){ toast('Could not bring them back: '+((error&&error.message)||'no candidate was created'),'err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Bring back';} return; }
+  const {error:se}=await sb.schema('hr').rpc('candidate_set_stage',{p_id:rec.candidate_id,p_stage:pend.stage});
+  closeModal();
+  if(se) toast('Back in Candidates, but the stage could not be set to '+pend.stage+': '+se.message,'warn');
+  else toast((rec.referred_name||'Referral')+' is back in Candidates as '+pend.stage,'ok');
+  TP_TR_RECORDS=null; tpArchive();
+};
 /* ONE LOOK FOR THE TWO EDITABLE CELLS. They were native selects with a couple of inline rules,
    so Source and Stage were different widths and different heights in the same row and neither
    lined up with the text beside them. */
@@ -25077,7 +23937,8 @@ function tpTrFbTag(s){
 }
 function tpTrRender(){
   const b=$('recBody'); if(!b)return;
-  const all=TP_TR_RECORDS||[];
+  /* REJECTED PEOPLE LIVE IN ARCHIVE (23 Nov 2026), not here. From there they can be brought back. */
+  const all=(TP_TR_RECORDS||[]).filter(function(r){return String(r.feedback||'').trim()!=='Rejected';});
   const posFilter=TP_TR_POS_FILTER;
   const rows=posFilter
     ? all.filter(function(r){return String(r.position||'')===posFilter;})
@@ -25090,7 +23951,7 @@ function tpTrRender(){
      refuse them only after they had written the message. */
   const canMail=rtCanManage();
   b.innerHTML=TP_SEL_CSS+TP_NOTE_CSS+`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">Interviews <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
+    <div class="sec-title" style="margin:0">Candidates <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="tpTrAdd()"><i class="fa-solid fa-plus"></i> Add</button>
       ${canAct?`<button class="btn" id="tpTrEditBtn" disabled style="opacity:.4" title="Tick one hand-added candidate to edit their details" onclick="tpTrEdit()"><i class="fa-solid fa-pen"></i> Edit</button>`:''}
@@ -25102,11 +23963,11 @@ function tpTrRender(){
     <i class="fa-solid fa-filter"></i> Showing only <b>${esc(posFilter)}</b> — ${rows.length} of ${all.length}
     <button class="btn btn-sm" style="margin-left:auto;padding:2px 10px" onclick="tpTrClearPosFilter()">Show all</button>
   </div>`:''}
-  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Everyone who applied on the Careers page, was uploaded as a CV, was referred, or was added here by hand.</div>
+  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Everyone who applied on the Careers page, was uploaded as a CV, was referred, or was added here by hand. Rejected candidates move to the Archive tab.</div>
   <div style="overflow-x:auto"><table class="tbl" style="min-width:1200px">
     <thead><tr>
       ${canAct?'<th style="width:32px"><input type="checkbox" onchange="tpTrToggleAll(this)"></th>':''}
-      <th>Candidate</th><th>Position</th><th>Source</th><th>Handled By</th><th>Phone</th><th>Email</th><th>Date &amp; Time</th><th style="width:170px">Stage</th><th>Notes</th>
+      <th>Candidate</th><th>Position</th><th>Source</th><th>Recruiter</th><th>Phone</th><th>Email</th><th>Date &amp; Time</th><th style="width:170px">Stage</th><th>Notes</th>
     </tr></thead>
     <tbody>${rows.length?rows.map(r=>`<tr>
       ${canAct?`<td><input type="checkbox" class="tp-tr-cb" data-id="${r.id}" data-email="${esc(r.email||'')}" onchange="tpTrRowCheck(this)"></td>`:''}
@@ -25116,13 +23977,8 @@ function tpTrRender(){
            invisible here: a waiting candidate looked exactly like an approved one, and the first
            anybody heard of it was the Email window refusing to list them. The chip says it where
            the person is, and the tooltip says where to go and do something about it. -->
-      <td style="font-weight:600">${esc(r.candidate_name||'—')}${(()=>{
-        const ap=String((r.candidates&&r.candidates.approval_status)||'Approved');
-        if(ap==='Pending')return ' <span class="tag t-amber" style="font-size:10px" title="Waiting to be approved in Accountability \u203a Pending Approval \u2014 they cannot be sent a test until then">to approve</span>';
-        if(ap==='Rejected')return ' <span class="tag t-red" style="font-size:10px" title="This candidate was not approved">not approved</span>';
-        return '';
-      })()}</td>
-      <td>${esc(r.position||'—')}</td>
+      <td style="font-weight:600">${esc(r.candidate_name||'—')}</td>
+      <td>${r.position?esc(r.position):'<span style="color:var(--slate)">No position yet</span>'}</td>
       <!-- SOURCE IS EDITABLE, THE SAME WAY STAGE IS. It was printed as text, so a row that came in
            with the wrong source - or none, which is what a hand-added candidate starts with - could
            only be corrected in the database. It is the field Monthly Progress and every "where do
@@ -25239,19 +24095,24 @@ function tpTrHandAdded(r){
 /* EDITING A HAND-ADDED CANDIDATE. Name, phone, email and notes - the things that are typed in and
    so get typed wrong. Position is not offered: it decides which month and which position they are
    counted under, so moving them is delete-and-add, not an edit. Allowed at any stage. */
-window.tpTrEdit=function(){
+window.tpTrEdit=async function(){
   if(!recGuard())return;
   const r=(TP_TR_RECORDS||[]).find(x=>x.id===[...TP_TR_SEL][0]);
   if(!r||!tpTrHandAdded(r)){toast('Tick one hand-added candidate first','err');return;}
+  if(!r.position){ try{ await tpEnsurePositions(); }catch(_e){} }
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit Candidate</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <div class="two"><div><label>Candidate Name *</label><input id="tpTrEName" class="inp" value="${esc(r.candidate_name||'')}"></div>
-    <div><label>Position</label><input class="inp" value="${esc(r.position||'')}" disabled title="To move someone to another position, delete them and add them again"></div></div>
+    <div><label>Position</label>${r.position
+      ? `<input class="inp" value="${esc(r.position||'')}" disabled title="To move someone to another position, delete them and add them again">`
+      : `<select id="tpTrEPos" class="sel"><option value="">— No position yet —</option>${tpTrOpenPositions().map(q=>`<option value="${q.id}">${esc(q.job_title||'—')}</option>`).join('')}</select>`}</div></div>
     <div class="two"><div><label>Phone</label><input id="tpTrEPhone" class="inp" value="${esc(r.number||'')}"></div><div><label>Email</label><input id="tpTrEEmail" class="inp" value="${esc(r.email||'')}"></div></div>
     <label>Notes</label><textarea id="tpTrENotes" class="inp" rows="2">${esc(r.notes||'')}</textarea>
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpTrESaveBtn" onclick="tpTrEditSave(${r.id})"><i class="fa-solid fa-check"></i> Save</button></div>`);
 };
+/* Open positions a candidate can be put on (23 Nov 2026: candidates may be added with no position). */
+function tpTrOpenPositions(){ return (MP_RECORDS||[]).filter(q=>(q.status||'Open')==='Open'&&q.approval_status!=='Rejected'); }
 window.tpTrEditSave=async function(trackerId){
   if(!recGuard())return;
   const r=(TP_TR_RECORDS||[]).find(x=>x.id===trackerId); if(!r)return;
@@ -25277,6 +24138,19 @@ window.tpTrEditSave=async function(trackerId){
         +(back?' - and the Interviews row could not be put back, so it may show the new details: '+back.message:''),'err');
       if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}
       return;
+    }
+  }
+  /* GIVING A POSITION LATER. Someone added with "No position yet" gets one here; that also puts them
+     on that position's Monthly Progress row. */
+  const posPick=parseInt(($('tpTrEPos')||{}).value||'')||null;
+  if(posPick&&!r.position&&r.candidate_id){
+    const q=tpTrOpenPositions().find(x=>x.id===posPick);
+    const rr=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:posPick,p_month:null});
+    if(rr.error||!q){ toast('Details saved, but the position could not be set: '+((rr.error&&rr.error.message)||'that position is not open'),'warn'); }
+    else{
+      const {data:pc,error:pe}=await sb.schema('hr').from('candidates').update({manpower_request_id:posPick,position:q.job_title,tracker_row_id:rr.data}).eq('id',r.candidate_id).select('id');
+      if(pe||!pc||!pc.length){ toast('Details saved, but the position could not be set: '+((pe&&pe.message)||'no permission'),'warn'); }
+      else{ await sb.schema('hr').from('interview_tracker').update({position:q.job_title}).eq('id',trackerId); r.position=q.job_title; if(r.candidates) r.candidates.tracker_row_id=rr.data; }
     }
   }
   Object.assign(r,{candidate_name:name,number:phone,email,notes});
@@ -25355,13 +24229,14 @@ window.tpTrSource=async function(trackerId,value){
 window.tpTrAdd=async function(){
   if(!recGuard())return;
   await tpEnsurePositions();
-  const openReqs=(MP_RECORDS||[]).filter(r=>r.ai_job_description_json);
+  // Only open positions (closed ones used to appear too). "No position yet" lets HR add someone first and choose later.
+  const openReqs=(MP_RECORDS||[]).filter(r=>(r.status||'Open')==='Open'&&r.approval_status!=='Rejected');
   const entities=(window._tpEntities||[]);
   const sources=(window._tpSources||[]);
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Candidate</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <div class="two"><div><label>Candidate Name *</label><input id="tpTrName" class="inp"></div>
-    <div><label>Position *</label><select id="tpTrPos" class="sel"><option value="">— Select —</option>${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}</option>`).join('')}</select></div></div>
+    <div><label>Position</label><select id="tpTrPos" class="sel"><option value="none">— No position yet —</option>${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}</option>`).join('')}</select></div></div>
     <!-- ENTITY IS NOT ASKED FOR. It is who handled this candidate, and that is whoever is filling
          this form in - asking them to pick themselves from a list is a question with one right
          answer. It is recorded from the signed-in user instead. -->
@@ -25442,12 +24317,16 @@ window.tpTrSrcNewSave=async function(){
 };
 window.tpTrSave=async function(){
   const name=($('tpTrName')||{}).value?.trim();
-  const reqId=parseInt(($('tpTrPos')||{}).value||'');
-  if(!name||!reqId){toast('Name and Position are required','err');return;}
-  const req=(MP_RECORDS||[]).find(r=>r.id===reqId);
+  const reqId=parseInt(($('tpTrPos')||{}).value||'')||null;   // null = no position yet
+  if(!name){toast('Name is required','err');return;}
+  const req=reqId?(MP_RECORDS||[]).find(r=>r.id===reqId):null;
   const btn=$('tpTrSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {data:rowId,error:rrErr}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
-  if(rrErr){toast(rrErr.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}return;}
+  let rowId=null;
+  if(reqId){
+    const rr=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
+    if(rr.error){toast(rr.error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}return;}
+    rowId=rr.data;
+  }
   let source=($('tpTrSrc')||{}).value||null;
   if(source==='__new') source=null;            // the placeholder is not a source
   /* Handled By is whoever is adding them. tpEntityForMe resolves the signed-in person to an entity
@@ -25883,12 +24762,6 @@ window.tpMuEmail=async function(){
   await rtShare(true);
 };
 let TP_MU_EMAIL_POS=null;
-window.tpMuOpenMonth=async function(){
-  if(!recGuard())return;
-  const {error}=await sb.schema('hr').rpc('tracker_open_month',{p_month:null});
-  if(error){toast(error.message,'err');return;}
-  toast('Refreshed');await tpMonthlyUpdate();
-};
 // Replaces the old tpMuDeleteRow -- a filled position should be closed out, not deleted (it's
 // expected to have candidates linked, unlike the old delete which refused exactly that case).
 // Completing locks every one of this row's candidates' Feedback dropdowns in Interview Tracker
@@ -28739,7 +27612,7 @@ async function cpaImportConfirmXlsx(st){
         payment_mode:rec.mode,instrument_no:rec.instrumentNo,instrument_date:rec.instrumentDate,
         drawn_on:rec.drawnOn,drawn_on_branch:rec.drawnOnBranch,deposit_bank:rec.depositBank,
         narration:rec.narration,total_amount:totalAmt,
-        is_reversed:rec.isReversed==='Yes',unit_status_at_receipt:rec.unitStatus,
+        is_reversed:String(rec.isReversed||'').trim().toUpperCase()==='YES',unit_status_at_receipt:rec.unitStatus,   // Farvision writes "YES" (25 Nov 2026)
         is_current:true,import_batch_id:batchId};
       let rcptId=existingRcpt[unit.id+'|'+rec.receiptNo];
       if(rcptId){ const {error:ue}=await sb.schema('cust').from('money_receipts').update(rcptRow).eq('id',rcptId); if(ue)throw ue; }
@@ -43263,22 +42136,29 @@ function caPaint(){
         +nm(caret(aon)+caDot(anyLive?'ACTIVE':ae.status)+thumb,(ae.name||('Ad '+a.ad_id))+(nCamps>1?'  ·  '+nCamps+' campaigns':''))+(FB?'':money(null))
         +rowCols(fbT(a,pl,a.rows),W2[a.k]?fbT(W2[a.k],pl,W2[a.k].rows):raw(null,pl,null),crmIds(a.ids,a.spend,(W2[a.k]||{}).spend),a,copies>1?reachOf('group',a.k):reachOf('ad',Object.keys(a.ids)[0]))+'</tr>';
       if(!aon) return;
-      // up one: every campaign the ad runs in - the campaign's own figures
+      /* THE AD'S OWN FIGURES UNDER IT (25 Nov 2026, Ayush: "when an Ad is opened, the Campaigns and Ad Sets show the leads THE AD generated in those, and only those ad sets where that ad is listed"):
+         an open ad lists the campaigns it runs in and, in each, the ad sets it runs in - and every one of those rows now shows only what THIS ad did there (spend, leads, clicks ... and the
+         CRM's leads tied to this ad in that campaign / ad set), not the campaign's or ad set's whole figures. Reach is the ad's overall (above), so it is blank on these rows. */
+      const adIn=function(list,cid,sid){ return agg(list,function(r){ return a.ids[String(r.ad_id)]&&(cid==null||String(r.campaign_id)===String(cid))&&(sid==null||String(r.adset_id)===String(sid)); }); };
+      const crmAdIn=function(cid,sid,sp,spw){ if(!CS) return crmNo('CRM figures by ad are read at night - they show from the next morning');
+        const pp=function(x){ return x.level==='ad'&&a.ids[String(x.ad_id)]&&(cid==null||String(x.campaign_id)===String(cid))&&(sid==null||String(x.adset_id)===String(sid)); };
+        if(!CS.cur.some(pp)) return crmNo('The CRM has no leads tied to this ad here for these dates'); return {t:crmT(crmAgg(CS.cur,pp),+sp||0),w:crmT(crmAgg(CS.prev,pp),+spw||0)}; };
+      // up one: every campaign the ad runs in - what this ad did there
       const cids=[...new Set(a.rows.map(function(r){ return r.campaign_id; }))].sort(function(x,y){ const cx=CA_D.cur.filter(function(c){ return c.campaign_id===x; })[0]||{}, cy=CA_D.cur.filter(function(c){ return c.campaign_id===y; })[0]||{}; return (+cy.spend||0)-(+cx.spend||0); });
       cids.forEach(function(cid){
         const c=CA_D.cur.filter(function(x){ return x.platform===pl&&x.campaign_id===cid; })[0]||{campaign_id:cid,platform:pl,project:p,spend:0,clicks:0,impressions:0,results:0};
-        const ce=E['campaign:'+cid]||{}, ck=a.k+'|'+cid, con=AX.camp===ck, lead=pl==='meta'?obIsLead(E,c):null, was=prev.filter(function(x){ return x.platform===pl&&x.campaign_id===cid; })[0];
+        const ce=E['campaign:'+cid]||{}, ck=a.k+'|'+cid, con=AX.camp===ck, lead=pl==='meta'?obIsLead(E,c):null, ac=adIn(CA_D.ads,cid,null), aw=cmpOn?adIn((CA_D.cmp&&CA_D.cmp.ads)||[],cid,null):null;
         rows+='<tr class="ca-row ca-l1'+(con?' ca-on':'')+'" onclick="caAx(\'camp\',_caAxK['+(window._caAxK.push(ck)-1)+'])">'+nm(caret(con)+caDot(ce.status),ce.name||cid)
           +(FB?'':(cBud(cid)==null&&caCampBud(cid,true)!=null&&caLive(ce.status)?idle(cid):!caLive(ce.status)?'<td>'+(cBud(cid)==null?'<span style="color:#94a3b8">—</span>':obMoney(cBud(cid)))+'<div class="ca-sub">'+esc(String(ce.status||'stopped').toLowerCase())+'</div></td>':money(cBud(cid))))
-          +rowCols(FB?fbT(c,pl,[c]):raw(c,pl,lead),FB&&was?fbT(was,pl,[was]):raw(was,pl,lead),crmX(function(x){ return x.campaign_id===cid; },pl==='google'?'google':'facebook'),FB?Object.assign(agg(CA_D.ads,function(r){ return r.campaign_id===cid; }),{impressions:+c.impressions||0}):null,reachOf('campaign',cid))+'</tr>';
+          +rowCols(FB?fbT(ac,pl,[{campaign_id:cid,results:ac.results}]):raw(ac,pl,lead),cmpOn?(FB?fbT(aw,pl,[{campaign_id:cid,results:aw.results}]):raw(aw,pl,lead)):raw(null,pl,null),crmAdIn(cid,null,ac.spend,aw&&aw.spend),ac,null)+'</tr>';
         if(!con) return;
         // up again: the ad sets / ad groups of that campaign the ad runs in - the ad set's own figures
         const sids=[...new Set(a.rows.filter(function(r){ return r.campaign_id===cid&&r.adset_id; }).map(function(r){ return r.adset_id; }))];
         if(!sids.length){ rows+='<tr class="ca-l2 ca-none"><td colspan="'+nc+'">No '+W.set.toLowerCase()+' recorded for this ad here</td></tr>'; return; }
         sids.forEach(function(sid){
-          const se=E['adset:'+sid]||{}, sa=setAgg(CA_D.ads,sid), sw=cmpOn?setAgg((CA_D.cmp&&CA_D.cmp.ads)||[],sid):null;
+          const se=E['adset:'+sid]||{}, sa=adIn(CA_D.ads,cid,sid), sw=cmpOn?adIn((CA_D.cmp&&CA_D.cmp.ads)||[],cid,sid):null;
           const sb=se.daily_budget!=null?money(se.daily_budget):ce.daily_budget!=null?'<td title="The budget is set on the campaign and shared by its '+W.sets.toLowerCase()+'"><span style="color:#64748b">'+obMoney(ce.daily_budget)+'</span><div class="ca-sub">shared</div></td>':money(null);
-          rows+='<tr class="ca-l2"><td class="ca-nm"><span class="ca-nmx" title="'+esc(se.name||sid)+'">'+caDot(se.status||ce.status)+esc(se.name||sid)+'</span></td>'+(FB?'':sb)+rowCols(fbT(sa,pl,[{campaign_id:cid,results:sa.results}]),sw?fbT(sw,pl,[{campaign_id:cid,results:sw.results}]):raw(null,pl,null),crmSetX(sid,sa.spend,sw&&sw.spend),sa,reachOf('adset',sid))+'</tr>';
+          rows+='<tr class="ca-l2"><td class="ca-nm"><span class="ca-nmx" title="'+esc(se.name||sid)+'">'+caDot(se.status||ce.status)+esc(se.name||sid)+'</span></td>'+(FB?'':sb)+rowCols(fbT(sa,pl,[{campaign_id:cid,results:sa.results}]),sw?fbT(sw,pl,[{campaign_id:cid,results:sw.results}]):raw(null,pl,null),crmAdIn(cid,sid,sa.spend,sw&&sw.spend),sa,null)+'</tr>';
         });
       });
     });
@@ -45618,7 +44498,7 @@ let SRC={period:'last_30d',from:'',to:'',bper:'prev',bfrom:'',bto:'',proj:'all',
 const SRC_BOPTS=[['prev','Period before A']].concat(OB_PERIODS);
 const SRC_CSS='<style>'
   +'.src-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px}'
-  +'.src-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:0 0 16px}@media(max-width:900px){.src-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+  +'.src-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin:0 0 16px}@media(max-width:900px){.src-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}'
   +'.src-k{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}.src-k .l{font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px}'
   +'.src-k .v{font-size:22px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}.src-k .c{font-size:11.5px;margin-top:2px;color:var(--slate)}'
   +'.src-t{width:100%;border-collapse:collapse;font-size:13px}.src-t th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--slate);background:#f8fafc;padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}'
@@ -45629,7 +44509,8 @@ const SRC_CSS='<style>'
   +'.src-cmp{font-size:11px;color:#94a3b8;margin-top:1px}.src-cmp .g{color:#15803d;font-weight:700}.src-cmp .b{color:#b91c1c;font-weight:700}'
   +'.src-h{font-weight:800;font-size:14px;margin:18px 2px 8px}.src-note{font-size:11.5px;color:var(--slate);margin:10px 2px;line-height:1.5}'
   +'</style>';
-const SRC_K=[['q','Qualified',true],['sv','Site visits',true],['rv','Revisits',true],['bk','Booked',true],['lost','Lost',false]];
+// Leads added 23 Nov 2026 (Ayush: "Yes, add Leads") - the CRM report now carries a lead count for every source
+const SRC_K=[['l','Leads',true],['q','Qualified',true],['sv','Site visits',true],['rv','Revisits',true],['bk','Booked',true],['lost','Lost',false]];
 function srcRangeOf(p,f,t){ const keep=OB_P; OB_P=Object.assign({},OB_P,{period:p,from:f,to:t}); try{ return obRange(); } finally{ OB_P=keep; } }
 function srcRange(){ return srcRangeOf(SRC.period,SRC.from,SRC.to); }
 // Range B: its own period or dates, or the same number of days just before A
@@ -45654,12 +44535,14 @@ window.srcCmp=function(on){ SRC.cmp=on; if(on&&SRC.bper===SRC.period&&SRC.bper!=
 if(!window._srcDoc){ window._srcDoc=true; document.addEventListener('click',function(){ if(SRC.pop){ SRC.pop=null; srcPaint(); } }); }
 async function srcRows(s,e){
   const out=[]; for(let f=0;;f+=1000){
-    const q=await sb.schema('camp').from('crm_source_daily').select('bu_id,business_unit,node_id,parent_id,level,top_source,source,tot_q,tot_sv,tot_rv,tot_bk,tot_lost').gte('day',s).lte('day',e).range(f,f+999);
+    const cols='bu_id,business_unit,node_id,parent_id,level,top_source,source,tot_q,tot_sv,tot_rv,tot_bk,tot_lost';
+    let q=await sb.schema('camp').from('crm_source_daily').select(cols+',tot_leads').gte('day',s).lte('day',e).range(f,f+999);
+    if(q.error&&/tot_leads/.test(q.error.message)) q=await sb.schema('camp').from('crm_source_daily').select(cols).gte('day',s).lte('day',e).range(f,f+999);   // before the leads column exists
     if(q.error) return {error:q.error}; out.push.apply(out,q.data||[]); if(!q.data||q.data.length<1000) break; }
   // the period: each project's node added up over the days
   const by={};
-  out.forEach(function(r){ const k=r.bu_id+'|'+r.node_id; const x=by[k]||(by[k]={bu:r.bu_id,project:r.business_unit,id:r.node_id,parent:r.parent_id,level:r.level,top:r.top_source,name:r.source,q:0,sv:0,rv:0,bk:0,lost:0});
-    x.q+=r.tot_q; x.sv+=r.tot_sv; x.rv+=r.tot_rv; x.bk+=r.tot_bk; x.lost+=r.tot_lost; });
+  out.forEach(function(r){ const k=r.bu_id+'|'+r.node_id; const x=by[k]||(by[k]={bu:r.bu_id,project:r.business_unit,id:r.node_id,parent:r.parent_id,level:r.level,top:r.top_source,name:r.source,l:0,q:0,sv:0,rv:0,bk:0,lost:0});
+    x.l+=r.tot_leads||0; x.q+=r.tot_q; x.sv+=r.tot_sv; x.rv+=r.tot_rv; x.bk+=r.tot_bk; x.lost+=r.tot_lost; });
   return {nodes:by,days:new Set(out.map(function(r){ return r.day; })).size};
 }
 async function srcView(host){
@@ -45696,9 +44579,9 @@ function srcPaint(err){
   const N=SRC.data.nodes, P=(SRC.prev&&SRC.prev.nodes)||{};
   const inP=function(x){ return SRC.proj==='all'||x.project===SRC.proj; };
   const keys=Object.keys(N).filter(function(k){ return inP(N[k]); });
-  const zero=function(x){ return !(x.q||x.sv||x.rv||x.bk||x.lost); };
+  const zero=function(x){ return !(x.l||x.q||x.sv||x.rv||x.bk||x.lost); };
   const add=function(t,x){ SRC_K.forEach(function(k){ t[k[0]]+=(x&&x[k[0]])||0; }); return t; };
-  const blank=function(){ return {q:0,sv:0,rv:0,bk:0,lost:0}; };
+  const blank=function(){ return {l:0,q:0,sv:0,rv:0,bk:0,lost:0}; };
   const pct=function(a,b){ return b?Math.round(a/b*100)+'%':'—'; };
   const chg=function(now,was,goodUp){ if(!SRC.cmp) return ''; let c=''; if(was){ const p=(now-was)/was*100; c=Math.abs(p)<0.5?'=':'<span class="'+((p>0)===goodUp?'g':'b')+'">'+(p>0?'▲':'▼')+Math.abs(p).toFixed(0)+'%</span>'; } else if(now) c='<span class="'+(goodUp?'g':'b')+'">new</span>';
     return '<div class="src-cmp">'+obNum(was||0)+' '+c+'</div>'; };
@@ -45717,7 +44600,7 @@ function srcPaint(err){
   const srcNames=Object.keys(bySrc).filter(function(n){ return !zero(bySrc[n]); }).sort(function(a,b){ return bySrc[b].q-bySrc[a].q||bySrc[b].sv-bySrc[a].sv; });
   h+='<div class="src-h"><i class="fa-solid fa-filter"></i> By source <span style="font-weight:500;color:var(--slate);font-size:12px">- '+(SRC.proj==='all'?'all projects':esc(SRC.proj))+'</span></div>'
     +'<div class="card" style="overflow-x:auto"><table class="src-t">'+thead('Source')+'<tbody>'
-    +(srcNames.length?srcNames.map(function(n){ return '<tr><td class="nm"><b>'+esc(n)+'</b></td>'+cells(bySrc[n],bySrcW[n])+'</tr>'; }).join(''):'<tr><td colspan="8" style="text-align:center;color:var(--slate);padding:20px">Nothing in these dates</td></tr>')
+    +(srcNames.length?srcNames.map(function(n){ return '<tr><td class="nm"><b>'+esc(n)+'</b></td>'+cells(bySrc[n],bySrcW[n])+'</tr>'; }).join(''):'<tr><td colspan="9" style="text-align:center;color:var(--slate);padding:20px">Nothing in these dates</td></tr>')
     +'</tbody><tfoot><tr class="tot"><td>Total</td>'+cells(T,TW)+'</tr></tfoot></table></div>';
   // BY PROJECT: project > source > campaign > ad set > ad
   const kids={}; keys.forEach(function(k){ const x=N[k]; const pk=x.parent==null?('p:'+x.bu):(x.bu+'|'+x.parent); (kids[pk]||(kids[pk]=[])).push(k); });
@@ -45732,7 +44615,7 @@ function srcPaint(err){
     +'<div class="card" style="overflow-x:auto"><table class="src-t">'+thead('Project / source')+'<tbody>'
     +(projIds.length?projIds.map(function(b){ const pk='p:'+b, on=!!SRC.open[pk];
         return '<tr class="op'+(on?' on':'')+'" onclick="srcToggle(\''+pk+'\')"><td class="nm"><span class="car"><i class="fa-solid fa-chevron-'+(on?'down':'right')+'"></i></span><b>'+esc(projT[b].name)+'</b></td>'+cells(projT[b],projW[b])+'</tr>'+(on?rowsOf(pk,1):''); }).join('')
-      :'<tr><td colspan="8" style="text-align:center;color:var(--slate);padding:20px">Nothing in these dates</td></tr>')
+      :'<tr><td colspan="9" style="text-align:center;color:var(--slate);padding:20px">Nothing in these dates</td></tr>')
     +'</tbody></table></div>'
     +'<div class="src-note">From the CRM\'s source report (its absolute figures), all lead sources - not only ads. Read every night; today is not included.'+(SRC.data.days?'':' No days read for these dates yet.')+'</div>';
   body.innerHTML=h;
@@ -45749,7 +44632,7 @@ window.srcToggle=function(k){ SRC.open[k]=!SRC.open[k]; srcPaint(); };
    Tab 2 DELIVERIES: camp.wa_* filled nightly by the edge function wa-deliveries-sync.
    Who sees it: everyone with Campaign Analytics ('campaigns'), plus a direct 'wa_templates' grant.
    ============================================================================================= */
-const WAT_TABS=['Templates','Deliveries','Knocking'];   // Knocking: 17 Nov 2026
+const WAT_TABS=['Templates','Deliveries','Knocking','Replies'];   // Replies: 25 Nov 2026   // Knocking: 17 Nov 2026
 let WAT_DATA=null, WAT_PROJ=null, WAT_STAGE=0;
 const WAT_STAGE_COL={'enquiry':'#2563eb','qualified':'#7c3aed','ov':'#d97706','site visit':'#059669','miss ov':'#dc2626'};
 /* LAYOUT (17 Nov 2026, third version - Ayush: "clumsy ... much less noisy, easier to explore ... remove extra text",
@@ -45913,10 +44796,10 @@ VIEWS.wa_templates=async function(v,seg){
     if(!WAT_DATA&&ti<2){ v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+watErrBox(); return; }
     if(ti>0){
       if(!WAD){ v.innerHTML=load; await wadPrep(); if(PAGE!=='wa_templates') return; }
-      const acc=ti===1?wadAccFor(watProj().label):((WAD.acc||[]).filter(function(a){ return /ananta/i.test(a.name); })[0]||null);
+      const acc=ti===1?wadAccFor(watProj().label):ti===3?warAcc():((WAD.acc||[]).filter(function(a){ return /ananta/i.test(a.name); })[0]||null);
       if(acc&&!WAD.byAcc[acc.id]){ v.innerHTML=load; await wadLoadAcc(acc.id); if(PAGE!=='wa_templates') return; }
     }
-    const body=ti===0?watTemplates():ti===1?watDeliveries():watKnocking();
+    const body=ti===0?watTemplates():ti===1?watDeliveries():ti===3?watReplies():watKnocking();
     v.innerHTML=head+mTabs('wa_templates',WAT_TABS,ti)+body;
     if(ti===1) wadDrawChart();
     // while Templates or Knocking is open, Deliveries' figures load in the background, so the tab opens at once
@@ -45948,7 +44831,7 @@ window.watPop=function(i){
   if(o.m){ const m=o.m, c=function(l,v,pc,cl){ return '<div class="wpp-s"><div style="color:'+cl+'">'+l+'</div><b>'+v+'</b><small>'+(pc||'&nbsp;')+'</small></div>'; };
     stats='<div class="wpp-foot"><div class="wpp-lbl">'+esc(fmtDate(o.range.s))+(o.range.s!==o.range.e?' – '+esc(fmtDate(o.range.e)):'')+'</div><div class="wpp-stats">'
       +c('Sent',wadN(m.sent),'','#64748b')+c('Delivered',wadN(m.delivered),wadPct(m.delivered,m.sent),'#2563eb')+c('Read',wadN(m.read),wadPct(m.read,m.delivered),'#16a34a')
-      +c('Clicked',wadN(m.clicked),wadPct(m.clicked,m.read),'#7c3aed')+c(o.failLabel||'Failed',o.tracksFail?wadN(m.failed):'NA',o.failLabel?wadPct(m.failed,m.sent):'','#dc2626')+'</div>'
+      +c('Clicked',wadN(m.clicked),wadPct(m.clicked,m.read),'#7c3aed')+c('Replied',WAD_REP&&m.replied!=null?wadN(m.replied):'NA',WAD_REP&&m.replied!=null?wadPct(m.replied,m.read):'','#0891b2')+c(o.failLabel||'Failed',o.tracksFail?wadN(m.failed):'NA',o.failLabel?wadPct(m.failed,m.sent):'','#dc2626')+'</div>'
       +(o.btns&&o.btns.length?'<div class="wpp-lbl" style="margin-top:14px">Button clicks</div><div class="kn-b" style="display:flex;flex-wrap:wrap;gap:6px">'+o.btns.map(function(b){ return /PHONE/i.test(b.type)?'<span style="border:1px solid var(--line);background:#f8fafc;color:#94a3b8;border-radius:999px;padding:4px 11px;font-size:12.5px">'+esc(b.text)+' · not counted by Meta</span>':'<span style="border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:999px;padding:4px 11px;font-size:12.5px;font-weight:600">'+esc(b.text)+' · '+wadN((o.btnCount||{})[b.text]||0)+'</span>'; }).join('')+'</div>':'')
       +(Object.keys(m.reasons).length?'<div class="wpp-lbl" style="margin-top:14px">Why it failed</div>'+Object.keys(m.reasons).sort(function(a,b){ return m.reasons[b]-m.reasons[a]; }).map(function(w){ return '<div class="wpp-r"><span>'+esc(w)+'</span><b>'+m.reasons[w]+'</b></div>'; }).join(''):'')+'</div>'; }
   openModal('<style>'
@@ -45970,7 +44853,7 @@ window.watPop=function(i){
     +'.wppid .no{color:#667781;font-size:13px}'
     +'.wpp-foot{padding:16px 20px 20px;background:#fff}'
     +'.wpp-lbl{font-size:11px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.05em;margin:0 0 8px}'
-    +'.wpp-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}'
+    +'.wpp-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}'
     +'.wpp-s{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:9px 10px;font-size:11.5px;font-weight:600}.wpp-s b{display:block;font-size:18px;color:#0f172a;margin-top:2px}.wpp-s small{color:var(--slate);font-weight:500}'
     +'.wpp-r{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid #f1f5f9;font-size:13.5px}'
     +'@media(max-width:600px){.wpph{padding:13px 14px;gap:10px}.wpph .av{width:38px;height:38px;font-size:21px}.wpph .nm{font-size:16px}.wpph .lv b{font-size:12.5px;padding:5px 8px}'
@@ -46039,7 +44922,9 @@ const WAD_CSS='<style>'
 +'.wcal-foot{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding:9px 12px}'
 +'.wcal-foot .clr{border:0;background:transparent;padding:0;font:inherit;font-size:12px;color:var(--slate);cursor:pointer}.wcal-foot .clr:hover{color:#dc2626}'
 +'.wcal-foot .done{margin-left:auto;height:31px;padding:0 17px;border:0;border-radius:8px;background:#1d4ed8;color:#fff;font:inherit;font-size:12px;font-weight:600;cursor:pointer}.wcal-foot .done[disabled]{opacity:.45;cursor:not-allowed}'
-+'.wad-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:0 0 14px}.wad-cards.c4{grid-template-columns:repeat(4,minmax(0,1fr))}'
++'.wad-cost{display:flex;gap:10px;align-items:center;background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:10px 14px;margin:0 0 14px;font-size:13px;color:#134e4a}.wad-cost i{color:#0f766e}'
++'.war-row{display:grid;grid-template-columns:120px 200px minmax(0,1fr);gap:14px;padding:11px 16px;border-top:1px solid #f1f5f9;font-size:13px;align-items:start}.war-row .w{color:var(--slate);font-size:12px}.war-row .p{display:flex;flex-direction:column}.war-row .p span{color:var(--slate);font-size:12px}.war-row .t{white-space:pre-wrap;word-break:break-word}@media(max-width:720px){.war-row{grid-template-columns:1fr}}'
++'.wad-cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin:0 0 14px}.wad-cards.c4{grid-template-columns:repeat(5,minmax(0,1fr))}'
 +'.wad-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px 15px}'
 +'.wad-card .l{font-size:12px;color:var(--slate);font-weight:600;display:flex;align-items:center;gap:6px}.wad-card .l i{width:8px;height:8px;border-radius:50%}'
 +'.wad-card .v{font-size:24px;font-weight:700;color:#0f172a;margin-top:5px;line-height:1.1}.wad-card .p{font-size:12px;color:var(--slate);margin-top:2px}'
@@ -46049,8 +44934,8 @@ const WAD_CSS='<style>'
 +'.wad-stg{display:flex;gap:6px;overflow-x:auto;margin:0 0 10px;scrollbar-width:none}.wad-stg::-webkit-scrollbar{display:none}'
 +'.wad-stg button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:600;color:#475569;cursor:pointer;white-space:nowrap;font-family:inherit}'
 +'.wad-stg button.on{background:#0f172a;border-color:#0f172a;color:#fff}'
-+'.wad-row{display:grid;grid-template-columns:54px 40px minmax(0,1fr) repeat(5,minmax(66px,auto)) 16px;gap:12px;align-items:center;padding:10px 16px;border-top:1px solid #f1f5f9;cursor:pointer}'
-+'.wad-row.kn{grid-template-columns:118px minmax(0,1fr) repeat(4,minmax(70px,auto)) 16px}'
++'.wad-row{display:grid;grid-template-columns:54px 40px minmax(0,1fr) repeat(6,minmax(62px,auto)) 16px;gap:12px;align-items:center;padding:10px 16px;border-top:1px solid #f1f5f9;cursor:pointer}'
++'.wad-row.kn{grid-template-columns:118px minmax(0,1fr) repeat(5,minmax(66px,auto)) 16px}'
 +'.wad-row:hover{background:#f8fafc}'
 +'.wad-row.h{cursor:default;background:#f8fafc;font-size:11px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;padding:9px 16px;border-top:0}'
 +'.wad-row .th{width:40px;height:40px;border-radius:8px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;overflow:hidden}.wad-row .th img{width:100%;height:100%;object-fit:cover}'
@@ -46135,6 +45020,15 @@ async function wadPages(q){   // four pages at a time until one comes back short
   let out=[]; for(let f=0;;f+=4000){ const got=await Promise.all([0,1,2,3].map(function(i){ return q().range(f+i*1000,f+i*1000+999); }));
     for(const g of got){ out=out.concat(g.data||[]); if(g.error||!g.data||g.data.length<1000) return out; } }
 }
+/* REPLIED (25 Nov 2026, Ayush: "how many Replies were given can be extracted?? Try again"): Meta's template_analytics gives
+   'replied' per template per day - customers who answered the template with a message of their own. Meta gives the count
+   only, not what they wrote. Column camp.wa_template_daily.replied (added 25 Nov 20:05 IST); before that it is left out. */
+let WAD_REP=true;
+async function wadDailyPart(C,p){
+  const q=function(cols){ return function(){ return C.from('wa_template_daily').select(cols).in('template_id',p).gte('day',WAD_Y0).order('day').order('template_id'); }; };
+  if(WAD_REP){ const t=await C.from('wa_template_daily').select('replied').limit(1); if(t.error) WAD_REP=false; }
+  return wadPages(q('template_id,day,sent,delivered,read,clicked,clicks'+(WAD_REP?',replied':'')));
+}
 async function wadLoad(){
   const C=sb.schema('camp');
   const got=await Promise.all([
@@ -46156,10 +45050,16 @@ async function wadLoadAcc0(accId){
   const parts=[]; for(let i=0;i<ids.length;i+=60) parts.push(ids.slice(i,i+60));
   const res=await Promise.all([
     C.from('wa_templates').select('id,components').eq('waba_id',accId).then(function(r){ return r.data||[]; },function(){ return []; })
-  ].concat(parts.map(function(p){ return wadPages(function(){ return C.from('wa_template_daily').select('template_id,day,sent,delivered,read,clicked,clicks').in('template_id',p).gte('day',WAD_Y0).order('day').order('template_id'); }); })));
+  ].concat(parts.map(function(p){ return wadDailyPart(C,p); })));
   const comp={}; (res[0]||[]).forEach(function(x){ comp[x.id]=x.components; });
   WAD.tpl.forEach(function(t){ if(t.waba_id===accId) t.components=comp[t.id]||null; });
   WAD.byAcc[accId]={daily:[].concat.apply([],res.slice(1))};
+  // 25 Nov 2026: the number's daily cost (camp.wa_cost_daily) and the customers' messages (camp.wa_inbound) - empty until those
+  // tables exist (25 Nov 20:03 IST) and, for messages, until the number is subscribed to JAIN-E's app at Meta
+  const ex=await Promise.all([
+    C.from('wa_cost_daily').select('day,category,pricing_type,volume,cost').eq('waba_id',accId).gte('day',WAD_Y0).order('day').range(0,4999).then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; }),
+    C.from('wa_inbound').select('id,ts,from_phone,from_name,kind,body,business_number').eq('waba_id',accId).gte('ts',WAD_Y0+'T00:00:00+05:30').order('ts',{ascending:false}).range(0,4999).then(function(r){ return r.error?null:(r.data||[]); },function(){ return null; })]);
+  WAD.byAcc[accId].cost=ex[0]; WAD.byAcc[accId].inbound=ex[1];
 }
 function wadAccFor(label){ const pn=function(x){ return String(x||'').toLowerCase().replace(/dream|by jain group/g,'').replace(/[^a-z0-9]/g,''); };
   return ((WAD&&WAD.acc)||[]).filter(function(a){ return pn(a.name)===pn(label); })[0]||null; }
@@ -46171,15 +45071,16 @@ function knBody(t){ const c=(t.components||[]).filter(function(x){ return x.type
 function knButtons(t){ const c=(t.components||[]).filter(function(x){ return x.type==='BUTTONS'; })[0]; return ((c&&c.buttons)||[]).map(function(b){ return {text:b.text,type:b.type}; }); }
 function wadChips(btns,cnt){ return btns.length?'<div class="wad-btns">'+btns.map(function(b){ return /PHONE/i.test(b.type)?'<span class="off" title="Meta does not count clicks on call buttons">'+esc(b.text)+' · not counted</span>':'<span>'+esc(b.text)+' · '+wadN((cnt||{})[b.text]||0)+'</span>'; }).join('')+'</div>':''; }
 function wadCard(col,l,v,pc,ttl){ return '<div class="wad-card"'+(ttl?' title="'+esc(ttl)+'"':'')+'><div class="l"><i style="background:'+col+'"></i>'+l+'</div><div class="v">'+v+'</div><div class="p">'+(pc||'&nbsp;')+'</div></div>'; }
+const WAD_RP='Customers who answered this message by typing a reply (Meta counts them; it does not give what they wrote)';
 const WAD_ND='Meta does not report failed messages - this is sent minus delivered (failed, or not delivered yet)';
 // sums per template (in the range) and per day (for the chart) of the chosen templates
 function wadSum(daily,ids,r){
-  const per={}, perDay={}, tot={sent:0,delivered:0,read:0,clicked:0}, r0=wadRange0();
+  const per={}, perDay={}, tot={sent:0,delivered:0,read:0,clicked:0,replied:0}, r0=wadRange0();
   daily.forEach(function(x){ if(!ids[x.template_id]) return;
     if(x.day>=r0.s&&x.day<=r0.e){ const dd=perDay[x.day]=perDay[x.day]||{sent:0,delivered:0,read:0}; dd.sent+=+x.sent||0; dd.delivered+=+x.delivered||0; dd.read+=+x.read||0; }
     if(x.day<r.s||x.day>r.e) return;
-    const m=per[x.template_id]=per[x.template_id]||{sent:0,delivered:0,read:0,clicked:0,btn:{}};
-    ['sent','delivered','read','clicked'].forEach(function(k){ m[k]+=+x[k]||0; tot[k]+=+x[k]||0; });
+    const m=per[x.template_id]=per[x.template_id]||{sent:0,delivered:0,read:0,clicked:0,replied:0,btn:{}};
+    ['sent','delivered','read','clicked','replied'].forEach(function(k){ m[k]+=+x[k]||0; tot[k]+=+x[k]||0; });
     (x.clicks||[]).forEach(function(c){ const b=c.button_content||c.type||'Button'; m.btn[b]=(m.btn[b]||0)+(+c.count||0); }); });
   return {per:per,perDay:perDay,tot:tot};
 }
@@ -46202,21 +45103,23 @@ function watDeliveries(){
   const S=wadSum(D,ids,r), tot=S.tot, nd=Math.max(0,tot.sent-tot.delivered);
   h+='<div class="wad-cards">'+wadCard('#64748b','Sent',wadN(tot.sent))+wadCard('#2563eb','Delivered',wadN(tot.delivered),wadPct(tot.delivered,tot.sent)+(tot.sent?' of sent':''))
     +wadCard('#16a34a','Read',wadN(tot.read),wadPct(tot.read,tot.delivered)+(tot.delivered?' of delivered':''))+wadCard('#7c3aed','Clicked',wadN(tot.clicked),wadPct(tot.clicked,tot.read)+(tot.read?' of read':''))
+    +wadCard('#0891b2','Replied',WAD_REP?wadN(tot.replied):'NA',WAD_REP?wadPct(tot.replied,tot.read)+(tot.read?' of read':''):'from tonight',WAD_RP)
     +wadCard('#dc2626','Not delivered',wadN(nd),wadPct(nd,tot.sent)+(tot.sent?' of sent':''),WAD_ND)+'</div>';
+  h+=wadCostBox(acc,r,tot);
   h+=wadChartBox(S.perDay);
   h+='<div class="wad-stg"><button class="'+(WAD_STAGE===-1?'on':'')+'" onclick="wadStage(-1)">All stages</button>'+stages.map(function(st,i){ return '<button class="'+(WAD_STAGE===i?'on':'')+'" onclick="wadStage('+i+')">'+esc(st.name)+'</button>'; }).join('')+'</div>';
   window._watRows=[];
-  let rows='<div class="wad-row h"><div>Day</div><div></div><div>Template</div><div style="text-align:right">Sent</div><div style="text-align:right">Delivered</div><div style="text-align:right">Read</div><div style="text-align:right">Clicked</div><div style="text-align:right" title="'+esc(WAD_ND)+'">Not delivered</div><div></div></div>';
+  let rows='<div class="wad-row h"><div>Day</div><div></div><div>Template</div><div style="text-align:right">Sent</div><div style="text-align:right">Delivered</div><div style="text-align:right">Read</div><div style="text-align:right">Clicked</div><div style="text-align:right" title="'+esc(WAD_RP)+'">Replied</div><div style="text-align:right" title="'+esc(WAD_ND)+'">Not delivered</div><div></div></div>';
   shown.forEach(function(st){
     if(WAD_STAGE===-1) rows+='<div class="wad-row h" style="display:block;background:#fff;color:#0f172a;font-size:12px;border-top:1px solid var(--line)">'+esc(st.name)+'</div>';
-    st.steps.forEach(function(s){ const t=byName[s.name], m=(t&&S.per[t.id])||{sent:0,delivered:0,read:0,clicked:0,btn:{}}, btns=t?knButtons(t):[], nd1=Math.max(0,m.sent-m.delivered);
+    st.steps.forEach(function(s){ const t=byName[s.name], m=(t&&S.per[t.id])||{sent:0,delivered:0,read:0,clicked:0,replied:0,btn:{}}, btns=t?knButtons(t):[], nd1=Math.max(0,m.sent-m.delivered);
       const pic=[s.attach].concat(s.preview||[]).filter(function(u){ return u&&/\.(jpe?g|png|webp|gif)(\?|$)/i.test(u); })[0], k=watKind(s.type);
-      const pi=window._watRows.push({p:p,st:st,s:s,m:{sent:m.sent,delivered:m.delivered,read:m.read,clicked:m.clicked,failed:nd1,reasons:{}},meta:t?[t]:[],tracksFail:true,failLabel:'Not delivered',range:r,btns:btns,btnCount:m.btn})-1;
+      const pi=window._watRows.push({p:p,st:st,s:s,m:{sent:m.sent,delivered:m.delivered,read:m.read,clicked:m.clicked,replied:m.replied,failed:nd1,reasons:{}},meta:t?[t]:[],tracksFail:true,failLabel:'Not delivered',range:r,btns:btns,btnCount:m.btn})-1;
       rows+='<div class="wad-row" onclick="watPop('+pi+')"><div class="d" style="font-size:12px;color:var(--slate);font-weight:600">'+(s.day==null?'':'Day <b style="color:#0f172a;font-size:15px">'+s.day+'</b>')+'</div>'
         +'<div class="th">'+(pic?'<img src="'+esc(pic)+'" alt="" loading="lazy">':'<i class="'+k[0]+'"></i>')+'</div>'
         +'<div class="tt"><div class="t">'+esc(watTitle(s))+'</div><div class="id">'+esc(s.name)+(t?'':' · not found on this number')+'</div>'+wadChips(btns,m.btn)+'</div>'
         +'<div class="nums"><div class="n" data-l="Sent">'+wadN(m.sent)+'</div><div class="n" data-l="Delivered">'+wadN(m.delivered)+'<small>'+wadPct(m.delivered,m.sent)+'</small></div><div class="n" data-l="Read">'+wadN(m.read)+'<small>'+wadPct(m.read,m.delivered)+'</small></div>'
-        +'<div class="n" data-l="Clicked">'+wadN(m.clicked)+'<small>'+wadPct(m.clicked,m.read)+'</small></div><div class="n'+(nd1?' bad':'')+'" data-l="Not delivered">'+wadN(nd1)+'</div></div>'
+        +'<div class="n" data-l="Clicked">'+wadN(m.clicked)+'<small>'+wadPct(m.clicked,m.read)+'</small></div><div class="n" data-l="Replied">'+(WAD_REP?wadN(m.replied)+'<small>'+wadPct(m.replied,m.read)+'</small>':'NA')+'</div><div class="n'+(nd1?' bad':'')+'" data-l="Not delivered">'+wadN(nd1)+'</div></div>'
         +'<i class="fa-solid fa-chevron-right cv"></i></div>';
     });
   });
@@ -46272,19 +45175,20 @@ function watKnocking(){
   const S=wadSum(WAD.byAcc[acc.id].daily,ids,r), tot=S.tot, nd=Math.max(0,tot.sent-tot.delivered);
   h+='<div class="wad-cards c4">'+wadCard('#64748b','Sent',wadN(tot.sent))+wadCard('#2563eb','Delivered',wadN(tot.delivered),wadPct(tot.delivered,tot.sent)+(tot.sent?' of sent':''))
     +wadCard('#dc2626','Not delivered',wadN(nd),wadPct(nd,tot.sent)+(tot.sent?' of sent':''),WAD_ND)
-    +wadCard('#16a34a','Read',wadN(tot.read),wadPct(tot.read,tot.delivered)+(tot.delivered?' of delivered':''))+'</div>';
+    +wadCard('#16a34a','Read',wadN(tot.read),wadPct(tot.read,tot.delivered)+(tot.delivered?' of delivered':''))
+    +wadCard('#0891b2','Replied',WAD_REP?wadN(tot.replied):'NA',WAD_REP?wadPct(tot.replied,tot.read)+(tot.read?' of read':''):'from tonight',WAD_RP)+'</div>';
   const cols=[['First knock','#0f172a'],['Said Yes','#16a34a'],['Said No','#dc2626'],['No reply','#d97706']];
   const ordered=tpl.slice().sort(function(a,b){ return knBranch(a.name)-knBranch(b.name)||knStep(a.name)-knStep(b.name)||a.name.localeCompare(b.name); });
   window._watRows=[];
-  let rows='<div class="wad-row kn h"><div>Path</div><div>Template</div><div style="text-align:right">Sent</div><div style="text-align:right">Delivered</div><div style="text-align:right" title="'+esc(WAD_ND)+'">Not delivered</div><div style="text-align:right">Read</div><div></div></div>';
+  let rows='<div class="wad-row kn h"><div>Path</div><div>Template</div><div style="text-align:right">Sent</div><div style="text-align:right">Delivered</div><div style="text-align:right" title="'+esc(WAD_ND)+'">Not delivered</div><div style="text-align:right">Read</div><div style="text-align:right" title="'+esc(WAD_RP)+'">Replied</div><div></div></div>';
   ordered.forEach(function(t){
-    const c=cols[knBranch(t.name)], m=S.per[t.id]||{sent:0,delivered:0,read:0,clicked:0,btn:{}}, btns=knButtons(t), body=knBody(t), nd1=Math.max(0,m.sent-m.delivered);
+    const c=cols[knBranch(t.name)], m=S.per[t.id]||{sent:0,delivered:0,read:0,clicked:0,replied:0,btn:{}}, btns=knButtons(t), body=knBody(t), nd1=Math.max(0,m.sent-m.delivered);
     const s={text:body+(btns.length?'\nCTA - '+btns.map(function(b){ return b.text; }).join(' & '):''),name:t.name,day:null,status:'',type:'text'};
-    const pi=window._watRows.push({p:{label:acc.name},st:{name:knLabel(t.name)},s:s,meta:[t],m:{sent:m.sent,delivered:m.delivered,read:m.read,clicked:m.clicked,failed:nd1,reasons:{}},tracksFail:true,failLabel:'Not delivered',btns:btns,btnCount:m.btn,range:r})-1;
+    const pi=window._watRows.push({p:{label:acc.name},st:{name:knLabel(t.name)},s:s,meta:[t],m:{sent:m.sent,delivered:m.delivered,read:m.read,clicked:m.clicked,replied:m.replied,failed:nd1,reasons:{}},tracksFail:true,failLabel:'Not delivered',btns:btns,btnCount:m.btn,range:r})-1;
     rows+='<div class="wad-row kn" onclick="watPop('+pi+')"><div class="pth"><span class="wad-path" style="color:'+c[1]+'"><i style="background:'+c[1]+'"></i><span>'+esc(knLabel(t.name))+'</span></span></div>'
       +'<div class="tt"><div class="t">'+esc(watTitle({text:body}))+'</div><div class="id">'+esc(t.name)+'</div>'+(btns.length?wadChips(btns,m.btn):'<div class="wad-btns"><span class="off">No buttons</span></div>')+'</div>'
       +'<div class="nums"><div class="n" data-l="Sent">'+wadN(m.sent)+'</div><div class="n" data-l="Delivered">'+wadN(m.delivered)+'<small>'+wadPct(m.delivered,m.sent)+'</small></div>'
-      +'<div class="n'+(nd1?' bad':'')+'" data-l="Not delivered">'+wadN(nd1)+'<small>'+wadPct(nd1,m.sent)+'</small></div><div class="n" data-l="Read">'+wadN(m.read)+'<small>'+wadPct(m.read,m.delivered)+'</small></div></div>'
+      +'<div class="n'+(nd1?' bad':'')+'" data-l="Not delivered">'+wadN(nd1)+'<small>'+wadPct(nd1,m.sent)+'</small></div><div class="n" data-l="Read">'+wadN(m.read)+'<small>'+wadPct(m.read,m.delivered)+'</small></div><div class="n" data-l="Replied">'+(WAD_REP?wadN(m.replied)+'<small>'+wadPct(m.replied,m.read)+'</small>':'NA')+'</div></div>'
       +'<i class="fa-solid fa-chevron-right cv"></i></div>';
   });
   return h+'<div class="wat-list">'+(ordered.length?rows:'<div style="padding:16px;color:var(--slate)">No knocking templates on this number.</div>')+'</div>';
@@ -46363,6 +45267,46 @@ window.wadReport=async function(){
   }catch(e){ toast('Could not make the report: '+e.message,'err'); }
   if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-file-arrow-down"></i> Download report'; }
 };
+
+/* WHATSAPP COST (25 Nov 2026, Ayush: "I want 2"): what Meta charged this number in the range - every message it charged
+   for, not only the drip templates (the knocking messages and anything else sent from the number count too). Free
+   messages (replies inside the customer's 24-hour window, ad-started chats) are counted but cost nothing. */
+function wadCostBox(acc,r,tot){
+  const rows=(WAD.byAcc[acc.id]&&WAD.byAcc[acc.id].cost);
+  if(rows==null) return '<div class="wad-cost"><i class="fa-solid fa-indian-rupee-sign"></i><span><b>WhatsApp cost</b> - shown from tonight (8 PM), when Meta’s daily cost starts being stored.</span></div>';
+  let cost=0, paid=0, free=0; const cat={};
+  rows.forEach(function(x){ if(x.day<r.s||x.day>r.e) return; cost+=+x.cost||0; if(+x.cost>0){ paid+=+x.volume||0; const c=cat[x.category]=cat[x.category]||{n:0,c:0}; c.n+=+x.volume||0; c.c+=+x.cost||0; } else free+=+x.volume||0; });
+  const inr=function(v){ return '₹'+Number(v).toLocaleString('en-IN',{maximumFractionDigits:v<100?2:0}); };
+  const per=function(n){ return n>0&&cost>0?inr(cost/n):'NA'; };
+  return '<div class="wad-cost"><i class="fa-solid fa-indian-rupee-sign"></i><span><b>WhatsApp cost '+inr(cost)+'</b> for this number in the period · '+wadN(paid)+' charged messages'
+    +Object.keys(cat).sort().map(function(k){ return ' ('+esc(k.charAt(0)+k.slice(1).toLowerCase())+' '+wadN(cat[k].n)+' · '+inr(cat[k].c)+')'; }).join('')
+    +' · '+wadN(free)+' free · <b>'+per(tot.replied)+'</b> per reply · <b>'+per(tot.read)+'</b> per read</span></div>';
+}
+/* REPLIES TAB (25 Nov 2026, Ayush: "I want ... 3"): what customers wrote back to each WhatsApp number, newest first, with
+   their name and number. Filled by the wa-replies webhook once the numbers are subscribed to JAIN-E's app at Meta. */
+let WAR_ACC=null;
+window.warPick=function(id){ WAR_ACC=id; renderPage(); };
+function warAcc(){ const L=(WAD&&WAD.acc)||[]; return L.filter(function(a){ return a.id===WAR_ACC; })[0]||L.filter(function(a){ return /ananta/i.test(a.name); })[0]||L[0]||null; }
+function watReplies(){
+  if(!WAD) return '<div class="loader"><div class="spin"></div></div>';
+  const acc=warAcc(); let h=WAD_CSS;
+  if(!acc) return h+wadNoData();
+  const L=(WAD.acc||[]).slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
+  h+='<div class="wat-top"><select class="sel" style="height:36px" onchange="warPick(this.value)">'+L.map(function(a){ return '<option value="'+esc(a.id)+'"'+(a.id===acc.id?' selected':'')+'>'+esc(a.name)+'</option>'; }).join('')+'</select></div>';
+  h+=wadBar();
+  const rows=WAD.byAcc[acc.id]&&WAD.byAcc[acc.id].inbound, r=wadRange();
+  if(rows==null||!rows.length&&!(WAD.byAcc[acc.id]||{}).anyIn){
+    return h+'<div class="wad-empty"><i class="fa-brands fa-whatsapp" style="font-size:22px;color:#16a34a"></i><div><b style="color:#0f172a">No replies received yet.</b><br>Customers’ messages appear here once this WhatsApp number is connected to JAIN-E at Meta. Until then, the number of replies per template is in Deliveries and Knocking.</div></div>';
+  }
+  const day=function(ts){ return new Date(new Date(ts).getTime()+330*60000).toISOString().slice(0,10); };
+  const shown=rows.filter(function(x){ const d=day(x.ts); return d>=r.s&&d<=r.e; });
+  const who={}; shown.forEach(function(x){ who[x.from_phone]=1; });
+  h+='<div class="wad-cards c4" style="grid-template-columns:repeat(2,minmax(0,1fr))">'+wadCard('#0891b2','Messages received',wadN(shown.length))+wadCard('#16a34a','People who wrote',wadN(Object.keys(who).length))+'</div>';
+  const tm=function(ts){ const d=new Date(ts); return d.toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true}); };
+  h+='<div class="wat-list">'+(shown.length?shown.map(function(x){ return '<div class="war-row"><div class="w">'+esc(tm(x.ts))+'</div><div class="p"><b>'+esc(x.from_name||'Unknown')+'</b><span>+'+esc(x.from_phone)+'</span></div><div class="t">'+esc(x.body||'')+'</div></div>'; }).join('')
+    :'<div style="padding:24px;text-align:center;color:var(--slate);font-size:13px">No messages in this period.</div>')+'</div>';
+  return h;
+}
 
 /* ---------------------------------------------------------------- Jain Group Fb Ads / Jain Group Google Ads (Competitor Data)
    OUR OWN ADS, FROM OUR OWN AD ACCOUNTS (19 Nov 2026, Ayush: "I want to see the ads in Facebook and Google showing in
@@ -46752,244 +45696,21 @@ async function rkDetail(id,force){
 function rkFv(){ if(RK.fv) return Promise.resolve(RK.fv);
   return sb.schema('cust').from('projects').select('id,name').order('name').then(function(r){ RK.fv=r.data||[]; return RK.fv; },function(){ RK.fv=[]; return RK.fv; }); }
 
-/* ---------------------------------------------------------------- the page */
-function rkNav(on){
-  const items=[['','Directory','fa-building'],['compare','Compare','fa-scale-balanced'],['pending','Pending Verifications','fa-clipboard-check'],['audit','Audit Log','fa-clock-rotate-left']];
-  if(RK.role==='super') items.push(['roles','Roles','fa-user-shield']);
-  return '<div class="rk-nav rk-noprint">'+items.map(function(i){ return '<a class="'+(i[0]===on?'on':'')+'" onclick="navTo(\'reckoner'+(i[0]?'/'+i[0]:'')+'\')"><i class="fa-solid '+i[2]+'"></i> '+i[1]+(i[0]==='pending'&&RK.pendN?'<span class="n">'+RK.pendN+'</span>':'')+'</a>'; }).join('')+'</div>';
-}
-VIEWS.reckoner=async function(v,seg){
-  setCrumb(['Sales','Reckoner']);
-  const head=RK_CSS+mHead('fa-book-bookmark','#0f766e','Reckoner');
-  const s0=seg&&seg[0]||'';
-  try{
-    if(!RK.projects){ v.innerHTML=head+'<div class="loader"><div class="spin"></div></div>'; await rkBase(); if(PAGE!=='reckoner') return; }
-    if(s0==='p'&&seg[1]){
-      const id=seg[1], ti=Math.max(0,Math.min(7,parseInt(seg[2]||'0',10)||0));
-      if(!RK.proj[id]){ v.innerHTML=head+rkNav('')+'<div class="loader"><div class="spin"></div></div>'; await rkDetail(id); if(PAGE!=='reckoner') return; }
-      v.innerHTML=head+rkNav('')+rkProfile(id,ti); return;
-    }
-    if(s0==='compare'){ v.innerHTML=head+rkNav('compare')+'<div class="loader"><div class="spin"></div></div>'; const h=await rkCompareView(); if(PAGE!=='reckoner') return; v.innerHTML=head+rkNav('compare')+h; return; }
-    if(s0==='pending'){ v.innerHTML=head+rkNav('pending')+'<div class="loader"><div class="spin"></div></div>'; const h=await rkPendingView(); if(PAGE!=='reckoner') return; v.innerHTML=head+rkNav('pending')+h; return; }
-    if(s0==='audit'){ v.innerHTML=head+rkNav('audit')+'<div class="loader"><div class="spin"></div></div>'; const h=await rkAuditView(); if(PAGE!=='reckoner') return; v.innerHTML=head+rkNav('audit')+h; return; }
-    if(s0==='roles'){ v.innerHTML=head+rkNav('roles')+'<div class="loader"><div class="spin"></div></div>'; const h=await rkRolesView(); if(PAGE!=='reckoner') return; v.innerHTML=head+rkNav('roles')+h; return; }
-    v.innerHTML=head+rkNav('')+rkDirectory();
-  }catch(e){
-    const t=rkErrText(e);
-    v.innerHTML=head+'<div class="card card-pad" style="font-size:13.5px;'+(t==='setup'?'color:#475569':'color:#b91c1c')+'">'
-      +(t==='setup'?'<i class="fa-regular fa-clock"></i> Reckoner\'s database is being set up tonight after 8 PM. The page works once that has run.'
-        :'<i class="fa-solid fa-triangle-exclamation"></i> Reckoner could not be shown: '+esc(t)+'. <a href="javascript:void(0)" onclick="rkReload()">Try again</a>')+'</div>';
-    try{ console.error('reckoner',e); }catch(_e){}
-  }
-};
-window.rkReload=function(){ RK.projects=null; RK.proj={}; renderPage(); };
+/* The page itself (project strip + one-page project sheet, 23 Nov 2026): 62-reckoner-sheet.js */
 
-/* ---------------------------------------------------------------- Directory */
-function rkDirectory(){
-  const P=RK.projects||[], f=RK.f, q=RK.q.trim().toLowerCase();
-  const uniq=function(a){ return Array.from(new Set(a.filter(Boolean))).sort(); };
-  const cats=uniq(P.map(function(p){ return p.category; })), sts=uniq(P.map(function(p){ return p.status; })), cities=uniq(P.map(function(p){ return p.city; }));
-  const cfgNames=uniq(RK.cfg.map(function(c){ const m=String(c.name||'').match(/\d+(\.\d+)?\s*(BHK|RK)|Studio|Bungalow|Villa|Shop|Duplex|Penthouse/i); return m?m[0].toUpperCase().replace(/\s+/,' '):null; }));
-  const cfgOf=function(id){ return RK.cfg.filter(function(c){ return c.project_id===id; }); };
-  const list=P.filter(function(p){
-    if(f.cat&&p.category!==f.cat) return false; if(f.status&&p.status!==f.status) return false; if(f.city&&p.city!==f.city) return false;
-    const cs=cfgOf(p.id);
-    if(f.cfg&&!cs.some(function(c){ return String(c.name||'').toUpperCase().replace(/\s+/g,' ').indexOf(f.cfg)!==-1; })) return false;
-    if(q){ const hay=[p.name,p.code,p.city,p.locality,p.developer,p.rera_no,p.category,p.status,p.stage].concat(cs.map(function(c){ return c.name; })).join(' ').toLowerCase(); if(hay.indexOf(q)===-1) return false; }
-    return true;
-  });
-  const opt=function(v,arr,lbl){ return '<select onchange="rkF(\''+v+'\',this.value)"><option value="">'+lbl+'</option>'+arr.map(function(x){ return '<option'+(f[v]===x?' selected':'')+'>'+esc(x)+'</option>'; }).join('')+'</select>'; };
-  let h='<div class="rk-bar rk-noprint"><input type="search" placeholder="Search project, locality, configuration, RERA..." value="'+esc(RK.q)+'" oninput="rkQ(this.value)" id="rkQ">'
-    +opt('cat',cats,'All categories')+opt('status',sts,'All statuses')+opt('city',cities,'All cities')+opt('cfg',cfgNames,'Any configuration')
-    +(RK.cmp.length?'<button class="btn btn-primary btn-sm" onclick="navTo(\'reckoner/compare\')"><i class="fa-solid fa-scale-balanced"></i> Compare '+RK.cmp.length+'</button>':'')
-    +(rkCanPropose(null)?'<button class="btn btn-sm" onclick="rkEdit(\'projects\',null,null)"><i class="fa-solid fa-plus"></i> Add project</button>':'')+'</div>';
-  if(!P.length) return h+'<div class="rk-sec rk-empty">No projects yet.'+(rkCanPropose(null)?' Use <b>Add project</b>; it appears here once an approver accepts it.':'')+'<br>The workbook data is added after it has been reviewed.</div>';
-  if(!list.length) return h+'<div class="rk-sec rk-empty">No project matches these filters.</div>';
-  return h+'<div class="rk-grid">'+list.map(function(p){
-    const s=RK.stats[p.id]||{n:{}}, cs=cfgOf(p.id), pc=rkComplete(p);
-    const rates=RK.rates.filter(function(r){ return r.project_id===p.id&&r.kind==='base_rate'&&r.unit==='per_sqft'&&r.amount!=null&&!r.internal; });
-    const minRate=rates.length?Math.min.apply(null,rates.map(function(r){ return Number(r.amount); })):null;
-    return '<div class="rk-card" onclick="navTo(\'reckoner/p/'+p.id+'\')">'
-      +'<label class="cmp rk-noprint" onclick="event.stopPropagation()"><input type="checkbox" '+(RK.cmp.indexOf(p.id)!==-1?'checked':'')+' onchange="rkCmpToggle(\''+p.id+'\',this.checked)"> Compare</label>'
-      +'<h3>'+esc(p.name)+'</h3><div class="loc"><i class="fa-solid fa-location-dot"></i> '+(esc([p.locality,p.city].filter(Boolean).join(', '))||'Location not available')+'</div>'
-      +'<div class="rk-chips">'+[p.category,p.status,p.stage].filter(Boolean).map(function(x){ return '<span class="rk-chip">'+esc(x)+'</span>'; }).join('')+' '+rkChip(p,true)+'</div>'
-      +'<div class="rk-meta"><div>Possession: <b>'+(p.possession_date?esc(fmtDate(p.possession_date)):(p.possession_note?esc(p.possession_note):'—'))+'</b></div>'
-      +'<div>Base rate from: <b>'+(minRate!=null?rkInr(minRate)+'/sq ft':'—')+'</b></div>'
-      +'<div>Configurations: <b>'+(cs.length?esc(cs.slice(0,4).map(function(c){ return c.name; }).join(', '))+(cs.length>4?' +'+(cs.length-4):''):'—')+'</b></div>'
-      +'<div>Updated: <b>'+(s.last?esc(fmtDate(s.last)):'—')+'</b></div></div>'
-      +'<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#64748b"><div class="rk-prog" style="flex:1"><i style="width:'+pc+'%"></i></div>'+pc+'% filled</div>'
-      +'</div>';
-  }).join('')+'</div>';
-}
-window.rkF=function(k,v){ RK.f[k]=v; renderPage(); };
-let RK_QT=null;
-window.rkQ=function(v){ RK.q=v; clearTimeout(RK_QT); RK_QT=setTimeout(function(){ renderPage(); setTimeout(function(){ const i=$('rkQ'); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } },0); },250); };
-window.rkCmpToggle=function(id,on){ const i=RK.cmp.indexOf(id); if(on&&i===-1){ if(RK.cmp.length>=4){ toast('Compare up to 4 projects','warn'); renderPage(); return; } RK.cmp.push(id); } if(!on&&i!==-1) RK.cmp.splice(i,1); renderPage(); };
-
-/* ---------------------------------------------------------------- Profile */
 const RK_KEY={locations:'loc',configurations:'cfg',charges:'chg',payment_plans:'plan',offers:'off',units:'units',amenities:'am',landmarks:'lm',sales_notes:'notes',bank_approvals:'bank',documents:'docs',assignments:'team'};
-function rkSec(title,icon,tbl,pid,body,extraBtns){
-  if(tbl&&pid&&rkCanApprove()&&RK.proj[pid]){ const un=(RK.proj[pid][RK_KEY[tbl]]||[]).filter(function(x){ return rkState(x)==='pending'; });
-    if(un.length) extraBtns=(extraBtns||'')+'<button class="btn btn-sm" style="color:#166534" onclick="rkVerifyAll(\''+tbl+'\',\''+pid+'\')"><i class="fa-solid fa-check-double"></i> Verify all ('+un.length+')</button>'; }
-  return '<div class="rk-sec"><h4><i class="fa-solid '+icon+'" style="color:#0f766e"></i> '+title+'<span class="r rk-noprint">'+(extraBtns||'')
-    +(tbl&&rkCanPropose(pid)?'<button class="btn btn-sm" onclick="rkEdit(\''+tbl+'\',null,\''+pid+'\')"><i class="fa-solid fa-plus"></i> Add</button>':'')+'</span></h4>'+body+'</div>';
-}
 function rkRowBtns(tbl,r,pid){
   const vb=rkCanApprove()&&rkState(r)!=='verified'?'<button class="rk-ib" title="Mark verified" style="color:#16a34a" onclick="event.stopPropagation();rkVerify(\''+tbl+'\',[\''+r.id+'\'],\''+pid+'\')"><i class="fa-solid fa-check-double"></i></button>':'';
   if(!rkCanPropose(pid)) return vb?'<span class="rk-noprint" style="white-space:nowrap">'+vb+'</span>':'';
   return '<span class="rk-noprint" style="white-space:nowrap">'+vb+'<button class="rk-ib" title="Propose a change" onclick="event.stopPropagation();rkEdit(\''+tbl+'\',\''+r.id+'\',\''+pid+'\')"><i class="fa-solid fa-pen"></i></button>'
     +'<button class="rk-ib" title="Propose removal" onclick="event.stopPropagation();rkArchive(\''+tbl+'\',\''+r.id+'\',\''+pid+'\')"><i class="fa-solid fa-box-archive"></i></button></span>'; }
 function rkVal(v,fmt){ if(v==null||v==='') return rkNA(); return fmt?fmt(v):esc(String(v)); }
-function rkProfile(id,ti){
-  const d=RK.proj[id], p=d.p;
-  let h='<div class="rk-ph"><a class="rk-ib rk-noprint" onclick="navTo(\'reckoner\')"><i class="fa-solid fa-arrow-left"></i> Directory</a></div>'
-    +'<div class="rk-ph"><h2>'+esc(p.name)+'</h2>'+rkChip(p,true)+rkChgChip(d,p.id)
-    +'<span style="margin-left:auto;display:flex;gap:8px;align-items:center" class="rk-noprint">'
-    +'<label style="font-size:12.5px;color:#475569;display:flex;gap:5px;align-items:center" title="Show only verified, in-date, customer-facing information"><input type="checkbox" '+(RK.cust?'checked':'')+' onchange="RK.cust=this.checked;renderPage()"> Customer view</label>'
-    +'<button class="btn btn-sm" onclick="rkRefresh(\''+id+'\')" title="Load again"><i class="fa-solid fa-rotate"></i></button>'
-    +'<button class="btn btn-sm" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button></span></div>'
-    +'<div style="color:#64748b;font-size:13px">'+esc([p.locality,p.city].filter(Boolean).join(', '))+(p.category?' · '+esc(p.category):'')+(p.status?' · '+esc(p.status):'')+'</div>'
-    +(RK.cust?'<div class="rk-pend" style="background:#f0fdf4;border-color:#86efac;color:#166534"><i class="fa-solid fa-eye"></i> Customer view: only verified, in-date, customer-facing information is shown.</div>':'')
-    +'<div class="rk-tabs rk-noprint">'+RK_TABS.map(function(t,i){ return '<a class="'+(i===ti?'on':'')+'" onclick="navTo(\'reckoner/p/'+id+'/'+i+'\')">'+t+'</a>'; }).join('')+'</div>';
-  const body=[rkTabOverview,rkTabConfig,rkTabPricing,rkTabInventory,rkTabAmenities,rkTabLocation,rkTabSales,rkTabDocs][ti](d,id);
-  return h+body;
-}
 window.rkRefresh=async function(id){ try{ await rkDetail(id,true); await rkBase(true); }catch(e){ toast(String(e.message||e),'err'); } renderPage(); };
-
-function rkTabOverview(d,id){
-  const p=d.p, ok=!RK.cust||rkOk(p);
-  const f=function(lbl,v,fmt,copy){ return '<div><div class="k">'+lbl+'</div>'+(ok?rkVal(v,fmt):'<span class="rk-na">Pending Verification</span>')+(ok&&copy?rkCopyBtn(v):'')+'</div>'; };
-  let kv='<div class="rk-kv">'+f('Category',p.category)+f('Project status',p.status)+f('Development stage',p.stage)+f('City',p.city)+f('Locality',p.locality)+f('Developer',p.developer)
-    +f('Land area',p.land_area)+f('Towers / blocks',p.towers)+f('Height',p.height)+f('Total units',p.total_units,rkNum)+f('Open space',p.open_space)
-    +f('Launch date',p.launch_date,fmtDate)+f('Possession',p.possession_date,fmtDate)+f('Possession note',p.possession_note)+f('RERA number',p.rera_no,null,true)+f('RERA note',p.rera_note)
-    +(!RK.cust?f('Farvision project',(p.fv_project_ids||[]).length?p.fv_project_ids.map(function(i){ return ((RK.fv||[]).find(function(x){ return String(x.id)===String(i); })||{name:'#'+i}).name; }).join(', '):null):'')+'</div>'
-    +(p.description&&ok?'<div style="margin-top:12px;font-size:13.5px;line-height:1.55;white-space:pre-wrap">'+esc(p.description)+'</div>':'')
-    +'<div style="margin-top:12px;font-size:12px;color:#64748b">'+(p.source?'Source: '+esc(p.source)+' · ':'')+(p.verified_at?'Verified by '+esc(p.verified_by||'')+' on '+esc(fmtDate(p.verified_at))+' · ':'')+'Updated '+esc(fmtDate(p.updated_at))+(p.valid_until?' · Valid until '+esc(fmtDate(p.valid_until)):'')+'</div>';
-  const edit=(rkCanApprove()&&rkState(p)!=='verified'?'<button class="btn btn-sm" style="color:#166534" onclick="rkVerify(\'projects\',[\''+id+'\'],\''+id+'\')"><i class="fa-solid fa-check-double"></i> Mark overview verified</button> ':'')+(rkCanPropose(id)?'<button class="btn btn-sm" onclick="rkEdit(\'projects\',\''+id+'\',\''+id+'\')"><i class="fa-solid fa-pen"></i> Propose change</button>':'');
-  let h=rkSec('Overview','fa-circle-info',null,id,kv,edit);
-  const off=rkShow(d.off);
-  if(!RK.cust||off.length) h+=rkSec('Offers','fa-tag','offers',id,(off.length?'<table class="rk-t"><tr><th>Offer</th><th>Details</th><th>Valid</th><th></th><th></th></tr>'+off.map(function(o){ return '<tr'+(o.internal?' class="int"':'')+'><td><b>'+esc(o.title)+'</b>'+rkInt(o)+'</td><td>'+rkVal(o.details)+'</td><td>'+(o.valid_until?'until '+esc(fmtDate(o.valid_until)):'—')+'</td><td>'+rkChip(o)+rkChgChip(d,o.id)+'</td><td>'+rkRowBtns('offers',o,id)+'</td></tr>'; }).join('')+'</table>':'<div class="rk-empty">No offers recorded.</div>')+rkNewPend(d,'offers'));
-  if(!RK.cust) h+=rkSec('Team','fa-users','assignments',id,(d.team.length?'<table class="rk-t"><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr>'+d.team.map(function(a){ return '<tr><td>'+rkVal(a.name)+'</td><td>'+esc(a.email||'')+'</td><td>'+esc(String(a.role||'').replace(/_/g,' '))+'</td><td>'+rkRowBtns('assignments',a,id)+'</td></tr>'; }).join('')+'</table>':'<div class="rk-empty">No project manager or sales executive assigned yet.</div>')+rkNewPend(d,'assignments'));
-  return h;
-}
-function rkTabConfig(d,id){
-  const rows=rkShow(d.cfg);
-  const body=rows.length?'<div class="rk-wrap"><table class="rk-t"><tr><th>Configuration</th><th>Type</th><th>Bed / Bath / Balcony</th><th>Super built-up</th><th>Built-up</th><th>Carpet</th><th>Floors</th><th>Facing</th><th></th><th></th></tr>'
-    +rows.map(function(c){ return '<tr><td><b>'+esc(c.name)+'</b>'+(c.area_note?'<div style="color:#64748b;font-size:12px">'+esc(c.area_note)+'</div>':'')+(c.room_sizes?'<div style="font-size:12px;white-space:pre-wrap">'+esc(c.room_sizes)+'</div>':'')+(c.features?'<div style="font-size:12px;color:#475569;white-space:pre-wrap">'+esc(c.features)+'</div>':'')+'</td>'
-      +'<td>'+rkVal(c.kind)+'</td><td>'+[c.bedrooms,c.bathrooms,c.balconies].map(function(x){ return x==null?'–':rkNum(x); }).join(' / ')+'</td><td>'+(rkArea(c)||rkNA())+'</td><td>'+rkVal(c.built_up,function(x){ return rkNum(x)+' sq ft'; })+'</td><td>'+rkVal(c.carpet,function(x){ return rkNum(x)+' sq ft'; })+'</td>'
-      +'<td>'+rkVal(c.floors)+'</td><td>'+rkVal(c.facing)+'</td><td>'+rkChip(c)+rkChgChip(d,c.id)+'</td><td>'+rkRowBtns('configurations',c,id)+'</td></tr>'; }).join('')+'</table></div>'
-    :'<div class="rk-empty">'+(RK.cust&&d.cfg.length?'Configurations are pending verification.':'No configurations recorded.')+'</div>';
-  return rkSec('Configurations','fa-house','configurations',id,body+rkNewPend(d,'configurations'));
-}
-function rkTabPricing(d,id){
-  const ch=rkShow(d.chg), cfgName=function(cid){ const c=d.cfg.find(function(x){ return x.id===cid; }); return c?c.name:'All configurations'; };
-  const fmtAmt=function(c){ if(c.amount==null) return rkNA(); if(c.unit==='percent') return rkNum(c.amount)+'%'; return rkInr(c.amount)+(c.unit==='per_sqft'?' / sq ft':''); };
-  const yn=function(v){ return v==null?'<span class="rk-na">–</span>':v?'Yes':'No'; };
-  const groups={}; ch.forEach(function(c){ const k=c.configuration_id||''; (groups[k]=groups[k]||[]).push(c); });
-  let body=ch.length?Object.keys(groups).sort(function(a,b){ return a===''?-1:b===''?1:cfgName(a).localeCompare(cfgName(b)); }).map(function(k){
-    return '<div style="font-weight:600;font-size:13px;margin:10px 0 4px">'+esc(cfgName(k||null))+'</div><div class="rk-wrap"><table class="rk-t"><tr><th>Component</th><th>Amount</th><th>In base</th><th>In final</th><th>GST incl.</th><th>Confirmed</th><th>Valid</th><th></th><th></th></tr>'
-      +groups[k].map(function(c){ return '<tr'+(c.internal?' class="int"':'')+'><td><b>'+esc(c.name)+'</b> <span style="color:#64748b;font-size:12px">'+esc(RK_CHARGE_KIND[c.kind]||c.kind)+'</span>'+rkInt(c)+(c.note?'<div style="font-size:12px;color:#475569">'+esc(c.note)+'</div>':'')+'</td>'
-        +'<td style="white-space:nowrap">'+fmtAmt(c)+'</td><td>'+yn(c.in_base)+'</td><td>'+yn(c.in_final)+'</td><td>'+yn(c.gst_included)+'</td><td>'+(c.confirmed?'Confirmed':'<span style="color:#b45309">Indicative</span>')+'</td>'
-        +'<td style="white-space:nowrap">'+(c.effective_from?esc(fmtDate(c.effective_from)):'')+(c.valid_until?' – '+esc(fmtDate(c.valid_until)):'')+'</td><td>'+rkChip(c)+rkChgChip(d,c.id)+'</td><td>'+rkRowBtns('charges',c,id)+'</td></tr>'; }).join('')+'</table></div>';
-  }).join(''):'<div class="rk-empty">'+(RK.cust&&d.chg.length?'Prices are pending verification.':'No price components recorded.')+'</div>';
-  let h=rkSec('Price breakdown','fa-indian-rupee-sign','charges',id,body+rkNewPend(d,'charges'));
-  h+=rkSec('Price calculator','fa-calculator',null,id,rkCalc(d));
-  const plan=rkShow(d.plan);
-  h+=rkSec('Payment plan','fa-list-ol','payment_plans',id,(plan.length?'<table class="rk-t"><tr><th>Stage</th><th>Percent</th><th>Amount</th><th>Note</th><th></th><th></th></tr>'+plan.map(function(s){ return '<tr><td>'+esc(s.stage)+'</td><td>'+(s.percent!=null?rkNum(s.percent)+'%':'—')+'</td><td>'+(s.amount!=null?rkInr(s.amount):'—')+'</td><td>'+esc(s.note||'')+'</td><td>'+rkChip(s)+rkChgChip(d,s.id)+'</td><td>'+rkRowBtns('payment_plans',s,id)+'</td></tr>'; }).join('')+'</table>':'<div class="rk-empty">No payment plan recorded.</div>')+rkNewPend(d,'payment_plans'));
-  return h;
-}
-/* The total is worked out only from what is recorded: per-sq-ft components x the area, lump sums as they are,
-   percentages of the base. Anything unverified or indicative makes the total "Indicative"; nothing missing is
-   counted as 0 - with no base rate or unit price there is no total. */
-const RK_CALC={};
-function rkCalc(d){
-  const pid=d.p.id, st=RK_CALC[pid]=RK_CALC[pid]||{cfg:'',area:''};
-  const cfgs=rkShow(d.cfg); if(!st.cfg&&cfgs.length) st.cfg=cfgs[0].id;
-  const c=cfgs.find(function(x){ return x.id===st.cfg; });
-  const area=st.area!==''?Number(st.area):(c&&(c.sba_min!=null?Number(c.sba_min):c.sba_max!=null?Number(c.sba_max):null));
-  const parts=rkShow(d.chg).filter(function(x){ return (!x.configuration_id||x.configuration_id===st.cfg)&&x.amount!=null&&!(x.in_base&&x.kind!=='base_rate'&&x.kind!=='unit_price'); });
-  let base=0, hasBase=false, lines=[], tentative=false, needArea=false;
-  parts.filter(function(x){ return x.kind==='base_rate'||x.kind==='unit_price'; }).forEach(function(x){
-    let v=null; if(x.unit==='per_sqft'){ if(area==null||!isFinite(area)){ needArea=true; return; } v=Number(x.amount)*area; } else if(x.unit!=='percent') v=Number(x.amount);
-    if(v==null) return; base+=v; hasBase=true; lines.push([x,v]); if(!rkOk(x)||!x.confirmed) tentative=true; });
-  let total=base;
-  parts.filter(function(x){ return x.kind!=='base_rate'&&x.kind!=='unit_price'; }).forEach(function(x){
-    let v=null; if(x.unit==='percent') v=hasBase?base*Number(x.amount)/100:null; else if(x.unit==='per_sqft'){ if(area==null||!isFinite(area)){ needArea=true; return; } v=Number(x.amount)*area; } else v=Number(x.amount);
-    if(v==null) return; total+=v; lines.push([x,v]); if(!rkOk(x)||!x.confirmed) tentative=true; });
-  let h='<div class="rk-bar"><select onchange="RK_CALC[\''+pid+'\'].cfg=this.value;RK_CALC[\''+pid+'\'].area=\'\';renderPage()">'+(cfgs.length?cfgs.map(function(x){ return '<option value="'+x.id+'"'+(x.id===st.cfg?' selected':'')+'>'+esc(x.name)+'</option>'; }).join(''):'<option>No configuration</option>')+'</select>'
-    +'<input type="number" placeholder="Area (sq ft)" style="width:150px" value="'+(area!=null&&isFinite(area)?area:'')+'" onchange="RK_CALC[\''+pid+'\'].area=this.value;renderPage()"> <span style="font-size:12px;color:#64748b">sq ft</span></div>';
-  if(!hasBase) return h+'<div class="rk-empty">'+(needArea?'Enter the area to work out a price.':'Not enough information to total: no base rate or unit price is recorded'+(RK.cust?' and verified':'')+' for this configuration.')+'</div>';
-  h+='<table class="rk-t">'+lines.map(function(l){ const x=l[0]; return '<tr><td>'+esc(x.name)+rkInt(x)+'</td><td style="color:#64748b;font-size:12px">'+(x.unit==='per_sqft'?rkInr(x.amount)+' × '+rkNum(area)+' sq ft':x.unit==='percent'?rkNum(x.amount)+'% of base':'')+'</td><td style="text-align:right;white-space:nowrap">'+rkInr(l[1])+'</td><td>'+rkChip(x)+'</td></tr>'; }).join('')
-    +'<tr><td colspan="2"><b>Total</b> '+(tentative?'<span class="rk-vs pending">Indicative</span>':'<span class="rk-vs verified">All components verified and confirmed</span>')+'</td><td style="text-align:right" class="rk-tot">'+rkInr(total)+'</td><td>'+rkCopyBtn(rkInr(total))+'</td></tr></table>'
-    +(needArea?'<div class="rk-pend">Some per-sq-ft components were left out because no area is set.</div>':'')
-    +'<div style="font-size:12px;color:#64748b;margin-top:8px">Components marked "included in base" are not added again. Missing components are not counted.</div>';
-  return h;
-}
-function rkTabInventory(d,id){
-  const f=RK.inv, all=rkShow(d.units), uniq=function(a){ return Array.from(new Set(a.filter(Boolean))).sort(); };
-  const cfgName=function(cid){ const c=d.cfg.find(function(x){ return x.id===cid; }); return c?c.name:''; };
-  const rows=all.filter(function(u){ if(f.tower&&u.tower!==f.tower) return false; if(f.cfg&&u.configuration_id!==f.cfg) return false; if(f.status&&u.status!==f.status) return false;
-    if(f.q){ const q=f.q.toLowerCase(); if([u.unit_no,u.tower,u.floor,u.facing,u.view,cfgName(u.configuration_id)].join(' ').toLowerCase().indexOf(q)===-1) return false; } return true; });
-  const last=all.reduce(function(m,u){ return u.updated_at>m?u.updated_at:m; },'');
-  window._rkInvRows=rows.map(function(u){ return Object.assign({},u,{configuration:cfgName(u.configuration_id)}); });
-  const bar='<div class="rk-bar rk-noprint"><input type="search" placeholder="Unit, tower, floor..." value="'+esc(f.q)+'" onchange="RK.inv.q=this.value;renderPage()">'
-    +'<select onchange="RK.inv.tower=this.value;renderPage()"><option value="">All towers</option>'+uniq(all.map(function(u){ return u.tower; })).map(function(t){ return '<option'+(f.tower===t?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+'</select>'
-    +'<select onchange="RK.inv.cfg=this.value;renderPage()"><option value="">All configurations</option>'+d.cfg.map(function(c){ return '<option value="'+c.id+'"'+(f.cfg===c.id?' selected':'')+'>'+esc(c.name)+'</option>'; }).join('')+'</select>'
-    +'<select onchange="RK.inv.status=this.value;renderPage()"><option value="">Any status</option>'+['Available','On Hold','Under Verification'].map(function(s){ return '<option'+(f.status===s?' selected':'')+'>'+s+'</option>'; }).join('')+'</select>'
-    +'<button class="btn btn-sm" onclick="rkInvExport(\''+id+'\')"><i class="fa-solid fa-file-excel"></i> Export</button>'
-    +(rkCanPropose(id)?'<button class="btn btn-sm" onclick="rkInvImportAsk(\''+id+'\')"><i class="fa-solid fa-file-import"></i> Import Excel</button>':'')+'</div>';
-  const body=rows.length?'<div class="rk-wrap"><table class="rk-t"><tr><th>Unit</th><th>Tower</th><th>Floor</th><th>Configuration</th><th>Area</th><th>Facing / view</th><th>Base price</th><th>Quoted price</th><th>Status</th><th></th><th></th></tr>'
-    +rows.map(function(u){ return '<tr><td><b>'+esc(u.unit_no)+'</b></td><td>'+rkVal(u.tower)+'</td><td>'+rkVal(u.floor)+'</td><td>'+rkVal(cfgName(u.configuration_id))+'</td><td>'+rkVal(u.area,function(x){ return rkNum(x)+' sq ft'; })+'</td>'
-      +'<td>'+esc([u.facing,u.view].filter(Boolean).join(' / ')||'—')+'</td><td>'+rkVal(u.base_price,rkInr)+'</td><td>'+rkVal(u.quoted_price,rkInr)+'</td><td>'+esc(u.status)+(u.note?'<div style="font-size:12px;color:#64748b">'+esc(u.note)+'</div>':'')+'</td>'
-      +'<td>'+rkChip(u)+rkChgChip(d,u.id)+'</td><td>'+rkRowBtns('units',u,id)+'</td></tr>'; }).join('')+'</table></div>'
-    :'<div class="rk-empty">'+(all.length?'No unit matches these filters.':'No free units recorded.')+'</div>';
-  return rkSec('Inventory - free units','fa-table-cells','units',id,'<div style="font-size:12.5px;color:#64748b;margin:-4px 0 10px">'+rows.length+' of '+all.length+' free units'+(last?' · last updated '+esc(fmtDate(last)):'')+' · units Farvision shows as booked are hidden'+((d.p.fv_project_ids||[]).length?'':' (this project is not linked to Farvision yet)')+'</div>'+bar+body+rkNewPend(d,'units'));
-}
-function rkTabAmenities(d,id){
-  const rows=rkShow(d.am), g={}; rows.forEach(function(a){ (g[a.category||'Other']=g[a.category||'Other']||[]).push(a); });
-  const order=(RK.lists.amenity||[]).concat(Object.keys(g)).filter(function(k,i,a){ return g[k]&&a.indexOf(k)===i; });
-  const body=rows.length?order.map(function(k){ return '<div style="font-weight:600;font-size:13px;margin:10px 0 6px">'+esc(k)+'</div><table class="rk-t">'+g[k].map(function(a){ return '<tr><td style="width:30%"><b>'+esc(a.name)+'</b></td><td>'+esc(a.description||'')+(a.place?'<div style="font-size:12px;color:#64748b">'+esc(a.place)+'</div>':'')+'</td><td>'+esc(a.status||'')+'</td><td>'+rkChip(a)+rkChgChip(d,a.id)+'</td><td>'+rkRowBtns('amenities',a,id)+'</td></tr>'; }).join('')+'</table>'; }).join('')
-    :'<div class="rk-empty">'+(RK.cust&&d.am.length?'Amenities are pending verification.':'No amenities recorded.')+'</div>';
-  return rkSec('Amenities','fa-person-swimming','amenities',id,body+rkNewPend(d,'amenities'));
-}
-function rkTabLocation(d,id){
-  const loc=rkShow(d.loc);
-  let h=rkSec('Address','fa-location-dot','locations',id,(loc.length?loc.map(function(l){ return '<div style="display:flex;gap:10px;align-items:flex-start;margin:0 0 10px"><div style="flex:1;font-size:13.5px"><div style="white-space:pre-wrap">'+esc(l.address||'')+(l.pin?' - '+esc(l.pin):'')+rkCopyBtn([l.address,l.pin].filter(Boolean).join(' - '))+'</div>'
-      +(l.directions?'<div style="font-size:12.5px;color:#475569;margin-top:4px;white-space:pre-wrap">'+esc(l.directions)+'</div>':'')
-      +((l.maps_url||(l.lat&&l.lng))?'<a href="'+esc(l.maps_url||('https://www.google.com/maps?q='+l.lat+','+l.lng))+'" target="_blank" rel="noopener" style="font-size:13px"><i class="fa-solid fa-map"></i> Open in Google Maps</a>'+rkCopyBtn(l.maps_url||(l.lat+','+l.lng)):'')
-      +'</div>'+rkChip(l)+rkChgChip(d,l.id)+rkRowBtns('locations',l,id)+'</div>'; }).join(''):'<div class="rk-empty">No address recorded.</div>')+rkNewPend(d,'locations'));
-  const lm=rkShow(d.lm), g={}; lm.forEach(function(a){ (g[a.category||'Landmark']=g[a.category||'Landmark']||[]).push(a); });
-  const order=(RK.lists.landmark||[]).concat(Object.keys(g)).filter(function(k,i,a){ return g[k]&&a.indexOf(k)===i; });
-  h+=rkSec('Nearby','fa-signs-post','landmarks',id,(lm.length?'<div class="rk-wrap"><table class="rk-t"><tr><th>Place</th><th>Kind</th><th>Distance</th><th>Travel time</th><th>Checked</th><th></th><th></th></tr>'+order.map(function(k){ return g[k].map(function(a){
-      return '<tr><td><b>'+esc(a.name)+'</b>'+(a.travel_note?'<div style="font-size:12px;color:#64748b">'+esc(a.travel_note)+'</div>':'')+'</td><td>'+esc(k)+'</td><td>'+(a.distance_km!=null?rkNum(a.distance_km)+' km':rkNA())+'</td><td>'+(a.travel_min!=null?rkNum(a.travel_min)+' min':rkNA())+'</td><td>'+(a.verified_at?esc(fmtDate(a.verified_at)):'—')+'</td><td>'+rkChip(a)+rkChgChip(d,a.id)+'</td><td>'+rkRowBtns('landmarks',a,id)+'</td></tr>'; }).join(''); }).join('')+'</table></div>'
-    :'<div class="rk-empty">No nearby places recorded.</div>')+rkNewPend(d,'landmarks'));
-  return h;
-}
-function rkTabSales(d,id){
-  const rows=rkShow(d.notes);
-  const block=function(list,title,cls){ const g={}; list.forEach(function(n){ (g[n.kind]=g[n.kind]||[]).push(n); });
-    return '<div class="rk-sec" style="margin:0'+(cls?';'+cls:'')+'"><h4>'+title+'</h4>'+(list.length?Object.keys(RK_NOTE_KIND).filter(function(k){ return g[k]; }).map(function(k){
-      return '<div style="font-weight:600;font-size:12.5px;color:#475569;margin:10px 0 4px;text-transform:uppercase;letter-spacing:.03em">'+RK_NOTE_KIND[k]+'</div>'+g[k].map(function(n){
-        return '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #f1f5f9"><div style="flex:1;font-size:13.5px">'+(n.title?'<b>'+esc(n.title)+'</b><br>':'')+'<span style="white-space:pre-wrap">'+esc(n.body)+'</span>'+rkCopyBtn(n.body)+'</div>'+rkChip(n)+rkChgChip(d,n.id)+rkRowBtns('sales_notes',n,id)+'</div>'; }).join(''); }).join('')
-      :'<div class="rk-empty">Nothing recorded.</div>')+'</div>'; };
-  let h=rkSec('Sales information','fa-bullhorn','sales_notes',id,'<div class="rk-two">'+block(rows.filter(function(n){ return !n.internal; }),'<i class="fa-solid fa-user" style="color:#16a34a"></i> Customer-facing')
-    +(RK.cust?'':block(rows.filter(function(n){ return n.internal; }),'<i class="fa-solid fa-lock" style="color:#7c3aed"></i> Internal - do not share with customers','background:#faf5ff'))+'</div>'+rkNewPend(d,'sales_notes'));
-  const bank=rkShow(d.bank);
-  h+=rkSec('Bank approvals','fa-building-columns','bank_approvals',id,(bank.length?'<table class="rk-t"><tr><th>Bank</th><th>Status</th><th>Reference</th><th></th><th></th></tr>'+bank.map(function(b){ return '<tr><td><b>'+esc(b.bank)+'</b></td><td>'+rkVal(b.status)+'</td><td>'+rkVal(b.reference)+'</td><td>'+rkChip(b)+rkChgChip(d,b.id)+'</td><td>'+rkRowBtns('bank_approvals',b,id)+'</td></tr>'; }).join('')+'</table>':'<div class="rk-empty">No bank approvals recorded.</div>')+rkNewPend(d,'bank_approvals'));
-  return h;
-}
-function rkTabDocs(d,id){
-  const rows=rkShow(d.docs), g={}; rows.forEach(function(x){ (g[x.category]=g[x.category]||[]).push(x); });
-  const order=(RK.lists.document||[]).concat(Object.keys(g)).filter(function(k,i,a){ return g[k]&&a.indexOf(k)===i; });
-  const body=rows.length?'<table class="rk-t"><tr><th>Document</th><th>Category</th><th>Version</th><th>Added</th><th></th><th></th></tr>'+order.map(function(k){ return g[k].map(function(x){
-      return '<tr'+(x.internal?' class="int"':'')+'><td>'+(x.s3_key?'<a href="javascript:void(0)" onclick="rkOpenDoc(\''+id+'\',\''+x.id+'\')"><i class="fa-regular fa-file"></i> '+esc(x.title)+'</a>':esc(x.title)+' <span class="rk-na">(no file)</span>')+rkInt(x)+'</td><td>'+esc(k)+'</td><td>'+esc(x.version||'')+'</td><td>'+esc(fmtDate(x.entered_at))+(x.entered_by?'<div style="font-size:11.5px;color:#64748b">'+esc(x.entered_by)+'</div>':'')+'</td><td>'+rkChip(x)+rkChgChip(d,x.id)+'</td><td>'+rkRowBtns('documents',x,id)+'</td></tr>'; }).join(''); }).join('')+'</table>'
-    :'<div class="rk-empty">No documents uploaded.</div>';
-  return rkSec('Documents','fa-folder-open','documents',id,body+rkNewPend(d,'documents'));
-}
 window.rkOpenDoc=function(pid,did){ const x=(RK.proj[pid].docs||[]).find(function(r){ return r.id===did; }); if(x&&x.s3_key) s3OpenSigned(x.s3_key,x.file_name||x.title); };
 
 /* ---------------------------------------------------------------- proposing a change */
-function rkFields(tbl){ return RK_F[tbl].concat(tbl==='assignments'?[]:RK_COMMON); }
+// 23 Nov 2026: the edit form shows only the record's own fields (Ayush: editing should be easy)
+function rkFields(tbl){ return RK_F[tbl].filter(function(f){ return f[0]!=='sort'; }); }
 function rkRec(tbl,id,pid){ if(tbl==='projects') return (RK.proj[id]&&RK.proj[id].p)||(RK.projects||[]).find(function(p){ return p.id===id; });
   const d=RK.proj[pid]; if(!d) return null; const m={locations:'loc',configurations:'cfg',charges:'chg',payment_plans:'plan',offers:'off',units:'units',amenities:'am',landmarks:'lm',sales_notes:'notes',bank_approvals:'bank',documents:'docs',assignments:'team'};
   return (d[m[tbl]]||[]).find(function(r){ return r.id===id; }); }
@@ -47018,12 +45739,9 @@ window.rkEdit=async function(tbl,id,pid){
   const r=id?rkRec(tbl,id,pid):null;
   if(id&&!r){ toast('This record is not loaded - refresh the page','err'); return; }
   const pend=id&&pid&&RK.proj[pid]?rkChgFor(RK.proj[pid],id):[];
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> '+(id?'Propose a change - ':'Add ')+esc(RK_TBL_LABEL[tbl])+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body"><div class="rk-pend" style="margin:0 0 12px"><i class="fa-solid fa-shield-halved"></i> Nothing changes until an approver accepts it. Until then the current approved value stays on screen, marked "Change pending".</div>'
-    +(pend.length?'<div class="rk-pend" style="margin:0 0 12px;background:#fffbeb;border-color:#fcd34d;color:#92400e">'+pend.length+' change(s) to this are already waiting for approval.</div>':'')
-    +'<div class="rk-form" id="rkForm">'+rkFields(tbl).map(function(f){ return rkInput(f,r?r[f[0]]:(f[2]==='bool'?false:null),pid); }).join('')
-    +'<hr><label class="w">Reason for this change<input type="text" id="rkReason" placeholder="e.g. new price list from 20 Nov"></label></div></div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="rkSave" onclick="rkSave(\''+tbl+'\','+(id?'\''+id+'\'':'null')+','+(pid?'\''+pid+'\'':'null')+')"><i class="fa-solid fa-paper-plane"></i> Send for approval</button></div>','lg');
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit '+esc(RK_TBL_LABEL[tbl]).toLowerCase()+(r&&(r.name||r.title)?' - '+esc(r.name||r.title):'')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><div class="rk-form" id="rkForm">'+rkFields(tbl).map(function(f){ return rkInput(f,r?r[f[0]]:(f[2]==='bool'?false:null),pid); }).join('')+'</div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="rkSave" onclick="rkSave(\''+tbl+'\','+(id?'\''+id+'\'':'null')+','+(pid?'\''+pid+'\'':'null')+')"><i class="fa-solid fa-check"></i> Save</button></div>','lg');
 };
 window.rkSave=async function(tbl,id,pid){
   const btn=$('rkSave'), form=$('rkForm'); if(!form) return;
@@ -47039,21 +45757,23 @@ window.rkSave=async function(tbl,id,pid){
   });
   if(tbl==='documents'&&!id&&!file) missing.push('File');
   if(missing.length){ toast('Please fill: '+missing.join(', '),'warn'); return; }
-  btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending...';
+  btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
   try{
     if(file){
       const up=await uploadFileToS3('portal/reckoner/'+(pid||'new')+'/'+s3Stamp()+'_'+s3SafeName(file.name),file);
       if(up.error) throw up.error;
       Object.assign(payload,{s3_key:up.data.path,file_name:file.name,mime:file.type||null,size_bytes:file.size});
     }
-    if(id&&!Object.keys(payload).length){ toast('Nothing was changed','warn'); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send for approval'; return; }
+    if(id&&!Object.keys(payload).length){ toast('Nothing was changed','warn'); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Save'; return; }
     if(!id&&tbl!=='projects') payload.project_id=pid;
     const res=await RKS().rpc('propose',{p_tbl:tbl,p_record:id,p_op:id?'update':'insert',p_payload:payload,p_reason:($('rkReason')||{}).value||null,p_source:payload.source||null,p_project:tbl==='projects'?id:pid,p_batch:null});
     if(res.error) throw res.error;
-    closeModal(); toast('Sent for approval','ok'); RK.pendN++;
+    if(rkCanApprove()){ const ok=await RKS().rpc('review',{p_id:res.data,p_approve:true,p_remarks:'Saved by the editor'}); if(ok.error) throw ok.error; toast('Saved','ok'); }
+    else { toast('Sent for approval','ok'); RK.pendN++; }
+    closeModal();
     if(pid) await rkDetail(pid,true);
     renderPage();
-  }catch(e){ toast(String((e&&e.message)||e),'err'); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send for approval'; }
+  }catch(e){ toast(String((e&&e.message)||e),'err'); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Save'; }
 };
 window.rkArchive=async function(tbl,id,pid){
   const r=rkRec(tbl,id,pid); if(!r) return;
@@ -47134,231 +45854,562 @@ window.rkVerifyAll=async function(tbl,pid){
   if(!ok) return; rkVerify(tbl,rows.map(function(x){ return x.id; }),pid);
 };
 /* =============================================================================================
-   RECKONER, part 2 (21 Nov 2026): Pending Verifications, Audit Log, Compare, Roles. See 60-reckoner.js.
+   RECKONER - THE PAGE (23 Nov 2026, built from the approved Claude Design "Reckoner Design", Ayush).
+   Design: "Claude outputs/Reckoner/design/project/Project.dc.html" (canvas https://claude.ai/artifact/EvFMD4CEFqYzzCrqrKKBTC).
+     1. every project on one line, scrolling sideways, most qualified leads first
+     2. name, place, status  |  one box for search OR a budget ("40 L 2 BHK")  |  pencil (editors), Download, Print icons
+     3. first screen: Flats & car parking (prices + big parking tiles + other charges) | Key facts | Offers + Why buy
+     4. Location | Amenities | Availability & booking
+     5. Flat details, then Nearby (one line per kind of place, nearest first)
+   No staff-only notes on this page. No adding or deleting.
+   EDIT (pencil, rkCanApprove = super admins + Sales Heads): every changeable value gets a dashed outline and is typed over
+   in place; Save sends each changed record through rk.propose + rk.review (so it is in the change history), Cancel drops it.
+   Data and the edit form helpers: 60-reckoner.js.
    ============================================================================================= */
-function rkFieldLabel(tbl,col){ const f=(RK_F[tbl]||[]).concat(RK_COMMON).find(function(x){ return x[0]===col; }); return f?f[1]:col.replace(/_/g,' '); }
-function rkFmtVal(tbl,col,v){
-  if(v==null||v==='') return '<span class="rk-na">empty</span>';
-  if(typeof v==='boolean') return v?'Yes':'No';
-  if(col==='configuration_id'){ const c=(RK.cfg||[]).find(function(x){ return x.id===v; }); return esc(c?c.name:'(configuration)'); }
-  if(col==='project_id') return esc(rkProjName(v));
-  if(col==='fv_project_ids'){ return esc((Array.isArray(v)?v:[v]).map(function(i){ const p=(RK.fv||[]).find(function(x){ return String(x.id)===String(i); }); return p?p.name:'#'+i; }).join(', ')); }
-  if(col==='s3_key') return '<i class="fa-regular fa-file"></i> file';
-  if(col==='kind'&&tbl==='charges') return esc(RK_CHARGE_KIND[v]||v);
-  if(col==='kind'&&tbl==='sales_notes') return esc(RK_NOTE_KIND[v]||v);
-  if(col==='unit') return esc(RK_PER[v]||v);
-  if(col==='size_bytes') return esc(fmtBytes(v));
-  if(/price|amount|charges$/.test(col)&&typeof v==='number') return rkInr(v);
-  return '<span style="white-space:pre-wrap">'+esc(String(v))+'</span>';
+const RK_BU={'Dream World City':3,'Dream Exotica':4,'Dream Gurukul':70,'Dream Ananta':171,'Dream Valley':6,'Dream EcoCity':5,'Dream One':2,'Dream Residency Manor':8,'Dream EcoCity Bungalows':68,'Dream Palazzo':7,'Dream Diamond':138};
+// qualified leads, last 90 days, read 23 Nov 2026 - used until rk.lead_counts() exists (then read live)
+const RK_LEADS_SNAP={3:1125,4:236,70:229,171:147,6:70,5:56,2:50,8:18,68:7,7:4,138:0};
+RK.leads=null; RK.cur=null; RK.q=''; RK.edit=false;
+const RK_LMORDER=['Connectivity','Metro Station','Railway Station','Airport','School','Hospital','Shopping','Dining','Highway','Landmark'];
+
+const RK4_CSS='<style>'
++'.rk4{font-family:Inter,system-ui,sans-serif;color:#0f172a;display:flex;flex-direction:column;gap:12px}'
++'.rk4-strip{display:flex;flex-wrap:nowrap;gap:2px;background:#e8ecf0;border-radius:10px;padding:3px;overflow-x:auto;scrollbar-width:thin}'
++'.rk4-strip button{border:0;background:transparent;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;color:#475569;white-space:nowrap;flex:0 0 auto;cursor:pointer;font-family:inherit}'
++'.rk4-strip button:hover{color:#0f172a}.rk4-strip button.on{background:#fff;color:#0f172a;font-weight:700;box-shadow:0 1px 2px rgba(15,23,42,.12)}.rk4-strip button.empty{color:#94a3b8;font-weight:500}'
++'.rk4-body{display:flex;flex-direction:column;gap:12px}#rk4Bud:empty,#rk4DetSlot:empty{display:none}'
++'.rk4-head{display:flex;align-items:center;gap:10px 12px;flex-wrap:nowrap;min-height:36px;min-width:0}'
++'.rk4-head h1{margin:0;font-size:23px;font-weight:800;letter-spacing:-.02em;white-space:nowrap;flex:0 0 auto}'
++'.rk4-place{color:#475569;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:40px;flex:0 1 auto}'
++'.rk4-fact.av>span:last-child{font-weight:500;color:#0f172a;line-height:1.45}.rk4-fact.av>span:last-child b{font-weight:800;color:#0f766e}'
++'.rk4-fg{margin:10px 0 2px;padding:9px 8px 7px;background:#f0fdfa;border:1px solid #ccfbf1;border-radius:10px;overflow-x:auto}.rk4-fg .cap{font-size:12.5px;font-weight:700;color:#0f766e;margin:0 0 7px;display:flex;align-items:center;gap:6px}'
++'.rk4-fg table{border-collapse:separate;border-spacing:2px;font-size:12px;width:100%;margin:-2px;table-layout:auto}.rk4-fg th,.rk4-fg td{padding:2px 1px;min-width:22px;text-transform:none;letter-spacing:0;text-align:center;white-space:nowrap;border-radius:6px;line-height:1.4}'
++'.rk4-fg th{color:#64748b;font-weight:600;font-size:10.5px}.rk4-fg td{background:#fff;border:1px solid #99f6e4;color:#0f766e;font-weight:800;font-size:13px}.rk4-fg td.no{background:transparent;border-color:transparent;color:#cbd5e1;font-weight:400}'
++'.rk4-fg td:first-child,.rk4-fg th:first-child{text-align:left;background:transparent;border-color:transparent;color:#0f172a;font-weight:700;font-size:12.5px;padding-left:0}'
++'.rk4-fl{display:block;grid-column:1/-1;font-size:12px;color:#0e7490;line-height:1.45;margin-top:-2px}.rk4-fl b{font-weight:700;color:#155e75}.rk4-fl i{font-style:normal;font-weight:700}'
++'.rk4-pnote{font-size:12.5px;color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;border-radius:8px;padding:6px 10px;margin:0 0 8px}'
++'.rk4-fact.hl{background:#f0fdf4;border-radius:8px;padding:6px 8px;margin:2px -8px;border-bottom-color:transparent}.rk4-fact.hl>span:first-child{color:#166534;font-weight:600}.rk4-fact.hl>span:last-child{color:#14532d}'
++'.rk4-strip button.off{opacity:.4;cursor:not-allowed;text-decoration:line-through}'
++'.rk4-badge{background:#dcfce7;color:#166534;font-size:12px;font-weight:700;border-radius:999px;padding:4px 10px;white-space:nowrap}'
++'.rk4-tools{margin-left:auto;display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0}'
++'.rk4-q{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #d6dde4;border-radius:9px;padding:0 11px;height:36px;width:250px;min-width:150px;flex:0 1 250px;box-sizing:border-box}'
++'.rk4-q input{border:0;outline:none;font:inherit;font-size:13px;width:100%;background:transparent;color:#0f172a}'
++'.rk4-ib{width:36px;height:36px;flex:0 0 36px;border:1px solid #d6dde4;border-radius:9px;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#334155;font-size:14px}'
++'.rk4-ib:hover{background:#f8fafc}.rk4-ib.pen{border-color:#0f766e;background:#f0fdfa;color:#0f766e}'
++'.rk4-editbar{margin-left:auto;display:flex;align-items:center;gap:10px}'
++'.rk4-editbar span{font-size:13px;color:#0f766e;font-weight:600}'
++'.rk4-btn{height:36px;padding:0 14px;border:1px solid #d6dde4;border-radius:9px;background:#fff;color:#0f172a;font:inherit;font-size:13px;font-weight:600;cursor:pointer}'
++'.rk4-btn.pri{border:0;background:#0f766e;color:#fff;font-weight:700;padding:0 16px}'
++'.rk4-row{display:grid;gap:12px;align-items:stretch}'
++'.rk4-row.r1{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr)}'
++'.rk4-row.r2{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr)}.rk4-row.r2>[data-sec^="amenities"]{grid-column:span 2}'
++'.rk4-stack{display:flex;flex-direction:column;gap:12px;min-width:0}.rk4-stack>section:last-child{flex:1}'
++'.rk4-row>section{display:flex;flex-direction:column;min-width:0}'
++'.rk4-map{display:inline-flex;align-items:center;gap:7px;margin-top:auto;background:#0f766e;color:#fff!important;border-radius:9px;padding:8px 14px;font-size:13px;font-weight:700;text-decoration:none!important;align-self:flex-start}'
++'.rk4-map:hover{background:#115e59}'
++'.rk4-tile.book{background:#eff6ff;border-color:#bfdbfe}.rk4-tile.book .k{color:#1e40af}.rk4-tile .v.sm{font-size:15px;white-space:normal}.rk4-tile .n2{font-size:11.5px;color:#475569;margin-top:1px;line-height:1.3}'
++'.rk4-tile.none{background:#fffbeb;border-color:#fde68a}.rk4-tile.none .k{color:#92400e}'
++'.rk4-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:12px 15px}'
++'.rk4-card h2{margin:0 0 6px;padding:0 0 7px;border-bottom:2px solid #0f766e;font-size:13px;font-weight:800;color:#0f172a;text-transform:uppercase;letter-spacing:.05em}'
++'.rk4-off{background:#fffbeb;border-color:#fde68a}.rk4-off h2{color:#78350f;border-bottom-color:#f59e0b}'
++'.rk4-pt{display:grid;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid #f1f5f9}'
++'.rk4-pt.h{font-size:11.5px;font-weight:700;color:#475569;padding:2px 0 5px;border-bottom:1px solid #e2e8f0}'
++'.rk4-pt .t{font-size:15px;font-weight:700}.rk4-pt .t.rep{font-size:14px;font-weight:600;color:#94a3b8}'
++'.rk4-pt .z{font-size:14px;color:#334155}'
++'.rk4-pt .p{font-size:19px;font-weight:800}.rk4-pt .p.ask{font-size:13.5px;font-weight:600;color:#b45309}'
++'.rk4-pt .s{display:block;font-size:12px;color:#64748b;margin-top:2px;line-height:1.35}'
++'.rk4-pt .w{font-size:15px;font-weight:600;color:#334155}'
++'.rk4-park{margin-top:10px}'
++'.rk4-tiles{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px}'
++'.rk4-tile{background:#f0fdfa;border:1px solid #99f6e4;border-radius:11px;padding:8px 12px}'
++'.rk4-tile .k{font-size:12.5px;color:#115e59;font-weight:700}.rk4-tile .v{font-size:22px;font-weight:800;margin-top:2px;white-space:nowrap}'
++'.rk4-nopark{background:#fffbeb;border:1px solid #fde68a;border-radius:11px;padding:10px 12px;font-size:14px;color:#92400e;font-weight:600}'
++'.rk4-chg{display:grid;grid-template-columns:1fr auto;gap:10px;padding:7px 0 0;font-size:13.5px}'
++'.rk4-fact{display:grid;grid-template-columns:104px 1fr;gap:10px;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:13.5px}'
++'.rk4-reg{display:block;font-size:12px;overflow-wrap:anywhere;letter-spacing:-.02em}'
++'.rk4-fact>span:first-child{color:#64748b}.rk4-fact>span:last-child{font-weight:700;line-height:1.4;overflow-wrap:anywhere;min-width:0}'
++'.rk4-li{display:flex;gap:9px;padding:3px 0;font-size:13.5px;line-height:1.45}'
++'.rk4-li .d{width:6px;height:6px;border-radius:3px;background:#0f766e;margin-top:7px;flex:0 0 6px}'
++'.rk4-li .n{color:#0f766e;font-weight:800;flex:0 0 auto}'
++'.rk4-am{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 10px;font-size:13.5px;margin-top:4px}'
++'.rk4-amt{display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:7px 10px;font-weight:600;color:#1e293b}'
++'.rk4-amt>i{color:#0f766e;font-size:11px;flex:0 0 auto}'
++'.rk4-row.r0{grid-template-columns:1fr}.rk4-row.r1b{grid-template-columns:repeat(3,minmax(0,1fr))}'
++'.rk4-cfgs{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:10px;margin-top:4px}'
++'.rk4-cfg{border:1px solid #e2e8f0;border-radius:11px;padding:9px 12px;background:#fcfdfd}'
++'.rk4-cfg .h{font-size:15px;font-weight:800;padding-bottom:6px;border-bottom:1px solid #e2e8f0;margin-bottom:2px;display:flex;flex-direction:column}.rk4-cfg .h>.sz{font-size:12px;font-weight:500;color:#64748b}'
++'.rk4-cfg .r{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:5px 0;border-bottom:1px solid #f1f5f9}.rk4-cfg .r:last-child{border-bottom:0}'
++'.rk4-cfg .z{display:flex;flex-direction:column;line-height:1.3}.rk4-cfg .z>b{font-size:13.5px;color:#0f172a}.rk4-cfg .z>i{font-style:normal;font-size:12px;color:#64748b}'
++'.rk4-tile.long .v{font-size:17px;white-space:nowrap}'
++'.rk4-cfg .lb{display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;padding:2px 0 1px}.rk4-cfg .r{padding:7px 0}.rk4-cfg{display:flex;flex-direction:column}'
++'.rk4-sub{display:flex;flex-direction:column;gap:3px;margin-top:4px}.rk4-sub>span{position:relative;padding-left:12px;font-size:13px;color:#334155;line-height:1.4}.rk4-sub>span:before{content:"";position:absolute;left:0;top:7px;width:5px;height:5px;border-radius:3px;background:#94a3b8}'
++'.rk4-closes{margin:10px 0 0;border-top:1px solid #f1f5f9;padding-top:6px;display:flex;flex-direction:column}'
++'.rk4-close{display:grid;grid-template-columns:18px 1fr auto;gap:8px;align-items:baseline;font-size:13px;padding:3px 0}.rk4-close>i{color:#0f766e;font-size:12px;text-align:center}.rk4-close>b{font-size:12.5px;color:#0f172a;white-space:nowrap}'
++'.rk4-cfg .xz{font-size:12.5px;color:#475569}.rk4-cfg .p{font-size:16px;font-weight:800;white-space:nowrap}.rk4-cfg .p.ask{font-size:13px;color:#b45309}'
++'.rk4-det{display:grid;grid-template-columns:170px 1fr;gap:12px;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:13.5px}'
++'.rk4-det>span:last-child{color:#334155;line-height:1.45}'
++'.rk4-nb{display:grid;grid-template-columns:130px 1fr;gap:12px;align-items:start;padding:6px 0;border-bottom:1px solid #f1f5f9}'
++'.rk4-nb>span{font-size:13px;font-weight:700;color:#334155;padding-top:4px}'
++'.rk4-chips{display:flex;flex-wrap:wrap;gap:6px}'
++'.rk4-chip{display:inline-flex;align-items:baseline;gap:6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:3px 9px;font-size:13px}'
++'.rk4-chip b{color:#0f766e;font-size:12px;white-space:nowrap}'
++'.rk4-none{font-size:14px;color:#64748b}'
++'.rk4-bud{background:#fff;border:1px solid #99f6e4;border-radius:14px;padding:12px 16px}'
++'.rk4-bud h2{margin:0 0 6px;font-size:12px;font-weight:700;color:#0f766e;text-transform:uppercase;letter-spacing:.06em;display:flex;gap:10px}'
++'.rk4-bud .r{display:grid;grid-template-columns:1.2fr 1fr 1fr .8fr 1fr 1.4fr;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;font-size:13.5px;cursor:pointer;align-items:baseline}'
++'.rk4-bud .r:hover{background:#f8fafc}.rk4-bud .r.h{font-size:11.5px;color:#64748b;font-weight:600;cursor:default}'
++'.rk4-hl{background:#fef08a;border-radius:2px}'
++'.rk4-v.on{outline:1.5px dashed #14b8a6;outline-offset:2px;border-radius:4px;background:#f0fdfa;cursor:text;min-width:24px;display:inline-block}'
++'.rk4-v.on:empty:before{content:"add";color:#94a3b8;font-weight:400}'
++'.rk4-v.on:focus{outline-style:solid;background:#fff}'
++'.rk4-v.chg{outline-color:#f59e0b;background:#fffbeb}'
++'.rk4.capturing .rk4-tools,.rk4.capturing .rk4-strip{display:none!important}'
+// tablet: two cards a row, Offers and Why buy side by side under them
++'@media(max-width:1100px){.rk4-row.r1{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.rk4-row.r1>.rk4-stack{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.rk4-row.r2{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.rk4-row.r2>[data-sec^="amenities"]{grid-column:span 1}.rk4-row.r1b{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.rk4-cfgs{grid-auto-flow:row;grid-template-columns:repeat(2,minmax(0,1fr))}.rk4-q{width:220px}.rk4-tile .v{font-size:20px}}'
+// phone: one column, in the order a call needs it
++'@media(max-width:760px){.rk4-row.r1,.rk4-row.r2,.rk4-row.r1>.rk4-stack{display:flex;flex-direction:column;gap:12px}.rk4-am{grid-template-columns:1fr 1fr}'
++'.rk4-head{flex-wrap:wrap}.rk4-head h1{font-size:20px}.rk4-tools{margin-left:0;width:100%}.rk4-q{flex:1;width:auto}.rk4-editbar{margin-left:0;width:100%;flex-wrap:wrap}'
++'.rk4-pt{grid-template-columns:1fr 1fr 1.3fr!important}.rk4-pt .w,.rk4-pt.h>span:nth-child(4){display:none}.rk4-tile .v{font-size:18px}'
++'.rk4-nb,.rk4-det{grid-template-columns:1fr;gap:4px}.rk4-nb>span{padding-top:0}.rk4-fact{grid-template-columns:96px 1fr}.rk4-bud .r{grid-template-columns:1fr 1fr 1fr}.rk4-bud .r>:nth-child(n+4){display:none}}'
++'@media print{.sidebar,.topbar,.sb-backdrop,.rk4-strip,.rk4-tools,.rk4-bud{display:none!important}.main{margin:0!important;padding:0!important}.view{padding:0!important}.rk4-card{break-inside:avoid}}'
++'</style>';
+
+/* ---------------------------------------------------------------- order by leads */
+async function rkLeads(){
+  if(RK.leads) return RK.leads;
+  let m=Object.assign({},RK_LEADS_SNAP);
+  try{ const r=await RKS().rpc('lead_counts'); if(!r.error&&Array.isArray(r.data)&&r.data.length){ m={}; r.data.forEach(function(x){ m[x.bu_id]=Number(x.q90)||0; }); } }catch(e){}
+  RK.leads=m; return m;
 }
-function rkChgLabel(c,cur){ const r=Object.assign({},cur||{},c.previous||{},c.payload||{}); return r.name||r.title||r.unit_no||r.stage||r.bank||r.email||(r.address?String(r.address).slice(0,50):'')||(r.body?String(r.body).slice(0,50):'')||''; }
-async function rkCurrent(rows){
-  const by={}; rows.forEach(function(c){ if(c.record_id) (by[c.tbl]=by[c.tbl]||[]).push(c.record_id); });
-  const cur={};
-  await Promise.all(Object.keys(by).map(function(t){ const ids=Array.from(new Set(by[t]));
-    return RKS().from(t).select('*').in('id',ids.slice(0,300)).then(function(r){ (r.data||[]).forEach(function(x){ cur[x.id]=x; }); }); }));
-  return cur;
+function rkHasData(p){ const n=(RK.stats[p.id]||{}).n||{}; return !!(n.configurations||n.charges||n.amenities||n.locations); }
+/* ORDER AND DISABLED PROJECTS (25 Nov 2026, Ayush): the strip runs in this fixed order; Dream Diamond and Dream Excellency are
+   disabled (shown greyed at the end, not clickable). Any other project follows, by qualified leads. */
+const RK_ORDER=['Dream World City','Dream Ananta','Dream Gurukul','Dream Exotica','Dream One','Dream EcoCity','Dream Valley','Dream Residency Manor','Dream EcoCity Bungalows','Dream Palazzo'];
+const RK_OFF=['Dream Diamond','Dream Excellency'];
+function rkOff(p){ return RK_OFF.indexOf(p.name)!==-1; }
+function rkOrdered(){
+  const L=RK.leads||RK_LEADS_SNAP, pos=function(p){ const i=RK_ORDER.indexOf(p.name); return rkOff(p)?2000:i===-1?1000:i; };
+  return (RK.projects||[]).slice().sort(function(a,b){
+    const oa=pos(a), ob=pos(b); if(oa!==ob) return oa-ob;
+    const ha=rkHasData(a)?1:0, hb=rkHasData(b)?1:0; if(ha!==hb) return hb-ha;
+    const la=L[RK_BU[a.name]]||0, lb=L[RK_BU[b.name]]||0; if(la!==lb) return lb-la;
+    return a.name.localeCompare(b.name); });
 }
-const RK_OP={insert:['New','#16a34a','fa-plus'],update:['Change','#2563eb','fa-pen'],archive:['Remove','#dc2626','fa-box-archive']};
-function rkDiff(c,cur){
-  const keys=Object.keys(c.payload||{}).filter(function(k){ return !(c.tbl!=='projects'&&k==='project_id')&&k!=='file_name'&&k!=='mime'; });
-  if(c.op==='archive') return '<div style="font-size:13px;color:#991b1b">Remove this '+esc((RK_TBL_LABEL[c.tbl]||c.tbl).toLowerCase())+' (it is kept in the history).</div>';
-  if(!keys.length) return '';
-  return '<table class="rk-t" style="margin-top:6px"><tr><th style="width:28%">Field</th>'+(c.op==='update'?'<th>Now</th>':'')+'<th>'+(c.op==='update'?'Proposed':'Value')+'</th></tr>'
-    +keys.map(function(k){ const old=c.op==='update'?(c.previous&&k in c.previous?c.previous[k]:(cur&&cur[k])):null;
-      return '<tr><td style="color:#475569">'+esc(rkFieldLabel(c.tbl,k))+'</td>'+(c.op==='update'?'<td style="color:#64748b">'+rkFmtVal(c.tbl,k,old)+'</td>':'')+'<td><b>'+rkFmtVal(c.tbl,k,c.payload[k])+'</b></td></tr>'; }).join('')+'</table>';
+function rkTabName(n){ return n.replace(/^Dream /,'').replace('Residency Manor','Manor').replace('EcoCity Bungalows','Eco Bungalows').replace('Gateway Pailan','Gateway'); }
+
+/* ---------------------------------------------------------------- page */
+VIEWS.reckoner=async function(v,seg){
+  setCrumb(['Sales','Reckoner']);
+  const s0=seg&&seg[0]||'', head=RK4_CSS;
+  try{
+    if(!RK.projects){ v.innerHTML=head+'<div class="loader"><div class="spin"></div></div>'; await Promise.all([rkBase(),rkLeads()]); if(PAGE!=='reckoner') return; }
+    const list=rkOrdered(); if(!list.length){ v.innerHTML=head+'<div class="rk4-card rk4-none">No projects yet.</div>'; return; }
+    let id=(s0==='p'&&seg[1])?seg[1]:(RK.cur||list[0].id);
+    if(!list.some(function(p){ return p.id===id&&!rkOff(p); })) id=list[0].id;
+    if(RK.cur!==id) RK.edit=false;
+    RK.cur=id;
+    const strip=rkStrip4(list,id);
+    if(!RK.proj[id]){ v.innerHTML=head+'<div class="rk4">'+strip+'<div class="loader"><div class="spin"></div></div></div>'; await rkDetail(id); if(PAGE!=='reckoner'||RK.cur!==id) return; }
+    v.innerHTML=head+'<div class="rk4">'+strip+rkSheet4(RK.proj[id])+'</div>';
+    if(RK.q) rkSearchApply();
+    setTimeout(function(){ list.slice(0,6).forEach(function(p){ if(!RK.proj[p.id]) rkDetail(p.id).catch(function(){}); }); },400);
+  }catch(e){
+    v.innerHTML=head+'<div class="card card-pad" style="font-size:13.5px;color:#b91c1c"><i class="fa-solid fa-triangle-exclamation"></i> Reckoner could not be shown: '+esc(String((e&&e.message)||e))+'. <a href="javascript:void(0)" onclick="rkReload()">Try again</a></div>';
+    try{ console.error('reckoner',e); }catch(_e){}
+  }
+};
+window.rkReload=function(){ RK.projects=null; RK.proj={}; RK.leads=null; renderPage(); };
+window.rkPick=function(id){ if(RK.edit&&!confirm('Leave without saving your changes?')) return; RK.edit=false; RK.cur=id; navTo('reckoner/p/'+id); };
+function rkStrip4(list,id){
+  const L=RK.leads||RK_LEADS_SNAP;
+  return '<nav class="rk4-strip" aria-label="Projects">'+list.map(function(p){
+    if(rkOff(p)) return '<button class="off" disabled title="'+esc(p.name)+' - not on sale">'+esc(rkTabName(p.name))+'</button>';
+    return '<button class="'+(p.id===id?'on':'')+(rkHasData(p)?'':' empty')+'" onclick="rkPick(\''+p.id+'\')" title="'+esc(p.name)+(RK_BU[p.name]!=null?' - '+(L[RK_BU[p.name]]||0)+' qualified leads in 90 days':'')+'">'+esc(rkTabName(p.name))+'</button>'; }).join('')+'</nav>';
 }
 
-/* ---------------------------------------------------------------- Pending Verifications */
-const RK_PSEL=new Set();
-async function rkPendingView(){
-  const rows=await rkPages(function(){ return RKS().from('changes').select('*').eq('status','pending').order('id'); });
-  RK.pendN=rows.length; await rkFv();
-  const cur=await rkCurrent(rows);
-  window._rkPend=rows; window._rkCur=cur;
-  const me=String((state.user&&state.user.email)||'').toLowerCase(), ap=rkCanApprove();
-  Array.from(RK_PSEL).forEach(function(id){ if(!rows.some(function(c){ return c.id===id; })) RK_PSEL.delete(id); });
-  let h='';
-  if(!rows.length) h+='<div class="rk-sec rk-empty"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Nothing is waiting for approval.</div>';
-  else {
-    h+='<div class="rk-bar rk-noprint" style="justify-content:space-between"><div style="font-size:13px;color:#475569">'+rows.length+' waiting · '+(ap?'you can approve':'only approvers can approve; you can withdraw your own')+'</div>'
-      +(ap?'<div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="rkSelAll()">Select all</button><button class="btn btn-sm btn-primary" onclick="rkReviewSel(true)" '+(RK_PSEL.size?'':'disabled')+'><i class="fa-solid fa-check"></i> Approve selected ('+RK_PSEL.size+')</button><button class="btn btn-sm" onclick="rkReviewSel(false)" '+(RK_PSEL.size?'':'disabled')+'><i class="fa-solid fa-xmark"></i> Reject selected</button></div>':'')+'</div>';
-    const g={}; rows.forEach(function(c){ const k=c.project_id||'_new'; (g[k]=g[k]||[]).push(c); });
-    Object.keys(g).sort(function(a,b){ return a==='_new'?-1:b==='_new'?1:rkProjName(a).localeCompare(rkProjName(b)); }).forEach(function(k){
-      const batches={}; g[k].forEach(function(c){ if(c.batch) batches[c.batch]=(batches[c.batch]||0)+1; });
-      h+='<div class="rk-sec"><h4><i class="fa-solid fa-building" style="color:#0f766e"></i> '+(k==='_new'?'New projects':'<a href="javascript:void(0)" onclick="navTo(\'reckoner/p/'+k+'\')">'+esc(rkProjName(k))+'</a>')+' <span style="color:#64748b;font-weight:500">'+g[k].length+'</span>'
-        +(ap?'<span class="r">'+Object.keys(batches).filter(function(b){ return batches[b]>1; }).map(function(b){ return '<button class="btn btn-sm" onclick="rkSelBatch(\''+esc(b)+'\')">Select import ('+batches[b]+')</button>'; }).join('')+'</span>':'')+'</h4>'
-        +g[k].map(function(c){
-          const o=RK_OP[c.op], days=Math.floor((Date.now()-new Date(c.proposed_at))/864e5), mine=String(c.proposed_by).toLowerCase()===me;
-          return '<div style="border-top:1px solid #f1f5f9;padding:10px 0;display:flex;gap:10px">'
-            +(ap?'<input type="checkbox" style="margin-top:4px" '+(RK_PSEL.has(c.id)?'checked':'')+' onchange="rkSel('+c.id+',this.checked)">':'')
-            +'<div style="flex:1;min-width:0"><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13.5px"><span class="rk-vs" style="background:'+o[1]+'1a;color:'+o[1]+'"><i class="fa-solid '+o[2]+'"></i> '+o[0]+'</span>'
-            +'<b>'+esc(RK_TBL_LABEL[c.tbl]||c.tbl)+'</b> '+esc(rkChgLabel(c,cur[c.record_id]))
-            +'<span style="color:#64748b;font-size:12px">by '+esc(c.proposed_by)+' · '+esc(relTime(c.proposed_at))+'</span>'+(days>=3?'<span class="rk-vs outdated">Waiting '+days+' days</span>':'')+'</div>'
-            +(c.reason||c.source?'<div style="font-size:12.5px;color:#475569;margin-top:3px">'+(c.reason?'Reason: '+esc(c.reason):'')+(c.reason&&c.source?' · ':'')+(c.source?'Source: '+esc(c.source):'')+'</div>':'')
-            +rkDiff(c,cur[c.record_id])+'</div>'
-            +'<div style="display:flex;flex-direction:column;gap:5px" class="rk-noprint">'+(ap?'<button class="btn btn-sm btn-primary" onclick="rkReview(['+c.id+'],true)"><i class="fa-solid fa-check"></i> Approve</button><button class="btn btn-sm" onclick="rkReview(['+c.id+'],false)"><i class="fa-solid fa-xmark"></i> Reject</button>':'')
-            +(mine?'<button class="btn btn-sm" onclick="rkWithdraw('+c.id+')">Withdraw</button>':'')+'</div></div>';
-        }).join('')+'</div>';
-    });
-  }
-  h+=await rkUnverifiedBlock();
-  h+=await rkOutdatedBlock();
-  return h;
+/* ---------------------------------------------------------------- formatting */
+function rk4Big(n){ n=Number(n); const t=function(x){ return String(Math.round(x*100)/100); }; if(n>=1e7) return '₹'+(Math.round(n/1e5)/100).toFixed(2)+' Cr'; if(n>=1e5) return '₹'+t(n/1e5)+' L'; return rkInr(n); }
+function rk4Money(c){ if(c.amount==null) return ''; if(c.unit==='percent') return rkNum(c.amount)+'%'; if(c.unit==='per_sqft') return rkInr(c.amount)+' / sq ft'; return rk4Big(c.amount); }
+function rk4Area(c){ if(!c||(c.sba_min==null&&c.sba_max==null)) return ''; if(c.sba_min!=null&&c.sba_max!=null&&Number(c.sba_min)!==Number(c.sba_max)) return rkNum(c.sba_min)+' – '+rkNum(c.sba_max); return rkNum(c.sba_min!=null?c.sba_min:c.sba_max); }
+// "₹82-85 L" in a price note -> shown as the price itself
+const RK4_RANGE=/₹\s?(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)\s*(L|Lakhs?|Lacs?|Lakh|Cr)\b\.?/i;
+function rk4Range(x){ const m=String(x.note||'').match(RK4_RANGE); if(!m) return ''; return '₹'+m[1]+'–'+m[2]+' '+(/^c/i.test(m[3])?'Cr':'L'); }
+// booking amount as a tile: the amount big, the rest of the sentence small ("then 10%")
+function rkBookTile(n,ed){
+  if(ed) return '<div class="rk4-tile book" data-it><div class="k">Booking amount</div><div class="v sm">'+rkV('sales_notes',n.id,'body','text',n.body)+'</div></div>';
+  const b=String(n.body||'').replace(/^(booking amount|token amount)\s*/i,'');
+  const m=b.match(/₹\s?[\d,.]+\s*(lakhs?|lacs?|l\b|cr)?/i);
+  const big=m?m[0].replace(/\s+/g,' ').replace(/lakhs?|lacs?/i,'Lakh').trim():b;
+  const rest=m?b.replace(m[0],'').replace(/^[\s,;.-]+|[\s,;.]+$/g,'').replace(/\(([^)]*)\)/g,'$1'):'';
+  // just the amount - the rest of the sentence ("down payment, after that 20%...") is left out (Ayush 23 Nov)
+  return '<div class="rk4-tile book'+(big.length>8?' long':'')+'" data-it title="'+esc(n.body)+'"><div class="k">Booking amount</div><div class="v'+(big.length>12?' sm':'')+'">'+esc(big)+'</div></div>';
 }
-// verified values whose "valid until" date has passed
-async function rkOutdatedBlock(){
-  const t=rkToday(), S=RKS();
-  const got=await Promise.all(['projects','charges','offers','payment_plans','units','configurations'].map(function(tb){
-    return S.from(tb).select('*').eq('archived',false).eq('vstatus','verified').lt('valid_until',t).limit(200).then(function(r){ return (r.data||[]).map(function(x){ return [tb,x]; }); },function(){ return []; }); }));
-  const all=[].concat.apply([],got); if(!all.length) return '';
-  return '<div class="rk-sec"><h4><i class="fa-regular fa-calendar-xmark" style="color:#dc2626"></i> Past their "valid until" date ('+all.length+')</h4><div style="font-size:12.5px;color:#64748b;margin:-6px 0 8px">These show as Outdated everywhere. Propose new values, or '+(rkCanApprove()?'mark them Outdated for good.':'ask an approver.')+'</div><table class="rk-t"><tr><th>Project</th><th>What</th><th>Valid until</th><th></th></tr>'
-    +all.map(function(p){ const tb=p[0], x=p[1], pid=tb==='projects'?x.id:x.project_id;
-      return '<tr><td><a href="javascript:void(0)" onclick="navTo(\'reckoner/p/'+pid+'\')">'+esc(rkProjName(pid))+'</a></td><td>'+esc(RK_TBL_LABEL[tb])+' '+esc(x.name||x.title||x.unit_no||x.stage||'')+'</td><td>'+esc(fmtDate(x.valid_until))+'</td><td>'+(rkCanApprove()?'<button class="btn btn-sm" onclick="rkMarkOutdated(\''+tb+'\',\''+x.id+'\')">Mark outdated</button>':'')+'</td></tr>'; }).join('')+'</table></div>';
+// registration numbers, one per line, never broken mid-number; the phase ("Precinct I") as a hover note
+function rkRegNos(v){ return String(v||'').split(/,\s*/).filter(Boolean).map(function(x){ const m=x.match(/^(\S+)\s*(?:\((.*)\))?/); return '<span class="rk4-reg" title="'+esc(m&&m[2]||'')+'">'+esc(m?m[1]:x)+'</span>'; }).join(''); }
+function rk4Live(rows){ return (rows||[]).filter(function(r){ return !r.archived&&r.vstatus!=='rejected'&&r.vstatus!=='na'; }); }
+const RK4_MON=/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?,?\s*\d{4}|\b20\d\d\b/i;
+function rk4PossShort(n){ n=String(n||''); if(!n) return ''; const h=n.match(/handover\b[^;]*/i); if(h){ const m=h[0].match(RK4_MON); if(m) return 'Handover '+m[0]; } const d=n.match(RK4_MON); return d?d[0]:n; }
+/* A value: plain text when viewing; in edit mode an outlined box typed over in place. kind: text | money | num | sba */
+function rkV(tbl,id,col,kind,shown,cls){
+  shown=shown==null?'':String(shown);
+  if(!RK.edit||!id) return '<span class="rk4-v'+(cls?' '+cls:'')+'">'+esc(shown)+'</span>';
+  return '<span class="rk4-v on'+(cls?' '+cls:'')+'" contenteditable="true" spellcheck="false" data-e="'+tbl+'|'+id+'|'+col+'|'+kind+'" data-o="'+esc(shown)+'" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}" oninput="this.classList.toggle(\'chg\',this.innerText.trim()!==this.getAttribute(\'data-o\'))">'+esc(shown)+'</span>';
 }
-window.rkSel=function(id,on){ if(on) RK_PSEL.add(id); else RK_PSEL.delete(id); renderPage(); };
-window.rkSelAll=function(){ (window._rkPend||[]).forEach(function(c){ RK_PSEL.add(c.id); }); renderPage(); };
-window.rkSelBatch=function(b){ (window._rkPend||[]).forEach(function(c){ if(c.batch===b) RK_PSEL.add(c.id); }); renderPage(); };
-window.rkReviewSel=function(ap){ rkReview(Array.from(RK_PSEL).sort(function(a,b){ return a-b; }),ap); };
-window.rkReview=async function(ids,approve){
-  if(!ids.length) return;
-  let remarks=null;
-  if(!approve||ids.length>1){
-    remarks=await new Promise(function(res){
-      window._rkRemRes=res;
-      openModal('<div class="modal-head"><h3>'+(approve?'Approve '+ids.length+' changes':'Reject '+(ids.length>1?ids.length+' changes':'this change'))+'</h3><span class="x" onclick="closeModal();_rkRemRes(false)">&times;</span></div>'
-        +'<div class="modal-body"><label style="font-size:12.5px;color:#475569;font-weight:600">Remarks'+(approve?' (optional)':' - why it is rejected')+'</label><textarea id="rkRem" rows="3" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px;font-family:inherit;margin-top:4px"></textarea></div>'
-        +'<div class="modal-foot"><button class="btn" onclick="closeModal();_rkRemRes(false)">Cancel</button><button class="btn '+(approve?'btn-primary':'btn-danger')+'" onclick="var v=$(\'rkRem\').value.trim();closeModal();_rkRemRes(v)">'+(approve?'Approve':'Reject')+'</button></div>');
-    });
-    if(remarks===false) return;
-    if(!approve&&!remarks){ toast('Please give a reason for rejecting','warn'); return; }
+
+/* ---------------------------------------------------------------- the project */
+function rkSheet4(d){
+  const p=d.p, id=p.id, ed=RK.edit;
+  const cfg=rk4Live(d.cfg), chg=rk4Live(d.chg), notes=rk4Live(d.notes), am=rk4Live(d.am), lm=rk4Live(d.lm), loc=rk4Live(d.loc), bank=rk4Live(d.bank), off=rk4Live(d.off), plan=rk4Live(d.plan), units=d.units||[];
+  const prices=chg.filter(function(c){ return c.kind==='unit_price'&&!c.internal; });
+  const parking=chg.filter(function(c){ return c.kind==='parking'&&!c.internal; }).sort(function(a,b){ return (a.amount==null?1e12:a.amount)-(b.amount==null?1e12:b.amount); });
+  const cheap=parking.find(function(x){ return x.amount!=null; });
+  const charges=chg.filter(function(c){ return !c.internal&&c.kind!=='unit_price'&&c.kind!=='parking'; });
+  const book=notes.filter(function(n){ return n.kind==='booking_procedure'; });
+  const avail=notes.filter(function(n){ return n.kind==='other'&&/availab/i.test(n.title||''); });
+  const why=notes.filter(function(n){ return ['usp','selling_point','differentiator','pitch','target_customer'].indexOf(n.kind)!==-1&&!n.internal; });
+  const cfgOf=function(cid){ return cfg.find(function(c){ return c.id===cid; }); };
+  const has=!!(cfg.length||chg.length||am.length||loc.length);
+  const status=p.status||rk4PossShort(p.possession_note);
+  const ap=rkCanApprove();
+
+  // header
+  let h='<div class="rk4-body"><div class="rk4-head"><h1>'+rkV('projects',id,'name','text',p.name)+'</h1><span class="rk4-place">'+esc([p.locality,p.city].filter(Boolean).join(', '))+'</span>'
+    +(status?'<span class="rk4-badge">Possession: '+esc(status)+'</span>':'');
+  if(ed) h+='<div class="rk4-editbar"><span>Editing - click any outlined value to change it</span><button class="rk4-btn" onclick="rkEditCancel()">Cancel</button><button class="rk4-btn pri" id="rk4Save" onclick="rkEditSave()">Save changes</button></div>';
+  else h+='<div class="rk4-tools"><label class="rk4-q"><i class="fa-solid fa-magnifying-glass" style="color:#64748b;font-size:13px"></i><input id="rk4Q" type="search" aria-label="Search, or a customer budget" placeholder="Search or budget e.g. 40 L 2 BHK" value="'+esc(RK.q)+'" oninput="rkSearch(this.value)"></label>'
+    +(ap&&has?'<button class="rk4-ib pen" title="Edit this project" aria-label="Edit this project" onclick="rkEditOn()"><i class="fa-solid fa-pen"></i></button>':'')
+    +'<button class="rk4-ib" title="Download PDF" aria-label="Download PDF" onclick="rkDownload()"><i class="fa-solid fa-download"></i></button>'
+    +'<button class="rk4-ib" title="Print" aria-label="Print" onclick="window.print()"><i class="fa-solid fa-print"></i></button></div>';
+  h+='</div><div id="rk4Bud"></div>';
+  if(!has) return h+'<div class="rk4-card rk4-none" style="padding:28px">Nothing is recorded for '+esc(p.name)+' yet. Its prices, sizes, location and selling points appear here once they are entered.</div></div>';
+
+  // 1. flats & car parking
+  // Ayush 23 Nov: no "with parking" column - the parking tiles below say it
+  const parkHead='';
+  const cols='0.9fr 1fr 1.7fr';
+  const sqftIn=function(s){ const m=String(s||'').match(/(\d[\d,.]*)\s*sq\s*ft/i); return m?m[1]:null; };
+  const sub=function(x,c){ const incA=[x.edc_included?'EDC':null,x.gst_included?'GST':null,x.parking_included===true?'parking':null].filter(Boolean);
+    const inc=incA.length?'incl. '+(incA.length>1?incA.slice(0,-1).join(', ')+' & '+incA[incA.length-1]:incA[0]):'';
+    // the note, short (Ayush 23 Nov: long notes shorter): the price range moves into the price (rk4Range), what is
+    // included is already in "incl. ...", the rest is cut to "excl. ..." / "flat cost" / "all inclusive"
+    const segs=String(x.note||'').replace(RK4_RANGE,'').replace(/\(various options\)/ig,'').split(/;|,(?![^()]*\))/).map(function(t){ return t.trim(); }).filter(Boolean);
+    const keep=[]; segs.forEach(function(t){
+      if(/^onwards$/i.test(t)) return;
+      if(/unit price\s*\+|^(including|inclusive|incl\.?)\b(?!\s+all)/i.test(t)&&!/exclud/i.test(t)) return;
+      t=t.replace(/\bonwards\b/ig,'').replace(/including all|inclusive all|inclusive$/ig,'all inclusive').replace(/excluding/ig,'excl.').replace(/car parking/ig,'parking').replace(/\s+and\s+/ig,' & ').replace(/\ball all inclusive\b/ig,'all inclusive').replace(/\s{2,}/g,' ').trim();
+      if(t&&keep.indexOf(t)===-1) keep.push(t); });
+    const lab=c?String(x.name).replace(c.name,'').replace(/\d[\d,.]*\s*sq\s*ft/i,'').replace(/[()]/g,'').replace(/^[\s,·-]+|[\s,·-]+$/g,''):'';
+    let s=[lab||null,inc].concat(keep).filter(Boolean).join(' · ');
+    if(/onwards/i.test(x.note||'')) s+=(s?' · ':'')+'onwards';
+    return s.length>70?s.slice(0,68)+'…':s; };
+  const withP=function(x){ if(x.parking_included===true) return 'Included'; if(cheap&&x.amount!=null&&x.unit==='lump_sum') return rk4Big(Number(x.amount)+Number(cheap.amount)); return '—'; };
+  let rows='';
+  cfg.forEach(function(c){
+    const ps=prices.filter(function(x){ return x.configuration_id===c.id; });
+    if(!ps.length) rows+='<div class="rk4-pt" data-it style="grid-template-columns:'+cols+'"><span class="t">'+rkV('configurations',c.id,'name','text',c.name)+'</span><span class="z">'+rkV('configurations',c.id,'sba','sba',rk4Area(c))+'</span><span class="p ask">Ask Sales Manager</span>'+(parkHead?'<span class="w">—</span>':'')+'</div>';
+    ps.forEach(function(x,i){ const s=sub(x,c), fromName=sqftIn(x.name);
+      rows+='<div class="rk4-pt" data-it style="grid-template-columns:'+cols+'"><span class="t'+(i?' rep':'')+'">'+(i?esc(c.name):rkV('configurations',c.id,'name','text',c.name))+'</span>'
+        +'<span class="z">'+(fromName&&!(ps.length===1&&/–/.test(rk4Area(c)))?esc(rkNum(Number(String(fromName).split(',').join('')))):rkV('configurations',c.id,'sba','sba',rk4Area(c)))+'</span>'
+        +'<span><span class="p">'+(ed?rkV('charges',x.id,'amount','money',rk4Money(x)):esc(rk4Range(x)||rk4Money(x)))+'</span>'+(s?'<span class="s">'+esc(s)+'</span>':'')+'</span>'+(ed&&i===ps.length-1&&c.floors&&c.floors.indexOf('G+')!==0?rk4Floors(c):'')
+        +(parkHead?'<span class="w">'+esc(withP(x))+'</span>':'')+'</div>'; });
+  });
+  prices.filter(function(x){ return !x.configuration_id||!cfgOf(x.configuration_id); }).forEach(function(x){ const s=sub(x,null);
+    rows+='<div class="rk4-pt" data-it style="grid-template-columns:'+cols+'"><span class="t">'+esc(x.name)+'</span><span class="z">'+esc(sqftIn(x.name)||'—')+'</span><span><span class="p">'+rkV('charges',x.id,'amount','money',rk4Money(x))+'</span>'+(s?'<span class="s">'+esc(s)+'</span>':'')+'</span>'+(parkHead?'<span class="w">'+esc(withP(x))+'</span>':'')+'</div>'; });
+  // a line about every price (Dream One: what the box price includes) - a sales note titled "Price note" (Ayush 25 Nov)
+  const pn=notes.filter(function(n){ return n.kind==='other'&&/^price note$/i.test(n.title||''); });
+  const priceNote=pn.map(function(n){ return '<div class="rk4-pnote" data-it><i class="fa-solid fa-circle-info"></i> '+rkV('sales_notes',n.id,'body','text',n.body)+'</div>'; }).join('');
+  const flats='<section class="rk4-card" data-sec="prices price flats bhk size parking"><h2>Flats &amp; car parking</h2>'+(prices.length>5?'':priceNote)
+    +(rows?'<div class="rk4-pt h" style="grid-template-columns:'+cols+'"><span>Type</span><span>Size (sq ft)</span><span>Box Price</span>'+(parkHead?'<span>'+esc(parkHead)+'</span>':'')+'</div>'+rows:'')
+    // parking tiles, and the booking amount as a tile beside them (Ayush 23 Nov: out of Key facts, beside Covered parking)
+    +'<div class="rk4-park"><div class="rk4-tiles">'
+    +(parking.length?parking.map(function(k){ const inc=k.note&&!/^included in the price$/i.test(k.note)&&k.note.charAt(0)!=='₹'?k.note:'Included', pv=k.amount==null&&k.parking_included?inc:/^₹/.test(k.note||'')?k.note:rk4Money(k)||'Ask Sales Manager'; return '<div class="rk4-tile'+(!ed&&String(pv).length>8?' long':'')+'" data-it><div class="k">'+esc(k.name.replace(/ car parking$/i,'').replace(/ parking$/i,''))+' parking</div><div class="v">'+(ed?rkV('charges',k.id,'amount','money',rk4Money(k)):esc(pv))+'</div></div>'; }).join('')
+      :'<div class="rk4-tile none" data-it><div class="k">Car parking</div><div class="v sm">Ask Sales Manager</div></div>')
+    +(book[0]?rkBookTile(book[0],ed):'')+'</div>'
+    +charges.map(function(c){ return '<div class="rk4-chg" data-it><span style="color:#334155">'+esc(c.name)+(c.note?'<span style="color:#64748b;font-size:12px"> - '+esc(c.note)+'</span>':'')+'</span><span style="font-weight:700">'+(c.amount==null&&!ed?'Ask Sales Manager':rkV('charges',c.id,'amount','money',rk4Money(c)))+'</span></div>'; }).join('')+'</div></section>';
+
+  // the same, laid out horizontally: one column per flat type, its sizes and prices under it, then parking below
+  const flatsWide=prices.length>5?'<section class="rk4-card" data-sec="prices price flats bhk size parking"><h2>Flats &amp; car parking</h2>'+priceNote+'<div class="rk4-cfgs">'
+    +cfg.map(function(c){ const ps=prices.filter(function(x){ return x.configuration_id===c.id; });
+      return '<div class="rk4-cfg" data-it><div class="h">'+rkV('configurations',c.id,'name','text',c.name)+'<span class="sz">'+esc(rk4Area(c)?rk4Area(c)+' sq ft':'')+'</span></div><div class="lb"><span>Size · floor</span><span>Box Price</span></div>'
+        +(ps.length?ps.map(function(x){ const fromName=sqftIn(x.name), s=sub(x,c).replace(/^[^·]*sq ft[^·]*·?\s*/i,'');
+          // size in bold, the floor under it, the price on the right
+          const fl=(x.name.match(/\(([^)]*floor[^)]*)\)/i)||[,''])[1];
+          return '<div class="r"><span class="z"><b>'+esc(fromName?fromName+' sq ft':(rk4Area(c)?rk4Area(c)+' sq ft':''))+'</b>'+(fl?'<i>'+esc(fl.charAt(0).toUpperCase()+fl.slice(1))+'</i>':'')+'</span><span class="p">'+(ed?rkV('charges',x.id,'amount','money',rk4Money(x)):esc(rk4Range(x)||rk4Money(x)))+'</span></div>'; }).join('')
+          :'<div class="r"><span class="p ask">Ask Sales Manager</span></div>')+'</div>'; }).join('')
+    +'</div>'+flats.slice(flats.indexOf('<div class="rk4-park">'))
+    :'';
+
+  // 2. key facts
+  const fact=function(k,html,show,hl){ return show||ed?'<div class="rk4-fact'+(hl?' hl':'')+'" data-it><span>'+k+'</span><span>'+html+'</span></div>':''; };
+  const facts='<section class="rk4-card" data-sec="key facts possession booking land towers units rera loans"><h2>Key facts</h2>'
+    // possession: just "Ready to Move", or the short handover date - never the long note (Ayush 23 Nov); editors see both fields
+    +(ed?fact('Possession',rkV('projects',id,'status','text',p.status||'')+' · '+rkV('projects',id,'possession_note','text',p.possession_note||''),true,1)
+      :fact('Possession',esc(p.status||rk4PossShort(p.possession_note)),p.status||p.possession_note,1))
+    +fact('Sizes',esc((function(){ const a=[]; cfg.forEach(function(c){ if(c.sba_min!=null) a.push(Number(c.sba_min)); if(c.sba_max!=null) a.push(Number(c.sba_max)); }); if(!a.length) return ''; const lo=Math.min.apply(null,a), hi=Math.max.apply(null,a); return (lo===hi?rkNum(lo):rkNum(lo)+' – '+rkNum(hi))+' sq ft'; })()),cfg.some(function(c){ return c.sba_min!=null||c.sba_max!=null; })&&!ed,1)
+    // land and units on one line, towers and floors on one line (shorter card - Ayush 23 Nov)
+    +fact('Land · units',rkV('projects',id,'land_area','text',p.land_area||'')+(p.land_area&&p.total_units!=null?' · ':'')+(p.total_units!=null||ed?rkV('projects',id,'total_units','num',p.total_units!=null?rkNum(p.total_units):'')+' units':''),p.land_area||p.total_units!=null,1)
+    +fact('Towers / Height',rkV('projects',id,'towers','text',p.towers||'')+(p.towers&&p.height?' · ':'')+rkV('projects',id,'height','text',p.height||''),p.towers||p.height,1)
+    +fact('Open space',rkV('projects',id,'open_space','text',p.open_space||''),p.open_space)
+    // (Stage left out - Possession already says it; Ayush 23 Nov: Key facts too long)
+    // registration numbers: WB RERA in rera_no, WB HIRA in rera_note ("HIRA/P/..."); several phases separated by ", "
+    // RERA No. only when the project has one (Ayush 23 Nov)
+    +fact('RERA No.',ed?rkV('projects',id,'rera_no','text',p.rera_no||''):rkRegNos(p.rera_no),!!p.rera_no)
+    +fact('HIRA No.',ed?rkV('projects',id,'rera_note','text',/HIRA/i.test(p.rera_note||'')?p.rera_note:''):rkRegNos(p.rera_note),/HIRA/i.test(p.rera_note||''))
+    +(ed||prices.length>5?'':rk4FloorGrid(cfg))
+    +(bank.length?fact('Home loans',bank.map(function(b){ return rkV('bank_approvals',b.id,'bank','text',b.bank); }).join(' · '),true):'')
+    +'</section>';
+
+  // 3. offers + why buy
+  const offers='<section class="rk4-card rk4-off" data-sec="offers offer discount free"><h2>Offers</h2>'
+    +(off.filter(function(o){ return !o.internal; }).map(function(o){ return '<div data-it style="padding:5px 0"><div style="font-size:14px;font-weight:700;line-height:1.35">'+rkV('offers',o.id,'title','text',o.title)+'</div>'
+      +'<div style="font-size:12px;color:#92400e;margin-top:1px">'+(o.details||ed?rkV('offers',o.id,'details','text',o.details||'')+' · ':'')+(o.valid_until?'Until '+esc(fmtDate(o.valid_until)):'No end date - confirm before offering')+'</div></div>'; }).join('')||'<div class="rk4-none" style="color:#92400e">No offer running.</div>')+'</section>';
+  const whyC='<section class="rk4-card" data-sec="why buy selling points usp"><h2>Why buy</h2>'
+    // a point written on several lines (Ananta's premium specs) shows as a small list under its title
+    +(why.map(function(w,i){ const lines=String(w.body||'').split('\n').map(function(t){ return t.trim(); }).filter(Boolean);
+      if(lines.length>1&&!ed) return '<div class="rk4-li" data-it><span class="n">'+(i+1)+'</span><span>'+(w.title?'<b>'+esc(w.title)+'</b>':'')+'<span class="rk4-sub">'+lines.map(function(t){ return '<span>'+esc(t)+'</span>'; }).join('')+'</span></span></div>';
+      return '<div class="rk4-li" data-it><span class="n">'+(i+1)+'</span><span style="white-space:pre-line">'+(w.title?'<b>'+rkV('sales_notes',w.id,'title','text',w.title)+'</b> - ':'')+rkV('sales_notes',w.id,'body','text',w.body)+'</span></div>'; }).join('')||'<div class="rk4-none">Selling points not recorded.</div>')+'</section>';
+
+
+  // 4. location | amenities | availability & booking
+  const locC='<section class="rk4-card" data-sec="location address directions map"><h2>Location</h2>'
+    +(loc.map(function(l){ const addr=[l.address,l.pin&&String(l.address||'').indexOf(l.pin)===-1?l.pin:null].filter(Boolean).join(' - ');
+      // the closest place of each kind a customer asks about, so the card answers "how far is..." (and has no empty bottom)
+      return '<div data-it style="padding:2px 0 6px;display:flex;flex-direction:column;flex:1"><div><div style="font-size:14px;font-weight:700;line-height:1.4">'+rkV('locations',l.id,'address','text',l.address||'')+(l.pin&&String(l.address||'').indexOf(l.pin)===-1?' - '+rkV('locations',l.id,'pin','text',l.pin):'')+'</div>'
+        +(l.directions||ed?'<div style="font-size:13.5px;color:#334155;line-height:1.55;margin-top:6px">'+rkV('locations',l.id,'directions','text',l.directions||'')+'</div>':'')
+        // the project itself on Google Maps: its own pin when recorded, else a search for the project by name and area
+        +'</div><a class="rk4-map" href="'+esc(l.maps_url||(l.lat&&l.lng?'https://www.google.com/maps/search/?api=1&query='+l.lat+','+l.lng:'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent([p.name,p.locality,p.city].filter(Boolean).join(', '))))+'" target="_blank" rel="noopener"><i class="fa-solid fa-location-dot"></i> Open in Google Maps</a></div>'; }).join('')||'<div class="rk4-none">Address not recorded.</div>')+'</section>';
+  const amC='<section class="rk4-card" data-sec="amenities amenity facilities club pool gym"><h2>Amenities</h2>'
+    +(am.length?'<div class="rk4-am">'+am.map(function(a){ return '<span class="rk4-amt" data-it><i class="fa-solid fa-check"></i>'+rkV('amenities',a.id,'name','text',a.name)+(a.status?' <span style="color:#64748b">('+esc(a.status)+')</span>':'')+'</span>'; }).join('')+'</div>':'<div class="rk4-none">Amenities not recorded.</div>')+'</section>';
+  // (Availability & booking card removed - Ayush 23 Nov)
+
+
+  // 5. flat details
+  const det=cfg.map(function(c){
+    const parts=[];
+    if(c.room_sizes||ed) parts.push('Rooms '+rkV('configurations',c.id,'room_sizes','text',c.room_sizes||''));
+    if(c.facing||ed) parts.push('Facing '+rkV('configurations',c.id,'facing','text',c.facing||''));
+    const tb=[c.bathrooms!=null?rkNum(c.bathrooms)+' toilets':null,c.balconies!=null?rkNum(c.balconies)+' balconies':null].filter(Boolean).join(', '); if(tb) parts.push(esc(tb));
+    if(c.carpet) parts.push(esc('Carpet '+rkNum(c.carpet)+' sq ft')); if(c.built_up) parts.push(esc('Built-up '+rkNum(c.built_up)+' sq ft'));
+    if(c.area_note||ed) parts.push(rkV('configurations',c.id,'area_note','text',c.area_note||''));
+    if(c.features||ed) parts.push(rkV('configurations',c.id,'features','text',c.features||''));
+    return parts.length?'<div class="rk4-det" data-it><span style="font-weight:700">'+esc(c.name)+'</span><span>'+parts.join(' · ')+'</span></div>':''; }).join('');
+  const detC='';   // Flat details removed from every project (Ayush 23 Nov)
+  const specC='';   // premium specs now sit in Why buy (Ayush 23 Nov)
+  // rows whose cards are the same height, so everything lines up (Ayush 23 Nov):
+  // row 1  Flats & car parking | Key facts | Offers + Why buy      row 2  Location | Amenities (two columns wide)
+  // a long flat list (Dream One: 8 prices) gets the whole width, laid out flat type by flat type side by side;
+  // Key facts, Offers and Why buy then share the next row
+  h+=(prices.length>5?'<div class="rk4-row r0">'+flatsWide+'</div><div class="rk4-row r1 r1b">'+facts+offers+whyC+'</div>'
+    :'<div class="rk4-row r1">'+flats+facts+'<div class="rk4-stack">'+offers+whyC+'</div></div>')
+    +'<div class="rk4-row r2">'+locC+amC+'</div>'+specC;
+  const pool=[];
+
+  // 6. nearby
+  const g={}; lm.forEach(function(a){ (g[a.category||'Landmark']=g[a.category||'Landmark']||[]).push(a); });
+  const order=RK_LMORDER.concat(Object.keys(g)).filter(function(k,i,a){ return g[k]&&a.indexOf(k)===i; });
+  let nearC=''; if(order.length) nearC=('<section class="rk4-card" data-sec="nearby schools hospitals metro station airport shopping dining"><h2>Nearby</h2>'+order.map(function(k){
+    const items=g[k].slice().sort(function(a,b){ return (a.travel_min==null?1e9:a.travel_min)-(b.travel_min==null?1e9:b.travel_min); });
+    return '<div class="rk4-nb" data-grp><span>'+esc(k)+'</span><div class="rk4-chips">'+items.map(function(a){
+      const km=a.distance_km!=null?rkNum(a.distance_km)+' km':'';
+      const tm=a.travel_min!=null||ed?rkV('landmarks',a.id,'travel_min','num',a.travel_min!=null?rkNum(a.travel_min):'')+' min':'';
+      return '<span class="rk4-chip" data-it>'+rkV('landmarks',a.id,'name','text',a.name)+'<b>'+[tm,km].filter(Boolean).join(' · ')+(!tm&&!km&&a.travel_note?esc(a.travel_note):'')+'</b></span>'; }).join('')+'</div></div>'; }).join('')+'</section>');
+  // Flat details and Nearby run full width under the columns (long text reads best wide)
+  h+='<div class="rk4-pool" style="display:none">'+pool.filter(Boolean).join('')+'</div><div id="rk4DetSlot">'+detC+'</div>'+nearC;
+  return h+'<div class="rk4-none" id="rk4NoRes" style="display:none;padding:20px;text-align:center">Nothing on this project matches.</div></div>';
+}
+
+/* ---------------------------------------------------------------- one box: search, or a budget */
+let RK4_T=null;
+window.rkSearch=function(v){ RK.q=v; clearTimeout(RK4_T); RK4_T=setTimeout(rkSearchApply,150); };
+function rkBudParse(q){
+  const s=String(q||'').toLowerCase(); let max=null, bhk=null;
+  const b=s.match(/(\d+(?:\.\d+)?)\s*(bhk|rk)/); if(b){ bhk=b[1]+' '+b[2].toUpperCase(); }
+  const rest=b?s.replace(b[0],' '):s;
+  const m=rest.match(/(\d+(?:\.\d+)?)\s*(cr|crore|l|lac|lacs|lakh|lakhs)\b/);   // a unit is needed: a bare number (a size, a RERA no.) is searched as text (25 Nov)
+  if(m){ const n=parseFloat(m[1]); max=/^c/.test(m[2])?n*1e7:n*1e5; }
+  return { max:max, bhk:bhk, on:!!(max||bhk) };
+}
+function rkBhk4(name){ const m=String(name||'').match(/(\d+(?:\.\d+)?)\s*(BHK|RK)/i); if(m) return m[1]+' '+m[2].toUpperCase(); if(/studio/i.test(name)) return '1 RK'; return null; }
+function rkSearchApply(){
+  const root=document.querySelector('.rk4-body'), bud=$('rk4Bud'); if(!root) return;
+  const q=String(RK.q||'').trim(), B=rkBudParse(q);
+  // budget: every flat type, in every project, that fits
+  if(bud){
+    if(B.on){
+      const byP={}; (RK.projects||[]).forEach(function(p){ byP[p.id]=p; });
+      const rows=[];
+      RK.cfg.forEach(function(c){ if(!byP[c.project_id]) return; if(B.bhk&&rkBhk4(c.name)!==B.bhk) return;
+        const ps=RK.rates.filter(function(r){ return r.configuration_id===c.id&&r.kind==='unit_price'&&r.unit==='lump_sum'&&!r.internal&&r.amount!=null&&r.vstatus!=='rejected'&&r.vstatus!=='na'; });
+        if(!ps.length) return; const lo=Math.min.apply(null,ps.map(function(r){ return Number(r.amount); }));
+        if(B.max&&lo>B.max) return; rows.push({p:byP[c.project_id],c:c,lo:lo}); });
+      rows.sort(function(a,b){ return a.lo-b.lo; });
+      bud.innerHTML='<div class="rk4-bud"><h2>Fits '+esc([B.max?'up to '+rk4Big(B.max):null,B.bhk].filter(Boolean).join(', '))+' - '+rows.length+' option'+(rows.length===1?'':'s')+'</h2>'
+        +(rows.length?'<div class="r h"><span>Project</span><span>Type</span><span>Size (sq ft)</span><span>From</span><span>Possession</span><span>Where</span></div>'+rows.map(function(r){ const p=r.p;
+          return '<div class="r" onclick="rkPick(\''+p.id+'\')"><b>'+esc(p.name)+'</b><span>'+esc(r.c.name)+'</span><span>'+esc(rk4Area(r.c))+'</span><b>'+esc(rk4Big(r.lo))+'</b><span>'+esc(p.status||rk4PossShort(p.possession_note))+'</span><span style="color:#64748b">'+esc([p.locality,p.city].filter(Boolean).join(', '))+'</span></div>'; }).join('')
+          :'<div class="rk4-none">No flat with a recorded price fits. Try a higher budget or leave out the BHK.</div>')+'</div>';
+    } else bud.innerHTML='';
   }
+  // otherwise: narrow this project's page to what matches
+  root.querySelectorAll('.rk4-hl').forEach(function(m){ const pn=m.parentNode; m.replaceWith(document.createTextNode(m.textContent)); pn.normalize(); });
+  const words=B.on?[]:q.toLowerCase().split(/\s+/).filter(Boolean); let any=false;
+  root.querySelectorAll('[data-sec]').forEach(function(sec){
+    const title=String(sec.getAttribute('data-sec')).toLowerCase(), its=Array.from(sec.querySelectorAll('[data-it]'));
+    // numbers match with or without commas ("1650" finds "1,650")
+    const hit=its.map(function(it){ const tx=it.textContent.toLowerCase(), tn=tx.split(',').join(''); return !words.length||words.every(function(w){ return tx.indexOf(w)!==-1||tn.indexOf(w.split(',').join(''))!==-1; }); });
+    const n=hit.filter(Boolean).length, byTitle=words.length&&!n&&words.every(function(w){ return title.indexOf(w)!==-1; });
+    its.forEach(function(it,i){ const ok=hit[i]||byTitle; it.style.display=ok?'':'none'; if(hit[i]&&words.length) rkMark4(it,words); });
+    sec.querySelectorAll('[data-grp]').forEach(function(gp){ gp.style.display=Array.from(gp.querySelectorAll('[data-it]')).some(function(x){ return x.style.display!=='none'; })?'':'none'; });
+    const vis=n>0||byTitle; sec.style.display=vis?'':'none'; if(vis) any=true;
+  });
+  const nr=$('rk4NoRes'); if(nr) nr.style.display=any?'none':'block';
+}
+function rkMark4(el,words){
+  const walk=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null), nodes=[]; let n; while((n=walk.nextNode())) nodes.push(n);
+  nodes.forEach(function(t){ const s=t.nodeValue, low=s.toLowerCase(); let hit=-1, len=0;
+    words.forEach(function(w){ const i=low.indexOf(w); if(i!==-1&&(hit===-1||i<hit)){ hit=i; len=w.length; } });
+    if(hit===-1) return; const sp=document.createElement('span'); sp.className='rk4-hl'; sp.textContent=s.slice(hit,hit+len);
+    const after=t.splitText(hit); after.nodeValue=after.nodeValue.slice(len); t.parentNode.insertBefore(sp,after); });
+}
+
+/* ---------------------------------------------------------------- edit in place */
+window.rkEditOn=function(){ if(!rkCanApprove()) return; RK.q=''; RK.edit=true; renderPage(); };
+window.rkEditCancel=function(){ const n=document.querySelectorAll('.rk4-v.chg').length; if(n&&!confirm('Drop '+n+' unsaved change'+(n===1?'':'s')+'?')) return; RK.edit=false; renderPage(); };
+function rkParseMoney(s){ s=String(s||'').replace(/₹|,|\/\s*sq\s*ft|onwards/gi,'').trim(); if(!s) return null; const m=s.match(/(\d+(?:\.\d+)?)\s*(cr|crore|l|lac|lakh|lakhs|%)?/i); if(!m) return NaN;
+  const n=parseFloat(m[1]), u=(m[2]||'').toLowerCase(); return u[0]==='c'?n*1e7:(u&&u!=='%'?n*1e5:n); }
+window.rkEditSave=async function(){
+  const els=Array.from(document.querySelectorAll('.rk4-v.on')).filter(function(e){ return e.innerText.trim()!==e.getAttribute('data-o'); });
+  if(!els.length){ RK.edit=false; renderPage(); return; }
+  const recs={}, bad=[];
+  els.forEach(function(e){ const parts=e.getAttribute('data-e').split('|'), tbl=parts[0], rid=parts[1], col=parts[2], kind=parts[3], txt=e.innerText.trim();
+    const k=tbl+'|'+rid; recs[k]=recs[k]||{tbl:tbl,id:rid,payload:{}};
+    if(kind==='money'){ const v=rkParseMoney(txt); if(v!==null&&!isFinite(v)){ bad.push(txt); return; } recs[k].payload[col]=v; }
+    else if(kind==='num'){ const v=txt===''?null:parseFloat(txt.replace(/[^\d.]/g,'')); if(v!==null&&!isFinite(v)){ bad.push(txt); return; } recs[k].payload[col]=v; }
+    else if(kind==='sba'){ const ns=(txt.match(/\d[\d,]*(?:\.\d+)?/g)||[]).map(function(x){ return parseFloat(x.replace(/,/g,'')); }); recs[k].payload.sba_min=ns.length?ns[0]:null; recs[k].payload.sba_max=ns.length?ns[ns.length-1]:null; }
+    else recs[k].payload[col]=txt===''?null:txt; });
+  if(bad.length){ toast('Not a number: '+bad.join(', '),'warn'); return; }
+  const btn=$('rk4Save'); if(btn){ btn.disabled=true; btn.textContent='Saving...'; }
   let ok=0, fail=[];
-  for(const id of ids){
-    const r=await RKS().rpc('review',{p_id:id,p_approve:approve,p_remarks:remarks||null});
-    if(r.error) fail.push('#'+id+': '+r.error.message); else { ok++; RK_PSEL.delete(id); }
-  }
-  toast((approve?'Approved ':'Rejected ')+ok+(fail.length?' · '+fail.length+' failed':''),fail.length?'warn':'ok');
-  if(fail.length) try{ console.warn('reckoner review',fail); }catch(e){}
-  if(fail.length&&ids.length===1) toast(fail[0],'err');
-  RK.proj={}; await rkBase(true); renderPage();
-};
-window.rkWithdraw=async function(id){
-  const ok=await confirmDialog('Withdraw this proposed change?',{title:'Withdraw',okLabel:'Withdraw',danger:false}); if(!ok) return;
-  const r=await RKS().rpc('withdraw',{p_id:id}); if(r.error){ toast(r.error.message,'err'); return; }
-  toast('Withdrawn','ok'); RK.proj={}; await rkBase(true); renderPage();
-};
-window.rkMarkOutdated=async function(tb,id){
-  const r=await RKS().rpc('set_vstatus',{p_tbl:tb,p_id:id,p_status:'outdated',p_remarks:'Past its valid-until date'});
-  if(r.error){ toast(r.error.message,'err'); return; } toast('Marked outdated','ok'); RK.proj={}; renderPage();
+  for(const k of Object.keys(recs)){ const r=recs[k];
+    const pr=await RKS().rpc('propose',{p_tbl:r.tbl,p_record:r.id,p_op:'update',p_payload:r.payload,p_reason:'Edited on the Reckoner page',p_source:null,p_project:RK.cur,p_batch:null});
+    if(pr.error){ fail.push(pr.error.message); continue; }
+    const rv=await RKS().rpc('review',{p_id:pr.data,p_approve:true,p_remarks:'Saved by the editor'});
+    if(rv.error) fail.push(rv.error.message); else ok++; }
+  if(fail.length){ toast('Saved '+ok+', not saved '+fail.length+': '+fail[0],'err'); if(btn){ btn.disabled=false; btn.textContent='Save changes'; } return; }
+  toast('Saved '+els.length+' change'+(els.length===1?'':'s'),'ok');
+  RK.edit=false; try{ await rkDetail(RK.cur,true); await rkBase(true); }catch(e){}
+  renderPage();
 };
 
-/* ---------------------------------------------------------------- Audit Log */
-const RK_AUD={proj:'',status:''};
-async function rkAuditView(){
-  await rkFv();
-  let rows=await (function(){ let q=RKS().from('changes').select('*').order('id',{ascending:false}).limit(300);
-    if(RK_AUD.proj) q=q.eq('project_id',RK_AUD.proj); if(RK_AUD.status) q=q.eq('status',RK_AUD.status); return q; })().then(function(r){ if(r.error) throw r.error; return r.data||[]; });
-  window._rkAud=rows;
-  const cur=await rkCurrent(rows.filter(function(c){ return c.op!=='insert'; }));
-  window._rkAudCur=cur;
-  const S={pending:'pending',approved:'verified',rejected:'rejected',withdrawn:'na'};
-  let h='<div class="rk-bar rk-noprint"><select onchange="RK_AUD.proj=this.value;renderPage()"><option value="">All projects</option>'+(RK.projects||[]).map(function(p){ return '<option value="'+p.id+'"'+(RK_AUD.proj===p.id?' selected':'')+'>'+esc(p.name)+'</option>'; }).join('')+'</select>'
-    +'<select onchange="RK_AUD.status=this.value;renderPage()"><option value="">Any status</option>'+['pending','approved','rejected','withdrawn'].map(function(s){ return '<option'+(RK_AUD.status===s?' selected':'')+'>'+s+'</option>'; }).join('')+'</select>'
-    +'<span style="font-size:12.5px;color:#64748b">Latest 300 · every proposed, approved and rejected change, with who and when</span></div>';
-  if(!rows.length) return h+'<div class="rk-sec rk-empty">No changes yet.</div>';
-  return h+'<div class="rk-sec"><div class="rk-wrap"><table class="rk-t"><tr><th>#</th><th>When</th><th>Project</th><th>What</th><th>By</th><th>Status</th><th>Reviewed</th></tr>'
-    +rows.map(function(c,i){ const o=RK_OP[c.op];
-      return '<tr style="cursor:pointer" onclick="rkAudOpen('+i+')"><td style="color:#94a3b8">'+c.id+'</td><td style="white-space:nowrap">'+esc(fmtDate(c.proposed_at))+'<div style="font-size:11.5px;color:#94a3b8">'+esc(new Date(c.proposed_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}))+'</div></td>'
-        +'<td>'+esc(c.project_id?rkProjName(c.project_id):(c.payload&&c.payload.name)||'New project')+'</td><td><span style="color:'+o[1]+'">'+o[0]+'</span> '+esc(RK_TBL_LABEL[c.tbl]||c.tbl)+' <span style="color:#475569">'+esc(rkChgLabel(c,cur[c.record_id]))+'</span></td>'
-        +'<td style="font-size:12.5px">'+esc(c.proposed_by)+'</td><td><span class="rk-vs '+(S[c.status]||'na')+'">'+esc(c.status)+'</span></td><td style="font-size:12.5px">'+(c.reviewed_by?esc(c.reviewed_by)+'<div style="color:#94a3b8">'+esc(fmtDate(c.reviewed_at))+'</div>':'')+(c.review_remarks?'<div style="color:#475569">'+esc(c.review_remarks)+'</div>':'')+'</td></tr>'; }).join('')+'</table></div></div>';
-}
-window.rkAudOpen=function(i){ const c=(window._rkAud||[])[i]; if(!c) return;
-  openModal('<div class="modal-head"><h3>Change #'+c.id+' - '+esc(RK_OP[c.op][0])+' '+esc(RK_TBL_LABEL[c.tbl]||c.tbl)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="font-size:13px"><div>Proposed by <b>'+esc(c.proposed_by)+'</b> on '+esc(new Date(c.proposed_at).toLocaleString('en-IN'))+'</div>'
-    +(c.reason?'<div>Reason: '+esc(c.reason)+'</div>':'')+(c.source?'<div>Source: '+esc(c.source)+'</div>':'')+(c.batch?'<div>Batch: '+esc(c.batch)+'</div>':'')
-    +'<div>Status: <b>'+esc(c.status)+'</b>'+(c.reviewed_by?' by '+esc(c.reviewed_by)+' on '+esc(new Date(c.reviewed_at).toLocaleString('en-IN')):'')+'</div>'+(c.review_remarks?'<div>Remarks: '+esc(c.review_remarks)+'</div>':'')
-    +rkDiff(c,(window._rkAudCur||{})[c.record_id])+'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','lg'); };
-
-/* ---------------------------------------------------------------- Compare */
-async function rkCompareView(){
-  RK.cmp=RK.cmp.filter(function(id){ return (RK.projects||[]).some(function(p){ return p.id===id; }); });
-  await Promise.all(RK.cmp.map(function(id){ return rkDetail(id); }));
-  const left=(RK.projects||[]).filter(function(p){ return RK.cmp.indexOf(p.id)===-1; });
-  let h='<div class="rk-bar rk-noprint">'+(RK.cmp.length<4?'<select onchange="if(this.value){RK.cmp.push(this.value);renderPage();}"><option value="">Add a project to compare...</option>'+left.map(function(p){ return '<option value="'+p.id+'">'+esc(p.name)+'</option>'; }).join('')+'</select>':'<span style="font-size:12.5px;color:#64748b">Up to 4 projects</span>')
-    +'<label style="font-size:12.5px;color:#475569;display:flex;gap:5px;align-items:center"><input type="checkbox" '+(RK.cust?'checked':'')+' onchange="RK.cust=this.checked;renderPage()"> Customer view</label>'
-    +(RK.cmp.length?'<button class="btn btn-sm" onclick="rkCmpExport()"><i class="fa-solid fa-file-excel"></i> Excel</button><button class="btn btn-sm" onclick="window.print()"><i class="fa-solid fa-print"></i> Print / PDF</button>':'')+'</div>';
-  if(RK.cmp.length<2) return h+'<div class="rk-sec rk-empty">Pick at least 2 projects - here or with the Compare box on the Directory cards.</div>';
-  const M=rkCmpMatrix();
-  window._rkCmp=M;
-  return h+'<div class="rk-sec"><div class="rk-wrap"><table class="rk-t"><tr><th style="width:170px"></th>'+M.heads.map(function(n,i){ return '<th style="font-size:14px;color:#0f172a">'+esc(n)+' <button class="rk-ib rk-noprint" title="Remove" onclick="RK.cmp.splice('+i+',1);renderPage()"><i class="fa-solid fa-xmark"></i></button></th>'; }).join('')+'</tr>'
-    +M.rows.map(function(r){ return '<tr><td style="color:#475569;font-weight:600;font-size:12.5px">'+esc(r[0])+'</td>'+r[1].map(function(c){
-      return '<td'+(c.flag?' style="background:#fffbeb"':'')+'>'+(c.t==null||c.t===''?rkNA():'<span style="white-space:pre-wrap">'+esc(c.t)+'</span>')+(c.flag?'<div style="font-size:11.5px;color:#92400e">'+esc(c.flag)+'</div>':'')+'</td>'; }).join('')+'</tr>'; }).join('')
-    +'</table></div><div style="font-size:12px;color:#64748b;margin-top:8px">Shaded cells include information that is not verified yet. "Not Available" means nothing is recorded.</div></div>';
-}
-function rkCmpMatrix(){
-  const D=RK.cmp.map(function(id){ return RK.proj[id]; });
-  const pv=function(d,v,fmt){ const ok=rkOk(d.p); if(RK.cust&&!ok) return {t:null,flag:'Pending verification'}; return {t:v==null||v===''?null:(fmt?fmt(v):String(v)),flag:ok||v==null||v===''?'':'Pending verification'}; };
-  const lst=function(rows,fn){ const s=rkShow(rows); const un=s.filter(function(r){ return !rkOk(r); }).length; return {t:s.length?fn(s):null,flag:un?un+' not verified':''}; };
-  const range=function(a){ a=a.filter(function(x){ return x!=null&&isFinite(x); }); if(!a.length) return null; const lo=Math.min.apply(null,a), hi=Math.max.apply(null,a); return lo===hi?[lo]:[lo,hi]; };
-  const rows=[
-    ['Location',D.map(function(d){ return pv(d,[d.p.locality,d.p.city].filter(Boolean).join(', ')); })],
-    ['Category',D.map(function(d){ return pv(d,d.p.category); })],
-    ['Status',D.map(function(d){ return pv(d,d.p.status); })],
-    ['Stage',D.map(function(d){ return pv(d,d.p.stage); })],
-    ['Land area',D.map(function(d){ return pv(d,d.p.land_area); })],
-    ['Towers / height',D.map(function(d){ return pv(d,[d.p.towers,d.p.height].filter(Boolean).join(' · ')); })],
-    ['Total units',D.map(function(d){ return pv(d,d.p.total_units,rkNum); })],
-    ['Open space',D.map(function(d){ return pv(d,d.p.open_space); })],
-    ['Possession',D.map(function(d){ return pv(d,d.p.possession_date?fmtDate(d.p.possession_date):d.p.possession_note); })],
-    ['RERA',D.map(function(d){ return pv(d,d.p.rera_no); })],
-    ['Configurations',D.map(function(d){ return lst(d.cfg,function(s){ return s.map(function(c){ const a=rkArea(c); return c.name+(a?' - '+a:''); }).join('\n'); }); })],
-    ['Base rate',D.map(function(d){ return lst(d.chg.filter(function(c){ return c.kind==='base_rate'&&c.unit==='per_sqft'&&c.amount!=null; }),function(s){ const r=range(s.map(function(c){ return Number(c.amount); })); return r?r.map(rkInr).join(' – ')+' / sq ft':null; }); })],
-    ['Unit prices',D.map(function(d){ return lst(d.chg.filter(function(c){ return c.kind==='unit_price'&&c.amount!=null&&c.unit!=='percent'&&c.unit!=='per_sqft'; }),function(s){ const r=range(s.map(function(c){ return Number(c.amount); })); return r?r.map(rkCr).join(' – '):null; }); })],
-    ['Other charges',D.map(function(d){ return lst(d.chg.filter(function(c){ return ['base_rate','unit_price'].indexOf(c.kind)===-1; }),function(s){ return s.map(function(c){ return c.name+': '+(c.amount==null?'–':c.unit==='percent'?rkNum(c.amount)+'%':rkInr(c.amount)+(c.unit==='per_sqft'?'/sq ft':'')); }).join('\n'); }); })],
-    ['Free units',D.map(function(d){ return lst(d.units,function(s){ return String(s.length); }); })],
-    ['Offers',D.map(function(d){ return lst(d.off,function(s){ return s.map(function(o){ return o.title; }).join('\n'); }); })],
-    ['Amenities',D.map(function(d){ return lst(d.am,function(s){ return s.length+': '+s.slice(0,10).map(function(a){ return a.name; }).join(', ')+(s.length>10?'...':''); }); })],
-    ['Nearby',D.map(function(d){ return lst(d.lm,function(s){ return s.slice().sort(function(a,b){ return (a.travel_min==null?1e9:a.travel_min)-(b.travel_min==null?1e9:b.travel_min); }).slice(0,5).map(function(a){ return a.name+(a.travel_min!=null?' - '+rkNum(a.travel_min)+' min':'')+(a.distance_km!=null?' ('+rkNum(a.distance_km)+' km)':''); }).join('\n'); }); })],
-    ['Bank approvals',D.map(function(d){ return lst(d.bank,function(s){ return s.map(function(b){ return b.bank; }).join(', '); }); })],
-    ['USPs',D.map(function(d){ return lst(d.notes.filter(function(n){ return n.kind==='usp'&&!n.internal; }),function(s){ return s.map(function(n){ return n.title||n.body; }).join('\n'); }); })]
-  ];
-  return {heads:D.map(function(d){ return d.p.name; }),rows:rows};
-}
-window.rkCmpExport=async function(){
-  const M=window._rkCmp; if(!M) return; const XL=await loadXLSX(); if(!XL){ toast('Excel library did not load','err'); return; }
-  const aoa=[['']].concat([]); aoa[0]=[''].concat(M.heads);
-  M.rows.forEach(function(r){ aoa.push([r[0]].concat(r[1].map(function(c){ return (c.t==null||c.t===''?'Not Available':c.t)+(c.flag?' ['+c.flag+']':''); }))); });
-  const ws=XL.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:18}].concat(M.heads.map(function(){ return {wch:40}; }));
-  const wb=XL.utils.book_new(); XL.utils.book_append_sheet(wb,ws,'Comparison'); XL.writeFile(wb,'Reckoner comparison - '+rkToday()+'.xlsx');
+/* ---------------------------------------------------------------- Download PDF
+   A real PDF (Ayush 23 Nov: "actual PDF made, not images"): selectable text and tables made with jsPDF + autotable,
+   read from this project's cards in call order. The standard PDF fonts have no rupee sign, so prices read "Rs.". */
+function rkLoadScript(src){ return new Promise(function(res,rej){ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
+const RK_PDF_ORDER=['prices','key','offers','why','location','amenities','availability','flat','nearby'];
+window.rkDownload=async function(){
+  const d=RK.proj[RK.cur], body=document.querySelector('.rk4-body'); if(!d||!body) return;
+  toast('Making the PDF...','info');
+  try{
+    if(!(window.jspdf&&window.jspdf.jsPDF)) await rkLoadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    if(!(window.jspdf.jsPDF.API&&window.jspdf.jsPDF.API.autoTable)) await rkLoadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+    const doc=new window.jspdf.jsPDF({unit:'pt',format:'a4'}), W=595.28, M=36, CW=W-2*M;
+    // the PDF's standard font has no rupee sign or long dashes; "Open in Google Maps" is no use on paper
+    const T=function(x){ return String(x==null?'':x).replace(/₹\s?/g,'Rs. ').replace(/[→]/g,'->').replace(/\s*[–—]\s*/g,' - ').replace(/Open in Google Maps/g,'').replace(/[ \t]+/g,' ').replace(/\n\s+/g,'\n').trim(); };
+    const txt=function(el){ return T(el?el.innerText:''); };
+    const p=d.p; let y=M;
+    const room=function(h){ if(y+h>812){ doc.addPage(); y=M; } };
+    // title
+    doc.setFont('helvetica','bold'); doc.setFontSize(20); doc.setTextColor(15,23,42); doc.text(T(p.name),M,y+14); y+=26;
+    doc.setFont('helvetica','normal'); doc.setFontSize(10.5); doc.setTextColor(71,85,105);
+    doc.text(T([[p.locality,p.city].filter(Boolean).join(', '),p.status||rk4PossShort(p.possession_note)].filter(Boolean).join('  ·  ')),M,y); y+=18;
+    const head=function(t){ room(40); doc.setFont('helvetica','bold'); doc.setFontSize(11.5); doc.setTextColor(15,23,42); doc.text(T(t).toUpperCase(),M,y+10);
+      doc.setDrawColor(15,118,110); doc.setLineWidth(1.5); doc.line(M,y+15,M+CW,y+15); y+=24; };
+    const table=function(hd,rows,widths){ if(!rows.length) return; const cs={}; (widths||[]).forEach(function(w,i){ cs[i]={cellWidth:w}; });
+      doc.autoTable({startY:y,head:hd?[hd]:undefined,body:rows,margin:{left:M,right:M},theme:'plain',columnStyles:cs,
+        styles:{font:'helvetica',fontSize:9.5,cellPadding:{top:3.5,bottom:3.5,left:4,right:4},textColor:[30,41,59],lineColor:[226,232,240],lineWidth:{bottom:0.5}},
+        headStyles:{fontStyle:'bold',textColor:[71,85,105],fontSize:8.5}});
+      y=doc.lastAutoTable.finalY+12; };
+    const para=function(t){ const lines=doc.splitTextToSize(T(t),CW); doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(30,41,59);
+      lines.forEach(function(l){ room(14); doc.text(l,M,y+9); y+=13; }); y+=6; };
+    const secs=Array.from(body.querySelectorAll('[data-sec]')).filter(function(s){ return s.querySelector('h2'); });
+    const byKey=function(k){ return secs.find(function(s){ return String(s.getAttribute('data-sec')).indexOf(k)===0; }); };
+    RK_PDF_ORDER.forEach(function(k){ const s=byKey(k); if(!s) return; head(txt(s.querySelector('h2')));
+      if(k==='prices'){
+        const h=s.querySelector('.rk4-pt.h'); const hd=h?Array.from(h.children).map(txt):null;
+        table(hd,Array.from(s.querySelectorAll('.rk4-pt:not(.h)')).map(function(r){ return Array.from(r.children).map(txt); }));
+        const park=Array.from(s.querySelectorAll('.rk4-tile')).map(function(t){ return [txt(t.querySelector('.k')),txt(t.querySelector('.v'))]; })
+          .concat(Array.from(s.querySelectorAll('.rk4-chg')).map(function(c){ return Array.from(c.children).map(txt); }));
+        const none=s.querySelector('.rk4-nopark'); if(none) park.push([txt(none),'']);
+        if(park.length){ table(['Car parking & other charges','Amount'],park,[CW-130,130]); }
+      } else if(k==='key'){ table(null,Array.from(s.querySelectorAll('.rk4-fact')).map(function(f){ return Array.from(f.children).map(txt); }),[120,CW-120]); }
+      else if(k==='flat'){ table(null,Array.from(s.querySelectorAll('.rk4-det')).map(function(f){ return Array.from(f.children).map(txt); }),[140,CW-140]); }
+      else if(k==='nearby'){ table(null,Array.from(s.querySelectorAll('.rk4-nb')).map(function(g){ return [txt(g.querySelector(':scope>span')),Array.from(g.querySelectorAll('.rk4-chip')).map(txt).join(',  ')]; }),[110,CW-110]); }
+      else if(k==='amenities'){ para(Array.from(s.querySelectorAll('.rk4-am>span')).map(txt).join('  ·  ')||txt(s.querySelector('.rk4-none'))); }
+      else { const items=Array.from(s.querySelectorAll('[data-it]')).map(txt).filter(Boolean); if(!items.length){ para(txt(s.querySelector('.rk4-none'))); return; }
+        table(null,items.map(function(t,i){ return [(k==='why'?(i+1)+'.':'-'),t.replace(/^\d+\s*/,k==='why'?'':'$&')]; }),[18,CW-18]); }
+    });
+    // footer on every page
+    const n=doc.getNumberOfPages(); for(let i=1;i<=n;i++){ doc.setPage(i); doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(148,163,184);
+      doc.text('Reckoner  ·  The Jain Group  ·  '+fmtDate(new Date()),M,828); doc.text(i+' / '+n,W-M,828,{align:'right'}); }
+    doc.save('Reckoner - '+p.name+' - '+rkToday()+'.pdf');
+  }catch(e){ toast('Could not make the PDF - use Print and save as PDF','err'); try{ console.error('reckoner pdf',e); }catch(_e){} }
 };
 
-/* ---------------------------------------------------------------- Roles (super admins) */
-const RK_ROLE_L={sales_head:'Sales Head - approves',project_admin:'Project Admin - approves, edits assigned projects',project_manager:'Project Manager - proposes for assigned projects',viewer:'Viewer'};
-async function rkRolesView(){
-  if(RK.role!=='super') return '<div class="rk-sec rk-empty">Only super admins manage Reckoner roles.</div>';
-  const r=await RKS().from('roles').select('*').order('email'); if(r.error) throw r.error;
-  return '<div class="rk-sec"><h4><i class="fa-solid fa-user-shield" style="color:#0f766e"></i> Reckoner roles</h4>'
-    +'<div style="font-size:12.5px;color:#64748b;margin:-6px 0 10px">Super admins can do everything. Everyone else with the Reckoner module can view (internal information included). A person also needs the <b>Reckoner</b> module in Control Panel to see it in the menu. Project Managers and Project Admins are tied to projects on each project\'s Overview → Team.</div>'
-    +'<table class="rk-t"><tr><th>Email</th><th>Role</th><th>Added</th><th></th></tr>'+(r.data||[]).map(function(x){ return '<tr><td>'+esc(x.email)+'</td><td>'+esc(RK_ROLE_L[x.role]||x.role)+'</td><td style="font-size:12px;color:#64748b">'+esc(fmtDate(x.added_at))+(x.added_by?' by '+esc(x.added_by):'')+'</td><td><button class="rk-ib" title="Remove role" onclick="rkSetRole(\''+esc(x.email)+'\',null)"><i class="fa-solid fa-trash"></i></button></td></tr>'; }).join('')+'</table>'
-    +'<div class="rk-bar" style="margin-top:12px"><input type="email" id="rkRoleEmail" placeholder="name@thejaingroup.com" style="min-width:240px"><select id="rkRoleSel">'+Object.keys(RK_ROLE_L).map(function(k){ return '<option value="'+k+'">'+esc(RK_ROLE_L[k])+'</option>'; }).join('')+'</select><button class="btn btn-sm btn-primary" onclick="rkSetRole($(\'rkRoleEmail\').value,$(\'rkRoleSel\').value)">Add / change</button></div></div>';
+/* ---------------------------------------------------------------- no empty space (Ayush 23 Nov)
+   Flats, Key facts and Offers + Why buy keep their places at the top of the three columns. The other cards (Location,
+   Amenities, Availability, Flat details, Nearby) are dealt, in that order, into whichever column is shortest at that
+   moment, so the columns end level whatever a project has recorded. Tablet: two columns. Phone: one, in call order. */
+function rkBalance(){
+  const pool=document.querySelector('.rk4-pool'), cols=Array.from(document.querySelectorAll('.rk4-cols>.rk4-col'));
+  if(!pool||cols.length<3) return;
+  const cards=Array.from(document.querySelectorAll('.rk4-cols [data-move], .rk4-pool>section'));
+  cards.forEach(function(c){ c.setAttribute('data-move','1'); pool.appendChild(c); });
+  // Offers and Why buy: top of the right column on a desktop, under Key facts on a tablet
+  const wide=window.innerWidth>1100, sel=Array.from(document.querySelectorAll('.rk4-cols [data-sec^="offers"], .rk4-cols [data-sec^="why"]'));
+  sel.forEach(function(c){ (wide?cols[2]:cols[1]).appendChild(c); });
+  const use=wide?cols:window.innerWidth>760?cols.slice(0,2):[cols[0]];
+  // biggest card first, each into the shortest column (heights measured in a real column)
+  const hs=new Map(); cards.forEach(function(c){ use[use.length-1].appendChild(c); hs.set(c,c.offsetHeight); });
+  cards.forEach(function(c){ pool.appendChild(c); });
+  cards.slice().sort(function(a,b){ return hs.get(b)-hs.get(a); }).forEach(function(c){ let best=use[0]; use.forEach(function(col){ if(col.offsetHeight<best.offsetHeight) best=col; }); best.appendChild(c); });
+  // still a big hole (one tall card, e.g. Dream One's 8 prices)? Flat details moves up into the short column if it fits there
+  const slot=$('rk4DetSlot'), det=document.querySelector('.rk4-body [data-sec^="flat"]');
+  if(slot&&det){ slot.appendChild(det);
+    if(use.length>1){ let lo=use[0], hi=use[0]; use.forEach(function(col){ if(col.offsetHeight<lo.offsetHeight) lo=col; if(col.offsetHeight>hi.offsetHeight) hi=col; });
+      const gap=hi.offsetHeight-lo.offsetHeight; if(gap>200){ lo.appendChild(det); if(lo.offsetHeight>hi.offsetHeight+120) slot.appendChild(det); } } }
 }
-window.rkSetRole=async function(email,role){
-  email=String(email||'').trim().toLowerCase(); if(!/^[^@\s]+@[^@\s]+$/.test(email)){ toast('Enter an email address','warn'); return; }
-  if(!role){ const ok=await confirmDialog('Remove the Reckoner role of '+email+'?',{title:'Remove role',okLabel:'Remove'}); if(!ok) return; }
-  const r=await RKS().rpc('set_role',{p_email:email,p_role:role}); if(r.error){ toast(r.error.message,'err'); return; }
-  toast('Saved','ok'); renderPage();
-};
+let RK_BAL_T=null;
+if(!window._rkBalWired){ window._rkBalWired=true; window.addEventListener('resize',function(){ if(PAGE!=='reckoner') return; clearTimeout(RK_BAL_T); RK_BAL_T=setTimeout(rkBalance,150); }); }
 
-// records that exist but are not verified yet (e.g. the workbook import): counted per project, verified on the project's tabs
-async function rkUnverifiedBlock(){
-  const T=['projects','configurations','charges','payment_plans','offers','units','amenities','landmarks','locations','sales_notes','bank_approvals','documents'];
-  const got=await Promise.all(T.map(function(t){ return rkPages(function(){ return RKS().from(t).select(t==='projects'?'id':'project_id').eq('vstatus','pending').eq('archived',false); }).then(function(r){ return [t,r]; },function(){ return [t,[]]; }); }));
-  const by={}; let total=0;
-  got.forEach(function(g){ g[1].forEach(function(r){ const pid=g[0]==='projects'?r.id:r.project_id; by[pid]=by[pid]||{}; by[pid][g[0]]=(by[pid][g[0]]||0)+1; total++; }); });
-  if(!total) return '';
-  const tabOf={projects:0,configurations:1,charges:2,payment_plans:2,offers:0,units:3,amenities:4,landmarks:5,locations:5,sales_notes:6,bank_approvals:6,documents:7};
-  return '<div class="rk-sec"><h4><i class="fa-solid fa-hourglass-half" style="color:#d97706"></i> Not verified yet ('+total+')</h4><div style="font-size:12.5px;color:#64748b;margin:-6px 0 8px">Information already in Reckoner but not checked - mostly the workbook import of 21 Nov. '+(rkCanApprove()?'Open a project, check each item against its source (shown under it) and press <i class="fa-solid fa-check-double"></i> or "Verify all".':'An approver verifies these.')+'</div>'
-    +'<table class="rk-t"><tr><th>Project</th><th>Waiting</th></tr>'+Object.keys(by).sort(function(a,b){ return rkProjName(a).localeCompare(rkProjName(b)); }).map(function(pid){
-      return '<tr><td><a href="javascript:void(0)" onclick="navTo(\'reckoner/p/'+pid+'\')"><b>'+esc(rkProjName(pid))+'</b></a></td><td>'+Object.keys(by[pid]).map(function(t){ return '<a href="javascript:void(0)" class="rk-chip" style="display:inline-block;margin:2px" onclick="navTo(\'reckoner/p/'+pid+'/'+tabOf[t]+'\')">'+esc(RK_TBL_LABEL[t]||t)+' '+by[pid][t]+'</a>'; }).join('')+'</td></tr>'; }).join('')+'</table></div>';
+/* AVAILABLE FLOORS (25 Nov 2026, Ayush: only the floor and the flats on it, no extra height): configurations.floors, one
+   short line under the type's price - "1st (4) · 2nd (1) · 11th (2)" = floor (flats available); "Block 1: 6th, 8th" groups by block. */
+function rk4Floors(c){
+  if(RK.edit) return '<span class="rk4-fl">Floors: '+rkV('configurations',c.id,'floors','text',c.floors||'')+'</span>';
+  const g=String(c.floors||'').split(';').map(function(t){ return t.trim(); }).filter(Boolean);
+  if(!g.length) return '';
+  const counts=g.some(function(t){ return /\(\d+\)/.test(t); });
+  return '<span class="rk4-fl"><b>'+(counts?'Floors (flats):':'Floors:')+'</b> '+g.map(function(t){ const i=t.indexOf(':'); return i>0?'<i>'+esc(t.slice(0,i))+'</i> '+esc(t.slice(i+1).trim()):esc(t); }).join(' · ')+'</span>';
+}
+
+/* FLATS AVAILABLE, IN WORDS (25 Nov 2026, Ayush: "I can't understand anything by that Flat Availability"): one Key facts line
+   per flat type, the way it is said on a call - "12 flats: 4 on the 1st floor, 2 on the 11th, 1 each on the 2nd, 4th, 5th, 6th,
+   8th and 9th". Without counts: "On the 1st, 3rd, 6th ... floors". From configurations.floors ("1st (4); 2nd (1)"). */
+function rk4FloorGrid(cfg){
+  const ord=function(f){ const m=String(f).match(/\d+/); return m?Number(m[0]):0; };
+  const and=function(a){ return a.length>1?a.slice(0,-1).join(', ')+' and '+a[a.length-1]:a[0]; };
+  return cfg.map(function(c){
+    if(!c.floors||c.floors.indexOf('G+')===0) return '';
+    const it=String(c.floors).split(';').map(function(t){ return t.trim(); }).filter(Boolean).map(function(t){
+      const x=t.match(/^(.*?)\s*(?:\((\d+)\))?$/); return {f:x[1].replace(/\s*floors?$/i,'').trim(),n:x[2]!=null?Number(x[2]):null}; }).filter(function(x){ return x.f; })
+      .sort(function(a,b){ return ord(a.f)-ord(b.f); });
+    if(!it.length) return '';
+    let txt;
+    if(it.every(function(x){ return x.n!=null; })){
+      const tot=it.reduce(function(a,x){ return a+x.n; },0), by={};
+      it.forEach(function(x){ (by[x.n]=by[x.n]||[]).push(x.f); });
+      const parts=Object.keys(by).map(Number).sort(function(a,b){ return b-a; }).map(function(n){ const fl=by[n];
+        return (fl.length>1?n+' each':n)+' on the '+and(fl)+(fl.length>1?' floors':' floor'); });
+      txt=it.length===1?'<b>'+tot+' flat'+(tot===1?'':'s')+'</b> on the '+esc(it[0].f)+' floor':'<b>'+tot+' flats</b> - '+esc(parts.join('; '));
+    } else txt='On the '+esc(and(it.map(function(x){ return x.f; })))+' floor'+(it.length>1?'s':'');
+    return '<div class="rk4-fact av" data-it><span>'+esc(c.name)+' available</span><span>'+txt+'</span></div>';
+  }).join('');
 }
